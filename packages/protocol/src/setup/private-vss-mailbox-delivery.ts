@@ -5,6 +5,7 @@ import {
 } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
+import { assertNonNegativeSafeInteger } from './common-fields.js';
 import {
     setupProofMaterialRecordTransportMetadataFields,
     setupProofMaterialRecordTransportFields,
@@ -303,23 +304,6 @@ const assertProtocolHash = (
     if (typeof value !== 'string' || !protocolHashPattern.test(value)) {
         throw new TypeError(
             `${fieldName} must be a lowercase 512-bit protocol hash.`,
-        );
-    }
-
-    return value;
-};
-
-const assertNonNegativeSafeInteger = (
-    value: unknown,
-    fieldName: string,
-): number => {
-    if (
-        typeof value !== 'number' ||
-        !Number.isSafeInteger(value) ||
-        value < 0
-    ) {
-        throw new TypeError(
-            `${fieldName} must be a non-negative safe integer.`,
         );
     }
 

@@ -215,16 +215,16 @@ describe('collective BGV setup kernel commands', () => {
             };
         const fullMaterialCoefficientBytes =
             publicVssCommitmentMaterialSize.fullMaterialCoefficientBytes;
-        const compactCoefficientCommitmentBytes = new TextEncoder().encode(
-            canonicalJson(setupPackage.compactVssCoefficientCommitmentSet),
+        const coefficientCommitmentBytes = new TextEncoder().encode(
+            canonicalJson(setupPackage.vssPublicCoefficientCommitmentSet),
         ).byteLength;
 
         // The compact set publishes fixed-size BDLOP commitments (constant in the
         // ring degree) in place of the O(ring) full-VSS coefficient material, so it
         // is a small fraction of the full-ring baseline. This measures the
         // reduction; the bound is a lenient sanity check, not a size gate.
-        expect(compactCoefficientCommitmentBytes).toBeGreaterThan(0);
-        expect(compactCoefficientCommitmentBytes).toBeLessThan(
+        expect(coefficientCommitmentBytes).toBeGreaterThan(0);
+        expect(coefficientCommitmentBytes).toBeLessThan(
             fullMaterialCoefficientBytes / 100,
         );
     });

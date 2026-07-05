@@ -33,14 +33,14 @@ export const createSetupPackageVerificationInput = (
             input.transportedEvaluationKeyShareProofMaterial,
             input.verifiedSetupProofMaterials,
         );
-    const transportedCompactVssShareLinkageProofMaterial =
+    const transportedVssShareLinkageProofMaterial =
         chunklessSetupProofMaterialSetForVerificationInput(
-            input.transportedCompactVssShareLinkageProofMaterial,
+            input.transportedVssShareLinkageProofMaterial,
             input.verifiedSetupProofMaterials,
         );
-    const transportedCompactSameSecretBridgeProofMaterial =
+    const transportedSameSecretBridgeProofMaterial =
         chunklessSetupProofMaterialSetForVerificationInput(
-            input.transportedCompactSameSecretBridgeProofMaterial,
+            input.transportedSameSecretBridgeProofMaterial,
             input.verifiedSetupProofMaterials,
         );
 
@@ -72,17 +72,17 @@ export const createSetupPackageVerificationInput = (
                   transportedEvaluationKeyShareProofMaterial:
                       transportedEvaluationKeyShareProofMaterial,
               }),
-        ...(transportedCompactVssShareLinkageProofMaterial === undefined
+        ...(transportedVssShareLinkageProofMaterial === undefined
             ? {}
             : {
-                  transportedCompactVssShareLinkageProofMaterial:
-                      transportedCompactVssShareLinkageProofMaterial,
+                  transportedVssShareLinkageProofMaterial:
+                      transportedVssShareLinkageProofMaterial,
               }),
-        ...(transportedCompactSameSecretBridgeProofMaterial === undefined
+        ...(transportedSameSecretBridgeProofMaterial === undefined
             ? {}
             : {
-                  transportedCompactSameSecretBridgeProofMaterial:
-                      transportedCompactSameSecretBridgeProofMaterial,
+                  transportedSameSecretBridgeProofMaterial:
+                      transportedSameSecretBridgeProofMaterial,
               }),
         ...(input.transportedEvaluationKeyShareComponentMaterial === undefined
             ? {}

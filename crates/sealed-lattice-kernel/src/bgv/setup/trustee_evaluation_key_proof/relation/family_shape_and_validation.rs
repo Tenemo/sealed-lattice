@@ -15,10 +15,9 @@ pub(crate) const PRIVATE_VSS_SHARE_BINDING_LABELS: [&str; 3] = [
     "privateEnvelopeAadHash",
     "shareValuesHash",
 ];
-pub(crate) const COMPACT_VSS_SHARE_LINKAGE_BINDING_LABELS: [&str; 1] =
-    ["shareLinkageStatementRoot"];
-pub(crate) const COMPACT_SAME_SECRET_BRIDGE_BINDING_LABELS: [&str; 4] = [
-    "compactSameSecretBridgeStatementRoot",
+pub(crate) const VSS_SHARE_LINKAGE_BINDING_LABELS: [&str; 1] = ["shareLinkageStatementRoot"];
+pub(crate) const SAME_SECRET_BRIDGE_BINDING_LABELS: [&str; 4] = [
+    "sameSecretBridgeStatementRoot",
     "sameSecretStatementRoot",
     "sameSecretProofRoot",
     "sameSecretProofFamilyBindingRoot",
@@ -46,8 +45,8 @@ pub(crate) enum SuccinctSetupProofFamilyShape {
     SameSecretLinkageAnchor,
     PublicKeyShare,
     PrivateVssShare,
-    CompactVssShareLinkage,
-    CompactSameSecretBridge,
+    VssShareLinkage,
+    SameSecretBridge,
     TargetDecryptionShare,
     TrusteeEvaluationKey,
 }
@@ -78,8 +77,8 @@ impl SuccinctSetupProofFamilyShape {
             Self::SameSecretLinkageAnchor => super::SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY,
             Self::PublicKeyShare => super::PUBLIC_KEY_SHARE_PROOF_FAMILY,
             Self::PrivateVssShare => super::PRIVATE_VSS_SHARE_PROOF_FAMILY,
-            Self::CompactVssShareLinkage => super::COMPACT_VSS_SHARE_LINKAGE_PROOF_FAMILY,
-            Self::CompactSameSecretBridge => super::COMPACT_SAME_SECRET_BRIDGE_PROOF_FAMILY,
+            Self::VssShareLinkage => super::VSS_SHARE_LINKAGE_PROOF_FAMILY,
+            Self::SameSecretBridge => super::SAME_SECRET_BRIDGE_PROOF_FAMILY,
             Self::TargetDecryptionShare => super::TARGET_DECRYPTION_SHARE_PROOF_FAMILY,
             Self::TrusteeEvaluationKey => super::TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
         }
@@ -90,8 +89,8 @@ impl SuccinctSetupProofFamilyShape {
             Self::SameSecretLinkageAnchor => &SAME_SECRET_LINKAGE_ANCHOR_BINDING_LABELS,
             Self::PublicKeyShare => &PUBLIC_KEY_SHARE_SUCCINCT_BINDING_LABELS,
             Self::PrivateVssShare => &PRIVATE_VSS_SHARE_BINDING_LABELS,
-            Self::CompactVssShareLinkage => &COMPACT_VSS_SHARE_LINKAGE_BINDING_LABELS,
-            Self::CompactSameSecretBridge => &COMPACT_SAME_SECRET_BRIDGE_BINDING_LABELS,
+            Self::VssShareLinkage => &VSS_SHARE_LINKAGE_BINDING_LABELS,
+            Self::SameSecretBridge => &SAME_SECRET_BRIDGE_BINDING_LABELS,
             Self::TargetDecryptionShare => &TARGET_DECRYPTION_SHARE_BINDING_LABELS,
             Self::TrusteeEvaluationKey => &TRUSTEE_EVALUATION_KEY_BINDING_LABELS,
         }
@@ -102,22 +101,22 @@ impl SuccinctSetupProofFamilyShape {
             Self::TargetDecryptionShare => {
                 TARGET_DECRYPTION_AGGREGATE_MESSAGE_CLAIM_MASK_DIGIT_COUNT
             }
-            Self::CompactVssShareLinkage => COMPACT_VSS_CARRY_CLAIM_MASK_DIGIT_COUNT,
+            Self::VssShareLinkage => VSS_PUBLIC_CARRY_CLAIM_MASK_DIGIT_COUNT,
             Self::SameSecretLinkageAnchor
             | Self::PublicKeyShare
             | Self::PrivateVssShare
-            | Self::CompactSameSecretBridge
+            | Self::SameSecretBridge
             | Self::TrusteeEvaluationKey => CLAIM_MASK_DIGIT_COUNT,
         }
     }
 
     pub(crate) fn consistency_repetitions(self) -> usize {
         match self {
-            Self::CompactVssShareLinkage => COMPACT_VSS_CONSISTENCY_REPETITIONS,
+            Self::VssShareLinkage => VSS_PUBLIC_CONSISTENCY_REPETITIONS,
             Self::SameSecretLinkageAnchor
             | Self::PublicKeyShare
             | Self::PrivateVssShare
-            | Self::CompactSameSecretBridge
+            | Self::SameSecretBridge
             | Self::TargetDecryptionShare
             | Self::TrusteeEvaluationKey => CONSISTENCY_REPETITIONS,
         }
@@ -125,11 +124,11 @@ impl SuccinctSetupProofFamilyShape {
 
     pub(crate) fn consistency_coefficient_bits(self) -> u32 {
         match self {
-            Self::CompactVssShareLinkage => COMPACT_VSS_CONSISTENCY_COEFFICIENT_BITS,
+            Self::VssShareLinkage => VSS_PUBLIC_CONSISTENCY_COEFFICIENT_BITS,
             Self::SameSecretLinkageAnchor
             | Self::PublicKeyShare
             | Self::PrivateVssShare
-            | Self::CompactSameSecretBridge
+            | Self::SameSecretBridge
             | Self::TargetDecryptionShare
             | Self::TrusteeEvaluationKey => CONSISTENCY_COEFFICIENT_BITS,
         }
@@ -149,10 +148,7 @@ fn append_len_prefixed_str(preimage: &mut Vec<u8>, value: &str) {
     preimage.extend_from_slice(value.as_bytes());
 }
 
-fn append_compact_vss_commitment(
-    preimage: &mut Vec<u8>,
-    commitment: &CompactVssShareLinkageCommitment,
-) {
+fn append_vss_public_commitment(preimage: &mut Vec<u8>, commitment: &VssShareLinkageCommitment) {
     append_usize(preimage, commitment.coordinates_by_commitment_modulus.len());
     for coordinates in &commitment.coordinates_by_commitment_modulus {
         append_usize(preimage, coordinates.len());
@@ -327,76 +323,61 @@ impl TrusteeEvaluationKeyStatement {
         } else {
             preimage.push(0);
         }
-        if let Some(compact_vss_share_linkage) = &self.compact_vss_share_linkage {
+        if let Some(vss_share_linkage) = &self.vss_share_linkage {
             preimage.push(1);
             for field in [
-                compact_vss_share_linkage.public_matrix_seed_hash.as_str(),
-                compact_vss_share_linkage.source_trustee_identity.as_str(),
-                compact_vss_share_linkage.recipient_identity.as_str(),
-                compact_vss_share_linkage
+                vss_share_linkage.public_matrix_seed_hash.as_str(),
+                vss_share_linkage.source_trustee_identity.as_str(),
+                vss_share_linkage.recipient_identity.as_str(),
+                vss_share_linkage
                     .source_coefficient_commitment_root
                     .as_str(),
-                compact_vss_share_linkage
+                vss_share_linkage
                     .source_recipient_share_commitment_root
                     .as_str(),
-                compact_vss_share_linkage
-                    .recipient_share_commitment_root
-                    .as_str(),
-                compact_vss_share_linkage
-                    .recipient_share_opening_root
-                    .as_str(),
+                vss_share_linkage.recipient_share_commitment_root.as_str(),
+                vss_share_linkage.recipient_share_opening_root.as_str(),
             ] {
                 append_len_prefixed_str(&mut preimage, field);
             }
             preimage.extend_from_slice(
-                &compact_vss_share_linkage
+                &vss_share_linkage
                     .source_trustee_roster_position
                     .to_le_bytes(),
             );
-            preimage.extend_from_slice(
-                &compact_vss_share_linkage
-                    .recipient_roster_position
-                    .to_le_bytes(),
-            );
+            preimage.extend_from_slice(&vss_share_linkage.recipient_roster_position.to_le_bytes());
+            append_usize(&mut preimage, vss_share_linkage.source_rns_limb_index);
+            preimage.extend_from_slice(&vss_share_linkage.source_message_modulus.to_le_bytes());
             append_usize(
                 &mut preimage,
-                compact_vss_share_linkage.source_rns_limb_index,
+                vss_share_linkage.coefficient_commitment_roots.len(),
             );
-            preimage.extend_from_slice(
-                &compact_vss_share_linkage
-                    .source_message_modulus
-                    .to_le_bytes(),
-            );
-            append_usize(
-                &mut preimage,
-                compact_vss_share_linkage.coefficient_commitment_roots.len(),
-            );
-            for root in &compact_vss_share_linkage.coefficient_commitment_roots {
+            for root in &vss_share_linkage.coefficient_commitment_roots {
                 append_len_prefixed_str(&mut preimage, root);
             }
             append_usize(
                 &mut preimage,
-                compact_vss_share_linkage.coefficient_opening_roots.len(),
+                vss_share_linkage.coefficient_opening_roots.len(),
             );
-            for root in &compact_vss_share_linkage.coefficient_opening_roots {
+            for root in &vss_share_linkage.coefficient_opening_roots {
                 append_len_prefixed_str(&mut preimage, root);
             }
             append_usize(
                 &mut preimage,
-                compact_vss_share_linkage.coefficient_commitments.len(),
+                vss_share_linkage.coefficient_commitments.len(),
             );
-            for commitment in &compact_vss_share_linkage.coefficient_commitments {
-                append_compact_vss_commitment(&mut preimage, commitment);
+            for commitment in &vss_share_linkage.coefficient_commitments {
+                append_vss_public_commitment(&mut preimage, commitment);
             }
-            append_compact_vss_commitment(
+            append_vss_public_commitment(
                 &mut preimage,
-                &compact_vss_share_linkage.recipient_share_commitment,
+                &vss_share_linkage.recipient_share_commitment,
             );
             append_usize(
                 &mut preimage,
-                compact_vss_share_linkage.additional_linkage_items.len(),
+                vss_share_linkage.additional_linkage_items.len(),
             );
-            for item in &compact_vss_share_linkage.additional_linkage_items {
+            for item in &vss_share_linkage.additional_linkage_items {
                 for field in [
                     item.source_trustee_identity.as_str(),
                     item.source_coefficient_commitment_root.as_str(),
@@ -421,46 +402,41 @@ impl TrusteeEvaluationKeyStatement {
                 }
                 append_usize(&mut preimage, item.coefficient_commitments.len());
                 for commitment in &item.coefficient_commitments {
-                    append_compact_vss_commitment(&mut preimage, commitment);
+                    append_vss_public_commitment(&mut preimage, commitment);
                 }
-                append_compact_vss_commitment(&mut preimage, &item.recipient_share_commitment);
+                append_vss_public_commitment(&mut preimage, &item.recipient_share_commitment);
             }
         }
-        if let Some(compact_same_secret_bridge) = &self.compact_same_secret_bridge {
+        if let Some(same_secret_bridge) = &self.same_secret_bridge {
             preimage.push(1);
             for field in [
-                compact_same_secret_bridge.public_matrix_seed_hash.as_str(),
-                compact_same_secret_bridge.source_trustee_identity.as_str(),
-                compact_same_secret_bridge.target_basis_hash.as_str(),
+                same_secret_bridge.public_matrix_seed_hash.as_str(),
+                same_secret_bridge.source_trustee_identity.as_str(),
+                same_secret_bridge.target_basis_hash.as_str(),
             ] {
                 append_len_prefixed_str(&mut preimage, field);
             }
             preimage.extend_from_slice(
-                &compact_same_secret_bridge
+                &same_secret_bridge
                     .source_trustee_roster_position
                     .to_le_bytes(),
             );
-            append_usize(
-                &mut preimage,
-                compact_same_secret_bridge.target_rns_primes.len(),
-            );
-            for target_rns_prime in &compact_same_secret_bridge.target_rns_primes {
+            append_usize(&mut preimage, same_secret_bridge.target_rns_primes.len());
+            for target_rns_prime in &same_secret_bridge.target_rns_primes {
                 preimage.extend_from_slice(&target_rns_prime.to_le_bytes());
             }
             append_usize(
                 &mut preimage,
-                compact_same_secret_bridge
-                    .target_constant_commitment_roots
-                    .len(),
+                same_secret_bridge.target_constant_commitment_roots.len(),
             );
-            for root in &compact_same_secret_bridge.target_constant_commitment_roots {
+            for root in &same_secret_bridge.target_constant_commitment_roots {
                 append_len_prefixed_str(&mut preimage, root);
             }
             append_usize(
                 &mut preimage,
-                compact_same_secret_bridge.target_constant_commitments.len(),
+                same_secret_bridge.target_constant_commitments.len(),
             );
-            for commitment in &compact_same_secret_bridge.target_constant_commitments {
+            for commitment in &same_secret_bridge.target_constant_commitments {
                 append_usize(
                     &mut preimage,
                     commitment.coordinates_by_commitment_modulus.len(),
@@ -593,8 +569,8 @@ impl TrusteeEvaluationKeyStatement {
         if self.private_vss_share.is_some() {
             if !self.keys.is_empty()
                 || self.same_secret_linkage.is_some()
-                || self.compact_vss_share_linkage.is_some()
-                || self.compact_same_secret_bridge.is_some()
+                || self.vss_share_linkage.is_some()
+                || self.same_secret_bridge.is_some()
             {
                 return Err(invalid_succinct_setup_proof(
                     "private VSS statement must not include key descriptors or same-secret linkage",
@@ -602,21 +578,21 @@ impl TrusteeEvaluationKeyStatement {
             }
             return Ok(SuccinctSetupProofFamilyShape::PrivateVssShare);
         }
-        if self.compact_vss_share_linkage.is_some() {
+        if self.vss_share_linkage.is_some() {
             if !self.keys.is_empty()
                 || self.same_secret_linkage.is_some()
-                || self.compact_same_secret_bridge.is_some()
+                || self.same_secret_bridge.is_some()
             {
                 return Err(invalid_succinct_setup_proof(
                     "compact VSS share-linkage statement must not include key descriptors or same-secret linkage",
                 ));
             }
-            return Ok(SuccinctSetupProofFamilyShape::CompactVssShareLinkage);
+            return Ok(SuccinctSetupProofFamilyShape::VssShareLinkage);
         }
-        if self.compact_same_secret_bridge.is_some() {
+        if self.same_secret_bridge.is_some() {
             if self.same_secret_linkage.is_some()
                 || self.private_vss_share.is_some()
-                || self.compact_vss_share_linkage.is_some()
+                || self.vss_share_linkage.is_some()
                 || self.target_decryption_share.is_some()
             {
                 return Err(invalid_succinct_setup_proof(
@@ -624,15 +600,15 @@ impl TrusteeEvaluationKeyStatement {
                 ));
             }
             if self.keys.is_empty() {
-                return Ok(SuccinctSetupProofFamilyShape::CompactSameSecretBridge);
+                return Ok(SuccinctSetupProofFamilyShape::SameSecretBridge);
             }
         }
         if self.target_decryption_share.is_some() {
             if !self.keys.is_empty()
                 || self.same_secret_linkage.is_some()
                 || self.private_vss_share.is_some()
-                || self.compact_vss_share_linkage.is_some()
-                || self.compact_same_secret_bridge.is_some()
+                || self.vss_share_linkage.is_some()
+                || self.same_secret_bridge.is_some()
             {
                 return Err(invalid_succinct_setup_proof(
                     "target-decryption share statement must not mix proof families",
@@ -649,8 +625,8 @@ impl TrusteeEvaluationKeyStatement {
         if self.keys.is_empty()
             && self.same_secret_linkage.is_none()
             && self.private_vss_share.is_none()
-            && self.compact_vss_share_linkage.is_none()
-            && self.compact_same_secret_bridge.is_none()
+            && self.vss_share_linkage.is_none()
+            && self.same_secret_bridge.is_none()
             && self.target_decryption_share.is_none()
         {
             return Err(invalid_succinct_setup_proof(
@@ -678,7 +654,7 @@ impl TrusteeEvaluationKeyStatement {
                 // One constant-commitment opening links the share secret to
                 // the anchored secret by congruence over the commitment
                 // modulus product plus ternary support.
-                if self.compact_same_secret_bridge.is_some() {
+                if self.same_secret_bridge.is_some() {
                     if self.same_secret_linkage.is_some() {
                         return Err(invalid_succinct_setup_proof(
                             "public-key share statement must not carry both same-secret linkage forms",
@@ -694,7 +670,7 @@ impl TrusteeEvaluationKeyStatement {
                 if self.keys.is_empty()
                     && self.same_secret_linkage.is_none()
                     && self.private_vss_share.is_some()
-                    && self.compact_vss_share_linkage.is_none()
+                    && self.vss_share_linkage.is_none()
                     && self.target_decryption_share.is_none()
                 {
                     // The detailed statement check below validates the
@@ -705,12 +681,12 @@ impl TrusteeEvaluationKeyStatement {
                     ));
                 }
             }
-            SuccinctSetupProofFamilyShape::CompactVssShareLinkage => {
+            SuccinctSetupProofFamilyShape::VssShareLinkage => {
                 if !(self.keys.is_empty()
                     && self.same_secret_linkage.is_none()
                     && self.private_vss_share.is_none()
-                    && self.compact_vss_share_linkage.is_some()
-                    && self.compact_same_secret_bridge.is_none()
+                    && self.vss_share_linkage.is_some()
+                    && self.same_secret_bridge.is_none()
                     && self.target_decryption_share.is_none())
                 {
                     return Err(invalid_succinct_setup_proof(
@@ -718,12 +694,12 @@ impl TrusteeEvaluationKeyStatement {
                     ));
                 }
             }
-            SuccinctSetupProofFamilyShape::CompactSameSecretBridge => {
+            SuccinctSetupProofFamilyShape::SameSecretBridge => {
                 if !(self.keys.is_empty()
                     && self.same_secret_linkage.is_none()
                     && self.private_vss_share.is_none()
-                    && self.compact_vss_share_linkage.is_none()
-                    && self.compact_same_secret_bridge.is_some()
+                    && self.vss_share_linkage.is_none()
+                    && self.same_secret_bridge.is_some()
                     && self.target_decryption_share.is_none())
                 {
                     return Err(invalid_succinct_setup_proof(
@@ -735,8 +711,8 @@ impl TrusteeEvaluationKeyStatement {
                 if !(self.keys.is_empty()
                     && self.same_secret_linkage.is_none()
                     && self.private_vss_share.is_none()
-                    && self.compact_vss_share_linkage.is_none()
-                    && self.compact_same_secret_bridge.is_none()
+                    && self.vss_share_linkage.is_none()
+                    && self.same_secret_bridge.is_none()
                     && self.target_decryption_share.is_some())
                 {
                     return Err(invalid_succinct_setup_proof(
@@ -747,7 +723,7 @@ impl TrusteeEvaluationKeyStatement {
             SuccinctSetupProofFamilyShape::TrusteeEvaluationKey => {
                 // The accepted setup path always builds keyed statements with a
                 // same-secret linkage form; development statements may omit it.
-                if self.same_secret_linkage.is_some() && self.compact_same_secret_bridge.is_some() {
+                if self.same_secret_linkage.is_some() && self.same_secret_bridge.is_some() {
                     return Err(invalid_succinct_setup_proof(
                         "trustee evaluation-key statement must not carry both same-secret linkage forms",
                     ));
@@ -816,25 +792,19 @@ impl TrusteeEvaluationKeyStatement {
         if let Some(private_vss_share) = &self.private_vss_share {
             validate_private_vss_share_statement(private_vss_share, self.ring_degree)?;
         }
-        if let Some(compact_vss_share_linkage) = &self.compact_vss_share_linkage {
-            validate_compact_vss_share_linkage_statement(
-                compact_vss_share_linkage,
-                self.ring_degree,
-            )?;
+        if let Some(vss_share_linkage) = &self.vss_share_linkage {
+            validate_vss_share_linkage_statement(vss_share_linkage, self.ring_degree)?;
         }
-        if let Some(compact_same_secret_bridge) = &self.compact_same_secret_bridge {
-            if compact_same_secret_bridge.source_trustee_identity != self.context.trustee_identity
-                || compact_same_secret_bridge.source_trustee_roster_position
+        if let Some(same_secret_bridge) = &self.same_secret_bridge {
+            if same_secret_bridge.source_trustee_identity != self.context.trustee_identity
+                || same_secret_bridge.source_trustee_roster_position
                     != self.context.trustee_roster_position
             {
                 return Err(invalid_succinct_setup_proof(
                     "compact same-secret bridge source trustee must match the proof context",
                 ));
             }
-            validate_compact_same_secret_bridge_statement(
-                compact_same_secret_bridge,
-                self.ring_degree,
-            )?;
+            validate_same_secret_bridge_statement(same_secret_bridge, self.ring_degree)?;
         }
         if let Some(target_decryption_share) = &self.target_decryption_share {
             if target_decryption_share.trustee_identity != self.context.trustee_identity
@@ -887,8 +857,8 @@ fn validate_masked_claim_lift_window(
             "target-decryption masked consistency claims need more carried limb fields",
         ));
     }
-    if statement.compact_vss_share_linkage.is_some() {
-        let first_digit_global_claim_id = COMPACT_VSS_CONSISTENCY_REPETITIONS as u64;
+    if statement.vss_share_linkage.is_some() {
+        let first_digit_global_claim_id = VSS_PUBLIC_CONSISTENCY_REPETITIONS as u64;
         let (digit_lower_bound, digit_upper_bound) =
             masked_claim_bounds_for_global_claim(statement, first_digit_global_claim_id)?;
         let required_digit_residue_count = masked_claim_lift_residue_count_for_moduli(
@@ -909,7 +879,7 @@ fn validate_masked_claim_lift_window(
             statement.target_decryption_smudging_message_global_index()
         {
             let first_smudging_global_claim_id = (first_smudging_global_message_index
-                * crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT
+                * crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT
                 * CONSISTENCY_REPETITIONS) as u64;
             let smudging_limb_indices = statement
                 .target_decryption_message_claim_limb_indices(first_smudging_global_message_index);
@@ -1083,10 +1053,13 @@ fn validate_target_decryption_share_statement(
     }) {
         if commitment.coordinates_by_commitment_modulus.len()
             != SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len()
-            || commitment.coordinates_by_commitment_modulus.iter().any(|coordinates| {
-                coordinates.len()
-                    != crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_OUTPUT_COORDINATE_COUNT
-            })
+            || commitment
+                .coordinates_by_commitment_modulus
+                .iter()
+                .any(|coordinates| {
+                    coordinates.len()
+                        != crate::bgv::setup::vss_commitment::VSS_PUBLIC_OUTPUT_COORDINATE_COUNT
+                })
         {
             return Err(invalid_succinct_setup_proof(
                 "target-decryption compact commitment coordinate count does not match the profile",
@@ -1195,17 +1168,17 @@ fn validate_private_vss_share_statement(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn validate_compact_vss_share_linkage_item(
+fn validate_vss_share_linkage_item(
     field_prefix: &str,
     recipient_identity: &str,
     source_rns_limb_index: usize,
     source_message_modulus: u64,
     coefficient_commitment_roots: &[String],
     coefficient_opening_roots: &[String],
-    coefficient_commitments: &[CompactVssShareLinkageCommitment],
+    coefficient_commitments: &[VssShareLinkageCommitment],
     recipient_share_commitment_root: &str,
     recipient_share_opening_root: &str,
-    recipient_share_commitment: &CompactVssShareLinkageCommitment,
+    recipient_share_commitment: &VssShareLinkageCommitment,
 ) -> CanonicalResult<()> {
     validate_context_token(
         &format!("{field_prefix}.recipientIdentity"),
@@ -1258,7 +1231,7 @@ fn validate_compact_vss_share_linkage_item(
                 .enumerate()
                 .any(|(commitment_modulus_index, coordinates)| {
                     coordinates.len()
-                        != crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_OUTPUT_COORDINATE_COUNT
+                        != crate::bgv::setup::vss_commitment::VSS_PUBLIC_OUTPUT_COORDINATE_COUNT
                         || coordinates
                             .iter()
                             .any(|coordinate| *coordinate >= DATA_PRIMES[commitment_modulus_index])
@@ -1273,32 +1246,32 @@ fn validate_compact_vss_share_linkage_item(
     Ok(())
 }
 
-fn validate_compact_vss_share_linkage_statement(
-    statement: &CompactVssShareLinkageStatement,
+fn validate_vss_share_linkage_statement(
+    statement: &VssShareLinkageStatement,
     ring_degree: usize,
 ) -> CanonicalResult<()> {
     validate_protocol_hash_hex(
-        "compactVssShareLinkage.publicMatrixSeedHash",
+        "vssShareLinkage.publicMatrixSeedHash",
         &statement.public_matrix_seed_hash,
     )?;
     validate_context_token(
-        "compactVssShareLinkage.sourceTrusteeIdentity",
+        "vssShareLinkage.sourceTrusteeIdentity",
         &statement.source_trustee_identity,
     )?;
     validate_context_token(
-        "compactVssShareLinkage.recipientIdentity",
+        "vssShareLinkage.recipientIdentity",
         &statement.recipient_identity,
     )?;
     validate_protocol_hash_hex(
-        "compactVssShareLinkage.sourceCoefficientCommitmentRoot",
+        "vssShareLinkage.sourceCoefficientCommitmentRoot",
         &statement.source_coefficient_commitment_root,
     )?;
     validate_protocol_hash_hex(
-        "compactVssShareLinkage.sourceRecipientShareCommitmentRoot",
+        "vssShareLinkage.sourceRecipientShareCommitmentRoot",
         &statement.source_recipient_share_commitment_root,
     )?;
-    validate_compact_vss_share_linkage_item(
-        "compactVssShareLinkage",
+    validate_vss_share_linkage_item(
+        "vssShareLinkage",
         &statement.recipient_identity,
         statement.source_rns_limb_index,
         statement.source_message_modulus,
@@ -1311,25 +1284,23 @@ fn validate_compact_vss_share_linkage_statement(
     )?;
     for (item_index, item) in statement.additional_linkage_items.iter().enumerate() {
         validate_context_token(
-            &format!(
-                "compactVssShareLinkage.additionalLinkageItems.{item_index}.sourceTrusteeIdentity"
-            ),
+            &format!("vssShareLinkage.additionalLinkageItems.{item_index}.sourceTrusteeIdentity"),
             &item.source_trustee_identity,
         )?;
         validate_protocol_hash_hex(
             &format!(
-                "compactVssShareLinkage.additionalLinkageItems.{item_index}.sourceCoefficientCommitmentRoot"
+                "vssShareLinkage.additionalLinkageItems.{item_index}.sourceCoefficientCommitmentRoot"
             ),
             &item.source_coefficient_commitment_root,
         )?;
         validate_protocol_hash_hex(
             &format!(
-                "compactVssShareLinkage.additionalLinkageItems.{item_index}.sourceRecipientShareCommitmentRoot"
+                "vssShareLinkage.additionalLinkageItems.{item_index}.sourceRecipientShareCommitmentRoot"
             ),
             &item.source_recipient_share_commitment_root,
         )?;
-        validate_compact_vss_share_linkage_item(
-            &format!("compactVssShareLinkage.additionalLinkageItems.{item_index}"),
+        validate_vss_share_linkage_item(
+            &format!("vssShareLinkage.additionalLinkageItems.{item_index}"),
             &item.recipient_identity,
             item.source_rns_limb_index,
             item.source_message_modulus,
@@ -1347,7 +1318,7 @@ fn validate_compact_vss_share_linkage_statement(
     let mut validate_coefficient_slot_bindings =
         |field_prefix: &str,
          coefficient_slot_indices: &[usize],
-         coefficient_commitments: &[CompactVssShareLinkageCommitment]|
+         coefficient_commitments: &[VssShareLinkageCommitment]|
          -> CanonicalResult<()> {
             if coefficient_slot_indices.len() != coefficient_commitments.len() {
                 return Err(invalid_succinct_setup_proof(
@@ -1381,7 +1352,7 @@ fn validate_compact_vss_share_linkage_statement(
             Ok(())
         };
     validate_coefficient_slot_bindings(
-        "compactVssShareLinkage",
+        "vssShareLinkage",
         coefficient_slot_indices_by_item
             .first()
             .map(Vec::as_slice)
@@ -1395,7 +1366,7 @@ fn validate_compact_vss_share_linkage_statement(
         .enumerate()
     {
         validate_coefficient_slot_bindings(
-            &format!("compactVssShareLinkage.additionalLinkageItems.{item_index}"),
+            &format!("vssShareLinkage.additionalLinkageItems.{item_index}"),
             coefficient_slot_indices,
             &item.coefficient_commitments,
         )?;
@@ -1409,20 +1380,20 @@ fn validate_compact_vss_share_linkage_statement(
     Ok(())
 }
 
-fn validate_compact_same_secret_bridge_statement(
-    statement: &CompactSameSecretBridgeStatement,
+fn validate_same_secret_bridge_statement(
+    statement: &SameSecretBridgeStatement,
     ring_degree: usize,
 ) -> CanonicalResult<()> {
     validate_protocol_hash_hex(
-        "compactSameSecretBridge.publicMatrixSeedHash",
+        "sameSecretBridge.publicMatrixSeedHash",
         &statement.public_matrix_seed_hash,
     )?;
     validate_context_token(
-        "compactSameSecretBridge.sourceTrusteeIdentity",
+        "sameSecretBridge.sourceTrusteeIdentity",
         &statement.source_trustee_identity,
     )?;
     validate_protocol_hash_hex(
-        "compactSameSecretBridge.targetBasisHash",
+        "sameSecretBridge.targetBasisHash",
         &statement.target_basis_hash,
     )?;
     if statement.target_basis_hash != crate::bgv::evaluator::top_k::canonical_target_basis_hash()? {
@@ -1447,17 +1418,20 @@ fn validate_compact_same_secret_bridge_statement(
             ));
         }
         validate_protocol_hash_hex(
-            "compactSameSecretBridge.targetConstantCommitmentRoot",
+            "sameSecretBridge.targetConstantCommitmentRoot",
             &statement.target_constant_commitment_roots[target_rns_limb_index],
         )?;
     }
     for commitment in &statement.target_constant_commitments {
         if commitment.coordinates_by_commitment_modulus.len()
             != SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len()
-            || commitment.coordinates_by_commitment_modulus.iter().any(|coordinates| {
-                coordinates.len()
-                    != crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_OUTPUT_COORDINATE_COUNT
-            })
+            || commitment
+                .coordinates_by_commitment_modulus
+                .iter()
+                .any(|coordinates| {
+                    coordinates.len()
+                        != crate::bgv::setup::vss_commitment::VSS_PUBLIC_OUTPUT_COORDINATE_COUNT
+                })
         {
             return Err(invalid_succinct_setup_proof(
                 "compact same-secret bridge commitment coordinate count does not match the profile",

@@ -1,6 +1,6 @@
 use super::*;
 
-use super::compact_same_secret_bridge_verification::VerifiedCompactSameSecretBridgeMaterial;
+use super::same_secret_bridge_verification::VerifiedSameSecretBridgeMaterial;
 use crate::hashing::derive_canonical_object_hash;
 
 pub(super) fn verify_evaluator_key_schedule(
@@ -255,7 +255,7 @@ fn evaluator_key_schedule_refusal(
 pub(super) fn verify_pending_evaluation_key_material_boundary(
     setup_package: &Value,
     request: &Value,
-    verified_compact_same_secret_bridge: Option<&VerifiedCompactSameSecretBridgeMaterial>,
+    verified_same_secret_bridge: Option<&VerifiedSameSecretBridgeMaterial>,
 ) -> CanonicalResult<Option<Value>> {
     if let Some(response) = verify_relinearization_key_share_rounds(setup_package, request)? {
         return Ok(Some(response));
@@ -263,11 +263,9 @@ pub(super) fn verify_pending_evaluation_key_material_boundary(
     if let Some(response) = verify_galois_key_share_batches(setup_package, request)? {
         return Ok(Some(response));
     }
-    if let Some(response) = verify_trustee_evaluation_key_proofs(
-        setup_package,
-        request,
-        verified_compact_same_secret_bridge,
-    )? {
+    if let Some(response) =
+        verify_trustee_evaluation_key_proofs(setup_package, request, verified_same_secret_bridge)?
+    {
         return Ok(Some(response));
     }
 

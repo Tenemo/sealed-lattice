@@ -1,14 +1,13 @@
 use super::super::*;
 use super::*;
-use crate::bgv::setup::compact_vss_commitment::{
-    COMPACT_VSS_MESSAGE_DIGIT_COUNT, COMPACT_VSS_OUTPUT_COORDINATE_COUNT,
-    COMPACT_VSS_RANDOMNESS_COLUMN_COUNT, CompactProjectionTermsInput,
-    CompactVssMessageEncodingLayout, compact_projection_terms,
-    compact_vss_message_digit_column_label, compact_vss_message_digit_weight,
+use crate::bgv::setup::vss_commitment::{
+    ProjectionTermsInput, VSS_PUBLIC_MESSAGE_DIGIT_COUNT, VSS_PUBLIC_OUTPUT_COORDINATE_COUNT,
+    VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT, VssPublicMessageEncodingLayout, projection_terms,
+    vss_public_message_digit_column_label, vss_public_message_digit_weight,
 };
 
-fn compact_vss_message_encoding_offsets(
-    layouts: &[CompactVssMessageEncodingLayout],
+fn vss_public_message_encoding_offsets(
+    layouts: &[VssPublicMessageEncodingLayout],
 ) -> CanonicalResult<Vec<usize>> {
     let mut offsets = Vec::with_capacity(layouts.len() + 1);
     let mut offset = 0_usize;
@@ -25,7 +24,7 @@ fn compact_vss_message_encoding_offsets(
     Ok(offsets)
 }
 
-fn compact_vss_message_encoding_total(offsets: &[usize]) -> usize {
+fn vss_public_message_encoding_total(offsets: &[usize]) -> usize {
     offsets.last().copied().unwrap_or(0)
 }
 
@@ -50,10 +49,10 @@ fn target_decryption_message_vector_index(
 }
 
 fn target_decryption_decoder_digit_count(
-    layout: CompactVssMessageEncodingLayout,
+    layout: VssPublicMessageEncodingLayout,
 ) -> CanonicalResult<usize> {
     let mut count = 0_usize;
-    for digit_index in 0..COMPACT_VSS_MESSAGE_DIGIT_COUNT {
+    for digit_index in 0..VSS_PUBLIC_MESSAGE_DIGIT_COUNT {
         if layout.digit_trit_count(digit_index)? > 0 {
             count += 1;
         }
@@ -127,18 +126,15 @@ pub(crate) fn build_target_decryption_share_public_vectors(
                 .target_decryption_message_encoding_layout(input.limb_index, *global_message_index)
         })
         .collect::<CanonicalResult<Vec<_>>>()?;
-    let message_encoding_offsets = compact_vss_message_encoding_offsets(&message_encoding_layouts)?;
+    let message_encoding_offsets = vss_public_message_encoding_offsets(&message_encoding_layouts)?;
     let extension_zero_vector = || vec![ChallengeExtensionTower::zero(); input.ring_degree];
     let mut relation_claim = ChallengeExtensionTower::zero();
     let mut message_encoding_vectors =
-        vec![
-            extension_zero_vector();
-            compact_vss_message_encoding_total(&message_encoding_offsets)
-        ];
+        vec![extension_zero_vector(); vss_public_message_encoding_total(&message_encoding_offsets)];
 
     let commitment_relation_count =
         if input.limb_index < SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len() {
-            message_count * COMPACT_VSS_OUTPUT_COORDINATE_COUNT
+            message_count * VSS_PUBLIC_OUTPUT_COORDINATE_COUNT
         } else {
             0
         };
@@ -204,7 +200,7 @@ pub(crate) fn build_target_decryption_share_public_vectors(
                         "target-decryption compact commitment does not cover the commitment field",
                     )
                 })?;
-            if coordinates.len() != COMPACT_VSS_OUTPUT_COORDINATE_COUNT {
+            if coordinates.len() != VSS_PUBLIC_OUTPUT_COORDINATE_COUNT {
                 return Err(invalid_succinct_setup_proof(
                     "target-decryption compact commitment coordinate count does not match the profile",
                 ));
@@ -215,21 +211,21 @@ pub(crate) fn build_target_decryption_share_public_vectors(
                         "target-decryption compact commitment coordinate is outside the commitment field",
                     ));
                 }
-                let alpha_index = commitment_index * COMPACT_VSS_OUTPUT_COORDINATE_COUNT
-                    + output_coordinate_index;
+                let alpha_index =
+                    commitment_index * VSS_PUBLIC_OUTPUT_COORDINATE_COUNT + output_coordinate_index;
                 let alpha_value = &input.relation_alpha[alpha_index];
                 relation_claim =
                     tower.add(&relation_claim, &tower.scale_base(alpha_value, *coordinate));
-                for digit_index in 0..COMPACT_VSS_MESSAGE_DIGIT_COUNT {
-                    let input_column = compact_vss_message_digit_column_label(digit_index)?;
+                for digit_index in 0..VSS_PUBLIC_MESSAGE_DIGIT_COUNT {
+                    let input_column = vss_public_message_digit_column_label(digit_index)?;
                     let digit_vector_index = target_decryption_message_vector_index(
                         &message_encoding_offsets,
                         commitment_index,
                         message_encoding_layouts[commitment_index]
                             .digit_encoding_column(digit_index)?,
                     )?;
-                    add_compact_projection_vector(
-                        AddCompactProjectionVectorInput {
+                    add_projection_vector(
+                        AddProjectionVectorInput {
                             target: &mut message_encoding_vectors[digit_vector_index],
                             scale: alpha_value,
                             public_matrix_seed_hash: &input.statement.public_matrix_seed_hash,
@@ -243,12 +239,12 @@ pub(crate) fn build_target_decryption_share_public_vectors(
                         tower,
                     )?;
                 }
-                for randomness_column_index in 0..COMPACT_VSS_RANDOMNESS_COLUMN_COUNT {
+                for randomness_column_index in 0..VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT {
                     let input_column = format!("randomness:{randomness_column_index}");
-                    let randomness_index = commitment_index * COMPACT_VSS_RANDOMNESS_COLUMN_COUNT
+                    let randomness_index = commitment_index * VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT
                         + randomness_column_index;
-                    add_compact_projection_vector(
-                        AddCompactProjectionVectorInput {
+                    add_projection_vector(
+                        AddProjectionVectorInput {
                             target: &mut randomness_vectors[randomness_index],
                             scale: alpha_value,
                             public_matrix_seed_hash: &input.statement.public_matrix_seed_hash,
@@ -371,7 +367,7 @@ pub(crate) fn build_target_decryption_share_public_vectors(
         let mut decoder_relation_index = 0_usize;
         for (message_index, message_encoding_layout) in message_encoding_layouts.iter().enumerate()
         {
-            for digit_index in 0..COMPACT_VSS_MESSAGE_DIGIT_COUNT {
+            for digit_index in 0..VSS_PUBLIC_MESSAGE_DIGIT_COUNT {
                 let trit_count = message_encoding_layout.digit_trit_count(digit_index)?;
                 if trit_count == 0 {
                     continue;
@@ -425,7 +421,7 @@ pub(crate) fn build_target_decryption_share_public_vectors(
     Ok((relation_claim, vectors))
 }
 
-struct AddCompactProjectionVectorInput<'a, 'b> {
+struct AddProjectionVectorInput<'a, 'b> {
     target: &'a mut [ChallengeExtensionElement],
     scale: &'b ChallengeExtensionElement,
     public_matrix_seed_hash: &'b str,
@@ -440,28 +436,26 @@ struct AddCompactProjectionVectorInput<'a, 'b> {
 struct AddScaledExtensionVectorToMessageDigitsInput<'a> {
     message_encoding_vectors: &'a mut [Vec<ChallengeExtensionElement>],
     message_encoding_offsets: &'a [usize],
-    message_encoding_layouts: &'a [CompactVssMessageEncodingLayout],
+    message_encoding_layouts: &'a [VssPublicMessageEncodingLayout],
     message_index: usize,
     source: &'a [ChallengeExtensionElement],
     coefficient: u64,
     modulus: u64,
 }
 
-fn add_compact_projection_vector(
-    input: AddCompactProjectionVectorInput<'_, '_>,
+fn add_projection_vector(
+    input: AddProjectionVectorInput<'_, '_>,
     tower: &ChallengeExtensionTower,
 ) -> CanonicalResult<()> {
-    for (ring_coefficient_index, matrix_residue) in
-        compact_projection_terms(CompactProjectionTermsInput {
-            public_matrix_seed_hash: input.public_matrix_seed_hash,
-            rns_limb_index: input.rns_limb_index,
-            commitment_modulus_index: input.commitment_modulus_index,
-            output_coordinate_index: input.output_coordinate_index,
-            input_column: input.input_column,
-            ring_degree: input.ring_degree,
-            modulus: input.modulus,
-        })?
-    {
+    for (ring_coefficient_index, matrix_residue) in projection_terms(ProjectionTermsInput {
+        public_matrix_seed_hash: input.public_matrix_seed_hash,
+        rns_limb_index: input.rns_limb_index,
+        commitment_modulus_index: input.commitment_modulus_index,
+        output_coordinate_index: input.output_coordinate_index,
+        input_column: input.input_column,
+        ring_degree: input.ring_degree,
+        modulus: input.modulus,
+    })? {
         input.target[ring_coefficient_index] = tower.add(
             &input.target[ring_coefficient_index],
             &tower.scale_base(input.scale, matrix_residue),
@@ -494,8 +488,8 @@ fn add_scaled_extension_vector_to_message_digits(
                 "target-decryption message index is outside the vector layout",
             )
         })?;
-    for digit_index in 0..COMPACT_VSS_MESSAGE_DIGIT_COUNT {
-        let digit_weight = compact_vss_message_digit_weight(digit_index, input.modulus)?;
+    for digit_index in 0..VSS_PUBLIC_MESSAGE_DIGIT_COUNT {
+        let digit_weight = vss_public_message_digit_weight(digit_index, input.modulus)?;
         let vector_index = target_decryption_message_vector_index(
             input.message_encoding_offsets,
             input.message_index,

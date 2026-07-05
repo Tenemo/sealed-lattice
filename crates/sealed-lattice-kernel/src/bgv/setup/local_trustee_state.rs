@@ -3,8 +3,8 @@ use serde_json::{Value, json};
 use crate::{
     bgv::parameters::DATA_PRIMES,
     bgv::setup_helpers::{
-        array_field, hash_string_field, is_lowercase_protocol_hash, object_field, string_field,
-        u64_field, usize_field,
+        array_field, hash_string_field, object_field, string_field, u64_field, usize_field,
+        validate_hash_string,
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
     hashing::derive_canonical_object_hash,
@@ -261,16 +261,6 @@ fn string_array_field<'a>(value: &'a Value, field_name: &str) -> CanonicalResult
             })
         })
         .collect()
-}
-
-fn validate_hash_string(hash: &str, field_name: &str) -> CanonicalResult<()> {
-    if is_lowercase_protocol_hash(hash) {
-        return Ok(());
-    }
-
-    Err(invalid_local_state_input(format!(
-        "{field_name} must be a lowercase 512-bit hex protocol hash"
-    )))
 }
 
 fn invalid_local_state_input(message: impl Into<String>) -> CanonicalError {

@@ -5,17 +5,17 @@ pub(super) struct LocalTargetDecryptionShareWitness {
     pub(super) setup_epoch: String,
     pub(super) smudging_seed_hex: String,
     pub(super) smudging_polynomial_openings: Vec<TargetDecryptionSmudgingPolynomialOpening>,
-    pub(super) compact_opening: CompactAggregateOpeningWitnessBinding,
+    pub(super) opening: AggregateOpeningWitnessBinding,
 }
 
-pub(super) struct CompactAggregateOpeningWitnessBinding {
+pub(super) struct AggregateOpeningWitnessBinding {
     pub(super) public_matrix_seed_hash: String,
     pub(super) share_linkage_statement_root: String,
     pub(super) aggregate_threshold_commitment_root: String,
-    pub(super) active_credential_bindings: Vec<CompactAggregateOpeningCredentialBinding>,
+    pub(super) active_credential_bindings: Vec<AggregateOpeningCredentialBinding>,
 }
 
-pub(super) struct CompactAggregateOpeningCredentialBinding {
+pub(super) struct AggregateOpeningCredentialBinding {
     pub(super) limb_index: usize,
     pub(super) rns_prime: u64,
     pub(super) aggregate_commitment_root: String,
@@ -281,10 +281,9 @@ pub(super) fn read_local_target_decryption_share_witness(
     )?;
     let setup_epoch = required_string_field(witness, "setupEpoch")?;
 
-    let compact_opening = value_at_path(witness, &["compactAggregateOpening"])?;
-    if string_at_path(compact_opening, &["objectType"])?
-        != "LocalTrusteeCompactVssAggregateOpeningWitness"
-        || unsigned_at_path(compact_opening, &["objectVersion"])? != 1
+    let opening = value_at_path(witness, &["aggregateOpening"])?;
+    if string_at_path(opening, &["objectType"])? != "LocalTrusteeVssPublicAggregateOpeningWitness"
+        || unsigned_at_path(opening, &["objectVersion"])? != 1
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -292,24 +291,24 @@ pub(super) fn read_local_target_decryption_share_witness(
         ));
     }
     compare_hash_field(
-        compact_opening,
+        opening,
         "targetBasisHash",
         &target_accepted.target_basis_hash,
         "local target-decryption share witness target basis hash",
     )?;
     compare_hash_field(
-        compact_opening,
+        opening,
         "publicMatrixSeedHash",
         &setup_binding.public_matrix_seed_hash,
         "local target-decryption share witness public matrix seed hash",
     )?;
     let public_matrix_seed_hash = setup_binding.public_matrix_seed_hash.clone();
     let share_linkage_statement_root =
-        hash_at_path(compact_opening, &["shareLinkageStatementRoot"])?.to_string();
+        hash_at_path(opening, &["shareLinkageStatementRoot"])?.to_string();
     let aggregate_threshold_commitment_root =
-        hash_at_path(compact_opening, &["aggregateThresholdCommitmentRoot"])?.to_string();
+        hash_at_path(opening, &["aggregateThresholdCommitmentRoot"])?.to_string();
     let accepted_share_linkage_statement_root = setup_binding
-        .compact_share_linkage_statement_root
+        .share_linkage_statement_root
         .as_ref()
         .ok_or_else(|| {
             CanonicalError::new(
@@ -323,8 +322,8 @@ pub(super) fn read_local_target_decryption_share_witness(
             "local target-decryption compact share-linkage statement root does not match the accepted setup statement",
         ));
     }
-    let compact_aggregate_threshold_commitment_set = setup_binding
-        .compact_aggregate_threshold_commitment_set
+    let aggregate_threshold_commitment_set = setup_binding
+        .aggregate_threshold_commitment_set
         .as_ref()
         .ok_or_else(|| {
             CanonicalError::new(
@@ -333,7 +332,7 @@ pub(super) fn read_local_target_decryption_share_witness(
             )
         })?;
     if aggregate_threshold_commitment_root
-        != compact_aggregate_threshold_commitment_set.aggregate_threshold_commitment_root
+        != aggregate_threshold_commitment_set.aggregate_threshold_commitment_root
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ComponentMismatch,
@@ -342,23 +341,23 @@ pub(super) fn read_local_target_decryption_share_witness(
     }
 
     let active_limb_count = target_ciphertexts.target_id.level + 1;
-    if active_limb_count > compact_aggregate_threshold_commitment_set.rns_limb_count {
+    if active_limb_count > aggregate_threshold_commitment_set.rns_limb_count {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
             "accepted compact aggregate threshold commitment set does not cover every active target limb",
         ));
     }
     let mut secret_share_by_limb: Vec<Option<Vec<u64>>> = vec![None; active_limb_count];
-    let mut active_credential_bindings: Vec<Option<CompactAggregateOpeningCredentialBinding>> =
+    let mut active_credential_bindings: Vec<Option<AggregateOpeningCredentialBinding>> =
         (0..active_limb_count).map(|_| None).collect();
-    for credential in array_at_path(compact_opening, &["compactAggregateOpeningCredentials"])? {
+    for credential in array_at_path(opening, &["aggregateOpeningCredentials"])? {
         if string_at_path(credential, &["objectType"])?
-            != "LocalTrusteeCompactVssAggregateOpeningCredential"
+            != "LocalTrusteeVssPublicAggregateOpeningCredential"
             || unsigned_at_path(credential, &["objectVersion"])? != 1
         {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "compact aggregate opening credentials must be LocalTrusteeCompactVssAggregateOpeningCredential version 1",
+                "compact aggregate opening credentials must be LocalTrusteeVssPublicAggregateOpeningCredential version 1",
             ));
         }
         compare_string_field(
@@ -403,7 +402,7 @@ pub(super) fn read_local_target_decryption_share_witness(
         }
 
         let verified_credential =
-            verify_compact_aggregate_opening_credential(CompactAggregateOpeningCheckInput {
+            verify_aggregate_opening_credential(AggregateOpeningCheckInput {
                 setup_binding,
                 participant,
                 setup_epoch,
@@ -413,7 +412,7 @@ pub(super) fn read_local_target_decryption_share_witness(
                 rns_prime: expected_modulus,
             })?;
         secret_share_by_limb[limb_index] = Some(verified_credential.aggregate_share_values.clone());
-        let accepted_record = compact_aggregate_threshold_commitment_set
+        let accepted_record = aggregate_threshold_commitment_set
             .recipient_records
             .get(participant.roster_position)
             .and_then(|limb_records| limb_records.get(limb_index))
@@ -441,7 +440,7 @@ pub(super) fn read_local_target_decryption_share_witness(
                 "local target-decryption compact aggregate opening root does not match the accepted aggregate commitment record",
             ));
         }
-        active_credential_bindings[limb_index] = Some(CompactAggregateOpeningCredentialBinding {
+        active_credential_bindings[limb_index] = Some(AggregateOpeningCredentialBinding {
             limb_index,
             rns_prime: expected_modulus,
             aggregate_commitment_root: verified_credential.commitment_root,
@@ -486,7 +485,7 @@ pub(super) fn read_local_target_decryption_share_witness(
         setup_epoch: setup_epoch.to_string(),
         smudging_seed_hex,
         smudging_polynomial_openings,
-        compact_opening: CompactAggregateOpeningWitnessBinding {
+        opening: AggregateOpeningWitnessBinding {
             public_matrix_seed_hash,
             share_linkage_statement_root,
             aggregate_threshold_commitment_root,
@@ -1160,12 +1159,12 @@ fn target_decryption_smudging_commitment_opening(
 fn target_decryption_smudging_commitment_record(
     opening: &TargetDecryptionSmudgingCommitmentOpening,
 ) -> CanonicalResult<Value> {
-    let message_digit_columns = crate::bgv::setup::compact_vss_canonical_message_digit_columns(
+    let message_digit_columns = crate::bgv::setup::vss_public_canonical_message_digit_columns(
         &opening.message_coefficients,
         POLYNOMIAL_DEGREE,
     )?;
     let computation =
-        compute_compact_vss_commitment_from_opening(CompactVssCommitmentOpeningInput {
+        compute_vss_public_commitment_from_opening(VssPublicCommitmentOpeningInput {
             commitment_role: TARGET_DECRYPTION_SMUDGING_COMMITMENT_ROLE,
             commitment_context: &opening.commitment_context,
             public_matrix_seed_hash: &opening.public_matrix_seed_hash,
@@ -1214,7 +1213,7 @@ fn target_decryption_smudging_commitment_randomness_by_column(
     let rns_prime_bytes = rns_prime.to_le_bytes();
     let polynomial_degree_bytes = (polynomial_degree as u64).to_le_bytes();
 
-    (0..COMPACT_VSS_RANDOMNESS_COLUMN_COUNT)
+    (0..VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT)
         .map(|column_index| {
             let column_index_bytes = (column_index as u64).to_le_bytes();
             let mut sampler = DeterministicSampler::new(

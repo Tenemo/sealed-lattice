@@ -12,8 +12,8 @@ const expectedManifestHash = '1'.repeat(128);
 type SetupProofMaterialTransportFieldName =
     | 'transportedSameSecretProofMaterial'
     | 'transportedPublicKeyShareProofMaterial'
-    | 'transportedCompactVssShareLinkageProofMaterial'
-    | 'transportedCompactSameSecretBridgeProofMaterial'
+    | 'transportedVssShareLinkageProofMaterial'
+    | 'transportedSameSecretBridgeProofMaterial'
     | 'transportedEvaluationKeyShareProofMaterial';
 
 type SetupProofMaterialTransportCase = Readonly<{
@@ -21,20 +21,20 @@ type SetupProofMaterialTransportCase = Readonly<{
     readonly materialSetObjectType:
         | 'SetupTransportedSameSecretProofMaterialSet'
         | 'SetupTransportedPublicKeyShareProofMaterialSet'
-        | 'SetupTransportedCompactVssShareLinkageProofMaterialSet'
-        | 'SetupTransportedCompactSameSecretBridgeProofMaterialSet'
+        | 'SetupTransportedVssShareLinkageProofMaterialSet'
+        | 'SetupTransportedSameSecretBridgeProofMaterialSet'
         | 'SetupTransportedEvaluationKeyShareProofMaterialSet';
     readonly materialObjectType:
         | 'SetupTransportedSameSecretProofMaterial'
         | 'SetupTransportedPublicKeyShareProofMaterial'
-        | 'SetupTransportedCompactVssShareLinkageProofMaterial'
-        | 'SetupTransportedCompactSameSecretBridgeProofMaterial'
+        | 'SetupTransportedVssShareLinkageProofMaterial'
+        | 'SetupTransportedSameSecretBridgeProofMaterial'
         | 'SetupTransportedEvaluationKeyShareProofMaterial';
     readonly proofFamily:
         | 'same-secret-linkage-anchor'
         | 'public-key-share'
-        | 'compact-vss-share-linkage'
-        | 'compact-same-secret-bridge'
+        | 'vss-share-linkage'
+        | 'same-secret-bridge'
         | 'trustee-evaluation-key';
 }>;
 
@@ -52,20 +52,20 @@ const setupProofMaterialTransportCases = [
         proofFamily: 'public-key-share',
     },
     {
-        fieldName: 'transportedCompactVssShareLinkageProofMaterial',
+        fieldName: 'transportedVssShareLinkageProofMaterial',
         materialSetObjectType:
-            'SetupTransportedCompactVssShareLinkageProofMaterialSet',
+            'SetupTransportedVssShareLinkageProofMaterialSet',
         materialObjectType:
-            'SetupTransportedCompactVssShareLinkageProofMaterial',
-        proofFamily: 'compact-vss-share-linkage',
+            'SetupTransportedVssShareLinkageProofMaterial',
+        proofFamily: 'vss-share-linkage',
     },
     {
-        fieldName: 'transportedCompactSameSecretBridgeProofMaterial',
+        fieldName: 'transportedSameSecretBridgeProofMaterial',
         materialSetObjectType:
-            'SetupTransportedCompactSameSecretBridgeProofMaterialSet',
+            'SetupTransportedSameSecretBridgeProofMaterialSet',
         materialObjectType:
-            'SetupTransportedCompactSameSecretBridgeProofMaterial',
-        proofFamily: 'compact-same-secret-bridge',
+            'SetupTransportedSameSecretBridgeProofMaterial',
+        proofFamily: 'same-secret-bridge',
     },
     {
         fieldName: 'transportedEvaluationKeyShareProofMaterial',

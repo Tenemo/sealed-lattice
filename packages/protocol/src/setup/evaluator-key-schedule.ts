@@ -125,8 +125,9 @@ export const createRequiredGaloisSet = (
 // The selected evaluator working level: every evaluation key is generated at
 // this level and lower-level uses reuse the same key through CRT-idempotent
 // truncation, so the frozen schedule carries one relinearization entry per
-// round and no per-level entries. Mirrors the kernel evaluator constant.
-export const selectedEvaluatorWorkingLevel = 15;
+// round and no per-level entries. Mirrors the kernel evaluator constant
+// (raised to 16 with the comparison-input cleaning fix).
+export const selectedEvaluatorWorkingLevel = 16;
 
 export const createRelinearizationLevelSchedule = (
     rnsLimbCount: number,

@@ -105,9 +105,9 @@ export {
     sameSecretRelation,
 } from './setup/same-secret-consistency-records.js';
 export {
-    createBinaryChunkedCompactSameSecretBridgeProofMaterialTransport,
-    createBinaryChunkedCompactVssShareLinkageProofMaterialTransport,
-} from './setup/compact-vss-commitments.js';
+    createBinaryChunkedSameSecretBridgeProofMaterialTransport,
+    createBinaryChunkedVssShareLinkageProofMaterialTransport,
+} from './setup/vss-commitments.js';
 export {
     createVssComplaintSet,
     createVssShareAcceptanceRecord,
@@ -219,11 +219,6 @@ export type {
     SetupPackageVssCoefficientCommitmentMaterialSet,
     SetupCommitmentLimbValue,
     SetupCommitmentValue,
-    SetupTransportChunk,
-    SetupTransportedVssCoefficientCommitmentMaterial,
-    SetupTransportedVssCoefficientCommitmentMaterialLike,
-    SetupTransportedVssCoefficientCommitmentMaterialReference,
-    VerifiedVssCoefficientCommitmentMaterial,
     VssCoefficientCommitmentBundle,
     VssCoefficientCommitmentMaterialRecord,
     VssCoefficientCommitmentMaterialSet,
@@ -306,11 +301,11 @@ export type {
     VerifiedSetupProofMaterialSet,
 } from './setup/setup-proof-material-transport.js';
 export type {
-    BinaryChunkedCompactSameSecretBridgeProofMaterialTransport,
-    BinaryChunkedCompactVssShareLinkageProofMaterialTransport,
-    TransportedCompactSameSecretBridgeProofMaterialSet,
-    TransportedCompactVssShareLinkageProofMaterialSet,
-} from './setup/compact-vss-commitments.js';
+    BinaryChunkedSameSecretBridgeProofMaterialTransport,
+    BinaryChunkedVssShareLinkageProofMaterialTransport,
+    TransportedSameSecretBridgeProofMaterialSet,
+    TransportedVssShareLinkageProofMaterialSet,
+} from './setup/vss-commitments.js';
 export type {
     CollectiveBgvSetupContext,
     PrivateVssLocalVerificationFailure,

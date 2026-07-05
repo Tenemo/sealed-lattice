@@ -4,19 +4,19 @@ import {
 } from '../setup-fixture-primitives.js';
 
 import {
-    createCompactThresholdShareCommitmentBinding,
-    createCompactVssAggregateThresholdCommitmentSet,
-    createCompactVssCoefficientCommitmentSet,
-    createCompactVssRecipientShareCommitmentSet,
-    createCompactVssSameSecretBridgeProofMaterialSet,
-    createCompactVssSameSecretBridgeStatementSet,
-    createCompactVssShareLinkageProofMaterialSet,
-    createCompactVssShareLinkageStatement,
-    type CompactVssCoefficientCommitmentSet,
-    type CompactVssCoefficientCredential,
-    type CompactVssRecipientShareCommitmentSet,
-    type CompactVssSourceTrusteeOpeningState,
-} from '#packages/protocol/src/setup/compact-vss-commitments';
+    createThresholdShareCommitmentBinding,
+    createVssPublicAggregateThresholdCommitmentSet,
+    createVssPublicCoefficientCommitmentSet,
+    createVssPublicRecipientShareCommitmentSet,
+    createVssSameSecretBridgeProofMaterialSet,
+    createVssSameSecretBridgeStatementSet,
+    createVssShareLinkageProofMaterialSet,
+    createVssShareLinkageStatement,
+    type VssPublicCoefficientCommitmentSet,
+    type VssPublicCoefficientCredential,
+    type VssPublicRecipientShareCommitmentSet,
+    type VssPublicSourceTrusteeOpeningState,
+} from '#packages/protocol/src/setup/vss-commitments';
 import type {
     SameSecretConsistencyStatementSet,
     SameSecretProofSet,
@@ -27,29 +27,29 @@ import type {
     TranscriptCoreKernel,
 } from '#packages/wasm/src/index';
 import {
-    compactSameSecretBridgeProofComputer,
-    compactVssCommitmentComputer,
-    compactVssShareLinkageProofComputer,
-} from '#tests/support/compact-vss-commitment-computer';
+    sameSecretBridgeProofComputer,
+    vssPublicCommitmentComputer,
+    vssShareLinkageProofComputer,
+} from '#tests/support/vss-commitment-computer';
 
 // The source trustee's centered ternary secret coefficient, deterministic per
 // (trustee, coefficient position). The shamir-zero coefficient message is this
 // secret reduced into each RNS prime, so the same-secret proof and the compact
 // same-secret bridge bind one consistent secret.
-export const compactVssTrusteeSecretCoefficient = (
+export const vssPublicTrusteeSecretCoefficient = (
     sourceTrusteeRosterPosition: number,
     coefficientPosition: number,
 ): number =>
     [-1, 0, 1][(sourceTrusteeRosterPosition + coefficientPosition) % 3];
 
-export const compactVssTrusteeSecretCoefficients = (
+export const vssPublicTrusteeSecretCoefficients = (
     sourceTrusteeRosterPosition: number,
     ringDegree: number,
 ): number[] =>
     Array.from(
         { length: ringDegree },
         (_unusedCoefficient, coefficientPosition) =>
-            compactVssTrusteeSecretCoefficient(
+            vssPublicTrusteeSecretCoefficient(
                 sourceTrusteeRosterPosition,
                 coefficientPosition,
             ),
@@ -59,7 +59,7 @@ export const compactVssTrusteeSecretCoefficients = (
 // constant (shamir-zero) coefficient carries the centered ternary secret; higher
 // coefficients carry a deterministic bounded residue that reproduces valid
 // covered-message digits.
-const compactVssCoefficientMessage = (
+const vssPublicCoefficientMessage = (
     sourceTrusteeRosterPosition: number,
     rnsLimbIndex: number,
     shamirCoefficientIndex: number,
@@ -70,7 +70,7 @@ const compactVssCoefficientMessage = (
         return Array.from(
             { length: ringDegree },
             (_unusedCoefficient, coefficientPosition) => {
-                const secretCoefficient = compactVssTrusteeSecretCoefficient(
+                const secretCoefficient = vssPublicTrusteeSecretCoefficient(
                     sourceTrusteeRosterPosition,
                     coefficientPosition,
                 );
@@ -95,7 +95,7 @@ const compactVssCoefficientMessage = (
 // verifier (the compact commitment is hiding), so any deterministic ternary
 // value works as long as the commit and the proof reuse the same column, which
 // the builders guarantee by threading it through the credentials.
-const compactVssCoefficientRandomness = (
+const vssPublicCoefficientRandomness = (
     sourceTrusteeRosterPosition: number,
     rnsLimbIndex: number,
     shamirCoefficientIndex: number,
@@ -116,7 +116,7 @@ const compactVssCoefficientRandomness = (
         ),
     );
 
-const compactVssRecipientShareRandomness = (
+const vssPublicRecipientShareRandomness = (
     sourceTrusteeRosterPosition: number,
     recipientRosterPosition: number,
     rnsLimbIndex: number,
@@ -141,12 +141,12 @@ const compactVssRecipientShareRandomness = (
     );
 };
 
-const compactVssSourceTrusteeOpeningStates = (
+const vssPublicSourceTrusteeOpeningStates = (
     qSharePrimes: readonly number[],
     ringDegree: number,
     participantCount: number,
     thresholdDegree: number,
-): CompactVssSourceTrusteeOpeningState[] =>
+): VssPublicSourceTrusteeOpeningState[] =>
     Array.from(
         { length: participantCount },
         (_unusedTrustee, sourceTrusteeRosterPosition) => ({
@@ -160,7 +160,7 @@ const compactVssSourceTrusteeOpeningStates = (
                             rnsLimbIndex,
                             rnsPrime,
                             shamirCoefficientIndex,
-                            coefficientMessage: compactVssCoefficientMessage(
+                            coefficientMessage: vssPublicCoefficientMessage(
                                 sourceTrusteeRosterPosition,
                                 rnsLimbIndex,
                                 shamirCoefficientIndex,
@@ -173,14 +173,14 @@ const compactVssSourceTrusteeOpeningStates = (
         }),
     );
 
-export type CompactVssMaterial = {
-    readonly coefficientCommitmentSet: CompactVssCoefficientCommitmentSet;
-    readonly recipientShareCommitmentSet: CompactVssRecipientShareCommitmentSet;
+export type VssPublicMaterial = {
+    readonly coefficientCommitmentSet: VssPublicCoefficientCommitmentSet;
+    readonly recipientShareCommitmentSet: VssPublicRecipientShareCommitmentSet;
     readonly aggregateThresholdCommitmentSet: JsonRecord;
     readonly shareLinkageStatement: JsonRecord;
     readonly shareLinkageProofMaterialSet: JsonRecord;
     readonly thresholdShareCommitmentBinding: JsonRecord;
-    readonly coefficientCredentials: readonly CompactVssCoefficientCredential[];
+    readonly coefficientCredentials: readonly VssPublicCoefficientCredential[];
     readonly ringDegree: number;
 };
 
@@ -190,17 +190,17 @@ export type CompactVssMaterial = {
 // protocol builders with the kernel-backed compact commitment and proof
 // computers. The same-secret bridge is built separately because it also binds
 // the accepted same-secret proof.
-export function acceptedCompactVssMaterial(
+export function acceptedVssPublicMaterial(
     kernel: TranscriptCoreKernel,
     setupContext: CollectiveBgvSetupContext,
     parameters: BgvCollectiveSetupParametersDescription,
     publicMatrixSeedHash: string,
-): CompactVssMaterial {
+): VssPublicMaterial {
     const qSharePrimes = parameters.qShare.primes;
     const ringDegree = minimumSuccinctProofFixtureRingDegree;
     const participantCount = parameters.participantCount;
     const thresholdDegree = parameters.qDec;
-    const sourceTrusteeOpeningStates = compactVssSourceTrusteeOpeningStates(
+    const sourceTrusteeOpeningStates = vssPublicSourceTrusteeOpeningStates(
         qSharePrimes,
         ringDegree,
         participantCount,
@@ -208,7 +208,7 @@ export function acceptedCompactVssMaterial(
     );
 
     const coefficientCommitmentBundle =
-        createCompactVssCoefficientCommitmentSet({
+        createVssPublicCoefficientCommitmentSet({
             setupContext,
             publicMatrixSeedHash,
             participantCount,
@@ -221,16 +221,16 @@ export function acceptedCompactVssMaterial(
                 rnsLimbIndex,
                 shamirCoefficientIndex,
             }) =>
-                compactVssCoefficientRandomness(
+                vssPublicCoefficientRandomness(
                     trusteeRosterPosition,
                     rnsLimbIndex,
                     shamirCoefficientIndex,
                     ringDegree,
                 ),
-            computeCompactVssCommitment: compactVssCommitmentComputer,
+            computeVssPublicCommitment: vssPublicCommitmentComputer,
         });
     const recipientShareCommitmentBundle =
-        createCompactVssRecipientShareCommitmentSet({
+        createVssPublicRecipientShareCommitmentSet({
             setupContext,
             publicMatrixSeedHash,
             participantCount,
@@ -243,16 +243,16 @@ export function acceptedCompactVssMaterial(
                 recipientRosterPosition,
                 rnsLimbIndex,
             }) =>
-                compactVssRecipientShareRandomness(
+                vssPublicRecipientShareRandomness(
                     sourceTrusteeRosterPosition,
                     recipientRosterPosition,
                     rnsLimbIndex,
                     ringDegree,
                 ),
-            computeCompactVssCommitment: compactVssCommitmentComputer,
+            computeVssPublicCommitment: vssPublicCommitmentComputer,
         });
     const aggregateThresholdCommitmentSet =
-        createCompactVssAggregateThresholdCommitmentSet({
+        createVssPublicAggregateThresholdCommitmentSet({
             setupContext,
             publicMatrixSeedHash,
             participantCount,
@@ -261,7 +261,7 @@ export function acceptedCompactVssMaterial(
             recipientShareCredentials:
                 recipientShareCommitmentBundle.recipientShareCredentials,
         });
-    const shareLinkageStatement = createCompactVssShareLinkageStatement({
+    const shareLinkageStatement = createVssShareLinkageStatement({
         setupContext,
         publicMatrixSeedHash,
         targetBasisHash: parameters.canonicalTargetBasisHash,
@@ -272,7 +272,7 @@ export function acceptedCompactVssMaterial(
         aggregateThresholdCommitmentSet,
     });
     const shareLinkageProofMaterialSet =
-        createCompactVssShareLinkageProofMaterialSet({
+        createVssShareLinkageProofMaterialSet({
             statement: shareLinkageStatement,
             coefficientCommitmentSet:
                 coefficientCommitmentBundle.coefficientCommitmentSet,
@@ -288,7 +288,7 @@ export function acceptedCompactVssMaterial(
             }) => ({
                 seedHex: kernel.deriveCanonicalObjectHash({
                     value: {
-                        objectType: 'CompactVssShareLinkageProofRandomness',
+                        objectType: 'VssShareLinkageProofRandomness',
                         fixture: 'seed',
                         sourceTrusteeRosterPosition,
                         proofRecordIndex,
@@ -296,18 +296,18 @@ export function acceptedCompactVssMaterial(
                 }),
                 nonceHex: kernel.deriveCanonicalObjectHash({
                     value: {
-                        objectType: 'CompactVssShareLinkageProofRandomness',
+                        objectType: 'VssShareLinkageProofRandomness',
                         fixture: 'nonce',
                         sourceTrusteeRosterPosition,
                         proofRecordIndex,
                     },
                 }),
             }),
-            generateCompactVssShareLinkageProof:
-                compactVssShareLinkageProofComputer,
+            generateVssShareLinkageProof:
+                vssShareLinkageProofComputer,
         });
     const thresholdShareCommitmentBinding =
-        createCompactThresholdShareCommitmentBinding({
+        createThresholdShareCommitmentBinding({
             coefficientCommitmentSet:
                 coefficientCommitmentBundle.coefficientCommitmentSet,
             statement: shareLinkageStatement,
@@ -331,7 +331,7 @@ export function acceptedCompactVssMaterial(
     };
 }
 
-export type CompactSameSecretBridge = {
+export type SameSecretBridge = {
     readonly bridgeStatementSet: JsonRecord;
     readonly bridgeProofMaterialSet: JsonRecord;
 };
@@ -341,51 +341,51 @@ export type CompactSameSecretBridge = {
 // same-secret proof, and one succinct bridge proof shows both open to the same
 // centered ternary secret. The bridge secret must be the exact secret the
 // same-secret proof binds.
-export function acceptedCompactSameSecretBridge(
+export function acceptedSameSecretBridge(
     kernel: TranscriptCoreKernel,
     setupContext: CollectiveBgvSetupContext,
     parameters: BgvCollectiveSetupParametersDescription,
     publicMatrixSeedHash: string,
-    compactVssMaterial: CompactVssMaterial,
-    compactSameSecretConsistency: SameSecretConsistencyStatementSet,
-    compactSameSecretProofs: SameSecretProofSet,
-): CompactSameSecretBridge {
-    const bridgeStatementSet = createCompactVssSameSecretBridgeStatementSet({
+    vssPublicMaterial: VssPublicMaterial,
+    sameSecretConsistency: SameSecretConsistencyStatementSet,
+    sameSecretProofs: SameSecretProofSet,
+): SameSecretBridge {
+    const bridgeStatementSet = createVssSameSecretBridgeStatementSet({
         setupContext,
         publicMatrixSeedHash,
         targetBasisHash: parameters.canonicalTargetBasisHash,
-        coefficientCommitmentSet: compactVssMaterial.coefficientCommitmentSet,
-        sameSecretConsistency: compactSameSecretConsistency,
-        sameSecretProofs: compactSameSecretProofs,
+        coefficientCommitmentSet: vssPublicMaterial.coefficientCommitmentSet,
+        sameSecretConsistency: sameSecretConsistency,
+        sameSecretProofs: sameSecretProofs,
     });
     const bridgeProofMaterialSet =
-        createCompactVssSameSecretBridgeProofMaterialSet({
+        createVssSameSecretBridgeProofMaterialSet({
             statementSet: bridgeStatementSet,
-            coefficientCredentials: compactVssMaterial.coefficientCredentials,
+            coefficientCredentials: vssPublicMaterial.coefficientCredentials,
             bridgeSecret: ({ sourceTrusteeRosterPosition }) => ({
-                secretCoefficients: compactVssTrusteeSecretCoefficients(
+                secretCoefficients: vssPublicTrusteeSecretCoefficients(
                     sourceTrusteeRosterPosition,
-                    compactVssMaterial.ringDegree,
+                    vssPublicMaterial.ringDegree,
                 ),
             }),
             bridgeProofRandomness: ({ sourceTrusteeRosterPosition }) => ({
                 seedHex: kernel.deriveCanonicalObjectHash({
                     value: {
-                        objectType: 'CompactSameSecretBridgeProofRandomness',
+                        objectType: 'SameSecretBridgeProofRandomness',
                         fixture: 'seed',
                         sourceTrusteeRosterPosition,
                     },
                 }),
                 nonceHex: kernel.deriveCanonicalObjectHash({
                     value: {
-                        objectType: 'CompactSameSecretBridgeProofRandomness',
+                        objectType: 'SameSecretBridgeProofRandomness',
                         fixture: 'nonce',
                         sourceTrusteeRosterPosition,
                     },
                 }),
             }),
-            generateCompactSameSecretBridgeProof:
-                compactSameSecretBridgeProofComputer,
+            generateSameSecretBridgeProof:
+                sameSecretBridgeProofComputer,
         });
 
     return { bridgeStatementSet, bridgeProofMaterialSet };

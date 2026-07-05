@@ -1,6 +1,10 @@
 import { hash512Hex } from '@sealed-lattice/crypto';
 
-import { assertProtocolHash } from '../common-fields.js';
+import {
+    assertProtocolHash,
+    assertNonNegativeSafeInteger,
+    assertPositiveSafeInteger,
+} from '../common-fields.js';
 
 import {
     publicKeyShareCoefficientVectorHashDomain,
@@ -24,25 +28,7 @@ export const assertLowercaseHexBytes = (
     }
 };
 
-export const assertPositiveSafeInteger = (
-    value: number,
-    fieldName: string,
-): void => {
-    if (!Number.isSafeInteger(value) || value <= 0) {
-        throw new TypeError(`${fieldName} must be a positive safe integer.`);
-    }
-};
-
-export const assertNonNegativeSafeInteger = (
-    value: number,
-    fieldName: string,
-): void => {
-    if (!Number.isSafeInteger(value) || value < 0) {
-        throw new TypeError(
-            `${fieldName} must be a non-negative safe integer.`,
-        );
-    }
-};
+export { assertNonNegativeSafeInteger, assertPositiveSafeInteger };
 
 export const assertNonEmptyString = (
     value: string,
@@ -125,23 +111,6 @@ export const bytesToHex = (bytes: Uint8Array): string =>
 export const publicKeyShareMaterialBinaryMagic = new Uint8Array([
     0x53, 0x4c, 0x50, 0x4b, 0x53, 0x4d, 0x56, 0x31,
 ]);
-
-export const appendVaruint = (outputBytes: number[], value: number): void => {
-    if (!Number.isSafeInteger(value) || value < 0) {
-        throw new TypeError(
-            'binary varuint value must be a non-negative safe integer.',
-        );
-    }
-    let remainingValue = value;
-    do {
-        let byte = remainingValue & 0x7f;
-        remainingValue = Math.floor(remainingValue / 128);
-        if (remainingValue !== 0) {
-            byte |= 0x80;
-        }
-        outputBytes.push(byte);
-    } while (remainingValue !== 0);
-};
 
 export const coefficientVectorHash512 = (
     coefficients: readonly number[],

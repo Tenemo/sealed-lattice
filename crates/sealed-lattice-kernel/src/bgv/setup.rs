@@ -6,26 +6,21 @@ use unicode_normalization::UnicodeNormalization;
 mod accepted_setup;
 mod certificates;
 mod commitment;
-mod compact_same_secret_bridge;
-mod compact_vss_commitment;
 mod evaluation_key_share_material;
 mod input;
 mod key_material;
-// Test-only key-switch digit-atom machinery used by its unit tests and ignored
-// prover-cost benchmark.
-#[cfg(test)]
-mod limb_group_key_switch_atom;
 mod local_trustee_state;
 mod package_builder;
 mod participant_material;
 mod private_vss;
 mod private_vss_share_proof;
 mod public_evaluation_key_material;
+mod same_secret_bridge;
 mod sampling;
 mod setup_proof;
 mod sharing;
-mod threshold_share_commitments;
 mod trustee_evaluation_key_proof;
+mod vss_commitment;
 pub(crate) use trustee_evaluation_key_proof::generate_trustee_evaluation_key_proof_from_request;
 mod validation;
 mod vss;
@@ -43,22 +38,6 @@ pub(crate) use accepted_setup::{
     verify_collective_bgv_setup_package_from_request,
 };
 pub(crate) use commitment::compute_setup_commitment_from_opening_request;
-pub(crate) use compact_same_secret_bridge::{
-    verify_compact_vss_same_secret_bridge_proof_material_set_request,
-    verify_compact_vss_same_secret_bridge_statement_set_request,
-};
-#[cfg(test)]
-pub(crate) use compact_vss_commitment::compact_vss_canonical_message_digit_columns;
-pub(crate) use compact_vss_commitment::{
-    COMPACT_VSS_OUTPUT_COORDINATE_COUNT, COMPACT_VSS_RANDOMNESS_COLUMN_COUNT,
-    CompactVssCommitmentOpeningInput, compute_compact_vss_commitment_from_opening,
-    compute_compact_vss_commitment_from_opening_request,
-    validate_standalone_compact_vss_commitment_body,
-    verify_compact_vss_aggregate_threshold_commitment_set_request,
-    verify_compact_vss_coefficient_commitment_set_request,
-    verify_compact_vss_recipient_share_commitment_set_request,
-    verify_compact_vss_share_linkage_statement_request,
-};
 pub(crate) use local_trustee_state::verify_local_trustee_setup_state_from_request;
 pub(crate) use private_vss::{
     generate_private_vss_share_proof_from_request, verify_private_vss_share_envelope_from_request,
@@ -71,29 +50,37 @@ pub(crate) use public_evaluation_key_material::{
 use public_evaluation_key_material::{
     read_public_evaluation_key_rotation_requests, selected_public_evaluation_key_rotation_requests,
 };
-pub(crate) use setup_proof::SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES;
+pub(crate) use same_secret_bridge::{
+    verify_vss_same_secret_bridge_proof_material_set_request,
+    verify_vss_same_secret_bridge_statement_set_request,
+};
 pub(crate) use setup_proof::{
     absorb_setup_proof_material_transport_stream_chunk_request,
     begin_setup_proof_material_transport_stream_request,
     finish_setup_proof_material_transport_stream_request,
 };
-pub(crate) use threshold_share_commitments::{
-    absorb_threshold_share_commitment_transport_derivation_stream_chunk_request,
-    begin_threshold_share_commitment_transport_derivation_stream_request,
-    derive_threshold_share_commitments_from_request,
-    finish_threshold_share_commitment_transport_derivation_stream_request,
-};
 pub(crate) use trustee_evaluation_key_proof::TARGET_DECRYPTION_SHARE_PROOF_FAMILY;
-pub(crate) use trustee_evaluation_key_proof::verify_compact_vss_share_linkage_proof_material_set_from_request;
-pub(crate) use trustee_evaluation_key_proof::verify_target_decryption_share_proof_bytes_from_request;
 #[cfg(test)]
+pub(crate) use trustee_evaluation_key_proof::generate_target_decryption_share_proof_bytes_from_request;
+pub(crate) use trustee_evaluation_key_proof::verify_target_decryption_share_proof_bytes_from_request;
+pub(crate) use trustee_evaluation_key_proof::verify_vss_share_linkage_proof_material_set_from_request;
 pub(crate) use trustee_evaluation_key_proof::{
-    describe_target_decryption_share_proof_layout_from_request,
-    generate_target_decryption_share_proof_bytes_from_request,
+    generate_same_secret_bridge_proof_from_request, generate_vss_share_linkage_proof_from_request,
 };
-pub(crate) use trustee_evaluation_key_proof::{
-    generate_compact_same_secret_bridge_proof_from_request,
-    generate_compact_vss_share_linkage_proof_from_request,
+#[cfg(test)]
+pub(crate) use vss_commitment::vss_public_canonical_message_digit_columns;
+pub(crate) use vss_commitment::{
+    VSS_PUBLIC_OUTPUT_COORDINATE_COUNT, VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT,
+    compute_vss_public_commitment_from_opening_request,
+    validate_standalone_vss_public_commitment_body,
+    verify_vss_public_aggregate_threshold_commitment_set_request,
+    verify_vss_public_coefficient_commitment_set_request,
+    verify_vss_public_recipient_share_commitment_set_request,
+    verify_vss_share_linkage_statement_request,
+};
+#[cfg(any(feature = "target-decryption-development-commands", test))]
+pub(crate) use vss_commitment::{
+    VssPublicCommitmentOpeningInput, compute_vss_public_commitment_from_opening,
 };
 
 #[cfg(test)]

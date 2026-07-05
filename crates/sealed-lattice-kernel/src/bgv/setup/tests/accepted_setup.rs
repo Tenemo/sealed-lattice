@@ -1,5 +1,4 @@
 mod ceremony_phases;
-mod compact_terminal_evaluation_key_proofs;
 mod evaluation_key_share_proofs;
 mod material_transport_fixtures;
 mod package_fixtures;
@@ -7,6 +6,7 @@ mod proof_record_fixtures;
 mod public_key_share_proofs;
 mod record_rebinding;
 mod same_secret_proofs;
+mod terminal_evaluation_key_proofs;
 mod transport_policy;
 mod vss_material;
 

@@ -71,7 +71,7 @@ pub(super) fn target_decryption_share_all_active_limbs_proof_request_from_local_
             ));
         };
         let aggregate_opening = local_witness
-            .compact_opening
+            .opening
             .active_credential_bindings
             .get(target_rns_limb_index)
             .ok_or_else(|| {
@@ -165,7 +165,7 @@ pub(super) fn target_decryption_share_all_active_limbs_proof_statement_from_publ
         }
     }
     let statement_aggregate_bindings = array_at_path(
-        value_at_path(input.proof_statement, &["compactAggregateOpeningBinding"])?,
+        value_at_path(input.proof_statement, &["aggregateOpeningBinding"])?,
         &["activeCredentialBindings"],
     )?;
     if statement_aggregate_bindings.len() != active_limb_count {
@@ -176,10 +176,7 @@ pub(super) fn target_decryption_share_all_active_limbs_proof_statement_from_publ
     }
     let active_credential_binding_root = hash_at_path(
         input.proof_statement,
-        &[
-            "compactAggregateOpeningBinding",
-            "activeCredentialBindingRoot",
-        ],
+        &["aggregateOpeningBinding", "activeCredentialBindingRoot"],
     )?
     .to_string();
     let proof_statement_root =
@@ -195,7 +192,7 @@ pub(super) fn target_decryption_share_all_active_limbs_proof_statement_from_publ
     )?;
     let aggregate_message_coefficient_bound = (0..active_limb_count)
         .map(|target_rns_limb_index| {
-            compact_aggregate_message_coefficient_bound(
+            aggregate_message_coefficient_bound(
                 DATA_PRIMES[target_rns_limb_index],
                 input.setup_binding.participants.len(),
             )
@@ -324,7 +321,7 @@ fn target_statement_aggregate_binding<'a>(
     aggregate_opening_root: &str,
 ) -> CanonicalResult<&'a Value> {
     let bindings = array_at_path(
-        value_at_path(proof_statement, &["compactAggregateOpeningBinding"])?,
+        value_at_path(proof_statement, &["aggregateOpeningBinding"])?,
         &["activeCredentialBindings"],
     )?;
     let binding = bindings.get(target_rns_limb_index).ok_or_else(|| {

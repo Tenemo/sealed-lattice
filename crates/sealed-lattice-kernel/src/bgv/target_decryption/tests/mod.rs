@@ -101,7 +101,7 @@ fn target_decryption_evaluator_key() -> DevelopmentBgvKey {
 // setupParametersHash matches), a phaseTranscript whose setupIntent phase binds
 // the fixture roster, commonRandomness.publicMatrixSeedHash, and the injected
 // compact-VSS aggregate-threshold commitment set plus share-linkage statement
-// root. The compact commitments are built (see compact_aggregate_threshold_...)
+// root. The compact commitments are built (see aggregate_threshold_...)
 // from the SAME Shamir shares the local witness opens, so the C2 binding in
 // share_generation is exercised, not bypassed.
 fn accepted_setup_package() -> Value {
@@ -163,12 +163,12 @@ fn accepted_setup_package_base() -> Value {
 fn build_accepted_setup_package() -> Value {
     let mut accepted_setup_package = accepted_setup_package_base();
     let target_share_profile = target_share_profile(&accepted_setup_package);
-    let compact_aggregate_threshold_commitment_set =
-        compact_aggregate_threshold_commitment_set(&accepted_setup_package, &target_share_profile);
-    accepted_setup_package["compactVssAggregateThresholdCommitmentSet"] =
-        compact_aggregate_threshold_commitment_set;
-    accepted_setup_package["compactVssShareLinkageStatement"] = json!({
-        "objectType": "CompactVssShareLinkageStatement",
+    let aggregate_threshold_commitment_set =
+        aggregate_threshold_commitment_set(&accepted_setup_package, &target_share_profile);
+    accepted_setup_package["vssPublicAggregateThresholdCommitmentSet"] =
+        aggregate_threshold_commitment_set;
+    accepted_setup_package["vssShareLinkageStatement"] = json!({
+        "objectType": "VssShareLinkageStatement",
         "objectVersion": 1,
         "statementRoot": "4".repeat(128),
     });
@@ -329,7 +329,7 @@ fn target_fixture() -> (Value, Value, Value, Value) {
     )
 }
 
-fn compact_aggregate_threshold_commitment_set(
+fn aggregate_threshold_commitment_set(
     setup_package: &Value,
     target_share_profile: &Value,
 ) -> Value {
@@ -353,26 +353,23 @@ fn compact_aggregate_threshold_commitment_set(
         for (rns_limb_index, share_values) in share_by_limb.iter().enumerate() {
             let rns_prime = DATA_PRIMES[rns_limb_index];
             let aggregate_commitment_message_values =
-                compact_aggregate_opening_values(share_values, rns_prime);
+                aggregate_opening_values(share_values, rns_prime);
             let aggregate_randomness_by_column = vec![vec![0_i64; POLYNOMIAL_DEGREE]; 2];
-            let message_coefficient_bound = compact_aggregate_message_coefficient_bound(
+            let message_coefficient_bound =
+                aggregate_message_coefficient_bound(rns_prime, setup_binding.participants.len())
+                    .expect("compact aggregate message coefficient bound");
+            let computation = compute_aggregate_opening(AggregateOpeningRootsInput {
+                setup_binding: &setup_binding,
+                participant,
+                setup_epoch: TARGET_DECRYPTION_FIXTURE_COMPACT_SETUP_EPOCH,
+                public_matrix_seed_hash: &setup_binding.public_matrix_seed_hash,
+                rns_limb_index,
                 rns_prime,
-                setup_binding.participants.len(),
-            )
-            .expect("compact aggregate message coefficient bound");
-            let computation =
-                compute_compact_aggregate_opening(CompactAggregateOpeningRootsInput {
-                    setup_binding: &setup_binding,
-                    participant,
-                    setup_epoch: TARGET_DECRYPTION_FIXTURE_COMPACT_SETUP_EPOCH,
-                    public_matrix_seed_hash: &setup_binding.public_matrix_seed_hash,
-                    rns_limb_index,
-                    rns_prime,
-                    aggregate_commitment_message_values: &aggregate_commitment_message_values,
-                    message_coefficient_bound,
-                    aggregate_randomness_by_column: &aggregate_randomness_by_column,
-                })
-                .expect("compact aggregate opening computation");
+                aggregate_commitment_message_values: &aggregate_commitment_message_values,
+                message_coefficient_bound,
+                aggregate_randomness_by_column: &aggregate_randomness_by_column,
+            })
+            .expect("compact aggregate opening computation");
             let source_share_commitment_roots = (0..setup_binding.participants.len())
                 .map(|_| json!("9".repeat(128)))
                 .collect::<Vec<_>>();
@@ -380,7 +377,7 @@ fn compact_aggregate_threshold_commitment_set(
                 .map(|_| json!("8".repeat(128)))
                 .collect::<Vec<_>>();
             recipient_records.push(json!({
-                "objectType": "CompactVssAggregateThresholdCommitment",
+                "objectType": "VssPublicAggregateThresholdCommitment",
                 "objectVersion": 1,
                 "recipientIdentity": participant.trustee_identity.as_str(),
                 "recipientRosterPosition": participant.roster_position,
@@ -397,7 +394,7 @@ fn compact_aggregate_threshold_commitment_set(
     }
 
     let mut set = json!({
-        "objectType": "CompactVssAggregateThresholdCommitmentSet",
+        "objectType": "VssPublicAggregateThresholdCommitmentSet",
         "objectVersion": 1,
         "publicMatrixSeedHash": setup_binding.public_matrix_seed_hash.as_str(),
         "participantCount": setup_binding.participants.len(),
@@ -410,7 +407,7 @@ fn compact_aggregate_threshold_commitment_set(
     set
 }
 
-fn compact_aggregate_opening_values(share_values: &[u64], rns_prime: u64) -> Vec<u64> {
+fn aggregate_opening_values(share_values: &[u64], rns_prime: u64) -> Vec<u64> {
     let mut aggregate_commitment_message_values = share_values.to_vec();
     aggregate_commitment_message_values[0] += rns_prime;
     aggregate_commitment_message_values
@@ -535,10 +532,10 @@ fn rebind_target_accepted_record_hash(accepted_record: &mut Value) {
 
 fn rebind_active_credential_binding_root(statement: &mut Value) {
     let active_credential_bindings =
-        statement["compactAggregateOpeningBinding"]["activeCredentialBindings"].clone();
-    statement["compactAggregateOpeningBinding"]["activeCredentialBindingRoot"] = json!(
+        statement["aggregateOpeningBinding"]["activeCredentialBindings"].clone();
+    statement["aggregateOpeningBinding"]["activeCredentialBindingRoot"] = json!(
         derive_canonical_object_hash(&json!({
-            "objectType": "TargetDecryptionCompactAggregateOpeningCredentialBindingSet",
+            "objectType": "TargetDecryptionAggregateOpeningCredentialBindingSet",
             "objectVersion": 1,
             "activeCredentialBindings": active_credential_bindings,
         }))
@@ -647,30 +644,30 @@ fn local_target_share_witness(
     let public_matrix_seed_hash = setup_binding.public_matrix_seed_hash.clone();
     let share_linkage_statement_root = hash_at_path(
         setup_package,
-        &["compactVssShareLinkageStatement", "statementRoot"],
+        &["vssShareLinkageStatement", "statementRoot"],
     )
     .expect("compact share-linkage statement root");
     let aggregate_threshold_commitment_root = setup_package
-        .get("compactVssAggregateThresholdCommitmentSet")
+        .get("vssPublicAggregateThresholdCommitmentSet")
         .and_then(|aggregate_set| aggregate_set.get("aggregateThresholdCommitmentRoot"))
         .and_then(Value::as_str)
         .expect("compact aggregate threshold commitment set root")
         .to_string();
-    let compact_aggregate_opening_credentials = share_by_limb
+    let aggregate_opening_credentials = share_by_limb
         .iter()
         .enumerate()
         .map(|(rns_limb_index, share_values)| {
             let aggregate_randomness_by_column = vec![vec![0_i64; POLYNOMIAL_DEGREE]; 2];
             let rns_prime = DATA_PRIMES[rns_limb_index];
             let aggregate_commitment_message_values =
-                compact_aggregate_opening_values(share_values, rns_prime);
-            let message_coefficient_bound = compact_aggregate_message_coefficient_bound(
+                aggregate_opening_values(share_values, rns_prime);
+            let message_coefficient_bound = aggregate_message_coefficient_bound(
                 rns_prime,
                 setup_binding.participants.len(),
             )
             .expect("compact aggregate message coefficient bound");
             let (aggregate_commitment_root, aggregate_opening_root) =
-                compute_compact_aggregate_opening_roots(CompactAggregateOpeningRootsInput {
+                compute_aggregate_opening_roots(AggregateOpeningRootsInput {
                     setup_binding: &setup_binding,
                     participant,
                     setup_epoch,
@@ -683,7 +680,7 @@ fn local_target_share_witness(
                 })
                 .expect("compact aggregate opening roots");
             json!({
-                "objectType": "LocalTrusteeCompactVssAggregateOpeningCredential",
+                "objectType": "LocalTrusteeVssPublicAggregateOpeningCredential",
                 "objectVersion": 1,
                 "recipientIdentity": participant.trustee_identity.as_str(),
                 "recipientRosterPosition": participant.roster_position,
@@ -717,14 +714,14 @@ fn local_target_share_witness(
             &target_share_profile,
             participant,
         ).expect("target-decryption smudging witness"),
-        "compactAggregateOpening": {
-            "objectType": "LocalTrusteeCompactVssAggregateOpeningWitness",
+        "aggregateOpening": {
+            "objectType": "LocalTrusteeVssPublicAggregateOpeningWitness",
             "objectVersion": 1,
             "publicMatrixSeedHash": public_matrix_seed_hash,
             "targetBasisHash": canonical_target_basis_hash().expect("target basis hash"),
             "shareLinkageStatementRoot": share_linkage_statement_root,
             "aggregateThresholdCommitmentRoot": aggregate_threshold_commitment_root,
-            "compactAggregateOpeningCredentials": compact_aggregate_opening_credentials,
+            "aggregateOpeningCredentials": aggregate_opening_credentials,
         },
     })
 }
@@ -1206,7 +1203,7 @@ fn target_result_release_requires_proof_backed_quorum() {
 }
 
 #[test]
-fn target_share_proof_statement_binds_compact_local_witness_and_share() {
+fn target_share_proof_statement_binds_local_witness_and_share() {
     let (setup_package, accepted_record, target_ciphertext_binding, target_ciphertexts) =
         target_fixture();
     let target_share_profile = target_share_profile(&setup_package);
@@ -1250,29 +1247,29 @@ fn target_share_proof_statement_binds_compact_local_witness_and_share() {
     );
     assert_eq!(statement["shareRoot"], local_share["shareRoot"]);
     assert_eq!(
-        statement["compactAggregateOpeningBinding"]["publicMatrixSeedHash"],
+        statement["aggregateOpeningBinding"]["publicMatrixSeedHash"],
         setup_package["commonRandomness"]["publicMatrixSeedHash"]
     );
     assert_eq!(
-        statement["compactAggregateOpeningBinding"]["shareLinkageStatementRoot"],
-        setup_package["compactVssShareLinkageStatement"]["statementRoot"]
+        statement["aggregateOpeningBinding"]["shareLinkageStatementRoot"],
+        setup_package["vssShareLinkageStatement"]["statementRoot"]
     );
     assert_eq!(
-        statement["compactAggregateOpeningBinding"]["aggregateThresholdCommitmentRoot"],
-        setup_package["compactVssAggregateThresholdCommitmentSet"]["aggregateThresholdCommitmentRoot"]
+        statement["aggregateOpeningBinding"]["aggregateThresholdCommitmentRoot"],
+        setup_package["vssPublicAggregateThresholdCommitmentSet"]["aggregateThresholdCommitmentRoot"]
     );
     let expected_active_credential_binding_root = derive_canonical_object_hash(&json!({
-        "objectType": "TargetDecryptionCompactAggregateOpeningCredentialBindingSet",
+        "objectType": "TargetDecryptionAggregateOpeningCredentialBindingSet",
         "objectVersion": 1,
-        "activeCredentialBindings": statement["compactAggregateOpeningBinding"]["activeCredentialBindings"],
+        "activeCredentialBindings": statement["aggregateOpeningBinding"]["activeCredentialBindings"],
     }))
     .expect("active credential binding root");
     assert_eq!(
-        statement["compactAggregateOpeningBinding"]["activeCredentialBindingRoot"],
+        statement["aggregateOpeningBinding"]["activeCredentialBindingRoot"],
         json!(expected_active_credential_binding_root)
     );
     assert_eq!(
-        statement["compactAggregateOpeningBinding"]["activeCredentialBindings"]
+        statement["aggregateOpeningBinding"]["activeCredentialBindings"]
             .as_array()
             .expect("active credential bindings")
             .len(),
@@ -1429,16 +1426,18 @@ fn target_share_proof_statement_binding_rejects_rebound_wrong_aggregate_commitme
         trustee_identity: "trustee-1",
     })
     .expect("target share proof statement");
-    let first_coordinate = statement["compactAggregateOpeningBinding"]["activeCredentialBindings"]
-        [0]["aggregateCommitment"]["commitmentLimbs"][0]["coordinates"][0]
-        .as_u64()
-        .expect("first aggregate commitment coordinate");
-    let first_modulus = statement["compactAggregateOpeningBinding"]["activeCredentialBindings"][0]
-        ["aggregateCommitment"]["commitmentLimbs"][0]["modulus"]
-        .as_u64()
-        .expect("first aggregate commitment modulus");
-    statement["compactAggregateOpeningBinding"]["activeCredentialBindings"][0]["aggregateCommitment"]
-        ["commitmentLimbs"][0]["coordinates"][0] = json!((first_coordinate + 1) % first_modulus);
+    let first_coordinate =
+        statement["aggregateOpeningBinding"]["activeCredentialBindings"][0]["aggregateCommitment"]
+            ["commitmentLimbs"][0]["coordinates"][0]
+            .as_u64()
+            .expect("first aggregate commitment coordinate");
+    let first_modulus =
+        statement["aggregateOpeningBinding"]["activeCredentialBindings"][0]["aggregateCommitment"]
+            ["commitmentLimbs"][0]["modulus"]
+            .as_u64()
+            .expect("first aggregate commitment modulus");
+    statement["aggregateOpeningBinding"]["activeCredentialBindings"][0]["aggregateCommitment"]["commitmentLimbs"]
+        [0]["coordinates"][0] = json!((first_coordinate + 1) % first_modulus);
     rebind_active_credential_binding_root(&mut statement);
     rebind_share_proof_statement_root(&mut statement);
 

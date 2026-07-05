@@ -15,17 +15,17 @@ pub(in crate::bgv::setup) fn verify_full_ring_material(
                 "setupPackage.vssCoefficientCommitmentMaterial.ringDegree",
             )?));
         }
-    } else if let Some(compact_set) = setup_package.get("compactVssCoefficientCommitmentSet") {
+    } else if let Some(compact_set) = setup_package.get("vssPublicCoefficientCommitmentSet") {
         if compact_set.get("ringDegree").and_then(Value::as_u64) != Some(POLYNOMIAL_DEGREE as u64) {
             return Ok(Some(vss_material_outside_full_ring(
-                "compactVssCoefficientCommitmentSet must use the accepted full ring degree",
-                "setupPackage.compactVssCoefficientCommitmentSet.ringDegree",
+                "vssPublicCoefficientCommitmentSet must use the accepted full ring degree",
+                "setupPackage.vssPublicCoefficientCommitmentSet.ringDegree",
             )?));
         }
     } else {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "vssCoefficientCommitmentMaterial or compactVssCoefficientCommitmentSet was required before full-ring verification",
+            "vssCoefficientCommitmentMaterial or vssPublicCoefficientCommitmentSet was required before full-ring verification",
         ));
     }
     if let Some(proof_set) = setup_package.get("sameSecretProofs")

@@ -70,42 +70,42 @@ const assertCommonBindings = (input: SetupPackageInput): void => {
         'commonRandomness',
     );
     assertObjectType(
-        input.compactVssCoefficientCommitmentSet,
-        'compactVssCoefficientCommitmentSet',
-        'CompactVssCoefficientCommitmentSet',
+        input.vssPublicCoefficientCommitmentSet,
+        'vssPublicCoefficientCommitmentSet',
+        'VssPublicCoefficientCommitmentSet',
     );
     hashField(
-        input.compactVssCoefficientCommitmentSet,
+        input.vssPublicCoefficientCommitmentSet,
         'coefficientCommitmentRoot',
-        'compactVssCoefficientCommitmentSet',
+        'vssPublicCoefficientCommitmentSet',
     );
     assertObjectType(
-        input.compactVssRecipientShareCommitmentSet,
-        'compactVssRecipientShareCommitmentSet',
-        'CompactVssRecipientShareCommitmentSet',
+        input.vssPublicRecipientShareCommitmentSet,
+        'vssPublicRecipientShareCommitmentSet',
+        'VssPublicRecipientShareCommitmentSet',
     );
     assertObjectType(
-        input.compactVssAggregateThresholdCommitmentSet,
-        'compactVssAggregateThresholdCommitmentSet',
-        'CompactVssAggregateThresholdCommitmentSet',
+        input.vssPublicAggregateThresholdCommitmentSet,
+        'vssPublicAggregateThresholdCommitmentSet',
+        'VssPublicAggregateThresholdCommitmentSet',
     );
     assertObjectType(
-        input.compactVssShareLinkageStatement,
-        'compactVssShareLinkageStatement',
-        'CompactVssShareLinkageStatement',
+        input.vssShareLinkageStatement,
+        'vssShareLinkageStatement',
+        'VssShareLinkageStatement',
     );
     assertObjectRecord(
-        input.compactVssShareLinkageProofMaterialSet,
-        'compactVssShareLinkageProofMaterialSet',
+        input.vssShareLinkageProofMaterialSet,
+        'vssShareLinkageProofMaterialSet',
     );
     assertObjectType(
-        input.compactSameSecretBridgeStatementSet,
-        'compactSameSecretBridgeStatementSet',
-        'CompactVssSameSecretBridgeStatementSet',
+        input.sameSecretBridgeStatementSet,
+        'sameSecretBridgeStatementSet',
+        'VssSameSecretBridgeStatementSet',
     );
     assertObjectRecord(
-        input.compactSameSecretBridgeProofMaterialSet,
-        'compactSameSecretBridgeProofMaterialSet',
+        input.sameSecretBridgeProofMaterialSet,
+        'sameSecretBridgeProofMaterialSet',
     );
     assertObjectType(
         input.privateVssEnvelopeCommitments,
@@ -347,7 +347,7 @@ export const resolveThresholdShareCommitments = (
     assertObjectType(
         thresholdShareCommitments,
         'thresholdShareCommitments',
-        'CompactThresholdShareCommitmentBinding',
+        'ThresholdShareCommitmentBinding',
     );
     hashField(
         thresholdShareCommitments,
@@ -410,7 +410,7 @@ export const validateInput = (
     assertObjectType(
         thresholdShareCommitments,
         'thresholdShareCommitments',
-        'CompactThresholdShareCommitmentBinding',
+        'ThresholdShareCommitmentBinding',
     );
     hashField(
         thresholdShareCommitments,

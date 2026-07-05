@@ -61,8 +61,10 @@ use crate::{
 
 const DIRECT_BALLOT_OPERATION: &str = "runDirectEncryptedBallot";
 const DIRECT_BALLOT_OPTION_COUNT: usize = 20;
-const DIRECT_BALLOT_MINIMUM_SCORE: u64 = 1;
-const DIRECT_BALLOT_MAXIMUM_SCORE: u64 = 10;
+// pub(crate): the setup-parameter identity binds the bounded-domain evaluator
+// profile (score span times roster size) from these score-domain constants.
+pub(crate) const DIRECT_BALLOT_MINIMUM_SCORE: u64 = 1;
+pub(crate) const DIRECT_BALLOT_MAXIMUM_SCORE: u64 = 10;
 const DIRECT_BALLOT_SCORE_BUCKET_COUNT: usize =
     (DIRECT_BALLOT_MAXIMUM_SCORE - DIRECT_BALLOT_MINIMUM_SCORE + 1) as usize;
 const DIRECT_BALLOT_MAXIMUM_PROTOTYPE_BALLOTS: usize = 20;

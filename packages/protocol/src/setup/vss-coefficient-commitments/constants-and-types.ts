@@ -183,68 +183,8 @@ export type VssCoefficientCommitmentMaterialSet = Readonly<
     }
 >;
 
-export type SetupTransportChunk = Readonly<
-    JsonRecord & {
-        readonly chunkIndex: number;
-        readonly bytesHex: string;
-    }
->;
-
-export type SetupTransportedVssCoefficientCommitmentMaterial = Readonly<
-    JsonRecord & {
-        readonly objectType: 'SetupTransportedVssCoefficientCommitmentMaterial';
-        readonly objectVersion: 1;
-        readonly binaryFormat: typeof vssCoefficientCommitmentMaterialBinaryFormat;
-        readonly chunkSizeBytes: typeof setupTransportChunkSizeBytes;
-        readonly chunkCount: number;
-        readonly totalByteLength: number;
-        readonly fullObjectHash: ProtocolHash;
-        readonly chunkHashes: readonly ProtocolHash[];
-        readonly chunkRoot: ProtocolHash;
-        readonly chunks: readonly SetupTransportChunk[];
-    }
->;
-
-export type SetupTransportedVssCoefficientCommitmentMaterialReference =
-    Readonly<
-        JsonRecord & {
-            readonly objectType: 'SetupTransportedVssCoefficientCommitmentMaterial';
-            readonly objectVersion: 1;
-            readonly binaryFormat: typeof vssCoefficientCommitmentMaterialBinaryFormat;
-            readonly chunkSizeBytes: typeof setupTransportChunkSizeBytes;
-            readonly chunkCount: number;
-            readonly totalByteLength: number;
-            readonly fullObjectHash: ProtocolHash;
-            readonly chunkHashes: readonly ProtocolHash[];
-            readonly chunkRoot: ProtocolHash;
-        }
-    >;
-
-export type SetupTransportedVssCoefficientCommitmentMaterialLike =
-    | SetupTransportedVssCoefficientCommitmentMaterial
-    | SetupTransportedVssCoefficientCommitmentMaterialReference;
-
 export type SetupPackageVssCoefficientCommitmentMaterialSet =
     VssCoefficientCommitmentMaterialSet;
-
-export type VerifiedVssCoefficientCommitmentMaterial = Readonly<
-    JsonRecord & {
-        readonly objectType: 'VerifiedVssCoefficientCommitmentMaterial';
-        readonly objectVersion: 1;
-        readonly verificationId: string;
-        readonly materialBinaryFormat: typeof vssCoefficientCommitmentMaterialBinaryFormat;
-        readonly publicMatrixSeedHash: ProtocolHash;
-        readonly vssCoefficientCommitmentRoot: ProtocolHash;
-        readonly vssCoefficientCommitmentMaterialRoot: ProtocolHash;
-        readonly thresholdShareCommitmentRoot: ProtocolHash;
-        readonly transportSchemeId: typeof setupTransportSchemeId;
-        readonly transportChunkSizeBytes: typeof setupTransportChunkSizeBytes;
-        readonly transportChunkCount: number;
-        readonly transportTotalByteLength: number;
-        readonly transportFullObjectHash: ProtocolHash;
-        readonly transportChunkRoot: ProtocolHash;
-    }
->;
 
 export type VssSourceTrusteeOpeningMaterial = Readonly<{
     readonly sourceTrusteeIdentity: string;

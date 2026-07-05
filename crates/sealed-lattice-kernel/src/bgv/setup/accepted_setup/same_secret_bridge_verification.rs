@@ -1,29 +1,28 @@
 use super::*;
 use crate::bgv::setup::trustee_evaluation_key_proof::{
-    CompactSameSecretBridgeStatement, CompactVssCommandCommitmentExpectation,
-    compact_vss_share_linkage_commitment_from_value,
+    SameSecretBridgeStatement, VssPublicCommandCommitmentExpectation,
+    vss_share_linkage_commitment_from_value,
 };
 
-const COMPACT_SAME_SECRET_BRIDGE_STATEMENT_SET_FIELD: &str = "compactSameSecretBridgeStatementSet";
-const COMPACT_SAME_SECRET_BRIDGE_PROOF_MATERIAL_SET_FIELD: &str =
-    "compactSameSecretBridgeProofMaterialSet";
+const SAME_SECRET_BRIDGE_STATEMENT_SET_FIELD: &str = "sameSecretBridgeStatementSet";
+const SAME_SECRET_BRIDGE_PROOF_MATERIAL_SET_FIELD: &str = "sameSecretBridgeProofMaterialSet";
 
-pub(super) enum CompactSameSecretBridgeVerification {
+pub(super) enum SameSecretBridgeVerification {
     Absent,
-    Verified(VerifiedCompactSameSecretBridgeMaterial),
+    Verified(VerifiedSameSecretBridgeMaterial),
     Refused(Value),
 }
 
 #[derive(Clone)]
-pub(in crate::bgv::setup) struct VerifiedCompactSameSecretBridgeMaterial {
-    statements_by_roster_position: BTreeMap<u64, CompactSameSecretBridgeStatementBinding>,
+pub(in crate::bgv::setup) struct VerifiedSameSecretBridgeMaterial {
+    statements_by_roster_position: BTreeMap<u64, SameSecretBridgeStatementBinding>,
 }
 
-impl VerifiedCompactSameSecretBridgeMaterial {
+impl VerifiedSameSecretBridgeMaterial {
     pub(in crate::bgv::setup) fn statement_for_roster_position(
         &self,
         trustee_roster_position: u64,
-    ) -> CanonicalResult<&CompactSameSecretBridgeStatementBinding> {
+    ) -> CanonicalResult<&SameSecretBridgeStatementBinding> {
         self.statements_by_roster_position
             .get(&trustee_roster_position)
             .ok_or_else(|| {
@@ -36,34 +35,34 @@ impl VerifiedCompactSameSecretBridgeMaterial {
 }
 
 #[derive(Clone)]
-pub(in crate::bgv::setup) struct CompactSameSecretBridgeStatementBinding {
+pub(in crate::bgv::setup) struct SameSecretBridgeStatementBinding {
     pub(in crate::bgv::setup) trustee_identity: String,
     pub(in crate::bgv::setup) trustee_secret_commitment_root: String,
     pub(in crate::bgv::setup) same_secret_statement_root: String,
     pub(in crate::bgv::setup) same_secret_proof_root: String,
     pub(in crate::bgv::setup) same_secret_proof_family_binding_root: String,
-    pub(in crate::bgv::setup) statement: CompactSameSecretBridgeStatement,
+    pub(in crate::bgv::setup) statement: SameSecretBridgeStatement,
 }
 
-pub(super) fn verify_optional_compact_same_secret_bridge_statement_set(
+pub(super) fn verify_optional_same_secret_bridge_statement_set(
     setup_package: &Value,
     request: &Value,
-) -> CanonicalResult<CompactSameSecretBridgeVerification> {
-    let compact_bridge_material_fields = [
-        COMPACT_SAME_SECRET_BRIDGE_STATEMENT_SET_FIELD,
-        COMPACT_SAME_SECRET_BRIDGE_PROOF_MATERIAL_SET_FIELD,
+) -> CanonicalResult<SameSecretBridgeVerification> {
+    let bridge_material_fields = [
+        SAME_SECRET_BRIDGE_STATEMENT_SET_FIELD,
+        SAME_SECRET_BRIDGE_PROOF_MATERIAL_SET_FIELD,
     ];
-    let present_compact_bridge_field_count = compact_bridge_material_fields
+    let present_bridge_field_count = bridge_material_fields
         .iter()
         .filter(|field_name| setup_package.get(**field_name).is_some())
         .count();
-    if present_compact_bridge_field_count == 0 {
-        return Ok(CompactSameSecretBridgeVerification::Absent);
+    if present_bridge_field_count == 0 {
+        return Ok(SameSecretBridgeVerification::Absent);
     }
 
     let required_bridge_material_fields = [
-        COMPACT_SAME_SECRET_BRIDGE_STATEMENT_SET_FIELD,
-        COMPACT_SAME_SECRET_BRIDGE_PROOF_MATERIAL_SET_FIELD,
+        SAME_SECRET_BRIDGE_STATEMENT_SET_FIELD,
+        SAME_SECRET_BRIDGE_PROOF_MATERIAL_SET_FIELD,
         "sameSecretConsistency",
         "sameSecretProofs",
     ];
@@ -80,9 +79,9 @@ pub(super) fn verify_optional_compact_same_secret_bridge_statement_set(
             .collect::<Vec<_>>()
             .join(", ");
 
-        return Ok(CompactSameSecretBridgeVerification::Refused(
-            compact_same_secret_bridge_refusal(
-                "compactSameSecretBridgeEvidenceIncomplete",
+        return Ok(SameSecretBridgeVerification::Refused(
+            same_secret_bridge_refusal(
+                "sameSecretBridgeEvidenceIncomplete",
                 format!(
                     "compact same-secret bridge material requires the statement set, proof material set, same-secret statements, and same-secret proofs; missing {missing_fields}"
                 ),
@@ -91,13 +90,11 @@ pub(super) fn verify_optional_compact_same_secret_bridge_statement_set(
         ));
     }
 
-    match verified_compact_same_secret_bridge_material_from_package(setup_package, request) {
-        Ok(verified_material) => Ok(CompactSameSecretBridgeVerification::Verified(
-            verified_material,
-        )),
-        Err(error) => Ok(CompactSameSecretBridgeVerification::Refused(
-            compact_same_secret_bridge_refusal(
-                "compactSameSecretBridgeMalformed",
+    match verified_same_secret_bridge_material_from_package(setup_package, request) {
+        Ok(verified_material) => Ok(SameSecretBridgeVerification::Verified(verified_material)),
+        Err(error) => Ok(SameSecretBridgeVerification::Refused(
+            same_secret_bridge_refusal(
+                "sameSecretBridgeMalformed",
                 format!(
                     "compact same-secret bridge material is malformed: {}",
                     error.message
@@ -108,7 +105,7 @@ pub(super) fn verify_optional_compact_same_secret_bridge_statement_set(
     }
 }
 
-fn verify_compact_same_secret_bridge_setup_binding(
+fn verify_same_secret_bridge_setup_binding(
     setup_package: &Value,
     statement_set: &Value,
     statement_verification: &Value,
@@ -116,15 +113,15 @@ fn verify_compact_same_secret_bridge_setup_binding(
     same_secret_proofs: &Value,
 ) -> CanonicalResult<()> {
     let setup_context = setup_package.get("setupContext").ok_or_else(|| {
-        compact_same_secret_bridge_error("compact same-secret bridge requires setup context")
+        same_secret_bridge_error("compact same-secret bridge requires setup context")
     })?;
     let common_randomness = setup_package.get("commonRandomness").ok_or_else(|| {
-        compact_same_secret_bridge_error("compact same-secret bridge requires common randomness")
+        same_secret_bridge_error("compact same-secret bridge requires common randomness")
     })?;
     let coefficient_commitment_set = setup_package
-        .get("compactVssCoefficientCommitmentSet")
+        .get("vssPublicCoefficientCommitmentSet")
         .ok_or_else(|| {
-            compact_same_secret_bridge_error(
+            same_secret_bridge_error(
                 "compact same-secret bridge requires compact coefficient commitment set",
             )
         })?;
@@ -150,12 +147,9 @@ fn verify_compact_same_secret_bridge_setup_binding(
         "compact same-secret bridge statement set publicMatrixSeedHash",
     )?;
     compare_required_string(
-        hash_at_path(
-            statement_verification,
-            &["compactCoefficientCommitmentRoot"],
-        )?,
+        hash_at_path(statement_verification, &["coefficientCommitmentRoot"])?,
         hash_at_path(coefficient_commitment_set, &["coefficientCommitmentRoot"])?,
-        "compact same-secret bridge statement set compactCoefficientCommitmentRoot",
+        "compact same-secret bridge statement set coefficientCommitmentRoot",
     )?;
     compare_required_string(
         hash_at_path(statement_verification, &["sameSecretConsistencyRoot"])?,
@@ -171,24 +165,22 @@ fn verify_compact_same_secret_bridge_setup_binding(
     Ok(())
 }
 
-pub(in crate::bgv::setup) fn verified_compact_same_secret_bridge_material_from_package(
+pub(in crate::bgv::setup) fn verified_same_secret_bridge_material_from_package(
     setup_package: &Value,
     request: &Value,
-) -> CanonicalResult<VerifiedCompactSameSecretBridgeMaterial> {
+) -> CanonicalResult<VerifiedSameSecretBridgeMaterial> {
     let statement_set = setup_package
-        .get(COMPACT_SAME_SECRET_BRIDGE_STATEMENT_SET_FIELD)
-        .ok_or_else(|| {
-            compact_same_secret_bridge_error("compact same-secret bridge statement set")
-        })?;
+        .get(SAME_SECRET_BRIDGE_STATEMENT_SET_FIELD)
+        .ok_or_else(|| same_secret_bridge_error("compact same-secret bridge statement set"))?;
     let same_secret_consistency = setup_package
         .get("sameSecretConsistency")
-        .ok_or_else(|| compact_same_secret_bridge_error("same-secret consistency"))?;
+        .ok_or_else(|| same_secret_bridge_error("same-secret consistency"))?;
     let same_secret_proofs = setup_package
         .get("sameSecretProofs")
-        .ok_or_else(|| compact_same_secret_bridge_error("same-secret proofs"))?;
+        .ok_or_else(|| same_secret_bridge_error("same-secret proofs"))?;
     let statement_verification =
-        crate::bgv::setup::verify_compact_vss_same_secret_bridge_statement_set_request(
-            &compact_same_secret_bridge_verification_request(
+        crate::bgv::setup::verify_vss_same_secret_bridge_statement_set_request(
+            &same_secret_bridge_verification_request(
                 statement_set,
                 same_secret_consistency,
                 same_secret_proofs,
@@ -196,7 +188,7 @@ pub(in crate::bgv::setup) fn verified_compact_same_secret_bridge_material_from_p
                 request,
             ),
         )?;
-    verify_compact_same_secret_bridge_setup_binding(
+    verify_same_secret_bridge_setup_binding(
         setup_package,
         statement_set,
         &statement_verification,
@@ -204,12 +196,10 @@ pub(in crate::bgv::setup) fn verified_compact_same_secret_bridge_material_from_p
         same_secret_proofs,
     )?;
     let proof_material_set = setup_package
-        .get(COMPACT_SAME_SECRET_BRIDGE_PROOF_MATERIAL_SET_FIELD)
-        .ok_or_else(|| {
-            compact_same_secret_bridge_error("compact same-secret bridge proof material set")
-        })?;
-    crate::bgv::setup::verify_compact_vss_same_secret_bridge_proof_material_set_request(
-        &compact_same_secret_bridge_verification_request(
+        .get(SAME_SECRET_BRIDGE_PROOF_MATERIAL_SET_FIELD)
+        .ok_or_else(|| same_secret_bridge_error("compact same-secret bridge proof material set"))?;
+    crate::bgv::setup::verify_vss_same_secret_bridge_proof_material_set_request(
+        &same_secret_bridge_verification_request(
             statement_set,
             same_secret_consistency,
             same_secret_proofs,
@@ -290,11 +280,11 @@ pub(in crate::bgv::setup) fn verified_compact_same_secret_bridge_material_from_p
                     "compact same-secret bridge target commitment body is missing",
                 )
             })?;
-            let commitment = compact_vss_share_linkage_commitment_from_value(
+            let commitment = vss_share_linkage_commitment_from_value(
                 commitment_value,
-                CompactVssCommandCommitmentExpectation {
+                VssPublicCommandCommitmentExpectation {
                     field_name: format!(
-                        "compactSameSecretBridgeStatementSet.statementRecords.{trustee_roster_position}.targetConstantCoefficientCommitments.{target_rns_limb_index}"
+                        "sameSecretBridgeStatementSet.statementRecords.{trustee_roster_position}.targetConstantCoefficientCommitments.{target_rns_limb_index}"
                     ),
                     root: target_commitment_root,
                     role: "coefficient",
@@ -310,7 +300,7 @@ pub(in crate::bgv::setup) fn verified_compact_same_secret_bridge_material_from_p
         }
 
         let trustee_identity = value_string(statement_record, "trusteeIdentity")?.to_string();
-        let binding = CompactSameSecretBridgeStatementBinding {
+        let binding = SameSecretBridgeStatementBinding {
             trustee_identity: trustee_identity.clone(),
             trustee_secret_commitment_root: value_string(
                 statement_record,
@@ -326,7 +316,7 @@ pub(in crate::bgv::setup) fn verified_compact_same_secret_bridge_material_from_p
                 "sameSecretProofFamilyBindingRoot",
             )?
             .to_string(),
-            statement: CompactSameSecretBridgeStatement {
+            statement: SameSecretBridgeStatement {
                 public_matrix_seed_hash: public_matrix_seed_hash.to_string(),
                 source_trustee_identity: trustee_identity,
                 source_trustee_roster_position: trustee_roster_position,
@@ -347,12 +337,12 @@ pub(in crate::bgv::setup) fn verified_compact_same_secret_bridge_material_from_p
         }
     }
 
-    Ok(VerifiedCompactSameSecretBridgeMaterial {
+    Ok(VerifiedSameSecretBridgeMaterial {
         statements_by_roster_position,
     })
 }
 
-fn compact_same_secret_bridge_verification_request(
+fn same_secret_bridge_verification_request(
     statement_set: &Value,
     same_secret_consistency: &Value,
     same_secret_proofs: &Value,
@@ -372,7 +362,7 @@ fn compact_same_secret_bridge_verification_request(
     }
     for field_name in [
         "transportedSameSecretProofMaterial",
-        "transportedCompactSameSecretBridgeProofMaterial",
+        "transportedSameSecretBridgeProofMaterial",
         "verifiedSetupProofMaterials",
     ] {
         if let Some(value) = request.get(field_name) {
@@ -383,11 +373,11 @@ fn compact_same_secret_bridge_verification_request(
     Value::Object(verification_request)
 }
 
-fn compact_same_secret_bridge_error(message: &'static str) -> CanonicalError {
+fn same_secret_bridge_error(message: &'static str) -> CanonicalError {
     CanonicalError::new(CanonicalErrorCode::InvalidFixture, message)
 }
 
-fn compact_same_secret_bridge_refusal(
+fn same_secret_bridge_refusal(
     reason_code: &'static str,
     message: impl Into<String>,
     object_path: impl Into<String>,
@@ -405,20 +395,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn optional_compact_same_secret_bridge_is_absent_by_default() -> CanonicalResult<()> {
-        let response =
-            verify_optional_compact_same_secret_bridge_statement_set(&json!({}), &json!({}))?;
+    fn optional_same_secret_bridge_is_absent_by_default() -> CanonicalResult<()> {
+        let response = verify_optional_same_secret_bridge_statement_set(&json!({}), &json!({}))?;
 
-        assert!(matches!(
-            response,
-            CompactSameSecretBridgeVerification::Absent
-        ));
+        assert!(matches!(response, SameSecretBridgeVerification::Absent));
         Ok(())
     }
 
     #[test]
-    fn ordinary_same_secret_fields_do_not_enable_compact_bridge() -> CanonicalResult<()> {
-        let response = verify_optional_compact_same_secret_bridge_statement_set(
+    fn ordinary_same_secret_fields_do_not_enable_bridge() -> CanonicalResult<()> {
+        let response = verify_optional_same_secret_bridge_statement_set(
             &json!({
                 "sameSecretConsistency": {},
                 "sameSecretProofs": {},
@@ -426,19 +412,16 @@ mod tests {
             &json!({}),
         )?;
 
-        assert!(matches!(
-            response,
-            CompactSameSecretBridgeVerification::Absent
-        ));
+        assert!(matches!(response, SameSecretBridgeVerification::Absent));
         Ok(())
     }
 
     #[test]
-    fn optional_compact_same_secret_bridge_refuses_proof_material_without_statement_set()
+    fn optional_same_secret_bridge_refuses_proof_material_without_statement_set()
     -> CanonicalResult<()> {
-        let response = verify_optional_compact_same_secret_bridge_statement_set(
+        let response = verify_optional_same_secret_bridge_statement_set(
             &json!({
-                "compactSameSecretBridgeProofMaterialSet": {},
+                "sameSecretBridgeProofMaterialSet": {},
             }),
             &json!({}),
         )?
@@ -447,17 +430,17 @@ mod tests {
         assert_eq!(response["isValid"], json!(false));
         assert_eq!(
             response["refusedObjects"][0]["reasonCode"],
-            json!("compactSameSecretBridgeEvidenceIncomplete")
+            json!("sameSecretBridgeEvidenceIncomplete")
         );
         Ok(())
     }
 
     #[test]
-    fn optional_compact_same_secret_bridge_refuses_statement_set_without_proof_material()
+    fn optional_same_secret_bridge_refuses_statement_set_without_proof_material()
     -> CanonicalResult<()> {
-        let response = verify_optional_compact_same_secret_bridge_statement_set(
+        let response = verify_optional_same_secret_bridge_statement_set(
             &json!({
-                "compactSameSecretBridgeStatementSet": {},
+                "sameSecretBridgeStatementSet": {},
             }),
             &json!({}),
         )?
@@ -466,18 +449,17 @@ mod tests {
         assert_eq!(response["isValid"], json!(false));
         assert_eq!(
             response["refusedObjects"][0]["reasonCode"],
-            json!("compactSameSecretBridgeEvidenceIncomplete")
+            json!("sameSecretBridgeEvidenceIncomplete")
         );
         Ok(())
     }
 
     #[test]
-    fn optional_compact_same_secret_bridge_rejects_malformed_complete_field_group()
-    -> CanonicalResult<()> {
-        let response = verify_optional_compact_same_secret_bridge_statement_set(
+    fn optional_same_secret_bridge_rejects_malformed_complete_field_group() -> CanonicalResult<()> {
+        let response = verify_optional_same_secret_bridge_statement_set(
             &json!({
-                "compactSameSecretBridgeStatementSet": {},
-                "compactSameSecretBridgeProofMaterialSet": {},
+                "sameSecretBridgeStatementSet": {},
+                "sameSecretBridgeProofMaterialSet": {},
                 "sameSecretConsistency": {},
                 "sameSecretProofs": {},
             }),
@@ -489,23 +471,23 @@ mod tests {
         assert_eq!(response["isValid"], json!(false));
         assert_eq!(
             response["refusedObjects"][0]["reasonCode"],
-            json!("compactSameSecretBridgeMalformed")
+            json!("sameSecretBridgeMalformed")
         );
         Ok(())
     }
 
-    trait CompactSameSecretBridgeVerificationTestExt {
+    trait SameSecretBridgeVerificationTestExt {
         fn refusal_for_test(self, message: &str) -> Value;
     }
 
-    impl CompactSameSecretBridgeVerificationTestExt for CompactSameSecretBridgeVerification {
+    impl SameSecretBridgeVerificationTestExt for SameSecretBridgeVerification {
         fn refusal_for_test(self, message: &str) -> Value {
             match self {
-                CompactSameSecretBridgeVerification::Refused(response) => response,
-                CompactSameSecretBridgeVerification::Absent => {
+                SameSecretBridgeVerification::Refused(response) => response,
+                SameSecretBridgeVerification::Absent => {
                     panic!("{message}: compact bridge evidence was absent")
                 }
-                CompactSameSecretBridgeVerification::Verified(_) => {
+                SameSecretBridgeVerification::Verified(_) => {
                     panic!("{message}: compact bridge evidence verified")
                 }
             }

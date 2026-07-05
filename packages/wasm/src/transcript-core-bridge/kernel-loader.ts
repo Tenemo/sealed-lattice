@@ -23,19 +23,13 @@ import type {
     BgvPrivateVssShareProofGeneration,
     BgvOperationRejection,
     BgvRnsParametersDescription,
-    BgvCompactSameSecretBridgeProofGeneration,
-    BgvCompactVssCommitmentOpeningComputation,
-    BgvCompactVssShareLinkageProofGeneration,
+    BgvSameSecretBridgeProofGeneration,
+    BgvVssPublicCommitmentOpeningComputation,
+    BgvVssShareLinkageProofGeneration,
     BgvSetupCommitmentOpeningComputation,
     BgvSetupProofMaterialTransportStreamBegin,
     BgvSetupProofMaterialTransportStreamChunkAbsorption,
     BgvSetupProofMaterialTransportStreamVerification,
-    BgvTargetDecryptionResult,
-    BgvTargetDecryptionShare,
-    BgvThresholdShareCommitmentDerivation,
-    BgvThresholdShareCommitmentTransportStreamBegin,
-    BgvThresholdShareCommitmentTransportStreamChunkAbsorption,
-    BgvThresholdShareCommitmentTransportStreamDerivation,
     TranscriptCoreKernel,
     TranscriptCoreKernelCommand,
     TranscriptCoreKernelExports,
@@ -307,31 +301,6 @@ export const createTranscriptCoreKernelLoader = (
                         workingLevel: input.workingLevel,
                         rotationKeys: input.rotationKeys,
                     }),
-                generateBgvTargetDecryptionShare: (
-                    input,
-                ): BgvTargetDecryptionShare =>
-                    executeCommand<BgvTargetDecryptionShare>({
-                        command: 'GenerateBgvTargetDecryptionShare',
-                        setupPackage: input.setupPackage,
-                        setupPrivateWitness: input.setupPrivateWitness,
-                        targetAcceptedRecord: input.targetAcceptedRecord,
-                        targetCiphertextBinding: input.targetCiphertextBinding,
-                        targetCiphertexts: input.targetCiphertexts,
-                        targetShareParameters: input.targetShareParameters,
-                        trusteeIdentity: input.trusteeIdentity,
-                    }),
-                recombineBgvTargetDecryptionShares: (
-                    input,
-                ): BgvTargetDecryptionResult =>
-                    executeCommand<BgvTargetDecryptionResult>({
-                        command: 'RecombineBgvTargetDecryptionShares',
-                        setupPackage: input.setupPackage,
-                        targetAcceptedRecord: input.targetAcceptedRecord,
-                        targetCiphertextBinding: input.targetCiphertextBinding,
-                        targetCiphertexts: input.targetCiphertexts,
-                        targetShareParameters: input.targetShareParameters,
-                        decryptionShares: input.decryptionShares,
-                    }),
                 verifyBgvPassiveSetup: (input): BgvPassiveSetupVerification =>
                     executeCommand<BgvPassiveSetupVerification>({
                         command: 'VerifyBgvPassiveSetup',
@@ -357,10 +326,6 @@ export const createTranscriptCoreKernelLoader = (
                                 input.expectedSetupPackageHash,
                             expectedManifestHash: input.expectedManifestHash,
                             expectedRosterHash: input.expectedRosterHash,
-                            transportedVssCoefficientCommitmentMaterial:
-                                input.transportedVssCoefficientCommitmentMaterial,
-                            verifiedVssCoefficientCommitmentMaterial:
-                                input.verifiedVssCoefficientCommitmentMaterial,
                             transportedSameSecretProofMaterial:
                                 input.transportedSameSecretProofMaterial,
                             transportedPublicKeyShareMaterial:
@@ -453,11 +418,11 @@ export const createTranscriptCoreKernelLoader = (
                         randomnessByColumn: input.randomnessByColumn,
                         ringDegree: input.ringDegree,
                     }),
-                computeCompactVssCommitmentFromOpening: (
+                computeVssPublicCommitmentFromOpening: (
                     input,
-                ): BgvCompactVssCommitmentOpeningComputation =>
-                    executeCommand<BgvCompactVssCommitmentOpeningComputation>({
-                        command: 'ComputeCompactVssCommitmentFromOpening',
+                ): BgvVssPublicCommitmentOpeningComputation =>
+                    executeCommand<BgvVssPublicCommitmentOpeningComputation>({
+                        command: 'ComputeVssPublicCommitmentFromOpening',
                         commitmentRole: input.commitmentRole,
                         commitmentContext: input.commitmentContext,
                         publicMatrixSeedHash: input.publicMatrixSeedHash,
@@ -474,14 +439,14 @@ export const createTranscriptCoreKernelLoader = (
                         messageDigitColumns: input.messageDigitColumns,
                         randomnessByColumn: input.randomnessByColumn,
                     }),
-                generateCompactVssShareLinkageProof: (
+                generateVssShareLinkageProof: (
                     input,
-                ): BgvCompactVssShareLinkageProofGeneration =>
-                    executeCommand<BgvCompactVssShareLinkageProofGeneration>({
-                        command: 'GenerateCompactVssShareLinkageProof',
+                ): BgvVssShareLinkageProofGeneration =>
+                    executeCommand<BgvVssShareLinkageProofGeneration>({
+                        command: 'GenerateVssShareLinkageProof',
                         context: input.context,
                         ringDegree: input.ringDegree,
-                        compactVssShareLinkage: input.compactVssShareLinkage,
+                        vssShareLinkage: input.vssShareLinkage,
                         coefficientMessagesByShamirIndex:
                             input.coefficientMessagesByShamirIndex,
                         recipientShareMessages: input.recipientShareMessages,
@@ -498,14 +463,14 @@ export const createTranscriptCoreKernelLoader = (
                         proofRandomnessSeedHex: input.proofRandomnessSeedHex,
                         proofRandomnessNonceHex: input.proofRandomnessNonceHex,
                     }),
-                generateCompactSameSecretBridgeProof: (
+                generateSameSecretBridgeProof: (
                     input,
-                ): BgvCompactSameSecretBridgeProofGeneration =>
-                    executeCommand<BgvCompactSameSecretBridgeProofGeneration>({
-                        command: 'GenerateCompactSameSecretBridgeProof',
+                ): BgvSameSecretBridgeProofGeneration =>
+                    executeCommand<BgvSameSecretBridgeProofGeneration>({
+                        command: 'GenerateSameSecretBridgeProof',
                         context: input.context,
                         ringDegree: input.ringDegree,
-                        compactSameSecretBridge: input.compactSameSecretBridge,
+                        sameSecretBridge: input.sameSecretBridge,
                         secretCoefficients: input.secretCoefficients,
                         negativeIndicatorCoefficients:
                             input.negativeIndicatorCoefficients,
@@ -513,57 +478,6 @@ export const createTranscriptCoreKernelLoader = (
                         proofRandomnessSeedHex: input.proofRandomnessSeedHex,
                         proofRandomnessNonceHex: input.proofRandomnessNonceHex,
                     }),
-                deriveThresholdShareCommitments: (
-                    input,
-                ): BgvThresholdShareCommitmentDerivation =>
-                    executeCommand<BgvThresholdShareCommitmentDerivation>({
-                        command: 'DeriveThresholdShareCommitments',
-                        setupContext: input.setupContext,
-                        publicMatrixSeedHash: input.publicMatrixSeedHash,
-                        sourceTrusteeCoefficientCommitmentRecords:
-                            input.sourceTrusteeCoefficientCommitmentRecords,
-                        coefficientCommitments: input.coefficientCommitments,
-                    }),
-                beginThresholdShareCommitmentsFromTransportStream: (
-                    input,
-                ): BgvThresholdShareCommitmentTransportStreamBegin =>
-                    executeCommand<BgvThresholdShareCommitmentTransportStreamBegin>(
-                        {
-                            command:
-                                'BeginThresholdShareCommitmentsFromTransportStream',
-                            derivationId: input.derivationId,
-                            setupContext: input.setupContext,
-                            publicMatrixSeedHash: input.publicMatrixSeedHash,
-                            transportedVssCoefficientCommitmentMaterial:
-                                input.transportedVssCoefficientCommitmentMaterial,
-                        },
-                    ),
-                absorbThresholdShareCommitmentsFromTransportStreamChunk: (
-                    input,
-                ): BgvThresholdShareCommitmentTransportStreamChunkAbsorption =>
-                    executeCommand<BgvThresholdShareCommitmentTransportStreamChunkAbsorption>(
-                        {
-                            command:
-                                'AbsorbThresholdShareCommitmentsFromTransportStreamChunk',
-                            derivationId: input.derivationId,
-                            chunkIndex: input.chunkIndex,
-                            bytesHex: input.bytesHex,
-                        },
-                    ),
-                finishThresholdShareCommitmentsFromTransportStream: (
-                    input,
-                ): BgvThresholdShareCommitmentTransportStreamDerivation =>
-                    executeCommand<BgvThresholdShareCommitmentTransportStreamDerivation>(
-                        {
-                            command:
-                                'FinishThresholdShareCommitmentsFromTransportStream',
-                            derivationId: input.derivationId,
-                            vssCoefficientCommitmentRoot:
-                                input.vssCoefficientCommitmentRoot,
-                            sourceTrusteeCoefficientCommitmentRecords:
-                                input.sourceTrusteeCoefficientCommitmentRecords,
-                        },
-                    ),
                 beginSetupProofMaterialTransportStream: (
                     input,
                 ): BgvSetupProofMaterialTransportStreamBegin =>

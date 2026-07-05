@@ -355,7 +355,7 @@ fn same_secret_trustee_bindings_from_vss(
     // the per-source-trustee root is the compact source record root, and each
     // commitment binds its root under coefficientCommitmentRoot.
     let (commitment_set_field, source_root_field, commitment_root_field) = (
-        "compactVssCoefficientCommitmentSet",
+        "vssPublicCoefficientCommitmentSet",
         "sourceCoefficientCommitmentRoot",
         "coefficientCommitmentRoot",
     );

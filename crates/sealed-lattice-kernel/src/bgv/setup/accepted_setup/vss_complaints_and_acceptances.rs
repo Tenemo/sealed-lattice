@@ -828,7 +828,7 @@ pub(super) fn source_trustee_commitment_roots_from_vss_commitments(
     // root: the per-source-trustee root over that trustee's coefficient
     // commitments, which the private envelopes and share acceptances bind against.
     let (commitment_set_field, source_root_field) = (
-        "compactVssCoefficientCommitmentSet",
+        "vssPublicCoefficientCommitmentSet",
         "sourceCoefficientCommitmentRoot",
     );
     let source_trustee_records = setup_package

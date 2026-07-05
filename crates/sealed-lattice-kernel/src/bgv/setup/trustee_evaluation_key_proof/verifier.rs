@@ -546,7 +546,7 @@ pub(crate) fn verify_evaluation_key_share(
 ) -> CanonicalResult<()> {
     statement.validate_shape()?;
     let proof_trace_ring_degree = statement
-        .compact_vss_share_linkage
+        .vss_share_linkage
         .as_ref()
         .map(|share_linkage| share_linkage.packed_ring_degree(statement.ring_degree))
         .transpose()?

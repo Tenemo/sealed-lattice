@@ -442,64 +442,64 @@ describe('accepted setup public package API in Node', () => {
         // package assembly validates object types, versions, and root formats,
         // while the kernel verifier recomputes and verifies the real compact
         // commitments and proofs.
-        const compactVssCoefficientCommitmentSet = {
-            objectType: 'CompactVssCoefficientCommitmentSet',
+        const vssPublicCoefficientCommitmentSet = {
+            objectType: 'VssPublicCoefficientCommitmentSet',
             objectVersion: 1,
             coefficientCommitmentRoot: hashFromKernel(
                 kernel,
                 'compact-coefficient-commitment-root',
             ),
         };
-        const compactVssRecipientShareCommitmentSet = {
-            objectType: 'CompactVssRecipientShareCommitmentSet',
+        const vssPublicRecipientShareCommitmentSet = {
+            objectType: 'VssPublicRecipientShareCommitmentSet',
             objectVersion: 1,
             recipientShareCommitmentRoot: hashFromKernel(
                 kernel,
                 'compact-recipient-share-commitment-root',
             ),
         };
-        const compactVssAggregateThresholdCommitmentSet = {
-            objectType: 'CompactVssAggregateThresholdCommitmentSet',
+        const vssPublicAggregateThresholdCommitmentSet = {
+            objectType: 'VssPublicAggregateThresholdCommitmentSet',
             objectVersion: 1,
             aggregateThresholdCommitmentRoot: hashFromKernel(
                 kernel,
                 'compact-aggregate-threshold-commitment-root',
             ),
         };
-        const compactVssShareLinkageStatement = {
-            objectType: 'CompactVssShareLinkageStatement',
+        const vssShareLinkageStatement = {
+            objectType: 'VssShareLinkageStatement',
             objectVersion: 1,
             statementRoot: hashFromKernel(
                 kernel,
                 'compact-share-linkage-statement-root',
             ),
         };
-        const compactVssShareLinkageProofMaterialSet = {
-            objectType: 'CompactVssShareLinkageProofMaterialSet',
+        const vssShareLinkageProofMaterialSet = {
+            objectType: 'VssShareLinkageProofMaterialSet',
             objectVersion: 1,
             proofMaterialSetRoot: hashFromKernel(
                 kernel,
                 'compact-share-linkage-proof-material-set-root',
             ),
         };
-        const compactSameSecretBridgeStatementSet = {
-            objectType: 'CompactVssSameSecretBridgeStatementSet',
+        const sameSecretBridgeStatementSet = {
+            objectType: 'VssSameSecretBridgeStatementSet',
             objectVersion: 1,
-            compactSameSecretBridgeStatementSetRoot: hashFromKernel(
+            sameSecretBridgeStatementSetRoot: hashFromKernel(
                 kernel,
-                'compact-same-secret-bridge-statement-set-root',
+                'same-secret-bridge-statement-set-root',
             ),
         };
-        const compactSameSecretBridgeProofMaterialSet = {
-            objectType: 'CompactVssSameSecretBridgeProofMaterialSet',
+        const sameSecretBridgeProofMaterialSet = {
+            objectType: 'VssSameSecretBridgeProofMaterialSet',
             objectVersion: 1,
             proofMaterialSetRoot: hashFromKernel(
                 kernel,
-                'compact-same-secret-bridge-proof-material-set-root',
+                'same-secret-bridge-proof-material-set-root',
             ),
         };
         const thresholdShareCommitments = {
-            objectType: 'CompactThresholdShareCommitmentBinding',
+            objectType: 'ThresholdShareCommitmentBinding',
             objectVersion: 1,
             thresholdShareCommitmentRoot: hashFromKernel(
                 kernel,
@@ -516,13 +516,13 @@ describe('accepted setup public package API in Node', () => {
                     value: commonRandomnessWithoutRoot,
                 }),
             },
-            compactVssCoefficientCommitmentSet,
-            compactVssRecipientShareCommitmentSet,
-            compactVssAggregateThresholdCommitmentSet,
-            compactVssShareLinkageStatement,
-            compactVssShareLinkageProofMaterialSet,
-            compactSameSecretBridgeStatementSet,
-            compactSameSecretBridgeProofMaterialSet,
+            vssPublicCoefficientCommitmentSet,
+            vssPublicRecipientShareCommitmentSet,
+            vssPublicAggregateThresholdCommitmentSet,
+            vssShareLinkageStatement,
+            vssShareLinkageProofMaterialSet,
+            sameSecretBridgeStatementSet,
+            sameSecretBridgeProofMaterialSet,
             thresholdShareCommitments,
             privateVssEnvelopeCommitments: {
                 objectType: 'PrivateVssEnvelopeCommitmentSet',
@@ -675,7 +675,7 @@ describe('accepted setup public package API in Node', () => {
                     objectType: 'ThresholdShareCommitmentSet',
                 },
             }),
-        ).toThrow(/CompactThresholdShareCommitmentBinding/u);
+        ).toThrow(/ThresholdShareCommitmentBinding/u);
         for (const requiredPublicKeyClosureField of [
             'sameSecretProofs',
             'publicKeyShareMaterial',

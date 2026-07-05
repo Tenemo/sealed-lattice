@@ -9,7 +9,7 @@ import {
 } from '../setup-fixture-primitives.js';
 
 import {
-    acceptedCompactSetupTransportCertificate,
+    acceptedSetupTransportCertificate,
     rebindCollectiveSetupPackageHash,
 } from './certificates.js';
 import {
@@ -17,9 +17,9 @@ import {
     publicPrivateVssEnvelopeCommitmentSet,
 } from './common-randomness.js';
 import {
-    acceptedCompactSameSecretBridge,
-    acceptedCompactVssMaterial,
-} from './compact-vss-material.js';
+    acceptedSameSecretBridge,
+    acceptedVssPublicMaterial,
+} from './vss-material.js';
 import { acceptedEvaluatorKeySchedule } from './evaluator-schedule.js';
 import {
     acceptedVssShareAcceptances,
@@ -30,8 +30,8 @@ import {
     acceptedPublicKeyShares,
 } from './public-key-shares.js';
 import {
-    acceptedCompactSameSecretConsistency,
-    acceptedCompactSameSecretProofs,
+    acceptedSameSecretConsistency,
+    acceptedSameSecretProofs,
 } from './same-secret.js';
 
 import {
@@ -150,44 +150,44 @@ async function buildAcceptedShapedSetupPackage(
     }
     const commonRandomness = acceptedCommonRandomness(kernel, setupParameters);
     const publicMatrixSeedHash = String(commonRandomness.publicMatrixSeedHash);
-    const compactVssMaterial = acceptedCompactVssMaterial(
+    const vssPublicMaterial = acceptedVssPublicMaterial(
         kernel,
         setupContext,
         setupParameters,
         publicMatrixSeedHash,
     );
-    const sameSecretConsistency = acceptedCompactSameSecretConsistency(
+    const sameSecretConsistency = acceptedSameSecretConsistency(
         setupContext,
         setupParameters,
-        compactVssMaterial.coefficientCommitmentSet,
+        vssPublicMaterial.coefficientCommitmentSet,
     );
-    const sameSecretProofs = acceptedCompactSameSecretProofs(
+    const sameSecretProofs = acceptedSameSecretProofs(
         kernel,
         setupContext,
         setupParameters,
         publicMatrixSeedHash,
         sameSecretConsistency,
-        compactVssMaterial.coefficientCommitmentSet.coefficientCommitmentRoot,
-        compactVssMaterial.ringDegree,
+        vssPublicMaterial.coefficientCommitmentSet.coefficientCommitmentRoot,
+        vssPublicMaterial.ringDegree,
     );
-    const compactSameSecretBridge = acceptedCompactSameSecretBridge(
+    const sameSecretBridge = acceptedSameSecretBridge(
         kernel,
         setupContext,
         setupParameters,
         publicMatrixSeedHash,
-        compactVssMaterial,
+        vssPublicMaterial,
         sameSecretConsistency,
         sameSecretProofs,
     );
     // The private VSS envelope and share-acceptance material bind the coefficient
-    // commitment roots. On the compact path present the compact set through a view
-    // that aliases the full-VSS field name to the compact source record root.
-    const compactCoefficientCommitmentView = {
+    // commitment roots. Present the commitment set through a view that aliases the
+    // full-VSS field name to the source record root.
+    const coefficientCommitmentView = {
         vssCoefficientCommitmentRoot:
-            compactVssMaterial.coefficientCommitmentSet
+            vssPublicMaterial.coefficientCommitmentSet
                 .coefficientCommitmentRoot,
         sourceTrusteeRecords:
-            compactVssMaterial.coefficientCommitmentSet.sourceTrusteeRecords.map(
+            vssPublicMaterial.coefficientCommitmentSet.sourceTrusteeRecords.map(
                 (sourceTrusteeRecord) => ({
                     ...sourceTrusteeRecord,
                     sourceTrusteeCommitmentRoot:
@@ -201,7 +201,7 @@ async function buildAcceptedShapedSetupPackage(
             setupParameters,
             setupContext,
             commonRandomness,
-            compactCoefficientCommitmentView,
+            coefficientCommitmentView,
         );
     const publicPrivateVssEnvelopeCommitments =
         publicPrivateVssEnvelopeCommitmentSet(privateVssEnvelopeCommitments);
@@ -233,7 +233,7 @@ async function buildAcceptedShapedSetupPackage(
         publicKeyShares,
         publicKeyShareProofs,
     );
-    const setupTransportCertificate = acceptedCompactSetupTransportCertificate(
+    const setupTransportCertificate = acceptedSetupTransportCertificate(
         kernel,
         setupParameters,
     );
@@ -244,27 +244,27 @@ async function buildAcceptedShapedSetupPackage(
         qShare: setupParameters.qShare,
         phaseTranscript,
         commonRandomness,
-        compactVssCoefficientCommitmentSet:
-            compactVssMaterial.coefficientCommitmentSet,
-        compactVssRecipientShareCommitmentSet:
-            compactVssMaterial.recipientShareCommitmentSet,
-        compactVssAggregateThresholdCommitmentSet:
-            compactVssMaterial.aggregateThresholdCommitmentSet,
-        compactVssShareLinkageStatement:
-            compactVssMaterial.shareLinkageStatement,
-        compactVssShareLinkageProofMaterialSet:
-            compactVssMaterial.shareLinkageProofMaterialSet,
+        vssPublicCoefficientCommitmentSet:
+            vssPublicMaterial.coefficientCommitmentSet,
+        vssPublicRecipientShareCommitmentSet:
+            vssPublicMaterial.recipientShareCommitmentSet,
+        vssPublicAggregateThresholdCommitmentSet:
+            vssPublicMaterial.aggregateThresholdCommitmentSet,
+        vssShareLinkageStatement:
+            vssPublicMaterial.shareLinkageStatement,
+        vssShareLinkageProofMaterialSet:
+            vssPublicMaterial.shareLinkageProofMaterialSet,
         privateVssEnvelopeCommitments: publicPrivateVssEnvelopeCommitments,
         privateVssEnvelopeCommitmentRoot,
         vssShareAcceptances,
         thresholdShareCommitments:
-            compactVssMaterial.thresholdShareCommitmentBinding,
+            vssPublicMaterial.thresholdShareCommitmentBinding,
         sameSecretConsistency,
         sameSecretProofs,
-        compactSameSecretBridgeStatementSet:
-            compactSameSecretBridge.bridgeStatementSet,
-        compactSameSecretBridgeProofMaterialSet:
-            compactSameSecretBridge.bridgeProofMaterialSet,
+        sameSecretBridgeStatementSet:
+            sameSecretBridge.bridgeStatementSet,
+        sameSecretBridgeProofMaterialSet:
+            sameSecretBridge.bridgeProofMaterialSet,
         publicKeyShares,
         publicKeyShareProofs,
         evaluatorKeySchedule,

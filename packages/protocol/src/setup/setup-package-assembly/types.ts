@@ -2,14 +2,14 @@ import type { ProtocolHash } from '@sealed-lattice/types';
 
 import type { SetupCommonRandomness } from '../common-randomness-records.js';
 import type {
-    CompactVssAggregateThresholdCommitmentSet,
-    CompactVssCoefficientCommitmentSet,
-    CompactVssRecipientShareCommitmentSet,
-    CompactVssSameSecretBridgeStatementSet,
-    CompactVssShareLinkageStatement,
-    TransportedCompactSameSecretBridgeProofMaterialSet,
-    TransportedCompactVssShareLinkageProofMaterialSet,
-} from '../compact-vss-commitments.js';
+    VssPublicAggregateThresholdCommitmentSet,
+    VssPublicCoefficientCommitmentSet,
+    VssPublicRecipientShareCommitmentSet,
+    VssSameSecretBridgeStatementSet,
+    VssShareLinkageStatement,
+    TransportedSameSecretBridgeProofMaterialSet,
+    TransportedVssShareLinkageProofMaterialSet,
+} from '../vss-commitments.js';
 import type {
     GaloisKeyShareBatch,
     PublicEvaluationKeySet,
@@ -59,13 +59,13 @@ export type SetupPackageInput = Readonly<{
     readonly qShare: JsonRecord;
     readonly phaseTranscript: readonly SetupPhaseRecord[];
     readonly commonRandomness: SetupCommonRandomness;
-    readonly compactVssCoefficientCommitmentSet: CompactVssCoefficientCommitmentSet;
-    readonly compactVssRecipientShareCommitmentSet: CompactVssRecipientShareCommitmentSet;
-    readonly compactVssAggregateThresholdCommitmentSet: CompactVssAggregateThresholdCommitmentSet;
-    readonly compactVssShareLinkageStatement: CompactVssShareLinkageStatement;
-    readonly compactVssShareLinkageProofMaterialSet: JsonRecord;
-    readonly compactSameSecretBridgeStatementSet: CompactVssSameSecretBridgeStatementSet;
-    readonly compactSameSecretBridgeProofMaterialSet: JsonRecord;
+    readonly vssPublicCoefficientCommitmentSet: VssPublicCoefficientCommitmentSet;
+    readonly vssPublicRecipientShareCommitmentSet: VssPublicRecipientShareCommitmentSet;
+    readonly vssPublicAggregateThresholdCommitmentSet: VssPublicAggregateThresholdCommitmentSet;
+    readonly vssShareLinkageStatement: VssShareLinkageStatement;
+    readonly vssShareLinkageProofMaterialSet: JsonRecord;
+    readonly sameSecretBridgeStatementSet: VssSameSecretBridgeStatementSet;
+    readonly sameSecretBridgeProofMaterialSet: JsonRecord;
     readonly privateVssEnvelopeCommitments: JsonRecord;
     readonly vssShareAcceptances: VssShareAcceptanceSet;
     readonly vssComplaints?: VssComplaintSet | JsonRecord;
@@ -116,13 +116,13 @@ export type SetupPackage = Readonly<
         readonly qShare: JsonRecord;
         readonly phaseTranscript: readonly SetupPhaseRecord[];
         readonly commonRandomness: SetupCommonRandomness;
-        readonly compactVssCoefficientCommitmentSet: CompactVssCoefficientCommitmentSet;
-        readonly compactVssRecipientShareCommitmentSet: CompactVssRecipientShareCommitmentSet;
-        readonly compactVssAggregateThresholdCommitmentSet: CompactVssAggregateThresholdCommitmentSet;
-        readonly compactVssShareLinkageStatement: CompactVssShareLinkageStatement;
-        readonly compactVssShareLinkageProofMaterialSet: JsonRecord;
-        readonly compactSameSecretBridgeStatementSet: CompactVssSameSecretBridgeStatementSet;
-        readonly compactSameSecretBridgeProofMaterialSet: JsonRecord;
+        readonly vssPublicCoefficientCommitmentSet: VssPublicCoefficientCommitmentSet;
+        readonly vssPublicRecipientShareCommitmentSet: VssPublicRecipientShareCommitmentSet;
+        readonly vssPublicAggregateThresholdCommitmentSet: VssPublicAggregateThresholdCommitmentSet;
+        readonly vssShareLinkageStatement: VssShareLinkageStatement;
+        readonly vssShareLinkageProofMaterialSet: JsonRecord;
+        readonly sameSecretBridgeStatementSet: VssSameSecretBridgeStatementSet;
+        readonly sameSecretBridgeProofMaterialSet: JsonRecord;
         readonly privateVssEnvelopeCommitments: JsonRecord;
         readonly privateVssEnvelopeCommitmentRoot: ProtocolHash;
         readonly vssShareAcceptances: VssShareAcceptanceSet;
@@ -159,8 +159,8 @@ export type SetupPackageVerificationInputSource = Readonly<{
     readonly transportedPublicKeyShareMaterial?: SetupTransportedPublicKeyShareMaterial;
     readonly transportedPublicKeyShareProofMaterial?: TransportedPublicKeyShareProofMaterialSet;
     readonly transportedEvaluationKeyShareProofMaterial?: TransportedEvaluationKeyShareProofMaterialSet;
-    readonly transportedCompactVssShareLinkageProofMaterial?: TransportedCompactVssShareLinkageProofMaterialSet;
-    readonly transportedCompactSameSecretBridgeProofMaterial?: TransportedCompactSameSecretBridgeProofMaterialSet;
+    readonly transportedVssShareLinkageProofMaterial?: TransportedVssShareLinkageProofMaterialSet;
+    readonly transportedSameSecretBridgeProofMaterial?: TransportedSameSecretBridgeProofMaterialSet;
     readonly transportedEvaluationKeyShareComponentMaterial?: TransportedEvaluationKeyShareComponentMaterialSet;
     readonly transportedPublicEvaluationKeyMaterial?: TransportedPublicEvaluationKeyMaterialSet;
     readonly verifiedSetupProofMaterials?: VerifiedSetupProofMaterialSet;

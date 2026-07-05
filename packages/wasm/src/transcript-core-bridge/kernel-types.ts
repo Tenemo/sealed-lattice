@@ -30,24 +30,15 @@ import type {
     BgvPrivateVssShareProofGeneration,
     BgvOperationRejection,
     BgvRnsParametersDescription,
-    BgvCompactSameSecretBridgeProofContext,
-    BgvCompactSameSecretBridgeProofGeneration,
-    BgvCompactVssCommitmentOpeningComputation,
-    BgvCompactVssShareLinkageProofContext,
-    BgvCompactVssShareLinkageProofGeneration,
+    BgvSameSecretBridgeProofContext,
+    BgvSameSecretBridgeProofGeneration,
+    BgvVssPublicCommitmentOpeningComputation,
+    BgvVssShareLinkageProofContext,
+    BgvVssShareLinkageProofGeneration,
     BgvSetupCommitmentOpeningComputation,
     BgvSetupProofMaterialTransportStreamBegin,
     BgvSetupProofMaterialTransportStreamChunkAbsorption,
     BgvSetupProofMaterialTransportStreamVerification,
-    BgvTargetCiphertextPairInput,
-    BgvTargetDecryptionResult,
-    BgvTargetDecryptionShare,
-    BgvThresholdShareCommitmentDerivation,
-    BgvThresholdShareCommitmentTransportStreamBegin,
-    BgvThresholdShareCommitmentTransportStreamChunkAbsorption,
-    BgvThresholdShareCommitmentTransportStreamDerivation,
-    BgvTransportedVssCoefficientCommitmentMaterialReference,
-    BgvTransportedVssCoefficientCommitmentMaterialTemplate,
 } from './kernel-types/bgv.js';
 
 export type {
@@ -73,24 +64,15 @@ export type {
     BgvPrivateVssShareProofGeneration,
     BgvOperationRejection,
     BgvRnsParametersDescription,
-    BgvCompactSameSecretBridgeProofContext,
-    BgvCompactSameSecretBridgeProofGeneration,
-    BgvCompactVssCommitmentOpeningComputation,
-    BgvCompactVssShareLinkageProofContext,
-    BgvCompactVssShareLinkageProofGeneration,
+    BgvSameSecretBridgeProofContext,
+    BgvSameSecretBridgeProofGeneration,
+    BgvVssPublicCommitmentOpeningComputation,
+    BgvVssShareLinkageProofContext,
+    BgvVssShareLinkageProofGeneration,
     BgvSetupCommitmentOpeningComputation,
     BgvSetupProofMaterialTransportStreamBegin,
     BgvSetupProofMaterialTransportStreamChunkAbsorption,
     BgvSetupProofMaterialTransportStreamVerification,
-    BgvTargetCiphertextPairInput,
-    BgvTargetDecryptionResult,
-    BgvTargetDecryptionShare,
-    BgvThresholdShareCommitmentDerivation,
-    BgvThresholdShareCommitmentTransportStreamBegin,
-    BgvThresholdShareCommitmentTransportStreamChunkAbsorption,
-    BgvThresholdShareCommitmentTransportStreamDerivation,
-    BgvTransportedVssCoefficientCommitmentMaterialReference,
-    BgvTransportedVssCoefficientCommitmentMaterialTemplate,
 } from './kernel-types/bgv.js';
 export type TranscriptCoreKernelSharePoint = {
     readonly rosterPosition: number;
@@ -157,25 +139,6 @@ export type TranscriptCoreKernel = {
             readonly level: number;
         }[];
     }): Record<string, unknown>;
-    generateBgvTargetDecryptionShare(input: {
-        readonly setupPackage: BgvPassiveSetupPackage;
-        readonly setupPrivateWitness: {
-            readonly setupSeed: string;
-        };
-        readonly targetAcceptedRecord: unknown;
-        readonly targetCiphertextBinding: unknown;
-        readonly targetCiphertexts: BgvTargetCiphertextPairInput;
-        readonly targetShareParameters: unknown;
-        readonly trusteeIdentity: string;
-    }): BgvTargetDecryptionShare;
-    recombineBgvTargetDecryptionShares(input: {
-        readonly setupPackage: BgvPassiveSetupPackage;
-        readonly targetAcceptedRecord: unknown;
-        readonly targetCiphertextBinding: unknown;
-        readonly targetCiphertexts: BgvTargetCiphertextPairInput;
-        readonly targetShareParameters: unknown;
-        readonly decryptionShares: readonly BgvTargetDecryptionShare[];
-    }): BgvTargetDecryptionResult;
     verifyBgvPassiveSetup(input: {
         readonly setupPackage: BgvPassiveSetupPackage;
         readonly expectedSetupPackageHash?: ProtocolHash;
@@ -244,7 +207,7 @@ export type TranscriptCoreKernel = {
         readonly randomnessByColumn: readonly (readonly number[])[];
         readonly ringDegree: number;
     }): BgvSetupCommitmentOpeningComputation;
-    computeCompactVssCommitmentFromOpening(input: {
+    computeVssPublicCommitmentFromOpening(input: {
         readonly commitmentRole: string;
         readonly commitmentContext: Record<string, unknown>;
         readonly publicMatrixSeedHash: ProtocolHash;
@@ -255,11 +218,11 @@ export type TranscriptCoreKernel = {
         readonly messageCoefficients: readonly number[];
         readonly messageDigitColumns: readonly (readonly number[])[];
         readonly randomnessByColumn: readonly (readonly number[])[];
-    }): BgvCompactVssCommitmentOpeningComputation;
-    generateCompactVssShareLinkageProof(input: {
-        readonly context: BgvCompactVssShareLinkageProofContext;
+    }): BgvVssPublicCommitmentOpeningComputation;
+    generateVssShareLinkageProof(input: {
+        readonly context: BgvVssShareLinkageProofContext;
         readonly ringDegree: number;
-        readonly compactVssShareLinkage: Record<string, unknown>;
+        readonly vssShareLinkage: Record<string, unknown>;
         readonly coefficientMessagesByShamirIndex: readonly (readonly number[])[];
         readonly recipientShareMessages: readonly number[];
         readonly coefficientOpeningRandomnessByShamirIndex: readonly (readonly (readonly number[])[])[];
@@ -270,41 +233,17 @@ export type TranscriptCoreKernel = {
         readonly carryWitnessesByItem?: readonly (readonly number[])[];
         readonly proofRandomnessSeedHex: string;
         readonly proofRandomnessNonceHex: string;
-    }): BgvCompactVssShareLinkageProofGeneration;
-    generateCompactSameSecretBridgeProof(input: {
-        readonly context: BgvCompactSameSecretBridgeProofContext;
+    }): BgvVssShareLinkageProofGeneration;
+    generateSameSecretBridgeProof(input: {
+        readonly context: BgvSameSecretBridgeProofContext;
         readonly ringDegree: number;
-        readonly compactSameSecretBridge: Record<string, unknown>;
+        readonly sameSecretBridge: Record<string, unknown>;
         readonly secretCoefficients: readonly number[];
         readonly negativeIndicatorCoefficients: readonly number[];
         readonly openingRandomnessByLimb: readonly (readonly (readonly number[])[])[];
         readonly proofRandomnessSeedHex: string;
         readonly proofRandomnessNonceHex: string;
-    }): BgvCompactSameSecretBridgeProofGeneration;
-    deriveThresholdShareCommitments(input: {
-        readonly setupContext: unknown;
-        readonly publicMatrixSeedHash: ProtocolHash;
-        readonly sourceTrusteeCoefficientCommitmentRecords: readonly unknown[];
-        readonly coefficientCommitments: readonly unknown[];
-    }): BgvThresholdShareCommitmentDerivation;
-    beginThresholdShareCommitmentsFromTransportStream(input: {
-        readonly derivationId: string;
-        readonly setupContext: unknown;
-        readonly publicMatrixSeedHash: ProtocolHash;
-        readonly transportedVssCoefficientCommitmentMaterial:
-            | BgvTransportedVssCoefficientCommitmentMaterialReference
-            | BgvTransportedVssCoefficientCommitmentMaterialTemplate;
-    }): BgvThresholdShareCommitmentTransportStreamBegin;
-    absorbThresholdShareCommitmentsFromTransportStreamChunk(input: {
-        readonly derivationId: string;
-        readonly chunkIndex: number;
-        readonly bytesHex: string;
-    }): BgvThresholdShareCommitmentTransportStreamChunkAbsorption;
-    finishThresholdShareCommitmentsFromTransportStream(input: {
-        readonly derivationId: string;
-        readonly vssCoefficientCommitmentRoot: ProtocolHash;
-        readonly sourceTrusteeCoefficientCommitmentRecords: readonly unknown[];
-    }): BgvThresholdShareCommitmentTransportStreamDerivation;
+    }): BgvSameSecretBridgeProofGeneration;
     beginSetupProofMaterialTransportStream(input: {
         readonly verificationId: string;
         readonly transportedSetupProofMaterial: unknown;
@@ -427,27 +366,6 @@ type TranscriptCoreKernelCommand =
           }[];
       }
     | {
-          readonly command: 'GenerateBgvTargetDecryptionShare';
-          readonly setupPackage: BgvPassiveSetupPackage;
-          readonly setupPrivateWitness: {
-              readonly setupSeed: string;
-          };
-          readonly targetAcceptedRecord: unknown;
-          readonly targetCiphertextBinding: unknown;
-          readonly targetCiphertexts: BgvTargetCiphertextPairInput;
-          readonly targetShareParameters: unknown;
-          readonly trusteeIdentity: string;
-      }
-    | {
-          readonly command: 'RecombineBgvTargetDecryptionShares';
-          readonly setupPackage: BgvPassiveSetupPackage;
-          readonly targetAcceptedRecord: unknown;
-          readonly targetCiphertextBinding: unknown;
-          readonly targetCiphertexts: BgvTargetCiphertextPairInput;
-          readonly targetShareParameters: unknown;
-          readonly decryptionShares: readonly BgvTargetDecryptionShare[];
-      }
-    | {
           readonly command: 'VerifyBgvPassiveSetup';
           readonly setupPackage: BgvPassiveSetupPackage;
           readonly expectedSetupPackageHash?: ProtocolHash;
@@ -520,7 +438,7 @@ type TranscriptCoreKernelCommand =
           readonly ringDegree: number;
       }
     | {
-          readonly command: 'ComputeCompactVssCommitmentFromOpening';
+          readonly command: 'ComputeVssPublicCommitmentFromOpening';
           readonly commitmentRole: string;
           readonly commitmentContext: Record<string, unknown>;
           readonly publicMatrixSeedHash: ProtocolHash;
@@ -533,10 +451,10 @@ type TranscriptCoreKernelCommand =
           readonly randomnessByColumn: readonly (readonly number[])[];
       }
     | {
-          readonly command: 'GenerateCompactVssShareLinkageProof';
-          readonly context: BgvCompactVssShareLinkageProofContext;
+          readonly command: 'GenerateVssShareLinkageProof';
+          readonly context: BgvVssShareLinkageProofContext;
           readonly ringDegree: number;
-          readonly compactVssShareLinkage: Record<string, unknown>;
+          readonly vssShareLinkage: Record<string, unknown>;
           readonly coefficientMessagesByShamirIndex: readonly (readonly number[])[];
           readonly recipientShareMessages: readonly number[];
           readonly coefficientOpeningRandomnessByShamirIndex: readonly (readonly (readonly number[])[])[];
@@ -549,43 +467,15 @@ type TranscriptCoreKernelCommand =
           readonly proofRandomnessNonceHex: string;
       }
     | {
-          readonly command: 'GenerateCompactSameSecretBridgeProof';
-          readonly context: BgvCompactSameSecretBridgeProofContext;
+          readonly command: 'GenerateSameSecretBridgeProof';
+          readonly context: BgvSameSecretBridgeProofContext;
           readonly ringDegree: number;
-          readonly compactSameSecretBridge: Record<string, unknown>;
+          readonly sameSecretBridge: Record<string, unknown>;
           readonly secretCoefficients: readonly number[];
           readonly negativeIndicatorCoefficients: readonly number[];
           readonly openingRandomnessByLimb: readonly (readonly (readonly number[])[])[];
           readonly proofRandomnessSeedHex: string;
           readonly proofRandomnessNonceHex: string;
-      }
-    | {
-          readonly command: 'DeriveThresholdShareCommitments';
-          readonly setupContext: unknown;
-          readonly publicMatrixSeedHash: ProtocolHash;
-          readonly sourceTrusteeCoefficientCommitmentRecords: readonly unknown[];
-          readonly coefficientCommitments: readonly unknown[];
-      }
-    | {
-          readonly command: 'BeginThresholdShareCommitmentsFromTransportStream';
-          readonly derivationId: string;
-          readonly setupContext: unknown;
-          readonly publicMatrixSeedHash: ProtocolHash;
-          readonly transportedVssCoefficientCommitmentMaterial:
-              | BgvTransportedVssCoefficientCommitmentMaterialReference
-              | BgvTransportedVssCoefficientCommitmentMaterialTemplate;
-      }
-    | {
-          readonly command: 'AbsorbThresholdShareCommitmentsFromTransportStreamChunk';
-          readonly derivationId: string;
-          readonly chunkIndex: number;
-          readonly bytesHex: string;
-      }
-    | {
-          readonly command: 'FinishThresholdShareCommitmentsFromTransportStream';
-          readonly derivationId: string;
-          readonly vssCoefficientCommitmentRoot: ProtocolHash;
-          readonly sourceTrusteeCoefficientCommitmentRecords: readonly unknown[];
       }
     | {
           readonly command: 'BeginSetupProofMaterialTransportStream';

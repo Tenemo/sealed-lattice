@@ -40,12 +40,12 @@ use super::{
 };
 
 mod codec_and_commands;
-mod compact_same_secret_bridge;
-mod compact_vss_share_linkage;
 mod relation_algebra;
+mod same_secret_bridge;
 mod soundness;
 mod target_decryption_share;
 mod verification;
+mod vss_share_linkage;
 
 const SMALL_RING_DEGREE: usize = 128;
 // Smallest ring whose rate-1/2 low-degree claim bound folds past the adaptive
@@ -139,8 +139,8 @@ fn private_vss_statement_for_context_tests() -> TrusteeEvaluationKeyStatement {
         },
         ring_degree: SMALL_RING_DEGREE,
         keys: Vec::new(),
-        compact_vss_share_linkage: None,
-        compact_same_secret_bridge: None,
+        vss_share_linkage: None,
+        same_secret_bridge: None,
         same_secret_linkage: None,
         target_decryption_share: None,
         private_vss_share: Some(PrivateVssShareStatement {

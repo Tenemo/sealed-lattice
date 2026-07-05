@@ -16,48 +16,6 @@ export type BgvSetupTransportChunk = Readonly<
     }
 >;
 
-export type BgvTransportedVssCoefficientCommitmentMaterial =
-    BgvTransportedMaterialObject<'SetupTransportedVssCoefficientCommitmentMaterial'> &
-        Readonly<{
-            readonly binaryFormat: string;
-            readonly chunkSizeBytes: number;
-            readonly chunkCount: number;
-            readonly totalByteLength: number;
-            readonly fullObjectHash: ProtocolHash;
-            readonly chunkHashes: readonly ProtocolHash[];
-            readonly chunkRoot: ProtocolHash;
-            readonly chunks: readonly BgvSetupTransportChunk[];
-        }>;
-
-export type BgvTransportedVssCoefficientCommitmentMaterialReference = Omit<
-    BgvTransportedVssCoefficientCommitmentMaterial,
-    'chunks'
->;
-
-export type BgvTransportedVssCoefficientCommitmentMaterialTemplate = Omit<
-    BgvTransportedVssCoefficientCommitmentMaterialReference,
-    'fullObjectHash' | 'chunkHashes' | 'chunkRoot'
->;
-
-export type BgvVerifiedVssCoefficientCommitmentMaterial = Readonly<
-    BgvJsonRecord & {
-        readonly objectType: 'VerifiedVssCoefficientCommitmentMaterial';
-        readonly objectVersion: 1;
-        readonly verificationId: string;
-        readonly materialBinaryFormat: string;
-        readonly publicMatrixSeedHash: ProtocolHash;
-        readonly vssCoefficientCommitmentRoot: ProtocolHash;
-        readonly vssCoefficientCommitmentMaterialRoot: ProtocolHash;
-        readonly thresholdShareCommitmentRoot: ProtocolHash;
-        readonly transportSchemeId: string;
-        readonly transportChunkSizeBytes: number;
-        readonly transportChunkCount: number;
-        readonly transportTotalByteLength: number;
-        readonly transportFullObjectHash: ProtocolHash;
-        readonly transportChunkRoot: ProtocolHash;
-    }
->;
-
 export type BgvTransportedSetupProofMaterialSet<
     ObjectType extends string = string,
 > = BgvTransportedMaterialObject<ObjectType> &
@@ -119,10 +77,6 @@ export type BgvTransportedPublicEvaluationKeyMaterialSet =
         }>;
 
 export type BgvCollectiveSetupTransportCompanions = Readonly<{
-    readonly transportedVssCoefficientCommitmentMaterial?:
-        | BgvTransportedVssCoefficientCommitmentMaterial
-        | BgvTransportedVssCoefficientCommitmentMaterialReference;
-    readonly verifiedVssCoefficientCommitmentMaterial?: BgvVerifiedVssCoefficientCommitmentMaterial;
     readonly transportedSameSecretProofMaterial?: BgvTransportedSetupProofMaterialSet<'SetupTransportedSameSecretProofMaterialSet'>;
     readonly transportedPublicKeyShareMaterial?: BgvTransportedPublicKeyShareMaterial;
     readonly transportedPublicKeyShareProofMaterial?: BgvTransportedSetupProofMaterialSet<'SetupTransportedPublicKeyShareProofMaterialSet'>;
@@ -615,7 +569,7 @@ export type BgvTrusteeEvaluationKeySameSecretLinkage = {
     readonly commitments: readonly unknown[];
 };
 
-export type BgvCompactVssShareLinkageProofContext = {
+export type BgvVssShareLinkageProofContext = {
     readonly ceremonyId: string;
     readonly manifestHash: ProtocolHash;
     readonly rosterHash: ProtocolHash;
@@ -625,14 +579,14 @@ export type BgvCompactVssShareLinkageProofContext = {
     readonly shareLinkageStatementRoot: ProtocolHash;
 };
 
-export type BgvCompactSameSecretBridgeProofContext = {
+export type BgvSameSecretBridgeProofContext = {
     readonly ceremonyId: string;
     readonly manifestHash: ProtocolHash;
     readonly rosterHash: ProtocolHash;
     readonly trusteeIdentity: string;
     readonly trusteeRosterPosition: number;
     readonly setupEpoch: string;
-    readonly compactSameSecretBridgeStatementRoot: ProtocolHash;
+    readonly sameSecretBridgeStatementRoot: ProtocolHash;
     readonly sameSecretStatementRoot: ProtocolHash;
     readonly sameSecretProofRoot: ProtocolHash;
     readonly sameSecretProofFamilyBindingRoot: ProtocolHash;
@@ -651,26 +605,14 @@ export type BgvTrusteeEvaluationKeyProofGeneration = {
     readonly proofBytesHex: string;
 };
 
-export type BgvThresholdShareCommitmentDerivation = {
-    readonly operation: 'deriveThresholdShareCommitments';
-    readonly ringDegree: number;
-    readonly ringDegreeStatus: 'full-ring' | 'development-reduced-ring';
-    readonly participantCount: number;
-    readonly rnsLimbCount: number;
-    readonly thresholdDegree: number;
-    readonly derivedLimbCommitmentCount: number;
-    readonly thresholdShareCommitmentRoot: ProtocolHash;
-    readonly thresholdShareCommitments: Readonly<Record<string, unknown>>;
-};
-
 export type BgvSetupCommitmentOpeningComputation = {
     readonly operation: 'computeSetupCommitmentFromOpening';
     readonly commitment: Record<string, unknown>;
     readonly commitmentRoot: ProtocolHash;
 };
 
-export type BgvCompactVssCommitmentOpeningComputation = {
-    readonly operation: 'computeCompactVssCommitmentFromOpening';
+export type BgvVssPublicCommitmentOpeningComputation = {
+    readonly operation: 'computeVssPublicCommitmentFromOpening';
     readonly commitment: Record<string, unknown>;
     readonly commitmentRoot: ProtocolHash;
     readonly openingRoot: ProtocolHash;
@@ -678,9 +620,9 @@ export type BgvCompactVssCommitmentOpeningComputation = {
     readonly encodedCommitmentByteLength: number;
 };
 
-export type BgvCompactVssShareLinkageProofGeneration = {
-    readonly operation: 'generateCompactVssShareLinkageProof';
-    readonly proofFamily: 'compact-vss-share-linkage';
+export type BgvVssShareLinkageProofGeneration = {
+    readonly operation: 'generateVssShareLinkageProof';
+    readonly proofFamily: 'vss-share-linkage';
     readonly statementHash: ProtocolHash;
     readonly limbCount: number;
     readonly coefficientCommitmentCount: number;
@@ -689,50 +631,14 @@ export type BgvCompactVssShareLinkageProofGeneration = {
     readonly proofBytesHex: string;
 };
 
-export type BgvCompactSameSecretBridgeProofGeneration = {
-    readonly operation: 'generateCompactSameSecretBridgeProof';
-    readonly proofFamily: 'compact-same-secret-bridge';
+export type BgvSameSecretBridgeProofGeneration = {
+    readonly operation: 'generateSameSecretBridgeProof';
+    readonly proofFamily: 'same-secret-bridge';
     readonly statementHash: ProtocolHash;
     readonly limbCount: number;
     readonly targetRnsLimbCount: number;
     readonly proofByteLength: number;
     readonly proofBytesHex: string;
-};
-
-export type BgvThresholdShareCommitmentTransportDerivation = Omit<
-    BgvThresholdShareCommitmentDerivation,
-    'operation'
-> & {
-    readonly operation: 'deriveThresholdShareCommitmentsFromTransport';
-    readonly materialBinaryFormat: string;
-    readonly transport: Readonly<Record<string, unknown>>;
-    readonly vssCoefficientCommitmentMaterial: Readonly<
-        Record<string, unknown>
-    >;
-};
-
-export type BgvThresholdShareCommitmentTransportStreamBegin = {
-    readonly operation: 'beginThresholdShareCommitmentsFromTransportStream';
-    readonly derivationId: string;
-    readonly materialBinaryFormat: string;
-    readonly transport: Readonly<Record<string, unknown>>;
-};
-
-export type BgvThresholdShareCommitmentTransportStreamChunkAbsorption = {
-    readonly operation: 'absorbThresholdShareCommitmentsFromTransportStreamChunk';
-    readonly absorbedChunkIndex: number;
-    readonly absorbedByteLength: number;
-    readonly nextChunkIndex: number;
-    readonly observedTotalByteLength: number;
-};
-
-export type BgvThresholdShareCommitmentTransportStreamDerivation = Omit<
-    BgvThresholdShareCommitmentTransportDerivation,
-    'operation'
-> & {
-    readonly operation: 'finishThresholdShareCommitmentsFromTransportStream';
-    readonly derivationId: string;
-    readonly verifiedVssCoefficientCommitmentMaterial: BgvVerifiedVssCoefficientCommitmentMaterial;
 };
 
 export type BgvSetupProofMaterialTransportStreamBegin = {
@@ -769,45 +675,4 @@ export type BgvLocalTrusteeSetupStateVerification = {
     readonly localStateRoot: ProtocolHash;
     readonly deletionReceiptRoot: ProtocolHash;
     readonly deletionBoundary: 'after-private-vss-aggregation';
-};
-
-export type BgvTargetCiphertextPairInput = {
-    readonly targetIdCanonicalBytesHex: string;
-    readonly targetOrderCanonicalBytesHex: string;
-};
-
-export type BgvTargetDecryptionShare = Readonly<
-    Record<string, unknown> & {
-        readonly objectType: 'BgvTargetDecryptionShare';
-        readonly objectVersion: 1;
-        readonly targetDecryptionShareHash: ProtocolHash;
-        readonly trusteeIdentity: string;
-        readonly rosterPosition: number;
-        readonly interpolationPoint: number;
-        readonly targetAcceptedRecordHash: ProtocolHash;
-        readonly targetContextHash: ProtocolHash;
-        readonly targetCiphertextHash: ProtocolHash;
-        readonly targetDecryptionCiphertextHash: ProtocolHash;
-        readonly targetShareParametersHash: ProtocolHash;
-        readonly shareRoot: ProtocolHash;
-        readonly sharePayload: unknown;
-    }
->;
-
-export type BgvTargetDecryptionResult = {
-    readonly operation: 'recombineBgvTargetDecryptionShares';
-    readonly targetDecryptionResultHash: ProtocolHash;
-    readonly setupPackageHash: ProtocolHash;
-    readonly targetAcceptedRecordHash: ProtocolHash;
-    readonly targetContextHash: ProtocolHash;
-    readonly targetCiphertextHash: ProtocolHash;
-    readonly targetShareParametersHash: ProtocolHash;
-    readonly targetDecryptionParametersHash: ProtocolHash;
-    readonly minimumSharesForInterpolation: number;
-    readonly decryptionThreshold: number;
-    readonly decryptionShareQuorum: number;
-    readonly selectedRosterPositions: readonly number[];
-    readonly decodedTargetIds: readonly number[];
-    readonly decodedTargetOrders: readonly number[];
-    readonly decryptScaling: number;
 };

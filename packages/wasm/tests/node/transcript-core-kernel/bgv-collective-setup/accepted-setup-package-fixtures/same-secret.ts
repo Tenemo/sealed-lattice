@@ -1,6 +1,5 @@
 import { validHash } from '../../bgv-passive-setup-fixtures.js';
 import {
-    firstRosterDecryptionThreshold,
     firstRosterParticipantCount,
     hexToBytes,
     jsonRecord,
@@ -8,10 +7,10 @@ import {
     type JsonRecord,
 } from '../setup-fixture-primitives.js';
 
-import { compactVssTrusteeSecretCoefficients } from './compact-vss-material.js';
+import { vssPublicTrusteeSecretCoefficients } from './vss-material.js';
 
 import { hash512Hex } from '#packages/crypto/src/index';
-import { type CompactVssCoefficientCommitmentSet } from '#packages/protocol/src/setup/compact-vss-commitments';
+import { type VssPublicCoefficientCommitmentSet } from '#packages/protocol/src/setup/vss-commitments';
 import {
     createSameSecretConsistencyStatementSet,
     createSameSecretProofSet,
@@ -39,40 +38,26 @@ const sameSecretProofBytesHash = (proofBytesHex: string): string =>
         [hexToBytes(proofBytesHex)],
     );
 
+// The same-secret consistency statement binds the public VSS coefficient
+// commitment roots. The consistency builder reads the full-VSS field names
+// (sourceTrusteeCommitmentRoot, per-commitment commitmentRoot), so present the
+// commitment set through a view that aliases those to the roots the
+// accepted-setup verifier recomputes.
 export function acceptedSameSecretConsistency(
     setupContext: CollectiveBgvSetupContext,
     parameters: BgvCollectiveSetupParametersDescription,
-    vssCoefficientCommitments: VssCoefficientCommitmentSet,
+    coefficientCommitmentSet: VssPublicCoefficientCommitmentSet,
 ): SameSecretConsistencyStatementSet {
-    return createSameSecretConsistencyStatementSet({
-        setupContext,
-        qSharePrimes: parameters.qShare.primes,
-        participantCount: firstRosterParticipantCount,
-        thresholdDegree: firstRosterDecryptionThreshold,
-        vssCoefficientCommitments,
-    });
-}
-
-// The same-secret consistency statement on the compact path binds the compact
-// coefficient commitment roots. The consistency builder reads the full-VSS field
-// names (sourceTrusteeCommitmentRoot, per-commitment commitmentRoot), so present
-// the compact set through a view that aliases those to the compact roots the
-// accepted-setup verifier recomputes.
-export function acceptedCompactSameSecretConsistency(
-    setupContext: CollectiveBgvSetupContext,
-    parameters: BgvCollectiveSetupParametersDescription,
-    compactCoefficientCommitmentSet: CompactVssCoefficientCommitmentSet,
-): SameSecretConsistencyStatementSet {
-    const compactCoefficientView = {
+    const coefficientView = {
         ceremonyId: setupContext.ceremonyId,
         manifestHash: setupContext.manifestHash,
         rosterHash: setupContext.rosterHash,
         setupParametersHash: setupContext.setupParametersHash,
         setupEpoch: setupContext.setupEpoch,
         vssCoefficientCommitmentRoot:
-            compactCoefficientCommitmentSet.coefficientCommitmentRoot,
+            coefficientCommitmentSet.coefficientCommitmentRoot,
         sourceTrusteeRecords:
-            compactCoefficientCommitmentSet.sourceTrusteeRecords.map(
+            coefficientCommitmentSet.sourceTrusteeRecords.map(
                 (sourceTrusteeRecord) => ({
                     ceremonyId: setupContext.ceremonyId,
                     manifestHash: setupContext.manifestHash,
@@ -107,7 +92,7 @@ export function acceptedCompactSameSecretConsistency(
         participantCount: parameters.participantCount,
         thresholdDegree: parameters.qDec,
         vssCoefficientCommitments:
-            compactCoefficientView as unknown as VssCoefficientCommitmentSet,
+            coefficientView as unknown as VssCoefficientCommitmentSet,
     });
 }
 
@@ -116,7 +101,7 @@ export function acceptedCompactSameSecretConsistency(
 // this width works for the data-basis same-secret anchor commitments.
 const setupCommitmentRandomnessWidth = 5;
 
-const compactSameSecretDataBasisRandomness = (
+const sameSecretDataBasisRandomness = (
     sourceTrusteeRosterPosition: number,
     rnsLimbIndex: number,
     ringDegree: number,
@@ -137,18 +122,18 @@ const compactSameSecretDataBasisRandomness = (
             ),
     );
 
-// The same-secret proofs on the compact path stay data-basis proofs: each trustee
-// commits its constant (secret) coefficient into every RNS prime with the setup
-// commitment and proves those commitments open to one short ternary secret. The
-// compact same-secret bridge links these data-basis anchors to the compact
-// target-basis constant commitments through that same secret.
-export function acceptedCompactSameSecretProofs(
+// The same-secret proofs stay data-basis proofs: each trustee commits its
+// constant (secret) coefficient into every RNS prime with the setup commitment
+// and proves those commitments open to one short ternary secret. The same-secret
+// bridge links these data-basis anchors to the target-basis constant commitments
+// through that same secret.
+export function acceptedSameSecretProofs(
     kernel: TranscriptCoreKernel,
     setupContext: CollectiveBgvSetupContext,
     parameters: BgvCollectiveSetupParametersDescription,
     publicMatrixSeedHash: string,
-    compactSameSecretConsistency: SameSecretConsistencyStatementSet,
-    compactCoefficientCommitmentRoot: string,
+    sameSecretConsistency: SameSecretConsistencyStatementSet,
+    coefficientCommitmentRoot: string,
     ringDegree: number,
 ): SameSecretProofSet {
     const qSharePrimes = parameters.qShare.primes;
@@ -156,21 +141,21 @@ export function acceptedCompactSameSecretProofs(
     // anchor root for the compact path.
     const dataBasisAnchorMaterialRoot = kernel.deriveCanonicalObjectHash({
         value: {
-            objectType: 'CompactVssDataBasisSameSecretAnchorMaterial',
-            coefficientCommitmentRoot: compactCoefficientCommitmentRoot,
+            objectType: 'VssPublicDataBasisSameSecretAnchorMaterial',
+            coefficientCommitmentRoot: coefficientCommitmentRoot,
         },
     });
     const proofMaterials: SameSecretProofMaterial[] = Array.from(
         { length: parameters.participantCount },
         (_unusedTrustee, sourceTrusteeRosterPosition) => {
             const trusteeIdentity = `trustee-${String(sourceTrusteeRosterPosition)}`;
-            const secretCoefficients = compactVssTrusteeSecretCoefficients(
+            const secretCoefficients = vssPublicTrusteeSecretCoefficients(
                 sourceTrusteeRosterPosition,
                 ringDegree,
             );
             const openingRandomnessByLimb = qSharePrimes.map(
                 (_rnsPrime, rnsLimbIndex) =>
-                    compactSameSecretDataBasisRandomness(
+                    sameSecretDataBasisRandomness(
                         sourceTrusteeRosterPosition,
                         rnsLimbIndex,
                         ringDegree,
@@ -221,11 +206,11 @@ export function acceptedCompactSameSecretProofs(
                 ),
                 openingRandomnessByLimb,
                 proofRandomnessSeedHex: hash512Hex(
-                    'sealed-lattice-test/compact-same-secret-proof-seed-v1',
+                    'sealed-lattice-test/accepted-same-secret-proof-seed-v1',
                     [textEncoder.encode(String(sourceTrusteeRosterPosition))],
                 ),
                 proofRandomnessNonceHex: hash512Hex(
-                    'sealed-lattice-test/compact-same-secret-proof-nonce-v1',
+                    'sealed-lattice-test/accepted-same-secret-proof-nonce-v1',
                     [textEncoder.encode(String(sourceTrusteeRosterPosition))],
                 ),
             });
@@ -250,12 +235,12 @@ export function acceptedCompactSameSecretProofs(
         setupContext,
         qSharePrimes,
         participantCount: parameters.participantCount,
-        sameSecretConsistency: compactSameSecretConsistency,
+        sameSecretConsistency: sameSecretConsistency,
         vssCoefficientCommitmentMaterial: {
             vssCoefficientCommitmentMaterialRoot: dataBasisAnchorMaterialRoot,
             participantCount: parameters.participantCount,
             rnsLimbCount: qSharePrimes.length,
-            vssCoefficientCommitmentRoot: compactCoefficientCommitmentRoot,
+            vssCoefficientCommitmentRoot: coefficientCommitmentRoot,
             ringDegree,
         } as unknown as SetupPackageVssCoefficientCommitmentMaterialSet,
         proofMaterials,

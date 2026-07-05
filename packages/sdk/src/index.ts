@@ -21,14 +21,12 @@ import {
 } from '@sealed-lattice/protocol';
 import type {
     SetupTransportedPublicKeyShareMaterial as ProtocolSetupTransportedPublicKeyShareMaterial,
-    SetupTransportedVssCoefficientCommitmentMaterialLike as ProtocolSetupTransportedVssCoefficientCommitmentMaterialLike,
-    VerifiedVssCoefficientCommitmentMaterial as ProtocolVerifiedVssCoefficientCommitmentMaterial,
     VerifiedSetupProofMaterial as ProtocolVerifiedSetupProofMaterial,
     VerifiedSetupProofMaterialSet as ProtocolVerifiedSetupProofMaterialSet,
     TransportedSameSecretProofMaterialSet as ProtocolTransportedSameSecretProofMaterialSet,
     TransportedPublicKeyShareProofMaterialSet as ProtocolTransportedPublicKeyShareProofMaterialSet,
-    TransportedCompactVssShareLinkageProofMaterialSet as ProtocolTransportedCompactVssShareLinkageProofMaterialSet,
-    TransportedCompactSameSecretBridgeProofMaterialSet as ProtocolTransportedCompactSameSecretBridgeProofMaterialSet,
+    TransportedVssShareLinkageProofMaterialSet as ProtocolTransportedVssShareLinkageProofMaterialSet,
+    TransportedSameSecretBridgeProofMaterialSet as ProtocolTransportedSameSecretBridgeProofMaterialSet,
     TransportedEvaluationKeyShareComponentMaterialSet as ProtocolTransportedEvaluationKeyShareComponentMaterialSet,
     TransportedEvaluationKeyShareProofMaterialSet as ProtocolTransportedEvaluationKeyShareProofMaterialSet,
     TransportedPublicEvaluationKeyMaterialSet as ProtocolTransportedPublicEvaluationKeyMaterialSet,
@@ -237,10 +235,6 @@ export type SetupPackage = ProtocolSetupPackage;
 export type CollectiveBgvSetupRosterEntryInput =
     ProtocolCollectiveBgvSetupRosterEntryInput;
 
-export type SetupTransportedVssCoefficientCommitmentMaterialLike =
-    ProtocolSetupTransportedVssCoefficientCommitmentMaterialLike;
-export type VerifiedVssCoefficientCommitmentMaterial =
-    ProtocolVerifiedVssCoefficientCommitmentMaterial;
 export type VerifiedSetupProofMaterial = ProtocolVerifiedSetupProofMaterial;
 export type VerifiedSetupProofMaterialSet =
     ProtocolVerifiedSetupProofMaterialSet;
@@ -250,10 +244,10 @@ export type TransportedSameSecretProofMaterialSet =
     ProtocolTransportedSameSecretProofMaterialSet;
 export type TransportedPublicKeyShareProofMaterialSet =
     ProtocolTransportedPublicKeyShareProofMaterialSet;
-export type TransportedCompactVssShareLinkageProofMaterialSet =
-    ProtocolTransportedCompactVssShareLinkageProofMaterialSet;
-export type TransportedCompactSameSecretBridgeProofMaterialSet =
-    ProtocolTransportedCompactSameSecretBridgeProofMaterialSet;
+export type TransportedVssShareLinkageProofMaterialSet =
+    ProtocolTransportedVssShareLinkageProofMaterialSet;
+export type TransportedSameSecretBridgeProofMaterialSet =
+    ProtocolTransportedSameSecretBridgeProofMaterialSet;
 export type TransportedEvaluationKeyShareProofMaterialSet =
     ProtocolTransportedEvaluationKeyShareProofMaterialSet;
 export type TransportedEvaluationKeyShareComponentMaterialSet =
@@ -266,13 +260,11 @@ export type VerifySetupPackageInput = Readonly<{
     readonly expectedSetupPackageHash?: ProtocolHash;
     readonly expectedManifestHash: ProtocolHash;
     readonly expectedRosterHash: ProtocolHash;
-    readonly transportedVssCoefficientCommitmentMaterial?: SetupTransportedVssCoefficientCommitmentMaterialLike;
-    readonly verifiedVssCoefficientCommitmentMaterial?: VerifiedVssCoefficientCommitmentMaterial;
     readonly transportedSameSecretProofMaterial?: TransportedSameSecretProofMaterialSet;
     readonly transportedPublicKeyShareMaterial?: SetupTransportedPublicKeyShareMaterial;
     readonly transportedPublicKeyShareProofMaterial?: TransportedPublicKeyShareProofMaterialSet;
-    readonly transportedCompactVssShareLinkageProofMaterial?: TransportedCompactVssShareLinkageProofMaterialSet;
-    readonly transportedCompactSameSecretBridgeProofMaterial?: TransportedCompactSameSecretBridgeProofMaterialSet;
+    readonly transportedVssShareLinkageProofMaterial?: TransportedVssShareLinkageProofMaterialSet;
+    readonly transportedSameSecretBridgeProofMaterial?: TransportedSameSecretBridgeProofMaterialSet;
     readonly transportedEvaluationKeyShareProofMaterial?: TransportedEvaluationKeyShareProofMaterialSet;
     readonly transportedEvaluationKeyShareComponentMaterial?: TransportedEvaluationKeyShareComponentMaterialSet;
     readonly transportedPublicEvaluationKeyMaterial?: TransportedPublicEvaluationKeyMaterialSet;
@@ -442,15 +434,15 @@ export const createSetupPackageVerificationInput = (
 type SetupProofMaterialTransportFieldName =
     | 'transportedSameSecretProofMaterial'
     | 'transportedPublicKeyShareProofMaterial'
-    | 'transportedCompactVssShareLinkageProofMaterial'
-    | 'transportedCompactSameSecretBridgeProofMaterial'
+    | 'transportedVssShareLinkageProofMaterial'
+    | 'transportedSameSecretBridgeProofMaterial'
     | 'transportedEvaluationKeyShareProofMaterial';
 
 type SetupProofMaterialTransportSet =
     | TransportedSameSecretProofMaterialSet
     | TransportedPublicKeyShareProofMaterialSet
-    | TransportedCompactVssShareLinkageProofMaterialSet
-    | TransportedCompactSameSecretBridgeProofMaterialSet
+    | TransportedVssShareLinkageProofMaterialSet
+    | TransportedSameSecretBridgeProofMaterialSet
     | TransportedEvaluationKeyShareProofMaterialSet;
 
 type SetupProofMaterialChunk = Readonly<{
@@ -461,8 +453,8 @@ type SetupProofMaterialChunk = Readonly<{
 const setupProofMaterialTransportFieldNames = [
     'transportedSameSecretProofMaterial',
     'transportedPublicKeyShareProofMaterial',
-    'transportedCompactVssShareLinkageProofMaterial',
-    'transportedCompactSameSecretBridgeProofMaterial',
+    'transportedVssShareLinkageProofMaterial',
+    'transportedSameSecretBridgeProofMaterial',
     'transportedEvaluationKeyShareProofMaterial',
 ] as const satisfies readonly SetupProofMaterialTransportFieldName[];
 
@@ -562,7 +554,7 @@ const streamSetupProofMaterialSet = (
     return verifiedMaterials;
 };
 
-const compactSetupPackageVerificationInput = (
+const setupPackageVerificationInput = (
     input: VerifySetupPackageInput,
 ): VerifySetupPackageInput => {
     const verificationInput = createSetupPackageVerificationInputInternal(
@@ -582,7 +574,7 @@ const prepareSetupPackageVerificationInputForKernel = (
     input: VerifySetupPackageInput,
 ): VerifySetupPackageInput => {
     if (input.verifiedSetupProofMaterials !== undefined) {
-        return compactSetupPackageVerificationInput(input);
+        return setupPackageVerificationInput(input);
     }
 
     const verifiedMaterials = setupProofMaterialTransportFieldNames.flatMap(
@@ -599,7 +591,7 @@ const prepareSetupPackageVerificationInputForKernel = (
         proofMaterials: verifiedMaterials,
     } as const satisfies VerifiedSetupProofMaterialSet;
 
-    return compactSetupPackageVerificationInput({
+    return setupPackageVerificationInput({
         ...input,
         verifiedSetupProofMaterials,
     });

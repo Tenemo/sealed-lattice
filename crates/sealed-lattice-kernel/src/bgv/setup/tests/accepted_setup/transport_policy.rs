@@ -3,9 +3,8 @@ use super::*;
 #[test]
 fn terminal_full_ring_gate_refuses_reduced_public_key_material() {
     let package = serde_json::json!({
-        "vssCoefficientCommitmentMaterial": {
+        "vssPublicCoefficientCommitmentSet": {
             "ringDegree": POLYNOMIAL_DEGREE,
-            "ringDegreeStatus": "full-ring",
         },
         "sameSecretProofs": {
             "proofRecords": [
@@ -35,9 +34,8 @@ fn terminal_full_ring_gate_refuses_reduced_public_key_material() {
 #[test]
 fn terminal_full_ring_gate_refuses_reduced_evaluation_key_records() {
     let package = serde_json::json!({
-        "vssCoefficientCommitmentMaterial": {
+        "vssPublicCoefficientCommitmentSet": {
             "ringDegree": POLYNOMIAL_DEGREE,
-            "ringDegreeStatus": "full-ring",
         },
         "sameSecretProofs": {
             "proofRecords": [
@@ -328,9 +326,8 @@ fn terminal_full_ring_gate_refuses_reduced_vss_material() {
     let _accepted_setup_test_timing =
         accepted_setup_test_timing("terminal_full_ring_gate_refuses_reduced_vss_material");
     let package = serde_json::json!({
-        "vssCoefficientCommitmentMaterial": {
+        "vssPublicCoefficientCommitmentSet": {
             "ringDegree": 8,
-            "ringDegreeStatus": "development-reduced-ring",
         },
     });
 
@@ -342,5 +339,9 @@ fn terminal_full_ring_gate_refuses_reduced_vss_material() {
     assert_eq!(
         response["refusedObjects"][0]["reasonCode"],
         "vssCoefficientCommitmentMaterialOutsideAcceptedRing"
+    );
+    assert_eq!(
+        response["refusedObjects"][0]["objectPath"],
+        "setupPackage.vssPublicCoefficientCommitmentSet.ringDegree"
     );
 }

@@ -6,11 +6,9 @@ mod consistency;
 mod family_binding;
 
 pub(super) use accessors::{
-    same_secret_consistency_root_from_package,
-    same_secret_constant_commitment_values_from_material, same_secret_proof_bindings_from_package,
+    same_secret_consistency_root_from_package, same_secret_proof_bindings_from_package,
     same_secret_proof_set_root_from_package, same_secret_statement_bindings_from_package,
     same_secret_statement_records_by_roster_position,
-    same_secret_transported_constant_commitments_by_roster_position,
 };
 pub(super) use anchor_proofs::verify_optional_same_secret_proofs;
 pub(super) use consistency::verify_same_secret_consistency;

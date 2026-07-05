@@ -24,34 +24,34 @@ import type { CollectiveBgvSetupContext } from './vss-share-verification-records
 // Two base-3^17 message digits per coefficient. The kernel validates that the
 // canonical digit columns reproduce the message coefficients, so they must be
 // derived exactly this way (little-endian digits, transposed into columns).
-const compactVssMessageDigitBase = 3 ** 17;
-const compactVssMessageDigitCount = 2;
+const vssPublicMessageDigitBase = 3 ** 17;
+const vssPublicMessageDigitCount = 2;
 
-const compactVssCanonicalMessageDigitColumns = (
+const vssPublicCanonicalMessageDigitColumns = (
     messageCoefficients: readonly number[],
 ): number[][] => {
     const ringDegree = messageCoefficients.length;
     const columns: number[][] = Array.from(
-        { length: compactVssMessageDigitCount },
+        { length: vssPublicMessageDigitCount },
         () => new Array<number>(ringDegree).fill(0),
     );
     messageCoefficients.forEach((coefficient, coefficientIndex) => {
         let remaining = coefficient;
         for (
             let digitIndex = 0;
-            digitIndex < compactVssMessageDigitCount;
+            digitIndex < vssPublicMessageDigitCount;
             digitIndex += 1
         ) {
             columns[digitIndex][coefficientIndex] =
-                remaining % compactVssMessageDigitBase;
-            remaining = Math.floor(remaining / compactVssMessageDigitBase);
+                remaining % vssPublicMessageDigitBase;
+            remaining = Math.floor(remaining / vssPublicMessageDigitBase);
         }
     });
 
     return columns;
 };
 
-export type CompactVssCommitmentOpeningInput = {
+export type VssPublicCommitmentOpeningInput = {
     readonly commitmentRole:
         | 'coefficient'
         | 'recipient-share'
@@ -67,14 +67,14 @@ export type CompactVssCommitmentOpeningInput = {
     readonly randomnessByColumn: readonly (readonly number[])[];
 };
 
-export type CompactVssCommitmentLimbValue = {
+export type VssPublicCommitmentLimbValue = {
     readonly commitmentModulusIndex: number;
     readonly modulus: number;
     readonly coordinates: readonly number[];
 };
 
-export type CompactVssCommitmentValue = {
-    readonly objectType: 'CompactVssCommitment';
+export type VssPublicCommitmentValue = {
+    readonly objectType: 'VssPublicCommitment';
     readonly objectVersion: number;
     readonly commitmentRole: string;
     readonly commitmentContextHash: ProtocolHash;
@@ -84,28 +84,28 @@ export type CompactVssCommitmentValue = {
     readonly ringDegree: number;
     readonly outputCoordinateCount: number;
     readonly randomnessColumnCount: number;
-    readonly commitmentLimbs: readonly CompactVssCommitmentLimbValue[];
+    readonly commitmentLimbs: readonly VssPublicCommitmentLimbValue[];
 };
 
-export type CompactVssCommitmentComputation = {
-    readonly commitment: CompactVssCommitmentValue;
+export type VssPublicCommitmentComputation = {
+    readonly commitment: VssPublicCommitmentValue;
     readonly commitmentRoot: ProtocolHash;
     readonly openingRoot: ProtocolHash;
 };
 
 // The kernel-backed compact commitment computation (bound to the WASM
-// `ComputeCompactVssCommitmentFromOpening` command by the SDK layer). Injected
+// `ComputeVssPublicCommitmentFromOpening` command by the SDK layer). Injected
 // so the protocol layer never reimplements the certified commitment.
-export type CompactVssCommitmentComputer = (
-    input: CompactVssCommitmentOpeningInput,
-) => CompactVssCommitmentComputation;
+export type VssPublicCommitmentComputer = (
+    input: VssPublicCommitmentOpeningInput,
+) => VssPublicCommitmentComputation;
 
 // Typed compact commitment set outputs. These are the exact objects the
 // accepted-setup verifier recomputes canonical roots over, so downstream
 // builders (share-linkage statement and proof material) read them type-safely
 // instead of casting through untyped records.
-export type CompactVssCoefficientCommitment = {
-    readonly objectType: 'CompactVssCoefficientCommitment';
+export type VssPublicCoefficientCommitment = {
+    readonly objectType: 'VssPublicCoefficientCommitment';
     readonly objectVersion: number;
     readonly sourceTrusteeIdentity: string;
     readonly sourceTrusteeRosterPosition: number;
@@ -115,20 +115,20 @@ export type CompactVssCoefficientCommitment = {
     readonly shamirCoefficientIndex: number;
     readonly coefficientCommitmentRoot: ProtocolHash;
     readonly coefficientOpeningRoot: ProtocolHash;
-    readonly commitment: CompactVssCommitmentValue;
+    readonly commitment: VssPublicCommitmentValue;
 };
 
-export type CompactVssSourceCoefficientCommitments = {
+export type VssPublicSourceCoefficientCommitments = {
     readonly objectType: string;
     readonly objectVersion: number;
     readonly sourceTrusteeIdentity: string;
     readonly sourceTrusteeRosterPosition: number;
     readonly publicMatrixSeedHash: ProtocolHash;
-    readonly coefficientCommitments: readonly CompactVssCoefficientCommitment[];
+    readonly coefficientCommitments: readonly VssPublicCoefficientCommitment[];
     readonly sourceCoefficientCommitmentRoot: ProtocolHash;
 };
 
-export type CompactVssCoefficientCommitmentSet = {
+export type VssPublicCoefficientCommitmentSet = {
     readonly objectType: string;
     readonly objectVersion: number;
     readonly publicMatrixSeedHash: ProtocolHash;
@@ -136,12 +136,12 @@ export type CompactVssCoefficientCommitmentSet = {
     readonly rnsLimbCount: number;
     readonly thresholdDegree: number;
     readonly ringDegree: number;
-    readonly sourceTrusteeRecords: readonly CompactVssSourceCoefficientCommitments[];
+    readonly sourceTrusteeRecords: readonly VssPublicSourceCoefficientCommitments[];
     readonly coefficientCommitmentRoot: ProtocolHash;
 };
 
-export type CompactVssRecipientShareCommitment = {
-    readonly objectType: 'CompactVssRecipientShareCommitment';
+export type VssPublicRecipientShareCommitment = {
+    readonly objectType: 'VssPublicRecipientShareCommitment';
     readonly objectVersion: number;
     readonly sourceTrusteeIdentity: string;
     readonly sourceTrusteeRosterPosition: number;
@@ -152,31 +152,31 @@ export type CompactVssRecipientShareCommitment = {
     readonly rnsPrime: number;
     readonly shareCommitmentRoot: ProtocolHash;
     readonly shareOpeningRoot: ProtocolHash;
-    readonly commitment: CompactVssCommitmentValue;
+    readonly commitment: VssPublicCommitmentValue;
 };
 
-export type CompactVssSourceRecipientShareCommitments = {
+export type VssPublicSourceRecipientShareCommitments = {
     readonly objectType: string;
     readonly objectVersion: number;
     readonly sourceTrusteeIdentity: string;
     readonly sourceTrusteeRosterPosition: number;
-    readonly recipientShareCommitments: readonly CompactVssRecipientShareCommitment[];
+    readonly recipientShareCommitments: readonly VssPublicRecipientShareCommitment[];
     readonly sourceRecipientShareCommitmentRoot: ProtocolHash;
 };
 
-export type CompactVssRecipientShareCommitmentSet = {
+export type VssPublicRecipientShareCommitmentSet = {
     readonly objectType: string;
     readonly objectVersion: number;
     readonly publicMatrixSeedHash: ProtocolHash;
     readonly participantCount: number;
     readonly rnsLimbCount: number;
     readonly ringDegree: number;
-    readonly sourceTrusteeRecords: readonly CompactVssSourceRecipientShareCommitments[];
+    readonly sourceTrusteeRecords: readonly VssPublicSourceRecipientShareCommitments[];
     readonly recipientShareCommitmentRoot: ProtocolHash;
 };
 
-export type CompactVssAggregateThresholdCommitment = {
-    readonly objectType: 'CompactVssAggregateThresholdCommitment';
+export type VssPublicAggregateThresholdCommitment = {
+    readonly objectType: 'VssPublicAggregateThresholdCommitment';
     readonly objectVersion: number;
     readonly recipientIdentity: string;
     readonly recipientRosterPosition: number;
@@ -185,36 +185,36 @@ export type CompactVssAggregateThresholdCommitment = {
     readonly rnsPrime: number;
     readonly aggregateCommitmentRoot: ProtocolHash;
     readonly aggregateOpeningRoot: ProtocolHash;
-    readonly commitment: CompactVssCommitmentValue;
+    readonly commitment: VssPublicCommitmentValue;
     readonly sourceShareCommitmentRoots: readonly ProtocolHash[];
     readonly sourceShareOpeningRoots: readonly ProtocolHash[];
 };
 
-export type CompactVssAggregateThresholdCommitmentSet = {
+export type VssPublicAggregateThresholdCommitmentSet = {
     readonly objectType: string;
     readonly objectVersion: number;
     readonly publicMatrixSeedHash: ProtocolHash;
     readonly participantCount: number;
     readonly rnsLimbCount: number;
     readonly ringDegree: number;
-    readonly recipientRecords: readonly CompactVssAggregateThresholdCommitment[];
+    readonly recipientRecords: readonly VssPublicAggregateThresholdCommitment[];
     readonly aggregateThresholdCommitmentRoot: ProtocolHash;
 };
 
-export type CompactVssCoefficientOpening = {
+export type VssPublicCoefficientOpening = {
     readonly rnsLimbIndex: number;
     readonly rnsPrime: number;
     readonly shamirCoefficientIndex: number;
     readonly coefficientMessage: readonly number[];
 };
 
-export type CompactVssSourceTrusteeOpeningState = {
+export type VssPublicSourceTrusteeOpeningState = {
     readonly sourceTrusteeIdentity: string;
     readonly sourceTrusteeRosterPosition: number;
-    readonly coefficientOpenings: readonly CompactVssCoefficientOpening[];
+    readonly coefficientOpenings: readonly VssPublicCoefficientOpening[];
 };
 
-type CompactVssCoefficientOpeningRandomnessProvider = (input: {
+type VssPublicCoefficientOpeningRandomnessProvider = (input: {
     readonly trusteeIdentity: string;
     readonly trusteeRosterPosition: number;
     readonly rnsLimbIndex: number;
@@ -227,7 +227,7 @@ type CompactVssCoefficientOpeningRandomnessProvider = (input: {
 // commitment randomness). Carried out of the coefficient-set builder so the
 // share-linkage proof opens the same commitments the set bound, rather than
 // re-deriving randomness and risking a mismatch.
-export type CompactVssCoefficientCredential = {
+export type VssPublicCoefficientCredential = {
     readonly sourceTrusteeRosterPosition: number;
     readonly rnsLimbIndex: number;
     readonly rnsPrime: number;
@@ -236,12 +236,12 @@ export type CompactVssCoefficientCredential = {
     readonly randomnessByColumn: readonly (readonly number[])[];
 };
 
-type CompactVssCoefficientCommitmentBundle = {
-    readonly coefficientCommitmentSet: CompactVssCoefficientCommitmentSet;
-    readonly coefficientCredentials: readonly CompactVssCoefficientCredential[];
+type VssPublicCoefficientCommitmentBundle = {
+    readonly coefficientCommitmentSet: VssPublicCoefficientCommitmentSet;
+    readonly coefficientCredentials: readonly VssPublicCoefficientCredential[];
 };
 
-type CompactVssSetupContextFields = {
+type VssPublicSetupContextFields = {
     readonly ceremonyId: string;
     readonly manifestHash: ProtocolHash;
     readonly rosterHash: ProtocolHash;
@@ -251,7 +251,7 @@ type CompactVssSetupContextFields = {
 
 const setupContextFields = (
     setupContext: CollectiveBgvSetupContext,
-): CompactVssSetupContextFields => ({
+): VssPublicSetupContextFields => ({
     ceremonyId: setupContext.ceremonyId,
     manifestHash: setupContext.manifestHash,
     rosterHash: setupContext.rosterHash,
@@ -264,18 +264,18 @@ const openingCoordinateKey = (
     shamirCoefficientIndex: number,
 ): string => `${String(rnsLimbIndex)}:${String(shamirCoefficientIndex)}`;
 
-export const createCompactVssCoefficientCommitmentSet = (input: {
+export const createVssPublicCoefficientCommitmentSet = (input: {
     readonly setupContext: CollectiveBgvSetupContext;
     readonly publicMatrixSeedHash: ProtocolHash;
     readonly participantCount: number;
     readonly qSharePrimes: readonly number[];
     readonly ringDegree: number;
     readonly thresholdDegree: number;
-    readonly sourceTrusteeOpeningStates: readonly CompactVssSourceTrusteeOpeningState[];
-    readonly coefficientOpeningRandomness: CompactVssCoefficientOpeningRandomnessProvider;
-    readonly computeCompactVssCommitment: CompactVssCommitmentComputer;
-}): CompactVssCoefficientCommitmentBundle => {
-    const coefficientCredentials: CompactVssCoefficientCredential[] = [];
+    readonly sourceTrusteeOpeningStates: readonly VssPublicSourceTrusteeOpeningState[];
+    readonly coefficientOpeningRandomness: VssPublicCoefficientOpeningRandomnessProvider;
+    readonly computeVssPublicCommitment: VssPublicCommitmentComputer;
+}): VssPublicCoefficientCommitmentBundle => {
+    const coefficientCredentials: VssPublicCoefficientCredential[] = [];
     const sourceTrusteeRecords = [...input.sourceTrusteeOpeningStates]
         .sort(
             (left, right) =>
@@ -285,7 +285,7 @@ export const createCompactVssCoefficientCommitmentSet = (input: {
         .map(
             (
                 sourceTrusteeOpeningState,
-            ): CompactVssSourceCoefficientCommitments => {
+            ): VssPublicSourceCoefficientCommitments => {
                 const openingsByCoordinate = new Map(
                     sourceTrusteeOpeningState.coefficientOpenings.map(
                         (opening) => [
@@ -297,7 +297,7 @@ export const createCompactVssCoefficientCommitmentSet = (input: {
                         ],
                     ),
                 );
-                const coefficientCommitments: CompactVssCoefficientCommitment[] =
+                const coefficientCommitments: VssPublicCoefficientCommitment[] =
                     [];
                 input.qSharePrimes.forEach((rnsPrime, rnsLimbIndex) => {
                     for (
@@ -323,7 +323,7 @@ export const createCompactVssCoefficientCommitmentSet = (input: {
                         }
                         const commitmentContext = {
                             objectType:
-                                'CompactVssCoefficientCommitmentContext',
+                                'VssPublicCoefficientCommitmentContext',
                             objectVersion: 1,
                             ...setupContextFields(input.setupContext),
                             sourceTrusteeIdentity:
@@ -345,7 +345,7 @@ export const createCompactVssCoefficientCommitmentSet = (input: {
                                 shamirCoefficientIndex,
                                 ringDegree: input.ringDegree,
                             });
-                        const computation = input.computeCompactVssCommitment({
+                        const computation = input.computeVssPublicCommitment({
                             commitmentRole: 'coefficient',
                             commitmentContext,
                             publicMatrixSeedHash: input.publicMatrixSeedHash,
@@ -355,13 +355,13 @@ export const createCompactVssCoefficientCommitmentSet = (input: {
                             messageCoefficientBound: rnsPrime,
                             messageCoefficients: opening.coefficientMessage,
                             messageDigitColumns:
-                                compactVssCanonicalMessageDigitColumns(
+                                vssPublicCanonicalMessageDigitColumns(
                                     opening.coefficientMessage,
                                 ),
                             randomnessByColumn,
                         });
                         coefficientCommitments.push({
-                            objectType: 'CompactVssCoefficientCommitment',
+                            objectType: 'VssPublicCoefficientCommitment',
                             objectVersion: 1,
                             sourceTrusteeIdentity:
                                 sourceTrusteeOpeningState.sourceTrusteeIdentity,
@@ -389,7 +389,7 @@ export const createCompactVssCoefficientCommitmentSet = (input: {
                 });
 
                 const sourceRecordWithoutRoot = {
-                    objectType: 'CompactVssSourceCoefficientCommitments',
+                    objectType: 'VssPublicSourceCoefficientCommitments',
                     objectVersion: 1,
                     sourceTrusteeIdentity:
                         sourceTrusteeOpeningState.sourceTrusteeIdentity,
@@ -409,7 +409,7 @@ export const createCompactVssCoefficientCommitmentSet = (input: {
         );
 
     const setWithoutRoot = {
-        objectType: 'CompactVssCoefficientCommitmentSet',
+        objectType: 'VssPublicCoefficientCommitmentSet',
         objectVersion: 1,
         publicMatrixSeedHash: input.publicMatrixSeedHash,
         participantCount: input.participantCount,
@@ -429,7 +429,7 @@ export const createCompactVssCoefficientCommitmentSet = (input: {
     };
 };
 
-type CompactVssRecipientShareOpeningRandomnessProvider = (input: {
+type VssPublicRecipientShareOpeningRandomnessProvider = (input: {
     readonly sourceTrusteeIdentity: string;
     readonly sourceTrusteeRosterPosition: number;
     readonly recipientRosterPosition: number;
@@ -438,7 +438,7 @@ type CompactVssRecipientShareOpeningRandomnessProvider = (input: {
     readonly ringDegree: number;
 }) => readonly (readonly number[])[];
 
-type CompactVssRecipientShareCredential = {
+type VssPublicRecipientShareCredential = {
     readonly sourceTrusteeIdentity: string;
     readonly sourceTrusteeRosterPosition: number;
     readonly recipientRosterPosition: number;
@@ -449,12 +449,12 @@ type CompactVssRecipientShareCredential = {
     readonly randomnessByColumn: readonly (readonly number[])[];
     readonly shareCommitmentRoot: ProtocolHash;
     readonly shareOpeningRoot: ProtocolHash;
-    readonly commitment: CompactVssCommitmentValue;
+    readonly commitment: VssPublicCommitmentValue;
 };
 
-type CompactVssRecipientShareCommitmentBundle = {
-    readonly recipientShareCommitmentSet: CompactVssRecipientShareCommitmentSet;
-    readonly recipientShareCredentials: readonly CompactVssRecipientShareCredential[];
+type VssPublicRecipientShareCommitmentBundle = {
+    readonly recipientShareCommitmentSet: VssPublicRecipientShareCommitmentSet;
+    readonly recipientShareCredentials: readonly VssPublicRecipientShareCredential[];
 };
 
 // The recipient's Shamir share of a source trustee's coefficient polynomial,
@@ -462,7 +462,7 @@ type CompactVssRecipientShareCommitmentBundle = {
 // decomposed into the residue (the committed share value) and the integer carry
 // the kernel's share-linkage proof binds. Computed in BigInt because the lifted
 // pre-reduction share can exceed the safe-integer range.
-const compactVssRecipientShareValuesAndCarries = (input: {
+const vssPublicRecipientShareValuesAndCarries = (input: {
     readonly coefficientMessagesByShamirIndex: readonly (readonly number[])[];
     readonly recipientPoint: number;
     readonly rnsPrime: number;
@@ -490,18 +490,18 @@ const compactVssRecipientShareValuesAndCarries = (input: {
     return { shareValues, carries };
 };
 
-export const createCompactVssRecipientShareCommitmentSet = (input: {
+export const createVssPublicRecipientShareCommitmentSet = (input: {
     readonly setupContext: CollectiveBgvSetupContext;
     readonly publicMatrixSeedHash: ProtocolHash;
     readonly participantCount: number;
     readonly qSharePrimes: readonly number[];
     readonly ringDegree: number;
     readonly thresholdDegree: number;
-    readonly sourceTrusteeOpeningStates: readonly CompactVssSourceTrusteeOpeningState[];
-    readonly recipientShareOpeningRandomness: CompactVssRecipientShareOpeningRandomnessProvider;
-    readonly computeCompactVssCommitment: CompactVssCommitmentComputer;
-}): CompactVssRecipientShareCommitmentBundle => {
-    const recipientShareCredentials: CompactVssRecipientShareCredential[] = [];
+    readonly sourceTrusteeOpeningStates: readonly VssPublicSourceTrusteeOpeningState[];
+    readonly recipientShareOpeningRandomness: VssPublicRecipientShareOpeningRandomnessProvider;
+    readonly computeVssPublicCommitment: VssPublicCommitmentComputer;
+}): VssPublicRecipientShareCommitmentBundle => {
+    const recipientShareCredentials: VssPublicRecipientShareCredential[] = [];
     const sourceTrusteeRecords = [...input.sourceTrusteeOpeningStates]
         .sort(
             (left, right) =>
@@ -511,7 +511,7 @@ export const createCompactVssRecipientShareCommitmentSet = (input: {
         .map(
             (
                 sourceTrusteeOpeningState,
-            ): CompactVssSourceRecipientShareCommitments => {
+            ): VssPublicSourceRecipientShareCommitments => {
                 const openingsByCoordinate = new Map(
                     sourceTrusteeOpeningState.coefficientOpenings.map(
                         (opening) => [
@@ -523,7 +523,7 @@ export const createCompactVssRecipientShareCommitmentSet = (input: {
                         ],
                     ),
                 );
-                const recipientShareCommitments: CompactVssRecipientShareCommitment[] =
+                const recipientShareCommitments: VssPublicRecipientShareCommitment[] =
                     [];
                 for (
                     let recipientRosterPosition = 0;
@@ -555,7 +555,7 @@ export const createCompactVssRecipientShareCommitmentSet = (input: {
                             ]);
                         }
                         const { shareValues, carries } =
-                            compactVssRecipientShareValuesAndCarries({
+                            vssPublicRecipientShareValuesAndCarries({
                                 coefficientMessagesByShamirIndex,
                                 recipientPoint,
                                 rnsPrime,
@@ -574,7 +574,7 @@ export const createCompactVssRecipientShareCommitmentSet = (input: {
                             });
                         const commitmentContext = {
                             objectType:
-                                'CompactVssRecipientShareCommitmentContext',
+                                'VssPublicRecipientShareCommitmentContext',
                             objectVersion: 1,
                             ...setupContextFields(input.setupContext),
                             sourceTrusteeIdentity:
@@ -587,7 +587,7 @@ export const createCompactVssRecipientShareCommitmentSet = (input: {
                             rnsLimbIndex,
                             rnsPrime,
                         };
-                        const computation = input.computeCompactVssCommitment({
+                        const computation = input.computeVssPublicCommitment({
                             commitmentRole: 'recipient-share',
                             commitmentContext,
                             publicMatrixSeedHash: input.publicMatrixSeedHash,
@@ -597,13 +597,13 @@ export const createCompactVssRecipientShareCommitmentSet = (input: {
                             messageCoefficientBound: rnsPrime,
                             messageCoefficients: shareValues,
                             messageDigitColumns:
-                                compactVssCanonicalMessageDigitColumns(
+                                vssPublicCanonicalMessageDigitColumns(
                                     shareValues,
                                 ),
                             randomnessByColumn,
                         });
                         recipientShareCommitments.push({
-                            objectType: 'CompactVssRecipientShareCommitment',
+                            objectType: 'VssPublicRecipientShareCommitment',
                             objectVersion: 1,
                             sourceTrusteeIdentity:
                                 sourceTrusteeOpeningState.sourceTrusteeIdentity,
@@ -637,7 +637,7 @@ export const createCompactVssRecipientShareCommitmentSet = (input: {
                 }
 
                 const sourceRecordWithoutRoot = {
-                    objectType: 'CompactVssSourceRecipientShareCommitments',
+                    objectType: 'VssPublicSourceRecipientShareCommitments',
                     objectVersion: 1,
                     sourceTrusteeIdentity:
                         sourceTrusteeOpeningState.sourceTrusteeIdentity,
@@ -655,7 +655,7 @@ export const createCompactVssRecipientShareCommitmentSet = (input: {
         );
 
     const setWithoutRoot = {
-        objectType: 'CompactVssRecipientShareCommitmentSet',
+        objectType: 'VssPublicRecipientShareCommitmentSet',
         objectVersion: 1,
         publicMatrixSeedHash: input.publicMatrixSeedHash,
         participantCount: input.participantCount,
@@ -688,14 +688,14 @@ const aggregateCoordinateGroupKey = (
 // under zero randomness would not equal the sum of the source commitments and
 // would fail the verifier. Each commitment modulus is a ~2^47 data prime and the
 // running remainder stays below it, so the plain-number modular sum is exact.
-const compactVssSummedAggregateCommitment = (input: {
+const vssPublicSummedAggregateCommitment = (input: {
     readonly commitmentContext: Record<string, unknown>;
     readonly publicMatrixSeedHash: ProtocolHash;
     readonly rnsLimbIndex: number;
     readonly rnsPrime: number;
     readonly ringDegree: number;
-    readonly sourceCommitments: readonly CompactVssCommitmentValue[];
-}): CompactVssCommitmentValue => {
+    readonly sourceCommitments: readonly VssPublicCommitmentValue[];
+}): VssPublicCommitmentValue => {
     const [firstCommitment] = input.sourceCommitments;
     if (firstCommitment === undefined) {
         throw new Error(
@@ -703,7 +703,7 @@ const compactVssSummedAggregateCommitment = (input: {
         );
     }
     const commitmentContextHash = deriveCanonicalObjectHash({
-        objectType: 'CompactVssCommitmentContext',
+        objectType: 'VssPublicCommitmentContext',
         objectVersion: 1,
         commitmentRole: 'aggregate-threshold-share',
         commitmentContext: input.commitmentContext,
@@ -732,7 +732,7 @@ const compactVssSummedAggregateCommitment = (input: {
     );
 
     return {
-        objectType: 'CompactVssCommitment',
+        objectType: 'VssPublicCommitment',
         objectVersion: 1,
         commitmentRole: 'aggregate-threshold-share',
         commitmentContextHash,
@@ -746,17 +746,17 @@ const compactVssSummedAggregateCommitment = (input: {
     };
 };
 
-export const createCompactVssAggregateThresholdCommitmentSet = (input: {
+export const createVssPublicAggregateThresholdCommitmentSet = (input: {
     readonly setupContext: CollectiveBgvSetupContext;
     readonly publicMatrixSeedHash: ProtocolHash;
     readonly participantCount: number;
     readonly qSharePrimes: readonly number[];
     readonly ringDegree: number;
-    readonly recipientShareCredentials: readonly CompactVssRecipientShareCredential[];
-}): CompactVssAggregateThresholdCommitmentSet => {
+    readonly recipientShareCredentials: readonly VssPublicRecipientShareCredential[];
+}): VssPublicAggregateThresholdCommitmentSet => {
     const credentialsByCoordinate = new Map<
         string,
-        CompactVssRecipientShareCredential[]
+        VssPublicRecipientShareCredential[]
     >();
     input.recipientShareCredentials.forEach((credential) => {
         const key = aggregateCoordinateGroupKey(
@@ -771,7 +771,7 @@ export const createCompactVssAggregateThresholdCommitmentSet = (input: {
         }
     });
 
-    const recipientRecords: CompactVssAggregateThresholdCommitment[] = [];
+    const recipientRecords: VssPublicAggregateThresholdCommitment[] = [];
     for (
         let recipientRosterPosition = 0;
         recipientRosterPosition < input.participantCount;
@@ -804,7 +804,7 @@ export const createCompactVssAggregateThresholdCommitmentSet = (input: {
                 (credential) => credential.shareOpeningRoot,
             );
             const commitmentContext = {
-                objectType: 'CompactVssAggregateThresholdCommitmentContext',
+                objectType: 'VssPublicAggregateThresholdCommitmentContext',
                 objectVersion: 1,
                 ...setupContextFields(input.setupContext),
                 recipientIdentity,
@@ -815,7 +815,7 @@ export const createCompactVssAggregateThresholdCommitmentSet = (input: {
                 sourceShareCommitmentRoots,
                 sourceShareOpeningRoots,
             };
-            const commitment = compactVssSummedAggregateCommitment({
+            const commitment = vssPublicSummedAggregateCommitment({
                 commitmentContext,
                 publicMatrixSeedHash: input.publicMatrixSeedHash,
                 rnsLimbIndex,
@@ -826,7 +826,7 @@ export const createCompactVssAggregateThresholdCommitmentSet = (input: {
                 ),
             });
             const aggregateOpeningRoot = deriveCanonicalObjectHash({
-                objectType: 'CompactVssAggregateThresholdOpening',
+                objectType: 'VssPublicAggregateThresholdOpening',
                 objectVersion: 1,
                 commitmentRole: 'aggregate-threshold-share',
                 commitmentContext,
@@ -837,7 +837,7 @@ export const createCompactVssAggregateThresholdCommitmentSet = (input: {
                 sourceShareOpeningRoots,
             });
             recipientRecords.push({
-                objectType: 'CompactVssAggregateThresholdCommitment',
+                objectType: 'VssPublicAggregateThresholdCommitment',
                 objectVersion: 1,
                 recipientIdentity,
                 recipientRosterPosition,
@@ -854,7 +854,7 @@ export const createCompactVssAggregateThresholdCommitmentSet = (input: {
     }
 
     const setWithoutRoot = {
-        objectType: 'CompactVssAggregateThresholdCommitmentSet',
+        objectType: 'VssPublicAggregateThresholdCommitmentSet',
         objectVersion: 1,
         publicMatrixSeedHash: input.publicMatrixSeedHash,
         participantCount: input.participantCount,
@@ -870,7 +870,7 @@ export const createCompactVssAggregateThresholdCommitmentSet = (input: {
     };
 };
 
-export type CompactVssShareLinkageStatement = {
+export type VssShareLinkageStatement = {
     readonly objectType: string;
     readonly objectVersion: number;
     readonly ceremonyId: string;
@@ -896,14 +896,14 @@ export type CompactVssShareLinkageStatement = {
 // pure root assembly over the already-built sets: the accepted-setup verifier
 // recomputes every root it references, so acceptance never trusts this object,
 // only the roots it recomputes and the proof that binds them.
-export const createCompactVssShareLinkageStatement = (input: {
+export const createVssShareLinkageStatement = (input: {
     readonly setupContext: CollectiveBgvSetupContext;
     readonly publicMatrixSeedHash: ProtocolHash;
     readonly targetBasisHash: ProtocolHash;
-    readonly coefficientCommitmentSet: CompactVssCoefficientCommitmentSet;
-    readonly recipientShareCommitmentSet: CompactVssRecipientShareCommitmentSet;
-    readonly aggregateThresholdCommitmentSet: CompactVssAggregateThresholdCommitmentSet;
-}): CompactVssShareLinkageStatement => {
+    readonly coefficientCommitmentSet: VssPublicCoefficientCommitmentSet;
+    readonly recipientShareCommitmentSet: VssPublicRecipientShareCommitmentSet;
+    readonly aggregateThresholdCommitmentSet: VssPublicAggregateThresholdCommitmentSet;
+}): VssShareLinkageStatement => {
     const {
         coefficientCommitmentSet,
         recipientShareCommitmentSet,
@@ -938,7 +938,7 @@ export const createCompactVssShareLinkageStatement = (input: {
                             recipientShareCommitment.shareOpeningRoot,
                     );
                 const sourceStatementWithoutRoot = {
-                    objectType: 'CompactVssShareLinkageSourceStatement',
+                    objectType: 'VssShareLinkageSourceStatement',
                     objectVersion: 1,
                     ...setupContextFields(input.setupContext),
                     publicMatrixSeedHash: input.publicMatrixSeedHash,
@@ -973,7 +973,7 @@ export const createCompactVssShareLinkageStatement = (input: {
         );
 
     const statementWithoutRoot = {
-        objectType: 'CompactVssShareLinkageStatement',
+        objectType: 'VssShareLinkageStatement',
         objectVersion: 1,
         ...setupContextFields(input.setupContext),
         publicMatrixSeedHash: input.publicMatrixSeedHash,
@@ -997,9 +997,9 @@ export const createCompactVssShareLinkageStatement = (input: {
     };
 };
 
-const compactVssShareLinkageProofFamily = 'compact-vss-share-linkage';
-const compactVssShareLinkageProofBytesHashDomain =
-    'sealed-lattice/setup/compact-vss-share-linkage/proof-bytes-v1';
+const vssShareLinkageProofFamily = 'vss-share-linkage';
+const vssShareLinkageProofBytesHashDomain =
+    'sealed-lattice/setup/vss-share-linkage/proof-bytes-v1';
 const standardBase64Alphabet =
     'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 
@@ -1045,7 +1045,7 @@ const encodeStandardBase64 = (bytes: Uint8Array): string => {
     return encoded;
 };
 
-export type CompactVssShareLinkageProofContext = {
+export type VssShareLinkageProofContext = {
     readonly ceremonyId: string;
     readonly manifestHash: ProtocolHash;
     readonly rosterHash: ProtocolHash;
@@ -1056,12 +1056,12 @@ export type CompactVssShareLinkageProofContext = {
 };
 
 // The kernel-backed compact share-linkage proof (bound to the WASM
-// `GenerateCompactVssShareLinkageProof` command by the SDK). Injected so the
+// `GenerateVssShareLinkageProof` command by the SDK). Injected so the
 // protocol layer assembles the witness but never runs the certified prover.
-export type CompactVssShareLinkageProofComputer = (input: {
-    readonly context: CompactVssShareLinkageProofContext;
+export type VssShareLinkageProofComputer = (input: {
+    readonly context: VssShareLinkageProofContext;
     readonly ringDegree: number;
-    readonly compactVssShareLinkage: Record<string, unknown>;
+    readonly vssShareLinkage: Record<string, unknown>;
     readonly coefficientMessagesByShamirIndex: readonly (readonly number[])[];
     readonly recipientShareMessages: readonly number[];
     readonly coefficientOpeningRandomnessByShamirIndex: readonly (readonly (readonly number[])[])[];
@@ -1077,19 +1077,19 @@ export type CompactVssShareLinkageProofComputer = (input: {
 // Fresh prover blinding randomness per proof record. The share-linkage proof is
 // zero-knowledge, so this is independent per (source trustee, proof record) and
 // binds nothing the verifier recomputes.
-type CompactVssShareLinkageProofRandomnessProvider = (input: {
+type VssShareLinkageProofRandomnessProvider = (input: {
     readonly sourceTrusteeRosterPosition: number;
     readonly proofRecordIndex: number;
 }) => { readonly seedHex: string; readonly nonceHex: string };
 
-const compactVssShareLinkageCoordinateKey = (
+const vssShareLinkageCoordinateKey = (
     sourceTrusteeRosterPosition: number,
     rnsLimbIndex: number,
     shamirCoefficientIndex: number,
 ): string =>
     `${String(sourceTrusteeRosterPosition)}:${String(rnsLimbIndex)}:${String(shamirCoefficientIndex)}`;
 
-const compactVssRecipientShareCoordinateKey = (
+const vssPublicRecipientShareCoordinateKey = (
     sourceTrusteeRosterPosition: number,
     recipientRosterPosition: number,
     rnsLimbIndex: number,
@@ -1101,14 +1101,14 @@ const compactVssRecipientShareCoordinateKey = (
 // recipient at that limb. The verifier recomputes the covered opening roots and
 // the statement root and checks the proof, so this builder only assembles the
 // witness the injected prover consumes and binds the proof bytes.
-export const createCompactVssShareLinkageProofMaterialSet = (input: {
-    readonly statement: CompactVssShareLinkageStatement;
-    readonly coefficientCommitmentSet: CompactVssCoefficientCommitmentSet;
-    readonly recipientShareCommitmentSet: CompactVssRecipientShareCommitmentSet;
-    readonly coefficientCredentials: readonly CompactVssCoefficientCredential[];
-    readonly recipientShareCredentials: readonly CompactVssRecipientShareCredential[];
-    readonly shareLinkageProofRandomness: CompactVssShareLinkageProofRandomnessProvider;
-    readonly generateCompactVssShareLinkageProof: CompactVssShareLinkageProofComputer;
+export const createVssShareLinkageProofMaterialSet = (input: {
+    readonly statement: VssShareLinkageStatement;
+    readonly coefficientCommitmentSet: VssPublicCoefficientCommitmentSet;
+    readonly recipientShareCommitmentSet: VssPublicRecipientShareCommitmentSet;
+    readonly coefficientCredentials: readonly VssPublicCoefficientCredential[];
+    readonly recipientShareCredentials: readonly VssPublicRecipientShareCredential[];
+    readonly shareLinkageProofRandomness: VssShareLinkageProofRandomnessProvider;
+    readonly generateVssShareLinkageProof: VssShareLinkageProofComputer;
 }): Record<string, unknown> & {
     readonly proofMaterialSetRoot: ProtocolHash;
 } => {
@@ -1124,7 +1124,7 @@ export const createCompactVssShareLinkageProofMaterialSet = (input: {
 
     const coefficientCredentialByCoordinate = new Map(
         input.coefficientCredentials.map((credential) => [
-            compactVssShareLinkageCoordinateKey(
+            vssShareLinkageCoordinateKey(
                 credential.sourceTrusteeRosterPosition,
                 credential.rnsLimbIndex,
                 credential.shamirCoefficientIndex,
@@ -1134,7 +1134,7 @@ export const createCompactVssShareLinkageProofMaterialSet = (input: {
     );
     const recipientShareCredentialByCoordinate = new Map(
         input.recipientShareCredentials.map((credential) => [
-            compactVssRecipientShareCoordinateKey(
+            vssPublicRecipientShareCoordinateKey(
                 credential.sourceTrusteeRosterPosition,
                 credential.recipientRosterPosition,
                 credential.rnsLimbIndex,
@@ -1146,9 +1146,9 @@ export const createCompactVssShareLinkageProofMaterialSet = (input: {
         sourceTrusteeRosterPosition: number,
         rnsLimbIndex: number,
         shamirCoefficientIndex: number,
-    ): CompactVssCoefficientCredential => {
+    ): VssPublicCoefficientCredential => {
         const credential = coefficientCredentialByCoordinate.get(
-            compactVssShareLinkageCoordinateKey(
+            vssShareLinkageCoordinateKey(
                 sourceTrusteeRosterPosition,
                 rnsLimbIndex,
                 shamirCoefficientIndex,
@@ -1166,9 +1166,9 @@ export const createCompactVssShareLinkageProofMaterialSet = (input: {
         sourceTrusteeRosterPosition: number,
         recipientRosterPosition: number,
         rnsLimbIndex: number,
-    ): CompactVssRecipientShareCredential => {
+    ): VssPublicRecipientShareCredential => {
         const credential = recipientShareCredentialByCoordinate.get(
-            compactVssRecipientShareCoordinateKey(
+            vssPublicRecipientShareCoordinateKey(
                 sourceTrusteeRosterPosition,
                 recipientRosterPosition,
                 rnsLimbIndex,
@@ -1308,7 +1308,7 @@ export const createCompactVssShareLinkageProofMaterialSet = (input: {
                     'Compact VSS share linkage proof record requires at least one covered recipient.',
                 );
             }
-            const compactVssShareLinkage = {
+            const vssShareLinkage = {
                 ...primaryLinkageItemRecord,
                 publicMatrixSeedHash: statement.publicMatrixSeedHash,
                 shareLinkageStatementRoot: statement.statementRoot,
@@ -1341,18 +1341,18 @@ export const createCompactVssShareLinkageProofMaterialSet = (input: {
                 sourceTrusteeRosterPosition,
                 proofRecordIndex,
             });
-            const generatedProof = input.generateCompactVssShareLinkageProof({
+            const generatedProof = input.generateVssShareLinkageProof({
                 context: {
                     ceremonyId: statement.ceremonyId,
                     manifestHash: statement.manifestHash,
                     rosterHash: statement.rosterHash,
-                    trusteeIdentity: compactVssShareLinkageProofFamily,
+                    trusteeIdentity: vssShareLinkageProofFamily,
                     trusteeRosterPosition: 0,
                     setupEpoch: statement.setupEpoch,
                     shareLinkageStatementRoot: statement.statementRoot,
                 },
                 ringDegree,
-                compactVssShareLinkage,
+                vssShareLinkage,
                 coefficientMessagesByShamirIndex,
                 recipientShareMessages: recipientShareMessagesByItem[0],
                 coefficientOpeningRandomnessByShamirIndex,
@@ -1370,13 +1370,13 @@ export const createCompactVssShareLinkageProofMaterialSet = (input: {
                 'compact VSS share linkage proofBytesHex',
             );
             const proofRecordWithoutRoot = {
-                objectType: 'CompactVssShareLinkageProofRecord',
+                objectType: 'VssShareLinkageProofRecord',
                 objectVersion: 1,
-                proofFamily: compactVssShareLinkageProofFamily,
+                proofFamily: vssShareLinkageProofFamily,
                 linkageItems,
-                compactVssShareLinkage,
+                vssShareLinkage,
                 proofBytesHash: hash512Hex(
-                    compactVssShareLinkageProofBytesHashDomain,
+                    vssShareLinkageProofBytesHashDomain,
                     [proofBytes],
                 ),
                 proofBytesBase64: encodeStandardBase64(proofBytes),
@@ -1391,9 +1391,9 @@ export const createCompactVssShareLinkageProofMaterialSet = (input: {
     }
 
     const proofMaterialSetWithoutRoot = {
-        objectType: 'CompactVssShareLinkageProofMaterialSet',
+        objectType: 'VssShareLinkageProofMaterialSet',
         objectVersion: 1,
-        proofFamily: compactVssShareLinkageProofFamily,
+        proofFamily: vssShareLinkageProofFamily,
         ceremonyId: statement.ceremonyId,
         manifestHash: statement.manifestHash,
         rosterHash: statement.rosterHash,
@@ -1425,14 +1425,14 @@ export const createCompactVssShareLinkageProofMaterialSet = (input: {
 // aggregate threshold commitment set to the share-linkage statement and proof
 // material, so the accepted-setup verifier recomputes this root over the compact
 // roots it already verified rather than trusting a separate threshold object.
-export const createCompactThresholdShareCommitmentBinding = (input: {
-    readonly coefficientCommitmentSet: CompactVssCoefficientCommitmentSet;
-    readonly statement: CompactVssShareLinkageStatement;
-    readonly aggregateThresholdCommitmentSet: CompactVssAggregateThresholdCommitmentSet;
+export const createThresholdShareCommitmentBinding = (input: {
+    readonly coefficientCommitmentSet: VssPublicCoefficientCommitmentSet;
+    readonly statement: VssShareLinkageStatement;
+    readonly aggregateThresholdCommitmentSet: VssPublicAggregateThresholdCommitmentSet;
     readonly shareLinkageProofMaterialSetRoot: ProtocolHash;
 }): Record<string, unknown> => {
     const bindingWithoutRoot = {
-        objectType: 'CompactThresholdShareCommitmentBinding',
+        objectType: 'ThresholdShareCommitmentBinding',
         objectVersion: 1,
         publicMatrixSeedHash:
             input.coefficientCommitmentSet.publicMatrixSeedHash,
@@ -1461,35 +1461,35 @@ export const createCompactThresholdShareCommitmentBinding = (input: {
 const sameSecretProofFamily = 'same-secret-linkage-anchor';
 const sameSecretRelation =
     'vss-constant-commitments-open-to-one-short-secret-across-q-share-limbs';
-const compactSameSecretBridgeRelation =
+const sameSecretBridgeRelation =
     'target-basis compact constant coefficient commitments bind to the same signed ternary trustee secret as the data-basis same-secret proof';
-const compactSameSecretBridgeIntegerSupport =
+const sameSecretBridgeIntegerSupport =
     'the bridge proof must show one centered ternary integer coefficient vector whose signed coefficients reduce into every bound data-basis and target-basis limb';
-const compactSameSecretBridgeSignedRepresentativeConvention =
+const sameSecretBridgeSignedRepresentativeConvention =
     'coefficients are interpreted as signed representatives before reduction into each data-basis or target-basis RNS prime';
-const compactVssCommitmentBinaryFormat =
-    'sealed-lattice-compact-vss-commitment-binary-v1';
-const compactSameSecretBridgeTargetBasisLimbOrder =
+const vssPublicCommitmentBinaryFormat =
+    'sealed-lattice-vss-public-commitment-binary-v1';
+const sameSecretBridgeTargetBasisLimbOrder =
     'target constant roots are ordered by contiguous target-basis rnsLimbIndex values starting at zero and bind the listed target-basis prime';
-const compactSameSecretBridgeProofFamily = 'compact-same-secret-bridge';
-const compactSameSecretBridgeProofBytesHashDomain =
-    'sealed-lattice/setup/compact-same-secret-bridge/proof-bytes-v1';
+const sameSecretBridgeProofFamily = 'same-secret-bridge';
+const sameSecretBridgeProofBytesHashDomain =
+    'sealed-lattice/setup/same-secret-bridge/proof-bytes-v1';
 
-export type CompactVssSameSecretBridgeTargetConstantRoot = {
+export type VssSameSecretBridgeTargetConstantRoot = {
     readonly rnsLimbIndex: number;
     readonly rnsPrime: number;
     readonly shamirCoefficientIndex: number;
     readonly coefficientCommitmentRoot: ProtocolHash;
 };
 
-export type CompactVssSameSecretBridgeTargetConstantCommitment = {
+export type VssSameSecretBridgeTargetConstantCommitment = {
     readonly rnsLimbIndex: number;
     readonly rnsPrime: number;
     readonly shamirCoefficientIndex: number;
-    readonly commitment: CompactVssCommitmentValue;
+    readonly commitment: VssPublicCommitmentValue;
 };
 
-export type CompactVssSameSecretBridgeStatement = {
+export type VssSameSecretBridgeStatement = {
     readonly objectType: string;
     readonly objectVersion: number;
     readonly proofFamily: string;
@@ -1510,15 +1510,15 @@ export type CompactVssSameSecretBridgeStatement = {
     readonly dataBasisRelation: string;
     readonly integerSupport: string;
     readonly signedRepresentativeConvention: string;
-    readonly compactCommitmentEncoding: string;
+    readonly vssPublicCommitmentEncoding: string;
     readonly targetBasisLimbOrder: string;
-    readonly targetConstantCoefficientCommitmentRoots: readonly CompactVssSameSecretBridgeTargetConstantRoot[];
-    readonly targetConstantCoefficientCommitments: readonly CompactVssSameSecretBridgeTargetConstantCommitment[];
+    readonly targetConstantCoefficientCommitmentRoots: readonly VssSameSecretBridgeTargetConstantRoot[];
+    readonly targetConstantCoefficientCommitments: readonly VssSameSecretBridgeTargetConstantCommitment[];
     readonly relation: string;
-    readonly compactSameSecretBridgeStatementRoot: ProtocolHash;
+    readonly sameSecretBridgeStatementRoot: ProtocolHash;
 };
 
-export type CompactVssSameSecretBridgeStatementSet = {
+export type VssSameSecretBridgeStatementSet = {
     readonly objectType: string;
     readonly objectVersion: number;
     readonly proofFamily: string;
@@ -1533,30 +1533,30 @@ export type CompactVssSameSecretBridgeStatementSet = {
     readonly participantCount: number;
     readonly targetRnsLimbCount: number;
     readonly thresholdDegree: number;
-    readonly compactCoefficientCommitmentRoot: ProtocolHash;
+    readonly coefficientCommitmentRoot: ProtocolHash;
     readonly sameSecretConsistencyRoot: ProtocolHash;
     readonly sameSecretProofSetRoot: ProtocolHash;
     readonly sameSecretProofFamilyBindingRoot: ProtocolHash;
     readonly integerSupport: string;
     readonly signedRepresentativeConvention: string;
-    readonly compactCommitmentEncoding: string;
+    readonly vssPublicCommitmentEncoding: string;
     readonly targetBasisLimbOrder: string;
-    readonly statementRecords: readonly CompactVssSameSecretBridgeStatement[];
-    readonly compactSameSecretBridgeStatementSetRoot: ProtocolHash;
+    readonly statementRecords: readonly VssSameSecretBridgeStatement[];
+    readonly sameSecretBridgeStatementSetRoot: ProtocolHash;
 };
 
 // The compact same-secret bridge statement set: per source trustee, it ties the
 // compact target-basis constant coefficient commitments to the accepted
 // data-basis same-secret proof, so the verifier recomputes the shared roots and
 // checks one bridge proof per trustee proves both bases open to one secret.
-export const createCompactVssSameSecretBridgeStatementSet = (input: {
+export const createVssSameSecretBridgeStatementSet = (input: {
     readonly setupContext: CollectiveBgvSetupContext;
     readonly publicMatrixSeedHash: ProtocolHash;
     readonly targetBasisHash: ProtocolHash;
-    readonly coefficientCommitmentSet: CompactVssCoefficientCommitmentSet;
+    readonly coefficientCommitmentSet: VssPublicCoefficientCommitmentSet;
     readonly sameSecretConsistency: SameSecretConsistencyStatementSet;
     readonly sameSecretProofs: SameSecretProofSet;
-}): CompactVssSameSecretBridgeStatementSet => {
+}): VssSameSecretBridgeStatementSet => {
     const { coefficientCommitmentSet } = input;
     const { ringDegree, participantCount, rnsLimbCount, thresholdDegree } =
         coefficientCommitmentSet;
@@ -1564,7 +1564,7 @@ export const createCompactVssSameSecretBridgeStatementSet = (input: {
         (
             coefficientSourceRecord,
             sourceTrusteeRosterPosition,
-        ): CompactVssSameSecretBridgeStatement => {
+        ): VssSameSecretBridgeStatement => {
             const sameSecretStatement =
                 input.sameSecretConsistency.statementRecords[
                     sourceTrusteeRosterPosition
@@ -1581,9 +1581,9 @@ export const createCompactVssSameSecretBridgeStatementSet = (input: {
                     'Compact same-secret bridge requires a same-secret statement and proof per source trustee.',
                 );
             }
-            const targetConstantCoefficientCommitmentRoots: CompactVssSameSecretBridgeTargetConstantRoot[] =
+            const targetConstantCoefficientCommitmentRoots: VssSameSecretBridgeTargetConstantRoot[] =
                 [];
-            const targetConstantCoefficientCommitments: CompactVssSameSecretBridgeTargetConstantCommitment[] =
+            const targetConstantCoefficientCommitments: VssSameSecretBridgeTargetConstantCommitment[] =
                 [];
             for (
                 let rnsLimbIndex = 0;
@@ -1617,7 +1617,7 @@ export const createCompactVssSameSecretBridgeStatementSet = (input: {
             }
 
             const statementWithoutRoot = {
-                objectType: 'CompactVssSameSecretBridgeStatement',
+                objectType: 'VssSameSecretBridgeStatement',
                 objectVersion: 1,
                 proofFamily: sameSecretProofFamily,
                 ...setupContextFields(input.setupContext),
@@ -1634,27 +1634,27 @@ export const createCompactVssSameSecretBridgeStatementSet = (input: {
                 sameSecretProofFamilyBindingRoot:
                     sameSecretStatement.sameSecretProofFamilyBindingRoot,
                 dataBasisRelation: sameSecretRelation,
-                integerSupport: compactSameSecretBridgeIntegerSupport,
+                integerSupport: sameSecretBridgeIntegerSupport,
                 signedRepresentativeConvention:
-                    compactSameSecretBridgeSignedRepresentativeConvention,
-                compactCommitmentEncoding: compactVssCommitmentBinaryFormat,
+                    sameSecretBridgeSignedRepresentativeConvention,
+                vssPublicCommitmentEncoding: vssPublicCommitmentBinaryFormat,
                 targetBasisLimbOrder:
-                    compactSameSecretBridgeTargetBasisLimbOrder,
+                    sameSecretBridgeTargetBasisLimbOrder,
                 targetConstantCoefficientCommitmentRoots,
                 targetConstantCoefficientCommitments,
-                relation: compactSameSecretBridgeRelation,
+                relation: sameSecretBridgeRelation,
             };
 
             return {
                 ...statementWithoutRoot,
-                compactSameSecretBridgeStatementRoot:
+                sameSecretBridgeStatementRoot:
                     deriveCanonicalObjectHash(statementWithoutRoot),
             };
         },
     );
 
     const statementSetWithoutRoot = {
-        objectType: 'CompactVssSameSecretBridgeStatementSet',
+        objectType: 'VssSameSecretBridgeStatementSet',
         objectVersion: 1,
         proofFamily: sameSecretProofFamily,
         ...setupContextFields(input.setupContext),
@@ -1664,49 +1664,49 @@ export const createCompactVssSameSecretBridgeStatementSet = (input: {
         participantCount,
         targetRnsLimbCount: rnsLimbCount,
         thresholdDegree,
-        compactCoefficientCommitmentRoot:
+        coefficientCommitmentRoot:
             coefficientCommitmentSet.coefficientCommitmentRoot,
         sameSecretConsistencyRoot:
             input.sameSecretConsistency.sameSecretConsistencyRoot,
         sameSecretProofSetRoot: input.sameSecretProofs.sameSecretProofSetRoot,
         sameSecretProofFamilyBindingRoot:
             input.sameSecretConsistency.sameSecretProofFamilyBindingRoot,
-        integerSupport: compactSameSecretBridgeIntegerSupport,
+        integerSupport: sameSecretBridgeIntegerSupport,
         signedRepresentativeConvention:
-            compactSameSecretBridgeSignedRepresentativeConvention,
-        compactCommitmentEncoding: compactVssCommitmentBinaryFormat,
-        targetBasisLimbOrder: compactSameSecretBridgeTargetBasisLimbOrder,
+            sameSecretBridgeSignedRepresentativeConvention,
+        vssPublicCommitmentEncoding: vssPublicCommitmentBinaryFormat,
+        targetBasisLimbOrder: sameSecretBridgeTargetBasisLimbOrder,
         statementRecords,
     };
 
     return {
         ...statementSetWithoutRoot,
-        compactSameSecretBridgeStatementSetRoot: deriveCanonicalObjectHash(
+        sameSecretBridgeStatementSetRoot: deriveCanonicalObjectHash(
             statementSetWithoutRoot,
         ),
     };
 };
 
-export type CompactSameSecretBridgeProofContext = {
+export type SameSecretBridgeProofContext = {
     readonly ceremonyId: string;
     readonly manifestHash: ProtocolHash;
     readonly rosterHash: ProtocolHash;
     readonly trusteeIdentity: string;
     readonly trusteeRosterPosition: number;
     readonly setupEpoch: string;
-    readonly compactSameSecretBridgeStatementRoot: ProtocolHash;
+    readonly sameSecretBridgeStatementRoot: ProtocolHash;
     readonly sameSecretStatementRoot: ProtocolHash;
     readonly sameSecretProofRoot: ProtocolHash;
     readonly sameSecretProofFamilyBindingRoot: ProtocolHash;
 };
 
 // The kernel-backed compact same-secret bridge proof (bound to the WASM
-// `GenerateCompactSameSecretBridgeProof` command by the SDK). Injected so the
+// `GenerateSameSecretBridgeProof` command by the SDK). Injected so the
 // protocol layer assembles the witness but never runs the certified prover.
-export type CompactSameSecretBridgeProofComputer = (input: {
-    readonly context: CompactSameSecretBridgeProofContext;
+export type SameSecretBridgeProofComputer = (input: {
+    readonly context: SameSecretBridgeProofContext;
     readonly ringDegree: number;
-    readonly compactSameSecretBridge: Record<string, unknown>;
+    readonly sameSecretBridge: Record<string, unknown>;
     readonly secretCoefficients: readonly number[];
     readonly negativeIndicatorCoefficients: readonly number[];
     readonly openingRandomnessByLimb: readonly (readonly (readonly number[])[])[];
@@ -1718,18 +1718,18 @@ export type CompactSameSecretBridgeProofComputer = (input: {
 // The source trustee's centered ternary secret coefficient vector, the same
 // secret the data-basis same-secret proof binds. The bridge proves the compact
 // target-basis constant commitments open to this exact vector.
-type CompactSameSecretBridgeSecretProvider = (input: {
+type SameSecretBridgeSecretProvider = (input: {
     readonly sourceTrusteeRosterPosition: number;
 }) => { readonly secretCoefficients: readonly number[] };
 
-type CompactSameSecretBridgeProofRandomnessProvider = (input: {
+type SameSecretBridgeProofRandomnessProvider = (input: {
     readonly sourceTrusteeRosterPosition: number;
 }) => { readonly seedHex: string; readonly nonceHex: string };
 
 // Optional per-trustee transported same-secret proof material, present only when
 // the data-basis same-secret proof is delivered by transport rather than
 // embedded; the bridge proof binds it so both bases reference one proof.
-type CompactSameSecretBridgeTransportedProofMaterialProvider = (input: {
+type SameSecretBridgeTransportedProofMaterialProvider = (input: {
     readonly sourceTrusteeRosterPosition: number;
 }) => Record<string, unknown> | undefined;
 
@@ -1738,13 +1738,13 @@ type CompactSameSecretBridgeTransportedProofMaterialProvider = (input: {
 // bytes hash and checks each proof, so this builder assembles the witness (the
 // trustee secret, its sign indicators, and the per-limb constant-coefficient
 // commitment randomness) and binds the proof bytes.
-export const createCompactVssSameSecretBridgeProofMaterialSet = (input: {
-    readonly statementSet: CompactVssSameSecretBridgeStatementSet;
-    readonly coefficientCredentials: readonly CompactVssCoefficientCredential[];
-    readonly bridgeSecret: CompactSameSecretBridgeSecretProvider;
-    readonly bridgeProofRandomness: CompactSameSecretBridgeProofRandomnessProvider;
-    readonly transportedSameSecretProofMaterial?: CompactSameSecretBridgeTransportedProofMaterialProvider;
-    readonly generateCompactSameSecretBridgeProof: CompactSameSecretBridgeProofComputer;
+export const createVssSameSecretBridgeProofMaterialSet = (input: {
+    readonly statementSet: VssSameSecretBridgeStatementSet;
+    readonly coefficientCredentials: readonly VssPublicCoefficientCredential[];
+    readonly bridgeSecret: SameSecretBridgeSecretProvider;
+    readonly bridgeProofRandomness: SameSecretBridgeProofRandomnessProvider;
+    readonly transportedSameSecretProofMaterial?: SameSecretBridgeTransportedProofMaterialProvider;
+    readonly generateSameSecretBridgeProof: SameSecretBridgeProofComputer;
 }): Record<string, unknown> => {
     const { statementSet } = input;
     const constantCoefficientRandomnessByCoordinate = new Map(
@@ -1789,9 +1789,9 @@ export const createCompactVssSameSecretBridgeProofMaterialSet = (input: {
                             targetConstantRoot.rnsLimbIndex,
                         ).map((column) => [...column]),
                 );
-            const compactSameSecretBridge = {
-                compactSameSecretBridgeStatementRoot:
-                    statementRecord.compactSameSecretBridgeStatementRoot,
+            const sameSecretBridge = {
+                sameSecretBridgeStatementRoot:
+                    statementRecord.sameSecretBridgeStatementRoot,
                 sameSecretStatementRoot:
                     statementRecord.sameSecretStatementRoot,
                 sameSecretProofRoot: statementRecord.sameSecretProofRoot,
@@ -1823,7 +1823,7 @@ export const createCompactVssSameSecretBridgeProofMaterialSet = (input: {
                 input.transportedSameSecretProofMaterial?.({
                     sourceTrusteeRosterPosition,
                 });
-            const generatedProof = input.generateCompactSameSecretBridgeProof({
+            const generatedProof = input.generateSameSecretBridgeProof({
                 context: {
                     ceremonyId: statementSet.ceremonyId,
                     manifestHash: statementSet.manifestHash,
@@ -1831,8 +1831,8 @@ export const createCompactVssSameSecretBridgeProofMaterialSet = (input: {
                     trusteeIdentity: statementRecord.trusteeIdentity,
                     trusteeRosterPosition: sourceTrusteeRosterPosition,
                     setupEpoch: statementSet.setupEpoch,
-                    compactSameSecretBridgeStatementRoot:
-                        statementRecord.compactSameSecretBridgeStatementRoot,
+                    sameSecretBridgeStatementRoot:
+                        statementRecord.sameSecretBridgeStatementRoot,
                     sameSecretStatementRoot:
                         statementRecord.sameSecretStatementRoot,
                     sameSecretProofRoot: statementRecord.sameSecretProofRoot,
@@ -1840,7 +1840,7 @@ export const createCompactVssSameSecretBridgeProofMaterialSet = (input: {
                         statementRecord.sameSecretProofFamilyBindingRoot,
                 },
                 ringDegree: statementRecord.ringDegree,
-                compactSameSecretBridge,
+                sameSecretBridge,
                 secretCoefficients,
                 negativeIndicatorCoefficients,
                 openingRandomnessByLimb,
@@ -1855,13 +1855,13 @@ export const createCompactVssSameSecretBridgeProofMaterialSet = (input: {
                 'compact same-secret bridge proofBytesHex',
             );
             const proofRecordWithoutRoot = {
-                objectType: 'CompactVssSameSecretBridgeProofRecord',
+                objectType: 'VssSameSecretBridgeProofRecord',
                 objectVersion: 1,
-                proofFamily: compactSameSecretBridgeProofFamily,
-                compactSameSecretBridgeStatementRoot:
-                    statementRecord.compactSameSecretBridgeStatementRoot,
+                proofFamily: sameSecretBridgeProofFamily,
+                sameSecretBridgeStatementRoot:
+                    statementRecord.sameSecretBridgeStatementRoot,
                 proofBytesHash: hash512Hex(
-                    compactSameSecretBridgeProofBytesHashDomain,
+                    sameSecretBridgeProofBytesHashDomain,
                     [proofBytes],
                 ),
                 proofBytesBase64: encodeStandardBase64(proofBytes),
@@ -1877,9 +1877,9 @@ export const createCompactVssSameSecretBridgeProofMaterialSet = (input: {
     );
 
     const proofMaterialSetWithoutRoot = {
-        objectType: 'CompactVssSameSecretBridgeProofMaterialSet',
+        objectType: 'VssSameSecretBridgeProofMaterialSet',
         objectVersion: 1,
-        proofFamily: compactSameSecretBridgeProofFamily,
+        proofFamily: sameSecretBridgeProofFamily,
         ceremonyId: statementSet.ceremonyId,
         manifestHash: statementSet.manifestHash,
         rosterHash: statementSet.rosterHash,
@@ -1891,14 +1891,14 @@ export const createCompactVssSameSecretBridgeProofMaterialSet = (input: {
         participantCount: statementSet.participantCount,
         targetRnsLimbCount: statementSet.targetRnsLimbCount,
         thresholdDegree: statementSet.thresholdDegree,
-        compactCoefficientCommitmentRoot:
-            statementSet.compactCoefficientCommitmentRoot,
+        coefficientCommitmentRoot:
+            statementSet.coefficientCommitmentRoot,
         sameSecretConsistencyRoot: statementSet.sameSecretConsistencyRoot,
         sameSecretProofSetRoot: statementSet.sameSecretProofSetRoot,
         sameSecretProofFamilyBindingRoot:
             statementSet.sameSecretProofFamilyBindingRoot,
-        compactSameSecretBridgeStatementSetRoot:
-            statementSet.compactSameSecretBridgeStatementSetRoot,
+        sameSecretBridgeStatementSetRoot:
+            statementSet.sameSecretBridgeStatementSetRoot,
         proofRecords,
     };
 
@@ -1955,21 +1955,21 @@ const bytesFromStandardBase64 = (
     return bytes;
 };
 
-export type TransportedCompactVssShareLinkageProofMaterialSet = Readonly<
+export type TransportedVssShareLinkageProofMaterialSet = Readonly<
     TransportedSetupProofMaterialSet & {
-        readonly objectType: 'SetupTransportedCompactVssShareLinkageProofMaterialSet';
-        readonly proofFamily: typeof compactVssShareLinkageProofFamily;
+        readonly objectType: 'SetupTransportedVssShareLinkageProofMaterialSet';
+        readonly proofFamily: typeof vssShareLinkageProofFamily;
     }
 >;
 
-export type TransportedCompactSameSecretBridgeProofMaterialSet = Readonly<
+export type TransportedSameSecretBridgeProofMaterialSet = Readonly<
     TransportedSetupProofMaterialSet & {
-        readonly objectType: 'SetupTransportedCompactSameSecretBridgeProofMaterialSet';
-        readonly proofFamily: typeof compactSameSecretBridgeProofFamily;
+        readonly objectType: 'SetupTransportedSameSecretBridgeProofMaterialSet';
+        readonly proofFamily: typeof sameSecretBridgeProofFamily;
     }
 >;
 
-type CompactProofMaterialTransportParameters = Readonly<{
+type ProofMaterialTransportParameters = Readonly<{
     readonly proofFamily: string;
     readonly proofBytesHashDomain: string;
     readonly transportSetObjectType: string;
@@ -1986,9 +1986,9 @@ type CompactProofMaterialTransportParameters = Readonly<{
 // fixture move helpers so a transported set verifies identically to the embedded
 // set it replaces, while staying small enough for the canonical string encoder
 // at production roster sizes.
-const moveCompactProofBytesToTransport = (
+const moveProofBytesToTransport = (
     proofMaterialSet: JsonRecord,
-    parameters: CompactProofMaterialTransportParameters,
+    parameters: ProofMaterialTransportParameters,
 ): Readonly<{
     readonly proofMaterialSet: JsonRecord;
     readonly transportedProofMaterialSet: TransportedSetupProofMaterialSet;
@@ -2032,7 +2032,7 @@ const moveCompactProofBytesToTransport = (
                 `${parameters.proofFamily} proofRecords.${String(proofIndex)}.proofBytesBase64 must produce at least one transported chunk.`,
             );
             const proofMaterialRoot = deriveCanonicalObjectHash({
-                objectType: 'CompactSetupProofMaterialReference',
+                objectType: 'SetupProofMaterialReference',
                 objectVersion: 1,
                 proofFamily: parameters.proofFamily,
                 proofBytesHash: proofRecord.proofBytesHash,
@@ -2102,53 +2102,53 @@ const moveCompactProofBytesToTransport = (
     };
 };
 
-export type BinaryChunkedCompactVssShareLinkageProofMaterialTransport =
+export type BinaryChunkedVssShareLinkageProofMaterialTransport =
     Readonly<{
         readonly proofMaterialSet: JsonRecord;
-        readonly transportedCompactVssShareLinkageProofMaterial: TransportedCompactVssShareLinkageProofMaterialSet;
+        readonly transportedVssShareLinkageProofMaterial: TransportedVssShareLinkageProofMaterialSet;
     }>;
 
-export const createBinaryChunkedCompactVssShareLinkageProofMaterialTransport = (
+export const createBinaryChunkedVssShareLinkageProofMaterialTransport = (
     proofMaterialSet: JsonRecord,
-): BinaryChunkedCompactVssShareLinkageProofMaterialTransport => {
-    const moved = moveCompactProofBytesToTransport(proofMaterialSet, {
-        proofFamily: compactVssShareLinkageProofFamily,
-        proofBytesHashDomain: compactVssShareLinkageProofBytesHashDomain,
+): BinaryChunkedVssShareLinkageProofMaterialTransport => {
+    const moved = moveProofBytesToTransport(proofMaterialSet, {
+        proofFamily: vssShareLinkageProofFamily,
+        proofBytesHashDomain: vssShareLinkageProofBytesHashDomain,
         transportSetObjectType:
-            'SetupTransportedCompactVssShareLinkageProofMaterialSet',
+            'SetupTransportedVssShareLinkageProofMaterialSet',
         transportMaterialObjectType:
-            'SetupTransportedCompactVssShareLinkageProofMaterial',
+            'SetupTransportedVssShareLinkageProofMaterial',
     });
 
     return {
         proofMaterialSet: moved.proofMaterialSet,
-        transportedCompactVssShareLinkageProofMaterial:
-            moved.transportedProofMaterialSet as TransportedCompactVssShareLinkageProofMaterialSet,
+        transportedVssShareLinkageProofMaterial:
+            moved.transportedProofMaterialSet as TransportedVssShareLinkageProofMaterialSet,
     };
 };
 
-export type BinaryChunkedCompactSameSecretBridgeProofMaterialTransport =
+export type BinaryChunkedSameSecretBridgeProofMaterialTransport =
     Readonly<{
         readonly proofMaterialSet: JsonRecord;
-        readonly transportedCompactSameSecretBridgeProofMaterial: TransportedCompactSameSecretBridgeProofMaterialSet;
+        readonly transportedSameSecretBridgeProofMaterial: TransportedSameSecretBridgeProofMaterialSet;
     }>;
 
-export const createBinaryChunkedCompactSameSecretBridgeProofMaterialTransport =
+export const createBinaryChunkedSameSecretBridgeProofMaterialTransport =
     (
         proofMaterialSet: JsonRecord,
-    ): BinaryChunkedCompactSameSecretBridgeProofMaterialTransport => {
-        const moved = moveCompactProofBytesToTransport(proofMaterialSet, {
-            proofFamily: compactSameSecretBridgeProofFamily,
-            proofBytesHashDomain: compactSameSecretBridgeProofBytesHashDomain,
+    ): BinaryChunkedSameSecretBridgeProofMaterialTransport => {
+        const moved = moveProofBytesToTransport(proofMaterialSet, {
+            proofFamily: sameSecretBridgeProofFamily,
+            proofBytesHashDomain: sameSecretBridgeProofBytesHashDomain,
             transportSetObjectType:
-                'SetupTransportedCompactSameSecretBridgeProofMaterialSet',
+                'SetupTransportedSameSecretBridgeProofMaterialSet',
             transportMaterialObjectType:
-                'SetupTransportedCompactSameSecretBridgeProofMaterial',
+                'SetupTransportedSameSecretBridgeProofMaterial',
         });
 
         return {
             proofMaterialSet: moved.proofMaterialSet,
-            transportedCompactSameSecretBridgeProofMaterial:
-                moved.transportedProofMaterialSet as TransportedCompactSameSecretBridgeProofMaterialSet,
+            transportedSameSecretBridgeProofMaterial:
+                moved.transportedProofMaterialSet as TransportedSameSecretBridgeProofMaterialSet,
         };
     };

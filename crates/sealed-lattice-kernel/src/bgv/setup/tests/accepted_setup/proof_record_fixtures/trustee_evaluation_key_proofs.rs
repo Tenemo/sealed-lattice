@@ -2,12 +2,12 @@ use super::super::*;
 use super::*;
 use rayon::prelude::*;
 
-use super::compact_vss_public_material::compact_vss_coefficient_randomness_i64_fixture;
+use super::vss_public_material::vss_public_coefficient_randomness_i64_fixture;
 
 use crate::bgv::setup::accepted_setup::{
     TrusteeEvaluationKeyStatementInputs, accepted_key_switch_decomposition_hash,
     trustee_evaluation_key_statement_from_package,
-    verified_compact_same_secret_bridge_material_from_package,
+    verified_same_secret_bridge_material_from_package,
 };
 use crate::bgv::setup::evaluation_key_share_material::EvaluationKeyShareProofFamily;
 use crate::bgv::setup::trustee_evaluation_key_proof::prove_evaluation_key_share;
@@ -36,19 +36,15 @@ pub(in super::super) fn trustee_evaluation_key_proofs_object(
         .expect("same-secret proof records");
     // The compact bridge material the verifier reconstructs; the compact package
     // embeds it so an empty transport request reconstructs it.
-    let verified_compact_same_secret_bridge =
-        package.get("compactSameSecretBridgeStatementSet").map(|_| {
-            verified_compact_same_secret_bridge_material_from_package(
-                package,
-                &serde_json::json!({}),
-            )
+    let verified_same_secret_bridge = package.get("sameSecretBridgeStatementSet").map(|_| {
+        verified_same_secret_bridge_material_from_package(package, &serde_json::json!({}))
             .expect("compact same-secret bridge material")
-        });
+    });
     assert!(
-        verified_compact_same_secret_bridge.is_some(),
+        verified_same_secret_bridge.is_some(),
         "the trustee evaluation-key fixture is the compact-bridge-bound terminal path"
     );
-    let ring_degree = package["compactSameSecretBridgeStatementSet"]["ringDegree"]
+    let ring_degree = package["sameSecretBridgeStatementSet"]["ringDegree"]
         .as_u64()
         .expect("compact bridge ring degree") as usize;
 
@@ -65,9 +61,7 @@ pub(in super::super) fn trustee_evaluation_key_proofs_object(
                 &TrusteeEvaluationKeyStatementInputs {
                     setup_package: package,
                     transported_key_switch_component_material: None,
-                    transported_constant_commitments: None,
-                    verified_compact_same_secret_bridge: verified_compact_same_secret_bridge
-                        .as_ref(),
+                    verified_same_secret_bridge: verified_same_secret_bridge.as_ref(),
                     round_one_aggregate_diagonals_by_level,
                     trustee_roster_position,
                 },
@@ -243,12 +237,12 @@ pub(in super::super) fn trustee_evaluation_key_witness_for_fixture(
     // target-basis limb, using the same deterministic coefficient randomness the
     // compact coefficient commitments were built with.
     let opening_randomness_by_limb = statement
-        .compact_same_secret_bridge
+        .same_secret_bridge
         .as_ref()
         .map(|bridge| {
             (0..bridge.target_rns_primes.len())
                 .map(|target_rns_limb_index| {
-                    compact_vss_coefficient_randomness_i64_fixture(
+                    vss_public_coefficient_randomness_i64_fixture(
                         trustee_roster_position,
                         target_rns_limb_index,
                         0,
@@ -267,14 +261,14 @@ pub(in super::super) fn trustee_evaluation_key_witness_for_fixture(
         private_vss_coefficient_messages_by_shamir_index: Vec::new(),
         private_vss_opening_randomness_by_shamir_index: Vec::new(),
         private_vss_carry_witnesses: Vec::new(),
-        compact_vss_coefficient_messages_by_shamir_index: Vec::new(),
-        compact_vss_recipient_share_messages: Vec::new(),
-        compact_vss_coefficient_opening_randomness_by_shamir_index: Vec::new(),
-        compact_vss_recipient_share_opening_randomness: Vec::new(),
-        compact_vss_carry_witnesses: Vec::new(),
-        compact_vss_recipient_share_messages_by_item: Vec::new(),
-        compact_vss_recipient_share_opening_randomness_by_item: Vec::new(),
-        compact_vss_carry_witnesses_by_item: Vec::new(),
+        vss_public_coefficient_messages_by_shamir_index: Vec::new(),
+        vss_public_recipient_share_messages: Vec::new(),
+        vss_public_coefficient_opening_randomness_by_shamir_index: Vec::new(),
+        vss_public_recipient_share_opening_randomness: Vec::new(),
+        vss_public_carry_witnesses: Vec::new(),
+        vss_public_recipient_share_messages_by_item: Vec::new(),
+        vss_public_recipient_share_opening_randomness_by_item: Vec::new(),
+        vss_public_carry_witnesses_by_item: Vec::new(),
         target_decryption_message_vectors: Vec::new(),
         target_decryption_opening_randomness_by_commitment: Vec::new(),
     }

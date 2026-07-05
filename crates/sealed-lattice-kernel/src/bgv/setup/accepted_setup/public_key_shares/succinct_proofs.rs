@@ -1,6 +1,6 @@
 use super::common::*;
 
-use super::super::compact_same_secret_bridge_verification::VerifiedCompactSameSecretBridgeMaterial;
+use super::super::same_secret_bridge_verification::VerifiedSameSecretBridgeMaterial;
 use super::shares::*;
 use super::succinct_proof_transport::*;
 use super::*;
@@ -33,7 +33,7 @@ fn public_key_share_succinct_proofs_have_terminal_dependents(setup_package: &Val
 pub(in super::super) fn verify_optional_public_key_share_succinct_proofs(
     setup_package: &Value,
     request: &Value,
-    verified_compact_same_secret_bridge: Option<&VerifiedCompactSameSecretBridgeMaterial>,
+    verified_same_secret_bridge: Option<&VerifiedSameSecretBridgeMaterial>,
 ) -> CanonicalResult<Option<Value>> {
     let material_set = setup_package.get("publicKeyShareMaterial");
     let proof_set = setup_package.get("publicKeyShareSuccinctProofs");
@@ -113,20 +113,6 @@ pub(in super::super) fn verify_optional_public_key_share_succinct_proofs(
     let proof_records = public_key_share_proof_records_by_roster_position(setup_package)?;
     let same_secret_records = same_secret_statement_records_by_roster_position(setup_package)?;
     let same_secret_proof_bindings = same_secret_proof_bindings_from_package(setup_package)?;
-    // On the compact path the public-key share statements anchor to the compact
-    // same-secret bridge's target constant commitments (verified upstream before
-    // this phase), so the full transported same-secret constant commitments are
-    // neither present nor rebuilt. On the full-VSS path they remain the anchor.
-    let transported_constant_commitments = if verified_compact_same_secret_bridge.is_some() {
-        None
-    } else {
-        Some(
-            same_secret_transported_constant_commitments_by_roster_position(
-                setup_package,
-                request,
-            )?,
-        )
-    };
     if public_key_share_material_uses_transport(material_set)
         && request.get("transportedPublicKeyShareMaterial").is_none()
     {
@@ -264,7 +250,6 @@ pub(in super::super) fn verify_optional_public_key_share_succinct_proofs(
         )?));
     }
     let verification_context = PublicKeyShareSuccinctProofVerificationContext {
-        setup_package,
         request,
         setup_context,
         public_matrix_seed_hash,
@@ -273,8 +258,7 @@ pub(in super::super) fn verify_optional_public_key_share_succinct_proofs(
         same_secret_records: &same_secret_records,
         same_secret_proof_bindings: &same_secret_proof_bindings,
         material_bindings: &material_bindings,
-        transported_constant_commitments: transported_constant_commitments.as_deref(),
-        verified_compact_same_secret_bridge,
+        verified_same_secret_bridge,
     };
     let mut roster_position_counts: BTreeMap<u64, usize> = BTreeMap::new();
     for succinct_proof_record in proof_records_array {
@@ -358,7 +342,6 @@ pub(in super::super) fn verify_public_key_material_acceptance_boundary(
 }
 
 struct PublicKeyShareSuccinctProofVerificationContext<'a> {
-    setup_package: &'a Value,
     request: &'a Value,
     setup_context: &'a Value,
     public_matrix_seed_hash: &'a str,
@@ -367,9 +350,7 @@ struct PublicKeyShareSuccinctProofVerificationContext<'a> {
     same_secret_records: &'a BTreeMap<u64, Value>,
     same_secret_proof_bindings: &'a BTreeMap<u64, SameSecretProofBinding>,
     material_bindings: &'a BTreeMap<u64, PublicKeyShareMaterialBinding>,
-    transported_constant_commitments:
-        Option<&'a BTreeMap<u64, Vec<super::commitment::SetupCommitmentValue>>>,
-    verified_compact_same_secret_bridge: Option<&'a VerifiedCompactSameSecretBridgeMaterial>,
+    verified_same_secret_bridge: Option<&'a VerifiedSameSecretBridgeMaterial>,
 }
 
 fn verify_public_key_share_succinct_proof_record(
@@ -547,97 +528,54 @@ fn verify_public_key_share_succinct_proof_record(
     }
     // The pk relation opens exactly the limb-zero constant commitment the
     // same-secret proof binds. Compact packages carry that commitment through
-    // the compact same-secret bridge statement; full-VSS packages rebuild the
-    // limb-zero BDLOP commitment from transported material.
-    let (ring_degree, same_secret_linkage, compact_same_secret_bridge) = if let Some(
-        verified_compact_same_secret_bridge,
-    ) =
-        context.verified_compact_same_secret_bridge
+    // the compact same-secret bridge statement.
+    let verified_same_secret_bridge = context
+        .verified_same_secret_bridge
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "compact same-secret bridge material was required for public-key share succinct proof verification",
+            )
+        })?;
+    let bridge_binding =
+        verified_same_secret_bridge.statement_for_roster_position(trustee_roster_position)?;
+    if bridge_binding.trustee_identity != same_secret_proof_binding.trustee_identity
+        || bridge_binding.trustee_secret_commitment_root
+            != same_secret_proof_binding.trustee_secret_commitment_root
+        || bridge_binding.same_secret_statement_root
+            != same_secret_proof_binding.same_secret_statement_root
+        || bridge_binding.same_secret_proof_root != same_secret_proof_binding.same_secret_proof_root
+        || bridge_binding.same_secret_proof_family_binding_root
+            != same_secret_proof_binding.same_secret_proof_family_binding_root
     {
-        let compact_bridge_binding = verified_compact_same_secret_bridge
-            .statement_for_roster_position(trustee_roster_position)?;
-        if compact_bridge_binding.trustee_identity != same_secret_proof_binding.trustee_identity
-            || compact_bridge_binding.trustee_secret_commitment_root
-                != same_secret_proof_binding.trustee_secret_commitment_root
-            || compact_bridge_binding.same_secret_statement_root
-                != same_secret_proof_binding.same_secret_statement_root
-            || compact_bridge_binding.same_secret_proof_root
-                != same_secret_proof_binding.same_secret_proof_root
-            || compact_bridge_binding.same_secret_proof_family_binding_root
-                != same_secret_proof_binding.same_secret_proof_family_binding_root
-        {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::ComponentMismatch,
-                "compact same-secret bridge statement must match the verified same-secret proof binding",
-            ));
-        }
-        let ring_degree =
-            usize::try_from(value_u64(proof_record, "ringDegree")?).map_err(|_| {
-                CanonicalError::new(
-                    CanonicalErrorCode::MalformedLength,
-                    "public-key share succinct proof ringDegree does not fit usize",
-                )
-            })?;
-        if compact_bridge_binding
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ComponentMismatch,
+            "compact same-secret bridge statement must match the verified same-secret proof binding",
+        ));
+    }
+    let ring_degree = usize::try_from(value_u64(proof_record, "ringDegree")?).map_err(|_| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "public-key share succinct proof ringDegree does not fit usize",
+        )
+    })?;
+    if bridge_binding.statement.target_rns_primes.is_empty()
+        || bridge_binding
             .statement
-            .target_rns_primes
+            .target_constant_commitment_roots
             .is_empty()
-            || compact_bridge_binding
-                .statement
-                .target_constant_commitment_roots
-                .is_empty()
-            || compact_bridge_binding
-                .statement
-                .target_constant_commitments
-                .is_empty()
-        {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "compact same-secret bridge statement must carry the limb-zero target commitment",
-            ));
-        }
-        (
-            ring_degree,
-            None,
-            Some(compact_bridge_binding.statement.clone()),
-        )
-    } else {
-        let transported_constant_commitments =
-            context.transported_constant_commitments.ok_or_else(|| {
-                CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
-                    "transported same-secret constant commitments were required for full-VSS public-key proof verification",
-                )
-            })?;
-        let mut constant_commitments = same_secret_constant_commitment_values_from_material(
-            context.setup_package,
-            trustee_roster_position,
-            transported_constant_commitments,
-        )?;
-        if constant_commitments.is_empty() {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "public-key share succinct proof requires the limb-zero constant commitment opening",
-            ));
-        }
-        // One commitment opening suffices: congruence over the commitment modulus product plus ternary support re-identifies the share secret as the anchor's short secret, so only the limb-zero constant commitment is replayed here.
-        let limb_zero_commitment = constant_commitments.remove(0);
-        let ring_degree = limb_zero_commitment.ring_degree;
-        if value_u64(proof_record, "ringDegree")? != ring_degree as u64 {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "public-key share succinct proof ringDegree must match the rebuilt statement",
-            ));
-        }
-        (
-            ring_degree,
-            Some(SameSecretLinkageStatement {
-                public_matrix_seed_hash: context.public_matrix_seed_hash.to_string(),
-                commitments: vec![limb_zero_commitment],
-            }),
-            None,
-        )
-    };
+        || bridge_binding
+            .statement
+            .target_constant_commitments
+            .is_empty()
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "compact same-secret bridge statement must carry the limb-zero target commitment",
+        ));
+    }
+    let same_secret_linkage: Option<SameSecretLinkageStatement> = None;
+    let same_secret_bridge = Some(bridge_binding.statement.clone());
     let statement = TrusteeEvaluationKeyStatement {
         context: SuccinctSetupProofContext {
             proof_family: PUBLIC_KEY_SHARE_PROOF_FAMILY.to_string(),
@@ -668,8 +606,8 @@ fn verify_public_key_share_succinct_proof_record(
             component_b_by_digit: vec![material_binding.coefficients_by_limb.clone()],
             round_one_aggregate_diagonal: Vec::new(),
         }],
-        compact_vss_share_linkage: None,
-        compact_same_secret_bridge,
+        vss_share_linkage: None,
+        same_secret_bridge,
         same_secret_linkage,
         private_vss_share: None,
         target_decryption_share: None,

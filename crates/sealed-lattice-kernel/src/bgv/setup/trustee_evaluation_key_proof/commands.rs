@@ -8,11 +8,12 @@ use super::proof_codec::{
 };
 use super::prover::prove_evaluation_key_share;
 use super::relation::{
-    CompactSameSecretBridgeStatement, CompactVssShareLinkageCommitment, CompactVssShareLinkageItem,
-    CompactVssShareLinkageStatement, EvaluationKeyShareDescriptor, EvaluationKeyShareKind,
+    EvaluationKeyShareDescriptor, EvaluationKeyShareKind, SameSecretBridgeStatement,
     SameSecretLinkageStatement, SuccinctSetupProofContext, SuccinctSetupProofFamilyShape,
-    TrusteeEvaluationKeyStatement, TrusteeEvaluationKeyWitness,
+    TrusteeEvaluationKeyStatement, TrusteeEvaluationKeyWitness, VssShareLinkageCommitment,
+    VssShareLinkageItem, VssShareLinkageStatement,
 };
+#[cfg(any(feature = "target-decryption-development-commands", test))]
 use super::relation::{LimbColumnLayout, PHASE_TWO_COLUMN_COUNT, TargetDecryptionMessageClaimKind};
 use super::relation::{
     TargetDecryptionShareLimbStatement, TargetDecryptionShareRoleStatement,
@@ -23,29 +24,29 @@ use crate::bgv::parameters::DATA_PRIMES;
 use crate::bgv::setup::commitment::{
     SETUP_COMMITMENT_MODULUS_LIMB_INDICES, parse_setup_commitment_full_value,
 };
-use crate::bgv::setup::compact_vss_commitment::{
-    COMPACT_VSS_OUTPUT_COORDINATE_COUNT, COMPACT_VSS_RANDOMNESS_COLUMN_COUNT,
-};
 use crate::bgv::setup::setup_proof::{
     SETUP_PROOF_MATERIAL_ENCODING, SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
     SetupProofMaterialTransportHashes, setup_proof_material_transport_hashes,
     verified_setup_proof_material_chunks_from_request,
 };
+use crate::bgv::setup::vss_commitment::{
+    VSS_PUBLIC_OUTPUT_COORDINATE_COUNT, VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT,
+};
 use crate::hashing::{derive_canonical_object_hash, hash512_hex, to_hex};
 
 const PROOF_RANDOMNESS_SEED_BYTES: usize = 64;
 const PROOF_RANDOMNESS_NONCE_BYTES: usize = 64;
-const COMPACT_VSS_SHARE_LINKAGE_PROOF_BYTES_HASH_DOMAIN: &str =
-    "sealed-lattice/setup/compact-vss-share-linkage/proof-bytes-v1";
-const COMPACT_VSS_SHARE_LINKAGE_TRANSPORT_SET_OBJECT_TYPE: &str =
-    "SetupTransportedCompactVssShareLinkageProofMaterialSet";
-const COMPACT_VSS_SHARE_LINKAGE_TRANSPORT_OBJECT_TYPE: &str =
-    "SetupTransportedCompactVssShareLinkageProofMaterial";
+const VSS_SHARE_LINKAGE_PROOF_BYTES_HASH_DOMAIN: &str =
+    "sealed-lattice/setup/vss-share-linkage/proof-bytes-v1";
+const VSS_SHARE_LINKAGE_TRANSPORT_SET_OBJECT_TYPE: &str =
+    "SetupTransportedVssShareLinkageProofMaterialSet";
+const VSS_SHARE_LINKAGE_TRANSPORT_OBJECT_TYPE: &str =
+    "SetupTransportedVssShareLinkageProofMaterial";
 const TARGET_DECRYPTION_SMUDGING_COMMITMENT_ROLE: &str =
     "target-decryption-smudging-polynomial-coefficient";
 const TARGET_DECRYPTION_PROOF_TARGET_ROLES: [&str; 2] = ["targetId", "targetOrder"];
 
-pub(in crate::bgv::setup) struct CompactVssCommandCommitmentExpectation<'a> {
+pub(in crate::bgv::setup) struct VssPublicCommandCommitmentExpectation<'a> {
     pub(in crate::bgv::setup) field_name: String,
     pub(in crate::bgv::setup) root: &'a str,
     pub(in crate::bgv::setup) role: &'a str,
@@ -86,14 +87,14 @@ pub(crate) fn generate_trustee_evaluation_key_proof_from_request(
         private_vss_coefficient_messages_by_shamir_index: Vec::new(),
         private_vss_opening_randomness_by_shamir_index: Vec::new(),
         private_vss_carry_witnesses: Vec::new(),
-        compact_vss_coefficient_messages_by_shamir_index: Vec::new(),
-        compact_vss_recipient_share_messages: Vec::new(),
-        compact_vss_coefficient_opening_randomness_by_shamir_index: Vec::new(),
-        compact_vss_recipient_share_opening_randomness: Vec::new(),
-        compact_vss_carry_witnesses: Vec::new(),
-        compact_vss_recipient_share_messages_by_item: Vec::new(),
-        compact_vss_recipient_share_opening_randomness_by_item: Vec::new(),
-        compact_vss_carry_witnesses_by_item: Vec::new(),
+        vss_public_coefficient_messages_by_shamir_index: Vec::new(),
+        vss_public_recipient_share_messages: Vec::new(),
+        vss_public_coefficient_opening_randomness_by_shamir_index: Vec::new(),
+        vss_public_recipient_share_opening_randomness: Vec::new(),
+        vss_public_carry_witnesses: Vec::new(),
+        vss_public_recipient_share_messages_by_item: Vec::new(),
+        vss_public_recipient_share_opening_randomness_by_item: Vec::new(),
+        vss_public_carry_witnesses_by_item: Vec::new(),
         target_decryption_message_vectors: Vec::new(),
         target_decryption_opening_randomness_by_commitment: Vec::new(),
     };
@@ -148,11 +149,11 @@ fn statement_bound_proof_randomness_seed_hex(
     }))
 }
 
-pub(crate) fn generate_compact_vss_share_linkage_proof_from_request(
+pub(crate) fn generate_vss_share_linkage_proof_from_request(
     request: &Value,
 ) -> CanonicalResult<Value> {
-    let statement = compact_vss_share_linkage_statement_from_request(request)?;
-    let witness = compact_vss_share_linkage_witness_from_request(request)?;
+    let statement = vss_share_linkage_statement_from_request(request)?;
+    let witness = vss_share_linkage_witness_from_request(request)?;
     let proof_randomness_seed_hex = read_string(request, "proofRandomnessSeedHex")?;
     let proof_randomness_nonce_hex = read_string(request, "proofRandomnessNonceHex")?;
     let bound_proof_randomness_seed_hex = statement_bound_proof_randomness_seed_hex(
@@ -163,13 +164,13 @@ pub(crate) fn generate_compact_vss_share_linkage_proof_from_request(
     let proof = prove_evaluation_key_share(&statement, &witness, &bound_proof_randomness_seed_hex)?;
     let proof_bytes = encode_trustee_evaluation_key_proof(&proof);
     let compact_statement = statement
-        .compact_vss_share_linkage
+        .vss_share_linkage
         .as_ref()
         .ok_or_else(|| invalid_succinct_setup_proof("compact share-linkage statement missing"))?;
 
     Ok(json!({
         "ok": true,
-        "operation": "generateCompactVssShareLinkageProof",
+        "operation": "generateVssShareLinkageProof",
         "proofFamily": statement.context.proof_family,
         "statementHash": to_hex(&statement.statement_hash()),
         "limbCount": statement.proof_limb_count(),
@@ -180,21 +181,21 @@ pub(crate) fn generate_compact_vss_share_linkage_proof_from_request(
     }))
 }
 
-pub(crate) fn verify_compact_vss_share_linkage_proof_from_request(
+pub(crate) fn verify_vss_share_linkage_proof_from_request(
     request: &Value,
 ) -> CanonicalResult<Value> {
-    let statement = compact_vss_share_linkage_statement_from_request(request)?;
+    let statement = vss_share_linkage_statement_from_request(request)?;
     let proof_bytes = read_hex_bytes(request, "proofBytesHex")?;
     let proof = decode_trustee_evaluation_key_proof(&statement, &proof_bytes)?;
     verify_evaluation_key_share(&statement, &proof)?;
     let compact_statement = statement
-        .compact_vss_share_linkage
+        .vss_share_linkage
         .as_ref()
         .ok_or_else(|| invalid_succinct_setup_proof("compact share-linkage statement missing"))?;
 
     Ok(json!({
         "ok": true,
-        "operation": "verifyCompactVssShareLinkageProof",
+        "operation": "verifyVssShareLinkageProof",
         "proofFamily": statement.context.proof_family,
         "statementHash": to_hex(&statement.statement_hash()),
         "limbCount": statement.proof_limb_count(),
@@ -204,7 +205,7 @@ pub(crate) fn verify_compact_vss_share_linkage_proof_from_request(
     }))
 }
 
-struct CompactVssShareLinkageMaterialRecordStatementInput<'a> {
+struct VssShareLinkageMaterialRecordStatementInput<'a> {
     proof_statement: &'a Value,
     statement: &'a Value,
     statement_root: &'a str,
@@ -215,7 +216,7 @@ struct CompactVssShareLinkageMaterialRecordStatementInput<'a> {
     threshold_degree: usize,
 }
 
-struct CompactVssShareLinkagePublicRecordInput<'a> {
+struct VssShareLinkagePublicRecordInput<'a> {
     item: &'a Value,
     statement: &'a Value,
     coefficient_commitment_set: &'a Value,
@@ -253,14 +254,14 @@ fn array_field<'a>(value: &'a Value, field_name: &str) -> CanonicalResult<&'a Ve
         .ok_or_else(|| invalid_succinct_setup_proof(format!("{field_name} must be an array")))
 }
 
-fn compact_vss_share_linkage_item_values(proof_statement: &Value) -> CanonicalResult<Vec<&Value>> {
+fn vss_share_linkage_item_values(proof_statement: &Value) -> CanonicalResult<Vec<&Value>> {
     let mut items = vec![proof_statement];
     match proof_statement.get("additionalLinkageItems") {
         None => {}
         Some(Value::Array(additional_items)) => items.extend(additional_items.iter()),
         Some(_) => {
             return Err(invalid_succinct_setup_proof(
-                "compactVssShareLinkage.additionalLinkageItems must be an array",
+                "vssShareLinkage.additionalLinkageItems must be an array",
             ));
         }
     }
@@ -268,8 +269,8 @@ fn compact_vss_share_linkage_item_values(proof_statement: &Value) -> CanonicalRe
     Ok(items)
 }
 
-fn verify_compact_vss_share_linkage_material_record_statement(
-    input: CompactVssShareLinkageMaterialRecordStatementInput<'_>,
+fn verify_vss_share_linkage_material_record_statement(
+    input: VssShareLinkageMaterialRecordStatementInput<'_>,
 ) -> CanonicalResult<Vec<Value>> {
     for (field_name, expected_value) in [
         (
@@ -285,7 +286,7 @@ fn verify_compact_vss_share_linkage_material_record_statement(
         )?;
     }
 
-    let items = compact_vss_share_linkage_item_values(input.proof_statement)?;
+    let items = vss_share_linkage_item_values(input.proof_statement)?;
     if items.is_empty() {
         return Err(invalid_succinct_setup_proof(
             "compact share-linkage proof statement must cover at least one item",
@@ -293,27 +294,25 @@ fn verify_compact_vss_share_linkage_material_record_statement(
     }
     let mut coverage = Vec::with_capacity(items.len());
     for (item_index, &item) in items.iter().enumerate() {
-        coverage.push(
-            verify_compact_vss_share_linkage_item_against_public_records(
-                CompactVssShareLinkagePublicRecordInput {
-                    item,
-                    statement: input.statement,
-                    coefficient_commitment_set: input.coefficient_commitment_set,
-                    recipient_share_commitment_set: input.recipient_share_commitment_set,
-                    participant_count: input.participant_count,
-                    target_rns_limb_count: input.target_rns_limb_count,
-                    threshold_degree: input.threshold_degree,
-                    item_index,
-                },
-            )?,
-        );
+        coverage.push(verify_vss_share_linkage_item_against_public_records(
+            VssShareLinkagePublicRecordInput {
+                item,
+                statement: input.statement,
+                coefficient_commitment_set: input.coefficient_commitment_set,
+                recipient_share_commitment_set: input.recipient_share_commitment_set,
+                participant_count: input.participant_count,
+                target_rns_limb_count: input.target_rns_limb_count,
+                threshold_degree: input.threshold_degree,
+                item_index,
+            },
+        )?);
     }
 
     Ok(coverage)
 }
 
-fn verify_compact_vss_share_linkage_item_against_public_records(
-    input: CompactVssShareLinkagePublicRecordInput<'_>,
+fn verify_vss_share_linkage_item_against_public_records(
+    input: VssShareLinkagePublicRecordInput<'_>,
 ) -> CanonicalResult<Value> {
     let item = input.item;
     let statement = input.statement;
@@ -557,14 +556,14 @@ fn verify_compact_vss_share_linkage_item_against_public_records(
     }))
 }
 
-pub(crate) fn verify_compact_vss_share_linkage_proof_material_set_from_request(
+pub(crate) fn verify_vss_share_linkage_proof_material_set_from_request(
     request: &Value,
 ) -> CanonicalResult<Value> {
     let statement = request.get("statement").ok_or_else(|| {
         invalid_succinct_setup_proof("compact share-linkage material statement must be present")
     })?;
     let statement_verification =
-        crate::bgv::setup::compact_vss_commitment::verify_compact_vss_share_linkage_statement_request(request)?;
+        crate::bgv::setup::vss_commitment::verify_vss_share_linkage_statement_request(request)?;
     let statement_root = read_string(&statement_verification, "statementRoot")?;
     let participant_count = usize::try_from(read_u64(&statement_verification, "participantCount")?)
         .map_err(|_| invalid_succinct_setup_proof("participantCount does not fit usize"))?;
@@ -593,7 +592,7 @@ pub(crate) fn verify_compact_vss_share_linkage_proof_material_set_from_request(
 
     compare_string_value(
         read_string(proof_material_set, "objectType")?,
-        "CompactVssShareLinkageProofMaterialSet",
+        "VssShareLinkageProofMaterialSet",
         "compact share-linkage proof material set objectType",
     )?;
     compare_u64_value(
@@ -602,7 +601,7 @@ pub(crate) fn verify_compact_vss_share_linkage_proof_material_set_from_request(
         "compact share-linkage proof material set objectVersion",
     )?;
     for (field_name, expected_value) in [
-        ("proofFamily", COMPACT_VSS_SHARE_LINKAGE_PROOF_FAMILY),
+        ("proofFamily", VSS_SHARE_LINKAGE_PROOF_FAMILY),
         ("ceremonyId", read_string(statement, "ceremonyId")?),
         ("setupEpoch", read_string(statement, "setupEpoch")?),
     ] {
@@ -675,7 +674,7 @@ pub(crate) fn verify_compact_vss_share_linkage_proof_material_set_from_request(
     for (proof_record_index, proof_record) in proof_records.iter().enumerate() {
         compare_string_value(
             read_string(proof_record, "objectType")?,
-            "CompactVssShareLinkageProofRecord",
+            "VssShareLinkageProofRecord",
             "compact share-linkage proof record objectType",
         )?;
         compare_u64_value(
@@ -685,19 +684,18 @@ pub(crate) fn verify_compact_vss_share_linkage_proof_material_set_from_request(
         )?;
         compare_string_value(
             read_string(proof_record, "proofFamily")?,
-            COMPACT_VSS_SHARE_LINKAGE_PROOF_FAMILY,
+            VSS_SHARE_LINKAGE_PROOF_FAMILY,
             "compact share-linkage proof record proofFamily",
         )?;
 
-        let compact_vss_share_linkage =
-            proof_record.get("compactVssShareLinkage").ok_or_else(|| {
-                invalid_succinct_setup_proof(
-                    "compact share-linkage proof record compactVssShareLinkage must be present",
-                )
-            })?;
-        let coverage = verify_compact_vss_share_linkage_material_record_statement(
-            CompactVssShareLinkageMaterialRecordStatementInput {
-                proof_statement: compact_vss_share_linkage,
+        let vss_share_linkage = proof_record.get("vssShareLinkage").ok_or_else(|| {
+            invalid_succinct_setup_proof(
+                "compact share-linkage proof record vssShareLinkage must be present",
+            )
+        })?;
+        let coverage = verify_vss_share_linkage_material_record_statement(
+            VssShareLinkageMaterialRecordStatementInput {
+                proof_statement: vss_share_linkage,
                 statement,
                 statement_root,
                 coefficient_commitment_set,
@@ -761,11 +759,11 @@ pub(crate) fn verify_compact_vss_share_linkage_proof_material_set_from_request(
             }
         }
 
-        let resolved_proof_bytes = resolve_compact_vss_share_linkage_proof_bytes(
+        let resolved_proof_bytes = resolve_vss_share_linkage_proof_bytes(
             proof_record,
             request,
             &coverage,
-            compact_vss_share_linkage,
+            vss_share_linkage,
         )?;
         let proof_bytes = resolved_proof_bytes.proof_bytes;
         total_proof_byte_length = total_proof_byte_length
@@ -783,16 +781,16 @@ pub(crate) fn verify_compact_vss_share_linkage_proof_material_set_from_request(
                 "ceremonyId": read_string(statement, "ceremonyId")?,
                 "manifestHash": read_string(statement, "manifestHash")?,
                 "rosterHash": read_string(statement, "rosterHash")?,
-                "trusteeIdentity": "compact-vss-share-linkage",
+                "trusteeIdentity": "vss-share-linkage",
                 "trusteeRosterPosition": 0,
                 "setupEpoch": read_string(statement, "setupEpoch")?,
                 "shareLinkageStatementRoot": statement_root,
             },
             "ringDegree": ring_degree,
-            "compactVssShareLinkage": compact_vss_share_linkage,
+            "vssShareLinkage": vss_share_linkage,
             "proofBytesHex": to_hex(&proof_bytes),
         });
-        verify_compact_vss_share_linkage_proof_from_request(&proof_request).map_err(|error| {
+        verify_vss_share_linkage_proof_from_request(&proof_request).map_err(|error| {
             CanonicalError::new(
                 error.code,
                 format!(
@@ -836,9 +834,9 @@ pub(crate) fn verify_compact_vss_share_linkage_proof_material_set_from_request(
     }
 
     let proof_material_set_without_root = json!({
-        "objectType": "CompactVssShareLinkageProofMaterialSet",
+        "objectType": "VssShareLinkageProofMaterialSet",
         "objectVersion": 1,
-        "proofFamily": COMPACT_VSS_SHARE_LINKAGE_PROOF_FAMILY,
+        "proofFamily": VSS_SHARE_LINKAGE_PROOF_FAMILY,
         "ceremonyId": read_string(statement, "ceremonyId")?,
         "manifestHash": read_string(statement, "manifestHash")?,
         "rosterHash": read_string(statement, "rosterHash")?,
@@ -865,8 +863,8 @@ pub(crate) fn verify_compact_vss_share_linkage_proof_material_set_from_request(
 
     Ok(json!({
         "ok": true,
-        "operation": "verifyCompactVssShareLinkageProofMaterialSet",
-        "proofFamily": COMPACT_VSS_SHARE_LINKAGE_PROOF_FAMILY,
+        "operation": "verifyVssShareLinkageProofMaterialSet",
+        "proofFamily": VSS_SHARE_LINKAGE_PROOF_FAMILY,
         "statementRoot": statement_root,
         "proofMaterialSetRoot": expected_material_root,
         "participantCount": participant_count,
@@ -884,23 +882,23 @@ pub(crate) fn verify_compact_vss_share_linkage_proof_material_set_from_request(
 // inside the record; the transported form streams the bytes through the shared
 // setup proof-material transport and binds the transport reference into the
 // record root instead of the base64 bytes.
-struct ResolvedCompactVssShareLinkageProofBytes {
+struct ResolvedVssShareLinkageProofBytes {
     proof_bytes: Vec<u8>,
     proof_record_without_root: Value,
     proof_record_root: String,
 }
 
-fn resolve_compact_vss_share_linkage_proof_bytes(
+fn resolve_vss_share_linkage_proof_bytes(
     proof_record: &Value,
     request: &Value,
     coverage: &[Value],
-    compact_vss_share_linkage: &Value,
-) -> CanonicalResult<ResolvedCompactVssShareLinkageProofBytes> {
+    vss_share_linkage: &Value,
+) -> CanonicalResult<ResolvedVssShareLinkageProofBytes> {
     let proof_bytes_hash = read_string(proof_record, "proofBytesHash")?;
     let proof_record_root = read_string(proof_record, "proofRecordRoot")?.to_string();
     if proof_record.get("proofBytesBase64").is_some() {
         if proof_record.get("proofBytesEncoding").is_some()
-            || compact_vss_share_linkage_proof_has_transport_reference(proof_record)
+            || vss_share_linkage_proof_has_transport_reference(proof_record)
         {
             return Err(invalid_succinct_setup_proof(
                 "compact share-linkage proof record must not mix embedded proofBytesBase64 with transported proof material",
@@ -911,21 +909,19 @@ fn resolve_compact_vss_share_linkage_proof_bytes(
             proof_bytes_base64,
             "compact share-linkage proofBytesBase64",
         )?;
-        let expected_proof_bytes_hash = hash512_hex(
-            COMPACT_VSS_SHARE_LINKAGE_PROOF_BYTES_HASH_DOMAIN,
-            &[&proof_bytes],
-        );
+        let expected_proof_bytes_hash =
+            hash512_hex(VSS_SHARE_LINKAGE_PROOF_BYTES_HASH_DOMAIN, &[&proof_bytes]);
         compare_string_value(
             proof_bytes_hash,
             &expected_proof_bytes_hash,
             "compact share-linkage proof record proofBytesHash",
         )?;
         let proof_record_without_root = json!({
-            "objectType": "CompactVssShareLinkageProofRecord",
+            "objectType": "VssShareLinkageProofRecord",
             "objectVersion": 1,
-            "proofFamily": COMPACT_VSS_SHARE_LINKAGE_PROOF_FAMILY,
+            "proofFamily": VSS_SHARE_LINKAGE_PROOF_FAMILY,
             "linkageItems": coverage,
-            "compactVssShareLinkage": compact_vss_share_linkage,
+            "vssShareLinkage": vss_share_linkage,
             "proofBytesHash": proof_bytes_hash,
             "proofBytesBase64": proof_bytes_base64,
         });
@@ -936,7 +932,7 @@ fn resolve_compact_vss_share_linkage_proof_bytes(
             "compact share-linkage proof record proofRecordRoot",
         )?;
 
-        return Ok(ResolvedCompactVssShareLinkageProofBytes {
+        return Ok(ResolvedVssShareLinkageProofBytes {
             proof_bytes,
             proof_record_without_root,
             proof_record_root,
@@ -950,8 +946,8 @@ fn resolve_compact_vss_share_linkage_proof_bytes(
     )?;
     let proof_material_root = read_string(proof_record, "proofMaterialRoot")?;
     let transported_binding =
-        transported_compact_vss_share_linkage_proof_material_binding(request, proof_material_root)?;
-    verify_compact_vss_share_linkage_proof_transport_reference(
+        transported_vss_share_linkage_proof_material_binding(request, proof_material_root)?;
+    verify_vss_share_linkage_proof_transport_reference(
         proof_record,
         &transported_binding.transport_hashes,
     )?;
@@ -961,11 +957,11 @@ fn resolve_compact_vss_share_linkage_proof_bytes(
         "compact share-linkage proof record proofBytesHash",
     )?;
     let proof_record_without_root = json!({
-        "objectType": "CompactVssShareLinkageProofRecord",
+        "objectType": "VssShareLinkageProofRecord",
         "objectVersion": 1,
-        "proofFamily": COMPACT_VSS_SHARE_LINKAGE_PROOF_FAMILY,
+        "proofFamily": VSS_SHARE_LINKAGE_PROOF_FAMILY,
         "linkageItems": coverage,
-        "compactVssShareLinkage": compact_vss_share_linkage,
+        "vssShareLinkage": vss_share_linkage,
         "proofBytesHash": proof_bytes_hash,
         "proofBytesEncoding": SETUP_PROOF_MATERIAL_ENCODING,
         "proofMaterialRoot": proof_material_root,
@@ -983,80 +979,78 @@ fn resolve_compact_vss_share_linkage_proof_bytes(
         "compact share-linkage proof record proofRecordRoot",
     )?;
 
-    Ok(ResolvedCompactVssShareLinkageProofBytes {
+    Ok(ResolvedVssShareLinkageProofBytes {
         proof_bytes: transported_binding.proof_bytes,
         proof_record_without_root,
         proof_record_root,
     })
 }
 
-struct CompactVssShareLinkageProofTransportBinding {
+struct VssShareLinkageProofTransportBinding {
     transport_hashes: SetupProofMaterialTransportHashes,
     proof_bytes: Vec<u8>,
     proof_bytes_hash: String,
 }
 
-fn transported_compact_vss_share_linkage_proof_material_binding(
+fn transported_vss_share_linkage_proof_material_binding(
     request: &Value,
     expected_proof_material_root: &str,
-) -> CanonicalResult<CompactVssShareLinkageProofTransportBinding> {
+) -> CanonicalResult<VssShareLinkageProofTransportBinding> {
     let material_set = request
-        .get("transportedCompactVssShareLinkageProofMaterial")
+        .get("transportedVssShareLinkageProofMaterial")
         .ok_or_else(|| {
             invalid_succinct_setup_proof(
-                "transportedCompactVssShareLinkageProofMaterial is required by transported compact share-linkage proof records",
+                "transportedVssShareLinkageProofMaterial is required by transported compact share-linkage proof records",
             )
         })?;
-    verify_transported_compact_vss_share_linkage_proof_material_set_header(material_set)?;
+    verify_transported_vss_share_linkage_proof_material_set_header(material_set)?;
     let proof_materials = material_set
         .get("proofMaterials")
         .and_then(Value::as_array)
         .ok_or_else(|| {
             invalid_succinct_setup_proof(
-                "transportedCompactVssShareLinkageProofMaterial.proofMaterials must be an array",
+                "transportedVssShareLinkageProofMaterial.proofMaterials must be an array",
             )
         })?;
     let mut matching_binding = None;
     for (proof_material_index, proof_material) in proof_materials.iter().enumerate() {
-        verify_transported_compact_vss_share_linkage_proof_material_header(proof_material)?;
+        verify_transported_vss_share_linkage_proof_material_header(proof_material)?;
         let proof_material_root = read_string(proof_material, "proofMaterialRoot")?;
         if proof_material_root != expected_proof_material_root {
             continue;
         }
         if matching_binding.is_some() {
             return Err(invalid_succinct_setup_proof(
-                "transportedCompactVssShareLinkageProofMaterial contains duplicate proofMaterialRoot entries",
+                "transportedVssShareLinkageProofMaterial contains duplicate proofMaterialRoot entries",
             ));
         }
         let chunks = if proof_material.get("chunks").is_some() {
-            Arc::new(transported_compact_vss_share_linkage_proof_chunks(
+            Arc::new(transported_vss_share_linkage_proof_chunks(
                 proof_material,
                 proof_material_index,
             )?)
         } else {
             verified_setup_proof_material_chunks_from_request(
                 request,
-                COMPACT_VSS_SHARE_LINKAGE_PROOF_FAMILY,
+                VSS_SHARE_LINKAGE_PROOF_FAMILY,
                 expected_proof_material_root,
                 proof_material,
-                "transportedCompactVssShareLinkageProofMaterial.proofMaterials",
+                "transportedVssShareLinkageProofMaterial.proofMaterials",
             )?
         };
         let transport_hashes = setup_proof_material_transport_hashes(
-            COMPACT_VSS_SHARE_LINKAGE_PROOF_FAMILY,
+            VSS_SHARE_LINKAGE_PROOF_FAMILY,
             chunks.as_ref(),
             SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
         )?;
-        verify_transported_compact_vss_share_linkage_proof_material_hashes(
+        verify_transported_vss_share_linkage_proof_material_hashes(
             proof_material,
             &transport_hashes,
         )?;
         let proof_bytes = chunks.iter().flatten().copied().collect::<Vec<u8>>();
-        let proof_bytes_hash = hash512_hex(
-            COMPACT_VSS_SHARE_LINKAGE_PROOF_BYTES_HASH_DOMAIN,
-            &[&proof_bytes],
-        );
-        matching_binding = Some(CompactVssShareLinkageProofTransportBinding {
+        let proof_bytes_hash =
+            hash512_hex(VSS_SHARE_LINKAGE_PROOF_BYTES_HASH_DOMAIN, &[&proof_bytes]);
+        matching_binding = Some(VssShareLinkageProofTransportBinding {
             transport_hashes,
             proof_bytes,
             proof_bytes_hash,
@@ -1065,43 +1059,37 @@ fn transported_compact_vss_share_linkage_proof_material_binding(
 
     matching_binding.ok_or_else(|| {
         invalid_succinct_setup_proof(
-            "transportedCompactVssShareLinkageProofMaterial is missing the requested proofMaterialRoot",
+            "transportedVssShareLinkageProofMaterial is missing the requested proofMaterialRoot",
         )
     })
 }
 
-fn verify_transported_compact_vss_share_linkage_proof_material_set_header(
+fn verify_transported_vss_share_linkage_proof_material_set_header(
     value: &Value,
 ) -> CanonicalResult<()> {
     for (field_name, expected_value) in [
-        (
-            "objectType",
-            COMPACT_VSS_SHARE_LINKAGE_TRANSPORT_SET_OBJECT_TYPE,
-        ),
-        ("proofFamily", COMPACT_VSS_SHARE_LINKAGE_PROOF_FAMILY),
+        ("objectType", VSS_SHARE_LINKAGE_TRANSPORT_SET_OBJECT_TYPE),
+        ("proofFamily", VSS_SHARE_LINKAGE_PROOF_FAMILY),
     ] {
         compare_string_value(
             read_string(value, field_name)?,
             expected_value,
-            &format!("transportedCompactVssShareLinkageProofMaterial.{field_name}"),
+            &format!("transportedVssShareLinkageProofMaterial.{field_name}"),
         )?;
     }
     compare_u64_value(
         read_u64(value, "objectVersion")?,
         1,
-        "transportedCompactVssShareLinkageProofMaterial.objectVersion",
+        "transportedVssShareLinkageProofMaterial.objectVersion",
     )
 }
 
-fn verify_transported_compact_vss_share_linkage_proof_material_header(
+fn verify_transported_vss_share_linkage_proof_material_header(
     value: &Value,
 ) -> CanonicalResult<()> {
     for (field_name, expected_value) in [
-        (
-            "objectType",
-            COMPACT_VSS_SHARE_LINKAGE_TRANSPORT_OBJECT_TYPE,
-        ),
-        ("proofFamily", COMPACT_VSS_SHARE_LINKAGE_PROOF_FAMILY),
+        ("objectType", VSS_SHARE_LINKAGE_TRANSPORT_OBJECT_TYPE),
+        ("proofFamily", VSS_SHARE_LINKAGE_PROOF_FAMILY),
     ] {
         compare_string_value(
             read_string(value, field_name)?,
@@ -1119,7 +1107,7 @@ fn verify_transported_compact_vss_share_linkage_proof_material_header(
     Ok(())
 }
 
-fn transported_compact_vss_share_linkage_proof_chunks(
+fn transported_vss_share_linkage_proof_chunks(
     value: &Value,
     proof_material_index: usize,
 ) -> CanonicalResult<Vec<Vec<u8>>> {
@@ -1157,7 +1145,7 @@ fn transported_compact_vss_share_linkage_proof_chunks(
             read_u64(chunk_value, "chunkIndex")?,
             expected_chunk_index as u64,
             &format!(
-                "transportedCompactVssShareLinkageProofMaterial.proofMaterials.{proof_material_index}.chunks.{expected_chunk_index}.chunkIndex"
+                "transportedVssShareLinkageProofMaterial.proofMaterials.{proof_material_index}.chunks.{expected_chunk_index}.chunkIndex"
             ),
         )?;
         chunks.push(crate::transcript_core::decode_standard_base64(
@@ -1169,7 +1157,7 @@ fn transported_compact_vss_share_linkage_proof_chunks(
     Ok(chunks)
 }
 
-fn verify_transported_compact_vss_share_linkage_proof_material_hashes(
+fn verify_transported_vss_share_linkage_proof_material_hashes(
     value: &Value,
     transport_hashes: &SetupProofMaterialTransportHashes,
 ) -> CanonicalResult<()> {
@@ -1221,7 +1209,7 @@ fn verify_transported_compact_vss_share_linkage_proof_material_hashes(
     Ok(())
 }
 
-fn verify_compact_vss_share_linkage_proof_transport_reference(
+fn verify_vss_share_linkage_proof_transport_reference(
     proof_record: &Value,
     transport_hashes: &SetupProofMaterialTransportHashes,
 ) -> CanonicalResult<()> {
@@ -1285,7 +1273,7 @@ fn verify_compact_vss_share_linkage_proof_transport_reference(
     Ok(())
 }
 
-fn compact_vss_share_linkage_proof_has_transport_reference(proof_record: &Value) -> bool {
+fn vss_share_linkage_proof_has_transport_reference(proof_record: &Value) -> bool {
     [
         "proofMaterialRoot",
         "proofChunkSizeBytes",
@@ -1299,11 +1287,11 @@ fn compact_vss_share_linkage_proof_has_transport_reference(proof_record: &Value)
     .any(|field_name| proof_record.get(*field_name).is_some())
 }
 
-pub(crate) fn generate_compact_same_secret_bridge_proof_from_request(
+pub(crate) fn generate_same_secret_bridge_proof_from_request(
     request: &Value,
 ) -> CanonicalResult<Value> {
-    let statement = compact_same_secret_bridge_statement_from_request(request)?;
-    let witness = compact_same_secret_bridge_witness_from_request(request)?;
+    let statement = same_secret_bridge_statement_from_request(request)?;
+    let witness = same_secret_bridge_witness_from_request(request)?;
     let proof_randomness_seed_hex = read_string(request, "proofRandomnessSeedHex")?;
     let proof_randomness_nonce_hex = read_string(request, "proofRandomnessNonceHex")?;
     let bound_proof_randomness_seed_hex = statement_bound_proof_randomness_seed_hex(
@@ -1313,16 +1301,13 @@ pub(crate) fn generate_compact_same_secret_bridge_proof_from_request(
     )?;
     let proof = prove_evaluation_key_share(&statement, &witness, &bound_proof_randomness_seed_hex)?;
     let proof_bytes = encode_trustee_evaluation_key_proof(&proof);
-    let compact_statement = statement
-        .compact_same_secret_bridge
-        .as_ref()
-        .ok_or_else(|| {
-            invalid_succinct_setup_proof("compact same-secret bridge statement missing")
-        })?;
+    let compact_statement = statement.same_secret_bridge.as_ref().ok_or_else(|| {
+        invalid_succinct_setup_proof("compact same-secret bridge statement missing")
+    })?;
 
     Ok(json!({
         "ok": true,
-        "operation": "generateCompactSameSecretBridgeProof",
+        "operation": "generateSameSecretBridgeProof",
         "proofFamily": statement.context.proof_family,
         "statementHash": to_hex(&statement.statement_hash()),
         "limbCount": statement.proof_limb_count(),
@@ -1332,23 +1317,20 @@ pub(crate) fn generate_compact_same_secret_bridge_proof_from_request(
     }))
 }
 
-pub(crate) fn verify_compact_same_secret_bridge_proof_from_request(
+pub(crate) fn verify_same_secret_bridge_proof_from_request(
     request: &Value,
 ) -> CanonicalResult<Value> {
-    let statement = compact_same_secret_bridge_statement_from_request(request)?;
+    let statement = same_secret_bridge_statement_from_request(request)?;
     let proof_bytes = read_hex_bytes(request, "proofBytesHex")?;
     let proof = decode_trustee_evaluation_key_proof(&statement, &proof_bytes)?;
     verify_evaluation_key_share(&statement, &proof)?;
-    let compact_statement = statement
-        .compact_same_secret_bridge
-        .as_ref()
-        .ok_or_else(|| {
-            invalid_succinct_setup_proof("compact same-secret bridge statement missing")
-        })?;
+    let compact_statement = statement.same_secret_bridge.as_ref().ok_or_else(|| {
+        invalid_succinct_setup_proof("compact same-secret bridge statement missing")
+    })?;
 
     Ok(json!({
         "ok": true,
-        "operation": "verifyCompactSameSecretBridgeProof",
+        "operation": "verifySameSecretBridgeProof",
         "proofFamily": statement.context.proof_family,
         "statementHash": to_hex(&statement.statement_hash()),
         "limbCount": statement.proof_limb_count(),
@@ -1500,8 +1482,8 @@ fn statement_from_request(request: &Value) -> CanonicalResult<TrusteeEvaluationK
         keys,
         same_secret_linkage,
         private_vss_share: None,
-        compact_vss_share_linkage: None,
-        compact_same_secret_bridge: None,
+        vss_share_linkage: None,
+        same_secret_bridge: None,
         target_decryption_share: None,
     };
     statement.validate_shape()?;
@@ -1534,7 +1516,7 @@ fn proof_context_from_value(
     })
 }
 
-fn compact_vss_share_linkage_statement_from_request(
+fn vss_share_linkage_statement_from_request(
     request: &Value,
 ) -> CanonicalResult<TrusteeEvaluationKeyStatement> {
     let context_value = request
@@ -1543,11 +1525,11 @@ fn compact_vss_share_linkage_statement_from_request(
     let ring_degree = usize::try_from(read_u64(request, "ringDegree")?)
         .map_err(|_| invalid_succinct_setup_proof("ringDegree does not fit usize"))?;
     let statement_value = request
-        .get("compactVssShareLinkage")
-        .ok_or_else(|| invalid_succinct_setup_proof("compactVssShareLinkage must be present"))?;
+        .get("vssShareLinkage")
+        .ok_or_else(|| invalid_succinct_setup_proof("vssShareLinkage must be present"))?;
     let context = proof_context_from_value(
         context_value,
-        SuccinctSetupProofFamilyShape::CompactVssShareLinkage,
+        SuccinctSetupProofFamilyShape::VssShareLinkage,
     )?;
     let share_linkage_statement_root = read_string(statement_value, "shareLinkageStatementRoot")?;
     if context.binding_roots[0].1 != share_linkage_statement_root {
@@ -1556,9 +1538,9 @@ fn compact_vss_share_linkage_statement_from_request(
         ));
     }
     let public_matrix_seed_hash = read_string(statement_value, "publicMatrixSeedHash")?.to_string();
-    let primary_item = compact_vss_share_linkage_item_from_value(
+    let primary_item = vss_share_linkage_item_from_value(
         statement_value,
-        "compactVssShareLinkage",
+        "vssShareLinkage",
         &public_matrix_seed_hash,
         ring_degree,
     )?;
@@ -1568,9 +1550,9 @@ fn compact_vss_share_linkage_statement_from_request(
             .iter()
             .enumerate()
             .map(|(item_index, item_value)| {
-                compact_vss_share_linkage_item_from_value(
+                vss_share_linkage_item_from_value(
                     item_value,
-                    &format!("compactVssShareLinkage.additionalLinkageItems.{item_index}"),
+                    &format!("vssShareLinkage.additionalLinkageItems.{item_index}"),
                     &public_matrix_seed_hash,
                     ring_degree,
                 )
@@ -1578,7 +1560,7 @@ fn compact_vss_share_linkage_statement_from_request(
             .collect::<CanonicalResult<Vec<_>>>()?,
         Some(_) => {
             return Err(invalid_succinct_setup_proof(
-                "compactVssShareLinkage.additionalLinkageItems must be an array",
+                "vssShareLinkage.additionalLinkageItems must be an array",
             ));
         }
     };
@@ -1589,7 +1571,7 @@ fn compact_vss_share_linkage_statement_from_request(
         keys: Vec::new(),
         same_secret_linkage: None,
         private_vss_share: None,
-        compact_vss_share_linkage: Some(CompactVssShareLinkageStatement {
+        vss_share_linkage: Some(VssShareLinkageStatement {
             public_matrix_seed_hash,
             source_trustee_identity: primary_item.source_trustee_identity,
             source_trustee_roster_position: primary_item.source_trustee_roster_position,
@@ -1608,7 +1590,7 @@ fn compact_vss_share_linkage_statement_from_request(
             recipient_share_commitment: primary_item.recipient_share_commitment,
             additional_linkage_items,
         }),
-        compact_same_secret_bridge: None,
+        same_secret_bridge: None,
         target_decryption_share: None,
     };
     statement.validate_shape()?;
@@ -1616,7 +1598,7 @@ fn compact_vss_share_linkage_statement_from_request(
     Ok(statement)
 }
 
-fn compact_vss_share_linkage_witness_from_request(
+fn vss_share_linkage_witness_from_request(
     request: &Value,
 ) -> CanonicalResult<TrusteeEvaluationKeyWitness> {
     Ok(TrusteeEvaluationKeyWitness {
@@ -1627,29 +1609,29 @@ fn compact_vss_share_linkage_witness_from_request(
         private_vss_coefficient_messages_by_shamir_index: Vec::new(),
         private_vss_opening_randomness_by_shamir_index: Vec::new(),
         private_vss_carry_witnesses: Vec::new(),
-        compact_vss_coefficient_messages_by_shamir_index: read_i64_matrix2(
+        vss_public_coefficient_messages_by_shamir_index: read_i64_matrix2(
             request,
             "coefficientMessagesByShamirIndex",
         )?,
-        compact_vss_recipient_share_messages: read_i64_array(request, "recipientShareMessages")?,
-        compact_vss_coefficient_opening_randomness_by_shamir_index: read_i64_matrix(
+        vss_public_recipient_share_messages: read_i64_array(request, "recipientShareMessages")?,
+        vss_public_coefficient_opening_randomness_by_shamir_index: read_i64_matrix(
             request,
             "coefficientOpeningRandomnessByShamirIndex",
         )?,
-        compact_vss_recipient_share_opening_randomness: read_i64_matrix2(
+        vss_public_recipient_share_opening_randomness: read_i64_matrix2(
             request,
             "recipientShareOpeningRandomness",
         )?,
-        compact_vss_carry_witnesses: read_i64_array(request, "carryWitnesses")?,
-        compact_vss_recipient_share_messages_by_item: read_optional_i64_matrix2(
+        vss_public_carry_witnesses: read_i64_array(request, "carryWitnesses")?,
+        vss_public_recipient_share_messages_by_item: read_optional_i64_matrix2(
             request,
             "recipientShareMessagesByItem",
         )?,
-        compact_vss_recipient_share_opening_randomness_by_item: read_optional_i64_matrix(
+        vss_public_recipient_share_opening_randomness_by_item: read_optional_i64_matrix(
             request,
             "recipientShareOpeningRandomnessByItem",
         )?,
-        compact_vss_carry_witnesses_by_item: read_optional_i64_matrix2(
+        vss_public_carry_witnesses_by_item: read_optional_i64_matrix2(
             request,
             "carryWitnessesByItem",
         )?,
@@ -1658,7 +1640,7 @@ fn compact_vss_share_linkage_witness_from_request(
     })
 }
 
-fn compact_same_secret_bridge_statement_from_request(
+fn same_secret_bridge_statement_from_request(
     request: &Value,
 ) -> CanonicalResult<TrusteeEvaluationKeyStatement> {
     let context_value = request
@@ -1667,19 +1649,19 @@ fn compact_same_secret_bridge_statement_from_request(
     let ring_degree = usize::try_from(read_u64(request, "ringDegree")?)
         .map_err(|_| invalid_succinct_setup_proof("ringDegree does not fit usize"))?;
     let statement_value = request
-        .get("compactSameSecretBridge")
-        .ok_or_else(|| invalid_succinct_setup_proof("compactSameSecretBridge must be present"))?;
+        .get("sameSecretBridge")
+        .ok_or_else(|| invalid_succinct_setup_proof("sameSecretBridge must be present"))?;
     let context = proof_context_from_value(
         context_value,
-        SuccinctSetupProofFamilyShape::CompactSameSecretBridge,
+        SuccinctSetupProofFamilyShape::SameSecretBridge,
     )?;
-    let compact_same_secret_bridge_statement_root =
-        read_string(statement_value, "compactSameSecretBridgeStatementRoot")?;
+    let same_secret_bridge_statement_root =
+        read_string(statement_value, "sameSecretBridgeStatementRoot")?;
     let same_secret_statement_root = read_string(statement_value, "sameSecretStatementRoot")?;
     let same_secret_proof_root = read_string(statement_value, "sameSecretProofRoot")?;
     let same_secret_proof_family_binding_root =
         read_string(statement_value, "sameSecretProofFamilyBindingRoot")?;
-    if context.binding_roots[0].1 != compact_same_secret_bridge_statement_root
+    if context.binding_roots[0].1 != same_secret_bridge_statement_root
         || context.binding_roots[1].1 != same_secret_statement_root
         || context.binding_roots[2].1 != same_secret_proof_root
         || context.binding_roots[3].1 != same_secret_proof_family_binding_root
@@ -1708,14 +1690,14 @@ fn compact_same_secret_bridge_statement_from_request(
         .and_then(Value::as_array)
         .ok_or_else(|| {
             invalid_succinct_setup_proof(
-                "compactSameSecretBridge.targetConstantCommitments must be an array",
+                "sameSecretBridge.targetConstantCommitments must be an array",
             )
         })?;
     if target_constant_commitment_roots.len() != target_rns_primes.len()
         || target_constant_commitment_values.len() != target_rns_primes.len()
     {
         return Err(invalid_succinct_setup_proof(
-            "compactSameSecretBridge target primes, roots, and commitments must be aligned",
+            "sameSecretBridge target primes, roots, and commitments must be aligned",
         ));
     }
     let target_constant_commitments = target_constant_commitment_values
@@ -1725,9 +1707,9 @@ fn compact_same_secret_bridge_statement_from_request(
         .enumerate()
         .map(
             |(target_rns_limb_index, ((value, expected_commitment_root), target_rns_prime))| {
-                compact_vss_share_linkage_commitment_from_value(
+                vss_share_linkage_commitment_from_value(
                     value,
-                    CompactVssCommandCommitmentExpectation {
+                    VssPublicCommandCommitmentExpectation {
                         field_name: format!("targetConstantCommitments.{target_rns_limb_index}"),
                         root: expected_commitment_root,
                         role: "coefficient",
@@ -1747,8 +1729,8 @@ fn compact_same_secret_bridge_statement_from_request(
         keys: Vec::new(),
         same_secret_linkage: None,
         private_vss_share: None,
-        compact_vss_share_linkage: None,
-        compact_same_secret_bridge: Some(CompactSameSecretBridgeStatement {
+        vss_share_linkage: None,
+        same_secret_bridge: Some(SameSecretBridgeStatement {
             public_matrix_seed_hash,
             source_trustee_identity,
             source_trustee_roster_position,
@@ -1764,7 +1746,7 @@ fn compact_same_secret_bridge_statement_from_request(
     Ok(statement)
 }
 
-fn compact_same_secret_bridge_witness_from_request(
+fn same_secret_bridge_witness_from_request(
     request: &Value,
 ) -> CanonicalResult<TrusteeEvaluationKeyWitness> {
     Ok(TrusteeEvaluationKeyWitness {
@@ -1775,25 +1757,25 @@ fn compact_same_secret_bridge_witness_from_request(
         private_vss_coefficient_messages_by_shamir_index: Vec::new(),
         private_vss_opening_randomness_by_shamir_index: Vec::new(),
         private_vss_carry_witnesses: Vec::new(),
-        compact_vss_coefficient_messages_by_shamir_index: Vec::new(),
-        compact_vss_recipient_share_messages: Vec::new(),
-        compact_vss_coefficient_opening_randomness_by_shamir_index: Vec::new(),
-        compact_vss_recipient_share_opening_randomness: Vec::new(),
-        compact_vss_carry_witnesses: Vec::new(),
-        compact_vss_recipient_share_messages_by_item: Vec::new(),
-        compact_vss_recipient_share_opening_randomness_by_item: Vec::new(),
-        compact_vss_carry_witnesses_by_item: Vec::new(),
+        vss_public_coefficient_messages_by_shamir_index: Vec::new(),
+        vss_public_recipient_share_messages: Vec::new(),
+        vss_public_coefficient_opening_randomness_by_shamir_index: Vec::new(),
+        vss_public_recipient_share_opening_randomness: Vec::new(),
+        vss_public_carry_witnesses: Vec::new(),
+        vss_public_recipient_share_messages_by_item: Vec::new(),
+        vss_public_recipient_share_opening_randomness_by_item: Vec::new(),
+        vss_public_carry_witnesses_by_item: Vec::new(),
         target_decryption_message_vectors: Vec::new(),
         target_decryption_opening_randomness_by_commitment: Vec::new(),
     })
 }
 
-fn compact_vss_share_linkage_item_from_value(
+fn vss_share_linkage_item_from_value(
     value: &Value,
     field_name: &str,
     public_matrix_seed_hash: &str,
     ring_degree: usize,
-) -> CanonicalResult<CompactVssShareLinkageItem> {
+) -> CanonicalResult<VssShareLinkageItem> {
     if !value.is_object() {
         return Err(invalid_succinct_setup_proof(format!(
             "{field_name} must be an object"
@@ -1832,9 +1814,9 @@ fn compact_vss_share_linkage_item_from_value(
         .enumerate()
         .map(
             |(coefficient_index, (commitment_value, expected_commitment_root))| {
-                compact_vss_share_linkage_commitment_from_value(
+                vss_share_linkage_commitment_from_value(
                     commitment_value,
-                    CompactVssCommandCommitmentExpectation {
+                    VssPublicCommandCommitmentExpectation {
                         field_name: format!(
                             "{field_name}.coefficientCommitments.{coefficient_index}"
                         ),
@@ -1852,13 +1834,13 @@ fn compact_vss_share_linkage_item_from_value(
     let recipient_share_commitment_root =
         read_string(value, "recipientShareCommitmentRoot")?.to_string();
     let recipient_share_opening_root = read_string(value, "recipientShareOpeningRoot")?.to_string();
-    let recipient_share_commitment = compact_vss_share_linkage_commitment_from_value(
+    let recipient_share_commitment = vss_share_linkage_commitment_from_value(
         value.get("recipientShareCommitment").ok_or_else(|| {
             invalid_succinct_setup_proof(format!(
                 "{field_name}.recipientShareCommitment must be present"
             ))
         })?,
-        CompactVssCommandCommitmentExpectation {
+        VssPublicCommandCommitmentExpectation {
             field_name: format!("{field_name}.recipientShareCommitment"),
             root: &recipient_share_commitment_root,
             role: "recipient-share",
@@ -1869,7 +1851,7 @@ fn compact_vss_share_linkage_item_from_value(
         },
     )?;
 
-    Ok(CompactVssShareLinkageItem {
+    Ok(VssShareLinkageItem {
         source_trustee_identity: read_string(value, "sourceTrusteeIdentity")?.to_string(),
         source_trustee_roster_position: read_u64(value, "sourceTrusteeRosterPosition")?,
         source_coefficient_commitment_root: read_string(value, "sourceCoefficientCommitmentRoot")?
@@ -1985,8 +1967,8 @@ fn target_decryption_share_statement_from_request(
         keys: Vec::new(),
         same_secret_linkage: None,
         private_vss_share: None,
-        compact_vss_share_linkage: None,
-        compact_same_secret_bridge: None,
+        vss_share_linkage: None,
+        same_secret_bridge: None,
         target_decryption_share: Some(TargetDecryptionShareStatement {
             public_matrix_seed_hash,
             target_basis_hash,
@@ -2060,7 +2042,7 @@ pub(crate) fn describe_target_decryption_share_proof_layout_from_request(
                 "globalMessageIndex": global_message_index,
                 "claimKind": claim_kind,
                 "messageBound": message_bound,
-                "encodingColumnCount": crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT + total_trit_count,
+                "encodingColumnCount": crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT + total_trit_count,
                 "lowDigitTritCount": low_digit_trit_count,
                 "highDigitTritCount": high_digit_trit_count,
                 "totalTritCount": total_trit_count,
@@ -2143,9 +2125,9 @@ fn target_decryption_share_limb_statement_from_value(
     let aggregate_commitment_value = limb_statement_value
         .get("aggregateCommitment")
         .ok_or_else(|| invalid_succinct_setup_proof("aggregateCommitment must be present"))?;
-    let aggregate_commitment = compact_vss_share_linkage_commitment_from_value(
+    let aggregate_commitment = vss_share_linkage_commitment_from_value(
         aggregate_commitment_value,
-        CompactVssCommandCommitmentExpectation {
+        VssPublicCommandCommitmentExpectation {
             field_name: "targetDecryptionShare.aggregateCommitment".to_string(),
             root: &aggregate_commitment_root,
             role: "aggregate-threshold-share",
@@ -2292,7 +2274,7 @@ fn target_decryption_smudging_commitments_from_set(
     public_matrix_seed_hash: &str,
     ring_degree: usize,
     smudging_polynomial_degree: usize,
-) -> CanonicalResult<(Vec<String>, Vec<CompactVssShareLinkageCommitment>)> {
+) -> CanonicalResult<(Vec<String>, Vec<VssShareLinkageCommitment>)> {
     let records = smudging_commitment_set
         .get("commitmentRecords")
         .and_then(Value::as_array)
@@ -2337,9 +2319,9 @@ fn target_decryption_smudging_commitments_from_set(
         let commitment_value = record.get("commitment").ok_or_else(|| {
             invalid_succinct_setup_proof("smudging commitment record must include a commitment")
         })?;
-        let commitment = compact_vss_share_linkage_commitment_from_value(
+        let commitment = vss_share_linkage_commitment_from_value(
             commitment_value,
-            CompactVssCommandCommitmentExpectation {
+            VssPublicCommandCommitmentExpectation {
                 field_name: format!(
                     "smudgingCommitmentSet.commitmentRecords.{record_index}.commitment"
                 ),
@@ -2387,14 +2369,14 @@ fn target_decryption_share_witness_from_request(
         private_vss_coefficient_messages_by_shamir_index: Vec::new(),
         private_vss_opening_randomness_by_shamir_index: Vec::new(),
         private_vss_carry_witnesses: Vec::new(),
-        compact_vss_coefficient_messages_by_shamir_index: Vec::new(),
-        compact_vss_recipient_share_messages: Vec::new(),
-        compact_vss_coefficient_opening_randomness_by_shamir_index: Vec::new(),
-        compact_vss_recipient_share_opening_randomness: Vec::new(),
-        compact_vss_carry_witnesses: Vec::new(),
-        compact_vss_recipient_share_messages_by_item: Vec::new(),
-        compact_vss_recipient_share_opening_randomness_by_item: Vec::new(),
-        compact_vss_carry_witnesses_by_item: Vec::new(),
+        vss_public_coefficient_messages_by_shamir_index: Vec::new(),
+        vss_public_recipient_share_messages: Vec::new(),
+        vss_public_coefficient_opening_randomness_by_shamir_index: Vec::new(),
+        vss_public_recipient_share_opening_randomness: Vec::new(),
+        vss_public_carry_witnesses: Vec::new(),
+        vss_public_recipient_share_messages_by_item: Vec::new(),
+        vss_public_recipient_share_opening_randomness_by_item: Vec::new(),
+        vss_public_carry_witnesses_by_item: Vec::new(),
         target_decryption_message_vectors: read_i64_matrix2(
             request,
             "targetDecryptionMessageVectors",
@@ -2406,18 +2388,18 @@ fn target_decryption_share_witness_from_request(
     })
 }
 
-pub(in crate::bgv::setup) fn compact_vss_share_linkage_commitment_from_value(
+pub(in crate::bgv::setup) fn vss_share_linkage_commitment_from_value(
     value: &Value,
-    expected: CompactVssCommandCommitmentExpectation<'_>,
-) -> CanonicalResult<CompactVssShareLinkageCommitment> {
-    if read_string(value, "objectType")? != "CompactVssCommitment" {
+    expected: VssPublicCommandCommitmentExpectation<'_>,
+) -> CanonicalResult<VssShareLinkageCommitment> {
+    if read_string(value, "objectType")? != "VssPublicCommitment" {
         return Err(invalid_succinct_setup_proof(format!(
-            "{}.objectType must be CompactVssCommitment",
+            "{}.objectType must be VssPublicCommitment",
             expected.field_name
         )));
     }
-    if read_u64(value, "outputCoordinateCount")? != COMPACT_VSS_OUTPUT_COORDINATE_COUNT as u64
-        || read_u64(value, "randomnessColumnCount")? != COMPACT_VSS_RANDOMNESS_COLUMN_COUNT as u64
+    if read_u64(value, "outputCoordinateCount")? != VSS_PUBLIC_OUTPUT_COORDINATE_COUNT as u64
+        || read_u64(value, "randomnessColumnCount")? != VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT as u64
     {
         return Err(invalid_succinct_setup_proof(format!(
             "{} compact commitment shape does not match the parameters",
@@ -2497,7 +2479,7 @@ pub(in crate::bgv::setup) fn compact_vss_share_linkage_commitment_from_value(
         coordinates_by_commitment_modulus.push(coordinates);
     }
 
-    Ok(CompactVssShareLinkageCommitment {
+    Ok(VssShareLinkageCommitment {
         coordinates_by_commitment_modulus,
     })
 }

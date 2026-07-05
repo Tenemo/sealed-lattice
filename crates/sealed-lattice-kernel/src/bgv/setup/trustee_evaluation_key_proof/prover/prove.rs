@@ -645,7 +645,7 @@ fn prove_evaluation_key_share_with_limb_batch_size(
     }
     let family_shape = statement.family_shape()?;
     let consistency_vector_length = statement
-        .compact_vss_share_linkage
+        .vss_share_linkage
         .as_ref()
         .map(|share_linkage| share_linkage.packed_ring_degree(statement.ring_degree))
         .transpose()?

@@ -8,7 +8,7 @@ use super::*;
 // evaluation-key proofs, and the embedded public evaluation-key set. Every
 // evaluation-key object embeds its material and proof bytes, so no transported
 // material is required.
-fn compact_terminal_evaluation_key_bearing_collective_setup_package() -> serde_json::Value {
+fn terminal_evaluation_key_bearing_collective_setup_package() -> serde_json::Value {
     let mut package = compactify_collective_setup_package(
         minimal_collective_setup_package_for_participant_count(3),
     );
@@ -64,12 +64,11 @@ fn evaluation_key_phase_refused(result: &serde_json::Value) -> Option<String> {
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_compact_terminal_trustee_evaluation_key_proofs_pass_the_evaluation_key_phase()
- {
+fn heavy_accepted_setup_terminal_trustee_evaluation_key_proofs_pass_the_evaluation_key_phase() {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_compact_terminal_trustee_evaluation_key_proofs_pass_the_evaluation_key_phase",
+        "heavy_accepted_setup_terminal_trustee_evaluation_key_proofs_pass_the_evaluation_key_phase",
     );
-    let package = compact_terminal_evaluation_key_bearing_collective_setup_package();
+    let package = terminal_evaluation_key_bearing_collective_setup_package();
 
     let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
         .expect("verification response");
@@ -104,11 +103,11 @@ fn heavy_accepted_setup_compact_terminal_trustee_evaluation_key_proofs_pass_the_
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_compact_terminal_tampered_trustee_evaluation_key_proof_is_refused() {
+fn heavy_accepted_setup_terminal_tampered_trustee_evaluation_key_proof_is_refused() {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_compact_terminal_tampered_trustee_evaluation_key_proof_is_refused",
+        "heavy_accepted_setup_terminal_tampered_trustee_evaluation_key_proof_is_refused",
     );
-    let mut package = compact_terminal_evaluation_key_bearing_collective_setup_package();
+    let mut package = terminal_evaluation_key_bearing_collective_setup_package();
 
     // Flip one byte of the first trustee's embedded proof bytes and rebind the
     // record, set, and package roots so the only inconsistency is the proof

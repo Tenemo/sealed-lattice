@@ -14,7 +14,6 @@ export { acceptedPublicKeyShareMaterial } from './accepted-setup-package-fixture
 export { acceptedPublicKeyShareProofs } from './accepted-setup-package-fixtures/public-key-shares.js';
 export { acceptedPublicKeyShares } from './accepted-setup-package-fixtures/public-key-shares.js';
 export { publicKeyShareSuccinctProofsWithDriftedStatementHashes } from './accepted-setup-package-fixtures/public-key-shares.js';
-export { acceptedSameSecretConsistency } from './accepted-setup-package-fixtures/same-secret.js';
 export { sameSecretProofsWithDriftedStatementHashes } from './accepted-setup-package-fixtures/same-secret.js';
 export { sameSecretProofsWithGeneratedProofs } from './accepted-setup-package-fixtures/same-secret.js';
 export { acceptedShapedSetupPackage } from './accepted-setup-package-fixtures/package-assembler.js';

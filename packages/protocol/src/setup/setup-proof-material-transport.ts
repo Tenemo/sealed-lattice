@@ -9,6 +9,7 @@ import {
     assertNonNegativeSafeInteger,
     type JsonRecord,
 } from './common-fields.js';
+import { appendVaruint } from './varuint-encoding.js';
 
 export const setupProofTransportChunkSizeBytes = 1_048_576;
 
@@ -20,15 +21,7 @@ const bytesToHex = (bytes: Uint8Array): string =>
 const varUintBytes = (value: number, fieldName: string): Uint8Array => {
     const numericValue = assertNonNegativeSafeInteger(value, fieldName);
     const bytes: number[] = [];
-    let remainingValue = numericValue;
-    do {
-        let byte = remainingValue & 0x7f;
-        remainingValue = Math.floor(remainingValue / 128);
-        if (remainingValue !== 0) {
-            byte |= 0x80;
-        }
-        bytes.push(byte);
-    } while (remainingValue !== 0);
+    appendVaruint(bytes, numericValue);
 
     return Uint8Array.from(bytes);
 };

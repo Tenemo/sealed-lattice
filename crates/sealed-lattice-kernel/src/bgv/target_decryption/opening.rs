@@ -1,13 +1,13 @@
 use super::*;
 
 use crate::bgv::setup::{
-    COMPACT_VSS_RANDOMNESS_COLUMN_COUNT, CompactVssCommitmentOpeningInput,
-    compact_vss_canonical_message_digit_columns, compute_compact_vss_commitment_from_opening,
+    VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT, VssPublicCommitmentOpeningInput,
+    compute_vss_public_commitment_from_opening, vss_public_canonical_message_digit_columns,
 };
 
-const COMPACT_VSS_AGGREGATE_COMMITMENT_ROLE: &str = "aggregate-threshold-share";
+const VSS_PUBLIC_AGGREGATE_COMMITMENT_ROLE: &str = "aggregate-threshold-share";
 
-pub(super) struct CompactAggregateOpeningCheckInput<'a> {
+pub(super) struct AggregateOpeningCheckInput<'a> {
     pub(super) setup_binding: &'a SetupBinding,
     pub(super) participant: &'a ParticipantBinding,
     pub(super) setup_epoch: &'a str,
@@ -17,7 +17,7 @@ pub(super) struct CompactAggregateOpeningCheckInput<'a> {
     pub(super) rns_prime: u64,
 }
 
-pub(super) struct CompactAggregateOpeningRootsInput<'a> {
+pub(super) struct AggregateOpeningRootsInput<'a> {
     pub(super) setup_binding: &'a SetupBinding,
     pub(super) participant: &'a ParticipantBinding,
     pub(super) setup_epoch: &'a str,
@@ -29,13 +29,13 @@ pub(super) struct CompactAggregateOpeningRootsInput<'a> {
     pub(super) aggregate_randomness_by_column: &'a [Vec<i64>],
 }
 
-pub(super) struct CompactAggregateOpeningComputation {
+pub(super) struct AggregateOpeningComputation {
     pub(super) commitment: Value,
     pub(super) commitment_root: String,
     pub(super) opening_root: String,
 }
 
-pub(super) struct VerifiedCompactAggregateOpeningCredential {
+pub(super) struct VerifiedAggregateOpeningCredential {
     pub(super) commitment_root: String,
     pub(super) opening_root: String,
     pub(super) aggregate_share_values: Vec<u64>,
@@ -43,29 +43,26 @@ pub(super) struct VerifiedCompactAggregateOpeningCredential {
     pub(super) aggregate_randomness_by_column: Vec<Vec<i64>>,
 }
 
-pub(super) fn verify_compact_aggregate_opening_credential(
-    input: CompactAggregateOpeningCheckInput<'_>,
-) -> CanonicalResult<VerifiedCompactAggregateOpeningCredential> {
-    let aggregate_randomness_by_column =
-        read_compact_aggregate_randomness_by_column_signed_byte_hex(
-            input.credential,
-            input.setup_binding.participants.len(),
-        )?;
-    let aggregate_commitment_message_values = read_compact_aggregate_u64_vector_le_hex(
+pub(super) fn verify_aggregate_opening_credential(
+    input: AggregateOpeningCheckInput<'_>,
+) -> CanonicalResult<VerifiedAggregateOpeningCredential> {
+    let aggregate_randomness_by_column = read_aggregate_randomness_by_column_signed_byte_hex(
+        input.credential,
+        input.setup_binding.participants.len(),
+    )?;
+    let aggregate_commitment_message_values = read_aggregate_u64_vector_le_hex(
         input.credential,
         "aggregateCommitmentMessageValuesLeHex",
         "compact aggregate opening credential message byte length must match ringDegree",
     )?;
-    let aggregate_share_values = derive_compact_aggregate_share_values(
-        &aggregate_commitment_message_values,
-        input.rns_prime,
-    )?;
-    let message_coefficient_bound = compact_aggregate_message_coefficient_bound(
+    let aggregate_share_values =
+        derive_aggregate_share_values(&aggregate_commitment_message_values, input.rns_prime)?;
+    let message_coefficient_bound = aggregate_message_coefficient_bound(
         input.rns_prime,
         input.setup_binding.participants.len(),
     )?;
     let (commitment_root, opening_root) =
-        compute_compact_aggregate_opening_roots(CompactAggregateOpeningRootsInput {
+        compute_aggregate_opening_roots(AggregateOpeningRootsInput {
             setup_binding: input.setup_binding,
             participant: input.participant,
             setup_epoch: input.setup_epoch,
@@ -89,7 +86,7 @@ pub(super) fn verify_compact_aggregate_opening_credential(
         "compact aggregate opening credential opening root",
     )?;
 
-    Ok(VerifiedCompactAggregateOpeningCredential {
+    Ok(VerifiedAggregateOpeningCredential {
         commitment_root,
         opening_root,
         aggregate_share_values,
@@ -98,31 +95,31 @@ pub(super) fn verify_compact_aggregate_opening_credential(
     })
 }
 
-pub(super) fn compute_compact_aggregate_opening_roots(
-    input: CompactAggregateOpeningRootsInput<'_>,
+pub(super) fn compute_aggregate_opening_roots(
+    input: AggregateOpeningRootsInput<'_>,
 ) -> CanonicalResult<(String, String)> {
-    let computation = compute_compact_aggregate_opening(input)?;
+    let computation = compute_aggregate_opening(input)?;
 
     Ok((computation.commitment_root, computation.opening_root))
 }
 
-pub(super) fn compute_compact_aggregate_opening(
-    input: CompactAggregateOpeningRootsInput<'_>,
-) -> CanonicalResult<CompactAggregateOpeningComputation> {
-    let commitment_context = compact_aggregate_commitment_context(
+pub(super) fn compute_aggregate_opening(
+    input: AggregateOpeningRootsInput<'_>,
+) -> CanonicalResult<AggregateOpeningComputation> {
+    let commitment_context = aggregate_commitment_context(
         input.setup_binding,
         input.participant,
         input.setup_epoch,
         input.rns_limb_index,
         input.rns_prime,
     );
-    let message_digit_columns = compact_vss_canonical_message_digit_columns(
+    let message_digit_columns = vss_public_canonical_message_digit_columns(
         input.aggregate_commitment_message_values,
         POLYNOMIAL_DEGREE,
     )?;
     let computation =
-        compute_compact_vss_commitment_from_opening(CompactVssCommitmentOpeningInput {
-            commitment_role: COMPACT_VSS_AGGREGATE_COMMITMENT_ROLE,
+        compute_vss_public_commitment_from_opening(VssPublicCommitmentOpeningInput {
+            commitment_role: VSS_PUBLIC_AGGREGATE_COMMITMENT_ROLE,
             commitment_context: &commitment_context,
             public_matrix_seed_hash: input.public_matrix_seed_hash,
             rns_limb_index: input.rns_limb_index,
@@ -134,14 +131,14 @@ pub(super) fn compute_compact_aggregate_opening(
             randomness_by_column: input.aggregate_randomness_by_column,
         })?;
 
-    Ok(CompactAggregateOpeningComputation {
+    Ok(AggregateOpeningComputation {
         commitment: computation.commitment,
         commitment_root: computation.commitment_root,
         opening_root: computation.opening_root,
     })
 }
 
-pub(super) fn read_compact_aggregate_u64_vector_le_hex(
+pub(super) fn read_aggregate_u64_vector_le_hex(
     credential: &Value,
     field_name: &str,
     length_error_message: &'static str,
@@ -153,12 +150,12 @@ pub(super) fn read_compact_aggregate_u64_vector_le_hex(
     )
 }
 
-fn read_compact_aggregate_randomness_by_column_signed_byte_hex(
+fn read_aggregate_randomness_by_column_signed_byte_hex(
     credential: &Value,
     participant_count: usize,
 ) -> CanonicalResult<Vec<Vec<i64>>> {
     let columns = array_at_path(credential, &["aggregateRandomnessByColumnSignedByteHex"])?;
-    if columns.len() != COMPACT_VSS_RANDOMNESS_COLUMN_COUNT {
+    if columns.len() != VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
             "aggregateRandomnessByColumnSignedByteHex must carry the compact randomness column count",
@@ -204,7 +201,7 @@ fn read_compact_aggregate_randomness_by_column_signed_byte_hex(
     Ok(randomness_by_column)
 }
 
-fn derive_compact_aggregate_share_values(
+fn derive_aggregate_share_values(
     aggregate_commitment_message_values: &[u64],
     rns_prime: u64,
 ) -> CanonicalResult<Vec<u64>> {
@@ -225,7 +222,7 @@ fn derive_compact_aggregate_share_values(
     Ok(aggregate_share_values)
 }
 
-fn compact_aggregate_commitment_context(
+fn aggregate_commitment_context(
     setup_binding: &SetupBinding,
     participant: &ParticipantBinding,
     setup_epoch: &str,
@@ -233,7 +230,7 @@ fn compact_aggregate_commitment_context(
     rns_prime: u64,
 ) -> Value {
     json!({
-        "objectType": "CompactVssAggregateThresholdShareCommitmentContext",
+        "objectType": "VssPublicAggregateThresholdShareCommitmentContext",
         "objectVersion": 1,
         "ceremonyId": setup_binding.ceremony_id.as_str(),
         "manifestHash": setup_binding.election_manifest_hash.as_str(),

@@ -1,9 +1,9 @@
 import type {
-    CompactSameSecretBridgeProofComputer,
-    CompactVssCommitmentComputer,
-    CompactVssCommitmentValue,
-    CompactVssShareLinkageProofComputer,
-} from '#packages/protocol/src/setup/compact-vss-commitments';
+    SameSecretBridgeProofComputer,
+    VssPublicCommitmentComputer,
+    VssPublicCommitmentValue,
+    VssShareLinkageProofComputer,
+} from '#packages/protocol/src/setup/vss-commitments';
 import { loadTranscriptCoreKernel } from '#packages/wasm/src/index';
 
 // The compact VSS commitment and its share-linkage and same-secret bridge proofs
@@ -12,24 +12,24 @@ import { loadTranscriptCoreKernel } from '#packages/wasm/src/index';
 // the assembly while the certified commitment and proof math stay in one place.
 const transcriptCoreKernel = await loadTranscriptCoreKernel();
 
-export const compactVssCommitmentComputer: CompactVssCommitmentComputer = (
+export const vssPublicCommitmentComputer: VssPublicCommitmentComputer = (
     input,
 ) => {
     const computation =
-        transcriptCoreKernel.computeCompactVssCommitmentFromOpening(input);
+        transcriptCoreKernel.computeVssPublicCommitmentFromOpening(input);
 
     // The kernel returns the commitment as an opaque canonical object; at this
     // test-support boundary we know it is the compact commitment the protocol
     // aggregate builder sums, so bind it to that type.
     return {
-        commitment: computation.commitment as CompactVssCommitmentValue,
+        commitment: computation.commitment as VssPublicCommitmentValue,
         commitmentRoot: computation.commitmentRoot,
         openingRoot: computation.openingRoot,
     };
 };
 
-export const compactVssShareLinkageProofComputer: CompactVssShareLinkageProofComputer =
-    (input) => transcriptCoreKernel.generateCompactVssShareLinkageProof(input);
+export const vssShareLinkageProofComputer: VssShareLinkageProofComputer =
+    (input) => transcriptCoreKernel.generateVssShareLinkageProof(input);
 
-export const compactSameSecretBridgeProofComputer: CompactSameSecretBridgeProofComputer =
-    (input) => transcriptCoreKernel.generateCompactSameSecretBridgeProof(input);
+export const sameSecretBridgeProofComputer: SameSecretBridgeProofComputer =
+    (input) => transcriptCoreKernel.generateSameSecretBridgeProof(input);

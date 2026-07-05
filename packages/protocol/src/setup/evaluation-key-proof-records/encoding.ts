@@ -2,6 +2,7 @@ import { deriveCanonicalObjectHash, hash512Hex } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
 import { setupProofTransportChunkSizeBytes } from '../setup-proof-material-transport.js';
+import { appendVaruint } from '../varuint-encoding.js';
 
 import {
     type EvaluationKeyShareMaterial,
@@ -16,27 +17,11 @@ import {
 
 const lowercaseHexPattern = /^[0-9a-f]+$/u;
 
-export { assertProtocolHash } from '../common-fields.js';
-
-export const assertPositiveSafeInteger = (
-    value: number,
-    fieldName: string,
-): void => {
-    if (!Number.isSafeInteger(value) || value <= 0) {
-        throw new TypeError(`${fieldName} must be a positive safe integer.`);
-    }
-};
-
-export const assertNonNegativeSafeInteger = (
-    value: number,
-    fieldName: string,
-): void => {
-    if (!Number.isSafeInteger(value) || value < 0) {
-        throw new TypeError(
-            `${fieldName} must be a non-negative safe integer.`,
-        );
-    }
-};
+export {
+    assertNonNegativeSafeInteger,
+    assertPositiveSafeInteger,
+    assertProtocolHash,
+} from '../common-fields.js';
 
 export const assertNonEmptyString = (
     value: string,
@@ -138,23 +123,6 @@ export const freshProofRandomnessHex = (): string => {
     }
 
     return bytesToHex(bytes);
-};
-
-const appendVaruint = (outputBytes: number[], value: number): void => {
-    if (!Number.isSafeInteger(value) || value < 0) {
-        throw new TypeError(
-            'binary varuint value must be a non-negative safe integer.',
-        );
-    }
-    let remainingValue = value;
-    do {
-        let byte = remainingValue & 0x7f;
-        remainingValue = Math.floor(remainingValue / 128);
-        if (remainingValue !== 0) {
-            byte |= 0x80;
-        }
-        outputBytes.push(byte);
-    } while (remainingValue !== 0);
 };
 
 const varUintBytes = (value: number): Uint8Array => {

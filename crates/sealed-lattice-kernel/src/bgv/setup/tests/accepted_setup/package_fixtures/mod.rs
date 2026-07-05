@@ -12,7 +12,6 @@ static COLLECTIVE_PUBLIC_KEY_BEARING_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<se
 struct VssMaterialPackageComponents {
     vss_coefficient_commitments: serde_json::Value,
     vss_coefficient_commitment_material: serde_json::Value,
-    threshold_share_commitments: serde_json::Value,
 }
 
 struct CollectiveSetupPackageFixture {
@@ -331,25 +330,14 @@ fn build_collective_setup_package_fixture_parts(
                 vss_material_ring_degree_status,
                 participant_count,
             );
-        let threshold_share_commitments =
-            derive_threshold_share_commitments_from_request(&serde_json::json!({
-                "setupContext": setup_context.clone(),
-                "publicMatrixSeedHash": public_matrix_seed_hash,
-                "sourceTrusteeCoefficientCommitmentRecords": vss_coefficient_commitments["sourceTrusteeRecords"].clone(),
-                "coefficientCommitments": vss_coefficient_commitment_material["coefficientCommitments"].clone(),
-            }))
-            .expect("threshold-share commitments")["thresholdShareCommitments"]
-                .clone();
         VssMaterialPackageComponents {
             vss_coefficient_commitments,
             vss_coefficient_commitment_material,
-            threshold_share_commitments,
         }
     };
     let vss_coefficient_commitments = vss_components.vss_coefficient_commitments.clone();
     let vss_coefficient_commitment_material =
         vss_components.vss_coefficient_commitment_material.clone();
-    let threshold_share_commitments = vss_components.threshold_share_commitments.clone();
     let private_vss_envelope_commitments = private_vss_envelope_commitments_object(
         ceremony_id,
         &manifest_hash,
@@ -439,7 +427,6 @@ fn build_collective_setup_package_fixture_parts(
         "privateVssEnvelopeCommitments": private_vss_envelope_commitments,
         "privateVssEnvelopeCommitmentRoot": private_vss_envelope_commitment_root,
         "vssShareAcceptances": vss_share_acceptances,
-        "thresholdShareCommitments": threshold_share_commitments,
         "sameSecretConsistency": same_secret_consistency,
         "publicKeyShares": public_key_shares,
         "publicKeyShareProofs": public_key_share_proofs,

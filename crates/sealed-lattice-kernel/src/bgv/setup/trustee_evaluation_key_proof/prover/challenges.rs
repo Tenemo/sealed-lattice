@@ -1,11 +1,11 @@
 use super::super::extension_field::{ChallengeExtensionElement, ChallengeExtensionTower};
 use super::super::fiat_shamir_transcript::FiatShamirTranscript;
 use super::super::relation::{
-    CompactSameSecretBridgePublicVectorInput, LimbColumnLayout, SumcheckErrorWeights,
+    LimbColumnLayout, SameSecretBridgePublicVectorInput, SumcheckErrorWeights,
     TargetDecryptionSharePublicVectorInput, TrusteeEvaluationKeyStatement,
-    build_compact_same_secret_bridge_public_vectors,
-    build_compact_vss_share_linkage_batch_public_vectors, build_linkage_public_vectors,
-    build_private_vss_public_vectors, build_target_decryption_share_public_vectors,
+    build_linkage_public_vectors, build_private_vss_public_vectors,
+    build_same_secret_bridge_public_vectors, build_target_decryption_share_public_vectors,
+    build_vss_share_linkage_batch_public_vectors,
 };
 use super::super::*;
 use super::polynomial::{extension_powers, negacyclic_transpose_product_extension_matrix};
@@ -74,17 +74,17 @@ pub(in super::super) fn draw_limb_challenges(
             modulus,
             layout.private_vss_relation_count() * LINCHECK_REPETITIONS,
         )
-    } else if layout.compact_vss_active() {
+    } else if layout.vss_public_active() {
         transcript.challenge_extension_elements(
-            "compact-vss-share-linkage-alpha",
+            "vss-share-linkage-alpha",
             modulus,
-            layout.compact_vss_relation_count(),
+            layout.vss_public_relation_count(),
         )
-    } else if layout.compact_same_secret_bridge_material_active() {
+    } else if layout.same_secret_bridge_material_active() {
         transcript.challenge_extension_elements(
-            "compact-same-secret-bridge-alpha",
+            "same-secret-bridge-alpha",
             modulus,
-            layout.compact_same_secret_bridge_relation_count(),
+            layout.same_secret_bridge_relation_count(),
         )
     } else if layout.target_decryption_active() {
         transcript.challenge_extension_elements(
@@ -176,16 +176,12 @@ pub(in super::super) fn build_limb_public_vectors(
             lincheck_claim: combined_claim,
         });
     }
-    if layout.compact_vss_active() {
-        let compact_vss_share_linkage =
-            statement
-                .compact_vss_share_linkage
-                .as_ref()
-                .ok_or_else(|| {
-                    invalid_succinct_setup_proof(
-                        "compact VSS layout requires a compact share-linkage statement",
-                    )
-                })?;
+    if layout.vss_public_active() {
+        let vss_share_linkage = statement.vss_share_linkage.as_ref().ok_or_else(|| {
+            invalid_succinct_setup_proof(
+                "compact VSS layout requires a compact share-linkage statement",
+            )
+        })?;
         let mut combined_claim = ChallengeExtensionTower::zero();
         let mut mask_selectors = vec![extension_zero_vector(); layout.mask_column_count];
         for (local_claim, alpha_value) in challenges.consistency_alpha.iter().enumerate() {
@@ -201,17 +197,16 @@ pub(in super::super) fn build_limb_public_vectors(
                     tower.add(&mask_selectors[column][position], &digit_weight);
             }
         }
-        let (compact_vss_claim, relation_vectors) =
-            build_compact_vss_share_linkage_batch_public_vectors(
-                compact_vss_share_linkage,
-                limb_index,
-                modulus,
-                layout.base_ring_degree,
-                &challenges.linkage_alpha,
-                &u_powers,
-                &tower,
-            )?;
-        combined_claim = tower.add(&combined_claim, &compact_vss_claim);
+        let (vss_public_claim, relation_vectors) = build_vss_share_linkage_batch_public_vectors(
+            vss_share_linkage,
+            limb_index,
+            modulus,
+            layout.base_ring_degree,
+            &challenges.linkage_alpha,
+            &u_powers,
+            &tower,
+        )?;
+        combined_claim = tower.add(&combined_claim, &vss_public_claim);
 
         return Ok(LimbPublicVectors {
             secret_factor: Vec::new(),
@@ -224,16 +219,12 @@ pub(in super::super) fn build_limb_public_vectors(
             lincheck_claim: combined_claim,
         });
     }
-    if layout.compact_same_secret_bridge_active() {
-        let compact_same_secret_bridge =
-            statement
-                .compact_same_secret_bridge
-                .as_ref()
-                .ok_or_else(|| {
-                    invalid_succinct_setup_proof(
-                        "compact same-secret bridge layout requires a compact bridge statement",
-                    )
-                })?;
+    if layout.same_secret_bridge_active() {
+        let same_secret_bridge = statement.same_secret_bridge.as_ref().ok_or_else(|| {
+            invalid_succinct_setup_proof(
+                "compact same-secret bridge layout requires a compact bridge statement",
+            )
+        })?;
         let mut combined_claim = ChallengeExtensionTower::zero();
         let mut mask_selectors = vec![extension_zero_vector(); layout.mask_column_count];
         for (local_claim, alpha_value) in challenges.consistency_alpha.iter().enumerate() {
@@ -249,22 +240,20 @@ pub(in super::super) fn build_limb_public_vectors(
                     tower.add(&mask_selectors[column][position], &digit_weight);
             }
         }
-        let (compact_bridge_claim, relation_vectors) =
-            build_compact_same_secret_bridge_public_vectors(
-                CompactSameSecretBridgePublicVectorInput {
-                    public_matrix_seed_hash: &compact_same_secret_bridge.public_matrix_seed_hash,
-                    commitment_modulus_index: limb_index,
-                    modulus,
-                    ring_degree,
-                    target_rns_primes: &compact_same_secret_bridge.target_rns_primes,
-                    target_constant_commitments: &compact_same_secret_bridge
-                        .target_constant_commitments,
-                    relation_alpha: &challenges.linkage_alpha,
-                    u_power_vectors: &u_powers,
-                },
-                &tower,
-            )?;
-        combined_claim = tower.add(&combined_claim, &compact_bridge_claim);
+        let (bridge_claim, relation_vectors) = build_same_secret_bridge_public_vectors(
+            SameSecretBridgePublicVectorInput {
+                public_matrix_seed_hash: &same_secret_bridge.public_matrix_seed_hash,
+                commitment_modulus_index: limb_index,
+                modulus,
+                ring_degree,
+                target_rns_primes: &same_secret_bridge.target_rns_primes,
+                target_constant_commitments: &same_secret_bridge.target_constant_commitments,
+                relation_alpha: &challenges.linkage_alpha,
+                u_power_vectors: &u_powers,
+            },
+            &tower,
+        )?;
+        combined_claim = tower.add(&combined_claim, &bridge_claim);
 
         return Ok(LimbPublicVectors {
             secret_factor: Vec::new(),
@@ -416,29 +405,24 @@ pub(in super::super) fn build_limb_public_vectors(
     }
 
     let mut linkage_vectors = Vec::new();
-    if layout.compact_same_secret_bridge_material_active() {
-        let compact_same_secret_bridge =
-            statement
-                .compact_same_secret_bridge
-                .as_ref()
-                .ok_or_else(|| {
-                    invalid_succinct_setup_proof("limb layout expects a compact bridge statement")
-                })?;
-        let (compact_bridge_claim, vectors) = build_compact_same_secret_bridge_public_vectors(
-            CompactSameSecretBridgePublicVectorInput {
-                public_matrix_seed_hash: &compact_same_secret_bridge.public_matrix_seed_hash,
+    if layout.same_secret_bridge_material_active() {
+        let same_secret_bridge = statement.same_secret_bridge.as_ref().ok_or_else(|| {
+            invalid_succinct_setup_proof("limb layout expects a compact bridge statement")
+        })?;
+        let (bridge_claim, vectors) = build_same_secret_bridge_public_vectors(
+            SameSecretBridgePublicVectorInput {
+                public_matrix_seed_hash: &same_secret_bridge.public_matrix_seed_hash,
                 commitment_modulus_index: limb_index,
                 modulus,
                 ring_degree,
-                target_rns_primes: &compact_same_secret_bridge.target_rns_primes,
-                target_constant_commitments: &compact_same_secret_bridge
-                    .target_constant_commitments,
+                target_rns_primes: &same_secret_bridge.target_rns_primes,
+                target_constant_commitments: &same_secret_bridge.target_constant_commitments,
                 relation_alpha: &challenges.linkage_alpha,
                 u_power_vectors: &u_powers,
             },
             &tower,
         )?;
-        combined_claim = tower.add(&combined_claim, &compact_bridge_claim);
+        combined_claim = tower.add(&combined_claim, &bridge_claim);
         linkage_vectors = vectors;
     } else if layout.linkage_active() {
         let linkage = statement.same_secret_linkage.as_ref().ok_or_else(|| {

@@ -3,31 +3,31 @@ use crate::bgv::setup_helpers::compare_required_string;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
-pub(super) const COMPACT_VSS_COMMITMENT_BINARY_FORMAT: &str =
-    "sealed-lattice-compact-vss-commitment-binary-v1";
-pub(crate) const COMPACT_VSS_OUTPUT_COORDINATE_COUNT: usize = 16;
-pub(crate) const COMPACT_VSS_MESSAGE_DIGIT_COUNT: usize = 2;
+pub(super) const VSS_PUBLIC_COMMITMENT_BINARY_FORMAT: &str =
+    "sealed-lattice-vss-public-commitment-binary-v1";
+pub(crate) const VSS_PUBLIC_OUTPUT_COORDINATE_COUNT: usize = 16;
+pub(crate) const VSS_PUBLIC_MESSAGE_DIGIT_COUNT: usize = 2;
 #[cfg(test)]
-pub(crate) const COMPACT_VSS_MESSAGE_BASE_DIGIT_TRIT_COUNT: usize = 17;
-pub(crate) const COMPACT_VSS_MESSAGE_DIGIT_BASE: u64 = 129_140_163;
-pub(crate) const COMPACT_VSS_RANDOMNESS_COLUMN_COUNT: usize = 2;
-pub(in crate::bgv::setup) const COMPACT_VSS_RANDOMNESS_PROJECTION_WEIGHT: usize = 32;
-const COMPACT_VSS_COMMITMENT_MODULUS_LIMB_INDICES: [usize; 3] = [0, 1, 2];
-const COMPACT_VSS_SAMPLER_DOMAIN: &str = "sealed-lattice-compact-vss-commitment/sampler-v1";
-const COMPACT_VSS_MATRIX_RESIDUE_HASH_DOMAIN: &str =
-    "sealed-lattice-compact-vss-commitment/matrix-residue-v1";
-const COMPACT_VSS_PROJECTION_INDEX_HASH_DOMAIN: &str =
-    "sealed-lattice-compact-vss-commitment/projection-index-v1";
-const COMPACT_VSS_OPENING_PAYLOAD_HASH_DOMAIN: &str =
-    "sealed-lattice-compact-vss-commitment/opening-payload-v2";
+pub(crate) const VSS_PUBLIC_MESSAGE_BASE_DIGIT_TRIT_COUNT: usize = 17;
+pub(crate) const VSS_PUBLIC_MESSAGE_DIGIT_BASE: u64 = 129_140_163;
+pub(crate) const VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT: usize = 2;
+pub(in crate::bgv::setup) const VSS_PUBLIC_RANDOMNESS_PROJECTION_WEIGHT: usize = 32;
+const VSS_PUBLIC_COMMITMENT_MODULUS_LIMB_INDICES: [usize; 3] = [0, 1, 2];
+const VSS_PUBLIC_SAMPLER_DOMAIN: &str = "sealed-lattice-vss-public-commitment/sampler-v1";
+const VSS_PUBLIC_MATRIX_RESIDUE_HASH_DOMAIN: &str =
+    "sealed-lattice-vss-public-commitment/matrix-residue-v1";
+const VSS_PUBLIC_PROJECTION_INDEX_HASH_DOMAIN: &str =
+    "sealed-lattice-vss-public-commitment/projection-index-v1";
+const VSS_PUBLIC_OPENING_PAYLOAD_HASH_DOMAIN: &str =
+    "sealed-lattice-vss-public-commitment/opening-payload-v2";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::bgv::setup) struct CompactVssMessageEncodingLayout {
+pub(in crate::bgv::setup) struct VssPublicMessageEncodingLayout {
     low_digit_trit_count: usize,
     high_digit_trit_count: usize,
 }
 
-impl CompactVssMessageEncodingLayout {
+impl VssPublicMessageEncodingLayout {
     pub(in crate::bgv::setup) fn digit_trit_count(
         self,
         digit_index: usize,
@@ -47,14 +47,14 @@ impl CompactVssMessageEncodingLayout {
     }
 
     pub(in crate::bgv::setup) fn encoding_column_count(self) -> usize {
-        COMPACT_VSS_MESSAGE_DIGIT_COUNT + self.total_trit_count()
+        VSS_PUBLIC_MESSAGE_DIGIT_COUNT + self.total_trit_count()
     }
 
     pub(in crate::bgv::setup) fn digit_encoding_column(
         self,
         digit_index: usize,
     ) -> CanonicalResult<usize> {
-        if digit_index < COMPACT_VSS_MESSAGE_DIGIT_COUNT {
+        if digit_index < VSS_PUBLIC_MESSAGE_DIGIT_COUNT {
             Ok(digit_index)
         } else {
             Err(CanonicalError::new(
@@ -88,11 +88,11 @@ impl CompactVssMessageEncodingLayout {
                     })
             })?;
 
-        Ok(COMPACT_VSS_MESSAGE_DIGIT_COUNT + previous_trit_count + trit_index)
+        Ok(VSS_PUBLIC_MESSAGE_DIGIT_COUNT + previous_trit_count + trit_index)
     }
 }
 
-pub(crate) struct CompactVssCommitmentOpeningInput<'a> {
+pub(crate) struct VssPublicCommitmentOpeningInput<'a> {
     pub(crate) commitment_role: &'a str,
     pub(crate) commitment_context: &'a Value,
     pub(crate) public_matrix_seed_hash: &'a str,
@@ -105,26 +105,26 @@ pub(crate) struct CompactVssCommitmentOpeningInput<'a> {
     pub(crate) randomness_by_column: &'a [Vec<i64>],
 }
 
-pub(crate) struct CompactVssCommitmentComputation {
+pub(crate) struct VssPublicCommitmentComputation {
     pub(crate) commitment: Value,
     pub(crate) commitment_root: String,
     pub(crate) commitment_context_hash: String,
     pub(crate) opening_root: String,
 }
 
-pub(crate) fn compute_compact_vss_commitment_from_opening(
-    input: CompactVssCommitmentOpeningInput<'_>,
-) -> CanonicalResult<CompactVssCommitmentComputation> {
+pub(crate) fn compute_vss_public_commitment_from_opening(
+    input: VssPublicCommitmentOpeningInput<'_>,
+) -> CanonicalResult<VssPublicCommitmentComputation> {
     validate_hash_string(input.public_matrix_seed_hash, "publicMatrixSeedHash")?;
-    validate_compact_vss_commitment_role(input.commitment_role)?;
+    validate_vss_public_commitment_role(input.commitment_role)?;
     if input.rns_prime == 0 {
-        return Err(invalid_compact_vss_input("rnsPrime must be positive"));
+        return Err(invalid_vss_public_input("rnsPrime must be positive"));
     }
     if input.ring_degree == 0 {
-        return Err(invalid_compact_vss_input("ringDegree must be positive"));
+        return Err(invalid_vss_public_input("ringDegree must be positive"));
     }
     if input.message_coefficient_bound == 0 {
-        return Err(invalid_compact_vss_input(
+        return Err(invalid_vss_public_input(
             "messageCoefficientBound must be positive",
         ));
     }
@@ -144,13 +144,13 @@ pub(crate) fn compute_compact_vss_commitment_from_opening(
             ));
         }
     }
-    let message_digit_columns = compact_vss_message_digit_columns_for_opening(
+    let message_digit_columns = vss_public_message_digit_columns_for_opening(
         input.message_coefficients,
         input.message_digit_columns,
         input.message_coefficient_bound,
         input.ring_degree,
     )?;
-    validate_compact_vss_randomness_columns(
+    validate_vss_public_randomness_columns(
         input.randomness_by_column,
         input.ring_degree,
         None,
@@ -158,18 +158,18 @@ pub(crate) fn compute_compact_vss_commitment_from_opening(
     )?;
 
     let commitment_context_hash = derive_canonical_object_hash(&json!({
-        "objectType": "CompactVssCommitmentContext",
+        "objectType": "VssPublicCommitmentContext",
         "objectVersion": 1,
         "commitmentRole": input.commitment_role,
         "commitmentContext": input.commitment_context,
     }))?;
-    let commitment_limbs = COMPACT_VSS_COMMITMENT_MODULUS_LIMB_INDICES
+    let commitment_limbs = VSS_PUBLIC_COMMITMENT_MODULUS_LIMB_INDICES
         .iter()
         .map(|commitment_modulus_index| {
             let modulus = DATA_PRIMES[*commitment_modulus_index];
-            let coordinates = (0..COMPACT_VSS_OUTPUT_COORDINATE_COUNT)
+            let coordinates = (0..VSS_PUBLIC_OUTPUT_COORDINATE_COUNT)
                 .map(|output_coordinate_index| {
-                    compact_commitment_coordinate(CompactCommitmentCoordinateInput {
+                    commitment_coordinate(CommitmentCoordinateInput {
                         public_matrix_seed_hash: input.public_matrix_seed_hash,
                         rns_limb_index: input.rns_limb_index,
                         commitment_modulus_index: *commitment_modulus_index,
@@ -189,7 +189,7 @@ pub(crate) fn compute_compact_vss_commitment_from_opening(
         })
         .collect::<CanonicalResult<Vec<_>>>()?;
     let commitment = json!({
-        "objectType": "CompactVssCommitment",
+        "objectType": "VssPublicCommitment",
         "objectVersion": 1,
         "commitmentRole": input.commitment_role,
         "commitmentContextHash": commitment_context_hash,
@@ -197,13 +197,13 @@ pub(crate) fn compute_compact_vss_commitment_from_opening(
         "rnsLimbIndex": input.rns_limb_index,
         "rnsPrime": input.rns_prime,
         "ringDegree": input.ring_degree,
-        "outputCoordinateCount": COMPACT_VSS_OUTPUT_COORDINATE_COUNT,
-        "randomnessColumnCount": COMPACT_VSS_RANDOMNESS_COLUMN_COUNT,
+        "outputCoordinateCount": VSS_PUBLIC_OUTPUT_COORDINATE_COUNT,
+        "randomnessColumnCount": VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT,
         "commitmentLimbs": commitment_limbs,
     });
     let commitment_root = derive_canonical_object_hash(&commitment)?;
     let opening_root = derive_canonical_object_hash(&json!({
-        "objectType": "CompactVssCommitmentOpening",
+        "objectType": "VssPublicCommitmentOpening",
         "objectVersion": 1,
         "commitmentRole": input.commitment_role,
         "commitmentContext": input.commitment_context,
@@ -211,14 +211,14 @@ pub(crate) fn compute_compact_vss_commitment_from_opening(
         "rnsLimbIndex": input.rns_limb_index,
         "rnsPrime": input.rns_prime,
         "ringDegree": input.ring_degree,
-        "openingPayloadHash512": compact_vss_opening_payload_hash(
+        "openingPayloadHash512": vss_public_opening_payload_hash(
             input.message_coefficients,
             &message_digit_columns,
             input.randomness_by_column,
         )?,
     }))?;
 
-    Ok(CompactVssCommitmentComputation {
+    Ok(VssPublicCommitmentComputation {
         commitment,
         commitment_root,
         commitment_context_hash,
@@ -226,21 +226,21 @@ pub(crate) fn compute_compact_vss_commitment_from_opening(
     })
 }
 
-pub(crate) fn compute_compact_vss_commitment_from_opening_request(
+pub(crate) fn compute_vss_public_commitment_from_opening_request(
     request: &Value,
 ) -> CanonicalResult<Value> {
-    let computation = compute_compact_vss_commitment_from_opening_value(request)?;
+    let computation = compute_vss_public_commitment_from_opening_value(request)?;
 
-    Ok(compact_vss_commitment_computation_response(&computation))
+    Ok(vss_public_commitment_computation_response(&computation))
 }
 
-pub(crate) fn verify_compact_vss_coefficient_commitment_set_request(
+pub(crate) fn verify_vss_public_coefficient_commitment_set_request(
     request: &Value,
 ) -> CanonicalResult<Value> {
     let coefficient_set = value_at_path(request, &["coefficientCommitmentSet"])?;
     compare_required_string(
         string_at_path(coefficient_set, &["objectType"])?,
-        "CompactVssCoefficientCommitmentSet",
+        "VssPublicCoefficientCommitmentSet",
         "compact VSS coefficient commitment set objectType",
     )?;
     compare_required_u64(
@@ -288,8 +288,8 @@ pub(crate) fn verify_compact_vss_coefficient_commitment_set_request(
 
     let mut verified_source_trustee_records = Vec::with_capacity(source_trustee_records.len());
     for (expected_roster_position, source_record) in source_trustee_records.iter().enumerate() {
-        verified_source_trustee_records.push(verify_compact_vss_source_coefficient_record(
-            CompactVssSourceCoefficientRecordInput {
+        verified_source_trustee_records.push(verify_vss_public_source_coefficient_record(
+            VssPublicSourceCoefficientRecordInput {
                 source_record,
                 expected_roster_position,
                 expected_coefficient_count,
@@ -300,7 +300,7 @@ pub(crate) fn verify_compact_vss_coefficient_commitment_set_request(
     }
 
     let expected_set_root = derive_canonical_object_hash(&json!({
-        "objectType": "CompactVssCoefficientCommitmentSet",
+        "objectType": "VssPublicCoefficientCommitmentSet",
         "objectVersion": 1,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "participantCount": participant_count,
@@ -320,7 +320,7 @@ pub(crate) fn verify_compact_vss_coefficient_commitment_set_request(
 
     Ok(json!({
         "ok": true,
-        "operation": "verifyCompactVssCoefficientCommitmentSet",
+        "operation": "verifyVssPublicCoefficientCommitmentSet",
         "coefficientCommitmentRoot": coefficient_commitment_root,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "participantCount": participant_count,
@@ -330,13 +330,13 @@ pub(crate) fn verify_compact_vss_coefficient_commitment_set_request(
     }))
 }
 
-pub(crate) fn verify_compact_vss_recipient_share_commitment_set_request(
+pub(crate) fn verify_vss_public_recipient_share_commitment_set_request(
     request: &Value,
 ) -> CanonicalResult<Value> {
     let recipient_set = value_at_path(request, &["recipientShareCommitmentSet"])?;
     compare_required_string(
         string_at_path(recipient_set, &["objectType"])?,
-        "CompactVssRecipientShareCommitmentSet",
+        "VssPublicRecipientShareCommitmentSet",
         "compact VSS recipient-share commitment set objectType",
     )?;
     compare_required_u64(
@@ -379,8 +379,8 @@ pub(crate) fn verify_compact_vss_recipient_share_commitment_set_request(
 
     let mut verified_source_trustee_records = Vec::with_capacity(source_trustee_records.len());
     for (expected_roster_position, source_record) in source_trustee_records.iter().enumerate() {
-        verified_source_trustee_records.push(verify_compact_vss_source_recipient_share_record(
-            CompactVssSourceRecipientShareRecordInput {
+        verified_source_trustee_records.push(verify_vss_public_source_recipient_share_record(
+            VssPublicSourceRecipientShareRecordInput {
                 source_record,
                 expected_source_roster_position: expected_roster_position,
                 expected_recipient_share_count,
@@ -391,7 +391,7 @@ pub(crate) fn verify_compact_vss_recipient_share_commitment_set_request(
     }
 
     let expected_set_root = derive_canonical_object_hash(&json!({
-        "objectType": "CompactVssRecipientShareCommitmentSet",
+        "objectType": "VssPublicRecipientShareCommitmentSet",
         "objectVersion": 1,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "participantCount": participant_count,
@@ -410,7 +410,7 @@ pub(crate) fn verify_compact_vss_recipient_share_commitment_set_request(
 
     Ok(json!({
         "ok": true,
-        "operation": "verifyCompactVssRecipientShareCommitmentSet",
+        "operation": "verifyVssPublicRecipientShareCommitmentSet",
         "recipientShareCommitmentRoot": recipient_share_commitment_root,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "participantCount": participant_count,
@@ -419,13 +419,13 @@ pub(crate) fn verify_compact_vss_recipient_share_commitment_set_request(
     }))
 }
 
-pub(crate) fn verify_compact_vss_aggregate_threshold_commitment_set_request(
+pub(crate) fn verify_vss_public_aggregate_threshold_commitment_set_request(
     request: &Value,
 ) -> CanonicalResult<Value> {
     let aggregate_set = value_at_path(request, &["aggregateThresholdCommitmentSet"])?;
     compare_required_string(
         string_at_path(aggregate_set, &["objectType"])?,
-        "CompactVssAggregateThresholdCommitmentSet",
+        "VssPublicAggregateThresholdCommitmentSet",
         "compact VSS aggregate threshold commitment set objectType",
     )?;
     compare_required_u64(
@@ -467,8 +467,8 @@ pub(crate) fn verify_compact_vss_aggregate_threshold_commitment_set_request(
 
     let mut verified_recipient_records = Vec::with_capacity(recipient_records.len());
     for (recipient_record_index, recipient_record) in recipient_records.iter().enumerate() {
-        verified_recipient_records.push(verify_compact_vss_aggregate_threshold_record(
-            CompactVssAggregateThresholdRecordInput {
+        verified_recipient_records.push(verify_vss_public_aggregate_threshold_record(
+            VssPublicAggregateThresholdRecordInput {
                 recipient_record,
                 expected_recipient_roster_position: recipient_record_index / rns_limb_count,
                 expected_rns_limb_index: recipient_record_index % rns_limb_count,
@@ -479,7 +479,7 @@ pub(crate) fn verify_compact_vss_aggregate_threshold_commitment_set_request(
     }
 
     let expected_set_root = derive_canonical_object_hash(&json!({
-        "objectType": "CompactVssAggregateThresholdCommitmentSet",
+        "objectType": "VssPublicAggregateThresholdCommitmentSet",
         "objectVersion": 1,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "participantCount": participant_count,
@@ -498,7 +498,7 @@ pub(crate) fn verify_compact_vss_aggregate_threshold_commitment_set_request(
 
     Ok(json!({
         "ok": true,
-        "operation": "verifyCompactVssAggregateThresholdCommitmentSet",
+        "operation": "verifyVssPublicAggregateThresholdCommitmentSet",
         "aggregateThresholdCommitmentRoot": aggregate_threshold_commitment_root,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "participantCount": participant_count,
@@ -507,13 +507,13 @@ pub(crate) fn verify_compact_vss_aggregate_threshold_commitment_set_request(
     }))
 }
 
-pub(crate) fn verify_compact_vss_share_linkage_statement_request(
+pub(crate) fn verify_vss_share_linkage_statement_request(
     request: &Value,
 ) -> CanonicalResult<Value> {
     let statement = value_at_path(request, &["statement"])?;
     compare_required_string(
         string_at_path(statement, &["objectType"])?,
-        "CompactVssShareLinkageStatement",
+        "VssShareLinkageStatement",
         "compact VSS share linkage statement objectType",
     )?;
     compare_required_u64(
@@ -564,11 +564,11 @@ pub(crate) fn verify_compact_vss_share_linkage_statement_request(
     for (expected_source_position, source_statement_record) in
         source_statement_records.iter().enumerate()
     {
-        verified_source_statement_records.push(verify_compact_vss_share_linkage_source_statement(
-            CompactVssShareLinkageSourceStatementInput {
+        verified_source_statement_records.push(verify_vss_share_linkage_source_statement(
+            VssShareLinkageSourceStatementInput {
                 source_statement_record,
                 expected_source_position,
-                statement: CompactVssShareLinkageStatementBinding {
+                statement: VssShareLinkageStatementBinding {
                     ceremony_id,
                     manifest_hash,
                     roster_hash,
@@ -588,7 +588,7 @@ pub(crate) fn verify_compact_vss_share_linkage_statement_request(
     }
     let statement_root = hash_at_path(statement, &["statementRoot"])?;
     let statement_without_root = json!({
-        "objectType": "CompactVssShareLinkageStatement",
+        "objectType": "VssShareLinkageStatement",
         "objectVersion": 1,
         "ceremonyId": ceremony_id,
         "manifestHash": manifest_hash,
@@ -613,9 +613,9 @@ pub(crate) fn verify_compact_vss_share_linkage_statement_request(
             "compact VSS share linkage statement root does not match its bound public roots",
         ));
     }
-    verify_compact_vss_share_linkage_evidence(CompactVssShareLinkageEvidenceInput {
+    verify_vss_share_linkage_evidence(VssShareLinkageEvidenceInput {
         request,
-        statement: CompactVssShareLinkageStatementBinding {
+        statement: VssShareLinkageStatementBinding {
             ceremony_id,
             manifest_hash,
             roster_hash,
@@ -636,7 +636,7 @@ pub(crate) fn verify_compact_vss_share_linkage_statement_request(
 
     Ok(json!({
         "ok": true,
-        "operation": "verifyCompactVssShareLinkageStatement",
+        "operation": "verifyVssShareLinkageStatement",
         "statementRoot": statement_root,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "targetBasisHash": target_basis_hash,
@@ -650,7 +650,7 @@ pub(crate) fn verify_compact_vss_share_linkage_statement_request(
     }))
 }
 
-struct CompactVssShareLinkageStatementBinding<'a> {
+struct VssShareLinkageStatementBinding<'a> {
     ceremony_id: &'a str,
     manifest_hash: &'a str,
     roster_hash: &'a str,
@@ -666,21 +666,21 @@ struct CompactVssShareLinkageStatementBinding<'a> {
     aggregate_threshold_commitment_root: &'a str,
 }
 
-struct CompactVssShareLinkageSourceStatementInput<'a> {
+struct VssShareLinkageSourceStatementInput<'a> {
     source_statement_record: &'a Value,
     expected_source_position: usize,
-    statement: CompactVssShareLinkageStatementBinding<'a>,
+    statement: VssShareLinkageStatementBinding<'a>,
 }
 
-struct CompactVssShareLinkageEvidenceInput<'a> {
+struct VssShareLinkageEvidenceInput<'a> {
     request: &'a Value,
-    statement: CompactVssShareLinkageStatementBinding<'a>,
+    statement: VssShareLinkageStatementBinding<'a>,
     recipient_share_commitment_root: &'a str,
     verified_source_statement_records: &'a [Value],
 }
 
-fn verify_compact_vss_share_linkage_evidence(
-    input: CompactVssShareLinkageEvidenceInput<'_>,
+fn verify_vss_share_linkage_evidence(
+    input: VssShareLinkageEvidenceInput<'_>,
 ) -> CanonicalResult<()> {
     let (
         Some(coefficient_commitment_set),
@@ -698,7 +698,7 @@ fn verify_compact_vss_share_linkage_evidence(
         ));
     };
 
-    verify_compact_vss_share_linkage_evidence_sets(
+    verify_vss_share_linkage_evidence_sets(
         input,
         coefficient_commitment_set,
         recipient_share_commitment_set,
@@ -706,21 +706,21 @@ fn verify_compact_vss_share_linkage_evidence(
     )
 }
 
-fn verify_compact_vss_share_linkage_evidence_sets(
-    input: CompactVssShareLinkageEvidenceInput<'_>,
+fn verify_vss_share_linkage_evidence_sets(
+    input: VssShareLinkageEvidenceInput<'_>,
     coefficient_commitment_set: &Value,
     recipient_share_commitment_set: &Value,
     aggregate_threshold_commitment_set: &Value,
 ) -> CanonicalResult<()> {
-    let coefficient_verification = verify_compact_vss_coefficient_commitment_set_request(&json!({
+    let coefficient_verification = verify_vss_public_coefficient_commitment_set_request(&json!({
         "coefficientCommitmentSet": coefficient_commitment_set,
     }))?;
     let recipient_verification =
-        verify_compact_vss_recipient_share_commitment_set_request(&json!({
+        verify_vss_public_recipient_share_commitment_set_request(&json!({
             "recipientShareCommitmentSet": recipient_share_commitment_set,
         }))?;
     let aggregate_verification =
-        verify_compact_vss_aggregate_threshold_commitment_set_request(&json!({
+        verify_vss_public_aggregate_threshold_commitment_set_request(&json!({
             "aggregateThresholdCommitmentSet": aggregate_threshold_commitment_set,
         }))?;
 
@@ -794,7 +794,7 @@ fn verify_compact_vss_share_linkage_evidence_sets(
         input.statement.threshold_degree as u64,
         "compact VSS share linkage evidence coefficient thresholdDegree",
     )?;
-    verify_compact_vss_aggregate_threshold_public_sums(
+    verify_vss_public_aggregate_threshold_public_sums(
         recipient_share_commitment_set,
         aggregate_threshold_commitment_set,
         input.statement.participant_count,
@@ -932,7 +932,7 @@ fn verify_compact_vss_share_linkage_evidence_sets(
     Ok(())
 }
 
-fn verify_compact_vss_aggregate_threshold_public_sums(
+fn verify_vss_public_aggregate_threshold_public_sums(
     recipient_share_commitment_set: &Value,
     aggregate_threshold_commitment_set: &Value,
     participant_count: usize,
@@ -1099,12 +1099,12 @@ fn verify_compact_vss_aggregate_threshold_public_sums(
     Ok(())
 }
 
-fn verify_compact_vss_share_linkage_source_statement(
-    input: CompactVssShareLinkageSourceStatementInput<'_>,
+fn verify_vss_share_linkage_source_statement(
+    input: VssShareLinkageSourceStatementInput<'_>,
 ) -> CanonicalResult<Value> {
     compare_required_string(
         string_at_path(input.source_statement_record, &["objectType"])?,
-        "CompactVssShareLinkageSourceStatement",
+        "VssShareLinkageSourceStatement",
         "compact VSS share linkage source statement objectType",
     )?;
     compare_required_u64(
@@ -1284,7 +1284,7 @@ fn verify_compact_vss_share_linkage_source_statement(
         "compact VSS share linkage source statement aggregateThresholdCommitmentRoot",
     )?;
     let expected_source_statement = json!({
-        "objectType": "CompactVssShareLinkageSourceStatement",
+        "objectType": "VssShareLinkageSourceStatement",
         "objectVersion": 1,
         "ceremonyId": input.statement.ceremony_id,
         "manifestHash": input.statement.manifest_hash,
@@ -1322,7 +1322,7 @@ fn verify_compact_vss_share_linkage_source_statement(
     Ok(verified_source_statement)
 }
 
-struct CompactVssSourceCoefficientRecordInput<'a> {
+struct VssPublicSourceCoefficientRecordInput<'a> {
     source_record: &'a Value,
     expected_roster_position: usize,
     expected_coefficient_count: usize,
@@ -1330,12 +1330,12 @@ struct CompactVssSourceCoefficientRecordInput<'a> {
     public_matrix_seed_hash: &'a str,
 }
 
-fn verify_compact_vss_source_coefficient_record(
-    input: CompactVssSourceCoefficientRecordInput<'_>,
+fn verify_vss_public_source_coefficient_record(
+    input: VssPublicSourceCoefficientRecordInput<'_>,
 ) -> CanonicalResult<Value> {
     compare_required_string(
         string_at_path(input.source_record, &["objectType"])?,
-        "CompactVssSourceCoefficientCommitments",
+        "VssPublicSourceCoefficientCommitments",
         "compact VSS source coefficient commitments objectType",
     )?;
     compare_required_u64(
@@ -1366,8 +1366,8 @@ fn verify_compact_vss_source_coefficient_record(
     let mut verified_coefficient_commitments = Vec::with_capacity(coefficient_commitments.len());
     for (coefficient_record_index, coefficient_record) in coefficient_commitments.iter().enumerate()
     {
-        verified_coefficient_commitments.push(verify_compact_vss_coefficient_record(
-            CompactVssCoefficientRecordInput {
+        verified_coefficient_commitments.push(verify_vss_public_coefficient_record(
+            VssPublicCoefficientRecordInput {
                 coefficient_record,
                 source_trustee_identity,
                 source_trustee_roster_position: input.expected_roster_position,
@@ -1380,7 +1380,7 @@ fn verify_compact_vss_source_coefficient_record(
     }
 
     let expected_source_root = derive_canonical_object_hash(&json!({
-        "objectType": "CompactVssSourceCoefficientCommitments",
+        "objectType": "VssPublicSourceCoefficientCommitments",
         "objectVersion": 1,
         "sourceTrusteeIdentity": source_trustee_identity,
         "sourceTrusteeRosterPosition": input.expected_roster_position,
@@ -1397,7 +1397,7 @@ fn verify_compact_vss_source_coefficient_record(
     }
 
     Ok(json!({
-        "objectType": "CompactVssSourceCoefficientCommitments",
+        "objectType": "VssPublicSourceCoefficientCommitments",
         "objectVersion": 1,
         "sourceTrusteeIdentity": source_trustee_identity,
         "sourceTrusteeRosterPosition": input.expected_roster_position,
@@ -1407,7 +1407,7 @@ fn verify_compact_vss_source_coefficient_record(
     }))
 }
 
-struct CompactVssCoefficientRecordInput<'a> {
+struct VssPublicCoefficientRecordInput<'a> {
     coefficient_record: &'a Value,
     source_trustee_identity: &'a str,
     source_trustee_roster_position: usize,
@@ -1416,7 +1416,7 @@ struct CompactVssCoefficientRecordInput<'a> {
     public_matrix_seed_hash: &'a str,
 }
 
-struct CompactVssCommitmentBodyInput<'a> {
+struct VssPublicCommitmentBodyInput<'a> {
     commitment: &'a Value,
     expected_commitment_role: &'a str,
     expected_commitment_root: &'a str,
@@ -1426,13 +1426,13 @@ struct CompactVssCommitmentBodyInput<'a> {
     field_name: &'a str,
 }
 
-pub(crate) fn validate_standalone_compact_vss_commitment_body(
+pub(crate) fn validate_standalone_vss_public_commitment_body(
     commitment: &Value,
     field_name: &str,
 ) -> CanonicalResult<Value> {
     compare_required_string(
         string_at_path(commitment, &["objectType"])?,
-        "CompactVssCommitment",
+        "VssPublicCommitment",
         &format!("{field_name} objectType"),
     )?;
     compare_required_u64(
@@ -1440,7 +1440,7 @@ pub(crate) fn validate_standalone_compact_vss_commitment_body(
         1,
         &format!("{field_name} objectVersion"),
     )?;
-    validate_compact_vss_commitment_role(string_at_path(commitment, &["commitmentRole"])?)?;
+    validate_vss_public_commitment_role(string_at_path(commitment, &["commitmentRole"])?)?;
     let _commitment_context_hash = hash_at_path(commitment, &["commitmentContextHash"])?;
     let _public_matrix_seed_hash = hash_at_path(commitment, &["publicMatrixSeedHash"])?;
     let _rns_limb_index = usize_at_path(commitment, &["rnsLimbIndex"])?;
@@ -1453,16 +1453,16 @@ pub(crate) fn validate_standalone_compact_vss_commitment_body(
     )?;
     compare_required_u64(
         unsigned_at_path(commitment, &["outputCoordinateCount"])?,
-        COMPACT_VSS_OUTPUT_COORDINATE_COUNT as u64,
+        VSS_PUBLIC_OUTPUT_COORDINATE_COUNT as u64,
         &format!("{field_name} outputCoordinateCount"),
     )?;
     compare_required_u64(
         unsigned_at_path(commitment, &["randomnessColumnCount"])?,
-        COMPACT_VSS_RANDOMNESS_COLUMN_COUNT as u64,
+        VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT as u64,
         &format!("{field_name} randomnessColumnCount"),
     )?;
     let commitment_limbs = array_at_path(commitment, &["commitmentLimbs"])?;
-    if commitment_limbs.len() != COMPACT_VSS_COMMITMENT_MODULUS_LIMB_INDICES.len() {
+    if commitment_limbs.len() != VSS_PUBLIC_COMMITMENT_MODULUS_LIMB_INDICES.len() {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
             format!("{field_name} commitmentLimbs must cover the compact commitment modulus limbs"),
@@ -1470,7 +1470,7 @@ pub(crate) fn validate_standalone_compact_vss_commitment_body(
     }
     for (limb_position, commitment_limb) in commitment_limbs.iter().enumerate() {
         let expected_commitment_modulus_index =
-            COMPACT_VSS_COMMITMENT_MODULUS_LIMB_INDICES[limb_position];
+            VSS_PUBLIC_COMMITMENT_MODULUS_LIMB_INDICES[limb_position];
         compare_required_u64(
             unsigned_at_path(commitment_limb, &["commitmentModulusIndex"])?,
             expected_commitment_modulus_index as u64,
@@ -1483,7 +1483,7 @@ pub(crate) fn validate_standalone_compact_vss_commitment_body(
             &format!("{field_name} commitmentLimbs.{limb_position}.modulus"),
         )?;
         let coordinates = array_at_path(commitment_limb, &["coordinates"])?;
-        if coordinates.len() != COMPACT_VSS_OUTPUT_COORDINATE_COUNT {
+        if coordinates.len() != VSS_PUBLIC_OUTPUT_COORDINATE_COUNT {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
                 format!(
@@ -1514,11 +1514,11 @@ pub(crate) fn validate_standalone_compact_vss_commitment_body(
     Ok(commitment.clone())
 }
 
-fn verify_compact_vss_commitment_body(
-    input: CompactVssCommitmentBodyInput<'_>,
+fn verify_vss_public_commitment_body(
+    input: VssPublicCommitmentBodyInput<'_>,
 ) -> CanonicalResult<Value> {
     let commitment =
-        validate_standalone_compact_vss_commitment_body(input.commitment, input.field_name)?;
+        validate_standalone_vss_public_commitment_body(input.commitment, input.field_name)?;
     compare_required_string(
         string_at_path(&commitment, &["commitmentRole"])?,
         input.expected_commitment_role,
@@ -1553,12 +1553,12 @@ fn verify_compact_vss_commitment_body(
     Ok(commitment)
 }
 
-fn verify_compact_vss_coefficient_record(
-    input: CompactVssCoefficientRecordInput<'_>,
+fn verify_vss_public_coefficient_record(
+    input: VssPublicCoefficientRecordInput<'_>,
 ) -> CanonicalResult<Value> {
     compare_required_string(
         string_at_path(input.coefficient_record, &["objectType"])?,
-        "CompactVssCoefficientCommitment",
+        "VssPublicCoefficientCommitment",
         "compact VSS coefficient commitment objectType",
     )?;
     compare_required_u64(
@@ -1600,7 +1600,7 @@ fn verify_compact_vss_coefficient_record(
         hash_at_path(input.coefficient_record, &["coefficientCommitmentRoot"])?;
     let coefficient_opening_root =
         hash_at_path(input.coefficient_record, &["coefficientOpeningRoot"])?;
-    let commitment = verify_compact_vss_commitment_body(CompactVssCommitmentBodyInput {
+    let commitment = verify_vss_public_commitment_body(VssPublicCommitmentBodyInput {
         commitment: value_at_path(input.coefficient_record, &["commitment"])?,
         expected_commitment_role: "coefficient",
         expected_commitment_root: coefficient_commitment_root,
@@ -1611,7 +1611,7 @@ fn verify_compact_vss_coefficient_record(
     })?;
 
     Ok(json!({
-        "objectType": "CompactVssCoefficientCommitment",
+        "objectType": "VssPublicCoefficientCommitment",
         "objectVersion": 1,
         "sourceTrusteeIdentity": input.source_trustee_identity,
         "sourceTrusteeRosterPosition": input.source_trustee_roster_position,
@@ -1625,7 +1625,7 @@ fn verify_compact_vss_coefficient_record(
     }))
 }
 
-struct CompactVssSourceRecipientShareRecordInput<'a> {
+struct VssPublicSourceRecipientShareRecordInput<'a> {
     source_record: &'a Value,
     expected_source_roster_position: usize,
     expected_recipient_share_count: usize,
@@ -1633,12 +1633,12 @@ struct CompactVssSourceRecipientShareRecordInput<'a> {
     public_matrix_seed_hash: &'a str,
 }
 
-fn verify_compact_vss_source_recipient_share_record(
-    input: CompactVssSourceRecipientShareRecordInput<'_>,
+fn verify_vss_public_source_recipient_share_record(
+    input: VssPublicSourceRecipientShareRecordInput<'_>,
 ) -> CanonicalResult<Value> {
     compare_required_string(
         string_at_path(input.source_record, &["objectType"])?,
-        "CompactVssSourceRecipientShareCommitments",
+        "VssPublicSourceRecipientShareCommitments",
         "compact VSS source recipient-share commitments objectType",
     )?;
     compare_required_u64(
@@ -1667,8 +1667,8 @@ fn verify_compact_vss_source_recipient_share_record(
     for (recipient_share_record_index, recipient_share_record) in
         recipient_share_commitments.iter().enumerate()
     {
-        verified_recipient_share_commitments.push(verify_compact_vss_recipient_share_record(
-            CompactVssRecipientShareRecordInput {
+        verified_recipient_share_commitments.push(verify_vss_public_recipient_share_record(
+            VssPublicRecipientShareRecordInput {
                 recipient_share_record,
                 source_trustee_identity,
                 source_trustee_roster_position: input.expected_source_roster_position,
@@ -1681,7 +1681,7 @@ fn verify_compact_vss_source_recipient_share_record(
     }
 
     let expected_source_root = derive_canonical_object_hash(&json!({
-        "objectType": "CompactVssSourceRecipientShareCommitments",
+        "objectType": "VssPublicSourceRecipientShareCommitments",
         "objectVersion": 1,
         "sourceTrusteeIdentity": source_trustee_identity,
         "sourceTrusteeRosterPosition": input.expected_source_roster_position,
@@ -1697,7 +1697,7 @@ fn verify_compact_vss_source_recipient_share_record(
     }
 
     Ok(json!({
-        "objectType": "CompactVssSourceRecipientShareCommitments",
+        "objectType": "VssPublicSourceRecipientShareCommitments",
         "objectVersion": 1,
         "sourceTrusteeIdentity": source_trustee_identity,
         "sourceTrusteeRosterPosition": input.expected_source_roster_position,
@@ -1706,7 +1706,7 @@ fn verify_compact_vss_source_recipient_share_record(
     }))
 }
 
-struct CompactVssRecipientShareRecordInput<'a> {
+struct VssPublicRecipientShareRecordInput<'a> {
     recipient_share_record: &'a Value,
     source_trustee_identity: &'a str,
     source_trustee_roster_position: usize,
@@ -1715,12 +1715,12 @@ struct CompactVssRecipientShareRecordInput<'a> {
     public_matrix_seed_hash: &'a str,
 }
 
-fn verify_compact_vss_recipient_share_record(
-    input: CompactVssRecipientShareRecordInput<'_>,
+fn verify_vss_public_recipient_share_record(
+    input: VssPublicRecipientShareRecordInput<'_>,
 ) -> CanonicalResult<Value> {
     compare_required_string(
         string_at_path(input.recipient_share_record, &["objectType"])?,
-        "CompactVssRecipientShareCommitment",
+        "VssPublicRecipientShareCommitment",
         "compact VSS recipient-share commitment objectType",
     )?;
     compare_required_u64(
@@ -1766,7 +1766,7 @@ fn verify_compact_vss_recipient_share_record(
     let share_commitment_root =
         hash_at_path(input.recipient_share_record, &["shareCommitmentRoot"])?;
     let share_opening_root = hash_at_path(input.recipient_share_record, &["shareOpeningRoot"])?;
-    let commitment = verify_compact_vss_commitment_body(CompactVssCommitmentBodyInput {
+    let commitment = verify_vss_public_commitment_body(VssPublicCommitmentBodyInput {
         commitment: value_at_path(input.recipient_share_record, &["commitment"])?,
         expected_commitment_role: "recipient-share",
         expected_commitment_root: share_commitment_root,
@@ -1777,7 +1777,7 @@ fn verify_compact_vss_recipient_share_record(
     })?;
 
     Ok(json!({
-        "objectType": "CompactVssRecipientShareCommitment",
+        "objectType": "VssPublicRecipientShareCommitment",
         "objectVersion": 1,
         "sourceTrusteeIdentity": input.source_trustee_identity,
         "sourceTrusteeRosterPosition": input.source_trustee_roster_position,
@@ -1792,7 +1792,7 @@ fn verify_compact_vss_recipient_share_record(
     }))
 }
 
-struct CompactVssAggregateThresholdRecordInput<'a> {
+struct VssPublicAggregateThresholdRecordInput<'a> {
     recipient_record: &'a Value,
     expected_recipient_roster_position: usize,
     expected_rns_limb_index: usize,
@@ -1800,12 +1800,12 @@ struct CompactVssAggregateThresholdRecordInput<'a> {
     public_matrix_seed_hash: &'a str,
 }
 
-fn verify_compact_vss_aggregate_threshold_record(
-    input: CompactVssAggregateThresholdRecordInput<'_>,
+fn verify_vss_public_aggregate_threshold_record(
+    input: VssPublicAggregateThresholdRecordInput<'_>,
 ) -> CanonicalResult<Value> {
     compare_required_string(
         string_at_path(input.recipient_record, &["objectType"])?,
-        "CompactVssAggregateThresholdCommitment",
+        "VssPublicAggregateThresholdCommitment",
         "compact VSS aggregate threshold commitment objectType",
     )?;
     compare_required_u64(
@@ -1837,7 +1837,7 @@ fn verify_compact_vss_aggregate_threshold_record(
     let aggregate_commitment_root =
         hash_at_path(input.recipient_record, &["aggregateCommitmentRoot"])?;
     let aggregate_opening_root = hash_at_path(input.recipient_record, &["aggregateOpeningRoot"])?;
-    let commitment = verify_compact_vss_commitment_body(CompactVssCommitmentBodyInput {
+    let commitment = verify_vss_public_commitment_body(VssPublicCommitmentBodyInput {
         commitment: value_at_path(input.recipient_record, &["commitment"])?,
         expected_commitment_role: "aggregate-threshold-share",
         expected_commitment_root: aggregate_commitment_root,
@@ -1908,7 +1908,7 @@ fn verify_compact_vss_aggregate_threshold_record(
         .collect::<CanonicalResult<Vec<_>>>()?;
 
     Ok(json!({
-        "objectType": "CompactVssAggregateThresholdCommitment",
+        "objectType": "VssPublicAggregateThresholdCommitment",
         "objectVersion": 1,
         "recipientIdentity": recipient_identity,
         "recipientRosterPosition": input.expected_recipient_roster_position,
@@ -1923,7 +1923,7 @@ fn verify_compact_vss_aggregate_threshold_record(
     }))
 }
 
-pub(crate) fn read_compact_vss_randomness_by_column(
+pub(crate) fn read_vss_public_randomness_by_column(
     value: &Value,
     field_name: &str,
     ring_degree: usize,
@@ -1938,7 +1938,7 @@ pub(crate) fn read_compact_vss_randomness_by_column(
                 format!("{field_name} must be an array"),
             )
         })?;
-    if columns.len() != COMPACT_VSS_RANDOMNESS_COLUMN_COUNT {
+    if columns.len() != VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
             format!("{field_name} must carry the compact randomness column count"),
@@ -1985,7 +1985,7 @@ pub(crate) fn read_compact_vss_randomness_by_column(
         })
         .collect::<CanonicalResult<Vec<_>>>()?;
 
-    validate_compact_vss_randomness_columns(
+    validate_vss_public_randomness_columns(
         &randomness_by_column,
         ring_degree,
         active_limb_modulus,
@@ -1995,9 +1995,9 @@ pub(crate) fn read_compact_vss_randomness_by_column(
     Ok(randomness_by_column)
 }
 
-fn compute_compact_vss_commitment_from_opening_value(
+fn compute_vss_public_commitment_from_opening_value(
     opening: &Value,
-) -> CanonicalResult<CompactVssCommitmentComputation> {
+) -> CanonicalResult<VssPublicCommitmentComputation> {
     let commitment_role = string_at_path(opening, &["commitmentRole"])?;
     let commitment_context = value_at_path(opening, &["commitmentContext"])?;
     let public_matrix_seed_hash = hash_at_path(opening, &["publicMatrixSeedHash"])?;
@@ -2006,18 +2006,18 @@ fn compute_compact_vss_commitment_from_opening_value(
     let ring_degree = usize_at_path(opening, &["ringDegree"])?;
     let message_coefficient_bound =
         read_optional_u64(opening, "messageCoefficientBound")?.unwrap_or(rns_prime);
-    let message_coefficients = read_compact_vss_message_coefficients(
+    let message_coefficients = read_vss_public_message_coefficients(
         opening,
         "messageCoefficients",
         ring_degree,
         message_coefficient_bound,
     )?;
     let message_digit_columns =
-        read_compact_vss_message_digit_columns(opening, "messageDigitColumns", ring_degree)?;
+        read_vss_public_message_digit_columns(opening, "messageDigitColumns", ring_degree)?;
     let randomness_by_column =
-        read_compact_vss_randomness_by_column(opening, "randomnessByColumn", ring_degree, None)?;
+        read_vss_public_randomness_by_column(opening, "randomnessByColumn", ring_degree, None)?;
 
-    compute_compact_vss_commitment_from_opening(CompactVssCommitmentOpeningInput {
+    compute_vss_public_commitment_from_opening(VssPublicCommitmentOpeningInput {
         commitment_role,
         commitment_context,
         public_matrix_seed_hash,
@@ -2031,28 +2031,28 @@ fn compute_compact_vss_commitment_from_opening_value(
     })
 }
 
-fn compact_vss_commitment_computation_response(
-    computation: &CompactVssCommitmentComputation,
+fn vss_public_commitment_computation_response(
+    computation: &VssPublicCommitmentComputation,
 ) -> Value {
     json!({
         "ok": true,
-        "operation": "computeCompactVssCommitmentFromOpening",
+        "operation": "computeVssPublicCommitmentFromOpening",
         "commitment": computation.commitment,
         "commitmentRoot": computation.commitment_root,
         "openingRoot": computation.opening_root,
         "commitmentContextHash": computation.commitment_context_hash,
-        "encodedCommitmentByteLength": compact_vss_encoded_commitment_byte_length(),
+        "encodedCommitmentByteLength": vss_public_encoded_commitment_byte_length(),
     })
 }
 
-fn read_compact_vss_message_coefficients(
+fn read_vss_public_message_coefficients(
     value: &Value,
     field_name: &str,
     ring_degree: usize,
     message_coefficient_bound: u64,
 ) -> CanonicalResult<Vec<u64>> {
     if message_coefficient_bound == 0 {
-        return Err(invalid_compact_vss_input(
+        return Err(invalid_vss_public_input(
             "messageCoefficientBound must be positive",
         ));
     }
@@ -2095,7 +2095,7 @@ fn read_compact_vss_message_coefficients(
         .collect()
 }
 
-fn read_compact_vss_message_digit_columns(
+fn read_vss_public_message_digit_columns(
     value: &Value,
     field_name: &str,
     ring_degree: usize,
@@ -2112,7 +2112,7 @@ fn read_compact_vss_message_digit_columns(
             format!("{field_name} must be an array"),
         )
     })?;
-    if columns.len() != COMPACT_VSS_MESSAGE_DIGIT_COUNT {
+    if columns.len() != VSS_PUBLIC_MESSAGE_DIGIT_COUNT {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
             format!("{field_name} must contain the selected message digit count"),
@@ -2154,13 +2154,13 @@ fn read_compact_vss_message_digit_columns(
         .collect::<CanonicalResult<Vec<_>>>()
 }
 
-fn compact_vss_message_digit_columns_for_opening(
+fn vss_public_message_digit_columns_for_opening(
     message_coefficients: &[u64],
     message_digit_columns: &[Vec<u64>],
     message_coefficient_bound: u64,
     ring_degree: usize,
 ) -> CanonicalResult<Vec<Vec<u64>>> {
-    if message_digit_columns.len() != COMPACT_VSS_MESSAGE_DIGIT_COUNT {
+    if message_digit_columns.len() != VSS_PUBLIC_MESSAGE_DIGIT_COUNT {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
             "compact VSS messageDigitColumns must contain the selected message digit count",
@@ -2178,9 +2178,9 @@ fn compact_vss_message_digit_columns_for_opening(
     }
     let columns = message_digit_columns.to_vec();
 
-    let digit_weights = (0..COMPACT_VSS_MESSAGE_DIGIT_COUNT)
+    let digit_weights = (0..VSS_PUBLIC_MESSAGE_DIGIT_COUNT)
         .map(|digit_index| {
-            u128::from(COMPACT_VSS_MESSAGE_DIGIT_BASE)
+            u128::from(VSS_PUBLIC_MESSAGE_DIGIT_BASE)
                 .checked_pow(digit_index as u32)
                 .ok_or_else(|| {
                     CanonicalError::new(
@@ -2217,13 +2217,13 @@ fn compact_vss_message_digit_columns_for_opening(
     Ok(columns)
 }
 
-fn validate_compact_vss_commitment_role(commitment_role: &str) -> CanonicalResult<()> {
+fn validate_vss_public_commitment_role(commitment_role: &str) -> CanonicalResult<()> {
     match commitment_role {
         "coefficient"
         | "recipient-share"
         | "aggregate-threshold-share"
         | "target-decryption-smudging-polynomial-coefficient" => Ok(()),
-        _ => Err(invalid_compact_vss_input(
+        _ => Err(invalid_vss_public_input(
             "compact VSS commitment role is not supported",
         )),
     }
@@ -2272,13 +2272,13 @@ fn read_positive_u64_at_path(
     Ok(field)
 }
 
-fn validate_compact_vss_randomness_columns(
+fn validate_vss_public_randomness_columns(
     randomness_by_column: &[Vec<i64>],
     ring_degree: usize,
     active_limb_modulus: Option<u64>,
     field_name: &str,
 ) -> CanonicalResult<()> {
-    if randomness_by_column.len() != COMPACT_VSS_RANDOMNESS_COLUMN_COUNT {
+    if randomness_by_column.len() != VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
             format!("{field_name} must contain the compact randomness column count"),
@@ -2306,7 +2306,7 @@ fn validate_compact_vss_randomness_columns(
     Ok(())
 }
 
-struct CompactCommitmentCoordinateInput<'a> {
+struct CommitmentCoordinateInput<'a> {
     public_matrix_seed_hash: &'a str,
     rns_limb_index: usize,
     commitment_modulus_index: usize,
@@ -2316,14 +2316,12 @@ struct CompactCommitmentCoordinateInput<'a> {
     randomness_by_column: &'a [Vec<i64>],
 }
 
-fn compact_commitment_coordinate(
-    input: CompactCommitmentCoordinateInput<'_>,
-) -> CanonicalResult<u64> {
+fn commitment_coordinate(input: CommitmentCoordinateInput<'_>) -> CanonicalResult<u64> {
     let mut accumulator = 0_u128;
     let ring_degree = input.message_digit_columns[0].len();
-    for digit_index in 0..COMPACT_VSS_MESSAGE_DIGIT_COUNT {
-        let input_column = compact_vss_message_digit_column_label_str(digit_index)?;
-        let projection_terms = cached_compact_projection_terms(CompactProjectionTermsInput {
+    for digit_index in 0..VSS_PUBLIC_MESSAGE_DIGIT_COUNT {
+        let input_column = vss_public_message_digit_column_label_str(digit_index)?;
+        let projection_terms = cached_projection_terms(ProjectionTermsInput {
             public_matrix_seed_hash: input.public_matrix_seed_hash,
             rns_limb_index: input.rns_limb_index,
             commitment_modulus_index: input.commitment_modulus_index,
@@ -2344,8 +2342,8 @@ fn compact_commitment_coordinate(
     for (randomness_column_index, randomness_column) in
         input.randomness_by_column.iter().enumerate()
     {
-        let input_column = compact_vss_randomness_column_label(randomness_column_index)?;
-        let projection_terms = cached_compact_projection_terms(CompactProjectionTermsInput {
+        let input_column = vss_public_randomness_column_label(randomness_column_index)?;
+        let projection_terms = cached_projection_terms(ProjectionTermsInput {
             public_matrix_seed_hash: input.public_matrix_seed_hash,
             rns_limb_index: input.rns_limb_index,
             commitment_modulus_index: input.commitment_modulus_index,
@@ -2367,13 +2365,13 @@ fn compact_commitment_coordinate(
     Ok(accumulator as u64)
 }
 
-pub(in crate::bgv::setup) fn compact_vss_message_digit_column_label(
+pub(in crate::bgv::setup) fn vss_public_message_digit_column_label(
     digit_index: usize,
 ) -> CanonicalResult<String> {
-    Ok(compact_vss_message_digit_column_label_str(digit_index)?.to_string())
+    Ok(vss_public_message_digit_column_label_str(digit_index)?.to_string())
 }
 
-fn compact_vss_message_digit_column_label_str(digit_index: usize) -> CanonicalResult<&'static str> {
+fn vss_public_message_digit_column_label_str(digit_index: usize) -> CanonicalResult<&'static str> {
     match digit_index {
         0 => Ok("message:0"),
         1 => Ok("message:1"),
@@ -2384,22 +2382,22 @@ fn compact_vss_message_digit_column_label_str(digit_index: usize) -> CanonicalRe
     }
 }
 
-fn is_compact_vss_message_digit_column_label(input_column: &str) -> bool {
-    (0..COMPACT_VSS_MESSAGE_DIGIT_COUNT).any(|digit_index| {
-        compact_vss_message_digit_column_label_str(digit_index)
+fn is_vss_public_message_digit_column_label(input_column: &str) -> bool {
+    (0..VSS_PUBLIC_MESSAGE_DIGIT_COUNT).any(|digit_index| {
+        vss_public_message_digit_column_label_str(digit_index)
             .map(|message_column| message_column == input_column)
             .unwrap_or(false)
     })
 }
 
-pub(in crate::bgv::setup) fn compact_vss_coordinate_count_per_commitment() -> usize {
-    COMPACT_VSS_COMMITMENT_MODULUS_LIMB_INDICES.len() * COMPACT_VSS_OUTPUT_COORDINATE_COUNT
+pub(in crate::bgv::setup) fn vss_public_coordinate_count_per_commitment() -> usize {
+    VSS_PUBLIC_COMMITMENT_MODULUS_LIMB_INDICES.len() * VSS_PUBLIC_OUTPUT_COORDINATE_COUNT
 }
 
-pub(in crate::bgv::setup) fn compact_vss_message_coverage_terms_per_coordinate(
+pub(in crate::bgv::setup) fn vss_public_message_coverage_terms_per_coordinate(
     ring_degree: usize,
 ) -> CanonicalResult<usize> {
-    let coordinate_count = compact_vss_coordinate_count_per_commitment();
+    let coordinate_count = vss_public_coordinate_count_per_commitment();
     ring_degree
         .checked_add(coordinate_count - 1)
         .map(|adjusted| adjusted / coordinate_count)
@@ -2411,10 +2409,10 @@ pub(in crate::bgv::setup) fn compact_vss_message_coverage_terms_per_coordinate(
         })
 }
 
-fn compact_vss_commitment_modulus_position(
+fn vss_public_commitment_modulus_position(
     commitment_modulus_index: usize,
 ) -> CanonicalResult<usize> {
-    COMPACT_VSS_COMMITMENT_MODULUS_LIMB_INDICES
+    VSS_PUBLIC_COMMITMENT_MODULUS_LIMB_INDICES
         .iter()
         .position(|candidate_index| *candidate_index == commitment_modulus_index)
         .ok_or_else(|| {
@@ -2425,15 +2423,15 @@ fn compact_vss_commitment_modulus_position(
         })
 }
 
-fn compact_vss_covered_message_ring_coefficient_index(
+fn vss_public_covered_message_ring_coefficient_index(
     commitment_modulus_index: usize,
     output_coordinate_index: usize,
     coverage_term_index: usize,
 ) -> CanonicalResult<usize> {
     let commitment_modulus_position =
-        compact_vss_commitment_modulus_position(commitment_modulus_index)?;
+        vss_public_commitment_modulus_position(commitment_modulus_index)?;
     let coordinate_index = commitment_modulus_position
-        .checked_mul(COMPACT_VSS_OUTPUT_COORDINATE_COUNT)
+        .checked_mul(VSS_PUBLIC_OUTPUT_COORDINATE_COUNT)
         .and_then(|value| value.checked_add(output_coordinate_index))
         .ok_or_else(|| {
             CanonicalError::new(
@@ -2442,7 +2440,7 @@ fn compact_vss_covered_message_ring_coefficient_index(
             )
         })?;
     coverage_term_index
-        .checked_mul(compact_vss_coordinate_count_per_commitment())
+        .checked_mul(vss_public_coordinate_count_per_commitment())
         .and_then(|value| value.checked_add(coordinate_index))
         .ok_or_else(|| {
             CanonicalError::new(
@@ -2452,7 +2450,7 @@ fn compact_vss_covered_message_ring_coefficient_index(
         })
 }
 
-fn compact_vss_randomness_column_label(column_index: usize) -> CanonicalResult<&'static str> {
+fn vss_public_randomness_column_label(column_index: usize) -> CanonicalResult<&'static str> {
     match column_index {
         0 => Ok("randomness:0"),
         1 => Ok("randomness:1"),
@@ -2463,11 +2461,11 @@ fn compact_vss_randomness_column_label(column_index: usize) -> CanonicalResult<&
     }
 }
 
-pub(in crate::bgv::setup) fn compact_vss_message_digit_weight(
+pub(in crate::bgv::setup) fn vss_public_message_digit_weight(
     digit_index: usize,
     modulus: u64,
 ) -> CanonicalResult<u64> {
-    if digit_index >= COMPACT_VSS_MESSAGE_DIGIT_COUNT {
+    if digit_index >= VSS_PUBLIC_MESSAGE_DIGIT_COUNT {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             "compact VSS message digit index is outside the selected profile",
@@ -2475,17 +2473,17 @@ pub(in crate::bgv::setup) fn compact_vss_message_digit_weight(
     }
     let mut weight = 1_u128;
     for _ in 0..digit_index {
-        weight = (weight * u128::from(COMPACT_VSS_MESSAGE_DIGIT_BASE)) % u128::from(modulus);
+        weight = (weight * u128::from(VSS_PUBLIC_MESSAGE_DIGIT_BASE)) % u128::from(modulus);
     }
 
     Ok(weight as u64)
 }
 
-pub(in crate::bgv::setup) fn compact_vss_message_digits(
+pub(in crate::bgv::setup) fn vss_public_message_digits(
     coefficient: u64,
-) -> CanonicalResult<[u64; COMPACT_VSS_MESSAGE_DIGIT_COUNT]> {
-    let maximum_coefficient = u128::from(COMPACT_VSS_MESSAGE_DIGIT_BASE)
-        .checked_pow(COMPACT_VSS_MESSAGE_DIGIT_COUNT as u32)
+) -> CanonicalResult<[u64; VSS_PUBLIC_MESSAGE_DIGIT_COUNT]> {
+    let maximum_coefficient = u128::from(VSS_PUBLIC_MESSAGE_DIGIT_BASE)
+        .checked_pow(VSS_PUBLIC_MESSAGE_DIGIT_COUNT as u32)
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
@@ -2500,10 +2498,10 @@ pub(in crate::bgv::setup) fn compact_vss_message_digits(
     }
 
     let mut remaining = coefficient;
-    let mut digits = [0_u64; COMPACT_VSS_MESSAGE_DIGIT_COUNT];
+    let mut digits = [0_u64; VSS_PUBLIC_MESSAGE_DIGIT_COUNT];
     for digit in &mut digits {
-        *digit = remaining % COMPACT_VSS_MESSAGE_DIGIT_BASE;
-        remaining /= COMPACT_VSS_MESSAGE_DIGIT_BASE;
+        *digit = remaining % VSS_PUBLIC_MESSAGE_DIGIT_BASE;
+        remaining /= VSS_PUBLIC_MESSAGE_DIGIT_BASE;
     }
     if remaining != 0 {
         return Err(CanonicalError::new(
@@ -2516,7 +2514,7 @@ pub(in crate::bgv::setup) fn compact_vss_message_digits(
 }
 
 #[cfg(test)]
-pub(crate) fn compact_vss_canonical_message_digit_columns(
+pub(crate) fn vss_public_canonical_message_digit_columns(
     message_coefficients: &[u64],
     ring_degree: usize,
 ) -> CanonicalResult<Vec<Vec<u64>>> {
@@ -2526,9 +2524,9 @@ pub(crate) fn compact_vss_canonical_message_digit_columns(
             "compact VSS message coefficient count must match ringDegree",
         ));
     }
-    let mut columns = vec![vec![0_u64; ring_degree]; COMPACT_VSS_MESSAGE_DIGIT_COUNT];
+    let mut columns = vec![vec![0_u64; ring_degree]; VSS_PUBLIC_MESSAGE_DIGIT_COUNT];
     for (coefficient_index, coefficient) in message_coefficients.iter().enumerate() {
-        for (digit_index, digit) in compact_vss_message_digits(*coefficient)?
+        for (digit_index, digit) in vss_public_message_digits(*coefficient)?
             .into_iter()
             .enumerate()
         {
@@ -2539,15 +2537,15 @@ pub(crate) fn compact_vss_canonical_message_digit_columns(
     Ok(columns)
 }
 
-pub(in crate::bgv::setup) fn compact_vss_message_digit_only_encoding_layout()
--> CompactVssMessageEncodingLayout {
-    CompactVssMessageEncodingLayout {
+pub(in crate::bgv::setup) fn vss_public_message_digit_only_encoding_layout()
+-> VssPublicMessageEncodingLayout {
+    VssPublicMessageEncodingLayout {
         low_digit_trit_count: 0,
         high_digit_trit_count: 0,
     }
 }
 
-pub(in crate::bgv::setup) fn compact_vss_message_digit_bound(
+pub(in crate::bgv::setup) fn vss_public_message_digit_bound(
     message_bound_exclusive: u64,
     digit_index: usize,
 ) -> CanonicalResult<u64> {
@@ -2557,8 +2555,8 @@ pub(in crate::bgv::setup) fn compact_vss_message_digit_bound(
             "compact VSS message coefficient bound must be positive",
         ));
     }
-    let maximum_coefficient = u128::from(COMPACT_VSS_MESSAGE_DIGIT_BASE)
-        .checked_pow(COMPACT_VSS_MESSAGE_DIGIT_COUNT as u32)
+    let maximum_coefficient = u128::from(VSS_PUBLIC_MESSAGE_DIGIT_BASE)
+        .checked_pow(VSS_PUBLIC_MESSAGE_DIGIT_COUNT as u32)
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
@@ -2573,10 +2571,10 @@ pub(in crate::bgv::setup) fn compact_vss_message_digit_bound(
     }
 
     match digit_index {
-        0 => Ok(message_bound_exclusive.min(COMPACT_VSS_MESSAGE_DIGIT_BASE)),
+        0 => Ok(message_bound_exclusive.min(VSS_PUBLIC_MESSAGE_DIGIT_BASE)),
         1 => {
             let high_digit_bound = u128::from(message_bound_exclusive)
-                .div_ceil(u128::from(COMPACT_VSS_MESSAGE_DIGIT_BASE));
+                .div_ceil(u128::from(VSS_PUBLIC_MESSAGE_DIGIT_BASE));
             u64::try_from(high_digit_bound).map_err(|_| {
                 CanonicalError::new(
                     CanonicalErrorCode::MalformedLength,
@@ -2591,17 +2589,17 @@ pub(in crate::bgv::setup) fn compact_vss_message_digit_bound(
     }
 }
 
-pub(in crate::bgv::setup) fn compact_vss_message_encoding_layout(
+pub(in crate::bgv::setup) fn vss_public_message_encoding_layout(
     message_bound_exclusive: u64,
-) -> CanonicalResult<CompactVssMessageEncodingLayout> {
+) -> CanonicalResult<VssPublicMessageEncodingLayout> {
     if message_bound_exclusive == 0 {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             "compact VSS message coefficient bound must be positive",
         ));
     }
-    let maximum_coefficient = u128::from(COMPACT_VSS_MESSAGE_DIGIT_BASE)
-        .checked_pow(COMPACT_VSS_MESSAGE_DIGIT_COUNT as u32)
+    let maximum_coefficient = u128::from(VSS_PUBLIC_MESSAGE_DIGIT_BASE)
+        .checked_pow(VSS_PUBLIC_MESSAGE_DIGIT_COUNT as u32)
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
@@ -2615,18 +2613,18 @@ pub(in crate::bgv::setup) fn compact_vss_message_encoding_layout(
         ));
     }
     let low_digit_bound =
-        u128::from(message_bound_exclusive).min(u128::from(COMPACT_VSS_MESSAGE_DIGIT_BASE));
+        u128::from(message_bound_exclusive).min(u128::from(VSS_PUBLIC_MESSAGE_DIGIT_BASE));
     let high_digit_bound =
-        u128::from(message_bound_exclusive).div_ceil(u128::from(COMPACT_VSS_MESSAGE_DIGIT_BASE));
-    let low_digit_trit_count = compact_vss_trit_count_for_bound(low_digit_bound)?;
-    let high_digit_trit_count = compact_vss_trit_count_for_bound(high_digit_bound)?;
-    Ok(CompactVssMessageEncodingLayout {
+        u128::from(message_bound_exclusive).div_ceil(u128::from(VSS_PUBLIC_MESSAGE_DIGIT_BASE));
+    let low_digit_trit_count = vss_public_trit_count_for_bound(low_digit_bound)?;
+    let high_digit_trit_count = vss_public_trit_count_for_bound(high_digit_bound)?;
+    Ok(VssPublicMessageEncodingLayout {
         low_digit_trit_count,
         high_digit_trit_count,
     })
 }
 
-fn compact_vss_trit_count_for_bound(bound_exclusive: u128) -> CanonicalResult<usize> {
+fn vss_public_trit_count_for_bound(bound_exclusive: u128) -> CanonicalResult<usize> {
     if bound_exclusive == 0 {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -2653,7 +2651,7 @@ fn compact_vss_trit_count_for_bound(bound_exclusive: u128) -> CanonicalResult<us
     Ok(trit_count)
 }
 
-pub(in crate::bgv::setup) fn compact_vss_message_digit_trits_for_count(
+pub(in crate::bgv::setup) fn vss_public_message_digit_trits_for_count(
     digit: u64,
     trit_count: usize,
 ) -> CanonicalResult<Vec<u64>> {
@@ -2688,7 +2686,7 @@ pub(in crate::bgv::setup) fn compact_vss_message_digit_trits_for_count(
 }
 
 #[derive(Clone, Copy)]
-pub(in crate::bgv::setup) struct CompactProjectionTermsInput<'a> {
+pub(in crate::bgv::setup) struct ProjectionTermsInput<'a> {
     pub(in crate::bgv::setup) public_matrix_seed_hash: &'a str,
     pub(in crate::bgv::setup) rns_limb_index: usize,
     pub(in crate::bgv::setup) commitment_modulus_index: usize,
@@ -2699,7 +2697,7 @@ pub(in crate::bgv::setup) struct CompactProjectionTermsInput<'a> {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-struct CompactProjectionTermCacheKey {
+struct ProjectionTermCacheKey {
     public_matrix_seed_hash: String,
     rns_limb_index: usize,
     commitment_modulus_index: usize,
@@ -2709,8 +2707,8 @@ struct CompactProjectionTermCacheKey {
     modulus: u64,
 }
 
-impl CompactProjectionTermCacheKey {
-    fn from_input(input: CompactProjectionTermsInput<'_>) -> Self {
+impl ProjectionTermCacheKey {
+    fn from_input(input: ProjectionTermsInput<'_>) -> Self {
         Self {
             public_matrix_seed_hash: input.public_matrix_seed_hash.to_owned(),
             rns_limb_index: input.rns_limb_index,
@@ -2723,23 +2721,22 @@ impl CompactProjectionTermCacheKey {
     }
 }
 
-type CompactProjectionTerm = (usize, u64);
-type CompactProjectionTermCache =
-    HashMap<CompactProjectionTermCacheKey, Arc<[CompactProjectionTerm]>>;
+type ProjectionTerm = (usize, u64);
+type ProjectionTermCache = HashMap<ProjectionTermCacheKey, Arc<[ProjectionTerm]>>;
 
-static COMPACT_PROJECTION_TERM_CACHE: OnceLock<Mutex<CompactProjectionTermCache>> = OnceLock::new();
+static PROJECTION_TERM_CACHE: OnceLock<Mutex<ProjectionTermCache>> = OnceLock::new();
 
-pub(in crate::bgv::setup) fn compact_projection_terms(
-    input: CompactProjectionTermsInput<'_>,
-) -> CanonicalResult<Vec<CompactProjectionTerm>> {
-    Ok(cached_compact_projection_terms(input)?.as_ref().to_vec())
+pub(in crate::bgv::setup) fn projection_terms(
+    input: ProjectionTermsInput<'_>,
+) -> CanonicalResult<Vec<ProjectionTerm>> {
+    Ok(cached_projection_terms(input)?.as_ref().to_vec())
 }
 
-fn cached_compact_projection_terms(
-    input: CompactProjectionTermsInput<'_>,
-) -> CanonicalResult<Arc<[CompactProjectionTerm]>> {
-    let cache_key = CompactProjectionTermCacheKey::from_input(input);
-    let cache = COMPACT_PROJECTION_TERM_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+fn cached_projection_terms(
+    input: ProjectionTermsInput<'_>,
+) -> CanonicalResult<Arc<[ProjectionTerm]>> {
+    let cache_key = ProjectionTermCacheKey::from_input(input);
+    let cache = PROJECTION_TERM_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
     if let Some(cached_terms) = cache
         .lock()
         .map_err(|_| {
@@ -2754,36 +2751,36 @@ fn cached_compact_projection_terms(
         return Ok(cached_terms);
     }
 
-    let term_count = if is_compact_vss_message_digit_column_label(input.input_column) {
-        compact_vss_message_coverage_terms_per_coordinate(input.ring_degree)?
+    let term_count = if is_vss_public_message_digit_column_label(input.input_column) {
+        vss_public_message_coverage_terms_per_coordinate(input.ring_degree)?
     } else {
-        COMPACT_VSS_RANDOMNESS_PROJECTION_WEIGHT
+        VSS_PUBLIC_RANDOMNESS_PROJECTION_WEIGHT
     };
     let mut terms = Vec::with_capacity(term_count);
     for projection_term_index in 0..term_count {
-        let ring_coefficient_index =
-            if is_compact_vss_message_digit_column_label(input.input_column) {
-                let scheduled_index = compact_vss_covered_message_ring_coefficient_index(
-                    input.commitment_modulus_index,
-                    input.output_coordinate_index,
-                    projection_term_index,
-                )?;
-                if scheduled_index >= input.ring_degree {
-                    continue;
-                }
-                scheduled_index
-            } else {
-                sample_compact_projection_index(SampleCompactProjectionInput {
-                    public_matrix_seed_hash: input.public_matrix_seed_hash,
-                    rns_limb_index: input.rns_limb_index,
-                    commitment_modulus_index: input.commitment_modulus_index,
-                    output_coordinate_index: input.output_coordinate_index,
-                    input_column: input.input_column,
-                    projection_term_index,
-                    ring_degree: input.ring_degree,
-                })?
-            };
-        let matrix_residue = sample_compact_matrix_residue(SampleCompactMatrixInput {
+        let ring_coefficient_index = if is_vss_public_message_digit_column_label(input.input_column)
+        {
+            let scheduled_index = vss_public_covered_message_ring_coefficient_index(
+                input.commitment_modulus_index,
+                input.output_coordinate_index,
+                projection_term_index,
+            )?;
+            if scheduled_index >= input.ring_degree {
+                continue;
+            }
+            scheduled_index
+        } else {
+            sample_projection_index(SampleProjectionInput {
+                public_matrix_seed_hash: input.public_matrix_seed_hash,
+                rns_limb_index: input.rns_limb_index,
+                commitment_modulus_index: input.commitment_modulus_index,
+                output_coordinate_index: input.output_coordinate_index,
+                input_column: input.input_column,
+                projection_term_index,
+                ring_degree: input.ring_degree,
+            })?
+        };
+        let matrix_residue = sample_matrix_residue(SampleMatrixInput {
             public_matrix_seed_hash: input.public_matrix_seed_hash,
             rns_limb_index: input.rns_limb_index,
             commitment_modulus_index: input.commitment_modulus_index,
@@ -2794,7 +2791,7 @@ fn cached_compact_projection_terms(
         })?;
         terms.push((ring_coefficient_index, matrix_residue));
     }
-    let computed_terms: Arc<[CompactProjectionTerm]> = Arc::from(terms.into_boxed_slice());
+    let computed_terms: Arc<[ProjectionTerm]> = Arc::from(terms.into_boxed_slice());
 
     let mut cache_guard = cache.lock().map_err(|_| {
         CanonicalError::new(
@@ -2809,7 +2806,7 @@ fn cached_compact_projection_terms(
     Ok(Arc::clone(cached_terms))
 }
 
-struct SampleCompactMatrixInput<'a> {
+struct SampleMatrixInput<'a> {
     public_matrix_seed_hash: &'a str,
     rns_limb_index: usize,
     commitment_modulus_index: usize,
@@ -2819,16 +2816,16 @@ struct SampleCompactMatrixInput<'a> {
     modulus: u64,
 }
 
-fn sample_compact_matrix_residue(input: SampleCompactMatrixInput<'_>) -> CanonicalResult<u64> {
+fn sample_matrix_residue(input: SampleMatrixInput<'_>) -> CanonicalResult<u64> {
     let modulus = u128::from(input.modulus);
     let limit = (1_u128 << 64) - ((1_u128 << 64) % modulus);
     let mut block_index = 0_usize;
     loop {
-        let mut preimage = compact_sampler_preimage_prefix(&input);
+        let mut preimage = sampler_preimage_prefix(&input);
         push_sampler_u64_field(&mut preimage, input.modulus);
         push_sampler_usize_field(&mut preimage, block_index);
         let digest = hash512(
-            COMPACT_VSS_MATRIX_RESIDUE_HASH_DOMAIN,
+            VSS_PUBLIC_MATRIX_RESIDUE_HASH_DOMAIN,
             &[preimage.as_slice()],
         );
         for chunk in digest.chunks_exact(8) {
@@ -2848,7 +2845,7 @@ fn sample_compact_matrix_residue(input: SampleCompactMatrixInput<'_>) -> Canonic
     }
 }
 
-struct SampleCompactProjectionInput<'a> {
+struct SampleProjectionInput<'a> {
     public_matrix_seed_hash: &'a str,
     rns_limb_index: usize,
     commitment_modulus_index: usize,
@@ -2858,18 +2855,16 @@ struct SampleCompactProjectionInput<'a> {
     ring_degree: usize,
 }
 
-fn sample_compact_projection_index(
-    input: SampleCompactProjectionInput<'_>,
-) -> CanonicalResult<usize> {
+fn sample_projection_index(input: SampleProjectionInput<'_>) -> CanonicalResult<usize> {
     let modulus = input.ring_degree as u128;
     let limit = (1_u128 << 64) - ((1_u128 << 64) % modulus);
     let mut block_index = 0_usize;
     loop {
-        let mut preimage = compact_sampler_preimage_prefix(&input);
+        let mut preimage = sampler_preimage_prefix(&input);
         push_sampler_usize_field(&mut preimage, input.ring_degree);
         push_sampler_usize_field(&mut preimage, block_index);
         let digest = hash512(
-            COMPACT_VSS_PROJECTION_INDEX_HASH_DOMAIN,
+            VSS_PUBLIC_PROJECTION_INDEX_HASH_DOMAIN,
             &[preimage.as_slice()],
         );
         for chunk in digest.chunks_exact(8) {
@@ -2889,7 +2884,7 @@ fn sample_compact_projection_index(
     }
 }
 
-trait CompactSamplerInput {
+trait SamplerInput {
     fn public_matrix_seed_hash(&self) -> &str;
     fn rns_limb_index(&self) -> usize;
     fn commitment_modulus_index(&self) -> usize;
@@ -2898,7 +2893,7 @@ trait CompactSamplerInput {
     fn projection_term_index(&self) -> usize;
 }
 
-impl CompactSamplerInput for SampleCompactMatrixInput<'_> {
+impl SamplerInput for SampleMatrixInput<'_> {
     fn public_matrix_seed_hash(&self) -> &str {
         self.public_matrix_seed_hash
     }
@@ -2924,7 +2919,7 @@ impl CompactSamplerInput for SampleCompactMatrixInput<'_> {
     }
 }
 
-impl CompactSamplerInput for SampleCompactProjectionInput<'_> {
+impl SamplerInput for SampleProjectionInput<'_> {
     fn public_matrix_seed_hash(&self) -> &str {
         self.public_matrix_seed_hash
     }
@@ -2950,15 +2945,15 @@ impl CompactSamplerInput for SampleCompactProjectionInput<'_> {
     }
 }
 
-fn compact_sampler_preimage_prefix(input: &impl CompactSamplerInput) -> Vec<u8> {
+fn sampler_preimage_prefix(input: &impl SamplerInput) -> Vec<u8> {
     let mut preimage = Vec::with_capacity(
         input.public_matrix_seed_hash().len()
-            + COMPACT_VSS_SAMPLER_DOMAIN.len()
+            + VSS_PUBLIC_SAMPLER_DOMAIN.len()
             + input.input_column().len()
             + 96,
     );
     push_sampler_bytes_field(&mut preimage, input.public_matrix_seed_hash().as_bytes());
-    push_sampler_bytes_field(&mut preimage, COMPACT_VSS_SAMPLER_DOMAIN.as_bytes());
+    push_sampler_bytes_field(&mut preimage, VSS_PUBLIC_SAMPLER_DOMAIN.as_bytes());
     push_sampler_usize_field(&mut preimage, input.rns_limb_index());
     push_sampler_usize_field(&mut preimage, input.commitment_modulus_index());
     push_sampler_usize_field(&mut preimage, input.output_coordinate_index());
@@ -3008,7 +3003,7 @@ fn signed_integer_to_residue(value: i64, modulus: u64) -> u64 {
     i128::from(value).rem_euclid(i128::from(modulus)) as u64
 }
 
-fn compact_vss_opening_payload_hash(
+fn vss_public_opening_payload_hash(
     message_coefficients: &[u64],
     message_digit_columns: &[Vec<u64>],
     randomness_by_column: &[Vec<i64>],
@@ -3056,16 +3051,16 @@ fn compact_vss_opening_payload_hash(
     }
 
     Ok(hash512_hex(
-        COMPACT_VSS_OPENING_PAYLOAD_HASH_DOMAIN,
+        VSS_PUBLIC_OPENING_PAYLOAD_HASH_DOMAIN,
         &[&bytes],
     ))
 }
 
-fn compact_vss_encoded_commitment_byte_length() -> usize {
-    COMPACT_VSS_COMMITMENT_MODULUS_LIMB_INDICES.len() * COMPACT_VSS_OUTPUT_COORDINATE_COUNT * 8
+fn vss_public_encoded_commitment_byte_length() -> usize {
+    VSS_PUBLIC_COMMITMENT_MODULUS_LIMB_INDICES.len() * VSS_PUBLIC_OUTPUT_COORDINATE_COUNT * 8
 }
 
-fn invalid_compact_vss_input(message: impl Into<String>) -> CanonicalError {
+fn invalid_vss_public_input(message: impl Into<String>) -> CanonicalError {
     CanonicalError::new(CanonicalErrorCode::InvalidFixture, message)
 }
 
@@ -3074,35 +3069,35 @@ pub(in crate::bgv::setup) mod tests {
     use serde_json::json;
 
     use super::{
-        COMPACT_VSS_MESSAGE_BASE_DIGIT_TRIT_COUNT, COMPACT_VSS_MESSAGE_DIGIT_BASE,
-        COMPACT_VSS_OUTPUT_COORDINATE_COUNT, COMPACT_VSS_RANDOMNESS_COLUMN_COUNT,
-        CompactVssCommitmentComputation, CompactVssCommitmentOpeningInput,
-        compact_vss_canonical_message_digit_columns, compact_vss_encoded_commitment_byte_length,
-        compact_vss_message_encoding_layout, compute_compact_vss_commitment_from_opening,
-        compute_compact_vss_commitment_from_opening_request,
-        verify_compact_vss_aggregate_threshold_commitment_set_request,
-        verify_compact_vss_coefficient_commitment_set_request,
-        verify_compact_vss_recipient_share_commitment_set_request,
-        verify_compact_vss_share_linkage_statement_request,
+        VSS_PUBLIC_MESSAGE_BASE_DIGIT_TRIT_COUNT, VSS_PUBLIC_MESSAGE_DIGIT_BASE,
+        VSS_PUBLIC_OUTPUT_COORDINATE_COUNT, VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT,
+        VssPublicCommitmentComputation, VssPublicCommitmentOpeningInput,
+        compute_vss_public_commitment_from_opening,
+        compute_vss_public_commitment_from_opening_request,
+        verify_vss_public_aggregate_threshold_commitment_set_request,
+        verify_vss_public_coefficient_commitment_set_request,
+        verify_vss_public_recipient_share_commitment_set_request,
+        verify_vss_share_linkage_statement_request, vss_public_canonical_message_digit_columns,
+        vss_public_encoded_commitment_byte_length, vss_public_message_encoding_layout,
     };
     use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 
     #[test]
-    fn compact_message_encoding_layout_uses_digit_bounds_for_trit_columns() -> CanonicalResult<()> {
-        let small_layout = compact_vss_message_encoding_layout(33)?;
+    fn message_encoding_layout_uses_digit_bounds_for_trit_columns() -> CanonicalResult<()> {
+        let small_layout = vss_public_message_encoding_layout(33)?;
         assert_eq!(small_layout.digit_trit_count(0)?, 4);
         assert_eq!(small_layout.digit_trit_count(1)?, 0);
         assert_eq!(small_layout.encoding_column_count(), 6);
 
-        let full_low_digit_layout = compact_vss_message_encoding_layout(
-            COMPACT_VSS_MESSAGE_DIGIT_BASE
+        let full_low_digit_layout = vss_public_message_encoding_layout(
+            VSS_PUBLIC_MESSAGE_DIGIT_BASE
                 .checked_mul(2)
                 .and_then(|value| value.checked_add(1))
                 .expect("test bound fits u64"),
         )?;
         assert_eq!(
             full_low_digit_layout.digit_trit_count(0)?,
-            COMPACT_VSS_MESSAGE_BASE_DIGIT_TRIT_COUNT
+            VSS_PUBLIC_MESSAGE_BASE_DIGIT_TRIT_COUNT
         );
         assert_eq!(full_low_digit_layout.digit_trit_count(1)?, 1);
 
@@ -3110,13 +3105,13 @@ pub(in crate::bgv::setup) mod tests {
     }
 
     #[test]
-    fn compact_commitment_command_verifies_and_rejects_tampering() -> CanonicalResult<()> {
-        let request = compact_opening_request();
-        let response = compute_compact_vss_commitment_from_opening_request(&request)?;
+    fn commitment_command_verifies_and_rejects_tampering() -> CanonicalResult<()> {
+        let request = opening_request();
+        let response = compute_vss_public_commitment_from_opening_request(&request)?;
 
         assert_eq!(
             response["operation"],
-            "computeCompactVssCommitmentFromOpening"
+            "computeVssPublicCommitmentFromOpening"
         );
         assert_eq!(response["encodedCommitmentByteLength"], json!(384_u64));
         assert_eq!(
@@ -3134,27 +3129,27 @@ pub(in crate::bgv::setup) mod tests {
             128
         );
 
-        let mut tampered_opening = compact_opening_request();
+        let mut tampered_opening = opening_request();
         tampered_opening["messageCoefficients"][3] = json!(12_u64);
         assert!(
-            compute_compact_vss_commitment_from_opening_request(&tampered_opening).is_err(),
+            compute_vss_public_commitment_from_opening_request(&tampered_opening).is_err(),
             "tampered compact opening must reject"
         );
 
-        let mut wrong_shape = compact_opening_request();
+        let mut wrong_shape = opening_request();
         wrong_shape["randomnessByColumn"][0] = json!([0, 1]);
         assert!(
-            compute_compact_vss_commitment_from_opening_request(&wrong_shape).is_err(),
+            compute_vss_public_commitment_from_opening_request(&wrong_shape).is_err(),
             "wrong compact randomness shape must reject"
         );
 
-        let mut missing_digit_columns = compact_opening_request();
+        let mut missing_digit_columns = opening_request();
         missing_digit_columns
             .as_object_mut()
             .expect("compact opening request")
             .remove("messageDigitColumns");
         assert!(
-            compute_compact_vss_commitment_from_opening_request(&missing_digit_columns).is_err(),
+            compute_vss_public_commitment_from_opening_request(&missing_digit_columns).is_err(),
             "compact opening command must require message digit columns"
         );
 
@@ -3162,23 +3157,22 @@ pub(in crate::bgv::setup) mod tests {
     }
 
     #[test]
-    fn compact_commitment_opening_root_binds_explicit_message_digit_columns() -> CanonicalResult<()>
-    {
-        let carried_message = COMPACT_VSS_MESSAGE_DIGIT_BASE + 7;
-        let mut request = compact_opening_request();
-        request["messageCoefficientBound"] = json!(COMPACT_VSS_MESSAGE_DIGIT_BASE * 2);
+    fn commitment_opening_root_binds_explicit_message_digit_columns() -> CanonicalResult<()> {
+        let carried_message = VSS_PUBLIC_MESSAGE_DIGIT_BASE + 7;
+        let mut request = opening_request();
+        request["messageCoefficientBound"] = json!(VSS_PUBLIC_MESSAGE_DIGIT_BASE * 2);
         request["messageCoefficients"][2] = json!(carried_message);
         request["messageDigitColumns"] = json!([
             [1_u64, 2, carried_message, 4, 5, 6, 7, 8],
             [0_u64, 0, 0, 0, 0, 0, 0, 0],
         ]);
-        let response = compute_compact_vss_commitment_from_opening_request(&request)?;
+        let response = compute_vss_public_commitment_from_opening_request(&request)?;
 
         let mut canonical_digits_request = request.clone();
         canonical_digits_request["messageDigitColumns"] =
             json!([[1_u64, 2, 7, 4, 5, 6, 7, 8], [0_u64, 0, 1, 0, 0, 0, 0, 0],]);
         let canonical_digits_response =
-            compute_compact_vss_commitment_from_opening_request(&canonical_digits_request)?;
+            compute_vss_public_commitment_from_opening_request(&canonical_digits_request)?;
         assert_ne!(
             response["commitmentRoot"],
             canonical_digits_response["commitmentRoot"]
@@ -3191,8 +3185,7 @@ pub(in crate::bgv::setup) mod tests {
         let mut mismatched_digits_request = request;
         mismatched_digits_request["messageDigitColumns"][0][2] = json!(carried_message - 1);
         assert!(
-            compute_compact_vss_commitment_from_opening_request(&mismatched_digits_request)
-                .is_err(),
+            compute_vss_public_commitment_from_opening_request(&mismatched_digits_request).is_err(),
             "explicit compact VSS message digit columns must decode to the declared message coefficients"
         );
 
@@ -3200,16 +3193,16 @@ pub(in crate::bgv::setup) mod tests {
     }
 
     #[test]
-    fn compact_coefficient_commitment_set_command_verifies_bound_roots() -> CanonicalResult<()> {
-        let coefficient_set = compact_coefficient_commitment_set()?;
-        let verification = verify_compact_vss_coefficient_commitment_set_request(&json!({
-            "command": "VerifyCompactVssCoefficientCommitmentSet",
+    fn coefficient_commitment_set_command_verifies_bound_roots() -> CanonicalResult<()> {
+        let coefficient_set = coefficient_commitment_set()?;
+        let verification = verify_vss_public_coefficient_commitment_set_request(&json!({
+            "command": "VerifyVssPublicCoefficientCommitmentSet",
             "coefficientCommitmentSet": coefficient_set,
         }))?;
 
         assert_eq!(
             verification["operation"],
-            "verifyCompactVssCoefficientCommitmentSet"
+            "verifyVssPublicCoefficientCommitmentSet"
         );
         assert_eq!(
             verification["coefficientCommitmentRoot"],
@@ -3223,8 +3216,8 @@ pub(in crate::bgv::setup) mod tests {
         tampered_set["sourceTrusteeRecords"][1]["coefficientCommitments"][2]["coefficientCommitmentRoot"] =
             json!("0".repeat(128));
         assert!(
-            verify_compact_vss_coefficient_commitment_set_request(&json!({
-                "command": "VerifyCompactVssCoefficientCommitmentSet",
+            verify_vss_public_coefficient_commitment_set_request(&json!({
+                "command": "VerifyVssPublicCoefficientCommitmentSet",
                 "coefficientCommitmentSet": tampered_set,
             }))
             .is_err(),
@@ -3235,17 +3228,16 @@ pub(in crate::bgv::setup) mod tests {
     }
 
     #[test]
-    fn compact_recipient_share_commitment_set_command_verifies_bound_roots() -> CanonicalResult<()>
-    {
-        let recipient_set = compact_recipient_share_commitment_set()?;
-        let verification = verify_compact_vss_recipient_share_commitment_set_request(&json!({
-            "command": "VerifyCompactVssRecipientShareCommitmentSet",
+    fn recipient_share_commitment_set_command_verifies_bound_roots() -> CanonicalResult<()> {
+        let recipient_set = recipient_share_commitment_set()?;
+        let verification = verify_vss_public_recipient_share_commitment_set_request(&json!({
+            "command": "VerifyVssPublicRecipientShareCommitmentSet",
             "recipientShareCommitmentSet": recipient_set,
         }))?;
 
         assert_eq!(
             verification["operation"],
-            "verifyCompactVssRecipientShareCommitmentSet"
+            "verifyVssPublicRecipientShareCommitmentSet"
         );
         assert_eq!(
             verification["recipientShareCommitmentRoot"],
@@ -3259,8 +3251,8 @@ pub(in crate::bgv::setup) mod tests {
         tampered_set["sourceTrusteeRecords"][0]["recipientShareCommitments"][1]["shareCommitmentRoot"] =
             json!("f".repeat(128));
         assert!(
-            verify_compact_vss_recipient_share_commitment_set_request(&json!({
-                "command": "VerifyCompactVssRecipientShareCommitmentSet",
+            verify_vss_public_recipient_share_commitment_set_request(&json!({
+                "command": "VerifyVssPublicRecipientShareCommitmentSet",
                 "recipientShareCommitmentSet": tampered_set,
             }))
             .is_err(),
@@ -3271,17 +3263,16 @@ pub(in crate::bgv::setup) mod tests {
     }
 
     #[test]
-    fn compact_aggregate_threshold_commitment_set_command_verifies_bound_roots()
-    -> CanonicalResult<()> {
-        let aggregate_set = compact_aggregate_threshold_commitment_set()?;
-        let verification = verify_compact_vss_aggregate_threshold_commitment_set_request(&json!({
-            "command": "VerifyCompactVssAggregateThresholdCommitmentSet",
+    fn aggregate_threshold_commitment_set_command_verifies_bound_roots() -> CanonicalResult<()> {
+        let aggregate_set = aggregate_threshold_commitment_set()?;
+        let verification = verify_vss_public_aggregate_threshold_commitment_set_request(&json!({
+            "command": "VerifyVssPublicAggregateThresholdCommitmentSet",
             "aggregateThresholdCommitmentSet": aggregate_set,
         }))?;
 
         assert_eq!(
             verification["operation"],
-            "verifyCompactVssAggregateThresholdCommitmentSet"
+            "verifyVssPublicAggregateThresholdCommitmentSet"
         );
         assert_eq!(
             verification["aggregateThresholdCommitmentRoot"],
@@ -3294,8 +3285,8 @@ pub(in crate::bgv::setup) mod tests {
         let mut tampered_set = aggregate_set;
         tampered_set["recipientRecords"][0]["aggregateCommitmentRoot"] = json!("f".repeat(128));
         assert!(
-            verify_compact_vss_aggregate_threshold_commitment_set_request(&json!({
-                "command": "VerifyCompactVssAggregateThresholdCommitmentSet",
+            verify_vss_public_aggregate_threshold_commitment_set_request(&json!({
+                "command": "VerifyVssPublicAggregateThresholdCommitmentSet",
                 "aggregateThresholdCommitmentSet": tampered_set,
             }))
             .is_err(),
@@ -3306,27 +3297,21 @@ pub(in crate::bgv::setup) mod tests {
     }
 
     #[test]
-    fn compact_share_linkage_statement_command_verifies_bound_roots() -> CanonicalResult<()> {
-        let coefficient_set = compact_coefficient_commitment_set()?;
-        let recipient_set = compact_recipient_share_commitment_set()?;
-        let aggregate_set = compact_aggregate_threshold_commitment_set()?;
-        let statement = compact_share_linkage_statement_from_evidence(
-            &coefficient_set,
-            &recipient_set,
-            &aggregate_set,
-        );
-        let verification = verify_compact_vss_share_linkage_statement_request(&json!({
-            "command": "VerifyCompactVssShareLinkageStatement",
+    fn share_linkage_statement_command_verifies_bound_roots() -> CanonicalResult<()> {
+        let coefficient_set = coefficient_commitment_set()?;
+        let recipient_set = recipient_share_commitment_set()?;
+        let aggregate_set = aggregate_threshold_commitment_set()?;
+        let statement =
+            share_linkage_statement_from_evidence(&coefficient_set, &recipient_set, &aggregate_set);
+        let verification = verify_vss_share_linkage_statement_request(&json!({
+            "command": "VerifyVssShareLinkageStatement",
             "statement": statement.clone(),
             "coefficientCommitmentSet": coefficient_set.clone(),
             "recipientShareCommitmentSet": recipient_set.clone(),
             "aggregateThresholdCommitmentSet": aggregate_set.clone(),
         }))?;
 
-        assert_eq!(
-            verification["operation"],
-            "verifyCompactVssShareLinkageStatement"
-        );
+        assert_eq!(verification["operation"], "verifyVssShareLinkageStatement");
         assert_eq!(verification["statementRoot"], statement["statementRoot"]);
         assert_eq!(
             verification["aggregateThresholdCommitmentRoot"],
@@ -3336,12 +3321,12 @@ pub(in crate::bgv::setup) mod tests {
         let mut forged_source_statement = statement.clone();
         forged_source_statement["sourceStatementRecords"][0]["sourceRecipientShareCommitmentRoot"] =
             json!("0".repeat(128));
-        rebind_compact_share_linkage_source_statement_root(
+        rebind_share_linkage_source_statement_root(
             &mut forged_source_statement["sourceStatementRecords"][0],
         )?;
-        rebind_compact_share_linkage_statement_root(&mut forged_source_statement)?;
-        let missing_evidence_error = verify_compact_vss_share_linkage_statement_request(&json!({
-            "command": "VerifyCompactVssShareLinkageStatement",
+        rebind_share_linkage_statement_root(&mut forged_source_statement)?;
+        let missing_evidence_error = verify_vss_share_linkage_statement_request(&json!({
+            "command": "VerifyVssShareLinkageStatement",
             "statement": forged_source_statement.clone(),
         }))
         .expect_err("compact share-linkage statement verification must require evidence sets");
@@ -3352,8 +3337,8 @@ pub(in crate::bgv::setup) mod tests {
             "missing compact share-linkage evidence should report the required evidence sets: {missing_evidence_error}"
         );
         assert!(
-            verify_compact_vss_share_linkage_statement_request(&json!({
-                "command": "VerifyCompactVssShareLinkageStatement",
+            verify_vss_share_linkage_statement_request(&json!({
+                "command": "VerifyVssShareLinkageStatement",
                 "statement": forged_source_statement,
                 "coefficientCommitmentSet": coefficient_set.clone(),
                 "recipientShareCommitmentSet": recipient_set.clone(),
@@ -3364,22 +3349,22 @@ pub(in crate::bgv::setup) mod tests {
         );
 
         let mut mismatched_aggregate_set = aggregate_set.clone();
-        tamper_compact_aggregate_commitment_body(&mut mismatched_aggregate_set)?;
+        tamper_aggregate_commitment_body(&mut mismatched_aggregate_set)?;
         assert!(
-            verify_compact_vss_aggregate_threshold_commitment_set_request(&json!({
-                "command": "VerifyCompactVssAggregateThresholdCommitmentSet",
+            verify_vss_public_aggregate_threshold_commitment_set_request(&json!({
+                "command": "VerifyVssPublicAggregateThresholdCommitmentSet",
                 "aggregateThresholdCommitmentSet": mismatched_aggregate_set.clone(),
             }))
             .is_ok(),
             "aggregate set verification only checks aggregate body canonical roots"
         );
-        let mismatched_statement = compact_share_linkage_statement_from_evidence(
+        let mismatched_statement = share_linkage_statement_from_evidence(
             &coefficient_set,
             &recipient_set,
             &mismatched_aggregate_set,
         );
-        let mismatch_error = verify_compact_vss_share_linkage_statement_request(&json!({
-            "command": "VerifyCompactVssShareLinkageStatement",
+        let mismatch_error = verify_vss_share_linkage_statement_request(&json!({
+            "command": "VerifyVssShareLinkageStatement",
             "statement": mismatched_statement,
             "coefficientCommitmentSet": coefficient_set.clone(),
             "recipientShareCommitmentSet": recipient_set.clone(),
@@ -3394,8 +3379,8 @@ pub(in crate::bgv::setup) mod tests {
         let mut tampered_statement = statement;
         tampered_statement["aggregateThresholdCommitmentRoot"] = json!("8".repeat(128));
         assert!(
-            verify_compact_vss_share_linkage_statement_request(&json!({
-                "command": "VerifyCompactVssShareLinkageStatement",
+            verify_vss_share_linkage_statement_request(&json!({
+                "command": "VerifyVssShareLinkageStatement",
                 "statement": tampered_statement,
                 "coefficientCommitmentSet": coefficient_set,
                 "recipientShareCommitmentSet": recipient_set,
@@ -3408,12 +3393,12 @@ pub(in crate::bgv::setup) mod tests {
         Ok(())
     }
 
-    fn compact_opening_request() -> serde_json::Value {
+    fn opening_request() -> serde_json::Value {
         json!({
-            "command": "ComputeCompactVssCommitmentFromOpening",
+            "command": "ComputeVssPublicCommitmentFromOpening",
             "commitmentRole": "aggregate-threshold-share",
             "commitmentContext": {
-                "objectType": "CompactVssAggregateThresholdShareCommitmentContext",
+                "objectType": "VssPublicAggregateThresholdShareCommitmentContext",
                 "objectVersion": 1,
                 "ceremonyId": "compact-vss-test",
                 "manifestHash": "1".repeat(128),
@@ -3449,7 +3434,7 @@ pub(in crate::bgv::setup) mod tests {
     // constant-size property is the point of the compaction; the reduction
     // against the first-profile ring is measured and printed, never gated on.
     #[test]
-    fn compact_vss_commitment_body_is_constant_size_across_ring_degrees() -> CanonicalResult<()> {
+    fn vss_public_commitment_body_is_constant_size_across_ring_degrees() -> CanonicalResult<()> {
         let mut encoded_byte_lengths = Vec::new();
         for ring_degree in [8_usize, 64] {
             let message_coefficients: Vec<u64> =
@@ -3465,7 +3450,7 @@ pub(in crate::bgv::setup) mod tests {
             let request = json!({
                 "commitmentRole": "aggregate-threshold-share",
                 "commitmentContext": {
-                    "objectType": "CompactVssAggregateThresholdShareCommitmentContext",
+                    "objectType": "VssPublicAggregateThresholdShareCommitmentContext",
                     "objectVersion": 1,
                     "ceremonyId": "compact-vss-measurement",
                     "manifestHash": "1".repeat(128),
@@ -3486,8 +3471,8 @@ pub(in crate::bgv::setup) mod tests {
                 "messageDigitColumns": [low_digit_column, high_digit_column],
                 "randomnessByColumn": [randomness_first, randomness_second],
             });
-            compute_compact_vss_commitment_from_opening_request(&request)?;
-            encoded_byte_lengths.push(compact_vss_encoded_commitment_byte_length() as u64);
+            compute_vss_public_commitment_from_opening_request(&request)?;
+            encoded_byte_lengths.push(vss_public_encoded_commitment_byte_length() as u64);
         }
 
         assert_eq!(
@@ -3507,16 +3492,14 @@ pub(in crate::bgv::setup) mod tests {
         Ok(())
     }
 
-    pub(in crate::bgv::setup) fn compact_coefficient_commitment_set()
-    -> CanonicalResult<serde_json::Value> {
+    pub(in crate::bgv::setup) fn coefficient_commitment_set() -> CanonicalResult<serde_json::Value>
+    {
         let mut source_trustee_records = Vec::new();
         for source_trustee_roster_position in 0..2_usize {
-            source_trustee_records.push(compact_source_coefficient_record(
-                source_trustee_roster_position,
-            )?);
+            source_trustee_records.push(source_coefficient_record(source_trustee_roster_position)?);
         }
         let set_without_root = json!({
-            "objectType": "CompactVssCoefficientCommitmentSet",
+            "objectType": "VssPublicCoefficientCommitmentSet",
             "objectVersion": 1,
             "publicMatrixSeedHash": "7".repeat(128),
             "participantCount": 2,
@@ -3534,14 +3517,14 @@ pub(in crate::bgv::setup) mod tests {
         Ok(coefficient_set)
     }
 
-    fn compact_source_coefficient_record(
+    fn source_coefficient_record(
         source_trustee_roster_position: usize,
     ) -> CanonicalResult<serde_json::Value> {
         let mut coefficient_commitments = Vec::new();
-        for rns_limb_index in 0..compact_test_rns_limb_count() {
-            let rns_prime = compact_test_rns_prime(rns_limb_index);
-            for shamir_coefficient_index in 0..compact_test_threshold_degree() {
-                let computation = compact_test_commitment(
+        for rns_limb_index in 0..test_rns_limb_count() {
+            let rns_prime = test_rns_prime(rns_limb_index);
+            for shamir_coefficient_index in 0..test_threshold_degree() {
+                let computation = test_commitment(
                     "coefficient",
                     rns_limb_index,
                     rns_prime,
@@ -3553,7 +3536,7 @@ pub(in crate::bgv::setup) mod tests {
                     ],
                 )?;
                 coefficient_commitments.push(json!({
-                    "objectType": "CompactVssCoefficientCommitment",
+                    "objectType": "VssPublicCoefficientCommitment",
                     "objectVersion": 1,
                     "sourceTrusteeIdentity": format!("source-{source_trustee_roster_position}"),
                     "sourceTrusteeRosterPosition": source_trustee_roster_position,
@@ -3568,7 +3551,7 @@ pub(in crate::bgv::setup) mod tests {
             }
         }
         let source_without_root = json!({
-            "objectType": "CompactVssSourceCoefficientCommitments",
+            "objectType": "VssPublicSourceCoefficientCommitments",
             "objectVersion": 1,
             "sourceTrusteeIdentity": format!("source-{source_trustee_roster_position}"),
             "sourceTrusteeRosterPosition": source_trustee_roster_position,
@@ -3584,43 +3567,43 @@ pub(in crate::bgv::setup) mod tests {
         Ok(source_record)
     }
 
-    fn compact_test_participant_count() -> usize {
+    fn test_participant_count() -> usize {
         2
     }
 
-    fn compact_test_rns_limb_count() -> usize {
+    fn test_rns_limb_count() -> usize {
         2
     }
 
-    fn compact_test_threshold_degree() -> usize {
+    fn test_threshold_degree() -> usize {
         2
     }
 
-    fn compact_test_ring_degree() -> usize {
+    fn test_ring_degree() -> usize {
         8
     }
 
-    fn compact_test_public_matrix_seed_hash() -> String {
+    fn test_public_matrix_seed_hash() -> String {
         "7".repeat(128)
     }
 
-    fn compact_test_rns_prime(rns_limb_index: usize) -> u64 {
+    fn test_rns_prime(rns_limb_index: usize) -> u64 {
         if rns_limb_index == 0 { 97 } else { 193 }
     }
 
-    fn compact_test_seed(seed_parts: &[usize]) -> usize {
+    fn test_seed(seed_parts: &[usize]) -> usize {
         seed_parts
             .iter()
             .fold(0_usize, |seed, seed_part| seed * 31 + seed_part + 1)
     }
 
-    fn compact_test_hash_from_seed(seed: usize, domain_offset: usize) -> String {
+    fn test_hash_from_seed(seed: usize, domain_offset: usize) -> String {
         let digit = (seed + domain_offset) % 16;
         format!("{digit:x}").repeat(128)
     }
 
-    fn compact_test_message_coefficients(seed: usize, modulus: u64) -> Vec<u64> {
-        (0..compact_test_ring_degree())
+    fn test_message_coefficients(seed: usize, modulus: u64) -> Vec<u64> {
+        (0..test_ring_degree())
             .map(|coefficient_index| {
                 ((seed as u64)
                     .wrapping_mul(17)
@@ -3630,10 +3613,10 @@ pub(in crate::bgv::setup) mod tests {
             .collect()
     }
 
-    fn compact_test_randomness_by_column(seed: usize) -> Vec<Vec<i64>> {
-        (0..COMPACT_VSS_RANDOMNESS_COLUMN_COUNT)
+    fn test_randomness_by_column(seed: usize) -> Vec<Vec<i64>> {
+        (0..VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT)
             .map(|column_index| {
-                (0..compact_test_ring_degree())
+                (0..test_ring_degree())
                     .map(|coefficient_index| {
                         let magnitude =
                             ((seed + column_index * 11 + coefficient_index * 7) % 29) as i64;
@@ -3648,34 +3631,32 @@ pub(in crate::bgv::setup) mod tests {
             .collect()
     }
 
-    fn compact_test_commitment(
+    fn test_commitment(
         commitment_role: &str,
         rns_limb_index: usize,
         rns_prime: u64,
         seed_parts: &[usize],
-    ) -> CanonicalResult<CompactVssCommitmentComputation> {
-        let seed = compact_test_seed(seed_parts);
+    ) -> CanonicalResult<VssPublicCommitmentComputation> {
+        let seed = test_seed(seed_parts);
         let commitment_context = json!({
-            "objectType": "CompactVssTestCommitmentContext",
+            "objectType": "VssPublicTestCommitmentContext",
             "objectVersion": 1,
             "commitmentRole": commitment_role,
-            "seedHash": compact_test_hash_from_seed(seed, 9),
+            "seedHash": test_hash_from_seed(seed, 9),
         });
-        let public_matrix_seed_hash = compact_test_public_matrix_seed_hash();
-        let message_coefficients = compact_test_message_coefficients(seed, rns_prime);
-        let message_digit_columns = compact_vss_canonical_message_digit_columns(
-            &message_coefficients,
-            compact_test_ring_degree(),
-        )?;
-        let randomness_by_column = compact_test_randomness_by_column(seed);
+        let public_matrix_seed_hash = test_public_matrix_seed_hash();
+        let message_coefficients = test_message_coefficients(seed, rns_prime);
+        let message_digit_columns =
+            vss_public_canonical_message_digit_columns(&message_coefficients, test_ring_degree())?;
+        let randomness_by_column = test_randomness_by_column(seed);
         let computation =
-            compute_compact_vss_commitment_from_opening(CompactVssCommitmentOpeningInput {
+            compute_vss_public_commitment_from_opening(VssPublicCommitmentOpeningInput {
                 commitment_role,
                 commitment_context: &commitment_context,
                 public_matrix_seed_hash: &public_matrix_seed_hash,
                 rns_limb_index,
                 rns_prime,
-                ring_degree: compact_test_ring_degree(),
+                ring_degree: test_ring_degree(),
                 message_coefficients: &message_coefficients,
                 message_digit_columns: &message_digit_columns,
                 message_coefficient_bound: rns_prime,
@@ -3685,21 +3666,21 @@ pub(in crate::bgv::setup) mod tests {
         Ok(computation)
     }
 
-    pub(in crate::bgv::setup) fn compact_recipient_share_commitment_set()
+    pub(in crate::bgv::setup) fn recipient_share_commitment_set()
     -> CanonicalResult<serde_json::Value> {
         let mut source_trustee_records = Vec::new();
-        for source_trustee_roster_position in 0..compact_test_participant_count() {
-            source_trustee_records.push(compact_source_recipient_share_record(
+        for source_trustee_roster_position in 0..test_participant_count() {
+            source_trustee_records.push(source_recipient_share_record(
                 source_trustee_roster_position,
             )?);
         }
         let set_without_root = json!({
-            "objectType": "CompactVssRecipientShareCommitmentSet",
+            "objectType": "VssPublicRecipientShareCommitmentSet",
             "objectVersion": 1,
-            "publicMatrixSeedHash": compact_test_public_matrix_seed_hash(),
-            "participantCount": compact_test_participant_count(),
-            "rnsLimbCount": compact_test_rns_limb_count(),
-            "ringDegree": compact_test_ring_degree(),
+            "publicMatrixSeedHash": test_public_matrix_seed_hash(),
+            "participantCount": test_participant_count(),
+            "rnsLimbCount": test_rns_limb_count(),
+            "ringDegree": test_ring_degree(),
             "sourceTrusteeRecords": source_trustee_records,
         });
         let mut recipient_set = set_without_root;
@@ -3711,13 +3692,13 @@ pub(in crate::bgv::setup) mod tests {
         Ok(recipient_set)
     }
 
-    fn compact_source_recipient_share_record(
+    fn source_recipient_share_record(
         source_trustee_roster_position: usize,
     ) -> CanonicalResult<serde_json::Value> {
         let mut recipient_share_commitments = Vec::new();
-        for recipient_roster_position in 0..compact_test_participant_count() {
-            for rns_limb_index in 0..compact_test_rns_limb_count() {
-                recipient_share_commitments.push(compact_recipient_share_commitment_record(
+        for recipient_roster_position in 0..test_participant_count() {
+            for rns_limb_index in 0..test_rns_limb_count() {
+                recipient_share_commitments.push(recipient_share_commitment_record(
                     source_trustee_roster_position,
                     recipient_roster_position,
                     rns_limb_index,
@@ -3725,7 +3706,7 @@ pub(in crate::bgv::setup) mod tests {
             }
         }
         let source_without_root = json!({
-            "objectType": "CompactVssSourceRecipientShareCommitments",
+            "objectType": "VssPublicSourceRecipientShareCommitments",
             "objectVersion": 1,
             "sourceTrusteeIdentity": format!("source-{source_trustee_roster_position}"),
             "sourceTrusteeRosterPosition": source_trustee_roster_position,
@@ -3740,13 +3721,13 @@ pub(in crate::bgv::setup) mod tests {
         Ok(source_record)
     }
 
-    fn compact_recipient_share_commitment_record(
+    fn recipient_share_commitment_record(
         source_trustee_roster_position: usize,
         recipient_roster_position: usize,
         rns_limb_index: usize,
     ) -> CanonicalResult<serde_json::Value> {
-        let rns_prime = compact_test_rns_prime(rns_limb_index);
-        let computation = compact_test_commitment(
+        let rns_prime = test_rns_prime(rns_limb_index);
+        let computation = test_commitment(
             "recipient-share",
             rns_limb_index,
             rns_prime,
@@ -3758,7 +3739,7 @@ pub(in crate::bgv::setup) mod tests {
             ],
         )?;
         Ok(json!({
-            "objectType": "CompactVssRecipientShareCommitment",
+            "objectType": "VssPublicRecipientShareCommitment",
             "objectVersion": 1,
             "sourceTrusteeIdentity": format!("source-{source_trustee_roster_position}"),
             "sourceTrusteeRosterPosition": source_trustee_roster_position,
@@ -3773,18 +3754,18 @@ pub(in crate::bgv::setup) mod tests {
         }))
     }
 
-    fn compact_aggregate_threshold_commitment_set() -> CanonicalResult<serde_json::Value> {
-        let recipient_set = compact_recipient_share_commitment_set()?;
-        compact_aggregate_threshold_commitment_set_from_recipient_set(&recipient_set)
+    fn aggregate_threshold_commitment_set() -> CanonicalResult<serde_json::Value> {
+        let recipient_set = recipient_share_commitment_set()?;
+        aggregate_threshold_commitment_set_from_recipient_set(&recipient_set)
     }
 
-    pub(in crate::bgv::setup) fn compact_aggregate_threshold_commitment_set_from_recipient_set(
+    pub(in crate::bgv::setup) fn aggregate_threshold_commitment_set_from_recipient_set(
         recipient_set: &serde_json::Value,
     ) -> CanonicalResult<serde_json::Value> {
         let mut recipient_records = Vec::new();
-        for recipient_roster_position in 0..compact_test_participant_count() {
-            for rns_limb_index in 0..compact_test_rns_limb_count() {
-                recipient_records.push(compact_aggregate_threshold_commitment_record(
+        for recipient_roster_position in 0..test_participant_count() {
+            for rns_limb_index in 0..test_rns_limb_count() {
+                recipient_records.push(aggregate_threshold_commitment_record(
                     recipient_set,
                     recipient_roster_position,
                     rns_limb_index,
@@ -3792,12 +3773,12 @@ pub(in crate::bgv::setup) mod tests {
             }
         }
         let set_without_root = json!({
-            "objectType": "CompactVssAggregateThresholdCommitmentSet",
+            "objectType": "VssPublicAggregateThresholdCommitmentSet",
             "objectVersion": 1,
-            "publicMatrixSeedHash": compact_test_public_matrix_seed_hash(),
-            "participantCount": compact_test_participant_count(),
-            "rnsLimbCount": compact_test_rns_limb_count(),
-            "ringDegree": compact_test_ring_degree(),
+            "publicMatrixSeedHash": test_public_matrix_seed_hash(),
+            "participantCount": test_participant_count(),
+            "rnsLimbCount": test_rns_limb_count(),
+            "ringDegree": test_ring_degree(),
             "recipientRecords": recipient_records,
         });
         let mut aggregate_set = set_without_root;
@@ -3809,18 +3790,18 @@ pub(in crate::bgv::setup) mod tests {
         Ok(aggregate_set)
     }
 
-    fn compact_aggregate_threshold_commitment_record(
+    fn aggregate_threshold_commitment_record(
         recipient_set: &serde_json::Value,
         recipient_roster_position: usize,
         rns_limb_index: usize,
     ) -> CanonicalResult<serde_json::Value> {
-        let source_share_records = compact_source_share_records_for_recipient(
+        let source_share_records = source_share_records_for_recipient(
             recipient_set,
             recipient_roster_position,
             rns_limb_index,
         )?;
-        let rns_prime = compact_test_rns_prime(rns_limb_index);
-        let commitment = compact_aggregate_commitment_body(
+        let rns_prime = test_rns_prime(rns_limb_index);
+        let commitment = aggregate_commitment_body(
             recipient_roster_position,
             rns_limb_index,
             rns_prime,
@@ -3834,10 +3815,10 @@ pub(in crate::bgv::setup) mod tests {
             .iter()
             .map(|source_share_record| source_share_record["shareOpeningRoot"].clone())
             .collect::<Vec<_>>();
-        let seed = compact_test_seed(&[recipient_roster_position, rns_limb_index, 5]);
+        let seed = test_seed(&[recipient_roster_position, rns_limb_index, 5]);
 
         Ok(json!({
-            "objectType": "CompactVssAggregateThresholdCommitment",
+            "objectType": "VssPublicAggregateThresholdCommitment",
             "objectVersion": 1,
             "recipientIdentity": format!("recipient-{recipient_roster_position}"),
             "recipientRosterPosition": recipient_roster_position,
@@ -3846,20 +3827,20 @@ pub(in crate::bgv::setup) mod tests {
             "rnsPrime": rns_prime,
             "aggregateCommitmentRoot": crate::hashing::derive_canonical_object_hash(&commitment,
             )?,
-            "aggregateOpeningRoot": compact_test_hash_from_seed(seed, 0),
+            "aggregateOpeningRoot": test_hash_from_seed(seed, 0),
             "commitment": commitment,
             "sourceShareCommitmentRoots": source_share_commitment_roots,
             "sourceShareOpeningRoots": source_share_opening_roots,
         }))
     }
 
-    fn compact_source_share_records_for_recipient(
+    fn source_share_records_for_recipient(
         recipient_set: &serde_json::Value,
         recipient_roster_position: usize,
         rns_limb_index: usize,
     ) -> CanonicalResult<Vec<serde_json::Value>> {
         let recipient_share_record_index = recipient_roster_position
-            .checked_mul(compact_test_rns_limb_count())
+            .checked_mul(test_rns_limb_count())
             .and_then(|offset| offset.checked_add(rns_limb_index))
             .ok_or_else(|| {
                 CanonicalError::new(
@@ -3899,7 +3880,7 @@ pub(in crate::bgv::setup) mod tests {
             .collect()
     }
 
-    fn compact_aggregate_commitment_body(
+    fn aggregate_commitment_body(
         recipient_roster_position: usize,
         rns_limb_index: usize,
         rns_prime: u64,
@@ -3936,7 +3917,7 @@ pub(in crate::bgv::setup) mod tests {
                 )
             })?;
             let mut summed_coordinates = Vec::new();
-            for coordinate_index in 0..COMPACT_VSS_OUTPUT_COORDINATE_COUNT {
+            for coordinate_index in 0..VSS_PUBLIC_OUTPUT_COORDINATE_COUNT {
                 let mut summed_coordinate = 0_u128;
                 for source_share_record in source_share_records {
                     let source_limb = source_share_record["commitment"]["commitmentLimbs"]
@@ -3970,23 +3951,23 @@ pub(in crate::bgv::setup) mod tests {
             }));
         }
 
-        let seed = compact_test_seed(&[recipient_roster_position, rns_limb_index, 4]);
+        let seed = test_seed(&[recipient_roster_position, rns_limb_index, 4]);
         Ok(json!({
-            "objectType": "CompactVssCommitment",
+            "objectType": "VssPublicCommitment",
             "objectVersion": 1,
             "commitmentRole": "aggregate-threshold-share",
-            "commitmentContextHash": compact_test_hash_from_seed(seed, 0),
-            "publicMatrixSeedHash": compact_test_public_matrix_seed_hash(),
+            "commitmentContextHash": test_hash_from_seed(seed, 0),
+            "publicMatrixSeedHash": test_public_matrix_seed_hash(),
             "rnsLimbIndex": rns_limb_index,
             "rnsPrime": rns_prime,
-            "ringDegree": compact_test_ring_degree(),
-            "outputCoordinateCount": COMPACT_VSS_OUTPUT_COORDINATE_COUNT,
-            "randomnessColumnCount": COMPACT_VSS_RANDOMNESS_COLUMN_COUNT,
+            "ringDegree": test_ring_degree(),
+            "outputCoordinateCount": VSS_PUBLIC_OUTPUT_COORDINATE_COUNT,
+            "randomnessColumnCount": VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT,
             "commitmentLimbs": commitment_limbs,
         }))
     }
 
-    pub(in crate::bgv::setup) fn compact_share_linkage_statement_from_evidence(
+    pub(in crate::bgv::setup) fn share_linkage_statement_from_evidence(
         coefficient_set: &serde_json::Value,
         recipient_set: &serde_json::Value,
         aggregate_set: &serde_json::Value,
@@ -4022,7 +4003,7 @@ pub(in crate::bgv::setup) mod tests {
                     })
                     .collect::<Vec<_>>();
                 let source_statement_without_root = json!({
-                    "objectType": "CompactVssShareLinkageSourceStatement",
+                    "objectType": "VssShareLinkageSourceStatement",
                     "objectVersion": 1,
                     "ceremonyId": "compact-vss-test",
                     "manifestHash": "1".repeat(128),
@@ -4054,7 +4035,7 @@ pub(in crate::bgv::setup) mod tests {
             })
             .collect::<Vec<_>>();
         let statement_without_root = json!({
-            "objectType": "CompactVssShareLinkageStatement",
+            "objectType": "VssShareLinkageStatement",
             "objectVersion": 1,
             "ceremonyId": "compact-vss-test",
             "manifestHash": "1".repeat(128),
@@ -4080,7 +4061,7 @@ pub(in crate::bgv::setup) mod tests {
         statement
     }
 
-    fn rebind_compact_share_linkage_source_statement_root(
+    fn rebind_share_linkage_source_statement_root(
         source_statement: &mut serde_json::Value,
     ) -> CanonicalResult<()> {
         let mut source_statement_without_root = source_statement
@@ -4101,7 +4082,7 @@ pub(in crate::bgv::setup) mod tests {
         Ok(())
     }
 
-    fn rebind_compact_share_linkage_statement_root(
+    fn rebind_share_linkage_statement_root(
         statement: &mut serde_json::Value,
     ) -> CanonicalResult<()> {
         let mut statement_without_root = statement
@@ -4121,7 +4102,7 @@ pub(in crate::bgv::setup) mod tests {
         Ok(())
     }
 
-    fn tamper_compact_aggregate_commitment_body(
+    fn tamper_aggregate_commitment_body(
         aggregate_set: &mut serde_json::Value,
     ) -> CanonicalResult<()> {
         let aggregate_record = &mut aggregate_set["recipientRecords"][0];
@@ -4146,10 +4127,10 @@ pub(in crate::bgv::setup) mod tests {
         aggregate_record["aggregateCommitmentRoot"] = json!(
             crate::hashing::derive_canonical_object_hash(&aggregate_record["commitment"],)?
         );
-        rebind_compact_aggregate_threshold_commitment_set_root(aggregate_set)
+        rebind_aggregate_threshold_commitment_set_root(aggregate_set)
     }
 
-    fn rebind_compact_aggregate_threshold_commitment_set_root(
+    fn rebind_aggregate_threshold_commitment_set_root(
         aggregate_set: &mut serde_json::Value,
     ) -> CanonicalResult<()> {
         let mut aggregate_set_without_root = aggregate_set

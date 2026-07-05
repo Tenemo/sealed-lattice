@@ -42,32 +42,3 @@ pub(in super::super) fn linear_combination_setup_commitments(
 
     Ok(combined_commitment)
 }
-
-pub(in super::super) fn add_scaled_setup_commitment_in_place(
-    target_commitment: &mut SetupCommitmentValue,
-    term_commitment: &SetupCommitmentValue,
-    scalar: u128,
-) -> CanonicalResult<()> {
-    validate_same_commitment_domain(target_commitment, term_commitment)?;
-    for (target_limb, term_limb) in target_commitment
-        .limbs
-        .iter_mut()
-        .zip(term_commitment.limbs.iter())
-    {
-        let modulus = target_limb.modulus;
-        let scalar_residue = u64::try_from(scalar % u128::from(modulus)).map_err(|_| {
-            invalid_commitment_input("commitment linear-combination scalar does not fit u64")
-        })?;
-        for (target_row, term_row) in target_limb.rows.iter_mut().zip(term_limb.rows.iter()) {
-            for (target_value, term_value) in target_row.iter_mut().zip(term_row.iter()) {
-                *target_value = add_mod_fast(
-                    *target_value,
-                    mul_mod_fast(*term_value, scalar_residue, modulus),
-                    modulus,
-                );
-            }
-        }
-    }
-
-    Ok(())
-}

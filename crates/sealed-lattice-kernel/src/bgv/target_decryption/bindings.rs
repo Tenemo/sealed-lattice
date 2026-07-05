@@ -1,8 +1,8 @@
 use super::*;
 
-const COMPACT_VSS_AGGREGATE_THRESHOLD_COMMITMENT_SET_FIELD: &str =
-    "compactVssAggregateThresholdCommitmentSet";
-const COMPACT_VSS_SHARE_LINKAGE_STATEMENT_FIELD: &str = "compactVssShareLinkageStatement";
+const VSS_PUBLIC_AGGREGATE_THRESHOLD_COMMITMENT_SET_FIELD: &str =
+    "vssPublicAggregateThresholdCommitmentSet";
+const VSS_SHARE_LINKAGE_STATEMENT_FIELD: &str = "vssShareLinkageStatement";
 const TARGET_RESULT_RELEASE_SETUP_CONTEXT_HASH_FIELD: &str = "releaseSetupContextHash";
 
 // Target decryption binds the accepted, verifier-gated SetupPackage that every
@@ -64,18 +64,18 @@ pub(super) fn read_setup_binding(setup_package: &Value) -> CanonicalResult<Setup
             })
         })
         .collect::<CanonicalResult<Vec<_>>>()?;
-    let compact_aggregate_threshold_commitment_set = setup_package
-        .get(COMPACT_VSS_AGGREGATE_THRESHOLD_COMMITMENT_SET_FIELD)
+    let aggregate_threshold_commitment_set = setup_package
+        .get(VSS_PUBLIC_AGGREGATE_THRESHOLD_COMMITMENT_SET_FIELD)
         .map(|aggregate_set| {
-            read_compact_aggregate_threshold_commitment_set_binding(
+            read_aggregate_threshold_commitment_set_binding(
                 aggregate_set,
                 &public_matrix_seed_hash,
                 &participants,
             )
         })
         .transpose()?;
-    let compact_share_linkage_statement_root = setup_package
-        .get(COMPACT_VSS_SHARE_LINKAGE_STATEMENT_FIELD)
+    let share_linkage_statement_root = setup_package
+        .get(VSS_SHARE_LINKAGE_STATEMENT_FIELD)
         .map(|statement| {
             hash_at_path(statement, &["statementRoot"]).map(std::borrow::ToOwned::to_owned)
         })
@@ -90,9 +90,9 @@ pub(super) fn read_setup_binding(setup_package: &Value) -> CanonicalResult<Setup
         target_decryption_profile_hash,
         target_decryption_profile_binding_hash,
         public_matrix_seed_hash,
-        compact_share_linkage_statement_root,
+        share_linkage_statement_root,
         participants,
-        compact_aggregate_threshold_commitment_set,
+        aggregate_threshold_commitment_set,
     })
 }
 
@@ -151,25 +151,25 @@ pub(super) fn read_target_result_release_setup_context(
             ));
         }
     }
-    let compact_aggregate_threshold_commitment_set = context
-        .get(COMPACT_VSS_AGGREGATE_THRESHOLD_COMMITMENT_SET_FIELD)
+    let aggregate_threshold_commitment_set = context
+        .get(VSS_PUBLIC_AGGREGATE_THRESHOLD_COMMITMENT_SET_FIELD)
         .filter(|value| !value.is_null())
         .map(|aggregate_set| {
-            read_compact_aggregate_threshold_commitment_set_binding(
+            read_aggregate_threshold_commitment_set_binding(
                 aggregate_set,
                 &public_matrix_seed_hash,
                 &participants,
             )
         })
         .transpose()?;
-    let compact_share_linkage_statement_root = context
-        .get("compactShareLinkageStatementRoot")
+    let share_linkage_statement_root = context
+        .get("shareLinkageStatementRoot")
         .filter(|value| !value.is_null())
         .map(|value| {
             value.as_str().ok_or_else(|| {
                 CanonicalError::new(
                     CanonicalErrorCode::InvalidFixture,
-                    "compactShareLinkageStatementRoot must be a hash string",
+                    "shareLinkageStatementRoot must be a hash string",
                 )
             })
         })
@@ -190,9 +190,9 @@ pub(super) fn read_target_result_release_setup_context(
         )?
         .to_string(),
         public_matrix_seed_hash,
-        compact_share_linkage_statement_root,
+        share_linkage_statement_root,
         participants,
-        compact_aggregate_threshold_commitment_set,
+        aggregate_threshold_commitment_set,
     })
 }
 
@@ -210,7 +210,7 @@ fn target_result_release_setup_context_from_binding(
         "targetDecryptionParametersHash": setup_binding.target_decryption_profile_hash,
         "targetDecryptionParametersBindingHash": setup_binding.target_decryption_profile_binding_hash,
         "publicMatrixSeedHash": setup_binding.public_matrix_seed_hash,
-        "compactShareLinkageStatementRoot": setup_binding.compact_share_linkage_statement_root,
+        "shareLinkageStatementRoot": setup_binding.share_linkage_statement_root,
         "participants": setup_binding.participants.iter().map(|participant| json!({
             "trusteeIdentity": participant.trustee_identity,
             "rosterPosition": participant.roster_position,
@@ -219,7 +219,7 @@ fn target_result_release_setup_context_from_binding(
             "recoveryEpoch": participant.recovery_epoch,
             "deviceEpoch": participant.device_epoch,
         })).collect::<Vec<_>>(),
-        COMPACT_VSS_AGGREGATE_THRESHOLD_COMMITMENT_SET_FIELD: compact_aggregate_threshold_commitment_set_value(setup_binding)?,
+        VSS_PUBLIC_AGGREGATE_THRESHOLD_COMMITMENT_SET_FIELD: aggregate_threshold_commitment_set_value(setup_binding)?,
     });
     let context_hash = target_result_release_setup_context_hash(&context)?;
     context
@@ -233,10 +233,10 @@ fn target_result_release_setup_context_from_binding(
     Ok(context)
 }
 
-fn compact_aggregate_threshold_commitment_set_value(
+fn aggregate_threshold_commitment_set_value(
     setup_binding: &SetupBinding,
 ) -> CanonicalResult<Value> {
-    let Some(aggregate_set) = &setup_binding.compact_aggregate_threshold_commitment_set else {
+    let Some(aggregate_set) = &setup_binding.aggregate_threshold_commitment_set else {
         return Ok(Value::Null);
     };
     let mut records = Vec::new();
@@ -252,7 +252,7 @@ fn compact_aggregate_threshold_commitment_set_value(
             })?;
         for (rns_limb_index, record) in limb_records.iter().enumerate() {
             records.push(json!({
-                "objectType": "CompactVssAggregateThresholdCommitment",
+                "objectType": "VssPublicAggregateThresholdCommitment",
                 "objectVersion": 1,
                 "recipientIdentity": participant.trustee_identity,
                 "recipientRosterPosition": participant.roster_position,
@@ -269,7 +269,7 @@ fn compact_aggregate_threshold_commitment_set_value(
     }
 
     Ok(json!({
-        "objectType": "CompactVssAggregateThresholdCommitmentSet",
+        "objectType": "VssPublicAggregateThresholdCommitmentSet",
         "objectVersion": 1,
         "publicMatrixSeedHash": setup_binding.public_matrix_seed_hash,
         "participantCount": setup_binding.participants.len(),
@@ -288,12 +288,12 @@ fn target_result_release_setup_context_hash(context: &Value) -> CanonicalResult<
     derive_canonical_object_hash(&hash_input)
 }
 
-fn read_compact_aggregate_threshold_commitment_set_binding(
+fn read_aggregate_threshold_commitment_set_binding(
     aggregate_set: &Value,
     setup_public_matrix_seed_hash: &str,
     participants: &[ParticipantBinding],
-) -> CanonicalResult<CompactAggregateThresholdCommitmentSetBinding> {
-    verify_compact_vss_aggregate_threshold_commitment_set_request(&json!({
+) -> CanonicalResult<AggregateThresholdCommitmentSetBinding> {
+    verify_vss_public_aggregate_threshold_commitment_set_request(&json!({
         "aggregateThresholdCommitmentSet": aggregate_set,
     }))?;
     let aggregate_threshold_commitment_root =
@@ -379,7 +379,7 @@ fn read_compact_aggregate_threshold_commitment_set_binding(
                     "compact aggregate threshold commitment RNS prime does not match the canonical data basis",
                 ));
             }
-            limb_records.push(CompactAggregateThresholdCommitmentRecordBinding {
+            limb_records.push(AggregateThresholdCommitmentRecordBinding {
                 rns_prime,
                 aggregate_commitment_root: hash_at_path(record, &["aggregateCommitmentRoot"])?
                     .to_string(),
@@ -399,7 +399,7 @@ fn read_compact_aggregate_threshold_commitment_set_binding(
         recipient_records.push(limb_records);
     }
 
-    Ok(CompactAggregateThresholdCommitmentSetBinding {
+    Ok(AggregateThresholdCommitmentSetBinding {
         aggregate_threshold_commitment_root,
         rns_limb_count,
         recipient_records,

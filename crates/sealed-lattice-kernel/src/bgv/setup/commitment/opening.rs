@@ -6,6 +6,7 @@ use super::computation::*;
 use super::serialization::*;
 #[cfg(test)]
 use super::validation::*;
+#[cfg(test)]
 use super::*;
 
 #[cfg(test)]
@@ -148,6 +149,7 @@ fn verify_setup_commitment_opening_with_message_bound(
     })
 }
 
+#[cfg(test)]
 pub(super) fn validate_same_commitment_domain(
     first_commitment: &SetupCommitmentValue,
     commitment: &SetupCommitmentValue,

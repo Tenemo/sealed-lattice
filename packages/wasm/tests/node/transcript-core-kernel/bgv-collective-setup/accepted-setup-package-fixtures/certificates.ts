@@ -1,7 +1,5 @@
 import {
-    setupTransportChunkCount,
     setupTransportChunkSizeBytes,
-    setupTransportTotalByteLength,
     type JsonRecord,
 } from '../setup-fixture-primitives.js';
 
@@ -33,83 +31,9 @@ export function rebindCollectiveSetupPackageHash(
     });
 }
 
+// The commitment sets are embedded and proof-verified in-package, so the
+// transport certificate carries no streamed objects.
 export function acceptedSetupTransportCertificate(
-    kernel: TranscriptCoreKernel,
-    parameters: BgvCollectiveSetupParametersDescription,
-    vssCoefficientCommitmentMaterial: JsonRecord,
-): JsonRecord {
-    const vssObjectFullObjectHash = kernel.deriveCanonicalObjectHash({
-        value: {
-            objectType: 'SetupTransportChunkManifestRoot',
-            fixture: 'setup-transport-full-object-hash',
-            totalByteLength: setupTransportTotalByteLength,
-        },
-    });
-    const chunkHashes = Array.from(
-        { length: setupTransportChunkCount },
-        (_unused, chunkIndex) =>
-            kernel.deriveCanonicalObjectHash({
-                value: {
-                    objectType: 'SetupTransportChunkManifestRoot',
-                    fixture: 'setup-transport-chunk-hash',
-                    chunkIndex,
-                },
-            }),
-    );
-    const vssObjectChunkRoot = kernel.deriveCanonicalObjectHash({
-        value: {
-            objectType: 'SetupTransportChunkManifestRoot',
-            fixture: 'setup-transport-vss-object-chunk-root',
-            totalByteLength: setupTransportTotalByteLength,
-        },
-    });
-    const transportedVssObject = {
-        objectType: 'SetupTransportedObject',
-        objectVersion: 1,
-        objectName: 'vssCoefficientCommitmentMaterial',
-        objectRole: 'public-vss-coefficient-commitment-material',
-        objectRoot: String(
-            vssCoefficientCommitmentMaterial.vssCoefficientCommitmentMaterialRoot,
-        ),
-        byteLength: setupTransportTotalByteLength,
-        chunkStartIndex: 0,
-        chunkCount: setupTransportChunkCount,
-        chunkRoot: vssObjectChunkRoot,
-        chunkHashes,
-        fullObjectHash: vssObjectFullObjectHash,
-        encoding: 'binary',
-        loadingPolicy: 'stream-verified-before-object-use',
-    };
-    const certificate = {
-        objectType: 'SetupTransportCertificate',
-        objectVersion: 1,
-        transportSchemeId: 'sealed-lattice-setup-binary-chunked-transport-v1',
-        setupParametersHash: parameters.setupParametersHash,
-        largeObjectEncoding: 'binary',
-        chunking: 'required',
-        chunkSizeBytes: setupTransportChunkSizeBytes,
-        chunkCount: setupTransportChunkCount,
-        totalByteLength: setupTransportTotalByteLength,
-        storageQuotaBytes: 2_147_483_648,
-        largestSingleBufferBytes: 1_572_864,
-        copyCountLimit: 2,
-        streamVerificationOrder: 'ascending-chunk-index',
-        resumePolicy: 'chunk-index-checkpointed-by-hash',
-        lazyLoadingPolicy: 'root-addressed-large-object-loading',
-        transportedObjects: [transportedVssObject],
-    };
-
-    return {
-        ...certificate,
-        setupTransportCertificateHash: kernel.deriveCanonicalObjectHash({
-            value: certificate,
-        }),
-    };
-}
-
-// The compact commitment sets are embedded and proof-verified in-package, so the
-// transport certificate carries no streamed objects on the compact path.
-export function acceptedCompactSetupTransportCertificate(
     kernel: TranscriptCoreKernel,
     parameters: BgvCollectiveSetupParametersDescription,
 ): JsonRecord {

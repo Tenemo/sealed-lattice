@@ -18,6 +18,7 @@ use crate::{
 
 use super::sampling::reduce_unbiased_u64;
 
+#[cfg(test)]
 mod algebra;
 mod commitment_parameters;
 mod computation;
@@ -26,6 +27,7 @@ mod opening;
 mod serialization;
 mod validation;
 
+#[cfg(test)]
 pub(super) use algebra::*;
 pub(super) use commitment_parameters::*;
 pub(super) use matrix::*;

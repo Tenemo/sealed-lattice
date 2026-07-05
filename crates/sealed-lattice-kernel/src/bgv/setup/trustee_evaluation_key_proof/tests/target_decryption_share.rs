@@ -1,6 +1,6 @@
 use super::super::relation::{
-    CompactVssShareLinkageCommitment, TargetDecryptionShareLimbStatement,
-    TargetDecryptionShareRoleStatement, TargetDecryptionShareStatement,
+    TargetDecryptionShareLimbStatement, TargetDecryptionShareRoleStatement,
+    TargetDecryptionShareStatement, VssShareLinkageCommitment,
     masked_claim_bounds_for_global_claim,
 };
 use super::super::{
@@ -13,10 +13,10 @@ use super::*;
 use crate::bgv::evaluator::engine::negacyclic_mul;
 use crate::bgv::modular_arithmetic::{add_mod_fast, mul_mod_fast};
 use crate::bgv::parameters::PLAINTEXT_MODULUS;
-use crate::bgv::setup::compact_vss_commitment::{
-    COMPACT_VSS_MESSAGE_BASE_DIGIT_TRIT_COUNT, CompactVssCommitmentOpeningInput,
-    compact_vss_canonical_message_digit_columns, compact_vss_message_encoding_layout,
-    compute_compact_vss_commitment_from_opening,
+use crate::bgv::setup::vss_commitment::{
+    VSS_PUBLIC_MESSAGE_BASE_DIGIT_TRIT_COUNT, VssPublicCommitmentOpeningInput,
+    compute_vss_public_commitment_from_opening, vss_public_canonical_message_digit_columns,
+    vss_public_message_encoding_layout,
 };
 use serde_json::{Value, json};
 
@@ -285,7 +285,7 @@ fn target_decryption_share_proof_requires_enough_lift_fields() {
     );
     assert_eq!(
         commitment_field_layout.target_decryption_randomness_columns,
-        35 * crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_RANDOMNESS_COLUMN_COUNT,
+        35 * crate::bgv::setup::vss_commitment::VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT,
         "commitment fields carry all compact-opening randomness"
     );
     let target_field_layout =
@@ -314,17 +314,17 @@ fn target_decryption_share_proof_requires_enough_lift_fields() {
         .as_ref()
         .expect("target statement");
     let aggregate_layout =
-        compact_vss_message_encoding_layout(target_statement.aggregate_message_coefficient_bound)
+        vss_public_message_encoding_layout(target_statement.aggregate_message_coefficient_bound)
             .expect("aggregate message layout");
     assert_eq!(
         aggregate_layout
             .digit_trit_count(0)
             .expect("aggregate low digit trit count"),
-        COMPACT_VSS_MESSAGE_BASE_DIGIT_TRIT_COUNT,
+        VSS_PUBLIC_MESSAGE_BASE_DIGIT_TRIT_COUNT,
         "large aggregate-message digits still need the full base-digit trit decoder"
     );
     let smudging_layout =
-        compact_vss_message_encoding_layout(target_statement.smudging_message_coefficient_bound)
+        vss_public_message_encoding_layout(target_statement.smudging_message_coefficient_bound)
             .expect("smudging message layout");
     assert_eq!(
         smudging_layout
@@ -410,12 +410,12 @@ fn target_decryption_share_proof_layout_description_matches_relation_layout() {
     );
     assert_eq!(
         first_commitment_limb["targetDecryptionRandomnessColumns"],
-        json!(35 * crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_RANDOMNESS_COLUMN_COUNT)
+        json!(35 * crate::bgv::setup::vss_commitment::VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT)
     );
     assert_eq!(
         first_commitment_limb["claimCount"],
         json!(
-            35 * crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT
+            35 * crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT
                 * CONSISTENCY_REPETITIONS
         )
     );
@@ -440,7 +440,7 @@ fn target_decryption_share_proof_layout_description_matches_relation_layout() {
     assert_eq!(
         final_target_limb["claimCount"],
         json!(
-            11 * crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT
+            11 * crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT
                 * CONSISTENCY_REPETITIONS
         )
     );
@@ -470,13 +470,13 @@ fn target_decryption_share_proof_layout_description_matches_relation_layout() {
     assert_eq!(final_limb_messages[5]["highDigitTritCount"], json!(0));
     assert_eq!(
         final_limb_messages[0]["encodingColumnCount"],
-        json!(crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT),
+        json!(crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT),
         "non-decoder lifted messages carry only digit columns"
     );
     assert_eq!(final_limb_messages[0]["lowDigitTritCount"], json!(0));
     assert_eq!(
         final_limb_messages[4]["lowDigitTritCount"],
-        json!(COMPACT_VSS_MESSAGE_BASE_DIGIT_TRIT_COUNT),
+        json!(VSS_PUBLIC_MESSAGE_BASE_DIGIT_TRIT_COUNT),
         "the final limb's own aggregate message keeps the full decoder"
     );
 }
@@ -497,7 +497,7 @@ fn target_decryption_share_layout_omits_unneeded_lift_columns() {
     );
     assert_eq!(
         commitment_field_layout.target_decryption_randomness_columns,
-        49 * crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_RANDOMNESS_COLUMN_COUNT
+        49 * crate::bgv::setup::vss_commitment::VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT
     );
 
     let first_lift_target_field_layout =
@@ -575,7 +575,7 @@ fn target_decryption_share_mask_bound_uses_lifted_aggregate_bound() {
         masked_claim_bounds_for_global_claim(&instance.statement, 0).expect("target mask bounds");
     let coefficient_bound = (1_i128 << CONSISTENCY_COEFFICIENT_BITS) - 1;
     let aggregate_message_digit_bound =
-        crate::bgv::setup::compact_vss_commitment::compact_vss_message_digit_bound(
+        crate::bgv::setup::vss_commitment::vss_public_message_digit_bound(
             u64::try_from(aggregate_message_coefficient_bound)
                 .expect("aggregate message bound fits u64"),
             0,
@@ -599,13 +599,13 @@ fn target_decryption_share_mask_bound_uses_lifted_aggregate_bound() {
         .statement
         .target_decryption_smudging_message_global_index()
         .expect("first smudging message")
-        * crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT
+        * crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT
         * CONSISTENCY_REPETITIONS) as u64;
     let (smudging_lower_bound, smudging_upper_bound) =
         masked_claim_bounds_for_global_claim(&instance.statement, first_smudging_global_claim_id)
             .expect("target smudging message mask bounds");
     let expected_smudging_clear_claim_bound = i128::from(
-        crate::bgv::setup::compact_vss_commitment::compact_vss_message_digit_bound(
+        crate::bgv::setup::vss_commitment::vss_public_message_digit_bound(
             target_statement.smudging_message_coefficient_bound,
             0,
         )
@@ -733,7 +733,7 @@ fn target_decryption_share_instance_parts_for_active_limb_count(
             ring_degree,
             23 + target_rns_limb_index as i64 * 29,
         );
-        let aggregate_commitment = compact_commitment_for_target_decryption_test(
+        let aggregate_commitment = commitment_for_target_decryption_test(
             "aggregate-threshold-share",
             json!({
                 "testPurpose": "target-decryption-share-proof",
@@ -823,7 +823,7 @@ fn target_decryption_share_instance_parts_for_active_limb_count(
                 .enumerate()
                 .map(
                     |(polynomial_index, (message_coefficients, randomness_by_column))| {
-                        compact_commitment_for_target_decryption_test(
+                        commitment_for_target_decryption_test(
                             "target-decryption-smudging-polynomial-coefficient",
                             json!({
                                 "testPurpose": "target-decryption-share-proof",
@@ -955,8 +955,8 @@ fn target_decryption_share_instance_parts_for_active_limb_count(
         keys: Vec::new(),
         same_secret_linkage: None,
         private_vss_share: None,
-        compact_vss_share_linkage: None,
-        compact_same_secret_bridge: None,
+        vss_share_linkage: None,
+        same_secret_bridge: None,
         target_decryption_share: Some(TargetDecryptionShareStatement {
             public_matrix_seed_hash: public_matrix_seed_hash.clone(),
             target_basis_hash: target_basis_hash.clone(),
@@ -986,14 +986,14 @@ fn target_decryption_share_instance_parts_for_active_limb_count(
         private_vss_coefficient_messages_by_shamir_index: Vec::new(),
         private_vss_opening_randomness_by_shamir_index: Vec::new(),
         private_vss_carry_witnesses: Vec::new(),
-        compact_vss_coefficient_messages_by_shamir_index: Vec::new(),
-        compact_vss_recipient_share_messages: Vec::new(),
-        compact_vss_coefficient_opening_randomness_by_shamir_index: Vec::new(),
-        compact_vss_recipient_share_opening_randomness: Vec::new(),
-        compact_vss_carry_witnesses: Vec::new(),
-        compact_vss_recipient_share_messages_by_item: Vec::new(),
-        compact_vss_recipient_share_opening_randomness_by_item: Vec::new(),
-        compact_vss_carry_witnesses_by_item: Vec::new(),
+        vss_public_coefficient_messages_by_shamir_index: Vec::new(),
+        vss_public_recipient_share_messages: Vec::new(),
+        vss_public_coefficient_opening_randomness_by_shamir_index: Vec::new(),
+        vss_public_recipient_share_opening_randomness: Vec::new(),
+        vss_public_carry_witnesses: Vec::new(),
+        vss_public_recipient_share_messages_by_item: Vec::new(),
+        vss_public_recipient_share_opening_randomness_by_item: Vec::new(),
+        vss_public_carry_witnesses_by_item: Vec::new(),
         target_decryption_message_vectors,
         target_decryption_opening_randomness_by_commitment,
     };
@@ -1108,7 +1108,7 @@ fn target_decryption_ternary_randomness_columns(
     ring_degree: usize,
     seed_offset: i64,
 ) -> Vec<Vec<i64>> {
-    (0..crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_RANDOMNESS_COLUMN_COUNT)
+    (0..crate::bgv::setup::vss_commitment::VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT)
         .map(|column_index| {
             (0..ring_degree)
                 .map(|coefficient_index| {
@@ -1121,14 +1121,14 @@ fn target_decryption_ternary_randomness_columns(
         .collect()
 }
 
-struct CompactCommitmentForTargetDecryptionTest {
+struct CommitmentForTargetDecryptionTest {
     commitment_root: String,
     commitment_value: Value,
-    commitment: CompactVssShareLinkageCommitment,
+    commitment: VssShareLinkageCommitment,
 }
 
 #[allow(clippy::too_many_arguments)]
-fn compact_commitment_for_target_decryption_test(
+fn commitment_for_target_decryption_test(
     commitment_role: &str,
     commitment_context: serde_json::Value,
     public_matrix_seed_hash: &str,
@@ -1138,24 +1138,23 @@ fn compact_commitment_for_target_decryption_test(
     message_coefficients: &[u64],
     message_coefficient_bound: u64,
     randomness_by_column: &[Vec<i64>],
-) -> CompactCommitmentForTargetDecryptionTest {
+) -> CommitmentForTargetDecryptionTest {
     let message_digit_columns =
-        compact_vss_canonical_message_digit_columns(message_coefficients, ring_degree)
+        vss_public_canonical_message_digit_columns(message_coefficients, ring_degree)
             .expect("compact target-decryption message digit columns");
-    let computation =
-        compute_compact_vss_commitment_from_opening(CompactVssCommitmentOpeningInput {
-            commitment_role,
-            commitment_context: &commitment_context,
-            public_matrix_seed_hash,
-            rns_limb_index,
-            rns_prime,
-            ring_degree,
-            message_coefficients,
-            message_digit_columns: &message_digit_columns,
-            message_coefficient_bound,
-            randomness_by_column,
-        })
-        .expect("compact target-decryption commitment");
+    let computation = compute_vss_public_commitment_from_opening(VssPublicCommitmentOpeningInput {
+        commitment_role,
+        commitment_context: &commitment_context,
+        public_matrix_seed_hash,
+        rns_limb_index,
+        rns_prime,
+        ring_degree,
+        message_coefficients,
+        message_digit_columns: &message_digit_columns,
+        message_coefficient_bound,
+        randomness_by_column,
+    })
+    .expect("compact target-decryption commitment");
 
     let coordinates_by_commitment_modulus = computation
         .commitment
@@ -1173,10 +1172,10 @@ fn compact_commitment_for_target_decryption_test(
         })
         .collect();
 
-    CompactCommitmentForTargetDecryptionTest {
+    CommitmentForTargetDecryptionTest {
         commitment_root: computation.commitment_root,
         commitment_value: computation.commitment,
-        commitment: CompactVssShareLinkageCommitment {
+        commitment: VssShareLinkageCommitment {
             coordinates_by_commitment_modulus,
         },
     }

@@ -200,7 +200,7 @@ fn heavy_accepted_setup_collective_setup_verifier_requires_same_secret_proofs_be
     assert_eq!(result["isValid"], false);
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
-        "compactSameSecretBridgeEvidenceIncomplete"
+        "sameSecretBridgeEvidenceIncomplete"
     );
     assert_eq!(result["refusedObjects"][0]["objectPath"], "setupPackage");
     assert!(result["acceptedSetupHandoff"].is_null());

@@ -609,8 +609,8 @@ fn private_vss_share_succinct_statement(
         ring_degree: input.ring_degree,
         keys: Vec::new(),
         same_secret_linkage: None,
-        compact_vss_share_linkage: None,
-        compact_same_secret_bridge: None,
+        vss_share_linkage: None,
+        same_secret_bridge: None,
         private_vss_share: Some(PrivateVssShareStatement {
             public_matrix_seed_hash: input.public_matrix_seed_hash.to_string(),
             private_envelope_aad_hash: input.private_envelope_aad_hash.to_string(),
@@ -898,14 +898,14 @@ pub(super) fn private_vss_share_succinct_proof_record(
                 })
             })
             .collect::<CanonicalResult<Vec<i64>>>()?,
-        compact_vss_coefficient_messages_by_shamir_index: Vec::new(),
-        compact_vss_recipient_share_messages: Vec::new(),
-        compact_vss_coefficient_opening_randomness_by_shamir_index: Vec::new(),
-        compact_vss_recipient_share_opening_randomness: Vec::new(),
-        compact_vss_carry_witnesses: Vec::new(),
-        compact_vss_recipient_share_messages_by_item: Vec::new(),
-        compact_vss_recipient_share_opening_randomness_by_item: Vec::new(),
-        compact_vss_carry_witnesses_by_item: Vec::new(),
+        vss_public_coefficient_messages_by_shamir_index: Vec::new(),
+        vss_public_recipient_share_messages: Vec::new(),
+        vss_public_coefficient_opening_randomness_by_shamir_index: Vec::new(),
+        vss_public_recipient_share_opening_randomness: Vec::new(),
+        vss_public_carry_witnesses: Vec::new(),
+        vss_public_recipient_share_messages_by_item: Vec::new(),
+        vss_public_recipient_share_opening_randomness_by_item: Vec::new(),
+        vss_public_carry_witnesses_by_item: Vec::new(),
         target_decryption_message_vectors: Vec::new(),
         target_decryption_opening_randomness_by_commitment: Vec::new(),
     };
