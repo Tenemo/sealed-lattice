@@ -24,6 +24,7 @@
 use super::super::negacyclic_transform::NegacyclicDomain;
 use super::super::proof_field::ProofFieldParameters;
 use super::atom_reduction::{AtomPublicInputs, AtomSource, reduce_atom};
+use super::carry_range_lookup;
 use super::column_commitment::{ColumnCommitment, ColumnOpening, verify_column_opening};
 use super::domain::{CyclicDomain, coset_evaluate_coefficients, coset_offset};
 use super::low_degree::{
@@ -107,55 +108,81 @@ impl<const LIMB_COUNT: usize> KeySource<LIMB_COUNT> {
 
 pub(super) struct KeyFriProof<const LIMB_COUNT: usize> {
     pub(crate) base_root: MerkleDigest,
+    pub(crate) aux_root: MerkleDigest,
     pub(crate) quotient_root: MerkleDigest,
     pub(crate) fri: FriProof<LIMB_COUNT>,
     pub(crate) base_opening: ColumnOpening<LIMB_COUNT>,
+    pub(crate) aux_opening: ColumnOpening<LIMB_COUNT>,
     pub(crate) quotient_opening: ColumnOpening<LIMB_COUNT>,
+    // logUp terminals: the lookup-side total `sum_x sum_d f_d(x)` and one total
+    // per table chunk `sum_x f_T_k(x)`. Bound to the committed fraction columns
+    // by the batched sumcheck, and cross-checked `lookup = sum_k table_k`.
+    pub(crate) lookup_terminal: [u64; LIMB_COUNT],
+    pub(crate) table_terminals: Vec<[u64; LIMB_COUNT]>,
 }
 
 fn invalid_key(message: &str) -> CanonicalError {
     CanonicalError::new(CanonicalErrorCode::InvalidProtocolObject, message)
 }
 
-// The carry range `|c| <= N+1` is proven by decomposing the shifted carry
-// `c + (N+1) in [0, 2N+2]` into bits, each range-checked in {0,1}, plus the
-// binary reconstruction. Per-bit decomposition is degree-2 and keeps the
-// committed carry within `~3N`, below the field's no-wrap exactness bound (the
-// proof field is sized so `|residual| < p` for `|c| <= N+1`, and 17 bits at the
-// first profile keep the reconstructed carry just inside `3N`; a coarser base
-// would overshoot that bound and is unsound, so bits are the tightest safe
-// decomposition here).
-fn carry_bit_count(ring_degree: usize) -> usize {
-    let maximum = 2 * ring_degree + 2;
-    (maximum + 1).next_power_of_two().trailing_zeros() as usize
-}
+// The carry range `|c| <= N+1` is proven by a log-derivative (logUp) range
+// lookup over the shifted carry `c + (N+1) in [0, 2N+2]`, split into
+// `carry_range_lookup::table_count` size-`N` table chunks so every column stays
+// in the single trace domain (coset `8N`, FRI rate 1/4 unchanged). The 16-per-
+// digit range-bit columns and their binary-reconstruction constraints are gone;
+// see `carry_range_lookup` for the identity, the padding-collision defense, and
+// the isolated soundness tests. A coarser base decomposition was tried and
+// reverted as unsound (a carry could overshoot the field no-wrap bound); the
+// lookup certifies membership in the exact range with no overshoot.
 
-// Shared base column indices.
+// Round-1 base columns: the witness (shared secret plus per-digit blocks) then
+// one carry-range multiplicity column per table chunk.
 const COLUMN_SECRET: usize = 0;
 const COLUMN_SECRET_SQUARE: usize = 1;
 const SHARED_COLUMN_COUNT: usize = 2;
 
-// Per-digit block: error, carry, error-square, error-support, then the carry's
-// range bits.
+// Per-digit block: error, carry, error-square, error-support.
 const DIGIT_ERROR: usize = 0;
 const DIGIT_CARRY: usize = 1;
 const DIGIT_ERROR_SQUARE: usize = 2;
 const DIGIT_ERROR_SUPPORT: usize = 3;
-const DIGIT_BITS_START: usize = 4;
+const DIGIT_BLOCK_SIZE: usize = 4;
 
-fn digit_block_size(ring_degree: usize) -> usize {
-    DIGIT_BITS_START + carry_bit_count(ring_degree)
+// Index of the first multiplicity column (after all per-digit blocks).
+fn base_multiplicity_start(digit_count: usize) -> usize {
+    SHARED_COLUMN_COUNT + digit_count * DIGIT_BLOCK_SIZE
 }
 
 fn base_column_count(ring_degree: usize, digit_count: usize) -> usize {
-    SHARED_COLUMN_COUNT + digit_count * digit_block_size(ring_degree)
+    base_multiplicity_start(digit_count) + carry_range_lookup::table_count(ring_degree)
 }
 
-fn digit_column(ring_degree: usize, digit: usize, offset_in_block: usize) -> usize {
-    SHARED_COLUMN_COUNT + digit * digit_block_size(ring_degree) + offset_in_block
+fn digit_column(digit: usize, offset_in_block: usize) -> usize {
+    SHARED_COLUMN_COUNT + digit * DIGIT_BLOCK_SIZE + offset_in_block
+}
+
+fn base_multiplicity_column(digit_count: usize, table_index: usize) -> usize {
+    base_multiplicity_start(digit_count) + table_index
+}
+
+// Round-2 auxiliary columns (challenge-dependent, committed after the logUp
+// challenge is drawn): one lookup fraction column per digit then one table
+// fraction column per table chunk.
+fn aux_lookup_column(digit: usize) -> usize {
+    digit
+}
+
+fn aux_table_fraction_column(digit_count: usize, table_index: usize) -> usize {
+    digit_count + table_index
+}
+
+fn aux_column_count(ring_degree: usize, digit_count: usize) -> usize {
+    digit_count + carry_range_lookup::table_count(ring_degree)
 }
 
 // Quotient columns: one sumcheck quotient, one sumcheck g, one support quotient.
+// The lookup terminals ride the single sumcheck and the fraction pins ride the
+// single support composition, so the quotient count is unchanged.
 const QUOTIENT_SUMCHECK: usize = 0;
 const QUOTIENT_G: usize = 1;
 const QUOTIENT_SUPPORT: usize = 2;
@@ -221,8 +248,11 @@ fn masked_coefficients<const LIMB_COUNT: usize>(
     polynomial::add(parameters, coefficients, &mask_multiple)
 }
 
-// Build all base column coefficient vectors (shared secret block then per-digit
-// blocks).
+// Build the round-1 base column coefficient vectors: the shared secret block,
+// the per-digit witness blocks, then one carry-range multiplicity column per
+// table chunk. The multiplicity of each table value is the number of shifted
+// carries equal to it; an out-of-range carry is simply not counted, which makes
+// the logUp balance fail (the sound outcome, exercised by a tamper test).
 fn build_base_columns<const LIMB_COUNT: usize>(
     parameters: &ProofFieldParameters<LIMB_COUNT>,
     trace_domain: &CyclicDomain<'_, LIMB_COUNT>,
@@ -232,8 +262,6 @@ fn build_base_columns<const LIMB_COUNT: usize>(
     mask_degree: usize,
     salt_seed: &mut u64,
 ) -> CanonicalResult<Vec<Vec<[u64; LIMB_COUNT]>>> {
-    let bit_count = carry_bit_count(ring_degree);
-    let carry_shift = (ring_degree + 1) as i64;
     let mut columns = Vec::with_capacity(base_column_count(ring_degree, digits.len()));
 
     // Shared: S, S^2.
@@ -256,7 +284,7 @@ fn build_base_columns<const LIMB_COUNT: usize>(
         ));
     }
 
-    // Per digit: E_j, C_j, E_j^2, Pcol_j, bits_j.
+    // Per digit: E_j, C_j, E_j^2, Pcol_j.
     for digit in digits {
         if digit.error.len() != ring_degree || digit.carry.len() != ring_degree {
             return Err(invalid_key(
@@ -286,17 +314,6 @@ fn build_base_columns<const LIMB_COUNT: usize>(
                 parameters.signed_word_to_element((square - 1) * (square - 4))
             })
             .collect();
-        let mut bit_values = vec![Vec::with_capacity(ring_degree); bit_count];
-        for &carry_scalar in &digit.carry {
-            let shifted = carry_scalar + carry_shift;
-            if shifted < 0 {
-                return Err(invalid_key("carry is below its range bound"));
-            }
-            for (bit_index, column) in bit_values.iter_mut().enumerate() {
-                let bit = (shifted >> bit_index) & 1;
-                column.push(parameters.unsigned_word_to_element(bit as u64));
-            }
-        }
         for values in [
             &error_values,
             &carry_values,
@@ -312,49 +329,165 @@ fn build_base_columns<const LIMB_COUNT: usize>(
                 salt_seed,
             ));
         }
-        for column in &bit_values {
-            let coefficients = trace_domain.interpolate(column);
-            columns.push(masked_coefficients(
-                parameters,
-                &coefficients,
-                ring_degree,
-                mask_degree,
-                salt_seed,
-            ));
-        }
+    }
+
+    // Carry-range multiplicity columns (one per table chunk).
+    let multiplicity_columns = carry_multiplicity_values(parameters, ring_degree, digits);
+    for multiplicity in &multiplicity_columns {
+        let coefficients = trace_domain.interpolate(multiplicity);
+        columns.push(masked_coefficients(
+            parameters,
+            &coefficients,
+            ring_degree,
+            mask_degree,
+            salt_seed,
+        ));
     }
 
     Ok(columns)
 }
 
-// One support constraint count: ternary (2) + per digit eta-2 (3) + range
-// (bits + 1 reconstruction).
-fn support_constraint_count(ring_degree: usize, digit_count: usize) -> usize {
-    2 + digit_count * (3 + carry_bit_count(ring_degree) + 1)
-}
-
-// The place value `2^index` for the carry bit reconstruction.
-fn power_of_two<const LIMB_COUNT: usize>(
+// The carry-range multiplicity value columns (one per table chunk), counting how
+// many shifted carries across all digits equal each table value. Out-of-range
+// carries are not counted, which makes the logUp balance fail. Deterministic
+// from the witness, so both the round-1 base builder and the round-2 aux builder
+// derive the same columns.
+fn carry_multiplicity_values<const LIMB_COUNT: usize>(
     parameters: &ProofFieldParameters<LIMB_COUNT>,
-    index: usize,
-) -> [u64; LIMB_COUNT] {
-    parameters.unsigned_word_to_element(1_u64 << index)
+    ring_degree: usize,
+    digits: &[DigitWitness],
+) -> Vec<Vec<[u64; LIMB_COUNT]>> {
+    let shift = carry_range_lookup::carry_shift(ring_degree);
+    let max_shifted = carry_range_lookup::max_shifted_value(ring_degree);
+    let mut shifted_in_range = Vec::with_capacity(digits.len() * ring_degree);
+    for digit in digits {
+        for &carry in &digit.carry {
+            let shifted = carry + shift;
+            if shifted >= 0 && (shifted as usize) <= max_shifted {
+                shifted_in_range.push(shifted as usize);
+            }
+        }
+    }
+    carry_range_lookup::multiplicities(parameters, &shifted_in_range, ring_degree)
 }
 
-// Build the support constraint polynomials in a fixed order shared by prover
-// and verifier.
+// Build the round-2 auxiliary column coefficient vectors (committed after the
+// logUp challenge `mu` is drawn): one lookup fraction column per digit
+// `f_d[x] = 1/(mu - (c_d(x) + shift))`, then one table fraction column per chunk
+// `f_T_k[x] = m_k(x)/(mu - T_k(x))`. Returns the columns together with the logUp
+// terminals (`lookup_terminal = sum_x sum_d f_d`, `table_terminals[k] = sum_x
+// f_T_k`), computed from the on-domain values so masking does not affect them.
+struct AuxColumns<const LIMB_COUNT: usize> {
+    coefficients: Vec<Vec<[u64; LIMB_COUNT]>>,
+    lookup_terminal: [u64; LIMB_COUNT],
+    table_terminals: Vec<[u64; LIMB_COUNT]>,
+}
+
+fn build_aux_columns<const LIMB_COUNT: usize>(
+    parameters: &ProofFieldParameters<LIMB_COUNT>,
+    trace_domain: &CyclicDomain<'_, LIMB_COUNT>,
+    ring_degree: usize,
+    digits: &[DigitWitness],
+    multiplicity_values: &[Vec<[u64; LIMB_COUNT]>],
+    challenge: &[u64; LIMB_COUNT],
+    mask_degree: usize,
+    salt_seed: &mut u64,
+) -> CanonicalResult<AuxColumns<LIMB_COUNT>> {
+    let shift = carry_range_lookup::carry_shift(ring_degree);
+    let mut coefficients = Vec::with_capacity(aux_column_count(ring_degree, digits.len()));
+    let mut lookup_terminal = parameters.zero();
+
+    // Per-digit lookup fractions.
+    for digit in digits {
+        let shifted_values: Vec<[u64; LIMB_COUNT]> = digit
+            .carry
+            .iter()
+            .map(|carry| parameters.signed_word_to_element(carry + shift))
+            .collect();
+        let fraction = carry_range_lookup::lookup_fraction_column(parameters, challenge, &shifted_values)
+            .ok_or_else(|| invalid_key("logUp challenge collided with a shifted carry"))?;
+        lookup_terminal =
+            parameters.add(&lookup_terminal, &carry_range_lookup::column_sum(parameters, &fraction));
+        let column = trace_domain.interpolate(&fraction);
+        coefficients.push(masked_coefficients(
+            parameters,
+            &column,
+            ring_degree,
+            mask_degree,
+            salt_seed,
+        ));
+    }
+
+    // Table fractions, one per chunk.
+    let mut table_terminals = Vec::with_capacity(multiplicity_values.len());
+    for (table_index, multiplicity) in multiplicity_values.iter().enumerate() {
+        let table_values = carry_range_lookup::table_values(parameters, ring_degree, table_index);
+        let fraction =
+            carry_range_lookup::table_fraction_column(parameters, challenge, &table_values, multiplicity)
+                .ok_or_else(|| invalid_key("logUp challenge collided with a table value"))?;
+        table_terminals.push(carry_range_lookup::column_sum(parameters, &fraction));
+        let column = trace_domain.interpolate(&fraction);
+        coefficients.push(masked_coefficients(
+            parameters,
+            &column,
+            ring_degree,
+            mask_degree,
+            salt_seed,
+        ));
+    }
+
+    Ok(AuxColumns {
+        coefficients,
+        lookup_terminal,
+        table_terminals,
+    })
+}
+
+// Support constraint count: ternary (2) + per digit [eta-2 (3) + lookup
+// fraction pin (1)] + one table fraction pin per chunk.
+fn support_constraint_count(ring_degree: usize, digit_count: usize) -> usize {
+    2 + digit_count * 4 + carry_range_lookup::table_count(ring_degree)
+}
+
+// The public table value polynomials (coefficient form), one per chunk, shared
+// by prover and verifier. `T_k` interpolates the chunk's public value column
+// over the trace domain; both sides evaluate it at query points like the
+// sumcheck linear forms, so no table column is committed and no out-of-range
+// value can enter the table.
+fn table_value_polynomials<const LIMB_COUNT: usize>(
+    parameters: &ProofFieldParameters<LIMB_COUNT>,
+    trace_domain: &CyclicDomain<'_, LIMB_COUNT>,
+    ring_degree: usize,
+) -> Vec<Vec<[u64; LIMB_COUNT]>> {
+    (0..carry_range_lookup::table_count(ring_degree))
+        .map(|table_index| {
+            let values = carry_range_lookup::table_values(parameters, ring_degree, table_index);
+            trace_domain.interpolate(&values)
+        })
+        .collect()
+}
+
+// Build the support constraint polynomials in a fixed order shared by prover and
+// verifier: ternary, then per digit [eta-2 x3, lookup fraction pin], then the
+// table fraction pins. The fraction pins are the logUp relation
+// `(mu - value) * fraction - multiplicity = 0` (multiplicity is the implicit 1
+// for a looked-up carry).
 fn support_constraints<const LIMB_COUNT: usize>(
     parameters: &ProofFieldParameters<LIMB_COUNT>,
     ring_degree: usize,
     digit_count: usize,
-    columns: &[Vec<[u64; LIMB_COUNT]>],
+    base_columns: &[Vec<[u64; LIMB_COUNT]>],
+    aux_columns: &[Vec<[u64; LIMB_COUNT]>],
+    table_polynomials: &[Vec<[u64; LIMB_COUNT]>],
+    challenge: &[u64; LIMB_COUNT],
 ) -> Vec<Vec<[u64; LIMB_COUNT]>> {
-    let bit_count = carry_bit_count(ring_degree);
     let one = vec![parameters.one()];
     let four = vec![parameters.unsigned_word_to_element(4)];
-    let shift = vec![parameters.unsigned_word_to_element((ring_degree + 1) as u64)];
-    let secret = &columns[COLUMN_SECRET];
-    let secret_square = &columns[COLUMN_SECRET_SQUARE];
+    let shift = parameters.unsigned_word_to_element((ring_degree + 1) as u64);
+    let challenge_minus_shift = vec![parameters.subtract(challenge, &shift)];
+    let challenge_constant = vec![*challenge];
+    let secret = &base_columns[COLUMN_SECRET];
+    let secret_square = &base_columns[COLUMN_SECRET_SQUARE];
 
     let mut constraints = Vec::new();
     // Ternary: Ssq - S*S, S*(Ssq-1).
@@ -369,10 +502,10 @@ fn support_constraints<const LIMB_COUNT: usize>(
         &polynomial::subtract(parameters, secret_square, &one),
     ));
     for digit in 0..digit_count {
-        let error = &columns[digit_column(ring_degree, digit, DIGIT_ERROR)];
-        let carry = &columns[digit_column(ring_degree, digit, DIGIT_CARRY)];
-        let error_square = &columns[digit_column(ring_degree, digit, DIGIT_ERROR_SQUARE)];
-        let error_support = &columns[digit_column(ring_degree, digit, DIGIT_ERROR_SUPPORT)];
+        let error = &base_columns[digit_column(digit, DIGIT_ERROR)];
+        let carry = &base_columns[digit_column(digit, DIGIT_CARRY)];
+        let error_square = &base_columns[digit_column(digit, DIGIT_ERROR_SQUARE)];
+        let error_support = &base_columns[digit_column(digit, DIGIT_ERROR_SUPPORT)];
         // eta-2: Wsq - E*E, Pcol - (Wsq-1)(Wsq-4), E*Pcol.
         constraints.push(polynomial::subtract(
             parameters,
@@ -393,46 +526,58 @@ fn support_constraints<const LIMB_COUNT: usize>(
             error,
             error_support,
         ));
-        // range: each bit b in {0,1} via b(b-1) = 0, then the binary
-        // reconstruction of the shifted carry.
-        let mut reconstruction = polynomial::add(parameters, carry, &shift);
-        for bit_index in 0..bit_count {
-            let bit = &columns[digit_column(ring_degree, digit, DIGIT_BITS_START + bit_index)];
-            constraints.push(polynomial::multiply_via_ntt(
-                parameters,
-                bit,
-                &polynomial::subtract(parameters, bit, &one),
-            ));
-            let weighted = polynomial::scale(parameters, bit, &power_of_two(parameters, bit_index));
-            reconstruction = polynomial::subtract(parameters, &reconstruction, &weighted);
-        }
-        constraints.push(reconstruction);
+        // lookup fraction pin: (mu - shift - C) * f - 1 = 0.
+        let fraction = &aux_columns[aux_lookup_column(digit)];
+        let denominator = polynomial::subtract(parameters, &challenge_minus_shift, carry);
+        constraints.push(polynomial::subtract(
+            parameters,
+            &polynomial::multiply_via_ntt(parameters, &denominator, fraction),
+            &one,
+        ));
+    }
+    // Table fraction pins: (mu - T_k) * f_T_k - m_k = 0.
+    for (table_index, table_polynomial) in table_polynomials.iter().enumerate() {
+        let fraction = &aux_columns[aux_table_fraction_column(digit_count, table_index)];
+        let multiplicity = &base_columns[base_multiplicity_column(digit_count, table_index)];
+        let denominator = polynomial::subtract(parameters, &challenge_constant, table_polynomial);
+        constraints.push(polynomial::subtract(
+            parameters,
+            &polynomial::multiply_via_ntt(parameters, &denominator, fraction),
+            multiplicity,
+        ));
     }
     constraints
 }
 
-// The support constraint value at one coset point, from opened column values.
+// The support constraint value at one coset point, from opened base and aux
+// values, the public table values evaluated at the point, and the logUp
+// challenge. The constraint order matches `support_constraints`.
+#[allow(clippy::too_many_arguments)]
 fn support_value_at<const LIMB_COUNT: usize>(
     parameters: &ProofFieldParameters<LIMB_COUNT>,
     ring_degree: usize,
     digit_count: usize,
-    values: &[[u64; LIMB_COUNT]],
+    base_values: &[[u64; LIMB_COUNT]],
+    aux_values: &[[u64; LIMB_COUNT]],
+    table_values_at_point: &[[u64; LIMB_COUNT]],
+    challenge: &[u64; LIMB_COUNT],
     alpha: &[[u64; LIMB_COUNT]],
 ) -> [u64; LIMB_COUNT] {
-    let bit_count = carry_bit_count(ring_degree);
     let one = parameters.one();
     let four = parameters.unsigned_word_to_element(4);
-    let secret = values[COLUMN_SECRET];
-    let secret_square = values[COLUMN_SECRET_SQUARE];
+    let shift = parameters.unsigned_word_to_element((ring_degree + 1) as u64);
+    let challenge_minus_shift = parameters.subtract(challenge, &shift);
+    let secret = base_values[COLUMN_SECRET];
+    let secret_square = base_values[COLUMN_SECRET_SQUARE];
 
     let mut constraints = Vec::with_capacity(support_constraint_count(ring_degree, digit_count));
     constraints.push(parameters.subtract(&secret_square, &parameters.multiply(&secret, &secret)));
     constraints.push(parameters.multiply(&secret, &parameters.subtract(&secret_square, &one)));
     for digit in 0..digit_count {
-        let error = values[digit_column(ring_degree, digit, DIGIT_ERROR)];
-        let carry = values[digit_column(ring_degree, digit, DIGIT_CARRY)];
-        let error_square = values[digit_column(ring_degree, digit, DIGIT_ERROR_SQUARE)];
-        let error_support = values[digit_column(ring_degree, digit, DIGIT_ERROR_SUPPORT)];
+        let error = base_values[digit_column(digit, DIGIT_ERROR)];
+        let carry = base_values[digit_column(digit, DIGIT_CARRY)];
+        let error_square = base_values[digit_column(digit, DIGIT_ERROR_SQUARE)];
+        let error_support = base_values[digit_column(digit, DIGIT_ERROR_SUPPORT)];
         constraints.push(parameters.subtract(&error_square, &parameters.multiply(&error, &error)));
         let support_product = parameters.multiply(
             &parameters.subtract(&error_square, &one),
@@ -440,19 +585,19 @@ fn support_value_at<const LIMB_COUNT: usize>(
         );
         constraints.push(parameters.subtract(&error_support, &support_product));
         constraints.push(parameters.multiply(&error, &error_support));
-        let mut reconstruction = parameters.add(
-            &carry,
-            &parameters.unsigned_word_to_element((ring_degree + 1) as u64),
-        );
-        for bit_index in 0..bit_count {
-            let bit = values[digit_column(ring_degree, digit, DIGIT_BITS_START + bit_index)];
-            constraints.push(parameters.multiply(&bit, &parameters.subtract(&bit, &one)));
-            reconstruction = parameters.subtract(
-                &reconstruction,
-                &parameters.multiply(&bit, &power_of_two(parameters, bit_index)),
-            );
-        }
-        constraints.push(reconstruction);
+        // lookup fraction pin: (mu - shift - C) * f - 1.
+        let fraction = aux_values[aux_lookup_column(digit)];
+        let denominator = parameters.subtract(&challenge_minus_shift, &carry);
+        constraints.push(parameters.subtract(&parameters.multiply(&denominator, &fraction), &one));
+    }
+    for (table_index, table_value) in table_values_at_point.iter().enumerate() {
+        let fraction = aux_values[aux_table_fraction_column(digit_count, table_index)];
+        let multiplicity = base_values[base_multiplicity_column(digit_count, table_index)];
+        let denominator = parameters.subtract(challenge, table_value);
+        constraints.push(parameters.subtract(
+            &parameters.multiply(&denominator, &fraction),
+            &multiplicity,
+        ));
     }
 
     let mut value = parameters.zero();
@@ -529,14 +674,17 @@ fn combined_forms<const LIMB_COUNT: usize>(
 fn combination_at<const LIMB_COUNT: usize>(
     parameters: &ProofFieldParameters<LIMB_COUNT>,
     base_values: &[[u64; LIMB_COUNT]],
+    aux_values: &[[u64; LIMB_COUNT]],
     quotient_values: &[[u64; LIMB_COUNT]],
     weights: &[[u64; LIMB_COUNT]],
 ) -> [u64; LIMB_COUNT] {
     let mut value = parameters.zero();
-    for (weight, column_value) in weights
-        .iter()
-        .zip(base_values.iter().chain(quotient_values.iter()))
-    {
+    for (weight, column_value) in weights.iter().zip(
+        base_values
+            .iter()
+            .chain(aux_values.iter())
+            .chain(quotient_values.iter()),
+    ) {
         value = parameters.add(&value, &parameters.multiply(weight, column_value));
     }
     value
@@ -601,6 +749,9 @@ pub(super) fn prove_key_fri<const LIMB_COUNT: usize>(
     let offset = coset_offset(parameters);
     let negacyclic = NegacyclicDomain::new(parameters, ring_degree)?;
 
+    let table_count = carry_range_lookup::table_count(ring_degree);
+
+    // Round 1: witness columns plus the carry-range multiplicity columns.
     let base_coefficients = build_base_columns(
         parameters,
         &trace_domain,
@@ -621,6 +772,42 @@ pub(super) fn prove_key_fri<const LIMB_COUNT: usize>(
     transcript.absorb_digest("key-base-root", &base_commitment.root());
     let gamma = transcript.challenge_field_elements(parameters, "key-gamma", ring_degree);
     let delta = transcript.challenge_field_elements(parameters, "key-delta", digit_count);
+    let lookup_challenge = transcript.challenge_field_elements(parameters, "key-lookup-mu", 1);
+    let mu = lookup_challenge[0];
+
+    // Round 2: the logUp fraction columns, which depend on `mu`. The lookup and
+    // table terminals are computed here and bound into the transcript.
+    let multiplicity_values = carry_multiplicity_values(parameters, ring_degree, digits);
+    let aux = build_aux_columns(
+        parameters,
+        &trace_domain,
+        ring_degree,
+        digits,
+        &multiplicity_values,
+        &mu,
+        proof_parameters.mask_degree,
+        salt_seed,
+    )?;
+    let aux_codewords = aux
+        .coefficients
+        .iter()
+        .map(|c| coset_evaluate_coefficients(&coset_domain, &offset, c))
+        .collect::<Vec<_>>();
+    let aux_commitment = ColumnCommitment::commit(aux_codewords, salt_seed)?;
+    transcript.absorb_digest("key-aux-root", &aux_commitment.root());
+    transcript.absorb_field_elements("key-lookup-terminal", &[aux.lookup_terminal]);
+    transcript.absorb_field_elements("key-table-terminals", &aux.table_terminals);
+
+    // Batching challenges: one for the lookup terminal, one per table terminal,
+    // folded into the single sumcheck; and the support-constraint weights.
+    let sum_batch =
+        transcript.challenge_field_elements(parameters, "key-sum-batch", 1 + table_count);
+    let alpha = transcript.challenge_field_elements(
+        parameters,
+        "key-support-alpha",
+        support_constraint_count(ring_degree, digit_count),
+    );
+
     let forms = combined_forms(
         parameters,
         &negacyclic,
@@ -630,13 +817,9 @@ pub(super) fn prove_key_fri<const LIMB_COUNT: usize>(
         &gamma,
         &delta,
     );
-    let alpha = transcript.challenge_field_elements(
-        parameters,
-        "key-support-alpha",
-        support_constraint_count(ring_degree, digit_count),
-    );
 
-    // Sumcheck: f = Ls*S + sum_j (Le_j*E_j + Lc_j*C_j).
+    // Sumcheck: f = Ls*S + sum_j (Le_j*E_j + Lc_j*C_j) plus the batched logUp
+    // fraction sums, whose target folds in the committed terminals.
     let ls = trace_domain.interpolate(&forms.secret);
     let mut f = polynomial::multiply_via_ntt(parameters, &ls, &base_coefficients[COLUMN_SECRET]);
     for digit in 0..digit_count {
@@ -648,7 +831,7 @@ pub(super) fn prove_key_fri<const LIMB_COUNT: usize>(
             &polynomial::multiply_via_ntt(
                 parameters,
                 &le,
-                &base_coefficients[digit_column(ring_degree, digit, DIGIT_ERROR)],
+                &base_coefficients[digit_column(digit, DIGIT_ERROR)],
             ),
         );
         f = polynomial::add(
@@ -657,10 +840,44 @@ pub(super) fn prove_key_fri<const LIMB_COUNT: usize>(
             &polynomial::multiply_via_ntt(
                 parameters,
                 &lc,
-                &base_coefficients[digit_column(ring_degree, digit, DIGIT_CARRY)],
+                &base_coefficients[digit_column(digit, DIGIT_CARRY)],
             ),
         );
     }
+    let lookup_weight = sum_batch[0];
+    for digit in 0..digit_count {
+        f = polynomial::add(
+            parameters,
+            &f,
+            &polynomial::scale(
+                parameters,
+                &aux.coefficients[aux_lookup_column(digit)],
+                &lookup_weight,
+            ),
+        );
+    }
+    for table_index in 0..table_count {
+        f = polynomial::add(
+            parameters,
+            &f,
+            &polynomial::scale(
+                parameters,
+                &aux.coefficients[aux_table_fraction_column(digit_count, table_index)],
+                &sum_batch[1 + table_index],
+            ),
+        );
+    }
+    let mut target = parameters.add(
+        &forms.target,
+        &parameters.multiply(&lookup_weight, &aux.lookup_terminal),
+    );
+    for table_index in 0..table_count {
+        target = parameters.add(
+            &target,
+            &parameters.multiply(&sum_batch[1 + table_index], &aux.table_terminals[table_index]),
+        );
+    }
+
     let vanishing = vanishing_polynomial(parameters, layout.trace_size);
     let q_sc = polynomial::divide_by_vanishing(parameters, &f, layout.trace_size);
     let mut remainder = polynomial::subtract(
@@ -671,7 +888,7 @@ pub(super) fn prove_key_fri<const LIMB_COUNT: usize>(
     polynomial::trim(&mut remainder);
     let size_inverse =
         parameters.inverse(&parameters.unsigned_word_to_element(layout.trace_size as u64));
-    let target_over_size = parameters.multiply(&forms.target, &size_inverse);
+    let target_over_size = parameters.multiply(&target, &size_inverse);
     let remainder_constant = remainder
         .first()
         .copied()
@@ -690,8 +907,18 @@ pub(super) fn prove_key_fri<const LIMB_COUNT: usize>(
         vec![parameters.zero()]
     };
 
-    // Support: V = sum alpha_i constraint_i, vanishing on H.
-    let constraints = support_constraints(parameters, ring_degree, digit_count, &base_coefficients);
+    // Support: V = sum alpha_i constraint_i, vanishing on H (ternary, eta-2, and
+    // the logUp fraction pins).
+    let table_polynomials = table_value_polynomials(parameters, &trace_domain, ring_degree);
+    let constraints = support_constraints(
+        parameters,
+        ring_degree,
+        digit_count,
+        &base_coefficients,
+        &aux.coefficients,
+        &table_polynomials,
+        &mu,
+    );
     let mut v = vec![parameters.zero()];
     for (weight, constraint) in alpha.iter().zip(constraints.iter()) {
         v = polynomial::add(
@@ -714,6 +941,7 @@ pub(super) fn prove_key_fri<const LIMB_COUNT: usize>(
         return Err(invalid_key("support constraints do not vanish on H"));
     }
 
+    // Round 3: quotients.
     let mut quotient_coefficients = vec![Vec::new(); QUOTIENT_COLUMN_COUNT];
     quotient_coefficients[QUOTIENT_SUMCHECK] = q_sc;
     quotient_coefficients[QUOTIENT_G] = g;
@@ -726,24 +954,39 @@ pub(super) fn prove_key_fri<const LIMB_COUNT: usize>(
     transcript.absorb_digest("key-quotient-root", &quotient_commitment.root());
 
     let base_count = base_commitment.column_count();
+    let aux_count = aux_commitment.column_count();
     let weights = transcript.challenge_field_elements(
         parameters,
         "key-combination",
-        base_count + QUOTIENT_COLUMN_COUNT,
+        base_count + aux_count + QUOTIENT_COLUMN_COUNT,
     );
 
-    // Combination codeword: weighted sum of every committed column's codeword.
+    // Combination codeword: weighted sum of every committed column's codeword,
+    // across all three commitment rounds.
     let mut combination = vec![parameters.zero(); layout.coset_size];
-    for (column, weight) in weights.iter().take(base_count).enumerate() {
+    let mut weight_index = 0;
+    for column in 0..base_count {
+        let weight = weights[weight_index];
+        weight_index += 1;
         for (slot, index) in combination.iter_mut().zip(0..layout.coset_size) {
             *slot = parameters.add(
                 slot,
-                &parameters.multiply(weight, &base_commitment.value(column, index)),
+                &parameters.multiply(&weight, &base_commitment.value(column, index)),
+            );
+        }
+    }
+    for column in 0..aux_count {
+        let weight = weights[weight_index];
+        weight_index += 1;
+        for (slot, index) in combination.iter_mut().zip(0..layout.coset_size) {
+            *slot = parameters.add(
+                slot,
+                &parameters.multiply(&weight, &aux_commitment.value(column, index)),
             );
         }
     }
     for (quotient, codeword) in quotient_codewords.iter().enumerate() {
-        let weight = weights[base_count + quotient];
+        let weight = weights[base_count + aux_count + quotient];
         for (slot, value) in combination.iter_mut().zip(codeword.iter()) {
             *slot = parameters.add(slot, &parameters.multiply(&weight, value));
         }
@@ -771,14 +1014,19 @@ pub(super) fn prove_key_fri<const LIMB_COUNT: usize>(
         open_indices.push(folded + half);
     }
     let base_opening = base_commitment.open(&open_indices);
+    let aux_opening = aux_commitment.open(&open_indices);
     let quotient_opening = quotient_commitment.open(&open_indices);
 
     Ok(KeyFriProof {
         base_root: base_commitment.root(),
+        aux_root: aux_commitment.root(),
         quotient_root: quotient_commitment.root(),
         fri,
         base_opening,
+        aux_opening,
         quotient_opening,
+        lookup_terminal: aux.lookup_terminal,
+        table_terminals: aux.table_terminals,
     })
 }
 
@@ -816,13 +1064,44 @@ pub(super) fn verify_key_fri<const LIMB_COUNT: usize>(
     let coset_domain = CyclicDomain::new(parameters, layout.coset_size)?;
     let offset = coset_offset(parameters);
     let negacyclic = NegacyclicDomain::new(parameters, ring_degree)?;
+    let table_count = carry_range_lookup::table_count(ring_degree);
     let base_count = base_column_count(ring_degree, digit_count);
+    let aux_count = aux_column_count(ring_degree, digit_count);
+
+    // The logUp terminals in the proof must be shaped for this key, and the
+    // cross-check `lookup = sum_k table_k` must hold before any query work.
+    if proof.table_terminals.len() != table_count {
+        return Ok(false);
+    }
+    let table_terminal_sum = proof
+        .table_terminals
+        .iter()
+        .fold(parameters.zero(), |sum, terminal| {
+            parameters.add(&sum, terminal)
+        });
+    if table_terminal_sum != proof.lookup_terminal {
+        return Ok(false);
+    }
 
     let mut transcript = Transcript::new(PROTOCOL_LABEL);
     absorb_public(&mut transcript, ring_degree, public, source);
     transcript.absorb_digest("key-base-root", &proof.base_root);
     let gamma = transcript.challenge_field_elements(parameters, "key-gamma", ring_degree);
     let delta = transcript.challenge_field_elements(parameters, "key-delta", digit_count);
+    let lookup_challenge = transcript.challenge_field_elements(parameters, "key-lookup-mu", 1);
+    let mu = lookup_challenge[0];
+
+    transcript.absorb_digest("key-aux-root", &proof.aux_root);
+    transcript.absorb_field_elements("key-lookup-terminal", &[proof.lookup_terminal]);
+    transcript.absorb_field_elements("key-table-terminals", &proof.table_terminals);
+    let sum_batch =
+        transcript.challenge_field_elements(parameters, "key-sum-batch", 1 + table_count);
+    let alpha = transcript.challenge_field_elements(
+        parameters,
+        "key-support-alpha",
+        support_constraint_count(ring_degree, digit_count),
+    );
+
     let forms = combined_forms(
         parameters,
         &negacyclic,
@@ -832,16 +1111,12 @@ pub(super) fn verify_key_fri<const LIMB_COUNT: usize>(
         &gamma,
         &delta,
     );
-    let alpha = transcript.challenge_field_elements(
-        parameters,
-        "key-support-alpha",
-        support_constraint_count(ring_degree, digit_count),
-    );
+
     transcript.absorb_digest("key-quotient-root", &proof.quotient_root);
     let weights = transcript.challenge_field_elements(
         parameters,
         "key-combination",
-        base_count + QUOTIENT_COLUMN_COUNT,
+        base_count + aux_count + QUOTIENT_COLUMN_COUNT,
     );
 
     let fri_parameters = FriParameters {
@@ -876,6 +1151,14 @@ pub(super) fn verify_key_fri<const LIMB_COUNT: usize>(
     ) else {
         return Ok(false);
     };
+    let Some(aux_rows) = verify_column_opening(
+        &proof.aux_root,
+        layout.coset_size,
+        aux_count,
+        &proof.aux_opening,
+    ) else {
+        return Ok(false);
+    };
     let Some(quotient_rows) = verify_column_opening(
         &proof.quotient_root,
         layout.coset_size,
@@ -885,7 +1168,8 @@ pub(super) fn verify_key_fri<const LIMB_COUNT: usize>(
         return Ok(false);
     };
 
-    // Public linear-form polynomials over H.
+    // Public linear-form polynomials over H, plus the public table value
+    // polynomials for the fraction-pin support constraints.
     let ls = trace_domain.interpolate(&forms.secret);
     let le_by_digit: Vec<Vec<[u64; LIMB_COUNT]>> = forms
         .error_by_digit
@@ -897,9 +1181,21 @@ pub(super) fn verify_key_fri<const LIMB_COUNT: usize>(
         .iter()
         .map(|form| trace_domain.interpolate(form))
         .collect();
+    let table_polynomials = table_value_polynomials(parameters, &trace_domain, ring_degree);
     let size_inverse =
         parameters.inverse(&parameters.unsigned_word_to_element(layout.trace_size as u64));
-    let target_over_size = parameters.multiply(&forms.target, &size_inverse);
+    // Combined sumcheck target: the atom target plus the batched logUp terminals.
+    let mut target = parameters.add(
+        &forms.target,
+        &parameters.multiply(&sum_batch[0], &proof.lookup_terminal),
+    );
+    for table_index in 0..table_count {
+        target = parameters.add(
+            &target,
+            &parameters.multiply(&sum_batch[1 + table_index], &proof.table_terminals[table_index]),
+        );
+    }
+    let target_over_size = parameters.multiply(&target, &size_inverse);
 
     let half = layout.coset_size / 2;
     for (query_index, &position) in query_positions.iter().enumerate() {
@@ -917,16 +1213,22 @@ pub(super) fn verify_key_fri<const LIMB_COUNT: usize>(
             let Some(base_values) = base_rows.get(&index) else {
                 return Ok(false);
             };
+            let Some(aux_values) = aux_rows.get(&index) else {
+                return Ok(false);
+            };
             let Some(quotient_values) = quotient_rows.get(&index) else {
                 return Ok(false);
             };
-            if combination_at(parameters, base_values, quotient_values, &weights) != expected {
+            if combination_at(parameters, base_values, aux_values, quotient_values, &weights)
+                != expected
+            {
                 return Ok(false);
             }
             let x = parameters.multiply(&offset, &coset_domain.point(index));
             let vanishing_x = polynomial::vanishing_at(parameters, &x, layout.trace_size);
 
-            // Sumcheck: f(x) = target/m + x g(x) + Z_H(x) q_sc(x).
+            // Sumcheck: f(x) = target/m + x g(x) + Z_H(x) q_sc(x), where f folds
+            // in the batched logUp fraction columns.
             let mut f_x = parameters.multiply(
                 &polynomial::evaluate(parameters, &ls, &x),
                 &base_values[COLUMN_SECRET],
@@ -936,16 +1238,25 @@ pub(super) fn verify_key_fri<const LIMB_COUNT: usize>(
                 let lc_x = polynomial::evaluate(parameters, &lc_by_digit[digit], &x);
                 f_x = parameters.add(
                     &f_x,
-                    &parameters.multiply(
-                        &le_x,
-                        &base_values[digit_column(ring_degree, digit, DIGIT_ERROR)],
-                    ),
+                    &parameters.multiply(&le_x, &base_values[digit_column(digit, DIGIT_ERROR)]),
                 );
                 f_x = parameters.add(
                     &f_x,
+                    &parameters.multiply(&lc_x, &base_values[digit_column(digit, DIGIT_CARRY)]),
+                );
+            }
+            for digit in 0..digit_count {
+                f_x = parameters.add(
+                    &f_x,
+                    &parameters.multiply(&sum_batch[0], &aux_values[aux_lookup_column(digit)]),
+                );
+            }
+            for table_index in 0..table_count {
+                f_x = parameters.add(
+                    &f_x,
                     &parameters.multiply(
-                        &lc_x,
-                        &base_values[digit_column(ring_degree, digit, DIGIT_CARRY)],
+                        &sum_batch[1 + table_index],
+                        &aux_values[aux_table_fraction_column(digit_count, table_index)],
                     ),
                 );
             }
@@ -960,8 +1271,22 @@ pub(super) fn verify_key_fri<const LIMB_COUNT: usize>(
                 return Ok(false);
             }
 
-            // Support: V(x) = Z_H(x) q_support(x).
-            let v_x = support_value_at(parameters, ring_degree, digit_count, base_values, &alpha);
+            // Support: V(x) = Z_H(x) q_support(x), with the table value
+            // polynomials evaluated at x for the fraction pins.
+            let table_values_at_point: Vec<[u64; LIMB_COUNT]> = table_polynomials
+                .iter()
+                .map(|table_polynomial| polynomial::evaluate(parameters, table_polynomial, &x))
+                .collect();
+            let v_x = support_value_at(
+                parameters,
+                ring_degree,
+                digit_count,
+                base_values,
+                aux_values,
+                &table_values_at_point,
+                &mu,
+                &alpha,
+            );
             if v_x != parameters.multiply(&vanishing_x, &quotient_values[QUOTIENT_SUPPORT]) {
                 return Ok(false);
             }
@@ -1148,12 +1473,14 @@ mod tests {
 
     #[test]
     fn out_of_range_carry_is_rejected() {
-        // A carry outside the range the decomposition represents, with the
-        // component rebuilt so the congruence still holds: the range digits
-        // cannot reconstruct the shifted carry, so the reconstruction support
-        // constraint fails and the prover (or verifier) rejects. This guards the
-        // carry-range decomposition against silently admitting a carry large
-        // enough to break the field no-wrap exactness bound.
+        // A carry outside `|c| <= N+1`, with the component rebuilt so the
+        // congruence still holds: the shifted carry is not a value in the logUp
+        // range table, so its lookup fraction has no matching table term and the
+        // multiset balance (the sumcheck-bound terminals plus their cross-check)
+        // fails, so the prover or verifier rejects. This guards the carry range
+        // against silently admitting a carry large enough to break the field
+        // no-wrap exactness bound - the exact failure the reverted base-4
+        // decomposition had.
         use super::super::super::negacyclic_transform::NegacyclicDomain;
         let parameters = sixteen_limb_group_field_parameters();
         let ring_degree = 64;
@@ -1276,6 +1603,68 @@ mod tests {
                 "a wrong shared secret must not yield an accepted key proof"
             ),
         }
+    }
+
+    #[test]
+    fn tampered_lookup_terminal_is_rejected() {
+        // The lookup terminal is bound to the committed fraction columns by the
+        // batched sumcheck and cross-checked against the table terminals. Any
+        // change (the verifier also re-absorbs it into the transcript) breaks
+        // acceptance.
+        let parameters = sixteen_limb_group_field_parameters();
+        let ring_degree = 64;
+        let (secret, digits, public) = synthetic_key(ring_degree, 4);
+        let proof_parameters = KeyFriProofParameters {
+            query_count: 40,
+            mask_degree: 0,
+        };
+        let mut salt_seed = 0xc0ffee;
+        let mut proof = prove_round_one_key_fri(
+            &parameters,
+            ring_degree,
+            &public,
+            &secret,
+            &digits,
+            &proof_parameters,
+            &mut salt_seed,
+        )
+        .expect("prove");
+        proof.lookup_terminal = parameters.add(&proof.lookup_terminal, &parameters.one());
+        assert!(
+            !verify_round_one_key_fri(&parameters, ring_degree, &public, &proof, &proof_parameters)
+                .expect("verify"),
+            "a tampered lookup terminal must not verify"
+        );
+    }
+
+    #[test]
+    fn tampered_table_terminal_is_rejected() {
+        // Tampering one table terminal breaks the lookup/table cross-check and
+        // the sumcheck binding.
+        let parameters = sixteen_limb_group_field_parameters();
+        let ring_degree = 64;
+        let (secret, digits, public) = synthetic_key(ring_degree, 4);
+        let proof_parameters = KeyFriProofParameters {
+            query_count: 40,
+            mask_degree: 0,
+        };
+        let mut salt_seed = 0xbadf00d;
+        let mut proof = prove_round_one_key_fri(
+            &parameters,
+            ring_degree,
+            &public,
+            &secret,
+            &digits,
+            &proof_parameters,
+            &mut salt_seed,
+        )
+        .expect("prove");
+        proof.table_terminals[0] = parameters.add(&proof.table_terminals[0], &parameters.one());
+        assert!(
+            !verify_round_one_key_fri(&parameters, ring_degree, &public, &proof, &proof_parameters)
+                .expect("verify"),
+            "a tampered table terminal must not verify"
+        );
     }
 
     // The forward automorphism image phi_g(s): s(X) -> s(X^g), as a length-N

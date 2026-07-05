@@ -1,48 +1,22 @@
 //! Ignored gate benchmark for the atom family backend: measures per-key
-//! round-one prove/verify wall time and an estimated serialized proof size at
-//! development-and-above ring degrees that fit the field's 65536 two-adic order
-//! without column splitting (`N <= 8192`, since the coset is `8N`).
+//! round-one prove/verify wall time and the canonically serialized proof size
+//! (via the proof-bytes codec) at development-and-above ring degrees. With the
+//! two-adic ceiling raised to `2^20` the first profile `N = 32768` runs unsplit
+//! (coset `8N = 2^18`), so all three measured degrees use one column set.
 //!
 //! Run with:
 //! `cargo test -p sealed-lattice-kernel --release --lib
 //!  family_backend::bench::round_one_key_prover_cost -- --ignored --nocapture`
 //!
-//! This is native development measurement only, at unsplit ring degrees. It is
-//! not full-profile (`N = 32768`) evidence, not browser or WASM evidence, and
-//! not supported-phone evidence. Full-profile sizing needs the column split
-//! recorded in the family-implementation decision record.
+//! This is native development measurement only. It is not browser or WASM
+//! evidence, and not supported-phone evidence.
 
 use super::super::proof_field::sixteen_limb_group_field_parameters;
 use super::key_proof::{
-    DigitPublic, DigitWitness, KeyFriProof, KeyFriProofParameters, KeyPublic,
-    prove_round_one_key_fri, verify_round_one_key_fri,
+    DigitPublic, DigitWitness, KeyFriProofParameters, KeyPublic, prove_round_one_key_fri,
+    verify_round_one_key_fri,
 };
-
-const LIMB_BYTES: usize = 13 * 8;
-const DIGEST_BYTES: usize = 32;
-
-// A rough serialized-size estimate for one key proof (the codec is a later
-// milestone; this sums the field-element, digest, and salt bytes the proof
-// carries).
-fn estimate_proof_bytes(proof: &KeyFriProof<13>) -> usize {
-    let mut bytes = 2 * DIGEST_BYTES;
-    bytes += proof.fri.layer_roots.len() * DIGEST_BYTES;
-    bytes += proof.fri.final_coefficients.len() * LIMB_BYTES;
-    for answer in &proof.fri.query_answers {
-        for layer in &answer.layers {
-            bytes += 2 * LIMB_BYTES;
-            bytes += layer.value_salt.len() + layer.sibling_salt.len();
-            bytes += layer.opening.authentication_nodes.len() * DIGEST_BYTES;
-        }
-    }
-    for opening in [&proof.base_opening, &proof.quotient_opening] {
-        for row in &opening.rows {
-            bytes += 8 + row.values.len() * LIMB_BYTES + row.salt.len();
-        }
-        bytes += opening.opening.authentication_nodes.len() * DIGEST_BYTES;
-    }
-    bytes
-}
+use super::proof_codec::encode_key_proof;
 
 fn synthetic_key(
     ring_degree: usize,
@@ -132,7 +106,7 @@ fn round_one_key_prover_cost() {
     let digit_count = 16;
     let query_count = 80;
     println!("round-one key ({digit_count} digits, {query_count} queries, mask degree N/4):");
-    for ring_degree in [4096_usize, 8192] {
+    for ring_degree in [4096_usize, 8192, 32768] {
         let proof_parameters = KeyFriProofParameters {
             query_count,
             mask_degree: ring_degree / 4,
@@ -157,9 +131,11 @@ fn round_one_key_prover_cost() {
                 .expect("verify");
         let verify_ms = verify_start.elapsed().as_secs_f64() * 1000.0;
         assert!(accepted, "benchmark proof must verify");
-        let proof_kib = estimate_proof_bytes(&proof) as f64 / 1024.0;
+        let proof_bytes = encode_key_proof(&proof).expect("encode").len();
+        let proof_kib = proof_bytes as f64 / 1024.0;
+        let proof_mib = proof_bytes as f64 / (1024.0 * 1024.0);
         println!(
-            "  N = {ring_degree:5}: prove {prove_ms:9.1} ms, verify {verify_ms:8.1} ms, proof ~{proof_kib:8.1} KiB"
+            "  N = {ring_degree:5}: prove {prove_ms:9.1} ms, verify {verify_ms:8.1} ms, proof {proof_kib:8.1} KiB ({proof_mib:.2} MiB)"
         );
     }
 }

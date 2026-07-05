@@ -1,8 +1,6 @@
 import os from 'node:os';
 
 export const heavyAcceptedSetupTestPattern = 'heavy_accepted_setup';
-export const heavyAcceptedSetupFinalPackageTestPattern =
-    'heavy_accepted_setup_final_package';
 
 export const normalizeRustTestFilter = (filter: string): string => {
     const normalizedSeparators = filter.replace(/\\/gu, '/');

@@ -1,10 +1,10 @@
 use super::*;
 use crate::hashing::hash256;
 
-const LEAF_DOMAIN: &str = "sealed-lattice/setup/trustee-evaluation-key/merkle-leaf-v2";
+const LEAF_DOMAIN: &str = "sealed-lattice/setup/trustee-evaluation-key/merkle-leaf";
 const PHASE_PAIR_LEAF_DOMAIN: &str =
-    "sealed-lattice/setup/trustee-evaluation-key/phase-pair-merkle-leaf-v1";
-const NODE_DOMAIN: &str = "sealed-lattice/setup/trustee-evaluation-key/merkle-node-v2";
+    "sealed-lattice/setup/trustee-evaluation-key/phase-pair-merkle-leaf";
+const NODE_DOMAIN: &str = "sealed-lattice/setup/trustee-evaluation-key/merkle-node";
 
 pub(super) const MERKLE_DIGEST_BYTES: usize = 32;
 pub(super) type MerkleDigest = [u8; MERKLE_DIGEST_BYTES];

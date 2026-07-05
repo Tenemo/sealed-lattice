@@ -15,7 +15,7 @@ pub(in super::super) fn setup_commitment_parameters_value() -> CanonicalResult<V
     Ok(json!({
         "objectType": "BdlopCommitment",
         "objectVersion": 1,
-        "construction": "BDLOP simplified matrix commitment",
+        "construction": "BDLOP matrix commitment",
         "ring": {
             "coefficientRing": "Z_q[X]/(X^N+1)",
             "ringDegree": POLYNOMIAL_DEGREE,

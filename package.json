@@ -23,8 +23,6 @@
         "test:lattigo-oracle": "tsx ./tools/lattigo-oracle/run-lattigo-oracle.ts",
         "test:rust:kernel": "tsx ./tools/ci/run-rust-kernel-tests.ts",
         "test:rust:kernel:accepted-setup": "tsx ./tools/ci/run-rust-kernel-accepted-setup-tests.ts",
-        "test:rust:kernel:accepted-setup:fast": "tsx ./tools/ci/run-rust-kernel-accepted-setup-tests.ts --lane fast",
-        "test:rust:kernel:accepted-setup:final-package": "tsx ./tools/ci/run-rust-kernel-accepted-setup-tests.ts --lane final-package",
         "test:node:fast": "tsx ./tools/ci/run-node-tests.ts fast",
         "test:node:protocol": "tsx ./tools/ci/run-node-tests.ts protocol",
         "test:node:kernel": "tsx ./tools/ci/run-node-tests.ts kernel",

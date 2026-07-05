@@ -33,6 +33,7 @@ pub(crate) mod atom_proof;
 pub(crate) mod atom_reduction;
 #[cfg(test)]
 mod bench;
+pub(crate) mod carry_range_lookup;
 pub(crate) mod column_commitment;
 pub(crate) mod domain;
 pub(crate) mod key_proof;
