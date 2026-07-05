@@ -1,7 +1,7 @@
-use super::*;
-use super::reconstructed::*;
 use super::anchor_transport::*;
+use super::reconstructed::*;
 use super::statement_record::*;
+use super::*;
 
 pub(super) fn verify_same_secret_evidence_sets(
     input: EvidenceSetVerificationInput<'_>,
@@ -363,4 +363,3 @@ pub(super) fn verify_same_secret_proof_byte_binding(
 
     Ok(())
 }
-

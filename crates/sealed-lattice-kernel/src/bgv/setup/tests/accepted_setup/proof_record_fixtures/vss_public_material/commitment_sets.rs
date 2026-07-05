@@ -1,6 +1,6 @@
-use super::*;
-use super::share_linkage::*;
 use super::same_secret_bridge::*;
+use super::share_linkage::*;
+use super::*;
 
 pub(in super::super::super) fn vss_public_coefficient_commitment_set_object(
     package: &serde_json::Value,
@@ -509,4 +509,3 @@ pub(super) fn vss_public_sum_commitment_body(
         "commitmentLimbs": commitment_limbs,
     })
 }
-

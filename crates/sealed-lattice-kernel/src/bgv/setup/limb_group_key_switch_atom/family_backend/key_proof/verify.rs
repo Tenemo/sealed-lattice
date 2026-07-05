@@ -1,5 +1,5 @@
-use super::*;
 use super::constraints::*;
+use super::*;
 
 pub(in super::super) fn verify_round_one_key_fri<const LIMB_COUNT: usize>(
     parameters: &ProofFieldParameters<LIMB_COUNT>,
@@ -73,16 +73,6 @@ pub(in super::super) fn verify_key_fri<const LIMB_COUNT: usize>(
         support_constraint_count(ring_degree, digit_count),
     );
 
-    let forms = combined_forms(
-        parameters,
-        &negacyclic,
-        ring_degree,
-        public,
-        source,
-        &gamma,
-        &delta,
-    );
-
     transcript.absorb_digest("key-quotient-root", &proof.quotient_root);
     let weights = transcript.challenge_field_elements(
         parameters,
@@ -139,31 +129,67 @@ pub(in super::super) fn verify_key_fri<const LIMB_COUNT: usize>(
         return Ok(false);
     };
 
-    // Public linear-form polynomials over H, plus the public table value
-    // polynomials for the fraction-pin support constraints.
-    let ls = trace_domain.interpolate(&forms.secret);
-    let le_by_digit: Vec<Vec<[u64; LIMB_COUNT]>> = forms
-        .error_by_digit
+    // Evaluate every public polynomial once per opened position, streaming the
+    // per-digit linear forms so no all-digit form set is ever resident (at the
+    // full profile that set alone is hundreds of megabytes). Slot `s` holds the
+    // evaluations at the `s`-th opened index.
+    let opened_indices: Vec<usize> = base_rows.keys().copied().collect();
+    let slot_of_index: std::collections::BTreeMap<usize, usize> = opened_indices
         .iter()
-        .map(|form| trace_domain.interpolate(form))
+        .enumerate()
+        .map(|(slot, &index)| (index, slot))
         .collect();
-    let lc_by_digit: Vec<Vec<[u64; LIMB_COUNT]>> = forms
-        .carry_by_digit
+    let x_of_slot: Vec<[u64; LIMB_COUNT]> = opened_indices
         .iter()
-        .map(|form| trace_domain.interpolate(form))
+        .map(|&index| parameters.multiply(&offset, &coset_domain.point(index)))
         .collect();
+    let evaluate_at_slots = |coefficients: &[[u64; LIMB_COUNT]]| -> Vec<[u64; LIMB_COUNT]> {
+        x_of_slot
+            .iter()
+            .map(|x| polynomial::evaluate(parameters, coefficients, x))
+            .collect()
+    };
+
+    let mut error_form_at_slot: Vec<Vec<[u64; LIMB_COUNT]>> = Vec::with_capacity(digit_count);
+    let mut carry_form_at_slot: Vec<Vec<[u64; LIMB_COUNT]>> = Vec::with_capacity(digit_count);
+    let (secret_form, atom_target) = accumulate_forms(
+        parameters,
+        &negacyclic,
+        ring_degree,
+        public,
+        source,
+        &gamma,
+        &delta,
+        |_, forms| {
+            let error_linear = trace_domain.interpolate(&forms.error_form);
+            error_form_at_slot.push(evaluate_at_slots(&error_linear));
+            let carry_linear = trace_domain.interpolate(&forms.carry_form);
+            carry_form_at_slot.push(evaluate_at_slots(&carry_linear));
+            Ok(())
+        },
+    )?;
+    let ls = trace_domain.interpolate(&secret_form);
+    let secret_form_at_slot = evaluate_at_slots(&ls);
     let table_polynomials = table_value_polynomials(parameters, &trace_domain, ring_degree);
+    let table_value_at_slot: Vec<Vec<[u64; LIMB_COUNT]>> = table_polynomials
+        .iter()
+        .map(|table_polynomial| evaluate_at_slots(table_polynomial))
+        .collect();
+
     let size_inverse =
         parameters.inverse(&parameters.unsigned_word_to_element(layout.trace_size as u64));
     // Combined sumcheck target: the atom target plus the batched logUp terminals.
     let mut target = parameters.add(
-        &forms.target,
+        &atom_target,
         &parameters.multiply(&sum_batch[0], &proof.lookup_terminal),
     );
     for table_index in 0..table_count {
         target = parameters.add(
             &target,
-            &parameters.multiply(&sum_batch[1 + table_index], &proof.table_terminals[table_index]),
+            &parameters.multiply(
+                &sum_batch[1 + table_index],
+                &proof.table_terminals[table_index],
+            ),
         );
     }
     let target_over_size = parameters.multiply(&target, &size_inverse);
@@ -190,30 +216,40 @@ pub(in super::super) fn verify_key_fri<const LIMB_COUNT: usize>(
             let Some(quotient_values) = quotient_rows.get(&index) else {
                 return Ok(false);
             };
-            if combination_at(parameters, base_values, aux_values, quotient_values, &weights)
-                != expected
+            let Some(&slot) = slot_of_index.get(&index) else {
+                return Ok(false);
+            };
+            if combination_at(
+                parameters,
+                base_values,
+                aux_values,
+                quotient_values,
+                &weights,
+            ) != expected
             {
                 return Ok(false);
             }
-            let x = parameters.multiply(&offset, &coset_domain.point(index));
+            let x = x_of_slot[slot];
             let vanishing_x = polynomial::vanishing_at(parameters, &x, layout.trace_size);
 
             // Sumcheck: f(x) = target/m + x g(x) + Z_H(x) q_sc(x), where f folds
             // in the batched logUp fraction columns.
-            let mut f_x = parameters.multiply(
-                &polynomial::evaluate(parameters, &ls, &x),
-                &base_values[COLUMN_SECRET],
-            );
+            let mut f_x =
+                parameters.multiply(&secret_form_at_slot[slot], &base_values[COLUMN_SECRET]);
             for digit in 0..digit_count {
-                let le_x = polynomial::evaluate(parameters, &le_by_digit[digit], &x);
-                let lc_x = polynomial::evaluate(parameters, &lc_by_digit[digit], &x);
                 f_x = parameters.add(
                     &f_x,
-                    &parameters.multiply(&le_x, &base_values[digit_column(digit, DIGIT_ERROR)]),
+                    &parameters.multiply(
+                        &error_form_at_slot[digit][slot],
+                        &base_values[digit_column(digit, DIGIT_ERROR)],
+                    ),
                 );
                 f_x = parameters.add(
                     &f_x,
-                    &parameters.multiply(&lc_x, &base_values[digit_column(digit, DIGIT_CARRY)]),
+                    &parameters.multiply(
+                        &carry_form_at_slot[digit][slot],
+                        &base_values[digit_column(digit, DIGIT_CARRY)],
+                    ),
                 );
             }
             for digit in 0..digit_count {
@@ -244,9 +280,9 @@ pub(in super::super) fn verify_key_fri<const LIMB_COUNT: usize>(
 
             // Support: V(x) = Z_H(x) q_support(x), with the table value
             // polynomials evaluated at x for the fraction pins.
-            let table_values_at_point: Vec<[u64; LIMB_COUNT]> = table_polynomials
+            let table_values_at_point: Vec<[u64; LIMB_COUNT]> = table_value_at_slot
                 .iter()
-                .map(|table_polynomial| polynomial::evaluate(parameters, table_polynomial, &x))
+                .map(|values| values[slot])
                 .collect();
             let v_x = support_value_at(
                 parameters,
@@ -266,4 +302,3 @@ pub(in super::super) fn verify_key_fri<const LIMB_COUNT: usize>(
 
     Ok(true)
 }
-

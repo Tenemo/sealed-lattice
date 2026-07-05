@@ -1,5 +1,5 @@
-use super::*;
 use super::statement_record::*;
+use super::*;
 
 pub(super) struct SameSecretProofTransportBinding {
     pub(super) transport_hashes: SetupProofMaterialTransportHashes,
@@ -71,7 +71,9 @@ pub(super) fn transported_same_secret_proof_material_binding(
     })
 }
 
-pub(super) fn verify_transported_same_secret_proof_material_set_header(value: &Value) -> CanonicalResult<()> {
+pub(super) fn verify_transported_same_secret_proof_material_set_header(
+    value: &Value,
+) -> CanonicalResult<()> {
     for (field_name, expected_value) in [
         ("objectType", SAME_SECRET_PROOF_TRANSPORT_SET_OBJECT_TYPE),
         ("proofFamily", SAME_SECRET_PROOF_FAMILY),
@@ -89,7 +91,9 @@ pub(super) fn verify_transported_same_secret_proof_material_set_header(value: &V
     )
 }
 
-pub(super) fn verify_transported_same_secret_proof_material_header(value: &Value) -> CanonicalResult<()> {
+pub(super) fn verify_transported_same_secret_proof_material_header(
+    value: &Value,
+) -> CanonicalResult<()> {
     for (field_name, expected_value) in [
         ("objectType", SAME_SECRET_PROOF_TRANSPORT_OBJECT_TYPE),
         ("proofFamily", SAME_SECRET_PROOF_FAMILY),
@@ -281,4 +285,3 @@ pub(super) fn same_secret_proof_has_transport_reference(proof_record: &Value) ->
     .iter()
     .any(|field_name| proof_record.get(*field_name).is_some())
 }
-

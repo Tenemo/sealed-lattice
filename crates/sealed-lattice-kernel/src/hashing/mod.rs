@@ -87,6 +87,56 @@ pub(crate) fn hash256(domain: &str, parts: &[&[u8]]) -> [u8; 32] {
     output
 }
 
+/// A streaming variant of [`hash256`] producing byte-identical output for the
+/// same domain and parts, without buffering the whole preimage. The caller
+/// declares the part count up front, then either supplies whole framed parts or
+/// opens one part with its byte length and streams its bytes. Used by the atom
+/// family backend's streamed Merkle leaf hashing, where one leaf's row part is
+/// produced one committed column at a time. Test-gated alongside that backend;
+/// the gate comes off when the backend takes over the trustee evaluation-key
+/// command path.
+#[cfg(test)]
+pub(crate) struct StreamingHash256 {
+    hasher: Shake256,
+}
+
+#[cfg(test)]
+impl StreamingHash256 {
+    pub(crate) fn new(domain: &str, part_count: u64) -> Self {
+        const HASH256_PREIMAGE_PREFIX: &[u8] = b"sealed.vote/v1/hash256";
+        let mut hasher = Shake256::default();
+        hasher.update(HASH256_PREIMAGE_PREFIX);
+        update_varuint(&mut hasher, domain.len() as u64);
+        hasher.update(domain.as_bytes());
+        update_varuint(&mut hasher, part_count);
+        Self { hasher }
+    }
+
+    // Absorb one whole length-framed part.
+    pub(crate) fn absorb_part(&mut self, part: &[u8]) {
+        update_varuint(&mut self.hasher, part.len() as u64);
+        self.hasher.update(part);
+    }
+
+    // Open a length-framed part whose bytes will follow through `absorb_raw`.
+    // The caller must then absorb exactly `byte_length` bytes.
+    pub(crate) fn begin_part(&mut self, byte_length: u64) {
+        update_varuint(&mut self.hasher, byte_length);
+    }
+
+    // Absorb raw bytes belonging to the currently open part.
+    pub(crate) fn absorb_raw(&mut self, bytes: &[u8]) {
+        self.hasher.update(bytes);
+    }
+
+    pub(crate) fn finalize(self) -> [u8; 32] {
+        let mut reader = self.hasher.finalize_xof();
+        let mut output = [0_u8; 32];
+        reader.read(&mut output);
+        output
+    }
+}
+
 fn update_varuint(hasher: &mut Shake256, value: u64) {
     for byte in encode_varuint_for_hash(value) {
         hasher.update(&[byte]);

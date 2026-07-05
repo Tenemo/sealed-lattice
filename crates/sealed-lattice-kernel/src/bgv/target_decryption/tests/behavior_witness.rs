@@ -324,4 +324,3 @@ fn target_result_release_requires_proof_backed_quorum() {
     assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
     assert!(error.message.contains("proofStatement"));
 }
-

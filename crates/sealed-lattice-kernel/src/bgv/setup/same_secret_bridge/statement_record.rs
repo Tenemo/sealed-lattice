@@ -1,7 +1,9 @@
-use super::*;
 use super::reconstructed::*;
+use super::*;
 
-pub(super) fn verify_statement_record(input: StatementRecordVerificationInput<'_>) -> CanonicalResult<Value> {
+pub(super) fn verify_statement_record(
+    input: StatementRecordVerificationInput<'_>,
+) -> CanonicalResult<Value> {
     compare_required_string(
         string_at_path(input.statement_record, &["objectType"])?,
         "VssSameSecretBridgeStatement",
@@ -383,7 +385,11 @@ pub(super) fn read_positive_u64_at_path(
     Ok(field)
 }
 
-pub(super) fn compare_required_u64(actual: u64, expected: u64, description: &str) -> CanonicalResult<()> {
+pub(super) fn compare_required_u64(
+    actual: u64,
+    expected: u64,
+    description: &str,
+) -> CanonicalResult<()> {
     if actual != expected {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ComponentMismatch,
@@ -393,4 +399,3 @@ pub(super) fn compare_required_u64(actual: u64, expected: u64, description: &str
 
     Ok(())
 }
-

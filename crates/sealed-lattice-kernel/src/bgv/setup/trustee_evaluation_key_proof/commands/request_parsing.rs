@@ -1,8 +1,10 @@
-use super::*;
-use super::target_decryption_parsing::*;
 use super::decoding::*;
+use super::target_decryption_parsing::*;
+use super::*;
 
-pub(super) fn statement_from_request(request: &Value) -> CanonicalResult<TrusteeEvaluationKeyStatement> {
+pub(super) fn statement_from_request(
+    request: &Value,
+) -> CanonicalResult<TrusteeEvaluationKeyStatement> {
     let context_value = request
         .get("context")
         .ok_or_else(|| invalid_succinct_setup_proof("context must be present"))?;
@@ -439,4 +441,3 @@ pub(super) fn vss_share_linkage_item_from_value(
         recipient_share_commitment,
     })
 }
-

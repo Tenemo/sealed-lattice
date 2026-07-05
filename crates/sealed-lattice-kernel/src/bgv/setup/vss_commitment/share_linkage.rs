@@ -1,5 +1,5 @@
-use super::*;
 use super::readers::*;
+use super::*;
 
 pub(crate) fn verify_vss_share_linkage_statement_request(
     request: &Value,
@@ -815,4 +815,3 @@ pub(super) fn verify_vss_share_linkage_source_statement(
 
     Ok(verified_source_statement)
 }
-

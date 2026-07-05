@@ -1,7 +1,7 @@
-use super::*;
 use super::commitment_sets::*;
-use super::share_linkage::*;
 use super::same_secret_bridge::*;
+use super::share_linkage::*;
+use super::*;
 
 pub(in super::super::super) fn finalize_collective_setup_package(
     mut package: serde_json::Value,

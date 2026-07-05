@@ -1,6 +1,6 @@
-use super::*;
-use super::transport::*;
 use super::material_records::*;
+use super::transport::*;
+use super::*;
 
 pub(in super::super) fn public_key_share_material_uses_transport(material_set: &Value) -> bool {
     material_set.get("materialEncoding").and_then(Value::as_str)
@@ -110,11 +110,12 @@ pub(super) fn verify_transport_public_key_share_material_set(
     Ok((bindings, material_roots))
 }
 
-pub(super) fn public_key_share_material_root_reference(binding: &PublicKeyShareMaterialBinding) -> Value {
+pub(super) fn public_key_share_material_root_reference(
+    binding: &PublicKeyShareMaterialBinding,
+) -> Value {
     json!({
         "trusteeIdentity": binding.trustee_identity,
         "trusteeRosterPosition": binding.trustee_roster_position,
         "publicKeyShareMaterialRoot": binding.public_key_share_material_root,
     })
 }
-

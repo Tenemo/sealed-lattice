@@ -1,6 +1,6 @@
-use super::*;
 use super::commitment_sets::*;
 use super::share_linkage::*;
+use super::*;
 
 pub(in super::super::super) fn same_secret_bridge_statement_set_object(
     package: &serde_json::Value,
@@ -446,4 +446,3 @@ pub(super) fn vss_public_material_fixture_verifies_generated_fields() {
         .expect("generated same-secret bridge proof material set verifies");
     assert_eq!(bridge_proof_verification["ok"], serde_json::json!(true));
 }
-

@@ -56,14 +56,19 @@ fn negacyclic_adjoint<const LIMB_COUNT: usize>(
     adjoint
 }
 
-// The diagonal source shape of one atom.
+// The diagonal source shape of one atom. Round one and Galois contribute
+// `G * source` with the scalar gadget idempotent `G`; round two's `aggregate`
+// is the CENTERED diagonal aggregate term (the CRT recombination of the
+// round-one aggregate placed at the diagonal limb), which already carries the
+// `G` fold, so its contribution is `aggregate (*) s` with no further scaling.
+// Centering before the convolution is what keeps the diagonal term inside the
+// `N * Q/2` no-wrap bound the relation layer derives.
 pub(super) enum AtomSource<'a, const LIMB_COUNT: usize> {
     // Relinearization round one: source = s (identity map).
     RoundOne,
     // Galois rotation: source = phi_g(s), the automorphism s(X) -> s(X^g).
     Galois { galois_element: usize },
-    // Relinearization round two: source = s (*) aggregate, with `aggregate` the
-    // digit's round-one public aggregate as field elements.
+    // Relinearization round two: the centered diagonal aggregate term.
     RoundTwo { aggregate: &'a [[u64; LIMB_COUNT]] },
 }
 
@@ -124,8 +129,9 @@ pub(super) fn reduce_round_one_atom<const LIMB_COUNT: usize>(
 
 // General atom reduction for any source: builds the public linear form for
 // challenge `gamma`. The secret coefficients are `adjoint(A) (*) gamma - G *
-// source_adjoint_image(gamma)`; the error coefficients `-t gamma`; the carry
-// coefficients `-Q gamma`; the target `-<gamma, B>`.
+// source_adjoint_image(gamma)` (round two's aggregate carries the `G` fold
+// already, so its image is not rescaled); the error coefficients `-t gamma`;
+// the carry coefficients `-Q gamma`; the target `-<gamma, B>`.
 pub(super) fn reduce_atom<const LIMB_COUNT: usize>(
     parameters: &ProofFieldParameters<LIMB_COUNT>,
     domain: &NegacyclicDomain<'_, LIMB_COUNT>,
@@ -136,8 +142,13 @@ pub(super) fn reduce_atom<const LIMB_COUNT: usize>(
     let sample_adjoint = negacyclic_adjoint(parameters, public.recombined_sample);
     let mut secret_coefficients = domain.negacyclic_product(&sample_adjoint, challenge);
     let source_image = source_adjoint_image(parameters, domain, source, challenge);
+    let gadget_scales_source = !matches!(source, AtomSource::RoundTwo { .. });
     for (coefficient, image_value) in secret_coefficients.iter_mut().zip(source_image.iter()) {
-        let scaled = parameters.multiply(&public.gadget_idempotent, image_value);
+        let scaled = if gadget_scales_source {
+            parameters.multiply(&public.gadget_idempotent, image_value)
+        } else {
+            *image_value
+        };
         *coefficient = parameters.subtract(coefficient, &scaled);
     }
     let negated_plaintext = parameters.negate(&public.plaintext_modulus);

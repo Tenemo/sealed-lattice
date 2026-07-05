@@ -10,7 +10,7 @@
 //! supplied node so short and padded node lists are both rejected.
 
 use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
-use crate::hashing::hash256;
+use crate::hashing::{StreamingHash256, hash256};
 
 const LEAF_DOMAIN: &str = "sealed-lattice/setup/key-switch-atom/merkle-leaf-v1";
 const NODE_DOMAIN: &str = "sealed-lattice/setup/key-switch-atom/merkle-node-v1";
@@ -35,6 +35,35 @@ pub(super) fn leaf_hash(index: usize, salt: &[u8], row_words: &[u64]) -> MerkleD
         LEAF_DOMAIN,
         &[&(index as u64).to_le_bytes(), salt, &row_bytes],
     )
+}
+
+// A streaming leaf hasher producing output byte-identical to `leaf_hash` while
+// absorbing the row one committed column at a time, so the streamed prover
+// never materializes all column codewords at once. The row byte length (every
+// column's words at this position) is declared up front; the caller must absorb
+// exactly that many word bytes before finalizing.
+pub(super) struct StreamingLeafHasher {
+    inner: StreamingHash256,
+}
+
+impl StreamingLeafHasher {
+    pub(super) fn new(index: usize, salt: &[u8], row_byte_length: u64) -> Self {
+        let mut inner = StreamingHash256::new(LEAF_DOMAIN, 3);
+        inner.absorb_part(&(index as u64).to_le_bytes());
+        inner.absorb_part(salt);
+        inner.begin_part(row_byte_length);
+        Self { inner }
+    }
+
+    pub(super) fn absorb_value_words(&mut self, words: &[u64]) {
+        for word in words {
+            self.inner.absorb_raw(&word.to_le_bytes());
+        }
+    }
+
+    pub(super) fn finalize(self) -> MerkleDigest {
+        self.inner.finalize()
+    }
 }
 
 pub(super) struct MerkleTree {

@@ -25,12 +25,14 @@ use super::super::negacyclic_transform::NegacyclicDomain;
 use super::super::proof_field::ProofFieldParameters;
 use super::atom_reduction::{AtomPublicInputs, AtomSource, reduce_atom};
 use super::carry_range_lookup;
-use super::column_commitment::{ColumnCommitment, ColumnOpening, verify_column_opening};
+use super::column_commitment::{
+    ColumnOpening, StreamedColumnCommitmentBuilder, verify_column_opening,
+};
 use super::domain::{CyclicDomain, coset_evaluate_coefficients, coset_offset};
 use super::low_degree::{
     FriParameters, FriProof, fri_answer, fri_commit, fri_verify_queries, fri_verify_structure,
 };
-use super::merkle::MerkleDigest;
+use super::merkle::{MerkleDigest, sorted_unique_indices};
 use super::polynomial;
 use super::transcript::Transcript;
 use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
@@ -213,12 +215,10 @@ fn layout(ring_degree: usize) -> CanonicalResult<Layout> {
     })
 }
 
-
 mod columns;
 mod constraints;
 mod prove;
 mod verify;
-
 
 pub(super) use prove::{prove_key_fri, prove_round_one_key_fri};
 pub(super) use verify::{verify_key_fri, verify_round_one_key_fri};

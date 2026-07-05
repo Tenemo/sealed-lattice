@@ -1,5 +1,5 @@
-use super::*;
 use super::message_encoding::*;
+use super::*;
 
 #[derive(Clone, Copy)]
 pub(in crate::bgv::setup) struct ProjectionTermsInput<'a> {
@@ -371,4 +371,3 @@ pub(super) fn vss_public_opening_payload_hash(
         &[&bytes],
     ))
 }
-

@@ -1,5 +1,5 @@
-use super::*;
 use super::statement_record::*;
+use super::*;
 
 // Resolved same-secret bridge proof bytes plus the canonical proof
 // record whose root binds them. The embedded form carries the proof bytes as
@@ -375,4 +375,3 @@ pub(super) fn same_secret_bridge_proof_has_transport_reference(proof_record: &Va
     .iter()
     .any(|field_name| proof_record.get(*field_name).is_some())
 }
-

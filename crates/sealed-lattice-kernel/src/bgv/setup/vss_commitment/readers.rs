@@ -1,6 +1,6 @@
-use super::*;
 use super::message_encoding::*;
 use super::sampler::*;
+use super::*;
 
 pub(crate) fn read_vss_public_randomness_by_column(
     value: &Value,
@@ -306,7 +306,11 @@ pub(super) fn validate_vss_public_commitment_role(commitment_role: &str) -> Cano
     }
 }
 
-pub(super) fn compare_required_u64(actual: u64, expected: u64, description: &str) -> CanonicalResult<()> {
+pub(super) fn compare_required_u64(
+    actual: u64,
+    expected: u64,
+    description: &str,
+) -> CanonicalResult<()> {
     if actual != expected {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ComponentMismatch,
@@ -441,4 +445,3 @@ pub(super) fn commitment_coordinate(input: CommitmentCoordinateInput<'_>) -> Can
 
     Ok(accumulator as u64)
 }
-

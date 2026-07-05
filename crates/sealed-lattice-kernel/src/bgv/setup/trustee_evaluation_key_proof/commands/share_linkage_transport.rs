@@ -1,6 +1,6 @@
-use super::*;
-use super::share_linkage_verification::*;
 use super::decoding::*;
+use super::share_linkage_verification::*;
+use super::*;
 
 // Resolved share-linkage proof bytes plus the canonical proof record
 // whose root binds them. The embedded form carries the proof bytes as base64
@@ -411,4 +411,3 @@ pub(super) fn vss_share_linkage_proof_has_transport_reference(proof_record: &Val
     .iter()
     .any(|field_name| proof_record.get(*field_name).is_some())
 }
-

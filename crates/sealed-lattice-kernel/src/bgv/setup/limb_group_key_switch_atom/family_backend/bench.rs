@@ -18,6 +18,70 @@ use super::key_proof::{
 };
 use super::proof_codec::encode_key_proof;
 
+// The process's peak working set (Windows) or high-water RSS (Linux), as a
+// development-only prover peak-memory indicator. Process-wide, so the benchmark
+// must run as the only test in its invocation for the number to mean anything.
+fn peak_memory_bytes() -> Option<u64> {
+    #[cfg(windows)]
+    {
+        #[repr(C)]
+        struct ProcessMemoryCounters {
+            structure_size: u32,
+            page_fault_count: u32,
+            peak_working_set_size: usize,
+            working_set_size: usize,
+            quota_peak_paged_pool_usage: usize,
+            quota_paged_pool_usage: usize,
+            quota_peak_non_paged_pool_usage: usize,
+            quota_non_paged_pool_usage: usize,
+            pagefile_usage: usize,
+            peak_pagefile_usage: usize,
+        }
+        unsafe extern "system" {
+            unsafe fn GetCurrentProcess() -> isize;
+            unsafe fn K32GetProcessMemoryInfo(
+                process: isize,
+                counters: *mut ProcessMemoryCounters,
+                counters_size: u32,
+            ) -> i32;
+        }
+        let mut counters = ProcessMemoryCounters {
+            structure_size: std::mem::size_of::<ProcessMemoryCounters>() as u32,
+            page_fault_count: 0,
+            peak_working_set_size: 0,
+            working_set_size: 0,
+            quota_peak_paged_pool_usage: 0,
+            quota_paged_pool_usage: 0,
+            quota_peak_non_paged_pool_usage: 0,
+            quota_non_paged_pool_usage: 0,
+            pagefile_usage: 0,
+            peak_pagefile_usage: 0,
+        };
+        let succeeded = unsafe {
+            K32GetProcessMemoryInfo(GetCurrentProcess(), &mut counters, counters.structure_size)
+        };
+        if succeeded != 0 {
+            return Some(counters.peak_working_set_size as u64);
+        }
+        None
+    }
+    #[cfg(all(unix, target_os = "linux"))]
+    {
+        let status = std::fs::read_to_string("/proc/self/status").ok()?;
+        for line in status.lines() {
+            if let Some(rest) = line.strip_prefix("VmHWM:") {
+                let kibibytes: u64 = rest.trim().trim_end_matches("kB").trim().parse().ok()?;
+                return Some(kibibytes * 1024);
+            }
+        }
+        None
+    }
+    #[cfg(not(any(windows, all(unix, target_os = "linux"))))]
+    {
+        None
+    }
+}
+
 fn synthetic_key(
     ring_degree: usize,
     digit_count: usize,
@@ -134,8 +198,11 @@ fn round_one_key_prover_cost() {
         let proof_bytes = encode_key_proof(&proof).expect("encode").len();
         let proof_kib = proof_bytes as f64 / 1024.0;
         let proof_mib = proof_bytes as f64 / (1024.0 * 1024.0);
+        let peak = peak_memory_bytes()
+            .map(|bytes| format!("{:.0} MiB", bytes as f64 / (1024.0 * 1024.0)))
+            .unwrap_or_else(|| "unavailable".to_string());
         println!(
-            "  N = {ring_degree:5}: prove {prove_ms:9.1} ms, verify {verify_ms:8.1} ms, proof {proof_kib:8.1} KiB ({proof_mib:.2} MiB)"
+            "  N = {ring_degree:5}: prove {prove_ms:9.1} ms, verify {verify_ms:8.1} ms, proof {proof_kib:8.1} KiB ({proof_mib:.2} MiB), peak memory {peak}"
         );
     }
 }

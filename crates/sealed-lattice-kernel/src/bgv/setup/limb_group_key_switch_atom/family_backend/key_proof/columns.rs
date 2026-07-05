@@ -35,103 +35,268 @@ pub(super) fn masked_coefficients<const LIMB_COUNT: usize>(
     polynomial::add(parameters, coefficients, &mask_multiple)
 }
 
-// Build the round-1 base column coefficient vectors: the shared secret block,
-// the per-digit witness blocks, then one carry-range multiplicity column per
-// table chunk. The multiplicity of each table value is the number of shifted
-// carries equal to it; an out-of-range carry is simply not counted, which makes
-// the logUp balance fail (the sound outcome, exercised by a tamper test).
-pub(super) fn build_base_columns<const LIMB_COUNT: usize>(
-    parameters: &ProofFieldParameters<LIMB_COUNT>,
-    trace_domain: &CyclicDomain<'_, LIMB_COUNT>,
+// Advance the deterministic mask/salt seed by `steps` draws without producing
+// values, mirroring the per-draw LCG in `masked_coefficients`.
+pub(super) fn advance_seed(seed: &mut u64, steps: usize) {
+    for _ in 0..steps {
+        *seed = seed
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+    }
+}
+
+// A deterministic regeneration plan for every committed column. The streamed
+// prover never holds all column coefficient vectors or codewords at once: each
+// column is a pure function of the witness, the logUp challenge, and a
+// per-column mask-seed snapshot, so the commit, sumcheck/support, combination,
+// and opening passes each rebuild exactly the columns they are consuming, and a
+// regenerated column is bit-identical every time. Constructing the plan (and
+// later setting the logUp challenge) advances the caller's seed by exactly the
+// draws the one-shot builders used, so the overall deterministic salt/mask
+// stream is unchanged.
+pub(super) struct KeyColumnPlan<'a, const LIMB_COUNT: usize> {
     ring_degree: usize,
-    secret: &[i64],
-    digits: &[DigitWitness],
     mask_degree: usize,
-    salt_seed: &mut u64,
-) -> CanonicalResult<Vec<Vec<[u64; LIMB_COUNT]>>> {
-    let mut columns = Vec::with_capacity(base_column_count(ring_degree, digits.len()));
+    secret: &'a [i64],
+    digits: &'a [DigitWitness],
+    multiplicity_values: Vec<Vec<[u64; LIMB_COUNT]>>,
+    base_mask_seed_starts: Vec<u64>,
+    lookup_challenge: Option<[u64; LIMB_COUNT]>,
+    aux_mask_seed_starts: Vec<u64>,
+}
 
-    // Shared: S, S^2.
-    let secret_values: Vec<[u64; LIMB_COUNT]> = secret
-        .iter()
-        .map(|v| parameters.signed_word_to_element(*v))
-        .collect();
-    let secret_square_values: Vec<[u64; LIMB_COUNT]> = secret
-        .iter()
-        .map(|v| parameters.signed_word_to_element(v * v))
-        .collect();
-    for values in [&secret_values, &secret_square_values] {
-        let coefficients = trace_domain.interpolate(values);
-        columns.push(masked_coefficients(
-            parameters,
-            &coefficients,
+impl<'a, const LIMB_COUNT: usize> KeyColumnPlan<'a, LIMB_COUNT> {
+    pub(super) fn new(
+        parameters: &ProofFieldParameters<LIMB_COUNT>,
+        ring_degree: usize,
+        mask_degree: usize,
+        secret: &'a [i64],
+        digits: &'a [DigitWitness],
+        salt_seed: &mut u64,
+    ) -> CanonicalResult<Self> {
+        if secret.len() != ring_degree {
+            return Err(invalid_key("secret length does not match ring degree"));
+        }
+        for digit in digits {
+            if digit.error.len() != ring_degree || digit.carry.len() != ring_degree {
+                return Err(invalid_key(
+                    "digit witness length does not match ring degree",
+                ));
+            }
+        }
+        let multiplicity_values = carry_multiplicity_values(parameters, ring_degree, digits);
+        let steps = if mask_degree == 0 { 0 } else { mask_degree + 1 };
+        let base_count = base_column_count(ring_degree, digits.len());
+        let mut base_mask_seed_starts = Vec::with_capacity(base_count);
+        for _ in 0..base_count {
+            base_mask_seed_starts.push(*salt_seed);
+            advance_seed(salt_seed, steps);
+        }
+        Ok(Self {
             ring_degree,
             mask_degree,
-            salt_seed,
-        ));
+            secret,
+            digits,
+            multiplicity_values,
+            base_mask_seed_starts,
+            lookup_challenge: None,
+            aux_mask_seed_starts: Vec::new(),
+        })
     }
 
-    // Per digit: E_j, C_j, E_j^2, Pcol_j.
-    for digit in digits {
-        if digit.error.len() != ring_degree || digit.carry.len() != ring_degree {
-            return Err(invalid_key(
-                "digit witness length does not match ring degree",
-            ));
+    pub(super) fn base_column_count(&self) -> usize {
+        base_column_count(self.ring_degree, self.digits.len())
+    }
+
+    pub(super) fn aux_column_count(&self) -> usize {
+        aux_column_count(self.ring_degree, self.digits.len())
+    }
+
+    // Record the logUp challenge and snapshot the aux columns' mask seeds,
+    // advancing the caller's seed by the aux mask draws.
+    pub(super) fn set_lookup_challenge(
+        &mut self,
+        challenge: [u64; LIMB_COUNT],
+        salt_seed: &mut u64,
+    ) {
+        let steps = if self.mask_degree == 0 {
+            0
+        } else {
+            self.mask_degree + 1
+        };
+        let aux_count = self.aux_column_count();
+        self.aux_mask_seed_starts = Vec::with_capacity(aux_count);
+        for _ in 0..aux_count {
+            self.aux_mask_seed_starts.push(*salt_seed);
+            advance_seed(salt_seed, steps);
         }
-        let error_values: Vec<[u64; LIMB_COUNT]> = digit
-            .error
-            .iter()
-            .map(|v| parameters.signed_word_to_element(*v))
-            .collect();
-        let carry_values: Vec<[u64; LIMB_COUNT]> = digit
-            .carry
-            .iter()
-            .map(|v| parameters.signed_word_to_element(*v))
-            .collect();
-        let error_square_values: Vec<[u64; LIMB_COUNT]> = digit
-            .error
-            .iter()
-            .map(|v| parameters.signed_word_to_element(v * v))
-            .collect();
-        let error_support_values: Vec<[u64; LIMB_COUNT]> = digit
-            .error
-            .iter()
-            .map(|v| {
-                let square = v * v;
-                parameters.signed_word_to_element((square - 1) * (square - 4))
-            })
-            .collect();
-        for values in [
-            &error_values,
-            &carry_values,
-            &error_square_values,
-            &error_support_values,
-        ] {
-            let coefficients = trace_domain.interpolate(values);
-            columns.push(masked_coefficients(
+        self.lookup_challenge = Some(challenge);
+    }
+
+    // The unmasked value column for base column `column` (shared secret block,
+    // per-digit witness blocks, then the carry-range multiplicity columns; the
+    // multiplicity of each table value counts the shifted carries equal to it,
+    // and an out-of-range carry is simply not counted, which makes the logUp
+    // balance fail - the sound outcome, exercised by a tamper test).
+    fn base_value_column(
+        &self,
+        parameters: &ProofFieldParameters<LIMB_COUNT>,
+        column: usize,
+    ) -> Vec<[u64; LIMB_COUNT]> {
+        let digit_count = self.digits.len();
+        let multiplicity_start = base_multiplicity_start(digit_count);
+        if column == COLUMN_SECRET {
+            return self
+                .secret
+                .iter()
+                .map(|v| parameters.signed_word_to_element(*v))
+                .collect();
+        }
+        if column == COLUMN_SECRET_SQUARE {
+            return self
+                .secret
+                .iter()
+                .map(|v| parameters.signed_word_to_element(v * v))
+                .collect();
+        }
+        if column < multiplicity_start {
+            let digit_index = (column - SHARED_COLUMN_COUNT) / DIGIT_BLOCK_SIZE;
+            let offset_in_block = (column - SHARED_COLUMN_COUNT) % DIGIT_BLOCK_SIZE;
+            let digit = &self.digits[digit_index];
+            return match offset_in_block {
+                DIGIT_ERROR => digit
+                    .error
+                    .iter()
+                    .map(|v| parameters.signed_word_to_element(*v))
+                    .collect(),
+                DIGIT_CARRY => digit
+                    .carry
+                    .iter()
+                    .map(|v| parameters.signed_word_to_element(*v))
+                    .collect(),
+                DIGIT_ERROR_SQUARE => digit
+                    .error
+                    .iter()
+                    .map(|v| parameters.signed_word_to_element(v * v))
+                    .collect(),
+                _ => digit
+                    .error
+                    .iter()
+                    .map(|v| {
+                        let square = v * v;
+                        parameters.signed_word_to_element((square - 1) * (square - 4))
+                    })
+                    .collect(),
+            };
+        }
+        self.multiplicity_values[column - multiplicity_start].clone()
+    }
+
+    // The masked coefficient vector for base column `column`, bit-identical on
+    // every regeneration (the mask seed is the per-column snapshot).
+    pub(super) fn base_column_coefficients(
+        &self,
+        parameters: &ProofFieldParameters<LIMB_COUNT>,
+        trace_domain: &CyclicDomain<'_, LIMB_COUNT>,
+        column: usize,
+    ) -> Vec<[u64; LIMB_COUNT]> {
+        let values = self.base_value_column(parameters, column);
+        let coefficients = trace_domain.interpolate(&values);
+        let mut seed = self.base_mask_seed_starts[column];
+        masked_coefficients(
+            parameters,
+            &coefficients,
+            self.ring_degree,
+            self.mask_degree,
+            &mut seed,
+        )
+    }
+
+    // The unmasked logUp fraction value column for aux column `column`: one
+    // lookup fraction column per digit `f_d[x] = 1/(mu - (c_d(x) + shift))`,
+    // then one table fraction column per chunk `f_T_k[x] = m_k(x)/(mu - T_k(x))`.
+    fn aux_value_column(
+        &self,
+        parameters: &ProofFieldParameters<LIMB_COUNT>,
+        column: usize,
+    ) -> CanonicalResult<Vec<[u64; LIMB_COUNT]>> {
+        let challenge = self
+            .lookup_challenge
+            .as_ref()
+            .ok_or_else(|| invalid_key("aux columns requested before the logUp challenge"))?;
+        let digit_count = self.digits.len();
+        if column < digit_count {
+            let shift = carry_range_lookup::carry_shift(self.ring_degree);
+            let shifted_values: Vec<[u64; LIMB_COUNT]> = self.digits[column]
+                .carry
+                .iter()
+                .map(|carry| parameters.signed_word_to_element(carry + shift))
+                .collect();
+            return carry_range_lookup::lookup_fraction_column(
                 parameters,
-                &coefficients,
-                ring_degree,
-                mask_degree,
-                salt_seed,
-            ));
+                challenge,
+                &shifted_values,
+            )
+            .ok_or_else(|| invalid_key("logUp challenge collided with a shifted carry"));
         }
+        let table_index = column - digit_count;
+        let table_values =
+            carry_range_lookup::table_values(parameters, self.ring_degree, table_index);
+        carry_range_lookup::table_fraction_column(
+            parameters,
+            challenge,
+            &table_values,
+            &self.multiplicity_values[table_index],
+        )
+        .ok_or_else(|| invalid_key("logUp challenge collided with a table value"))
     }
 
-    // Carry-range multiplicity columns (one per table chunk).
-    let multiplicity_columns = carry_multiplicity_values(parameters, ring_degree, digits);
-    for multiplicity in &multiplicity_columns {
-        let coefficients = trace_domain.interpolate(multiplicity);
-        columns.push(masked_coefficients(
+    // The masked coefficient vector for aux column `column`.
+    pub(super) fn aux_column_coefficients(
+        &self,
+        parameters: &ProofFieldParameters<LIMB_COUNT>,
+        trace_domain: &CyclicDomain<'_, LIMB_COUNT>,
+        column: usize,
+    ) -> CanonicalResult<Vec<[u64; LIMB_COUNT]>> {
+        let values = self.aux_value_column(parameters, column)?;
+        let coefficients = trace_domain.interpolate(&values);
+        let mut seed = self.aux_mask_seed_starts[column];
+        Ok(masked_coefficients(
             parameters,
             &coefficients,
-            ring_degree,
-            mask_degree,
-            salt_seed,
-        ));
+            self.ring_degree,
+            self.mask_degree,
+            &mut seed,
+        ))
     }
 
-    Ok(columns)
+    // The logUp terminals over the on-domain fraction values (masking is a
+    // `Z_H`-multiple so it does not change on-domain sums): the lookup-side
+    // total and one total per table chunk.
+    pub(super) fn lookup_terminals(
+        &self,
+        parameters: &ProofFieldParameters<LIMB_COUNT>,
+    ) -> CanonicalResult<([u64; LIMB_COUNT], Vec<[u64; LIMB_COUNT]>)> {
+        let digit_count = self.digits.len();
+        let mut lookup_terminal = parameters.zero();
+        for digit in 0..digit_count {
+            let column = self.aux_value_column(parameters, aux_lookup_column(digit))?;
+            lookup_terminal = parameters.add(
+                &lookup_terminal,
+                &carry_range_lookup::column_sum(parameters, &column),
+            );
+        }
+        let table_count = carry_range_lookup::table_count(self.ring_degree);
+        let mut table_terminals = Vec::with_capacity(table_count);
+        for table_index in 0..table_count {
+            let column = self.aux_value_column(
+                parameters,
+                aux_table_fraction_column(digit_count, table_index),
+            )?;
+            table_terminals.push(carry_range_lookup::column_sum(parameters, &column));
+        }
+        Ok((lookup_terminal, table_terminals))
+    }
 }
 
 // The carry-range multiplicity value columns (one per table chunk), counting how
@@ -157,76 +322,3 @@ pub(super) fn carry_multiplicity_values<const LIMB_COUNT: usize>(
     }
     carry_range_lookup::multiplicities(parameters, &shifted_in_range, ring_degree)
 }
-
-// Build the round-2 auxiliary column coefficient vectors (committed after the
-// logUp challenge `mu` is drawn): one lookup fraction column per digit
-// `f_d[x] = 1/(mu - (c_d(x) + shift))`, then one table fraction column per chunk
-// `f_T_k[x] = m_k(x)/(mu - T_k(x))`. Returns the columns together with the logUp
-// terminals (`lookup_terminal = sum_x sum_d f_d`, `table_terminals[k] = sum_x
-// f_T_k`), computed from the on-domain values so masking does not affect them.
-pub(super) struct AuxColumns<const LIMB_COUNT: usize> {
-    pub(super) coefficients: Vec<Vec<[u64; LIMB_COUNT]>>,
-    pub(super) lookup_terminal: [u64; LIMB_COUNT],
-    pub(super) table_terminals: Vec<[u64; LIMB_COUNT]>,
-}
-
-pub(super) fn build_aux_columns<const LIMB_COUNT: usize>(
-    parameters: &ProofFieldParameters<LIMB_COUNT>,
-    trace_domain: &CyclicDomain<'_, LIMB_COUNT>,
-    ring_degree: usize,
-    digits: &[DigitWitness],
-    multiplicity_values: &[Vec<[u64; LIMB_COUNT]>],
-    challenge: &[u64; LIMB_COUNT],
-    mask_degree: usize,
-    salt_seed: &mut u64,
-) -> CanonicalResult<AuxColumns<LIMB_COUNT>> {
-    let shift = carry_range_lookup::carry_shift(ring_degree);
-    let mut coefficients = Vec::with_capacity(aux_column_count(ring_degree, digits.len()));
-    let mut lookup_terminal = parameters.zero();
-
-    // Per-digit lookup fractions.
-    for digit in digits {
-        let shifted_values: Vec<[u64; LIMB_COUNT]> = digit
-            .carry
-            .iter()
-            .map(|carry| parameters.signed_word_to_element(carry + shift))
-            .collect();
-        let fraction = carry_range_lookup::lookup_fraction_column(parameters, challenge, &shifted_values)
-            .ok_or_else(|| invalid_key("logUp challenge collided with a shifted carry"))?;
-        lookup_terminal =
-            parameters.add(&lookup_terminal, &carry_range_lookup::column_sum(parameters, &fraction));
-        let column = trace_domain.interpolate(&fraction);
-        coefficients.push(masked_coefficients(
-            parameters,
-            &column,
-            ring_degree,
-            mask_degree,
-            salt_seed,
-        ));
-    }
-
-    // Table fractions, one per chunk.
-    let mut table_terminals = Vec::with_capacity(multiplicity_values.len());
-    for (table_index, multiplicity) in multiplicity_values.iter().enumerate() {
-        let table_values = carry_range_lookup::table_values(parameters, ring_degree, table_index);
-        let fraction =
-            carry_range_lookup::table_fraction_column(parameters, challenge, &table_values, multiplicity)
-                .ok_or_else(|| invalid_key("logUp challenge collided with a table value"))?;
-        table_terminals.push(carry_range_lookup::column_sum(parameters, &fraction));
-        let column = trace_domain.interpolate(&fraction);
-        coefficients.push(masked_coefficients(
-            parameters,
-            &column,
-            ring_degree,
-            mask_degree,
-            salt_seed,
-        ));
-    }
-
-    Ok(AuxColumns {
-        coefficients,
-        lookup_terminal,
-        table_terminals,
-    })
-}
-

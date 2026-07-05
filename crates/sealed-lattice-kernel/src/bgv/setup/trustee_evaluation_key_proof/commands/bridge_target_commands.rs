@@ -1,7 +1,7 @@
-use super::*;
+use super::decoding::*;
 use super::request_parsing::*;
 use super::target_decryption_parsing::*;
-use super::decoding::*;
+use super::*;
 
 pub(crate) fn generate_same_secret_bridge_proof_from_request(
     request: &Value,
@@ -153,4 +153,3 @@ pub(crate) fn verify_target_decryption_share_proof_bytes_from_request(
 
     Ok(response)
 }
-

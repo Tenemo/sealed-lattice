@@ -239,4 +239,3 @@ pub(super) fn verify_collective_public_key_coefficients(
 
     Ok(())
 }
-

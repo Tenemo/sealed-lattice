@@ -102,7 +102,9 @@ impl PublicKeyShareMaterialByteReader {
     }
 }
 
-pub(super) fn verify_public_key_share_material_transport_header(value: &Value) -> CanonicalResult<()> {
+pub(super) fn verify_public_key_share_material_transport_header(
+    value: &Value,
+) -> CanonicalResult<()> {
     if !value.is_object() {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -377,4 +379,3 @@ pub(super) fn verify_public_key_share_material_set_transport_reference(
         "public-key share material transport reference",
     )
 }
-

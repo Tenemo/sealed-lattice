@@ -1,6 +1,6 @@
-use super::*;
-use super::request_parsing::*;
 use super::decoding::*;
+use super::request_parsing::*;
+use super::*;
 
 pub(super) fn target_decryption_share_statement_from_request(
     request: &Value,
@@ -612,7 +612,9 @@ pub(in crate::bgv::setup) fn vss_share_linkage_commitment_from_value(
     })
 }
 
-pub(super) fn key_descriptor_from_value(key_value: &Value) -> CanonicalResult<EvaluationKeyShareDescriptor> {
+pub(super) fn key_descriptor_from_value(
+    key_value: &Value,
+) -> CanonicalResult<EvaluationKeyShareDescriptor> {
     let kind = match read_string(key_value, "proofFamily")? {
         "relinearization-round-one" => EvaluationKeyShareKind::RelinearizationRoundOne,
         "relinearization-round-two" => EvaluationKeyShareKind::RelinearizationRoundTwo,
@@ -658,4 +660,3 @@ pub(super) fn key_descriptor_from_value(key_value: &Value) -> CanonicalResult<Ev
         round_one_aggregate_diagonal,
     })
 }
-

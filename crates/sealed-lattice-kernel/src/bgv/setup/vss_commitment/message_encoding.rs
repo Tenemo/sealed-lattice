@@ -6,7 +6,9 @@ pub(in crate::bgv::setup) fn vss_public_message_digit_column_label(
     Ok(vss_public_message_digit_column_label_str(digit_index)?.to_string())
 }
 
-pub(super) fn vss_public_message_digit_column_label_str(digit_index: usize) -> CanonicalResult<&'static str> {
+pub(super) fn vss_public_message_digit_column_label_str(
+    digit_index: usize,
+) -> CanonicalResult<&'static str> {
     match digit_index {
         0 => Ok("message:0"),
         1 => Ok("message:1"),
@@ -85,7 +87,9 @@ pub(super) fn vss_public_covered_message_ring_coefficient_index(
         })
 }
 
-pub(super) fn vss_public_randomness_column_label(column_index: usize) -> CanonicalResult<&'static str> {
+pub(super) fn vss_public_randomness_column_label(
+    column_index: usize,
+) -> CanonicalResult<&'static str> {
     match column_index {
         0 => Ok("randomness:0"),
         1 => Ok("randomness:1"),
@@ -319,4 +323,3 @@ pub(in crate::bgv::setup) fn vss_public_message_digit_trits_for_count(
 
     Ok(trits)
 }
-

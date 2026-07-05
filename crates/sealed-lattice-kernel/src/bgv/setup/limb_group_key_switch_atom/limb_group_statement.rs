@@ -203,6 +203,24 @@ impl<const LIMB_COUNT: usize> LimbGroupContext<LIMB_COUNT> {
             .get(group_position)
             .ok_or_else(invalid_diagonal_group_position)
     }
+
+    /// The limb-group modulus `Q` as a proof-field element.
+    pub(crate) fn group_modulus_element(
+        &self,
+        parameters: &ProofFieldParameters<LIMB_COUNT>,
+    ) -> [u64; LIMB_COUNT] {
+        parameters.raw_value_to_element(&self.group_modulus)
+    }
+
+    /// The degree-dependent exactness bound check for this group: the mod-p
+    /// relation equals the integer relation only when `p > 2 (Q (2N + 1) + 4t)`.
+    pub(crate) fn validate_exactness_bound(
+        &self,
+        parameters: &ProofFieldParameters<LIMB_COUNT>,
+        ring_degree: usize,
+    ) -> CanonicalResult<()> {
+        validate_limb_group_exactness_bound(parameters, &self.group_modulus, ring_degree)
+    }
 }
 
 fn invalid_diagonal_group_position() -> CanonicalError {
@@ -433,7 +451,7 @@ fn diagonal_term<const LIMB_COUNT: usize>(
     }
 }
 
-fn validate_signed_support(
+pub(crate) fn validate_signed_support(
     values: &[i64],
     ring_degree: usize,
     bound: i64,

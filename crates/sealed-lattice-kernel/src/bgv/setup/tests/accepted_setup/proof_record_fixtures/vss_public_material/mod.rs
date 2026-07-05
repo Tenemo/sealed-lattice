@@ -25,7 +25,6 @@ pub(in super::super) const SAME_SECRET_BRIDGE_PROOF_CHECKPOINT_DIRECTORY: &str =
 pub(in super::super) const VSS_SHARE_LINKAGE_PROOF_CHECKPOINT_DIRECTORY: &str =
     "vss-share-linkage-proof-material";
 
-
 mod commitment_sets;
 mod finalized_package;
 mod same_secret_bridge;

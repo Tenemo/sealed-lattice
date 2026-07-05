@@ -1,5 +1,5 @@
-use super::*;
 use super::statement_record::*;
+use super::*;
 
 #[derive(Clone, Copy)]
 pub(super) struct StatementSetBinding<'a> {

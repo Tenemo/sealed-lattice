@@ -1,5 +1,5 @@
-use super::*;
 use super::same_secret_bridge::*;
+use super::*;
 
 pub(in super::super::super) fn vss_share_linkage_statement_object(
     package: &serde_json::Value,
@@ -626,4 +626,3 @@ pub(super) fn vss_public_recipient_share_randomness_i64_fixture(
         })
         .collect()
 }
-

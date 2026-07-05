@@ -215,7 +215,10 @@ pub(super) fn read_i64_matrix2(value: &Value, field_name: &str) -> CanonicalResu
         .collect()
 }
 
-pub(super) fn read_optional_i64_matrix2(value: &Value, field_name: &str) -> CanonicalResult<Vec<Vec<i64>>> {
+pub(super) fn read_optional_i64_matrix2(
+    value: &Value,
+    field_name: &str,
+) -> CanonicalResult<Vec<Vec<i64>>> {
     if value.get(field_name).is_some() {
         read_i64_matrix2(value, field_name)
     } else {
@@ -223,7 +226,10 @@ pub(super) fn read_optional_i64_matrix2(value: &Value, field_name: &str) -> Cano
     }
 }
 
-pub(super) fn read_i64_matrix(value: &Value, field_name: &str) -> CanonicalResult<Vec<Vec<Vec<i64>>>> {
+pub(super) fn read_i64_matrix(
+    value: &Value,
+    field_name: &str,
+) -> CanonicalResult<Vec<Vec<Vec<i64>>>> {
     value
         .get(field_name)
         .and_then(Value::as_array)
@@ -296,7 +302,10 @@ pub(super) fn read_u64_matrix(value: &Value, field_name: &str) -> CanonicalResul
         .collect()
 }
 
-pub(super) fn read_u64_matrix3(value: &Value, field_name: &str) -> CanonicalResult<Vec<Vec<Vec<u64>>>> {
+pub(super) fn read_u64_matrix3(
+    value: &Value,
+    field_name: &str,
+) -> CanonicalResult<Vec<Vec<Vec<u64>>>> {
     value
         .get(field_name)
         .and_then(Value::as_array)

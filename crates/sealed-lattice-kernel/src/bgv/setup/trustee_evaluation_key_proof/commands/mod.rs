@@ -205,7 +205,6 @@ pub(crate) fn verify_vss_share_linkage_proof_from_request(
     }))
 }
 
-
 mod bridge_target_commands;
 mod decoding;
 mod request_parsing;
@@ -216,13 +215,13 @@ mod target_decryption_parsing;
 use decoding::*;
 use request_parsing::*;
 
-pub(crate) use share_linkage_verification::verify_vss_share_linkage_proof_material_set_from_request;
+#[cfg(any(test, feature = "target-decryption-development-commands"))]
+pub(crate) use bridge_target_commands::generate_target_decryption_share_proof_bytes_from_request;
 pub(crate) use bridge_target_commands::{
     generate_same_secret_bridge_proof_from_request, verify_same_secret_bridge_proof_from_request,
     verify_target_decryption_share_proof_bytes_from_request,
 };
-#[cfg(any(test, feature = "target-decryption-development-commands"))]
-pub(crate) use bridge_target_commands::generate_target_decryption_share_proof_bytes_from_request;
-pub(in crate::bgv::setup) use target_decryption_parsing::vss_share_linkage_commitment_from_value;
+pub(crate) use share_linkage_verification::verify_vss_share_linkage_proof_material_set_from_request;
 #[cfg(test)]
 pub(crate) use target_decryption_parsing::describe_target_decryption_share_proof_layout_from_request;
+pub(in crate::bgv::setup) use target_decryption_parsing::vss_share_linkage_commitment_from_value;

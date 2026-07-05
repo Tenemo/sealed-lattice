@@ -1,6 +1,6 @@
-use super::*;
-use super::share_linkage_transport::*;
 use super::decoding::*;
+use super::share_linkage_transport::*;
+use super::*;
 
 pub(super) struct VssShareLinkageMaterialRecordStatementInput<'a> {
     pub(super) proof_statement: &'a Value,
@@ -24,7 +24,11 @@ pub(super) struct VssShareLinkagePublicRecordInput<'a> {
     pub(super) item_index: usize,
 }
 
-pub(super) fn compare_string_value(actual: &str, expected: &str, description: &str) -> CanonicalResult<()> {
+pub(super) fn compare_string_value(
+    actual: &str,
+    expected: &str,
+    description: &str,
+) -> CanonicalResult<()> {
     if actual != expected {
         return Err(invalid_succinct_setup_proof(format!(
             "{description} must match"
@@ -34,7 +38,11 @@ pub(super) fn compare_string_value(actual: &str, expected: &str, description: &s
     Ok(())
 }
 
-pub(super) fn compare_u64_value(actual: u64, expected: u64, description: &str) -> CanonicalResult<()> {
+pub(super) fn compare_u64_value(
+    actual: u64,
+    expected: u64,
+    description: &str,
+) -> CanonicalResult<()> {
     if actual != expected {
         return Err(invalid_succinct_setup_proof(format!(
             "{description} must match"
@@ -44,14 +52,19 @@ pub(super) fn compare_u64_value(actual: u64, expected: u64, description: &str) -
     Ok(())
 }
 
-pub(super) fn array_field<'a>(value: &'a Value, field_name: &str) -> CanonicalResult<&'a Vec<Value>> {
+pub(super) fn array_field<'a>(
+    value: &'a Value,
+    field_name: &str,
+) -> CanonicalResult<&'a Vec<Value>> {
     value
         .get(field_name)
         .and_then(Value::as_array)
         .ok_or_else(|| invalid_succinct_setup_proof(format!("{field_name} must be an array")))
 }
 
-pub(super) fn vss_share_linkage_item_values(proof_statement: &Value) -> CanonicalResult<Vec<&Value>> {
+pub(super) fn vss_share_linkage_item_values(
+    proof_statement: &Value,
+) -> CanonicalResult<Vec<&Value>> {
     let mut items = vec![proof_statement];
     match proof_statement.get("additionalLinkageItems") {
         None => {}
@@ -661,4 +674,3 @@ pub(crate) fn verify_vss_share_linkage_proof_material_set_from_request(
         "proofVerificationCount": proof_verification_count,
     }))
 }
-

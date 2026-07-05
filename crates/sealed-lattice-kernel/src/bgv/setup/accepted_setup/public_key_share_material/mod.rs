@@ -306,7 +306,6 @@ pub(super) fn verify_collective_public_key_material(
     Ok(None)
 }
 
-
 mod collective_public_key;
 mod material_records;
 mod material_set;
@@ -314,6 +313,6 @@ mod transport;
 
 use collective_public_key::*;
 
+pub(in crate::bgv::setup) use collective_public_key::accepted_setup_collective_public_key_from_package;
 pub(super) use material_records::verify_public_key_share_material_set;
 pub(super) use material_set::public_key_share_material_uses_transport;
-pub(in crate::bgv::setup) use collective_public_key::accepted_setup_collective_public_key_from_package;

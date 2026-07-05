@@ -184,7 +184,7 @@ pub(super) fn direct_packed_option_slots(slots: &[u64]) -> Vec<u64> {
 
 pub(super) fn direct_ballot_evaluator_working_level(ballot_count: usize) -> usize {
     if ballot_count == 1 {
-        DIRECT_BALLOT_SINGLE_BALLOT_FULL_TARGET_WORKING_LEVEL
+        DIRECT_BALLOT_SINGLE_BALLOT_TARGET_WORKING_LEVEL
     } else {
         DIRECT_BALLOT_DEFAULT_EVALUATOR_WORKING_LEVEL
     }

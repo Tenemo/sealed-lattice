@@ -1,5 +1,5 @@
-use super::*;
 use super::readers::*;
+use super::*;
 
 pub(super) struct VssPublicSourceCoefficientRecordInput<'a> {
     pub(super) source_record: &'a Value,
@@ -601,4 +601,3 @@ pub(super) fn verify_vss_public_aggregate_threshold_record(
         "sourceShareOpeningRoots": verified_source_share_opening_roots,
     }))
 }
-

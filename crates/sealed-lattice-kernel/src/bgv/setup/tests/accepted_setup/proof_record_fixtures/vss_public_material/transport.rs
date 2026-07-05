@@ -1,7 +1,7 @@
-use super::*;
 use super::commitment_sets::*;
-use super::share_linkage::*;
 use super::same_secret_bridge::*;
+use super::share_linkage::*;
+use super::*;
 
 // Move every share-linkage proof record's proof bytes out of the
 // embedded base64 field and onto the shared setup proof-material transport,

@@ -83,7 +83,11 @@ pub(super) fn table_values<const LIMB_COUNT: usize>(
     (0..ring_degree)
         .map(|row| {
             let candidate = base + row;
-            let value = if candidate <= max_value { candidate } else { base };
+            let value = if candidate <= max_value {
+                candidate
+            } else {
+                base
+            };
             parameters.unsigned_word_to_element(value as u64)
         })
         .collect()
@@ -134,6 +138,47 @@ pub(super) fn reciprocal<const LIMB_COUNT: usize>(
     Some(parameters.inverse(&denominator))
 }
 
+// All reciprocals `1/(mu - v_i)` for one column via Montgomery's batch-inversion
+// trick: one field inversion plus three multiplications per element, instead of
+// one (exponentiation-cost) inversion per element. `None` if any denominator is
+// zero (negligible-probability challenge collision; the prover surfaces it as
+// an error). Tested equal to the per-element `reciprocal`.
+pub(super) fn batch_reciprocals<const LIMB_COUNT: usize>(
+    parameters: &ProofFieldParameters<LIMB_COUNT>,
+    challenge: &[u64; LIMB_COUNT],
+    values: &[[u64; LIMB_COUNT]],
+) -> Option<Vec<[u64; LIMB_COUNT]>> {
+    if values.is_empty() {
+        return Some(Vec::new());
+    }
+    let mut denominators = Vec::with_capacity(values.len());
+    for value in values {
+        let denominator = parameters.subtract(challenge, value);
+        if denominator.iter().all(|limb| *limb == 0) {
+            return None;
+        }
+        denominators.push(denominator);
+    }
+    let mut prefix_products = Vec::with_capacity(denominators.len());
+    let mut running = parameters.one();
+    for denominator in &denominators {
+        running = parameters.multiply(&running, denominator);
+        prefix_products.push(running);
+    }
+    let mut suffix_inverse = parameters.inverse(prefix_products.last().expect("non-empty column"));
+    let mut reciprocals = vec![parameters.zero(); denominators.len()];
+    for index in (0..denominators.len()).rev() {
+        let prefix_before = if index == 0 {
+            parameters.one()
+        } else {
+            prefix_products[index - 1]
+        };
+        reciprocals[index] = parameters.multiply(&suffix_inverse, &prefix_before);
+        suffix_inverse = parameters.multiply(&suffix_inverse, &denominators[index]);
+    }
+    Some(reciprocals)
+}
+
 // The per-digit lookup fraction column `f_d[x] = 1/(mu - shifted_c_d(x))` over
 // the trace domain (length `N`).
 pub(super) fn lookup_fraction_column<const LIMB_COUNT: usize>(
@@ -141,10 +186,7 @@ pub(super) fn lookup_fraction_column<const LIMB_COUNT: usize>(
     challenge: &[u64; LIMB_COUNT],
     shifted_carry_values: &[[u64; LIMB_COUNT]],
 ) -> Option<Vec<[u64; LIMB_COUNT]>> {
-    shifted_carry_values
-        .iter()
-        .map(|value| reciprocal(parameters, challenge, value))
-        .collect()
+    batch_reciprocals(parameters, challenge, shifted_carry_values)
 }
 
 // The table fraction column `f_T[x] = m(x)/(mu - T(x))` over a table chunk's
@@ -156,14 +198,14 @@ pub(super) fn table_fraction_column<const LIMB_COUNT: usize>(
     table_column: &[[u64; LIMB_COUNT]],
     multiplicity_column: &[[u64; LIMB_COUNT]],
 ) -> Option<Vec<[u64; LIMB_COUNT]>> {
-    table_column
-        .iter()
-        .zip(multiplicity_column.iter())
-        .map(|(value, multiplicity)| {
-            let recip = reciprocal(parameters, challenge, value)?;
-            Some(parameters.multiply(multiplicity, &recip))
-        })
-        .collect()
+    let reciprocals = batch_reciprocals(parameters, challenge, table_column)?;
+    Some(
+        reciprocals
+            .iter()
+            .zip(multiplicity_column.iter())
+            .map(|(recip, multiplicity)| parameters.multiply(multiplicity, recip))
+            .collect(),
+    )
 }
 
 // The sum of a fraction column's values, i.e. its logUp terminal
@@ -172,11 +214,9 @@ pub(super) fn column_sum<const LIMB_COUNT: usize>(
     parameters: &ProofFieldParameters<LIMB_COUNT>,
     column: &[[u64; LIMB_COUNT]],
 ) -> [u64; LIMB_COUNT] {
-    column
-        .iter()
-        .fold(parameters.zero(), |accumulated, value| {
-            parameters.add(&accumulated, value)
-        })
+    column.iter().fold(parameters.zero(), |accumulated, value| {
+        parameters.add(&accumulated, value)
+    })
 }
 
 #[cfg(test)]
@@ -268,7 +308,8 @@ mod tests {
         let shifted = vec![0_usize, 5, ring_degree, 2 * ring_degree, out_of_range];
         for seed in [2_u64, 13, 55_555] {
             let challenge = sample_challenge(&parameters, seed);
-            let (lookup_total, table_total) = balance(&parameters, ring_degree, &shifted, &challenge);
+            let (lookup_total, table_total) =
+                balance(&parameters, ring_degree, &shifted, &challenge);
             assert_ne!(
                 lookup_total, table_total,
                 "an out-of-range carry must break the logUp balance"
@@ -378,6 +419,29 @@ mod tests {
     }
 
     #[test]
+    fn batch_reciprocals_match_per_element_inversion() {
+        // Montgomery's trick must agree with the direct per-element inverse on
+        // every element, including repeated values.
+        let parameters = sixteen_limb_group_field_parameters();
+        let challenge = sample_challenge(&parameters, 777);
+        let values: Vec<[u64; 13]> = [0_u64, 5, 5, 130, 129, 1, 42]
+            .iter()
+            .map(|value| parameters.unsigned_word_to_element(*value))
+            .collect();
+        let batch = batch_reciprocals(&parameters, &challenge, &values).expect("batch");
+        for (value, batched) in values.iter().zip(batch.iter()) {
+            let direct = reciprocal(&parameters, &challenge, value).expect("direct");
+            assert_eq!(
+                *batched, direct,
+                "batch inversion must match direct inversion"
+            );
+        }
+        // A zero denominator (challenge equals a value) is surfaced as None.
+        let colliding = vec![challenge];
+        assert!(batch_reciprocals(&parameters, &challenge, &colliding).is_none());
+    }
+
+    #[test]
     fn fraction_pin_holds_for_table_and_lookup() {
         // The fraction-pin relation each support constraint enforces:
         // (mu - value) * fraction - multiplicity == 0.
@@ -398,6 +462,10 @@ mod tests {
             &parameters.multiply(&parameters.subtract(&challenge, &value), &table_fraction),
             &multiplicity,
         );
-        assert_eq!(table_pinned, parameters.zero(), "table fraction pin must hold");
+        assert_eq!(
+            table_pinned,
+            parameters.zero(),
+            "table fraction pin must hold"
+        );
     }
 }

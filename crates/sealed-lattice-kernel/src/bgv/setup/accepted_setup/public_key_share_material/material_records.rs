@@ -1,6 +1,6 @@
-use super::*;
 use super::material_set::*;
 use super::transport::*;
+use super::*;
 
 pub(super) fn decode_public_key_share_material_bindings(
     setup_context: &Value,

@@ -507,7 +507,6 @@ pub(crate) fn verify_vss_public_aggregate_threshold_commitment_set_request(
     }))
 }
 
-
 fn vss_public_encoded_commitment_byte_length() -> usize {
     VSS_PUBLIC_COMMITMENT_MODULUS_LIMB_INDICES.len() * VSS_PUBLIC_OUTPUT_COORDINATE_COUNT * 8
 }
@@ -526,8 +525,6 @@ use readers::*;
 use record_verification::*;
 use sampler::*;
 
-pub(crate) use record_verification::validate_standalone_vss_public_commitment_body;
-pub(crate) use share_linkage::verify_vss_share_linkage_statement_request;
 #[cfg(any(test, feature = "target-decryption-development-commands"))]
 pub(crate) use message_encoding::vss_public_canonical_message_digit_columns;
 pub(in crate::bgv::setup) use message_encoding::{
@@ -535,7 +532,9 @@ pub(in crate::bgv::setup) use message_encoding::{
     vss_public_message_digit_only_encoding_layout, vss_public_message_digit_trits_for_count,
     vss_public_message_digit_weight, vss_public_message_digits, vss_public_message_encoding_layout,
 };
+pub(crate) use record_verification::validate_standalone_vss_public_commitment_body;
 pub(in crate::bgv::setup) use sampler::{ProjectionTermsInput, projection_terms};
+pub(crate) use share_linkage::verify_vss_share_linkage_statement_request;
 
 #[cfg(test)]
 pub(in crate::bgv::setup) mod tests;
