@@ -50,4 +50,4 @@ pub(super) use public_key_share_proofs::*;
 pub(super) use relinearization_key_share_rounds::*;
 pub(super) use same_secret_anchor_proofs::*;
 pub(super) use trustee_evaluation_key_proofs::*;
-pub(super) use vss_public_material::compactify_collective_setup_package;
+pub(super) use vss_public_material::finalize_collective_setup_package;

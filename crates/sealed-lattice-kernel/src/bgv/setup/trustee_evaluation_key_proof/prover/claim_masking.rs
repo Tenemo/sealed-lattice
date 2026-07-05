@@ -84,7 +84,7 @@ pub(in super::super) fn global_claim_id(
         }
         remaining -= digit_count;
     }
-    // Linkage vectors: the negative indicator, optional compact bridge message
+    // Linkage vectors: the negative indicator, optional bridge message
     // digits, then the opening-randomness columns, indexed after every
     // statement-global error vector.
     let total_error_vectors: usize = statement
@@ -191,13 +191,12 @@ fn append_vss_public_digit_vectors(digit_vectors: &mut Vec<Vec<i64>>, message_ve
         .collect::<Vec<_>>();
     for coefficient in message_vector {
         let unsigned_coefficient = u64::try_from(*coefficient)
-            .expect("compact VSS message coefficient is non-negative after validation");
+            .expect("VSS message coefficient is non-negative after validation");
         let digits =
             crate::bgv::setup::vss_commitment::vss_public_message_digits(unsigned_coefficient)
-                .expect("compact VSS message coefficient fits the digit layout");
+                .expect("VSS message coefficient fits the digit layout");
         for (digit_index, digit) in digits.iter().enumerate() {
-            vectors[digit_index]
-                .push(i64::try_from(*digit).expect("compact VSS message digit fits i64"));
+            vectors[digit_index].push(i64::try_from(*digit).expect("VSS message digit fits i64"));
         }
     }
     digit_vectors.extend(vectors);
@@ -231,12 +230,12 @@ pub(super) fn global_claim_integers(
             }
         }
     } else if let Some(vss_share_linkage) = &statement.vss_share_linkage {
-        // Compact share-linkage claims each lifted-carry vector followed by
-        // every compact-message digit vector. Opening randomness stays
+        // Share-linkage claims each lifted-carry vector followed by
+        // every message digit vector. Opening randomness stays
         // committed, ternary row-checked, and consumed by the opening lincheck,
         // but it does not carry a separate cross-field integer-equality claim.
-        // This order must match consistency_vector_count and the compact branch
-        // of batched_sumcheck_value ([carries..., message_digits...]).
+        // This order must match consistency_vector_count and the share-linkage
+        // branch of batched_sumcheck_value ([carries..., message_digits...]).
         let base_ring_degree = statement.ring_degree;
         let item_count = vss_share_linkage.item_count();
         let coefficient_slot_indices_by_item =
@@ -247,23 +246,23 @@ pub(super) fn global_claim_integers(
         assert_eq!(
             coefficient_slot_indices_by_item.len(),
             item_count,
-            "compact VSS coefficient slot layout matches the item count"
+            "VSS coefficient slot layout matches the item count"
         );
         assert_eq!(
             recipient_messages_by_item.len(),
             item_count,
-            "compact VSS recipient message witness count matches the item count"
+            "VSS recipient message witness count matches the item count"
         );
         assert_eq!(
             carry_witnesses_by_item.len(),
             item_count,
-            "compact VSS carry witness count matches the item count"
+            "VSS carry witness count matches the item count"
         );
         let validate_vss_public_vector = |source: &[i64]| {
             assert_eq!(
                 source.len(),
                 base_ring_degree,
-                "compact VSS witness vector length matches the base ring degree"
+                "VSS witness vector length matches the base ring degree"
             );
         };
 
@@ -296,7 +295,7 @@ pub(super) fn global_claim_integers(
     } else if statement.target_decryption_share.is_some() {
         // Target-decryption masked consistency claims bind direct message
         // digits. Opening randomness stays committed, ternary row-checked, and
-        // consumed by the compact-opening equations on setup commitment fields.
+        // consumed by the opening equations on setup commitment fields.
         for message_vector in &witness.target_decryption_message_vectors {
             append_vss_public_digit_vectors(&mut owned_vss_public_claim_vectors, message_vector);
         }
@@ -322,10 +321,10 @@ pub(super) fn global_claim_integers(
                             let target_message = i128::from(*secret_coefficient)
                                 + i128::from(*target_rns_prime) * i128::from(*negative_indicator);
                             let unsigned_target_message = u64::try_from(target_message).expect(
-                                "compact same-secret bridge message is non-negative after validation",
+                                "same-secret bridge message is non-negative after validation",
                             );
                             i64::try_from(unsigned_target_message)
-                                .expect("compact same-secret bridge message fits i64")
+                                .expect("same-secret bridge message fits i64")
                         })
                         .collect::<Vec<_>>();
                     append_vss_public_digit_vectors(

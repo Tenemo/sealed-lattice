@@ -91,8 +91,8 @@ const setupTransportCertificateBody = (
     setupParameters: CollectiveBgvSetupParametersForCertificates,
     transportInput: SetupCertificateTransportInput,
 ): SetupTransportCertificateBody => {
-    // On the compact path the public VSS coefficient material is no longer
-    // transported (the commitments are compact), so the transport certificate
+    // The public VSS coefficient material is no longer
+    // transported (the commitments stand in for it), so the transport certificate
     // binds only the companion transported objects (public-key share, proof, and
     // evaluation-key materials) rather than a primary VSS material object.
     const transportedObjects = transportedObjectRecords([

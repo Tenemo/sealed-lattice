@@ -24,7 +24,7 @@ pub(super) fn read_setup_binding(setup_package: &Value) -> CanonicalResult<Setup
     // The accepted package carries no setupPackageHash field; recompute the
     // canonical hash of the whole package. It is the single subsuming anchor -
     // every package-derived binding the share statement and release context
-    // commit to (participants, public-key-share roots, the compact-VSS graph,
+    // commit to (participants, public-key-share roots, the VSS graph,
     // the roster-derived threshold parameters) is committed through this hash,
     // which is why the passive-dialect per-component setup and threshold-key
     // hashes are dropped from the statement rather than re-derived.
@@ -247,7 +247,7 @@ fn aggregate_threshold_commitment_set_value(
             .ok_or_else(|| {
                 CanonicalError::new(
                     CanonicalErrorCode::MalformedLength,
-                    "compact aggregate threshold commitment recipient has no setup participant",
+                    "aggregate threshold commitment recipient has no setup participant",
                 )
             })?;
         for (rns_limb_index, record) in limb_records.iter().enumerate() {
@@ -302,27 +302,27 @@ fn read_aggregate_threshold_commitment_set_binding(
         aggregate_set,
         "publicMatrixSeedHash",
         setup_public_matrix_seed_hash,
-        "compact aggregate threshold commitment set public matrix seed hash",
+        "aggregate threshold commitment set public matrix seed hash",
     )?;
     let participant_count = usize_at_path(aggregate_set, &["participantCount"])?;
     if participant_count != participants.len() {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ComponentMismatch,
-            "compact aggregate threshold commitment set participant count does not match the setup participants",
+            "aggregate threshold commitment set participant count does not match the setup participants",
         ));
     }
     let rns_limb_count = usize_at_path(aggregate_set, &["rnsLimbCount"])?;
     if rns_limb_count > DATA_PRIMES.len() {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ComponentMismatch,
-            "compact aggregate threshold commitment set has more limbs than the canonical data basis",
+            "aggregate threshold commitment set has more limbs than the canonical data basis",
         ));
     }
     let ring_degree = usize_at_path(aggregate_set, &["ringDegree"])?;
     if ring_degree != POLYNOMIAL_DEGREE {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ComponentMismatch,
-            "compact aggregate threshold commitment set ring degree does not match the setup profile",
+            "aggregate threshold commitment set ring degree does not match the setup profile",
         ));
     }
 
@@ -339,44 +339,44 @@ fn read_aggregate_threshold_commitment_set_binding(
                 .ok_or_else(|| {
                     CanonicalError::new(
                         CanonicalErrorCode::MalformedLength,
-                        "compact aggregate threshold commitment record index overflowed",
+                        "aggregate threshold commitment record index overflowed",
                     )
                 })?;
             let record = records.get(record_index).ok_or_else(|| {
                 CanonicalError::new(
                     CanonicalErrorCode::MalformedLength,
-                    "compact aggregate threshold commitment set is missing a recipient limb record",
+                    "aggregate threshold commitment set is missing a recipient limb record",
                 )
             })?;
             compare_string_field(
                 record,
                 "recipientIdentity",
                 &participant.trustee_identity,
-                "compact aggregate threshold commitment recipient identity",
+                "aggregate threshold commitment recipient identity",
             )?;
             compare_unsigned_field(
                 record,
                 "recipientRosterPosition",
                 participant.roster_position as u64,
-                "compact aggregate threshold commitment recipient roster position",
+                "aggregate threshold commitment recipient roster position",
             )?;
             compare_unsigned_field(
                 record,
                 "recipientTrusteePoint",
                 participant.interpolation_point,
-                "compact aggregate threshold commitment recipient trustee point",
+                "aggregate threshold commitment recipient trustee point",
             )?;
             compare_unsigned_field(
                 record,
                 "rnsLimbIndex",
                 rns_limb_index as u64,
-                "compact aggregate threshold commitment RNS limb index",
+                "aggregate threshold commitment RNS limb index",
             )?;
             let rns_prime = unsigned_at_path(record, &["rnsPrime"])?;
             if rns_prime != expected_rns_prime {
                 return Err(CanonicalError::new(
                     CanonicalErrorCode::ComponentMismatch,
-                    "compact aggregate threshold commitment RNS prime does not match the canonical data basis",
+                    "aggregate threshold commitment RNS prime does not match the canonical data basis",
                 ));
             }
             limb_records.push(AggregateThresholdCommitmentRecordBinding {

@@ -475,7 +475,7 @@ fn verify_cross_limb_consistency(
     for (global_claim_id, residues) in &residues_by_global_id {
         // The lift window is recomputed per claim: the product of the first
         // lift_count limb moduli must exceed twice the claim's accepted range,
-        // so wider compact digit claims take a three-field lift while narrow
+        // so wider digit claims take a three-field lift while narrow
         // base claims keep the two-field lift. The range guard below enforces
         // uniqueness rather than assuming it.
         let (lower_bound, upper_bound) =

@@ -20,9 +20,9 @@ use crate::hashing::{derive_canonical_object_hash, to_hex};
 
 // Builds the trustee evaluation-key succinct proof set, one proof per trustee
 // covering the whole scheduled relinearization and Galois key material, bound to
-// the compact same-secret bridge. Each statement is rebuilt through the same
+// the same-secret bridge. Each statement is rebuilt through the same
 // `trustee_evaluation_key_statement_from_package` the accepted-setup verifier
-// calls, so a proof verifies against the exact records, aggregates, and compact
+// calls, so a proof verifies against the exact records, aggregates, and
 // bridge the verifier reconstructs. Proof bytes are embedded (the accepted-setup
 // verifier accepts `proofBytesHex`), and every root is a canonical object hash.
 pub(in super::super) fn trustee_evaluation_key_proofs_object(
@@ -34,19 +34,19 @@ pub(in super::super) fn trustee_evaluation_key_proofs_object(
     let same_secret_proofs = package["sameSecretProofs"]["proofRecords"]
         .as_array()
         .expect("same-secret proof records");
-    // The compact bridge material the verifier reconstructs; the compact package
-    // embeds it so an empty transport request reconstructs it.
+    // The bridge material the verifier reconstructs; the package embeds it so an
+    // empty transport request reconstructs it.
     let verified_same_secret_bridge = package.get("sameSecretBridgeStatementSet").map(|_| {
         verified_same_secret_bridge_material_from_package(package, &serde_json::json!({}))
-            .expect("compact same-secret bridge material")
+            .expect("same-secret bridge material")
     });
     assert!(
         verified_same_secret_bridge.is_some(),
-        "the trustee evaluation-key fixture is the compact-bridge-bound terminal path"
+        "the trustee evaluation-key fixture is the same-secret-bridge-bound terminal path"
     );
     let ring_degree = package["sameSecretBridgeStatementSet"]["ringDegree"]
         .as_u64()
-        .expect("compact bridge ring degree") as usize;
+        .expect("same-secret bridge ring degree") as usize;
 
     let per_trustee_records = same_secret_proofs
         .par_iter()
@@ -185,7 +185,7 @@ pub(in super::super) fn trustee_evaluation_key_proofs_object(
 }
 
 // The deterministic fixture witness for one trustee's batched statement: the
-// shared VSS secret, per-key fixture errors in statement order, and the compact
+// shared VSS secret, per-key fixture errors in statement order, and the
 // same-secret bridge openings. The public-key-share and target-decryption
 // witness fields the DEV prototype carried are absent from the LIVE relation, so
 // this witness only populates the key-relation and linkage columns.
@@ -233,9 +233,9 @@ pub(in super::super) fn trustee_evaluation_key_witness_for_fixture(
         .iter()
         .map(|coefficient| i64::from(*coefficient < 0))
         .collect();
-    // On the compact bridge path the openings cover one column set per bound
+    // On the same-secret bridge path the openings cover one column set per bound
     // target-basis limb, using the same deterministic coefficient randomness the
-    // compact coefficient commitments were built with.
+    // public coefficient commitments were built with.
     let opening_randomness_by_limb = statement
         .same_secret_bridge
         .as_ref()

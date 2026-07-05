@@ -438,16 +438,16 @@ describe('accepted setup public package API in Node', () => {
             commitRecords: [],
             revealRecords: [],
         } as const;
-        // The compact public VSS sets are stand-ins at the shape level: the
+        // The public VSS sets are stand-ins at the shape level: the
         // package assembly validates object types, versions, and root formats,
-        // while the kernel verifier recomputes and verifies the real compact
+        // while the kernel verifier recomputes and verifies the real
         // commitments and proofs.
         const vssPublicCoefficientCommitmentSet = {
             objectType: 'VssPublicCoefficientCommitmentSet',
             objectVersion: 1,
             coefficientCommitmentRoot: hashFromKernel(
                 kernel,
-                'compact-coefficient-commitment-root',
+                'coefficient-commitment-root',
             ),
         };
         const vssPublicRecipientShareCommitmentSet = {
@@ -455,7 +455,7 @@ describe('accepted setup public package API in Node', () => {
             objectVersion: 1,
             recipientShareCommitmentRoot: hashFromKernel(
                 kernel,
-                'compact-recipient-share-commitment-root',
+                'recipient-share-commitment-root',
             ),
         };
         const vssPublicAggregateThresholdCommitmentSet = {
@@ -463,7 +463,7 @@ describe('accepted setup public package API in Node', () => {
             objectVersion: 1,
             aggregateThresholdCommitmentRoot: hashFromKernel(
                 kernel,
-                'compact-aggregate-threshold-commitment-root',
+                'aggregate-threshold-commitment-root',
             ),
         };
         const vssShareLinkageStatement = {
@@ -471,7 +471,7 @@ describe('accepted setup public package API in Node', () => {
             objectVersion: 1,
             statementRoot: hashFromKernel(
                 kernel,
-                'compact-share-linkage-statement-root',
+                'share-linkage-statement-root',
             ),
         };
         const vssShareLinkageProofMaterialSet = {
@@ -479,7 +479,7 @@ describe('accepted setup public package API in Node', () => {
             objectVersion: 1,
             proofMaterialSetRoot: hashFromKernel(
                 kernel,
-                'compact-share-linkage-proof-material-set-root',
+                'share-linkage-proof-material-set-root',
             ),
         };
         const sameSecretBridgeStatementSet = {
@@ -503,7 +503,7 @@ describe('accepted setup public package API in Node', () => {
             objectVersion: 1,
             thresholdShareCommitmentRoot: hashFromKernel(
                 kernel,
-                'compact-threshold-share-commitment-root',
+                'threshold-share-commitment-root',
             ),
         };
         const setupPackageInput = {

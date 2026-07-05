@@ -584,7 +584,7 @@ impl TrusteeEvaluationKeyStatement {
                 || self.same_secret_bridge.is_some()
             {
                 return Err(invalid_succinct_setup_proof(
-                    "compact VSS share-linkage statement must not include key descriptors or same-secret linkage",
+                    "VSS share-linkage statement must not include key descriptors or same-secret linkage",
                 ));
             }
             return Ok(SuccinctSetupProofFamilyShape::VssShareLinkage);
@@ -596,7 +596,7 @@ impl TrusteeEvaluationKeyStatement {
                 || self.target_decryption_share.is_some()
             {
                 return Err(invalid_succinct_setup_proof(
-                    "compact same-secret bridge statement must not mix proof families",
+                    "same-secret bridge statement must not mix proof families",
                 ));
             }
             if self.keys.is_empty() {
@@ -690,7 +690,7 @@ impl TrusteeEvaluationKeyStatement {
                     && self.target_decryption_share.is_none())
                 {
                     return Err(invalid_succinct_setup_proof(
-                        "compact VSS share-linkage statement must not mix proof families",
+                        "VSS share-linkage statement must not mix proof families",
                     ));
                 }
             }
@@ -703,7 +703,7 @@ impl TrusteeEvaluationKeyStatement {
                     && self.target_decryption_share.is_none())
                 {
                     return Err(invalid_succinct_setup_proof(
-                        "compact same-secret bridge statement must not mix proof families",
+                        "same-secret bridge statement must not mix proof families",
                     ));
                 }
             }
@@ -801,7 +801,7 @@ impl TrusteeEvaluationKeyStatement {
                     != self.context.trustee_roster_position
             {
                 return Err(invalid_succinct_setup_proof(
-                    "compact same-secret bridge source trustee must match the proof context",
+                    "same-secret bridge source trustee must match the proof context",
                 ));
             }
             validate_same_secret_bridge_statement(same_secret_bridge, self.ring_degree)?;
@@ -870,36 +870,35 @@ fn validate_masked_claim_lift_window(
         );
         if required_digit_residue_count > proof_limb_indices.len() {
             return Err(invalid_succinct_setup_proof(
-                "compact VSS digit masked consistency claims need more active limb fields",
+                "VSS digit masked consistency claims need more active limb fields",
             ));
         }
     }
-    if statement.target_decryption_share.is_some() {
-        if let Some(first_smudging_global_message_index) =
+    if statement.target_decryption_share.is_some()
+        && let Some(first_smudging_global_message_index) =
             statement.target_decryption_smudging_message_global_index()
-        {
-            let first_smudging_global_claim_id = (first_smudging_global_message_index
-                * crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT
-                * CONSISTENCY_REPETITIONS) as u64;
-            let smudging_limb_indices = statement
-                .target_decryption_message_claim_limb_indices(first_smudging_global_message_index);
-            let (smudging_lower_bound, smudging_upper_bound) =
-                masked_claim_bounds_for_global_claim(statement, first_smudging_global_claim_id)?;
-            let required_smudging_residue_count = masked_claim_lift_residue_count_for_moduli(
-                smudging_limb_indices
-                    .iter()
-                    .map(|limb_index| DATA_PRIMES[*limb_index]),
-                &smudging_lower_bound,
-                &smudging_upper_bound,
-            );
-            if required_smudging_residue_count
+    {
+        let first_smudging_global_claim_id = (first_smudging_global_message_index
+            * crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT
+            * CONSISTENCY_REPETITIONS) as u64;
+        let smudging_limb_indices = statement
+            .target_decryption_message_claim_limb_indices(first_smudging_global_message_index);
+        let (smudging_lower_bound, smudging_upper_bound) =
+            masked_claim_bounds_for_global_claim(statement, first_smudging_global_claim_id)?;
+        let required_smudging_residue_count = masked_claim_lift_residue_count_for_moduli(
+            smudging_limb_indices
+                .iter()
+                .map(|limb_index| DATA_PRIMES[*limb_index]),
+            &smudging_lower_bound,
+            &smudging_upper_bound,
+        );
+        if required_smudging_residue_count
                 > TrusteeEvaluationKeyStatement::TARGET_DECRYPTION_SMUDGING_MESSAGE_MASKED_CLAIM_FIELD_COUNT
             {
                 return Err(invalid_succinct_setup_proof(
                     "target-decryption smudging-message masked consistency claims need more carried limb fields",
                 ));
             }
-        }
     }
     Ok(())
 }
@@ -1062,7 +1061,7 @@ fn validate_target_decryption_share_statement(
                 })
         {
             return Err(invalid_succinct_setup_proof(
-                "target-decryption compact commitment coordinate count does not match the profile",
+                "target-decryption commitment coordinate count does not match the profile",
             ));
         }
         for (commitment_modulus_index, coordinates) in commitment
@@ -1076,7 +1075,7 @@ fn validate_target_decryption_share_statement(
                 .any(|coordinate| *coordinate >= commitment_modulus)
             {
                 return Err(invalid_succinct_setup_proof(
-                    "target-decryption compact commitment coordinate is outside its commitment field",
+                    "target-decryption commitment coordinate is outside its commitment field",
                 ));
             }
         }
@@ -1196,7 +1195,7 @@ fn validate_vss_share_linkage_item(
         || DATA_PRIMES[source_rns_limb_index] != source_message_modulus
     {
         return Err(invalid_succinct_setup_proof(
-            "compact VSS source limb does not match the selected data basis",
+            "VSS source limb does not match the selected data basis",
         ));
     }
     if coefficient_commitments.is_empty()
@@ -1204,7 +1203,7 @@ fn validate_vss_share_linkage_item(
         || coefficient_commitments.len() != coefficient_opening_roots.len()
     {
         return Err(invalid_succinct_setup_proof(
-            "compact VSS coefficient commitments and roots must be non-empty and aligned",
+            "VSS coefficient commitments and roots must be non-empty and aligned",
         ));
     }
     for commitment_root in coefficient_commitment_roots {
@@ -1238,7 +1237,7 @@ fn validate_vss_share_linkage_item(
                 })
         {
             return Err(invalid_succinct_setup_proof(
-                "compact VSS commitment coordinate count or residue does not match the profile",
+                "VSS commitment coordinate count or residue does not match the profile",
             ));
         }
     }
@@ -1322,7 +1321,7 @@ fn validate_vss_share_linkage_statement(
          -> CanonicalResult<()> {
             if coefficient_slot_indices.len() != coefficient_commitments.len() {
                 return Err(invalid_succinct_setup_proof(
-                    "compact VSS coefficient witness slot layout does not match the statement",
+                    "VSS coefficient witness slot layout does not match the statement",
                 ));
             }
             for (coefficient_index, (coefficient_slot_index, commitment)) in
@@ -1335,7 +1334,7 @@ fn validate_vss_share_linkage_statement(
                     .get_mut(*coefficient_slot_index)
                     .ok_or_else(|| {
                         invalid_succinct_setup_proof(
-                            "compact VSS coefficient witness slot index is outside the layout",
+                            "VSS coefficient witness slot index is outside the layout",
                         )
                     })?;
                 if let Some(existing_commitment) = slot {
@@ -1373,7 +1372,7 @@ fn validate_vss_share_linkage_statement(
     }
     if ring_degree == 0 {
         return Err(invalid_succinct_setup_proof(
-            "compact VSS share-linkage ring degree must be positive",
+            "VSS share-linkage ring degree must be positive",
         ));
     }
 
@@ -1398,7 +1397,7 @@ fn validate_same_secret_bridge_statement(
     )?;
     if statement.target_basis_hash != crate::bgv::evaluator::top_k::canonical_target_basis_hash()? {
         return Err(invalid_succinct_setup_proof(
-            "compact same-secret bridge target basis hash must match the canonical target basis",
+            "same-secret bridge target basis hash must match the canonical target basis",
         ));
     }
     if statement.target_rns_primes.is_empty()
@@ -1407,14 +1406,14 @@ fn validate_same_secret_bridge_statement(
         || statement.target_rns_primes.len() != statement.target_constant_commitments.len()
     {
         return Err(invalid_succinct_setup_proof(
-            "compact same-secret bridge target commitments and target primes must be non-empty and aligned",
+            "same-secret bridge target commitments and target primes must be non-empty and aligned",
         ));
     }
     for (target_rns_limb_index, target_rns_prime) in statement.target_rns_primes.iter().enumerate()
     {
         if *target_rns_prime != DATA_PRIMES[target_rns_limb_index] {
             return Err(invalid_succinct_setup_proof(
-                "compact same-secret bridge target primes must match the canonical target basis",
+                "same-secret bridge target primes must match the canonical target basis",
             ));
         }
         validate_protocol_hash_hex(
@@ -1434,13 +1433,13 @@ fn validate_same_secret_bridge_statement(
                 })
         {
             return Err(invalid_succinct_setup_proof(
-                "compact same-secret bridge commitment coordinate count does not match the profile",
+                "same-secret bridge commitment coordinate count does not match the profile",
             ));
         }
     }
     if ring_degree == 0 {
         return Err(invalid_succinct_setup_proof(
-            "compact same-secret bridge ring degree must be positive",
+            "same-secret bridge ring degree must be positive",
         ));
     }
 

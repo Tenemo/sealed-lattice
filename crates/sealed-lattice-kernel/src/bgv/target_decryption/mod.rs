@@ -80,8 +80,12 @@ use crate::{
 };
 
 #[cfg(any(feature = "target-decryption-development-commands", test))]
-use crate::bgv::coefficient_codec::{signed_byte_vector_from_hex, signed_byte_vector_hex};
-#[cfg(any(feature = "target-decryption-development-commands", test))]
+use crate::bgv::coefficient_codec::signed_byte_vector_from_hex;
+#[cfg(test)]
+use crate::bgv::coefficient_codec::signed_byte_vector_hex;
+#[cfg(test)]
+use crate::bgv::evaluator::engine::DevelopmentBgvKey;
+#[cfg(test)]
 use crate::bgv::setup::development_evaluator_key_from_passive_setup_package;
 use crate::bgv::setup::{VSS_PUBLIC_OUTPUT_COORDINATE_COUNT, VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT};
 #[cfg(any(feature = "target-decryption-development-commands", test))]
@@ -92,7 +96,7 @@ use crate::bgv::setup::{
 use crate::bgv::{
     coefficient_codec::coefficient_vector_le_hex,
     evaluator::{
-        engine::{DevelopmentBgvKey, negacyclic_mul, signed_residue},
+        engine::{negacyclic_mul, signed_residue},
         prg::DeterministicSampler,
     },
 };
@@ -208,20 +212,20 @@ fn aggregate_message_coefficient_bound(
     if participant_count == 0 {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "compact aggregate opening participant count must be positive",
+            "aggregate opening participant count must be positive",
         ));
     }
     rns_prime
         .checked_mul(u64::try_from(participant_count).map_err(|_| {
             CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
-                "compact aggregate opening participant count does not fit u64",
+                "aggregate opening participant count does not fit u64",
             )
         })?)
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
-                "compact aggregate opening message coefficient bound overflowed",
+                "aggregate opening message coefficient bound overflowed",
             )
         })
 }

@@ -55,16 +55,14 @@ const setupProofMaterialTransportCases = [
         fieldName: 'transportedVssShareLinkageProofMaterial',
         materialSetObjectType:
             'SetupTransportedVssShareLinkageProofMaterialSet',
-        materialObjectType:
-            'SetupTransportedVssShareLinkageProofMaterial',
+        materialObjectType: 'SetupTransportedVssShareLinkageProofMaterial',
         proofFamily: 'vss-share-linkage',
     },
     {
         fieldName: 'transportedSameSecretBridgeProofMaterial',
         materialSetObjectType:
             'SetupTransportedSameSecretBridgeProofMaterialSet',
-        materialObjectType:
-            'SetupTransportedSameSecretBridgeProofMaterial',
+        materialObjectType: 'SetupTransportedSameSecretBridgeProofMaterial',
         proofFamily: 'same-secret-bridge',
     },
     {
@@ -298,7 +296,7 @@ describe('setup proof material streaming in the public package', () => {
     });
 
     it.each(setupProofMaterialTransportCases)(
-        'streams $proofFamily proof chunks and verifies with compact handles',
+        'streams $proofFamily proof chunks and verifies with streamed handles',
         async (transportCase) => {
             await publicPackage.verifySetupPackage({
                 setupPackage: {

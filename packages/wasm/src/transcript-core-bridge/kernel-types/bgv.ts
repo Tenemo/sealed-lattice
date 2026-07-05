@@ -286,25 +286,6 @@ export type BgvCollectiveSetupParametersDescription = {
         readonly assumptions: Readonly<Record<string, unknown>>;
         readonly serialization: Readonly<Record<string, unknown>>;
     };
-    readonly publicVssCommitmentMaterialSize: {
-        readonly objectType: 'PublicVssCommitmentMaterialSize';
-        readonly objectVersion: 1;
-        readonly measurementKind: string;
-        readonly ringDegree: number;
-        readonly ringDegreeStatus: 'full-ring';
-        readonly participantCount: 10;
-        readonly rnsLimbCount: number;
-        readonly shamirCoefficientCount: 4;
-        readonly commitmentModulusLimbCount: number;
-        readonly commitmentRowCount: number;
-        readonly bytesPerResidue: 8;
-        readonly singleCommitmentCoefficientBytes: number;
-        readonly publishedCommitmentCount: number;
-        readonly fullMaterialCoefficientBytes: number;
-        readonly fullMaterialCoefficientMebibytes: number;
-        readonly jsonOverheadStatus: string;
-        readonly streamingRequirement: string;
-    };
     readonly setupProof: {
         readonly objectType: 'SetupProof';
         readonly objectVersion: 1;

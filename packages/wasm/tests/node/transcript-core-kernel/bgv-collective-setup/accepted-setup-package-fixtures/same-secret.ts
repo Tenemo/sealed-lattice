@@ -10,7 +10,6 @@ import {
 import { vssPublicTrusteeSecretCoefficients } from './vss-material.js';
 
 import { hash512Hex } from '#packages/crypto/src/index';
-import { type VssPublicCoefficientCommitmentSet } from '#packages/protocol/src/setup/vss-commitments';
 import {
     createSameSecretConsistencyStatementSet,
     createSameSecretProofSet,
@@ -26,6 +25,7 @@ import {
     type VssCoefficientCommitmentSet,
     type VssSourceTrusteeOpeningMaterial,
 } from '#packages/protocol/src/setup/vss-coefficient-commitments';
+import { type VssPublicCoefficientCommitmentSet } from '#packages/protocol/src/setup/vss-commitments';
 import { type CollectiveBgvSetupContext } from '#packages/protocol/src/setup/vss-share-verification-records';
 import type {
     BgvCollectiveSetupParametersDescription,
@@ -56,34 +56,32 @@ export function acceptedSameSecretConsistency(
         setupEpoch: setupContext.setupEpoch,
         vssCoefficientCommitmentRoot:
             coefficientCommitmentSet.coefficientCommitmentRoot,
-        sourceTrusteeRecords:
-            coefficientCommitmentSet.sourceTrusteeRecords.map(
-                (sourceTrusteeRecord) => ({
-                    ceremonyId: setupContext.ceremonyId,
-                    manifestHash: setupContext.manifestHash,
-                    rosterHash: setupContext.rosterHash,
-                    setupParametersHash: setupContext.setupParametersHash,
-                    setupEpoch: setupContext.setupEpoch,
-                    sourceTrusteeIdentity:
-                        sourceTrusteeRecord.sourceTrusteeIdentity,
-                    sourceTrusteeRosterPosition:
-                        sourceTrusteeRecord.sourceTrusteeRosterPosition,
-                    sourceTrusteeCommitmentRoot:
-                        sourceTrusteeRecord.sourceCoefficientCommitmentRoot,
-                    coefficientCommitments:
-                        sourceTrusteeRecord.coefficientCommitments.map(
-                            (coefficientCommitment) => ({
-                                rnsLimbIndex:
-                                    coefficientCommitment.rnsLimbIndex,
-                                rnsPrime: coefficientCommitment.rnsPrime,
-                                shamirCoefficientIndex:
-                                    coefficientCommitment.shamirCoefficientIndex,
-                                commitmentRoot:
-                                    coefficientCommitment.coefficientCommitmentRoot,
-                            }),
-                        ),
-                }),
-            ),
+        sourceTrusteeRecords: coefficientCommitmentSet.sourceTrusteeRecords.map(
+            (sourceTrusteeRecord) => ({
+                ceremonyId: setupContext.ceremonyId,
+                manifestHash: setupContext.manifestHash,
+                rosterHash: setupContext.rosterHash,
+                setupParametersHash: setupContext.setupParametersHash,
+                setupEpoch: setupContext.setupEpoch,
+                sourceTrusteeIdentity:
+                    sourceTrusteeRecord.sourceTrusteeIdentity,
+                sourceTrusteeRosterPosition:
+                    sourceTrusteeRecord.sourceTrusteeRosterPosition,
+                sourceTrusteeCommitmentRoot:
+                    sourceTrusteeRecord.sourceCoefficientCommitmentRoot,
+                coefficientCommitments:
+                    sourceTrusteeRecord.coefficientCommitments.map(
+                        (coefficientCommitment) => ({
+                            rnsLimbIndex: coefficientCommitment.rnsLimbIndex,
+                            rnsPrime: coefficientCommitment.rnsPrime,
+                            shamirCoefficientIndex:
+                                coefficientCommitment.shamirCoefficientIndex,
+                            commitmentRoot:
+                                coefficientCommitment.coefficientCommitmentRoot,
+                        }),
+                    ),
+            }),
+        ),
     };
 
     return createSameSecretConsistencyStatementSet({
@@ -138,7 +136,7 @@ export function acceptedSameSecretProofs(
 ): SameSecretProofSet {
     const qSharePrimes = parameters.qShare.primes;
     // The data-basis anchor material is computed here, so bind a deterministic
-    // anchor root for the compact path.
+    // anchor root.
     const dataBasisAnchorMaterialRoot = kernel.deriveCanonicalObjectHash({
         value: {
             objectType: 'VssPublicDataBasisSameSecretAnchorMaterial',

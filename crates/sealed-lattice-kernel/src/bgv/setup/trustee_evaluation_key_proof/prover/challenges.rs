@@ -178,9 +178,7 @@ pub(in super::super) fn build_limb_public_vectors(
     }
     if layout.vss_public_active() {
         let vss_share_linkage = statement.vss_share_linkage.as_ref().ok_or_else(|| {
-            invalid_succinct_setup_proof(
-                "compact VSS layout requires a compact share-linkage statement",
-            )
+            invalid_succinct_setup_proof("VSS layout requires a share-linkage statement")
         })?;
         let mut combined_claim = ChallengeExtensionTower::zero();
         let mut mask_selectors = vec![extension_zero_vector(); layout.mask_column_count];
@@ -221,9 +219,7 @@ pub(in super::super) fn build_limb_public_vectors(
     }
     if layout.same_secret_bridge_active() {
         let same_secret_bridge = statement.same_secret_bridge.as_ref().ok_or_else(|| {
-            invalid_succinct_setup_proof(
-                "compact same-secret bridge layout requires a compact bridge statement",
-            )
+            invalid_succinct_setup_proof("same-secret bridge layout requires a bridge statement")
         })?;
         let mut combined_claim = ChallengeExtensionTower::zero();
         let mut mask_selectors = vec![extension_zero_vector(); layout.mask_column_count];
@@ -407,7 +403,7 @@ pub(in super::super) fn build_limb_public_vectors(
     let mut linkage_vectors = Vec::new();
     if layout.same_secret_bridge_material_active() {
         let same_secret_bridge = statement.same_secret_bridge.as_ref().ok_or_else(|| {
-            invalid_succinct_setup_proof("limb layout expects a compact bridge statement")
+            invalid_succinct_setup_proof("limb layout expects a bridge statement")
         })?;
         let (bridge_claim, vectors) = build_same_secret_bridge_public_vectors(
             SameSecretBridgePublicVectorInput {

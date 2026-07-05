@@ -347,16 +347,15 @@ pub(in super::super) fn public_key_share_succinct_proofs_object(
         .as_array()
         .expect("public-key material records");
     let participant_count = participant_count_from_package(package);
-    // Compact terminal public-key-share proofs anchor to the verified compact
-    // same-secret bridge material that the accepted-setup verifier reconstructs.
-    // The compact package embeds the bridge proof material, so an empty
-    // transport request reconstructs it.
+    // Terminal public-key-share proofs anchor to the verified same-secret bridge
+    // material that the accepted-setup verifier reconstructs. The package embeds
+    // the bridge proof material, so an empty transport request reconstructs it.
     let verified_same_secret_bridge = package.get("sameSecretBridgeStatementSet").map(|_| {
         crate::bgv::setup::accepted_setup::verified_same_secret_bridge_material_from_package(
             package,
             &serde_json::json!({}),
         )
-        .expect("compact same-secret bridge material")
+        .expect("same-secret bridge material")
     });
     let per_trustee_records = (0..participant_count)
         .into_par_iter()
@@ -373,7 +372,7 @@ pub(in super::super) fn public_key_share_succinct_proofs_object(
             {
                 let bridge_binding = verified_same_secret_bridge
                     .statement_for_roster_position(trustee_roster_position)
-                    .expect("compact same-secret bridge statement binding");
+                    .expect("same-secret bridge statement binding");
                 assert_eq!(bridge_binding.trustee_identity, trustee_identity);
                 assert_eq!(
                     bridge_binding.trustee_secret_commitment_root.as_str(),
@@ -403,12 +402,12 @@ pub(in super::super) fn public_key_share_succinct_proofs_object(
                 );
                 let ring_degree = package["sameSecretBridgeStatementSet"]["ringDegree"]
                     .as_u64()
-                    .expect("compact same-secret bridge ring degree")
+                    .expect("same-secret bridge ring degree")
                     as usize;
                 // One opening-randomness column per bound target limb: the bridge
                 // statement re-opens every target-basis constant commitment, and the
                 // fixture uses the same deterministic coefficient randomness the
-                // compact coefficient commitments were built with.
+                // public coefficient commitments were built with.
                 let opening_randomness_by_limb = (0..bridge_binding
                     .statement
                     .target_rns_primes

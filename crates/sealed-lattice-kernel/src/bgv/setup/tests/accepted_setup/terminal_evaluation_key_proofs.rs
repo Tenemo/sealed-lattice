@@ -1,18 +1,18 @@
 use super::*;
 
-// Assembles a compact terminal collective BGV setup package whose trustee
-// evaluation-key proofs are bound to the compact same-secret bridge: the
-// reduced-ring three-trustee compact package, plus the public-key share material
-// and compact-bridge-bound succinct proofs, the collective public key, the
-// relinearization rounds, the Galois batches, the compact-bridge-bound trustee
+// Assembles a terminal collective BGV setup package whose trustee
+// evaluation-key proofs are bound to the same-secret bridge: the
+// reduced-ring three-trustee package, plus the public-key share material
+// and same-secret-bridge-bound succinct proofs, the collective public key, the
+// relinearization rounds, the Galois batches, the same-secret-bridge-bound trustee
 // evaluation-key proofs, and the embedded public evaluation-key set. Every
 // evaluation-key object embeds its material and proof bytes, so no transported
 // material is required.
 fn terminal_evaluation_key_bearing_collective_setup_package() -> serde_json::Value {
-    let mut package = compactify_collective_setup_package(
+    let mut package = finalize_collective_setup_package(
         minimal_collective_setup_package_for_participant_count(3),
     );
-    // Public-key share material and compact-bridge-bound succinct proofs.
+    // Public-key share material and same-secret-bridge-bound succinct proofs.
     replace_public_key_share_hashes_with_material_hashes(&mut package);
     package["publicKeyShareMaterial"] = public_key_share_material_object(&package);
     package["publicKeyShareSuccinctProofs"] = public_key_share_succinct_proofs_object(&package);
@@ -26,7 +26,7 @@ fn terminal_evaluation_key_bearing_collective_setup_package() -> serde_json::Val
     package["relinearizationKeyShareRounds"] = relinearization.rounds;
     // Galois batches.
     package["galoisKeyShareBatches"] = galois_key_share_batches_object(&package);
-    // Compact-bridge-bound trustee evaluation-key proofs.
+    // Same-secret-bridge-bound trustee evaluation-key proofs.
     package["trusteeEvaluationKeyProofs"] = trustee_evaluation_key_proofs_object(
         &package,
         &relinearization.round_one_aggregate_diagonals_by_level,
@@ -40,7 +40,7 @@ fn terminal_evaluation_key_bearing_collective_setup_package() -> serde_json::Val
 
 // The evaluation-key phase-boundary refusal object path is the pending-object
 // path, so the eval-key phase leaving no refusal means the phase accepted the
-// compact-bridge-bound proofs. A refused-object list containing an eval-key
+// same-secret-bridge-bound proofs. A refused-object list containing an eval-key
 // refusal reason would fail this check.
 fn evaluation_key_phase_refused(result: &serde_json::Value) -> Option<String> {
     result["refusedObjects"]
@@ -74,13 +74,13 @@ fn heavy_accepted_setup_terminal_trustee_evaluation_key_proofs_pass_the_evaluati
         .expect("verification response");
     let context = || serde_json::to_string_pretty(&result).expect("verification result JSON");
 
-    // The compact-bridge-bound relinearization rounds, Galois batches, trustee
+    // The same-secret-bridge-bound relinearization rounds, Galois batches, trustee
     // evaluation-key proofs, and evaluation-key set must all pass their phase:
     // no refusal references any evaluation-key object.
     assert_eq!(
         evaluation_key_phase_refused(&result),
         None,
-        "the evaluation-key phase must accept the compact-bridge-bound proofs: {}",
+        "the evaluation-key phase must accept the same-secret-bridge-bound proofs: {}",
         context()
     );
     // The reduced development ring means the only permitted refusal is the
@@ -95,7 +95,7 @@ fn heavy_accepted_setup_terminal_trustee_evaluation_key_proofs_pass_the_evaluati
         result["verifierStatus"] == "accepted"
             || refusal_reason == "vssCoefficientCommitmentMaterialOutsideAcceptedRing"
             || refusal_reason == "vssCoefficientCommitmentMaterialOutsideProfile",
-        "reduced-ring compact terminal package must either accept or stop only at the \
+        "reduced-ring terminal package must either accept or stop only at the \
          profile-ring boundary after the evaluation-key phase: {}",
         context()
     );
@@ -161,12 +161,12 @@ fn heavy_accepted_setup_empty_evaluation_key_objects_with_collective_public_key_
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "heavy_accepted_setup_empty_evaluation_key_objects_with_collective_public_key_are_not_accepted",
     );
-    // The compact pre-terminal package plus public-key material, succinct proofs,
+    // The pre-terminal package plus public-key material, succinct proofs,
     // and the collective public key, but with the terminal evaluation-key objects
     // left as the empty {} / [] the base package ships. This is the trust-boundary
     // case: a package that declares public runtime material (the collective public
     // key) but carries no evaluation-key material must not reach accepted.
-    let mut package = compactify_collective_setup_package(
+    let mut package = finalize_collective_setup_package(
         minimal_collective_setup_package_for_participant_count(3),
     );
     replace_public_key_share_hashes_with_material_hashes(&mut package);

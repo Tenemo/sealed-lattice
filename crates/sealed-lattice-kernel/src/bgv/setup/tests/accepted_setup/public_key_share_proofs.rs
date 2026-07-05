@@ -193,8 +193,8 @@ fn heavy_accepted_setup_collective_setup_verifier_requires_same_secret_proofs_be
     let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
         .expect("verification response");
 
-    // The compact same-secret bridge now provides this gate: a package that
-    // carries the compact bridge material but drops the same-secret proofs is
+    // The same-secret bridge now provides this gate: a package that
+    // carries the bridge material but drops the same-secret proofs is
     // refused as incomplete bridge evidence before any public-key succinct
     // proof can be accepted.
     assert_eq!(result["isValid"], false);

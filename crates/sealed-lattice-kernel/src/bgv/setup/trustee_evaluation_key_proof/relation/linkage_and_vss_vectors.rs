@@ -241,9 +241,9 @@ pub(crate) fn build_private_vss_public_vectors(
 // bounded by max witness magnitude * ring degree * (2^bits - 1), and the
 // smudging mask lies in the family-selected base-3 range.
 // Family-aware clear bound: private VSS masks only the carry and ternary
-// opening-randomness columns. Compact share-linkage masks per-item carries and
-// compact message digits; carry claims use the lifted carry bound and digit
-// claims use the compact digit bound. Every other family uses 2
+// opening-randomness columns. Share-linkage masks per-item carries and
+// message digits; carry claims use the lifted carry bound and digit
+// claims use the digit bound. Every other family uses 2
 // (centered-binomial magnitude).
 // The mask is one-sided in [0, CLAIM_MASK_RADIX^mask_digit_count), so the centered claim
 // lies in [-clear_bound, mask_bound + clear_bound]. The disclosed smudging

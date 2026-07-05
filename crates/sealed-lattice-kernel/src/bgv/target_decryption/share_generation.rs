@@ -287,7 +287,7 @@ pub(super) fn read_local_target_decryption_share_witness(
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "local target-decryption share witness must include compact aggregate opening material",
+            "local target-decryption share witness must include aggregate opening material",
         ));
     }
     compare_hash_field(
@@ -313,13 +313,13 @@ pub(super) fn read_local_target_decryption_share_witness(
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "local target-decryption compact aggregate opening requires the accepted compact share-linkage statement",
+                "local target-decryption aggregate opening requires the accepted share-linkage statement",
             )
         })?;
     if &share_linkage_statement_root != accepted_share_linkage_statement_root {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ComponentMismatch,
-            "local target-decryption compact share-linkage statement root does not match the accepted setup statement",
+            "local target-decryption share-linkage statement root does not match the accepted setup statement",
         ));
     }
     let aggregate_threshold_commitment_set = setup_binding
@@ -328,7 +328,7 @@ pub(super) fn read_local_target_decryption_share_witness(
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "local target-decryption compact aggregate opening requires the accepted compact aggregate threshold commitment set",
+                "local target-decryption aggregate opening requires the accepted aggregate threshold commitment set",
             )
         })?;
     if aggregate_threshold_commitment_root
@@ -336,7 +336,7 @@ pub(super) fn read_local_target_decryption_share_witness(
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ComponentMismatch,
-            "local target-decryption compact aggregate opening root does not match the accepted aggregate commitment set",
+            "local target-decryption aggregate opening root does not match the accepted aggregate commitment set",
         ));
     }
 
@@ -344,7 +344,7 @@ pub(super) fn read_local_target_decryption_share_witness(
     if active_limb_count > aggregate_threshold_commitment_set.rns_limb_count {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "accepted compact aggregate threshold commitment set does not cover every active target limb",
+            "accepted aggregate threshold commitment set does not cover every active target limb",
         ));
     }
     let mut secret_share_by_limb: Vec<Option<Vec<u64>>> = vec![None; active_limb_count];
@@ -357,39 +357,39 @@ pub(super) fn read_local_target_decryption_share_witness(
         {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "compact aggregate opening credentials must be LocalTrusteeVssPublicAggregateOpeningCredential version 1",
+                "aggregate opening credentials must be LocalTrusteeVssPublicAggregateOpeningCredential version 1",
             ));
         }
         compare_string_field(
             credential,
             "recipientIdentity",
             &participant.trustee_identity,
-            "compact aggregate opening credential recipient identity",
+            "aggregate opening credential recipient identity",
         )?;
         compare_unsigned_field(
             credential,
             "recipientRosterPosition",
             participant.roster_position as u64,
-            "compact aggregate opening credential recipient roster position",
+            "aggregate opening credential recipient roster position",
         )?;
         compare_unsigned_field(
             credential,
             "recipientTrusteePoint",
             participant.interpolation_point,
-            "compact aggregate opening credential recipient trustee point",
+            "aggregate opening credential recipient trustee point",
         )?;
         let limb_index = usize_at_path(credential, &["rnsLimbIndex"])?;
         let Some(expected_modulus) = DATA_PRIMES.get(limb_index).copied() else {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::ComponentMismatch,
-                "compact aggregate opening credential limb is outside the selected BGV basis",
+                "aggregate opening credential limb is outside the selected BGV basis",
             ));
         };
         compare_unsigned_field(
             credential,
             "rnsPrime",
             expected_modulus,
-            "compact aggregate opening credential rnsPrime",
+            "aggregate opening credential rnsPrime",
         )?;
         if limb_index >= active_limb_count {
             continue;
@@ -419,25 +419,25 @@ pub(super) fn read_local_target_decryption_share_witness(
             .ok_or_else(|| {
                 CanonicalError::new(
                     CanonicalErrorCode::MalformedLength,
-                    "accepted compact aggregate threshold commitment set is missing the active recipient limb",
+                    "accepted aggregate threshold commitment set is missing the active recipient limb",
                 )
             })?;
         if accepted_record.rns_prime != expected_modulus {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::ComponentMismatch,
-                "accepted compact aggregate threshold commitment RNS prime does not match the active target limb",
+                "accepted aggregate threshold commitment RNS prime does not match the active target limb",
             ));
         }
         if accepted_record.aggregate_commitment_root != verified_credential.commitment_root {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::ComponentMismatch,
-                "local target-decryption compact aggregate opening commitment root does not match the accepted aggregate commitment record",
+                "local target-decryption aggregate opening commitment root does not match the accepted aggregate commitment record",
             ));
         }
         if accepted_record.aggregate_opening_root != verified_credential.opening_root {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::ComponentMismatch,
-                "local target-decryption compact aggregate opening root does not match the accepted aggregate commitment record",
+                "local target-decryption aggregate opening root does not match the accepted aggregate commitment record",
             ));
         }
         active_credential_bindings[limb_index] = Some(AggregateOpeningCredentialBinding {
@@ -494,6 +494,7 @@ pub(super) fn read_local_target_decryption_share_witness(
     })
 }
 
+#[cfg(test)]
 pub(super) fn derive_threshold_secret_share_by_limb(
     evaluator_key: &DevelopmentBgvKey,
     target_share_profile_hash: &str,
@@ -550,10 +551,11 @@ pub(super) fn derive_threshold_secret_share_by_limb(
 // generation; the shares are only as private as the seed. The random
 // coefficients are domain-separated by the private seed, the target-share
 // profile hash, and the limb, but NOT by the accepted setup package hash: the
-// accepted package embeds the compact aggregate-threshold commitments derived
+// accepted package embeds the aggregate-threshold commitments derived
 // from these very shares, so folding the package hash into the polynomial would
 // be circular (the shares would depend on a hash that depends on the shares).
 // The constant term is still the secret, so recombination at x=0 is unchanged.
+#[cfg(test)]
 pub(super) fn derive_threshold_secret_share_limb(
     secret: &[i64],
     target_share_profile_hash: &str,
@@ -614,6 +616,7 @@ pub(super) fn target_decryption_smudging_seed_hex(
     )
 }
 
+#[cfg(test)]
 pub(super) fn target_decryption_smudging_witness_value(
     setup_binding: &SetupBinding,
     target_accepted: &TargetAcceptedBinding,
@@ -1322,7 +1325,7 @@ fn target_decryption_smudging_input_report_value(
 // Development target shares now add plaintext-multiple Shamir zero-share masks
 // before release. The report binds numeric parameters, but a production
 // target-decryption path still needs a zero-knowledge proof that the smudged
-// share and compact opening witness satisfy the stated relation.
+// share and opening witness satisfy the stated relation.
 pub(super) fn partial_decryption_by_limb(
     ciphertext: &Ciphertext,
     secret_share_by_limb: &[Vec<u64>],

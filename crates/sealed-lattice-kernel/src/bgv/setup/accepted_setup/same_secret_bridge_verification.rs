@@ -28,7 +28,7 @@ impl VerifiedSameSecretBridgeMaterial {
             .ok_or_else(|| {
                 CanonicalError::new(
                     CanonicalErrorCode::ComponentMismatch,
-                    "compact same-secret bridge material does not cover the trustee roster position",
+                    "same-secret bridge material does not cover the trustee roster position",
                 )
             })
     }
@@ -83,7 +83,7 @@ pub(super) fn verify_optional_same_secret_bridge_statement_set(
             same_secret_bridge_refusal(
                 "sameSecretBridgeEvidenceIncomplete",
                 format!(
-                    "compact same-secret bridge material requires the statement set, proof material set, same-secret statements, and same-secret proofs; missing {missing_fields}"
+                    "same-secret bridge material requires the statement set, proof material set, same-secret statements, and same-secret proofs; missing {missing_fields}"
                 ),
                 "setupPackage",
             )?,
@@ -96,7 +96,7 @@ pub(super) fn verify_optional_same_secret_bridge_statement_set(
             same_secret_bridge_refusal(
                 "sameSecretBridgeMalformed",
                 format!(
-                    "compact same-secret bridge material is malformed: {}",
+                    "same-secret bridge material is malformed: {}",
                     error.message
                 ),
                 "setupPackage",
@@ -112,54 +112,52 @@ fn verify_same_secret_bridge_setup_binding(
     same_secret_consistency: &Value,
     same_secret_proofs: &Value,
 ) -> CanonicalResult<()> {
-    let setup_context = setup_package.get("setupContext").ok_or_else(|| {
-        same_secret_bridge_error("compact same-secret bridge requires setup context")
-    })?;
-    let common_randomness = setup_package.get("commonRandomness").ok_or_else(|| {
-        same_secret_bridge_error("compact same-secret bridge requires common randomness")
-    })?;
+    let setup_context = setup_package
+        .get("setupContext")
+        .ok_or_else(|| same_secret_bridge_error("same-secret bridge requires setup context"))?;
+    let common_randomness = setup_package
+        .get("commonRandomness")
+        .ok_or_else(|| same_secret_bridge_error("same-secret bridge requires common randomness"))?;
     let coefficient_commitment_set = setup_package
         .get("vssPublicCoefficientCommitmentSet")
         .ok_or_else(|| {
-            same_secret_bridge_error(
-                "compact same-secret bridge requires compact coefficient commitment set",
-            )
+            same_secret_bridge_error("same-secret bridge requires the coefficient commitment set")
         })?;
 
     compare_setup_context_binding(
         setup_context,
         statement_set,
-        "compact same-secret bridge statement set",
+        "same-secret bridge statement set",
     )?;
     compare_setup_context_participant_count(
         setup_context,
         statement_verification,
-        "compact same-secret bridge statement set",
+        "same-secret bridge statement set",
     )?;
     compare_setup_context_threshold_degree(
         setup_context,
         statement_verification,
-        "compact same-secret bridge statement set",
+        "same-secret bridge statement set",
     )?;
     compare_required_string(
         hash_at_path(statement_verification, &["publicMatrixSeedHash"])?,
         hash_at_path(common_randomness, &["publicMatrixSeedHash"])?,
-        "compact same-secret bridge statement set publicMatrixSeedHash",
+        "same-secret bridge statement set publicMatrixSeedHash",
     )?;
     compare_required_string(
         hash_at_path(statement_verification, &["coefficientCommitmentRoot"])?,
         hash_at_path(coefficient_commitment_set, &["coefficientCommitmentRoot"])?,
-        "compact same-secret bridge statement set coefficientCommitmentRoot",
+        "same-secret bridge statement set coefficientCommitmentRoot",
     )?;
     compare_required_string(
         hash_at_path(statement_verification, &["sameSecretConsistencyRoot"])?,
         hash_at_path(same_secret_consistency, &["sameSecretConsistencyRoot"])?,
-        "compact same-secret bridge statement set sameSecretConsistencyRoot",
+        "same-secret bridge statement set sameSecretConsistencyRoot",
     )?;
     compare_required_string(
         hash_at_path(statement_verification, &["sameSecretProofSetRoot"])?,
         hash_at_path(same_secret_proofs, &["sameSecretProofSetRoot"])?,
-        "compact same-secret bridge statement set sameSecretProofSetRoot",
+        "same-secret bridge statement set sameSecretProofSetRoot",
     )?;
 
     Ok(())
@@ -171,7 +169,7 @@ pub(in crate::bgv::setup) fn verified_same_secret_bridge_material_from_package(
 ) -> CanonicalResult<VerifiedSameSecretBridgeMaterial> {
     let statement_set = setup_package
         .get(SAME_SECRET_BRIDGE_STATEMENT_SET_FIELD)
-        .ok_or_else(|| same_secret_bridge_error("compact same-secret bridge statement set"))?;
+        .ok_or_else(|| same_secret_bridge_error("same-secret bridge statement set"))?;
     let same_secret_consistency = setup_package
         .get("sameSecretConsistency")
         .ok_or_else(|| same_secret_bridge_error("same-secret consistency"))?;
@@ -197,7 +195,7 @@ pub(in crate::bgv::setup) fn verified_same_secret_bridge_material_from_package(
     )?;
     let proof_material_set = setup_package
         .get(SAME_SECRET_BRIDGE_PROOF_MATERIAL_SET_FIELD)
-        .ok_or_else(|| same_secret_bridge_error("compact same-secret bridge proof material set"))?;
+        .ok_or_else(|| same_secret_bridge_error("same-secret bridge proof material set"))?;
     crate::bgv::setup::verify_vss_same_secret_bridge_proof_material_set_request(
         &same_secret_bridge_verification_request(
             statement_set,
@@ -211,14 +209,14 @@ pub(in crate::bgv::setup) fn verified_same_secret_bridge_material_from_package(
     let ring_degree = usize::try_from(value_u64(statement_set, "ringDegree")?).map_err(|_| {
         CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "compact same-secret bridge ringDegree does not fit usize",
+            "same-secret bridge ringDegree does not fit usize",
         )
     })?;
     let public_matrix_seed_hash = value_string(statement_set, "publicMatrixSeedHash")?;
     compare_required_string(
         public_matrix_seed_hash,
         hash_at_path(&statement_verification, &["publicMatrixSeedHash"])?,
-        "compact same-secret bridge publicMatrixSeedHash",
+        "same-secret bridge publicMatrixSeedHash",
     )?;
     let target_basis_hash = value_string(statement_set, "targetBasisHash")?;
     let statement_records = array_value(statement_set, "statementRecords")?;
@@ -232,7 +230,7 @@ pub(in crate::bgv::setup) fn verified_same_secret_bridge_material_from_package(
         if target_constant_root_records.len() != target_constant_commitment_records.len() {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
-                "compact same-secret bridge target roots and commitments must be aligned",
+                "same-secret bridge target roots and commitments must be aligned",
             ));
         }
         let mut target_rns_primes = Vec::with_capacity(target_constant_root_records.len());
@@ -252,7 +250,7 @@ pub(in crate::bgv::setup) fn verified_same_secret_bridge_material_from_package(
             {
                 return Err(CanonicalError::new(
                     CanonicalErrorCode::MalformedLength,
-                    "compact same-secret bridge target commitments must be ordered by limb",
+                    "same-secret bridge target commitments must be ordered by limb",
                 ));
             }
             let target_rns_prime = value_u64(target_root_record, "rnsPrime")?;
@@ -261,7 +259,7 @@ pub(in crate::bgv::setup) fn verified_same_secret_bridge_material_from_package(
             {
                 return Err(CanonicalError::new(
                     CanonicalErrorCode::ComponentMismatch,
-                    "compact same-secret bridge target prime must match the canonical target basis",
+                    "same-secret bridge target prime must match the canonical target basis",
                 ));
             }
             if value_u64(target_root_record, "shamirCoefficientIndex")? != 0
@@ -269,7 +267,7 @@ pub(in crate::bgv::setup) fn verified_same_secret_bridge_material_from_package(
             {
                 return Err(CanonicalError::new(
                     CanonicalErrorCode::ComponentMismatch,
-                    "compact same-secret bridge target commitment must bind the constant coefficient",
+                    "same-secret bridge target commitment must bind the constant coefficient",
                 ));
             }
             let target_commitment_root =
@@ -277,7 +275,7 @@ pub(in crate::bgv::setup) fn verified_same_secret_bridge_material_from_package(
             let commitment_value = target_commitment_record.get("commitment").ok_or_else(|| {
                 CanonicalError::new(
                     CanonicalErrorCode::InvalidFixture,
-                    "compact same-secret bridge target commitment body is missing",
+                    "same-secret bridge target commitment body is missing",
                 )
             })?;
             let commitment = vss_share_linkage_commitment_from_value(
@@ -332,7 +330,7 @@ pub(in crate::bgv::setup) fn verified_same_secret_bridge_material_from_package(
         {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::ComponentMismatch,
-                "compact same-secret bridge statements contain duplicate trustee roster positions",
+                "same-secret bridge statements contain duplicate trustee roster positions",
             ));
         }
     }
@@ -425,7 +423,7 @@ mod tests {
             }),
             &json!({}),
         )?
-        .refusal_for_test("compact bridge proof material without statement set must refuse");
+        .refusal_for_test("bridge proof material without statement set must refuse");
 
         assert_eq!(response["isValid"], json!(false));
         assert_eq!(
@@ -444,7 +442,7 @@ mod tests {
             }),
             &json!({}),
         )?
-        .refusal_for_test("compact bridge statement set must refuse");
+        .refusal_for_test("bridge statement set must refuse");
 
         assert_eq!(response["isValid"], json!(false));
         assert_eq!(
@@ -465,8 +463,8 @@ mod tests {
             }),
             &json!({}),
         )
-        .expect("complete compact bridge refusal")
-        .refusal_for_test("complete compact bridge evidence must refuse");
+        .expect("complete bridge refusal")
+        .refusal_for_test("complete bridge evidence must refuse");
 
         assert_eq!(response["isValid"], json!(false));
         assert_eq!(
@@ -485,10 +483,10 @@ mod tests {
             match self {
                 SameSecretBridgeVerification::Refused(response) => response,
                 SameSecretBridgeVerification::Absent => {
-                    panic!("{message}: compact bridge evidence was absent")
+                    panic!("{message}: bridge evidence was absent")
                 }
                 SameSecretBridgeVerification::Verified(_) => {
-                    panic!("{message}: compact bridge evidence verified")
+                    panic!("{message}: bridge evidence verified")
                 }
             }
         }

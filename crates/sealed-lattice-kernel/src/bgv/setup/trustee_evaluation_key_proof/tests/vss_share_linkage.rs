@@ -14,7 +14,7 @@ fn vss_share_linkage_proof_round_trips_and_rejects_tampering() {
     let proof =
         prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
 
-    verify_evaluation_key_share(&statement, &proof).expect("verify compact share-linkage proof");
+    verify_evaluation_key_share(&statement, &proof).expect("verify share-linkage proof");
 
     let (invalid_share_statement, mut invalid_share_witness) = vss_share_linkage_instance();
     invalid_share_witness.vss_public_recipient_share_messages_by_item[0][0] =
@@ -39,7 +39,7 @@ fn vss_share_linkage_proof_round_trips_and_rejects_tampering() {
             PROOF_RANDOMNESS_SEED
         )
         .is_err(),
-        "proving must reject non-ternary compact opening randomness"
+        "proving must reject non-ternary opening randomness"
     );
 
     let (mut tampered_statement, _unused_witness) = vss_share_linkage_instance();
@@ -47,26 +47,26 @@ fn vss_share_linkage_proof_round_trips_and_rejects_tampering() {
     let coordinate = &mut tampered_statement
         .vss_share_linkage
         .as_mut()
-        .expect("compact statement")
+        .expect("statement")
         .recipient_share_commitment
         .coordinates_by_commitment_modulus[0][0];
     *coordinate = (*coordinate + 1) % modulus;
 
     assert!(
         verify_evaluation_key_share(&tampered_statement, &proof).is_err(),
-        "tampering with the public compact recipient-share commitment must reject"
+        "tampering with the public recipient-share commitment must reject"
     );
 
     let (mut tampered_opening_statement, _unused_witness) = vss_share_linkage_instance();
     tampered_opening_statement
         .vss_share_linkage
         .as_mut()
-        .expect("compact statement")
+        .expect("statement")
         .coefficient_opening_roots[0] = repeated_hash("fa");
 
     assert!(
         verify_evaluation_key_share(&tampered_opening_statement, &proof).is_err(),
-        "tampering with a compact coefficient opening root must reject"
+        "tampering with a coefficient opening root must reject"
     );
 
     let (mut tampered_additional_statement, _unused_witness) = vss_share_linkage_instance();
@@ -74,7 +74,7 @@ fn vss_share_linkage_proof_round_trips_and_rejects_tampering() {
     let coordinate = &mut tampered_additional_statement
         .vss_share_linkage
         .as_mut()
-        .expect("compact statement")
+        .expect("statement")
         .additional_linkage_items[0]
         .recipient_share_commitment
         .coordinates_by_commitment_modulus[0][0];
@@ -82,7 +82,7 @@ fn vss_share_linkage_proof_round_trips_and_rejects_tampering() {
 
     assert!(
         verify_evaluation_key_share(&tampered_additional_statement, &proof).is_err(),
-        "tampering with an additional compact recipient-share commitment must reject"
+        "tampering with an additional recipient-share commitment must reject"
     );
 }
 
@@ -128,7 +128,7 @@ fn vss_share_linkage_instance() -> (
     let statement = TrusteeEvaluationKeyStatement {
         context: SuccinctSetupProofContext {
             proof_family: super::super::VSS_SHARE_LINKAGE_PROOF_FAMILY.to_string(),
-            ceremony_id: "compact-vss-proof-test".to_string(),
+            ceremony_id: "vss-proof-test".to_string(),
             manifest_hash: repeated_hash("11"),
             roster_hash: repeated_hash("22"),
             trustee_identity: "vss-share-linkage".to_string(),
@@ -188,77 +188,75 @@ fn vss_share_linkage_instance() -> (
         same_secret_bridge: None,
         target_decryption_share: None,
     };
-    statement
-        .validate_shape()
-        .expect("compact share-linkage statement");
-    let layout = LimbColumnLayout::new(&statement, 0).expect("compact share-linkage layout");
+    statement.validate_shape().expect("share-linkage statement");
+    let layout = LimbColumnLayout::new(&statement, 0).expect("share-linkage layout");
     assert_eq!(
         layout.vss_public_coefficient_relation_columns, 8,
-        "three compact share-linkage items bind eight public coefficient commitments"
+        "three share-linkage items bind eight public coefficient commitments"
     );
     assert_eq!(
         layout.vss_public_coefficient_columns, 5,
-        "the compact share-linkage trace keeps one coefficient column per unique commitment opening"
+        "the share-linkage trace keeps one coefficient column per unique commitment opening"
     );
     assert_eq!(
         layout.vss_public_item_columns, 3,
-        "the compact share-linkage statement should batch three carried share relations"
+        "the share-linkage statement should batch three carried share relations"
     );
     assert_eq!(
         layout.base_ring_degree, 128,
-        "the compact share-linkage layout keeps the source ring degree as the proof row count"
+        "the share-linkage layout keeps the source ring degree as the proof row count"
     );
     assert_eq!(
         layout.ring_degree, 128,
-        "compact share-linkage batches items by columns without increasing the trace row count"
+        "share-linkage batches items by columns without increasing the trace row count"
     );
     assert!(
         layout.vss_public_randomness_columns > 0,
-        "opening randomness must remain in the compact opening lincheck"
+        "opening randomness must remain in the opening lincheck"
     );
     assert_eq!(
         layout.consistency_vector_count(),
         layout.vss_public_item_columns
             + layout.vss_public_message_vector_count()
                 * crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT,
-        "compact share-linkage consistency claims must bind per-item carries and message digits"
+        "share-linkage consistency claims must bind per-item carries and message digits"
     );
     assert_eq!(
         layout.claim_count(),
         layout.consistency_vector_count() * layout.consistency_repetitions
     );
     let later_commitment_limb_layout =
-        LimbColumnLayout::new(&statement, 1).expect("compact share-linkage second limb layout");
+        LimbColumnLayout::new(&statement, 1).expect("share-linkage second limb layout");
     assert_eq!(
         layout.vss_public_coefficient_decoder_digit_count(),
         crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT,
-        "compact share-linkage coefficient digits must carry verifier-side decoder rows"
+        "share-linkage coefficient digits must carry verifier-side decoder rows"
     );
     assert_eq!(
         layout.vss_public_recipient_decoder_digit_count(),
         crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT,
-        "compact share-linkage recipient digits must carry verifier-side decoder rows"
+        "share-linkage recipient digits must carry verifier-side decoder rows"
     );
     assert!(
         layout.vss_public_message_encoding_column_count(0)
             > crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT,
-        "compact share-linkage coefficient messages must carry digit and trit columns"
+        "share-linkage coefficient messages must carry digit and trit columns"
     );
     assert!(
         layout.vss_public_message_encoding_column_count(layout.vss_public_coefficient_columns)
             > crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT,
-        "compact share-linkage recipient messages must carry digit and trit columns"
+        "share-linkage recipient messages must carry digit and trit columns"
     );
     assert!(
         layout.vss_public_message_trit_count(layout.vss_public_coefficient_columns, 0) > 0,
-        "compact share-linkage recipient digits must carry trit decoder columns"
+        "share-linkage recipient digits must carry trit decoder columns"
     );
     assert!(
         later_commitment_limb_layout.vss_public_coefficient_decoder_digit_count()
             == crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT
             && later_commitment_limb_layout.vss_public_recipient_decoder_digit_count()
                 == crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT,
-        "later compact share-linkage limbs must also carry decoder-backed encodings"
+        "later share-linkage limbs must also carry decoder-backed encodings"
     );
     assert_eq!(
         later_commitment_limb_layout.consistency_vector_count(),
@@ -268,7 +266,7 @@ fn vss_share_linkage_instance() -> (
     assert_eq!(
         later_commitment_limb_layout.vss_public_message_encoding_columns(),
         layout.vss_public_message_encoding_columns(),
-        "all compact share-linkage limbs should use the same decoder-backed message width"
+        "all share-linkage limbs should use the same decoder-backed message width"
     );
 
     let witness = super::super::relation::TrusteeEvaluationKeyWitness {
@@ -450,7 +448,7 @@ fn share_linkage_item_for_test(
         recipient_share_carry_values
             .iter()
             .any(|carry_value| *carry_value > 0),
-        "compact share-linkage fixture must exercise carried share values"
+        "share-linkage fixture must exercise carried share values"
     );
 
     let coefficient_commitment_computations = coefficient_messages
@@ -462,7 +460,7 @@ fn share_linkage_item_for_test(
                 commitment_computation_for_test(
                     "coefficient",
                     json!({
-                        "testPurpose": "compact-share-linkage-proof",
+                        "testPurpose": "share-linkage-proof",
                         "itemLabel": item_label,
                         "shamirCoefficientIndex": shamir_coefficient_index,
                     }),
@@ -479,7 +477,7 @@ fn share_linkage_item_for_test(
     let recipient_share_commitment_computation = commitment_computation_for_test(
         "recipient-share",
         json!({
-            "testPurpose": "compact-share-linkage-proof",
+            "testPurpose": "share-linkage-proof",
             "itemLabel": item_label,
             "recipientRosterPosition": recipient_roster_position,
         }),
@@ -540,7 +538,7 @@ fn commitment_computation_for_test(
 ) -> CommitmentComputationForTest {
     let message_digit_columns =
         vss_public_canonical_message_digit_columns(message_coefficients, ring_degree)
-            .expect("compact VSS message digit columns");
+            .expect("VSS message digit columns");
     let computation = compute_vss_public_commitment_from_opening(VssPublicCommitmentOpeningInput {
         commitment_role,
         commitment_context: &commitment_context,
@@ -553,20 +551,20 @@ fn commitment_computation_for_test(
         message_coefficient_bound: rns_prime,
         randomness_by_column,
     })
-    .expect("compact VSS commitment");
+    .expect("VSS commitment");
 
     let coordinates_by_commitment_modulus = computation
         .commitment
         .get("commitmentLimbs")
         .and_then(serde_json::Value::as_array)
-        .expect("compact commitment limbs")
+        .expect("commitment limbs")
         .iter()
         .map(|limb| {
             limb.get("coordinates")
                 .and_then(serde_json::Value::as_array)
-                .expect("compact commitment coordinates")
+                .expect("commitment coordinates")
                 .iter()
-                .map(|coordinate| coordinate.as_u64().expect("compact coordinate"))
+                .map(|coordinate| coordinate.as_u64().expect("coordinate"))
                 .collect()
         })
         .collect();

@@ -16,10 +16,6 @@ import {
     acceptedCommonRandomness,
     publicPrivateVssEnvelopeCommitmentSet,
 } from './common-randomness.js';
-import {
-    acceptedSameSecretBridge,
-    acceptedVssPublicMaterial,
-} from './vss-material.js';
 import { acceptedEvaluatorKeySchedule } from './evaluator-schedule.js';
 import {
     acceptedVssShareAcceptances,
@@ -33,6 +29,10 @@ import {
     acceptedSameSecretConsistency,
     acceptedSameSecretProofs,
 } from './same-secret.js';
+import {
+    acceptedSameSecretBridge,
+    acceptedVssPublicMaterial,
+} from './vss-material.js';
 
 import {
     createMlDsaKeyPairFixture,
@@ -250,8 +250,7 @@ async function buildAcceptedShapedSetupPackage(
             vssPublicMaterial.recipientShareCommitmentSet,
         vssPublicAggregateThresholdCommitmentSet:
             vssPublicMaterial.aggregateThresholdCommitmentSet,
-        vssShareLinkageStatement:
-            vssPublicMaterial.shareLinkageStatement,
+        vssShareLinkageStatement: vssPublicMaterial.shareLinkageStatement,
         vssShareLinkageProofMaterialSet:
             vssPublicMaterial.shareLinkageProofMaterialSet,
         privateVssEnvelopeCommitments: publicPrivateVssEnvelopeCommitments,
@@ -261,8 +260,7 @@ async function buildAcceptedShapedSetupPackage(
             vssPublicMaterial.thresholdShareCommitmentBinding,
         sameSecretConsistency,
         sameSecretProofs,
-        sameSecretBridgeStatementSet:
-            sameSecretBridge.bridgeStatementSet,
+        sameSecretBridgeStatementSet: sameSecretBridge.bridgeStatementSet,
         sameSecretBridgeProofMaterialSet:
             sameSecretBridge.bridgeProofMaterialSet,
         publicKeyShares,

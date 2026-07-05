@@ -37,7 +37,7 @@ impl VssPublicMessageEncodingLayout {
             1 => Ok(self.high_digit_trit_count),
             _ => Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "compact VSS message digit index is outside the selected profile",
+                "VSS message digit index is outside the selected profile",
             )),
         }
     }
@@ -59,7 +59,7 @@ impl VssPublicMessageEncodingLayout {
         } else {
             Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "compact VSS message digit index is outside the selected profile",
+                "VSS message digit index is outside the selected profile",
             ))
         }
     }
@@ -73,7 +73,7 @@ impl VssPublicMessageEncodingLayout {
         if trit_index >= trit_count {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "compact VSS message trit index is outside the statement-bound layout",
+                "VSS message trit index is outside the statement-bound layout",
             ));
         }
 
@@ -83,7 +83,7 @@ impl VssPublicMessageEncodingLayout {
                     .ok_or_else(|| {
                         CanonicalError::new(
                             CanonicalErrorCode::MalformedLength,
-                            "compact VSS message trit column offset overflowed",
+                            "VSS message trit column offset overflowed",
                         )
                     })
             })?;
@@ -131,7 +131,7 @@ pub(crate) fn compute_vss_public_commitment_from_opening(
     if input.message_coefficients.len() != input.ring_degree {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "compact VSS message coefficient count must match ringDegree",
+            "VSS message coefficient count must match ringDegree",
         ));
     }
     for (coefficient_index, coefficient) in input.message_coefficients.iter().enumerate() {
@@ -139,7 +139,7 @@ pub(crate) fn compute_vss_public_commitment_from_opening(
             return Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
                 format!(
-                    "compact VSS message coefficient {coefficient_index} must be below messageCoefficientBound"
+                    "VSS message coefficient {coefficient_index} must be below messageCoefficientBound"
                 ),
             ));
         }
@@ -241,39 +241,39 @@ pub(crate) fn verify_vss_public_coefficient_commitment_set_request(
     compare_required_string(
         string_at_path(coefficient_set, &["objectType"])?,
         "VssPublicCoefficientCommitmentSet",
-        "compact VSS coefficient commitment set objectType",
+        "VSS coefficient commitment set objectType",
     )?;
     compare_required_u64(
         unsigned_at_path(coefficient_set, &["objectVersion"])?,
         1,
-        "compact VSS coefficient commitment set objectVersion",
+        "VSS coefficient commitment set objectVersion",
     )?;
     let public_matrix_seed_hash = hash_at_path(coefficient_set, &["publicMatrixSeedHash"])?;
     let participant_count = read_positive_usize_at_path(
         coefficient_set,
         &["participantCount"],
-        "compact VSS coefficient commitment set participantCount",
+        "VSS coefficient commitment set participantCount",
     )?;
     let rns_limb_count = read_positive_usize_at_path(
         coefficient_set,
         &["rnsLimbCount"],
-        "compact VSS coefficient commitment set rnsLimbCount",
+        "VSS coefficient commitment set rnsLimbCount",
     )?;
     let threshold_degree = read_positive_usize_at_path(
         coefficient_set,
         &["thresholdDegree"],
-        "compact VSS coefficient commitment set thresholdDegree",
+        "VSS coefficient commitment set thresholdDegree",
     )?;
     let ring_degree = read_positive_usize_at_path(
         coefficient_set,
         &["ringDegree"],
-        "compact VSS coefficient commitment set ringDegree",
+        "VSS coefficient commitment set ringDegree",
     )?;
     let source_trustee_records = array_at_path(coefficient_set, &["sourceTrusteeRecords"])?;
     if source_trustee_records.len() != participant_count {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "compact VSS coefficient commitment set must contain one source record per participant",
+            "VSS coefficient commitment set must contain one source record per participant",
         ));
     }
     let expected_coefficient_count =
@@ -282,7 +282,7 @@ pub(crate) fn verify_vss_public_coefficient_commitment_set_request(
             .ok_or_else(|| {
                 CanonicalError::new(
                     CanonicalErrorCode::MalformedLength,
-                    "compact VSS coefficient commitment coordinate count overflowed",
+                    "VSS coefficient commitment coordinate count overflowed",
                 )
             })?;
 
@@ -314,7 +314,7 @@ pub(crate) fn verify_vss_public_coefficient_commitment_set_request(
     if expected_set_root != coefficient_commitment_root {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ComponentMismatch,
-            "compact VSS coefficient commitment set root does not match its source records",
+            "VSS coefficient commitment set root does not match its source records",
         ));
     }
 
@@ -337,34 +337,34 @@ pub(crate) fn verify_vss_public_recipient_share_commitment_set_request(
     compare_required_string(
         string_at_path(recipient_set, &["objectType"])?,
         "VssPublicRecipientShareCommitmentSet",
-        "compact VSS recipient-share commitment set objectType",
+        "VSS recipient-share commitment set objectType",
     )?;
     compare_required_u64(
         unsigned_at_path(recipient_set, &["objectVersion"])?,
         1,
-        "compact VSS recipient-share commitment set objectVersion",
+        "VSS recipient-share commitment set objectVersion",
     )?;
     let public_matrix_seed_hash = hash_at_path(recipient_set, &["publicMatrixSeedHash"])?;
     let participant_count = read_positive_usize_at_path(
         recipient_set,
         &["participantCount"],
-        "compact VSS recipient-share commitment set participantCount",
+        "VSS recipient-share commitment set participantCount",
     )?;
     let rns_limb_count = read_positive_usize_at_path(
         recipient_set,
         &["rnsLimbCount"],
-        "compact VSS recipient-share commitment set rnsLimbCount",
+        "VSS recipient-share commitment set rnsLimbCount",
     )?;
     let ring_degree = read_positive_usize_at_path(
         recipient_set,
         &["ringDegree"],
-        "compact VSS recipient-share commitment set ringDegree",
+        "VSS recipient-share commitment set ringDegree",
     )?;
     let source_trustee_records = array_at_path(recipient_set, &["sourceTrusteeRecords"])?;
     if source_trustee_records.len() != participant_count {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "compact VSS recipient-share commitment set must contain one source record per participant",
+            "VSS recipient-share commitment set must contain one source record per participant",
         ));
     }
     let expected_recipient_share_count =
@@ -373,7 +373,7 @@ pub(crate) fn verify_vss_public_recipient_share_commitment_set_request(
             .ok_or_else(|| {
                 CanonicalError::new(
                     CanonicalErrorCode::MalformedLength,
-                    "compact VSS recipient-share commitment coordinate count overflowed",
+                    "VSS recipient-share commitment coordinate count overflowed",
                 )
             })?;
 
@@ -404,7 +404,7 @@ pub(crate) fn verify_vss_public_recipient_share_commitment_set_request(
     if expected_set_root != recipient_share_commitment_root {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ComponentMismatch,
-            "compact VSS recipient-share commitment set root does not match its source records",
+            "VSS recipient-share commitment set root does not match its source records",
         ));
     }
 
@@ -426,28 +426,28 @@ pub(crate) fn verify_vss_public_aggregate_threshold_commitment_set_request(
     compare_required_string(
         string_at_path(aggregate_set, &["objectType"])?,
         "VssPublicAggregateThresholdCommitmentSet",
-        "compact VSS aggregate threshold commitment set objectType",
+        "VSS aggregate threshold commitment set objectType",
     )?;
     compare_required_u64(
         unsigned_at_path(aggregate_set, &["objectVersion"])?,
         1,
-        "compact VSS aggregate threshold commitment set objectVersion",
+        "VSS aggregate threshold commitment set objectVersion",
     )?;
     let public_matrix_seed_hash = hash_at_path(aggregate_set, &["publicMatrixSeedHash"])?;
     let participant_count = read_positive_usize_at_path(
         aggregate_set,
         &["participantCount"],
-        "compact VSS aggregate threshold commitment set participantCount",
+        "VSS aggregate threshold commitment set participantCount",
     )?;
     let rns_limb_count = read_positive_usize_at_path(
         aggregate_set,
         &["rnsLimbCount"],
-        "compact VSS aggregate threshold commitment set rnsLimbCount",
+        "VSS aggregate threshold commitment set rnsLimbCount",
     )?;
     let ring_degree = read_positive_usize_at_path(
         aggregate_set,
         &["ringDegree"],
-        "compact VSS aggregate threshold commitment set ringDegree",
+        "VSS aggregate threshold commitment set ringDegree",
     )?;
     let recipient_records = array_at_path(aggregate_set, &["recipientRecords"])?;
     let expected_recipient_record_count = participant_count
@@ -455,13 +455,13 @@ pub(crate) fn verify_vss_public_aggregate_threshold_commitment_set_request(
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
-                "compact VSS aggregate threshold commitment coordinate count overflowed",
+                "VSS aggregate threshold commitment coordinate count overflowed",
             )
         })?;
     if recipient_records.len() != expected_recipient_record_count {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "compact VSS aggregate threshold commitment set must cover every recipient and RNS limb",
+            "VSS aggregate threshold commitment set must cover every recipient and RNS limb",
         ));
     }
 
@@ -492,7 +492,7 @@ pub(crate) fn verify_vss_public_aggregate_threshold_commitment_set_request(
     if expected_set_root != aggregate_threshold_commitment_root {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ComponentMismatch,
-            "compact VSS aggregate threshold commitment set root does not match its recipient records",
+            "VSS aggregate threshold commitment set root does not match its recipient records",
         ));
     }
 
@@ -514,12 +514,12 @@ pub(crate) fn verify_vss_share_linkage_statement_request(
     compare_required_string(
         string_at_path(statement, &["objectType"])?,
         "VssShareLinkageStatement",
-        "compact VSS share linkage statement objectType",
+        "VSS share linkage statement objectType",
     )?;
     compare_required_u64(
         unsigned_at_path(statement, &["objectVersion"])?,
         1,
-        "compact VSS share linkage statement objectVersion",
+        "VSS share linkage statement objectVersion",
     )?;
     let ceremony_id = read_non_empty_string(statement, "ceremonyId")?;
     let setup_epoch = read_non_empty_string(statement, "setupEpoch")?;
@@ -531,7 +531,7 @@ pub(crate) fn verify_vss_share_linkage_statement_request(
     let ring_degree = read_positive_usize_at_path(
         statement,
         &["ringDegree"],
-        "compact VSS share linkage statement ringDegree",
+        "VSS share linkage statement ringDegree",
     )?;
     let coefficient_commitment_root = hash_at_path(statement, &["coefficientCommitmentRoot"])?;
     let recipient_share_commitment_root =
@@ -541,23 +541,23 @@ pub(crate) fn verify_vss_share_linkage_statement_request(
     let participant_count = read_positive_usize_at_path(
         statement,
         &["participantCount"],
-        "compact VSS share linkage statement participantCount",
+        "VSS share linkage statement participantCount",
     )?;
     let target_rns_limb_count = read_positive_usize_at_path(
         statement,
         &["targetRnsLimbCount"],
-        "compact VSS share linkage statement targetRnsLimbCount",
+        "VSS share linkage statement targetRnsLimbCount",
     )?;
     let threshold_degree = read_positive_usize_at_path(
         statement,
         &["thresholdDegree"],
-        "compact VSS share linkage statement thresholdDegree",
+        "VSS share linkage statement thresholdDegree",
     )?;
     let source_statement_records = array_at_path(statement, &["sourceStatementRecords"])?;
     if source_statement_records.len() != participant_count {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "compact VSS share linkage statement must contain one source statement per participant",
+            "VSS share linkage statement must contain one source statement per participant",
         ));
     }
     let mut verified_source_statement_records = Vec::with_capacity(source_statement_records.len());
@@ -610,7 +610,7 @@ pub(crate) fn verify_vss_share_linkage_statement_request(
     if expected_statement_root != statement_root {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ComponentMismatch,
-            "compact VSS share linkage statement root does not match its bound public roots",
+            "VSS share linkage statement root does not match its bound public roots",
         ));
     }
     verify_vss_share_linkage_evidence(VssShareLinkageEvidenceInput {
@@ -694,7 +694,7 @@ fn verify_vss_share_linkage_evidence(
     else {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "compact VSS share linkage evidence verification requires coefficient, recipient-share, and aggregate-threshold commitment sets",
+            "VSS share linkage evidence verification requires coefficient, recipient-share, and aggregate-threshold commitment sets",
         ));
     };
 
@@ -727,12 +727,12 @@ fn verify_vss_share_linkage_evidence_sets(
     compare_required_string(
         hash_at_path(&coefficient_verification, &["coefficientCommitmentRoot"])?,
         input.statement.coefficient_commitment_root,
-        "compact VSS share linkage evidence coefficientCommitmentRoot",
+        "VSS share linkage evidence coefficientCommitmentRoot",
     )?;
     compare_required_string(
         hash_at_path(&recipient_verification, &["recipientShareCommitmentRoot"])?,
         input.recipient_share_commitment_root,
-        "compact VSS share linkage evidence recipientShareCommitmentRoot",
+        "VSS share linkage evidence recipientShareCommitmentRoot",
     )?;
     compare_required_string(
         hash_at_path(
@@ -740,7 +740,7 @@ fn verify_vss_share_linkage_evidence_sets(
             &["aggregateThresholdCommitmentRoot"],
         )?,
         input.statement.aggregate_threshold_commitment_root,
-        "compact VSS share linkage evidence aggregateThresholdCommitmentRoot",
+        "VSS share linkage evidence aggregateThresholdCommitmentRoot",
     )?;
     for (verification, description) in [
         (&recipient_verification, "recipient-share"),
@@ -749,50 +749,50 @@ fn verify_vss_share_linkage_evidence_sets(
         compare_required_string(
             hash_at_path(verification, &["publicMatrixSeedHash"])?,
             input.statement.public_matrix_seed_hash,
-            &format!("compact VSS share linkage evidence {description} publicMatrixSeedHash"),
+            &format!("VSS share linkage evidence {description} publicMatrixSeedHash"),
         )?;
         compare_required_u64(
             unsigned_at_path(verification, &["participantCount"])?,
             input.statement.participant_count as u64,
-            &format!("compact VSS share linkage evidence {description} participantCount"),
+            &format!("VSS share linkage evidence {description} participantCount"),
         )?;
         compare_required_u64(
             unsigned_at_path(verification, &["ringDegree"])?,
             input.statement.ring_degree as u64,
-            &format!("compact VSS share linkage evidence {description} ringDegree"),
+            &format!("VSS share linkage evidence {description} ringDegree"),
         )?;
         compare_required_u64(
             unsigned_at_path(verification, &["rnsLimbCount"])?,
             input.statement.target_rns_limb_count as u64,
-            &format!("compact VSS share linkage evidence {description} rnsLimbCount"),
+            &format!("VSS share linkage evidence {description} rnsLimbCount"),
         )?;
     }
     compare_required_string(
         hash_at_path(&coefficient_verification, &["publicMatrixSeedHash"])?,
         input.statement.public_matrix_seed_hash,
-        "compact VSS share linkage evidence coefficient publicMatrixSeedHash",
+        "VSS share linkage evidence coefficient publicMatrixSeedHash",
     )?;
     compare_required_u64(
         unsigned_at_path(&coefficient_verification, &["participantCount"])?,
         input.statement.participant_count as u64,
-        "compact VSS share linkage evidence coefficient participantCount",
+        "VSS share linkage evidence coefficient participantCount",
     )?;
     compare_required_u64(
         unsigned_at_path(&coefficient_verification, &["ringDegree"])?,
         input.statement.ring_degree as u64,
-        "compact VSS share linkage evidence coefficient ringDegree",
+        "VSS share linkage evidence coefficient ringDegree",
     )?;
     let coefficient_rns_limb_count = usize_at_path(&coefficient_verification, &["rnsLimbCount"])?;
     if coefficient_rns_limb_count < input.statement.target_rns_limb_count {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "compact VSS share linkage coefficient evidence must cover the target basis",
+            "VSS share linkage coefficient evidence must cover the target basis",
         ));
     }
     compare_required_u64(
         unsigned_at_path(&coefficient_verification, &["thresholdDegree"])?,
         input.statement.threshold_degree as u64,
-        "compact VSS share linkage evidence coefficient thresholdDegree",
+        "VSS share linkage evidence coefficient thresholdDegree",
     )?;
     verify_vss_public_aggregate_threshold_public_sums(
         recipient_share_commitment_set,
@@ -811,7 +811,7 @@ fn verify_vss_share_linkage_evidence_sets(
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "compact VSS share linkage evidence source records must cover every participant",
+            "VSS share linkage evidence source records must cover every participant",
         ));
     }
     for expected_source_position in 0..input.statement.participant_count {
@@ -822,22 +822,22 @@ fn verify_vss_share_linkage_evidence_sets(
         compare_required_string(
             string_at_path(coefficient_source_record, &["sourceTrusteeIdentity"])?,
             source_trustee_identity,
-            "compact VSS share linkage evidence coefficient sourceTrusteeIdentity",
+            "VSS share linkage evidence coefficient sourceTrusteeIdentity",
         )?;
         compare_required_string(
             string_at_path(recipient_source_record, &["sourceTrusteeIdentity"])?,
             source_trustee_identity,
-            "compact VSS share linkage evidence recipient sourceTrusteeIdentity",
+            "VSS share linkage evidence recipient sourceTrusteeIdentity",
         )?;
         compare_required_u64(
             unsigned_at_path(coefficient_source_record, &["sourceTrusteeRosterPosition"])?,
             expected_source_position as u64,
-            "compact VSS share linkage evidence coefficient sourceTrusteeRosterPosition",
+            "VSS share linkage evidence coefficient sourceTrusteeRosterPosition",
         )?;
         compare_required_u64(
             unsigned_at_path(recipient_source_record, &["sourceTrusteeRosterPosition"])?,
             expected_source_position as u64,
-            "compact VSS share linkage evidence recipient sourceTrusteeRosterPosition",
+            "VSS share linkage evidence recipient sourceTrusteeRosterPosition",
         )?;
         compare_required_string(
             hash_at_path(
@@ -845,7 +845,7 @@ fn verify_vss_share_linkage_evidence_sets(
                 &["sourceCoefficientCommitmentRoot"],
             )?,
             hash_at_path(source_statement, &["sourceCoefficientCommitmentRoot"])?,
-            "compact VSS share linkage evidence sourceCoefficientCommitmentRoot",
+            "VSS share linkage evidence sourceCoefficientCommitmentRoot",
         )?;
         compare_required_string(
             hash_at_path(
@@ -853,7 +853,7 @@ fn verify_vss_share_linkage_evidence_sets(
                 &["sourceRecipientShareCommitmentRoot"],
             )?,
             hash_at_path(source_statement, &["sourceRecipientShareCommitmentRoot"])?,
-            "compact VSS share linkage evidence sourceRecipientShareCommitmentRoot",
+            "VSS share linkage evidence sourceRecipientShareCommitmentRoot",
         )?;
         let coefficient_records =
             array_at_path(coefficient_source_record, &["coefficientCommitments"])?;
@@ -866,13 +866,13 @@ fn verify_vss_share_linkage_evidence_sets(
             .ok_or_else(|| {
                 CanonicalError::new(
                     CanonicalErrorCode::MalformedLength,
-                    "compact VSS share linkage target coefficient count overflowed",
+                    "VSS share linkage target coefficient count overflowed",
                 )
             })?;
         if source_statement_coefficient_opening_roots.len() != target_coefficient_record_count {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
-                "compact VSS share linkage evidence coefficient opening roots must cover the source statement",
+                "VSS share linkage evidence coefficient opening roots must cover the source statement",
             ));
         }
         for (opening_root_index, coefficient_record) in coefficient_records
@@ -888,13 +888,13 @@ fn verify_vss_share_linkage_evidence_sets(
                 .ok_or_else(|| {
                     CanonicalError::new(
                         CanonicalErrorCode::InvalidFixture,
-                        "compact VSS share linkage source coefficient opening root must be a string",
+                        "VSS share linkage source coefficient opening root must be a string",
                     )
                 })?;
             compare_required_string(
                 source_statement_opening_root,
                 expected_opening_root,
-                "compact VSS share linkage evidence coefficientOpeningRoots",
+                "VSS share linkage evidence coefficientOpeningRoots",
             )?;
         }
         let recipient_share_records =
@@ -904,7 +904,7 @@ fn verify_vss_share_linkage_evidence_sets(
         if recipient_share_records.len() != source_statement_recipient_share_opening_roots.len() {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
-                "compact VSS share linkage evidence recipient-share opening roots must cover the source statement",
+                "VSS share linkage evidence recipient-share opening roots must cover the source statement",
             ));
         }
         for (opening_root_index, recipient_share_record) in
@@ -918,13 +918,13 @@ fn verify_vss_share_linkage_evidence_sets(
                 .ok_or_else(|| {
                     CanonicalError::new(
                         CanonicalErrorCode::InvalidFixture,
-                        "compact VSS share linkage source recipient-share opening root must be a string",
+                        "VSS share linkage source recipient-share opening root must be a string",
                     )
                 })?;
             compare_required_string(
                 source_statement_opening_root,
                 expected_opening_root,
-                "compact VSS share linkage evidence recipientShareOpeningRoots",
+                "VSS share linkage evidence recipientShareOpeningRoots",
             )?;
         }
     }
@@ -950,7 +950,7 @@ fn verify_vss_public_aggregate_threshold_public_sums(
         .map_err(|_| {
             CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
-                "compact VSS aggregate recipient roster position does not fit usize",
+                "VSS aggregate recipient roster position does not fit usize",
             )
         })?;
         let rns_limb_index =
@@ -958,7 +958,7 @@ fn verify_vss_public_aggregate_threshold_public_sums(
                 |_| {
                     CanonicalError::new(
                         CanonicalErrorCode::MalformedLength,
-                        "compact VSS aggregate RNS limb index does not fit usize",
+                        "VSS aggregate RNS limb index does not fit usize",
                     )
                 },
             )?;
@@ -968,7 +968,7 @@ fn verify_vss_public_aggregate_threshold_public_sums(
             .ok_or_else(|| {
                 CanonicalError::new(
                     CanonicalErrorCode::MalformedLength,
-                    "compact VSS aggregate recipient-share record index overflowed",
+                    "VSS aggregate recipient-share record index overflowed",
                 )
             })?;
         let source_share_commitment_roots =
@@ -976,7 +976,7 @@ fn verify_vss_public_aggregate_threshold_public_sums(
         if source_share_commitment_roots.len() != participant_count {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
-                "compact VSS aggregate threshold commitment source roots must cover every participant",
+                "VSS aggregate threshold commitment source roots must cover every participant",
             ));
         }
         let source_share_opening_roots =
@@ -984,7 +984,7 @@ fn verify_vss_public_aggregate_threshold_public_sums(
         if source_share_opening_roots.len() != participant_count {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
-                "compact VSS aggregate threshold commitment source opening roots must cover every participant",
+                "VSS aggregate threshold commitment source opening roots must cover every participant",
             ));
         }
         let mut source_recipient_share_records = Vec::with_capacity(participant_count);
@@ -996,7 +996,7 @@ fn verify_vss_public_aggregate_threshold_public_sums(
                 .ok_or_else(|| {
                     CanonicalError::new(
                         CanonicalErrorCode::MalformedLength,
-                        "compact VSS recipient-share set is missing a source record",
+                        "VSS recipient-share set is missing a source record",
                     )
                 })?;
             let recipient_share_records =
@@ -1006,7 +1006,7 @@ fn verify_vss_public_aggregate_threshold_public_sums(
                 .ok_or_else(|| {
                     CanonicalError::new(
                         CanonicalErrorCode::MalformedLength,
-                        "compact VSS aggregate threshold commitment references a missing recipient-share commitment",
+                        "VSS aggregate threshold commitment references a missing recipient-share commitment",
                     )
                 })?;
             let share_commitment_root =
@@ -1014,13 +1014,13 @@ fn verify_vss_public_aggregate_threshold_public_sums(
             let expected_root = source_share_commitment_root.as_str().ok_or_else(|| {
                 CanonicalError::new(
                     CanonicalErrorCode::InvalidFixture,
-                    "compact VSS aggregate source share commitment root must be a string",
+                    "VSS aggregate source share commitment root must be a string",
                 )
             })?;
             compare_required_string(
                 share_commitment_root,
                 expected_root,
-                "compact VSS aggregate source share commitment root",
+                "VSS aggregate source share commitment root",
             )?;
             let share_opening_root = hash_at_path(recipient_share_record, &["shareOpeningRoot"])?;
             let expected_opening_root = source_share_opening_roots
@@ -1029,13 +1029,13 @@ fn verify_vss_public_aggregate_threshold_public_sums(
                 .ok_or_else(|| {
                     CanonicalError::new(
                         CanonicalErrorCode::InvalidFixture,
-                        "compact VSS aggregate source share opening root must be a string",
+                        "VSS aggregate source share opening root must be a string",
                     )
                 })?;
             compare_required_string(
                 share_opening_root,
                 expected_opening_root,
-                "compact VSS aggregate source share opening root",
+                "VSS aggregate source share opening root",
             )?;
             source_recipient_share_records.push(recipient_share_record);
         }
@@ -1050,7 +1050,7 @@ fn verify_vss_public_aggregate_threshold_public_sums(
                     aggregate_coordinate.as_u64().ok_or_else(|| {
                         CanonicalError::new(
                             CanonicalErrorCode::InvalidFixture,
-                            "compact VSS aggregate coordinate must be an unsigned integer",
+                            "VSS aggregate coordinate must be an unsigned integer",
                         )
                     })?;
                 let mut summed_coordinate = 0_u128;
@@ -1061,18 +1061,18 @@ fn verify_vss_public_aggregate_threshold_public_sums(
                         .ok_or_else(|| {
                             CanonicalError::new(
                                 CanonicalErrorCode::MalformedLength,
-                                "compact VSS recipient-share commitment is missing a limb",
+                                "VSS recipient-share commitment is missing a limb",
                             )
                         })?;
                     compare_required_u64(
                         unsigned_at_path(limb, &["commitmentModulusIndex"])?,
                         unsigned_at_path(aggregate_limb, &["commitmentModulusIndex"])?,
-                        "compact VSS aggregate source commitment modulus index",
+                        "VSS aggregate source commitment modulus index",
                     )?;
                     compare_required_u64(
                         unsigned_at_path(limb, &["modulus"])?,
                         modulus,
-                        "compact VSS aggregate source commitment modulus",
+                        "VSS aggregate source commitment modulus",
                     )?;
                     let coordinate = array_at_path(limb, &["coordinates"])?
                         .get(coordinate_index)
@@ -1080,7 +1080,7 @@ fn verify_vss_public_aggregate_threshold_public_sums(
                         .ok_or_else(|| {
                             CanonicalError::new(
                                 CanonicalErrorCode::MalformedLength,
-                                "compact VSS recipient-share commitment is missing a coordinate",
+                                "VSS recipient-share commitment is missing a coordinate",
                             )
                         })?;
                     summed_coordinate =
@@ -1089,7 +1089,7 @@ fn verify_vss_public_aggregate_threshold_public_sums(
                 if summed_coordinate as u64 != aggregate_coordinate_value {
                     return Err(CanonicalError::new(
                         CanonicalErrorCode::ComponentMismatch,
-                        "compact VSS aggregate threshold commitment body is not the public sum of recipient-share commitments",
+                        "VSS aggregate threshold commitment body is not the public sum of recipient-share commitments",
                     ));
                 }
             }
@@ -1105,47 +1105,47 @@ fn verify_vss_share_linkage_source_statement(
     compare_required_string(
         string_at_path(input.source_statement_record, &["objectType"])?,
         "VssShareLinkageSourceStatement",
-        "compact VSS share linkage source statement objectType",
+        "VSS share linkage source statement objectType",
     )?;
     compare_required_u64(
         unsigned_at_path(input.source_statement_record, &["objectVersion"])?,
         1,
-        "compact VSS share linkage source statement objectVersion",
+        "VSS share linkage source statement objectVersion",
     )?;
     compare_required_string(
         string_at_path(input.source_statement_record, &["ceremonyId"])?,
         input.statement.ceremony_id,
-        "compact VSS share linkage source statement ceremonyId",
+        "VSS share linkage source statement ceremonyId",
     )?;
     compare_required_string(
         hash_at_path(input.source_statement_record, &["manifestHash"])?,
         input.statement.manifest_hash,
-        "compact VSS share linkage source statement manifestHash",
+        "VSS share linkage source statement manifestHash",
     )?;
     compare_required_string(
         hash_at_path(input.source_statement_record, &["rosterHash"])?,
         input.statement.roster_hash,
-        "compact VSS share linkage source statement rosterHash",
+        "VSS share linkage source statement rosterHash",
     )?;
     compare_required_string(
         hash_at_path(input.source_statement_record, &["setupParametersHash"])?,
         input.statement.setup_parameters_hash,
-        "compact VSS share linkage source statement setupParametersHash",
+        "VSS share linkage source statement setupParametersHash",
     )?;
     compare_required_string(
         string_at_path(input.source_statement_record, &["setupEpoch"])?,
         input.statement.setup_epoch,
-        "compact VSS share linkage source statement setupEpoch",
+        "VSS share linkage source statement setupEpoch",
     )?;
     compare_required_string(
         hash_at_path(input.source_statement_record, &["publicMatrixSeedHash"])?,
         input.statement.public_matrix_seed_hash,
-        "compact VSS share linkage source statement publicMatrixSeedHash",
+        "VSS share linkage source statement publicMatrixSeedHash",
     )?;
     compare_required_string(
         hash_at_path(input.source_statement_record, &["targetBasisHash"])?,
         input.statement.target_basis_hash,
-        "compact VSS share linkage source statement targetBasisHash",
+        "VSS share linkage source statement targetBasisHash",
     )?;
     let source_trustee_identity =
         read_non_empty_string(input.source_statement_record, "sourceTrusteeIdentity")?;
@@ -1155,27 +1155,27 @@ fn verify_vss_share_linkage_source_statement(
             &["sourceTrusteeRosterPosition"],
         )?,
         input.expected_source_position as u64,
-        "compact VSS share linkage source statement sourceTrusteeRosterPosition",
+        "VSS share linkage source statement sourceTrusteeRosterPosition",
     )?;
     compare_required_u64(
         unsigned_at_path(input.source_statement_record, &["participantCount"])?,
         input.statement.participant_count as u64,
-        "compact VSS share linkage source statement participantCount",
+        "VSS share linkage source statement participantCount",
     )?;
     compare_required_u64(
         unsigned_at_path(input.source_statement_record, &["ringDegree"])?,
         input.statement.ring_degree as u64,
-        "compact VSS share linkage source statement ringDegree",
+        "VSS share linkage source statement ringDegree",
     )?;
     compare_required_u64(
         unsigned_at_path(input.source_statement_record, &["targetRnsLimbCount"])?,
         input.statement.target_rns_limb_count as u64,
-        "compact VSS share linkage source statement targetRnsLimbCount",
+        "VSS share linkage source statement targetRnsLimbCount",
     )?;
     compare_required_u64(
         unsigned_at_path(input.source_statement_record, &["thresholdDegree"])?,
         input.statement.threshold_degree as u64,
-        "compact VSS share linkage source statement thresholdDegree",
+        "VSS share linkage source statement thresholdDegree",
     )?;
     compare_required_string(
         hash_at_path(
@@ -1183,7 +1183,7 @@ fn verify_vss_share_linkage_source_statement(
             &["coefficientCommitmentRoot"],
         )?,
         input.statement.coefficient_commitment_root,
-        "compact VSS share linkage source statement coefficientCommitmentRoot",
+        "VSS share linkage source statement coefficientCommitmentRoot",
     )?;
     let source_coefficient_commitment_root = hash_at_path(
         input.source_statement_record,
@@ -1200,7 +1200,7 @@ fn verify_vss_share_linkage_source_statement(
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
-                "compact VSS source statement coefficient opening root count overflowed",
+                "VSS source statement coefficient opening root count overflowed",
             )
         })?;
     let coefficient_opening_roots =
@@ -1208,7 +1208,7 @@ fn verify_vss_share_linkage_source_statement(
     if coefficient_opening_roots.len() != expected_coefficient_opening_root_count {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "compact VSS share linkage source statement coefficientOpeningRoots must cover every target limb and coefficient",
+            "VSS share linkage source statement coefficientOpeningRoots must cover every target limb and coefficient",
         ));
     }
     let verified_coefficient_opening_roots = coefficient_opening_roots
@@ -1219,14 +1219,14 @@ fn verify_vss_share_linkage_source_statement(
                 CanonicalError::new(
                     CanonicalErrorCode::InvalidFixture,
                     format!(
-                        "compact VSS share linkage source statement coefficientOpeningRoots.{opening_root_index} must be a string"
+                        "VSS share linkage source statement coefficientOpeningRoots.{opening_root_index} must be a string"
                     ),
                 )
             })?;
             validate_hash_string(
                 root,
                 &format!(
-                    "compact VSS share linkage source statement coefficientOpeningRoots.{opening_root_index}"
+                    "VSS share linkage source statement coefficientOpeningRoots.{opening_root_index}"
                 ),
             )?;
 
@@ -1240,7 +1240,7 @@ fn verify_vss_share_linkage_source_statement(
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
-                "compact VSS source statement recipient-share opening root count overflowed",
+                "VSS source statement recipient-share opening root count overflowed",
             )
         })?;
     let recipient_share_opening_roots = array_at_path(
@@ -1250,7 +1250,7 @@ fn verify_vss_share_linkage_source_statement(
     if recipient_share_opening_roots.len() != expected_recipient_share_opening_root_count {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "compact VSS share linkage source statement recipientShareOpeningRoots must cover every recipient and target limb",
+            "VSS share linkage source statement recipientShareOpeningRoots must cover every recipient and target limb",
         ));
     }
     let verified_recipient_share_opening_roots = recipient_share_opening_roots
@@ -1261,14 +1261,14 @@ fn verify_vss_share_linkage_source_statement(
                 CanonicalError::new(
                     CanonicalErrorCode::InvalidFixture,
                     format!(
-                        "compact VSS share linkage source statement recipientShareOpeningRoots.{opening_root_index} must be a string"
+                        "VSS share linkage source statement recipientShareOpeningRoots.{opening_root_index} must be a string"
                     ),
                 )
             })?;
             validate_hash_string(
                 root,
                 &format!(
-                    "compact VSS share linkage source statement recipientShareOpeningRoots.{opening_root_index}"
+                    "VSS share linkage source statement recipientShareOpeningRoots.{opening_root_index}"
                 ),
             )?;
 
@@ -1281,7 +1281,7 @@ fn verify_vss_share_linkage_source_statement(
             &["aggregateThresholdCommitmentRoot"],
         )?,
         input.statement.aggregate_threshold_commitment_root,
-        "compact VSS share linkage source statement aggregateThresholdCommitmentRoot",
+        "VSS share linkage source statement aggregateThresholdCommitmentRoot",
     )?;
     let expected_source_statement = json!({
         "objectType": "VssShareLinkageSourceStatement",
@@ -1312,7 +1312,7 @@ fn verify_vss_share_linkage_source_statement(
     if expected_source_statement_root != source_statement_root {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ComponentMismatch,
-            "compact VSS share linkage source statement root does not match its bound roots",
+            "VSS share linkage source statement root does not match its bound roots",
         ));
     }
 
@@ -1336,30 +1336,30 @@ fn verify_vss_public_source_coefficient_record(
     compare_required_string(
         string_at_path(input.source_record, &["objectType"])?,
         "VssPublicSourceCoefficientCommitments",
-        "compact VSS source coefficient commitments objectType",
+        "VSS source coefficient commitments objectType",
     )?;
     compare_required_u64(
         unsigned_at_path(input.source_record, &["objectVersion"])?,
         1,
-        "compact VSS source coefficient commitments objectVersion",
+        "VSS source coefficient commitments objectVersion",
     )?;
     let source_trustee_identity =
         read_non_empty_string(input.source_record, "sourceTrusteeIdentity")?;
     compare_required_u64(
         unsigned_at_path(input.source_record, &["sourceTrusteeRosterPosition"])?,
         input.expected_roster_position as u64,
-        "compact VSS source coefficient commitments sourceTrusteeRosterPosition",
+        "VSS source coefficient commitments sourceTrusteeRosterPosition",
     )?;
     compare_required_string(
         hash_at_path(input.source_record, &["publicMatrixSeedHash"])?,
         input.public_matrix_seed_hash,
-        "compact VSS source coefficient commitments publicMatrixSeedHash",
+        "VSS source coefficient commitments publicMatrixSeedHash",
     )?;
     let coefficient_commitments = array_at_path(input.source_record, &["coefficientCommitments"])?;
     if coefficient_commitments.len() != input.expected_coefficient_count {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "compact VSS source coefficient commitments must cover every RNS limb and Shamir coefficient",
+            "VSS source coefficient commitments must cover every RNS limb and Shamir coefficient",
         ));
     }
 
@@ -1392,7 +1392,7 @@ fn verify_vss_public_source_coefficient_record(
     if expected_source_root != source_coefficient_commitment_root {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ComponentMismatch,
-            "compact VSS source coefficient commitment root does not match its records",
+            "VSS source coefficient commitment root does not match its records",
         ));
     }
 
@@ -1465,7 +1465,7 @@ pub(crate) fn validate_standalone_vss_public_commitment_body(
     if commitment_limbs.len() != VSS_PUBLIC_COMMITMENT_MODULUS_LIMB_INDICES.len() {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            format!("{field_name} commitmentLimbs must cover the compact commitment modulus limbs"),
+            format!("{field_name} commitmentLimbs must cover the commitment modulus limbs"),
         ));
     }
     for (limb_position, commitment_limb) in commitment_limbs.iter().enumerate() {
@@ -1487,7 +1487,7 @@ pub(crate) fn validate_standalone_vss_public_commitment_body(
             return Err(CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
                 format!(
-                    "{field_name} commitmentLimbs.{limb_position}.coordinates length must match the compact output count"
+                    "{field_name} commitmentLimbs.{limb_position}.coordinates length must match the commitment output count"
                 ),
             ));
         }
@@ -1559,42 +1559,42 @@ fn verify_vss_public_coefficient_record(
     compare_required_string(
         string_at_path(input.coefficient_record, &["objectType"])?,
         "VssPublicCoefficientCommitment",
-        "compact VSS coefficient commitment objectType",
+        "VSS coefficient commitment objectType",
     )?;
     compare_required_u64(
         unsigned_at_path(input.coefficient_record, &["objectVersion"])?,
         1,
-        "compact VSS coefficient commitment objectVersion",
+        "VSS coefficient commitment objectVersion",
     )?;
     compare_required_string(
         string_at_path(input.coefficient_record, &["sourceTrusteeIdentity"])?,
         input.source_trustee_identity,
-        "compact VSS coefficient commitment sourceTrusteeIdentity",
+        "VSS coefficient commitment sourceTrusteeIdentity",
     )?;
     compare_required_u64(
         unsigned_at_path(input.coefficient_record, &["sourceTrusteeRosterPosition"])?,
         input.source_trustee_roster_position as u64,
-        "compact VSS coefficient commitment sourceTrusteeRosterPosition",
+        "VSS coefficient commitment sourceTrusteeRosterPosition",
     )?;
     compare_required_string(
         hash_at_path(input.coefficient_record, &["publicMatrixSeedHash"])?,
         input.public_matrix_seed_hash,
-        "compact VSS coefficient commitment publicMatrixSeedHash",
+        "VSS coefficient commitment publicMatrixSeedHash",
     )?;
     compare_required_u64(
         unsigned_at_path(input.coefficient_record, &["rnsLimbIndex"])?,
         input.expected_rns_limb_index as u64,
-        "compact VSS coefficient commitment rnsLimbIndex",
+        "VSS coefficient commitment rnsLimbIndex",
     )?;
     let rns_prime = read_positive_u64_at_path(
         input.coefficient_record,
         &["rnsPrime"],
-        "compact VSS coefficient commitment rnsPrime",
+        "VSS coefficient commitment rnsPrime",
     )?;
     compare_required_u64(
         unsigned_at_path(input.coefficient_record, &["shamirCoefficientIndex"])?,
         input.expected_shamir_coefficient_index as u64,
-        "compact VSS coefficient commitment shamirCoefficientIndex",
+        "VSS coefficient commitment shamirCoefficientIndex",
     )?;
     let coefficient_commitment_root =
         hash_at_path(input.coefficient_record, &["coefficientCommitmentRoot"])?;
@@ -1607,7 +1607,7 @@ fn verify_vss_public_coefficient_record(
         expected_public_matrix_seed_hash: input.public_matrix_seed_hash,
         expected_rns_limb_index: input.expected_rns_limb_index,
         expected_rns_prime: rns_prime,
-        field_name: "compact VSS coefficient commitment commitment",
+        field_name: "VSS coefficient commitment commitment",
     })?;
 
     Ok(json!({
@@ -1639,26 +1639,26 @@ fn verify_vss_public_source_recipient_share_record(
     compare_required_string(
         string_at_path(input.source_record, &["objectType"])?,
         "VssPublicSourceRecipientShareCommitments",
-        "compact VSS source recipient-share commitments objectType",
+        "VSS source recipient-share commitments objectType",
     )?;
     compare_required_u64(
         unsigned_at_path(input.source_record, &["objectVersion"])?,
         1,
-        "compact VSS source recipient-share commitments objectVersion",
+        "VSS source recipient-share commitments objectVersion",
     )?;
     let source_trustee_identity =
         read_non_empty_string(input.source_record, "sourceTrusteeIdentity")?;
     compare_required_u64(
         unsigned_at_path(input.source_record, &["sourceTrusteeRosterPosition"])?,
         input.expected_source_roster_position as u64,
-        "compact VSS source recipient-share commitments sourceTrusteeRosterPosition",
+        "VSS source recipient-share commitments sourceTrusteeRosterPosition",
     )?;
     let recipient_share_commitments =
         array_at_path(input.source_record, &["recipientShareCommitments"])?;
     if recipient_share_commitments.len() != input.expected_recipient_share_count {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "compact VSS source recipient-share commitments must cover every recipient and RNS limb",
+            "VSS source recipient-share commitments must cover every recipient and RNS limb",
         ));
     }
 
@@ -1692,7 +1692,7 @@ fn verify_vss_public_source_recipient_share_record(
     if expected_source_root != source_recipient_share_commitment_root {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ComponentMismatch,
-            "compact VSS source recipient-share commitment root does not match its records",
+            "VSS source recipient-share commitment root does not match its records",
         ));
     }
 
@@ -1721,17 +1721,17 @@ fn verify_vss_public_recipient_share_record(
     compare_required_string(
         string_at_path(input.recipient_share_record, &["objectType"])?,
         "VssPublicRecipientShareCommitment",
-        "compact VSS recipient-share commitment objectType",
+        "VSS recipient-share commitment objectType",
     )?;
     compare_required_u64(
         unsigned_at_path(input.recipient_share_record, &["objectVersion"])?,
         1,
-        "compact VSS recipient-share commitment objectVersion",
+        "VSS recipient-share commitment objectVersion",
     )?;
     compare_required_string(
         string_at_path(input.recipient_share_record, &["sourceTrusteeIdentity"])?,
         input.source_trustee_identity,
-        "compact VSS recipient-share commitment sourceTrusteeIdentity",
+        "VSS recipient-share commitment sourceTrusteeIdentity",
     )?;
     compare_required_u64(
         unsigned_at_path(
@@ -1739,29 +1739,29 @@ fn verify_vss_public_recipient_share_record(
             &["sourceTrusteeRosterPosition"],
         )?,
         input.source_trustee_roster_position as u64,
-        "compact VSS recipient-share commitment sourceTrusteeRosterPosition",
+        "VSS recipient-share commitment sourceTrusteeRosterPosition",
     )?;
     let recipient_identity =
         read_non_empty_string(input.recipient_share_record, "recipientIdentity")?;
     compare_required_u64(
         unsigned_at_path(input.recipient_share_record, &["recipientRosterPosition"])?,
         input.expected_recipient_roster_position as u64,
-        "compact VSS recipient-share commitment recipientRosterPosition",
+        "VSS recipient-share commitment recipientRosterPosition",
     )?;
     compare_required_u64(
         unsigned_at_path(input.recipient_share_record, &["recipientTrusteePoint"])?,
         (input.expected_recipient_roster_position + 1) as u64,
-        "compact VSS recipient-share commitment recipientTrusteePoint",
+        "VSS recipient-share commitment recipientTrusteePoint",
     )?;
     compare_required_u64(
         unsigned_at_path(input.recipient_share_record, &["rnsLimbIndex"])?,
         input.expected_rns_limb_index as u64,
-        "compact VSS recipient-share commitment rnsLimbIndex",
+        "VSS recipient-share commitment rnsLimbIndex",
     )?;
     let rns_prime = read_positive_u64_at_path(
         input.recipient_share_record,
         &["rnsPrime"],
-        "compact VSS recipient-share commitment rnsPrime",
+        "VSS recipient-share commitment rnsPrime",
     )?;
     let share_commitment_root =
         hash_at_path(input.recipient_share_record, &["shareCommitmentRoot"])?;
@@ -1773,7 +1773,7 @@ fn verify_vss_public_recipient_share_record(
         expected_public_matrix_seed_hash: input.public_matrix_seed_hash,
         expected_rns_limb_index: input.expected_rns_limb_index,
         expected_rns_prime: rns_prime,
-        field_name: "compact VSS recipient-share commitment commitment",
+        field_name: "VSS recipient-share commitment commitment",
     })?;
 
     Ok(json!({
@@ -1806,33 +1806,33 @@ fn verify_vss_public_aggregate_threshold_record(
     compare_required_string(
         string_at_path(input.recipient_record, &["objectType"])?,
         "VssPublicAggregateThresholdCommitment",
-        "compact VSS aggregate threshold commitment objectType",
+        "VSS aggregate threshold commitment objectType",
     )?;
     compare_required_u64(
         unsigned_at_path(input.recipient_record, &["objectVersion"])?,
         1,
-        "compact VSS aggregate threshold commitment objectVersion",
+        "VSS aggregate threshold commitment objectVersion",
     )?;
     let recipient_identity = read_non_empty_string(input.recipient_record, "recipientIdentity")?;
     compare_required_u64(
         unsigned_at_path(input.recipient_record, &["recipientRosterPosition"])?,
         input.expected_recipient_roster_position as u64,
-        "compact VSS aggregate threshold commitment recipientRosterPosition",
+        "VSS aggregate threshold commitment recipientRosterPosition",
     )?;
     compare_required_u64(
         unsigned_at_path(input.recipient_record, &["recipientTrusteePoint"])?,
         (input.expected_recipient_roster_position + 1) as u64,
-        "compact VSS aggregate threshold commitment recipientTrusteePoint",
+        "VSS aggregate threshold commitment recipientTrusteePoint",
     )?;
     compare_required_u64(
         unsigned_at_path(input.recipient_record, &["rnsLimbIndex"])?,
         input.expected_rns_limb_index as u64,
-        "compact VSS aggregate threshold commitment rnsLimbIndex",
+        "VSS aggregate threshold commitment rnsLimbIndex",
     )?;
     let rns_prime = read_positive_u64_at_path(
         input.recipient_record,
         &["rnsPrime"],
-        "compact VSS aggregate threshold commitment rnsPrime",
+        "VSS aggregate threshold commitment rnsPrime",
     )?;
     let aggregate_commitment_root =
         hash_at_path(input.recipient_record, &["aggregateCommitmentRoot"])?;
@@ -1844,14 +1844,14 @@ fn verify_vss_public_aggregate_threshold_record(
         expected_public_matrix_seed_hash: input.public_matrix_seed_hash,
         expected_rns_limb_index: input.expected_rns_limb_index,
         expected_rns_prime: rns_prime,
-        field_name: "compact VSS aggregate threshold commitment commitment",
+        field_name: "VSS aggregate threshold commitment commitment",
     })?;
     let source_share_commitment_roots =
         array_at_path(input.recipient_record, &["sourceShareCommitmentRoots"])?;
     if source_share_commitment_roots.len() != input.participant_count {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "compact VSS aggregate threshold commitment must bind one source share commitment root per participant",
+            "VSS aggregate threshold commitment must bind one source share commitment root per participant",
         ));
     }
     let verified_source_share_commitment_roots = source_share_commitment_roots
@@ -1862,14 +1862,14 @@ fn verify_vss_public_aggregate_threshold_record(
                 CanonicalError::new(
                     CanonicalErrorCode::InvalidFixture,
                     format!(
-                        "compact VSS aggregate threshold commitment sourceShareCommitmentRoots.{source_roster_position} must be a string"
+                        "VSS aggregate threshold commitment sourceShareCommitmentRoots.{source_roster_position} must be a string"
                     ),
                 )
             })?;
             validate_hash_string(
                 root,
                 &format!(
-                    "compact VSS aggregate threshold commitment sourceShareCommitmentRoots.{source_roster_position}"
+                    "VSS aggregate threshold commitment sourceShareCommitmentRoots.{source_roster_position}"
                 ),
             )?;
 
@@ -1881,7 +1881,7 @@ fn verify_vss_public_aggregate_threshold_record(
     if source_share_opening_roots.len() != input.participant_count {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "compact VSS aggregate threshold commitment must bind one source share opening root per participant",
+            "VSS aggregate threshold commitment must bind one source share opening root per participant",
         ));
     }
     let verified_source_share_opening_roots = source_share_opening_roots
@@ -1892,14 +1892,14 @@ fn verify_vss_public_aggregate_threshold_record(
                 CanonicalError::new(
                     CanonicalErrorCode::InvalidFixture,
                     format!(
-                        "compact VSS aggregate threshold commitment sourceShareOpeningRoots.{source_roster_position} must be a string"
+                        "VSS aggregate threshold commitment sourceShareOpeningRoots.{source_roster_position} must be a string"
                     ),
                 )
             })?;
             validate_hash_string(
                 root,
                 &format!(
-                    "compact VSS aggregate threshold commitment sourceShareOpeningRoots.{source_roster_position}"
+                    "VSS aggregate threshold commitment sourceShareOpeningRoots.{source_roster_position}"
                 ),
             )?;
 
@@ -1941,7 +1941,7 @@ pub(crate) fn read_vss_public_randomness_by_column(
     if columns.len() != VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            format!("{field_name} must carry the compact randomness column count"),
+            format!("{field_name} must carry the randomness column count"),
         ));
     }
     let randomness_by_column = columns
@@ -1975,7 +1975,7 @@ pub(crate) fn read_vss_public_randomness_by_column(
                     if active_limb_modulus.is_some_and(|modulus| value.unsigned_abs() >= modulus) {
                         return Err(CanonicalError::new(
                             CanonicalErrorCode::InvalidFixture,
-                            "compact VSS opening randomness coefficient exceeds the active limb modulus",
+                            "VSS opening randomness coefficient exceeds the active limb modulus",
                         ));
                     }
 
@@ -2163,16 +2163,14 @@ fn vss_public_message_digit_columns_for_opening(
     if message_digit_columns.len() != VSS_PUBLIC_MESSAGE_DIGIT_COUNT {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "compact VSS messageDigitColumns must contain the selected message digit count",
+            "VSS messageDigitColumns must contain the selected message digit count",
         ));
     }
     for (digit_index, column) in message_digit_columns.iter().enumerate() {
         if column.len() != ring_degree {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
-                format!(
-                    "compact VSS messageDigitColumns.{digit_index} length must match ringDegree"
-                ),
+                format!("VSS messageDigitColumns.{digit_index} length must match ringDegree"),
             ));
         }
     }
@@ -2185,7 +2183,7 @@ fn vss_public_message_digit_columns_for_opening(
                 .ok_or_else(|| {
                     CanonicalError::new(
                         CanonicalErrorCode::MalformedLength,
-                        "compact VSS message digit weight overflowed",
+                        "VSS message digit weight overflowed",
                     )
                 })
         })
@@ -2198,7 +2196,7 @@ fn vss_public_message_digit_columns_for_opening(
                 .ok_or_else(|| {
                     CanonicalError::new(
                         CanonicalErrorCode::MalformedLength,
-                        "compact VSS message digit column decoding overflowed",
+                        "VSS message digit column decoding overflowed",
                     )
                 })?;
         }
@@ -2208,7 +2206,7 @@ fn vss_public_message_digit_columns_for_opening(
             return Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
                 format!(
-                    "compact VSS message digit columns do not decode to messageCoefficients.{coefficient_index}"
+                    "VSS message digit columns do not decode to messageCoefficients.{coefficient_index}"
                 ),
             ));
         }
@@ -2224,7 +2222,7 @@ fn validate_vss_public_commitment_role(commitment_role: &str) -> CanonicalResult
         | "aggregate-threshold-share"
         | "target-decryption-smudging-polynomial-coefficient" => Ok(()),
         _ => Err(invalid_vss_public_input(
-            "compact VSS commitment role is not supported",
+            "VSS commitment role is not supported",
         )),
     }
 }
@@ -2281,7 +2279,7 @@ fn validate_vss_public_randomness_columns(
     if randomness_by_column.len() != VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            format!("{field_name} must contain the compact randomness column count"),
+            format!("{field_name} must contain the randomness column count"),
         ));
     }
     for (column_index, column) in randomness_by_column.iter().enumerate() {
@@ -2296,7 +2294,7 @@ fn validate_vss_public_randomness_columns(
                 if coefficient.unsigned_abs() >= modulus {
                     return Err(CanonicalError::new(
                         CanonicalErrorCode::InvalidFixture,
-                        "compact VSS opening randomness coefficient exceeds the active limb modulus",
+                        "VSS opening randomness coefficient exceeds the active limb modulus",
                     ));
                 }
             }
@@ -2377,7 +2375,7 @@ fn vss_public_message_digit_column_label_str(digit_index: usize) -> CanonicalRes
         1 => Ok("message:1"),
         _ => Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "compact VSS message digit index is outside the selected profile",
+            "VSS message digit index is outside the selected profile",
         )),
     }
 }
@@ -2404,7 +2402,7 @@ pub(in crate::bgv::setup) fn vss_public_message_coverage_terms_per_coordinate(
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
-                "compact VSS message coverage term count overflowed",
+                "VSS message coverage term count overflowed",
             )
         })
 }
@@ -2418,7 +2416,7 @@ fn vss_public_commitment_modulus_position(
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "compact VSS commitment modulus index is outside the selected profile",
+                "VSS commitment modulus index is outside the selected profile",
             )
         })
 }
@@ -2436,7 +2434,7 @@ fn vss_public_covered_message_ring_coefficient_index(
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
-                "compact VSS message coverage coordinate index overflowed",
+                "VSS message coverage coordinate index overflowed",
             )
         })?;
     coverage_term_index
@@ -2445,7 +2443,7 @@ fn vss_public_covered_message_ring_coefficient_index(
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
-                "compact VSS message coverage coefficient index overflowed",
+                "VSS message coverage coefficient index overflowed",
             )
         })
 }
@@ -2456,7 +2454,7 @@ fn vss_public_randomness_column_label(column_index: usize) -> CanonicalResult<&'
         1 => Ok("randomness:1"),
         _ => Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "compact VSS randomness column index is outside the selected profile",
+            "VSS randomness column index is outside the selected profile",
         )),
     }
 }
@@ -2468,7 +2466,7 @@ pub(in crate::bgv::setup) fn vss_public_message_digit_weight(
     if digit_index >= VSS_PUBLIC_MESSAGE_DIGIT_COUNT {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "compact VSS message digit index is outside the selected profile",
+            "VSS message digit index is outside the selected profile",
         ));
     }
     let mut weight = 1_u128;
@@ -2487,13 +2485,13 @@ pub(in crate::bgv::setup) fn vss_public_message_digits(
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
-                "compact VSS message digit range overflowed",
+                "VSS message digit range overflowed",
             )
         })?;
     if u128::from(coefficient) >= maximum_coefficient {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "compact VSS message coefficient exceeds the full-message coordinate range",
+            "VSS message coefficient exceeds the full-message coordinate range",
         ));
     }
 
@@ -2506,14 +2504,14 @@ pub(in crate::bgv::setup) fn vss_public_message_digits(
     if remaining != 0 {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "compact VSS message coefficient did not fit the selected digit range",
+            "VSS message coefficient did not fit the selected digit range",
         ));
     }
 
     Ok(digits)
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "target-decryption-development-commands"))]
 pub(crate) fn vss_public_canonical_message_digit_columns(
     message_coefficients: &[u64],
     ring_degree: usize,
@@ -2521,7 +2519,7 @@ pub(crate) fn vss_public_canonical_message_digit_columns(
     if message_coefficients.len() != ring_degree {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "compact VSS message coefficient count must match ringDegree",
+            "VSS message coefficient count must match ringDegree",
         ));
     }
     let mut columns = vec![vec![0_u64; ring_degree]; VSS_PUBLIC_MESSAGE_DIGIT_COUNT];
@@ -2552,7 +2550,7 @@ pub(in crate::bgv::setup) fn vss_public_message_digit_bound(
     if message_bound_exclusive == 0 {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "compact VSS message coefficient bound must be positive",
+            "VSS message coefficient bound must be positive",
         ));
     }
     let maximum_coefficient = u128::from(VSS_PUBLIC_MESSAGE_DIGIT_BASE)
@@ -2560,13 +2558,13 @@ pub(in crate::bgv::setup) fn vss_public_message_digit_bound(
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
-                "compact VSS message digit range overflowed",
+                "VSS message digit range overflowed",
             )
         })?;
     if u128::from(message_bound_exclusive) > maximum_coefficient {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "compact VSS message coefficient bound exceeds the two-digit message range",
+            "VSS message coefficient bound exceeds the two-digit message range",
         ));
     }
 
@@ -2578,13 +2576,13 @@ pub(in crate::bgv::setup) fn vss_public_message_digit_bound(
             u64::try_from(high_digit_bound).map_err(|_| {
                 CanonicalError::new(
                     CanonicalErrorCode::MalformedLength,
-                    "compact VSS high digit bound overflowed",
+                    "VSS high digit bound overflowed",
                 )
             })
         }
         _ => Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "compact VSS message digit index is outside the selected profile",
+            "VSS message digit index is outside the selected profile",
         )),
     }
 }
@@ -2595,7 +2593,7 @@ pub(in crate::bgv::setup) fn vss_public_message_encoding_layout(
     if message_bound_exclusive == 0 {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "compact VSS message coefficient bound must be positive",
+            "VSS message coefficient bound must be positive",
         ));
     }
     let maximum_coefficient = u128::from(VSS_PUBLIC_MESSAGE_DIGIT_BASE)
@@ -2603,13 +2601,13 @@ pub(in crate::bgv::setup) fn vss_public_message_encoding_layout(
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
-                "compact VSS message digit range overflowed",
+                "VSS message digit range overflowed",
             )
         })?;
     if u128::from(message_bound_exclusive) > maximum_coefficient {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "compact VSS message coefficient bound exceeds the two-digit message range",
+            "VSS message coefficient bound exceeds the two-digit message range",
         ));
     }
     let low_digit_bound =
@@ -2628,7 +2626,7 @@ fn vss_public_trit_count_for_bound(bound_exclusive: u128) -> CanonicalResult<usi
     if bound_exclusive == 0 {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "compact VSS trit bound must be positive",
+            "VSS trit bound must be positive",
         ));
     }
     let mut represented_bound = 1_u128;
@@ -2637,13 +2635,13 @@ fn vss_public_trit_count_for_bound(bound_exclusive: u128) -> CanonicalResult<usi
         represented_bound = represented_bound.checked_mul(3).ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
-                "compact VSS trit bound overflowed",
+                "VSS trit bound overflowed",
             )
         })?;
         trit_count = trit_count.checked_add(1).ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
-                "compact VSS trit count overflowed",
+                "VSS trit count overflowed",
             )
         })?;
     }
@@ -2659,14 +2657,14 @@ pub(in crate::bgv::setup) fn vss_public_message_digit_trits_for_count(
         bound.checked_mul(3).ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
-                "compact VSS message trit bound overflowed",
+                "VSS message trit bound overflowed",
             )
         })
     })?;
     if digit >= digit_bound {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "compact VSS message digit exceeds the statement-bound trit range",
+            "VSS message digit exceeds the statement-bound trit range",
         ));
     }
     let mut remaining = digit;
@@ -2678,7 +2676,7 @@ pub(in crate::bgv::setup) fn vss_public_message_digit_trits_for_count(
     if remaining != 0 {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "compact VSS message digit did not fit the selected trit count",
+            "VSS message digit did not fit the selected trit count",
         ));
     }
 
@@ -2742,7 +2740,7 @@ fn cached_projection_terms(
         .map_err(|_| {
             CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "compact VSS projection-term cache is unavailable",
+                "VSS projection-term cache is unavailable",
             )
         })?
         .get(&cache_key)
@@ -2796,7 +2794,7 @@ fn cached_projection_terms(
     let mut cache_guard = cache.lock().map_err(|_| {
         CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "compact VSS projection-term cache is unavailable",
+            "VSS projection-term cache is unavailable",
         )
     })?;
     let cached_terms = cache_guard
@@ -2839,7 +2837,7 @@ fn sample_matrix_residue(input: SampleMatrixInput<'_>) -> CanonicalResult<u64> {
         block_index = block_index.checked_add(1).ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
-                "compact VSS matrix-residue sampler block index overflowed",
+                "VSS matrix-residue sampler block index overflowed",
             )
         })?;
     }
@@ -2878,7 +2876,7 @@ fn sample_projection_index(input: SampleProjectionInput<'_>) -> CanonicalResult<
         block_index = block_index.checked_add(1).ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
-                "compact VSS projection-index sampler block index overflowed",
+                "VSS projection-index sampler block index overflowed",
             )
         })?;
     }
@@ -3027,7 +3025,7 @@ fn vss_public_opening_payload_hash(
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
-                "compact VSS opening payload length overflowed",
+                "VSS opening payload length overflowed",
             )
         })?;
     let mut bytes = Vec::with_capacity(word_count * 8);
@@ -3133,24 +3131,24 @@ pub(in crate::bgv::setup) mod tests {
         tampered_opening["messageCoefficients"][3] = json!(12_u64);
         assert!(
             compute_vss_public_commitment_from_opening_request(&tampered_opening).is_err(),
-            "tampered compact opening must reject"
+            "tampered opening must reject"
         );
 
         let mut wrong_shape = opening_request();
         wrong_shape["randomnessByColumn"][0] = json!([0, 1]);
         assert!(
             compute_vss_public_commitment_from_opening_request(&wrong_shape).is_err(),
-            "wrong compact randomness shape must reject"
+            "wrong randomness shape must reject"
         );
 
         let mut missing_digit_columns = opening_request();
         missing_digit_columns
             .as_object_mut()
-            .expect("compact opening request")
+            .expect("opening request")
             .remove("messageDigitColumns");
         assert!(
             compute_vss_public_commitment_from_opening_request(&missing_digit_columns).is_err(),
-            "compact opening command must require message digit columns"
+            "opening command must require message digit columns"
         );
 
         Ok(())
@@ -3186,7 +3184,7 @@ pub(in crate::bgv::setup) mod tests {
         mismatched_digits_request["messageDigitColumns"][0][2] = json!(carried_message - 1);
         assert!(
             compute_vss_public_commitment_from_opening_request(&mismatched_digits_request).is_err(),
-            "explicit compact VSS message digit columns must decode to the declared message coefficients"
+            "explicit VSS message digit columns must decode to the declared message coefficients"
         );
 
         Ok(())
@@ -3221,7 +3219,7 @@ pub(in crate::bgv::setup) mod tests {
                 "coefficientCommitmentSet": tampered_set,
             }))
             .is_err(),
-            "tampered compact coefficient commitment root must reject"
+            "tampered coefficient commitment root must reject"
         );
 
         Ok(())
@@ -3256,7 +3254,7 @@ pub(in crate::bgv::setup) mod tests {
                 "recipientShareCommitmentSet": tampered_set,
             }))
             .is_err(),
-            "tampered compact recipient-share commitment root must reject"
+            "tampered recipient-share commitment root must reject"
         );
 
         Ok(())
@@ -3290,7 +3288,7 @@ pub(in crate::bgv::setup) mod tests {
                 "aggregateThresholdCommitmentSet": tampered_set,
             }))
             .is_err(),
-            "tampered compact aggregate threshold commitment root must reject"
+            "tampered aggregate threshold commitment root must reject"
         );
 
         Ok(())
@@ -3329,12 +3327,12 @@ pub(in crate::bgv::setup) mod tests {
             "command": "VerifyVssShareLinkageStatement",
             "statement": forged_source_statement.clone(),
         }))
-        .expect_err("compact share-linkage statement verification must require evidence sets");
+        .expect_err("share-linkage statement verification must require evidence sets");
         assert!(
             missing_evidence_error
                 .to_string()
                 .contains("requires coefficient, recipient-share, and aggregate-threshold"),
-            "missing compact share-linkage evidence should report the required evidence sets: {missing_evidence_error}"
+            "missing share-linkage evidence should report the required evidence sets: {missing_evidence_error}"
         );
         assert!(
             verify_vss_share_linkage_statement_request(&json!({
@@ -3400,7 +3398,7 @@ pub(in crate::bgv::setup) mod tests {
             "commitmentContext": {
                 "objectType": "VssPublicAggregateThresholdShareCommitmentContext",
                 "objectVersion": 1,
-                "ceremonyId": "compact-vss-test",
+                "ceremonyId": "vss-test",
                 "manifestHash": "1".repeat(128),
                 "rosterHash": "2".repeat(128),
                 "setupParametersHash": "3".repeat(128),
@@ -3427,12 +3425,13 @@ pub(in crate::bgv::setup) mod tests {
         })
     }
 
-    // Small final check for the VSS compaction: the public commitment body is a
-    // fixed set of field residues (three commitment limbs times sixteen output
-    // coordinates), independent of the ring degree, whereas an uncompacted VSS
-    // coefficient commitment stores one residue per ring coefficient. The
-    // constant-size property is the point of the compaction; the reduction
-    // against the first-profile ring is measured and printed, never gated on.
+    // Small final check for the public VSS commitment: the public commitment
+    // body is a fixed set of field residues (three commitment limbs times
+    // sixteen output coordinates), independent of the ring degree, whereas a
+    // full-ring VSS coefficient commitment stores one residue per ring
+    // coefficient. The constant-size property is the point of the public
+    // commitment; the reduction against the first-profile ring is measured and
+    // printed, never gated on.
     #[test]
     fn vss_public_commitment_body_is_constant_size_across_ring_degrees() -> CanonicalResult<()> {
         let mut encoded_byte_lengths = Vec::new();
@@ -3452,7 +3451,7 @@ pub(in crate::bgv::setup) mod tests {
                 "commitmentContext": {
                     "objectType": "VssPublicAggregateThresholdShareCommitmentContext",
                     "objectVersion": 1,
-                    "ceremonyId": "compact-vss-measurement",
+                    "ceremonyId": "vss-measurement",
                     "manifestHash": "1".repeat(128),
                     "rosterHash": "2".repeat(128),
                     "setupParametersHash": "3".repeat(128),
@@ -3477,16 +3476,16 @@ pub(in crate::bgv::setup) mod tests {
 
         assert_eq!(
             encoded_byte_lengths[0], encoded_byte_lengths[1],
-            "compact commitment body must be a constant size independent of the ring degree"
+            "public commitment body must be a constant size independent of the ring degree"
         );
-        let compact_body_bytes = encoded_byte_lengths[0];
-        // Model an uncompacted VSS coefficient commitment over the first-profile
+        let public_commitment_body_bytes = encoded_byte_lengths[0];
+        // Model a full-ring VSS coefficient commitment over the first-profile
         // ring: one ~6-byte residue per ring coefficient per commitment limb.
         let modeled_full_bytes_per_commitment =
             crate::bgv::parameters::POLYNOMIAL_DEGREE as u64 * 3 * 6;
         println!(
-            "sealed-lattice-compact-vss-measurement compact-body-bytes={compact_body_bytes} modeled-full-bytes-per-commitment={modeled_full_bytes_per_commitment} reduction={}x",
-            modeled_full_bytes_per_commitment / compact_body_bytes.max(1)
+            "sealed-lattice-vss-public-commitment-measurement public-commitment-body-bytes={public_commitment_body_bytes} modeled-full-bytes-per-commitment={modeled_full_bytes_per_commitment} reduction={}x",
+            modeled_full_bytes_per_commitment / public_commitment_body_bytes.max(1)
         );
 
         Ok(())
@@ -3511,7 +3510,7 @@ pub(in crate::bgv::setup) mod tests {
         let mut coefficient_set = set_without_root;
         coefficient_set["coefficientCommitmentRoot"] = json!(
             crate::hashing::derive_canonical_object_hash(&coefficient_set)
-                .expect("compact coefficient set root")
+                .expect("coefficient set root")
         );
 
         Ok(coefficient_set)
@@ -3561,7 +3560,7 @@ pub(in crate::bgv::setup) mod tests {
         let mut source_record = source_without_root;
         source_record["sourceCoefficientCommitmentRoot"] = json!(
             crate::hashing::derive_canonical_object_hash(&source_record)
-                .expect("compact source coefficient root")
+                .expect("source coefficient root")
         );
 
         Ok(source_record)
@@ -3686,7 +3685,7 @@ pub(in crate::bgv::setup) mod tests {
         let mut recipient_set = set_without_root;
         recipient_set["recipientShareCommitmentRoot"] = json!(
             crate::hashing::derive_canonical_object_hash(&recipient_set)
-                .expect("compact recipient-share set root")
+                .expect("recipient-share set root")
         );
 
         Ok(recipient_set)
@@ -3715,7 +3714,7 @@ pub(in crate::bgv::setup) mod tests {
         let mut source_record = source_without_root;
         source_record["sourceRecipientShareCommitmentRoot"] = json!(
             crate::hashing::derive_canonical_object_hash(&source_record)
-                .expect("compact source recipient-share root")
+                .expect("source recipient-share root")
         );
 
         Ok(source_record)
@@ -3784,7 +3783,7 @@ pub(in crate::bgv::setup) mod tests {
         let mut aggregate_set = set_without_root;
         aggregate_set["aggregateThresholdCommitmentRoot"] = json!(
             crate::hashing::derive_canonical_object_hash(&aggregate_set)
-                .expect("compact aggregate threshold set root")
+                .expect("aggregate threshold set root")
         );
 
         Ok(aggregate_set)
@@ -3845,7 +3844,7 @@ pub(in crate::bgv::setup) mod tests {
             .ok_or_else(|| {
                 CanonicalError::new(
                     CanonicalErrorCode::MalformedLength,
-                    "compact VSS fixture recipient-share index overflowed",
+                    "VSS fixture recipient-share index overflowed",
                 )
             })?;
         let source_records = recipient_set["sourceTrusteeRecords"]
@@ -3853,7 +3852,7 @@ pub(in crate::bgv::setup) mod tests {
             .ok_or_else(|| {
                 CanonicalError::new(
                     CanonicalErrorCode::InvalidFixture,
-                    "compact VSS fixture recipient source records must be an array",
+                    "VSS fixture recipient source records must be an array",
                 )
             })?;
         source_records
@@ -3864,7 +3863,7 @@ pub(in crate::bgv::setup) mod tests {
                     .ok_or_else(|| {
                         CanonicalError::new(
                             CanonicalErrorCode::InvalidFixture,
-                            "compact VSS fixture recipient-share records must be an array",
+                            "VSS fixture recipient-share records must be an array",
                         )
                     })?;
                 recipient_share_records
@@ -3873,7 +3872,7 @@ pub(in crate::bgv::setup) mod tests {
                     .ok_or_else(|| {
                         CanonicalError::new(
                             CanonicalErrorCode::MalformedLength,
-                            "compact VSS fixture recipient-share record is missing",
+                            "VSS fixture recipient-share record is missing",
                         )
                     })
             })
@@ -3889,7 +3888,7 @@ pub(in crate::bgv::setup) mod tests {
         let first_source_share_record = source_share_records.first().ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
-                "compact VSS fixture aggregate body must have source share records",
+                "VSS fixture aggregate body must have source share records",
             )
         })?;
         let first_commitment_limbs = first_source_share_record["commitment"]["commitmentLimbs"]
@@ -3897,7 +3896,7 @@ pub(in crate::bgv::setup) mod tests {
             .ok_or_else(|| {
                 CanonicalError::new(
                     CanonicalErrorCode::InvalidFixture,
-                    "compact VSS fixture commitment limbs must be an array",
+                    "VSS fixture commitment limbs must be an array",
                 )
             })?;
         let mut commitment_limbs = Vec::new();
@@ -3907,13 +3906,13 @@ pub(in crate::bgv::setup) mod tests {
                 .ok_or_else(|| {
                     CanonicalError::new(
                         CanonicalErrorCode::InvalidFixture,
-                        "compact VSS fixture commitment modulus index must be an unsigned integer",
+                        "VSS fixture commitment modulus index must be an unsigned integer",
                     )
                 })?;
             let modulus = first_limb["modulus"].as_u64().ok_or_else(|| {
                 CanonicalError::new(
                     CanonicalErrorCode::InvalidFixture,
-                    "compact VSS fixture commitment modulus must be an unsigned integer",
+                    "VSS fixture commitment modulus must be an unsigned integer",
                 )
             })?;
             let mut summed_coordinates = Vec::new();
@@ -3926,7 +3925,7 @@ pub(in crate::bgv::setup) mod tests {
                         .ok_or_else(|| {
                             CanonicalError::new(
                                 CanonicalErrorCode::MalformedLength,
-                                "compact VSS fixture source commitment limb is missing",
+                                "VSS fixture source commitment limb is missing",
                             )
                         })?;
                     let coordinate = source_limb["coordinates"]
@@ -3936,7 +3935,7 @@ pub(in crate::bgv::setup) mod tests {
                         .ok_or_else(|| {
                             CanonicalError::new(
                                 CanonicalErrorCode::InvalidFixture,
-                                "compact VSS fixture source commitment coordinate must be an unsigned integer",
+                                "VSS fixture source commitment coordinate must be an unsigned integer",
                             )
                         })?;
                     summed_coordinate =
@@ -3975,10 +3974,8 @@ pub(in crate::bgv::setup) mod tests {
         // The primitive statement verifier binds targetBasisHash as data; the
         // canonical-basis check lives in the same-secret bridge, so any
         // well-formed deterministic hash serves the fixture here.
-        let target_basis_hash = crate::hashing::hash512_hex(
-            "sealed-lattice-compact-vss-test/target-basis",
-            &[b"target-basis"],
-        );
+        let target_basis_hash =
+            crate::hashing::hash512_hex("sealed-lattice-vss-test/target-basis", &[b"target-basis"]);
         let source_statement_records = (0..2_usize)
             .map(|source_trustee_roster_position| {
                 let coefficient_source_record =
@@ -4005,7 +4002,7 @@ pub(in crate::bgv::setup) mod tests {
                 let source_statement_without_root = json!({
                     "objectType": "VssShareLinkageSourceStatement",
                     "objectVersion": 1,
-                    "ceremonyId": "compact-vss-test",
+                    "ceremonyId": "vss-test",
                     "manifestHash": "1".repeat(128),
                     "rosterHash": "2".repeat(128),
                     "setupParametersHash": "3".repeat(128),
@@ -4037,7 +4034,7 @@ pub(in crate::bgv::setup) mod tests {
         let statement_without_root = json!({
             "objectType": "VssShareLinkageStatement",
             "objectVersion": 1,
-            "ceremonyId": "compact-vss-test",
+            "ceremonyId": "vss-test",
             "manifestHash": "1".repeat(128),
             "rosterHash": "2".repeat(128),
             "setupParametersHash": "3".repeat(128),
@@ -4069,7 +4066,7 @@ pub(in crate::bgv::setup) mod tests {
             .ok_or_else(|| {
                 CanonicalError::new(
                     CanonicalErrorCode::InvalidFixture,
-                    "compact VSS share linkage source statement must be an object",
+                    "VSS share linkage source statement must be an object",
                 )
             })?
             .clone();
@@ -4090,7 +4087,7 @@ pub(in crate::bgv::setup) mod tests {
             .ok_or_else(|| {
                 CanonicalError::new(
                     CanonicalErrorCode::InvalidFixture,
-                    "compact VSS share linkage statement must be an object",
+                    "VSS share linkage statement must be an object",
                 )
             })?
             .clone();
@@ -4111,7 +4108,7 @@ pub(in crate::bgv::setup) mod tests {
             .ok_or_else(|| {
                 CanonicalError::new(
                     CanonicalErrorCode::InvalidFixture,
-                    "compact VSS fixture aggregate modulus must be an unsigned integer",
+                    "VSS fixture aggregate modulus must be an unsigned integer",
                 )
             })?;
         let coordinate = aggregate_record["commitment"]["commitmentLimbs"][0]["coordinates"][0]
@@ -4119,7 +4116,7 @@ pub(in crate::bgv::setup) mod tests {
             .ok_or_else(|| {
                 CanonicalError::new(
                     CanonicalErrorCode::InvalidFixture,
-                    "compact VSS fixture aggregate coordinate must be an unsigned integer",
+                    "VSS fixture aggregate coordinate must be an unsigned integer",
                 )
             })?;
         aggregate_record["commitment"]["commitmentLimbs"][0]["coordinates"][0] =
@@ -4138,7 +4135,7 @@ pub(in crate::bgv::setup) mod tests {
             .ok_or_else(|| {
                 CanonicalError::new(
                     CanonicalErrorCode::InvalidFixture,
-                    "compact VSS aggregate threshold commitment set must be an object",
+                    "VSS aggregate threshold commitment set must be an object",
                 )
             })?
             .clone();

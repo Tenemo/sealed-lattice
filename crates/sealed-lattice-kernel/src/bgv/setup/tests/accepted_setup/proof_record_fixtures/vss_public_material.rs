@@ -16,7 +16,7 @@ const SAME_SECRET_BRIDGE_PROOF_BYTES_HASH_DOMAIN: &str =
 const SAME_SECRET_PROOF_FAMILY: &str = "same-secret-linkage-anchor";
 const SAME_SECRET_RELATION: &str =
     "vss-constant-commitments-open-to-one-short-secret-across-q-share-limbs";
-const SAME_SECRET_BRIDGE_RELATION: &str = "target-basis compact constant coefficient commitments bind to the same signed ternary trustee secret as the data-basis same-secret proof";
+const SAME_SECRET_BRIDGE_RELATION: &str = "target-basis constant coefficient commitments bind to the same signed ternary trustee secret as the data-basis same-secret proof";
 const SAME_SECRET_BRIDGE_INTEGER_SUPPORT: &str = "the bridge proof must show one centered ternary integer coefficient vector whose signed coefficients reduce into every bound data-basis and target-basis limb";
 const SAME_SECRET_BRIDGE_SIGNED_REPRESENTATIVE_CONVENTION: &str = "coefficients are interpreted as signed representatives before reduction into each data-basis or target-basis RNS prime";
 const SAME_SECRET_BRIDGE_TARGET_BASIS_LIMB_ORDER: &str = "target constant roots are ordered by contiguous target-basis rnsLimbIndex values starting at zero and bind the listed target-basis prime";
@@ -57,7 +57,7 @@ pub(in super::super) fn vss_public_coefficient_commitment_set_object(
         "sourceTrusteeRecords": source_trustee_records,
     });
     set["coefficientCommitmentRoot"] = serde_json::json!(
-        derive_canonical_object_hash(&set).expect("compact VSS coefficient commitment root")
+        derive_canonical_object_hash(&set).expect("VSS coefficient commitment root")
     );
 
     set
@@ -101,7 +101,7 @@ fn vss_public_source_coefficient_record(
     });
     source_record["sourceCoefficientCommitmentRoot"] = serde_json::json!(
         derive_canonical_object_hash(&source_record)
-            .expect("compact VSS source coefficient commitment root")
+            .expect("VSS source coefficient commitment root")
     );
 
     source_record
@@ -130,7 +130,7 @@ fn vss_public_coefficient_commitment_record(
             &coefficient_message,
             ring_degree,
         )
-        .expect("compact VSS coefficient message digits");
+        .expect("VSS coefficient message digits");
     let randomness_by_column = vss_public_coefficient_randomness_i64_fixture(
         source_trustee_roster_position,
         rns_limb_index,
@@ -166,7 +166,7 @@ fn vss_public_coefficient_commitment_record(
                 randomness_by_column: &randomness_by_column,
             },
         )
-        .expect("compact VSS coefficient commitment");
+        .expect("VSS coefficient commitment");
 
     serde_json::json!({
         "objectType": "VssPublicCoefficientCommitment",
@@ -192,7 +192,7 @@ pub(in super::super) fn vss_public_recipient_share_commitment_set_object(
     let participant_count = participant_count_from_package(package);
     let ring_degree = package["vssPublicCoefficientCommitmentSet"]["ringDegree"]
         .as_u64()
-        .expect("compact coefficient ring degree") as usize;
+        .expect("coefficient ring degree") as usize;
     let source_trustee_records = (0..participant_count)
         .map(|source_trustee_roster_position| {
             vss_public_source_recipient_share_record(
@@ -213,8 +213,7 @@ pub(in super::super) fn vss_public_recipient_share_commitment_set_object(
         "sourceTrusteeRecords": source_trustee_records,
     });
     recipient_set["recipientShareCommitmentRoot"] = serde_json::json!(
-        derive_canonical_object_hash(&recipient_set)
-            .expect("compact VSS recipient-share commitment root")
+        derive_canonical_object_hash(&recipient_set).expect("VSS recipient-share commitment root")
     );
 
     recipient_set
@@ -253,7 +252,7 @@ fn vss_public_source_recipient_share_record(
     });
     source_record["sourceRecipientShareCommitmentRoot"] = serde_json::json!(
         derive_canonical_object_hash(&source_record)
-            .expect("compact VSS source recipient-share commitment root")
+            .expect("VSS source recipient-share commitment root")
     );
 
     source_record
@@ -273,7 +272,7 @@ fn vss_public_recipient_share_commitment_record(
     let rns_prime = DATA_PRIMES[rns_limb_index];
     let threshold_degree = package["vssPublicCoefficientCommitmentSet"]["thresholdDegree"]
         .as_u64()
-        .expect("compact coefficient threshold degree");
+        .expect("coefficient threshold degree");
     let (share_coefficients, _carry_witnesses) = vss_public_recipient_share_values_and_carries(
         source_trustee_roster_position,
         recipient_roster_position,
@@ -287,7 +286,7 @@ fn vss_public_recipient_share_commitment_record(
             &share_coefficients,
             ring_degree,
         )
-        .expect("compact VSS recipient-share message digits");
+        .expect("VSS recipient-share message digits");
     let randomness_by_column = vss_public_recipient_share_randomness_i64_fixture(
         source_trustee_roster_position,
         recipient_roster_position,
@@ -326,7 +325,7 @@ fn vss_public_recipient_share_commitment_record(
                 randomness_by_column: &randomness_by_column,
             },
         )
-        .expect("compact VSS recipient-share commitment");
+        .expect("VSS recipient-share commitment");
 
     serde_json::json!({
         "objectType": "VssPublicRecipientShareCommitment",
@@ -353,7 +352,7 @@ pub(in super::super) fn vss_public_aggregate_threshold_commitment_set_object(
     let participant_count = participant_count_from_package(package);
     let ring_degree = package["vssPublicRecipientShareCommitmentSet"]["ringDegree"]
         .as_u64()
-        .expect("compact recipient-share ring degree") as usize;
+        .expect("recipient-share ring degree") as usize;
     let recipient_records = (0..participant_count)
         .flat_map(|recipient_roster_position| {
             (0..DATA_PRIMES.len()).map(move |rns_limb_index| {
@@ -377,8 +376,7 @@ pub(in super::super) fn vss_public_aggregate_threshold_commitment_set_object(
         "recipientRecords": recipient_records,
     });
     aggregate_set["aggregateThresholdCommitmentRoot"] = serde_json::json!(
-        derive_canonical_object_hash(&aggregate_set)
-            .expect("compact aggregate threshold commitment root")
+        derive_canonical_object_hash(&aggregate_set).expect("aggregate threshold commitment root")
     );
 
     aggregate_set
@@ -437,8 +435,8 @@ fn vss_public_aggregate_threshold_commitment_record(
         ring_degree,
         &source_share_records,
     );
-    let aggregate_commitment_root = derive_canonical_object_hash(&commitment)
-        .expect("compact aggregate threshold commitment root");
+    let aggregate_commitment_root =
+        derive_canonical_object_hash(&commitment).expect("aggregate threshold commitment root");
     let aggregate_opening_root = derive_canonical_object_hash(&serde_json::json!({
         "objectType": "VssPublicAggregateThresholdOpening",
         "objectVersion": 1,
@@ -450,7 +448,7 @@ fn vss_public_aggregate_threshold_commitment_record(
         "ringDegree": ring_degree,
         "sourceShareOpeningRoots": source_share_opening_roots,
     }))
-    .expect("compact aggregate threshold opening root");
+    .expect("aggregate threshold opening root");
 
     serde_json::json!({
         "objectType": "VssPublicAggregateThresholdCommitment",
@@ -484,12 +482,12 @@ fn vss_public_sum_commitment_body(
         "commitmentRole": commitment_role,
         "commitmentContext": commitment_context,
     }))
-    .expect("compact VSS commitment context hash");
+    .expect("VSS commitment context hash");
     let first_commitment =
         &source_share_records.first().expect("source share record")["commitment"];
     let commitment_limbs = first_commitment["commitmentLimbs"]
         .as_array()
-        .expect("compact source commitment limbs")
+        .expect("source commitment limbs")
         .iter()
         .enumerate()
         .map(|(limb_position, limb)| {
@@ -547,10 +545,10 @@ pub(in super::super) fn vss_share_linkage_statement_object(
     let participant_count = participant_count_from_package(package);
     let threshold_degree = package["vssPublicCoefficientCommitmentSet"]["thresholdDegree"]
         .as_u64()
-        .expect("compact threshold degree");
+        .expect("threshold degree");
     let ring_degree = package["vssPublicCoefficientCommitmentSet"]["ringDegree"]
         .as_u64()
-        .expect("compact ring degree");
+        .expect("ring degree");
     let source_statement_records = (0..participant_count)
         .map(|source_trustee_roster_position| {
             vss_share_linkage_source_statement_record(
@@ -581,7 +579,7 @@ pub(in super::super) fn vss_share_linkage_statement_object(
         "sourceStatementRecords": source_statement_records,
     });
     statement["statementRoot"] = serde_json::json!(
-        derive_canonical_object_hash(&statement).expect("compact VSS share-linkage statement root")
+        derive_canonical_object_hash(&statement).expect("VSS share-linkage statement root")
     );
 
     statement
@@ -601,7 +599,7 @@ fn vss_share_linkage_source_statement_record(
         vss_public_recipient_source_record_from_package(package, source_trustee_roster_position);
     let coefficient_opening_roots = coefficient_source_record["coefficientCommitments"]
         .as_array()
-        .expect("compact coefficient commitments")
+        .expect("coefficient commitments")
         .iter()
         .take(
             DATA_PRIMES.len()
@@ -613,7 +611,7 @@ fn vss_share_linkage_source_statement_record(
         .collect::<Vec<_>>();
     let recipient_share_opening_roots = recipient_source_record["recipientShareCommitments"]
         .as_array()
-        .expect("compact recipient-share commitments")
+        .expect("recipient-share commitments")
         .iter()
         .map(|record| record["shareOpeningRoot"].clone())
         .collect::<Vec<_>>();
@@ -642,7 +640,7 @@ fn vss_share_linkage_source_statement_record(
     });
     source_statement["sourceStatementRoot"] = serde_json::json!(
         derive_canonical_object_hash(&source_statement)
-            .expect("compact VSS share-linkage source statement root")
+            .expect("VSS share-linkage source statement root")
     );
 
     source_statement
@@ -681,7 +679,7 @@ pub(in super::super) fn vss_share_linkage_proof_material_set_object(
     });
     proof_material_set["proofMaterialSetRoot"] = serde_json::json!(
         derive_canonical_object_hash(&proof_material_set)
-            .expect("compact VSS share-linkage proof material set root")
+            .expect("VSS share-linkage proof material set root")
     );
 
     proof_material_set
@@ -724,7 +722,7 @@ fn vss_share_linkage_proof_record(
         proof_record_index,
     );
     let proof_bytes = crate::transcript_core::decode_hex(&proof_bytes_hex)
-        .expect("compact VSS share-linkage proof bytes");
+        .expect("VSS share-linkage proof bytes");
     let mut proof_record = serde_json::json!({
         "objectType": "VssShareLinkageProofRecord",
         "objectVersion": 1,
@@ -738,8 +736,7 @@ fn vss_share_linkage_proof_record(
         "proofBytesBase64": crate::transcript_core::encode_standard_base64(&proof_bytes),
     });
     proof_record["proofRecordRoot"] = serde_json::json!(
-        derive_canonical_object_hash(&proof_record)
-            .expect("compact VSS share-linkage proof record root")
+        derive_canonical_object_hash(&proof_record).expect("VSS share-linkage proof record root")
     );
 
     proof_record
@@ -751,7 +748,7 @@ fn vss_share_linkage_proof_statement(
 ) -> serde_json::Value {
     let mut primary_item = item_records
         .first()
-        .expect("compact VSS primary share-linkage item")
+        .expect("VSS primary share-linkage item")
         .clone();
     primary_item["publicMatrixSeedHash"] =
         package["vssShareLinkageStatement"]["publicMatrixSeedHash"].clone();
@@ -873,19 +870,19 @@ fn vss_share_linkage_proof_bytes_hex(
         "proofRecordIndex": proof_record_index,
         "vssShareLinkage": vss_share_linkage,
     }))
-    .expect("compact VSS share-linkage proof checkpoint key");
+    .expect("VSS share-linkage proof checkpoint key");
     let proof_bytes = checkpointed_anchor_proof_bytes(
         VSS_SHARE_LINKAGE_PROOF_CHECKPOINT_DIRECTORY,
         &checkpoint_key,
         || {
             let generated = generate_vss_share_linkage_proof_from_request(&request)
-                .expect("compact VSS share-linkage proof");
+                .expect("VSS share-linkage proof");
             crate::transcript_core::decode_hex(
                 generated["proofBytesHex"]
                     .as_str()
-                    .expect("compact VSS share-linkage proof bytes hex"),
+                    .expect("VSS share-linkage proof bytes hex"),
             )
-            .expect("compact VSS share-linkage proof bytes")
+            .expect("VSS share-linkage proof bytes")
         },
     );
 
@@ -899,7 +896,7 @@ fn vss_share_linkage_statement_items(
     items.extend(
         vss_share_linkage["additionalLinkageItems"]
             .as_array()
-            .expect("compact VSS additional linkage items")
+            .expect("VSS additional linkage items")
             .iter(),
     );
 
@@ -914,7 +911,7 @@ fn vss_share_linkage_coefficient_slots(
     for item in linkage_items {
         let rns_limb_index = item["sourceRnsLimbIndex"]
             .as_u64()
-            .expect("compact linkage item limb") as usize;
+            .expect("linkage item limb") as usize;
         for shamir_coefficient_index in 0..threshold_degree {
             let coefficient_slot = (rns_limb_index, shamir_coefficient_index);
             if !coefficient_slots.contains(&coefficient_slot) {
@@ -935,10 +932,10 @@ fn vss_share_linkage_proof_generation_request(
     let statement = &package["vssShareLinkageStatement"];
     let ring_degree = statement["ringDegree"]
         .as_u64()
-        .expect("compact share-linkage ring degree") as usize;
+        .expect("share-linkage ring degree") as usize;
     let threshold_degree = statement["thresholdDegree"]
         .as_u64()
-        .expect("compact share-linkage threshold degree");
+        .expect("share-linkage threshold degree");
     let linkage_items = vss_share_linkage_statement_items(vss_share_linkage);
     let coefficient_slots = vss_share_linkage_coefficient_slots(&linkage_items, threshold_degree);
     let coefficient_messages_by_shamir_index = coefficient_slots
@@ -952,7 +949,7 @@ fn vss_share_linkage_proof_generation_request(
                 ring_degree,
             )
             .into_iter()
-            .map(|value| i64::try_from(value).expect("compact coefficient message fits i64"))
+            .map(|value| i64::try_from(value).expect("coefficient message fits i64"))
             .collect::<Vec<_>>()
         })
         .collect::<Vec<_>>();
@@ -973,17 +970,17 @@ fn vss_share_linkage_proof_generation_request(
     for item in &linkage_items {
         let item_source_trustee_roster_position = item["sourceTrusteeRosterPosition"]
             .as_u64()
-            .expect("compact linkage item source trustee");
+            .expect("linkage item source trustee");
         assert_eq!(
             item_source_trustee_roster_position, source_trustee_roster_position,
-            "compact linkage proof batch must contain one source trustee"
+            "linkage proof batch must contain one source trustee"
         );
         let recipient_roster_position = item["recipientRosterPosition"]
             .as_u64()
-            .expect("compact linkage item recipient");
+            .expect("linkage item recipient");
         let rns_limb_index = item["sourceRnsLimbIndex"]
             .as_u64()
-            .expect("compact linkage item limb") as usize;
+            .expect("linkage item limb") as usize;
         let (share_coefficients, carry_witnesses) = vss_public_recipient_share_values_and_carries(
             source_trustee_roster_position,
             recipient_roster_position,
@@ -995,7 +992,7 @@ fn vss_share_linkage_proof_generation_request(
         recipient_share_messages_by_item.push(
             share_coefficients
                 .into_iter()
-                .map(|value| i64::try_from(value).expect("compact recipient share fits i64"))
+                .map(|value| i64::try_from(value).expect("recipient share fits i64"))
                 .collect::<Vec<_>>(),
         );
         recipient_share_opening_randomness_by_item.push(
@@ -1014,14 +1011,14 @@ fn vss_share_linkage_proof_generation_request(
         "sourceTrusteeRosterPosition": source_trustee_roster_position,
         "proofRecordIndex": proof_record_index,
     }))
-    .expect("compact VSS share-linkage proof randomness seed");
+    .expect("VSS share-linkage proof randomness seed");
     let proof_randomness_nonce_hex = derive_canonical_object_hash(&serde_json::json!({
         "objectType": "VssPublicMaterialFixtureRandomness",
         "fixture": "vss-share-linkage-proof-randomness-nonce",
         "sourceTrusteeRosterPosition": source_trustee_roster_position,
         "proofRecordIndex": proof_record_index,
     }))
-    .expect("compact VSS share-linkage proof randomness nonce");
+    .expect("VSS share-linkage proof randomness nonce");
 
     serde_json::json!({
         "context": {
@@ -1038,14 +1035,14 @@ fn vss_share_linkage_proof_generation_request(
         "coefficientMessagesByShamirIndex": coefficient_messages_by_shamir_index,
         "recipientShareMessages": recipient_share_messages_by_item
             .first()
-            .expect("primary compact recipient share messages"),
+            .expect("primary recipient share messages"),
         "coefficientOpeningRandomnessByShamirIndex": coefficient_opening_randomness_by_shamir_index,
         "recipientShareOpeningRandomness": recipient_share_opening_randomness_by_item
             .first()
-            .expect("primary compact recipient share opening randomness"),
+            .expect("primary recipient share opening randomness"),
         "carryWitnesses": carry_witnesses_by_item
             .first()
-            .expect("primary compact carry witnesses"),
+            .expect("primary carry witnesses"),
         "recipientShareMessagesByItem": recipient_share_messages_by_item,
         "recipientShareOpeningRandomnessByItem": recipient_share_opening_randomness_by_item,
         "carryWitnessesByItem": carry_witnesses_by_item,
@@ -1078,11 +1075,11 @@ fn vss_public_recipient_share_commitment_record_from_package(
 ) -> serde_json::Value {
     let rns_limb_count = package["vssPublicRecipientShareCommitmentSet"]["rnsLimbCount"]
         .as_u64()
-        .expect("compact recipient-share limb count") as usize;
+        .expect("recipient-share limb count") as usize;
     let record_index = (recipient_roster_position as usize)
         .checked_mul(rns_limb_count)
         .and_then(|offset| offset.checked_add(rns_limb_index))
-        .expect("compact recipient-share record index");
+        .expect("recipient-share record index");
     package["vssPublicRecipientShareCommitmentSet"]["sourceTrusteeRecords"]
         [source_trustee_roster_position as usize]["recipientShareCommitments"][record_index]
         .clone()
@@ -1132,7 +1129,7 @@ fn vss_public_recipient_share_values_and_carries(
         share_coefficients.push((lifted_share % u128::from(rns_prime)) as u64);
         carry_witnesses.push(
             i64::try_from(lifted_share / u128::from(rns_prime))
-                .expect("compact recipient share carry fits i64"),
+                .expect("recipient share carry fits i64"),
         );
     }
 
@@ -1174,7 +1171,7 @@ pub(in super::super) fn same_secret_bridge_statement_set_object(
         .expect("public matrix seed hash");
     let statement_records = coefficient_set["sourceTrusteeRecords"]
         .as_array()
-        .expect("compact source coefficient records")
+        .expect("source coefficient records")
         .iter()
         .enumerate()
         .map(|(source_trustee_roster_position, source_record)| {
@@ -1213,7 +1210,7 @@ pub(in super::super) fn same_secret_bridge_statement_set_object(
     });
     statement_set["sameSecretBridgeStatementSetRoot"] = serde_json::json!(
         derive_canonical_object_hash(&statement_set)
-            .expect("compact same-secret bridge statement set root")
+            .expect("same-secret bridge statement set root")
     );
 
     statement_set
@@ -1221,21 +1218,21 @@ pub(in super::super) fn same_secret_bridge_statement_set_object(
 
 fn same_secret_bridge_statement_record(
     package: &serde_json::Value,
-    compact_source_record: &serde_json::Value,
+    source_coefficient_record: &serde_json::Value,
     target_basis_hash: &str,
     source_trustee_roster_position: usize,
 ) -> serde_json::Value {
     let setup_context = &package["setupContext"];
-    let source_trustee_identity = compact_source_record["sourceTrusteeIdentity"]
+    let source_trustee_identity = source_coefficient_record["sourceTrusteeIdentity"]
         .as_str()
         .expect("source trustee identity");
     let same_secret_statement =
         &package["sameSecretConsistency"]["statementRecords"][source_trustee_roster_position];
     let same_secret_proof =
         &package["sameSecretProofs"]["proofRecords"][source_trustee_roster_position];
-    let coefficient_commitments = compact_source_record["coefficientCommitments"]
+    let coefficient_commitments = source_coefficient_record["coefficientCommitments"]
         .as_array()
-        .expect("compact coefficient commitments");
+        .expect("coefficient commitments");
     let threshold_degree = package["vssPublicCoefficientCommitmentSet"]["thresholdDegree"]
         .as_u64()
         .expect("threshold degree") as usize;
@@ -1243,7 +1240,7 @@ fn same_secret_bridge_statement_record(
         .map(|rns_limb_index| {
             let coefficient_record_index = rns_limb_index
                 .checked_mul(threshold_degree)
-                .expect("compact coefficient record index");
+                .expect("coefficient record index");
             let coefficient_record = &coefficient_commitments[coefficient_record_index];
             (
                 serde_json::json!({
@@ -1291,8 +1288,7 @@ fn same_secret_bridge_statement_record(
         "relation": SAME_SECRET_BRIDGE_RELATION,
     });
     statement_record["sameSecretBridgeStatementRoot"] = serde_json::json!(
-        derive_canonical_object_hash(&statement_record)
-            .expect("compact same-secret bridge statement root")
+        derive_canonical_object_hash(&statement_record).expect("same-secret bridge statement root")
     );
 
     statement_record
@@ -1305,7 +1301,7 @@ pub(in super::super) fn same_secret_bridge_proof_material_set_object(
     let statement_set = &package["sameSecretBridgeStatementSet"];
     let proof_records = statement_set["statementRecords"]
         .as_array()
-        .expect("compact same-secret bridge statement records")
+        .expect("same-secret bridge statement records")
         .iter()
         .enumerate()
         .map(|(trustee_roster_position, statement_record)| {
@@ -1341,7 +1337,7 @@ pub(in super::super) fn same_secret_bridge_proof_material_set_object(
     });
     proof_material_set["proofMaterialSetRoot"] = serde_json::json!(
         derive_canonical_object_hash(&proof_material_set)
-            .expect("compact same-secret bridge proof material set root")
+            .expect("same-secret bridge proof material set root")
     );
 
     proof_material_set
@@ -1360,7 +1356,7 @@ fn same_secret_bridge_proof_record(
         trustee_roster_position,
     );
     let proof_bytes = crate::transcript_core::decode_hex(&proof_bytes_hex)
-        .expect("compact same-secret bridge proof bytes");
+        .expect("same-secret bridge proof bytes");
     let mut proof_record = serde_json::json!({
         "objectType": "VssSameSecretBridgeProofRecord",
         "objectVersion": 1,
@@ -1373,8 +1369,7 @@ fn same_secret_bridge_proof_record(
         "proofBytesBase64": crate::transcript_core::encode_standard_base64(&proof_bytes),
     });
     proof_record["proofRecordRoot"] = serde_json::json!(
-        derive_canonical_object_hash(&proof_record)
-            .expect("compact same-secret bridge proof record root")
+        derive_canonical_object_hash(&proof_record).expect("same-secret bridge proof record root")
     );
 
     proof_record
@@ -1394,19 +1389,19 @@ fn same_secret_bridge_proof_bytes_hex(
     );
     let checkpoint_key = statement_record["sameSecretBridgeStatementRoot"]
         .as_str()
-        .expect("compact same-secret bridge statement root");
+        .expect("same-secret bridge statement root");
     let proof_bytes = checkpointed_anchor_proof_bytes(
         SAME_SECRET_BRIDGE_PROOF_CHECKPOINT_DIRECTORY,
         checkpoint_key,
         || {
             let generated = generate_same_secret_bridge_proof_from_request(&request)
-                .expect("compact same-secret bridge proof");
+                .expect("same-secret bridge proof");
             crate::transcript_core::decode_hex(
                 generated["proofBytesHex"]
                     .as_str()
-                    .expect("compact same-secret bridge proof bytes hex"),
+                    .expect("same-secret bridge proof bytes hex"),
             )
-            .expect("compact same-secret bridge proof bytes")
+            .expect("same-secret bridge proof bytes")
         },
     );
 
@@ -1422,10 +1417,10 @@ fn same_secret_bridge_proof_generation_request(
     let setup_context = &package["setupContext"];
     let target_roots = statement_record["targetConstantCoefficientCommitmentRoots"]
         .as_array()
-        .expect("compact bridge target roots");
+        .expect("bridge target roots");
     let target_commitments = statement_record["targetConstantCoefficientCommitments"]
         .as_array()
-        .expect("compact bridge target commitments");
+        .expect("bridge target commitments");
     let target_rns_primes = target_roots
         .iter()
         .map(|root_record| root_record["rnsPrime"].clone())
@@ -1440,7 +1435,7 @@ fn same_secret_bridge_proof_generation_request(
         .collect::<Vec<_>>();
     let ring_degree = statement_record["ringDegree"]
         .as_u64()
-        .expect("compact bridge ring degree") as usize;
+        .expect("bridge ring degree") as usize;
     let opening_randomness_by_limb = (0..target_roots.len())
         .map(|rns_limb_index| {
             vss_public_coefficient_randomness_i64_fixture(
@@ -1468,13 +1463,13 @@ fn same_secret_bridge_proof_generation_request(
         "fixture": "same-secret-bridge-proof-randomness",
         "trusteeRosterPosition": trustee_roster_position,
     }))
-    .expect("compact same-secret bridge proof randomness seed");
+    .expect("same-secret bridge proof randomness seed");
     let proof_randomness_nonce_hex = derive_canonical_object_hash(&serde_json::json!({
         "objectType": "VssPublicMaterialFixtureRandomness",
         "fixture": "same-secret-bridge-proof-randomness-nonce",
         "trusteeRosterPosition": trustee_roster_position,
     }))
-    .expect("compact same-secret bridge proof randomness nonce");
+    .expect("same-secret bridge proof randomness nonce");
     let mut request = serde_json::json!({
         "context": {
             "ceremonyId": setup_context["ceremonyId"],
@@ -1564,7 +1559,7 @@ fn vss_public_material_fixture_verifies_generated_fields() {
             "proofMaterialSet": package["vssShareLinkageProofMaterialSet"],
         }),
     )
-    .expect("generated compact VSS public material verifies");
+    .expect("generated VSS public material verifies");
 
     assert_eq!(verification["ok"], serde_json::json!(true));
     assert_eq!(
@@ -1577,10 +1572,10 @@ fn vss_public_material_fixture_verifies_generated_fields() {
     );
     assert!(
         verification["proofMaterialSetRoot"].is_string(),
-        "generated compact VSS proof material set must bind a root"
+        "generated VSS proof material set must bind a root"
     );
 
-    // The compact same-secret bridge links the generated compact coefficient
+    // The same-secret bridge links the generated coefficient
     // commitments to the accepted same-secret proof over the target key-switch
     // basis. Generate it and verify both the statement set and the bridge proof
     // material set through the kernel commands, so the generator's bridge objects
@@ -1599,17 +1594,17 @@ fn vss_public_material_fixture_verifies_generated_fields() {
     });
     let bridge_statement_verification =
         crate::bgv::setup::verify_vss_same_secret_bridge_statement_set_request(&bridge_request)
-            .expect("generated compact same-secret bridge statement set verifies");
+            .expect("generated same-secret bridge statement set verifies");
     assert_eq!(bridge_statement_verification["ok"], serde_json::json!(true));
     let bridge_proof_verification =
         crate::bgv::setup::verify_vss_same_secret_bridge_proof_material_set_request(
             &bridge_request,
         )
-        .expect("generated compact same-secret bridge proof material set verifies");
+        .expect("generated same-secret bridge proof material set verifies");
     assert_eq!(bridge_proof_verification["ok"], serde_json::json!(true));
 }
 
-// Move every compact share-linkage proof record's proof bytes out of the
+// Move every share-linkage proof record's proof bytes out of the
 // embedded base64 field and onto the shared setup proof-material transport,
 // returning the rewritten proof material set alongside the transported material
 // object that carries the streamed chunks. Each record binds its proof record
@@ -1621,23 +1616,23 @@ pub(in super::super) fn move_vss_share_linkage_proof_bytes_to_transport(
 ) -> serde_json::Value {
     let proof_records = proof_material_set["proofRecords"]
         .as_array_mut()
-        .expect("compact share-linkage proof records");
+        .expect("share-linkage proof records");
     let mut transported_proof_materials = Vec::new();
     for proof_record in proof_records.iter_mut() {
         let proof_bytes = crate::transcript_core::decode_standard_base64(
             proof_record["proofBytesBase64"]
                 .as_str()
-                .expect("embedded compact share-linkage proof bytes"),
-            "compact share-linkage proofBytesBase64",
+                .expect("embedded share-linkage proof bytes"),
+            "share-linkage proofBytesBase64",
         )
-        .expect("decode compact share-linkage proof bytes");
+        .expect("decode share-linkage proof bytes");
         let chunks = transport_chunks(&proof_bytes);
         let transport_hashes = setup_proof_material_transport_hashes(
             VSS_SHARE_LINKAGE_PROOF_FAMILY,
             &chunks,
             SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
         )
-        .expect("compact share-linkage transport hashes");
+        .expect("share-linkage transport hashes");
         let proof_material_root = transport_proof_material_root(
             VSS_SHARE_LINKAGE_PROOF_FAMILY,
             proof_record["proofBytesHash"]
@@ -1648,7 +1643,7 @@ pub(in super::super) fn move_vss_share_linkage_proof_bytes_to_transport(
 
         let record_object = proof_record
             .as_object_mut()
-            .expect("compact share-linkage proof record object");
+            .expect("share-linkage proof record object");
         record_object.remove("proofBytesBase64");
         record_object.remove("proofRecordRoot");
         record_object.insert(
@@ -1658,7 +1653,7 @@ pub(in super::super) fn move_vss_share_linkage_proof_bytes_to_transport(
         insert_transport_reference(record_object, &proof_material_root, &transport_hashes);
         proof_record["proofRecordRoot"] = serde_json::json!(
             derive_canonical_object_hash(proof_record)
-                .expect("compact share-linkage transported proof record root")
+                .expect("share-linkage transported proof record root")
         );
 
         transported_proof_materials.push(transport_material_object(
@@ -1680,30 +1675,30 @@ pub(in super::super) fn move_vss_share_linkage_proof_bytes_to_transport(
     })
 }
 
-// Move every compact same-secret bridge proof record's proof bytes onto the
+// Move every same-secret bridge proof record's proof bytes onto the
 // shared setup proof-material transport, mirroring the share-linkage helper.
 pub(in super::super) fn move_same_secret_bridge_proof_bytes_to_transport(
     proof_material_set: &mut serde_json::Value,
 ) -> serde_json::Value {
     let proof_records = proof_material_set["proofRecords"]
         .as_array_mut()
-        .expect("compact same-secret bridge proof records");
+        .expect("same-secret bridge proof records");
     let mut transported_proof_materials = Vec::new();
     for proof_record in proof_records.iter_mut() {
         let proof_bytes = crate::transcript_core::decode_standard_base64(
             proof_record["proofBytesBase64"]
                 .as_str()
-                .expect("embedded compact same-secret bridge proof bytes"),
-            "compact same-secret bridge proofBytesBase64",
+                .expect("embedded same-secret bridge proof bytes"),
+            "same-secret bridge proofBytesBase64",
         )
-        .expect("decode compact same-secret bridge proof bytes");
+        .expect("decode same-secret bridge proof bytes");
         let chunks = transport_chunks(&proof_bytes);
         let transport_hashes = setup_proof_material_transport_hashes(
             SAME_SECRET_BRIDGE_PROOF_FAMILY,
             &chunks,
             SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
         )
-        .expect("compact same-secret bridge transport hashes");
+        .expect("same-secret bridge transport hashes");
         let proof_material_root = transport_proof_material_root(
             SAME_SECRET_BRIDGE_PROOF_FAMILY,
             proof_record["proofBytesHash"]
@@ -1714,7 +1709,7 @@ pub(in super::super) fn move_same_secret_bridge_proof_bytes_to_transport(
 
         let record_object = proof_record
             .as_object_mut()
-            .expect("compact same-secret bridge proof record object");
+            .expect("same-secret bridge proof record object");
         record_object.remove("proofBytesBase64");
         record_object.remove("proofRecordRoot");
         record_object.insert(
@@ -1724,7 +1719,7 @@ pub(in super::super) fn move_same_secret_bridge_proof_bytes_to_transport(
         insert_transport_reference(record_object, &proof_material_root, &transport_hashes);
         proof_record["proofRecordRoot"] = serde_json::json!(
             derive_canonical_object_hash(proof_record)
-                .expect("compact same-secret bridge transported proof record root")
+                .expect("same-secret bridge transported proof record root")
         );
 
         transported_proof_materials.push(transport_material_object(
@@ -1755,22 +1750,22 @@ const SAME_SECRET_BRIDGE_TRANSPORT_SET_OBJECT_TYPE: &str =
 const SAME_SECRET_BRIDGE_TRANSPORT_OBJECT_TYPE: &str =
     "SetupTransportedSameSecretBridgeProofMaterial";
 
-// Recompute a compact proof material set root over the canonical body. The
+// Recompute a proof material set root over the canonical body. The
 // verifier hashes the set with its proofMaterialSetRoot field absent, so the
 // stale root must be removed before rehashing rather than left in place.
 fn rebind_proof_material_set_root(proof_material_set: &mut serde_json::Value) {
     proof_material_set
         .as_object_mut()
-        .expect("compact proof material set object")
+        .expect("proof material set object")
         .remove("proofMaterialSetRoot");
     proof_material_set["proofMaterialSetRoot"] = serde_json::json!(
         derive_canonical_object_hash(proof_material_set)
-            .expect("compact transported proof material set root")
+            .expect("transported proof material set root")
     );
 }
 
 // Split proof bytes into the uniform transport chunk size the kernel enforces.
-// The compact development proofs are far smaller than one chunk, so this yields
+// The development proofs are far smaller than one chunk, so this yields
 // a single chunk, but the split is written for the general case.
 fn transport_chunks(proof_bytes: &[u8]) -> Vec<Vec<u8>> {
     let chunk_size =
@@ -1798,7 +1793,7 @@ fn transport_proof_material_root(
         "chunkRoot": transport_hashes.chunk_root,
         "chunkHashes": transport_hashes.chunk_hashes,
     }))
-    .expect("compact transport proof material root")
+    .expect("transport proof material root")
 }
 
 fn insert_transport_reference(
@@ -1869,35 +1864,35 @@ fn transport_material_object(
     })
 }
 
-// Assert two compact proof-material-set verification responses accept and agree
+// Assert two proof-material-set verification responses accept and agree
 // on every verified field except the proof material set root, which binds the
 // per-record proof-bytes encoding and so legitimately differs between the
 // embedded and transported forms.
-fn assert_semantically_identical_compact_verification(
+fn assert_semantically_identical_verification(
     embedded: &serde_json::Value,
     transported: &serde_json::Value,
 ) {
     assert_eq!(
         embedded["ok"],
         serde_json::json!(true),
-        "embedded compact verification must accept"
+        "embedded verification must accept"
     );
     assert_eq!(
         transported["ok"],
         serde_json::json!(true),
-        "transported compact verification must accept"
+        "transported verification must accept"
     );
     let mut embedded_without_root = embedded.clone();
     let mut transported_without_root = transported.clone();
     for response in [&mut embedded_without_root, &mut transported_without_root] {
         response
             .as_object_mut()
-            .expect("compact verification response object")
+            .expect("verification response object")
             .remove("proofMaterialSetRoot");
     }
     assert_eq!(
         embedded_without_root, transported_without_root,
-        "embedded and transported compact verifications must agree on every field except the proof material set root"
+        "embedded and transported verifications must agree on every field except the proof material set root"
     );
 }
 
@@ -1923,7 +1918,7 @@ fn vss_share_linkage_transported_proof_material_matches_embedded() {
                 "proofMaterialSet": embedded_proof_material_set,
             }),
         )
-        .expect("embedded compact share-linkage proof material set verifies");
+        .expect("embedded share-linkage proof material set verifies");
 
     let mut transported_proof_material_set = embedded_proof_material_set.clone();
     let transported_material =
@@ -1940,7 +1935,7 @@ fn vss_share_linkage_transported_proof_material_matches_embedded() {
                 "transportedVssShareLinkageProofMaterial": transported_material,
             }),
         )
-        .expect("transported compact share-linkage proof material set verifies");
+        .expect("transported share-linkage proof material set verifies");
 
     // The transported and embedded forms both accept and agree on every verified
     // semantic field. The proof material set root legitimately differs because it
@@ -1949,10 +1944,7 @@ fn vss_share_linkage_transported_proof_material_matches_embedded() {
     // the verifier recomputes the root from the encoding it was given. So the
     // transported verification's root binds the transported set it was given, not
     // the embedded set's root.
-    assert_semantically_identical_compact_verification(
-        &embedded_verification,
-        &transported_verification,
-    );
+    assert_semantically_identical_verification(&embedded_verification, &transported_verification);
     assert_eq!(
         transported_verification["proofMaterialSetRoot"],
         transported_proof_material_set["proofMaterialSetRoot"],
@@ -1976,7 +1968,7 @@ fn vss_share_linkage_transported_proof_material_matches_embedded() {
             }),
         )
         .is_err(),
-        "transported compact share-linkage records must require transported proof material"
+        "transported share-linkage records must require transported proof material"
     );
 
     // Tampering with a transported chunk hash must be rejected.
@@ -1995,7 +1987,7 @@ fn vss_share_linkage_transported_proof_material_matches_embedded() {
             }),
         )
         .is_err(),
-        "tampered transported compact share-linkage chunk hash must be rejected"
+        "tampered transported share-linkage chunk hash must be rejected"
     );
 }
 
@@ -2022,7 +2014,7 @@ fn same_secret_bridge_transported_proof_material_matches_embedded() {
         crate::bgv::setup::verify_vss_same_secret_bridge_proof_material_set_request(
             &embedded_request,
         )
-        .expect("embedded compact same-secret bridge proof material set verifies");
+        .expect("embedded same-secret bridge proof material set verifies");
 
     let mut transported_proof_material_set = embedded_proof_material_set.clone();
     let transported_material =
@@ -2038,15 +2030,12 @@ fn same_secret_bridge_transported_proof_material_matches_embedded() {
                 "transportedSameSecretBridgeProofMaterial": transported_material,
             }),
         )
-        .expect("transported compact same-secret bridge proof material set verifies");
+        .expect("transported same-secret bridge proof material set verifies");
 
     // As with share-linkage, both forms accept and agree on every verified
     // semantic field; only the proof material set root legitimately differs
     // because it canonically binds the per-record proof-bytes encoding.
-    assert_semantically_identical_compact_verification(
-        &embedded_verification,
-        &transported_verification,
-    );
+    assert_semantically_identical_verification(&embedded_verification, &transported_verification);
     assert_eq!(
         transported_verification["proofMaterialSetRoot"],
         transported_proof_material_set["proofMaterialSetRoot"],
@@ -2068,7 +2057,7 @@ fn same_secret_bridge_transported_proof_material_matches_embedded() {
             }),
         )
         .is_err(),
-        "transported compact same-secret bridge records must require transported proof material"
+        "transported same-secret bridge records must require transported proof material"
     );
 
     let mut tampered_material =
@@ -2085,16 +2074,15 @@ fn same_secret_bridge_transported_proof_material_matches_embedded() {
             }),
         )
         .is_err(),
-        "tampered transported compact same-secret bridge chunk hash must be rejected"
+        "tampered transported same-secret bridge chunk hash must be rejected"
     );
 }
 
-// Rebind a setup package to the compact coefficient commitment sets, the compact
-// same-secret bridge, and a ThresholdShareCommitmentBinding so the package
-// is accepted through the compact path of the collective setup verifier. The
-// participant count is read from the package, so this drives any supported
-// roster size.
-pub(in super::super) fn compactify_collective_setup_package(
+// Rebind a base setup package to the embedded coefficient commitment sets, the
+// same-secret bridge, and a ThresholdShareCommitmentBinding so the package is
+// accepted by the collective setup verifier. The participant count is read from
+// the package, so this drives any supported roster size.
+pub(in super::super) fn finalize_collective_setup_package(
     mut package: serde_json::Value,
 ) -> serde_json::Value {
     let participant_count = participant_count_from_package(&package);
@@ -2107,21 +2095,21 @@ pub(in super::super) fn compactify_collective_setup_package(
     package["vssShareLinkageStatement"] = vss_share_linkage_statement_object(&package);
     package["vssShareLinkageProofMaterialSet"] =
         vss_share_linkage_proof_material_set_object(&package);
-    // Rebuild the same-secret consistency statements to bind the compact constant
+    // Rebuild the same-secret consistency statements to bind the constant
     // coefficient commitments. The statement builder reads the full-VSS field
     // names (sourceTrusteeCommitmentRoot, per-commitment commitmentRoot), so pass
-    // a compact coefficient view that aliases those to the compact roots the
-    // accepted-setup verifier recomputes. The same-secret proofs and bridge below
-    // then reference these compact-bound statements.
+    // a coefficient view that aliases those to the roots the accepted-setup
+    // verifier recomputes. The same-secret proofs and bridge below then reference
+    // these statements.
     let coefficient_set = package["vssPublicCoefficientCommitmentSet"].clone();
-    let compact_consistency_source_records = coefficient_set["sourceTrusteeRecords"]
+    let consistency_source_records = coefficient_set["sourceTrusteeRecords"]
         .as_array()
-        .expect("compact source trustee records")
+        .expect("source trustee records")
         .iter()
         .map(|source_record| {
             let commitments = source_record["coefficientCommitments"]
                 .as_array()
-                .expect("compact coefficient commitments")
+                .expect("coefficient commitments")
                 .iter()
                 .map(|commitment| {
                     let mut commitment = commitment.clone();
@@ -2137,9 +2125,9 @@ pub(in super::super) fn compactify_collective_setup_package(
             })
         })
         .collect::<Vec<_>>();
-    let compact_consistency_view = serde_json::json!({
+    let consistency_view = serde_json::json!({
         "vssCoefficientCommitmentRoot": coefficient_set["coefficientCommitmentRoot"],
-        "sourceTrusteeRecords": compact_consistency_source_records,
+        "sourceTrusteeRecords": consistency_source_records,
     });
     package["sameSecretConsistency"] =
         super::super::package_fixtures::same_secret_consistency_object(
@@ -2158,12 +2146,11 @@ pub(in super::super) fn compactify_collective_setup_package(
             package["setupContext"]["setupEpoch"]
                 .as_str()
                 .expect("setup epoch"),
-            &compact_consistency_view,
+            &consistency_view,
             participant_count,
         );
     // The public key shares and their proofs bind the same-secret statement roots,
-    // which the compact rebuild changed, so rebuild them against the compact
-    // statements.
+    // which the rebuild changed, so rebuild them against the new statements.
     let rebuilt_public_key_shares = super::super::package_fixtures::public_key_shares_object(
         package["setupContext"]["ceremonyId"]
             .as_str()
@@ -2261,11 +2248,12 @@ pub(in super::super) fn compactify_collective_setup_package(
     });
     threshold_binding["thresholdShareCommitmentRoot"] = serde_json::json!(
         derive_canonical_object_hash(&threshold_binding)
-            .expect("compact threshold-share commitment binding root")
+            .expect("threshold-share commitment binding root")
     );
     package["thresholdShareCommitments"] = threshold_binding;
 
-    // The public VSS coefficient material is replaced by the compact sets.
+    // The public VSS coefficient material is replaced by the embedded commitment
+    // sets.
     package
         .as_object_mut()
         .expect("setup package object")
@@ -2277,9 +2265,9 @@ pub(in super::super) fn compactify_collective_setup_package(
 
     // The private VSS envelopes bind (as AAD) to the accepted coefficient
     // commitment root and each source trustee's per-trustee coefficient root,
-    // which on the compact path are the compact set root and each compact source
-    // record's sourceCoefficientCommitmentRoot, so rebuild the envelopes against
-    // a compact-rooted coefficient view.
+    // which are the commitment set root and each source record's
+    // sourceCoefficientCommitmentRoot, so rebuild the envelopes against that
+    // coefficient view.
     let ceremony_id = package["setupContext"]["ceremonyId"]
         .as_str()
         .expect("ceremony id")
@@ -2302,9 +2290,9 @@ pub(in super::super) fn compactify_collective_setup_package(
         .to_string();
     let common_randomness = package["commonRandomness"].clone();
     let coefficient_set = &package["vssPublicCoefficientCommitmentSet"];
-    let compact_source_records = coefficient_set["sourceTrusteeRecords"]
+    let source_records = coefficient_set["sourceTrusteeRecords"]
         .as_array()
-        .expect("compact source trustee records")
+        .expect("source trustee records")
         .iter()
         .map(|source_record| {
             serde_json::json!({
@@ -2315,7 +2303,7 @@ pub(in super::super) fn compactify_collective_setup_package(
         .collect::<Vec<_>>();
     let coefficient_view = serde_json::json!({
         "vssCoefficientCommitmentRoot": coefficient_set["coefficientCommitmentRoot"],
-        "sourceTrusteeRecords": compact_source_records,
+        "sourceTrusteeRecords": source_records,
     });
     let rebuilt_envelopes = super::super::package_fixtures::private_vss_envelope_commitments_object(
         &ceremony_id,
@@ -2328,7 +2316,7 @@ pub(in super::super) fn compactify_collective_setup_package(
         participant_count,
     );
     // The VSS share acceptances reference the rebuilt envelopes and the same
-    // compact-rooted coefficient view, so rebuild them to match.
+    // coefficient view, so rebuild them to match.
     let rebuilt_acceptances = super::super::package_fixtures::vss_share_acceptances_object(
         &ceremony_id,
         &manifest_hash,
@@ -2344,9 +2332,9 @@ pub(in super::super) fn compactify_collective_setup_package(
     package["privateVssEnvelopeCommitments"] = rebuilt_envelopes;
     package["vssShareAcceptances"] = rebuilt_acceptances;
 
-    // The compact commitment sets are embedded and proof-verified in-package, so
-    // there is no large public VSS material to stream: the transport certificate
-    // carries no transported objects on the compact path.
+    // The commitment sets are embedded and proof-verified in-package, so there is
+    // no large public VSS material to stream: the transport certificate carries no
+    // transported objects.
     let mut transport_certificate = package["setupTransportCertificate"].clone();
     {
         let certificate_object = transport_certificate
@@ -2368,47 +2356,47 @@ pub(in super::super) fn compactify_collective_setup_package(
     package
 }
 
-// The reference compact package: the reduced-ring three-trustee base package run
-// through the compact transform. The accepted-setup compact path is exercised
+// The reference finalized package: the reduced-ring three-trustee base package
+// run through the finalize transform. Accepted-setup verification is exercised
 // against it.
-pub(in super::super) fn minimal_compact_collective_setup_package() -> serde_json::Value {
-    compactify_collective_setup_package(minimal_collective_setup_package_for_participant_count(3))
+pub(in super::super) fn minimal_finalized_collective_setup_package() -> serde_json::Value {
+    finalize_collective_setup_package(minimal_collective_setup_package_for_participant_count(3))
 }
 
-// The compact setup package flows through every accepted-setup phase on the
-// compact path: the public coefficient commitment material is replaced by the
-// compact commitment sets and same-secret bridge, and every downstream phase
-// (private VSS envelopes, share acceptances, same-secret consistency, public key
-// shares and proofs, evaluator schedule, transport certificate, final objects)
-// binds those compact roots. Like the full-VSS minimal package this reduced-ring
-// package is pre-terminal (no collective public key runtime material), so it is
-// not fully valid; the check is that it passes every compact-specific phase and
-// object requirement, leaving only the terminal runtime objects missing.
+// The finalized setup package flows through every accepted-setup phase: the
+// public coefficient commitment material is replaced by the embedded commitment
+// sets and same-secret bridge, and every downstream phase (private VSS envelopes,
+// share acceptances, same-secret consistency, public key shares and proofs,
+// evaluator schedule, transport certificate, final objects) binds those roots.
+// Like the full-VSS minimal package this reduced-ring package is pre-terminal (no
+// collective public key runtime material), so it is not fully valid; the check is
+// that it passes every phase and object requirement, leaving only the terminal
+// runtime objects missing.
 #[test]
-fn minimal_compact_collective_setup_package_passes_compact_acceptance() {
-    let package = minimal_compact_collective_setup_package();
+fn minimal_finalized_collective_setup_package_passes_accepted_setup() {
+    let package = minimal_finalized_collective_setup_package();
     let result = crate::bgv::setup::accepted_setup::verify_collective_bgv_setup_package(
         &package,
         &serde_json::json!({}),
     )
-    .expect("compact collective setup package verification result");
+    .expect("finalized collective setup package verification result");
     let context = || serde_json::to_string_pretty(&result).unwrap();
-    // No phase refuses the compact material.
+    // No phase refuses the material.
     assert!(
         result["refusedObjects"]
             .as_array()
             .is_none_or(|refused| refused.is_empty()),
-        "compact package must not be refused at any phase: {}",
+        "finalized package must not be refused at any phase: {}",
         context()
     );
-    // Every compact-specific phase passed, so the flow reached the final phase.
+    // Every phase passed, so the flow reached the final phase.
     assert_eq!(
         result["currentPhase"],
         "setupPackageVerification",
         "{}",
         context()
     );
-    // The compact commitment sets satisfy the coefficient-commitment requirement;
+    // The embedded commitment sets satisfy the coefficient-commitment requirement;
     // only the terminal runtime objects a pre-terminal setup package lacks may
     // remain.
     let missing_objects = result["missingObjects"]
@@ -2423,7 +2411,7 @@ fn minimal_compact_collective_setup_package_passes_compact_acceptance() {
                 | Some("collectivePublicKey")
                 | Some("collectivePublicKeyRoot")
         )),
-        "only terminal runtime objects may remain missing for the pre-terminal compact package: {}",
+        "only terminal runtime objects may remain missing for the pre-terminal finalized package: {}",
         context()
     );
 }

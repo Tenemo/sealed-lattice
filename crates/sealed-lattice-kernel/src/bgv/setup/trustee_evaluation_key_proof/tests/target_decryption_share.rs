@@ -286,7 +286,7 @@ fn target_decryption_share_proof_requires_enough_lift_fields() {
     assert_eq!(
         commitment_field_layout.target_decryption_randomness_columns,
         35 * crate::bgv::setup::vss_commitment::VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT,
-        "commitment fields carry all compact-opening randomness"
+        "commitment fields carry all opening randomness"
     );
     let target_field_layout =
         LimbColumnLayout::new(&instance.statement, 4).expect("target-field layout");
@@ -465,7 +465,7 @@ fn target_decryption_share_proof_layout_description_matches_relation_layout() {
     assert_eq!(
         final_limb_messages[5]["lowDigitTritCount"],
         json!(4),
-        "small smudging messages must keep the compact decoder width"
+        "small smudging messages must keep the decoder width"
     );
     assert_eq!(final_limb_messages[5]["highDigitTritCount"], json!(0));
     assert_eq!(
@@ -1141,7 +1141,7 @@ fn commitment_for_target_decryption_test(
 ) -> CommitmentForTargetDecryptionTest {
     let message_digit_columns =
         vss_public_canonical_message_digit_columns(message_coefficients, ring_degree)
-            .expect("compact target-decryption message digit columns");
+            .expect("target-decryption message digit columns");
     let computation = compute_vss_public_commitment_from_opening(VssPublicCommitmentOpeningInput {
         commitment_role,
         commitment_context: &commitment_context,
@@ -1154,20 +1154,20 @@ fn commitment_for_target_decryption_test(
         message_coefficient_bound,
         randomness_by_column,
     })
-    .expect("compact target-decryption commitment");
+    .expect("target-decryption commitment");
 
     let coordinates_by_commitment_modulus = computation
         .commitment
         .get("commitmentLimbs")
         .and_then(serde_json::Value::as_array)
-        .expect("compact commitment limbs")
+        .expect("commitment limbs")
         .iter()
         .map(|limb| {
             limb.get("coordinates")
                 .and_then(serde_json::Value::as_array)
-                .expect("compact commitment coordinates")
+                .expect("commitment coordinates")
                 .iter()
-                .map(|coordinate| coordinate.as_u64().expect("compact coordinate"))
+                .map(|coordinate| coordinate.as_u64().expect("coordinate"))
                 .collect()
         })
         .collect();

@@ -9,6 +9,12 @@ mod commitment;
 mod evaluation_key_share_material;
 mod input;
 mod key_material;
+// Test-only key-switch digit-atom machinery: the limb-group relation substrate
+// and the atom-family proof backend, exercised by their unit tests and the
+// ignored prover-cost benchmark until the trustee evaluation-key command path
+// is switched over to the backend.
+#[cfg(test)]
+mod limb_group_key_switch_atom;
 mod local_trustee_state;
 mod package_builder;
 mod participant_material;
@@ -60,14 +66,14 @@ pub(crate) use setup_proof::{
     finish_setup_proof_material_transport_stream_request,
 };
 pub(crate) use trustee_evaluation_key_proof::TARGET_DECRYPTION_SHARE_PROOF_FAMILY;
-#[cfg(test)]
+#[cfg(any(test, feature = "target-decryption-development-commands"))]
 pub(crate) use trustee_evaluation_key_proof::generate_target_decryption_share_proof_bytes_from_request;
 pub(crate) use trustee_evaluation_key_proof::verify_target_decryption_share_proof_bytes_from_request;
 pub(crate) use trustee_evaluation_key_proof::verify_vss_share_linkage_proof_material_set_from_request;
 pub(crate) use trustee_evaluation_key_proof::{
     generate_same_secret_bridge_proof_from_request, generate_vss_share_linkage_proof_from_request,
 };
-#[cfg(test)]
+#[cfg(any(test, feature = "target-decryption-development-commands"))]
 pub(crate) use vss_commitment::vss_public_canonical_message_digit_columns;
 pub(crate) use vss_commitment::{
     VSS_PUBLIC_OUTPUT_COORDINATE_COUNT, VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT,

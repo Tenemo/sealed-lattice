@@ -9,7 +9,6 @@ import {
 } from './accepted-setup-package-fixtures.js';
 import { type JsonRecord } from './setup-fixture-primitives.js';
 
-import { canonicalJson } from '#packages/crypto/src/index';
 import {
     loadTranscriptCoreKernel,
     TranscriptCoreKernelCommandError,
@@ -136,7 +135,7 @@ describe('collective BGV setup kernel commands', () => {
             kernel,
             parameters,
         );
-        // Drift a same-secret proof statement hash. The compact same-secret
+        // Drift a same-secret proof statement hash. The same-secret
         // bridge binds the same-secret proof set root, so the recomputed root no
         // longer matches the bound root and the package is refused.
         const sameSecretProofs = setupPackage.sameSecretProofs as JsonRecord;
@@ -193,39 +192,5 @@ describe('collective BGV setup kernel commands', () => {
             'vssComplaintAcceptedAbort',
         );
         expect(result.acceptedHashes).toEqual([]);
-    });
-
-    it('keeps the compact public VSS coefficient material a small fraction of the full-ring baseline', async () => {
-        const kernel = await loadTranscriptCoreKernel();
-        const parameters = kernel.describeCollectiveBgvSetupParameters({
-            participantCount: 3,
-        });
-        const setupPackage = await acceptedShapedSetupPackage(
-            kernel,
-            parameters,
-        );
-
-        // The full public VSS coefficient material the compact commitments replace
-        // is described by the kernel at the production ring; its coefficient byte
-        // length is the baseline being compacted away.
-        const publicVssCommitmentMaterialSize =
-            kernel.describeCollectiveBgvSetupParameters()
-                .publicVssCommitmentMaterialSize as {
-                readonly fullMaterialCoefficientBytes: number;
-            };
-        const fullMaterialCoefficientBytes =
-            publicVssCommitmentMaterialSize.fullMaterialCoefficientBytes;
-        const coefficientCommitmentBytes = new TextEncoder().encode(
-            canonicalJson(setupPackage.vssPublicCoefficientCommitmentSet),
-        ).byteLength;
-
-        // The compact set publishes fixed-size BDLOP commitments (constant in the
-        // ring degree) in place of the O(ring) full-VSS coefficient material, so it
-        // is a small fraction of the full-ring baseline. This measures the
-        // reduction; the bound is a lenient sanity check, not a size gate.
-        expect(coefficientCommitmentBytes).toBeGreaterThan(0);
-        expect(coefficientCommitmentBytes).toBeLessThan(
-            fullMaterialCoefficientBytes / 100,
-        );
     });
 });

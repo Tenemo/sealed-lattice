@@ -23,10 +23,9 @@ pub(super) fn verify_threshold_share_commitments(
             "setupPackage.thresholdShareCommitments",
         )?));
     }
-    // Compact setup path: the threshold-share commitments are a recomputed
-    // binding over the proof-verified compact VSS public material. Acceptance is
-    // gated purely on recomputing the binding root from the verified compact
-    // roots.
+    // The threshold-share commitments are a recomputed binding over the
+    // proof-verified VSS public material. Acceptance is gated purely on
+    // recomputing the binding root from the verified roots.
     if threshold_share_commitments
         .get("objectType")
         .and_then(Value::as_str)
@@ -57,11 +56,11 @@ fn threshold_share_refusal(
     )
 }
 
-// Accept a compact threshold-share commitment binding only when its root
-// recomputes from the proof-verified compact VSS public material and the whole
-// object matches its canonical form. There is no self-attested field: the
-// binding carries only the compact roots the earlier compact-material phase
-// already verified, and this phase recomputes their canonical binding root.
+// Accept a threshold-share commitment binding only when its root recomputes
+// from the proof-verified VSS public material and the whole object matches its
+// canonical form. There is no self-attested field: the binding carries only the
+// roots the earlier public-material phase already verified, and this phase
+// recomputes their canonical binding root.
 fn verify_threshold_share_commitment_binding(
     threshold_share_commitments: &Value,
     verified_vss_public_material: Option<&VerifiedVssPublicMaterial>,
@@ -69,7 +68,7 @@ fn verify_threshold_share_commitment_binding(
     let Some(verified_material) = verified_vss_public_material else {
         return Ok(Some(threshold_share_refusal(
             "thresholdShareCommitmentBindingRequiresVerifiedMaterial",
-            "compact threshold-share commitment binding requires proof-verified compact VSS public material",
+            "threshold-share commitment binding requires proof-verified VSS public material",
             "setupPackage.thresholdShareCommitments",
         )?));
     };
@@ -79,7 +78,7 @@ fn verify_threshold_share_commitment_binding(
     else {
         return Ok(Some(threshold_share_refusal(
             "thresholdShareCommitmentBindingRootMissing",
-            "compact threshold-share commitment binding must carry a thresholdShareCommitmentRoot",
+            "threshold-share commitment binding must carry a thresholdShareCommitmentRoot",
             "setupPackage.thresholdShareCommitments.thresholdShareCommitmentRoot",
         )?));
     };
@@ -102,7 +101,7 @@ fn verify_threshold_share_commitment_binding(
     if expected_threshold_share_commitment_root != threshold_share_commitment_root {
         return Ok(Some(threshold_share_refusal(
             "thresholdShareCommitmentBindingRootMismatch",
-            "compact threshold-share binding root does not match its proof-verified compact VSS roots",
+            "threshold-share binding root does not match its proof-verified VSS roots",
             "setupPackage.thresholdShareCommitments.thresholdShareCommitmentRoot",
         )?));
     }
@@ -112,7 +111,7 @@ fn verify_threshold_share_commitment_binding(
     if threshold_share_commitments != &expected_binding {
         return Ok(Some(threshold_share_refusal(
             "thresholdShareCommitmentBindingMismatch",
-            "compact threshold-share binding object does not match its canonical form over the verified compact roots",
+            "threshold-share binding object does not match its canonical form over the verified roots",
             "setupPackage.thresholdShareCommitments",
         )?));
     }

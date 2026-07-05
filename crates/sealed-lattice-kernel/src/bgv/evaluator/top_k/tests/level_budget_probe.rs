@@ -1,5 +1,6 @@
-// Development-only exact-noise probe for the target-level-budget work (restoring
-// proof-backed K_top = 1..19 target decryption). It measures true residual BGV
+// Development-only exact-noise probe for the evaluator level budget (the
+// measurements behind the K_top = 20-only decryption scope and the
+// comparison-input cleaning fix). It measures true residual BGV
 // noise, decrypting with the development key, at the comparison handoff (level 6),
 // through the degree-19 Paterson-Stockmeyer rank lookup, and at the terminal
 // target, and it measures the terminal (exit level, noise) for candidate terminal
@@ -250,6 +251,7 @@ fn sum_ciphertexts_at_common_level(ciphertexts: &[Ciphertext]) -> Ciphertext {
 // Faithful replica of circuit.rs evaluate_polynomial_paterson_stockmeyer_with_baby_step_count
 // (defer_terminal_modulus_switch = true), with the added power-table level floor.
 // A floor of 0 reproduces the production rank lookup exactly.
+#[allow(clippy::too_many_arguments)]
 fn evaluate_lookup_with_level_floor(
     context: &EvaluatorContext,
     input: &Ciphertext,
@@ -510,9 +512,13 @@ fn level_budget_rank_lookup_noise_probe() {
         "level-floor-0 replica must exit at the production level"
     );
     // correctness: indicator flips at k on the clean ranks 0..19.
-    for rank in 0..RANK_LOOKUP_DEGREE_OPTION_COUNT {
+    for (rank, slot) in production_slots
+        .iter()
+        .enumerate()
+        .take(RANK_LOOKUP_DEGREE_OPTION_COUNT)
+    {
         assert_eq!(
-            production_slots[rank],
+            *slot,
             u64::from(rank < selection_threshold),
             "indicator at rank {rank}"
         );
@@ -963,7 +969,7 @@ fn handoff_soundness_diagnostic() {
             }
         }
         let injected_slots = key.decrypt_to_slots(&injected).expect("injected slots");
-        let message_preserved = &injected_slots[..3] == &[1u64, 2, 3];
+        let message_preserved = injected_slots[..3] == [1u64, 2, 3];
         println!(
             "\n== reader validation: fresh noise {:.1} bits; after injecting K=2^30 noise, reader reads {:.1} bits (expect ~30), message preserved = {message_preserved} ==",
             baseline,
@@ -1389,7 +1395,7 @@ fn ceiling_sweep_at_start_level(
         }
         let input_noise = ciphertext_noise_bits(key, &noisy);
         let output = evaluate_direct_comparison_polynomial_with_baby_step_count(
-            &context,
+            context,
             &noisy,
             &polynomial,
             baby,

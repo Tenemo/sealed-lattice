@@ -30,6 +30,7 @@ pub(super) struct AggregateOpeningRootsInput<'a> {
 }
 
 pub(super) struct AggregateOpeningComputation {
+    #[cfg(test)]
     pub(super) commitment: Value,
     pub(super) commitment_root: String,
     pub(super) opening_root: String,
@@ -53,7 +54,7 @@ pub(super) fn verify_aggregate_opening_credential(
     let aggregate_commitment_message_values = read_aggregate_u64_vector_le_hex(
         input.credential,
         "aggregateCommitmentMessageValuesLeHex",
-        "compact aggregate opening credential message byte length must match ringDegree",
+        "aggregate opening credential message byte length must match ringDegree",
     )?;
     let aggregate_share_values =
         derive_aggregate_share_values(&aggregate_commitment_message_values, input.rns_prime)?;
@@ -77,13 +78,13 @@ pub(super) fn verify_aggregate_opening_credential(
         input.credential,
         "aggregateCommitmentRoot",
         &commitment_root,
-        "compact aggregate opening credential commitment root",
+        "aggregate opening credential commitment root",
     )?;
     compare_hash_field(
         input.credential,
         "aggregateOpeningRoot",
         &opening_root,
-        "compact aggregate opening credential opening root",
+        "aggregate opening credential opening root",
     )?;
 
     Ok(VerifiedAggregateOpeningCredential {
@@ -132,6 +133,7 @@ pub(super) fn compute_aggregate_opening(
         })?;
 
     Ok(AggregateOpeningComputation {
+        #[cfg(test)]
         commitment: computation.commitment,
         commitment_root: computation.commitment_root,
         opening_root: computation.opening_root,
@@ -158,13 +160,13 @@ fn read_aggregate_randomness_by_column_signed_byte_hex(
     if columns.len() != VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "aggregateRandomnessByColumnSignedByteHex must carry the compact randomness column count",
+            "aggregateRandomnessByColumnSignedByteHex must carry the randomness column count",
         ));
     }
     let maximum_abs = i64::try_from(participant_count).map_err(|_| {
         CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "compact aggregate opening participant count does not fit signed randomness bound",
+            "aggregate opening participant count does not fit signed randomness bound",
         )
     })?;
 
@@ -182,7 +184,7 @@ fn read_aggregate_randomness_by_column_signed_byte_hex(
                     )
                 })?,
                 POLYNOMIAL_DEGREE,
-                "compact aggregate opening credential signed-byte randomness length must match ringDegree",
+                "aggregate opening credential signed-byte randomness length must match ringDegree",
             )?;
             if coefficients
                 .iter()
@@ -190,7 +192,7 @@ fn read_aggregate_randomness_by_column_signed_byte_hex(
             {
                 return Err(CanonicalError::new(
                     CanonicalErrorCode::InvalidFixture,
-                    "compact VSS opening randomness coefficient exceeds the participant-count bound",
+                    "VSS opening randomness coefficient exceeds the participant-count bound",
                 ));
             }
 
@@ -213,7 +215,7 @@ fn derive_aggregate_share_values(
             .ok_or_else(|| {
                 CanonicalError::new(
                     CanonicalErrorCode::MalformedLength,
-                    "compact aggregate opening message length must match ringDegree",
+                    "aggregate opening message length must match ringDegree",
                 )
             })?;
         aggregate_share_values.push(aggregate_commitment_message_value % rns_prime);

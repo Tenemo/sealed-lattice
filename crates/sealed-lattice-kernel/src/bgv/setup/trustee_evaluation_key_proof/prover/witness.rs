@@ -27,9 +27,8 @@ fn vss_public_message_encoding_vectors_with_layout(
     let unsigned_coefficients = coefficients
         .iter()
         .map(|coefficient| {
-            u64::try_from(*coefficient).map_err(|_| {
-                invalid_succinct_setup_proof("compact VSS message coefficient is negative")
-            })
+            u64::try_from(*coefficient)
+                .map_err(|_| invalid_succinct_setup_proof("VSS message coefficient is negative"))
         })
         .collect::<CanonicalResult<Vec<_>>>()?;
 
@@ -51,7 +50,7 @@ fn vss_public_message_encoding_vectors_from_unsigned(
     for (coefficient_index, coefficient) in coefficients.iter().enumerate() {
         if *coefficient >= message_bound {
             return Err(invalid_succinct_setup_proof(
-                "compact VSS message coefficient is outside the statement bound",
+                "VSS message coefficient is outside the statement bound",
             ));
         }
         let digits = crate::bgv::setup::vss_commitment::vss_public_message_digits(*coefficient)?;
@@ -184,9 +183,7 @@ pub(super) fn build_limb_witness_commitment(
         }
     } else if layout.vss_public_active() {
         let vss_share_linkage = statement.vss_share_linkage.as_ref().ok_or_else(|| {
-            invalid_succinct_setup_proof(
-                "compact VSS witness layout requires a share-linkage statement",
-            )
+            invalid_succinct_setup_proof("VSS witness layout requires a share-linkage statement")
         })?;
         let coefficient_slots = vss_share_linkage.coefficient_witness_slots();
         if coefficient_slots.len()
@@ -195,7 +192,7 @@ pub(super) fn build_limb_witness_commitment(
                 .len()
         {
             return Err(invalid_succinct_setup_proof(
-                "compact VSS coefficient witness count does not match the statement",
+                "VSS coefficient witness count does not match the statement",
             ));
         }
         if witness
@@ -204,7 +201,7 @@ pub(super) fn build_limb_witness_commitment(
             != coefficient_slots.len()
         {
             return Err(invalid_succinct_setup_proof(
-                "compact VSS coefficient randomness witness count does not match the statement",
+                "VSS coefficient randomness witness count does not match the statement",
             ));
         }
         let item_count = vss_share_linkage.item_count();
@@ -220,13 +217,13 @@ pub(super) fn build_limb_witness_commitment(
             || recipient_randomness_by_item.len() != item_count
         {
             return Err(invalid_succinct_setup_proof(
-                "compact VSS packed witness item count does not match the statement",
+                "VSS packed witness item count does not match the statement",
             ));
         }
         let message_bounds = vss_share_linkage.packed_message_bounds();
         if message_bounds.len() != layout.vss_public_message_vector_count() {
             return Err(invalid_succinct_setup_proof(
-                "compact VSS packed message bounds do not match the column layout",
+                "VSS packed message bounds do not match the column layout",
             ));
         }
         let validate_vss_public_vector =
@@ -250,13 +247,10 @@ pub(super) fn build_limb_witness_commitment(
                 .get(coefficient_slot_index)
                 .ok_or_else(|| {
                     invalid_succinct_setup_proof(
-                        "compact VSS coefficient witness slot is outside the witness",
+                        "VSS coefficient witness slot is outside the witness",
                     )
                 })?;
-            validate_vss_public_vector(
-                coefficient_messages,
-                "compact VSS coefficient message witness",
-            )?;
+            validate_vss_public_vector(coefficient_messages, "VSS coefficient message witness")?;
             for logical_vector in vss_public_message_encoding_vectors_with_layout(
                 coefficient_messages,
                 message_bound,
@@ -267,10 +261,7 @@ pub(super) fn build_limb_witness_commitment(
             }
         }
         for (item_index, recipient_messages) in recipient_messages_by_item.iter().enumerate() {
-            validate_vss_public_vector(
-                recipient_messages,
-                "compact VSS recipient message witness",
-            )?;
+            validate_vss_public_vector(recipient_messages, "VSS recipient message witness")?;
             let recipient_message_position = layout.vss_public_coefficient_columns + item_index;
             for logical_vector in vss_public_message_encoding_vectors_with_layout(
                 recipient_messages,
@@ -282,7 +273,7 @@ pub(super) fn build_limb_witness_commitment(
             }
         }
         for carry_witnesses in carry_witnesses_by_item {
-            validate_vss_public_vector(carry_witnesses, "compact VSS carry witness")?;
+            validate_vss_public_vector(carry_witnesses, "VSS carry witness")?;
             let carry_vector = signed_residue_vector(carry_witnesses, modulus);
             append_logical_vector(&carry_vector);
         }
@@ -296,19 +287,17 @@ pub(super) fn build_limb_witness_commitment(
                     .get(coefficient_slot_index)
                     .ok_or_else(|| {
                         invalid_succinct_setup_proof(
-                            "compact VSS coefficient randomness slot is outside the witness",
+                            "VSS coefficient randomness slot is outside the witness",
                         )
                     })?;
                 let randomness_column = randomness_columns
                     .get(randomness_column_index)
                     .ok_or_else(|| {
-                        invalid_succinct_setup_proof(
-                            "compact VSS coefficient randomness column is missing",
-                        )
+                        invalid_succinct_setup_proof("VSS coefficient randomness column is missing")
                     })?;
                 validate_vss_public_vector(
                     randomness_column,
-                    "compact VSS coefficient randomness witness",
+                    "VSS coefficient randomness witness",
                 )?;
                 let logical_vector = signed_residue_vector(randomness_column, modulus);
                 append_logical_vector(&logical_vector);
@@ -319,23 +308,16 @@ pub(super) fn build_limb_witness_commitment(
                 let randomness_column = randomness_columns
                     .get(randomness_column_index)
                     .ok_or_else(|| {
-                        invalid_succinct_setup_proof(
-                            "compact VSS recipient randomness column is missing",
-                        )
+                        invalid_succinct_setup_proof("VSS recipient randomness column is missing")
                     })?;
-                validate_vss_public_vector(
-                    randomness_column,
-                    "compact VSS recipient randomness witness",
-                )?;
+                validate_vss_public_vector(randomness_column, "VSS recipient randomness witness")?;
                 let logical_vector = signed_residue_vector(randomness_column, modulus);
                 append_logical_vector(&logical_vector);
             }
         }
     } else if layout.same_secret_bridge_active() {
         let bridge = statement.same_secret_bridge.as_ref().ok_or_else(|| {
-            invalid_succinct_setup_proof(
-                "compact same-secret bridge layout requires a bridge statement",
-            )
+            invalid_succinct_setup_proof("same-secret bridge layout requires a bridge statement")
         })?;
         let secret_vector = signed_residue_vector(&witness.secret_coefficients, modulus);
         append_logical_vector(&secret_vector);
@@ -352,7 +334,7 @@ pub(super) fn build_limb_witness_commitment(
                         + i128::from(*target_rns_prime) * i128::from(*negative_indicator);
                     u64::try_from(target_message).map_err(|_| {
                         invalid_succinct_setup_proof(
-                            "compact same-secret bridge target message coefficient is negative",
+                            "same-secret bridge target message coefficient is negative",
                         )
                     })
                 })
@@ -446,7 +428,7 @@ pub(super) fn build_limb_witness_commitment(
                                 + i128::from(*target_rns_prime) * i128::from(*negative_indicator);
                             u64::try_from(target_message).map_err(|_| {
                                 invalid_succinct_setup_proof(
-                                    "compact same-secret bridge target message coefficient is negative",
+                                    "same-secret bridge target message coefficient is negative",
                                 )
                             })
                         })
@@ -552,7 +534,7 @@ pub(super) fn validate_witness_support(
             || statement.target_decryption_share.is_some()
         {
             return Err(invalid_succinct_setup_proof(
-                "compact VSS share-linkage witness must not include key, same-secret, or private VSS material",
+                "VSS share-linkage witness must not include key, same-secret, or private VSS material",
             ));
         }
         return validate_vss_public_witness(vss_share_linkage, witness, statement.ring_degree);
@@ -586,7 +568,7 @@ pub(super) fn validate_witness_support(
             || statement.target_decryption_share.is_some()
         {
             return Err(invalid_succinct_setup_proof(
-                "compact same-secret bridge witness must not include key, private VSS, or share-linkage material",
+                "same-secret bridge witness must not include key, private VSS, or share-linkage material",
             ));
         }
         return validate_same_secret_bridge_witness(
@@ -781,7 +763,7 @@ fn validate_same_secret_bridge_witness(
             .any(|coefficient| !(-1..=1).contains(coefficient))
     {
         return Err(invalid_succinct_setup_proof(
-            "compact same-secret bridge secret must be ternary at the ring degree",
+            "same-secret bridge secret must be ternary at the ring degree",
         ));
     }
 
@@ -970,7 +952,7 @@ fn validate_vss_public_witness(
         || recipient_share_opening_randomness_by_item.len() != item_count
     {
         return Err(invalid_succinct_setup_proof(
-            "compact VSS witness shape does not match the statement",
+            "VSS witness shape does not match the statement",
         ));
     }
     for (slot_index, (coefficient_slot, (messages, randomness_columns))) in coefficient_slots
@@ -987,10 +969,8 @@ fn validate_vss_public_witness(
         )
         .enumerate()
     {
-        let source_modulus_i64 =
-            i64::try_from(coefficient_slot.source_message_modulus).map_err(|_| {
-                invalid_succinct_setup_proof("compact VSS source modulus does not fit i64")
-            })?;
+        let source_modulus_i64 = i64::try_from(coefficient_slot.source_message_modulus)
+            .map_err(|_| invalid_succinct_setup_proof("VSS source modulus does not fit i64"))?;
         if messages.len() != ring_degree
             || messages
                 .iter()
@@ -1005,7 +985,7 @@ fn validate_vss_public_witness(
             })
         {
             return Err(invalid_succinct_setup_proof(format!(
-                "compact VSS witness for shared coefficient slot {slot_index} has the wrong shape"
+                "VSS witness for shared coefficient slot {slot_index} has the wrong shape"
             )));
         }
     }
@@ -1037,12 +1017,11 @@ fn validate_vss_public_witness(
                 .any(|slot_index| *slot_index >= coefficient_count)
         {
             return Err(invalid_succinct_setup_proof(
-                "compact VSS coefficient witness slot layout does not match the item",
+                "VSS coefficient witness slot layout does not match the item",
             ));
         }
-        let source_modulus_i64 = i64::try_from(source_message_modulus).map_err(|_| {
-            invalid_succinct_setup_proof("compact VSS source modulus does not fit i64")
-        })?;
+        let source_modulus_i64 = i64::try_from(source_message_modulus)
+            .map_err(|_| invalid_succinct_setup_proof("VSS source modulus does not fit i64"))?;
         let recipient_share_messages = recipient_share_messages_by_item[item_index];
         let carry_witnesses = carry_witnesses_by_item[item_index];
         let recipient_share_opening_randomness =
@@ -1062,7 +1041,7 @@ fn validate_vss_public_witness(
             })
         {
             return Err(invalid_succinct_setup_proof(
-                "compact VSS recipient share witness has the wrong shape",
+                "VSS recipient share witness has the wrong shape",
             ));
         }
         let carry_bound = private_vss_share_lifted_carry_bound(
@@ -1073,15 +1052,13 @@ fn validate_vss_public_witness(
             let carry_i128 = i128::from(*carry);
             if carry_i128 < 0 || carry_i128 > carry_bound {
                 return Err(invalid_succinct_setup_proof(
-                    "compact VSS carry witness is outside the accepted bound",
+                    "VSS carry witness is outside the accepted bound",
                 ));
             }
         }
         let trustee_point = i128::from(crate::bgv::setup::sharing::canonical_trustee_point(
             usize::try_from(recipient_roster_position).map_err(|_| {
-                invalid_succinct_setup_proof(
-                    "compact VSS recipient roster position does not fit usize",
-                )
+                invalid_succinct_setup_proof("VSS recipient roster position does not fit usize")
             })?,
             source_message_modulus,
         )?);
@@ -1089,9 +1066,9 @@ fn validate_vss_public_witness(
         let mut power = 1_i128;
         for _ in 0..item_coefficient_count {
             powers.push(power);
-            power = power.checked_mul(trustee_point).ok_or_else(|| {
-                invalid_succinct_setup_proof("compact VSS point power overflowed")
-            })?;
+            power = power
+                .checked_mul(trustee_point)
+                .ok_or_else(|| invalid_succinct_setup_proof("VSS point power overflowed"))?;
         }
         for coefficient_position in 0..ring_degree {
             let mut left = 0_i128;
@@ -1106,33 +1083,27 @@ fn validate_vss_public_witness(
                             .checked_mul(i128::from(messages[coefficient_position]))
                             .ok_or_else(|| {
                                 invalid_succinct_setup_proof(
-                                    "compact VSS lifted message product overflowed",
+                                    "VSS lifted message product overflowed",
                                 )
                             })?,
                     )
-                    .ok_or_else(|| {
-                        invalid_succinct_setup_proof("compact VSS lifted sum overflowed")
-                    })?;
+                    .ok_or_else(|| invalid_succinct_setup_proof("VSS lifted sum overflowed"))?;
             }
             left = left
                 .checked_sub(i128::from(recipient_share_messages[coefficient_position]))
-                .ok_or_else(|| {
-                    invalid_succinct_setup_proof("compact VSS lifted share overflowed")
-                })?;
+                .ok_or_else(|| invalid_succinct_setup_proof("VSS lifted share overflowed"))?;
             left = left
                 .checked_sub(
                     i128::from(source_message_modulus)
                         .checked_mul(i128::from(carry_witnesses[coefficient_position]))
                         .ok_or_else(|| {
-                            invalid_succinct_setup_proof("compact VSS lifted carry overflowed")
+                            invalid_succinct_setup_proof("VSS lifted carry overflowed")
                         })?,
                 )
-                .ok_or_else(|| {
-                    invalid_succinct_setup_proof("compact VSS lifted relation overflowed")
-                })?;
+                .ok_or_else(|| invalid_succinct_setup_proof("VSS lifted relation overflowed"))?;
             if left != 0 {
                 return Err(invalid_succinct_setup_proof(format!(
-                    "compact VSS lifted relation failed for item {item_index} at coefficient {coefficient_position}"
+                    "VSS lifted relation failed for item {item_index} at coefficient {coefficient_position}"
                 )));
             }
         }

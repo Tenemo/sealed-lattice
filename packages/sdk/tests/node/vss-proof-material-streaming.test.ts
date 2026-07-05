@@ -10,15 +10,13 @@ import {
 
 type JsonRecord = Record<string, unknown>;
 
-// The two compact public-VSS proof material families the kernel streams through
+// The two public-VSS proof material families the kernel streams through
 // the shared setup proof-material transport instead of embedding as base64 in the
 // package JSON. Each carries a distinct proof-family string, transported object
 // types, and proof-bytes hash domain; the streamed proofRecordRoot canonical form
 // otherwise differs only in the embedded identity fields.
 type ProofMaterialCase = Readonly<{
-    readonly proofFamily:
-        | 'vss-share-linkage'
-        | 'same-secret-bridge';
+    readonly proofFamily: 'vss-share-linkage' | 'same-secret-bridge';
     readonly proofRecordObjectType:
         | 'VssShareLinkageProofRecord'
         | 'VssSameSecretBridgeProofRecord';
@@ -59,10 +57,7 @@ const shareLinkageIdentityFields = (recordIndex: number): JsonRecord => ({
 });
 
 const sameSecretBridgeIdentityFields = (recordIndex: number): JsonRecord => ({
-    sameSecretBridgeStatementRoot: `${String(recordIndex)}`.padStart(
-        128,
-        'c',
-    ),
+    sameSecretBridgeStatementRoot: `${String(recordIndex)}`.padStart(128, 'c'),
 });
 
 const proofMaterialCases = [
@@ -93,8 +88,7 @@ const proofMaterialCases = [
     {
         proofFamily: 'same-secret-bridge',
         proofRecordObjectType: 'VssSameSecretBridgeProofRecord',
-        proofMaterialSetObjectType:
-            'VssSameSecretBridgeProofMaterialSet',
+        proofMaterialSetObjectType: 'VssSameSecretBridgeProofMaterialSet',
         transportSetObjectType:
             'SetupTransportedSameSecretBridgeProofMaterialSet',
         transportMaterialObjectType:
@@ -143,13 +137,13 @@ const encodeStandardBase64 = (bytes: Uint8Array): string => {
     return encoded;
 };
 
-// A tiny embedded compact proof material set for one source trustee. The proof
+// A tiny embedded proof material set for one source trustee. The proof
 // bytes are short synthetic bytes, not a certified proof: the streaming transport
 // path binds and recomputes the transport hashes over whatever bytes it is given,
 // so this exercises the move-to-transport rewrite and the kernel chunk-hash
 // binding at the smallest possible scale.
 const embeddedProofMaterialSet = (
-    compactCase: ProofMaterialCase,
+    proofMaterialCase: ProofMaterialCase,
     recordCount: number,
 ): JsonRecord => {
     const proofRecords = Array.from(
@@ -164,13 +158,14 @@ const embeddedProofMaterialSet = (
             ]);
 
             return {
-                objectType: compactCase.proofRecordObjectType,
+                objectType: proofMaterialCase.proofRecordObjectType,
                 objectVersion: 1,
-                proofFamily: compactCase.proofFamily,
-                ...compactCase.identityFields(recordIndex),
-                proofBytesHash: hash512Hex(compactCase.proofBytesHashDomain, [
-                    proofBytes,
-                ]),
+                proofFamily: proofMaterialCase.proofFamily,
+                ...proofMaterialCase.identityFields(recordIndex),
+                proofBytesHash: hash512Hex(
+                    proofMaterialCase.proofBytesHashDomain,
+                    [proofBytes],
+                ),
                 proofBytesBase64: encodeStandardBase64(proofBytes),
                 proofRecordRoot: `stale-record-root-${String(recordIndex)}`,
             };
@@ -178,28 +173,28 @@ const embeddedProofMaterialSet = (
     );
 
     return {
-        objectType: compactCase.proofMaterialSetObjectType,
+        objectType: proofMaterialCase.proofMaterialSetObjectType,
         objectVersion: 1,
-        proofFamily: compactCase.proofFamily,
+        proofFamily: proofMaterialCase.proofFamily,
         proofRecords,
         proofMaterialSetRoot: 'stale-proof-material-set-root',
     };
 };
 
-describe('compact VSS proof material move to transport', () => {
+describe('VSS proof material move to transport', () => {
     it.each(proofMaterialCases)(
         'moves $proofFamily embedded proof bytes onto the streamable transport',
-        (compactCase) => {
-            const embedded = embeddedProofMaterialSet(compactCase, 2);
-            const moved = compactCase.moveEmbeddedToTransport(embedded);
+        (proofMaterialCase) => {
+            const embedded = embeddedProofMaterialSet(proofMaterialCase, 2);
+            const moved = proofMaterialCase.moveEmbeddedToTransport(embedded);
 
             const transportedProofMaterials = moved.transportedProofMaterialSet
                 .proofMaterials as readonly JsonRecord[];
             expect(moved.transportedProofMaterialSet.objectType).toBe(
-                compactCase.transportSetObjectType,
+                proofMaterialCase.transportSetObjectType,
             );
             expect(moved.transportedProofMaterialSet.proofFamily).toBe(
-                compactCase.proofFamily,
+                proofMaterialCase.proofFamily,
             );
             expect(transportedProofMaterials).toHaveLength(2);
 
@@ -249,12 +244,12 @@ describe('compact VSS proof material move to transport', () => {
 
     it.each(proofMaterialCases)(
         'rejects a $proofFamily proof material set with no proof records',
-        (compactCase) => {
+        (proofMaterialCase) => {
             expect(() =>
-                compactCase.moveEmbeddedToTransport({
-                    objectType: compactCase.proofMaterialSetObjectType,
+                proofMaterialCase.moveEmbeddedToTransport({
+                    objectType: proofMaterialCase.proofMaterialSetObjectType,
                     objectVersion: 1,
-                    proofFamily: compactCase.proofFamily,
+                    proofFamily: proofMaterialCase.proofFamily,
                 }),
             ).toThrow(/proofRecords must be an array/u);
         },
@@ -262,8 +257,8 @@ describe('compact VSS proof material move to transport', () => {
 
     it.each(proofMaterialCases)(
         'rejects a $proofFamily record whose proofBytesHash does not match its bytes',
-        (compactCase) => {
-            const embedded = embeddedProofMaterialSet(compactCase, 1);
+        (proofMaterialCase) => {
+            const embedded = embeddedProofMaterialSet(proofMaterialCase, 1);
             const tamperedRecords = (
                 embedded.proofRecords as readonly JsonRecord[]
             ).map((proofRecord) => ({
@@ -272,7 +267,7 @@ describe('compact VSS proof material move to transport', () => {
             }));
 
             expect(() =>
-                compactCase.moveEmbeddedToTransport({
+                proofMaterialCase.moveEmbeddedToTransport({
                     ...embedded,
                     proofRecords: tamperedRecords,
                 }),
@@ -281,14 +276,14 @@ describe('compact VSS proof material move to transport', () => {
     );
 });
 
-describe('compact VSS proof material streaming through the kernel', () => {
+describe('VSS proof material streaming through the kernel', () => {
     it.each(proofMaterialCases)(
         'accepts a streamed $proofFamily transported material set and rejects a tampered chunk hash',
-        async (compactCase) => {
+        async (proofMaterialCase) => {
             const kernel = await loadPublicTranscriptCoreKernel();
 
-            const embedded = embeddedProofMaterialSet(compactCase, 1);
-            const moved = compactCase.moveEmbeddedToTransport(embedded);
+            const embedded = embeddedProofMaterialSet(proofMaterialCase, 1);
+            const moved = proofMaterialCase.moveEmbeddedToTransport(embedded);
             const transportMaterial = (
                 moved.transportedProofMaterialSet
                     .proofMaterials as readonly JsonRecord[]
@@ -296,7 +291,7 @@ describe('compact VSS proof material streaming through the kernel', () => {
 
             const { chunks: transportChunks, ...transportReference } =
                 transportMaterial;
-            const verificationId = `compact-stream-${compactCase.proofFamily}`;
+            const verificationId = `vss-stream-${proofMaterialCase.proofFamily}`;
             kernel.beginSetupProofMaterialTransportStream({
                 verificationId,
                 transportedSetupProofMaterial: transportReference,
@@ -314,7 +309,9 @@ describe('compact VSS proof material streaming through the kernel', () => {
                 },
             ) as unknown as JsonRecord;
 
-            expect(verification.proofFamily).toBe(compactCase.proofFamily);
+            expect(verification.proofFamily).toBe(
+                proofMaterialCase.proofFamily,
+            );
             expect(verification.proofBytesEncoding).toBe(
                 'binary-chunked-proof-bytes',
             );
@@ -323,7 +320,9 @@ describe('compact VSS proof material streaming through the kernel', () => {
             );
             const verifiedHandle =
                 verification.verifiedSetupProofMaterial as JsonRecord;
-            expect(verifiedHandle.proofFamily).toBe(compactCase.proofFamily);
+            expect(verifiedHandle.proofFamily).toBe(
+                proofMaterialCase.proofFamily,
+            );
             expect(verifiedHandle.proofMaterialRoot).toBe(
                 transportMaterial.proofMaterialRoot,
             );
@@ -337,7 +336,7 @@ describe('compact VSS proof material streaming through the kernel', () => {
                 ...transportReference,
                 chunkHashes: ['0'.repeat(128)],
             };
-            const tamperedVerificationId = `compact-stream-tampered-${compactCase.proofFamily}`;
+            const tamperedVerificationId = `vss-stream-tampered-${proofMaterialCase.proofFamily}`;
             const streamTamperedMaterial = (): void => {
                 kernel.beginSetupProofMaterialTransportStream({
                     verificationId: tamperedVerificationId,

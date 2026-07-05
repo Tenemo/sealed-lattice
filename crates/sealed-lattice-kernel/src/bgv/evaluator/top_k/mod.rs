@@ -57,8 +57,8 @@ pub(crate) const SELECTED_EVALUATOR_WORKING_LEVEL: usize = 16;
 // residues mod 2N.
 pub(crate) const DIRECT_COMPARISON_OUTPUT_LEVEL: usize = 6;
 // The canonical target ciphertext basis: the direct-comparison output level and
-// its data-prime prefix. Setup-time statements (the compact same-secret bridge)
-// pin their target-basis binding to this one canonical object.
+// its data-prime prefix. Setup-time statements (the same-secret bridge) pin their
+// target-basis binding to this one canonical object.
 pub(crate) const CANONICAL_TARGET_CIPHERTEXT_LEVEL: usize = DIRECT_COMPARISON_OUTPUT_LEVEL;
 pub(crate) const RANK_LOOKUP_BABY_STEP_COUNT: usize = 5;
 

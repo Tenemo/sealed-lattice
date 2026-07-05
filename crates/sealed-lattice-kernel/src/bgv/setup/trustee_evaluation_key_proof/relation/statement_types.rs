@@ -229,7 +229,7 @@ pub(crate) struct TrusteeEvaluationKeyWitness {
     // error_coefficients_by_key[key][digit] follows each key's digit count.
     pub(crate) error_coefficients_by_key: Vec<Vec<Vec<i64>>>,
     // Linkage witnesses, present exactly when the statement carries the
-    // same-secret linkage or compact same-secret bridge: the binary
+    // same-secret linkage or same-secret bridge: the binary
     // negative-indicator vector and the ternary opening randomness per bound
     // commitment and column.
     pub(crate) negative_indicator_coefficients: Vec<i64>,

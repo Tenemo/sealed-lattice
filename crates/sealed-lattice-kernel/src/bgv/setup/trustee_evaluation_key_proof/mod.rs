@@ -52,13 +52,12 @@ mod prover;
 mod relation;
 mod verifier;
 
+#[cfg(test)]
+pub(crate) use commands::describe_target_decryption_share_proof_layout_from_request;
+#[cfg(any(test, feature = "target-decryption-development-commands"))]
+pub(crate) use commands::generate_target_decryption_share_proof_bytes_from_request;
 pub(crate) use commands::generate_trustee_evaluation_key_proof_from_request;
 pub(crate) use commands::verify_target_decryption_share_proof_bytes_from_request;
-#[cfg(test)]
-pub(crate) use commands::{
-    describe_target_decryption_share_proof_layout_from_request,
-    generate_target_decryption_share_proof_bytes_from_request,
-};
 pub(crate) use commands::{
     generate_same_secret_bridge_proof_from_request, generate_vss_share_linkage_proof_from_request,
     verify_same_secret_bridge_proof_from_request,
@@ -175,7 +174,7 @@ pub(super) const LINCHECK_REPETITIONS: usize = 2;
 // (at most 2 * N * 255, about 2^24) so the base-3 smudging masks dominate them
 // only as a bounded-leakage row; twenty repetitions put the per-difference
 // collision bound at 2^-160 before union and Fiat-Shamir losses, the pre-union
-// margin the disclosed accounting requires. Compact share-linkage uses fewer,
+// margin the disclosed accounting requires. Share-linkage uses fewer,
 // wider carry and message-digit combinations: four 40-bit repetitions preserve
 // the same 160-bit pre-union collision budget while avoiding mask columns for
 // repetitions that carry no additional collision margin.
@@ -192,7 +191,7 @@ pub(in crate::bgv::setup) const VSS_PUBLIC_CONSISTENCY_COEFFICIENT_BITS: u32 = 4
 pub(in crate::bgv::setup) const CLAIM_MASK_RADIX: u64 = 3;
 pub(in crate::bgv::setup) const CLAIM_MASK_DIGIT_COUNT: usize = 58;
 pub(in crate::bgv::setup) const VSS_PUBLIC_CARRY_CLAIM_MASK_DIGIT_COUNT: usize = 75;
-// Compact VSS digit consistency claims have a larger clear range than carries.
+// VSS digit consistency claims have a larger clear range than carries.
 // Eighty-seven base-3 mask digits stay inside the three setup-field CRT lift
 // window while keeping the digit-claim mask margin comparable to the carry
 // claim margin.

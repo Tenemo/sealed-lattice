@@ -90,7 +90,7 @@ fn target_decryption_share_proof_statement_value(
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "target decryption compact aggregate opening statement requires the accepted compact aggregate threshold commitment set",
+                "target decryption aggregate opening statement requires the accepted aggregate threshold commitment set",
             )
         })?;
     let credential_bindings = local_witness
@@ -105,7 +105,7 @@ fn target_decryption_share_proof_statement_value(
                 .ok_or_else(|| {
                     CanonicalError::new(
                         CanonicalErrorCode::MalformedLength,
-                        "accepted compact aggregate threshold commitment set is missing the active recipient limb",
+                        "accepted aggregate threshold commitment set is missing the active recipient limb",
                     )
                 })?;
             if accepted_record.rns_prime != binding.rns_prime
@@ -114,7 +114,7 @@ fn target_decryption_share_proof_statement_value(
             {
                 return Err(CanonicalError::new(
                     CanonicalErrorCode::ComponentMismatch,
-                    "target decryption compact aggregate credential binding does not match the accepted aggregate commitment record",
+                    "target decryption aggregate credential binding does not match the accepted aggregate commitment record",
                 ));
             }
             Ok(json!({
@@ -651,57 +651,57 @@ fn validate_smudging_commitment_shape(
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "target decryption smudging compact commitment must be VssPublicCommitment version 1",
+            "target decryption smudging commitment must be VssPublicCommitment version 1",
         ));
     }
     compare_string_field(
         commitment,
         "commitmentRole",
         TARGET_DECRYPTION_SMUDGING_COMMITMENT_ROLE,
-        "target decryption smudging compact commitment role",
+        "target decryption smudging commitment role",
     )?;
     compare_hash_field(
         commitment,
         "publicMatrixSeedHash",
         &setup_binding.public_matrix_seed_hash,
-        "target decryption smudging compact commitment matrix seed",
+        "target decryption smudging commitment matrix seed",
     )?;
     compare_unsigned_field(
         commitment,
         "rnsLimbIndex",
         expected_limb_index as u64,
-        "target decryption smudging compact commitment limb",
+        "target decryption smudging commitment limb",
     )?;
     compare_unsigned_field(
         commitment,
         "rnsPrime",
         expected_rns_prime,
-        "target decryption smudging compact commitment prime",
+        "target decryption smudging commitment prime",
     )?;
     compare_unsigned_field(
         commitment,
         "ringDegree",
         POLYNOMIAL_DEGREE as u64,
-        "target decryption smudging compact commitment ring degree",
+        "target decryption smudging commitment ring degree",
     )?;
     compare_unsigned_field(
         commitment,
         "outputCoordinateCount",
         VSS_PUBLIC_OUTPUT_COORDINATE_COUNT as u64,
-        "target decryption smudging compact commitment output coordinate count",
+        "target decryption smudging commitment output coordinate count",
     )?;
     compare_unsigned_field(
         commitment,
         "randomnessColumnCount",
         VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT as u64,
-        "target decryption smudging compact commitment randomness column count",
+        "target decryption smudging commitment randomness column count",
     )?;
     hash_at_path(commitment, &["commitmentContextHash"])?;
     let commitment_limbs = array_at_path(commitment, &["commitmentLimbs"])?;
     if commitment_limbs.len() != 3 {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "target decryption smudging compact commitment must include every compact commitment field",
+            "target decryption smudging commitment must include every commitment field",
         ));
     }
     for (commitment_modulus_index, limb) in commitment_limbs.iter().enumerate() {
@@ -709,19 +709,19 @@ fn validate_smudging_commitment_shape(
             limb,
             "commitmentModulusIndex",
             commitment_modulus_index as u64,
-            "target decryption smudging compact commitment modulus index",
+            "target decryption smudging commitment modulus index",
         )?;
         compare_unsigned_field(
             limb,
             "modulus",
             DATA_PRIMES[commitment_modulus_index],
-            "target decryption smudging compact commitment modulus",
+            "target decryption smudging commitment modulus",
         )?;
         let coordinates = array_at_path(limb, &["coordinates"])?;
         if coordinates.len() != VSS_PUBLIC_OUTPUT_COORDINATE_COUNT {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
-                "target decryption smudging compact commitment coordinate count does not match the profile",
+                "target decryption smudging commitment coordinate count does not match the profile",
             ));
         }
         let modulus = DATA_PRIMES[commitment_modulus_index];
@@ -730,7 +730,7 @@ fn validate_smudging_commitment_shape(
             if coordinate_value >= modulus {
                 return Err(CanonicalError::new(
                     CanonicalErrorCode::InvalidFixture,
-                    "target decryption smudging compact commitment coordinate is outside its commitment field",
+                    "target decryption smudging commitment coordinate is outside its commitment field",
                 ));
             }
         }
@@ -750,14 +750,14 @@ fn validate_aggregate_opening_statement_binding(
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "target decryption compact aggregate opening binding must be TargetDecryptionAggregateOpeningBinding version 1",
+            "target decryption aggregate opening binding must be TargetDecryptionAggregateOpeningBinding version 1",
         ));
     }
     compare_hash_field(
         binding,
         "publicMatrixSeedHash",
         &setup_binding.public_matrix_seed_hash,
-        "target decryption compact aggregate opening binding public matrix seed hash",
+        "target decryption aggregate opening binding public matrix seed hash",
     )?;
     let accepted_share_linkage_statement_root = setup_binding
         .share_linkage_statement_root
@@ -765,14 +765,14 @@ fn validate_aggregate_opening_statement_binding(
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "target decryption compact aggregate opening binding requires the accepted compact share-linkage statement",
+                "target decryption aggregate opening binding requires the accepted share-linkage statement",
             )
         })?;
     compare_hash_field(
         binding,
         "shareLinkageStatementRoot",
         accepted_share_linkage_statement_root,
-        "target decryption compact aggregate opening binding share-linkage statement root",
+        "target decryption aggregate opening binding share-linkage statement root",
     )?;
     let accepted_aggregate_set = setup_binding
         .aggregate_threshold_commitment_set
@@ -780,26 +780,26 @@ fn validate_aggregate_opening_statement_binding(
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "target decryption compact aggregate opening binding requires the accepted compact aggregate threshold commitment set",
+                "target decryption aggregate opening binding requires the accepted aggregate threshold commitment set",
             )
         })?;
     compare_hash_field(
         binding,
         "aggregateThresholdCommitmentRoot",
         &accepted_aggregate_set.aggregate_threshold_commitment_root,
-        "target decryption compact aggregate opening binding aggregate threshold commitment root",
+        "target decryption aggregate opening binding aggregate threshold commitment root",
     )?;
     if active_limb_count > accepted_aggregate_set.rns_limb_count {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "accepted compact aggregate threshold commitment set does not cover every active target limb",
+            "accepted aggregate threshold commitment set does not cover every active target limb",
         ));
     }
     let credential_bindings = array_at_path(binding, &["activeCredentialBindings"])?;
     if credential_bindings.len() != active_limb_count {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "target decryption compact aggregate opening binding must include one active credential binding per target limb",
+            "target decryption aggregate opening binding must include one active credential binding per target limb",
         ));
     }
     for (limb_index, credential_binding) in credential_bindings.iter().enumerate() {
@@ -809,26 +809,26 @@ fn validate_aggregate_opening_statement_binding(
         {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "target decryption compact aggregate credential binding must be TargetDecryptionAggregateOpeningCredentialBinding version 1",
+                "target decryption aggregate credential binding must be TargetDecryptionAggregateOpeningCredentialBinding version 1",
             ));
         }
         compare_unsigned_field(
             credential_binding,
             "rnsLimbIndex",
             limb_index as u64,
-            "target decryption compact aggregate credential binding limb",
+            "target decryption aggregate credential binding limb",
         )?;
         let Some(expected_prime) = DATA_PRIMES.get(limb_index).copied() else {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::ComponentMismatch,
-                "target decryption compact aggregate credential binding limb is outside the selected BGV basis",
+                "target decryption aggregate credential binding limb is outside the selected BGV basis",
             ));
         };
         compare_unsigned_field(
             credential_binding,
             "rnsPrime",
             expected_prime,
-            "target decryption compact aggregate credential binding prime",
+            "target decryption aggregate credential binding prime",
         )?;
         let accepted_record = accepted_aggregate_set
             .recipient_records
@@ -837,61 +837,61 @@ fn validate_aggregate_opening_statement_binding(
             .ok_or_else(|| {
                 CanonicalError::new(
                     CanonicalErrorCode::MalformedLength,
-                    "accepted compact aggregate threshold commitment set is missing the active recipient limb",
+                    "accepted aggregate threshold commitment set is missing the active recipient limb",
                 )
             })?;
         if accepted_record.rns_prime != expected_prime {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::ComponentMismatch,
-                "accepted compact aggregate threshold commitment RNS prime does not match the active target limb",
+                "accepted aggregate threshold commitment RNS prime does not match the active target limb",
             ));
         }
         compare_hash_field(
             credential_binding,
             "aggregateCommitmentRoot",
             &accepted_record.aggregate_commitment_root,
-            "target decryption compact aggregate credential binding accepted aggregate commitment record",
+            "target decryption aggregate credential binding accepted aggregate commitment record",
         )?;
         compare_hash_field(
             credential_binding,
             "aggregateOpeningRoot",
             &accepted_record.aggregate_opening_root,
-            "target decryption compact aggregate credential binding accepted aggregate opening record",
+            "target decryption aggregate credential binding accepted aggregate opening record",
         )?;
         let aggregate_commitment = value_at_path(credential_binding, &["aggregateCommitment"])?;
         crate::bgv::setup::validate_standalone_vss_public_commitment_body(
             aggregate_commitment,
-            "compact VSS commitment",
+            "public VSS commitment",
         )?;
         compare_string_field(
             aggregate_commitment,
             "commitmentRole",
             "aggregate-threshold-share",
-            "target decryption compact aggregate credential binding commitment role",
+            "target decryption aggregate credential binding commitment role",
         )?;
         compare_hash_field(
             aggregate_commitment,
             "publicMatrixSeedHash",
             &setup_binding.public_matrix_seed_hash,
-            "target decryption compact aggregate credential binding commitment public matrix seed hash",
+            "target decryption aggregate credential binding commitment public matrix seed hash",
         )?;
         compare_unsigned_field(
             aggregate_commitment,
             "rnsLimbIndex",
             limb_index as u64,
-            "target decryption compact aggregate credential binding commitment limb",
+            "target decryption aggregate credential binding commitment limb",
         )?;
         compare_unsigned_field(
             aggregate_commitment,
             "rnsPrime",
             expected_prime,
-            "target decryption compact aggregate credential binding commitment prime",
+            "target decryption aggregate credential binding commitment prime",
         )?;
         let aggregate_commitment_root = derive_canonical_object_hash(aggregate_commitment)?;
         if aggregate_commitment_root != accepted_record.aggregate_commitment_root {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::ComponentMismatch,
-                "target decryption compact aggregate credential binding commitment body does not match the accepted aggregate commitment record",
+                "target decryption aggregate credential binding commitment body does not match the accepted aggregate commitment record",
             ));
         }
     }
@@ -901,7 +901,7 @@ fn validate_aggregate_opening_statement_binding(
         binding,
         "activeCredentialBindingRoot",
         &expected_active_credential_binding_root,
-        "target decryption compact aggregate active credential binding root",
+        "target decryption aggregate active credential binding root",
     )?;
 
     Ok(())

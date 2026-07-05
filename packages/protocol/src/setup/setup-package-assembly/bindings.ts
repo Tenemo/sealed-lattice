@@ -334,8 +334,8 @@ const assertCommonRandomnessPublicDerivationsBindPackageInput = (
 export const resolveThresholdShareCommitments = (
     input: SetupPackageInput,
 ): JsonRecord => {
-    // On the compact path the threshold-share commitment binding is a small
-    // record the compact VSS builders emit (it binds the compact coefficient
+    // The threshold-share commitment binding is a small
+    // record the VSS builders emit (it binds the coefficient
     // commitment root, the aggregate threshold commitment root and the share
     // linkage proof material set root). The kernel recomputes and re-binds it
     // during verification, so the assembler passes it through after a shape

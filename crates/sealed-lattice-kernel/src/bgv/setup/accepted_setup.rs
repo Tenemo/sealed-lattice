@@ -30,10 +30,9 @@ use self::common_randomness::{
 use self::same_secret_bridge_verification::{
     SameSecretBridgeVerification, verify_optional_same_secret_bridge_statement_set,
 };
-// Re-exported for compact-bound terminal proof fixtures, which build
-// public-key-share and trustee evaluation-key statements against the verified
-// compact same-secret bridge material that the accepted-setup verifier
-// reconstructs.
+// Re-exported for terminal proof fixtures, which build public-key-share and
+// trustee evaluation-key statements against the verified same-secret bridge
+// material that the accepted-setup verifier reconstructs.
 use self::evaluation_key_material_transport::{
     evaluation_key_material_refusal,
     transported_evaluation_key_share_component_material_from_request,
@@ -437,7 +436,6 @@ pub(crate) fn describe_collective_bgv_setup_parameters_for_roster(
         "qShare": q_share_value(),
         "carryAwareVssShareRelation": carry_aware_vss_share_relation_value(),
         "commitment": setup_commitment_parameters_value()?,
-        "publicVssCommitmentMaterialSize": public_vss_commitment_material_size_value()?,
         "setupProof": setup_proof_parameters_value()?,
         "setupTransport": setup_transport_parameters_value_for_roster(roster)?,
         "evaluatorKeySchedule": evaluator_key_schedule_value_for_roster(roster)?,
@@ -781,7 +779,6 @@ pub(super) fn setup_parameters_value(roster: &AcceptedRosterParameters) -> Canon
         "bgvParametersHash": bgv_parameters_hash()?,
         "carryAwareVssShareRelation": carry_aware_vss_share_relation_value(),
         "commitment": setup_commitment_parameters_value()?,
-        "publicVssCommitmentMaterialSize": public_vss_commitment_material_size_value()?,
         "setupProof": setup_proof_parameters_value()?,
         "setupTransport": setup_transport_parameters_value_for_roster(roster)?,
         "evaluatorKeySchedule": evaluator_key_schedule_value_for_roster(roster)?,
@@ -813,44 +810,6 @@ fn bounded_domain_evaluator_value_for_roster(
         "scoreDifferenceBound": score_difference_bound,
         "directComparisonOutputLevel": crate::bgv::evaluator::top_k::DIRECT_COMPARISON_OUTPUT_LEVEL,
         "tiePolicy": crate::bgv::evaluator::top_k::TIE_POLICY,
-    }))
-}
-
-fn public_vss_commitment_material_size_value() -> CanonicalResult<Value> {
-    let commitment_modulus_limb_count = setup_commitment_modulus_limb_values().len();
-    let bytes_per_residue = 8_usize;
-    let single_commitment_coefficient_bytes = commitment_modulus_limb_count
-        * SETUP_COMMITMENT_ROW_COUNT
-        * POLYNOMIAL_DEGREE
-        * bytes_per_residue;
-    let commitment_count = usize::try_from(FIRST_ROSTER_PARTICIPANT_COUNT)
-        .expect("first-roster participant count fits usize")
-        * DATA_PRIMES.len()
-        * usize::try_from(FIRST_ROSTER_DECRYPTION_THRESHOLD)
-            .expect("first-roster threshold fits usize");
-    let full_material_coefficient_bytes = single_commitment_coefficient_bytes
-        .checked_mul(commitment_count)
-        .expect("full-roster VSS commitment material byte count fits usize");
-    let bytes_per_mebibyte = 1024_usize * 1024_usize;
-
-    Ok(json!({
-        "objectType": "PublicVssCommitmentMaterialSize",
-        "objectVersion": 1,
-        "measurementKind": "static-full-roster-coefficient-byte-accounting",
-        "ringDegree": POLYNOMIAL_DEGREE,
-        "ringDegreeStatus": "full-ring",
-        "participantCount": FIRST_ROSTER_PARTICIPANT_COUNT,
-        "rnsLimbCount": DATA_PRIMES.len(),
-        "shamirCoefficientCount": FIRST_ROSTER_DECRYPTION_THRESHOLD,
-        "commitmentModulusLimbCount": commitment_modulus_limb_count,
-        "commitmentRowCount": SETUP_COMMITMENT_ROW_COUNT,
-        "bytesPerResidue": bytes_per_residue,
-        "singleCommitmentCoefficientBytes": single_commitment_coefficient_bytes,
-        "publishedCommitmentCount": commitment_count,
-        "fullMaterialCoefficientBytes": full_material_coefficient_bytes,
-        "fullMaterialCoefficientMebibytes": full_material_coefficient_bytes / bytes_per_mebibyte,
-        "jsonOverheadStatus": "excluded-from-lower-bound",
-        "streamingRequirement": "binary-chunked-stream-verification-with-one-commitment-resident",
     }))
 }
 
@@ -1108,7 +1067,7 @@ fn array_value<'a>(value: &'a Value, field_name: &str) -> CanonicalResult<&'a Ve
 }
 
 // The accepted VSS coefficient commitment root that later phases (private VSS
-// envelopes, share acceptances, transport) bind against: the compact coefficient
+// envelopes, share acceptances, transport) bind against: the coefficient
 // commitment set root.
 pub(super) fn accepted_vss_coefficient_commitment_root(setup_package: &Value) -> Option<&str> {
     setup_package
@@ -1143,7 +1102,7 @@ fn value_u64(value: &Value, field_name: &str) -> CanonicalResult<u64> {
 
 // Ceremony-identifying setup-context fields a bound object must carry
 // identically so a bound artifact cannot be transplanted across ceremonies,
-// rosters, parameter sets, or epochs. Used by the compact VSS public-material
+// rosters, parameter sets, or epochs. Used by the VSS public-material
 // binding checks.
 const SETUP_CONTEXT_BINDING_FIELDS: [&str; 5] = [
     "ceremonyId",

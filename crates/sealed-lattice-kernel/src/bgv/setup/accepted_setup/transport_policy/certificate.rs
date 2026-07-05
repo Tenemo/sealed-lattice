@@ -230,9 +230,9 @@ fn verify_setup_transported_objects(
             )));
         }
     };
-    // The compact setup path embeds the compact commitment sets in-package and has
-    // no large public VSS material to stream, so its transport certificate may
-    // carry no transported objects.
+    // The setup path embeds the commitment sets in-package and has no large
+    // public VSS material to stream, so its transport certificate may carry no
+    // transported objects.
     let mut transported_objects = Vec::with_capacity(transported_object_values.len());
     let mut seen_object_roots = BTreeSet::new();
     let mut expected_chunk_start_index = 0_u64;

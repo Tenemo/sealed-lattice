@@ -51,8 +51,7 @@ export const createSetupPackage = (input: SetupPackageInput): SetupPackage => {
         vssPublicAggregateThresholdCommitmentSet:
             input.vssPublicAggregateThresholdCommitmentSet,
         vssShareLinkageStatement: input.vssShareLinkageStatement,
-        vssShareLinkageProofMaterialSet:
-            input.vssShareLinkageProofMaterialSet,
+        vssShareLinkageProofMaterialSet: input.vssShareLinkageProofMaterialSet,
         privateVssEnvelopeCommitments,
         privateVssEnvelopeCommitmentRoot,
         ...(input.vssComplaints === undefined
@@ -62,8 +61,7 @@ export const createSetupPackage = (input: SetupPackageInput): SetupPackage => {
         thresholdShareCommitments,
         sameSecretConsistency: input.sameSecretConsistency,
         sameSecretProofs: input.sameSecretProofs,
-        sameSecretBridgeStatementSet:
-            input.sameSecretBridgeStatementSet,
+        sameSecretBridgeStatementSet: input.sameSecretBridgeStatementSet,
         sameSecretBridgeProofMaterialSet:
             input.sameSecretBridgeProofMaterialSet,
         publicKeyShares: input.publicKeyShares,

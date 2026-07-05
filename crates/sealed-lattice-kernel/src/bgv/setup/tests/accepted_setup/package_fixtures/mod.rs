@@ -76,7 +76,7 @@ pub(super) fn minimal_collective_setup_package() -> serde_json::Value {
     // hundred twenty-eight.
     MINIMAL_COLLECTIVE_SETUP_PACKAGE_CACHE
         .get_or_init(|| {
-            super::proof_record_fixtures::compactify_collective_setup_package(
+            super::proof_record_fixtures::finalize_collective_setup_package(
                 minimal_collective_setup_package_for_participant_count(
                     FIXTURE_FIRST_CLOSURE_PARTICIPANT_COUNT,
                 ),
@@ -443,11 +443,11 @@ fn build_collective_setup_package_fixture_parts(
     CollectiveSetupPackageFixture { package }
 }
 
-// The compact transform binds the same-secret proofs and the compact same-secret
-// bridge that references them, so the compact minimal package is already
+// The finalize transform binds the same-secret proofs and the same-secret
+// bridge that references them, so the minimal package is already
 // same-secret-proof-bearing: this is exactly the minimal package. Reusing its
-// cache (rather than compactifying the same base into a second cache) avoids a
-// redundant heavy compact build that would otherwise race the minimal one under
+// cache (rather than finalizing the same base into a second cache) avoids a
+// redundant heavy build that would otherwise race the minimal one under
 // parallel test execution.
 pub(super) fn same_secret_proof_bearing_collective_setup_package() -> serde_json::Value {
     minimal_collective_setup_package()

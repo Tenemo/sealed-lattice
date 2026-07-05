@@ -19,11 +19,6 @@ export type CollectiveBgvSetupParametersForCertificates = Readonly<
                 readonly messageEncoding: JsonRecord;
             }
         >;
-        readonly publicVssCommitmentMaterialSize: Readonly<
-            JsonRecord & {
-                readonly fullMaterialCoefficientBytes: number;
-            }
-        >;
         readonly setupProof: JsonRecord;
         readonly setupTransport: JsonRecord;
         readonly evaluatorKeySchedule: Readonly<

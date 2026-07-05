@@ -58,7 +58,7 @@ pub(super) fn verify_optional_vss_public_material(
             vss_public_material_refusal(
                 "vssPublicMaterialIncomplete",
                 format!(
-                    "compact VSS public material requires all compact commitment sets, the share-linkage statement, and its proof material set; missing {missing_fields}"
+                    "VSS public material requires all commitment sets, the share-linkage statement, and its proof material set; missing {missing_fields}"
                 ),
                 "setupPackage",
             )?,
@@ -70,10 +70,7 @@ pub(super) fn verify_optional_vss_public_material(
         Err(error) => Ok(VssPublicMaterialVerification::Refused(
             vss_public_material_refusal(
                 "vssPublicMaterialMalformed",
-                format!(
-                    "compact VSS public material is malformed: {}",
-                    error.message
-                ),
+                format!("VSS public material is malformed: {}", error.message),
                 "setupPackage",
             )?,
         )),
@@ -86,19 +83,19 @@ fn verify_vss_public_material_binding(
 ) -> CanonicalResult<VerifiedVssPublicMaterial> {
     let coefficient_set = setup_package
         .get(VSS_PUBLIC_COEFFICIENT_COMMITMENT_SET_FIELD)
-        .ok_or_else(|| public_material_error("compact coefficient commitment set"))?;
+        .ok_or_else(|| public_material_error("coefficient commitment set"))?;
     let recipient_share_set = setup_package
         .get(VSS_PUBLIC_RECIPIENT_SHARE_COMMITMENT_SET_FIELD)
-        .ok_or_else(|| public_material_error("compact recipient-share commitment set"))?;
+        .ok_or_else(|| public_material_error("recipient-share commitment set"))?;
     let aggregate_threshold_set = setup_package
         .get(VSS_PUBLIC_AGGREGATE_THRESHOLD_COMMITMENT_SET_FIELD)
-        .ok_or_else(|| public_material_error("compact aggregate threshold set"))?;
+        .ok_or_else(|| public_material_error("aggregate threshold set"))?;
     let statement = setup_package
         .get(VSS_SHARE_LINKAGE_STATEMENT_FIELD)
-        .ok_or_else(|| public_material_error("compact share-linkage statement"))?;
+        .ok_or_else(|| public_material_error("share-linkage statement"))?;
     let proof_material_set = setup_package
         .get(VSS_SHARE_LINKAGE_PROOF_MATERIAL_SET_FIELD)
-        .ok_or_else(|| public_material_error("compact share-linkage proof material set"))?;
+        .ok_or_else(|| public_material_error("share-linkage proof material set"))?;
 
     let coefficient_verification =
         crate::bgv::setup::verify_vss_public_coefficient_commitment_set_request(&json!({
@@ -121,79 +118,75 @@ fn verify_vss_public_material_binding(
     let statement_verification =
         crate::bgv::setup::verify_vss_share_linkage_statement_request(&statement_request)?;
 
-    let setup_context = setup_package.get("setupContext").ok_or_else(|| {
-        public_material_error("compact VSS public material requires setup context")
-    })?;
-    compare_setup_context_binding(
-        setup_context,
-        statement,
-        "compact VSS share-linkage statement",
-    )?;
+    let setup_context = setup_package
+        .get("setupContext")
+        .ok_or_else(|| public_material_error("VSS public material requires setup context"))?;
+    compare_setup_context_binding(setup_context, statement, "VSS share-linkage statement")?;
     compare_setup_context_participant_count(
         setup_context,
         &coefficient_verification,
-        "compact VSS coefficient commitment set",
+        "VSS coefficient commitment set",
     )?;
     compare_setup_context_threshold_degree(
         setup_context,
         &coefficient_verification,
-        "compact VSS coefficient commitment set",
+        "VSS coefficient commitment set",
     )?;
     compare_setup_context_participant_count(
         setup_context,
         &recipient_share_verification,
-        "compact VSS recipient-share commitment set",
+        "VSS recipient-share commitment set",
     )?;
     compare_setup_context_participant_count(
         setup_context,
         &aggregate_threshold_verification,
-        "compact VSS aggregate threshold commitment set",
+        "VSS aggregate threshold commitment set",
     )?;
     compare_setup_context_participant_count(
         setup_context,
         &statement_verification,
-        "compact VSS share-linkage statement",
+        "VSS share-linkage statement",
     )?;
     compare_setup_context_threshold_degree(
         setup_context,
         &statement_verification,
-        "compact VSS share-linkage statement",
+        "VSS share-linkage statement",
     )?;
 
-    let common_randomness = setup_package.get("commonRandomness").ok_or_else(|| {
-        public_material_error("compact VSS public material requires common randomness")
-    })?;
+    let common_randomness = setup_package
+        .get("commonRandomness")
+        .ok_or_else(|| public_material_error("VSS public material requires common randomness"))?;
     let accepted_public_matrix_seed_hash =
         hash_at_path(common_randomness, &["publicMatrixSeedHash"])?;
     compare_required_string(
         hash_at_path(&coefficient_verification, &["publicMatrixSeedHash"])?,
         accepted_public_matrix_seed_hash,
-        "compact VSS coefficient set publicMatrixSeedHash",
+        "VSS coefficient set publicMatrixSeedHash",
     )?;
     compare_required_string(
         hash_at_path(&recipient_share_verification, &["publicMatrixSeedHash"])?,
         accepted_public_matrix_seed_hash,
-        "compact VSS recipient-share set publicMatrixSeedHash",
+        "VSS recipient-share set publicMatrixSeedHash",
     )?;
     compare_required_string(
         hash_at_path(&aggregate_threshold_verification, &["publicMatrixSeedHash"])?,
         accepted_public_matrix_seed_hash,
-        "compact VSS aggregate set publicMatrixSeedHash",
+        "VSS aggregate set publicMatrixSeedHash",
     )?;
     compare_required_string(
         hash_at_path(&statement_verification, &["publicMatrixSeedHash"])?,
         accepted_public_matrix_seed_hash,
-        "compact VSS share-linkage statement publicMatrixSeedHash",
+        "VSS share-linkage statement publicMatrixSeedHash",
     )?;
     compare_required_string(
         hash_at_path(&statement_verification, &["targetBasisHash"])?,
         &crate::bgv::evaluator::top_k::canonical_target_basis_hash()?,
-        "compact VSS share-linkage statement targetBasisHash",
+        "VSS share-linkage statement targetBasisHash",
     )?;
     compare_required_string(
         hash_at_path(&statement_verification, &["coefficientCommitmentRoot"])?,
         hash_at_path(&coefficient_verification, &["coefficientCommitmentRoot"])?,
-        "compact VSS share-linkage statement coefficientCommitmentRoot",
+        "VSS share-linkage statement coefficientCommitmentRoot",
     )?;
     compare_required_string(
         hash_at_path(&statement_verification, &["recipientShareCommitmentRoot"])?,
@@ -201,7 +194,7 @@ fn verify_vss_public_material_binding(
             &recipient_share_verification,
             &["recipientShareCommitmentRoot"],
         )?,
-        "compact VSS share-linkage statement recipientShareCommitmentRoot",
+        "VSS share-linkage statement recipientShareCommitmentRoot",
     )?;
     compare_required_string(
         hash_at_path(
@@ -212,7 +205,7 @@ fn verify_vss_public_material_binding(
             &aggregate_threshold_verification,
             &["aggregateThresholdCommitmentRoot"],
         )?,
-        "compact VSS share-linkage statement aggregateThresholdCommitmentRoot",
+        "VSS share-linkage statement aggregateThresholdCommitmentRoot",
     )?;
 
     let mut proof_material_request = serde_json::Map::from_iter([
@@ -246,7 +239,7 @@ fn verify_vss_public_material_binding(
     compare_required_string(
         hash_at_path(&proof_material_verification, &["proofMaterialSetRoot"])?,
         hash_at_path(proof_material_set, &["proofMaterialSetRoot"])?,
-        "compact VSS share-linkage proof material set root",
+        "VSS share-linkage proof material set root",
     )?;
 
     Ok(VerifiedVssPublicMaterial {
@@ -310,7 +303,7 @@ mod tests {
             &json!({}),
         )?
         else {
-            panic!("partial compact VSS public material must refuse");
+            panic!("partial VSS public material must refuse");
         };
 
         assert_eq!(response["isValid"], json!(false));
@@ -333,7 +326,7 @@ mod tests {
             &json!({}),
         )?
         else {
-            panic!("complete compact VSS public material must refuse");
+            panic!("complete VSS public material must refuse");
         };
 
         assert_eq!(response["isValid"], json!(false));
@@ -363,8 +356,8 @@ mod tests {
             }),
             &json!({}),
         )
-        .expect("complete compact VSS public material refusal") else {
-            panic!("complete compact VSS public material must refuse");
+        .expect("complete VSS public material refusal") else {
+            panic!("complete VSS public material must refuse");
         };
 
         assert_eq!(response["isValid"], json!(false));

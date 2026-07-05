@@ -4,7 +4,7 @@
 // encoding and sampling primitives, per-source-trustee opening-state generation,
 // BDLOP commitment value shaping, and the embedded commitment bundle constructor.
 // The commitments built here are the data basis the same-secret proof family
-// opens; the compact VSS commitment sets replace them as the transported public
+// opens; the VSS commitment sets replace them as the transported public
 // setup material.
 export {
     setupCommitmentRandomnessWidth,

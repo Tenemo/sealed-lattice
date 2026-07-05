@@ -790,7 +790,7 @@ fn vss_public_column_value<Domain: CompositionColumnDomain>(
     if vector_index < message_encoding_column_count {
         let (message_position, encoding_column) = layout
             .vss_public_message_position_for_encoding_column(vector_index)
-            .expect("compact VSS vector index is in the layout");
+            .expect("VSS vector index is in the layout");
         if message_position < layout.vss_public_coefficient_columns {
             column_values
                 [layout.physical_vss_public_message(message_position, encoding_column, half)]
@@ -852,7 +852,7 @@ fn same_secret_bridge_column_value<Domain: CompositionColumnDomain>(
             let message_vector_index = vector_index - 2;
             let (target_index, encoding_column) = layout
                 .same_secret_bridge_message_position_for_encoding_column(message_vector_index)
-                .expect("compact same-secret bridge vector index is in the layout");
+                .expect("same-secret bridge vector index is in the layout");
             column_values
                 [layout.physical_same_secret_bridge_message(target_index, encoding_column, half)]
         } else {

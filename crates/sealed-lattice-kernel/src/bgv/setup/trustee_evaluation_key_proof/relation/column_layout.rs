@@ -24,7 +24,7 @@ fn vss_public_message_encoding_offsets_for_layouts(
     for layout in layouts {
         offset = offset
             .checked_add(layout.encoding_column_count())
-            .ok_or_else(|| invalid_succinct_setup_proof("compact VSS column layout overflowed"))?;
+            .ok_or_else(|| invalid_succinct_setup_proof("VSS column layout overflowed"))?;
         offsets.push(offset);
     }
 
@@ -120,7 +120,7 @@ impl LimbColumnLayout {
             != vss_public_coefficient_columns + vss_public_item_columns
         {
             return Err(invalid_succinct_setup_proof(
-                "compact VSS statement bounds do not match the active message columns",
+                "VSS statement bounds do not match the active message columns",
             ));
         }
         let vss_public_message_encoding_offsets =
@@ -168,8 +168,8 @@ impl LimbColumnLayout {
         // consistency claim (their cross-field consistency is argued globally,
         // not by a per-claim mask; see consistency_vector_count), so the count is
         // the carry plus the opening-randomness columns, not the full logical
-        // column count. Compact VSS share-linkage claims the per-item carries
-        // plus every compact message digit; the digit claims bind the digit
+        // column count. VSS share-linkage claims the per-item carries
+        // plus every message digit; the digit claims bind the digit
         // witnesses across commitment fields without carrying separate trit
         // decoder columns in this relation.
         let same_secret_bridge_target_count = same_secret_bridge_message_encoding_layouts.len();
@@ -423,9 +423,9 @@ impl LimbColumnLayout {
             // because they remain witnesses for the opening and share linchecks.
             1 + self.private_vss_randomness_columns
         } else if self.vss_public_active() {
-            // Compact share-linkage keeps the base trace length and batches
+            // Share-linkage keeps the base trace length and batches
             // recipient/source-limb items into separate logical columns. It
-            // claims each lifted-carry vector and every compact message digit.
+            // claims each lifted-carry vector and every message digit.
             // Opening and share-relation linchecks keep consuming the digits
             // in each field, while these claims bind the digits to lifted
             // integer vectors across the carried fields.
@@ -436,16 +436,16 @@ impl LimbColumnLayout {
                 + self.vss_public_message_vector_count()
                     * crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT
         } else if self.same_secret_bridge_active() {
-            // Compact same-secret bridge claims the signed secret, the binary
-            // negative indicator, every target-message digit, and the compact
+            // Same-secret bridge claims the signed secret, the binary
+            // negative indicator, every target-message digit, and the
             // opening randomness. Decoder rows bind those digit columns to
             // verifier-visible trit columns.
             2 + self.same_secret_bridge_target_count()
                 * crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT
                 + self.linkage_randomness_columns
         } else if self.target_decryption_active() {
-            // Target-decryption claims every compact message digit directly.
-            // Compact-opening randomness remains a witness column where setup
+            // Target-decryption claims every message digit directly.
+            // Opening randomness remains a witness column where setup
             // commitment fields consume it, but it carries no separate masked
             // consistency claim.
             self.target_decryption_message_columns
@@ -517,7 +517,7 @@ impl LimbColumnLayout {
     ) -> usize {
         self.vss_public_message_encoding_layouts[message_position]
             .digit_trit_count(digit_index)
-            .expect("compact VSS digit is in the layout")
+            .expect("VSS digit is in the layout")
     }
 
     pub(crate) fn vss_public_message_position_for_encoding_column(
@@ -569,7 +569,7 @@ impl LimbColumnLayout {
     ) -> usize {
         self.same_secret_bridge_message_encoding_layouts[target_index]
             .digit_trit_count(digit_index)
-            .expect("compact same-secret bridge digit is in the layout")
+            .expect("same-secret bridge digit is in the layout")
     }
 
     pub(crate) fn same_secret_bridge_message_position_for_encoding_column(
@@ -694,7 +694,7 @@ impl LimbColumnLayout {
     ) -> usize {
         let encoding_column = self.vss_public_message_encoding_layouts[message_position]
             .trit_encoding_column(digit_index, trit_index)
-            .expect("compact VSS message trit is in the layout");
+            .expect("VSS message trit is in the layout");
         self.physical_vss_public_message(message_position, encoding_column, half)
     }
 
@@ -706,7 +706,7 @@ impl LimbColumnLayout {
     ) -> usize {
         let encoding_column = self.vss_public_message_encoding_layouts[message_position]
             .digit_encoding_column(digit_index)
-            .expect("compact VSS message digit is in the layout");
+            .expect("VSS message digit is in the layout");
         self.physical_vss_public_message(message_position, encoding_column, half)
     }
 
@@ -774,7 +774,7 @@ impl LimbColumnLayout {
     ) -> usize {
         let encoding_column = self.same_secret_bridge_message_encoding_layouts[target_index]
             .trit_encoding_column(digit_index, trit_index)
-            .expect("compact same-secret bridge message trit is in the layout");
+            .expect("same-secret bridge message trit is in the layout");
         self.physical_same_secret_bridge_message(target_index, encoding_column, half)
     }
 
@@ -786,7 +786,7 @@ impl LimbColumnLayout {
     ) -> usize {
         let encoding_column = self.same_secret_bridge_message_encoding_layouts[target_index]
             .digit_encoding_column(digit_index)
-            .expect("compact same-secret bridge message digit is in the layout");
+            .expect("same-secret bridge message digit is in the layout");
         self.physical_same_secret_bridge_message(target_index, encoding_column, half)
     }
 
@@ -892,7 +892,7 @@ impl LimbColumnLayout {
     // columns. The private VSS carry's integer lift is pinned by its masked
     // consistency claim; private VSS message columns carry no consistency claim,
     // so sharing relies on the global argument in consistency_vector_count
-    // instead. Compact VSS share-linkage, bridge, and target-decryption message
+    // instead. VSS share-linkage, bridge, and target-decryption message
     // digits are pinned by masked consistency claims, while any trit decoder
     // columns are locally range-checked here.
     pub(crate) fn row_check_constraint_count(&self) -> usize {

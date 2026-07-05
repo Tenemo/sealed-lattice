@@ -351,9 +351,9 @@ fn same_secret_trustee_bindings_from_vss(
     setup_package: &Value,
     expected_trustees: &BTreeMap<u64, String>,
 ) -> CanonicalResult<BTreeMap<u64, SameSecretTrusteeBinding>> {
-    // The constant coefficient commitments live in the compact commitment set:
-    // the per-source-trustee root is the compact source record root, and each
-    // commitment binds its root under coefficientCommitmentRoot.
+    // The constant coefficient commitments live in the commitment set: the
+    // per-source-trustee root is the source record root, and each commitment
+    // binds its root under coefficientCommitmentRoot.
     let (commitment_set_field, source_root_field, commitment_root_field) = (
         "vssPublicCoefficientCommitmentSet",
         "sourceCoefficientCommitmentRoot",

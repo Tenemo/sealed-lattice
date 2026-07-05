@@ -44,7 +44,7 @@ fn vss_public_message_encoding_offsets(
     for layout in layouts {
         offset = offset
             .checked_add(layout.encoding_column_count())
-            .ok_or_else(|| invalid_succinct_setup_proof("compact VSS vector layout overflowed"))?;
+            .ok_or_else(|| invalid_succinct_setup_proof("VSS vector layout overflowed"))?;
         offsets.push(offset);
     }
 
@@ -57,14 +57,14 @@ fn vss_public_message_vector_index(
     encoding_column: usize,
 ) -> CanonicalResult<usize> {
     let start = offsets.get(message_index).copied().ok_or_else(|| {
-        invalid_succinct_setup_proof("compact VSS message index is outside the vector layout")
+        invalid_succinct_setup_proof("VSS message index is outside the vector layout")
     })?;
     let end = offsets.get(message_index + 1).copied().ok_or_else(|| {
-        invalid_succinct_setup_proof("compact VSS message index is outside the vector layout")
+        invalid_succinct_setup_proof("VSS message index is outside the vector layout")
     })?;
     if start + encoding_column >= end {
         return Err(invalid_succinct_setup_proof(
-            "compact VSS message encoding column is outside the vector layout",
+            "VSS message encoding column is outside the vector layout",
         ));
     }
 
@@ -92,7 +92,7 @@ pub(crate) struct SameSecretBridgePublicVectorInput<'a> {
     pub(crate) u_power_vectors: &'a [Vec<ChallengeExtensionElement>],
 }
 
-// Compact source-to-recipient share linkage vectors for one commitment field.
+// Source-to-recipient share linkage vectors for one commitment field.
 // The vector order is every Shamir coefficient message, the recipient share
 // message, the recipient share carry, every coefficient opening-randomness
 // column, and finally the recipient share opening-randomness columns.
@@ -105,22 +105,22 @@ pub(crate) fn build_vss_share_linkage_public_vectors(
 )> {
     if input.ring_degree == 0 {
         return Err(invalid_succinct_setup_proof(
-            "compact VSS share-linkage ring degree must be positive",
+            "VSS share-linkage ring degree must be positive",
         ));
     }
     if input.source_message_modulus == 0 {
         return Err(invalid_succinct_setup_proof(
-            "compact VSS share-linkage source modulus must be positive",
+            "VSS share-linkage source modulus must be positive",
         ));
     }
     if input.coefficient_commitments.is_empty() {
         return Err(invalid_succinct_setup_proof(
-            "compact VSS share-linkage requires coefficient commitments",
+            "VSS share-linkage requires coefficient commitments",
         ));
     }
     if tower.modulus != input.modulus {
         return Err(invalid_succinct_setup_proof(
-            "compact VSS share-linkage tower modulus does not match the commitment field",
+            "VSS share-linkage tower modulus does not match the commitment field",
         ));
     }
     for commitment in input
@@ -133,12 +133,12 @@ pub(crate) fn build_vss_share_linkage_public_vectors(
             .get(input.commitment_modulus_index)
             .ok_or_else(|| {
                 invalid_succinct_setup_proof(
-                    "compact VSS commitment does not cover the selected commitment field",
+                    "VSS commitment does not cover the selected commitment field",
                 )
             })?;
         if coordinates.len() != VSS_PUBLIC_OUTPUT_COORDINATE_COUNT {
             return Err(invalid_succinct_setup_proof(
-                "compact VSS commitment coordinate count does not match the profile",
+                "VSS commitment coordinate count does not match the profile",
             ));
         }
         if coordinates
@@ -146,7 +146,7 @@ pub(crate) fn build_vss_share_linkage_public_vectors(
             .any(|coordinate| *coordinate >= input.modulus)
         {
             return Err(invalid_succinct_setup_proof(
-                "compact VSS commitment coordinate is outside the commitment field",
+                "VSS commitment coordinate is outside the commitment field",
             ));
         }
     }
@@ -154,7 +154,7 @@ pub(crate) fn build_vss_share_linkage_public_vectors(
     let commitment_count = input.coefficient_commitments.len() + 1;
     if input.u_power_vectors.len() != LINCHECK_REPETITIONS {
         return Err(invalid_succinct_setup_proof(
-            "compact VSS share-linkage lincheck repetition count does not match the profile",
+            "VSS share-linkage lincheck repetition count does not match the profile",
         ));
     }
     if input
@@ -163,7 +163,7 @@ pub(crate) fn build_vss_share_linkage_public_vectors(
         .any(|vector| vector.len() != input.ring_degree)
     {
         return Err(invalid_succinct_setup_proof(
-            "compact VSS share-linkage lincheck vector length does not match the ring degree",
+            "VSS share-linkage lincheck vector length does not match the ring degree",
         ));
     }
 
@@ -181,7 +181,7 @@ pub(crate) fn build_vss_share_linkage_public_vectors(
     let relation_count = decoder_relation_offset + decoder_relation_count;
     if input.relation_alpha.len() != relation_count {
         return Err(invalid_succinct_setup_proof(
-            "compact VSS share-linkage challenge count does not match the relation count",
+            "VSS share-linkage challenge count does not match the relation count",
         ));
     }
 
@@ -268,7 +268,7 @@ pub(crate) fn build_vss_share_linkage_public_vectors(
 
     let trustee_point = canonical_trustee_point(
         usize::try_from(input.recipient_roster_position).map_err(|_| {
-            invalid_succinct_setup_proof("compact VSS recipient roster position does not fit usize")
+            invalid_succinct_setup_proof("VSS recipient roster position does not fit usize")
         })?,
         input.source_message_modulus,
     )?;
@@ -310,7 +310,7 @@ pub(crate) fn build_vss_share_linkage_public_vectors(
             trustee_point_power = trustee_point_power
                 .checked_mul(u128::from(trustee_point))
                 .ok_or_else(|| {
-                    invalid_succinct_setup_proof("compact VSS trustee point power overflowed")
+                    invalid_succinct_setup_proof("VSS trustee point power overflowed")
                 })?;
         }
         let recipient_message_index = input.coefficient_commitments.len();
@@ -473,7 +473,7 @@ pub(crate) fn build_vss_share_linkage_batch_public_vectors(
         .sum::<usize>();
     if relation_alpha.len() != expected_relation_count {
         return Err(invalid_succinct_setup_proof(
-            "compact VSS share-linkage challenge count does not match the batched relation count",
+            "VSS share-linkage challenge count does not match the batched relation count",
         ));
     }
     let proof_ring_degree = statement.packed_ring_degree(ring_degree)?;
@@ -483,7 +483,7 @@ pub(crate) fn build_vss_share_linkage_batch_public_vectors(
             .any(|vector| vector.len() != proof_ring_degree)
     {
         return Err(invalid_succinct_setup_proof(
-            "compact VSS batched lincheck vector length does not match the proof ring degree",
+            "VSS batched lincheck vector length does not match the proof ring degree",
         ));
     }
 
@@ -495,7 +495,7 @@ pub(crate) fn build_vss_share_linkage_batch_public_vectors(
     let message_bounds = statement.packed_message_bounds();
     if message_bounds.len() != coefficient_column_count + statement.item_count() {
         return Err(invalid_succinct_setup_proof(
-            "compact VSS packed message bounds do not match the packed column layout",
+            "VSS packed message bounds do not match the packed column layout",
         ));
     }
     let message_encoding_layouts = message_bounds
@@ -522,7 +522,7 @@ pub(crate) fn build_vss_share_linkage_batch_public_vectors(
                 .any(|slot_index| *slot_index >= coefficient_slots.len())
         {
             return Err(invalid_succinct_setup_proof(
-                "compact VSS coefficient witness slot layout does not match the item",
+                "VSS coefficient witness slot layout does not match the item",
             ));
         }
         let item_coefficient_message_encoding_layout =
@@ -534,14 +534,14 @@ pub(crate) fn build_vss_share_linkage_batch_public_vectors(
                 .get(*coefficient_slot_index)
                 .ok_or_else(|| {
                     invalid_succinct_setup_proof(
-                        "compact VSS item coefficient slot is outside the packed column layout",
+                        "VSS item coefficient slot is outside the packed column layout",
                     )
                 })?;
             if message_encoding_layout.encoding_column_count()
                 != item_coefficient_message_encoding_layout.encoding_column_count()
             {
                 return Err(invalid_succinct_setup_proof(
-                    "compact VSS item message layout does not match the packed column layout",
+                    "VSS item message layout does not match the packed column layout",
                 ));
             }
         }
@@ -550,14 +550,14 @@ pub(crate) fn build_vss_share_linkage_batch_public_vectors(
             .get(recipient_message_position)
             .ok_or_else(|| {
                 invalid_succinct_setup_proof(
-                    "compact VSS recipient item is outside the packed column layout",
+                    "VSS recipient item is outside the packed column layout",
                 )
             })?;
         if recipient_message_encoding_layout.encoding_column_count()
             != item_recipient_message_encoding_layout.encoding_column_count()
         {
             return Err(invalid_succinct_setup_proof(
-                "compact VSS recipient message layout does not match the packed column layout",
+                "VSS recipient message layout does not match the packed column layout",
             ));
         }
         let item_decoder_relation_count = (item.coefficient_commitments.len()
@@ -594,7 +594,7 @@ pub(crate) fn build_vss_share_linkage_batch_public_vectors(
                 0..item_coefficient_message_encoding_layout.encoding_column_count()
             {
                 let item_vector = item_vectors.next().ok_or_else(|| {
-                    invalid_succinct_setup_proof("compact VSS batch vectors ended unexpectedly")
+                    invalid_succinct_setup_proof("VSS batch vectors ended unexpectedly")
                 })?;
                 let vector_index = vss_public_message_vector_index(
                     &message_encoding_offsets,
@@ -610,7 +610,7 @@ pub(crate) fn build_vss_share_linkage_batch_public_vectors(
         }
         for encoding_column in 0..item_recipient_message_encoding_layout.encoding_column_count() {
             let item_vector = item_vectors.next().ok_or_else(|| {
-                invalid_succinct_setup_proof("compact VSS batch vectors ended unexpectedly")
+                invalid_succinct_setup_proof("VSS batch vectors ended unexpectedly")
             })?;
             let vector_index = vss_public_message_vector_index(
                 &message_encoding_offsets,
@@ -623,9 +623,9 @@ pub(crate) fn build_vss_share_linkage_batch_public_vectors(
                 tower,
             )?;
         }
-        let carry_vector = item_vectors.next().ok_or_else(|| {
-            invalid_succinct_setup_proof("compact VSS batch vectors ended unexpectedly")
-        })?;
+        let carry_vector = item_vectors
+            .next()
+            .ok_or_else(|| invalid_succinct_setup_proof("VSS batch vectors ended unexpectedly"))?;
         add_extension_vector(
             &mut recipient_share_carry_vectors[item_index],
             &carry_vector,
@@ -634,7 +634,7 @@ pub(crate) fn build_vss_share_linkage_batch_public_vectors(
         for coefficient_slot_index in &item.coefficient_slot_indices {
             for randomness_column_index in 0..VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT {
                 let item_vector = item_vectors.next().ok_or_else(|| {
-                    invalid_succinct_setup_proof("compact VSS batch vectors ended unexpectedly")
+                    invalid_succinct_setup_proof("VSS batch vectors ended unexpectedly")
                 })?;
                 let vector_index = coefficient_slot_index * VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT
                     + randomness_column_index;
@@ -647,7 +647,7 @@ pub(crate) fn build_vss_share_linkage_batch_public_vectors(
         }
         for randomness_column_index in 0..VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT {
             let item_vector = item_vectors.next().ok_or_else(|| {
-                invalid_succinct_setup_proof("compact VSS batch vectors ended unexpectedly")
+                invalid_succinct_setup_proof("VSS batch vectors ended unexpectedly")
             })?;
             let vector_index =
                 item_index * VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT + randomness_column_index;
@@ -659,13 +659,13 @@ pub(crate) fn build_vss_share_linkage_batch_public_vectors(
         }
         if item_vectors.next().is_some() {
             return Err(invalid_succinct_setup_proof(
-                "compact VSS batch vectors contain unexpected extra columns",
+                "VSS batch vectors contain unexpected extra columns",
             ));
         }
     }
     if relation_alpha_offset != relation_alpha.len() {
         return Err(invalid_succinct_setup_proof(
-            "compact VSS batch relation challenge offset did not consume every challenge",
+            "VSS batch relation challenge offset did not consume every challenge",
         ));
     }
 
@@ -683,9 +683,9 @@ pub(crate) fn build_vss_share_linkage_batch_public_vectors(
     Ok((relation_claim, vectors))
 }
 
-// Compact same-secret bridge vectors for one commitment field. The vector
+// Same-secret bridge vectors for one commitment field. The vector
 // order is the signed ternary secret, the binary negative indicator, and each
-// compact target-constant opening-randomness column in target limb order.
+// target-constant opening-randomness column in target limb order.
 pub(crate) fn build_same_secret_bridge_public_vectors(
     input: SameSecretBridgePublicVectorInput<'_>,
     tower: &ChallengeExtensionTower,
@@ -695,19 +695,19 @@ pub(crate) fn build_same_secret_bridge_public_vectors(
 )> {
     if input.ring_degree == 0 {
         return Err(invalid_succinct_setup_proof(
-            "compact same-secret bridge ring degree must be positive",
+            "same-secret bridge ring degree must be positive",
         ));
     }
     if tower.modulus != input.modulus {
         return Err(invalid_succinct_setup_proof(
-            "compact same-secret bridge tower modulus does not match the commitment field",
+            "same-secret bridge tower modulus does not match the commitment field",
         ));
     }
     if input.target_rns_primes.is_empty()
         || input.target_rns_primes.len() != input.target_constant_commitments.len()
     {
         return Err(invalid_succinct_setup_proof(
-            "compact same-secret bridge target primes and commitments must be aligned",
+            "same-secret bridge target primes and commitments must be aligned",
         ));
     }
     for commitment in input.target_constant_commitments {
@@ -716,12 +716,12 @@ pub(crate) fn build_same_secret_bridge_public_vectors(
             .get(input.commitment_modulus_index)
             .ok_or_else(|| {
                 invalid_succinct_setup_proof(
-                    "compact same-secret bridge commitment does not cover the selected commitment field",
+                    "same-secret bridge commitment does not cover the selected commitment field",
                 )
             })?;
         if coordinates.len() != VSS_PUBLIC_OUTPUT_COORDINATE_COUNT {
             return Err(invalid_succinct_setup_proof(
-                "compact same-secret bridge coordinate count does not match the profile",
+                "same-secret bridge coordinate count does not match the profile",
             ));
         }
         if coordinates
@@ -729,14 +729,14 @@ pub(crate) fn build_same_secret_bridge_public_vectors(
             .any(|coordinate| *coordinate >= input.modulus)
         {
             return Err(invalid_succinct_setup_proof(
-                "compact same-secret bridge coordinate is outside the commitment field",
+                "same-secret bridge coordinate is outside the commitment field",
             ));
         }
     }
 
     if input.u_power_vectors.len() != LINCHECK_REPETITIONS {
         return Err(invalid_succinct_setup_proof(
-            "compact same-secret bridge lincheck repetition count does not match the profile",
+            "same-secret bridge lincheck repetition count does not match the profile",
         ));
     }
     if input
@@ -745,7 +745,7 @@ pub(crate) fn build_same_secret_bridge_public_vectors(
         .any(|vector| vector.len() != input.ring_degree)
     {
         return Err(invalid_succinct_setup_proof(
-            "compact same-secret bridge lincheck vector length does not match the ring degree",
+            "same-secret bridge lincheck vector length does not match the ring degree",
         ));
     }
 
@@ -770,7 +770,7 @@ pub(crate) fn build_same_secret_bridge_public_vectors(
     let relation_count = commitment_relation_count + bridge_relation_count + decoder_relation_count;
     if input.relation_alpha.len() != relation_count {
         return Err(invalid_succinct_setup_proof(
-            "compact same-secret bridge challenge count does not match the relation count",
+            "same-secret bridge challenge count does not match the relation count",
         ));
     }
 
@@ -990,7 +990,7 @@ fn add_extension_vector(
 ) -> CanonicalResult<()> {
     if target.len() != source.len() {
         return Err(invalid_succinct_setup_proof(
-            "compact VSS batch vector length does not match the shared coefficient column",
+            "VSS batch vector length does not match the shared coefficient column",
         ));
     }
     for (target_value, source_value) in target.iter_mut().zip(source) {

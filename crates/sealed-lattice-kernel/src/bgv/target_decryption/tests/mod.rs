@@ -100,8 +100,8 @@ fn target_decryption_evaluator_key() -> DevelopmentBgvKey {
 // reads: a five-field setupContext (with participantCount so the roster-derived
 // setupParametersHash matches), a phaseTranscript whose setupIntent phase binds
 // the fixture roster, commonRandomness.publicMatrixSeedHash, and the injected
-// compact-VSS aggregate-threshold commitment set plus share-linkage statement
-// root. The compact commitments are built (see aggregate_threshold_...)
+// VSS aggregate-threshold commitment set plus share-linkage statement
+// root. The commitments are built (see aggregate_threshold_...)
 // from the SAME Shamir shares the local witness opens, so the C2 binding in
 // share_generation is exercised, not bypassed.
 fn accepted_setup_package() -> Value {
@@ -357,7 +357,7 @@ fn aggregate_threshold_commitment_set(
             let aggregate_randomness_by_column = vec![vec![0_i64; POLYNOMIAL_DEGREE]; 2];
             let message_coefficient_bound =
                 aggregate_message_coefficient_bound(rns_prime, setup_binding.participants.len())
-                    .expect("compact aggregate message coefficient bound");
+                    .expect("aggregate message coefficient bound");
             let computation = compute_aggregate_opening(AggregateOpeningRootsInput {
                 setup_binding: &setup_binding,
                 participant,
@@ -369,7 +369,7 @@ fn aggregate_threshold_commitment_set(
                 message_coefficient_bound,
                 aggregate_randomness_by_column: &aggregate_randomness_by_column,
             })
-            .expect("compact aggregate opening computation");
+            .expect("aggregate opening computation");
             let source_share_commitment_roots = (0..setup_binding.participants.len())
                 .map(|_| json!("9".repeat(128)))
                 .collect::<Vec<_>>();
@@ -646,12 +646,12 @@ fn local_target_share_witness(
         setup_package,
         &["vssShareLinkageStatement", "statementRoot"],
     )
-    .expect("compact share-linkage statement root");
+    .expect("share-linkage statement root");
     let aggregate_threshold_commitment_root = setup_package
         .get("vssPublicAggregateThresholdCommitmentSet")
         .and_then(|aggregate_set| aggregate_set.get("aggregateThresholdCommitmentRoot"))
         .and_then(Value::as_str)
-        .expect("compact aggregate threshold commitment set root")
+        .expect("aggregate threshold commitment set root")
         .to_string();
     let aggregate_opening_credentials = share_by_limb
         .iter()
@@ -665,7 +665,7 @@ fn local_target_share_witness(
                 rns_prime,
                 setup_binding.participants.len(),
             )
-            .expect("compact aggregate message coefficient bound");
+            .expect("aggregate message coefficient bound");
             let (aggregate_commitment_root, aggregate_opening_root) =
                 compute_aggregate_opening_roots(AggregateOpeningRootsInput {
                     setup_binding: &setup_binding,
@@ -678,7 +678,7 @@ fn local_target_share_witness(
                     message_coefficient_bound,
                     aggregate_randomness_by_column: &aggregate_randomness_by_column,
                 })
-                .expect("compact aggregate opening roots");
+                .expect("aggregate opening roots");
             json!({
                 "objectType": "LocalTrusteeVssPublicAggregateOpeningCredential",
                 "objectVersion": 1,
@@ -1450,7 +1450,7 @@ fn target_share_proof_statement_binding_rejects_rebound_wrong_aggregate_commitme
         target_decryption_share: &local_share,
         proof_statement: &statement,
     })
-    .expect_err("wrong compact aggregate commitment body must be refused");
+    .expect_err("wrong aggregate commitment body must be refused");
 
     assert_eq!(error.code, CanonicalErrorCode::ComponentMismatch);
     assert!(error.message.contains("commitment body"));

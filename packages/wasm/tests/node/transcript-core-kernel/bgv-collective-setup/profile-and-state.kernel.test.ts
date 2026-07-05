@@ -12,7 +12,7 @@ import {
 } from '#packages/wasm/src/index';
 
 describe('collective BGV setup kernel commands', () => {
-    it('describes the accepted setup parameters and compact verifier states', async () => {
+    it('describes the accepted setup parameters and verifier states', async () => {
         const kernel = await loadTranscriptCoreKernel();
         const parameters = kernel.describeCollectiveBgvSetupParameters();
 
@@ -35,14 +35,6 @@ describe('collective BGV setup kernel commands', () => {
         });
         expect(parameters.qShare.primes.length).toBeGreaterThan(0);
         expect(parameters.setupParametersHash).toHaveLength(128);
-        expect(parameters.publicVssCommitmentMaterialSize).toMatchObject({
-            objectType: 'PublicVssCommitmentMaterialSize',
-            ringDegree: 32768,
-            ringDegreeStatus: 'full-ring',
-            fullMaterialCoefficientBytes: 1_604_321_280,
-            streamingRequirement:
-                'binary-chunked-stream-verification-with-one-commitment-resident',
-        });
         expect(parameters.setupTransport).toMatchObject({
             objectType: 'SetupTransport',
             chunkSizeBytes: setupTransportChunkSizeBytes,

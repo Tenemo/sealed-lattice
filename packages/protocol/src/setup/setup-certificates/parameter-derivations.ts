@@ -46,16 +46,6 @@ export const setupParametersForCertificates = (
     objectField(setupParameters, 'setupProof', 'setupParameters');
     objectField(setupParameters, 'setupTransport', 'setupParameters');
     objectField(setupParameters, 'evaluatorKeySchedule', 'setupParameters');
-    const publicVssMaterialSizeParameters = objectField(
-        setupParameters,
-        'publicVssCommitmentMaterialSize',
-        'setupParameters',
-    );
-    positiveNumberField(
-        publicVssMaterialSizeParameters,
-        'fullMaterialCoefficientBytes',
-        'setupParameters.publicVssCommitmentMaterialSize',
-    );
 
     return setupParameters;
 };

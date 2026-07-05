@@ -16,7 +16,7 @@ export const normalizeRustTestFilter = (filter: string): string => {
 };
 
 // The non-ignored accepted-setup tests in this lane share a large transient
-// proof-generation working set (the memoized compact setup fixture is tens of
+// proof-generation working set (the memoized setup fixture is tens of
 // gibibytes resident while it is built and verified). libtest concurrency here
 // must therefore be memory-bounded the same way the dedicated accepted-setup
 // lane bounds it, or an oversubscribed default-parallelism run exhausts RAM on a

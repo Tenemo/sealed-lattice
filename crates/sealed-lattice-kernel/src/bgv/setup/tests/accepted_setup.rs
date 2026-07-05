@@ -19,7 +19,7 @@ use self::package_fixtures::{
     public_key_share_succinct_proof_bearing_collective_setup_package,
 };
 use self::proof_record_fixtures::{
-    collective_public_key_object, compactify_collective_setup_package,
+    collective_public_key_object, finalize_collective_setup_package,
     galois_key_share_batches_object, public_evaluation_key_set_object,
     public_key_share_material_object, public_key_share_succinct_proofs_object,
     relinearization_key_share_rounds_fixture, replace_public_key_share_hashes_with_material_hashes,

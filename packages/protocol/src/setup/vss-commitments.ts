@@ -1,5 +1,5 @@
-// Compact VSS public material assembly. The trustees' per-coefficient secret
-// polynomial evaluations are committed with a single covered-message compact
+// VSS public material assembly. The trustees' per-coefficient secret
+// polynomial evaluations are committed with a single covered-message
 // commitment per (source trustee, RNS limb, Shamir coefficient), and the whole
 // set is bound by canonical object roots. The heavy cryptography lives in the
 // kernel commands; this module orchestrates the per-coefficient commitment
@@ -93,14 +93,14 @@ export type VssPublicCommitmentComputation = {
     readonly openingRoot: ProtocolHash;
 };
 
-// The kernel-backed compact commitment computation (bound to the WASM
+// The kernel-backed commitment computation (bound to the WASM
 // `ComputeVssPublicCommitmentFromOpening` command by the SDK layer). Injected
 // so the protocol layer never reimplements the certified commitment.
 export type VssPublicCommitmentComputer = (
     input: VssPublicCommitmentOpeningInput,
 ) => VssPublicCommitmentComputation;
 
-// Typed compact commitment set outputs. These are the exact objects the
+// Typed commitment set outputs. These are the exact objects the
 // accepted-setup verifier recomputes canonical roots over, so downstream
 // builders (share-linkage statement and proof material) read them type-safely
 // instead of casting through untyped records.
@@ -313,7 +313,7 @@ export const createVssPublicCoefficientCommitmentSet = (input: {
                         );
                         if (opening === undefined) {
                             throw new Error(
-                                'Source trustee coefficient openings must cover every compact VSS coefficient coordinate.',
+                                'Source trustee coefficient openings must cover every VSS coefficient coordinate.',
                             );
                         }
                         if (opening.rnsPrime !== rnsPrime) {
@@ -322,8 +322,7 @@ export const createVssPublicCoefficientCommitmentSet = (input: {
                             );
                         }
                         const commitmentContext = {
-                            objectType:
-                                'VssPublicCoefficientCommitmentContext',
+                            objectType: 'VssPublicCoefficientCommitmentContext',
                             objectVersion: 1,
                             ...setupContextFields(input.setupContext),
                             sourceTrusteeIdentity:
@@ -547,7 +546,7 @@ export const createVssPublicRecipientShareCommitmentSet = (input: {
                             );
                             if (opening === undefined) {
                                 throw new Error(
-                                    'Source trustee coefficient openings must cover every compact VSS coefficient coordinate.',
+                                    'Source trustee coefficient openings must cover every VSS coefficient coordinate.',
                                 );
                             }
                             coefficientMessagesByShamirIndex.push([
@@ -681,7 +680,7 @@ const aggregateCoordinateGroupKey = (
 
 // The aggregate threshold commitment for one recipient at one RNS limb is the
 // coordinate-wise SUM of every source trustee's recipient-share commitment to
-// that recipient at that limb. The compact commitment is linear, so the summed
+// that recipient at that limb. The commitment is linear, so the summed
 // commitment opens to the summed share under the summed randomness, which is
 // exactly what the accepted-setup verifier recomputes. This is a client-side
 // sum, never a fresh compute-command call: a commitment of the summed share
@@ -891,7 +890,7 @@ export type VssShareLinkageStatement = {
     readonly statementRoot: ProtocolHash;
 };
 
-// The share-linkage statement binds the three compact commitment set roots and,
+// The share-linkage statement binds the three commitment set roots and,
 // per source trustee, the opening roots the share-linkage proof covers. It is
 // pure root assembly over the already-built sets: the accepted-setup verifier
 // recomputes every root it references, so acceptance never trusts this object,
@@ -922,7 +921,7 @@ export const createVssShareLinkageStatement = (input: {
                     ];
                 if (recipientSourceRecord === undefined) {
                     throw new Error(
-                        'Compact VSS share linkage statement inputs must contain matching source records.',
+                        'VSS share linkage statement inputs must contain matching source records.',
                     );
                 }
                 const coefficientOpeningRoots =
@@ -1055,7 +1054,7 @@ export type VssShareLinkageProofContext = {
     readonly shareLinkageStatementRoot: ProtocolHash;
 };
 
-// The kernel-backed compact share-linkage proof (bound to the WASM
+// The kernel-backed share-linkage proof (bound to the WASM
 // `GenerateVssShareLinkageProof` command by the SDK). Injected so the
 // protocol layer assembles the witness but never runs the certified prover.
 export type VssShareLinkageProofComputer = (input: {
@@ -1156,7 +1155,7 @@ export const createVssShareLinkageProofMaterialSet = (input: {
         );
         if (credential === undefined) {
             throw new Error(
-                'Compact VSS share linkage proof requires a coefficient credential for every covered coordinate.',
+                'VSS share linkage proof requires a coefficient credential for every covered coordinate.',
             );
         }
 
@@ -1176,7 +1175,7 @@ export const createVssShareLinkageProofMaterialSet = (input: {
         );
         if (credential === undefined) {
             throw new Error(
-                'Compact VSS share linkage proof requires a recipient-share credential for every covered coordinate.',
+                'VSS share linkage proof requires a recipient-share credential for every covered coordinate.',
             );
         }
 
@@ -1201,7 +1200,7 @@ export const createVssShareLinkageProofMaterialSet = (input: {
             recipientSourceRecord === undefined
         ) {
             throw new Error(
-                'Compact VSS share linkage proof requires matching coefficient and recipient source records.',
+                'VSS share linkage proof requires matching coefficient and recipient source records.',
             );
         }
         const coefficientRecordOffset = rnsLimbIndex * thresholdDegree;
@@ -1216,7 +1215,7 @@ export const createVssShareLinkageProofMaterialSet = (input: {
             ];
         if (recipientRecord === undefined) {
             throw new Error(
-                'Compact VSS share linkage proof requires a recipient-share commitment for every covered coordinate.',
+                'VSS share linkage proof requires a recipient-share commitment for every covered coordinate.',
             );
         }
 
@@ -1305,7 +1304,7 @@ export const createVssShareLinkageProofMaterialSet = (input: {
             const [primaryLinkageItemRecord] = linkageItemRecords;
             if (primaryLinkageItemRecord === undefined) {
                 throw new Error(
-                    'Compact VSS share linkage proof record requires at least one covered recipient.',
+                    'VSS share linkage proof record requires at least one covered recipient.',
                 );
             }
             const vssShareLinkage = {
@@ -1367,7 +1366,7 @@ export const createVssShareLinkageProofMaterialSet = (input: {
             });
             const proofBytes = bytesFromHex(
                 generatedProof.proofBytesHex,
-                'compact VSS share linkage proofBytesHex',
+                'VSS share linkage proofBytesHex',
             );
             const proofRecordWithoutRoot = {
                 objectType: 'VssShareLinkageProofRecord',
@@ -1421,9 +1420,9 @@ export const createVssShareLinkageProofMaterialSet = (input: {
     };
 };
 
-// The single threshold-share commitment form on the compact path: it binds the
+// The single threshold-share commitment form: it binds the
 // aggregate threshold commitment set to the share-linkage statement and proof
-// material, so the accepted-setup verifier recomputes this root over the compact
+// material, so the accepted-setup verifier recomputes this root over the
 // roots it already verified rather than trusting a separate threshold object.
 export const createThresholdShareCommitmentBinding = (input: {
     readonly coefficientCommitmentSet: VssPublicCoefficientCommitmentSet;
@@ -1455,14 +1454,14 @@ export const createThresholdShareCommitmentBinding = (input: {
     };
 };
 
-// Compact same-secret bridge constants. These are bound into the bridge
+// Same-secret bridge constants. These are bound into the bridge
 // statement (and thus its recomputed root), so they must match the kernel
 // verifier byte for byte.
 const sameSecretProofFamily = 'same-secret-linkage-anchor';
 const sameSecretRelation =
     'vss-constant-commitments-open-to-one-short-secret-across-q-share-limbs';
 const sameSecretBridgeRelation =
-    'target-basis compact constant coefficient commitments bind to the same signed ternary trustee secret as the data-basis same-secret proof';
+    'target-basis constant coefficient commitments bind to the same signed ternary trustee secret as the data-basis same-secret proof';
 const sameSecretBridgeIntegerSupport =
     'the bridge proof must show one centered ternary integer coefficient vector whose signed coefficients reduce into every bound data-basis and target-basis limb';
 const sameSecretBridgeSignedRepresentativeConvention =
@@ -1545,8 +1544,8 @@ export type VssSameSecretBridgeStatementSet = {
     readonly sameSecretBridgeStatementSetRoot: ProtocolHash;
 };
 
-// The compact same-secret bridge statement set: per source trustee, it ties the
-// compact target-basis constant coefficient commitments to the accepted
+// The same-secret bridge statement set: per source trustee, it ties the
+// target-basis constant coefficient commitments to the accepted
 // data-basis same-secret proof, so the verifier recomputes the shared roots and
 // checks one bridge proof per trustee proves both bases open to one secret.
 export const createVssSameSecretBridgeStatementSet = (input: {
@@ -1578,7 +1577,7 @@ export const createVssSameSecretBridgeStatementSet = (input: {
                 sameSecretProof === undefined
             ) {
                 throw new Error(
-                    'Compact same-secret bridge requires a same-secret statement and proof per source trustee.',
+                    'Same-secret bridge requires a same-secret statement and proof per source trustee.',
                 );
             }
             const targetConstantCoefficientCommitmentRoots: VssSameSecretBridgeTargetConstantRoot[] =
@@ -1596,7 +1595,7 @@ export const createVssSameSecretBridgeStatementSet = (input: {
                     ];
                 if (constantCoefficient === undefined) {
                     throw new Error(
-                        'Compact same-secret bridge requires a constant coefficient commitment per target limb.',
+                        'Same-secret bridge requires a constant coefficient commitment per target limb.',
                     );
                 }
                 targetConstantCoefficientCommitmentRoots.push({
@@ -1638,8 +1637,7 @@ export const createVssSameSecretBridgeStatementSet = (input: {
                 signedRepresentativeConvention:
                     sameSecretBridgeSignedRepresentativeConvention,
                 vssPublicCommitmentEncoding: vssPublicCommitmentBinaryFormat,
-                targetBasisLimbOrder:
-                    sameSecretBridgeTargetBasisLimbOrder,
+                targetBasisLimbOrder: sameSecretBridgeTargetBasisLimbOrder,
                 targetConstantCoefficientCommitmentRoots,
                 targetConstantCoefficientCommitments,
                 relation: sameSecretBridgeRelation,
@@ -1700,7 +1698,7 @@ export type SameSecretBridgeProofContext = {
     readonly sameSecretProofFamilyBindingRoot: ProtocolHash;
 };
 
-// The kernel-backed compact same-secret bridge proof (bound to the WASM
+// The kernel-backed same-secret bridge proof (bound to the WASM
 // `GenerateSameSecretBridgeProof` command by the SDK). Injected so the
 // protocol layer assembles the witness but never runs the certified prover.
 export type SameSecretBridgeProofComputer = (input: {
@@ -1716,7 +1714,7 @@ export type SameSecretBridgeProofComputer = (input: {
 }) => { readonly proofBytesHex: string };
 
 // The source trustee's centered ternary secret coefficient vector, the same
-// secret the data-basis same-secret proof binds. The bridge proves the compact
+// secret the data-basis same-secret proof binds. The bridge proves the
 // target-basis constant commitments open to this exact vector.
 type SameSecretBridgeSecretProvider = (input: {
     readonly sourceTrusteeRosterPosition: number;
@@ -1733,7 +1731,7 @@ type SameSecretBridgeTransportedProofMaterialProvider = (input: {
     readonly sourceTrusteeRosterPosition: number;
 }) => Record<string, unknown> | undefined;
 
-// The compact same-secret bridge proof material set: one succinct bridge proof
+// The same-secret bridge proof material set: one succinct bridge proof
 // per source trustee. The verifier recomputes the statement roots and the proof
 // bytes hash and checks each proof, so this builder assembles the witness (the
 // trustee secret, its sign indicators, and the per-limb constant-coefficient
@@ -1764,7 +1762,7 @@ export const createVssSameSecretBridgeProofMaterialSet = (input: {
         );
         if (randomness === undefined) {
             throw new Error(
-                'Compact same-secret bridge proof requires constant coefficient commitment randomness per target limb.',
+                'Same-secret bridge proof requires constant coefficient commitment randomness per target limb.',
             );
         }
 
@@ -1852,7 +1850,7 @@ export const createVssSameSecretBridgeProofMaterialSet = (input: {
             });
             const proofBytes = bytesFromHex(
                 generatedProof.proofBytesHex,
-                'compact same-secret bridge proofBytesHex',
+                'same-secret bridge proofBytesHex',
             );
             const proofRecordWithoutRoot = {
                 objectType: 'VssSameSecretBridgeProofRecord',
@@ -1891,8 +1889,7 @@ export const createVssSameSecretBridgeProofMaterialSet = (input: {
         participantCount: statementSet.participantCount,
         targetRnsLimbCount: statementSet.targetRnsLimbCount,
         thresholdDegree: statementSet.thresholdDegree,
-        coefficientCommitmentRoot:
-            statementSet.coefficientCommitmentRoot,
+        coefficientCommitmentRoot: statementSet.coefficientCommitmentRoot,
         sameSecretConsistencyRoot: statementSet.sameSecretConsistencyRoot,
         sameSecretProofSetRoot: statementSet.sameSecretProofSetRoot,
         sameSecretProofFamilyBindingRoot:
@@ -1913,7 +1910,7 @@ export const createVssSameSecretBridgeProofMaterialSet = (input: {
 type JsonRecord = Record<string, unknown>;
 
 // Standard RFC 4648 base64 with padding, the inverse of the local
-// encodeStandardBase64 the compact proof records use for their embedded proof
+// encodeStandardBase64 the proof records use for their embedded proof
 // bytes. Decoding recovers the exact proof bytes so the transport hashes bind
 // the same object the embedded record committed to.
 const bytesFromStandardBase64 = (
@@ -1976,7 +1973,7 @@ type ProofMaterialTransportParameters = Readonly<{
     readonly transportMaterialObjectType: string;
 }>;
 
-// Move every compact proof record's embedded base64 proof bytes onto the shared
+// Move every proof record's embedded base64 proof bytes onto the shared
 // setup proof-material transport. Each record keeps its identity fields but drops
 // proofBytesBase64 for the transport reference fields and a recomputed
 // proofRecordRoot, exactly as the kernel verifier rebuilds it, and its proof
@@ -2102,11 +2099,10 @@ const moveProofBytesToTransport = (
     };
 };
 
-export type BinaryChunkedVssShareLinkageProofMaterialTransport =
-    Readonly<{
-        readonly proofMaterialSet: JsonRecord;
-        readonly transportedVssShareLinkageProofMaterial: TransportedVssShareLinkageProofMaterialSet;
-    }>;
+export type BinaryChunkedVssShareLinkageProofMaterialTransport = Readonly<{
+    readonly proofMaterialSet: JsonRecord;
+    readonly transportedVssShareLinkageProofMaterial: TransportedVssShareLinkageProofMaterialSet;
+}>;
 
 export const createBinaryChunkedVssShareLinkageProofMaterialTransport = (
     proofMaterialSet: JsonRecord,
@@ -2127,28 +2123,26 @@ export const createBinaryChunkedVssShareLinkageProofMaterialTransport = (
     };
 };
 
-export type BinaryChunkedSameSecretBridgeProofMaterialTransport =
-    Readonly<{
-        readonly proofMaterialSet: JsonRecord;
-        readonly transportedSameSecretBridgeProofMaterial: TransportedSameSecretBridgeProofMaterialSet;
-    }>;
+export type BinaryChunkedSameSecretBridgeProofMaterialTransport = Readonly<{
+    readonly proofMaterialSet: JsonRecord;
+    readonly transportedSameSecretBridgeProofMaterial: TransportedSameSecretBridgeProofMaterialSet;
+}>;
 
-export const createBinaryChunkedSameSecretBridgeProofMaterialTransport =
-    (
-        proofMaterialSet: JsonRecord,
-    ): BinaryChunkedSameSecretBridgeProofMaterialTransport => {
-        const moved = moveProofBytesToTransport(proofMaterialSet, {
-            proofFamily: sameSecretBridgeProofFamily,
-            proofBytesHashDomain: sameSecretBridgeProofBytesHashDomain,
-            transportSetObjectType:
-                'SetupTransportedSameSecretBridgeProofMaterialSet',
-            transportMaterialObjectType:
-                'SetupTransportedSameSecretBridgeProofMaterial',
-        });
+export const createBinaryChunkedSameSecretBridgeProofMaterialTransport = (
+    proofMaterialSet: JsonRecord,
+): BinaryChunkedSameSecretBridgeProofMaterialTransport => {
+    const moved = moveProofBytesToTransport(proofMaterialSet, {
+        proofFamily: sameSecretBridgeProofFamily,
+        proofBytesHashDomain: sameSecretBridgeProofBytesHashDomain,
+        transportSetObjectType:
+            'SetupTransportedSameSecretBridgeProofMaterialSet',
+        transportMaterialObjectType:
+            'SetupTransportedSameSecretBridgeProofMaterial',
+    });
 
-        return {
-            proofMaterialSet: moved.proofMaterialSet,
-            transportedSameSecretBridgeProofMaterial:
-                moved.transportedProofMaterialSet as TransportedSameSecretBridgeProofMaterialSet,
-        };
+    return {
+        proofMaterialSet: moved.proofMaterialSet,
+        transportedSameSecretBridgeProofMaterial:
+            moved.transportedProofMaterialSet as TransportedSameSecretBridgeProofMaterialSet,
     };
+};

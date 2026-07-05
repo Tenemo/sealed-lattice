@@ -197,18 +197,18 @@ pub(crate) fn build_target_decryption_share_public_vectors(
                 .get(input.limb_index)
                 .ok_or_else(|| {
                     invalid_succinct_setup_proof(
-                        "target-decryption compact commitment does not cover the commitment field",
+                        "target-decryption commitment does not cover the commitment field",
                     )
                 })?;
             if coordinates.len() != VSS_PUBLIC_OUTPUT_COORDINATE_COUNT {
                 return Err(invalid_succinct_setup_proof(
-                    "target-decryption compact commitment coordinate count does not match the profile",
+                    "target-decryption commitment coordinate count does not match the profile",
                 ));
             }
             for (output_coordinate_index, coordinate) in coordinates.iter().enumerate() {
                 if *coordinate >= input.modulus {
                     return Err(invalid_succinct_setup_proof(
-                        "target-decryption compact commitment coordinate is outside the commitment field",
+                        "target-decryption commitment coordinate is outside the commitment field",
                     ));
                 }
                 let alpha_index =

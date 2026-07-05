@@ -3,6 +3,10 @@ import {
     type JsonRecord,
 } from '../setup-fixture-primitives.js';
 
+import type {
+    SameSecretConsistencyStatementSet,
+    SameSecretProofSet,
+} from '#packages/protocol/src/setup/same-secret-consistency-records';
 import {
     createThresholdShareCommitmentBinding,
     createVssPublicAggregateThresholdCommitmentSet,
@@ -17,10 +21,6 @@ import {
     type VssPublicRecipientShareCommitmentSet,
     type VssPublicSourceTrusteeOpeningState,
 } from '#packages/protocol/src/setup/vss-commitments';
-import type {
-    SameSecretConsistencyStatementSet,
-    SameSecretProofSet,
-} from '#packages/protocol/src/setup/same-secret-consistency-records';
 import { type CollectiveBgvSetupContext } from '#packages/protocol/src/setup/vss-share-verification-records';
 import type {
     BgvCollectiveSetupParametersDescription,
@@ -34,7 +34,7 @@ import {
 
 // The source trustee's centered ternary secret coefficient, deterministic per
 // (trustee, coefficient position). The shamir-zero coefficient message is this
-// secret reduced into each RNS prime, so the same-secret proof and the compact
+// secret reduced into each RNS prime, so the same-secret proof and the
 // same-secret bridge bind one consistent secret.
 export const vssPublicTrusteeSecretCoefficient = (
     sourceTrusteeRosterPosition: number,
@@ -92,7 +92,7 @@ const vssPublicCoefficientMessage = (
 };
 
 // Deterministic centered ternary commitment randomness. It is opaque to the
-// verifier (the compact commitment is hiding), so any deterministic ternary
+// verifier (the commitment is hiding), so any deterministic ternary
 // value works as long as the commit and the proof reuse the same column, which
 // the builders guarantee by threading it through the credentials.
 const vssPublicCoefficientRandomness = (
@@ -184,10 +184,10 @@ export type VssPublicMaterial = {
     readonly ringDegree: number;
 };
 
-// Build the compact VSS public material (coefficient, recipient-share and
+// Build the VSS public material (coefficient, recipient-share and
 // aggregate threshold commitment sets, the share-linkage statement and proof
-// material, and the compact threshold-share commitment binding) by driving the
-// protocol builders with the kernel-backed compact commitment and proof
+// material, and the threshold-share commitment binding) by driving the
+// protocol builders with the kernel-backed commitment and proof
 // computers. The same-secret bridge is built separately because it also binds
 // the accepted same-secret proof.
 export function acceptedVssPublicMaterial(
@@ -207,8 +207,8 @@ export function acceptedVssPublicMaterial(
         thresholdDegree,
     );
 
-    const coefficientCommitmentBundle =
-        createVssPublicCoefficientCommitmentSet({
+    const coefficientCommitmentBundle = createVssPublicCoefficientCommitmentSet(
+        {
             setupContext,
             publicMatrixSeedHash,
             participantCount,
@@ -228,7 +228,8 @@ export function acceptedVssPublicMaterial(
                     ringDegree,
                 ),
             computeVssPublicCommitment: vssPublicCommitmentComputer,
-        });
+        },
+    );
     const recipientShareCommitmentBundle =
         createVssPublicRecipientShareCommitmentSet({
             setupContext,
@@ -271,41 +272,39 @@ export function acceptedVssPublicMaterial(
             recipientShareCommitmentBundle.recipientShareCommitmentSet,
         aggregateThresholdCommitmentSet,
     });
-    const shareLinkageProofMaterialSet =
-        createVssShareLinkageProofMaterialSet({
-            statement: shareLinkageStatement,
-            coefficientCommitmentSet:
-                coefficientCommitmentBundle.coefficientCommitmentSet,
-            recipientShareCommitmentSet:
-                recipientShareCommitmentBundle.recipientShareCommitmentSet,
-            coefficientCredentials:
-                coefficientCommitmentBundle.coefficientCredentials,
-            recipientShareCredentials:
-                recipientShareCommitmentBundle.recipientShareCredentials,
-            shareLinkageProofRandomness: ({
-                sourceTrusteeRosterPosition,
-                proofRecordIndex,
-            }) => ({
-                seedHex: kernel.deriveCanonicalObjectHash({
-                    value: {
-                        objectType: 'VssShareLinkageProofRandomness',
-                        fixture: 'seed',
-                        sourceTrusteeRosterPosition,
-                        proofRecordIndex,
-                    },
-                }),
-                nonceHex: kernel.deriveCanonicalObjectHash({
-                    value: {
-                        objectType: 'VssShareLinkageProofRandomness',
-                        fixture: 'nonce',
-                        sourceTrusteeRosterPosition,
-                        proofRecordIndex,
-                    },
-                }),
+    const shareLinkageProofMaterialSet = createVssShareLinkageProofMaterialSet({
+        statement: shareLinkageStatement,
+        coefficientCommitmentSet:
+            coefficientCommitmentBundle.coefficientCommitmentSet,
+        recipientShareCommitmentSet:
+            recipientShareCommitmentBundle.recipientShareCommitmentSet,
+        coefficientCredentials:
+            coefficientCommitmentBundle.coefficientCredentials,
+        recipientShareCredentials:
+            recipientShareCommitmentBundle.recipientShareCredentials,
+        shareLinkageProofRandomness: ({
+            sourceTrusteeRosterPosition,
+            proofRecordIndex,
+        }) => ({
+            seedHex: kernel.deriveCanonicalObjectHash({
+                value: {
+                    objectType: 'VssShareLinkageProofRandomness',
+                    fixture: 'seed',
+                    sourceTrusteeRosterPosition,
+                    proofRecordIndex,
+                },
             }),
-            generateVssShareLinkageProof:
-                vssShareLinkageProofComputer,
-        });
+            nonceHex: kernel.deriveCanonicalObjectHash({
+                value: {
+                    objectType: 'VssShareLinkageProofRandomness',
+                    fixture: 'nonce',
+                    sourceTrusteeRosterPosition,
+                    proofRecordIndex,
+                },
+            }),
+        }),
+        generateVssShareLinkageProof: vssShareLinkageProofComputer,
+    });
     const thresholdShareCommitmentBinding =
         createThresholdShareCommitmentBinding({
             coefficientCommitmentSet:
@@ -336,7 +335,7 @@ export type SameSecretBridge = {
     readonly bridgeProofMaterialSet: JsonRecord;
 };
 
-// Build the compact same-secret bridge: per source trustee it binds the compact
+// Build the same-secret bridge: per source trustee it binds the
 // target-basis constant coefficient commitments to the accepted data-basis
 // same-secret proof, and one succinct bridge proof shows both open to the same
 // centered ternary secret. The bridge secret must be the exact secret the
@@ -358,35 +357,33 @@ export function acceptedSameSecretBridge(
         sameSecretConsistency: sameSecretConsistency,
         sameSecretProofs: sameSecretProofs,
     });
-    const bridgeProofMaterialSet =
-        createVssSameSecretBridgeProofMaterialSet({
-            statementSet: bridgeStatementSet,
-            coefficientCredentials: vssPublicMaterial.coefficientCredentials,
-            bridgeSecret: ({ sourceTrusteeRosterPosition }) => ({
-                secretCoefficients: vssPublicTrusteeSecretCoefficients(
+    const bridgeProofMaterialSet = createVssSameSecretBridgeProofMaterialSet({
+        statementSet: bridgeStatementSet,
+        coefficientCredentials: vssPublicMaterial.coefficientCredentials,
+        bridgeSecret: ({ sourceTrusteeRosterPosition }) => ({
+            secretCoefficients: vssPublicTrusteeSecretCoefficients(
+                sourceTrusteeRosterPosition,
+                vssPublicMaterial.ringDegree,
+            ),
+        }),
+        bridgeProofRandomness: ({ sourceTrusteeRosterPosition }) => ({
+            seedHex: kernel.deriveCanonicalObjectHash({
+                value: {
+                    objectType: 'SameSecretBridgeProofRandomness',
+                    fixture: 'seed',
                     sourceTrusteeRosterPosition,
-                    vssPublicMaterial.ringDegree,
-                ),
+                },
             }),
-            bridgeProofRandomness: ({ sourceTrusteeRosterPosition }) => ({
-                seedHex: kernel.deriveCanonicalObjectHash({
-                    value: {
-                        objectType: 'SameSecretBridgeProofRandomness',
-                        fixture: 'seed',
-                        sourceTrusteeRosterPosition,
-                    },
-                }),
-                nonceHex: kernel.deriveCanonicalObjectHash({
-                    value: {
-                        objectType: 'SameSecretBridgeProofRandomness',
-                        fixture: 'nonce',
-                        sourceTrusteeRosterPosition,
-                    },
-                }),
+            nonceHex: kernel.deriveCanonicalObjectHash({
+                value: {
+                    objectType: 'SameSecretBridgeProofRandomness',
+                    fixture: 'nonce',
+                    sourceTrusteeRosterPosition,
+                },
             }),
-            generateSameSecretBridgeProof:
-                sameSecretBridgeProofComputer,
-        });
+        }),
+        generateSameSecretBridgeProof: sameSecretBridgeProofComputer,
+    });
 
     return { bridgeStatementSet, bridgeProofMaterialSet };
 }

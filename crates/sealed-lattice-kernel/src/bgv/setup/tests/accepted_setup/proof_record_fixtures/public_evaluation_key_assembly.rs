@@ -9,7 +9,7 @@ use crate::hashing::derive_canonical_object_hash;
 // share roots). The key-root preimages are byte-identical to the verifier's
 // `expected_relinearization_key_roots_for_evaluation_keys` and
 // `expected_galois_key_roots_for_evaluation_keys`, and the set carries no
-// streamed material reference, so the compact package embeds the whole set and no
+// streamed material reference, so the package embeds the whole set and no
 // transported public evaluation-key material is required.
 pub(in super::super) fn public_evaluation_key_set_object(
     package: &serde_json::Value,

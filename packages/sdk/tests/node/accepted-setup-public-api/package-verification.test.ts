@@ -214,7 +214,7 @@ describe('accepted setup public package API in Node', () => {
         expect(verification.acceptedSetupHandoff).toBeUndefined();
     });
 
-    it('creates compact setup verification input for every verified proof material family', () => {
+    it('creates setup verification input for every verified proof material family', () => {
         const setupPackage = {
             objectType: 'SetupPackage',
             objectVersion: 1,

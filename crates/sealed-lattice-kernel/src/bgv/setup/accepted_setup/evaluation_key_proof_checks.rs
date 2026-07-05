@@ -668,18 +668,17 @@ pub(in crate::bgv::setup) fn trustee_evaluation_key_statement_from_package(
     // key-switch limb (the working-level RNS limbs the relinearization and
     // Galois keys operate over), not every Q_share limb.
     let active_key_switch_limb_count = keys.iter().map(|key| key.level + 1).max().unwrap_or(0);
-    // Compact path: the trustee's key schedule is proven against the compact
-    // same-secret bridge's target constant commitments. The bridge is only a
-    // valid anchor if its binding matches the same-secret proof already accepted
-    // for this trustee, which is in turn bound (through the bridge statement set
-    // root and the compact coefficient commitment root) to the verified compact
-    // VSS material. This ties the evaluation keys to the exact secret committed
-    // in the compact VSS coefficients.
+    // The trustee's key schedule is proven against the same-secret bridge's
+    // target constant commitments. The bridge is only a valid anchor if its
+    // binding matches the same-secret proof already accepted for this trustee,
+    // which is in turn bound (through the bridge statement set root and the
+    // coefficient commitment root) to the verified VSS material. This ties the
+    // evaluation keys to the exact secret committed in the VSS coefficients.
     let verified_same_secret_bridge =
         inputs.verified_same_secret_bridge.ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "compact same-secret bridge material was required for trustee evaluation-key proof verification",
+                "same-secret bridge material was required for trustee evaluation-key proof verification",
             )
         })?;
     let bridge_binding = verified_same_secret_bridge
@@ -695,7 +694,7 @@ pub(in crate::bgv::setup) fn trustee_evaluation_key_statement_from_package(
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ComponentMismatch,
-            "compact same-secret bridge statement must match the accepted same-secret proof binding",
+            "same-secret bridge statement must match the accepted same-secret proof binding",
         ));
     }
     let mut bridge_statement = bridge_binding.statement.clone();
@@ -705,7 +704,7 @@ pub(in crate::bgv::setup) fn trustee_evaluation_key_statement_from_package(
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "compact same-secret bridge statement does not cover every active key-switch limb",
+            "same-secret bridge statement does not cover every active key-switch limb",
         ));
     }
     bridge_statement

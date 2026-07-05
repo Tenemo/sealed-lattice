@@ -824,9 +824,9 @@ fn verify_vss_share_acceptance_context(
 pub(super) fn source_trustee_commitment_roots_from_vss_commitments(
     setup_package: &Value,
 ) -> CanonicalResult<BTreeMap<u64, String>> {
-    // Each source trustee is identified by its compact coefficient commitment set
-    // root: the per-source-trustee root over that trustee's coefficient
-    // commitments, which the private envelopes and share acceptances bind against.
+    // Each source trustee is identified by its coefficient commitment set root:
+    // the per-source-trustee root over that trustee's coefficient commitments,
+    // which the private envelopes and share acceptances bind against.
     let (commitment_set_field, source_root_field) = (
         "vssPublicCoefficientCommitmentSet",
         "sourceCoefficientCommitmentRoot",

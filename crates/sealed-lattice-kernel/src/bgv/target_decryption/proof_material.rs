@@ -128,7 +128,7 @@ pub(super) fn verify_target_decryption_share_proof_material(
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "target-decryption proof material must use the current compact target proof-material layout",
+            "target-decryption proof material must use the current target proof-material layout",
         ));
     }
     hash_at_path(input.proof_material, &["proofMaterialRoot"])?;
@@ -184,7 +184,7 @@ fn verify_target_decryption_share_proof_record(
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "target-decryption proof record must use the current compact target proof-record layout",
+            "target-decryption proof record must use the current target proof-record layout",
         ));
     }
     let expected_target_rns_limb_indices = (0..input.active_limb_count).collect::<Vec<_>>();

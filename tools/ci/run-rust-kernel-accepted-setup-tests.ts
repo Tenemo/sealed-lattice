@@ -61,7 +61,7 @@ export type ParsedRustKernelAcceptedSetupArguments = {
     readonly testFilters: readonly string[];
 };
 
-// Shared libtest-thread budget. The heavy lane uses compact transported
+// Shared libtest-thread budget. The heavy lane uses transported
 // proof/key material, but full-profile package construction and verification
 // still have a transient working set large enough that libtest concurrency must
 // be memory-bound: a single package-inflating test was measured near 57 GiB

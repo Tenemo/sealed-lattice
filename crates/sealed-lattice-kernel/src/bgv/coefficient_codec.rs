@@ -44,7 +44,7 @@ pub(in crate::bgv) fn coefficient_vector_hash512(coefficients: &[u64], domain: &
     hash512_hex(domain, &[&coefficient_vector_bytes(coefficients)])
 }
 
-#[cfg(any(feature = "target-decryption-development-commands", test))]
+#[cfg(test)]
 pub(in crate::bgv) fn signed_byte_vector_hex(coefficients: &[i64]) -> CanonicalResult<String> {
     let mut bytes = Vec::with_capacity(coefficients.len());
     for coefficient in coefficients {
