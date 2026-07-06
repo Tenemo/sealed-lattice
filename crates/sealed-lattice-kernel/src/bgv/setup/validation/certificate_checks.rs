@@ -9,11 +9,6 @@ pub(super) fn validate_setup_certificates(setup_package: &Value) -> CanonicalRes
         hash_at_path(certificates, &["keySwitchDecompositionHash"])?,
         "key-switch decomposition hash",
     )?;
-    compare_derived_hash(
-        value_at_path(certificates, &["evaluationKeySizeCertificate"])?,
-        hash_at_path(certificates, &["evaluationKeySizeParametersHash"])?,
-        "evaluation key size parameters hash",
-    )?;
     validate_evaluation_key_streaming_commitment(certificates)?;
     Ok(())
 }

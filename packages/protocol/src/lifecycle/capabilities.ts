@@ -386,7 +386,6 @@ export const evaluateActionCapability = (
             return evaluateRecombination(action, context);
         case 'DecodeVerifiedTopK':
             return evaluateRecombination(action, context);
-        case 'VerifyTranscript':
         case 'CreateRecoveryEpochUpdate':
         case 'VerifyEncryptedEnvelope':
             return refuseAction(action, 'OperationUnavailable');

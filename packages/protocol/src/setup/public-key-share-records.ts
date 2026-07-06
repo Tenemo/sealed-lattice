@@ -41,7 +41,6 @@ export {
     type PublicKeyShareMaterialSetInput,
     type PublicKeyShareSuccinctProofSetInput,
     type TransportedPublicKeyShareProofMaterialSet,
-    type BinaryChunkedPublicKeyShareProofMaterialTransport,
 } from './public-key-share-records/constants-and-types.js';
 export {
     createPublicKeyShareSet,
@@ -57,7 +56,4 @@ export {
     createCollectivePublicKey,
     createCollectivePublicKeyFromTransportedPublicKeyShareMaterial,
 } from './public-key-share-records/collective-public-key.js';
-export {
-    createPublicKeyShareSuccinctProofSet,
-    createBinaryChunkedPublicKeyShareProofMaterialTransport,
-} from './public-key-share-records/succinct-proofs.js';
+export { createPublicKeyShareSuccinctProofSet } from './public-key-share-records/succinct-proofs.js';

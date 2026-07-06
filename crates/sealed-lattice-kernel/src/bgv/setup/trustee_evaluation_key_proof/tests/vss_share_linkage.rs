@@ -2,6 +2,9 @@ use super::super::relation::{
     VssShareLinkageCommitment, VssShareLinkageItem, VssShareLinkageStatement,
     masked_claim_bounds_for_global_claim, masked_claim_lift_residue_count_for_moduli,
 };
+use super::super::{
+    VSS_PUBLIC_CARRY_CLAIM_MASK_DIGIT_COUNT, VSS_PUBLIC_DIGIT_CLAIM_MASK_DIGIT_COUNT,
+};
 use super::*;
 use crate::bgv::setup::vss_commitment::{
     VssPublicCommitmentOpeningInput, compute_vss_public_commitment_from_opening,
@@ -579,14 +582,18 @@ fn commitment_computation_for_test(
     }
 }
 
-// The cross-limb consistency soundness mechanism requires every masked claim's
-// CRT lift to leave at least one commitment field unconsumed: the lift pins the
-// centered integer from `required` fields and the remaining field's residue is
-// the check that catches an inconsistent per-field witness. A claim class whose
-// mask forces the lift to consume every active field has no check field and
-// its cross-field binding degrades to the range check alone.
+// The cross-limb consistency soundness mechanism the other setup families use
+// requires a masked claim's CRT lift to leave at least one commitment field
+// unconsumed: the lift pins the centered integer from `required` fields and
+// the remaining field's residue is the check that catches an inconsistent
+// per-field witness. This probe pins the measured share-linkage geometry: the
+// wide four-repetition masks force every claim class to consume all three
+// fields, so these claims currently run with no check field. The schedule
+// decision resolving that is recorded with its measured branch costs in the
+// setup proof decisions record; when a branch lands, the three-of-three pins
+// below must flip to strictly-fewer-than-field-count assertions.
 #[test]
-fn vss_share_linkage_consistency_claims_leave_a_check_field() {
+fn vss_share_linkage_consistency_lift_geometry_is_pinned() {
     let (statement, _witness) = vss_share_linkage_instance();
     let field_moduli = statement
         .proof_limb_indices()
@@ -602,7 +609,8 @@ fn vss_share_linkage_consistency_claims_leave_a_check_field() {
         .item_count();
 
     for (claim_class, global_claim_id) in [
-        ("carry", 0_u64),
+        ("primary carry", 0_u64),
+        ("additional-item carry", consistency_repetitions as u64),
         ("digit", (item_count * consistency_repetitions) as u64),
     ] {
         let (lower_bound, upper_bound) =
@@ -619,11 +627,38 @@ fn vss_share_linkage_consistency_claims_leave_a_check_field() {
             upper_bound.bits(),
             field_moduli.len(),
         );
-        assert!(
-            required_residue_count < field_moduli.len(),
-            "share-linkage {claim_class} claims must leave at least one check field \
-             (lift consumes {required_residue_count} of {} fields)",
+        assert_eq!(
+            required_residue_count,
             field_moduli.len(),
+            "share-linkage {claim_class} lift geometry moved; re-derive the check-field \
+             decision record before accepting the new geometry",
         );
     }
+
+    // The mask selection must pair with the claim-bound selection: every
+    // vector below the item count is a carry claim and takes the carry mask,
+    // including the additional linkage items' carries.
+    assert!(
+        item_count > 1,
+        "fixture must cover additional linkage items"
+    );
+    for item_vector_index in 0..item_count {
+        let global_claim_id = (item_vector_index * consistency_repetitions) as u64;
+        assert_eq!(
+            super::super::relation::claim_mask_digit_count_for_global_claim(
+                &statement,
+                global_claim_id,
+            ),
+            VSS_PUBLIC_CARRY_CLAIM_MASK_DIGIT_COUNT,
+            "carry vector {item_vector_index} must take the carry claim mask",
+        );
+    }
+    assert_eq!(
+        super::super::relation::claim_mask_digit_count_for_global_claim(
+            &statement,
+            (item_count * consistency_repetitions) as u64,
+        ),
+        VSS_PUBLIC_DIGIT_CLAIM_MASK_DIGIT_COUNT,
+        "the first vector after the carries must take the digit claim mask",
+    );
 }

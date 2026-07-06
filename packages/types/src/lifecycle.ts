@@ -201,7 +201,6 @@ export type ProtocolAction =
     | 'VerifyEncryptedBallotProofs'
     | 'AggregateEncryptedBallots'
     | 'ReplayEvaluator'
-    | 'VerifyTranscript'
     | 'AcceptTarget'
     | 'CreateTargetBoundDecryptionShare'
     | 'VerifyDecryptionShare'

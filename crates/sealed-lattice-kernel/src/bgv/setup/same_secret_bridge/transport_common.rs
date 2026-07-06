@@ -253,62 +253,17 @@ pub(super) fn verify_proof_transport_reference(
     transport_hashes: &SetupProofMaterialTransportHashes,
     family: &TransportFamily,
 ) -> CanonicalResult<()> {
-    compare_required_u64(
-        unsigned_at_path(proof_record, &["proofChunkSizeBytes"])?,
-        SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
-        &format!("{} proof record proofChunkSizeBytes", family.family_prose),
-    )?;
-    compare_required_u64(
-        unsigned_at_path(proof_record, &["proofChunkCount"])?,
-        u64::try_from(transport_hashes.chunk_hashes.len()).map_err(|_| {
-            CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                format!("{} proof chunk count does not fit u64", family.family_prose),
-            )
-        })?,
-        &format!("{} proof record proofChunkCount", family.family_prose),
-    )?;
-    compare_required_u64(
-        unsigned_at_path(proof_record, &["proofTotalByteLength"])?,
-        transport_hashes.total_byte_length,
-        &format!("{} proof record proofTotalByteLength", family.family_prose),
-    )?;
-    compare_required_string(
-        hash_at_path(proof_record, &["proofFullObjectHash"])?,
-        &transport_hashes.full_object_hash,
-        &format!("{} proof record proofFullObjectHash", family.family_prose),
-    )?;
-    compare_required_string(
-        hash_at_path(proof_record, &["proofChunkRoot"])?,
-        &transport_hashes.chunk_root,
-        &format!("{} proof record proofChunkRoot", family.family_prose),
-    )?;
-    let proof_chunk_hashes = array_at_path(proof_record, &["proofChunkHashes"])?;
-    if proof_chunk_hashes.len() != transport_hashes.chunk_hashes.len() {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            format!(
-                "{} proof record proofChunkHashes length must match transported chunks",
-                family.family_prose
-            ),
-        ));
-    }
-    for (chunk_index, (proof_chunk_hash, expected_chunk_hash)) in proof_chunk_hashes
-        .iter()
-        .zip(transport_hashes.chunk_hashes.iter())
-        .enumerate()
-    {
-        compare_required_string(
-            hash_at_path(proof_chunk_hash, &[])?,
-            expected_chunk_hash,
-            &format!(
-                "{} proof record proofChunkHashes.{chunk_index}",
-                family.family_prose
-            ),
-        )?;
-    }
-
-    Ok(())
+    // The transport-reference checks are family-independent: one shared verifier
+    // recomputes chunk size, count, total length, full-object hash, chunk root,
+    // and per-chunk hashes against the recomputed transport manifest. The family
+    // only supplies the message prose.
+    crate::bgv::setup::setup_proof::verify_setup_proof_record_transport_reference(
+        proof_record,
+        transport_hashes,
+        family.family_prose,
+        family.family_prose,
+        family.family_prose,
+    )
 }
 
 pub(super) fn proof_has_transport_reference(proof_record: &Value) -> bool {

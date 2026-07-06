@@ -101,21 +101,37 @@ impl SuccinctSetupProofFamilyShape {
             Self::TargetDecryptionShare => {
                 TARGET_DECRYPTION_AGGREGATE_MESSAGE_CLAIM_MASK_DIGIT_COUNT
             }
+            Self::VssShareLinkage => VSS_PUBLIC_CARRY_CLAIM_MASK_DIGIT_COUNT,
             Self::SameSecretLinkageAnchor
             | Self::PublicKeyShare
             | Self::PrivateVssShare
-            | Self::VssShareLinkage
             | Self::SameSecretBridge
             | Self::TrusteeEvaluationKey => CLAIM_MASK_DIGIT_COUNT,
         }
     }
 
     pub(crate) fn consistency_repetitions(self) -> usize {
-        CONSISTENCY_REPETITIONS
+        match self {
+            Self::VssShareLinkage => VSS_PUBLIC_CONSISTENCY_REPETITIONS,
+            Self::SameSecretLinkageAnchor
+            | Self::PublicKeyShare
+            | Self::PrivateVssShare
+            | Self::SameSecretBridge
+            | Self::TargetDecryptionShare
+            | Self::TrusteeEvaluationKey => CONSISTENCY_REPETITIONS,
+        }
     }
 
     pub(crate) fn consistency_coefficient_bits(self) -> u32 {
-        CONSISTENCY_COEFFICIENT_BITS
+        match self {
+            Self::VssShareLinkage => VSS_PUBLIC_CONSISTENCY_COEFFICIENT_BITS,
+            Self::SameSecretLinkageAnchor
+            | Self::PublicKeyShare
+            | Self::PrivateVssShare
+            | Self::SameSecretBridge
+            | Self::TargetDecryptionShare
+            | Self::TrusteeEvaluationKey => CONSISTENCY_COEFFICIENT_BITS,
+        }
     }
 }
 
@@ -841,8 +857,14 @@ fn validate_masked_claim_lift_window(
             "target-decryption masked consistency claims need more carried limb fields",
         ));
     }
-    if statement.vss_share_linkage.is_some() {
-        let first_digit_global_claim_id = VSS_PUBLIC_CONSISTENCY_REPETITIONS as u64;
+    if let Some(vss_share_linkage) = &statement.vss_share_linkage {
+        // The first message-digit consistency vector sits after every item's
+        // carry vector, and each vector carries one claim per repetition.
+        // Indexing from the item count keeps this window check on a genuine
+        // digit claim when additional linkage items are present.
+        let first_digit_global_claim_id = (vss_share_linkage.item_count()
+            * statement.family_shape()?.consistency_repetitions())
+            as u64;
         let (digit_lower_bound, digit_upper_bound) =
             masked_claim_bounds_for_global_claim(statement, first_digit_global_claim_id)?;
         let required_digit_residue_count = masked_claim_lift_residue_count_for_moduli(

@@ -17,9 +17,7 @@ pub(crate) mod transcript_core;
 use core::{ptr, slice};
 use std::vec::Vec;
 
-pub use encoding::{
-    TRANSCRIPT_CORE_COMMAND_CONTRACT_VERSION, roundtrip_bytes, run_transcript_core_command,
-};
+pub use encoding::{roundtrip_bytes, run_transcript_core_command};
 
 fn leak_bytes(bytes: Vec<u8>) -> *mut u8 {
     Box::into_raw(bytes.into_boxed_slice()) as *mut u8

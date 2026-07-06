@@ -142,10 +142,6 @@ describe('collective BGV setup kernel commands', () => {
         const publicEnvelopeReference =
             publicPrivateVssEnvelopeCommitmentReference(envelopeReference);
 
-        expect(publicEnvelopeReference.encryptedEnvelope).toBeUndefined();
-        expect(
-            publicEnvelopeReference.transportedPrivateVssShareProofMaterial,
-        ).toBeUndefined();
         expect(String(publicEnvelopeReference.privateEnvelopeHash)).toMatch(
             protocolHashPattern,
         );

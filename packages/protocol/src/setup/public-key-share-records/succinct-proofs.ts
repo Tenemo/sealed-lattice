@@ -1,18 +1,10 @@
-import { deriveCanonicalObjectHash, hash512Hex } from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
 import { type SameSecretProofSet } from '../same-secret-consistency-records.js';
-import {
-    setupProofMaterialRecordTransportFields,
-    setupProofMaterialReferenceFields,
-    setupProofMaterialTransportChunks,
-    setupProofMaterialTransportMetadata,
-    setupTransportedProofMaterialFields,
-} from '../setup-proof-material-transport.js';
 
 import {
     publicKeyShareProofFamily,
-    type BinaryChunkedPublicKeyShareProofMaterialTransport,
     type JsonRecord,
     type PublicKeyShareMaterialRootReference,
     type PublicKeyShareMaterialSet,
@@ -31,7 +23,6 @@ import {
     assertPositiveSafeInteger,
     assertProtocolHash,
     assertContextMatches,
-    bytesFromHex,
     contextFields,
     sortedByRosterPosition,
     validateCommonInput,
@@ -40,9 +31,6 @@ import {
     publicKeyShareRecordsByRosterPosition,
     statementRecordsByRosterPosition,
 } from './share-statement-records.js';
-
-const publicKeyShareSuccinctProofBytesHashDomain =
-    'sealed-lattice/setup/public-key-share/succinct-proof-bytes-v1';
 
 const publicKeyShareProofRecordsByRosterPosition = (
     input: Pick<
@@ -533,89 +521,4 @@ export const createPublicKeyShareSuccinctProofSet = (
         publicKeyShareSuccinctProofSetRoot:
             deriveCanonicalObjectHash(proofSetWithoutRoot),
     } satisfies PublicKeyShareSuccinctProofSet;
-};
-
-export const createBinaryChunkedPublicKeyShareProofMaterialTransport = (
-    proofMaterials: readonly PublicKeyShareSuccinctProofMaterial[],
-): BinaryChunkedPublicKeyShareProofMaterialTransport => {
-    const transportedProofMaterials: JsonRecord[] = [];
-    const transportedRecords = proofMaterials.map(
-        (proofMaterial, proofIndex) => {
-            validatePublicKeyShareSuccinctProofMaterial(
-                proofMaterial,
-                `proofMaterials.${String(proofIndex)}`,
-            );
-            const materialRecord = proofMaterial as JsonRecord;
-            const proofBytesHex = materialRecord.proofBytesHex;
-            if (
-                typeof proofBytesHex !== 'string' ||
-                proofBytesHex.length === 0
-            ) {
-                throw new TypeError(
-                    `proofMaterials.${String(proofIndex)}.proofBytesHex must be non-empty.`,
-                );
-            }
-            const proofBytes = bytesFromHex(
-                proofBytesHex,
-                `proofMaterials.${String(proofIndex)}.proofBytesHex`,
-            );
-            const expectedProofBytesHash = hash512Hex(
-                publicKeyShareSuccinctProofBytesHashDomain,
-                [proofBytes],
-            );
-            if (proofMaterial.proofBytesHash !== expectedProofBytesHash) {
-                throw new Error(
-                    `proofMaterials.${String(proofIndex)}.proofBytesHash must match proofBytesHex before transport.`,
-                );
-            }
-            const proofMaterialTransport = setupProofMaterialTransportMetadata(
-                publicKeyShareProofFamily,
-                proofBytes,
-                `proofMaterials.${String(proofIndex)}.proofBytesHex must produce at least one transported chunk.`,
-            );
-            const proofMaterialRoot = deriveCanonicalObjectHash({
-                objectType: 'PublicKeyShareSuccinctProofMaterialReference',
-                objectVersion: 1,
-                proofFamily: publicKeyShareProofFamily,
-                trusteeIdentity: proofMaterial.trusteeIdentity,
-                trusteeRosterPosition: proofMaterial.trusteeRosterPosition,
-                statementHash: proofMaterial.statementHash,
-                proofBytesHash: proofMaterial.proofBytesHash,
-                ...setupProofMaterialReferenceFields(proofMaterialTransport),
-            });
-            transportedProofMaterials.push({
-                objectType: 'SetupTransportedPublicKeyShareProofMaterial',
-                objectVersion: 1,
-                proofFamily: publicKeyShareProofFamily,
-                ...setupTransportedProofMaterialFields(
-                    proofMaterialTransport,
-                    proofMaterialRoot,
-                ),
-                chunks: setupProofMaterialTransportChunks(
-                    proofMaterialTransport,
-                ),
-            });
-            const transportedMaterial = {
-                ...materialRecord,
-                ...setupProofMaterialRecordTransportFields(
-                    proofMaterialTransport,
-                    proofMaterialRoot,
-                    'binary-chunked-proof-bytes',
-                ),
-            } as JsonRecord;
-            delete transportedMaterial.proofBytesHex;
-
-            return transportedMaterial as unknown as PublicKeyShareSuccinctProofMaterial;
-        },
-    );
-
-    return {
-        proofMaterials: transportedRecords,
-        transportedPublicKeyShareProofMaterial: {
-            objectType: 'SetupTransportedPublicKeyShareProofMaterialSet',
-            objectVersion: 1,
-            proofFamily: publicKeyShareProofFamily,
-            proofMaterials: transportedProofMaterials,
-        },
-    };
 };

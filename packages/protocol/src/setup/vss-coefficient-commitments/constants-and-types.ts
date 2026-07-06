@@ -28,19 +28,10 @@ export const acceptedBgvSetupQSharePrimes = [
     140_737_471_774_721, 140_737_471_578_113,
 ] as const;
 
-export const acceptedBgvSetupQShare = {
-    objectType: 'QSharePrimeList',
-    objectVersion: 1,
-    primes: acceptedBgvSetupQSharePrimes,
-} as const;
-
 export const setupTransportSchemeId =
     'sealed-lattice-setup-binary-chunked-transport-v1';
 
 export const setupTransportChunkSizeBytes = 1_048_576;
-
-export const vssCoefficientCommitmentMaterialBinaryFormat =
-    'sealed-lattice-vss-coefficient-commitment-material-binary-v1';
 
 export const vssCoefficientCommitmentMaterialBinaryMagic =
     new TextEncoder().encode('SLVSSMAT');

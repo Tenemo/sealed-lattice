@@ -30,61 +30,6 @@ pub(super) fn public_rlwe_samples_by_basis(
     })
 }
 
-pub(super) fn evaluation_key_size_certificate(evaluation_keys: &Value) -> CanonicalResult<Value> {
-    let residue_byte_count = 8_usize;
-    let polynomial_byte_estimate_data = POLYNOMIAL_DEGREE * DATA_PRIMES.len() * residue_byte_count;
-    let polynomial_byte_estimate_extended =
-        POLYNOMIAL_DEGREE * (DATA_PRIMES.len() + 1) * residue_byte_count;
-    let relinearization_key_record = value_at_path(
-        evaluation_keys,
-        &[
-            "evaluationKeyMaterialCommitment",
-            "relinearizationKeyRecord",
-        ],
-    )?;
-    let relinearization_key_bytes = array_at_path(relinearization_key_record, &["levelSchedule"])?
-        .iter()
-        .map(|level| {
-            level
-                .as_u64()
-                .and_then(|value| usize::try_from(value).ok())
-                .map(evaluation_key_stream_bytes_at_level)
-                .ok_or_else(|| {
-                    CanonicalError::new(
-                        CanonicalErrorCode::InvalidFixture,
-                        "relinearization key level schedule entries must be non-negative integers",
-                    )
-                })
-        })
-        .sum::<CanonicalResult<usize>>()?;
-    let rotation_key_roots = array_at_path(evaluation_keys, &["rotationKeyRoots"])?;
-    let rotation_key_bytes = rotation_key_roots
-        .iter()
-        .map(|rotation_key| {
-            usize_at_path(rotation_key, &["level"]).map(evaluation_key_stream_bytes_at_level)
-        })
-        .sum::<CanonicalResult<usize>>()?;
-    let key_switch_key_bytes = relinearization_key_bytes + rotation_key_bytes;
-    let total_evaluation_key_bytes = key_switch_key_bytes;
-
-    Ok(json!({
-        "objectType": "EvaluationKeySizeCertificate",
-        "objectVersion": 1,
-        "polynomialDegree": POLYNOMIAL_DEGREE,
-        "dataBasisPolynomialByteEstimate": polynomial_byte_estimate_data,
-        "extendedBasisPolynomialByteEstimate": polynomial_byte_estimate_extended,
-        "relinearizationKeyByteEstimate": relinearization_key_bytes,
-        "relinearizationKeyLevelCount": array_at_path(relinearization_key_record, &["levelSchedule"])?.len(),
-        "rotationKeyCount": rotation_key_roots.len(),
-        "rotationKeyByteEstimate": rotation_key_bytes,
-        "keySwitchKeyByteEstimate": key_switch_key_bytes,
-        "totalEvaluationKeyByteEstimate": total_evaluation_key_bytes,
-        "chunkingStrategy": {
-            "chunkSizeBytes": 262144,
-        },
-    }))
-}
-
 pub(super) fn evaluation_key_streaming_commitment(
     evaluation_keys: &Value,
 ) -> CanonicalResult<Value> {
@@ -117,12 +62,4 @@ pub(super) fn evaluation_key_streaming_commitment(
         "commitment": commitment_record,
         "commitmentHash": commitment_hash,
     }))
-}
-
-fn evaluation_key_stream_bytes_at_level(level: usize) -> usize {
-    let active_limb_count = level + 1;
-    let component_count = 2;
-    let digit_count = active_limb_count;
-
-    digit_count * component_count * active_limb_count * POLYNOMIAL_DEGREE * 8
 }

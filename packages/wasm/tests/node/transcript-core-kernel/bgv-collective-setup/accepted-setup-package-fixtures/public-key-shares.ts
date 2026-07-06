@@ -1,31 +1,19 @@
-import { validHash } from '../../bgv-passive-setup-fixtures.js';
 import {
     coefficientVectorLittleEndianHex,
-    hexToBytes,
     minimumSuccinctProofFixtureRingDegree,
     publicKeyShareCoefficientVectorHash,
     type JsonRecord,
 } from '../setup-fixture-primitives.js';
 
-import { hash512Hex } from '#packages/crypto/src/index';
 import {
-    createPublicKeyShareMaterialSet,
     createPublicKeyShareProofSet,
     createPublicKeyShareSet,
-    createPublicKeyShareSuccinctProofSet,
-    publicKeyShareProofFamily,
     type PublicKeyShareContributionInput,
     type PublicKeyShareMaterialContributionInput,
-    type PublicKeyShareMaterialSet,
     type PublicKeyShareProofSet,
     type PublicKeyShareSet,
-    type PublicKeyShareSuccinctProofMaterial,
-    type PublicKeyShareSuccinctProofSet,
 } from '#packages/protocol/src/setup/public-key-share-records';
-import {
-    type SameSecretConsistencyStatementSet,
-    type SameSecretProofSet,
-} from '#packages/protocol/src/setup/same-secret-consistency-records';
+import { type SameSecretConsistencyStatementSet } from '#packages/protocol/src/setup/same-secret-consistency-records';
 import { type CollectiveBgvSetupContext } from '#packages/protocol/src/setup/vss-share-verification-records';
 import type { BgvCollectiveSetupParametersDescription } from '#packages/wasm/src/index';
 
@@ -123,31 +111,6 @@ export function acceptedPublicKeyShares(
     });
 }
 
-export function acceptedPublicKeyShareMaterial(
-    setupContext: CollectiveBgvSetupContext,
-    parameters: BgvCollectiveSetupParametersDescription,
-    commonRandomness: JsonRecord,
-    publicKeyShares: PublicKeyShareSet,
-): PublicKeyShareMaterialSet {
-    const publicMatrixSeedHash = String(commonRandomness.publicMatrixSeedHash);
-    const publicDerivations = commonRandomness.publicDerivations as JsonRecord;
-    const crpRoots = publicDerivations.crpRoots as JsonRecord;
-    const publicA = publicDerivations.bgvPublicA as JsonRecord;
-
-    return createPublicKeyShareMaterialSet({
-        setupContext,
-        qSharePrimes: parameters.qShare.primes,
-        participantCount: parameters.participantCount,
-        ringDegree: minimumSuccinctProofFixtureRingDegree,
-        publicMatrixSeedHash,
-        publicKeyCrpRoot: String(crpRoots.publicKeyCrpRoot),
-        publicAPolynomialRoot: String(publicA.publicPolynomialRoot),
-        publicKeyShares,
-        materialContributions:
-            acceptedPublicKeyShareMaterialContributions(parameters),
-    });
-}
-
 export function acceptedPublicKeyShareProofs(
     setupContext: CollectiveBgvSetupContext,
     parameters: BgvCollectiveSetupParametersDescription,
@@ -171,51 +134,5 @@ export function acceptedPublicKeyShareProofs(
         publicAPolynomialRoot,
         sameSecretConsistency,
         publicKeyShares,
-    });
-}
-
-const publicKeyShareSuccinctProofBytesHash = (proofBytesHex: string): string =>
-    hash512Hex(
-        'sealed-lattice/setup/public-key-share/succinct-proof-bytes-v1',
-        [hexToBytes(proofBytesHex)],
-    );
-
-export function publicKeyShareSuccinctProofsWithDriftedStatementHashes(
-    parameters: BgvCollectiveSetupParametersDescription,
-    setupPackage: JsonRecord,
-): PublicKeyShareSuccinctProofSet {
-    const setupContext = setupPackage.setupContext as CollectiveBgvSetupContext;
-    const commonRandomness = setupPackage.commonRandomness as JsonRecord;
-    const publicDerivations = commonRandomness.publicDerivations as JsonRecord;
-    const crpRoots = publicDerivations.crpRoots as JsonRecord;
-    const publicA = publicDerivations.bgvPublicA as JsonRecord;
-    const publicKeyShares = setupPackage.publicKeyShares as PublicKeyShareSet;
-    const proofBytesHex = '00';
-    const proofMaterials: PublicKeyShareSuccinctProofMaterial[] =
-        publicKeyShares.shareRecords.map((shareRecord) => ({
-            proofFamily: publicKeyShareProofFamily,
-            trusteeIdentity: shareRecord.trusteeIdentity,
-            trusteeRosterPosition: shareRecord.trusteeRosterPosition,
-            statementHash: validHash('8'),
-            proofBytesHash: publicKeyShareSuccinctProofBytesHash(proofBytesHex),
-            proofBytesHex,
-        }));
-
-    return createPublicKeyShareSuccinctProofSet({
-        setupContext,
-        qSharePrimes: parameters.qShare.primes,
-        participantCount: parameters.participantCount,
-        publicMatrixSeedHash: String(commonRandomness.publicMatrixSeedHash),
-        publicKeyCrpRoot: String(crpRoots.publicKeyCrpRoot),
-        publicAPolynomialRoot: String(publicA.publicPolynomialRoot),
-        sameSecretConsistency:
-            setupPackage.sameSecretConsistency as SameSecretConsistencyStatementSet,
-        sameSecretProofs: setupPackage.sameSecretProofs as SameSecretProofSet,
-        publicKeyShares,
-        publicKeyShareProofs:
-            setupPackage.publicKeyShareProofs as PublicKeyShareProofSet,
-        publicKeyShareMaterial:
-            setupPackage.publicKeyShareMaterial as PublicKeyShareMaterialSet,
-        proofMaterials,
     });
 }

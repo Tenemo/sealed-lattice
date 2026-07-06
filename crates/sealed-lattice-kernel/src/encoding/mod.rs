@@ -16,9 +16,6 @@ mod command;
 #[cfg(test)]
 use command::run_transcript_core_command_inner;
 
-pub const TRANSCRIPT_CORE_COMMAND_CONTRACT_VERSION: &str =
-    "sealed-lattice-transcript-core-command-v1";
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub enum CanonicalErrorCode {

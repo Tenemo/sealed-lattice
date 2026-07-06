@@ -9,13 +9,7 @@ export class ChunkedBinaryReader {
 
     private readonly totalByteLength: number;
 
-    public constructor(
-        private readonly chunks: readonly Uint8Array[],
-        input: { readonly emptyChunksMessage?: string } = {},
-    ) {
-        if (chunks.length === 0 && input.emptyChunksMessage !== undefined) {
-            throw new Error(input.emptyChunksMessage);
-        }
+    public constructor(private readonly chunks: readonly Uint8Array[]) {
         this.totalByteLength = chunks.reduce(
             (accumulatedLength, chunk) => accumulatedLength + chunk.byteLength,
             0,

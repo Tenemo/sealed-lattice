@@ -419,8 +419,3 @@ export type TransportedPublicKeyShareProofMaterialSet = Readonly<
         readonly proofFamily: typeof publicKeyShareProofFamily;
     }
 >;
-
-export type BinaryChunkedPublicKeyShareProofMaterialTransport = Readonly<{
-    readonly proofMaterials: readonly PublicKeyShareSuccinctProofMaterial[];
-    readonly transportedPublicKeyShareProofMaterial: TransportedPublicKeyShareProofMaterialSet;
-}>;

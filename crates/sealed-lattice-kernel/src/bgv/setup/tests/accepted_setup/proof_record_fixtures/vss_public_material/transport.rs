@@ -296,7 +296,7 @@ pub(super) fn assert_semantically_identical_verification(
 }
 
 #[test]
-pub(super) fn vss_share_linkage_transported_proof_material_matches_embedded() {
+fn vss_share_linkage_transported_proof_material_matches_embedded() {
     let mut package = minimal_collective_setup_package_for_participant_count(3);
     package["vssPublicCoefficientCommitmentSet"] =
         vss_public_coefficient_commitment_set_object(&package, 128);
@@ -391,7 +391,7 @@ pub(super) fn vss_share_linkage_transported_proof_material_matches_embedded() {
 }
 
 #[test]
-pub(super) fn same_secret_bridge_transported_proof_material_matches_embedded() {
+fn same_secret_bridge_transported_proof_material_matches_embedded() {
     let mut package = minimal_collective_setup_package_for_participant_count(3);
     package["vssPublicCoefficientCommitmentSet"] =
         vss_public_coefficient_commitment_set_object(&package, 128);

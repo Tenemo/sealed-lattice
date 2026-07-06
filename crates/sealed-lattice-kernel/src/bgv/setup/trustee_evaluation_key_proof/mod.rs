@@ -178,7 +178,12 @@ pub(super) const LINCHECK_REPETITIONS: usize = 2;
 // margin the disclosed accounting requires. Share-linkage uses fewer,
 // wider carry and message-digit combinations: four 40-bit repetitions preserve
 // the same 160-bit pre-union collision budget while avoiding mask columns for
-// repetitions that carry no additional collision margin.
+// repetitions that carry no additional collision margin. The wider clear sums
+// force masks whose CRT lift consumes all three commitment fields, so these
+// claims currently run with no check field; the schedule decision resolving
+// that (documented with the measured branch costs in the setup proof decisions
+// record) is pending review, because every branch trades soundness, leakage,
+// or commitment material.
 pub(in crate::bgv::setup) const CONSISTENCY_REPETITIONS: usize = 20;
 pub(in crate::bgv::setup) const CONSISTENCY_COEFFICIENT_BITS: u32 = 8;
 pub(in crate::bgv::setup) const VSS_PUBLIC_CONSISTENCY_REPETITIONS: usize = 4;

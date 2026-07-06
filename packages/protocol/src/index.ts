@@ -26,7 +26,6 @@ export {
 export {
     createBinaryChunkedPublicKeyShareMaterialBundle,
     createBinaryChunkedPublicKeyShareMaterialTransport,
-    createBinaryChunkedPublicKeyShareProofMaterialTransport,
     createCollectivePublicKey,
     createPublicKeyShareSuccinctProofSet,
     createPublicKeyShareMaterialSet,
@@ -59,7 +58,6 @@ export {
 } from './setup/evaluator-key-schedule.js';
 export {
     acceptedBgvFullRingDegree,
-    acceptedBgvSetupQShare,
     acceptedBgvSetupQSharePrimes,
     binaryVssCoefficientCommitmentMaterialByteLength,
     createVssSourceTrusteeCoefficientOpeningState,
@@ -69,7 +67,6 @@ export {
     setupCommitmentRandomnessWidth,
     setupTransportChunkSizeBytes,
     setupTransportSchemeId,
-    vssCoefficientCommitmentMaterialBinaryFormat,
 } from './setup/vss-coefficient-commitments.js';
 export {
     createEncryptedLocalTrusteeSetupStateFromVerifiedShares,
@@ -97,7 +94,6 @@ export {
     setupPackageHashInput,
 } from './setup/setup-package-assembly.js';
 export {
-    createBinaryChunkedSameSecretProofMaterialTransport,
     createSameSecretProofSet,
     createSameSecretConsistencyStatementSet,
     sameSecretBoundProofFamilies,
@@ -183,7 +179,6 @@ export type {
 } from './setup/evaluator-key-schedule.js';
 export type {
     BinaryChunkedPublicKeyShareMaterialBundle,
-    BinaryChunkedPublicKeyShareProofMaterialTransport,
     BinaryChunkedPublicKeyShareMaterialSet,
     BinaryChunkedPublicKeyShareMaterialTransport,
     CollectivePublicKey,
@@ -282,7 +277,6 @@ export type {
     SetupPackageVerificationInputSource,
 } from './setup/setup-package-assembly.js';
 export type {
-    BinaryChunkedSameSecretProofMaterialTransport,
     SameSecretConsistencyStatementRecord,
     SameSecretConsistencyStatementSet,
     SameSecretConsistencyStatementSetInput,

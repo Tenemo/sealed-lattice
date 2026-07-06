@@ -280,9 +280,13 @@ pub(crate) fn claim_mask_digit_count_for_global_claim(
         } else {
             unreachable!("target-decryption global claims only carry message digits")
         }
-    } else if statement.vss_share_linkage.is_some() {
+    } else if let Some(vss_share_linkage) = &statement.vss_share_linkage {
+        // Carry vectors occupy the first item_count vector slots; the message
+        // digit vectors follow. Mask selection must pair with the same
+        // carry-versus-digit split the claim bounds use, so multi-item
+        // statements mask their additional carry claims as carries.
         let global_vector_index = global_claim_id as usize / consistency_repetitions;
-        if global_vector_index == 0 {
+        if global_vector_index < vss_share_linkage.item_count() {
             VSS_PUBLIC_CARRY_CLAIM_MASK_DIGIT_COUNT
         } else {
             VSS_PUBLIC_DIGIT_CLAIM_MASK_DIGIT_COUNT

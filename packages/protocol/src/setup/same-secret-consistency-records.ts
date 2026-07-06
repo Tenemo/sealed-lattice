@@ -1,4 +1,4 @@
-import { deriveCanonicalObjectHash, hash512Hex } from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
 import {
@@ -8,18 +8,10 @@ import {
     assertNonNegativeSafeInteger,
     assertPositiveSafeInteger,
     assertProtocolHash,
-    bytesFromHex,
     contextFields,
     type JsonRecord,
 } from './common-fields.js';
-import {
-    setupProofMaterialRecordTransportFields,
-    setupProofMaterialReferenceFields,
-    setupProofMaterialTransportChunks,
-    setupProofMaterialTransportMetadata,
-    setupTransportedProofMaterialFields,
-    type TransportedSetupProofMaterialSet,
-} from './setup-proof-material-transport.js';
+import { type TransportedSetupProofMaterialSet } from './setup-proof-material-transport.js';
 import {
     type SetupPackageVssCoefficientCommitmentMaterialSet,
     type VssCoefficientCommitmentRecord,
@@ -29,8 +21,6 @@ import {
 import type { CollectiveBgvSetupContext } from './vss-share-verification-records.js';
 
 export const sameSecretProofFamily = 'same-secret-linkage-anchor';
-const sameSecretAnchorProofBytesHashDomain =
-    'sealed-lattice/setup/same-secret-linkage-anchor/proof-bytes-v1';
 export const sameSecretRelation =
     'vss-constant-commitments-open-to-one-short-secret-across-q-share-limbs';
 export const sameSecretBoundProofFamilies = [
@@ -164,11 +154,6 @@ export type TransportedSameSecretProofMaterialSet = Readonly<
         readonly proofFamily: typeof sameSecretProofFamily;
     }
 >;
-
-export type BinaryChunkedSameSecretProofMaterialTransport = Readonly<{
-    readonly proofMaterials: readonly SameSecretProofMaterial[];
-    readonly transportedSameSecretProofMaterial: TransportedSameSecretProofMaterialSet;
-}>;
 
 const validateInput = (input: SameSecretConsistencyStatementSetInput): void => {
     assertPositiveSafeInteger(input.participantCount, 'participantCount');
@@ -670,89 +655,4 @@ export const createSameSecretProofSet = (
         ...proofSetWithoutRoot,
         sameSecretProofSetRoot: deriveCanonicalObjectHash(proofSetWithoutRoot),
     } satisfies SameSecretProofSet;
-};
-
-// Move embedded anchor proof bytes into binary chunked transport, mirroring
-// the kernel transported same-secret proof material flow: each material keeps
-// the transport reference fields, the chunks travel in the request-side
-// transported proof material set.
-export const createBinaryChunkedSameSecretProofMaterialTransport = (
-    proofMaterials: readonly SameSecretProofMaterial[],
-): BinaryChunkedSameSecretProofMaterialTransport => {
-    const transportedProofMaterials: JsonRecord[] = [];
-    const transportedRecords = proofMaterials.map(
-        (proofMaterial, proofIndex) => {
-            const materialRecord = proofMaterial as JsonRecord;
-            const proofBytesHex = materialRecord.proofBytesHex;
-            if (
-                typeof proofBytesHex !== 'string' ||
-                proofBytesHex.length === 0
-            ) {
-                throw new TypeError(
-                    `proofMaterials.${String(proofIndex)}.proofBytesHex must be non-empty.`,
-                );
-            }
-            const proofBytes = bytesFromHex(
-                proofBytesHex,
-                `proofMaterials.${String(proofIndex)}.proofBytesHex`,
-            );
-            const expectedProofBytesHash = hash512Hex(
-                sameSecretAnchorProofBytesHashDomain,
-                [proofBytes],
-            );
-            if (proofMaterial.proofBytesHash !== expectedProofBytesHash) {
-                throw new Error(
-                    `proofMaterials.${String(proofIndex)}.proofBytesHash must match proofBytesHex before transport.`,
-                );
-            }
-            const proofMaterialTransport = setupProofMaterialTransportMetadata(
-                sameSecretProofFamily,
-                proofBytes,
-                `proofMaterials.${String(proofIndex)}.proofBytesHex must produce at least one transported chunk.`,
-            );
-            const proofMaterialRoot = deriveCanonicalObjectHash({
-                objectType: 'SameSecretLinkageAnchorProofMaterialReference',
-                objectVersion: 1,
-                proofFamily: sameSecretProofFamily,
-                trusteeIdentity: proofMaterial.trusteeIdentity,
-                trusteeRosterPosition: proofMaterial.trusteeRosterPosition,
-                statementHash: proofMaterial.statementHash,
-                proofBytesHash: proofMaterial.proofBytesHash,
-                ...setupProofMaterialReferenceFields(proofMaterialTransport),
-            });
-            transportedProofMaterials.push({
-                objectType: 'SetupTransportedSameSecretProofMaterial',
-                objectVersion: 1,
-                proofFamily: sameSecretProofFamily,
-                ...setupTransportedProofMaterialFields(
-                    proofMaterialTransport,
-                    proofMaterialRoot,
-                ),
-                chunks: setupProofMaterialTransportChunks(
-                    proofMaterialTransport,
-                ),
-            });
-            const transportedMaterial = {
-                ...materialRecord,
-                ...setupProofMaterialRecordTransportFields(
-                    proofMaterialTransport,
-                    proofMaterialRoot,
-                    'binary-chunked-proof-bytes',
-                ),
-            } as JsonRecord;
-            delete transportedMaterial.proofBytesHex;
-
-            return transportedMaterial as unknown as SameSecretProofMaterial;
-        },
-    );
-
-    return {
-        proofMaterials: transportedRecords,
-        transportedSameSecretProofMaterial: {
-            objectType: 'SetupTransportedSameSecretProofMaterialSet',
-            objectVersion: 1,
-            proofFamily: sameSecretProofFamily,
-            proofMaterials: transportedProofMaterials,
-        },
-    };
 };

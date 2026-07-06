@@ -381,7 +381,7 @@ pub(in super::super::super) fn vss_public_coefficient_randomness_i64_fixture(
 }
 
 #[test]
-pub(super) fn vss_public_material_fixture_verifies_generated_fields() {
+fn vss_public_material_fixture_verifies_generated_fields() {
     let mut package = minimal_collective_setup_package_for_participant_count(3);
     package["vssPublicCoefficientCommitmentSet"] =
         vss_public_coefficient_commitment_set_object(&package, 128);

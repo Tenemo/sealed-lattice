@@ -1,8 +1,7 @@
 mod evaluation_keys;
 
 use self::evaluation_keys::{
-    evaluation_key_size_certificate, evaluation_key_streaming_commitment,
-    public_rlwe_samples_by_basis,
+    evaluation_key_streaming_commitment, public_rlwe_samples_by_basis,
 };
 use super::*;
 use crate::bgv::evaluator::records::target_layout_hash;
@@ -19,17 +18,12 @@ pub(super) fn setup_certificates(
         .expect("rotation key roots use array");
     let rotation_key_count = rotation_key_roots.len();
     let public_samples = public_rlwe_samples_by_basis(participant_count, rotation_key_count);
-    let evaluation_key_size_certificate = evaluation_key_size_certificate(evaluation_keys)?;
-    let evaluation_key_size_parameters_hash =
-        derive_canonical_object_hash(&evaluation_key_size_certificate)?;
     let evaluation_key_streaming_commitment = evaluation_key_streaming_commitment(evaluation_keys)?;
 
     Ok(json!({
         "keySwitchDecomposition": key_switch_decomposition,
         "keySwitchDecompositionHash": key_switch_decomposition_hash,
         "publicRlweSamplesByBasis": public_samples,
-        "evaluationKeySizeCertificate": evaluation_key_size_certificate,
-        "evaluationKeySizeParametersHash": evaluation_key_size_parameters_hash,
         "evaluationKeyStreamingCommitment": evaluation_key_streaming_commitment,
     }))
 }

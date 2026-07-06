@@ -79,7 +79,6 @@ describe('board consistency', () => {
         });
 
         expect(result.isValid).toBe(true);
-        expect(inclusionProof.boardEntryHashes).toBeUndefined();
         expect(inclusionProof.boardEntryCount).toBe(3);
         expect(inclusionProof.boardEntryMerklePath).toHaveLength(1);
         expect(result.verifiedHeadHashes).toEqual([

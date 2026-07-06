@@ -294,7 +294,7 @@ pub(in super::super::super) fn minimal_finalized_collective_setup_package() -> s
 // that it passes every phase and object requirement, leaving only the terminal
 // runtime objects missing.
 #[test]
-pub(super) fn minimal_finalized_collective_setup_package_passes_accepted_setup() {
+fn minimal_finalized_collective_setup_package_passes_accepted_setup() {
     let package = minimal_finalized_collective_setup_package();
     let result = crate::bgv::setup::accepted_setup::verify_collective_bgv_setup_package(
         &package,

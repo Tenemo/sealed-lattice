@@ -10,11 +10,7 @@ export { acceptedVssComplaintSet } from './accepted-setup-package-fixtures/priva
 export { acceptedVssShareAcceptances } from './accepted-setup-package-fixtures/private-vss-delivery.js';
 export { focusedPrivateVssSourceDeliveryReferences } from './accepted-setup-package-fixtures/private-vss-delivery.js';
 export { packageShapePrivateVssEnvelopeCommitments } from './accepted-setup-package-fixtures/private-vss-delivery.js';
-export { acceptedPublicKeyShareMaterial } from './accepted-setup-package-fixtures/public-key-shares.js';
 export { acceptedPublicKeyShareProofs } from './accepted-setup-package-fixtures/public-key-shares.js';
 export { acceptedPublicKeyShares } from './accepted-setup-package-fixtures/public-key-shares.js';
-export { publicKeyShareSuccinctProofsWithDriftedStatementHashes } from './accepted-setup-package-fixtures/public-key-shares.js';
-export { sameSecretProofsWithDriftedStatementHashes } from './accepted-setup-package-fixtures/same-secret.js';
-export { sameSecretProofsWithGeneratedProofs } from './accepted-setup-package-fixtures/same-secret.js';
 export { acceptedShapedSetupPackage } from './accepted-setup-package-fixtures/package-assembler.js';
 export { acceptedVssCoefficientCommitments } from './accepted-setup-package-fixtures/vss-commitments.js';
