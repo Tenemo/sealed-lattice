@@ -7,9 +7,10 @@ use super::super::{
 };
 use super::*;
 use crate::bgv::setup::vss_commitment::{
-    VssPublicCommitmentOpeningInput, compute_vss_public_commitment_from_opening,
-    vss_public_canonical_message_digit_columns,
+    VSS_PUBLIC_MESSAGE_TRIT_BASE, VssPublicCommitmentOpeningInput,
+    compute_vss_public_commitment_from_opening, vss_public_canonical_message_digit_columns,
 };
+use num_bigint::BigInt;
 use serde_json::json;
 
 #[test]
@@ -218,12 +219,23 @@ fn vss_share_linkage_instance() -> (
         layout.vss_public_randomness_columns > 0,
         "opening randomness must remain in the opening lincheck"
     );
+    // With Branch 2 the message consistency claims are trit-granular: each of the
+    // eight messages (five coefficient + three item) contributes both digits'
+    // base-three trits (17 + 13 = 30 for this fixture's message modulus), so the
+    // count is the three item carries plus 8 * 30 = 240 message trits. This is
+    // strictly more than the old whole-digit count (3 + 8 * 2 = 19); the wider
+    // claim set with the narrower per-trit witness is what tightens the leakage.
     assert_eq!(
         layout.consistency_vector_count(),
-        layout.vss_public_item_columns
-            + layout.vss_public_message_vector_count()
-                * crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT,
-        "share-linkage consistency claims must bind per-item carries and message digits"
+        243,
+        "three item carries plus eight messages of thirty trits each"
+    );
+    assert!(
+        layout.consistency_vector_count()
+            > layout.vss_public_item_columns
+                + layout.vss_public_message_vector_count()
+                    * crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT,
+        "trit-granular claims must expand beyond the whole-digit claim count"
     );
     assert_eq!(
         layout.claim_count(),
@@ -587,10 +599,15 @@ fn commitment_computation_for_test(
 // unconsumed: the lift pins the centered integer from the consumed fields and
 // the remaining field's residue is the check that catches an inconsistent
 // per-field witness. This probe pins the share-linkage geometry after the
-// Branch 2 schedule change (2026-07-06): under the standard twenty-repetition
-// eight-bit schedule with the 58-digit mask, every claim class consumes two of
-// the three commitment fields, leaving one check field. If these pins move,
-// re-derive the check-field decision record in setup-proof-decisions.md.
+// Branch 2 change (2026-07-06): message consistency claims are trit-granular
+// (each digit split into base-three trits, witness bound two), and under the
+// standard twenty-repetition eight-bit schedule with the 58-digit mask every
+// claim class still consumes two of the three commitment fields, leaving one
+// check field. The trit witness bound is what narrows the per-claim leakage
+// window; the separate assertion below pins that bound so a regression to
+// whole-digit claims is caught even though the residue count is unchanged. If
+// these pins move, re-derive the check-field decision record in
+// setup-proof-decisions.md.
 #[test]
 fn vss_share_linkage_consistency_lift_geometry_is_pinned() {
     let (statement, _witness) = vss_share_linkage_instance();
@@ -610,7 +627,10 @@ fn vss_share_linkage_consistency_lift_geometry_is_pinned() {
     for (claim_class, global_claim_id) in [
         ("primary carry", 0_u64),
         ("additional-item carry", consistency_repetitions as u64),
-        ("digit", (item_count * consistency_repetitions) as u64),
+        (
+            "message trit",
+            (item_count * consistency_repetitions) as u64,
+        ),
     ] {
         let (lower_bound, upper_bound) =
             masked_claim_bounds_for_global_claim(&statement, global_claim_id)
@@ -634,6 +654,39 @@ fn vss_share_linkage_consistency_lift_geometry_is_pinned() {
              check-field decision record",
         );
     }
+
+    // Pin the message-trit witness bound. A message consistency claim lifts a
+    // single base-three trit (bound VSS_PUBLIC_MESSAGE_TRIT_BASE - 1 = 2), not a
+    // whole digit. masked_claim_bounds_for_global_claim returns the clear window
+    // as (-clear, mask + clear) with clear = witness_bound * coefficient_bound *
+    // ring_degree, so the negated lower bound recovers the clear span and pins
+    // witness_bound. The residue-count check above cannot see this pin, because
+    // the 58-digit mask dominates the window for both trit and digit bounds;
+    // without it a silent regression to whole-digit claims (leakage back to
+    // 2^-42 from 2^-68) would pass unnoticed.
+    let share_linkage = statement
+        .vss_share_linkage
+        .as_ref()
+        .expect("share linkage statement");
+    let coefficient_bound = (1_i128 << family_shape.consistency_coefficient_bits()) - 1;
+    let packed_ring_degree = share_linkage
+        .packed_ring_degree(statement.ring_degree)
+        .expect("packed ring degree");
+    let expected_trit_clear_span = BigInt::from(
+        i128::from(VSS_PUBLIC_MESSAGE_TRIT_BASE - 1)
+            * coefficient_bound
+            * packed_ring_degree as i128,
+    );
+    let (message_trit_lower, _message_trit_upper) = masked_claim_bounds_for_global_claim(
+        &statement,
+        (item_count * consistency_repetitions) as u64,
+    )
+    .expect("message trit masked claim bounds");
+    assert_eq!(
+        -message_trit_lower, expected_trit_clear_span,
+        "message consistency claims must bind a single base-three trit (bound two); a wider clear \
+         span means the claim reverted to whole-digit granularity and widened the leakage window",
+    );
 
     // The mask selection must pair with the claim-bound selection: every
     // vector below the item count is a carry claim and takes the carry mask,
@@ -659,6 +712,6 @@ fn vss_share_linkage_consistency_lift_geometry_is_pinned() {
             (item_count * consistency_repetitions) as u64,
         ),
         VSS_PUBLIC_SHARE_LINKAGE_DIGIT_CLAIM_MASK_DIGIT_COUNT,
-        "the first vector after the carries must take the digit claim mask",
+        "the first message trit vector after the carries must take the share-linkage claim mask",
     );
 }

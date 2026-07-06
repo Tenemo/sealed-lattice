@@ -165,8 +165,8 @@ mod tests {
         // vectors, so its identity differs: perturbing one basis coefficient
         // must change the hash.
         let mut basis = batch_encoder_basis_vectors().expect("basis vectors");
-        basis[0][0] = add_mod(basis[0][0], 1, PLAINTEXT_MODULUS)
-            .expect("plaintext-field modular add");
+        basis[0][0] =
+            add_mod(basis[0][0], 1, PLAINTEXT_MODULUS).expect("plaintext-field modular add");
         let mut header = Vec::with_capacity(24);
         header.extend_from_slice(&(OPTION_COUNT as u64).to_le_bytes());
         header.extend_from_slice(&(POLYNOMIAL_DEGREE as u64).to_le_bytes());

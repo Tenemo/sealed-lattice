@@ -837,436 +837,481 @@ struct VerifiedEvaluationKeyShareComponentMaterialChunkStoreEntry {
 // reads the handle transiently through the existing read path, so only one
 // component (about 72.25 MiB) is ever resident.
 
-const COMPONENT_MATERIAL_STREAM_ID_MAX_BYTES: usize = 128;
-const COMPONENT_MATERIAL_STREAM_TEMP_FILE_DOMAIN: &str =
-    "sealed-lattice/setup/evaluation-key-share/component-material/stream-temp-v1";
-
-static COMPONENT_MATERIAL_TRANSPORT_STREAM_SESSIONS: OnceLock<
-    Mutex<BTreeMap<String, ComponentMaterialTransportStreamSession>>,
-> = OnceLock::new();
-
-struct ComponentMaterialStreamHeader {
-    proof_family: EvaluationKeyShareProofFamily,
-    material_root: String,
-    chunk_count: usize,
-    total_byte_length: u64,
-    full_object_hash: String,
-    chunk_root: String,
-    chunk_hashes: Vec<String>,
+// Streaming spills to a temp file, so it requires a native filesystem. The
+// browser wasm runtime has none, and tens-of-gigabyte evaluation-key material is
+// verified on a trustee's own native device rather than in the browser, so the
+// three stream commands fail closed under wasm instead of touching the
+// filesystem.
+#[cfg(target_arch = "wasm32")]
+fn component_material_streaming_requires_native_filesystem() -> CanonicalError {
+    invalid_evaluation_key_share_material(
+        "evaluation-key component material streaming requires a native filesystem and is unavailable in the browser runtime",
+    )
 }
 
-struct ComponentMaterialTransportStreamSession {
-    header: ComponentMaterialStreamHeader,
-    next_chunk_index: usize,
-    observed_total_byte_length: u64,
-    path: PathBuf,
-    writer: BufWriter<File>,
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn begin_evaluation_key_share_component_material_transport_stream_request(
+    _request: &Value,
+) -> CanonicalResult<Value> {
+    Err(component_material_streaming_requires_native_filesystem())
 }
 
-fn component_material_transport_stream_sessions()
--> &'static Mutex<BTreeMap<String, ComponentMaterialTransportStreamSession>> {
-    COMPONENT_MATERIAL_TRANSPORT_STREAM_SESSIONS.get_or_init(|| Mutex::new(BTreeMap::new()))
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn absorb_evaluation_key_share_component_material_transport_stream_chunk_request(
+    _request: &Value,
+) -> CanonicalResult<Value> {
+    Err(component_material_streaming_requires_native_filesystem())
 }
 
-fn component_material_stream_verification_id(value: &Value) -> CanonicalResult<String> {
-    let verification_id = string_field(value, "verificationId")?;
-    if verification_id.is_empty()
-        || verification_id.len() > COMPONENT_MATERIAL_STREAM_ID_MAX_BYTES
-        || !verification_id
-            .chars()
-            .all(|character| character.is_ascii_alphanumeric() || "-_:.".contains(character))
-    {
-        return Err(invalid_evaluation_key_share_material(
-            "evaluation-key component material verificationId must be a short ASCII identifier",
-        ));
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn finish_evaluation_key_share_component_material_transport_stream_request(
+    _request: &Value,
+) -> CanonicalResult<Value> {
+    Err(component_material_streaming_requires_native_filesystem())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) use native_component_material_stream::{
+    absorb_evaluation_key_share_component_material_transport_stream_chunk_request,
+    begin_evaluation_key_share_component_material_transport_stream_request,
+    finish_evaluation_key_share_component_material_transport_stream_request,
+};
+
+#[cfg(not(target_arch = "wasm32"))]
+mod native_component_material_stream {
+    use super::*;
+
+    const COMPONENT_MATERIAL_STREAM_ID_MAX_BYTES: usize = 128;
+    const COMPONENT_MATERIAL_STREAM_TEMP_FILE_DOMAIN: &str =
+        "sealed-lattice/setup/evaluation-key-share/component-material/stream-temp-v1";
+
+    static COMPONENT_MATERIAL_TRANSPORT_STREAM_SESSIONS: OnceLock<
+        Mutex<BTreeMap<String, ComponentMaterialTransportStreamSession>>,
+    > = OnceLock::new();
+
+    struct ComponentMaterialStreamHeader {
+        proof_family: EvaluationKeyShareProofFamily,
+        material_root: String,
+        chunk_count: usize,
+        total_byte_length: u64,
+        full_object_hash: String,
+        chunk_root: String,
+        chunk_hashes: Vec<String>,
     }
 
-    Ok(verification_id.to_string())
-}
-
-fn evaluation_key_share_proof_family_from_str(
-    value: &str,
-) -> CanonicalResult<EvaluationKeyShareProofFamily> {
-    match value {
-        "relinearization-key-share" => Ok(EvaluationKeyShareProofFamily::Relinearization),
-        "galois-key-share" => Ok(EvaluationKeyShareProofFamily::Galois),
-        _ => Err(invalid_evaluation_key_share_material(
-            "evaluation-key component material proofFamily is not accepted",
-        )),
+    struct ComponentMaterialTransportStreamSession {
+        header: ComponentMaterialStreamHeader,
+        next_chunk_index: usize,
+        observed_total_byte_length: u64,
+        path: PathBuf,
+        writer: BufWriter<File>,
     }
-}
 
-// A stable, cross-platform temp filename for a stream: the verificationId can
-// contain characters that are not valid on every filesystem, so the file is
-// named by a domain-separated hash of it.
-fn component_material_stream_temp_path(verification_id: &str) -> CanonicalResult<PathBuf> {
-    let mut directory = std::env::temp_dir();
-    directory.push("sealed-lattice-evaluation-key-component-material");
-    std::fs::create_dir_all(&directory).map_err(|error| {
+    fn component_material_transport_stream_sessions()
+    -> &'static Mutex<BTreeMap<String, ComponentMaterialTransportStreamSession>> {
+        COMPONENT_MATERIAL_TRANSPORT_STREAM_SESSIONS.get_or_init(|| Mutex::new(BTreeMap::new()))
+    }
+
+    fn component_material_stream_verification_id(value: &Value) -> CanonicalResult<String> {
+        let verification_id = string_field(value, "verificationId")?;
+        if verification_id.is_empty()
+            || verification_id.len() > COMPONENT_MATERIAL_STREAM_ID_MAX_BYTES
+            || !verification_id
+                .chars()
+                .all(|character| character.is_ascii_alphanumeric() || "-_:.".contains(character))
+        {
+            return Err(invalid_evaluation_key_share_material(
+                "evaluation-key component material verificationId must be a short ASCII identifier",
+            ));
+        }
+
+        Ok(verification_id.to_string())
+    }
+
+    fn evaluation_key_share_proof_family_from_str(
+        value: &str,
+    ) -> CanonicalResult<EvaluationKeyShareProofFamily> {
+        match value {
+            "relinearization-key-share" => Ok(EvaluationKeyShareProofFamily::Relinearization),
+            "galois-key-share" => Ok(EvaluationKeyShareProofFamily::Galois),
+            _ => Err(invalid_evaluation_key_share_material(
+                "evaluation-key component material proofFamily is not accepted",
+            )),
+        }
+    }
+
+    // A stable, cross-platform temp filename for a stream: the verificationId can
+    // contain characters that are not valid on every filesystem, so the file is
+    // named by a domain-separated hash of it.
+    fn component_material_stream_temp_path(verification_id: &str) -> CanonicalResult<PathBuf> {
+        let mut directory = std::env::temp_dir();
+        directory.push("sealed-lattice-evaluation-key-component-material");
+        std::fs::create_dir_all(&directory).map_err(|error| {
         invalid_evaluation_key_share_material(format!(
             "evaluation-key component material stream temp directory could not be created: {error}"
         ))
     })?;
-    let file_name = hash512_hex(
-        COMPONENT_MATERIAL_STREAM_TEMP_FILE_DOMAIN,
-        &[verification_id.as_bytes()],
-    );
-    directory.push(format!("{file_name}.bin"));
+        let file_name = hash512_hex(
+            COMPONENT_MATERIAL_STREAM_TEMP_FILE_DOMAIN,
+            &[verification_id.as_bytes()],
+        );
+        directory.push(format!("{file_name}.bin"));
 
-    Ok(directory)
-}
-
-fn read_component_material_stream_header(
-    reference: &Value,
-) -> CanonicalResult<ComponentMaterialStreamHeader> {
-    if reference.get("chunks").is_some() {
-        return Err(invalid_evaluation_key_share_material(
-            "evaluation-key component material stream header must not contain embedded chunks",
-        ));
-    }
-    if reference.get("objectType").and_then(Value::as_str)
-        != Some(EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_TRANSPORT_OBJECT_TYPE)
-        || reference.get("objectVersion").and_then(Value::as_u64) != Some(1)
-        || reference
-            .get("keySwitchMaterialEncoding")
-            .and_then(Value::as_str)
-            != Some(EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING)
-    {
-        return Err(invalid_evaluation_key_share_material(
-            "evaluation-key component material stream header is invalid",
-        ));
-    }
-    let proof_family =
-        evaluation_key_share_proof_family_from_str(string_field(reference, "proofFamily")?)?;
-    let material_root = string_field(reference, "keySwitchComponentMaterialRoot")?.to_string();
-    validate_hex_string(&material_root, "keySwitchComponentMaterialRoot")?;
-    if value_u64(reference, "chunkSizeBytes")? != SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES {
-        return Err(invalid_evaluation_key_share_material(
-            "evaluation-key component material stream chunkSizeBytes must match the setup transport parameters",
-        ));
-    }
-    let chunk_count = value_usize(reference, "chunkCount")?;
-    if chunk_count == 0 {
-        return Err(invalid_evaluation_key_share_material(
-            "evaluation-key component material stream chunkCount must be positive",
-        ));
-    }
-    let total_byte_length = value_u64(reference, "totalByteLength")?;
-    if total_byte_length == 0 {
-        return Err(invalid_evaluation_key_share_material(
-            "evaluation-key component material stream totalByteLength must be positive",
-        ));
-    }
-    let full_object_hash = string_field(reference, "fullObjectHash")?.to_string();
-    validate_hex_string(&full_object_hash, "fullObjectHash")?;
-    let chunk_root = string_field(reference, "chunkRoot")?.to_string();
-    validate_hex_string(&chunk_root, "chunkRoot")?;
-    let chunk_hash_values = array_field(reference, "chunkHashes")?;
-    if chunk_hash_values.len() != chunk_count {
-        return Err(invalid_evaluation_key_share_material(
-            "evaluation-key component material stream chunkHashes length must match chunkCount",
-        ));
-    }
-    let mut chunk_hashes = Vec::with_capacity(chunk_count);
-    for chunk_hash_value in chunk_hash_values {
-        let chunk_hash = chunk_hash_value.as_str().ok_or_else(|| {
-            invalid_evaluation_key_share_material(
-                "evaluation-key component material stream chunkHashes must be hash strings",
-            )
-        })?;
-        validate_hex_string(chunk_hash, "chunkHashes")?;
-        chunk_hashes.push(chunk_hash.to_string());
+        Ok(directory)
     }
 
-    Ok(ComponentMaterialStreamHeader {
-        proof_family,
-        material_root,
-        chunk_count,
-        total_byte_length,
-        full_object_hash,
-        chunk_root,
-        chunk_hashes,
-    })
-}
+    fn read_component_material_stream_header(
+        reference: &Value,
+    ) -> CanonicalResult<ComponentMaterialStreamHeader> {
+        if reference.get("chunks").is_some() {
+            return Err(invalid_evaluation_key_share_material(
+                "evaluation-key component material stream header must not contain embedded chunks",
+            ));
+        }
+        if reference.get("objectType").and_then(Value::as_str)
+            != Some(EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_TRANSPORT_OBJECT_TYPE)
+            || reference.get("objectVersion").and_then(Value::as_u64) != Some(1)
+            || reference
+                .get("keySwitchMaterialEncoding")
+                .and_then(Value::as_str)
+                != Some(EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING)
+        {
+            return Err(invalid_evaluation_key_share_material(
+                "evaluation-key component material stream header is invalid",
+            ));
+        }
+        let proof_family =
+            evaluation_key_share_proof_family_from_str(string_field(reference, "proofFamily")?)?;
+        let material_root = string_field(reference, "keySwitchComponentMaterialRoot")?.to_string();
+        validate_hex_string(&material_root, "keySwitchComponentMaterialRoot")?;
+        if value_u64(reference, "chunkSizeBytes")? != SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES {
+            return Err(invalid_evaluation_key_share_material(
+                "evaluation-key component material stream chunkSizeBytes must match the setup transport parameters",
+            ));
+        }
+        let chunk_count = value_usize(reference, "chunkCount")?;
+        if chunk_count == 0 {
+            return Err(invalid_evaluation_key_share_material(
+                "evaluation-key component material stream chunkCount must be positive",
+            ));
+        }
+        let total_byte_length = value_u64(reference, "totalByteLength")?;
+        if total_byte_length == 0 {
+            return Err(invalid_evaluation_key_share_material(
+                "evaluation-key component material stream totalByteLength must be positive",
+            ));
+        }
+        let full_object_hash = string_field(reference, "fullObjectHash")?.to_string();
+        validate_hex_string(&full_object_hash, "fullObjectHash")?;
+        let chunk_root = string_field(reference, "chunkRoot")?.to_string();
+        validate_hex_string(&chunk_root, "chunkRoot")?;
+        let chunk_hash_values = array_field(reference, "chunkHashes")?;
+        if chunk_hash_values.len() != chunk_count {
+            return Err(invalid_evaluation_key_share_material(
+                "evaluation-key component material stream chunkHashes length must match chunkCount",
+            ));
+        }
+        let mut chunk_hashes = Vec::with_capacity(chunk_count);
+        for chunk_hash_value in chunk_hash_values {
+            let chunk_hash = chunk_hash_value.as_str().ok_or_else(|| {
+                invalid_evaluation_key_share_material(
+                    "evaluation-key component material stream chunkHashes must be hash strings",
+                )
+            })?;
+            validate_hex_string(chunk_hash, "chunkHashes")?;
+            chunk_hashes.push(chunk_hash.to_string());
+        }
 
-pub(crate) fn begin_evaluation_key_share_component_material_transport_stream_request(
-    request: &Value,
-) -> CanonicalResult<Value> {
-    let verification_id = component_material_stream_verification_id(request)?;
-    let reference = request
+        Ok(ComponentMaterialStreamHeader {
+            proof_family,
+            material_root,
+            chunk_count,
+            total_byte_length,
+            full_object_hash,
+            chunk_root,
+            chunk_hashes,
+        })
+    }
+
+    pub(crate) fn begin_evaluation_key_share_component_material_transport_stream_request(
+        request: &Value,
+    ) -> CanonicalResult<Value> {
+        let verification_id = component_material_stream_verification_id(request)?;
+        let reference = request
         .get("transportedEvaluationKeyShareComponentMaterial")
         .ok_or_else(|| {
             invalid_evaluation_key_share_material(
                 "transportedEvaluationKeyShareComponentMaterial is required to begin the component material stream",
             )
         })?;
-    let header = read_component_material_stream_header(reference)?;
-    let path = component_material_stream_temp_path(&verification_id)?;
-    let file = File::create(&path).map_err(|error| {
-        invalid_evaluation_key_share_material(format!(
-            "evaluation-key component material stream temp file could not be created: {error}"
-        ))
-    })?;
+        let header = read_component_material_stream_header(reference)?;
+        let path = component_material_stream_temp_path(&verification_id)?;
+        let file = File::create(&path).map_err(|error| {
+            invalid_evaluation_key_share_material(format!(
+                "evaluation-key component material stream temp file could not be created: {error}"
+            ))
+        })?;
 
-    let sessions = component_material_transport_stream_sessions();
-    let mut sessions = sessions.lock().map_err(|_| {
-        invalid_evaluation_key_share_material(
-            "evaluation-key component material stream session store is unavailable",
-        )
-    })?;
-    if sessions.contains_key(&verification_id) {
-        let _ = std::fs::remove_file(&path);
-        return Err(invalid_evaluation_key_share_material(
-            "evaluation-key component material verificationId is already active",
-        ));
+        let sessions = component_material_transport_stream_sessions();
+        let mut sessions = sessions.lock().map_err(|_| {
+            invalid_evaluation_key_share_material(
+                "evaluation-key component material stream session store is unavailable",
+            )
+        })?;
+        if sessions.contains_key(&verification_id) {
+            let _ = std::fs::remove_file(&path);
+            return Err(invalid_evaluation_key_share_material(
+                "evaluation-key component material verificationId is already active",
+            ));
+        }
+        let chunk_size_bytes = SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES;
+        let chunk_count = header.chunk_count;
+        let total_byte_length = header.total_byte_length;
+        let material_root = header.material_root.clone();
+        let proof_family = header.proof_family.proof_family();
+        sessions.insert(
+            verification_id.clone(),
+            ComponentMaterialTransportStreamSession {
+                header,
+                next_chunk_index: 0,
+                observed_total_byte_length: 0,
+                path,
+                writer: BufWriter::new(file),
+            },
+        );
+
+        Ok(json!({
+            "operation": "beginEvaluationKeyShareComponentMaterialTransportStream",
+            "verificationId": verification_id,
+            "proofFamily": proof_family,
+            "keySwitchComponentMaterialRoot": material_root,
+            "keySwitchMaterialEncoding": EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
+            "transport": {
+                "chunkSizeBytes": chunk_size_bytes,
+                "chunkCount": chunk_count,
+                "totalByteLength": total_byte_length,
+            },
+        }))
     }
-    let chunk_size_bytes = SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES;
-    let chunk_count = header.chunk_count;
-    let total_byte_length = header.total_byte_length;
-    let material_root = header.material_root.clone();
-    let proof_family = header.proof_family.proof_family();
-    sessions.insert(
-        verification_id.clone(),
-        ComponentMaterialTransportStreamSession {
-            header,
-            next_chunk_index: 0,
-            observed_total_byte_length: 0,
-            path,
-            writer: BufWriter::new(file),
-        },
-    );
 
-    Ok(json!({
-        "operation": "beginEvaluationKeyShareComponentMaterialTransportStream",
-        "verificationId": verification_id,
-        "proofFamily": proof_family,
-        "keySwitchComponentMaterialRoot": material_root,
-        "keySwitchMaterialEncoding": EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
-        "transport": {
-            "chunkSizeBytes": chunk_size_bytes,
-            "chunkCount": chunk_count,
-            "totalByteLength": total_byte_length,
-        },
-    }))
-}
+    pub(crate) fn absorb_evaluation_key_share_component_material_transport_stream_chunk_request(
+        request: &Value,
+    ) -> CanonicalResult<Value> {
+        let verification_id = component_material_stream_verification_id(request)?;
+        let chunk_index = value_usize(request, "chunkIndex")?;
+        let chunk = crate::transcript_core::decode_hex(string_field(request, "bytesHex")?)?;
 
-pub(crate) fn absorb_evaluation_key_share_component_material_transport_stream_chunk_request(
-    request: &Value,
-) -> CanonicalResult<Value> {
-    let verification_id = component_material_stream_verification_id(request)?;
-    let chunk_index = value_usize(request, "chunkIndex")?;
-    let chunk = crate::transcript_core::decode_hex(string_field(request, "bytesHex")?)?;
+        let sessions = component_material_transport_stream_sessions();
+        let mut sessions = sessions.lock().map_err(|_| {
+            invalid_evaluation_key_share_material(
+                "evaluation-key component material stream session store is unavailable",
+            )
+        })?;
+        let absorb_result = {
+            let session = sessions.get_mut(&verification_id).ok_or_else(|| {
+                invalid_evaluation_key_share_material(
+                    "evaluation-key component material verificationId is not active",
+                )
+            })?;
+            absorb_component_material_stream_chunk(session, chunk_index, &chunk)
+        };
+        match absorb_result {
+            Ok(response) => Ok(response),
+            Err(error) => {
+                if let Some(session) = sessions.remove(&verification_id) {
+                    let _ = std::fs::remove_file(&session.path);
+                }
+                Err(error)
+            }
+        }
+    }
 
-    let sessions = component_material_transport_stream_sessions();
-    let mut sessions = sessions.lock().map_err(|_| {
-        invalid_evaluation_key_share_material(
-            "evaluation-key component material stream session store is unavailable",
-        )
-    })?;
-    let absorb_result = {
-        let session = sessions.get_mut(&verification_id).ok_or_else(|| {
+    fn absorb_component_material_stream_chunk(
+        session: &mut ComponentMaterialTransportStreamSession,
+        chunk_index: usize,
+        chunk: &[u8],
+    ) -> CanonicalResult<Value> {
+        if chunk_index != session.next_chunk_index {
+            return Err(invalid_evaluation_key_share_material(
+                "evaluation-key component material chunks must be absorbed in ascending chunk-index order",
+            ));
+        }
+        if chunk_index >= session.header.chunk_count {
+            return Err(invalid_evaluation_key_share_material(
+                "evaluation-key component material stream received more chunks than declared",
+            ));
+        }
+        if chunk.is_empty() {
+            return Err(invalid_evaluation_key_share_material(
+                "evaluation-key component material chunks must be non-empty",
+            ));
+        }
+        let chunk_size = usize::try_from(SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES).map_err(|_| {
+            invalid_evaluation_key_share_material(
+                "evaluation-key component material chunk size does not fit usize",
+            )
+        })?;
+        if chunk.len() > chunk_size {
+            return Err(invalid_evaluation_key_share_material(
+                "evaluation-key component material chunk exceeds the accepted chunk size",
+            ));
+        }
+        let is_final_chunk = chunk_index + 1 == session.header.chunk_count;
+        if !is_final_chunk && chunk.len() != chunk_size {
+            return Err(invalid_evaluation_key_share_material(
+                "evaluation-key component material contains a short non-final chunk",
+            ));
+        }
+        let new_total = session
+            .observed_total_byte_length
+            .checked_add(u64::try_from(chunk.len()).map_err(|_| {
+                invalid_evaluation_key_share_material(
+                    "evaluation-key component material chunk length does not fit u64",
+                )
+            })?)
+            .ok_or_else(|| {
+                invalid_evaluation_key_share_material(
+                    "evaluation-key component material byte length overflowed",
+                )
+            })?;
+        if new_total > session.header.total_byte_length {
+            return Err(invalid_evaluation_key_share_material(
+                "evaluation-key component material stream chunk bytes exceed declared totalByteLength",
+            ));
+        }
+        if is_final_chunk && new_total != session.header.total_byte_length {
+            return Err(invalid_evaluation_key_share_material(
+                "final evaluation-key component material chunk must finish at declared totalByteLength",
+            ));
+        }
+        session.writer.write_all(chunk).map_err(|error| {
+            invalid_evaluation_key_share_material(format!(
+                "evaluation-key component material chunk could not be written: {error}"
+            ))
+        })?;
+        session.observed_total_byte_length = new_total;
+        session.next_chunk_index += 1;
+
+        Ok(json!({
+            "operation": "absorbEvaluationKeyShareComponentMaterialTransportStreamChunk",
+            "absorbedChunkIndex": chunk_index,
+            "nextChunkIndex": session.next_chunk_index,
+            "observedTotalByteLength": session.observed_total_byte_length,
+        }))
+    }
+
+    pub(crate) fn finish_evaluation_key_share_component_material_transport_stream_request(
+        request: &Value,
+    ) -> CanonicalResult<Value> {
+        let verification_id = component_material_stream_verification_id(request)?;
+        let sessions = component_material_transport_stream_sessions();
+        let mut sessions = sessions.lock().map_err(|_| {
+            invalid_evaluation_key_share_material(
+                "evaluation-key component material stream session store is unavailable",
+            )
+        })?;
+        let session = sessions.remove(&verification_id).ok_or_else(|| {
             invalid_evaluation_key_share_material(
                 "evaluation-key component material verificationId is not active",
             )
         })?;
-        absorb_component_material_stream_chunk(session, chunk_index, &chunk)
-    };
-    match absorb_result {
-        Ok(response) => Ok(response),
-        Err(error) => {
-            if let Some(session) = sessions.remove(&verification_id) {
-                let _ = std::fs::remove_file(&session.path);
-            }
-            Err(error)
+        drop(sessions);
+
+        finish_component_material_stream(&verification_id, session)
+    }
+
+    fn finish_component_material_stream(
+        verification_id: &str,
+        mut session: ComponentMaterialTransportStreamSession,
+    ) -> CanonicalResult<Value> {
+        let finish_result = finish_component_material_stream_inner(&mut session);
+        if finish_result.is_err() {
+            let _ = std::fs::remove_file(&session.path);
         }
-    }
-}
+        let transport_hashes = finish_result?;
 
-fn absorb_component_material_stream_chunk(
-    session: &mut ComponentMaterialTransportStreamSession,
-    chunk_index: usize,
-    chunk: &[u8],
-) -> CanonicalResult<Value> {
-    if chunk_index != session.next_chunk_index {
-        return Err(invalid_evaluation_key_share_material(
-            "evaluation-key component material chunks must be absorbed in ascending chunk-index order",
-        ));
-    }
-    if chunk_index >= session.header.chunk_count {
-        return Err(invalid_evaluation_key_share_material(
-            "evaluation-key component material stream received more chunks than declared",
-        ));
-    }
-    if chunk.is_empty() {
-        return Err(invalid_evaluation_key_share_material(
-            "evaluation-key component material chunks must be non-empty",
-        ));
-    }
-    let chunk_size = usize::try_from(SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES).map_err(|_| {
-        invalid_evaluation_key_share_material(
-            "evaluation-key component material chunk size does not fit usize",
-        )
-    })?;
-    if chunk.len() > chunk_size {
-        return Err(invalid_evaluation_key_share_material(
-            "evaluation-key component material chunk exceeds the accepted chunk size",
-        ));
-    }
-    let is_final_chunk = chunk_index + 1 == session.header.chunk_count;
-    if !is_final_chunk && chunk.len() != chunk_size {
-        return Err(invalid_evaluation_key_share_material(
-            "evaluation-key component material contains a short non-final chunk",
-        ));
-    }
-    let new_total = session
-        .observed_total_byte_length
-        .checked_add(u64::try_from(chunk.len()).map_err(|_| {
-            invalid_evaluation_key_share_material(
-                "evaluation-key component material chunk length does not fit u64",
-            )
-        })?)
-        .ok_or_else(|| {
-            invalid_evaluation_key_share_material(
-                "evaluation-key component material byte length overflowed",
-            )
-        })?;
-    if new_total > session.header.total_byte_length {
-        return Err(invalid_evaluation_key_share_material(
-            "evaluation-key component material stream chunk bytes exceed declared totalByteLength",
-        ));
-    }
-    if is_final_chunk && new_total != session.header.total_byte_length {
-        return Err(invalid_evaluation_key_share_material(
-            "final evaluation-key component material chunk must finish at declared totalByteLength",
-        ));
-    }
-    session.writer.write_all(chunk).map_err(|error| {
-        invalid_evaluation_key_share_material(format!(
-            "evaluation-key component material chunk could not be written: {error}"
-        ))
-    })?;
-    session.observed_total_byte_length = new_total;
-    session.next_chunk_index += 1;
+        verified_evaluation_key_share_component_material_chunks()
+            .lock()
+            .map_err(|_| {
+                invalid_evaluation_key_share_material(
+                    "verified evaluation-key component material store is unavailable",
+                )
+            })?
+            .insert(
+                session.header.material_root.clone(),
+                VerifiedEvaluationKeyShareComponentMaterialChunkStoreEntry {
+                    path: session.path.clone(),
+                    total_byte_length: session.header.total_byte_length,
+                },
+            );
 
-    Ok(json!({
-        "operation": "absorbEvaluationKeyShareComponentMaterialTransportStreamChunk",
-        "absorbedChunkIndex": chunk_index,
-        "nextChunkIndex": session.next_chunk_index,
-        "observedTotalByteLength": session.observed_total_byte_length,
-    }))
-}
-
-pub(crate) fn finish_evaluation_key_share_component_material_transport_stream_request(
-    request: &Value,
-) -> CanonicalResult<Value> {
-    let verification_id = component_material_stream_verification_id(request)?;
-    let sessions = component_material_transport_stream_sessions();
-    let mut sessions = sessions.lock().map_err(|_| {
-        invalid_evaluation_key_share_material(
-            "evaluation-key component material stream session store is unavailable",
-        )
-    })?;
-    let session = sessions.remove(&verification_id).ok_or_else(|| {
-        invalid_evaluation_key_share_material(
-            "evaluation-key component material verificationId is not active",
-        )
-    })?;
-    drop(sessions);
-
-    finish_component_material_stream(&verification_id, session)
-}
-
-fn finish_component_material_stream(
-    verification_id: &str,
-    mut session: ComponentMaterialTransportStreamSession,
-) -> CanonicalResult<Value> {
-    let finish_result = finish_component_material_stream_inner(&mut session);
-    if finish_result.is_err() {
-        let _ = std::fs::remove_file(&session.path);
-    }
-    let transport_hashes = finish_result?;
-
-    verified_evaluation_key_share_component_material_chunks()
-        .lock()
-        .map_err(|_| {
-            invalid_evaluation_key_share_material(
-                "verified evaluation-key component material store is unavailable",
-            )
-        })?
-        .insert(
-            session.header.material_root.clone(),
-            VerifiedEvaluationKeyShareComponentMaterialChunkStoreEntry {
-                path: session.path.clone(),
-                total_byte_length: session.header.total_byte_length,
-            },
-        );
-
-    Ok(json!({
-        "operation": "finishEvaluationKeyShareComponentMaterialTransportStream",
-        "verificationId": verification_id,
-        "proofFamily": session.header.proof_family.proof_family(),
-        "keySwitchComponentMaterialRoot": session.header.material_root,
-        "keySwitchMaterialEncoding": EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
-        "verifiedEvaluationKeyShareComponentMaterial": {
-            "objectType": "VerifiedEvaluationKeyShareComponentMaterial",
-            "objectVersion": 1,
+        Ok(json!({
+            "operation": "finishEvaluationKeyShareComponentMaterialTransportStream",
             "verificationId": verification_id,
             "proofFamily": session.header.proof_family.proof_family(),
             "keySwitchComponentMaterialRoot": session.header.material_root,
             "keySwitchMaterialEncoding": EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
-            "chunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
-            "chunkCount": transport_hashes.chunk_hashes.len(),
-            "totalByteLength": transport_hashes.total_byte_length,
-            "fullObjectHash": transport_hashes.full_object_hash,
-            "chunkRoot": transport_hashes.chunk_root,
-            "chunkHashes": transport_hashes.chunk_hashes,
-        },
-    }))
+            "verifiedEvaluationKeyShareComponentMaterial": {
+                "objectType": "VerifiedEvaluationKeyShareComponentMaterial",
+                "objectVersion": 1,
+                "verificationId": verification_id,
+                "proofFamily": session.header.proof_family.proof_family(),
+                "keySwitchComponentMaterialRoot": session.header.material_root,
+                "keySwitchMaterialEncoding": EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
+                "chunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
+                "chunkCount": transport_hashes.chunk_hashes.len(),
+                "totalByteLength": transport_hashes.total_byte_length,
+                "fullObjectHash": transport_hashes.full_object_hash,
+                "chunkRoot": transport_hashes.chunk_root,
+                "chunkHashes": transport_hashes.chunk_hashes,
+            },
+        }))
+    }
+
+    fn finish_component_material_stream_inner(
+        session: &mut ComponentMaterialTransportStreamSession,
+    ) -> CanonicalResult<EvaluationKeyShareComponentMaterialTransportHashes> {
+        session.writer.flush().map_err(|error| {
+            invalid_evaluation_key_share_material(format!(
+                "evaluation-key component material stream file could not be flushed: {error}"
+            ))
+        })?;
+        if session.next_chunk_index != session.header.chunk_count {
+            return Err(invalid_evaluation_key_share_material(
+                "evaluation-key component material stream is missing declared chunks",
+            ));
+        }
+        if session.observed_total_byte_length != session.header.total_byte_length {
+            return Err(invalid_evaluation_key_share_material(
+                "evaluation-key component material stream totalByteLength does not match absorbed chunk bytes",
+            ));
+        }
+        let store_entry = VerifiedEvaluationKeyShareComponentMaterialChunkStoreEntry {
+            path: session.path.clone(),
+            total_byte_length: session.header.total_byte_length,
+        };
+        let chunks = read_verified_evaluation_key_share_component_material_chunks(&store_entry)?;
+        let transport_hashes = evaluation_key_share_component_material_transport_hashes(
+            session.header.proof_family,
+            &chunks,
+            SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
+        )?;
+        if transport_hashes.chunk_hashes.len() != session.header.chunk_count
+            || transport_hashes.total_byte_length != session.header.total_byte_length
+            || transport_hashes.full_object_hash != session.header.full_object_hash
+            || transport_hashes.chunk_root != session.header.chunk_root
+            || transport_hashes.chunk_hashes != session.header.chunk_hashes
+        {
+            return Err(invalid_evaluation_key_share_material(
+                "evaluation-key component material stream does not match the declared chunk manifest",
+            ));
+        }
+
+        Ok(transport_hashes)
+    }
 }
 
-fn finish_component_material_stream_inner(
-    session: &mut ComponentMaterialTransportStreamSession,
-) -> CanonicalResult<EvaluationKeyShareComponentMaterialTransportHashes> {
-    session.writer.flush().map_err(|error| {
-        invalid_evaluation_key_share_material(format!(
-            "evaluation-key component material stream file could not be flushed: {error}"
-        ))
-    })?;
-    if session.next_chunk_index != session.header.chunk_count {
-        return Err(invalid_evaluation_key_share_material(
-            "evaluation-key component material stream is missing declared chunks",
-        ));
-    }
-    if session.observed_total_byte_length != session.header.total_byte_length {
-        return Err(invalid_evaluation_key_share_material(
-            "evaluation-key component material stream totalByteLength does not match absorbed chunk bytes",
-        ));
-    }
-    let store_entry = VerifiedEvaluationKeyShareComponentMaterialChunkStoreEntry {
-        path: session.path.clone(),
-        total_byte_length: session.header.total_byte_length,
-    };
-    let chunks = read_verified_evaluation_key_share_component_material_chunks(&store_entry)?;
-    let transport_hashes = evaluation_key_share_component_material_transport_hashes(
-        session.header.proof_family,
-        &chunks,
-        SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
-    )?;
-    if transport_hashes.chunk_hashes.len() != session.header.chunk_count
-        || transport_hashes.total_byte_length != session.header.total_byte_length
-        || transport_hashes.full_object_hash != session.header.full_object_hash
-        || transport_hashes.chunk_root != session.header.chunk_root
-        || transport_hashes.chunk_hashes != session.header.chunk_hashes
-    {
-        return Err(invalid_evaluation_key_share_material(
-            "evaluation-key component material stream does not match the declared chunk manifest",
-        ));
-    }
-
-    Ok(transport_hashes)
-}
-
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod stream_tests {
     use super::*;
 
@@ -1283,7 +1328,8 @@ mod stream_tests {
     }
 
     fn chunk_bytes(bytes: &[u8]) -> Vec<Vec<u8>> {
-        let chunk_size = usize::try_from(SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES).expect("chunk size");
+        let chunk_size =
+            usize::try_from(SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES).expect("chunk size");
         bytes.chunks(chunk_size).map(<[u8]>::to_vec).collect()
     }
 

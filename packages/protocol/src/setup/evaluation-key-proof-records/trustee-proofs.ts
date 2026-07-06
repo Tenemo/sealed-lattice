@@ -289,7 +289,10 @@ const componentBVectorsFromMaterial = (
             );
         }
 
-        return bytesFromHex(chunk.bytesHex, 'componentMaterial.chunks.bytesHex');
+        return bytesFromHex(
+            chunk.bytesHex,
+            'componentMaterial.chunks.bytesHex',
+        );
     });
     const totalByteLength = materialBytesParts.reduce(
         (byteLength, part) => byteLength + part.byteLength,

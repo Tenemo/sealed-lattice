@@ -454,14 +454,13 @@ pub(crate) fn batched_sumcheck_value<Domain: CompositionColumnDomain>(
                     let witness_value = if consistency_vector < layout.vss_public_item_columns {
                         column_values[layout.physical_vss_public_carry_at(consistency_vector, half)]
                     } else {
-                        let digit_claim_index = consistency_vector - layout.vss_public_item_columns;
-                        let message_position = digit_claim_index
-                            / crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT;
-                        let digit_index = digit_claim_index
-                            % crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT;
-                        column_values[layout.physical_vss_public_message_digit(
+                        let trit_claim_index = consistency_vector - layout.vss_public_item_columns;
+                        let (message_position, digit_index, trit_index) =
+                            layout.vss_public_message_trit_claim_at(trit_claim_index);
+                        column_values[layout.physical_vss_public_message_trit(
                             message_position,
                             digit_index,
+                            trit_index,
                             half,
                         )]
                     };

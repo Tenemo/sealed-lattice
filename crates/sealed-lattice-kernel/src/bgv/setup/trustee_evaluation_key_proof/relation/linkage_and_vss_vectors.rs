@@ -249,7 +249,7 @@ pub(crate) fn build_private_vss_public_vectors(
 // lies in [-clear_bound, mask_bound + clear_bound]. The disclosed smudging
 // figure in accounting.rs recomputes from this same family-aware bound, so the
 // relation bound and the disclosed leakage figure agree by construction. The
-// carry's range bound here is essential to the global sharing-soundness
+// carry's range bound here is required for the global sharing-soundness
 // argument: it keeps the pinned evaluation a bounded centered lift.
 pub(crate) fn claim_mask_digit_count_for_global_claim(
     statement: &TrusteeEvaluationKeyStatement,
@@ -367,7 +367,12 @@ pub(crate) fn masked_claim_bounds_for_global_claim(
                     };
                     carry_bound.max(1)
                 } else {
-                    i128::from(crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_BASE - 1)
+                    // A share-linkage message claim binds a single base-three trit
+                    // of a digit, not the whole digit, so the witness ranges over
+                    // {0, 1, 2}. That narrower bound is what shrinks the cross-field
+                    // leakage window; the committed decoder column already carries
+                    // this exact trit value, so soundness is unchanged.
+                    i128::from(crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_TRIT_BASE - 1)
                 }
             }
             None => {

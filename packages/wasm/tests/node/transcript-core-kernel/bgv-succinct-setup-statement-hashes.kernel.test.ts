@@ -5,7 +5,7 @@ import type {
     BgvCollectiveSetupParametersDescription,
     TranscriptCoreKernel,
 } from '#packages/wasm/src/index';
-// Single source of truth shared with the Rust kernel test
+// Shared hash vector set used by the Rust kernel test
 // (trustee_evaluation_key_proof::tests): byte-identical succinct-setup statement
 // hashes pinned across the TS/WASM and Rust provers. Edit the values in the JSON
 // after an intended encoding change.

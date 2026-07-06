@@ -43,6 +43,11 @@ pub(crate) use accepted_setup::{
     verify_collective_bgv_setup_package_from_request,
 };
 pub(crate) use commitment::compute_setup_commitment_from_opening_request;
+pub(crate) use evaluation_key_share_material::{
+    absorb_evaluation_key_share_component_material_transport_stream_chunk_request,
+    begin_evaluation_key_share_component_material_transport_stream_request,
+    finish_evaluation_key_share_component_material_transport_stream_request,
+};
 pub(crate) use local_trustee_state::verify_local_trustee_setup_state_from_request;
 pub(crate) use private_vss::{
     generate_private_vss_share_proof_from_request, verify_private_vss_share_envelope_from_request,
@@ -58,11 +63,6 @@ use public_evaluation_key_material::{
 pub(crate) use same_secret_bridge::{
     verify_vss_same_secret_bridge_proof_material_set_request,
     verify_vss_same_secret_bridge_statement_set_request,
-};
-pub(crate) use evaluation_key_share_material::{
-    absorb_evaluation_key_share_component_material_transport_stream_chunk_request,
-    begin_evaluation_key_share_component_material_transport_stream_request,
-    finish_evaluation_key_share_component_material_transport_stream_request,
 };
 pub(crate) use setup_proof::{
     absorb_setup_proof_material_transport_stream_chunk_request,

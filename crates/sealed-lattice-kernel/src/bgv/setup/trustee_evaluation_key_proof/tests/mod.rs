@@ -58,8 +58,8 @@ fn folded_layer_path_length(extension_size: usize, fold_index: usize) -> usize {
     leaf_count.trailing_zeros() as usize
 }
 
-// The four succinct-setup statement-hash vectors are the single source of truth
-// shared with the TS/WASM kernel test (bgv-succinct-setup-statement-hashes),
+// The four succinct-setup statement-hash vectors are shared with the TS/WASM
+// kernel test (bgv-succinct-setup-statement-hashes),
 // pinning byte-identical statement hashes across the Rust and TS provers. The
 // values live in test-vectors/succinct-setup-statement-hashes.json; after an
 // intended encoding change, regenerate them there rather than editing copies in

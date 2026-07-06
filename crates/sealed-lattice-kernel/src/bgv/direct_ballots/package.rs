@@ -120,11 +120,7 @@ fn append_length_prefixed(bytes: &mut Vec<u8>, part: &[u8]) {
     bytes.extend_from_slice(part);
 }
 
-fn append_hash_field(
-    bytes: &mut Vec<u8>,
-    field_name: &str,
-    value: &str,
-) -> CanonicalResult<()> {
+fn append_hash_field(bytes: &mut Vec<u8>, field_name: &str, value: &str) -> CanonicalResult<()> {
     validate_protocol_hash(value, field_name)?;
     append_length_prefixed(bytes, value.as_bytes());
     Ok(())
@@ -178,7 +174,11 @@ impl BallotValidityStatement {
         )?;
         bytes.extend_from_slice(&(self.ciphertext_limb_roots.len() as u64).to_le_bytes());
         for (limb_index, root) in self.ciphertext_limb_roots.iter().enumerate() {
-            append_hash_field(&mut bytes, &format!("ciphertextLimbRoot.{limb_index}"), root)?;
+            append_hash_field(
+                &mut bytes,
+                &format!("ciphertextLimbRoot.{limb_index}"),
+                root,
+            )?;
         }
         bytes.extend_from_slice(&(self.public_key_limb_roots.len() as u64).to_le_bytes());
         for (limb_index, root) in self.public_key_limb_roots.iter().enumerate() {

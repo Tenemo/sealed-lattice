@@ -463,7 +463,7 @@ pub fn canonical_json_matches_bytes(value: &Value, expected_bytes: &[u8]) -> Can
 /// Single structural domain for canonical typed protocol objects, records, and
 /// roots. Domain separation comes from the mandatory `objectType` discriminator
 /// already inside the canonical JSON, not from a per-type namespace string. The
-/// non-empty-objectType check is load-bearing: it makes "never merge a typeless
+/// non-empty-objectType check is required: it makes "never merge a typeless
 /// preimage into the shared domain" a hard rejection, not a convention.
 pub fn derive_canonical_object_hash(value: &Value) -> CanonicalResult<String> {
     let has_object_type = value

@@ -46,6 +46,28 @@ fn vss_public_message_position_for_encoding_column(
         .map(|(message_position, window)| (message_position, vector_index - window[0]))
 }
 
+// The total number of VSS-public message trit consistency claims for a set of
+// per-message encoding layouts: each message digit contributes one claim per
+// base-three trit. Shared by the layout constructor (which sizes the claim mask
+// table) and `vss_public_message_total_trit_claim_count` (which the verifier
+// uses to walk the claims), so the two can never disagree on the claim count.
+fn vss_public_message_total_trit_claim_count_for_layouts(
+    layouts: &[VssPublicMessageEncodingLayout],
+) -> usize {
+    layouts
+        .iter()
+        .map(|encoding_layout| {
+            (0..crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT)
+                .map(|digit_index| {
+                    encoding_layout
+                        .digit_trit_count(digit_index)
+                        .expect("VSS digit is in the encoding layout")
+                })
+                .sum::<usize>()
+        })
+        .sum()
+}
+
 // Per-limb physical column layout. Every logical length-N vector occupies
 // TRACE_SPLIT physical columns of length N / TRACE_SPLIT, in half order. The
 // layout is: secret halves, then per active key per digit the error halves,
@@ -179,8 +201,9 @@ impl LimbColumnLayout {
             SuccinctSetupProofFamilyShape::PrivateVssShare => 1 + private_vss_randomness_columns,
             SuccinctSetupProofFamilyShape::VssShareLinkage => {
                 vss_public_item_columns
-                    + (vss_public_coefficient_columns + vss_public_item_columns)
-                        * crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT
+                    + vss_public_message_total_trit_claim_count_for_layouts(
+                        &vss_public_message_encoding_layouts,
+                    )
             }
             SuccinctSetupProofFamilyShape::SameSecretBridge => {
                 2 + same_secret_bridge_digit_vector_count + linkage_randomness_columns
@@ -436,9 +459,7 @@ impl LimbColumnLayout {
             // Opening randomness remains committed and ternary row-checked in
             // each proof limb, but it is not consumed downstream and does not
             // need a separate cross-field integer claim.
-            self.vss_public_item_columns
-                + self.vss_public_message_vector_count()
-                    * crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT
+            self.vss_public_item_columns + self.vss_public_message_total_trit_claim_count()
         } else if self.same_secret_bridge_active() {
             // Same-secret bridge claims the signed secret, the binary
             // negative indicator, every target-message digit, and the
@@ -522,6 +543,40 @@ impl LimbColumnLayout {
         self.vss_public_message_encoding_layouts[message_position]
             .digit_trit_count(digit_index)
             .expect("VSS digit is in the layout")
+    }
+
+    // The total number of VSS-public message trit consistency claims across every
+    // message. Each message digit contributes one claim per base-three trit, so a
+    // consistency claim commits a single ternary witness (bound two) rather than a
+    // whole digit (bound `3^trit_count - 1`); the narrower witness shrinks the
+    // cross-field linkage leakage window without changing which committed columns
+    // carry the value.
+    pub(crate) fn vss_public_message_total_trit_claim_count(&self) -> usize {
+        vss_public_message_total_trit_claim_count_for_layouts(
+            &self.vss_public_message_encoding_layouts,
+        )
+    }
+
+    // Resolve a flat trit consistency-claim index into the message, digit, and
+    // trit it commits. The iteration order (message-major, digit-major,
+    // trit-minor) is exactly the order the prover appends the trit claim vectors,
+    // so the verifier projects the matching committed trit column.
+    pub(crate) fn vss_public_message_trit_claim_at(
+        &self,
+        trit_claim_index: usize,
+    ) -> (usize, usize, usize) {
+        let mut remaining = trit_claim_index;
+        for message_position in 0..self.vss_public_message_vector_count() {
+            for digit_index in 0..crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT
+            {
+                let trit_count = self.vss_public_message_trit_count(message_position, digit_index);
+                if remaining < trit_count {
+                    return (message_position, digit_index, remaining);
+                }
+                remaining -= trit_count;
+            }
+        }
+        unreachable!("VSS trit claim index is within the total trit count")
     }
 
     pub(crate) fn vss_public_message_position_for_encoding_column(
@@ -699,18 +754,6 @@ impl LimbColumnLayout {
         let encoding_column = self.vss_public_message_encoding_layouts[message_position]
             .trit_encoding_column(digit_index, trit_index)
             .expect("VSS message trit is in the layout");
-        self.physical_vss_public_message(message_position, encoding_column, half)
-    }
-
-    pub(crate) fn physical_vss_public_message_digit(
-        &self,
-        message_position: usize,
-        digit_index: usize,
-        half: usize,
-    ) -> usize {
-        let encoding_column = self.vss_public_message_encoding_layouts[message_position]
-            .digit_encoding_column(digit_index)
-            .expect("VSS message digit is in the layout");
         self.physical_vss_public_message(message_position, encoding_column, half)
     }
 

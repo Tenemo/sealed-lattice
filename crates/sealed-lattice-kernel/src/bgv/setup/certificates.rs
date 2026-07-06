@@ -1,8 +1,6 @@
 mod evaluation_keys;
 
-use self::evaluation_keys::{
-    evaluation_key_streaming_commitment, public_rlwe_samples_by_basis,
-};
+use self::evaluation_keys::{evaluation_key_streaming_commitment, public_rlwe_samples_by_basis};
 use super::*;
 use crate::bgv::evaluator::records::target_layout_hash;
 use crate::hashing::derive_canonical_object_hash;

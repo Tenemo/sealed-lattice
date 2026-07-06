@@ -281,8 +281,13 @@ pub(in super::super) fn verify_key_fri<const LIMB_COUNT: usize>(
             // combination_at zips the weights against base+aux+quotient columns,
             // so the extra trailing weight is ignored here and used below for the
             // g degree-adjustment term.
-            let mut combined =
-                combination_at(parameters, base_values, aux_values, quotient_values, &weights);
+            let mut combined = combination_at(
+                parameters,
+                base_values,
+                aux_values,
+                quotient_values,
+                &weights,
+            );
             // g degree adjustment (sumcheck soundness): mirror the prover's
             // shifted g term (x^{trace_size + 1} g), reconstructed from the
             // opened g value, so the combined FRI enforces deg(g) <=

@@ -629,7 +629,11 @@ pub(in super::super) fn prove_key_fri<const LIMB_COUNT: usize>(
     shifted_g_coefficients.extend_from_slice(&quotient_coefficients[QUOTIENT_G]);
     let shifted_g_codeword =
         coset_evaluate_coefficients(&coset_domain, &offset, &shifted_g_coefficients);
-    accumulate(&mut combination, &weights[weight_index], &shifted_g_codeword);
+    accumulate(
+        &mut combination,
+        &weights[weight_index],
+        &shifted_g_codeword,
+    );
 
     let fri_commitment = fri_commit(
         parameters,

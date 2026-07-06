@@ -63,8 +63,7 @@ pub(super) fn consume_accepted_setup_handoff(
     let object = handoff
         .as_object()
         .ok_or_else(|| invalid_handoff("accepted setup handoff must be a JSON object"))?;
-    if handoff.get("objectType").and_then(Value::as_str)
-        != Some(ACCEPTED_SETUP_HANDOFF_OBJECT_TYPE)
+    if handoff.get("objectType").and_then(Value::as_str) != Some(ACCEPTED_SETUP_HANDOFF_OBJECT_TYPE)
     {
         return Err(invalid_handoff(
             "accepted setup handoff objectType must be CollectiveBgvAcceptedSetupHandoff",
@@ -88,9 +87,11 @@ pub(super) fn consume_accepted_setup_handoff(
         ));
     }
 
-    let direct_ballot_handoff = handoff.get("directBallotEncryptionHandoff").ok_or_else(|| {
-        invalid_handoff("accepted setup handoff is missing directBallotEncryptionHandoff")
-    })?;
+    let direct_ballot_handoff = handoff
+        .get("directBallotEncryptionHandoff")
+        .ok_or_else(|| {
+            invalid_handoff("accepted setup handoff is missing directBallotEncryptionHandoff")
+        })?;
 
     Ok(AcceptedSetupHandoffBinding {
         ceremony_id: required_string(handoff, "ceremonyId")?,

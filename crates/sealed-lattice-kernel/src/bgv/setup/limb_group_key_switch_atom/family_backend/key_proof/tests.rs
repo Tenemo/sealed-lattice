@@ -123,8 +123,7 @@ fn g_degree_adjustment_rejects_helper_above_the_sumcheck_bound() {
             &offset,
             &fri_parameters,
         )
-        .expect("fri structure")
-        else {
+        .expect("fri structure") else {
             return false;
         };
         let verifier_positions =

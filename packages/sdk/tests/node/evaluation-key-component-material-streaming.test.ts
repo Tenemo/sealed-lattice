@@ -70,22 +70,21 @@ let mockKernel: MockKernel;
 // prepareSetupPackageVerificationInputForKernel receives the kernel as a
 // parameter, so the streaming orchestration is exercised directly against a
 // mock kernel without loading the packaged WASM kernel.
-const { prepareSetupPackageVerificationInputForKernel } = await import(
-    '#packages/sdk/src/setup-verification-input.js'
-);
+const { prepareSetupPackageVerificationInputForKernel } =
+    await import('#packages/sdk/src/setup-verification-input.js');
 
 const makeMockKernel = (): MockKernel => ({
     beginEvaluationKeyShareComponentMaterialTransportStream: vi.fn(() => ({
-        operation:
-            'beginEvaluationKeyShareComponentMaterialTransportStream',
+        operation: 'beginEvaluationKeyShareComponentMaterialTransportStream',
     })),
-    absorbEvaluationKeyShareComponentMaterialTransportStreamChunk: vi.fn(() => ({
-        operation:
-            'absorbEvaluationKeyShareComponentMaterialTransportStreamChunk',
-    })),
+    absorbEvaluationKeyShareComponentMaterialTransportStreamChunk: vi.fn(
+        () => ({
+            operation:
+                'absorbEvaluationKeyShareComponentMaterialTransportStreamChunk',
+        }),
+    ),
     finishEvaluationKeyShareComponentMaterialTransportStream: vi.fn(() => ({
-        operation:
-            'finishEvaluationKeyShareComponentMaterialTransportStream',
+        operation: 'finishEvaluationKeyShareComponentMaterialTransportStream',
     })),
     verifyCollectiveBgvSetup: vi.fn((input: JsonRecord) => ({
         isValid: false,
@@ -101,7 +100,7 @@ const prepare = (input: JsonRecord): JsonRecord =>
         // the streaming orchestration only reads the transported material and
         // the chunk streams, so a structural object is sufficient for the test.
         input as never,
-    ) as unknown as JsonRecord;
+    );
 
 describe('evaluation-key component material streaming before terminal verification', () => {
     beforeEach(() => {
@@ -160,7 +159,8 @@ describe('evaluation-key component material streaming before terminal verificati
 
         // Absorb must forward the exact chunk bytes in ascending index order.
         const absorbCalls =
-            mockKernel.absorbEvaluationKeyShareComponentMaterialTransportStreamChunk
+            mockKernel
+                .absorbEvaluationKeyShareComponentMaterialTransportStreamChunk
                 .mock.calls;
         expect(absorbCalls).toContainEqual([
             expect.objectContaining({ chunkIndex: 0, bytesHex: 'aabb' }),

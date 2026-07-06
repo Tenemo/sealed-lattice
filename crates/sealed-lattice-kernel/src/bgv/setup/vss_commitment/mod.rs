@@ -13,6 +13,11 @@ pub(crate) const VSS_PUBLIC_MESSAGE_DIGIT_COUNT: usize = 2;
 #[cfg(test)]
 pub(crate) const VSS_PUBLIC_MESSAGE_BASE_DIGIT_TRIT_COUNT: usize = 17;
 pub(crate) const VSS_PUBLIC_MESSAGE_DIGIT_BASE: u64 = 129_140_163;
+// The decoder splits each digit into base-three trits; the digit base above is
+// this trit base raised to the base-digit trit count (3^17 = 129_140_163). A
+// single trit therefore ranges over {0, 1, 2}, which is the witness bound the
+// trit-granular share-linkage consistency claims publish.
+pub(crate) const VSS_PUBLIC_MESSAGE_TRIT_BASE: u64 = 3;
 pub(crate) const VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT: usize = 2;
 pub(in crate::bgv::setup) const VSS_PUBLIC_RANDOMNESS_PROJECTION_WEIGHT: usize = 32;
 pub(in crate::bgv::setup) const VSS_PUBLIC_COMMITMENT_MODULUS_LIMB_INDICES: [usize; 3] = [0, 1, 2];

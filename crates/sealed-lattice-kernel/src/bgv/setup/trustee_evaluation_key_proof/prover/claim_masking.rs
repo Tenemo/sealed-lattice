@@ -202,6 +202,51 @@ fn append_vss_public_digit_vectors(digit_vectors: &mut Vec<Vec<i64>>, message_ve
     digit_vectors.extend(vectors);
 }
 
+// Append the base-three trit decomposition of every message digit as separate
+// consistency-claim vectors. Where `append_vss_public_digit_vectors` binds a
+// whole digit (witness bound `3^trit_count - 1`) across commitment fields, this
+// binds each individual trit (witness bound two). The trit is the exact value
+// the committed decoder column already carries, so the cross-field claim window
+// shrinks from the digit range to a single ternary coefficient without changing
+// the committed trace. The message modulus selects the per-message trit counts,
+// matching the verifier's `physical_vss_public_message_trit` projection, and the
+// emission order (digit-major, trit-minor) matches
+// `vss_public_message_trit_claim_at`.
+fn append_vss_public_trit_vectors(
+    trit_vectors: &mut Vec<Vec<i64>>,
+    message_vector: &[i64],
+    message_modulus: u64,
+) {
+    let encoding_layout =
+        crate::bgv::setup::vss_commitment::vss_public_message_encoding_layout(message_modulus)
+            .expect("VSS message modulus fits the encoding layout");
+    for digit_index in 0..crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT {
+        let trit_count = encoding_layout
+            .digit_trit_count(digit_index)
+            .expect("VSS digit is in the encoding layout");
+        let mut vectors = (0..trit_count)
+            .map(|_| Vec::with_capacity(message_vector.len()))
+            .collect::<Vec<_>>();
+        for coefficient in message_vector {
+            let unsigned_coefficient = u64::try_from(*coefficient)
+                .expect("VSS message coefficient is non-negative after validation");
+            let digits =
+                crate::bgv::setup::vss_commitment::vss_public_message_digits(unsigned_coefficient)
+                    .expect("VSS message coefficient fits the digit layout");
+            let trits =
+                crate::bgv::setup::vss_commitment::vss_public_message_digit_trits_for_count(
+                    digits[digit_index],
+                    trit_count,
+                )
+                .expect("VSS message digit fits the selected trit count");
+            for (trit_index, trit) in trits.iter().enumerate() {
+                vectors[trit_index].push(i64::try_from(*trit).expect("VSS message trit fits i64"));
+            }
+        }
+        trit_vectors.extend(vectors);
+    }
+}
+
 // The shared global claim integers: for every statement-global witness
 // vector and consistency repetition, the clear integer combination of the
 // signed witness plus the shared smudging mask. Every limb publishes the
@@ -230,12 +275,13 @@ pub(super) fn global_claim_integers(
             }
         }
     } else if let Some(vss_share_linkage) = &statement.vss_share_linkage {
-        // Share-linkage claims each lifted-carry vector followed by
-        // every message digit vector. Opening randomness stays
-        // committed, ternary row-checked, and consumed by the opening lincheck,
-        // but it does not carry a separate cross-field integer-equality claim.
-        // This order must match consistency_vector_count and the share-linkage
-        // branch of batched_sumcheck_value ([carries..., message_digits...]).
+        // Share-linkage claims each lifted-carry vector followed by every message
+        // trit vector (each digit split into its base-three trits). Opening
+        // randomness stays committed, ternary row-checked, and consumed by the
+        // opening lincheck, but it does not carry a separate cross-field
+        // integer-equality claim. This order must match consistency_vector_count
+        // and the share-linkage branch of batched_sumcheck_value
+        // ([carries..., message_trits...]).
         let base_ring_degree = statement.ring_degree;
         let item_count = vss_share_linkage.item_count();
         let coefficient_slot_indices_by_item =
@@ -271,22 +317,38 @@ pub(super) fn global_claim_integers(
             owned_vss_public_claim_vectors.push((*carry_witnesses).to_vec());
         }
 
+        // The per-message moduli in message order ([coefficient slots...,
+        // recipient items...]) select each message's trit counts, matching the
+        // per-message encoding layouts the verifier projects through
+        // physical_vss_public_message_trit.
+        let packed_message_bounds = vss_share_linkage.packed_message_bounds();
+        assert_eq!(
+            packed_message_bounds.len(),
+            vss_share_linkage.unique_coefficient_witness_slot_count() + item_count,
+            "VSS packed message bounds cover every coefficient slot and recipient item"
+        );
+        let mut message_position = 0_usize;
+
         for coefficient_slot_index in 0..vss_share_linkage.unique_coefficient_witness_slot_count() {
             let coefficient_messages =
                 &witness.vss_public_coefficient_messages_by_shamir_index[coefficient_slot_index];
             validate_vss_public_vector(coefficient_messages);
-            append_vss_public_digit_vectors(
+            append_vss_public_trit_vectors(
                 &mut owned_vss_public_claim_vectors,
                 coefficient_messages,
+                packed_message_bounds[message_position],
             );
+            message_position += 1;
         }
 
         for recipient_messages in &recipient_messages_by_item {
             validate_vss_public_vector(recipient_messages);
-            append_vss_public_digit_vectors(
+            append_vss_public_trit_vectors(
                 &mut owned_vss_public_claim_vectors,
                 recipient_messages,
+                packed_message_bounds[message_position],
             );
+            message_position += 1;
         }
 
         for claim_vector in &owned_vss_public_claim_vectors {

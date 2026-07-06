@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn soundness_report_meets_the_conjectured_classical_policy_floor() {
-    // The soundness gate is essential: 128-bit effective soundness depends on the
+    // The soundness gate is required: 128-bit effective soundness depends on the
     // pre-union margin and a named, unproven FRI conjecture. The recomputed
     // numeric soundness bound, not self-attested verdict flags, is what the
     // policy enforces.

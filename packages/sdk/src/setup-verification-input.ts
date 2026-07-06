@@ -208,10 +208,9 @@ const streamEvaluationKeyShareComponentMaterial = (
     );
 
     chunkStreams.forEach((chunkStream, streamIndex) => {
-        const componentMaterialReference =
-            componentMaterialReferenceByRoot.get(
-                chunkStream.keySwitchComponentMaterialRoot,
-            );
+        const componentMaterialReference = componentMaterialReferenceByRoot.get(
+            chunkStream.keySwitchComponentMaterialRoot,
+        );
         if (componentMaterialReference === undefined) {
             throw new Error(
                 'evaluationKeyShareComponentMaterialChunkStreams references a keySwitchComponentMaterialRoot without a transported component material reference.',

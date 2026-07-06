@@ -390,7 +390,7 @@ fn private_vss_succinct_proof_accepts_one_polynomial_across_threshold_recipients
 
 // The Shamir coefficient message columns carry no per-field consistency
 // assertion, so the commitment opening lincheck is the message column's only
-// binding. This test confirms that binding is essential: a coefficient message
+// binding. This test confirms that binding is required: a coefficient message
 // that disagrees with what its commitment opens to cannot be packaged into an
 // accepted proof. The tamper keeps the recipient-share Shamir relation satisfied
 // (so the witness-relation self-check and shape checks pass) and leaves the

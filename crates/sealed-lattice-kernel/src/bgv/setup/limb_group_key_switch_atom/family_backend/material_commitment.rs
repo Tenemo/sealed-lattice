@@ -307,9 +307,7 @@ mod tests {
                             "data primes must exceed the retired 23-bit half boundary"
                         );
                         (0..degree)
-                            .map(|coefficient_index| {
-                                prime - 1 - (coefficient_index as u64 % 4)
-                            })
+                            .map(|coefficient_index| prime - 1 - (coefficient_index as u64 % 4))
                             .collect()
                     })
                     .collect()
