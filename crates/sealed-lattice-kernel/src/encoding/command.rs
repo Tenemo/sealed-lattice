@@ -28,6 +28,9 @@ enum TranscriptCoreCommand {
     BeginSetupProofMaterialTransportStream,
     AbsorbSetupProofMaterialTransportStreamChunk,
     FinishSetupProofMaterialTransportStream,
+    BeginEvaluationKeyShareComponentMaterialTransportStream,
+    AbsorbEvaluationKeyShareComponentMaterialTransportStreamChunk,
+    FinishEvaluationKeyShareComponentMaterialTransportStream,
     VerifyLocalTrusteeSetupState,
     GenerateBgvEvaluationKeyMaterial,
     EncodeBgvBatchPlaintext,
@@ -234,6 +237,9 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
         | TranscriptCoreCommand::BeginSetupProofMaterialTransportStream
         | TranscriptCoreCommand::AbsorbSetupProofMaterialTransportStreamChunk
         | TranscriptCoreCommand::FinishSetupProofMaterialTransportStream
+        | TranscriptCoreCommand::BeginEvaluationKeyShareComponentMaterialTransportStream
+        | TranscriptCoreCommand::AbsorbEvaluationKeyShareComponentMaterialTransportStreamChunk
+        | TranscriptCoreCommand::FinishEvaluationKeyShareComponentMaterialTransportStream
         | TranscriptCoreCommand::VerifyLocalTrusteeSetupState
         | TranscriptCoreCommand::GenerateBgvEvaluationKeyMaterial
         | TranscriptCoreCommand::EncodeBgvBatchPlaintext
@@ -309,6 +315,21 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
         }
         TranscriptCoreCommand::FinishSetupProofMaterialTransportStream => {
             crate::bgv::commands::finish_setup_proof_material_transport_stream(request)
+        }
+        TranscriptCoreCommand::BeginEvaluationKeyShareComponentMaterialTransportStream => {
+            crate::bgv::commands::begin_evaluation_key_share_component_material_transport_stream(
+                request,
+            )
+        }
+        TranscriptCoreCommand::AbsorbEvaluationKeyShareComponentMaterialTransportStreamChunk => {
+            crate::bgv::commands::absorb_evaluation_key_share_component_material_transport_stream_chunk(
+                request,
+            )
+        }
+        TranscriptCoreCommand::FinishEvaluationKeyShareComponentMaterialTransportStream => {
+            crate::bgv::commands::finish_evaluation_key_share_component_material_transport_stream(
+                request,
+            )
         }
         TranscriptCoreCommand::VerifyLocalTrusteeSetupState => {
             crate::bgv::commands::verify_local_trustee_setup_state(request)

@@ -3,6 +3,7 @@ mod aggregation;
 mod command;
 mod encryption;
 mod evaluator_replay;
+mod layout;
 mod proof_summary;
 mod proof_transport;
 mod randomness;

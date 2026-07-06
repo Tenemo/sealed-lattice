@@ -13,12 +13,15 @@ use crate::{
             plaintext_root, serialize_bgv_object,
         },
         setup::{
+            absorb_evaluation_key_share_component_material_transport_stream_chunk_request,
             absorb_setup_proof_material_transport_stream_chunk_request,
+            begin_evaluation_key_share_component_material_transport_stream_request,
             begin_setup_proof_material_transport_stream_request,
             compute_setup_commitment_from_opening_request,
             compute_vss_public_commitment_from_opening_request,
             derive_collective_bgv_setup_public_derivations_from_request,
             describe_collective_bgv_setup_parameters,
+            finish_evaluation_key_share_component_material_transport_stream_request,
             finish_setup_proof_material_transport_stream_request,
             generate_passive_setup_package_from_request,
             generate_passive_setup_public_evaluation_key_material_from_request,
@@ -164,6 +167,24 @@ pub(crate) fn finish_setup_proof_material_transport_stream(
     request: &Value,
 ) -> CanonicalResult<Value> {
     finish_setup_proof_material_transport_stream_request(request)
+}
+
+pub(crate) fn begin_evaluation_key_share_component_material_transport_stream(
+    request: &Value,
+) -> CanonicalResult<Value> {
+    begin_evaluation_key_share_component_material_transport_stream_request(request)
+}
+
+pub(crate) fn absorb_evaluation_key_share_component_material_transport_stream_chunk(
+    request: &Value,
+) -> CanonicalResult<Value> {
+    absorb_evaluation_key_share_component_material_transport_stream_chunk_request(request)
+}
+
+pub(crate) fn finish_evaluation_key_share_component_material_transport_stream(
+    request: &Value,
+) -> CanonicalResult<Value> {
+    finish_evaluation_key_share_component_material_transport_stream_request(request)
 }
 
 pub(crate) fn verify_local_trustee_setup_state(request: &Value) -> CanonicalResult<Value> {

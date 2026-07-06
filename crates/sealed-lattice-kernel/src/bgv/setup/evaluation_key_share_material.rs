@@ -6,6 +6,11 @@
 mod component_material;
 
 pub(super) use self::component_material::component_b_vectors_from_record;
+pub(crate) use self::component_material::{
+    absorb_evaluation_key_share_component_material_transport_stream_chunk_request,
+    begin_evaluation_key_share_component_material_transport_stream_request,
+    finish_evaluation_key_share_component_material_transport_stream_request,
+};
 #[cfg(test)]
 pub(in crate::bgv::setup) use self::component_material::{
     evaluation_key_share_component_vector_hash, evaluation_key_share_component_vector_root,
