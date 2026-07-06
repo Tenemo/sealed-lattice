@@ -129,6 +129,34 @@ pub(in crate::bgv::setup) fn verify_terminal_setup_transport_policy(
     if let Some(response) = verify_terminal_vss_material_handle_policy(request)? {
         return Ok(Some(response));
     }
+    if let Some(response) = verify_terminal_key_switch_material_handle_policy(request)? {
+        return Ok(Some(response));
+    }
+
+    Ok(None)
+}
+
+// The terminal accepted setup must not carry the raw key-switch component
+// material inline in the package: the material streams through the file-backed
+// evaluation-key component material transport and the accepted-setup verifier
+// reads it transiently from the stream-verified handle. Any inline `chunks`
+// array on a transported component material is a raw embedded store and is
+// refused, mirroring `verify_terminal_vss_material_handle_policy`.
+fn verify_terminal_key_switch_material_handle_policy(
+    request: &Value,
+) -> CanonicalResult<Option<Value>> {
+    let Some(material_set) = request.get("transportedEvaluationKeyShareComponentMaterial") else {
+        return Ok(None);
+    };
+    for component_material in array_value(material_set, "componentMaterials")? {
+        if component_material.get("chunks").is_some() {
+            return Ok(Some(terminal_transport_policy_refusal(
+                "terminalKeySwitchMaterialHandleRequired",
+                "terminal accepted setup requires a chunkless key-switch component material reference plus a stream-verified material handle",
+                "transportedEvaluationKeyShareComponentMaterial.componentMaterials.chunks",
+            )?));
+        }
+    }
 
     Ok(None)
 }

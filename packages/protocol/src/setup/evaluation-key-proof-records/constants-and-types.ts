@@ -475,6 +475,23 @@ export type TransportedEvaluationKeyShareComponentMaterialSet = Readonly<
     }
 >;
 
+export type EvaluationKeyShareComponentMaterialChunk = Readonly<{
+    readonly chunkIndex: number;
+    readonly bytesHex: string;
+}>;
+
+// The raw chunk bytes for one transported evaluation-key component material,
+// exposed out of band so a caller can stream them through the file-backed
+// component material transport before the terminal setup package verification.
+// The terminal accepted-setup verifier refuses an inline `chunks` array on the
+// transported component material, so the manifest reference and its bytes are
+// carried separately, keyed by keySwitchComponentMaterialRoot.
+export type EvaluationKeyShareComponentMaterialChunkStream = Readonly<{
+    readonly keySwitchComponentMaterialRoot: ProtocolHash;
+    readonly proofFamily: EvaluationKeyShareProofFamily;
+    readonly chunks: readonly EvaluationKeyShareComponentMaterialChunk[];
+}>;
+
 export type TransportedPublicEvaluationKeyMaterial = Readonly<
     JsonRecord & {
         readonly objectType: typeof publicEvaluationKeyMaterialTransportObjectType;
@@ -519,6 +536,7 @@ export type BinaryChunkedEvaluationKeyShareMaterialTransport = Readonly<{
     readonly relinearizationRoundTwoContributions: readonly RelinearizationRoundTwoContribution[];
     readonly galoisKeyShareBatchContributions: readonly GaloisKeyShareBatchContribution[];
     readonly transportedEvaluationKeyShareComponentMaterial: TransportedEvaluationKeyShareComponentMaterialSet;
+    readonly evaluationKeyShareComponentMaterialChunkStreams: readonly EvaluationKeyShareComponentMaterialChunkStream[];
 }>;
 
 export type EvaluationKeyShareMaterialTransportInput = Readonly<{
@@ -562,6 +580,11 @@ export type TrusteeEvaluationKeyProofsInput = EvaluationKeyProofCommonInput &
         readonly sameSecretBridgeAnchors: readonly TrusteeSameSecretBridgeAnchorInput[];
         readonly trusteeEvaluationKeyProofGenerator: TrusteeEvaluationKeyProofGenerator;
         readonly transportedEvaluationKeyShareComponentMaterial?: TransportedEvaluationKeyShareComponentMaterialSet;
+        // Raw chunk bytes for the transported evaluation-key component material,
+        // supplied out of band when the transported component material is a
+        // chunkless manifest reference so the prover can reconstruct the binary
+        // component vectors from the parallel chunk streams.
+        readonly evaluationKeyShareComponentMaterialChunkStreams?: readonly EvaluationKeyShareComponentMaterialChunkStream[];
     }>;
 
 export type PublicEvaluationKeySetInput = EvaluationKeyProofCommonInput &

@@ -183,6 +183,69 @@ fn terminal_transport_policy_refuses_raw_vss_chunk_sidecar() {
 }
 
 #[test]
+fn terminal_transport_policy_refuses_raw_key_switch_component_chunk_sidecar() {
+    let package = terminal_transport_policy_package_with_material_encodings(
+        "binary-chunked-full-public-setup-commitment-values",
+        PUBLIC_KEY_SHARE_MATERIAL_TRANSPORT_ENCODING,
+        SETUP_PROOF_MATERIAL_ENCODING,
+        EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
+    );
+    let request = serde_json::json!({
+        "transportedVssCoefficientCommitmentMaterial": {
+            "objectType": "SetupTransportedVssCoefficientCommitmentMaterial",
+            "objectVersion": 1,
+            "binaryFormat": "sealed-lattice-vss-coefficient-commitment-material-binary-v1",
+            "chunkSizeBytes": 1_048_576,
+            "chunkCount": 1,
+            "totalByteLength": 64,
+            "fullObjectHash": valid_hash('5'),
+            "chunkHashes": [valid_hash('6')],
+            "chunkRoot": valid_hash('7'),
+        },
+        "verifiedVssCoefficientCommitmentMaterial": {
+            "objectType": "VerifiedVssCoefficientCommitmentMaterial",
+            "objectVersion": 1,
+            "verifiedMaterialId": "terminal-policy-test-material",
+        },
+        "transportedEvaluationKeyShareComponentMaterial": {
+            "objectType": "SetupTransportedEvaluationKeyShareComponentMaterialSet",
+            "objectVersion": 1,
+            "componentMaterials": [
+                {
+                    "objectType": "SetupTransportedEvaluationKeyShareComponentMaterial",
+                    "objectVersion": 1,
+                    "proofFamily": "relinearization-key-share",
+                    "keySwitchMaterialEncoding": EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
+                    "keySwitchComponentMaterialRoot": valid_hash('8'),
+                    "chunkSizeBytes": 1_048_576,
+                    "chunkCount": 1,
+                    "totalByteLength": 64,
+                    "fullObjectHash": valid_hash('9'),
+                    "chunkRoot": valid_hash('a'),
+                    "chunkHashes": [valid_hash('b')],
+                    "chunks": [
+                        {
+                            "chunkIndex": 0,
+                            "bytesHex": "00",
+                        }
+                    ],
+                }
+            ],
+        },
+    });
+
+    let response = verify_terminal_setup_transport_policy(&package, &request)
+        .expect("terminal transport policy")
+        .expect("raw key-switch component chunk sidecar refusal");
+
+    assert_eq!(response["isValid"], false);
+    assert_eq!(
+        response["refusedObjects"][0]["reasonCode"],
+        "terminalKeySwitchMaterialHandleRequired"
+    );
+}
+
+#[test]
 fn terminal_transport_policy_reports_missing_stream_verified_vss_handle() {
     let package = terminal_transport_policy_package_with_material_encodings(
         "binary-chunked-full-public-setup-commitment-values",

@@ -1089,6 +1089,19 @@ describe('createBinaryChunkedEvaluationKeyShareMaterialTransport', () => {
                 'binary-chunked-key-switch-component-vectors',
             );
         }
+        // Each transported component material is a chunkless manifest
+        // reference: the raw chunk bytes travel out of band in the parallel
+        // chunk streams so the terminal accepted-setup verifier can stream them
+        // through the file-backed component material transport.
+        const chunkStreamByRoot = new Map(
+            transport.evaluationKeyShareComponentMaterialChunkStreams.map(
+                (chunkStream) => [
+                    chunkStream.keySwitchComponentMaterialRoot,
+                    chunkStream,
+                ],
+            ),
+        );
+        expect(chunkStreamByRoot.size).toBe(expectedComponentMaterialCount);
         for (const componentMaterial of transport
             .transportedEvaluationKeyShareComponentMaterial
             .componentMaterials) {
@@ -1099,12 +1112,20 @@ describe('createBinaryChunkedEvaluationKeyShareMaterialTransport', () => {
             expect(material.digitCount).toBe(digitCount);
             expect(material.rnsLimbCount).toBe(digitCount);
             expect(material.ringDegree).toBe(ringDegree);
-            const chunks = material.chunks as readonly {
-                chunkIndex: number;
-                bytesHex: string;
-            }[];
-            expect(chunks.length).toBeGreaterThan(0);
-            expect(chunks[0].bytesHex.startsWith('534c454b434d5631')).toBe(
+            expect(
+                Object.prototype.hasOwnProperty.call(material, 'chunks'),
+            ).toBe(false);
+            const keySwitchComponentMaterialRoot =
+                material.keySwitchComponentMaterialRoot as string;
+            const chunkStream = chunkStreamByRoot.get(
+                keySwitchComponentMaterialRoot,
+            );
+            expect(chunkStream).toBeDefined();
+            expect(chunkStream?.proofFamily).toBe(material.proofFamily);
+            const chunks = chunkStream?.chunks ?? [];
+            expect(chunks.length).toBe(material.chunkCount);
+            expect(chunks[0]?.chunkIndex).toBe(0);
+            expect(chunks[0]?.bytesHex.startsWith('534c454b434d5631')).toBe(
                 true,
             );
         }
@@ -1152,13 +1173,16 @@ describe('createBinaryChunkedEvaluationKeyShareMaterialTransport', () => {
             trusteeEvaluationKeyProofGenerator: stubGenerator(capturedInputs),
             transportedEvaluationKeyShareComponentMaterial:
                 transport.transportedEvaluationKeyShareComponentMaterial,
+            evaluationKeyShareComponentMaterialChunkStreams:
+                transport.evaluationKeyShareComponentMaterialChunkStreams,
         });
 
         expect(trusteeEvaluationKeyProofs.proofRecords).toHaveLength(
             participantCount,
         );
-        // The decoded chunked material must reproduce the same component
-        // coefficients the embedded path supplies.
+        // The decoded chunk-streamed material must reproduce the same component
+        // coefficients the embedded path supplies, even though the transported
+        // component material now carries only the chunkless manifest reference.
         expect(capturedInputs[0].keys[0].componentBByDigit[0][0]).toEqual(
             componentCoefficients('round-one-0', 0, 0),
         );

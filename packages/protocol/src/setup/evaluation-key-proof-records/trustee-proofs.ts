@@ -8,6 +8,8 @@ import {
 } from '../setup-proof-material-transport.js';
 
 import {
+    type EvaluationKeyShareComponentMaterialChunk,
+    type EvaluationKeyShareComponentMaterialChunkStream,
     type EvaluationKeyShareProofFamily,
     type JsonRecord,
     type RelinearizationKeyShareRounds,
@@ -47,15 +49,79 @@ import {
     validateCommonInput,
 } from './share-records.js';
 
+// The ordered chunk hex records for one transported component material: either
+// embedded inline on the component material (the additive inline path) or
+// carried out of band in the parallel chunk streams keyed by
+// keySwitchComponentMaterialRoot (the streamed path the terminal verify uses).
+const componentMaterialChunkRecords = (
+    componentMaterial: JsonRecord,
+    keySwitchComponentMaterialRoot: string,
+    componentMaterialChunkStreams:
+        | readonly EvaluationKeyShareComponentMaterialChunkStream[]
+        | undefined,
+    objectPath: string,
+): readonly EvaluationKeyShareComponentMaterialChunk[] => {
+    const inlineChunks = componentMaterial.chunks;
+    if (inlineChunks !== undefined) {
+        if (!Array.isArray(inlineChunks) || inlineChunks.length === 0) {
+            throw new Error(
+                `${objectPath} transported component material chunks must be a non-empty array.`,
+            );
+        }
+
+        return inlineChunks.map((chunkValue, chunkIndex) => {
+            const chunk = assertJsonRecord(
+                chunkValue,
+                `componentMaterial.chunks.${String(chunkIndex)}`,
+            );
+
+            return {
+                chunkIndex: assertNonNegativeSafeInteger(
+                    chunk.chunkIndex,
+                    `componentMaterial.chunks.${String(chunkIndex)}.chunkIndex`,
+                ),
+                bytesHex: stringRecordField(
+                    chunk,
+                    'bytesHex',
+                    `componentMaterial.chunks.${String(chunkIndex)}`,
+                ),
+            };
+        });
+    }
+    const matchingChunkStreams = (componentMaterialChunkStreams ?? []).filter(
+        (chunkStream) =>
+            chunkStream.keySwitchComponentMaterialRoot ===
+            keySwitchComponentMaterialRoot,
+    );
+    if (matchingChunkStreams.length !== 1) {
+        throw new Error(
+            `${objectPath} transported component material has no inline chunks and must match exactly one component material chunk stream.`,
+        );
+    }
+    const chunks = matchingChunkStreams[0].chunks;
+    if (chunks.length === 0) {
+        throw new Error(
+            `${objectPath} transported component material chunk stream must be a non-empty array.`,
+        );
+    }
+
+    return chunks;
+};
+
 // Decode one record's full public component-b material, mirroring the kernel
 // decoder: from embedded canonical component vector entries, or from the
-// binary chunked transport referenced by keySwitchComponentMaterialRoot.
+// binary chunked transport referenced by keySwitchComponentMaterialRoot. The
+// binary transport bytes come from the component material's inline chunks when
+// present, otherwise from the parallel component material chunk streams.
 const componentBVectorsFromMaterial = (
     proofFamily: EvaluationKeyShareProofFamily,
     record: JsonRecord,
     qSharePrimes: readonly number[],
     transportedComponentMaterial:
         | TransportedEvaluationKeyShareComponentMaterialSet
+        | undefined,
+    componentMaterialChunkStreams:
+        | readonly EvaluationKeyShareComponentMaterialChunkStream[]
         | undefined,
     objectPath: string,
 ): number[][][] => {
@@ -210,31 +276,20 @@ const componentBVectorsFromMaterial = (
         matchingMaterials[0],
         'componentMaterial',
     );
-    const chunksValue = componentMaterial.chunks;
-    if (!Array.isArray(chunksValue) || chunksValue.length === 0) {
-        throw new Error(
-            `${objectPath} transported component material chunks must be a non-empty array.`,
-        );
-    }
-    const materialBytesParts = chunksValue.map((chunkValue, chunkIndex) => {
-        const chunk = assertJsonRecord(
-            chunkValue,
-            `componentMaterial.chunks.${String(chunkIndex)}`,
-        );
+    const chunkRecords = componentMaterialChunkRecords(
+        componentMaterial,
+        expectedMaterialRoot,
+        componentMaterialChunkStreams,
+        objectPath,
+    );
+    const materialBytesParts = chunkRecords.map((chunk, chunkIndex) => {
         if (chunk.chunkIndex !== chunkIndex) {
             throw new Error(
                 'transported component material chunks must be in ascending chunk-index order.',
             );
         }
 
-        return bytesFromHex(
-            stringRecordField(
-                chunk,
-                'bytesHex',
-                `componentMaterial.chunks.${String(chunkIndex)}`,
-            ),
-            'componentMaterial.chunks.bytesHex',
-        );
+        return bytesFromHex(chunk.bytesHex, 'componentMaterial.chunks.bytesHex');
     });
     const totalByteLength = materialBytesParts.reduce(
         (byteLength, part) => byteLength + part.byteLength,
@@ -371,6 +426,9 @@ const roundOnePublicAggregateDiagonals = (
     transportedComponentMaterial:
         | TransportedEvaluationKeyShareComponentMaterialSet
         | undefined,
+    componentMaterialChunkStreams:
+        | readonly EvaluationKeyShareComponentMaterialChunkStream[]
+        | undefined,
 ): ReadonlyMap<number, number[][]> => {
     const aggregatesByLevel = new Map<
         number,
@@ -389,6 +447,7 @@ const roundOnePublicAggregateDiagonals = (
             recordFields,
             qSharePrimes,
             transportedComponentMaterial,
+            componentMaterialChunkStreams,
             'roundOneRecords',
         );
         const ringDegree = components[0]?.[0]?.length ?? 0;
@@ -545,6 +604,7 @@ export const createTrusteeEvaluationKeyProofs = (
         input.qSharePrimes,
         input.participantCount,
         input.transportedEvaluationKeyShareComponentMaterial,
+        input.evaluationKeyShareComponentMaterialChunkStreams,
     );
 
     const proofRecords = sameSecretProofReferences.map((proofReference) => {
@@ -606,6 +666,7 @@ export const createTrusteeEvaluationKeyProofs = (
                     record,
                     input.qSharePrimes,
                     input.transportedEvaluationKeyShareComponentMaterial,
+                    input.evaluationKeyShareComponentMaterialChunkStreams,
                     'roundOneRecords',
                 ),
             });
@@ -642,6 +703,7 @@ export const createTrusteeEvaluationKeyProofs = (
                     record,
                     input.qSharePrimes,
                     input.transportedEvaluationKeyShareComponentMaterial,
+                    input.evaluationKeyShareComponentMaterialChunkStreams,
                     'roundTwoRecords',
                 ),
                 roundOneAggregateDiagonal: aggregateDiagonal,
@@ -681,6 +743,7 @@ export const createTrusteeEvaluationKeyProofs = (
                     materialRecord,
                     input.qSharePrimes,
                     input.transportedEvaluationKeyShareComponentMaterial,
+                    input.evaluationKeyShareComponentMaterialChunkStreams,
                     'galoisKeyShareMaterialRecords',
                 ),
             });

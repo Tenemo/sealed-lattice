@@ -127,6 +127,8 @@ export type {
     BinaryChunkedEvaluationKeyShareMaterialTransport,
     BinaryChunkedPublicEvaluationKeyMaterialTransport,
     EvaluationKeyProofCommonInput,
+    EvaluationKeyShareComponentMaterialChunk,
+    EvaluationKeyShareComponentMaterialChunkStream,
     EvaluationKeyShareEmbeddedKeySwitchComponentMaterial,
     EvaluationKeyShareKeySwitchComponentMaterial,
     EvaluationKeyShareMaterial,

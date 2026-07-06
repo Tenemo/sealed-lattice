@@ -642,6 +642,49 @@ export type BgvSetupProofMaterialTransportStreamVerification = {
     readonly verifiedSetupProofMaterial: BgvVerifiedSetupProofMaterial;
 };
 
+export type BgvVerifiedEvaluationKeyShareComponentMaterial = Readonly<
+    BgvJsonRecord & {
+        readonly objectType: 'VerifiedEvaluationKeyShareComponentMaterial';
+        readonly verificationId: string;
+        readonly proofFamily: string;
+        readonly keySwitchComponentMaterialRoot: ProtocolHash;
+        readonly keySwitchMaterialEncoding: string;
+        readonly chunkSizeBytes: number;
+        readonly chunkCount: number;
+        readonly totalByteLength: number;
+        readonly fullObjectHash: ProtocolHash;
+        readonly chunkRoot: ProtocolHash;
+        readonly chunkHashes: readonly ProtocolHash[];
+    }
+>;
+
+export type BgvEvaluationKeyShareComponentMaterialTransportStreamBegin = {
+    readonly operation: 'beginEvaluationKeyShareComponentMaterialTransportStream';
+    readonly verificationId: string;
+    readonly proofFamily: string;
+    readonly keySwitchComponentMaterialRoot: ProtocolHash;
+    readonly keySwitchMaterialEncoding: string;
+    readonly transport: Readonly<Record<string, unknown>>;
+};
+
+export type BgvEvaluationKeyShareComponentMaterialTransportStreamChunkAbsorption =
+    {
+        readonly operation: 'absorbEvaluationKeyShareComponentMaterialTransportStreamChunk';
+        readonly absorbedChunkIndex: number;
+        readonly nextChunkIndex: number;
+        readonly observedTotalByteLength: number;
+    };
+
+export type BgvEvaluationKeyShareComponentMaterialTransportStreamVerification =
+    {
+        readonly operation: 'finishEvaluationKeyShareComponentMaterialTransportStream';
+        readonly verificationId: string;
+        readonly proofFamily: string;
+        readonly keySwitchComponentMaterialRoot: ProtocolHash;
+        readonly keySwitchMaterialEncoding: string;
+        readonly verifiedEvaluationKeyShareComponentMaterial: BgvVerifiedEvaluationKeyShareComponentMaterial;
+    };
+
 export type BgvLocalTrusteeSetupStateVerification = {
     readonly operation: 'verifyLocalTrusteeSetupState';
     readonly trusteeIdentity: string;

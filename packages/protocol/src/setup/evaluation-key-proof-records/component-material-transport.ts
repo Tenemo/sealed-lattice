@@ -3,6 +3,7 @@ import { setupProofTransportChunkSizeBytes } from '../setup-proof-material-trans
 
 import {
     type BinaryChunkedEvaluationKeyShareMaterialTransport,
+    type EvaluationKeyShareComponentMaterialChunkStream,
     type EvaluationKeyShareEmbeddedKeySwitchComponentMaterial,
     type EvaluationKeyShareMaterial,
     type EvaluationKeyShareMaterialTransportInput,
@@ -239,6 +240,7 @@ const transportEvaluationKeyShareComponentMaterial = (
 ): Readonly<{
     readonly shareMaterial: EvaluationKeyShareMaterial;
     readonly componentMaterial: JsonRecord;
+    readonly componentMaterialChunkStream: EvaluationKeyShareComponentMaterialChunkStream;
 }> => {
     const chunks = encodeEvaluationKeyShareComponentMaterial(
         workItem.proofFamily,
@@ -274,8 +276,18 @@ const transportEvaluationKeyShareComponentMaterial = (
         keySwitchComponentChunkHashes: transportHashes.chunkHashes,
     };
 
+    const componentMaterialChunks = chunks.map((chunk, chunkIndex) => ({
+        chunkIndex,
+        bytesHex: bytesToHex(chunk),
+    }));
+
     return {
         shareMaterial,
+        // The transported component material is a chunkless manifest reference:
+        // the terminal accepted-setup verifier refuses inline chunks and instead
+        // reads the material from the file-backed component material transport
+        // stream, so the raw bytes are carried out of band in the chunk stream
+        // below rather than embedded here.
         componentMaterial: {
             objectType: evaluationKeyShareComponentMaterialTransportObjectType,
             proofFamily: workItem.proofFamily,
@@ -298,10 +310,11 @@ const transportEvaluationKeyShareComponentMaterial = (
             fullObjectHash: transportHashes.fullObjectHash,
             chunkRoot: transportHashes.chunkRoot,
             chunkHashes: transportHashes.chunkHashes,
-            chunks: chunks.map((chunk, chunkIndex) => ({
-                chunkIndex,
-                bytesHex: bytesToHex(chunk),
-            })),
+        },
+        componentMaterialChunkStream: {
+            keySwitchComponentMaterialRoot,
+            proofFamily: workItem.proofFamily,
+            chunks: componentMaterialChunks,
         },
     };
 };
@@ -313,6 +326,8 @@ export const createBinaryChunkedEvaluationKeyShareMaterialTransport = (
         input.sameSecretProofReferences,
     );
     const componentMaterials: JsonRecord[] = [];
+    const componentMaterialChunkStreams: EvaluationKeyShareComponentMaterialChunkStream[] =
+        [];
     const componentRoots = new Set<string>();
     const transportShareMaterial = (
         workItem: EvaluationKeyShareTransportWorkItem,
@@ -331,6 +346,9 @@ export const createBinaryChunkedEvaluationKeyShareMaterialTransport = (
         }
         componentRoots.add(componentMaterialRoot);
         componentMaterials.push(componentTransport.componentMaterial);
+        componentMaterialChunkStreams.push(
+            componentTransport.componentMaterialChunkStream,
+        );
 
         return componentTransport.shareMaterial;
     };
@@ -416,5 +434,7 @@ export const createBinaryChunkedEvaluationKeyShareMaterialTransport = (
                 evaluationKeyShareComponentMaterialTransportSetObjectType,
             componentMaterials,
         },
+        evaluationKeyShareComponentMaterialChunkStreams:
+            componentMaterialChunkStreams,
     };
 };

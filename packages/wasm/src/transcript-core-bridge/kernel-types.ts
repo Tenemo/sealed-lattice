@@ -40,6 +40,9 @@ import type {
     BgvSetupProofMaterialTransportStreamBegin,
     BgvSetupProofMaterialTransportStreamChunkAbsorption,
     BgvSetupProofMaterialTransportStreamVerification,
+    BgvEvaluationKeyShareComponentMaterialTransportStreamBegin,
+    BgvEvaluationKeyShareComponentMaterialTransportStreamChunkAbsorption,
+    BgvEvaluationKeyShareComponentMaterialTransportStreamVerification,
     BgvTargetDecryptionReleaseSetupContext,
     BgvTargetDecryptionResultReleaseBegin,
     BgvTargetDecryptionResultReleaseShareAbsorption,
@@ -79,6 +82,10 @@ export type {
     BgvSetupProofMaterialTransportStreamBegin,
     BgvSetupProofMaterialTransportStreamChunkAbsorption,
     BgvSetupProofMaterialTransportStreamVerification,
+    BgvVerifiedEvaluationKeyShareComponentMaterial,
+    BgvEvaluationKeyShareComponentMaterialTransportStreamBegin,
+    BgvEvaluationKeyShareComponentMaterialTransportStreamChunkAbsorption,
+    BgvEvaluationKeyShareComponentMaterialTransportStreamVerification,
     BgvTargetDecryptionReleaseSetupContext,
     BgvTargetDecryptionResultReleaseBegin,
     BgvTargetDecryptionResultReleaseShareAbsorption,
@@ -267,6 +274,18 @@ export type TranscriptCoreKernel = {
     finishSetupProofMaterialTransportStream(input: {
         readonly verificationId: string;
     }): BgvSetupProofMaterialTransportStreamVerification;
+    beginEvaluationKeyShareComponentMaterialTransportStream(input: {
+        readonly verificationId: string;
+        readonly transportedEvaluationKeyShareComponentMaterial: unknown;
+    }): BgvEvaluationKeyShareComponentMaterialTransportStreamBegin;
+    absorbEvaluationKeyShareComponentMaterialTransportStreamChunk(input: {
+        readonly verificationId: string;
+        readonly chunkIndex: number;
+        readonly bytesHex: string;
+    }): BgvEvaluationKeyShareComponentMaterialTransportStreamChunkAbsorption;
+    finishEvaluationKeyShareComponentMaterialTransportStream(input: {
+        readonly verificationId: string;
+    }): BgvEvaluationKeyShareComponentMaterialTransportStreamVerification;
     deriveBgvTargetDecryptionResultReleaseSetupContext(input: {
         readonly setupPackage: unknown;
     }): BgvTargetDecryptionReleaseSetupContext;
@@ -520,6 +539,21 @@ type TranscriptCoreKernelCommand =
       }
     | {
           readonly command: 'FinishSetupProofMaterialTransportStream';
+          readonly verificationId: string;
+      }
+    | {
+          readonly command: 'BeginEvaluationKeyShareComponentMaterialTransportStream';
+          readonly verificationId: string;
+          readonly transportedEvaluationKeyShareComponentMaterial: unknown;
+      }
+    | {
+          readonly command: 'AbsorbEvaluationKeyShareComponentMaterialTransportStreamChunk';
+          readonly verificationId: string;
+          readonly chunkIndex: number;
+          readonly bytesHex: string;
+      }
+    | {
+          readonly command: 'FinishEvaluationKeyShareComponentMaterialTransportStream';
           readonly verificationId: string;
       }
     | {

@@ -21,6 +21,7 @@ import {
 } from '@sealed-lattice/protocol';
 import type {
     SetupTransportedPublicKeyShareMaterial as ProtocolSetupTransportedPublicKeyShareMaterial,
+    EvaluationKeyShareComponentMaterialChunkStream as ProtocolEvaluationKeyShareComponentMaterialChunkStream,
     VerifiedSetupProofMaterial as ProtocolVerifiedSetupProofMaterial,
     VerifiedSetupProofMaterialSet as ProtocolVerifiedSetupProofMaterialSet,
     TransportedSameSecretProofMaterialSet as ProtocolTransportedSameSecretProofMaterialSet,
@@ -251,6 +252,8 @@ export type TransportedEvaluationKeyShareProofMaterialSet =
     ProtocolTransportedEvaluationKeyShareProofMaterialSet;
 export type TransportedEvaluationKeyShareComponentMaterialSet =
     ProtocolTransportedEvaluationKeyShareComponentMaterialSet;
+export type EvaluationKeyShareComponentMaterialChunkStream =
+    ProtocolEvaluationKeyShareComponentMaterialChunkStream;
 export type TransportedPublicEvaluationKeyMaterialSet =
     ProtocolTransportedPublicEvaluationKeyMaterialSet;
 
@@ -266,6 +269,12 @@ export type VerifySetupPackageInput = Readonly<{
     readonly transportedSameSecretBridgeProofMaterial?: TransportedSameSecretBridgeProofMaterialSet;
     readonly transportedEvaluationKeyShareProofMaterial?: TransportedEvaluationKeyShareProofMaterialSet;
     readonly transportedEvaluationKeyShareComponentMaterial?: TransportedEvaluationKeyShareComponentMaterialSet;
+    // Raw chunk bytes for the transported evaluation-key component material,
+    // supplied out of band so the verifier streams each component through the
+    // file-backed component material transport before the terminal setup package
+    // verification. The terminal accepted-setup verifier refuses inline chunks on
+    // the transported component material itself, so the bytes travel here.
+    readonly evaluationKeyShareComponentMaterialChunkStreams?: readonly EvaluationKeyShareComponentMaterialChunkStream[];
     readonly transportedPublicEvaluationKeyMaterial?: TransportedPublicEvaluationKeyMaterialSet;
     readonly verifiedSetupProofMaterials?: VerifiedSetupProofMaterialSet;
 }>;

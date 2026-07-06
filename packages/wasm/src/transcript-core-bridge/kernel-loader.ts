@@ -30,6 +30,9 @@ import type {
     BgvSetupProofMaterialTransportStreamBegin,
     BgvSetupProofMaterialTransportStreamChunkAbsorption,
     BgvSetupProofMaterialTransportStreamVerification,
+    BgvEvaluationKeyShareComponentMaterialTransportStreamBegin,
+    BgvEvaluationKeyShareComponentMaterialTransportStreamChunkAbsorption,
+    BgvEvaluationKeyShareComponentMaterialTransportStreamVerification,
     BgvTargetDecryptionReleaseSetupContext,
     BgvTargetDecryptionResultReleaseBegin,
     BgvTargetDecryptionResultReleaseShareAbsorption,
@@ -507,6 +510,40 @@ export const createTranscriptCoreKernelLoader = (
                     executeCommand<BgvSetupProofMaterialTransportStreamVerification>(
                         {
                             command: 'FinishSetupProofMaterialTransportStream',
+                            verificationId: input.verificationId,
+                        },
+                    ),
+                beginEvaluationKeyShareComponentMaterialTransportStream: (
+                    input,
+                ): BgvEvaluationKeyShareComponentMaterialTransportStreamBegin =>
+                    executeCommand<BgvEvaluationKeyShareComponentMaterialTransportStreamBegin>(
+                        {
+                            command:
+                                'BeginEvaluationKeyShareComponentMaterialTransportStream',
+                            verificationId: input.verificationId,
+                            transportedEvaluationKeyShareComponentMaterial:
+                                input.transportedEvaluationKeyShareComponentMaterial,
+                        },
+                    ),
+                absorbEvaluationKeyShareComponentMaterialTransportStreamChunk: (
+                    input,
+                ): BgvEvaluationKeyShareComponentMaterialTransportStreamChunkAbsorption =>
+                    executeCommand<BgvEvaluationKeyShareComponentMaterialTransportStreamChunkAbsorption>(
+                        {
+                            command:
+                                'AbsorbEvaluationKeyShareComponentMaterialTransportStreamChunk',
+                            verificationId: input.verificationId,
+                            chunkIndex: input.chunkIndex,
+                            bytesHex: input.bytesHex,
+                        },
+                    ),
+                finishEvaluationKeyShareComponentMaterialTransportStream: (
+                    input,
+                ): BgvEvaluationKeyShareComponentMaterialTransportStreamVerification =>
+                    executeCommand<BgvEvaluationKeyShareComponentMaterialTransportStreamVerification>(
+                        {
+                            command:
+                                'FinishEvaluationKeyShareComponentMaterialTransportStream',
                             verificationId: input.verificationId,
                         },
                     ),
