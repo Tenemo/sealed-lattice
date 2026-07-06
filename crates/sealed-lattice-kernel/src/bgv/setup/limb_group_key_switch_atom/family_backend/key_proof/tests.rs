@@ -234,6 +234,8 @@ fn out_of_range_carry_is_rejected() {
         &secret,
         &digits,
         None,
+        &ZERO_STATEMENT_BINDING,
+        0,
         &proof_parameters,
         &mut salt_seed,
     );
@@ -247,6 +249,8 @@ fn out_of_range_carry_is_rejected() {
                 &KeySource::RoundOne,
                 &proof,
                 None,
+                &ZERO_STATEMENT_BINDING,
+                0,
                 &proof_parameters
             )
             .expect("verify"),
@@ -479,6 +483,8 @@ fn honest_galois_key_verifies() {
         &secret,
         &digits,
         None,
+        &ZERO_STATEMENT_BINDING,
+        0,
         &proof_parameters,
         &mut salt_seed,
     )
@@ -491,6 +497,8 @@ fn honest_galois_key_verifies() {
             &source,
             &proof,
             None,
+            &ZERO_STATEMENT_BINDING,
+            0,
             &proof_parameters
         )
         .expect("verify")
@@ -518,6 +526,8 @@ fn galois_proof_bound_to_its_element() {
         &secret,
         &digits,
         None,
+        &ZERO_STATEMENT_BINDING,
+        0,
         &proof_parameters,
         &mut salt_seed,
     )
@@ -531,6 +541,8 @@ fn galois_proof_bound_to_its_element() {
             &other_source,
             &proof,
             None,
+            &ZERO_STATEMENT_BINDING,
+            0,
             &proof_parameters
         )
         .expect("verify"),
@@ -572,6 +584,8 @@ fn honest_round_two_key_verifies() {
         &secret,
         &digits,
         None,
+        &ZERO_STATEMENT_BINDING,
+        0,
         &proof_parameters,
         &mut salt_seed,
     )
@@ -584,6 +598,8 @@ fn honest_round_two_key_verifies() {
             &source,
             &proof,
             None,
+            &ZERO_STATEMENT_BINDING,
+            0,
             &proof_parameters
         )
         .expect("verify")
@@ -689,6 +705,8 @@ fn linkage_binds_the_secret_to_a_live_commitment() {
         &secret,
         &digits,
         Some((&statement, &witness)),
+        &ZERO_STATEMENT_BINDING,
+        0,
         &proof_parameters,
         &mut salt_seed,
     )
@@ -701,6 +719,8 @@ fn linkage_binds_the_secret_to_a_live_commitment() {
             &KeySource::RoundOne,
             &proof,
             Some(&statement),
+            &ZERO_STATEMENT_BINDING,
+            0,
             &proof_parameters,
         )
         .expect("verify runs"),
@@ -722,6 +742,8 @@ fn linkage_binds_the_secret_to_a_live_commitment() {
         &secret,
         &digits,
         Some((&statement, &witness)),
+        &ZERO_STATEMENT_BINDING,
+        0,
         &masked_parameters,
         &mut masked_seed,
     )
@@ -734,6 +756,8 @@ fn linkage_binds_the_secret_to_a_live_commitment() {
             &KeySource::RoundOne,
             &masked_proof,
             Some(&statement),
+            &ZERO_STATEMENT_BINDING,
+            0,
             &masked_parameters,
         )
         .expect("verify runs"),
@@ -757,6 +781,8 @@ fn linkage_binds_the_secret_to_a_live_commitment() {
             &KeySource::RoundOne,
             &proof,
             Some(&tampered_statement),
+            &ZERO_STATEMENT_BINDING,
+            0,
             &proof_parameters,
         )
         .expect("verify runs"),
@@ -779,6 +805,8 @@ fn linkage_binds_the_secret_to_a_live_commitment() {
             &KeySource::RoundOne,
             &proof,
             Some(&other_seed_statement),
+            &ZERO_STATEMENT_BINDING,
+            0,
             &proof_parameters,
         )
         .expect("verify runs"),
@@ -795,6 +823,8 @@ fn linkage_binds_the_secret_to_a_live_commitment() {
             &KeySource::RoundOne,
             &proof,
             None,
+            &ZERO_STATEMENT_BINDING,
+            0,
             &proof_parameters,
         )
         .expect("verify runs"),
@@ -838,6 +868,8 @@ fn linkage_prover_refuses_witness_mismatches() {
                     randomness_by_column: &oracle.randomness,
                 },
             )),
+            &ZERO_STATEMENT_BINDING,
+            0,
             &proof_parameters,
             &mut salt_seed,
         )
@@ -865,6 +897,8 @@ fn linkage_prover_refuses_witness_mismatches() {
                     randomness_by_column: &wrong_randomness,
                 },
             )),
+            &ZERO_STATEMENT_BINDING,
+            0,
             &proof_parameters,
             &mut salt_seed,
         )
@@ -897,6 +931,8 @@ fn linkage_prover_refuses_witness_mismatches() {
                     randomness_by_column: &oracle.randomness,
                 },
             )),
+            &ZERO_STATEMENT_BINDING,
+            0,
             &proof_parameters,
             &mut salt_seed,
         )

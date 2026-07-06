@@ -16,8 +16,7 @@
 //! commitment, FRI, and masking are shared. The source is absorbed into the
 //! transcript, so a proof for one source (or one automorphism element) cannot
 //! be replayed as another. The construction, soundness, and masking are the
-//! same as `atom_proof` (which proves the single-digit case); this module is
-//! the multi-digit generalization.
+//! family's single construction (a one-digit key is the smallest case).
 
 #![allow(clippy::too_many_arguments)]
 
@@ -39,6 +38,11 @@ use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 
 const PROTOCOL_LABEL: &str = "sealed-lattice/setup/key-switch-atom/key-v1";
 const FRI_RATE_BLOWUP: usize = 4;
+
+// The all-zero statement binding the round-one test wrappers absorb; real
+// schedule proofs bind the statement hash and the key's schedule index.
+#[cfg(test)]
+pub(super) const ZERO_STATEMENT_BINDING: [u8; 64] = [0_u8; 64];
 
 pub(super) struct KeyFriProofParameters {
     pub(crate) query_count: usize,
@@ -246,8 +250,12 @@ mod prove;
 mod verify;
 
 pub(super) use linkage::{LinkageStatement, LinkageWitness};
-pub(super) use prove::{prove_key_fri, prove_round_one_key_fri};
-pub(super) use verify::{verify_key_fri, verify_round_one_key_fri};
+pub(super) use prove::prove_key_fri;
+#[cfg(test)]
+pub(super) use prove::prove_round_one_key_fri;
+pub(super) use verify::verify_key_fri;
+#[cfg(test)]
+pub(super) use verify::verify_round_one_key_fri;
 
 #[cfg(test)]
 mod tests;

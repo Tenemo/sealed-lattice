@@ -92,15 +92,11 @@ pub(crate) fn hash256(domain: &str, parts: &[&[u8]]) -> [u8; 32] {
 /// declares the part count up front, then either supplies whole framed parts or
 /// opens one part with its byte length and streams its bytes. Used by the atom
 /// family backend's streamed Merkle leaf hashing, where one leaf's row part is
-/// produced one committed column at a time. Test-gated alongside that backend;
-/// the gate comes off when the backend takes over the trustee evaluation-key
-/// command path.
-#[cfg(test)]
+/// produced one committed column at a time.
 pub(crate) struct StreamingHash256 {
     hasher: Shake256,
 }
 
-#[cfg(test)]
 impl StreamingHash256 {
     pub(crate) fn new(domain: &str, part_count: u64) -> Self {
         const HASH256_PREIMAGE_PREFIX: &[u8] = b"sealed.vote/v1/hash256";

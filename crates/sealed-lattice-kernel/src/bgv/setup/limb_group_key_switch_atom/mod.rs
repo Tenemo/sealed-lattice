@@ -32,9 +32,14 @@ pub(crate) mod limb_group_statement;
 pub(crate) mod negacyclic_transform;
 pub(crate) mod proof_field;
 pub(crate) mod wide_unsigned;
+#[cfg(test)]
 pub(crate) mod witness_encoding;
 
 pub(crate) mod family_backend;
 
+// The material-transport commitment trio (the ring commitment, its base-b
+// digit encoder, and the material commitment over transported components) is
+// the documented follow-up transport pass; it stays test-gated until the
+// aggregate-sum verification wires into accepted-setup.
 #[cfg(test)]
-mod witness_commitment;
+pub(crate) mod witness_commitment;

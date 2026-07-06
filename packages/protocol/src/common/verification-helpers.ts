@@ -70,8 +70,10 @@ export const defaultSignedRootContextHash = deriveCanonicalObjectHash({
 // Fixed 64-byte (512-bit) length every signed object root must declare.
 export const signedObjectRootByteLength = 64;
 
+export const protocolHashPattern = /^[0-9a-f]{128}$/u;
+
 export const isProtocolHashString = (value: unknown): value is string =>
-    typeof value === 'string' && /^[0-9a-f]{128}$/u.test(value);
+    typeof value === 'string' && protocolHashPattern.test(value);
 
 export const isRecord = (
     value: unknown,

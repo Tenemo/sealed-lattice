@@ -92,6 +92,11 @@ export const vendoredCryptoRuntimeModules = [
     'hashes.ts',
     'index.ts',
     'local-trustee-state-storage.ts',
+    'local-trustee-state-storage/aes-gcm.ts',
+    'local-trustee-state-storage/constants-and-types.ts',
+    'local-trustee-state-storage/envelope-validation.ts',
+    'local-trustee-state-storage/operations.ts',
+    'local-trustee-state-storage/validation.ts',
     'private-vss-mailbox.ts',
     'signatures.ts',
 ] as const;

@@ -151,6 +151,7 @@ pub(super) fn evaluate_polynomial_at<const LIMB_COUNT: usize>(
 // `trace_size` values on the trace subgroup) evaluated on the coset `offset *
 // K`, `K` the subgroup of order `trace_size * blowup`. Returns the coset
 // evaluations in `K`-transform order.
+#[cfg(test)]
 pub(super) fn coset_low_degree_extension<const LIMB_COUNT: usize>(
     trace_domain: &CyclicDomain<'_, LIMB_COUNT>,
     coset_domain: &CyclicDomain<'_, LIMB_COUNT>,

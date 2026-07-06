@@ -5,7 +5,10 @@ import {
 } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
-import { assertNonNegativeSafeInteger } from './common-fields.js';
+import {
+    assertNonNegativeSafeInteger,
+    protocolHashPattern,
+} from './common-fields.js';
 import {
     setupProofMaterialRecordTransportMetadataFields,
     setupProofMaterialRecordTransportFields,
@@ -278,7 +281,6 @@ const transportedSetupProofMaterialEncoding = 'binary-chunked-proof-bytes';
 const privateVssShareProofBytesHashDomain =
     'sealed-lattice/setup/private-vss-share/succinct-proof-bytes-v1';
 const lowercaseHexPattern = /^[0-9a-f]+$/u;
-const protocolHashPattern = /^[0-9a-f]{128}$/u;
 
 const validatePositiveSafeInteger = (
     value: number,

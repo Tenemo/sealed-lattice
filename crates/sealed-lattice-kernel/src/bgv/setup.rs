@@ -9,11 +9,10 @@ mod commitment;
 mod evaluation_key_share_material;
 mod input;
 mod key_material;
-// Test-only key-switch digit-atom machinery: the limb-group relation substrate
-// and the atom-family proof backend, exercised by their unit tests and the
-// ignored prover-cost benchmark until the trustee evaluation-key command path
-// is switched over to the backend.
-#[cfg(test)]
+// The key-switch digit-atom machinery: the limb-group relation substrate and
+// the atom-family proof backend that proves and verifies key-bearing trustee
+// evaluation-key statements (the schedule layer under
+// `limb_group_key_switch_atom::family_backend::schedule`).
 mod limb_group_key_switch_atom;
 mod local_trustee_state;
 mod package_builder;

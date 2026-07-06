@@ -156,7 +156,7 @@ pub(super) fn bridge_key_material<const LIMB_COUNT: usize>(
     };
 
     let group_modulus_element = input.group.group_modulus_element(parameters);
-    let group_modulus_inverse = parameters.inverse(&group_modulus_element);
+    let group_modulus_inverse = *input.group.group_modulus_inverse();
     let plaintext_modulus_element = parameters.unsigned_word_to_element(input.plaintext_modulus);
     let carry_bound = ring_degree as u64 + 1;
 
@@ -259,10 +259,102 @@ pub(super) fn bridge_key_material<const LIMB_COUNT: usize>(
     })
 }
 
+// Public-only bridge for the verifier: the recombined statement inputs and the
+// family source, without any witness. The prover-side `bridge_key_material`
+// derives the identical public side plus the witness; a test pins the two
+// against each other.
+pub(super) fn bridge_key_public<const LIMB_COUNT: usize>(
+    parameters: &ProofFieldParameters<LIMB_COUNT>,
+    group: &LimbGroupContext<LIMB_COUNT>,
+    domain: &NegacyclicDomain<'_, LIMB_COUNT>,
+    component_b_by_digit: &[Vec<Vec<u64>>],
+    public_sample_by_digit: &[Vec<Vec<u64>>],
+    kind: BridgedKeyKind<'_>,
+    plaintext_modulus: u64,
+) -> CanonicalResult<(KeyPublic<LIMB_COUNT>, KeySource<LIMB_COUNT>)> {
+    let ring_degree = domain.size;
+    let digit_count = component_b_by_digit.len();
+    if digit_count == 0 || public_sample_by_digit.len() != digit_count {
+        return Err(invalid_bridge(
+            "bridged key digit counts must match and be non-empty",
+        ));
+    }
+    if group.group_primes.len() != digit_count {
+        return Err(invalid_bridge(
+            "bridged key digit count must match the limb group size",
+        ));
+    }
+    group.validate_exactness_bound(parameters, ring_degree)?;
+
+    let mut aggregate_by_digit: Vec<Vec<[u64; LIMB_COUNT]>> = Vec::new();
+    if let BridgedKeyKind::RelinearizationRoundTwo {
+        aggregate_residues_by_digit,
+    } = &kind
+    {
+        if aggregate_residues_by_digit.len() != digit_count {
+            return Err(invalid_bridge(
+                "round-two aggregates must cover every digit",
+            ));
+        }
+        for (digit_index, aggregate_residues) in aggregate_residues_by_digit.iter().enumerate() {
+            let padded_by_limb = (0..digit_count)
+                .map(|limb_index| {
+                    if limb_index == digit_index {
+                        aggregate_residues.clone()
+                    } else {
+                        vec![0_u64; ring_degree]
+                    }
+                })
+                .collect::<Vec<_>>();
+            aggregate_by_digit.push(group.recombine_centered(
+                parameters,
+                &padded_by_limb,
+                ring_degree,
+            )?);
+        }
+    }
+
+    let mut public_digits = Vec::with_capacity(digit_count);
+    for (digit_index, (component_b_by_limb, public_sample_by_limb)) in component_b_by_digit
+        .iter()
+        .zip(public_sample_by_digit.iter())
+        .enumerate()
+    {
+        let recombined_component_b =
+            group.recombine_centered(parameters, component_b_by_limb, ring_degree)?;
+        let recombined_sample =
+            group.recombine_centered(parameters, public_sample_by_limb, ring_degree)?;
+        let gadget_idempotent = *group.gadget_idempotent(digit_index)?;
+        public_digits.push(DigitPublic {
+            recombined_sample,
+            recombined_component_b,
+            gadget_idempotent,
+        });
+    }
+
+    let source = match kind {
+        BridgedKeyKind::RelinearizationRoundOne => KeySource::RoundOne,
+        BridgedKeyKind::Galois { galois_element } => KeySource::Galois { galois_element },
+        BridgedKeyKind::RelinearizationRoundTwo { .. } => {
+            KeySource::RoundTwo { aggregate_by_digit }
+        }
+    };
+    Ok((
+        KeyPublic {
+            digits: public_digits,
+            group_modulus: group.group_modulus_element(parameters),
+            plaintext_modulus: parameters.unsigned_word_to_element(plaintext_modulus),
+        },
+        source,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::super::proof_field::sixteen_limb_group_field_parameters;
-    use super::super::key_proof::{KeyFriProofParameters, prove_key_fri, verify_key_fri};
+    use super::super::key_proof::{
+        KeyFriProofParameters, ZERO_STATEMENT_BINDING, prove_key_fri, verify_key_fri,
+    };
     use super::*;
     use crate::bgv::parameters::{DATA_PRIMES, PLAINTEXT_MODULUS};
 
@@ -461,6 +553,8 @@ mod tests {
             &material.secret,
             &bridged.digits,
             None,
+            &ZERO_STATEMENT_BINDING,
+            0,
             &proof_parameters,
             &mut salt_seed,
         )
@@ -473,6 +567,8 @@ mod tests {
                 &bridged.source,
                 &proof,
                 None,
+                &ZERO_STATEMENT_BINDING,
+                0,
                 &proof_parameters
             )
             .expect("verify runs"),

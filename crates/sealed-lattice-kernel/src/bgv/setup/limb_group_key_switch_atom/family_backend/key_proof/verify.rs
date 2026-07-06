@@ -1,6 +1,7 @@
 use super::constraints::*;
 use super::*;
 
+#[cfg(test)]
 pub(in super::super) fn verify_round_one_key_fri<const LIMB_COUNT: usize>(
     parameters: &ProofFieldParameters<LIMB_COUNT>,
     ring_degree: usize,
@@ -15,6 +16,8 @@ pub(in super::super) fn verify_round_one_key_fri<const LIMB_COUNT: usize>(
         &KeySource::RoundOne,
         proof,
         None,
+        &ZERO_STATEMENT_BINDING,
+        0,
         proof_parameters,
     )
 }
@@ -26,6 +29,8 @@ pub(in super::super) fn verify_key_fri<const LIMB_COUNT: usize>(
     source: &KeySource<LIMB_COUNT>,
     proof: &KeyFriProof<LIMB_COUNT>,
     linkage_statement: Option<&linkage::LinkageStatement<'_>>,
+    statement_binding: &[u8; 64],
+    schedule_index: u64,
     proof_parameters: &KeyFriProofParameters,
 ) -> CanonicalResult<bool> {
     let layout = layout(ring_degree)?;
@@ -61,6 +66,8 @@ pub(in super::super) fn verify_key_fri<const LIMB_COUNT: usize>(
     }
 
     let mut transcript = Transcript::new(PROTOCOL_LABEL);
+    transcript.absorb("key-statement-binding", statement_binding);
+    transcript.absorb_u64("key-schedule-index", schedule_index);
     absorb_public(&mut transcript, ring_degree, public, source);
     transcript.absorb_u64(
         "key-linkage-present",
@@ -102,7 +109,6 @@ pub(in super::super) fn verify_key_fri<const LIMB_COUNT: usize>(
 
     let fri_parameters = FriParameters {
         blowup: FRI_RATE_BLOWUP,
-        query_count: proof_parameters.query_count,
     };
     let Some(verification) = fri_verify_structure(
         parameters,

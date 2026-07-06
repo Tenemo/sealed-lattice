@@ -24,6 +24,7 @@ use crate::bgv::parameters::DATA_PRIMES;
 use crate::bgv::setup::commitment::{
     SETUP_COMMITMENT_MODULUS_LIMB_INDICES, parse_setup_commitment_full_value,
 };
+use crate::bgv::setup::limb_group_key_switch_atom::family_backend::schedule as atom_schedule;
 use crate::bgv::setup::setup_proof::{
     SETUP_PROOF_MATERIAL_ENCODING, SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
     SetupProofMaterialTransportHashes, setup_proof_material_transport_hashes,
@@ -106,8 +107,16 @@ pub(crate) fn generate_trustee_evaluation_key_proof_from_request(
         proof_randomness_nonce_hex,
     )?;
 
-    let proof = prove_evaluation_key_share(&statement, &witness, &bound_proof_randomness_seed_hex)?;
-    let proof_bytes = encode_trustee_evaluation_key_proof(&proof);
+    let proof_bytes = if atom_schedule::statement_is_key_bearing(&statement) {
+        // Key-bearing statements are proven by the key-switch atom backend;
+        // the statement-bound randomness binding above still gates the request
+        // shape, and the per-key salt streams derive from the statement hash.
+        atom_schedule::prove_key_bearing_trustee_evaluation_keys(&statement, &witness)?
+    } else {
+        let proof =
+            prove_evaluation_key_share(&statement, &witness, &bound_proof_randomness_seed_hex)?;
+        encode_trustee_evaluation_key_proof(&proof)
+    };
     Ok(json!({
         "operation": "generateTrusteeEvaluationKeyProof",
         "proofFamily": statement.context.proof_family,

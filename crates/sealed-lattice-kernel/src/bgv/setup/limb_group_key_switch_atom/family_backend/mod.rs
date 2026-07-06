@@ -29,7 +29,6 @@
 //! families (SEC-004/SEC-005 class); the maintainer setup-proof decision
 //! record owns the architecture.
 
-pub(crate) mod atom_proof;
 pub(crate) mod atom_reduction;
 #[cfg(test)]
 mod bench;
@@ -38,9 +37,11 @@ pub(crate) mod column_commitment;
 pub(crate) mod domain;
 pub(crate) mod key_proof;
 pub(crate) mod low_degree;
+#[cfg(test)]
 pub(crate) mod material_commitment;
 pub(crate) mod merkle;
 pub(crate) mod polynomial;
 pub(crate) mod proof_codec;
+pub(crate) mod schedule;
 pub(crate) mod statement_bridge;
 pub(crate) mod transcript;

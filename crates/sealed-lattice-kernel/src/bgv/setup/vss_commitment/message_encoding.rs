@@ -152,7 +152,6 @@ pub(in crate::bgv::setup) fn vss_public_message_digits(
     Ok(digits)
 }
 
-#[cfg(any(test, feature = "target-decryption-development-commands"))]
 pub(crate) fn vss_public_canonical_message_digit_columns(
     message_coefficients: &[u64],
     ring_degree: usize,

@@ -528,17 +528,13 @@ use readers::*;
 use record_verification::*;
 use sampler::*;
 
-#[cfg(any(test, feature = "target-decryption-development-commands"))]
 pub(crate) use message_encoding::vss_public_canonical_message_digit_columns;
 pub(in crate::bgv::setup) use message_encoding::{
     vss_public_message_digit_bound, vss_public_message_digit_column_label,
     vss_public_message_digit_only_encoding_layout, vss_public_message_digit_trits_for_count,
     vss_public_message_digit_weight, vss_public_message_digits, vss_public_message_encoding_layout,
 };
-// Consumed by the test-gated key-switch atom family backend same-secret
-// linkage; the gate comes off when the backend takes over the trustee
-// evaluation-key command path.
-#[cfg(test)]
+// Consumed by the key-switch atom family backend same-secret linkage.
 pub(in crate::bgv::setup) use message_encoding::{
     vss_public_message_coverage_terms_per_coordinate, vss_public_randomness_column_label,
 };

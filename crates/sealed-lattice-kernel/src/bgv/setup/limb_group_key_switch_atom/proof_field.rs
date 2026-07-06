@@ -20,6 +20,9 @@ pub(crate) struct ProofFieldParameters<const LIMB_COUNT: usize> {
     montgomery_radix_squared: [u64; LIMB_COUNT],
     negated_modulus_inverse_word: u64,
     pub(crate) primitive_65536th_root: [u64; LIMB_COUNT],
+    // The defining constant `b` of `p = b^64 + 1`; read by the test-gated
+    // base-b witness digit encoder.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) encoding_base: u64,
 }
 
@@ -82,8 +85,10 @@ pub(crate) fn sixteen_limb_group_field_parameters()
 
 /// The 8-limb-group proof field: p = 102^64 + 1 (428 bits, 7 limbs). Large
 /// enough for an 8-prime limb-group congruence at ring degree 32768.
+#[cfg(test)]
 pub(crate) const EIGHT_LIMB_GROUP_FIELD_LIMBS: usize = 7;
 
+#[cfg(test)]
 pub(crate) fn eight_limb_group_field_parameters()
 -> ProofFieldParameters<EIGHT_LIMB_GROUP_FIELD_LIMBS> {
     ProofFieldParameters::from_constants(
@@ -120,6 +125,7 @@ pub(crate) fn eight_limb_group_field_parameters()
 
 /// Constructs single-limb parameters at runtime for word-sized NTT-friendly
 /// moduli (used by the commitment ring).
+#[cfg(test)]
 pub(crate) fn single_limb_field_parameters(
     modulus: u64,
     primitive_65536th_root: u64,

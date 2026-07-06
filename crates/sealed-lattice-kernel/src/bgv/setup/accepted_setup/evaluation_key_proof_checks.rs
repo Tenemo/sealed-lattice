@@ -448,16 +448,21 @@ fn verify_trustee_evaluation_key_proof_record(
         ));
     }
     trustee_evaluation_key_verify_progress(|| {
-        format!("trustee={trustee_roster_position} decode-start")
-    });
-    let proof = decode_trustee_evaluation_key_proof(statement, &proof_bytes)?;
-    trustee_evaluation_key_verify_progress(|| {
-        format!("trustee={trustee_roster_position} decode-finish")
-    });
-    trustee_evaluation_key_verify_progress(|| {
         format!("trustee={trustee_roster_position} proof-verify-start")
     });
-    verify_evaluation_key_share(statement, &proof)?;
+    if crate::bgv::setup::limb_group_key_switch_atom::family_backend::schedule::statement_is_key_bearing(
+        statement,
+    ) {
+        // Key-bearing statements verify against the key-switch atom backend;
+        // legacy engine bytes fail the schedule container magic.
+        crate::bgv::setup::limb_group_key_switch_atom::family_backend::schedule::verify_key_bearing_trustee_evaluation_keys(
+            statement,
+            &proof_bytes,
+        )?;
+    } else {
+        let proof = decode_trustee_evaluation_key_proof(statement, &proof_bytes)?;
+        verify_evaluation_key_share(statement, &proof)?;
+    }
     trustee_evaluation_key_verify_progress(|| {
         format!("trustee={trustee_roster_position} proof-verify-finish")
     });

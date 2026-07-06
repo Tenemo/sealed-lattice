@@ -1,10 +1,12 @@
 import type { ProtocolHash } from '@sealed-lattice/types';
 
+import { protocolHashPattern } from '../common/verification-helpers.js';
+
 import type { CollectiveBgvSetupContext } from './vss-share-verification-records.js';
 
 export type JsonRecord = Record<string, unknown>;
 
-export const protocolHashPattern = /^[0-9a-f]{128}$/u;
+export { protocolHashPattern };
 
 export const setupContextFieldNames = [
     'ceremonyId',

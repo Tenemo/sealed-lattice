@@ -118,6 +118,7 @@ fn source_adjoint_image<const LIMB_COUNT: usize>(
 }
 
 // Round-one atom reduction convenience wrapper.
+#[cfg(test)]
 pub(super) fn reduce_round_one_atom<const LIMB_COUNT: usize>(
     parameters: &ProofFieldParameters<LIMB_COUNT>,
     domain: &NegacyclicDomain<'_, LIMB_COUNT>,

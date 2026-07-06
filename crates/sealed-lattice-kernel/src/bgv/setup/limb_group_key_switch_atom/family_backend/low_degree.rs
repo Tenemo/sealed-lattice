@@ -28,7 +28,6 @@ pub(super) const FINAL_LAYER_MAX_SIZE: usize = 8;
 
 pub(super) struct FriParameters {
     pub(super) blowup: usize,
-    pub(super) query_count: usize,
 }
 
 pub(super) struct FriProof<const LIMB_COUNT: usize> {
@@ -420,27 +419,29 @@ pub(super) fn fri_verify_queries<const LIMB_COUNT: usize>(
 // Self-contained convenience wrapper (derives its own query positions); used by
 // the FRI unit tests. The atom proof uses the two-phase API so it can share
 // query positions with the trace commitment.
+#[cfg(test)]
 pub(super) fn prove_low_degree<const LIMB_COUNT: usize>(
     parameters: &ProofFieldParameters<LIMB_COUNT>,
     transcript: &mut Transcript,
     codeword: &[[u64; LIMB_COUNT]],
     initial_offset: &[u64; LIMB_COUNT],
-    fri_parameters: &FriParameters,
+    query_count: usize,
     salt_seed: &mut u64,
 ) -> CanonicalResult<FriProof<LIMB_COUNT>> {
     let top_size = codeword.len();
     let commitment = fri_commit(parameters, transcript, codeword, initial_offset, salt_seed)?;
-    let positions =
-        transcript.challenge_positions("fri-query", top_size, fri_parameters.query_count);
+    let positions = transcript.challenge_positions("fri-query", top_size, query_count);
     Ok(fri_answer(&commitment, &positions))
 }
 
+#[cfg(test)]
 pub(super) fn verify_low_degree<const LIMB_COUNT: usize>(
     parameters: &ProofFieldParameters<LIMB_COUNT>,
     transcript: &mut Transcript,
     proof: &FriProof<LIMB_COUNT>,
     top_size: usize,
     initial_offset: &[u64; LIMB_COUNT],
+    query_count: usize,
     fri_parameters: &FriParameters,
 ) -> CanonicalResult<bool> {
     let Some(verification) = fri_verify_structure(
@@ -454,8 +455,7 @@ pub(super) fn verify_low_degree<const LIMB_COUNT: usize>(
     else {
         return Ok(false);
     };
-    let positions =
-        transcript.challenge_positions("fri-query", top_size, fri_parameters.query_count);
+    let positions = transcript.challenge_positions("fri-query", top_size, query_count);
     Ok(fri_verify_queries(
         parameters,
         &verification,
@@ -517,10 +517,8 @@ mod tests {
         let offset = coset_offset(&parameters);
         let coefficients = random_coefficients(&parameters, trace_size, 0xd00d);
         let codeword = low_degree_codeword(&parameters, &coefficients, coset_size, &offset);
-        let fri_parameters = FriParameters {
-            blowup,
-            query_count: 24,
-        };
+        let query_count = 24;
+        let fri_parameters = FriParameters { blowup };
 
         let mut prover_transcript = Transcript::new("fri-test");
         let mut salt_seed = 0x1234;
@@ -529,7 +527,7 @@ mod tests {
             &mut prover_transcript,
             &codeword,
             &offset,
-            &fri_parameters,
+            query_count,
             &mut salt_seed,
         )
         .expect("prove");
@@ -542,6 +540,7 @@ mod tests {
                 &proof,
                 coset_size,
                 &offset,
+                query_count,
                 &fri_parameters,
             )
             .expect("verify")
@@ -558,10 +557,8 @@ mod tests {
         // A full-degree (coset_size coefficients) codeword is not low-degree.
         let coefficients = random_coefficients(&parameters, coset_size, 0xbadb);
         let codeword = low_degree_codeword(&parameters, &coefficients, coset_size, &offset);
-        let fri_parameters = FriParameters {
-            blowup,
-            query_count: 24,
-        };
+        let query_count = 24;
+        let fri_parameters = FriParameters { blowup };
         let mut prover_transcript = Transcript::new("fri-test");
         let mut salt_seed = 0x99;
         let proof = prove_low_degree(
@@ -569,7 +566,7 @@ mod tests {
             &mut prover_transcript,
             &codeword,
             &offset,
-            &fri_parameters,
+            query_count,
             &mut salt_seed,
         )
         .expect("prove");
@@ -583,6 +580,7 @@ mod tests {
                 &proof,
                 coset_size,
                 &offset,
+                query_count,
                 &fri_parameters,
             )
             .expect("verify")
@@ -598,10 +596,8 @@ mod tests {
         let offset = coset_offset(&parameters);
         let coefficients = random_coefficients(&parameters, trace_size, 0x7);
         let codeword = low_degree_codeword(&parameters, &coefficients, coset_size, &offset);
-        let fri_parameters = FriParameters {
-            blowup,
-            query_count: 20,
-        };
+        let query_count = 20;
+        let fri_parameters = FriParameters { blowup };
         let mut prover_transcript = Transcript::new("fri-test");
         let mut salt_seed = 0x55;
         let mut proof = prove_low_degree(
@@ -609,7 +605,7 @@ mod tests {
             &mut prover_transcript,
             &codeword,
             &offset,
-            &fri_parameters,
+            query_count,
             &mut salt_seed,
         )
         .expect("prove");
@@ -624,6 +620,7 @@ mod tests {
                 &proof,
                 coset_size,
                 &offset,
+                query_count,
                 &fri_parameters,
             )
             .expect("verify")
@@ -639,10 +636,8 @@ mod tests {
         let offset = coset_offset(&parameters);
         let coefficients = random_coefficients(&parameters, trace_size, 0x3);
         let codeword = low_degree_codeword(&parameters, &coefficients, coset_size, &offset);
-        let fri_parameters = FriParameters {
-            blowup,
-            query_count: 16,
-        };
+        let query_count = 16;
+        let fri_parameters = FriParameters { blowup };
         let mut prover_transcript = Transcript::new("fri-test");
         let mut salt_seed = 0x2;
         let proof = prove_low_degree(
@@ -650,7 +645,7 @@ mod tests {
             &mut prover_transcript,
             &codeword,
             &offset,
-            &fri_parameters,
+            query_count,
             &mut salt_seed,
         )
         .expect("prove");
@@ -663,6 +658,7 @@ mod tests {
                 &proof,
                 coset_size * 2,
                 &offset,
+                query_count,
                 &fri_parameters,
             )
             .expect("verify")

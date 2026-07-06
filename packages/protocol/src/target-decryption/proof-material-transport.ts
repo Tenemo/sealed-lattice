@@ -4,6 +4,7 @@ import {
 } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
+import { protocolHashPattern } from '../common/verification-helpers.js';
 import { BinaryChunkWriter } from '../setup/binary-chunk-writer.js';
 import { bytesFromStandardBase64 } from '../setup/proof-byte-encoding.js';
 import {
@@ -47,8 +48,6 @@ type BgvTargetDecryptionShareBinaryProofMaterialTransport = Readonly<
         readonly chunks: readonly Uint8Array[];
     }
 >;
-
-const protocolHashPattern = /^[0-9a-f]{128}$/u;
 
 const assertProtocolHash = (
     value: unknown,

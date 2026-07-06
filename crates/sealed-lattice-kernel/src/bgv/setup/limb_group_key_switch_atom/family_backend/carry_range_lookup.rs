@@ -126,6 +126,7 @@ pub(super) fn multiplicities<const LIMB_COUNT: usize>(
 // transcript after the witness and table multiplicities are committed, so
 // `mu - value` is nonzero with overwhelming probability; a zero is a genuine
 // (negligible-probability) prover failure, surfaced as `None`.
+#[cfg(test)]
 pub(super) fn reciprocal<const LIMB_COUNT: usize>(
     parameters: &ProofFieldParameters<LIMB_COUNT>,
     challenge: &[u64; LIMB_COUNT],

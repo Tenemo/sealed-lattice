@@ -143,6 +143,7 @@ pub(super) fn multiply<const LIMB_COUNT: usize>(
 // Divide by `X - point`, returning the quotient. Requires that `point` is a
 // root (the remainder is discarded); callers use this only when the numerator
 // vanishes at `point`.
+#[cfg(test)]
 pub(super) fn divide_by_linear<const LIMB_COUNT: usize>(
     parameters: &ProofFieldParameters<LIMB_COUNT>,
     coefficients: &[[u64; LIMB_COUNT]],

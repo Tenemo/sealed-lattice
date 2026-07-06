@@ -9,13 +9,17 @@
 
 use rayon::prelude::*;
 
-use super::super::proof_field::ProofFieldParameters;
+#[cfg(test)]
+use super::merkle::sorted_unique_indices;
 use super::merkle::{
     BatchedMerkleOpening, MerkleDigest, MerkleTree, StreamingLeafHasher, consistent_sorted_leaves,
-    leaf_hash, sorted_unique_indices, verify_merkle_batch,
+    leaf_hash, verify_merkle_batch,
 };
 use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 
+// The in-memory commitment is the byte-identity oracle the streamed builder
+// is pinned against; production paths always stream.
+#[cfg(test)]
 pub(super) struct ColumnCommitment<const LIMB_COUNT: usize> {
     columns: Vec<Vec<[u64; LIMB_COUNT]>>,
     salts: Vec<Vec<u8>>,
@@ -47,6 +51,7 @@ fn row_words<const LIMB_COUNT: usize>(values: &[[u64; LIMB_COUNT]]) -> Vec<u64> 
     words
 }
 
+#[cfg(test)]
 impl<const LIMB_COUNT: usize> ColumnCommitment<LIMB_COUNT> {
     // Commit a set of columns, each of the same power-of-two length. `salt_seed`
     // advances a deterministic per-attempt salt stream.
@@ -296,7 +301,9 @@ pub(super) fn verify_column_opening<const LIMB_COUNT: usize>(
 
 #[cfg(test)]
 mod tests {
-    use super::super::super::proof_field::sixteen_limb_group_field_parameters;
+    use super::super::super::proof_field::{
+        ProofFieldParameters, sixteen_limb_group_field_parameters,
+    };
     use super::*;
 
     fn column<const LIMB_COUNT: usize>(
