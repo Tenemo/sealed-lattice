@@ -93,7 +93,7 @@ pub(super) fn direct_ballot_relation_challenge(
             "sealed-lattice/direct-encrypted-ballot/relation-challenge-v1",
             &[statement_hash, relation_commitment_hash, &block_index_bytes],
         );
-        let challenge_bytes = &block[..DIRECT_BALLOT_RELATION_PROOF_CHALLENGE_BYTES];
+        let challenge_bytes = &block[..RELATION_PROOF_CHALLENGE_BYTES];
         let challenge = BigInt::from_bytes_le(Sign::Plus, challenge_bytes);
         if !challenge.is_zero() {
             return Ok(challenge);

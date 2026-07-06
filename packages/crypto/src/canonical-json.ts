@@ -135,7 +135,7 @@ const appendVarUintToHash = (
     }
 
     // LEB128 unsigned varint. Used as a length prefix so every hashed part is
-    // framed (length ‖ bytes); this makes the preimage injective and prevents
+    // framed (length || bytes); this makes the preimage injective and prevents
     // length-extension / concatenation ambiguity across parts.
     const encodedBytes: number[] = [];
     let remainingValue = value;
@@ -168,7 +168,7 @@ const hash512 = (domain: string, parts: readonly Uint8Array[]): Uint8Array => {
     try {
         // Security-critical anti-collision preimage layout that every protocol
         // hash relies on, and that must byte-match the Rust kernel:
-        //   prefix ‖ len(domain) ‖ domain ‖ count(parts) ‖ (len(part) ‖ part)*
+        //   prefix || len(domain) || domain || count(parts) || (len(part) || part)*
         // The varint length prefixes make the layout unambiguous/injective.
         hash.update(hash512PreimagePrefix);
         appendBytesToHash(hash, textEncoder.encode(domain));
@@ -223,80 +223,4 @@ export const setupProofMaterialFullObjectHashHex = (
     } finally {
         hash.destroy();
     }
-};
-
-export type SetupVssMaterialFullObjectHasher = Readonly<{
-    update: (chunk: Uint8Array) => void;
-    digestHex: () => string;
-}>;
-
-// Chunks are concatenated unframed; the digest is injective only because all non-final chunks are exactly the fixed transport chunk size, so totalByteLength recovers the boundaries. Do not call with variable-size chunks.
-export const createSetupVssMaterialFullObjectHasher = (
-    totalByteLength: number,
-): SetupVssMaterialFullObjectHasher => {
-    if (!Number.isSafeInteger(totalByteLength) || totalByteLength < 0) {
-        throw new TypeError(
-            'setup VSS material totalByteLength must be a non-negative safe integer.',
-        );
-    }
-
-    const hash = shake256.create({ dkLen: 64 });
-    let finalized = false;
-    hash.update(hash512PreimagePrefix);
-    appendBytesToHash(
-        hash,
-        textEncoder.encode(
-            'sealed-lattice/setup/vss-coefficient-commitment-material/full-object-v1',
-        ),
-    );
-    appendVarUintToHash(hash, 1);
-    appendVarUintToHash(hash, totalByteLength);
-
-    return {
-        update: (chunk: Uint8Array): void => {
-            if (finalized) {
-                throw new Error(
-                    'setup VSS material full-object hash is already finalized.',
-                );
-            }
-            hash.update(chunk);
-        },
-        digestHex: (): string => {
-            if (finalized) {
-                throw new Error(
-                    'setup VSS material full-object hash is already finalized.',
-                );
-            }
-            finalized = true;
-
-            try {
-                return bytesToHex(hash.digest());
-            } finally {
-                hash.destroy();
-            }
-        },
-    };
-};
-
-export const setupVssMaterialFullObjectHashHex = (
-    totalByteLength: number,
-    chunks: readonly Uint8Array[],
-): string => {
-    if (!Number.isSafeInteger(totalByteLength) || totalByteLength < 0) {
-        throw new TypeError(
-            'setup VSS material totalByteLength must be a non-negative safe integer.',
-        );
-    }
-    if (chunks.length === 0) {
-        throw new TypeError(
-            'setup VSS material full-object hash requires at least one chunk.',
-        );
-    }
-
-    const hasher = createSetupVssMaterialFullObjectHasher(totalByteLength);
-    for (const chunk of chunks) {
-        hasher.update(chunk);
-    }
-
-    return hasher.digestHex();
 };

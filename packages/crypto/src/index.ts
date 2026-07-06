@@ -1,11 +1,8 @@
 export {
     canonicalJson,
-    createSetupVssMaterialFullObjectHasher,
     hash512Hex,
     setupProofMaterialFullObjectHashHex,
-    setupVssMaterialFullObjectHashHex,
 } from './canonical-json.js';
-export type { SetupVssMaterialFullObjectHasher } from './canonical-json.js';
 export { deriveCanonicalObjectHash } from './hashes.js';
 export {
     deriveMlDsaPublicKeyHash,
@@ -22,8 +19,6 @@ export {
     decryptLocalTrusteeState,
     encryptLocalTrusteeSetupSealedMaterial,
     encryptLocalTrusteeState,
-    localTrusteeSealedMaterialStorageFormat,
-    localTrusteeStateStorageFormat,
 } from './local-trustee-state-storage.js';
 export type {
     PrivateVssEncryptedEnvelope,

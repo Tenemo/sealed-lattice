@@ -856,4 +856,3 @@ export const createVssPublicAggregateThresholdCommitmentSet = (input: {
             deriveCanonicalObjectHash(setWithoutRoot),
     };
 };
-

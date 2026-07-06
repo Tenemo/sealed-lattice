@@ -27,8 +27,7 @@ use num_traits::Zero;
 use serde_json::{Value, json};
 
 use super::{
-    DIRECT_BALLOT_MAXIMUM_SCORE, DIRECT_BALLOT_OPTION_COUNT, DIRECT_BALLOT_SCORE_BUCKET_COUNT,
-    DirectEncryptedBallot, setup_package_hash,
+    DirectEncryptedBallot, MAXIMUM_SCORE, OPTION_COUNT, SCORE_BUCKET_COUNT, setup_package_hash,
 };
 use crate::{
     bgv::{
@@ -40,18 +39,18 @@ use crate::{
     hashing::{canonical_json, hash512, hash512_hex, to_hex},
 };
 
-const DIRECT_BALLOT_RELATION_PROOF_MAGIC: &[u8; 8] = b"SLDBP001";
-const DIRECT_BALLOT_RELATION_WITNESS_POLYNOMIALS: usize = 4;
-const DIRECT_BALLOT_ONE_HOT_SUPPORT_EXPANSION_COEFFICIENTS: usize = 2;
-const DIRECT_BALLOT_RANDOMIZER_SUPPORT_EXPANSION_COEFFICIENTS: usize = 3;
-const DIRECT_BALLOT_ERROR_SUPPORT_EXPANSION_COEFFICIENTS: usize = 5;
-const DIRECT_BALLOT_RELATION_PROOF_CHALLENGE_BITS: u32 = 192;
-const DIRECT_BALLOT_RELATION_PROOF_CHALLENGE_BYTES: usize = 24;
-const DIRECT_BALLOT_RELATION_MASK_COEFFICIENT_BITS: usize = 360;
-const DIRECT_BALLOT_RELATION_RESPONSE_COEFFICIENT_BYTES: usize = 48;
-const DIRECT_BALLOT_RELATION_STATEMENT_HASH_DOMAIN: &str =
+const RELATION_PROOF_MAGIC: &[u8; 8] = b"SLDBP001";
+const RELATION_WITNESS_POLYNOMIALS: usize = 4;
+const ONE_HOT_SUPPORT_EXPANSION_COEFFICIENTS: usize = 2;
+const RANDOMIZER_SUPPORT_EXPANSION_COEFFICIENTS: usize = 3;
+const ERROR_SUPPORT_EXPANSION_COEFFICIENTS: usize = 5;
+const RELATION_PROOF_CHALLENGE_BITS: u32 = 192;
+const RELATION_PROOF_CHALLENGE_BYTES: usize = 24;
+const RELATION_MASK_COEFFICIENT_BITS: usize = 360;
+const RELATION_RESPONSE_COEFFICIENT_BYTES: usize = 48;
+const RELATION_STATEMENT_HASH_DOMAIN: &str =
     "sealed-lattice/direct-encrypted-ballot/relation-statement-v4";
-const DIRECT_BALLOT_RELATION_PROOF_BYTES_HASH_DOMAIN: &str =
+const RELATION_PROOF_BYTES_HASH_DOMAIN: &str =
     "sealed-lattice/direct-encrypted-ballot/relation-proof-bytes-v1";
 
 #[derive(Clone)]

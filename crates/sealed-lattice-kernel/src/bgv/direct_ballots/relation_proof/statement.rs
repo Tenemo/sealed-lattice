@@ -16,13 +16,13 @@ pub(super) fn direct_ballot_relation_statement_hash(
         "ciphertextCanonicalByteLength": ballot.ciphertext_canonical_byte_length,
         "voterIdentity": ballot.input.voter_identity.as_str(),
         "actionContextHash": ballot.input.action_context_hash.as_str(),
-        "optionCount": DIRECT_BALLOT_OPTION_COUNT,
-        "scoreRange": format!("1..={DIRECT_BALLOT_MAXIMUM_SCORE}"),
+        "optionCount": OPTION_COUNT,
+        "scoreRange": format!("1..={MAXIMUM_SCORE}"),
         "relation": "score and one-hot linear constraints, one-hot Booleanity, randomizer and error support, plus c0=b*u+p*encode(score)+p*e0 and c1=a*u+p*e1 for every BGV data prime"
     }))?;
 
     Ok(hash512(
-        DIRECT_BALLOT_RELATION_STATEMENT_HASH_DOMAIN,
+        RELATION_STATEMENT_HASH_DOMAIN,
         &[statement_json.as_bytes()],
     ))
 }

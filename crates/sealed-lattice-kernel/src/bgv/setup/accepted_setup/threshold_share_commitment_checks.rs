@@ -37,7 +37,7 @@ pub(super) fn verify_threshold_share_commitments(
         );
     }
     Ok(Some(threshold_share_refusal(
-        "thresholdShareCommitmentSetTypeMismatch",
+        "thresholdShareCommitmentTypeMismatch",
         "thresholdShareCommitments.objectType must be ThresholdShareCommitmentBinding",
         "setupPackage.thresholdShareCommitments.objectType",
     )?))

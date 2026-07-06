@@ -6,6 +6,7 @@ import type {
     SameSecretProofSet,
 } from '../same-secret-consistency-records.js';
 import type { CollectiveBgvSetupContext } from '../vss-share-verification-records.js';
+
 import {
     setupContextFields,
     type VssPublicAggregateThresholdCommitmentSet,
@@ -1053,4 +1054,3 @@ export const createVssSameSecretBridgeProofMaterialSet = (input: {
         ),
     };
 };
-

@@ -2,7 +2,7 @@ use std::sync::OnceLock;
 
 use super::*;
 
-static DIRECT_BALLOT_SCORE_ENCODING_BASIS: OnceLock<Vec<Vec<u64>>> = OnceLock::new();
+static SCORE_ENCODING_BASIS: OnceLock<Vec<Vec<u64>>> = OnceLock::new();
 
 pub(super) fn direct_ballot_witness_vector(
     ballot: &DirectEncryptedBallot,
@@ -80,7 +80,7 @@ pub(super) fn direct_ballot_one_hot_coefficients(
                         "direct ballot score does not fit in a one-hot bucket index",
                     )
                 })?;
-                let mut row = vec![BigInt::zero(); DIRECT_BALLOT_SCORE_BUCKET_COUNT];
+                let mut row = vec![BigInt::zero(); SCORE_BUCKET_COUNT];
                 if selected_bucket >= row.len() {
                     return Err(invalid_direct_ballot_relation_proof(
                         "direct ballot score is outside the one-hot bucket range",
@@ -94,20 +94,20 @@ pub(super) fn direct_ballot_one_hot_coefficients(
 }
 
 pub(super) fn direct_ballot_score_encoding_basis() -> CanonicalResult<&'static [Vec<u64>]> {
-    if let Some(score_encoding_basis) = DIRECT_BALLOT_SCORE_ENCODING_BASIS.get() {
+    if let Some(score_encoding_basis) = SCORE_ENCODING_BASIS.get() {
         return Ok(score_encoding_basis.as_slice());
     }
 
-    let score_encoding_basis = (0..DIRECT_BALLOT_OPTION_COUNT)
+    let score_encoding_basis = (0..OPTION_COUNT)
         .map(|option_index| {
             let mut slots = vec![0_u64; POLYNOMIAL_DEGREE];
             slots[option_index] = 1;
             encode_slots_to_coefficients(&slots)
         })
         .collect::<CanonicalResult<Vec<_>>>()?;
-    let _ = DIRECT_BALLOT_SCORE_ENCODING_BASIS.set(score_encoding_basis);
+    let _ = SCORE_ENCODING_BASIS.set(score_encoding_basis);
 
-    Ok(DIRECT_BALLOT_SCORE_ENCODING_BASIS
+    Ok(SCORE_ENCODING_BASIS
         .get()
         .expect("direct ballot score encoding basis is initialized")
         .as_slice())
@@ -140,18 +140,18 @@ pub(super) fn validate_direct_ballot_witness_vector_shape(
             )));
         }
     }
-    if witness_vector.score_coefficients.len() != DIRECT_BALLOT_OPTION_COUNT {
+    if witness_vector.score_coefficients.len() != OPTION_COUNT {
         return Err(invalid_direct_ballot_relation_proof(
             "direct ballot relation score response must have one scalar per option",
         ));
     }
-    if witness_vector.one_hot_coefficients.len() != DIRECT_BALLOT_OPTION_COUNT {
+    if witness_vector.one_hot_coefficients.len() != OPTION_COUNT {
         return Err(invalid_direct_ballot_relation_proof(
             "direct ballot relation one-hot response must have one row per option",
         ));
     }
     for (option_index, row) in witness_vector.one_hot_coefficients.iter().enumerate() {
-        if row.len() != DIRECT_BALLOT_SCORE_BUCKET_COUNT {
+        if row.len() != SCORE_BUCKET_COUNT {
             return Err(invalid_direct_ballot_relation_proof(format!(
                 "direct ballot relation one-hot response row {option_index} must have one scalar per score bucket"
             )));
@@ -163,7 +163,7 @@ pub(super) fn validate_direct_ballot_witness_vector_shape(
 
 pub(super) fn direct_ballot_witness_polynomials(
     witness_vector: &DirectBallotWitnessVector,
-) -> [&[BigInt]; DIRECT_BALLOT_RELATION_WITNESS_POLYNOMIALS] {
+) -> [&[BigInt]; RELATION_WITNESS_POLYNOMIALS] {
     [
         witness_vector.randomizer_coefficients.as_slice(),
         witness_vector.error_zero_coefficients.as_slice(),

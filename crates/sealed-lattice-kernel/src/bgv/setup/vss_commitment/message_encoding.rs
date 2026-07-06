@@ -87,7 +87,7 @@ pub(super) fn vss_public_covered_message_ring_coefficient_index(
         })
 }
 
-pub(super) fn vss_public_randomness_column_label(
+pub(in crate::bgv::setup) fn vss_public_randomness_column_label(
     column_index: usize,
 ) -> CanonicalResult<&'static str> {
     match column_index {

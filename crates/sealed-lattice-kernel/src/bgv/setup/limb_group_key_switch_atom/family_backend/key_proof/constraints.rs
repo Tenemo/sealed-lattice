@@ -1,9 +1,18 @@
 use super::*;
 
 // Support constraint count: ternary (2) + per digit [eta-2 (3) + lookup
-// fraction pin (1)] + one table fraction pin per chunk.
-pub(super) fn support_constraint_count(ring_degree: usize, digit_count: usize) -> usize {
-    2 + digit_count * 4 + carry_range_lookup::table_count(ring_degree)
+// fraction pin (1)] + one table fraction pin per chunk + the linkage block's
+// constraints when present.
+pub(super) fn support_constraint_count(
+    ring_degree: usize,
+    digit_count: usize,
+    linkage_layout: Option<&linkage::LinkageLayout>,
+) -> usize {
+    2 + digit_count * 4
+        + carry_range_lookup::table_count(ring_degree)
+        + linkage_layout
+            .map(linkage::linkage_support_constraint_count)
+            .unwrap_or(0)
 }
 
 // The public table value polynomials (coefficient form), one per chunk, shared
@@ -26,7 +35,8 @@ pub(super) fn table_value_polynomials<const LIMB_COUNT: usize>(
 
 // The support constraint value at one coset point, from opened base and aux
 // values, the public table values evaluated at the point, and the logUp
-// challenge. The constraint order matches `support_constraints`.
+// challenge. The constraint order matches the prover's streamed folds: ternary,
+// per digit [eta-2 x3, lookup pin], then table pins.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn support_value_at<const LIMB_COUNT: usize>(
     parameters: &ProofFieldParameters<LIMB_COUNT>,
@@ -37,6 +47,7 @@ pub(super) fn support_value_at<const LIMB_COUNT: usize>(
     table_values_at_point: &[[u64; LIMB_COUNT]],
     challenge: &[u64; LIMB_COUNT],
     alpha: &[[u64; LIMB_COUNT]],
+    linkage_context: Option<&linkage::LinkageConstraintContext<LIMB_COUNT>>,
 ) -> [u64; LIMB_COUNT] {
     let one = parameters.one();
     let four = parameters.unsigned_word_to_element(4);
@@ -45,7 +56,11 @@ pub(super) fn support_value_at<const LIMB_COUNT: usize>(
     let secret = base_values[COLUMN_SECRET];
     let secret_square = base_values[COLUMN_SECRET_SQUARE];
 
-    let mut constraints = Vec::with_capacity(support_constraint_count(ring_degree, digit_count));
+    let mut constraints = Vec::with_capacity(support_constraint_count(
+        ring_degree,
+        digit_count,
+        linkage_context.map(|context| context.layout()),
+    ));
     constraints.push(parameters.subtract(&secret_square, &parameters.multiply(&secret, &secret)));
     constraints.push(parameters.multiply(&secret, &parameters.subtract(&secret_square, &one)));
     for digit in 0..digit_count {
@@ -73,7 +88,19 @@ pub(super) fn support_value_at<const LIMB_COUNT: usize>(
             parameters.subtract(&parameters.multiply(&denominator, &fraction), &multiplicity),
         );
     }
-
+    if let Some(context) = linkage_context {
+        linkage::push_linkage_support_values(
+            parameters,
+            context,
+            base_values,
+            aux_values,
+            base_linkage_start(ring_degree, digit_count),
+            aux_linkage_start(ring_degree, digit_count),
+            &secret,
+            challenge,
+            &mut constraints,
+        );
+    }
     let mut value = parameters.zero();
     for (weight, constraint) in alpha.iter().zip(constraints.iter()) {
         value = parameters.add(&value, &parameters.multiply(weight, constraint));

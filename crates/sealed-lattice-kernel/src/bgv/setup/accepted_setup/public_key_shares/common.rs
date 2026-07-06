@@ -57,17 +57,10 @@ pub(in super::super) fn public_key_common_binding(
     })
 }
 
-#[derive(Clone, Copy)]
-pub(super) enum PublicKeyRefusalKind {
-    Share,
-    Proof,
-}
-
 pub(super) fn verify_public_key_common_fields(
     value: &Value,
     common_binding: &PublicKeyCommonBinding,
     object_path: &str,
-    refusal_kind: PublicKeyRefusalKind,
 ) -> CanonicalResult<Option<Value>> {
     for (field_name, expected_value) in [
         (
@@ -87,49 +80,18 @@ pub(super) fn verify_public_key_common_fields(
             let message =
                 format!("{object_path}.{field_name} must match accepted common randomness");
             let path = format!("setupPackage.{object_path}.{field_name}");
-            return Ok(Some(match refusal_kind {
-                PublicKeyRefusalKind::Share => {
-                    public_key_share_refusal("publicKeyShareCommonBindingMismatch", message, path)?
-                }
-                PublicKeyRefusalKind::Proof => public_key_share_proof_refusal(
-                    "publicKeyShareCommonBindingMismatch",
-                    message,
-                    path,
-                )?,
-            }));
+            return Ok(Some(public_key_refusal(
+                "publicKeyShareCommonBindingMismatch",
+                message,
+                path,
+            )?));
         }
     }
 
     Ok(None)
 }
 
-pub(super) fn public_key_share_refusal(
-    reason_code: &'static str,
-    message: impl Into<String>,
-    object_path: impl Into<String>,
-) -> CanonicalResult<Value> {
-    verification_response(
-        Some("publicKeyShareProofs"),
-        Vec::new(),
-        vec![Refusal::new(reason_code, message, object_path)],
-        Vec::new(),
-    )
-}
-
-pub(in super::super) fn public_key_share_proof_refusal(
-    reason_code: &'static str,
-    message: impl Into<String>,
-    object_path: impl Into<String>,
-) -> CanonicalResult<Value> {
-    verification_response(
-        Some("publicKeyShareProofs"),
-        Vec::new(),
-        vec![Refusal::new(reason_code, message, object_path)],
-        Vec::new(),
-    )
-}
-
-pub(super) fn public_key_share_succinct_proof_refusal(
+pub(in super::super) fn public_key_refusal(
     reason_code: &'static str,
     message: impl Into<String>,
     object_path: impl Into<String>,

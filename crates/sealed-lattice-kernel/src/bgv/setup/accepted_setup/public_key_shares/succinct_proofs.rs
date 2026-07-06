@@ -50,7 +50,7 @@ pub(in super::super) fn verify_optional_public_key_share_succinct_proofs(
     };
     let Some(proof_set) = proof_set else {
         if public_key_share_succinct_proofs_have_terminal_dependents(setup_package) {
-            return Ok(Some(public_key_share_succinct_proof_refusal(
+            return Ok(Some(public_key_refusal(
                 "publicKeyShareSuccinctProofsMissing",
                 "publicKeyShareSuccinctProofs must be present before terminal public-key or evaluation-key material can be accepted",
                 "setupPackage.publicKeyShareSuccinctProofs",
@@ -133,7 +133,7 @@ pub(in super::super) fn verify_optional_public_key_share_succinct_proofs(
     ) {
         Ok(bindings) => bindings,
         Err(error) => {
-            return Ok(Some(public_key_share_succinct_proof_refusal(
+            return Ok(Some(public_key_refusal(
                 "publicKeyShareMaterialVerificationFailed",
                 error.message,
                 "setupPackage.publicKeyShareMaterial",
@@ -141,7 +141,7 @@ pub(in super::super) fn verify_optional_public_key_share_succinct_proofs(
         }
     };
     if !proof_set.is_object() {
-        return Ok(Some(public_key_share_succinct_proof_refusal(
+        return Ok(Some(public_key_refusal(
             "publicKeyShareSuccinctProofSetNotObject",
             "publicKeyShareSuccinctProofs must be a root-bound object",
             "setupPackage.publicKeyShareSuccinctProofs",
@@ -150,21 +150,21 @@ pub(in super::super) fn verify_optional_public_key_share_succinct_proofs(
     if proof_set.get("objectType").and_then(Value::as_str)
         != Some(PUBLIC_KEY_SHARE_SUCCINCT_PROOF_SET_OBJECT_TYPE)
     {
-        return Ok(Some(public_key_share_succinct_proof_refusal(
+        return Ok(Some(public_key_refusal(
             "publicKeyShareSuccinctProofSetTypeMismatch",
             "publicKeyShareSuccinctProofs.objectType must be PublicKeyShareSuccinctProofSet",
             "setupPackage.publicKeyShareSuccinctProofs.objectType",
         )?));
     }
     if proof_set.get("objectVersion").and_then(Value::as_u64) != Some(1) {
-        return Ok(Some(public_key_share_succinct_proof_refusal(
+        return Ok(Some(public_key_refusal(
             "publicKeyShareSuccinctProofSetVersionMismatch",
             "publicKeyShareSuccinctProofs.objectVersion must be 1",
             "setupPackage.publicKeyShareSuccinctProofs.objectVersion",
         )?));
     }
     if let Err(error) = verify_same_secret_context(proof_set, setup_context) {
-        return Ok(Some(public_key_share_succinct_proof_refusal(
+        return Ok(Some(public_key_refusal(
             "publicKeyShareSuccinctProofSetContextMismatch",
             error.message,
             "setupPackage.publicKeyShareSuccinctProofs",
@@ -172,7 +172,7 @@ pub(in super::super) fn verify_optional_public_key_share_succinct_proofs(
     }
     for (field_name, expected_value) in [("proofFamily", PUBLIC_KEY_SHARE_PROOF_FAMILY)] {
         if proof_set.get(field_name).and_then(Value::as_str) != Some(expected_value) {
-            return Ok(Some(public_key_share_succinct_proof_refusal(
+            return Ok(Some(public_key_refusal(
                 "publicKeyShareSuccinctProofSetParametersMismatch",
                 format!("publicKeyShareSuccinctProofs.{field_name} must be {expected_value}"),
                 format!("setupPackage.publicKeyShareSuccinctProofs.{field_name}"),
@@ -185,7 +185,7 @@ pub(in super::super) fn verify_optional_public_key_share_succinct_proofs(
         ("rnsLimbCount", DATA_PRIMES.len() as u64),
     ] {
         if proof_set.get(field_name).and_then(Value::as_u64) != Some(expected_value) {
-            return Ok(Some(public_key_share_succinct_proof_refusal(
+            return Ok(Some(public_key_refusal(
                 "publicKeyShareSuccinctProofSetCountMismatch",
                 format!("publicKeyShareSuccinctProofs.{field_name} must be {expected_value}"),
                 format!("setupPackage.publicKeyShareSuccinctProofs.{field_name}"),
@@ -229,21 +229,21 @@ pub(in super::super) fn verify_optional_public_key_share_succinct_proofs(
                 .get("publicKeyShareMaterialSetRoot")
                 .and_then(Value::as_str)
     {
-        return Ok(Some(public_key_share_succinct_proof_refusal(
+        return Ok(Some(public_key_refusal(
             "publicKeyShareSuccinctProofSetBindingMismatch",
             "publicKeyShareSuccinctProofs must bind accepted public randomness, same-secret, share, proof, and material roots",
             "setupPackage.publicKeyShareSuccinctProofs",
         )?));
     }
     let Some(proof_records_array) = proof_set.get("proofRecords").and_then(Value::as_array) else {
-        return Ok(Some(public_key_share_succinct_proof_refusal(
+        return Ok(Some(public_key_refusal(
             "publicKeyShareSuccinctProofRecordsMissing",
             "publicKeyShareSuccinctProofs.proofRecords must be present on the accepted proof set",
             "setupPackage.publicKeyShareSuccinctProofs.proofRecords",
         )?));
     };
     if proof_records_array.len() != roster.participant_count as usize {
-        return Ok(Some(public_key_share_succinct_proof_refusal(
+        return Ok(Some(public_key_refusal(
             "publicKeyShareSuccinctProofCountMismatch",
             "publicKeyShareSuccinctProofs.proofRecords must contain one proof per trustee",
             "setupPackage.publicKeyShareSuccinctProofs.proofRecords",
@@ -288,7 +288,7 @@ pub(in super::super) fn verify_optional_public_key_share_succinct_proofs(
         .filter_map(Result::err)
         .next()
     {
-        return Ok(Some(public_key_share_succinct_proof_refusal(
+        return Ok(Some(public_key_refusal(
             "publicKeyShareSuccinctProofVerificationFailed",
             error.message,
             "setupPackage.publicKeyShareSuccinctProofs.proofRecords",
@@ -298,7 +298,7 @@ pub(in super::super) fn verify_optional_public_key_share_succinct_proofs(
         .get("publicKeyShareSuccinctProofSetRoot")
         .and_then(Value::as_str)
     else {
-        return Ok(Some(public_key_share_succinct_proof_refusal(
+        return Ok(Some(public_key_refusal(
             "publicKeyShareSuccinctProofSetRootMissing",
             "publicKeyShareSuccinctProofs.publicKeyShareSuccinctProofSetRoot must be present on the accepted proof set",
             "setupPackage.publicKeyShareSuccinctProofs.publicKeyShareSuccinctProofSetRoot",
@@ -315,7 +315,7 @@ pub(in super::super) fn verify_optional_public_key_share_succinct_proofs(
         .remove("publicKeyShareSuccinctProofSetRoot");
     let expected_root = derive_canonical_object_hash(&root_input)?;
     if succinct_proof_set_root != expected_root {
-        return Ok(Some(public_key_share_succinct_proof_refusal(
+        return Ok(Some(public_key_refusal(
             "publicKeyShareSuccinctProofSetRootMismatch",
             "publicKeyShareSuccinctProofSetRoot does not match the canonical public-key share succinct proof set",
             "setupPackage.publicKeyShareSuccinctProofs.publicKeyShareSuccinctProofSetRoot",
@@ -330,7 +330,7 @@ pub(in super::super) fn verify_public_key_material_acceptance_boundary(
 ) -> CanonicalResult<Option<Value>> {
     for field_name in ["bgvPublicKey", "bgvPublicKeyRoot"] {
         if setup_package.get(field_name).is_some() {
-            return Ok(Some(public_key_share_proof_refusal(
+            return Ok(Some(public_key_refusal(
                 "publicKeyMaterialBeforeProofVerification",
                 "raw BGV public-key material is not accepted until accepted public-key proof-byte verifiers pass",
                 format!("setupPackage.{field_name}"),

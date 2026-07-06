@@ -1,8 +1,7 @@
 //! Real BDLOP/Ajtai witness commitment for the key-switch atom family.
 //!
-//! Unlike `commitment_round`, whose ring, dimensions, and matrix mixer are an
-//! explicit throughput-measurement placeholder, this module fixes the security
-//! parameters selected and estimator-checked in the commitment decision record:
+//! This module fixes the security parameters selected and estimator-checked in
+//! the commitment decision record:
 //!
 //! - commitment ring `R_c = Z_q[X]/(X^256 + 1)`, `q = 2^32 - 2^20 + 1`, a prime
 //!   with `2^16 | q - 1` so the shared negacyclic transform builds the size-256

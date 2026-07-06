@@ -38,7 +38,7 @@ pub(super) fn verify_collective_public_key_pair_consistency(
         } else {
             "setupPackage.collectivePublicKeyRoot"
         };
-        return Ok(Some(public_key_share_proof_refusal(
+        return Ok(Some(public_key_refusal(
             "publicKeyMaterialBeforeProofVerification",
             "collective public-key material is not accepted unless the aggregate object and package root are both present and root-bound",
             object_path,
@@ -58,14 +58,14 @@ pub(super) fn verify_collective_public_key_material(
         return Ok(None);
     }
     let Some(aggregate_object) = aggregate_object else {
-        return Ok(Some(public_key_share_proof_refusal(
+        return Ok(Some(public_key_refusal(
             "publicKeyMaterialBeforeProofVerification",
             "collective public-key material is not accepted unless it is root-bound to verified public-key share material and succinct proof records",
             "setupPackage.collectivePublicKeyRoot",
         )?));
     };
     if !aggregate_object.is_object() {
-        return Ok(Some(public_key_share_proof_refusal(
+        return Ok(Some(public_key_refusal(
             "collectivePublicKeyNotObject",
             "collectivePublicKey must be a root-bound object",
             "setupPackage.collectivePublicKey",
@@ -74,7 +74,7 @@ pub(super) fn verify_collective_public_key_material(
     if aggregate_object.get("objectType").and_then(Value::as_str)
         != Some(COLLECTIVE_PUBLIC_KEY_OBJECT_TYPE)
     {
-        return Ok(Some(public_key_share_proof_refusal(
+        return Ok(Some(public_key_refusal(
             "collectivePublicKeyTypeMismatch",
             "collectivePublicKey.objectType must be CollectivePublicKey",
             "setupPackage.collectivePublicKey.objectType",
@@ -85,7 +85,7 @@ pub(super) fn verify_collective_public_key_material(
         .and_then(Value::as_u64)
         != Some(1)
     {
-        return Ok(Some(public_key_share_proof_refusal(
+        return Ok(Some(public_key_refusal(
             "collectivePublicKeyVersionMismatch",
             "collectivePublicKey.objectVersion must be 1",
             "setupPackage.collectivePublicKey.objectVersion",
@@ -98,7 +98,7 @@ pub(super) fn verify_collective_public_key_material(
         )
     })?;
     if let Err(error) = verify_same_secret_context(aggregate_object, setup_context) {
-        return Ok(Some(public_key_share_proof_refusal(
+        return Ok(Some(public_key_refusal(
             "collectivePublicKeyContextMismatch",
             error.message,
             "setupPackage.collectivePublicKey",
@@ -112,7 +112,7 @@ pub(super) fn verify_collective_public_key_material(
         ),
     ] {
         if aggregate_object.get(field_name).and_then(Value::as_str) != Some(expected_value) {
-            return Ok(Some(public_key_share_proof_refusal(
+            return Ok(Some(public_key_refusal(
                 "collectivePublicKeyParametersMismatch",
                 format!("collectivePublicKey.{field_name} must be {expected_value}"),
                 format!("setupPackage.collectivePublicKey.{field_name}"),
@@ -163,7 +163,7 @@ pub(super) fn verify_collective_public_key_material(
     ) {
         Ok(bindings) => bindings,
         Err(error) => {
-            return Ok(Some(public_key_share_proof_refusal(
+            return Ok(Some(public_key_refusal(
                 "collectivePublicKeySourceMaterialVerificationFailed",
                 error.message,
                 "setupPackage.publicKeyShareMaterial",
@@ -181,7 +181,7 @@ pub(super) fn verify_collective_public_key_material(
         || aggregate_object.get("rnsLimbCount").and_then(Value::as_u64)
             != Some(DATA_PRIMES.len() as u64)
     {
-        return Ok(Some(public_key_share_proof_refusal(
+        return Ok(Some(public_key_refusal(
             "collectivePublicKeyParametersCountMismatch",
             "collectivePublicKey participant count, limb count, and ring degree must match the selected setup parameters",
             "setupPackage.collectivePublicKey",
@@ -244,7 +244,7 @@ pub(super) fn verify_collective_public_key_material(
     ];
     for (field_name, expected_value) in expected_source_bindings {
         if aggregate_object.get(field_name).and_then(Value::as_str) != expected_value {
-            return Ok(Some(public_key_share_proof_refusal(
+            return Ok(Some(public_key_refusal(
                 "collectivePublicKeySourceRootMismatch",
                 format!("collectivePublicKey.{field_name} must bind the verified source root"),
                 format!("setupPackage.collectivePublicKey.{field_name}"),
@@ -262,7 +262,7 @@ pub(super) fn verify_collective_public_key_material(
         })?,
         roster.participant_count,
     ) {
-        return Ok(Some(public_key_share_proof_refusal(
+        return Ok(Some(public_key_refusal(
             "collectivePublicKeyVerificationFailed",
             error.message,
             "setupPackage.collectivePublicKey",
@@ -274,7 +274,7 @@ pub(super) fn verify_collective_public_key_material(
         "collectivePublicKey.collectivePublicKeyRoot",
     )?;
     if aggregate_root.and_then(Value::as_str) != Some(collective_public_key_root) {
-        return Ok(Some(public_key_share_proof_refusal(
+        return Ok(Some(public_key_refusal(
             "collectivePublicKeyPackageRootMismatch",
             "setupPackage.collectivePublicKeyRoot must match collectivePublicKey.collectivePublicKeyRoot",
             "setupPackage.collectivePublicKeyRoot",
@@ -287,7 +287,7 @@ pub(super) fn verify_collective_public_key_material(
         .remove("collectivePublicKeyRoot");
     let expected_root = derive_canonical_object_hash(&root_input)?;
     if collective_public_key_root != expected_root {
-        return Ok(Some(public_key_share_proof_refusal(
+        return Ok(Some(public_key_refusal(
             "collectivePublicKeyRootMismatch",
             "collectivePublicKeyRoot does not match the canonical collective public key",
             "setupPackage.collectivePublicKey.collectivePublicKeyRoot",
@@ -296,7 +296,7 @@ pub(super) fn verify_collective_public_key_material(
     if ring_degree == POLYNOMIAL_DEGREE as u64
         && let Err(error) = accepted_setup_collective_public_key_from_package(setup_package)
     {
-        return Ok(Some(public_key_share_proof_refusal(
+        return Ok(Some(public_key_refusal(
             "collectivePublicKeyRuntimeMaterialInvalid",
             error.message,
             "setupPackage.collectivePublicKey",

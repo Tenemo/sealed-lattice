@@ -8,6 +8,7 @@ import {
     setupTransportedProofMaterialFields,
     type TransportedSetupProofMaterialSet,
 } from '../setup-proof-material-transport.js';
+
 import {
     sameSecretBridgeProofBytesHashDomain,
     sameSecretBridgeProofFamily,

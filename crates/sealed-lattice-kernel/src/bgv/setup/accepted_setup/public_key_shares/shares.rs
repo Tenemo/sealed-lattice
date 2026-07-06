@@ -16,7 +16,7 @@ pub(in super::super) fn verify_public_key_shares(
         )?));
     };
     if !share_set.is_object() {
-        return Ok(Some(public_key_share_refusal(
+        return Ok(Some(public_key_refusal(
             "publicKeySharesNotObject",
             "publicKeyShares must be a root-bound object, not an array or scalar",
             "setupPackage.publicKeyShares",
@@ -24,14 +24,14 @@ pub(in super::super) fn verify_public_key_shares(
     }
     if share_set.get("objectType").and_then(Value::as_str) != Some(PUBLIC_KEY_SHARE_SET_OBJECT_TYPE)
     {
-        return Ok(Some(public_key_share_refusal(
+        return Ok(Some(public_key_refusal(
             "publicKeyShareSetTypeMismatch",
             "publicKeyShares.objectType must be PublicKeyShareSet",
             "setupPackage.publicKeyShares.objectType",
         )?));
     }
     if share_set.get("objectVersion").and_then(Value::as_u64) != Some(1) {
-        return Ok(Some(public_key_share_refusal(
+        return Ok(Some(public_key_refusal(
             "publicKeyShareSetVersionMismatch",
             "publicKeyShares.objectVersion must be 1",
             "setupPackage.publicKeyShares.objectVersion",
@@ -45,7 +45,7 @@ pub(in super::super) fn verify_public_key_shares(
         )
     })?;
     if let Err(error) = verify_same_secret_context(share_set, setup_context) {
-        return Ok(Some(public_key_share_refusal(
+        return Ok(Some(public_key_refusal(
             "publicKeyShareSetContextMismatch",
             error.message,
             "setupPackage.publicKeyShares",
@@ -57,7 +57,7 @@ pub(in super::super) fn verify_public_key_shares(
         ("rnsLimbCount", DATA_PRIMES.len() as u64),
     ] {
         if share_set.get(field_name).and_then(Value::as_u64) != Some(expected_value) {
-            return Ok(Some(public_key_share_refusal(
+            return Ok(Some(public_key_refusal(
                 "publicKeyShareSetCountMismatch",
                 format!("publicKeyShares.{field_name} must be {expected_value}"),
                 format!("setupPackage.publicKeyShares.{field_name}"),
@@ -66,12 +66,9 @@ pub(in super::super) fn verify_public_key_shares(
     }
 
     let common_binding = public_key_common_binding(setup_package)?;
-    if let Some(response) = verify_public_key_common_fields(
-        share_set,
-        &common_binding,
-        "publicKeyShares",
-        PublicKeyRefusalKind::Share,
-    )? {
+    if let Some(response) =
+        verify_public_key_common_fields(share_set, &common_binding, "publicKeyShares")?
+    {
         return Ok(Some(response));
     }
     let same_secret_consistency_root = same_secret_consistency_root_from_package(setup_package)?;
@@ -80,7 +77,7 @@ pub(in super::super) fn verify_public_key_shares(
         .and_then(Value::as_str)
         != Some(same_secret_consistency_root.as_str())
     {
-        return Ok(Some(public_key_share_refusal(
+        return Ok(Some(public_key_refusal(
             "publicKeyShareSameSecretRootMismatch",
             "publicKeyShares.sameSecretConsistencyRoot must match accepted same-secret statements",
             "setupPackage.publicKeyShares.sameSecretConsistencyRoot",
@@ -98,7 +95,7 @@ pub(in super::super) fn verify_public_key_shares(
         )?));
     };
     if share_records.len() != roster.participant_count as usize {
-        return Ok(Some(public_key_share_refusal(
+        return Ok(Some(public_key_refusal(
             "publicKeyShareCountMismatch",
             "publicKeyShares.shareRecords must contain one share per trustee",
             "setupPackage.publicKeyShares.shareRecords",
@@ -140,7 +137,7 @@ pub(in super::super) fn verify_public_key_shares(
         .remove("publicKeyShareSetRoot");
     let expected_root = derive_canonical_object_hash(&root_input)?;
     if public_key_share_set_root != expected_root {
-        return Ok(Some(public_key_share_refusal(
+        return Ok(Some(public_key_refusal(
             "publicKeyShareSetRootMismatch",
             "publicKeyShareSetRoot does not match the canonical public-key share set",
             "setupPackage.publicKeyShares.publicKeyShareSetRoot",
@@ -159,7 +156,7 @@ fn verify_public_key_share_record(
     seen_roster_positions: &mut BTreeSet<u64>,
 ) -> CanonicalResult<Option<Value>> {
     if !share_record.is_object() {
-        return Ok(Some(public_key_share_refusal(
+        return Ok(Some(public_key_refusal(
             "publicKeyShareNotObject",
             "public-key share records must be objects",
             "setupPackage.publicKeyShares.shareRecords",
@@ -167,21 +164,21 @@ fn verify_public_key_share_record(
     }
     if share_record.get("objectType").and_then(Value::as_str) != Some(PUBLIC_KEY_SHARE_OBJECT_TYPE)
     {
-        return Ok(Some(public_key_share_refusal(
+        return Ok(Some(public_key_refusal(
             "publicKeyShareTypeMismatch",
             "public-key share objectType must be PublicKeyShare",
             "setupPackage.publicKeyShares.shareRecords.objectType",
         )?));
     }
     if share_record.get("objectVersion").and_then(Value::as_u64) != Some(1) {
-        return Ok(Some(public_key_share_refusal(
+        return Ok(Some(public_key_refusal(
             "publicKeyShareVersionMismatch",
             "public-key share objectVersion must be 1",
             "setupPackage.publicKeyShares.shareRecords.objectVersion",
         )?));
     }
     if let Err(error) = verify_same_secret_context(share_record, setup_context) {
-        return Ok(Some(public_key_share_refusal(
+        return Ok(Some(public_key_refusal(
             "publicKeyShareContextMismatch",
             error.message,
             "setupPackage.publicKeyShares.shareRecords",
@@ -189,7 +186,7 @@ fn verify_public_key_share_record(
     }
     for (field_name, expected_value) in [("shareComponent", "component-zero-b_i")] {
         if share_record.get(field_name).and_then(Value::as_str) != Some(expected_value) {
-            return Ok(Some(public_key_share_refusal(
+            return Ok(Some(public_key_refusal(
                 "publicKeyShareParametersMismatch",
                 format!("public-key share {field_name} must be {expected_value}"),
                 format!("setupPackage.publicKeyShares.shareRecords.{field_name}"),
@@ -197,7 +194,7 @@ fn verify_public_key_share_record(
         }
     }
     if share_record.get("rnsLimbCount").and_then(Value::as_u64) != Some(DATA_PRIMES.len() as u64) {
-        return Ok(Some(public_key_share_refusal(
+        return Ok(Some(public_key_refusal(
             "publicKeyShareRnsLimbCountMismatch",
             "public-key share rnsLimbCount must match Q_share",
             "setupPackage.publicKeyShares.shareRecords.rnsLimbCount",
@@ -207,7 +204,6 @@ fn verify_public_key_share_record(
         share_record,
         common_binding,
         "publicKeyShares.shareRecords",
-        PublicKeyRefusalKind::Share,
     )? {
         return Ok(Some(response));
     }
@@ -215,7 +211,7 @@ fn verify_public_key_share_record(
     let trustee_identity = value_string(share_record, "trusteeIdentity")?;
     let trustee_roster_position = value_u64(share_record, "trusteeRosterPosition")?;
     if !seen_roster_positions.insert(trustee_roster_position) {
-        return Ok(Some(public_key_share_refusal(
+        return Ok(Some(public_key_refusal(
             "publicKeyShareDuplicate",
             "public-key share records must have distinct trustee roster positions",
             "setupPackage.publicKeyShares.shareRecords",
@@ -226,21 +222,21 @@ fn verify_public_key_share_record(
         .map(String::as_str)
         != Some(trustee_identity)
     {
-        return Ok(Some(public_key_share_refusal(
+        return Ok(Some(public_key_refusal(
             "publicKeyShareTrusteeMismatch",
             "public-key share trustee identity must match the accepted setup roster",
             "setupPackage.publicKeyShares.shareRecords.trusteeIdentity",
         )?));
     }
     let Some(same_secret_binding) = same_secret_bindings.get(&trustee_roster_position) else {
-        return Ok(Some(public_key_share_refusal(
+        return Ok(Some(public_key_refusal(
             "publicKeyShareSameSecretMissing",
             "public-key share must reference an accepted same-secret statement",
             "setupPackage.publicKeyShares.shareRecords.trusteeRosterPosition",
         )?));
     };
     if same_secret_binding.trustee_identity != trustee_identity {
-        return Ok(Some(public_key_share_refusal(
+        return Ok(Some(public_key_refusal(
             "publicKeyShareSameSecretTrusteeMismatch",
             "public-key share trustee must match the same-secret statement trustee",
             "setupPackage.publicKeyShares.shareRecords.trusteeIdentity",
@@ -255,7 +251,7 @@ fn verify_public_key_share_record(
             .and_then(Value::as_str)
             != Some(same_secret_binding.same_secret_statement_root.as_str())
     {
-        return Ok(Some(public_key_share_refusal(
+        return Ok(Some(public_key_refusal(
             "publicKeyShareSameSecretBindingMismatch",
             "public-key share must bind the accepted trustee secret and same-secret statement roots",
             "setupPackage.publicKeyShares.shareRecords.sameSecretStatementRoot",
@@ -291,7 +287,7 @@ fn verify_public_key_share_record(
         .remove("publicKeyShareRoot");
     let expected_root = derive_canonical_object_hash(&root_input)?;
     if public_key_share_root != expected_root {
-        return Ok(Some(public_key_share_refusal(
+        return Ok(Some(public_key_refusal(
             "publicKeyShareRootMismatch",
             "publicKeyShareRoot does not match the canonical public-key share",
             "setupPackage.publicKeyShares.shareRecords.publicKeyShareRoot",

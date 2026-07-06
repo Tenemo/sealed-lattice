@@ -38,23 +38,18 @@ pub(super) fn transport_direct_ballot_binary_proof(
             format!("{label} transport requires non-empty binary proof bytes"),
         ));
     }
-    let chunk_count =
-        chunk_count_for_bytes(proof_bytes.len(), DIRECT_BALLOT_PROTOTYPE_PROOF_CHUNK_BYTES)?;
+    let chunk_count = chunk_count_for_bytes(proof_bytes.len(), PROTOTYPE_PROOF_CHUNK_BYTES)?;
     let mut transported_proof_bytes = Vec::with_capacity(proof_bytes.len());
     let mut chunk_hashes = Vec::with_capacity(chunk_count);
     let mut observed_chunk_count = 0_usize;
-    for (chunk_index, chunk) in proof_bytes
-        .chunks(DIRECT_BALLOT_PROTOTYPE_PROOF_CHUNK_BYTES)
-        .enumerate()
-    {
-        if chunk.is_empty() || chunk.len() > DIRECT_BALLOT_PROTOTYPE_PROOF_CHUNK_BYTES {
+    for (chunk_index, chunk) in proof_bytes.chunks(PROTOTYPE_PROOF_CHUNK_BYTES).enumerate() {
+        if chunk.is_empty() || chunk.len() > PROTOTYPE_PROOF_CHUNK_BYTES {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
                 format!("{label} transport produced a malformed chunk"),
             ));
         }
-        if chunk_index + 1 < chunk_count && chunk.len() != DIRECT_BALLOT_PROTOTYPE_PROOF_CHUNK_BYTES
-        {
+        if chunk_index + 1 < chunk_count && chunk.len() != PROTOTYPE_PROOF_CHUNK_BYTES {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
                 format!("{label} transport has a short non-final chunk"),
@@ -86,15 +81,12 @@ pub(super) fn transport_direct_ballot_binary_proof(
             format!("{label} transported proof bytes do not match the proof hash"),
         ));
     }
-    let chunk_merkle_root = chunk_root(
-        &transported_proof_bytes,
-        DIRECT_BALLOT_PROTOTYPE_PROOF_CHUNK_BYTES,
-    )?;
+    let chunk_merkle_root = chunk_root(&transported_proof_bytes, PROTOTYPE_PROOF_CHUNK_BYTES)?;
     verify_direct_ballot_public_proof_transport(
         &transported_proof_bytes,
         expected_proof_bytes_hash,
         &chunk_hashes,
-        DIRECT_BALLOT_PROTOTYPE_PROOF_CHUNK_BYTES,
+        PROTOTYPE_PROOF_CHUNK_BYTES,
         &chunk_merkle_root,
     )?;
     let public_transport_hash =
@@ -104,7 +96,7 @@ pub(super) fn transport_direct_ballot_binary_proof(
             statement_hash,
             proof_bytes_hash: expected_proof_bytes_hash,
             proof_byte_length: proof_bytes.len(),
-            chunk_size_bytes: DIRECT_BALLOT_PROTOTYPE_PROOF_CHUNK_BYTES,
+            chunk_size_bytes: PROTOTYPE_PROOF_CHUNK_BYTES,
             chunk_count,
             chunk_hashes: &chunk_hashes,
             chunk_merkle_root: &chunk_merkle_root,

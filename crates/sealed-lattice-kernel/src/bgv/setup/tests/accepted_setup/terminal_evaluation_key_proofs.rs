@@ -92,7 +92,7 @@ fn heavy_accepted_setup_terminal_trustee_evaluation_key_proofs_pass_the_evaluati
         .as_str()
         .unwrap_or_default();
     assert!(
-        result["verifierStatus"] == "accepted"
+        result["isValid"] == true
             || refusal_reason == "vssCoefficientCommitmentMaterialOutsideAcceptedRing"
             || refusal_reason == "vssCoefficientCommitmentMaterialOutsideProfile",
         "reduced-ring terminal package must either accept or stop only at the \
@@ -139,8 +139,7 @@ fn heavy_accepted_setup_terminal_tampered_trustee_evaluation_key_proof_is_refuse
     // The tampered proof no longer matches the statement the verifier rebuilds,
     // so the succinct evaluation-key verifier rejects it during the
     // relinearization round-one phase, before the reduced-ring boundary is
-    // reached. The refusal is reported through isValid/refusedObjects (the
-    // evaluation-key phase does not set the terminal verifierStatus field).
+    // reached. The refusal is reported through isValid/refusedObjects.
     assert_eq!(result["isValid"], false, "{}", context());
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
@@ -193,10 +192,10 @@ fn heavy_accepted_setup_empty_evaluation_key_objects_with_collective_public_key_
     // caught either by the reduced-ring profile boundary (which runs before the
     // terminal required-material gate) or, on a full ring, by the terminal
     // required public evaluation-key material gate that treats the empty
-    // evaluationKeys as missing. Either way, acceptance is refused/withheld.
-    assert_ne!(
-        result["verifierStatus"],
-        "accepted",
+    // evaluationKeys as missing. Either way, isValid remains false.
+    assert_eq!(
+        result["isValid"],
+        false,
         "a package with empty evaluation-key objects and a collective public key must not be accepted: {}",
         context()
     );

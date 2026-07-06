@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn direct_encrypted_ballot_command_rejects_more_than_twenty_ballots() {
     let setup_package = setup_package_not_reached();
-    let ballots = (0..=DIRECT_BALLOT_MAXIMUM_PROTOTYPE_BALLOTS)
+    let ballots = (0..=MAXIMUM_PROTOTYPE_BALLOTS)
         .map(|ballot_index| {
             json!({
                 "voterIdentity": format!("voter-{}", ballot_index + 1),
@@ -27,9 +27,9 @@ fn direct_encrypted_ballot_command_rejects_more_than_twenty_ballots() {
     let error = run_direct_encrypted_ballot(&json!({
         "setupPackage": setup_package,
         "setupPrivateWitness": {
-            "setupSeed": DIRECT_BALLOT_TEST_SETUP_SEED
+            "setupSeed": TEST_SETUP_SEED
         },
-        "ballotEncryptionRandomness": direct_ballot_test_ballot_encryption_randomness(DIRECT_BALLOT_MAXIMUM_PROTOTYPE_BALLOTS + 1),
+        "ballotEncryptionRandomness": direct_ballot_test_ballot_encryption_randomness(MAXIMUM_PROTOTYPE_BALLOTS + 1),
         "ballots": ballots
     }))
     .expect_err("oversized direct ballot batch must reject before encryption");
@@ -44,7 +44,7 @@ fn direct_encrypted_ballot_command_rejects_missing_ballot_encryption_randomness(
     let error = run_direct_encrypted_ballot(&json!({
         "setupPackage": setup_package,
         "setupPrivateWitness": {
-            "setupSeed": DIRECT_BALLOT_TEST_SETUP_SEED
+            "setupSeed": TEST_SETUP_SEED
         },
         "proofMaskRandomness": direct_ballot_test_proof_mask_randomness(1),
         "ballots": [
@@ -75,7 +75,7 @@ fn direct_encrypted_ballot_command_rejects_ballot_embedded_encryption_seed() {
     let error = run_direct_encrypted_ballot(&json!({
         "setupPackage": setup_package,
         "setupPrivateWitness": {
-            "setupSeed": DIRECT_BALLOT_TEST_SETUP_SEED
+            "setupSeed": TEST_SETUP_SEED
         },
         "ballotEncryptionRandomness": direct_ballot_test_ballot_encryption_randomness(1),
         "proofMaskRandomness": direct_ballot_test_proof_mask_randomness(1),
@@ -113,10 +113,10 @@ fn direct_encrypted_ballot_command_rejects_reused_encryption_randomness() {
     let error = run_direct_encrypted_ballot(&json!({
         "setupPackage": setup_package,
         "setupPrivateWitness": {
-            "setupSeed": DIRECT_BALLOT_TEST_SETUP_SEED
+            "setupSeed": TEST_SETUP_SEED
         },
         "ballotEncryptionRandomness": {
-            "source": DIRECT_BALLOT_ENCRYPTION_RANDOMNESS_DEVELOPMENT_FIXTURE,
+            "source": ENCRYPTION_RANDOMNESS_DEVELOPMENT_FIXTURE,
             "encryptionSeedHexes": [
                 reused_randomness,
                 reused_randomness
@@ -141,11 +141,11 @@ fn direct_encrypted_ballot_command_rejects_reused_proof_randomness() {
     let error = run_direct_encrypted_ballot(&json!({
         "setupPackage": setup_package,
         "setupPrivateWitness": {
-            "setupSeed": DIRECT_BALLOT_TEST_SETUP_SEED
+            "setupSeed": TEST_SETUP_SEED
         },
         "ballotEncryptionRandomness": direct_ballot_test_ballot_encryption_randomness(2),
         "proofMaskRandomness": {
-            "source": DIRECT_BALLOT_PROOF_MASK_RANDOMNESS_DEVELOPMENT_FIXTURE,
+            "source": PROOF_MASK_RANDOMNESS_DEVELOPMENT_FIXTURE,
             "ballotProofRandomnessHexes": [
                 reused_randomness,
                 reused_randomness
@@ -169,14 +169,14 @@ fn direct_encrypted_ballot_command_rejects_proof_and_encryption_randomness_overl
     let error = run_direct_encrypted_ballot(&json!({
         "setupPackage": setup_package,
         "setupPrivateWitness": {
-            "setupSeed": DIRECT_BALLOT_TEST_SETUP_SEED
+            "setupSeed": TEST_SETUP_SEED
         },
         "ballotEncryptionRandomness": {
-            "source": DIRECT_BALLOT_ENCRYPTION_RANDOMNESS_DEVELOPMENT_FIXTURE,
+            "source": ENCRYPTION_RANDOMNESS_DEVELOPMENT_FIXTURE,
             "encryptionSeedHexes": [reused_randomness]
         },
         "proofMaskRandomness": {
-            "source": DIRECT_BALLOT_PROOF_MASK_RANDOMNESS_DEVELOPMENT_FIXTURE,
+            "source": PROOF_MASK_RANDOMNESS_DEVELOPMENT_FIXTURE,
             "ballotProofRandomnessHexes": [reused_randomness]
         },
         "ballots": [
@@ -199,7 +199,7 @@ fn direct_encrypted_ballot_command_rejects_duplicate_voter_identity() {
     let error = run_direct_encrypted_ballot(&json!({
         "setupPackage": setup_package,
         "setupPrivateWitness": {
-            "setupSeed": DIRECT_BALLOT_TEST_SETUP_SEED
+            "setupSeed": TEST_SETUP_SEED
         },
         "ballotEncryptionRandomness": direct_ballot_test_ballot_encryption_randomness(2),
         "ballots": [
@@ -243,7 +243,7 @@ fn direct_encrypted_ballot_command_rejects_wrong_voter_order() {
     let error = run_direct_encrypted_ballot(&json!({
         "setupPackage": setup_package,
         "setupPrivateWitness": {
-            "setupSeed": DIRECT_BALLOT_TEST_SETUP_SEED
+            "setupSeed": TEST_SETUP_SEED
         },
         "ballotEncryptionRandomness": direct_ballot_test_ballot_encryption_randomness(2),
         "ballots": [
@@ -287,7 +287,7 @@ fn direct_encrypted_ballot_command_rejects_invalid_score_before_proof_generation
     let error = run_direct_encrypted_ballot(&json!({
         "setupPackage": setup_package,
         "setupPrivateWitness": {
-            "setupSeed": DIRECT_BALLOT_TEST_SETUP_SEED
+            "setupSeed": TEST_SETUP_SEED
         },
         "ballotEncryptionRandomness": direct_ballot_test_ballot_encryption_randomness(1),
         "ballots": [

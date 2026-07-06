@@ -18,7 +18,7 @@ pub(super) fn verify_direct_ballot_aggregation(
     }
 
     let aggregate_slots = evaluator_key.decrypt_to_slots(&aggregate_ciphertext)?;
-    let aggregate_scores = aggregate_slots[..DIRECT_BALLOT_OPTION_COUNT].to_vec();
+    let aggregate_scores = aggregate_slots[..OPTION_COUNT].to_vec();
     let expected_scores = direct_ballot_plaintext_aggregate_scores(encrypted_ballots)?;
     if aggregate_scores != expected_scores {
         return Err(CanonicalError::new(
@@ -26,7 +26,7 @@ pub(super) fn verify_direct_ballot_aggregation(
             "direct encrypted ballot aggregate scores do not match the plaintext oracle",
         ));
     }
-    if aggregate_slots[DIRECT_BALLOT_OPTION_COUNT..]
+    if aggregate_slots[OPTION_COUNT..]
         .iter()
         .any(|slot| *slot != 0)
     {
@@ -55,9 +55,9 @@ pub(super) fn verify_direct_ballot_aggregation(
 pub(super) fn direct_ballot_plaintext_aggregate_scores(
     encrypted_ballots: &[DirectEncryptedBallot],
 ) -> CanonicalResult<Vec<u64>> {
-    let mut aggregate_scores = vec![0_u64; DIRECT_BALLOT_OPTION_COUNT];
+    let mut aggregate_scores = vec![0_u64; OPTION_COUNT];
     for encrypted_ballot in encrypted_ballots {
-        if encrypted_ballot.input.scores.len() != DIRECT_BALLOT_OPTION_COUNT {
+        if encrypted_ballot.input.scores.len() != OPTION_COUNT {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
                 "direct encrypted ballot aggregate oracle requires each ballot to have twenty scores",

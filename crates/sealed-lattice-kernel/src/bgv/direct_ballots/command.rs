@@ -6,7 +6,7 @@ pub(crate) fn run_direct_encrypted_ballot(request: &Value) -> CanonicalResult<Va
         required_string_path(request, &["setupPrivateWitness", "setupSeed"])?.to_string();
 
     let (ballots, ballot_encryption_randomness) = read_ballots(request)?;
-    if ballots.len() > DIRECT_BALLOT_MAXIMUM_PROTOTYPE_BALLOTS {
+    if ballots.len() > MAXIMUM_PROTOTYPE_BALLOTS {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
             "direct encrypted ballot command currently supports at most twenty ballots",
@@ -125,7 +125,7 @@ pub(crate) fn run_direct_encrypted_ballot(request: &Value) -> CanonicalResult<Va
         .collect::<Vec<_>>();
 
     Ok(json!({
-        "operation": DIRECT_BALLOT_OPERATION,
+        "operation": OPERATION,
         "parameters": {
             "bgvParametersHash": bgv_parameters_hash()?,
             "polynomialDegree": POLYNOMIAL_DEGREE,
@@ -133,7 +133,7 @@ pub(crate) fn run_direct_encrypted_ballot(request: &Value) -> CanonicalResult<Va
             "dataPrimeCount": DATA_PRIMES.len()
         },
         "ballotLayout": {
-            "optionCount": DIRECT_BALLOT_OPTION_COUNT,
+            "optionCount": OPTION_COUNT,
             "scoreSlots": "slots 0 through 19 hold one scalar score per option",
             "reservedSlots": "all remaining slots are zero before encryption",
             "scoreRange": "scores must be integers from 1 through 10"
@@ -164,9 +164,9 @@ pub(crate) fn run_direct_encrypted_ballot(request: &Value) -> CanonicalResult<Va
             "challenge": first_proof.challenge.to_string(),
             "proofTransport": {
                 "encoding": "binary proof chunks",
-                "chunkSizeBytes": DIRECT_BALLOT_PROTOTYPE_PROOF_CHUNK_BYTES,
+                "chunkSizeBytes": PROTOTYPE_PROOF_CHUNK_BYTES,
                 "chunksPerProof": first_proof.proof_chunk_count,
-                "chunksForBatch": chunk_count_for_bytes(total_proof_bytes, DIRECT_BALLOT_PROTOTYPE_PROOF_CHUNK_BYTES)?,
+                "chunksForBatch": chunk_count_for_bytes(total_proof_bytes, PROTOTYPE_PROOF_CHUNK_BYTES)?,
                 "transportedProofSizeBytes": first_proof.transported_proof_size_bytes,
                 "transportedProofBytesHash": first_proof.transported_proof_bytes_hash,
                 "firstProofChunkMerkleRoot": first_proof.proof_chunk_merkle_root,

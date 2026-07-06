@@ -14,6 +14,7 @@ pub(in super::super) fn verify_round_one_key_fri<const LIMB_COUNT: usize>(
         public,
         &KeySource::RoundOne,
         proof,
+        None,
         proof_parameters,
     )
 }
@@ -24,6 +25,7 @@ pub(in super::super) fn verify_key_fri<const LIMB_COUNT: usize>(
     public: &KeyPublic<LIMB_COUNT>,
     source: &KeySource<LIMB_COUNT>,
     proof: &KeyFriProof<LIMB_COUNT>,
+    linkage_statement: Option<&linkage::LinkageStatement<'_>>,
     proof_parameters: &KeyFriProofParameters,
 ) -> CanonicalResult<bool> {
     let layout = layout(ring_degree)?;
@@ -36,8 +38,12 @@ pub(in super::super) fn verify_key_fri<const LIMB_COUNT: usize>(
     let offset = coset_offset(parameters);
     let negacyclic = NegacyclicDomain::new(parameters, ring_degree)?;
     let table_count = carry_range_lookup::table_count(ring_degree);
-    let base_count = base_column_count(ring_degree, digit_count);
-    let aux_count = aux_column_count(ring_degree, digit_count);
+    let linkage_layout_data = match linkage_statement {
+        Some(_) => Some(linkage::linkage_layout(ring_degree)?),
+        None => None,
+    };
+    let base_count = base_column_count(ring_degree, digit_count, linkage_layout_data.as_ref());
+    let aux_count = aux_column_count(ring_degree, digit_count, linkage_layout_data.as_ref());
 
     // The logUp terminals in the proof must be shaped for this key, and the
     // cross-check `lookup = sum_k table_k` must hold before any query work.
@@ -56,11 +62,25 @@ pub(in super::super) fn verify_key_fri<const LIMB_COUNT: usize>(
 
     let mut transcript = Transcript::new(PROTOCOL_LABEL);
     absorb_public(&mut transcript, ring_degree, public, source);
+    transcript.absorb_u64(
+        "key-linkage-present",
+        u64::from(linkage_statement.is_some()),
+    );
+    if let Some(statement) = linkage_statement {
+        linkage::absorb_linkage_statement(&mut transcript, statement);
+    }
     transcript.absorb_digest("key-base-root", &proof.base_root);
     let gamma = transcript.challenge_field_elements(parameters, "key-gamma", ring_degree);
     let delta = transcript.challenge_field_elements(parameters, "key-delta", digit_count);
     let lookup_challenge = transcript.challenge_field_elements(parameters, "key-lookup-mu", 1);
     let mu = lookup_challenge[0];
+    let linkage_weights = linkage_statement.map(|_| {
+        transcript.challenge_field_elements(
+            parameters,
+            "key-linkage-omega",
+            linkage::linkage_claim_count(),
+        )
+    });
 
     transcript.absorb_digest("key-aux-root", &proof.aux_root);
     transcript.absorb_field_elements("key-lookup-terminal", &[proof.lookup_terminal]);
@@ -70,7 +90,7 @@ pub(in super::super) fn verify_key_fri<const LIMB_COUNT: usize>(
     let alpha = transcript.challenge_field_elements(
         parameters,
         "key-support-alpha",
-        support_constraint_count(ring_degree, digit_count),
+        support_constraint_count(ring_degree, digit_count, linkage_layout_data.as_ref()),
     );
 
     transcript.absorb_digest("key-quotient-root", &proof.quotient_root);
@@ -175,6 +195,35 @@ pub(in super::super) fn verify_key_fri<const LIMB_COUNT: usize>(
         .iter()
         .map(|table_polynomial| evaluate_at_slots(table_polynomial))
         .collect();
+    // Linkage: the public opening forms evaluated at the opened points, plus
+    // the constraint context for the support walk.
+    let linkage_forms = match (linkage_statement, &linkage_weights) {
+        (Some(statement), Some(weights)) => Some(linkage::build_linkage_forms(
+            parameters,
+            statement,
+            ring_degree,
+            weights,
+        )?),
+        _ => None,
+    };
+    let linkage_form_at_slot: Option<Vec<Vec<[u64; LIMB_COUNT]>>> =
+        linkage_forms.as_ref().map(|forms| {
+            forms
+                .digit_forms
+                .iter()
+                .chain(forms.randomness_forms.iter())
+                .chain(std::iter::once(&forms.carry_form))
+                .map(|form| evaluate_at_slots(&trace_domain.interpolate(form)))
+                .collect()
+        });
+    let linkage_context = match linkage_statement {
+        Some(statement) => Some(linkage::linkage_constraint_context(
+            parameters,
+            ring_degree,
+            statement.source_message_modulus,
+        )?),
+        None => None,
+    };
 
     let size_inverse =
         parameters.inverse(&parameters.unsigned_word_to_element(layout.trace_size as u64));
@@ -191,6 +240,9 @@ pub(in super::super) fn verify_key_fri<const LIMB_COUNT: usize>(
                 &proof.table_terminals[table_index],
             ),
         );
+    }
+    if let Some(forms) = &linkage_forms {
+        target = parameters.add(&target, &forms.target);
     }
     let target_over_size = parameters.multiply(&target, &size_inverse);
 
@@ -267,6 +319,35 @@ pub(in super::super) fn verify_key_fri<const LIMB_COUNT: usize>(
                     ),
                 );
             }
+            if let Some(layout_data) = linkage_layout_data.as_ref() {
+                let linkage_aux = aux_linkage_start(ring_degree, digit_count);
+                for offset in 0..linkage::linkage_aux_column_count(layout_data) {
+                    f_x = parameters.add(
+                        &f_x,
+                        &parameters.multiply(&sum_batch[0], &aux_values[linkage_aux + offset]),
+                    );
+                }
+                let forms_at_slot = linkage_form_at_slot
+                    .as_ref()
+                    .expect("linkage forms exist with a linkage statement");
+                let linkage_base = base_linkage_start(ring_degree, digit_count);
+                let form_columns = [
+                    linkage::link_digit(0),
+                    linkage::link_digit(1),
+                    linkage::link_randomness(layout_data, 0),
+                    linkage::link_randomness(layout_data, 1),
+                    linkage::link_carry(layout_data),
+                ];
+                for (form_values, column_offset) in forms_at_slot.iter().zip(form_columns) {
+                    f_x = parameters.add(
+                        &f_x,
+                        &parameters.multiply(
+                            &form_values[slot],
+                            &base_values[linkage_base + column_offset],
+                        ),
+                    );
+                }
+            }
             let sumcheck_rhs = parameters.add(
                 &parameters.add(
                     &target_over_size,
@@ -293,6 +374,7 @@ pub(in super::super) fn verify_key_fri<const LIMB_COUNT: usize>(
                 &table_values_at_point,
                 &mu,
                 &alpha,
+                linkage_context.as_ref(),
             );
             if v_x != parameters.multiply(&vanishing_x, &quotient_values[QUOTIENT_SUPPORT]) {
                 return Ok(false);

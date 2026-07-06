@@ -32,14 +32,14 @@ pub(super) fn encrypt_direct_ballot(
 }
 
 pub(super) fn validate_direct_ballot_input(ballot: &DirectBallotInput) -> CanonicalResult<()> {
-    if ballot.scores.len() != DIRECT_BALLOT_OPTION_COUNT {
+    if ballot.scores.len() != OPTION_COUNT {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
             "direct encrypted ballot requires exactly twenty scores",
         ));
     }
     for (option_index, score) in ballot.scores.iter().enumerate() {
-        if !(DIRECT_BALLOT_MINIMUM_SCORE..=DIRECT_BALLOT_MAXIMUM_SCORE).contains(score) {
+        if !(MINIMUM_SCORE..=MAXIMUM_SCORE).contains(score) {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
                 format!(
@@ -59,14 +59,14 @@ pub(super) fn validate_one_hot_witnesses(
     scores: &[u64],
     one_hot_witnesses: &[Vec<u64>],
 ) -> CanonicalResult<()> {
-    if one_hot_witnesses.len() != DIRECT_BALLOT_OPTION_COUNT {
+    if one_hot_witnesses.len() != OPTION_COUNT {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
             "direct encrypted ballot one-hot witness must have one row per option",
         ));
     }
     for (option_index, one_hot_row) in one_hot_witnesses.iter().enumerate() {
-        if one_hot_row.len() != DIRECT_BALLOT_SCORE_BUCKET_COUNT {
+        if one_hot_row.len() != SCORE_BUCKET_COUNT {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
                 "direct encrypted ballot one-hot witness rows must have ten entries",
@@ -114,23 +114,20 @@ pub(super) fn validate_direct_ballot_preflight(
             "direct encrypted ballot slot vector must match the polynomial degree",
         ));
     }
-    if ballot.slots[DIRECT_BALLOT_OPTION_COUNT..]
-        .iter()
-        .any(|slot| *slot != 0)
-    {
+    if ballot.slots[OPTION_COUNT..].iter().any(|slot| *slot != 0) {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             "direct encrypted ballot reserved slots must be zero",
         ));
     }
     let decrypted_slots = evaluator_key.decrypt_to_slots(&ballot.ciphertext)?;
-    if decrypted_slots[..DIRECT_BALLOT_OPTION_COUNT] != ballot.input.scores[..] {
+    if decrypted_slots[..OPTION_COUNT] != ballot.input.scores[..] {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             "direct encrypted ballot does not decrypt to the submitted score slots",
         ));
     }
-    if decrypted_slots[DIRECT_BALLOT_OPTION_COUNT..]
+    if decrypted_slots[OPTION_COUNT..]
         .iter()
         .any(|slot| *slot != 0)
     {

@@ -1,5 +1,8 @@
 use super::*;
-use crate::bgv::setup_helpers::compare_required_string;
+use crate::bgv::setup_helpers::{
+    compare_required_string, compare_required_u64, read_positive_u64_at_path,
+    read_positive_usize_at_path,
+};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -12,7 +15,7 @@ pub(crate) const VSS_PUBLIC_MESSAGE_BASE_DIGIT_TRIT_COUNT: usize = 17;
 pub(crate) const VSS_PUBLIC_MESSAGE_DIGIT_BASE: u64 = 129_140_163;
 pub(crate) const VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT: usize = 2;
 pub(in crate::bgv::setup) const VSS_PUBLIC_RANDOMNESS_PROJECTION_WEIGHT: usize = 32;
-const VSS_PUBLIC_COMMITMENT_MODULUS_LIMB_INDICES: [usize; 3] = [0, 1, 2];
+pub(in crate::bgv::setup) const VSS_PUBLIC_COMMITMENT_MODULUS_LIMB_INDICES: [usize; 3] = [0, 1, 2];
 const VSS_PUBLIC_SAMPLER_DOMAIN: &str = "sealed-lattice-vss-public-commitment/sampler-v1";
 const VSS_PUBLIC_MATRIX_RESIDUE_HASH_DOMAIN: &str =
     "sealed-lattice-vss-public-commitment/matrix-residue-v1";
@@ -531,6 +534,13 @@ pub(in crate::bgv::setup) use message_encoding::{
     vss_public_message_digit_bound, vss_public_message_digit_column_label,
     vss_public_message_digit_only_encoding_layout, vss_public_message_digit_trits_for_count,
     vss_public_message_digit_weight, vss_public_message_digits, vss_public_message_encoding_layout,
+};
+// Consumed by the test-gated key-switch atom family backend same-secret
+// linkage; the gate comes off when the backend takes over the trustee
+// evaluation-key command path.
+#[cfg(test)]
+pub(in crate::bgv::setup) use message_encoding::{
+    vss_public_message_coverage_terms_per_coordinate, vss_public_randomness_column_label,
 };
 pub(crate) use record_verification::validate_standalone_vss_public_commitment_body;
 pub(in crate::bgv::setup) use sampler::{ProjectionTermsInput, projection_terms};

@@ -155,8 +155,20 @@ fn base_multiplicity_start(digit_count: usize) -> usize {
     SHARED_COLUMN_COUNT + digit_count * DIGIT_BLOCK_SIZE
 }
 
-fn base_column_count(ring_degree: usize, digit_count: usize) -> usize {
+// Index of the first linkage base column (after the multiplicity columns).
+fn base_linkage_start(ring_degree: usize, digit_count: usize) -> usize {
     base_multiplicity_start(digit_count) + carry_range_lookup::table_count(ring_degree)
+}
+
+fn base_column_count(
+    ring_degree: usize,
+    digit_count: usize,
+    linkage_layout: Option<&linkage::LinkageLayout>,
+) -> usize {
+    base_linkage_start(ring_degree, digit_count)
+        + linkage_layout
+            .map(linkage::linkage_base_column_count)
+            .unwrap_or(0)
 }
 
 fn digit_column(digit: usize, offset_in_block: usize) -> usize {
@@ -168,7 +180,7 @@ fn base_multiplicity_column(digit_count: usize, table_index: usize) -> usize {
 }
 
 // Round-2 auxiliary columns (challenge-dependent, committed after the logUp
-// challenge is drawn): one lookup fraction column per digit then one table
+// challenge is drawn): one lookup fraction column per digit, then one table
 // fraction column per table chunk.
 fn aux_lookup_column(digit: usize) -> usize {
     digit
@@ -178,8 +190,20 @@ fn aux_table_fraction_column(digit_count: usize, table_index: usize) -> usize {
     digit_count + table_index
 }
 
-fn aux_column_count(ring_degree: usize, digit_count: usize) -> usize {
+// Index of the first linkage aux fraction column.
+fn aux_linkage_start(ring_degree: usize, digit_count: usize) -> usize {
     digit_count + carry_range_lookup::table_count(ring_degree)
+}
+
+fn aux_column_count(
+    ring_degree: usize,
+    digit_count: usize,
+    linkage_layout: Option<&linkage::LinkageLayout>,
+) -> usize {
+    aux_linkage_start(ring_degree, digit_count)
+        + linkage_layout
+            .map(linkage::linkage_aux_column_count)
+            .unwrap_or(0)
 }
 
 // Quotient columns: one sumcheck quotient, one sumcheck g, one support quotient.
@@ -217,9 +241,11 @@ fn layout(ring_degree: usize) -> CanonicalResult<Layout> {
 
 mod columns;
 mod constraints;
+mod linkage;
 mod prove;
 mod verify;
 
+pub(super) use linkage::{LinkageStatement, LinkageWitness};
 pub(super) use prove::{prove_key_fri, prove_round_one_key_fri};
 pub(super) use verify::{verify_key_fri, verify_round_one_key_fri};
 

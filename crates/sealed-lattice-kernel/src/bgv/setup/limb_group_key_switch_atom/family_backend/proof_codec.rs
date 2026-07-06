@@ -113,6 +113,15 @@ impl<'a, const LIMB_COUNT: usize> Reader<'a, LIMB_COUNT> {
         Ok(slice)
     }
 
+    // Upper bound on how many more elements can possibly remain: every element
+    // consumes at least one byte, so a count-prefix larger than this is a
+    // malformed stream. Used to cap `Vec::with_capacity` against the byte budget
+    // so an attacker-controlled length prefix cannot force a huge speculative
+    // allocation before the elements themselves are read.
+    fn remaining_element_bound(&self) -> usize {
+        self.bytes.len().saturating_sub(self.position)
+    }
+
     fn read_u32(&mut self) -> CanonicalResult<usize> {
         let slice = self.take(4)?;
         Ok(u32::from_le_bytes(slice.try_into().expect("four bytes")) as usize)
@@ -185,10 +194,10 @@ fn read_fri<const LIMB_COUNT: usize>(
     let layer_roots = reader.read_digest_vec()?;
     let final_coefficients = reader.read_field_vec()?;
     let answer_count = reader.read_u32()?;
-    let mut query_answers = Vec::with_capacity(answer_count);
+    let mut query_answers = Vec::with_capacity(answer_count.min(reader.remaining_element_bound()));
     for _ in 0..answer_count {
         let layer_count = reader.read_u32()?;
-        let mut layers = Vec::with_capacity(layer_count);
+        let mut layers = Vec::with_capacity(layer_count.min(reader.remaining_element_bound()));
         for _ in 0..layer_count {
             let value = reader.read_field()?;
             let sibling_value = reader.read_field()?;
@@ -232,7 +241,7 @@ fn read_column_opening<const LIMB_COUNT: usize>(
     reader: &mut Reader<'_, LIMB_COUNT>,
 ) -> CanonicalResult<ColumnOpening<LIMB_COUNT>> {
     let row_count = reader.read_u32()?;
-    let mut rows = Vec::with_capacity(row_count);
+    let mut rows = Vec::with_capacity(row_count.min(reader.remaining_element_bound()));
     for _ in 0..row_count {
         let index = reader.read_u32()?;
         let values = reader.read_field_vec()?;

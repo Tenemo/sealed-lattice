@@ -5,7 +5,10 @@ use super::setup_proof::{
 };
 use super::vss_commitment::VSS_PUBLIC_COMMITMENT_BINARY_FORMAT;
 use super::*;
-use crate::bgv::setup_helpers::compare_required_string;
+use crate::bgv::setup_helpers::{
+    compare_required_string, compare_required_u64, read_positive_u64_at_path,
+    read_positive_usize_at_path,
+};
 use std::sync::Arc;
 
 const SAME_SECRET_PROOF_FAMILY: &str = "same-secret-linkage-anchor";
@@ -455,6 +458,7 @@ mod anchor_transport;
 mod bridge_transport;
 mod reconstructed;
 mod statement_record;
+mod transport_common;
 
 use anchor_evidence::*;
 #[cfg(test)]

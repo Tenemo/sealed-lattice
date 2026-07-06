@@ -73,17 +73,13 @@ pub(super) fn run_direct_ballot_packed_batched_pair_evaluator_for_top_counts(
         };
     let working_aggregate = modulus_switch_to(aggregate_ciphertext, context.working_level())?;
     let replay_started = DirectBallotTimingStart::now();
-    let packed_scores = pack_direct_score_slots(
-        &context,
-        &working_aggregate,
-        DIRECT_BALLOT_OPTION_COUNT,
-        &replay_seed,
-    )?;
+    let packed_scores =
+        pack_direct_score_slots(&context, &working_aggregate, OPTION_COUNT, &replay_seed)?;
     drop(working_aggregate);
     let rank_evaluation = evaluate_packed_rank_evaluation_from_packed_scores_with_batched_pairs(
         &context,
         &packed_scores,
-        DIRECT_BALLOT_OPTION_COUNT,
+        OPTION_COUNT,
         score_domain_max,
         &replay_seed,
     )?;
@@ -91,11 +87,11 @@ pub(super) fn run_direct_ballot_packed_batched_pair_evaluator_for_top_counts(
 
     let mut evaluations = Vec::with_capacity(top_counts.len());
     for top_count in top_counts {
-        let target_layout_root = target_layout_hash(DIRECT_BALLOT_OPTION_COUNT)?;
+        let target_layout_root = target_layout_hash(OPTION_COUNT)?;
         let target = project_packed_sparse_target_from_rank_evaluation(
             &context,
             &rank_evaluation,
-            DIRECT_BALLOT_OPTION_COUNT,
+            OPTION_COUNT,
             *top_count,
         )?;
         let replay_time_milliseconds = replay_started.elapsed_milliseconds();
@@ -177,22 +173,22 @@ pub(super) fn run_direct_ballot_packed_batched_pair_evaluator_for_top_counts(
 }
 
 pub(super) fn direct_packed_option_slots(slots: &[u64]) -> Vec<u64> {
-    (0..DIRECT_BALLOT_OPTION_COUNT)
+    (0..OPTION_COUNT)
         .map(|option| slots[packed_score_slot(option)])
         .collect()
 }
 
 pub(super) fn direct_ballot_evaluator_working_level(ballot_count: usize) -> usize {
     if ballot_count == 1 {
-        DIRECT_BALLOT_SINGLE_BALLOT_TARGET_WORKING_LEVEL
+        SINGLE_BALLOT_TARGET_WORKING_LEVEL
     } else {
-        DIRECT_BALLOT_DEFAULT_EVALUATOR_WORKING_LEVEL
+        DEFAULT_EVALUATOR_WORKING_LEVEL
     }
 }
 
 pub(super) fn direct_ballot_comparison_domain_max(ballot_count: usize) -> CanonicalResult<u64> {
     let ballot_count_u64 = usize_to_u64(ballot_count, "ballot count")?;
-    let score_span = DIRECT_BALLOT_MAXIMUM_SCORE - DIRECT_BALLOT_MINIMUM_SCORE;
+    let score_span = MAXIMUM_SCORE - MINIMUM_SCORE;
 
     score_span.checked_mul(ballot_count_u64).ok_or_else(|| {
         CanonicalError::new(
@@ -206,13 +202,13 @@ pub(super) fn direct_ballot_plaintext_target_slots(
     aggregate_scores: &[u64],
     top_count: usize,
 ) -> CanonicalResult<(Vec<u64>, Vec<u64>)> {
-    if aggregate_scores.len() != DIRECT_BALLOT_OPTION_COUNT {
+    if aggregate_scores.len() != OPTION_COUNT {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
             "direct encrypted ballot target oracle requires twenty aggregate scores",
         ));
     }
-    if top_count == 0 || top_count > DIRECT_BALLOT_OPTION_COUNT {
+    if top_count == 0 || top_count > OPTION_COUNT {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
             "topCount must be between one and the direct ballot option count",
@@ -228,12 +224,12 @@ pub(super) fn direct_ballot_plaintext_target_slots(
             .cmp(left_score)
             .then_with(|| left_option.cmp(right_option))
     });
-    let mut ranks_by_option = [0_usize; DIRECT_BALLOT_OPTION_COUNT];
+    let mut ranks_by_option = [0_usize; OPTION_COUNT];
     for (rank, (option_index, _)) in ranked_options.iter().enumerate() {
         ranks_by_option[*option_index] = rank;
     }
-    let mut target_ids = vec![0_u64; DIRECT_BALLOT_OPTION_COUNT];
-    let mut target_orders = vec![0_u64; DIRECT_BALLOT_OPTION_COUNT];
+    let mut target_ids = vec![0_u64; OPTION_COUNT];
+    let mut target_orders = vec![0_u64; OPTION_COUNT];
     for (option_index, rank) in ranks_by_option.iter().enumerate() {
         if *rank < top_count {
             target_ids[option_index] = usize_to_u64(option_index + 1, "option identifier")?;

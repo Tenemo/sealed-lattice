@@ -3,11 +3,9 @@ use super::*;
 #[test]
 fn direct_ballot_aggregation_matches_plaintext_oracle_for_multiple_ballots() {
     let setup_package = setup_package();
-    let evaluator_key = development_evaluator_key_from_passive_setup_package(
-        &setup_package,
-        DIRECT_BALLOT_TEST_SETUP_SEED,
-    )
-    .expect("evaluator key");
+    let evaluator_key =
+        development_evaluator_key_from_passive_setup_package(&setup_package, TEST_SETUP_SEED)
+            .expect("evaluator key");
     let first_ballot = encrypt_direct_ballot(&setup_package, &evaluator_key, valid_ballot_input())
         .expect("first encrypted ballot");
     let mut second_input = valid_ballot_input();

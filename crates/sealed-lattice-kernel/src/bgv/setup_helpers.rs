@@ -316,3 +316,50 @@ pub(super) fn compare_derived_hash(
 
     Ok(())
 }
+
+pub(super) fn compare_required_u64(
+    actual: u64,
+    expected: u64,
+    description: &str,
+) -> CanonicalResult<()> {
+    if actual != expected {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ComponentMismatch,
+            format!("passive BGV setup package {description} does not match its canonical binding"),
+        ));
+    }
+
+    Ok(())
+}
+
+pub(super) fn read_positive_usize_at_path(
+    value: &Value,
+    path: &[&str],
+    description: &str,
+) -> CanonicalResult<usize> {
+    let field = usize_at_path(value, path)?;
+    if field == 0 {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            format!("{description} must be positive"),
+        ));
+    }
+
+    Ok(field)
+}
+
+pub(super) fn read_positive_u64_at_path(
+    value: &Value,
+    path: &[&str],
+    description: &str,
+) -> CanonicalResult<u64> {
+    let field = unsigned_at_path(value, path)?;
+    if field == 0 {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            format!("{description} must be positive"),
+        ));
+    }
+
+    Ok(field)
+}
