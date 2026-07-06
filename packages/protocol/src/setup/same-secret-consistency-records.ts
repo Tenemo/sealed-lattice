@@ -3,10 +3,12 @@ import type { ProtocolHash } from '@sealed-lattice/types';
 
 import {
     assertContextMatches,
+    assertLowercaseHexBytes,
     assertNonEmptyString,
     assertNonNegativeSafeInteger,
     assertPositiveSafeInteger,
     assertProtocolHash,
+    bytesFromHex,
     contextFields,
     type JsonRecord,
 } from './common-fields.js';
@@ -167,24 +169,6 @@ export type BinaryChunkedSameSecretProofMaterialTransport = Readonly<{
     readonly proofMaterials: readonly SameSecretProofMaterial[];
     readonly transportedSameSecretProofMaterial: TransportedSameSecretProofMaterialSet;
 }>;
-
-const lowercaseHexPattern = /^(?:[0-9a-f]{2})*$/u;
-
-const assertLowercaseHexBytes = (value: string, fieldName: string): void => {
-    if (!lowercaseHexPattern.test(value)) {
-        throw new TypeError(`${fieldName} must be lowercase hex bytes.`);
-    }
-};
-
-const bytesFromHex = (hex: string, fieldName: string): Uint8Array => {
-    assertLowercaseHexBytes(hex, fieldName);
-    const bytes = new Uint8Array(hex.length / 2);
-    for (let offset = 0; offset < hex.length; offset += 2) {
-        bytes[offset / 2] = Number.parseInt(hex.slice(offset, offset + 2), 16);
-    }
-
-    return bytes;
-};
 
 const validateInput = (input: SameSecretConsistencyStatementSetInput): void => {
     assertPositiveSafeInteger(input.participantCount, 'participantCount');

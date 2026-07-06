@@ -7,6 +7,7 @@
 //! query positions so the algebraic identities can be checked pointwise and the
 //! FRI-tested random combination bound to the opened values.
 
+#[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::*;
 
 #[cfg(test)]
@@ -96,14 +97,6 @@ impl<const LIMB_COUNT: usize> ColumnCommitment<LIMB_COUNT> {
         self.tree.root()
     }
 
-    pub(super) fn column_count(&self) -> usize {
-        self.columns.len()
-    }
-
-    pub(super) fn value(&self, column: usize, index: usize) -> [u64; LIMB_COUNT] {
-        self.columns[column][index]
-    }
-
     // Open a set of indices, returning each requested row and one batched
     // authentication path.
     pub(super) fn open(&self, indices: &[usize]) -> ColumnOpening<LIMB_COUNT> {
@@ -188,9 +181,15 @@ impl<const LIMB_COUNT: usize> StreamedColumnCommitmentBuilder<LIMB_COUNT> {
                 "streamed commitment already absorbed every declared column",
             ));
         }
+        #[cfg(not(target_arch = "wasm32"))]
         self.states
             .par_iter_mut()
             .zip(codeword.par_iter())
+            .for_each(|(state, value)| state.absorb_value_words(value));
+        #[cfg(target_arch = "wasm32")]
+        self.states
+            .iter_mut()
+            .zip(codeword.iter())
             .for_each(|(state, value)| state.absorb_value_words(value));
         self.absorbed_columns += 1;
         Ok(())
@@ -202,9 +201,16 @@ impl<const LIMB_COUNT: usize> StreamedColumnCommitmentBuilder<LIMB_COUNT> {
                 "streamed commitment finalized before every declared column",
             ));
         }
+        #[cfg(not(target_arch = "wasm32"))]
         let leaves = self
             .states
             .into_par_iter()
+            .map(StreamingLeafHasher::finalize)
+            .collect::<Vec<_>>();
+        #[cfg(target_arch = "wasm32")]
+        let leaves = self
+            .states
+            .into_iter()
             .map(StreamingLeafHasher::finalize)
             .collect::<Vec<_>>();
         let tree = MerkleTree::from_leaf_hashes(leaves)?;

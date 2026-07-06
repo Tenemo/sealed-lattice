@@ -7,9 +7,8 @@ use super::super::relation::{
 use super::*;
 use crate::bgv::evaluator::top_k::canonical_target_basis_hash;
 use crate::bgv::setup::vss_commitment::{
-    VSS_PUBLIC_MESSAGE_DIGIT_COUNT, VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT,
-    VssPublicCommitmentOpeningInput, compute_vss_public_commitment_from_opening,
-    vss_public_canonical_message_digit_columns,
+    VSS_PUBLIC_MESSAGE_DIGIT_COUNT, VssPublicCommitmentOpeningInput,
+    compute_vss_public_commitment_from_opening, vss_public_canonical_message_digit_columns,
 };
 use serde_json::json;
 
@@ -192,50 +191,6 @@ fn public_key_share_proof_round_trips_with_same_secret_bridge() {
         verify_evaluation_key_share(&tampered_statement, &proof).is_err(),
         "tampering with bridge material must reject the public-key share proof"
     );
-}
-
-#[test]
-fn trustee_evaluation_key_proof_round_trips_with_same_secret_bridge() {
-    let (statement, witness) = generate_development_trustee_instance_with_linkage(
-        "facefeed",
-        &[round_one(2)],
-        SMALL_RING_DEGREE,
-        Some(DATA_PRIMES.len()),
-    )
-    .expect("trustee evaluation-key instance");
-    let (statement, witness) =
-        attach_same_secret_bridge_to_key_statement(statement, witness, DATA_PRIMES.len());
-
-    assert_eq!(
-        statement.family_shape().expect("statement shape"),
-        SuccinctSetupProofFamilyShape::TrusteeEvaluationKey
-    );
-    assert!(
-        statement.same_secret_linkage.is_none(),
-        "evaluation-key proof must use the same-secret bridge"
-    );
-    assert_eq!(
-        statement.proof_limb_count(),
-        SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len(),
-        "the focused evaluation-key fixture keeps proof limbs on the setup commitment fields"
-    );
-    let layout =
-        LimbColumnLayout::new(&statement, 0).expect("trustee evaluation-key setup-field layout");
-    assert!(layout.same_secret_bridge_material_active());
-    assert_eq!(layout.active_keys.len(), 1);
-    assert_eq!(layout.total_error_columns, statement.keys[0].digit_count());
-    assert_eq!(
-        layout.consistency_vector_count(),
-        1 + statement.keys[0].digit_count()
-            + 1
-            + DATA_PRIMES.len() * VSS_PUBLIC_MESSAGE_DIGIT_COUNT
-            + DATA_PRIMES.len() * VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT,
-        "evaluation-key bridge fields must claim the key, bridge digits, and opening randomness"
-    );
-
-    let proof =
-        prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
-    verify_evaluation_key_share(&statement, &proof).expect("verify trustee evaluation-key proof");
 }
 
 fn same_secret_bridge_instance() -> (

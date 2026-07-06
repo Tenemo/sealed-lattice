@@ -1,6 +1,7 @@
 //! Per-trustee schedule proving and verification for key-bearing trustee
-//! evaluation-key statements: one atom family proof per scheduled key, each
-//! transcript-bound to the statement hash and the key's schedule index, with
+//! evaluation-key statements: one atom family proof per scheduled key limb
+//! group (keys wider than the group capacity split into consecutive groups),
+//! each transcript-bound to the statement hash and its schedule position, with
 //! the same-secret linkage opening the statement's first bridge target
 //! constant commitment (the verified bridge proves cross-limb consistency, so
 //! one opened commitment binds every key's relation secret to the anchor, and
@@ -11,6 +12,7 @@
 //! order. Legacy engine bytes fail the magic check, so a key-bearing statement
 //! can never verify against an old-format proof.
 
+#[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::*;
 
 use super::super::limb_group_statement::LimbGroupContext;
@@ -21,7 +23,8 @@ use super::key_proof::{
 };
 use super::proof_codec::{decode_key_proof, encode_key_proof};
 use super::statement_bridge::{
-    BridgeKeyMaterialInput, BridgedKeyKind, bridge_key_material, bridge_key_public,
+    BridgeKeyMaterialInput, BridgeKeyPublicInput, BridgedKeyKind, bridge_key_material,
+    bridge_key_public,
 };
 use crate::bgv::parameters::{DATA_PRIMES, PLAINTEXT_MODULUS};
 use crate::bgv::setup::trustee_evaluation_key_proof::{
@@ -39,6 +42,10 @@ const SCHEDULE_QUERY_COUNT: usize = 80;
 // Keys prove independently; bounding the concurrent set keeps the peak
 // working set at a few streamed provers rather than the whole schedule.
 const PARALLEL_KEY_GROUP: usize = 4;
+// The proof field hosts at most sixteen data primes per limb group (the
+// sixteen-limb group field modulus bounds the group product); wider keys
+// split into consecutive groups with one atom proof per group.
+const LIMB_GROUP_CAPACITY: usize = 16;
 
 fn invalid_schedule(message: &str) -> CanonicalError {
     CanonicalError::new(CanonicalErrorCode::InvalidProtocolObject, message)
@@ -118,53 +125,82 @@ fn key_salt_seed(statement_hash: &[u8; 64], key_index: usize) -> u64 {
     u64::from_le_bytes(digest[..8].try_into().expect("eight bytes"))
 }
 
-// The per-limb public key-switch samples for one key digit, derived exactly as
-// the transported material was generated.
-fn digit_public_samples(
+// One scheduled atom proof: a key and one of its consecutive limb groups.
+// The order is deterministic from the statement (keys in statement order,
+// groups ascending), so prover and verifier derive the identical schedule.
+struct ScheduledProof {
+    key_index: usize,
+    group_start_limb: usize,
+    group_limb_count: usize,
+}
+
+fn scheduled_proofs(
+    statement: &TrusteeEvaluationKeyStatement,
+) -> CanonicalResult<Vec<ScheduledProof>> {
+    let mut proofs = Vec::new();
+    for (key_index, key) in statement.keys.iter().enumerate() {
+        let limb_count = key
+            .level
+            .checked_add(1)
+            .filter(|count| *count <= DATA_PRIMES.len())
+            .ok_or_else(|| invalid_schedule("key level is outside the data prime basis"))?;
+        if key.component_b_by_digit.len() != limb_count {
+            return Err(invalid_schedule(
+                "key digit count must match its level's limb count",
+            ));
+        }
+        let mut group_start_limb = 0;
+        while group_start_limb < limb_count {
+            let group_limb_count = LIMB_GROUP_CAPACITY.min(limb_count - group_start_limb);
+            proofs.push(ScheduledProof {
+                key_index,
+                group_start_limb,
+                group_limb_count,
+            });
+            group_start_limb += group_limb_count;
+        }
+    }
+    Ok(proofs)
+}
+
+// The group's public key-switch samples: for every digit, the samples at the
+// group's limbs, derived exactly as the transported material was generated.
+fn group_public_samples(
     key: &EvaluationKeyShareDescriptor,
-    digit_index: usize,
-    limb_count: usize,
+    scheduled: &ScheduledProof,
     ring_degree: usize,
-) -> Vec<Vec<u64>> {
-    (0..limb_count)
-        .map(|limb_index| {
-            public_key_switch_sample(
-                &key.key_switch_domain,
-                &key.key_switch_seed_hex,
-                digit_index,
-                DATA_PRIMES[limb_index],
-                ring_degree,
-            )
+) -> Vec<Vec<Vec<u64>>> {
+    let digit_count = key.component_b_by_digit.len();
+    (0..digit_count)
+        .map(|digit_index| {
+            (scheduled.group_start_limb..scheduled.group_start_limb + scheduled.group_limb_count)
+                .map(|limb_index| {
+                    public_key_switch_sample(
+                        &key.key_switch_domain,
+                        &key.key_switch_seed_hex,
+                        digit_index,
+                        DATA_PRIMES[limb_index],
+                        ring_degree,
+                    )
+                })
+                .collect()
         })
         .collect()
 }
 
-struct KeyGeometry {
-    limb_count: usize,
-    public_sample_by_digit: Vec<Vec<Vec<u64>>>,
-}
-
-fn key_geometry(
+// The group's transported component slice: every digit, the group's limbs.
+fn group_component_slice(
     key: &EvaluationKeyShareDescriptor,
-    ring_degree: usize,
-) -> CanonicalResult<KeyGeometry> {
-    let limb_count = key
-        .level
-        .checked_add(1)
-        .filter(|count| *count <= DATA_PRIMES.len())
-        .ok_or_else(|| invalid_schedule("key level is outside the data prime basis"))?;
-    if key.component_b_by_digit.len() != limb_count {
-        return Err(invalid_schedule(
-            "key digit count must match its level's limb count",
-        ));
-    }
-    let public_sample_by_digit = (0..limb_count)
-        .map(|digit_index| digit_public_samples(key, digit_index, limb_count, ring_degree))
-        .collect();
-    Ok(KeyGeometry {
-        limb_count,
-        public_sample_by_digit,
-    })
+    scheduled: &ScheduledProof,
+) -> Vec<Vec<Vec<u64>>> {
+    key.component_b_by_digit
+        .iter()
+        .map(|limb_vectors| {
+            limb_vectors[scheduled.group_start_limb
+                ..scheduled.group_start_limb + scheduled.group_limb_count]
+                .to_vec()
+        })
+        .collect()
 }
 
 fn bridged_kind<'a>(key: &'a EvaluationKeyShareDescriptor) -> CanonicalResult<BridgedKeyKind<'a>> {
@@ -214,42 +250,51 @@ pub(crate) fn prove_key_bearing_trustee_evaluation_keys(
         mask_degree: schedule_mask_degree(ring_degree),
     };
 
-    let mut per_key_bytes: Vec<Vec<u8>> = Vec::with_capacity(statement.keys.len());
-    for (group_start, key_group) in statement
-        .keys
+    let scheduled = scheduled_proofs(statement)?;
+    let mut per_proof_bytes: Vec<Vec<u8>> = Vec::with_capacity(scheduled.len());
+    for (chunk_start, chunk) in scheduled
         .chunks(PARALLEL_KEY_GROUP)
         .enumerate()
-        .map(|(group, keys)| (group * PARALLEL_KEY_GROUP, keys))
+        .map(|(chunk, proofs)| (chunk * PARALLEL_KEY_GROUP, proofs))
     {
-        let group_results: Vec<CanonicalResult<Vec<u8>>> = key_group
+        let prove_at = |offset: usize, scheduled_proof: &ScheduledProof| {
+            let proof_index = chunk_start + offset;
+            prove_one_key(ProveOneKey {
+                parameters: &parameters,
+                statement_hash: &statement_hash,
+                ring_degree,
+                key: &statement.keys[scheduled_proof.key_index],
+                scheduled: scheduled_proof,
+                proof_index,
+                secret: &witness.secret_coefficients,
+                errors: &witness.error_coefficients_by_key[scheduled_proof.key_index],
+                linkage_statement: &linkage_statement,
+                linkage_witness: &linkage_witness,
+                proof_parameters: &proof_parameters,
+            })
+        };
+        #[cfg(not(target_arch = "wasm32"))]
+        let chunk_results: Vec<CanonicalResult<Vec<u8>>> = chunk
             .par_iter()
             .enumerate()
-            .map(|(offset, key)| {
-                let key_index = group_start + offset;
-                prove_one_key(ProveOneKey {
-                    parameters: &parameters,
-                    statement_hash: &statement_hash,
-                    ring_degree,
-                    key,
-                    key_index,
-                    secret: &witness.secret_coefficients,
-                    errors: &witness.error_coefficients_by_key[key_index],
-                    linkage_statement: &linkage_statement,
-                    linkage_witness: &linkage_witness,
-                    proof_parameters: &proof_parameters,
-                })
-            })
+            .map(|(offset, scheduled_proof)| prove_at(offset, scheduled_proof))
             .collect();
-        for result in group_results {
-            per_key_bytes.push(result?);
+        #[cfg(target_arch = "wasm32")]
+        let chunk_results: Vec<CanonicalResult<Vec<u8>>> = chunk
+            .iter()
+            .enumerate()
+            .map(|(offset, scheduled_proof)| prove_at(offset, scheduled_proof))
+            .collect();
+        for result in chunk_results {
+            per_proof_bytes.push(result?);
         }
     }
 
     let mut container = SCHEDULE_MAGIC.to_vec();
-    let count = u32::try_from(per_key_bytes.len())
-        .map_err(|_| invalid_schedule("schedule key count exceeds u32"))?;
+    let count = u32::try_from(per_proof_bytes.len())
+        .map_err(|_| invalid_schedule("schedule proof count exceeds u32"))?;
     container.extend_from_slice(&count.to_le_bytes());
-    for bytes in &per_key_bytes {
+    for bytes in &per_proof_bytes {
         let length =
             u32::try_from(bytes.len()).map_err(|_| invalid_schedule("proof length exceeds u32"))?;
         container.extend_from_slice(&length.to_le_bytes());
@@ -263,7 +308,8 @@ struct ProveOneKey<'a, const LIMB_COUNT: usize> {
     statement_hash: &'a [u8; 64],
     ring_degree: usize,
     key: &'a EvaluationKeyShareDescriptor,
-    key_index: usize,
+    scheduled: &'a ScheduledProof,
+    proof_index: usize,
     secret: &'a [i64],
     errors: &'a [Vec<i64>],
     linkage_statement: &'a LinkageStatement<'a>,
@@ -274,23 +320,28 @@ struct ProveOneKey<'a, const LIMB_COUNT: usize> {
 fn prove_one_key<const LIMB_COUNT: usize>(
     input: ProveOneKey<'_, LIMB_COUNT>,
 ) -> CanonicalResult<Vec<u8>> {
-    let geometry = key_geometry(input.key, input.ring_degree)?;
-    let group = LimbGroupContext::new(input.parameters, &DATA_PRIMES[..geometry.limb_count])?;
+    let group_primes = &DATA_PRIMES[input.scheduled.group_start_limb
+        ..input.scheduled.group_start_limb + input.scheduled.group_limb_count];
+    let group = LimbGroupContext::new(input.parameters, group_primes)?;
     let domain = NegacyclicDomain::new(input.parameters, input.ring_degree)?;
+    let public_sample_by_digit =
+        group_public_samples(input.key, input.scheduled, input.ring_degree);
+    let component_b_by_digit = group_component_slice(input.key, input.scheduled);
     let bridged = bridge_key_material(
         input.parameters,
         BridgeKeyMaterialInput {
             group: &group,
             domain: &domain,
-            component_b_by_digit: &input.key.component_b_by_digit,
-            public_sample_by_digit: &geometry.public_sample_by_digit,
+            component_b_by_digit: &component_b_by_digit,
+            public_sample_by_digit: &public_sample_by_digit,
             secret_coefficients: input.secret,
             error_coefficients_by_digit: input.errors,
             kind: bridged_kind(input.key)?,
             plaintext_modulus: PLAINTEXT_MODULUS,
+            group_start_limb: input.scheduled.group_start_limb,
         },
     )?;
-    let mut salt_seed = key_salt_seed(input.statement_hash, input.key_index);
+    let mut salt_seed = key_salt_seed(input.statement_hash, input.proof_index);
     let proof = prove_key_fri(
         input.parameters,
         input.ring_degree,
@@ -300,7 +351,7 @@ fn prove_one_key<const LIMB_COUNT: usize>(
         &bridged.digits,
         Some((input.linkage_statement, input.linkage_witness)),
         input.statement_hash,
-        input.key_index as u64,
+        input.proof_index as u64,
         input.proof_parameters,
         &mut salt_seed,
     )?;
@@ -338,12 +389,13 @@ pub(crate) fn verify_key_bearing_trustee_evaluation_keys(
             .expect("four bytes"),
     ) as usize;
     position += 4;
-    if count != statement.keys.len() {
+    let scheduled = scheduled_proofs(statement)?;
+    if count != scheduled.len() {
         return Err(invalid_schedule(
-            "schedule proof count must match the statement's key count",
+            "schedule proof count must match the statement's scheduled proof count",
         ));
     }
-    let mut per_key_bytes = Vec::with_capacity(count);
+    let mut per_proof_bytes = Vec::with_capacity(count);
     for _ in 0..count {
         if position + 4 > proof_bytes.len() {
             return Err(invalid_schedule("schedule proof stream is truncated"));
@@ -360,56 +412,70 @@ pub(crate) fn verify_key_bearing_trustee_evaluation_keys(
         if end > proof_bytes.len() {
             return Err(invalid_schedule("schedule proof stream is truncated"));
         }
-        per_key_bytes.push(&proof_bytes[position..end]);
+        per_proof_bytes.push(&proof_bytes[position..end]);
         position = end;
     }
     if position != proof_bytes.len() {
         return Err(invalid_schedule("schedule proof stream has trailing bytes"));
     }
 
-    for (group_start, group) in per_key_bytes
+    for (chunk_start, chunk) in per_proof_bytes
         .chunks(PARALLEL_KEY_GROUP)
         .enumerate()
-        .map(|(group, bytes)| (group * PARALLEL_KEY_GROUP, bytes))
+        .map(|(chunk, bytes)| (chunk * PARALLEL_KEY_GROUP, bytes))
     {
-        let results: Vec<CanonicalResult<()>> = group
+        let verify_at = |offset: usize, bytes: &[u8]| -> CanonicalResult<()> {
+            let proof_index = chunk_start + offset;
+            let scheduled_proof = &scheduled[proof_index];
+            let key = &statement.keys[scheduled_proof.key_index];
+            let group_primes = &DATA_PRIMES[scheduled_proof.group_start_limb
+                ..scheduled_proof.group_start_limb + scheduled_proof.group_limb_count];
+            let limb_group = LimbGroupContext::new(&parameters, group_primes)?;
+            let domain = NegacyclicDomain::new(&parameters, ring_degree)?;
+            let public_sample_by_digit = group_public_samples(key, scheduled_proof, ring_degree);
+            let component_b_by_digit = group_component_slice(key, scheduled_proof);
+            let (public, source) = bridge_key_public(
+                &parameters,
+                BridgeKeyPublicInput {
+                    group: &limb_group,
+                    domain: &domain,
+                    component_b_by_digit: &component_b_by_digit,
+                    public_sample_by_digit: &public_sample_by_digit,
+                    kind: bridged_kind(key)?,
+                    plaintext_modulus: PLAINTEXT_MODULUS,
+                    group_start_limb: scheduled_proof.group_start_limb,
+                },
+            )?;
+            let proof = decode_key_proof(&parameters, bytes)?;
+            let accepted = verify_key_fri(
+                &parameters,
+                ring_degree,
+                &public,
+                &source,
+                &proof,
+                Some(&linkage_statement),
+                &statement_hash,
+                proof_index as u64,
+                &proof_parameters,
+            )?;
+            if !accepted {
+                return Err(invalid_schedule(
+                    "a scheduled trustee evaluation-key atom proof was rejected",
+                ));
+            }
+            Ok(())
+        };
+        #[cfg(not(target_arch = "wasm32"))]
+        let results: Vec<CanonicalResult<()>> = chunk
             .par_iter()
             .enumerate()
-            .map(|(offset, bytes)| {
-                let key_index = group_start + offset;
-                let key = &statement.keys[key_index];
-                let geometry = key_geometry(key, ring_degree)?;
-                let limb_group =
-                    LimbGroupContext::new(&parameters, &DATA_PRIMES[..geometry.limb_count])?;
-                let domain = NegacyclicDomain::new(&parameters, ring_degree)?;
-                let (public, source) = bridge_key_public(
-                    &parameters,
-                    &limb_group,
-                    &domain,
-                    &key.component_b_by_digit,
-                    &geometry.public_sample_by_digit,
-                    bridged_kind(key)?,
-                    PLAINTEXT_MODULUS,
-                )?;
-                let proof = decode_key_proof(&parameters, bytes)?;
-                let accepted = verify_key_fri(
-                    &parameters,
-                    ring_degree,
-                    &public,
-                    &source,
-                    &proof,
-                    Some(&linkage_statement),
-                    &statement_hash,
-                    key_index as u64,
-                    &proof_parameters,
-                )?;
-                if !accepted {
-                    return Err(invalid_schedule(
-                        "a scheduled trustee evaluation-key atom proof was rejected",
-                    ));
-                }
-                Ok(())
-            })
+            .map(|(offset, bytes)| verify_at(offset, bytes))
+            .collect();
+        #[cfg(target_arch = "wasm32")]
+        let results: Vec<CanonicalResult<()>> = chunk
+            .iter()
+            .enumerate()
+            .map(|(offset, bytes)| verify_at(offset, bytes))
             .collect();
         for result in results {
             result?;

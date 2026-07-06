@@ -4,6 +4,9 @@ import {
     assertProtocolHash,
     assertNonNegativeSafeInteger,
     assertPositiveSafeInteger,
+    assertLowercaseHexBytes,
+    bytesFromHex,
+    bytesToHex,
 } from '../common-fields.js';
 
 import {
@@ -11,24 +14,19 @@ import {
     type PublicKeyShareSetInput,
 } from './constants-and-types.js';
 
-const lowercaseHexPattern = /^(?:[0-9a-f]{2})*$/u;
-
 export {
     assertContextMatches,
     assertProtocolHash,
     contextFields,
 } from '../common-fields.js';
 
-export const assertLowercaseHexBytes = (
-    value: string,
-    fieldName: string,
-): void => {
-    if (!lowercaseHexPattern.test(value)) {
-        throw new TypeError(`${fieldName} must be lowercase hex bytes.`);
-    }
+export {
+    assertNonNegativeSafeInteger,
+    assertPositiveSafeInteger,
+    assertLowercaseHexBytes,
+    bytesFromHex,
+    bytesToHex,
 };
-
-export { assertNonNegativeSafeInteger, assertPositiveSafeInteger };
 
 export const assertNonEmptyString = (
     value: string,
@@ -37,19 +35,6 @@ export const assertNonEmptyString = (
     if (value.length === 0) {
         throw new TypeError(`${fieldName} must be non-empty.`);
     }
-};
-
-export const bytesFromHex = (hex: string, fieldName: string): Uint8Array => {
-    assertLowercaseHexBytes(hex, fieldName);
-    const bytes = new Uint8Array(hex.length / 2);
-    for (let byteIndex = 0; byteIndex < bytes.length; byteIndex += 1) {
-        bytes[byteIndex] = Number.parseInt(
-            hex.slice(byteIndex * 2, byteIndex * 2 + 2),
-            16,
-        );
-    }
-
-    return bytes;
 };
 
 export const coefficientVectorFromLittleEndianHex = (
@@ -104,9 +89,6 @@ const coefficientVectorBytes = (
 
     return bytes;
 };
-
-export const bytesToHex = (bytes: Uint8Array): string =>
-    Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 
 export const publicKeyShareMaterialBinaryMagic = new Uint8Array([
     0x53, 0x4c, 0x50, 0x4b, 0x53, 0x4d, 0x56, 0x31,

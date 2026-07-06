@@ -10,11 +10,10 @@ use crate::bgv::setup::accepted_setup::{
     verified_same_secret_bridge_material_from_package,
 };
 use crate::bgv::setup::evaluation_key_share_material::EvaluationKeyShareProofFamily;
-use crate::bgv::setup::trustee_evaluation_key_proof::prove_evaluation_key_share;
+use crate::bgv::setup::trustee_evaluation_key_proof::prove_trustee_evaluation_key_proof_bytes;
 use crate::bgv::setup::trustee_evaluation_key_proof::{
     EvaluationKeyShareKind, TRUSTEE_EVALUATION_KEY_PROOF_FAMILY, TrusteeEvaluationKeyStatement,
-    TrusteeEvaluationKeyWitness, encode_trustee_evaluation_key_proof,
-    trustee_evaluation_key_proof_bytes_hash,
+    TrusteeEvaluationKeyWitness, trustee_evaluation_key_proof_bytes_hash,
 };
 use crate::hashing::{derive_canonical_object_hash, to_hex};
 
@@ -79,17 +78,20 @@ pub(in super::super) fn trustee_evaluation_key_proofs_object(
             }))
             .expect("trustee proof randomness seed");
             let statement_hash_hex = to_hex(&statement.statement_hash());
+            // The checkpoint key carries the schedule container tag so stale
+            // old-engine bytes (same statement hash) never collide with the
+            // atom-backend format.
+            let checkpoint_key = format!("{statement_hash_hex}-slksats1");
             let proof_bytes = checkpointed_anchor_proof_bytes(
                 TRUSTEE_EVALUATION_KEY_ANCHOR_PROOF_CHECKPOINT_DIRECTORY,
-                &statement_hash_hex,
+                &checkpoint_key,
                 || {
-                    let proof = prove_evaluation_key_share(
+                    prove_trustee_evaluation_key_proof_bytes(
                         &statement,
                         &witness,
                         &proof_randomness_seed_hex,
                     )
-                    .expect("trustee evaluation-key succinct proof");
-                    encode_trustee_evaluation_key_proof(&proof)
+                    .expect("trustee evaluation-key proof bytes")
                 },
             );
             let proof_bytes_hash = trustee_evaluation_key_proof_bytes_hash(&proof_bytes);

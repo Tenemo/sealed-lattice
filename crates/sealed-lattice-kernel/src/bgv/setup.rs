@@ -88,6 +88,12 @@ pub(crate) use vss_commitment::{
     VssPublicCommitmentOpeningInput, compute_vss_public_commitment_from_opening,
 };
 
+// The target-decryption secret-share domain label, bound identically into the
+// target-decryption parameters certificate and the threshold-verification
+// material so the two records describe the same secret-share space.
+pub(in crate::bgv::setup) const SECRET_SHARE_DOMAIN: &str =
+    "BGV-RNS-secret-share-polynomial-over-selected-Q-data";
+
 #[cfg(test)]
 pub(in crate::bgv::setup) const TEST_CHECKPOINT_ROOT_ENVIRONMENT_VARIABLE: &str =
     "SEALED_LATTICE_TEST_CHECKPOINT_ROOT";

@@ -1,5 +1,6 @@
 use super::super::relation::{
     VssShareLinkageCommitment, VssShareLinkageItem, VssShareLinkageStatement,
+    masked_claim_bounds_for_global_claim, masked_claim_lift_residue_count_for_moduli,
 };
 use super::*;
 use crate::bgv::setup::vss_commitment::{
@@ -575,5 +576,54 @@ fn commitment_computation_for_test(
         },
         commitment_root: computation.commitment_root,
         opening_root: computation.opening_root,
+    }
+}
+
+// The cross-limb consistency soundness mechanism requires every masked claim's
+// CRT lift to leave at least one commitment field unconsumed: the lift pins the
+// centered integer from `required` fields and the remaining field's residue is
+// the check that catches an inconsistent per-field witness. A claim class whose
+// mask forces the lift to consume every active field has no check field and
+// its cross-field binding degrades to the range check alone.
+#[test]
+fn vss_share_linkage_consistency_claims_leave_a_check_field() {
+    let (statement, _witness) = vss_share_linkage_instance();
+    let field_moduli = statement
+        .proof_limb_indices()
+        .iter()
+        .map(|limb_index| DATA_PRIMES[*limb_index])
+        .collect::<Vec<_>>();
+    let family_shape = statement.family_shape().expect("family shape");
+    let consistency_repetitions = family_shape.consistency_repetitions();
+    let item_count = statement
+        .vss_share_linkage
+        .as_ref()
+        .expect("share linkage statement")
+        .item_count();
+
+    for (claim_class, global_claim_id) in [
+        ("carry", 0_u64),
+        ("digit", (item_count * consistency_repetitions) as u64),
+    ] {
+        let (lower_bound, upper_bound) =
+            masked_claim_bounds_for_global_claim(&statement, global_claim_id)
+                .expect("masked claim bounds");
+        let required_residue_count = masked_claim_lift_residue_count_for_moduli(
+            field_moduli.iter().copied(),
+            &lower_bound,
+            &upper_bound,
+        );
+        eprintln!(
+            "share-linkage {claim_class} claim: clear/mask window [{lower_bound}, {upper_bound}] \
+             ({} bits), lift consumes {required_residue_count} of {} fields",
+            upper_bound.bits(),
+            field_moduli.len(),
+        );
+        assert!(
+            required_residue_count < field_moduli.len(),
+            "share-linkage {claim_class} claims must leave at least one check field \
+             (lift consumes {required_residue_count} of {} fields)",
+            field_moduli.len(),
+        );
     }
 }

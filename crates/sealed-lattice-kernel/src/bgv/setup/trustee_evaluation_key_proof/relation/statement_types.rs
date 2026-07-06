@@ -398,55 +398,6 @@ impl EvaluationKeyShareDescriptor {
             ),
         }
     }
-
-    // The diagonal source vector D tested against the secret in limb l, chosen
-    // so that <U, source> = <D, s>: U for round one, Neg(A_l)^T U for round
-    // two, and M_phi^T U for a Galois rotation. The public-key share relation
-    // has no diagonal source.
-    pub(crate) fn diagonal_source_vector(
-        &self,
-        limb_index: usize,
-        u_powers: &[u64],
-        modulus: u64,
-    ) -> CanonicalResult<Vec<u64>> {
-        match self.kind {
-            EvaluationKeyShareKind::RelinearizationRoundOne => Ok(u_powers.to_vec()),
-            EvaluationKeyShareKind::RelinearizationRoundTwo => negacyclic_transpose_product(
-                &self.round_one_aggregate_diagonal[limb_index],
-                u_powers,
-                modulus,
-            ),
-            EvaluationKeyShareKind::GaloisRotation { galois_element } => {
-                galois_automorphism_transpose_apply(u_powers, galois_element, modulus)
-            }
-            EvaluationKeyShareKind::PublicKeyShare => Err(invalid_succinct_setup_proof(
-                "the public-key share relation has no diagonal source",
-            )),
-        }
-    }
-
-    // The same diagonal source action on an extension challenge vector: the
-    // action is base-linear, so it applies to each extension coordinate.
-    pub(crate) fn diagonal_source_vector_extension(
-        &self,
-        limb_index: usize,
-        u_powers: &[ChallengeExtensionElement],
-        modulus: u64,
-    ) -> CanonicalResult<Vec<ChallengeExtensionElement>> {
-        let mut result = vec![ChallengeExtensionTower::zero(); u_powers.len()];
-        let mut coordinate_vector = vec![0_u64; u_powers.len()];
-        for coordinate in 0..CHALLENGE_EXTENSION_DEGREE {
-            for (slot, element) in coordinate_vector.iter_mut().zip(u_powers.iter()) {
-                *slot = element[coordinate];
-            }
-            let applied = self.diagonal_source_vector(limb_index, &coordinate_vector, modulus)?;
-            for (target, value) in result.iter_mut().zip(applied.iter()) {
-                target[coordinate] = *value;
-            }
-        }
-
-        Ok(result)
-    }
 }
 
 impl VssShareLinkageStatement {

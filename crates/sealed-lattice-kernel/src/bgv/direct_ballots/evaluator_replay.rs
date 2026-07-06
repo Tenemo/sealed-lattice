@@ -3,18 +3,18 @@ use crate::hashing::derive_canonical_object_hash;
 
 use super::*;
 
-pub(super) struct DirectBallotPackedBatchedPairEvaluatorInput<'a> {
-    pub(super) setup_package: &'a Value,
-    pub(super) evaluator_key: &'a DevelopmentBgvKey,
-    pub(super) aggregate_ciphertext: &'a Ciphertext,
-    pub(super) aggregate_scores: &'a [u64],
-    pub(super) ballot_count: usize,
-    pub(super) top_counts: &'a [usize],
-    pub(super) public_evaluation_key_material: Option<&'a Value>,
-    pub(super) target_finality_policy_hash: Option<&'a str>,
+pub(crate) struct DirectBallotPackedBatchedPairEvaluatorInput<'a> {
+    pub(crate) setup_package: &'a Value,
+    pub(crate) evaluator_key: &'a DevelopmentBgvKey,
+    pub(crate) aggregate_ciphertext: &'a Ciphertext,
+    pub(crate) aggregate_scores: &'a [u64],
+    pub(crate) ballot_count: usize,
+    pub(crate) top_counts: &'a [usize],
+    pub(crate) public_evaluation_key_material: Option<&'a Value>,
+    pub(crate) target_finality_policy_hash: Option<&'a str>,
 }
 
-pub(super) fn run_direct_ballot_packed_batched_pair_evaluator_for_top_counts(
+pub(crate) fn run_direct_ballot_packed_batched_pair_evaluator_for_top_counts(
     input: DirectBallotPackedBatchedPairEvaluatorInput<'_>,
 ) -> CanonicalResult<Vec<Value>> {
     let DirectBallotPackedBatchedPairEvaluatorInput {
@@ -178,7 +178,7 @@ pub(super) fn direct_packed_option_slots(slots: &[u64]) -> Vec<u64> {
         .collect()
 }
 
-pub(super) fn direct_ballot_evaluator_working_level(ballot_count: usize) -> usize {
+pub(crate) fn direct_ballot_evaluator_working_level(ballot_count: usize) -> usize {
     if ballot_count == 1 {
         SINGLE_BALLOT_TARGET_WORKING_LEVEL
     } else {
@@ -186,7 +186,7 @@ pub(super) fn direct_ballot_evaluator_working_level(ballot_count: usize) -> usiz
     }
 }
 
-pub(super) fn direct_ballot_comparison_domain_max(ballot_count: usize) -> CanonicalResult<u64> {
+pub(crate) fn direct_ballot_comparison_domain_max(ballot_count: usize) -> CanonicalResult<u64> {
     let ballot_count_u64 = usize_to_u64(ballot_count, "ballot count")?;
     let score_span = MAXIMUM_SCORE - MINIMUM_SCORE;
 
@@ -198,7 +198,7 @@ pub(super) fn direct_ballot_comparison_domain_max(ballot_count: usize) -> Canoni
     })
 }
 
-pub(super) fn direct_ballot_plaintext_target_slots(
+pub(crate) fn direct_ballot_plaintext_target_slots(
     aggregate_scores: &[u64],
     top_count: usize,
 ) -> CanonicalResult<(Vec<u64>, Vec<u64>)> {

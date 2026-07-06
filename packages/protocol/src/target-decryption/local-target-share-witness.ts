@@ -272,7 +272,7 @@ const aggregateRecordKey = (
     recipientRosterPosition: number,
     rnsLimbIndex: number,
 ): string =>
-    `${recipientIdentity} ${String(recipientRosterPosition)} ${String(rnsLimbIndex)}`;
+    `${recipientIdentity}\u0000${String(recipientRosterPosition)}\u0000${String(rnsLimbIndex)}`;
 
 const aggregateRecordsByRecipientLimb = (
     aggregateThresholdCommitmentSet: JsonRecord,

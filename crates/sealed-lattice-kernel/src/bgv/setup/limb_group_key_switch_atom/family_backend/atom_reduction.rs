@@ -117,17 +117,6 @@ fn source_adjoint_image<const LIMB_COUNT: usize>(
     }
 }
 
-// Round-one atom reduction convenience wrapper.
-#[cfg(test)]
-pub(super) fn reduce_round_one_atom<const LIMB_COUNT: usize>(
-    parameters: &ProofFieldParameters<LIMB_COUNT>,
-    domain: &NegacyclicDomain<'_, LIMB_COUNT>,
-    public: &AtomPublicInputs<'_, LIMB_COUNT>,
-    challenge: &[[u64; LIMB_COUNT]],
-) -> AtomLinearForm<LIMB_COUNT> {
-    reduce_atom(parameters, domain, public, &AtomSource::RoundOne, challenge)
-}
-
 // General atom reduction for any source: builds the public linear form for
 // challenge `gamma`. The secret coefficients are `adjoint(A) (*) gamma - G *
 // source_adjoint_image(gamma)` (round two's aggregate carries the `G` fold

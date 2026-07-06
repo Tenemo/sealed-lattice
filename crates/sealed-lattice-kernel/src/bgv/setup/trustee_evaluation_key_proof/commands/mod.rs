@@ -57,6 +57,24 @@ pub(in crate::bgv::setup) struct VssPublicCommandCommitmentExpectation<'a> {
     pub(in crate::bgv::setup) ring_degree: usize,
 }
 
+// The single byte-level dispatch for trustee evaluation-key proofs: key-bearing
+// statements are proven by the key-switch atom backend (the statement-bound
+// randomness binding still gates the request shape; the per-key salt streams
+// derive from the statement hash), every other family stays on the shared
+// succinct engine.
+pub(in crate::bgv::setup) fn prove_trustee_evaluation_key_proof_bytes(
+    statement: &TrusteeEvaluationKeyStatement,
+    witness: &TrusteeEvaluationKeyWitness,
+    proof_randomness_seed_hex: &str,
+) -> CanonicalResult<Vec<u8>> {
+    if atom_schedule::statement_is_key_bearing(statement) {
+        atom_schedule::prove_key_bearing_trustee_evaluation_keys(statement, witness)
+    } else {
+        let proof = prove_evaluation_key_share(statement, witness, proof_randomness_seed_hex)?;
+        Ok(encode_trustee_evaluation_key_proof(&proof))
+    }
+}
+
 // Generate one trustee-batched evaluation-key proof from a JSON request. The
 // statement carries the ceremony context, the key descriptors with embedded
 // component material, and the same-secret linkage commitments; the witness
@@ -107,22 +125,16 @@ pub(crate) fn generate_trustee_evaluation_key_proof_from_request(
         proof_randomness_nonce_hex,
     )?;
 
-    let proof_bytes = if atom_schedule::statement_is_key_bearing(&statement) {
-        // Key-bearing statements are proven by the key-switch atom backend;
-        // the statement-bound randomness binding above still gates the request
-        // shape, and the per-key salt streams derive from the statement hash.
-        atom_schedule::prove_key_bearing_trustee_evaluation_keys(&statement, &witness)?
-    } else {
-        let proof =
-            prove_evaluation_key_share(&statement, &witness, &bound_proof_randomness_seed_hex)?;
-        encode_trustee_evaluation_key_proof(&proof)
-    };
+    let proof_bytes = prove_trustee_evaluation_key_proof_bytes(
+        &statement,
+        &witness,
+        &bound_proof_randomness_seed_hex,
+    )?;
     Ok(json!({
         "operation": "generateTrusteeEvaluationKeyProof",
         "proofFamily": statement.context.proof_family,
         "statementHash": to_hex(&statement.statement_hash()),
         "limbCount": statement.proof_limb_count(),
-        "sameSecretLinkageIncluded": statement.same_secret_linkage.is_some(),
         "proofByteLength": proof_bytes.len(),
         "proofBytesHex": to_hex(&proof_bytes),
     }))
@@ -222,6 +234,7 @@ mod share_linkage_verification;
 mod target_decryption_parsing;
 
 use decoding::*;
+pub(in crate::bgv::setup::trustee_evaluation_key_proof) use request_parsing::statement_from_request;
 use request_parsing::*;
 
 #[cfg(any(test, feature = "target-decryption-development-commands"))]

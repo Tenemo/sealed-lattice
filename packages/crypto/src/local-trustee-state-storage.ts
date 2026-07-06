@@ -3,10 +3,6 @@
 // validation, AES-GCM primitives, envelope validation, and the encrypt/decrypt
 // operations); this barrel re-exports the public surface so import paths are
 // unchanged.
-export {
-    localTrusteeSealedMaterialStorageFormat,
-    localTrusteeStateStorageFormat,
-} from './local-trustee-state-storage/constants-and-types.js';
 export type {
     EncryptedLocalTrusteeSetupMaterial,
     EncryptedLocalTrusteeSetupState,

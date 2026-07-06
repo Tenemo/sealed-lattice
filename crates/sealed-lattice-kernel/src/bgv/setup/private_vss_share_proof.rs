@@ -12,7 +12,8 @@ use super::{
     commitment::{SETUP_COMMITMENT_RANDOMNESS_WIDTH, SetupCommitmentValue, setup_commitment_root},
     setup_proof::{
         SETUP_PROOF_MATERIAL_ENCODING, SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
-        setup_proof_material_transport_hashes,
+        setup_proof_material_transport_hashes, verify_setup_proof_record_transport_reference,
+        verify_transported_setup_proof_material_hashes,
     },
     sharing::canonical_trustee_point,
     trustee_evaluation_key_proof::{
@@ -335,75 +336,13 @@ fn verify_private_vss_share_succinct_proof_transport_reference(
     proof_record: &Value,
     transport_hashes: &super::setup_proof::SetupProofMaterialTransportHashes,
 ) -> CanonicalResult<()> {
-    if value_u64(proof_record, "proofChunkSizeBytes")? != SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES {
-        return Err(invalid_private_vss_share_proof(
-            "private VSS share proofChunkSizeBytes must match the setup proof transport parameters",
-        ));
-    }
-    let expected_chunk_count =
-        u64::try_from(transport_hashes.chunk_hashes.len()).map_err(|_| {
-            CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "private VSS proof material chunk count does not fit u64",
-            )
-        })?;
-    if value_u64(proof_record, "proofChunkCount")? != expected_chunk_count {
-        return Err(invalid_private_vss_share_proof(
-            "private VSS share proofChunkCount must match transported proof chunks",
-        ));
-    }
-    if value_u64(proof_record, "proofTotalByteLength")? != transport_hashes.total_byte_length {
-        return Err(invalid_private_vss_share_proof(
-            "private VSS share proofTotalByteLength must match transported proof chunks",
-        ));
-    }
-    if value_string(proof_record, "proofFullObjectHash")?
-        != transport_hashes.full_object_hash.as_str()
-    {
-        return Err(invalid_private_vss_share_proof(
-            "private VSS share proofFullObjectHash must match transported proof chunks",
-        ));
-    }
-    if value_string(proof_record, "proofChunkRoot")? != transport_hashes.chunk_root.as_str() {
-        return Err(invalid_private_vss_share_proof(
-            "private VSS share proofChunkRoot must match the canonical proof chunk manifest",
-        ));
-    }
-    let Some(chunk_hash_values) = proof_record
-        .get("proofChunkHashes")
-        .and_then(Value::as_array)
-    else {
-        return Err(invalid_private_vss_share_proof(
-            "private VSS share proofChunkHashes must list every transported proof chunk",
-        ));
-    };
-    if chunk_hash_values.len() != transport_hashes.chunk_hashes.len() {
-        return Err(invalid_private_vss_share_proof(
-            "private VSS share proofChunkHashes length must match transported proof chunks",
-        ));
-    }
-    for (chunk_index, (chunk_hash_value, expected_chunk_hash)) in chunk_hash_values
-        .iter()
-        .zip(transport_hashes.chunk_hashes.iter())
-        .enumerate()
-    {
-        let Some(chunk_hash) = chunk_hash_value.as_str() else {
-            return Err(invalid_private_vss_share_proof(format!(
-                "private VSS share proofChunkHashes[{chunk_index}] must be a hash string"
-            )));
-        };
-        validate_hash(
-            chunk_hash,
-            &format!("privateVssShareProof.proofChunkHashes[{chunk_index}]"),
-        )?;
-        if chunk_hash != expected_chunk_hash {
-            return Err(invalid_private_vss_share_proof(
-                "private VSS share proofChunkHashes must match transported proof chunks",
-            ));
-        }
-    }
-
-    Ok(())
+    verify_setup_proof_record_transport_reference(
+        proof_record,
+        transport_hashes,
+        "private VSS share",
+        "private VSS share",
+        "privateVssShareProof",
+    )
 }
 
 fn transported_private_vss_share_proof_material_chunks(
@@ -539,43 +478,11 @@ fn verify_transported_private_vss_share_proof_material_hashes(
     value: &Value,
     transport_hashes: &super::setup_proof::SetupProofMaterialTransportHashes,
 ) -> CanonicalResult<()> {
-    if value_u64(value, "totalByteLength")? != transport_hashes.total_byte_length {
-        return Err(invalid_private_vss_share_proof(
-            "transported private VSS share proof totalByteLength must match supplied chunks",
-        ));
-    }
-    if value_string(value, "fullObjectHash")? != transport_hashes.full_object_hash.as_str() {
-        return Err(invalid_private_vss_share_proof(
-            "transported private VSS share proof fullObjectHash must match supplied chunks",
-        ));
-    }
-    if value_string(value, "chunkRoot")? != transport_hashes.chunk_root.as_str() {
-        return Err(invalid_private_vss_share_proof(
-            "transported private VSS share proof chunkRoot must match supplied chunks",
-        ));
-    }
-    let Some(chunk_hash_values) = value.get("chunkHashes").and_then(Value::as_array) else {
-        return Err(invalid_private_vss_share_proof(
-            "transported private VSS share proof chunkHashes are required",
-        ));
-    };
-    if chunk_hash_values.len() != transport_hashes.chunk_hashes.len() {
-        return Err(invalid_private_vss_share_proof(
-            "transported private VSS share proof chunkHashes length must match supplied chunks",
-        ));
-    }
-    for (chunk_hash_value, expected_chunk_hash) in chunk_hash_values
-        .iter()
-        .zip(transport_hashes.chunk_hashes.iter())
-    {
-        if chunk_hash_value.as_str() != Some(expected_chunk_hash.as_str()) {
-            return Err(invalid_private_vss_share_proof(
-                "transported private VSS share proof chunkHashes must match supplied chunks",
-            ));
-        }
-    }
-
-    Ok(())
+    verify_transported_setup_proof_material_hashes(
+        value,
+        transport_hashes,
+        "transported private VSS share proof",
+    )
 }
 
 fn private_vss_share_succinct_statement(

@@ -20,6 +20,7 @@ import {
     type SameSecretProofReference,
     type TrusteeEvaluationKeyProofGenerator,
     type TrusteeEvaluationKeyWitnessInput,
+    type TrusteeSameSecretBridgeAnchorInput,
 } from '#packages/protocol/src/setup/evaluation-key-proof-records';
 import {
     createRequiredGaloisSet,
@@ -385,7 +386,6 @@ const stubGenerator = (
                 `statement-${String(input.context.trusteeRosterPosition)}`,
             ),
             limbCount: qSharePrimes.length,
-            sameSecretLinkageIncluded: true,
             proofByteLength: proofBytesHex.length / 2,
             proofBytesHex,
         };
@@ -413,9 +413,25 @@ const trusteeWitnesses = (): TrusteeEvaluationKeyWitnessInput[] =>
                 { length: qSharePrimes.length },
                 () => [Array.from({ length: ringDegree }, () => 1)],
             ),
-            constantCommitments: [
+        }),
+    );
+
+const sameSecretBridgeAnchors = (): TrusteeSameSecretBridgeAnchorInput[] =>
+    Array.from(
+        { length: participantCount },
+        (_unused, trusteeRosterPosition) => ({
+            trusteeRosterPosition,
+            publicMatrixSeedHash: fixtureHash('bridge-public-matrix-seed'),
+            targetBasisHash: fixtureHash('bridge-target-basis'),
+            targetRnsPrimes: [17],
+            targetConstantCommitmentRoots: [
+                fixtureHash(
+                    `bridge-target-root-${String(trusteeRosterPosition)}`,
+                ),
+            ],
+            targetConstantCommitments: [
                 {
-                    objectType: 'SetupCommitmentFixture',
+                    objectType: 'VssPublicCommitmentFixture',
                     trusteeRosterPosition,
                 },
             ],
@@ -462,6 +478,7 @@ const builtTrusteeProofs = (
         galoisKeyShareBatches,
         keySwitchDecompositionHash: fixtureHash('key-switch-decomposition'),
         trusteeWitnesses: trusteeWitnesses(),
+        sameSecretBridgeAnchors: sameSecretBridgeAnchors(),
         trusteeEvaluationKeyProofGenerator: stubGenerator(capturedInputs),
     });
 
@@ -806,9 +823,15 @@ describe('createTrusteeEvaluationKeyProofs', () => {
             expect(generatorInput.keys[0].roundOneAggregateDiagonal).toBe(
                 undefined,
             );
-            expect(generatorInput.sameSecretLinkage.publicMatrixSeedHash).toBe(
-                fixture.schedule.publicMatrixSeedHash,
+            expect(generatorInput.sameSecretBridge.publicMatrixSeedHash).toBe(
+                fixtureHash('bridge-public-matrix-seed'),
             );
+            expect(generatorInput.sameSecretBridge.sourceTrusteeIdentity).toBe(
+                generatorInput.context.trusteeIdentity,
+            );
+            expect(
+                generatorInput.sameSecretBridge.sourceTrusteeRosterPosition,
+            ).toBe(generatorInput.context.trusteeRosterPosition);
             expect(generatorInput.errorCoefficientsByKey).toHaveLength(
                 statementKeyCount,
             );
@@ -878,6 +901,7 @@ describe('createTrusteeEvaluationKeyProofs', () => {
                     'key-switch-decomposition',
                 ),
                 trusteeWitnesses: completeWitnesses.slice(0, 1),
+                sameSecretBridgeAnchors: sameSecretBridgeAnchors(),
                 trusteeEvaluationKeyProofGenerator: stubGenerator([]),
             }),
         ).toThrow('trusteeWitnesses must contain one witness per participant');
@@ -900,6 +924,7 @@ describe('createTrusteeEvaluationKeyProofs', () => {
                     },
                     completeWitnesses[1],
                 ],
+                sameSecretBridgeAnchors: sameSecretBridgeAnchors(),
                 trusteeEvaluationKeyProofGenerator: stubGenerator([]),
             }),
         ).toThrow(
@@ -921,6 +946,7 @@ describe('createTrusteeEvaluationKeyProofs', () => {
                     'key-switch-decomposition',
                 ),
                 trusteeWitnesses: trusteeWitnesses(),
+                sameSecretBridgeAnchors: sameSecretBridgeAnchors(),
                 trusteeEvaluationKeyProofGenerator: stubGenerator([]),
             }),
         ).toThrow(
@@ -949,6 +975,7 @@ describe('createTrusteeEvaluationKeyProofs', () => {
                     'key-switch-decomposition',
                 ),
                 trusteeWitnesses: trusteeWitnesses(),
+                sameSecretBridgeAnchors: sameSecretBridgeAnchors(),
                 trusteeEvaluationKeyProofGenerator: stubGenerator([]),
             }),
         ).toThrow('coefficient hash does not match coefficientsLeHex');
@@ -1126,6 +1153,7 @@ describe('createBinaryChunkedEvaluationKeyShareMaterialTransport', () => {
             galoisKeyShareBatches: batches,
             keySwitchDecompositionHash: fixtureHash('key-switch-decomposition'),
             trusteeWitnesses: trusteeWitnesses(),
+            sameSecretBridgeAnchors: sameSecretBridgeAnchors(),
             trusteeEvaluationKeyProofGenerator: stubGenerator(capturedInputs),
             transportedEvaluationKeyShareComponentMaterial:
                 transport.transportedEvaluationKeyShareComponentMaterial,

@@ -147,7 +147,7 @@ export const createVssShareLinkageStatement = (input: {
 export const vssShareLinkageProofFamily = 'vss-share-linkage';
 export const vssShareLinkageProofBytesHashDomain =
     'sealed-lattice/setup/vss-share-linkage/proof-bytes-v1';
-export const standardBase64Alphabet =
+const standardBase64Alphabet =
     'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 
 const bytesFromHex = (hex: string, fieldName: string): Uint8Array => {

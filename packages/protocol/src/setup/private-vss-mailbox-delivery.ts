@@ -7,6 +7,7 @@ import type { ProtocolHash } from '@sealed-lattice/types';
 
 import {
     assertNonNegativeSafeInteger,
+    bytesToHex,
     protocolHashPattern,
 } from './common-fields.js';
 import {
@@ -344,9 +345,6 @@ const hexToBytes = (hex: string, fieldName: string): Uint8Array => {
 
     return output;
 };
-
-const bytesToHex = (bytes: Uint8Array): string =>
-    [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('');
 
 const proofRandomnessByteLength = 64;
 

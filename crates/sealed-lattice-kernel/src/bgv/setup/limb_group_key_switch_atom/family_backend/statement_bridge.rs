@@ -72,6 +72,21 @@ pub(super) struct BridgeKeyMaterialInput<'a, const LIMB_COUNT: usize> {
     pub(super) error_coefficients_by_digit: &'a [Vec<i64>],
     pub(super) kind: BridgedKeyKind<'a>,
     pub(super) plaintext_modulus: u64,
+    // The global index of the group's first limb: digit j carries its
+    // diagonal source in the group that contains limb j and no diagonal in
+    // any other group.
+    pub(super) group_start_limb: usize,
+}
+
+// The group-local diagonal position of a digit, if this group contains it.
+fn diagonal_local_index(
+    digit_index: usize,
+    group_start_limb: usize,
+    group_limb_count: usize,
+) -> Option<usize> {
+    digit_index
+        .checked_sub(group_start_limb)
+        .filter(|local_index| *local_index < group_limb_count)
 }
 
 pub(super) fn bridge_key_material<const LIMB_COUNT: usize>(
@@ -90,9 +105,15 @@ pub(super) fn bridge_key_material<const LIMB_COUNT: usize>(
             "bridged key error vectors must cover every digit",
         ));
     }
-    if input.group.group_primes.len() != digit_count {
+    let group_limb_count = input.group.group_primes.len();
+    if input
+        .component_b_by_digit
+        .iter()
+        .chain(input.public_sample_by_digit.iter())
+        .any(|limb_vectors| limb_vectors.len() != group_limb_count)
+    {
         return Err(invalid_bridge(
-            "bridged key digit count must match the limb group size",
+            "bridged key limb vectors must match the limb group size",
         ));
     }
     input
@@ -136,9 +157,13 @@ pub(super) fn bridge_key_material<const LIMB_COUNT: usize>(
             {
                 // The centered diagonal term: the aggregate at the diagonal
                 // limb, zero at every other limb, CRT-recombined and centered.
-                let padded_by_limb = (0..digit_count)
+                // A digit whose diagonal limb lies outside this group carries
+                // no diagonal here.
+                let local_diagonal =
+                    diagonal_local_index(digit_index, input.group_start_limb, group_limb_count);
+                let padded_by_limb = (0..group_limb_count)
                     .map(|limb_index| {
-                        if limb_index == digit_index {
+                        if Some(limb_index) == local_diagonal {
                             aggregate_residues.clone()
                         } else {
                             vec![0_u64; ring_degree]
@@ -176,7 +201,11 @@ pub(super) fn bridge_key_material<const LIMB_COUNT: usize>(
             input
                 .group
                 .recombine_centered(parameters, public_sample_by_limb, ring_degree)?;
-        let gadget_idempotent = *input.group.gadget_idempotent(digit_index)?;
+        let gadget_idempotent =
+            match diagonal_local_index(digit_index, input.group_start_limb, group_limb_count) {
+                Some(local_index) => *input.group.gadget_idempotent(local_index)?,
+                None => parameters.zero(),
+            };
 
         // The diagonal term of this digit's congruence.
         let diagonal_term: Vec<[u64; LIMB_COUNT]> = match &input.kind {
@@ -259,19 +288,35 @@ pub(super) fn bridge_key_material<const LIMB_COUNT: usize>(
     })
 }
 
+// Public-only bridge input for the verifier, mirroring the material input
+// without the witness fields.
+pub(super) struct BridgeKeyPublicInput<'a, const LIMB_COUNT: usize> {
+    pub(super) group: &'a LimbGroupContext<LIMB_COUNT>,
+    pub(super) domain: &'a NegacyclicDomain<'a, LIMB_COUNT>,
+    pub(super) component_b_by_digit: &'a [Vec<Vec<u64>>],
+    pub(super) public_sample_by_digit: &'a [Vec<Vec<u64>>],
+    pub(super) kind: BridgedKeyKind<'a>,
+    pub(super) plaintext_modulus: u64,
+    pub(super) group_start_limb: usize,
+}
+
 // Public-only bridge for the verifier: the recombined statement inputs and the
 // family source, without any witness. The prover-side `bridge_key_material`
 // derives the identical public side plus the witness; a test pins the two
 // against each other.
 pub(super) fn bridge_key_public<const LIMB_COUNT: usize>(
     parameters: &ProofFieldParameters<LIMB_COUNT>,
-    group: &LimbGroupContext<LIMB_COUNT>,
-    domain: &NegacyclicDomain<'_, LIMB_COUNT>,
-    component_b_by_digit: &[Vec<Vec<u64>>],
-    public_sample_by_digit: &[Vec<Vec<u64>>],
-    kind: BridgedKeyKind<'_>,
-    plaintext_modulus: u64,
+    input: BridgeKeyPublicInput<'_, LIMB_COUNT>,
 ) -> CanonicalResult<(KeyPublic<LIMB_COUNT>, KeySource<LIMB_COUNT>)> {
+    let BridgeKeyPublicInput {
+        group,
+        domain,
+        component_b_by_digit,
+        public_sample_by_digit,
+        kind,
+        plaintext_modulus,
+        group_start_limb,
+    } = input;
     let ring_degree = domain.size;
     let digit_count = component_b_by_digit.len();
     if digit_count == 0 || public_sample_by_digit.len() != digit_count {
@@ -279,9 +324,14 @@ pub(super) fn bridge_key_public<const LIMB_COUNT: usize>(
             "bridged key digit counts must match and be non-empty",
         ));
     }
-    if group.group_primes.len() != digit_count {
+    let group_limb_count = group.group_primes.len();
+    if component_b_by_digit
+        .iter()
+        .chain(public_sample_by_digit.iter())
+        .any(|limb_vectors| limb_vectors.len() != group_limb_count)
+    {
         return Err(invalid_bridge(
-            "bridged key digit count must match the limb group size",
+            "bridged key limb vectors must match the limb group size",
         ));
     }
     group.validate_exactness_bound(parameters, ring_degree)?;
@@ -297,9 +347,11 @@ pub(super) fn bridge_key_public<const LIMB_COUNT: usize>(
             ));
         }
         for (digit_index, aggregate_residues) in aggregate_residues_by_digit.iter().enumerate() {
-            let padded_by_limb = (0..digit_count)
+            let local_diagonal =
+                diagonal_local_index(digit_index, group_start_limb, group_limb_count);
+            let padded_by_limb = (0..group_limb_count)
                 .map(|limb_index| {
-                    if limb_index == digit_index {
+                    if Some(limb_index) == local_diagonal {
                         aggregate_residues.clone()
                     } else {
                         vec![0_u64; ring_degree]
@@ -324,7 +376,11 @@ pub(super) fn bridge_key_public<const LIMB_COUNT: usize>(
             group.recombine_centered(parameters, component_b_by_limb, ring_degree)?;
         let recombined_sample =
             group.recombine_centered(parameters, public_sample_by_limb, ring_degree)?;
-        let gadget_idempotent = *group.gadget_idempotent(digit_index)?;
+        let gadget_idempotent =
+            match diagonal_local_index(digit_index, group_start_limb, group_limb_count) {
+                Some(local_index) => *group.gadget_idempotent(local_index)?,
+                None => parameters.zero(),
+            };
         public_digits.push(DigitPublic {
             recombined_sample,
             recombined_component_b,
@@ -523,6 +579,7 @@ mod tests {
                 error_coefficients_by_digit: &material.errors_by_digit,
                 kind,
                 plaintext_modulus: PLAINTEXT_MODULUS,
+                group_start_limb: 0,
             },
         )
         .expect("bridge accepts satisfying material");
@@ -603,6 +660,80 @@ mod tests {
     }
 
     #[test]
+    fn bridged_split_groups_cover_a_key_wider_than_one_group() {
+        // A three-limb key split as [0..2) + [2..3): every digit appears in
+        // both group proofs, the diagonal source only in its owning group.
+        let kind = BridgedKeyKind::RelinearizationRoundOne;
+        let material = synthetic_limb_material(64, &DATA_PRIMES[..3], &kind);
+        let parameters = sixteen_limb_group_field_parameters();
+        let ring_degree = material.secret.len();
+        for (group_start_limb, group_limb_count) in [(0_usize, 2_usize), (2, 1)] {
+            let group_primes = &DATA_PRIMES[group_start_limb..group_start_limb + group_limb_count];
+            let group = LimbGroupContext::new(&parameters, group_primes).expect("group builds");
+            let domain = NegacyclicDomain::new(&parameters, ring_degree).expect("domain builds");
+            let component_slice = material
+                .component_b_by_digit
+                .iter()
+                .map(|limbs| limbs[group_start_limb..group_start_limb + group_limb_count].to_vec())
+                .collect::<Vec<_>>();
+            let sample_slice = material
+                .public_sample_by_digit
+                .iter()
+                .map(|limbs| limbs[group_start_limb..group_start_limb + group_limb_count].to_vec())
+                .collect::<Vec<_>>();
+            let bridged = bridge_key_material(
+                &parameters,
+                BridgeKeyMaterialInput {
+                    group: &group,
+                    domain: &domain,
+                    component_b_by_digit: &component_slice,
+                    public_sample_by_digit: &sample_slice,
+                    secret_coefficients: &material.secret,
+                    error_coefficients_by_digit: &material.errors_by_digit,
+                    kind: BridgedKeyKind::RelinearizationRoundOne,
+                    plaintext_modulus: PLAINTEXT_MODULUS,
+                    group_start_limb,
+                },
+            )
+            .expect("split group bridges satisfying material");
+            let proof_parameters = KeyFriProofParameters {
+                query_count: 40,
+                mask_degree: 0,
+            };
+            let mut salt_seed = 0x517 + group_start_limb as u64;
+            let proof = prove_key_fri(
+                &parameters,
+                ring_degree,
+                &bridged.public,
+                &bridged.source,
+                &material.secret,
+                &bridged.digits,
+                None,
+                &ZERO_STATEMENT_BINDING,
+                group_start_limb as u64,
+                &proof_parameters,
+                &mut salt_seed,
+            )
+            .expect("split group proves");
+            assert!(
+                verify_key_fri(
+                    &parameters,
+                    ring_degree,
+                    &bridged.public,
+                    &bridged.source,
+                    &proof,
+                    None,
+                    &ZERO_STATEMENT_BINDING,
+                    group_start_limb as u64,
+                    &proof_parameters
+                )
+                .expect("split group verify runs"),
+                "split group proof verifies"
+            );
+        }
+    }
+
+    #[test]
     fn tampered_limb_material_is_refused_by_the_bridge() {
         // One corrupted limb residue breaks the congruence: the carry lift
         // lands outside |c| <= N + 1 and the bridge refuses instead of
@@ -625,6 +756,7 @@ mod tests {
                 error_coefficients_by_digit: &material.errors_by_digit,
                 kind,
                 plaintext_modulus: PLAINTEXT_MODULUS,
+                group_start_limb: 0,
             },
         );
         assert!(
@@ -653,6 +785,7 @@ mod tests {
                 error_coefficients_by_digit: &material.errors_by_digit,
                 kind,
                 plaintext_modulus: PLAINTEXT_MODULUS,
+                group_start_limb: 0,
             },
         );
         assert!(

@@ -1,5 +1,6 @@
 import { deriveCanonicalObjectHash, hash512Hex } from '@sealed-lattice/crypto';
 
+import { bytesFromStandardBase64 } from '../proof-byte-encoding.js';
 import {
     setupProofMaterialRecordTransportMetadataFields,
     setupProofMaterialReferenceFields,
@@ -12,55 +13,11 @@ import {
 import {
     sameSecretBridgeProofBytesHashDomain,
     sameSecretBridgeProofFamily,
-    standardBase64Alphabet,
     vssShareLinkageProofBytesHashDomain,
     vssShareLinkageProofFamily,
 } from './linkage-and-bridge.js';
 
 type JsonRecord = Record<string, unknown>;
-
-// Standard RFC 4648 base64 with padding, the inverse of the local
-// encodeStandardBase64 the proof records use for their embedded proof
-// bytes. Decoding recovers the exact proof bytes so the transport hashes bind
-// the same object the embedded record committed to.
-const bytesFromStandardBase64 = (
-    encoded: string,
-    fieldName: string,
-): Uint8Array => {
-    if (encoded.length % 4 !== 0) {
-        throw new Error(
-            `${fieldName} must have a base64 length multiple of 4.`,
-        );
-    }
-    const paddingLength = encoded.endsWith('==')
-        ? 2
-        : encoded.endsWith('=')
-          ? 1
-          : 0;
-    const symbolCount = encoded.length - paddingLength;
-    const byteLength = (encoded.length / 4) * 3 - paddingLength;
-    const bytes = new Uint8Array(byteLength);
-    let byteIndex = 0;
-    let accumulator = 0;
-    let accumulatedBits = 0;
-    for (let symbolIndex = 0; symbolIndex < symbolCount; symbolIndex += 1) {
-        const symbolValue = standardBase64Alphabet.indexOf(
-            encoded[symbolIndex],
-        );
-        if (symbolValue < 0) {
-            throw new Error(`${fieldName} must be valid standard base64.`);
-        }
-        accumulator = (accumulator << 6) | symbolValue;
-        accumulatedBits += 6;
-        if (accumulatedBits >= 8) {
-            accumulatedBits -= 8;
-            bytes[byteIndex] = (accumulator >> accumulatedBits) & 0xff;
-            byteIndex += 1;
-        }
-    }
-
-    return bytes;
-};
 
 export type TransportedVssShareLinkageProofMaterialSet = Readonly<
     TransportedSetupProofMaterialSet & {

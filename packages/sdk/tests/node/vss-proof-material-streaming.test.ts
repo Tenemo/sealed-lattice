@@ -274,6 +274,67 @@ describe('VSS proof material move to transport', () => {
             ).toThrow(/proofBytesHash must match proofBytesBase64/u);
         },
     );
+
+    it.each(proofMaterialCases)(
+        'rejects a $proofFamily record whose base64 sets non-canonical padding bits',
+        (proofMaterialCase) => {
+            const embedded = embeddedProofMaterialSet(proofMaterialCase, 1);
+            const mutatedRecords = (
+                embedded.proofRecords as readonly JsonRecord[]
+            ).map((proofRecord) => {
+                // The five-byte fixture encodes to eight symbols ending in one
+                // padding character, so the final symbol canonically carries
+                // two zero low bits. Setting them nonzero decodes to the same
+                // bytes (the embedded proofBytesHash still matches), which is
+                // exactly the second-encoding divergence the strict decoder
+                // must refuse before hashing.
+                const canonicalBase64 = proofRecord.proofBytesBase64 as string;
+                const finalSymbolIndex = canonicalBase64.length - 2;
+                const finalSymbolValue = encodeStandardBase64Alphabet.indexOf(
+                    canonicalBase64[finalSymbolIndex],
+                );
+
+                return {
+                    ...proofRecord,
+                    proofBytesBase64:
+                        canonicalBase64.slice(0, finalSymbolIndex) +
+                        encodeStandardBase64Alphabet[finalSymbolValue + 1] +
+                        '=',
+                };
+            });
+
+            expect(() =>
+                proofMaterialCase.moveEmbeddedToTransport({
+                    ...embedded,
+                    proofRecords: mutatedRecords,
+                }),
+            ).toThrow(/must use canonical padding bits/u);
+        },
+    );
+
+    it.each(proofMaterialCases)(
+        'rejects a $proofFamily record whose base64 pads before the final chunk',
+        (proofMaterialCase) => {
+            const embedded = embeddedProofMaterialSet(proofMaterialCase, 1);
+            const mutatedRecords = (
+                embedded.proofRecords as readonly JsonRecord[]
+            ).map((proofRecord) => {
+                const canonicalBase64 = proofRecord.proofBytesBase64 as string;
+
+                return {
+                    ...proofRecord,
+                    proofBytesBase64: `${canonicalBase64.slice(0, 2)}==${canonicalBase64.slice(4)}`,
+                };
+            });
+
+            expect(() =>
+                proofMaterialCase.moveEmbeddedToTransport({
+                    ...embedded,
+                    proofRecords: mutatedRecords,
+                }),
+            ).toThrow(/padding must appear only in the final chunk/u);
+        },
+    );
 });
 
 describe('VSS proof material streaming through the kernel', () => {

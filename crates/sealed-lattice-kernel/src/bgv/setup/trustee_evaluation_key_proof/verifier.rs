@@ -545,6 +545,15 @@ pub(crate) fn verify_evaluation_key_share(
     proof: &SuccinctEvaluationKeyProof,
 ) -> CanonicalResult<()> {
     statement.validate_shape()?;
+    if statement
+        .keys
+        .iter()
+        .any(|key| key.kind.has_diagonal_source())
+    {
+        return Err(invalid_succinct_setup_proof(
+            "key-bearing trustee evaluation-key statements are verified by the key-switch atom schedule",
+        ));
+    }
     let proof_trace_ring_degree = statement
         .vss_share_linkage
         .as_ref()

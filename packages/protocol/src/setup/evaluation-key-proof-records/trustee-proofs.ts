@@ -18,6 +18,7 @@ import {
     type TrusteeEvaluationKeyProofsInput,
     type TrusteeEvaluationKeyStatementKey,
     type TrusteeEvaluationKeyWitnessInput,
+    type TrusteeSameSecretBridgeAnchorInput,
     evaluationKeyShareComponentMaterialEncoding,
     evaluationKeyShareComponentMaterialMagic,
     evaluationKeyShareProofTransportObjectType,
@@ -500,6 +501,40 @@ export const createTrusteeEvaluationKeyProofs = (
         }
         witnessesByRosterPosition.set(witness.trusteeRosterPosition, witness);
     });
+    const anchorsByRosterPosition = new Map<
+        number,
+        TrusteeSameSecretBridgeAnchorInput
+    >();
+    input.sameSecretBridgeAnchors.forEach((anchor) => {
+        assertNonNegativeSafeInteger(
+            anchor.trusteeRosterPosition,
+            'sameSecretBridgeAnchors.trusteeRosterPosition',
+        );
+        if (anchorsByRosterPosition.has(anchor.trusteeRosterPosition)) {
+            throw new Error(
+                'sameSecretBridgeAnchors must not repeat a trustee roster position.',
+            );
+        }
+        if (
+            anchor.targetRnsPrimes.length === 0 ||
+            anchor.targetRnsPrimes.length !==
+                anchor.targetConstantCommitmentRoots.length ||
+            anchor.targetRnsPrimes.length !==
+                anchor.targetConstantCommitments.length
+        ) {
+            throw new Error(
+                'sameSecretBridgeAnchors target primes, roots, and commitments must be non-empty and aligned.',
+            );
+        }
+        anchor.targetConstantCommitments.forEach(
+            (commitment, commitmentIndex) =>
+                assertJsonRecord(
+                    commitment,
+                    `sameSecretBridgeAnchors.targetConstantCommitments.${String(commitmentIndex)}`,
+                ),
+        );
+        anchorsByRosterPosition.set(anchor.trusteeRosterPosition, anchor);
+    });
 
     const scheduledLevels =
         input.evaluatorKeySchedule.relinearizationLevelSchedule.map(
@@ -519,6 +554,14 @@ export const createTrusteeEvaluationKeyProofs = (
         if (witness === undefined) {
             throw new Error(
                 'trusteeWitnesses must contain one witness per participant.',
+            );
+        }
+        const bridgeAnchor = anchorsByRosterPosition.get(
+            proofReference.trusteeRosterPosition,
+        );
+        if (bridgeAnchor === undefined) {
+            throw new Error(
+                'sameSecretBridgeAnchors must contain one anchor per participant.',
             );
         }
         const statementKeys: TrusteeEvaluationKeyStatementKey[] = [];
@@ -652,12 +695,6 @@ export const createTrusteeEvaluationKeyProofs = (
                 'trusteeWitnesses.errorCoefficientsByKey must contain one error vector set per statement key.',
             );
         }
-        witness.constantCommitments.forEach((commitment, commitmentIndex) =>
-            assertJsonRecord(
-                commitment,
-                `trusteeWitnesses.constantCommitments.${String(commitmentIndex)}`,
-            ),
-        );
         const proofRandomnessSeedHex = freshProofRandomnessHex();
         const proofRandomnessNonceHex = freshProofRandomnessHex();
         const generatedProof = input.trusteeEvaluationKeyProofGenerator({
@@ -678,10 +715,17 @@ export const createTrusteeEvaluationKeyProofs = (
             },
             ringDegree,
             keys: statementKeys,
-            sameSecretLinkage: {
-                publicMatrixSeedHash:
-                    input.evaluatorKeySchedule.publicMatrixSeedHash,
-                commitments: witness.constantCommitments,
+            sameSecretBridge: {
+                publicMatrixSeedHash: bridgeAnchor.publicMatrixSeedHash,
+                targetBasisHash: bridgeAnchor.targetBasisHash,
+                sourceTrusteeIdentity: proofReference.trusteeIdentity,
+                sourceTrusteeRosterPosition:
+                    proofReference.trusteeRosterPosition,
+                targetRnsPrimes: bridgeAnchor.targetRnsPrimes,
+                targetConstantCommitmentRoots:
+                    bridgeAnchor.targetConstantCommitmentRoots,
+                targetConstantCommitments:
+                    bridgeAnchor.targetConstantCommitments,
             },
             secretCoefficients: witness.secretCoefficients,
             errorCoefficientsByKey: witness.errorCoefficientsByKey,
@@ -700,11 +744,6 @@ export const createTrusteeEvaluationKeyProofs = (
             generatedProof.statementHash,
             'generatedProof.statementHash',
         );
-        if (generatedProof.sameSecretLinkageIncluded !== true) {
-            throw new Error(
-                'generatedProof must include the same-secret linkage.',
-            );
-        }
         assertNonEmptyString(
             generatedProof.proofBytesHex,
             'generatedProof.proofBytesHex',

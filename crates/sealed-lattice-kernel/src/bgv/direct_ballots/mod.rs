@@ -12,7 +12,18 @@ mod timing;
 use aggregation::*;
 pub(crate) use command::run_direct_encrypted_ballot;
 use encryption::*;
-use evaluator_replay::*;
+// The end-to-end first-profile evidence test under target_decryption::tests
+// replays a genuine ballot aggregate through this production evaluator path
+// before releasing it through the proof-backed staged decryption commands.
+pub(crate) use evaluator_replay::{
+    DirectBallotPackedBatchedPairEvaluatorInput,
+    run_direct_ballot_packed_batched_pair_evaluator_for_top_counts,
+};
+#[cfg(test)]
+pub(crate) use evaluator_replay::{
+    direct_ballot_comparison_domain_max, direct_ballot_evaluator_working_level,
+    direct_ballot_plaintext_target_slots,
+};
 use proof_summary::*;
 use proof_transport::*;
 use randomness::*;

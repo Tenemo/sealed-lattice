@@ -1,6 +1,13 @@
 import { deriveCanonicalObjectHash, hash512Hex } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
+import {
+    assertNonNegativeSafeInteger,
+    assertPositiveSafeInteger,
+    assertProtocolHash,
+    bytesFromHex,
+    bytesToHex,
+} from '../common-fields.js';
 import { setupProofTransportChunkSizeBytes } from '../setup-proof-material-transport.js';
 import { appendVaruint } from '../varuint-encoding.js';
 
@@ -21,7 +28,9 @@ export {
     assertNonNegativeSafeInteger,
     assertPositiveSafeInteger,
     assertProtocolHash,
-} from '../common-fields.js';
+    bytesFromHex,
+    bytesToHex,
+};
 
 export const assertNonEmptyString = (
     value: string,
@@ -80,24 +89,6 @@ export const nonNegativeIntegerRecordField = (
 
     return value;
 };
-
-export const bytesFromHex = (hex: string, fieldName: string): Uint8Array => {
-    if (!/^(?:[0-9a-f]{2})*$/u.test(hex)) {
-        throw new TypeError(`${fieldName} must be lowercase hex bytes.`);
-    }
-    const bytes = new Uint8Array(hex.length / 2);
-    for (let byteIndex = 0; byteIndex < bytes.length; byteIndex += 1) {
-        bytes[byteIndex] = Number.parseInt(
-            hex.slice(byteIndex * 2, byteIndex * 2 + 2),
-            16,
-        );
-    }
-
-    return bytes;
-};
-
-export const bytesToHex = (bytes: Uint8Array): string =>
-    Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 
 const proofRandomnessByteLength = 64;
 

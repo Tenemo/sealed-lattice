@@ -2,14 +2,106 @@ use super::*;
 
 #[test]
 fn trustee_proof_commands_round_trip_and_reject_tampered_bytes() {
-    let (statement, witness) = generate_development_trustee_instance_with_linkage(
+    use super::super::relation::{SameSecretBridgeStatement, VssShareLinkageCommitment};
+    use crate::bgv::evaluator::top_k::canonical_target_basis_hash;
+    use crate::bgv::setup::vss_commitment::{
+        VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT as BRIDGE_RANDOMNESS_COLUMNS,
+        VssPublicCommitmentOpeningInput, compute_vss_public_commitment_from_opening,
+        vss_public_canonical_message_digit_columns,
+    };
+
+    let (mut statement, mut witness) = generate_development_trustee_instance(
         "cdcdabab",
-        &[round_one(2), rotation(3, 1)],
+        &[round_one(2), round_two(2), rotation(3, 1)],
         SMALL_RING_DEGREE,
-        Some(3),
     )
     .expect("development instance");
+    // Attach a consistent same-secret bridge anchor over the instance secret,
+    // computed by the live commitment function so both the command parser's
+    // root recomputation and the atom schedule's linkage opening hold.
+    let bridge_seed_hash = repeated_hash("cd");
+    let target_rns_prime = DATA_PRIMES[0];
+    witness.negative_indicator_coefficients = witness
+        .secret_coefficients
+        .iter()
+        .map(|coefficient| i64::from(*coefficient < 0))
+        .collect();
+    let message_coefficients = witness
+        .secret_coefficients
+        .iter()
+        .zip(witness.negative_indicator_coefficients.iter())
+        .map(|(secret_coefficient, negative_indicator)| {
+            u64::try_from(
+                i128::from(*secret_coefficient)
+                    + i128::from(*negative_indicator) * i128::from(target_rns_prime),
+            )
+            .expect("canonical bridge message")
+        })
+        .collect::<Vec<_>>();
+    let randomness_by_column = (0..BRIDGE_RANDOMNESS_COLUMNS)
+        .map(|column_index| {
+            (0..SMALL_RING_DEGREE)
+                .map(|coefficient_index| {
+                    ((33 + column_index as i64 * 11 + coefficient_index as i64 * 13).rem_euclid(3))
+                        - 1
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    let message_digit_columns =
+        vss_public_canonical_message_digit_columns(&message_coefficients, SMALL_RING_DEGREE)
+            .expect("bridge message digit columns");
+    let computation = compute_vss_public_commitment_from_opening(VssPublicCommitmentOpeningInput {
+        commitment_role: "coefficient",
+        commitment_context: &serde_json::json!({ "testPurpose": "atom-command-round-trip" }),
+        public_matrix_seed_hash: &bridge_seed_hash,
+        rns_limb_index: 0,
+        rns_prime: target_rns_prime,
+        ring_degree: SMALL_RING_DEGREE,
+        message_coefficients: &message_coefficients,
+        message_digit_columns: &message_digit_columns,
+        message_coefficient_bound: target_rns_prime,
+        randomness_by_column: &randomness_by_column,
+    })
+    .expect("live bridge commitment");
+    let coordinates_by_commitment_modulus = computation.commitment["commitmentLimbs"]
+        .as_array()
+        .expect("commitment limbs")
+        .iter()
+        .map(|limb| {
+            limb["coordinates"]
+                .as_array()
+                .expect("commitment coordinates")
+                .iter()
+                .map(|coordinate| coordinate.as_u64().expect("coordinate"))
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    statement.same_secret_bridge = Some(SameSecretBridgeStatement {
+        public_matrix_seed_hash: bridge_seed_hash,
+        source_trustee_identity: statement.context.trustee_identity.clone(),
+        source_trustee_roster_position: statement.context.trustee_roster_position,
+        target_basis_hash: canonical_target_basis_hash().expect("canonical target basis hash"),
+        target_rns_primes: vec![target_rns_prime],
+        target_constant_commitment_roots: vec![computation.commitment_root.clone()],
+        target_constant_commitments: vec![VssShareLinkageCommitment {
+            coordinates_by_commitment_modulus,
+        }],
+    });
+    statement.validate_shape().expect("bridged key statement");
+    witness.opening_randomness_by_limb = vec![randomness_by_column];
+
     let mut generate_request = statement_request_value(&statement);
+    let bridge = statement.same_secret_bridge.as_ref().expect("bridge");
+    generate_request["sameSecretBridge"] = serde_json::json!({
+        "publicMatrixSeedHash": bridge.public_matrix_seed_hash,
+        "targetBasisHash": bridge.target_basis_hash,
+        "sourceTrusteeIdentity": bridge.source_trustee_identity,
+        "sourceTrusteeRosterPosition": bridge.source_trustee_roster_position,
+        "targetRnsPrimes": bridge.target_rns_primes,
+        "targetConstantCommitmentRoots": bridge.target_constant_commitment_roots,
+        "targetConstantCommitments": [computation.commitment.clone()],
+    });
     generate_request["secretCoefficients"] = serde_json::json!(witness.secret_coefficients);
     generate_request["errorCoefficientsByKey"] =
         serde_json::json!(witness.error_coefficients_by_key);
@@ -22,8 +114,18 @@ fn trustee_proof_commands_round_trip_and_reject_tampered_bytes() {
 
     let generated = super::generate_trustee_evaluation_key_proof_from_request(&generate_request)
         .expect("generate command");
-    assert_eq!(generated["sameSecretLinkageIncluded"], true);
     verify_generated_proof(&statement, &generated);
+
+    // A key-bearing request without the bridge anchor is refused fail-closed.
+    let mut missing_anchor_request = generate_request.clone();
+    missing_anchor_request
+        .as_object_mut()
+        .expect("request object")
+        .remove("sameSecretBridge");
+    assert!(
+        super::generate_trustee_evaluation_key_proof_from_request(&missing_anchor_request).is_err(),
+        "a key-bearing statement without the bridge anchor must be refused"
+    );
 
     let mut tampered_proof_bytes = generated_proof_bytes(&generated);
     let flip_position = tampered_proof_bytes.len() / 2;
@@ -31,6 +133,44 @@ fn trustee_proof_commands_round_trip_and_reject_tampered_bytes() {
     assert!(
         verify_proof_bytes(&statement, &tampered_proof_bytes).is_err(),
         "tampered proof bytes must reject"
+    );
+
+    // Statement tampering: a forged Galois element or a substituted round-two
+    // aggregate changes the statement hash, so the schedule's per-key
+    // transcript binding rejects the honest bytes.
+    let honest_proof_bytes = generated_proof_bytes(&generated);
+    let mut forged_element_statement =
+        super::super::commands::statement_from_request(&generate_request)
+            .expect("reparsed statement");
+    forged_element_statement.keys[2].kind =
+        EvaluationKeyShareKind::GaloisRotation { galois_element: 7 };
+    assert!(
+        verify_proof_bytes(&forged_element_statement, &honest_proof_bytes).is_err(),
+        "a forged rotation element must reject the schedule proof"
+    );
+    let mut forged_aggregate_statement =
+        super::super::commands::statement_from_request(&generate_request)
+            .expect("reparsed statement");
+    let aggregate_modulus = DATA_PRIMES[0];
+    forged_aggregate_statement.keys[1].round_one_aggregate_diagonal[0][0] =
+        (forged_aggregate_statement.keys[1].round_one_aggregate_diagonal[0][0] + 1)
+            % aggregate_modulus;
+    assert!(
+        verify_proof_bytes(&forged_aggregate_statement, &honest_proof_bytes).is_err(),
+        "a substituted round-two aggregate must reject the schedule proof"
+    );
+    // A substituted aggregate must not prove either: the witness carries no
+    // exact carry decomposition for the forged congruence.
+    let mut forged_generate_request = generate_request.clone();
+    let original_residue = forged_generate_request["keys"][1]["roundOneAggregateDiagonal"][0][0]
+        .as_u64()
+        .expect("aggregate residue");
+    forged_generate_request["keys"][1]["roundOneAggregateDiagonal"][0][0] =
+        serde_json::json!((original_residue + 1) % aggregate_modulus);
+    assert!(
+        super::generate_trustee_evaluation_key_proof_from_request(&forged_generate_request)
+            .is_err(),
+        "a substituted round-two aggregate must not prove"
     );
 }
 
@@ -152,7 +292,6 @@ fn public_key_share_commands_round_trip_with_family_label() {
     let generated = super::generate_trustee_evaluation_key_proof_from_request(&generate_request)
         .expect("generate public-key share command");
     assert_eq!(generated["proofFamily"], "public-key-share");
-    assert_eq!(generated["sameSecretLinkageIncluded"], true);
 
     verify_generated_proof(&statement, &generated);
 
@@ -224,11 +363,11 @@ fn proof_command_binds_randomness_seed_to_nonce_and_statement() {
 fn proof_codec_round_trips_and_rejects_malformed_bytes() {
     let (statement, witness) = generate_development_trustee_instance_with_linkage(
         "c0dec0de",
-        &[round_one(2), rotation(3, 1)],
+        &[],
         SMALL_RING_DEGREE,
-        Some(3),
+        Some(DATA_PRIMES.len()),
     )
-    .expect("development instance");
+    .expect("anchor instance");
     let proof =
         prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
     let bytes = encode_trustee_evaluation_key_proof(&proof);
@@ -266,11 +405,11 @@ fn proof_codec_rejects_low_degree_shape_mismatches_before_verification() {
     // smallest ring that still commits a folded Merkle layer.
     let (statement, witness) = generate_development_trustee_instance_with_linkage(
         "c0dec0de",
-        &[round_one(2), rotation(3, 1)],
+        &[],
         FOLDED_LAYER_RING_DEGREE,
-        Some(3),
+        Some(DATA_PRIMES.len()),
     )
-    .expect("development instance");
+    .expect("anchor instance");
     let mut proof =
         prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
     proof.limb_proofs[0]
@@ -293,11 +432,11 @@ fn proof_codec_rejects_low_degree_shape_mismatches_before_verification() {
 
     let (statement, witness) = generate_development_trustee_instance_with_linkage(
         "cafe0dd0",
-        &[round_one(2), rotation(3, 1)],
+        &[],
         FOLDED_LAYER_RING_DEGREE,
-        Some(3),
+        Some(DATA_PRIMES.len()),
     )
-    .expect("development instance");
+    .expect("anchor instance");
     let mut proof =
         prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
     proof.limb_proofs[0]
@@ -320,11 +459,11 @@ fn proof_codec_rejects_low_degree_shape_mismatches_before_verification() {
 
     let (statement, witness) = generate_development_trustee_instance_with_linkage(
         "dec0ded0",
-        &[round_one(2), rotation(3, 1)],
+        &[],
         FOLDED_LAYER_RING_DEGREE,
-        Some(3),
+        Some(DATA_PRIMES.len()),
     )
-    .expect("development instance");
+    .expect("anchor instance");
     let mut proof =
         prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
     // A batched folded-layer opening whose node count exceeds its per-layer
@@ -358,11 +497,11 @@ fn assert_noncanonical_encoded_proof_rejects(
 ) {
     let (statement, witness) = generate_development_trustee_instance_with_linkage(
         "c0decafe",
-        &[round_one(2), rotation(3, 1)],
+        &[],
         FOLDED_LAYER_RING_DEGREE,
-        Some(3),
+        Some(DATA_PRIMES.len()),
     )
-    .expect("development instance");
+    .expect("anchor instance");
     let mut proof =
         prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
     let modulus = statement.limb_moduli()[0];
@@ -428,13 +567,6 @@ fn proof_codec_rejects_noncanonical_values_for_each_succinct_family_shape() {
         .expect("same-secret anchor instance"),
         generate_development_public_key_share_instance("2222bbbb", SMALL_RING_DEGREE)
             .expect("public-key share instance"),
-        generate_development_trustee_instance_with_linkage(
-            "3333cccc",
-            &[round_one(2), round_two(2), rotation(3, 1)],
-            SMALL_RING_DEGREE,
-            Some(3),
-        )
-        .expect("trustee evaluation-key instance"),
     ];
 
     for (statement, witness) in family_cases {

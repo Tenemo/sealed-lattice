@@ -4,8 +4,7 @@ use super::proof_codec::{
 use super::prover::prove_evaluation_key_share;
 use super::relation::{
     EvaluationKeyShareKind, PrivateVssShareStatement, SuccinctSetupProofContext,
-    TrusteeEvaluationKeyStatement, galois_automorphism_apply, galois_automorphism_transpose_apply,
-    generate_development_public_key_share_instance, generate_development_trustee_ceremony_slice,
+    TrusteeEvaluationKeyStatement, generate_development_public_key_share_instance,
     generate_development_trustee_instance, generate_development_trustee_instance_with_linkage,
     round_one_aggregate_diagonal_from_components,
 };
@@ -290,6 +289,15 @@ fn verify_proof_bytes(
     statement: &TrusteeEvaluationKeyStatement,
     proof_bytes: &[u8],
 ) -> crate::encoding::CanonicalResult<()> {
+    // Mirror the production dispatch: key-bearing statements verify against
+    // the atom schedule backend, every other family on the shared engine.
+    if crate::bgv::setup::limb_group_key_switch_atom::family_backend::schedule::statement_is_key_bearing(
+        statement,
+    ) {
+        return crate::bgv::setup::limb_group_key_switch_atom::family_backend::schedule::verify_key_bearing_trustee_evaluation_keys(
+            statement, proof_bytes,
+        );
+    }
     let proof = decode_trustee_evaluation_key_proof(statement, proof_bytes)?;
 
     verify_evaluation_key_share(statement, &proof)
@@ -365,6 +373,34 @@ fn public_key_share_statement_hash_vector_request() -> serde_json::Value {
 }
 
 fn trustee_evaluation_key_statement_hash_vector_request() -> serde_json::Value {
+    use crate::bgv::setup::vss_commitment::{
+        VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT, VssPublicCommitmentOpeningInput,
+        compute_vss_public_commitment_from_opening, vss_public_canonical_message_digit_columns,
+    };
+
+    // The key-bearing family statement carries the same-secret bridge anchor.
+    // The vector's anchor is the zero opening computed by the live VssPublic
+    // commitment function; the TS/WASM vector test computes the identical
+    // anchor through the kernel command, so both languages pin one hash.
+    let bridge_seed_hash = repeated_hash("43");
+    let zero_message = vec![0_u64; SMALL_RING_DEGREE];
+    let zero_digit_columns =
+        vss_public_canonical_message_digit_columns(&zero_message, SMALL_RING_DEGREE)
+            .expect("statement-vector bridge digit columns");
+    let zero_randomness = vec![vec![0_i64; SMALL_RING_DEGREE]; VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT];
+    let computation = compute_vss_public_commitment_from_opening(VssPublicCommitmentOpeningInput {
+        commitment_role: "coefficient",
+        commitment_context: &serde_json::json!({ "testPurpose": "statement-vector-bridge" }),
+        public_matrix_seed_hash: &bridge_seed_hash,
+        rns_limb_index: 0,
+        rns_prime: DATA_PRIMES[0],
+        ring_degree: SMALL_RING_DEGREE,
+        message_coefficients: &zero_message,
+        message_digit_columns: &zero_digit_columns,
+        message_coefficient_bound: DATA_PRIMES[0],
+        randomness_by_column: &zero_randomness,
+    })
+    .expect("statement-vector bridge commitment");
     let mut request = serde_json::json!({
         "context": vector_context_base(serde_json::json!({
             "requiredGaloisSetHash": repeated_hash("33"),
@@ -385,8 +421,20 @@ fn trustee_evaluation_key_statement_hash_vector_request() -> serde_json::Value {
                 [zero_u64_vector(), zero_u64_vector(), zero_u64_vector()],
             ],
         }],
+        "sameSecretBridge": {
+            "publicMatrixSeedHash": bridge_seed_hash,
+            "targetBasisHash": crate::bgv::evaluator::top_k::canonical_target_basis_hash()
+                .expect("canonical target basis hash"),
+            "sourceTrusteeIdentity": "statement-vector-trustee",
+            "sourceTrusteeRosterPosition": 0,
+            "targetRnsPrimes": [DATA_PRIMES[0]],
+            "targetConstantCommitmentRoots": [computation.commitment_root],
+            "targetConstantCommitments": [computation.commitment],
+        },
         "secretCoefficients": zero_i64_vector(),
         "errorCoefficientsByKey": [[zero_i64_vector(), zero_i64_vector(), zero_i64_vector()]],
+        "negativeIndicatorCoefficients": zero_i64_vector(),
+        "openingRandomnessByLimb": [zero_randomness],
     });
     proof_randomness_fields(&mut request);
     request

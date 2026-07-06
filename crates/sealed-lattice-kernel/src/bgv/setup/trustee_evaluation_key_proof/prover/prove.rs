@@ -593,6 +593,15 @@ fn prove_evaluation_key_share_with_limb_batch_size(
     requested_limb_batch_size: usize,
 ) -> CanonicalResult<SuccinctEvaluationKeyProof> {
     statement.validate_shape()?;
+    if statement
+        .keys
+        .iter()
+        .any(|key| key.kind.has_diagonal_source())
+    {
+        return Err(invalid_succinct_setup_proof(
+            "key-bearing trustee evaluation-key statements are proven by the key-switch atom schedule",
+        ));
+    }
     validate_witness_support(statement, witness)?;
     let proof_limb_indices = statement.proof_limb_indices();
     let limb_batch_size =

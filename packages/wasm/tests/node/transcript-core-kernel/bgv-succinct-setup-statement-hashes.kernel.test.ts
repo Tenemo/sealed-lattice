@@ -289,6 +289,28 @@ describe('succinct setup statement hash vectors', () => {
             expectedStatementHashes.privateVssShare,
         );
 
+        // The key-bearing statement carries the same-secret bridge anchor:
+        // the zero opening computed through the kernel's live VssPublic
+        // commitment command, byte-identical to the Rust vector fixture.
+        const bridgeSeedHash = repeatedHash('43');
+        const zeroBridgeRandomness = Array.from({ length: 2 }, () =>
+            zeroI64Vector(),
+        );
+        const bridgeComputation = kernel.computeVssPublicCommitmentFromOpening({
+            commitmentRole: 'coefficient',
+            commitmentContext: {
+                testPurpose: 'statement-vector-bridge',
+            },
+            publicMatrixSeedHash: bridgeSeedHash,
+            rnsLimbIndex: 0,
+            rnsPrime: firstQSharePrime,
+            ringDegree,
+            messageCoefficients: zeroU64Vector(),
+            messageDigitColumns: Array.from({ length: 2 }, () =>
+                zeroU64Vector(),
+            ),
+            randomnessByColumn: zeroBridgeRandomness,
+        });
         const trusteeEvaluationKey = kernel.generateTrusteeEvaluationKeyProof({
             context: statementContext({
                 requiredGaloisSetHash: repeatedHash('33'),
@@ -311,10 +333,23 @@ describe('succinct setup statement hash vectors', () => {
                     ],
                 },
             ],
+            sameSecretBridge: {
+                publicMatrixSeedHash: bridgeSeedHash,
+                targetBasisHash: parameters.canonicalTargetBasisHash,
+                sourceTrusteeIdentity: 'statement-vector-trustee',
+                sourceTrusteeRosterPosition: 0,
+                targetRnsPrimes: [firstQSharePrime],
+                targetConstantCommitmentRoots: [
+                    bridgeComputation.commitmentRoot,
+                ],
+                targetConstantCommitments: [bridgeComputation.commitment],
+            },
             secretCoefficients: zeroI64Vector(),
             errorCoefficientsByKey: [
                 [zeroI64Vector(), zeroI64Vector(), zeroI64Vector()],
             ],
+            negativeIndicatorCoefficients: zeroI64Vector(),
+            openingRandomnessByLimb: [zeroBridgeRandomness],
             ...proofRandomnessFields,
         });
         expect(trusteeEvaluationKey.proofFamily).toBe('trustee-evaluation-key');

@@ -53,7 +53,7 @@ const normalizeBackendCorruptionModel = (
         );
     }
     if (model.certificateHash.length === 0) {
-        throw new Error('Certified HE backend parameters requires a hash.');
+        throw new Error('Certified HE backend parameters require a hash.');
     }
 
     return {

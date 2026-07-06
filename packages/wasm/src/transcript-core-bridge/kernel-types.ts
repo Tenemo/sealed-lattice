@@ -17,6 +17,7 @@ import type {
     BgvCollectiveSetupPublicDerivations,
     BgvCollectiveSetupVerification,
     BgvTrusteeEvaluationKeyProofGeneration,
+    BgvTrusteeEvaluationKeySameSecretBridge,
     BgvTrusteeEvaluationKeySameSecretLinkage,
     BgvTrusteeEvaluationKeyStatementContext,
     BgvTrusteeEvaluationKeyStatementKey,
@@ -51,6 +52,7 @@ export type {
     BgvCollectiveSetupPublicDerivations,
     BgvCollectiveSetupVerification,
     BgvTrusteeEvaluationKeyProofGeneration,
+    BgvTrusteeEvaluationKeySameSecretBridge,
     BgvTrusteeEvaluationKeySameSecretLinkage,
     BgvTrusteeEvaluationKeyStatementContext,
     BgvTrusteeEvaluationKeyStatementKey,
@@ -87,7 +89,6 @@ export type TranscriptCorePlaintextComparison = {
 
 export type TranscriptCoreKernel = {
     readonly exportedFunctionNames: readonly string[];
-    wasmMemoryByteLength(): number;
     analyzeCanonicalObject(input: {
         readonly canonicalBytesHex: string;
         readonly chunkSize: number;
@@ -191,6 +192,7 @@ export type TranscriptCoreKernel = {
         readonly ringDegree: number;
         readonly keys: readonly BgvTrusteeEvaluationKeyStatementKey[];
         readonly sameSecretLinkage?: BgvTrusteeEvaluationKeySameSecretLinkage;
+        readonly sameSecretBridge?: BgvTrusteeEvaluationKeySameSecretBridge;
         readonly secretCoefficients: readonly number[];
         readonly errorCoefficientsByKey: readonly (readonly (readonly number[])[])[];
         readonly negativeIndicatorCoefficients?: readonly number[];
@@ -420,6 +422,7 @@ type TranscriptCoreKernelCommand =
           readonly ringDegree: number;
           readonly keys: readonly BgvTrusteeEvaluationKeyStatementKey[];
           readonly sameSecretLinkage?: BgvTrusteeEvaluationKeySameSecretLinkage;
+          readonly sameSecretBridge?: BgvTrusteeEvaluationKeySameSecretBridge;
           readonly secretCoefficients: readonly number[];
           readonly errorCoefficientsByKey: readonly (readonly (readonly number[])[])[];
           readonly negativeIndicatorCoefficients?: readonly number[];

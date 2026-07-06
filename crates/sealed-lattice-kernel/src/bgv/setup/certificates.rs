@@ -53,7 +53,7 @@ pub(super) fn target_decryption_parameters(bgv_parameters_hash: &str) -> Canonic
         "objectType": "TargetDecryptionParameters",
         "objectVersion": 1,
         "bgvParametersHash": bgv_parameters_hash,
-        "secretShareDomain": "BGV-RNS-secret-share-polynomial-over-selected-Q-data",
+        "secretShareDomain": SECRET_SHARE_DOMAIN,
     }))
 }
 

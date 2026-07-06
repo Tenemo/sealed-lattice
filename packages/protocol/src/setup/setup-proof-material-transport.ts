@@ -7,6 +7,7 @@ import type { ProtocolHash } from '@sealed-lattice/types';
 
 import {
     assertNonNegativeSafeInteger,
+    bytesToHex,
     type JsonRecord,
 } from './common-fields.js';
 import { appendVaruint } from './varuint-encoding.js';
@@ -14,9 +15,6 @@ import { appendVaruint } from './varuint-encoding.js';
 export const setupProofTransportChunkSizeBytes = 1_048_576;
 
 const textEncoder = new TextEncoder();
-
-const bytesToHex = (bytes: Uint8Array): string =>
-    [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('');
 
 const varUintBytes = (value: number, fieldName: string): Uint8Array => {
     const numericValue = assertNonNegativeSafeInteger(value, fieldName);

@@ -2,7 +2,87 @@ use super::decoding::*;
 use super::target_decryption_parsing::*;
 use super::*;
 
-pub(super) fn statement_from_request(
+// The same-secret bridge statement fields shared by the bridge-anchor family
+// parser and the optional key-bearing anchor. Every commitment body is
+// validated against its expected canonical root, and every parsed field enters
+// the statement hash, so the anchor cannot be swapped after proving.
+fn same_secret_bridge_fields_from_value(
+    statement_value: &Value,
+    ring_degree: usize,
+) -> CanonicalResult<SameSecretBridgeStatement> {
+    let source_trustee_identity =
+        read_string(statement_value, "sourceTrusteeIdentity")?.to_string();
+    let source_trustee_roster_position = read_u64(statement_value, "sourceTrusteeRosterPosition")?;
+    let public_matrix_seed_hash = read_string(statement_value, "publicMatrixSeedHash")?.to_string();
+    let target_basis_hash = read_string(statement_value, "targetBasisHash")?.to_string();
+    let target_rns_primes = read_u64_array(statement_value, "targetRnsPrimes")?;
+    let target_constant_commitment_roots =
+        read_string_array(statement_value, "targetConstantCommitmentRoots")?;
+    let target_constant_commitment_values = statement_value
+        .get("targetConstantCommitments")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            invalid_succinct_setup_proof(
+                "sameSecretBridge.targetConstantCommitments must be an array",
+            )
+        })?;
+    if target_constant_commitment_roots.len() != target_rns_primes.len()
+        || target_constant_commitment_values.len() != target_rns_primes.len()
+    {
+        return Err(invalid_succinct_setup_proof(
+            "sameSecretBridge target primes, roots, and commitments must be aligned",
+        ));
+    }
+    let target_constant_commitments = target_constant_commitment_values
+        .iter()
+        .zip(target_constant_commitment_roots.iter())
+        .zip(target_rns_primes.iter())
+        .enumerate()
+        .map(
+            |(target_rns_limb_index, ((value, expected_commitment_root), target_rns_prime))| {
+                vss_share_linkage_commitment_from_value(
+                    value,
+                    VssPublicCommandCommitmentExpectation {
+                        field_name: format!("targetConstantCommitments.{target_rns_limb_index}"),
+                        root: expected_commitment_root,
+                        role: "coefficient",
+                        public_matrix_seed_hash: &public_matrix_seed_hash,
+                        rns_limb_index: target_rns_limb_index,
+                        rns_prime: *target_rns_prime,
+                        ring_degree,
+                    },
+                )
+            },
+        )
+        .collect::<CanonicalResult<Vec<_>>>()?;
+    Ok(SameSecretBridgeStatement {
+        public_matrix_seed_hash,
+        source_trustee_identity,
+        source_trustee_roster_position,
+        target_basis_hash,
+        target_rns_primes,
+        target_constant_commitment_roots,
+        target_constant_commitments,
+    })
+}
+
+// The optional same-secret bridge anchor on a key-bearing statement request:
+// the anchor the atom schedule's linkage opens. Development statements may
+// omit it; the schedule backend refuses to prove or verify without it.
+fn optional_same_secret_bridge_from_statement_request(
+    request: &Value,
+    ring_degree: usize,
+) -> CanonicalResult<Option<SameSecretBridgeStatement>> {
+    match request.get("sameSecretBridge") {
+        None | Some(Value::Null) => Ok(None),
+        Some(statement_value) => Ok(Some(same_secret_bridge_fields_from_value(
+            statement_value,
+            ring_degree,
+        )?)),
+    }
+}
+
+pub(in crate::bgv::setup::trustee_evaluation_key_proof) fn statement_from_request(
     request: &Value,
 ) -> CanonicalResult<TrusteeEvaluationKeyStatement> {
     let context_value = request
@@ -44,6 +124,8 @@ pub(super) fn statement_from_request(
             })
         }
     };
+    let same_secret_bridge =
+        optional_same_secret_bridge_from_statement_request(request, ring_degree)?;
     let statement = TrusteeEvaluationKeyStatement {
         context,
         ring_degree,
@@ -51,7 +133,7 @@ pub(super) fn statement_from_request(
         same_secret_linkage,
         private_vss_share: None,
         vss_share_linkage: None,
-        same_secret_bridge: None,
+        same_secret_bridge,
         target_decryption_share: None,
     };
     statement.validate_shape()?;
@@ -248,48 +330,7 @@ pub(super) fn same_secret_bridge_statement_from_request(
             "same-secret bridge context trustee must match the source trustee",
         ));
     }
-    let public_matrix_seed_hash = read_string(statement_value, "publicMatrixSeedHash")?.to_string();
-    let target_basis_hash = read_string(statement_value, "targetBasisHash")?.to_string();
-    let target_rns_primes = read_u64_array(statement_value, "targetRnsPrimes")?;
-    let target_constant_commitment_roots =
-        read_string_array(statement_value, "targetConstantCommitmentRoots")?;
-    let target_constant_commitment_values = statement_value
-        .get("targetConstantCommitments")
-        .and_then(Value::as_array)
-        .ok_or_else(|| {
-            invalid_succinct_setup_proof(
-                "sameSecretBridge.targetConstantCommitments must be an array",
-            )
-        })?;
-    if target_constant_commitment_roots.len() != target_rns_primes.len()
-        || target_constant_commitment_values.len() != target_rns_primes.len()
-    {
-        return Err(invalid_succinct_setup_proof(
-            "sameSecretBridge target primes, roots, and commitments must be aligned",
-        ));
-    }
-    let target_constant_commitments = target_constant_commitment_values
-        .iter()
-        .zip(target_constant_commitment_roots.iter())
-        .zip(target_rns_primes.iter())
-        .enumerate()
-        .map(
-            |(target_rns_limb_index, ((value, expected_commitment_root), target_rns_prime))| {
-                vss_share_linkage_commitment_from_value(
-                    value,
-                    VssPublicCommandCommitmentExpectation {
-                        field_name: format!("targetConstantCommitments.{target_rns_limb_index}"),
-                        root: expected_commitment_root,
-                        role: "coefficient",
-                        public_matrix_seed_hash: &public_matrix_seed_hash,
-                        rns_limb_index: target_rns_limb_index,
-                        rns_prime: *target_rns_prime,
-                        ring_degree,
-                    },
-                )
-            },
-        )
-        .collect::<CanonicalResult<Vec<_>>>()?;
+    let bridge_fields = same_secret_bridge_fields_from_value(statement_value, ring_degree)?;
 
     let statement = TrusteeEvaluationKeyStatement {
         context,
@@ -298,15 +339,7 @@ pub(super) fn same_secret_bridge_statement_from_request(
         same_secret_linkage: None,
         private_vss_share: None,
         vss_share_linkage: None,
-        same_secret_bridge: Some(SameSecretBridgeStatement {
-            public_matrix_seed_hash,
-            source_trustee_identity,
-            source_trustee_roster_position,
-            target_basis_hash,
-            target_rns_primes,
-            target_constant_commitment_roots,
-            target_constant_commitments,
-        }),
+        same_secret_bridge: Some(bridge_fields),
         target_decryption_share: None,
     };
     statement.validate_shape()?;

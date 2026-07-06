@@ -343,7 +343,6 @@ export type TrusteeEvaluationKeyProofGenerationOutput = Readonly<{
     readonly operation: 'generateTrusteeEvaluationKeyProof';
     readonly statementHash: ProtocolHash;
     readonly limbCount: number;
-    readonly sameSecretLinkageIncluded: boolean;
     readonly proofByteLength: number;
     readonly proofBytesHex: string;
 }>;
@@ -353,9 +352,14 @@ export type TrusteeEvaluationKeyProofGenerator = (
         readonly context: TrusteeEvaluationKeyStatementContext;
         readonly ringDegree: number;
         readonly keys: readonly TrusteeEvaluationKeyStatementKey[];
-        readonly sameSecretLinkage: Readonly<{
+        readonly sameSecretBridge: Readonly<{
             readonly publicMatrixSeedHash: ProtocolHash;
-            readonly commitments: readonly JsonRecord[];
+            readonly targetBasisHash: ProtocolHash;
+            readonly sourceTrusteeIdentity: string;
+            readonly sourceTrusteeRosterPosition: number;
+            readonly targetRnsPrimes: readonly number[];
+            readonly targetConstantCommitmentRoots: readonly ProtocolHash[];
+            readonly targetConstantCommitments: readonly JsonRecord[];
         }>;
         readonly secretCoefficients: readonly number[];
         readonly errorCoefficientsByKey: readonly (readonly (readonly number[])[])[];
@@ -369,16 +373,29 @@ export type TrusteeEvaluationKeyProofGenerator = (
 // One trustee's private witness for its batched evaluation-key statement: the
 // shared ternary secret, per-key centered-binomial errors in statement key
 // order (relinearization round-one levels ascending, round-two levels
-// ascending, then the frozen Galois schedule), the negative-coefficient
-// indicator, the BDLOP opening randomness, and the same-secret constant
-// commitments the linkage opens.
+// ascending, then the frozen Galois schedule), the binary negative-coefficient
+// indicator, and the ternary opening randomness for the bridge target constant
+// commitments the schedule's linkage opens, one column set per bridge target
+// limb.
 export type TrusteeEvaluationKeyWitnessInput = Readonly<{
     readonly trusteeRosterPosition: number;
     readonly secretCoefficients: readonly number[];
     readonly errorCoefficientsByKey: readonly (readonly (readonly number[])[])[];
     readonly negativeIndicatorCoefficients: readonly number[];
     readonly openingRandomnessByLimb: readonly (readonly (readonly number[])[])[];
-    readonly constantCommitments: readonly JsonRecord[];
+}>;
+
+// One trustee's same-secret bridge anchor: the target-basis constant
+// coefficient commitments the atom schedule's linkage opens, with their
+// canonical roots. Public statement material, sourced from the assembled
+// same-secret bridge statement set.
+export type TrusteeSameSecretBridgeAnchorInput = Readonly<{
+    readonly trusteeRosterPosition: number;
+    readonly publicMatrixSeedHash: ProtocolHash;
+    readonly targetBasisHash: ProtocolHash;
+    readonly targetRnsPrimes: readonly number[];
+    readonly targetConstantCommitmentRoots: readonly ProtocolHash[];
+    readonly targetConstantCommitments: readonly JsonRecord[];
 }>;
 
 export type RelinearizationKeyRootReference = Readonly<{
@@ -554,6 +571,7 @@ export type TrusteeEvaluationKeyProofsInput = EvaluationKeyProofCommonInput &
         readonly galoisKeyShareBatches: readonly GaloisKeyShareBatch[];
         readonly keySwitchDecompositionHash: ProtocolHash;
         readonly trusteeWitnesses: readonly TrusteeEvaluationKeyWitnessInput[];
+        readonly sameSecretBridgeAnchors: readonly TrusteeSameSecretBridgeAnchorInput[];
         readonly trusteeEvaluationKeyProofGenerator: TrusteeEvaluationKeyProofGenerator;
         readonly transportedEvaluationKeyShareComponentMaterial?: TransportedEvaluationKeyShareComponentMaterialSet;
     }>;

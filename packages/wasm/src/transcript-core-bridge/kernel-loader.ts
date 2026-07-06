@@ -153,9 +153,6 @@ export const createTranscriptCoreKernelLoader = (
 
             return {
                 exportedFunctionNames,
-                // WASM linear memory only grows, so the byte length after a
-                // sequence of commands is that sequence's peak footprint.
-                wasmMemoryByteLength: (): number => memory.buffer.byteLength,
                 analyzeCanonicalObject: (input): TranscriptCoreAnalysis =>
                     executeCommand<TranscriptCoreAnalysis>({
                         command: 'AnalyzeCanonicalObject',
@@ -397,6 +394,7 @@ export const createTranscriptCoreKernelLoader = (
                         ringDegree: input.ringDegree,
                         keys: input.keys,
                         sameSecretLinkage: input.sameSecretLinkage,
+                        sameSecretBridge: input.sameSecretBridge,
                         secretCoefficients: input.secretCoefficients,
                         errorCoefficientsByKey: input.errorCoefficientsByKey,
                         negativeIndicatorCoefficients:

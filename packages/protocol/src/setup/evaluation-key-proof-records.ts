@@ -53,6 +53,7 @@ export {
     type TrusteeEvaluationKeyStatementKey,
     type TrusteeEvaluationKeyTransportedProofBytes,
     type TrusteeEvaluationKeyWitnessInput,
+    type TrusteeSameSecretBridgeAnchorInput,
 } from './evaluation-key-proof-records/constants-and-types.js';
 export {
     evaluationKeyShareComponentVectorHash,

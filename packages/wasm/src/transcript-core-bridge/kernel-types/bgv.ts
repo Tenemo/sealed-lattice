@@ -550,6 +550,16 @@ export type BgvTrusteeEvaluationKeySameSecretLinkage = {
     readonly commitments: readonly unknown[];
 };
 
+export type BgvTrusteeEvaluationKeySameSecretBridge = {
+    readonly publicMatrixSeedHash: ProtocolHash;
+    readonly targetBasisHash: ProtocolHash;
+    readonly sourceTrusteeIdentity: string;
+    readonly sourceTrusteeRosterPosition: number;
+    readonly targetRnsPrimes: readonly number[];
+    readonly targetConstantCommitmentRoots: readonly ProtocolHash[];
+    readonly targetConstantCommitments: readonly unknown[];
+};
+
 export type BgvVssShareLinkageProofContext = {
     readonly ceremonyId: string;
     readonly manifestHash: ProtocolHash;
@@ -581,7 +591,6 @@ export type BgvTrusteeEvaluationKeyProofGeneration = {
         | 'public-key-share';
     readonly statementHash: ProtocolHash;
     readonly limbCount: number;
-    readonly sameSecretLinkageIncluded: boolean;
     readonly proofByteLength: number;
     readonly proofBytesHex: string;
 };

@@ -48,6 +48,7 @@ export const vendoredProtocolRuntimeModules = [
     'setup/evaluation-key-proof-records/public-evaluation-key.ts',
     'setup/evaluator-key-schedule.ts',
     'setup/private-vss-mailbox-delivery.ts',
+    'setup/proof-byte-encoding.ts',
     'setup/public-key-share-records.ts',
     'setup/public-key-share-records/constants-and-types.ts',
     'setup/public-key-share-records/encoding.ts',

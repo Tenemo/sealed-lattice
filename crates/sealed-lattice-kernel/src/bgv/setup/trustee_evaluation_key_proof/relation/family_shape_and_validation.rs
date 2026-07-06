@@ -101,37 +101,21 @@ impl SuccinctSetupProofFamilyShape {
             Self::TargetDecryptionShare => {
                 TARGET_DECRYPTION_AGGREGATE_MESSAGE_CLAIM_MASK_DIGIT_COUNT
             }
-            Self::VssShareLinkage => VSS_PUBLIC_CARRY_CLAIM_MASK_DIGIT_COUNT,
             Self::SameSecretLinkageAnchor
             | Self::PublicKeyShare
             | Self::PrivateVssShare
+            | Self::VssShareLinkage
             | Self::SameSecretBridge
             | Self::TrusteeEvaluationKey => CLAIM_MASK_DIGIT_COUNT,
         }
     }
 
     pub(crate) fn consistency_repetitions(self) -> usize {
-        match self {
-            Self::VssShareLinkage => VSS_PUBLIC_CONSISTENCY_REPETITIONS,
-            Self::SameSecretLinkageAnchor
-            | Self::PublicKeyShare
-            | Self::PrivateVssShare
-            | Self::SameSecretBridge
-            | Self::TargetDecryptionShare
-            | Self::TrusteeEvaluationKey => CONSISTENCY_REPETITIONS,
-        }
+        CONSISTENCY_REPETITIONS
     }
 
     pub(crate) fn consistency_coefficient_bits(self) -> u32 {
-        match self {
-            Self::VssShareLinkage => VSS_PUBLIC_CONSISTENCY_COEFFICIENT_BITS,
-            Self::SameSecretLinkageAnchor
-            | Self::PublicKeyShare
-            | Self::PrivateVssShare
-            | Self::SameSecretBridge
-            | Self::TargetDecryptionShare
-            | Self::TrusteeEvaluationKey => CONSISTENCY_COEFFICIENT_BITS,
-        }
+        CONSISTENCY_COEFFICIENT_BITS
     }
 }
 

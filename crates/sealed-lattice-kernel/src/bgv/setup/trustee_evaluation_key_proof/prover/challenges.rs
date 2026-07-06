@@ -347,27 +347,14 @@ pub(in super::super) fn build_limb_public_vectors(
                 u_power_vector,
                 modulus,
             )?;
-            if key.kind.has_diagonal_source() {
-                let diagonal_vector =
-                    key.diagonal_source_vector_extension(limb_index, u_power_vector, modulus)?;
-                let gamma_limb_power = &gamma_powers[limb_index];
-                for coefficient_index in 0..ring_degree {
-                    let factor = tower.sub(
-                        &v_vector[coefficient_index],
-                        &tower.mul(gamma_limb_power, &diagonal_vector[coefficient_index]),
-                    );
-                    secret_factor[repetition][coefficient_index] = tower.add(
-                        &secret_factor[repetition][coefficient_index],
-                        &tower.mul(alpha_value, &factor),
-                    );
-                }
-            } else {
-                for (secret_factor_value, v_value) in
-                    secret_factor[repetition].iter_mut().zip(v_vector.iter())
-                {
-                    *secret_factor_value =
-                        tower.add(secret_factor_value, &tower.mul(alpha_value, v_value));
-                }
+            // Diagonal-source kinds are proven by the key-switch atom
+            // schedule; the engine's key claims cover the no-diagonal
+            // public-key share relation only.
+            for (secret_factor_value, v_value) in
+                secret_factor[repetition].iter_mut().zip(v_vector.iter())
+            {
+                *secret_factor_value =
+                    tower.add(secret_factor_value, &tower.mul(alpha_value, v_value));
             }
             let mut component_dot = ChallengeExtensionTower::zero();
             for (u_value, component_value) in u_power_vector.iter().zip(combined_component.iter()) {
