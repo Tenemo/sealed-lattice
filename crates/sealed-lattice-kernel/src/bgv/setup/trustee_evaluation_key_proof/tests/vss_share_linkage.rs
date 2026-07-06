@@ -3,7 +3,7 @@ use super::super::relation::{
     masked_claim_bounds_for_global_claim, masked_claim_lift_residue_count_for_moduli,
 };
 use super::super::{
-    VSS_PUBLIC_CARRY_CLAIM_MASK_DIGIT_COUNT, VSS_PUBLIC_DIGIT_CLAIM_MASK_DIGIT_COUNT,
+    VSS_PUBLIC_CARRY_CLAIM_MASK_DIGIT_COUNT, VSS_PUBLIC_SHARE_LINKAGE_DIGIT_CLAIM_MASK_DIGIT_COUNT,
 };
 use super::*;
 use crate::bgv::setup::vss_commitment::{
@@ -584,14 +584,13 @@ fn commitment_computation_for_test(
 
 // The cross-limb consistency soundness mechanism the other setup families use
 // requires a masked claim's CRT lift to leave at least one commitment field
-// unconsumed: the lift pins the centered integer from `required` fields and
+// unconsumed: the lift pins the centered integer from the consumed fields and
 // the remaining field's residue is the check that catches an inconsistent
-// per-field witness. This probe pins the measured share-linkage geometry: the
-// wide four-repetition masks force every claim class to consume all three
-// fields, so these claims currently run with no check field. The schedule
-// decision resolving that is recorded with its measured branch costs in the
-// setup proof decisions record; when a branch lands, the three-of-three pins
-// below must flip to strictly-fewer-than-field-count assertions.
+// per-field witness. This probe pins the share-linkage geometry after the
+// Branch 2 schedule change (2026-07-06): under the standard twenty-repetition
+// eight-bit schedule with the 58-digit mask, every claim class consumes two of
+// the three commitment fields, leaving one check field. If these pins move,
+// re-derive the check-field decision record in setup-proof-decisions.md.
 #[test]
 fn vss_share_linkage_consistency_lift_geometry_is_pinned() {
     let (statement, _witness) = vss_share_linkage_instance();
@@ -629,9 +628,10 @@ fn vss_share_linkage_consistency_lift_geometry_is_pinned() {
         );
         assert_eq!(
             required_residue_count,
-            field_moduli.len(),
-            "share-linkage {claim_class} lift geometry moved; re-derive the check-field \
-             decision record before accepting the new geometry",
+            field_moduli.len() - 1,
+            "share-linkage {claim_class} lift must consume fewer than all commitment fields \
+             so the remaining field is the check field; if this moved, re-derive the \
+             check-field decision record",
         );
     }
 
@@ -658,7 +658,7 @@ fn vss_share_linkage_consistency_lift_geometry_is_pinned() {
             &statement,
             (item_count * consistency_repetitions) as u64,
         ),
-        VSS_PUBLIC_DIGIT_CLAIM_MASK_DIGIT_COUNT,
+        VSS_PUBLIC_SHARE_LINKAGE_DIGIT_CLAIM_MASK_DIGIT_COUNT,
         "the first vector after the carries must take the digit claim mask",
     );
 }

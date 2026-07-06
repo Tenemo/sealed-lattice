@@ -218,6 +218,20 @@ const QUOTIENT_G: usize = 1;
 const QUOTIENT_SUPPORT: usize = 2;
 const QUOTIENT_COLUMN_COUNT: usize = 3;
 
+// Degree-adjustment shift for the univariate-sumcheck helper `g`. The sumcheck
+// identity is `f(x) = target/m + x g(x) + Z_H(x) q_sc(x)`; its soundness
+// (`sum_H f = target`) requires `deg(g) <= |H| - 2 = trace_size - 2`, otherwise
+// the spare coefficient `g_{trace_size-1}` lets `sum_H x g(x)` be nonzero and a
+// prover can certify a false sum. The combined FRI only bounds every column to
+// `< 2 * trace_size`, which does not pin `g` tightly. So `g` re-enters the
+// combination shifted by `x^{trace_size + 1}`: an honest `g` (degree
+// `<= trace_size - 2`) reaches at most degree `2 * trace_size - 1`, still under
+// the bound, while a degree-`(trace_size - 1)` `g` reaches `2 * trace_size` and
+// FRI rejects. Derived from `(2 * trace_size - 1) - (trace_size - 2)`.
+pub(super) fn g_degree_adjustment_shift(trace_size: usize) -> usize {
+    trace_size + 1
+}
+
 struct Layout {
     trace_size: usize,
     coset_size: usize,

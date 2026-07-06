@@ -239,7 +239,7 @@ impl LimbColumnLayout {
                     if vector_index < vss_public_item_columns {
                         VSS_PUBLIC_CARRY_CLAIM_MASK_DIGIT_COUNT
                     } else {
-                        VSS_PUBLIC_DIGIT_CLAIM_MASK_DIGIT_COUNT
+                        VSS_PUBLIC_SHARE_LINKAGE_DIGIT_CLAIM_MASK_DIGIT_COUNT
                     }
                 } else if family_shape == SuccinctSetupProofFamilyShape::SameSecretBridge {
                     let vector_index = claim_index / consistency_repetitions;

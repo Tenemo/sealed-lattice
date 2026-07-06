@@ -289,7 +289,7 @@ pub(crate) fn claim_mask_digit_count_for_global_claim(
         if global_vector_index < vss_share_linkage.item_count() {
             VSS_PUBLIC_CARRY_CLAIM_MASK_DIGIT_COUNT
         } else {
-            VSS_PUBLIC_DIGIT_CLAIM_MASK_DIGIT_COUNT
+            VSS_PUBLIC_SHARE_LINKAGE_DIGIT_CLAIM_MASK_DIGIT_COUNT
         }
     } else if let Some(same_secret_bridge) = &statement.same_secret_bridge {
         let global_vector_index = global_claim_id as usize / consistency_repetitions;

@@ -1,6 +1,8 @@
 use super::*;
 
-use crate::hashing::derive_canonical_object_hash;
+use std::io::{BufWriter, Write};
+
+use crate::hashing::{derive_canonical_object_hash, hash512_hex};
 
 pub(in crate::bgv::setup) fn evaluation_key_share_component_vector_hash(
     coefficients: &[u64],

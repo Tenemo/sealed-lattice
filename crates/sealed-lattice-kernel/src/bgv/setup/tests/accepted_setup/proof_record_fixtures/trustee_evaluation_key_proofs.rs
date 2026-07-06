@@ -78,10 +78,12 @@ pub(in super::super) fn trustee_evaluation_key_proofs_object(
             }))
             .expect("trustee proof randomness seed");
             let statement_hash_hex = to_hex(&statement.statement_hash());
-            // The checkpoint key carries the schedule container tag so stale
-            // old-engine bytes (same statement hash) never collide with the
-            // atom-backend format.
-            let checkpoint_key = format!("{statement_hash_hex}-slksats1");
+            // The checkpoint key carries the schedule container tag plus a
+            // prover-revision suffix so stale bytes (same statement hash) never
+            // collide across format or prover changes. Bump the revision when
+            // the atom prover's transcript changes; slksats2 covers the sumcheck
+            // helper degree-adjustment (g bounded to trace_size - 2).
+            let checkpoint_key = format!("{statement_hash_hex}-slksats2");
             let proof_bytes = checkpointed_anchor_proof_bytes(
                 TRUSTEE_EVALUATION_KEY_ANCHOR_PROOF_CHECKPOINT_DIRECTORY,
                 &checkpoint_key,

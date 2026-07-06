@@ -104,7 +104,7 @@ pub(in super::super) fn verify_key_fri<const LIMB_COUNT: usize>(
     let weights = transcript.challenge_field_elements(
         parameters,
         "key-combination",
-        base_count + aux_count + QUOTIENT_COLUMN_COUNT,
+        base_count + aux_count + QUOTIENT_COLUMN_COUNT + 1,
     );
 
     let fri_parameters = FriParameters {
@@ -277,17 +277,31 @@ pub(in super::super) fn verify_key_fri<const LIMB_COUNT: usize>(
             let Some(&slot) = slot_of_index.get(&index) else {
                 return Ok(false);
             };
-            if combination_at(
-                parameters,
-                base_values,
-                aux_values,
-                quotient_values,
-                &weights,
-            ) != expected
-            {
+            let x = x_of_slot[slot];
+            // combination_at zips the weights against base+aux+quotient columns,
+            // so the extra trailing weight is ignored here and used below for the
+            // g degree-adjustment term.
+            let mut combined =
+                combination_at(parameters, base_values, aux_values, quotient_values, &weights);
+            // g degree adjustment (sumcheck soundness): mirror the prover's
+            // shifted g term (x^{trace_size + 1} g), reconstructed from the
+            // opened g value, so the combined FRI enforces deg(g) <=
+            // trace_size - 2. See `g_degree_adjustment_shift`.
+            let g_shift = g_degree_adjustment_shift(layout.trace_size);
+            let mut g_shift_exponent = [0_u64; LIMB_COUNT];
+            g_shift_exponent[0] = g_shift as u64;
+            let x_pow_g_shift = parameters.power(&x, &g_shift_exponent);
+            let g_adjustment_weight = weights[base_count + aux_count + QUOTIENT_COLUMN_COUNT];
+            combined = parameters.add(
+                &combined,
+                &parameters.multiply(
+                    &g_adjustment_weight,
+                    &parameters.multiply(&x_pow_g_shift, &quotient_values[QUOTIENT_G]),
+                ),
+            );
+            if combined != expected {
                 return Ok(false);
             }
-            let x = x_of_slot[slot];
             let vanishing_x = polynomial::vanishing_at(parameters, &x, layout.trace_size);
 
             // Sumcheck: f(x) = target/m + x g(x) + Z_H(x) q_sc(x), where f folds

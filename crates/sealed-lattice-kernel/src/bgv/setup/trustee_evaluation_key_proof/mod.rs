@@ -175,19 +175,18 @@ pub(super) const LINCHECK_REPETITIONS: usize = 2;
 // (at most 2 * N * 255, about 2^24) so the base-3 smudging masks dominate them
 // only as a bounded-leakage row; twenty repetitions put the per-difference
 // collision bound at 2^-160 before union and Fiat-Shamir losses, the pre-union
-// margin the disclosed accounting requires. Share-linkage uses fewer,
-// wider carry and message-digit combinations: four 40-bit repetitions preserve
-// the same 160-bit pre-union collision budget while avoiding mask columns for
-// repetitions that carry no additional collision margin. The wider clear sums
-// force masks whose CRT lift consumes all three commitment fields, so these
-// claims currently run with no check field; the schedule decision resolving
-// that (documented with the measured branch costs in the setup proof decisions
-// record) is pending review, because every branch trades soundness, leakage,
-// or commitment material.
+// margin the disclosed accounting requires. Share-linkage uses the same
+// twenty-repetition eight-bit schedule as the other families (2026-07-06,
+// Branch 2 decision in the setup proof decisions record): the earlier
+// four-40-bit schedule forced masks whose CRT lift consumed all three
+// commitment fields, leaving no check field; the standard schedule keeps both
+// carry and message-digit clear sums under the standard 58-digit mask so the
+// lift consumes two of the three commitment fields and the third is the check
+// field that catches an inconsistent per-field witness.
 pub(in crate::bgv::setup) const CONSISTENCY_REPETITIONS: usize = 20;
 pub(in crate::bgv::setup) const CONSISTENCY_COEFFICIENT_BITS: u32 = 8;
-pub(in crate::bgv::setup) const VSS_PUBLIC_CONSISTENCY_REPETITIONS: usize = 4;
-pub(in crate::bgv::setup) const VSS_PUBLIC_CONSISTENCY_COEFFICIENT_BITS: u32 = 40;
+pub(in crate::bgv::setup) const VSS_PUBLIC_CONSISTENCY_REPETITIONS: usize = 20;
+pub(in crate::bgv::setup) const VSS_PUBLIC_CONSISTENCY_COEFFICIENT_BITS: u32 = 8;
 // Each consistency claim is one shared integer (clear bounded combination plus
 // a family-selected mask committed digit-wise in base-3 mask columns) published
 // as its residue in every proof field carrying that claim. Setup proof families
@@ -196,11 +195,18 @@ pub(in crate::bgv::setup) const VSS_PUBLIC_CONSISTENCY_COEFFICIENT_BITS: u32 = 4
 // 2^-68. This is not a 128-bit zero-knowledge row.
 pub(in crate::bgv::setup) const CLAIM_MASK_RADIX: u64 = 3;
 pub(in crate::bgv::setup) const CLAIM_MASK_DIGIT_COUNT: usize = 58;
-pub(in crate::bgv::setup) const VSS_PUBLIC_CARRY_CLAIM_MASK_DIGIT_COUNT: usize = 75;
-// VSS digit consistency claims have a larger clear range than carries.
-// Eighty-seven base-3 mask digits stay inside the three setup-field CRT lift
-// window while keeping the digit-claim mask margin comparable to the carry
-// claim margin.
+// Share-linkage carry and message-digit consistency claims both take the
+// standard 58-digit mask under the twenty-repetition eight-bit schedule, so
+// their ~2^92 mask bound leaves the three-field lift with a check field. The
+// digit-claim per-claim leakage is the clear bound over the mask bound: with
+// the full base-3^17 message digit it is about 2^-42, improved to the standard
+// ~2^-68 class once the digit witness is trit-decomposed (Branch 2).
+pub(in crate::bgv::setup) const VSS_PUBLIC_CARRY_CLAIM_MASK_DIGIT_COUNT: usize = 58;
+pub(in crate::bgv::setup) const VSS_PUBLIC_SHARE_LINKAGE_DIGIT_CLAIM_MASK_DIGIT_COUNT: usize = 58;
+// Same-secret-bridge digit consistency claims lift over up to seven target
+// fields, so the wider eighty-seven-digit mask stays inside that CRT window
+// while keeping a generous leakage margin; this constant serves the bridge
+// family only (share-linkage digit claims use the 58-digit mask above).
 pub(in crate::bgv::setup) const VSS_PUBLIC_DIGIT_CLAIM_MASK_DIGIT_COUNT: usize = 87;
 // Target-decryption message claims need wider masks than the setup families
 // because lifted aggregate-message openings have a much larger clear range. That

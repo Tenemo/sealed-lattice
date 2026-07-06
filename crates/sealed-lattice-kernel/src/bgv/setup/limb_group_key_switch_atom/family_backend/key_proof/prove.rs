@@ -587,7 +587,7 @@ pub(in super::super) fn prove_key_fri<const LIMB_COUNT: usize>(
     let weights = transcript.challenge_field_elements(
         parameters,
         "key-combination",
-        base_count + aux_count + QUOTIENT_COLUMN_COUNT,
+        base_count + aux_count + QUOTIENT_COLUMN_COUNT + 1,
     );
 
     // Combination pass: the weighted sum of every committed column's codeword,
@@ -618,6 +618,18 @@ pub(in super::super) fn prove_key_fri<const LIMB_COUNT: usize>(
         accumulate(&mut combination, &weights[weight_index], &codeword);
         weight_index += 1;
     }
+    // g degree adjustment (sumcheck soundness): re-enter g shifted by
+    // x^{trace_size + 1} so the combined FRI bound forces deg(g) <=
+    // trace_size - 2. See `g_degree_adjustment_shift`. The shifted codeword is
+    // derived from g's coefficients (prepending the shift as zero coefficients)
+    // and is not committed or opened; the verifier reconstructs its value from
+    // the opened g column, so this adds no proof bytes.
+    let g_shift = g_degree_adjustment_shift(layout.trace_size);
+    let mut shifted_g_coefficients = vec![parameters.zero(); g_shift];
+    shifted_g_coefficients.extend_from_slice(&quotient_coefficients[QUOTIENT_G]);
+    let shifted_g_codeword =
+        coset_evaluate_coefficients(&coset_domain, &offset, &shifted_g_coefficients);
+    accumulate(&mut combination, &weights[weight_index], &shifted_g_codeword);
 
     let fri_commitment = fri_commit(
         parameters,

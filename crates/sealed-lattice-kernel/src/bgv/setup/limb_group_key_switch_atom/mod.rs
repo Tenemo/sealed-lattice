@@ -37,9 +37,13 @@ pub(crate) mod witness_encoding;
 
 pub(crate) mod family_backend;
 
-// The material-transport commitment trio (the ring commitment, its base-b
-// digit encoder, and the material commitment over transported components) is
-// the documented follow-up transport pass; it stays test-gated until the
-// aggregate-sum verification wires into accepted-setup.
+// The ring commitment over transported evaluation-key component material stays
+// test-gated: the accepted-setup verifier already binds each component's
+// material through the verified component-vector root and the published
+// aggregate through per-limb reconstruction, so the homomorphic commitment is
+// not on the acceptance path. It is retained, with its binding/hiding/
+// homomorphism tests, as the substrate for the review-gated flag-day change in
+// which atoms verify committed material and reconstruction retires (recorded in
+// the key-switch atom family section of `setup-proof-decisions.md`).
 #[cfg(test)]
 pub(crate) mod witness_commitment;

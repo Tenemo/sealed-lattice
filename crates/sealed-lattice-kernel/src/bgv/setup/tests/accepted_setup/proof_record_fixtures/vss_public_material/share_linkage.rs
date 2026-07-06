@@ -333,6 +333,11 @@ pub(super) fn vss_share_linkage_proof_bytes_hex(
     );
     let checkpoint_key = derive_canonical_object_hash(&serde_json::json!({
         "objectType": "VssShareLinkageProofCheckpointKey",
+        // The prover revision invalidates cached proofs when the family's proof
+        // structure changes but its statement root does not. Bump it on any
+        // vss-share-linkage schedule/mask change; "20x8-v1" covers the Branch 2
+        // stage B.1 move to the standard twenty-repetition eight-bit schedule.
+        "proverRevision": "share-linkage-20x8-v1",
         "statementRoot": package["vssShareLinkageStatement"]["statementRoot"],
         "sourceTrusteeRosterPosition": source_trustee_roster_position,
         "proofRecordIndex": proof_record_index,

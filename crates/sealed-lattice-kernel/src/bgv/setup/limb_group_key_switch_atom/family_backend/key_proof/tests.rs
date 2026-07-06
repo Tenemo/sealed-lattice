@@ -69,6 +69,79 @@ fn synthetic_key(
     (secret, digits, public)
 }
 
+// The univariate-sumcheck helper `g` must have degree <= trace_size - 2, or a
+// prover can absorb a false sum in the spare coefficient `g_{trace_size-1}`.
+// The fix re-enters `g` into the combined FRI shifted by
+// `g_degree_adjustment_shift` (= trace_size + 1), so the shared coset bound
+// (2 * trace_size) rejects any `g` above that degree. This pins the exact
+// boundary: an honest-degree `g` (trace_size - 2) lands at the bound and
+// passes; a degree-(trace_size - 1) `g` reaches 2 * trace_size and FRI rejects.
+#[test]
+fn g_degree_adjustment_rejects_helper_above_the_sumcheck_bound() {
+    let parameters = sixteen_limb_group_field_parameters();
+    let trace_size = 64;
+    // The layout's coset: FRI_RATE_BLOWUP * 2 * trace_size, rate 1/4, so the
+    // combined codeword bound is 2 * trace_size.
+    let coset_size = FRI_RATE_BLOWUP * 2 * trace_size;
+    let coset_domain = CyclicDomain::new(&parameters, coset_size).expect("coset domain");
+    let offset = coset_offset(&parameters);
+    let shift = g_degree_adjustment_shift(trace_size);
+    let fri_parameters = FriParameters {
+        blowup: FRI_RATE_BLOWUP,
+    };
+
+    // Whether `x^shift * g` (for a `g` with a nonzero top coefficient at
+    // `g_degree`) passes the shared FRI degree bound, mirroring the prover's
+    // shifted-g codeword and the verifier's FRI structure/query checks.
+    let shifted_g_passes_fri = |g_degree: usize| -> bool {
+        let g: Vec<[u64; 13]> = (0..=g_degree)
+            .map(|index| parameters.unsigned_word_to_element(index as u64 * 7 + 1))
+            .collect();
+        let mut shifted = vec![parameters.zero(); shift];
+        shifted.extend_from_slice(&g);
+        let codeword = coset_evaluate_coefficients(&coset_domain, &offset, &shifted);
+
+        let mut salt_seed = 0xa7c3_u64;
+        let mut prover_transcript = Transcript::new(PROTOCOL_LABEL);
+        let commitment = fri_commit(
+            &parameters,
+            &mut prover_transcript,
+            &codeword,
+            &offset,
+            &mut salt_seed,
+        )
+        .expect("fri commit");
+        let query_positions = prover_transcript.challenge_positions("key-query", coset_size, 40);
+        let fri = fri_answer(&commitment, &query_positions);
+
+        let mut verifier_transcript = Transcript::new(PROTOCOL_LABEL);
+        let Some(verification) = fri_verify_structure(
+            &parameters,
+            &mut verifier_transcript,
+            &fri,
+            coset_size,
+            &offset,
+            &fri_parameters,
+        )
+        .expect("fri structure")
+        else {
+            return false;
+        };
+        let verifier_positions =
+            verifier_transcript.challenge_positions("key-query", coset_size, 40);
+        fri_verify_queries(&parameters, &verification, &fri, &verifier_positions)
+    };
+
+    assert!(
+        shifted_g_passes_fri(trace_size - 2),
+        "an honest sumcheck helper (degree trace_size - 2) must pass the shifted FRI bound"
+    );
+    assert!(
+        !shifted_g_passes_fri(trace_size - 1),
+        "a sumcheck helper of degree trace_size - 1 must fail the shifted FRI bound"
+    );
+}
+
 #[test]
 fn honest_multi_digit_key_verifies() {
     let parameters = sixteen_limb_group_field_parameters();
