@@ -23,7 +23,6 @@ pub(in crate::bgv::setup) fn evaluation_key_share_component_vector_root(
 ) -> CanonicalResult<String> {
     derive_canonical_object_hash(&json!({
         "objectType": "EvaluationKeyShareComponentVectorSet",
-        "objectVersion": 1,
         "proofFamily": proof_family.proof_family(),
         "keySwitchDomain": key_switch_domain,
         "keySwitchSeedHex": key_switch_seed_hex,
@@ -120,7 +119,6 @@ pub(in crate::bgv::setup) fn evaluation_key_share_component_material_transport_h
     })?;
     let chunk_root = derive_canonical_object_hash(&json!({
         "objectType": "EvaluationKeyShareComponentMaterialChunkManifest",
-        "objectVersion": 1,
         "proofFamily": proof_family.proof_family(),
         "keySwitchMaterialEncoding": EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
         "chunkSizeBytes": chunk_size_bytes,
@@ -215,7 +213,6 @@ pub(in crate::bgv::setup) fn evaluation_key_share_component_material_reference_r
     })?;
     derive_canonical_object_hash(&json!({
         "objectType": "EvaluationKeyShareComponentMaterialReference",
-        "objectVersion": 1,
         "proofFamily": proof_family.proof_family(),
         "keySwitchMaterialEncoding": EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
         "trusteeIdentity": string_field(proof_record, "trusteeIdentity")?,
@@ -447,7 +444,6 @@ fn component_b_vectors_from_transported_material(
 ) -> CanonicalResult<Vec<Vec<Vec<u64>>>> {
     if material_set.get("objectType").and_then(Value::as_str)
         != Some(EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_TRANSPORT_SET_OBJECT_TYPE)
-        || material_set.get("objectVersion").and_then(Value::as_u64) != Some(1)
     {
         return Err(invalid_evaluation_key_share_material(
             "transported evaluation-key component material set header is invalid",
@@ -970,7 +966,6 @@ mod native_component_material_stream {
         }
         if reference.get("objectType").and_then(Value::as_str)
             != Some(EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_TRANSPORT_OBJECT_TYPE)
-            || reference.get("objectVersion").and_then(Value::as_u64) != Some(1)
             || reference
                 .get("keySwitchMaterialEncoding")
                 .and_then(Value::as_str)
@@ -1253,7 +1248,6 @@ mod native_component_material_stream {
             "keySwitchMaterialEncoding": EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
             "verifiedEvaluationKeyShareComponentMaterial": {
                 "objectType": "VerifiedEvaluationKeyShareComponentMaterial",
-                "objectVersion": 1,
                 "verificationId": verification_id,
                 "proofFamily": session.header.proof_family.proof_family(),
                 "keySwitchComponentMaterialRoot": session.header.material_root,
@@ -1342,7 +1336,6 @@ mod stream_tests {
         .expect("component material transport hashes");
         json!({
             "objectType": EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_TRANSPORT_OBJECT_TYPE,
-            "objectVersion": 1,
             "proofFamily": "relinearization-key-share",
             "keySwitchMaterialEncoding": EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
             "keySwitchComponentMaterialRoot": material_root,

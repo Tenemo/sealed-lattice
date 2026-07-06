@@ -15,10 +15,7 @@
 //! - CRT recombination of limb-group kernel material into centered mod-Q
 //!   representatives, where the CRT basis constants are also the key-switch
 //!   gadget idempotents;
-//! - the limb-group digit-atom congruence check with an exact carry bound;
-//! - signed base-b witness digit encoding and a seeded ring commitment for the
-//!   transported evaluation-key material (the material-transport commitment the
-//!   family backend binds into its transcript).
+//! - the limb-group digit-atom congruence check with an exact carry bound.
 //!
 //! The atom-family proof backend under `family_backend` is the single
 //! production backend: a masked univariate FRI polynomial-IOP over the proof
@@ -32,18 +29,5 @@ pub(crate) mod limb_group_statement;
 pub(crate) mod negacyclic_transform;
 pub(crate) mod proof_field;
 pub(crate) mod wide_unsigned;
-#[cfg(test)]
-pub(crate) mod witness_encoding;
 
 pub(crate) mod family_backend;
-
-// The ring commitment over transported evaluation-key component material stays
-// test-gated: the accepted-setup verifier already binds each component's
-// material through the verified component-vector root and the published
-// aggregate through per-limb reconstruction, so the homomorphic commitment is
-// not on the acceptance path. It is retained, with its binding/hiding/
-// homomorphism tests, as the substrate for the review-gated flag-day change in
-// which atoms verify committed material and reconstruction retires (recorded in
-// the key-switch atom family section of `setup-proof-decisions.md`).
-#[cfg(test)]
-pub(crate) mod witness_commitment;

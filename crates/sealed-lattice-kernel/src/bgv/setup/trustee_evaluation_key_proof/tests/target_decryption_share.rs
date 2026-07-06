@@ -850,7 +850,6 @@ fn target_decryption_share_instance_parts_for_active_limb_count(
                 |(polynomial_index, commitment)| {
                     json!({
                         "objectType": "TargetDecryptionSmudgingCommitment",
-                        "objectVersion": 1,
                         "role": target_role,
                         "rnsLimbIndex": target_rns_limb_index,
                         "rnsPrime": target_rns_prime,
@@ -909,7 +908,6 @@ fn target_decryption_share_instance_parts_for_active_limb_count(
 
     let mut smudging_commitment_set = json!({
         "objectType": "TargetDecryptionSmudgingCommitmentSet",
-        "objectVersion": 1,
         "targetBasisHash": target_basis_hash.clone(),
         "publicMatrixSeedHash": public_matrix_seed_hash.clone(),
         "activeRnsLimbCount": active_limb_count,

@@ -111,9 +111,6 @@ export const assertObjectType = (
             `${fieldName}.objectType must be ${expectedObjectType}.`,
         );
     }
-    if (objectRecord.objectVersion !== 1) {
-        throw new Error(`${fieldName}.objectVersion must be 1.`);
-    }
 };
 
 export const hashField = (

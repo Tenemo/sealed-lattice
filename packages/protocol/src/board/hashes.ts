@@ -168,7 +168,6 @@ export const deriveBoardHeadHash = (head: SignedBoardHead): ProtocolHash =>
         boardSequence: head.boardSequence,
         ceremonyId: head.ceremonyId,
         objectType: head.objectType,
-        objectVersion: head.objectVersion,
         previousHeadHash: head.previousHeadHash,
     });
 

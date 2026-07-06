@@ -9,7 +9,6 @@ pub(super) fn read_partial_decryption_share(
     target_share_profile: &TargetShareProfile,
 ) -> CanonicalResult<()> {
     if string_at_path(share, &["objectType"])? != "BgvTargetDecryptionShare"
-        || unsigned_at_path(share, &["objectVersion"])? != 1
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -220,7 +219,6 @@ pub(super) fn share_payload(
 ) -> CanonicalResult<Value> {
     Ok(json!({
         "objectType": "BgvTargetDecryptionSharePayload",
-        "objectVersion": 1,
         "encoding": TARGET_SHARE_PAYLOAD_ENCODING,
         "level": level,
         "smudgingInputReport": smudging_input_report,
@@ -262,7 +260,6 @@ pub(super) fn read_partial_limb_set(
     level: usize,
 ) -> CanonicalResult<Vec<Vec<u64>>> {
     if string_at_path(payload, &["objectType"])? != "BgvTargetDecryptionSharePayload"
-        || unsigned_at_path(payload, &["objectVersion"])? != 1
         || string_at_path(payload, &["encoding"])? != TARGET_SHARE_PAYLOAD_ENCODING
         || usize_at_path(payload, &["level"])? != level
     {
@@ -328,7 +325,6 @@ fn validate_target_decryption_smudging_input_report(
     participant: &ParticipantBinding,
 ) -> CanonicalResult<()> {
     if string_at_path(report, &["objectType"])? != "TargetDecryptionSmudgingInputReport"
-        || unsigned_at_path(report, &["objectVersion"])? != 1
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -505,7 +501,6 @@ pub(super) fn share_record_hash_input(
 ) -> Value {
     json!({
         "objectType": "BgvTargetDecryptionShare",
-        "objectVersion": 1,
         "setupPackageHash": setup_binding.setup_package_hash,
         "ceremonyId": setup_binding.ceremony_id,
         "electionManifestHash": setup_binding.election_manifest_hash,

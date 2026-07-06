@@ -230,7 +230,6 @@ fn passive_setup_rejects_wrong_request_and_recovery_state_shapes() {
     for invalid_participant_count in [2_usize, 51_usize] {
         let minimally_shaped_package = serde_json::json!({
             "objectType": "BgvPassiveSetupPackage",
-            "objectVersion": 1,
             "participants": vec![serde_json::json!({}); invalid_participant_count],
             "setupInputs": {
                 "participantCount": invalid_participant_count,

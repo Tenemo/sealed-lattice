@@ -58,7 +58,6 @@ fn target_share_proof_statement_binds_local_witness_and_share() {
     );
     let expected_active_credential_binding_root = derive_canonical_object_hash(&json!({
         "objectType": "TargetDecryptionAggregateOpeningCredentialBindingSet",
-        "objectVersion": 1,
         "activeCredentialBindings": statement["aggregateOpeningBinding"]["activeCredentialBindings"],
     }))
     .expect("active credential binding root");
@@ -346,11 +345,9 @@ fn statement_backed_target_share_with_malformed_proof_material(
         "proofStatement": proof_statement,
         "proofMaterial": {
             "objectType": "BgvTargetDecryptionShareProofMaterial",
-            "objectVersion": 8,
             "proofRecords": [
                 {
                     "objectType": "BgvTargetDecryptionShareProofRecord",
-                    "objectVersion": 7,
                     "proofBytesBase64": "AQIDBAU=",
                 },
             ],

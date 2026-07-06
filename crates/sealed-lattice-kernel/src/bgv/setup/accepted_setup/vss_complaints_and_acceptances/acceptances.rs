@@ -549,7 +549,6 @@ fn verify_vss_share_acceptance_record(
         signature_envelope,
         &ProtocolSignatureExpectation {
             object_type: "VssShareAcceptance",
-            object_version: 1,
             signer_role: "Trustee",
             signer_identity: recipient_identity,
             ceremony_id,
@@ -584,7 +583,6 @@ fn verify_vss_share_acceptance_record(
 fn vss_share_acceptance_payload_value(acceptance_record: &Value) -> CanonicalResult<Value> {
     Ok(json!({
         "objectType": "VssShareAcceptance",
-        "objectVersion": 1,
         "ceremonyId": value_string(acceptance_record, "ceremonyId")?,
         "manifestHash": value_string(acceptance_record, "manifestHash")?,
         "rosterHash": value_string(acceptance_record, "rosterHash")?,

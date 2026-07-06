@@ -1106,7 +1106,6 @@ fn private_vss_envelope_aad_value(
 ) -> CanonicalResult<Value> {
     Ok(json!({
         "objectType": PRIVATE_VSS_ENVELOPE_AAD_OBJECT_TYPE,
-        "objectVersion": 1,
         "privateEnvelopeObjectType": "PrivateVssShareEnvelope",
         "ciphertextContentType": "private-vss-share-envelope",
         "ceremonyId": setup_context_string(setup_context, "ceremonyId")?,

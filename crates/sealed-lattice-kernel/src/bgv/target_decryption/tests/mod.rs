@@ -123,7 +123,6 @@ fn accepted_setup_package_base() -> Value {
         .enumerate()
         .map(|(roster_position, trustee_identity)| json!({
             "objectType": "SetupPhaseParticipantObject",
-            "objectVersion": 1,
             "phaseId": "setupIntent",
             "phaseNumber": 0,
             "ceremonyId": TARGET_DECRYPTION_FIXTURE_CEREMONY_ID,
@@ -135,7 +134,6 @@ fn accepted_setup_package_base() -> Value {
 
     json!({
         "objectType": "SetupPackage",
-        "objectVersion": 1,
         "setupContext": {
             "ceremonyId": TARGET_DECRYPTION_FIXTURE_CEREMONY_ID,
             "manifestHash": manifest_hash,
@@ -146,7 +144,6 @@ fn accepted_setup_package_base() -> Value {
         },
         "commonRandomness": {
             "objectType": "CollectiveBgvCommonRandomness",
-            "objectVersion": 1,
             "publicMatrixSeedHash": target_decryption_fixture_public_matrix_seed_hash(),
         },
         "phaseTranscript": [
@@ -169,7 +166,6 @@ fn build_accepted_setup_package() -> Value {
         aggregate_threshold_commitment_set;
     accepted_setup_package["vssShareLinkageStatement"] = json!({
         "objectType": "VssShareLinkageStatement",
-        "objectVersion": 1,
         "statementRoot": "4".repeat(128),
     });
 
@@ -187,7 +183,6 @@ fn target_share_profile(_setup_package: &Value) -> Value {
         canonical_target_decryption_parameter_hashes().expect("target decryption profile hashes");
     let profile = json!({
         "objectType": "TargetDecryptionShareProfile",
-        "objectVersion": 1,
         "targetDecryptionProfileHash": target_decryption_profile_hash,
         "targetDecryptionProfileBindingHash": target_decryption_profile_binding_hash,
         "decryptionThreshold": 2,
@@ -245,7 +240,6 @@ fn accepted_record(target_ciphertext_hash: &str, target_layout_hash: &str) -> Va
         canonical_target_decryption_parameter_hashes().expect("target decryption parameters hash");
     let mut record = json!({
         "objectType": "TargetAcceptedRecord",
-        "objectVersion": 1,
         "ceremonyId": TARGET_DECRYPTION_FIXTURE_CEREMONY_ID,
         "electionManifestHash": target_decryption_fixture_manifest_hash(),
         "targetProposalHash": derive_canonical_object_hash(
@@ -378,7 +372,6 @@ fn aggregate_threshold_commitment_set(
                 .collect::<Vec<_>>();
             recipient_records.push(json!({
                 "objectType": "VssPublicAggregateThresholdCommitment",
-                "objectVersion": 1,
                 "recipientIdentity": participant.trustee_identity.as_str(),
                 "recipientRosterPosition": participant.roster_position,
                 "recipientTrusteePoint": participant.interpolation_point,
@@ -395,7 +388,6 @@ fn aggregate_threshold_commitment_set(
 
     let mut set = json!({
         "objectType": "VssPublicAggregateThresholdCommitmentSet",
-        "objectVersion": 1,
         "publicMatrixSeedHash": setup_binding.public_matrix_seed_hash.as_str(),
         "participantCount": setup_binding.participants.len(),
         "rnsLimbCount": rns_limb_count,
@@ -536,7 +528,6 @@ fn rebind_active_credential_binding_root(statement: &mut Value) {
     statement["aggregateOpeningBinding"]["activeCredentialBindingRoot"] = json!(
         derive_canonical_object_hash(&json!({
             "objectType": "TargetDecryptionAggregateOpeningCredentialBindingSet",
-            "objectVersion": 1,
             "activeCredentialBindings": active_credential_bindings,
         }))
         .expect("active credential binding root")
@@ -681,7 +672,6 @@ fn local_target_share_witness(
                 .expect("aggregate opening roots");
             json!({
                 "objectType": "LocalTrusteeVssPublicAggregateOpeningCredential",
-                "objectVersion": 1,
                 "recipientIdentity": participant.trustee_identity.as_str(),
                 "recipientRosterPosition": participant.roster_position,
                 "recipientTrusteePoint": participant.interpolation_point,
@@ -699,7 +689,6 @@ fn local_target_share_witness(
         .collect::<Vec<_>>();
     json!({
         "objectType": "LocalTrusteeTargetDecryptionProofWitnessMaterial",
-        "objectVersion": 1,
         "ceremonyId": setup_binding.ceremony_id.as_str(),
         "manifestHash": setup_binding.election_manifest_hash.as_str(),
         "rosterHash": setup_context_hashes.roster_hash,
@@ -716,7 +705,6 @@ fn local_target_share_witness(
         ).expect("target-decryption smudging witness"),
         "aggregateOpening": {
             "objectType": "LocalTrusteeVssPublicAggregateOpeningWitness",
-            "objectVersion": 1,
             "publicMatrixSeedHash": public_matrix_seed_hash,
             "targetBasisHash": canonical_target_basis_hash().expect("target basis hash"),
             "shareLinkageStatementRoot": share_linkage_statement_root,

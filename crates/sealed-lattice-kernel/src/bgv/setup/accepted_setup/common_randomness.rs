@@ -255,7 +255,6 @@ pub(in crate::bgv::setup) fn derive_collective_bgv_setup_public_derivations(
         derive_setup_public_matrices(public_matrix_seed_hash, decryption_threshold)?;
     let mut derivations = json!({
         "objectType": "SetupPublicDerivations",
-        "objectVersion": 1,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "bgvPublicA": bgv_public_a,
         "publicMatrices": public_matrices,
@@ -293,7 +292,6 @@ pub(super) fn derive_bgv_public_a_polynomial(
         .collect::<Vec<_>>();
     let mut public_a = json!({
         "objectType": "BgvPublicAPolynomial",
-        "objectVersion": 1,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "derivationLabel": "accepted-bgv-public-a",
         "basisId": BgvBasisKind::Data.basis_id(),
@@ -320,7 +318,6 @@ fn derive_setup_public_matrices(
         derive_setup_commitment_matrix(public_matrix_seed_hash, decryption_threshold)?;
     let mut public_matrices = json!({
         "objectType": "SetupPublicMatrixMaterial",
-        "objectVersion": 1,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "commitmentMatrix": commitment_matrix,
     });
@@ -338,7 +335,6 @@ fn derive_setup_commitment_matrix(
     let sampled_entries = commitment_matrix_sampled_entries(public_matrix_seed_hash)?;
     let mut matrix = json!({
         "objectType": "SetupPublicMatrix",
-        "objectVersion": 1,
         "matrixKind": "commitment",
         "commitmentModulusLimbs": setup_commitment_modulus_limb_values(),
         "commitmentModuleRank": SETUP_COMMITMENT_MODULE_RANK,
@@ -380,7 +376,6 @@ fn setup_public_derivation_root(
 ) -> CanonicalResult<String> {
     derive_canonical_object_hash(&json!({
         "objectType": "SetupPublicDerivation",
-        "objectVersion": 1,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "componentName": component_name,
     }))
@@ -628,7 +623,6 @@ fn verify_common_randomness_participant_record_shape(
 fn common_randomness_commit_payload_value(record: &Value) -> CanonicalResult<Value> {
     Ok(json!({
         "objectType": "CommonRandomnessCommit",
-        "objectVersion": 1,
         "ceremonyId": value_string(record, "ceremonyId")?,
         "manifestHash": value_string(record, "manifestHash")?,
         "rosterHash": value_string(record, "rosterHash")?,
@@ -646,7 +640,6 @@ fn common_randomness_commit_payload_value(record: &Value) -> CanonicalResult<Val
 fn common_randomness_reveal_payload_value(record: &Value) -> CanonicalResult<Value> {
     Ok(json!({
         "objectType": "CommonRandomnessReveal",
-        "objectVersion": 1,
         "ceremonyId": value_string(record, "ceremonyId")?,
         "manifestHash": value_string(record, "manifestHash")?,
         "rosterHash": value_string(record, "rosterHash")?,
@@ -738,7 +731,6 @@ fn verify_common_randomness_signature(
         signature_envelope,
         &ProtocolSignatureExpectation {
             object_type: expectation.object_type,
-            object_version: 1,
             signer_role: "Trustee",
             signer_identity: trustee_identity,
             ceremony_id,

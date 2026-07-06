@@ -53,7 +53,6 @@ pub(super) fn vss_coefficient_commitments_object(
                 let commitment_root = setup_commitment_root(&commitment).expect("commitment root");
                 coefficient_commitments.push(serde_json::json!({
                     "objectType": "VssCoefficientCommitment",
-                    "objectVersion": 1,
                     "ceremonyId": ceremony_id,
                     "manifestHash": manifest_hash,
                     "rosterHash": roster_hash,
@@ -69,7 +68,6 @@ pub(super) fn vss_coefficient_commitments_object(
                 }));
                 coefficient_commitment_material.push(serde_json::json!({
                     "objectType": "VssCoefficientCommitmentMaterial",
-                    "objectVersion": 1,
                     "ceremonyId": ceremony_id,
                     "manifestHash": manifest_hash,
                     "rosterHash": roster_hash,
@@ -89,7 +87,6 @@ pub(super) fn vss_coefficient_commitments_object(
 
         let mut source_trustee_record = serde_json::json!({
             "objectType": "VssSourceTrusteeCoefficientCommitments",
-            "objectVersion": 1,
             "ceremonyId": ceremony_id,
             "manifestHash": manifest_hash,
             "rosterHash": roster_hash,
@@ -109,7 +106,6 @@ pub(super) fn vss_coefficient_commitments_object(
 
     let mut commitment_set = serde_json::json!({
         "objectType": "VssCoefficientCommitmentSet",
-        "objectVersion": 1,
         "ceremonyId": ceremony_id,
         "manifestHash": manifest_hash,
         "rosterHash": roster_hash,
@@ -124,7 +120,6 @@ pub(super) fn vss_coefficient_commitments_object(
 
     let mut material_set = serde_json::json!({
         "objectType": "VssCoefficientCommitmentMaterialSet",
-        "objectVersion": 1,
         "ceremonyId": ceremony_id,
         "manifestHash": manifest_hash,
         "rosterHash": roster_hash,

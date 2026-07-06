@@ -131,7 +131,6 @@ fn public_common_random_polynomial_root_matches_canonical_object_hash() {
         .expect("setup seed hash");
     let common_random_polynomial_record = serde_json::json!({
         "objectType": "BgvPublicCommonRandomPolynomial",
-        "objectVersion": 1,
         "ceremonyId": package["setupInputs"]["ceremonyId"],
         "rosterHash": package["setupInputs"]["rosterHash"],
         "setupSeedHash": setup_seed_hash,

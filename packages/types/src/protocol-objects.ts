@@ -74,7 +74,6 @@ export type MlDsaSignatureProfile = {
 /** Canonical root object covered by a protocol signature. */
 export type CanonicalSignedRootObject = {
     readonly objectType: SignedObjectType;
-    readonly objectVersion: number;
     readonly ceremonyId: string;
     readonly manifestHash: ProtocolHash | null;
     readonly boardHeadHash: ProtocolHash | null;

@@ -27,6 +27,81 @@ pub(in super::super) fn prove_round_one_key_fri<const LIMB_COUNT: usize>(
     )
 }
 
+// The public entry: bind the transported public component material as the
+// committed `B_j` columns and prove. Production always commits the public
+// material; the streamed body accepts the material explicitly so a test can
+// substitute a mismatched column and confirm the per-digit pin rejects it.
+#[allow(clippy::too_many_arguments)]
+pub(in super::super) fn prove_key_fri<const LIMB_COUNT: usize>(
+    parameters: &ProofFieldParameters<LIMB_COUNT>,
+    ring_degree: usize,
+    public: &KeyPublic<LIMB_COUNT>,
+    source: &KeySource<LIMB_COUNT>,
+    secret: &[i64],
+    digits: &[DigitWitness],
+    linkage_inputs: Option<(&linkage::LinkageStatement<'_>, &linkage::LinkageWitness<'_>)>,
+    statement_binding: &[u8; 64],
+    schedule_index: u64,
+    proof_parameters: &KeyFriProofParameters,
+    salt_seed: &mut u64,
+) -> CanonicalResult<KeyFriProof<LIMB_COUNT>> {
+    let component_b: Vec<&[[u64; LIMB_COUNT]]> = public
+        .digits
+        .iter()
+        .map(|digit| digit.recombined_component_b.as_slice())
+        .collect();
+    prove_key_fri_streamed(
+        parameters,
+        ring_degree,
+        public,
+        source,
+        secret,
+        digits,
+        component_b,
+        linkage_inputs,
+        statement_binding,
+        schedule_index,
+        proof_parameters,
+        salt_seed,
+    )
+}
+
+// A test entry that commits caller-supplied component material instead of the
+// public material, so the per-digit component pin can be exercised in isolation
+// (the transcript-bound public material is unchanged, so only the pin can catch
+// the mismatch).
+#[cfg(test)]
+#[allow(clippy::too_many_arguments)]
+pub(in super::super) fn prove_key_fri_with_component_b<const LIMB_COUNT: usize>(
+    parameters: &ProofFieldParameters<LIMB_COUNT>,
+    ring_degree: usize,
+    public: &KeyPublic<LIMB_COUNT>,
+    source: &KeySource<LIMB_COUNT>,
+    secret: &[i64],
+    digits: &[DigitWitness],
+    component_b: Vec<&[[u64; LIMB_COUNT]]>,
+    linkage_inputs: Option<(&linkage::LinkageStatement<'_>, &linkage::LinkageWitness<'_>)>,
+    statement_binding: &[u8; 64],
+    schedule_index: u64,
+    proof_parameters: &KeyFriProofParameters,
+    salt_seed: &mut u64,
+) -> CanonicalResult<KeyFriProof<LIMB_COUNT>> {
+    prove_key_fri_streamed(
+        parameters,
+        ring_degree,
+        public,
+        source,
+        secret,
+        digits,
+        component_b,
+        linkage_inputs,
+        statement_binding,
+        schedule_index,
+        proof_parameters,
+        salt_seed,
+    )
+}
+
 // The streamed prover: commit, sumcheck/support, combination, and opening
 // passes each regenerate exactly the columns they consume from the
 // deterministic `KeyColumnPlan`, so peak memory is bounded by one coset
@@ -36,13 +111,14 @@ pub(in super::super) fn prove_round_one_key_fri<const LIMB_COUNT: usize>(
 // for that bound; the transcript, challenge order, and deterministic salt/mask
 // stream are unchanged from the one-shot shape.
 #[allow(clippy::too_many_arguments)]
-pub(in super::super) fn prove_key_fri<const LIMB_COUNT: usize>(
+fn prove_key_fri_streamed<const LIMB_COUNT: usize>(
     parameters: &ProofFieldParameters<LIMB_COUNT>,
     ring_degree: usize,
     public: &KeyPublic<LIMB_COUNT>,
     source: &KeySource<LIMB_COUNT>,
     secret: &[i64],
     digits: &[DigitWitness],
+    component_b: Vec<&[[u64; LIMB_COUNT]]>,
     linkage_inputs: Option<(&linkage::LinkageStatement<'_>, &linkage::LinkageWitness<'_>)>,
     statement_binding: &[u8; 64],
     schedule_index: u64,
@@ -66,6 +142,7 @@ pub(in super::super) fn prove_key_fri<const LIMB_COUNT: usize>(
         proof_parameters.mask_degree,
         secret,
         digits,
+        component_b,
         linkage_inputs,
         salt_seed,
     )?;
@@ -402,6 +479,22 @@ pub(in super::super) fn prove_key_fri<const LIMB_COUNT: usize>(
                 &polynomial::multiply_via_ntt(parameters, &denominator, &fraction_column),
                 &one,
             ),
+        );
+        // component material pin: B_col(x) - B_public(x) = 0 on H. The masked
+        // committed column minus the interpolated public material is a Z_H
+        // multiple, so it vanishes on H when the committed column is the public
+        // material and does not otherwise, forcing the two to agree.
+        let component_b_column = plan.base_column_coefficients(
+            parameters,
+            &trace_domain,
+            digit_column(digit, DIGIT_COMPONENT_B),
+        );
+        let component_b_public =
+            trace_domain.interpolate(&public.digits[digit].recombined_component_b);
+        fold_constraint(
+            &mut v,
+            &mut alpha_index,
+            polynomial::subtract(parameters, &component_b_column, &component_b_public),
         );
     }
     // Table fraction pins: (mu - T_k) * f_T_k - m_k = 0.

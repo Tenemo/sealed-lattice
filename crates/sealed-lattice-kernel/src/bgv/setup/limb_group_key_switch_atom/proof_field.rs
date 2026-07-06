@@ -20,10 +20,6 @@ pub(crate) struct ProofFieldParameters<const LIMB_COUNT: usize> {
     montgomery_radix_squared: [u64; LIMB_COUNT],
     negated_modulus_inverse_word: u64,
     pub(crate) primitive_65536th_root: [u64; LIMB_COUNT],
-    // The defining constant `b` of `p = b^64 + 1`; read by the test-gated
-    // base-b witness digit encoder.
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) encoding_base: u64,
 }
 
 /// The 16-limb-group proof field: p = 4166^64 + 1 (770 bits, 13 limbs).
@@ -79,7 +75,6 @@ pub(crate) fn sixteen_limb_group_field_parameters()
             0x793e56009bdb41af,
             0x0000000000000000,
         ],
-        4166,
     )
 }
 
@@ -119,7 +114,6 @@ pub(crate) fn eight_limb_group_field_parameters()
             0x1ba4e83925867d3d,
             0x000005c2d0c5f121,
         ],
-        102,
     )
 }
 
@@ -137,7 +131,6 @@ pub(crate) fn single_limb_field_parameters(
         [modulus],
         [radix_squared],
         [primitive_65536th_root],
-        modulus,
     )
 }
 
@@ -146,7 +139,6 @@ impl<const LIMB_COUNT: usize> ProofFieldParameters<LIMB_COUNT> {
         modulus: [u64; LIMB_COUNT],
         montgomery_radix_squared: [u64; LIMB_COUNT],
         primitive_65536th_root: [u64; LIMB_COUNT],
-        encoding_base: u64,
     ) -> Self {
         let mut modulus_half_floor = modulus;
         shift_right_one_in_place(&mut modulus_half_floor);
@@ -156,7 +148,6 @@ impl<const LIMB_COUNT: usize> ProofFieldParameters<LIMB_COUNT> {
             montgomery_radix_squared,
             negated_modulus_inverse_word: negated_inverse_word(modulus[0]),
             primitive_65536th_root,
-            encoding_base,
         }
     }
 

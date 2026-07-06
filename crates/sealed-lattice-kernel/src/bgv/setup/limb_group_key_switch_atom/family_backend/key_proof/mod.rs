@@ -147,12 +147,18 @@ const COLUMN_SECRET: usize = 0;
 const COLUMN_SECRET_SQUARE: usize = 1;
 const SHARED_COLUMN_COUNT: usize = 2;
 
-// Per-digit block: error, carry, error-square, error-support.
+// Per-digit block: error, carry, error-square, error-support, then the
+// committed recombined component material `B_j`. `B_j` carries no witness
+// support of its own; it is pinned equal to the public component material by a
+// per-digit support constraint (`support_value_at`), so the committed column is
+// the transported material and the published aggregate can later bind to it
+// instead of to a re-summed raw material stream.
 const DIGIT_ERROR: usize = 0;
 const DIGIT_CARRY: usize = 1;
 const DIGIT_ERROR_SQUARE: usize = 2;
 const DIGIT_ERROR_SUPPORT: usize = 3;
-const DIGIT_BLOCK_SIZE: usize = 4;
+const DIGIT_COMPONENT_B: usize = 4;
+const DIGIT_BLOCK_SIZE: usize = 5;
 
 // Index of the first multiplicity column (after all per-digit blocks).
 fn base_multiplicity_start(digit_count: usize) -> usize {
@@ -266,7 +272,7 @@ mod verify;
 pub(super) use linkage::{LinkageStatement, LinkageWitness};
 pub(super) use prove::prove_key_fri;
 #[cfg(test)]
-pub(super) use prove::prove_round_one_key_fri;
+pub(super) use prove::{prove_key_fri_with_component_b, prove_round_one_key_fri};
 pub(super) use verify::verify_key_fri;
 #[cfg(test)]
 pub(super) use verify::verify_round_one_key_fri;

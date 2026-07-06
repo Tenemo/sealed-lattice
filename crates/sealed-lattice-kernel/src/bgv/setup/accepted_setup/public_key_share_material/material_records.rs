@@ -142,7 +142,6 @@ pub(super) fn decode_public_key_share_material_bindings(
         }
         let material_record = json!({
             "objectType": PUBLIC_KEY_SHARE_MATERIAL_OBJECT_TYPE,
-            "objectVersion": 1,
             "proofFamily": "public-key-share",
             "materialEncoding": PUBLIC_KEY_SHARE_MATERIAL_EMBEDDED_ENCODING,
             "ceremonyId": value_string(setup_context, "ceremonyId")?,

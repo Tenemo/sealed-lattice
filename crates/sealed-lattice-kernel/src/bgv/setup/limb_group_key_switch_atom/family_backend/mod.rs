@@ -37,8 +37,12 @@ pub(crate) mod column_commitment;
 pub(crate) mod domain;
 pub(crate) mod key_proof;
 pub(crate) mod low_degree;
+// S1 aggregate binding substrate (batched linear-evaluation check over the
+// committed material). Test-gated while the batched delta-opening it consumes is
+// built; un-gated when the aggregate check is wired into the eval-key
+// verification layer and reconstruction retires.
 #[cfg(test)]
-pub(crate) mod material_commitment;
+pub(crate) mod material_aggregate;
 pub(crate) mod merkle;
 pub(crate) mod polynomial;
 pub(crate) mod proof_codec;

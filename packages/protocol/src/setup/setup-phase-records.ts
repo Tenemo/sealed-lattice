@@ -155,7 +155,6 @@ const verifyGeneratedSignatureEnvelope = (
 ): void => {
     const result = verifySignedObjectSignature(signatureEnvelope, {
         objectType: signedRoot.objectType,
-        objectVersion: signedRoot.objectVersion,
         signerRole: signedRoot.signerRole,
         signerIdentity: signedRoot.signerIdentity,
         ceremonyId: signedRoot.ceremonyId,

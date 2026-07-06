@@ -42,7 +42,6 @@ pub(super) fn resolve_same_secret_bridge_proof_bytes(
         )?;
         let proof_record_without_root = json!({
             "objectType": "VssSameSecretBridgeProofRecord",
-            "objectVersion": 1,
             "proofFamily": SAME_SECRET_BRIDGE_PROOF_FAMILY,
             "sameSecretBridgeStatementRoot": bridge_statement_root,
             "proofBytesHash": proof_bytes_hash,
@@ -82,7 +81,6 @@ pub(super) fn resolve_same_secret_bridge_proof_bytes(
     )?;
     let proof_record_without_root = json!({
         "objectType": "VssSameSecretBridgeProofRecord",
-        "objectVersion": 1,
         "proofFamily": SAME_SECRET_BRIDGE_PROOF_FAMILY,
         "sameSecretBridgeStatementRoot": bridge_statement_root,
         "proofBytesHash": proof_bytes_hash,

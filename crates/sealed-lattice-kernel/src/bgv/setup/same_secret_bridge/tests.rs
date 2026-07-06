@@ -236,7 +236,6 @@ fn same_secret_bridge_proof_material_set(
             let proof_bytes = crate::transcript_core::decode_hex(proof_bytes_hex)?;
             let proof_record_without_root = json!({
                 "objectType": "VssSameSecretBridgeProofRecord",
-                "objectVersion": 1,
                 "proofFamily": super::SAME_SECRET_BRIDGE_PROOF_FAMILY,
                 "sameSecretBridgeStatementRoot": statement_record["sameSecretBridgeStatementRoot"],
                 "proofBytesHash": crate::hashing::hash512_hex(
@@ -252,7 +251,6 @@ fn same_secret_bridge_proof_material_set(
         .collect::<CanonicalResult<Vec<_>>>()?;
     let proof_material_set_without_root = json!({
         "objectType": "VssSameSecretBridgeProofMaterialSet",
-        "objectVersion": 1,
         "proofFamily": super::SAME_SECRET_BRIDGE_PROOF_FAMILY,
         "ceremonyId": statement_set["ceremonyId"],
         "manifestHash": statement_set["manifestHash"],
@@ -316,7 +314,6 @@ fn same_secret_bridge_statement_record(trustee_roster_position: usize) -> Canoni
         .collect::<Vec<_>>();
     let statement_without_root = json!({
         "objectType": "VssSameSecretBridgeStatement",
-        "objectVersion": 1,
         "proofFamily": "same-secret-linkage-anchor",
         "ceremonyId": "vss-test",
         "manifestHash": "1".repeat(128),
@@ -387,7 +384,6 @@ fn same_secret_bridge_target_commitment_body(
 
     Ok(json!({
         "objectType": "VssPublicCommitment",
-        "objectVersion": 1,
         "commitmentRole": "coefficient",
         "commitmentContextHash": "7".repeat(128),
         "publicMatrixSeedHash": "8".repeat(128),
@@ -414,7 +410,6 @@ fn same_secret_bridge_statement_set_with_evidence() -> CanonicalResult<(Value, V
     }
     let statement_set_without_root = json!({
         "objectType": "VssSameSecretBridgeStatementSet",
-        "objectVersion": 1,
         "proofFamily": "same-secret-linkage-anchor",
         "ceremonyId": "vss-test",
         "manifestHash": "1".repeat(128),
@@ -461,7 +456,6 @@ fn same_secret_consistency_statement_set() -> CanonicalResult<Value> {
         .collect::<Vec<_>>();
     let statement_set_without_root = json!({
         "objectType": "SameSecretConsistencyStatementSet",
-        "objectVersion": 1,
         "commitmentProfileId": "SealedLattice-BDLOP-Commitment-v1",
         "proofFamily": "same-secret-linkage-anchor",
         "ceremonyId": "vss-test",
@@ -489,7 +483,6 @@ fn same_secret_consistency_statement_record(
 ) -> CanonicalResult<Value> {
     let statement_without_root = json!({
         "objectType": "SameSecretConsistencyStatement",
-        "objectVersion": 1,
         "commitmentProfileId": "SealedLattice-BDLOP-Commitment-v1",
         "proofFamily": "same-secret-linkage-anchor",
         "ceremonyId": "vss-test",
@@ -547,7 +540,6 @@ fn same_secret_proof_set(same_secret_consistency: &Value) -> CanonicalResult<Val
         .collect::<Vec<_>>();
     let proof_set_without_root = json!({
         "objectType": "SameSecretProofSet",
-        "objectVersion": 1,
         "commitmentProfileId": "SealedLattice-BDLOP-Commitment-v1",
         "proofFamily": "same-secret-linkage-anchor",
         "proofAccountingHash": "d".repeat(128),
@@ -576,7 +568,6 @@ fn same_secret_proof_record(
 ) -> CanonicalResult<Value> {
     let proof_record_without_root = json!({
         "objectType": "SameSecretProof",
-        "objectVersion": 1,
         "commitmentProfileId": "SealedLattice-BDLOP-Commitment-v1",
         "proofFamily": "same-secret-linkage-anchor",
         "ceremonyId": "vss-test",
@@ -687,7 +678,6 @@ fn move_same_secret_proof_bytes_to_transport(
 
         transported_proof_materials.push(json!({
             "objectType": "SetupTransportedSameSecretProofMaterial",
-            "objectVersion": 1,
             "proofFamily": "same-secret-linkage-anchor",
             "proofMaterialRoot": proof_record["proofMaterialRoot"],
             "chunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
@@ -724,7 +714,6 @@ fn move_same_secret_proof_bytes_to_transport(
 
     Ok(json!({
         "objectType": "SetupTransportedSameSecretProofMaterialSet",
-        "objectVersion": 1,
         "proofFamily": "same-secret-linkage-anchor",
         "proofMaterials": transported_proof_materials,
     }))

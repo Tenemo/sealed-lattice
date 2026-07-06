@@ -1,14 +1,14 @@
 use super::*;
 
 // Support constraint count: ternary (2) + per digit [eta-2 (3) + lookup
-// fraction pin (1)] + one table fraction pin per chunk + the linkage block's
-// constraints when present.
+// fraction pin (1) + component-material pin (1)] + one table fraction pin per
+// chunk + the linkage block's constraints when present.
 pub(super) fn support_constraint_count(
     ring_degree: usize,
     digit_count: usize,
     linkage_layout: Option<&linkage::LinkageLayout>,
 ) -> usize {
-    2 + digit_count * 4
+    2 + digit_count * 5
         + carry_range_lookup::table_count(ring_degree)
         + linkage_layout
             .map(linkage::linkage_support_constraint_count)
@@ -34,9 +34,11 @@ pub(super) fn table_value_polynomials<const LIMB_COUNT: usize>(
 }
 
 // The support constraint value at one coset point, from opened base and aux
-// values, the public table values evaluated at the point, and the logUp
-// challenge. The constraint order matches the prover's streamed folds: ternary,
-// per digit [eta-2 x3, lookup pin], then table pins.
+// values, the public table values and public component material evaluated at
+// the point, and the logUp challenge. The constraint order matches the prover's
+// streamed folds: ternary, per digit [eta-2 x3, lookup pin, component pin], then
+// table pins. `component_b_at_point` holds the public material polynomial of
+// each digit evaluated at this point (like the table polynomials).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn support_value_at<const LIMB_COUNT: usize>(
     parameters: &ProofFieldParameters<LIMB_COUNT>,
@@ -45,6 +47,7 @@ pub(super) fn support_value_at<const LIMB_COUNT: usize>(
     base_values: &[[u64; LIMB_COUNT]],
     aux_values: &[[u64; LIMB_COUNT]],
     table_values_at_point: &[[u64; LIMB_COUNT]],
+    component_b_at_point: &[[u64; LIMB_COUNT]],
     challenge: &[u64; LIMB_COUNT],
     alpha: &[[u64; LIMB_COUNT]],
     linkage_context: Option<&linkage::LinkageConstraintContext<LIMB_COUNT>>,
@@ -79,6 +82,10 @@ pub(super) fn support_value_at<const LIMB_COUNT: usize>(
         let fraction = aux_values[aux_lookup_column(digit)];
         let denominator = parameters.subtract(&challenge_minus_shift, &carry);
         constraints.push(parameters.subtract(&parameters.multiply(&denominator, &fraction), &one));
+        // component material pin: the committed column equals the public
+        // material on H, so B_col(x) - B_public(x) vanishes there.
+        let component_b = base_values[digit_column(digit, DIGIT_COMPONENT_B)];
+        constraints.push(parameters.subtract(&component_b, &component_b_at_point[digit]));
     }
     for (table_index, table_value) in table_values_at_point.iter().enumerate() {
         let fraction = aux_values[aux_table_fraction_column(digit_count, table_index)];

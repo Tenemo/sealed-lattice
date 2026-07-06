@@ -28,7 +28,6 @@ pub(in super::super::super) fn same_secret_bridge_statement_set_object(
         .collect::<Vec<_>>();
     let mut statement_set = serde_json::json!({
         "objectType": "VssSameSecretBridgeStatementSet",
-        "objectVersion": 1,
         "proofFamily": SAME_SECRET_PROOF_FAMILY,
         "ceremonyId": setup_context["ceremonyId"],
         "manifestHash": setup_context["manifestHash"],
@@ -105,7 +104,6 @@ pub(super) fn same_secret_bridge_statement_record(
         target_constant_records.into_iter().unzip();
     let mut statement_record = serde_json::json!({
         "objectType": "VssSameSecretBridgeStatement",
-        "objectVersion": 1,
         "proofFamily": SAME_SECRET_PROOF_FAMILY,
         "ceremonyId": setup_context["ceremonyId"],
         "manifestHash": setup_context["manifestHash"],
@@ -158,7 +156,6 @@ pub(in super::super::super) fn same_secret_bridge_proof_material_set_object(
         .collect::<Vec<_>>();
     let mut proof_material_set = serde_json::json!({
         "objectType": "VssSameSecretBridgeProofMaterialSet",
-        "objectVersion": 1,
         "proofFamily": SAME_SECRET_BRIDGE_PROOF_FAMILY,
         "ceremonyId": statement_set["ceremonyId"],
         "manifestHash": statement_set["manifestHash"],
@@ -202,7 +199,6 @@ pub(super) fn same_secret_bridge_proof_record(
         .expect("same-secret bridge proof bytes");
     let mut proof_record = serde_json::json!({
         "objectType": "VssSameSecretBridgeProofRecord",
-        "objectVersion": 1,
         "proofFamily": SAME_SECRET_BRIDGE_PROOF_FAMILY,
         "sameSecretBridgeStatementRoot": statement_record["sameSecretBridgeStatementRoot"],
         "proofBytesHash": hash512_hex(

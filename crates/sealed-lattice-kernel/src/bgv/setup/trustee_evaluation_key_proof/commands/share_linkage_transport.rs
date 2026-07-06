@@ -43,7 +43,6 @@ pub(super) fn resolve_vss_share_linkage_proof_bytes(
         )?;
         let proof_record_without_root = json!({
             "objectType": "VssShareLinkageProofRecord",
-            "objectVersion": 1,
             "proofFamily": VSS_SHARE_LINKAGE_PROOF_FAMILY,
             "linkageItems": coverage,
             "vssShareLinkage": vss_share_linkage,
@@ -83,7 +82,6 @@ pub(super) fn resolve_vss_share_linkage_proof_bytes(
     )?;
     let proof_record_without_root = json!({
         "objectType": "VssShareLinkageProofRecord",
-        "objectVersion": 1,
         "proofFamily": VSS_SHARE_LINKAGE_PROOF_FAMILY,
         "linkageItems": coverage,
         "vssShareLinkage": vss_share_linkage,

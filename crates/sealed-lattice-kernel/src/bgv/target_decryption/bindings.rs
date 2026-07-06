@@ -107,7 +107,6 @@ pub(super) fn read_target_result_release_setup_context(
     context: &Value,
 ) -> CanonicalResult<SetupBinding> {
     if string_at_path(context, &["objectType"])? != "BgvTargetDecryptionReleaseSetupContext"
-        || unsigned_at_path(context, &["objectVersion"])? != 1
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidProtocolObject,
@@ -201,7 +200,6 @@ fn target_result_release_setup_context_from_binding(
 ) -> CanonicalResult<Value> {
     let mut context = json!({
         "objectType": "BgvTargetDecryptionReleaseSetupContext",
-        "objectVersion": 1,
         "setupPackageHash": setup_binding.setup_package_hash,
         "ceremonyId": setup_binding.ceremony_id,
         "electionManifestHash": setup_binding.election_manifest_hash,
@@ -253,7 +251,6 @@ fn aggregate_threshold_commitment_set_value(
         for (rns_limb_index, record) in limb_records.iter().enumerate() {
             records.push(json!({
                 "objectType": "VssPublicAggregateThresholdCommitment",
-                "objectVersion": 1,
                 "recipientIdentity": participant.trustee_identity,
                 "recipientRosterPosition": participant.roster_position,
                 "recipientTrusteePoint": participant.interpolation_point,
@@ -270,7 +267,6 @@ fn aggregate_threshold_commitment_set_value(
 
     Ok(json!({
         "objectType": "VssPublicAggregateThresholdCommitmentSet",
-        "objectVersion": 1,
         "publicMatrixSeedHash": setup_binding.public_matrix_seed_hash,
         "participantCount": setup_binding.participants.len(),
         "rnsLimbCount": aggregate_set.rns_limb_count,
@@ -426,7 +422,6 @@ pub(super) fn read_target_accepted_binding(
     setup_binding: &SetupBinding,
 ) -> CanonicalResult<TargetAcceptedBinding> {
     if string_at_path(record, &["objectType"])? != "TargetAcceptedRecord"
-        || unsigned_at_path(record, &["objectVersion"])? != 1
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -459,7 +454,6 @@ pub(super) fn read_target_accepted_binding(
     )?;
     let expected_record_hash = derive_canonical_object_hash(&json!({
         "objectType": string_at_path(record, &["objectType"])?,
-        "objectVersion": unsigned_at_path(record, &["objectVersion"])?,
         "boardPosition": unsigned_at_path(record, &["boardPosition"])?,
         "boardSequence": unsigned_at_path(record, &["boardSequence"])?,
         "ceremonyId": string_at_path(record, &["ceremonyId"])?,
@@ -507,7 +501,6 @@ pub(super) fn read_target_share_profile(
     setup_binding: &SetupBinding,
 ) -> CanonicalResult<TargetShareProfile> {
     if string_at_path(value, &["objectType"])? != "TargetDecryptionShareProfile"
-        || unsigned_at_path(value, &["objectVersion"])? != 1
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -551,7 +544,6 @@ pub(super) fn read_target_share_profile(
 
     let hash_input = json!({
         "objectType": "TargetDecryptionShareProfile",
-        "objectVersion": 1,
         "targetDecryptionProfileHash": setup_binding.target_decryption_profile_hash,
         "targetDecryptionProfileBindingHash": setup_binding.target_decryption_profile_binding_hash,
         "decryptionThreshold": decryption_threshold,

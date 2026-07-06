@@ -167,7 +167,6 @@ pub(crate) fn compute_vss_public_commitment_from_opening(
 
     let commitment_context_hash = derive_canonical_object_hash(&json!({
         "objectType": "VssPublicCommitmentContext",
-        "objectVersion": 1,
         "commitmentRole": input.commitment_role,
         "commitmentContext": input.commitment_context,
     }))?;
@@ -198,7 +197,6 @@ pub(crate) fn compute_vss_public_commitment_from_opening(
         .collect::<CanonicalResult<Vec<_>>>()?;
     let commitment = json!({
         "objectType": "VssPublicCommitment",
-        "objectVersion": 1,
         "commitmentRole": input.commitment_role,
         "commitmentContextHash": commitment_context_hash,
         "publicMatrixSeedHash": input.public_matrix_seed_hash,
@@ -212,7 +210,6 @@ pub(crate) fn compute_vss_public_commitment_from_opening(
     let commitment_root = derive_canonical_object_hash(&commitment)?;
     let opening_root = derive_canonical_object_hash(&json!({
         "objectType": "VssPublicCommitmentOpening",
-        "objectVersion": 1,
         "commitmentRole": input.commitment_role,
         "commitmentContext": input.commitment_context,
         "publicMatrixSeedHash": input.public_matrix_seed_hash,
@@ -309,7 +306,6 @@ pub(crate) fn verify_vss_public_coefficient_commitment_set_request(
 
     let expected_set_root = derive_canonical_object_hash(&json!({
         "objectType": "VssPublicCoefficientCommitmentSet",
-        "objectVersion": 1,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "participantCount": participant_count,
         "rnsLimbCount": rns_limb_count,
@@ -400,7 +396,6 @@ pub(crate) fn verify_vss_public_recipient_share_commitment_set_request(
 
     let expected_set_root = derive_canonical_object_hash(&json!({
         "objectType": "VssPublicRecipientShareCommitmentSet",
-        "objectVersion": 1,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "participantCount": participant_count,
         "rnsLimbCount": rns_limb_count,
@@ -488,7 +483,6 @@ pub(crate) fn verify_vss_public_aggregate_threshold_commitment_set_request(
 
     let expected_set_root = derive_canonical_object_hash(&json!({
         "objectType": "VssPublicAggregateThresholdCommitmentSet",
-        "objectVersion": 1,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "participantCount": participant_count,
         "rnsLimbCount": rns_limb_count,

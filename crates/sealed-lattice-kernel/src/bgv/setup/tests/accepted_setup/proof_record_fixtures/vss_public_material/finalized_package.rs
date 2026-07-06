@@ -155,7 +155,6 @@ pub(in super::super::super) fn finalize_collective_setup_package(
     let statement = &package["vssShareLinkageStatement"];
     let mut threshold_binding = serde_json::json!({
         "objectType": "ThresholdShareCommitmentBinding",
-        "objectVersion": 1,
         "publicMatrixSeedHash": coefficient_set["publicMatrixSeedHash"],
         "participantCount": coefficient_set["participantCount"],
         "thresholdDegree": coefficient_set["thresholdDegree"],

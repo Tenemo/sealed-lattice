@@ -25,7 +25,6 @@ pub(super) fn common_randomness_object(
         let reveal_hex = reveal_source_hash[..64].to_string();
         let mut reveal_record = serde_json::json!({
             "objectType": "CommonRandomnessReveal",
-            "objectVersion": 1,
             "ceremonyId": ceremony_id,
             "manifestHash": manifest_hash,
             "rosterHash": roster_hash,
@@ -60,7 +59,6 @@ pub(super) fn common_randomness_object(
             &signature_seed_label,
             serde_json::json!({
                 "objectType": "CommonRandomnessReveal",
-                "objectVersion": 1,
                 "ceremonyId": ceremony_id,
                 "manifestHash": manifest_hash,
                 "boardHeadHash": null,
@@ -84,7 +82,6 @@ pub(super) fn common_randomness_object(
 
         let mut commit_record = serde_json::json!({
             "objectType": "CommonRandomnessCommit",
-            "objectVersion": 1,
             "ceremonyId": ceremony_id,
             "manifestHash": manifest_hash,
             "rosterHash": roster_hash,
@@ -118,7 +115,6 @@ pub(super) fn common_randomness_object(
             &signature_seed_label,
             serde_json::json!({
                 "objectType": "CommonRandomnessCommit",
-                "objectVersion": 1,
                 "ceremonyId": ceremony_id,
                 "manifestHash": manifest_hash,
                 "boardHeadHash": null,
@@ -177,7 +173,6 @@ pub(super) fn common_randomness_object(
     );
     let mut common_randomness = serde_json::json!({
         "objectType": "SetupCommonRandomness",
-        "objectVersion": 1,
         "ceremonyId": ceremony_id,
         "manifestHash": manifest_hash,
         "rosterHash": roster_hash,

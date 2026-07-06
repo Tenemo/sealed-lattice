@@ -321,7 +321,6 @@ fn setup_commitment_matrix_entry_hash(
 ) -> CanonicalResult<String> {
     derive_canonical_object_hash(&json!({
         "objectType": "SetupCommitmentMatrixEntryDerivation",
-        "objectVersion": 1,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "coordinate": coordinate,
         "coefficientValue": coefficient_value,

@@ -25,7 +25,6 @@ pub(in super::super::super) fn vss_public_coefficient_commitment_set_object(
         .collect::<Vec<_>>();
     let mut set = serde_json::json!({
         "objectType": "VssPublicCoefficientCommitmentSet",
-        "objectVersion": 1,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "participantCount": participant_count,
         "rnsLimbCount": DATA_PRIMES.len(),
@@ -70,7 +69,6 @@ pub(super) fn vss_public_source_coefficient_record(
         .collect::<Vec<_>>();
     let mut source_record = serde_json::json!({
         "objectType": "VssPublicSourceCoefficientCommitments",
-        "objectVersion": 1,
         "sourceTrusteeIdentity": source_trustee_identity,
         "sourceTrusteeRosterPosition": source_trustee_roster_position,
         "publicMatrixSeedHash": public_matrix_seed_hash,
@@ -116,7 +114,6 @@ pub(super) fn vss_public_coefficient_commitment_record(
     );
     let commitment_context = serde_json::json!({
         "objectType": "VssPublicCoefficientCommitmentContext",
-        "objectVersion": 1,
         "ceremonyId": setup_context["ceremonyId"],
         "manifestHash": setup_context["manifestHash"],
         "rosterHash": setup_context["rosterHash"],
@@ -147,7 +144,6 @@ pub(super) fn vss_public_coefficient_commitment_record(
 
     serde_json::json!({
         "objectType": "VssPublicCoefficientCommitment",
-        "objectVersion": 1,
         "sourceTrusteeIdentity": source_trustee_identity,
         "sourceTrusteeRosterPosition": source_trustee_roster_position,
         "publicMatrixSeedHash": public_matrix_seed_hash,
@@ -182,7 +178,6 @@ pub(in super::super::super) fn vss_public_recipient_share_commitment_set_object(
         .collect::<Vec<_>>();
     let mut recipient_set = serde_json::json!({
         "objectType": "VssPublicRecipientShareCommitmentSet",
-        "objectVersion": 1,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "participantCount": participant_count,
         "rnsLimbCount": DATA_PRIMES.len(),
@@ -222,7 +217,6 @@ pub(super) fn vss_public_source_recipient_share_record(
         .collect::<Vec<_>>();
     let mut source_record = serde_json::json!({
         "objectType": "VssPublicSourceRecipientShareCommitments",
-        "objectVersion": 1,
         "sourceTrusteeIdentity": source_trustee_identity,
         "sourceTrusteeRosterPosition": source_trustee_roster_position,
         "recipientShareCommitments": recipient_share_commitments,
@@ -273,7 +267,6 @@ pub(super) fn vss_public_recipient_share_commitment_record(
     let recipient_identity = format!("trustee-{recipient_roster_position}");
     let commitment_context = serde_json::json!({
         "objectType": "VssPublicRecipientShareCommitmentContext",
-        "objectVersion": 1,
         "ceremonyId": setup_context["ceremonyId"],
         "manifestHash": setup_context["manifestHash"],
         "rosterHash": setup_context["rosterHash"],
@@ -306,7 +299,6 @@ pub(super) fn vss_public_recipient_share_commitment_record(
 
     serde_json::json!({
         "objectType": "VssPublicRecipientShareCommitment",
-        "objectVersion": 1,
         "sourceTrusteeIdentity": source_trustee_identity,
         "sourceTrusteeRosterPosition": source_trustee_roster_position,
         "recipientIdentity": recipient_identity,
@@ -345,7 +337,6 @@ pub(in super::super::super) fn vss_public_aggregate_threshold_commitment_set_obj
         .collect::<Vec<_>>();
     let mut aggregate_set = serde_json::json!({
         "objectType": "VssPublicAggregateThresholdCommitmentSet",
-        "objectVersion": 1,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "participantCount": participant_count,
         "rnsLimbCount": DATA_PRIMES.len(),
@@ -389,7 +380,6 @@ pub(super) fn vss_public_aggregate_threshold_commitment_record(
         .collect::<Vec<_>>();
     let commitment_context = serde_json::json!({
         "objectType": "VssPublicAggregateThresholdCommitmentContext",
-        "objectVersion": 1,
         "ceremonyId": setup_context["ceremonyId"],
         "manifestHash": setup_context["manifestHash"],
         "rosterHash": setup_context["rosterHash"],
@@ -416,7 +406,6 @@ pub(super) fn vss_public_aggregate_threshold_commitment_record(
         derive_canonical_object_hash(&commitment).expect("aggregate threshold commitment root");
     let aggregate_opening_root = derive_canonical_object_hash(&serde_json::json!({
         "objectType": "VssPublicAggregateThresholdOpening",
-        "objectVersion": 1,
         "commitmentRole": "aggregate-threshold-share",
         "commitmentContext": commitment_context,
         "publicMatrixSeedHash": public_matrix_seed_hash,
@@ -429,7 +418,6 @@ pub(super) fn vss_public_aggregate_threshold_commitment_record(
 
     serde_json::json!({
         "objectType": "VssPublicAggregateThresholdCommitment",
-        "objectVersion": 1,
         "recipientIdentity": recipient_identity,
         "recipientRosterPosition": recipient_roster_position,
         "recipientTrusteePoint": recipient_roster_position + 1,
@@ -455,7 +443,6 @@ pub(super) fn vss_public_sum_commitment_body(
 ) -> serde_json::Value {
     let commitment_context_hash = derive_canonical_object_hash(&serde_json::json!({
         "objectType": "VssPublicCommitmentContext",
-        "objectVersion": 1,
         "commitmentRole": commitment_role,
         "commitmentContext": commitment_context,
     }))
@@ -497,7 +484,6 @@ pub(super) fn vss_public_sum_commitment_body(
 
     serde_json::json!({
         "objectType": "VssPublicCommitment",
-        "objectVersion": 1,
         "commitmentRole": commitment_role,
         "commitmentContextHash": commitment_context_hash,
         "publicMatrixSeedHash": public_matrix_seed_hash,

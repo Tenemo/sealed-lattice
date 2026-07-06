@@ -59,7 +59,6 @@ export const deriveRecoveryEpochUpdateHash = (
         newSigningPublicKeyHash: update.newSigningPublicKeyHash,
         newTrusteeSetupCommitment: update.newTrusteeSetupCommitment,
         objectType: update.objectType,
-        objectVersion: update.objectVersion,
         oldActionCutoffBoardSequence: update.oldActionCutoffBoardSequence,
         previousDeviceEpoch: update.previousDeviceEpoch,
         previousRecoveryEpoch: update.previousRecoveryEpoch,
@@ -235,7 +234,6 @@ const verifyRecoveryEpochUpdateUnchecked = (
         newSigningPublicKeyHash: update.newSigningPublicKeyHash,
         newTrusteeSetupCommitment: update.newTrusteeSetupCommitment,
         objectType: update.objectType,
-        objectVersion: update.objectVersion,
         oldActionCutoffBoardSequence: update.oldActionCutoffBoardSequence,
         previousDeviceEpoch: update.previousDeviceEpoch,
         previousRecoveryEpoch: update.previousRecoveryEpoch,
@@ -258,7 +256,6 @@ const verifyRecoveryEpochUpdateUnchecked = (
     }
     if (
         update.objectType !== 'RecoveryEpochUpdate' ||
-        update.objectVersion !== 1 ||
         !isNonNegativeInteger(update.previousRecoveryEpoch) ||
         !isNonNegativeInteger(update.newRecoveryEpoch) ||
         !isNonNegativeInteger(update.previousDeviceEpoch) ||

@@ -105,7 +105,6 @@ pub(super) fn validate_setup_package_internal_bindings(
 
 pub(super) fn validate_setup_package_shape(setup_package: &Value) -> CanonicalResult<()> {
     if setup_package.get("objectType").and_then(Value::as_str) != Some("BgvPassiveSetupPackage")
-        || setup_package.get("objectVersion").and_then(Value::as_u64) != Some(1)
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,

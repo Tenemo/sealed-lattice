@@ -71,7 +71,6 @@ export const verifyRegistrationEntry = (
         ceremonyId: entry.ceremonyId,
         deviceEpoch: entry.deviceEpoch,
         objectType: entry.objectType,
-        objectVersion: entry.objectVersion,
         participantIdentity: entry.participantIdentity,
         recoveryEpoch: entry.recoveryEpoch,
         signingPublicKeyHash: entry.signingPublicKeyHash,
@@ -89,7 +88,6 @@ export const verifyRegistrationEntry = (
     }
     if (
         entry.objectType !== 'RegistrationEntry' ||
-        entry.objectVersion !== 1 ||
         !isNonNegativeInteger(entry.boardSequence) ||
         !isNonNegativeInteger(entry.boardPosition) ||
         !isNonNegativeInteger(entry.recoveryEpoch) ||
@@ -159,7 +157,6 @@ export const verifyTrusteeSetupEntry = (
         deviceEpoch: entry.deviceEpoch,
         evaluationKeyRoot: entry.evaluationKeyRoot,
         objectType: entry.objectType,
-        objectVersion: entry.objectVersion,
         participantSetupRecordHash: entry.participantSetupRecordHash,
         publicKeyShareRoot: entry.publicKeyShareRoot,
         recoveryEpoch: entry.recoveryEpoch,
@@ -184,7 +181,6 @@ export const verifyTrusteeSetupEntry = (
     }
     if (
         entry.objectType !== 'TrusteeSetupEntry' ||
-        entry.objectVersion !== 1 ||
         !isNonNegativeInteger(entry.boardSequence) ||
         !isNonNegativeInteger(entry.boardPosition) ||
         !isNonNegativeInteger(entry.recoveryEpoch) ||
@@ -307,7 +303,6 @@ export const verifyManifest = (
         manifestOpaqueBindings: manifest.manifestOpaqueBindings,
         manifestPolicyHashes: manifest.manifestPolicyHashes,
         objectType: manifest.objectType,
-        objectVersion: manifest.objectVersion,
         pollSpecHash: manifest.pollSpecHash,
         rosterHash: manifest.rosterHash,
         thresholdParametersHash: manifest.thresholdParametersHash,
@@ -325,7 +320,6 @@ export const verifyManifest = (
     }
     if (
         manifest.objectType !== 'ElectionManifest' ||
-        manifest.objectVersion !== 1 ||
         !isNonNegativeInteger(manifest.boardSequence) ||
         !isNonNegativeInteger(manifest.boardPosition)
     ) {
@@ -413,7 +407,6 @@ export const verifyRosterExternalAcceptance = (
             ceremonyId: acceptance.ceremonyId,
             electionManifestHash: acceptance.electionManifestHash,
             objectType: acceptance.objectType,
-            objectVersion: acceptance.objectVersion,
             participantIdentity: acceptance.participantIdentity,
             rosterHash: acceptance.rosterHash,
             warningTextVersion: acceptance.warningTextVersion,
@@ -431,7 +424,6 @@ export const verifyRosterExternalAcceptance = (
         }
         if (
             acceptance.objectType !== 'RosterExternalAcceptance' ||
-            acceptance.objectVersion !== 1 ||
             acceptance.ceremonyId !== input.expectedCeremonyId ||
             acceptance.rosterHash !== input.expectedRosterHash ||
             acceptance.electionManifestHash !==

@@ -76,7 +76,6 @@ pub(crate) fn canonical_target_basis_value() -> CanonicalResult<serde_json::Valu
 
     Ok(serde_json::json!({
         "objectType": "CanonicalTargetBasis",
-        "objectVersion": 1,
         "targetLevel": CANONICAL_TARGET_CIPHERTEXT_LEVEL,
         "targetPrimes": canonical_target_basis_primes(),
     }))

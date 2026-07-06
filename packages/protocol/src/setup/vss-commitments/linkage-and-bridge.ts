@@ -19,7 +19,6 @@ import {
 
 export type VssShareLinkageStatement = {
     readonly objectType: string;
-    readonly objectVersion: number;
     readonly ceremonyId: string;
     readonly manifestHash: ProtocolHash;
     readonly rosterHash: ProtocolHash;
@@ -633,7 +632,6 @@ export type VssSameSecretBridgeTargetConstantCommitment = {
 
 export type VssSameSecretBridgeStatement = {
     readonly objectType: string;
-    readonly objectVersion: number;
     readonly proofFamily: string;
     readonly ceremonyId: string;
     readonly manifestHash: ProtocolHash;
@@ -662,7 +660,6 @@ export type VssSameSecretBridgeStatement = {
 
 export type VssSameSecretBridgeStatementSet = {
     readonly objectType: string;
-    readonly objectVersion: number;
     readonly proofFamily: string;
     readonly ceremonyId: string;
     readonly manifestHash: ProtocolHash;

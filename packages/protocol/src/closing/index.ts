@@ -34,7 +34,6 @@ export const deriveCastReceiptHash = (
         electionManifestHash: receipt.electionManifestHash,
         encryptedBallotHash: receipt.encryptedBallotHash,
         objectType: receipt.objectType,
-        objectVersion: receipt.objectVersion,
         recoveryEpoch: receipt.recoveryEpoch,
         voterIdentity: receipt.voterIdentity,
     });
@@ -67,7 +66,6 @@ export const deriveCloseRecordHash = (
         closedBoardHeadHash: closeRecord.closedBoardHeadHash,
         electionManifestHash: closeRecord.electionManifestHash,
         objectType: closeRecord.objectType,
-        objectVersion: closeRecord.objectVersion,
         organizerIdentity: closeRecord.organizerIdentity,
     });
 
@@ -85,7 +83,6 @@ const verifyCastReceiptShape = (
         electionManifestHash: receipt.electionManifestHash,
         encryptedBallotHash: receipt.encryptedBallotHash,
         objectType: receipt.objectType,
-        objectVersion: receipt.objectVersion,
         recoveryEpoch: receipt.recoveryEpoch,
         voterIdentity: receipt.voterIdentity,
     });
@@ -102,7 +99,6 @@ const verifyCastReceiptShape = (
     }
     if (
         receipt.objectType !== 'CastReceipt' ||
-        receipt.objectVersion !== 1 ||
         !isNonNegativeInteger(receipt.boardSequence) ||
         !isNonNegativeInteger(receipt.boardPosition) ||
         !isNonNegativeInteger(receipt.recoveryEpoch) ||
@@ -237,7 +233,6 @@ const verifyCloseRecordShape = (
         closedBoardHeadHash: closeRecord.closedBoardHeadHash,
         electionManifestHash: closeRecord.electionManifestHash,
         objectType: closeRecord.objectType,
-        objectVersion: closeRecord.objectVersion,
         organizerIdentity: closeRecord.organizerIdentity,
     });
 
@@ -253,7 +248,6 @@ const verifyCloseRecordShape = (
     }
     if (
         closeRecord.objectType !== 'CloseRecord' ||
-        closeRecord.objectVersion !== 1 ||
         !isNonNegativeInteger(closeRecord.boardSequence) ||
         !isNonNegativeInteger(closeRecord.boardPosition)
     ) {

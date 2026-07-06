@@ -388,7 +388,6 @@ pub(super) fn verified_setup_proof_material_reference_value(
 ) -> Value {
     json!({
         "objectType": VERIFIED_SETUP_PROOF_MATERIAL_OBJECT_TYPE,
-        "objectVersion": 1,
         "verificationId": verification_id,
         "proofFamily": proof_family,
         "proofMaterialRoot": proof_material_root,

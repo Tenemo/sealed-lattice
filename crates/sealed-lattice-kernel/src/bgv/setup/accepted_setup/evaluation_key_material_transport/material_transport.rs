@@ -31,7 +31,6 @@ pub(in super::super) fn transported_evaluation_key_share_component_material_from
 
     Ok(Some(json!({
         "objectType": EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_TRANSPORT_SET_OBJECT_TYPE,
-        "objectVersion": 1,
         "componentMaterials": component_materials,
     })))
 }
@@ -314,7 +313,6 @@ fn transported_evaluation_key_share_component_material_roots_from_request(
     };
     if material_set.get("objectType").and_then(Value::as_str)
         != Some(EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_TRANSPORT_SET_OBJECT_TYPE)
-        || material_set.get("objectVersion").and_then(Value::as_u64) != Some(1)
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -410,7 +408,6 @@ fn verify_public_evaluation_key_material_entry_header(
 ) -> CanonicalResult<()> {
     if material_entry.get("objectType").and_then(Value::as_str)
         != Some(PUBLIC_EVALUATION_KEY_MATERIAL_TRANSPORT_OBJECT_TYPE)
-        || material_entry.get("objectVersion").and_then(Value::as_u64) != Some(1)
         || material_entry
             .get("materialEncoding")
             .and_then(Value::as_str)
@@ -547,7 +544,6 @@ pub(in crate::bgv::setup) fn public_evaluation_key_material_transport_hashes(
         .collect::<CanonicalResult<Vec<_>>>()?;
     let chunk_root = derive_canonical_object_hash(&json!({
         "objectType": "PublicEvaluationKeyMaterialChunkManifest",
-        "objectVersion": 1,
         "materialEncoding": PUBLIC_EVALUATION_KEY_TRANSPORT_MATERIAL_ENCODING,
         "chunkSizeBytes": SETUP_TRANSPORT_CHUNK_SIZE_BYTES,
         "chunkCount": chunk_hashes.len(),
@@ -672,7 +668,6 @@ pub(in crate::bgv::setup) fn public_evaluation_key_material_reference_root(
 ) -> CanonicalResult<String> {
     derive_canonical_object_hash(&json!({
         "objectType": "PublicEvaluationKeyMaterialReference",
-        "objectVersion": 1,
         "materialEncoding": PUBLIC_EVALUATION_KEY_TRANSPORT_MATERIAL_ENCODING,
         "ceremonyId": value_string(evaluation_keys, "ceremonyId")?,
         "manifestHash": value_string(evaluation_keys, "manifestHash")?,

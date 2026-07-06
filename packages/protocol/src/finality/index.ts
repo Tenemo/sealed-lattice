@@ -51,7 +51,6 @@ const verifyTargetRecordShape = (
         ceremonyId: record.ceremonyId,
         inclusionProof: record.inclusionProof,
         objectType: record.objectType,
-        objectVersion: record.objectVersion,
         targetFinalityCheckpoint: checkpoint,
         targetFinalityPolicyHash: record.targetFinalityPolicyHash,
         targetFinalityScope: record.targetFinalityScope,
@@ -83,7 +82,6 @@ const verifyTargetRecordShape = (
         evaluatorReplayRecordHash: checkpoint.evaluatorReplayRecordHash,
         finalizedBoardHeadHash: checkpoint.finalizedBoardHeadHash,
         objectType: checkpoint.objectType,
-        objectVersion: checkpoint.objectVersion,
         targetCiphertextHash: checkpoint.targetCiphertextHash,
         targetFinalityPolicyHash: checkpoint.targetFinalityPolicyHash,
         targetLayoutHash: checkpoint.targetLayoutHash,
@@ -106,9 +104,7 @@ const verifyTargetRecordShape = (
     }
     if (
         record.objectType !== 'TargetFinalityRecord' ||
-        record.objectVersion !== 1 ||
-        checkpoint.objectType !== 'TargetFinalityCheckpoint' ||
-        checkpoint.objectVersion !== 1
+        checkpoint.objectType !== 'TargetFinalityCheckpoint'
     ) {
         refusedObjects.push(
             createRefusal(
@@ -310,7 +306,6 @@ const verifyWitnessCheckpoint = (
     const expectedCheckpointHash = deriveWitnessCheckpointHash({
         ceremonyId: checkpoint.ceremonyId,
         objectType: checkpoint.objectType,
-        objectVersion: checkpoint.objectVersion,
         targetFinalityCheckpointHash: checkpoint.targetFinalityCheckpointHash,
         targetFinalityPolicyHash: checkpoint.targetFinalityPolicyHash,
         targetFinalityScope: checkpoint.targetFinalityScope,
@@ -342,8 +337,7 @@ const verifyWitnessCheckpoint = (
         );
     }
     if (
-        checkpoint.objectType !== 'WitnessCheckpoint' ||
-        checkpoint.objectVersion !== 1
+        checkpoint.objectType !== 'WitnessCheckpoint'
     ) {
         refusedObjects.push(
             createRefusal(

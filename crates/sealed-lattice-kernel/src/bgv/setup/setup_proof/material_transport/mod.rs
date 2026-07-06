@@ -74,7 +74,6 @@ pub(in crate::bgv::setup) fn setup_proof_record_binding_value(
 ) -> CanonicalResult<Value> {
     Ok(json!({
         "objectType": "SetupProofRecordBinding",
-        "objectVersion": 1,
         "setupParametersHash": setup_parameters_hash,
         "proofBytesDomain": SETUP_PROOF_BYTES_DOMAIN,
         "proofSerialization": SETUP_PROOF_SERIALIZATION,

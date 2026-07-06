@@ -118,7 +118,6 @@ pub(super) fn generate_target_decryption_share_from_secret_share(
 
     Ok(json!({
         "objectType": "BgvTargetDecryptionShare",
-        "objectVersion": 1,
         "targetDecryptionShareHash": target_decryption_share_hash,
         "setupPackageHash": setup_binding.setup_package_hash,
         "ceremonyId": setup_binding.ceremony_id,

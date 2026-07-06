@@ -148,7 +148,6 @@ pub(in super::super) fn same_secret_proofs_object(
             );
         let mut proof_record = serde_json::json!({
             "objectType": "SameSecretProof",
-            "objectVersion": 1,
             "proofFamily":
                 crate::bgv::setup::trustee_evaluation_key_proof::SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY,
             "ceremonyId": setup_context["ceremonyId"],
@@ -179,7 +178,6 @@ pub(in super::super) fn same_secret_proofs_object(
         .collect::<Vec<_>>();
     let mut proof_set = serde_json::json!({
         "objectType": "SameSecretProofSet",
-        "objectVersion": 1,
         "proofFamily":
             crate::bgv::setup::trustee_evaluation_key_proof::SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY,
         "ceremonyId": setup_context["ceremonyId"],

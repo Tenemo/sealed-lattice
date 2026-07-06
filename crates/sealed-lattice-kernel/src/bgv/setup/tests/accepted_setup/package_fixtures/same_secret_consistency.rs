@@ -16,7 +16,6 @@ pub(in super::super) fn same_secret_consistency_object(
     let mut statement_records = Vec::new();
     let same_secret_proof_family_binding_root = derive_canonical_object_hash(&serde_json::json!({
             "objectType": "SameSecretProofFamilyBinding",
-            "objectVersion": 1,
             "proofFamily": "same-secret-linkage-anchor",
             "sameSecretRelation": "vss-constant-commitments-open-to-one-short-secret-across-q-share-limbs",
             "boundSecretDependentProofFamilies": [
@@ -60,7 +59,6 @@ pub(in super::super) fn same_secret_consistency_object(
             .collect::<Vec<_>>();
         let trustee_secret_commitment_payload = serde_json::json!({
             "objectType": "TrusteeSecretCommitment",
-            "objectVersion": 1,
             "ceremonyId": ceremony_id,
             "manifestHash": manifest_hash,
             "rosterHash": roster_hash,
@@ -76,7 +74,6 @@ pub(in super::super) fn same_secret_consistency_object(
                 .expect("trustee secret commitment root");
         let mut statement_record = serde_json::json!({
             "objectType": "SameSecretConsistencyStatement",
-            "objectVersion": 1,
             "proofFamily": "same-secret-linkage-anchor",
             "ceremonyId": ceremony_id,
             "manifestHash": manifest_hash,
@@ -104,7 +101,6 @@ pub(in super::super) fn same_secret_consistency_object(
     }
     let mut same_secret_consistency = serde_json::json!({
         "objectType": "SameSecretConsistencyStatementSet",
-        "objectVersion": 1,
         "proofFamily": "same-secret-linkage-anchor",
         "ceremonyId": ceremony_id,
         "manifestHash": manifest_hash,

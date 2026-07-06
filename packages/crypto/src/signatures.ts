@@ -272,14 +272,13 @@ const validateSignedRootShape = (
         );
     }
     if (
-        !isNonNegativeInteger(signedRoot.objectVersion) ||
         !isNonNegativeInteger(signedRoot.byteLength) ||
         !isNonNegativeInteger(signedRoot.recoveryEpoch) ||
         !isNonNegativeInteger(signedRoot.deviceEpoch)
     ) {
         return emptySignatureVerificationResult(
             'InvalidSignedRoot',
-            'Signed root version, byte length, and epochs must be non-negative integers.',
+            'Signed root byte length and epochs must be non-negative integers.',
         );
     }
     if (
@@ -309,16 +308,6 @@ const validateExpectation = (
         return emptySignatureVerificationResult(
             'WrongObjectType',
             'Signature root object type does not match the expected object.',
-            signature.signatureHash,
-        );
-    }
-    if (
-        expectation.objectVersion !== undefined &&
-        signedRoot.objectVersion !== expectation.objectVersion
-    ) {
-        return emptySignatureVerificationResult(
-            'InvalidSignedRoot',
-            'Signature root object version does not match the expected version.',
             signature.signatureHash,
         );
     }
@@ -451,7 +440,6 @@ const hasExplicitSignatureExpectationBinding = (
 ): boolean =>
     [
         expectation.objectType,
-        expectation.objectVersion,
         expectation.signerRole,
         expectation.signerIdentity,
         expectation.ceremonyId,

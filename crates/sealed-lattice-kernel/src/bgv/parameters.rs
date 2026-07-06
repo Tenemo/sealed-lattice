@@ -27,7 +27,6 @@ pub(crate) use root_parameters::{
 pub(crate) fn bgv_parameters_value() -> Value {
     json!({
         "objectType": "BgvParameters",
-        "objectVersion": 1,
         "polynomialDegree": POLYNOMIAL_DEGREE,
         "plaintextModulus": PLAINTEXT_MODULUS,
         "dataPrimes": DATA_PRIMES,

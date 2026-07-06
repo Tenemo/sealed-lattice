@@ -93,7 +93,6 @@ pub(super) fn setup_transport_chunk_manifest_root(
 ) -> CanonicalResult<String> {
     derive_canonical_object_hash(&json!({
         "objectType": "SetupTransportChunkManifest",
-        "objectVersion": 1,
         "chunkSizeBytes": chunk_size_bytes,
         "chunkCount": chunk_count,
         "totalByteLength": total_byte_length,

@@ -119,7 +119,6 @@ fn verify_trustee_evaluation_key_proof_set(
 ) -> CanonicalResult<()> {
     if proof_set.get("objectType").and_then(Value::as_str)
         != Some(TRUSTEE_EVALUATION_KEY_PROOF_SET_OBJECT_TYPE)
-        || proof_set.get("objectVersion").and_then(Value::as_u64) != Some(1)
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -379,7 +378,6 @@ fn verify_trustee_evaluation_key_proof_record(
     }
     if proof_record.get("objectType").and_then(Value::as_str)
         != Some(TRUSTEE_EVALUATION_KEY_PROOF_OBJECT_TYPE)
-        || proof_record.get("objectVersion").and_then(Value::as_u64) != Some(1)
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -957,7 +955,6 @@ pub(in crate::bgv::setup) fn trustee_evaluation_key_proof_material_root(
 ) -> CanonicalResult<String> {
     derive_canonical_object_hash(&json!({
         "objectType": "TrusteeEvaluationKeyProofMaterialReference",
-        "objectVersion": 1,
         "proofFamily": TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
         "trusteeIdentity": value_string(proof_record, "trusteeIdentity")?,
         "trusteeRosterPosition": value_u64(proof_record, "trusteeRosterPosition")?,

@@ -59,6 +59,12 @@ pub(super) struct KeyColumnPlan<'a, const LIMB_COUNT: usize> {
     mask_degree: usize,
     secret: &'a [i64],
     digits: &'a [DigitWitness],
+    // The recombined component material `B_j` per digit, committed as a base
+    // column and pinned equal to the public material. Borrowed per-digit slices,
+    // never a full clone, so the streamed prover keeps its bounded footprint.
+    // The prover normally binds the public material here; a test override can
+    // substitute a mismatched column to exercise the pin in isolation.
+    component_b: Vec<&'a [[u64; LIMB_COUNT]]>,
     multiplicity_values: Vec<Vec<[u64; LIMB_COUNT]>>,
     base_mask_seed_starts: Vec<u64>,
     lookup_challenge: Option<[u64; LIMB_COUNT]>,
@@ -80,16 +86,29 @@ impl<'a, const LIMB_COUNT: usize> KeyColumnPlan<'a, LIMB_COUNT> {
         mask_degree: usize,
         secret: &'a [i64],
         digits: &'a [DigitWitness],
+        component_b: Vec<&'a [[u64; LIMB_COUNT]]>,
         linkage_inputs: Option<(&linkage::LinkageStatement<'_>, &linkage::LinkageWitness<'_>)>,
         salt_seed: &mut u64,
     ) -> CanonicalResult<Self> {
         if secret.len() != ring_degree {
             return Err(invalid_key("secret length does not match ring degree"));
         }
+        if component_b.len() != digits.len() {
+            return Err(invalid_key(
+                "component material count does not match digit count",
+            ));
+        }
         for digit in digits {
             if digit.error.len() != ring_degree || digit.carry.len() != ring_degree {
                 return Err(invalid_key(
                     "digit witness length does not match ring degree",
+                ));
+            }
+        }
+        for material in &component_b {
+            if material.len() != ring_degree {
+                return Err(invalid_key(
+                    "component material length does not match ring degree",
                 ));
             }
         }
@@ -129,6 +148,7 @@ impl<'a, const LIMB_COUNT: usize> KeyColumnPlan<'a, LIMB_COUNT> {
             mask_degree,
             secret,
             digits,
+            component_b,
             multiplicity_values,
             base_mask_seed_starts,
             lookup_challenge: None,
@@ -216,7 +236,7 @@ impl<'a, const LIMB_COUNT: usize> KeyColumnPlan<'a, LIMB_COUNT> {
                     .iter()
                     .map(|v| parameters.signed_word_to_element(v * v))
                     .collect(),
-                _ => digit
+                DIGIT_ERROR_SUPPORT => digit
                     .error
                     .iter()
                     .map(|v| {
@@ -224,6 +244,8 @@ impl<'a, const LIMB_COUNT: usize> KeyColumnPlan<'a, LIMB_COUNT> {
                         parameters.signed_word_to_element((square - 1) * (square - 4))
                     })
                     .collect(),
+                DIGIT_COMPONENT_B => self.component_b[digit_index].to_vec(),
+                _ => unreachable!("digit block offset out of range"),
             };
         }
         let linkage_start = base_linkage_start(self.ring_degree, digit_count);

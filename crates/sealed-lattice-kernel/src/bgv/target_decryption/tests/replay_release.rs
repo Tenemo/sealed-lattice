@@ -25,7 +25,7 @@ use crate::hashing::hash512_hex;
 //
 // The target proposal, context, and finality hashes on the accepted record
 // remain fixture material: the standalone target-acceptance and finality gate
-// is later milestone work, and this test binds the genuine evaluator-replay
+// is not implemented yet, and this test binds the genuine evaluator-replay
 // record hash, ciphertext hashes, layout, and basis exactly as the share
 // generation and release paths verify them today.
 //

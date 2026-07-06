@@ -633,7 +633,6 @@ pub(crate) fn verify_vss_share_linkage_proof_material_set_from_request(
 
     let proof_material_set_without_root = json!({
         "objectType": "VssShareLinkageProofMaterialSet",
-        "objectVersion": 1,
         "proofFamily": VSS_SHARE_LINKAGE_PROOF_FAMILY,
         "ceremonyId": read_string(statement, "ceremonyId")?,
         "manifestHash": read_string(statement, "manifestHash")?,

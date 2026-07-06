@@ -232,9 +232,6 @@ const assertRecordShape = (
             `${objectPath}.objectType must be ${expectedObjectType}.`,
         );
     }
-    if (record.objectVersion !== 1) {
-        throw new Error(`${objectPath}.objectVersion must be 1.`);
-    }
     if (record.signerRole !== 'Trustee') {
         throw new Error(`${objectPath}.signerRole must be Trustee.`);
     }
@@ -348,9 +345,6 @@ const assertPublicDerivationsMatchKernelShape = (
             'publicDerivations.objectType must be SetupPublicDerivations.',
         );
     }
-    if (publicDerivations.objectVersion !== 1) {
-        throw new Error('publicDerivations.objectVersion must be 1.');
-    }
     if (publicDerivations.publicMatrixSeedHash !== publicMatrixSeedHash) {
         throw new Error(
             'publicDerivations.publicMatrixSeedHash must match the derived public matrix seed hash.',
@@ -363,7 +357,6 @@ const assertPublicDerivationsMatchKernelShape = (
     );
     if (
         bgvPublicA.objectType !== 'BgvPublicAPolynomial' ||
-        bgvPublicA.objectVersion !== 1 ||
         bgvPublicA.publicMatrixSeedHash !== publicMatrixSeedHash
     ) {
         throw new Error(
@@ -381,7 +374,6 @@ const assertPublicDerivationsMatchKernelShape = (
     );
     if (
         publicMatrices.objectType !== 'SetupPublicMatrixMaterial' ||
-        publicMatrices.objectVersion !== 1 ||
         publicMatrices.publicMatrixSeedHash !== publicMatrixSeedHash
     ) {
         throw new Error(
@@ -454,7 +446,6 @@ const verifyGeneratedSignatureEnvelope = (
 ): void => {
     const result = verifySignedObjectSignature(signatureEnvelope, {
         objectType: signedRoot.objectType,
-        objectVersion: signedRoot.objectVersion,
         signerRole: signedRoot.signerRole,
         signerIdentity: signedRoot.signerIdentity,
         ceremonyId: signedRoot.ceremonyId,

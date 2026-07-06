@@ -353,7 +353,6 @@ fn verify_private_envelope_limb(
 
     let share_values_hash = derive_canonical_object_hash(&json!({
         "objectType": "PrivateVssShareValueVector",
-        "objectVersion": 1,
         "rnsLimbIndex": rns_limb_index,
         "rnsPrime": rns_prime,
         "shareValues": share_values,
@@ -390,7 +389,6 @@ fn verify_private_envelope_limb(
     };
     let limb_verification_record = json!({
         "objectType": "PrivateVssLimbVerification",
-        "objectVersion": 1,
         "rnsLimbIndex": rns_limb_index,
         "rnsPrime": rns_prime,
         "ringDegree": ring_degree,

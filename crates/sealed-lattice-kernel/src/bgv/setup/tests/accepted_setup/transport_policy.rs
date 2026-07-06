@@ -116,7 +116,6 @@ fn terminal_transport_policy_accepts_binary_setup_and_key_material_references() 
     let request = serde_json::json!({
         "transportedVssCoefficientCommitmentMaterial": {
             "objectType": "SetupTransportedVssCoefficientCommitmentMaterial",
-            "objectVersion": 1,
             "binaryFormat": "sealed-lattice-vss-coefficient-commitment-material-binary-v1",
             "chunkSizeBytes": 1_048_576,
             "chunkCount": 1,
@@ -127,7 +126,6 @@ fn terminal_transport_policy_accepts_binary_setup_and_key_material_references() 
         },
         "verifiedVssCoefficientCommitmentMaterial": {
             "objectType": "VerifiedVssCoefficientCommitmentMaterial",
-            "objectVersion": 1,
             "verifiedMaterialId": "terminal-policy-test-material",
         },
     });
@@ -149,7 +147,6 @@ fn terminal_transport_policy_refuses_raw_vss_chunk_sidecar() {
     let request = serde_json::json!({
         "transportedVssCoefficientCommitmentMaterial": {
             "objectType": "SetupTransportedVssCoefficientCommitmentMaterial",
-            "objectVersion": 1,
             "binaryFormat": "sealed-lattice-vss-coefficient-commitment-material-binary-v1",
             "chunkSizeBytes": 1_048_576,
             "chunkCount": 1,
@@ -166,7 +163,6 @@ fn terminal_transport_policy_refuses_raw_vss_chunk_sidecar() {
         },
         "verifiedVssCoefficientCommitmentMaterial": {
             "objectType": "VerifiedVssCoefficientCommitmentMaterial",
-            "objectVersion": 1,
             "verifiedMaterialId": "terminal-policy-test-material",
         },
     });
@@ -193,7 +189,6 @@ fn terminal_transport_policy_refuses_raw_key_switch_component_chunk_sidecar() {
     let request = serde_json::json!({
         "transportedVssCoefficientCommitmentMaterial": {
             "objectType": "SetupTransportedVssCoefficientCommitmentMaterial",
-            "objectVersion": 1,
             "binaryFormat": "sealed-lattice-vss-coefficient-commitment-material-binary-v1",
             "chunkSizeBytes": 1_048_576,
             "chunkCount": 1,
@@ -204,16 +199,13 @@ fn terminal_transport_policy_refuses_raw_key_switch_component_chunk_sidecar() {
         },
         "verifiedVssCoefficientCommitmentMaterial": {
             "objectType": "VerifiedVssCoefficientCommitmentMaterial",
-            "objectVersion": 1,
             "verifiedMaterialId": "terminal-policy-test-material",
         },
         "transportedEvaluationKeyShareComponentMaterial": {
             "objectType": "SetupTransportedEvaluationKeyShareComponentMaterialSet",
-            "objectVersion": 1,
             "componentMaterials": [
                 {
                     "objectType": "SetupTransportedEvaluationKeyShareComponentMaterial",
-                    "objectVersion": 1,
                     "proofFamily": "relinearization-key-share",
                     "keySwitchMaterialEncoding": EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
                     "keySwitchComponentMaterialRoot": valid_hash('8'),
@@ -256,7 +248,6 @@ fn terminal_transport_policy_reports_missing_stream_verified_vss_handle() {
     let request = serde_json::json!({
         "transportedVssCoefficientCommitmentMaterial": {
             "objectType": "SetupTransportedVssCoefficientCommitmentMaterial",
-            "objectVersion": 1,
             "binaryFormat": "sealed-lattice-vss-coefficient-commitment-material-binary-v1",
             "chunkSizeBytes": 1_048_576,
             "chunkCount": 1,

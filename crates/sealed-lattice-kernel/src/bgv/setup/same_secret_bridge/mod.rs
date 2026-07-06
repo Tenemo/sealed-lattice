@@ -148,7 +148,6 @@ pub(crate) fn verify_vss_same_secret_bridge_statement_set_request(
 
     let expected_statement_set_root = derive_canonical_object_hash(&json!({
         "objectType": "VssSameSecretBridgeStatementSet",
-        "objectVersion": 1,
         "proofFamily": SAME_SECRET_PROOF_FAMILY,
         "ceremonyId": ceremony_id,
         "manifestHash": manifest_hash,
@@ -410,7 +409,6 @@ pub(crate) fn verify_vss_same_secret_bridge_proof_material_set_request(
     }
     let proof_material_set_without_root = json!({
         "objectType": "VssSameSecretBridgeProofMaterialSet",
-        "objectVersion": 1,
         "proofFamily": SAME_SECRET_BRIDGE_PROOF_FAMILY,
         "ceremonyId": ceremony_id,
         "manifestHash": manifest_hash,

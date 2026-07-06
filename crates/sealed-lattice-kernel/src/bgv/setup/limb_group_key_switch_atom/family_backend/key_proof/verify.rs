@@ -201,6 +201,14 @@ pub(in super::super) fn verify_key_fri<const LIMB_COUNT: usize>(
         .iter()
         .map(|table_polynomial| evaluate_at_slots(table_polynomial))
         .collect();
+    // The public component material of each digit, interpolated and evaluated at
+    // the opened points, so the per-digit component pin can compare it against
+    // the opened committed column.
+    let component_b_at_slot: Vec<Vec<[u64; LIMB_COUNT]>> = public
+        .digits
+        .iter()
+        .map(|digit| evaluate_at_slots(&trace_domain.interpolate(&digit.recombined_component_b)))
+        .collect();
     // Linkage: the public opening forms evaluated at the opened points, plus
     // the constraint context for the support walk.
     let linkage_forms = match (linkage_statement, &linkage_weights) {
@@ -390,6 +398,10 @@ pub(in super::super) fn verify_key_fri<const LIMB_COUNT: usize>(
                 .iter()
                 .map(|values| values[slot])
                 .collect();
+            let component_b_at_point: Vec<[u64; LIMB_COUNT]> = component_b_at_slot
+                .iter()
+                .map(|values| values[slot])
+                .collect();
             let v_x = support_value_at(
                 parameters,
                 ring_degree,
@@ -397,6 +409,7 @@ pub(in super::super) fn verify_key_fri<const LIMB_COUNT: usize>(
                 base_values,
                 aux_values,
                 &table_values_at_point,
+                &component_b_at_point,
                 &mu,
                 &alpha,
                 linkage_context.as_ref(),

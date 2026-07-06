@@ -67,7 +67,6 @@ pub(in super::super) fn galois_key_share_batches_object(
                     let root = fixture_material.component_vector_root.clone();
                     let material_record = serde_json::json!({
                         "objectType": "GaloisKeyShareMaterial",
-                        "objectVersion": 1,
                         "proofFamily": "galois-key-share",
                         "trusteeIdentity": trustee_identity,
                         "trusteeRosterPosition": trustee_roster_position,
@@ -93,7 +92,6 @@ pub(in super::super) fn galois_key_share_batches_object(
                 .collect::<Vec<_>>();
             let mut batch = serde_json::json!({
                 "objectType": "GaloisKeyShareBatch",
-                "objectVersion": 1,
                 "proofFamily": "galois-key-share",
                 "ceremonyId": setup_context["ceremonyId"],
                 "manifestHash": setup_context["manifestHash"],

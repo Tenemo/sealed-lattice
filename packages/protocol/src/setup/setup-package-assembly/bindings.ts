@@ -268,7 +268,6 @@ const assertCommonRandomnessPublicDerivationsBindPackageInput = (
     );
     if (
         publicDerivations.objectType !== 'SetupPublicDerivations' ||
-        publicDerivations.objectVersion !== 1 ||
         publicDerivations.publicMatrixSeedHash !== publicMatrixSeedHash
     ) {
         throw new Error(

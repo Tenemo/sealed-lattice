@@ -40,7 +40,6 @@ pub(super) fn same_secret_anchor_proof_material_root(
 ) -> CanonicalResult<String> {
     derive_canonical_object_hash(&json!({
         "objectType": "SameSecretLinkageAnchorProofMaterialReference",
-        "objectVersion": 1,
         "proofFamily": SAME_SECRET_PROOF_FAMILY,
         "trusteeIdentity": string_at_path(proof_record, &["trusteeIdentity"])?,
         "trusteeRosterPosition": unsigned_at_path(proof_record, &["trusteeRosterPosition"])?,

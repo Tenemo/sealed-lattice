@@ -537,7 +537,6 @@ fn verify_vss_complaint_record(
         signature_envelope,
         &ProtocolSignatureExpectation {
             object_type: "VssShareComplaint",
-            object_version: 1,
             signer_role: "Trustee",
             // The recipient is the signer of both complaints and acceptances, since only the share recipient can attest whether the dealt share opened correctly.
             signer_identity: recipient_identity,
@@ -573,7 +572,6 @@ fn verify_vss_complaint_record(
 fn vss_complaint_payload_value(complaint_record: &Value) -> CanonicalResult<Value> {
     Ok(json!({
         "objectType": "VssShareComplaint",
-        "objectVersion": 1,
         "ceremonyId": value_string(complaint_record, "ceremonyId")?,
         "manifestHash": value_string(complaint_record, "manifestHash")?,
         "rosterHash": value_string(complaint_record, "rosterHash")?,

@@ -110,13 +110,6 @@ fn verify_transport_certificate_body(
     }
     transport_try!(expect_transport_u64(
         transport_certificate,
-        "objectVersion",
-        1,
-        "transportCertificateVersionMismatch",
-        "setupTransportCertificate.objectVersion must be 1",
-    ));
-    transport_try!(expect_transport_u64(
-        transport_certificate,
         "chunkSizeBytes",
         SETUP_TRANSPORT_CHUNK_SIZE_BYTES,
         "transportChunkSizeMismatch",
@@ -347,14 +340,6 @@ fn setup_transported_object_binding(
         SETUP_TRANSPORTED_OBJECT_TYPE,
         "transportedObjectTypeMismatch",
         "transported object objectType must be SetupTransportedObject",
-        &object_path,
-    ));
-    transport_try!(expect_transport_u64_at(
-        transported_object,
-        "objectVersion",
-        1,
-        "transportedObjectVersionMismatch",
-        "transported object objectVersion must be 1",
         &object_path,
     ));
     transport_try!(expect_transport_string_at(

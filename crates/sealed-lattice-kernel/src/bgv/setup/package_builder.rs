@@ -108,7 +108,6 @@ pub(super) fn build_passive_setup_package(input: &PassiveSetupInput) -> Canonica
 
     let mut package = json!({
         "objectType": "BgvPassiveSetupPackage",
-        "objectVersion": 1,
         "setupMode": "passive-full-roster-development",
         "setupInputs": setup_inputs,
         "parameterBindings": {

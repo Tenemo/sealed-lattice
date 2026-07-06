@@ -566,7 +566,6 @@ fn private_vss_share_succinct_statement_value(
 
     Ok(json!({
         "objectType": "PrivateVssShareSuccinctProofStatement",
-        "objectVersion": 1,
         "setupProofBinding": setup_proof_binding,
         "proofFamily": PRIVATE_VSS_SHARE_PROOF_FAMILY,
         "setupContext": input.setup_context,
@@ -600,7 +599,6 @@ pub(super) fn private_vss_share_succinct_proof_material_root(
 ) -> CanonicalResult<String> {
     derive_canonical_object_hash(&json!({
         "objectType": "PrivateVssShareSuccinctProofMaterial",
-        "objectVersion": 1,
         "proofFamily": PRIVATE_VSS_SHARE_PROOF_FAMILY,
         "proofBytesEncoding": "embedded-binary-proof-bytes-hex",
         "statementHash": statement_hash_hex,
@@ -615,7 +613,6 @@ fn private_vss_share_succinct_transported_proof_material_root(
 ) -> CanonicalResult<String> {
     derive_canonical_object_hash(&json!({
         "objectType": "PrivateVssShareTransportedSuccinctProofMaterial",
-        "objectVersion": 1,
         "proofFamily": PRIVATE_VSS_SHARE_PROOF_FAMILY,
         "proofBytesEncoding": SETUP_PROOF_MATERIAL_ENCODING,
         "statementHash": statement_hash_hex,
@@ -823,7 +820,6 @@ pub(super) fn private_vss_share_succinct_proof_record(
         private_vss_share_succinct_proof_material_root(&statement_hash_hex, &proof_bytes_hash)?;
     Ok(json!({
         "objectType": "PrivateVssShareProof",
-        "objectVersion": 1,
         "proofFamily": PRIVATE_VSS_SHARE_PROOF_FAMILY,
         "proofBytesEncoding": "embedded-binary-proof-bytes-hex",
         "proofStatementRoot": proof_statement_root,

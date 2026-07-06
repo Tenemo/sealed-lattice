@@ -92,29 +92,6 @@ pub(super) fn require_transport_non_empty_string_at(
     Ok(field_value.to_string())
 }
 
-pub(super) fn expect_transport_u64_at(
-    value: &Value,
-    field_name: &'static str,
-    expected_value: u64,
-    reason_code: &'static str,
-    message: &'static str,
-    object_path: &str,
-) -> Result<(), Refusal> {
-    match value.get(field_name).and_then(Value::as_u64) {
-        Some(observed_value) if observed_value == expected_value => Ok(()),
-        Some(_) => Err(Refusal::new(
-            reason_code,
-            message,
-            format!("{object_path}.{field_name}"),
-        )),
-        None => Err(Refusal::new(
-            reason_code,
-            format!("{object_path}.{field_name} is required"),
-            format!("{object_path}.{field_name}"),
-        )),
-    }
-}
-
 pub(super) fn require_transport_u64_at(
     value: &Value,
     field_name: &'static str,

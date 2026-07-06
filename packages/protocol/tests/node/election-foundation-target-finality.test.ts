@@ -67,7 +67,6 @@ describe('target finality', () => {
                 ceremonyId: duplicateWitnessRecord.ceremonyId,
                 inclusionProof: duplicateWitnessRecord.inclusionProof,
                 objectType: duplicateWitnessRecord.objectType,
-                objectVersion: duplicateWitnessRecord.objectVersion,
                 targetFinalityCheckpoint:
                     duplicateWitnessRecord.targetFinalityCheckpoint,
                 targetFinalityPolicyHash:
@@ -207,7 +206,6 @@ describe('target finality', () => {
             ceremonyId: record.ceremonyId,
             inclusionProof: record.inclusionProof,
             objectType: record.objectType,
-            objectVersion: record.objectVersion,
             targetFinalityCheckpoint: record.targetFinalityCheckpoint,
             targetFinalityPolicyHash: record.targetFinalityPolicyHash,
             targetFinalityScope: record.targetFinalityScope,

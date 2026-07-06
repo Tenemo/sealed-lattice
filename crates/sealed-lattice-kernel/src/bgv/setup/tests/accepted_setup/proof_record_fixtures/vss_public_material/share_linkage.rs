@@ -29,7 +29,6 @@ pub(in super::super::super) fn vss_share_linkage_statement_object(
         .collect::<Vec<_>>();
     let mut statement = serde_json::json!({
         "objectType": "VssShareLinkageStatement",
-        "objectVersion": 1,
         "ceremonyId": setup_context["ceremonyId"],
         "manifestHash": setup_context["manifestHash"],
         "rosterHash": setup_context["rosterHash"],
@@ -85,7 +84,6 @@ pub(super) fn vss_share_linkage_source_statement_record(
         .collect::<Vec<_>>();
     let mut source_statement = serde_json::json!({
         "objectType": "VssShareLinkageSourceStatement",
-        "objectVersion": 1,
         "ceremonyId": setup_context["ceremonyId"],
         "manifestHash": setup_context["manifestHash"],
         "rosterHash": setup_context["rosterHash"],
@@ -126,7 +124,6 @@ pub(in super::super::super) fn vss_share_linkage_proof_material_set_object(
         .collect::<Vec<_>>();
     let mut proof_material_set = serde_json::json!({
         "objectType": "VssShareLinkageProofMaterialSet",
-        "objectVersion": 1,
         "proofFamily": VSS_SHARE_LINKAGE_PROOF_FAMILY,
         "ceremonyId": statement["ceremonyId"],
         "manifestHash": statement["manifestHash"],
@@ -193,7 +190,6 @@ pub(super) fn vss_share_linkage_proof_record(
         .expect("VSS share-linkage proof bytes");
     let mut proof_record = serde_json::json!({
         "objectType": "VssShareLinkageProofRecord",
-        "objectVersion": 1,
         "proofFamily": VSS_SHARE_LINKAGE_PROOF_FAMILY,
         "linkageItems": linkage_items,
         "vssShareLinkage": vss_share_linkage,

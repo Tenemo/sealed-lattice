@@ -447,7 +447,6 @@ describe('integrated election foundation transcript', () => {
                         ceremonyId: duplicateWitnessRecord.ceremonyId,
                         inclusionProof: duplicateWitnessRecord.inclusionProof,
                         objectType: duplicateWitnessRecord.objectType,
-                        objectVersion: duplicateWitnessRecord.objectVersion,
                         targetFinalityCheckpoint:
                             duplicateWitnessRecord.targetFinalityCheckpoint,
                         targetFinalityPolicyHash:

@@ -24,7 +24,6 @@ pub(in crate::bgv::setup) fn threshold_verification_material(
         .collect::<Vec<_>>();
     let verification_key_set = json!({
         "objectType": "ThresholdShareVerificationKeySet",
-        "objectVersion": 1,
         "targetDecryptionParametersHash": target_decryption_parameters_hash,
         "targetDecryptionParametersBindingHash": target_decryption_parameters_binding_hash,
         "ceremonyId": input.ceremony_id,

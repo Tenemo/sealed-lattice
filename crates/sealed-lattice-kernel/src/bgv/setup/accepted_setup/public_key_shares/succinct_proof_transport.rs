@@ -85,7 +85,6 @@ pub(in crate::bgv::setup) fn public_key_share_succinct_proof_material_root(
 ) -> CanonicalResult<String> {
     derive_canonical_object_hash(&json!({
         "objectType": "PublicKeyShareSuccinctProofMaterialReference",
-        "objectVersion": 1,
         "proofFamily": "public-key-share",
         "trusteeIdentity": value_string(proof_record, "trusteeIdentity")?,
         "trusteeRosterPosition": value_u64(proof_record, "trusteeRosterPosition")?,

@@ -35,7 +35,6 @@ pub(super) fn participant_setup_material(
     );
     let public_key_share_record = json!({
         "objectType": "BgvPublicKeyShare",
-        "objectVersion": 1,
         "ceremonyId": input.ceremony_id,
         "manifestHash": input.manifest_hash,
         "rosterHash": input.roster_hash,
@@ -61,7 +60,6 @@ pub(super) fn participant_setup_material(
     let public_key_share_root = derive_canonical_object_hash(&public_key_share_record)?;
     let trustee_threshold_verification_key = json!({
         "objectType": "TrusteeThresholdVerificationKey",
-        "objectVersion": 1,
         "targetDecryptionParametersHash": target_decryption_parameters_hash,
         "targetDecryptionParametersBindingHash": target_decryption_parameters_binding_hash,
         "ceremonyId": input.ceremony_id,
@@ -76,7 +74,6 @@ pub(super) fn participant_setup_material(
         derive_canonical_object_hash(&trustee_threshold_verification_key)?;
     let participant_record_without_hash = json!({
         "objectType": "ParticipantBgvSetupRecord",
-        "objectVersion": 1,
         "ceremonyId": input.ceremony_id,
         "manifestHash": input.manifest_hash,
         "rosterHash": input.roster_hash,

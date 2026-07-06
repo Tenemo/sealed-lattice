@@ -20,7 +20,6 @@ pub(in super::super) fn setup_parameters_hash_for_roster(
 pub(super) fn setup_parameters_value(roster: &AcceptedRosterParameters) -> CanonicalResult<Value> {
     Ok(json!({
         "objectType": "SetupParameters",
-        "objectVersion": 1,
         "adversaryModel": "active-static",
         "livenessModel": "secure-with-abort",
         "sharingModel": "recipient-verified-vss",
@@ -60,7 +59,6 @@ pub(super) fn bounded_domain_evaluator_value_for_roster(
         })?;
     Ok(json!({
         "objectType": "BoundedDomainEvaluatorParameters",
-        "objectVersion": 1,
         "scoreDifferenceBound": score_difference_bound,
         "directComparisonOutputLevel": crate::bgv::evaluator::top_k::DIRECT_COMPARISON_OUTPUT_LEVEL,
         "tiePolicy": crate::bgv::evaluator::top_k::TIE_POLICY,
@@ -72,7 +70,6 @@ pub(super) fn setup_transport_parameters_value_for_roster(
 ) -> CanonicalResult<Value> {
     Ok(json!({
         "objectType": "SetupTransport",
-        "objectVersion": 1,
         "largeObjectEncoding": "binary",
         "chunking": "required",
         "chunkSizeBytes": SETUP_TRANSPORT_CHUNK_SIZE_BYTES,
@@ -107,7 +104,6 @@ pub(super) fn evaluator_key_schedule_value_for_roster(
 
     Ok(json!({
         "objectType": "EvaluatorKeySchedule",
-        "objectVersion": 1,
         "evaluatorScheme": EVALUATOR_REPLAY_SCHEME_LABEL,
         "packingScheme": EVALUATOR_PACKING_SCHEME_LABEL,
         "participantCount": roster.participant_count,
@@ -175,7 +171,6 @@ pub(super) fn expected_required_galois_set_hash(
 pub(super) fn required_galois_set_value(required_galois_key_schedule: Value) -> Value {
     json!({
         "objectType": REQUIRED_GALOIS_SET_OBJECT_TYPE,
-        "objectVersion": 1,
         "evaluatorScheme": EVALUATOR_REPLAY_SCHEME_LABEL,
         "packingScheme": EVALUATOR_PACKING_SCHEME_LABEL,
         "rnsLimbCount": DATA_PRIMES.len(),
@@ -186,7 +181,6 @@ pub(super) fn required_galois_set_value(required_galois_key_schedule: Value) -> 
 pub(super) fn setup_proof_parameters_value() -> CanonicalResult<Value> {
     Ok(json!({
         "objectType": "SetupProof",
-        "objectVersion": 1,
         "proofBackendBoundary": "sealed-lattice-rust-wasm-fixed-relations-only",
         "arbitraryRelationApi": "not-exposed",
         "relationModel": {

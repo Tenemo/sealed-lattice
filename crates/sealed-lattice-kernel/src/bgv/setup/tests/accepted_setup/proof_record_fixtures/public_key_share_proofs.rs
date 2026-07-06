@@ -65,7 +65,6 @@ pub(in super::super) fn collective_public_key_object(
         .collect::<Vec<_>>();
     let mut collective_public_key = serde_json::json!({
         "objectType": "CollectivePublicKey",
-        "objectVersion": 1,
         "proofFamily": "public-key-share",
         "materialEncoding": "embedded-full-collective-public-key-coefficients",
         "ceremonyId": setup_context["ceremonyId"],
@@ -188,7 +187,6 @@ pub(in super::super) fn public_key_share_material_object(
             .collect::<Vec<_>>();
         let mut material_record = serde_json::json!({
             "objectType": "PublicKeyShareMaterial",
-            "objectVersion": 1,
             "proofFamily": "public-key-share",
             "materialEncoding": "embedded-full-public-key-share-coefficients",
             "ceremonyId": setup_context["ceremonyId"],
@@ -218,7 +216,6 @@ pub(in super::super) fn public_key_share_material_object(
     }
     let mut material_set = serde_json::json!({
         "objectType": "PublicKeyShareMaterialSet",
-        "objectVersion": 1,
         "proofFamily": "public-key-share",
         "materialEncoding": "embedded-full-public-key-share-coefficients",
         "ceremonyId": setup_context["ceremonyId"],
@@ -573,7 +570,6 @@ pub(in super::super) fn public_key_share_succinct_proofs_object(
         let proof_bytes_hash = public_key_share_succinct_proof_bytes_hash(&proof_bytes);
         let mut proof_record = serde_json::json!({
             "objectType": "PublicKeyShareSuccinctProof",
-            "objectVersion": 1,
             "proofFamily": PUBLIC_KEY_SHARE_PROOF_FAMILY,
             "ceremonyId": setup_context["ceremonyId"],
             "manifestHash": setup_context["manifestHash"],
@@ -611,7 +607,6 @@ pub(in super::super) fn public_key_share_succinct_proofs_object(
     }
     let mut proof_set = serde_json::json!({
         "objectType": "PublicKeyShareSuccinctProofSet",
-        "objectVersion": 1,
         "proofFamily": PUBLIC_KEY_SHARE_PROOF_FAMILY,
         "ceremonyId": setup_context["ceremonyId"],
         "manifestHash": setup_context["manifestHash"],

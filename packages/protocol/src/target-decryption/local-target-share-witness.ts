@@ -124,20 +124,6 @@ const exactStringField = (
     }
 };
 
-const exactVersionField = (
-    value: JsonRecord,
-    fieldName: string,
-    expectedValue: number,
-    objectPath: string,
-): void => {
-    const fieldValue = value[fieldName];
-    if (fieldValue !== expectedValue) {
-        throw new Error(
-            `${objectPath}.${fieldName} must be ${String(expectedValue)}.`,
-        );
-    }
-};
-
 const compareProtocolHashField = (
     value: JsonRecord,
     fieldName: string,
@@ -336,11 +322,6 @@ const assertRestoredAggregateOpeningBinding = (input: {
         'LocalTrusteeVssPublicAggregateOpeningWitness',
         'restoredLocalTargetShareWitness.aggregateOpening',
     );
-    exactVersionField(
-        aggregateOpening,
-        1,
-        'restoredLocalTargetShareWitness.aggregateOpening',
-    );
 
     const commonRandomness = jsonRecord(
         input.setupPackage.commonRandomness,
@@ -424,7 +405,6 @@ const assertRestoredAggregateOpeningBinding = (input: {
             'LocalTrusteeVssPublicAggregateOpeningCredential',
             objectPath,
         );
-        exactVersionField(credential, 'objectVersion', 1, objectPath);
         const recipientIdentity = nonEmptyStringField(
             credential,
             'recipientIdentity',

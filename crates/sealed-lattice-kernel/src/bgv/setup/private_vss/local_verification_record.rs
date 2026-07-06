@@ -12,7 +12,6 @@ pub(super) fn local_verification_record(
     let roster = super::accepted_setup::accepted_roster_from_setup_context(setup_context);
     Ok(json!({
         "objectType": "PrivateVssLocalVerification",
-        "objectVersion": 1,
         "ceremonyId": string_field(
             setup_context,
             "ceremonyId",

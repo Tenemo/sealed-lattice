@@ -36,7 +36,6 @@ pub(super) fn expected_same_secret_bound_proof_families_value() -> Value {
 fn same_secret_proof_family_binding_value() -> Value {
     json!({
         "objectType": SAME_SECRET_PROOF_FAMILY_BINDING_OBJECT_TYPE,
-        "objectVersion": 1,
         "proofFamily": "same-secret-linkage-anchor",
         "sameSecretRelation": "vss-constant-commitments-open-to-one-short-secret-across-q-share-limbs",
         "boundSecretDependentProofFamilies": expected_same_secret_bound_proof_families_value(),

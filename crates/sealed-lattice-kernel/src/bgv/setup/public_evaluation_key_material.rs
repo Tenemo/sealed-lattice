@@ -188,7 +188,6 @@ pub(crate) fn generate_passive_setup_public_evaluation_keys_from_request(
     }
     let record = json!({
         "objectType": "PreparedBgvPublicEvaluationKeyMaterial",
-        "objectVersion": 1,
         "setupPackageHash": string_at_path(setup_package, &["setupPackageHash"])?,
         "collectivePublicKeyRoot": string_at_path(setup_package, &["collectivePublicKey", "collectivePublicKeyRoot"])?,
         "bgvPublicKeyRoot": string_at_path(setup_package, &["collectivePublicKey", "bgvPublicKeyRoot"])?,

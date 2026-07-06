@@ -172,7 +172,6 @@ pub(super) fn setup_proof_material_chunk_manifest_root(
 ) -> CanonicalResult<String> {
     derive_canonical_object_hash(&json!({
         "objectType": SETUP_PROOF_MATERIAL_CHUNK_MANIFEST_OBJECT_TYPE,
-        "objectVersion": 1,
         "proofFamily": proof_family,
         "chunkSizeBytes": chunk_size_bytes,
         "chunkCount": chunk_count,

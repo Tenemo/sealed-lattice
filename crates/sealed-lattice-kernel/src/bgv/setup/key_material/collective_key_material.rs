@@ -42,7 +42,6 @@ pub(in crate::bgv::setup) fn collective_public_key(
         collective_public_key_coefficient_root(&coefficient_material)?;
     let record_without_roots = json!({
         "objectType": "BgvCollectivePublicKey",
-        "objectVersion": 1,
         "ceremonyId": input.ceremony_id,
         "manifestHash": input.manifest_hash,
         "rosterHash": input.roster_hash,
@@ -226,7 +225,6 @@ pub(in crate::bgv::setup) fn collective_public_key_coefficient_material(
 
     Ok(json!({
         "objectType": "BgvCollectivePublicKeyCoefficientMaterial",
-        "objectVersion": 1,
         "level": DATA_PRIMES.len() - 1,
         "coefficientCount": POLYNOMIAL_DEGREE,
         "componentModel": DECRYPTABLE_PUBLIC_KEY_COMPONENT_MODEL,

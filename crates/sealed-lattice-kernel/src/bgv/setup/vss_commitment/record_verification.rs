@@ -60,7 +60,6 @@ pub(super) fn verify_vss_public_source_coefficient_record(
 
     let expected_source_root = derive_canonical_object_hash(&json!({
         "objectType": "VssPublicSourceCoefficientCommitments",
-        "objectVersion": 1,
         "sourceTrusteeIdentity": source_trustee_identity,
         "sourceTrusteeRosterPosition": input.expected_roster_position,
         "publicMatrixSeedHash": input.public_matrix_seed_hash,
@@ -77,7 +76,6 @@ pub(super) fn verify_vss_public_source_coefficient_record(
 
     Ok(json!({
         "objectType": "VssPublicSourceCoefficientCommitments",
-        "objectVersion": 1,
         "sourceTrusteeIdentity": source_trustee_identity,
         "sourceTrusteeRosterPosition": input.expected_roster_position,
         "publicMatrixSeedHash": input.public_matrix_seed_hash,
@@ -291,7 +289,6 @@ pub(super) fn verify_vss_public_coefficient_record(
 
     Ok(json!({
         "objectType": "VssPublicCoefficientCommitment",
-        "objectVersion": 1,
         "sourceTrusteeIdentity": input.source_trustee_identity,
         "sourceTrusteeRosterPosition": input.source_trustee_roster_position,
         "publicMatrixSeedHash": input.public_matrix_seed_hash,
@@ -361,7 +358,6 @@ pub(super) fn verify_vss_public_source_recipient_share_record(
 
     let expected_source_root = derive_canonical_object_hash(&json!({
         "objectType": "VssPublicSourceRecipientShareCommitments",
-        "objectVersion": 1,
         "sourceTrusteeIdentity": source_trustee_identity,
         "sourceTrusteeRosterPosition": input.expected_source_roster_position,
         "recipientShareCommitments": verified_recipient_share_commitments,
@@ -377,7 +373,6 @@ pub(super) fn verify_vss_public_source_recipient_share_record(
 
     Ok(json!({
         "objectType": "VssPublicSourceRecipientShareCommitments",
-        "objectVersion": 1,
         "sourceTrusteeIdentity": source_trustee_identity,
         "sourceTrusteeRosterPosition": input.expected_source_roster_position,
         "recipientShareCommitments": verified_recipient_share_commitments,
@@ -457,7 +452,6 @@ pub(super) fn verify_vss_public_recipient_share_record(
 
     Ok(json!({
         "objectType": "VssPublicRecipientShareCommitment",
-        "objectVersion": 1,
         "sourceTrusteeIdentity": input.source_trustee_identity,
         "sourceTrusteeRosterPosition": input.source_trustee_roster_position,
         "recipientIdentity": recipient_identity,
@@ -588,7 +582,6 @@ pub(super) fn verify_vss_public_aggregate_threshold_record(
 
     Ok(json!({
         "objectType": "VssPublicAggregateThresholdCommitment",
-        "objectVersion": 1,
         "recipientIdentity": recipient_identity,
         "recipientRosterPosition": input.expected_recipient_roster_position,
         "recipientTrusteePoint": input.expected_recipient_roster_position + 1,

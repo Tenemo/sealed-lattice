@@ -68,7 +68,6 @@ pub(in super::super::super) fn move_vss_share_linkage_proof_bytes_to_transport(
 
     serde_json::json!({
         "objectType": VSS_SHARE_LINKAGE_TRANSPORT_SET_OBJECT_TYPE,
-        "objectVersion": 1,
         "proofFamily": VSS_SHARE_LINKAGE_PROOF_FAMILY,
         "proofMaterials": transported_proof_materials,
     })
@@ -134,7 +133,6 @@ pub(in super::super::super) fn move_same_secret_bridge_proof_bytes_to_transport(
 
     serde_json::json!({
         "objectType": SAME_SECRET_BRIDGE_TRANSPORT_SET_OBJECT_TYPE,
-        "objectVersion": 1,
         "proofFamily": SAME_SECRET_BRIDGE_PROOF_FAMILY,
         "proofMaterials": transported_proof_materials,
     })
@@ -182,7 +180,6 @@ pub(super) fn transport_proof_material_root(
 ) -> String {
     derive_canonical_object_hash(&serde_json::json!({
         "objectType": "SetupProofMaterialReference",
-        "objectVersion": 1,
         "proofFamily": proof_family,
         "proofBytesHash": proof_bytes_hash,
         "chunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
@@ -250,7 +247,6 @@ pub(super) fn transport_material_object(
 
     serde_json::json!({
         "objectType": object_type,
-        "objectVersion": 1,
         "proofFamily": proof_family,
         "proofMaterialRoot": proof_material_root,
         "chunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,

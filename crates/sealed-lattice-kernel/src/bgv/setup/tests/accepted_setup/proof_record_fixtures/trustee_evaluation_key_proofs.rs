@@ -99,7 +99,6 @@ pub(in super::super) fn trustee_evaluation_key_proofs_object(
             let proof_bytes_hash = trustee_evaluation_key_proof_bytes_hash(&proof_bytes);
             let mut record = serde_json::json!({
                 "objectType": "TrusteeEvaluationKeyProof",
-                "objectVersion": 1,
                 "proofFamily": TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
                 "ceremonyId": setup_context["ceremonyId"],
                 "manifestHash": setup_context["manifestHash"],
@@ -156,7 +155,6 @@ pub(in super::super) fn trustee_evaluation_key_proofs_object(
         .collect::<Vec<_>>();
     let mut proof_set = serde_json::json!({
         "objectType": "TrusteeEvaluationKeyProofSet",
-        "objectVersion": 1,
         "proofFamily": TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
         "ceremonyId": setup_context["ceremonyId"],
         "manifestHash": setup_context["manifestHash"],

@@ -330,7 +330,6 @@ fn opening_request() -> serde_json::Value {
         "commitmentRole": "aggregate-threshold-share",
         "commitmentContext": {
             "objectType": "VssPublicAggregateThresholdShareCommitmentContext",
-            "objectVersion": 1,
             "ceremonyId": "vss-test",
             "manifestHash": "1".repeat(128),
             "rosterHash": "2".repeat(128),
@@ -383,7 +382,6 @@ fn vss_public_commitment_body_is_constant_size_across_ring_degrees() -> Canonica
             "commitmentRole": "aggregate-threshold-share",
             "commitmentContext": {
                 "objectType": "VssPublicAggregateThresholdShareCommitmentContext",
-                "objectVersion": 1,
                 "ceremonyId": "vss-measurement",
                 "manifestHash": "1".repeat(128),
                 "rosterHash": "2".repeat(128),
@@ -431,7 +429,6 @@ pub(in crate::bgv::setup) fn coefficient_commitment_set() -> CanonicalResult<ser
     }
     let set_without_root = json!({
         "objectType": "VssPublicCoefficientCommitmentSet",
-        "objectVersion": 1,
         "publicMatrixSeedHash": "7".repeat(128),
         "participantCount": 2,
         "rnsLimbCount": 2,
@@ -468,7 +465,6 @@ fn source_coefficient_record(
             )?;
             coefficient_commitments.push(json!({
                 "objectType": "VssPublicCoefficientCommitment",
-                "objectVersion": 1,
                 "sourceTrusteeIdentity": format!("source-{source_trustee_roster_position}"),
                 "sourceTrusteeRosterPosition": source_trustee_roster_position,
                 "publicMatrixSeedHash": "7".repeat(128),
@@ -483,7 +479,6 @@ fn source_coefficient_record(
     }
     let source_without_root = json!({
         "objectType": "VssPublicSourceCoefficientCommitments",
-        "objectVersion": 1,
         "sourceTrusteeIdentity": format!("source-{source_trustee_roster_position}"),
         "sourceTrusteeRosterPosition": source_trustee_roster_position,
         "publicMatrixSeedHash": "7".repeat(128),
@@ -571,7 +566,6 @@ fn test_commitment(
     let seed = test_seed(seed_parts);
     let commitment_context = json!({
         "objectType": "VssPublicTestCommitmentContext",
-        "objectVersion": 1,
         "commitmentRole": commitment_role,
         "seedHash": test_hash_from_seed(seed, 9),
     });
@@ -607,7 +601,6 @@ pub(in crate::bgv::setup) fn recipient_share_commitment_set() -> CanonicalResult
     }
     let set_without_root = json!({
         "objectType": "VssPublicRecipientShareCommitmentSet",
-        "objectVersion": 1,
         "publicMatrixSeedHash": test_public_matrix_seed_hash(),
         "participantCount": test_participant_count(),
         "rnsLimbCount": test_rns_limb_count(),
@@ -638,7 +631,6 @@ fn source_recipient_share_record(
     }
     let source_without_root = json!({
         "objectType": "VssPublicSourceRecipientShareCommitments",
-        "objectVersion": 1,
         "sourceTrusteeIdentity": format!("source-{source_trustee_roster_position}"),
         "sourceTrusteeRosterPosition": source_trustee_roster_position,
         "recipientShareCommitments": recipient_share_commitments,
@@ -671,7 +663,6 @@ fn recipient_share_commitment_record(
     )?;
     Ok(json!({
         "objectType": "VssPublicRecipientShareCommitment",
-        "objectVersion": 1,
         "sourceTrusteeIdentity": format!("source-{source_trustee_roster_position}"),
         "sourceTrusteeRosterPosition": source_trustee_roster_position,
         "recipientIdentity": format!("recipient-{recipient_roster_position}"),
@@ -705,7 +696,6 @@ pub(in crate::bgv::setup) fn aggregate_threshold_commitment_set_from_recipient_s
     }
     let set_without_root = json!({
         "objectType": "VssPublicAggregateThresholdCommitmentSet",
-        "objectVersion": 1,
         "publicMatrixSeedHash": test_public_matrix_seed_hash(),
         "participantCount": test_participant_count(),
         "rnsLimbCount": test_rns_limb_count(),
@@ -750,7 +740,6 @@ fn aggregate_threshold_commitment_record(
 
     Ok(json!({
         "objectType": "VssPublicAggregateThresholdCommitment",
-        "objectVersion": 1,
         "recipientIdentity": format!("recipient-{recipient_roster_position}"),
         "recipientRosterPosition": recipient_roster_position,
         "recipientTrusteePoint": recipient_roster_position + 1,
@@ -886,7 +875,6 @@ fn aggregate_commitment_body(
     let seed = test_seed(&[recipient_roster_position, rns_limb_index, 4]);
     Ok(json!({
         "objectType": "VssPublicCommitment",
-        "objectVersion": 1,
         "commitmentRole": "aggregate-threshold-share",
         "commitmentContextHash": test_hash_from_seed(seed, 0),
         "publicMatrixSeedHash": test_public_matrix_seed_hash(),
@@ -934,7 +922,6 @@ pub(in crate::bgv::setup) fn share_linkage_statement_from_evidence(
                     .collect::<Vec<_>>();
                 let source_statement_without_root = json!({
                     "objectType": "VssShareLinkageSourceStatement",
-                    "objectVersion": 1,
                     "ceremonyId": "vss-test",
                     "manifestHash": "1".repeat(128),
                     "rosterHash": "2".repeat(128),
@@ -966,7 +953,6 @@ pub(in crate::bgv::setup) fn share_linkage_statement_from_evidence(
             .collect::<Vec<_>>();
     let statement_without_root = json!({
         "objectType": "VssShareLinkageStatement",
-        "objectVersion": 1,
         "ceremonyId": "vss-test",
         "manifestHash": "1".repeat(128),
         "rosterHash": "2".repeat(128),

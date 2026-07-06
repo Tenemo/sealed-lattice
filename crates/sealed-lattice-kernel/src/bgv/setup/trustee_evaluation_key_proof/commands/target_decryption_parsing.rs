@@ -192,7 +192,6 @@ pub(crate) fn describe_target_decryption_share_proof_layout_from_request(
 
     Ok(json!({
         "objectType": "BgvTargetDecryptionShareProofLayoutDescription",
-        "objectVersion": 1,
         "ringDegree": statement.ring_degree,
         "proofLimbIndices": proof_limb_indices,
         "aggregateMessageCoefficientBound": target_statement.aggregate_message_coefficient_bound,
@@ -369,7 +368,6 @@ pub(super) fn validated_target_decryption_smudging_commitment_set_root(
 ) -> CanonicalResult<String> {
     if read_string(smudging_commitment_set, "objectType")?
         != "TargetDecryptionSmudgingCommitmentSet"
-        || read_u64(smudging_commitment_set, "objectVersion")? != 1
     {
         return Err(invalid_succinct_setup_proof(
             "smudgingCommitmentSet must be TargetDecryptionSmudgingCommitmentSet version 1",
@@ -414,7 +412,6 @@ pub(super) fn target_decryption_smudging_commitments_from_set(
 
     for (record_index, record) in records.iter().enumerate() {
         if read_string(record, "objectType")? != "TargetDecryptionSmudgingCommitment"
-            || read_u64(record, "objectVersion")? != 1
         {
             return Err(invalid_succinct_setup_proof(
                 "smudging commitment records must be TargetDecryptionSmudgingCommitment version 1",

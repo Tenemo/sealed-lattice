@@ -124,7 +124,6 @@ fn target_decryption_share_proof_statement_value(
             }
             Ok(json!({
                 "objectType": "TargetDecryptionAggregateOpeningCredentialBinding",
-                "objectVersion": 1,
                 "rnsLimbIndex": binding.limb_index,
                 "rnsPrime": binding.rns_prime,
                 "aggregateCommitmentRoot": binding.aggregate_commitment_root,
@@ -147,7 +146,6 @@ fn target_decryption_share_proof_statement_value(
 
     Ok(json!({
         "objectType": "BgvTargetDecryptionShareProofStatement",
-        "objectVersion": 1,
         "setupPackageHash": setup_binding.setup_package_hash,
         "ceremonyId": setup_binding.ceremony_id,
         "setupEpoch": local_witness.setup_epoch,
@@ -184,13 +182,11 @@ fn target_decryption_share_proof_statement_value(
         "smudgingInputReportHash": smudging_input_report_hash,
         "smudgingCommitmentBinding": {
             "objectType": "TargetDecryptionSmudgingCommitmentBinding",
-            "objectVersion": 1,
             "smudgingCommitmentSetRoot": smudging_commitment_set.root,
             "smudgingCommitmentSet": smudging_commitment_set.value,
         },
         "aggregateOpeningBinding": {
             "objectType": "TargetDecryptionAggregateOpeningBinding",
-            "objectVersion": 1,
             "publicMatrixSeedHash": local_witness.opening.public_matrix_seed_hash,
             "shareLinkageStatementRoot": local_witness.opening.share_linkage_statement_root,
             "aggregateThresholdCommitmentRoot": local_witness.opening.aggregate_threshold_commitment_root,
@@ -205,7 +201,6 @@ fn aggregate_opening_credential_binding_root(
 ) -> CanonicalResult<String> {
     derive_canonical_object_hash(&json!({
         "objectType": "TargetDecryptionAggregateOpeningCredentialBindingSet",
-        "objectVersion": 1,
         "activeCredentialBindings": credential_bindings,
     }))
 }
@@ -220,7 +215,6 @@ pub(super) fn validate_target_decryption_share_proof_statement_shape(
     target_decryption_share: &Value,
 ) -> CanonicalResult<()> {
     if string_at_path(proof_statement, &["objectType"])? != "BgvTargetDecryptionShareProofStatement"
-        || unsigned_at_path(proof_statement, &["objectVersion"])? != 1
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -412,7 +406,6 @@ fn validate_smudging_commitment_statement_binding(
     target_share_profile: &TargetShareProfile,
 ) -> CanonicalResult<()> {
     if string_at_path(binding, &["objectType"])? != "TargetDecryptionSmudgingCommitmentBinding"
-        || unsigned_at_path(binding, &["objectVersion"])? != 1
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -444,7 +437,6 @@ fn validate_target_decryption_smudging_commitment_set(
     target_share_profile: &TargetShareProfile,
 ) -> CanonicalResult<()> {
     if string_at_path(commitment_set, &["objectType"])? != "TargetDecryptionSmudgingCommitmentSet"
-        || unsigned_at_path(commitment_set, &["objectVersion"])? != 1
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -598,7 +590,6 @@ fn validate_smudging_commitment_record(
     expected_polynomial_degree: usize,
 ) -> CanonicalResult<()> {
     if string_at_path(record, &["objectType"])? != "TargetDecryptionSmudgingCommitment"
-        || unsigned_at_path(record, &["objectVersion"])? != 1
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -652,7 +643,6 @@ fn validate_smudging_commitment_shape(
     expected_rns_prime: u64,
 ) -> CanonicalResult<()> {
     if string_at_path(commitment, &["objectType"])? != "VssPublicCommitment"
-        || unsigned_at_path(commitment, &["objectVersion"])? != 1
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -751,7 +741,6 @@ fn validate_aggregate_opening_statement_binding(
     active_limb_count: usize,
 ) -> CanonicalResult<()> {
     if string_at_path(binding, &["objectType"])? != "TargetDecryptionAggregateOpeningBinding"
-        || unsigned_at_path(binding, &["objectVersion"])? != 1
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -810,7 +799,6 @@ fn validate_aggregate_opening_statement_binding(
     for (limb_index, credential_binding) in credential_bindings.iter().enumerate() {
         if string_at_path(credential_binding, &["objectType"])?
             != "TargetDecryptionAggregateOpeningCredentialBinding"
-            || unsigned_at_path(credential_binding, &["objectVersion"])? != 1
         {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,

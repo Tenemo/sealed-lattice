@@ -233,7 +233,6 @@ fn aggregate_commitment_context(
 ) -> Value {
     json!({
         "objectType": "VssPublicAggregateThresholdShareCommitmentContext",
-        "objectVersion": 1,
         "ceremonyId": setup_binding.ceremony_id.as_str(),
         "manifestHash": setup_binding.election_manifest_hash.as_str(),
         "rosterHash": setup_binding.roster_hash.as_str(),

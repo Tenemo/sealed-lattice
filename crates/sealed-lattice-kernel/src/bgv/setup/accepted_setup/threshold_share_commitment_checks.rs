@@ -84,7 +84,6 @@ fn verify_threshold_share_commitment_binding(
     };
     let expected_binding_without_root = json!({
         "objectType": THRESHOLD_SHARE_COMMITMENT_BINDING_OBJECT_TYPE,
-        "objectVersion": 1,
         "publicMatrixSeedHash": verified_material.public_matrix_seed_hash.as_str(),
         "participantCount": verified_material.participant_count,
         "thresholdDegree": verified_material.threshold_degree,

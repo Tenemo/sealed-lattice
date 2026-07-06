@@ -470,7 +470,6 @@ fn trustee_secret_commitment_payload(
 ) -> CanonicalResult<Value> {
     Ok(json!({
         "objectType": TRUSTEE_SECRET_COMMITMENT_OBJECT_TYPE,
-        "objectVersion": 1,
         "ceremonyId": value_string(setup_context, "ceremonyId")?,
         "manifestHash": value_string(setup_context, "manifestHash")?,
         "rosterHash": value_string(setup_context, "rosterHash")?,

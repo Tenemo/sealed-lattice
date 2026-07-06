@@ -31,7 +31,6 @@ pub(in super::super) fn target_decryption_smudging_witness_value(
 ) -> CanonicalResult<Value> {
     Ok(json!({
         "objectType": "LocalTrusteeTargetDecryptionSmudgingWitness",
-        "objectVersion": 1,
         "setupPackageHash": setup_binding.setup_package_hash,
         "targetAcceptedRecordHash": target_accepted.target_accepted_record_hash,
         "targetContextHash": target_accepted.target_context_hash,
@@ -441,7 +440,6 @@ pub(in super::super) fn target_decryption_smudging_commitment_set_from_polynomia
 
     let mut value = json!({
         "objectType": "TargetDecryptionSmudgingCommitmentSet",
-        "objectVersion": 1,
         "setupPackageHash": setup_binding.setup_package_hash,
         "targetAcceptedRecordHash": target_accepted.target_accepted_record_hash,
         "targetContextHash": target_accepted.target_context_hash,
@@ -588,7 +586,6 @@ fn target_decryption_smudging_commitment_record(
 
     Ok(json!({
         "objectType": "TargetDecryptionSmudgingCommitment",
-        "objectVersion": 1,
         "role": opening.role.as_str(),
         "rnsLimbIndex": opening.rns_limb_index,
         "rnsPrime": opening.rns_prime,
@@ -670,7 +667,6 @@ fn target_decryption_smudging_commitment_context(
 ) -> Value {
     json!({
         "objectType": "TargetDecryptionSmudgingPolynomialCoefficientCommitmentContext",
-        "objectVersion": 1,
         "setupPackageHash": setup_binding.setup_package_hash,
         "targetAcceptedRecordHash": target_accepted.target_accepted_record_hash,
         "targetContextHash": target_accepted.target_context_hash,
@@ -697,7 +693,6 @@ pub(in super::super) fn target_decryption_smudging_input_report_value(
 ) -> Value {
     json!({
         "objectType": "TargetDecryptionSmudgingInputReport",
-        "objectVersion": 1,
         "setupPackageHash": setup_binding.setup_package_hash,
         "targetAcceptedRecordHash": target_accepted.target_accepted_record_hash,
         "targetContextHash": target_accepted.target_context_hash,

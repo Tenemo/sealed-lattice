@@ -51,7 +51,6 @@ pub(super) struct CarryAwareVssCommitmentOpeningInput<'a> {
 pub(super) fn carry_aware_vss_share_relation_value() -> Value {
     json!({
         "objectType": "CarryAwareVssShareRelation",
-        "objectVersion": 1,
         "trusteePointRule": "roster-position-plus-one",
         "coefficientOrder": "constant-first",
         "relation": "sum(alpha_j^k * F_i,l,k) - sigma_i_to_j,l = q_l * z_i_to_j,l",

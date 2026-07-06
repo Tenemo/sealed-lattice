@@ -51,7 +51,6 @@ fn collective_setup_roster_hash_fixture(participant_count: u64) -> String {
             .expect("setup trustee signing public-key hash");
             serde_json::json!({
                 "objectType": "CollectiveBgvSetupRosterEntry",
-                "objectVersion": 1,
                 "rosterPosition": roster_position,
                 "trusteeIdentity": trustee_identity,
                 "signingPublicKeyHash": signing_public_key_hash,
@@ -190,7 +189,6 @@ fn build_collective_setup_package_fixture_parts(
                             .expect("signature key fixture");
                     let mut phase_payload = serde_json::json!({
                         "objectType": "SetupPhaseParticipantObject",
-                        "objectVersion": 1,
                         "phaseId": phase_identifier,
                         "phaseNumber": phase_number,
                         "ceremonyId": ceremony_id,
@@ -236,7 +234,6 @@ fn build_collective_setup_package_fixture_parts(
                         &signature_seed_label,
                         serde_json::json!({
                             "objectType": "SetupPhaseParticipantObject",
-                            "objectVersion": 1,
                             "ceremonyId": ceremony_id,
                             "manifestHash": manifest_hash,
                             "boardHeadHash": null,
@@ -255,7 +252,6 @@ fn build_collective_setup_package_fixture_parts(
                     let signature_envelope_hash = signature_envelope["signatureHash"].clone();
                     let mut participant_phase_object = serde_json::json!({
                         "objectType": "SetupPhaseParticipantObject",
-                        "objectVersion": 1,
                         "phaseId": phase_identifier,
                         "phaseNumber": phase_number,
                         "ceremonyId": ceremony_id,
@@ -417,7 +413,6 @@ fn build_collective_setup_package_fixture_parts(
         .to_string();
     let mut package = serde_json::json!({
         "objectType": "SetupPackage",
-        "objectVersion": 1,
         "setupContext": setup_context,
         "qShare": setup_parameters["qShare"].clone(),
         "phaseTranscript": phase_transcript,

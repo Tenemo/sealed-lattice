@@ -63,7 +63,6 @@ export type VssPublicCommitmentLimbValue = {
 
 export type VssPublicCommitmentValue = {
     readonly objectType: 'VssPublicCommitment';
-    readonly objectVersion: number;
     readonly commitmentRole: string;
     readonly commitmentContextHash: ProtocolHash;
     readonly publicMatrixSeedHash: ProtocolHash;
@@ -94,7 +93,6 @@ export type VssPublicCommitmentComputer = (
 // instead of casting through untyped records.
 export type VssPublicCoefficientCommitment = {
     readonly objectType: 'VssPublicCoefficientCommitment';
-    readonly objectVersion: number;
     readonly sourceTrusteeIdentity: string;
     readonly sourceTrusteeRosterPosition: number;
     readonly publicMatrixSeedHash: ProtocolHash;
@@ -108,7 +106,6 @@ export type VssPublicCoefficientCommitment = {
 
 export type VssPublicSourceCoefficientCommitments = {
     readonly objectType: string;
-    readonly objectVersion: number;
     readonly sourceTrusteeIdentity: string;
     readonly sourceTrusteeRosterPosition: number;
     readonly publicMatrixSeedHash: ProtocolHash;
@@ -118,7 +115,6 @@ export type VssPublicSourceCoefficientCommitments = {
 
 export type VssPublicCoefficientCommitmentSet = {
     readonly objectType: string;
-    readonly objectVersion: number;
     readonly publicMatrixSeedHash: ProtocolHash;
     readonly participantCount: number;
     readonly rnsLimbCount: number;
@@ -130,7 +126,6 @@ export type VssPublicCoefficientCommitmentSet = {
 
 export type VssPublicRecipientShareCommitment = {
     readonly objectType: 'VssPublicRecipientShareCommitment';
-    readonly objectVersion: number;
     readonly sourceTrusteeIdentity: string;
     readonly sourceTrusteeRosterPosition: number;
     readonly recipientIdentity: string;
@@ -145,7 +140,6 @@ export type VssPublicRecipientShareCommitment = {
 
 export type VssPublicSourceRecipientShareCommitments = {
     readonly objectType: string;
-    readonly objectVersion: number;
     readonly sourceTrusteeIdentity: string;
     readonly sourceTrusteeRosterPosition: number;
     readonly recipientShareCommitments: readonly VssPublicRecipientShareCommitment[];
@@ -154,7 +148,6 @@ export type VssPublicSourceRecipientShareCommitments = {
 
 export type VssPublicRecipientShareCommitmentSet = {
     readonly objectType: string;
-    readonly objectVersion: number;
     readonly publicMatrixSeedHash: ProtocolHash;
     readonly participantCount: number;
     readonly rnsLimbCount: number;
@@ -165,7 +158,6 @@ export type VssPublicRecipientShareCommitmentSet = {
 
 export type VssPublicAggregateThresholdCommitment = {
     readonly objectType: 'VssPublicAggregateThresholdCommitment';
-    readonly objectVersion: number;
     readonly recipientIdentity: string;
     readonly recipientRosterPosition: number;
     readonly recipientTrusteePoint: number;
@@ -180,7 +172,6 @@ export type VssPublicAggregateThresholdCommitment = {
 
 export type VssPublicAggregateThresholdCommitmentSet = {
     readonly objectType: string;
-    readonly objectVersion: number;
     readonly publicMatrixSeedHash: ProtocolHash;
     readonly participantCount: number;
     readonly rnsLimbCount: number;

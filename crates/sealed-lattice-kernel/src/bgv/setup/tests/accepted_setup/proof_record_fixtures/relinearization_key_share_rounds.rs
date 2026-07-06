@@ -92,7 +92,6 @@ pub(in super::super) fn relinearization_key_share_rounds_fixture(
             let round_one_share_root = fixture_material.component_vector_root.clone();
             let mut record = serde_json::json!({
                 "objectType": "RelinearizationKeyShareRoundOne",
-                "objectVersion": 1,
                 "proofFamily": "relinearization-key-share",
                 "ceremonyId": setup_context["ceremonyId"],
                 "manifestHash": setup_context["manifestHash"],
@@ -147,7 +146,6 @@ pub(in super::super) fn relinearization_key_share_rounds_fixture(
         let level = *level;
         let aggregate_root = derive_canonical_object_hash(&serde_json::json!({
             "objectType": "RelinearizationRoundOneAggregate",
-            "objectVersion": 1,
             "evaluatorKeyScheduleRoot": schedule["evaluatorKeyScheduleRoot"],
             "level": level,
             "roundOneRecordRoots": round_one_roots_by_level
@@ -203,7 +201,6 @@ pub(in super::super) fn relinearization_key_share_rounds_fixture(
             let round_two_share_root = fixture_material.component_vector_root.clone();
             let mut record = serde_json::json!({
                 "objectType": "RelinearizationKeyShareRoundTwo",
-                "objectVersion": 1,
                 "proofFamily": "relinearization-key-share",
                 "ceremonyId": setup_context["ceremonyId"],
                 "manifestHash": setup_context["manifestHash"],
@@ -264,7 +261,6 @@ pub(in super::super) fn relinearization_key_share_rounds_fixture(
         .map(|level| {
             let aggregate_root = derive_canonical_object_hash(&serde_json::json!({
                 "objectType": "RelinearizationRoundTwoAggregate",
-                "objectVersion": 1,
                 "evaluatorKeyScheduleRoot": schedule["evaluatorKeyScheduleRoot"],
                 "level": level,
                 "roundOneAggregateRoot": round_one_aggregate_root_by_level
@@ -284,7 +280,6 @@ pub(in super::super) fn relinearization_key_share_rounds_fixture(
 
     let mut rounds = serde_json::json!({
         "objectType": "RelinearizationKeyShareRounds",
-        "objectVersion": 1,
         "proofFamily": "relinearization-key-share",
         "ceremonyId": setup_context["ceremonyId"],
         "manifestHash": setup_context["manifestHash"],

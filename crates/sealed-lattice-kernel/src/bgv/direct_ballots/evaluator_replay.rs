@@ -265,7 +265,6 @@ pub(super) fn direct_ballot_evaluator_replay_context_hash(
 
     derive_canonical_object_hash(&json!({
         "objectType": "DirectEncryptedBallotEvaluatorReplayContext",
-        "objectVersion": 1,
         "setupPackageHash": setup_package_hash(input.setup_package)?,
         "ceremonyId": required_string_path(input.setup_package, &["setupInputs", "ceremonyId"])?,
         "manifestHash": required_string_path(input.setup_package, &["setupInputs", "manifestHash"])?,
@@ -292,7 +291,6 @@ pub(super) fn direct_ballot_evaluator_replay_record_hash(
 ) -> CanonicalResult<String> {
     derive_canonical_object_hash(&json!({
         "objectType": "EvaluatorReplayRecord",
-        "objectVersion": 1,
         "ceremonyId": required_string_path(setup_package, &["setupInputs", "ceremonyId"])?,
         "electionManifestHash": required_string_path(setup_package, &["setupInputs", "manifestHash"])?,
         "encryptedBallotAggregateHash": aggregate_ciphertext_root,

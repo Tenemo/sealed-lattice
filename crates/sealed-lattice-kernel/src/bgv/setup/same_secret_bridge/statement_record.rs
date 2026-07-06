@@ -212,7 +212,6 @@ pub(super) fn verify_statement_record(
         .collect::<CanonicalResult<Vec<_>>>()?;
     let expected_statement_root = derive_canonical_object_hash(&json!({
         "objectType": "VssSameSecretBridgeStatement",
-        "objectVersion": 1,
         "proofFamily": SAME_SECRET_PROOF_FAMILY,
         "ceremonyId": input.statement_set.ceremony_id,
         "manifestHash": input.statement_set.manifest_hash,
@@ -249,7 +248,6 @@ pub(super) fn verify_statement_record(
 
     Ok(json!({
         "objectType": "VssSameSecretBridgeStatement",
-        "objectVersion": 1,
         "proofFamily": SAME_SECRET_PROOF_FAMILY,
         "ceremonyId": input.statement_set.ceremony_id,
         "manifestHash": input.statement_set.manifest_hash,

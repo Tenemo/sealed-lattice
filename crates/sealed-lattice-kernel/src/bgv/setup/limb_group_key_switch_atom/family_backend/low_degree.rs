@@ -240,7 +240,6 @@ pub(super) struct FriVerification<'a, const LIMB_COUNT: usize> {
     layer_sizes: Vec<usize>,
     layer_offsets: Vec<[u64; LIMB_COUNT]>,
     layer_domains: Vec<CyclicDomain<'a, LIMB_COUNT>>,
-    final_size: usize,
     final_domain: CyclicDomain<'a, LIMB_COUNT>,
     two_inverse: [u64; LIMB_COUNT],
 }
@@ -307,7 +306,6 @@ pub(super) fn fri_verify_structure<'a, const LIMB_COUNT: usize>(
         layer_sizes,
         layer_offsets,
         layer_domains,
-        final_size,
         final_domain,
         two_inverse,
     }))
@@ -406,7 +404,6 @@ pub(super) fn fri_verify_queries<const LIMB_COUNT: usize>(
     if proof.query_answers.len() != query_positions.len() {
         return false;
     }
-    let _ = verification.final_size;
     proof
         .query_answers
         .iter()

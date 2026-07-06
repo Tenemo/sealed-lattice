@@ -292,7 +292,6 @@ fn release_verified_target_shares(
         .collect::<Vec<_>>();
     let result_preimage = json!({
         "objectType": "BgvTargetDecryptionResult",
-        "objectVersion": 1,
         "setupPackageHash": setup_binding.setup_package_hash,
         "targetAcceptedRecordHash": target_accepted.target_accepted_record_hash,
         "targetCiphertextHash": target_accepted.target_ciphertext_hash,

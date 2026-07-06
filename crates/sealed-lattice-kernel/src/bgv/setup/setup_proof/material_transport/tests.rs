@@ -13,7 +13,6 @@ fn setup_proof_material_stream_handle_recovers_chunkless_material() {
     let proof_material_root = valid_hash_for_test('7');
     let transported_proof_material = json!({
         "objectType": "SetupTransportedSameSecretProofMaterial",
-        "objectVersion": 1,
         "proofFamily": proof_family,
         "proofMaterialRoot": proof_material_root,
         "chunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
@@ -44,7 +43,6 @@ fn setup_proof_material_stream_handle_recovers_chunkless_material() {
     let request = json!({
         "verifiedSetupProofMaterials": {
             "objectType": VERIFIED_SETUP_PROOF_MATERIAL_SET_OBJECT_TYPE,
-            "objectVersion": 1,
             "proofMaterials": [
                 verified_setup_proof_material
             ],
@@ -76,7 +74,6 @@ fn setup_proof_material_stream_handle_rejects_metadata_rebinding() {
     let proof_material_root = valid_hash_for_test('8');
     let mut transported_proof_material = json!({
         "objectType": "SetupTransportedPublicKeyShareProofMaterial",
-        "objectVersion": 1,
         "proofFamily": proof_family,
         "proofMaterialRoot": proof_material_root,
         "chunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
@@ -106,7 +103,6 @@ fn setup_proof_material_stream_handle_rejects_metadata_rebinding() {
     let request = json!({
         "verifiedSetupProofMaterials": {
             "objectType": VERIFIED_SETUP_PROOF_MATERIAL_SET_OBJECT_TYPE,
-            "objectVersion": 1,
             "proofMaterials": [
                 finished["verifiedSetupProofMaterial"].clone()
             ],

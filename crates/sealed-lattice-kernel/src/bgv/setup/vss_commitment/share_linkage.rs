@@ -82,7 +82,6 @@ pub(crate) fn verify_vss_share_linkage_statement_request(
     let statement_root = hash_at_path(statement, &["statementRoot"])?;
     let statement_without_root = json!({
         "objectType": "VssShareLinkageStatement",
-        "objectVersion": 1,
         "ceremonyId": ceremony_id,
         "manifestHash": manifest_hash,
         "rosterHash": roster_hash,
@@ -778,7 +777,6 @@ pub(super) fn verify_vss_share_linkage_source_statement(
     )?;
     let expected_source_statement = json!({
         "objectType": "VssShareLinkageSourceStatement",
-        "objectVersion": 1,
         "ceremonyId": input.statement.ceremony_id,
         "manifestHash": input.statement.manifest_hash,
         "rosterHash": input.statement.roster_hash,

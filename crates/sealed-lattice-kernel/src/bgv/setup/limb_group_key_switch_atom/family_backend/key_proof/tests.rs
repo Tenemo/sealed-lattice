@@ -231,6 +231,119 @@ fn one_tampered_digit_error_is_caught_by_the_batch() {
 }
 
 #[test]
+fn honest_committed_component_material_verifies() {
+    // Committing exactly the public material - what the production path always
+    // does - proves and verifies through the new per-digit component column and
+    // its pin, both unmasked and masked.
+    let parameters = sixteen_limb_group_field_parameters();
+    let ring_degree = 64;
+    let (secret, digits, public) = synthetic_key(ring_degree, 4);
+    let honest: Vec<Vec<[u64; 13]>> = public
+        .digits
+        .iter()
+        .map(|digit| digit.recombined_component_b.clone())
+        .collect();
+    for mask_degree in [0_usize, 16] {
+        let component_b: Vec<&[[u64; 13]]> =
+            honest.iter().map(|values| values.as_slice()).collect();
+        let proof_parameters = KeyFriProofParameters {
+            query_count: 40,
+            mask_degree,
+        };
+        let mut salt_seed = 0xc0_ffee_22 + mask_degree as u64;
+        let proof = prove_key_fri_with_component_b(
+            &parameters,
+            ring_degree,
+            &public,
+            &KeySource::RoundOne,
+            &secret,
+            &digits,
+            component_b,
+            None,
+            &ZERO_STATEMENT_BINDING,
+            0,
+            &proof_parameters,
+            &mut salt_seed,
+        )
+        .expect("prove");
+        assert!(
+            verify_key_fri(
+                &parameters,
+                ring_degree,
+                &public,
+                &KeySource::RoundOne,
+                &proof,
+                None,
+                &ZERO_STATEMENT_BINDING,
+                0,
+                &proof_parameters,
+            )
+            .expect("verify"),
+            "committing the public material must verify (mask_degree {mask_degree})"
+        );
+    }
+}
+
+#[test]
+fn tampered_committed_component_material_is_rejected_by_the_pin() {
+    // The committed component column is pinned equal to the public material by a
+    // per-digit support constraint. A proof that commits material differing from
+    // the transported public material in a single coefficient - while the
+    // transcript-bound public material, the sumcheck target, and every other
+    // column are untouched - is refused: the pin no longer vanishes on H, so the
+    // prover cannot form the support quotient (or the verifier's support query
+    // check rejects it). This isolates the pin from the congruence checks.
+    let parameters = sixteen_limb_group_field_parameters();
+    let ring_degree = 64;
+    let (secret, digits, public) = synthetic_key(ring_degree, 4);
+    let mut tampered: Vec<Vec<[u64; 13]>> = public
+        .digits
+        .iter()
+        .map(|digit| digit.recombined_component_b.clone())
+        .collect();
+    tampered[1][9] = parameters.add(&tampered[1][9], &parameters.one());
+    let component_b: Vec<&[[u64; 13]]> =
+        tampered.iter().map(|values| values.as_slice()).collect();
+    let proof_parameters = KeyFriProofParameters {
+        query_count: 40,
+        mask_degree: 0,
+    };
+    let mut salt_seed = 0xc0_ffee_11;
+    let result = prove_key_fri_with_component_b(
+        &parameters,
+        ring_degree,
+        &public,
+        &KeySource::RoundOne,
+        &secret,
+        &digits,
+        component_b,
+        None,
+        &ZERO_STATEMENT_BINDING,
+        0,
+        &proof_parameters,
+        &mut salt_seed,
+    );
+    match result {
+        Err(_) => {}
+        Ok(proof) => assert!(
+            !verify_key_fri(
+                &parameters,
+                ring_degree,
+                &public,
+                &KeySource::RoundOne,
+                &proof,
+                None,
+                &ZERO_STATEMENT_BINDING,
+                0,
+                &proof_parameters,
+            )
+            .expect("verify runs"),
+            "committed material that differs from the public material must not verify"
+        ),
+    }
+}
+
+#[test]
 fn out_of_range_carry_is_rejected() {
     // A carry outside `|c| <= N+1`, with the component rebuilt so the
     // congruence still holds: the shifted carry is not a value in the logUp

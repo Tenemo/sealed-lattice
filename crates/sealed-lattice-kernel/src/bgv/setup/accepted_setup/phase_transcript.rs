@@ -684,7 +684,6 @@ fn verify_participant_phase_object(
         signature_envelope,
         &ProtocolSignatureExpectation {
             object_type: "SetupPhaseParticipantObject",
-            object_version: 1,
             signer_role: "Trustee",
             signer_identity: trustee_identity,
             ceremony_id,
@@ -735,7 +734,6 @@ fn phase_participant_payload_value(
     } = input;
     let mut payload = json!({
         "objectType": "SetupPhaseParticipantObject",
-        "objectVersion": 1,
         "phaseId": phase_identifier,
         "phaseNumber": phase_number,
         "ceremonyId": setup_context_string(setup_context, "ceremonyId")?,
@@ -883,7 +881,6 @@ pub(super) fn setup_intent_roster_hash_from_registrations(
         .map(|(roster_position, registration)| {
             json!({
                 "objectType": "CollectiveBgvSetupRosterEntry",
-                "objectVersion": 1,
                 "rosterPosition": roster_position,
                 "trusteeIdentity": registration.trustee_identity,
                 "signingPublicKeyHash": registration.signing_public_key_hash,

@@ -59,8 +59,7 @@ export const verifyBoardHead = (
     }
     if (
         !isNonNegativeInteger(head.boardSequence) ||
-        head.objectType !== 'BoardHead' ||
-        head.objectVersion !== 1
+        head.objectType !== 'BoardHead'
     ) {
         refusedObjects.push(
             createRefusal(

@@ -35,7 +35,6 @@ pub(super) fn evaluation_key_streaming_commitment(
 ) -> CanonicalResult<Value> {
     let stream_record = json!({
         "objectType": "BgvEvaluationKeyMaterialCommitmentStream",
-        "objectVersion": 1,
         "evaluationKeyRoot": evaluation_keys["evaluationKeyRoot"],
         "rotSetHash": evaluation_keys["rotSetHash"],
         "relinearizationKeyRoot": evaluation_keys["relinearizationKeyRoot"],
@@ -49,7 +48,6 @@ pub(super) fn evaluation_key_streaming_commitment(
     let chunk_root_value = chunk_root(&stream_bytes, EVALUATION_KEY_CHUNK_SIZE_BYTES)?;
     let commitment_record = json!({
         "objectType": "BgvEvaluationKeyStreamingCommitment",
-        "objectVersion": 1,
         "streamRecord": stream_record,
         "canonicalStreamByteLength": stream_bytes.len(),
         "chunkSizeBytes": EVALUATION_KEY_CHUNK_SIZE_BYTES,

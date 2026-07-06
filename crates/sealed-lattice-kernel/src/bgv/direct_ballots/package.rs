@@ -1,13 +1,13 @@
 //! Direct encrypted ballot statement and package schema freeze.
 //!
-//! SL3 Phase A: the stable object is `BallotValidityStatement-v1`, relation
-//! locked rather than backend locked. This module freezes the statement field
+//! The stable object is `BallotValidityStatement-v1`: the relation is locked
+//! rather than the backend. This module freezes the statement field
 //! order, its canonical length-prefixed byte encoding, the statement hash, and
 //! the kernel-recomputed identity fields (BGV parameters, batch encoder,
 //! encrypted-ballot layout, and the relation proof profile). Because the
 //! statement binds the voter identity, roster position, and action context, an
 //! accepting proof cannot be transplanted into another voter's package. The
-//! functions are frozen here ahead of the proof backend (SL3 Phase C) that
+//! functions are frozen here ahead of the proof backend that
 //! produces and verifies proofs against this statement.
 
 use super::layout::{batch_encoder_hash, encrypted_ballot_layout_hash};
@@ -66,7 +66,7 @@ pub(super) fn ballot_validity_proof_profile_hash(
 ) -> String {
     // The relation profile locks what an accepted proof is a proof OF: the
     // fixed score-validity and HE relation shape plus the encoder and layout
-    // identities. It is backend agnostic by construction (SL3 Phase A).
+    // identities. It is backend agnostic by construction.
     hash512_hex(
         BALLOT_VALIDITY_PROOF_PROFILE_DOMAIN,
         &[

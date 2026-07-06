@@ -1,6 +1,6 @@
 //! Direct encrypted ballot layout and batch-encoder identity freeze.
 //!
-//! SL3 Phase A: the accepted ballot-validity relation binds the encoded
+//! The accepted ballot-validity relation binds the encoded
 //! plaintext to a fixed public batch encoder and a reserved-slot rule. This
 //! module recomputes, from the kernel's own constants, the batch-encoder
 //! identity (a hash over the twenty encoder basis vectors - the
@@ -8,8 +8,8 @@
 //! fixed encoder) and the encrypted-ballot layout identity, and enforces the
 //! reserved-slot rule. The ballot statement binds these identities so a ballot
 //! proven under a different encoder or layout, or with a nonzero reserved slot,
-//! is refused. The functions are frozen here ahead of the statement/package
-//! schema (SL3 Phase A item 4) that consumes them.
+//! is refused. The functions are frozen here ahead of the statement and package
+//! schema that consumes them.
 
 use serde_json::json;
 

@@ -10,7 +10,6 @@ pub(in super::super) fn read_local_target_decryption_share_witness(
 ) -> CanonicalResult<LocalTargetDecryptionShareWitness> {
     if string_at_path(witness, &["objectType"])?
         != "LocalTrusteeTargetDecryptionProofWitnessMaterial"
-        || unsigned_at_path(witness, &["objectVersion"])? != 1
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -56,7 +55,6 @@ pub(in super::super) fn read_local_target_decryption_share_witness(
     let smudging_witness = value_at_path(witness, &["targetDecryptionSmudging"])?;
     if string_at_path(smudging_witness, &["objectType"])?
         != "LocalTrusteeTargetDecryptionSmudgingWitness"
-        || unsigned_at_path(smudging_witness, &["objectVersion"])? != 1
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -138,7 +136,6 @@ pub(in super::super) fn read_local_target_decryption_share_witness(
 
     let opening = value_at_path(witness, &["aggregateOpening"])?;
     if string_at_path(opening, &["objectType"])? != "LocalTrusteeVssPublicAggregateOpeningWitness"
-        || unsigned_at_path(opening, &["objectVersion"])? != 1
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -208,7 +205,6 @@ pub(in super::super) fn read_local_target_decryption_share_witness(
     for credential in array_at_path(opening, &["aggregateOpeningCredentials"])? {
         if string_at_path(credential, &["objectType"])?
             != "LocalTrusteeVssPublicAggregateOpeningCredential"
-            || unsigned_at_path(credential, &["objectVersion"])? != 1
         {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,

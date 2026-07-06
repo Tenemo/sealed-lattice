@@ -11,7 +11,6 @@ pub(in super::super) fn setup_commitment_root(
 pub(in super::super) fn setup_commitment_full_value(commitment: &SetupCommitmentValue) -> Value {
     json!({
         "objectType": "SetupCommitment",
-        "objectVersion": 1,
         "sourceRnsLimbIndex": commitment.source_rns_limb_index,
         "sourceMessageModulus": commitment.source_message_modulus,
         "shamirCoefficientIndex": commitment.shamir_coefficient_index,
@@ -109,7 +108,6 @@ pub(in super::super) fn parse_setup_commitment_full_value(
 fn setup_commitment_root_payload(commitment: &SetupCommitmentValue) -> Value {
     json!({
         "objectType": "SetupCommitment",
-        "objectVersion": 1,
         "sourceRnsLimbIndex": commitment.source_rns_limb_index,
         "sourceMessageModulus": commitment.source_message_modulus,
         "shamirCoefficientIndex": commitment.shamir_coefficient_index,

@@ -908,7 +908,6 @@ fn accepted_setup_handoff_value(setup_package: &Value) -> CanonicalResult<Value>
     })?;
     let mut handoff = json!({
         "objectType": "CollectiveBgvAcceptedSetupHandoff",
-        "objectVersion": 1,
         "ceremonyId": value_string(setup_context, "ceremonyId")?,
         "manifestHash": value_string(setup_context, "manifestHash")?,
         "rosterHash": value_string(setup_context, "rosterHash")?,

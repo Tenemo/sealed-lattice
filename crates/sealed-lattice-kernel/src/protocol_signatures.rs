@@ -22,7 +22,6 @@ const MAX_SAFE_JSON_INTEGER: u64 = 9_007_199_254_740_991;
 #[derive(Debug)]
 pub(crate) struct ProtocolSignatureExpectation<'a> {
     pub object_type: &'a str,
-    pub object_version: u64,
     pub signer_role: &'a str,
     pub signer_identity: &'a str,
     pub ceremony_id: &'a str,
@@ -214,7 +213,6 @@ fn validate_signed_root_shape(signature: &Value) -> Option<ProtocolSignatureFail
 
     for field_name in [
         "objectType",
-        "objectVersion",
         "ceremonyId",
         "manifestHash",
         "boardHeadHash",
@@ -285,12 +283,7 @@ fn validate_signed_root_shape(signature: &Value) -> Option<ProtocolSignatureFail
         ));
     }
 
-    for field_name in [
-        "objectVersion",
-        "byteLength",
-        "recoveryEpoch",
-        "deviceEpoch",
-    ] {
+    for field_name in ["byteLength", "recoveryEpoch", "deviceEpoch"] {
         if signed_root
             .get(field_name)
             .and_then(Value::as_u64)
@@ -298,7 +291,7 @@ fn validate_signed_root_shape(signature: &Value) -> Option<ProtocolSignatureFail
         {
             return Some(ProtocolSignatureFailure::new(
                 "InvalidSignedRoot",
-                "Signed root version, byte length, and epochs must be safe non-negative integers.",
+                "Signed root byte length and epochs must be safe non-negative integers.",
                 Some(signature),
             ));
         }
@@ -332,14 +325,6 @@ fn validate_expectation(
         return Some(ProtocolSignatureFailure::new(
             "WrongObjectType",
             "Signature root object type does not match the expected object.",
-            Some(signature),
-        ));
-    }
-    if signed_root.get("objectVersion").and_then(Value::as_u64) != Some(expectation.object_version)
-    {
-        return Some(ProtocolSignatureFailure::new(
-            "InvalidSignedRoot",
-            "Signature root object version does not match the expected version.",
             Some(signature),
         ));
     }
@@ -697,7 +682,6 @@ mod tests {
         .expect("context hash");
         let signed_root = json!({
             "objectType": "SetupPhaseParticipantObject",
-            "objectVersion": 1,
             "ceremonyId": "ceremony-main",
             "manifestHash": object_root,
             "boardHeadHash": null,
@@ -714,7 +698,6 @@ mod tests {
             create_protocol_signature_fixture("trustee-0", signed_root).expect("signature fixture");
         let expectation = ProtocolSignatureExpectation {
             object_type: "SetupPhaseParticipantObject",
-            object_version: 1,
             signer_role: "Trustee",
             signer_identity: "trustee-0",
             ceremony_id: "ceremony-main",
@@ -750,7 +733,6 @@ mod tests {
         .expect("context hash");
         let signed_root = json!({
             "objectType": "SetupPhaseParticipantObject",
-            "objectVersion": 1,
             "ceremonyId": "ceremony-main",
             "manifestHash": object_root,
             "boardHeadHash": null,
@@ -773,7 +755,6 @@ mod tests {
         );
         let expectation = ProtocolSignatureExpectation {
             object_type: "SetupPhaseParticipantObject",
-            object_version: 1,
             signer_role: "Trustee",
             signer_identity: "trustee-0",
             ceremony_id: "ceremony-main",

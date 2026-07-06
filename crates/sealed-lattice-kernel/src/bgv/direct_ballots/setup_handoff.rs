@@ -1,6 +1,6 @@
 //! Direct encrypted ballot accepted-setup handoff consumer.
 //!
-//! SL3 Phase A: the accepted ballot path consumes only the verifier-produced
+//! The accepted ballot path consumes only the verifier-produced
 //! `CollectiveBgvAcceptedSetupHandoff`, never the passive development package or
 //! a private setup seed. This module recomputes the handoff root over the
 //! received object and compares it to the bound root (so a tampered handoff is
@@ -123,7 +123,6 @@ mod tests {
     fn sample_handoff() -> Value {
         let mut handoff = json!({
             "objectType": ACCEPTED_SETUP_HANDOFF_OBJECT_TYPE,
-            "objectVersion": ACCEPTED_SETUP_HANDOFF_OBJECT_VERSION,
             "ceremonyId": "ceremony-0",
             "manifestHash": hash("manifest"),
             "rosterHash": hash("roster"),
@@ -188,7 +187,6 @@ mod tests {
         // check rather than being silently accepted.
         let passive_package = json!({
             "objectType": "CollectiveBgvPassiveSetupPackage",
-            "objectVersion": 1,
             "ceremonyId": "ceremony-0",
         });
         assert!(

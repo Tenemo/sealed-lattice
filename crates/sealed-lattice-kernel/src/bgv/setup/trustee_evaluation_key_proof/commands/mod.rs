@@ -159,7 +159,6 @@ fn statement_bound_proof_randomness_seed_hex(
 
     derive_canonical_object_hash(&json!({
         "objectType": "TrusteeEvaluationKeyProofRandomnessBinding",
-        "objectVersion": 1,
         "proofFamily": &statement.context.proof_family,
         "statementHash": statement_hash,
         "trusteeIdentity": &statement.context.trustee_identity,

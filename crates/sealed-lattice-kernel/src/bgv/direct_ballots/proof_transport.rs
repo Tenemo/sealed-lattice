@@ -155,7 +155,6 @@ pub(super) fn direct_ballot_public_proof_transport_hash(
 
     derive_canonical_object_hash(&json!({
         "objectType": "DirectEncryptedBallotProofTransport",
-        "objectVersion": 1,
         "proofByteLength": input.proof_byte_length,
         "chunkSizeBytes": input.chunk_size_bytes,
         "chunkCount": input.chunk_count,

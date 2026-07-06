@@ -319,11 +319,6 @@ const transportedPublicKeyShareMaterialChunks = (
             'transportedPublicKeyShareMaterial.objectType must be SetupTransportedPublicKeyShareMaterial.',
         );
     }
-    if (transportedMaterial.objectVersion !== 1) {
-        throw new Error(
-            'transportedPublicKeyShareMaterial.objectVersion must be 1.',
-        );
-    }
     if (
         transportedMaterial.binaryFormat !== publicKeyShareMaterialBinaryFormat
     ) {

@@ -468,7 +468,6 @@ fn private_vss_statement_hash_vector_request() -> serde_json::Value {
             }
             coefficient_commitments.push(serde_json::json!({
                 "objectType": "VssCoefficientCommitment",
-                "objectVersion": 1,
                 "ceremonyId": "statement-vector-ceremony",
                 "manifestHash": repeated_hash("10"),
                 "rosterHash": repeated_hash("20"),
@@ -484,7 +483,6 @@ fn private_vss_statement_hash_vector_request() -> serde_json::Value {
             }));
             material_records.push(serde_json::json!({
                 "objectType": "VssCoefficientCommitmentMaterial",
-                "objectVersion": 1,
                 "ceremonyId": "statement-vector-ceremony",
                 "manifestHash": repeated_hash("10"),
                 "rosterHash": repeated_hash("20"),
@@ -503,7 +501,6 @@ fn private_vss_statement_hash_vector_request() -> serde_json::Value {
     }
     let mut source_record = serde_json::json!({
         "objectType": "VssSourceTrusteeCoefficientCommitments",
-        "objectVersion": 1,
         "ceremonyId": "statement-vector-ceremony",
         "manifestHash": repeated_hash("10"),
         "rosterHash": repeated_hash("20"),
