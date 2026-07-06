@@ -37,6 +37,22 @@ enum TranscriptCoreCommand {
     GenerateBgvBaseConversionFixture,
     AnalyzeBgvCanonicalObject,
     RunDirectEncryptedBallot,
+    // Target-decryption command boundary (deliberate, not drift):
+    // - The prover-side commands below (share/proof-material generation from a
+    //   local secret share or witness, plus the standalone proof-material and
+    //   statement-binding verify introspection commands) are dev/test tooling.
+    //   They consume raw local secret material and are feature/test-gated out of
+    //   the default command surface so a raw share-generation footgun cannot be
+    //   driven from a production build.
+    // - The result-release commands (derive-context/begin/absorb/finish) are the
+    //   production-shaped staged one-shot release path and are intentionally
+    //   ungated. Safety does not come from the gate: `Absorb` verifies each
+    //   share's proof material inline through the ungated verifier chain
+    //   (`target_decryption::verify_target_decryption_share_proof_material` ->
+    //   `verify_evaluation_key_share`), so a proofless or unverified share can
+    //   never reach recombination even when the standalone verify command above
+    //   is compiled out. This mirrors SEC-002: only the proofless raw commands
+    //   are gated; the staged release over a verified-share session is not.
     #[cfg(any(feature = "target-decryption-development-commands", test))]
     GenerateBgvTargetDecryptionShareFromLocalShare,
     #[cfg(any(feature = "target-decryption-development-commands", test))]

@@ -94,7 +94,6 @@ export const verifyBoardHead = (
 
     const signatureResult = verifySignedObjectSignature(head.signature, {
         objectType: 'BoardHead',
-        objectVersion: 1,
         signerRole: 'Board',
         signerIdentity: 'board',
         ceremonyId: input.ceremonyId,

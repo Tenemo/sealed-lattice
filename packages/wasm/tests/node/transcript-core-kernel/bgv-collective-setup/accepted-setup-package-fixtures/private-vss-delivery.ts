@@ -98,7 +98,6 @@ function packageShapePrivateVssEnvelopeAad(input: {
 }): JsonRecord {
     return {
         objectType: 'PrivateVssEnvelopeAad',
-        objectVersion: 1,
         privateEnvelopeObjectType: 'PrivateVssShareEnvelope',
         ciphertextContentType: 'private-vss-share-envelope',
         ceremonyId: input.setupContext.ceremonyId,
@@ -188,7 +187,6 @@ function packageShapePrivateVssEnvelopeReference(input: {
     });
     const referenceWithoutRoot = {
         objectType: 'PrivateVssEnvelopeCommitment',
-        objectVersion: 1,
         ceremonyId: input.setupContext.ceremonyId,
         manifestHash: input.setupContext.manifestHash,
         rosterHash: input.setupContext.rosterHash,

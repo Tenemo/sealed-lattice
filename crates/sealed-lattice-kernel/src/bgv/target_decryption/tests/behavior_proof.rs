@@ -180,14 +180,20 @@ fn target_share_proof_statement_binding_accepts_bound_statement() {
         })
         .expect("target share proof statement binding");
 
-    assert_eq!(verification["ok"], json!(false));
     assert_eq!(
         verification["operation"],
         json!("verifyBgvTargetDecryptionShareProofStatementBinding")
     );
+    // The command validates the statement binding and returns the recomputed
+    // statement root; a well-formed bound statement round-trips to its own root.
     assert_eq!(
-        verification["refusalReason"],
-        json!("TargetDecryptionProofUnavailable")
+        verification["proofStatementRoot"],
+        statement["proofStatementRoot"]
+    );
+    assert!(
+        verification["proofStatementRoot"]
+            .as_str()
+            .is_some_and(|root| root.len() == 128)
     );
 }
 

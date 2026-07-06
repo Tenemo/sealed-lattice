@@ -39,7 +39,6 @@ export const createSetupPackage = (input: SetupPackageInput): SetupPackage => {
 
     const packageWithoutHash = {
         objectType: 'SetupPackage',
-        objectVersion: 1,
         setupContext: input.setupContext,
         qShare: input.qShare,
         phaseTranscript: input.phaseTranscript,

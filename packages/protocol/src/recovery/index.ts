@@ -421,7 +421,6 @@ const verifyRecoveryEpochUpdateUnchecked = (
 
     const signatureResult = verifySignedObjectSignature(update.signature, {
         objectType: 'RecoveryEpochUpdate',
-        objectVersion: 1,
         signerRole: 'RecoveryRoot',
         signerIdentity: update.signerIdentity,
         ceremonyId: update.ceremonyId,

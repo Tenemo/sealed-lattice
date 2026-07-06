@@ -159,7 +159,6 @@ const embeddedProofMaterialSet = (
 
             return {
                 objectType: proofMaterialCase.proofRecordObjectType,
-                objectVersion: 1,
                 proofFamily: proofMaterialCase.proofFamily,
                 ...proofMaterialCase.identityFields(recordIndex),
                 proofBytesHash: hash512Hex(
@@ -174,7 +173,6 @@ const embeddedProofMaterialSet = (
 
     return {
         objectType: proofMaterialCase.proofMaterialSetObjectType,
-        objectVersion: 1,
         proofFamily: proofMaterialCase.proofFamily,
         proofRecords,
         proofMaterialSetRoot: 'stale-proof-material-set-root',
@@ -248,7 +246,6 @@ describe('VSS proof material move to transport', () => {
             expect(() =>
                 proofMaterialCase.moveEmbeddedToTransport({
                     objectType: proofMaterialCase.proofMaterialSetObjectType,
-                    objectVersion: 1,
                     proofFamily: proofMaterialCase.proofFamily,
                 }),
             ).toThrow(/proofRecords must be an array/u);

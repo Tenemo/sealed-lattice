@@ -91,7 +91,6 @@ export const createRegistrationEntry = (
         getParticipantSigningPublicKeyHash(participantIdentity);
     const payload = {
         objectType: 'RegistrationEntry',
-        objectVersion: 1,
         ceremonyId,
         participantIdentity,
         signingPublicKeyHash,
@@ -124,7 +123,6 @@ export const createTrusteeSetupEntry = (
         getParticipantSigningPublicKeyHash(trusteeIdentity);
     const payload = {
         objectType: 'TrusteeSetupEntry',
-        objectVersion: 1,
         ceremonyId,
         trusteeIdentity,
         trusteeSetupRoot: deriveCanonicalObjectHash({
@@ -186,7 +184,6 @@ export const createElectionManifest = (
               });
     const payload = {
         objectType: 'ElectionManifest',
-        objectVersion: 1,
         ceremonyId,
         pollSpecHash: derivePollSpecHash(pollSpec),
         rosterHash,

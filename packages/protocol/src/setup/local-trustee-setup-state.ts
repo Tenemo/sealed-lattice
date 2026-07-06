@@ -96,7 +96,6 @@ export type LocalTrusteeSetupStateDecryptionInput = Readonly<{
 export type LocalTrusteeSetupStateDeletionReceipt = Readonly<
     JsonRecord & {
         readonly objectType: 'LocalTrusteeSetupStateDeletionReceipt';
-        readonly objectVersion: 1;
         readonly ceremonyId: string;
         readonly manifestHash: ProtocolHash;
         readonly rosterHash: ProtocolHash;
@@ -115,7 +114,6 @@ export type LocalTrusteeSetupStateDeletionReceipt = Readonly<
 export type LocalTrusteeSetupStateCommitment = Readonly<
     JsonRecord & {
         readonly objectType: 'LocalTrusteeSetupStateCommitment';
-        readonly objectVersion: 1;
         readonly ceremonyId: string;
         readonly manifestHash: ProtocolHash;
         readonly rosterHash: ProtocolHash;
@@ -232,7 +230,6 @@ export const createLocalTrusteeSetupStateCommitment = (
     const trusteePoint = input.trusteeRosterPosition + 1;
     const deletionReceiptWithoutRoot = {
         objectType: 'LocalTrusteeSetupStateDeletionReceipt',
-        objectVersion: 1,
         ...contextFields(input.setupContext),
         trusteeIdentity: input.trusteeIdentity,
         trusteeRosterPosition: input.trusteeRosterPosition,
@@ -249,7 +246,6 @@ export const createLocalTrusteeSetupStateCommitment = (
     } satisfies LocalTrusteeSetupStateDeletionReceipt;
     const localStateWithoutRoot = {
         objectType: 'LocalTrusteeSetupStateCommitment',
-        objectVersion: 1,
         ...contextFields(input.setupContext),
         trusteeIdentity: input.trusteeIdentity,
         trusteeRosterPosition: input.trusteeRosterPosition,
@@ -428,7 +424,6 @@ const issuedVssAcceptanceRoot = (
 
     return deriveCanonicalObjectHash({
         objectType: 'LocalTrusteeIssuedVssAcceptanceSet',
-        objectVersion: 1,
         ...contextFields(input.setupContext),
         trusteeIdentity: input.trusteeIdentity,
         trusteeRosterPosition: input.trusteeRosterPosition,
@@ -495,7 +490,6 @@ const sourcePrivateEnvelopeReferences = (
 ): readonly JsonRecord[] =>
     envelopeReferences.map((reference) => ({
         objectType: 'LocalTrusteePrivateVssEnvelopeReference',
-        objectVersion: 1,
         sourceTrusteeIdentity: reference.sourceTrusteeIdentity,
         sourceTrusteeRosterPosition: reference.sourceTrusteeRosterPosition,
         sourceTrusteeCommitmentRoot: reference.sourceTrusteeCommitmentRoot,
@@ -664,12 +658,10 @@ const aggregateVerifiedPrivateVssMaterial = (
     return {
         aggregateThresholdShareMaterial: {
             objectType: 'LocalTrusteeAggregateThresholdShareMaterial',
-            objectVersion: 1,
             ...materialCommonFields,
             materialDerivation: 'sum-of-verified-private-vss-share-values-v1',
             aggregateShareByRnsLimb: orderedAggregates.map((aggregate) => ({
                 objectType: 'LocalTrusteeAggregateThresholdShareLimb',
-                objectVersion: 1,
                 rnsLimbIndex: aggregate.rnsLimbIndex,
                 rnsPrime: aggregate.rnsPrime,
                 shareValues: aggregate.shareValues.map((shareValue) =>
@@ -750,7 +742,6 @@ export const createEncryptedLocalTrusteeSetupStateFromVerifiedShares = async (
     );
     const localStatePlaintext = {
         objectType: 'LocalTrusteeSetupStateSealedPayload',
-        objectVersion: 1,
         ceremonyId: input.setupContext.ceremonyId,
         manifestHash: input.setupContext.manifestHash,
         rosterHash: input.setupContext.rosterHash,

@@ -208,7 +208,6 @@ export const evaluationKeyShareComponentVectorRoot = (
 ): ProtocolHash =>
     deriveCanonicalObjectHash({
         objectType: 'EvaluationKeyShareComponentVectorSet',
-        objectVersion: 1,
         proofFamily,
         keySwitchDomain,
         keySwitchSeedHex,
@@ -273,7 +272,6 @@ export const evaluationKeyShareComponentMaterialTransportHashes = (
     );
     const chunkRoot = deriveCanonicalObjectHash({
         objectType: 'EvaluationKeyShareComponentMaterialChunkManifest',
-        objectVersion: 1,
         proofFamily,
         keySwitchMaterialEncoding: evaluationKeyShareComponentMaterialEncoding,
         chunkSizeBytes: setupProofTransportChunkSizeBytes,
@@ -301,7 +299,6 @@ export const evaluationKeyShareComponentMaterialReferenceRoot = (
 ): ProtocolHash =>
     deriveCanonicalObjectHash({
         objectType: 'EvaluationKeyShareComponentMaterialReference',
-        objectVersion: 1,
         proofFamily,
         keySwitchMaterialEncoding: evaluationKeyShareComponentMaterialEncoding,
         trusteeIdentity,

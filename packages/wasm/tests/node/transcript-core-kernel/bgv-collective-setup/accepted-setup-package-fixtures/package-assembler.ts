@@ -239,7 +239,6 @@ async function buildAcceptedShapedSetupPackage(
     );
     const setupPackage: JsonRecord = {
         objectType: 'SetupPackage',
-        objectVersion: 1,
         setupContext,
         qShare: setupParameters.qShare,
         phaseTranscript,

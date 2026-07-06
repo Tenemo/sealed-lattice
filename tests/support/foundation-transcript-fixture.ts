@@ -236,7 +236,6 @@ export const createFoundationTranscriptCoreFixture = (
         fixtureVersion: 1,
         kind: 'golden-transcript-core',
         objectType: 'TranscriptCore',
-        objectVersion: 1,
     };
 };
 
@@ -270,7 +269,6 @@ const createRosterExternalAcceptanceInput = (
 ): RosterExternalAcceptanceVerificationInput => {
     const payload = {
         objectType: 'RosterExternalAcceptance',
-        objectVersion: 1,
         ceremonyId,
         participantIdentity: registration.participantIdentity,
         rosterHash,

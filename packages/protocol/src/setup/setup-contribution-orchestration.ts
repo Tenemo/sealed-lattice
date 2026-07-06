@@ -43,7 +43,6 @@ export type SetupContributionAssemblyInput = Readonly<{
 export type SetupContributionAssembly = Readonly<
     JsonRecord & {
         readonly objectType: 'SetupContributionAssembly';
-        readonly objectVersion: 1;
         readonly ceremonyId: string;
         readonly manifestHash: ProtocolHash;
         readonly rosterHash: ProtocolHash;
@@ -320,7 +319,6 @@ export const createSetupContributionAssembly = (
 
     const assemblyWithoutRoot = {
         objectType: 'SetupContributionAssembly',
-        objectVersion: 1,
         ...contextFields(input.setupContext),
         trusteeIdentity: input.trusteeIdentity,
         trusteeRosterPosition: input.trusteeRosterPosition,

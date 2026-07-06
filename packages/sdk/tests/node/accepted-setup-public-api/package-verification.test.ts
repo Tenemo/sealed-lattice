@@ -67,12 +67,10 @@ const transportedSetupProofMaterialSet = (
 
     return {
         objectType: transportCase.materialSetObjectType,
-        objectVersion: 1,
         proofFamily: transportCase.proofFamily,
         proofMaterials: [
             {
                 objectType: transportCase.materialObjectType,
-                objectVersion: 1,
                 proofFamily: transportCase.proofFamily,
                 proofMaterialRoot,
                 chunkSizeBytes: 1_048_576,
@@ -98,13 +96,11 @@ const verifiedSetupProofMaterials = (
     ) => string = setupProofMaterialRoot,
 ): JsonRecord => ({
     objectType: 'VerifiedSetupProofMaterialSet',
-    objectVersion: 1,
     proofMaterials: setupProofMaterialTransportCases.map((transportCase) => {
         const proofMaterialRoot = proofMaterialRootForCase(transportCase);
 
         return {
             objectType: 'VerifiedSetupProofMaterial',
-            objectVersion: 1,
             verificationId: `sdk-public-${transportCase.proofFamily}`,
             proofFamily: transportCase.proofFamily,
             proofMaterialRoot,
@@ -140,11 +136,9 @@ const transportedPublicCompanions = (): Readonly<{
     return {
         transportedPublicKeyShareMaterial: {
             objectType: 'SetupTransportedPublicKeyShareMaterialSet',
-            objectVersion: 1,
             publicKeyShareMaterials: [
                 {
                     objectType: 'SetupTransportedPublicKeyShareMaterial',
-                    objectVersion: 1,
                     publicKeyShareMaterialRoot,
                     chunkSizeBytes: 1_048_576,
                     chunkCount: 1,
@@ -158,12 +152,10 @@ const transportedPublicCompanions = (): Readonly<{
         transportedEvaluationKeyShareComponentMaterial: {
             objectType:
                 'SetupTransportedEvaluationKeyShareComponentMaterialSet',
-            objectVersion: 1,
             componentMaterials: [
                 {
                     objectType:
                         'SetupTransportedEvaluationKeyShareComponentMaterial',
-                    objectVersion: 1,
                     keySwitchComponentMaterialRoot: evaluationKeyComponentRoot,
                     chunkSizeBytes: 1_048_576,
                     chunkCount: 1,
@@ -176,13 +168,11 @@ const transportedPublicCompanions = (): Readonly<{
         },
         transportedPublicEvaluationKeyMaterial: {
             objectType: 'SetupTransportedPublicEvaluationKeyMaterialSet',
-            objectVersion: 1,
             materialEncoding:
                 'sealed-lattice-public-evaluation-key-material-binary-v1',
             publicEvaluationKeyMaterials: [
                 {
                     objectType: 'SetupTransportedPublicEvaluationKeyMaterial',
-                    objectVersion: 1,
                     publicEvaluationKeyMaterialRoot,
                     chunkSizeBytes: 1_048_576,
                     chunkCount: 1,
@@ -202,7 +192,6 @@ describe('accepted setup public package API in Node', () => {
         const verification = await publicSetupApi.verifySetupPackage({
             setupPackage: {
                 objectType: 'BgvPassiveSetupPackage',
-                objectVersion: 1,
             },
             ...setupVerificationBindings,
         });
@@ -217,7 +206,6 @@ describe('accepted setup public package API in Node', () => {
     it('creates setup verification input for every verified proof material family', () => {
         const setupPackage = {
             objectType: 'SetupPackage',
-            objectVersion: 1,
             setupPackageHash: hash512Hex(
                 'sealed-lattice/test/setup-package-hash',
                 [new Uint8Array([5, 6, 7, 8])],
@@ -275,7 +263,6 @@ describe('accepted setup public package API in Node', () => {
     it('keeps setup proof chunks when no verified handle binds that proof root', () => {
         const setupPackage = {
             objectType: 'SetupPackage',
-            objectVersion: 1,
             setupPackageHash: hash512Hex(
                 'sealed-lattice/test/setup-package-hash-with-unverified-proof-material',
                 [new Uint8Array([9, 10, 11, 12])],
@@ -328,7 +315,6 @@ describe('accepted setup public package API in Node', () => {
     it('requires expected manifest and roster hashes for public setup verification input construction', () => {
         const setupPackage = {
             objectType: 'SetupPackage',
-            objectVersion: 1,
             setupPackageHash: hash512Hex(
                 'sealed-lattice/test/setup-package-hash-missing-bindings',
                 [new Uint8Array([13, 14, 15, 16])],

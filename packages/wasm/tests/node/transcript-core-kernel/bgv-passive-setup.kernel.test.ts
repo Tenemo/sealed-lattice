@@ -55,7 +55,6 @@ describe('BGV passive setup kernel commands', () => {
         ).toHaveLength(128);
         expect(setup.collectivePublicKey.coefficientMaterial).toMatchObject({
             objectType: 'BgvCollectivePublicKeyCoefficientMaterial',
-            objectVersion: 1,
         });
 
         const verification = kernel.verifyBgvPassiveSetup({

@@ -86,7 +86,6 @@ export const createVssShareLinkageStatement = (input: {
                     );
                 const sourceStatementWithoutRoot = {
                     objectType: 'VssShareLinkageSourceStatement',
-                    objectVersion: 1,
                     ...setupContextFields(input.setupContext),
                     publicMatrixSeedHash: input.publicMatrixSeedHash,
                     targetBasisHash: input.targetBasisHash,
@@ -121,7 +120,6 @@ export const createVssShareLinkageStatement = (input: {
 
     const statementWithoutRoot = {
         objectType: 'VssShareLinkageStatement',
-        objectVersion: 1,
         ...setupContextFields(input.setupContext),
         publicMatrixSeedHash: input.publicMatrixSeedHash,
         targetBasisHash: input.targetBasisHash,
@@ -518,7 +516,6 @@ export const createVssShareLinkageProofMaterialSet = (input: {
             );
             const proofRecordWithoutRoot = {
                 objectType: 'VssShareLinkageProofRecord',
-                objectVersion: 1,
                 proofFamily: vssShareLinkageProofFamily,
                 linkageItems,
                 vssShareLinkage,
@@ -539,7 +536,6 @@ export const createVssShareLinkageProofMaterialSet = (input: {
 
     const proofMaterialSetWithoutRoot = {
         objectType: 'VssShareLinkageProofMaterialSet',
-        objectVersion: 1,
         proofFamily: vssShareLinkageProofFamily,
         ceremonyId: statement.ceremonyId,
         manifestHash: statement.manifestHash,
@@ -580,7 +576,6 @@ export const createThresholdShareCommitmentBinding = (input: {
 }): Record<string, unknown> => {
     const bindingWithoutRoot = {
         objectType: 'ThresholdShareCommitmentBinding',
-        objectVersion: 1,
         publicMatrixSeedHash:
             input.coefficientCommitmentSet.publicMatrixSeedHash,
         participantCount: input.coefficientCommitmentSet.participantCount,
@@ -765,7 +760,6 @@ export const createVssSameSecretBridgeStatementSet = (input: {
 
             const statementWithoutRoot = {
                 objectType: 'VssSameSecretBridgeStatement',
-                objectVersion: 1,
                 proofFamily: sameSecretProofFamily,
                 ...setupContextFields(input.setupContext),
                 targetBasisHash: input.targetBasisHash,
@@ -801,7 +795,6 @@ export const createVssSameSecretBridgeStatementSet = (input: {
 
     const statementSetWithoutRoot = {
         objectType: 'VssSameSecretBridgeStatementSet',
-        objectVersion: 1,
         proofFamily: sameSecretProofFamily,
         ...setupContextFields(input.setupContext),
         targetBasisHash: input.targetBasisHash,
@@ -1002,7 +995,6 @@ export const createVssSameSecretBridgeProofMaterialSet = (input: {
             );
             const proofRecordWithoutRoot = {
                 objectType: 'VssSameSecretBridgeProofRecord',
-                objectVersion: 1,
                 proofFamily: sameSecretBridgeProofFamily,
                 sameSecretBridgeStatementRoot:
                     statementRecord.sameSecretBridgeStatementRoot,
@@ -1024,7 +1016,6 @@ export const createVssSameSecretBridgeProofMaterialSet = (input: {
 
     const proofMaterialSetWithoutRoot = {
         objectType: 'VssSameSecretBridgeProofMaterialSet',
-        objectVersion: 1,
         proofFamily: sameSecretBridgeProofFamily,
         ceremonyId: statementSet.ceremonyId,
         manifestHash: statementSet.manifestHash,

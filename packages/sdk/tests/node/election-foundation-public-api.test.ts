@@ -171,14 +171,12 @@ describe('election foundation public package API in Node', () => {
             rosterEntries: [
                 {
                     objectType: 'CollectiveBgvSetupRosterEntry',
-                    objectVersion: 1,
                     rosterPosition: 0,
                     trusteeIdentity: 'trustee-0',
                     signingPublicKeyHash: 'a'.repeat(128),
                 },
                 {
                     objectType: 'CollectiveBgvSetupRosterEntry',
-                    objectVersion: 1,
                     rosterPosition: 1,
                     trusteeIdentity: 'trustee-1',
                     signingPublicKeyHash: 'b'.repeat(128),

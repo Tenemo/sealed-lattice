@@ -118,7 +118,6 @@ describe('transcript-core kernel in Node', () => {
         const kernel = await loadMockKernel();
         const transportedSetupProofMaterial = {
             objectType: 'SetupTransportedSameSecretProofMaterial',
-            objectVersion: 1,
             proofFamily: 'same-secret-linkage-anchor',
             proofMaterialRoot: hashOne,
             chunkSizeBytes: 1_048_576,

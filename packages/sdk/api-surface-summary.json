@@ -13,7 +13,7 @@
         "packages/sdk/dist/internal/transcript-core.d.ts",
         "packages/sdk/dist/internal/types.d.ts"
     ],
-    "reachableDeclarationHash": "b5051711e88daf1c13b70f55f03b7b4ab7f176bd3b7dfd06557294794f77462f",
+    "reachableDeclarationHash": "346877f281a3f6e3a5b0e4d70f648125f3e43d5b2cbb82716baf32c269c66a6e",
     "runtimeExports": [
         "createSetupPackageVerificationInput",
         "deriveCollectiveBgvSetupRosterHash",
@@ -35,6 +35,7 @@
         "verifyRosterExternalAcceptance",
         "verifyRosterManifestTranscript",
         "verifySetupPackage",
+        "verifyTargetDecryptionResult",
         "verifyTargetFinality",
         "verifyTranscriptCoreFixture"
     ],
@@ -121,6 +122,8 @@
         "SmallRosterPolicy",
         "StructuredProtocolVerificationResult",
         "TargetBoundShareSelectionParameters",
+        "TargetDecryptionResultRelease",
+        "TargetDecryptionResultReleaseInput",
         "TargetFinalityCheckpoint",
         "TargetFinalityPolicy",
         "TargetFinalityRecord",

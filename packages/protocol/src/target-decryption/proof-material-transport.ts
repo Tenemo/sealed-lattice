@@ -35,7 +35,6 @@ export type BgvTargetDecryptionShareProofMaterial = Readonly<
 type BgvTargetDecryptionShareBinaryProofMaterialTransport = Readonly<
     JsonRecord & {
         readonly objectType: 'BgvTargetDecryptionShareBinaryProofMaterialTransport';
-        readonly objectVersion: 1;
         readonly proofFamily: typeof targetDecryptionShareProofFamily;
         readonly binaryFormat: typeof targetDecryptionShareProofMaterialBinaryFormat;
         readonly proofMaterialRoot: ProtocolHash;
@@ -206,7 +205,6 @@ export const encodeBgvTargetDecryptionShareProofMaterialBinary = (
 
     return {
         objectType: 'BgvTargetDecryptionShareBinaryProofMaterialTransport',
-        objectVersion: 1,
         proofFamily: targetDecryptionShareProofFamily,
         binaryFormat: targetDecryptionShareProofMaterialBinaryFormat,
         proofMaterialRoot,

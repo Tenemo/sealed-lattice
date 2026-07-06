@@ -26,7 +26,6 @@ type TargetDecryptionSmudgingSeedDerivationInput = Readonly<{
 type LocalTrusteeTargetDecryptionSmudgingWitness = Readonly<
     JsonRecord & {
         readonly objectType: 'LocalTrusteeTargetDecryptionSmudgingWitness';
-        readonly objectVersion: 1;
         readonly profileId: typeof targetDecryptionSmudgingProfileId;
         readonly setupPackageHash: ProtocolHash;
         readonly targetAcceptedRecordHash: ProtocolHash;
@@ -339,7 +338,6 @@ const assertRestoredAggregateOpeningBinding = (input: {
     );
     exactVersionField(
         aggregateOpening,
-        'objectVersion',
         1,
         'restoredLocalTargetShareWitness.aggregateOpening',
     );
@@ -548,7 +546,6 @@ const createLocalTrusteeTargetDecryptionSmudgingWitness = (
 
     return {
         objectType: 'LocalTrusteeTargetDecryptionSmudgingWitness',
-        objectVersion: 1,
         profileId: targetDecryptionSmudgingProfileId,
         setupPackageHash: bindingHashes.setupPackageHash,
         targetAcceptedRecordHash: bindingHashes.targetAcceptedRecordHash,

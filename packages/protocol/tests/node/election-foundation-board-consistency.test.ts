@@ -528,7 +528,6 @@ describe('board consistency', () => {
         });
         const castReceipt = {
             objectType: 'CastReceipt',
-            objectVersion: 1,
             castReceiptHash,
             ceremonyId,
             electionManifestHash: deriveCanonicalObjectHash({

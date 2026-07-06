@@ -21,7 +21,6 @@ const mlDsa65SignatureByteLength = ml_dsa65.lengths.signature!;
 
 export type SignatureExpectation = {
     readonly objectType?: SignedObjectType;
-    readonly objectVersion?: number;
     readonly signerRole?: SignerRole;
     readonly signerIdentity?: string;
     readonly ceremonyId?: string;
@@ -221,7 +220,6 @@ const validateSignedRootShape = (
     const signedRootRecord = signedRoot as Record<string, unknown>;
     const requiredFields = [
         'objectType',
-        'objectVersion',
         'ceremonyId',
         'manifestHash',
         'boardHeadHash',

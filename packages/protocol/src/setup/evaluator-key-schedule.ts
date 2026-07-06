@@ -33,7 +33,6 @@ export type RequiredGaloisKeyScheduleEntry = Readonly<{
 export type RequiredGaloisSet = Readonly<
     JsonRecord & {
         readonly objectType: 'RequiredGaloisSet';
-        readonly objectVersion: 1;
         readonly evaluatorScheme: 'direct-encrypted-ballot-evaluator-replay';
         readonly packingScheme: 'direct-score-packing-compact-generator-basis-direct-encrypted-score-comparison-generator-ordered-rank-packing';
         readonly rnsLimbCount: number;
@@ -44,7 +43,6 @@ export type RequiredGaloisSet = Readonly<
 export type EvaluatorKeySchedule = Readonly<
     JsonRecord & {
         readonly objectType: 'EvaluatorKeySchedule';
-        readonly objectVersion: 1;
         readonly participantCount: number;
         readonly rnsLimbCount: number;
         readonly publicMatrixSeedHash: ProtocolHash;
@@ -113,7 +111,6 @@ export const createRequiredGaloisSet = (
 
     return {
         objectType: 'RequiredGaloisSet',
-        objectVersion: 1,
         evaluatorScheme: 'direct-encrypted-ballot-evaluator-replay',
         packingScheme:
             'direct-score-packing-compact-generator-basis-direct-encrypted-score-comparison-generator-ordered-rank-packing',
@@ -204,7 +201,6 @@ export const createEvaluatorKeySchedule = (
     const requiredGaloisSetHash = deriveCanonicalObjectHash(requiredGaloisSet);
     const scheduleWithoutRoot = {
         objectType: 'EvaluatorKeySchedule',
-        objectVersion: 1,
         ...contextFields(input.setupContext),
         participantCount: input.participantCount,
         rnsLimbCount,

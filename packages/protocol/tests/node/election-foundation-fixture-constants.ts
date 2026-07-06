@@ -202,7 +202,6 @@ export const createSignature = (
         secretKeyBytesHex: keyFixture.secretKeyBytesHex,
         signedRoot: {
             objectType,
-            objectVersion: 1,
             ceremonyId,
             manifestHash: null,
             boardHeadHash: null,

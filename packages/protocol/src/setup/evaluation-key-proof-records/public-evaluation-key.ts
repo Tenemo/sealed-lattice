@@ -112,7 +112,6 @@ export function createPublicEvaluationKeySet(
                 const decompositionDigitCount = level + 1;
                 const relinearizationKeyRoot = deriveCanonicalObjectHash({
                     objectType: 'RelinearizationKeyAggregate',
-                    objectVersion: 1,
                     materialEncoding: publicEvaluationKeyMaterialEncoding,
                     evaluatorKeyScheduleRoot:
                         input.evaluatorKeySchedule.evaluatorKeyScheduleRoot,
@@ -200,7 +199,6 @@ export function createPublicEvaluationKeySet(
                 );
                 const galoisKeyRoot = deriveCanonicalObjectHash({
                     objectType: 'GaloisKeyAggregate',
-                    objectVersion: 1,
                     materialEncoding: publicEvaluationKeyMaterialEncoding,
                     evaluatorKeyScheduleRoot:
                         input.evaluatorKeySchedule.evaluatorKeyScheduleRoot,
@@ -283,7 +281,6 @@ export function createPublicEvaluationKeySet(
 
     const evaluationKeysWithoutHash = {
         objectType: 'PublicEvaluationKeySet',
-        objectVersion: 1,
         materialEncoding: publicEvaluationKeyMaterialEncoding,
         ...contextFields(input.setupContext),
         participantCount: input.participantCount,
@@ -428,7 +425,6 @@ const publicEvaluationKeyMaterialManifest = (
     evaluationKeys: PublicEvaluationKeySet,
 ): JsonRecord => ({
     objectType: 'PublicEvaluationKeyMaterialManifest',
-    objectVersion: 1,
     materialEncoding: publicEvaluationKeyMaterialEncoding,
     materialTransportEncoding: publicEvaluationKeyTransportMaterialEncoding,
     ...contextFields(input.setupContext),
@@ -557,7 +553,6 @@ const publicEvaluationKeyMaterialTransportHashes = (
     );
     const chunkRoot = deriveCanonicalObjectHash({
         objectType: 'PublicEvaluationKeyMaterialChunkManifest',
-        objectVersion: 1,
         materialEncoding: publicEvaluationKeyTransportMaterialEncoding,
         chunkSizeBytes: setupProofTransportChunkSizeBytes,
         chunkCount: chunkHashes.length,
@@ -583,7 +578,6 @@ const publicEvaluationKeyMaterialReferenceRoot = (
 ): ProtocolHash =>
     deriveCanonicalObjectHash({
         objectType: 'PublicEvaluationKeyMaterialReference',
-        objectVersion: 1,
         materialEncoding: publicEvaluationKeyTransportMaterialEncoding,
         ceremonyId: evaluationKeys.ceremonyId,
         manifestHash: evaluationKeys.manifestHash,
@@ -737,12 +731,10 @@ export const createBinaryChunkedPublicEvaluationKeyMaterialTransport = (
     assertPublicEvaluationKeyComponentMaterialCoverage(input);
     const transportedPublicEvaluationKeyMaterial = {
         objectType: publicEvaluationKeyMaterialTransportSetObjectType,
-        objectVersion: 1,
         materialEncoding: publicEvaluationKeyTransportMaterialEncoding,
         publicEvaluationKeyMaterials: [
             {
                 objectType: publicEvaluationKeyMaterialTransportObjectType,
-                objectVersion: 1,
                 materialEncoding: publicEvaluationKeyTransportMaterialEncoding,
                 ...contextFields(input.setupContext),
                 evaluationKeySetHash: evaluationKeys.evaluationKeySetHash,

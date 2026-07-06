@@ -73,7 +73,6 @@ describe('recovery epoch shells', () => {
         );
         const payload = {
             objectType: 'RecoveryEpochUpdate',
-            objectVersion: 1,
             ceremonyId,
             signerIdentity: 'participant-1',
             recoveryRootPublicKeyHash: recoveryRootKeyFixture.publicKeyHash,

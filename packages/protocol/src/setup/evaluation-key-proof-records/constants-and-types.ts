@@ -118,7 +118,6 @@ export type GaloisKeyShareBatchContribution = Readonly<{
 export type RelinearizationKeyShareRoundOneRecord = Readonly<
     JsonRecord & {
         readonly objectType: 'RelinearizationKeyShareRoundOne';
-        readonly objectVersion: 1;
         readonly proofFamily: 'relinearization-key-share';
         readonly trusteeIdentity: string;
         readonly trusteeRosterPosition: number;
@@ -144,7 +143,6 @@ export type RelinearizationKeyShareRoundOneRecord = Readonly<
 export type RelinearizationKeyShareRoundTwoRecord = Readonly<
     JsonRecord & {
         readonly objectType: 'RelinearizationKeyShareRoundTwo';
-        readonly objectVersion: 1;
         readonly proofFamily: 'relinearization-key-share';
         readonly trusteeIdentity: string;
         readonly trusteeRosterPosition: number;
@@ -173,7 +171,6 @@ export type RelinearizationKeyShareRoundTwoRecord = Readonly<
 export type RelinearizationKeyShareRounds = Readonly<
     JsonRecord & {
         readonly objectType: 'RelinearizationKeyShareRounds';
-        readonly objectVersion: 1;
         readonly proofFamily: 'relinearization-key-share';
         readonly participantCount: number;
         readonly rnsLimbCount: number;
@@ -208,7 +205,6 @@ export type GaloisKeyShareRootReference = Readonly<{
 export type GaloisKeyShareMaterialRecord = Readonly<
     JsonRecord & {
         readonly objectType: 'GaloisKeyShareMaterial';
-        readonly objectVersion: 1;
         readonly proofFamily: 'galois-key-share';
         readonly trusteeIdentity: string;
         readonly trusteeRosterPosition: number;
@@ -225,7 +221,6 @@ export type GaloisKeyShareMaterialRecord = Readonly<
 export type GaloisKeyShareBatch = Readonly<
     JsonRecord & {
         readonly objectType: 'GaloisKeyShareBatch';
-        readonly objectVersion: 1;
         readonly proofFamily: 'galois-key-share';
         readonly trusteeIdentity: string;
         readonly trusteeRosterPosition: number;
@@ -263,7 +258,6 @@ export type TrusteeEvaluationKeyTransportedProofBytes = Readonly<{
 export type TrusteeEvaluationKeyProofRecord = Readonly<
     JsonRecord & {
         readonly objectType: 'TrusteeEvaluationKeyProof';
-        readonly objectVersion: 1;
         readonly proofFamily: typeof trusteeEvaluationKeyProofFamily;
         readonly trusteeIdentity: string;
         readonly trusteeRosterPosition: number;
@@ -282,7 +276,6 @@ export type TrusteeEvaluationKeyProofRecord = Readonly<
 export type TrusteeEvaluationKeyProofSet = Readonly<
     JsonRecord & {
         readonly objectType: 'TrusteeEvaluationKeyProofSet';
-        readonly objectVersion: 1;
         readonly proofFamily: typeof trusteeEvaluationKeyProofFamily;
         readonly participantCount: number;
         readonly rnsLimbCount: number;
@@ -431,7 +424,6 @@ export type GaloisKeyRootReference = Readonly<{
 export type PublicEvaluationKeySet = Readonly<
     JsonRecord & {
         readonly objectType: 'PublicEvaluationKeySet';
-        readonly objectVersion: 1;
         readonly materialEncoding: typeof publicEvaluationKeyMaterialEncoding;
         readonly participantCount: number;
         readonly rnsLimbCount: number;
@@ -471,7 +463,6 @@ export type PublicEvaluationKeyMaterialReference = Readonly<{
 export type TransportedEvaluationKeyShareProofMaterialSet = Readonly<
     JsonRecord & {
         readonly objectType: typeof evaluationKeyShareProofTransportSetObjectType;
-        readonly objectVersion: 1;
         readonly proofFamily: typeof trusteeEvaluationKeyProofFamily;
         readonly proofMaterials: readonly JsonRecord[];
     }
@@ -480,7 +471,6 @@ export type TransportedEvaluationKeyShareProofMaterialSet = Readonly<
 export type TransportedEvaluationKeyShareComponentMaterialSet = Readonly<
     JsonRecord & {
         readonly objectType: typeof evaluationKeyShareComponentMaterialTransportSetObjectType;
-        readonly objectVersion: 1;
         readonly componentMaterials: readonly JsonRecord[];
     }
 >;
@@ -488,7 +478,6 @@ export type TransportedEvaluationKeyShareComponentMaterialSet = Readonly<
 export type TransportedPublicEvaluationKeyMaterial = Readonly<
     JsonRecord & {
         readonly objectType: typeof publicEvaluationKeyMaterialTransportObjectType;
-        readonly objectVersion: 1;
         readonly materialEncoding: typeof publicEvaluationKeyTransportMaterialEncoding;
         readonly ceremonyId: string;
         readonly manifestHash: ProtocolHash;
@@ -513,7 +502,6 @@ export type TransportedPublicEvaluationKeyMaterial = Readonly<
 export type TransportedPublicEvaluationKeyMaterialSet = Readonly<
     JsonRecord & {
         readonly objectType: typeof publicEvaluationKeyMaterialTransportSetObjectType;
-        readonly objectVersion: 1;
         readonly materialEncoding: typeof publicEvaluationKeyTransportMaterialEncoding;
         readonly publicEvaluationKeyMaterials: readonly TransportedPublicEvaluationKeyMaterial[];
         readonly componentMaterials?: readonly JsonRecord[];

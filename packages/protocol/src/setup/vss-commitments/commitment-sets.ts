@@ -311,7 +311,6 @@ export const createVssPublicCoefficientCommitmentSet = (input: {
                         }
                         const commitmentContext = {
                             objectType: 'VssPublicCoefficientCommitmentContext',
-                            objectVersion: 1,
                             ...setupContextFields(input.setupContext),
                             sourceTrusteeIdentity:
                                 sourceTrusteeOpeningState.sourceTrusteeIdentity,
@@ -349,7 +348,6 @@ export const createVssPublicCoefficientCommitmentSet = (input: {
                         });
                         coefficientCommitments.push({
                             objectType: 'VssPublicCoefficientCommitment',
-                            objectVersion: 1,
                             sourceTrusteeIdentity:
                                 sourceTrusteeOpeningState.sourceTrusteeIdentity,
                             sourceTrusteeRosterPosition:
@@ -377,7 +375,6 @@ export const createVssPublicCoefficientCommitmentSet = (input: {
 
                 const sourceRecordWithoutRoot = {
                     objectType: 'VssPublicSourceCoefficientCommitments',
-                    objectVersion: 1,
                     sourceTrusteeIdentity:
                         sourceTrusteeOpeningState.sourceTrusteeIdentity,
                     sourceTrusteeRosterPosition:
@@ -397,7 +394,6 @@ export const createVssPublicCoefficientCommitmentSet = (input: {
 
     const setWithoutRoot = {
         objectType: 'VssPublicCoefficientCommitmentSet',
-        objectVersion: 1,
         publicMatrixSeedHash: input.publicMatrixSeedHash,
         participantCount: input.participantCount,
         rnsLimbCount: input.qSharePrimes.length,
@@ -562,7 +558,6 @@ export const createVssPublicRecipientShareCommitmentSet = (input: {
                         const commitmentContext = {
                             objectType:
                                 'VssPublicRecipientShareCommitmentContext',
-                            objectVersion: 1,
                             ...setupContextFields(input.setupContext),
                             sourceTrusteeIdentity:
                                 sourceTrusteeOpeningState.sourceTrusteeIdentity,
@@ -591,7 +586,6 @@ export const createVssPublicRecipientShareCommitmentSet = (input: {
                         });
                         recipientShareCommitments.push({
                             objectType: 'VssPublicRecipientShareCommitment',
-                            objectVersion: 1,
                             sourceTrusteeIdentity:
                                 sourceTrusteeOpeningState.sourceTrusteeIdentity,
                             sourceTrusteeRosterPosition:
@@ -625,7 +619,6 @@ export const createVssPublicRecipientShareCommitmentSet = (input: {
 
                 const sourceRecordWithoutRoot = {
                     objectType: 'VssPublicSourceRecipientShareCommitments',
-                    objectVersion: 1,
                     sourceTrusteeIdentity:
                         sourceTrusteeOpeningState.sourceTrusteeIdentity,
                     sourceTrusteeRosterPosition:
@@ -643,7 +636,6 @@ export const createVssPublicRecipientShareCommitmentSet = (input: {
 
     const setWithoutRoot = {
         objectType: 'VssPublicRecipientShareCommitmentSet',
-        objectVersion: 1,
         publicMatrixSeedHash: input.publicMatrixSeedHash,
         participantCount: input.participantCount,
         rnsLimbCount: input.qSharePrimes.length,
@@ -691,7 +683,6 @@ const vssPublicSummedAggregateCommitment = (input: {
     }
     const commitmentContextHash = deriveCanonicalObjectHash({
         objectType: 'VssPublicCommitmentContext',
-        objectVersion: 1,
         commitmentRole: 'aggregate-threshold-share',
         commitmentContext: input.commitmentContext,
     });
@@ -720,7 +711,6 @@ const vssPublicSummedAggregateCommitment = (input: {
 
     return {
         objectType: 'VssPublicCommitment',
-        objectVersion: 1,
         commitmentRole: 'aggregate-threshold-share',
         commitmentContextHash,
         publicMatrixSeedHash: input.publicMatrixSeedHash,
@@ -792,7 +782,6 @@ export const createVssPublicAggregateThresholdCommitmentSet = (input: {
             );
             const commitmentContext = {
                 objectType: 'VssPublicAggregateThresholdCommitmentContext',
-                objectVersion: 1,
                 ...setupContextFields(input.setupContext),
                 recipientIdentity,
                 recipientRosterPosition,
@@ -814,7 +803,6 @@ export const createVssPublicAggregateThresholdCommitmentSet = (input: {
             });
             const aggregateOpeningRoot = deriveCanonicalObjectHash({
                 objectType: 'VssPublicAggregateThresholdOpening',
-                objectVersion: 1,
                 commitmentRole: 'aggregate-threshold-share',
                 commitmentContext,
                 publicMatrixSeedHash: input.publicMatrixSeedHash,
@@ -825,7 +813,6 @@ export const createVssPublicAggregateThresholdCommitmentSet = (input: {
             });
             recipientRecords.push({
                 objectType: 'VssPublicAggregateThresholdCommitment',
-                objectVersion: 1,
                 recipientIdentity,
                 recipientRosterPosition,
                 recipientTrusteePoint: recipientPoint,
@@ -842,7 +829,6 @@ export const createVssPublicAggregateThresholdCommitmentSet = (input: {
 
     const setWithoutRoot = {
         objectType: 'VssPublicAggregateThresholdCommitmentSet',
-        objectVersion: 1,
         publicMatrixSeedHash: input.publicMatrixSeedHash,
         participantCount: input.participantCount,
         rnsLimbCount: input.qSharePrimes.length,

@@ -111,7 +111,6 @@ export type SetupPackageInput = Readonly<{
 export type SetupPackage = Readonly<
     JsonRecord & {
         readonly objectType: 'SetupPackage';
-        readonly objectVersion: 1;
         readonly setupContext: CollectiveBgvSetupContext;
         readonly qShare: JsonRecord;
         readonly phaseTranscript: readonly SetupPhaseRecord[];

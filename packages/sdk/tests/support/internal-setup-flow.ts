@@ -92,7 +92,6 @@ export type SetupIntentInput = Readonly<{
 export type SetupPhaseParticipantObject = Readonly<
     JsonRecord & {
         readonly objectType: 'SetupPhaseParticipantObject';
-        readonly objectVersion: 1;
         readonly phaseId: string;
         readonly phaseNumber: number;
         readonly ceremonyId: string;
@@ -153,7 +152,6 @@ export type CommonRandomnessRevealInput = Readonly<{
 export type CommonRandomnessReveal = Readonly<
     JsonRecord & {
         readonly objectType: 'CommonRandomnessReveal';
-        readonly objectVersion: 1;
         readonly ceremonyId: string;
         readonly manifestHash: ProtocolHash;
         readonly rosterHash: ProtocolHash;
@@ -185,7 +183,6 @@ export type CommonRandomnessCommitInput = Readonly<{
 export type CommonRandomnessCommit = Readonly<
     JsonRecord & {
         readonly objectType: 'CommonRandomnessCommit';
-        readonly objectVersion: 1;
         readonly ceremonyId: string;
         readonly manifestHash: ProtocolHash;
         readonly rosterHash: ProtocolHash;
@@ -212,7 +209,6 @@ export type SetupCommonRandomnessInput = Readonly<{
 export type SetupCommonRandomness = Readonly<
     JsonRecord & {
         readonly objectType: 'SetupCommonRandomness';
-        readonly objectVersion: 1;
         readonly ceremonyId: string;
         readonly manifestHash: ProtocolHash;
         readonly rosterHash: ProtocolHash;
@@ -224,7 +220,6 @@ export type SetupCommonRandomness = Readonly<
         readonly publicDerivations: Readonly<
             JsonRecord & {
                 readonly objectType: 'SetupPublicDerivations';
-                readonly objectVersion: 1;
                 readonly publicMatrixSeedHash: ProtocolHash;
                 readonly publicDerivationRoot: ProtocolHash;
             }
@@ -236,7 +231,6 @@ export type SetupCommonRandomness = Readonly<
 export type PrivateVssEnvelopeVerificationReference = Readonly<
     JsonRecord & {
         readonly objectType: 'PrivateVssEnvelopeCommitment';
-        readonly objectVersion: 1;
         readonly ceremonyId: string;
         readonly manifestHash: ProtocolHash;
         readonly rosterHash: ProtocolHash;
@@ -281,7 +275,6 @@ export type VssShareAcceptanceInput = Readonly<{
 export type VssShareAcceptance = Readonly<
     JsonRecord & {
         readonly objectType: 'VssShareAcceptance';
-        readonly objectVersion: 1;
         readonly sourceTrusteeIdentity: string;
         readonly sourceTrusteeRosterPosition: number;
         readonly recipientIdentity: string;
@@ -315,7 +308,6 @@ export type VssComplaintInput = Readonly<{
 export type VssComplaint = Readonly<
     JsonRecord & {
         readonly objectType: 'VssShareComplaint';
-        readonly objectVersion: 1;
         readonly sourceTrusteeIdentity: string;
         readonly sourceTrusteeRosterPosition: number;
         readonly recipientIdentity: string;
@@ -339,7 +331,6 @@ export type VssComplaint = Readonly<
 export type LocalTrusteeSetupStateDeletionReceipt = Readonly<
     JsonRecord & {
         readonly objectType: 'LocalTrusteeSetupStateDeletionReceipt';
-        readonly objectVersion: 1;
         readonly setupEpoch: string;
         readonly trusteeIdentity: string;
         readonly trusteeRosterPosition: number;
@@ -352,7 +343,6 @@ export type LocalTrusteeSetupStateDeletionReceipt = Readonly<
 export type LocalTrusteeSetupStateCommitment = Readonly<
     JsonRecord & {
         readonly objectType: 'LocalTrusteeSetupStateCommitment';
-        readonly objectVersion: 1;
         readonly ceremonyId: string;
         readonly manifestHash: ProtocolHash;
         readonly rosterHash: ProtocolHash;
@@ -374,7 +364,6 @@ export type LocalTrusteeSetupStateCommitment = Readonly<
 export type LocalTrusteeSetupStateSealedMaterial = Readonly<
     JsonRecord & {
         readonly objectType: 'LocalTrusteeSetupStateSealedMaterial';
-        readonly objectVersion: 1;
         readonly materialClass: 'aggregate-threshold-share-sealed';
         readonly materialRoot: ProtocolHash;
         readonly ciphertextReference: ProtocolHash;
@@ -385,7 +374,6 @@ export type LocalTrusteeSetupStateSealedMaterial = Readonly<
 export type LocalTrusteeSetupStateSealedPayload = Readonly<
     JsonRecord & {
         readonly objectType: 'LocalTrusteeSetupStateSealedPayload';
-        readonly objectVersion: 1;
         readonly ceremonyId: string;
         readonly manifestHash: ProtocolHash;
         readonly rosterHash: ProtocolHash;
@@ -403,7 +391,6 @@ export type LocalTrusteeSetupStateSealedPayload = Readonly<
 export type EncryptedLocalTrusteeSetupState = Readonly<
     JsonRecord & {
         readonly objectType: 'EncryptedLocalTrusteeSetupState';
-        readonly objectVersion: 1;
         readonly storageScheme: string;
         readonly ciphertextContentType: 'local-trustee-setup-state';
         readonly localStateRoot: ProtocolHash;
@@ -413,8 +400,6 @@ export type EncryptedLocalTrusteeSetupState = Readonly<
         readonly keyCommitmentHash: ProtocolHash;
         readonly aeadNonceHex: string;
         readonly ciphertextBytesHex: string;
-        readonly ciphertextBytesHash: ProtocolHash;
-        readonly ciphertextByteLength: number;
         readonly plaintextByteLength: number;
         readonly aeadTagLength: 128;
         readonly encryptedLocalStateHash: ProtocolHash;
@@ -440,7 +425,6 @@ export type SetupContributionInput = Readonly<{
 export type SetupContribution = Readonly<
     JsonRecord & {
         readonly objectType: 'SetupContributionAssembly';
-        readonly objectVersion: 1;
         readonly ceremonyId: string;
         readonly manifestHash: ProtocolHash;
         readonly rosterHash: ProtocolHash;

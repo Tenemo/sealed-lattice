@@ -75,7 +75,6 @@ export type SetupCertificatesInput = Readonly<{
 export type SetupTransportCertificate = Readonly<
     JsonRecord & {
         readonly objectType: 'SetupTransportCertificate';
-        readonly objectVersion: 1;
         readonly setupTransportCertificateHash: ProtocolHash;
     }
 >;
@@ -83,7 +82,6 @@ export type SetupTransportCertificate = Readonly<
 export type SetupTransportCertificateBody = Readonly<
     JsonRecord & {
         readonly objectType: 'SetupTransportCertificate';
-        readonly objectVersion: 1;
     }
 >;
 
@@ -93,7 +91,6 @@ export type SetupCertificates = Readonly<{
 
 export type SetupTransportedObjectRecord = Readonly<{
     readonly objectType: 'SetupTransportedObject';
-    readonly objectVersion: 1;
     readonly objectName: string;
     readonly objectRole: string;
     readonly objectRoot: ProtocolHash;

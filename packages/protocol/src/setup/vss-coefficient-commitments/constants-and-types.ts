@@ -108,7 +108,6 @@ export type VssSourceTrusteeCoefficientOpeningStateProviderInput = Readonly<{
 export type VssCoefficientCommitmentRecord = Readonly<
     JsonRecord & {
         readonly objectType: 'VssCoefficientCommitment';
-        readonly objectVersion: 1;
         readonly sourceTrusteeIdentity: string;
         readonly sourceTrusteeRosterPosition: number;
         readonly publicMatrixSeedHash: ProtocolHash;
@@ -122,7 +121,6 @@ export type VssCoefficientCommitmentRecord = Readonly<
 export type VssSourceTrusteeCoefficientCommitmentRecord = Readonly<
     JsonRecord & {
         readonly objectType: 'VssSourceTrusteeCoefficientCommitments';
-        readonly objectVersion: 1;
         readonly sourceTrusteeIdentity: string;
         readonly sourceTrusteeRosterPosition: number;
         readonly publicMatrixSeedHash: ProtocolHash;
@@ -134,7 +132,6 @@ export type VssSourceTrusteeCoefficientCommitmentRecord = Readonly<
 export type VssCoefficientCommitmentMaterialRecord = Readonly<
     JsonRecord & {
         readonly objectType: 'VssCoefficientCommitmentMaterial';
-        readonly objectVersion: 1;
         readonly sourceTrusteeIdentity: string;
         readonly sourceTrusteeRosterPosition: number;
         readonly publicMatrixSeedHash: ProtocolHash;
@@ -149,7 +146,6 @@ export type VssCoefficientCommitmentMaterialRecord = Readonly<
 export type VssCoefficientCommitmentSet = Readonly<
     JsonRecord & {
         readonly objectType: 'VssCoefficientCommitmentSet';
-        readonly objectVersion: 1;
         readonly publicMatrixSeedHash: ProtocolHash;
         readonly sourceTrusteeRecords: readonly VssSourceTrusteeCoefficientCommitmentRecord[];
         readonly vssCoefficientCommitmentRoot: ProtocolHash;
@@ -159,7 +155,6 @@ export type VssCoefficientCommitmentSet = Readonly<
 export type VssCoefficientCommitmentMaterialSet = Readonly<
     JsonRecord & {
         readonly objectType: 'VssCoefficientCommitmentMaterialSet';
-        readonly objectVersion: 1;
         readonly publicMatrixSeedHash: ProtocolHash;
         readonly vssCoefficientCommitmentRoot: ProtocolHash;
         readonly materialEncoding: 'full-public-setup-commitment-values';

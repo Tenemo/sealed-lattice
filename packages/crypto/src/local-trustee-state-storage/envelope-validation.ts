@@ -5,7 +5,6 @@ import { canonicalJson, hash512Hex } from '../canonical-json.js';
 import {
     assertStorageKeyCommitment,
     decodeCanonicalHex,
-    hashBytes,
     hashCanonicalValue,
     sealedMaterialAad,
     sealedMaterialStorageKeyCommitmentHash,
@@ -224,7 +223,7 @@ function validateEncryptedSealedMaterialEnvelope(
         aesGcmNonceByteLength,
         `${objectPath}.aeadNonceHex`,
     );
-    const ciphertextBytes = decodeCanonicalHex(
+    decodeCanonicalHex(
         stringField(
             encryptedMaterial,
             'ciphertextBytesHex',
@@ -232,19 +231,6 @@ function validateEncryptedSealedMaterialEnvelope(
         ),
         `${objectPath}.ciphertextBytesHex`,
     );
-    const ciphertextByteLength = numberField(
-        encryptedMaterial,
-        'ciphertextByteLength',
-    );
-    assertNonNegativeSafeInteger(
-        ciphertextByteLength,
-        `${objectPath}.ciphertextByteLength`,
-    );
-    if (ciphertextBytes.byteLength !== ciphertextByteLength) {
-        throw new Error(
-            `${objectPath}.ciphertextByteLength must match ciphertextBytesHex.`,
-        );
-    }
     assertNonNegativeSafeInteger(
         numberField(encryptedMaterial, 'plaintextByteLength'),
         `${objectPath}.plaintextByteLength`,
@@ -252,15 +238,6 @@ function validateEncryptedSealedMaterialEnvelope(
     if (encryptedMaterial.aeadTagLength !== aesGcmTagBitLength) {
         throw new TypeError(
             `${objectPath}.aeadTagLength must be ${String(aesGcmTagBitLength)}.`,
-        );
-    }
-    const expectedCiphertextHash = hashBytes(
-        'sealed-lattice-local-trustee-state/sealed-material-ciphertext-bytes-v1',
-        ciphertextBytes,
-    );
-    if (encryptedMaterial.ciphertextBytesHash !== expectedCiphertextHash) {
-        throw new Error(
-            `${objectPath}.ciphertextBytesHash does not match ciphertextBytesHex.`,
         );
     }
     const envelopeWithoutHash = {

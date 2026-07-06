@@ -456,7 +456,6 @@ export const createPublicKeyShareSuccinctProofSet = (
             }
             const proofRecordWithoutRoot = {
                 objectType: 'PublicKeyShareSuccinctProof',
-                objectVersion: 1,
                 proofFamily: publicKeyShareProofFamily,
                 ...contextFields(input.setupContext),
                 trusteeIdentity: shareRecord.trusteeIdentity,
@@ -492,7 +491,6 @@ export const createPublicKeyShareSuccinctProofSet = (
     );
     const proofSetWithoutRoot = {
         objectType: 'PublicKeyShareSuccinctProofSet',
-        objectVersion: 1,
         proofFamily: publicKeyShareProofFamily,
         ...contextFields(input.setupContext),
         participantCount: input.participantCount,

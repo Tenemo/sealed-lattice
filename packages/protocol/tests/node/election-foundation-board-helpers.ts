@@ -54,7 +54,6 @@ export const createBoardHead = (
     ];
     const unsignedHead: SignedBoardHead = {
         objectType: 'BoardHead',
-        objectVersion: 1,
         headHash: '',
         ceremonyId,
         boardSequence,
@@ -223,7 +222,6 @@ export const createWitnessCheckpoint = (
 ): WitnessCheckpoint => {
     const checkpointPayload = {
         objectType: 'WitnessCheckpoint',
-        objectVersion: 1,
         ceremonyId,
         targetFinalityScope: 'target',
         targetProposalHash,
@@ -301,7 +299,6 @@ export const createTargetFinalityRecord = (
         ...proposalPayload,
         targetProposalHash,
         objectType: 'TargetFinalityCheckpoint',
-        objectVersion: 1,
         boardPolicyHash,
         finalizedBoardHeadHash: finalizedHead.headHash,
         witnessPolicyHash,
@@ -331,7 +328,6 @@ export const createTargetFinalityRecord = (
         );
     const payload = {
         objectType: 'TargetFinalityRecord',
-        objectVersion: 1,
         ceremonyId,
         targetFinalityScope: 'target',
         targetProposalHash,

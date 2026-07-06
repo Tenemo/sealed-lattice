@@ -42,7 +42,6 @@ export type SetupPhaseParticipantObjectInput = {
 export type SetupPhaseParticipantObject = Readonly<
     JsonRecord & {
         readonly objectType: 'SetupPhaseParticipantObject';
-        readonly objectVersion: 1;
         readonly phaseId: string;
         readonly phaseNumber: number;
         readonly trusteeIdentity: string;
@@ -72,7 +71,6 @@ export type SetupPhaseRecord = Readonly<
 
 type SetupPhasePayload = Readonly<{
     readonly objectType: 'SetupPhaseParticipantObject';
-    readonly objectVersion: 1;
     readonly phaseId: string;
     readonly phaseNumber: number;
     readonly ceremonyId: string;
@@ -100,7 +98,6 @@ const phasePayload = (
 ): SetupPhasePayload => {
     const payload = {
         objectType: 'SetupPhaseParticipantObject',
-        objectVersion: 1,
         phaseId: input.phaseId,
         phaseNumber: input.phaseNumber,
         ceremonyId: input.setupContext.ceremonyId,
@@ -236,7 +233,6 @@ export const createSetupPhaseParticipantObject = async (
     );
     const signedRoot = {
         objectType: 'SetupPhaseParticipantObject',
-        objectVersion: 1,
         ceremonyId: input.setupContext.ceremonyId,
         manifestHash: input.setupContext.manifestHash,
         boardHeadHash: null,

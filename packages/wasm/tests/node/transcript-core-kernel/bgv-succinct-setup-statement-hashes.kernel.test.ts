@@ -120,7 +120,6 @@ const privateVssRequest = (
             }
             coefficientCommitments.push({
                 objectType: 'VssCoefficientCommitment',
-                objectVersion: 1,
                 ceremonyId: 'statement-vector-ceremony',
                 manifestHash: repeatedHash('10'),
                 rosterHash: repeatedHash('20'),
@@ -136,7 +135,6 @@ const privateVssRequest = (
             });
             materialRecords.push({
                 objectType: 'VssCoefficientCommitmentMaterial',
-                objectVersion: 1,
                 ceremonyId: 'statement-vector-ceremony',
                 manifestHash: repeatedHash('10'),
                 rosterHash: repeatedHash('20'),
@@ -156,7 +154,6 @@ const privateVssRequest = (
 
     const sourceTrusteeRecord: JsonRecord = {
         objectType: 'VssSourceTrusteeCoefficientCommitments',
-        objectVersion: 1,
         ceremonyId: 'statement-vector-ceremony',
         manifestHash: repeatedHash('10'),
         rosterHash: repeatedHash('20'),

@@ -18,7 +18,6 @@ export type JsonRecord = Record<string, unknown>;
 export type EncryptedLocalTrusteeSetupMaterial = Readonly<
     JsonRecord & {
         readonly objectType: 'EncryptedLocalTrusteeSetupMaterial';
-        readonly objectVersion: 1;
         readonly storageScheme: typeof localTrusteeSealedMaterialStorageFormat;
         readonly ciphertextContentType: typeof localSealedMaterialCiphertextContentType;
         readonly materialClass: 'aggregate-threshold-share-sealed';
@@ -28,8 +27,6 @@ export type EncryptedLocalTrusteeSetupMaterial = Readonly<
         readonly keyCommitmentHash: ProtocolHash;
         readonly aeadNonceHex: string;
         readonly ciphertextBytesHex: string;
-        readonly ciphertextBytesHash: ProtocolHash;
-        readonly ciphertextByteLength: number;
         readonly plaintextByteLength: number;
         readonly aeadTagLength: typeof aesGcmTagBitLength;
         readonly encryptedMaterialHash: ProtocolHash;
@@ -39,7 +36,6 @@ export type EncryptedLocalTrusteeSetupMaterial = Readonly<
 export type LocalTrusteeSetupStateSealedMaterial = Readonly<
     JsonRecord & {
         readonly objectType: 'LocalTrusteeSetupStateSealedMaterial';
-        readonly objectVersion: 1;
         readonly materialClass: 'aggregate-threshold-share-sealed';
         readonly materialRoot: ProtocolHash;
         readonly ciphertextReference: ProtocolHash;
@@ -50,7 +46,6 @@ export type LocalTrusteeSetupStateSealedMaterial = Readonly<
 export type LocalTrusteeSetupStateSealedPayload = Readonly<
     JsonRecord & {
         readonly objectType: 'LocalTrusteeSetupStateSealedPayload';
-        readonly objectVersion: 1;
         readonly ceremonyId: string;
         readonly manifestHash: ProtocolHash;
         readonly rosterHash: ProtocolHash;
@@ -70,7 +65,6 @@ export type LocalTrusteeStateStorageEncryptionInput = {
     readonly localStateCommitment: Readonly<
         Record<string, unknown> & {
             readonly objectType: 'LocalTrusteeSetupStateCommitment';
-            readonly objectVersion: 1;
             readonly ceremonyId: string;
             readonly manifestHash: ProtocolHash;
             readonly rosterHash: ProtocolHash;
@@ -99,7 +93,6 @@ export type LocalTrusteeStateStorageDecryptionInput = {
 export type EncryptedLocalTrusteeSetupState = Readonly<
     Record<string, unknown> & {
         readonly objectType: 'EncryptedLocalTrusteeSetupState';
-        readonly objectVersion: 1;
         readonly storageScheme: typeof localTrusteeStateStorageFormat;
         readonly ciphertextContentType: typeof localStateCiphertextContentType;
         readonly localStateRoot: ProtocolHash;
@@ -109,8 +102,6 @@ export type EncryptedLocalTrusteeSetupState = Readonly<
         readonly keyCommitmentHash: ProtocolHash;
         readonly aeadNonceHex: string;
         readonly ciphertextBytesHex: string;
-        readonly ciphertextBytesHash: ProtocolHash;
-        readonly ciphertextByteLength: number;
         readonly plaintextByteLength: number;
         readonly aeadTagLength: typeof aesGcmTagBitLength;
         readonly encryptedLocalStateHash: ProtocolHash;
@@ -158,7 +149,6 @@ export const setupContextFieldNames = [
 
 export const localTrusteeSealedPayloadFieldNames = [
     'objectType',
-    'objectVersion',
     'ceremonyId',
     'manifestHash',
     'rosterHash',
@@ -174,7 +164,6 @@ export const localTrusteeSealedPayloadFieldNames = [
 
 export const sealedMaterialFieldNames = [
     'objectType',
-    'objectVersion',
     'materialClass',
     'materialRoot',
     'ciphertextReference',
@@ -183,7 +172,6 @@ export const sealedMaterialFieldNames = [
 
 export const encryptedSealedMaterialFieldNames = [
     'objectType',
-    'objectVersion',
     'storageScheme',
     'ciphertextContentType',
     'materialClass',
@@ -193,8 +181,6 @@ export const encryptedSealedMaterialFieldNames = [
     'keyCommitmentHash',
     'aeadNonceHex',
     'ciphertextBytesHex',
-    'ciphertextBytesHash',
-    'ciphertextByteLength',
     'plaintextByteLength',
     'aeadTagLength',
     'encryptedMaterialHash',

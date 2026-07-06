@@ -404,7 +404,6 @@ export const deriveFrozenRosterParameters = (input: {
 
     return {
         objectType: 'FrozenRosterParameters',
-        objectVersion: 1,
         thresholdParametersHash,
         pollSpecHash,
         rosterHash: input.rosterHash,

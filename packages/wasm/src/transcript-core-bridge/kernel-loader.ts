@@ -30,6 +30,10 @@ import type {
     BgvSetupProofMaterialTransportStreamBegin,
     BgvSetupProofMaterialTransportStreamChunkAbsorption,
     BgvSetupProofMaterialTransportStreamVerification,
+    BgvTargetDecryptionReleaseSetupContext,
+    BgvTargetDecryptionResultReleaseBegin,
+    BgvTargetDecryptionResultReleaseShareAbsorption,
+    BgvTargetDecryptionResultReleaseCompletion,
     TranscriptCoreKernel,
     TranscriptCoreKernelCommand,
     TranscriptCoreKernelExports,
@@ -506,6 +510,44 @@ export const createTranscriptCoreKernelLoader = (
                             verificationId: input.verificationId,
                         },
                     ),
+                deriveBgvTargetDecryptionResultReleaseSetupContext: (
+                    input,
+                ): BgvTargetDecryptionReleaseSetupContext =>
+                    executeCommand<BgvTargetDecryptionReleaseSetupContext>({
+                        command:
+                            'DeriveBgvTargetDecryptionResultReleaseSetupContext',
+                        setupPackage: input.setupPackage,
+                    }),
+                beginBgvTargetDecryptionResultRelease: (
+                    input,
+                ): BgvTargetDecryptionResultReleaseBegin =>
+                    executeCommand<BgvTargetDecryptionResultReleaseBegin>({
+                        command: 'BeginBgvTargetDecryptionResultRelease',
+                        releaseVerificationId: input.releaseVerificationId,
+                        releaseSetupContext: input.releaseSetupContext,
+                        targetAcceptedRecord: input.targetAcceptedRecord,
+                        targetCiphertexts: input.targetCiphertexts,
+                        targetCiphertextBinding: input.targetCiphertextBinding,
+                        targetShareProfile: input.targetShareProfile,
+                    }),
+                absorbBgvTargetDecryptionResultReleaseShare: (
+                    input,
+                ): BgvTargetDecryptionResultReleaseShareAbsorption =>
+                    executeCommand<BgvTargetDecryptionResultReleaseShareAbsorption>(
+                        {
+                            command:
+                                'AbsorbBgvTargetDecryptionResultReleaseShare',
+                            releaseVerificationId: input.releaseVerificationId,
+                            targetShareProof: input.targetShareProof,
+                        },
+                    ),
+                finishBgvTargetDecryptionResultRelease: (
+                    input,
+                ): BgvTargetDecryptionResultReleaseCompletion =>
+                    executeCommand<BgvTargetDecryptionResultReleaseCompletion>({
+                        command: 'FinishBgvTargetDecryptionResultRelease',
+                        releaseVerificationId: input.releaseVerificationId,
+                    }),
                 verifyLocalTrusteeSetupState: (
                     input,
                 ): BgvLocalTrusteeSetupStateVerification =>

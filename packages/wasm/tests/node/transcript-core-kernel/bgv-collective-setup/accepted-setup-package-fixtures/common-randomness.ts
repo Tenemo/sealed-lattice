@@ -69,7 +69,6 @@ function commonRandomnessSignatureEnvelope(input: {
         secretKeyBytesHex: keyFixture.secretKeyBytesHex,
         signedRoot: {
             objectType: input.objectType,
-            objectVersion: 1,
             ceremonyId: String(input.payload.ceremonyId),
             manifestHash: String(input.payload.manifestHash),
             boardHeadHash: null,
@@ -113,7 +112,6 @@ export function acceptedCommonRandomness(
             .slice(0, 64);
         const revealPayload: JsonRecord = {
             objectType: 'CommonRandomnessReveal',
-            objectVersion: 1,
             ceremonyId: setupRequest.ceremonyId,
             manifestHash: setupRequest.manifestHash,
             rosterHash,
@@ -148,7 +146,6 @@ export function acceptedCommonRandomness(
 
         const commitPayload: JsonRecord = {
             objectType: 'CommonRandomnessCommit',
-            objectVersion: 1,
             ceremonyId: setupRequest.ceremonyId,
             manifestHash: setupRequest.manifestHash,
             rosterHash,
@@ -202,7 +199,6 @@ export function acceptedCommonRandomness(
     ).toEqual(expect.any(Number));
     const commonRandomness: JsonRecord = {
         objectType: 'SetupCommonRandomness',
-        objectVersion: 1,
         ceremonyId: setupRequest.ceremonyId,
         manifestHash: setupRequest.manifestHash,
         rosterHash,

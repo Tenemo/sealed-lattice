@@ -39,21 +39,18 @@ describe('roster and manifest shells', () => {
             rosterEntries: [
                 {
                     objectType: 'CollectiveBgvSetupRosterEntry',
-                    objectVersion: 1,
                     rosterPosition: 0,
                     trusteeIdentity: 'trustee-0',
                     signingPublicKeyHash: 'a'.repeat(128),
                 },
                 {
                     objectType: 'CollectiveBgvSetupRosterEntry',
-                    objectVersion: 1,
                     rosterPosition: 1,
                     trusteeIdentity: 'trustee-1',
                     signingPublicKeyHash: 'b'.repeat(128),
                 },
                 {
                     objectType: 'CollectiveBgvSetupRosterEntry',
-                    objectVersion: 1,
                     rosterPosition: 2,
                     trusteeIdentity: 'trustee-2',
                     signingPublicKeyHash: 'c'.repeat(128),

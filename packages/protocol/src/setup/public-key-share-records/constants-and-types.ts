@@ -59,7 +59,6 @@ export type PublicKeyShareMaterialContributionInput = Readonly<{
 export type PublicKeyShareRecord = Readonly<
     JsonRecord & {
         readonly objectType: 'PublicKeyShare';
-        readonly objectVersion: 1;
         readonly trusteeIdentity: string;
         readonly trusteeRosterPosition: number;
         readonly publicMatrixSeedHash: ProtocolHash;
@@ -77,7 +76,6 @@ export type PublicKeyShareRecord = Readonly<
 export type PublicKeyShareSet = Readonly<
     JsonRecord & {
         readonly objectType: 'PublicKeyShareSet';
-        readonly objectVersion: 1;
         readonly participantCount: number;
         readonly rnsLimbCount: number;
         readonly publicMatrixSeedHash: ProtocolHash;
@@ -92,7 +90,6 @@ export type PublicKeyShareSet = Readonly<
 export type PublicKeyShareProofRecord = Readonly<
     JsonRecord & {
         readonly objectType: 'PublicKeyShareProof';
-        readonly objectVersion: 1;
         readonly proofFamily: typeof publicKeyShareProofFamily;
         readonly trusteeIdentity: string;
         readonly trusteeRosterPosition: number;
@@ -110,7 +107,6 @@ export type PublicKeyShareProofRecord = Readonly<
 export type PublicKeyShareProofSet = Readonly<
     JsonRecord & {
         readonly objectType: 'PublicKeyShareProofSet';
-        readonly objectVersion: 1;
         readonly proofFamily: typeof publicKeyShareProofFamily;
         readonly participantCount: number;
         readonly rnsLimbCount: number;
@@ -127,7 +123,6 @@ export type PublicKeyShareProofSet = Readonly<
 export type PublicKeyShareMaterialRecord = Readonly<
     JsonRecord & {
         readonly objectType: 'PublicKeyShareMaterial';
-        readonly objectVersion: 1;
         readonly proofFamily: typeof publicKeyShareProofFamily;
         readonly materialEncoding: typeof publicKeyShareMaterialEncoding;
         readonly trusteeIdentity: string;
@@ -152,7 +147,6 @@ export type PublicKeyShareMaterialRootReference = Readonly<{
 export type PublicKeyShareMaterialSet = Readonly<
     JsonRecord & {
         readonly objectType: 'PublicKeyShareMaterialSet';
-        readonly objectVersion: 1;
         readonly proofFamily: typeof publicKeyShareProofFamily;
         readonly materialEncoding: typeof publicKeyShareMaterialEncoding;
         readonly participantCount: number;
@@ -171,7 +165,6 @@ export type PublicKeyShareMaterialSet = Readonly<
 export type BinaryChunkedPublicKeyShareMaterialSet = Readonly<
     JsonRecord & {
         readonly objectType: 'PublicKeyShareMaterialSet';
-        readonly objectVersion: 1;
         readonly proofFamily: typeof publicKeyShareProofFamily;
         readonly materialEncoding: typeof publicKeyShareMaterialTransportEncoding;
         readonly binaryFormat: typeof publicKeyShareMaterialBinaryFormat;
@@ -198,7 +191,6 @@ export type BinaryChunkedPublicKeyShareMaterialSet = Readonly<
 export type SetupTransportedPublicKeyShareMaterial = Readonly<
     JsonRecord & {
         readonly objectType: 'SetupTransportedPublicKeyShareMaterial';
-        readonly objectVersion: 1;
         readonly binaryFormat: typeof publicKeyShareMaterialBinaryFormat;
         readonly chunkSizeBytes: typeof setupTransportChunkSizeBytes;
         readonly chunkCount: number;
@@ -260,7 +252,6 @@ export type PublicKeyShareSuccinctProofRecord = Readonly<
     JsonRecord &
         PublicKeyShareSuccinctProofByteMaterial & {
             readonly objectType: 'PublicKeyShareSuccinctProof';
-            readonly objectVersion: 1;
             readonly proofFamily: typeof publicKeyShareProofFamily;
             readonly trusteeIdentity: string;
             readonly trusteeRosterPosition: number;
@@ -281,7 +272,6 @@ export type PublicKeyShareSuccinctProofRecord = Readonly<
 export type PublicKeyShareSuccinctProofSet = Readonly<
     JsonRecord & {
         readonly objectType: 'PublicKeyShareSuccinctProofSet';
-        readonly objectVersion: 1;
         readonly proofFamily: typeof publicKeyShareProofFamily;
         readonly participantCount: number;
         readonly rnsLimbCount: number;
@@ -320,7 +310,6 @@ export type CollectivePublicKeyCoefficientVectorMaterial = Readonly<
 export type CollectivePublicKey = Readonly<
     JsonRecord & {
         readonly objectType: 'CollectivePublicKey';
-        readonly objectVersion: 1;
         readonly proofFamily: typeof publicKeyShareProofFamily;
         readonly materialEncoding: 'embedded-full-collective-public-key-coefficients';
         readonly participantCount: number;

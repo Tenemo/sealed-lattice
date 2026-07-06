@@ -203,7 +203,6 @@ const relinearizationKeySwitchSeed = (
 ): ProtocolHash =>
     deriveCanonicalObjectHash({
         objectType: 'RelinearizationKeySwitchPublicSampleSeed',
-        objectVersion: 1,
         proofFamily: 'relinearization-key-share',
         keySwitchSampleScope: 'shared-by-scheduled-level-and-round',
         evaluatorKeyScheduleRoot: evaluatorKeySchedule.evaluatorKeyScheduleRoot,
@@ -219,7 +218,6 @@ const galoisKeySwitchSeed = (
 ): ProtocolHash =>
     deriveCanonicalObjectHash({
         objectType: 'GaloisKeySwitchPublicSampleSeed',
-        objectVersion: 1,
         proofFamily: 'galois-key-share',
         keySwitchSampleScope: 'shared-by-scheduled-rotation-and-level',
         evaluatorKeyScheduleRoot: evaluatorKeySchedule.evaluatorKeyScheduleRoot,
@@ -465,7 +463,6 @@ export const createRelinearizationKeyShareRounds = (
                 );
                 const recordWithoutRoot = {
                     objectType: 'RelinearizationKeyShareRoundOne',
-                    objectVersion: 1,
                     proofFamily: 'relinearization-key-share',
                     ...contextFields(input.setupContext),
                     trusteeIdentity: proofReference.trusteeIdentity,
@@ -508,7 +505,6 @@ export const createRelinearizationKeyShareRounds = (
         );
         const roundOneAggregateRoot = deriveCanonicalObjectHash({
             objectType: 'RelinearizationRoundOneAggregate',
-            objectVersion: 1,
             evaluatorKeyScheduleRoot:
                 input.evaluatorKeySchedule.evaluatorKeyScheduleRoot,
             level,
@@ -563,7 +559,6 @@ export const createRelinearizationKeyShareRounds = (
                 );
                 const recordWithoutRoot = {
                     objectType: 'RelinearizationKeyShareRoundTwo',
-                    objectVersion: 1,
                     proofFamily: 'relinearization-key-share',
                     ...contextFields(input.setupContext),
                     trusteeIdentity: proofReference.trusteeIdentity,
@@ -613,7 +608,6 @@ export const createRelinearizationKeyShareRounds = (
         }
         const roundTwoAggregateRoot = deriveCanonicalObjectHash({
             objectType: 'RelinearizationRoundTwoAggregate',
-            objectVersion: 1,
             evaluatorKeyScheduleRoot:
                 input.evaluatorKeySchedule.evaluatorKeyScheduleRoot,
             level,
@@ -629,7 +623,6 @@ export const createRelinearizationKeyShareRounds = (
 
     const roundsWithoutRoot = {
         objectType: 'RelinearizationKeyShareRounds',
-        objectVersion: 1,
         proofFamily: 'relinearization-key-share',
         ...contextFields(input.setupContext),
         participantCount: input.participantCount,
@@ -741,7 +734,6 @@ export const createGaloisKeyShareBatches = (
 
                 return {
                     objectType: 'GaloisKeyShareMaterial',
-                    objectVersion: 1,
                     proofFamily: 'galois-key-share',
                     trusteeIdentity: proofReference.trusteeIdentity,
                     trusteeRosterPosition: proofReference.trusteeRosterPosition,
@@ -756,7 +748,6 @@ export const createGaloisKeyShareBatches = (
         );
         const batchWithoutRoot = {
             objectType: 'GaloisKeyShareBatch',
-            objectVersion: 1,
             proofFamily: 'galois-key-share',
             ...contextFields(input.setupContext),
             trusteeIdentity: proofReference.trusteeIdentity,

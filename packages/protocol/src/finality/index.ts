@@ -386,7 +386,6 @@ const verifyWitnessCheckpoint = (
 
     const signatureResult = verifySignedObjectSignature(checkpoint.signature, {
         objectType: 'WitnessCheckpoint',
-        objectVersion: 1,
         signerRole: 'Witness',
         signerIdentity: checkpoint.witnessIdentity,
         ceremonyId: record.ceremonyId,

@@ -68,7 +68,6 @@ function transportedObjectRecords(
         objectRoots.add(input.objectRoot);
         transportedObjects.push({
             objectType: 'SetupTransportedObject',
-            objectVersion: 1,
             objectName: input.objectName,
             objectRole: input.objectRole,
             objectRoot: input.objectRoot,
@@ -110,7 +109,6 @@ const setupTransportCertificateBody = (
 
     return {
         objectType: 'SetupTransportCertificate',
-        objectVersion: 1,
         setupParametersHash: setupParameters.setupParametersHash,
         largeObjectEncoding: 'binary',
         chunking: 'required',

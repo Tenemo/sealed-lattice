@@ -169,7 +169,6 @@ export const setupProofChunkManifestRoot = (
 ): ProtocolHash =>
     deriveCanonicalObjectHash({
         objectType: 'SetupProofMaterialChunkManifest',
-        objectVersion: 1,
         proofFamily,
         chunkSizeBytes: setupProofTransportChunkSizeBytes,
         chunkCount: chunkHashes.length,
@@ -222,7 +221,6 @@ export type TransportedSetupProofMaterialSet<
 > = Readonly<
     JsonRecord & {
         readonly objectType: ObjectType;
-        readonly objectVersion: 1;
         readonly proofFamily: string;
         readonly proofMaterials: readonly JsonRecord[];
     }
@@ -231,7 +229,6 @@ export type TransportedSetupProofMaterialSet<
 export type VerifiedSetupProofMaterial = Readonly<
     JsonRecord & {
         readonly objectType: 'VerifiedSetupProofMaterial';
-        readonly objectVersion: 1;
         readonly verificationId: string;
         readonly proofFamily: string;
         readonly proofMaterialRoot: ProtocolHash;
@@ -248,7 +245,6 @@ export type VerifiedSetupProofMaterial = Readonly<
 export type VerifiedSetupProofMaterialSet = Readonly<
     JsonRecord & {
         readonly objectType: 'VerifiedSetupProofMaterialSet';
-        readonly objectVersion: 1;
         readonly proofMaterials: readonly VerifiedSetupProofMaterial[];
     }
 >;

@@ -97,7 +97,6 @@ describe('private VSS mailbox delivery', () => {
         );
         const expectedChunkRoot = deriveCanonicalObjectHash({
             objectType: 'SetupProofMaterialChunkManifest',
-            objectVersion: 1,
             proofFamily: 'vss-opening-carry',
             chunkSizeBytes: setupProofTransportChunkSizeBytes,
             chunkCount: 1,
@@ -107,7 +106,6 @@ describe('private VSS mailbox delivery', () => {
         });
         const expectedTransportedMaterialRoot = deriveCanonicalObjectHash({
             objectType: 'PrivateVssShareTransportedSuccinctProofMaterial',
-            objectVersion: 1,
             proofFamily: 'vss-opening-carry',
             proofBytesEncoding: 'binary-chunked-proof-bytes',
             statementHash: fixtureHash('statement-hash'),
@@ -167,7 +165,6 @@ describe('private VSS mailbox delivery', () => {
             privateVssShareProofMaterialEncoding: 'binary-chunked-proof-bytes',
             privateVssShareProofFactory: () => ({
                 objectType: 'PrivateVssShareProof',
-                objectVersion: 1,
                 proofId: 'sealed-lattice-private-vss-share-proof-succinct-v1',
                 proofFamily: 'vss-opening-carry',
                 proofBytesEncoding: 'embedded-binary-proof-bytes-hex',
@@ -291,7 +288,6 @@ describe('private VSS mailbox delivery', () => {
                 verificationPhaseNumber: 7,
                 privateVssShareProofFactory: ({ rnsLimbIndex }) => ({
                     objectType: 'PrivateVssShareProof',
-                    objectVersion: 1,
                     proofId:
                         'sealed-lattice-private-vss-share-proof-succinct-v1',
                     proofFamily: 'vss-opening-carry',

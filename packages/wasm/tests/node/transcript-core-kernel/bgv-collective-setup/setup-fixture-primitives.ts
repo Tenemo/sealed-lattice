@@ -70,7 +70,6 @@ export const collectiveSetupRosterHash = (
 
                     return {
                         objectType: 'CollectiveBgvSetupRosterEntry',
-                        objectVersion: 1,
                         rosterPosition,
                         trusteeIdentity,
                         signingPublicKeyHash,

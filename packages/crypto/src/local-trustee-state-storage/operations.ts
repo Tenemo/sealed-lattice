@@ -8,7 +8,6 @@ import {
     assertStorageKeyCommitment,
     deriveAesGcmKeyBytes,
     deriveSealedMaterialAesGcmKeyBytes,
-    hashBytes,
     hashCanonicalValue,
     importAesGcmKey,
     localStateStorageKeyCommitmentHash,
@@ -108,7 +107,6 @@ export const encryptLocalTrusteeSetupSealedMaterial = async (
     );
     const encryptedMaterialWithoutHash = {
         objectType: 'EncryptedLocalTrusteeSetupMaterial',
-        objectVersion: 1,
         storageScheme: localTrusteeSealedMaterialStorageFormat,
         ciphertextContentType: localSealedMaterialCiphertextContentType,
         materialClass: input.materialClass,
@@ -119,11 +117,6 @@ export const encryptLocalTrusteeSetupSealedMaterial = async (
             sealedMaterialStorageKeyCommitmentHash(storageKeyBytes),
         aeadNonceHex: bytesToHex(nonceBytes),
         ciphertextBytesHex: bytesToHex(ciphertextBytes),
-        ciphertextBytesHash: hashBytes(
-            'sealed-lattice-local-trustee-state/sealed-material-ciphertext-bytes-v1',
-            ciphertextBytes,
-        ),
-        ciphertextByteLength: ciphertextBytes.byteLength,
         plaintextByteLength: materialPlaintextBytes.byteLength,
         aeadTagLength: aesGcmTagBitLength,
     } as const satisfies Omit<
@@ -142,7 +135,6 @@ export const encryptLocalTrusteeSetupSealedMaterial = async (
     return {
         sealedMaterial: {
             objectType: 'LocalTrusteeSetupStateSealedMaterial',
-            objectVersion: 1,
             materialClass: input.materialClass,
             materialRoot,
             ciphertextReference: encryptedMaterial.encryptedMaterialHash,
@@ -216,7 +208,6 @@ export const encryptLocalTrusteeState = async (
     );
     const envelopeWithoutHash = {
         objectType: 'EncryptedLocalTrusteeSetupState',
-        objectVersion: 1,
         storageScheme: localTrusteeStateStorageFormat,
         ciphertextContentType: localStateCiphertextContentType,
         localStateRoot: input.localStateCommitment.localStateRoot,
@@ -226,11 +217,6 @@ export const encryptLocalTrusteeState = async (
         keyCommitmentHash: localStateStorageKeyCommitmentHash(storageKeyBytes),
         aeadNonceHex: bytesToHex(nonceBytes),
         ciphertextBytesHex: bytesToHex(ciphertextBytes),
-        ciphertextBytesHash: hashBytes(
-            'sealed-lattice-local-trustee-state/ciphertext-bytes-v1',
-            ciphertextBytes,
-        ),
-        ciphertextByteLength: ciphertextBytes.byteLength,
         plaintextByteLength: plaintextBytes.byteLength,
         aeadTagLength: aesGcmTagBitLength,
     } as const;
@@ -344,17 +330,6 @@ export const decryptLocalTrusteeState = async (
     const ciphertextBytes = hexToBytes(
         input.encryptedLocalState.ciphertextBytesHex,
     );
-    const expectedCiphertextHash = hashBytes(
-        'sealed-lattice-local-trustee-state/ciphertext-bytes-v1',
-        ciphertextBytes,
-    );
-    if (
-        input.encryptedLocalState.ciphertextBytesHash !== expectedCiphertextHash
-    ) {
-        throw new Error(
-            'encryptedLocalState.ciphertextBytesHash does not match ciphertextBytesHex.',
-        );
-    }
     const plaintextBytes = new Uint8Array(
         await subtleCrypto().decrypt(
             {

@@ -440,7 +440,6 @@ const relinearizationKeySwitchSeed = (
 ): string =>
     canonicalObjectHashFromKernel(kernel, {
         objectType: 'RelinearizationKeySwitchPublicSampleSeed',
-        objectVersion: 1,
         proofFamily: 'relinearization-key-share',
         keySwitchSampleScope: 'shared-by-scheduled-level-and-round',
         evaluatorKeyScheduleRoot: evaluatorKeySchedule.evaluatorKeyScheduleRoot,
@@ -457,7 +456,6 @@ const galoisKeySwitchSeed = (
 ): string =>
     canonicalObjectHashFromKernel(kernel, {
         objectType: 'GaloisKeySwitchPublicSampleSeed',
-        objectVersion: 1,
         proofFamily: 'galois-key-share',
         keySwitchSampleScope: 'shared-by-scheduled-rotation-and-level',
         evaluatorKeyScheduleRoot: evaluatorKeySchedule.evaluatorKeyScheduleRoot,
@@ -559,7 +557,6 @@ export const phaseObject = (
     phaseId = `phase-${String(phaseNumber)}`,
 ): Record<string, unknown> => ({
     objectType: 'SetupPhaseParticipantObject',
-    objectVersion: 1,
     phaseId,
     phaseNumber,
     trusteeIdentity,
@@ -636,7 +633,6 @@ export const localStateInput = (
     );
     const privateEnvelope = {
         objectType: 'PrivateVssShareEnvelope',
-        objectVersion: 1,
         ...commonFields,
         sourceTrusteeIdentity: trusteeIdentity,
         sourceTrusteeRosterPosition: trusteeRosterPosition,
@@ -646,7 +642,6 @@ export const localStateInput = (
         rnsShareOpenings: [
             {
                 objectType: 'PrivateVssShareOpening',
-                objectVersion: 1,
                 rnsLimbIndex: 0,
                 rnsPrime: 65_537,
                 shareValues: [7, 11, 13, 17],
@@ -668,12 +663,10 @@ export const localStateInput = (
         deviceEpoch: 2,
         thresholdShareCommitments: {
             objectType: 'ThresholdShareCommitmentSet',
-            objectVersion: 1,
             ...commonFields,
             recipientRecords: [
                 {
                     objectType: 'ThresholdShareCommitmentRecipient',
-                    objectVersion: 1,
                     recipientIdentity: trusteeIdentity,
                     recipientRosterPosition: trusteeRosterPosition,
                     recipientCommitmentRoot: hashFromKernel(
@@ -685,14 +678,12 @@ export const localStateInput = (
         },
         privateVssEnvelopeCommitments: {
             objectType: 'PrivateVssEnvelopeCommitmentSet',
-            objectVersion: 1,
             ...commonFields,
             participantCount: 1,
             privateVssEnvelopeCommitmentRoot,
             envelopeReferences: [
                 {
                     objectType: 'PrivateVssEnvelopeCommitment',
-                    objectVersion: 1,
                     ...commonFields,
                     sourceTrusteeIdentity: trusteeIdentity,
                     sourceTrusteeRosterPosition: trusteeRosterPosition,
@@ -718,12 +709,10 @@ export const localStateInput = (
         verifiedPrivateVssShareEnvelopes: [privateEnvelope],
         vssShareAcceptances: {
             objectType: 'VssShareAcceptanceSet',
-            objectVersion: 1,
             ...commonFields,
             acceptanceRecords: [
                 {
                     objectType: 'VssShareAcceptance',
-                    objectVersion: 1,
                     ...commonFields,
                     sourceTrusteeIdentity: trusteeIdentity,
                     sourceTrusteeRosterPosition: trusteeRosterPosition,
@@ -750,7 +739,6 @@ export const privateVssEnvelopeReference = (
     setupContext: SetupContextFixture,
 ): Record<string, unknown> => ({
     objectType: 'PrivateVssEnvelopeCommitment',
-    objectVersion: 1,
     ...contextFields(setupContext),
     sourceTrusteeIdentity: 'trustee-1',
     sourceTrusteeRosterPosition: 1,

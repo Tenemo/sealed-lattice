@@ -296,7 +296,6 @@ describe('accepted setup public package API in Node', () => {
             });
         const trusteeEvaluationKeyProofsWithoutRoot = {
             objectType: 'TrusteeEvaluationKeyProofSet',
-            objectVersion: 1,
             relinearizationKeyShareRoundsRoot:
                 relinearizationKeyShareRounds.relinearizationKeyShareRoundsRoot,
             proofRecords: [],
@@ -427,7 +426,6 @@ describe('accepted setup public package API in Node', () => {
             >;
         const commonRandomnessWithoutRoot = {
             objectType: 'SetupCommonRandomness',
-            objectVersion: 1,
             ceremonyId: setupContext.ceremonyId,
             manifestHash: setupContext.manifestHash,
             rosterHash: setupContext.rosterHash,
@@ -444,7 +442,6 @@ describe('accepted setup public package API in Node', () => {
         // commitments and proofs.
         const vssPublicCoefficientCommitmentSet = {
             objectType: 'VssPublicCoefficientCommitmentSet',
-            objectVersion: 1,
             coefficientCommitmentRoot: hashFromKernel(
                 kernel,
                 'coefficient-commitment-root',
@@ -452,7 +449,6 @@ describe('accepted setup public package API in Node', () => {
         };
         const vssPublicRecipientShareCommitmentSet = {
             objectType: 'VssPublicRecipientShareCommitmentSet',
-            objectVersion: 1,
             recipientShareCommitmentRoot: hashFromKernel(
                 kernel,
                 'recipient-share-commitment-root',
@@ -460,7 +456,6 @@ describe('accepted setup public package API in Node', () => {
         };
         const vssPublicAggregateThresholdCommitmentSet = {
             objectType: 'VssPublicAggregateThresholdCommitmentSet',
-            objectVersion: 1,
             aggregateThresholdCommitmentRoot: hashFromKernel(
                 kernel,
                 'aggregate-threshold-commitment-root',
@@ -468,7 +463,6 @@ describe('accepted setup public package API in Node', () => {
         };
         const vssShareLinkageStatement = {
             objectType: 'VssShareLinkageStatement',
-            objectVersion: 1,
             statementRoot: hashFromKernel(
                 kernel,
                 'share-linkage-statement-root',
@@ -476,7 +470,6 @@ describe('accepted setup public package API in Node', () => {
         };
         const vssShareLinkageProofMaterialSet = {
             objectType: 'VssShareLinkageProofMaterialSet',
-            objectVersion: 1,
             proofMaterialSetRoot: hashFromKernel(
                 kernel,
                 'share-linkage-proof-material-set-root',
@@ -484,7 +477,6 @@ describe('accepted setup public package API in Node', () => {
         };
         const sameSecretBridgeStatementSet = {
             objectType: 'VssSameSecretBridgeStatementSet',
-            objectVersion: 1,
             sameSecretBridgeStatementSetRoot: hashFromKernel(
                 kernel,
                 'same-secret-bridge-statement-set-root',
@@ -492,7 +484,6 @@ describe('accepted setup public package API in Node', () => {
         };
         const sameSecretBridgeProofMaterialSet = {
             objectType: 'VssSameSecretBridgeProofMaterialSet',
-            objectVersion: 1,
             proofMaterialSetRoot: hashFromKernel(
                 kernel,
                 'same-secret-bridge-proof-material-set-root',
@@ -500,7 +491,6 @@ describe('accepted setup public package API in Node', () => {
         };
         const thresholdShareCommitments = {
             objectType: 'ThresholdShareCommitmentBinding',
-            objectVersion: 1,
             thresholdShareCommitmentRoot: hashFromKernel(
                 kernel,
                 'threshold-share-commitment-root',
@@ -526,13 +516,11 @@ describe('accepted setup public package API in Node', () => {
             thresholdShareCommitments,
             privateVssEnvelopeCommitments: {
                 objectType: 'PrivateVssEnvelopeCommitmentSet',
-                objectVersion: 1,
                 ...contextFields(setupContext),
                 privateVssEnvelopeCommitmentRoot,
                 envelopeReferences: [
                     {
                         objectType: 'PrivateVssEnvelopeCommitment',
-                        objectVersion: 1,
                         ...contextFields(setupContext),
                         sourceTrusteeIdentity: 'trustee-0',
                         sourceTrusteeRosterPosition: 0,
@@ -567,7 +555,6 @@ describe('accepted setup public package API in Node', () => {
             },
             vssShareAcceptances: {
                 objectType: 'VssShareAcceptanceSet',
-                objectVersion: 1,
                 ...contextFields(setupContext),
                 privateVssEnvelopeCommitmentRoot,
                 acceptanceRecords: [],

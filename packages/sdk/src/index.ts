@@ -67,6 +67,7 @@ import type {
     TargetFinalityVerification,
     TargetFinalityVerificationInput,
 } from '@sealed-lattice/types';
+import type { BgvTargetDecryptionResultReleaseCompletion } from '@sealed-lattice/wasm';
 
 import { loadTranscriptCoreKernel } from './kernel.js';
 import { prepareSetupPackageVerificationInputForKernel } from './setup-verification-input.js';
@@ -277,7 +278,6 @@ export type SetupPackageVerificationInputSource = Readonly<
 
 export type AcceptedSetupHandoff = Readonly<{
     readonly objectType: 'CollectiveBgvAcceptedSetupHandoff';
-    readonly objectVersion: 1;
     readonly ceremonyId: string;
     readonly manifestHash: ProtocolHash;
     readonly rosterHash: ProtocolHash;
@@ -319,6 +319,23 @@ export type SetupPackageVerification = Readonly<{
         readonly objectPath?: string;
     }>[];
 }>;
+
+// The target-decryption share proofs, accepted record, ciphertexts, and share
+// profile are opaque protocol records that the kernel binds and recomputes; the
+// SDK forwards them without a precise protocol type, matching how the protocol
+// package itself types these target-decryption inputs.
+export type TargetDecryptionResultReleaseInput = Readonly<{
+    readonly setupPackage: unknown;
+    readonly targetAcceptedRecord: unknown;
+    readonly targetCiphertexts: unknown;
+    readonly targetCiphertextBinding: unknown;
+    readonly targetShareProfile: unknown;
+    readonly releaseVerificationId: string;
+    readonly shareProofs: readonly unknown[];
+}>;
+
+export type TargetDecryptionResultRelease =
+    BgvTargetDecryptionResultReleaseCompletion;
 
 /** Derives threshold, quorum, and warning parameters for a roster. */
 export const deriveThresholdParameters = (
@@ -442,6 +459,42 @@ export const verifySetupPackage = async (
     );
 
     return kernel.verifyCollectiveBgvSetup(verificationInput);
+};
+
+/**
+ * Drives the development-evidence staged target-decryption result release with
+ * the packaged Rust/WASM kernel: derive the release setup context from the
+ * accepted setup package, begin the staged session, absorb each trustee share
+ * proof, then finish and return the released target result. Each stage is bound
+ * and recomputed by the kernel; this path is development evidence, not certified
+ * decryption.
+ */
+export const verifyTargetDecryptionResult = async (
+    input: TargetDecryptionResultReleaseInput,
+): Promise<TargetDecryptionResultRelease> => {
+    const kernel = await loadTranscriptCoreKernel();
+    const releaseSetupContext =
+        kernel.deriveBgvTargetDecryptionResultReleaseSetupContext({
+            setupPackage: input.setupPackage,
+        });
+    kernel.beginBgvTargetDecryptionResultRelease({
+        releaseVerificationId: input.releaseVerificationId,
+        releaseSetupContext,
+        targetAcceptedRecord: input.targetAcceptedRecord,
+        targetCiphertexts: input.targetCiphertexts,
+        targetCiphertextBinding: input.targetCiphertextBinding,
+        targetShareProfile: input.targetShareProfile,
+    });
+    for (const targetShareProof of input.shareProofs) {
+        kernel.absorbBgvTargetDecryptionResultReleaseShare({
+            releaseVerificationId: input.releaseVerificationId,
+            targetShareProof,
+        });
+    }
+
+    return kernel.finishBgvTargetDecryptionResultRelease({
+        releaseVerificationId: input.releaseVerificationId,
+    });
 };
 
 /** Verifies a transcript-core fixture with the packaged WASM kernel. */

@@ -97,14 +97,12 @@ const moveProofBytesToTransport = (
             );
             const proofMaterialRoot = deriveCanonicalObjectHash({
                 objectType: 'SetupProofMaterialReference',
-                objectVersion: 1,
                 proofFamily: parameters.proofFamily,
                 proofBytesHash: proofRecord.proofBytesHash,
                 ...setupProofMaterialReferenceFields(proofMaterialTransport),
             });
             transportedProofMaterials.push({
                 objectType: parameters.transportMaterialObjectType,
-                objectVersion: 1,
                 proofFamily: parameters.proofFamily,
                 ...setupTransportedProofMaterialFields(
                     proofMaterialTransport,
@@ -159,7 +157,6 @@ const moveProofBytesToTransport = (
         },
         transportedProofMaterialSet: {
             objectType: parameters.transportSetObjectType,
-            objectVersion: 1,
             proofFamily: parameters.proofFamily,
             proofMaterials: transportedProofMaterials,
         },

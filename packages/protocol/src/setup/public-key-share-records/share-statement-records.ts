@@ -159,7 +159,6 @@ export const createPublicKeyShareSet = (
             }
             const shareRecordWithoutRoot = {
                 objectType: 'PublicKeyShare',
-                objectVersion: 1,
                 ...contextFields(input.setupContext),
                 trusteeIdentity: contribution.trusteeIdentity,
                 trusteeRosterPosition: contribution.trusteeRosterPosition,
@@ -189,7 +188,6 @@ export const createPublicKeyShareSet = (
     );
     const shareSetWithoutRoot = {
         objectType: 'PublicKeyShareSet',
-        objectVersion: 1,
         ...contextFields(input.setupContext),
         participantCount: input.participantCount,
         rnsLimbCount: input.qSharePrimes.length,
@@ -267,7 +265,6 @@ export const createPublicKeyShareProofSet = (
             }
             const proofRecordWithoutRoot = {
                 objectType: 'PublicKeyShareProof',
-                objectVersion: 1,
                 proofFamily: publicKeyShareProofFamily,
                 ...contextFields(input.setupContext),
                 trusteeIdentity: shareRecord.trusteeIdentity,
@@ -296,7 +293,6 @@ export const createPublicKeyShareProofSet = (
     );
     const proofSetWithoutRoot = {
         objectType: 'PublicKeyShareProofSet',
-        objectVersion: 1,
         proofFamily: publicKeyShareProofFamily,
         ...contextFields(input.setupContext),
         participantCount: input.participantCount,

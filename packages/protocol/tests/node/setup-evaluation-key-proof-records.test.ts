@@ -69,7 +69,6 @@ const evaluatorKeySchedule = (): EvaluatorKeySchedule => {
     );
     const scheduleWithoutRoot = {
         objectType: 'EvaluatorKeySchedule',
-        objectVersion: 1,
         ...setupContext,
         participantCount,
         rnsLimbCount: qSharePrimes.length,
@@ -122,7 +121,6 @@ const relinearizationKeySwitchSeed = (
 ): string =>
     deriveCanonicalObjectHash({
         objectType: 'RelinearizationKeySwitchPublicSampleSeed',
-        objectVersion: 1,
         proofFamily: 'relinearization-key-share',
         keySwitchSampleScope: 'shared-by-scheduled-level-and-round',
         evaluatorKeyScheduleRoot: schedule.evaluatorKeyScheduleRoot,
@@ -138,7 +136,6 @@ const galoisKeySwitchSeed = (
 ): string =>
     deriveCanonicalObjectHash({
         objectType: 'GaloisKeySwitchPublicSampleSeed',
-        objectVersion: 1,
         proofFamily: 'galois-key-share',
         keySwitchSampleScope: 'shared-by-scheduled-rotation-and-level',
         evaluatorKeyScheduleRoot: schedule.evaluatorKeyScheduleRoot,
@@ -535,7 +532,6 @@ describe('createRelinearizationKeyShareRounds', () => {
         }
         const expectedRoundOneAggregateRoot = deriveCanonicalObjectHash({
             objectType: 'RelinearizationRoundOneAggregate',
-            objectVersion: 1,
             evaluatorKeyScheduleRoot: fixture.schedule.evaluatorKeyScheduleRoot,
             level: scheduledLevel,
             roundOneRecordRoots: rounds.roundOneRecords.map((record) => ({
@@ -552,7 +548,6 @@ describe('createRelinearizationKeyShareRounds', () => {
         ]);
         const expectedRoundTwoAggregateRoot = deriveCanonicalObjectHash({
             objectType: 'RelinearizationRoundTwoAggregate',
-            objectVersion: 1,
             evaluatorKeyScheduleRoot: fixture.schedule.evaluatorKeyScheduleRoot,
             level: scheduledLevel,
             roundOneAggregateRoot: expectedRoundOneAggregateRoot,
@@ -1339,7 +1334,6 @@ describe('createBinaryChunkedPublicEvaluationKeyMaterialTransport', () => {
                 transportedEvaluationKeyShareComponentMaterial: {
                     objectType:
                         'SetupTransportedEvaluationKeyShareComponentMaterialSet',
-                    objectVersion: 1,
                     componentMaterials: [
                         { keySwitchComponentMaterialRoot: fixtureHash('x') },
                     ],

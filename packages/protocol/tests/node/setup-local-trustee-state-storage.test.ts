@@ -42,7 +42,6 @@ const localStatePlaintext = async (): Promise<LocalStatePlaintextFixture> => {
             materialClass: 'aggregate-threshold-share-sealed',
             materialPlaintext: {
                 objectType: 'LocalTrusteeAggregateThresholdShareMaterial',
-                objectVersion: 1,
                 trusteeIdentity: storageInputBase.trusteeIdentity,
                 trusteeRosterPosition: storageInputBase.trusteeRosterPosition,
                 thresholdShareCommitmentRecipientRoot:
@@ -63,7 +62,6 @@ const localStatePlaintext = async (): Promise<LocalStatePlaintextFixture> => {
     } as const;
     const plaintext = {
         objectType: 'LocalTrusteeSetupStateSealedPayload',
-        objectVersion: 1,
         ceremonyId: setupContext.ceremonyId,
         manifestHash: setupContext.manifestHash,
         rosterHash: setupContext.rosterHash,

@@ -47,7 +47,6 @@ export const derivePostVotingClosedContextHash = (input: {
 }): ProtocolHash =>
     deriveCanonicalObjectHash({
         objectType: 'PostVotingClosedContext',
-        objectVersion: 1,
         ceremonyId: input.ceremonyId,
         closeRecordHash: input.closeRecordHash,
         electionManifestHash: input.electionManifestHash,
@@ -179,7 +178,6 @@ const verifyCastReceiptShellUnchecked = (
         signature: input.receipt.signature,
         signatureExpectation: {
             objectType: 'CastReceipt',
-            objectVersion: 1,
             signerRole: 'Voter',
             signerIdentity: input.receipt.voterIdentity,
             ceremonyId: input.receipt.ceremonyId,
@@ -380,7 +378,6 @@ const verifyCloseRecordShellUnchecked = (
         signature: input.closeRecord.signature,
         signatureExpectation: {
             objectType: 'CloseRecord',
-            objectVersion: 1,
             signerRole: 'Organizer',
             signerIdentity: input.closeRecord.organizerIdentity,
             ceremonyId: input.closeRecord.ceremonyId,

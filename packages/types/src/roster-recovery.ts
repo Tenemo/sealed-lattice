@@ -10,7 +10,6 @@ import type {
 /** Signed participant registration entry included before roster freeze. */
 export type RegistrationEntry = {
     readonly objectType: 'RegistrationEntry';
-    readonly objectVersion: 1;
     readonly registrationEntryHash: ProtocolHash;
     readonly ceremonyId: string;
     readonly participantIdentity: string;
@@ -25,7 +24,6 @@ export type RegistrationEntry = {
 /** Signed trustee setup entry bound to a frozen roster participant. */
 export type TrusteeSetupEntry = {
     readonly objectType: 'TrusteeSetupEntry';
-    readonly objectVersion: 1;
     readonly trusteeSetupEntryHash: ProtocolHash;
     readonly ceremonyId: string;
     readonly trusteeIdentity: string;
@@ -68,7 +66,6 @@ export type ManifestOpaqueBindings = {
 /** Signed election manifest accepted after roster and setup checks. */
 export type ElectionManifest = {
     readonly objectType: 'ElectionManifest';
-    readonly objectVersion: 1;
     readonly electionManifestHash: ProtocolHash;
     readonly ceremonyId: string;
     readonly pollSpecHash: ProtocolHash;
@@ -84,7 +81,6 @@ export type ElectionManifest = {
 /** Participant-local acceptance of a frozen open-link public roster. */
 export type RosterExternalAcceptance = {
     readonly objectType: 'RosterExternalAcceptance';
-    readonly objectVersion: 1;
     readonly rosterExternalAcceptanceHash: ProtocolHash;
     readonly ceremonyId: string;
     readonly participantIdentity: string;
@@ -204,7 +200,6 @@ export type FirstValidOrderingVerification =
 /** Signed recovery epoch update for a participant or trustee identity. */
 export type RecoveryEpochUpdate = {
     readonly objectType: 'RecoveryEpochUpdate';
-    readonly objectVersion: 1;
     readonly recoveryEpochUpdateHash: ProtocolHash;
     readonly ceremonyId: string;
     readonly signerIdentity: string;

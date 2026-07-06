@@ -107,12 +107,10 @@ const transportedSetupProofMaterialSet = (
 ) =>
     ({
         objectType: transportCase.materialSetObjectType,
-        objectVersion: 1,
         proofFamily: transportCase.proofFamily,
         proofMaterials: [
             {
                 objectType: transportCase.materialObjectType,
-                objectVersion: 1,
                 proofFamily: transportCase.proofFamily,
                 proofMaterialRoot: proofHash,
                 chunkSizeBytes: 1_048_576,
@@ -137,11 +135,9 @@ const verifiedSetupProofMaterials = (
 ) =>
     ({
         objectType: 'VerifiedSetupProofMaterialSet',
-        objectVersion: 1,
         proofMaterials: [
             {
                 objectType: 'VerifiedSetupProofMaterial',
-                objectVersion: 1,
                 verificationId: 'caller-supplied-handle',
                 proofFamily: transportCase.proofFamily,
                 proofMaterialRoot: proofHash,
@@ -191,7 +187,6 @@ describe('setup proof material streaming in the public package', () => {
                                 'finishSetupProofMaterialTransportStream',
                             verifiedSetupProofMaterial: {
                                 objectType: 'VerifiedSetupProofMaterial',
-                                objectVersion: 1,
                                 verificationId: input.verificationId,
                                 proofFamily: proofMaterial?.proofFamily,
                                 proofMaterialRoot:
@@ -224,7 +219,6 @@ describe('setup proof material streaming in the public package', () => {
         const acceptedSetupHandoffRoot = 'a'.repeat(128);
         const acceptedSetupHandoff = {
             objectType: 'CollectiveBgvAcceptedSetupHandoff',
-            objectVersion: 1,
             acceptedSetupHandoffRoot,
             directBallotEncryption: {
                 collectivePublicKeyRoot: proofHash,
@@ -259,7 +253,6 @@ describe('setup proof material streaming in the public package', () => {
         const result = await publicPackage.verifySetupPackage({
             setupPackage: {
                 objectType: 'SetupPackage',
-                objectVersion: 1,
             },
             ...setupVerificationBindings,
         });
@@ -275,7 +268,6 @@ describe('setup proof material streaming in the public package', () => {
         expect(mockKernel.verifyCollectiveBgvSetup).toHaveBeenCalledWith({
             setupPackage: {
                 objectType: 'SetupPackage',
-                objectVersion: 1,
             },
             ...setupVerificationBindings,
         });
@@ -285,7 +277,6 @@ describe('setup proof material streaming in the public package', () => {
         const inputWithoutExternalBindings = {
             setupPackage: {
                 objectType: 'SetupPackage',
-                objectVersion: 1,
             },
         } as unknown as VerifySetupPackageInput;
 
@@ -301,7 +292,6 @@ describe('setup proof material streaming in the public package', () => {
             await publicPackage.verifySetupPackage({
                 setupPackage: {
                     objectType: 'SetupPackage',
-                    objectVersion: 1,
                 },
                 ...setupVerificationBindings,
                 [transportCase.fieldName]:
@@ -342,7 +332,6 @@ describe('setup proof material streaming in the public package', () => {
             expect(finalVerifyInput?.verifiedSetupProofMaterials).toMatchObject(
                 {
                     objectType: 'VerifiedSetupProofMaterialSet',
-                    objectVersion: 1,
                     proofMaterials: [
                         expect.objectContaining({
                             objectType: 'VerifiedSetupProofMaterial',
@@ -359,7 +348,6 @@ describe('setup proof material streaming in the public package', () => {
         await publicPackage.verifySetupPackage({
             setupPackage: {
                 objectType: 'SetupPackage',
-                objectVersion: 1,
             },
             ...setupVerificationBindings,
             ...Object.fromEntries(
@@ -406,7 +394,6 @@ describe('setup proof material streaming in the public package', () => {
             });
         expect(finalVerifyInput?.verifiedSetupProofMaterials).toMatchObject({
             objectType: 'VerifiedSetupProofMaterialSet',
-            objectVersion: 1,
             proofMaterials: expectedVerifiedProofMaterials,
         });
     });
@@ -422,7 +409,6 @@ describe('setup proof material streaming in the public package', () => {
             await publicPackage.verifySetupPackage({
                 setupPackage: {
                     objectType: 'SetupPackage',
-                    objectVersion: 1,
                 },
                 ...setupVerificationBindings,
                 [transportCase.fieldName]:

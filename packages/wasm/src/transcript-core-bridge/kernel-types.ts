@@ -40,6 +40,10 @@ import type {
     BgvSetupProofMaterialTransportStreamBegin,
     BgvSetupProofMaterialTransportStreamChunkAbsorption,
     BgvSetupProofMaterialTransportStreamVerification,
+    BgvTargetDecryptionReleaseSetupContext,
+    BgvTargetDecryptionResultReleaseBegin,
+    BgvTargetDecryptionResultReleaseShareAbsorption,
+    BgvTargetDecryptionResultReleaseCompletion,
 } from './kernel-types/bgv.js';
 
 export type {
@@ -75,6 +79,11 @@ export type {
     BgvSetupProofMaterialTransportStreamBegin,
     BgvSetupProofMaterialTransportStreamChunkAbsorption,
     BgvSetupProofMaterialTransportStreamVerification,
+    BgvTargetDecryptionReleaseSetupContext,
+    BgvTargetDecryptionResultReleaseBegin,
+    BgvTargetDecryptionResultReleaseShareAbsorption,
+    BgvTargetDecryptionResultReleaseShareEvidence,
+    BgvTargetDecryptionResultReleaseCompletion,
 } from './kernel-types/bgv.js';
 export type TranscriptCoreKernelSharePoint = {
     readonly rosterPosition: number;
@@ -258,6 +267,24 @@ export type TranscriptCoreKernel = {
     finishSetupProofMaterialTransportStream(input: {
         readonly verificationId: string;
     }): BgvSetupProofMaterialTransportStreamVerification;
+    deriveBgvTargetDecryptionResultReleaseSetupContext(input: {
+        readonly setupPackage: unknown;
+    }): BgvTargetDecryptionReleaseSetupContext;
+    beginBgvTargetDecryptionResultRelease(input: {
+        readonly releaseVerificationId: string;
+        readonly releaseSetupContext: unknown;
+        readonly targetAcceptedRecord: unknown;
+        readonly targetCiphertexts: unknown;
+        readonly targetCiphertextBinding: unknown;
+        readonly targetShareProfile: unknown;
+    }): BgvTargetDecryptionResultReleaseBegin;
+    absorbBgvTargetDecryptionResultReleaseShare(input: {
+        readonly releaseVerificationId: string;
+        readonly targetShareProof: unknown;
+    }): BgvTargetDecryptionResultReleaseShareAbsorption;
+    finishBgvTargetDecryptionResultRelease(input: {
+        readonly releaseVerificationId: string;
+    }): BgvTargetDecryptionResultReleaseCompletion;
     verifyLocalTrusteeSetupState(input: {
         readonly setupContext: unknown;
         readonly localStateCommitment: unknown;
@@ -494,6 +521,28 @@ type TranscriptCoreKernelCommand =
     | {
           readonly command: 'FinishSetupProofMaterialTransportStream';
           readonly verificationId: string;
+      }
+    | {
+          readonly command: 'DeriveBgvTargetDecryptionResultReleaseSetupContext';
+          readonly setupPackage: unknown;
+      }
+    | {
+          readonly command: 'BeginBgvTargetDecryptionResultRelease';
+          readonly releaseVerificationId: string;
+          readonly releaseSetupContext: unknown;
+          readonly targetAcceptedRecord: unknown;
+          readonly targetCiphertexts: unknown;
+          readonly targetCiphertextBinding: unknown;
+          readonly targetShareProfile: unknown;
+      }
+    | {
+          readonly command: 'AbsorbBgvTargetDecryptionResultReleaseShare';
+          readonly releaseVerificationId: string;
+          readonly targetShareProof: unknown;
+      }
+    | {
+          readonly command: 'FinishBgvTargetDecryptionResultRelease';
+          readonly releaseVerificationId: string;
       }
     | {
           readonly command: 'VerifyLocalTrusteeSetupState';

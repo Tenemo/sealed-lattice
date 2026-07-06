@@ -40,7 +40,6 @@ export type SameSecretConstantCoefficientCommitmentRoot = Readonly<{
 export type SameSecretConsistencyStatementRecord = Readonly<
     JsonRecord & {
         readonly objectType: 'SameSecretConsistencyStatement';
-        readonly objectVersion: 1;
         readonly proofFamily: typeof sameSecretProofFamily;
         readonly trusteeIdentity: string;
         readonly trusteeRosterPosition: number;
@@ -57,7 +56,6 @@ export type SameSecretConsistencyStatementRecord = Readonly<
 export type SameSecretConsistencyStatementSet = Readonly<
     JsonRecord & {
         readonly objectType: 'SameSecretConsistencyStatementSet';
-        readonly objectVersion: 1;
         readonly proofFamily: typeof sameSecretProofFamily;
         readonly participantCount: number;
         readonly rnsLimbCount: number;
@@ -102,7 +100,6 @@ export type SameSecretProofRecord = Readonly<
     JsonRecord &
         SameSecretProofByteMaterial & {
             readonly objectType: 'SameSecretProof';
-            readonly objectVersion: 1;
             readonly proofFamily: typeof sameSecretProofFamily;
             readonly trusteeIdentity: string;
             readonly trusteeRosterPosition: number;
@@ -119,7 +116,6 @@ export type SameSecretProofRecord = Readonly<
 export type SameSecretProofSet = Readonly<
     JsonRecord & {
         readonly objectType: 'SameSecretProofSet';
-        readonly objectVersion: 1;
         readonly proofFamily: typeof sameSecretProofFamily;
         readonly participantCount: number;
         readonly rnsLimbCount: number;
@@ -379,7 +375,6 @@ const trusteeSecretCommitmentPayload = (
     constantRoots: readonly SameSecretConstantCoefficientCommitmentRoot[],
 ): JsonRecord => ({
     objectType: 'TrusteeSecretCommitment',
-    objectVersion: 1,
     ...contextFields(setupContext),
     trusteeIdentity: sourceTrusteeRecord.sourceTrusteeIdentity,
     trusteeRosterPosition: sourceTrusteeRecord.sourceTrusteeRosterPosition,
@@ -390,7 +385,6 @@ const trusteeSecretCommitmentPayload = (
 
 const sameSecretProofFamilyBindingPayload = (): JsonRecord => ({
     objectType: 'SameSecretProofFamilyBinding',
-    objectVersion: 1,
     proofFamily: sameSecretProofFamily,
     sameSecretRelation,
     boundSecretDependentProofFamilies: sameSecretBoundProofFamilies,
@@ -414,7 +408,6 @@ const createStatementRecord = (
     const proofFamilyBindingRoot = sameSecretProofFamilyBindingRoot();
     const statementRecordWithoutRoot = {
         objectType: 'SameSecretConsistencyStatement',
-        objectVersion: 1,
         proofFamily: sameSecretProofFamily,
         ...contextFields(setupContext),
         trusteeIdentity: sourceTrusteeRecord.sourceTrusteeIdentity,
@@ -457,7 +450,6 @@ export const createSameSecretConsistencyStatementSet = (
     );
     const statementSetWithoutRoot = {
         objectType: 'SameSecretConsistencyStatementSet',
-        objectVersion: 1,
         proofFamily: sameSecretProofFamily,
         ...contextFields(input.setupContext),
         participantCount: input.participantCount,
@@ -606,7 +598,6 @@ export const createSameSecretProofSet = (
             }
             const proofRecordWithoutRoot = {
                 objectType: 'SameSecretProof',
-                objectVersion: 1,
                 proofFamily: sameSecretProofFamily,
                 ...contextFields(input.setupContext),
                 trusteeIdentity: statementRecord.trusteeIdentity,
@@ -636,7 +627,6 @@ export const createSameSecretProofSet = (
     );
     const proofSetWithoutRoot = {
         objectType: 'SameSecretProofSet',
-        objectVersion: 1,
         proofFamily: sameSecretProofFamily,
         ...contextFields(input.setupContext),
         participantCount: input.participantCount,

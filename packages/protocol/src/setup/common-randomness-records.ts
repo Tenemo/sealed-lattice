@@ -49,7 +49,6 @@ export type CommonRandomnessReveal = Readonly<
     JsonRecord &
         CommonRandomnessContextFields & {
             readonly objectType: 'CommonRandomnessReveal';
-            readonly objectVersion: 1;
             readonly signerRole: 'Trustee';
             readonly trusteeIdentity: string;
             readonly rosterPosition: number;
@@ -71,7 +70,6 @@ export type CommonRandomnessCommit = Readonly<
     JsonRecord &
         CommonRandomnessContextFields & {
             readonly objectType: 'CommonRandomnessCommit';
-            readonly objectVersion: 1;
             readonly signerRole: 'Trustee';
             readonly trusteeIdentity: string;
             readonly rosterPosition: number;
@@ -87,12 +85,10 @@ export type CommonRandomnessCommit = Readonly<
 export type SetupCommonRandomnessPublicDerivations = Readonly<
     JsonRecord & {
         readonly objectType: 'SetupPublicDerivations';
-        readonly objectVersion: 1;
         readonly publicMatrixSeedHash: ProtocolHash;
         readonly bgvPublicA: Readonly<
             JsonRecord & {
                 readonly objectType: 'BgvPublicAPolynomial';
-                readonly objectVersion: 1;
                 readonly publicMatrixSeedHash: ProtocolHash;
                 readonly publicPolynomialRoot: ProtocolHash;
             }
@@ -100,7 +96,6 @@ export type SetupCommonRandomnessPublicDerivations = Readonly<
         readonly publicMatrices: Readonly<
             JsonRecord & {
                 readonly objectType: 'SetupPublicMatrixMaterial';
-                readonly objectVersion: 1;
                 readonly publicMatrixSeedHash: ProtocolHash;
                 readonly publicMatricesRoot: ProtocolHash;
             }
@@ -129,7 +124,6 @@ export type SetupCommonRandomness = Readonly<
     JsonRecord &
         CommonRandomnessContextFields & {
             readonly objectType: 'SetupCommonRandomness';
-            readonly objectVersion: 1;
             readonly commitRecords: readonly CommonRandomnessCommit[];
             readonly revealRecords: readonly CommonRandomnessReveal[];
             readonly publicMatrixSeedHash: ProtocolHash;
@@ -497,7 +491,6 @@ export const createCommonRandomnessReveal = async (
 
     const revealWithoutHash = {
         objectType: 'CommonRandomnessReveal',
-        objectVersion: 1,
         ...commonRandomnessParticipantFields(input),
         revealHex: input.revealHex,
     } as const satisfies JsonRecord;
@@ -510,7 +503,6 @@ export const createCommonRandomnessReveal = async (
     );
     const signedRoot = {
         objectType: 'CommonRandomnessReveal',
-        objectVersion: 1,
         ceremonyId: input.setupContext.ceremonyId,
         manifestHash: input.setupContext.manifestHash,
         boardHeadHash: null,
@@ -547,7 +539,6 @@ export const createCommonRandomnessCommit = async (
 
     const commitWithoutHash = {
         objectType: 'CommonRandomnessCommit',
-        objectVersion: 1,
         ...commonRandomnessParticipantFields(input),
         revealHash: input.revealHash,
     } as const satisfies JsonRecord;
@@ -560,7 +551,6 @@ export const createCommonRandomnessCommit = async (
     );
     const signedRoot = {
         objectType: 'CommonRandomnessCommit',
-        objectVersion: 1,
         ceremonyId: input.setupContext.ceremonyId,
         manifestHash: input.setupContext.manifestHash,
         boardHeadHash: null,
@@ -663,7 +653,6 @@ export const createSetupCommonRandomness = (
 
     const commonRandomnessWithoutRoot = {
         objectType: 'SetupCommonRandomness',
-        objectVersion: 1,
         ...commonRandomnessContextFields(input.setupContext),
         commitRecords,
         revealRecords,

@@ -127,7 +127,6 @@ export const verifyRegistrationEntry = (
 
     const signatureResult = verifySignedObjectSignature(entry.signature, {
         objectType: 'RegistrationEntry',
-        objectVersion: 1,
         signerRole: 'Participant',
         signerIdentity: entry.participantIdentity,
         ceremonyId: input.ceremonyId,
@@ -277,7 +276,6 @@ export const verifyTrusteeSetupEntry = (
 
     const signatureResult = verifySignedObjectSignature(entry.signature, {
         objectType: 'TrusteeSetupEntry',
-        objectVersion: 1,
         signerRole: 'Trustee',
         signerIdentity: entry.trusteeIdentity,
         ceremonyId: input.ceremonyId,
@@ -387,7 +385,6 @@ export const verifyManifest = (
 
     const signatureResult = verifySignedObjectSignature(manifest.signature, {
         objectType: 'ElectionManifest',
-        objectVersion: 1,
         signerRole: 'Organizer',
         signerIdentity: input.organizerIdentity,
         ceremonyId: input.ceremonyId,
@@ -457,7 +454,6 @@ export const verifyRosterExternalAcceptance = (
             acceptance.signature,
             {
                 objectType: 'RosterExternalAcceptance',
-                objectVersion: 1,
                 signerRole: 'Participant',
                 signerIdentity: acceptance.participantIdentity,
                 ceremonyId: acceptance.ceremonyId,

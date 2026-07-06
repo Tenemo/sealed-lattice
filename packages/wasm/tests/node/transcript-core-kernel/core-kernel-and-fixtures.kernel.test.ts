@@ -398,7 +398,6 @@ describe('transcript-core kernel in Node', () => {
             verificationId,
             transportedSetupProofMaterial: {
                 objectType: 'SetupTransportedSameSecretProofMaterial',
-                objectVersion: 1,
                 proofFamily,
                 proofMaterialRoot,
                 chunkSizeBytes: setupProofTransportChunkSizeBytes,

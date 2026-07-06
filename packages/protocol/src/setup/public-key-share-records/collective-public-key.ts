@@ -129,7 +129,6 @@ const createCollectivePublicKeyFromAggregateCoefficients = (
         });
     const collectivePublicKeyWithoutRoot = {
         objectType: 'CollectivePublicKey',
-        objectVersion: 1,
         proofFamily: publicKeyShareProofFamily,
         materialEncoding: 'embedded-full-collective-public-key-coefficients',
         ...contextFields(input.setupContext),
@@ -355,7 +354,6 @@ export const createCollectivePublicKeyFromTransportedPublicKeyShareMaterial = (
             );
         const materialRecordWithoutRoot = {
             objectType: 'PublicKeyShareMaterial',
-            objectVersion: 1,
             proofFamily: publicKeyShareProofFamily,
             materialEncoding: publicKeyShareMaterialEncoding,
             ...contextFields(input.setupContext),

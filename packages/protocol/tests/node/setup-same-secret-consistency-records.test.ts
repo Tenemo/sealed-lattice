@@ -172,14 +172,12 @@ describe('same-secret consistency statement builders', () => {
         const expectedSameSecretProofFamilyBindingRoot =
             deriveCanonicalObjectHash({
                 objectType: 'SameSecretProofFamilyBinding',
-                objectVersion: 1,
                 proofFamily: sameSecretProofFamily,
                 sameSecretRelation,
                 boundSecretDependentProofFamilies: sameSecretBoundProofFamilies,
             });
         const expectedTrusteeSecretCommitmentRoot = deriveCanonicalObjectHash({
             objectType: 'TrusteeSecretCommitment',
-            objectVersion: 1,
             ...setupContext,
             trusteeIdentity: firstStatementRecord.trusteeIdentity,
             trusteeRosterPosition: firstStatementRecord.trusteeRosterPosition,

@@ -171,7 +171,6 @@ export const prepareSetupPackageVerificationInputForKernel = (
 
     const verifiedSetupProofMaterials = {
         objectType: 'VerifiedSetupProofMaterialSet',
-        objectVersion: 1,
         proofMaterials: verifiedMaterials,
     } as const satisfies VerifiedSetupProofMaterialSet;
 

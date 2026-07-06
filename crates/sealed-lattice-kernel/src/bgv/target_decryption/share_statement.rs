@@ -63,10 +63,15 @@ pub(super) fn verify_target_decryption_share_proof_statement_binding(
         target_decryption_share,
     )?;
 
+    // This development introspection command validates only the statement
+    // binding (it errors above on any mismatch); it does not verify the succinct
+    // proof itself, which is the job of the result-release absorb path via
+    // `verify_target_decryption_share_proof_material`. It returns the recomputed
+    // statement root as evidence of the binding it checked, and carries no
+    // self-attested status/verdict/refusal field.
     Ok(json!({
-        "ok": false,
         "operation": "verifyBgvTargetDecryptionShareProofStatementBinding",
-        "refusalReason": "TargetDecryptionProofUnavailable",
+        "proofStatementRoot": hash_at_path(proof_statement, &["proofStatementRoot"])?,
     }))
 }
 

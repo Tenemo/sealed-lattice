@@ -123,7 +123,6 @@ const createVssSourceTrusteeCoefficientCommitmentContributionWithOptions = (
             });
             coefficientCommitments.push({
                 objectType: 'VssCoefficientCommitment',
-                objectVersion: 1,
                 ...context,
                 sourceTrusteeIdentity: sourceTrusteeState.sourceTrusteeIdentity,
                 sourceTrusteeRosterPosition:
@@ -136,7 +135,6 @@ const createVssSourceTrusteeCoefficientCommitmentContributionWithOptions = (
             });
             const materialRecord = {
                 objectType: 'VssCoefficientCommitmentMaterial',
-                objectVersion: 1,
                 ...context,
                 sourceTrusteeIdentity: sourceTrusteeState.sourceTrusteeIdentity,
                 sourceTrusteeRosterPosition:
@@ -156,7 +154,6 @@ const createVssSourceTrusteeCoefficientCommitmentContributionWithOptions = (
     });
     const sourceTrusteeRecordWithoutRoot = {
         objectType: 'VssSourceTrusteeCoefficientCommitments',
-        objectVersion: 1,
         ...context,
         sourceTrusteeIdentity: sourceTrusteeState.sourceTrusteeIdentity,
         sourceTrusteeRosterPosition:
@@ -303,7 +300,6 @@ export const createVssCoefficientCommitmentBundle = (
 
     const commitmentSetWithoutRoot = {
         objectType: 'VssCoefficientCommitmentSet',
-        objectVersion: 1,
         ...context,
         publicMatrixSeedHash: input.publicMatrixSeedHash,
         sourceTrusteeRecords,
@@ -319,7 +315,6 @@ export const createVssCoefficientCommitmentBundle = (
     } satisfies VssCoefficientCommitmentSet;
     const materialSetWithoutRoot = {
         objectType: 'VssCoefficientCommitmentMaterialSet',
-        objectVersion: 1,
         ...context,
         publicMatrixSeedHash: input.publicMatrixSeedHash,
         vssCoefficientCommitmentRoot:

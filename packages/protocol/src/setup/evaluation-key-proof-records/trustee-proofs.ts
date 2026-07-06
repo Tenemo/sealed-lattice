@@ -766,7 +766,6 @@ export const createTrusteeEvaluationKeyProofs = (
         );
         const recordWithoutRoot = {
             objectType: 'TrusteeEvaluationKeyProof',
-            objectVersion: 1,
             proofFamily: trusteeEvaluationKeyProofFamily,
             ...contextFields(input.setupContext),
             trusteeIdentity: proofReference.trusteeIdentity,
@@ -802,7 +801,6 @@ export const createTrusteeEvaluationKeyProofs = (
     }));
     const proofSetWithoutRoot = {
         objectType: 'TrusteeEvaluationKeyProofSet',
-        objectVersion: 1,
         proofFamily: trusteeEvaluationKeyProofFamily,
         ...contextFields(input.setupContext),
         participantCount: input.participantCount,
@@ -880,7 +878,6 @@ export const transportTrusteeEvaluationKeyProofSet = (
         );
         const proofMaterialRoot = deriveCanonicalObjectHash({
             objectType: 'TrusteeEvaluationKeyProofMaterialReference',
-            objectVersion: 1,
             proofFamily: trusteeEvaluationKeyProofFamily,
             trusteeIdentity: proofRecord.trusteeIdentity,
             trusteeRosterPosition: proofRecord.trusteeRosterPosition,
@@ -890,7 +887,6 @@ export const transportTrusteeEvaluationKeyProofSet = (
         });
         transportedProofMaterials.push({
             objectType: evaluationKeyShareProofTransportObjectType,
-            objectVersion: 1,
             proofFamily: trusteeEvaluationKeyProofFamily,
             ...setupProofMaterialRecordTransportFields(
                 proofMaterialTransport,
@@ -931,7 +927,6 @@ export const transportTrusteeEvaluationKeyProofSet = (
         } as TrusteeEvaluationKeyProofSet,
         transportedEvaluationKeyShareProofMaterial: {
             objectType: evaluationKeyShareProofTransportSetObjectType,
-            objectVersion: 1,
             proofFamily: trusteeEvaluationKeyProofFamily,
             proofMaterials: transportedProofMaterials,
         },

@@ -116,7 +116,6 @@ export type PollSpec = {
 /** Concrete threshold parameter output derived after roster freeze. */
 export type FrozenRosterParameters = {
     readonly objectType: 'FrozenRosterParameters';
-    readonly objectVersion: 1;
     readonly thresholdParametersHash: ProtocolHash;
     readonly pollSpecHash: ProtocolHash;
     readonly rosterHash: ProtocolHash;

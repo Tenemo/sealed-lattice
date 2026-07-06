@@ -53,7 +53,7 @@ export const hashCanonicalValue = (
 ): ProtocolHash =>
     hash512Hex(domain, [textEncoder.encode(canonicalJson(value))]);
 
-export const hashBytes = (domain: string, bytes: Uint8Array): ProtocolHash =>
+const hashBytes = (domain: string, bytes: Uint8Array): ProtocolHash =>
     hash512Hex(domain, [bytes]);
 
 // Key commitment: AES-GCM is not key-committing, so a hash of the storage key is
@@ -97,7 +97,6 @@ export const storageAad = (
     localStateCommitment: LocalTrusteeStateStorageEncryptionInput['localStateCommitment'],
 ): Readonly<Record<string, unknown>> => ({
     objectType: 'LocalTrusteeStateStorageAad',
-    objectVersion: 1,
     storageScheme: localTrusteeStateStorageFormat,
     ciphertextContentType: localStateCiphertextContentType,
     setupContext,
@@ -120,7 +119,6 @@ export const sealedMaterialAad = (
     }>,
 ): Readonly<Record<string, unknown>> => ({
     objectType: 'LocalTrusteeSetupSealedMaterialAad',
-    objectVersion: 1,
     storageScheme: localTrusteeSealedMaterialStorageFormat,
     ciphertextContentType: localSealedMaterialCiphertextContentType,
     materialClass,

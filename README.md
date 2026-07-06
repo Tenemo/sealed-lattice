@@ -79,6 +79,7 @@ const thresholdParameters = deriveThresholdParameters({
 - board consistency, cast receipt, close record, target finality, roster manifest, recovery epoch, first-valid ordering, and foundation transcript checks;
 - setup-development verification helpers for local share checks, setup-roster hash derivation, setup package verification input construction, setup package verification, and accepted setup handoff consumption;
 - foundation transcript verification through the packaged kernel;
+- development-evidence target-decryption result release from a proof-backed share quorum, which verifies each decryption share's proof inline before recombining the accepted target (development evidence only, not certified; see `SEC-002` in [SECURITY.md](SECURITY.md));
 - package-boundary and public API smoke coverage for development integration.
 
 ## What is not available yet
@@ -88,7 +89,7 @@ const thresholdParameters = deriveThresholdParameters({
 - public encrypted ballot package creation, verification, or accepted proof transport APIs;
 - public encrypted ballot aggregation APIs;
 - public bounded-domain mobile evaluator replay APIs;
-- target-bound decryption, target recombination, or result release APIs;
+- certified target-bound decryption, the trustee target-share generation surface (feature-gated out of the default build), or a production result-release and target-finality workflow;
 - security claims beyond [SECURITY.md](SECURITY.md).
 
 The public package must not expose raw BGV decryption, arbitrary threshold decryption, individual ballot decryption, aggregate score decryption, rank or comparison opening, evaluator intermediate opening, raw VSS share export, secret-share export, ballot proof witness export, encryption randomness export, or test-only plaintext oracle access.

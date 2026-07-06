@@ -278,7 +278,6 @@ const transportEvaluationKeyShareComponentMaterial = (
         shareMaterial,
         componentMaterial: {
             objectType: evaluationKeyShareComponentMaterialTransportObjectType,
-            objectVersion: 1,
             proofFamily: workItem.proofFamily,
             keySwitchMaterialEncoding:
                 evaluationKeyShareComponentMaterialEncoding,
@@ -415,7 +414,6 @@ export const createBinaryChunkedEvaluationKeyShareMaterialTransport = (
         transportedEvaluationKeyShareComponentMaterial: {
             objectType:
                 evaluationKeyShareComponentMaterialTransportSetObjectType,
-            objectVersion: 1,
             componentMaterials,
         },
     };

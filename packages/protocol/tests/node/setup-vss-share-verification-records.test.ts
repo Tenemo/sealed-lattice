@@ -39,7 +39,6 @@ const envelopeReference = (
 ): PrivateVssEnvelopeVerificationReference =>
     ({
         objectType: 'PrivateVssEnvelopeCommitment',
-        objectVersion: 1,
         ...setupContext,
         sourceTrusteeIdentity: `trustee-${String(sourceTrusteeRosterPosition)}`,
         sourceTrusteeRosterPosition,
@@ -131,7 +130,6 @@ describe('VSS share verification record builders', () => {
             textEncoder.encode(
                 canonicalJson({
                     objectType: 'VssShareAcceptance',
-                    objectVersion: 1,
                     ceremonyId: setupContext.ceremonyId,
                     manifestHash: setupContext.manifestHash,
                     rosterHash: setupContext.rosterHash,
@@ -167,7 +165,6 @@ describe('VSS share verification record builders', () => {
         expect(
             verifySignedObjectSignature(firstRecord.signatureEnvelope, {
                 objectType: 'VssShareAcceptance',
-                objectVersion: 1,
                 signerRole: 'Trustee',
                 signerIdentity: 'trustee-0',
                 ceremonyId: setupContext.ceremonyId,
@@ -196,7 +193,6 @@ describe('VSS share verification record builders', () => {
         expect(acceptanceSet.vssShareAcceptanceRoot).toBe(
             deriveCanonicalObjectHash({
                 objectType: 'VssShareAcceptanceSet',
-                objectVersion: 1,
                 ceremonyId: setupContext.ceremonyId,
                 manifestHash: setupContext.manifestHash,
                 rosterHash: setupContext.rosterHash,
@@ -294,7 +290,6 @@ describe('VSS share verification record builders', () => {
         expect(
             verifySignedObjectSignature(complaintRecord.signatureEnvelope, {
                 objectType: 'VssShareComplaint',
-                objectVersion: 1,
                 signerRole: 'Trustee',
                 signerIdentity: 'trustee-1',
                 ceremonyId: setupContext.ceremonyId,
@@ -318,7 +313,6 @@ describe('VSS share verification record builders', () => {
         expect(complaintSet.vssComplaintRoot).toBe(
             deriveCanonicalObjectHash({
                 objectType: 'VssComplaintSet',
-                objectVersion: 1,
                 ceremonyId: setupContext.ceremonyId,
                 manifestHash: setupContext.manifestHash,
                 rosterHash: setupContext.rosterHash,
@@ -383,7 +377,6 @@ describe('VSS share verification record builders', () => {
         expect(complaintRecord.complaintEvidenceRoot).toBe(
             deriveCanonicalObjectHash({
                 objectType: 'VssShareComplaintEvidence',
-                objectVersion: 1,
                 ceremonyId: setupContext.ceremonyId,
                 manifestHash: setupContext.manifestHash,
                 rosterHash: setupContext.rosterHash,

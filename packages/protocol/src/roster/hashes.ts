@@ -119,7 +119,6 @@ export const deriveCollectiveBgvSetupRosterHash = (
 
             return {
                 objectType: 'CollectiveBgvSetupRosterEntry',
-                objectVersion: 1,
                 rosterPosition: entry.rosterPosition,
                 trusteeIdentity: entry.trusteeIdentity,
                 signingPublicKeyHash: entry.signingPublicKeyHash,

@@ -11,6 +11,9 @@ export type {
     BgvLocalTrusteeSetupStateVerification,
     BgvPrivateVssShareEnvelopeVerification,
     BgvRnsParametersDescription,
+    BgvTargetDecryptionReleaseSetupContext,
+    BgvTargetDecryptionResultReleaseShareEvidence,
+    BgvTargetDecryptionResultReleaseCompletion,
     TranscriptCoreKernel,
 } from './transcript-core-bridge/kernel-contracts.js';
 export {

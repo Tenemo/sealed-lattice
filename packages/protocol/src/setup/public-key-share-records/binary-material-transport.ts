@@ -54,7 +54,6 @@ const setupTransportChunkManifestRoot = (input: {
 }): ProtocolHash =>
     deriveCanonicalObjectHash({
         objectType: 'SetupTransportChunkManifest',
-        objectVersion: 1,
         chunkSizeBytes: input.chunkSizeBytes,
         chunkCount: input.chunkCount,
         totalByteLength: input.totalByteLength,
@@ -179,7 +178,6 @@ const binaryChunkedPublicKeyShareMaterialSetFromTransport = (
 ): BinaryChunkedPublicKeyShareMaterialSet => {
     const materialSetWithoutRoot = {
         objectType: 'PublicKeyShareMaterialSet',
-        objectVersion: 1,
         proofFamily: publicKeyShareProofFamily,
         materialEncoding: publicKeyShareMaterialTransportEncoding,
         binaryFormat: publicKeyShareMaterialBinaryFormat,
@@ -220,7 +218,6 @@ const transportedPublicKeyShareMaterialFromChunks = (
 
     return {
         objectType: 'SetupTransportedPublicKeyShareMaterial',
-        objectVersion: 1,
         binaryFormat: publicKeyShareMaterialBinaryFormat,
         chunkSizeBytes: setupTransportChunkSizeBytes,
         chunkCount: chunks.length,
@@ -612,7 +609,6 @@ export const materialRecordsFromTransportedPublicKeyShareMaterial = (
             );
         const materialRecordWithoutRoot = {
             objectType: 'PublicKeyShareMaterial',
-            objectVersion: 1,
             proofFamily: publicKeyShareProofFamily,
             materialEncoding: publicKeyShareMaterialEncoding,
             ...contextFields(input.setupContext),
