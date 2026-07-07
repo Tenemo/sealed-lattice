@@ -1,5 +1,6 @@
 use super::*;
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::io::{BufWriter, Write};
 
 use crate::hashing::derive_canonical_object_hash;
@@ -121,7 +122,6 @@ pub(in crate::bgv::setup) fn evaluation_key_share_component_material_transport_h
         "objectType": "EvaluationKeyShareComponentMaterialChunkManifest",
         "proofFamily": proof_family.proof_family(),
         "keySwitchMaterialEncoding": EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
-        "chunkSizeBytes": chunk_size_bytes,
         "chunkCount": chunk_count,
         "totalByteLength": total_byte_length,
         "chunkHashes": chunk_hashes,
@@ -165,41 +165,71 @@ fn stored_verified_evaluation_key_share_component_material_chunks(
 fn read_verified_evaluation_key_share_component_material_chunks(
     store_entry: &VerifiedEvaluationKeyShareComponentMaterialChunkStoreEntry,
 ) -> CanonicalResult<Vec<Vec<u8>>> {
-    let chunk_size = usize::try_from(SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES).map_err(|_| {
-        invalid_evaluation_key_share_material(
-            "evaluation-key component material chunk size does not fit usize",
-        )
-    })?;
-    let mut remaining_byte_length = store_entry.total_byte_length;
-    let mut file = File::open(&store_entry.path).map_err(|error| {
-        invalid_evaluation_key_share_material(format!(
-            "verified evaluation-key component material store entry could not be opened: {error}",
-        ))
-    })?;
-    let mut chunks = Vec::new();
-    while remaining_byte_length > 0 {
-        let next_chunk_length =
-            usize::try_from(remaining_byte_length.min(SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES))
+    match &store_entry.backing {
+        #[cfg(any(target_arch = "wasm32", test))]
+        VerifiedComponentMaterialBacking::Memory(chunks) => {
+            let mut staged_total = 0_u64;
+            for chunk in chunks {
+                staged_total = staged_total
+                    .checked_add(u64::try_from(chunk.len()).map_err(|_| {
+                        invalid_evaluation_key_share_material(
+                            "in-memory component material chunk length does not fit u64",
+                        )
+                    })?)
+                    .ok_or_else(|| {
+                        invalid_evaluation_key_share_material(
+                            "in-memory component material byte length overflowed",
+                        )
+                    })?;
+            }
+            if staged_total != store_entry.total_byte_length {
+                return Err(invalid_evaluation_key_share_material(
+                    "in-memory component material total byte length does not match the verified handle",
+                ));
+            }
+            Ok(chunks.clone())
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        VerifiedComponentMaterialBacking::TempFile(path) => {
+            let chunk_size =
+                usize::try_from(SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES).map_err(|_| {
+                    invalid_evaluation_key_share_material(
+                        "evaluation-key component material chunk size does not fit usize",
+                    )
+                })?;
+            let mut remaining_byte_length = store_entry.total_byte_length;
+            let mut file = std::fs::File::open(path).map_err(|error| {
+                invalid_evaluation_key_share_material(format!(
+                    "verified evaluation-key component material store entry could not be opened: {error}",
+                ))
+            })?;
+            let mut chunks = Vec::new();
+            while remaining_byte_length > 0 {
+                let next_chunk_length = usize::try_from(
+                    remaining_byte_length.min(SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES),
+                )
                 .map_err(|_| {
                     invalid_evaluation_key_share_material(
                         "evaluation-key component material chunk length does not fit usize",
                     )
                 })?;
-        let mut chunk = vec![0_u8; next_chunk_length.min(chunk_size)];
-        file.read_exact(&mut chunk).map_err(|error| {
-            invalid_evaluation_key_share_material(format!(
-                "verified evaluation-key component material store entry could not be read: {error}",
-            ))
-        })?;
-        remaining_byte_length -= u64::try_from(chunk.len()).map_err(|_| {
-            invalid_evaluation_key_share_material(
-                "evaluation-key component material chunk length does not fit u64",
-            )
-        })?;
-        chunks.push(chunk);
-    }
+                let mut chunk = vec![0_u8; next_chunk_length.min(chunk_size)];
+                file.read_exact(&mut chunk).map_err(|error| {
+                    invalid_evaluation_key_share_material(format!(
+                        "verified evaluation-key component material store entry could not be read: {error}",
+                    ))
+                })?;
+                remaining_byte_length -= u64::try_from(chunk.len()).map_err(|_| {
+                    invalid_evaluation_key_share_material(
+                        "evaluation-key component material chunk length does not fit u64",
+                    )
+                })?;
+                chunks.push(chunk);
+            }
 
-    Ok(chunks)
+            Ok(chunks)
+        }
+    }
 }
 
 pub(in crate::bgv::setup) fn evaluation_key_share_component_material_reference_root(
@@ -227,7 +257,6 @@ pub(in crate::bgv::setup) fn evaluation_key_share_component_material_reference_r
             proof_record,
             "keySwitchComponentVectorRoot",
         )?,
-        "chunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
         "chunkCount": transport_hashes.chunk_hashes.len(),
         "totalByteLength": transport_hashes.total_byte_length,
         "fullObjectHash": transport_hashes.full_object_hash,
@@ -568,40 +597,17 @@ fn verify_evaluation_key_share_component_material_header(
 }
 
 fn evaluation_key_share_component_material_chunks(value: &Value) -> CanonicalResult<Vec<Vec<u8>>> {
-    let expected_chunk_count = usize::try_from(value_u64(value, "chunkCount")?).map_err(|_| {
-        invalid_evaluation_key_share_material(
-            "transported evaluation-key component material chunkCount does not fit usize",
-        )
-    })?;
     let Some(chunk_values) = value.get("chunks") else {
         let material_root = string_field(value, "keySwitchComponentMaterialRoot")?;
-        let chunks = stored_verified_evaluation_key_share_component_material_chunks(material_root)?;
-        if chunks.len() != expected_chunk_count {
-            return Err(invalid_evaluation_key_share_material(
-                "verified evaluation-key component material chunks length must match chunkCount",
-            ));
-        }
-
-        return Ok(chunks);
+        return stored_verified_evaluation_key_share_component_material_chunks(material_root);
     };
     let chunk_values = chunk_values.as_array().ok_or_else(|| {
         invalid_evaluation_key_share_material(
             "transported evaluation-key component material chunks must be an array",
         )
     })?;
-    if chunk_values.len() != expected_chunk_count {
-        return Err(invalid_evaluation_key_share_material(
-            "transported evaluation-key component material chunks length must match chunkCount",
-        ));
-    }
-    let mut chunks = Vec::with_capacity(expected_chunk_count);
-    for (expected_chunk_index, chunk_value) in chunk_values.iter().enumerate() {
-        let observed_chunk_index = value_usize(chunk_value, "chunkIndex")?;
-        if observed_chunk_index != expected_chunk_index {
-            return Err(invalid_evaluation_key_share_material(
-                "transported evaluation-key component material chunks must be in ascending chunk-index order",
-            ));
-        }
+    let mut chunks = Vec::with_capacity(chunk_values.len());
+    for chunk_value in chunk_values.iter() {
         let bytes_hex = string_field(chunk_value, "bytesHex")?;
         chunks.push(crate::transcript_core::decode_hex(bytes_hex)?);
     }
@@ -615,13 +621,13 @@ fn verify_evaluation_key_share_component_material_hash_fields(
     value_name: &str,
 ) -> CanonicalResult<()> {
     if value_u64(value, "chunkCount")
-            .or_else(|_| value_u64(value, "keySwitchComponentChunkCount"))?
-            != u64::try_from(transport_hashes.chunk_hashes.len()).map_err(|_| {
-                CanonicalError::new(
-                    CanonicalErrorCode::MalformedLength,
-                    "evaluation-key component material chunk count does not fit u64",
-                )
-            })?
+        .or_else(|_| value_u64(value, "keySwitchComponentChunkCount"))?
+        != u64::try_from(transport_hashes.chunk_hashes.len()).map_err(|_| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "evaluation-key component material chunk count does not fit u64",
+            )
+        })?
         || value_u64(value, "totalByteLength")
             .or_else(|_| value_u64(value, "keySwitchComponentTotalByteLength"))?
             != transport_hashes.total_byte_length
@@ -805,66 +811,45 @@ static VERIFIED_EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_CHUNKS: OnceLock<
 
 #[derive(Debug, Clone)]
 struct VerifiedEvaluationKeyShareComponentMaterialChunkStoreEntry {
-    path: PathBuf,
+    backing: VerifiedComponentMaterialBacking,
     total_byte_length: u64,
 }
 
-// Streamed, file-backed transport for evaluation-key component material. One
-// component is about 72.25 MiB and the whole per-roster class is tens of GB, so
-// the material is streamed once and spilled to a temp file rather than held in
-// memory: begin records the declared chunk manifest and opens the file, absorb
-// structurally validates each chunk (order, size, and running total) and appends
-// it, and finish reads the file back one component at a time, recomputes the
-// component-material transport hashes, verifies them against the declared
-// manifest, and registers the verified handle. The accepted-setup verifier then
-// reads the handle transiently through the existing read path, so only one
-// component (about 72.25 MiB) is ever resident.
-
-// Streaming spills to a temp file, so it requires a native filesystem. The
-// browser wasm runtime has none, and tens-of-gigabyte evaluation-key material is
-// verified on a trustee's own native device rather than in the browser, so the
-// three stream commands fail closed under wasm instead of touching the
-// filesystem.
-#[cfg(target_arch = "wasm32")]
-fn component_material_streaming_requires_native_filesystem() -> CanonicalError {
-    invalid_evaluation_key_share_material(
-        "evaluation-key component material streaming requires a native filesystem and is unavailable in the browser runtime",
-    )
+// Where verified component material lives after a stream finishes. Native runs
+// stage to a temp file so only one component (about 72.25 MiB) is resident at a
+// time and CI memory stays bounded; the browser wasm runtime has no filesystem,
+// so it holds the verified chunks in memory. The in-memory backing is also
+// compiled under `test` so the native stream tests exercise it without a browser.
+#[derive(Debug, Clone)]
+enum VerifiedComponentMaterialBacking {
+    #[cfg(not(target_arch = "wasm32"))]
+    TempFile(PathBuf),
+    #[cfg(any(target_arch = "wasm32", test))]
+    Memory(Vec<Vec<u8>>),
 }
 
-#[cfg(target_arch = "wasm32")]
-pub(crate) fn begin_evaluation_key_share_component_material_transport_stream_request(
-    _request: &Value,
-) -> CanonicalResult<Value> {
-    Err(component_material_streaming_requires_native_filesystem())
-}
-
-#[cfg(target_arch = "wasm32")]
-pub(crate) fn absorb_evaluation_key_share_component_material_transport_stream_chunk_request(
-    _request: &Value,
-) -> CanonicalResult<Value> {
-    Err(component_material_streaming_requires_native_filesystem())
-}
-
-#[cfg(target_arch = "wasm32")]
-pub(crate) fn finish_evaluation_key_share_component_material_transport_stream_request(
-    _request: &Value,
-) -> CanonicalResult<Value> {
-    Err(component_material_streaming_requires_native_filesystem())
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub(crate) use native_component_material_stream::{
+// Streamed transport for evaluation-key component material. begin records the
+// declared chunk manifest and opens a staging sink, absorb structurally
+// validates each chunk (order, size, and running total) and stages it, and
+// finish reads the staged chunks back, recomputes the component-material
+// transport hashes, verifies them against the declared manifest, and registers
+// the verified handle. One component is about 72.25 MiB and the whole per-roster
+// class is tens of GB, so native stages to a temp file and keeps only one
+// component resident; the browser wasm runtime has no filesystem and stages in
+// memory. The accepted-setup verifier then reads the handle transiently through
+// the shared read path. The material size, not the staging backend, is the open
+// supported-phone runtime constraint (see SEC-008 and SEC-012).
+pub(crate) use component_material_stream::{
     absorb_evaluation_key_share_component_material_transport_stream_chunk_request,
     begin_evaluation_key_share_component_material_transport_stream_request,
     finish_evaluation_key_share_component_material_transport_stream_request,
 };
 
-#[cfg(not(target_arch = "wasm32"))]
-mod native_component_material_stream {
+mod component_material_stream {
     use super::*;
 
     const COMPONENT_MATERIAL_STREAM_ID_MAX_BYTES: usize = 128;
+    #[cfg(not(target_arch = "wasm32"))]
     const COMPONENT_MATERIAL_STREAM_TEMP_FILE_DOMAIN: &str =
         "sealed-lattice/setup/evaluation-key-share/component-material/stream-temp-v1";
 
@@ -886,8 +871,130 @@ mod native_component_material_stream {
         header: ComponentMaterialStreamHeader,
         next_chunk_index: usize,
         observed_total_byte_length: u64,
-        path: PathBuf,
-        writer: BufWriter<File>,
+        sink: ComponentMaterialStreamSink,
+    }
+
+    // Where an in-flight stream stages its chunks before finish verifies them.
+    // Native stages to a temp file; the browser wasm runtime stages in memory.
+    // Compiled under `test` so the native stream tests exercise the in-memory
+    // path without a browser.
+    enum ComponentMaterialStreamSink {
+        #[cfg(not(target_arch = "wasm32"))]
+        TempFile {
+            path: PathBuf,
+            writer: BufWriter<File>,
+        },
+        #[cfg(any(target_arch = "wasm32", test))]
+        Memory { chunks: Vec<Vec<u8>> },
+    }
+
+    // Open a staging sink for a new stream. Native opens a temp file; the wasm
+    // runtime stages in memory.
+    fn open_component_material_stream_sink(
+        verification_id: &str,
+    ) -> CanonicalResult<ComponentMaterialStreamSink> {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let path = component_material_stream_temp_path(verification_id)?;
+            let file = File::create(&path).map_err(|error| {
+                invalid_evaluation_key_share_material(format!(
+                    "evaluation-key component material stream temp file could not be created: {error}"
+                ))
+            })?;
+            Ok(ComponentMaterialStreamSink::TempFile {
+                path,
+                writer: BufWriter::new(file),
+            })
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = verification_id;
+            Ok(ComponentMaterialStreamSink::Memory { chunks: Vec::new() })
+        }
+    }
+
+    // Append one validated chunk to the staging sink.
+    fn stage_component_material_stream_chunk(
+        sink: &mut ComponentMaterialStreamSink,
+        chunk: &[u8],
+    ) -> CanonicalResult<()> {
+        match sink {
+            #[cfg(not(target_arch = "wasm32"))]
+            ComponentMaterialStreamSink::TempFile { writer, .. } => {
+                writer.write_all(chunk).map_err(|error| {
+                    invalid_evaluation_key_share_material(format!(
+                        "evaluation-key component material chunk could not be written: {error}"
+                    ))
+                })
+            }
+            #[cfg(any(target_arch = "wasm32", test))]
+            ComponentMaterialStreamSink::Memory { chunks } => {
+                chunks.push(chunk.to_vec());
+                Ok(())
+            }
+        }
+    }
+
+    // Read the fully staged material back as chunks so finish can recompute and
+    // verify the transport hashes. Native flushes and reads the temp file; the
+    // wasm runtime already holds the chunks.
+    fn staged_component_material_stream_chunks(
+        sink: &mut ComponentMaterialStreamSink,
+        total_byte_length: u64,
+    ) -> CanonicalResult<Vec<Vec<u8>>> {
+        match sink {
+            #[cfg(not(target_arch = "wasm32"))]
+            ComponentMaterialStreamSink::TempFile { path, writer } => {
+                writer.flush().map_err(|error| {
+                    invalid_evaluation_key_share_material(format!(
+                        "evaluation-key component material stream file could not be flushed: {error}"
+                    ))
+                })?;
+                let store_entry = VerifiedEvaluationKeyShareComponentMaterialChunkStoreEntry {
+                    backing: VerifiedComponentMaterialBacking::TempFile(path.clone()),
+                    total_byte_length,
+                };
+                read_verified_evaluation_key_share_component_material_chunks(&store_entry)
+            }
+            #[cfg(any(target_arch = "wasm32", test))]
+            ComponentMaterialStreamSink::Memory { chunks } => {
+                let store_entry = VerifiedEvaluationKeyShareComponentMaterialChunkStoreEntry {
+                    backing: VerifiedComponentMaterialBacking::Memory(chunks.clone()),
+                    total_byte_length,
+                };
+                read_verified_evaluation_key_share_component_material_chunks(&store_entry)
+            }
+        }
+    }
+
+    // Consume the staging sink into the verified store backing that persists for
+    // downstream reads: native keeps the temp file, the wasm runtime keeps the
+    // in-memory chunks.
+    fn component_material_stream_sink_into_backing(
+        sink: ComponentMaterialStreamSink,
+    ) -> VerifiedComponentMaterialBacking {
+        match sink {
+            #[cfg(not(target_arch = "wasm32"))]
+            ComponentMaterialStreamSink::TempFile { path, .. } => {
+                VerifiedComponentMaterialBacking::TempFile(path)
+            }
+            #[cfg(any(target_arch = "wasm32", test))]
+            ComponentMaterialStreamSink::Memory { chunks } => {
+                VerifiedComponentMaterialBacking::Memory(chunks)
+            }
+        }
+    }
+
+    // Discard a staging sink whose stream failed, removing any temp file.
+    fn discard_component_material_stream_sink(sink: &ComponentMaterialStreamSink) {
+        match sink {
+            #[cfg(not(target_arch = "wasm32"))]
+            ComponentMaterialStreamSink::TempFile { path, .. } => {
+                let _ = std::fs::remove_file(path);
+            }
+            #[cfg(any(target_arch = "wasm32", test))]
+            ComponentMaterialStreamSink::Memory { .. } => {}
+        }
     }
 
     fn component_material_transport_stream_sessions()
@@ -926,6 +1033,7 @@ mod native_component_material_stream {
     // A stable, cross-platform temp filename for a stream: the verificationId can
     // contain characters that are not valid on every filesystem, so the file is
     // named by a domain-separated hash of it.
+    #[cfg(not(target_arch = "wasm32"))]
     fn component_material_stream_temp_path(verification_id: &str) -> CanonicalResult<PathBuf> {
         let mut directory = std::env::temp_dir();
         directory.push("sealed-lattice-evaluation-key-component-material");
@@ -1022,12 +1130,7 @@ mod native_component_material_stream {
             )
         })?;
         let header = read_component_material_stream_header(reference)?;
-        let path = component_material_stream_temp_path(&verification_id)?;
-        let file = File::create(&path).map_err(|error| {
-            invalid_evaluation_key_share_material(format!(
-                "evaluation-key component material stream temp file could not be created: {error}"
-            ))
-        })?;
+        let sink = open_component_material_stream_sink(&verification_id)?;
 
         let sessions = component_material_transport_stream_sessions();
         let mut sessions = sessions.lock().map_err(|_| {
@@ -1036,12 +1139,11 @@ mod native_component_material_stream {
             )
         })?;
         if sessions.contains_key(&verification_id) {
-            let _ = std::fs::remove_file(&path);
+            discard_component_material_stream_sink(&sink);
             return Err(invalid_evaluation_key_share_material(
                 "evaluation-key component material verificationId is already active",
             ));
         }
-        let chunk_size_bytes = SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES;
         let chunk_count = header.chunk_count;
         let total_byte_length = header.total_byte_length;
         let material_root = header.material_root.clone();
@@ -1052,8 +1154,7 @@ mod native_component_material_stream {
                 header,
                 next_chunk_index: 0,
                 observed_total_byte_length: 0,
-                path,
-                writer: BufWriter::new(file),
+                sink,
             },
         );
 
@@ -1064,7 +1165,6 @@ mod native_component_material_stream {
             "keySwitchComponentMaterialRoot": material_root,
             "keySwitchMaterialEncoding": EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
             "transport": {
-                "chunkSizeBytes": chunk_size_bytes,
                 "chunkCount": chunk_count,
                 "totalByteLength": total_byte_length,
             },
@@ -1096,7 +1196,7 @@ mod native_component_material_stream {
             Ok(response) => Ok(response),
             Err(error) => {
                 if let Some(session) = sessions.remove(&verification_id) {
-                    let _ = std::fs::remove_file(&session.path);
+                    discard_component_material_stream_sink(&session.sink);
                 }
                 Err(error)
             }
@@ -1161,11 +1261,7 @@ mod native_component_material_stream {
                 "final evaluation-key component material chunk must finish at declared totalByteLength",
             ));
         }
-        session.writer.write_all(chunk).map_err(|error| {
-            invalid_evaluation_key_share_material(format!(
-                "evaluation-key component material chunk could not be written: {error}"
-            ))
-        })?;
+        stage_component_material_stream_chunk(&mut session.sink, chunk)?;
         session.observed_total_byte_length = new_total;
         session.next_chunk_index += 1;
 
@@ -1203,10 +1299,11 @@ mod native_component_material_stream {
     ) -> CanonicalResult<Value> {
         let finish_result = finish_component_material_stream_inner(&mut session);
         if finish_result.is_err() {
-            let _ = std::fs::remove_file(&session.path);
+            discard_component_material_stream_sink(&session.sink);
         }
         let transport_hashes = finish_result?;
 
+        let backing = component_material_stream_sink_into_backing(session.sink);
         verified_evaluation_key_share_component_material_chunks()
             .lock()
             .map_err(|_| {
@@ -1217,7 +1314,7 @@ mod native_component_material_stream {
             .insert(
                 session.header.material_root.clone(),
                 VerifiedEvaluationKeyShareComponentMaterialChunkStoreEntry {
-                    path: session.path.clone(),
+                    backing,
                     total_byte_length: session.header.total_byte_length,
                 },
             );
@@ -1234,7 +1331,6 @@ mod native_component_material_stream {
                 "proofFamily": session.header.proof_family.proof_family(),
                 "keySwitchComponentMaterialRoot": session.header.material_root,
                 "keySwitchMaterialEncoding": EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
-                "chunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
                 "chunkCount": transport_hashes.chunk_hashes.len(),
                 "totalByteLength": transport_hashes.total_byte_length,
                 "fullObjectHash": transport_hashes.full_object_hash,
@@ -1247,11 +1343,6 @@ mod native_component_material_stream {
     fn finish_component_material_stream_inner(
         session: &mut ComponentMaterialTransportStreamSession,
     ) -> CanonicalResult<EvaluationKeyShareComponentMaterialTransportHashes> {
-        session.writer.flush().map_err(|error| {
-            invalid_evaluation_key_share_material(format!(
-                "evaluation-key component material stream file could not be flushed: {error}"
-            ))
-        })?;
         if session.next_chunk_index != session.header.chunk_count {
             return Err(invalid_evaluation_key_share_material(
                 "evaluation-key component material stream is missing declared chunks",
@@ -1262,13 +1353,11 @@ mod native_component_material_stream {
                 "evaluation-key component material stream totalByteLength does not match absorbed chunk bytes",
             ));
         }
-        let store_entry = VerifiedEvaluationKeyShareComponentMaterialChunkStoreEntry {
-            path: session.path.clone(),
-            total_byte_length: session.header.total_byte_length,
-        };
-        let chunks = read_verified_evaluation_key_share_component_material_chunks(&store_entry)?;
+        let total_byte_length = session.header.total_byte_length;
+        let proof_family = session.header.proof_family;
+        let chunks = staged_component_material_stream_chunks(&mut session.sink, total_byte_length)?;
         let transport_hashes = evaluation_key_share_component_material_transport_hashes(
-            session.header.proof_family,
+            proof_family,
             &chunks,
             SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
         )?;
@@ -1284,6 +1373,107 @@ mod native_component_material_stream {
         }
 
         Ok(transport_hashes)
+    }
+
+    // The in-memory sink is the wasm runtime's staging path. These tests exercise
+    // it on native (no filesystem, no browser) so the shared verification logic is
+    // covered on both backends.
+    #[cfg(test)]
+    mod memory_sink_tests {
+        use super::*;
+
+        fn arbitrary_bytes(byte_length: usize) -> Vec<u8> {
+            let mut bytes = Vec::with_capacity(byte_length);
+            let mut state = 0x0f0f_f0f0_1234_5678_u64;
+            for _ in 0..byte_length {
+                state = state
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1);
+                bytes.push((state >> 33) as u8);
+            }
+            bytes
+        }
+
+        fn memory_session(
+            chunks: &[Vec<u8>],
+            material_root: &str,
+        ) -> ComponentMaterialTransportStreamSession {
+            let hashes = evaluation_key_share_component_material_transport_hashes(
+                EvaluationKeyShareProofFamily::Relinearization,
+                chunks,
+                SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
+            )
+            .expect("transport hashes over the reference chunks");
+            let header = ComponentMaterialStreamHeader {
+                proof_family: EvaluationKeyShareProofFamily::Relinearization,
+                material_root: material_root.to_string(),
+                chunk_count: chunks.len(),
+                total_byte_length: hashes.total_byte_length,
+                full_object_hash: hashes.full_object_hash,
+                chunk_root: hashes.chunk_root,
+                chunk_hashes: hashes.chunk_hashes,
+            };
+            ComponentMaterialTransportStreamSession {
+                header,
+                next_chunk_index: 0,
+                observed_total_byte_length: 0,
+                sink: ComponentMaterialStreamSink::Memory { chunks: Vec::new() },
+            }
+        }
+
+        #[test]
+        fn in_memory_sink_verifies_and_reads_back_without_a_filesystem() {
+            let chunk_size =
+                usize::try_from(SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES).expect("chunk size");
+            let chunks: Vec<Vec<u8>> = arbitrary_bytes(chunk_size + 4096)
+                .chunks(chunk_size)
+                .map(<[u8]>::to_vec)
+                .collect();
+            let reference_hashes = evaluation_key_share_component_material_transport_hashes(
+                EvaluationKeyShareProofFamily::Relinearization,
+                &chunks,
+                SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
+            )
+            .expect("reference transport hashes");
+            let mut session = memory_session(&chunks, &"ab".repeat(64));
+            for (chunk_index, chunk) in chunks.iter().enumerate() {
+                absorb_component_material_stream_chunk(&mut session, chunk_index, chunk)
+                    .expect("absorb a chunk into the in-memory sink");
+            }
+            let transport_hashes = finish_component_material_stream_inner(&mut session)
+                .expect("finish verifies the in-memory staged material against the manifest");
+            assert_eq!(transport_hashes.chunk_hashes, reference_hashes.chunk_hashes);
+
+            let backing = component_material_stream_sink_into_backing(session.sink);
+            let store_entry = VerifiedEvaluationKeyShareComponentMaterialChunkStoreEntry {
+                backing,
+                total_byte_length: transport_hashes.total_byte_length,
+            };
+            let read_back =
+                read_verified_evaluation_key_share_component_material_chunks(&store_entry)
+                    .expect("the in-memory backing reads back its staged chunks");
+            assert_eq!(
+                read_back, chunks,
+                "in-memory backing returns exactly the staged chunks"
+            );
+        }
+
+        #[test]
+        fn in_memory_sink_rejects_out_of_order_chunks() {
+            let chunk_size =
+                usize::try_from(SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES).expect("chunk size");
+            let chunks: Vec<Vec<u8>> = arbitrary_bytes(chunk_size + 32)
+                .chunks(chunk_size)
+                .map(<[u8]>::to_vec)
+                .collect();
+            assert!(
+                chunks.len() >= 2,
+                "need at least two chunks for the ordering test"
+            );
+            let mut session = memory_session(&chunks, &"cd".repeat(64));
+            absorb_component_material_stream_chunk(&mut session, 1, &chunks[1])
+                .expect_err("a chunk absorbed out of ascending order must be refused");
+        }
     }
 }
 
@@ -1321,7 +1511,6 @@ mod stream_tests {
             "proofFamily": "relinearization-key-share",
             "keySwitchMaterialEncoding": EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
             "keySwitchComponentMaterialRoot": material_root,
-            "chunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
             "chunkCount": chunks.len(),
             "totalByteLength": chunks.iter().map(Vec::len).sum::<usize>(),
             "fullObjectHash": hashes.full_object_hash,

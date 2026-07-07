@@ -112,7 +112,6 @@ const setupTransportCertificateBody = (
         setupParametersHash: setupParameters.setupParametersHash,
         largeObjectEncoding: 'binary',
         chunking: 'required',
-        chunkSizeBytes: setupTransportChunkSizeBytes,
         chunkCount,
         totalByteLength,
         storageQuotaBytes: setupTransportStorageQuotaBytes,

@@ -250,7 +250,7 @@ fn honest_committed_component_material_verifies() {
             query_count: 40,
             mask_degree,
         };
-        let mut salt_seed = 0xc0_ffee_22 + mask_degree as u64;
+        let mut salt_seed = 0xc0ff_ee22 + mask_degree as u64;
         let proof = prove_key_fri_with_component_b(
             &parameters,
             ring_degree,
@@ -314,7 +314,7 @@ fn tampered_committed_component_material_is_rejected_by_the_relation() {
             query_count: 40,
             mask_degree,
         };
-        let mut salt_seed = 0xc0_ffee_11 + mask_degree as u64;
+        let mut salt_seed = 0xc0ff_ee11 + mask_degree as u64;
         let result = prove_key_fri_with_component_b(
             &parameters,
             ring_degree,

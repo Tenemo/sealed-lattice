@@ -110,13 +110,6 @@ fn verify_transport_certificate_body(
     }
     transport_try!(expect_transport_u64(
         transport_certificate,
-        "chunkSizeBytes",
-        SETUP_TRANSPORT_CHUNK_SIZE_BYTES,
-        "transportChunkSizeMismatch",
-        "setupTransportCertificate.chunkSizeBytes must match the setup transport parameters",
-    ));
-    transport_try!(expect_transport_u64(
-        transport_certificate,
         "storageQuotaBytes",
         SETUP_TRANSPORT_STORAGE_QUOTA_BYTES,
         "transportStorageQuotaMismatch",

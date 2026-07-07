@@ -37,7 +37,7 @@ pub(super) fn resolve_transported_proof_material(
     verify_transported_material_set_header(material_set, family)?;
     let proof_materials = array_at_path(material_set, &["proofMaterials"])?;
     let mut matching_binding = None;
-    for (proof_material_index, proof_material) in proof_materials.iter().enumerate() {
+    for proof_material in proof_materials.iter() {
         verify_transported_material_header(proof_material, family)?;
         let proof_material_root = hash_at_path(proof_material, &["proofMaterialRoot"])?;
         if proof_material_root != expected_proof_material_root {
@@ -53,11 +53,7 @@ pub(super) fn resolve_transported_proof_material(
             ));
         }
         let chunks = if proof_material.get("chunks").is_some() {
-            Arc::new(transported_material_chunks(
-                proof_material,
-                proof_material_index,
-                family,
-            )?)
+            Arc::new(transported_material_chunks(proof_material, family)?)
         } else {
             verified_setup_proof_material_chunks_from_request(
                 request,
@@ -128,37 +124,11 @@ fn verify_transported_material_header(
 
 fn transported_material_chunks(
     value: &Value,
-    proof_material_index: usize,
     family: &TransportFamily,
 ) -> CanonicalResult<Vec<Vec<u8>>> {
-    let chunk_count = read_positive_usize_at_path(
-        value,
-        &["chunkCount"],
-        &format!(
-            "transported {} proof material chunkCount",
-            family.family_prose
-        ),
-    )?;
     let chunk_values = array_at_path(value, &["chunks"])?;
-    if chunk_values.len() != chunk_count {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            format!(
-                "transported {} proof material chunks length must match chunkCount",
-                family.family_prose
-            ),
-        ));
-    }
-    let mut chunks = Vec::with_capacity(chunk_count);
-    for (expected_chunk_index, chunk_value) in chunk_values.iter().enumerate() {
-        compare_required_u64(
-            unsigned_at_path(chunk_value, &["chunkIndex"])?,
-            expected_chunk_index as u64,
-            &format!(
-                "{}.proofMaterials.{proof_material_index}.chunks.{expected_chunk_index}.chunkIndex",
-                family.transport_field
-            ),
-        )?;
+    let mut chunks = Vec::with_capacity(chunk_values.len());
+    for chunk_value in chunk_values.iter() {
         chunks.push(crate::transcript_core::decode_standard_base64(
             string_at_path(chunk_value, &["bytesBase64"])?,
             &format!(
@@ -249,7 +219,6 @@ pub(super) fn verify_proof_transport_reference(
 pub(super) fn proof_has_transport_reference(proof_record: &Value) -> bool {
     [
         "proofMaterialRoot",
-        "proofChunkSizeBytes",
         "proofChunkCount",
         "proofTotalByteLength",
         "proofFullObjectHash",

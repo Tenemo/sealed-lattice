@@ -340,6 +340,8 @@ export const createTranscriptCoreKernelLoader = (
                                 input.transportedEvaluationKeyShareProofMaterial,
                             transportedEvaluationKeyShareComponentMaterial:
                                 input.transportedEvaluationKeyShareComponentMaterial,
+                            transportedEvaluationKeyAggregateBindingOpenings:
+                                input.transportedEvaluationKeyAggregateBindingOpenings,
                             transportedPublicEvaluationKeyMaterial:
                                 input.transportedPublicEvaluationKeyMaterial,
                             verifiedSetupProofMaterials:

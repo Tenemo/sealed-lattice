@@ -46,7 +46,6 @@ pub(in super::super) fn setup_transport_certificate_fixture(
         .collect::<Vec<_>>();
     let vss_chunk_root = derive_canonical_object_hash(&serde_json::json!({
         "objectType": "SetupTransportChunkManifest",
-        "chunkSizeBytes": chunk_size_bytes,
         "chunkCount": chunk_count,
         "totalByteLength": total_byte_length,
         "chunkHashes": chunk_hashes,
@@ -81,7 +80,6 @@ pub(in super::super) fn setup_transport_certificate_fixture(
         "setupParametersHash": setup_parameters_hash,
         "largeObjectEncoding": "binary",
         "chunking": "required",
-        "chunkSizeBytes": chunk_size_bytes,
         "chunkCount": chunk_count,
         "totalByteLength": total_byte_length,
         "storageQuotaBytes": 2_147_483_648_u64,

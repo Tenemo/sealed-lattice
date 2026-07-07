@@ -43,7 +43,6 @@ pub(super) fn verify_public_evaluation_key_material_transport(
     for field_name in [
         "publicEvaluationKeyMaterialEncoding",
         "publicEvaluationKeyMaterialRoot",
-        "publicEvaluationKeyMaterialChunkSizeBytes",
         "publicEvaluationKeyMaterialChunkCount",
         "publicEvaluationKeyMaterialTotalByteLength",
         "publicEvaluationKeyMaterialFullObjectHash",
@@ -86,10 +85,6 @@ pub(super) fn verify_public_evaluation_key_material_transport(
         .get("objectType")
         .and_then(Value::as_str)
         != Some(PUBLIC_EVALUATION_KEY_MATERIAL_TRANSPORT_SET_OBJECT_TYPE)
-        || transported_material_set
-            .get("materialEncoding")
-            .and_then(Value::as_str)
-            != Some(PUBLIC_EVALUATION_KEY_TRANSPORT_MATERIAL_ENCODING)
     {
         return Ok(Some(evaluation_key_material_refusal(
             "publicEvaluationKeyMaterialTransportHeaderMismatch",
@@ -229,12 +224,31 @@ pub(super) fn verify_public_evaluation_key_material_transport(
                 "transportedPublicEvaluationKeyMaterial.componentMaterials",
             )?));
         }
+        // Committed-material aggregate binding (S1): when the evaluation-key set
+        // publishes the aggregate-binding record, bind the just-reconstructed
+        // runtime key to the trustee-committed material through the atom material
+        // roots and the transported linear-evaluation openings. This does NOT
+        // replace `public_key_reconstruction` yet - the runtime key is still
+        // derived and returned above for downstream use; a follow-up retires the
+        // raw-material summing as the binding once the creation side emits the
+        // openings. A package whose published runtime key does not match the
+        // committed-material aggregate is refused here.
+        if super::aggregate_binding::evaluation_key_set_has_aggregate_binding(evaluation_keys)
+            && let Some(response) =
+                super::aggregate_binding::verify_accepted_key_switch_aggregate_binding(
+                    setup_package,
+                    evaluation_keys,
+                    request,
+                )?
+        {
+            return Ok(Some(response));
+        }
     }
 
     Ok(None)
 }
 
-fn evaluation_key_material_verification_failure(
+pub(super) fn evaluation_key_material_verification_failure(
     error: CanonicalError,
     object_path: impl Into<String>,
 ) -> CanonicalResult<Value> {
@@ -404,10 +418,6 @@ fn verify_public_evaluation_key_material_entry_header(
 ) -> CanonicalResult<()> {
     if material_entry.get("objectType").and_then(Value::as_str)
         != Some(PUBLIC_EVALUATION_KEY_MATERIAL_TRANSPORT_OBJECT_TYPE)
-        || material_entry
-            .get("materialEncoding")
-            .and_then(Value::as_str)
-            != Some(PUBLIC_EVALUATION_KEY_TRANSPORT_MATERIAL_ENCODING)
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -437,34 +447,9 @@ fn verify_public_evaluation_key_material_entry_header(
 }
 
 fn public_evaluation_key_material_chunks(value: &Value) -> CanonicalResult<Vec<Vec<u8>>> {
-    let expected_chunk_count = usize::try_from(value_u64(value, "chunkCount")?).map_err(|_| {
-        CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "transported public evaluation-key material chunkCount does not fit usize",
-        )
-    })?;
     let chunk_values = array_value(value, "chunks")?;
-    if chunk_values.len() != expected_chunk_count {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "transported public evaluation-key material chunks length must match chunkCount",
-        ));
-    }
-    let mut chunks = Vec::with_capacity(expected_chunk_count);
-    for (expected_chunk_index, chunk_value) in chunk_values.iter().enumerate() {
-        if value_u64(chunk_value, "chunkIndex")?
-            != u64::try_from(expected_chunk_index).map_err(|_| {
-                CanonicalError::new(
-                    CanonicalErrorCode::MalformedLength,
-                    "public evaluation-key material chunk index does not fit u64",
-                )
-            })?
-        {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "transported public evaluation-key material chunks must be in ascending chunk-index order",
-            ));
-        }
+    let mut chunks = Vec::with_capacity(chunk_values.len());
+    for chunk_value in chunk_values.iter() {
         chunks.push(decode_hex(value_string(chunk_value, "bytesHex")?)?);
     }
 
@@ -535,7 +520,6 @@ pub(in crate::bgv::setup) fn public_evaluation_key_material_transport_hashes(
     let chunk_root = derive_canonical_object_hash(&json!({
         "objectType": "PublicEvaluationKeyMaterialChunkManifest",
         "materialEncoding": PUBLIC_EVALUATION_KEY_TRANSPORT_MATERIAL_ENCODING,
-        "chunkSizeBytes": SETUP_TRANSPORT_CHUNK_SIZE_BYTES,
         "chunkCount": chunk_hashes.len(),
         "totalByteLength": total_byte_length,
         "chunkHashes": chunk_hashes,
@@ -603,11 +587,11 @@ fn verify_public_evaluation_key_material_hash_fields(
         .or_else(|_| value_string(value, "publicEvaluationKeyMaterialChunkRoot"))?;
     if chunk_count
         != u64::try_from(transport_hashes.chunk_hashes.len()).map_err(|_| {
-                CanonicalError::new(
-                    CanonicalErrorCode::MalformedLength,
-                    "public evaluation-key material chunk count does not fit u64",
-                )
-            })?
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "public evaluation-key material chunk count does not fit u64",
+            )
+        })?
         || total_byte_length != transport_hashes.total_byte_length
         || full_object_hash != transport_hashes.full_object_hash
         || chunk_root != transport_hashes.chunk_root
@@ -679,7 +663,6 @@ pub(in crate::bgv::setup) fn public_evaluation_key_material_reference_root(
         )?,
         "requiredGaloisSetHash": value_string(evaluation_keys, "requiredGaloisSetHash")?,
         "expectedMaterialManifest": expected_manifest,
-        "chunkSizeBytes": SETUP_TRANSPORT_CHUNK_SIZE_BYTES,
         "chunkCount": transport_hashes.chunk_hashes.len(),
         "totalByteLength": transport_hashes.total_byte_length,
         "fullObjectHash": transport_hashes.full_object_hash,

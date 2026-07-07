@@ -198,6 +198,33 @@ describe('evaluation-key component material streaming before terminal verificati
         });
     });
 
+    it('surfaces a kernel chunk rejection instead of swallowing it', () => {
+        mockKernel.absorbEvaluationKeyShareComponentMaterialTransportStreamChunk.mockImplementation(
+            () => {
+                throw new Error(
+                    'evaluation-key component material chunks must be absorbed in ascending chunk-index order',
+                );
+            },
+        );
+
+        expect(() =>
+            prepare({
+                setupPackage: { objectType: 'SetupPackage' },
+                ...setupVerificationBindings,
+                transportedEvaluationKeyShareComponentMaterial: {
+                    objectType:
+                        'SetupTransportedEvaluationKeyShareComponentMaterialSet',
+                    componentMaterials: [
+                        chunklessComponentMaterial(componentMaterialRoot),
+                    ],
+                },
+                evaluationKeyShareComponentMaterialChunkStreams: [
+                    componentMaterialChunkStream(componentMaterialRoot, 'aabb'),
+                ],
+            }),
+        ).toThrow(/ascending chunk-index order/);
+    });
+
     it('does not stream when no component material chunk streams are supplied', () => {
         prepare({
             setupPackage: { objectType: 'SetupPackage' },

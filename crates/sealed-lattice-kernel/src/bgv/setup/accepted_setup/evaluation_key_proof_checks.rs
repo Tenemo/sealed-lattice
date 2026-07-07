@@ -363,6 +363,78 @@ fn verify_trustee_evaluation_key_proof_set(
     Ok(())
 }
 
+// Surface, per trustee (in roster order), each runtime-key group's atom-proof
+// material commitment root, so the accepted-setup aggregate-binding verifier can
+// cross-check the package `trusteeMaterialRoots` entries against the atom proofs'
+// own `KeyFriProof.material_root`. Reuses the exact statement reconstruction and
+// proof-bytes resolution the proof-verification phase uses, then extracts the
+// published roots from the verified schedule container (it does not re-run the
+// atom relation verification, which the proof-verification phase already did).
+//
+// Only key-bearing statements carry atom proofs; a non-key-bearing statement
+// yields an empty per-trustee list. Fail-closed: any statement reconstruction,
+// proof-bytes, or container-decode failure returns `Err`.
+pub(super) fn accepted_setup_atom_material_roots_by_trustee(
+    setup_package: &Value,
+    request: &Value,
+    verified_same_secret_bridge: Option<&VerifiedSameSecretBridgeMaterial>,
+) -> CanonicalResult<Vec<Vec<crate::bgv::setup::limb_group_key_switch_atom::family_backend::schedule::KeyGroupMaterialRoot>>>
+{
+    let proof_set = setup_package
+        .get("trusteeEvaluationKeyProofs")
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "trusteeEvaluationKeyProofs was required to surface atom material roots",
+            )
+        })?;
+    let roster = super::accepted_roster_from_package(setup_package);
+    let proof_records = array_value(proof_set, "proofRecords")?;
+    if proof_records.len() != roster.participant_count as usize {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "trusteeEvaluationKeyProofs.proofRecords must contain one proof per trustee",
+        ));
+    }
+
+    let transported_key_switch_component_material =
+        transported_evaluation_key_share_component_material_from_request(request)?;
+    let transported_key_switch_component_material = request
+        .get("transportedEvaluationKeyShareComponentMaterial")
+        .or(transported_key_switch_component_material.as_ref());
+    let round_one_aggregate_diagonals_by_level = round_one_public_aggregate_diagonals_from_package(
+        setup_package,
+        transported_key_switch_component_material,
+    )?;
+
+    let mut material_roots_by_trustee = Vec::with_capacity(proof_records.len());
+    for (record_position, proof_record) in proof_records.iter().enumerate() {
+        let trustee_roster_position = record_position as u64;
+        let statement =
+            trustee_evaluation_key_statement_from_package(&TrusteeEvaluationKeyStatementInputs {
+                setup_package,
+                transported_key_switch_component_material,
+                verified_same_secret_bridge,
+                round_one_aggregate_diagonals_by_level: &round_one_aggregate_diagonals_by_level,
+                trustee_roster_position,
+            })?;
+        if !crate::bgv::setup::limb_group_key_switch_atom::family_backend::schedule::statement_is_key_bearing(
+            &statement,
+        ) {
+            material_roots_by_trustee.push(Vec::new());
+            continue;
+        }
+        let proof_bytes = trustee_evaluation_key_proof_bytes_from_record(proof_record, request)?;
+        let roots = crate::bgv::setup::limb_group_key_switch_atom::family_backend::schedule::key_bearing_material_roots_by_key_group(
+            &statement,
+            &proof_bytes,
+        )?;
+        material_roots_by_trustee.push(roots);
+    }
+
+    Ok(material_roots_by_trustee)
+}
+
 fn verify_trustee_evaluation_key_proof_record(
     proof_record: &Value,
     setup_context: &Value,
@@ -960,7 +1032,6 @@ pub(in crate::bgv::setup) fn trustee_evaluation_key_proof_material_root(
         "trusteeRosterPosition": value_u64(proof_record, "trusteeRosterPosition")?,
         "statementHash": value_string(proof_record, "statementHash")?,
         "proofBytesHash": value_string(proof_record, "proofBytesHash")?,
-        "chunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
         "chunkCount": transport_hashes.chunk_hashes.len(),
         "totalByteLength": transport_hashes.total_byte_length,
         "fullObjectHash": transport_hashes.full_object_hash,
@@ -1077,12 +1148,12 @@ fn transported_trustee_evaluation_key_proof_material_chunks(
             SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
         )?;
         if value_u64(proof_material, "proofChunkCount")?
-                != u64::try_from(transport_hashes.chunk_hashes.len()).map_err(|_| {
-                    CanonicalError::new(
-                        CanonicalErrorCode::MalformedLength,
-                        "trustee evaluation-key proof material chunk count does not fit u64",
-                    )
-                })?
+            != u64::try_from(transport_hashes.chunk_hashes.len()).map_err(|_| {
+                CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    "trustee evaluation-key proof material chunk count does not fit u64",
+                )
+            })?
             || value_u64(proof_material, "proofTotalByteLength")?
                 != transport_hashes.total_byte_length
             || value_string(proof_material, "proofFullObjectHash")?

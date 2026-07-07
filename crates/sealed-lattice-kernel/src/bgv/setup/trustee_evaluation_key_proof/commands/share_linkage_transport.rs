@@ -88,7 +88,6 @@ pub(super) fn resolve_vss_share_linkage_proof_bytes(
         "proofBytesHash": proof_bytes_hash,
         "proofBytesEncoding": SETUP_PROOF_MATERIAL_ENCODING,
         "proofMaterialRoot": proof_material_root,
-        "proofChunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
         "proofChunkCount": transported_binding.transport_hashes.chunk_hashes.len(),
         "proofTotalByteLength": transported_binding.transport_hashes.total_byte_length,
         "proofFullObjectHash": transported_binding.transport_hashes.full_object_hash,
@@ -380,7 +379,6 @@ pub(super) fn verify_vss_share_linkage_proof_transport_reference(
 pub(super) fn vss_share_linkage_proof_has_transport_reference(proof_record: &Value) -> bool {
     [
         "proofMaterialRoot",
-        "proofChunkSizeBytes",
         "proofChunkCount",
         "proofTotalByteLength",
         "proofFullObjectHash",

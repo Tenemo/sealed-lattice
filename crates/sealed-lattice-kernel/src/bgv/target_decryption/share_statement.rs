@@ -405,8 +405,7 @@ fn validate_smudging_commitment_statement_binding(
     target_ciphertexts: &TargetCiphertextPair,
     target_share_profile: &TargetShareProfile,
 ) -> CanonicalResult<()> {
-    if string_at_path(binding, &["objectType"])? != "TargetDecryptionSmudgingCommitmentBinding"
-    {
+    if string_at_path(binding, &["objectType"])? != "TargetDecryptionSmudgingCommitmentBinding" {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             "target decryption smudging commitment binding must be TargetDecryptionSmudgingCommitmentBinding version 1",
@@ -436,8 +435,7 @@ fn validate_target_decryption_smudging_commitment_set(
     target_ciphertexts: &TargetCiphertextPair,
     target_share_profile: &TargetShareProfile,
 ) -> CanonicalResult<()> {
-    if string_at_path(commitment_set, &["objectType"])? != "TargetDecryptionSmudgingCommitmentSet"
-    {
+    if string_at_path(commitment_set, &["objectType"])? != "TargetDecryptionSmudgingCommitmentSet" {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             "target decryption smudging commitment set must be TargetDecryptionSmudgingCommitmentSet version 1",
@@ -589,8 +587,7 @@ fn validate_smudging_commitment_record(
     expected_rns_prime: u64,
     expected_polynomial_degree: usize,
 ) -> CanonicalResult<()> {
-    if string_at_path(record, &["objectType"])? != "TargetDecryptionSmudgingCommitment"
-    {
+    if string_at_path(record, &["objectType"])? != "TargetDecryptionSmudgingCommitment" {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             "target decryption smudging commitment record must be TargetDecryptionSmudgingCommitment version 1",
@@ -642,8 +639,7 @@ fn validate_smudging_commitment_shape(
     expected_limb_index: usize,
     expected_rns_prime: u64,
 ) -> CanonicalResult<()> {
-    if string_at_path(commitment, &["objectType"])? != "VssPublicCommitment"
-    {
+    if string_at_path(commitment, &["objectType"])? != "VssPublicCommitment" {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             "target decryption smudging commitment must be VssPublicCommitment version 1",
@@ -740,8 +736,7 @@ fn validate_aggregate_opening_statement_binding(
     participant: &ParticipantBinding,
     active_limb_count: usize,
 ) -> CanonicalResult<()> {
-    if string_at_path(binding, &["objectType"])? != "TargetDecryptionAggregateOpeningBinding"
-    {
+    if string_at_path(binding, &["objectType"])? != "TargetDecryptionAggregateOpeningBinding" {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             "target decryption aggregate opening binding must be TargetDecryptionAggregateOpeningBinding version 1",

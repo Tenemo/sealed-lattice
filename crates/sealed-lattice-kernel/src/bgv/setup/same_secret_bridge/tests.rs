@@ -680,7 +680,6 @@ fn move_same_secret_proof_bytes_to_transport(
             "objectType": "SetupTransportedSameSecretProofMaterial",
             "proofFamily": "same-secret-linkage-anchor",
             "proofMaterialRoot": proof_record["proofMaterialRoot"],
-            "chunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
             "chunkCount": transport_hashes.chunk_hashes.len(),
             "totalByteLength": transport_hashes.total_byte_length,
             "fullObjectHash": transport_hashes.full_object_hash,

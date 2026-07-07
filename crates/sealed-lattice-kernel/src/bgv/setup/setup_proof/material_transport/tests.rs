@@ -15,7 +15,6 @@ fn setup_proof_material_stream_handle_recovers_chunkless_material() {
         "objectType": "SetupTransportedSameSecretProofMaterial",
         "proofFamily": proof_family,
         "proofMaterialRoot": proof_material_root,
-        "chunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
         "chunkCount": transport_hashes.chunk_hashes.len(),
         "totalByteLength": transport_hashes.total_byte_length,
         "fullObjectHash": transport_hashes.full_object_hash,
@@ -76,7 +75,6 @@ fn setup_proof_material_stream_handle_rejects_metadata_rebinding() {
         "objectType": "SetupTransportedPublicKeyShareProofMaterial",
         "proofFamily": proof_family,
         "proofMaterialRoot": proof_material_root,
-        "chunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
         "chunkCount": transport_hashes.chunk_hashes.len(),
         "totalByteLength": transport_hashes.total_byte_length,
         "fullObjectHash": transport_hashes.full_object_hash,
@@ -145,7 +143,6 @@ fn trustee_evaluation_key_transport_reference_uses_setup_proof_hashes() {
     let proof_record = json!({
         "proofBytesEncoding": SETUP_PROOF_MATERIAL_ENCODING,
         "proofMaterialRoot": proof_material_root,
-        "proofChunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
         "proofChunkCount": transport_hashes.chunk_hashes.len(),
         "proofTotalByteLength": transport_hashes.total_byte_length,
         "proofFullObjectHash": transport_hashes.full_object_hash.clone(),

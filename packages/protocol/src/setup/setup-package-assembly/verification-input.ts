@@ -90,6 +90,12 @@ export const createSetupPackageVerificationInput = (
                   transportedEvaluationKeyShareComponentMaterial:
                       input.transportedEvaluationKeyShareComponentMaterial,
               }),
+        ...(input.transportedEvaluationKeyAggregateBindingOpenings === undefined
+            ? {}
+            : {
+                  transportedEvaluationKeyAggregateBindingOpenings:
+                      input.transportedEvaluationKeyAggregateBindingOpenings,
+              }),
         ...(input.transportedPublicEvaluationKeyMaterial === undefined
             ? {}
             : {

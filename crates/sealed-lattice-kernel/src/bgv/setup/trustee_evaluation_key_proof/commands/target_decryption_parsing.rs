@@ -411,8 +411,7 @@ pub(super) fn target_decryption_smudging_commitments_from_set(
     let mut commitments_by_degree = vec![None; smudging_polynomial_degree];
 
     for (record_index, record) in records.iter().enumerate() {
-        if read_string(record, "objectType")? != "TargetDecryptionSmudgingCommitment"
-        {
+        if read_string(record, "objectType")? != "TargetDecryptionSmudgingCommitment" {
             return Err(invalid_succinct_setup_proof(
                 "smudging commitment records must be TargetDecryptionSmudgingCommitment version 1",
             ));

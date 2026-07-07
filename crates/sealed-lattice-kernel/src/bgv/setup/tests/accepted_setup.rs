@@ -19,10 +19,11 @@ use self::package_fixtures::{
     public_key_share_succinct_proof_bearing_collective_setup_package,
 };
 use self::proof_record_fixtures::{
-    collective_public_key_object, finalize_collective_setup_package,
-    galois_key_share_batches_object, public_evaluation_key_set_object,
-    public_key_share_material_object, public_key_share_succinct_proofs_object,
-    relinearization_key_share_rounds_fixture, replace_public_key_share_hashes_with_material_hashes,
+    collective_public_key_object, evaluation_key_aggregate_binding_object,
+    finalize_collective_setup_package, galois_key_share_batches_object,
+    public_evaluation_key_set_object_with_aggregate_binding, public_key_share_material_object,
+    public_key_share_succinct_proofs_object, relinearization_key_share_rounds_fixture,
+    replace_public_key_share_hashes_with_material_hashes,
     same_secret_constant_commitments_from_fixture_package, trustee_evaluation_key_proofs_object,
 };
 use self::record_rebinding::{

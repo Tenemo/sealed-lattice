@@ -45,16 +45,12 @@ import {
 import { publicKeyShareRecordsByRosterPosition } from './share-statement-records.js';
 
 const setupTransportChunkManifestRoot = (input: {
-    readonly chunkSizeBytes: number;
-    readonly chunkCount: number;
     readonly totalByteLength: number;
     readonly chunkHashes: readonly ProtocolHash[];
     readonly fullObjectHash: ProtocolHash;
 }): ProtocolHash =>
     deriveCanonicalObjectHash({
         objectType: 'SetupTransportChunkManifest',
-        chunkSizeBytes: input.chunkSizeBytes,
-        chunkCount: input.chunkCount,
         totalByteLength: input.totalByteLength,
         chunkHashes: input.chunkHashes,
         fullObjectHash: input.fullObjectHash,
@@ -141,8 +137,6 @@ const publicKeyShareMaterialTransportHashes = (
         publicKeyShareMaterialChunkHash(fullObjectHash, chunkIndex, chunk),
     );
     const chunkRoot = setupTransportChunkManifestRoot({
-        chunkSizeBytes: setupTransportChunkSizeBytes,
-        chunkCount: chunks.length,
         totalByteLength,
         chunkHashes,
         fullObjectHash,
@@ -190,7 +184,6 @@ const binaryChunkedPublicKeyShareMaterialSetFromTransport = (
         publicKeyShareMaterialRoots: input.publicKeyShareMaterialRoots,
         transport: {
             transportSchemeId: setupTransportSchemeId,
-            chunkSizeBytes: setupTransportChunkSizeBytes,
             chunkCount: input.chunkCount,
             totalByteLength: input.transportHashes.totalByteLength,
             fullObjectHash: input.transportHashes.fullObjectHash,
@@ -216,7 +209,6 @@ const transportedPublicKeyShareMaterialFromChunks = (
 
     return {
         objectType: 'SetupTransportedPublicKeyShareMaterial',
-        chunkSizeBytes: setupTransportChunkSizeBytes,
         chunkCount: chunks.length,
         totalByteLength: transportHashes.totalByteLength,
         fullObjectHash: transportHashes.fullObjectHash,
@@ -314,11 +306,6 @@ const transportedPublicKeyShareMaterialChunks = (
     ) {
         throw new Error(
             'transportedPublicKeyShareMaterial.objectType must be SetupTransportedPublicKeyShareMaterial.',
-        );
-    }
-    if (transportedMaterial.chunkSizeBytes !== setupTransportChunkSizeBytes) {
-        throw new Error(
-            'transportedPublicKeyShareMaterial.chunkSizeBytes must match the setup transport scheme.',
         );
     }
     if (!Array.isArray(transportedMaterial.chunks)) {
@@ -420,8 +407,6 @@ const transportedPublicKeyShareMaterialReader = (
             publicKeyShareMaterialTransportEncoding ||
         input.materialSet.transport.transportSchemeId !==
             setupTransportSchemeId ||
-        input.materialSet.transport.chunkSizeBytes !==
-            setupTransportChunkSizeBytes ||
         input.materialSet.transport.chunkCount !== chunks.length ||
         input.materialSet.transport.totalByteLength !==
             transportHashes.totalByteLength ||

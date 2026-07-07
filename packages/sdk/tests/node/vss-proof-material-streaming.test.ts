@@ -208,7 +208,6 @@ describe('VSS proof material move to transport', () => {
                 expect(proofRecord.proofMaterialRoot).toBe(
                     transportMaterial.proofMaterialRoot,
                 );
-                expect(proofRecord.proofChunkSizeBytes).toBe(1_048_576);
                 expect(proofRecord.proofChunkCount).toBe(1);
                 expect(proofRecord.proofChunkRoot).toBe(
                     transportMaterial.chunkRoot,

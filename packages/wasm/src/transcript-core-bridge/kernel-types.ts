@@ -82,7 +82,6 @@ export type {
     BgvSetupProofMaterialTransportStreamBegin,
     BgvSetupProofMaterialTransportStreamChunkAbsorption,
     BgvSetupProofMaterialTransportStreamVerification,
-    BgvVerifiedEvaluationKeyShareComponentMaterial,
     BgvEvaluationKeyShareComponentMaterialTransportStreamBegin,
     BgvEvaluationKeyShareComponentMaterialTransportStreamChunkAbsorption,
     BgvEvaluationKeyShareComponentMaterialTransportStreamVerification,

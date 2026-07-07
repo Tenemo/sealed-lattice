@@ -678,21 +678,8 @@ fn private_vss_share_envelope_verifier_refuses_missing_transported_private_share
 
     assert_private_vss_share_proof_refusal_contains(
         &request,
-        "chunks length must match chunkCount",
+        "setup proof material transport requires at least one chunk",
     );
-}
-
-#[test]
-fn private_vss_share_envelope_verifier_refuses_reordered_transported_private_share_proof_chunk() {
-    let mut request =
-        proof_shaped_private_vss_share_envelope_request(PRIVATE_VSS_SUCCINCT_TEST_RING_DEGREE);
-    let mut transported_proof_material =
-        move_private_vss_share_proof_bytes_to_transport(&mut request);
-    transported_proof_material["proofMaterials"][0]["chunks"][0]["chunkIndex"] =
-        serde_json::json!(1);
-    request["transportedPrivateVssShareProofMaterial"] = transported_proof_material;
-
-    assert_private_vss_share_proof_refusal_contains(&request, "ascending chunk-index order");
 }
 
 #[test]
@@ -1134,7 +1121,6 @@ fn move_private_vss_share_proof_bytes_to_transport(
                 "proofBytesEncoding": SETUP_PROOF_MATERIAL_ENCODING,
                 "statementHash": proof_record["statementHash"],
                 "proofBytesHash": proof_record["proofBytesHash"],
-                "proofChunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
                 "proofChunkCount": transport_hashes.chunk_hashes.len(),
                 "proofTotalByteLength": transport_hashes.total_byte_length,
                 "proofFullObjectHash": transport_hashes.full_object_hash.clone(),
@@ -1164,7 +1150,6 @@ fn move_private_vss_share_proof_bytes_to_transport(
                 "objectType": "SetupTransportedPrivateVssShareProofMaterial",
                 "proofFamily": "vss-opening-carry",
                 "proofMaterialRoot": proof_material_root,
-                "chunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
                 "chunkCount": proof_chunks.len(),
                 "totalByteLength": transport_hashes.total_byte_length,
                 "fullObjectHash": transport_hashes.full_object_hash.clone(),

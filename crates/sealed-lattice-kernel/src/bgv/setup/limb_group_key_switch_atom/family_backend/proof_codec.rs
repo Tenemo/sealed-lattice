@@ -24,12 +24,14 @@ fn invalid_codec(message: &str) -> CanonicalError {
     CanonicalError::new(CanonicalErrorCode::MalformedLength, message)
 }
 
-struct Writer {
-    bytes: Vec<u8>,
+pub(super) struct Writer {
+    // Exposed to sibling `family_backend` modules so they can reuse this
+    // canonical writer and take the finished byte buffer.
+    pub(super) bytes: Vec<u8>,
 }
 
 impl Writer {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {
             bytes: CODEC_MAGIC.to_vec(),
         }
@@ -41,7 +43,7 @@ impl Writer {
         Ok(())
     }
 
-    fn write_field<const LIMB_COUNT: usize>(&mut self, element: &[u64; LIMB_COUNT]) {
+    pub(super) fn write_field<const LIMB_COUNT: usize>(&mut self, element: &[u64; LIMB_COUNT]) {
         for limb in element {
             self.bytes.extend_from_slice(&limb.to_le_bytes());
         }
@@ -58,7 +60,7 @@ impl Writer {
         Ok(())
     }
 
-    fn write_digest(&mut self, digest: &MerkleDigest) {
+    pub(super) fn write_digest(&mut self, digest: &MerkleDigest) {
         self.bytes.extend_from_slice(digest);
     }
 
@@ -79,14 +81,14 @@ impl Writer {
     }
 }
 
-struct Reader<'a, const LIMB_COUNT: usize> {
+pub(super) struct Reader<'a, const LIMB_COUNT: usize> {
     bytes: &'a [u8],
     position: usize,
     parameters: &'a ProofFieldParameters<LIMB_COUNT>,
 }
 
 impl<'a, const LIMB_COUNT: usize> Reader<'a, LIMB_COUNT> {
-    fn new(
+    pub(super) fn new(
         bytes: &'a [u8],
         parameters: &'a ProofFieldParameters<LIMB_COUNT>,
     ) -> CanonicalResult<Self> {
@@ -127,7 +129,7 @@ impl<'a, const LIMB_COUNT: usize> Reader<'a, LIMB_COUNT> {
         Ok(u32::from_le_bytes(slice.try_into().expect("four bytes")) as usize)
     }
 
-    fn read_field(&mut self) -> CanonicalResult<[u64; LIMB_COUNT]> {
+    pub(super) fn read_field(&mut self) -> CanonicalResult<[u64; LIMB_COUNT]> {
         let slice = self.take(LIMB_COUNT * 8)?;
         let mut element = [0_u64; LIMB_COUNT];
         for (limb, chunk) in element.iter_mut().zip(slice.chunks_exact(8)) {
@@ -146,7 +148,7 @@ impl<'a, const LIMB_COUNT: usize> Reader<'a, LIMB_COUNT> {
         (0..count).map(|_| self.read_field()).collect()
     }
 
-    fn read_digest(&mut self) -> CanonicalResult<MerkleDigest> {
+    pub(super) fn read_digest(&mut self) -> CanonicalResult<MerkleDigest> {
         let slice = self.take(MERKLE_DIGEST_BYTES)?;
         Ok(slice.try_into().expect("digest width"))
     }
@@ -160,7 +162,7 @@ impl<'a, const LIMB_COUNT: usize> Reader<'a, LIMB_COUNT> {
         Ok(self.take(SALT_BYTES)?.to_vec())
     }
 
-    fn finish(self) -> CanonicalResult<()> {
+    pub(super) fn finish(self) -> CanonicalResult<()> {
         if self.position != self.bytes.len() {
             return Err(invalid_codec("proof stream has trailing bytes"));
         }
@@ -168,7 +170,7 @@ impl<'a, const LIMB_COUNT: usize> Reader<'a, LIMB_COUNT> {
     }
 }
 
-fn write_fri<const LIMB_COUNT: usize>(
+pub(super) fn write_fri<const LIMB_COUNT: usize>(
     writer: &mut Writer,
     fri: &FriProof<LIMB_COUNT>,
 ) -> CanonicalResult<()> {
@@ -188,7 +190,7 @@ fn write_fri<const LIMB_COUNT: usize>(
     Ok(())
 }
 
-fn read_fri<const LIMB_COUNT: usize>(
+pub(super) fn read_fri<const LIMB_COUNT: usize>(
     reader: &mut Reader<'_, LIMB_COUNT>,
 ) -> CanonicalResult<FriProof<LIMB_COUNT>> {
     let layer_roots = reader.read_digest_vec()?;
@@ -223,7 +225,7 @@ fn read_fri<const LIMB_COUNT: usize>(
     })
 }
 
-fn write_column_opening<const LIMB_COUNT: usize>(
+pub(super) fn write_column_opening<const LIMB_COUNT: usize>(
     writer: &mut Writer,
     opening: &ColumnOpening<LIMB_COUNT>,
 ) -> CanonicalResult<()> {
@@ -237,7 +239,7 @@ fn write_column_opening<const LIMB_COUNT: usize>(
     Ok(())
 }
 
-fn read_column_opening<const LIMB_COUNT: usize>(
+pub(super) fn read_column_opening<const LIMB_COUNT: usize>(
     reader: &mut Reader<'_, LIMB_COUNT>,
 ) -> CanonicalResult<ColumnOpening<LIMB_COUNT>> {
     let row_count = reader.read_u32()?;

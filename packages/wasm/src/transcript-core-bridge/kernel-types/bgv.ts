@@ -30,7 +30,6 @@ export type BgvVerifiedSetupProofMaterial = Readonly<
         readonly proofFamily: string;
         readonly proofMaterialRoot: ProtocolHash;
         readonly proofBytesEncoding: string;
-        readonly proofChunkSizeBytes: number;
         readonly proofChunkCount: number;
         readonly proofTotalByteLength: number;
         readonly proofFullObjectHash: ProtocolHash;
@@ -49,7 +48,6 @@ export type BgvVerifiedSetupProofMaterialSet = Readonly<
 export type BgvTransportedPublicKeyShareMaterial =
     BgvTransportedMaterialObject<'SetupTransportedPublicKeyShareMaterial'> &
         Readonly<{
-            readonly chunkSizeBytes: number;
             readonly chunkCount: number;
             readonly totalByteLength: number;
             readonly fullObjectHash: ProtocolHash;
@@ -72,12 +70,19 @@ export type BgvTransportedPublicEvaluationKeyMaterialSet =
             readonly componentMaterials?: readonly BgvJsonRecord[];
         }>;
 
+export type BgvTransportedEvaluationKeyAggregateBindingOpeningSet =
+    BgvTransportedMaterialObject<'SetupTransportedEvaluationKeyAggregateBindingOpeningSet'> &
+        Readonly<{
+            readonly openings: readonly BgvJsonRecord[];
+        }>;
+
 export type BgvCollectiveSetupTransportCompanions = Readonly<{
     readonly transportedSameSecretProofMaterial?: BgvTransportedSetupProofMaterialSet<'SetupTransportedSameSecretProofMaterialSet'>;
     readonly transportedPublicKeyShareMaterial?: BgvTransportedPublicKeyShareMaterial;
     readonly transportedPublicKeyShareProofMaterial?: BgvTransportedSetupProofMaterialSet<'SetupTransportedPublicKeyShareProofMaterialSet'>;
     readonly transportedEvaluationKeyShareProofMaterial?: BgvTransportedSetupProofMaterialSet<'SetupTransportedEvaluationKeyShareProofMaterialSet'>;
     readonly transportedEvaluationKeyShareComponentMaterial?: BgvTransportedEvaluationKeyShareComponentMaterialSet;
+    readonly transportedEvaluationKeyAggregateBindingOpenings?: BgvTransportedEvaluationKeyAggregateBindingOpeningSet;
     readonly transportedPublicEvaluationKeyMaterial?: BgvTransportedPublicEvaluationKeyMaterialSet;
     readonly verifiedSetupProofMaterials?: BgvVerifiedSetupProofMaterialSet;
 }>;
@@ -290,7 +295,6 @@ export type BgvCollectiveSetupParametersDescription = {
         readonly objectType: 'SetupTransport';
         readonly largeObjectEncoding: 'binary';
         readonly chunking: 'required';
-        readonly chunkSizeBytes: number;
         readonly storageQuotaBytes: number;
         readonly largestSingleBufferBytes: number;
         readonly copyCountLimit: number;
@@ -645,7 +649,6 @@ export type BgvVerifiedEvaluationKeyShareComponentMaterial = Readonly<
         readonly proofFamily: string;
         readonly keySwitchComponentMaterialRoot: ProtocolHash;
         readonly keySwitchMaterialEncoding: string;
-        readonly chunkSizeBytes: number;
         readonly chunkCount: number;
         readonly totalByteLength: number;
         readonly fullObjectHash: ProtocolHash;

@@ -50,7 +50,6 @@ pub(super) fn evaluation_key_streaming_commitment(
         "objectType": "BgvEvaluationKeyStreamingCommitment",
         "streamRecord": stream_record,
         "canonicalStreamByteLength": stream_bytes.len(),
-        "chunkSizeBytes": EVALUATION_KEY_CHUNK_SIZE_BYTES,
         "chunkRoot": chunk_root_value,
         "chunkCount": stream_bytes.len().div_ceil(EVALUATION_KEY_CHUNK_SIZE_BYTES),
     });

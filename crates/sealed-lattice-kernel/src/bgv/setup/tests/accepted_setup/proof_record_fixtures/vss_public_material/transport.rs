@@ -182,7 +182,6 @@ pub(super) fn transport_proof_material_root(
         "objectType": "SetupProofMaterialReference",
         "proofFamily": proof_family,
         "proofBytesHash": proof_bytes_hash,
-        "chunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
         "chunkCount": transport_hashes.chunk_hashes.len(),
         "totalByteLength": transport_hashes.total_byte_length,
         "fullObjectHash": transport_hashes.full_object_hash,
@@ -200,10 +199,6 @@ pub(super) fn insert_transport_reference(
     record_object.insert(
         "proofMaterialRoot".to_string(),
         serde_json::json!(proof_material_root),
-    );
-    record_object.insert(
-        "proofChunkSizeBytes".to_string(),
-        serde_json::json!(SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES),
     );
     record_object.insert(
         "proofChunkCount".to_string(),
@@ -249,7 +244,6 @@ pub(super) fn transport_material_object(
         "objectType": object_type,
         "proofFamily": proof_family,
         "proofMaterialRoot": proof_material_root,
-        "chunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
         "chunkCount": transport_hashes.chunk_hashes.len(),
         "totalByteLength": transport_hashes.total_byte_length,
         "fullObjectHash": transport_hashes.full_object_hash,

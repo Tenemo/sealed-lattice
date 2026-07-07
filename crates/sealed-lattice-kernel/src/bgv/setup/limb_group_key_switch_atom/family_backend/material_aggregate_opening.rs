@@ -19,20 +19,26 @@
 //! holds` checks against the runtime key and wrap multiples. A forged runtime key
 //! or wrap fails that check; a tampered or dropped column fails this opening.
 
-use super::column_commitment::{
-    ColumnOpening, StreamedColumnCommitmentBuilder, verify_column_opening,
-};
-use super::domain::{CyclicDomain, coset_evaluate_coefficients, coset_offset};
-use super::low_degree::{
-    FriParameters, FriProof, fri_answer, fri_commit, fri_verify_queries, fri_verify_structure,
-};
-use super::merkle::{MerkleDigest, sorted_unique_indices};
-use super::polynomial;
 use super::super::proof_field::ProofFieldParameters;
+use super::column_commitment::{ColumnOpening, verify_column_opening};
+use super::domain::{CyclicDomain, coset_offset};
+use super::low_degree::{FriParameters, FriProof, fri_verify_queries, fri_verify_structure};
+use super::merkle::MerkleDigest;
+use super::polynomial;
 use super::transcript::Transcript;
 use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 
-const OPENING_PROTOCOL_LABEL: &str = "sealed-lattice/setup/key-switch-atom/material-aggregate-opening-v1";
+// Prover-side imports: the batched opening prover and its column/quotient
+// commitment and FRI-answer machinery. The creation-side aggregate binding
+// (`material_aggregate_creation`) drives these to produce the transported
+// openings; the acceptance path only verifies.
+use super::column_commitment::StreamedColumnCommitmentBuilder;
+use super::domain::coset_evaluate_coefficients;
+use super::low_degree::{fri_answer, fri_commit};
+use super::merkle::sorted_unique_indices;
+
+const OPENING_PROTOCOL_LABEL: &str =
+    "sealed-lattice/setup/key-switch-atom/material-aggregate-opening-v1";
 const OPENING_FRI_RATE_BLOWUP: usize = 4;
 // Quotient columns: the sumcheck quotient and the sumcheck helper g.
 const OPENING_QUOTIENT_SUMCHECK: usize = 0;
@@ -55,6 +61,50 @@ pub(super) struct LinearEvaluationOpeningProof<const LIMB_COUNT: usize> {
     pub(super) quotient_opening: ColumnOpening<LIMB_COUNT>,
 }
 
+// Canonical, length-framed binary codec for the linear-evaluation opening proof,
+// reusing the sibling `proof_codec` writer, reader, and sub-object codecs so the
+// framing, self-description, and strict decode match the atom-family key proof.
+// The field order below is the wire order; decode reads the same order and calls
+// `reader.finish()` to reject any trailing bytes.
+//
+// The creation-side aggregate binding (`material_aggregate_creation`) produces
+// these bytes for transport; the acceptance path only ever decodes them (see
+// `decode_linear_evaluation_opening_proof`). Kept alongside
+// `prove_linear_evaluation_opening` on the non-test path.
+pub(super) fn encode_linear_evaluation_opening_proof<const LIMB_COUNT: usize>(
+    proof: &LinearEvaluationOpeningProof<LIMB_COUNT>,
+) -> CanonicalResult<Vec<u8>> {
+    use super::proof_codec::{Writer, write_column_opening, write_fri};
+    let mut writer = Writer::new();
+    writer.write_field(&proof.claimed_sum);
+    writer.write_digest(&proof.quotient_root);
+    write_fri(&mut writer, &proof.fri)?;
+    write_column_opening(&mut writer, &proof.column_opening)?;
+    write_column_opening(&mut writer, &proof.quotient_opening)?;
+    Ok(writer.bytes)
+}
+
+pub(super) fn decode_linear_evaluation_opening_proof<const LIMB_COUNT: usize>(
+    parameters: &ProofFieldParameters<LIMB_COUNT>,
+    bytes: &[u8],
+) -> CanonicalResult<LinearEvaluationOpeningProof<LIMB_COUNT>> {
+    use super::proof_codec::{Reader, read_column_opening, read_fri};
+    let mut reader = Reader::new(bytes, parameters)?;
+    let claimed_sum = reader.read_field()?;
+    let quotient_root = reader.read_digest()?;
+    let fri = read_fri(&mut reader)?;
+    let column_opening = read_column_opening(&mut reader)?;
+    let quotient_opening = read_column_opening(&mut reader)?;
+    reader.finish()?;
+    Ok(LinearEvaluationOpeningProof {
+        claimed_sum,
+        quotient_root,
+        fri,
+        column_opening,
+        quotient_opening,
+    })
+}
+
 // The trace and coset sizes: the trace is the ring, the coset is
 // `OPENING_FRI_RATE_BLOWUP * 2 * ring_degree` (rate 1/4), matching the atom
 // backend so the committed columns share the coset the opening reads.
@@ -71,7 +121,9 @@ fn opening_layout(ring_degree: usize) -> CanonicalResult<(usize, usize)> {
     Ok((ring_degree, coset_size))
 }
 
-// The trace-subgroup vanishing polynomial `Z_H(x) = x^trace_size - 1`.
+// The trace-subgroup vanishing polynomial `Z_H(x) = x^trace_size - 1`. Used by
+// the opening prover and the module tests; the verifier evaluates the vanishing
+// polynomial pointwise through `polynomial::vanishing_at`.
 fn vanishing_polynomial<const LIMB_COUNT: usize>(
     parameters: &ProofFieldParameters<LIMB_COUNT>,
     trace_size: usize,
@@ -96,6 +148,10 @@ fn g_degree_adjustment_shift(trace_size: usize) -> usize {
 // j's public challenge vector as values over `H` (length ring_degree). Returns
 // the recomputed column root and the proof. `Z` is derived from the sumcheck, not
 // supplied, so the prover cannot claim a sum inconsistent with the columns.
+//
+// The creation-side aggregate binding (`material_aggregate_creation`) proves
+// these openings; the acceptance path only verifies (see
+// `verify_linear_evaluation_opening`).
 pub(super) fn prove_linear_evaluation_opening<const LIMB_COUNT: usize>(
     parameters: &ProofFieldParameters<LIMB_COUNT>,
     ring_degree: usize,
@@ -227,15 +283,22 @@ pub(super) fn prove_linear_evaluation_opening<const LIMB_COUNT: usize>(
     shifted_g_coefficients.extend_from_slice(&quotient_coefficients[OPENING_QUOTIENT_G]);
     let shifted_g_codeword =
         coset_evaluate_coefficients(&coset_domain, &offset, &shifted_g_coefficients);
-    accumulate(&mut combination, &weights[weight_index], &shifted_g_codeword);
-
-    let fri_commitment = fri_commit(parameters, &mut transcript, &combination, &offset, salt_seed)?;
-    drop(combination);
-    let query_positions = transcript.challenge_positions(
-        "opening-query",
-        coset_size,
-        opening_parameters.query_count,
+    accumulate(
+        &mut combination,
+        &weights[weight_index],
+        &shifted_g_codeword,
     );
+
+    let fri_commitment = fri_commit(
+        parameters,
+        &mut transcript,
+        &combination,
+        &offset,
+        salt_seed,
+    )?;
+    drop(combination);
+    let query_positions =
+        transcript.challenge_positions("opening-query", coset_size, opening_parameters.query_count);
     let fri = fri_answer(&fri_commitment, &query_positions);
 
     // Opening pass: collect the columns and quotients at the opened positions.
@@ -317,19 +380,23 @@ pub(super) fn verify_linear_evaluation_opening<const LIMB_COUNT: usize>(
     let fri_parameters = FriParameters {
         blowup: OPENING_FRI_RATE_BLOWUP,
     };
-    let verification =
-        fri_verify_structure(parameters, &mut transcript, &proof.fri, coset_size, &offset, &fri_parameters)
-            .ok()??;
-    let query_positions = transcript.challenge_positions(
-        "opening-query",
+    let verification = fri_verify_structure(
+        parameters,
+        &mut transcript,
+        &proof.fri,
         coset_size,
-        opening_parameters.query_count,
-    );
+        &offset,
+        &fri_parameters,
+    )
+    .ok()??;
+    let query_positions =
+        transcript.challenge_positions("opening-query", coset_size, opening_parameters.query_count);
     if !fri_verify_queries(parameters, &verification, &proof.fri, &query_positions) {
         return None;
     }
 
-    let column_rows = verify_column_opening(column_root, coset_size, column_count, &proof.column_opening)?;
+    let column_rows =
+        verify_column_opening(column_root, coset_size, column_count, &proof.column_opening)?;
     let quotient_rows = verify_column_opening(
         &proof.quotient_root,
         coset_size,
@@ -341,7 +408,12 @@ pub(super) fn verify_linear_evaluation_opening<const LIMB_COUNT: usize>(
     let opened_indices: Vec<usize> = column_rows.keys().copied().collect();
     let x_of_index: std::collections::BTreeMap<usize, [u64; LIMB_COUNT]> = opened_indices
         .iter()
-        .map(|&index| (index, parameters.multiply(&offset, &coset_domain.point(index))))
+        .map(|&index| {
+            (
+                index,
+                parameters.multiply(&offset, &coset_domain.point(index)),
+            )
+        })
         .collect();
     let delta_at_index: Vec<std::collections::BTreeMap<usize, [u64; LIMB_COUNT]>> = delta_forms
         .iter()
@@ -359,8 +431,7 @@ pub(super) fn verify_linear_evaluation_opening<const LIMB_COUNT: usize>(
         })
         .collect();
 
-    let size_inverse =
-        parameters.inverse(&parameters.unsigned_word_to_element(trace_size as u64));
+    let size_inverse = parameters.inverse(&parameters.unsigned_word_to_element(trace_size as u64));
     let claimed_over_size = parameters.multiply(&proof.claimed_sum, &size_inverse);
     let shift = g_degree_adjustment_shift(trace_size);
     let mut shift_exponent = [0_u64; LIMB_COUNT];
@@ -472,7 +543,11 @@ mod tests {
         polynomial::add(parameters, &coefficients, &mask_multiple)
     }
 
-    fn field_vector(parameters: &ProofFieldParameters<13>, len: usize, seed: u64) -> Vec<[u64; 13]> {
+    fn field_vector(
+        parameters: &ProofFieldParameters<13>,
+        len: usize,
+        seed: u64,
+    ) -> Vec<[u64; 13]> {
         let mut state = seed;
         (0..len)
             .map(|_| {
@@ -484,7 +559,11 @@ mod tests {
             .collect()
     }
 
-    fn inner_product(parameters: &ProofFieldParameters<13>, a: &[[u64; 13]], b: &[[u64; 13]]) -> [u64; 13] {
+    fn inner_product(
+        parameters: &ProofFieldParameters<13>,
+        a: &[[u64; 13]],
+        b: &[[u64; 13]],
+    ) -> [u64; 13] {
         let mut acc = parameters.zero();
         for (x, y) in a.iter().zip(b.iter()) {
             acc = parameters.add(&acc, &parameters.multiply(x, y));
@@ -512,14 +591,21 @@ mod tests {
             .iter()
             .enumerate()
             .map(|(j, values)| {
-                masked_column(&parameters, &trace_domain, values, trace_size, 0x5000 + j as u64)
+                masked_column(
+                    &parameters,
+                    &trace_domain,
+                    values,
+                    trace_size,
+                    0x5000 + j as u64,
+                )
             })
             .collect();
 
         // The true sum the opening must prove.
         let mut expected_sum = parameters.zero();
         for (delta, values) in delta_forms.iter().zip(material.iter()) {
-            expected_sum = parameters.add(&expected_sum, &inner_product(&parameters, delta, values));
+            expected_sum =
+                parameters.add(&expected_sum, &inner_product(&parameters, delta, values));
         }
 
         let opening_parameters = LinearEvaluationOpeningParameters { query_count: 40 };
@@ -597,6 +683,126 @@ mod tests {
             )
             .is_none(),
             "a tampered claimed sum must be rejected"
+        );
+    }
+
+    // Build one honest opening the same way the round-trip test above does, and
+    // return everything a verifier needs: the recomputed column root, the public
+    // delta forms, the opening parameters, and the proof.
+    fn honest_opening() -> (
+        ProofFieldParameters<13>,
+        usize,
+        MerkleDigest,
+        Vec<Vec<[u64; 13]>>,
+        LinearEvaluationOpeningParameters,
+        LinearEvaluationOpeningProof<13>,
+    ) {
+        let parameters = sixteen_limb_group_field_parameters();
+        let ring_degree = 64;
+        let (trace_size, _coset_size) = opening_layout(ring_degree).expect("layout");
+        let trace_domain = CyclicDomain::new(&parameters, trace_size).expect("trace domain");
+        let column_count = 5;
+
+        let material: Vec<Vec<[u64; 13]>> = (0..column_count)
+            .map(|column_index| field_vector(&parameters, ring_degree, 0x100 + column_index as u64))
+            .collect();
+        let delta_forms: Vec<Vec<[u64; 13]>> = (0..column_count)
+            .map(|column_index| field_vector(&parameters, ring_degree, 0x900 + column_index as u64))
+            .collect();
+        let column_coefficients: Vec<Vec<[u64; 13]>> = material
+            .iter()
+            .enumerate()
+            .map(|(column_index, values)| {
+                masked_column(
+                    &parameters,
+                    &trace_domain,
+                    values,
+                    trace_size,
+                    0x5000 + column_index as u64,
+                )
+            })
+            .collect();
+
+        let opening_parameters = LinearEvaluationOpeningParameters { query_count: 40 };
+        let mut salt_seed = 0xa11ce;
+        let (column_root, proof) = prove_linear_evaluation_opening(
+            &parameters,
+            ring_degree,
+            &column_coefficients,
+            &delta_forms,
+            &opening_parameters,
+            &mut salt_seed,
+        )
+        .expect("prove");
+        (
+            parameters,
+            ring_degree,
+            column_root,
+            delta_forms,
+            opening_parameters,
+            proof,
+        )
+    }
+
+    #[test]
+    fn linear_evaluation_opening_codec_round_trips_and_the_decoded_proof_verifies() {
+        let (parameters, ring_degree, column_root, delta_forms, opening_parameters, proof) =
+            honest_opening();
+
+        // The proven sum the honest opening establishes; the decoded proof must
+        // re-verify to exactly this Z.
+        let expected_z = verify_linear_evaluation_opening(
+            &parameters,
+            ring_degree,
+            &column_root,
+            &delta_forms,
+            &proof,
+            &opening_parameters,
+        )
+        .expect("the honest opening must verify before encoding");
+
+        let bytes = encode_linear_evaluation_opening_proof(&proof).expect("encode");
+        let decoded = decode_linear_evaluation_opening_proof(&parameters, &bytes).expect("decode");
+
+        // Re-encoding the decoded proof reproduces the exact bytes (canonical).
+        let reencoded = encode_linear_evaluation_opening_proof(&decoded).expect("re-encode");
+        assert_eq!(bytes, reencoded, "the opening encoding must be canonical");
+
+        // The decoded proof re-verifies to the same Z against the same root and
+        // delta forms.
+        assert_eq!(
+            verify_linear_evaluation_opening(
+                &parameters,
+                ring_degree,
+                &column_root,
+                &delta_forms,
+                &decoded,
+                &opening_parameters,
+            ),
+            Some(expected_z),
+            "the decoded opening must re-verify to the same proven sum"
+        );
+    }
+
+    #[test]
+    fn linear_evaluation_opening_codec_rejects_truncated_and_trailing_bytes() {
+        let (parameters, _ring_degree, _column_root, _delta_forms, _opening_parameters, proof) =
+            honest_opening();
+        let bytes = encode_linear_evaluation_opening_proof(&proof).expect("encode");
+
+        // Dropping the final byte truncates the stream: strict decode must fail.
+        assert!(
+            decode_linear_evaluation_opening_proof(&parameters, &bytes[..bytes.len() - 1]).is_err(),
+            "a truncated opening stream must be rejected"
+        );
+
+        // Appending a stray byte leaves trailing input: `reader.finish()` must
+        // reject it.
+        let mut with_trailing = bytes.clone();
+        with_trailing.push(0);
+        assert!(
+            decode_linear_evaluation_opening_proof(&parameters, &with_trailing).is_err(),
+            "an opening stream with trailing bytes must be rejected"
         );
     }
 }

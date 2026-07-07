@@ -164,7 +164,6 @@ pub(crate) fn run_direct_encrypted_ballot(request: &Value) -> CanonicalResult<Va
             "challenge": first_proof.challenge.to_string(),
             "proofTransport": {
                 "encoding": "binary proof chunks",
-                "chunkSizeBytes": PROTOTYPE_PROOF_CHUNK_BYTES,
                 "chunksPerProof": first_proof.proof_chunk_count,
                 "chunksForBatch": chunk_count_for_bytes(total_proof_bytes, PROTOTYPE_PROOF_CHUNK_BYTES)?,
                 "transportedProofSizeBytes": first_proof.transported_proof_size_bytes,

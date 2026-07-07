@@ -15,7 +15,6 @@ import {
     setupProofMaterialRecordTransportFields,
     setupProofMaterialTransportChunks,
     setupProofMaterialTransportMetadata,
-    setupProofTransportChunkSizeBytes,
     setupTransportedProofMaterialFields,
 } from './setup-proof-material-transport.js';
 
@@ -250,7 +249,6 @@ export type TransportedPrivateVssShareProofMaterial = Readonly<
         readonly objectType: 'SetupTransportedPrivateVssShareProofMaterial';
         readonly proofFamily: typeof privateVssShareProofFamily;
         readonly proofMaterialRoot: ProtocolHash;
-        readonly chunkSizeBytes: typeof setupProofTransportChunkSizeBytes;
         readonly chunkCount: number;
         readonly totalByteLength: number;
         readonly fullObjectHash: ProtocolHash;

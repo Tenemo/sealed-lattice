@@ -6,26 +6,22 @@ pub(in crate::bgv::setup) fn verify_terminal_setup_transport_policy(
 ) -> CanonicalResult<Option<Value>> {
     if setup_package
         .get("vssCoefficientCommitmentMaterial")
-        .and_then(|material_set| material_set.get("materialEncoding"))
-        .and_then(Value::as_str)
-        != Some("binary-chunked-full-public-setup-commitment-values")
+        .is_none()
     {
         return Ok(Some(terminal_transport_policy_refusal(
             "terminalVssMaterialTransportRequired",
             "terminal accepted setup requires binary-chunked VSS coefficient commitment material",
-            "setupPackage.vssCoefficientCommitmentMaterial.materialEncoding",
+            "setupPackage.vssCoefficientCommitmentMaterial",
         )?));
     }
-    if setup_package
+    if !setup_package
         .get("publicKeyShareMaterial")
-        .and_then(|material_set| material_set.get("materialEncoding"))
-        .and_then(Value::as_str)
-        != Some(PUBLIC_KEY_SHARE_MATERIAL_TRANSPORT_ENCODING)
+        .is_some_and(public_key_share_material_uses_transport)
     {
         return Ok(Some(terminal_transport_policy_refusal(
             "terminalPublicKeyShareMaterialTransportRequired",
             "terminal accepted setup requires binary-chunked public-key share material",
-            "setupPackage.publicKeyShareMaterial.materialEncoding",
+            "setupPackage.publicKeyShareMaterial",
         )?));
     }
     for (record_set_name, records_field_name, object_path) in [
@@ -100,7 +96,6 @@ pub(in crate::bgv::setup) fn verify_terminal_setup_transport_policy(
     for field_name in [
         "publicEvaluationKeyMaterialEncoding",
         "publicEvaluationKeyMaterialRoot",
-        "publicEvaluationKeyMaterialChunkSizeBytes",
         "publicEvaluationKeyMaterialChunkCount",
         "publicEvaluationKeyMaterialTotalByteLength",
         "publicEvaluationKeyMaterialFullObjectHash",

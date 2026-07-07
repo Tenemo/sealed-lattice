@@ -79,13 +79,6 @@ pub(crate) fn setup_proof_material_transport_hashes(
     }
     let chunk_root = setup_proof_material_chunk_manifest_root(
         proof_family,
-        chunk_size_bytes,
-        u64::try_from(chunks.len()).map_err(|_| {
-            CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "setup proof material chunk count does not fit u64",
-            )
-        })?,
         total_byte_length,
         &chunk_hashes,
         &full_object_hash,
@@ -207,38 +200,15 @@ pub(in crate::bgv::setup) fn verify_setup_proof_record_transport_reference(
 pub(in crate::bgv::setup) fn transported_setup_proof_material_chunks(
     value: &Value,
     material_message_label: &str,
-    chunk_message_label: &str,
 ) -> CanonicalResult<Vec<Vec<u8>>> {
-    let expected_chunk_count =
-        usize::try_from(setup_proof_transport_u64_field(value, "chunkCount")?).map_err(|_| {
-            CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                format!("{material_message_label} chunkCount does not fit usize"),
-            )
-        })?;
     let chunk_values = setup_proof_transport_array_field(value, "chunks").map_err(|_| {
         CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             format!("{material_message_label} chunks are required"),
         )
     })?;
-    if chunk_values.len() != expected_chunk_count {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            format!("{material_message_label} chunks length must match chunkCount"),
-        ));
-    }
-    let mut chunks = Vec::with_capacity(expected_chunk_count);
-    for (expected_chunk_index, chunk_value) in chunk_values.iter().enumerate() {
-        let observed_chunk_index = setup_proof_transport_u64_field(chunk_value, "chunkIndex")?;
-        if observed_chunk_index != expected_chunk_index as u64 {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                format!(
-                    "{chunk_message_label} chunks must be supplied in ascending chunk-index order"
-                ),
-            ));
-        }
+    let mut chunks = Vec::with_capacity(chunk_values.len());
+    for chunk_value in chunk_values.iter() {
         chunks.push(decode_hex(setup_proof_transport_string_field(
             chunk_value,
             "bytesHex",

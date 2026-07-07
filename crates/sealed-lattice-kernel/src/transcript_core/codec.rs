@@ -335,7 +335,6 @@ pub fn analyze_canonical_object(
     Ok(TranscriptCoreAnalysis {
         canonical_bytes_hex: encode_hex(bytes),
         object_type: "TranscriptCore",
-        object_version: TRANSCRIPT_CORE_OBJECT_VERSION,
         object_hash512: object_root(bytes),
         chunk_root: chunk_root(bytes, chunk_size_usize)?,
         chunk_size,

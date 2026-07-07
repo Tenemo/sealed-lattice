@@ -251,7 +251,6 @@ fn private_vss_share_succinct_proof_uses_transport(proof_record: &Value) -> Cano
 
 fn private_vss_share_succinct_proof_has_transport_reference(proof_record: &Value) -> bool {
     [
-        "proofChunkSizeBytes",
         "proofChunkCount",
         "proofTotalByteLength",
         "proofFullObjectHash",
@@ -424,30 +423,13 @@ fn verify_transported_private_vss_share_proof_material_header(
 }
 
 fn transported_private_vss_share_proof_chunks(value: &Value) -> CanonicalResult<Vec<Vec<u8>>> {
-    let expected_chunk_count = usize::try_from(value_u64(value, "chunkCount")?).map_err(|_| {
-        CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "transported private VSS share proof material chunkCount does not fit usize",
-        )
-    })?;
     let Some(chunk_values) = value.get("chunks").and_then(Value::as_array) else {
         return Err(invalid_private_vss_share_proof(
             "transported private VSS share proof material chunks are required",
         ));
     };
-    if chunk_values.len() != expected_chunk_count {
-        return Err(invalid_private_vss_share_proof(
-            "transported private VSS share proof material chunks length must match chunkCount",
-        ));
-    }
-    let mut chunks = Vec::with_capacity(expected_chunk_count);
-    for (expected_chunk_index, chunk_value) in chunk_values.iter().enumerate() {
-        let observed_chunk_index = value_u64(chunk_value, "chunkIndex")?;
-        if observed_chunk_index != expected_chunk_index as u64 {
-            return Err(invalid_private_vss_share_proof(
-                "transported private VSS share proof chunks must be supplied in ascending chunk-index order",
-            ));
-        }
+    let mut chunks = Vec::with_capacity(chunk_values.len());
+    for chunk_value in chunk_values.iter() {
         chunks.push(decode_hex(value_string(chunk_value, "bytesHex")?)?);
     }
 
@@ -597,7 +579,6 @@ fn private_vss_share_succinct_transported_proof_material_root(
         "proofBytesEncoding": SETUP_PROOF_MATERIAL_ENCODING,
         "statementHash": statement_hash_hex,
         "proofBytesHash": proof_bytes_hash,
-        "proofChunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
         "proofChunkCount": transport_hashes.chunk_hashes.len(),
         "proofTotalByteLength": transport_hashes.total_byte_length,
         "proofFullObjectHash": transport_hashes.full_object_hash.as_str(),
@@ -657,13 +638,6 @@ fn value_string<'a>(value: &'a Value, field_name: &str) -> CanonicalResult<&'a s
         .get(field_name)
         .and_then(Value::as_str)
         .ok_or_else(|| invalid_private_vss_share_proof(format!("{field_name} must be a string")))
-}
-
-fn value_u64(value: &Value, field_name: &str) -> CanonicalResult<u64> {
-    value
-        .get(field_name)
-        .and_then(Value::as_u64)
-        .ok_or_else(|| invalid_private_vss_share_proof(format!("{field_name} must be a u64")))
 }
 
 fn expect_string_field(

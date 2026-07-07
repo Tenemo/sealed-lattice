@@ -285,13 +285,26 @@ mod linkage;
 mod prove;
 mod verify;
 
-pub(super) use linkage::{LinkageStatement, LinkageWitness};
+pub(super) use linkage::{LinkageLayout, LinkageStatement, LinkageWitness};
 pub(super) use prove::prove_key_fri;
+// The single-source material-commitment regeneration the S1/S2 aggregate binding
+// reuses to open exactly the atom proof's committed material.
+pub(super) use prove::regenerate_material_commitment_inputs;
 #[cfg(test)]
 pub(super) use prove::{prove_key_fri_with_component_b, prove_round_one_key_fri};
 pub(super) use verify::verify_key_fri;
 #[cfg(test)]
 pub(super) use verify::verify_round_one_key_fri;
+
+// The key-switch atom linkage layout for a ring degree. Key-bearing statements
+// always carry the linkage block, so the aggregate binding uses this to compute
+// the same `base_column_count` the atom prover's column plan uses. Kept as a thin
+// re-export so the layout construction has one home in `linkage`.
+pub(super) fn key_switch_linkage_layout(
+    ring_degree: usize,
+) -> crate::encoding::CanonicalResult<LinkageLayout> {
+    linkage::linkage_layout(ring_degree)
+}
 
 #[cfg(test)]
 mod tests;

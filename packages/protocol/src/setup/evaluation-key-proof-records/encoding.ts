@@ -8,7 +8,6 @@ import {
     bytesFromHex,
     bytesToHex,
 } from '../common-fields.js';
-import { setupProofTransportChunkSizeBytes } from '../setup-proof-material-transport.js';
 import { appendVaruint } from '../varuint-encoding.js';
 
 import {
@@ -274,7 +273,6 @@ export const evaluationKeyShareComponentMaterialTransportHashes = (
         objectType: 'EvaluationKeyShareComponentMaterialChunkManifest',
         proofFamily,
         keySwitchMaterialEncoding: evaluationKeyShareComponentMaterialEncoding,
-        chunkSizeBytes: setupProofTransportChunkSizeBytes,
         chunkCount: chunkHashes.length,
         totalByteLength,
         chunkHashes,
@@ -311,7 +309,6 @@ export const evaluationKeyShareComponentMaterialReferenceRoot = (
         rnsLimbCount: level + 1,
         keySwitchComponentVectorRoot:
             shareMaterial.keySwitchComponentVectorRoot,
-        chunkSizeBytes: setupProofTransportChunkSizeBytes,
         chunkCount: transportHashes.chunkHashes.length,
         totalByteLength: transportHashes.totalByteLength,
         fullObjectHash: transportHashes.fullObjectHash,

@@ -44,9 +44,6 @@ export const assertCommitmentHeader = (
             'localStateCommitment.objectType must be LocalTrusteeSetupStateCommitment.',
         );
     }
-    if (localStateCommitment.objectVersion !== 1) {
-        throw new TypeError('localStateCommitment.objectVersion must be 1.');
-    }
     assertProtocolHash(
         localStateCommitment.localStateRoot,
         'localStateCommitment.localStateRoot',
@@ -140,9 +137,6 @@ function validateEncryptedSealedMaterialEnvelope(
         throw new TypeError(
             `${objectPath}.objectType must be EncryptedLocalTrusteeSetupMaterial.`,
         );
-    }
-    if (encryptedMaterial.objectVersion !== 1) {
-        throw new TypeError(`${objectPath}.objectVersion must be 1.`);
     }
     if (encryptedMaterial.materialClass !== expectedMaterialClass) {
         throw new TypeError(
@@ -257,9 +251,6 @@ const validateSealedMaterial = (
             `${objectPath}.objectType must be LocalTrusteeSetupStateSealedMaterial.`,
         );
     }
-    if (material.objectVersion !== 1) {
-        throw new TypeError(`${objectPath}.objectVersion must be 1.`);
-    }
     if (material.materialClass !== expectedMaterialClass) {
         throw new TypeError(
             `${objectPath}.materialClass must be ${expectedMaterialClass}.`,
@@ -323,9 +314,6 @@ export const validateLocalStatePlaintext = (
         throw new TypeError(
             'localStatePlaintext.objectType must be LocalTrusteeSetupStateSealedPayload.',
         );
-    }
-    if (plaintext.objectVersion !== 1) {
-        throw new TypeError('localStatePlaintext.objectVersion must be 1.');
     }
     for (const fieldName of setupContextFieldNames) {
         if (plaintext[fieldName] !== localStateCommitment[fieldName]) {

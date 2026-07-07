@@ -90,7 +90,6 @@ pub(in crate::bgv::setup) fn public_key_share_succinct_proof_material_root(
         "trusteeRosterPosition": value_u64(proof_record, "trusteeRosterPosition")?,
         "statementHash": value_string(proof_record, "statementHash")?,
         "proofBytesHash": value_string(proof_record, "proofBytesHash")?,
-        "chunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
         "chunkCount": transport_hashes.chunk_hashes.len(),
         "totalByteLength": transport_hashes.total_byte_length,
         "fullObjectHash": transport_hashes.full_object_hash,
@@ -224,7 +223,6 @@ fn transported_public_key_share_proof_chunks(value: &Value) -> CanonicalResult<V
     transported_setup_proof_material_chunks(
         value,
         "transported public-key share succinct proof material",
-        "transported public-key share succinct proof",
     )
 }
 

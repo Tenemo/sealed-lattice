@@ -164,8 +164,6 @@ pub(super) fn setup_proof_material_chunk_hash(
 
 pub(super) fn setup_proof_material_chunk_manifest_root(
     proof_family: &str,
-    chunk_size_bytes: u64,
-    chunk_count: u64,
     total_byte_length: u64,
     chunk_hashes: &[String],
     full_object_hash: &str,
@@ -173,8 +171,6 @@ pub(super) fn setup_proof_material_chunk_manifest_root(
     derive_canonical_object_hash(&json!({
         "objectType": SETUP_PROOF_MATERIAL_CHUNK_MANIFEST_OBJECT_TYPE,
         "proofFamily": proof_family,
-        "chunkSizeBytes": chunk_size_bytes,
-        "chunkCount": chunk_count,
         "totalByteLength": total_byte_length,
         "chunkHashes": chunk_hashes,
         "fullObjectHash": full_object_hash,

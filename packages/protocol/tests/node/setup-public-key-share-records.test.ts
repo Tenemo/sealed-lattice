@@ -12,8 +12,6 @@ import {
     createVssSourceTrusteeCoefficientOpeningState,
     materialRecordsFromTransportedPublicKeyShareMaterial,
     publicKeyShareCoefficientVectorHashDomain,
-    publicKeyShareMaterialBinaryFormat,
-    setupTransportChunkSizeBytes,
     type PublicKeyShareContributionInput,
     type PublicKeyShareMaterialContributionInput,
     type PublicKeyShareSet,
@@ -348,8 +346,7 @@ describe('public-key share statement builders', () => {
         expect(
             directMaterialBundle.transportedPublicKeyShareMaterial,
         ).toMatchObject({
-            binaryFormat: publicKeyShareMaterialBinaryFormat,
-            chunkSizeBytes: setupTransportChunkSizeBytes,
+            chunkCount: 1,
         });
         expect(reconstructedMaterialRecords).toEqual(
             embeddedMaterialSet.shareMaterialRecords,

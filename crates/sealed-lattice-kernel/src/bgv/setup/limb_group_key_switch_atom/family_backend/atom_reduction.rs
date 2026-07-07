@@ -39,6 +39,10 @@ pub(super) struct AtomLinearForm<const LIMB_COUNT: usize> {
     pub(super) secret_coefficients: Vec<[u64; LIMB_COUNT]>,
     pub(super) error_coefficients: Vec<[u64; LIMB_COUNT]>,
     pub(super) carry_coefficients: Vec<[u64; LIMB_COUNT]>,
+    // Carries `-<gamma, B_public_j>`. Retained for the documented atom-form
+    // structure even though the component term no longer enters the sumcheck
+    // target (it rides the material form against the committed `B_col_j`).
+    #[allow(dead_code)]
     pub(super) target: [u64; LIMB_COUNT],
 }
 

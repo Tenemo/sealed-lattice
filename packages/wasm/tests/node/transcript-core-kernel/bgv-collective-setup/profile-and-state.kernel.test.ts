@@ -2,8 +2,6 @@ import { describe, expect, it } from 'vitest';
 
 import { setupRequest, validHash } from '../bgv-passive-setup-fixtures.js';
 
-import { setupTransportChunkSizeBytes } from './setup-fixture-primitives.js';
-
 import { createLocalTrusteeSetupStateCommitment } from '#packages/protocol/src/setup/local-trustee-setup-state';
 import { type CollectiveBgvSetupContext } from '#packages/protocol/src/setup/vss-share-verification-records';
 import {
@@ -37,7 +35,6 @@ describe('collective BGV setup kernel commands', () => {
         expect(parameters.setupParametersHash).toHaveLength(128);
         expect(parameters.setupTransport).toMatchObject({
             objectType: 'SetupTransport',
-            chunkSizeBytes: setupTransportChunkSizeBytes,
             storageQuotaBytes: 2_147_483_648,
             largestSingleBufferBytes: 1_572_864,
             streamVerificationOrder: 'ascending-chunk-index',

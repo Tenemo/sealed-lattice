@@ -117,7 +117,6 @@ fn terminal_transport_policy_accepts_binary_setup_and_key_material_references() 
         "transportedVssCoefficientCommitmentMaterial": {
             "objectType": "SetupTransportedVssCoefficientCommitmentMaterial",
             "binaryFormat": "sealed-lattice-vss-coefficient-commitment-material-binary-v1",
-            "chunkSizeBytes": 1_048_576,
             "chunkCount": 1,
             "totalByteLength": 64,
             "fullObjectHash": valid_hash('5'),
@@ -148,7 +147,6 @@ fn terminal_transport_policy_refuses_raw_vss_chunk_sidecar() {
         "transportedVssCoefficientCommitmentMaterial": {
             "objectType": "SetupTransportedVssCoefficientCommitmentMaterial",
             "binaryFormat": "sealed-lattice-vss-coefficient-commitment-material-binary-v1",
-            "chunkSizeBytes": 1_048_576,
             "chunkCount": 1,
             "totalByteLength": 64,
             "fullObjectHash": valid_hash('5'),
@@ -190,7 +188,6 @@ fn terminal_transport_policy_refuses_raw_key_switch_component_chunk_sidecar() {
         "transportedVssCoefficientCommitmentMaterial": {
             "objectType": "SetupTransportedVssCoefficientCommitmentMaterial",
             "binaryFormat": "sealed-lattice-vss-coefficient-commitment-material-binary-v1",
-            "chunkSizeBytes": 1_048_576,
             "chunkCount": 1,
             "totalByteLength": 64,
             "fullObjectHash": valid_hash('5'),
@@ -209,7 +206,6 @@ fn terminal_transport_policy_refuses_raw_key_switch_component_chunk_sidecar() {
                     "proofFamily": "relinearization-key-share",
                     "keySwitchMaterialEncoding": EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
                     "keySwitchComponentMaterialRoot": valid_hash('8'),
-                    "chunkSizeBytes": 1_048_576,
                     "chunkCount": 1,
                     "totalByteLength": 64,
                     "fullObjectHash": valid_hash('9'),
@@ -249,7 +245,6 @@ fn terminal_transport_policy_reports_missing_stream_verified_vss_handle() {
         "transportedVssCoefficientCommitmentMaterial": {
             "objectType": "SetupTransportedVssCoefficientCommitmentMaterial",
             "binaryFormat": "sealed-lattice-vss-coefficient-commitment-material-binary-v1",
-            "chunkSizeBytes": 1_048_576,
             "chunkCount": 1,
             "totalByteLength": 64,
             "fullObjectHash": valid_hash('5'),
@@ -322,7 +317,6 @@ fn terminal_transport_policy_package_with_material_encodings(
         "evaluationKeys": {
             "publicEvaluationKeyMaterialEncoding": PUBLIC_EVALUATION_KEY_TRANSPORT_MATERIAL_ENCODING,
             "publicEvaluationKeyMaterialRoot": valid_hash('1'),
-            "publicEvaluationKeyMaterialChunkSizeBytes": 1_048_576,
             "publicEvaluationKeyMaterialChunkCount": 1,
             "publicEvaluationKeyMaterialTotalByteLength": 64,
             "publicEvaluationKeyMaterialFullObjectHash": valid_hash('2'),

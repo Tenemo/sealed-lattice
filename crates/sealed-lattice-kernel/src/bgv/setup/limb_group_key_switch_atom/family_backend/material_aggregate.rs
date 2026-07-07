@@ -75,10 +75,7 @@ pub(crate) fn material_aggregate_identity_holds<const LIMB_COUNT: usize>(
         return false;
     }
     let digit_count = recombined_runtime_key.len();
-    if digit_count == 0
-        || wrap_multiples.len() != digit_count
-        || delta.len() != digit_count
-    {
+    if digit_count == 0 || wrap_multiples.len() != digit_count || delta.len() != digit_count {
         return false;
     }
 
@@ -172,10 +169,7 @@ mod tests {
                     roster_size,
                 )
                 .expect("wrap in range");
-                total = parameters.add(
-                    &total,
-                    &parameters.multiply(&delta_coefficient, &sum),
-                );
+                total = parameters.add(&total, &parameters.multiply(&delta_coefficient, &sum));
                 recombined_digit.push(recombined_coefficient);
                 wrap_digit.push(wrap);
                 delta_digit.push(delta_coefficient);

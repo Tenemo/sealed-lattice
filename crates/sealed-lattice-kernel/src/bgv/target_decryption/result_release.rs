@@ -18,8 +18,7 @@ static TARGET_RESULT_RELEASE_SESSIONS: OnceLock<
 // target-binding key of every target a finish has released and enforces that
 // bound. Persistent consumed-state across process restarts remains an open
 // obligation (see SEC-002).
-static TARGET_RESULT_RELEASE_CONSUMED_TARGETS: OnceLock<Mutex<BTreeSet<String>>> =
-    OnceLock::new();
+static TARGET_RESULT_RELEASE_CONSUMED_TARGETS: OnceLock<Mutex<BTreeSet<String>>> = OnceLock::new();
 
 pub(super) struct TargetDecryptionResultReleaseBeginInput<'a> {
     pub(super) release_verification_id: &'a str,
@@ -71,8 +70,9 @@ pub(super) fn begin_target_decryption_result_release(
     // session. This is an early check; finish holds the registry lock across the
     // recombination and is the authoritative one-shot gate.
     {
-        let consumed_targets =
-            target_result_release_consumed_targets().lock().map_err(|_| {
+        let consumed_targets = target_result_release_consumed_targets()
+            .lock()
+            .map_err(|_| {
                 CanonicalError::new(
                     CanonicalErrorCode::InvalidProtocolObject,
                     "target result release consumed-target registry is unavailable",
@@ -188,12 +188,14 @@ pub(super) fn finish_target_decryption_result_release(
     // consumes the target, and the second is refused before a second plaintext is
     // revealed. A recombination failure returns without consuming, so a failed
     // release does not burn the target.
-    let mut consumed_targets = target_result_release_consumed_targets().lock().map_err(|_| {
-        CanonicalError::new(
-            CanonicalErrorCode::InvalidProtocolObject,
-            "target result release consumed-target registry is unavailable",
-        )
-    })?;
+    let mut consumed_targets = target_result_release_consumed_targets()
+        .lock()
+        .map_err(|_| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidProtocolObject,
+                "target result release consumed-target registry is unavailable",
+            )
+        })?;
     if consumed_targets.contains(&consumption_key) {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidProtocolObject,

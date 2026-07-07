@@ -334,9 +334,7 @@ const verifyWitnessCheckpoint = (
             ),
         );
     }
-    if (
-        checkpoint.objectType !== 'WitnessCheckpoint'
-    ) {
+    if (checkpoint.objectType !== 'WitnessCheckpoint') {
         refusedObjects.push(
             createRefusal(
                 'InvalidSignedRoot',

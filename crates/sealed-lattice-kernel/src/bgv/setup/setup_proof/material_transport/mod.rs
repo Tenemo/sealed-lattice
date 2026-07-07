@@ -13,7 +13,6 @@ const SETUP_PROOF_MATERIAL_STREAM_ID_MAX_BYTES: usize = 128;
 const SETUP_PROOF_RECORD_TRANSPORT_REFERENCE_FIELDS: &[&str] = &[
     "proofBytesEncoding",
     "proofMaterialRoot",
-    "proofChunkSizeBytes",
     "proofChunkCount",
     "proofTotalByteLength",
     "proofFullObjectHash",
@@ -130,7 +129,6 @@ pub(crate) fn begin_setup_proof_material_transport_stream_request(
         "proofMaterialRoot": header.proof_material_root,
         "proofBytesEncoding": SETUP_PROOF_MATERIAL_ENCODING,
         "transport": {
-            "chunkSizeBytes": header.metadata.chunk_size_bytes,
             "chunkCount": header.metadata.chunk_count,
             "totalByteLength": header.metadata.total_byte_length,
         },

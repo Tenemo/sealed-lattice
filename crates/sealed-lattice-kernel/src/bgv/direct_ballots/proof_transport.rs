@@ -96,7 +96,6 @@ pub(super) fn transport_direct_ballot_binary_proof(
             statement_hash,
             proof_bytes_hash: expected_proof_bytes_hash,
             proof_byte_length: proof_bytes.len(),
-            chunk_size_bytes: PROTOTYPE_PROOF_CHUNK_BYTES,
             chunk_count,
             chunk_hashes: &chunk_hashes,
             chunk_merkle_root: &chunk_merkle_root,
@@ -135,7 +134,6 @@ pub(super) struct DirectBallotPublicProofTransportHashInput<'a> {
     statement_hash: &'a str,
     proof_bytes_hash: &'a str,
     proof_byte_length: usize,
-    chunk_size_bytes: usize,
     chunk_count: usize,
     chunk_hashes: &'a [String],
     chunk_merkle_root: &'a str,
@@ -156,7 +154,6 @@ pub(super) fn direct_ballot_public_proof_transport_hash(
     derive_canonical_object_hash(&json!({
         "objectType": "DirectEncryptedBallotProofTransport",
         "proofByteLength": input.proof_byte_length,
-        "chunkSizeBytes": input.chunk_size_bytes,
         "chunkCount": input.chunk_count,
         "chunkHashes": input.chunk_hashes,
         "chunkMerkleRoot": input.chunk_merkle_root,

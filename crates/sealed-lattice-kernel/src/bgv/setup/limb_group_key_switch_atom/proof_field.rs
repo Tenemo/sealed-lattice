@@ -127,11 +127,7 @@ pub(crate) fn single_limb_field_parameters(
     let radix_remainder = ((1_u128 << 64) % u128::from(modulus)) as u64;
     let radix_squared =
         ((u128::from(radix_remainder) * u128::from(radix_remainder)) % u128::from(modulus)) as u64;
-    ProofFieldParameters::from_constants(
-        [modulus],
-        [radix_squared],
-        [primitive_65536th_root],
-    )
+    ProofFieldParameters::from_constants([modulus], [radix_squared], [primitive_65536th_root])
 }
 
 impl<const LIMB_COUNT: usize> ProofFieldParameters<LIMB_COUNT> {

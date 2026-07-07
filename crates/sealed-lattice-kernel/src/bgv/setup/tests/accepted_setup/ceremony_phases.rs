@@ -14,7 +14,7 @@ fn first_closure_setup_parameters_hash_is_byte_stable() {
         setup_parameters["setupParametersHash"]
             .as_str()
             .expect("setup parameters hash"),
-        "ebdc0a2dcf232e19e7aa7df7cd1239c2034657fb64e3c7cd62a804122f21cdd805a13f2656faec8cef3dcc8ff8010eb326c4fdc0269364ee2623e37993b5c18f",
+        "f220db80aee1642bac54d1d359446b34f4fde21ddebc0094682e8ebd9dfe4d00ce6a92bd6ee4076cd1e7600d33ca099cf7256b1bc1381ab8e0cdea8127c72690",
     );
 }
 
@@ -78,10 +78,6 @@ fn collective_setup_parameters_expose_first_closure_state_machine() {
     assert_eq!(
         setup_parameters["setupTransport"]["objectType"],
         "SetupTransport"
-    );
-    assert_eq!(
-        setup_parameters["setupTransport"]["chunkSizeBytes"],
-        1_048_576
     );
     assert_eq!(
         setup_parameters["setupTransport"]["storageQuotaBytes"],

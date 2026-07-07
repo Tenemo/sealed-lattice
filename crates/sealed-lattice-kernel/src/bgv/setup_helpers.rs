@@ -85,16 +85,12 @@ pub(super) fn usize_field(value: &Value, field_name: &str) -> CanonicalResult<us
 }
 
 pub(super) fn setup_transport_chunk_manifest_root(
-    chunk_size_bytes: u64,
-    chunk_count: u64,
     total_byte_length: u64,
     chunk_hashes: &[String],
     full_object_hash: &str,
 ) -> CanonicalResult<String> {
     derive_canonical_object_hash(&json!({
         "objectType": "SetupTransportChunkManifest",
-        "chunkSizeBytes": chunk_size_bytes,
-        "chunkCount": chunk_count,
         "totalByteLength": total_byte_length,
         "chunkHashes": chunk_hashes,
         "fullObjectHash": full_object_hash,

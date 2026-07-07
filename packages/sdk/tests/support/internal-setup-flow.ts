@@ -54,7 +54,6 @@ import type {
     SetupPackage as ProtocolSetupPackage,
     SetupPackageInput as ProtocolSetupPackageInput,
     SetupPhaseParticipantObjectInput as ProtocolSetupPhaseParticipantObjectInput,
-    LocalTrusteeSetupStateDecryptionInput,
 } from '@sealed-lattice/protocol';
 import type {
     ProtocolHash,
@@ -980,8 +979,7 @@ export const restoreLocalTrusteeSetupState = async (
     }) as LocalTrusteeSetupStateVerification;
     const decryptedState = await restoreEncryptedLocalTrusteeSetupStateInternal(
         {
-            encryptedLocalState:
-                input.encryptedLocalState as unknown as LocalTrusteeSetupStateDecryptionInput['encryptedLocalState'],
+            encryptedLocalState: input.encryptedLocalState,
             expectedLocalStateRoot,
             setupContext: input.setupContext,
             storageKeyBytesHex: input.storageKeyBytesHex,

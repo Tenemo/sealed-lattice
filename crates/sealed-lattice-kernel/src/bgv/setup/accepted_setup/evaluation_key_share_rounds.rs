@@ -648,7 +648,6 @@ fn verify_evaluation_key_component_material_encoding(record: &Value) -> Canonica
             }
             for field_name in [
                 "keySwitchComponentMaterialRoot",
-                "keySwitchComponentChunkSizeBytes",
                 "keySwitchComponentChunkCount",
                 "keySwitchComponentTotalByteLength",
                 "keySwitchComponentFullObjectHash",

@@ -124,34 +124,9 @@ pub(super) fn verify_public_key_share_material_transport_header(
 }
 
 pub(super) fn public_key_share_material_chunks(value: &Value) -> CanonicalResult<Vec<Vec<u8>>> {
-    let expected_chunk_count = usize::try_from(value_u64(value, "chunkCount")?).map_err(|_| {
-        CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "transported public-key share material chunkCount does not fit usize",
-        )
-    })?;
     let chunk_values = array_value(value, "chunks")?;
-    if chunk_values.len() != expected_chunk_count {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "transported public-key share material chunks length must match chunkCount",
-        ));
-    }
-    let mut chunks = Vec::with_capacity(expected_chunk_count);
-    for (expected_chunk_index, chunk_value) in chunk_values.iter().enumerate() {
-        if value_u64(chunk_value, "chunkIndex")?
-            != u64::try_from(expected_chunk_index).map_err(|_| {
-                CanonicalError::new(
-                    CanonicalErrorCode::MalformedLength,
-                    "public-key share material chunk index does not fit u64",
-                )
-            })?
-        {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "transported public-key share material chunks must be in ascending chunk-index order",
-            ));
-        }
+    let mut chunks = Vec::with_capacity(chunk_values.len());
+    for chunk_value in chunk_values.iter() {
         chunks.push(decode_hex(value_string(chunk_value, "bytesHex")?)?);
     }
 
@@ -218,18 +193,8 @@ pub(in crate::bgv::setup) fn public_key_share_material_transport_hashes(
             public_key_share_material_chunk_hash(&full_object_hash, chunk_index, chunk)
         })
         .collect::<CanonicalResult<Vec<_>>>()?;
-    let chunk_root = setup_transport_chunk_manifest_root(
-        SETUP_TRANSPORT_CHUNK_SIZE_BYTES,
-        u64::try_from(chunk_hashes.len()).map_err(|_| {
-            CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "public-key share material chunk count does not fit u64",
-            )
-        })?,
-        total_byte_length,
-        &chunk_hashes,
-        &full_object_hash,
-    )?;
+    let chunk_root =
+        setup_transport_chunk_manifest_root(total_byte_length, &chunk_hashes, &full_object_hash)?;
 
     Ok(PublicKeyShareMaterialTransportHashes {
         full_object_hash,
@@ -288,11 +253,11 @@ pub(super) fn verify_public_key_share_material_transport_hash_fields(
     let chunk_root = value_string(value, "chunkRoot")?;
     if chunk_count
         != u64::try_from(transport_hashes.chunk_hashes.len()).map_err(|_| {
-                CanonicalError::new(
-                    CanonicalErrorCode::MalformedLength,
-                    "public-key share material chunk count does not fit u64",
-                )
-            })?
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "public-key share material chunk count does not fit u64",
+            )
+        })?
         || total_byte_length != transport_hashes.total_byte_length
         || full_object_hash != transport_hashes.full_object_hash
         || chunk_root != transport_hashes.chunk_root

@@ -28,6 +28,7 @@ import type {
     TransportedPublicKeyShareProofMaterialSet as ProtocolTransportedPublicKeyShareProofMaterialSet,
     TransportedVssShareLinkageProofMaterialSet as ProtocolTransportedVssShareLinkageProofMaterialSet,
     TransportedSameSecretBridgeProofMaterialSet as ProtocolTransportedSameSecretBridgeProofMaterialSet,
+    TransportedEvaluationKeyAggregateBindingOpeningSet as ProtocolTransportedEvaluationKeyAggregateBindingOpeningSet,
     TransportedEvaluationKeyShareComponentMaterialSet as ProtocolTransportedEvaluationKeyShareComponentMaterialSet,
     TransportedEvaluationKeyShareProofMaterialSet as ProtocolTransportedEvaluationKeyShareProofMaterialSet,
     TransportedPublicEvaluationKeyMaterialSet as ProtocolTransportedPublicEvaluationKeyMaterialSet,
@@ -252,6 +253,8 @@ export type TransportedEvaluationKeyShareProofMaterialSet =
     ProtocolTransportedEvaluationKeyShareProofMaterialSet;
 export type TransportedEvaluationKeyShareComponentMaterialSet =
     ProtocolTransportedEvaluationKeyShareComponentMaterialSet;
+export type TransportedEvaluationKeyAggregateBindingOpeningSet =
+    ProtocolTransportedEvaluationKeyAggregateBindingOpeningSet;
 export type EvaluationKeyShareComponentMaterialChunkStream =
     ProtocolEvaluationKeyShareComponentMaterialChunkStream;
 export type TransportedPublicEvaluationKeyMaterialSet =
@@ -275,6 +278,11 @@ export type VerifySetupPackageInput = Readonly<{
     // verification. The terminal accepted-setup verifier refuses inline chunks on
     // the transported component material itself, so the bytes travel here.
     readonly evaluationKeyShareComponentMaterialChunkStreams?: readonly EvaluationKeyShareComponentMaterialChunkStream[];
+    // Optional per-trustee batched linear-evaluation openings for the package
+    // aggregate binding, forwarded to the kernel verbatim. The kernel runs the
+    // committed-material aggregate binding only when the evaluation-key set
+    // publishes an aggregateBinding; otherwise the openings are unused.
+    readonly transportedEvaluationKeyAggregateBindingOpenings?: TransportedEvaluationKeyAggregateBindingOpeningSet;
     readonly transportedPublicEvaluationKeyMaterial?: TransportedPublicEvaluationKeyMaterialSet;
     readonly verifiedSetupProofMaterials?: VerifiedSetupProofMaterialSet;
 }>;

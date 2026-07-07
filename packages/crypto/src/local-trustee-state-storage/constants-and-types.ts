@@ -2,13 +2,6 @@ import type { ProtocolHash } from '@sealed-lattice/types';
 
 export const textEncoder = new TextEncoder();
 export const textDecoder = new TextDecoder();
-export const localTrusteeStateStorageFormat =
-    'sealed-lattice-local-trustee-state-aes-256-gcm-hkdf-sha384-v1';
-export const localTrusteeSealedMaterialStorageFormat =
-    'sealed-lattice-local-trustee-setup-material-aes-256-gcm-hkdf-sha384-v1';
-export const localStateCiphertextContentType = 'local-trustee-setup-state';
-export const localSealedMaterialCiphertextContentType =
-    'local-trustee-setup-sealed-material';
 export const aesGcmKeyByteLength = 32;
 export const aesGcmNonceByteLength = 12;
 export const aesGcmTagBitLength = 128;

@@ -126,6 +126,9 @@ export type {
 export type {
     BinaryChunkedEvaluationKeyShareMaterialTransport,
     BinaryChunkedPublicEvaluationKeyMaterialTransport,
+    EvaluationKeyAggregateBindingKeyGroup,
+    EvaluationKeyAggregateBindingSet,
+    EvaluationKeyAggregateBindingTrusteeMaterialRoot,
     EvaluationKeyProofCommonInput,
     EvaluationKeyShareComponentMaterialChunk,
     EvaluationKeyShareComponentMaterialChunkStream,
@@ -156,6 +159,8 @@ export type {
     RelinearizationRoundOneContribution,
     RelinearizationRoundTwoContribution,
     SameSecretProofReference,
+    TransportedEvaluationKeyAggregateBindingOpening,
+    TransportedEvaluationKeyAggregateBindingOpeningSet,
     TransportedEvaluationKeyShareComponentMaterialSet,
     TransportedEvaluationKeyShareProofMaterialSet,
     TransportedPublicEvaluationKeyMaterial,

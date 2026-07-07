@@ -8,9 +8,7 @@ import type {
     SparseTopKTargetDecoding,
 } from '@sealed-lattice/types';
 
-import {
-    createRefusal,
-} from '../common/verification-helpers.js';
+import { createRefusal } from '../common/verification-helpers.js';
 
 import { assertCanonicalFieldElement } from './field.js';
 

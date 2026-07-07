@@ -263,10 +263,6 @@ const validatePublicKeyShareSuccinctProofMaterial = (
         `${fieldName}.proofMaterialRoot`,
     );
     assertPositiveSafeInteger(
-        transportedMaterial.proofChunkSizeBytes,
-        `${fieldName}.proofChunkSizeBytes`,
-    );
-    assertPositiveSafeInteger(
         transportedMaterial.proofChunkCount,
         `${fieldName}.proofChunkCount`,
     );
@@ -319,7 +315,6 @@ const publicKeyShareSuccinctProofByteMaterial = (
     return {
         proofBytesEncoding: transportedMaterial.proofBytesEncoding,
         proofMaterialRoot: transportedMaterial.proofMaterialRoot,
-        proofChunkSizeBytes: transportedMaterial.proofChunkSizeBytes,
         proofChunkCount: transportedMaterial.proofChunkCount,
         proofTotalByteLength: transportedMaterial.proofTotalByteLength,
         proofFullObjectHash: transportedMaterial.proofFullObjectHash,

@@ -7,7 +7,6 @@ import {
 import { describe, expect, it } from 'vitest';
 
 import { createPrivateVssMailboxDeliverySet } from '#packages/protocol/src/index';
-import { setupProofTransportChunkSizeBytes } from '#packages/protocol/src/setup/setup-proof-material-transport';
 import {
     makeSetupContext,
     makeSetupFixtureHash,
@@ -98,8 +97,6 @@ describe('private VSS mailbox delivery', () => {
         const expectedChunkRoot = deriveCanonicalObjectHash({
             objectType: 'SetupProofMaterialChunkManifest',
             proofFamily: 'vss-opening-carry',
-            chunkSizeBytes: setupProofTransportChunkSizeBytes,
-            chunkCount: 1,
             totalByteLength: proofBytes.byteLength,
             chunkHashes: [expectedChunkHash],
             fullObjectHash: expectedFullObjectHash,
@@ -110,7 +107,6 @@ describe('private VSS mailbox delivery', () => {
             proofBytesEncoding: 'binary-chunked-proof-bytes',
             statementHash: fixtureHash('statement-hash'),
             proofBytesHash,
-            proofChunkSizeBytes: setupProofTransportChunkSizeBytes,
             proofChunkCount: 1,
             proofTotalByteLength: proofBytes.byteLength,
             proofFullObjectHash: expectedFullObjectHash,

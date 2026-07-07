@@ -106,8 +106,7 @@ pub(super) fn target_result_release_setup_context_from_setup_package(
 pub(super) fn read_target_result_release_setup_context(
     context: &Value,
 ) -> CanonicalResult<SetupBinding> {
-    if string_at_path(context, &["objectType"])? != "BgvTargetDecryptionReleaseSetupContext"
-    {
+    if string_at_path(context, &["objectType"])? != "BgvTargetDecryptionReleaseSetupContext" {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidProtocolObject,
             "release setup context must be a BgvTargetDecryptionReleaseSetupContext version 1 object",
@@ -421,8 +420,7 @@ pub(super) fn read_target_accepted_binding(
     record: &Value,
     setup_binding: &SetupBinding,
 ) -> CanonicalResult<TargetAcceptedBinding> {
-    if string_at_path(record, &["objectType"])? != "TargetAcceptedRecord"
-    {
+    if string_at_path(record, &["objectType"])? != "TargetAcceptedRecord" {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             "targetAcceptedRecord must be a canonical TargetAcceptedRecord",
@@ -500,8 +498,7 @@ pub(super) fn read_target_share_profile(
     value: &Value,
     setup_binding: &SetupBinding,
 ) -> CanonicalResult<TargetShareProfile> {
-    if string_at_path(value, &["objectType"])? != "TargetDecryptionShareProfile"
-    {
+    if string_at_path(value, &["objectType"])? != "TargetDecryptionShareProfile" {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             "targetShareProfile must be a TargetDecryptionShareProfile version 1 object",

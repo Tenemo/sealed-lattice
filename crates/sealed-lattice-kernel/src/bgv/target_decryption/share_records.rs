@@ -8,8 +8,7 @@ pub(super) fn read_partial_decryption_share(
     target_ciphertexts: &TargetCiphertextPair,
     target_share_profile: &TargetShareProfile,
 ) -> CanonicalResult<()> {
-    if string_at_path(share, &["objectType"])? != "BgvTargetDecryptionShare"
-    {
+    if string_at_path(share, &["objectType"])? != "BgvTargetDecryptionShare" {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             "target decryption accepts only BgvTargetDecryptionShare records",
@@ -324,8 +323,7 @@ fn validate_target_decryption_smudging_input_report(
     target_share_profile: &TargetShareProfile,
     participant: &ParticipantBinding,
 ) -> CanonicalResult<()> {
-    if string_at_path(report, &["objectType"])? != "TargetDecryptionSmudgingInputReport"
-    {
+    if string_at_path(report, &["objectType"])? != "TargetDecryptionSmudgingInputReport" {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             "target decryption smudging input report must be TargetDecryptionSmudgingInputReport version 1",

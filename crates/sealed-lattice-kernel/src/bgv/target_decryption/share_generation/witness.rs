@@ -135,8 +135,7 @@ pub(in super::super) fn read_local_target_decryption_share_witness(
     let setup_epoch = required_string_field(witness, "setupEpoch")?;
 
     let opening = value_at_path(witness, &["aggregateOpening"])?;
-    if string_at_path(opening, &["objectType"])? != "LocalTrusteeVssPublicAggregateOpeningWitness"
-    {
+    if string_at_path(opening, &["objectType"])? != "LocalTrusteeVssPublicAggregateOpeningWitness" {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             "local target-decryption share witness must include aggregate opening material",

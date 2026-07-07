@@ -18,11 +18,12 @@ pub(in crate::bgv::setup) use self::component_material::{
 
 use std::{
     collections::BTreeMap,
-    fs::File,
-    io::Read,
-    path::PathBuf,
     sync::{Mutex, OnceLock},
 };
+// The component-material stream only touches the filesystem on native; the
+// browser wasm runtime stages in memory and never opens a file.
+#[cfg(not(target_arch = "wasm32"))]
+use std::{fs::File, io::Read, path::PathBuf};
 
 use serde_json::{Value, json};
 

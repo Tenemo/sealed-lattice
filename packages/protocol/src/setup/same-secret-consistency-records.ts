@@ -74,7 +74,6 @@ export type SameSecretEmbeddedProofBytes = Readonly<{
 export type SameSecretTransportedProofBytes = Readonly<{
     readonly proofBytesEncoding: 'binary-chunked-proof-bytes';
     readonly proofMaterialRoot: ProtocolHash;
-    readonly proofChunkSizeBytes: number;
     readonly proofChunkCount: number;
     readonly proofTotalByteLength: number;
     readonly proofFullObjectHash: ProtocolHash;
@@ -209,10 +208,6 @@ const validateSameSecretProofMaterial = (
         assertProtocolHash(
             transportedMaterial.proofMaterialRoot,
             `${fieldName}.proofMaterialRoot`,
-        );
-        assertPositiveSafeInteger(
-            transportedMaterial.proofChunkSizeBytes,
-            `${fieldName}.proofChunkSizeBytes`,
         );
         assertPositiveSafeInteger(
             transportedMaterial.proofChunkCount,
@@ -563,7 +558,6 @@ const sameSecretProofByteMaterial = (
     return {
         proofBytesEncoding: transportedMaterial.proofBytesEncoding,
         proofMaterialRoot: transportedMaterial.proofMaterialRoot,
-        proofChunkSizeBytes: transportedMaterial.proofChunkSizeBytes,
         proofChunkCount: transportedMaterial.proofChunkCount,
         proofTotalByteLength: transportedMaterial.proofTotalByteLength,
         proofFullObjectHash: transportedMaterial.proofFullObjectHash,

@@ -355,7 +355,8 @@ pub(in super::super) fn verify_key_fri<const LIMB_COUNT: usize>(
                 // `f_x` miss the sumcheck right-hand side and verification fails.
                 f_x = parameters.add(
                     &f_x,
-                    &parameters.multiply(&material_form_at_slot[digit][slot], &material_values[digit]),
+                    &parameters
+                        .multiply(&material_form_at_slot[digit][slot], &material_values[digit]),
                 );
             }
             for digit in 0..digit_count {

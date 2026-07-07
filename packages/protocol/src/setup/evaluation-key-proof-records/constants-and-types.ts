@@ -29,6 +29,12 @@ export const evaluationKeyShareComponentMaterialTransportSetObjectType =
     'SetupTransportedEvaluationKeyShareComponentMaterialSet';
 export const evaluationKeyShareComponentMaterialTransportObjectType =
     'SetupTransportedEvaluationKeyShareComponentMaterial';
+export const evaluationKeyAggregateBindingSetObjectType =
+    'EvaluationKeyAggregateBindingSet';
+export const evaluationKeyAggregateBindingKeyGroupObjectType =
+    'EvaluationKeyAggregateBindingKeyGroup';
+export const evaluationKeyAggregateBindingOpeningSetObjectType =
+    'SetupTransportedEvaluationKeyAggregateBindingOpeningSet';
 export const evaluationKeyShareComponentMaterialEncoding =
     'binary-chunked-key-switch-component-vectors';
 export const setupProofMaterialTransportEncoding = 'binary-chunked-proof-bytes';
@@ -247,7 +253,6 @@ export type TrusteeEvaluationKeyEmbeddedProofBytes = Readonly<{
 export type TrusteeEvaluationKeyTransportedProofBytes = Readonly<{
     readonly proofBytesEncoding: typeof setupProofMaterialTransportEncoding;
     readonly proofMaterialRoot: ProtocolHash;
-    readonly proofChunkSizeBytes: number;
     readonly proofChunkCount: number;
     readonly proofTotalByteLength: number;
     readonly proofFullObjectHash: ProtocolHash;
@@ -421,6 +426,64 @@ export type GaloisKeyRootReference = Readonly<{
     readonly contributingShareRoots: readonly GaloisKeyContributingShareRoot[];
 }>;
 
+// One trustee's committed-material root inside an aggregate-binding key group,
+// in roster order. The material root is a fixed-width atom-proof Merkle digest
+// in lowercase hexadecimal, narrower than the 128-character canonical object
+// hashes, so it is a plain hexadecimal string rather than a ProtocolHash.
+export type EvaluationKeyAggregateBindingTrusteeMaterialRoot = Readonly<{
+    readonly trusteeRosterPosition: number;
+    readonly materialRoot: string;
+}>;
+
+// One scheduled key group's committed-material aggregate-binding record: the
+// runtime key group it binds (level, an optional rotation for Galois keys, the
+// consecutive limb span, and the full ring degree), the per-coefficient wrap
+// multiples the aggregate identity accepts as signed integers indexed by digit
+// then coefficient, and each trustee's committed-material root.
+export type EvaluationKeyAggregateBindingKeyGroup = Readonly<
+    JsonRecord & {
+        readonly objectType: typeof evaluationKeyAggregateBindingKeyGroupObjectType;
+        readonly level: number;
+        readonly rotation?: number;
+        readonly groupStartLimb: number;
+        readonly groupLimbCount: number;
+        readonly ringDegree: number;
+        readonly wrapMultiples: readonly (readonly number[])[];
+        readonly trusteeMaterialRoots: readonly EvaluationKeyAggregateBindingTrusteeMaterialRoot[];
+    }
+>;
+
+// The optional committed-material aggregate-binding set the accepted-setup
+// evaluation-key verification consumes when the package publishes it. Absent by
+// default so existing packages and verification are unchanged; when present, the
+// kernel binds each published runtime key group to the trustee-committed
+// material through the atom material roots plus the transported openings.
+export type EvaluationKeyAggregateBindingSet = Readonly<
+    JsonRecord & {
+        readonly objectType: typeof evaluationKeyAggregateBindingSetObjectType;
+        readonly keyGroups: readonly EvaluationKeyAggregateBindingKeyGroup[];
+    }
+>;
+
+// One transported batched linear-evaluation opening, content-addressed by the
+// atom-proof material root it opens. The opening bytes are the family backend's
+// opening codec output in lowercase hexadecimal.
+export type TransportedEvaluationKeyAggregateBindingOpening = Readonly<{
+    readonly materialRoot: string;
+    readonly openingBytesHex: string;
+}>;
+
+// The transported opening set the verification request carries alongside the
+// package aggregate binding: one opening per trustee-committed material root the
+// aggregate-binding key groups reference. Absent by default; the kernel skips
+// the aggregate-binding check when the package does not publish it.
+export type TransportedEvaluationKeyAggregateBindingOpeningSet = Readonly<
+    JsonRecord & {
+        readonly objectType: typeof evaluationKeyAggregateBindingOpeningSetObjectType;
+        readonly openings: readonly TransportedEvaluationKeyAggregateBindingOpening[];
+    }
+>;
+
 export type PublicEvaluationKeySet = Readonly<
     JsonRecord & {
         readonly objectType: 'PublicEvaluationKeySet';
@@ -445,6 +508,7 @@ export type PublicEvaluationKeySet = Readonly<
         readonly publicEvaluationKeyMaterialFullObjectHash?: ProtocolHash;
         readonly publicEvaluationKeyMaterialChunkRoot?: ProtocolHash;
         readonly publicEvaluationKeyMaterialChunkHashes?: readonly ProtocolHash[];
+        readonly aggregateBinding?: EvaluationKeyAggregateBindingSet;
         readonly evaluationKeySetHash: ProtocolHash;
     }
 >;
@@ -503,7 +567,6 @@ export type TransportedPublicEvaluationKeyMaterial = Readonly<
         readonly setupEpoch: string;
         readonly evaluationKeySetHash: ProtocolHash;
         readonly publicEvaluationKeyMaterialRoot: ProtocolHash;
-        readonly chunkSizeBytes: number;
         readonly chunkCount: number;
         readonly totalByteLength: number;
         readonly fullObjectHash: ProtocolHash;
@@ -592,6 +655,11 @@ export type PublicEvaluationKeySetInput = EvaluationKeyProofCommonInput &
         readonly relinearizationKeyShareRounds: RelinearizationKeyShareRounds;
         readonly galoisKeyShareBatches: readonly GaloisKeyShareBatch[];
         readonly publicEvaluationKeyMaterialReference?: PublicEvaluationKeyMaterialReference;
+        // Optional committed-material aggregate binding, carried through into the
+        // assembled evaluation-key set verbatim and included in the canonical
+        // evaluationKeySetHash. Absent by default so existing assembly output is
+        // unchanged.
+        readonly aggregateBinding?: EvaluationKeyAggregateBindingSet;
     }>;
 
 export type PublicEvaluationKeyMaterialTransportInput = Omit<

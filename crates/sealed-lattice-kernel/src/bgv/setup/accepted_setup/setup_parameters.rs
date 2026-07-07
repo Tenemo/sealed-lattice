@@ -72,7 +72,6 @@ pub(super) fn setup_transport_parameters_value_for_roster(
         "objectType": "SetupTransport",
         "largeObjectEncoding": "binary",
         "chunking": "required",
-        "chunkSizeBytes": SETUP_TRANSPORT_CHUNK_SIZE_BYTES,
         "storageQuotaBytes": SETUP_TRANSPORT_STORAGE_QUOTA_BYTES,
         "largestSingleBufferBytes": SETUP_TRANSPORT_LARGEST_SINGLE_BUFFER_BYTES,
         "copyCountLimit": SETUP_TRANSPORT_COPY_COUNT_LIMIT,

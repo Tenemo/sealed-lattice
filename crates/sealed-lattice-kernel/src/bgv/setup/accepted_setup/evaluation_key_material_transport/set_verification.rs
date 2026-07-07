@@ -73,17 +73,6 @@ pub(in super::super) fn verify_public_evaluation_key_set(
             "setupPackage.evaluationKeys",
         )?));
     }
-    for (field_name, expected_value) in
-        [("materialEncoding", PUBLIC_EVALUATION_KEY_MATERIAL_ENCODING)]
-    {
-        if evaluation_keys.get(field_name).and_then(Value::as_str) != Some(expected_value) {
-            return Ok(Some(evaluation_key_material_refusal(
-                "evaluationKeysParametersMismatch",
-                format!("evaluationKeys.{field_name} must be {expected_value}"),
-                format!("setupPackage.evaluationKeys.{field_name}"),
-            )?));
-        }
-    }
     for (field_name, expected_value) in [
         ("participantCount", roster.participant_count),
         ("rnsLimbCount", DATA_PRIMES.len() as u64),
@@ -250,7 +239,6 @@ fn public_evaluation_key_set_has_material_reference(evaluation_keys: &Value) -> 
     [
         "publicEvaluationKeyMaterialEncoding",
         "publicEvaluationKeyMaterialRoot",
-        "publicEvaluationKeyMaterialChunkSizeBytes",
         "publicEvaluationKeyMaterialChunkCount",
         "publicEvaluationKeyMaterialTotalByteLength",
         "publicEvaluationKeyMaterialFullObjectHash",

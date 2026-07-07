@@ -38,7 +38,6 @@ type BgvTargetDecryptionShareBinaryProofMaterialTransport = Readonly<
         readonly proofFamily: typeof targetDecryptionShareProofFamily;
         readonly binaryFormat: typeof targetDecryptionShareProofMaterialBinaryFormat;
         readonly proofMaterialRoot: ProtocolHash;
-        readonly chunkSizeBytes: typeof setupProofTransportChunkSizeBytes;
         readonly chunkCount: number;
         readonly totalByteLength: number;
         readonly fullObjectHash: ProtocolHash;
@@ -208,7 +207,6 @@ export const encodeBgvTargetDecryptionShareProofMaterialBinary = (
         proofFamily: targetDecryptionShareProofFamily,
         binaryFormat: targetDecryptionShareProofMaterialBinaryFormat,
         proofMaterialRoot,
-        chunkSizeBytes: setupProofTransportChunkSizeBytes,
         chunkCount,
         totalByteLength,
         fullObjectHash,

@@ -46,7 +46,6 @@ pub(super) fn same_secret_anchor_proof_material_root(
         "statementHash": hash_at_path(proof_record, &["statementHash"])?,
         "proofSizeBytes": unsigned_at_path(proof_record, &["proofSizeBytes"])?,
         "proofBytesHash": hash_at_path(proof_record, &["proofBytesHash"])?,
-        "chunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
         "chunkCount": transport_hashes.chunk_hashes.len(),
         "totalByteLength": transport_hashes.total_byte_length,
         "fullObjectHash": transport_hashes.full_object_hash,

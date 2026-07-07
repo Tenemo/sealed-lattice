@@ -304,7 +304,6 @@ const transportEvaluationKeyShareComponentMaterial = (
             keySwitchComponentVectorRoot:
                 workItem.shareMaterial.keySwitchComponentVectorRoot,
             keySwitchComponentMaterialRoot,
-            chunkSizeBytes: setupProofTransportChunkSizeBytes,
             chunkCount: transportHashes.chunkHashes.length,
             totalByteLength: transportHashes.totalByteLength,
             fullObjectHash: transportHashes.fullObjectHash,

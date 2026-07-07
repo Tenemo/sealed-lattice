@@ -5,10 +5,7 @@ import {
     type SameSecretConsistencyStatementSet,
 } from '../same-secret-consistency-records.js';
 import type { TransportedSetupProofMaterialSet } from '../setup-proof-material-transport.js';
-import {
-    setupTransportChunkSizeBytes,
-    setupTransportSchemeId,
-} from '../vss-coefficient-commitments.js';
+import { setupTransportSchemeId } from '../vss-coefficient-commitments.js';
 import type { CollectiveBgvSetupContext } from '../vss-share-verification-records.js';
 
 export type JsonRecord = Record<string, unknown>;
@@ -177,7 +174,6 @@ export type BinaryChunkedPublicKeyShareMaterialSet = Readonly<
         readonly publicKeyShareMaterialRoots: readonly PublicKeyShareMaterialRootReference[];
         readonly transport: {
             readonly transportSchemeId: typeof setupTransportSchemeId;
-            readonly chunkSizeBytes: typeof setupTransportChunkSizeBytes;
             readonly chunkCount: number;
             readonly totalByteLength: number;
             readonly fullObjectHash: ProtocolHash;
@@ -190,7 +186,6 @@ export type BinaryChunkedPublicKeyShareMaterialSet = Readonly<
 export type SetupTransportedPublicKeyShareMaterial = Readonly<
     JsonRecord & {
         readonly objectType: 'SetupTransportedPublicKeyShareMaterial';
-        readonly chunkSizeBytes: typeof setupTransportChunkSizeBytes;
         readonly chunkCount: number;
         readonly totalByteLength: number;
         readonly fullObjectHash: ProtocolHash;
@@ -224,7 +219,6 @@ export type PublicKeyShareSuccinctEmbeddedProofBytes = Readonly<{
 export type PublicKeyShareSuccinctTransportedProofBytes = Readonly<{
     readonly proofBytesEncoding: 'binary-chunked-proof-bytes';
     readonly proofMaterialRoot: ProtocolHash;
-    readonly proofChunkSizeBytes: number;
     readonly proofChunkCount: number;
     readonly proofTotalByteLength: number;
     readonly proofFullObjectHash: ProtocolHash;

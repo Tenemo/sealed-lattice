@@ -622,7 +622,6 @@ describe('accepted setup public package API in Node', () => {
                 .collectivePublicKeyRoot,
         );
         expect(setupPackage.setupTransportCertificate).toMatchObject({
-            chunkSizeBytes: setupTransportChunkSizeBytes,
             chunkCount: transportedCompanionObjects.length,
             totalByteLength: transportedCompanionByteLength,
         });

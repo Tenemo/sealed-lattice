@@ -65,7 +65,6 @@ type SetupProofMaterialTransportChunk = Readonly<
 export const setupProofMaterialReferenceFields = (
     metadata: SetupProofMaterialTransportMetadata,
 ): JsonRecord => ({
-    chunkSizeBytes: setupProofTransportChunkSizeBytes,
     chunkCount: metadata.chunkHashes.length,
     totalByteLength: metadata.totalByteLength,
     fullObjectHash: metadata.fullObjectHash,
@@ -77,7 +76,6 @@ export const setupProofMaterialRecordTransportMetadataFields = (
     metadata: SetupProofMaterialTransportMetadata,
 ): Readonly<
     JsonRecord & {
-        readonly proofChunkSizeBytes: typeof setupProofTransportChunkSizeBytes;
         readonly proofChunkCount: number;
         readonly proofTotalByteLength: number;
         readonly proofFullObjectHash: ProtocolHash;
@@ -85,7 +83,6 @@ export const setupProofMaterialRecordTransportMetadataFields = (
         readonly proofChunkHashes: readonly ProtocolHash[];
     }
 > => ({
-    proofChunkSizeBytes: setupProofTransportChunkSizeBytes,
     proofChunkCount: metadata.chunkHashes.length,
     proofTotalByteLength: metadata.totalByteLength,
     proofFullObjectHash: metadata.fullObjectHash,
@@ -103,7 +100,6 @@ export const setupProofMaterialRecordTransportFields = <
     JsonRecord & {
         readonly proofBytesEncoding: ProofBytesEncoding;
         readonly proofMaterialRoot: ProtocolHash;
-        readonly proofChunkSizeBytes: typeof setupProofTransportChunkSizeBytes;
         readonly proofChunkCount: number;
         readonly proofTotalByteLength: number;
         readonly proofFullObjectHash: ProtocolHash;
@@ -122,7 +118,6 @@ export const setupTransportedProofMaterialFields = (
 ): Readonly<
     JsonRecord & {
         readonly proofMaterialRoot: ProtocolHash;
-        readonly chunkSizeBytes: typeof setupProofTransportChunkSizeBytes;
         readonly chunkCount: number;
         readonly totalByteLength: number;
         readonly fullObjectHash: ProtocolHash;
@@ -131,7 +126,6 @@ export const setupTransportedProofMaterialFields = (
     }
 > => ({
     proofMaterialRoot,
-    chunkSizeBytes: setupProofTransportChunkSizeBytes,
     chunkCount: metadata.chunkHashes.length,
     totalByteLength: metadata.totalByteLength,
     fullObjectHash: metadata.fullObjectHash,
@@ -170,8 +164,6 @@ export const setupProofChunkManifestRoot = (
     deriveCanonicalObjectHash({
         objectType: 'SetupProofMaterialChunkManifest',
         proofFamily,
-        chunkSizeBytes: setupProofTransportChunkSizeBytes,
-        chunkCount: chunkHashes.length,
         totalByteLength,
         chunkHashes,
         fullObjectHash,
@@ -233,7 +225,6 @@ export type VerifiedSetupProofMaterial = Readonly<
         readonly proofFamily: string;
         readonly proofMaterialRoot: ProtocolHash;
         readonly proofBytesEncoding: 'binary-chunked-proof-bytes';
-        readonly proofChunkSizeBytes: typeof setupProofTransportChunkSizeBytes;
         readonly proofChunkCount: number;
         readonly proofTotalByteLength: number;
         readonly proofFullObjectHash: ProtocolHash;

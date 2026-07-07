@@ -43,7 +43,6 @@ pub(super) fn setup_proof_material_metadata_from_value(
     object_path: &str,
 ) -> CanonicalResult<SetupProofMaterialMetadata> {
     let uses_prefixed_fields = [
-        "proofChunkSizeBytes",
         "proofChunkCount",
         "proofTotalByteLength",
         "proofFullObjectHash",
@@ -53,7 +52,6 @@ pub(super) fn setup_proof_material_metadata_from_value(
     .iter()
     .any(|field_name| value.get(*field_name).is_some());
     let uses_direct_fields = [
-        "chunkSizeBytes",
         "chunkCount",
         "totalByteLength",
         "fullObjectHash",
@@ -69,7 +67,6 @@ pub(super) fn setup_proof_material_metadata_from_value(
         ));
     }
     let (
-        chunk_size_field,
         chunk_count_field,
         total_byte_length_field,
         full_object_hash_field,
@@ -77,7 +74,6 @@ pub(super) fn setup_proof_material_metadata_from_value(
         chunk_hashes_field,
     ) = if uses_prefixed_fields {
         (
-            "proofChunkSizeBytes",
             "proofChunkCount",
             "proofTotalByteLength",
             "proofFullObjectHash",
@@ -86,7 +82,6 @@ pub(super) fn setup_proof_material_metadata_from_value(
         )
     } else {
         (
-            "chunkSizeBytes",
             "chunkCount",
             "totalByteLength",
             "fullObjectHash",
@@ -94,15 +89,7 @@ pub(super) fn setup_proof_material_metadata_from_value(
             "chunkHashes",
         )
     };
-    let chunk_size_bytes = u64_field_at(value, chunk_size_field, object_path)?;
-    if chunk_size_bytes != SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidProtocolObject,
-            format!(
-                "{object_path}.{chunk_size_field} must match the setup proof transport chunk size"
-            ),
-        ));
-    }
+    let chunk_size_bytes = SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES;
     let chunk_count = usize::try_from(u64_field_at(value, chunk_count_field, object_path)?)
         .map_err(|_| {
             CanonicalError::new(
@@ -134,13 +121,6 @@ pub(super) fn setup_proof_material_metadata_from_value(
         setup_proof_material_hash_array(value, chunk_hashes_field, object_path, chunk_count)?;
     let expected_chunk_root = setup_proof_material_chunk_manifest_root(
         string_field_at(value, "proofFamily", object_path)?,
-        chunk_size_bytes,
-        u64::try_from(chunk_count).map_err(|_| {
-            CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "setup proof material chunk count does not fit u64",
-            )
-        })?,
         total_byte_length,
         &chunk_hashes,
         &full_object_hash,
@@ -369,7 +349,6 @@ pub(super) fn finish_setup_proof_material_transport_stream(
         "proofMaterialRoot": session.header.proof_material_root,
         "proofBytesEncoding": SETUP_PROOF_MATERIAL_ENCODING,
         "transport": {
-            "chunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
             "chunkCount": transport_hashes.chunk_hashes.len(),
             "totalByteLength": transport_hashes.total_byte_length,
             "fullObjectHash": transport_hashes.full_object_hash,
@@ -392,7 +371,6 @@ pub(super) fn verified_setup_proof_material_reference_value(
         "proofFamily": proof_family,
         "proofMaterialRoot": proof_material_root,
         "proofBytesEncoding": SETUP_PROOF_MATERIAL_ENCODING,
-        "proofChunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
         "proofChunkCount": hashes.chunk_hashes.len(),
         "proofTotalByteLength": hashes.total_byte_length,
         "proofFullObjectHash": hashes.full_object_hash,

@@ -303,6 +303,12 @@ export function createPublicEvaluationKeySet(
         galoisKeyShareBatchRoots,
         galoisKeyRoots,
         ...(input.publicEvaluationKeyMaterialReference ?? {}),
+        // Carry an optional committed-material aggregate binding through verbatim
+        // so it enters the canonical evaluationKeySetHash the same object the
+        // kernel recomputes over. Absent by default.
+        ...(input.aggregateBinding === undefined
+            ? {}
+            : { aggregateBinding: input.aggregateBinding }),
     } as const satisfies Omit<PublicEvaluationKeySet, 'evaluationKeySetHash'>;
 
     return {
@@ -554,7 +560,6 @@ const publicEvaluationKeyMaterialTransportHashes = (
     const chunkRoot = deriveCanonicalObjectHash({
         objectType: 'PublicEvaluationKeyMaterialChunkManifest',
         materialEncoding: publicEvaluationKeyTransportMaterialEncoding,
-        chunkSizeBytes: setupProofTransportChunkSizeBytes,
         chunkCount: chunkHashes.length,
         totalByteLength,
         chunkHashes,
@@ -593,7 +598,6 @@ const publicEvaluationKeyMaterialReferenceRoot = (
             evaluationKeys.relinearizationKeyShareRoundsRoot,
         requiredGaloisSetHash: evaluationKeys.requiredGaloisSetHash,
         expectedMaterialManifest,
-        chunkSizeBytes: setupProofTransportChunkSizeBytes,
         chunkCount: transportHashes.chunkHashes.length,
         totalByteLength: transportHashes.totalByteLength,
         fullObjectHash: transportHashes.fullObjectHash,
@@ -739,7 +743,6 @@ export const createBinaryChunkedPublicEvaluationKeyMaterialTransport = (
                 ...contextFields(input.setupContext),
                 evaluationKeySetHash: evaluationKeys.evaluationKeySetHash,
                 publicEvaluationKeyMaterialRoot,
-                chunkSizeBytes: setupProofTransportChunkSizeBytes,
                 chunkCount: transportHashes.chunkHashes.length,
                 totalByteLength: transportHashes.totalByteLength,
                 fullObjectHash: transportHashes.fullObjectHash,

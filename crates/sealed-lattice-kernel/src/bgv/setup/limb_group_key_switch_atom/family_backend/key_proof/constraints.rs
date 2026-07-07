@@ -166,6 +166,12 @@ where
             &source.atom_source(digit_index),
             gamma,
         );
+        // The atom form still carries `-<gamma, B_public_j>` in `target`, but the
+        // component term no longer enters the sumcheck target: it rides the
+        // material form against the committed `B_col_j` on the left-hand side.
+        // Read the field explicitly so the intent is on record and it is not
+        // treated as dead.
+        let _atom_component_target = form.target;
         let weight = delta[digit_index];
         for (accumulator, coefficient) in
             secret_form.iter_mut().zip(form.secret_coefficients.iter())
