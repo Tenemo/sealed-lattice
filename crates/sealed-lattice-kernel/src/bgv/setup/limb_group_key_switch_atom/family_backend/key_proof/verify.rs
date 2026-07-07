@@ -48,6 +48,7 @@ pub(in super::super) fn verify_key_fri<const LIMB_COUNT: usize>(
         None => None,
     };
     let base_count = base_column_count(ring_degree, digit_count, linkage_layout_data.as_ref());
+    let material_count = material_column_count(digit_count);
     let aux_count = aux_column_count(ring_degree, digit_count, linkage_layout_data.as_ref());
 
     // The logUp terminals in the proof must be shaped for this key, and the
@@ -77,6 +78,7 @@ pub(in super::super) fn verify_key_fri<const LIMB_COUNT: usize>(
         linkage::absorb_linkage_statement(&mut transcript, statement);
     }
     transcript.absorb_digest("key-base-root", &proof.base_root);
+    transcript.absorb_digest("key-material-root", &proof.material_root);
     let gamma = transcript.challenge_field_elements(parameters, "key-gamma", ring_degree);
     let delta = transcript.challenge_field_elements(parameters, "key-delta", digit_count);
     let lookup_challenge = transcript.challenge_field_elements(parameters, "key-lookup-mu", 1);
@@ -104,7 +106,7 @@ pub(in super::super) fn verify_key_fri<const LIMB_COUNT: usize>(
     let weights = transcript.challenge_field_elements(
         parameters,
         "key-combination",
-        base_count + aux_count + QUOTIENT_COLUMN_COUNT + 1,
+        base_count + material_count + aux_count + QUOTIENT_COLUMN_COUNT + 1,
     );
 
     let fri_parameters = FriParameters {
@@ -135,6 +137,14 @@ pub(in super::super) fn verify_key_fri<const LIMB_COUNT: usize>(
         layout.coset_size,
         base_count,
         &proof.base_opening,
+    ) else {
+        return Ok(false);
+    };
+    let Some(material_rows) = verify_column_opening(
+        &proof.material_root,
+        layout.coset_size,
+        material_count,
+        &proof.material_opening,
     ) else {
         return Ok(false);
     };
@@ -178,6 +188,10 @@ pub(in super::super) fn verify_key_fri<const LIMB_COUNT: usize>(
 
     let mut error_form_at_slot: Vec<Vec<[u64; LIMB_COUNT]>> = Vec::with_capacity(digit_count);
     let mut carry_form_at_slot: Vec<Vec<[u64; LIMB_COUNT]>> = Vec::with_capacity(digit_count);
+    // The material form `delta_j * gamma` per digit, interpolated and evaluated
+    // at the opened points, so the sumcheck folds the opened committed material
+    // column with it exactly as the prover folds the material column into `f`.
+    let mut material_form_at_slot: Vec<Vec<[u64; LIMB_COUNT]>> = Vec::with_capacity(digit_count);
     let (secret_form, atom_target) = accumulate_forms(
         parameters,
         &negacyclic,
@@ -191,6 +205,8 @@ pub(in super::super) fn verify_key_fri<const LIMB_COUNT: usize>(
             error_form_at_slot.push(evaluate_at_slots(&error_linear));
             let carry_linear = trace_domain.interpolate(&forms.carry_form);
             carry_form_at_slot.push(evaluate_at_slots(&carry_linear));
+            let material_linear = trace_domain.interpolate(&forms.material_form);
+            material_form_at_slot.push(evaluate_at_slots(&material_linear));
             Ok(())
         },
     )?;
@@ -200,14 +216,6 @@ pub(in super::super) fn verify_key_fri<const LIMB_COUNT: usize>(
     let table_value_at_slot: Vec<Vec<[u64; LIMB_COUNT]>> = table_polynomials
         .iter()
         .map(|table_polynomial| evaluate_at_slots(table_polynomial))
-        .collect();
-    // The public component material of each digit, interpolated and evaluated at
-    // the opened points, so the per-digit component pin can compare it against
-    // the opened committed column.
-    let component_b_at_slot: Vec<Vec<[u64; LIMB_COUNT]>> = public
-        .digits
-        .iter()
-        .map(|digit| evaluate_at_slots(&trace_domain.interpolate(&digit.recombined_component_b)))
         .collect();
     // Linkage: the public opening forms evaluated at the opened points, plus
     // the constraint context for the support walk.
@@ -276,6 +284,9 @@ pub(in super::super) fn verify_key_fri<const LIMB_COUNT: usize>(
             let Some(base_values) = base_rows.get(&index) else {
                 return Ok(false);
             };
+            let Some(material_values) = material_rows.get(&index) else {
+                return Ok(false);
+            };
             let Some(aux_values) = aux_rows.get(&index) else {
                 return Ok(false);
             };
@@ -286,12 +297,13 @@ pub(in super::super) fn verify_key_fri<const LIMB_COUNT: usize>(
                 return Ok(false);
             };
             let x = x_of_slot[slot];
-            // combination_at zips the weights against base+aux+quotient columns,
-            // so the extra trailing weight is ignored here and used below for the
-            // g degree-adjustment term.
+            // combination_at zips the weights against base+material+aux+quotient
+            // columns in that fixed order, so the extra trailing weight is
+            // ignored here and used below for the g degree-adjustment term.
             let mut combined = combination_at(
                 parameters,
                 base_values,
+                material_values,
                 aux_values,
                 quotient_values,
                 &weights,
@@ -304,7 +316,8 @@ pub(in super::super) fn verify_key_fri<const LIMB_COUNT: usize>(
             let mut g_shift_exponent = [0_u64; LIMB_COUNT];
             g_shift_exponent[0] = g_shift as u64;
             let x_pow_g_shift = parameters.power(&x, &g_shift_exponent);
-            let g_adjustment_weight = weights[base_count + aux_count + QUOTIENT_COLUMN_COUNT];
+            let g_adjustment_weight =
+                weights[base_count + material_count + aux_count + QUOTIENT_COLUMN_COUNT];
             combined = parameters.add(
                 &combined,
                 &parameters.multiply(
@@ -335,6 +348,14 @@ pub(in super::super) fn verify_key_fri<const LIMB_COUNT: usize>(
                         &carry_form_at_slot[digit][slot],
                         &base_values[digit_column(digit, DIGIT_CARRY)],
                     ),
+                );
+                // Material form: add `(delta_j gamma)(x) * B_col_j(x)`, the
+                // committed component term the prover folds into `f`. This is the
+                // sole binding of `B_col_j`, so a wrong committed material makes
+                // `f_x` miss the sumcheck right-hand side and verification fails.
+                f_x = parameters.add(
+                    &f_x,
+                    &parameters.multiply(&material_form_at_slot[digit][slot], &material_values[digit]),
                 );
             }
             for digit in 0..digit_count {
@@ -398,10 +419,6 @@ pub(in super::super) fn verify_key_fri<const LIMB_COUNT: usize>(
                 .iter()
                 .map(|values| values[slot])
                 .collect();
-            let component_b_at_point: Vec<[u64; LIMB_COUNT]> = component_b_at_slot
-                .iter()
-                .map(|values| values[slot])
-                .collect();
             let v_x = support_value_at(
                 parameters,
                 ring_degree,
@@ -409,7 +426,6 @@ pub(in super::super) fn verify_key_fri<const LIMB_COUNT: usize>(
                 base_values,
                 aux_values,
                 &table_values_at_point,
-                &component_b_at_point,
                 &mu,
                 &alpha,
                 linkage_context.as_ref(),

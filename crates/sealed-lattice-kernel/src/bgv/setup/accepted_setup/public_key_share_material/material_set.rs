@@ -3,8 +3,9 @@ use super::transport::*;
 use super::*;
 
 pub(in super::super) fn public_key_share_material_uses_transport(material_set: &Value) -> bool {
-    material_set.get("materialEncoding").and_then(Value::as_str)
-        == Some(PUBLIC_KEY_SHARE_MATERIAL_TRANSPORT_ENCODING)
+    // Embedded material carries shareMaterialRecords; transport material does not.
+    // Presence is the discriminator - no separate materialEncoding label needed.
+    material_set.get("shareMaterialRecords").is_none()
 }
 
 pub(super) fn verify_embedded_public_key_share_material_set(
@@ -14,7 +15,7 @@ pub(super) fn verify_embedded_public_key_share_material_set(
     ring_degree: usize,
     share_records: &BTreeMap<u64, Value>,
 ) -> CanonicalResult<(BTreeMap<u64, PublicKeyShareMaterialBinding>, Vec<Value>)> {
-    if material_set.get("binaryFormat").is_some() || material_set.get("transport").is_some() {
+    if material_set.get("transport").is_some() {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             "embedded public-key share material must not declare binary transport fields",
@@ -73,14 +74,6 @@ pub(super) fn verify_transport_public_key_share_material_set(
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             "binary-chunked public-key share material must not embed shareMaterialRecords",
-        ));
-    }
-    if material_set.get("binaryFormat").and_then(Value::as_str)
-        != Some(PUBLIC_KEY_SHARE_MATERIAL_BINARY_FORMAT)
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "publicKeyShareMaterial.binaryFormat must match the accepted public-key share material binary format",
         ));
     }
     let Some(transported_material) = request.get("transportedPublicKeyShareMaterial") else {

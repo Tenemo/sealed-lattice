@@ -20,13 +20,6 @@ pub(in super::super) fn verify_vss_complaints(
             "setupPackage.vssComplaints.objectType",
         )?));
     }
-    if complaint_set.get("objectVersion").and_then(Value::as_u64) != Some(1) {
-        return Ok(Some(vss_complaint_refusal(
-            "vssComplaintSetVersionMismatch",
-            "vssComplaints.objectVersion must be 1",
-            "setupPackage.vssComplaints.objectVersion",
-        )?));
-    }
 
     let setup_context = setup_package.get("setupContext").ok_or_else(|| {
         CanonicalError::new(
@@ -182,17 +175,6 @@ fn verify_vss_complaint_record(
             "vssComplaintTypeMismatch",
             "VSS complaint objectType must be VssShareComplaint",
             "setupPackage.vssComplaints.complaintRecords.objectType",
-        )?));
-    }
-    if complaint_record
-        .get("objectVersion")
-        .and_then(Value::as_u64)
-        != Some(1)
-    {
-        return Ok(Some(vss_complaint_refusal(
-            "vssComplaintVersionMismatch",
-            "VSS complaint objectVersion must be 1",
-            "setupPackage.vssComplaints.complaintRecords.objectVersion",
         )?));
     }
     for field_name in [
@@ -547,7 +529,6 @@ fn verify_vss_complaint_record(
             chunk_merkle_root: None,
             board_head_hash: None,
             context_hash: complaint_context_hash,
-            byte_length: complaint_byte_length,
             recovery_epoch,
             device_epoch,
         },

@@ -31,12 +31,6 @@ pub(super) fn validate_participant_setup_records(
             "ParticipantBgvSetupRecord",
             "participant record object type",
         )?;
-        if unsigned_at_path(participant_record, &["objectVersion"])? != 1 {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "participant setup record object version must be 1",
-            ));
-        }
         compare_string_at_path(
             participant_record,
             &["ceremonyId"],

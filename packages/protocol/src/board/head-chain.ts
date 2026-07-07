@@ -12,7 +12,6 @@ import {
     createRefusal,
     defaultSignedRootContextHash,
     isNonNegativeInteger,
-    signedObjectRootByteLength,
 } from '../common/verification-helpers.js';
 
 import {
@@ -99,7 +98,6 @@ export const verifyBoardHead = (
         manifestHash: null,
         objectRoot: head.headHash,
         boardHeadHash: null,
-        byteLength: signedObjectRootByteLength,
         recoveryEpoch: 0,
         deviceEpoch: 0,
         contextHash: defaultSignedRootContextHash,

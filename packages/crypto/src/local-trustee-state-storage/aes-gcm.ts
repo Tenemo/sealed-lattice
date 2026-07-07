@@ -7,10 +7,6 @@ import { canonicalJson, hash512Hex } from '../canonical-json.js';
 
 import {
     aesGcmKeyByteLength,
-    localSealedMaterialCiphertextContentType,
-    localStateCiphertextContentType,
-    localTrusteeSealedMaterialStorageFormat,
-    localTrusteeStateStorageFormat,
     textEncoder,
     type LocalTrusteeStateStorageEncryptionInput,
 } from './constants-and-types.js';
@@ -97,8 +93,6 @@ export const storageAad = (
     localStateCommitment: LocalTrusteeStateStorageEncryptionInput['localStateCommitment'],
 ): Readonly<Record<string, unknown>> => ({
     objectType: 'LocalTrusteeStateStorageAad',
-    storageScheme: localTrusteeStateStorageFormat,
-    ciphertextContentType: localStateCiphertextContentType,
     setupContext,
     localStateCommitment,
     localStateRoot: localStateCommitment.localStateRoot,
@@ -119,8 +113,6 @@ export const sealedMaterialAad = (
     }>,
 ): Readonly<Record<string, unknown>> => ({
     objectType: 'LocalTrusteeSetupSealedMaterialAad',
-    storageScheme: localTrusteeSealedMaterialStorageFormat,
-    ciphertextContentType: localSealedMaterialCiphertextContentType,
     materialClass,
     materialRoot,
     setupContext,
@@ -143,7 +135,6 @@ export const deriveAesGcmKeyBytes = (
         textEncoder.encode(
             canonicalJson({
                 purpose: 'local-trustee-state-storage-aes-256-gcm-key',
-                storageScheme: localTrusteeStateStorageFormat,
                 localStateRoot,
                 storageAadHash,
             }),
@@ -163,7 +154,6 @@ export const deriveSealedMaterialAesGcmKeyBytes = (
         textEncoder.encode(
             canonicalJson({
                 purpose: 'local-trustee-setup-sealed-material-aes-256-gcm-key',
-                storageScheme: localTrusteeSealedMaterialStorageFormat,
                 materialRoot,
                 materialAadHash,
             }),

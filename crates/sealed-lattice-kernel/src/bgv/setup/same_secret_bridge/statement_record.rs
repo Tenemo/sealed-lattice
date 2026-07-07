@@ -9,11 +9,6 @@ pub(super) fn verify_statement_record(
         "VssSameSecretBridgeStatement",
         "VSS same-secret bridge statement objectType",
     )?;
-    compare_required_u64(
-        unsigned_at_path(input.statement_record, &["objectVersion"])?,
-        1,
-        "VSS same-secret bridge statement objectVersion",
-    )?;
     compare_required_string(
         string_at_path(input.statement_record, &["proofFamily"])?,
         SAME_SECRET_PROOF_FAMILY,
@@ -159,11 +154,6 @@ pub(super) fn verify_statement_record(
                 string_at_path(commitment_body, &["objectType"])?,
                 "VssPublicCommitment",
                 "VSS same-secret bridge target constant commitment objectType",
-            )?;
-            compare_required_u64(
-                unsigned_at_path(commitment_body, &["objectVersion"])?,
-                1,
-                "VSS same-secret bridge target constant commitment objectVersion",
             )?;
             compare_required_string(
                 string_at_path(commitment_body, &["commitmentRole"])?,

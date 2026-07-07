@@ -200,11 +200,7 @@ pub(super) fn verify_transported_vss_share_linkage_proof_material_set_header(
             &format!("transportedVssShareLinkageProofMaterial.{field_name}"),
         )?;
     }
-    compare_u64_value(
-        read_u64(value, "objectVersion")?,
-        1,
-        "transportedVssShareLinkageProofMaterial.objectVersion",
-    )
+    Ok(())
 }
 
 pub(super) fn verify_transported_vss_share_linkage_proof_material_header(
@@ -220,11 +216,6 @@ pub(super) fn verify_transported_vss_share_linkage_proof_material_header(
             &format!("transported share-linkage proof material {field_name}"),
         )?;
     }
-    compare_u64_value(
-        read_u64(value, "objectVersion")?,
-        1,
-        "transported share-linkage proof material objectVersion",
-    )?;
     read_string(value, "proofMaterialRoot")?;
 
     Ok(())
@@ -234,11 +225,6 @@ pub(super) fn transported_vss_share_linkage_proof_chunks(
     value: &Value,
     proof_material_index: usize,
 ) -> CanonicalResult<Vec<Vec<u8>>> {
-    compare_u64_value(
-        read_u64(value, "chunkSizeBytes")?,
-        SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
-        "transported share-linkage proof material chunkSizeBytes",
-    )?;
     let chunk_count = usize::try_from(read_u64(value, "chunkCount")?).map_err(|_| {
         invalid_succinct_setup_proof(
             "transported share-linkage proof material chunkCount does not fit usize",
@@ -336,11 +322,6 @@ pub(super) fn verify_vss_share_linkage_proof_transport_reference(
     proof_record: &Value,
     transport_hashes: &SetupProofMaterialTransportHashes,
 ) -> CanonicalResult<()> {
-    compare_u64_value(
-        read_u64(proof_record, "proofChunkSizeBytes")?,
-        SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
-        "share-linkage proof record proofChunkSizeBytes",
-    )?;
     compare_u64_value(
         read_u64(proof_record, "proofChunkCount")?,
         u64::try_from(transport_hashes.chunk_hashes.len()).map_err(|_| {

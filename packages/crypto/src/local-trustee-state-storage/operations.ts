@@ -21,10 +21,6 @@ import {
     aesGcmKeyByteLength,
     aesGcmNonceByteLength,
     aesGcmTagBitLength,
-    localSealedMaterialCiphertextContentType,
-    localStateCiphertextContentType,
-    localTrusteeSealedMaterialStorageFormat,
-    localTrusteeStateStorageFormat,
     textDecoder,
     textEncoder,
     type EncryptedLocalTrusteeSetupMaterial,
@@ -107,8 +103,6 @@ export const encryptLocalTrusteeSetupSealedMaterial = async (
     );
     const encryptedMaterialWithoutHash = {
         objectType: 'EncryptedLocalTrusteeSetupMaterial',
-        storageScheme: localTrusteeSealedMaterialStorageFormat,
-        ciphertextContentType: localSealedMaterialCiphertextContentType,
         materialClass: input.materialClass,
         materialRoot,
         materialAad: associatedData,
@@ -208,8 +202,6 @@ export const encryptLocalTrusteeState = async (
     );
     const envelopeWithoutHash = {
         objectType: 'EncryptedLocalTrusteeSetupState',
-        storageScheme: localTrusteeStateStorageFormat,
-        ciphertextContentType: localStateCiphertextContentType,
         localStateRoot: input.localStateCommitment.localStateRoot,
         localStateCommitmentHash,
         storageAad: associatedData,
@@ -241,22 +233,6 @@ export const decryptLocalTrusteeState = async (
     input: LocalTrusteeStateStorageDecryptionInput,
 ): Promise<LocalTrusteeStateStorageDecryptionResult> => {
     assertProtocolHash(input.expectedLocalStateRoot, 'expectedLocalStateRoot');
-    if (
-        input.encryptedLocalState.storageScheme !==
-        localTrusteeStateStorageFormat
-    ) {
-        throw new TypeError(
-            'encryptedLocalState.storageScheme is not supported.',
-        );
-    }
-    if (
-        input.encryptedLocalState.ciphertextContentType !==
-        localStateCiphertextContentType
-    ) {
-        throw new TypeError(
-            'encryptedLocalState.ciphertextContentType must be local-trustee-setup-state.',
-        );
-    }
     if (
         input.encryptedLocalState.localStateRoot !==
         input.expectedLocalStateRoot

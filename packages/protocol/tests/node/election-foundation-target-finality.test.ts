@@ -166,7 +166,6 @@ describe('target finality', () => {
         });
 
         expect(forkedVerification.isValid).toBe(false);
-        expect(forkedVerification.acceptedHashes).toEqual([]);
         expect(forkedVerification.targetFinalityRecordHash).toBeUndefined();
         expect(forkedVerification.equivocatingWitnessIdentities).toEqual(
             witnessIdentities.slice(0, 5),
@@ -292,7 +291,6 @@ describe('target finality', () => {
         });
 
         expect(verification.isValid).toBe(false);
-        expect(verification.acceptedHashes).toEqual([]);
         expect(verification.targetFinalityRecordHash).toBeUndefined();
         expect(verification.equivocatingWitnessIdentities).toEqual(
             witnessIdentities.slice(0, 5),

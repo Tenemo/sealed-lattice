@@ -29,11 +29,6 @@ pub(super) fn verify_same_secret_consistency_evidence(
         "SameSecretConsistencyStatementSet",
         "same-secret consistency objectType",
     )?;
-    compare_required_u64(
-        unsigned_at_path(same_secret_consistency, &["objectVersion"])?,
-        1,
-        "same-secret consistency objectVersion",
-    )?;
     compare_required_string(
         string_at_path(same_secret_consistency, &["proofFamily"])?,
         SAME_SECRET_PROOF_FAMILY,
@@ -92,11 +87,6 @@ pub(super) fn verify_same_secret_consistency_evidence(
             string_at_path(statement_record, &["objectType"])?,
             "SameSecretConsistencyStatement",
             "same-secret consistency statement objectType",
-        )?;
-        compare_required_u64(
-            unsigned_at_path(statement_record, &["objectVersion"])?,
-            1,
-            "same-secret consistency statement objectVersion",
         )?;
         compare_evidence_context(
             statement_record,
@@ -177,11 +167,6 @@ pub(super) fn verify_same_secret_proof_evidence(
         "SameSecretProofSet",
         "same-secret proof set objectType",
     )?;
-    compare_required_u64(
-        unsigned_at_path(same_secret_proofs, &["objectVersion"])?,
-        1,
-        "same-secret proof set objectVersion",
-    )?;
     compare_required_string(
         string_at_path(same_secret_proofs, &["proofFamily"])?,
         SAME_SECRET_PROOF_FAMILY,
@@ -243,11 +228,6 @@ pub(super) fn verify_same_secret_proof_evidence(
             string_at_path(proof_record, &["objectType"])?,
             "SameSecretProof",
             "same-secret proof record objectType",
-        )?;
-        compare_required_u64(
-            unsigned_at_path(proof_record, &["objectVersion"])?,
-            1,
-            "same-secret proof record objectVersion",
         )?;
         compare_evidence_context(
             proof_record,

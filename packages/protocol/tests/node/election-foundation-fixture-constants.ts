@@ -207,7 +207,6 @@ export const createSignature = (
             boardHeadHash: null,
             objectRoot,
             chunkMerkleRoot: null,
-            byteLength: 64,
             signerRole,
             signerIdentity,
             recoveryEpoch: 0,

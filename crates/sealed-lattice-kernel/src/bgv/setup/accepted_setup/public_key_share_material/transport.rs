@@ -119,31 +119,11 @@ pub(super) fn verify_public_key_share_material_transport_header(
             "transportedPublicKeyShareMaterial.objectType must be SetupTransportedPublicKeyShareMaterial",
         ));
     }
-    if value.get("objectVersion").and_then(Value::as_u64) != Some(1) {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "transportedPublicKeyShareMaterial.objectVersion must be 1",
-        ));
-    }
-    if value.get("binaryFormat").and_then(Value::as_str)
-        != Some(PUBLIC_KEY_SHARE_MATERIAL_BINARY_FORMAT)
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "transportedPublicKeyShareMaterial.binaryFormat must match the accepted public-key share material binary format",
-        ));
-    }
 
     Ok(())
 }
 
 pub(super) fn public_key_share_material_chunks(value: &Value) -> CanonicalResult<Vec<Vec<u8>>> {
-    if value_u64(value, "chunkSizeBytes")? != SETUP_TRANSPORT_CHUNK_SIZE_BYTES {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "transported public-key share material chunkSizeBytes must match the setup transport parameters",
-        ));
-    }
     let expected_chunk_count = usize::try_from(value_u64(value, "chunkCount")?).map_err(|_| {
         CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
@@ -302,14 +282,12 @@ pub(super) fn verify_public_key_share_material_transport_hash_fields(
     require_chunk_hashes: bool,
     value_name: &str,
 ) -> CanonicalResult<()> {
-    let chunk_size = value_u64(value, "chunkSizeBytes")?;
     let chunk_count = value_u64(value, "chunkCount")?;
     let total_byte_length = value_u64(value, "totalByteLength")?;
     let full_object_hash = value_string(value, "fullObjectHash")?;
     let chunk_root = value_string(value, "chunkRoot")?;
-    if chunk_size != SETUP_TRANSPORT_CHUNK_SIZE_BYTES
-        || chunk_count
-            != u64::try_from(transport_hashes.chunk_hashes.len()).map_err(|_| {
+    if chunk_count
+        != u64::try_from(transport_hashes.chunk_hashes.len()).map_err(|_| {
                 CanonicalError::new(
                     CanonicalErrorCode::MalformedLength,
                     "public-key share material chunk count does not fit u64",

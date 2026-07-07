@@ -10,7 +10,6 @@ import type {
 
 import {
     createRefusal,
-    uniqueStrings,
 } from '../common/verification-helpers.js';
 
 import { assertCanonicalFieldElement } from './field.js';
@@ -210,7 +209,6 @@ const validateSlotElement = (
 const createSparseTargetDecodingFailure = (
     targetHash?: string,
 ): SparseTopKTargetDecoding => ({
-    acceptedHashes: [],
     decodedSelections: [],
     isValid: false,
     refusedObjects: [
@@ -387,10 +385,6 @@ const decodeSparseTopKTargetUnchecked = (input: {
     );
 
     return {
-        acceptedHashes:
-            refusedObjects.length === 0
-                ? uniqueStrings([target.targetHash, target.layoutHash])
-                : [],
         decodedSelections: refusedObjects.length === 0 ? sortedSelections : [],
         isValid: refusedObjects.length === 0,
         refusedObjects,

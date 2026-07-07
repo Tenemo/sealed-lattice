@@ -16,7 +16,6 @@ use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 use crate::hashing::derive_canonical_object_hash;
 
 const ACCEPTED_SETUP_HANDOFF_OBJECT_TYPE: &str = "CollectiveBgvAcceptedSetupHandoff";
-const ACCEPTED_SETUP_HANDOFF_OBJECT_VERSION: u64 = 1;
 const ACCEPTED_SETUP_HANDOFF_ROOT_FIELD: &str = "acceptedSetupHandoffRoot";
 
 fn invalid_handoff(message: &str) -> CanonicalError {
@@ -67,13 +66,6 @@ pub(super) fn consume_accepted_setup_handoff(
     {
         return Err(invalid_handoff(
             "accepted setup handoff objectType must be CollectiveBgvAcceptedSetupHandoff",
-        ));
-    }
-    if handoff.get("objectVersion").and_then(Value::as_u64)
-        != Some(ACCEPTED_SETUP_HANDOFF_OBJECT_VERSION)
-    {
-        return Err(invalid_handoff(
-            "accepted setup handoff objectVersion is not the supported version",
         ));
     }
 

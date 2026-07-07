@@ -200,11 +200,6 @@ fn validate_private_vss_share_proof_record(proof_record: &Value) -> CanonicalRes
         "PrivateVssShareProof",
         "private VSS share proof objectType must be PrivateVssShareProof",
     )?;
-    if proof_record.get("objectVersion").and_then(Value::as_u64) != Some(1) {
-        return Err(invalid_private_vss_share_proof(
-            "private VSS share proof objectVersion must be 1",
-        ));
-    }
     expect_string_field(
         proof_record,
         "proofFamily",
@@ -403,11 +398,6 @@ fn verify_transported_private_vss_share_proof_material_set_header(
             )));
         }
     }
-    if value.get("objectVersion").and_then(Value::as_u64) != Some(1) {
-        return Err(invalid_private_vss_share_proof(
-            "transportedPrivateVssShareProofMaterial.objectVersion must be 1",
-        ));
-    }
 
     Ok(())
 }
@@ -425,11 +415,6 @@ fn verify_transported_private_vss_share_proof_material_header(
             )));
         }
     }
-    if value.get("objectVersion").and_then(Value::as_u64) != Some(1) {
-        return Err(invalid_private_vss_share_proof(
-            "transported private VSS share proof material objectVersion must be 1",
-        ));
-    }
     validate_hash(
         value_string(value, "proofMaterialRoot")?,
         "transportedPrivateVssShareProofMaterial.proofMaterialRoot",
@@ -439,11 +424,6 @@ fn verify_transported_private_vss_share_proof_material_header(
 }
 
 fn transported_private_vss_share_proof_chunks(value: &Value) -> CanonicalResult<Vec<Vec<u8>>> {
-    if value_u64(value, "chunkSizeBytes")? != SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES {
-        return Err(invalid_private_vss_share_proof(
-            "transported private VSS share proof material chunkSizeBytes must match the setup proof transport parameters",
-        ));
-    }
     let expected_chunk_count = usize::try_from(value_u64(value, "chunkCount")?).map_err(|_| {
         CanonicalError::new(
             CanonicalErrorCode::MalformedLength,

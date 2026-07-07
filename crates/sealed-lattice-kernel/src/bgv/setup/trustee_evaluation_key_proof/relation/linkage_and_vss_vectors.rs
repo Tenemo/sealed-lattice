@@ -282,14 +282,14 @@ pub(crate) fn claim_mask_digit_count_for_global_claim(
         }
     } else if let Some(vss_share_linkage) = &statement.vss_share_linkage {
         // Carry vectors occupy the first item_count vector slots; the message
-        // digit vectors follow. Mask selection must pair with the same
-        // carry-versus-digit split the claim bounds use, so multi-item
+        // trit vectors follow. Mask selection must pair with the same
+        // carry-versus-trit split the claim bounds use, so multi-item
         // statements mask their additional carry claims as carries.
         let global_vector_index = global_claim_id as usize / consistency_repetitions;
         if global_vector_index < vss_share_linkage.item_count() {
             VSS_PUBLIC_CARRY_CLAIM_MASK_DIGIT_COUNT
         } else {
-            VSS_PUBLIC_SHARE_LINKAGE_DIGIT_CLAIM_MASK_DIGIT_COUNT
+            VSS_PUBLIC_SHARE_LINKAGE_TRIT_CLAIM_MASK_DIGIT_COUNT
         }
     } else if let Some(same_secret_bridge) = &statement.same_secret_bridge {
         let global_vector_index = global_claim_id as usize / consistency_repetitions;

@@ -31,7 +31,6 @@ pub(crate) struct ProtocolSignatureExpectation<'a> {
     pub chunk_merkle_root: Option<&'a str>,
     pub board_head_hash: Option<&'a str>,
     pub context_hash: &'a str,
-    pub byte_length: u64,
     pub recovery_epoch: u64,
     pub device_epoch: u64,
 }
@@ -218,7 +217,6 @@ fn validate_signed_root_shape(signature: &Value) -> Option<ProtocolSignatureFail
         "boardHeadHash",
         "objectRoot",
         "chunkMerkleRoot",
-        "byteLength",
         "signerRole",
         "signerIdentity",
         "recoveryEpoch",
@@ -283,7 +281,7 @@ fn validate_signed_root_shape(signature: &Value) -> Option<ProtocolSignatureFail
         ));
     }
 
-    for field_name in ["byteLength", "recoveryEpoch", "deviceEpoch"] {
+    for field_name in ["recoveryEpoch", "deviceEpoch"] {
         if signed_root
             .get(field_name)
             .and_then(Value::as_u64)
@@ -380,14 +378,12 @@ fn validate_expectation(
             Some(signature),
         ));
     }
-    if signed_root.get("byteLength").and_then(Value::as_u64) != Some(expectation.byte_length)
-        || signed_root.get("recoveryEpoch").and_then(Value::as_u64)
-            != Some(expectation.recovery_epoch)
+    if signed_root.get("recoveryEpoch").and_then(Value::as_u64) != Some(expectation.recovery_epoch)
         || signed_root.get("deviceEpoch").and_then(Value::as_u64) != Some(expectation.device_epoch)
     {
         return Some(ProtocolSignatureFailure::new(
             "InvalidSignedRoot",
-            "Signature root byte length or epochs do not match the expected object.",
+            "Signature root epochs do not match the expected object.",
             Some(signature),
         ));
     }
@@ -687,7 +683,6 @@ mod tests {
             "boardHeadHash": null,
             "objectRoot": object_root,
             "chunkMerkleRoot": null,
-            "byteLength": 37,
             "signerRole": "Trustee",
             "signerIdentity": "trustee-0",
             "recoveryEpoch": 0,
@@ -707,7 +702,6 @@ mod tests {
             chunk_merkle_root: None,
             board_head_hash: None,
             context_hash: &context_hash,
-            byte_length: 37,
             recovery_epoch: 0,
             device_epoch: 0,
         };
@@ -738,7 +732,6 @@ mod tests {
             "boardHeadHash": null,
             "objectRoot": object_root,
             "chunkMerkleRoot": null,
-            "byteLength": 37,
             "signerRole": "Trustee",
             "signerIdentity": "trustee-0",
             "recoveryEpoch": 0,
@@ -764,7 +757,6 @@ mod tests {
             chunk_merkle_root: None,
             board_head_hash: None,
             context_hash: &context_hash,
-            byte_length: 38,
             recovery_epoch: 0,
             device_epoch: 0,
         };

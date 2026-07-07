@@ -233,8 +233,8 @@ fn one_tampered_digit_error_is_caught_by_the_batch() {
 #[test]
 fn honest_committed_component_material_verifies() {
     // Committing exactly the public material - what the production path always
-    // does - proves and verifies through the new per-digit component column and
-    // its pin, both unmasked and masked.
+    // does - proves and verifies through the dedicated MATERIAL commitment and
+    // its sumcheck material forms, both unmasked and masked.
     let parameters = sixteen_limb_group_field_parameters();
     let ring_degree = 64;
     let (secret, digits, public) = synthetic_key(ring_degree, 4);
@@ -285,14 +285,17 @@ fn honest_committed_component_material_verifies() {
 }
 
 #[test]
-fn tampered_committed_component_material_is_rejected_by_the_pin() {
-    // The committed component column is pinned equal to the public material by a
-    // per-digit support constraint. A proof that commits material differing from
-    // the transported public material in a single coefficient - while the
-    // transcript-bound public material, the sumcheck target, and every other
-    // column are untouched - is refused: the pin no longer vanishes on H, so the
-    // prover cannot form the support quotient (or the verifier's support query
-    // check rejects it). This isolates the pin from the congruence checks.
+fn tampered_committed_component_material_is_rejected_by_the_relation() {
+    // The committed MATERIAL column `B_col_j` is load-bearing: the batched
+    // sumcheck folds it on its left-hand side with `delta_j * gamma`, so it is
+    // the only thing standing in for `B_j` in the atom congruence
+    // `B + A(*)s - t e - G source - Q c = 0`. A proof that commits material
+    // differing from the correct component in a single coefficient - while the
+    // witness, the transcript-bound public data, and every other column are
+    // untouched - is refused: the relation no longer holds, so the sumcheck
+    // remainder constant misses the target and the prover cannot form the
+    // sumcheck (or the verifier's sumcheck query check rejects it). This
+    // exercises the relation binding that replaced the removed per-digit pin.
     let parameters = sixteen_limb_group_field_parameters();
     let ring_degree = 64;
     let (secret, digits, public) = synthetic_key(ring_degree, 4);
@@ -302,44 +305,49 @@ fn tampered_committed_component_material_is_rejected_by_the_pin() {
         .map(|digit| digit.recombined_component_b.clone())
         .collect();
     tampered[1][9] = parameters.add(&tampered[1][9], &parameters.one());
-    let component_b: Vec<&[[u64; 13]]> =
-        tampered.iter().map(|values| values.as_slice()).collect();
-    let proof_parameters = KeyFriProofParameters {
-        query_count: 40,
-        mask_degree: 0,
-    };
-    let mut salt_seed = 0xc0_ffee_11;
-    let result = prove_key_fri_with_component_b(
-        &parameters,
-        ring_degree,
-        &public,
-        &KeySource::RoundOne,
-        &secret,
-        &digits,
-        component_b,
-        None,
-        &ZERO_STATEMENT_BINDING,
-        0,
-        &proof_parameters,
-        &mut salt_seed,
-    );
-    match result {
-        Err(_) => {}
-        Ok(proof) => assert!(
-            !verify_key_fri(
-                &parameters,
-                ring_degree,
-                &public,
-                &KeySource::RoundOne,
-                &proof,
-                None,
-                &ZERO_STATEMENT_BINDING,
-                0,
-                &proof_parameters,
-            )
-            .expect("verify runs"),
-            "committed material that differs from the public material must not verify"
-        ),
+    // Both unmasked and masked: the material column rides the same masking idiom
+    // as the base columns, and neither hides a wrong committed value.
+    for mask_degree in [0_usize, 16] {
+        let component_b: Vec<&[[u64; 13]]> =
+            tampered.iter().map(|values| values.as_slice()).collect();
+        let proof_parameters = KeyFriProofParameters {
+            query_count: 40,
+            mask_degree,
+        };
+        let mut salt_seed = 0xc0_ffee_11 + mask_degree as u64;
+        let result = prove_key_fri_with_component_b(
+            &parameters,
+            ring_degree,
+            &public,
+            &KeySource::RoundOne,
+            &secret,
+            &digits,
+            component_b,
+            None,
+            &ZERO_STATEMENT_BINDING,
+            0,
+            &proof_parameters,
+            &mut salt_seed,
+        );
+        match result {
+            Err(_) => {}
+            Ok(proof) => assert!(
+                !verify_key_fri(
+                    &parameters,
+                    ring_degree,
+                    &public,
+                    &KeySource::RoundOne,
+                    &proof,
+                    None,
+                    &ZERO_STATEMENT_BINDING,
+                    0,
+                    &proof_parameters,
+                )
+                .expect("verify runs"),
+                "a committed material that breaks the relation must not verify \
+                 (mask_degree {mask_degree})"
+            ),
+        }
     }
 }
 

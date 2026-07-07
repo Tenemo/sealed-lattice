@@ -122,7 +122,7 @@ fn verify_trustee_evaluation_key_proof_set(
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "trusteeEvaluationKeyProofs objectType and objectVersion must match the accepted parameters",
+            "trusteeEvaluationKeyProofs objectType must match the accepted parameters",
         ));
     }
     let setup_context = setup_package.get("setupContext").ok_or_else(|| {
@@ -381,7 +381,7 @@ fn verify_trustee_evaluation_key_proof_record(
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "trustee evaluation-key proof objectType and objectVersion must match the accepted parameters",
+            "trustee evaluation-key proof objectType must match the accepted parameters",
         ));
     }
     verify_context_fields_match(proof_record, setup_context, "trusteeEvaluationKeyProof")?;
@@ -1076,9 +1076,7 @@ fn transported_trustee_evaluation_key_proof_material_chunks(
             chunks.as_ref(),
             SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
         )?;
-        if value_u64(proof_material, "proofChunkSizeBytes")?
-            != SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES
-            || value_u64(proof_material, "proofChunkCount")?
+        if value_u64(proof_material, "proofChunkCount")?
                 != u64::try_from(transport_hashes.chunk_hashes.len()).map_err(|_| {
                     CanonicalError::new(
                         CanonicalErrorCode::MalformedLength,

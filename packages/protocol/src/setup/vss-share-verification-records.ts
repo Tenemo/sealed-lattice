@@ -187,7 +187,6 @@ const verifyGeneratedSignatureEnvelope = (
         chunkMerkleRoot: signedRoot.chunkMerkleRoot,
         boardHeadHash: signedRoot.boardHeadHash,
         contextHash: signedRoot.contextHash,
-        byteLength: signedRoot.byteLength,
         recoveryEpoch: signedRoot.recoveryEpoch,
         deviceEpoch: signedRoot.deviceEpoch,
     });
@@ -197,11 +196,6 @@ const verifyGeneratedSignatureEnvelope = (
             refusedObject === undefined
                 ? `${recordLabel} signature envelope failed verification.`
                 : signatureFailureMessage(recordLabel, refusedObject),
-        );
-    }
-    if (signatureEnvelope.signatureHash !== result.acceptedHashes[0]) {
-        throw new Error(
-            `${recordLabel} signature envelope hash does not match the verified signature hash.`,
         );
     }
 };
@@ -308,7 +302,6 @@ export const createVssShareAcceptanceRecord = async (
         boardHeadHash: null,
         objectRoot: acceptanceRoot,
         chunkMerkleRoot: null,
-        byteLength: acceptanceByteLength,
         signerRole: 'Trustee',
         signerIdentity: input.envelopeReference.recipientIdentity,
         recoveryEpoch: input.recoveryEpoch,
@@ -410,7 +403,6 @@ export const createVssShareComplaintRecord = async (
         boardHeadHash: null,
         objectRoot: complaintRoot,
         chunkMerkleRoot: null,
-        byteLength: complaintByteLength,
         signerRole: 'Trustee',
         signerIdentity: input.envelopeReference.recipientIdentity,
         recoveryEpoch: input.recoveryEpoch,

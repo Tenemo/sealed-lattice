@@ -30,7 +30,6 @@ export type SignatureExpectation = {
     readonly chunkMerkleRoot?: ProtocolHash | null;
     readonly boardHeadHash?: ProtocolHash | null;
     readonly contextHash?: ProtocolHash;
-    readonly byteLength?: number;
     readonly recoveryEpoch?: number;
     readonly deviceEpoch?: number;
 };
@@ -41,7 +40,6 @@ const emptySignatureVerificationResult = (
     objectHash?: ProtocolHash,
 ): SignatureVerificationResult => ({
     isValid: false,
-    acceptedHashes: [],
     refusedObjects: [
         {
             code,
@@ -51,11 +49,8 @@ const emptySignatureVerificationResult = (
     ],
 });
 
-const successfulSignatureVerification = (
-    signatureHash: ProtocolHash,
-): SignatureVerificationResult => ({
+const successfulSignatureVerification = (): SignatureVerificationResult => ({
     isValid: true,
-    acceptedHashes: [signatureHash],
     refusedObjects: [],
 });
 
@@ -225,7 +220,6 @@ const validateSignedRootShape = (
         'boardHeadHash',
         'objectRoot',
         'chunkMerkleRoot',
-        'byteLength',
         'signerRole',
         'signerIdentity',
         'recoveryEpoch',
@@ -272,7 +266,6 @@ const validateSignedRootShape = (
         );
     }
     if (
-        !isNonNegativeInteger(signedRoot.byteLength) ||
         !isNonNegativeInteger(signedRoot.recoveryEpoch) ||
         !isNonNegativeInteger(signedRoot.deviceEpoch)
     ) {
@@ -392,16 +385,6 @@ const validateExpectation = (
         );
     }
     if (
-        expectation.byteLength !== undefined &&
-        signedRoot.byteLength !== expectation.byteLength
-    ) {
-        return emptySignatureVerificationResult(
-            'InvalidSignedRoot',
-            'Signature root byte length does not match the expected object.',
-            signature.signatureHash,
-        );
-    }
-    if (
         expectation.recoveryEpoch !== undefined &&
         signedRoot.recoveryEpoch !== expectation.recoveryEpoch
     ) {
@@ -449,7 +432,6 @@ const hasExplicitSignatureExpectationBinding = (
         expectation.chunkMerkleRoot,
         expectation.boardHeadHash,
         expectation.contextHash,
-        expectation.byteLength,
         expectation.recoveryEpoch,
         expectation.deviceEpoch,
     ].some((value) => value !== undefined);
@@ -532,7 +514,7 @@ const verifySignedObjectSignatureInner = (
         );
     }
 
-    return successfulSignatureVerification(signature.signatureHash);
+    return successfulSignatureVerification();
 };
 
 export const verifySignedObjectSignature = (

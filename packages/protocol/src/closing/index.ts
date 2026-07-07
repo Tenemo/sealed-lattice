@@ -18,7 +18,6 @@ import {
     createRefusal,
     defaultSignedRootContextHash,
     isNonNegativeInteger,
-    signedObjectRootByteLength,
     verificationExceptionMessage,
 } from '../common/verification-helpers.js';
 
@@ -182,7 +181,6 @@ const verifyCastReceiptShellUnchecked = (
             objectRoot: input.receipt.castReceiptHash,
             boardHeadHash: input.receiptInclusionProof.boardHeadHash,
             contextHash: input.receipt.contextHash,
-            byteLength: signedObjectRootByteLength,
             recoveryEpoch: input.receipt.recoveryEpoch,
             deviceEpoch: input.receipt.deviceEpoch,
         },
@@ -206,7 +204,6 @@ export const verifyCastReceiptShell = (
     } catch (error) {
         return {
             isValid: false,
-            acceptedHashes: [],
             refusedObjects: [
                 createRefusal(
                     'CastReceiptInvalid',
@@ -382,7 +379,6 @@ const verifyCloseRecordShellUnchecked = (
             contextHash:
                 input.closeRecord.postVotingClosedContextHash ??
                 defaultSignedRootContextHash,
-            byteLength: signedObjectRootByteLength,
             recoveryEpoch: 0,
             deviceEpoch: 0,
         },
@@ -436,7 +432,6 @@ export const verifyCloseRecordShell = (
     } catch (error) {
         return {
             isValid: false,
-            acceptedHashes: [],
             refusedObjects: [
                 createRefusal(
                     'CloseRecordInvalid',

@@ -53,12 +53,15 @@ fn coefficient_sum<const LIMB_COUNT: usize>(
     Some(parameters.add(recombined_coefficient, &wrap_contribution))
 }
 
-// The S1 aggregate identity for one key: `sum_i z_i == <delta, R + w * Q_L>`,
+// The S1 aggregate identity for one key: `evaluation_sum == <delta, R + w * Q_L>`,
 // with every wrap multiple inside the roster-bounded range. `recombined_runtime_
 // key[digit][coeff]` is the centered CRT recombination of the published runtime
 // key; `wrap_multiples[digit][coeff]` and `delta[digit][coeff]` share that shape;
-// `evaluations[i]` is trustee i's opened `<delta, recombined_B_i>`. Returns false
-// on any shape mismatch, out-of-range wrap, or identity mismatch (fail-closed).
+// `evaluation_sum` is the batched delta-opening's proven total
+// `sum_{trustee, digit} <delta_digit, recombined_B[trustee][digit]>`, which equals
+// `<delta, sum_trustee recombined_B_trustee>`. Returns false on any shape mismatch,
+// out-of-range wrap, or identity mismatch (fail-closed). A missing or extra trustee
+// contribution moves the proven total, so the single check also catches it.
 pub(crate) fn material_aggregate_identity_holds<const LIMB_COUNT: usize>(
     parameters: &ProofFieldParameters<LIMB_COUNT>,
     recombined_runtime_key: &[Vec<[u64; LIMB_COUNT]>],
@@ -66,9 +69,9 @@ pub(crate) fn material_aggregate_identity_holds<const LIMB_COUNT: usize>(
     wrap_multiples: &[Vec<i64>],
     roster_size: usize,
     delta: &[Vec<[u64; LIMB_COUNT]>],
-    evaluations: &[[u64; LIMB_COUNT]],
+    evaluation_sum: &[u64; LIMB_COUNT],
 ) -> bool {
-    if roster_size == 0 || evaluations.len() != roster_size {
+    if roster_size == 0 {
         return false;
     }
     let digit_count = recombined_runtime_key.len();
@@ -108,12 +111,7 @@ pub(crate) fn material_aggregate_identity_holds<const LIMB_COUNT: usize>(
         }
     }
 
-    let mut evaluation_sum = parameters.zero();
-    for evaluation in evaluations {
-        evaluation_sum = parameters.add(&evaluation_sum, evaluation);
-    }
-
-    evaluation_sum == delta_dot_sum
+    *evaluation_sum == delta_dot_sum
 }
 
 #[cfg(test)]
@@ -132,9 +130,9 @@ mod tests {
     }
 
     // Build an honest instance: random recombined runtime key R and wrap
-    // multiples w within range, delta random, and a single trustee carrying the
-    // whole evaluation z_0 = <delta, R + w*Q_L> (others zero), so the identity
-    // holds by construction. Returns every input plus the honest evaluations.
+    // multiples w within range, delta random, and the batched evaluation total
+    // `sum <delta, R + w*Q_L>`, so the identity holds by construction. Returns
+    // every input plus the honest evaluation sum.
     #[allow(clippy::type_complexity)]
     fn honest_instance(
         parameters: &ProofFieldParameters<13>,
@@ -146,7 +144,7 @@ mod tests {
         Vec<Vec<[u64; 13]>>,
         Vec<Vec<i64>>,
         Vec<Vec<[u64; 13]>>,
-        Vec<[u64; 13]>,
+        [u64; 13],
     ) {
         let mut state = 0x51a1_u64;
         let max_wrap = maximum_wrap_multiple_magnitude(roster_size);
@@ -186,9 +184,7 @@ mod tests {
             wraps.push(wrap_digit);
             delta.push(delta_digit);
         }
-        let mut evaluations = vec![parameters.zero(); roster_size];
-        evaluations[0] = total;
-        (recombined, wraps, delta, evaluations)
+        (recombined, wraps, delta, total)
     }
 
     #[test]
@@ -199,7 +195,7 @@ mod tests {
         let group = LimbGroupContext::new(&parameters, &DATA_PRIMES[..2]).expect("group builds");
         let group_modulus = group.group_modulus_element(&parameters);
         let roster_size = 7;
-        let (recombined, wraps, delta, evaluations) =
+        let (recombined, wraps, delta, evaluation_sum) =
             honest_instance(&parameters, &group_modulus, 2, 24, roster_size);
 
         assert!(
@@ -210,7 +206,7 @@ mod tests {
                 &wraps,
                 roster_size,
                 &delta,
-                &evaluations,
+                &evaluation_sum,
             ),
             "the honest aggregate identity must hold"
         );
@@ -226,7 +222,7 @@ mod tests {
                 &wraps,
                 roster_size,
                 &delta,
-                &evaluations,
+                &evaluation_sum,
             ),
             "a forged runtime-key coefficient must be rejected"
         );
@@ -242,7 +238,7 @@ mod tests {
                 &forged_wraps,
                 roster_size,
                 &delta,
-                &evaluations,
+                &evaluation_sum,
             ),
             "a forged in-range wrap multiple must be rejected"
         );
@@ -258,15 +254,14 @@ mod tests {
                 &out_of_range_wraps,
                 roster_size,
                 &delta,
-                &evaluations,
+                &evaluation_sum,
             ),
             "a wrap multiple beyond ceil(n/2) must be refused"
         );
 
-        // Dropping a trustee's evaluation (here, tampering the carrying one)
-        // breaks the sum.
-        let mut forged_evaluations = evaluations.clone();
-        forged_evaluations[0] = parameters.add(&forged_evaluations[0], &parameters.one());
+        // A wrong evaluation total (a dropped or tampered trustee contribution
+        // moves it) breaks the identity.
+        let forged_sum = parameters.add(&evaluation_sum, &parameters.one());
         assert!(
             !material_aggregate_identity_holds(
                 &parameters,
@@ -275,9 +270,9 @@ mod tests {
                 &wraps,
                 roster_size,
                 &delta,
-                &forged_evaluations,
+                &forged_sum,
             ),
-            "a tampered trustee evaluation must be rejected"
+            "a wrong evaluation total must be rejected"
         );
     }
 
@@ -287,18 +282,18 @@ mod tests {
         let group = LimbGroupContext::new(&parameters, &DATA_PRIMES[..2]).expect("group builds");
         let group_modulus = group.group_modulus_element(&parameters);
         let roster_size = 5;
-        let (recombined, wraps, delta, evaluations) =
+        let (recombined, wraps, delta, evaluation_sum) =
             honest_instance(&parameters, &group_modulus, 2, 16, roster_size);
 
-        // Wrong evaluation count.
+        // Zero roster size.
         assert!(!material_aggregate_identity_holds(
             &parameters,
             &recombined,
             &group_modulus,
             &wraps,
-            roster_size,
+            0,
             &delta,
-            &evaluations[..roster_size - 1],
+            &evaluation_sum,
         ));
         // Empty digit set.
         assert!(!material_aggregate_identity_holds(
@@ -308,7 +303,7 @@ mod tests {
             &[],
             roster_size,
             &[],
-            &evaluations,
+            &evaluation_sum,
         ));
         // Mismatched coefficient counts between delta and the runtime key.
         let mut short_delta = delta.clone();
@@ -320,7 +315,7 @@ mod tests {
             &wraps,
             roster_size,
             &short_delta,
-            &evaluations,
+            &evaluation_sum,
         ));
     }
 }

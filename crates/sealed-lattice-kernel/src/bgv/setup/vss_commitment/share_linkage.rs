@@ -9,11 +9,6 @@ pub(crate) fn verify_vss_share_linkage_statement_request(
         "VssShareLinkageStatement",
         "VSS share linkage statement objectType",
     )?;
-    compare_required_u64(
-        unsigned_at_path(statement, &["objectVersion"])?,
-        1,
-        "VSS share linkage statement objectVersion",
-    )?;
     let ceremony_id = read_non_empty_string(statement, "ceremonyId")?;
     let setup_epoch = read_non_empty_string(statement, "setupEpoch")?;
     let manifest_hash = hash_at_path(statement, &["manifestHash"])?;
@@ -598,11 +593,6 @@ pub(super) fn verify_vss_share_linkage_source_statement(
         string_at_path(input.source_statement_record, &["objectType"])?,
         "VssShareLinkageSourceStatement",
         "VSS share linkage source statement objectType",
-    )?;
-    compare_required_u64(
-        unsigned_at_path(input.source_statement_record, &["objectVersion"])?,
-        1,
-        "VSS share linkage source statement objectVersion",
     )?;
     compare_required_string(
         string_at_path(input.source_statement_record, &["ceremonyId"])?,

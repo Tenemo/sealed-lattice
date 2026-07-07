@@ -167,7 +167,6 @@ export type BinaryChunkedPublicKeyShareMaterialSet = Readonly<
         readonly objectType: 'PublicKeyShareMaterialSet';
         readonly proofFamily: typeof publicKeyShareProofFamily;
         readonly materialEncoding: typeof publicKeyShareMaterialTransportEncoding;
-        readonly binaryFormat: typeof publicKeyShareMaterialBinaryFormat;
         readonly participantCount: number;
         readonly rnsLimbCount: number;
         readonly ringDegree: number;
@@ -191,7 +190,6 @@ export type BinaryChunkedPublicKeyShareMaterialSet = Readonly<
 export type SetupTransportedPublicKeyShareMaterial = Readonly<
     JsonRecord & {
         readonly objectType: 'SetupTransportedPublicKeyShareMaterial';
-        readonly binaryFormat: typeof publicKeyShareMaterialBinaryFormat;
         readonly chunkSizeBytes: typeof setupTransportChunkSizeBytes;
         readonly chunkCount: number;
         readonly totalByteLength: number;

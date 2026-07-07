@@ -32,13 +32,6 @@ pub(in super::super) fn verify_same_secret_consistency(
             "setupPackage.sameSecretConsistency.objectType",
         )?));
     }
-    if statement_set.get("objectVersion").and_then(Value::as_u64) != Some(1) {
-        return Ok(Some(same_secret_refusal(
-            "sameSecretConsistencyVersionMismatch",
-            "sameSecretConsistency.objectVersion must be 1",
-            "setupPackage.sameSecretConsistency.objectVersion",
-        )?));
-    }
 
     let setup_context = setup_package.get("setupContext").ok_or_else(|| {
         CanonicalError::new(
@@ -194,17 +187,6 @@ fn verify_same_secret_statement_record(
             "sameSecretStatementTypeMismatch",
             "same-secret statement objectType must be SameSecretConsistencyStatement",
             "setupPackage.sameSecretConsistency.statementRecords.objectType",
-        )?));
-    }
-    if statement_record
-        .get("objectVersion")
-        .and_then(Value::as_u64)
-        != Some(1)
-    {
-        return Ok(Some(same_secret_refusal(
-            "sameSecretStatementVersionMismatch",
-            "same-secret statement objectVersion must be 1",
-            "setupPackage.sameSecretConsistency.statementRecords.objectVersion",
         )?));
     }
     if let Err(error) = verify_same_secret_context(statement_record, setup_context) {

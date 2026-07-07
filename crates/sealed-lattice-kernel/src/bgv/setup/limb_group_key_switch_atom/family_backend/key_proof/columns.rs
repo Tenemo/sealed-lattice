@@ -59,14 +59,16 @@ pub(super) struct KeyColumnPlan<'a, const LIMB_COUNT: usize> {
     mask_degree: usize,
     secret: &'a [i64],
     digits: &'a [DigitWitness],
-    // The recombined component material `B_j` per digit, committed as a base
-    // column and pinned equal to the public material. Borrowed per-digit slices,
-    // never a full clone, so the streamed prover keeps its bounded footprint.
-    // The prover normally binds the public material here; a test override can
-    // substitute a mismatched column to exercise the pin in isolation.
+    // The recombined component material `B_j` per digit, committed as one masked
+    // MATERIAL column per digit and folded into the sumcheck's left-hand side.
+    // Borrowed per-digit slices, never a full clone, so the streamed prover keeps
+    // its bounded footprint. The prover normally binds the public material here;
+    // a test override can substitute a mismatched column to exercise the
+    // relation binding in isolation.
     component_b: Vec<&'a [[u64; LIMB_COUNT]]>,
     multiplicity_values: Vec<Vec<[u64; LIMB_COUNT]>>,
     base_mask_seed_starts: Vec<u64>,
+    material_mask_seed_starts: Vec<u64>,
     lookup_challenge: Option<[u64; LIMB_COUNT]>,
     aux_mask_seed_starts: Vec<u64>,
     linkage: Option<LinkagePlanData>,
@@ -143,6 +145,16 @@ impl<'a, const LIMB_COUNT: usize> KeyColumnPlan<'a, LIMB_COUNT> {
             base_mask_seed_starts.push(*salt_seed);
             advance_seed(salt_seed, steps);
         }
+        // The MATERIAL columns' mask seeds are drawn right after the base seeds,
+        // one per digit, so the deterministic salt/mask stream advances in a
+        // fixed order that the commit, sumcheck, combination, and opening passes
+        // all reproduce.
+        let material_count = material_column_count(digits.len());
+        let mut material_mask_seed_starts = Vec::with_capacity(material_count);
+        for _ in 0..material_count {
+            material_mask_seed_starts.push(*salt_seed);
+            advance_seed(salt_seed, steps);
+        }
         Ok(Self {
             ring_degree,
             mask_degree,
@@ -151,6 +163,7 @@ impl<'a, const LIMB_COUNT: usize> KeyColumnPlan<'a, LIMB_COUNT> {
             component_b,
             multiplicity_values,
             base_mask_seed_starts,
+            material_mask_seed_starts,
             lookup_challenge: None,
             aux_mask_seed_starts: Vec::new(),
             linkage: linkage_data,
@@ -244,7 +257,6 @@ impl<'a, const LIMB_COUNT: usize> KeyColumnPlan<'a, LIMB_COUNT> {
                         parameters.signed_word_to_element((square - 1) * (square - 4))
                     })
                     .collect(),
-                DIGIT_COMPONENT_B => self.component_b[digit_index].to_vec(),
                 _ => unreachable!("digit block offset out of range"),
             };
         }
@@ -275,6 +287,27 @@ impl<'a, const LIMB_COUNT: usize> KeyColumnPlan<'a, LIMB_COUNT> {
         let values = self.base_value_column(parameters, column);
         let coefficients = trace_domain.interpolate(&values);
         let mut seed = self.base_mask_seed_starts[column];
+        masked_coefficients(
+            parameters,
+            &coefficients,
+            self.ring_degree,
+            self.mask_degree,
+            &mut seed,
+        )
+    }
+
+    // The masked coefficient vector for MATERIAL column `digit`: the recombined
+    // component material `B_digit` interpolated over the trace domain, then
+    // masked exactly like a base column (per-column mask-seed snapshot), so it is
+    // bit-identical on every regeneration and its opening is bounded-leakage.
+    pub(super) fn material_column_coefficients(
+        &self,
+        parameters: &ProofFieldParameters<LIMB_COUNT>,
+        trace_domain: &CyclicDomain<'_, LIMB_COUNT>,
+        digit: usize,
+    ) -> Vec<[u64; LIMB_COUNT]> {
+        let coefficients = trace_domain.interpolate(self.component_b[digit]);
+        let mut seed = self.material_mask_seed_starts[digit];
         masked_coefficients(
             parameters,
             &coefficients,

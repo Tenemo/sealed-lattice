@@ -156,13 +156,6 @@ pub(in super::super) fn verify_optional_public_key_share_succinct_proofs(
             "setupPackage.publicKeyShareSuccinctProofs.objectType",
         )?));
     }
-    if proof_set.get("objectVersion").and_then(Value::as_u64) != Some(1) {
-        return Ok(Some(public_key_refusal(
-            "publicKeyShareSuccinctProofSetVersionMismatch",
-            "publicKeyShareSuccinctProofs.objectVersion must be 1",
-            "setupPackage.publicKeyShareSuccinctProofs.objectVersion",
-        )?));
-    }
     if let Err(error) = verify_same_secret_context(proof_set, setup_context) {
         return Ok(Some(public_key_refusal(
             "publicKeyShareSuccinctProofSetContextMismatch",
@@ -370,12 +363,6 @@ fn verify_public_key_share_succinct_proof_record(
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             "public-key share succinct proof objectType must be PublicKeyShareSuccinctProof",
-        ));
-    }
-    if proof_record.get("objectVersion").and_then(Value::as_u64) != Some(1) {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "public-key share succinct proof objectVersion must be 1",
         ));
     }
     verify_same_secret_context(proof_record, context.setup_context)?;

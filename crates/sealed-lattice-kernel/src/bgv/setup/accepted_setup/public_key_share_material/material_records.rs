@@ -211,12 +211,6 @@ pub(in super::super) fn verify_public_key_share_material_set(
             "publicKeyShareMaterial.objectType must be PublicKeyShareMaterialSet",
         ));
     }
-    if material_set.get("objectVersion").and_then(Value::as_u64) != Some(1) {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "publicKeyShareMaterial.objectVersion must be 1",
-        ));
-    }
     verify_same_secret_context(material_set, setup_context)?;
     for (field_name, expected_value) in [("proofFamily", "public-key-share")] {
         if material_set.get(field_name).and_then(Value::as_str) != Some(expected_value) {
@@ -347,12 +341,6 @@ pub(super) fn verify_public_key_share_material_record(
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             "public-key share material objectType must be PublicKeyShareMaterial",
-        ));
-    }
-    if material_record.get("objectVersion").and_then(Value::as_u64) != Some(1) {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "public-key share material objectVersion must be 1",
         ));
     }
     verify_same_secret_context(material_record, setup_context)?;

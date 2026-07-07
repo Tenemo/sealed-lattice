@@ -16,7 +16,6 @@ import {
     defaultSignedRootContextHash,
     isNonNegativeInteger,
     isProtocolHashString,
-    signedObjectRootByteLength,
 } from '../common/verification-helpers.js';
 
 import {
@@ -131,7 +130,6 @@ export const verifyRegistrationEntry = (
         manifestHash: null,
         objectRoot: entry.registrationEntryHash,
         boardHeadHash: null,
-        byteLength: signedObjectRootByteLength,
         recoveryEpoch: entry.recoveryEpoch,
         deviceEpoch: entry.deviceEpoch,
         contextHash: defaultSignedRootContextHash,
@@ -278,7 +276,6 @@ export const verifyTrusteeSetupEntry = (
         manifestHash: null,
         objectRoot: entry.trusteeSetupEntryHash,
         boardHeadHash: null,
-        byteLength: signedObjectRootByteLength,
         recoveryEpoch: entry.recoveryEpoch,
         deviceEpoch: entry.deviceEpoch,
         contextHash: defaultSignedRootContextHash,
@@ -385,7 +382,6 @@ export const verifyManifest = (
         manifestHash: null,
         objectRoot: manifest.electionManifestHash,
         boardHeadHash: null,
-        byteLength: signedObjectRootByteLength,
         recoveryEpoch: 0,
         deviceEpoch: 0,
         contextHash: defaultSignedRootContextHash,
@@ -452,7 +448,6 @@ export const verifyRosterExternalAcceptance = (
                 manifestHash: acceptance.electionManifestHash,
                 objectRoot: acceptance.rosterExternalAcceptanceHash,
                 boardHeadHash: acceptance.acceptedBoardHeadHash,
-                byteLength: signedObjectRootByteLength,
                 recoveryEpoch: 0,
                 deviceEpoch: 0,
                 contextHash: defaultSignedRootContextHash,
@@ -463,10 +458,6 @@ export const verifyRosterExternalAcceptance = (
 
         return {
             isValid: refusedObjects.length === 0,
-            acceptedHashes:
-                refusedObjects.length === 0
-                    ? [acceptance.rosterExternalAcceptanceHash]
-                    : [],
             refusedObjects,
             rosterExternalAcceptanceHash:
                 refusedObjects.length === 0
@@ -476,7 +467,6 @@ export const verifyRosterExternalAcceptance = (
     } catch {
         return {
             isValid: false,
-            acceptedHashes: [],
             refusedObjects: [
                 createRefusal(
                     'RosterExternalAcceptanceInvalid',

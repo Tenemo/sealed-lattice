@@ -27,10 +27,11 @@ pub(in super::super) fn prove_round_one_key_fri<const LIMB_COUNT: usize>(
     )
 }
 
-// The public entry: bind the transported public component material as the
-// committed `B_j` columns and prove. Production always commits the public
+// The public entry: commit the transported public component material as the
+// MATERIAL `B_col_j` columns and prove. Production always commits the public
 // material; the streamed body accepts the material explicitly so a test can
-// substitute a mismatched column and confirm the per-digit pin rejects it.
+// substitute a mismatched column and confirm the relation (the sumcheck)
+// rejects it.
 #[allow(clippy::too_many_arguments)]
 pub(in super::super) fn prove_key_fri<const LIMB_COUNT: usize>(
     parameters: &ProofFieldParameters<LIMB_COUNT>,
@@ -67,9 +68,10 @@ pub(in super::super) fn prove_key_fri<const LIMB_COUNT: usize>(
 }
 
 // A test entry that commits caller-supplied component material instead of the
-// public material, so the per-digit component pin can be exercised in isolation
-// (the transcript-bound public material is unchanged, so only the pin can catch
-// the mismatch).
+// public material, so the relation binding on the committed `B_col_j` columns
+// can be exercised in isolation: a mismatched committed material makes the atom
+// congruence `B + A(*)s - t e - G source - Q c = 0` miss, and the sumcheck
+// rejects it.
 #[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 pub(in super::super) fn prove_key_fri_with_component_b<const LIMB_COUNT: usize>(
@@ -147,6 +149,7 @@ fn prove_key_fri_streamed<const LIMB_COUNT: usize>(
         salt_seed,
     )?;
     let base_count = plan.base_column_count();
+    let material_count = material_column_count(digit_count);
 
     // Round 1 (streamed): witness columns plus the carry-range multiplicity
     // columns, committed one codeword at a time.
@@ -159,6 +162,19 @@ fn prove_key_fri_streamed<const LIMB_COUNT: usize>(
     }
     let base_commitment = base_builder.finalize()?;
 
+    // The MATERIAL commitment: one masked column per digit holding the
+    // recombined component material `B_j`, committed exactly like the base
+    // columns and one codeword at a time. Committed before `gamma` is drawn, so
+    // the material is fixed prior to its reduction challenge.
+    let mut material_builder =
+        StreamedColumnCommitmentBuilder::begin(layout.coset_size, material_count, salt_seed)?;
+    for digit in 0..material_count {
+        let coefficients = plan.material_column_coefficients(parameters, &trace_domain, digit);
+        let codeword = coset_evaluate_coefficients(&coset_domain, &offset, &coefficients);
+        material_builder.absorb_column(&codeword)?;
+    }
+    let material_commitment = material_builder.finalize()?;
+
     let mut transcript = Transcript::new(PROTOCOL_LABEL);
     transcript.absorb("key-statement-binding", statement_binding);
     transcript.absorb_u64("key-schedule-index", schedule_index);
@@ -168,6 +184,7 @@ fn prove_key_fri_streamed<const LIMB_COUNT: usize>(
         linkage::absorb_linkage_statement(&mut transcript, statement);
     }
     transcript.absorb_digest("key-base-root", &base_commitment.root());
+    transcript.absorb_digest("key-material-root", &material_commitment.root());
     let gamma = transcript.challenge_field_elements(parameters, "key-gamma", ring_degree);
     let delta = transcript.challenge_field_elements(parameters, "key-delta", digit_count);
     let lookup_challenge = transcript.challenge_field_elements(parameters, "key-lookup-mu", 1);
@@ -243,6 +260,18 @@ fn prove_key_fri_streamed<const LIMB_COUNT: usize>(
                 parameters,
                 &f,
                 &polynomial::multiply_via_ntt(parameters, &carry_linear, &carry_column),
+            );
+            // Material form: fold the committed `B_col_j` on the left-hand side
+            // with `delta_j * gamma`, exactly like the error and carry columns.
+            // This carries the atom's component term that the target used to
+            // hold, now against the committed material column.
+            let material_linear = trace_domain.interpolate(&forms.material_form);
+            let material_column =
+                plan.material_column_coefficients(parameters, &trace_domain, digit);
+            f = polynomial::add(
+                parameters,
+                &f,
+                &polynomial::multiply_via_ntt(parameters, &material_linear, &material_column),
             );
             Ok(())
         },
@@ -480,22 +509,6 @@ fn prove_key_fri_streamed<const LIMB_COUNT: usize>(
                 &one,
             ),
         );
-        // component material pin: B_col(x) - B_public(x) = 0 on H. The masked
-        // committed column minus the interpolated public material is a Z_H
-        // multiple, so it vanishes on H when the committed column is the public
-        // material and does not otherwise, forcing the two to agree.
-        let component_b_column = plan.base_column_coefficients(
-            parameters,
-            &trace_domain,
-            digit_column(digit, DIGIT_COMPONENT_B),
-        );
-        let component_b_public =
-            trace_domain.interpolate(&public.digits[digit].recombined_component_b);
-        fold_constraint(
-            &mut v,
-            &mut alpha_index,
-            polynomial::subtract(parameters, &component_b_column, &component_b_public),
-        );
     }
     // Table fraction pins: (mu - T_k) * f_T_k - m_k = 0.
     for (table_index, table_polynomial) in table_polynomials.iter().enumerate() {
@@ -680,11 +693,12 @@ fn prove_key_fri_streamed<const LIMB_COUNT: usize>(
     let weights = transcript.challenge_field_elements(
         parameters,
         "key-combination",
-        base_count + aux_count + QUOTIENT_COLUMN_COUNT + 1,
+        base_count + material_count + aux_count + QUOTIENT_COLUMN_COUNT + 1,
     );
 
     // Combination pass: the weighted sum of every committed column's codeword,
-    // regenerating one codeword at a time.
+    // regenerating one codeword at a time, in the fixed order base + material +
+    // aux + quotient (mirrored in the verifier's weight indexing).
     let mut combination = vec![parameters.zero(); layout.coset_size];
     let accumulate = |combination: &mut Vec<[u64; LIMB_COUNT]>,
                       weight: &[u64; LIMB_COUNT],
@@ -696,6 +710,12 @@ fn prove_key_fri_streamed<const LIMB_COUNT: usize>(
     let mut weight_index = 0;
     for column in 0..base_count {
         let coefficients = plan.base_column_coefficients(parameters, &trace_domain, column);
+        let codeword = coset_evaluate_coefficients(&coset_domain, &offset, &coefficients);
+        accumulate(&mut combination, &weights[weight_index], &codeword);
+        weight_index += 1;
+    }
+    for digit in 0..material_count {
+        let coefficients = plan.material_column_coefficients(parameters, &trace_domain, digit);
         let codeword = coset_evaluate_coefficients(&coset_domain, &offset, &coefficients);
         accumulate(&mut combination, &weights[weight_index], &codeword);
         weight_index += 1;
@@ -761,6 +781,14 @@ fn prove_key_fri_streamed<const LIMB_COUNT: usize>(
             row.push(codeword[index]);
         }
     }
+    let mut material_rows_values = vec![Vec::with_capacity(material_count); sorted.len()];
+    for digit in 0..material_count {
+        let coefficients = plan.material_column_coefficients(parameters, &trace_domain, digit);
+        let codeword = coset_evaluate_coefficients(&coset_domain, &offset, &coefficients);
+        for (row, &index) in material_rows_values.iter_mut().zip(sorted.iter()) {
+            row.push(codeword[index]);
+        }
+    }
     let mut aux_rows_values = vec![Vec::with_capacity(aux_count); sorted.len()];
     for column in 0..aux_count {
         let coefficients = plan.aux_column_coefficients(parameters, &trace_domain, column)?;
@@ -777,15 +805,18 @@ fn prove_key_fri_streamed<const LIMB_COUNT: usize>(
         }
     }
     let base_opening = base_commitment.open_rows(&sorted, base_rows_values)?;
+    let material_opening = material_commitment.open_rows(&sorted, material_rows_values)?;
     let aux_opening = aux_commitment.open_rows(&sorted, aux_rows_values)?;
     let quotient_opening = quotient_commitment.open_rows(&sorted, quotient_rows_values)?;
 
     Ok(KeyFriProof {
         base_root: base_commitment.root(),
+        material_root: material_commitment.root(),
         aux_root: aux_commitment.root(),
         quotient_root: quotient_commitment.root(),
         fri,
         base_opening,
+        material_opening,
         aux_opening,
         quotient_opening,
         lookup_terminal,

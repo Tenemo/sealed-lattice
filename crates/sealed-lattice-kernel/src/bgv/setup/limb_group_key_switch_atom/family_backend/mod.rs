@@ -43,6 +43,10 @@ pub(crate) mod low_degree;
 // verification layer and reconstruction retires.
 #[cfg(test)]
 pub(crate) mod material_aggregate;
+// The batched linear-evaluation opening the S1 aggregate check consumes.
+// Test-gated alongside `material_aggregate` until both wire into acceptance.
+#[cfg(test)]
+pub(crate) mod material_aggregate_opening;
 pub(crate) mod merkle;
 pub(crate) mod polynomial;
 pub(crate) mod proof_codec;

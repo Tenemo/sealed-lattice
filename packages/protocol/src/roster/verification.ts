@@ -12,7 +12,6 @@ import { verifyInclusionProof } from '../board/inclusion-proof.js';
 import {
     buildBoardHeadMap,
     createRefusal,
-    uniqueStrings,
 } from '../common/verification-helpers.js';
 import { derivePollSpecHash } from '../lifecycle/poll-spec.js';
 import { deriveFrozenRosterParameters } from '../lifecycle/thresholds.js';
@@ -375,21 +374,6 @@ const verifyRosterManifestTranscriptUnchecked = (
 
     return {
         isValid: transcriptAccepted,
-        acceptedHashes: transcriptAccepted
-            ? uniqueStrings([
-                  ...boardResult.acceptedHashes,
-                  ...input.registrationEntries.map(
-                      (entry) => entry.registrationEntryHash,
-                  ),
-                  ...input.trusteeSetupEntries.map(
-                      (entry) => entry.trusteeSetupEntryHash,
-                  ),
-                  rosterHash,
-                  input.electionManifest.electionManifestHash,
-                  input.manifestInclusionProof.inclusionProofHash,
-                  ...acceptedConflictingManifestEvidenceHashes,
-              ])
-            : [],
         refusedObjects,
         forkEvidence,
         electionManifestHash: transcriptAccepted
@@ -408,7 +392,6 @@ export const verifyRosterManifestTranscript = (
     } catch {
         return {
             isValid: false,
-            acceptedHashes: [],
             refusedObjects: [
                 createRefusal(
                     'RosterHashMismatch',

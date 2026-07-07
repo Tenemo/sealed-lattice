@@ -20,7 +20,6 @@ import {
     createRefusal,
     defaultSignedRootContextHash,
     isNonNegativeInteger,
-    signedObjectRootByteLength,
     verificationExceptionMessage,
 } from '../common/verification-helpers.js';
 
@@ -151,9 +150,6 @@ const isActionCurrentForRecoveryEpochUnchecked = (
         const actionCurrent = refusedObjects.length === 0;
         return {
             isValid: actionCurrent,
-            acceptedHashes: actionCurrent
-                ? [input.actionContext.actionContextHash]
-                : [],
             refusedObjects,
         };
     }
@@ -169,9 +165,6 @@ const isActionCurrentForRecoveryEpochUnchecked = (
         const actionCurrent = refusedObjects.length === 0;
         return {
             isValid: actionCurrent,
-            acceptedHashes: actionCurrent
-                ? [input.actionContext.actionContextHash]
-                : [],
             refusedObjects,
         };
     }
@@ -187,7 +180,6 @@ const isActionCurrentForRecoveryEpochUnchecked = (
 
     return {
         isValid: false,
-        acceptedHashes: [],
         refusedObjects,
     };
 };
@@ -200,7 +192,6 @@ export const isActionCurrentForRecoveryEpoch = (
     } catch (error) {
         return {
             isValid: false,
-            acceptedHashes: [],
             refusedObjects: [
                 createRefusal(
                     'InvalidSignedRoot',
@@ -424,7 +415,6 @@ const verifyRecoveryEpochUpdateUnchecked = (
         manifestHash: null,
         objectRoot: update.recoveryEpochUpdateHash,
         boardHeadHash: update.boardHeadHash,
-        byteLength: signedObjectRootByteLength,
         recoveryEpoch: update.previousRecoveryEpoch,
         deviceEpoch: update.previousDeviceEpoch,
         contextHash: defaultSignedRootContextHash,
@@ -434,14 +424,6 @@ const verifyRecoveryEpochUpdateUnchecked = (
 
     return {
         isValid: refusedObjects.length === 0,
-        acceptedHashes:
-            refusedObjects.length === 0
-                ? [
-                      ...boardResult.acceptedHashes,
-                      update.recoveryEpochUpdateHash,
-                      input.updateInclusionProof.inclusionProofHash,
-                  ]
-                : [],
         refusedObjects,
         forkEvidence: boardResult.forkEvidence,
         updatedEntry:
@@ -465,7 +447,6 @@ export const verifyRecoveryEpochUpdate = (
     } catch (error) {
         return {
             isValid: false,
-            acceptedHashes: [],
             refusedObjects: [
                 createRefusal(
                     'RecoveryUpdateInvalid',

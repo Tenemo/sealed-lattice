@@ -1,5 +1,4 @@
 import {
-    canonicalJson,
     deriveCanonicalObjectHash,
     verifySignedObjectSignature,
 } from '@sealed-lattice/crypto';
@@ -134,7 +133,6 @@ export type SetupCommonRandomness = Readonly<
 
 // Each reveal contributes exactly 32 bytes (256 bits) of entropy to the joint public matrix seed.
 const revealHexPattern = /^[0-9a-f]{64}$/u;
-const textEncoder = new TextEncoder();
 
 const assertRevealHex = (value: string, fieldName: string): void => {
     if (!revealHexPattern.test(value)) {
@@ -179,9 +177,6 @@ const assertParticipantInput = (
     assertNonNegativeSafeInteger(input.deviceEpoch, 'deviceEpoch');
     assertProtocolHash(input.signingPublicKeyHash, 'signingPublicKeyHash');
 };
-
-const canonicalByteLength = (value: unknown): number =>
-    textEncoder.encode(canonicalJson(value)).byteLength;
 
 const commonRandomnessParticipantFields = (
     input: CommonRandomnessParticipantInput,
@@ -455,7 +450,6 @@ const verifyGeneratedSignatureEnvelope = (
         chunkMerkleRoot: signedRoot.chunkMerkleRoot,
         boardHeadHash: signedRoot.boardHeadHash,
         contextHash: signedRoot.contextHash,
-        byteLength: signedRoot.byteLength,
         recoveryEpoch: signedRoot.recoveryEpoch,
         deviceEpoch: signedRoot.deviceEpoch,
     });
@@ -465,11 +459,6 @@ const verifyGeneratedSignatureEnvelope = (
             refusedObject === undefined
                 ? `${recordLabel} signature envelope failed verification.`
                 : `${recordLabel} signature envelope failed verification: ${refusedObject.code}: ${refusedObject.message}`,
-        );
-    }
-    if (signatureEnvelope.signatureHash !== result.acceptedHashes[0]) {
-        throw new Error(
-            `${recordLabel} signature envelope hash does not match the verified signature hash.`,
         );
     }
 };
@@ -499,7 +488,6 @@ export const createCommonRandomnessReveal = async (
         boardHeadHash: null,
         objectRoot: revealHash,
         chunkMerkleRoot: null,
-        byteLength: canonicalByteLength(revealWithoutHash),
         signerRole: 'Trustee',
         signerIdentity: input.trusteeIdentity,
         recoveryEpoch: input.recoveryEpoch,
@@ -547,7 +535,6 @@ export const createCommonRandomnessCommit = async (
         boardHeadHash: null,
         objectRoot: commitHash,
         chunkMerkleRoot: null,
-        byteLength: canonicalByteLength(commitWithoutHash),
         signerRole: 'Trustee',
         signerIdentity: input.trusteeIdentity,
         recoveryEpoch: input.recoveryEpoch,

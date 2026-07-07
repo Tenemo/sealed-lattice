@@ -68,7 +68,6 @@ export const defaultSignedRootContextHash = deriveCanonicalObjectHash({
 });
 
 // Fixed 64-byte (512-bit) length every signed object root must declare.
-export const signedObjectRootByteLength = 64;
 
 export const protocolHashPattern = /^[0-9a-f]{128}$/u;
 

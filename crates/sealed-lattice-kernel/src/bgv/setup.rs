@@ -279,15 +279,6 @@ pub(crate) fn verify_passive_setup_package_from_request(request: &Value) -> Cano
 
     Ok(json!({
         "operation": "verifyBgvPassiveSetupPackage",
-        "acceptedHashes": [
-            setup_package_hash,
-            string_at_path(setup_package, &["collectivePublicKey", "collectivePublicKeyRoot"])?,
-            string_at_path(setup_package, &["collectivePublicKey", "bgvPublicKeyRoot"])?,
-            string_at_path(setup_package, &["thresholdVerificationMaterial", "thresholdShareVerificationKeyRoot"])?,
-            string_at_path(setup_package, &["thresholdVerificationMaterial", "thresholdShareVerificationKeyHash"])?,
-            string_at_path(setup_package, &["evaluationKeys", "evaluationKeyRoot"])?,
-            string_at_path(setup_package, &["evaluationKeys", "rotSetHash"])?,
-        ],
     }))
 }
 

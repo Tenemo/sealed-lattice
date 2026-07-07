@@ -49,7 +49,6 @@ export type BgvVerifiedSetupProofMaterialSet = Readonly<
 export type BgvTransportedPublicKeyShareMaterial =
     BgvTransportedMaterialObject<'SetupTransportedPublicKeyShareMaterial'> &
         Readonly<{
-            readonly binaryFormat: string;
             readonly chunkSizeBytes: number;
             readonly chunkCount: number;
             readonly totalByteLength: number;
@@ -128,7 +127,6 @@ export type BgvCanonicalObjectAnalysis = {
 export type BgvOperationRejection = {
     readonly isValid: false;
     readonly operation: string;
-    readonly acceptedHashes: readonly ProtocolHash[];
     readonly refusedObjects: readonly {
         readonly code: 'BgvOperationRejected';
         readonly reasonCode: string;
@@ -239,7 +237,6 @@ export type BgvPassiveSetupPackage = {
 
 export type BgvPassiveSetupVerification = {
     readonly operation: 'verifyBgvPassiveSetupPackage';
-    readonly acceptedHashes: readonly ProtocolHash[];
 };
 
 export type BgvCollectiveSetupParametersDescription = {
@@ -432,7 +429,6 @@ export type BgvCollectiveSetupVerification = {
     readonly operation: 'verifyCollectiveBgvSetupPackage';
     readonly currentPhase: string | null;
     readonly phaseOrderHash: ProtocolHash;
-    readonly acceptedHashes: readonly ProtocolHash[];
     readonly acceptedSetupHandoff?: BgvAcceptedSetupHandoff;
     readonly missingObjects: readonly string[];
     readonly refusedObjects: readonly {

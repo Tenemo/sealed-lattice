@@ -40,13 +40,6 @@ pub(super) fn verify_relinearization_key_share_rounds(
             "setupPackage.relinearizationKeyShareRounds.objectType",
         )?));
     }
-    if rounds.get("objectVersion").and_then(Value::as_u64) != Some(1) {
-        return Ok(Some(evaluation_key_material_refusal(
-            "relinearizationKeyShareRoundsVersionMismatch",
-            "relinearizationKeyShareRounds.objectVersion must be 1",
-            "setupPackage.relinearizationKeyShareRounds.objectVersion",
-        )?));
-    }
     let setup_context = setup_package.get("setupContext").ok_or_else(|| {
         CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -634,7 +627,6 @@ fn verify_evaluation_key_component_material_encoding(record: &Value) -> Canonica
         "embedded-full-key-switch-component-vectors" => {
             if record.get("keySwitchComponentVectors").is_none()
                 || record.get("keySwitchComponentMaterialRoot").is_some()
-                || record.get("keySwitchComponentChunkSizeBytes").is_some()
                 || record.get("keySwitchComponentChunkCount").is_some()
                 || record.get("keySwitchComponentTotalByteLength").is_some()
                 || record.get("keySwitchComponentFullObjectHash").is_some()
@@ -914,12 +906,6 @@ fn verify_galois_key_share_material_record(
             "Galois key share material objectType must be GaloisKeyShareMaterial",
         ));
     }
-    if material_record.get("objectVersion").and_then(Value::as_u64) != Some(1) {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "Galois key share material objectVersion must be 1",
-        ));
-    }
     for field_name in ["proofFamily", "trusteeIdentity", "trusteeRosterPosition"] {
         if material_record.get(field_name) != batch.get(field_name) {
             return Err(CanonicalError::new(
@@ -965,12 +951,6 @@ fn verify_evaluation_key_record_object(
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             format!("evaluation-key share objectType must be {expected_object_type}"),
-        ));
-    }
-    if record.get("objectVersion").and_then(Value::as_u64) != Some(1) {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "evaluation-key share objectVersion must be 1",
         ));
     }
     for (field_name, expected_value) in [("proofFamily", expected_proof_family)] {

@@ -20,17 +20,6 @@ pub(super) fn verify_private_envelope_header(
             "privateEnvelope.objectType",
         )));
     }
-    if private_envelope
-        .get("objectVersion")
-        .and_then(Value::as_u64)
-        != Some(1)
-    {
-        return Ok(Err(PrivateVssRefusal::new(
-            "privateEnvelopeVersionMismatch",
-            "privateEnvelope.objectVersion must be 1",
-            "privateEnvelope.objectVersion",
-        )));
-    }
     if let Err(refusal) = compare_context_fields(private_envelope, setup_context, "privateEnvelope")
     {
         return Ok(Err(refusal));
@@ -228,13 +217,6 @@ fn verify_private_envelope_limb(
             "privateVssLimbOpeningTypeMismatch",
             "private VSS limb opening objectType must be PrivateVssShareLimbOpening",
             "privateEnvelope.rnsShareOpenings.objectType",
-        )));
-    }
-    if limb_opening.get("objectVersion").and_then(Value::as_u64) != Some(1) {
-        return Ok(Err(PrivateVssRefusal::new(
-            "privateVssLimbOpeningVersionMismatch",
-            "private VSS limb opening objectVersion must be 1",
-            "privateEnvelope.rnsShareOpenings.objectVersion",
         )));
     }
     let rns_limb_index = match usize_field(

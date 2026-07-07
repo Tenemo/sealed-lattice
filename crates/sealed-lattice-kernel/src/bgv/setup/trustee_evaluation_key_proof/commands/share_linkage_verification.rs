@@ -399,11 +399,6 @@ pub(crate) fn verify_vss_share_linkage_proof_material_set_from_request(
         "VssShareLinkageProofMaterialSet",
         "share-linkage proof material set objectType",
     )?;
-    compare_u64_value(
-        read_u64(proof_material_set, "objectVersion")?,
-        1,
-        "share-linkage proof material set objectVersion",
-    )?;
     for (field_name, expected_value) in [
         ("proofFamily", VSS_SHARE_LINKAGE_PROOF_FAMILY),
         ("ceremonyId", read_string(statement, "ceremonyId")?),
@@ -480,11 +475,6 @@ pub(crate) fn verify_vss_share_linkage_proof_material_set_from_request(
             read_string(proof_record, "objectType")?,
             "VssShareLinkageProofRecord",
             "share-linkage proof record objectType",
-        )?;
-        compare_u64_value(
-            read_u64(proof_record, "objectVersion")?,
-            1,
-            "share-linkage proof record objectVersion",
         )?;
         compare_string_value(
             read_string(proof_record, "proofFamily")?,

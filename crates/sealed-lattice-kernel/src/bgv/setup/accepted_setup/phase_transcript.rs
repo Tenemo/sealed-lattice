@@ -346,18 +346,6 @@ fn verify_participant_phase_object(
         )?));
     }
     if participant_phase_object
-        .get("objectVersion")
-        .and_then(Value::as_u64)
-        != Some(1)
-    {
-        return Ok(Some(phase_refusal(
-            phase_identifier,
-            "phaseParticipantObjectVersionMismatch",
-            "participant phase object version must be 1",
-            format!("setupPackage.phaseTranscript.{phase_identifier}.participantPhaseObjects"),
-        )?));
-    }
-    if participant_phase_object
         .get("phaseId")
         .and_then(Value::as_str)
         != Some(phase_identifier)
@@ -693,7 +681,6 @@ fn verify_participant_phase_object(
             chunk_merkle_root: None,
             board_head_hash: None,
             context_hash: phase_signature_context_hash,
-            byte_length: phase_object_byte_length,
             recovery_epoch,
             device_epoch,
         },

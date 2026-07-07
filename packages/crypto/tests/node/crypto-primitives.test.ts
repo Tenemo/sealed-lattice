@@ -59,7 +59,6 @@ const createSignedRoot = (
     boardHeadHash: null,
     objectRoot,
     chunkMerkleRoot: null,
-    byteLength: 64,
     signerRole: 'Board',
     signerIdentity: 'board',
     recoveryEpoch: 0,

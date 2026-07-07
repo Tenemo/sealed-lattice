@@ -391,8 +391,6 @@ export type LocalTrusteeSetupStateSealedPayload = Readonly<
 export type EncryptedLocalTrusteeSetupState = Readonly<
     JsonRecord & {
         readonly objectType: 'EncryptedLocalTrusteeSetupState';
-        readonly storageScheme: string;
-        readonly ciphertextContentType: 'local-trustee-setup-state';
         readonly localStateRoot: ProtocolHash;
         readonly localStateCommitmentHash: ProtocolHash;
         readonly storageAad: Readonly<JsonRecord>;

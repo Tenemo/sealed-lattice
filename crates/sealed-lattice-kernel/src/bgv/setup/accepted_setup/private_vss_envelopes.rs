@@ -116,13 +116,6 @@ pub(super) fn verify_private_vss_envelope_commitments(
             "setupPackage.privateVssEnvelopeCommitments.objectType",
         )?));
     }
-    if commitment_set.get("objectVersion").and_then(Value::as_u64) != Some(1) {
-        return Ok(Some(private_vss_envelope_refusal(
-            "privateVssEnvelopeCommitmentSetVersionMismatch",
-            "privateVssEnvelopeCommitments.objectVersion must be 1",
-            "setupPackage.privateVssEnvelopeCommitments.objectVersion",
-        )?));
-    }
 
     let setup_context = setup_package.get("setupContext").ok_or_else(|| {
         CanonicalError::new(
@@ -490,17 +483,6 @@ fn private_vss_envelope_binding_from_reference(
             "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.objectType",
         )));
     }
-    if envelope_reference
-        .get("objectVersion")
-        .and_then(Value::as_u64)
-        != Some(1)
-    {
-        return Ok(Err(Refusal::new(
-            "privateVssEnvelopeReferenceVersionMismatch",
-            "private VSS envelope commitment objectVersion must be 1",
-            "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.objectVersion",
-        )));
-    }
     if let Err(refusal) = verify_private_vss_envelope_context(
         envelope_reference,
         setup_context,
@@ -862,17 +844,6 @@ fn verify_encrypted_private_vss_envelope(
             "privateVssEncryptedEnvelopeTypeMismatch",
             "encryptedEnvelope.objectType must be EncryptedPrivateVssShareEnvelope",
             "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.encryptedEnvelope.objectType",
-        )));
-    }
-    if encrypted_envelope
-        .get("objectVersion")
-        .and_then(Value::as_u64)
-        != Some(1)
-    {
-        return Ok(Err(Refusal::new(
-            "privateVssEncryptedEnvelopeVersionMismatch",
-            "encryptedEnvelope.objectVersion must be 1",
-            "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.encryptedEnvelope.objectVersion",
         )));
     }
     if let Err(refusal) = verify_private_vss_envelope_context(

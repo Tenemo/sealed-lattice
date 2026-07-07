@@ -11,7 +11,6 @@ import {
     createRefusal,
     isNonEmptyString,
     isNonNegativeInteger,
-    uniqueStrings,
     verificationExceptionMessage,
 } from '../common/verification-helpers.js';
 
@@ -259,15 +258,6 @@ const deriveValidatedFirstValidOrderUnchecked = (
 
     return {
         isValid: refusedObjects.length === 0,
-        acceptedHashes:
-            refusedObjects.length === 0
-                ? uniqueStrings([
-                      firstValidOrderHash,
-                      ...orderedCandidates.map(
-                          (candidate) => candidate.objectHash,
-                      ),
-                  ])
-                : [],
         refusedObjects,
         firstValidOrderHash:
             refusedObjects.length === 0 ? firstValidOrderHash : undefined,
@@ -283,7 +273,6 @@ export const deriveValidatedFirstValidOrder = (
     } catch (error) {
         return {
             isValid: false,
-            acceptedHashes: [],
             refusedObjects: [
                 createRefusal(
                     'FirstValidPolicyMismatch',

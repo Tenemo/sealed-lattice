@@ -242,7 +242,6 @@ describe('setup proof material streaming in the public package', () => {
                 isValid: true,
                 operation: 'verifyCollectiveBgvSetupPackage',
                 currentPhase: 'setupPackageVerification',
-                acceptedHashes: [acceptedSetupHandoffRoot],
                 missingObjects: [],
                 refusedObjects: [],
                 acceptedSetupHandoff,

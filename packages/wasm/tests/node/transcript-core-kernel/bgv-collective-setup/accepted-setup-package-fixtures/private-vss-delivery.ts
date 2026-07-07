@@ -99,7 +99,6 @@ function packageShapePrivateVssEnvelopeAad(input: {
     return {
         objectType: 'PrivateVssEnvelopeAad',
         privateEnvelopeObjectType: 'PrivateVssShareEnvelope',
-        ciphertextContentType: 'private-vss-share-envelope',
         ceremonyId: input.setupContext.ceremonyId,
         manifestHash: input.setupContext.manifestHash,
         rosterHash: input.setupContext.rosterHash,

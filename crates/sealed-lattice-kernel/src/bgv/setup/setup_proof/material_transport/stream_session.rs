@@ -420,12 +420,6 @@ pub(super) fn verify_verified_setup_proof_material_set_header(
             ),
         ));
     }
-    if value.get("objectVersion").and_then(Value::as_u64) != Some(1) {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidProtocolObject,
-            "verifiedSetupProofMaterials.objectVersion must be 1",
-        ));
-    }
 
     Ok(())
 }
@@ -450,12 +444,6 @@ pub(super) fn verify_verified_setup_proof_material_header(
                 format!("{object_path}.{field_name} must be {expected_value}"),
             ));
         }
-    }
-    if value.get("objectVersion").and_then(Value::as_u64) != Some(1) {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidProtocolObject,
-            format!("{object_path}.objectVersion must be 1"),
-        ));
     }
     setup_proof_material_verification_id_field(value)?;
     validate_supported_setup_proof_transport_family(

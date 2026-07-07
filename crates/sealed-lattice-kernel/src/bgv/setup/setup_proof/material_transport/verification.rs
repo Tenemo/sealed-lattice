@@ -108,20 +108,10 @@ pub(in crate::bgv::setup) fn setup_proof_record_has_transport_reference(value: &
 pub(in crate::bgv::setup) fn verify_setup_proof_record_transport_reference(
     proof_record: &Value,
     transport_hashes: &SetupProofMaterialTransportHashes,
-    chunk_size_message_label: &str,
+    _chunk_size_message_label: &str,
     reference_message_label: &str,
     chunk_hash_field_path_prefix: &str,
 ) -> CanonicalResult<()> {
-    if setup_proof_transport_u64_field(proof_record, "proofChunkSizeBytes")?
-        != SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            format!(
-                "{chunk_size_message_label} proofChunkSizeBytes must match the setup proof transport parameters"
-            ),
-        ));
-    }
     let expected_chunk_count =
         u64::try_from(transport_hashes.chunk_hashes.len()).map_err(|_| {
             CanonicalError::new(
@@ -219,16 +209,6 @@ pub(in crate::bgv::setup) fn transported_setup_proof_material_chunks(
     material_message_label: &str,
     chunk_message_label: &str,
 ) -> CanonicalResult<Vec<Vec<u8>>> {
-    if setup_proof_transport_u64_field(value, "chunkSizeBytes")?
-        != SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            format!(
-                "{material_message_label} chunkSizeBytes must match the setup proof transport parameters"
-            ),
-        ));
-    }
     let expected_chunk_count =
         usize::try_from(setup_proof_transport_u64_field(value, "chunkCount")?).map_err(|_| {
             CanonicalError::new(

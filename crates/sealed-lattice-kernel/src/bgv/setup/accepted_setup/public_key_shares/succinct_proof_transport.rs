@@ -194,12 +194,6 @@ fn verify_transported_public_key_share_proof_material_set_header(
             ));
         }
     }
-    if value.get("objectVersion").and_then(Value::as_u64) != Some(1) {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "transportedPublicKeyShareProofMaterial.objectVersion must be 1",
-        ));
-    }
 
     Ok(())
 }
@@ -217,12 +211,6 @@ fn verify_transported_public_key_share_proof_material_header(value: &Value) -> C
                 ),
             ));
         }
-    }
-    if value.get("objectVersion").and_then(Value::as_u64) != Some(1) {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "transported public-key share succinct proof material objectVersion must be 1",
-        ));
     }
     validate_hash_string(
         value_string(value, "proofMaterialRoot")?,

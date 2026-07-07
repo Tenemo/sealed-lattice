@@ -87,10 +87,6 @@ pub(super) fn verify_public_evaluation_key_material_transport(
         .and_then(Value::as_str)
         != Some(PUBLIC_EVALUATION_KEY_MATERIAL_TRANSPORT_SET_OBJECT_TYPE)
         || transported_material_set
-            .get("objectVersion")
-            .and_then(Value::as_u64)
-            != Some(1)
-        || transported_material_set
             .get("materialEncoding")
             .and_then(Value::as_str)
             != Some(PUBLIC_EVALUATION_KEY_TRANSPORT_MATERIAL_ENCODING)
@@ -441,12 +437,6 @@ fn verify_public_evaluation_key_material_entry_header(
 }
 
 fn public_evaluation_key_material_chunks(value: &Value) -> CanonicalResult<Vec<Vec<u8>>> {
-    if value_u64(value, "chunkSizeBytes")? != SETUP_TRANSPORT_CHUNK_SIZE_BYTES {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "transported public evaluation-key material chunkSizeBytes must match the setup transport parameters",
-        ));
-    }
     let expected_chunk_count = usize::try_from(value_u64(value, "chunkCount")?).map_err(|_| {
         CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
@@ -603,8 +593,6 @@ fn verify_public_evaluation_key_material_hash_fields(
     transport_hashes: &PublicEvaluationKeyMaterialTransportHashes,
     value_name: &str,
 ) -> CanonicalResult<()> {
-    let chunk_size = value_u64(value, "chunkSizeBytes")
-        .or_else(|_| value_u64(value, "publicEvaluationKeyMaterialChunkSizeBytes"))?;
     let chunk_count = value_u64(value, "chunkCount")
         .or_else(|_| value_u64(value, "publicEvaluationKeyMaterialChunkCount"))?;
     let total_byte_length = value_u64(value, "totalByteLength")
@@ -613,9 +601,8 @@ fn verify_public_evaluation_key_material_hash_fields(
         .or_else(|_| value_string(value, "publicEvaluationKeyMaterialFullObjectHash"))?;
     let chunk_root = value_string(value, "chunkRoot")
         .or_else(|_| value_string(value, "publicEvaluationKeyMaterialChunkRoot"))?;
-    if chunk_size != SETUP_TRANSPORT_CHUNK_SIZE_BYTES
-        || chunk_count
-            != u64::try_from(transport_hashes.chunk_hashes.len()).map_err(|_| {
+    if chunk_count
+        != u64::try_from(transport_hashes.chunk_hashes.len()).map_err(|_| {
                 CanonicalError::new(
                     CanonicalErrorCode::MalformedLength,
                     "public evaluation-key material chunk count does not fit u64",

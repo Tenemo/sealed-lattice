@@ -170,7 +170,6 @@ describe('recovery epoch shells', () => {
         });
 
         expect(delayedRecoveryUpdateResult.isValid).toBe(false);
-        expect(delayedRecoveryUpdateResult.acceptedHashes).toEqual([]);
         expect(delayedRecoveryUpdateResult.refusedObjects).toEqual(
             expect.arrayContaining([
                 expect.objectContaining({ code: 'RecoveryUpdateInvalid' }),
@@ -406,7 +405,6 @@ describe('recovery epoch shells', () => {
         });
 
         expect(wrongRosterActionResult.isValid).toBe(false);
-        expect(wrongRosterActionResult.acceptedHashes).toEqual([]);
         expect(wrongRosterActionResult.refusedObjects).toEqual(
             expect.arrayContaining([
                 expect.objectContaining({

@@ -175,8 +175,6 @@ const PUBLIC_KEY_SHARE_MATERIAL_EMBEDDED_ENCODING: &str =
     "embedded-full-public-key-share-coefficients";
 pub(super) const PUBLIC_KEY_SHARE_MATERIAL_TRANSPORT_ENCODING: &str =
     "binary-chunked-full-public-key-share-coefficients";
-pub(super) const PUBLIC_KEY_SHARE_MATERIAL_BINARY_FORMAT: &str =
-    "sealed-lattice-public-key-share-material-binary-v1";
 const PUBLIC_KEY_SHARE_MATERIAL_BINARY_MAGIC: &[u8; 8] = b"SLPKSMV1";
 const PUBLIC_KEY_SHARE_MATERIAL_BINARY_VERSION: u64 = 1;
 const PUBLIC_KEY_SHARE_SUCCINCT_PROOF_SET_OBJECT_TYPE: &str = "PublicKeyShareSuccinctProofSet";
@@ -535,12 +533,6 @@ fn verify_collective_setup_package(
             "setupPackage.objectType",
         );
     }
-    if setup_package.get("objectVersion").and_then(Value::as_u64) != Some(1) {
-        return outside_accepted_parameters(
-            "setupPackage.objectVersion must be 1",
-            "setupPackage.objectVersion",
-        );
-    }
     if let Some(response) = verify_context(setup_package, request)? {
         return Ok(VerificationFlow::Stop(response));
     }
@@ -772,121 +764,12 @@ fn setup_package_declares_public_runtime_material(setup_package: &Value) -> bool
             .is_some_and(|evaluation_keys| !evaluation_keys.is_empty())
 }
 
-pub(in crate::bgv::setup) fn accepted_hashes_from_package(setup_package: &Value) -> Vec<String> {
-    let mut accepted_hashes = Vec::new();
-    if let Some(setup_package_hash) = setup_package
-        .get("setupPackageHash")
-        .and_then(Value::as_str)
-    {
-        accepted_hashes.push(setup_package_hash.to_string());
-    }
-    for field_name in [
-        "thresholdShareCommitmentRoot",
-        "publicKeyShareSetRoot",
-        "publicKeyShareProofSetRoot",
-        "setupTransportCertificateHash",
-    ] {
-        if let Some(hash) = setup_package.get(field_name).and_then(Value::as_str) {
-            accepted_hashes.push(hash.to_string());
-        }
-    }
-    if let Some(hash) = setup_package
-        .get("publicKeyShares")
-        .and_then(|share_set| share_set.get("publicKeyShareSetRoot"))
-        .and_then(Value::as_str)
-    {
-        accepted_hashes.push(hash.to_string());
-    }
-    if let Some(hash) = setup_package
-        .get("thresholdShareCommitments")
-        .and_then(|commitment_set| commitment_set.get("thresholdShareCommitmentRoot"))
-        .and_then(Value::as_str)
-    {
-        accepted_hashes.push(hash.to_string());
-    }
-    if let Some(hash) = setup_package
-        .get("publicKeyShareProofs")
-        .and_then(|proof_set| proof_set.get("publicKeyShareProofSetRoot"))
-        .and_then(Value::as_str)
-    {
-        accepted_hashes.push(hash.to_string());
-    }
-    if let Some(hash) = setup_package
-        .get("publicKeyShareMaterial")
-        .and_then(|material_set| material_set.get("publicKeyShareMaterialSetRoot"))
-        .and_then(Value::as_str)
-    {
-        accepted_hashes.push(hash.to_string());
-    }
-    if let Some(hash) = setup_package
-        .get("publicKeyShareSuccinctProofs")
-        .and_then(|proof_set| proof_set.get("publicKeyShareSuccinctProofSetRoot"))
-        .and_then(Value::as_str)
-    {
-        accepted_hashes.push(hash.to_string());
-    }
-    if let Some(hash) = setup_package
-        .get("collectivePublicKey")
-        .and_then(|public_key| public_key.get("collectivePublicKeyRoot"))
-        .and_then(Value::as_str)
-    {
-        accepted_hashes.push(hash.to_string());
-    }
-    if let Some(hash) = setup_package
-        .get("evaluatorKeySchedule")
-        .and_then(|schedule| schedule.get("evaluatorKeyScheduleRoot"))
-        .and_then(Value::as_str)
-    {
-        accepted_hashes.push(hash.to_string());
-    }
-    if let Some(hash) = setup_package
-        .get("relinearizationKeyShareRounds")
-        .and_then(|rounds| rounds.get("relinearizationKeyShareRoundsRoot"))
-        .and_then(Value::as_str)
-    {
-        accepted_hashes.push(hash.to_string());
-    }
-    if let Some(batches) = setup_package
-        .get("galoisKeyShareBatches")
-        .and_then(Value::as_array)
-    {
-        for batch in batches {
-            if let Some(hash) = batch.get("galoisKeyShareBatchRoot").and_then(Value::as_str) {
-                accepted_hashes.push(hash.to_string());
-            }
-        }
-    }
-    if let Some(hash) = setup_package
-        .get("trusteeEvaluationKeyProofs")
-        .and_then(|proof_set| proof_set.get("trusteeEvaluationKeyProofSetRoot"))
-        .and_then(Value::as_str)
-    {
-        accepted_hashes.push(hash.to_string());
-    }
-    if let Some(hash) = setup_package
-        .get("evaluationKeys")
-        .and_then(|evaluation_keys| evaluation_keys.get("evaluationKeySetHash"))
-        .and_then(Value::as_str)
-    {
-        accepted_hashes.push(hash.to_string());
-    }
-    if let Some(hash) = setup_package
-        .get("evaluationKeys")
-        .and_then(|evaluation_keys| evaluation_keys.get("publicEvaluationKeyMaterialRoot"))
-        .and_then(Value::as_str)
-    {
-        accepted_hashes.push(hash.to_string());
-    }
-
-    accepted_hashes
-}
-
 fn accepted_setup_verification_response(setup_package: &Value) -> CanonicalResult<Value> {
     let mut response = verification_response(
         Some("setupPackageVerification"),
         Vec::new(),
         Vec::new(),
-        accepted_hashes_from_package(setup_package),
+        Vec::new(),
     )?;
     response
         .as_object_mut()
@@ -1001,21 +884,15 @@ fn verification_response(
     current_phase: Option<&str>,
     missing_objects: Vec<String>,
     refused_objects: Vec<Refusal>,
-    accepted_hashes: Vec<String>,
+    _accepted_hashes: Vec<String>,
 ) -> CanonicalResult<Value> {
     let accepted = refused_objects.is_empty() && missing_objects.is_empty();
-    let accepted_hashes = if accepted {
-        accepted_hashes
-    } else {
-        Vec::new()
-    };
 
     Ok(json!({
         "isValid": accepted,
         "operation": "verifyCollectiveBgvSetupPackage",
         "currentPhase": current_phase,
         "phaseOrderHash": phase_order_hash()?,
-        "acceptedHashes": accepted_hashes,
         "missingObjects": missing_objects,
         "refusedObjects": refused_objects
             .into_iter()

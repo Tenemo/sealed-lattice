@@ -86,9 +86,6 @@ describe('board consistency', () => {
             head1.headHash,
             head2.headHash,
         ]);
-        expect(result.acceptedHashes).toContain(
-            inclusionProof.inclusionProofHash,
-        );
     });
 
     it('rejects board evidence without a trusted expected board key', () => {
@@ -254,7 +251,6 @@ describe('board consistency', () => {
             createBoardEvidence([head0, head1, fork]),
         );
 
-        expect(forkedBoardResult.acceptedHashes).toEqual([]);
         expect(forkedBoardResult.refusedObjects).toEqual(
             expect.arrayContaining([
                 expect.objectContaining({ code: 'BoardForkDetected' }),
@@ -480,7 +476,6 @@ describe('board consistency', () => {
         const malformedHeads = [
             createHeadWithSignedRoot(omitSignedRootField('manifestHash')),
             createHeadWithSignedRoot(omitSignedRootField('boardHeadHash')),
-            createHeadWithSignedRoot(omitSignedRootField('byteLength')),
             createHeadWithSignedRoot(omitSignedRootField('contextHash')),
             createHeadWithSignedRoot({
                 ...head1.signature.signedRoot,

@@ -255,14 +255,14 @@ impl LimbColumnLayout {
                     }
                 } else if family_shape == SuccinctSetupProofFamilyShape::VssShareLinkage {
                     // Carry vectors occupy the first item-count slots; the
-                    // message digit vectors follow. The split must pair with
+                    // message trit vectors follow. The split must pair with
                     // the claim-bound split so multi-item statements mask
                     // their additional carry claims as carries.
                     let vector_index = claim_index / consistency_repetitions;
                     if vector_index < vss_public_item_columns {
                         VSS_PUBLIC_CARRY_CLAIM_MASK_DIGIT_COUNT
                     } else {
-                        VSS_PUBLIC_SHARE_LINKAGE_DIGIT_CLAIM_MASK_DIGIT_COUNT
+                        VSS_PUBLIC_SHARE_LINKAGE_TRIT_CLAIM_MASK_DIGIT_COUNT
                     }
                 } else if family_shape == SuccinctSetupProofFamilyShape::SameSecretBridge {
                     let vector_index = claim_index / consistency_repetitions;

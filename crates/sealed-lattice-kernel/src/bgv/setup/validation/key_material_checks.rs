@@ -96,8 +96,7 @@ fn validate_collective_public_key_coefficient_material(
         "BgvCollectivePublicKeyCoefficientMaterial",
         "collective public key coefficient material object type",
     )?;
-    if usize_at_path(coefficient_material, &["objectVersion"])? != 1
-        || usize_at_path(coefficient_material, &["level"])? != DATA_PRIMES.len() - 1
+    if usize_at_path(coefficient_material, &["level"])? != DATA_PRIMES.len() - 1
         || usize_at_path(coefficient_material, &["coefficientCount"])? != POLYNOMIAL_DEGREE
         || usize_at_path(coefficient_material, &["participantCount"])? != participant_bindings.len()
     {

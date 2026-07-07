@@ -18,8 +18,6 @@ export type JsonRecord = Record<string, unknown>;
 export type EncryptedLocalTrusteeSetupMaterial = Readonly<
     JsonRecord & {
         readonly objectType: 'EncryptedLocalTrusteeSetupMaterial';
-        readonly storageScheme: typeof localTrusteeSealedMaterialStorageFormat;
-        readonly ciphertextContentType: typeof localSealedMaterialCiphertextContentType;
         readonly materialClass: 'aggregate-threshold-share-sealed';
         readonly materialRoot: ProtocolHash;
         readonly materialAad: Readonly<Record<string, unknown>>;
@@ -93,8 +91,6 @@ export type LocalTrusteeStateStorageDecryptionInput = {
 export type EncryptedLocalTrusteeSetupState = Readonly<
     Record<string, unknown> & {
         readonly objectType: 'EncryptedLocalTrusteeSetupState';
-        readonly storageScheme: typeof localTrusteeStateStorageFormat;
-        readonly ciphertextContentType: typeof localStateCiphertextContentType;
         readonly localStateRoot: ProtocolHash;
         readonly localStateCommitmentHash: ProtocolHash;
         readonly storageAad: Readonly<Record<string, unknown>>;
@@ -172,8 +168,6 @@ export const sealedMaterialFieldNames = [
 
 export const encryptedSealedMaterialFieldNames = [
     'objectType',
-    'storageScheme',
-    'ciphertextContentType',
     'materialClass',
     'materialRoot',
     'materialAad',

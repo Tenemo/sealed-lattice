@@ -57,13 +57,6 @@ pub(in super::super) fn verify_public_evaluation_key_set(
             "setupPackage.evaluationKeys.objectType",
         )?));
     }
-    if evaluation_keys.get("objectVersion").and_then(Value::as_u64) != Some(1) {
-        return Ok(Some(evaluation_key_material_refusal(
-            "evaluationKeysVersionMismatch",
-            "evaluationKeys.objectVersion must be 1",
-            "setupPackage.evaluationKeys.objectVersion",
-        )?));
-    }
     let setup_context = setup_package.get("setupContext").ok_or_else(|| {
         CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,

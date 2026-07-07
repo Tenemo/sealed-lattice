@@ -4,11 +4,9 @@ import { setupRequest } from '../../bgv-passive-setup-fixtures.js';
 import {
     collectiveSetupRosterHash,
     setupTrusteeSignatureSeedLabel,
-    textEncoder,
     type JsonRecord,
 } from '../setup-fixture-primitives.js';
 
-import { canonicalJson } from '#packages/crypto/src/index';
 import {
     createMlDsaKeyPairFixture,
     createMlDsaSignatureProfileFixture,
@@ -18,9 +16,6 @@ import type {
     BgvCollectiveSetupParametersDescription,
     TranscriptCoreKernel,
 } from '#packages/wasm/src/index';
-
-const canonicalByteLength = (value: unknown): number =>
-    textEncoder.encode(canonicalJson(value)).byteLength;
 
 function commonRandomnessSignatureContextHash(input: {
     readonly kernel: TranscriptCoreKernel;
@@ -74,7 +69,6 @@ function commonRandomnessSignatureEnvelope(input: {
             boardHeadHash: null,
             objectRoot: input.objectRoot,
             chunkMerkleRoot: null,
-            byteLength: canonicalByteLength(input.payload),
             signerRole: 'Trustee',
             signerIdentity: input.trusteeIdentity,
             recoveryEpoch: Number(input.payload.recoveryEpoch),

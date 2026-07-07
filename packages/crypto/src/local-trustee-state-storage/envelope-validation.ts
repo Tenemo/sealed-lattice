@@ -13,8 +13,6 @@ import {
     aesGcmNonceByteLength,
     aesGcmTagBitLength,
     encryptedSealedMaterialFieldNames,
-    localSealedMaterialCiphertextContentType,
-    localTrusteeSealedMaterialStorageFormat,
     localTrusteeSealedPayloadFieldNames,
     sealedMaterialFieldNames,
     setupContextFieldNames,
@@ -145,20 +143,6 @@ function validateEncryptedSealedMaterialEnvelope(
     }
     if (encryptedMaterial.objectVersion !== 1) {
         throw new TypeError(`${objectPath}.objectVersion must be 1.`);
-    }
-    if (
-        encryptedMaterial.storageScheme !==
-        localTrusteeSealedMaterialStorageFormat
-    ) {
-        throw new TypeError(`${objectPath}.storageScheme is not supported.`);
-    }
-    if (
-        encryptedMaterial.ciphertextContentType !==
-        localSealedMaterialCiphertextContentType
-    ) {
-        throw new TypeError(
-            `${objectPath}.ciphertextContentType must be local-trustee-setup-sealed-material.`,
-        );
     }
     if (encryptedMaterial.materialClass !== expectedMaterialClass) {
         throw new TypeError(

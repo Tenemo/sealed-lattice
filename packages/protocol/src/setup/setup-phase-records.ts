@@ -164,7 +164,6 @@ const verifyGeneratedSignatureEnvelope = (
         chunkMerkleRoot: signedRoot.chunkMerkleRoot,
         boardHeadHash: signedRoot.boardHeadHash,
         contextHash: signedRoot.contextHash,
-        byteLength: signedRoot.byteLength,
         recoveryEpoch: signedRoot.recoveryEpoch,
         deviceEpoch: signedRoot.deviceEpoch,
     });
@@ -174,11 +173,6 @@ const verifyGeneratedSignatureEnvelope = (
             refusedObject === undefined
                 ? 'Setup phase participant signature envelope failed verification.'
                 : `Setup phase participant signature envelope failed verification: ${refusedObject.code}: ${refusedObject.message}`,
-        );
-    }
-    if (signatureEnvelope.signatureHash !== result.acceptedHashes[0]) {
-        throw new Error(
-            'Setup phase participant signature envelope hash does not match the verified signature hash.',
         );
     }
 };
@@ -237,7 +231,6 @@ export const createSetupPhaseParticipantObject = async (
         boardHeadHash: null,
         objectRoot: phaseObjectRoot,
         chunkMerkleRoot: null,
-        byteLength: phaseObjectByteLength,
         signerRole: 'Trustee',
         signerIdentity: input.trusteeIdentity,
         recoveryEpoch: input.recoveryEpoch,

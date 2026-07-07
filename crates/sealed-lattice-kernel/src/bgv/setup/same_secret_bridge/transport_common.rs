@@ -101,11 +101,7 @@ fn verify_transported_material_set_header(
             &format!("{}.{field_name}", family.transport_field),
         )?;
     }
-    compare_required_u64(
-        unsigned_at_path(value, &["objectVersion"])?,
-        1,
-        &format!("{}.objectVersion", family.transport_field),
-    )
+    Ok(())
 }
 
 fn verify_transported_material_header(
@@ -125,14 +121,6 @@ fn verify_transported_material_header(
             ),
         )?;
     }
-    compare_required_u64(
-        unsigned_at_path(value, &["objectVersion"])?,
-        1,
-        &format!(
-            "transported {} proof material objectVersion",
-            family.family_prose
-        ),
-    )?;
     hash_at_path(value, &["proofMaterialRoot"])?;
 
     Ok(())
@@ -143,14 +131,6 @@ fn transported_material_chunks(
     proof_material_index: usize,
     family: &TransportFamily,
 ) -> CanonicalResult<Vec<Vec<u8>>> {
-    compare_required_u64(
-        unsigned_at_path(value, &["chunkSizeBytes"])?,
-        SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
-        &format!(
-            "transported {} proof material chunkSizeBytes",
-            family.family_prose
-        ),
-    )?;
     let chunk_count = read_positive_usize_at_path(
         value,
         &["chunkCount"],

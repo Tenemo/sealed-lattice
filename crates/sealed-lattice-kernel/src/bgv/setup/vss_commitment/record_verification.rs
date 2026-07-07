@@ -17,11 +17,6 @@ pub(super) fn verify_vss_public_source_coefficient_record(
         "VssPublicSourceCoefficientCommitments",
         "VSS source coefficient commitments objectType",
     )?;
-    compare_required_u64(
-        unsigned_at_path(input.source_record, &["objectVersion"])?,
-        1,
-        "VSS source coefficient commitments objectVersion",
-    )?;
     let source_trustee_identity =
         read_non_empty_string(input.source_record, "sourceTrusteeIdentity")?;
     compare_required_u64(
@@ -111,11 +106,6 @@ pub(crate) fn validate_standalone_vss_public_commitment_body(
         string_at_path(commitment, &["objectType"])?,
         "VssPublicCommitment",
         &format!("{field_name} objectType"),
-    )?;
-    compare_required_u64(
-        unsigned_at_path(commitment, &["objectVersion"])?,
-        1,
-        &format!("{field_name} objectVersion"),
     )?;
     validate_vss_public_commitment_role(string_at_path(commitment, &["commitmentRole"])?)?;
     let _commitment_context_hash = hash_at_path(commitment, &["commitmentContextHash"])?;
@@ -238,11 +228,6 @@ pub(super) fn verify_vss_public_coefficient_record(
         "VssPublicCoefficientCommitment",
         "VSS coefficient commitment objectType",
     )?;
-    compare_required_u64(
-        unsigned_at_path(input.coefficient_record, &["objectVersion"])?,
-        1,
-        "VSS coefficient commitment objectVersion",
-    )?;
     compare_required_string(
         string_at_path(input.coefficient_record, &["sourceTrusteeIdentity"])?,
         input.source_trustee_identity,
@@ -316,11 +301,6 @@ pub(super) fn verify_vss_public_source_recipient_share_record(
         string_at_path(input.source_record, &["objectType"])?,
         "VssPublicSourceRecipientShareCommitments",
         "VSS source recipient-share commitments objectType",
-    )?;
-    compare_required_u64(
-        unsigned_at_path(input.source_record, &["objectVersion"])?,
-        1,
-        "VSS source recipient-share commitments objectVersion",
     )?;
     let source_trustee_identity =
         read_non_empty_string(input.source_record, "sourceTrusteeIdentity")?;
@@ -396,11 +376,6 @@ pub(super) fn verify_vss_public_recipient_share_record(
         string_at_path(input.recipient_share_record, &["objectType"])?,
         "VssPublicRecipientShareCommitment",
         "VSS recipient-share commitment objectType",
-    )?;
-    compare_required_u64(
-        unsigned_at_path(input.recipient_share_record, &["objectVersion"])?,
-        1,
-        "VSS recipient-share commitment objectVersion",
     )?;
     compare_required_string(
         string_at_path(input.recipient_share_record, &["sourceTrusteeIdentity"])?,
@@ -480,11 +455,6 @@ pub(super) fn verify_vss_public_aggregate_threshold_record(
         string_at_path(input.recipient_record, &["objectType"])?,
         "VssPublicAggregateThresholdCommitment",
         "VSS aggregate threshold commitment objectType",
-    )?;
-    compare_required_u64(
-        unsigned_at_path(input.recipient_record, &["objectVersion"])?,
-        1,
-        "VSS aggregate threshold commitment objectVersion",
     )?;
     let recipient_identity = read_non_empty_string(input.recipient_record, "recipientIdentity")?;
     compare_required_u64(

@@ -79,7 +79,6 @@ export type CanonicalSignedRootObject = {
     readonly boardHeadHash: ProtocolHash | null;
     readonly objectRoot: ProtocolHash | null;
     readonly chunkMerkleRoot: ProtocolHash | null;
-    readonly byteLength: number;
     readonly signerRole: SignerRole;
     readonly signerIdentity: string;
     readonly recoveryEpoch: number;
@@ -174,7 +173,6 @@ export type ConflictingHeadEvidence = {
 /** Shared structured result shape for protocol verification helpers. */
 export type StructuredProtocolVerificationResult = {
     readonly isValid: boolean;
-    readonly acceptedHashes: readonly ProtocolHash[];
     readonly refusedObjects: readonly RefusalRecord[];
     readonly forkEvidence?: ConflictingHeadEvidence;
     readonly unresolvedReason?: string | null;

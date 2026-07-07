@@ -221,12 +221,6 @@ pub(crate) fn public_evaluation_keys_from_material(
         "BgvPublicEvaluationKeyMaterial",
         "public evaluation-key material object type",
     )?;
-    if usize_at_path(material, &["objectVersion"])? != 1 {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ComponentMismatch,
-            "public evaluation-key material object version is unsupported",
-        ));
-    }
     compare_string_at_path(
         material,
         &["componentEncoding"],

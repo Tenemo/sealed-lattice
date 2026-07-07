@@ -264,7 +264,6 @@ describe('roster and manifest shells', () => {
         const result = verifyRosterManifestTranscript(input);
 
         expect(result.isValid).toBe(false);
-        expect(result.acceptedHashes).toEqual([]);
         expect(result.electionManifestHash).toBeUndefined();
         expect(result.rosterHash).toBeUndefined();
         expect(result.refusedObjects).toEqual(

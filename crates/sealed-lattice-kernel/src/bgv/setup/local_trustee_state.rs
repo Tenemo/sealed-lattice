@@ -138,11 +138,6 @@ fn verify_local_state_header(local_state: &Value, setup_context: &Value) -> Cano
             "localStateCommitment.objectType must be LocalTrusteeSetupStateCommitment",
         ));
     }
-    if local_state.get("objectVersion").and_then(Value::as_u64) != Some(1) {
-        return Err(invalid_local_state_input(
-            "localStateCommitment.objectVersion must be 1",
-        ));
-    }
     compare_context_fields(local_state, setup_context, "localStateCommitment")?;
     string_field(local_state, "trusteeIdentity")?;
 
@@ -160,15 +155,6 @@ fn verify_deletion_receipt(
     {
         return Err(invalid_local_state_input(
             "deletionReceipt.objectType must be LocalTrusteeSetupStateDeletionReceipt",
-        ));
-    }
-    if deletion_receipt
-        .get("objectVersion")
-        .and_then(Value::as_u64)
-        != Some(1)
-    {
-        return Err(invalid_local_state_input(
-            "deletionReceipt.objectVersion must be 1",
         ));
     }
     compare_context_fields(deletion_receipt, setup_context, "deletionReceipt")?;

@@ -3,7 +3,7 @@ use super::super::relation::{
     masked_claim_bounds_for_global_claim, masked_claim_lift_residue_count_for_moduli,
 };
 use super::super::{
-    VSS_PUBLIC_CARRY_CLAIM_MASK_DIGIT_COUNT, VSS_PUBLIC_SHARE_LINKAGE_DIGIT_CLAIM_MASK_DIGIT_COUNT,
+    VSS_PUBLIC_CARRY_CLAIM_MASK_DIGIT_COUNT, VSS_PUBLIC_SHARE_LINKAGE_TRIT_CLAIM_MASK_DIGIT_COUNT,
 };
 use super::*;
 use crate::bgv::setup::vss_commitment::{
@@ -711,7 +711,7 @@ fn vss_share_linkage_consistency_lift_geometry_is_pinned() {
             &statement,
             (item_count * consistency_repetitions) as u64,
         ),
-        VSS_PUBLIC_SHARE_LINKAGE_DIGIT_CLAIM_MASK_DIGIT_COUNT,
+        VSS_PUBLIC_SHARE_LINKAGE_TRIT_CLAIM_MASK_DIGIT_COUNT,
         "the first message trit vector after the carries must take the share-linkage claim mask",
     );
 }

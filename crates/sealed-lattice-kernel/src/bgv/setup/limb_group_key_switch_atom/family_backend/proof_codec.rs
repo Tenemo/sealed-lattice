@@ -266,10 +266,12 @@ pub(super) fn encode_key_proof<const LIMB_COUNT: usize>(
 ) -> CanonicalResult<Vec<u8>> {
     let mut writer = Writer::new();
     writer.write_digest(&proof.base_root);
+    writer.write_digest(&proof.material_root);
     writer.write_digest(&proof.aux_root);
     writer.write_digest(&proof.quotient_root);
     write_fri(&mut writer, &proof.fri)?;
     write_column_opening(&mut writer, &proof.base_opening)?;
+    write_column_opening(&mut writer, &proof.material_opening)?;
     write_column_opening(&mut writer, &proof.aux_opening)?;
     write_column_opening(&mut writer, &proof.quotient_opening)?;
     writer.write_field(&proof.lookup_terminal);
@@ -283,10 +285,12 @@ pub(super) fn decode_key_proof<const LIMB_COUNT: usize>(
 ) -> CanonicalResult<KeyFriProof<LIMB_COUNT>> {
     let mut reader = Reader::new(bytes, parameters)?;
     let base_root = reader.read_digest()?;
+    let material_root = reader.read_digest()?;
     let aux_root = reader.read_digest()?;
     let quotient_root = reader.read_digest()?;
     let fri = read_fri(&mut reader)?;
     let base_opening = read_column_opening(&mut reader)?;
+    let material_opening = read_column_opening(&mut reader)?;
     let aux_opening = read_column_opening(&mut reader)?;
     let quotient_opening = read_column_opening(&mut reader)?;
     let lookup_terminal = reader.read_field()?;
@@ -294,10 +298,12 @@ pub(super) fn decode_key_proof<const LIMB_COUNT: usize>(
     reader.finish()?;
     Ok(KeyFriProof {
         base_root,
+        material_root,
         aux_root,
         quotient_root,
         fri,
         base_opening,
+        material_opening,
         aux_opening,
         quotient_opening,
         lookup_terminal,
@@ -454,10 +460,10 @@ mod tests {
         let parameters = sixteen_limb_group_field_parameters();
         let (_public, _ring_degree, _proof_parameters, proof) = sample_proof();
         let mut bytes = encode_key_proof(&proof).expect("encode");
-        // Corrupt the first length prefix after the three roots (base, aux, and
-        // quotient), i.e. the FRI layer root count, to an enormous value: decode
-        // must fail bounds checks.
-        let offset = CODEC_MAGIC.len() + 3 * MERKLE_DIGEST_BYTES;
+        // Corrupt the first length prefix after the four roots (base, material,
+        // aux, and quotient), i.e. the FRI layer root count, to an enormous
+        // value: decode must fail bounds checks.
+        let offset = CODEC_MAGIC.len() + 4 * MERKLE_DIGEST_BYTES;
         bytes[offset..offset + 4].copy_from_slice(&u32::MAX.to_le_bytes());
         assert!(decode_key_proof(&parameters, &bytes).is_err());
     }

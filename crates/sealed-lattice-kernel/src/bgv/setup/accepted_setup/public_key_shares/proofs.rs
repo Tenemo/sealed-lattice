@@ -39,13 +39,6 @@ pub(in super::super) fn verify_public_key_share_proofs(
             "setupPackage.publicKeyShareProofs.objectType",
         )?));
     }
-    if proof_set.get("objectVersion").and_then(Value::as_u64) != Some(1) {
-        return Ok(Some(public_key_refusal(
-            "publicKeyShareProofSetVersionMismatch",
-            "publicKeyShareProofs.objectVersion must be 1",
-            "setupPackage.publicKeyShareProofs.objectVersion",
-        )?));
-    }
 
     let setup_context = setup_package.get("setupContext").ok_or_else(|| {
         CanonicalError::new(
@@ -206,13 +199,6 @@ fn verify_public_key_share_proof_record(
             "publicKeyShareProofTypeMismatch",
             "public-key share proof objectType must be PublicKeyShareProof",
             "setupPackage.publicKeyShareProofs.proofRecords.objectType",
-        )?));
-    }
-    if proof_record.get("objectVersion").and_then(Value::as_u64) != Some(1) {
-        return Ok(Some(public_key_refusal(
-            "publicKeyShareProofVersionMismatch",
-            "public-key share proof objectVersion must be 1",
-            "setupPackage.publicKeyShareProofs.proofRecords.objectVersion",
         )?));
     }
     if let Err(error) = verify_same_secret_context(proof_record, setup_context) {

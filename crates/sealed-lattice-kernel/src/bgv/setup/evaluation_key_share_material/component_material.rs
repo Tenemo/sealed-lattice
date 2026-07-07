@@ -294,7 +294,6 @@ pub(in crate::bgv::setup) fn component_b_vectors_from_record(
     match string_field(record, "keySwitchMaterialEncoding")? {
         "embedded-full-key-switch-component-vectors" => {
             if record.get("keySwitchComponentMaterialRoot").is_some()
-                || record.get("keySwitchComponentChunkSizeBytes").is_some()
                 || record.get("keySwitchComponentChunkCount").is_some()
                 || record.get("keySwitchComponentTotalByteLength").is_some()
                 || record.get("keySwitchComponentFullObjectHash").is_some()
@@ -523,10 +522,6 @@ fn verify_evaluation_key_share_component_material_header(
     if component_material.get("objectType").and_then(Value::as_str)
         != Some(EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_TRANSPORT_OBJECT_TYPE)
         || component_material
-            .get("objectVersion")
-            .and_then(Value::as_u64)
-            != Some(1)
-        || component_material
             .get("proofFamily")
             .and_then(Value::as_str)
             != Some(proof_family.proof_family())
@@ -573,11 +568,6 @@ fn verify_evaluation_key_share_component_material_header(
 }
 
 fn evaluation_key_share_component_material_chunks(value: &Value) -> CanonicalResult<Vec<Vec<u8>>> {
-    if value_u64(value, "chunkSizeBytes")? != SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES {
-        return Err(invalid_evaluation_key_share_material(
-            "transported evaluation-key component material chunkSizeBytes must match the setup transport parameters",
-        ));
-    }
     let expected_chunk_count = usize::try_from(value_u64(value, "chunkCount")?).map_err(|_| {
         invalid_evaluation_key_share_material(
             "transported evaluation-key component material chunkCount does not fit usize",
@@ -624,10 +614,7 @@ fn verify_evaluation_key_share_component_material_hash_fields(
     transport_hashes: &EvaluationKeyShareComponentMaterialTransportHashes,
     value_name: &str,
 ) -> CanonicalResult<()> {
-    if value_u64(value, "chunkSizeBytes")
-        .or_else(|_| value_u64(value, "keySwitchComponentChunkSizeBytes"))?
-        != SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES
-        || value_u64(value, "chunkCount")
+    if value_u64(value, "chunkCount")
             .or_else(|_| value_u64(value, "keySwitchComponentChunkCount"))?
             != u64::try_from(transport_hashes.chunk_hashes.len()).map_err(|_| {
                 CanonicalError::new(
@@ -979,11 +966,6 @@ mod native_component_material_stream {
             evaluation_key_share_proof_family_from_str(string_field(reference, "proofFamily")?)?;
         let material_root = string_field(reference, "keySwitchComponentMaterialRoot")?.to_string();
         validate_hex_string(&material_root, "keySwitchComponentMaterialRoot")?;
-        if value_u64(reference, "chunkSizeBytes")? != SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES {
-            return Err(invalid_evaluation_key_share_material(
-                "evaluation-key component material stream chunkSizeBytes must match the setup transport parameters",
-            ));
-        }
         let chunk_count = value_usize(reference, "chunkCount")?;
         if chunk_count == 0 {
             return Err(invalid_evaluation_key_share_material(

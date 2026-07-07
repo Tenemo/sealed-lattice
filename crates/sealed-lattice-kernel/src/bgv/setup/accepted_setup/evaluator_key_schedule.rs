@@ -30,13 +30,6 @@ pub(super) fn verify_evaluator_key_schedule(
             "setupPackage.evaluatorKeySchedule.objectType",
         )?));
     }
-    if schedule.get("objectVersion").and_then(Value::as_u64) != Some(1) {
-        return Ok(Some(evaluator_key_schedule_refusal(
-            "evaluatorKeyScheduleVersionMismatch",
-            "evaluatorKeySchedule.objectVersion must be 1",
-            "setupPackage.evaluatorKeySchedule.objectVersion",
-        )?));
-    }
     let setup_context = setup_package.get("setupContext").ok_or_else(|| {
         CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,

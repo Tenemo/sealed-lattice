@@ -47,11 +47,6 @@ pub(crate) fn verify_vss_same_secret_bridge_statement_set_request(
         "VssSameSecretBridgeStatementSet",
         "VSS same-secret bridge statement set objectType",
     )?;
-    compare_required_u64(
-        unsigned_at_path(statement_set, &["objectVersion"])?,
-        1,
-        "VSS same-secret bridge statement set objectVersion",
-    )?;
     compare_required_string(
         string_at_path(statement_set, &["proofFamily"])?,
         SAME_SECRET_PROOF_FAMILY,
@@ -252,11 +247,6 @@ pub(crate) fn verify_vss_same_secret_bridge_proof_material_set_request(
         "VssSameSecretBridgeProofMaterialSet",
         "same-secret bridge proof material set objectType",
     )?;
-    compare_required_u64(
-        unsigned_at_path(proof_material_set, &["objectVersion"])?,
-        1,
-        "same-secret bridge proof material set objectVersion",
-    )?;
 
     let ceremony_id = read_non_empty_string(statement_set, "ceremonyId")?;
     let setup_epoch = read_non_empty_string(statement_set, "setupEpoch")?;
@@ -350,11 +340,6 @@ pub(crate) fn verify_vss_same_secret_bridge_proof_material_set_request(
             string_at_path(proof_record, &["objectType"])?,
             "VssSameSecretBridgeProofRecord",
             "same-secret bridge proof record objectType",
-        )?;
-        compare_required_u64(
-            unsigned_at_path(proof_record, &["objectVersion"])?,
-            1,
-            "same-secret bridge proof record objectVersion",
         )?;
         compare_required_string(
             string_at_path(proof_record, &["proofFamily"])?,

@@ -319,7 +319,6 @@ export type SetupPackageVerification = Readonly<{
     readonly operation: 'verifyCollectiveBgvSetupPackage';
     readonly currentPhase: string | null;
     readonly phaseOrderHash: ProtocolHash;
-    readonly acceptedHashes: readonly ProtocolHash[];
     readonly acceptedSetupHandoff?: AcceptedSetupHandoff;
     readonly missingObjects: readonly string[];
     readonly refusedObjects: readonly Readonly<{

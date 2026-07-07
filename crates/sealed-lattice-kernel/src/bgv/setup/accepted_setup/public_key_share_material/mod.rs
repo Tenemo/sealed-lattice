@@ -80,17 +80,6 @@ pub(super) fn verify_collective_public_key_material(
             "setupPackage.collectivePublicKey.objectType",
         )?));
     }
-    if aggregate_object
-        .get("objectVersion")
-        .and_then(Value::as_u64)
-        != Some(1)
-    {
-        return Ok(Some(public_key_refusal(
-            "collectivePublicKeyVersionMismatch",
-            "collectivePublicKey.objectVersion must be 1",
-            "setupPackage.collectivePublicKey.objectVersion",
-        )?));
-    }
     let setup_context = setup_package.get("setupContext").ok_or_else(|| {
         CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,

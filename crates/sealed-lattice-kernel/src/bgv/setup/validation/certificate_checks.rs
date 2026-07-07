@@ -22,12 +22,6 @@ fn validate_evaluation_key_streaming_commitment(certificates: &Value) -> Canonic
         "BgvEvaluationKeyStreamingCommitment",
         "evaluation key streaming commitment object type",
     )?;
-    if usize_at_path(commitment_record, &["chunkSizeBytes"])? != EVALUATION_KEY_CHUNK_SIZE_BYTES {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidChunkSize,
-            "evaluation key streaming commitment chunk size changed",
-        ));
-    }
     let stream_record = value_at_path(commitment_record, &["streamRecord"])?;
     let stream_bytes = canonical_json(stream_record)?.into_bytes();
     if usize_at_path(commitment_record, &["canonicalStreamByteLength"])? != stream_bytes.len() {

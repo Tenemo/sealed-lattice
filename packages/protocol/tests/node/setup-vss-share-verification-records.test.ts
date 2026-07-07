@@ -158,7 +158,6 @@ describe('VSS share verification record builders', () => {
         expect(firstRecord.signatureEnvelope.signedRoot).toMatchObject({
             objectType: 'VssShareAcceptance',
             objectRoot: firstRecord.acceptanceRoot,
-            byteLength: firstRecord.acceptanceByteLength,
             contextHash: firstRecord.acceptanceContextHash,
             signerIdentity: 'trustee-0',
         });
@@ -172,7 +171,6 @@ describe('VSS share verification record builders', () => {
                 manifestHash: setupContext.manifestHash,
                 objectRoot: firstRecord.acceptanceRoot,
                 contextHash: firstRecord.acceptanceContextHash,
-                byteLength: firstRecord.acceptanceByteLength,
                 recoveryEpoch: 2,
                 deviceEpoch: 3,
             }).isValid,
@@ -283,7 +281,6 @@ describe('VSS share verification record builders', () => {
         expect(complaintRecord.signatureEnvelope.signedRoot).toMatchObject({
             objectType: 'VssShareComplaint',
             objectRoot: complaintRecord.complaintRoot,
-            byteLength: complaintRecord.complaintByteLength,
             contextHash: complaintRecord.complaintContextHash,
             signerIdentity: 'trustee-1',
         });
@@ -297,7 +294,6 @@ describe('VSS share verification record builders', () => {
                 manifestHash: setupContext.manifestHash,
                 objectRoot: complaintRecord.complaintRoot,
                 contextHash: complaintRecord.complaintContextHash,
-                byteLength: complaintRecord.complaintByteLength,
                 recoveryEpoch: 4,
                 deviceEpoch: 5,
             }).isValid,

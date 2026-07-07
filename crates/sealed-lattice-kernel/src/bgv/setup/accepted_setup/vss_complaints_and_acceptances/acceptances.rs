@@ -25,13 +25,6 @@ pub(in super::super) fn verify_vss_share_acceptances(
             "setupPackage.vssShareAcceptances.objectType",
         )?));
     }
-    if acceptance_set.get("objectVersion").and_then(Value::as_u64) != Some(1) {
-        return Ok(Some(vss_share_acceptance_refusal(
-            "vssShareAcceptanceSetVersionMismatch",
-            "vssShareAcceptances.objectVersion must be 1",
-            "setupPackage.vssShareAcceptances.objectVersion",
-        )?));
-    }
 
     let setup_context = setup_package.get("setupContext").ok_or_else(|| {
         CanonicalError::new(
@@ -184,17 +177,6 @@ fn verify_vss_share_acceptance_record(
             "vssShareAcceptanceTypeMismatch",
             "VSS share acceptance objectType must be VssShareAcceptance",
             "setupPackage.vssShareAcceptances.acceptanceRecords.objectType",
-        )?));
-    }
-    if acceptance_record
-        .get("objectVersion")
-        .and_then(Value::as_u64)
-        != Some(1)
-    {
-        return Ok(Some(vss_share_acceptance_refusal(
-            "vssShareAcceptanceVersionMismatch",
-            "VSS share acceptance objectVersion must be 1",
-            "setupPackage.vssShareAcceptances.acceptanceRecords.objectVersion",
         )?));
     }
     for field_name in [
@@ -558,7 +540,6 @@ fn verify_vss_share_acceptance_record(
             chunk_merkle_root: None,
             board_head_hash: None,
             context_hash: acceptance_context_hash,
-            byte_length: acceptance_byte_length,
             recovery_epoch,
             device_epoch,
         },

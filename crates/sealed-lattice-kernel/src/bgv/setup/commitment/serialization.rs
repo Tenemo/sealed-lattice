@@ -33,11 +33,6 @@ pub(in super::super) fn parse_setup_commitment_full_value(
             "setup commitment objectType must be SetupCommitment",
         ));
     }
-    if value.get("objectVersion").and_then(Value::as_u64) != Some(1) {
-        return Err(invalid_commitment_input(
-            "setup commitment objectVersion must be 1",
-        ));
-    }
     let source_rns_limb_index = read_usize(value, "sourceRnsLimbIndex")?;
     let source_message_modulus = read_u64(value, "sourceMessageModulus")?;
     validate_source_rns_limb(source_rns_limb_index, source_message_modulus)?;

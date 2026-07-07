@@ -256,6 +256,10 @@ fn first_profile_replay_target_release_matches_plaintext_oracle() {
         phase(&format!("proved share for {trustee_identity}"));
     }
 
+    // Keep a copy of the proven share quorum so the test can attempt a fresh
+    // re-release of the same target after it is consumed one-shot.
+    let re_release_share_proofs = target_share_proofs.clone();
+
     phase("releasing the genuine target through the staged one-shot session");
     let release_verification_id = "replay-release-first-profile";
     let release_result = staged_target_result_release(
@@ -295,6 +299,20 @@ fn first_profile_replay_target_release_matches_plaintext_oracle() {
         "releaseVerificationId": release_verification_id,
     }))
     .expect_err("a consumed release session must refuse a second finish");
+
+    phase("verifying a consumed target refuses a fresh re-release under a new id");
+    staged_target_result_release(
+        &setup_package,
+        &accepted,
+        &target_ciphertext_binding,
+        &target_ciphertexts,
+        &target_share_profile_value,
+        re_release_share_proofs,
+        "replay-release-first-profile-second-attempt",
+    )
+    .expect_err(
+        "a target already released one-shot must refuse a fresh release under a new verification id",
+    );
 
     phase("done");
 }

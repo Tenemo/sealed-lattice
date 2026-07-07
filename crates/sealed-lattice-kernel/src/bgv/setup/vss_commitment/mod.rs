@@ -248,11 +248,6 @@ pub(crate) fn verify_vss_public_coefficient_commitment_set_request(
         "VssPublicCoefficientCommitmentSet",
         "VSS coefficient commitment set objectType",
     )?;
-    compare_required_u64(
-        unsigned_at_path(coefficient_set, &["objectVersion"])?,
-        1,
-        "VSS coefficient commitment set objectVersion",
-    )?;
     let public_matrix_seed_hash = hash_at_path(coefficient_set, &["publicMatrixSeedHash"])?;
     let participant_count = read_positive_usize_at_path(
         coefficient_set,
@@ -343,11 +338,6 @@ pub(crate) fn verify_vss_public_recipient_share_commitment_set_request(
         "VssPublicRecipientShareCommitmentSet",
         "VSS recipient-share commitment set objectType",
     )?;
-    compare_required_u64(
-        unsigned_at_path(recipient_set, &["objectVersion"])?,
-        1,
-        "VSS recipient-share commitment set objectVersion",
-    )?;
     let public_matrix_seed_hash = hash_at_path(recipient_set, &["publicMatrixSeedHash"])?;
     let participant_count = read_positive_usize_at_path(
         recipient_set,
@@ -430,11 +420,6 @@ pub(crate) fn verify_vss_public_aggregate_threshold_commitment_set_request(
         string_at_path(aggregate_set, &["objectType"])?,
         "VssPublicAggregateThresholdCommitmentSet",
         "VSS aggregate threshold commitment set objectType",
-    )?;
-    compare_required_u64(
-        unsigned_at_path(aggregate_set, &["objectVersion"])?,
-        1,
-        "VSS aggregate threshold commitment set objectVersion",
     )?;
     let public_matrix_seed_hash = hash_at_path(aggregate_set, &["publicMatrixSeedHash"])?;
     let participant_count = read_positive_usize_at_path(

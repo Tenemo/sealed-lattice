@@ -10,7 +10,6 @@ import type { CollectiveBgvSetupContext } from '../vss-share-verification-record
 
 import {
     isJsonRecord,
-    publicKeyShareMaterialBinaryFormat,
     publicKeyShareMaterialEncoding,
     publicKeyShareMaterialTransportEncoding,
     publicKeyShareProofFamily,
@@ -180,7 +179,6 @@ const binaryChunkedPublicKeyShareMaterialSetFromTransport = (
         objectType: 'PublicKeyShareMaterialSet',
         proofFamily: publicKeyShareProofFamily,
         materialEncoding: publicKeyShareMaterialTransportEncoding,
-        binaryFormat: publicKeyShareMaterialBinaryFormat,
         ...contextFields(input.setupContext),
         participantCount: input.participantCount,
         rnsLimbCount: input.rnsLimbCount,
@@ -218,7 +216,6 @@ const transportedPublicKeyShareMaterialFromChunks = (
 
     return {
         objectType: 'SetupTransportedPublicKeyShareMaterial',
-        binaryFormat: publicKeyShareMaterialBinaryFormat,
         chunkSizeBytes: setupTransportChunkSizeBytes,
         chunkCount: chunks.length,
         totalByteLength: transportHashes.totalByteLength,
@@ -317,13 +314,6 @@ const transportedPublicKeyShareMaterialChunks = (
     ) {
         throw new Error(
             'transportedPublicKeyShareMaterial.objectType must be SetupTransportedPublicKeyShareMaterial.',
-        );
-    }
-    if (
-        transportedMaterial.binaryFormat !== publicKeyShareMaterialBinaryFormat
-    ) {
-        throw new Error(
-            'transportedPublicKeyShareMaterial.binaryFormat must match the accepted binary format.',
         );
     }
     if (transportedMaterial.chunkSizeBytes !== setupTransportChunkSizeBytes) {
@@ -428,7 +418,6 @@ const transportedPublicKeyShareMaterialReader = (
     if (
         input.materialSet.materialEncoding !==
             publicKeyShareMaterialTransportEncoding ||
-        input.materialSet.binaryFormat !== publicKeyShareMaterialBinaryFormat ||
         input.materialSet.transport.transportSchemeId !==
             setupTransportSchemeId ||
         input.materialSet.transport.chunkSizeBytes !==

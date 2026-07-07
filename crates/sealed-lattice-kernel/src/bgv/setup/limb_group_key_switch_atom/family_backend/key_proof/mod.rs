@@ -114,10 +114,15 @@ impl<const LIMB_COUNT: usize> KeySource<LIMB_COUNT> {
 
 pub(super) struct KeyFriProof<const LIMB_COUNT: usize> {
     pub(crate) base_root: MerkleDigest,
+    // The MATERIAL commitment root: one masked column per digit holding the
+    // recombined component material `B_j`, committed before `gamma` is drawn so
+    // the material is fixed prior to its reduction challenge.
+    pub(crate) material_root: MerkleDigest,
     pub(crate) aux_root: MerkleDigest,
     pub(crate) quotient_root: MerkleDigest,
     pub(crate) fri: FriProof<LIMB_COUNT>,
     pub(crate) base_opening: ColumnOpening<LIMB_COUNT>,
+    pub(crate) material_opening: ColumnOpening<LIMB_COUNT>,
     pub(crate) aux_opening: ColumnOpening<LIMB_COUNT>,
     pub(crate) quotient_opening: ColumnOpening<LIMB_COUNT>,
     // logUp terminals: the lookup-side total `sum_x sum_d f_d(x)` and one total
@@ -147,18 +152,20 @@ const COLUMN_SECRET: usize = 0;
 const COLUMN_SECRET_SQUARE: usize = 1;
 const SHARED_COLUMN_COUNT: usize = 2;
 
-// Per-digit block: error, carry, error-square, error-support, then the
-// committed recombined component material `B_j`. `B_j` carries no witness
-// support of its own; it is pinned equal to the public component material by a
-// per-digit support constraint (`support_value_at`), so the committed column is
-// the transported material and the published aggregate can later bind to it
-// instead of to a re-summed raw material stream.
+// Per-digit block: error, carry, error-square, error-support. The recombined
+// component material `B_j` is committed separately, in its own MATERIAL Merkle
+// group (one masked column per digit), not in this base block. `B_j` carries no
+// support constraint of its own: it is bound only by the relation, because the
+// batched sumcheck folds the committed `B_col_j` on its left-hand side (with the
+// per-digit weight `delta_j * gamma`) instead of the raw public component
+// material entering the sumcheck target. A committed material that does not
+// equal the correct component makes `B + A(*)s - t e - G source - Q c = 0` miss,
+// so the sumcheck rejects it.
 const DIGIT_ERROR: usize = 0;
 const DIGIT_CARRY: usize = 1;
 const DIGIT_ERROR_SQUARE: usize = 2;
 const DIGIT_ERROR_SUPPORT: usize = 3;
-const DIGIT_COMPONENT_B: usize = 4;
-const DIGIT_BLOCK_SIZE: usize = 5;
+const DIGIT_BLOCK_SIZE: usize = 4;
 
 // Index of the first multiplicity column (after all per-digit blocks).
 fn base_multiplicity_start(digit_count: usize) -> usize {
@@ -183,6 +190,15 @@ fn base_column_count(
 
 fn digit_column(digit: usize, offset_in_block: usize) -> usize {
     SHARED_COLUMN_COUNT + digit * DIGIT_BLOCK_SIZE + offset_in_block
+}
+
+// The MATERIAL commitment holds one masked column per digit: digit `d`'s column
+// is the masked coefficients of the recombined component material `B_d`,
+// committed exactly like a base column. The batched sumcheck folds each column
+// on its left-hand side, so the committed material is load-bearing for the
+// relation and needs no separate support constraint.
+fn material_column_count(digit_count: usize) -> usize {
+    digit_count
 }
 
 fn base_multiplicity_column(digit_count: usize, table_index: usize) -> usize {

@@ -17,8 +17,6 @@ import {
     createRefusal,
     defaultSignedRootContextHash,
     isProtocolHashString,
-    signedObjectRootByteLength,
-    uniqueStrings,
     verificationExceptionMessage,
 } from '../common/verification-helpers.js';
 
@@ -387,7 +385,6 @@ const verifyWitnessCheckpoint = (
         manifestHash: finalityCheckpoint.electionManifestHash,
         objectRoot: checkpoint.checkpointHash,
         boardHeadHash: finalityCheckpoint.finalizedBoardHeadHash,
-        byteLength: signedObjectRootByteLength,
         recoveryEpoch: 0,
         deviceEpoch: 0,
         contextHash: defaultSignedRootContextHash,
@@ -579,19 +576,11 @@ const verifyTargetFinalityUnchecked = (
     const forkEvidence = finalityForkEvidence ?? boardResult.forkEvidence;
     const equivocatingWitnessIdentities =
         forkEvidence?.equivocatingWitnessIdentities ?? [];
-    const acceptedHashes = uniqueStrings([
-        ...boardResult.acceptedHashes,
-        input.record.targetFinalityRecordHash,
-        ...input.record.witnessCheckpoints.map(
-            (checkpoint) => checkpoint.checkpointHash,
-        ),
-    ]);
     const finalityAccepted =
         refusedObjects.length === 0 && forkEvidence === undefined;
 
     return {
         isValid: finalityAccepted,
-        acceptedHashes: finalityAccepted ? acceptedHashes : [],
         refusedObjects:
             forkEvidence === undefined
                 ? refusedObjects
@@ -630,7 +619,6 @@ export const verifyTargetFinality = (
     } catch (error) {
         return {
             isValid: false,
-            acceptedHashes: [],
             refusedObjects: [
                 createRefusal(
                     'TargetFinalityPolicyMismatch',
