@@ -4,14 +4,21 @@ pub(in crate::bgv::setup) fn verify_terminal_setup_transport_policy(
     setup_package: &Value,
     request: &Value,
 ) -> CanonicalResult<Option<Value>> {
+    // Embedded VSS coefficient commitment material declares the full-public
+    // encoding; the terminal accepted setup requires the binary-chunked transport
+    // encoding instead. A missing field or any other encoding is refused too, so
+    // the check fails closed and only the transported form passes, mirroring the
+    // sibling proof-bytes, key-switch, and public-evaluation-key encoding checks.
     if setup_package
         .get("vssCoefficientCommitmentMaterial")
-        .is_none()
+        .and_then(|material| material.get("materialEncoding"))
+        .and_then(Value::as_str)
+        != Some(VSS_COEFFICIENT_COMMITMENT_MATERIAL_TRANSPORT_ENCODING)
     {
         return Ok(Some(terminal_transport_policy_refusal(
             "terminalVssMaterialTransportRequired",
             "terminal accepted setup requires binary-chunked VSS coefficient commitment material",
-            "setupPackage.vssCoefficientCommitmentMaterial",
+            "setupPackage.vssCoefficientCommitmentMaterial.materialEncoding",
         )?));
     }
     if !setup_package

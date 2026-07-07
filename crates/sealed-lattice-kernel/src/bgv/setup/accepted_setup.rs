@@ -199,6 +199,11 @@ const PUBLIC_EVALUATION_KEY_MATERIAL_ENCODING: &str =
 pub(super) const PUBLIC_EVALUATION_KEY_TRANSPORT_MATERIAL_ENCODING: &str =
     "binary-chunked-public-evaluation-key-root-manifest";
 const PUBLIC_EVALUATION_KEY_MATERIAL_MAGIC: &[u8; 8] = b"SLEKPMV1";
+// The terminal accepted setup carries the VSS coefficient commitment material as
+// a binary-chunked transport reference, never as the embedded full commitment
+// values, so the terminal transport policy requires this encoding.
+pub(super) const VSS_COEFFICIENT_COMMITMENT_MATERIAL_TRANSPORT_ENCODING: &str =
+    "binary-chunked-full-public-setup-commitment-values";
 use super::trustee_evaluation_key_proof::TRUSTEE_EVALUATION_KEY_PROOF_FAMILY;
 const PRIVATE_VSS_ENVELOPE_COMMITMENT_SET_OBJECT_TYPE: &str = "PrivateVssEnvelopeCommitmentSet";
 const PRIVATE_VSS_ENVELOPE_COMMITMENT_OBJECT_TYPE: &str = "PrivateVssEnvelopeCommitment";
