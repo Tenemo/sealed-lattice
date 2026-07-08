@@ -271,7 +271,7 @@ const validateSignedRootShape = (
     ) {
         return emptySignatureVerificationResult(
             'InvalidSignedRoot',
-            'Signed root byte length and epochs must be non-negative integers.',
+            'Signed root epochs must be non-negative integers.',
         );
     }
     if (

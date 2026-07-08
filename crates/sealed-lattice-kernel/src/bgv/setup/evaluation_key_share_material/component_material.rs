@@ -157,19 +157,27 @@ fn stored_verified_evaluation_key_share_component_material_chunks(
             "transported evaluation-key component material requires chunks or a live verified material handle",
         )
     })?;
+    // The entry is cloned once so the read (a native file read) never holds the
+    // store lock; it is then consumed by value below, so the chunk bytes are moved
+    // out rather than cloned a second time. The original stays in the store for the
+    // verifier's repeated reads and is dropped by the eviction guard after verify.
     drop(stored_chunks);
 
-    read_verified_evaluation_key_share_component_material_chunks(&store_entry)
+    read_verified_evaluation_key_share_component_material_chunks(store_entry)
 }
 
 fn read_verified_evaluation_key_share_component_material_chunks(
-    store_entry: &VerifiedEvaluationKeyShareComponentMaterialChunkStoreEntry,
+    store_entry: VerifiedEvaluationKeyShareComponentMaterialChunkStoreEntry,
 ) -> CanonicalResult<Vec<Vec<u8>>> {
-    match &store_entry.backing {
+    let VerifiedEvaluationKeyShareComponentMaterialChunkStoreEntry {
+        backing,
+        total_byte_length,
+    } = store_entry;
+    match backing {
         #[cfg(any(target_arch = "wasm32", test))]
         VerifiedComponentMaterialBacking::Memory(chunks) => {
             let mut staged_total = 0_u64;
-            for chunk in chunks {
+            for chunk in &chunks {
                 staged_total = staged_total
                     .checked_add(u64::try_from(chunk.len()).map_err(|_| {
                         invalid_evaluation_key_share_material(
@@ -182,12 +190,12 @@ fn read_verified_evaluation_key_share_component_material_chunks(
                         )
                     })?;
             }
-            if staged_total != store_entry.total_byte_length {
+            if staged_total != total_byte_length {
                 return Err(invalid_evaluation_key_share_material(
                     "in-memory component material total byte length does not match the verified handle",
                 ));
             }
-            Ok(chunks.clone())
+            Ok(chunks)
         }
         #[cfg(not(target_arch = "wasm32"))]
         VerifiedComponentMaterialBacking::TempFile(path) => {
@@ -197,8 +205,8 @@ fn read_verified_evaluation_key_share_component_material_chunks(
                         "evaluation-key component material chunk size does not fit usize",
                     )
                 })?;
-            let mut remaining_byte_length = store_entry.total_byte_length;
-            let mut file = std::fs::File::open(path).map_err(|error| {
+            let mut remaining_byte_length = total_byte_length;
+            let mut file = std::fs::File::open(&path).map_err(|error| {
                 invalid_evaluation_key_share_material(format!(
                     "verified evaluation-key component material store entry could not be opened: {error}",
                 ))
@@ -229,6 +237,81 @@ fn read_verified_evaluation_key_share_component_material_chunks(
 
             Ok(chunks)
         }
+    }
+}
+
+// Collect the evaluation-key component material roots a verification request
+// references, so the eviction guard drops exactly those store entries and leaves a
+// concurrent verification's entries untouched.
+fn request_component_material_roots(request: &Value) -> Vec<String> {
+    let Some(component_materials) = request
+        .get("transportedEvaluationKeyShareComponentMaterial")
+        .and_then(|material_set| material_set.get("componentMaterials"))
+        .and_then(Value::as_array)
+    else {
+        return Vec::new();
+    };
+    component_materials
+        .iter()
+        .filter_map(|component_material| {
+            component_material
+                .get("keySwitchComponentMaterialRoot")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
+        .collect()
+}
+
+// Drop the staged backing of an evicted store entry: on native this removes the
+// temp file; on the browser wasm runtime the in-memory chunk bytes are freed when
+// `backing` drops. Mirrors `discard_component_material_stream_sink`.
+fn discard_verified_component_material_backing(backing: VerifiedComponentMaterialBacking) {
+    match backing {
+        #[cfg(not(target_arch = "wasm32"))]
+        VerifiedComponentMaterialBacking::TempFile(path) => {
+            let _ = std::fs::remove_file(path);
+        }
+        #[cfg(any(target_arch = "wasm32", test))]
+        VerifiedComponentMaterialBacking::Memory(_) => {}
+    }
+}
+
+// Drop the verified component material entries a completed verification consumed,
+// so the process-global store does not retain them. The verifier reads each entry
+// several times (public-key reconstruction and evaluation-key proof checks), so
+// eviction happens once, after verify returns, rather than on first read. Without
+// it the store would grow with every verified package on the wasm runtime, whose
+// linear memory never returns to the OS.
+fn evict_verified_evaluation_key_share_component_material(material_roots: &[String]) {
+    let Ok(mut stored_chunks) = verified_evaluation_key_share_component_material_chunks().lock()
+    else {
+        return;
+    };
+    for material_root in material_roots {
+        if let Some(entry) = stored_chunks.remove(material_root) {
+            discard_verified_component_material_backing(entry.backing);
+        }
+    }
+}
+
+// RAII guard that evicts a verification's streamed component material from the
+// process-global store when verify returns by any path (acceptance, refusal, or
+// error), scoped to the request's own material roots.
+pub(in crate::bgv::setup) struct VerifiedComponentMaterialEvictionGuard {
+    material_roots: Vec<String>,
+}
+
+impl VerifiedComponentMaterialEvictionGuard {
+    pub(in crate::bgv::setup) fn for_request(request: &Value) -> Self {
+        Self {
+            material_roots: request_component_material_roots(request),
+        }
+    }
+}
+
+impl Drop for VerifiedComponentMaterialEvictionGuard {
+    fn drop(&mut self) {
+        evict_verified_evaluation_key_share_component_material(&self.material_roots);
     }
 }
 
@@ -954,7 +1037,7 @@ mod component_material_stream {
                     backing: VerifiedComponentMaterialBacking::TempFile(path.clone()),
                     total_byte_length,
                 };
-                read_verified_evaluation_key_share_component_material_chunks(&store_entry)
+                read_verified_evaluation_key_share_component_material_chunks(store_entry)
             }
             #[cfg(any(target_arch = "wasm32", test))]
             ComponentMaterialStreamSink::Memory { chunks } => {
@@ -962,7 +1045,7 @@ mod component_material_stream {
                     backing: VerifiedComponentMaterialBacking::Memory(chunks.clone()),
                     total_byte_length,
                 };
-                read_verified_evaluation_key_share_component_material_chunks(&store_entry)
+                read_verified_evaluation_key_share_component_material_chunks(store_entry)
             }
         }
     }
@@ -1450,7 +1533,7 @@ mod component_material_stream {
                 total_byte_length: transport_hashes.total_byte_length,
             };
             let read_back =
-                read_verified_evaluation_key_share_component_material_chunks(&store_entry)
+                read_verified_evaluation_key_share_component_material_chunks(store_entry)
                     .expect("the in-memory backing reads back its staged chunks");
             assert_eq!(
                 read_back, chunks,

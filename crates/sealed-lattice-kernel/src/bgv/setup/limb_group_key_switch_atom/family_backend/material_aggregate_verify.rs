@@ -1,4 +1,4 @@
-//! Aggregate-binding wrapper for the committed key-switch material (S1).
+//! Aggregate-binding wrapper for the committed key-switch material.
 //!
 //! This wires the two already-built primitives in this backend into one
 //! aggregate check for the published runtime key:
@@ -35,7 +35,9 @@ use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 // The cyclic domain and the opening prover are used by the aggregate prover
 // `prove_material_aggregate` (driven by the creation-side aggregate binding in
 // `material_aggregate_creation`); the verifier and its wrapper never prove.
+#[cfg(test)]
 use super::domain::CyclicDomain;
+#[cfg(test)]
 use super::material_aggregate_opening::prove_linear_evaluation_opening;
 
 const AGGREGATE_DELTA_LABEL: &str =
@@ -43,6 +45,7 @@ const AGGREGATE_DELTA_LABEL: &str =
 
 // Used by the aggregate prover; the acceptance-path wrapper reports its own
 // fail-closed refusals through `aggregate_binding_refusal`.
+#[cfg(test)]
 fn inconsistent_aggregate(message: &str) -> CanonicalError {
     CanonicalError::new(CanonicalErrorCode::InvalidProtocolObject, message)
 }
@@ -126,11 +129,12 @@ fn recombine_runtime_key<const LIMB_COUNT: usize>(
 // here is always in the range the identity check accepts. Used only by the
 // test-gated aggregate prover; the acceptance-path wrapper range-checks the
 // wrap multiples before the call and the identity check enforces the bound again.
+#[cfg(test)]
 fn maximum_wrap_multiple_magnitude(roster_size: usize) -> i64 {
     roster_size.div_ceil(2) as i64
 }
 
-// Verify the S1 aggregate binding for one published runtime key. Fail-closed:
+// Verify the material aggregate binding for one published runtime key. Fail-closed:
 // returns `false` on any shape mismatch, a failed trustee opening, or a broken
 // aggregate identity.
 //
@@ -203,10 +207,10 @@ pub(super) fn verify_material_aggregate<const LIMB_COUNT: usize>(
     )
 }
 
-// Prove the S1 aggregate binding: recover the integer coefficient sum from the
-// trustee material columns, solve each per-coefficient wrap multiple against the
-// published runtime key, then open every trustee's batched linear evaluation
-// under the shared `delta`.
+// Prove the material aggregate binding: recover the integer coefficient sum
+// from the trustee material columns, solve each per-coefficient wrap multiple
+// against the published runtime key, then open every trustee's batched linear
+// evaluation under the shared `delta`.
 //
 // `material_columns_by_trustee[i][digit]` are the masked coefficients of trustee
 // `i`'s digit-`digit` material column, and `material_commit_salt_seeds[i]` is the
@@ -214,10 +218,11 @@ pub(super) fn verify_material_aggregate<const LIMB_COUNT: usize>(
 // `key_proof::regenerate_material_commitment_inputs` helper, so opening under that
 // salt reproduces the atom proof's `KeyFriProof.material_root` exactly. The
 // recomputed root is asserted to equal `material_roots[i]` (which the caller took
-// from the atom proof), so the aggregate opens the ATOM-VERIFIED material rather
+// from the atom proof), so the aggregate opens the atom-verified material rather
 // than a fresh commitment. Returns the recomputed material roots (so the verifier
 // and this prover agree on the exact roots and thus the delta transcript), the
 // wrap multiples, and the openings.
+#[cfg(test)]
 #[allow(clippy::type_complexity)]
 pub(super) fn prove_material_aggregate<const LIMB_COUNT: usize>(
     parameters: &ProofFieldParameters<LIMB_COUNT>,
@@ -403,10 +408,10 @@ fn aggregate_binding_refusal(message: &str) -> CanonicalError {
 
 // The acceptance-path wrapper: decode the transported opening bytes, build the
 // limb group for the key-group's `DATA_PRIMES` slice on the sixteen-limb-group
-// proof field, and run the S1 aggregate binding. This is the single `pub(crate)`
-// surface the eval-key verifier calls; the opening proof type and the inner
-// `verify_material_aggregate` stay `pub(super)`, so the crate boundary only sees
-// plain data in and a fail-closed result out.
+// proof field, and run the material aggregate binding. This is the single
+// `pub(crate)` surface the eval-key verifier calls; the opening proof type and
+// the inner `verify_material_aggregate` stay `pub(super)`, so the crate boundary
+// only sees plain data in and a fail-closed result out.
 //
 // Fail-closed: any decode failure, shape mismatch, group-construction failure,
 // or a broken aggregate identity returns `Err`. A returned `Ok(())` means the

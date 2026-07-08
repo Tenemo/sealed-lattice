@@ -42,10 +42,12 @@ pub(super) type ProjectionTermCache = HashMap<ProjectionTermCacheKey, Arc<[Proje
 
 static PROJECTION_TERM_CACHE: OnceLock<Mutex<ProjectionTermCache>> = OnceLock::new();
 
+// Returns the shared cached term slice; callers iterate it in place instead of
+// copying the whole row per innermost relation-vector accumulation.
 pub(in crate::bgv::setup) fn projection_terms(
     input: ProjectionTermsInput<'_>,
-) -> CanonicalResult<Vec<ProjectionTerm>> {
-    Ok(cached_projection_terms(input)?.as_ref().to_vec())
+) -> CanonicalResult<Arc<[ProjectionTerm]>> {
+    cached_projection_terms(input)
 }
 
 pub(super) fn cached_projection_terms(

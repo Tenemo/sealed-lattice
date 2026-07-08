@@ -5,7 +5,9 @@
 
 mod component_material;
 
-pub(super) use self::component_material::component_b_vectors_from_record;
+pub(super) use self::component_material::{
+    VerifiedComponentMaterialEvictionGuard, component_b_vectors_from_record,
+};
 pub(crate) use self::component_material::{
     absorb_evaluation_key_share_component_material_transport_stream_chunk_request,
     begin_evaluation_key_share_component_material_transport_stream_request,

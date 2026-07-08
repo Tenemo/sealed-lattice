@@ -1,6 +1,6 @@
 //! Same-secret linkage block: binds the key proof's committed secret `S` to one
-//! verified same-secret bridge target constant commitment (the compact
-//! VssPublic family), natively in `F_p`.
+//! verified same-secret bridge target constant commitment (the VssPublic family),
+//! natively in `F_p`.
 //!
 //! The bridge (verified separately, fail-closed at the package layer) proves
 //! all its target constant commitments open to one short secret across the
@@ -312,7 +312,7 @@ pub(in super::super) fn build_linkage_witness_values(
                     ring_degree,
                     modulus: *commitment_modulus,
                 })?;
-                for (position, residue) in terms {
+                for (position, residue) in terms.iter().copied() {
                     numerator += digit_column[position] as i128 * residue as i128;
                 }
             }
@@ -327,7 +327,7 @@ pub(in super::super) fn build_linkage_witness_values(
                     ring_degree,
                     modulus: *commitment_modulus,
                 })?;
-                for (position, residue) in terms {
+                for (position, residue) in terms.iter().copied() {
                     numerator += witness.randomness_by_column[randomness_column][position] as i128
                         * residue as i128;
                 }
@@ -635,7 +635,7 @@ pub(in super::super) fn build_linkage_forms<const LIMB_COUNT: usize>(
                     ring_degree,
                     modulus: *commitment_modulus,
                 })?;
-                for (position, residue) in terms {
+                for (position, residue) in terms.iter().copied() {
                     let contribution =
                         parameters.multiply(&weight, &parameters.unsigned_word_to_element(residue));
                     digit_form[position] = parameters.add(&digit_form[position], &contribution);
@@ -652,7 +652,7 @@ pub(in super::super) fn build_linkage_forms<const LIMB_COUNT: usize>(
                     ring_degree,
                     modulus: *commitment_modulus,
                 })?;
-                for (position, residue) in terms {
+                for (position, residue) in terms.iter().copied() {
                     let contribution =
                         parameters.multiply(&weight, &parameters.unsigned_word_to_element(residue));
                     randomness_form[position] =

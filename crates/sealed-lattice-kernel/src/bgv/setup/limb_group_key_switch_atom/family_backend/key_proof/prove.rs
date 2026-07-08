@@ -27,8 +27,8 @@ pub(in super::super) fn prove_round_one_key_fri<const LIMB_COUNT: usize>(
     )
 }
 
-// The public entry: commit the transported public component material as the
-// MATERIAL `B_col_j` columns and prove. Production always commits the public
+// Commit the transported public component material as the `B_col_j` columns and
+// prove. Production always commits the public
 // material; the streamed body accepts the material explicitly so a test can
 // substitute a mismatched column and confirm the relation (the sumcheck)
 // rejects it.
@@ -104,15 +104,11 @@ pub(in super::super) fn prove_key_fri_with_component_b<const LIMB_COUNT: usize>(
     )
 }
 
-// The material commitment the atom proof publishes as `KeyFriProof.material_root`
-// AND the exact masked material columns it committed, regenerated deterministically
-// from public data alone. This is the single source of truth for the MATERIAL
-// commitment: `prove_key_fri_streamed` builds its material root through this helper
-// (so the published `material_root` is exactly what this returns), and the S1
-// aggregate binding calls the same helper to obtain the atom's committed columns
-// and material-commit salt seed, so it can open THAT commitment rather than a fresh
-// one. Because both sides route through here, the atom's `material_root` and the
-// aggregator's recomputed root cannot drift.
+// Regenerate the material commitment the atom proof publishes as
+// `KeyFriProof.material_root` and the exact masked material columns it committed.
+// Both `prove_key_fri_streamed` and the aggregate binding route through this
+// helper, so the aggregate opens the atom commitment rather than a fresh
+// commitment with the same public values.
 //
 // The regeneration mirrors the salt discipline `prove_key_fri_streamed` runs, in
 // order: `KeyColumnPlan::new` snapshots the base then the material mask seeds
@@ -283,11 +279,10 @@ fn prove_key_fri_streamed<const LIMB_COUNT: usize>(
     }
     let base_commitment = base_builder.finalize()?;
 
-    // The MATERIAL commitment: one masked column per digit holding the recombined
+    // The material commitment: one masked column per digit holding the recombined
     // component material `B_j`. The masked columns and the material-commit salt
-    // seed come from the shared `regenerate_material_commitment_inputs` helper, the
-    // SINGLE source of truth for the material commitment: the S1 aggregate binding
-    // calls the same helper to open exactly this commitment. Committed before
+    // seed come from `regenerate_material_commitment_inputs`, which the material
+    // aggregate binding also uses to open exactly this commitment. Committed before
     // `gamma` is drawn, so the material is fixed prior to its reduction challenge.
     //
     // The helper derived the material-commit salt seed from `initial_salt_seed` on

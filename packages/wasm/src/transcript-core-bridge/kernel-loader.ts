@@ -18,7 +18,6 @@ import type {
     BgvLocalTrusteeSetupStateVerification,
     BgvObjectValidation,
     BgvPassiveSetupPackage,
-    BgvPassiveSetupVerification,
     BgvPrivateVssShareEnvelopeVerification,
     BgvPrivateVssShareProofGeneration,
     BgvOperationRejection,
@@ -305,8 +304,8 @@ export const createTranscriptCoreKernelLoader = (
                         workingLevel: input.workingLevel,
                         rotationKeys: input.rotationKeys,
                     }),
-                verifyBgvPassiveSetup: (input): BgvPassiveSetupVerification =>
-                    executeCommand<BgvPassiveSetupVerification>({
+                verifyBgvPassiveSetup: (input): void =>
+                    executeCommand<void>({
                         command: 'VerifyBgvPassiveSetup',
                         setupPackage: input.setupPackage,
                         expectedSetupPackageHash:
@@ -338,6 +337,10 @@ export const createTranscriptCoreKernelLoader = (
                                 input.transportedPublicKeyShareProofMaterial,
                             transportedEvaluationKeyShareProofMaterial:
                                 input.transportedEvaluationKeyShareProofMaterial,
+                            transportedVssShareLinkageProofMaterial:
+                                input.transportedVssShareLinkageProofMaterial,
+                            transportedSameSecretBridgeProofMaterial:
+                                input.transportedSameSecretBridgeProofMaterial,
                             transportedEvaluationKeyShareComponentMaterial:
                                 input.transportedEvaluationKeyShareComponentMaterial,
                             transportedEvaluationKeyAggregateBindingOpenings:

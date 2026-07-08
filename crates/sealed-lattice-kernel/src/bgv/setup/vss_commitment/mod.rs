@@ -20,7 +20,11 @@ pub(crate) const VSS_PUBLIC_MESSAGE_DIGIT_BASE: u64 = 129_140_163;
 pub(crate) const VSS_PUBLIC_MESSAGE_TRIT_BASE: u64 = 3;
 pub(crate) const VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT: usize = 2;
 pub(in crate::bgv::setup) const VSS_PUBLIC_RANDOMNESS_PROJECTION_WEIGHT: usize = 32;
-pub(in crate::bgv::setup) const VSS_PUBLIC_COMMITMENT_MODULUS_LIMB_INDICES: [usize; 3] = [0, 1, 2];
+// Single home: the VSS public commitment binds over exactly the BDLOP setup
+// commitment modulus limbs, so alias that constant instead of restating it and
+// letting the two drift.
+pub(in crate::bgv::setup) const VSS_PUBLIC_COMMITMENT_MODULUS_LIMB_INDICES: [usize; 3] =
+    super::commitment::SETUP_COMMITMENT_MODULUS_LIMB_INDICES;
 const VSS_PUBLIC_SAMPLER_DOMAIN: &str = "sealed-lattice-vss-public-commitment/sampler-v1";
 const VSS_PUBLIC_MATRIX_RESIDUE_HASH_DOMAIN: &str =
     "sealed-lattice-vss-public-commitment/matrix-residue-v1";

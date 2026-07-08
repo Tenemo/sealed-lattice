@@ -7,14 +7,16 @@
 //! ```
 //!
 //! with `A (*) s` a negacyclic convolution. Batching the `N` coefficient
-//! identities with a random challenge `gamma` collapses the relation to one
-//! linear claim `<L, w> = target` over the witness `w = (s || e || c)`, using
-//! the negacyclic adjoint identity `<a (*) b, c> = <b, adjoint(a) (*) c>`. Since
-//! the residual has degree below `N` and the proof field has more than `2^768`
-//! elements, `<gamma, residual> = 0` for a random `gamma` implies the residual
-//! is zero except with probability about `N / |field|` (about `2^-755`). This is
-//! the family's relation core; it is the same reduction validated in the
-//! test-gated `atom_argument` module, hosted here for the production backend.
+//! identities with a random challenge `gamma` collapses the witness terms to
+//! one linear claim over `w = (s || e || c)`, using the negacyclic adjoint
+//! identity `<a (*) b, c> = <b, adjoint(a) (*) c>`. The transported `B` term is
+//! carried by the material column form in the key proof, not by this reducer.
+//! Since the residual has degree below `N` and the proof field has more than
+//! `2^768` elements, `<gamma, residual> = 0` for a random `gamma` implies the
+//! residual is zero except with probability about `N / |field|` (about
+//! `2^-755`). This is the family's relation core; it is the same reduction
+//! validated in the test-gated `atom_argument` module, hosted here for the
+//! production backend.
 
 use super::super::negacyclic_transform::NegacyclicDomain;
 use super::super::proof_field::ProofFieldParameters;
@@ -23,8 +25,6 @@ use super::super::proof_field::ProofFieldParameters;
 pub(super) struct AtomPublicInputs<'a, const LIMB_COUNT: usize> {
     // Recombined public sample `A` (negacyclic multiplier of the secret).
     pub(super) recombined_sample: &'a [[u64; LIMB_COUNT]],
-    // Recombined transported component `B`.
-    pub(super) recombined_component_b: &'a [[u64; LIMB_COUNT]],
     // Scalar gadget idempotent `G` of the diagonal limb.
     pub(super) gadget_idempotent: [u64; LIMB_COUNT],
     // Limb-group modulus `Q`.
@@ -33,17 +33,12 @@ pub(super) struct AtomPublicInputs<'a, const LIMB_COUNT: usize> {
     pub(super) plaintext_modulus: [u64; LIMB_COUNT],
 }
 
-// The public linear form: `<secret_coeffs, s> + <error_coeffs, e> +
-// <carry_coeffs, c> = target` for a correct witness.
+// The public witness-side linear form for one atom. The committed material
+// column carries the transported component term outside this struct.
 pub(super) struct AtomLinearForm<const LIMB_COUNT: usize> {
     pub(super) secret_coefficients: Vec<[u64; LIMB_COUNT]>,
     pub(super) error_coefficients: Vec<[u64; LIMB_COUNT]>,
     pub(super) carry_coefficients: Vec<[u64; LIMB_COUNT]>,
-    // Carries `-<gamma, B_public_j>`. Retained for the documented atom-form
-    // structure even though the component term no longer enters the sumcheck
-    // target (it rides the material form against the committed `B_col_j`).
-    #[allow(dead_code)]
-    pub(super) target: [u64; LIMB_COUNT],
 }
 
 // The negacyclic adjoint: `adjoint(a)_0 = a_0`, `adjoint(a)_j = -a_{N-j}`.
@@ -125,7 +120,7 @@ fn source_adjoint_image<const LIMB_COUNT: usize>(
 // challenge `gamma`. The secret coefficients are `adjoint(A) (*) gamma - G *
 // source_adjoint_image(gamma)` (round two's aggregate carries the `G` fold
 // already, so its image is not rescaled); the error coefficients `-t gamma`;
-// the carry coefficients `-Q gamma`; the target `-<gamma, B>`.
+// the carry coefficients `-Q gamma`.
 pub(super) fn reduce_atom<const LIMB_COUNT: usize>(
     parameters: &ProofFieldParameters<LIMB_COUNT>,
     domain: &NegacyclicDomain<'_, LIMB_COUNT>,
@@ -155,16 +150,10 @@ pub(super) fn reduce_atom<const LIMB_COUNT: usize>(
         .iter()
         .map(|value| parameters.multiply(value, &negated_modulus))
         .collect();
-    let mut inner = parameters.zero();
-    for (challenge_value, component) in challenge.iter().zip(public.recombined_component_b.iter()) {
-        inner = parameters.add(&inner, &parameters.multiply(challenge_value, component));
-    }
-    let target = parameters.negate(&inner);
 
     AtomLinearForm {
         secret_coefficients,
         error_coefficients,
         carry_coefficients,
-        target,
     }
 }

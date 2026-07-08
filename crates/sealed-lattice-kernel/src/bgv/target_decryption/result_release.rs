@@ -64,7 +64,6 @@ pub(super) fn begin_target_decryption_result_release(
         input.setup_binding,
         input.target_accepted,
         input.target_ciphertexts,
-        input.target_share_profile,
     )?;
     // Reject a target that a prior release already consumed before opening a new
     // session. This is an early check; finish holds the registry lock across the
@@ -180,7 +179,6 @@ pub(super) fn finish_target_decryption_result_release(
         &session.setup_binding,
         &session.target_accepted,
         &session.target_ciphertexts,
-        &session.target_share_profile,
     )?;
     // Hold the consumed-target registry across the check, the recombination, and
     // the insert so the one-shot property is race-free: two finishes that both
@@ -304,22 +302,23 @@ fn target_result_release_consumed_targets() -> &'static Mutex<BTreeSet<String>> 
 }
 
 // The canonical one-shot consumption key for a target release. It binds the
-// accepted setup package, the accepted target record, the exact target ciphertext
-// pair being decrypted, and the target-share profile, so two releases of the same
-// target under the same setup collide on this key while genuinely different
-// targets do not.
+// accepted setup package, the accepted target record, and the exact target
+// ciphertext pair being decrypted, so every release of the same target under the
+// same setup collides on this key while genuinely different targets do not. The
+// target-share profile is deliberately excluded from the key: only the decryption
+// threshold is roster-pinned, so a second release under a different but still-valid
+// (minimum, quorum) profile must not mint a fresh key and escape the one-shot
+// bound.
 fn target_release_consumption_key(
     setup_binding: &SetupBinding,
     target_accepted: &TargetAcceptedBinding,
     target_ciphertexts: &TargetCiphertextPair,
-    target_share_profile: &TargetShareProfile,
 ) -> CanonicalResult<String> {
     derive_canonical_object_hash(&json!({
         "objectType": "BgvTargetDecryptionResultReleaseConsumptionKey",
         "setupPackageHash": setup_binding.setup_package_hash,
         "targetAcceptedRecordHash": target_accepted.target_accepted_record_hash,
         "targetDecryptionCiphertextHash": target_ciphertexts.target_ciphertext_hash,
-        "targetShareProfileHash": target_share_profile.hash,
     }))
 }
 

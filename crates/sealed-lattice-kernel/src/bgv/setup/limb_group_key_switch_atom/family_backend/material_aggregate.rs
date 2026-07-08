@@ -1,7 +1,7 @@
-//! Aggregate binding for the committed key-switch material (S1).
+//! Aggregate binding for the committed key-switch material.
 //!
 //! The published runtime key is the per-limb sum of the trustee materials. Once
-//! the material is committed as an atom column (S0) rather than re-summed from
+//! the material is committed as an atom column rather than re-summed from
 //! raw bytes, the aggregate is bound by a random linear evaluation instead of by
 //! reconstruction: the verifier reconstructs the integer coefficient sum from the
 //! per-limb runtime key by CRT plus a public per-coefficient wrap multiple, then
@@ -45,7 +45,9 @@ fn coefficient_sum<const LIMB_COUNT: usize>(
     wrap_multiple: i64,
     roster_size: usize,
 ) -> Option<[u64; LIMB_COUNT]> {
-    if wrap_multiple.abs() > maximum_wrap_multiple_magnitude(roster_size) {
+    // `unsigned_abs` (not `abs`) so a hostile `i64::MIN` wrap multiple is compared,
+    // not a debug-panic / release-wrap of `abs()`, against the roster bound.
+    if wrap_multiple.unsigned_abs() > maximum_wrap_multiple_magnitude(roster_size) as u64 {
         return None;
     }
     let wrap = parameters.signed_word_to_element(wrap_multiple);
@@ -53,15 +55,17 @@ fn coefficient_sum<const LIMB_COUNT: usize>(
     Some(parameters.add(recombined_coefficient, &wrap_contribution))
 }
 
-// The S1 aggregate identity for one key: `evaluation_sum == <delta, R + w * Q_L>`,
-// with every wrap multiple inside the roster-bounded range. `recombined_runtime_
-// key[digit][coeff]` is the centered CRT recombination of the published runtime
-// key; `wrap_multiples[digit][coeff]` and `delta[digit][coeff]` share that shape;
-// `evaluation_sum` is the batched delta-opening's proven total
-// `sum_{trustee, digit} <delta_digit, recombined_B[trustee][digit]>`, which equals
-// `<delta, sum_trustee recombined_B_trustee>`. Returns false on any shape mismatch,
-// out-of-range wrap, or identity mismatch (fail-closed). A missing or extra trustee
-// contribution moves the proven total, so the single check also catches it.
+// The material aggregate identity for one key:
+// `evaluation_sum == <delta, R + w * Q_L>`, with every wrap multiple inside the
+// roster-bounded range. `recombined_runtime_key[digit][coeff]` is the centered
+// CRT recombination of the published runtime key; `wrap_multiples[digit][coeff]`
+// and `delta[digit][coeff]` share that shape. `evaluation_sum` is the batched
+// delta-opening's proven total
+// `sum_{trustee, digit} <delta_digit, recombined_B[trustee][digit]>`, which
+// equals `<delta, sum_trustee recombined_B_trustee>`. Returns false on any shape
+// mismatch, out-of-range wrap, or identity mismatch (fail-closed). A missing or
+// extra trustee contribution moves the proven total, so the single check also
+// catches it.
 pub(crate) fn material_aggregate_identity_holds<const LIMB_COUNT: usize>(
     parameters: &ProofFieldParameters<LIMB_COUNT>,
     recombined_runtime_key: &[Vec<[u64; LIMB_COUNT]>],

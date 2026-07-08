@@ -593,7 +593,7 @@ describe('crypto primitive boundary', () => {
                 encryptedLocalState: {
                     ...tamperedLocalStateEnvelopeWithoutHash,
                     encryptedLocalStateHash: localTrusteeEnvelopeHash(
-                        'sealed-lattice-local-trustee-state/envelope-hash-v1',
+                        'sealed-lattice-local-trustee-state/envelope-hash-v2',
                         tamperedLocalStateEnvelopeWithoutHash,
                     ),
                 } as typeof encrypted.encryptedLocalState,
@@ -622,7 +622,7 @@ describe('crypto primitive boundary', () => {
                 encryptedLocalState: {
                     ...nonceSwappedEnvelopeWithoutHash,
                     encryptedLocalStateHash: localTrusteeEnvelopeHash(
-                        'sealed-lattice-local-trustee-state/envelope-hash-v1',
+                        'sealed-lattice-local-trustee-state/envelope-hash-v2',
                         nonceSwappedEnvelopeWithoutHash,
                     ),
                 } as typeof encrypted.encryptedLocalState,
@@ -650,7 +650,7 @@ describe('crypto primitive boundary', () => {
                 encryptedLocalState: {
                     ...reboundLocalStateEnvelope,
                     encryptedLocalStateHash: localTrusteeEnvelopeHash(
-                        'sealed-lattice-local-trustee-state/envelope-hash-v1',
+                        'sealed-lattice-local-trustee-state/envelope-hash-v2',
                         reboundLocalStateEnvelope,
                     ),
                 } as typeof encrypted.encryptedLocalState,
@@ -674,7 +674,7 @@ describe('crypto primitive boundary', () => {
         const reboundEncryptedMaterial = {
             ...reboundSealedMaterialEnvelope,
             encryptedMaterialHash: localTrusteeEnvelopeHash(
-                'sealed-lattice-local-trustee-state/sealed-material-envelope-hash-v1',
+                'sealed-lattice-local-trustee-state/sealed-material-envelope-hash-v2',
                 reboundSealedMaterialEnvelope,
             ),
         } as typeof sealedAggregateThresholdShare.sealedMaterial.encryptedMaterial;

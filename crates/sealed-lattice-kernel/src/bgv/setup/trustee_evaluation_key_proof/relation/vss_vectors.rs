@@ -962,7 +962,10 @@ fn add_projection_vector(
         input_column: input.input_column,
         ring_degree: input.ring_degree,
         modulus: input.modulus,
-    })? {
+    })?
+    .iter()
+    .copied()
+    {
         input.target[ring_coefficient_index] = tower.add(
             &input.target[ring_coefficient_index],
             &tower.scale_base(input.scale, matrix_residue),

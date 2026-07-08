@@ -26,12 +26,11 @@ fn passive_setup_generation_is_verifiable() {
             .get("sampledLocalErrorCoefficients")
             .is_none()
     );
-    let verification = verify_passive_setup_package_from_request(&serde_json::json!({
+    verify_passive_setup_package_from_request(&serde_json::json!({
         "setupPackage": first.clone(),
         "expectedRosterHash": request()["rosterHash"],
     }))
     .expect("verify setup package");
-    assert_eq!(verification["operation"], "verifyBgvPassiveSetupPackage");
 }
 
 #[test]

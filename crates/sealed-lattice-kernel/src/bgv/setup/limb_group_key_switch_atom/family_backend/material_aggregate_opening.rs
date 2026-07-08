@@ -1,4 +1,4 @@
-//! Batched linear-evaluation opening for the committed key-switch material (S1).
+//! Batched linear-evaluation opening for the committed key-switch material.
 //!
 //! Proves `Z = sum_j <delta_j, col_j>` for a set of committed columns `col_j`
 //! (each a masked trace polynomial committed as a coset codeword in one salted
@@ -32,9 +32,13 @@ use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 // commitment and FRI-answer machinery. The creation-side aggregate binding
 // (`material_aggregate_creation`) drives these to produce the transported
 // openings; the acceptance path only verifies.
+#[cfg(test)]
 use super::column_commitment::StreamedColumnCommitmentBuilder;
+#[cfg(test)]
 use super::domain::coset_evaluate_coefficients;
+#[cfg(test)]
 use super::low_degree::{fri_answer, fri_commit};
+#[cfg(test)]
 use super::merkle::sorted_unique_indices;
 
 const OPENING_PROTOCOL_LABEL: &str =
@@ -71,6 +75,7 @@ pub(super) struct LinearEvaluationOpeningProof<const LIMB_COUNT: usize> {
 // these bytes for transport; the acceptance path only ever decodes them (see
 // `decode_linear_evaluation_opening_proof`). Kept alongside
 // `prove_linear_evaluation_opening` on the non-test path.
+#[cfg(test)]
 pub(super) fn encode_linear_evaluation_opening_proof<const LIMB_COUNT: usize>(
     proof: &LinearEvaluationOpeningProof<LIMB_COUNT>,
 ) -> CanonicalResult<Vec<u8>> {
@@ -124,6 +129,7 @@ fn opening_layout(ring_degree: usize) -> CanonicalResult<(usize, usize)> {
 // The trace-subgroup vanishing polynomial `Z_H(x) = x^trace_size - 1`. Used by
 // the opening prover and the module tests; the verifier evaluates the vanishing
 // polynomial pointwise through `polynomial::vanishing_at`.
+#[cfg(test)]
 fn vanishing_polynomial<const LIMB_COUNT: usize>(
     parameters: &ProofFieldParameters<LIMB_COUNT>,
     trace_size: usize,
@@ -152,6 +158,7 @@ fn g_degree_adjustment_shift(trace_size: usize) -> usize {
 // The creation-side aggregate binding (`material_aggregate_creation`) proves
 // these openings; the acceptance path only verifies (see
 // `verify_linear_evaluation_opening`).
+#[cfg(test)]
 pub(super) fn prove_linear_evaluation_opening<const LIMB_COUNT: usize>(
     parameters: &ProofFieldParameters<LIMB_COUNT>,
     ring_degree: usize,

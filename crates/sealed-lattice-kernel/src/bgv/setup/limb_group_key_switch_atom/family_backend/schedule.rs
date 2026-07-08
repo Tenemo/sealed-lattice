@@ -44,9 +44,10 @@ const SCHEDULE_MAGIC: &[u8; 8] = b"SLKSATS1";
 const SCHEDULE_SALT_DOMAIN: &str = "sealed-lattice/setup/key-switch-atom/schedule-salt-v1";
 // 80 queries at rate 1/4 give about 136 conditional classical bits under the
 // CS25 accounting the setup families use; the count is soundness-set. Shared with
-// the creation-side aggregate binding (`material_aggregate_creation`) so the
-// transported openings carry the same soundness parameter as the atom proofs.
-pub(super) const SCHEDULE_QUERY_COUNT: usize = 80;
+// the creation-side aggregate binding (`material_aggregate_creation`) and the
+// accepted-setup aggregate-binding verifier so the transported openings carry the
+// same soundness parameter as the atom proofs.
+pub(crate) const SCHEDULE_QUERY_COUNT: usize = 80;
 // Keys prove independently; bounding the concurrent set keeps the peak
 // working set at a few streamed provers rather than the whole schedule.
 const PARALLEL_KEY_GROUP: usize = 4;

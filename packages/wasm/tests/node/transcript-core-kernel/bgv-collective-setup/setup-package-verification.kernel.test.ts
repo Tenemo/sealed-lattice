@@ -4,6 +4,7 @@ import { setupRequest, validHash } from '../bgv-passive-setup-fixtures.js';
 
 import {
     acceptedShapedSetupPackage,
+    acceptedShapedSetupVerificationCompanions,
     acceptedVssComplaintSet,
     rebindCollectiveSetupPackageHash,
 } from './accepted-setup-package-fixtures.js';
@@ -67,9 +68,12 @@ describe('collective BGV setup kernel commands', () => {
             kernel,
             parameters,
         );
+        const verificationCompanions =
+            await acceptedShapedSetupVerificationCompanions(kernel, parameters);
 
         const result = kernel.verifyCollectiveBgvSetup({
             setupPackage,
+            ...verificationCompanions,
             expectedManifestHash: setupRequest.manifestHash,
             expectedRosterHash: String(
                 (setupPackage.setupContext as JsonRecord).rosterHash,
@@ -94,6 +98,8 @@ describe('collective BGV setup kernel commands', () => {
         const parameters = kernel.describeCollectiveBgvSetupParameters({
             participantCount: 3,
         });
+        const verificationCompanions =
+            await acceptedShapedSetupVerificationCompanions(kernel, parameters);
 
         for (const [fieldName, malformedValue] of [
             ['setupEpoch', 'setup-epoch 1'],
@@ -110,6 +116,7 @@ describe('collective BGV setup kernel commands', () => {
 
             const result = kernel.verifyCollectiveBgvSetup({
                 setupPackage,
+                ...verificationCompanions,
                 expectedManifestHash: setupRequest.manifestHash,
                 expectedRosterHash: String(
                     (setupPackage.setupContext as JsonRecord).rosterHash,
@@ -135,6 +142,8 @@ describe('collective BGV setup kernel commands', () => {
             kernel,
             parameters,
         );
+        const verificationCompanions =
+            await acceptedShapedSetupVerificationCompanions(kernel, parameters);
         // Drift a same-secret proof statement hash. The same-secret
         // bridge binds the same-secret proof set root, so the recomputed root no
         // longer matches the bound root and the package is refused.
@@ -150,6 +159,7 @@ describe('collective BGV setup kernel commands', () => {
 
         const result = kernel.verifyCollectiveBgvSetup({
             setupPackage,
+            ...verificationCompanions,
             expectedManifestHash: setupRequest.manifestHash,
             expectedRosterHash: String(
                 (setupPackage.setupContext as JsonRecord).rosterHash,
@@ -170,6 +180,8 @@ describe('collective BGV setup kernel commands', () => {
             kernel,
             parameters,
         );
+        const verificationCompanions =
+            await acceptedShapedSetupVerificationCompanions(kernel, parameters);
         setupPackage.vssComplaints = await acceptedVssComplaintSet(
             setupPackage.setupContext as JsonRecord,
             setupPackage.privateVssEnvelopeCommitments as JsonRecord,
@@ -178,6 +190,7 @@ describe('collective BGV setup kernel commands', () => {
 
         const result = kernel.verifyCollectiveBgvSetup({
             setupPackage,
+            ...verificationCompanions,
             expectedManifestHash: setupRequest.manifestHash,
             expectedRosterHash: String(
                 (setupPackage.setupContext as JsonRecord).rosterHash,

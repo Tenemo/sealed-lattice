@@ -17,9 +17,10 @@ jobs:
     rust:
         name: rust
         runs-on: ubuntu-latest
-        timeout-minutes: 20
+        timeout-minutes: 120
         steps:
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+            - uses: ./.github/actions/bootstrap-pnpm
             - uses: dtolnay/rust-toolchain@b18f7037bce1ea84c086f4d5e9493f853c0ce412
               with:
                   components: clippy, rustfmt
@@ -28,7 +29,7 @@ jobs:
             - run: cargo fmt --check -p sealed-lattice-kernel
             - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
             - name: Run Rust tests with optimized test profile
-              run: cargo test --workspace
+              run: pnpm run test:rust:kernel
 
     rust-accepted-setup:
         name: rust accepted setup

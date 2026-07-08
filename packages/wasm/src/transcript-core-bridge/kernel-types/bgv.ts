@@ -81,6 +81,8 @@ export type BgvCollectiveSetupTransportCompanions = Readonly<{
     readonly transportedPublicKeyShareMaterial?: BgvTransportedPublicKeyShareMaterial;
     readonly transportedPublicKeyShareProofMaterial?: BgvTransportedSetupProofMaterialSet<'SetupTransportedPublicKeyShareProofMaterialSet'>;
     readonly transportedEvaluationKeyShareProofMaterial?: BgvTransportedSetupProofMaterialSet<'SetupTransportedEvaluationKeyShareProofMaterialSet'>;
+    readonly transportedVssShareLinkageProofMaterial?: BgvTransportedSetupProofMaterialSet<'SetupTransportedVssShareLinkageProofMaterialSet'>;
+    readonly transportedSameSecretBridgeProofMaterial?: BgvTransportedSetupProofMaterialSet<'SetupTransportedSameSecretBridgeProofMaterialSet'>;
     readonly transportedEvaluationKeyShareComponentMaterial?: BgvTransportedEvaluationKeyShareComponentMaterialSet;
     readonly transportedEvaluationKeyAggregateBindingOpenings?: BgvTransportedEvaluationKeyAggregateBindingOpeningSet;
     readonly transportedPublicEvaluationKeyMaterial?: BgvTransportedPublicEvaluationKeyMaterialSet;
@@ -238,10 +240,6 @@ export type BgvPassiveSetupPackage = {
         readonly targetDecryptionParametersHash: ProtocolHash;
         readonly targetDecryptionParametersBindingHash: ProtocolHash;
     };
-};
-
-export type BgvPassiveSetupVerification = {
-    readonly operation: 'verifyBgvPassiveSetupPackage';
 };
 
 export type BgvCollectiveSetupParametersDescription = {

@@ -113,67 +113,11 @@ fn terminal_transport_policy_accepts_binary_setup_and_key_material_references() 
         SETUP_PROOF_MATERIAL_ENCODING,
         EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
     );
-    let request = serde_json::json!({
-        "transportedVssCoefficientCommitmentMaterial": {
-            "objectType": "SetupTransportedVssCoefficientCommitmentMaterial",
-            "binaryFormat": "sealed-lattice-vss-coefficient-commitment-material-binary-v1",
-            "chunkCount": 1,
-            "totalByteLength": 64,
-            "fullObjectHash": valid_hash('5'),
-            "chunkHashes": [valid_hash('6')],
-            "chunkRoot": valid_hash('7'),
-        },
-        "verifiedVssCoefficientCommitmentMaterial": {
-            "objectType": "VerifiedVssCoefficientCommitmentMaterial",
-            "verifiedMaterialId": "terminal-policy-test-material",
-        },
-    });
 
-    let response = verify_terminal_setup_transport_policy(&package, &request)
+    let response = verify_terminal_setup_transport_policy(&package, &serde_json::json!({}))
         .expect("terminal transport policy");
 
     assert!(response.is_none());
-}
-
-#[test]
-fn terminal_transport_policy_refuses_raw_vss_chunk_sidecar() {
-    let package = terminal_transport_policy_package_with_material_encodings(
-        "binary-chunked-full-public-setup-commitment-values",
-        PUBLIC_KEY_SHARE_MATERIAL_TRANSPORT_ENCODING,
-        SETUP_PROOF_MATERIAL_ENCODING,
-        EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
-    );
-    let request = serde_json::json!({
-        "transportedVssCoefficientCommitmentMaterial": {
-            "objectType": "SetupTransportedVssCoefficientCommitmentMaterial",
-            "binaryFormat": "sealed-lattice-vss-coefficient-commitment-material-binary-v1",
-            "chunkCount": 1,
-            "totalByteLength": 64,
-            "fullObjectHash": valid_hash('5'),
-            "chunkHashes": [valid_hash('6')],
-            "chunkRoot": valid_hash('7'),
-            "chunks": [
-                {
-                    "chunkIndex": 0,
-                    "bytesHex": "00",
-                }
-            ],
-        },
-        "verifiedVssCoefficientCommitmentMaterial": {
-            "objectType": "VerifiedVssCoefficientCommitmentMaterial",
-            "verifiedMaterialId": "terminal-policy-test-material",
-        },
-    });
-
-    let response = verify_terminal_setup_transport_policy(&package, &request)
-        .expect("terminal transport policy")
-        .expect("raw VSS chunk sidecar refusal");
-
-    assert_eq!(response["isValid"], false);
-    assert_eq!(
-        response["refusedObjects"][0]["reasonCode"],
-        "terminalVssMaterialHandleRequired"
-    );
 }
 
 #[test]
@@ -185,19 +129,6 @@ fn terminal_transport_policy_refuses_raw_key_switch_component_chunk_sidecar() {
         EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
     );
     let request = serde_json::json!({
-        "transportedVssCoefficientCommitmentMaterial": {
-            "objectType": "SetupTransportedVssCoefficientCommitmentMaterial",
-            "binaryFormat": "sealed-lattice-vss-coefficient-commitment-material-binary-v1",
-            "chunkCount": 1,
-            "totalByteLength": 64,
-            "fullObjectHash": valid_hash('5'),
-            "chunkHashes": [valid_hash('6')],
-            "chunkRoot": valid_hash('7'),
-        },
-        "verifiedVssCoefficientCommitmentMaterial": {
-            "objectType": "VerifiedVssCoefficientCommitmentMaterial",
-            "verifiedMaterialId": "terminal-policy-test-material",
-        },
         "transportedEvaluationKeyShareComponentMaterial": {
             "objectType": "SetupTransportedEvaluationKeyShareComponentMaterialSet",
             "componentMaterials": [
@@ -230,37 +161,6 @@ fn terminal_transport_policy_refuses_raw_key_switch_component_chunk_sidecar() {
     assert_eq!(
         response["refusedObjects"][0]["reasonCode"],
         "terminalKeySwitchMaterialHandleRequired"
-    );
-}
-
-#[test]
-fn terminal_transport_policy_reports_missing_stream_verified_vss_handle() {
-    let package = terminal_transport_policy_package_with_material_encodings(
-        "binary-chunked-full-public-setup-commitment-values",
-        PUBLIC_KEY_SHARE_MATERIAL_TRANSPORT_ENCODING,
-        SETUP_PROOF_MATERIAL_ENCODING,
-        EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
-    );
-    let request = serde_json::json!({
-        "transportedVssCoefficientCommitmentMaterial": {
-            "objectType": "SetupTransportedVssCoefficientCommitmentMaterial",
-            "binaryFormat": "sealed-lattice-vss-coefficient-commitment-material-binary-v1",
-            "chunkCount": 1,
-            "totalByteLength": 64,
-            "fullObjectHash": valid_hash('5'),
-            "chunkHashes": [valid_hash('6')],
-            "chunkRoot": valid_hash('7'),
-        },
-    });
-
-    let response = verify_terminal_setup_transport_policy(&package, &request)
-        .expect("terminal transport policy")
-        .expect("missing stream-verified VSS handle response");
-
-    assert_eq!(response["isValid"], false);
-    assert_eq!(
-        response["missingObjects"],
-        serde_json::json!(["verifiedVssCoefficientCommitmentMaterial"])
     );
 }
 

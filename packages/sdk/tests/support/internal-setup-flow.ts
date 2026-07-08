@@ -623,7 +623,6 @@ const setupPhaseNumber = (
     return phase.phaseNumber;
 };
 
-/** Creates the signed setup intent object for one trustee. */
 export const createSetupIntent = async (
     input: SetupIntentInput,
 ): Promise<SetupPhaseParticipantObject> => {
@@ -639,25 +638,21 @@ export const createSetupIntent = async (
     } satisfies ProtocolSetupPhaseParticipantObjectInput) as Promise<SetupPhaseParticipantObject>;
 };
 
-/** Creates a deterministic setup phase record from signed participant objects. */
 export const createSetupPhaseRecord = (
     input: SetupPhaseRecordInput,
 ): SetupPhaseRecord =>
     createSetupPhaseRecordInternal(input) as SetupPhaseRecord;
 
-/** Creates a public common-randomness reveal record for one trustee. */
 export const createCommonRandomnessReveal = (
     input: CommonRandomnessRevealInput,
 ): Promise<CommonRandomnessReveal> =>
     createCommonRandomnessRevealInternal(input);
 
-/** Creates a public common-randomness commit record for one trustee. */
 export const createCommonRandomnessCommit = (
     input: CommonRandomnessCommitInput,
 ): Promise<CommonRandomnessCommit> =>
     createCommonRandomnessCommitInternal(input);
 
-/** Assembles full-roster common randomness and accepted public derivations. */
 export const createSetupCommonRandomness = async (
     input: SetupCommonRandomnessInput,
 ): Promise<SetupCommonRandomness> => {
@@ -716,7 +711,6 @@ const assertRefusedPrivateVssVerification = (
     }
 };
 
-/** Creates a signed VSS share acceptance from a matching accepted local verification. */
 export const createVssShareAcceptance = async (
     input: VssShareAcceptanceInput,
 ): Promise<VssShareAcceptance> => {
@@ -732,7 +726,6 @@ export const createVssShareAcceptance = async (
     );
 };
 
-/** Creates a signed VSS complaint from a refused local private VSS verification. */
 export const createVssComplaint = async (
     input: VssComplaintInput,
 ): Promise<VssComplaint> => {
@@ -750,7 +743,6 @@ export const createVssComplaint = async (
     } as unknown as Parameters<typeof createVssComplaintInternal>[0]);
 };
 
-/** Creates a roots-only setup contribution record for one trustee. */
 export const createSetupContribution = (
     input: SetupContributionInput,
 ): SetupContribution =>
@@ -758,63 +750,51 @@ export const createSetupContribution = (
         input as unknown as SetupContributionAssemblyInput,
     );
 
-/** Creates root-bound setup certificates from parameters and transport evidence. */
 export const createSetupCertificates = (
     input: SetupCertificatesInput,
 ): SetupCertificates => createSetupCertificatesInternal(input);
 
-/** Creates a hash-bound setup package from canonical public setup records. */
 export const createSetupPackage = (input: SetupPackageInput): SetupPackage =>
     createSetupPackageInternal(input as unknown as ProtocolSetupPackageInput);
 
-/** Creates root-bound public-key share records from public component hashes. */
 export const createPublicKeyShareSet = (
     input: PublicKeyShareSetInput,
 ): PublicKeyShareSet => createPublicKeyShareSetInternal(input);
 
-/** Creates root-bound public-key share proof statement records. */
 export const createPublicKeyShareProofSet = (
     input: PublicKeyShareProofSetInput,
 ): PublicKeyShareProofSet => createPublicKeyShareProofSetInternal(input);
 
-/** Creates root-bound same-secret proof records from generated proof material. */
 export const createSameSecretProofSet = (
     input: SameSecretProofSetInput,
 ): SameSecretProofSet => createSameSecretProofSetInternal(input);
 
-/** Creates root-bound public-key share material records from public coefficients. */
 export const createPublicKeyShareMaterialSet = (
     input: PublicKeyShareMaterialSetInput,
 ): PublicKeyShareMaterialSet => createPublicKeyShareMaterialSetInternal(input);
 
-/** Creates root-bound public-key succinct proof records from generated proof material. */
 export const createPublicKeyShareSuccinctProofSet = (
     input: PublicKeyShareSuccinctProofSetInput,
 ): PublicKeyShareSuccinctProofSet =>
     createPublicKeyShareSuccinctProofSetInternal(input);
 
-/** Freezes the evaluator-key schedule used by setup verification. */
 export const createEvaluatorKeySchedule = (
     input: EvaluatorKeyScheduleInput,
 ): EvaluatorKeySchedule => createEvaluatorKeyScheduleInternal(input);
 
-/** Creates root-bound relinearization share records from public share material. */
 export const createRelinearizationKeyShareRounds = (
     input: RelinearizationKeyShareRoundsInput,
 ): RelinearizationKeyShareRounds =>
     createRelinearizationKeyShareRoundsInternal(input);
 
-/** Creates root-bound Galois share batch records from public share material. */
 export const createGaloisKeyShareBatches = (
     input: GaloisKeyShareBatchesInput,
 ): readonly GaloisKeyShareBatch[] => createGaloisKeyShareBatchesInternal(input);
 
-/** Creates public evaluation-key roots from verified relinearization and Galois records. */
 export const createPublicEvaluationKeySet = (
     input: PublicEvaluationKeySetInput,
 ): PublicEvaluationKeySet => createPublicEvaluationKeySetInternal(input);
 
-/** Encrypts local setup state from verified private VSS shares without returning plaintext. */
 export const exportEncryptedLocalTrusteeSetupState = async (
     input: ExportEncryptedLocalTrusteeSetupStateInput,
 ): Promise<ExportEncryptedLocalTrusteeSetupStateResult> => {
@@ -858,7 +838,8 @@ const assertExpectedHash = (
     }
 };
 
-// Unconditional payload-to-commitment binding comes from the kernel localStateRoot check; the optional expected* arguments only add extra caller pins and are skipped when undefined.
+// The kernel binds payload to commitment through localStateRoot; the optional
+// expected* arguments are caller pins.
 const assertRestoredLocalStateBindings = (
     input: RestoreLocalTrusteeSetupStateInput,
     sealedLocalStatePayload: LocalTrusteeSetupStateSealedPayload,
@@ -954,7 +935,6 @@ const assertRestoredLocalStateBindings = (
     }
 };
 
-/** Restores encrypted local setup state and verifies the roots-only commitment. */
 export const restoreLocalTrusteeSetupState = async (
     input: RestoreLocalTrusteeSetupStateInput,
 ): Promise<RestoredLocalTrusteeSetupState> => {

@@ -44,6 +44,11 @@ import {
     createSetupPhaseRecord,
 } from '#packages/protocol/src/setup/setup-phase-records';
 import {
+    chunklessSetupProofMaterialSetForVerificationInput,
+    type VerifiedSetupProofMaterial,
+    type VerifiedSetupProofMaterialSet,
+} from '#packages/protocol/src/setup/setup-proof-material-transport';
+import {
     type CollectiveBgvSetupContext,
     type ProtocolRootSigner,
 } from '#packages/protocol/src/setup/vss-share-verification-records';
@@ -51,11 +56,38 @@ import type {
     BgvCollectiveSetupParametersDescription,
     TranscriptCoreKernel,
 } from '#packages/wasm/src/index';
+import type {
+    BgvCollectiveSetupTransportCompanions,
+    BgvTransportedSetupProofMaterialSet,
+} from '#packages/wasm/src/transcript-core-bridge/kernel-types/bgv';
 
 const acceptedShapedSetupPackageCacheByParametersKey = new Map<
     string,
-    Promise<JsonRecord>
+    Promise<AcceptedShapedSetupPackageFixture>
 >();
+const acceptedShapedSetupVerificationCompanionsCacheByKernel = new WeakMap<
+    TranscriptCoreKernel,
+    Map<string, Promise<AcceptedShapedSetupVerificationCompanions>>
+>();
+
+type AcceptedShapedSetupPackageFixture = {
+    readonly setupPackage: JsonRecord;
+} & Required<
+    Pick<
+        BgvCollectiveSetupTransportCompanions,
+        | 'transportedVssShareLinkageProofMaterial'
+        | 'transportedSameSecretBridgeProofMaterial'
+    >
+>;
+
+export type AcceptedShapedSetupVerificationCompanions = Required<
+    Pick<
+        BgvCollectiveSetupTransportCompanions,
+        | 'transportedVssShareLinkageProofMaterial'
+        | 'transportedSameSecretBridgeProofMaterial'
+        | 'verifiedSetupProofMaterials'
+    >
+>;
 
 function acceptedShapedSetupPackageCacheKey(
     kernel: TranscriptCoreKernel,
@@ -72,7 +104,7 @@ function acceptedShapedSetupPackageCacheKey(
 async function buildAcceptedShapedSetupPackage(
     kernel: TranscriptCoreKernel,
     setupParameters: BgvCollectiveSetupParametersDescription,
-): Promise<JsonRecord> {
+): Promise<AcceptedShapedSetupPackageFixture> {
     let previousPhaseRoot: string | null = null;
     const participantCount = setupParameters.participantCount;
     const setupContext = {
@@ -275,13 +307,78 @@ async function buildAcceptedShapedSetupPackage(
     };
     rebindCollectiveSetupPackageHash(kernel, setupPackage);
 
-    return setupPackage;
+    return {
+        setupPackage,
+        transportedVssShareLinkageProofMaterial:
+            vssPublicMaterial.transportedVssShareLinkageProofMaterial,
+        transportedSameSecretBridgeProofMaterial:
+            sameSecretBridge.transportedSameSecretBridgeProofMaterial,
+    };
 }
 
-export async function acceptedShapedSetupPackage(
+const streamTransportedSetupProofMaterialSet = (
+    kernel: TranscriptCoreKernel,
+    materialSet: BgvTransportedSetupProofMaterialSet,
+    verificationIdPrefix: string,
+): readonly VerifiedSetupProofMaterial[] => {
+    const proofMaterials = materialSet.proofMaterials;
+    if (!Array.isArray(proofMaterials)) {
+        throw new TypeError(
+            `${verificationIdPrefix} proofMaterials must be an array.`,
+        );
+    }
+
+    return proofMaterials.map((proofMaterialValue, proofMaterialIndex) => {
+        const proofMaterial = proofMaterialValue as JsonRecord;
+        const chunks = proofMaterial.chunks;
+        if (!Array.isArray(chunks)) {
+            throw new TypeError(
+                `${verificationIdPrefix} proof material chunks must be an array.`,
+            );
+        }
+        const { chunks: omittedChunks, ...transportReference } = proofMaterial;
+        void omittedChunks;
+        const proofMaterialRoot = String(proofMaterial.proofMaterialRoot);
+        const verificationId = [
+            verificationIdPrefix,
+            String(proofMaterialIndex),
+            proofMaterialRoot.slice(0, 16),
+        ].join('-');
+        kernel.beginSetupProofMaterialTransportStream({
+            verificationId,
+            transportedSetupProofMaterial: transportReference,
+        });
+        for (const chunkValue of chunks) {
+            const chunk = chunkValue as JsonRecord;
+            kernel.absorbSetupProofMaterialTransportStreamChunk({
+                verificationId,
+                chunkIndex: Number(chunk.chunkIndex),
+                bytesHex: String(chunk.bytesHex),
+            });
+        }
+        const verification = kernel.finishSetupProofMaterialTransportStream({
+            verificationId,
+        }) as unknown as JsonRecord;
+        const verifiedSetupProofMaterial =
+            verification.verifiedSetupProofMaterial;
+        if (
+            typeof verifiedSetupProofMaterial !== 'object' ||
+            verifiedSetupProofMaterial === null ||
+            Array.isArray(verifiedSetupProofMaterial)
+        ) {
+            throw new Error(
+                `${verificationIdPrefix} stream verification did not return a verified setup proof material handle.`,
+            );
+        }
+
+        return verifiedSetupProofMaterial as VerifiedSetupProofMaterial;
+    });
+};
+
+export async function acceptedShapedSetupPackageFixture(
     kernel: TranscriptCoreKernel,
     setupParameters: BgvCollectiveSetupParametersDescription,
-): Promise<JsonRecord> {
+): Promise<AcceptedShapedSetupPackageFixture> {
     const cacheKey = acceptedShapedSetupPackageCacheKey(
         kernel,
         setupParameters,
@@ -299,5 +396,88 @@ export async function acceptedShapedSetupPackage(
         );
     }
 
-    return cloneJsonRecord(await acceptedShapedSetupPackagePromise);
+    return acceptedShapedSetupPackagePromise;
+}
+
+const buildAcceptedShapedSetupVerificationCompanions = async (
+    kernel: TranscriptCoreKernel,
+    setupParameters: BgvCollectiveSetupParametersDescription,
+): Promise<AcceptedShapedSetupVerificationCompanions> => {
+    const fixture = await acceptedShapedSetupPackageFixture(
+        kernel,
+        setupParameters,
+    );
+    const verificationIdHashFragment =
+        setupParameters.setupParametersHash.slice(0, 16);
+    const proofMaterials = [
+        ...streamTransportedSetupProofMaterialSet(
+            kernel,
+            fixture.transportedVssShareLinkageProofMaterial,
+            `accepted-setup-vss-share-linkage-${verificationIdHashFragment}`,
+        ),
+        ...streamTransportedSetupProofMaterialSet(
+            kernel,
+            fixture.transportedSameSecretBridgeProofMaterial,
+            `accepted-setup-same-secret-bridge-${verificationIdHashFragment}`,
+        ),
+    ];
+    const verifiedSetupProofMaterials = {
+        objectType: 'VerifiedSetupProofMaterialSet',
+        proofMaterials,
+    } satisfies VerifiedSetupProofMaterialSet;
+
+    return {
+        transportedVssShareLinkageProofMaterial:
+            chunklessSetupProofMaterialSetForVerificationInput(
+                fixture.transportedVssShareLinkageProofMaterial,
+                verifiedSetupProofMaterials,
+            ),
+        transportedSameSecretBridgeProofMaterial:
+            chunklessSetupProofMaterialSetForVerificationInput(
+                fixture.transportedSameSecretBridgeProofMaterial,
+                verifiedSetupProofMaterials,
+            ),
+        verifiedSetupProofMaterials,
+    };
+};
+
+export async function acceptedShapedSetupVerificationCompanions(
+    kernel: TranscriptCoreKernel,
+    setupParameters: BgvCollectiveSetupParametersDescription,
+): Promise<AcceptedShapedSetupVerificationCompanions> {
+    const cacheKey = acceptedShapedSetupPackageCacheKey(
+        kernel,
+        setupParameters,
+    );
+    let cacheByParametersKey =
+        acceptedShapedSetupVerificationCompanionsCacheByKernel.get(kernel);
+    if (cacheByParametersKey === undefined) {
+        cacheByParametersKey = new Map();
+        acceptedShapedSetupVerificationCompanionsCacheByKernel.set(
+            kernel,
+            cacheByParametersKey,
+        );
+    }
+    let companionsPromise = cacheByParametersKey.get(cacheKey);
+    if (companionsPromise === undefined) {
+        companionsPromise = buildAcceptedShapedSetupVerificationCompanions(
+            kernel,
+            setupParameters,
+        );
+        cacheByParametersKey.set(cacheKey, companionsPromise);
+    }
+
+    return companionsPromise;
+}
+
+export async function acceptedShapedSetupPackage(
+    kernel: TranscriptCoreKernel,
+    setupParameters: BgvCollectiveSetupParametersDescription,
+): Promise<JsonRecord> {
+    const fixture = await acceptedShapedSetupPackageFixture(
+        kernel,
+        setupParameters,
+    );
+
+    return cloneJsonRecord(fixture.setupPackage);
 }

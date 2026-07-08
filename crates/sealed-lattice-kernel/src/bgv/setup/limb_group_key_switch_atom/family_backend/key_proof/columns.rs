@@ -60,7 +60,7 @@ pub(super) struct KeyColumnPlan<'a, const LIMB_COUNT: usize> {
     secret: &'a [i64],
     digits: &'a [DigitWitness],
     // The recombined component material `B_j` per digit, committed as one masked
-    // MATERIAL column per digit and folded into the sumcheck's left-hand side.
+    // material column per digit and folded into the sumcheck's left-hand side.
     // Borrowed per-digit slices, never a full clone, so the streamed prover keeps
     // its bounded footprint. The prover normally binds the public material here;
     // a test override can substitute a mismatched column to exercise the
@@ -145,7 +145,7 @@ impl<'a, const LIMB_COUNT: usize> KeyColumnPlan<'a, LIMB_COUNT> {
             base_mask_seed_starts.push(*salt_seed);
             advance_seed(salt_seed, steps);
         }
-        // The MATERIAL columns' mask seeds are drawn right after the base seeds,
+        // The material columns' mask seeds are drawn right after the base seeds,
         // one per digit, so the deterministic salt/mask stream advances in a
         // fixed order that the commit, sumcheck, combination, and opening passes
         // all reproduce.
@@ -296,7 +296,7 @@ impl<'a, const LIMB_COUNT: usize> KeyColumnPlan<'a, LIMB_COUNT> {
         )
     }
 
-    // The masked coefficient vector for MATERIAL column `digit`: the recombined
+    // The masked coefficient vector for material column `digit`: the recombined
     // component material `B_digit` interpolated over the trace domain, then
     // masked exactly like a base column (per-column mask-seed snapshot), so it is
     // bit-identical on every regeneration and its opening is bounded-leakage.

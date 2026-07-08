@@ -12,5 +12,8 @@ export { focusedPrivateVssSourceDeliveryReferences } from './accepted-setup-pack
 export { packageShapePrivateVssEnvelopeCommitments } from './accepted-setup-package-fixtures/private-vss-delivery.js';
 export { acceptedPublicKeyShareProofs } from './accepted-setup-package-fixtures/public-key-shares.js';
 export { acceptedPublicKeyShares } from './accepted-setup-package-fixtures/public-key-shares.js';
-export { acceptedShapedSetupPackage } from './accepted-setup-package-fixtures/package-assembler.js';
+export {
+    acceptedShapedSetupPackage,
+    acceptedShapedSetupVerificationCompanions,
+} from './accepted-setup-package-fixtures/package-assembler.js';
 export { acceptedVssCoefficientCommitments } from './accepted-setup-package-fixtures/vss-commitments.js';

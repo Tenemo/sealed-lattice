@@ -353,101 +353,82 @@ export type TargetDecryptionResultReleaseInput = Readonly<{
 export type TargetDecryptionResultRelease =
     BgvTargetDecryptionResultReleaseCompletion;
 
-/** Derives threshold, quorum, and warning parameters for a roster. */
 export const deriveThresholdParameters = (
     input: ThresholdParametersInput,
 ): ThresholdParameters => deriveThresholdParametersInternal(input);
 
-/** Derives the concrete roster parameters after registration closes and the roster freezes. */
 export const deriveFrozenRosterParameters =
     deriveFrozenRosterParametersInternal;
 
-/** Derives the setup-roster hash consumed by collective BGV setup package verification. */
 export const deriveCollectiveBgvSetupRosterHash = (
     entries: readonly CollectiveBgvSetupRosterEntryInput[],
 ): ProtocolHash => deriveCollectiveBgvSetupRosterHashInternal(entries);
 
-/** Derives the canonical poll-spec hash including roster policy fields. */
 export const derivePollSpecHash = derivePollSpecHashInternal;
 
-/** Derives the canonical threshold parameters hash for frozen roster parameters. */
 export const deriveThresholdParametersHash =
     deriveThresholdParametersHashInternal;
 
-/** Validates and normalizes a poll specification from trusted or untrusted input. */
 export function validatePollSpec(input: PollSpecInput): PollSpecValidation;
 export function validatePollSpec(input: unknown): PollSpecValidation;
 export function validatePollSpec(input: unknown): PollSpecValidation {
     return validatePollSpecInternal(input);
 }
 
-/** Returns whether a lifecycle transition is part of the supported state graph. */
 export const isValidLifecycleTransition = (
     transition: LifecycleTransition,
 ): boolean => isValidLifecycleTransitionInternal(transition);
 
-/** Evaluates whether a protocol action is allowed in the current context. */
 export const evaluateActionCapability = (
     action: ProtocolAction,
     context: CapabilityContext,
 ): CapabilityDecision => evaluateActionCapabilityInternal(action, context);
 
-/** Verifies the integrated foundation transcript without claiming full election verification. */
 export const verifyFoundationTranscript = (
     input: FoundationTranscriptInput,
 ): FoundationTranscriptVerification =>
     verifyFoundationTranscriptInternal(input);
 
-/** Verifies signed board heads, inclusion proofs, and append-only evidence. */
 export const verifyBoardConsistency = (
     input: BoardConsistencyInput,
 ): BoardConsistencyVerification => verifyBoardConsistencyInternal(input);
 
-/** Verifies the signed shell and inclusion evidence for a cast receipt. */
 export const verifyCastReceiptShell = (
     input: CastReceiptVerificationInput,
 ): CastReceiptVerification => verifyCastReceiptShellInternal(input);
 
-/** Verifies the signed shell and inclusion evidence for a close record. */
 export const verifyCloseRecordShell = (
     input: CloseRecordVerificationInput,
 ): CloseRecordVerification => verifyCloseRecordShellInternal(input);
 
-/** Verifies witness checkpoints and board evidence for a target finality record. */
 export const verifyTargetFinality = (
     input: TargetFinalityVerificationInput,
 ): TargetFinalityVerification => verifyTargetFinalityInternal(input);
 
-/** Derives the deterministic first-valid order for validated objects. */
 export const deriveValidatedFirstValidOrder = (
     input: FirstValidOrderingInput,
 ): FirstValidOrderingVerification =>
     deriveValidatedFirstValidOrderInternal(input);
 
-/** Verifies one participant's local acceptance of the frozen public roster. */
 export const verifyRosterExternalAcceptance = (
     input: RosterExternalAcceptanceVerificationInput,
 ): RosterExternalAcceptanceVerification =>
     verifyRosterExternalAcceptanceInternal(input);
 
-/** Verifies roster freeze inputs, manifest evidence, and setup uniqueness. */
 export const verifyRosterManifestTranscript = (
     input: RosterManifestTranscriptInput,
 ): RosterManifestTranscriptVerification =>
     verifyRosterManifestTranscriptInternal(input);
 
-/** Checks whether an action context is current for a signer recovery epoch. */
 export const isActionCurrentForRecoveryEpoch = (
     input: ActionCurrentForRecoveryEpochInput,
 ): ActionCurrentForRecoveryEpochResult =>
     isActionCurrentForRecoveryEpochInternal(input);
 
-/** Verifies a recovery epoch update and returns the accepted epoch entry. */
 export const verifyRecoveryEpochUpdate = (
     input: RecoveryEpochVerificationInput,
 ): RecoveryEpochVerification => verifyRecoveryEpochUpdateInternal(input);
 
-/** Verifies one private VSS share envelope locally without returning raw shares. */
 export const verifyPrivateVssShare = async (
     input: VerifyPrivateVssShareInput,
 ): Promise<PrivateVssShareVerification> => {
@@ -456,13 +437,11 @@ export const verifyPrivateVssShare = async (
     return kernel.verifyPrivateVssShareEnvelope(input);
 };
 
-/** Builds the public-only setup package verification input from package and transported setup material. */
 export const createSetupPackageVerificationInput = (
     input: SetupPackageVerificationInputSource,
 ): VerifySetupPackageInput =>
     createSetupPackageVerificationInputInternal(input);
 
-/** Verifies an accepted setup package with the packaged Rust/WASM kernel. */
 export const verifySetupPackage = async (
     input: VerifySetupPackageInput,
 ): Promise<SetupPackageVerification> => {
@@ -513,7 +492,6 @@ export const verifyTargetDecryptionResult = async (
     });
 };
 
-/** Verifies a transcript-core fixture with the packaged WASM kernel. */
 export const verifyTranscriptCoreFixture = async (
     fixture: TranscriptCoreFixture,
 ): Promise<TranscriptCoreVerificationResult> => {

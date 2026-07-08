@@ -21,13 +21,9 @@
 //! same-secret linkage opens the accepted constant commitments natively in the
 //! proof field so the proven relation secret is the committed trustee secret.
 //!
-//! Every layer is unconditionally binding (hash Merkle commitments, no
-//! norm-bound or matrix-uniformity subtlety), which is why this backend
-//! replaces the DEV-clone flat proof-field Ajtai opening (word-valued matrix,
-//! placeholder norm check) rather than shipping it. Soundness accounting and
-//! the QROM/zero-knowledge disclosure follow the existing succinct setup
-//! families (SEC-004/SEC-005 class); the maintainer setup-proof decision
-//! record owns the architecture.
+//! Every layer is unconditionally binding through hash Merkle commitments;
+//! soundness accounting and zero-knowledge disclosure follow the existing
+//! succinct setup proof families.
 
 pub(crate) mod atom_reduction;
 #[cfg(test)]
@@ -37,38 +33,17 @@ pub(crate) mod column_commitment;
 pub(crate) mod domain;
 pub(crate) mod key_proof;
 pub(crate) mod low_degree;
-// S1 aggregate binding substrate (batched linear-evaluation check over the
-// committed material). Un-gated because the accepted-setup eval-key verifier now
-// calls the aggregate-binding wrapper in `material_aggregate_verify` on the
-// acceptance path; the wrapper composes this identity check and the opening.
-// Integration WIP: the aggregate-binding wrapper is mid-wiring, so some of this
-// substrate is staged but not yet consumed on the acceptance path.
-#[allow(dead_code, unused_imports)]
 pub(crate) mod material_aggregate;
-// The batched linear-evaluation opening the S1 aggregate check consumes.
-// Un-gated alongside `material_aggregate` so the wrapper can decode and verify
-// transported opening bytes on the acceptance path.
-#[allow(dead_code, unused_imports)]
+#[cfg(test)]
+#[allow(clippy::too_many_arguments)]
+pub(crate) mod material_aggregate_creation;
 pub(crate) mod material_aggregate_opening;
-// The aggregate-binding wrapper wiring the opening and the identity check into
-// one runtime-key aggregate proof/verify. Un-gated so the accepted-setup
-// verifier can call its acceptance-path wrapper; the proof type it composes
-// stays `pub(super)`.
 #[allow(
-    dead_code,
-    unused_imports,
     clippy::too_many_arguments,
     clippy::needless_range_loop,
     clippy::unusual_byte_groupings
 )]
 pub(crate) mod material_aggregate_verify;
-// The setup-creation counterpart of the aggregate-binding wrapper: given each
-// trustee's recombined component material and the published runtime key group, it
-// commits the material columns, solves the wrap multiples, and opens the batched
-// linear evaluations, producing the package record and transported opening bytes
-// the verifier consumes. Un-gated so the accepted-setup creation path can call it.
-#[allow(dead_code, clippy::too_many_arguments)]
-pub(crate) mod material_aggregate_creation;
 pub(crate) mod merkle;
 pub(crate) mod polynomial;
 pub(crate) mod proof_codec;

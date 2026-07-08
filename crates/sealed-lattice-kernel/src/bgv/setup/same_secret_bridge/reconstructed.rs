@@ -93,9 +93,19 @@ pub(super) fn verify_reconstructed_same_secret_bridge_proof(
             unsigned_at_path(bridge_target_commitment, &["rnsPrime"])?,
             "same-secret bridge target commitment rnsPrime",
         )?;
+        let canonical_target_prime =
+            DATA_PRIMES
+                .get(target_rns_limb_index)
+                .copied()
+                .ok_or_else(|| {
+                    CanonicalError::new(
+                        CanonicalErrorCode::MalformedLength,
+                        "same-secret bridge targetRnsLimbCount exceeds the available target primes",
+                    )
+                })?;
         compare_required_u64(
             target_rns_prime,
-            DATA_PRIMES[target_rns_limb_index],
+            canonical_target_prime,
             "same-secret bridge proof canonical target prime",
         )?;
         compare_required_u64(

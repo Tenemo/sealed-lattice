@@ -122,9 +122,18 @@ pub(super) fn verify_statement_record(
                 &["rnsPrime"],
                 "VSS same-secret bridge target constant rnsPrime",
             )?;
+            let canonical_target_prime = DATA_PRIMES
+                .get(expected_rns_limb_index)
+                .copied()
+                .ok_or_else(|| {
+                    CanonicalError::new(
+                        CanonicalErrorCode::MalformedLength,
+                        "VSS same-secret bridge targetRnsLimbCount exceeds the available target primes",
+                    )
+                })?;
             compare_required_u64(
                 rns_prime,
-                DATA_PRIMES[expected_rns_limb_index],
+                canonical_target_prime,
                 "VSS same-secret bridge target constant rnsPrime",
             )?;
             compare_required_u64(

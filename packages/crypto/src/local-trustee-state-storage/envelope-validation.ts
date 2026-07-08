@@ -170,7 +170,7 @@ function validateEncryptedSealedMaterialEnvelope(
         canonicalJson(expectedMaterialAad),
     );
     const expectedMaterialAadHash = hash512Hex(
-        'sealed-lattice-local-trustee-state/sealed-material-aad-hash-v1',
+        'sealed-lattice-local-trustee-state/sealed-material-aad-hash-v2',
         [materialAadBytes],
     );
     if (encryptedMaterial.materialAadHash !== expectedMaterialAadHash) {
@@ -223,7 +223,7 @@ function validateEncryptedSealedMaterialEnvelope(
     } as Record<string, unknown>;
     delete envelopeWithoutHash.encryptedMaterialHash;
     const expectedEnvelopeHash = hashCanonicalValue(
-        'sealed-lattice-local-trustee-state/sealed-material-envelope-hash-v1',
+        'sealed-lattice-local-trustee-state/sealed-material-envelope-hash-v2',
         envelopeWithoutHash,
     );
     if (encryptedMaterial.encryptedMaterialHash !== expectedEnvelopeHash) {

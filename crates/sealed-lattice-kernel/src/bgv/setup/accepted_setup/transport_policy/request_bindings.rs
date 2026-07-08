@@ -24,23 +24,6 @@ pub(super) fn verify_setup_transport_request_bindings(
         };
     }
 
-    if let Some(transported_material) = request.get("transportedVssCoefficientCommitmentMaterial") {
-        transport_try!(require_setup_transport_entry(
-            transported_objects,
-            &setup_transport_expected_direct_material(
-                transported_material,
-                package_nested_hash(
-                    setup_package,
-                    "vssCoefficientCommitmentMaterial",
-                    "vssCoefficientCommitmentMaterialRoot",
-                )?,
-                SETUP_TRANSPORTED_VSS_MATERIAL_NAME,
-                SETUP_TRANSPORTED_VSS_MATERIAL_ROLE,
-                SETUP_TRANSPORT_DIRECT_HASH_FIELDS,
-                "transportedVssCoefficientCommitmentMaterial",
-            )?,
-        ));
-    }
     if let Some(transported_material) = request.get("transportedPublicKeyShareMaterial") {
         let Some(public_key_share_material_root) = setup_package
             .get("publicKeyShareMaterial")

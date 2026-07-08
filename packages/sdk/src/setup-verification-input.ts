@@ -143,16 +143,22 @@ const streamSetupProofMaterialSet = (
 type JsonRecordWithRoot = JsonRecord &
     Readonly<{ readonly keySwitchComponentMaterialRoot?: unknown }>;
 
-// Verification ids are process-local kernel stream handles, not security bindings; the cryptographic binding is the component material root.
+let evaluationKeyShareComponentMaterialVerificationSequence = 0;
+
+// Verification ids are process-local kernel stream handles, not security bindings; the cryptographic binding is the component material root. A per-process sequence prefix (as for setup proof material above) keeps the id unique even when a prior stream for the same root wedged its session after a mid-stream throw, so a retry does not collide on an already-active id.
 const evaluationKeyShareComponentMaterialVerificationId = (
     streamIndex: number,
     keySwitchComponentMaterialRoot: string,
-): string =>
-    [
+): string => {
+    evaluationKeyShareComponentMaterialVerificationSequence += 1;
+
+    return [
         'sdk-evaluation-key-component-material',
+        String(evaluationKeyShareComponentMaterialVerificationSequence),
         String(streamIndex),
         keySwitchComponentMaterialRoot.slice(0, 24),
     ].join('-');
+};
 
 // Streams each transported evaluation-key component material through the
 // file-backed component material transport so the kernel holds a stream-verified

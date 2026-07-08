@@ -114,7 +114,7 @@ impl<const LIMB_COUNT: usize> KeySource<LIMB_COUNT> {
 
 pub(super) struct KeyFriProof<const LIMB_COUNT: usize> {
     pub(crate) base_root: MerkleDigest,
-    // The MATERIAL commitment root: one masked column per digit holding the
+    // The material commitment root: one masked column per digit holding the
     // recombined component material `B_j`, committed before `gamma` is drawn so
     // the material is fixed prior to its reduction challenge.
     pub(crate) material_root: MerkleDigest,
@@ -153,7 +153,7 @@ const COLUMN_SECRET_SQUARE: usize = 1;
 const SHARED_COLUMN_COUNT: usize = 2;
 
 // Per-digit block: error, carry, error-square, error-support. The recombined
-// component material `B_j` is committed separately, in its own MATERIAL Merkle
+// component material `B_j` is committed separately, in its own material Merkle
 // group (one masked column per digit), not in this base block. `B_j` carries no
 // support constraint of its own: it is bound only by the relation, because the
 // batched sumcheck folds the committed `B_col_j` on its left-hand side (with the
@@ -192,7 +192,7 @@ fn digit_column(digit: usize, offset_in_block: usize) -> usize {
     SHARED_COLUMN_COUNT + digit * DIGIT_BLOCK_SIZE + offset_in_block
 }
 
-// The MATERIAL commitment holds one masked column per digit: digit `d`'s column
+// The material commitment holds one masked column per digit: digit `d`'s column
 // is the masked coefficients of the recombined component material `B_d`,
 // committed exactly like a base column. The batched sumcheck folds each column
 // on its left-hand side, so the committed material is load-bearing for the
@@ -285,10 +285,13 @@ mod linkage;
 mod prove;
 mod verify;
 
-pub(super) use linkage::{LinkageLayout, LinkageStatement, LinkageWitness};
+#[cfg(test)]
+pub(super) use linkage::LinkageLayout;
+pub(super) use linkage::{LinkageStatement, LinkageWitness};
 pub(super) use prove::prove_key_fri;
-// The single-source material-commitment regeneration the S1/S2 aggregate binding
+// The single-source material-commitment regeneration the aggregate binding
 // reuses to open exactly the atom proof's committed material.
+#[cfg(test)]
 pub(super) use prove::regenerate_material_commitment_inputs;
 #[cfg(test)]
 pub(super) use prove::{prove_key_fri_with_component_b, prove_round_one_key_fri};
@@ -300,6 +303,7 @@ pub(super) use verify::verify_round_one_key_fri;
 // always carry the linkage block, so the aggregate binding uses this to compute
 // the same `base_column_count` the atom prover's column plan uses. Kept as a thin
 // re-export so the layout construction has one home in `linkage`.
+#[cfg(test)]
 pub(super) fn key_switch_linkage_layout(
     ring_degree: usize,
 ) -> crate::encoding::CanonicalResult<LinkageLayout> {

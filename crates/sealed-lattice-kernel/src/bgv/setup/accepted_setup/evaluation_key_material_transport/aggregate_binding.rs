@@ -1,25 +1,25 @@
-//! Verifier-side wiring of the committed-material aggregate binding (S1) into
+//! Verifier-side wiring of the committed-material aggregate binding into
 //! the accepted-setup evaluation-key verification.
 //!
-//! The runtime relinearization and Galois keys are still DERIVED and returned by
+//! The runtime relinearization and Galois keys are still derived and returned by
 //! `public_key_reconstruction`, which sums each trustee's raw `component_b`
-//! per RNS limb. This module ADDS the aggregate binding the verified-download
+//! per RNS limb. This module adds the aggregate binding the verified-download
 //! reduction introduces: it binds the published runtime key to the trustee-
 //! committed material through the atom proofs' material roots plus a batched
 //! linear-evaluation opening per trustee, with public per-coefficient wrap
 //! multiples, checked by the family backend's `verify_material_aggregate`.
 //!
-//! A follow-up will RETIRE the raw-material summing as the aggregate binding once
-//! the setup-creation side emits the openings; until then both run - the runtime
-//! key stays a derivation checked by this identity rather than the aggregate's
-//! only binding. This file does NOT implement that creation-side aggregator; it
-//! only defines what the verifier consumes and runs the check fail-closed.
+//! The raw-material summing path still derives the runtime key; this verifier
+//! checks that derivation against the committed material rather than trusting a
+//! package-level claim. The creation-side aggregate lives in the family backend;
+//! this file only defines what accepted-setup verification consumes and runs the
+//! check fail-closed.
 //!
-//! S2 cross-binding: the aggregate opening on its own only proves it opens
+//! Per-atom material-root binding: the aggregate opening on its own only proves it opens
 //! whatever material root the package publishes. To tie that material to the
-//! ATOM-VERIFIED material, this module also surfaces each trustee's atom proof
+//! atom-verified material, this module also surfaces each trustee's atom proof
 //! `KeyFriProof.material_root` (decoded from the verified schedule container) and
-//! REFUSES unless every package `trusteeMaterialRoots` entry equals the atom
+//! refuses unless every package `trusteeMaterialRoots` entry equals the atom
 //! proof's own root for the same (trustee, key group). Without this, a malicious
 //! aggregator could publish a self-committed root over material that has valid
 //! delta-openings but fails the atom relation.
@@ -57,12 +57,14 @@ const AGGREGATE_BINDING_LIMB_GROUP_CAPACITY: usize = 16;
 
 // The FRI query count the schedule prover and its atom proofs use, so the
 // transported openings the verifier checks share the same soundness parameter.
-// Recomputed here (not read from the package) so a package cannot weaken it.
-const AGGREGATE_BINDING_QUERY_COUNT: usize = 80;
+// Derived from the schedule constant (not read from the package) so a package
+// cannot weaken it and the two can never silently diverge.
+const AGGREGATE_BINDING_QUERY_COUNT: usize =
+    crate::bgv::setup::limb_group_key_switch_atom::family_backend::schedule::SCHEDULE_QUERY_COUNT;
 
-// Object types for the newly defined aggregate-binding package record and the
-// transported opening set. Self-describing and canonical, like the other
-// evaluation-key transport objects.
+// Object types for the aggregate-binding package record and transported opening
+// set. Self-describing and canonical, like the other evaluation-key transport
+// objects.
 const AGGREGATE_BINDING_SET_OBJECT_TYPE: &str = "EvaluationKeyAggregateBindingSet";
 const AGGREGATE_BINDING_KEY_GROUP_OBJECT_TYPE: &str = "EvaluationKeyAggregateBindingKeyGroup";
 const AGGREGATE_BINDING_OPENING_SET_OBJECT_TYPE: &str =
@@ -143,9 +145,9 @@ pub(super) fn verify_accepted_key_switch_aggregate_binding(
             }
         };
 
-    // Surface each trustee's atom-proof material commitment roots (S2 cross-
-    // binding): the aggregate binds runtime key to the trustee-committed material
-    // only if every package `trusteeMaterialRoots` entry equals the ATOM proof's
+    // Surface each trustee's atom-proof material commitment roots: the aggregate
+    // binds runtime key to the trustee-committed material
+    // only if every package `trusteeMaterialRoots` entry equals the atom proof's
     // own `KeyFriProof.material_root` for the same (trustee, key group). Building
     // this once here reconstructs each trustee's statement and decodes the verified
     // schedule container. The same-secret bridge is rebuilt from the package the
@@ -339,7 +341,7 @@ fn verify_one_key_group(
         }
     };
 
-    // S2 cross-binding: each package material root must equal the ATOM proof's own
+    // Per-atom material-root binding: each package material root must equal the atom proof's own
     // `KeyFriProof.material_root` for the same (trustee, key group). Without this,
     // the opening only proves it opens whatever root the package published, which a
     // malicious aggregator could set to a self-committed root over material that
@@ -585,7 +587,10 @@ fn parse_wrap_multiples(key_group: &Value, roster_size: u64) -> CanonicalResult<
                     "aggregate-binding wrap multiple must be a signed integer",
                 )
             })?;
-            if wrap.abs() > maximum_magnitude {
+            // `unsigned_abs` (not `abs`) so a hostile `i64::MIN` wrap multiple is
+            // rejected here instead of debug-panicking / release-wrapping past the
+            // guard.
+            if wrap.unsigned_abs() > maximum_magnitude as u64 {
                 return Err(CanonicalError::new(
                     CanonicalErrorCode::MalformedLength,
                     "aggregate-binding wrap multiple exceeds the roster-bounded magnitude",
@@ -658,4 +663,60 @@ fn gather_trustee_roots_and_openings(
     }
 
     Ok((material_roots, opening_bytes))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn canonical_material_root() -> String {
+        "1".repeat(AGGREGATE_MATERIAL_ROOT_BYTES * 2)
+    }
+
+    #[test]
+    fn transported_openings_parse_to_empty_without_an_opening_set() {
+        let openings =
+            transported_aggregate_binding_openings_by_material_root(&serde_json::json!({}))
+                .expect("an absent opening set parses to an empty map");
+        assert!(openings.is_empty());
+    }
+
+    #[test]
+    fn transported_openings_reject_a_wrong_opening_set_object_type() {
+        let request = serde_json::json!({
+            "transportedEvaluationKeyAggregateBindingOpenings": {
+                "objectType": "NotAnAggregateBindingOpeningSet",
+                "openings": [],
+            },
+        });
+        assert!(transported_aggregate_binding_openings_by_material_root(&request).is_err());
+    }
+
+    #[test]
+    fn transported_openings_reject_a_repeated_material_root() {
+        let material_root = canonical_material_root();
+        let request = serde_json::json!({
+            "transportedEvaluationKeyAggregateBindingOpenings": {
+                "objectType": AGGREGATE_BINDING_OPENING_SET_OBJECT_TYPE,
+                "openings": [
+                    { "materialRoot": material_root, "openingBytesHex": "00" },
+                    { "materialRoot": material_root, "openingBytesHex": "01" },
+                ],
+            },
+        });
+        assert!(transported_aggregate_binding_openings_by_material_root(&request).is_err());
+    }
+
+    #[test]
+    fn transported_openings_reject_a_non_canonical_material_root() {
+        let request = serde_json::json!({
+            "transportedEvaluationKeyAggregateBindingOpenings": {
+                "objectType": AGGREGATE_BINDING_OPENING_SET_OBJECT_TYPE,
+                "openings": [
+                    { "materialRoot": "abcd", "openingBytesHex": "00" },
+                ],
+            },
+        });
+        assert!(transported_aggregate_binding_openings_by_material_root(&request).is_err());
+    }
 }

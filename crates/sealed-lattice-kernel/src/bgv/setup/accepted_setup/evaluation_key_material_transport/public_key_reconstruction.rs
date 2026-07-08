@@ -298,8 +298,8 @@ fn add_accepted_key_switch_component_b(
 // The published runtime-key residues for one key as `[digit][limb][coeff]`: the
 // per-limb sum of every trustee's `component_b`, mod each level prime. This is
 // exactly the aggregate the two reconstruction functions above build before
-// wrapping it into a `KeySwitchKey`, factored out so the S1 aggregate binding
-// can bind against the identical residues the runtime key derives from without
+// wrapping it into a `KeySwitchKey`, factored out so the material aggregate
+// binding can use the identical residues the runtime key derives from without
 // re-summing differently. `rotation` selects the key: `None` reads the
 // relinearization round-two records for `level`; `Some(rotation)` reads the
 // Galois material records for `(rotation, level)`. Fail-closed on a missing or

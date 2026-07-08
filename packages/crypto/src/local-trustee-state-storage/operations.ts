@@ -80,7 +80,7 @@ export const encryptLocalTrusteeSetupSealedMaterial = async (
         canonicalJson(associatedData),
     );
     const materialAadHash = hash512Hex(
-        'sealed-lattice-local-trustee-state/sealed-material-aad-hash-v1',
+        'sealed-lattice-local-trustee-state/sealed-material-aad-hash-v2',
         [associatedDataBytes],
     );
     const keyBytes = deriveSealedMaterialAesGcmKeyBytes(
@@ -121,7 +121,7 @@ export const encryptLocalTrusteeSetupSealedMaterial = async (
     const encryptedMaterial = {
         ...encryptedMaterialWithoutHash,
         encryptedMaterialHash: hashCanonicalValue(
-            'sealed-lattice-local-trustee-state/sealed-material-envelope-hash-v1',
+            'sealed-lattice-local-trustee-state/sealed-material-envelope-hash-v2',
             encryptedMaterialWithoutHash,
         ),
     } satisfies EncryptedLocalTrusteeSetupMaterial;
@@ -173,7 +173,7 @@ export const encryptLocalTrusteeState = async (
     const associatedDataJson = canonicalJson(associatedData);
     const associatedDataBytes = textEncoder.encode(associatedDataJson);
     const storageAadHash = hash512Hex(
-        'sealed-lattice-local-trustee-state/aad-hash-v1',
+        'sealed-lattice-local-trustee-state/aad-hash-v2',
         [associatedDataBytes],
     );
     const localStateCommitmentHash = hashCanonicalValue(
@@ -217,7 +217,7 @@ export const encryptLocalTrusteeState = async (
         encryptedLocalState: {
             ...envelopeWithoutHash,
             encryptedLocalStateHash: hashCanonicalValue(
-                'sealed-lattice-local-trustee-state/envelope-hash-v1',
+                'sealed-lattice-local-trustee-state/envelope-hash-v2',
                 envelopeWithoutHash,
             ),
         },
@@ -246,7 +246,7 @@ export const decryptLocalTrusteeState = async (
     } as Record<string, unknown>;
     delete envelopeWithoutHash.encryptedLocalStateHash;
     const expectedEnvelopeHash = hashCanonicalValue(
-        'sealed-lattice-local-trustee-state/envelope-hash-v1',
+        'sealed-lattice-local-trustee-state/envelope-hash-v2',
         envelopeWithoutHash,
     );
     if (
@@ -274,7 +274,7 @@ export const decryptLocalTrusteeState = async (
         canonicalJson(expectedAssociatedData),
     );
     const expectedAadHash = hash512Hex(
-        'sealed-lattice-local-trustee-state/aad-hash-v1',
+        'sealed-lattice-local-trustee-state/aad-hash-v2',
         [associatedDataBytes],
     );
     if (input.encryptedLocalState.storageAadHash !== expectedAadHash) {

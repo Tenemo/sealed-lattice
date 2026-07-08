@@ -224,7 +224,7 @@ pub(super) fn verify_public_evaluation_key_material_transport(
                 "transportedPublicEvaluationKeyMaterial.componentMaterials",
             )?));
         }
-        // Committed-material aggregate binding (S1): when the evaluation-key set
+        // Committed-material aggregate binding: when the evaluation-key set
         // publishes the aggregate-binding record, bind the just-reconstructed
         // runtime key to the trustee-committed material through the atom material
         // roots and the transported linear-evaluation openings. This does NOT

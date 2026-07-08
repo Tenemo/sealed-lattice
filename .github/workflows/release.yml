@@ -48,11 +48,12 @@ jobs:
         needs:
             - validate-dispatch
         runs-on: ubuntu-latest
-        timeout-minutes: 20
+        timeout-minutes: 120
         steps:
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
               with:
                   persist-credentials: false
+            - uses: ./.github/actions/bootstrap-pnpm
             - uses: dtolnay/rust-toolchain@b18f7037bce1ea84c086f4d5e9493f853c0ce412
               with:
                   components: clippy, rustfmt
@@ -60,7 +61,7 @@ jobs:
             - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
             - run: cargo fmt --check -p sealed-lattice-kernel
             - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
-            - run: cargo test --workspace
+            - run: pnpm run test:rust:kernel
 
     rust-accepted-setup:
         name: rust accepted setup

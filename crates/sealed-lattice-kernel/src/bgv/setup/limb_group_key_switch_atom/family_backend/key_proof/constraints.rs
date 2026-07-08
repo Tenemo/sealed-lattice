@@ -113,7 +113,7 @@ pub(super) fn support_value_at<const LIMB_COUNT: usize>(
 // One digit's delta-weighted linear forms, handed to the caller and dropped
 // immediately: neither the prover nor the verifier ever holds every digit's
 // forms at once (at the full profile that set alone is hundreds of megabytes).
-// `material_form` is the linear form paired with the committed MATERIAL column
+// `material_form` is the linear form paired with the committed material column
 // `B_col_j`: it is `delta_j * gamma`, so `<material_form_j, B_col_j> =
 // delta_j <gamma, B_col_j>`, which is exactly the term the sumcheck target used
 // to carry as `-delta_j <gamma, B_public_j>`, moved to the left-hand side with
@@ -127,16 +127,11 @@ pub(super) struct WeightedDigitForms<const LIMB_COUNT: usize> {
 // Stream the per-digit reduced atom forms: `consume` receives each digit's
 // delta-weighted error/carry/material forms in digit order, while the
 // delta-weighted shared secret form accumulates across the sweep and is
-// returned with the atom target contribution.
-//
-// The atom target is zero: `reduce_atom` still returns `-<gamma, B_public_j>`
-// per digit, but that term is no longer folded into the returned target. It is
-// instead carried on the sumcheck's left-hand side by the material form against
-// the committed `B_col_j`. Old sumcheck identity (atom part): `LHS_forms =
-// -sum delta_j <gamma, B_public_j>`; new identity: `LHS_forms +
-// sum delta_j <gamma, B_col_j> = 0`. So the atom target is `0` and the material
-// term is `+delta_j <gamma, B_col_j>`. A committed material that does not equal
-// the correct component breaks this equality and the sumcheck rejects.
+// returned with a zero atom target contribution. The transported component is
+// carried on the sumcheck's left-hand side by the material form against the
+// committed `B_col_j`: `LHS_forms + sum delta_j <gamma, B_col_j> = 0`. A
+// committed material that does not equal the correct component breaks this
+// equality and the sumcheck rejects.
 pub(super) fn accumulate_forms<const LIMB_COUNT: usize, Consume>(
     parameters: &ProofFieldParameters<LIMB_COUNT>,
     negacyclic: &NegacyclicDomain<'_, LIMB_COUNT>,
@@ -154,7 +149,6 @@ where
     for (digit_index, digit) in public.digits.iter().enumerate() {
         let atom_public = AtomPublicInputs {
             recombined_sample: &digit.recombined_sample,
-            recombined_component_b: &digit.recombined_component_b,
             gadget_idempotent: digit.gadget_idempotent,
             group_modulus: public.group_modulus,
             plaintext_modulus: public.plaintext_modulus,
@@ -166,12 +160,6 @@ where
             &source.atom_source(digit_index),
             gamma,
         );
-        // The atom form still carries `-<gamma, B_public_j>` in `target`, but the
-        // component term no longer enters the sumcheck target: it rides the
-        // material form against the committed `B_col_j` on the left-hand side.
-        // Read the field explicitly so the intent is on record and it is not
-        // treated as dead.
-        let _atom_component_target = form.target;
         let weight = delta[digit_index];
         for (accumulator, coefficient) in
             secret_form.iter_mut().zip(form.secret_coefficients.iter())

@@ -277,9 +277,7 @@ pub(crate) fn verify_passive_setup_package_from_request(request: &Value) -> Cano
     validation::validate_setup_package_shape(setup_package)?;
     validation::validate_setup_package_internal_bindings(setup_package)?;
 
-    Ok(json!({
-        "operation": "verifyBgvPassiveSetupPackage",
-    }))
+    Ok(Value::Null)
 }
 
 pub(crate) fn validate_passive_setup_package_for_encrypted_evaluation(

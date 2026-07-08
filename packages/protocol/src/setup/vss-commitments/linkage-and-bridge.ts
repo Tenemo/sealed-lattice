@@ -1,6 +1,8 @@
 import { deriveCanonicalObjectHash, hash512Hex } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
+import { bytesFromHex } from '../common-fields.js';
+import { encodeStandardBase64 } from '../proof-byte-encoding.js';
 import type {
     SameSecretConsistencyStatementSet,
     SameSecretProofSet,
@@ -144,50 +146,6 @@ export const createVssShareLinkageStatement = (input: {
 export const vssShareLinkageProofFamily = 'vss-share-linkage';
 export const vssShareLinkageProofBytesHashDomain =
     'sealed-lattice/setup/vss-share-linkage/proof-bytes-v1';
-const standardBase64Alphabet =
-    'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-
-const bytesFromHex = (hex: string, fieldName: string): Uint8Array => {
-    if (hex.length % 2 !== 0) {
-        throw new Error(`${fieldName} must have an even hex length.`);
-    }
-    const bytes = new Uint8Array(hex.length / 2);
-    for (let byteIndex = 0; byteIndex < bytes.length; byteIndex += 1) {
-        const parsedByte = Number.parseInt(
-            hex.slice(byteIndex * 2, byteIndex * 2 + 2),
-            16,
-        );
-        if (Number.isNaN(parsedByte)) {
-            throw new Error(`${fieldName} must be valid hexadecimal.`);
-        }
-        bytes[byteIndex] = parsedByte;
-    }
-
-    return bytes;
-};
-
-// Standard RFC 4648 base64 with padding, byte-for-byte the kernel's
-// encode_standard_base64 so the canonical decoder the verifier runs accepts it
-// and the proof bytes stay canonically bound.
-const encodeStandardBase64 = (bytes: Uint8Array): string => {
-    let encoded = '';
-    for (let chunkStart = 0; chunkStart < bytes.length; chunkStart += 3) {
-        const remaining = bytes.length - chunkStart;
-        const first = bytes[chunkStart];
-        const second = remaining >= 2 ? bytes[chunkStart + 1] : 0;
-        const third = remaining >= 3 ? bytes[chunkStart + 2] : 0;
-        encoded += standardBase64Alphabet[first >> 2];
-        encoded +=
-            standardBase64Alphabet[((first & 0x03) << 4) | (second >> 4)];
-        encoded +=
-            remaining >= 2
-                ? standardBase64Alphabet[((second & 0x0f) << 2) | (third >> 6)]
-                : '=';
-        encoded += remaining >= 3 ? standardBase64Alphabet[third & 0x3f] : '=';
-    }
-
-    return encoded;
-};
 
 export type VssShareLinkageProofContext = {
     readonly ceremonyId: string;
@@ -226,6 +184,16 @@ type VssShareLinkageProofRandomnessProvider = (input: {
     readonly proofRecordIndex: number;
 }) => { readonly seedHex: string; readonly nonceHex: string };
 
+type VssShareLinkageProofMaterialSetInput = {
+    readonly statement: VssShareLinkageStatement;
+    readonly coefficientCommitmentSet: VssPublicCoefficientCommitmentSet;
+    readonly recipientShareCommitmentSet: VssPublicRecipientShareCommitmentSet;
+    readonly coefficientCredentials: readonly VssPublicCoefficientCredential[];
+    readonly recipientShareCredentials: readonly VssPublicRecipientShareCredential[];
+    readonly shareLinkageProofRandomness: VssShareLinkageProofRandomnessProvider;
+    readonly generateVssShareLinkageProof: VssShareLinkageProofComputer;
+};
+
 const vssShareLinkageCoordinateKey = (
     sourceTrusteeRosterPosition: number,
     rnsLimbIndex: number,
@@ -245,17 +213,23 @@ const vssPublicRecipientShareCoordinateKey = (
 // recipient at that limb. The verifier recomputes the covered opening roots and
 // the statement root and checks the proof, so this builder only assembles the
 // witness the injected prover consumes and binds the proof bytes.
-export const createVssShareLinkageProofMaterialSet = (input: {
-    readonly statement: VssShareLinkageStatement;
-    readonly coefficientCommitmentSet: VssPublicCoefficientCommitmentSet;
-    readonly recipientShareCommitmentSet: VssPublicRecipientShareCommitmentSet;
-    readonly coefficientCredentials: readonly VssPublicCoefficientCredential[];
-    readonly recipientShareCredentials: readonly VssPublicRecipientShareCredential[];
-    readonly shareLinkageProofRandomness: VssShareLinkageProofRandomnessProvider;
-    readonly generateVssShareLinkageProof: VssShareLinkageProofComputer;
-}): Record<string, unknown> & {
+export function createVssShareLinkageProofMaterialSet(
+    input: VssShareLinkageProofMaterialSetInput & {
+        readonly deriveProofMaterialSetRoot?: true;
+    },
+): Record<string, unknown> & {
     readonly proofMaterialSetRoot: ProtocolHash;
-} => {
+};
+export function createVssShareLinkageProofMaterialSet(
+    input: VssShareLinkageProofMaterialSetInput & {
+        readonly deriveProofMaterialSetRoot: false;
+    },
+): Record<string, unknown>;
+export function createVssShareLinkageProofMaterialSet(
+    input: VssShareLinkageProofMaterialSetInput & {
+        readonly deriveProofMaterialSetRoot?: boolean;
+    },
+): Record<string, unknown> {
     const { statement, coefficientCommitmentSet, recipientShareCommitmentSet } =
         input;
     const {
@@ -555,13 +529,17 @@ export const createVssShareLinkageProofMaterialSet = (input: {
         proofRecords,
     };
 
+    if (input.deriveProofMaterialSetRoot === false) {
+        return proofMaterialSetWithoutRoot;
+    }
+
     return {
         ...proofMaterialSetWithoutRoot,
         proofMaterialSetRoot: deriveCanonicalObjectHash(
             proofMaterialSetWithoutRoot,
         ),
     };
-};
+}
 
 // The single threshold-share commitment form: it binds the
 // aggregate threshold commitment set to the share-linkage statement and proof
@@ -869,19 +847,37 @@ type SameSecretBridgeTransportedProofMaterialProvider = (input: {
     readonly sourceTrusteeRosterPosition: number;
 }) => Record<string, unknown> | undefined;
 
-// The same-secret bridge proof material set: one succinct bridge proof
-// per source trustee. The verifier recomputes the statement roots and the proof
-// bytes hash and checks each proof, so this builder assembles the witness (the
-// trustee secret, its sign indicators, and the per-limb constant-coefficient
-// commitment randomness) and binds the proof bytes.
-export const createVssSameSecretBridgeProofMaterialSet = (input: {
+type VssSameSecretBridgeProofMaterialSetInput = {
     readonly statementSet: VssSameSecretBridgeStatementSet;
     readonly coefficientCredentials: readonly VssPublicCoefficientCredential[];
     readonly bridgeSecret: SameSecretBridgeSecretProvider;
     readonly bridgeProofRandomness: SameSecretBridgeProofRandomnessProvider;
     readonly transportedSameSecretProofMaterial?: SameSecretBridgeTransportedProofMaterialProvider;
     readonly generateSameSecretBridgeProof: SameSecretBridgeProofComputer;
-}): Record<string, unknown> => {
+};
+
+// The same-secret bridge proof material set: one succinct bridge proof
+// per source trustee. The verifier recomputes the statement roots and the proof
+// bytes hash and checks each proof, so this builder assembles the witness (the
+// trustee secret, its sign indicators, and the per-limb constant-coefficient
+// commitment randomness) and binds the proof bytes.
+export function createVssSameSecretBridgeProofMaterialSet(
+    input: VssSameSecretBridgeProofMaterialSetInput & {
+        readonly deriveProofMaterialSetRoot?: true;
+    },
+): Record<string, unknown> & {
+    readonly proofMaterialSetRoot: ProtocolHash;
+};
+export function createVssSameSecretBridgeProofMaterialSet(
+    input: VssSameSecretBridgeProofMaterialSetInput & {
+        readonly deriveProofMaterialSetRoot: false;
+    },
+): Record<string, unknown>;
+export function createVssSameSecretBridgeProofMaterialSet(
+    input: VssSameSecretBridgeProofMaterialSetInput & {
+        readonly deriveProofMaterialSetRoot?: boolean;
+    },
+): Record<string, unknown> {
     const { statementSet } = input;
     const constantCoefficientRandomnessByCoordinate = new Map(
         input.coefficientCredentials
@@ -1035,10 +1031,14 @@ export const createVssSameSecretBridgeProofMaterialSet = (input: {
         proofRecords,
     };
 
+    if (input.deriveProofMaterialSetRoot === false) {
+        return proofMaterialSetWithoutRoot;
+    }
+
     return {
         ...proofMaterialSetWithoutRoot,
         proofMaterialSetRoot: deriveCanonicalObjectHash(
             proofMaterialSetWithoutRoot,
         ),
     };
-};
+}

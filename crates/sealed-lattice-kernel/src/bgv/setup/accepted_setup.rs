@@ -130,7 +130,8 @@ use super::{
     evaluation_key_share_material::{
         EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
         EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_TRANSPORT_SET_OBJECT_TYPE,
-        EvaluationKeyShareProofFamily, component_b_vectors_from_record,
+        EvaluationKeyShareProofFamily, VerifiedComponentMaterialEvictionGuard,
+        component_b_vectors_from_record,
     },
     setup_proof::{
         SETUP_PROOF_BYTES_DOMAIN, SETUP_PROOF_MATERIAL_ENCODING, SETUP_PROOF_SERIALIZATION,
@@ -477,6 +478,11 @@ pub(crate) fn verify_collective_bgv_setup_package(
     setup_package: &Value,
     request: &Value,
 ) -> CanonicalResult<Value> {
+    // Evict this request's streamed evaluation-key component material from the
+    // process-global store when verify returns by any path, so the browser wasm
+    // runtime does not retain every verified package's material.
+    let _component_material_eviction_guard =
+        VerifiedComponentMaterialEvictionGuard::for_request(request);
     if !setup_package.is_object() {
         return verification_response(
             None,

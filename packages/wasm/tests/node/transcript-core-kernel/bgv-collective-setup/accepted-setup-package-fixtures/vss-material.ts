@@ -9,6 +9,8 @@ import type {
 } from '#packages/protocol/src/setup/same-secret-consistency-records';
 import {
     createThresholdShareCommitmentBinding,
+    createBinaryChunkedSameSecretBridgeProofMaterialTransport,
+    createBinaryChunkedVssShareLinkageProofMaterialTransport,
     createVssPublicAggregateThresholdCommitmentSet,
     createVssPublicCoefficientCommitmentSet,
     createVssPublicRecipientShareCommitmentSet,
@@ -16,6 +18,8 @@ import {
     createVssSameSecretBridgeStatementSet,
     createVssShareLinkageProofMaterialSet,
     createVssShareLinkageStatement,
+    type TransportedSameSecretBridgeProofMaterialSet,
+    type TransportedVssShareLinkageProofMaterialSet,
     type VssPublicCoefficientCommitmentSet,
     type VssPublicCoefficientCredential,
     type VssPublicRecipientShareCommitmentSet,
@@ -179,6 +183,7 @@ export type VssPublicMaterial = {
     readonly aggregateThresholdCommitmentSet: JsonRecord;
     readonly shareLinkageStatement: JsonRecord;
     readonly shareLinkageProofMaterialSet: JsonRecord;
+    readonly transportedVssShareLinkageProofMaterial: TransportedVssShareLinkageProofMaterialSet;
     readonly thresholdShareCommitmentBinding: JsonRecord;
     readonly coefficientCredentials: readonly VssPublicCoefficientCredential[];
     readonly ringDegree: number;
@@ -272,47 +277,58 @@ export function acceptedVssPublicMaterial(
             recipientShareCommitmentBundle.recipientShareCommitmentSet,
         aggregateThresholdCommitmentSet,
     });
-    const shareLinkageProofMaterialSet = createVssShareLinkageProofMaterialSet({
-        statement: shareLinkageStatement,
-        coefficientCommitmentSet:
-            coefficientCommitmentBundle.coefficientCommitmentSet,
-        recipientShareCommitmentSet:
-            recipientShareCommitmentBundle.recipientShareCommitmentSet,
-        coefficientCredentials:
-            coefficientCommitmentBundle.coefficientCredentials,
-        recipientShareCredentials:
-            recipientShareCommitmentBundle.recipientShareCredentials,
-        shareLinkageProofRandomness: ({
-            sourceTrusteeRosterPosition,
-            proofRecordIndex,
-        }) => ({
-            seedHex: kernel.deriveCanonicalObjectHash({
-                value: {
-                    objectType: 'VssShareLinkageProofRandomness',
-                    fixture: 'seed',
-                    sourceTrusteeRosterPosition,
-                    proofRecordIndex,
-                },
+    const embeddedShareLinkageProofMaterialSet =
+        createVssShareLinkageProofMaterialSet({
+            deriveProofMaterialSetRoot: false,
+            statement: shareLinkageStatement,
+            coefficientCommitmentSet:
+                coefficientCommitmentBundle.coefficientCommitmentSet,
+            recipientShareCommitmentSet:
+                recipientShareCommitmentBundle.recipientShareCommitmentSet,
+            coefficientCredentials:
+                coefficientCommitmentBundle.coefficientCredentials,
+            recipientShareCredentials:
+                recipientShareCommitmentBundle.recipientShareCredentials,
+            shareLinkageProofRandomness: ({
+                sourceTrusteeRosterPosition,
+                proofRecordIndex,
+            }) => ({
+                seedHex: kernel.deriveCanonicalObjectHash({
+                    value: {
+                        objectType: 'VssShareLinkageProofRandomness',
+                        fixture: 'seed',
+                        sourceTrusteeRosterPosition,
+                        proofRecordIndex,
+                    },
+                }),
+                nonceHex: kernel.deriveCanonicalObjectHash({
+                    value: {
+                        objectType: 'VssShareLinkageProofRandomness',
+                        fixture: 'nonce',
+                        sourceTrusteeRosterPosition,
+                        proofRecordIndex,
+                    },
+                }),
             }),
-            nonceHex: kernel.deriveCanonicalObjectHash({
-                value: {
-                    objectType: 'VssShareLinkageProofRandomness',
-                    fixture: 'nonce',
-                    sourceTrusteeRosterPosition,
-                    proofRecordIndex,
-                },
-            }),
-        }),
-        generateVssShareLinkageProof: vssShareLinkageProofComputer,
-    });
+            generateVssShareLinkageProof: vssShareLinkageProofComputer,
+        });
+    const shareLinkageProofTransport =
+        createBinaryChunkedVssShareLinkageProofMaterialTransport(
+            embeddedShareLinkageProofMaterialSet,
+        );
+    const shareLinkageProofMaterialSet =
+        shareLinkageProofTransport.proofMaterialSet;
+    const transportedVssShareLinkageProofMaterial =
+        shareLinkageProofTransport.transportedVssShareLinkageProofMaterial;
     const thresholdShareCommitmentBinding =
         createThresholdShareCommitmentBinding({
             coefficientCommitmentSet:
                 coefficientCommitmentBundle.coefficientCommitmentSet,
             statement: shareLinkageStatement,
             aggregateThresholdCommitmentSet,
-            shareLinkageProofMaterialSetRoot:
+            shareLinkageProofMaterialSetRoot: String(
                 shareLinkageProofMaterialSet.proofMaterialSetRoot,
+            ),
         });
 
     return {
@@ -323,6 +339,7 @@ export function acceptedVssPublicMaterial(
         aggregateThresholdCommitmentSet,
         shareLinkageStatement,
         shareLinkageProofMaterialSet,
+        transportedVssShareLinkageProofMaterial,
         thresholdShareCommitmentBinding,
         coefficientCredentials:
             coefficientCommitmentBundle.coefficientCredentials,
@@ -333,6 +350,7 @@ export function acceptedVssPublicMaterial(
 export type SameSecretBridge = {
     readonly bridgeStatementSet: JsonRecord;
     readonly bridgeProofMaterialSet: JsonRecord;
+    readonly transportedSameSecretBridgeProofMaterial: TransportedSameSecretBridgeProofMaterialSet;
 };
 
 // Build the same-secret bridge: per source trustee it binds the
@@ -357,33 +375,46 @@ export function acceptedSameSecretBridge(
         sameSecretConsistency: sameSecretConsistency,
         sameSecretProofs: sameSecretProofs,
     });
-    const bridgeProofMaterialSet = createVssSameSecretBridgeProofMaterialSet({
-        statementSet: bridgeStatementSet,
-        coefficientCredentials: vssPublicMaterial.coefficientCredentials,
-        bridgeSecret: ({ sourceTrusteeRosterPosition }) => ({
-            secretCoefficients: vssPublicTrusteeSecretCoefficients(
-                sourceTrusteeRosterPosition,
-                vssPublicMaterial.ringDegree,
-            ),
-        }),
-        bridgeProofRandomness: ({ sourceTrusteeRosterPosition }) => ({
-            seedHex: kernel.deriveCanonicalObjectHash({
-                value: {
-                    objectType: 'SameSecretBridgeProofRandomness',
-                    fixture: 'seed',
+    const embeddedBridgeProofMaterialSet =
+        createVssSameSecretBridgeProofMaterialSet({
+            deriveProofMaterialSetRoot: false,
+            statementSet: bridgeStatementSet,
+            coefficientCredentials: vssPublicMaterial.coefficientCredentials,
+            bridgeSecret: ({ sourceTrusteeRosterPosition }) => ({
+                secretCoefficients: vssPublicTrusteeSecretCoefficients(
                     sourceTrusteeRosterPosition,
-                },
+                    vssPublicMaterial.ringDegree,
+                ),
             }),
-            nonceHex: kernel.deriveCanonicalObjectHash({
-                value: {
-                    objectType: 'SameSecretBridgeProofRandomness',
-                    fixture: 'nonce',
-                    sourceTrusteeRosterPosition,
-                },
+            bridgeProofRandomness: ({ sourceTrusteeRosterPosition }) => ({
+                seedHex: kernel.deriveCanonicalObjectHash({
+                    value: {
+                        objectType: 'SameSecretBridgeProofRandomness',
+                        fixture: 'seed',
+                        sourceTrusteeRosterPosition,
+                    },
+                }),
+                nonceHex: kernel.deriveCanonicalObjectHash({
+                    value: {
+                        objectType: 'SameSecretBridgeProofRandomness',
+                        fixture: 'nonce',
+                        sourceTrusteeRosterPosition,
+                    },
+                }),
             }),
-        }),
-        generateSameSecretBridgeProof: sameSecretBridgeProofComputer,
-    });
+            generateSameSecretBridgeProof: sameSecretBridgeProofComputer,
+        });
+    const bridgeProofTransport =
+        createBinaryChunkedSameSecretBridgeProofMaterialTransport(
+            embeddedBridgeProofMaterialSet,
+        );
+    const bridgeProofMaterialSet = bridgeProofTransport.proofMaterialSet;
+    const transportedSameSecretBridgeProofMaterial =
+        bridgeProofTransport.transportedSameSecretBridgeProofMaterial;
 
-    return { bridgeStatementSet, bridgeProofMaterialSet };
+    return {
+        bridgeStatementSet,
+        bridgeProofMaterialSet,
+        transportedSameSecretBridgeProofMaterial,
+    };
 }

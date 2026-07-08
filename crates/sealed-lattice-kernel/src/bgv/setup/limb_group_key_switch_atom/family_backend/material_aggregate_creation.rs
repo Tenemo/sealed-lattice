@@ -1,5 +1,5 @@
-//! Creation-side aggregate binding for the committed key-switch material (S1),
-//! cross-bound to each atom proof's material commitment (S2).
+//! Creation-side aggregate binding for the committed key-switch material,
+//! cross-bound to each atom proof's material commitment.
 //!
 //! This is the setup-creation counterpart of `material_aggregate_verify`'s
 //! acceptance-path wrapper. For one published runtime key group it regenerates
@@ -12,7 +12,7 @@
 //! opening set carry: the per-trustee material roots, the per-coefficient wrap
 //! multiples, and the encoded opening bytes.
 //!
-//! S2 cross-binding: because the columns and the salt come from the same helper
+//! Per-atom material-root binding: because the columns and the salt come from the same helper
 //! the atom prover publishes its `material_root` through, the recomputed opening
 //! column root equals that atom proof's `KeyFriProof.material_root` byte-for-byte.
 //! The published `trusteeMaterialRoots` are therefore the atom-verified material
@@ -28,12 +28,12 @@
 //! coefficients but not the on-`H` material values, so the aggregate identity the
 //! verifier checks reconstructs the same integer coefficient sum
 //! `S = sum_trustee recombined_B` and the same wraps. The recombined material is
-//! derived from the PUBLIC transported component material, so masking here is for
+//! derived from the public transported component material, so masking here is for
 //! commitment uniformity, not for hiding a secret.
 //!
-//! Trust boundary: this only PRODUCES the binding; the verifier
+//! Trust boundary: this only produces the binding; the verifier
 //! (`material_aggregate_verify::verify_material_aggregate_group_binding` plus the
-//! S2 material-root equality check) is the sole authority that accepts or refuses.
+//! material-root equality check) is the sole authority that accepts or refuses.
 
 use super::super::proof_field::ProofFieldParameters;
 use super::key_proof::{
@@ -58,8 +58,8 @@ pub(super) struct KeyGroupAggregateBinding {
     pub(super) opening_bytes: Vec<Vec<u8>>,
 }
 
-// Prove the S1 aggregate binding for one published runtime key group, cross-bound
-// to each atom proof's material commitment.
+// Prove the material aggregate binding for one published runtime key group,
+// cross-bound to each atom proof's material commitment.
 //
 // `recombined_material_by_trustee[trustee][digit]` is trustee `trustee`'s
 // recombined component material `B_col` for the group's digits (centered CRT
@@ -126,7 +126,7 @@ pub(super) fn prove_key_group_aggregate_binding<const LIMB_COUNT: usize>(
     // Regenerate each trustee's atom material commitment: the exact masked columns
     // and the material-commit salt seed the atom proof used, and the material root
     // that equals its `KeyFriProof.material_root`. Both feed the aggregate opening,
-    // so the opening binds the ATOM-VERIFIED material.
+    // so the opening binds the atom-verified material.
     let mut material_columns_by_trustee = Vec::with_capacity(roster_size);
     let mut material_roots = Vec::with_capacity(roster_size);
     let mut material_commit_salt_seeds = Vec::with_capacity(roster_size);
@@ -301,7 +301,7 @@ mod tests {
         )
         .expect("creation-side aggregate binding proves");
 
-        // S2 cross-binding: each published material root must equal the material
+        // Per-atom material-root binding: each published material root must equal the material
         // root the shared `regenerate_material_commitment_inputs` helper produces
         // for that trustee's atom commitment - the exact value the atom proof would
         // publish as `KeyFriProof.material_root`.

@@ -13,7 +13,7 @@
         "packages/sdk/dist/internal/transcript-core.d.ts",
         "packages/sdk/dist/internal/types.d.ts"
     ],
-    "reachableDeclarationHash": "346877f281a3f6e3a5b0e4d70f648125f3e43d5b2cbb82716baf32c269c66a6e",
+    "reachableDeclarationHash": "d19bbc738b84818b150f97dbb374f740ba5eff21aae6538fdeda0e36ebeae784",
     "runtimeExports": [
         "createSetupPackageVerificationInput",
         "deriveCollectiveBgvSetupRosterHash",
@@ -67,6 +67,7 @@
         "ConflictingManifestEvidence",
         "DecryptionShareFilteringMode",
         "ElectionManifest",
+        "EvaluationKeyShareComponentMaterialChunkStream",
         "FirstValidOrderingInput",
         "FirstValidOrderingVerification",
         "FoundationTranscriptComponentResults",
@@ -137,6 +138,7 @@
         "TranscriptCoreFixture",
         "TranscriptCoreFixtureVerification",
         "TranscriptCoreVerificationResult",
+        "TransportedEvaluationKeyAggregateBindingOpeningSet",
         "TransportedEvaluationKeyShareComponentMaterialSet",
         "TransportedEvaluationKeyShareProofMaterialSet",
         "TransportedPublicEvaluationKeyMaterialSet",

@@ -128,9 +128,6 @@ pub(in crate::bgv::setup) fn verify_terminal_setup_transport_policy(
             "setupPackage.evaluationKeys.publicEvaluationKeyMaterialEncoding",
         )?));
     }
-    if let Some(response) = verify_terminal_vss_material_handle_policy(request)? {
-        return Ok(Some(response));
-    }
     if let Some(response) = verify_terminal_key_switch_material_handle_policy(request)? {
         return Ok(Some(response));
     }
@@ -143,7 +140,7 @@ pub(in crate::bgv::setup) fn verify_terminal_setup_transport_policy(
 // evaluation-key component material transport and the accepted-setup verifier
 // reads it transiently from the stream-verified handle. Any inline `chunks`
 // array on a transported component material is a raw embedded store and is
-// refused, mirroring `verify_terminal_vss_material_handle_policy`.
+// refused.
 fn verify_terminal_key_switch_material_handle_policy(
     request: &Value,
 ) -> CanonicalResult<Option<Value>> {
@@ -158,38 +155,6 @@ fn verify_terminal_key_switch_material_handle_policy(
                 "transportedEvaluationKeyShareComponentMaterial.componentMaterials.chunks",
             )?));
         }
-    }
-
-    Ok(None)
-}
-
-fn verify_terminal_vss_material_handle_policy(request: &Value) -> CanonicalResult<Option<Value>> {
-    let Some(transported_material) = request.get("transportedVssCoefficientCommitmentMaterial")
-    else {
-        return Ok(Some(verification_response(
-            Some("setupPackageVerification"),
-            vec!["transportedVssCoefficientCommitmentMaterial".to_string()],
-            Vec::new(),
-            Vec::new(),
-        )?));
-    };
-    if transported_material.get("chunks").is_some() {
-        return Ok(Some(terminal_transport_policy_refusal(
-            "terminalVssMaterialHandleRequired",
-            "terminal accepted setup requires a chunkless VSS material transport reference plus a stream-verified VSS material handle",
-            "transportedVssCoefficientCommitmentMaterial.chunks",
-        )?));
-    }
-    if request
-        .get("verifiedVssCoefficientCommitmentMaterial")
-        .is_none()
-    {
-        return Ok(Some(verification_response(
-            Some("setupPackageVerification"),
-            vec!["verifiedVssCoefficientCommitmentMaterial".to_string()],
-            Vec::new(),
-            Vec::new(),
-        )?));
     }
 
     Ok(None)

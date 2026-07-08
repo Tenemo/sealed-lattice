@@ -12,7 +12,10 @@ import type { CollectiveBgvSetupContext } from '../vss-share-verification-record
 // Two base-3^17 message digits per coefficient. The kernel validates that the
 // canonical digit columns reproduce the message coefficients, so they must be
 // derived exactly this way (little-endian digits, transposed into columns).
-const vssPublicMessageDigitBase = 3 ** 17;
+// 129_140_163 = 3^17, kept as the literal so it matches the kernel's
+// VSS_PUBLIC_MESSAGE_DIGIT_BASE verbatim instead of drifting from an
+// independent 3 ** 17 computation.
+const vssPublicMessageDigitBase = 129_140_163;
 const vssPublicMessageDigitCount = 2;
 
 const vssPublicCanonicalMessageDigitColumns = (

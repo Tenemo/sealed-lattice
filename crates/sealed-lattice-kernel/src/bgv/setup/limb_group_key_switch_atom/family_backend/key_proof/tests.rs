@@ -233,7 +233,7 @@ fn one_tampered_digit_error_is_caught_by_the_batch() {
 #[test]
 fn honest_committed_component_material_verifies() {
     // Committing exactly the public material - what the production path always
-    // does - proves and verifies through the dedicated MATERIAL commitment and
+    // does - proves and verifies through the dedicated material commitment and
     // its sumcheck material forms, both unmasked and masked.
     let parameters = sixteen_limb_group_field_parameters();
     let ring_degree = 64;
@@ -286,7 +286,7 @@ fn honest_committed_component_material_verifies() {
 
 #[test]
 fn tampered_committed_component_material_is_rejected_by_the_relation() {
-    // The committed MATERIAL column `B_col_j` is load-bearing: the batched
+    // The committed material column `B_col_j` is load-bearing: the batched
     // sumcheck folds it on its left-hand side with `delta_j * gamma`, so it is
     // the only thing standing in for `B_j` in the atom congruence
     // `B + A(*)s - t e - G source - Q c = 0`. A proof that commits material
