@@ -57,16 +57,20 @@ struct SetupProofMaterialTransportStreamSession {
     header: SetupProofMaterialTransportStreamHeader,
     next_chunk_index: usize,
     observed_total_byte_length: u64,
-    chunks: Vec<Vec<u8>>,
+    // The absorbed proof bytes accumulate into one contiguous buffer. The bound
+    // total length plus the enforced uniform chunk size make the concatenation
+    // unambiguous, so the canonical chunk windows are recovered on demand with
+    // `chunks(chunk_size)` and never stored per-chunk.
+    bytes: Vec<u8>,
 }
 
 #[derive(Debug, Clone)]
 struct VerifiedSetupProofMaterial {
     reference: Value,
-    chunks: SetupProofMaterialChunks,
+    proof_bytes: SetupProofMaterialBytes,
 }
 
-pub(in crate::bgv::setup) type SetupProofMaterialChunks = Arc<Vec<Vec<u8>>>;
+pub(in crate::bgv::setup) type SetupProofMaterialBytes = Arc<Vec<u8>>;
 
 pub(in crate::bgv::setup) fn setup_proof_record_binding_value(
     setup_parameters_hash: &str,
@@ -115,7 +119,10 @@ pub(crate) fn begin_setup_proof_material_transport_stream_request(
     sessions.insert(
         verification_id.clone(),
         SetupProofMaterialTransportStreamSession {
-            chunks: Vec::with_capacity(header.metadata.chunk_count),
+            // Grow the buffer only as bytes are actually absorbed, so a hostile
+            // `begin` declaring a gigantic totalByteLength cannot reserve it up
+            // front.
+            bytes: Vec::new(),
             header: header.clone(),
             next_chunk_index: 0,
             observed_total_byte_length: 0,
@@ -178,13 +185,13 @@ pub(crate) fn finish_setup_proof_material_transport_stream_request(
     finish_setup_proof_material_transport_stream(&verification_id, session)
 }
 
-pub(in crate::bgv::setup) fn verified_setup_proof_material_chunks_from_request(
+pub(in crate::bgv::setup) fn verified_setup_proof_material_bytes_from_request(
     request: &Value,
     proof_family: &str,
     expected_proof_material_root: &str,
     transported_proof_material: &Value,
     transported_material_path: &str,
-) -> CanonicalResult<SetupProofMaterialChunks> {
+) -> CanonicalResult<SetupProofMaterialBytes> {
     validate_supported_setup_proof_transport_family(proof_family, "proofFamily")?;
     validate_hash_string(
         expected_proof_material_root,
@@ -214,7 +221,7 @@ pub(in crate::bgv::setup) fn verified_setup_proof_material_chunks_from_request(
     let verified_materials = verified_materials
         .lock()
         .map_err(|_| setup_proof_error("verified setup proof material store is unavailable"))?;
-    let mut matching_chunks = None;
+    let mut matching_bytes = None;
     for (material_index, proof_material) in proof_materials.iter().enumerate() {
         let proof_material_path =
             format!("verifiedSetupProofMaterials.proofMaterials[{material_index}]");
@@ -225,7 +232,7 @@ pub(in crate::bgv::setup) fn verified_setup_proof_material_chunks_from_request(
         {
             continue;
         }
-        if matching_chunks.is_some() {
+        if matching_bytes.is_some() {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidProtocolObject,
                 "verifiedSetupProofMaterials contains duplicate proof material handles for one proofMaterialRoot",
@@ -252,15 +259,76 @@ pub(in crate::bgv::setup) fn verified_setup_proof_material_chunks_from_request(
                 "verified setup proof material handle does not match the stream-verified metadata",
             ));
         }
-        matching_chunks = Some(Arc::clone(&stored_material.chunks));
+        matching_bytes = Some(Arc::clone(&stored_material.proof_bytes));
     }
 
-    matching_chunks.ok_or_else(|| {
+    matching_bytes.ok_or_else(|| {
         CanonicalError::new(
             CanonicalErrorCode::InvalidProtocolObject,
             "verifiedSetupProofMaterials is missing the requested proofMaterialRoot",
         )
     })
+}
+
+// Collect the verificationId of every verified setup proof material handle a
+// request references. Best-effort: a malformed entry contributes no id, because
+// verification already rejects malformed handles and this guard is a lifecycle
+// mechanism, not a validator.
+fn request_verified_setup_proof_material_verification_ids(request: &Value) -> Vec<String> {
+    request
+        .get("verifiedSetupProofMaterials")
+        .and_then(|material_set| material_set.get("proofMaterials"))
+        .and_then(Value::as_array)
+        .map(|proof_materials| {
+            proof_materials
+                .iter()
+                .filter_map(|proof_material| {
+                    proof_material
+                        .get("verificationId")
+                        .and_then(Value::as_str)
+                        .map(str::to_string)
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+// Drop the verified setup proof material entries a completed verification
+// consumed, so the process-global store does not retain them. The verifier reads
+// each entry a few times (share-linkage, the same-secret bridge and anchor,
+// public-key shares, and the evaluation-key proof checks), so eviction happens
+// once, after verify returns, rather than on first read. Absent ids are skipped,
+// so eviction is idempotent. Without it the store would grow with every verified
+// package on the wasm runtime, whose linear memory never returns to the OS.
+fn evict_verified_setup_proof_materials(verification_ids: &[String]) {
+    let Ok(mut verified_materials) = verified_setup_proof_materials().lock() else {
+        return;
+    };
+    for verification_id in verification_ids {
+        verified_materials.remove(verification_id);
+    }
+}
+
+// RAII guard that evicts a verification's stream-verified setup proof material
+// from the process-global store when verify returns by any path (acceptance,
+// refusal, pending-with-missing-objects, or error), scoped to the request's own
+// verificationIds. Mirrors `VerifiedComponentMaterialEvictionGuard`.
+pub(in crate::bgv::setup) struct VerifiedSetupProofMaterialEvictionGuard {
+    verification_ids: Vec<String>,
+}
+
+impl VerifiedSetupProofMaterialEvictionGuard {
+    pub(in crate::bgv::setup) fn for_request(request: &Value) -> Self {
+        Self {
+            verification_ids: request_verified_setup_proof_material_verification_ids(request),
+        }
+    }
+}
+
+impl Drop for VerifiedSetupProofMaterialEvictionGuard {
+    fn drop(&mut self) {
+        evict_verified_setup_proof_materials(&self.verification_ids);
+    }
 }
 
 mod helpers;
@@ -272,7 +340,7 @@ use stream_session::*;
 
 pub(crate) use verification::setup_proof_material_transport_hashes;
 pub(in crate::bgv::setup) use verification::{
-    setup_proof_record_has_transport_reference, transported_setup_proof_material_chunks,
+    setup_proof_record_has_transport_reference, transported_setup_proof_material_bytes,
     verify_setup_proof_record_transport_reference, verify_transported_setup_proof_material_hashes,
 };
 

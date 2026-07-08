@@ -4,7 +4,7 @@ use super::*;
 // records (the data-basis anchor and the target-basis bridge) carry their
 // transported proof material through the identical inline-base64 transport,
 // differing only in these object-type and message strings and in how the
-// resolved chunks are finally bound into the proof-bytes hash (which each
+// resolved proof bytes are finally bound into the proof-bytes hash (which each
 // caller does itself). The verification logic below is shared byte-for-byte.
 pub(super) struct TransportFamily {
     pub(super) proof_family: &'static str,
@@ -16,15 +16,15 @@ pub(super) struct TransportFamily {
 
 // Resolve the transported proof material for `expected_proof_material_root`:
 // verify the material-set and per-material headers, decode the inline base64
-// chunks (or stream them through the shared setup transport), recompute the
-// transport hashes and verify the material carries them. Returns the recomputed
-// hashes plus the decoded chunks; the caller derives the family-specific proof
-// bytes and proof-bytes hash from the chunks.
+// chunks (or read the stream-verified handle from the shared setup transport)
+// into one contiguous buffer, recompute the transport hashes and verify the
+// material carries them. Returns the recomputed hashes plus the contiguous proof
+// bytes; the caller derives the family-specific proof-bytes hash from them.
 pub(super) fn resolve_transported_proof_material(
     request: &Value,
     expected_proof_material_root: &str,
     family: &TransportFamily,
-) -> CanonicalResult<(SetupProofMaterialTransportHashes, Arc<Vec<Vec<u8>>>)> {
+) -> CanonicalResult<(SetupProofMaterialTransportHashes, Arc<Vec<u8>>)> {
     let material_set = value_at_path(request, &[family.transport_field]).map_err(|_| {
         CanonicalError::new(
             CanonicalErrorCode::ComponentMismatch,
@@ -52,10 +52,10 @@ pub(super) fn resolve_transported_proof_material(
                 ),
             ));
         }
-        let chunks = if proof_material.get("chunks").is_some() {
-            Arc::new(transported_material_chunks(proof_material, family)?)
+        let proof_bytes = if proof_material.get("chunks").is_some() {
+            Arc::new(transported_material_bytes(proof_material, family)?)
         } else {
-            verified_setup_proof_material_chunks_from_request(
+            verified_setup_proof_material_bytes_from_request(
                 request,
                 family.proof_family,
                 expected_proof_material_root,
@@ -65,11 +65,11 @@ pub(super) fn resolve_transported_proof_material(
         };
         let transport_hashes = setup_proof_material_transport_hashes(
             family.proof_family,
-            chunks.as_ref(),
+            &proof_bytes,
             SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
         )?;
         verify_transported_material_hashes(proof_material, &transport_hashes, family)?;
-        matching_binding = Some((transport_hashes, chunks));
+        matching_binding = Some((transport_hashes, proof_bytes));
     }
 
     matching_binding.ok_or_else(|| {
@@ -122,14 +122,11 @@ fn verify_transported_material_header(
     Ok(())
 }
 
-fn transported_material_chunks(
-    value: &Value,
-    family: &TransportFamily,
-) -> CanonicalResult<Vec<Vec<u8>>> {
+fn transported_material_bytes(value: &Value, family: &TransportFamily) -> CanonicalResult<Vec<u8>> {
     let chunk_values = array_at_path(value, &["chunks"])?;
-    let mut chunks = Vec::with_capacity(chunk_values.len());
+    let mut proof_bytes = Vec::new();
     for chunk_value in chunk_values.iter() {
-        chunks.push(crate::transcript_core::decode_standard_base64(
+        proof_bytes.extend_from_slice(&crate::transcript_core::decode_standard_base64(
             string_at_path(chunk_value, &["bytesBase64"])?,
             &format!(
                 "transported {} proof material bytesBase64",
@@ -138,7 +135,7 @@ fn transported_material_chunks(
         )?);
     }
 
-    Ok(chunks)
+    Ok(proof_bytes)
 }
 
 fn verify_transported_material_hashes(

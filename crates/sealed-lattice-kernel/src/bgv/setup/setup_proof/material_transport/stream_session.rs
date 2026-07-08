@@ -220,7 +220,7 @@ pub(super) fn absorb_setup_proof_material_transport_stream_chunk(
                 "setup proof material byte length overflowed",
             )
         })?;
-    session.chunks.push(chunk);
+    session.bytes.extend_from_slice(&chunk);
     session.next_chunk_index += 1;
 
     Ok(json!({
@@ -309,7 +309,7 @@ pub(super) fn finish_setup_proof_material_transport_stream(
     }
     let transport_hashes = setup_proof_material_transport_hashes(
         &session.header.proof_family,
-        &session.chunks,
+        &session.bytes,
         SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
     )?;
     let observed_metadata = SetupProofMaterialMetadata {
@@ -338,7 +338,8 @@ pub(super) fn finish_setup_proof_material_transport_stream(
             verification_id.to_string(),
             VerifiedSetupProofMaterial {
                 reference: verified_material_reference.clone(),
-                chunks: Arc::new(session.chunks),
+                // Move the absorbed buffer straight into the store; no byte copy.
+                proof_bytes: Arc::new(session.bytes),
             },
         );
 

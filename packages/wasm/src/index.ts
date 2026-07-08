@@ -56,3 +56,17 @@ export const loadTranscriptCoreKernel: () => Promise<TranscriptCoreKernel> =
     createTranscriptCoreKernelLoader(transcriptCoreKernelUrl, {
         allowUnpinnedKernel: true,
     });
+
+// A fresh, unmemoized kernel instance with its own WebAssembly linear memory,
+// separate from the shared singleton above. Dev/test fixtures use this to run
+// heavy proof generation on a throwaway instance so the prover's transient peak
+// ratchets that instance's linear memory rather than the singleton's, and is
+// reclaimed once the caller drops its reference. Each call builds a new loader
+// and invokes it once, so callers must not share the returned kernel across
+// fixtures they expect to be independent. Same dev/test-only scope as
+// loadTranscriptCoreKernel.
+export const loadFreshTranscriptCoreKernel: () => Promise<TranscriptCoreKernel> =
+    () =>
+        createTranscriptCoreKernelLoader(transcriptCoreKernelUrl, {
+            allowUnpinnedKernel: true,
+        })();

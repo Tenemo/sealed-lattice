@@ -26,9 +26,9 @@ use crate::bgv::setup::commitment::{
 };
 use crate::bgv::setup::limb_group_key_switch_atom::family_backend::schedule as atom_schedule;
 use crate::bgv::setup::setup_proof::{
-    SETUP_PROOF_MATERIAL_ENCODING, SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
+    SETUP_PROOF_MATERIAL_ENCODING, SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES, SetupProofMaterialBytes,
     SetupProofMaterialTransportHashes, setup_proof_material_transport_hashes,
-    verified_setup_proof_material_chunks_from_request,
+    verified_setup_proof_material_bytes_from_request,
 };
 use crate::bgv::setup::vss_commitment::{
     VSS_PUBLIC_OUTPUT_COORDINATE_COUNT, VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT,

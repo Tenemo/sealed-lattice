@@ -990,11 +990,11 @@ fn trustee_evaluation_key_proof_bytes_from_record(
         proof_material_root,
         "trusteeEvaluationKeyProof.proofMaterialRoot",
     )?;
-    let chunks =
-        transported_trustee_evaluation_key_proof_material_chunks(request, proof_material_root)?;
+    let proof_bytes =
+        transported_trustee_evaluation_key_proof_material_bytes(request, proof_material_root)?;
     let transport_hashes = setup_proof_material_transport_hashes(
         TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
-        chunks.as_ref(),
+        &proof_bytes,
         SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
     )?;
     verify_trustee_evaluation_key_proof_transport_reference(proof_record, &transport_hashes)?;
@@ -1006,19 +1006,8 @@ fn trustee_evaluation_key_proof_bytes_from_record(
             "trustee evaluation-key proofMaterialRoot must match the canonical transported proof material reference",
         ));
     }
-    let mut proof_bytes = Vec::with_capacity(
-        usize::try_from(transport_hashes.total_byte_length).map_err(|_| {
-            CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "trustee evaluation-key transported proof material length does not fit usize",
-            )
-        })?,
-    );
-    for chunk in chunks.iter() {
-        proof_bytes.extend_from_slice(chunk);
-    }
 
-    Ok(proof_bytes)
+    Ok(proof_bytes.as_ref().clone())
 }
 
 pub(in crate::bgv::setup) fn trustee_evaluation_key_proof_material_root(
@@ -1053,10 +1042,10 @@ fn verify_trustee_evaluation_key_proof_transport_reference(
     )
 }
 
-fn transported_trustee_evaluation_key_proof_material_chunks(
+fn transported_trustee_evaluation_key_proof_material_bytes(
     request: &Value,
     expected_proof_material_root: &str,
-) -> CanonicalResult<SetupProofMaterialChunks> {
+) -> CanonicalResult<SetupProofMaterialBytes> {
     let material_set = request
         .get("transportedEvaluationKeyShareProofMaterial")
         .ok_or_else(|| {
@@ -1086,7 +1075,7 @@ fn transported_trustee_evaluation_key_proof_material_chunks(
                 "transportedEvaluationKeyShareProofMaterial.proofMaterials must list proof material objects",
             )
         })?;
-    let mut matching_chunks = None;
+    let mut matching_bytes = None;
     for proof_material in proof_materials {
         if proof_material.get("objectType").and_then(Value::as_str)
             != Some(EVALUATION_KEY_SHARE_PROOF_TRANSPORT_OBJECT_TYPE)
@@ -1105,30 +1094,26 @@ fn transported_trustee_evaluation_key_proof_material_chunks(
         if value_string(proof_material, "proofMaterialRoot")? != expected_proof_material_root {
             continue;
         }
-        if matching_chunks.is_some() {
+        if matching_bytes.is_some() {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
                 "transportedEvaluationKeyShareProofMaterial contains duplicate proofMaterialRoot entries",
             ));
         }
-        let chunks = if let Some(chunk_values) = proof_material.get("chunks") {
+        let proof_bytes = if let Some(chunk_values) = proof_material.get("chunks") {
             let chunk_values = chunk_values.as_array().ok_or_else(|| {
                 CanonicalError::new(
                     CanonicalErrorCode::InvalidFixture,
                     "transported trustee evaluation-key proof material chunks must be an array",
                 )
             })?;
-            Arc::new(
-                chunk_values
-                    .iter()
-                    .map(|chunk| {
-                        let bytes_hex = value_string(chunk, "bytesHex")?;
-                        decode_hex(bytes_hex)
-                    })
-                    .collect::<CanonicalResult<Vec<_>>>()?,
-            )
+            let mut proof_bytes = Vec::new();
+            for chunk in chunk_values {
+                proof_bytes.extend_from_slice(&decode_hex(value_string(chunk, "bytesHex")?)?);
+            }
+            Arc::new(proof_bytes)
         } else if request.get("verifiedSetupProofMaterials").is_some() {
-            verified_setup_proof_material_chunks_from_request(
+            verified_setup_proof_material_bytes_from_request(
                 request,
                 TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
                 expected_proof_material_root,
@@ -1136,15 +1121,19 @@ fn transported_trustee_evaluation_key_proof_material_chunks(
                 "transportedEvaluationKeyShareProofMaterial.proofMaterials",
             )?
         } else {
+            // The trustee evaluation-key material can also arrive through its own
+            // file-backed transport, whose store still holds per-chunk vectors;
+            // flatten them into the same contiguous buffer here.
             Arc::new(
                 stored_verified_trustee_evaluation_key_proof_material_chunks(
                     expected_proof_material_root,
-                )?,
+                )?
+                .concat(),
             )
         };
         let transport_hashes = setup_proof_material_transport_hashes(
             TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
-            chunks.as_ref(),
+            &proof_bytes,
             SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
         )?;
         if value_u64(proof_material, "proofChunkCount")?
@@ -1165,10 +1154,10 @@ fn transported_trustee_evaluation_key_proof_material_chunks(
                 "transported trustee evaluation-key proof material hashes do not match chunks",
             ));
         }
-        matching_chunks = Some(chunks);
+        matching_bytes = Some(proof_bytes);
     }
 
-    matching_chunks.ok_or_else(|| {
+    matching_bytes.ok_or_else(|| {
         CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             "transportedEvaluationKeyShareProofMaterial is missing the requested proofMaterialRoot",

@@ -106,13 +106,14 @@ pub(super) fn setup_proof_transport_array_field<'a>(
         })
 }
 
-// Chunks are streamed unframed; the bound total length plus the enforced
-// uniform chunk size make this concatenation unambiguous, so no per-chunk length
-// prefix is needed.
+// The proof bytes are hashed unframed; the bound total length plus the enforced
+// uniform chunk size make the concatenation unambiguous, so no per-chunk length
+// prefix is needed. Hashing the contiguous buffer is byte-for-byte identical to
+// updating the hasher with each canonical chunk window in order.
 pub(super) fn setup_proof_material_full_object_hash(
     proof_family: &str,
     total_byte_length: u64,
-    chunks: &[Vec<u8>],
+    proof_bytes: &[u8],
 ) -> CanonicalResult<String> {
     let mut hasher = Shake256::default();
     hasher.update(HASH512_PREIMAGE_PREFIX);
@@ -124,9 +125,7 @@ pub(super) fn setup_proof_material_full_object_hash(
     let mut length = Vec::new();
     append_varuint(&mut length, total_byte_length);
     hasher.update(&length);
-    for chunk in chunks {
-        hasher.update(chunk);
-    }
+    hasher.update(proof_bytes);
     let mut output = [0_u8; 64];
     hasher.finalize_xof().read(&mut output);
 

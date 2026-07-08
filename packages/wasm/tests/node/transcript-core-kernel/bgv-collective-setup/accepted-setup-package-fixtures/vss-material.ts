@@ -30,11 +30,7 @@ import type {
     BgvCollectiveSetupParametersDescription,
     TranscriptCoreKernel,
 } from '#packages/wasm/src/index';
-import {
-    sameSecretBridgeProofComputer,
-    vssPublicCommitmentComputer,
-    vssShareLinkageProofComputer,
-} from '#tests/support/vss-commitment-computer';
+import { createVssCommitmentComputers } from '#tests/support/vss-commitment-computer';
 
 // The source trustee's centered ternary secret coefficient, deterministic per
 // (trustee, coefficient position). The shamir-zero coefficient message is this
@@ -201,6 +197,8 @@ export function acceptedVssPublicMaterial(
     parameters: BgvCollectiveSetupParametersDescription,
     publicMatrixSeedHash: string,
 ): VssPublicMaterial {
+    const { vssPublicCommitmentComputer, vssShareLinkageProofComputer } =
+        createVssCommitmentComputers(kernel);
     const qSharePrimes = parameters.qShare.primes;
     const ringDegree = minimumSuccinctProofFixtureRingDegree;
     const participantCount = parameters.participantCount;
@@ -367,6 +365,8 @@ export function acceptedSameSecretBridge(
     sameSecretConsistency: SameSecretConsistencyStatementSet,
     sameSecretProofs: SameSecretProofSet,
 ): SameSecretBridge {
+    const { sameSecretBridgeProofComputer } =
+        createVssCommitmentComputers(kernel);
     const bridgeStatementSet = createVssSameSecretBridgeStatementSet({
         setupContext,
         publicMatrixSeedHash,

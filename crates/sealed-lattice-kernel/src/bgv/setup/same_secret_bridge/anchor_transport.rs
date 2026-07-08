@@ -18,9 +18,16 @@ pub(super) fn transported_same_secret_proof_material_binding(
     request: &Value,
     expected_proof_material_root: &str,
 ) -> CanonicalResult<SameSecretProofTransportBinding> {
-    let (transport_hashes, chunks) =
+    let (transport_hashes, proof_bytes) =
         resolve_transported_proof_material(request, expected_proof_material_root, &ANCHOR_FAMILY)?;
-    let chunk_slices = chunks.iter().map(Vec::as_slice).collect::<Vec<_>>();
+    // The anchor proof-bytes hash frames each canonical chunk as a separate
+    // hash part (unlike the bridge and share-linkage hashes, which hash the
+    // flattened bytes as one part). hash512_hex length-frames every part, so the
+    // contiguous buffer must be re-split at the canonical chunk boundary to keep
+    // this hash byte-identical.
+    let chunk_slices = proof_bytes
+        .chunks(SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES as usize)
+        .collect::<Vec<_>>();
     Ok(SameSecretProofTransportBinding {
         transport_hashes,
         proof_bytes_hash: hash512_hex(SAME_SECRET_ANCHOR_PROOF_BYTES_HASH_DOMAIN, &chunk_slices),

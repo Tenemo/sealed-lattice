@@ -7,7 +7,7 @@ use super::*;
 // shared setup proof-material transport and binds the transport reference into
 // the record root instead of the base64 bytes.
 pub(super) struct ResolvedSameSecretBridgeProofBytes {
-    pub(super) proof_bytes: Vec<u8>,
+    pub(super) proof_bytes: SetupProofMaterialBytes,
     pub(super) proof_record_without_root: Value,
     pub(super) proof_record_root: String,
 }
@@ -56,7 +56,7 @@ pub(super) fn resolve_same_secret_bridge_proof_bytes(
         }
 
         return Ok(ResolvedSameSecretBridgeProofBytes {
-            proof_bytes,
+            proof_bytes: Arc::new(proof_bytes),
             proof_record_without_root,
             proof_record_root,
         });
@@ -109,7 +109,7 @@ pub(super) fn resolve_same_secret_bridge_proof_bytes(
 
 pub(super) struct SameSecretBridgeProofTransportBinding {
     pub(super) transport_hashes: SetupProofMaterialTransportHashes,
-    pub(super) proof_bytes: Vec<u8>,
+    pub(super) proof_bytes: SetupProofMaterialBytes,
     pub(super) proof_bytes_hash: String,
 }
 
@@ -125,13 +125,15 @@ pub(super) fn transported_same_secret_bridge_proof_material_binding(
     request: &Value,
     expected_proof_material_root: &str,
 ) -> CanonicalResult<SameSecretBridgeProofTransportBinding> {
-    let (transport_hashes, chunks) = resolve_transported_proof_material(
+    let (transport_hashes, proof_bytes) = resolve_transported_proof_material(
         request,
         expected_proof_material_root,
         &SAME_SECRET_BRIDGE_TRANSPORT_FAMILY,
     )?;
-    let proof_bytes = chunks.iter().flatten().copied().collect::<Vec<u8>>();
-    let proof_bytes_hash = hash512_hex(SAME_SECRET_BRIDGE_PROOF_BYTES_HASH_DOMAIN, &[&proof_bytes]);
+    let proof_bytes_hash = hash512_hex(
+        SAME_SECRET_BRIDGE_PROOF_BYTES_HASH_DOMAIN,
+        &[&proof_bytes[..]],
+    );
     Ok(SameSecretBridgeProofTransportBinding {
         transport_hashes,
         proof_bytes,

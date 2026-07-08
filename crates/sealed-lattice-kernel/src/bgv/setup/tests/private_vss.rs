@@ -1111,7 +1111,7 @@ fn move_private_vss_share_proof_bytes_to_transport(
                 .collect::<Vec<_>>();
             let transport_hashes = setup_proof_material_transport_hashes(
                 "vss-opening-carry",
-                &proof_chunks,
+                &proof_bytes,
                 SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
             )
             .expect("private VSS proof transport hashes");

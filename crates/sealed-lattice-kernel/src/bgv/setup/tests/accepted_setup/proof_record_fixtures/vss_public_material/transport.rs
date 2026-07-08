@@ -28,7 +28,7 @@ pub(in super::super::super) fn move_vss_share_linkage_proof_bytes_to_transport(
         let chunks = transport_chunks(&proof_bytes);
         let transport_hashes = setup_proof_material_transport_hashes(
             VSS_SHARE_LINKAGE_PROOF_FAMILY,
-            &chunks,
+            &proof_bytes,
             SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
         )
         .expect("share-linkage transport hashes");
@@ -93,7 +93,7 @@ pub(in super::super::super) fn move_same_secret_bridge_proof_bytes_to_transport(
         let chunks = transport_chunks(&proof_bytes);
         let transport_hashes = setup_proof_material_transport_hashes(
             SAME_SECRET_BRIDGE_PROOF_FAMILY,
-            &chunks,
+            &proof_bytes,
             SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
         )
         .expect("same-secret bridge transport hashes");

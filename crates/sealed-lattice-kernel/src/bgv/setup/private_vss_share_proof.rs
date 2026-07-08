@@ -292,11 +292,11 @@ fn private_vss_share_succinct_transported_proof_bytes_from_record(
         proof_material_root,
         "privateVssShareProof.proofMaterialRoot",
     )?;
-    let chunks =
-        transported_private_vss_share_proof_material_chunks(material_set, proof_material_root)?;
+    let proof_bytes =
+        transported_private_vss_share_proof_material_bytes(material_set, proof_material_root)?;
     let transport_hashes = setup_proof_material_transport_hashes(
         PRIVATE_VSS_SHARE_PROOF_FAMILY,
-        &chunks,
+        &proof_bytes,
         SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
     )?;
     verify_private_vss_share_succinct_proof_transport_reference(proof_record, &transport_hashes)?;
@@ -309,18 +309,6 @@ fn private_vss_share_succinct_transported_proof_bytes_from_record(
         return Err(invalid_private_vss_share_proof(
             "private VSS share proofMaterialRoot must match the canonical transported proof material reference",
         ));
-    }
-
-    let mut proof_bytes = Vec::with_capacity(
-        usize::try_from(transport_hashes.total_byte_length).map_err(|_| {
-            CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "private VSS transported proof material length does not fit usize",
-            )
-        })?,
-    );
-    for chunk in chunks {
-        proof_bytes.extend_from_slice(&chunk);
     }
 
     Ok(proof_bytes)
@@ -339,42 +327,42 @@ fn verify_private_vss_share_succinct_proof_transport_reference(
     )
 }
 
-fn transported_private_vss_share_proof_material_chunks(
+fn transported_private_vss_share_proof_material_bytes(
     material_set: &Value,
     expected_proof_material_root: &str,
-) -> CanonicalResult<Vec<Vec<u8>>> {
+) -> CanonicalResult<Vec<u8>> {
     verify_transported_private_vss_share_proof_material_set_header(material_set)?;
     let Some(proof_materials) = material_set.get("proofMaterials").and_then(Value::as_array) else {
         return Err(invalid_private_vss_share_proof(
             "transportedPrivateVssShareProofMaterial.proofMaterials must list transported proof material objects",
         ));
     };
-    let mut matching_chunks = None;
+    let mut matching_bytes = None;
     for proof_material in proof_materials {
         verify_transported_private_vss_share_proof_material_header(proof_material)?;
         let proof_material_root = value_string(proof_material, "proofMaterialRoot")?;
         if proof_material_root != expected_proof_material_root {
             continue;
         }
-        if matching_chunks.is_some() {
+        if matching_bytes.is_some() {
             return Err(invalid_private_vss_share_proof(
                 "transportedPrivateVssShareProofMaterial contains duplicate proofMaterialRoot entries",
             ));
         }
-        let chunks = transported_private_vss_share_proof_chunks(proof_material)?;
+        let proof_bytes = transported_private_vss_share_proof_bytes(proof_material)?;
         let transport_hashes = setup_proof_material_transport_hashes(
             PRIVATE_VSS_SHARE_PROOF_FAMILY,
-            &chunks,
+            &proof_bytes,
             SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
         )?;
         verify_transported_private_vss_share_proof_material_hashes(
             proof_material,
             &transport_hashes,
         )?;
-        matching_chunks = Some(chunks);
+        matching_bytes = Some(proof_bytes);
     }
 
-    matching_chunks.ok_or_else(|| {
+    matching_bytes.ok_or_else(|| {
         invalid_private_vss_share_proof(
             "transportedPrivateVssShareProofMaterial is missing the requested proofMaterialRoot",
         )
@@ -422,18 +410,18 @@ fn verify_transported_private_vss_share_proof_material_header(
     Ok(())
 }
 
-fn transported_private_vss_share_proof_chunks(value: &Value) -> CanonicalResult<Vec<Vec<u8>>> {
+fn transported_private_vss_share_proof_bytes(value: &Value) -> CanonicalResult<Vec<u8>> {
     let Some(chunk_values) = value.get("chunks").and_then(Value::as_array) else {
         return Err(invalid_private_vss_share_proof(
             "transported private VSS share proof material chunks are required",
         ));
     };
-    let mut chunks = Vec::with_capacity(chunk_values.len());
+    let mut proof_bytes = Vec::new();
     for chunk_value in chunk_values.iter() {
-        chunks.push(decode_hex(value_string(chunk_value, "bytesHex")?)?);
+        proof_bytes.extend_from_slice(&decode_hex(value_string(chunk_value, "bytesHex")?)?);
     }
 
-    Ok(chunks)
+    Ok(proof_bytes)
 }
 
 fn verify_transported_private_vss_share_proof_material_hashes(

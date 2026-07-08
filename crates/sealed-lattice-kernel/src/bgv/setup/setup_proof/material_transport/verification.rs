@@ -1,9 +1,14 @@
 use super::helpers::*;
 use super::*;
 
+// Recompute the transport manifest over a contiguous proof-byte buffer. The only
+// valid chunking binds every non-final chunk to exactly `chunk_size_bytes`, so
+// the canonical chunk windows are fully determined by the total length and are
+// recovered here with `proof_bytes.chunks(chunk_size)`. Every hash is therefore
+// byte-for-byte identical to the per-chunk form this replaced.
 pub(crate) fn setup_proof_material_transport_hashes(
     proof_family: &str,
-    chunks: &[Vec<u8>],
+    proof_bytes: &[u8],
     chunk_size_bytes: u64,
 ) -> CanonicalResult<SetupProofMaterialTransportHashes> {
     if !SETUP_PROOF_TRANSPORT_FAMILIES.contains(&proof_family) {
@@ -17,7 +22,7 @@ pub(crate) fn setup_proof_material_transport_hashes(
             "setup proof material chunk size must be positive",
         ));
     }
-    if chunks.is_empty() {
+    if proof_bytes.is_empty() {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
             "setup proof material transport requires at least one chunk",
@@ -29,47 +34,17 @@ pub(crate) fn setup_proof_material_transport_hashes(
             "setup proof material chunk size does not fit usize",
         )
     })?;
-    let total_byte_length =
-        chunks
-            .iter()
-            .enumerate()
-            .try_fold(0_u64, |accumulator, (chunk_index, chunk)| {
-                if chunk.is_empty() {
-                    return Err(CanonicalError::new(
-                        CanonicalErrorCode::MalformedLength,
-                        "setup proof material chunks must be non-empty",
-                    ));
-                }
-                if chunk.len() > chunk_size_usize {
-                    return Err(CanonicalError::new(
-                        CanonicalErrorCode::MalformedLength,
-                        "setup proof material chunk exceeds the accepted chunk size",
-                    ));
-                }
-                if chunk_index + 1 < chunks.len() && chunk.len() != chunk_size_usize {
-                    return Err(CanonicalError::new(
-                        CanonicalErrorCode::MalformedLength,
-                        "setup proof material contains a short non-final chunk",
-                    ));
-                }
-                let chunk_length = u64::try_from(chunk.len()).map_err(|_| {
-                    CanonicalError::new(
-                        CanonicalErrorCode::MalformedLength,
-                        "setup proof material chunk length does not fit u64",
-                    )
-                })?;
-                accumulator.checked_add(chunk_length).ok_or_else(|| {
-                    CanonicalError::new(
-                        CanonicalErrorCode::MalformedLength,
-                        "setup proof material byte length overflowed",
-                    )
-                })
-            })?;
+    let total_byte_length = u64::try_from(proof_bytes.len()).map_err(|_| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "setup proof material byte length does not fit u64",
+        )
+    })?;
 
     let full_object_hash =
-        setup_proof_material_full_object_hash(proof_family, total_byte_length, chunks)?;
-    let mut chunk_hashes = Vec::with_capacity(chunks.len());
-    for (chunk_index, chunk) in chunks.iter().enumerate() {
+        setup_proof_material_full_object_hash(proof_family, total_byte_length, proof_bytes)?;
+    let mut chunk_hashes = Vec::with_capacity(proof_bytes.len().div_ceil(chunk_size_usize));
+    for (chunk_index, chunk) in proof_bytes.chunks(chunk_size_usize).enumerate() {
         chunk_hashes.push(setup_proof_material_chunk_hash(
             proof_family,
             &full_object_hash,
@@ -197,25 +172,25 @@ pub(in crate::bgv::setup) fn verify_setup_proof_record_transport_reference(
     Ok(())
 }
 
-pub(in crate::bgv::setup) fn transported_setup_proof_material_chunks(
+pub(in crate::bgv::setup) fn transported_setup_proof_material_bytes(
     value: &Value,
     material_message_label: &str,
-) -> CanonicalResult<Vec<Vec<u8>>> {
+) -> CanonicalResult<Vec<u8>> {
     let chunk_values = setup_proof_transport_array_field(value, "chunks").map_err(|_| {
         CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             format!("{material_message_label} chunks are required"),
         )
     })?;
-    let mut chunks = Vec::with_capacity(chunk_values.len());
+    let mut proof_bytes = Vec::new();
     for chunk_value in chunk_values.iter() {
-        chunks.push(decode_hex(setup_proof_transport_string_field(
+        proof_bytes.extend_from_slice(&decode_hex(setup_proof_transport_string_field(
             chunk_value,
             "bytesHex",
         )?)?);
     }
 
-    Ok(chunks)
+    Ok(proof_bytes)
 }
 
 pub(in crate::bgv::setup) fn verify_transported_setup_proof_material_hashes(

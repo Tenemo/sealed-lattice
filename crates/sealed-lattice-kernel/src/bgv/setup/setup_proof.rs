@@ -2,7 +2,8 @@ mod material_transport;
 
 pub(super) use self::material_transport::setup_proof_record_binding_value;
 pub(in crate::bgv::setup) use self::material_transport::{
-    SetupProofMaterialChunks, verified_setup_proof_material_chunks_from_request,
+    SetupProofMaterialBytes, VerifiedSetupProofMaterialEvictionGuard,
+    verified_setup_proof_material_bytes_from_request,
 };
 pub(crate) use self::material_transport::{
     SetupProofMaterialTransportHashes, absorb_setup_proof_material_transport_stream_chunk_request,
@@ -10,7 +11,7 @@ pub(crate) use self::material_transport::{
     finish_setup_proof_material_transport_stream_request, setup_proof_material_transport_hashes,
 };
 pub(in crate::bgv::setup) use self::material_transport::{
-    setup_proof_record_has_transport_reference, transported_setup_proof_material_chunks,
+    setup_proof_record_has_transport_reference, transported_setup_proof_material_bytes,
     verify_setup_proof_record_transport_reference, verify_transported_setup_proof_material_hashes,
 };
 

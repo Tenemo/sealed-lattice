@@ -1,7 +1,7 @@
 use super::*;
 
 use crate::bgv::setup::setup_proof::{
-    setup_proof_record_has_transport_reference, transported_setup_proof_material_chunks,
+    setup_proof_record_has_transport_reference, transported_setup_proof_material_bytes,
     verify_setup_proof_record_transport_reference, verify_transported_setup_proof_material_hashes,
 };
 use crate::hashing::derive_canonical_object_hash;
@@ -44,10 +44,11 @@ pub(super) fn public_key_share_succinct_proof_bytes_from_record(
         proof_material_root,
         "publicKeyShareSuccinctProof.proofMaterialRoot",
     )?;
-    let chunks = transported_public_key_share_proof_material_chunks(request, proof_material_root)?;
+    let proof_bytes =
+        transported_public_key_share_proof_material_bytes(request, proof_material_root)?;
     let transport_hashes = setup_proof_material_transport_hashes(
         "public-key-share",
-        chunks.as_ref(),
+        &proof_bytes,
         SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
     )?;
     verify_public_key_share_succinct_proof_transport_reference(proof_record, &transport_hashes)?;
@@ -60,19 +61,7 @@ pub(super) fn public_key_share_succinct_proof_bytes_from_record(
         ));
     }
 
-    let mut proof_bytes = Vec::with_capacity(
-        usize::try_from(transport_hashes.total_byte_length).map_err(|_| {
-            CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "public-key transported proof material length does not fit usize",
-            )
-        })?,
-    );
-    for chunk in chunks.iter() {
-        proof_bytes.extend_from_slice(chunk);
-    }
-
-    Ok(proof_bytes)
+    Ok(proof_bytes.as_ref().clone())
 }
 
 // Canonical transported proof material reference for one public-key share
@@ -111,10 +100,10 @@ fn verify_public_key_share_succinct_proof_transport_reference(
     )
 }
 
-fn transported_public_key_share_proof_material_chunks(
+fn transported_public_key_share_proof_material_bytes(
     request: &Value,
     expected_proof_material_root: &str,
-) -> CanonicalResult<SetupProofMaterialChunks> {
+) -> CanonicalResult<SetupProofMaterialBytes> {
     let material_set = request
         .get("transportedPublicKeyShareProofMaterial")
         .ok_or_else(|| {
@@ -130,23 +119,23 @@ fn transported_public_key_share_proof_material_chunks(
             "transportedPublicKeyShareProofMaterial.proofMaterials must list transported proof material objects",
         ));
     };
-    let mut matching_chunks = None;
+    let mut matching_bytes = None;
     for proof_material in proof_materials {
         verify_transported_public_key_share_proof_material_header(proof_material)?;
         let proof_material_root = value_string(proof_material, "proofMaterialRoot")?;
         if proof_material_root != expected_proof_material_root {
             continue;
         }
-        if matching_chunks.is_some() {
+        if matching_bytes.is_some() {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
                 "transportedPublicKeyShareProofMaterial contains duplicate proofMaterialRoot entries",
             ));
         }
-        let chunks = if proof_material.get("chunks").is_some() {
-            Arc::new(transported_public_key_share_proof_chunks(proof_material)?)
+        let proof_bytes = if proof_material.get("chunks").is_some() {
+            Arc::new(transported_public_key_share_proof_bytes(proof_material)?)
         } else {
-            verified_setup_proof_material_chunks_from_request(
+            verified_setup_proof_material_bytes_from_request(
                 request,
                 PUBLIC_KEY_SHARE_PROOF_FAMILY,
                 expected_proof_material_root,
@@ -156,17 +145,17 @@ fn transported_public_key_share_proof_material_chunks(
         };
         let transport_hashes = setup_proof_material_transport_hashes(
             PUBLIC_KEY_SHARE_PROOF_FAMILY,
-            chunks.as_ref(),
+            &proof_bytes,
             SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
         )?;
         verify_transported_public_key_share_proof_material_hashes(
             proof_material,
             &transport_hashes,
         )?;
-        matching_chunks = Some(chunks);
+        matching_bytes = Some(proof_bytes);
     }
 
-    matching_chunks.ok_or_else(|| {
+    matching_bytes.ok_or_else(|| {
         CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             "transportedPublicKeyShareProofMaterial is missing the requested proofMaterialRoot",
@@ -219,8 +208,8 @@ fn verify_transported_public_key_share_proof_material_header(value: &Value) -> C
     Ok(())
 }
 
-fn transported_public_key_share_proof_chunks(value: &Value) -> CanonicalResult<Vec<Vec<u8>>> {
-    transported_setup_proof_material_chunks(
+fn transported_public_key_share_proof_bytes(value: &Value) -> CanonicalResult<Vec<u8>> {
+    transported_setup_proof_material_bytes(
         value,
         "transported public-key share succinct proof material",
     )

@@ -651,10 +651,9 @@ fn move_same_secret_proof_bytes_to_transport(
                 .as_str()
                 .expect("embedded same-secret proof bytes"),
         )?;
-        let chunks = vec![proof_bytes.clone()];
         let transport_hashes = setup_proof_material_transport_hashes(
             "same-secret-linkage-anchor",
-            &chunks,
+            &proof_bytes,
             SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
         )?;
         proof_record

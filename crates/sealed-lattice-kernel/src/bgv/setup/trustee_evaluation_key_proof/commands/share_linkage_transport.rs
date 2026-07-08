@@ -8,7 +8,7 @@ use super::*;
 // setup proof-material transport and binds the transport reference into the
 // record root instead of the base64 bytes.
 pub(super) struct ResolvedVssShareLinkageProofBytes {
-    pub(super) proof_bytes: Vec<u8>,
+    pub(super) proof_bytes: SetupProofMaterialBytes,
     pub(super) proof_record_without_root: Value,
     pub(super) proof_record_root: String,
 }
@@ -57,7 +57,7 @@ pub(super) fn resolve_vss_share_linkage_proof_bytes(
         )?;
 
         return Ok(ResolvedVssShareLinkageProofBytes {
-            proof_bytes,
+            proof_bytes: Arc::new(proof_bytes),
             proof_record_without_root,
             proof_record_root,
         });
@@ -110,7 +110,7 @@ pub(super) fn resolve_vss_share_linkage_proof_bytes(
 
 pub(super) struct VssShareLinkageProofTransportBinding {
     pub(super) transport_hashes: SetupProofMaterialTransportHashes,
-    pub(super) proof_bytes: Vec<u8>,
+    pub(super) proof_bytes: SetupProofMaterialBytes,
     pub(super) proof_bytes_hash: String,
 }
 
@@ -146,13 +146,13 @@ pub(super) fn transported_vss_share_linkage_proof_material_binding(
                 "transportedVssShareLinkageProofMaterial contains duplicate proofMaterialRoot entries",
             ));
         }
-        let chunks = if proof_material.get("chunks").is_some() {
-            Arc::new(transported_vss_share_linkage_proof_chunks(
+        let proof_bytes = if proof_material.get("chunks").is_some() {
+            Arc::new(transported_vss_share_linkage_proof_bytes(
                 proof_material,
                 proof_material_index,
             )?)
         } else {
-            verified_setup_proof_material_chunks_from_request(
+            verified_setup_proof_material_bytes_from_request(
                 request,
                 VSS_SHARE_LINKAGE_PROOF_FAMILY,
                 expected_proof_material_root,
@@ -162,16 +162,17 @@ pub(super) fn transported_vss_share_linkage_proof_material_binding(
         };
         let transport_hashes = setup_proof_material_transport_hashes(
             VSS_SHARE_LINKAGE_PROOF_FAMILY,
-            chunks.as_ref(),
+            &proof_bytes,
             SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
         )?;
         verify_transported_vss_share_linkage_proof_material_hashes(
             proof_material,
             &transport_hashes,
         )?;
-        let proof_bytes = chunks.iter().flatten().copied().collect::<Vec<u8>>();
-        let proof_bytes_hash =
-            hash512_hex(VSS_SHARE_LINKAGE_PROOF_BYTES_HASH_DOMAIN, &[&proof_bytes]);
+        let proof_bytes_hash = hash512_hex(
+            VSS_SHARE_LINKAGE_PROOF_BYTES_HASH_DOMAIN,
+            &[&proof_bytes[..]],
+        );
         matching_binding = Some(VssShareLinkageProofTransportBinding {
             transport_hashes,
             proof_bytes,
@@ -220,10 +221,10 @@ pub(super) fn verify_transported_vss_share_linkage_proof_material_header(
     Ok(())
 }
 
-pub(super) fn transported_vss_share_linkage_proof_chunks(
+pub(super) fn transported_vss_share_linkage_proof_bytes(
     value: &Value,
     proof_material_index: usize,
-) -> CanonicalResult<Vec<Vec<u8>>> {
+) -> CanonicalResult<Vec<u8>> {
     let chunk_count = usize::try_from(read_u64(value, "chunkCount")?).map_err(|_| {
         invalid_succinct_setup_proof(
             "transported share-linkage proof material chunkCount does not fit usize",
@@ -247,7 +248,7 @@ pub(super) fn transported_vss_share_linkage_proof_chunks(
             "transported share-linkage proof material chunks length must match chunkCount",
         ));
     }
-    let mut chunks = Vec::with_capacity(chunk_count);
+    let mut proof_bytes = Vec::new();
     for (expected_chunk_index, chunk_value) in chunk_values.iter().enumerate() {
         compare_u64_value(
             read_u64(chunk_value, "chunkIndex")?,
@@ -256,13 +257,13 @@ pub(super) fn transported_vss_share_linkage_proof_chunks(
                 "transportedVssShareLinkageProofMaterial.proofMaterials.{proof_material_index}.chunks.{expected_chunk_index}.chunkIndex"
             ),
         )?;
-        chunks.push(crate::transcript_core::decode_standard_base64(
+        proof_bytes.extend_from_slice(&crate::transcript_core::decode_standard_base64(
             read_string(chunk_value, "bytesBase64")?,
             "transported share-linkage proof material bytesBase64",
         )?);
     }
 
-    Ok(chunks)
+    Ok(proof_bytes)
 }
 
 pub(super) fn verify_transported_vss_share_linkage_proof_material_hashes(

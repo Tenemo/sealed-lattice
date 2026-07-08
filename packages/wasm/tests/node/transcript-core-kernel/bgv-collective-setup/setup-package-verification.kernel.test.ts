@@ -98,13 +98,18 @@ describe('collective BGV setup kernel commands', () => {
         const parameters = kernel.describeCollectiveBgvSetupParameters({
             participantCount: 3,
         });
-        const verificationCompanions =
-            await acceptedShapedSetupVerificationCompanions(kernel, parameters);
 
         for (const [fieldName, malformedValue] of [
             ['setupEpoch', 'setup-epoch 1'],
             ['ceremonyId', 'ceremony-1\nfork'],
         ] as const) {
+            // Each verify consumes and evicts its streamed proof-material handles,
+            // so this loop streams a fresh companions set for every iteration.
+            const verificationCompanions =
+                await acceptedShapedSetupVerificationCompanions(
+                    kernel,
+                    parameters,
+                );
             const setupPackage = await acceptedShapedSetupPackage(
                 kernel,
                 parameters,

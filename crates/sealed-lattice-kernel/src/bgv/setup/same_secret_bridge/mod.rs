@@ -1,7 +1,7 @@
 use super::setup_proof::{
-    SETUP_PROOF_MATERIAL_ENCODING, SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
+    SETUP_PROOF_MATERIAL_ENCODING, SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES, SetupProofMaterialBytes,
     SetupProofMaterialTransportHashes, setup_proof_material_transport_hashes,
-    verified_setup_proof_material_chunks_from_request,
+    verified_setup_proof_material_bytes_from_request,
 };
 use super::vss_commitment::VSS_PUBLIC_COMMITMENT_BINARY_FORMAT;
 use super::*;
@@ -383,7 +383,7 @@ pub(crate) fn verify_vss_same_secret_bridge_proof_material_set_request(
                 },
                 expected_position,
                 proof_byte_length,
-                proof_bytes: &proof_bytes,
+                proof_bytes: &proof_bytes[..],
             },
         )?;
         verified_proof_count += 1;

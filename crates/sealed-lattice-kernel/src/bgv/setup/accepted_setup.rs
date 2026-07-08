@@ -135,8 +135,9 @@ use super::{
     },
     setup_proof::{
         SETUP_PROOF_BYTES_DOMAIN, SETUP_PROOF_MATERIAL_ENCODING, SETUP_PROOF_SERIALIZATION,
-        SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES, SetupProofMaterialChunks,
-        setup_proof_material_transport_hashes, verified_setup_proof_material_chunks_from_request,
+        SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES, SetupProofMaterialBytes,
+        VerifiedSetupProofMaterialEvictionGuard, setup_proof_material_transport_hashes,
+        verified_setup_proof_material_bytes_from_request,
     },
     vss::carry_aware_vss_share_relation_value,
 };
@@ -483,6 +484,13 @@ pub(crate) fn verify_collective_bgv_setup_package(
     // runtime does not retain every verified package's material.
     let _component_material_eviction_guard =
         VerifiedComponentMaterialEvictionGuard::for_request(request);
+    // Same lifecycle for this request's stream-verified setup proof material: the
+    // SDK streams fresh sequence-numbered handles on every verify, so without
+    // eviction the process-global store retains a full copy of every verified
+    // package's share-linkage, same-secret bridge and anchor, public-key share,
+    // and evaluation-key proof material.
+    let _setup_proof_material_eviction_guard =
+        VerifiedSetupProofMaterialEvictionGuard::for_request(request);
     if !setup_package.is_object() {
         return verification_response(
             None,
