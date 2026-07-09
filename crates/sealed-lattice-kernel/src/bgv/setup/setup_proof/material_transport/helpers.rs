@@ -119,7 +119,7 @@ pub(super) fn setup_proof_material_full_object_hash(
     hasher.update(HASH512_PREIMAGE_PREFIX);
     append_bytes_to_hasher(
         &mut hasher,
-        b"sealed-lattice/setup/proof-material/full-object-v1",
+        b"sealed-lattice/setup/proof-material/full-object",
     )?;
     append_bytes_to_hasher(&mut hasher, proof_family.as_bytes())?;
     let mut length = Vec::new();
@@ -151,7 +151,7 @@ pub(super) fn setup_proof_material_chunk_hash(
     );
 
     Ok(hash512_hex(
-        "sealed-lattice/setup/proof-material/chunk-v1",
+        "sealed-lattice/setup/proof-material/chunk",
         &[
             proof_family.as_bytes(),
             full_object_hash.as_bytes(),

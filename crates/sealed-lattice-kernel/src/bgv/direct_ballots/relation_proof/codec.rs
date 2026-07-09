@@ -371,7 +371,7 @@ pub(super) fn direct_ballot_relation_commitment_hash(
     encoded_commitments: &[u8],
 ) -> [u8; 64] {
     hash512(
-        "sealed-lattice/direct-encrypted-ballot/relation-commitment-v1",
+        "sealed-lattice/direct-encrypted-ballot/relation-commitment",
         &[statement_hash, encoded_commitments],
     )
 }

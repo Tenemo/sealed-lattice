@@ -44,7 +44,7 @@ pub(crate) fn run_direct_ballot_packed_batched_pair_evaluator_for_top_counts(
         .collect::<Vec<_>>()
         .join("-");
     let replay_seed = hash512_hex(
-        "sealed-lattice/direct-encrypted-ballot/packed-batched-pair-evaluator-seed-v1",
+        "sealed-lattice/direct-encrypted-ballot/packed-batched-pair-evaluator-seed",
         &[
             aggregate_ciphertext_root.as_bytes(),
             top_count_seed.as_bytes(),

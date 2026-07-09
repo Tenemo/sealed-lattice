@@ -70,7 +70,7 @@ const proofMaterialCases = [
         transportMaterialObjectType:
             'SetupTransportedVssShareLinkageProofMaterial',
         proofBytesHashDomain:
-            'sealed-lattice/setup/vss-share-linkage/proof-bytes-v1',
+            'sealed-lattice/setup/vss-share-linkage/proof-bytes',
         moveEmbeddedToTransport: (proofMaterialSet: JsonRecord) => {
             const moved =
                 createBinaryChunkedVssShareLinkageProofMaterialTransport(
@@ -94,7 +94,7 @@ const proofMaterialCases = [
         transportMaterialObjectType:
             'SetupTransportedSameSecretBridgeProofMaterial',
         proofBytesHashDomain:
-            'sealed-lattice/setup/same-secret-bridge/proof-bytes-v1',
+            'sealed-lattice/setup/same-secret-bridge/proof-bytes',
         moveEmbeddedToTransport: (proofMaterialSet: JsonRecord) => {
             const moved =
                 createBinaryChunkedSameSecretBridgeProofMaterialTransport(

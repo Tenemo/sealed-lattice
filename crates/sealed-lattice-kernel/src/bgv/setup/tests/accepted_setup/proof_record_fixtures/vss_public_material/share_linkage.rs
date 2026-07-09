@@ -331,11 +331,11 @@ pub(super) fn vss_share_linkage_proof_bytes_hex(
         "objectType": "VssShareLinkageProofCheckpointKey",
         // The prover revision invalidates cached proofs when the family's proof
         // structure changes but its statement root does not. Bump it on any
-        // vss-share-linkage schedule/mask change; "trit-v1" covers the Branch 2
+        // vss-share-linkage schedule/mask change; "trit" covers the Branch 2
         // stage B.2 move to trit-granular message consistency claims (each digit
         // split into its base-three trits, witness bound two), which changes the
         // masked-claim set and proof bytes without touching the statement root.
-        "proverRevision": "share-linkage-trit-v1",
+        "proverRevision": "share-linkage-trit",
         "statementRoot": package["vssShareLinkageStatement"]["statementRoot"],
         "sourceTrusteeRosterPosition": source_trustee_roster_position,
         "proofRecordIndex": proof_record_index,

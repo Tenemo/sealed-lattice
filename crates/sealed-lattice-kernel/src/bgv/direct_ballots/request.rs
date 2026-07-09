@@ -112,7 +112,7 @@ pub(super) fn direct_ballot_proof_randomness_seed(
     ballot: &DirectEncryptedBallot,
 ) -> String {
     hash512_hex(
-        "sealed-lattice/direct-encrypted-ballot/proof-randomness-seed-v1",
+        "sealed-lattice/direct-encrypted-ballot/proof-randomness-seed",
         &[
             private_setup_seed.as_bytes(),
             ballot.ciphertext_root.as_bytes(),
@@ -142,7 +142,7 @@ pub(super) fn direct_encrypted_ballot_hash(
             "ciphertextCanonicalByteLength": ciphertext_canonical_byte_length
     }))?;
     Ok(hash512_hex(
-        "sealed-lattice/direct-encrypted-ballot/encrypted-ballot-hash-v1",
+        "sealed-lattice/direct-encrypted-ballot/encrypted-ballot-hash",
         &[package_json.as_bytes()],
     ))
 }

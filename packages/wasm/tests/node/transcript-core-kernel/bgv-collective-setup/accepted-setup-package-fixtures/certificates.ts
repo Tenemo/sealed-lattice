@@ -39,7 +39,7 @@ export function acceptedSetupTransportCertificate(
 ): JsonRecord {
     const certificate = {
         objectType: 'SetupTransportCertificate',
-        transportSchemeId: 'sealed-lattice-setup-binary-chunked-transport-v1',
+        transportSchemeId: 'sealed-lattice-setup-binary-chunked-transport',
         setupParametersHash: parameters.setupParametersHash,
         largeObjectEncoding: 'binary',
         chunking: 'required',

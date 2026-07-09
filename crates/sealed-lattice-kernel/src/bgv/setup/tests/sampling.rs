@@ -8,7 +8,7 @@ fn centered_binomial_eta2_samples_match_certified_sampler() {
         let position = sample["position"].as_u64().expect("position") as usize;
         let position_text = position.to_string();
         let output = hash512(
-            "sealed-lattice-bgv-rns/sample-centered-binomial-eta2-v1",
+            "sealed-lattice-bgv-rns/sample-centered-binomial-eta2",
             &[
                 seed_hash.as_bytes(),
                 b"trustee-1",

@@ -2,7 +2,7 @@ import { shake256 } from '@noble/hashes/sha3.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
 
 const textEncoder = new TextEncoder();
-const hash512PreimagePrefix = textEncoder.encode('sealed.vote/v1/hash512');
+const hash512PreimagePrefix = textEncoder.encode('sealed.vote/hash512');
 
 const isCanonicalInteger = (value: number): boolean =>
     Number.isSafeInteger(value) && !Object.is(value, -0);
@@ -210,7 +210,7 @@ export const setupProofMaterialFullObjectHashHex = (
         appendBytesToHash(
             hash,
             textEncoder.encode(
-                'sealed-lattice/setup/proof-material/full-object-v1',
+                'sealed-lattice/setup/proof-material/full-object',
             ),
         );
         appendBytesToHash(hash, textEncoder.encode(proofFamily));

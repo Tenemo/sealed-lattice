@@ -94,7 +94,7 @@ use crate::{
 // the package proof records and the chunked proof transport reference.
 pub(in crate::bgv::setup) fn trustee_evaluation_key_proof_bytes_hash(proof_bytes: &[u8]) -> String {
     hash512_hex(
-        "sealed-lattice/setup/trustee-evaluation-key/proof-bytes-v1",
+        "sealed-lattice/setup/trustee-evaluation-key/proof-bytes",
         &[proof_bytes],
     )
 }
@@ -110,7 +110,7 @@ pub(crate) const TARGET_DECRYPTION_SHARE_PROOF_FAMILY: &str = "target-decryption
 #[cfg(test)]
 pub(in crate::bgv::setup) fn same_secret_anchor_proof_bytes_hash(proof_bytes: &[u8]) -> String {
     hash512_hex(
-        "sealed-lattice/setup/same-secret-linkage-anchor/proof-bytes-v1",
+        "sealed-lattice/setup/same-secret-linkage-anchor/proof-bytes",
         &[proof_bytes],
     )
 }
@@ -120,7 +120,7 @@ pub(in crate::bgv::setup) fn public_key_share_succinct_proof_bytes_hash(
     proof_bytes: &[u8],
 ) -> String {
     hash512_hex(
-        "sealed-lattice/setup/public-key-share/succinct-proof-bytes-v1",
+        "sealed-lattice/setup/public-key-share/succinct-proof-bytes",
         &[proof_bytes],
     )
 }
@@ -130,7 +130,7 @@ pub(in crate::bgv::setup) fn private_vss_share_succinct_proof_bytes_hash(
     proof_bytes: &[u8],
 ) -> String {
     hash512_hex(
-        "sealed-lattice/setup/private-vss-share/succinct-proof-bytes-v1",
+        "sealed-lattice/setup/private-vss-share/succinct-proof-bytes",
         &[proof_bytes],
     )
 }
@@ -229,9 +229,9 @@ pub(in crate::bgv::setup) const TARGET_DECRYPTION_SMUDGING_MESSAGE_CLAIM_MASK_DI
 // roughly 288 queries. No grinding is applied.
 pub(super) const LOW_DEGREE_QUERY_COUNT: usize = 168;
 pub(super) const MINIMUM_CONJECTURED_CLASSICAL_SOUNDNESS_AFTER_UNION_BITS: i64 = 128;
-pub(super) const MAIN_LOW_DEGREE_TRANSCRIPT_PURPOSE: &[u8] = b"batched-column-degree-v1";
+pub(super) const MAIN_LOW_DEGREE_TRANSCRIPT_PURPOSE: &[u8] = b"batched-column-degree";
 pub(super) const SUMCHECK_RESIDUAL_LOW_DEGREE_TRANSCRIPT_PURPOSE: &[u8] =
-    b"sumcheck-residual-degree-v1";
+    b"sumcheck-residual-degree";
 // The FRI recursion stops at a statement-derived final coefficient layer. The
 // minimum keeps tiny development traces usable; the cap removes committed
 // folded Merkle layers from production-size proofs while keeping final

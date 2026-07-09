@@ -100,7 +100,7 @@ fn first_profile_replay_target_release_matches_plaintext_oracle() {
     let aggregate_ciphertext_root =
         ciphertext_object_root(&aggregate_ciphertext).expect("aggregate root");
     let replay_seed = hash512_hex(
-        "sealed-lattice/direct-encrypted-ballot/packed-batched-pair-evaluator-seed-v1",
+        "sealed-lattice/direct-encrypted-ballot/packed-batched-pair-evaluator-seed",
         &[
             aggregate_ciphertext_root.as_bytes(),
             top_count.to_string().as_bytes(),

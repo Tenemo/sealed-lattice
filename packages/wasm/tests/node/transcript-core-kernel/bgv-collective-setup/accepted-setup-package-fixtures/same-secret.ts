@@ -24,7 +24,7 @@ import type {
 
 const sameSecretProofBytesHash = (proofBytesHex: string): string =>
     hash512Hex(
-        'sealed-lattice/setup/same-secret-linkage-anchor/proof-bytes-v1',
+        'sealed-lattice/setup/same-secret-linkage-anchor/proof-bytes',
         [hexToBytes(proofBytesHex)],
     );
 
@@ -194,11 +194,11 @@ export function acceptedSameSecretProofs(
                 ),
                 openingRandomnessByLimb,
                 proofRandomnessSeedHex: hash512Hex(
-                    'sealed-lattice-test/accepted-same-secret-proof-seed-v1',
+                    'sealed-lattice-test/accepted-same-secret-proof-seed',
                     [textEncoder.encode(String(sourceTrusteeRosterPosition))],
                 ),
                 proofRandomnessNonceHex: hash512Hex(
-                    'sealed-lattice-test/accepted-same-secret-proof-nonce-v1',
+                    'sealed-lattice-test/accepted-same-secret-proof-nonce',
                     [textEncoder.encode(String(sourceTrusteeRosterPosition))],
                 ),
             });

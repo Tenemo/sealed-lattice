@@ -114,7 +114,7 @@ fn setup_commitment_root_payload(commitment: &SetupCommitmentValue) -> Value {
                 "rowCoefficientHash512": limb.rows.iter().map(|row| {
                     coefficient_vector_hash512(
                         row,
-                        "sealed-lattice-bdlop-commitment/row-coefficients-v1",
+                        "sealed-lattice-bdlop-commitment/row-coefficients",
                     )
                 }).collect::<Vec<_>>()
             })

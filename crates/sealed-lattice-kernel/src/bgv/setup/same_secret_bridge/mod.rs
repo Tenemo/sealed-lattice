@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 const SAME_SECRET_PROOF_FAMILY: &str = "same-secret-linkage-anchor";
 const SAME_SECRET_ANCHOR_PROOF_BYTES_HASH_DOMAIN: &str =
-    "sealed-lattice/setup/same-secret-linkage-anchor/proof-bytes-v1";
+    "sealed-lattice/setup/same-secret-linkage-anchor/proof-bytes";
 const SAME_SECRET_PROOF_TRANSPORT_SET_OBJECT_TYPE: &str =
     "SetupTransportedSameSecretProofMaterialSet";
 const SAME_SECRET_PROOF_TRANSPORT_OBJECT_TYPE: &str = "SetupTransportedSameSecretProofMaterial";
@@ -22,7 +22,7 @@ const SAME_SECRET_RELATION: &str =
 const VSS_SAME_SECRET_BRIDGE_RELATION: &str = "target-basis constant coefficient commitments bind to the same signed ternary trustee secret as the data-basis same-secret proof";
 const SAME_SECRET_BRIDGE_PROOF_FAMILY: &str = "same-secret-bridge";
 const SAME_SECRET_BRIDGE_PROOF_BYTES_HASH_DOMAIN: &str =
-    "sealed-lattice/setup/same-secret-bridge/proof-bytes-v1";
+    "sealed-lattice/setup/same-secret-bridge/proof-bytes";
 const SAME_SECRET_BRIDGE_TRANSPORT_SET_OBJECT_TYPE: &str =
     "SetupTransportedSameSecretBridgeProofMaterialSet";
 const SAME_SECRET_BRIDGE_TRANSPORT_OBJECT_TYPE: &str =

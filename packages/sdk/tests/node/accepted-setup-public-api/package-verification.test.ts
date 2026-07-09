@@ -169,7 +169,7 @@ const transportedPublicCompanions = (): Readonly<{
         transportedPublicEvaluationKeyMaterial: {
             objectType: 'SetupTransportedPublicEvaluationKeyMaterialSet',
             materialEncoding:
-                'sealed-lattice-public-evaluation-key-material-binary-v1',
+                'sealed-lattice-public-evaluation-key-material-binary',
             publicEvaluationKeyMaterials: [
                 {
                     objectType: 'SetupTransportedPublicEvaluationKeyMaterial',

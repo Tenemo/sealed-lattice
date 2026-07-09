@@ -39,13 +39,13 @@ export const evaluationKeyShareComponentMaterialEncoding =
     'binary-chunked-key-switch-component-vectors';
 export const setupProofMaterialTransportEncoding = 'binary-chunked-proof-bytes';
 export const evaluationKeyShareComponentVectorHashDomain =
-    'sealed-lattice-bgv-rns/evaluation-key-share-component-vector-v1';
+    'sealed-lattice-bgv-rns/evaluation-key-share-component-vector';
 export const evaluationKeyShareComponentMaterialFullObjectHashDomain =
-    'sealed-lattice/setup/evaluation-key-share/component-material/full-object-v1';
+    'sealed-lattice/setup/evaluation-key-share/component-material/full-object';
 export const evaluationKeyShareComponentMaterialChunkHashDomain =
-    'sealed-lattice/setup/evaluation-key-share/component-material/chunk-v1';
+    'sealed-lattice/setup/evaluation-key-share/component-material/chunk';
 export const trusteeEvaluationKeyProofBytesHashDomain =
-    'sealed-lattice/setup/trustee-evaluation-key/proof-bytes-v1';
+    'sealed-lattice/setup/trustee-evaluation-key/proof-bytes';
 export const evaluationKeyShareComponentMaterialMagic = new Uint8Array([
     0x53, 0x4c, 0x45, 0x4b, 0x43, 0x4d, 0x56, 0x31,
 ]);

@@ -66,7 +66,7 @@ export const localStateStorageKeyCommitmentHash = (
     storageKeyBytes: Uint8Array,
 ): ProtocolHash =>
     hashBytes(
-        'sealed-lattice-local-trustee-state/storage-key-commitment-v1',
+        'sealed-lattice-local-trustee-state/storage-key-commitment',
         storageKeyBytes,
     );
 
@@ -74,7 +74,7 @@ export const sealedMaterialStorageKeyCommitmentHash = (
     storageKeyBytes: Uint8Array,
 ): ProtocolHash =>
     hashBytes(
-        'sealed-lattice-local-trustee-state/sealed-material-storage-key-commitment-v1',
+        'sealed-lattice-local-trustee-state/sealed-material-storage-key-commitment',
         storageKeyBytes,
     );
 
@@ -97,7 +97,7 @@ export const storageAad = (
     localStateCommitment,
     localStateRoot: localStateCommitment.localStateRoot,
     localStateCommitmentHash: hashCanonicalValue(
-        'sealed-lattice-local-trustee-state/commitment-hash-v1',
+        'sealed-lattice-local-trustee-state/commitment-hash',
         localStateCommitment,
     ),
 });

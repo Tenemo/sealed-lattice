@@ -12,7 +12,7 @@ use super::super::proof_field::ProofFieldParameters;
 use super::merkle::MerkleDigest;
 use crate::hashing::hash512;
 
-const TRANSCRIPT_DOMAIN: &str = "sealed-lattice/setup/key-switch-atom/transcript-v1";
+const TRANSCRIPT_DOMAIN: &str = "sealed-lattice/setup/key-switch-atom/transcript";
 
 // Words drawn per field challenge. The proof fields are at most 13 limbs
 // (~770 bits); 15 words is ~960 bits, so Horner reduction leaves a bias below

@@ -145,7 +145,7 @@ export const createVssShareLinkageStatement = (input: {
 
 export const vssShareLinkageProofFamily = 'vss-share-linkage';
 export const vssShareLinkageProofBytesHashDomain =
-    'sealed-lattice/setup/vss-share-linkage/proof-bytes-v1';
+    'sealed-lattice/setup/vss-share-linkage/proof-bytes';
 
 export type VssShareLinkageProofContext = {
     readonly ceremonyId: string;
@@ -587,12 +587,12 @@ const sameSecretBridgeIntegerSupport =
 const sameSecretBridgeSignedRepresentativeConvention =
     'coefficients are interpreted as signed representatives before reduction into each data-basis or target-basis RNS prime';
 const vssPublicCommitmentBinaryFormat =
-    'sealed-lattice-vss-public-commitment-binary-v1';
+    'sealed-lattice-vss-public-commitment-binary';
 const sameSecretBridgeTargetBasisLimbOrder =
     'target constant roots are ordered by contiguous target-basis rnsLimbIndex values starting at zero and bind the listed target-basis prime';
 export const sameSecretBridgeProofFamily = 'same-secret-bridge';
 export const sameSecretBridgeProofBytesHashDomain =
-    'sealed-lattice/setup/same-secret-bridge/proof-bytes-v1';
+    'sealed-lattice/setup/same-secret-bridge/proof-bytes';
 
 export type VssSameSecretBridgeTargetConstantRoot = {
     readonly rnsLimbIndex: number;

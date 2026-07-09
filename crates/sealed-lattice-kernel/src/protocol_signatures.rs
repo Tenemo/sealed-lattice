@@ -15,7 +15,7 @@ use crate::{
 const ML_DSA_65_ALGORITHM: &str = "ML-DSA-65";
 const PURE_ML_DSA_MODE: &str = "PureMLDSA";
 const ML_DSA_CONTEXT_BYTE_LIMIT: usize = 255;
-const PROTOCOL_SIGNATURE_MESSAGE_DOMAIN: &str = "sealed-lattice/protocol-signature-v1";
+const PROTOCOL_SIGNATURE_MESSAGE_DOMAIN: &str = "sealed-lattice/protocol-signature";
 const SUPPORTED_ML_DSA_CONTEXT_STRING: &str = "sealed-lattice:v1";
 const MAX_SAFE_JSON_INTEGER: u64 = 9_007_199_254_740_991;
 

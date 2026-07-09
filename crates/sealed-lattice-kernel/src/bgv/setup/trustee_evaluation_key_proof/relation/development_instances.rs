@@ -5,7 +5,7 @@ use crate::bgv::evaluator::key_switch::KEY_SWITCH_ERROR_DOMAIN;
 use crate::bgv::setup::commitment::compute_setup_big_signed_lifted_commitment;
 use num_bigint::BigInt;
 
-const WITNESS_SECRET_DOMAIN: &str = "sealed-lattice/setup/trustee-evaluation-key/witness-secret-v1";
+const WITNESS_SECRET_DOMAIN: &str = "sealed-lattice/setup/trustee-evaluation-key/witness-secret";
 
 // Apply the Galois automorphism phi_g coefficient-wise: the monomial X^i maps
 // to sign * X^(i*g mod 2N folded into [0, N) with X^N = -1).
@@ -113,7 +113,7 @@ fn build_component_material(
 }
 
 const ROUND_ONE_AGGREGATE_DOMAIN: &str =
-    "sealed-lattice/setup/trustee-evaluation-key/development-round-one-aggregate-v1";
+    "sealed-lattice/setup/trustee-evaluation-key/development-round-one-aggregate";
 
 // One development key descriptor plus its errors, for an already-sampled
 // shared secret.
@@ -202,9 +202,9 @@ fn generate_development_key(
 }
 
 const LINKAGE_RANDOMNESS_DOMAIN: &str =
-    "sealed-lattice/setup/trustee-evaluation-key/linkage-opening-randomness-v1";
+    "sealed-lattice/setup/trustee-evaluation-key/linkage-opening-randomness";
 const LINKAGE_MATRIX_SEED_DOMAIN: &str =
-    "sealed-lattice/setup/trustee-evaluation-key/linkage-matrix-seed-v1";
+    "sealed-lattice/setup/trustee-evaluation-key/linkage-matrix-seed";
 
 // Development instance generator for a whole trustee key schedule: one shared
 // ternary secret and a list of key kinds at their levels, all with real
@@ -215,7 +215,7 @@ const LINKAGE_MATRIX_SEED_DOMAIN: &str =
 fn development_context(key_switch_seed_hex: &str, keyless: bool) -> SuccinctSetupProofContext {
     let derived = |label: &str| -> String {
         hash512(
-            "sealed-lattice/setup/trustee-evaluation-key/development-context-v1",
+            "sealed-lattice/setup/trustee-evaluation-key/development-context",
             &[key_switch_seed_hex.as_bytes(), label.as_bytes()],
         )
         .iter()
@@ -516,7 +516,7 @@ pub(crate) fn generate_development_public_key_share_instance(
 fn development_public_key_share_context(seed_hex: &str) -> SuccinctSetupProofContext {
     let derived = |label: &str| -> String {
         hash512(
-            "sealed-lattice/setup/public-key-share/development-context-v1",
+            "sealed-lattice/setup/public-key-share/development-context",
             &[seed_hex.as_bytes(), label.as_bytes()],
         )
         .iter()

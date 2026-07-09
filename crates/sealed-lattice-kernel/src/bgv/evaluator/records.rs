@@ -7,7 +7,7 @@ use crate::{
 };
 
 pub(crate) const MAXIMUM_OPTION_COUNT: usize = 20;
-pub(crate) const DIRECT_TARGET_PROJECTION_ID: &str = "direct-encrypted-target-projection-v1";
+pub(crate) const DIRECT_TARGET_PROJECTION_ID: &str = "direct-encrypted-target-projection";
 
 pub(crate) fn target_layout_hash(option_count: usize) -> CanonicalResult<String> {
     if option_count == 0 || option_count > MAXIMUM_OPTION_COUNT {

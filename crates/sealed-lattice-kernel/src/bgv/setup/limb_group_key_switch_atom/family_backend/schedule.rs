@@ -41,7 +41,7 @@ use crate::hashing::hash512;
 use crate::hashing::to_hex;
 
 const SCHEDULE_MAGIC: &[u8; 8] = b"SLKSATS1";
-const SCHEDULE_SALT_DOMAIN: &str = "sealed-lattice/setup/key-switch-atom/schedule-salt-v1";
+const SCHEDULE_SALT_DOMAIN: &str = "sealed-lattice/setup/key-switch-atom/schedule-salt";
 // 80 queries at rate 1/4 give about 136 conditional classical bits under the
 // CS25 accounting the setup families use; the count is soundness-set. Shared with
 // the creation-side aggregate binding (`material_aggregate_creation`) and the

@@ -64,13 +64,13 @@ pub(super) fn passive_setup_evaluator_context_bindings(
     let comparison_input_derivation_record = json!({
         "objectType": "ComparisonInputDerivationCircuitBinding",
         "evaluatorBindingContextHash": &evaluator_binding_context_hash,
-        "selectedEvaluatorPath": "direct-encrypted-score-comparison-v1",
+        "selectedEvaluatorPath": "direct-encrypted-score-comparison",
         "bgvParametersHash": &bgv_parameters_hash,
     });
     let encrypted_comparison_input_record = json!({
         "objectType": "EncryptedComparisonInputBinding",
         "evaluatorBindingContextHash": &evaluator_binding_context_hash,
-        "selectedEvaluatorPath": "direct-encrypted-score-comparison-v1",
+        "selectedEvaluatorPath": "direct-encrypted-score-comparison",
         "comparisonInputDerivationCircuitHash": derive_canonical_object_hash(
             &comparison_input_derivation_record,
         )?,
@@ -97,7 +97,7 @@ pub(super) fn passive_setup_evaluator_context_bindings(
         "encryptedComparisonInputHash": encrypted_comparison_input_hash,
         "encryptedSparseTargetProjectionHash": encrypted_sparse_target_projection_hash,
         "targetLayoutHash": sparse_target_projection_record["targetLayoutHash"],
-        "selectedEvaluatorPath": "direct-encrypted-score-comparison-v1",
+        "selectedEvaluatorPath": "direct-encrypted-score-comparison",
     });
 
     Ok(json!({

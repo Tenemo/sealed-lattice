@@ -24,7 +24,7 @@ pub(in crate::bgv::direct_ballots) fn direct_ballot_relation_proof_parameters_ha
         "statementHashDomain": RELATION_STATEMENT_HASH_DOMAIN,
         "proofEncoding": "binary relation transcript",
         "challengeBits": RELATION_PROOF_CHALLENGE_BITS,
-        "challengeDomain": "sealed-lattice/direct-encrypted-ballot/relation-challenge-v1",
+        "challengeDomain": "sealed-lattice/direct-encrypted-ballot/relation-challenge",
         "proofBytesDomain": RELATION_PROOF_BYTES_HASH_DOMAIN,
         "relation": "BGV all-limb encryption equations, score encoding, one-hot constraints, randomizer support, and error support",
         "sourceRingDegree": POLYNOMIAL_DEGREE,

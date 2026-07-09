@@ -284,12 +284,12 @@ export const createTargetFinalityRecord = (
         }),
         targetLayoutHash: deriveCanonicalObjectHash({
             objectType: 'FixtureTargetLayoutPlaceholder',
-            layout: 'direct-sparse-target-layout-v1',
+            layout: 'direct-sparse-target-layout',
         }),
         bgvParametersHash: manifestOpaqueBindings.bgvParametersHash,
         targetFinalityPolicyHash,
         topOptionCount: 2,
-        tiePolicyHash: deriveFixtureHash('fixture-tie-policy-v1', {
+        tiePolicyHash: deriveFixtureHash('fixture-tie-policy', {
             tiePolicy: 'HigherScoreThenLowerOptionIndex',
         }),
         ...proposalOverrides,

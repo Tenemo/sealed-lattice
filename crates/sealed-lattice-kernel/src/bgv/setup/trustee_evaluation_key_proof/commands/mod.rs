@@ -38,7 +38,7 @@ use crate::hashing::{derive_canonical_object_hash, hash512_hex, to_hex};
 const PROOF_RANDOMNESS_SEED_BYTES: usize = 64;
 const PROOF_RANDOMNESS_NONCE_BYTES: usize = 64;
 const VSS_SHARE_LINKAGE_PROOF_BYTES_HASH_DOMAIN: &str =
-    "sealed-lattice/setup/vss-share-linkage/proof-bytes-v1";
+    "sealed-lattice/setup/vss-share-linkage/proof-bytes";
 const VSS_SHARE_LINKAGE_TRANSPORT_SET_OBJECT_TYPE: &str =
     "SetupTransportedVssShareLinkageProofMaterialSet";
 const VSS_SHARE_LINKAGE_TRANSPORT_OBJECT_TYPE: &str =

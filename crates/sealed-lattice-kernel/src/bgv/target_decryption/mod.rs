@@ -114,16 +114,16 @@ use rayon::prelude::*;
 const TARGET_SHARE_PAYLOAD_ENCODING: &str =
     "coefficient-domain-u64-little-endian-partial-decryption-limbs";
 const TARGET_PARTIAL_DECRYPTION_LIMB_HASH_DOMAIN: &str =
-    "sealed-lattice-bgv-rns/target-partial-decryption-limb-v1";
+    "sealed-lattice-bgv-rns/target-partial-decryption-limb";
 #[cfg(any(feature = "target-decryption-development-commands", test))]
 const TARGET_DECRYPTION_SMUDGING_SEED_HASH_DOMAIN: &str =
-    "sealed-lattice-bgv-rns/target-decryption-smudging-seed-v1";
+    "sealed-lattice-bgv-rns/target-decryption-smudging-seed";
 #[cfg(any(feature = "target-decryption-development-commands", test))]
 const TARGET_DECRYPTION_SMUDGING_ZERO_SHARE_DOMAIN: &str =
-    "sealed-lattice-bgv-rns/target-decryption-smudging-zero-share-v1";
+    "sealed-lattice-bgv-rns/target-decryption-smudging-zero-share";
 #[cfg(any(feature = "target-decryption-development-commands", test))]
 const TARGET_DECRYPTION_SMUDGING_COMMITMENT_RANDOMNESS_DOMAIN: &str =
-    "sealed-lattice-bgv-rns/target-decryption-smudging-commitment-randomness-v1";
+    "sealed-lattice-bgv-rns/target-decryption-smudging-commitment-randomness";
 pub(super) const TARGET_DECRYPTION_SMUDGING_COEFFICIENT_BOUND: i64 = 16;
 const TARGET_DECRYPTION_SMUDGING_COMMITMENT_ROLE: &str =
     "target-decryption-smudging-polynomial-coefficient";

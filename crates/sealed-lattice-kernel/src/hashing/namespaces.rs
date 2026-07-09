@@ -3,4 +3,4 @@
 // domain string. The remaining structural domains (canonical-root type ids,
 // chunk/transport roots, and raw row-coefficient vectors) use separate
 // `hash512_hex` callers and are not listed here.
-pub const CANONICAL_OBJECT_HASH_NAMESPACE: &str = "sealed-lattice-root/canonical-object-v1";
+pub const CANONICAL_OBJECT_HASH_NAMESPACE: &str = "sealed-lattice-root/canonical-object";

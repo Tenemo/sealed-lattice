@@ -19,9 +19,9 @@ export const publicKeyShareMaterialEncoding =
 export const publicKeyShareMaterialTransportEncoding =
     'binary-chunked-full-public-key-share-coefficients';
 export const publicKeyShareMaterialBinaryFormat =
-    'sealed-lattice-public-key-share-material-binary-v1';
+    'sealed-lattice-public-key-share-material-binary';
 export const publicKeyShareCoefficientVectorHashDomain =
-    'sealed-lattice-bgv-rns/public-key-share-coefficient-vector-v1';
+    'sealed-lattice-bgv-rns/public-key-share-coefficient-vector';
 
 export type PublicKeyShareCoefficientVectorHash = Readonly<{
     readonly rnsLimbIndex: number;

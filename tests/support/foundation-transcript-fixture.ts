@@ -37,7 +37,7 @@ export const foundationParticipantCount = 10;
 export const foundationOptionCount = 20;
 export const foundationTopOptionCount = 10;
 export const foundationTiePolicyHash = deriveFixtureHash(
-    'fixture-tie-policy-v1',
+    'fixture-tie-policy',
     { tiePolicy: 'HigherScoreThenLowerOptionIndex' },
 );
 
@@ -111,7 +111,7 @@ const varUintBytes = (value: number): Uint8Array => {
 };
 
 const transcriptCoreObjectRoot = (canonicalBytes: Uint8Array): string =>
-    hash512Hex('sealed-lattice-root/canonical-root-v1', [
+    hash512Hex('sealed-lattice-root/canonical-root', [
         varUintBytes(1),
         varUintBytes(1),
         canonicalBytes,
@@ -274,7 +274,7 @@ const createRosterExternalAcceptanceInput = (
         rosterHash,
         electionManifestHash,
         acceptedBoardHeadHash,
-        warningTextVersion: 'foundation-warning-text-v1',
+        warningTextVersion: 'foundation-warning-text',
     } satisfies Omit<
         RosterExternalAcceptance,
         'rosterExternalAcceptanceHash' | 'signature'
@@ -406,7 +406,7 @@ export const createFoundationTranscriptFixture =
             ]),
         );
         const evaluatorReplayRecordHash = deriveFixtureHash(
-            'fixture-evaluator-replay-record-v1',
+            'fixture-evaluator-replay-record',
             {
                 electionManifestHash:
                     rosterManifestTranscript.electionManifest

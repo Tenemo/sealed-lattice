@@ -10,7 +10,7 @@ pub(super) fn read_passive_setup_input(request: &Value) -> CanonicalResult<Passi
     let setup_seed = request
         .get("setupSeed")
         .and_then(Value::as_str)
-        .unwrap_or("sealed-lattice-passive-bgv-setup-development-seed-v1");
+        .unwrap_or("sealed-lattice-passive-bgv-setup-development-seed");
     if setup_seed.trim().is_empty() {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -83,7 +83,7 @@ pub(super) fn passive_setup_seed_hash(
     setup_seed: &str,
 ) -> String {
     hash512_hex(
-        "sealed-lattice-bgv-rns/passive-setup-seed-hash-v1",
+        "sealed-lattice-bgv-rns/passive-setup-seed-hash",
         &[
             ceremony_id.as_bytes(),
             manifest_hash.as_bytes(),
@@ -102,7 +102,7 @@ pub(super) fn private_passive_setup_seed_hash(
     setup_seed: &str,
 ) -> String {
     hash512_hex(
-        "sealed-lattice-bgv-rns/passive-setup-private-seed-hash-v1",
+        "sealed-lattice-bgv-rns/passive-setup-private-seed-hash",
         &[
             ceremony_id.as_bytes(),
             manifest_hash.as_bytes(),

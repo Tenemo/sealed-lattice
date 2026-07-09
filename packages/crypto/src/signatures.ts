@@ -78,7 +78,7 @@ const canonicalProtocolSignatureMessage = (
 ): Uint8Array =>
     textEncoder.encode(
         canonicalJson({
-            messageDomain: 'sealed-lattice/protocol-signature-v1',
+            messageDomain: 'sealed-lattice/protocol-signature',
             profile: signature.profile,
             publicKeyHash: signature.publicKeyHash,
             signedRoot: signature.signedRoot,

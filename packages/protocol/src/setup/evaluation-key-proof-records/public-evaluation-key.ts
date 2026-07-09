@@ -500,7 +500,7 @@ const publicEvaluationKeyMaterialFullObjectHash = (
     chunks: readonly Uint8Array[],
 ): ProtocolHash =>
     hash512Hex(
-        'sealed-lattice/setup/public-evaluation-key-material/full-object-v1',
+        'sealed-lattice/setup/public-evaluation-key-material/full-object',
         [u64LittleEndianBytes(totalByteLength, 'totalByteLength'), ...chunks],
     );
 
@@ -509,7 +509,7 @@ const publicEvaluationKeyMaterialChunkHash = (
     chunkIndex: number,
     chunk: Uint8Array,
 ): ProtocolHash =>
-    hash512Hex('sealed-lattice/setup/public-evaluation-key-material/chunk-v1', [
+    hash512Hex('sealed-lattice/setup/public-evaluation-key-material/chunk', [
         textEncoder.encode(fullObjectHash),
         u64LittleEndianBytes(chunkIndex, 'chunkIndex'),
         chunk,

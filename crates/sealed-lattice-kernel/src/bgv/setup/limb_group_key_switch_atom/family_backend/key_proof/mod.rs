@@ -36,7 +36,7 @@ use super::polynomial;
 use super::transcript::Transcript;
 use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 
-const PROTOCOL_LABEL: &str = "sealed-lattice/setup/key-switch-atom/key-v1";
+const PROTOCOL_LABEL: &str = "sealed-lattice/setup/key-switch-atom/key";
 const FRI_RATE_BLOWUP: usize = 4;
 
 // The all-zero statement binding the round-one test wrappers absorb; real

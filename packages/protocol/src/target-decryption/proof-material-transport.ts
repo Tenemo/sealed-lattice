@@ -17,7 +17,7 @@ type JsonRecord = Record<string, unknown>;
 
 export const targetDecryptionShareProofFamily = 'target-decryption-share';
 export const targetDecryptionShareProofMaterialBinaryFormat =
-    'sealed-lattice-target-decryption-share-proof-material-binary-v1';
+    'sealed-lattice-target-decryption-share-proof-material-binary';
 
 const targetDecryptionShareProofMaterialBinaryMagic = new TextEncoder().encode(
     'SEALED-LATTICE-TARGET-DECRYPTION-SHARE-PROOF-MATERIAL-BINARY-V1',

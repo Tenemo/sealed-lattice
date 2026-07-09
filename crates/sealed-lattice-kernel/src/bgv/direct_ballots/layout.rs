@@ -20,9 +20,9 @@ use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 use crate::hashing::{canonical_json, hash512_hex};
 
 const BATCH_ENCODER_IDENTITY_DOMAIN: &str =
-    "sealed-lattice/direct-ballot/batch-encoder-identity-v1";
+    "sealed-lattice/direct-ballot/batch-encoder-identity";
 const ENCRYPTED_BALLOT_LAYOUT_DOMAIN: &str =
-    "sealed-lattice/direct-ballot/encrypted-ballot-layout-v1";
+    "sealed-lattice/direct-ballot/encrypted-ballot-layout";
 
 fn invalid_ballot_layout(message: &str) -> CanonicalError {
     CanonicalError::new(CanonicalErrorCode::InvalidFixture, message)

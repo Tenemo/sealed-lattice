@@ -49,9 +49,9 @@ const RELATION_PROOF_CHALLENGE_BYTES: usize = 24;
 const RELATION_MASK_COEFFICIENT_BITS: usize = 360;
 const RELATION_RESPONSE_COEFFICIENT_BYTES: usize = 48;
 const RELATION_STATEMENT_HASH_DOMAIN: &str =
-    "sealed-lattice/direct-encrypted-ballot/relation-statement-v4";
+    "sealed-lattice/direct-encrypted-ballot/relation-statement";
 const RELATION_PROOF_BYTES_HASH_DOMAIN: &str =
-    "sealed-lattice/direct-encrypted-ballot/relation-proof-bytes-v1";
+    "sealed-lattice/direct-encrypted-ballot/relation-proof-bytes";
 
 #[derive(Clone)]
 pub(super) struct DirectBallotRelationProofGeneration {

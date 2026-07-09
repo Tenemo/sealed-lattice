@@ -12,8 +12,8 @@
 use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 use crate::hashing::{StreamingHash256, hash256};
 
-const LEAF_DOMAIN: &str = "sealed-lattice/setup/key-switch-atom/merkle-leaf-v1";
-const NODE_DOMAIN: &str = "sealed-lattice/setup/key-switch-atom/merkle-node-v1";
+const LEAF_DOMAIN: &str = "sealed-lattice/setup/key-switch-atom/merkle-leaf";
+const NODE_DOMAIN: &str = "sealed-lattice/setup/key-switch-atom/merkle-node";
 
 pub(super) const MERKLE_DIGEST_BYTES: usize = 32;
 pub(super) type MerkleDigest = [u8; MERKLE_DIGEST_BYTES];

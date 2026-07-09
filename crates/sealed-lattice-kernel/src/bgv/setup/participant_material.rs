@@ -16,7 +16,7 @@ pub(super) fn participant_setup_material(
         .map(|setup_participant| setup_participant.trustee_identity.clone())
         .collect::<Vec<_>>();
     let local_secret_share_commitment_hash = hash512_hex(
-        "sealed-lattice-bgv-rns/local-secret-share-commitment-v1",
+        "sealed-lattice-bgv-rns/local-secret-share-commitment",
         &[
             input.private_setup_seed_hash.as_bytes(),
             participant.trustee_identity.as_bytes(),
@@ -25,7 +25,7 @@ pub(super) fn participant_setup_material(
         ],
     );
     let local_error_commitment_hash = hash512_hex(
-        "sealed-lattice-bgv-rns/local-error-commitment-v1",
+        "sealed-lattice-bgv-rns/local-error-commitment",
         &[
             input.private_setup_seed_hash.as_bytes(),
             participant.trustee_identity.as_bytes(),

@@ -547,7 +547,7 @@ fn public_evaluation_key_material_full_object_hash(
     }
 
     hash512_hex(
-        "sealed-lattice/setup/public-evaluation-key-material/full-object-v1",
+        "sealed-lattice/setup/public-evaluation-key-material/full-object",
         &parts,
     )
 }
@@ -567,7 +567,7 @@ fn public_evaluation_key_material_chunk_hash(
         .to_le_bytes();
 
     Ok(hash512_hex(
-        "sealed-lattice/setup/public-evaluation-key-material/chunk-v1",
+        "sealed-lattice/setup/public-evaluation-key-material/chunk",
         &[full_object_hash.as_bytes(), &chunk_index_bytes, chunk],
     ))
 }

@@ -274,7 +274,7 @@ const embeddedPrivateVssShareProofBytesEncoding =
     'embedded-binary-proof-bytes-hex';
 const transportedSetupProofMaterialEncoding = 'binary-chunked-proof-bytes';
 const privateVssShareProofBytesHashDomain =
-    'sealed-lattice/setup/private-vss-share/succinct-proof-bytes-v1';
+    'sealed-lattice/setup/private-vss-share/succinct-proof-bytes';
 const lowercaseHexPattern = /^[0-9a-f]+$/u;
 
 const validatePositiveSafeInteger = (

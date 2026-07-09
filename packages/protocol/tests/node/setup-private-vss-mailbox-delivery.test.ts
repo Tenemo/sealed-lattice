@@ -76,7 +76,7 @@ describe('private VSS mailbox delivery', () => {
         const proofBytesHex = '0001020304050607';
         const proofBytes = Uint8Array.from([0, 1, 2, 3, 4, 5, 6, 7]);
         const proofBytesHash = hash512Hex(
-            'sealed-lattice/setup/private-vss-share/succinct-proof-bytes-v1',
+            'sealed-lattice/setup/private-vss-share/succinct-proof-bytes',
             [proofBytes],
         );
         const textEncoder = new TextEncoder();
@@ -86,7 +86,7 @@ describe('private VSS mailbox delivery', () => {
             [proofBytes],
         );
         const expectedChunkHash = hash512Hex(
-            'sealed-lattice/setup/proof-material/chunk-v1',
+            'sealed-lattice/setup/proof-material/chunk',
             [
                 textEncoder.encode('vss-opening-carry'),
                 textEncoder.encode(expectedFullObjectHash),
@@ -161,7 +161,7 @@ describe('private VSS mailbox delivery', () => {
             privateVssShareProofMaterialEncoding: 'binary-chunked-proof-bytes',
             privateVssShareProofFactory: () => ({
                 objectType: 'PrivateVssShareProof',
-                proofId: 'sealed-lattice-private-vss-share-proof-succinct-v1',
+                proofId: 'sealed-lattice-private-vss-share-proof-succinct',
                 proofFamily: 'vss-opening-carry',
                 proofBytesEncoding: 'embedded-binary-proof-bytes-hex',
                 proofStatementRoot: fixtureHash('statement-root'),
@@ -285,7 +285,7 @@ describe('private VSS mailbox delivery', () => {
                 privateVssShareProofFactory: ({ rnsLimbIndex }) => ({
                     objectType: 'PrivateVssShareProof',
                     proofId:
-                        'sealed-lattice-private-vss-share-proof-succinct-v1',
+                        'sealed-lattice-private-vss-share-proof-succinct',
                     proofFamily: 'vss-opening-carry',
                     proofBytesEncoding: 'embedded-binary-proof-bytes-hex',
                     proofStatementRoot: fixtureHash(

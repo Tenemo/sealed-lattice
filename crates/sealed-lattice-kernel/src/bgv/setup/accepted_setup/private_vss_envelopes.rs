@@ -970,7 +970,7 @@ fn verify_encrypted_private_vss_envelope(
     )?;
     let kem_ciphertext_bytes = crate::transcript_core::decode_hex(kem_ciphertext_bytes_hex)?;
     let expected_kem_ciphertext_hash = hash512_hex(
-        "sealed-lattice-private-vss-mailbox/ml-kem-768-ciphertext-v1",
+        "sealed-lattice-private-vss-mailbox/ml-kem-768-ciphertext",
         &[&kem_ciphertext_bytes],
     );
     if encrypted_envelope
@@ -1008,7 +1008,7 @@ fn verify_encrypted_private_vss_envelope(
     validate_lowercase_hex(ciphertext_bytes_hex, "encryptedEnvelope.ciphertextBytesHex")?;
     let ciphertext_bytes = crate::transcript_core::decode_hex(ciphertext_bytes_hex)?;
     let expected_ciphertext_bytes_hash = hash512_hex(
-        "sealed-lattice-private-vss-mailbox/aes-256-gcm-ciphertext-v1",
+        "sealed-lattice-private-vss-mailbox/aes-256-gcm-ciphertext",
         &[&ciphertext_bytes],
     );
     if encrypted_envelope

@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
 pub(super) const VSS_PUBLIC_COMMITMENT_BINARY_FORMAT: &str =
-    "sealed-lattice-vss-public-commitment-binary-v1";
+    "sealed-lattice-vss-public-commitment-binary";
 pub(crate) const VSS_PUBLIC_OUTPUT_COORDINATE_COUNT: usize = 16;
 pub(crate) const VSS_PUBLIC_MESSAGE_DIGIT_COUNT: usize = 2;
 #[cfg(test)]
@@ -25,13 +25,13 @@ pub(in crate::bgv::setup) const VSS_PUBLIC_RANDOMNESS_PROJECTION_WEIGHT: usize =
 // letting the two drift.
 pub(in crate::bgv::setup) const VSS_PUBLIC_COMMITMENT_MODULUS_LIMB_INDICES: [usize; 3] =
     super::commitment::SETUP_COMMITMENT_MODULUS_LIMB_INDICES;
-const VSS_PUBLIC_SAMPLER_DOMAIN: &str = "sealed-lattice-vss-public-commitment/sampler-v1";
+const VSS_PUBLIC_SAMPLER_DOMAIN: &str = "sealed-lattice-vss-public-commitment/sampler";
 const VSS_PUBLIC_MATRIX_RESIDUE_HASH_DOMAIN: &str =
-    "sealed-lattice-vss-public-commitment/matrix-residue-v1";
+    "sealed-lattice-vss-public-commitment/matrix-residue";
 const VSS_PUBLIC_PROJECTION_INDEX_HASH_DOMAIN: &str =
-    "sealed-lattice-vss-public-commitment/projection-index-v1";
+    "sealed-lattice-vss-public-commitment/projection-index";
 const VSS_PUBLIC_OPENING_PAYLOAD_HASH_DOMAIN: &str =
-    "sealed-lattice-vss-public-commitment/opening-payload-v2";
+    "sealed-lattice-vss-public-commitment/opening-payload";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::bgv::setup) struct VssPublicMessageEncodingLayout {

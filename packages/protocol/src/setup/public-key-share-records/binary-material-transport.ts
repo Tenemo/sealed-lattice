@@ -68,7 +68,7 @@ const publicKeyShareMaterialFullObjectHash = (
     );
 
     return hash512Hex(
-        'sealed-lattice/setup/public-key-share-material/full-object-v1',
+        'sealed-lattice/setup/public-key-share-material/full-object',
         [totalLengthBytes, ...chunks],
     );
 };
@@ -86,7 +86,7 @@ const publicKeyShareMaterialChunkHash = (
     );
 
     return hash512Hex(
-        'sealed-lattice/setup/public-key-share-material/chunk-v1',
+        'sealed-lattice/setup/public-key-share-material/chunk',
         [new TextEncoder().encode(fullObjectHash), chunkIndexBytes, chunk],
     );
 };

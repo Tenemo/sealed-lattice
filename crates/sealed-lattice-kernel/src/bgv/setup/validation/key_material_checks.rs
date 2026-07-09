@@ -240,7 +240,7 @@ fn validate_coefficient_table(table: &Value, expected_modulus: u64) -> Canonical
             ));
         }
         let expected_hash = hash512_hex(
-            "sealed-lattice-bgv-rns/public-key-coefficient-vector-v1",
+            "sealed-lattice-bgv-rns/public-key-coefficient-vector",
             &[&bytes],
         );
         compare_hash_at_path(

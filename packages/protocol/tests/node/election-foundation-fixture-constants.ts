@@ -41,8 +41,8 @@ export const ceremonyId = 'ceremony-main';
 // parameter value object here.
 export const bgvParametersHash =
     '9bbab6a0f732f34acc013c999b79b7e857245e223ca348a910f9228eb4ac9ec1a21e52b6b5058ef24d92c23db72f11f58c4fa52728dbb6262d60d17725ff4165';
-export const boardPolicyHash = deriveFixtureHash('fixture-board-policy-v1', {
-    policy: 'signed-head-chain-v1',
+export const boardPolicyHash = deriveFixtureHash('fixture-board-policy', {
+    policy: 'signed-head-chain',
 });
 export const contextHash = deriveCanonicalObjectHash({
     objectType: 'ActionContext',
@@ -103,7 +103,7 @@ export const targetFinalityPolicyHash = deriveTargetFinalityPolicyHash({
     totalWitnesses: 7,
 });
 export const defaultEvaluatorReplayRecordHash = deriveFixtureHash(
-    'fixture-evaluator-replay-record-v1',
+    'fixture-evaluator-replay-record',
     { proposal: 'direct-evaluator-replay' },
 );
 export const defaultThresholdParametersHash = deriveCanonicalObjectHash({
@@ -140,20 +140,20 @@ export const targetFinalityPolicy = {
 
 export const manifestPolicyHashes: ManifestPolicyHashes = {
     aggregateSelectionPolicyHash: deriveFixtureHash(
-        'fixture-aggregate-selection-policy-v1',
+        'fixture-aggregate-selection-policy',
         { policy: 'first-valid-aggregate-contributors' },
     ),
     duplicateBallotPolicyHash: deriveFixtureHash(
-        'fixture-duplicate-ballot-policy-v1',
+        'fixture-duplicate-ballot-policy',
         {
             policy: 'first-valid-before-close',
         },
     ),
-    firstValidPolicyHash: deriveFixtureHash('fixture-first-valid-policy-v1', {
+    firstValidPolicyHash: deriveFixtureHash('fixture-first-valid-policy', {
         policy: 'canonical-signed-board-order-current-epoch',
     }),
-    recoveryPolicyHash: deriveFixtureHash('fixture-recovery-policy-v1', {
-        policy: 'same-slot-recovery-v1',
+    recoveryPolicyHash: deriveFixtureHash('fixture-recovery-policy', {
+        policy: 'same-slot-recovery',
     }),
     targetFinalityPolicyHash,
     witnessPolicyHash,
@@ -166,7 +166,7 @@ export const manifestOpaqueBindings: ManifestOpaqueBindings = {
     }),
     targetLayoutHash: deriveCanonicalObjectHash({
         objectType: 'TargetLayoutHash',
-        layout: 'direct-sparse-target-layout-v1',
+        layout: 'direct-sparse-target-layout',
     }),
     rotSetHash: deriveCanonicalObjectHash({
         objectType: 'RotSetHash',

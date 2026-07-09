@@ -9,7 +9,7 @@ const textEncoder = new TextEncoder();
 // mandatory `objectType` discriminator, so domain separation comes from that
 // in-band type tag rather than from a per-type wire namespace. This domain MUST
 // byte-match the Rust kernel's derive_canonical_object_hash.
-const canonicalObjectHashDomain = 'sealed-lattice-root/canonical-object-v1';
+const canonicalObjectHashDomain = 'sealed-lattice-root/canonical-object';
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
     typeof value === 'object' && value !== null && !Array.isArray(value);

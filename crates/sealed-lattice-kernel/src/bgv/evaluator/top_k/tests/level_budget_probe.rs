@@ -39,7 +39,7 @@ use crate::bgv::parameters::DATA_PRIMES;
 // pair-count term is additive, about log2(190 / pair_count)). Raise to 20 for the
 // exact handoff figure.
 const RANK_LOOKUP_DEGREE_OPTION_COUNT: usize = 20;
-const DEVELOPMENT_SEED: &str = "level-budget-probe-seed-v1";
+const DEVELOPMENT_SEED: &str = "level-budget-probe-seed";
 
 // True residual noise of a ciphertext under the development key, in bits
 // (ceil log2 of the infinity norm of the noise polynomial). Decryption computes

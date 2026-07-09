@@ -42,7 +42,7 @@ use super::low_degree::{fri_answer, fri_commit};
 use super::merkle::sorted_unique_indices;
 
 const OPENING_PROTOCOL_LABEL: &str =
-    "sealed-lattice/setup/key-switch-atom/material-aggregate-opening-v1";
+    "sealed-lattice/setup/key-switch-atom/material-aggregate-opening";
 const OPENING_FRI_RATE_BLOWUP: usize = 4;
 // Quotient columns: the sumcheck quotient and the sumcheck helper g.
 const OPENING_QUOTIENT_SUMCHECK: usize = 0;

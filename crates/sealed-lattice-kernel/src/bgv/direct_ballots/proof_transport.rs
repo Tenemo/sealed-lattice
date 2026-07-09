@@ -119,7 +119,7 @@ pub(super) fn direct_ballot_proof_chunk_hash(
 ) -> CanonicalResult<String> {
     validate_direct_ballot_hash_hex(proof_bytes_hash, "proofBytesHash")?;
     Ok(hash512_hex(
-        "sealed-lattice/direct-encrypted-ballot/proof-chunk-v1",
+        "sealed-lattice/direct-encrypted-ballot/proof-chunk",
         &[
             proof_bytes_hash.as_bytes(),
             &usize_to_u64(chunk_index, "proof chunk index")?.to_le_bytes(),

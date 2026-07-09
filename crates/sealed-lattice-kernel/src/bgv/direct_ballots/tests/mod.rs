@@ -88,7 +88,7 @@ fn direct_ballot_test_ballot_json(voter_identity: &str, ballot_index: usize) -> 
 
 fn direct_ballot_test_randomness_hex(label: &str, index: usize) -> String {
     let randomness_hex = hash512_hex(
-        "sealed-lattice/direct-encrypted-ballot/test-randomness-v1",
+        "sealed-lattice/direct-encrypted-ballot/test-randomness",
         &[
             TEST_SETUP_SEED.as_bytes(),
             label.as_bytes(),

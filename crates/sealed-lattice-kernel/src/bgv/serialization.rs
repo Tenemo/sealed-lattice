@@ -11,7 +11,7 @@ use crate::{
     transcript_core::{decode_hex, encode_hex},
 };
 
-const CANONICAL_MAGIC: &str = "sealed-lattice-bgv-rns-canonical-object-v1";
+const CANONICAL_MAGIC: &str = "sealed-lattice-bgv-rns-canonical-object";
 const CANONICAL_OBJECT_VERSION: u64 = 1;
 // Max polynomial components in a BGV object: a degree-2 ciphertext has 3.
 const MAXIMUM_COMPONENT_COUNT: usize = 3;
@@ -131,11 +131,11 @@ pub(crate) fn parse_bgv_object_hex(
 }
 
 pub(crate) fn plaintext_root(canonical_bytes: &[u8]) -> String {
-    namespace_root("sealed-lattice-root/plaintext-root-v1", canonical_bytes)
+    namespace_root("sealed-lattice-root/plaintext-root", canonical_bytes)
 }
 
 pub(crate) fn ciphertext_root(canonical_bytes: &[u8]) -> String {
-    namespace_root("sealed-lattice-root/ciphertext-root-v1", canonical_bytes)
+    namespace_root("sealed-lattice-root/ciphertext-root", canonical_bytes)
 }
 
 fn append_polynomial(output: &mut Vec<u8>, polynomial: &RnsPolynomial) {

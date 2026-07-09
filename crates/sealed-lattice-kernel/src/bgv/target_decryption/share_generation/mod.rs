@@ -231,7 +231,7 @@ pub(super) fn derive_threshold_secret_share_limb(
     for polynomial_degree in 1..minimum_shares_for_interpolation {
         let degree_bytes = (polynomial_degree as u64).to_le_bytes();
         let mut sampler = DeterministicSampler::new(
-            "sealed-lattice-bgv-rns/target-decryption-shamir-polynomial-v1",
+            "sealed-lattice-bgv-rns/target-decryption-shamir-polynomial",
             &[
                 private_setup_seed.as_bytes(),
                 target_share_profile_hash.as_bytes(),

@@ -73,7 +73,7 @@ describe('crypto primitive boundary', () => {
         largeCanonicalPart.fill(7);
 
         expect(
-            hash512Hex('sealed-lattice-root/plaintext-root-v1', [
+            hash512Hex('sealed-lattice-root/plaintext-root', [
                 largeCanonicalPart,
             ]),
         ).toHaveLength(128);
@@ -243,7 +243,7 @@ describe('crypto primitive boundary', () => {
                     privateVssShareProof: {
                         objectType: 'PrivateVssShareProof',
                         proofId:
-                            'sealed-lattice-private-vss-share-proof-lnp-v1',
+                            'sealed-lattice-private-vss-share-proof-lnp',
                         proofMaterialRoot: deriveCanonicalObjectHash({
                             objectType: 'PrivateVssShareEnvelopeHash',
                             proof: 'material-root',
@@ -593,7 +593,7 @@ describe('crypto primitive boundary', () => {
                 encryptedLocalState: {
                     ...tamperedLocalStateEnvelopeWithoutHash,
                     encryptedLocalStateHash: localTrusteeEnvelopeHash(
-                        'sealed-lattice-local-trustee-state/envelope-hash-v2',
+                        'sealed-lattice-local-trustee-state/envelope-hash',
                         tamperedLocalStateEnvelopeWithoutHash,
                     ),
                 } as typeof encrypted.encryptedLocalState,
@@ -622,7 +622,7 @@ describe('crypto primitive boundary', () => {
                 encryptedLocalState: {
                     ...nonceSwappedEnvelopeWithoutHash,
                     encryptedLocalStateHash: localTrusteeEnvelopeHash(
-                        'sealed-lattice-local-trustee-state/envelope-hash-v2',
+                        'sealed-lattice-local-trustee-state/envelope-hash',
                         nonceSwappedEnvelopeWithoutHash,
                     ),
                 } as typeof encrypted.encryptedLocalState,
@@ -650,7 +650,7 @@ describe('crypto primitive boundary', () => {
                 encryptedLocalState: {
                     ...reboundLocalStateEnvelope,
                     encryptedLocalStateHash: localTrusteeEnvelopeHash(
-                        'sealed-lattice-local-trustee-state/envelope-hash-v2',
+                        'sealed-lattice-local-trustee-state/envelope-hash',
                         reboundLocalStateEnvelope,
                     ),
                 } as typeof encrypted.encryptedLocalState,
@@ -674,7 +674,7 @@ describe('crypto primitive boundary', () => {
         const reboundEncryptedMaterial = {
             ...reboundSealedMaterialEnvelope,
             encryptedMaterialHash: localTrusteeEnvelopeHash(
-                'sealed-lattice-local-trustee-state/sealed-material-envelope-hash-v2',
+                'sealed-lattice-local-trustee-state/sealed-material-envelope-hash',
                 reboundSealedMaterialEnvelope,
             ),
         } as typeof sealedAggregateThresholdShare.sealedMaterial.encryptedMaterial;

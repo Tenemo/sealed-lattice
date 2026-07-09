@@ -46,7 +46,7 @@ pub(super) fn direct_ballot_public_key_hash(
     encode_public_key_component(&mut encoded, public_component_one, "component one")?;
 
     Ok(hash512(
-        "sealed-lattice/direct-encrypted-ballot/public-key-v1",
+        "sealed-lattice/direct-encrypted-ballot/public-key",
         &[&encoded],
     ))
 }

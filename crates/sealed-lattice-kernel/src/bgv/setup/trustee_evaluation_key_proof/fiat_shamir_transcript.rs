@@ -1,7 +1,7 @@
 use super::extension_field::{CHALLENGE_EXTENSION_DEGREE, ChallengeExtensionElement};
 use crate::hashing::hash512;
 
-const TRANSCRIPT_DOMAIN: &str = "sealed-lattice/setup/trustee-evaluation-key/transcript-v1";
+const TRANSCRIPT_DOMAIN: &str = "sealed-lattice/setup/trustee-evaluation-key/transcript";
 
 // Hash-chained Fiat-Shamir transcript over the kernel hash. Challenges are
 // derived from labelled squeeze blocks with a counter, so prover and verifier

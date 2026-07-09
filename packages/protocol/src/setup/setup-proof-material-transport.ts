@@ -148,7 +148,7 @@ export const setupProofMaterialChunkHash = (
     chunkIndex: number,
     chunk: Uint8Array,
 ): ProtocolHash =>
-    hash512Hex('sealed-lattice/setup/proof-material/chunk-v1', [
+    hash512Hex('sealed-lattice/setup/proof-material/chunk', [
         textEncoder.encode(proofFamily),
         textEncoder.encode(fullObjectHash),
         varUintBytes(chunkIndex, 'chunkIndex'),

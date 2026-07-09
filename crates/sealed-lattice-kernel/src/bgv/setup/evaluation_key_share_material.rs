@@ -42,7 +42,7 @@ use crate::{
 use super::setup_proof::SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES;
 
 pub(super) const EVALUATION_KEY_SHARE_COMPONENT_VECTOR_HASH_DOMAIN: &str =
-    "sealed-lattice-bgv-rns/evaluation-key-share-component-vector-v1";
+    "sealed-lattice-bgv-rns/evaluation-key-share-component-vector";
 pub(super) const EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING: &str =
     "binary-chunked-key-switch-component-vectors";
 pub(super) const EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_TRANSPORT_SET_OBJECT_TYPE: &str =

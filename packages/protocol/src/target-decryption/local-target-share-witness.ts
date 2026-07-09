@@ -9,9 +9,9 @@ import {
 type JsonRecord = Record<string, unknown>;
 
 const targetDecryptionSmudgingProfileId =
-    'sealed-lattice-target-decryption-zero-share-smudging-v1';
+    'sealed-lattice-target-decryption-zero-share-smudging';
 const targetDecryptionSmudgingSeedHashDomain =
-    'sealed-lattice-bgv-rns/target-decryption-smudging-seed-v1';
+    'sealed-lattice-bgv-rns/target-decryption-smudging-seed';
 const targetDecryptionPlaintextMultiple = 65_537;
 
 const textEncoder = new TextEncoder();

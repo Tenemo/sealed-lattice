@@ -358,7 +358,7 @@ const trusteeEvaluationKeyProofBytesHash = (proofBytesHex: string): string => {
     );
 
     return hash512Hex(
-        'sealed-lattice/setup/trustee-evaluation-key/proof-bytes-v1',
+        'sealed-lattice/setup/trustee-evaluation-key/proof-bytes',
         [bytes],
     );
 };

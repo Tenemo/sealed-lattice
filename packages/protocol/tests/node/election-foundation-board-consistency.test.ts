@@ -49,7 +49,7 @@ describe('board consistency', () => {
         const head0 = createBoardHead(0, null);
         const head1 = createBoardHead(1, head0.headHash);
         const evaluatorReplayRecordHash = deriveFixtureHash(
-            'fixture-evaluator-replay-record-v1',
+            'fixture-evaluator-replay-record',
             { proposal: 'target' },
         );
         const { head: head2, inclusionProofs } = createBoardHeadWithObjects(
@@ -108,7 +108,7 @@ describe('board consistency', () => {
     it('rejects a board-entry Merkle path with a substituted sibling', () => {
         const head0 = createBoardHead(0, null);
         const evaluatorReplayRecordHash = deriveFixtureHash(
-            'fixture-evaluator-replay-record-v1',
+            'fixture-evaluator-replay-record',
             { proposal: 'target' },
         );
         const { head, inclusionProofs } = createBoardHeadWithObjects(
@@ -163,7 +163,7 @@ describe('board consistency', () => {
         const fabricatedInclusionProof = createInclusionProof(
             head1,
             'EvaluatorReplayRecord',
-            deriveFixtureHash('fixture-evaluator-replay-record-v1', {
+            deriveFixtureHash('fixture-evaluator-replay-record', {
                 proposal: 'not-in-head',
             }),
         );
@@ -281,7 +281,7 @@ describe('board consistency', () => {
             evidenceHash: deriveCanonicalObjectHash({
                 objectType: 'ChallengeDomainHash',
                 payload: { wrong: true },
-                purpose: 'fixture-wrong-conflicting-head-evidence-v1',
+                purpose: 'fixture-wrong-conflicting-head-evidence',
             }),
         };
         const compatibleForkEvidence = {

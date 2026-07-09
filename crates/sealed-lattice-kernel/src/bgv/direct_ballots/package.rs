@@ -38,9 +38,9 @@ fn validate_protocol_hash(value: &str, field_name: &str) -> CanonicalResult<()> 
 
 const BALLOT_VALIDITY_STATEMENT_VERSION: u32 = 1;
 const BALLOT_VALIDITY_STATEMENT_DOMAIN: &str =
-    "sealed-lattice/direct-ballot/ballot-validity-statement-v1";
+    "sealed-lattice/direct-ballot/ballot-validity-statement";
 const BALLOT_VALIDITY_PROOF_PROFILE_DOMAIN: &str =
-    "sealed-lattice/direct-ballot/ballot-validity-proof-profile-v1";
+    "sealed-lattice/direct-ballot/ballot-validity-proof-profile";
 
 fn invalid_statement(message: &str) -> CanonicalError {
     CanonicalError::new(CanonicalErrorCode::InvalidFixture, message)

@@ -16,7 +16,7 @@ mod namespaces;
 pub use chunk_tree::chunk_root;
 pub use namespaces::*;
 
-pub const HASH512_PREIMAGE_PREFIX: &[u8] = b"sealed.vote/v1/hash512";
+pub const HASH512_PREIMAGE_PREFIX: &[u8] = b"sealed.vote/hash512";
 
 pub fn to_hex(bytes: &[u8]) -> String {
     const LOWER_HEX: &[u8; 16] = b"0123456789abcdef";
@@ -33,7 +33,7 @@ pub fn to_hex(bytes: &[u8]) -> String {
 /// The `Hash512` name describes the output length. Security is bounded by
 /// SHAKE256, not by a generic 512-bit random-oracle assumption.
 ///
-/// This helper frames the `sealed.vote/v1/hash512` prefix, a caller-supplied
+/// This helper frames the `sealed.vote/hash512` prefix, a caller-supplied
 /// protocol step domain, and each supplied part. Canonical protocol objects
 /// must pass the frozen ceremony, statement, and encoded object material as
 /// explicit framed parts rather than using an informal parallel convention.
@@ -69,7 +69,7 @@ pub fn hash512_hex(domain: &str, parts: &[&[u8]]) -> String {
 /// prefix. Used for internal Merkle commitment nodes where the 256-bit width
 /// is the disclosed binding length.
 pub(crate) fn hash256(domain: &str, parts: &[&[u8]]) -> [u8; 32] {
-    const HASH256_PREIMAGE_PREFIX: &[u8] = b"sealed.vote/v1/hash256";
+    const HASH256_PREIMAGE_PREFIX: &[u8] = b"sealed.vote/hash256";
     let mut preimage = Vec::new();
     preimage.extend(HASH256_PREIMAGE_PREFIX);
     append_bytes(&mut preimage, domain.as_bytes());
@@ -99,7 +99,7 @@ pub(crate) struct StreamingHash256 {
 
 impl StreamingHash256 {
     pub(crate) fn new(domain: &str, part_count: u64) -> Self {
-        const HASH256_PREIMAGE_PREFIX: &[u8] = b"sealed.vote/v1/hash256";
+        const HASH256_PREIMAGE_PREFIX: &[u8] = b"sealed.vote/hash256";
         let mut hasher = Shake256::default();
         hasher.update(HASH256_PREIMAGE_PREFIX);
         update_varuint(&mut hasher, domain.len() as u64);
@@ -183,7 +183,7 @@ pub fn canonical_root(type_id: u64, version: u64, canonical_bytes: &[u8]) -> Str
     append_varuint(&mut version_bytes, version);
 
     hash512_hex(
-        "sealed-lattice-root/canonical-root-v1",
+        "sealed-lattice-root/canonical-root",
         &[&type_id_bytes, &version_bytes, canonical_bytes],
     )
 }

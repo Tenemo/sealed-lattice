@@ -6,13 +6,13 @@ use crate::bgv::setup::trustee_evaluation_key_proof::{
 };
 use crate::hashing::derive_canonical_object_hash;
 
-const VSS_PUBLIC_COMMITMENT_BINARY_FORMAT: &str = "sealed-lattice-vss-public-commitment-binary-v1";
+const VSS_PUBLIC_COMMITMENT_BINARY_FORMAT: &str = "sealed-lattice-vss-public-commitment-binary";
 const VSS_SHARE_LINKAGE_PROOF_FAMILY: &str = "vss-share-linkage";
 const VSS_SHARE_LINKAGE_PROOF_BYTES_HASH_DOMAIN: &str =
-    "sealed-lattice/setup/vss-share-linkage/proof-bytes-v1";
+    "sealed-lattice/setup/vss-share-linkage/proof-bytes";
 const SAME_SECRET_BRIDGE_PROOF_FAMILY: &str = "same-secret-bridge";
 const SAME_SECRET_BRIDGE_PROOF_BYTES_HASH_DOMAIN: &str =
-    "sealed-lattice/setup/same-secret-bridge/proof-bytes-v1";
+    "sealed-lattice/setup/same-secret-bridge/proof-bytes";
 const SAME_SECRET_PROOF_FAMILY: &str = "same-secret-linkage-anchor";
 const SAME_SECRET_RELATION: &str =
     "vss-constant-commitments-open-to-one-short-secret-across-q-share-limbs";

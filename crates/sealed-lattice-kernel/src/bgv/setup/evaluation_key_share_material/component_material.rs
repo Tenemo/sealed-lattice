@@ -365,7 +365,7 @@ fn evaluation_key_share_component_material_full_object_hash(
     }
 
     Ok(hash512_hex(
-        "sealed-lattice/setup/evaluation-key-share/component-material/full-object-v1",
+        "sealed-lattice/setup/evaluation-key-share/component-material/full-object",
         &parts,
     ))
 }
@@ -388,7 +388,7 @@ fn evaluation_key_share_component_material_chunk_hash(
     );
 
     Ok(hash512_hex(
-        "sealed-lattice/setup/evaluation-key-share/component-material/chunk-v1",
+        "sealed-lattice/setup/evaluation-key-share/component-material/chunk",
         &[
             proof_family.proof_family().as_bytes(),
             full_object_hash.as_bytes(),
@@ -934,7 +934,7 @@ mod component_material_stream {
     const COMPONENT_MATERIAL_STREAM_ID_MAX_BYTES: usize = 128;
     #[cfg(not(target_arch = "wasm32"))]
     const COMPONENT_MATERIAL_STREAM_TEMP_FILE_DOMAIN: &str =
-        "sealed-lattice/setup/evaluation-key-share/component-material/stream-temp-v1";
+        "sealed-lattice/setup/evaluation-key-share/component-material/stream-temp";
 
     static COMPONENT_MATERIAL_TRANSPORT_STREAM_SESSIONS: OnceLock<
         Mutex<BTreeMap<String, ComponentMaterialTransportStreamSession>>,
@@ -1213,7 +1213,6 @@ mod component_material_stream {
             )
         })?;
         let header = read_component_material_stream_header(reference)?;
-        let sink = open_component_material_stream_sink(&verification_id)?;
 
         let sessions = component_material_transport_stream_sessions();
         let mut sessions = sessions.lock().map_err(|_| {
@@ -1221,12 +1220,18 @@ mod component_material_stream {
                 "evaluation-key component material stream session store is unavailable",
             )
         })?;
+        // Refuse a colliding active session BEFORE opening the sink. The sink path
+        // is derived deterministically from the verificationId, so opening it first
+        // would truncate - and the discard path would then remove - a live session's
+        // backing file, corrupting the in-flight stream. Checking under the session
+        // lock before touching the filesystem leaves the existing session intact and
+        // also serializes two concurrent begins with the same id.
         if sessions.contains_key(&verification_id) {
-            discard_component_material_stream_sink(&sink);
             return Err(invalid_evaluation_key_share_material(
                 "evaluation-key component material verificationId is already active",
             ));
         }
+        let sink = open_component_material_stream_sink(&verification_id)?;
         let chunk_count = header.chunk_count;
         let total_byte_length = header.total_byte_length;
         let material_root = header.material_root.clone();

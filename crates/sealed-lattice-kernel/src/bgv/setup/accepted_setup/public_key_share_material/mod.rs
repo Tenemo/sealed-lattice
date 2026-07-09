@@ -7,7 +7,7 @@ use crate::bgv::coefficient_codec::coefficient_vector_hash512;
 // Canonical per-limb hash of a public-key share coefficient vector, bound into
 // the public-key share records and the public-key share material records.
 const PUBLIC_KEY_SHARE_COEFFICIENT_VECTOR_HASH_DOMAIN: &str =
-    "sealed-lattice-bgv-rns/public-key-share-coefficient-vector-v1";
+    "sealed-lattice-bgv-rns/public-key-share-coefficient-vector";
 
 pub(in crate::bgv::setup) fn public_key_share_coefficient_vector_hash(
     coefficients: &[u64],

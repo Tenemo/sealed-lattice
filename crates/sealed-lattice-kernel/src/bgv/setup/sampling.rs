@@ -95,7 +95,7 @@ pub(super) fn sample_small_distribution_offset(
     loop {
         let block_index_text = block_index.to_string();
         let output = hash512(
-            "sealed-lattice-bgv-rns/sample-small-distribution-v2",
+            "sealed-lattice-bgv-rns/sample-small-distribution",
             &[
                 seed_hash.as_bytes(),
                 identity.as_bytes(),
@@ -215,7 +215,7 @@ fn collective_share_owner_index(
     loop {
         let block_index_text = block_index.to_string();
         let output = hash512(
-            "sealed-lattice-bgv-rns/bounded-collective-share-owner-v1",
+            "sealed-lattice-bgv-rns/bounded-collective-share-owner",
             &[
                 seed_hash.as_bytes(),
                 label.as_bytes(),
@@ -292,7 +292,7 @@ fn centered_binomial_eta2_coefficient(
 ) -> i64 {
     let position_text = position.to_string();
     let output = hash512(
-        "sealed-lattice-bgv-rns/sample-centered-binomial-eta2-v1",
+        "sealed-lattice-bgv-rns/sample-centered-binomial-eta2",
         &[
             seed_hash.as_bytes(),
             identity.as_bytes(),
@@ -362,7 +362,7 @@ pub(super) fn sample_residue(seed_hash: &str, label: &str, position: usize, modu
     loop {
         let block_index_text = block_index.to_string();
         let output = hash512(
-            "sealed-lattice-bgv-rns/sample-residue-v2",
+            "sealed-lattice-bgv-rns/sample-residue",
             &[
                 seed_hash.as_bytes(),
                 label.as_bytes(),

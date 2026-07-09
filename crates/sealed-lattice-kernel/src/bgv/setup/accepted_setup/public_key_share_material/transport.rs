@@ -216,7 +216,7 @@ pub(super) fn public_key_share_material_full_object_hash(
     }
 
     hash512_hex(
-        "sealed-lattice/setup/public-key-share-material/full-object-v1",
+        "sealed-lattice/setup/public-key-share-material/full-object",
         &parts,
     )
 }
@@ -236,7 +236,7 @@ pub(super) fn public_key_share_material_chunk_hash(
         .to_le_bytes();
 
     Ok(hash512_hex(
-        "sealed-lattice/setup/public-key-share-material/chunk-v1",
+        "sealed-lattice/setup/public-key-share-material/chunk",
         &[full_object_hash.as_bytes(), &chunk_index_bytes, chunk],
     ))
 }

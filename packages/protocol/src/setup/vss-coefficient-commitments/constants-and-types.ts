@@ -29,7 +29,7 @@ export const acceptedBgvSetupQSharePrimes = [
 ] as const;
 
 export const setupTransportSchemeId =
-    'sealed-lattice-setup-binary-chunked-transport-v1';
+    'sealed-lattice-setup-binary-chunked-transport';
 
 export const setupTransportChunkSizeBytes = 1_048_576;
 

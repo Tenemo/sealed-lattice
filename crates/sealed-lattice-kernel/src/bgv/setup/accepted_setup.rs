@@ -284,7 +284,7 @@ pub(super) fn accepted_roster_from_package(setup_package: &Value) -> AcceptedRos
         .map(accepted_roster_from_setup_context)
         .unwrap_or_else(first_closure_roster_parameters)
 }
-const SETUP_TRANSPORT_SCHEME_ID: &str = "sealed-lattice-setup-binary-chunked-transport-v1";
+const SETUP_TRANSPORT_SCHEME_ID: &str = "sealed-lattice-setup-binary-chunked-transport";
 const SETUP_TRANSPORT_CERTIFICATE_OBJECT_TYPE: &str = "SetupTransportCertificate";
 const SETUP_TRANSPORTED_OBJECT_TYPE: &str = "SetupTransportedObject";
 const SETUP_TRANSPORT_STORAGE_QUOTA_BYTES: u64 = 2_147_483_648;

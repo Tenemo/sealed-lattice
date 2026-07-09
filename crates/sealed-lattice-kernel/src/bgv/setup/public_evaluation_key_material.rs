@@ -4,7 +4,7 @@ use crate::bgv::evaluator::top_k::SELECTED_EVALUATOR_WORKING_LEVEL;
 use crate::hashing::derive_canonical_object_hash;
 
 const PUBLIC_KEY_SWITCH_COMPONENT_VECTOR_HASH_DOMAIN: &str =
-    "sealed-lattice-bgv-rns/public-key-switch-component-vector-v1";
+    "sealed-lattice-bgv-rns/public-key-switch-component-vector";
 const PUBLIC_EVALUATION_KEY_COMPONENT_ENCODING: &str = "component-zero-b-little-endian-u64-coefficient-vectors-with-public-component-one-regenerated-from-stream-seed";
 
 pub(crate) struct PassiveSetupEvaluationKeySeeds {

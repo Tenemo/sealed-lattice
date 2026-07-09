@@ -1,7 +1,7 @@
 use super::super::*;
 use super::*;
 
-const STATEMENT_HASH_DOMAIN: &str = "sealed-lattice/setup/trustee-evaluation-key/statement-v2";
+const STATEMENT_HASH_DOMAIN: &str = "sealed-lattice/setup/trustee-evaluation-key/statement";
 const PROTOCOL_HASH_HEX_LENGTH: usize = 128;
 const MAX_CONTEXT_TOKEN_BYTES: usize = 512;
 const TARGET_DECRYPTION_PROOF_TARGET_ROLES: [&str; 2] = ["targetId", "targetOrder"];

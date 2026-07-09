@@ -33,7 +33,7 @@ fn same_secret_bridge_statement_set_verifies_bound_roots() -> CanonicalResult<()
     assert_eq!(verification["targetRnsLimbCount"], json!(2_u64));
     assert_eq!(
         verification["vssPublicCommitmentEncoding"],
-        "sealed-lattice-vss-public-commitment-binary-v1"
+        "sealed-lattice-vss-public-commitment-binary"
     );
 
     let (mut wrong_target_basis_statement_set, same_secret_consistency, same_secret_proofs) =
@@ -344,7 +344,7 @@ fn same_secret_bridge_statement_record(trustee_roster_position: usize) -> Canoni
         "dataBasisRelation": "vss-constant-commitments-open-to-one-short-secret-across-q-share-limbs",
         "integerSupport": "the bridge proof must show one centered ternary integer coefficient vector whose signed coefficients reduce into every bound data-basis and target-basis limb",
         "signedRepresentativeConvention": "coefficients are interpreted as signed representatives before reduction into each data-basis or target-basis RNS prime",
-        "vssPublicCommitmentEncoding": "sealed-lattice-vss-public-commitment-binary-v1",
+        "vssPublicCommitmentEncoding": "sealed-lattice-vss-public-commitment-binary",
         "targetBasisLimbOrder": "target constant roots are ordered by contiguous target-basis rnsLimbIndex values starting at zero and bind the listed target-basis prime",
         "targetConstantCoefficientCommitmentRoots": target_constant_coefficient_commitment_roots,
         "targetConstantCoefficientCommitments": target_constant_coefficient_commitments,
@@ -428,7 +428,7 @@ fn same_secret_bridge_statement_set_with_evidence() -> CanonicalResult<(Value, V
         "sameSecretProofFamilyBindingRoot": "c".repeat(128),
         "integerSupport": "the bridge proof must show one centered ternary integer coefficient vector whose signed coefficients reduce into every bound data-basis and target-basis limb",
         "signedRepresentativeConvention": "coefficients are interpreted as signed representatives before reduction into each data-basis or target-basis RNS prime",
-        "vssPublicCommitmentEncoding": "sealed-lattice-vss-public-commitment-binary-v1",
+        "vssPublicCommitmentEncoding": "sealed-lattice-vss-public-commitment-binary",
         "targetBasisLimbOrder": "target constant roots are ordered by contiguous target-basis rnsLimbIndex values starting at zero and bind the listed target-basis prime",
         "statementRecords": statement_records,
     });
@@ -456,7 +456,7 @@ fn same_secret_consistency_statement_set() -> CanonicalResult<Value> {
         .collect::<Vec<_>>();
     let statement_set_without_root = json!({
         "objectType": "SameSecretConsistencyStatementSet",
-        "commitmentProfileId": "SealedLattice-BDLOP-Commitment-v1",
+        "commitmentProfileId": "SealedLattice-BDLOP-Commitment",
         "proofFamily": "same-secret-linkage-anchor",
         "ceremonyId": "vss-test",
         "manifestHash": "1".repeat(128),
@@ -483,7 +483,7 @@ fn same_secret_consistency_statement_record(
 ) -> CanonicalResult<Value> {
     let statement_without_root = json!({
         "objectType": "SameSecretConsistencyStatement",
-        "commitmentProfileId": "SealedLattice-BDLOP-Commitment-v1",
+        "commitmentProfileId": "SealedLattice-BDLOP-Commitment",
         "proofFamily": "same-secret-linkage-anchor",
         "ceremonyId": "vss-test",
         "manifestHash": "1".repeat(128),
@@ -540,7 +540,7 @@ fn same_secret_proof_set(same_secret_consistency: &Value) -> CanonicalResult<Val
         .collect::<Vec<_>>();
     let proof_set_without_root = json!({
         "objectType": "SameSecretProofSet",
-        "commitmentProfileId": "SealedLattice-BDLOP-Commitment-v1",
+        "commitmentProfileId": "SealedLattice-BDLOP-Commitment",
         "proofFamily": "same-secret-linkage-anchor",
         "proofAccountingHash": "d".repeat(128),
         "ceremonyId": "vss-test",
@@ -568,7 +568,7 @@ fn same_secret_proof_record(
 ) -> CanonicalResult<Value> {
     let proof_record_without_root = json!({
         "objectType": "SameSecretProof",
-        "commitmentProfileId": "SealedLattice-BDLOP-Commitment-v1",
+        "commitmentProfileId": "SealedLattice-BDLOP-Commitment",
         "proofFamily": "same-secret-linkage-anchor",
         "ceremonyId": "vss-test",
         "manifestHash": "1".repeat(128),

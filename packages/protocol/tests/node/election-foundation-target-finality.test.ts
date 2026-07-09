@@ -97,7 +97,7 @@ describe('target finality', () => {
         const head0 = createBoardHead(0, null);
         const head1 = createTargetProposalHead(1, head0.headHash, 'left');
         const forkEvaluatorReplayRecordHash = deriveFixtureHash(
-            'fixture-evaluator-replay-record-v1',
+            'fixture-evaluator-replay-record',
             { proposal: 'fork' },
         );
         const head1Fork = createTargetProposalHead(
@@ -263,7 +263,7 @@ describe('target finality', () => {
             'first-target',
         );
         const secondEvaluatorReplayRecordHash = deriveFixtureHash(
-            'fixture-evaluator-replay-record-v1',
+            'fixture-evaluator-replay-record',
             { proposal: 'second-linear-target' },
         );
         const secondTargetHead = createTargetProposalHead(

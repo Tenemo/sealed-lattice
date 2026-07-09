@@ -268,7 +268,7 @@ pub(super) fn derive_bgv_public_a_polynomial(
             json!({
                 "modulus": modulus,
                 "coefficientDerivationHash": hash512_hex(
-                    "sealed-lattice-bgv-rns/accepted-public-a-derivation-v1",
+                    "sealed-lattice-bgv-rns/accepted-public-a-derivation",
                     &[
                         public_matrix_seed_hash.as_bytes(),
                         "accepted-bgv-public-a".as_bytes(),

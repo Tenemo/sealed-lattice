@@ -557,7 +557,7 @@ mod tests {
     fn context() -> &'static EvaluatorContext {
         static CONTEXT: OnceLock<EvaluatorContext> = OnceLock::new();
         CONTEXT
-            .get_or_init(|| EvaluatorContext::new("circuit-seed-v1", 4).expect("evaluator context"))
+            .get_or_init(|| EvaluatorContext::new("circuit-seed", 4).expect("evaluator context"))
     }
 
     #[test]

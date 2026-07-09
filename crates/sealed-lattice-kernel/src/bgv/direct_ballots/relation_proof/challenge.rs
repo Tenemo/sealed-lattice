@@ -90,7 +90,7 @@ pub(super) fn direct_ballot_relation_challenge(
     loop {
         let block_index_bytes = block_index.to_le_bytes();
         let block = hash512(
-            "sealed-lattice/direct-encrypted-ballot/relation-challenge-v1",
+            "sealed-lattice/direct-encrypted-ballot/relation-challenge",
             &[statement_hash, relation_commitment_hash, &block_index_bytes],
         );
         let challenge_bytes = &block[..RELATION_PROOF_CHALLENGE_BYTES];

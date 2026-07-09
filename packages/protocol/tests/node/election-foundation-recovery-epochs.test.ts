@@ -87,7 +87,7 @@ describe('recovery epoch shells', () => {
             restoredEncryptedBallotStateCommitment: deriveCanonicalObjectHash({
                 objectType: 'ChallengeDomainHash',
                 payload: { encryptedBallotState: 'restored' },
-                purpose: 'fixture-restored-encrypted-ballot-state-root-v1',
+                purpose: 'fixture-restored-encrypted-ballot-state-root',
             }),
             newTrusteeSetupCommitment: deriveCanonicalObjectHash({
                 objectType: 'CollectivePublicKeyRoot',
@@ -249,7 +249,7 @@ describe('recovery epoch shells', () => {
             recoveryPolicyHash: deriveCanonicalObjectHash({
                 objectType: 'ChallengeDomainHash',
                 payload: { policy: 'wrong-recovery-policy' },
-                purpose: 'fixture-recovery-policy-v1',
+                purpose: 'fixture-recovery-policy',
             }),
         };
         const wrongRecoveryPolicyUpdateHash = deriveRecoveryEpochUpdateHash(

@@ -80,7 +80,7 @@ export const encryptLocalTrusteeSetupSealedMaterial = async (
         canonicalJson(associatedData),
     );
     const materialAadHash = hash512Hex(
-        'sealed-lattice-local-trustee-state/sealed-material-aad-hash-v2',
+        'sealed-lattice-local-trustee-state/sealed-material-aad-hash',
         [associatedDataBytes],
     );
     const keyBytes = deriveSealedMaterialAesGcmKeyBytes(
@@ -121,7 +121,7 @@ export const encryptLocalTrusteeSetupSealedMaterial = async (
     const encryptedMaterial = {
         ...encryptedMaterialWithoutHash,
         encryptedMaterialHash: hashCanonicalValue(
-            'sealed-lattice-local-trustee-state/sealed-material-envelope-hash-v2',
+            'sealed-lattice-local-trustee-state/sealed-material-envelope-hash',
             encryptedMaterialWithoutHash,
         ),
     } satisfies EncryptedLocalTrusteeSetupMaterial;
@@ -136,7 +136,7 @@ export const encryptLocalTrusteeSetupSealedMaterial = async (
         },
         materialRoot,
         materialPlaintextHash: hash512Hex(
-            'sealed-lattice-local-trustee-state/sealed-material-plaintext-hash-v1',
+            'sealed-lattice-local-trustee-state/sealed-material-plaintext-hash',
             [materialPlaintextBytes],
         ),
         materialAadHash,
@@ -173,11 +173,11 @@ export const encryptLocalTrusteeState = async (
     const associatedDataJson = canonicalJson(associatedData);
     const associatedDataBytes = textEncoder.encode(associatedDataJson);
     const storageAadHash = hash512Hex(
-        'sealed-lattice-local-trustee-state/aad-hash-v2',
+        'sealed-lattice-local-trustee-state/aad-hash',
         [associatedDataBytes],
     );
     const localStateCommitmentHash = hashCanonicalValue(
-        'sealed-lattice-local-trustee-state/commitment-hash-v1',
+        'sealed-lattice-local-trustee-state/commitment-hash',
         input.localStateCommitment,
     );
     const plaintextJson = canonicalJson(localStatePlaintext);
@@ -217,12 +217,12 @@ export const encryptLocalTrusteeState = async (
         encryptedLocalState: {
             ...envelopeWithoutHash,
             encryptedLocalStateHash: hashCanonicalValue(
-                'sealed-lattice-local-trustee-state/envelope-hash-v2',
+                'sealed-lattice-local-trustee-state/envelope-hash',
                 envelopeWithoutHash,
             ),
         },
         localStatePlaintextHash: hash512Hex(
-            'sealed-lattice-local-trustee-state/plaintext-hash-v1',
+            'sealed-lattice-local-trustee-state/plaintext-hash',
             [plaintextBytes],
         ),
         storageAadHash,
@@ -246,7 +246,7 @@ export const decryptLocalTrusteeState = async (
     } as Record<string, unknown>;
     delete envelopeWithoutHash.encryptedLocalStateHash;
     const expectedEnvelopeHash = hashCanonicalValue(
-        'sealed-lattice-local-trustee-state/envelope-hash-v2',
+        'sealed-lattice-local-trustee-state/envelope-hash',
         envelopeWithoutHash,
     );
     if (
@@ -274,7 +274,7 @@ export const decryptLocalTrusteeState = async (
         canonicalJson(expectedAssociatedData),
     );
     const expectedAadHash = hash512Hex(
-        'sealed-lattice-local-trustee-state/aad-hash-v2',
+        'sealed-lattice-local-trustee-state/aad-hash',
         [associatedDataBytes],
     );
     if (input.encryptedLocalState.storageAadHash !== expectedAadHash) {
@@ -342,7 +342,7 @@ export const decryptLocalTrusteeState = async (
     return {
         localStatePlaintext,
         localStatePlaintextHash: hash512Hex(
-            'sealed-lattice-local-trustee-state/plaintext-hash-v1',
+            'sealed-lattice-local-trustee-state/plaintext-hash',
             [plaintextBytes],
         ),
         storageAadHash: expectedAadHash,

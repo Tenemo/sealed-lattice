@@ -63,7 +63,7 @@ pub(super) fn sample_direct_ballot_relation_mask_scalars(
     while coefficients.len() < scalar_count {
         let coefficient_index_bytes = usize_to_u64_bytes(coefficients.len())?;
         let block = hash512(
-            "sealed-lattice/direct-encrypted-ballot/relation-mask-scalar-v1",
+            "sealed-lattice/direct-encrypted-ballot/relation-mask-scalar",
             &[
                 statement_hash,
                 ciphertext_root.as_bytes(),
@@ -89,7 +89,7 @@ pub(super) fn sample_direct_ballot_relation_mask_polynomial(
     while coefficients.len() < POLYNOMIAL_DEGREE {
         let coefficient_index_bytes = usize_to_u64_bytes(coefficients.len())?;
         let block = hash512(
-            "sealed-lattice/direct-encrypted-ballot/relation-mask-v1",
+            "sealed-lattice/direct-encrypted-ballot/relation-mask",
             &[
                 statement_hash,
                 ciphertext_root.as_bytes(),
