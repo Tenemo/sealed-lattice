@@ -91,6 +91,82 @@ fn repeated_hash(byte_pair: &str) -> String {
     byte_pair.repeat(64)
 }
 
+// A committed-material VSS commitment plus its holder regeneration inputs, for
+// the material-binding families' fixtures (share-linkage, same-secret bridge,
+// target-decryption). The seed and context hash are threaded into the witness
+// so the prover rebuilds byte-identical trees and the binding rows hold.
+struct TestCommittedMaterialCommitment {
+    commitment: super::relation::VssShareLinkageCommitment,
+    commitment_root: String,
+    opening_root: String,
+    material_seed_hex: String,
+    context_hash: String,
+}
+
+fn test_committed_material_commitment(
+    commitment_role: &str,
+    commitment_context: serde_json::Value,
+    rns_limb_index: usize,
+    rns_prime: u64,
+    ring_degree: usize,
+    message_coefficients: &[u64],
+    message_coefficient_bound: u64,
+) -> TestCommittedMaterialCommitment {
+    let context_bytes =
+        serde_json::to_vec(&commitment_context).expect("serialize commitment context for seed");
+    let material_seed_hex = crate::hashing::hash512_hex(
+        "sealed-lattice/test/vss-committed-material-seed",
+        &[commitment_role.as_bytes(), &context_bytes],
+    );
+    let request = serde_json::json!({
+        "commitmentRole": commitment_role,
+        "commitmentContext": commitment_context,
+        "rnsLimbIndex": rns_limb_index,
+        "rnsPrime": rns_prime,
+        "ringDegree": ring_degree,
+        "messageCoefficients": message_coefficients,
+        "messageCoefficientBound": message_coefficient_bound,
+        "materialSeedHex": material_seed_hex,
+    });
+    let response = crate::bgv::setup::compute_vss_committed_material_commitment_request(&request)
+        .expect("committed-material commitment");
+    let material_roots_by_commitment_field = response["commitment"]["commitmentFields"]
+        .as_array()
+        .expect("commitment fields")
+        .iter()
+        .map(|field| {
+            let bytes = crate::transcript_core::decode_hex(
+                field["materialRootHex"]
+                    .as_str()
+                    .expect("material root hex"),
+            )
+            .expect("material root bytes");
+            let digest: super::merkle_commitment::MerkleDigest =
+                bytes.as_slice().try_into().expect("full Merkle digest");
+            digest
+        })
+        .collect();
+
+    TestCommittedMaterialCommitment {
+        commitment: super::relation::VssShareLinkageCommitment {
+            material_roots_by_commitment_field,
+        },
+        commitment_root: response["commitmentRoot"]
+            .as_str()
+            .expect("commitment root")
+            .to_string(),
+        opening_root: response["openingRoot"]
+            .as_str()
+            .expect("opening root")
+            .to_string(),
+        material_seed_hex,
+        context_hash: response["commitmentContextHash"]
+            .as_str()
+            .expect("context hash")
+            .to_string(),
+    }
+}
+
 fn zero_setup_commitment_for_tests(
     source_rns_limb_index: usize,
     source_message_modulus: u64,
@@ -373,34 +449,33 @@ fn public_key_share_statement_hash_vector_request() -> serde_json::Value {
 }
 
 fn trustee_evaluation_key_statement_hash_vector_request() -> serde_json::Value {
-    use crate::bgv::setup::vss_commitment::{
-        VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT, VssPublicCommitmentOpeningInput,
-        compute_vss_public_commitment_from_opening, vss_public_canonical_message_digit_columns,
-    };
-
     // The key-bearing family statement carries the same-secret bridge anchor.
-    // The vector's anchor is the zero opening computed by the live VssPublic
-    // commitment function; the TS/WASM vector test computes the identical
-    // anchor through the kernel command, so both languages pin one hash.
-    let bridge_seed_hash = repeated_hash("43");
-    let zero_message = vec![0_u64; SMALL_RING_DEGREE];
-    let zero_digit_columns =
-        vss_public_canonical_message_digit_columns(&zero_message, SMALL_RING_DEGREE)
-            .expect("statement-vector bridge digit columns");
-    let zero_randomness = vec![vec![0_i64; SMALL_RING_DEGREE]; VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT];
-    let computation = compute_vss_public_commitment_from_opening(VssPublicCommitmentOpeningInput {
-        commitment_role: "coefficient",
-        commitment_context: &serde_json::json!({ "testPurpose": "statement-vector-bridge" }),
-        public_matrix_seed_hash: &bridge_seed_hash,
-        rns_limb_index: 0,
-        rns_prime: DATA_PRIMES[0],
-        ring_degree: SMALL_RING_DEGREE,
-        message_coefficients: &zero_message,
-        message_digit_columns: &zero_digit_columns,
-        message_coefficient_bound: DATA_PRIMES[0],
-        randomness_by_column: &zero_randomness,
-    })
-    .expect("statement-vector bridge commitment");
+    // The vector's anchor is the committed-material commitment of the zero
+    // message computed by the live kernel command; the TS/WASM vector test
+    // computes the identical anchor through the same command, so both
+    // languages pin one hash.
+    let material = test_committed_material_commitment(
+        "coefficient",
+        serde_json::json!({ "testPurpose": "statement-vector-bridge" }),
+        0,
+        DATA_PRIMES[0],
+        SMALL_RING_DEGREE,
+        &vec![0_u64; SMALL_RING_DEGREE],
+        DATA_PRIMES[0],
+    );
+    let commitment_value =
+        crate::bgv::setup::compute_vss_committed_material_commitment_request(&serde_json::json!({
+            "commitmentRole": "coefficient",
+            "commitmentContext": { "testPurpose": "statement-vector-bridge" },
+            "rnsLimbIndex": 0,
+            "rnsPrime": DATA_PRIMES[0],
+            "ringDegree": SMALL_RING_DEGREE,
+            "messageCoefficients": vec![0_u64; SMALL_RING_DEGREE],
+            "messageCoefficientBound": DATA_PRIMES[0],
+            "materialSeedHex": material.material_seed_hex,
+        }))
+        .expect("statement-vector bridge commitment body")["commitment"]
+            .clone();
     let mut request = serde_json::json!({
         "context": vector_context_base(serde_json::json!({
             "requiredGaloisSetHash": repeated_hash("33"),
@@ -422,19 +497,18 @@ fn trustee_evaluation_key_statement_hash_vector_request() -> serde_json::Value {
             ],
         }],
         "sameSecretBridge": {
-            "publicMatrixSeedHash": bridge_seed_hash,
+            "publicMatrixSeedHash": repeated_hash("43"),
             "targetBasisHash": crate::bgv::evaluator::top_k::canonical_target_basis_hash()
                 .expect("canonical target basis hash"),
             "sourceTrusteeIdentity": "statement-vector-trustee",
             "sourceTrusteeRosterPosition": 0,
             "targetRnsPrimes": [DATA_PRIMES[0]],
-            "targetConstantCommitmentRoots": [computation.commitment_root],
-            "targetConstantCommitments": [computation.commitment],
+            "targetConstantCommitmentRoots": [material.commitment_root],
+            "targetConstantCommitments": [commitment_value],
         },
         "secretCoefficients": zero_i64_vector(),
         "errorCoefficientsByKey": [[zero_i64_vector(), zero_i64_vector(), zero_i64_vector()]],
         "negativeIndicatorCoefficients": zero_i64_vector(),
-        "openingRandomnessByLimb": [zero_randomness],
     });
     proof_randomness_fields(&mut request);
     request

@@ -99,19 +99,27 @@ impl CompositionColumnDomain for ExtensionColumnDomain {
 }
 
 // The batched row-check value sum_k beta_k * C_k at one point, given the
-// phase-one physical column values at that point in layout order. One
-// constraint per physical column:
+// phase-one physical column values at that point in layout order, plus the
+// opened committed-material column values for the families that bind material
+// trees. One constraint per physical column:
 //   secret halves:        S^3 - S            (ternary support)
 //   error halves:         E (E2 - 1)(E2 - 4) (centered binomial support)
 //   error-square halves:  E2 - E^2           (helper well-formedness)
 //   mask halves:          M (M - 1)(M - 2)   (base-3 digits)
+//   material binding:     D - material       (vanishes on the trace, so the
+//                         witness digit column is the committed column)
 pub(crate) fn batched_row_check_value<Domain: CompositionColumnDomain>(
     domain: &Domain,
     column_values: &[Domain::Value],
+    material_values: &[Domain::Value],
     beta: &[ChallengeExtensionElement],
     layout: &LimbColumnLayout,
 ) -> ChallengeExtensionElement {
     debug_assert_eq!(column_values.len(), layout.phase_one_physical_count());
+    debug_assert_eq!(
+        material_values.len(),
+        layout.vss_committed_material_physical_count()
+    );
     debug_assert_eq!(beta.len(), layout.row_check_constraint_count());
     let tower = *domain.tower();
     let mut accumulated = ChallengeExtensionTower::zero();
@@ -166,13 +174,22 @@ pub(crate) fn batched_row_check_value<Domain: CompositionColumnDomain>(
                 }
             }
         }
-        for randomness_position in 0..layout.vss_public_randomness_columns {
-            for half in 0..TRACE_SPLIT {
-                let randomness =
-                    column_values[layout.physical_vss_public_randomness(randomness_position, half)];
-                let cube =
-                    domain.value_mul(&domain.value_mul(&randomness, &randomness), &randomness);
-                absorb(&domain.value_sub(&cube, &randomness), &mut accumulated);
+        for bound_message_index in 0..layout.vss_committed_material_bound_message_count() {
+            for digit_index in 0..crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT
+            {
+                for half in 0..TRACE_SPLIT {
+                    let witness_digit = column_values[layout.physical_bound_message_digit(
+                        bound_message_index,
+                        digit_index,
+                        half,
+                    )];
+                    let material = material_values
+                        [layout.material_column_index(bound_message_index, digit_index, half)];
+                    absorb(
+                        &domain.value_sub(&witness_digit, &material),
+                        &mut accumulated,
+                    );
+                }
             }
         }
         for mask_column in 0..layout.mask_column_count {
@@ -215,13 +232,22 @@ pub(crate) fn batched_row_check_value<Domain: CompositionColumnDomain>(
                 }
             }
         }
-        for randomness_position in 0..layout.linkage_randomness_columns {
-            for half in 0..TRACE_SPLIT {
-                let randomness =
-                    column_values[layout.physical_linkage_randomness(randomness_position, half)];
-                let cube =
-                    domain.value_mul(&domain.value_mul(&randomness, &randomness), &randomness);
-                absorb(&domain.value_sub(&cube, &randomness), &mut accumulated);
+        for bound_message_index in 0..layout.vss_committed_material_bound_message_count() {
+            for digit_index in 0..crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT
+            {
+                for half in 0..TRACE_SPLIT {
+                    let witness_digit = column_values[layout.physical_bound_message_digit(
+                        bound_message_index,
+                        digit_index,
+                        half,
+                    )];
+                    let material = material_values
+                        [layout.material_column_index(bound_message_index, digit_index, half)];
+                    absorb(
+                        &domain.value_sub(&witness_digit, &material),
+                        &mut accumulated,
+                    );
+                }
             }
         }
         for mask_column in 0..layout.mask_column_count {
@@ -252,13 +278,22 @@ pub(crate) fn batched_row_check_value<Domain: CompositionColumnDomain>(
                 }
             }
         }
-        for randomness_position in 0..layout.target_decryption_randomness_columns {
-            for half in 0..TRACE_SPLIT {
-                let randomness = column_values
-                    [layout.physical_target_decryption_randomness(randomness_position, half)];
-                let cube =
-                    domain.value_mul(&domain.value_mul(&randomness, &randomness), &randomness);
-                absorb(&domain.value_sub(&cube, &randomness), &mut accumulated);
+        for bound_message_index in 0..layout.vss_committed_material_bound_message_count() {
+            for digit_index in 0..crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT
+            {
+                for half in 0..TRACE_SPLIT {
+                    let witness_digit = column_values[layout.physical_bound_message_digit(
+                        bound_message_index,
+                        digit_index,
+                        half,
+                    )];
+                    let material = material_values
+                        [layout.material_column_index(bound_message_index, digit_index, half)];
+                    absorb(
+                        &domain.value_sub(&witness_digit, &material),
+                        &mut accumulated,
+                    );
+                }
             }
         }
         for mask_column in 0..layout.mask_column_count {
@@ -299,7 +334,7 @@ pub(crate) fn batched_row_check_value<Domain: CompositionColumnDomain>(
             );
         }
     }
-    if layout.linkage_active() {
+    if layout.linkage_active() || layout.same_secret_bridge_material_active() {
         for half in 0..TRACE_SPLIT {
             let indicator = column_values[layout.physical_negative_indicator(half)];
             absorb(
@@ -325,6 +360,25 @@ pub(crate) fn batched_row_check_value<Domain: CompositionColumnDomain>(
                                 )];
                             absorb(&mask_digit_constraint(&trit), &mut accumulated);
                         }
+                    }
+                }
+            }
+            for bound_message_index in 0..layout.vss_committed_material_bound_message_count() {
+                for digit_index in
+                    0..crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT
+                {
+                    for half in 0..TRACE_SPLIT {
+                        let witness_digit = column_values[layout.physical_bound_message_digit(
+                            bound_message_index,
+                            digit_index,
+                            half,
+                        )];
+                        let material = material_values
+                            [layout.material_column_index(bound_message_index, digit_index, half)];
+                        absorb(
+                            &domain.value_sub(&witness_digit, &material),
+                            &mut accumulated,
+                        );
                     }
                 }
             }
@@ -804,10 +858,7 @@ fn vss_public_column_value<Domain: CompositionColumnDomain>(
         column_values[layout
             .physical_vss_public_carry_at(vector_index - message_encoding_column_count, half)]
     } else {
-        column_values[layout.physical_vss_public_randomness(
-            vector_index - message_encoding_column_count - layout.vss_public_item_columns,
-            half,
-        )]
+        unreachable!("VSS public vector index is outside the packed column layout")
     }
 }
 
@@ -828,10 +879,7 @@ fn target_decryption_column_value<Domain: CompositionColumnDomain>(
             half,
         )]
     } else {
-        column_values[layout.physical_target_decryption_randomness(
-            vector_index - message_encoding_column_count,
-            half,
-        )]
+        unreachable!("target-decryption vector index is outside the message column layout")
     }
 }
 
@@ -855,10 +903,7 @@ fn same_secret_bridge_column_value<Domain: CompositionColumnDomain>(
             column_values
                 [layout.physical_same_secret_bridge_message(target_index, encoding_column, half)]
         } else {
-            column_values[layout.physical_linkage_randomness(
-                vector_index - 2 - message_encoding_column_count,
-                half,
-            )]
+            unreachable!("same-secret bridge vector index is outside the message column layout")
         }
     }
 }

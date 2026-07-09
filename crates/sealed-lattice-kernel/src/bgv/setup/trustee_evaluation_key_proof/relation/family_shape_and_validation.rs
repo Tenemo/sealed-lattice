@@ -149,13 +149,32 @@ fn append_len_prefixed_str(preimage: &mut Vec<u8>, value: &str) {
 }
 
 fn append_vss_public_commitment(preimage: &mut Vec<u8>, commitment: &VssShareLinkageCommitment) {
-    append_usize(preimage, commitment.coordinates_by_commitment_modulus.len());
-    for coordinates in &commitment.coordinates_by_commitment_modulus {
-        append_usize(preimage, coordinates.len());
-        for coordinate in coordinates {
-            preimage.extend_from_slice(&coordinate.to_le_bytes());
-        }
+    append_usize(
+        preimage,
+        commitment.material_roots_by_commitment_field.len(),
+    );
+    for material_root in &commitment.material_roots_by_commitment_field {
+        preimage.extend_from_slice(material_root);
     }
+}
+
+// Shape check for a committed-material VSS commitment: exactly one material
+// root per setup commitment field. Root bytes are fixed-width digests, so
+// there is no residue range to validate; binding is checked by the material
+// openings against these roots, not here.
+fn validate_vss_committed_material_commitment_shape(
+    commitment: &VssShareLinkageCommitment,
+    field_name: &str,
+) -> CanonicalResult<()> {
+    if commitment.material_roots_by_commitment_field.len()
+        != SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len()
+    {
+        return Err(invalid_succinct_setup_proof(format!(
+            "{field_name} must carry one material root per setup commitment field",
+        )));
+    }
+
+    Ok(())
 }
 
 pub(crate) fn validate_context_token(field_name: &str, value: &str) -> CanonicalResult<()> {
@@ -437,16 +456,7 @@ impl TrusteeEvaluationKeyStatement {
                 same_secret_bridge.target_constant_commitments.len(),
             );
             for commitment in &same_secret_bridge.target_constant_commitments {
-                append_usize(
-                    &mut preimage,
-                    commitment.coordinates_by_commitment_modulus.len(),
-                );
-                for coordinates in &commitment.coordinates_by_commitment_modulus {
-                    append_usize(&mut preimage, coordinates.len());
-                    for coordinate in coordinates {
-                        preimage.extend_from_slice(&coordinate.to_le_bytes());
-                    }
-                }
+                append_vss_public_commitment(&mut preimage, commitment);
             }
         }
         if let Some(target_decryption_share) = &self.target_decryption_share {
@@ -481,22 +491,7 @@ impl TrusteeEvaluationKeyStatement {
                 preimage.extend_from_slice(&limb_statement.target_rns_prime.to_le_bytes());
                 append_len_prefixed_str(&mut preimage, &limb_statement.aggregate_commitment_root);
                 append_len_prefixed_str(&mut preimage, &limb_statement.aggregate_opening_root);
-                append_usize(
-                    &mut preimage,
-                    limb_statement
-                        .aggregate_commitment
-                        .coordinates_by_commitment_modulus
-                        .len(),
-                );
-                for coordinates in &limb_statement
-                    .aggregate_commitment
-                    .coordinates_by_commitment_modulus
-                {
-                    append_usize(&mut preimage, coordinates.len());
-                    for coordinate in coordinates {
-                        preimage.extend_from_slice(&coordinate.to_le_bytes());
-                    }
-                }
+                append_vss_public_commitment(&mut preimage, &limb_statement.aggregate_commitment);
                 append_usize(&mut preimage, limb_statement.role_statements.len());
                 for role_statement in &limb_statement.role_statements {
                     append_len_prefixed_str(&mut preimage, &role_statement.target_role);
@@ -523,16 +518,7 @@ impl TrusteeEvaluationKeyStatement {
                     }
                     append_usize(&mut preimage, role_statement.smudging_commitments.len());
                     for commitment in &role_statement.smudging_commitments {
-                        append_usize(
-                            &mut preimage,
-                            commitment.coordinates_by_commitment_modulus.len(),
-                        );
-                        for coordinates in &commitment.coordinates_by_commitment_modulus {
-                            append_usize(&mut preimage, coordinates.len());
-                            for coordinate in coordinates {
-                                preimage.extend_from_slice(&coordinate.to_le_bytes());
-                            }
-                        }
+                        append_vss_public_commitment(&mut preimage, commitment);
                     }
                 }
             }
@@ -1056,35 +1042,10 @@ fn validate_target_decryption_share_statement(
                 .flat_map(|role_statement| role_statement.smudging_commitments.iter()),
         )
     }) {
-        if commitment.coordinates_by_commitment_modulus.len()
-            != SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len()
-            || commitment
-                .coordinates_by_commitment_modulus
-                .iter()
-                .any(|coordinates| {
-                    coordinates.len()
-                        != crate::bgv::setup::vss_commitment::VSS_PUBLIC_OUTPUT_COORDINATE_COUNT
-                })
-        {
-            return Err(invalid_succinct_setup_proof(
-                "target-decryption commitment coordinate count does not match the profile",
-            ));
-        }
-        for (commitment_modulus_index, coordinates) in commitment
-            .coordinates_by_commitment_modulus
-            .iter()
-            .enumerate()
-        {
-            let commitment_modulus = DATA_PRIMES[commitment_modulus_index];
-            if coordinates
-                .iter()
-                .any(|coordinate| *coordinate >= commitment_modulus)
-            {
-                return Err(invalid_succinct_setup_proof(
-                    "target-decryption commitment coordinate is outside its commitment field",
-                ));
-            }
-        }
+        validate_vss_committed_material_commitment_shape(
+            commitment,
+            "targetDecryptionShare.commitment",
+        )?;
     }
 
     Ok(())
@@ -1228,24 +1189,7 @@ fn validate_vss_share_linkage_item(
         .iter()
         .chain(std::iter::once(recipient_share_commitment))
     {
-        if commitment.coordinates_by_commitment_modulus.len()
-            != SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len()
-            || commitment
-                .coordinates_by_commitment_modulus
-                .iter()
-                .enumerate()
-                .any(|(commitment_modulus_index, coordinates)| {
-                    coordinates.len()
-                        != crate::bgv::setup::vss_commitment::VSS_PUBLIC_OUTPUT_COORDINATE_COUNT
-                        || coordinates
-                            .iter()
-                            .any(|coordinate| *coordinate >= DATA_PRIMES[commitment_modulus_index])
-                })
-        {
-            return Err(invalid_succinct_setup_proof(
-                "VSS commitment coordinate count or residue does not match the profile",
-            ));
-        }
+        validate_vss_committed_material_commitment_shape(commitment, "vssShareLinkage.commitment")?;
     }
 
     Ok(())
@@ -1428,20 +1372,10 @@ fn validate_same_secret_bridge_statement(
         )?;
     }
     for commitment in &statement.target_constant_commitments {
-        if commitment.coordinates_by_commitment_modulus.len()
-            != SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len()
-            || commitment
-                .coordinates_by_commitment_modulus
-                .iter()
-                .any(|coordinates| {
-                    coordinates.len()
-                        != crate::bgv::setup::vss_commitment::VSS_PUBLIC_OUTPUT_COORDINATE_COUNT
-                })
-        {
-            return Err(invalid_succinct_setup_proof(
-                "same-secret bridge commitment coordinate count does not match the profile",
-            ));
-        }
+        validate_vss_committed_material_commitment_shape(
+            commitment,
+            "sameSecretBridge.targetConstantCommitment",
+        )?;
     }
     if ring_degree == 0 {
         return Err(invalid_succinct_setup_proof(

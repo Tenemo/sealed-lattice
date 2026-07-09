@@ -105,7 +105,11 @@ fn verify_limb(
     let trace_size = plan.trace_size;
     let extension_size = plan.extension_size;
     let phase_one_columns = layout.phase_one_physical_count();
-    let total_columns = phase_one_columns + PHASE_TWO_COLUMN_COUNT;
+    let material_tree_count = layout.vss_committed_material_bound_message_count();
+    let material_physical_count = layout.vss_committed_material_physical_count();
+    let material_columns_per_tree =
+        crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT * TRACE_SPLIT;
+    let total_columns = phase_one_columns + PHASE_TWO_COLUMN_COUNT + material_physical_count;
     if limb_proof.masked_consistency_claims.len() != layout.claim_count()
         || limb_proof.deep_evaluations.len() != DEEP_EVALUATION_POINT_COUNT
         || limb_proof
@@ -113,11 +117,53 @@ fn verify_limb(
             .iter()
             .any(|evaluations| evaluations.len() != total_columns)
         || limb_proof.query_openings.len() != LOW_DEGREE_QUERY_COUNT
+        || limb_proof.material_query_openings.len() != material_tree_count
+        || limb_proof
+            .material_query_openings
+            .iter()
+            .any(|tree_openings| tree_openings.len() != LOW_DEGREE_QUERY_COUNT)
+        || limb_proof.material_batch_openings.len() != material_tree_count
     {
         return Err(invalid_succinct_setup_proof(
             "limb proof shape does not match the statement",
         ));
     }
+    // The expected material roots come from the STATEMENT (whose hash seeded
+    // the transcript), never from the proof: this limb opens its commitment
+    // field's tree of every bound commitment.
+    let material_expected_roots: Vec<MerkleDigest> = if material_tree_count > 0 {
+        let commitment_field_position =
+            crate::bgv::setup::commitment::SETUP_COMMITMENT_MODULUS_LIMB_INDICES
+                .iter()
+                .position(|commitment_modulus_index| *commitment_modulus_index == limb_index)
+                .ok_or_else(|| {
+                    invalid_succinct_setup_proof(
+                        "committed-material trees are only bound in the setup commitment fields",
+                    )
+                })?;
+        let bound_commitments = statement.vss_committed_material_bound_commitments();
+        if bound_commitments.len() != material_tree_count {
+            return Err(invalid_succinct_setup_proof(
+                "bound committed-material commitments do not match the limb layout",
+            ));
+        }
+        bound_commitments
+            .iter()
+            .map(|commitment| {
+                commitment
+                    .material_roots_by_commitment_field
+                    .get(commitment_field_position)
+                    .copied()
+                    .ok_or_else(|| {
+                        invalid_succinct_setup_proof(
+                            "bound commitment does not carry one material root per commitment field",
+                        )
+                    })
+            })
+            .collect::<CanonicalResult<Vec<_>>>()?
+    } else {
+        Vec::new()
+    };
 
     let mut transcript = global_transcript.fork("limb", limb_index as u64);
     let challenges = draw_limb_challenges(&mut transcript, &layout, modulus);
@@ -151,10 +197,12 @@ fn verify_limb(
     for (point_index, point) in deep_points.iter().enumerate() {
         let evaluations = &limb_proof.deep_evaluations[point_index];
         let phase_one_values = &evaluations[..phase_one_columns];
+        let material_values = &evaluations[phase_one_columns + PHASE_TWO_COLUMN_COUNT..];
         let vanishing = trace_vanishing_at_extension(&plan, &tower, point);
         let row_check_value = batched_row_check_value(
             &extension_domain,
             phase_one_values,
+            material_values,
             &challenges.beta,
             &layout,
         );
@@ -249,6 +297,7 @@ fn verify_limb(
     let phase_two_physical_columns = PHASE_TWO_COLUMN_COUNT * CHALLENGE_EXTENSION_DEGREE;
     let reconstruct_batch_value = |phase_one_row: &[u64],
                                    phase_two_row: &[u64],
+                                   material_row: &[u64],
                                    position: usize|
      -> CanonicalResult<ChallengeExtensionElement> {
         let extension_point = tower.embed_base(plan.extension_point(position));
@@ -280,6 +329,16 @@ fn verify_limb(
                     ),
                 );
             }
+            for (material_index, material_value) in material_row.iter().enumerate() {
+                let column_index = phase_one_columns + PHASE_TWO_COLUMN_COUNT + material_index;
+                point_sum = tower.add(
+                    &point_sum,
+                    &tower.scale_base(
+                        &lambda[column_index * DEEP_EVALUATION_POINT_COUNT + point_index],
+                        *material_value,
+                    ),
+                );
+            }
             for column_index in 0..total_columns {
                 point_sum = tower.sub(
                     &point_sum,
@@ -297,6 +356,8 @@ fn verify_limb(
 
     let mut witness_leaves: Vec<(usize, MerkleDigest)> = Vec::new();
     let mut quotient_leaves: Vec<(usize, MerkleDigest)> = Vec::new();
+    let mut material_leaves: Vec<Vec<(usize, MerkleDigest)>> =
+        vec![Vec::new(); material_tree_count];
     transcript.absorb("low-degree-purpose", MAIN_LOW_DEGREE_TRANSCRIPT_PURPOSE);
     let low_degree_verification_state = bind_low_degree_commitment(
         &mut transcript,
@@ -362,15 +423,45 @@ fn verify_limb(
                     &opening.phase_two_rows[1],
                 ),
             ));
+            // The bound material trees open the same pair; their rows enter
+            // the batched FRI combination and the leaves are authenticated
+            // against the statement roots after the fold checks.
+            let mut material_row_first = Vec::with_capacity(material_physical_count);
+            let mut material_row_second = Vec::with_capacity(material_physical_count);
+            for (tree_index, tree_openings) in limb_proof.material_query_openings.iter().enumerate()
+            {
+                let material_opening = &tree_openings[query_ordinal];
+                if material_opening.rows[0].len() != material_columns_per_tree
+                    || material_opening.rows[1].len() != material_columns_per_tree
+                    || material_opening.pair_salt.len() != LEAF_SALT_BYTES
+                {
+                    return Err(invalid_succinct_setup_proof(
+                        "material query opening shape does not match the column layout",
+                    ));
+                }
+                material_leaves[tree_index].push((
+                    pair_index,
+                    phase_pair_leaf_hash(
+                        pair_index,
+                        &material_opening.pair_salt,
+                        &material_opening.rows[0],
+                        &material_opening.rows[1],
+                    ),
+                ));
+                material_row_first.extend_from_slice(&material_opening.rows[0]);
+                material_row_second.extend_from_slice(&material_opening.rows[1]);
+            }
             Ok([
                 reconstruct_batch_value(
                     &opening.phase_one_rows[0],
                     &opening.phase_two_rows[0],
+                    &material_row_first,
                     pair_index,
                 )?,
                 reconstruct_batch_value(
                     &opening.phase_one_rows[1],
                     &opening.phase_two_rows[1],
+                    &material_row_second,
                     pair_index + half,
                 )?,
             ])
@@ -433,6 +524,28 @@ fn verify_limb(
         return Err(invalid_succinct_setup_proof(
             "quotient tree query openings failed batched Merkle verification",
         ));
+    }
+    // Authenticate every bound material tree against the STATEMENT's root for
+    // this limb's commitment field. This is where SHAKE256 collision
+    // resistance carries the commitment binding into the proof: the opened
+    // material rows the binding rows and the batched FRI consumed are exactly
+    // the published committed columns.
+    for (tree_index, tree_leaves) in material_leaves.into_iter().enumerate() {
+        let Some(material_sorted_leaves) = consistent_sorted_leaves(tree_leaves) else {
+            return Err(invalid_succinct_setup_proof(
+                "material tree opens one position to two values",
+            ));
+        };
+        if !verify_merkle_batch(
+            &material_expected_roots[tree_index],
+            phase_tree_depth,
+            &material_sorted_leaves,
+            &limb_proof.material_batch_openings[tree_index],
+        ) {
+            return Err(invalid_succinct_setup_proof(
+                "material tree query openings failed batched Merkle verification against the statement root",
+            ));
+        }
     }
 
     Ok(())

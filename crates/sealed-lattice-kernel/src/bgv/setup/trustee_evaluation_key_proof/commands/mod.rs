@@ -30,9 +30,6 @@ use crate::bgv::setup::setup_proof::{
     SetupProofMaterialTransportHashes, setup_proof_material_transport_hashes,
     verified_setup_proof_material_bytes_from_request,
 };
-use crate::bgv::setup::vss_commitment::{
-    VSS_PUBLIC_OUTPUT_COORDINATE_COUNT, VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT,
-};
 use crate::hashing::{derive_canonical_object_hash, hash512_hex, to_hex};
 
 const PROOF_RANDOMNESS_SEED_BYTES: usize = 64;
@@ -51,7 +48,6 @@ pub(in crate::bgv::setup) struct VssPublicCommandCommitmentExpectation<'a> {
     pub(in crate::bgv::setup) field_name: String,
     pub(in crate::bgv::setup) root: &'a str,
     pub(in crate::bgv::setup) role: &'a str,
-    pub(in crate::bgv::setup) public_matrix_seed_hash: &'a str,
     pub(in crate::bgv::setup) rns_limb_index: usize,
     pub(in crate::bgv::setup) rns_prime: u64,
     pub(in crate::bgv::setup) ring_degree: usize,
@@ -116,6 +112,20 @@ pub(crate) fn generate_trustee_evaluation_key_proof_from_request(
         vss_public_carry_witnesses_by_item: Vec::new(),
         target_decryption_message_vectors: Vec::new(),
         target_decryption_opening_randomness_by_commitment: Vec::new(),
+        vss_committed_material_seeds_by_bound_message: match request
+            .get("vssCommittedMaterialSeedsByBoundMessage")
+        {
+            Some(_) => read_string_array(request, "vssCommittedMaterialSeedsByBoundMessage")?,
+            None => Vec::new(),
+        },
+        vss_committed_material_context_hashes_by_bound_message: match request
+            .get("vssCommittedMaterialContextHashesByBoundMessage")
+        {
+            Some(_) => {
+                read_string_array(request, "vssCommittedMaterialContextHashesByBoundMessage")?
+            }
+            None => Vec::new(),
+        },
     };
     let proof_randomness_seed_hex = read_string(request, "proofRandomnessSeedHex")?;
     let proof_randomness_nonce_hex = read_string(request, "proofRandomnessNonceHex")?;

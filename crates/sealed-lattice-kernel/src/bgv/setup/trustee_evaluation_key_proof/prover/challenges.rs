@@ -197,7 +197,6 @@ pub(in super::super) fn build_limb_public_vectors(
         }
         let (vss_public_claim, relation_vectors) = build_vss_share_linkage_batch_public_vectors(
             vss_share_linkage,
-            limb_index,
             modulus,
             layout.base_ring_degree,
             &challenges.linkage_alpha,
@@ -238,8 +237,6 @@ pub(in super::super) fn build_limb_public_vectors(
         }
         let (bridge_claim, relation_vectors) = build_same_secret_bridge_public_vectors(
             SameSecretBridgePublicVectorInput {
-                public_matrix_seed_hash: &same_secret_bridge.public_matrix_seed_hash,
-                commitment_modulus_index: limb_index,
                 modulus,
                 ring_degree,
                 target_rns_primes: &same_secret_bridge.target_rns_primes,
@@ -394,8 +391,6 @@ pub(in super::super) fn build_limb_public_vectors(
         })?;
         let (bridge_claim, vectors) = build_same_secret_bridge_public_vectors(
             SameSecretBridgePublicVectorInput {
-                public_matrix_seed_hash: &same_secret_bridge.public_matrix_seed_hash,
-                commitment_modulus_index: limb_index,
                 modulus,
                 ring_degree,
                 target_rns_primes: &same_secret_bridge.target_rns_primes,

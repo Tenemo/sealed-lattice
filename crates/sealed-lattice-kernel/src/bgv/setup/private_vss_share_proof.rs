@@ -754,6 +754,8 @@ pub(super) fn private_vss_share_succinct_proof_record(
         vss_public_carry_witnesses_by_item: Vec::new(),
         target_decryption_message_vectors: Vec::new(),
         target_decryption_opening_randomness_by_commitment: Vec::new(),
+        vss_committed_material_seeds_by_bound_message: Vec::new(),
+        vss_committed_material_context_hashes_by_bound_message: Vec::new(),
     };
     let proof = prove_evaluation_key_share(&statement, &witness, input.proof_randomness_seed_hex)?;
     let proof_bytes = encode_trustee_evaluation_key_proof(&proof);

@@ -71,6 +71,7 @@ enum TranscriptCoreCommand {
     AbsorbBgvTargetDecryptionResultReleaseShare,
     FinishBgvTargetDecryptionResultRelease,
     ComputeVssPublicCommitmentFromOpening,
+    ComputeVssCommittedMaterialCommitment,
     GenerateVssShareLinkageProof,
     GenerateSameSecretBridgeProof,
 }
@@ -254,6 +255,7 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
         | TranscriptCoreCommand::AbsorbBgvTargetDecryptionResultReleaseShare
         | TranscriptCoreCommand::FinishBgvTargetDecryptionResultRelease
         | TranscriptCoreCommand::ComputeVssPublicCommitmentFromOpening
+        | TranscriptCoreCommand::ComputeVssCommittedMaterialCommitment
         | TranscriptCoreCommand::GenerateVssShareLinkageProof
         | TranscriptCoreCommand::GenerateSameSecretBridgeProof => {
             run_bgv_command(command, &request)
@@ -410,6 +412,9 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
         }
         TranscriptCoreCommand::ComputeVssPublicCommitmentFromOpening => {
             crate::bgv::commands::compute_vss_public_commitment_from_opening(request)
+        }
+        TranscriptCoreCommand::ComputeVssCommittedMaterialCommitment => {
+            crate::bgv::commands::compute_vss_committed_material_commitment(request)
         }
         TranscriptCoreCommand::GenerateVssShareLinkageProof => {
             crate::bgv::commands::generate_vss_share_linkage_proof(request)

@@ -8,7 +8,6 @@ export {
     publicKeyShareProofFamily,
     publicKeyShareMaterialEncoding,
     publicKeyShareMaterialTransportEncoding,
-    publicKeyShareMaterialBinaryFormat,
     publicKeyShareCoefficientVectorHashDomain,
     type PublicKeyShareCoefficientVectorHash,
     type PublicKeyShareContributionInput,

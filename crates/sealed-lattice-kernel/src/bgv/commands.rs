@@ -18,6 +18,7 @@ use crate::{
             begin_evaluation_key_share_component_material_transport_stream_request,
             begin_setup_proof_material_transport_stream_request,
             compute_setup_commitment_from_opening_request,
+            compute_vss_committed_material_commitment_request,
             compute_vss_public_commitment_from_opening_request,
             derive_collective_bgv_setup_public_derivations_from_request,
             describe_collective_bgv_setup_parameters,
@@ -137,6 +138,10 @@ pub(crate) fn compute_vss_public_commitment_from_opening(
     request: &Value,
 ) -> CanonicalResult<Value> {
     compute_vss_public_commitment_from_opening_request(request)
+}
+
+pub(crate) fn compute_vss_committed_material_commitment(request: &Value) -> CanonicalResult<Value> {
+    compute_vss_committed_material_commitment_request(request)
 }
 
 pub(crate) fn generate_vss_share_linkage_proof(request: &Value) -> CanonicalResult<Value> {

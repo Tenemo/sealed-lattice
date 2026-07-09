@@ -72,7 +72,6 @@ pub(super) fn target_decryption_share_statement_from_request(
     let limb_statements = target_decryption_share_limb_statements_from_request(
         target_value,
         smudging_commitment_set,
-        &public_matrix_seed_hash,
         ring_degree,
         smudging_polynomial_degree,
     )?;
@@ -180,12 +179,14 @@ pub(crate) fn describe_target_decryption_share_proof_layout_from_request(
             "proofLimbIndex": proof_limb_index,
             "traceSize": layout.trace_size,
             "targetDecryptionMessageColumns": layout.target_decryption_message_columns,
-            "targetDecryptionRandomnessColumns": layout.target_decryption_randomness_columns,
+            "vssCommittedMaterialBoundMessageCount": layout.vss_committed_material_bound_message_count(),
             "targetDecryptionMessageEncodingColumns": layout.target_decryption_message_encoding_columns(),
             "claimCount": layout.claim_count(),
             "maskColumnCount": layout.mask_column_count,
             "phaseOnePhysicalColumnCount": layout.phase_one_physical_count(),
-            "totalColumnCount": layout.phase_one_physical_count() + PHASE_TWO_COLUMN_COUNT,
+            "totalColumnCount": layout.phase_one_physical_count()
+                + PHASE_TWO_COLUMN_COUNT
+                + layout.vss_committed_material_physical_count(),
             "messages": message_summaries,
         }));
     }
@@ -205,7 +206,6 @@ pub(crate) fn describe_target_decryption_share_proof_layout_from_request(
 pub(super) fn target_decryption_share_limb_statements_from_request(
     target_value: &Value,
     smudging_commitment_set: &Value,
-    public_matrix_seed_hash: &str,
     ring_degree: usize,
     smudging_polynomial_degree: usize,
 ) -> CanonicalResult<Vec<TargetDecryptionShareLimbStatement>> {
@@ -226,7 +226,6 @@ pub(super) fn target_decryption_share_limb_statements_from_request(
             target_decryption_share_limb_statement_from_value(
                 limb_statement_value,
                 smudging_commitment_set,
-                public_matrix_seed_hash,
                 ring_degree,
                 smudging_polynomial_degree,
             )
@@ -237,7 +236,6 @@ pub(super) fn target_decryption_share_limb_statements_from_request(
 pub(super) fn target_decryption_share_limb_statement_from_value(
     limb_statement_value: &Value,
     smudging_commitment_set: &Value,
-    public_matrix_seed_hash: &str,
     ring_degree: usize,
     smudging_polynomial_degree: usize,
 ) -> CanonicalResult<TargetDecryptionShareLimbStatement> {
@@ -258,7 +256,6 @@ pub(super) fn target_decryption_share_limb_statement_from_value(
             field_name: "targetDecryptionShare.aggregateCommitment".to_string(),
             root: &aggregate_commitment_root,
             role: "aggregate-threshold-share",
-            public_matrix_seed_hash,
             rns_limb_index: target_rns_limb_index,
             rns_prime: target_rns_prime,
             ring_degree,
@@ -269,7 +266,6 @@ pub(super) fn target_decryption_share_limb_statement_from_value(
         smudging_commitment_set,
         target_rns_limb_index,
         target_rns_prime,
-        public_matrix_seed_hash,
         ring_degree,
         smudging_polynomial_degree,
     )?;
@@ -289,7 +285,6 @@ pub(super) fn target_decryption_share_role_statements_from_request(
     smudging_commitment_set: &Value,
     target_rns_limb_index: usize,
     target_rns_prime: u64,
-    public_matrix_seed_hash: &str,
     ring_degree: usize,
     smudging_polynomial_degree: usize,
 ) -> CanonicalResult<Vec<TargetDecryptionShareRoleStatement>> {
@@ -319,7 +314,6 @@ pub(super) fn target_decryption_share_role_statements_from_request(
                 smudging_commitment_set,
                 target_rns_limb_index,
                 target_rns_prime,
-                public_matrix_seed_hash,
                 ring_degree,
                 smudging_polynomial_degree,
             )
@@ -332,7 +326,6 @@ pub(super) fn target_decryption_share_role_statement_from_value(
     smudging_commitment_set: &Value,
     target_rns_limb_index: usize,
     target_rns_prime: u64,
-    public_matrix_seed_hash: &str,
     ring_degree: usize,
     smudging_polynomial_degree: usize,
 ) -> CanonicalResult<TargetDecryptionShareRoleStatement> {
@@ -343,7 +336,6 @@ pub(super) fn target_decryption_share_role_statement_from_value(
             &target_role,
             target_rns_limb_index,
             target_rns_prime,
-            public_matrix_seed_hash,
             ring_degree,
             smudging_polynomial_degree,
         )?;
@@ -397,7 +389,6 @@ pub(super) fn target_decryption_smudging_commitments_from_set(
     target_role: &str,
     target_rns_limb_index: usize,
     target_rns_prime: u64,
-    public_matrix_seed_hash: &str,
     ring_degree: usize,
     smudging_polynomial_degree: usize,
 ) -> CanonicalResult<(Vec<String>, Vec<VssShareLinkageCommitment>)> {
@@ -451,7 +442,6 @@ pub(super) fn target_decryption_smudging_commitments_from_set(
                 ),
                 root: &commitment_root,
                 role: TARGET_DECRYPTION_SMUDGING_COMMITMENT_ROLE,
-                public_matrix_seed_hash,
                 rns_limb_index: target_rns_limb_index,
                 rns_prime: target_rns_prime,
                 ring_degree,
@@ -505,9 +495,14 @@ pub(super) fn target_decryption_share_witness_from_request(
             request,
             "targetDecryptionMessageVectors",
         )?,
-        target_decryption_opening_randomness_by_commitment: read_i64_matrix(
+        target_decryption_opening_randomness_by_commitment: Vec::new(),
+        vss_committed_material_seeds_by_bound_message: read_string_array(
             request,
-            "targetDecryptionOpeningRandomnessByCommitment",
+            "vssCommittedMaterialSeedsByBoundMessage",
+        )?,
+        vss_committed_material_context_hashes_by_bound_message: read_string_array(
+            request,
+            "vssCommittedMaterialContextHashesByBoundMessage",
         )?,
     })
 }
@@ -516,17 +511,9 @@ pub(in crate::bgv::setup) fn vss_share_linkage_commitment_from_value(
     value: &Value,
     expected: VssPublicCommandCommitmentExpectation<'_>,
 ) -> CanonicalResult<VssShareLinkageCommitment> {
-    if read_string(value, "objectType")? != "VssPublicCommitment" {
+    if read_string(value, "objectType")? != "VssCommittedMaterialCommitment" {
         return Err(invalid_succinct_setup_proof(format!(
-            "{}.objectType must be VssPublicCommitment",
-            expected.field_name
-        )));
-    }
-    if read_u64(value, "outputCoordinateCount")? != VSS_PUBLIC_OUTPUT_COORDINATE_COUNT as u64
-        || read_u64(value, "randomnessColumnCount")? != VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT as u64
-    {
-        return Err(invalid_succinct_setup_proof(format!(
-            "{} commitment shape does not match the parameters",
+            "{}.objectType must be VssCommittedMaterialCommitment",
             expected.field_name
         )));
     }
@@ -538,7 +525,6 @@ pub(in crate::bgv::setup) fn vss_share_linkage_commitment_from_value(
         )));
     }
     if read_string(value, "commitmentRole")? != expected.role
-        || read_string(value, "publicMatrixSeedHash")? != expected.public_matrix_seed_hash
         || read_u64(value, "rnsLimbIndex")? != expected.rns_limb_index as u64
         || read_u64(value, "rnsPrime")? != expected.rns_prime
         || read_u64(value, "ringDegree")?
@@ -550,61 +536,63 @@ pub(in crate::bgv::setup) fn vss_share_linkage_commitment_from_value(
             expected.field_name
         )));
     }
-
-    let limbs = value
-        .get("commitmentLimbs")
-        .and_then(Value::as_array)
-        .ok_or_else(|| {
-            invalid_succinct_setup_proof(format!(
-                "{}.commitmentLimbs must be an array",
-                expected.field_name
-            ))
-        })?;
-    if limbs.len() != SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len() {
+    // The mask degree is layout-derived, not free: a record claiming another
+    // degree would desynchronize the opened column degree bound.
+    let expected_mask_degree = super::super::vss_committed_material_column_mask_degree(
+        expected.ring_degree / super::super::TRACE_SPLIT,
+    );
+    if read_u64(value, "materialColumnMaskDegree")? != expected_mask_degree as u64 {
         return Err(invalid_succinct_setup_proof(format!(
-            "{}.commitmentLimbs must cover the commitment fields",
+            "{} material column mask degree does not match the layout",
             expected.field_name
         )));
     }
-    let mut coordinates_by_commitment_modulus = Vec::with_capacity(limbs.len());
-    for (expected_limb_index, limb) in limbs.iter().enumerate() {
-        if read_u64(limb, "commitmentModulusIndex")? != expected_limb_index as u64 {
+
+    let commitment_fields = value
+        .get("commitmentFields")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            invalid_succinct_setup_proof(format!(
+                "{}.commitmentFields must be an array",
+                expected.field_name
+            ))
+        })?;
+    if commitment_fields.len() != SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len() {
+        return Err(invalid_succinct_setup_proof(format!(
+            "{}.commitmentFields must cover the commitment fields",
+            expected.field_name
+        )));
+    }
+    let mut material_roots_by_commitment_field = Vec::with_capacity(commitment_fields.len());
+    for (commitment_field_position, commitment_field) in commitment_fields.iter().enumerate() {
+        let expected_modulus_index =
+            SETUP_COMMITMENT_MODULUS_LIMB_INDICES[commitment_field_position];
+        if read_u64(commitment_field, "commitmentModulusIndex")? != expected_modulus_index as u64 {
             return Err(invalid_succinct_setup_proof(format!(
-                "{}.commitmentLimbs must be ordered by commitmentModulusIndex",
+                "{}.commitmentFields must be ordered by commitmentModulusIndex",
                 expected.field_name
             )));
         }
-        let expected_modulus = DATA_PRIMES[expected_limb_index];
-        if read_u64(limb, "modulus")? != expected_modulus {
+        if read_u64(commitment_field, "modulus")? != DATA_PRIMES[expected_modulus_index] {
             return Err(invalid_succinct_setup_proof(format!(
-                "{}.commitmentLimbs modulus must match the commitment field",
+                "{}.commitmentFields modulus must match the commitment field",
                 expected.field_name
             )));
         }
-        let coordinates = limb
-            .get("coordinates")
-            .and_then(Value::as_array)
-            .ok_or_else(|| {
+        let material_root_bytes =
+            crate::transcript_core::decode_hex(read_string(commitment_field, "materialRootHex")?)?;
+        let material_root: super::super::merkle_commitment::MerkleDigest =
+            material_root_bytes.as_slice().try_into().map_err(|_| {
                 invalid_succinct_setup_proof(format!(
-                    "{}.commitmentLimbs coordinates must be arrays",
+                    "{}.commitmentFields material root must be a full Merkle digest",
                     expected.field_name
                 ))
-            })?
-            .iter()
-            .map(|entry| {
-                entry.as_u64().ok_or_else(|| {
-                    invalid_succinct_setup_proof(format!(
-                        "{}.commitmentLimbs coordinates must be non-negative integers",
-                        expected.field_name
-                    ))
-                })
-            })
-            .collect::<CanonicalResult<Vec<_>>>()?;
-        coordinates_by_commitment_modulus.push(coordinates);
+            })?;
+        material_roots_by_commitment_field.push(material_root);
     }
 
     Ok(VssShareLinkageCommitment {
-        coordinates_by_commitment_modulus,
+        material_roots_by_commitment_field,
     })
 }
 

@@ -18,8 +18,6 @@ export const publicKeyShareMaterialEncoding =
     'embedded-full-public-key-share-coefficients';
 export const publicKeyShareMaterialTransportEncoding =
     'binary-chunked-full-public-key-share-coefficients';
-export const publicKeyShareMaterialBinaryFormat =
-    'sealed-lattice-public-key-share-material-binary';
 export const publicKeyShareCoefficientVectorHashDomain =
     'sealed-lattice-bgv-rns/public-key-share-coefficient-vector';
 

@@ -72,6 +72,10 @@ pub(in crate::bgv::setup) use commands::{
 pub(in crate::bgv::setup) use proof_codec::decode_trustee_evaluation_key_proof;
 pub(in crate::bgv::setup) use proof_codec::encode_trustee_evaluation_key_proof;
 pub(in crate::bgv::setup) use prover::prove_evaluation_key_share;
+pub(in crate::bgv::setup) use prover::{
+    VssCommittedMaterialTreeInput, vss_committed_material_column_mask_degree,
+    vss_committed_material_roots_by_commitment_field,
+};
 pub(in crate::bgv::setup) use relation::TrusteeEvaluationKeyWitness;
 pub(in crate::bgv::setup) use relation::public_key_switch_sample;
 pub(in crate::bgv::setup) use relation::{

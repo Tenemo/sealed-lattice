@@ -66,26 +66,24 @@ fn schedule_mask_degree(ring_degree: usize) -> usize {
     ring_degree / 4
 }
 
-// The linkage statement every key proof in the schedule binds: the FIRST
-// bridge target constant commitment (position 0 in the bridge's target list,
-// which is also the sampler's limb index for that commitment).
+// The linkage statement every key proof in the schedule binds. The removed
+// 48-coordinate projection commitment (SEC-012) was the previous anchor
+// target; the replacement anchor is the BDLOP constant commitment (the same
+// commitment the keyless same-secret linkage anchor family opens), whose
+// linear opening relation the atom system hosts natively. Until that
+// re-anchor lands, the schedule refuses fail-closed rather than proving or
+// accepting key-bearing statements without a same-secret anchor.
 fn linkage_statement_from_bridge(
     bridge: &SameSecretBridgeStatement,
 ) -> CanonicalResult<LinkageStatement<'_>> {
-    let commitment = bridge
-        .target_constant_commitments
-        .first()
-        .ok_or_else(|| invalid_schedule("the same-secret bridge carries no target commitments"))?;
-    let source_message_modulus = *bridge
-        .target_rns_primes
-        .first()
-        .ok_or_else(|| invalid_schedule("the same-secret bridge carries no target primes"))?;
-    Ok(LinkageStatement {
-        public_matrix_seed_hash: &bridge.public_matrix_seed_hash,
-        source_rns_limb_index: 0,
-        source_message_modulus,
-        coordinates_by_commitment_modulus: &commitment.coordinates_by_commitment_modulus,
-    })
+    if bridge.target_constant_commitments.is_empty() || bridge.target_rns_primes.is_empty() {
+        return Err(invalid_schedule(
+            "the same-secret bridge carries no target commitments",
+        ));
+    }
+    Err(invalid_schedule(
+        "the key-bearing same-secret anchor is being re-anchored from the removed projection commitment to the BDLOP constant commitment; key-bearing proofs refuse until the anchor lands",
+    ))
 }
 
 // The key-bearing statement checks shared by prove and verify: at least one

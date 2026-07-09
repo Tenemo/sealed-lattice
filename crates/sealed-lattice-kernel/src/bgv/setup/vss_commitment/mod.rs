@@ -506,6 +506,7 @@ fn invalid_vss_public_input(message: impl Into<String>) -> CanonicalError {
     CanonicalError::new(CanonicalErrorCode::InvalidFixture, message)
 }
 
+mod committed_material;
 mod message_encoding;
 mod readers;
 mod record_verification;
@@ -515,6 +516,8 @@ mod share_linkage;
 use readers::*;
 use record_verification::*;
 use sampler::*;
+
+pub(crate) use committed_material::compute_vss_committed_material_commitment_request;
 
 pub(crate) use message_encoding::vss_public_canonical_message_digit_columns;
 pub(in crate::bgv::setup) use message_encoding::{

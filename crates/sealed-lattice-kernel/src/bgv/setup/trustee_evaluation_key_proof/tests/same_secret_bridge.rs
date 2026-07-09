@@ -2,14 +2,10 @@ use super::super::LINCHECK_REPETITIONS;
 use super::super::SAME_SECRET_BRIDGE_PROOF_FAMILY;
 use super::super::relation::{
     SameSecretBridgeStatement, SuccinctSetupProofFamilyShape, TrusteeEvaluationKeyWitness,
-    VssShareLinkageCommitment,
 };
 use super::*;
 use crate::bgv::evaluator::top_k::canonical_target_basis_hash;
-use crate::bgv::setup::vss_commitment::{
-    VSS_PUBLIC_MESSAGE_DIGIT_COUNT, VssPublicCommitmentOpeningInput,
-    compute_vss_public_commitment_from_opening, vss_public_canonical_message_digit_columns,
-};
+use crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT;
 use serde_json::json;
 
 #[test]
@@ -44,11 +40,9 @@ fn same_secret_bridge_proof_round_trips_and_rejects_tampering() {
     );
     assert_eq!(
         layout.same_secret_bridge_relation_count(),
-        layout.same_secret_bridge_target_count()
-            * (crate::bgv::setup::vss_commitment::VSS_PUBLIC_OUTPUT_COORDINATE_COUNT
-                + LINCHECK_REPETITIONS)
+        layout.same_secret_bridge_target_count() * LINCHECK_REPETITIONS
             + layout.same_secret_bridge_decoder_digit_count() * LINCHECK_REPETITIONS,
-        "bridge relation challenges must include decoder rows"
+        "bridge relation challenges must include the bridge lincheck and decoder rows"
     );
     assert!(
         layout.same_secret_bridge_message_trit_count(0, 0) > 0,
@@ -92,18 +86,16 @@ fn same_secret_bridge_proof_round_trips_and_rejects_tampering() {
     );
 
     let (mut tampered_statement, _unused_witness) = same_secret_bridge_instance();
-    let modulus = DATA_PRIMES[0];
-    let coordinate = &mut tampered_statement
+    tampered_statement
         .same_secret_bridge
         .as_mut()
         .expect("bridge statement")
         .target_constant_commitments[0]
-        .coordinates_by_commitment_modulus[0][0];
-    *coordinate = (*coordinate + 1) % modulus;
+        .material_roots_by_commitment_field[0][0] ^= 0x01;
 
     assert!(
         verify_evaluation_key_share(&tampered_statement, &proof).is_err(),
-        "tampering with the public target constant must reject"
+        "tampering with the published target constant material root must reject"
     );
 
     let (mut wrong_target_basis_statement, _unused_witness) = same_secret_bridge_instance();
@@ -154,9 +146,7 @@ fn public_key_share_proof_round_trips_with_same_secret_bridge() {
     );
     assert_eq!(
         setup_field_layout.same_secret_bridge_relation_count(),
-        DATA_PRIMES.len()
-            * (crate::bgv::setup::vss_commitment::VSS_PUBLIC_OUTPUT_COORDINATE_COUNT
-                + LINCHECK_REPETITIONS)
+        DATA_PRIMES.len() * LINCHECK_REPETITIONS
             + setup_field_layout.same_secret_bridge_decoder_digit_count() * LINCHECK_REPETITIONS,
     );
 
@@ -180,13 +170,12 @@ fn public_key_share_proof_round_trips_with_same_secret_bridge() {
     verify_evaluation_key_share(&statement, &proof).expect("verify public-key share");
 
     let mut tampered_statement = statement;
-    let coordinate = &mut tampered_statement
+    tampered_statement
         .same_secret_bridge
         .as_mut()
         .expect("bridge statement")
         .target_constant_commitments[0]
-        .coordinates_by_commitment_modulus[0][0];
-    *coordinate = (*coordinate + 1) % DATA_PRIMES[0];
+        .material_roots_by_commitment_field[0][0] ^= 0x01;
     assert!(
         verify_evaluation_key_share(&tampered_statement, &proof).is_err(),
         "tampering with bridge material must reject the public-key share proof"
@@ -213,15 +202,8 @@ fn same_secret_bridge_instance() -> (
         .iter()
         .map(|coefficient| i64::from(*coefficient < 0))
         .collect::<Vec<_>>();
-    let opening_randomness_by_limb = target_rns_primes
-        .iter()
-        .enumerate()
-        .map(|(target_rns_limb_index, _target_rns_prime)| {
-            bridge_randomness_columns(ring_degree, 17 + target_rns_limb_index as i64)
-        })
-        .collect::<Vec<_>>();
 
-    let target_constant_commitments = target_rns_primes
+    let target_constant_material = target_rns_primes
         .iter()
         .enumerate()
         .map(|(target_rns_limb_index, target_rns_prime)| {
@@ -230,17 +212,23 @@ fn same_secret_bridge_instance() -> (
                 &negative_indicator_coefficients,
                 *target_rns_prime,
             );
-            VssShareLinkageCommitment {
-                coordinates_by_commitment_modulus: bridge_coordinates_by_modulus_for_test(
-                    &public_matrix_seed_hash,
-                    target_rns_limb_index,
-                    *target_rns_prime,
-                    ring_degree,
-                    &message_coefficients,
-                    &opening_randomness_by_limb[target_rns_limb_index],
-                ),
-            }
+            test_committed_material_commitment(
+                "coefficient",
+                json!({
+                    "testPurpose": "same-secret-bridge-proof",
+                    "targetRnsLimbIndex": target_rns_limb_index,
+                }),
+                target_rns_limb_index,
+                *target_rns_prime,
+                ring_degree,
+                &message_coefficients,
+                *target_rns_prime,
+            )
         })
+        .collect::<Vec<_>>();
+    let target_constant_commitments = target_constant_material
+        .iter()
+        .map(|material| material.commitment.clone())
         .collect::<Vec<_>>();
 
     let same_secret_bridge_statement_root = repeated_hash("a1");
@@ -294,7 +282,7 @@ fn same_secret_bridge_instance() -> (
         secret_coefficients,
         error_coefficients_by_key: Vec::new(),
         negative_indicator_coefficients,
-        opening_randomness_by_limb,
+        opening_randomness_by_limb: Vec::new(),
         private_vss_coefficient_messages_by_shamir_index: Vec::new(),
         private_vss_opening_randomness_by_shamir_index: Vec::new(),
         private_vss_carry_witnesses: Vec::new(),
@@ -308,6 +296,14 @@ fn same_secret_bridge_instance() -> (
         vss_public_carry_witnesses_by_item: Vec::new(),
         target_decryption_message_vectors: Vec::new(),
         target_decryption_opening_randomness_by_commitment: Vec::new(),
+        vss_committed_material_seeds_by_bound_message: target_constant_material
+            .iter()
+            .map(|material| material.material_seed_hex.clone())
+            .collect(),
+        vss_committed_material_context_hashes_by_bound_message: target_constant_material
+            .iter()
+            .map(|material| material.context_hash.clone())
+            .collect(),
     };
 
     (statement, witness)
@@ -326,14 +322,7 @@ fn attach_same_secret_bridge_to_key_statement(
         .unwrap_or_else(|| repeated_hash("cd"));
     let target_basis_hash = canonical_target_basis_hash().expect("canonical target basis hash");
     let target_rns_primes = DATA_PRIMES[..target_rns_limb_count].to_vec();
-    let opening_randomness_by_limb = target_rns_primes
-        .iter()
-        .enumerate()
-        .map(|(target_rns_limb_index, _target_rns_prime)| {
-            bridge_randomness_columns(statement.ring_degree, 101 + target_rns_limb_index as i64)
-        })
-        .collect::<Vec<_>>();
-    let target_constant_commitments = target_rns_primes
+    let target_constant_material = target_rns_primes
         .iter()
         .enumerate()
         .map(|(target_rns_limb_index, target_rns_prime)| {
@@ -342,17 +331,23 @@ fn attach_same_secret_bridge_to_key_statement(
                 &witness.negative_indicator_coefficients,
                 *target_rns_prime,
             );
-            VssShareLinkageCommitment {
-                coordinates_by_commitment_modulus: bridge_coordinates_by_modulus_for_test(
-                    &public_matrix_seed_hash,
-                    target_rns_limb_index,
-                    *target_rns_prime,
-                    statement.ring_degree,
-                    &message_coefficients,
-                    &opening_randomness_by_limb[target_rns_limb_index],
-                ),
-            }
+            test_committed_material_commitment(
+                "coefficient",
+                json!({
+                    "testPurpose": "same-secret-bridge-key-attach",
+                    "targetRnsLimbIndex": target_rns_limb_index,
+                }),
+                target_rns_limb_index,
+                *target_rns_prime,
+                statement.ring_degree,
+                &message_coefficients,
+                *target_rns_prime,
+            )
         })
+        .collect::<Vec<_>>();
+    let target_constant_commitments = target_constant_material
+        .iter()
+        .map(|material| material.commitment.clone())
         .collect::<Vec<_>>();
 
     statement.same_secret_linkage = None;
@@ -369,7 +364,15 @@ fn attach_same_secret_bridge_to_key_statement(
             .collect(),
         target_constant_commitments,
     });
-    witness.opening_randomness_by_limb = opening_randomness_by_limb;
+    witness.opening_randomness_by_limb = Vec::new();
+    witness.vss_committed_material_seeds_by_bound_message = target_constant_material
+        .iter()
+        .map(|material| material.material_seed_hex.clone())
+        .collect();
+    witness.vss_committed_material_context_hashes_by_bound_message = target_constant_material
+        .iter()
+        .map(|material| material.context_hash.clone())
+        .collect();
     statement.validate_shape().expect("key statement shape");
 
     (statement, witness)
@@ -387,67 +390,6 @@ fn bridge_message_coefficients(
             let lifted = i128::from(*secret_coefficient)
                 + i128::from(*negative_indicator) * i128::from(target_rns_prime);
             u64::try_from(lifted).expect("bridge message is canonical")
-        })
-        .collect()
-}
-
-fn bridge_randomness_columns(ring_degree: usize, seed_offset: i64) -> Vec<Vec<i64>> {
-    (0..crate::bgv::setup::vss_commitment::VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT)
-        .map(|column_index| {
-            (0..ring_degree)
-                .map(|coefficient_index| {
-                    ((seed_offset + column_index as i64 * 11 + coefficient_index as i64 * 13)
-                        .rem_euclid(3))
-                        - 1
-                })
-                .collect()
-        })
-        .collect()
-}
-
-fn bridge_coordinates_by_modulus_for_test(
-    public_matrix_seed_hash: &str,
-    target_rns_limb_index: usize,
-    target_rns_prime: u64,
-    ring_degree: usize,
-    message_coefficients: &[u64],
-    randomness_by_column: &[Vec<i64>],
-) -> Vec<Vec<u64>> {
-    (0..SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len())
-        .map(|commitment_modulus_index| {
-            let message_digit_columns =
-                vss_public_canonical_message_digit_columns(message_coefficients, ring_degree)
-                    .expect("same-secret bridge message digit columns");
-            let computation =
-                compute_vss_public_commitment_from_opening(VssPublicCommitmentOpeningInput {
-                    commitment_role: "coefficient",
-                    commitment_context: &json!({
-                        "testPurpose": "same-secret-bridge-proof",
-                        "targetRnsLimbIndex": target_rns_limb_index,
-                    }),
-                    public_matrix_seed_hash,
-                    rns_limb_index: target_rns_limb_index,
-                    rns_prime: target_rns_prime,
-                    ring_degree,
-                    message_coefficients,
-                    message_digit_columns: &message_digit_columns,
-                    message_coefficient_bound: target_rns_prime,
-                    randomness_by_column,
-                })
-                .expect("same-secret bridge commitment");
-
-            computation
-                .commitment
-                .get("commitmentLimbs")
-                .and_then(serde_json::Value::as_array)
-                .expect("commitment limbs")
-                .get(commitment_modulus_index)
-                .and_then(|limb| limb.get("coordinates"))
-                .and_then(serde_json::Value::as_array)
-                .expect("commitment coordinates")
-                .iter()
-                .map(|coordinate| coordinate.as_u64().expect("coordinate"))
-                .collect()
         })
         .collect()
 }

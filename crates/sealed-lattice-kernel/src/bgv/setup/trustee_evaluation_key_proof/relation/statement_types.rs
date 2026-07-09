@@ -250,6 +250,13 @@ pub(crate) struct TrusteeEvaluationKeyWitness {
     pub(crate) vss_public_carry_witnesses_by_item: Vec<Vec<i64>>,
     pub(crate) target_decryption_message_vectors: Vec<Vec<i64>>,
     pub(crate) target_decryption_opening_randomness_by_commitment: Vec<Vec<Vec<i64>>>,
+    // Committed-material regeneration inputs, one per bound message in the
+    // statement's bound-commitment order: the holder's private deterministic
+    // seed and the commitment-context hash. The prover regenerates the trees
+    // from these and refuses if any regenerated root differs from the
+    // statement's roots; it never commits fresh trees inside a proof.
+    pub(crate) vss_committed_material_seeds_by_bound_message: Vec<String>,
+    pub(crate) vss_committed_material_context_hashes_by_bound_message: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -512,14 +519,73 @@ impl VssShareLinkageStatement {
                 .map(|item| item.coefficient_commitments.len())
                 .sum::<usize>()
     }
-
-    pub(crate) fn packed_opening_randomness_column_count(&self) -> usize {
-        (self.unique_coefficient_witness_slot_count() + self.item_count())
-            * crate::bgv::setup::vss_commitment::VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT
-    }
 }
 
 impl TrusteeEvaluationKeyStatement {
+    // Ordered committed-material commitments the material-binding families
+    // open, one per bound message, in the bound-message order the limb
+    // layouts use: vss-public - unique coefficient slots (slot order) then
+    // per-item recipient shares (item order); bridge - target constants in
+    // target order; target-decryption - per limb statement the aggregate then
+    // its smudging commitments. Every commitment-field limb proof opens its
+    // own field's tree of each bound commitment.
+    pub(crate) fn vss_committed_material_bound_commitments(
+        &self,
+    ) -> Vec<&VssShareLinkageCommitment> {
+        if let Some(share_linkage) = &self.vss_share_linkage {
+            let slot_indices_by_item = share_linkage.coefficient_witness_slot_indices_by_item();
+            let slot_count = share_linkage.unique_coefficient_witness_slot_count();
+            let mut commitment_by_slot: Vec<Option<&VssShareLinkageCommitment>> =
+                vec![None; slot_count];
+            let commitments_by_item: Vec<&[VssShareLinkageCommitment]> =
+                std::iter::once(share_linkage.coefficient_commitments.as_slice())
+                    .chain(
+                        share_linkage
+                            .additional_linkage_items
+                            .iter()
+                            .map(|item| item.coefficient_commitments.as_slice()),
+                    )
+                    .collect();
+            for (item_index, slot_indices) in slot_indices_by_item.iter().enumerate() {
+                for (coefficient_index, slot_index) in slot_indices.iter().enumerate() {
+                    if commitment_by_slot[*slot_index].is_none() {
+                        commitment_by_slot[*slot_index] =
+                            Some(&commitments_by_item[item_index][coefficient_index]);
+                    }
+                }
+            }
+            let mut bound_commitments = commitment_by_slot
+                .into_iter()
+                .map(|commitment| {
+                    commitment.expect("every coefficient witness slot originates from an item")
+                })
+                .collect::<Vec<_>>();
+            bound_commitments.push(&share_linkage.recipient_share_commitment);
+            for item in &share_linkage.additional_linkage_items {
+                bound_commitments.push(&item.recipient_share_commitment);
+            }
+
+            bound_commitments
+        } else if let Some(bridge) = &self.same_secret_bridge {
+            bridge.target_constant_commitments.iter().collect()
+        } else if let Some(target_decryption_share) = &self.target_decryption_share {
+            target_decryption_share
+                .limb_statements
+                .iter()
+                .flat_map(|limb_statement| {
+                    std::iter::once(&limb_statement.aggregate_commitment).chain(
+                        limb_statement
+                            .role_statements
+                            .iter()
+                            .flat_map(|role_statement| role_statement.smudging_commitments.iter()),
+                    )
+                })
+                .collect()
+        } else {
+            Vec::new()
+        }
+    }
+
     pub(crate) const TARGET_DECRYPTION_AGGREGATE_MESSAGE_MASKED_CLAIM_FIELD_COUNT: usize = 5;
     pub(crate) const TARGET_DECRYPTION_SMUDGING_MESSAGE_MASKED_CLAIM_FIELD_COUNT: usize = 4;
 
@@ -593,17 +659,15 @@ impl TrusteeEvaluationKeyStatement {
 
     // Number of linkage opening-randomness logical columns active in a limb:
     // the linkage relations live only in the commitment fields (the first
-    // three data primes).
+    // three data primes). Only the legacy BDLOP same-secret linkage anchor
+    // carries opening randomness; the committed-material bridge targets hide
+    // via their tree masks and salts and have no algebraic opening randomness.
     pub(crate) fn linkage_randomness_count(&self, limb_index: usize) -> usize {
         if limb_index >= SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len() {
             return 0;
         }
         if let Some(linkage) = &self.same_secret_linkage {
             return linkage.commitments.len() * SETUP_COMMITMENT_RANDOMNESS_WIDTH;
-        }
-        if let Some(bridge) = &self.same_secret_bridge {
-            return bridge.target_constant_commitments.len()
-                * crate::bgv::setup::vss_commitment::VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT;
         }
 
         0
@@ -640,15 +704,6 @@ impl TrusteeEvaluationKeyStatement {
         match &self.vss_share_linkage {
             Some(statement) if limb_index < SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len() => {
                 statement.item_count()
-            }
-            _ => 0,
-        }
-    }
-
-    pub(crate) fn vss_public_randomness_count(&self, limb_index: usize) -> usize {
-        match &self.vss_share_linkage {
-            Some(statement) if limb_index < SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len() => {
-                statement.packed_opening_randomness_column_count()
             }
             _ => 0,
         }
@@ -927,17 +982,6 @@ impl TrusteeEvaluationKeyStatement {
             .collect()
     }
 
-    pub(crate) fn target_decryption_randomness_count(&self, limb_index: usize) -> usize {
-        self.target_decryption_share
-            .as_ref()
-            .filter(|_| limb_index < SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len())
-            .map(|_| {
-                self.target_decryption_total_message_count()
-                    * crate::bgv::setup::vss_commitment::VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT
-            })
-            .unwrap_or(0)
-    }
-
     fn target_decryption_decoder_digit_count_for_layout(
         layout: crate::bgv::setup::vss_commitment::VssPublicMessageEncodingLayout,
     ) -> usize {
@@ -946,20 +990,13 @@ impl TrusteeEvaluationKeyStatement {
             .count()
     }
 
+    // Target-decryption relation challenges: the per-role target-share lincheck
+    // rows plus the digit decoder rows. The aggregate and smudging commitments
+    // are bound by the material openings and Z_H binding rows, not by
+    // projection relation challenges, so no per-coordinate blocks remain.
     pub(crate) fn target_decryption_relation_count(&self, limb_index: usize) -> usize {
         match &self.target_decryption_share {
             Some(statement) => {
-                let commitment_relation_count =
-                    if limb_index < SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len() {
-                        statement
-                            .limb_statements
-                            .iter()
-                            .map(Self::target_decryption_limb_message_count)
-                            .sum::<usize>()
-                            * crate::bgv::setup::vss_commitment::VSS_PUBLIC_OUTPUT_COORDINATE_COUNT
-                    } else {
-                        0
-                    };
                 let target_relation_count = statement
                     .limb_statements
                     .iter()
@@ -975,7 +1012,7 @@ impl TrusteeEvaluationKeyStatement {
                     .map(Self::target_decryption_decoder_digit_count_for_layout)
                     .sum::<usize>()
                     * LINCHECK_REPETITIONS;
-                commitment_relation_count + target_relation_count + decoder_relation_count
+                target_relation_count + decoder_relation_count
             }
             None => 0,
         }

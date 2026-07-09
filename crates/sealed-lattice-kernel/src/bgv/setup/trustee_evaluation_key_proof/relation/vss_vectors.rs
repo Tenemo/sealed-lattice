@@ -1,21 +1,24 @@
 use super::super::*;
 use super::*;
 use crate::bgv::setup::vss_commitment::{
-    ProjectionTermsInput, VSS_PUBLIC_MESSAGE_DIGIT_COUNT, VSS_PUBLIC_OUTPUT_COORDINATE_COUNT,
-    VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT, VssPublicMessageEncodingLayout, projection_terms,
-    vss_public_message_digit_column_label, vss_public_message_digit_weight,
-    vss_public_message_encoding_layout,
+    VSS_PUBLIC_MESSAGE_DIGIT_COUNT, VssPublicMessageEncodingLayout,
+    vss_public_message_digit_weight, vss_public_message_encoding_layout,
 };
 
+// The committed-material VSS commitment carried by share-linkage, bridge, and
+// target-decryption statements: one salted-Merkle material root per setup
+// commitment field, in SETUP_COMMITMENT_MODULUS_LIMB_INDICES order, over the
+// message's canonical digit columns. Binding is SHAKE256 collision resistance;
+// the proof opens each field's tree at its shared query positions and pins the
+// witness digit columns to the opened columns with Z_H-divisibility binding
+// rows. Replaces the removed 48-coordinate projection body (SEC-012).
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) struct VssShareLinkageCommitment {
-    pub(crate) coordinates_by_commitment_modulus: Vec<Vec<u64>>,
+    pub(crate) material_roots_by_commitment_field:
+        Vec<super::super::merkle_commitment::MerkleDigest>,
 }
 
 pub(crate) struct VssShareLinkagePublicVectorInput<'a> {
-    pub(crate) public_matrix_seed_hash: &'a str,
-    pub(crate) rns_limb_index: usize,
-    pub(crate) commitment_modulus_index: usize,
     pub(crate) modulus: u64,
     pub(crate) source_message_modulus: u64,
     pub(crate) recipient_roster_position: u64,
@@ -82,8 +85,6 @@ fn vss_public_decoder_digit_count(layout: VssPublicMessageEncodingLayout) -> usi
 }
 
 pub(crate) struct SameSecretBridgePublicVectorInput<'a> {
-    pub(crate) public_matrix_seed_hash: &'a str,
-    pub(crate) commitment_modulus_index: usize,
     pub(crate) modulus: u64,
     pub(crate) ring_degree: usize,
     pub(crate) target_rns_primes: &'a [u64],
@@ -94,8 +95,10 @@ pub(crate) struct SameSecretBridgePublicVectorInput<'a> {
 
 // Source-to-recipient share linkage vectors for one commitment field.
 // The vector order is every Shamir coefficient message, the recipient share
-// message, the recipient share carry, every coefficient opening-randomness
-// column, and finally the recipient share opening-randomness columns.
+// message, and the recipient share carry. The commitment itself is bound
+// outside these vectors: the statement hash carries the committed-material
+// roots and the proof opens those trees with Z_H binding rows, so no
+// commitment-opening lincheck rows remain here.
 pub(crate) fn build_vss_share_linkage_public_vectors(
     input: VssShareLinkagePublicVectorInput<'_>,
     tower: &ChallengeExtensionTower,
@@ -123,35 +126,7 @@ pub(crate) fn build_vss_share_linkage_public_vectors(
             "VSS share-linkage tower modulus does not match the commitment field",
         ));
     }
-    for commitment in input
-        .coefficient_commitments
-        .iter()
-        .chain(std::iter::once(input.recipient_share_commitment))
-    {
-        let coordinates = commitment
-            .coordinates_by_commitment_modulus
-            .get(input.commitment_modulus_index)
-            .ok_or_else(|| {
-                invalid_succinct_setup_proof(
-                    "VSS commitment does not cover the selected commitment field",
-                )
-            })?;
-        if coordinates.len() != VSS_PUBLIC_OUTPUT_COORDINATE_COUNT {
-            return Err(invalid_succinct_setup_proof(
-                "VSS commitment coordinate count does not match the profile",
-            ));
-        }
-        if coordinates
-            .iter()
-            .any(|coordinate| *coordinate >= input.modulus)
-        {
-            return Err(invalid_succinct_setup_proof(
-                "VSS commitment coordinate is outside the commitment field",
-            ));
-        }
-    }
 
-    let commitment_count = input.coefficient_commitments.len() + 1;
     if input.u_power_vectors.len() != LINCHECK_REPETITIONS {
         return Err(invalid_succinct_setup_proof(
             "VSS share-linkage lincheck repetition count does not match the profile",
@@ -167,7 +142,6 @@ pub(crate) fn build_vss_share_linkage_public_vectors(
         ));
     }
 
-    let commitment_relation_count = commitment_count * VSS_PUBLIC_OUTPUT_COORDINATE_COUNT;
     let share_relation_count = LINCHECK_REPETITIONS;
     let coefficient_message_encoding_layout =
         vss_public_message_encoding_layout(input.source_message_modulus)?;
@@ -177,7 +151,7 @@ pub(crate) fn build_vss_share_linkage_public_vectors(
         * vss_public_decoder_digit_count(coefficient_message_encoding_layout)
         + vss_public_decoder_digit_count(recipient_message_encoding_layout))
         * LINCHECK_REPETITIONS;
-    let decoder_relation_offset = commitment_relation_count + share_relation_count;
+    let decoder_relation_offset = share_relation_count;
     let relation_count = decoder_relation_offset + decoder_relation_count;
     if input.relation_alpha.len() != relation_count {
         return Err(invalid_succinct_setup_proof(
@@ -186,7 +160,7 @@ pub(crate) fn build_vss_share_linkage_public_vectors(
     }
 
     let extension_zero_vector = || vec![ChallengeExtensionTower::zero(); input.ring_degree];
-    let mut relation_claim = ChallengeExtensionTower::zero();
+    let relation_claim = ChallengeExtensionTower::zero();
     let mut message_encoding_layouts =
         vec![coefficient_message_encoding_layout; input.coefficient_commitments.len()];
     message_encoding_layouts.push(recipient_message_encoding_layout);
@@ -194,77 +168,6 @@ pub(crate) fn build_vss_share_linkage_public_vectors(
     let mut message_encoding_vectors =
         vec![extension_zero_vector(); vss_public_message_encoding_total(&message_encoding_offsets)];
     let mut recipient_share_carry_vector = extension_zero_vector();
-    let mut coefficient_randomness_vectors = vec![
-        extension_zero_vector();
-        input.coefficient_commitments.len()
-            * VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT
-    ];
-    let mut recipient_share_randomness_vectors =
-        vec![extension_zero_vector(); VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT];
-
-    for (commitment_index, commitment) in input
-        .coefficient_commitments
-        .iter()
-        .chain(std::iter::once(input.recipient_share_commitment))
-        .enumerate()
-    {
-        let coordinates =
-            &commitment.coordinates_by_commitment_modulus[input.commitment_modulus_index];
-        for (output_coordinate_index, coordinate) in coordinates.iter().enumerate() {
-            let alpha_value = &input.relation_alpha
-                [commitment_index * VSS_PUBLIC_OUTPUT_COORDINATE_COUNT + output_coordinate_index];
-            relation_claim =
-                tower.add(&relation_claim, &tower.scale_base(alpha_value, *coordinate));
-            for digit_index in 0..VSS_PUBLIC_MESSAGE_DIGIT_COUNT {
-                let input_column = vss_public_message_digit_column_label(digit_index)?;
-                let message_encoding_layout = message_encoding_layouts[commitment_index];
-                let digit_vector_index = vss_public_message_vector_index(
-                    &message_encoding_offsets,
-                    commitment_index,
-                    message_encoding_layout.digit_encoding_column(digit_index)?,
-                )?;
-                let digit_vector = &mut message_encoding_vectors[digit_vector_index];
-                add_projection_vector(
-                    AddProjectionVectorInput {
-                        target: digit_vector,
-                        scale: alpha_value,
-                        public_matrix_seed_hash: input.public_matrix_seed_hash,
-                        rns_limb_index: input.rns_limb_index,
-                        commitment_modulus_index: input.commitment_modulus_index,
-                        output_coordinate_index,
-                        input_column: &input_column,
-                        ring_degree: input.ring_degree,
-                        modulus: input.modulus,
-                    },
-                    tower,
-                )?;
-            }
-            for randomness_column_index in 0..VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT {
-                let input_column = format!("randomness:{randomness_column_index}");
-                let randomness_vector = if commitment_index < input.coefficient_commitments.len() {
-                    &mut coefficient_randomness_vectors[commitment_index
-                        * VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT
-                        + randomness_column_index]
-                } else {
-                    &mut recipient_share_randomness_vectors[randomness_column_index]
-                };
-                add_projection_vector(
-                    AddProjectionVectorInput {
-                        target: randomness_vector,
-                        scale: alpha_value,
-                        public_matrix_seed_hash: input.public_matrix_seed_hash,
-                        rns_limb_index: input.rns_limb_index,
-                        commitment_modulus_index: input.commitment_modulus_index,
-                        output_coordinate_index,
-                        input_column: &input_column,
-                        ring_degree: input.ring_degree,
-                        modulus: input.modulus,
-                    },
-                    tower,
-                )?;
-            }
-        }
-    }
 
     let trustee_point = canonical_trustee_point(
         usize::try_from(input.recipient_roster_position).map_err(|_| {
@@ -279,7 +182,7 @@ pub(crate) fn build_vss_share_linkage_public_vectors(
         input.modulus - source_modulus_residue
     };
     for (repetition, u_powers) in input.u_power_vectors.iter().enumerate() {
-        let share_alpha = &input.relation_alpha[commitment_relation_count + repetition];
+        let share_alpha = &input.relation_alpha[repetition];
         let mut combined_u = extension_zero_vector();
         for (target_value, source_value) in combined_u.iter_mut().zip(u_powers.iter()) {
             *target_value = tower.add(target_value, &tower.mul(share_alpha, source_value));
@@ -398,23 +301,15 @@ pub(crate) fn build_vss_share_linkage_public_vectors(
         }
     }
 
-    let mut vectors = Vec::with_capacity(
-        message_encoding_vectors.len()
-            + 1
-            + coefficient_randomness_vectors.len()
-            + recipient_share_randomness_vectors.len(),
-    );
+    let mut vectors = Vec::with_capacity(message_encoding_vectors.len() + 1);
     vectors.extend(message_encoding_vectors);
     vectors.push(recipient_share_carry_vector);
-    vectors.extend(coefficient_randomness_vectors);
-    vectors.extend(recipient_share_randomness_vectors);
 
     Ok((relation_claim, vectors))
 }
 
 pub(crate) fn build_vss_share_linkage_batch_public_vectors(
     statement: &VssShareLinkageStatement,
-    commitment_modulus_index: usize,
     modulus: u64,
     ring_degree: usize,
     relation_alpha: &[ChallengeExtensionElement],
@@ -462,11 +357,7 @@ pub(crate) fn build_vss_share_linkage_batch_public_vectors(
                 * vss_public_decoder_digit_count(coefficient_layout)
                 + vss_public_decoder_digit_count(recipient_layout))
                 * LINCHECK_REPETITIONS;
-            Ok(
-                (item.coefficient_commitments.len() + 1) * VSS_PUBLIC_OUTPUT_COORDINATE_COUNT
-                    + LINCHECK_REPETITIONS
-                    + decoder_relation_count,
-            )
+            Ok(LINCHECK_REPETITIONS + decoder_relation_count)
         })
         .collect::<CanonicalResult<Vec<_>>>()?
         .into_iter()
@@ -506,13 +397,6 @@ pub(crate) fn build_vss_share_linkage_batch_public_vectors(
     let mut message_encoding_vectors =
         vec![extension_zero_vector(); vss_public_message_encoding_total(&message_encoding_offsets)];
     let mut recipient_share_carry_vectors = vec![extension_zero_vector(); statement.item_count()];
-    let mut coefficient_randomness_vectors = vec![
-        extension_zero_vector();
-        coefficient_column_count
-            * VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT
-    ];
-    let mut recipient_share_randomness_vectors =
-        vec![extension_zero_vector(); statement.item_count() * VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT];
 
     for (item_index, item) in items.into_iter().enumerate() {
         if item.coefficient_slot_indices.len() != item.coefficient_commitments.len()
@@ -564,15 +448,9 @@ pub(crate) fn build_vss_share_linkage_batch_public_vectors(
             * vss_public_decoder_digit_count(item_coefficient_message_encoding_layout)
             + vss_public_decoder_digit_count(item_recipient_message_encoding_layout))
             * LINCHECK_REPETITIONS;
-        let item_relation_count = (item.coefficient_commitments.len() + 1)
-            * VSS_PUBLIC_OUTPUT_COORDINATE_COUNT
-            + LINCHECK_REPETITIONS
-            + item_decoder_relation_count;
+        let item_relation_count = LINCHECK_REPETITIONS + item_decoder_relation_count;
         let (item_claim, item_vectors) = build_vss_share_linkage_public_vectors(
             VssShareLinkagePublicVectorInput {
-                public_matrix_seed_hash: &statement.public_matrix_seed_hash,
-                rns_limb_index: item.source_rns_limb_index,
-                commitment_modulus_index,
                 modulus,
                 source_message_modulus: item.source_message_modulus,
                 recipient_roster_position: item.recipient_roster_position,
@@ -631,32 +509,6 @@ pub(crate) fn build_vss_share_linkage_batch_public_vectors(
             &carry_vector,
             tower,
         )?;
-        for coefficient_slot_index in &item.coefficient_slot_indices {
-            for randomness_column_index in 0..VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT {
-                let item_vector = item_vectors.next().ok_or_else(|| {
-                    invalid_succinct_setup_proof("VSS batch vectors ended unexpectedly")
-                })?;
-                let vector_index = coefficient_slot_index * VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT
-                    + randomness_column_index;
-                add_extension_vector(
-                    &mut coefficient_randomness_vectors[vector_index],
-                    &item_vector,
-                    tower,
-                )?;
-            }
-        }
-        for randomness_column_index in 0..VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT {
-            let item_vector = item_vectors.next().ok_or_else(|| {
-                invalid_succinct_setup_proof("VSS batch vectors ended unexpectedly")
-            })?;
-            let vector_index =
-                item_index * VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT + randomness_column_index;
-            add_extension_vector(
-                &mut recipient_share_randomness_vectors[vector_index],
-                &item_vector,
-                tower,
-            )?;
-        }
         if item_vectors.next().is_some() {
             return Err(invalid_succinct_setup_proof(
                 "VSS batch vectors contain unexpected extra columns",
@@ -669,23 +521,20 @@ pub(crate) fn build_vss_share_linkage_batch_public_vectors(
         ));
     }
 
-    let mut vectors = Vec::with_capacity(
-        message_encoding_vectors.len()
-            + recipient_share_carry_vectors.len()
-            + coefficient_randomness_vectors.len()
-            + recipient_share_randomness_vectors.len(),
-    );
+    let mut vectors =
+        Vec::with_capacity(message_encoding_vectors.len() + recipient_share_carry_vectors.len());
     vectors.extend(message_encoding_vectors);
     vectors.extend(recipient_share_carry_vectors);
-    vectors.extend(coefficient_randomness_vectors);
-    vectors.extend(recipient_share_randomness_vectors);
 
     Ok((relation_claim, vectors))
 }
 
-// Same-secret bridge vectors for one commitment field. The vector
-// order is the signed ternary secret, the binary negative indicator, and each
-// target-constant opening-randomness column in target limb order.
+// Same-secret bridge vectors for one commitment field. The vector order is
+// the signed ternary secret, the binary negative indicator, and the target
+// message encodings. The target-constant commitments are bound outside these
+// vectors: the statement hash carries the committed-material roots and the
+// proof opens those trees with Z_H binding rows, so no commitment-opening
+// lincheck rows and no opening-randomness columns remain here.
 pub(crate) fn build_same_secret_bridge_public_vectors(
     input: SameSecretBridgePublicVectorInput<'_>,
     tower: &ChallengeExtensionTower,
@@ -710,29 +559,6 @@ pub(crate) fn build_same_secret_bridge_public_vectors(
             "same-secret bridge target primes and commitments must be aligned",
         ));
     }
-    for commitment in input.target_constant_commitments {
-        let coordinates = commitment
-            .coordinates_by_commitment_modulus
-            .get(input.commitment_modulus_index)
-            .ok_or_else(|| {
-                invalid_succinct_setup_proof(
-                    "same-secret bridge commitment does not cover the selected commitment field",
-                )
-            })?;
-        if coordinates.len() != VSS_PUBLIC_OUTPUT_COORDINATE_COUNT {
-            return Err(invalid_succinct_setup_proof(
-                "same-secret bridge coordinate count does not match the profile",
-            ));
-        }
-        if coordinates
-            .iter()
-            .any(|coordinate| *coordinate >= input.modulus)
-        {
-            return Err(invalid_succinct_setup_proof(
-                "same-secret bridge coordinate is outside the commitment field",
-            ));
-        }
-    }
 
     if input.u_power_vectors.len() != LINCHECK_REPETITIONS {
         return Err(invalid_succinct_setup_proof(
@@ -750,7 +576,7 @@ pub(crate) fn build_same_secret_bridge_public_vectors(
     }
 
     let extension_zero_vector = || vec![ChallengeExtensionTower::zero(); input.ring_degree];
-    let mut relation_claim = ChallengeExtensionTower::zero();
+    let relation_claim = ChallengeExtensionTower::zero();
     let mut secret_vector = extension_zero_vector();
     let mut negative_indicator_vector = extension_zero_vector();
     let message_encoding_layouts = input
@@ -759,7 +585,6 @@ pub(crate) fn build_same_secret_bridge_public_vectors(
         .map(|target_rns_prime| vss_public_message_encoding_layout(*target_rns_prime))
         .collect::<CanonicalResult<Vec<_>>>()?;
     let target_count = input.target_constant_commitments.len();
-    let commitment_relation_count = target_count * VSS_PUBLIC_OUTPUT_COORDINATE_COUNT;
     let bridge_relation_count = target_count * LINCHECK_REPETITIONS;
     let decoder_relation_count = message_encoding_layouts
         .iter()
@@ -767,7 +592,7 @@ pub(crate) fn build_same_secret_bridge_public_vectors(
         .map(vss_public_decoder_digit_count)
         .sum::<usize>()
         * LINCHECK_REPETITIONS;
-    let relation_count = commitment_relation_count + bridge_relation_count + decoder_relation_count;
+    let relation_count = bridge_relation_count + decoder_relation_count;
     if input.relation_alpha.len() != relation_count {
         return Err(invalid_succinct_setup_proof(
             "same-secret bridge challenge count does not match the relation count",
@@ -777,69 +602,10 @@ pub(crate) fn build_same_secret_bridge_public_vectors(
     let message_encoding_offsets = vss_public_message_encoding_offsets(&message_encoding_layouts)?;
     let mut message_encoding_vectors =
         vec![extension_zero_vector(); vss_public_message_encoding_total(&message_encoding_offsets)];
-    let mut randomness_vectors =
-        vec![extension_zero_vector(); target_count * VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT];
 
-    for (target_rns_limb_index, (target_rns_prime, commitment)) in input
-        .target_rns_primes
-        .iter()
-        .zip(input.target_constant_commitments.iter())
-        .enumerate()
-    {
+    for (target_rns_limb_index, target_rns_prime) in input.target_rns_primes.iter().enumerate() {
         let message_encoding_layout = message_encoding_layouts[target_rns_limb_index];
-        let coordinates =
-            &commitment.coordinates_by_commitment_modulus[input.commitment_modulus_index];
-        for (output_coordinate_index, coordinate) in coordinates.iter().enumerate() {
-            let alpha_index = target_rns_limb_index * VSS_PUBLIC_OUTPUT_COORDINATE_COUNT
-                + output_coordinate_index;
-            let alpha_value = &input.relation_alpha[alpha_index];
-            relation_claim =
-                tower.add(&relation_claim, &tower.scale_base(alpha_value, *coordinate));
-            for digit_index in 0..VSS_PUBLIC_MESSAGE_DIGIT_COUNT {
-                let input_column = vss_public_message_digit_column_label(digit_index)?;
-                let digit_vector_index = vss_public_message_vector_index(
-                    &message_encoding_offsets,
-                    target_rns_limb_index,
-                    message_encoding_layout.digit_encoding_column(digit_index)?,
-                )?;
-                add_projection_vector(
-                    AddProjectionVectorInput {
-                        target: &mut message_encoding_vectors[digit_vector_index],
-                        scale: alpha_value,
-                        public_matrix_seed_hash: input.public_matrix_seed_hash,
-                        rns_limb_index: target_rns_limb_index,
-                        commitment_modulus_index: input.commitment_modulus_index,
-                        output_coordinate_index,
-                        input_column: &input_column,
-                        ring_degree: input.ring_degree,
-                        modulus: input.modulus,
-                    },
-                    tower,
-                )?;
-            }
-            for randomness_column_index in 0..VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT {
-                let input_column = format!("randomness:{randomness_column_index}");
-                let randomness_vector = &mut randomness_vectors[target_rns_limb_index
-                    * VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT
-                    + randomness_column_index];
-                add_projection_vector(
-                    AddProjectionVectorInput {
-                        target: randomness_vector,
-                        scale: alpha_value,
-                        public_matrix_seed_hash: input.public_matrix_seed_hash,
-                        rns_limb_index: target_rns_limb_index,
-                        commitment_modulus_index: input.commitment_modulus_index,
-                        output_coordinate_index,
-                        input_column: &input_column,
-                        ring_degree: input.ring_degree,
-                        modulus: input.modulus,
-                    },
-                    tower,
-                )?;
-            }
-        }
-        let bridge_relation_offset =
-            commitment_relation_count + target_rns_limb_index * LINCHECK_REPETITIONS;
+        let bridge_relation_offset = target_rns_limb_index * LINCHECK_REPETITIONS;
         let target_prime_residue = *target_rns_prime % input.modulus;
         for (repetition, u_powers) in input.u_power_vectors.iter().enumerate() {
             let alpha_value = &input.relation_alpha[bridge_relation_offset + repetition];
@@ -877,7 +643,7 @@ pub(crate) fn build_same_secret_bridge_public_vectors(
     }
 
     if decoder_relation_count > 0 {
-        let decoder_relation_offset = commitment_relation_count + bridge_relation_count;
+        let decoder_relation_offset = bridge_relation_count;
         let mut decoder_relation_index = 0_usize;
         for (target_rns_limb_index, message_encoding_layout) in
             message_encoding_layouts.iter().enumerate()
@@ -928,51 +694,12 @@ pub(crate) fn build_same_secret_bridge_public_vectors(
         }
     }
 
-    let mut vectors =
-        Vec::with_capacity(2 + message_encoding_vectors.len() + randomness_vectors.len());
+    let mut vectors = Vec::with_capacity(2 + message_encoding_vectors.len());
     vectors.push(secret_vector);
     vectors.push(negative_indicator_vector);
     vectors.extend(message_encoding_vectors);
-    vectors.extend(randomness_vectors);
 
     Ok((relation_claim, vectors))
-}
-
-struct AddProjectionVectorInput<'a, 'b> {
-    target: &'a mut [ChallengeExtensionElement],
-    scale: &'b ChallengeExtensionElement,
-    public_matrix_seed_hash: &'b str,
-    rns_limb_index: usize,
-    commitment_modulus_index: usize,
-    output_coordinate_index: usize,
-    input_column: &'b str,
-    ring_degree: usize,
-    modulus: u64,
-}
-
-fn add_projection_vector(
-    input: AddProjectionVectorInput<'_, '_>,
-    tower: &ChallengeExtensionTower,
-) -> CanonicalResult<()> {
-    for (ring_coefficient_index, matrix_residue) in projection_terms(ProjectionTermsInput {
-        public_matrix_seed_hash: input.public_matrix_seed_hash,
-        rns_limb_index: input.rns_limb_index,
-        commitment_modulus_index: input.commitment_modulus_index,
-        output_coordinate_index: input.output_coordinate_index,
-        input_column: input.input_column,
-        ring_degree: input.ring_degree,
-        modulus: input.modulus,
-    })?
-    .iter()
-    .copied()
-    {
-        input.target[ring_coefficient_index] = tower.add(
-            &input.target[ring_coefficient_index],
-            &tower.scale_base(input.scale, matrix_residue),
-        );
-    }
-
-    Ok(())
 }
 
 fn add_scaled_extension_basis_vector(

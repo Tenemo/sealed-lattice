@@ -40,8 +40,7 @@ use super::domain::CyclicDomain;
 #[cfg(test)]
 use super::material_aggregate_opening::prove_linear_evaluation_opening;
 
-const AGGREGATE_DELTA_LABEL: &str =
-    "sealed-lattice/setup/key-switch-atom/material-aggregate-delta";
+const AGGREGATE_DELTA_LABEL: &str = "sealed-lattice/setup/key-switch-atom/material-aggregate-delta";
 
 // Used by the aggregate prover; the acceptance-path wrapper reports its own
 // fail-closed refusals through `aggregate_binding_refusal`.

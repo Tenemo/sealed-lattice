@@ -81,6 +81,7 @@ pub(crate) use trustee_evaluation_key_proof::{
 pub(crate) use vss_commitment::vss_public_canonical_message_digit_columns;
 pub(crate) use vss_commitment::{
     VSS_PUBLIC_OUTPUT_COORDINATE_COUNT, VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT,
+    compute_vss_committed_material_commitment_request,
     compute_vss_public_commitment_from_opening_request,
     validate_standalone_vss_public_commitment_body,
     verify_vss_public_aggregate_threshold_commitment_set_request,

@@ -136,8 +136,26 @@ pub(super) fn masked_half_coefficients(
     half_values: &[u64],
     mask_sampler: &mut DeterministicSampler,
 ) -> Vec<u64> {
+    masked_half_coefficients_with_mask_degree(
+        plan,
+        half_values,
+        column_mask_degree(plan.trace_size),
+        mask_sampler,
+    )
+}
+
+// The mask-degree-parameterized form: per-proof witness columns take the
+// `column_mask_degree` cap (they enter the cubic row-check composition), while
+// persistent VSS committed-material columns take their own larger budget (they
+// appear only in linear rows, so the cubic-composition cap does not apply and
+// the mask must instead cover every lifetime opening of the persistent tree).
+pub(super) fn masked_half_coefficients_with_mask_degree(
+    plan: &EvaluationDomainPlan,
+    half_values: &[u64],
+    mask_degree: usize,
+    mask_sampler: &mut DeterministicSampler,
+) -> Vec<u64> {
     let trace_size = plan.trace_size;
-    let mask_degree = column_mask_degree(trace_size);
     let mut coefficients = plan.coefficients_from_trace_values(half_values);
     coefficients.resize(trace_size + mask_degree, 0);
     let mask = mask_sampler.uniform_residues(plan.modulus, mask_degree);

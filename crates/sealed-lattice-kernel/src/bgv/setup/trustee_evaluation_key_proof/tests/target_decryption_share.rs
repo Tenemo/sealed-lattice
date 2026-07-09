@@ -14,9 +14,7 @@ use crate::bgv::evaluator::engine::negacyclic_mul;
 use crate::bgv::modular_arithmetic::{add_mod_fast, mul_mod_fast};
 use crate::bgv::parameters::PLAINTEXT_MODULUS;
 use crate::bgv::setup::vss_commitment::{
-    VSS_PUBLIC_MESSAGE_BASE_DIGIT_TRIT_COUNT, VssPublicCommitmentOpeningInput,
-    compute_vss_public_commitment_from_opening, vss_public_canonical_message_digit_columns,
-    vss_public_message_encoding_layout,
+    VSS_PUBLIC_MESSAGE_BASE_DIGIT_TRIT_COUNT, vss_public_message_encoding_layout,
 };
 use serde_json::{Value, json};
 
@@ -44,21 +42,16 @@ fn target_decryption_share_proof_round_trips_and_rejects_tampering() {
     );
 
     let (mut tampered_commitment_statement, _unused_witness) = target_decryption_share_instance();
-    let target_decryption_share = tampered_commitment_statement
+    tampered_commitment_statement
         .target_decryption_share
         .as_mut()
-        .expect("target statement");
-    let first_commitment_modulus = DATA_PRIMES[0];
-    target_decryption_share.limb_statements[0]
+        .expect("target statement")
+        .limb_statements[0]
         .aggregate_commitment
-        .coordinates_by_commitment_modulus[0][0] = (target_decryption_share.limb_statements[0]
-        .aggregate_commitment
-        .coordinates_by_commitment_modulus[0][0]
-        + 1)
-        % first_commitment_modulus;
+        .material_roots_by_commitment_field[0][0] ^= 0x01;
     assert!(
         verify_evaluation_key_share(&tampered_commitment_statement, &proof).is_err(),
-        "tampering with a public aggregate commitment coordinate must reject"
+        "tampering with a published aggregate commitment material root must reject"
     );
 
     let (invalid_aggregate_statement, mut invalid_aggregate_witness) =
@@ -113,16 +106,20 @@ fn target_decryption_share_proof_round_trips_and_rejects_tampering() {
         "proving must reject a smudging witness that no longer reconstructs the partial"
     );
 
-    let (non_ternary_statement, mut non_ternary_witness) = target_decryption_share_instance();
-    non_ternary_witness.target_decryption_opening_randomness_by_commitment[1][0][3] = 2;
+    // A tampered smudging message that no longer opens its committed material
+    // makes the regenerated material root differ from the published one, so the
+    // prover refuses fail-closed.
+    let (mismatched_material_statement, mut mismatched_material_witness) =
+        target_decryption_share_instance();
+    mismatched_material_witness.target_decryption_message_vectors[1][3] += 1;
     assert!(
         prove_evaluation_key_share(
-            &non_ternary_statement,
-            &non_ternary_witness,
+            &mismatched_material_statement,
+            &mismatched_material_witness,
             PROOF_RANDOMNESS_SEED
         )
         .is_err(),
-        "proving must reject non-ternary target-decryption opening randomness"
+        "proving must reject a target-decryption message that does not open its committed material"
     );
 
     let (mut wrong_target_basis_statement, _unused_witness) = target_decryption_share_instance();
@@ -181,14 +178,14 @@ fn target_decryption_share_proof_bytes_round_trips_and_rejects_tampering() {
 
     let mut tampered_aggregate_commitment_request = verify_request.clone();
     tampered_aggregate_commitment_request["targetDecryptionShare"]["targetRnsLimbStatements"][0]
-        ["aggregateCommitment"]["commitmentLimbs"][0]["coordinates"][0] = json!(0);
+        ["aggregateCommitment"]["commitmentFields"][0]["materialRootHex"] = json!("00".repeat(32));
     assert!(
         super::verify_target_decryption_share_proof_bytes_from_request(
             &tampered_aggregate_commitment_request,
             &generated.proof_bytes
         )
         .is_err(),
-        "tampering with the aggregate commitment object must reject before proof verification"
+        "tampering with the aggregate commitment material root must reject before proof verification"
     );
 
     let mut tampered_partial_request = verify_request.clone();
@@ -284,16 +281,17 @@ fn target_decryption_share_proof_requires_enough_lift_fields() {
         35
     );
     assert_eq!(
-        commitment_field_layout.target_decryption_randomness_columns,
-        35 * crate::bgv::setup::vss_commitment::VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT,
-        "commitment fields carry all opening randomness"
+        commitment_field_layout.vss_committed_material_bound_message_count(),
+        35,
+        "commitment fields open a committed-material tree for every bound message"
     );
     let target_field_layout =
         LimbColumnLayout::new(&instance.statement, 4).expect("target-field layout");
     assert_eq!(target_field_layout.target_decryption_message_columns, 11);
     assert_eq!(
-        target_field_layout.target_decryption_randomness_columns, 0,
-        "the final target-only field carries aggregate-message lift columns and its own smudging messages"
+        target_field_layout.vss_committed_material_bound_message_count(),
+        0,
+        "target-only fields open no committed-material trees; the material trees live in the setup commitment fields"
     );
     assert_eq!(
         target_field_layout.target_decryption_logical_columns(),
@@ -409,8 +407,8 @@ fn target_decryption_share_proof_layout_description_matches_relation_layout() {
         json!(35)
     );
     assert_eq!(
-        first_commitment_limb["targetDecryptionRandomnessColumns"],
-        json!(35 * crate::bgv::setup::vss_commitment::VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT)
+        first_commitment_limb["vssCommittedMaterialBoundMessageCount"],
+        json!(35)
     );
     assert_eq!(
         first_commitment_limb["claimCount"],
@@ -434,7 +432,7 @@ fn target_decryption_share_proof_layout_description_matches_relation_layout() {
         json!(11)
     );
     assert_eq!(
-        final_target_limb["targetDecryptionRandomnessColumns"],
+        final_target_limb["vssCommittedMaterialBoundMessageCount"],
         json!(0)
     );
     assert_eq!(
@@ -496,8 +494,8 @@ fn target_decryption_share_layout_omits_unneeded_lift_columns() {
         49
     );
     assert_eq!(
-        commitment_field_layout.target_decryption_randomness_columns,
-        49 * crate::bgv::setup::vss_commitment::VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT
+        commitment_field_layout.vss_committed_material_bound_message_count(),
+        49
     );
 
     let first_lift_target_field_layout =
@@ -507,7 +505,7 @@ fn target_decryption_share_layout_omits_unneeded_lift_columns() {
         31
     );
     assert_eq!(
-        first_lift_target_field_layout.target_decryption_randomness_columns,
+        first_lift_target_field_layout.vss_committed_material_bound_message_count(),
         0
     );
 
@@ -518,7 +516,7 @@ fn target_decryption_share_layout_omits_unneeded_lift_columns() {
         11
     );
     assert_eq!(
-        second_lift_target_field_layout.target_decryption_randomness_columns,
+        second_lift_target_field_layout.vss_committed_material_bound_message_count(),
         0
     );
 
@@ -529,7 +527,7 @@ fn target_decryption_share_layout_omits_unneeded_lift_columns() {
         7
     );
     assert_eq!(
-        later_target_field_layout.target_decryption_randomness_columns,
+        later_target_field_layout.vss_committed_material_bound_message_count(),
         0
     );
     assert_eq!(
@@ -653,7 +651,11 @@ fn target_decryption_share_verification_request(generate_request: &Value) -> Val
     verify_request
         .as_object_mut()
         .expect("target proof command request")
-        .remove("targetDecryptionOpeningRandomnessByCommitment");
+        .remove("vssCommittedMaterialSeedsByBoundMessage");
+    verify_request
+        .as_object_mut()
+        .expect("target proof command request")
+        .remove("vssCommittedMaterialContextHashesByBoundMessage");
     verify_request
         .as_object_mut()
         .expect("target proof command request")
@@ -699,7 +701,12 @@ fn target_decryption_share_instance_parts_for_active_limb_count(
         1 + target_decryption_roles.len() * smudging_polynomial_degree;
     let mut target_decryption_message_vectors =
         Vec::with_capacity(active_limb_count * target_message_count_per_limb);
-    let mut target_decryption_opening_randomness_by_commitment =
+    // Committed-material regeneration inputs, one per bound commitment in the
+    // same order as target_decryption_message_vectors (aggregate then smudging
+    // per limb and role).
+    let mut material_seeds_by_bound_message =
+        Vec::with_capacity(active_limb_count * target_message_count_per_limb);
+    let mut material_context_hashes_by_bound_message =
         Vec::with_capacity(active_limb_count * target_message_count_per_limb);
     let mut smudging_commitment_records = Vec::with_capacity(
         active_limb_count * target_decryption_roles.len() * smudging_polynomial_degree,
@@ -729,10 +736,6 @@ fn target_decryption_share_instance_parts_for_active_limb_count(
             aggregate_commitment_messages[0] < aggregate_message_coefficient_bound,
             "target proof fixture must exercise a lifted aggregate commitment message"
         );
-        let aggregate_randomness = target_decryption_ternary_randomness_columns(
-            ring_degree,
-            23 + target_rns_limb_index as i64 * 29,
-        );
         let aggregate_commitment = commitment_for_target_decryption_test(
             "aggregate-threshold-share",
             json!({
@@ -740,20 +743,19 @@ fn target_decryption_share_instance_parts_for_active_limb_count(
                 "targetRnsLimbIndex": target_rns_limb_index,
                 "shareRole": "aggregate",
             }),
-            &public_matrix_seed_hash,
             target_rns_limb_index,
             target_rns_prime,
             ring_degree,
             &aggregate_commitment_messages,
             aggregate_message_coefficient_bound,
-            &aggregate_randomness,
         );
 
         let aggregate_opening_root = repeated_hash("78");
         let mut command_role_statements = Vec::with_capacity(target_decryption_roles.len());
         let mut role_statements = Vec::with_capacity(target_decryption_roles.len());
 
-        target_decryption_opening_randomness_by_commitment.push(aggregate_randomness);
+        material_seeds_by_bound_message.push(aggregate_commitment.material_seed_hex.clone());
+        material_context_hashes_by_bound_message.push(aggregate_commitment.context_hash.clone());
         target_decryption_message_vectors.push(
             aggregate_commitment_messages
                 .iter()
@@ -807,40 +809,25 @@ fn target_decryption_share_instance_parts_for_active_limb_count(
                 PLAINTEXT_MODULUS,
                 target_rns_prime,
             );
-            let smudging_randomness_by_degree = (1..=smudging_polynomial_degree)
-                .map(|polynomial_degree| {
-                    target_decryption_ternary_randomness_columns(
-                        ring_degree,
-                        41 + target_rns_limb_index as i64 * 31
-                            + target_role_index as i64 * 101
-                            + polynomial_degree as i64 * 17,
-                    )
-                })
-                .collect::<Vec<_>>();
             let smudging_commitments = smudging_encoded_coefficients
                 .iter()
-                .zip(smudging_randomness_by_degree.iter())
                 .enumerate()
-                .map(
-                    |(polynomial_index, (message_coefficients, randomness_by_column))| {
-                        commitment_for_target_decryption_test(
-                            "target-decryption-smudging-polynomial-coefficient",
-                            json!({
-                                "testPurpose": "target-decryption-share-proof",
-                                "targetRnsLimbIndex": target_rns_limb_index,
-                                "targetRole": target_role,
-                                "polynomialDegree": polynomial_index + 1,
-                            }),
-                            &public_matrix_seed_hash,
-                            target_rns_limb_index,
-                            target_rns_prime,
-                            ring_degree,
-                            message_coefficients,
-                            smudging_message_coefficient_bound,
-                            randomness_by_column,
-                        )
-                    },
-                )
+                .map(|(polynomial_index, message_coefficients)| {
+                    commitment_for_target_decryption_test(
+                        "target-decryption-smudging-polynomial-coefficient",
+                        json!({
+                            "testPurpose": "target-decryption-share-proof",
+                            "targetRnsLimbIndex": target_rns_limb_index,
+                            "targetRole": target_role,
+                            "polynomialDegree": polynomial_index + 1,
+                        }),
+                        target_rns_limb_index,
+                        target_rns_prime,
+                        ring_degree,
+                        message_coefficients,
+                        smudging_message_coefficient_bound,
+                    )
+                })
                 .collect::<Vec<_>>();
             let smudging_commitment_roots = smudging_commitments
                 .iter()
@@ -874,8 +861,16 @@ fn target_decryption_share_instance_parts_for_active_limb_count(
                     .map(|commitment| commitment.commitment.clone())
                     .collect(),
             });
-            target_decryption_opening_randomness_by_commitment
-                .extend(smudging_randomness_by_degree);
+            material_seeds_by_bound_message.extend(
+                smudging_commitments
+                    .iter()
+                    .map(|commitment| commitment.material_seed_hex.clone()),
+            );
+            material_context_hashes_by_bound_message.extend(
+                smudging_commitments
+                    .iter()
+                    .map(|commitment| commitment.context_hash.clone()),
+            );
             target_decryption_message_vectors.extend(smudging_encoded_coefficients.iter().map(
                 |coefficients| {
                     coefficients
@@ -993,7 +988,10 @@ fn target_decryption_share_instance_parts_for_active_limb_count(
         vss_public_recipient_share_opening_randomness_by_item: Vec::new(),
         vss_public_carry_witnesses_by_item: Vec::new(),
         target_decryption_message_vectors,
-        target_decryption_opening_randomness_by_commitment,
+        target_decryption_opening_randomness_by_commitment: Vec::new(),
+        vss_committed_material_seeds_by_bound_message: material_seeds_by_bound_message,
+        vss_committed_material_context_hashes_by_bound_message:
+            material_context_hashes_by_bound_message,
     };
 
     let command_request = json!({
@@ -1023,7 +1021,8 @@ fn target_decryption_share_instance_parts_for_active_limb_count(
             "plaintextMultiple": PLAINTEXT_MODULUS,
         },
         "targetDecryptionMessageVectors": witness.target_decryption_message_vectors.clone(),
-        "targetDecryptionOpeningRandomnessByCommitment": witness.target_decryption_opening_randomness_by_commitment.clone(),
+        "vssCommittedMaterialSeedsByBoundMessage": witness.vss_committed_material_seeds_by_bound_message.clone(),
+        "vssCommittedMaterialContextHashesByBoundMessage": witness.vss_committed_material_context_hashes_by_bound_message.clone(),
         "proofRandomnessSeedHex": PROOF_RANDOMNESS_SEED,
         "proofRandomnessNonceHex": PROOF_RANDOMNESS_NONCE,
     });
@@ -1102,79 +1101,54 @@ fn signed_residue_for_test(value: i64, modulus: u64) -> u64 {
     }
 }
 
-fn target_decryption_ternary_randomness_columns(
-    ring_degree: usize,
-    seed_offset: i64,
-) -> Vec<Vec<i64>> {
-    (0..crate::bgv::setup::vss_commitment::VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT)
-        .map(|column_index| {
-            (0..ring_degree)
-                .map(|coefficient_index| {
-                    ((seed_offset + column_index as i64 * 13 + coefficient_index as i64 * 17)
-                        .rem_euclid(3))
-                        - 1
-                })
-                .collect()
-        })
-        .collect()
-}
-
 struct CommitmentForTargetDecryptionTest {
     commitment_root: String,
     commitment_value: Value,
     commitment: VssShareLinkageCommitment,
+    material_seed_hex: String,
+    context_hash: String,
 }
 
-#[allow(clippy::too_many_arguments)]
 fn commitment_for_target_decryption_test(
     commitment_role: &str,
     commitment_context: serde_json::Value,
-    public_matrix_seed_hash: &str,
     rns_limb_index: usize,
     rns_prime: u64,
     ring_degree: usize,
     message_coefficients: &[u64],
     message_coefficient_bound: u64,
-    randomness_by_column: &[Vec<i64>],
 ) -> CommitmentForTargetDecryptionTest {
-    let message_digit_columns =
-        vss_public_canonical_message_digit_columns(message_coefficients, ring_degree)
-            .expect("target-decryption message digit columns");
-    let computation = compute_vss_public_commitment_from_opening(VssPublicCommitmentOpeningInput {
+    let material = test_committed_material_commitment(
         commitment_role,
-        commitment_context: &commitment_context,
-        public_matrix_seed_hash,
+        commitment_context.clone(),
         rns_limb_index,
         rns_prime,
         ring_degree,
         message_coefficients,
-        message_digit_columns: &message_digit_columns,
         message_coefficient_bound,
-        randomness_by_column,
-    })
-    .expect("target-decryption commitment");
-
-    let coordinates_by_commitment_modulus = computation
-        .commitment
-        .get("commitmentLimbs")
-        .and_then(serde_json::Value::as_array)
-        .expect("commitment limbs")
-        .iter()
-        .map(|limb| {
-            limb.get("coordinates")
-                .and_then(serde_json::Value::as_array)
-                .expect("commitment coordinates")
-                .iter()
-                .map(|coordinate| coordinate.as_u64().expect("coordinate"))
-                .collect()
-        })
-        .collect();
+    );
+    // Rebuild the canonical commitment object (the transport/command records
+    // carry it) by re-running the request path and taking its commitment body.
+    let material_seed_hex = material.material_seed_hex.clone();
+    let commitment_value =
+        crate::bgv::setup::compute_vss_committed_material_commitment_request(&json!({
+            "commitmentRole": commitment_role,
+            "commitmentContext": commitment_context,
+            "rnsLimbIndex": rns_limb_index,
+            "rnsPrime": rns_prime,
+            "ringDegree": ring_degree,
+            "messageCoefficients": message_coefficients,
+            "messageCoefficientBound": message_coefficient_bound,
+            "materialSeedHex": material_seed_hex,
+        }))
+        .expect("committed-material commitment body")["commitment"]
+            .clone();
 
     CommitmentForTargetDecryptionTest {
-        commitment_root: computation.commitment_root,
-        commitment_value: computation.commitment,
-        commitment: VssShareLinkageCommitment {
-            coordinates_by_commitment_modulus,
-        },
+        commitment_root: material.commitment_root,
+        commitment_value,
+        commitment: material.commitment,
+        material_seed_hex: material.material_seed_hex,
+        context_hash: material.context_hash,
     }
 }

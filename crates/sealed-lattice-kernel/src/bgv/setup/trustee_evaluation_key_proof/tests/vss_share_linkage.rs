@@ -1,3 +1,4 @@
+use super::super::merkle_commitment::MerkleDigest;
 use super::super::relation::{
     VssShareLinkageCommitment, VssShareLinkageItem, VssShareLinkageStatement,
     masked_claim_bounds_for_global_claim, masked_claim_lift_residue_count_for_moduli,
@@ -6,10 +7,9 @@ use super::super::{
     VSS_PUBLIC_CARRY_CLAIM_MASK_DIGIT_COUNT, VSS_PUBLIC_SHARE_LINKAGE_TRIT_CLAIM_MASK_DIGIT_COUNT,
 };
 use super::*;
-use crate::bgv::setup::vss_commitment::{
-    VSS_PUBLIC_MESSAGE_TRIT_BASE, VssPublicCommitmentOpeningInput,
-    compute_vss_public_commitment_from_opening, vss_public_canonical_message_digit_columns,
-};
+use crate::bgv::setup::compute_vss_committed_material_commitment_request;
+use crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_TRIT_BASE;
+use crate::hashing::hash512_hex;
 use num_bigint::BigInt;
 use serde_json::json;
 
@@ -32,34 +32,38 @@ fn vss_share_linkage_proof_round_trips_and_rejects_tampering() {
             PROOF_RANDOMNESS_SEED
         )
         .is_err(),
-        "proving must reject a witness whose lifted share relation does not match"
+        "proving must reject a recipient-share witness that no longer opens its committed material"
     );
 
-    let (non_ternary_statement, mut non_ternary_witness) = vss_share_linkage_instance();
-    non_ternary_witness.vss_public_recipient_share_opening_randomness_by_item[1][0][0] = 2;
+    // A witness coefficient message that disagrees with the committed material
+    // makes the regenerated material root differ from the published one, so
+    // the prover refuses fail-closed before any proof is produced.
+    let (mismatched_material_statement, mut mismatched_material_witness) =
+        vss_share_linkage_instance();
+    mismatched_material_witness.vss_public_coefficient_messages_by_shamir_index[0][0] =
+        (mismatched_material_witness.vss_public_coefficient_messages_by_shamir_index[0][0] + 1)
+            % i64::try_from(DATA_PRIMES[0]).expect("modulus fits i64");
     assert!(
         prove_evaluation_key_share(
-            &non_ternary_statement,
-            &non_ternary_witness,
+            &mismatched_material_statement,
+            &mismatched_material_witness,
             PROOF_RANDOMNESS_SEED
         )
         .is_err(),
-        "proving must reject non-ternary opening randomness"
+        "proving must reject a witness message that does not open the published material commitment"
     );
 
     let (mut tampered_statement, _unused_witness) = vss_share_linkage_instance();
-    let modulus = DATA_PRIMES[0];
-    let coordinate = &mut tampered_statement
+    tampered_statement
         .vss_share_linkage
         .as_mut()
         .expect("statement")
         .recipient_share_commitment
-        .coordinates_by_commitment_modulus[0][0];
-    *coordinate = (*coordinate + 1) % modulus;
+        .material_roots_by_commitment_field[0][0] ^= 0x01;
 
     assert!(
         verify_evaluation_key_share(&tampered_statement, &proof).is_err(),
-        "tampering with the public recipient-share commitment must reject"
+        "tampering with the published recipient-share material root must reject"
     );
 
     let (mut tampered_opening_statement, _unused_witness) = vss_share_linkage_instance();
@@ -75,19 +79,17 @@ fn vss_share_linkage_proof_round_trips_and_rejects_tampering() {
     );
 
     let (mut tampered_additional_statement, _unused_witness) = vss_share_linkage_instance();
-    let modulus = DATA_PRIMES[0];
-    let coordinate = &mut tampered_additional_statement
+    tampered_additional_statement
         .vss_share_linkage
         .as_mut()
         .expect("statement")
         .additional_linkage_items[0]
         .recipient_share_commitment
-        .coordinates_by_commitment_modulus[0][0];
-    *coordinate = (*coordinate + 1) % modulus;
+        .material_roots_by_commitment_field[0][0] ^= 0x01;
 
     assert!(
         verify_evaluation_key_share(&tampered_additional_statement, &proof).is_err(),
-        "tampering with an additional recipient-share commitment must reject"
+        "tampering with an additional recipient-share material root must reject"
     );
 }
 
@@ -97,35 +99,12 @@ fn vss_share_linkage_instance() -> (
 ) {
     let ring_degree = SMALL_RING_DEGREE;
     let public_matrix_seed_hash = repeated_hash("bc");
-    let primary_item = share_linkage_item_for_test(
-        "primary",
-        &public_matrix_seed_hash,
-        ring_degree,
-        0,
-        2,
-        3,
-        10,
-    );
-    let mut same_source_additional_item = share_linkage_item_for_test(
-        "same-source-additional",
-        &public_matrix_seed_hash,
-        ring_degree,
-        0,
-        4,
-        3,
-        10,
-    );
+    let primary_item = share_linkage_item_for_test("primary", ring_degree, 0, 2, 3, 10);
+    let mut same_source_additional_item =
+        share_linkage_item_for_test("same-source-additional", ring_degree, 0, 4, 3, 10);
     same_source_additional_item.coefficient_commitment_computations =
         primary_item.coefficient_commitment_computations.clone();
-    let additional_item = share_linkage_item_for_test(
-        "additional",
-        &public_matrix_seed_hash,
-        ring_degree,
-        1,
-        3,
-        2,
-        70,
-    );
+    let additional_item = share_linkage_item_for_test("additional", ring_degree, 1, 3, 2, 70);
 
     let source_coefficient_commitment_root = repeated_hash("91");
     let source_recipient_share_commitment_root = repeated_hash("92");
@@ -215,9 +194,10 @@ fn vss_share_linkage_instance() -> (
         layout.ring_degree, 128,
         "share-linkage batches items by columns without increasing the trace row count"
     );
-    assert!(
-        layout.vss_public_randomness_columns > 0,
-        "opening randomness must remain in the opening lincheck"
+    assert_eq!(
+        layout.vss_committed_material_bound_message_count(),
+        8,
+        "five unique coefficient trees plus three recipient-share trees are bound"
     );
     // With Branch 2 the message consistency claims are trit-granular: each of the
     // eight messages (five coefficient + three item) contributes both digits'
@@ -285,6 +265,21 @@ fn vss_share_linkage_instance() -> (
         "all share-linkage limbs should use the same decoder-backed message width"
     );
 
+    // Bound-commitment order (matching vss_committed_material_bound_commitments):
+    // the five unique coefficient slots (primary's three, then additional's
+    // two), then the three items' recipient-share commitments. same_source
+    // shares primary's coefficient trees, so it adds no new coefficient slots.
+    let bound_commitment_computations: Vec<&CommitmentComputationForTest> = primary_item
+        .coefficient_commitment_computations
+        .iter()
+        .chain(additional_item.coefficient_commitment_computations.iter())
+        .chain([
+            &primary_item.recipient_share_commitment_computation,
+            &same_source_additional_item.recipient_share_commitment_computation,
+            &additional_item.recipient_share_commitment_computation,
+        ])
+        .collect();
+
     let witness = super::super::relation::TrusteeEvaluationKeyWitness {
         secret_coefficients: Vec::new(),
         error_coefficients_by_key: Vec::new(),
@@ -309,15 +304,8 @@ fn vss_share_linkage_instance() -> (
             .iter()
             .map(|value| i64::try_from(*value).expect("share fits i64"))
             .collect(),
-        vss_public_coefficient_opening_randomness_by_shamir_index: primary_item
-            .coefficient_randomness
-            .iter()
-            .chain(additional_item.coefficient_randomness.iter())
-            .cloned()
-            .collect(),
-        vss_public_recipient_share_opening_randomness: primary_item
-            .recipient_share_randomness
-            .clone(),
+        vss_public_coefficient_opening_randomness_by_shamir_index: Vec::new(),
+        vss_public_recipient_share_opening_randomness: Vec::new(),
         vss_public_carry_witnesses: primary_item.recipient_share_carry_values.clone(),
         vss_public_recipient_share_messages_by_item: vec![
             primary_item
@@ -336,11 +324,7 @@ fn vss_share_linkage_instance() -> (
                 .map(|value| i64::try_from(*value).expect("share fits i64"))
                 .collect(),
         ],
-        vss_public_recipient_share_opening_randomness_by_item: vec![
-            primary_item.recipient_share_randomness,
-            same_source_additional_item.recipient_share_randomness,
-            additional_item.recipient_share_randomness,
-        ],
+        vss_public_recipient_share_opening_randomness_by_item: Vec::new(),
         vss_public_carry_witnesses_by_item: vec![
             primary_item.recipient_share_carry_values,
             same_source_additional_item.recipient_share_carry_values,
@@ -348,6 +332,14 @@ fn vss_share_linkage_instance() -> (
         ],
         target_decryption_message_vectors: Vec::new(),
         target_decryption_opening_randomness_by_commitment: Vec::new(),
+        vss_committed_material_seeds_by_bound_message: bound_commitment_computations
+            .iter()
+            .map(|computation| computation.material_seed_hex.clone())
+            .collect(),
+        vss_committed_material_context_hashes_by_bound_message: bound_commitment_computations
+            .iter()
+            .map(|computation| computation.context_hash.clone())
+            .collect(),
     };
 
     (statement, witness)
@@ -399,9 +391,7 @@ struct ShareLinkageItemForTest {
     source_rns_limb_index: usize,
     source_message_modulus: u64,
     coefficient_messages: Vec<Vec<u64>>,
-    coefficient_randomness: Vec<Vec<Vec<i64>>>,
     recipient_share_values: Vec<u64>,
-    recipient_share_randomness: Vec<Vec<i64>>,
     recipient_share_carry_values: Vec<i64>,
     coefficient_commitment_computations: Vec<CommitmentComputationForTest>,
     recipient_share_commitment_computation: CommitmentComputationForTest,
@@ -409,7 +399,6 @@ struct ShareLinkageItemForTest {
 
 fn share_linkage_item_for_test(
     item_label: &str,
-    public_matrix_seed_hash: &str,
     ring_degree: usize,
     source_rns_limb_index: usize,
     recipient_roster_position: u64,
@@ -434,13 +423,6 @@ fn share_linkage_item_for_test(
                 .collect::<Vec<_>>()
         })
         .collect::<Vec<_>>();
-    let coefficient_randomness = (0..coefficient_count)
-        .map(|shamir_coefficient_index| {
-            ternary_randomness_columns(ring_degree, seed_offset + shamir_coefficient_index as i64)
-        })
-        .collect::<Vec<_>>();
-    let recipient_share_randomness = ternary_randomness_columns(ring_degree, seed_offset + 31);
-
     let mut recipient_share_values = Vec::with_capacity(ring_degree);
     let mut recipient_share_carry_values = Vec::with_capacity(ring_degree);
     let mut trustee_point_powers = Vec::with_capacity(coefficient_count);
@@ -469,26 +451,21 @@ fn share_linkage_item_for_test(
 
     let coefficient_commitment_computations = coefficient_messages
         .iter()
-        .zip(coefficient_randomness.iter())
         .enumerate()
-        .map(
-            |(shamir_coefficient_index, (messages, randomness_by_column))| {
-                commitment_computation_for_test(
-                    "coefficient",
-                    json!({
-                        "testPurpose": "share-linkage-proof",
-                        "itemLabel": item_label,
-                        "shamirCoefficientIndex": shamir_coefficient_index,
-                    }),
-                    public_matrix_seed_hash,
-                    source_rns_limb_index,
-                    source_message_modulus,
-                    ring_degree,
-                    messages,
-                    randomness_by_column,
-                )
-            },
-        )
+        .map(|(shamir_coefficient_index, messages)| {
+            commitment_computation_for_test(
+                "coefficient",
+                json!({
+                    "testPurpose": "share-linkage-proof",
+                    "itemLabel": item_label,
+                    "shamirCoefficientIndex": shamir_coefficient_index,
+                }),
+                source_rns_limb_index,
+                source_message_modulus,
+                ring_degree,
+                messages,
+            )
+        })
         .collect::<Vec<_>>();
     let recipient_share_commitment_computation = commitment_computation_for_test(
         "recipient-share",
@@ -497,12 +474,10 @@ fn share_linkage_item_for_test(
             "itemLabel": item_label,
             "recipientRosterPosition": recipient_roster_position,
         }),
-        public_matrix_seed_hash,
         source_rns_limb_index,
         source_message_modulus,
         ring_degree,
         &recipient_share_values,
-        &recipient_share_randomness,
     );
 
     ShareLinkageItemForTest {
@@ -511,9 +486,7 @@ fn share_linkage_item_for_test(
         source_rns_limb_index,
         source_message_modulus,
         coefficient_messages,
-        coefficient_randomness,
         recipient_share_values,
-        recipient_share_randomness,
         recipient_share_carry_values,
         coefficient_commitment_computations,
         recipient_share_commitment_computation,
@@ -525,72 +498,73 @@ struct CommitmentComputationForTest {
     commitment: VssShareLinkageCommitment,
     commitment_root: String,
     opening_root: String,
+    // The holder's regeneration inputs, threaded into the witness so the
+    // prover rebuilds byte-identical material trees and the binding rows hold.
+    material_seed_hex: String,
+    context_hash: String,
 }
 
-fn ternary_randomness_columns(ring_degree: usize, seed_offset: i64) -> Vec<Vec<i64>> {
-    (0..crate::bgv::setup::vss_commitment::VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT)
-        .map(|column_index| {
-            (0..ring_degree)
-                .map(|coefficient_index| {
-                    ((seed_offset + column_index as i64 * 5 + coefficient_index as i64 * 7)
-                        .rem_euclid(3))
-                        - 1
-                })
-                .collect()
-        })
-        .collect()
-}
-
-#[allow(clippy::too_many_arguments)]
 fn commitment_computation_for_test(
     commitment_role: &str,
     commitment_context: serde_json::Value,
-    public_matrix_seed_hash: &str,
     rns_limb_index: usize,
     rns_prime: u64,
     ring_degree: usize,
     message_coefficients: &[u64],
-    randomness_by_column: &[Vec<i64>],
 ) -> CommitmentComputationForTest {
-    let message_digit_columns =
-        vss_public_canonical_message_digit_columns(message_coefficients, ring_degree)
-            .expect("VSS message digit columns");
-    let computation = compute_vss_public_commitment_from_opening(VssPublicCommitmentOpeningInput {
-        commitment_role,
-        commitment_context: &commitment_context,
-        public_matrix_seed_hash,
-        rns_limb_index,
-        rns_prime,
-        ring_degree,
-        message_coefficients,
-        message_digit_columns: &message_digit_columns,
-        message_coefficient_bound: rns_prime,
-        randomness_by_column,
-    })
-    .expect("VSS commitment");
-
-    let coordinates_by_commitment_modulus = computation
-        .commitment
-        .get("commitmentLimbs")
-        .and_then(serde_json::Value::as_array)
-        .expect("commitment limbs")
+    // A distinct valid protocol-hash-shaped seed per commitment, derived from
+    // the role and the canonical context so distinct commitments hide with
+    // distinct masks and salts.
+    let context_bytes =
+        serde_json::to_vec(&commitment_context).expect("serialize commitment context for seed");
+    let material_seed_hex = hash512_hex(
+        "sealed-lattice/test/vss-committed-material-seed",
+        &[commitment_role.as_bytes(), &context_bytes],
+    );
+    let request = json!({
+        "commitmentRole": commitment_role,
+        "commitmentContext": commitment_context,
+        "rnsLimbIndex": rns_limb_index,
+        "rnsPrime": rns_prime,
+        "ringDegree": ring_degree,
+        "messageCoefficients": message_coefficients,
+        "materialSeedHex": material_seed_hex,
+    });
+    let response = compute_vss_committed_material_commitment_request(&request)
+        .expect("committed-material commitment");
+    let material_roots_by_commitment_field = response["commitment"]["commitmentFields"]
+        .as_array()
+        .expect("commitment fields")
         .iter()
-        .map(|limb| {
-            limb.get("coordinates")
-                .and_then(serde_json::Value::as_array)
-                .expect("commitment coordinates")
-                .iter()
-                .map(|coordinate| coordinate.as_u64().expect("coordinate"))
-                .collect()
+        .map(|field| {
+            let bytes = crate::transcript_core::decode_hex(
+                field["materialRootHex"]
+                    .as_str()
+                    .expect("material root hex"),
+            )
+            .expect("material root bytes");
+            let digest: MerkleDigest = bytes.as_slice().try_into().expect("full Merkle digest");
+            digest
         })
         .collect();
 
     CommitmentComputationForTest {
         commitment: VssShareLinkageCommitment {
-            coordinates_by_commitment_modulus,
+            material_roots_by_commitment_field,
         },
-        commitment_root: computation.commitment_root,
-        opening_root: computation.opening_root,
+        commitment_root: response["commitmentRoot"]
+            .as_str()
+            .expect("commitment root")
+            .to_string(),
+        opening_root: response["openingRoot"]
+            .as_str()
+            .expect("opening root")
+            .to_string(),
+        material_seed_hex,
+        context_hash: response["commitmentContextHash"]
+            .as_str()
+            .expect("context hash")
+            .to_string(),
     }
 }
 

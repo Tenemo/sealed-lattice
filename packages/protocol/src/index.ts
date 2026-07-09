@@ -32,7 +32,6 @@ export {
     createPublicKeyShareProofSet,
     createPublicKeyShareSet,
     publicKeyShareCoefficientVectorHashDomain,
-    publicKeyShareMaterialBinaryFormat,
     publicKeyShareMaterialTransportEncoding,
     publicKeyShareMaterialEncoding,
     publicKeyShareProofFamily,

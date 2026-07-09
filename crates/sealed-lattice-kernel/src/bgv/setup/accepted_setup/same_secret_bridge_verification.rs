@@ -286,7 +286,6 @@ pub(in crate::bgv::setup) fn verified_same_secret_bridge_material_from_package(
                     ),
                     root: target_commitment_root,
                     role: "coefficient",
-                    public_matrix_seed_hash,
                     rns_limb_index: target_rns_limb_index,
                     rns_prime: target_rns_prime,
                     ring_degree,

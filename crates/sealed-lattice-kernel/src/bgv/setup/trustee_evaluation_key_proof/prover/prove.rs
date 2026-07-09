@@ -20,6 +20,9 @@ use super::polynomial::{
     extension_powers, sample_deep_identity_points, trim_trailing_zeros,
 };
 use super::salted_tree::commit_salted_extension_row_pairs;
+use super::vss_committed_material::{
+    BoundCommittedMaterial, VssCommittedMaterialFieldTrees, regenerate_bound_committed_material,
+};
 use super::witness::{
     LimbWitnessCommitment, build_limb_witness_commitment, validate_witness_support,
 };
@@ -27,6 +30,7 @@ use super::*;
 use crate::bgv::evaluator::prg::DeterministicSampler;
 use crate::bgv::modular_arithmetic::inverse_mod;
 use crate::bgv::parameters::DATA_PRIMES;
+use crate::bgv::setup::commitment::SETUP_COMMITMENT_MODULUS_LIMB_INDICES;
 use num_bigint::BigInt;
 use num_traits::ToPrimitive;
 
@@ -68,10 +72,12 @@ fn configured_limb_batch_size(limb_count: usize) -> usize {
     normalize_limb_batch_size(1, limb_count)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn prove_limb(
     statement: &TrusteeEvaluationKeyStatement,
     limb_index: usize,
     commitment: &LimbWitnessCommitment,
+    bound_material: &BoundCommittedMaterial,
     consistency_vectors: &[Vec<u64>],
     global_claim_integers: &[BigInt],
     proof_randomness_seed_hex: &str,
@@ -84,6 +90,31 @@ fn prove_limb(
     let extension_size = plan.extension_size;
     let mut transcript = global_transcript.fork("limb", limb_index as u64);
     let challenges = draw_limb_challenges(&mut transcript, layout, modulus);
+
+    // The bound committed-material trees this limb opens: its commitment
+    // field's tree of every bound message. The regenerated roots were already
+    // asserted against the statement, so these are the published commitments.
+    let material_trees: Vec<&VssCommittedMaterialFieldTrees> =
+        match SETUP_COMMITMENT_MODULUS_LIMB_INDICES
+            .iter()
+            .position(|commitment_modulus_index| *commitment_modulus_index == limb_index)
+        {
+            Some(commitment_field_position) if !bound_material.is_empty() => bound_material
+                .trees_by_bound_message
+                .iter()
+                .map(|trees_by_field| &trees_by_field[commitment_field_position])
+                .collect(),
+            _ => Vec::new(),
+        };
+    let material_extension_columns: Vec<&Vec<u64>> = material_trees
+        .iter()
+        .flat_map(|field_trees| field_trees.extension_columns.iter())
+        .collect();
+    if material_extension_columns.len() != layout.vss_committed_material_physical_count() {
+        return Err(invalid_succinct_setup_proof(
+            "regenerated committed-material columns do not match the limb layout",
+        ));
+    }
 
     // Masked consistency claims: the limb residues of the shared global
     // integer claims (clear integer sum plus the shared smudging mask), so
@@ -136,13 +167,20 @@ fn prove_limb(
     let mut row_check_extension = Vec::with_capacity(extension_size);
     let mut sumcheck_extension = Vec::with_capacity(extension_size);
     let mut row = vec![0_u64; commitment.extension_columns.len()];
+    let mut material_row = vec![0_u64; material_extension_columns.len()];
     for position in 0..extension_size {
         for (column_index, column) in commitment.extension_columns.iter().enumerate() {
             row[column_index] = column[position];
         }
+        for (material_column_index, material_column) in
+            material_extension_columns.iter().enumerate()
+        {
+            material_row[material_column_index] = material_column[position];
+        }
         row_check_extension.push(batched_row_check_value(
             &base_domain,
             &row,
+            &material_row,
             &challenges.beta,
             layout,
         ));
@@ -295,6 +333,10 @@ fn prove_limb(
     // Out-of-domain evaluations of every committed column at the extension
     // points, via one shared powers table per point.
     let deep_points = sample_deep_identity_points(&mut transcript, plan)?;
+    let material_masked_coefficients: Vec<&Vec<u64>> = material_trees
+        .iter()
+        .flat_map(|field_trees| field_trees.masked_coefficients.iter())
+        .collect();
     let mut deep_evaluations = Vec::with_capacity(DEEP_EVALUATION_POINT_COUNT);
     for point in &deep_points {
         let coefficient_length = commitment
@@ -306,6 +348,11 @@ fn prove_limb(
                     .iter()
                     .flat_map(|sets| sets.iter().map(Vec::len)),
             )
+            .chain(
+                material_masked_coefficients
+                    .iter()
+                    .map(|coefficients| coefficients.len()),
+            )
             .max()
             .unwrap_or(0);
         let point_powers = extension_powers(&tower, point, coefficient_length);
@@ -316,8 +363,11 @@ fn prove_limb(
             }
             accumulated
         };
-        let mut evaluations =
-            Vec::with_capacity(commitment.masked_coefficients.len() + PHASE_TWO_COLUMN_COUNT);
+        let mut evaluations = Vec::with_capacity(
+            commitment.masked_coefficients.len()
+                + PHASE_TWO_COLUMN_COUNT
+                + material_masked_coefficients.len(),
+        );
         for coefficients in &commitment.masked_coefficients {
             evaluations.push(evaluate_base(coefficients));
         }
@@ -339,6 +389,9 @@ fn prove_limb(
             }
             evaluations.push(combined);
         }
+        for coefficients in &material_masked_coefficients {
+            evaluations.push(evaluate_base(coefficients));
+        }
         deep_evaluations.push(evaluations);
     }
     for evaluations in &deep_evaluations {
@@ -349,7 +402,9 @@ fn prove_limb(
     // Lambda-batched DEEP quotient codeword over the extension coset. The
     // committed phase-one values stay in the base field; the quotients and
     // the batching weights live in the challenge extension.
-    let total_column_count = commitment.extension_columns.len() + PHASE_TWO_COLUMN_COUNT;
+    let total_column_count = commitment.extension_columns.len()
+        + PHASE_TWO_COLUMN_COUNT
+        + material_extension_columns.len();
     let lambda = transcript.challenge_extension_elements(
         "lambda",
         modulus,
@@ -413,6 +468,17 @@ fn prove_limb(
                         &lambda_row[column_index],
                         &phase_two_logical_value(position, logical_index),
                     ),
+                );
+            }
+            for (material_column_index, material_column) in
+                material_extension_columns.iter().enumerate()
+            {
+                let column_index = commitment.extension_columns.len()
+                    + PHASE_TWO_COLUMN_COUNT
+                    + material_column_index;
+                point_sum = tower.add(
+                    &point_sum,
+                    &tower.scale_base(&lambda_row[column_index], material_column[position]),
                 );
             }
             point_sum = tower.sub(&point_sum, &lambda_evaluation_sums[point_index]);
@@ -508,6 +574,28 @@ fn prove_limb(
     let phase_opened_indices = sorted_unique_indices(query_positions.iter().copied());
     let witness_batch_opening = commitment.salted.tree.open_batch(&phase_opened_indices);
     let quotient_batch_opening = phase_two_salted.tree.open_batch(&phase_opened_indices);
+    // Every bound committed-material tree is opened at the same shared query
+    // set, so the binding rows are checked against the published commitments
+    // at exactly the positions the batched FRI reads.
+    let material_query_openings = material_trees
+        .iter()
+        .map(|field_trees| {
+            query_positions
+                .iter()
+                .map(|position| MaterialTreeQueryOpening {
+                    rows: [
+                        collect_row(&field_trees.extension_columns, *position),
+                        collect_row(&field_trees.extension_columns, *position + half),
+                    ],
+                    pair_salt: field_trees.salted.pair_salt(*position).to_vec(),
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    let material_batch_openings = material_trees
+        .iter()
+        .map(|field_trees| field_trees.salted.tree.open_batch(&phase_opened_indices))
+        .collect::<Vec<_>>();
 
     Ok(LimbProof {
         witness_tree_root: commitment.salted.tree.root(),
@@ -519,6 +607,8 @@ fn prove_limb(
         query_openings,
         witness_batch_opening,
         quotient_batch_opening,
+        material_query_openings,
+        material_batch_openings,
     })
 }
 
@@ -603,6 +693,11 @@ fn prove_evaluation_key_share_with_limb_batch_size(
         ));
     }
     validate_witness_support(statement, witness)?;
+    // Regenerate every bound committed-material tree once for the whole
+    // statement; each commitment-field limb opens its own field's trees. The
+    // regeneration refuses if any root differs from the statement's, so a
+    // proof can only ever open the published commitments.
+    let bound_material = regenerate_bound_committed_material(statement, witness)?;
     let proof_limb_indices = statement.proof_limb_indices();
     let limb_batch_size =
         normalize_limb_batch_size(requested_limb_batch_size, proof_limb_indices.len());
@@ -703,6 +798,7 @@ fn prove_evaluation_key_share_with_limb_batch_size(
                     statement,
                     *limb_index,
                     &commitment,
+                    &bound_material,
                     &consistency_vectors,
                     &claim_integers,
                     proof_randomness_seed_hex,
@@ -737,6 +833,7 @@ fn prove_evaluation_key_share_with_limb_batch_size(
                     statement,
                     *limb_index,
                     &commitment,
+                    &bound_material,
                     &consistency_vectors,
                     &claim_integers,
                     proof_randomness_seed_hex,

@@ -195,26 +195,14 @@ pub(super) fn build_limb_witness_commitment(
                 "VSS coefficient witness count does not match the statement",
             ));
         }
-        if witness
-            .vss_public_coefficient_opening_randomness_by_shamir_index
-            .len()
-            != coefficient_slots.len()
-        {
-            return Err(invalid_succinct_setup_proof(
-                "VSS coefficient randomness witness count does not match the statement",
-            ));
-        }
         let item_count = vss_share_linkage.item_count();
         let coefficient_slot_indices_by_item =
             vss_share_linkage.coefficient_witness_slot_indices_by_item();
         let recipient_messages_by_item = vss_public_recipient_share_messages_by_item(witness);
         let carry_witnesses_by_item = vss_public_carry_witnesses_by_item(witness);
-        let recipient_randomness_by_item =
-            vss_public_recipient_share_opening_randomness_by_item(witness);
         if coefficient_slot_indices_by_item.len() != item_count
             || recipient_messages_by_item.len() != item_count
             || carry_witnesses_by_item.len() != item_count
-            || recipient_randomness_by_item.len() != item_count
         {
             return Err(invalid_succinct_setup_proof(
                 "VSS packed witness item count does not match the statement",
@@ -277,44 +265,6 @@ pub(super) fn build_limb_witness_commitment(
             let carry_vector = signed_residue_vector(carry_witnesses, modulus);
             append_logical_vector(&carry_vector);
         }
-
-        let vss_public_randomness_column_count =
-            crate::bgv::setup::vss_commitment::VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT;
-        for coefficient_slot_index in 0..layout.vss_public_coefficient_columns {
-            for randomness_column_index in 0..vss_public_randomness_column_count {
-                let randomness_columns = witness
-                    .vss_public_coefficient_opening_randomness_by_shamir_index
-                    .get(coefficient_slot_index)
-                    .ok_or_else(|| {
-                        invalid_succinct_setup_proof(
-                            "VSS coefficient randomness slot is outside the witness",
-                        )
-                    })?;
-                let randomness_column = randomness_columns
-                    .get(randomness_column_index)
-                    .ok_or_else(|| {
-                        invalid_succinct_setup_proof("VSS coefficient randomness column is missing")
-                    })?;
-                validate_vss_public_vector(
-                    randomness_column,
-                    "VSS coefficient randomness witness",
-                )?;
-                let logical_vector = signed_residue_vector(randomness_column, modulus);
-                append_logical_vector(&logical_vector);
-            }
-        }
-        for randomness_columns in recipient_randomness_by_item {
-            for randomness_column_index in 0..vss_public_randomness_column_count {
-                let randomness_column = randomness_columns
-                    .get(randomness_column_index)
-                    .ok_or_else(|| {
-                        invalid_succinct_setup_proof("VSS recipient randomness column is missing")
-                    })?;
-                validate_vss_public_vector(randomness_column, "VSS recipient randomness witness")?;
-                let logical_vector = signed_residue_vector(randomness_column, modulus);
-                append_logical_vector(&logical_vector);
-            }
-        }
     } else if layout.same_secret_bridge_active() {
         let bridge = statement.same_secret_bridge.as_ref().ok_or_else(|| {
             invalid_succinct_setup_proof("same-secret bridge layout requires a bridge statement")
@@ -350,12 +300,6 @@ pub(super) fn build_limb_witness_commitment(
                 append_logical_vector(&logical_vector);
             }
         }
-        for randomness_columns in &witness.opening_randomness_by_limb {
-            for column in randomness_columns {
-                let logical_vector = signed_residue_vector(column, modulus);
-                append_logical_vector(&logical_vector);
-            }
-        }
     } else if layout.target_decryption_active() {
         for local_message_index in 0..layout.target_decryption_message_columns {
             let global_message_index = statement
@@ -378,14 +322,6 @@ pub(super) fn build_limb_witness_commitment(
                 message_encoding_layout,
             )? {
                 append_logical_vector(&logical_vector);
-            }
-        }
-        if layout.target_decryption_randomness_columns > 0 {
-            for randomness_columns in &witness.target_decryption_opening_randomness_by_commitment {
-                for column in randomness_columns {
-                    let logical_vector = signed_residue_vector(column, modulus);
-                    append_logical_vector(&logical_vector);
-                }
             }
         }
     } else {
@@ -413,7 +349,7 @@ pub(super) fn build_limb_witness_commitment(
                 append_logical_vector(&error_square_vector);
             }
         }
-        if layout.linkage_active() {
+        if layout.linkage_active() || layout.same_secret_bridge_material_active() {
             let negative_indicator_vector =
                 signed_residue_vector(&witness.negative_indicator_coefficients, modulus);
             append_logical_vector(&negative_indicator_vector);
@@ -445,10 +381,12 @@ pub(super) fn build_limb_witness_commitment(
                     }
                 }
             }
-            for randomness_columns in &witness.opening_randomness_by_limb {
-                for column in randomness_columns {
-                    let logical_vector = signed_residue_vector(column, modulus);
-                    append_logical_vector(&logical_vector);
+            if layout.linkage_active() {
+                for randomness_columns in &witness.opening_randomness_by_limb {
+                    for column in randomness_columns {
+                        let logical_vector = signed_residue_vector(column, modulus);
+                        append_logical_vector(&logical_vector);
+                    }
                 }
             }
         }
@@ -539,9 +477,7 @@ pub(super) fn validate_witness_support(
         }
         return validate_vss_public_witness(vss_share_linkage, witness, statement.ring_degree);
     }
-    if let Some(same_secret_bridge) = &statement.same_secret_bridge
-        && statement.keys.is_empty()
-    {
+    if statement.same_secret_bridge.is_some() && statement.keys.is_empty() {
         if !witness.error_coefficients_by_key.is_empty()
             || !witness
                 .private_vss_coefficient_messages_by_shamir_index
@@ -571,12 +507,10 @@ pub(super) fn validate_witness_support(
                 "same-secret bridge witness must not include key, private VSS, or share-linkage material",
             ));
         }
-        return validate_same_secret_bridge_witness(
-            same_secret_bridge.target_constant_commitments.len(),
-            crate::bgv::setup::vss_commitment::VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT,
-            witness,
-            statement.ring_degree,
-        );
+        // Committed-material bridge targets carry no algebraic opening
+        // randomness; the trees hide via their masks and salts, so the
+        // witness must not carry randomness columns for them.
+        return validate_same_secret_bridge_witness(0, 0, witness, statement.ring_degree);
     }
     if let Some(target_decryption_share) = &statement.target_decryption_share {
         if !witness.secret_coefficients.is_empty()
@@ -664,13 +598,8 @@ pub(super) fn validate_witness_support(
                 statement.ring_degree,
             )?;
         }
-        (None, Some(same_secret_bridge)) => {
-            validate_same_secret_bridge_witness(
-                same_secret_bridge.target_constant_commitments.len(),
-                crate::bgv::setup::vss_commitment::VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT,
-                witness,
-                statement.ring_degree,
-            )?;
+        (None, Some(_)) => {
+            validate_same_secret_bridge_witness(0, 0, witness, statement.ring_degree)?;
         }
         (None, None) => {
             if !witness.negative_indicator_coefficients.is_empty()
@@ -791,11 +720,12 @@ fn validate_target_decryption_share_witness(
                 .sum::<usize>()
         })
         .sum::<usize>();
+    // Committed-material commitments carry no algebraic opening randomness;
+    // the trees hide via their masks and salts.
     if witness.target_decryption_message_vectors.len() != message_count
-        || witness
+        || !witness
             .target_decryption_opening_randomness_by_commitment
-            .len()
-            != message_count
+            .is_empty()
     {
         return Err(invalid_succinct_setup_proof(
             "target-decryption witness shape does not match the statement",
@@ -811,25 +741,6 @@ fn validate_target_decryption_share_witness(
         i64::try_from(statement.smudging_message_coefficient_bound).map_err(|_| {
             invalid_succinct_setup_proof("target-decryption smudging bound does not fit i64")
         })?;
-    for (commitment_index, randomness_columns) in witness
-        .target_decryption_opening_randomness_by_commitment
-        .iter()
-        .enumerate()
-    {
-        if randomness_columns.len()
-            != crate::bgv::setup::vss_commitment::VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT
-            || randomness_columns.iter().any(|column| {
-                column.len() != ring_degree
-                    || column
-                        .iter()
-                        .any(|coefficient| !(-1..=1).contains(coefficient))
-            })
-        {
-            return Err(invalid_succinct_setup_proof(format!(
-                "target-decryption opening randomness for commitment {commitment_index} has the wrong shape"
-            )));
-        }
-    }
 
     let mut limb_message_offset = 0;
     for limb_statement in &statement.limb_statements {
@@ -936,36 +847,36 @@ fn validate_vss_public_witness(
     let coefficient_slot_indices_by_item = statement.coefficient_witness_slot_indices_by_item();
     let recipient_share_messages_by_item = vss_public_recipient_share_messages_by_item(witness);
     let carry_witnesses_by_item = vss_public_carry_witnesses_by_item(witness);
-    let recipient_share_opening_randomness_by_item =
-        vss_public_recipient_share_opening_randomness_by_item(witness);
+    // Committed-material commitments carry no algebraic opening randomness;
+    // the trees hide via their masks and salts, so no randomness columns are
+    // part of the witness.
     if witness
         .vss_public_coefficient_messages_by_shamir_index
         .len()
         != coefficient_count
-        || witness
+        || !witness
             .vss_public_coefficient_opening_randomness_by_shamir_index
-            .len()
-            != coefficient_count
+            .is_empty()
+        || !witness
+            .vss_public_recipient_share_opening_randomness
+            .is_empty()
+        || !witness
+            .vss_public_recipient_share_opening_randomness_by_item
+            .is_empty()
         || coefficient_slot_indices_by_item.len() != item_count
         || recipient_share_messages_by_item.len() != item_count
         || carry_witnesses_by_item.len() != item_count
-        || recipient_share_opening_randomness_by_item.len() != item_count
     {
         return Err(invalid_succinct_setup_proof(
             "VSS witness shape does not match the statement",
         ));
     }
-    for (slot_index, (coefficient_slot, (messages, randomness_columns))) in coefficient_slots
+    for (slot_index, (coefficient_slot, messages)) in coefficient_slots
         .iter()
         .zip(
             witness
                 .vss_public_coefficient_messages_by_shamir_index
-                .iter()
-                .zip(
-                    witness
-                        .vss_public_coefficient_opening_randomness_by_shamir_index
-                        .iter(),
-                ),
+                .iter(),
         )
         .enumerate()
     {
@@ -975,14 +886,6 @@ fn validate_vss_public_witness(
             || messages
                 .iter()
                 .any(|coefficient| *coefficient < 0 || *coefficient >= source_modulus_i64)
-            || randomness_columns.len()
-                != crate::bgv::setup::vss_commitment::VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT
-            || randomness_columns.iter().any(|column| {
-                column.len() != ring_degree
-                    || column
-                        .iter()
-                        .any(|coefficient| !(-1..=1).contains(coefficient))
-            })
         {
             return Err(invalid_succinct_setup_proof(format!(
                 "VSS witness for shared coefficient slot {slot_index} has the wrong shape"
@@ -1024,21 +927,11 @@ fn validate_vss_public_witness(
             .map_err(|_| invalid_succinct_setup_proof("VSS source modulus does not fit i64"))?;
         let recipient_share_messages = recipient_share_messages_by_item[item_index];
         let carry_witnesses = carry_witnesses_by_item[item_index];
-        let recipient_share_opening_randomness =
-            recipient_share_opening_randomness_by_item[item_index];
         if recipient_share_messages.len() != ring_degree
             || carry_witnesses.len() != ring_degree
             || recipient_share_messages
                 .iter()
                 .any(|coefficient| *coefficient < 0 || *coefficient >= source_modulus_i64)
-            || recipient_share_opening_randomness.len()
-                != crate::bgv::setup::vss_commitment::VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT
-            || recipient_share_opening_randomness.iter().any(|column| {
-                column.len() != ring_degree
-                    || column
-                        .iter()
-                        .any(|coefficient| !(-1..=1).contains(coefficient))
-            })
         {
             return Err(invalid_succinct_setup_proof(
                 "VSS recipient share witness has the wrong shape",
