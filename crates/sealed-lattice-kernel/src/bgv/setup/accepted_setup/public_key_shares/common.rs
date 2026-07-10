@@ -10,8 +10,6 @@ pub(super) struct PublicKeyShareBinding {
     pub(super) trustee_identity: String,
     pub(super) trustee_roster_position: u64,
     pub(super) public_key_share_root: String,
-    pub(super) trustee_secret_commitment_root: String,
-    pub(super) same_secret_statement_root: String,
 }
 
 pub(in super::super) fn public_key_common_binding(

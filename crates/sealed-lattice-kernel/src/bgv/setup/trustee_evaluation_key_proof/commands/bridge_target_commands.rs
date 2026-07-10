@@ -29,7 +29,6 @@ pub(crate) fn generate_same_secret_bridge_proof_from_request(
         "statementHash": to_hex(&statement.statement_hash()),
         "limbCount": statement.proof_limb_count(),
         "targetRnsLimbCount": bridge_statement.target_rns_primes.len(),
-        "proofByteLength": proof_bytes.len(),
         "proofBytesHex": to_hex(&proof_bytes),
     }))
 }
@@ -41,19 +40,11 @@ pub(crate) fn verify_same_secret_bridge_proof_from_request(
     let proof_bytes = read_hex_bytes(request, "proofBytesHex")?;
     let proof = decode_trustee_evaluation_key_proof(&statement, &proof_bytes)?;
     verify_evaluation_key_share(&statement, &proof)?;
-    let bridge_statement = statement
-        .same_secret_bridge
-        .as_ref()
-        .ok_or_else(|| invalid_succinct_setup_proof("same-secret bridge statement missing"))?;
-
     Ok(json!({
         "ok": true,
         "operation": "verifySameSecretBridgeProof",
         "proofFamily": statement.context.proof_family,
         "statementHash": to_hex(&statement.statement_hash()),
-        "limbCount": statement.proof_limb_count(),
-        "targetRnsLimbCount": bridge_statement.target_rns_primes.len(),
-        "proofByteLength": proof_bytes.len(),
     }))
 }
 

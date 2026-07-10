@@ -2,8 +2,9 @@ use super::super::*;
 use super::*;
 use crate::bgv::setup::vss_commitment::{
     VSS_PUBLIC_MESSAGE_DIGIT_COUNT, VssPublicMessageEncodingLayout,
-    vss_public_message_digit_only_encoding_layout, vss_public_message_digit_weight,
-    vss_public_message_encoding_layout,
+    vss_public_message_digit_weight, vss_public_message_encoding_layout,
+    vss_public_share_linkage_packed_message_encoding_layout,
+    vss_public_share_linkage_source_message_encoding_layout,
 };
 
 // The committed-material VSS commitment carried by share-linkage, bridge, and
@@ -152,11 +153,11 @@ pub(crate) fn build_vss_share_linkage_public_vectors(
     // relations. The aggregate item message keeps its full range-proof encoding.
     // This must match the digit-only choice in `LimbColumnLayout::new`, since the
     // relation count derived here draws the same challenges.
-    let coefficient_message_encoding_layout = if input.is_threshold_aggregate {
-        vss_public_message_digit_only_encoding_layout()
-    } else {
-        vss_public_message_encoding_layout(input.source_message_modulus)?
-    };
+    let coefficient_message_encoding_layout =
+        vss_public_share_linkage_source_message_encoding_layout(
+            input.is_threshold_aggregate,
+            input.source_message_modulus,
+        )?;
     let recipient_message_encoding_layout =
         vss_public_message_encoding_layout(input.source_message_modulus)?;
     let decoder_relation_count = (input.coefficient_commitments.len()
@@ -367,11 +368,10 @@ pub(crate) fn build_vss_share_linkage_batch_public_vectors(
             // `LimbColumnLayout::new`): the source coefficient messages carry no
             // decoder relations, so only the aggregate item message contributes
             // decoder claims here.
-            let coefficient_layout = if statement.is_threshold_aggregate {
-                vss_public_message_digit_only_encoding_layout()
-            } else {
-                vss_public_message_encoding_layout(item.source_message_modulus)?
-            };
+            let coefficient_layout = vss_public_share_linkage_source_message_encoding_layout(
+                statement.is_threshold_aggregate,
+                item.source_message_modulus,
+            )?;
             let recipient_layout = vss_public_message_encoding_layout(item.source_message_modulus)?;
             let decoder_relation_count = (item.coefficient_commitments.len()
                 * vss_public_decoder_digit_count(coefficient_layout)
@@ -418,11 +418,12 @@ pub(crate) fn build_vss_share_linkage_batch_public_vectors(
         .iter()
         .enumerate()
         .map(|(message_position, message_bound)| {
-            if statement.is_threshold_aggregate && message_position < coefficient_column_count {
-                Ok(vss_public_message_digit_only_encoding_layout())
-            } else {
-                vss_public_message_encoding_layout(*message_bound)
-            }
+            vss_public_share_linkage_packed_message_encoding_layout(
+                statement.is_threshold_aggregate,
+                message_position,
+                coefficient_column_count,
+                *message_bound,
+            )
         })
         .collect::<CanonicalResult<Vec<_>>>()?;
     let message_encoding_offsets = vss_public_message_encoding_offsets(&message_encoding_layouts)?;
@@ -441,11 +442,11 @@ pub(crate) fn build_vss_share_linkage_batch_public_vectors(
                 "VSS coefficient witness slot layout does not match the item",
             ));
         }
-        let item_coefficient_message_encoding_layout = if statement.is_threshold_aggregate {
-            vss_public_message_digit_only_encoding_layout()
-        } else {
-            vss_public_message_encoding_layout(item.source_message_modulus)?
-        };
+        let item_coefficient_message_encoding_layout =
+            vss_public_share_linkage_source_message_encoding_layout(
+                statement.is_threshold_aggregate,
+                item.source_message_modulus,
+            )?;
         let item_recipient_message_encoding_layout =
             vss_public_message_encoding_layout(item.source_message_modulus)?;
         for coefficient_slot_index in &item.coefficient_slot_indices {

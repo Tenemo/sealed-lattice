@@ -151,9 +151,9 @@ pub(crate) fn generate_trustee_evaluation_key_proof_from_request(
 }
 
 // Describe a trustee-batched evaluation-key statement without proving it. The
-// key-bearing same-secret anchor is fail-closed while it is re-anchored on the
-// BDLOP constant commitment, so its statement hash cannot be obtained by
-// proving. This parses the statement and returns its proof family and canonical
+// key-bearing same-secret relation is linked to its BDLOP source constant
+// commitment, so its statement hash is obtained without running the expensive
+// prover. This parses the statement and returns its proof family and canonical
 // statement hash directly, matching the native statement-hash vector path and
 // letting the WASM kernel pin the key-bearing statement encoding across the
 // Rust and JavaScript boundary.
@@ -236,20 +236,12 @@ pub(crate) fn verify_vss_share_linkage_proof_from_request(
     let proof_bytes = read_hex_bytes(request, "proofBytesHex")?;
     let proof = decode_trustee_evaluation_key_proof(&statement, &proof_bytes)?;
     verify_evaluation_key_share(&statement, &proof)?;
-    let share_linkage_statement = statement
-        .vss_share_linkage
-        .as_ref()
-        .ok_or_else(|| invalid_succinct_setup_proof("share-linkage statement missing"))?;
 
     Ok(json!({
         "ok": true,
         "operation": "verifyVssShareLinkageProof",
         "proofFamily": statement.context.proof_family,
         "statementHash": to_hex(&statement.statement_hash()),
-        "limbCount": statement.proof_limb_count(),
-        "coefficientCommitmentCount": share_linkage_statement.total_coefficient_commitment_count(),
-        "coefficientWitnessColumnCount": share_linkage_statement.unique_coefficient_witness_slot_count(),
-        "proofByteLength": proof_bytes.len(),
     }))
 }
 
@@ -261,6 +253,8 @@ mod share_linkage_verification;
 mod target_decryption_parsing;
 
 use decoding::*;
+#[cfg(test)]
+pub(in crate::bgv::setup::trustee_evaluation_key_proof) use request_parsing::same_secret_bridge_statement_from_request;
 pub(in crate::bgv::setup::trustee_evaluation_key_proof) use request_parsing::statement_from_request;
 use request_parsing::*;
 

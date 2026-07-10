@@ -1,11 +1,11 @@
 import type { ProtocolHash } from '@sealed-lattice/types';
 
-import {
-    type SameSecretProofSet,
-    type SameSecretConsistencyStatementSet,
-} from '../same-secret-consistency-records.js';
 import type { TransportedSetupProofMaterialSet } from '../setup-proof-material-transport.js';
 import { setupTransportSchemeId } from '../vss-coefficient-commitments.js';
+import type {
+    VssSameSecretBridgeProofMaterialSet,
+    VssSameSecretBridgeStatementSet,
+} from '../vss-commitments.js';
 import type { CollectiveBgvSetupContext } from '../vss-share-verification-records.js';
 
 export type JsonRecord = Record<string, unknown>;
@@ -59,8 +59,6 @@ export type PublicKeyShareRecord = Readonly<
         readonly publicMatrixSeedHash: ProtocolHash;
         readonly publicKeyCrpRoot: ProtocolHash;
         readonly publicAPolynomialRoot: ProtocolHash;
-        readonly sameSecretStatementRoot: ProtocolHash;
-        readonly trusteeSecretCommitmentRoot: ProtocolHash;
         readonly shareComponent: 'component-zero-b_i';
         readonly rnsLimbCount: number;
         readonly shareCoefficientVectorHash512ByLimb: readonly PublicKeyShareCoefficientVectorHash[];
@@ -76,7 +74,6 @@ export type PublicKeyShareSet = Readonly<
         readonly publicMatrixSeedHash: ProtocolHash;
         readonly publicKeyCrpRoot: ProtocolHash;
         readonly publicAPolynomialRoot: ProtocolHash;
-        readonly sameSecretConsistencyRoot: ProtocolHash;
         readonly shareRecords: readonly PublicKeyShareRecord[];
         readonly publicKeyShareSetRoot: ProtocolHash;
     }
@@ -92,8 +89,6 @@ export type PublicKeyShareProofRecord = Readonly<
         readonly publicKeyCrpRoot: ProtocolHash;
         readonly publicAPolynomialRoot: ProtocolHash;
         readonly publicKeyShareRoot: ProtocolHash;
-        readonly sameSecretStatementRoot: ProtocolHash;
-        readonly trusteeSecretCommitmentRoot: ProtocolHash;
         readonly rnsLimbCount: number;
         readonly publicKeyShareProofRoot: ProtocolHash;
     }
@@ -108,7 +103,6 @@ export type PublicKeyShareProofSet = Readonly<
         readonly publicMatrixSeedHash: ProtocolHash;
         readonly publicKeyCrpRoot: ProtocolHash;
         readonly publicAPolynomialRoot: ProtocolHash;
-        readonly sameSecretConsistencyRoot: ProtocolHash;
         readonly publicKeyShareSetRoot: ProtocolHash;
         readonly proofRecords: readonly PublicKeyShareProofRecord[];
         readonly publicKeyShareProofSetRoot: ProtocolHash;
@@ -249,10 +243,8 @@ export type PublicKeyShareSuccinctProofRecord = Readonly<
             readonly publicKeyShareRoot: ProtocolHash;
             readonly publicKeyShareProofRoot: ProtocolHash;
             readonly publicKeyShareMaterialRoot: ProtocolHash;
-            readonly sameSecretStatementRoot: ProtocolHash;
-            readonly trusteeSecretCommitmentRoot: ProtocolHash;
-            readonly sameSecretProofFamilyBindingRoot: ProtocolHash;
-            readonly sameSecretProofRoot: ProtocolHash;
+            readonly sameSecretBridgeStatementRoot: ProtocolHash;
+            readonly sameSecretBridgeProofRecordRoot: ProtocolHash;
             readonly statementHash: ProtocolHash;
             readonly proofBytesHash: ProtocolHash;
             readonly publicKeyShareSuccinctProofRoot: ProtocolHash;
@@ -268,9 +260,6 @@ export type PublicKeyShareSuccinctProofSet = Readonly<
         readonly publicMatrixSeedHash: ProtocolHash;
         readonly publicKeyCrpRoot: ProtocolHash;
         readonly publicAPolynomialRoot: ProtocolHash;
-        readonly sameSecretConsistencyRoot: ProtocolHash;
-        readonly sameSecretProofSetRoot: ProtocolHash;
-        readonly sameSecretProofFamilyBindingRoot: ProtocolHash;
         readonly publicKeyShareSetRoot: ProtocolHash;
         readonly publicKeyShareProofSetRoot: ProtocolHash;
         readonly publicKeyShareMaterialSetRoot: ProtocolHash;
@@ -308,9 +297,6 @@ export type CollectivePublicKey = Readonly<
         readonly publicMatrixSeedHash: ProtocolHash;
         readonly publicKeyCrpRoot: ProtocolHash;
         readonly publicAPolynomialRoot: ProtocolHash;
-        readonly sameSecretConsistencyRoot: ProtocolHash;
-        readonly sameSecretProofSetRoot: ProtocolHash;
-        readonly sameSecretProofFamilyBindingRoot: ProtocolHash;
         readonly publicKeyShareSetRoot: ProtocolHash;
         readonly publicKeyShareProofSetRoot: ProtocolHash;
         readonly publicKeyShareMaterialSetRoot: ProtocolHash;
@@ -329,8 +315,6 @@ export type CollectivePublicKeyInput = Readonly<{
     readonly publicMatrixSeedHash: ProtocolHash;
     readonly publicKeyCrpRoot: ProtocolHash;
     readonly publicAPolynomialRoot: ProtocolHash;
-    readonly sameSecretConsistency: SameSecretConsistencyStatementSet;
-    readonly sameSecretProofs: SameSecretProofSet;
     readonly publicKeyShares: PublicKeyShareSet;
     readonly publicKeyShareProofs: PublicKeyShareProofSet;
     readonly publicKeyShareMaterial: PublicKeyShareMaterialSet;
@@ -361,7 +345,6 @@ export type PublicKeyShareSetInput = {
     readonly publicMatrixSeedHash: ProtocolHash;
     readonly publicKeyCrpRoot: ProtocolHash;
     readonly publicAPolynomialRoot: ProtocolHash;
-    readonly sameSecretConsistency: SameSecretConsistencyStatementSet;
     readonly shareContributions: readonly PublicKeyShareContributionInput[];
 };
 
@@ -374,23 +357,21 @@ export type PublicKeyShareProofSetInput = Omit<
 
 export type PublicKeyShareMaterialSetInput = Omit<
     PublicKeyShareSetInput,
-    'shareContributions' | 'sameSecretConsistency'
+    'shareContributions'
 > & {
     readonly ringDegree: number;
     readonly publicKeyShares: PublicKeyShareSet;
     readonly materialContributions: readonly PublicKeyShareMaterialContributionInput[];
 };
 
-export type PublicKeyShareSuccinctProofSetInput = Omit<
-    PublicKeyShareProofSetInput,
-    'sameSecretConsistency'
-> & {
-    readonly sameSecretConsistency: SameSecretConsistencyStatementSet;
-    readonly sameSecretProofs: SameSecretProofSet;
-    readonly publicKeyShareProofs: PublicKeyShareProofSet;
-    readonly publicKeyShareMaterial: SetupPackagePublicKeyShareMaterialSet;
-    readonly proofMaterials: readonly PublicKeyShareSuccinctProofMaterial[];
-};
+export type PublicKeyShareSuccinctProofSetInput =
+    PublicKeyShareProofSetInput & {
+        readonly publicKeyShareProofs: PublicKeyShareProofSet;
+        readonly publicKeyShareMaterial: SetupPackagePublicKeyShareMaterialSet;
+        readonly sameSecretBridgeStatementSet: VssSameSecretBridgeStatementSet;
+        readonly sameSecretBridgeProofMaterialSet: VssSameSecretBridgeProofMaterialSet;
+        readonly proofMaterials: readonly PublicKeyShareSuccinctProofMaterial[];
+    };
 
 export type TransportedPublicKeyShareProofMaterialSet = Readonly<
     TransportedSetupProofMaterialSet & {

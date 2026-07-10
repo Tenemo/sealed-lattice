@@ -24,7 +24,6 @@ import type {
     EvaluationKeyShareComponentMaterialChunkStream as ProtocolEvaluationKeyShareComponentMaterialChunkStream,
     VerifiedSetupProofMaterial as ProtocolVerifiedSetupProofMaterial,
     VerifiedSetupProofMaterialSet as ProtocolVerifiedSetupProofMaterialSet,
-    TransportedSameSecretProofMaterialSet as ProtocolTransportedSameSecretProofMaterialSet,
     TransportedPublicKeyShareProofMaterialSet as ProtocolTransportedPublicKeyShareProofMaterialSet,
     TransportedVssShareLinkageProofMaterialSet as ProtocolTransportedVssShareLinkageProofMaterialSet,
     TransportedSameSecretBridgeProofMaterialSet as ProtocolTransportedSameSecretBridgeProofMaterialSet,
@@ -211,10 +210,6 @@ export type PrivateVssShareVerification = Readonly<{
     readonly privateEnvelopeHash: ProtocolHash | null;
     readonly localVerificationRoot: ProtocolHash | null;
     readonly ringDegree?: number;
-    readonly ringDegreeStatus?: 'full-ring' | 'development-reduced-ring';
-    readonly verifiedRnsLimbCount?: number;
-    readonly verifiedShamirCoefficientCommitmentCount?: number;
-    readonly verifiedPrivateVssShareProofCount?: number;
     readonly limbVerifications: readonly Readonly<{
         readonly rnsLimbIndex: number;
         readonly rnsPrime: number;
@@ -241,8 +236,6 @@ export type VerifiedSetupProofMaterialSet =
     ProtocolVerifiedSetupProofMaterialSet;
 export type SetupTransportedPublicKeyShareMaterial =
     ProtocolSetupTransportedPublicKeyShareMaterial;
-export type TransportedSameSecretProofMaterialSet =
-    ProtocolTransportedSameSecretProofMaterialSet;
 export type TransportedPublicKeyShareProofMaterialSet =
     ProtocolTransportedPublicKeyShareProofMaterialSet;
 export type TransportedVssShareLinkageProofMaterialSet =
@@ -265,7 +258,6 @@ export type VerifySetupPackageInput = Readonly<{
     readonly expectedSetupPackageHash?: ProtocolHash;
     readonly expectedManifestHash: ProtocolHash;
     readonly expectedRosterHash: ProtocolHash;
-    readonly transportedSameSecretProofMaterial?: TransportedSameSecretProofMaterialSet;
     readonly transportedPublicKeyShareMaterial?: SetupTransportedPublicKeyShareMaterial;
     readonly transportedPublicKeyShareProofMaterial?: TransportedPublicKeyShareProofMaterialSet;
     readonly transportedVssShareLinkageProofMaterial?: TransportedVssShareLinkageProofMaterialSet;

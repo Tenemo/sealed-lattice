@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { setupRequest, validHash } from '../bgv-passive-setup-fixtures.js';
+import { setupRequest } from '../bgv-passive-setup-fixtures.js';
 
 import {
     acceptedShapedSetupPackage,
@@ -136,44 +136,6 @@ describe('collective BGV setup kernel commands', () => {
             expect(result.missingObjects).toEqual([]);
             expect(result.acceptedSetupHandoff).toBeUndefined();
         }
-    });
-
-    it('refuses protocol-built same-secret proofs with statement-hash drift before later pending', async () => {
-        const kernel = await loadTranscriptCoreKernel();
-        const parameters = kernel.describeCollectiveBgvSetupParameters({
-            participantCount: 3,
-        });
-        const setupPackage = await acceptedShapedSetupPackage(
-            kernel,
-            parameters,
-        );
-        const verificationCompanions =
-            await acceptedShapedSetupVerificationCompanions(kernel, parameters);
-        // Drift a same-secret proof statement hash. The same-secret
-        // bridge binds the same-secret proof set root, so the recomputed root no
-        // longer matches the bound root and the package is refused.
-        const sameSecretProofs = setupPackage.sameSecretProofs as JsonRecord;
-        const sameSecretProofRecords =
-            sameSecretProofs.proofRecords as JsonRecord[];
-        const driftedSameSecretProof = sameSecretProofRecords[0];
-        if (driftedSameSecretProof === undefined) {
-            throw new Error('Expected a same-secret proof record to drift.');
-        }
-        driftedSameSecretProof.statementHash = validHash('7');
-        rebindCollectiveSetupPackageHash(kernel, setupPackage);
-
-        const result = kernel.verifyCollectiveBgvSetup({
-            setupPackage,
-            ...verificationCompanions,
-            expectedManifestHash: setupRequest.manifestHash,
-            expectedRosterHash: String(
-                (setupPackage.setupContext as JsonRecord).rosterHash,
-            ),
-        });
-
-        expect(result.isValid).toBe(false);
-        expect(result.refusedObjects.length).toBeGreaterThan(0);
-        expect(result.acceptedSetupHandoff).toBeUndefined();
     });
 
     it('aborts accepted-shaped setup on a protocol-built VSS complaint', async () => {

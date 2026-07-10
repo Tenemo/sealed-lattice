@@ -12,7 +12,6 @@ import {
     createPublicKeyShareProofSet as createPublicKeyShareProofSetInternal,
     createPublicKeyShareSet as createPublicKeyShareSetInternal,
     createRelinearizationKeyShareRounds as createRelinearizationKeyShareRoundsInternal,
-    createSameSecretProofSet as createSameSecretProofSetInternal,
     createSetupCommonRandomness as createSetupCommonRandomnessInternal,
     createSetupContributionAssembly as createSetupContributionInternal,
     createSetupCertificates as createSetupCertificatesInternal,
@@ -44,9 +43,6 @@ import type {
     PublicKeyShareSetInput as ProtocolPublicKeyShareSetInput,
     RelinearizationKeyShareRounds as ProtocolRelinearizationKeyShareRounds,
     RelinearizationKeyShareRoundsInput as ProtocolRelinearizationKeyShareRoundsInput,
-    SameSecretProofMaterial as ProtocolSameSecretProofMaterial,
-    SameSecretProofSet as ProtocolSameSecretProofSet,
-    SameSecretProofSetInput as ProtocolSameSecretProofSetInput,
     SetupCertificates as ProtocolSetupCertificates,
     SetupCertificateTransportedObjectInput as ProtocolSetupCertificateTransportedObjectInput,
     SetupTransportCertificate as ProtocolSetupTransportCertificate,
@@ -467,6 +463,8 @@ export type SetupPackageInput = Readonly<{
     readonly qShare: JsonRecord;
     readonly phaseTranscript: readonly JsonRecord[];
     readonly commonRandomness: JsonRecord;
+    readonly vssCoefficientCommitments: JsonRecord;
+    readonly vssCoefficientCommitmentMaterial: JsonRecord;
     readonly vssPublicCoefficientCommitmentSet: JsonRecord;
     readonly vssPublicRecipientShareCommitmentSet: JsonRecord;
     readonly vssPublicAggregateThresholdCommitmentSet: JsonRecord;
@@ -478,8 +476,6 @@ export type SetupPackageInput = Readonly<{
     readonly vssShareAcceptances: JsonRecord;
     readonly vssComplaints?: JsonRecord;
     readonly thresholdShareCommitments: JsonRecord;
-    readonly sameSecretConsistency: JsonRecord;
-    readonly sameSecretProofs: JsonRecord;
     readonly publicKeyShares: JsonRecord;
     readonly publicKeyShareProofs: JsonRecord;
     readonly publicKeyShareMaterial:
@@ -492,10 +488,7 @@ export type SetupPackageInput = Readonly<{
     readonly galoisKeyShareBatches: readonly JsonRecord[];
     readonly trusteeEvaluationKeyProofs: JsonRecord;
     readonly evaluationKeys: JsonRecord;
-    readonly setupCertificateInput?: Omit<
-        SetupCertificatesInput,
-        'vssCoefficientCommitmentMaterial'
-    >;
+    readonly setupCertificateInput?: SetupCertificatesInput;
     readonly setupTransportCertificate?: JsonRecord;
 }>;
 
@@ -516,9 +509,6 @@ export type PublicKeyShareSuccinctProofSetInput =
     ProtocolPublicKeyShareSuccinctProofSetInput;
 export type EvaluatorKeySchedule = ProtocolEvaluatorKeySchedule;
 export type EvaluatorKeyScheduleInput = ProtocolEvaluatorKeyScheduleInput;
-export type SameSecretProofMaterial = ProtocolSameSecretProofMaterial;
-export type SameSecretProofSet = ProtocolSameSecretProofSet;
-export type SameSecretProofSetInput = ProtocolSameSecretProofSetInput;
 export type RelinearizationKeyShareRounds =
     ProtocolRelinearizationKeyShareRounds;
 type PublicEvaluationKeyProofCommonInput = Readonly<
@@ -764,10 +754,6 @@ export const createPublicKeyShareSet = (
 export const createPublicKeyShareProofSet = (
     input: PublicKeyShareProofSetInput,
 ): PublicKeyShareProofSet => createPublicKeyShareProofSetInternal(input);
-
-export const createSameSecretProofSet = (
-    input: SameSecretProofSetInput,
-): SameSecretProofSet => createSameSecretProofSetInternal(input);
 
 export const createPublicKeyShareMaterialSet = (
     input: PublicKeyShareMaterialSetInput,

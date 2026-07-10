@@ -1,12 +1,202 @@
 use super::super::LINCHECK_REPETITIONS;
 use super::super::SAME_SECRET_BRIDGE_PROOF_FAMILY;
 use super::super::relation::{
-    SameSecretBridgeStatement, SuccinctSetupProofFamilyShape, TrusteeEvaluationKeyWitness,
+    SameSecretBridgeStatement, SameSecretLinkageStatement, SuccinctSetupProofFamilyShape,
+    TrusteeEvaluationKeyWitness,
 };
 use super::*;
 use crate::bgv::evaluator::top_k::canonical_target_basis_hash;
+use crate::bgv::setup::commitment::compute_setup_commitment_for_tests;
 use crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT;
 use serde_json::json;
+use std::collections::BTreeSet;
+
+#[test]
+fn same_secret_bridge_source_commitments_must_be_complete_and_canonically_ordered() {
+    let (mut missing_limb, _witness) = same_secret_bridge_instance();
+    missing_limb
+        .same_secret_linkage
+        .as_mut()
+        .expect("source linkage")
+        .commitments
+        .pop();
+    assert!(
+        missing_limb.validate_shape().is_err(),
+        "a bridge must include every source data-basis limb"
+    );
+
+    let (mut duplicate_limb, _witness) = same_secret_bridge_instance();
+    let linkage = duplicate_limb
+        .same_secret_linkage
+        .as_mut()
+        .expect("source linkage");
+    linkage.commitments[1] = linkage.commitments[0].clone();
+    assert!(
+        duplicate_limb.validate_shape().is_err(),
+        "a duplicated source limb must not satisfy canonical coverage"
+    );
+
+    let (mut reordered_limbs, _witness) = same_secret_bridge_instance();
+    reordered_limbs
+        .same_secret_linkage
+        .as_mut()
+        .expect("source linkage")
+        .commitments
+        .swap(0, 1);
+    assert!(
+        reordered_limbs.validate_shape().is_err(),
+        "source limbs must remain in canonical data-basis order"
+    );
+}
+
+#[test]
+fn same_secret_bridge_physical_columns_are_disjoint_and_in_range() {
+    let (statement, _witness) = same_secret_bridge_instance();
+    let layout = LimbColumnLayout::new(&statement, 0).expect("bridge layout");
+    let mut physical_positions = Vec::new();
+
+    for half in 0..super::super::TRACE_SPLIT {
+        physical_positions.push(layout.physical_secret(half));
+        physical_positions.push(layout.physical_negative_indicator(half));
+    }
+    for target_index in 0..layout.same_secret_bridge_target_count() {
+        let encoding_column_count = (0..layout.same_secret_bridge_message_encoding_columns())
+            .filter(|encoding_column| {
+                layout
+                    .same_secret_bridge_message_position_for_encoding_column(*encoding_column)
+                    .is_some_and(|(mapped_target_index, _)| mapped_target_index == target_index)
+            })
+            .count();
+        for encoding_column in 0..encoding_column_count {
+            for half in 0..super::super::TRACE_SPLIT {
+                physical_positions.push(layout.physical_same_secret_bridge_message(
+                    target_index,
+                    encoding_column,
+                    half,
+                ));
+            }
+        }
+    }
+    for randomness_position in 0..layout.linkage_randomness_columns {
+        for half in 0..super::super::TRACE_SPLIT {
+            physical_positions.push(layout.physical_linkage_randomness(randomness_position, half));
+        }
+    }
+    for mask_column in 0..layout.mask_column_count {
+        for half in 0..super::super::TRACE_SPLIT {
+            physical_positions.push(layout.physical_mask(mask_column, half));
+        }
+    }
+
+    assert_eq!(
+        physical_positions.len(),
+        layout.phase_one_physical_count(),
+        "the bridge layout audit must cover every phase-one physical column"
+    );
+    assert!(
+        physical_positions
+            .iter()
+            .all(|position| *position < layout.phase_one_physical_count()),
+        "every physical column must stay inside the phase-one commitment"
+    );
+    assert_eq!(
+        physical_positions
+            .iter()
+            .copied()
+            .collect::<BTreeSet<_>>()
+            .len(),
+        physical_positions.len(),
+        "secret, indicator, target, source-randomness, and mask columns must be pairwise disjoint"
+    );
+}
+
+#[test]
+fn same_secret_bridge_row_kernel_rejects_nonternary_source_randomness() {
+    let (statement, _witness) = same_secret_bridge_instance();
+    let layout = LimbColumnLayout::new(&statement, 0).expect("bridge layout");
+    let tower = super::super::extension_field::ChallengeExtensionTower::for_modulus(DATA_PRIMES[0])
+        .expect("challenge extension tower");
+    let domain = super::super::relation::BaseColumnDomain { tower };
+    let mut column_values = vec![0_u64; layout.phase_one_physical_count()];
+    let material_values = vec![0_u64; layout.vss_committed_material_physical_count()];
+    let beta = vec![
+        super::super::extension_field::ChallengeExtensionTower::one();
+        layout.row_check_constraint_count()
+    ];
+    assert_eq!(
+        super::super::relation::batched_row_check_value(
+            &domain,
+            &column_values,
+            &material_values,
+            &beta,
+            &layout,
+        ),
+        super::super::extension_field::ChallengeExtensionTower::zero(),
+        "the all-zero bridge row must satisfy every local constraint"
+    );
+
+    column_values[layout.physical_linkage_randomness(0, 0)] = 2;
+    assert_ne!(
+        super::super::relation::batched_row_check_value(
+            &domain,
+            &column_values,
+            &material_values,
+            &beta,
+            &layout,
+        ),
+        super::super::extension_field::ChallengeExtensionTower::zero(),
+        "the row kernel itself must reject nonternary source randomness"
+    );
+}
+
+#[test]
+fn same_secret_bridge_and_source_linkage_use_independent_alpha_domains() {
+    let (statement, _witness) = same_secret_bridge_instance();
+    let layout = LimbColumnLayout::new(&statement, 0).expect("bridge layout");
+    let modulus = DATA_PRIMES[0];
+    let mut transcript =
+        super::super::fiat_shamir_transcript::FiatShamirTranscript::new("bridge-alpha-test");
+    let challenges = super::super::prover::draw_limb_challenges(&mut transcript, &layout, modulus);
+    assert_eq!(
+        challenges.same_secret_bridge_alpha.len(),
+        layout.same_secret_bridge_relation_count(),
+        "target bridge alpha count must match every target and decoder relation"
+    );
+    assert_eq!(
+        challenges.linkage_alpha.len(),
+        layout.linkage_relation_count(),
+        "source-linkage alpha count must match every canonical source row"
+    );
+
+    let comparison_count = challenges
+        .same_secret_bridge_alpha
+        .len()
+        .min(challenges.linkage_alpha.len());
+    assert_ne!(
+        &challenges.same_secret_bridge_alpha[..comparison_count],
+        &challenges.linkage_alpha[..comparison_count],
+        "source and target relations must not reuse one alpha stream"
+    );
+
+    let mut target_domain_transcript =
+        super::super::fiat_shamir_transcript::FiatShamirTranscript::new("alpha-domain-test");
+    let target_domain = target_domain_transcript.challenge_extension_elements(
+        "same-secret-bridge-alpha",
+        modulus,
+        comparison_count,
+    );
+    let mut source_domain_transcript =
+        super::super::fiat_shamir_transcript::FiatShamirTranscript::new("alpha-domain-test");
+    let source_domain = source_domain_transcript.challenge_extension_elements(
+        "same-secret-source-linkage-alpha",
+        modulus,
+        comparison_count,
+    );
+    assert_ne!(
+        target_domain, source_domain,
+        "the Fiat-Shamir labels must domain-separate source and target alpha challenges"
+    );
+}
 
 #[test]
 fn same_secret_bridge_proof_round_trips_and_rejects_tampering() {
@@ -43,6 +233,31 @@ fn same_secret_bridge_proof_round_trips_and_rejects_tampering() {
         layout.same_secret_bridge_target_count() * LINCHECK_REPETITIONS
             + layout.same_secret_bridge_decoder_digit_count() * LINCHECK_REPETITIONS,
         "bridge relation challenges must include the bridge lincheck and decoder rows"
+    );
+    assert_eq!(
+        layout.linkage_relation_count(),
+        DATA_PRIMES.len() * SETUP_COMMITMENT_ROW_COUNT * LINCHECK_REPETITIONS,
+        "bridge source-linkage challenges must cover every source commitment row"
+    );
+    let last_target_index = layout.same_secret_bridge_target_count() - 1;
+    let last_target_encoding_column = layout.same_secret_bridge_message_encoding_columns() - 1;
+    let (last_target_for_encoding_column, last_local_encoding_column) = layout
+        .same_secret_bridge_message_position_for_encoding_column(last_target_encoding_column)
+        .expect("last bridge message encoding column");
+    assert_eq!(last_target_for_encoding_column, last_target_index);
+    assert!(
+        layout.physical_linkage_randomness(0, 0)
+            > layout.physical_same_secret_bridge_message(
+                last_target_for_encoding_column,
+                last_local_encoding_column,
+                super::super::TRACE_SPLIT - 1,
+            ),
+        "source randomness columns must follow every target message column without overlap"
+    );
+    assert_eq!(
+        layout.same_secret_bridge_logical_columns(),
+        2 + layout.same_secret_bridge_message_encoding_columns()
+            + layout.linkage_randomness_columns,
     );
     assert!(
         layout.same_secret_bridge_message_trit_count(0, 0) > 0,
@@ -85,6 +300,19 @@ fn same_secret_bridge_proof_round_trips_and_rejects_tampering() {
         "proving must reject a non-binary negative indicator"
     );
 
+    let (non_ternary_opening_statement, mut non_ternary_opening_witness) =
+        same_secret_bridge_instance();
+    non_ternary_opening_witness.opening_randomness_by_limb[0][0][0] = 2;
+    assert!(
+        prove_evaluation_key_share(
+            &non_ternary_opening_statement,
+            &non_ternary_opening_witness,
+            PROOF_RANDOMNESS_SEED,
+        )
+        .is_err(),
+        "proving must reject non-ternary source-commitment opening randomness"
+    );
+
     let (mut tampered_statement, _unused_witness) = same_secret_bridge_instance();
     tampered_statement
         .same_secret_bridge
@@ -96,6 +324,30 @@ fn same_secret_bridge_proof_round_trips_and_rejects_tampering() {
     assert!(
         verify_evaluation_key_share(&tampered_statement, &proof).is_err(),
         "tampering with the published target constant material root must reject"
+    );
+
+    let (mut tampered_source_statement, _unused_witness) = same_secret_bridge_instance();
+    let source_row = &mut tampered_source_statement
+        .same_secret_linkage
+        .as_mut()
+        .expect("source linkage")
+        .commitments[0]
+        .limbs[0]
+        .rows[0];
+    source_row[0] = (source_row[0] + 1) % DATA_PRIMES[0];
+    assert!(
+        verify_evaluation_key_share(&tampered_source_statement, &proof).is_err(),
+        "tampering with a canonical source commitment body must reject"
+    );
+
+    let (mut unexpected_context_statement, _unused_witness) = same_secret_bridge_instance();
+    unexpected_context_statement
+        .context
+        .binding_roots
+        .push(("unexpectedBridgeBinding".to_string(), repeated_hash("ab")));
+    assert!(
+        unexpected_context_statement.validate_shape().is_err(),
+        "the standalone bridge context must carry exactly zero binding roots"
     );
 
     let (mut wrong_target_basis_statement, _unused_witness) = same_secret_bridge_instance();
@@ -182,7 +434,7 @@ fn public_key_share_proof_round_trips_with_same_secret_bridge() {
     );
 }
 
-fn same_secret_bridge_instance() -> (
+pub(super) fn same_secret_bridge_instance() -> (
     TrusteeEvaluationKeyStatement,
     super::super::relation::TrusteeEvaluationKeyWitness,
 ) {
@@ -230,8 +482,36 @@ fn same_secret_bridge_instance() -> (
         .iter()
         .map(|material| material.commitment.clone())
         .collect::<Vec<_>>();
+    let opening_randomness_by_limb = source_opening_randomness_by_limb(ring_degree);
+    let source_constant_commitments = DATA_PRIMES
+        .iter()
+        .enumerate()
+        .map(|(source_rns_limb_index, source_rns_prime)| {
+            let source_message_coefficients = bridge_message_coefficients(
+                &secret_coefficients,
+                &negative_indicator_coefficients,
+                *source_rns_prime,
+            )
+            .into_iter()
+            .map(u128::from)
+            .collect::<Vec<_>>();
+            let randomness = opening_randomness_by_limb[source_rns_limb_index]
+                .iter()
+                .map(|column| column.iter().copied().map(i128::from).collect::<Vec<_>>())
+                .collect::<Vec<_>>();
+            compute_setup_commitment_for_tests(
+                &public_matrix_seed_hash,
+                source_rns_limb_index,
+                *source_rns_prime,
+                0,
+                &source_message_coefficients,
+                &randomness,
+                ring_degree,
+            )
+            .expect("source constant commitment")
+        })
+        .collect::<Vec<_>>();
 
-    let same_secret_bridge_statement_root = repeated_hash("a1");
     let statement = TrusteeEvaluationKeyStatement {
         context: SuccinctSetupProofContext {
             proof_family: SAME_SECRET_BRIDGE_PROOF_FAMILY.to_string(),
@@ -241,22 +521,14 @@ fn same_secret_bridge_instance() -> (
             trustee_identity: "trustee-0".to_string(),
             trustee_roster_position: 0,
             setup_epoch: "setup-epoch-1".to_string(),
-            binding_roots: vec![
-                (
-                    "sameSecretBridgeStatementRoot".to_string(),
-                    same_secret_bridge_statement_root,
-                ),
-                ("sameSecretStatementRoot".to_string(), repeated_hash("b1")),
-                ("sameSecretProofRoot".to_string(), repeated_hash("b2")),
-                (
-                    "sameSecretProofFamilyBindingRoot".to_string(),
-                    repeated_hash("b3"),
-                ),
-            ],
+            binding_roots: Vec::new(),
         },
         ring_degree,
         keys: Vec::new(),
-        same_secret_linkage: None,
+        same_secret_linkage: Some(SameSecretLinkageStatement {
+            public_matrix_seed_hash: public_matrix_seed_hash.clone(),
+            commitments: source_constant_commitments,
+        }),
         private_vss_share: None,
         vss_share_linkage: None,
         same_secret_bridge: Some(SameSecretBridgeStatement {
@@ -282,7 +554,7 @@ fn same_secret_bridge_instance() -> (
         secret_coefficients,
         error_coefficients_by_key: Vec::new(),
         negative_indicator_coefficients,
-        opening_randomness_by_limb: Vec::new(),
+        opening_randomness_by_limb,
         private_vss_coefficient_messages_by_shamir_index: Vec::new(),
         private_vss_opening_randomness_by_shamir_index: Vec::new(),
         private_vss_carry_witnesses: Vec::new(),
@@ -307,6 +579,30 @@ fn same_secret_bridge_instance() -> (
     };
 
     (statement, witness)
+}
+
+fn source_opening_randomness_by_limb(ring_degree: usize) -> Vec<Vec<Vec<i64>>> {
+    DATA_PRIMES
+        .iter()
+        .enumerate()
+        .map(|(source_rns_limb_index, _)| {
+            (0..crate::bgv::setup::commitment::SETUP_COMMITMENT_RANDOMNESS_WIDTH)
+                .map(|randomness_column| {
+                    (0..ring_degree)
+                        .map(|coefficient_index| {
+                            match (source_rns_limb_index + randomness_column + coefficient_index)
+                                % 3
+                            {
+                                0 => -1,
+                                1 => 0,
+                                _ => 1,
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect()
 }
 
 fn attach_same_secret_bridge_to_key_statement(

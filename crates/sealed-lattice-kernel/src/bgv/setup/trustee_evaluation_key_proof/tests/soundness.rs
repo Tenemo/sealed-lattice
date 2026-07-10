@@ -345,14 +345,14 @@ fn statement_hash_length_delimits_setup_epoch_and_linkage_seed() {
         "hashctx01",
         &[round_one(2)],
         SMALL_RING_DEGREE,
-        Some(3),
+        Some(1),
     )
     .expect("first development instance");
     let (mut second_statement, _) = generate_development_trustee_instance_with_linkage(
         "hashctx01",
         &[round_one(2)],
         SMALL_RING_DEGREE,
-        Some(3),
+        Some(1),
     )
     .expect("second development instance");
 

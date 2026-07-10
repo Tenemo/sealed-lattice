@@ -367,7 +367,7 @@ pub(crate) fn verify_vss_share_linkage_proof_material_set_from_request(
         invalid_succinct_setup_proof("share-linkage material statement must be present")
     })?;
     let statement_verification =
-        crate::bgv::setup::vss_commitment::verify_vss_share_linkage_statement_request(request)?;
+        crate::bgv::setup::vss_commitment::verify_vss_share_linkage_bindings_request(request)?;
     let statement_root = read_string(&statement_verification, "statementRoot")?;
     let participant_count = usize::try_from(read_u64(&statement_verification, "participantCount")?)
         .map_err(|_| invalid_succinct_setup_proof("participantCount does not fit usize"))?;
@@ -468,8 +468,6 @@ pub(crate) fn verify_vss_share_linkage_proof_material_set_from_request(
 
     let mut covered_items = BTreeSet::new();
     let mut verified_records = Vec::with_capacity(proof_records.len());
-    let mut total_proof_byte_length = 0usize;
-    let mut proof_verification_count = 0usize;
     for (proof_record_index, proof_record) in proof_records.iter().enumerate() {
         compare_string_value(
             read_string(proof_record, "objectType")?,
@@ -558,11 +556,6 @@ pub(crate) fn verify_vss_share_linkage_proof_material_set_from_request(
             vss_share_linkage,
         )?;
         let proof_bytes = resolved_proof_bytes.proof_bytes;
-        total_proof_byte_length = total_proof_byte_length
-            .checked_add(proof_bytes.len())
-            .ok_or_else(|| {
-                invalid_succinct_setup_proof("share-linkage proof material byte length overflowed")
-            })?;
         let proof_record_without_root = resolved_proof_bytes.proof_record_without_root;
         let expected_record_root = resolved_proof_bytes.proof_record_root;
 
@@ -589,7 +582,6 @@ pub(crate) fn verify_vss_share_linkage_proof_material_set_from_request(
                 ),
             )
         })?;
-        proof_verification_count += 1;
 
         let mut verified_record = proof_record_without_root;
         verified_record["proofRecordRoot"] = json!(expected_record_root);
@@ -657,9 +649,5 @@ pub(crate) fn verify_vss_share_linkage_proof_material_set_from_request(
         "participantCount": participant_count,
         "targetRnsLimbCount": target_rns_limb_count,
         "ringDegree": ring_degree,
-        "proofRecordCount": proof_records.len(),
-        "coveredLinkageItemCount": covered_items.len(),
-        "totalProofByteLength": total_proof_byte_length,
-        "proofVerificationCount": proof_verification_count,
     }))
 }

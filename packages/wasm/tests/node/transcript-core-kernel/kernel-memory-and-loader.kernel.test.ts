@@ -100,8 +100,8 @@ describe('transcript-core kernel in Node', () => {
             success: true,
             value: {
                 operation: 'beginSetupProofMaterialTransportStream',
-                verificationId: 'same-secret-proof-0',
-                proofFamily: 'same-secret-linkage-anchor',
+                verificationId: 'public-key-share-proof-0',
+                proofFamily: 'public-key-share',
                 proofMaterialRoot: hashOne,
                 proofBytesEncoding: 'binary-chunked-proof-bytes',
                 transport: {},
@@ -117,8 +117,8 @@ describe('transcript-core kernel in Node', () => {
         });
         const kernel = await loadMockKernel();
         const transportedSetupProofMaterial = {
-            objectType: 'SetupTransportedSameSecretProofMaterial',
-            proofFamily: 'same-secret-linkage-anchor',
+            objectType: 'SetupTransportedPublicKeyShareProofMaterial',
+            proofFamily: 'public-key-share',
             proofMaterialRoot: hashOne,
             chunkSizeBytes: 1_048_576,
             chunkCount: 1,
@@ -129,33 +129,33 @@ describe('transcript-core kernel in Node', () => {
         } as const;
 
         kernel.beginSetupProofMaterialTransportStream({
-            verificationId: 'same-secret-proof-0',
+            verificationId: 'public-key-share-proof-0',
             transportedSetupProofMaterial,
         });
         kernel.absorbSetupProofMaterialTransportStreamChunk({
-            verificationId: 'same-secret-proof-0',
+            verificationId: 'public-key-share-proof-0',
             chunkIndex: 0,
             bytesHex: '00',
         });
         kernel.finishSetupProofMaterialTransportStream({
-            verificationId: 'same-secret-proof-0',
+            verificationId: 'public-key-share-proof-0',
         });
 
         expect(decodedCommands).toEqual([
             {
                 command: 'BeginSetupProofMaterialTransportStream',
-                verificationId: 'same-secret-proof-0',
+                verificationId: 'public-key-share-proof-0',
                 transportedSetupProofMaterial,
             },
             {
                 command: 'AbsorbSetupProofMaterialTransportStreamChunk',
-                verificationId: 'same-secret-proof-0',
+                verificationId: 'public-key-share-proof-0',
                 chunkIndex: 0,
                 bytesHex: '00',
             },
             {
                 command: 'FinishSetupProofMaterialTransportStream',
-                verificationId: 'same-secret-proof-0',
+                verificationId: 'public-key-share-proof-0',
             },
         ]);
     });

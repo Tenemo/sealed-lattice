@@ -341,7 +341,7 @@ pub(super) fn vss_share_linkage_proof_bytes_hex(
         "vssShareLinkage": vss_share_linkage,
     }))
     .expect("VSS share-linkage proof checkpoint key");
-    let proof_bytes = checkpointed_anchor_proof_bytes(
+    let proof_bytes = checkpointed_proof_bytes(
         VSS_SHARE_LINKAGE_PROOF_CHECKPOINT_DIRECTORY,
         &checkpoint_key,
         || {

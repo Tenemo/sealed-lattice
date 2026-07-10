@@ -330,8 +330,6 @@ export const createTranscriptCoreKernelLoader = (
                                 input.expectedSetupPackageHash,
                             expectedManifestHash: input.expectedManifestHash,
                             expectedRosterHash: input.expectedRosterHash,
-                            transportedSameSecretProofMaterial:
-                                input.transportedSameSecretProofMaterial,
                             transportedPublicKeyShareMaterial:
                                 input.transportedPublicKeyShareMaterial,
                             transportedPublicKeyShareProofMaterial:
@@ -413,6 +411,10 @@ export const createTranscriptCoreKernelLoader = (
                         negativeIndicatorCoefficients:
                             input.negativeIndicatorCoefficients,
                         openingRandomnessByLimb: input.openingRandomnessByLimb,
+                        vssCommittedMaterialSeedsByBoundMessage:
+                            input.vssCommittedMaterialSeedsByBoundMessage,
+                        vssCommittedMaterialContextHashesByBoundMessage:
+                            input.vssCommittedMaterialContextHashesByBoundMessage,
                         proofRandomnessSeedHex: input.proofRandomnessSeedHex,
                         proofRandomnessNonceHex: input.proofRandomnessNonceHex,
                     }),
@@ -498,6 +500,7 @@ export const createTranscriptCoreKernelLoader = (
                         command: 'GenerateSameSecretBridgeProof',
                         context: input.context,
                         ringDegree: input.ringDegree,
+                        sameSecretLinkage: input.sameSecretLinkage,
                         sameSecretBridge: input.sameSecretBridge,
                         secretCoefficients: input.secretCoefficients,
                         negativeIndicatorCoefficients:

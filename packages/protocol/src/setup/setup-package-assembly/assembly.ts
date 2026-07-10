@@ -6,6 +6,7 @@ import {
     resolveSetupCertificateRecords,
 } from './certificates.js';
 import { hashField } from './constants-and-assertions.js';
+import { vssCoefficientCommitmentMaterialReferenceFromCertificate } from './transported-material.js';
 import type { SetupPackage, SetupPackageInput } from './types.js';
 import {
     publicPrivateVssEnvelopeCommitmentSet,
@@ -17,6 +18,11 @@ export const createSetupPackage = (input: SetupPackageInput): SetupPackage => {
     const thresholdShareCommitments = resolveThresholdShareCommitments(input);
     validateInput(input, certificates, thresholdShareCommitments);
     const collectivePublicKey = derivedCollectivePublicKey(input);
+    const vssCoefficientCommitmentMaterial =
+        vssCoefficientCommitmentMaterialReferenceFromCertificate(
+            input,
+            certificates.setupTransportCertificate,
+        );
 
     const privateVssEnvelopeCommitments = publicPrivateVssEnvelopeCommitmentSet(
         input.privateVssEnvelopeCommitments,
@@ -43,6 +49,8 @@ export const createSetupPackage = (input: SetupPackageInput): SetupPackage => {
         qShare: input.qShare,
         phaseTranscript: input.phaseTranscript,
         commonRandomness: input.commonRandomness,
+        vssCoefficientCommitments: input.vssCoefficientCommitments,
+        vssCoefficientCommitmentMaterial,
         vssPublicCoefficientCommitmentSet:
             input.vssPublicCoefficientCommitmentSet,
         vssPublicRecipientShareCommitmentSet:
@@ -58,8 +66,6 @@ export const createSetupPackage = (input: SetupPackageInput): SetupPackage => {
             : { vssComplaints: input.vssComplaints }),
         vssShareAcceptances: input.vssShareAcceptances,
         thresholdShareCommitments,
-        sameSecretConsistency: input.sameSecretConsistency,
-        sameSecretProofs: input.sameSecretProofs,
         sameSecretBridgeStatementSet: input.sameSecretBridgeStatementSet,
         sameSecretBridgeProofMaterialSet:
             input.sameSecretBridgeProofMaterialSet,

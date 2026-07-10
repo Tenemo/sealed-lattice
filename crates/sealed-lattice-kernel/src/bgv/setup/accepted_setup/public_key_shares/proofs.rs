@@ -46,7 +46,9 @@ pub(in super::super) fn verify_public_key_share_proofs(
             "setupContext was required before public-key share proof verification",
         )
     })?;
-    if let Err(error) = verify_same_secret_context(proof_set, setup_context) {
+    if let Err(error) =
+        verify_context_fields_match(proof_set, setup_context, "publicKeyShareProofs")
+    {
         return Ok(Some(public_key_refusal(
             "publicKeyShareProofSetContextMismatch",
             error.message,
@@ -82,18 +84,6 @@ pub(in super::super) fn verify_public_key_share_proofs(
     {
         return Ok(Some(response));
     }
-    let same_secret_consistency_root = same_secret_consistency_root_from_package(setup_package)?;
-    if proof_set
-        .get("sameSecretConsistencyRoot")
-        .and_then(Value::as_str)
-        != Some(same_secret_consistency_root.as_str())
-    {
-        return Ok(Some(public_key_refusal(
-            "publicKeyShareProofSameSecretRootMismatch",
-            "publicKeyShareProofs.sameSecretConsistencyRoot must match accepted same-secret statements",
-            "setupPackage.publicKeyShareProofs.sameSecretConsistencyRoot",
-        )?));
-    }
     let public_key_share_set_root = setup_package
         .get("publicKeyShares")
         .and_then(|share_set| share_set.get("publicKeyShareSetRoot"))
@@ -117,7 +107,6 @@ pub(in super::super) fn verify_public_key_share_proofs(
     }
 
     let share_bindings = public_key_share_bindings_from_package(setup_package)?;
-    let same_secret_bindings = same_secret_statement_bindings_from_package(setup_package)?;
     let Some(proof_records) = proof_set.get("proofRecords").and_then(Value::as_array) else {
         return Ok(Some(public_key_refusal(
             "publicKeyShareProofRecordsMissing",
@@ -138,7 +127,6 @@ pub(in super::super) fn verify_public_key_share_proofs(
             proof_record,
             setup_context,
             &share_bindings,
-            &same_secret_bindings,
             &common_binding,
             &mut seen_roster_positions,
         )? {
@@ -181,7 +169,6 @@ fn verify_public_key_share_proof_record(
     proof_record: &Value,
     setup_context: &Value,
     share_bindings: &BTreeMap<u64, PublicKeyShareBinding>,
-    same_secret_bindings: &BTreeMap<u64, SameSecretStatementBinding>,
     common_binding: &PublicKeyCommonBinding,
     seen_roster_positions: &mut BTreeSet<u64>,
 ) -> CanonicalResult<Option<Value>> {
@@ -201,7 +188,11 @@ fn verify_public_key_share_proof_record(
             "setupPackage.publicKeyShareProofs.proofRecords.objectType",
         )?));
     }
-    if let Err(error) = verify_same_secret_context(proof_record, setup_context) {
+    if let Err(error) = verify_context_fields_match(
+        proof_record,
+        setup_context,
+        "publicKeyShareProofs.proofRecords",
+    ) {
         return Ok(Some(public_key_refusal(
             "publicKeyShareProofContextMismatch",
             error.message,
@@ -248,20 +239,12 @@ fn verify_public_key_share_proof_record(
             "setupPackage.publicKeyShareProofs.proofRecords.trusteeRosterPosition",
         )?));
     };
-    let Some(same_secret_binding) = same_secret_bindings.get(&trustee_roster_position) else {
-        return Ok(Some(public_key_refusal(
-            "publicKeyShareProofSameSecretMissing",
-            "public-key share proof must reference an accepted same-secret statement",
-            "setupPackage.publicKeyShareProofs.proofRecords.trusteeRosterPosition",
-        )?));
-    };
     if share_binding.trustee_roster_position != trustee_roster_position
         || share_binding.trustee_identity != trustee_identity
-        || same_secret_binding.trustee_identity != trustee_identity
     {
         return Ok(Some(public_key_refusal(
             "publicKeyShareProofTrusteeMismatch",
-            "public-key share proof trustee must match the accepted share and same-secret statement",
+            "public-key share proof trustee must match the accepted share",
             "setupPackage.publicKeyShareProofs.proofRecords.trusteeIdentity",
         )?));
     }
@@ -269,26 +252,10 @@ fn verify_public_key_share_proof_record(
         .get("publicKeyShareRoot")
         .and_then(Value::as_str)
         != Some(share_binding.public_key_share_root.as_str())
-        || proof_record
-            .get("trusteeSecretCommitmentRoot")
-            .and_then(Value::as_str)
-            != Some(same_secret_binding.trustee_secret_commitment_root.as_str())
-        || proof_record
-            .get("trusteeSecretCommitmentRoot")
-            .and_then(Value::as_str)
-            != Some(share_binding.trustee_secret_commitment_root.as_str())
-        || proof_record
-            .get("sameSecretStatementRoot")
-            .and_then(Value::as_str)
-            != Some(same_secret_binding.same_secret_statement_root.as_str())
-        || proof_record
-            .get("sameSecretStatementRoot")
-            .and_then(Value::as_str)
-            != Some(share_binding.same_secret_statement_root.as_str())
     {
         return Ok(Some(public_key_refusal(
             "publicKeyShareProofBindingMismatch",
-            "public-key share proof must bind the accepted share, trustee secret, and same-secret roots",
+            "public-key share proof must bind the accepted share",
             "setupPackage.publicKeyShareProofs.proofRecords.publicKeyShareRoot",
         )?));
     }
@@ -402,16 +369,6 @@ fn public_key_share_bindings_from_package(
                     trustee_roster_position,
                     public_key_share_root: value_string(share_record, "publicKeyShareRoot")?
                         .to_string(),
-                    trustee_secret_commitment_root: value_string(
-                        share_record,
-                        "trusteeSecretCommitmentRoot",
-                    )?
-                    .to_string(),
-                    same_secret_statement_root: value_string(
-                        share_record,
-                        "sameSecretStatementRoot",
-                    )?
-                    .to_string(),
                 },
             )
             .is_some()

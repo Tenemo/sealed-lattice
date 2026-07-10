@@ -4,10 +4,10 @@
 // set is bound by canonical object roots. The heavy cryptography lives in the
 // kernel commands; this module orchestrates the per-coefficient commitment
 // computation and binds the roots the accepted-setup verifier recomputes.
-import { deriveCanonicalObjectHash, hash512Hex } from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
-import { bytesFromHex } from '../common-fields.js';
+import { bytesFromHex, bytesToHex } from '../common-fields.js';
 import { encodeStandardBase64 } from '../proof-byte-encoding.js';
 import type { CollectiveBgvSetupContext } from '../vss-share-verification-records.js';
 
@@ -193,8 +193,6 @@ export type VssPublicAggregateThresholdCommitment = {
     readonly aggregateCommitmentRoot: ProtocolHash;
     readonly aggregateOpeningRoot: ProtocolHash;
     readonly commitment: VssCommittedMaterialCommitmentValue;
-    readonly sourceShareCommitmentRoots: readonly ProtocolHash[];
-    readonly sourceShareOpeningRoots: readonly ProtocolHash[];
 };
 
 // The proven "aggregate equals modular sum of the source shares" binding for
@@ -207,7 +205,6 @@ export type VssAggregateThresholdProofRecord = {
     readonly recipientRosterPosition: number;
     readonly rnsLimbIndex: number;
     readonly vssShareLinkage: Record<string, unknown>;
-    readonly proofBytesHash: string;
     readonly proofBytesBase64: string;
 };
 
@@ -223,6 +220,44 @@ export type VssPublicAggregateThresholdCommitmentSet = {
     // proof is bound by its own statement, which references the committed
     // roots the set root already covers.
     readonly aggregateThresholdProofs: readonly VssAggregateThresholdProofRecord[];
+};
+
+type LocalTrusteeVssPublicAggregateOpeningCredential = {
+    readonly objectType: 'LocalTrusteeVssPublicAggregateOpeningCredential';
+    readonly recipientIdentity: string;
+    readonly recipientRosterPosition: number;
+    readonly recipientTrusteePoint: number;
+    readonly rnsLimbIndex: number;
+    readonly rnsPrime: number;
+    readonly aggregateCommitmentRoot: ProtocolHash;
+    readonly aggregateOpeningRoot: ProtocolHash;
+    readonly aggregateCommitmentMessageValuesLeHex: string;
+    readonly aggregateMaterialSeedHex: string;
+};
+
+// Private setup output retained by the recipient that locally formed the
+// aggregate commitment. It is never an input to public-set assembly.
+export type LocalTrusteeVssPublicAggregateOpeningCredentialHandoff = {
+    readonly trusteeIdentity: string;
+    readonly trusteeRosterPosition: number;
+    readonly aggregateOpeningCredentials: readonly LocalTrusteeVssPublicAggregateOpeningCredential[];
+};
+
+// One recipient's public contribution. The local creator returns this sibling
+// of its private opening handoff; a relay may assemble these public
+// contributions without learning any recipient-share or aggregate-opening
+// credential.
+type VssPublicAggregateThresholdCommitmentContribution = {
+    readonly objectType: 'VssPublicAggregateThresholdCommitmentContribution';
+    readonly trusteeIdentity: string;
+    readonly trusteeRosterPosition: number;
+    readonly recipientRecords: readonly VssPublicAggregateThresholdCommitment[];
+    readonly aggregateThresholdProofs: readonly VssAggregateThresholdProofRecord[];
+};
+
+export type LocalTrusteeVssPublicAggregateThresholdCommitmentBundle = {
+    readonly publicAggregateThresholdCommitmentContribution: VssPublicAggregateThresholdCommitmentContribution;
+    readonly localTrusteeAggregateOpeningCredentialHandoff: LocalTrusteeVssPublicAggregateOpeningCredentialHandoff;
 };
 
 export type VssPublicCoefficientOpening = {
@@ -280,6 +315,38 @@ const openingCoordinateKey = (
     rnsLimbIndex: number,
     shamirCoefficientIndex: number,
 ): string => `${String(rnsLimbIndex)}:${String(shamirCoefficientIndex)}`;
+
+const trusteeIdentitiesByRosterPosition = (input: {
+    readonly participantCount: number;
+    readonly sourceTrusteeOpeningStates: readonly VssPublicSourceTrusteeOpeningState[];
+}): readonly string[] => {
+    const trusteeIdentities = new Array<string | undefined>(
+        input.participantCount,
+    ).fill(undefined);
+    input.sourceTrusteeOpeningStates.forEach((openingState) => {
+        const rosterPosition = openingState.sourceTrusteeRosterPosition;
+        if (
+            rosterPosition < 0 ||
+            rosterPosition >= input.participantCount ||
+            trusteeIdentities[rosterPosition] !== undefined
+        ) {
+            throw new Error(
+                'Source trustee opening states must contain each roster position exactly once.',
+            );
+        }
+        if (openingState.sourceTrusteeIdentity.length === 0) {
+            throw new Error('Source trustee identities must not be empty.');
+        }
+        trusteeIdentities[rosterPosition] = openingState.sourceTrusteeIdentity;
+    });
+    if (trusteeIdentities.some((identity) => identity === undefined)) {
+        throw new Error(
+            'Source trustee opening states must cover every roster position.',
+        );
+    }
+
+    return trusteeIdentities as readonly string[];
+};
 
 export const createVssPublicCoefficientCommitmentSet = (input: {
     readonly setupContext: CollectiveBgvSetupContext;
@@ -500,6 +567,7 @@ export const createVssPublicRecipientShareCommitmentSet = (input: {
     readonly committedMaterialSeed: VssCommittedMaterialSeedProvider;
     readonly computeVssCommittedMaterialCommitment: VssCommittedMaterialCommitmentComputer;
 }): VssPublicRecipientShareCommitmentBundle => {
+    const recipientIdentities = trusteeIdentitiesByRosterPosition(input);
     const recipientShareCredentials: VssPublicRecipientShareCredential[] = [];
     const sourceTrusteeRecords = [...input.sourceTrusteeOpeningStates]
         .sort(
@@ -529,7 +597,13 @@ export const createVssPublicRecipientShareCommitmentSet = (input: {
                     recipientRosterPosition < input.participantCount;
                     recipientRosterPosition += 1
                 ) {
-                    const recipientIdentity = `trustee-${String(recipientRosterPosition)}`;
+                    const recipientIdentity =
+                        recipientIdentities[recipientRosterPosition];
+                    if (recipientIdentity === undefined) {
+                        throw new Error(
+                            'Source trustee opening states must identify every recipient.',
+                        );
+                    }
                     const recipientPoint = recipientRosterPosition + 1;
                     input.qSharePrimes.forEach((rnsPrime, rnsLimbIndex) => {
                         const coefficientMessagesByShamirIndex: number[][] = [];
@@ -664,17 +738,59 @@ export const createVssPublicRecipientShareCommitmentSet = (input: {
     };
 };
 
-const aggregateCoordinateGroupKey = (
+const recipientIdentityFromCommitmentSet = (
+    commitmentSet: VssPublicRecipientShareCommitmentSet,
     recipientRosterPosition: number,
-    rnsLimbIndex: number,
-): string => `${String(recipientRosterPosition)}:${String(rnsLimbIndex)}`;
+): string => {
+    const recordIndex = recipientRosterPosition * commitmentSet.rnsLimbCount;
+    const recipientIdentity =
+        commitmentSet.sourceTrusteeRecords[0]?.recipientShareCommitments[
+            recordIndex
+        ]?.recipientIdentity;
+    if (recipientIdentity === undefined || recipientIdentity.length === 0) {
+        throw new Error(
+            'Recipient-share commitment set must identify every aggregate recipient.',
+        );
+    }
+    commitmentSet.sourceTrusteeRecords.forEach((sourceRecord) => {
+        const sourceRecipientIdentity =
+            sourceRecord.recipientShareCommitments[recordIndex]
+                ?.recipientIdentity;
+        if (sourceRecipientIdentity !== recipientIdentity) {
+            throw new Error(
+                'Recipient-share commitment records must agree on each recipient identity.',
+            );
+        }
+    });
+
+    return recipientIdentity;
+};
+
+const coefficientVectorToLittleEndianHex = (
+    coefficients: readonly number[],
+): string => {
+    const bytes = new Uint8Array(coefficients.length * 8);
+    const view = new DataView(bytes.buffer);
+    coefficients.forEach((coefficient, coefficientIndex) => {
+        if (
+            !Number.isSafeInteger(coefficient) ||
+            coefficient < 0 ||
+            Object.is(coefficient, -0)
+        ) {
+            throw new Error(
+                'Aggregate commitment message coefficients must be non-negative safe integers.',
+            );
+        }
+        view.setBigUint64(coefficientIndex * 8, BigInt(coefficient), true);
+    });
+
+    return bytesToHex(bytes);
+};
 
 // The aggregate proofs reuse the share-linkage proof family: each one is a
 // unit-evaluation-point share-linkage proof showing the committed threshold
 // share is the modular sum of the committed source recipient shares.
 const vssAggregateThresholdProofFamily = 'vss-share-linkage';
-const vssAggregateThresholdProofBytesHashDomain =
-    'sealed-lattice/setup/vss-aggregate-threshold/proof-bytes';
 
 // Fresh prover blinding randomness per aggregate proof record. The proof is
 // zero-knowledge, so this is independent per (recipient, RNS limb) and binds
@@ -723,13 +839,17 @@ const createVssAggregateThresholdProofRecord = (input: {
     } = aggregateCredential;
     const recipientIdentity = record.recipientIdentity;
     const coefficientSourceRecord =
-        input.coefficientCommitmentSet.sourceTrusteeRecords[
-            recipientRosterPosition
-        ];
+        input.coefficientCommitmentSet.sourceTrusteeRecords.find(
+            (sourceRecord) =>
+                sourceRecord.sourceTrusteeRosterPosition ===
+                recipientRosterPosition,
+        );
     const recipientSourceRecord =
-        input.recipientShareCommitmentSet.sourceTrusteeRecords[
-            recipientRosterPosition
-        ];
+        input.recipientShareCommitmentSet.sourceTrusteeRecords.find(
+            (sourceRecord) =>
+                sourceRecord.sourceTrusteeRosterPosition ===
+                recipientRosterPosition,
+        );
     if (
         coefficientSourceRecord === undefined ||
         recipientSourceRecord === undefined
@@ -831,82 +951,119 @@ const createVssAggregateThresholdProofRecord = (input: {
         recipientRosterPosition,
         rnsLimbIndex,
         vssShareLinkage,
-        proofBytesHash: hash512Hex(vssAggregateThresholdProofBytesHashDomain, [
-            proofBytes,
-        ]),
         proofBytesBase64: encodeStandardBase64(proofBytes),
     };
 };
 
-export const createVssPublicAggregateThresholdCommitmentSet = (input: {
-    readonly setupContext: CollectiveBgvSetupContext;
-    readonly publicMatrixSeedHash: ProtocolHash;
-    readonly participantCount: number;
-    readonly qSharePrimes: readonly number[];
-    readonly ringDegree: number;
-    readonly coefficientCommitmentSet: VssPublicCoefficientCommitmentSet;
-    readonly recipientShareCommitmentSet: VssPublicRecipientShareCommitmentSet;
-    readonly recipientShareCredentials: readonly VssPublicRecipientShareCredential[];
-    readonly committedMaterialSeed: VssCommittedMaterialSeedProvider;
-    readonly computeVssCommittedMaterialCommitment: VssCommittedMaterialCommitmentComputer;
-    readonly aggregateThresholdProofRandomness: VssAggregateThresholdProofRandomnessProvider;
-    readonly generateVssShareLinkageProof: VssShareLinkageProofComputer;
-}): VssPublicAggregateThresholdCommitmentSet => {
-    const credentialsByCoordinate = new Map<
-        string,
-        VssPublicRecipientShareCredential[]
-    >();
-    input.recipientShareCredentials.forEach((credential) => {
-        const key = aggregateCoordinateGroupKey(
-            credential.recipientRosterPosition,
-            credential.rnsLimbIndex,
-        );
-        const group = credentialsByCoordinate.get(key);
-        if (group === undefined) {
-            credentialsByCoordinate.set(key, [credential]);
-        } else {
-            group.push(credential);
-        }
-    });
-
-    const recipientRecords: VssPublicAggregateThresholdCommitment[] = [];
-    const aggregateCredentials: VssPublicAggregateThresholdCredential[] = [];
-    for (
-        let recipientRosterPosition = 0;
-        recipientRosterPosition < input.participantCount;
-        recipientRosterPosition += 1
-    ) {
-        const recipientIdentity = `trustee-${String(recipientRosterPosition)}`;
-        const recipientPoint = recipientRosterPosition + 1;
-        input.qSharePrimes.forEach((rnsPrime, rnsLimbIndex) => {
-            const sourceCredentials = [
-                ...(credentialsByCoordinate.get(
-                    aggregateCoordinateGroupKey(
-                        recipientRosterPosition,
-                        rnsLimbIndex,
-                    ),
-                ) ?? []),
-            ].sort(
-                (left, right) =>
-                    left.sourceTrusteeRosterPosition -
-                    right.sourceTrusteeRosterPosition,
+export const createLocalTrusteeVssPublicAggregateThresholdCommitmentBundle =
+    (input: {
+        readonly setupContext: CollectiveBgvSetupContext;
+        readonly publicMatrixSeedHash: ProtocolHash;
+        readonly participantCount: number;
+        readonly qSharePrimes: readonly number[];
+        readonly ringDegree: number;
+        readonly coefficientCommitmentSet: VssPublicCoefficientCommitmentSet;
+        readonly recipientShareCommitmentSet: VssPublicRecipientShareCommitmentSet;
+        readonly localTrusteeRosterPosition: number;
+        readonly localRecipientShareCredentials: readonly VssPublicRecipientShareCredential[];
+        readonly committedMaterialSeed: VssCommittedMaterialSeedProvider;
+        readonly computeVssCommittedMaterialCommitment: VssCommittedMaterialCommitmentComputer;
+        readonly aggregateThresholdProofRandomness: VssAggregateThresholdProofRandomnessProvider;
+        readonly generateVssShareLinkageProof: VssShareLinkageProofComputer;
+    }): LocalTrusteeVssPublicAggregateThresholdCommitmentBundle => {
+        const recipientRosterPosition = input.localTrusteeRosterPosition;
+        if (
+            !Number.isSafeInteger(recipientRosterPosition) ||
+            recipientRosterPosition < 0 ||
+            recipientRosterPosition >= input.participantCount
+        ) {
+            throw new Error(
+                'Local aggregate threshold commitment requires a valid recipient roster position.',
             );
+        }
+        if (
+            input.localRecipientShareCredentials.some(
+                (credential) =>
+                    credential.recipientRosterPosition !==
+                    recipientRosterPosition,
+            )
+        ) {
+            throw new Error(
+                'Local aggregate threshold commitment accepts credentials for exactly one recipient.',
+            );
+        }
+
+        const recipientIdentity = recipientIdentityFromCommitmentSet(
+            input.recipientShareCommitmentSet,
+            recipientRosterPosition,
+        );
+        const recipientPoint = recipientRosterPosition + 1;
+
+        const recipientRecords: VssPublicAggregateThresholdCommitment[] = [];
+        const aggregateCredentials: VssPublicAggregateThresholdCredential[] =
+            [];
+        const aggregateOpeningCredentials: LocalTrusteeVssPublicAggregateOpeningCredential[] =
+            [];
+        input.qSharePrimes.forEach((rnsPrime, rnsLimbIndex) => {
+            const sourceCredentials = input.localRecipientShareCredentials
+                .filter(
+                    (credential) => credential.rnsLimbIndex === rnsLimbIndex,
+                )
+                .sort(
+                    (left, right) =>
+                        left.sourceTrusteeRosterPosition -
+                        right.sourceTrusteeRosterPosition,
+                );
             if (sourceCredentials.length !== input.participantCount) {
                 throw new Error(
-                    'Aggregate threshold commitment requires one source recipient-share commitment per trustee.',
+                    'Local aggregate threshold commitment requires one source recipient-share credential per trustee and RNS limb.',
                 );
             }
-            const sourceShareCommitmentRoots = sourceCredentials.map(
-                (credential) => credential.shareCommitmentRoot,
+            sourceCredentials.forEach(
+                (credential, sourceTrusteeRosterPosition) => {
+                    const sourceRecord =
+                        input.recipientShareCommitmentSet.sourceTrusteeRecords.find(
+                            (candidate) =>
+                                candidate.sourceTrusteeRosterPosition ===
+                                sourceTrusteeRosterPosition,
+                        );
+                    const publicRecipientShareRecord =
+                        sourceRecord?.recipientShareCommitments.find(
+                            (candidate) =>
+                                candidate.recipientRosterPosition ===
+                                    recipientRosterPosition &&
+                                candidate.rnsLimbIndex === rnsLimbIndex,
+                        );
+                    if (
+                        credential.sourceTrusteeRosterPosition !==
+                            sourceTrusteeRosterPosition ||
+                        credential.sourceTrusteeIdentity !==
+                            sourceRecord?.sourceTrusteeIdentity ||
+                        credential.rnsPrime !== rnsPrime ||
+                        credential.shareValues.length !== input.ringDegree ||
+                        credential.shareValues.some(
+                            (coefficient) =>
+                                !Number.isSafeInteger(coefficient) ||
+                                coefficient < 0 ||
+                                coefficient >= rnsPrime,
+                        ) ||
+                        credential.shareCommitmentRoot !==
+                            publicRecipientShareRecord?.shareCommitmentRoot ||
+                        credential.shareOpeningRoot !==
+                            publicRecipientShareRecord.shareOpeningRoot ||
+                        deriveCanonicalObjectHash(credential.commitment) !==
+                            credential.shareCommitmentRoot
+                    ) {
+                        throw new Error(
+                            'Local recipient-share credentials must match every accepted public recipient-share commitment.',
+                        );
+                    }
+                },
             );
-            const sourceShareOpeningRoots = sourceCredentials.map(
-                (credential) => credential.shareOpeningRoot,
-            );
-            // The threshold share is the modular sum of every source's
-            // recipient share for this recipient and limb; the integer wrap of
-            // that sum is the carry witness the aggregate proof binds.
-            // Computed in BigInt because the pre-reduction sum can approach
-            // the safe-integer range.
+
+            // The threshold share is the modular sum of every source's recipient
+            // share for this recipient and limb; the integer wrap of that sum is
+            // the carry witness the aggregate proof binds.
             const prime = BigInt(rnsPrime);
             const aggregateMessage = new Array<number>(input.ringDegree).fill(
                 0,
@@ -924,7 +1081,13 @@ export const createVssPublicAggregateThresholdCommitmentSet = (input: {
                     );
                 });
                 aggregateMessage[coefficientPosition] = Number(summed % prime);
-                wrapWitnesses[coefficientPosition] = Number(summed / prime);
+                const wrapWitness = Number(summed / prime);
+                if (!Number.isSafeInteger(wrapWitness)) {
+                    throw new Error(
+                        'Aggregate threshold commitment wrap witnesses must be safe integers.',
+                    );
+                }
+                wrapWitnesses[coefficientPosition] = wrapWitness;
             }
             const commitmentContext = {
                 objectType: 'VssPublicAggregateThresholdCommitmentContext',
@@ -934,8 +1097,6 @@ export const createVssPublicAggregateThresholdCommitmentSet = (input: {
                 recipientTrusteePoint: recipientPoint,
                 rnsLimbIndex,
                 rnsPrime,
-                sourceShareCommitmentRoots,
-                sourceShareOpeningRoots,
             };
             const materialSeedHex = input.committedMaterialSeed({
                 commitmentRole: 'aggregate-threshold-share',
@@ -963,10 +1124,21 @@ export const createVssPublicAggregateThresholdCommitmentSet = (input: {
                 aggregateCommitmentRoot: computation.commitmentRoot,
                 aggregateOpeningRoot: computation.openingRoot,
                 commitment: computation.commitment,
-                sourceShareCommitmentRoots,
-                sourceShareOpeningRoots,
             };
             recipientRecords.push(record);
+            aggregateOpeningCredentials.push({
+                objectType: 'LocalTrusteeVssPublicAggregateOpeningCredential',
+                recipientIdentity,
+                recipientRosterPosition,
+                recipientTrusteePoint: recipientPoint,
+                rnsLimbIndex,
+                rnsPrime,
+                aggregateCommitmentRoot: computation.commitmentRoot,
+                aggregateOpeningRoot: computation.openingRoot,
+                aggregateCommitmentMessageValuesLeHex:
+                    coefficientVectorToLittleEndianHex(aggregateMessage),
+                aggregateMaterialSeedHex: materialSeedHex,
+            });
             aggregateCredentials.push({
                 recipientRosterPosition,
                 rnsLimbIndex,
@@ -978,8 +1150,111 @@ export const createVssPublicAggregateThresholdCommitmentSet = (input: {
                 record,
             });
         });
+
+        const aggregateThresholdProofs = aggregateCredentials.map(
+            (aggregateCredential): VssAggregateThresholdProofRecord =>
+                createVssAggregateThresholdProofRecord({
+                    setupContext: input.setupContext,
+                    publicMatrixSeedHash: input.publicMatrixSeedHash,
+                    ringDegree: input.ringDegree,
+                    coefficientCommitmentSet: input.coefficientCommitmentSet,
+                    recipientShareCommitmentSet:
+                        input.recipientShareCommitmentSet,
+                    aggregateCredential,
+                    aggregateThresholdProofRandomness:
+                        input.aggregateThresholdProofRandomness,
+                    generateVssShareLinkageProof:
+                        input.generateVssShareLinkageProof,
+                }),
+        );
+
+        return {
+            publicAggregateThresholdCommitmentContribution: {
+                objectType: 'VssPublicAggregateThresholdCommitmentContribution',
+                trusteeIdentity: recipientIdentity,
+                trusteeRosterPosition: recipientRosterPosition,
+                recipientRecords,
+                aggregateThresholdProofs,
+            },
+            localTrusteeAggregateOpeningCredentialHandoff: {
+                trusteeIdentity: recipientIdentity,
+                trusteeRosterPosition: recipientRosterPosition,
+                aggregateOpeningCredentials,
+            },
+        };
+    };
+
+export const assembleVssPublicAggregateThresholdCommitmentSet = (input: {
+    readonly publicMatrixSeedHash: ProtocolHash;
+    readonly participantCount: number;
+    readonly qSharePrimes: readonly number[];
+    readonly ringDegree: number;
+    readonly recipientShareCommitmentSet: VssPublicRecipientShareCommitmentSet;
+    readonly publicAggregateThresholdCommitmentContributions: readonly VssPublicAggregateThresholdCommitmentContribution[];
+}): VssPublicAggregateThresholdCommitmentSet => {
+    if (
+        input.recipientShareCommitmentSet.publicMatrixSeedHash !==
+            input.publicMatrixSeedHash ||
+        input.recipientShareCommitmentSet.participantCount !==
+            input.participantCount ||
+        input.recipientShareCommitmentSet.rnsLimbCount !==
+            input.qSharePrimes.length ||
+        input.recipientShareCommitmentSet.ringDegree !== input.ringDegree ||
+        input.publicAggregateThresholdCommitmentContributions.length !==
+            input.participantCount
+    ) {
+        throw new Error(
+            'Public aggregate threshold contributions must match the accepted recipient-share commitment dimensions.',
+        );
     }
 
+    const contributions = [
+        ...input.publicAggregateThresholdCommitmentContributions,
+    ].sort(
+        (left, right) =>
+            left.trusteeRosterPosition - right.trusteeRosterPosition,
+    );
+    contributions.forEach((contribution, trusteeRosterPosition) => {
+        const trusteeIdentity = recipientIdentityFromCommitmentSet(
+            input.recipientShareCommitmentSet,
+            trusteeRosterPosition,
+        );
+        if (
+            contribution.trusteeRosterPosition !== trusteeRosterPosition ||
+            contribution.trusteeIdentity !== trusteeIdentity ||
+            contribution.recipientRecords.length !==
+                input.qSharePrimes.length ||
+            contribution.aggregateThresholdProofs.length !==
+                input.qSharePrimes.length
+        ) {
+            throw new Error(
+                'Public aggregate threshold contributions must cover every recipient and RNS limb exactly once.',
+            );
+        }
+        input.qSharePrimes.forEach((rnsPrime, rnsLimbIndex) => {
+            const record = contribution.recipientRecords[rnsLimbIndex];
+            const proof = contribution.aggregateThresholdProofs[rnsLimbIndex];
+            if (
+                record?.recipientIdentity !== trusteeIdentity ||
+                record.recipientRosterPosition !== trusteeRosterPosition ||
+                record.recipientTrusteePoint !== trusteeRosterPosition + 1 ||
+                record.rnsLimbIndex !== rnsLimbIndex ||
+                record.rnsPrime !== rnsPrime ||
+                deriveCanonicalObjectHash(record.commitment) !==
+                    record.aggregateCommitmentRoot ||
+                proof?.recipientRosterPosition !== trusteeRosterPosition ||
+                proof.rnsLimbIndex !== rnsLimbIndex
+            ) {
+                throw new Error(
+                    'Public aggregate threshold contribution coordinates and commitments must be canonical.',
+                );
+            }
+        });
+    });
+
+    const recipientRecords = contributions.flatMap(
+        (contribution) => contribution.recipientRecords,
+    );
     const setWithoutRoot = {
         objectType: 'VssPublicAggregateThresholdCommitmentSet',
         publicMatrixSeedHash: input.publicMatrixSeedHash,
@@ -988,32 +1263,13 @@ export const createVssPublicAggregateThresholdCommitmentSet = (input: {
         ringDegree: input.ringDegree,
         recipientRecords,
     };
-    const aggregateThresholdCommitmentRoot =
-        deriveCanonicalObjectHash(setWithoutRoot);
-
-    // The proven "aggregate equals sum" bindings are a sibling of the records,
-    // added after the set root so they are bound by their own statements
-    // (which reference the committed roots), not folded into the commitment
-    // set root.
-    const aggregateThresholdProofs = aggregateCredentials.map(
-        (aggregateCredential): VssAggregateThresholdProofRecord =>
-            createVssAggregateThresholdProofRecord({
-                setupContext: input.setupContext,
-                publicMatrixSeedHash: input.publicMatrixSeedHash,
-                ringDegree: input.ringDegree,
-                coefficientCommitmentSet: input.coefficientCommitmentSet,
-                recipientShareCommitmentSet: input.recipientShareCommitmentSet,
-                aggregateCredential,
-                aggregateThresholdProofRandomness:
-                    input.aggregateThresholdProofRandomness,
-                generateVssShareLinkageProof:
-                    input.generateVssShareLinkageProof,
-            }),
-    );
 
     return {
         ...setWithoutRoot,
-        aggregateThresholdCommitmentRoot,
-        aggregateThresholdProofs,
+        aggregateThresholdCommitmentRoot:
+            deriveCanonicalObjectHash(setWithoutRoot),
+        aggregateThresholdProofs: contributions.flatMap(
+            (contribution) => contribution.aggregateThresholdProofs,
+        ),
     };
 };

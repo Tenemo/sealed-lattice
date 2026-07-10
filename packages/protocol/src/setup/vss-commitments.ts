@@ -5,7 +5,8 @@
 export {
     createVssPublicCoefficientCommitmentSet,
     createVssPublicRecipientShareCommitmentSet,
-    createVssPublicAggregateThresholdCommitmentSet,
+    createLocalTrusteeVssPublicAggregateThresholdCommitmentBundle,
+    assembleVssPublicAggregateThresholdCommitmentSet,
 } from './vss-commitments/commitment-sets.js';
 export type {
     VssCommittedMaterialCommitmentValue,
@@ -15,6 +16,8 @@ export type {
     VssPublicCoefficientCommitmentSet,
     VssPublicRecipientShareCommitmentSet,
     VssPublicAggregateThresholdCommitmentSet,
+    LocalTrusteeVssPublicAggregateThresholdCommitmentBundle,
+    LocalTrusteeVssPublicAggregateOpeningCredentialHandoff,
     VssPublicSourceTrusteeOpeningState,
     VssPublicCoefficientCredential,
 } from './vss-commitments/commitment-sets.js';
@@ -27,6 +30,7 @@ export {
 } from './vss-commitments/linkage-and-bridge.js';
 export type {
     VssShareLinkageStatement,
+    VssSameSecretBridgeProofMaterialSet,
     VssSameSecretBridgeStatementSet,
     SameSecretBridgeProofComputer,
 } from './vss-commitments/linkage-and-bridge.js';

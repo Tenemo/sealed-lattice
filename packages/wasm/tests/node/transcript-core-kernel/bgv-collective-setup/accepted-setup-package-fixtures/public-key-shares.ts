@@ -13,7 +13,6 @@ import {
     type PublicKeyShareProofSet,
     type PublicKeyShareSet,
 } from '#packages/protocol/src/setup/public-key-share-records';
-import { type SameSecretConsistencyStatementSet } from '#packages/protocol/src/setup/same-secret-consistency-records';
 import { type CollectiveBgvSetupContext } from '#packages/protocol/src/setup/vss-share-verification-records';
 import type { BgvCollectiveSetupParametersDescription } from '#packages/wasm/src/index';
 
@@ -88,7 +87,6 @@ export function acceptedPublicKeyShares(
     setupContext: CollectiveBgvSetupContext,
     parameters: BgvCollectiveSetupParametersDescription,
     commonRandomness: JsonRecord,
-    sameSecretConsistency: SameSecretConsistencyStatementSet,
 ): PublicKeyShareSet {
     const publicMatrixSeedHash = String(commonRandomness.publicMatrixSeedHash);
     const publicDerivations = commonRandomness.publicDerivations as JsonRecord;
@@ -104,7 +102,6 @@ export function acceptedPublicKeyShares(
         publicMatrixSeedHash,
         publicKeyCrpRoot,
         publicAPolynomialRoot,
-        sameSecretConsistency,
         shareContributions: publicKeyShareContributionsFromMaterial(
             acceptedPublicKeyShareMaterialContributions(parameters),
         ),
@@ -115,7 +112,6 @@ export function acceptedPublicKeyShareProofs(
     setupContext: CollectiveBgvSetupContext,
     parameters: BgvCollectiveSetupParametersDescription,
     commonRandomness: JsonRecord,
-    sameSecretConsistency: SameSecretConsistencyStatementSet,
     publicKeyShares: PublicKeyShareSet,
 ): PublicKeyShareProofSet {
     const publicMatrixSeedHash = String(commonRandomness.publicMatrixSeedHash);
@@ -132,7 +128,6 @@ export function acceptedPublicKeyShareProofs(
         publicMatrixSeedHash,
         publicKeyCrpRoot,
         publicAPolynomialRoot,
-        sameSecretConsistency,
         publicKeyShares,
     });
 }

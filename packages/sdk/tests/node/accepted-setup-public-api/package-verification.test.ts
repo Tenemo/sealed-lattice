@@ -11,33 +11,21 @@ const setupVerificationBindings = {
 } as const;
 
 type SetupProofMaterialTransportFieldName =
-    | 'transportedSameSecretProofMaterial'
     | 'transportedPublicKeyShareProofMaterial'
     | 'transportedEvaluationKeyShareProofMaterial';
 
 type SetupProofMaterialTransportCase = Readonly<{
     readonly fieldName: SetupProofMaterialTransportFieldName;
     readonly materialSetObjectType:
-        | 'SetupTransportedSameSecretProofMaterialSet'
         | 'SetupTransportedPublicKeyShareProofMaterialSet'
         | 'SetupTransportedEvaluationKeyShareProofMaterialSet';
     readonly materialObjectType:
-        | 'SetupTransportedSameSecretProofMaterial'
         | 'SetupTransportedPublicKeyShareProofMaterial'
         | 'SetupTransportedEvaluationKeyShareProofMaterial';
-    readonly proofFamily:
-        | 'same-secret-linkage-anchor'
-        | 'public-key-share'
-        | 'trustee-evaluation-key';
+    readonly proofFamily: 'public-key-share' | 'trustee-evaluation-key';
 }>;
 
 const setupProofMaterialTransportCases = [
-    {
-        fieldName: 'transportedSameSecretProofMaterial',
-        materialSetObjectType: 'SetupTransportedSameSecretProofMaterialSet',
-        materialObjectType: 'SetupTransportedSameSecretProofMaterial',
-        proofFamily: 'same-secret-linkage-anchor',
-    },
     {
         fieldName: 'transportedPublicKeyShareProofMaterial',
         materialSetObjectType: 'SetupTransportedPublicKeyShareProofMaterialSet',
@@ -216,17 +204,13 @@ describe('accepted setup public package API in Node', () => {
             publicSetupApi.createSetupPackageVerificationInput({
                 setupPackage,
                 ...setupVerificationBindings,
-                transportedSameSecretProofMaterial:
+                transportedPublicKeyShareProofMaterial:
                     transportedSetupProofMaterialSet(
                         setupProofMaterialTransportCases[0],
                     ),
-                transportedPublicKeyShareProofMaterial:
-                    transportedSetupProofMaterialSet(
-                        setupProofMaterialTransportCases[1],
-                    ),
                 transportedEvaluationKeyShareProofMaterial:
                     transportedSetupProofMaterialSet(
-                        setupProofMaterialTransportCases[2],
+                        setupProofMaterialTransportCases[1],
                     ),
                 ...publicCompanions,
                 verifiedSetupProofMaterials: verifiedSetupProofMaterials(),
@@ -272,17 +256,13 @@ describe('accepted setup public package API in Node', () => {
             publicSetupApi.createSetupPackageVerificationInput({
                 setupPackage,
                 ...setupVerificationBindings,
-                transportedSameSecretProofMaterial:
+                transportedPublicKeyShareProofMaterial:
                     transportedSetupProofMaterialSet(
                         setupProofMaterialTransportCases[0],
                     ),
-                transportedPublicKeyShareProofMaterial:
-                    transportedSetupProofMaterialSet(
-                        setupProofMaterialTransportCases[1],
-                    ),
                 transportedEvaluationKeyShareProofMaterial:
                     transportedSetupProofMaterialSet(
-                        setupProofMaterialTransportCases[2],
+                        setupProofMaterialTransportCases[1],
                     ),
                 verifiedSetupProofMaterials: verifiedSetupProofMaterials(
                     (transportCase) =>

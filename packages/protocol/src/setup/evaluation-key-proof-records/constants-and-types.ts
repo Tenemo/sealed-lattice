@@ -5,6 +5,7 @@ import {
     type RelinearizationLevelScheduleEntry,
     type RequiredGaloisKeyScheduleEntry,
 } from '../evaluator-key-schedule.js';
+import type { VssSameSecretBridgeStatementSet } from '../vss-commitments/linkage-and-bridge.js';
 import type { CollectiveBgvSetupContext } from '../vss-share-verification-records.js';
 
 export type JsonRecord = Record<string, unknown>;
@@ -54,12 +55,9 @@ export const publicEvaluationKeyMaterialMagic = new Uint8Array([
 ]);
 export const textEncoder = new TextEncoder();
 
-export type SameSecretProofReference = Readonly<{
+export type EvaluationKeyTrusteeReference = Readonly<{
     readonly trusteeIdentity: string;
     readonly trusteeRosterPosition: number;
-    readonly sameSecretStatementRoot: ProtocolHash;
-    readonly trusteeSecretCommitmentRoot: ProtocolHash;
-    readonly sameSecretProofRoot: ProtocolHash;
 }>;
 
 export type KeySwitchComponentVectorEntry = Readonly<JsonRecord>;
@@ -129,13 +127,7 @@ export type RelinearizationKeyShareRoundOneRecord = Readonly<
         readonly trusteeRosterPosition: number;
         readonly level: number;
         readonly evaluatorKeyScheduleRoot: ProtocolHash;
-        readonly sameSecretConsistencyRoot: ProtocolHash;
-        readonly sameSecretProofSetRoot: ProtocolHash;
-        readonly sameSecretProofFamilyBindingRoot: ProtocolHash;
         readonly publicKeyShareSuccinctProofSetRoot: ProtocolHash;
-        readonly sameSecretStatementRoot: ProtocolHash;
-        readonly trusteeSecretCommitmentRoot: ProtocolHash;
-        readonly sameSecretProofRoot: ProtocolHash;
         readonly relinearizationCrpRoot: ProtocolHash;
         readonly keySwitchDomain: string;
         readonly keySwitchSeedHex: string;
@@ -154,13 +146,7 @@ export type RelinearizationKeyShareRoundTwoRecord = Readonly<
         readonly trusteeRosterPosition: number;
         readonly level: number;
         readonly evaluatorKeyScheduleRoot: ProtocolHash;
-        readonly sameSecretConsistencyRoot: ProtocolHash;
-        readonly sameSecretProofSetRoot: ProtocolHash;
-        readonly sameSecretProofFamilyBindingRoot: ProtocolHash;
         readonly publicKeyShareSuccinctProofSetRoot: ProtocolHash;
-        readonly sameSecretStatementRoot: ProtocolHash;
-        readonly trusteeSecretCommitmentRoot: ProtocolHash;
-        readonly sameSecretProofRoot: ProtocolHash;
         readonly relinearizationCrpRoot: ProtocolHash;
         readonly keySwitchDomain: string;
         readonly keySwitchSeedHex: string;
@@ -181,9 +167,6 @@ export type RelinearizationKeyShareRounds = Readonly<
         readonly participantCount: number;
         readonly rnsLimbCount: number;
         readonly evaluatorKeyScheduleRoot: ProtocolHash;
-        readonly sameSecretConsistencyRoot: ProtocolHash;
-        readonly sameSecretProofSetRoot: ProtocolHash;
-        readonly sameSecretProofFamilyBindingRoot: ProtocolHash;
         readonly publicKeyShareSetRoot: ProtocolHash;
         readonly publicKeyShareSuccinctProofSetRoot: ProtocolHash;
         readonly relinearizationCrpRoot: ProtocolHash;
@@ -231,13 +214,7 @@ export type GaloisKeyShareBatch = Readonly<
         readonly trusteeIdentity: string;
         readonly trusteeRosterPosition: number;
         readonly evaluatorKeyScheduleRoot: ProtocolHash;
-        readonly sameSecretConsistencyRoot: ProtocolHash;
-        readonly sameSecretProofSetRoot: ProtocolHash;
-        readonly sameSecretProofFamilyBindingRoot: ProtocolHash;
         readonly publicKeyShareSuccinctProofSetRoot: ProtocolHash;
-        readonly sameSecretStatementRoot: ProtocolHash;
-        readonly trusteeSecretCommitmentRoot: ProtocolHash;
-        readonly sameSecretProofRoot: ProtocolHash;
         readonly galoisKeyCrpRoot: ProtocolHash;
         readonly requiredGaloisSetHash: ProtocolHash;
         readonly requiredGaloisKeySchedule: readonly RequiredGaloisKeyScheduleEntry[];
@@ -266,9 +243,6 @@ export type TrusteeEvaluationKeyProofRecord = Readonly<
         readonly proofFamily: typeof trusteeEvaluationKeyProofFamily;
         readonly trusteeIdentity: string;
         readonly trusteeRosterPosition: number;
-        readonly sameSecretStatementRoot: ProtocolHash;
-        readonly trusteeSecretCommitmentRoot: ProtocolHash;
-        readonly sameSecretProofRoot: ProtocolHash;
         readonly statementHash: ProtocolHash;
         readonly proofBytesHash: ProtocolHash;
         readonly trusteeEvaluationKeyProofRoot: ProtocolHash;
@@ -287,9 +261,6 @@ export type TrusteeEvaluationKeyProofSet = Readonly<
         readonly evaluatorKeyScheduleRoot: ProtocolHash;
         readonly requiredGaloisSetHash: ProtocolHash;
         readonly keySwitchDecompositionHash: ProtocolHash;
-        readonly sameSecretConsistencyRoot: ProtocolHash;
-        readonly sameSecretProofSetRoot: ProtocolHash;
-        readonly sameSecretProofFamilyBindingRoot: ProtocolHash;
         readonly publicKeyShareSetRoot: ProtocolHash;
         readonly publicKeyShareSuccinctProofSetRoot: ProtocolHash;
         readonly relinearizationCrpRoot: ProtocolHash;
@@ -333,8 +304,7 @@ export type TrusteeEvaluationKeyStatementContext = Readonly<{
     readonly requiredGaloisSetHash: ProtocolHash;
     readonly evaluatorKeyScheduleRoot: ProtocolHash;
     readonly keySwitchDecompositionHash: ProtocolHash;
-    readonly sameSecretStatementRoot: ProtocolHash;
-    readonly sameSecretProofRoot: ProtocolHash;
+    readonly sourceConstantCoefficientCommitmentRoot: ProtocolHash;
 }>;
 
 export type TrusteeEvaluationKeyProofGenerationOutput = Readonly<{
@@ -350,14 +320,9 @@ export type TrusteeEvaluationKeyProofGenerator = (
         readonly context: TrusteeEvaluationKeyStatementContext;
         readonly ringDegree: number;
         readonly keys: readonly TrusteeEvaluationKeyStatementKey[];
-        readonly sameSecretBridge: Readonly<{
+        readonly sameSecretLinkage: Readonly<{
             readonly publicMatrixSeedHash: ProtocolHash;
-            readonly targetBasisHash: ProtocolHash;
-            readonly sourceTrusteeIdentity: string;
-            readonly sourceTrusteeRosterPosition: number;
-            readonly targetRnsPrimes: readonly number[];
-            readonly targetConstantCommitmentRoots: readonly ProtocolHash[];
-            readonly targetConstantCommitments: readonly JsonRecord[];
+            readonly commitments: readonly JsonRecord[];
         }>;
         readonly secretCoefficients: readonly number[];
         readonly errorCoefficientsByKey: readonly (readonly (readonly number[])[])[];
@@ -372,28 +337,14 @@ export type TrusteeEvaluationKeyProofGenerator = (
 // shared ternary secret, per-key centered-binomial errors in statement key
 // order (relinearization round-one levels ascending, round-two levels
 // ascending, then the frozen Galois schedule), the binary negative-coefficient
-// indicator, and the ternary opening randomness for the bridge target constant
-// commitments the schedule's linkage opens, one column set per bridge target
-// limb.
+// indicator, and the five ternary opening-randomness columns for the original
+// source-limb-zero BDLOP constant commitment the schedule opens.
 export type TrusteeEvaluationKeyWitnessInput = Readonly<{
     readonly trusteeRosterPosition: number;
     readonly secretCoefficients: readonly number[];
     readonly errorCoefficientsByKey: readonly (readonly (readonly number[])[])[];
     readonly negativeIndicatorCoefficients: readonly number[];
     readonly openingRandomnessByLimb: readonly (readonly (readonly number[])[])[];
-}>;
-
-// One trustee's same-secret bridge anchor: the target-basis constant
-// coefficient commitments the atom schedule's linkage opens, with their
-// canonical roots. Public statement material, sourced from the assembled
-// same-secret bridge statement set.
-export type TrusteeSameSecretBridgeAnchorInput = Readonly<{
-    readonly trusteeRosterPosition: number;
-    readonly publicMatrixSeedHash: ProtocolHash;
-    readonly targetBasisHash: ProtocolHash;
-    readonly targetRnsPrimes: readonly number[];
-    readonly targetConstantCommitmentRoots: readonly ProtocolHash[];
-    readonly targetConstantCommitments: readonly JsonRecord[];
 }>;
 
 export type RelinearizationKeyRootReference = Readonly<{
@@ -491,7 +442,6 @@ export type PublicEvaluationKeySet = Readonly<
         readonly participantCount: number;
         readonly rnsLimbCount: number;
         readonly evaluatorKeyScheduleRoot: ProtocolHash;
-        readonly sameSecretProofFamilyBindingRoot: ProtocolHash;
         readonly publicKeyShareSuccinctProofSetRoot: ProtocolHash;
         readonly relinearizationKeyShareRoundsRoot: ProtocolHash;
         readonly relinearizationLevelSchedule: readonly RelinearizationLevelScheduleEntry[];
@@ -603,10 +553,7 @@ export type BinaryChunkedEvaluationKeyShareMaterialTransport = Readonly<{
 }>;
 
 export type EvaluationKeyShareMaterialTransportInput = Readonly<{
-    readonly sameSecretProofReferences: readonly Pick<
-        SameSecretProofReference,
-        'trusteeIdentity' | 'trusteeRosterPosition'
-    >[];
+    readonly trusteeReferences: readonly EvaluationKeyTrusteeReference[];
     readonly relinearizationRoundOneContributions: readonly RelinearizationRoundOneContribution[];
     readonly relinearizationRoundTwoContributions: readonly RelinearizationRoundTwoContribution[];
     readonly galoisKeyShareBatchContributions: readonly GaloisKeyShareBatchContribution[];
@@ -617,10 +564,8 @@ export type EvaluationKeyProofCommonInput = Readonly<{
     readonly qSharePrimes: readonly number[];
     readonly participantCount: number;
     readonly evaluatorKeySchedule: EvaluatorKeySchedule;
-    readonly sameSecretProofSetRoot: ProtocolHash;
-    readonly sameSecretProofFamilyBindingRoot: ProtocolHash;
     readonly publicKeyShareSuccinctProofSetRoot: ProtocolHash;
-    readonly sameSecretProofReferences: readonly SameSecretProofReference[];
+    readonly trusteeReferences: readonly EvaluationKeyTrusteeReference[];
 }>;
 
 export type RelinearizationKeyShareRoundsInput = EvaluationKeyProofCommonInput &
@@ -640,7 +585,7 @@ export type TrusteeEvaluationKeyProofsInput = EvaluationKeyProofCommonInput &
         readonly galoisKeyShareBatches: readonly GaloisKeyShareBatch[];
         readonly keySwitchDecompositionHash: ProtocolHash;
         readonly trusteeWitnesses: readonly TrusteeEvaluationKeyWitnessInput[];
-        readonly sameSecretBridgeAnchors: readonly TrusteeSameSecretBridgeAnchorInput[];
+        readonly sameSecretBridgeStatementSet: VssSameSecretBridgeStatementSet;
         readonly trusteeEvaluationKeyProofGenerator: TrusteeEvaluationKeyProofGenerator;
         readonly transportedEvaluationKeyShareComponentMaterial?: TransportedEvaluationKeyShareComponentMaterialSet;
         // Raw chunk bytes for the transported evaluation-key component material,

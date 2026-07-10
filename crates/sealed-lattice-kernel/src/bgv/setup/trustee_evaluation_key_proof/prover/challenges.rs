@@ -10,9 +10,6 @@ use super::super::relation::{
 use super::super::*;
 use super::polynomial::{extension_powers, negacyclic_transpose_product_extension_matrix};
 use crate::bgv::modular_arithmetic::pow_mod;
-use crate::bgv::setup::commitment::{
-    SETUP_COMMITMENT_RANDOMNESS_WIDTH, SETUP_COMMITMENT_ROW_COUNT,
-};
 
 // Public per-limb sumcheck vectors, shared by prover and verifier: per
 // repetition the combined secret factor and power vector, the consistency
@@ -34,8 +31,69 @@ pub(in super::super) struct LimbChallenges {
     pub(in super::super) lincheck_challenges: Vec<ChallengeExtensionElement>,
     pub(in super::super) lincheck_alpha: Vec<ChallengeExtensionElement>,
     pub(in super::super) linkage_alpha: Vec<ChallengeExtensionElement>,
+    pub(in super::super) same_secret_bridge_alpha: Vec<ChallengeExtensionElement>,
     pub(in super::super) consistency_alpha: Vec<ChallengeExtensionElement>,
     pub(in super::super) beta: Vec<ChallengeExtensionElement>,
+}
+
+fn build_combined_same_secret_bridge_public_vectors(
+    statement: &TrusteeEvaluationKeyStatement,
+    layout: &LimbColumnLayout,
+    limb_index: usize,
+    modulus: u64,
+    challenges: &LimbChallenges,
+    u_power_vectors: &[Vec<ChallengeExtensionElement>],
+    tower: &ChallengeExtensionTower,
+) -> CanonicalResult<(
+    ChallengeExtensionElement,
+    Vec<Vec<ChallengeExtensionElement>>,
+)> {
+    let same_secret_bridge = statement.same_secret_bridge.as_ref().ok_or_else(|| {
+        invalid_succinct_setup_proof("limb layout expects a same-secret bridge statement")
+    })?;
+    let (bridge_claim, mut combined_vectors) = build_same_secret_bridge_public_vectors(
+        SameSecretBridgePublicVectorInput {
+            modulus,
+            ring_degree: layout.ring_degree,
+            target_rns_primes: &same_secret_bridge.target_rns_primes,
+            target_constant_commitments: &same_secret_bridge.target_constant_commitments,
+            relation_alpha: &challenges.same_secret_bridge_alpha,
+            u_power_vectors,
+        },
+        tower,
+    )?;
+    if !layout.linkage_active() {
+        return Ok((bridge_claim, combined_vectors));
+    }
+
+    let linkage = statement.same_secret_linkage.as_ref().ok_or_else(|| {
+        invalid_succinct_setup_proof(
+            "same-secret bridge layout expects the source commitment linkage",
+        )
+    })?;
+    let (linkage_claim, linkage_vectors) = build_linkage_public_vectors(
+        linkage,
+        limb_index,
+        tower,
+        u_power_vectors,
+        &challenges.linkage_alpha,
+    )?;
+    if combined_vectors.len() < 2 || linkage_vectors.len() < 2 {
+        return Err(invalid_succinct_setup_proof(
+            "same-secret bridge public vectors are missing their shared secret columns",
+        ));
+    }
+    for shared_vector_index in 0..2 {
+        for (combined_value, linkage_value) in combined_vectors[shared_vector_index]
+            .iter_mut()
+            .zip(linkage_vectors[shared_vector_index].iter())
+        {
+            *combined_value = tower.add(combined_value, linkage_value);
+        }
+    }
+    combined_vectors.extend(linkage_vectors.into_iter().skip(2));
+
+    Ok((tower.add(&bridge_claim, &linkage_claim), combined_vectors))
 }
 
 fn mask_digit_weight(
@@ -68,6 +126,15 @@ pub(in super::super) fn draw_limb_challenges(
         modulus,
         layout.active_keys.len() * LINCHECK_REPETITIONS,
     );
+    let same_secret_bridge_alpha = if layout.same_secret_bridge_material_active() {
+        transcript.challenge_extension_elements(
+            "same-secret-bridge-alpha",
+            modulus,
+            layout.same_secret_bridge_relation_count(),
+        )
+    } else {
+        Vec::new()
+    };
     let linkage_alpha = if layout.private_vss_active() {
         transcript.challenge_extension_elements(
             "private-vss-relation-alpha",
@@ -80,12 +147,6 @@ pub(in super::super) fn draw_limb_challenges(
             modulus,
             layout.vss_public_relation_count(),
         )
-    } else if layout.same_secret_bridge_material_active() {
-        transcript.challenge_extension_elements(
-            "same-secret-bridge-alpha",
-            modulus,
-            layout.same_secret_bridge_relation_count(),
-        )
     } else if layout.target_decryption_active() {
         transcript.challenge_extension_elements(
             "target-decryption-share-alpha",
@@ -93,12 +154,15 @@ pub(in super::super) fn draw_limb_challenges(
             layout.target_decryption_relation_count,
         )
     } else if layout.linkage_active() {
-        let commitment_count =
-            layout.linkage_randomness_columns / SETUP_COMMITMENT_RANDOMNESS_WIDTH;
+        let challenge_label = if layout.same_secret_bridge_material_active() {
+            "same-secret-source-linkage-alpha"
+        } else {
+            "linkage-alpha"
+        };
         transcript.challenge_extension_elements(
-            "linkage-alpha",
+            challenge_label,
             modulus,
-            commitment_count * SETUP_COMMITMENT_ROW_COUNT * LINCHECK_REPETITIONS,
+            layout.linkage_relation_count(),
         )
     } else {
         Vec::new()
@@ -116,6 +180,7 @@ pub(in super::super) fn draw_limb_challenges(
         lincheck_challenges,
         lincheck_alpha,
         linkage_alpha,
+        same_secret_bridge_alpha,
         consistency_alpha,
         beta,
     }
@@ -217,9 +282,6 @@ pub(in super::super) fn build_limb_public_vectors(
         });
     }
     if layout.same_secret_bridge_active() {
-        let same_secret_bridge = statement.same_secret_bridge.as_ref().ok_or_else(|| {
-            invalid_succinct_setup_proof("same-secret bridge layout requires a bridge statement")
-        })?;
         let mut combined_claim = ChallengeExtensionTower::zero();
         let mut mask_selectors = vec![extension_zero_vector(); layout.mask_column_count];
         for (local_claim, alpha_value) in challenges.consistency_alpha.iter().enumerate() {
@@ -235,16 +297,8 @@ pub(in super::super) fn build_limb_public_vectors(
                     tower.add(&mask_selectors[column][position], &digit_weight);
             }
         }
-        let (bridge_claim, relation_vectors) = build_same_secret_bridge_public_vectors(
-            SameSecretBridgePublicVectorInput {
-                modulus,
-                ring_degree,
-                target_rns_primes: &same_secret_bridge.target_rns_primes,
-                target_constant_commitments: &same_secret_bridge.target_constant_commitments,
-                relation_alpha: &challenges.linkage_alpha,
-                u_power_vectors: &u_powers,
-            },
-            &tower,
+        let (bridge_claim, relation_vectors) = build_combined_same_secret_bridge_public_vectors(
+            statement, layout, limb_index, modulus, challenges, &u_powers, &tower,
         )?;
         combined_claim = tower.add(&combined_claim, &bridge_claim);
 
@@ -386,19 +440,8 @@ pub(in super::super) fn build_limb_public_vectors(
 
     let mut linkage_vectors = Vec::new();
     if layout.same_secret_bridge_material_active() {
-        let same_secret_bridge = statement.same_secret_bridge.as_ref().ok_or_else(|| {
-            invalid_succinct_setup_proof("limb layout expects a bridge statement")
-        })?;
-        let (bridge_claim, vectors) = build_same_secret_bridge_public_vectors(
-            SameSecretBridgePublicVectorInput {
-                modulus,
-                ring_degree,
-                target_rns_primes: &same_secret_bridge.target_rns_primes,
-                target_constant_commitments: &same_secret_bridge.target_constant_commitments,
-                relation_alpha: &challenges.linkage_alpha,
-                u_power_vectors: &u_powers,
-            },
-            &tower,
+        let (bridge_claim, vectors) = build_combined_same_secret_bridge_public_vectors(
+            statement, layout, limb_index, modulus, challenges, &u_powers, &tower,
         )?;
         combined_claim = tower.add(&combined_claim, &bridge_claim);
         linkage_vectors = vectors;

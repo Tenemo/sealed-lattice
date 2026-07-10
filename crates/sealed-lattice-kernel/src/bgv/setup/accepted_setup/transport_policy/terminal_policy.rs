@@ -33,11 +33,6 @@ pub(in crate::bgv::setup) fn verify_terminal_setup_transport_policy(
     }
     for (record_set_name, records_field_name, object_path) in [
         (
-            "sameSecretProofs",
-            "proofRecords",
-            "setupPackage.sameSecretProofs.proofRecords",
-        ),
-        (
             "publicKeyShareSuccinctProofs",
             "proofRecords",
             "setupPackage.publicKeyShareSuccinctProofs.proofRecords",

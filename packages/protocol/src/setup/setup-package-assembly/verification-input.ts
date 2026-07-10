@@ -18,11 +18,6 @@ export const createSetupPackageVerificationInput = (
     assertProtocolHash(input.expectedManifestHash, 'expectedManifestHash');
     assertProtocolHash(input.expectedRosterHash, 'expectedRosterHash');
 
-    const transportedSameSecretProofMaterial =
-        chunklessSetupProofMaterialSetForVerificationInput(
-            input.transportedSameSecretProofMaterial,
-            input.verifiedSetupProofMaterials,
-        );
     const transportedPublicKeyShareProofMaterial =
         chunklessSetupProofMaterialSetForVerificationInput(
             input.transportedPublicKeyShareProofMaterial,
@@ -48,12 +43,6 @@ export const createSetupPackageVerificationInput = (
         setupPackage: input.setupPackage,
         expectedManifestHash: input.expectedManifestHash,
         expectedRosterHash: input.expectedRosterHash,
-        ...(transportedSameSecretProofMaterial === undefined
-            ? {}
-            : {
-                  transportedSameSecretProofMaterial:
-                      transportedSameSecretProofMaterial,
-              }),
         ...(input.transportedPublicKeyShareMaterial === undefined
             ? {}
             : {

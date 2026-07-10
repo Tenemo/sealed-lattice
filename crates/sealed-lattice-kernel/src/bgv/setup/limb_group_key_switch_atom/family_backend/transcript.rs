@@ -130,6 +130,27 @@ impl Transcript {
             .collect()
     }
 
+    // Uniform base-field residues by rejection from 64-bit transcript words.
+    // The BDLOP lincheck uses these to reproduce the established extension
+    // challenge distribution instead of reducing with a measurable bias.
+    pub(super) fn challenge_residues(
+        &mut self,
+        label: &str,
+        modulus: u64,
+        count: usize,
+    ) -> Vec<u64> {
+        debug_assert!(modulus > 1);
+        let accepted_range = u64::MAX - (u64::MAX % modulus);
+        let mut residues = Vec::with_capacity(count);
+        while residues.len() < count {
+            let word = self.squeeze_words(label, 1)[0];
+            if word < accepted_range {
+                residues.push(word % modulus);
+            }
+        }
+        residues
+    }
+
     // Query positions in `[0, range)`; `range` must be a power of two, so
     // masking is unbiased.
     pub(super) fn challenge_positions(

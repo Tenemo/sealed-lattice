@@ -2,7 +2,6 @@ use super::super::*;
 use super::*;
 use rayon::prelude::*;
 
-use super::vss_public_material::vss_public_coefficient_randomness_i64_fixture;
 use crate::hashing::derive_canonical_object_hash;
 
 pub(in super::super) fn collective_public_key_object(
@@ -78,9 +77,6 @@ pub(in super::super) fn collective_public_key_object(
         "publicMatrixSeedHash": package["commonRandomness"]["publicMatrixSeedHash"],
         "publicKeyCrpRoot": package["commonRandomness"]["publicDerivations"]["crpRoots"]["publicKeyCrpRoot"],
         "publicAPolynomialRoot": package["commonRandomness"]["publicDerivations"]["bgvPublicA"]["publicPolynomialRoot"],
-        "sameSecretConsistencyRoot": package["sameSecretConsistency"]["sameSecretConsistencyRoot"],
-        "sameSecretProofSetRoot": package["sameSecretProofs"]["sameSecretProofSetRoot"],
-        "sameSecretProofFamilyBindingRoot": package["sameSecretConsistency"]["sameSecretProofFamilyBindingRoot"],
         "publicKeyShareSetRoot": package["publicKeyShares"]["publicKeyShareSetRoot"],
         "publicKeyShareProofSetRoot": package["publicKeyShareProofs"]["publicKeyShareProofSetRoot"],
         "publicKeyShareMaterialSetRoot": package["publicKeyShareMaterial"]["publicKeyShareMaterialSetRoot"],
@@ -102,8 +98,7 @@ pub(in super::super) fn replace_public_key_share_hashes_with_material_hashes(
         .as_str()
         .expect("public matrix seed hash")
         .to_string();
-    let ring_degree =
-        same_secret_constant_commitments_from_fixture_package(package, 0)[0].ring_degree;
+    let ring_degree = source_constant_commitments_from_fixture_package(package, 0)[0].ring_degree;
     let participant_count = participant_count_from_package(package);
     for trustee_roster_position in 0..participant_count {
         let (coefficients_by_limb, _) = public_key_share_coefficients_and_errors_for_fixture(
@@ -159,8 +154,7 @@ pub(in super::super) fn public_key_share_material_object(
         package["commonRandomness"]["publicDerivations"]["bgvPublicA"]["publicPolynomialRoot"]
             .as_str()
             .expect("public a root");
-    let ring_degree =
-        same_secret_constant_commitments_from_fixture_package(package, 0)[0].ring_degree;
+    let ring_degree = source_constant_commitments_from_fixture_package(package, 0)[0].ring_degree;
     let participant_count = participant_count_from_package(package);
     let mut material_records = Vec::new();
     let mut material_roots = Vec::new();
@@ -313,8 +307,8 @@ pub(in super::super) fn public_key_share_succinct_proofs_object(
 ) -> serde_json::Value {
     use crate::bgv::setup::trustee_evaluation_key_proof::{
         EvaluationKeyShareDescriptor, PUBLIC_KEY_SHARE_COMMON_REFERENCE_LABEL,
-        PUBLIC_KEY_SHARE_PROOF_FAMILY, SameSecretLinkageStatement, SuccinctSetupProofContext,
-        TrusteeEvaluationKeyStatement, public_key_share_succinct_proof_bytes_hash,
+        PUBLIC_KEY_SHARE_PROOF_FAMILY, SuccinctSetupProofContext, TrusteeEvaluationKeyStatement,
+        public_key_share_succinct_proof_bytes_hash,
     };
     let setup_context = &package["setupContext"];
     let public_matrix_seed_hash = package["commonRandomness"]["publicMatrixSeedHash"]
@@ -328,12 +322,6 @@ pub(in super::super) fn public_key_share_succinct_proofs_object(
         package["commonRandomness"]["publicDerivations"]["bgvPublicA"]["publicPolynomialRoot"]
             .as_str()
             .expect("public a root");
-    let statement_records = package["sameSecretConsistency"]["statementRecords"]
-        .as_array()
-        .expect("same-secret statement records");
-    let same_secret_proof_records = package["sameSecretProofs"]["proofRecords"]
-        .as_array()
-        .expect("same-secret proof records");
     let share_records = package["publicKeyShares"]["shareRecords"]
         .as_array()
         .expect("public-key share records");
@@ -344,122 +332,31 @@ pub(in super::super) fn public_key_share_succinct_proofs_object(
         .as_array()
         .expect("public-key material records");
     let participant_count = participant_count_from_package(package);
-    // Terminal public-key-share proofs anchor to the verified same-secret bridge
-    // material that the accepted-setup verifier reconstructs. The package embeds
-    // the bridge proof material, so an empty transport request reconstructs it.
-    let verified_same_secret_bridge = package.get("sameSecretBridgeStatementSet").map(|_| {
+    // Terminal public-key-share proofs bind the verified same-secret bridge
+    // material that the accepted-setup verifier reconstructs.
+    let verified_same_secret_bridge =
         crate::bgv::setup::accepted_setup::verified_same_secret_bridge_material_from_package(
             package,
             &serde_json::json!({}),
         )
-        .expect("same-secret bridge material")
-    });
+        .expect("same-secret bridge material");
     let per_trustee_records = (0..participant_count)
         .into_par_iter()
         .map(|trustee_roster_position| {
         let trustee_identity = format!("trustee-{trustee_roster_position}");
-        let statement_record = &statement_records[trustee_roster_position as usize];
-        let same_secret_proof_record = &same_secret_proof_records[trustee_roster_position as usize];
         let share_record = &share_records[trustee_roster_position as usize];
         let proof_statement_record = &proof_statement_records[trustee_roster_position as usize];
         let material_record = &material_records[trustee_roster_position as usize];
-        let (ring_degree, same_secret_linkage, same_secret_bridge, opening_randomness_by_limb) =
-            if let Some(verified_same_secret_bridge) =
-                verified_same_secret_bridge.as_ref()
-            {
-                let bridge_binding = verified_same_secret_bridge
-                    .statement_for_roster_position(trustee_roster_position)
-                    .expect("same-secret bridge statement binding");
-                assert_eq!(bridge_binding.trustee_identity, trustee_identity);
-                assert_eq!(
-                    bridge_binding.trustee_secret_commitment_root.as_str(),
-                    statement_record["trusteeSecretCommitmentRoot"]
-                        .as_str()
-                        .expect("trustee secret commitment root")
-                );
-                assert_eq!(
-                    bridge_binding.same_secret_statement_root.as_str(),
-                    statement_record["sameSecretStatementRoot"]
-                        .as_str()
-                        .expect("same-secret statement root")
-                );
-                assert_eq!(
-                    bridge_binding.same_secret_proof_root.as_str(),
-                    same_secret_proof_record["sameSecretProofRoot"]
-                        .as_str()
-                        .expect("same-secret proof root")
-                );
-                assert_eq!(
-                    bridge_binding
-                        .same_secret_proof_family_binding_root
-                        .as_str(),
-                    same_secret_proof_record["sameSecretProofFamilyBindingRoot"]
-                        .as_str()
-                        .expect("same-secret proof family binding root")
-                );
-                let ring_degree = package["sameSecretBridgeStatementSet"]["ringDegree"]
-                    .as_u64()
-                    .expect("same-secret bridge ring degree")
-                    as usize;
-                // One opening-randomness column per bound target limb: the bridge
-                // statement re-opens every target-basis constant commitment, and the
-                // fixture uses the same deterministic coefficient randomness the
-                // public coefficient commitments were built with.
-                let opening_randomness_by_limb = (0..bridge_binding
-                    .statement
-                    .target_rns_primes
-                    .len())
-                    .map(|rns_limb_index| {
-                        vss_public_coefficient_randomness_i64_fixture(
-                            trustee_roster_position,
-                            rns_limb_index,
-                            0,
-                            ring_degree,
-                        )
-                    })
-                    .collect::<Vec<_>>();
-
-                (
-                    ring_degree,
-                    None,
-                    Some(bridge_binding.statement.clone()),
-                    opening_randomness_by_limb,
-                )
-            } else {
-                let mut constant_commitments =
-                    same_secret_constant_commitments_from_fixture_package(
-                        package,
-                        trustee_roster_position,
-                    );
-                let ring_degree = constant_commitments
-                    .first()
-                    .expect("constant commitment")
-                    .ring_degree;
-                // The pk relation opens only the limb-zero constant commitment.
-                let limb_zero_commitment = constant_commitments.remove(0);
-                let limb_zero_opening_randomness =
-                    accepted_vss_randomness_fixture(trustee_roster_position, 0, 0, ring_degree)
-                        .into_iter()
-                        .map(|column| {
-                            column
-                                .into_iter()
-                                .map(|value| {
-                                    i64::try_from(value).expect("ternary randomness fits i64")
-                                })
-                                .collect::<Vec<i64>>()
-                        })
-                        .collect::<Vec<Vec<i64>>>();
-
-                (
-                    ring_degree,
-                    Some(SameSecretLinkageStatement {
-                        public_matrix_seed_hash: public_matrix_seed_hash.to_string(),
-                        commitments: vec![limb_zero_commitment],
-                    }),
-                    None,
-                    vec![limb_zero_opening_randomness],
-                )
-            };
+        let bridge_binding = verified_same_secret_bridge
+            .statement_for_roster_position(trustee_roster_position)
+            .expect("same-secret bridge statement binding");
+        assert_eq!(bridge_binding.trustee_identity, trustee_identity);
+        let ring_degree = package["sameSecretBridgeStatementSet"]["ringDegree"]
+            .as_u64()
+            .expect("same-secret bridge ring degree") as usize;
+        let same_secret_bridge = Some(bridge_binding.statement.clone());
+        let same_secret_linkage = None;
+        let opening_randomness_by_limb = Vec::new();
         let (coefficients_by_limb, error_coefficients) =
             public_key_share_coefficients_and_errors_for_fixture(
                 public_matrix_seed_hash,
@@ -501,18 +398,12 @@ pub(in super::super) fn public_key_share_succinct_proofs_object(
                     .to_string(),
                 binding_roots: vec![
                     (
-                        "sameSecretStatementRoot".to_string(),
-                        same_secret_proof_record["sameSecretStatementRoot"]
-                            .as_str()
-                            .expect("same-secret statement root")
-                            .to_string(),
+                        "sameSecretBridgeStatementRoot".to_string(),
+                        bridge_binding.same_secret_bridge_statement_root.clone(),
                     ),
                     (
-                        "sameSecretProofRoot".to_string(),
-                        same_secret_proof_record["sameSecretProofRoot"]
-                            .as_str()
-                            .expect("same-secret proof root")
-                            .to_string(),
+                        "sameSecretBridgeProofRecordRoot".to_string(),
+                        bridge_binding.same_secret_bridge_proof_record_root.clone(),
                     ),
                 ],
             },
@@ -559,7 +450,7 @@ pub(in super::super) fn public_key_share_succinct_proofs_object(
         }))
         .expect("public-key share succinct proof randomness seed");
         let statement_hash_hex = to_hex(&statement.statement_hash());
-        let proof_bytes = checkpointed_anchor_proof_bytes(
+        let proof_bytes = checkpointed_proof_bytes(
             PUBLIC_KEY_SHARE_PROOF_CHECKPOINT_DIRECTORY,
             &statement_hash_hex,
             || {
@@ -584,10 +475,8 @@ pub(in super::super) fn public_key_share_succinct_proofs_object(
             "publicKeyShareRoot": share_record["publicKeyShareRoot"],
             "publicKeyShareProofRoot": proof_statement_record["publicKeyShareProofRoot"],
             "publicKeyShareMaterialRoot": material_record["publicKeyShareMaterialRoot"],
-            "sameSecretStatementRoot": statement_record["sameSecretStatementRoot"],
-            "trusteeSecretCommitmentRoot": statement_record["trusteeSecretCommitmentRoot"],
-            "sameSecretProofFamilyBindingRoot": same_secret_proof_record["sameSecretProofFamilyBindingRoot"],
-            "sameSecretProofRoot": same_secret_proof_record["sameSecretProofRoot"],
+            "sameSecretBridgeStatementRoot": bridge_binding.same_secret_bridge_statement_root,
+            "sameSecretBridgeProofRecordRoot": bridge_binding.same_secret_bridge_proof_record_root,
             "statementHash": statement_hash_hex,
             "proofBytesHash": proof_bytes_hash,
             "proofBytesHex": to_hex(&proof_bytes),
@@ -620,9 +509,6 @@ pub(in super::super) fn public_key_share_succinct_proofs_object(
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "publicKeyCrpRoot": public_key_crp_root,
         "publicAPolynomialRoot": public_a_polynomial_root,
-        "sameSecretConsistencyRoot": package["sameSecretConsistency"]["sameSecretConsistencyRoot"],
-        "sameSecretProofSetRoot": package["sameSecretProofs"]["sameSecretProofSetRoot"],
-        "sameSecretProofFamilyBindingRoot": package["sameSecretConsistency"]["sameSecretProofFamilyBindingRoot"],
         "publicKeyShareSetRoot": package["publicKeyShares"]["publicKeyShareSetRoot"],
         "publicKeyShareProofSetRoot": package["publicKeyShareProofs"]["publicKeyShareProofSetRoot"],
         "publicKeyShareMaterialSetRoot": package["publicKeyShareMaterial"]["publicKeyShareMaterialSetRoot"],

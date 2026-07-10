@@ -369,7 +369,7 @@ describe('transcript-core kernel in Node', () => {
 
     it('exposes chunk-fed setup proof material stream commands through WASM', async () => {
         const kernel = await loadTranscriptCoreKernel();
-        const proofFamily = 'same-secret-linkage-anchor';
+        const proofFamily = 'public-key-share';
         const proofChunk = textEncoder.encode('setup proof material stream');
         const proofChunks = [proofChunk] as const;
         const fullObjectHash = setupProofMaterialFullObjectHashHex(
@@ -397,7 +397,7 @@ describe('transcript-core kernel in Node', () => {
         const beginResult = kernel.beginSetupProofMaterialTransportStream({
             verificationId,
             transportedSetupProofMaterial: {
-                objectType: 'SetupTransportedSameSecretProofMaterial',
+                objectType: 'SetupTransportedPublicKeyShareProofMaterial',
                 proofFamily,
                 proofMaterialRoot,
                 chunkSizeBytes: setupProofTransportChunkSizeBytes,

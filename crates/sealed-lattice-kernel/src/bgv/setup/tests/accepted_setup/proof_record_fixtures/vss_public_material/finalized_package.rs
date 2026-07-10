@@ -16,140 +16,9 @@ pub(in super::super::super) fn finalize_collective_setup_package(
     package["vssShareLinkageStatement"] = vss_share_linkage_statement_object(&package);
     package["vssShareLinkageProofMaterialSet"] =
         vss_share_linkage_proof_material_set_object(&package);
-    // Rebuild the same-secret consistency statements to bind the constant
-    // coefficient commitments. The statement builder reads the full-VSS field
-    // names (sourceTrusteeCommitmentRoot, per-commitment commitmentRoot), so pass
-    // a coefficient view that aliases those to the roots the accepted-setup
-    // verifier recomputes. The same-secret proofs and bridge below then reference
-    // these statements.
-    let coefficient_set = package["vssPublicCoefficientCommitmentSet"].clone();
-    let consistency_source_records = coefficient_set["sourceTrusteeRecords"]
-        .as_array()
-        .expect("source trustee records")
-        .iter()
-        .map(|source_record| {
-            let commitments = source_record["coefficientCommitments"]
-                .as_array()
-                .expect("coefficient commitments")
-                .iter()
-                .map(|commitment| {
-                    let mut commitment = commitment.clone();
-                    commitment["commitmentRoot"] = commitment["coefficientCommitmentRoot"].clone();
-                    commitment
-                })
-                .collect::<Vec<_>>();
-            serde_json::json!({
-                "sourceTrusteeRosterPosition": source_record["sourceTrusteeRosterPosition"],
-                "sourceTrusteeIdentity": source_record["sourceTrusteeIdentity"],
-                "sourceTrusteeCommitmentRoot": source_record["sourceCoefficientCommitmentRoot"],
-                "coefficientCommitments": commitments,
-            })
-        })
-        .collect::<Vec<_>>();
-    let consistency_view = serde_json::json!({
-        "vssCoefficientCommitmentRoot": coefficient_set["coefficientCommitmentRoot"],
-        "sourceTrusteeRecords": consistency_source_records,
-    });
-    package["sameSecretConsistency"] =
-        super::super::package_fixtures::same_secret_consistency_object(
-            package["setupContext"]["ceremonyId"]
-                .as_str()
-                .expect("ceremony id"),
-            package["setupContext"]["manifestHash"]
-                .as_str()
-                .expect("manifest hash"),
-            package["setupContext"]["rosterHash"]
-                .as_str()
-                .expect("roster hash"),
-            package["setupContext"]["setupParametersHash"]
-                .as_str()
-                .expect("setup parameters hash"),
-            package["setupContext"]["setupEpoch"]
-                .as_str()
-                .expect("setup epoch"),
-            &consistency_view,
-            participant_count,
-        );
-    // The public key shares and their proofs bind the same-secret statement roots,
-    // which the rebuild changed, so rebuild them against the new statements.
-    let rebuilt_public_key_shares = super::super::package_fixtures::public_key_shares_object(
-        package["setupContext"]["ceremonyId"]
-            .as_str()
-            .expect("ceremony id"),
-        package["setupContext"]["manifestHash"]
-            .as_str()
-            .expect("manifest hash"),
-        package["setupContext"]["rosterHash"]
-            .as_str()
-            .expect("roster hash"),
-        package["setupContext"]["setupParametersHash"]
-            .as_str()
-            .expect("setup parameters hash"),
-        package["setupContext"]["setupEpoch"]
-            .as_str()
-            .expect("setup epoch"),
-        &package["commonRandomness"],
-        &package["sameSecretConsistency"],
-        participant_count,
-    );
-    package["publicKeyShares"] = rebuilt_public_key_shares;
-    let rebuilt_public_key_share_proofs =
-        super::super::package_fixtures::public_key_share_proofs_object(
-            package["setupContext"]["ceremonyId"]
-                .as_str()
-                .expect("ceremony id"),
-            package["setupContext"]["manifestHash"]
-                .as_str()
-                .expect("manifest hash"),
-            package["setupContext"]["rosterHash"]
-                .as_str()
-                .expect("roster hash"),
-            package["setupContext"]["setupParametersHash"]
-                .as_str()
-                .expect("setup parameters hash"),
-            package["setupContext"]["setupEpoch"]
-                .as_str()
-                .expect("setup epoch"),
-            &package["commonRandomness"],
-            &package["sameSecretConsistency"],
-            &package["publicKeyShares"],
-            participant_count,
-        );
-    package["publicKeyShareProofs"] = rebuilt_public_key_share_proofs;
-    // The evaluator key schedule also binds the same-secret statement root and the
-    // rebuilt public key share material.
-    let setup_parameters =
-        crate::bgv::setup::accepted_setup::describe_collective_bgv_setup_parameters()
-            .expect("setup parameters");
-    let rebuilt_evaluator_key_schedule =
-        super::super::package_fixtures::evaluator_key_schedule_object(
-            package["setupContext"]["ceremonyId"]
-                .as_str()
-                .expect("ceremony id"),
-            package["setupContext"]["manifestHash"]
-                .as_str()
-                .expect("manifest hash"),
-            package["setupContext"]["rosterHash"]
-                .as_str()
-                .expect("roster hash"),
-            package["setupContext"]["setupParametersHash"]
-                .as_str()
-                .expect("setup parameters hash"),
-            package["setupContext"]["setupEpoch"]
-                .as_str()
-                .expect("setup epoch"),
-            &setup_parameters,
-            &package["commonRandomness"],
-            &package["sameSecretConsistency"],
-            &package["publicKeyShares"],
-            &package["publicKeyShareProofs"],
-            participant_count,
-        );
-    package["evaluatorKeySchedule"] = rebuilt_evaluator_key_schedule;
-    package["sameSecretProofs"] = same_secret_proofs_object(&package);
     package["sameSecretBridgeStatementSet"] = same_secret_bridge_statement_set_object(&package);
     package["sameSecretBridgeProofMaterialSet"] =
-        same_secret_bridge_proof_material_set_object(&package, None);
+        same_secret_bridge_proof_material_set_object(&package);
 
     let coefficient_set = &package["vssPublicCoefficientCommitmentSet"];
     let statement = &package["vssShareLinkageStatement"];
@@ -172,16 +41,10 @@ pub(in super::super::super) fn finalize_collective_setup_package(
     );
     package["thresholdShareCommitments"] = threshold_binding;
 
-    // The public VSS coefficient material is replaced by the embedded commitment
-    // sets.
-    package
-        .as_object_mut()
-        .expect("setup package object")
-        .remove("vssCoefficientCommitments");
-    package
-        .as_object_mut()
-        .expect("setup package object")
-        .remove("vssCoefficientCommitmentMaterial");
+    // The small canonical BDLOP commitment-root set remains public. Bridge
+    // construction above consumes the full opening material and carries only
+    // the constant commitment bodies its proof needs; the large material store
+    // is replaced with its binary-chunked transport reference below.
 
     // The private VSS envelopes bind (as AAD) to the accepted coefficient
     // commitment root and each source trustee's per-trustee coefficient root,
@@ -252,28 +115,52 @@ pub(in super::super::super) fn finalize_collective_setup_package(
     package["privateVssEnvelopeCommitments"] = rebuilt_envelopes;
     package["vssShareAcceptances"] = rebuilt_acceptances;
 
-    // The commitment sets are embedded and proof-verified in-package, so there is
-    // no large public VSS material to stream: the transport certificate carries no
-    // transported objects.
-    let mut transport_certificate = package["setupTransportCertificate"].clone();
-    {
-        let certificate_object = transport_certificate
-            .as_object_mut()
-            .expect("transport certificate object");
-        certificate_object.insert("transportedObjects".to_string(), serde_json::json!([]));
-        certificate_object.insert("totalByteLength".to_string(), serde_json::json!(0));
-        certificate_object.insert("chunkCount".to_string(), serde_json::json!(0));
-        certificate_object.remove("setupTransportCertificateHash");
-    }
-    let transport_certificate_hash =
-        derive_canonical_object_hash(&transport_certificate).expect("transport certificate hash");
-    transport_certificate["setupTransportCertificateHash"] =
-        serde_json::json!(transport_certificate_hash);
-    package["setupTransportCertificateHash"] = serde_json::json!(transport_certificate_hash);
-    package["setupTransportCertificate"] = transport_certificate;
+    replace_vss_coefficient_commitment_material_with_transport_reference(&mut package);
 
     rebind_collective_setup_package_hash(&mut package);
     package
+}
+
+fn replace_vss_coefficient_commitment_material_with_transport_reference(
+    package: &mut serde_json::Value,
+) {
+    let material = package["vssCoefficientCommitmentMaterial"].clone();
+    let transported_object = package["setupTransportCertificate"]["transportedObjects"]
+        .as_array()
+        .expect("setup transport certificate objects")
+        .iter()
+        .find(|transported_object| {
+            transported_object["objectName"] == "vssCoefficientCommitmentMaterial"
+        })
+        .cloned()
+        .expect("transported VSS coefficient commitment material");
+    assert_eq!(
+        transported_object["objectRoot"], material["vssCoefficientCommitmentMaterialRoot"],
+        "transport certificate must bind the VSS coefficient commitment material root"
+    );
+
+    package["vssCoefficientCommitmentMaterial"] = serde_json::json!({
+        "objectType": "VssCoefficientCommitmentMaterialSet",
+        "ceremonyId": material["ceremonyId"],
+        "manifestHash": material["manifestHash"],
+        "rosterHash": material["rosterHash"],
+        "setupParametersHash": material["setupParametersHash"],
+        "setupEpoch": material["setupEpoch"],
+        "publicMatrixSeedHash": material["publicMatrixSeedHash"],
+        "vssCoefficientCommitmentRoot": material["vssCoefficientCommitmentRoot"],
+        "materialEncoding": VSS_COEFFICIENT_COMMITMENT_MATERIAL_TRANSPORT_ENCODING,
+        "participantCount": material["participantCount"],
+        "thresholdDegree": material["thresholdDegree"],
+        "rnsLimbCount": material["rnsLimbCount"],
+        "ringDegree": material["ringDegree"],
+        "materialRecordCount": material["materialRecordCount"],
+        "vssCoefficientCommitmentMaterialRoot": material["vssCoefficientCommitmentMaterialRoot"],
+        "chunkCount": transported_object["chunkCount"],
+        "totalByteLength": transported_object["byteLength"],
+        "fullObjectHash": transported_object["fullObjectHash"],
+        "chunkRoot": transported_object["chunkRoot"],
+        "chunkHashes": transported_object["chunkHashes"],
+    });
 }
 
 // The reference finalized package: the reduced-ring three-trustee base package
@@ -284,10 +171,12 @@ pub(in super::super::super) fn minimal_finalized_collective_setup_package() -> s
 }
 
 // The finalized setup package flows through every accepted-setup phase: the
-// public coefficient commitment material is replaced by the embedded commitment
-// sets and same-secret bridge, and every downstream phase (private VSS envelopes,
-// share acceptances, same-secret consistency, public key shares and proofs,
-// evaluator schedule, transport certificate, final objects) binds those roots.
+// canonical BDLOP commitment roots and bridge-carried constant bodies remain
+// alongside the committed-material sets, while the large opening-material store
+// is represented only by its binary-chunked transport reference. Every downstream phase
+// (private VSS envelopes, share acceptances, public key shares and proofs,
+// evaluator schedule, transport certificate, final objects) binds the relevant
+// roots.
 // Like the full-VSS minimal package this reduced-ring package is pre-terminal (no
 // collective public key runtime material), so it is not fully valid; the check is
 // that it passes every phase and object requirement, leaving only the terminal

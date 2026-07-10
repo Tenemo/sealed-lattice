@@ -17,9 +17,8 @@ pub(in super::super) fn relinearization_key_share_rounds_fixture(
 ) -> RelinearizationKeyShareRoundsFixture {
     let setup_context = &package["setupContext"];
     let schedule = &package["evaluatorKeySchedule"];
-    let same_secret_proofs = package["sameSecretProofs"]["proofRecords"]
-        .as_array()
-        .expect("same-secret proof records");
+    let participant_count = participant_count_from_package(package);
+    let trustee_roster_positions = (0..participant_count).collect::<Vec<_>>();
     let level_schedule = schedule["relinearizationLevelSchedule"]
         .as_array()
         .expect("relinearization level schedule");
@@ -33,8 +32,7 @@ pub(in super::super) fn relinearization_key_share_rounds_fixture(
     let mut round_one_share_roots = BTreeMap::<(u64, u64), String>::new();
     let mut round_one_record_roots = BTreeMap::<(u64, u64), String>::new();
     let mut round_one_aggregate_diagonals_by_level = BTreeMap::<u64, Vec<Vec<u64>>>::new();
-    let ring_degree =
-        same_secret_constant_commitments_from_fixture_package(package, 0)[0].ring_degree;
+    let ring_degree = source_constant_commitments_from_fixture_package(package, 0)[0].ring_degree;
     for level in &scheduled_levels {
         let level = *level;
         let key_switch_seed_hex =
@@ -43,12 +41,10 @@ pub(in super::super) fn relinearization_key_share_rounds_fixture(
         // in parallel; the deterministic material is then consumed in roster
         // order by the sequential aggregate-accumulation and record-building
         // pass below, so the emitted records and roots are byte-identical.
-        let level_materials: Vec<EvaluationKeyShareFixtureMaterial> = same_secret_proofs
+        let level_materials: Vec<EvaluationKeyShareFixtureMaterial> = trustee_roster_positions
             .par_iter()
-            .map(|proof_record| {
-                let trustee_roster_position = proof_record["trusteeRosterPosition"]
-                    .as_u64()
-                    .expect("trustee roster position");
+            .map(|trustee_roster_position| {
+                let trustee_roster_position = *trustee_roster_position;
                 let relinearization_source = relinearization_round_one_source_by_digit_for_fixture(
                     trustee_roster_position,
                     ring_degree,
@@ -65,13 +61,12 @@ pub(in super::super) fn relinearization_key_share_rounds_fixture(
                 )
             })
             .collect();
-        for (proof_record, fixture_material) in same_secret_proofs.iter().zip(level_materials) {
-            let trustee_roster_position = proof_record["trusteeRosterPosition"]
-                .as_u64()
-                .expect("trustee roster position");
-            let trustee_identity = proof_record["trusteeIdentity"]
-                .as_str()
-                .expect("trustee identity");
+        for (trustee_roster_position, fixture_material) in trustee_roster_positions
+            .iter()
+            .copied()
+            .zip(level_materials)
+        {
+            let trustee_identity = format!("trustee-{trustee_roster_position}");
             let aggregate_diagonals = round_one_aggregate_diagonals_by_level
                 .entry(level)
                 .or_insert_with(|| {
@@ -98,17 +93,11 @@ pub(in super::super) fn relinearization_key_share_rounds_fixture(
                 "rosterHash": setup_context["rosterHash"],
                 "setupParametersHash": setup_context["setupParametersHash"],
                 "setupEpoch": setup_context["setupEpoch"],
-                "trusteeIdentity": trustee_identity,
+                "trusteeIdentity": trustee_identity.as_str(),
                 "trusteeRosterPosition": trustee_roster_position,
                 "level": level,
                 "evaluatorKeyScheduleRoot": schedule["evaluatorKeyScheduleRoot"],
-                "sameSecretConsistencyRoot": package["sameSecretConsistency"]["sameSecretConsistencyRoot"],
-                "sameSecretProofSetRoot": package["sameSecretProofs"]["sameSecretProofSetRoot"],
-                "sameSecretProofFamilyBindingRoot": package["sameSecretConsistency"]["sameSecretProofFamilyBindingRoot"],
                 "publicKeyShareSuccinctProofSetRoot": package["publicKeyShareSuccinctProofs"]["publicKeyShareSuccinctProofSetRoot"],
-                "sameSecretStatementRoot": proof_record["sameSecretStatementRoot"],
-                "trusteeSecretCommitmentRoot": proof_record["trusteeSecretCommitmentRoot"],
-                "sameSecretProofRoot": proof_record["sameSecretProofRoot"],
                 "relinearizationCrpRoot": package["commonRandomness"]["publicDerivations"]["crpRoots"]["relinearizationCrpRoot"],
                 "roundOneShareRoot": round_one_share_root,
                 "keySwitchMaterialEncoding": "embedded-full-key-switch-component-vectors",
@@ -131,7 +120,7 @@ pub(in super::super) fn relinearization_key_share_rounds_fixture(
                 .entry(level)
                 .or_default()
                 .push(serde_json::json!({
-                    "trusteeIdentity": trustee_identity,
+                    "trusteeIdentity": trustee_identity.as_str(),
                     "trusteeRosterPosition": trustee_roster_position,
                     "roundOneRecordRoot": record_root,
                 }));
@@ -169,12 +158,10 @@ pub(in super::super) fn relinearization_key_share_rounds_fixture(
         let round_one_aggregate_diagonals = round_one_aggregate_diagonals_by_level
             .get(&level)
             .expect("round-one aggregate diagonals");
-        let level_materials: Vec<EvaluationKeyShareFixtureMaterial> = same_secret_proofs
+        let level_materials: Vec<EvaluationKeyShareFixtureMaterial> = trustee_roster_positions
             .par_iter()
-            .map(|proof_record| {
-                let trustee_roster_position = proof_record["trusteeRosterPosition"]
-                    .as_u64()
-                    .expect("trustee roster position");
+            .map(|trustee_roster_position| {
+                let trustee_roster_position = *trustee_roster_position;
                 let relinearization_source = relinearization_round_two_source_by_digit_for_fixture(
                     trustee_roster_position,
                     ring_degree,
@@ -191,13 +178,12 @@ pub(in super::super) fn relinearization_key_share_rounds_fixture(
                 )
             })
             .collect();
-        for (proof_record, fixture_material) in same_secret_proofs.iter().zip(level_materials) {
-            let trustee_roster_position = proof_record["trusteeRosterPosition"]
-                .as_u64()
-                .expect("trustee roster position");
-            let trustee_identity = proof_record["trusteeIdentity"]
-                .as_str()
-                .expect("trustee identity");
+        for (trustee_roster_position, fixture_material) in trustee_roster_positions
+            .iter()
+            .copied()
+            .zip(level_materials)
+        {
+            let trustee_identity = format!("trustee-{trustee_roster_position}");
             let round_two_share_root = fixture_material.component_vector_root.clone();
             let mut record = serde_json::json!({
                 "objectType": "RelinearizationKeyShareRoundTwo",
@@ -207,17 +193,11 @@ pub(in super::super) fn relinearization_key_share_rounds_fixture(
                 "rosterHash": setup_context["rosterHash"],
                 "setupParametersHash": setup_context["setupParametersHash"],
                 "setupEpoch": setup_context["setupEpoch"],
-                "trusteeIdentity": trustee_identity,
+                "trusteeIdentity": trustee_identity.as_str(),
                 "trusteeRosterPosition": trustee_roster_position,
                 "level": level,
                 "evaluatorKeyScheduleRoot": schedule["evaluatorKeyScheduleRoot"],
-                "sameSecretConsistencyRoot": package["sameSecretConsistency"]["sameSecretConsistencyRoot"],
-                "sameSecretProofSetRoot": package["sameSecretProofs"]["sameSecretProofSetRoot"],
-                "sameSecretProofFamilyBindingRoot": package["sameSecretConsistency"]["sameSecretProofFamilyBindingRoot"],
                 "publicKeyShareSuccinctProofSetRoot": package["publicKeyShareSuccinctProofs"]["publicKeyShareSuccinctProofSetRoot"],
-                "sameSecretStatementRoot": proof_record["sameSecretStatementRoot"],
-                "trusteeSecretCommitmentRoot": proof_record["trusteeSecretCommitmentRoot"],
-                "sameSecretProofRoot": proof_record["sameSecretProofRoot"],
                 "relinearizationCrpRoot": package["commonRandomness"]["publicDerivations"]["crpRoots"]["relinearizationCrpRoot"],
                 "roundOneShareRoot": round_one_share_roots
                     .get(&(level, trustee_roster_position))
@@ -249,7 +229,7 @@ pub(in super::super) fn relinearization_key_share_rounds_fixture(
                 .entry(level)
                 .or_default()
                 .push(serde_json::json!({
-                    "trusteeIdentity": trustee_identity,
+                    "trusteeIdentity": trustee_identity.as_str(),
                     "trusteeRosterPosition": trustee_roster_position,
                     "roundTwoRecordRoot": record_root,
                 }));
@@ -289,9 +269,6 @@ pub(in super::super) fn relinearization_key_share_rounds_fixture(
         "participantCount": participant_count_from_package(package),
         "rnsLimbCount": DATA_PRIMES.len(),
         "evaluatorKeyScheduleRoot": schedule["evaluatorKeyScheduleRoot"],
-        "sameSecretConsistencyRoot": package["sameSecretConsistency"]["sameSecretConsistencyRoot"],
-        "sameSecretProofSetRoot": package["sameSecretProofs"]["sameSecretProofSetRoot"],
-        "sameSecretProofFamilyBindingRoot": package["sameSecretConsistency"]["sameSecretProofFamilyBindingRoot"],
         "publicKeyShareSetRoot": package["publicKeyShares"]["publicKeyShareSetRoot"],
         "publicKeyShareSuccinctProofSetRoot": package["publicKeyShareSuccinctProofs"]["publicKeyShareSuccinctProofSetRoot"],
         "relinearizationCrpRoot": package["commonRandomness"]["publicDerivations"]["crpRoots"]["relinearizationCrpRoot"],

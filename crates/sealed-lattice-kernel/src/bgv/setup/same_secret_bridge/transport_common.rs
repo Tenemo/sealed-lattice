@@ -1,11 +1,8 @@
 use super::*;
 
-// A same-secret proof-material transport family: the two same-secret proof
-// records (the data-basis anchor and the target-basis bridge) carry their
-// transported proof material through the identical inline-base64 transport,
-// differing only in these object-type and message strings and in how the
-// resolved proof bytes are finally bound into the proof-bytes hash (which each
-// caller does itself). The verification logic below is shared byte-for-byte.
+// Parameters for the same-secret bridge proof-material transport. Proof bytes
+// can be carried inline or through the setup transport, while the resolved
+// bytes remain bound to the bridge proof record and its canonical hashes.
 pub(super) struct TransportFamily {
     pub(super) proof_family: &'static str,
     pub(super) transport_field: &'static str,

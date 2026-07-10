@@ -18,7 +18,8 @@ pub(super) fn resolve_same_secret_bridge_proof_bytes(
     bridge_statement_root: &str,
 ) -> CanonicalResult<ResolvedSameSecretBridgeProofBytes> {
     let proof_bytes_hash = hash_at_path(proof_record, &["proofBytesHash"])?;
-    let proof_record_root = hash_at_path(proof_record, &["proofRecordRoot"])?.to_string();
+    let proof_record_root =
+        hash_at_path(proof_record, &["sameSecretBridgeProofRecordRoot"])?.to_string();
     if proof_record.get("proofBytesBase64").is_some() {
         if proof_record.get("proofBytesEncoding").is_some()
             || same_secret_bridge_proof_has_transport_reference(proof_record)

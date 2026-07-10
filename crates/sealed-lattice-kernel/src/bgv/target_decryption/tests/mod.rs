@@ -19,7 +19,16 @@ const TARGET_DECRYPTION_FIXTURE_PARTICIPANT_COUNT: u64 = 3;
 const TARGET_DECRYPTION_FIXTURE_SETUP_SEED: &str = "target-decryption-setup-seed";
 const TARGET_DECRYPTION_FIXTURE_CEREMONY_ID: &str = "target-decryption-ceremony";
 const TARGET_DECRYPTION_FIXTURE_SETUP_EPOCH: &str = "setup-epoch-1";
-const TARGET_DECRYPTION_FIXTURE_COMPACT_SETUP_EPOCH: &str = "target-decryption-test";
+
+struct AcceptedSetupFixture {
+    setup_package: Value,
+    local_aggregate_opening_handoffs: Vec<Value>,
+}
+
+struct AggregateThresholdCommitmentSetupOutput {
+    public_commitment_set: Value,
+    local_aggregate_opening_handoffs: Vec<Value>,
+}
 
 // The three fixture trustees, listed in roster order. Roster position is the
 // array index; the Shamir abscissa is roster_position + 1, matching
@@ -105,10 +114,12 @@ fn target_decryption_evaluator_key() -> DevelopmentBgvKey {
 // from the SAME Shamir shares the local witness opens, so the C2 binding in
 // share_generation is exercised, not bypassed.
 fn accepted_setup_package() -> Value {
-    static ACCEPTED_SETUP_PACKAGE_CACHE: OnceLock<Value> = OnceLock::new();
-    ACCEPTED_SETUP_PACKAGE_CACHE
-        .get_or_init(build_accepted_setup_package)
-        .clone()
+    accepted_setup_fixture().setup_package.clone()
+}
+
+fn accepted_setup_fixture() -> &'static AcceptedSetupFixture {
+    static ACCEPTED_SETUP_FIXTURE_CACHE: OnceLock<AcceptedSetupFixture> = OnceLock::new();
+    ACCEPTED_SETUP_FIXTURE_CACHE.get_or_init(build_accepted_setup_fixture)
 }
 
 fn accepted_setup_package_base() -> Value {
@@ -157,19 +168,23 @@ fn accepted_setup_package_base() -> Value {
     })
 }
 
-fn build_accepted_setup_package() -> Value {
+fn build_accepted_setup_fixture() -> AcceptedSetupFixture {
     let mut accepted_setup_package = accepted_setup_package_base();
     let target_share_profile = target_share_profile(&accepted_setup_package);
-    let aggregate_threshold_commitment_set =
+    let aggregate_threshold_commitment_setup_output =
         aggregate_threshold_commitment_set(&accepted_setup_package, &target_share_profile);
     accepted_setup_package["vssPublicAggregateThresholdCommitmentSet"] =
-        aggregate_threshold_commitment_set;
+        aggregate_threshold_commitment_setup_output.public_commitment_set;
     accepted_setup_package["vssShareLinkageStatement"] = json!({
         "objectType": "VssShareLinkageStatement",
         "statementRoot": "4".repeat(128),
     });
 
-    accepted_setup_package
+    AcceptedSetupFixture {
+        setup_package: accepted_setup_package,
+        local_aggregate_opening_handoffs: aggregate_threshold_commitment_setup_output
+            .local_aggregate_opening_handoffs,
+    }
 }
 
 // The target-share profile the reader re-derives (read_target_share_profile). Its
@@ -326,7 +341,7 @@ fn target_fixture() -> (Value, Value, Value, Value) {
 fn aggregate_threshold_commitment_set(
     setup_package: &Value,
     target_share_profile: &Value,
-) -> Value {
+) -> AggregateThresholdCommitmentSetupOutput {
     let setup_binding = read_setup_binding(setup_package).expect("setup binding");
     let target_share_profile =
         read_target_share_profile(target_share_profile, &setup_binding).expect("share profile");
@@ -334,6 +349,7 @@ fn aggregate_threshold_commitment_set(
     let rns_limb_count = CANONICAL_TARGET_CIPHERTEXT_LEVEL + 1;
     let mut recipient_records =
         Vec::with_capacity(setup_binding.participants.len() * rns_limb_count);
+    let mut local_aggregate_opening_handoffs = Vec::with_capacity(setup_binding.participants.len());
     for participant in &setup_binding.participants {
         let share_by_limb = derive_threshold_secret_share_by_limb(
             &evaluator_key,
@@ -344,32 +360,37 @@ fn aggregate_threshold_commitment_set(
             CANONICAL_TARGET_CIPHERTEXT_LEVEL,
         )
         .expect("target share limbs");
+        let mut aggregate_opening_credentials = Vec::with_capacity(rns_limb_count);
         for (rns_limb_index, share_values) in share_by_limb.iter().enumerate() {
             let rns_prime = DATA_PRIMES[rns_limb_index];
-            let aggregate_commitment_message_values =
-                aggregate_opening_values(share_values, rns_prime);
+            let aggregate_commitment_message_values = aggregate_opening_values(share_values);
             let aggregate_material_seed_hex =
                 fixture_aggregate_material_seed_hex(participant.roster_position, rns_limb_index);
-            let message_coefficient_bound =
-                aggregate_message_coefficient_bound(rns_prime, setup_binding.participants.len())
-                    .expect("aggregate message coefficient bound");
             let computation = compute_aggregate_opening(AggregateOpeningRootsInput {
                 setup_binding: &setup_binding,
                 participant,
-                setup_epoch: TARGET_DECRYPTION_FIXTURE_COMPACT_SETUP_EPOCH,
+                setup_epoch: TARGET_DECRYPTION_FIXTURE_SETUP_EPOCH,
                 rns_limb_index,
                 rns_prime,
                 aggregate_commitment_message_values: &aggregate_commitment_message_values,
-                message_coefficient_bound,
+                message_coefficient_bound: rns_prime,
                 aggregate_material_seed_hex: &aggregate_material_seed_hex,
             })
             .expect("aggregate opening computation");
-            let source_share_commitment_roots = (0..setup_binding.participants.len())
-                .map(|_| json!("9".repeat(128)))
-                .collect::<Vec<_>>();
-            let source_share_opening_roots = (0..setup_binding.participants.len())
-                .map(|_| json!("8".repeat(128)))
-                .collect::<Vec<_>>();
+            aggregate_opening_credentials.push(json!({
+                "objectType": "LocalTrusteeVssPublicAggregateOpeningCredential",
+                "recipientIdentity": participant.trustee_identity.as_str(),
+                "recipientRosterPosition": participant.roster_position,
+                "recipientTrusteePoint": participant.interpolation_point,
+                "rnsLimbIndex": rns_limb_index,
+                "rnsPrime": rns_prime,
+                "aggregateCommitmentRoot": computation.commitment_root.clone(),
+                "aggregateOpeningRoot": computation.opening_root.clone(),
+                "aggregateCommitmentMessageValuesLeHex": coefficient_vector_le_hex(
+                    &aggregate_commitment_message_values,
+                ),
+                "aggregateMaterialSeedHex": aggregate_material_seed_hex,
+            }));
             recipient_records.push(json!({
                 "objectType": "VssPublicAggregateThresholdCommitment",
                 "recipientIdentity": participant.trustee_identity.as_str(),
@@ -380,10 +401,13 @@ fn aggregate_threshold_commitment_set(
                 "aggregateCommitmentRoot": computation.commitment_root,
                 "aggregateOpeningRoot": computation.opening_root,
                 "commitment": computation.commitment,
-                "sourceShareCommitmentRoots": source_share_commitment_roots,
-                "sourceShareOpeningRoots": source_share_opening_roots,
             }));
         }
+        local_aggregate_opening_handoffs.push(json!({
+            "trusteeIdentity": participant.trustee_identity.as_str(),
+            "trusteeRosterPosition": participant.roster_position,
+            "aggregateOpeningCredentials": aggregate_opening_credentials,
+        }));
     }
 
     let mut set = json!({
@@ -396,7 +420,10 @@ fn aggregate_threshold_commitment_set(
     });
     set["aggregateThresholdCommitmentRoot"] =
         json!(derive_canonical_object_hash(&set).expect("aggregate threshold commitment set root"));
-    set
+    AggregateThresholdCommitmentSetupOutput {
+        public_commitment_set: set,
+        local_aggregate_opening_handoffs,
+    }
 }
 
 // A deterministic valid 128-hex private material seed per fixture aggregate
@@ -412,10 +439,8 @@ fn fixture_aggregate_material_seed_hex(roster_position: usize, rns_limb_index: u
     )
 }
 
-fn aggregate_opening_values(share_values: &[u64], rns_prime: u64) -> Vec<u64> {
-    let mut aggregate_commitment_message_values = share_values.to_vec();
-    aggregate_commitment_message_values[0] += rns_prime;
-    aggregate_commitment_message_values
+fn aggregate_opening_values(share_values: &[u64]) -> Vec<u64> {
+    share_values.to_vec()
 }
 
 fn generate_share_from_fresh_local_witness(
@@ -634,17 +659,7 @@ fn local_target_share_witness(
         .iter()
         .find(|candidate| candidate.trustee_identity == trustee_identity)
         .expect("participant");
-    let evaluator_key = target_decryption_evaluator_key();
-    let share_by_limb = derive_threshold_secret_share_by_limb(
-        &evaluator_key,
-        &target_share_profile.hash,
-        TARGET_DECRYPTION_FIXTURE_SETUP_SEED,
-        participant.interpolation_point,
-        target_share_profile.minimum_shares_for_interpolation,
-        CANONICAL_TARGET_CIPHERTEXT_LEVEL,
-    )
-    .expect("target share limbs");
-    let setup_epoch = TARGET_DECRYPTION_FIXTURE_COMPACT_SETUP_EPOCH;
+    let setup_epoch = TARGET_DECRYPTION_FIXTURE_SETUP_EPOCH;
     let public_matrix_seed_hash = setup_binding.public_matrix_seed_hash.clone();
     let share_linkage_statement_root = hash_at_path(
         setup_package,
@@ -657,48 +672,17 @@ fn local_target_share_witness(
         .and_then(Value::as_str)
         .expect("aggregate threshold commitment set root")
         .to_string();
-    let aggregate_opening_credentials = share_by_limb
+    let aggregate_opening_handoff = accepted_setup_fixture()
+        .local_aggregate_opening_handoffs
         .iter()
-        .enumerate()
-        .map(|(rns_limb_index, share_values)| {
-            let aggregate_material_seed_hex = fixture_aggregate_material_seed_hex(
-                participant.roster_position,
-                rns_limb_index,
-            );
-            let rns_prime = DATA_PRIMES[rns_limb_index];
-            let aggregate_commitment_message_values =
-                aggregate_opening_values(share_values, rns_prime);
-            let message_coefficient_bound = aggregate_message_coefficient_bound(
-                rns_prime,
-                setup_binding.participants.len(),
-            )
-            .expect("aggregate message coefficient bound");
-            let (aggregate_commitment_root, aggregate_opening_root) =
-                compute_aggregate_opening_roots(AggregateOpeningRootsInput {
-                    setup_binding: &setup_binding,
-                    participant,
-                    setup_epoch,
-                    rns_limb_index,
-                    rns_prime,
-                    aggregate_commitment_message_values: &aggregate_commitment_message_values,
-                    message_coefficient_bound,
-                    aggregate_material_seed_hex: &aggregate_material_seed_hex,
-                })
-                .expect("aggregate opening roots");
-            json!({
-                "objectType": "LocalTrusteeVssPublicAggregateOpeningCredential",
-                "recipientIdentity": participant.trustee_identity.as_str(),
-                "recipientRosterPosition": participant.roster_position,
-                "recipientTrusteePoint": participant.interpolation_point,
-                "rnsLimbIndex": rns_limb_index,
-                "rnsPrime": rns_prime,
-                "aggregateCommitmentRoot": aggregate_commitment_root,
-                "aggregateOpeningRoot": aggregate_opening_root,
-                "aggregateCommitmentMessageValuesLeHex": coefficient_vector_le_hex(&aggregate_commitment_message_values),
-                "aggregateMaterialSeedHex": aggregate_material_seed_hex,
-            })
-        })
-        .collect::<Vec<_>>();
+        .find(|handoff| handoff["trusteeIdentity"] == participant.trustee_identity)
+        .expect("setup-produced local aggregate opening handoff");
+    assert_eq!(
+        aggregate_opening_handoff["trusteeRosterPosition"], participant.roster_position,
+        "setup-produced aggregate opening handoff roster position",
+    );
+    let aggregate_opening_credentials =
+        aggregate_opening_handoff["aggregateOpeningCredentials"].clone();
     json!({
         "objectType": "LocalTrusteeTargetDecryptionProofWitnessMaterial",
         "ceremonyId": setup_binding.ceremony_id.as_str(),

@@ -2,8 +2,6 @@ use super::share_linkage::*;
 use super::*;
 
 const VSS_AGGREGATE_THRESHOLD_PROOF_FAMILY: &str = "vss-share-linkage";
-const VSS_AGGREGATE_THRESHOLD_PROOF_BYTES_HASH_DOMAIN: &str =
-    "sealed-lattice/setup/vss-aggregate-threshold/proof-bytes";
 pub(in super::super) const VSS_AGGREGATE_THRESHOLD_PROOF_CHECKPOINT_DIRECTORY: &str =
     "vss-aggregate-threshold-proof-material";
 
@@ -61,7 +59,9 @@ fn vss_aggregate_threshold_proof_record(
     let public_matrix_seed_hash = package["commonRandomness"]["publicMatrixSeedHash"]
         .as_str()
         .expect("public matrix seed hash");
-    let recipient_identity = format!("trustee-{recipient_roster_position}");
+    let recipient_identity = aggregate_record["recipientIdentity"]
+        .as_str()
+        .expect("aggregate recipient identity");
 
     // The n source recipient-share commitments for this recipient and limb are
     // the summands; the aggregate record's committed material is the sum.
@@ -121,7 +121,7 @@ fn vss_aggregate_threshold_proof_record(
 
     let vss_aggregate = vss_aggregate_threshold_statement_object(
         public_matrix_seed_hash,
-        &recipient_identity,
+        recipient_identity,
         recipient_roster_position,
         rns_limb_index,
         rns_prime,
@@ -148,10 +148,6 @@ fn vss_aggregate_threshold_proof_record(
         "recipientRosterPosition": recipient_roster_position,
         "rnsLimbIndex": rns_limb_index,
         "vssShareLinkage": vss_aggregate,
-        "proofBytesHash": hash512_hex(
-            VSS_AGGREGATE_THRESHOLD_PROOF_BYTES_HASH_DOMAIN,
-            &[&proof_bytes],
-        ),
         "proofBytesBase64": crate::transcript_core::encode_standard_base64(&proof_bytes),
     })
 }
@@ -231,13 +227,13 @@ fn vss_aggregate_threshold_proof_bytes_hex(
     );
     let checkpoint_key = derive_canonical_object_hash(&serde_json::json!({
         "objectType": "VssAggregateThresholdProofCheckpointKey",
-        "proverRevision": "aggregate-unit-point",
+        "proverRevision": "aggregate-unit-point-trit-proof-v2",
         "recipientRosterPosition": recipient_roster_position,
         "rnsLimbIndex": rns_limb_index,
         "vssShareLinkage": vss_aggregate,
     }))
     .expect("VSS aggregate threshold proof checkpoint key");
-    let proof_bytes = checkpointed_anchor_proof_bytes(
+    let proof_bytes = checkpointed_proof_bytes(
         VSS_AGGREGATE_THRESHOLD_PROOF_CHECKPOINT_DIRECTORY,
         &checkpoint_key,
         || {

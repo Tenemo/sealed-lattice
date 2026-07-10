@@ -9,13 +9,15 @@ pub(super) struct StatementSetBinding<'a> {
     pub(super) setup_epoch: &'a str,
     pub(super) target_basis_hash: &'a str,
     pub(super) public_matrix_seed_hash: &'a str,
-    pub(super) same_secret_proof_family_binding_root: &'a str,
 }
 
 pub(super) struct StatementRecordVerificationInput<'a> {
     pub(super) statement_record: &'a Value,
+    pub(super) coefficient_commitment_set: &'a Value,
+    pub(super) vss_coefficient_commitments: &'a Value,
     pub(super) expected_position: usize,
     pub(super) target_rns_limb_count: usize,
+    pub(super) threshold_degree: usize,
     pub(super) ring_degree: usize,
     pub(super) statement_set: StatementSetBinding<'a>,
 }
@@ -24,18 +26,8 @@ pub(super) struct ReconstructedSameSecretBridgeProofVerification<'a> {
     pub(super) bridge_statement: &'a Value,
     pub(super) statement_set: StatementSetBinding<'a>,
     pub(super) expected_position: usize,
-    pub(super) proof_byte_length: usize,
     pub(super) proof_bytes: &'a [u8],
-}
-
-pub(super) struct EvidenceSetVerificationInput<'a> {
-    pub(super) request: &'a Value,
-    pub(super) statement_set: StatementSetBinding<'a>,
-    pub(super) participant_count: usize,
-    pub(super) same_secret_consistency_root: &'a str,
-    pub(super) same_secret_proof_set_root: &'a str,
-    pub(super) same_secret_proof_family_binding_root: &'a str,
-    pub(super) bridge_statement_records: &'a [Value],
+    pub(super) source_constant_commitment_values: &'a [Value],
 }
 
 pub(super) fn verify_reconstructed_same_secret_bridge_proof(
@@ -131,15 +123,6 @@ pub(super) fn verify_reconstructed_same_secret_bridge_proof(
         target_constant_commitments.push(target_commitment_body.clone());
     }
 
-    let same_secret_bridge_statement_root =
-        hash_at_path(input.bridge_statement, &["sameSecretBridgeStatementRoot"])?;
-    let same_secret_statement_root =
-        hash_at_path(input.bridge_statement, &["sameSecretStatementRoot"])?;
-    let same_secret_proof_root = hash_at_path(input.bridge_statement, &["sameSecretProofRoot"])?;
-    let same_secret_proof_family_binding_root = hash_at_path(
-        input.bridge_statement,
-        &["sameSecretProofFamilyBindingRoot"],
-    )?;
     let proof_verification_request = json!({
         "context": {
             "ceremonyId": input.statement_set.ceremony_id,
@@ -148,17 +131,13 @@ pub(super) fn verify_reconstructed_same_secret_bridge_proof(
             "trusteeIdentity": trustee_identity,
             "trusteeRosterPosition": input.expected_position,
             "setupEpoch": input.statement_set.setup_epoch,
-            "sameSecretBridgeStatementRoot": same_secret_bridge_statement_root,
-            "sameSecretStatementRoot": same_secret_statement_root,
-            "sameSecretProofRoot": same_secret_proof_root,
-            "sameSecretProofFamilyBindingRoot": same_secret_proof_family_binding_root,
         },
         "ringDegree": unsigned_at_path(input.bridge_statement, &["ringDegree"])?,
+        "sameSecretLinkage": {
+            "publicMatrixSeedHash": input.statement_set.public_matrix_seed_hash,
+            "commitments": input.source_constant_commitment_values,
+        },
         "sameSecretBridge": {
-            "sameSecretBridgeStatementRoot": same_secret_bridge_statement_root,
-            "sameSecretStatementRoot": same_secret_statement_root,
-            "sameSecretProofRoot": same_secret_proof_root,
-            "sameSecretProofFamilyBindingRoot": same_secret_proof_family_binding_root,
             "publicMatrixSeedHash": input.statement_set.public_matrix_seed_hash,
             "sourceTrusteeIdentity": trustee_identity,
             "sourceTrusteeRosterPosition": input.expected_position,
@@ -179,11 +158,6 @@ pub(super) fn verify_reconstructed_same_secret_bridge_proof(
         "reconstructed same-secret bridge proof verification proofFamily",
     )?;
     hash_at_path(&proof_verification, &["statementHash"])?;
-    compare_required_u64(
-        unsigned_at_path(&proof_verification, &["proofByteLength"])?,
-        input.proof_byte_length as u64,
-        "reconstructed same-secret bridge proof verification proofByteLength",
-    )?;
 
     Ok(())
 }

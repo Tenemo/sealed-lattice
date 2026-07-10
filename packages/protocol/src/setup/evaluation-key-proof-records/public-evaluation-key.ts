@@ -73,8 +73,6 @@ export function createPublicEvaluationKeySet(
     if (
         input.relinearizationKeyShareRounds.evaluatorKeyScheduleRoot !==
             input.evaluatorKeySchedule.evaluatorKeyScheduleRoot ||
-        input.relinearizationKeyShareRounds.sameSecretProofFamilyBindingRoot !==
-            input.sameSecretProofFamilyBindingRoot ||
         input.relinearizationKeyShareRounds
             .publicKeyShareSuccinctProofSetRoot !==
             input.publicKeyShareSuccinctProofSetRoot
@@ -115,8 +113,6 @@ export function createPublicEvaluationKeySet(
                     materialEncoding: publicEvaluationKeyMaterialEncoding,
                     evaluatorKeyScheduleRoot:
                         input.evaluatorKeySchedule.evaluatorKeyScheduleRoot,
-                    sameSecretProofFamilyBindingRoot:
-                        input.sameSecretProofFamilyBindingRoot,
                     publicKeyShareSuccinctProofSetRoot:
                         input.publicKeyShareSuccinctProofSetRoot,
                     relinearizationKeyShareRoundsRoot:
@@ -159,8 +155,6 @@ export function createPublicEvaluationKeySet(
         if (
             batch.evaluatorKeyScheduleRoot !==
                 input.evaluatorKeySchedule.evaluatorKeyScheduleRoot ||
-            batch.sameSecretProofFamilyBindingRoot !==
-                input.sameSecretProofFamilyBindingRoot ||
             batch.publicKeyShareSuccinctProofSetRoot !==
                 input.publicKeyShareSuccinctProofSetRoot ||
             batch.requiredGaloisSetHash !==
@@ -202,8 +196,6 @@ export function createPublicEvaluationKeySet(
                     materialEncoding: publicEvaluationKeyMaterialEncoding,
                     evaluatorKeyScheduleRoot:
                         input.evaluatorKeySchedule.evaluatorKeyScheduleRoot,
-                    sameSecretProofFamilyBindingRoot:
-                        input.sameSecretProofFamilyBindingRoot,
                     publicKeyShareSuccinctProofSetRoot:
                         input.publicKeyShareSuccinctProofSetRoot,
                     galoisKeyCrpRoot:
@@ -287,8 +279,6 @@ export function createPublicEvaluationKeySet(
         rnsLimbCount: input.qSharePrimes.length,
         evaluatorKeyScheduleRoot:
             input.evaluatorKeySchedule.evaluatorKeyScheduleRoot,
-        sameSecretProofFamilyBindingRoot:
-            input.sameSecretProofFamilyBindingRoot,
         publicKeyShareSuccinctProofSetRoot:
             input.publicKeyShareSuccinctProofSetRoot,
         relinearizationKeyShareRoundsRoot:
@@ -437,8 +427,6 @@ const publicEvaluationKeyMaterialManifest = (
     participantCount: input.participantCount,
     rnsLimbCount: input.qSharePrimes.length,
     evaluatorKeyScheduleRoot: evaluationKeys.evaluatorKeyScheduleRoot,
-    sameSecretProofFamilyBindingRoot:
-        evaluationKeys.sameSecretProofFamilyBindingRoot,
     publicKeyShareSuccinctProofSetRoot:
         evaluationKeys.publicKeyShareSuccinctProofSetRoot,
     relinearizationKeyShareRoundsRoot:
@@ -590,8 +578,6 @@ const publicEvaluationKeyMaterialReferenceRoot = (
         setupParametersHash: evaluationKeys.setupParametersHash,
         setupEpoch: evaluationKeys.setupEpoch,
         evaluatorKeyScheduleRoot: evaluationKeys.evaluatorKeyScheduleRoot,
-        sameSecretProofFamilyBindingRoot:
-            evaluationKeys.sameSecretProofFamilyBindingRoot,
         publicKeyShareSuccinctProofSetRoot:
             evaluationKeys.publicKeyShareSuccinctProofSetRoot,
         relinearizationKeyShareRoundsRoot:

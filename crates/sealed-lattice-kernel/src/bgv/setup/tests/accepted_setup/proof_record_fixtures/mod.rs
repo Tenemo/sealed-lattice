@@ -16,6 +16,29 @@ pub(super) struct RelinearizationKeyShareRoundsFixture {
     pub(super) round_one_aggregate_diagonals_by_level: BTreeMap<u64, Vec<Vec<u64>>>,
 }
 
+pub(in super::super) fn source_constant_commitments_from_fixture_package(
+    package: &serde_json::Value,
+    trustee_roster_position: u64,
+) -> Vec<crate::bgv::setup::commitment::SetupCommitmentValue> {
+    let trustee_identity = format!("trustee-{trustee_roster_position}");
+    let public_matrix_seed_hash = package["commonRandomness"]["publicMatrixSeedHash"]
+        .as_str()
+        .expect("public matrix seed hash");
+    let ring_degree = package["vssCoefficientCommitmentMaterial"]["ringDegree"]
+        .as_u64()
+        .expect("VSS coefficient commitment material ring degree") as usize;
+    crate::bgv::setup::source_constant_commitments::canonical_source_constant_commitments_from_vss_material(
+        &package["vssCoefficientCommitments"],
+        &package["vssCoefficientCommitmentMaterial"],
+        &trustee_identity,
+        trustee_roster_position,
+        public_matrix_seed_hash,
+        ring_degree,
+    )
+    .expect("canonical source constant commitments")
+    .commitments
+}
+
 /// Roster size declared by the package the proof fixtures bind. The proof
 /// records, proof sets, and per-trustee enumeration all follow the package's
 /// own participantCount so the fixtures build the right number of proofs for
@@ -38,7 +61,6 @@ mod proof_checkpointing;
 mod public_evaluation_key_assembly;
 mod public_key_share_proofs;
 mod relinearization_key_share_rounds;
-mod same_secret_anchor_proofs;
 mod trustee_evaluation_key_proofs;
 mod vss_public_material;
 
@@ -48,6 +70,5 @@ pub(super) use proof_checkpointing::*;
 pub(super) use public_evaluation_key_assembly::*;
 pub(super) use public_key_share_proofs::*;
 pub(super) use relinearization_key_share_rounds::*;
-pub(super) use same_secret_anchor_proofs::*;
 pub(super) use trustee_evaluation_key_proofs::*;
 pub(super) use vss_public_material::finalize_collective_setup_package;

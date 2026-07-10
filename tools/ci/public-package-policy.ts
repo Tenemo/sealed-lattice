@@ -57,7 +57,6 @@ export const vendoredProtocolRuntimeModules = [
     'setup/public-key-share-records/binary-material-transport.ts',
     'setup/public-key-share-records/collective-public-key.ts',
     'setup/public-key-share-records/succinct-proofs.ts',
-    'setup/same-secret-consistency-records.ts',
     'setup/setup-proof-material-transport.ts',
     'setup/setup-certificates.ts',
     'setup/setup-certificates/types.ts',

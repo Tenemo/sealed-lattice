@@ -86,7 +86,9 @@ pub(super) fn verify_collective_public_key_material(
             "setupContext was required before collective public-key verification",
         )
     })?;
-    if let Err(error) = verify_same_secret_context(aggregate_object, setup_context) {
+    if let Err(error) =
+        verify_context_fields_match(aggregate_object, setup_context, "collectivePublicKey")
+    {
         return Ok(Some(public_key_refusal(
             "collectivePublicKeyContextMismatch",
             error.message,
@@ -176,9 +178,6 @@ pub(super) fn verify_collective_public_key_material(
             "setupPackage.collectivePublicKey",
         )?));
     }
-    let same_secret_consistency_root = same_secret_consistency_root_from_package(setup_package)?;
-    let same_secret_proof_set_root = same_secret_proof_set_root_from_package(setup_package)?;
-    let same_secret_proof_family_binding_root = same_secret_proof_family_binding_root()?;
     let expected_source_bindings = [
         (
             "publicMatrixSeedHash",
@@ -191,18 +190,6 @@ pub(super) fn verify_collective_public_key_material(
         (
             "publicAPolynomialRoot",
             Some(common_binding.public_a_polynomial_root.as_str()),
-        ),
-        (
-            "sameSecretConsistencyRoot",
-            Some(same_secret_consistency_root.as_str()),
-        ),
-        (
-            "sameSecretProofSetRoot",
-            Some(same_secret_proof_set_root.as_str()),
-        ),
-        (
-            "sameSecretProofFamilyBindingRoot",
-            Some(same_secret_proof_family_binding_root.as_str()),
         ),
         (
             "publicKeyShareSetRoot",

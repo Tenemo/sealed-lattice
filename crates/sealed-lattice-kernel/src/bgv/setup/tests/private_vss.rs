@@ -19,10 +19,6 @@ fn private_vss_share_envelope_verifier_accepts_succinct_private_share_proofs() {
     assert_eq!(result["isValid"], true);
     assert_eq!(result["refusedObjects"], serde_json::json!([]));
     assert_eq!(
-        result["verifiedPrivateVssShareProofCount"],
-        serde_json::json!(DATA_PRIMES.len())
-    );
-    assert_eq!(
         result["limbVerifications"]
             .as_array()
             .expect("limb verifications")
@@ -61,10 +57,6 @@ fn private_vss_share_envelope_verifier_accepts_first_roster_succinct_private_sha
 
     assert_eq!(result["isValid"], true);
     assert_eq!(result["refusedObjects"], serde_json::json!([]));
-    assert_eq!(
-        result["verifiedPrivateVssShareProofCount"],
-        serde_json::json!(DATA_PRIMES.len())
-    );
     assert_eq!(
         result["limbVerifications"]
             .as_array()
@@ -517,10 +509,6 @@ fn private_vss_share_envelope_verifier_accepts_transported_succinct_private_shar
         .expect("private VSS envelope verification");
 
     assert_eq!(result["isValid"], true);
-    assert_eq!(
-        result["verifiedPrivateVssShareProofCount"],
-        serde_json::json!(DATA_PRIMES.len())
-    );
     for limb_opening in request["privateEnvelope"]["rnsShareOpenings"]
         .as_array()
         .expect("limb openings")

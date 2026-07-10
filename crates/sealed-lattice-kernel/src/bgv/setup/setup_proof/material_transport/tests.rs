@@ -62,7 +62,7 @@ fn request_with_verified_materials(handles: &[Value]) -> Value {
 
 #[test]
 fn setup_proof_material_stream_handle_recovers_chunkless_material() {
-    let proof_family = "same-secret-linkage-anchor";
+    let proof_family = "same-secret-bridge";
     let proof_bytes = b"bounded setup proof material".to_vec();
     let proof_material_root = valid_hash_for_test('7');
     let (transported_proof_material, verified_setup_proof_material) =
@@ -79,7 +79,7 @@ fn setup_proof_material_stream_handle_recovers_chunkless_material() {
         proof_family,
         &proof_material_root,
         &transported_proof_material,
-        "transportedSameSecretProofMaterial.proofMaterials[0]",
+        "transportedSameSecretBridgeProofMaterial.proofMaterials[0]",
     )
     .expect("verified setup proof material bytes");
 
@@ -174,7 +174,7 @@ fn trustee_evaluation_key_transport_reference_uses_setup_proof_hashes() {
 
 #[test]
 fn setup_proof_material_eviction_guard_scopes_to_requested_materials() {
-    let proof_family = "same-secret-linkage-anchor";
+    let proof_family = "same-secret-bridge";
     let referenced_root = valid_hash_for_test('c');
     let unreferenced_root = valid_hash_for_test('d');
     let referenced_bytes = b"referenced setup proof material".to_vec();

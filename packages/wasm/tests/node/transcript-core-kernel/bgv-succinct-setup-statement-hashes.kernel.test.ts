@@ -205,7 +205,7 @@ describe('succinct setup statement hash vectors', () => {
             );
         }
 
-        const sameSecretCommitments = qSharePrimes.map(
+        const sourceConstantCommitments = qSharePrimes.map(
             (rnsPrime, rnsLimbIndex) =>
                 zeroSetupCommitment(kernel, {
                     publicMatrixSeedHash,
@@ -214,40 +214,84 @@ describe('succinct setup statement hash vectors', () => {
                     shamirCoefficientIndex: 0,
                 }).commitment,
         );
-        const sameSecret = kernel.generateTrusteeEvaluationKeyProof({
-            context: statementContext({
-                vssCoefficientCommitmentMaterialRoot: repeatedHash('30'),
-            }),
+        const sameSecretBridgeMaterialSeedHex =
+            '710a4433ff567caa099bd666df653f6a3bf44fcffca9c5daafa958984f8e45a68a7c8a6236586c90d7256e335025c785ff9658c7dfa5d7d608c70c98ccfee014';
+        const sameSecretBridgeTarget =
+            kernel.computeVssCommittedMaterialCommitment({
+                commitmentRole: 'coefficient',
+                commitmentContext: {
+                    testPurpose: 'statement-vector-same-secret-bridge',
+                },
+                rnsLimbIndex: 0,
+                rnsPrime: firstQSharePrime,
+                ringDegree,
+                messageCoefficientBound: firstQSharePrime,
+                messageCoefficients: zeroU64Vector(),
+                materialSeedHex: sameSecretBridgeMaterialSeedHex,
+            });
+        const sameSecret = kernel.generateSameSecretBridgeProof({
+            context: {
+                ceremonyId: 'statement-vector-ceremony',
+                manifestHash: repeatedHash('10'),
+                rosterHash: repeatedHash('20'),
+                trusteeIdentity: 'statement-vector-trustee',
+                trusteeRosterPosition: 0,
+                setupEpoch: 'statement-vector-epoch',
+            },
             ringDegree,
-            keys: [],
             sameSecretLinkage: {
                 publicMatrixSeedHash,
-                commitments: sameSecretCommitments,
+                commitments: sourceConstantCommitments,
+            },
+            sameSecretBridge: {
+                publicMatrixSeedHash,
+                targetBasisHash: parameters.canonicalTargetBasisHash,
+                sourceTrusteeIdentity: 'statement-vector-trustee',
+                sourceTrusteeRosterPosition: 0,
+                targetRnsPrimes: [firstQSharePrime],
+                targetConstantCommitmentRoots: [
+                    sameSecretBridgeTarget.commitmentRoot,
+                ],
+                targetConstantCommitments: [sameSecretBridgeTarget.commitment],
             },
             secretCoefficients: zeroI64Vector(),
-            errorCoefficientsByKey: [],
             negativeIndicatorCoefficients: zeroI64Vector(),
             openingRandomnessByLimb: Array.from(
                 { length: qSharePrimes.length },
                 () => zeroOpeningRandomness(),
             ),
+            vssCommittedMaterialSeedsByBoundMessage: [
+                sameSecretBridgeMaterialSeedHex,
+            ],
+            vssCommittedMaterialContextHashesByBoundMessage: [
+                sameSecretBridgeTarget.commitmentContextHash,
+            ],
             ...proofRandomnessFields,
         });
-        expect(sameSecret.proofFamily).toBe('same-secret-linkage-anchor');
+        expect(sameSecret.proofFamily).toBe('same-secret-bridge');
         expect(sameSecret.statementHash).toBe(
             expectedStatementHashes.sameSecret,
         );
 
-        const publicKeyLinkageCommitment = zeroSetupCommitment(kernel, {
-            publicMatrixSeedHash: repeatedHash('41'),
-            sourceRnsLimbIndex: 0,
-            sourceMessageModulus: firstQSharePrime,
-            shamirCoefficientIndex: 0,
-        }).commitment;
+        const publicKeyBridgeMaterialSeedHex =
+            '192c6cd9305a6e29ce7d945665a223eed89e695463060689a89a15521638d91ae30efac6c283c07fe03869db777cf75b63c368f17568071a3dc4a0ef5bea6a68';
+        const publicKeyBridgeTarget =
+            kernel.computeVssCommittedMaterialCommitment({
+                commitmentRole: 'coefficient',
+                commitmentContext: {
+                    testPurpose: 'statement-vector-public-key-bridge',
+                },
+                rnsLimbIndex: 0,
+                rnsPrime: firstQSharePrime,
+                ringDegree,
+                messageCoefficientBound: firstQSharePrime,
+                messageCoefficients: zeroU64Vector(),
+                materialSeedHex: publicKeyBridgeMaterialSeedHex,
+            });
         const publicKeyShare = kernel.generateTrusteeEvaluationKeyProof({
             context: statementContext({
-                sameSecretStatementRoot: repeatedHash('31'),
-                sameSecretProofRoot: repeatedHash('32'),
+                sameSecretBridgeStatementRoot: repeatedHash('31'),
+                sameSecretBridgeProofRecordRoot: repeatedHash('32'),
             }),
             ringDegree,
             keys: [
@@ -261,14 +305,26 @@ describe('succinct setup statement hash vectors', () => {
                     ],
                 },
             ],
-            sameSecretLinkage: {
+            sameSecretBridge: {
                 publicMatrixSeedHash: repeatedHash('41'),
-                commitments: [publicKeyLinkageCommitment],
+                targetBasisHash: parameters.canonicalTargetBasisHash,
+                sourceTrusteeIdentity: 'statement-vector-trustee',
+                sourceTrusteeRosterPosition: 0,
+                targetRnsPrimes: [firstQSharePrime],
+                targetConstantCommitmentRoots: [
+                    publicKeyBridgeTarget.commitmentRoot,
+                ],
+                targetConstantCommitments: [publicKeyBridgeTarget.commitment],
             },
             secretCoefficients: zeroI64Vector(),
             errorCoefficientsByKey: [[zeroI64Vector()]],
             negativeIndicatorCoefficients: zeroI64Vector(),
-            openingRandomnessByLimb: [zeroOpeningRandomness()],
+            vssCommittedMaterialSeedsByBoundMessage: [
+                publicKeyBridgeMaterialSeedHex,
+            ],
+            vssCommittedMaterialContextHashesByBoundMessage: [
+                publicKeyBridgeTarget.commitmentContextHash,
+            ],
             ...proofRandomnessFields,
         });
         expect(publicKeyShare.proofFamily).toBe('public-key-share');
@@ -286,39 +342,27 @@ describe('succinct setup statement hash vectors', () => {
             expectedStatementHashes.privateVssShare,
         );
 
-        // The key-bearing statement carries the same-secret bridge anchor:
-        // the zero-message committed-material commitment computed through the
-        // kernel's live command, byte-identical to the Rust vector fixture.
-        // The material seed literal is the Rust fixture's deterministic test
-        // seed (hash512 of the role and canonical context under the
-        // sealed-lattice/test/vss-committed-material-seed domain), pinned here
-        // because the derivation domain is not part of the kernel surface.
-        const bridgeSeedHash = repeatedHash('43');
-        const bridgeMaterialSeedHex =
-            '3e2cb0207270f9393d46fb69340376ddb61b329b665a5d9df9bcf0179686de0a0960bbcf6d1156eec2cc7a57aaa801e7ffabf344096b0d9d40e6b23001121cda';
-        const bridgeComputation = kernel.computeVssCommittedMaterialCommitment({
-            commitmentRole: 'coefficient',
-            commitmentContext: {
-                testPurpose: 'statement-vector-bridge',
+        // The key-bearing statement links its atom secret directly to the
+        // canonical source constant commitment. The describe command pins the
+        // same parsed statement hash as the Rust vector without running the
+        // heavy prover in this fast vector lane.
+        const trusteeEvaluationKeyPublicMatrixSeedHash = repeatedHash('43');
+        const trusteeEvaluationKeySourceCommitment = zeroSetupCommitment(
+            kernel,
+            {
+                publicMatrixSeedHash: trusteeEvaluationKeyPublicMatrixSeedHash,
+                sourceRnsLimbIndex: 0,
+                sourceMessageModulus: firstQSharePrime,
+                shamirCoefficientIndex: 0,
             },
-            rnsLimbIndex: 0,
-            rnsPrime: firstQSharePrime,
-            ringDegree,
-            messageCoefficients: zeroU64Vector(),
-            materialSeedHex: bridgeMaterialSeedHex,
-        });
-        // The key-bearing same-secret anchor is fail-closed while it is
-        // re-anchored on the BDLOP constant commitment, so the statement hash is
-        // obtained through the describe command (the parsed statement, no proof)
-        // rather than by generating a proof, matching the Rust vector path.
+        ).commitment;
         const trusteeEvaluationKey =
             kernel.describeTrusteeEvaluationKeyStatement({
                 context: statementContext({
                     requiredGaloisSetHash: repeatedHash('33'),
                     evaluatorKeyScheduleRoot: repeatedHash('34'),
                     keySwitchDecompositionHash: repeatedHash('35'),
-                    sameSecretStatementRoot: repeatedHash('36'),
-                    sameSecretProofRoot: repeatedHash('37'),
+                    sourceConstantCoefficientCommitmentRoot: repeatedHash('36'),
                 }),
                 ringDegree,
                 keys: [
@@ -334,16 +378,10 @@ describe('succinct setup statement hash vectors', () => {
                         ],
                     },
                 ],
-                sameSecretBridge: {
-                    publicMatrixSeedHash: bridgeSeedHash,
-                    targetBasisHash: parameters.canonicalTargetBasisHash,
-                    sourceTrusteeIdentity: 'statement-vector-trustee',
-                    sourceTrusteeRosterPosition: 0,
-                    targetRnsPrimes: [firstQSharePrime],
-                    targetConstantCommitmentRoots: [
-                        bridgeComputation.commitmentRoot,
-                    ],
-                    targetConstantCommitments: [bridgeComputation.commitment],
+                sameSecretLinkage: {
+                    publicMatrixSeedHash:
+                        trusteeEvaluationKeyPublicMatrixSeedHash,
+                    commitments: [trusteeEvaluationKeySourceCommitment],
                 },
             });
         expect(trusteeEvaluationKey.proofFamily).toBe('trustee-evaluation-key');

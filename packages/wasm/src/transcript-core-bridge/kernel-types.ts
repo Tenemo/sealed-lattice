@@ -212,6 +212,8 @@ export type TranscriptCoreKernel = {
         readonly errorCoefficientsByKey: readonly (readonly (readonly number[])[])[];
         readonly negativeIndicatorCoefficients?: readonly number[];
         readonly openingRandomnessByLimb?: readonly (readonly (readonly number[])[])[];
+        readonly vssCommittedMaterialSeedsByBoundMessage?: readonly string[];
+        readonly vssCommittedMaterialContextHashesByBoundMessage?: readonly string[];
         readonly proofRandomnessSeedHex: string;
         readonly proofRandomnessNonceHex: string;
     }): BgvTrusteeEvaluationKeyProofGeneration;
@@ -261,6 +263,7 @@ export type TranscriptCoreKernel = {
     generateSameSecretBridgeProof(input: {
         readonly context: BgvSameSecretBridgeProofContext;
         readonly ringDegree: number;
+        readonly sameSecretLinkage: BgvTrusteeEvaluationKeySameSecretLinkage;
         readonly sameSecretBridge: Record<string, unknown>;
         readonly secretCoefficients: readonly number[];
         readonly negativeIndicatorCoefficients: readonly number[];

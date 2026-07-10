@@ -77,7 +77,6 @@ export type BgvTransportedEvaluationKeyAggregateBindingOpeningSet =
         }>;
 
 export type BgvCollectiveSetupTransportCompanions = Readonly<{
-    readonly transportedSameSecretProofMaterial?: BgvTransportedSetupProofMaterialSet<'SetupTransportedSameSecretProofMaterialSet'>;
     readonly transportedPublicKeyShareMaterial?: BgvTransportedPublicKeyShareMaterial;
     readonly transportedPublicKeyShareProofMaterial?: BgvTransportedSetupProofMaterialSet<'SetupTransportedPublicKeyShareProofMaterialSet'>;
     readonly transportedEvaluationKeyShareProofMaterial?: BgvTransportedSetupProofMaterialSet<'SetupTransportedEvaluationKeyShareProofMaterialSet'>;
@@ -446,10 +445,6 @@ export type BgvPrivateVssShareEnvelopeVerification = {
     readonly privateEnvelopeHash: ProtocolHash | null;
     readonly localVerificationRoot: ProtocolHash | null;
     readonly ringDegree?: number;
-    readonly ringDegreeStatus?: 'full-ring' | 'development-reduced-ring';
-    readonly verifiedRnsLimbCount?: number;
-    readonly verifiedShamirCoefficientCommitmentCount?: number;
-    readonly verifiedPrivateVssShareProofCount?: number;
     readonly limbVerifications: readonly {
         readonly rnsLimbIndex: number;
         readonly rnsPrime: number;
@@ -499,11 +494,10 @@ export type BgvTrusteeEvaluationKeyStatementKey = {
     readonly roundOneAggregateDiagonal?: readonly (readonly number[])[];
 };
 
-// The kernel derives the proof family from the key list: a populated key
-// list is the trustee evaluation-key family and binds the schedule roots; an
-// empty key list is the keyless same-secret linkage anchor family and binds
-// the accepted public VSS material root.
-// These branches share fields and carry no discriminant, so which root set is mandatory is enforced by the kernel from the key list, not by the type.
+// The kernel derives the key-bearing proof family from the key list. Trustee
+// evaluation-key statements bind their schedule and exact source constant;
+// public-key statements bind the separately verified bridge statement and
+// proof record.
 export type BgvTrusteeEvaluationKeyStatementContext = {
     readonly ceremonyId: string;
     readonly manifestHash: ProtocolHash;
@@ -516,15 +510,11 @@ export type BgvTrusteeEvaluationKeyStatementContext = {
           readonly requiredGaloisSetHash: ProtocolHash;
           readonly evaluatorKeyScheduleRoot: ProtocolHash;
           readonly keySwitchDecompositionHash: ProtocolHash;
-          readonly sameSecretStatementRoot: ProtocolHash;
-          readonly sameSecretProofRoot: ProtocolHash;
+          readonly sourceConstantCoefficientCommitmentRoot: ProtocolHash;
       }
     | {
-          readonly sameSecretStatementRoot: ProtocolHash;
-          readonly sameSecretProofRoot: ProtocolHash;
-      }
-    | {
-          readonly vssCoefficientCommitmentMaterialRoot: ProtocolHash;
+          readonly sameSecretBridgeStatementRoot: ProtocolHash;
+          readonly sameSecretBridgeProofRecordRoot: ProtocolHash;
       }
 );
 
@@ -560,41 +550,41 @@ export type BgvSameSecretBridgeProofContext = {
     readonly trusteeIdentity: string;
     readonly trusteeRosterPosition: number;
     readonly setupEpoch: string;
-    readonly sameSecretBridgeStatementRoot: ProtocolHash;
-    readonly sameSecretStatementRoot: ProtocolHash;
-    readonly sameSecretProofRoot: ProtocolHash;
-    readonly sameSecretProofFamilyBindingRoot: ProtocolHash;
 };
 
 export type BgvTrusteeEvaluationKeyProofGeneration = {
     readonly operation: 'generateTrusteeEvaluationKeyProof';
-    readonly proofFamily:
-        | 'trustee-evaluation-key'
-        | 'same-secret-linkage-anchor'
-        | 'public-key-share';
+    readonly proofFamily: 'trustee-evaluation-key' | 'public-key-share';
     readonly statementHash: ProtocolHash;
     readonly limbCount: number;
     readonly proofByteLength: number;
     readonly proofBytesHex: string;
 };
 
-// The proof family and canonical statement hash of a trustee-batched
-// evaluation-key statement, computed without proving it. The key-bearing
-// same-secret anchor stays fail-closed while it is re-anchored on the BDLOP
-// constant commitment, so its statement hash is obtained directly from the
-// parsed statement rather than from a generated proof.
+// The proof family and canonical statement hash of a key-bearing setup
+// statement, computed without proving it.
 export type BgvTrusteeEvaluationKeyStatementDescription = {
     readonly operation: 'describeTrusteeEvaluationKeyStatement';
-    readonly proofFamily:
-        | 'trustee-evaluation-key'
-        | 'same-secret-linkage-anchor'
-        | 'public-key-share';
+    readonly proofFamily: 'trustee-evaluation-key' | 'public-key-share';
     readonly statementHash: ProtocolHash;
+};
+
+export type BgvSetupCommitmentValue = {
+    readonly objectType: 'SetupCommitment';
+    readonly sourceRnsLimbIndex: number;
+    readonly sourceMessageModulus: number;
+    readonly shamirCoefficientIndex: number;
+    readonly ringDegree: number;
+    readonly commitmentLimbs: readonly {
+        readonly commitmentModulusIndex: number;
+        readonly modulus: number;
+        readonly rows: readonly (readonly number[])[];
+    }[];
 };
 
 export type BgvSetupCommitmentOpeningComputation = {
     readonly operation: 'computeSetupCommitmentFromOpening';
-    readonly commitment: Record<string, unknown>;
+    readonly commitment: BgvSetupCommitmentValue;
     readonly commitmentRoot: ProtocolHash;
 };
 

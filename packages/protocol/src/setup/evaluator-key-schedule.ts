@@ -14,7 +14,6 @@ import type {
     PublicKeyShareProofSet,
     PublicKeyShareSet,
 } from './public-key-share-records.js';
-import type { SameSecretConsistencyStatementSet } from './same-secret-consistency-records.js';
 import type { CollectiveBgvSetupContext } from './vss-share-verification-records.js';
 
 export type RelinearizationLevelScheduleEntry = Readonly<{
@@ -48,7 +47,6 @@ export type EvaluatorKeySchedule = Readonly<
         readonly publicMatrixSeedHash: ProtocolHash;
         readonly relinearizationCrpRoot: ProtocolHash;
         readonly galoisKeyCrpRoot: ProtocolHash;
-        readonly sameSecretConsistencyRoot: ProtocolHash;
         readonly publicKeyShareSetRoot: ProtocolHash;
         readonly publicKeyShareProofSetRoot: ProtocolHash;
         readonly relinearizationLevelSchedule: readonly RelinearizationLevelScheduleEntry[];
@@ -65,7 +63,6 @@ export type EvaluatorKeyScheduleInput = {
     readonly publicMatrixSeedHash: ProtocolHash;
     readonly relinearizationCrpRoot: ProtocolHash;
     readonly galoisKeyCrpRoot: ProtocolHash;
-    readonly sameSecretConsistency: SameSecretConsistencyStatementSet;
     readonly publicKeyShares: PublicKeyShareSet;
     readonly publicKeyShareProofs: PublicKeyShareProofSet;
     readonly requiredGaloisKeySchedule: readonly RequiredGaloisKeyScheduleEntry[];
@@ -167,11 +164,6 @@ export const createEvaluatorKeySchedule = (
     }
     assertContextMatches(
         input.setupContext,
-        input.sameSecretConsistency,
-        'sameSecretConsistency',
-    );
-    assertContextMatches(
-        input.setupContext,
         input.publicKeyShares,
         'publicKeyShares',
     );
@@ -181,15 +173,11 @@ export const createEvaluatorKeySchedule = (
         'publicKeyShareProofs',
     );
     if (
-        input.publicKeyShares.sameSecretConsistencyRoot !==
-            input.sameSecretConsistency.sameSecretConsistencyRoot ||
-        input.publicKeyShareProofs.sameSecretConsistencyRoot !==
-            input.sameSecretConsistency.sameSecretConsistencyRoot ||
         input.publicKeyShareProofs.publicKeyShareSetRoot !==
-            input.publicKeyShares.publicKeyShareSetRoot
+        input.publicKeyShares.publicKeyShareSetRoot
     ) {
         throw new Error(
-            'public-key share records must bind the accepted same-secret and share-set roots.',
+            'public-key share records must bind the accepted share-set root.',
         );
     }
 
@@ -207,8 +195,6 @@ export const createEvaluatorKeySchedule = (
         publicMatrixSeedHash: input.publicMatrixSeedHash,
         relinearizationCrpRoot: input.relinearizationCrpRoot,
         galoisKeyCrpRoot: input.galoisKeyCrpRoot,
-        sameSecretConsistencyRoot:
-            input.sameSecretConsistency.sameSecretConsistencyRoot,
         publicKeyShareSetRoot: input.publicKeyShares.publicKeyShareSetRoot,
         publicKeyShareProofSetRoot:
             input.publicKeyShareProofs.publicKeyShareProofSetRoot,

@@ -6,43 +6,35 @@ const PROTOCOL_HASH_HEX_LENGTH: usize = 128;
 const MAX_CONTEXT_TOKEN_BYTES: usize = 512;
 const TARGET_DECRYPTION_PROOF_TARGET_ROLES: [&str; 2] = ["targetId", "targetOrder"];
 
-pub(crate) const SAME_SECRET_LINKAGE_ANCHOR_BINDING_LABELS: [&str; 1] =
-    ["vssCoefficientCommitmentMaterialRoot"];
-pub(crate) const PUBLIC_KEY_SHARE_SUCCINCT_BINDING_LABELS: [&str; 2] =
-    ["sameSecretStatementRoot", "sameSecretProofRoot"];
+pub(crate) const PUBLIC_KEY_SHARE_SUCCINCT_BINDING_LABELS: [&str; 2] = [
+    "sameSecretBridgeStatementRoot",
+    "sameSecretBridgeProofRecordRoot",
+];
 pub(crate) const PRIVATE_VSS_SHARE_BINDING_LABELS: [&str; 3] = [
     "sourceTrusteeCommitmentRoot",
     "privateEnvelopeAadHash",
     "shareValuesHash",
 ];
 pub(crate) const VSS_SHARE_LINKAGE_BINDING_LABELS: [&str; 1] = ["shareLinkageStatementRoot"];
-pub(crate) const SAME_SECRET_BRIDGE_BINDING_LABELS: [&str; 4] = [
-    "sameSecretBridgeStatementRoot",
-    "sameSecretStatementRoot",
-    "sameSecretProofRoot",
-    "sameSecretProofFamilyBindingRoot",
-];
+pub(crate) const SAME_SECRET_BRIDGE_BINDING_LABELS: [&str; 0] = [];
 pub(crate) const TARGET_DECRYPTION_SHARE_BINDING_LABELS: [&str; 3] = [
     "targetShareProofStatementRoot",
     "activeCredentialBindingRoot",
     "smudgingCommitmentSetRoot",
 ];
-pub(crate) const TRUSTEE_EVALUATION_KEY_BINDING_LABELS: [&str; 5] = [
+pub(crate) const TRUSTEE_EVALUATION_KEY_BINDING_LABELS: [&str; 4] = [
     "requiredGaloisSetHash",
     "evaluatorKeyScheduleRoot",
     "keySwitchDecompositionHash",
-    "sameSecretStatementRoot",
-    "sameSecretProofRoot",
+    "sourceConstantCoefficientCommitmentRoot",
 ];
 
-// The statement family shape, decided by the key list: keyless statements are
-// the same-secret linkage anchor, a single public-key share descriptor is the
-// public-key share family, and key-switch descriptors are the trustee
-// evaluation-key family. A public-key share descriptor mixed with key-switch
-// descriptors is refused.
+// The statement family shape for key-bearing statements is decided by the key
+// list. A single public-key share descriptor is the public-key share family,
+// and key-switch descriptors are the trustee evaluation-key family. A
+// public-key share descriptor mixed with key-switch descriptors is refused.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum SuccinctSetupProofFamilyShape {
-    SameSecretLinkageAnchor,
     PublicKeyShare,
     PrivateVssShare,
     VssShareLinkage,
@@ -54,7 +46,9 @@ pub(crate) enum SuccinctSetupProofFamilyShape {
 impl SuccinctSetupProofFamilyShape {
     pub(crate) fn from_key_kinds(kinds: &[EvaluationKeyShareKind]) -> CanonicalResult<Self> {
         if kinds.is_empty() {
-            return Ok(Self::SameSecretLinkageAnchor);
+            return Err(invalid_succinct_setup_proof(
+                "key-bearing setup proof statement requires at least one key descriptor",
+            ));
         }
         let public_key_share_count = kinds
             .iter()
@@ -74,7 +68,6 @@ impl SuccinctSetupProofFamilyShape {
 
     pub(crate) fn proof_family(self) -> &'static str {
         match self {
-            Self::SameSecretLinkageAnchor => super::SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY,
             Self::PublicKeyShare => super::PUBLIC_KEY_SHARE_PROOF_FAMILY,
             Self::PrivateVssShare => super::PRIVATE_VSS_SHARE_PROOF_FAMILY,
             Self::VssShareLinkage => super::VSS_SHARE_LINKAGE_PROOF_FAMILY,
@@ -86,7 +79,6 @@ impl SuccinctSetupProofFamilyShape {
 
     pub(crate) fn binding_labels(self) -> &'static [&'static str] {
         match self {
-            Self::SameSecretLinkageAnchor => &SAME_SECRET_LINKAGE_ANCHOR_BINDING_LABELS,
             Self::PublicKeyShare => &PUBLIC_KEY_SHARE_SUCCINCT_BINDING_LABELS,
             Self::PrivateVssShare => &PRIVATE_VSS_SHARE_BINDING_LABELS,
             Self::VssShareLinkage => &VSS_SHARE_LINKAGE_BINDING_LABELS,
@@ -102,8 +94,7 @@ impl SuccinctSetupProofFamilyShape {
                 TARGET_DECRYPTION_AGGREGATE_MESSAGE_CLAIM_MASK_DIGIT_COUNT
             }
             Self::VssShareLinkage => VSS_PUBLIC_CARRY_CLAIM_MASK_DIGIT_COUNT,
-            Self::SameSecretLinkageAnchor
-            | Self::PublicKeyShare
+            Self::PublicKeyShare
             | Self::PrivateVssShare
             | Self::SameSecretBridge
             | Self::TrusteeEvaluationKey => CLAIM_MASK_DIGIT_COUNT,
@@ -113,8 +104,7 @@ impl SuccinctSetupProofFamilyShape {
     pub(crate) fn consistency_repetitions(self) -> usize {
         match self {
             Self::VssShareLinkage => VSS_PUBLIC_CONSISTENCY_REPETITIONS,
-            Self::SameSecretLinkageAnchor
-            | Self::PublicKeyShare
+            Self::PublicKeyShare
             | Self::PrivateVssShare
             | Self::SameSecretBridge
             | Self::TargetDecryptionShare
@@ -125,8 +115,7 @@ impl SuccinctSetupProofFamilyShape {
     pub(crate) fn consistency_coefficient_bits(self) -> u32 {
         match self {
             Self::VssShareLinkage => VSS_PUBLIC_CONSISTENCY_COEFFICIENT_BITS,
-            Self::SameSecretLinkageAnchor
-            | Self::PublicKeyShare
+            Self::PublicKeyShare
             | Self::PrivateVssShare
             | Self::SameSecretBridge
             | Self::TargetDecryptionShare
@@ -577,8 +566,7 @@ impl TrusteeEvaluationKeyStatement {
             return Ok(SuccinctSetupProofFamilyShape::VssShareLinkage);
         }
         if self.same_secret_bridge.is_some() {
-            if self.same_secret_linkage.is_some()
-                || self.private_vss_share.is_some()
+            if self.private_vss_share.is_some()
                 || self.vss_share_linkage.is_some()
                 || self.target_decryption_share.is_some()
             {
@@ -617,7 +605,7 @@ impl TrusteeEvaluationKeyStatement {
             && self.target_decryption_share.is_none()
         {
             return Err(invalid_succinct_setup_proof(
-                "trustee statement requires key shares or the same-secret linkage anchor",
+                "trustee statement requires a supported setup proof relation",
             ));
         }
         let shape = self.family_shape()?;
@@ -626,30 +614,10 @@ impl TrusteeEvaluationKeyStatement {
             .as_ref()
             .map(|linkage| linkage.commitments.len());
         match shape {
-            SuccinctSetupProofFamilyShape::SameSecretLinkageAnchor => {
-                // The anchor proves the whole constant-commitment set, one
-                // commitment per Q_share limb, over the setup commitment
-                // fields. Subsets leave later families without a canonical
-                // anchor target, and supersets sit outside the theorem shape.
-                if linkage_commitment_count != Some(DATA_PRIMES.len()) {
-                    return Err(invalid_succinct_setup_proof(
-                        "the linkage anchor requires exactly one commitment for every Q_share limb",
-                    ));
-                }
-            }
             SuccinctSetupProofFamilyShape::PublicKeyShare => {
-                // One constant-commitment opening links the share secret to
-                // the anchored secret by congruence over the commitment
-                // modulus product plus ternary support.
-                if self.same_secret_bridge.is_some() {
-                    if self.same_secret_linkage.is_some() {
-                        return Err(invalid_succinct_setup_proof(
-                            "public-key share statement must not carry both same-secret linkage forms",
-                        ));
-                    }
-                } else if linkage_commitment_count != Some(1) {
+                if self.same_secret_bridge.is_none() || self.same_secret_linkage.is_some() {
                     return Err(invalid_succinct_setup_proof(
-                        "the public-key share statement requires exactly one constant-commitment opening",
+                        "the public-key share statement requires bridge target material and no source linkage",
                     ));
                 }
             }
@@ -683,14 +651,14 @@ impl TrusteeEvaluationKeyStatement {
             }
             SuccinctSetupProofFamilyShape::SameSecretBridge => {
                 if !(self.keys.is_empty()
-                    && self.same_secret_linkage.is_none()
+                    && linkage_commitment_count == Some(DATA_PRIMES.len())
                     && self.private_vss_share.is_none()
                     && self.vss_share_linkage.is_none()
                     && self.same_secret_bridge.is_some()
                     && self.target_decryption_share.is_none())
                 {
                     return Err(invalid_succinct_setup_proof(
-                        "same-secret bridge statement must not mix proof families",
+                        "same-secret bridge statement requires the full source commitment set and must not mix proof families",
                     ));
                 }
             }
@@ -708,11 +676,9 @@ impl TrusteeEvaluationKeyStatement {
                 }
             }
             SuccinctSetupProofFamilyShape::TrusteeEvaluationKey => {
-                // The accepted setup path always builds keyed statements with a
-                // same-secret linkage form; development statements may omit it.
-                if self.same_secret_linkage.is_some() && self.same_secret_bridge.is_some() {
+                if linkage_commitment_count != Some(1) || self.same_secret_bridge.is_some() {
                     return Err(invalid_succinct_setup_proof(
-                        "trustee evaluation-key statement must not carry both same-secret linkage forms",
+                        "the trustee evaluation-key statement requires exactly one source constant commitment and no bridge target material",
                     ));
                 }
             }
@@ -733,23 +699,16 @@ impl TrusteeEvaluationKeyStatement {
                 "sameSecretLinkage.publicMatrixSeedHash",
                 &linkage.public_matrix_seed_hash,
             )?;
-            if self.limb_count() < SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len() {
+            if shape != SuccinctSetupProofFamilyShape::TrusteeEvaluationKey
+                && self.limb_count() < SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len()
+            {
                 return Err(invalid_succinct_setup_proof(
                     "same-secret linkage requires every commitment field to be an active limb",
                 ));
             }
-            if shape == SuccinctSetupProofFamilyShape::TrusteeEvaluationKey
-                && linkage.commitments.len() != self.limb_count()
-            {
-                return Err(invalid_succinct_setup_proof(format!(
-                    "same-secret linkage requires exactly one commitment per active Q_share limb: expected {}, got {}",
-                    self.limb_count(),
-                    linkage.commitments.len()
-                )));
-            }
             if linkage.commitments.is_empty() || linkage.commitments.len() > DATA_PRIMES.len() {
                 return Err(invalid_succinct_setup_proof(
-                    "same-secret linkage requires one commitment per Q_share limb",
+                    "same-secret linkage requires between one and the full source commitment set",
                 ));
             }
             for (source_limb_index, commitment) in linkage.commitments.iter().enumerate() {
@@ -789,6 +748,14 @@ impl TrusteeEvaluationKeyStatement {
             {
                 return Err(invalid_succinct_setup_proof(
                     "same-secret bridge source trustee must match the proof context",
+                ));
+            }
+            if let Some(same_secret_linkage) = &self.same_secret_linkage
+                && same_secret_linkage.public_matrix_seed_hash
+                    != same_secret_bridge.public_matrix_seed_hash
+            {
+                return Err(invalid_succinct_setup_proof(
+                    "same-secret bridge and source linkage public matrix seeds must match",
                 ));
             }
             validate_same_secret_bridge_statement(same_secret_bridge, self.ring_degree)?;

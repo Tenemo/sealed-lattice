@@ -649,10 +649,6 @@ pub(in crate::bgv::setup) fn public_evaluation_key_material_reference_root(
             evaluation_keys,
             "evaluatorKeyScheduleRoot",
         )?,
-        "sameSecretProofFamilyBindingRoot": value_string(
-            evaluation_keys,
-            "sameSecretProofFamilyBindingRoot",
-        )?,
         "publicKeyShareSuccinctProofSetRoot": value_string(
             evaluation_keys,
             "publicKeyShareSuccinctProofSetRoot",

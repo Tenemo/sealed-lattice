@@ -11,15 +11,9 @@ use crate::bgv::setup_helpers::{
 };
 use std::sync::Arc;
 
-const SAME_SECRET_PROOF_FAMILY: &str = "same-secret-linkage-anchor";
-const SAME_SECRET_ANCHOR_PROOF_BYTES_HASH_DOMAIN: &str =
-    "sealed-lattice/setup/same-secret-linkage-anchor/proof-bytes";
-const SAME_SECRET_PROOF_TRANSPORT_SET_OBJECT_TYPE: &str =
-    "SetupTransportedSameSecretProofMaterialSet";
-const SAME_SECRET_PROOF_TRANSPORT_OBJECT_TYPE: &str = "SetupTransportedSameSecretProofMaterial";
 const SAME_SECRET_RELATION: &str =
     "vss-constant-commitments-open-to-one-short-secret-across-q-share-limbs";
-const VSS_SAME_SECRET_BRIDGE_RELATION: &str = "target-basis constant coefficient commitments bind to the same signed ternary trustee secret as the data-basis same-secret proof";
+const VSS_SAME_SECRET_BRIDGE_RELATION: &str = "target-basis constant coefficient commitments bind to the same signed ternary trustee secret as the source data-basis VSS constant commitments";
 const SAME_SECRET_BRIDGE_PROOF_FAMILY: &str = "same-secret-bridge";
 const SAME_SECRET_BRIDGE_PROOF_BYTES_HASH_DOMAIN: &str =
     "sealed-lattice/setup/same-secret-bridge/proof-bytes";
@@ -42,6 +36,8 @@ pub(crate) fn verify_vss_same_secret_bridge_statement_set_request(
     request: &Value,
 ) -> CanonicalResult<Value> {
     let statement_set = value_at_path(request, &["statementSet"])?;
+    let coefficient_commitment_set = value_at_path(request, &["coefficientCommitmentSet"])?;
+    let vss_coefficient_commitments = value_at_path(request, &["vssCoefficientCommitments"])?;
     compare_required_string(
         string_at_path(statement_set, &["objectType"])?,
         "VssSameSecretBridgeStatementSet",
@@ -49,7 +45,7 @@ pub(crate) fn verify_vss_same_secret_bridge_statement_set_request(
     )?;
     compare_required_string(
         string_at_path(statement_set, &["proofFamily"])?,
-        SAME_SECRET_PROOF_FAMILY,
+        SAME_SECRET_BRIDGE_PROOF_FAMILY,
         "VSS same-secret bridge statement set proofFamily",
     )?;
 
@@ -71,10 +67,8 @@ pub(crate) fn verify_vss_same_secret_bridge_statement_set_request(
         "VSS same-secret bridge statement set ringDegree",
     )?;
     let coefficient_commitment_root = hash_at_path(statement_set, &["coefficientCommitmentRoot"])?;
-    let same_secret_consistency_root = hash_at_path(statement_set, &["sameSecretConsistencyRoot"])?;
-    let same_secret_proof_set_root = hash_at_path(statement_set, &["sameSecretProofSetRoot"])?;
-    let same_secret_proof_family_binding_root =
-        hash_at_path(statement_set, &["sameSecretProofFamilyBindingRoot"])?;
+    let vss_coefficient_commitment_root =
+        hash_at_path(statement_set, &["vssCoefficientCommitmentRoot"])?;
     let participant_count = read_positive_usize_at_path(
         statement_set,
         &["participantCount"],
@@ -90,6 +84,38 @@ pub(crate) fn verify_vss_same_secret_bridge_statement_set_request(
         &["thresholdDegree"],
         "VSS same-secret bridge statement set thresholdDegree",
     )?;
+    let coefficient_commitment_verification =
+        super::vss_commitment::verify_vss_public_coefficient_commitment_set_request(&json!({
+            "coefficientCommitmentSet": coefficient_commitment_set,
+        }))?;
+    compare_required_string(
+        hash_at_path(
+            &coefficient_commitment_verification,
+            &["coefficientCommitmentRoot"],
+        )?,
+        coefficient_commitment_root,
+        "VSS same-secret bridge authoritative coefficientCommitmentRoot",
+    )?;
+    compare_required_string(
+        hash_at_path(
+            &coefficient_commitment_verification,
+            &["publicMatrixSeedHash"],
+        )?,
+        public_matrix_seed_hash,
+        "VSS same-secret bridge authoritative publicMatrixSeedHash",
+    )?;
+    for (field_name, expected_value) in [
+        ("participantCount", participant_count),
+        ("rnsLimbCount", target_rns_limb_count),
+        ("thresholdDegree", threshold_degree),
+        ("ringDegree", ring_degree),
+    ] {
+        compare_required_u64(
+            unsigned_at_path(&coefficient_commitment_verification, &[field_name])?,
+            expected_value as u64,
+            &format!("VSS same-secret bridge authoritative {field_name}"),
+        )?;
+    }
     compare_required_string(
         string_at_path(statement_set, &["integerSupport"])?,
         VSS_SAME_SECRET_BRIDGE_INTEGER_SUPPORT,
@@ -124,8 +150,11 @@ pub(crate) fn verify_vss_same_secret_bridge_statement_set_request(
         verified_statement_records.push(verify_statement_record(
             StatementRecordVerificationInput {
                 statement_record,
+                coefficient_commitment_set,
+                vss_coefficient_commitments,
                 expected_position,
                 target_rns_limb_count,
+                threshold_degree,
                 ring_degree,
                 statement_set: StatementSetBinding {
                     ceremony_id,
@@ -135,7 +164,6 @@ pub(crate) fn verify_vss_same_secret_bridge_statement_set_request(
                     setup_epoch,
                     target_basis_hash,
                     public_matrix_seed_hash,
-                    same_secret_proof_family_binding_root,
                 },
             },
         )?);
@@ -143,7 +171,7 @@ pub(crate) fn verify_vss_same_secret_bridge_statement_set_request(
 
     let expected_statement_set_root = derive_canonical_object_hash(&json!({
         "objectType": "VssSameSecretBridgeStatementSet",
-        "proofFamily": SAME_SECRET_PROOF_FAMILY,
+        "proofFamily": SAME_SECRET_BRIDGE_PROOF_FAMILY,
         "ceremonyId": ceremony_id,
         "manifestHash": manifest_hash,
         "rosterHash": roster_hash,
@@ -156,9 +184,7 @@ pub(crate) fn verify_vss_same_secret_bridge_statement_set_request(
         "targetRnsLimbCount": target_rns_limb_count,
         "thresholdDegree": threshold_degree,
         "coefficientCommitmentRoot": coefficient_commitment_root,
-        "sameSecretConsistencyRoot": same_secret_consistency_root,
-        "sameSecretProofSetRoot": same_secret_proof_set_root,
-        "sameSecretProofFamilyBindingRoot": same_secret_proof_family_binding_root,
+        "vssCoefficientCommitmentRoot": vss_coefficient_commitment_root,
         "integerSupport": VSS_SAME_SECRET_BRIDGE_INTEGER_SUPPORT,
         "signedRepresentativeConvention": VSS_SAME_SECRET_BRIDGE_SIGNED_REPRESENTATIVE_CONVENTION,
         "vssPublicCommitmentEncoding": VSS_PUBLIC_COMMITMENT_BINARY_FORMAT,
@@ -172,25 +198,6 @@ pub(crate) fn verify_vss_same_secret_bridge_statement_set_request(
             "VSS same-secret bridge statement set root does not match its bound statements",
         ));
     }
-    verify_same_secret_evidence_sets(EvidenceSetVerificationInput {
-        request,
-        statement_set: StatementSetBinding {
-            ceremony_id,
-            manifest_hash,
-            roster_hash,
-            setup_parameters_hash,
-            setup_epoch,
-            target_basis_hash,
-            public_matrix_seed_hash,
-            same_secret_proof_family_binding_root,
-        },
-        participant_count,
-        same_secret_consistency_root,
-        same_secret_proof_set_root,
-        same_secret_proof_family_binding_root,
-        bridge_statement_records: &verified_statement_records,
-    })?;
-
     Ok(json!({
         "ok": true,
         "operation": "verifyVssSameSecretBridgeStatementSet",
@@ -202,9 +209,7 @@ pub(crate) fn verify_vss_same_secret_bridge_statement_set_request(
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "ringDegree": ring_degree,
         "coefficientCommitmentRoot": coefficient_commitment_root,
-        "sameSecretConsistencyRoot": same_secret_consistency_root,
-        "sameSecretProofSetRoot": same_secret_proof_set_root,
-        "sameSecretProofFamilyBindingRoot": same_secret_proof_family_binding_root,
+        "vssCoefficientCommitmentRoot": vss_coefficient_commitment_root,
         "integerSupport": VSS_SAME_SECRET_BRIDGE_INTEGER_SUPPORT,
         "signedRepresentativeConvention": VSS_SAME_SECRET_BRIDGE_SIGNED_REPRESENTATIVE_CONVENTION,
         "vssPublicCommitmentEncoding": VSS_PUBLIC_COMMITMENT_BINARY_FORMAT,
@@ -256,10 +261,9 @@ pub(crate) fn verify_vss_same_secret_bridge_proof_material_set_request(
     let target_basis_hash = hash_at_path(statement_set, &["targetBasisHash"])?;
     let public_matrix_seed_hash = hash_at_path(statement_set, &["publicMatrixSeedHash"])?;
     let coefficient_commitment_root = hash_at_path(statement_set, &["coefficientCommitmentRoot"])?;
-    let same_secret_consistency_root = hash_at_path(statement_set, &["sameSecretConsistencyRoot"])?;
-    let same_secret_proof_set_root = hash_at_path(statement_set, &["sameSecretProofSetRoot"])?;
-    let same_secret_proof_family_binding_root =
-        hash_at_path(statement_set, &["sameSecretProofFamilyBindingRoot"])?;
+    let vss_coefficient_commitment_root =
+        hash_at_path(statement_set, &["vssCoefficientCommitmentRoot"])?;
+    let vss_coefficient_commitments = value_at_path(request, &["vssCoefficientCommitments"])?;
 
     for (field_name, expected_value) in [
         ("proofFamily", SAME_SECRET_BRIDGE_PROOF_FAMILY),
@@ -279,11 +283,9 @@ pub(crate) fn verify_vss_same_secret_bridge_proof_material_set_request(
         ("targetBasisHash", target_basis_hash),
         ("publicMatrixSeedHash", public_matrix_seed_hash),
         ("coefficientCommitmentRoot", coefficient_commitment_root),
-        ("sameSecretConsistencyRoot", same_secret_consistency_root),
-        ("sameSecretProofSetRoot", same_secret_proof_set_root),
         (
-            "sameSecretProofFamilyBindingRoot",
-            same_secret_proof_family_binding_root,
+            "vssCoefficientCommitmentRoot",
+            vss_coefficient_commitment_root,
         ),
         ("sameSecretBridgeStatementSetRoot", statement_set_root),
     ] {
@@ -323,8 +325,6 @@ pub(crate) fn verify_vss_same_secret_bridge_proof_material_set_request(
         ));
     }
 
-    let mut total_proof_byte_length = 0usize;
-    let mut verified_proof_count = 0usize;
     let mut verified_proof_records = Vec::with_capacity(proof_records.len());
     for (expected_position, proof_record) in proof_records.iter().enumerate() {
         let bridge_statement =
@@ -356,17 +356,18 @@ pub(crate) fn verify_vss_same_secret_bridge_proof_material_set_request(
         let resolved_proof_bytes =
             resolve_same_secret_bridge_proof_bytes(proof_record, request, bridge_statement_root)?;
         let proof_bytes = resolved_proof_bytes.proof_bytes;
-        let proof_byte_length = proof_bytes.len();
-        total_proof_byte_length = total_proof_byte_length
-            .checked_add(proof_byte_length)
-            .ok_or_else(|| {
-                CanonicalError::new(
-                    CanonicalErrorCode::MalformedLength,
-                    "same-secret bridge proof byte length overflowed",
-                )
-            })?;
         let proof_record_without_root = resolved_proof_bytes.proof_record_without_root;
         let proof_record_root = resolved_proof_bytes.proof_record_root;
+        let trustee_identity = string_at_path(bridge_statement, &["trusteeIdentity"])?;
+        let source_constant_commitments =
+            super::source_constant_commitments::canonical_source_constant_commitments_from_bridge_statement(
+                vss_coefficient_commitments,
+                bridge_statement,
+                trustee_identity,
+                expected_position as u64,
+                public_matrix_seed_hash,
+                ring_degree,
+            )?;
 
         verify_reconstructed_same_secret_bridge_proof(
             ReconstructedSameSecretBridgeProofVerification {
@@ -379,17 +380,14 @@ pub(crate) fn verify_vss_same_secret_bridge_proof_material_set_request(
                     setup_epoch,
                     target_basis_hash,
                     public_matrix_seed_hash,
-                    same_secret_proof_family_binding_root,
                 },
                 expected_position,
-                proof_byte_length,
                 proof_bytes: &proof_bytes[..],
+                source_constant_commitment_values: &source_constant_commitments.commitment_values,
             },
         )?;
-        verified_proof_count += 1;
-
         let mut verified_proof_record = proof_record_without_root;
-        verified_proof_record["proofRecordRoot"] = json!(proof_record_root);
+        verified_proof_record["sameSecretBridgeProofRecordRoot"] = json!(proof_record_root);
         verified_proof_records.push(verified_proof_record);
     }
     let proof_material_set_without_root = json!({
@@ -407,9 +405,7 @@ pub(crate) fn verify_vss_same_secret_bridge_proof_material_set_request(
         "targetRnsLimbCount": target_rns_limb_count,
         "thresholdDegree": threshold_degree,
         "coefficientCommitmentRoot": coefficient_commitment_root,
-        "sameSecretConsistencyRoot": same_secret_consistency_root,
-        "sameSecretProofSetRoot": same_secret_proof_set_root,
-        "sameSecretProofFamilyBindingRoot": same_secret_proof_family_binding_root,
+        "vssCoefficientCommitmentRoot": vss_coefficient_commitment_root,
         "sameSecretBridgeStatementSetRoot": statement_set_root,
         "proofRecords": verified_proof_records,
     });
@@ -430,25 +426,14 @@ pub(crate) fn verify_vss_same_secret_bridge_proof_material_set_request(
         "sameSecretBridgeStatementSetRoot": statement_set_root,
         "proofMaterialSetRoot": proof_material_set_root,
         "participantCount": participant_count,
-        "proofRecordCount": proof_records.len(),
-        "totalProofByteLength": total_proof_byte_length,
-        "proofVerificationCount": verified_proof_count,
     }))
 }
 
-mod anchor_evidence;
-mod anchor_transport;
 mod bridge_transport;
 mod reconstructed;
 mod statement_record;
 mod transport_common;
 
-use anchor_evidence::*;
-#[cfg(test)]
-use anchor_transport::*;
 use bridge_transport::*;
 use reconstructed::*;
 use statement_record::*;
-
-#[cfg(test)]
-mod tests;

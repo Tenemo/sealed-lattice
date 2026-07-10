@@ -1,8 +1,6 @@
 import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
-import { type SameSecretProofSet } from '../same-secret-consistency-records.js';
-
 import {
     publicKeyShareProofFamily,
     type JsonRecord,
@@ -27,10 +25,7 @@ import {
     sortedByRosterPosition,
     validateCommonInput,
 } from './encoding.js';
-import {
-    publicKeyShareRecordsByRosterPosition,
-    statementRecordsByRosterPosition,
-} from './share-statement-records.js';
+import { publicKeyShareRecordsByRosterPosition } from './share-statement-records.js';
 
 const publicKeyShareProofRecordsByRosterPosition = (
     input: Pick<
@@ -78,63 +73,137 @@ const publicKeyShareProofRecordsByRosterPosition = (
     return recordsByRosterPosition;
 };
 
-const sameSecretProofRecordsByRosterPosition = (
+type SameSecretBridgeBinding = Readonly<{
+    readonly trusteeIdentity: string;
+    readonly sameSecretBridgeStatementRoot: ProtocolHash;
+    readonly sameSecretBridgeProofRecordRoot: ProtocolHash;
+}>;
+
+const sameSecretBridgeBindingsByRosterPosition = (
     input: Pick<
         PublicKeyShareSuccinctProofSetInput,
         | 'setupContext'
         | 'participantCount'
-        | 'sameSecretConsistency'
-        | 'sameSecretProofs'
+        | 'publicMatrixSeedHash'
+        | 'sameSecretBridgeStatementSet'
+        | 'sameSecretBridgeProofMaterialSet'
     >,
-): ReadonlyMap<number, SameSecretProofSet['proofRecords'][number]> => {
+): ReadonlyMap<number, SameSecretBridgeBinding> => {
+    const { sameSecretBridgeStatementSet, sameSecretBridgeProofMaterialSet } =
+        input;
     assertContextMatches(
         input.setupContext,
-        input.sameSecretProofs,
-        'sameSecretProofs',
+        sameSecretBridgeStatementSet,
+        'sameSecretBridgeStatementSet',
+    );
+    assertContextMatches(
+        input.setupContext,
+        sameSecretBridgeProofMaterialSet,
+        'sameSecretBridgeProofMaterialSet',
+    );
+    assertProtocolHash(
+        sameSecretBridgeStatementSet.sameSecretBridgeStatementSetRoot,
+        'sameSecretBridgeStatementSet.sameSecretBridgeStatementSetRoot',
     );
     if (
-        input.sameSecretProofs.sameSecretConsistencyRoot !==
-            input.sameSecretConsistency.sameSecretConsistencyRoot ||
-        input.sameSecretProofs.sameSecretProofFamilyBindingRoot !==
-            input.sameSecretConsistency.sameSecretProofFamilyBindingRoot
+        sameSecretBridgeStatementSet.participantCount !==
+            input.participantCount ||
+        sameSecretBridgeProofMaterialSet.participantCount !==
+            input.participantCount
     ) {
         throw new Error(
-            'sameSecretProofs must bind the accepted same-secret statement set.',
+            'same-secret bridge statement and proof material sets must match participantCount.',
         );
     }
-    assertProtocolHash(
-        input.sameSecretProofs.sameSecretProofSetRoot,
-        'sameSecretProofs.sameSecretProofSetRoot',
+    if (
+        sameSecretBridgeStatementSet.publicMatrixSeedHash !==
+            input.publicMatrixSeedHash ||
+        sameSecretBridgeProofMaterialSet.publicMatrixSeedHash !==
+            input.publicMatrixSeedHash
+    ) {
+        throw new Error(
+            'same-secret bridge statement and proof material sets must match publicMatrixSeedHash.',
+        );
+    }
+    if (
+        sameSecretBridgeProofMaterialSet.sameSecretBridgeStatementSetRoot !==
+        sameSecretBridgeStatementSet.sameSecretBridgeStatementSetRoot
+    ) {
+        throw new Error(
+            'sameSecretBridgeProofMaterialSet must bind sameSecretBridgeStatementSet.',
+        );
+    }
+
+    const statementRecords = sortedByRosterPosition(
+        sameSecretBridgeStatementSet.statementRecords,
     );
-    const proofRecords = sortedByRosterPosition(
-        input.sameSecretProofs.proofRecords,
-    );
+    if (statementRecords.length !== input.participantCount) {
+        throw new Error(
+            'sameSecretBridgeStatementSet.statementRecords must contain one statement per participant.',
+        );
+    }
+    const proofRecords = sameSecretBridgeProofMaterialSet.proofRecords;
     if (proofRecords.length !== input.participantCount) {
         throw new Error(
-            'sameSecretProofs.proofRecords must contain one proof per participant.',
+            'sameSecretBridgeProofMaterialSet.proofRecords must contain one proof per participant.',
         );
     }
-    const recordsByRosterPosition = new Map<
-        number,
-        SameSecretProofSet['proofRecords'][number]
-    >();
-    proofRecords.forEach((proofRecord, expectedRosterPosition) => {
-        if (proofRecord.trusteeRosterPosition !== expectedRosterPosition) {
+    const proofRecordsByStatementRoot = new Map(
+        proofRecords.map((proofRecord) => {
+            assertProtocolHash(
+                proofRecord.sameSecretBridgeStatementRoot,
+                'sameSecretBridgeProofMaterialSet.proofRecords.sameSecretBridgeStatementRoot',
+            );
+            assertProtocolHash(
+                proofRecord.sameSecretBridgeProofRecordRoot,
+                'sameSecretBridgeProofMaterialSet.proofRecords.sameSecretBridgeProofRecordRoot',
+            );
+
+            return [
+                proofRecord.sameSecretBridgeStatementRoot,
+                proofRecord,
+            ] as const;
+        }),
+    );
+    if (proofRecordsByStatementRoot.size !== proofRecords.length) {
+        throw new Error(
+            'sameSecretBridgeProofMaterialSet.proofRecords must not repeat a statement root.',
+        );
+    }
+
+    const bindingsByRosterPosition = new Map<number, SameSecretBridgeBinding>();
+    statementRecords.forEach((statementRecord, expectedRosterPosition) => {
+        if (statementRecord.trusteeRosterPosition !== expectedRosterPosition) {
             throw new Error(
-                'sameSecretProofs.proofRecords roster positions must be contiguous from zero.',
+                'sameSecretBridgeStatementSet.statementRecords roster positions must be contiguous from zero.',
             );
         }
+        assertNonEmptyString(
+            statementRecord.trusteeIdentity,
+            'sameSecretBridgeStatementSet.statementRecords.trusteeIdentity',
+        );
         assertProtocolHash(
-            proofRecord.sameSecretProofRoot,
-            'sameSecretProofs.proofRecords.sameSecretProofRoot',
+            statementRecord.sameSecretBridgeStatementRoot,
+            'sameSecretBridgeStatementSet.statementRecords.sameSecretBridgeStatementRoot',
         );
-        recordsByRosterPosition.set(
-            proofRecord.trusteeRosterPosition,
-            proofRecord,
+        const proofRecord = proofRecordsByStatementRoot.get(
+            statementRecord.sameSecretBridgeStatementRoot,
         );
+        if (proofRecord === undefined) {
+            throw new Error(
+                'sameSecretBridgeProofMaterialSet must contain one proof for every bridge statement.',
+            );
+        }
+        bindingsByRosterPosition.set(statementRecord.trusteeRosterPosition, {
+            trusteeIdentity: statementRecord.trusteeIdentity,
+            sameSecretBridgeStatementRoot:
+                statementRecord.sameSecretBridgeStatementRoot,
+            sameSecretBridgeProofRecordRoot:
+                proofRecord.sameSecretBridgeProofRecordRoot,
+        });
     });
 
-    return recordsByRosterPosition;
+    return bindingsByRosterPosition;
 };
 
 type PublicKeyShareMaterialProofReference =
@@ -359,16 +428,6 @@ export const createPublicKeyShareSuccinctProofSet = (
     validateCommonInput(input);
     assertContextMatches(
         input.setupContext,
-        input.sameSecretConsistency,
-        'sameSecretConsistency',
-    );
-    assertContextMatches(
-        input.setupContext,
-        input.sameSecretProofs,
-        'sameSecretProofs',
-    );
-    assertContextMatches(
-        input.setupContext,
         input.publicKeyShareProofs,
         'publicKeyShareProofs',
     );
@@ -378,52 +437,41 @@ export const createPublicKeyShareSuccinctProofSet = (
         'publicKeyShareMaterial',
     );
     if (
-        input.sameSecretProofs.sameSecretConsistencyRoot !==
-            input.sameSecretConsistency.sameSecretConsistencyRoot ||
-        input.sameSecretProofs.sameSecretProofFamilyBindingRoot !==
-            input.sameSecretConsistency.sameSecretProofFamilyBindingRoot ||
         input.publicKeyShareProofs.publicKeyShareSetRoot !==
             input.publicKeyShares.publicKeyShareSetRoot ||
-        input.publicKeyShareProofs.sameSecretConsistencyRoot !==
-            input.sameSecretConsistency.sameSecretConsistencyRoot ||
         input.publicKeyShareMaterial.publicKeyShareSetRoot !==
             input.publicKeyShares.publicKeyShareSetRoot
     ) {
         throw new Error(
-            'public-key succinct proofs must bind the accepted public-key share, same-secret, statement, and material roots.',
+            'public-key succinct proofs must bind the accepted public-key share, statement, and material roots.',
         );
     }
 
-    const statementsByRosterPosition = statementRecordsByRosterPosition(input);
     const shareRecords = publicKeyShareRecordsByRosterPosition(input);
     const proofStatementRecords =
         publicKeyShareProofRecordsByRosterPosition(input);
-    const sameSecretProofRecords =
-        sameSecretProofRecordsByRosterPosition(input);
     const materialReferences =
         publicKeyShareMaterialReferencesByRosterPosition(input);
+    const sameSecretBridgeBindings =
+        sameSecretBridgeBindingsByRosterPosition(input);
     const proofMaterials = sortedPublicKeyShareSuccinctProofMaterials(input);
     const proofRecords = proofMaterials.map(
         (proofMaterial, expectedRosterPosition) => {
-            const statementRecord = statementsByRosterPosition.get(
-                expectedRosterPosition,
-            );
             const shareRecord = shareRecords.get(expectedRosterPosition);
             const proofStatementRecord = proofStatementRecords.get(
-                expectedRosterPosition,
-            );
-            const sameSecretProofRecord = sameSecretProofRecords.get(
                 expectedRosterPosition,
             );
             const materialReference = materialReferences.get(
                 expectedRosterPosition,
             );
+            const sameSecretBridgeBinding = sameSecretBridgeBindings.get(
+                expectedRosterPosition,
+            );
             if (
-                statementRecord === undefined ||
                 shareRecord === undefined ||
                 proofStatementRecord === undefined ||
-                sameSecretProofRecord === undefined ||
-                materialReference === undefined
+                materialReference === undefined ||
+                sameSecretBridgeBinding === undefined
             ) {
                 throw new Error(
                     'publicKeyShareSuccinctProofMaterials must match accepted setup records.',
@@ -431,22 +479,20 @@ export const createPublicKeyShareSuccinctProofSet = (
             }
             if (
                 proofMaterial.trusteeIdentity !== shareRecord.trusteeIdentity ||
+                proofStatementRecord.trusteeIdentity !==
+                    shareRecord.trusteeIdentity ||
+                materialReference.trusteeIdentity !==
+                    shareRecord.trusteeIdentity ||
+                sameSecretBridgeBinding.trusteeIdentity !==
+                    shareRecord.trusteeIdentity ||
                 proofStatementRecord.publicKeyShareRoot !==
                     shareRecord.publicKeyShareRoot ||
                 (materialReference.publicKeyShareRoot !== undefined &&
                     materialReference.publicKeyShareRoot !==
-                        shareRecord.publicKeyShareRoot) ||
-                shareRecord.sameSecretStatementRoot !==
-                    statementRecord.sameSecretStatementRoot ||
-                proofStatementRecord.sameSecretStatementRoot !==
-                    statementRecord.sameSecretStatementRoot ||
-                sameSecretProofRecord.sameSecretStatementRoot !==
-                    statementRecord.sameSecretStatementRoot ||
-                sameSecretProofRecord.trusteeSecretCommitmentRoot !==
-                    statementRecord.trusteeSecretCommitmentRoot
+                        shareRecord.publicKeyShareRoot)
             ) {
                 throw new Error(
-                    'publicKeyShareSuccinctProofMaterials must bind accepted public-key and same-secret records.',
+                    'publicKeyShareSuccinctProofMaterials must bind accepted public-key records.',
                 );
             }
             const proofRecordWithoutRoot = {
@@ -461,13 +507,10 @@ export const createPublicKeyShareSuccinctProofSet = (
                     proofStatementRecord.publicKeyShareProofRoot,
                 publicKeyShareMaterialRoot:
                     materialReference.publicKeyShareMaterialRoot,
-                sameSecretStatementRoot:
-                    statementRecord.sameSecretStatementRoot,
-                trusteeSecretCommitmentRoot:
-                    statementRecord.trusteeSecretCommitmentRoot,
-                sameSecretProofFamilyBindingRoot:
-                    sameSecretProofRecord.sameSecretProofFamilyBindingRoot,
-                sameSecretProofRoot: sameSecretProofRecord.sameSecretProofRoot,
+                sameSecretBridgeStatementRoot:
+                    sameSecretBridgeBinding.sameSecretBridgeStatementRoot,
+                sameSecretBridgeProofRecordRoot:
+                    sameSecretBridgeBinding.sameSecretBridgeProofRecordRoot,
                 statementHash: proofMaterial.statementHash,
                 proofBytesHash: proofMaterial.proofBytesHash,
                 ...publicKeyShareSuccinctProofByteMaterial(proofMaterial),
@@ -493,11 +536,6 @@ export const createPublicKeyShareSuccinctProofSet = (
         publicMatrixSeedHash: input.publicMatrixSeedHash,
         publicKeyCrpRoot: input.publicKeyCrpRoot,
         publicAPolynomialRoot: input.publicAPolynomialRoot,
-        sameSecretConsistencyRoot:
-            input.sameSecretConsistency.sameSecretConsistencyRoot,
-        sameSecretProofSetRoot: input.sameSecretProofs.sameSecretProofSetRoot,
-        sameSecretProofFamilyBindingRoot:
-            input.sameSecretConsistency.sameSecretProofFamilyBindingRoot,
         publicKeyShareSetRoot: input.publicKeyShares.publicKeyShareSetRoot,
         publicKeyShareProofSetRoot:
             input.publicKeyShareProofs.publicKeyShareProofSetRoot,

@@ -200,14 +200,7 @@ pub(super) fn target_decryption_share_all_active_limbs_proof_statement_from_publ
         &["smudgingCommitmentBinding", "smudgingCommitmentSetRoot"],
     )?;
     let aggregate_message_coefficient_bound = (0..active_limb_count)
-        .map(|target_rns_limb_index| {
-            aggregate_message_coefficient_bound(
-                DATA_PRIMES[target_rns_limb_index],
-                input.setup_binding.participants.len(),
-            )
-        })
-        .collect::<CanonicalResult<Vec<_>>>()?
-        .into_iter()
+        .map(|target_rns_limb_index| DATA_PRIMES[target_rns_limb_index])
         .max()
         .ok_or_else(|| {
             CanonicalError::new(

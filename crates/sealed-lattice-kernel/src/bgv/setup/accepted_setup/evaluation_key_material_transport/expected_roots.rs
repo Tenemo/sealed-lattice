@@ -59,9 +59,6 @@ pub(super) fn expected_relinearization_key_roots_for_evaluation_keys(
                     "objectType": "RelinearizationKeyAggregate",
                     "materialEncoding": PUBLIC_EVALUATION_KEY_MATERIAL_ENCODING,
                     "evaluatorKeyScheduleRoot": binding.evaluator_key_schedule_root.as_str(),
-                    "sameSecretProofFamilyBindingRoot": binding
-                        .same_secret_proof_family_binding_root
-                        .as_str(),
                     "publicKeyShareSuccinctProofSetRoot": binding
                         .public_key_share_succinct_proof_set_root
                         .as_str(),
@@ -177,9 +174,6 @@ pub(super) fn expected_galois_key_roots_for_evaluation_keys(
                 "objectType": "GaloisKeyAggregate",
                 "materialEncoding": PUBLIC_EVALUATION_KEY_MATERIAL_ENCODING,
                 "evaluatorKeyScheduleRoot": binding.evaluator_key_schedule_root.as_str(),
-                "sameSecretProofFamilyBindingRoot": binding
-                    .same_secret_proof_family_binding_root
-                    .as_str(),
                 "publicKeyShareSuccinctProofSetRoot": binding
                     .public_key_share_succinct_proof_set_root
                     .as_str(),

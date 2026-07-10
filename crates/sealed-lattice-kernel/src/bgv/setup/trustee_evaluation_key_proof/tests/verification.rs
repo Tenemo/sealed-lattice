@@ -64,89 +64,6 @@ fn regenerated_limb_roots_preserve_encoded_proof_bytes_across_batch_sizes() {
 }
 
 #[test]
-fn same_secret_linkage_anchor_proof_round_trips_without_keys() {
-    // The keyless statement is the per-trustee same-secret linkage anchor:
-    // it opens one constant commitment per Q_share limb while the committed
-    // rows are checked over the three setup commitment fields.
-    let (statement, witness) = generate_development_trustee_instance_with_linkage(
-        "99ffeedd",
-        &[],
-        SMALL_RING_DEGREE,
-        Some(DATA_PRIMES.len()),
-    )
-    .expect("anchor instance");
-    assert!(statement.keys.is_empty());
-    let proof =
-        prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
-    verify_evaluation_key_share(&statement, &proof).expect("verify");
-
-    let encoded = encode_trustee_evaluation_key_proof(&proof);
-    let decoded =
-        decode_trustee_evaluation_key_proof(&statement, &encoded).expect("decode anchor proof");
-    verify_evaluation_key_share(&statement, &decoded).expect("verify decoded");
-}
-
-#[test]
-fn same_secret_anchor_rejects_partial_q_share_commitment_set() {
-    let (statement, witness) = generate_development_trustee_instance_with_linkage(
-        "77aaccee",
-        &[],
-        SMALL_RING_DEGREE,
-        Some(SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len()),
-    )
-    .expect("partial anchor instance");
-
-    assert!(
-        statement.validate_shape().is_err(),
-        "the keyless same-secret anchor must not accept only the setup commitment-field count"
-    );
-    assert!(
-        prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).is_err(),
-        "proving must refuse a partial same-secret anchor commitment set"
-    );
-}
-
-#[test]
-fn keyless_statement_without_linkage_is_refused() {
-    let (mut statement, witness) = generate_development_trustee_instance_with_linkage(
-        "aa00bb11",
-        &[],
-        SMALL_RING_DEGREE,
-        Some(DATA_PRIMES.len()),
-    )
-    .expect("anchor instance");
-    statement.same_secret_linkage = None;
-    assert!(
-        prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).is_err(),
-        "a statement with neither keys nor the linkage anchor must be refused"
-    );
-}
-
-#[test]
-fn anchor_rejects_commitments_to_a_different_secret() {
-    let (statement, witness) = generate_development_trustee_instance_with_linkage(
-        "cc22dd33",
-        &[],
-        SMALL_RING_DEGREE,
-        Some(DATA_PRIMES.len()),
-    )
-    .expect("anchor instance");
-    let (other_statement, _) = generate_development_trustee_instance_with_linkage(
-        "ee44ff55",
-        &[],
-        SMALL_RING_DEGREE,
-        Some(DATA_PRIMES.len()),
-    )
-    .expect("second anchor instance");
-    let mut forged = statement;
-    forged.same_secret_linkage = other_statement.same_secret_linkage;
-    assert!(
-        prove_evaluation_key_share(&forged, &witness, PROOF_RANDOMNESS_SEED).is_err(),
-        "anchor proving must reject commitments that open to a different secret"
-    );
-}
-
-#[test]
 fn honest_public_key_share_proof_round_trips() {
     let (statement, witness) =
         generate_development_public_key_share_instance("a1b2c3d401", SMALL_RING_DEGREE)
@@ -187,9 +104,9 @@ fn public_key_share_rejects_tampered_share_component() {
 
 #[test]
 fn public_key_share_rejects_a_secret_outside_the_committed_one() {
-    // A trustee whose share secret differs from the anchored committed secret
-    // cannot prove: splicing another instance's commitment makes the linkage
-    // opening relation fail at proving time.
+    // A trustee whose share secret differs from the bridge target secret
+    // cannot prove: splicing another instance's target commitments makes the
+    // committed-material relation fail at proving time.
     let (statement, witness) =
         generate_development_public_key_share_instance("dd44ee55", SMALL_RING_DEGREE)
             .expect("first instance");
@@ -197,7 +114,7 @@ fn public_key_share_rejects_a_secret_outside_the_committed_one() {
         generate_development_public_key_share_instance("ff66aa77", SMALL_RING_DEGREE)
             .expect("second instance");
     let mut forged = statement;
-    forged.same_secret_linkage = other_statement.same_secret_linkage;
+    forged.same_secret_bridge = other_statement.same_secret_bridge;
     assert!(
         prove_evaluation_key_share(&forged, &witness, PROOF_RANDOMNESS_SEED).is_err(),
         "a share secret that does not open the committed value must not prove"
@@ -225,22 +142,30 @@ fn public_key_share_rejects_a_foreign_common_reference_polynomial() {
 
 #[test]
 fn succinct_setup_statement_hash_vectors_cover_current_families() {
-    let same_secret = super::generate_trustee_evaluation_key_proof_from_request(
+    let same_secret_statement = super::super::commands::same_secret_bridge_statement_from_request(
         &same_secret_statement_hash_vector_request(),
     )
     .expect("same-secret statement vector");
-    let public_key = super::generate_trustee_evaluation_key_proof_from_request(
+    let same_secret = serde_json::json!({
+        "proofFamily": same_secret_statement.context.proof_family,
+        "statementHash": crate::hashing::to_hex(&same_secret_statement.statement_hash()),
+    });
+    let public_key_statement = super::super::commands::statement_from_request(
         &public_key_share_statement_hash_vector_request(),
     )
     .expect("public-key statement vector");
+    let public_key = serde_json::json!({
+        "proofFamily": public_key_statement.context.proof_family,
+        "statementHash": crate::hashing::to_hex(&public_key_statement.statement_hash()),
+    });
     let private_vss =
         crate::bgv::setup::private_vss::generate_private_vss_share_proof_from_request(
             &private_vss_statement_hash_vector_request(),
         )
         .expect("private VSS statement vector");
-    // The key-bearing family proves through the atom schedule and requires the
-    // same-secret bridge anchor, so the statement-hash vector pins the parsed
-    // statement's hash directly; the statement encoding is unchanged.
+    // The key-bearing family proves through the atom schedule and carries an
+    // exact source commitment linkage, so the statement-hash vector pins the
+    // parsed statement's hash directly.
     let trustee_evaluation_key_statement = super::super::commands::statement_from_request(
         &trustee_evaluation_key_statement_hash_vector_request(),
     )
@@ -267,7 +192,7 @@ fn succinct_setup_statement_hash_vectors_cover_current_families() {
             .expect("trustee evaluation-key hash"),
     );
     let expected_statement_hashes = expected_statement_hash_vectors();
-    assert_eq!(same_secret["proofFamily"], "same-secret-linkage-anchor");
+    assert_eq!(same_secret["proofFamily"], "same-secret-bridge");
     assert_eq!(
         same_secret["statementHash"],
         expected_statement_hashes["sameSecret"]

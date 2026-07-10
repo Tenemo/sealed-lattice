@@ -6,7 +6,6 @@ import type {
     TransportedEvaluationKeyShareProofMaterialSet,
     TransportedPublicKeyShareProofMaterialSet,
     TransportedSameSecretBridgeProofMaterialSet,
-    TransportedSameSecretProofMaterialSet,
     TransportedVssShareLinkageProofMaterialSet,
     VerifiedSetupProofMaterial,
     VerifiedSetupProofMaterialSet,
@@ -18,14 +17,12 @@ import type { VerifySetupPackageInput } from './index.js';
 type JsonRecord = Record<string, unknown>;
 
 type SetupProofMaterialTransportFieldName =
-    | 'transportedSameSecretProofMaterial'
     | 'transportedPublicKeyShareProofMaterial'
     | 'transportedVssShareLinkageProofMaterial'
     | 'transportedSameSecretBridgeProofMaterial'
     | 'transportedEvaluationKeyShareProofMaterial';
 
 type SetupProofMaterialTransportSet =
-    | TransportedSameSecretProofMaterialSet
     | TransportedPublicKeyShareProofMaterialSet
     | TransportedVssShareLinkageProofMaterialSet
     | TransportedSameSecretBridgeProofMaterialSet
@@ -37,7 +34,6 @@ type SetupProofMaterialChunk = Readonly<{
 }>;
 
 const setupProofMaterialTransportFieldNames = [
-    'transportedSameSecretProofMaterial',
     'transportedPublicKeyShareProofMaterial',
     'transportedVssShareLinkageProofMaterial',
     'transportedSameSecretBridgeProofMaterial',

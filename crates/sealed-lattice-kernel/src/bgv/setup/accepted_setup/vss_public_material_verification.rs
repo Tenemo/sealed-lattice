@@ -116,7 +116,7 @@ fn verify_vss_public_material_binding(
         "aggregateThresholdCommitmentSet": aggregate_threshold_set,
     });
     let statement_verification =
-        crate::bgv::setup::verify_vss_share_linkage_statement_request(&statement_request)?;
+        crate::bgv::setup::verify_vss_share_linkage_bindings_request(&statement_request)?;
 
     let setup_context = setup_package
         .get("setupContext")
@@ -246,9 +246,11 @@ fn verify_vss_public_material_binding(
     // committed T_{j,l} is shown to be the modular sum of the committed source
     // recipient shares by a unit-point share-linkage proof.
     crate::bgv::setup::verify_vss_public_aggregate_threshold_proofs(
+        coefficient_set,
         recipient_share_set,
         aggregate_threshold_set,
         &crate::bgv::setup::VssAggregateThresholdProofContext {
+            public_matrix_seed_hash: accepted_public_matrix_seed_hash,
             ceremony_id: string_at_path(setup_context, &["ceremonyId"])?,
             manifest_hash: hash_at_path(setup_context, &["manifestHash"])?,
             roster_hash: hash_at_path(setup_context, &["rosterHash"])?,

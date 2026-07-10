@@ -1,5 +1,6 @@
 use super::*;
 
+use crate::bgv::parameters::POLYNOMIAL_DEGREE;
 use crate::hashing::derive_canonical_object_hash;
 
 const PROOF_RANDOMNESS_SEED_BYTES: usize = 64;

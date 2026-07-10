@@ -69,6 +69,7 @@ pub(crate) struct EvaluationKeyShareDescriptor {
 // secret. Holding over all three commitment fields gives the equation over
 // the commitment modulus product by CRT, and binding makes the opened message
 // the committed one.
+#[derive(Clone)]
 pub(crate) struct SameSecretLinkageStatement {
     pub(crate) public_matrix_seed_hash: String,
     // One constant commitment per Q_share limb, in limb order.
@@ -203,10 +204,10 @@ pub(crate) struct TargetDecryptionShareStatement {
 // family label, and the family's ordered labeled binding roots. Every field
 // enters the statement hash, so a proof transplanted to another ceremony,
 // roster position, epoch, family, or binding object fails the transcript
-// rebinding. The binding label list is fixed per family: the keyless
-// same-secret linkage anchor binds the VSS coefficient commitment material
-// root it bridges, and the key-bearing evaluation-key family binds the
-// frozen schedule and its same-secret anchor references.
+// rebinding. The binding label list is fixed per family: the standalone bridge
+// carries no contextual binding roots because its canonical source and target
+// commitments enter the statement directly, while the key-bearing
+// evaluation-key family binds the frozen schedule and bridge proof record.
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) struct SuccinctSetupProofContext {
     pub(crate) proof_family: String,
@@ -598,9 +599,9 @@ impl TrusteeEvaluationKeyStatement {
     pub(crate) const TARGET_DECRYPTION_AGGREGATE_MESSAGE_MASKED_CLAIM_FIELD_COUNT: usize = 5;
     pub(crate) const TARGET_DECRYPTION_SMUDGING_MESSAGE_MASKED_CLAIM_FIELD_COUNT: usize = 4;
 
-    // The number of active limb fields: one past the highest key level. The
-    // keyless same-secret linkage anchor statement is active exactly on the
-    // commitment fields, where its opening relations live.
+    // The number of active limb fields: one past the highest key level. A
+    // standalone same-secret bridge statement is active on every source
+    // commitment field, where its opening relations live.
     pub(crate) fn limb_count(&self) -> usize {
         if self.private_vss_share.is_some() || self.vss_share_linkage.is_some() {
             return SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len();
@@ -668,8 +669,8 @@ impl TrusteeEvaluationKeyStatement {
 
     // Number of linkage opening-randomness logical columns active in a limb:
     // the linkage relations live only in the commitment fields (the first
-    // three data primes). Only the legacy BDLOP same-secret linkage anchor
-    // carries opening randomness; the committed-material bridge targets hide
+    // three data primes). Only the BDLOP source linkage carries opening
+    // randomness; the committed-material bridge targets hide
     // via their tree masks and salts and have no algebraic opening randomness.
     pub(crate) fn linkage_randomness_count(&self, limb_index: usize) -> usize {
         if limb_index >= SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len() {
@@ -971,11 +972,11 @@ impl TrusteeEvaluationKeyStatement {
                     "target-decryption message decoder limb is missing from the statement layout",
                 )
             })?;
-        if proof_limb_index == decoder_limb_index {
-            crate::bgv::setup::vss_commitment::vss_public_message_encoding_layout(message_bound)
-        } else {
-            Ok(crate::bgv::setup::vss_commitment::vss_public_message_digit_only_encoding_layout())
-        }
+        crate::bgv::setup::vss_commitment::vss_public_cross_limb_message_encoding_layout(
+            message_bound,
+            proof_limb_index,
+            decoder_limb_index,
+        )
     }
 
     pub(crate) fn target_decryption_message_encoding_layouts(

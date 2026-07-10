@@ -81,14 +81,6 @@ pub(in super::super) fn verify_optional_public_key_share_succinct_proofs(
             )
     })?;
     let common_binding = public_key_common_binding(setup_package)?;
-    let same_secret_consistency_root = same_secret_consistency_root_from_package(setup_package)?;
-    // The verifier reaches this point only with a verified same-secret bridge
-    // present (a bridge-absent package is refused earlier by
-    // verify_optional_same_secret_proofs), and a verified bridge already requires
-    // sameSecretProofs, so a standalone sameSecretProofs-missing guard here is
-    // unreachable and has been removed.
-    let same_secret_proof_set_root = same_secret_proof_set_root_from_package(setup_package)?;
-    let same_secret_proof_family_binding_root = same_secret_proof_family_binding_root()?;
     let public_key_share_set_root = setup_package
         .get("publicKeyShares")
         .and_then(|share_set| share_set.get("publicKeyShareSetRoot"))
@@ -111,8 +103,6 @@ pub(in super::super) fn verify_optional_public_key_share_succinct_proofs(
         })?;
     let share_records = public_key_share_records_by_roster_position(setup_package)?;
     let proof_records = public_key_share_proof_records_by_roster_position(setup_package)?;
-    let same_secret_records = same_secret_statement_records_by_roster_position(setup_package)?;
-    let same_secret_proof_bindings = same_secret_proof_bindings_from_package(setup_package)?;
     if public_key_share_material_uses_transport(material_set)
         && request.get("transportedPublicKeyShareMaterial").is_none()
     {
@@ -156,7 +146,9 @@ pub(in super::super) fn verify_optional_public_key_share_succinct_proofs(
             "setupPackage.publicKeyShareSuccinctProofs.objectType",
         )?));
     }
-    if let Err(error) = verify_same_secret_context(proof_set, setup_context) {
+    if let Err(error) =
+        verify_context_fields_match(proof_set, setup_context, "publicKeyShareSuccinctProofs")
+    {
         return Ok(Some(public_key_refusal(
             "publicKeyShareSuccinctProofSetContextMismatch",
             error.message,
@@ -196,18 +188,6 @@ pub(in super::super) fn verify_optional_public_key_share_succinct_proofs(
             .and_then(Value::as_str)
             != Some(common_binding.public_a_polynomial_root.as_str())
         || proof_set
-            .get("sameSecretConsistencyRoot")
-            .and_then(Value::as_str)
-            != Some(same_secret_consistency_root.as_str())
-        || proof_set
-            .get("sameSecretProofSetRoot")
-            .and_then(Value::as_str)
-            != Some(same_secret_proof_set_root.as_str())
-        || proof_set
-            .get("sameSecretProofFamilyBindingRoot")
-            .and_then(Value::as_str)
-            != Some(same_secret_proof_family_binding_root.as_str())
-        || proof_set
             .get("publicKeyShareSetRoot")
             .and_then(Value::as_str)
             != Some(public_key_share_set_root)
@@ -224,7 +204,7 @@ pub(in super::super) fn verify_optional_public_key_share_succinct_proofs(
     {
         return Ok(Some(public_key_refusal(
             "publicKeyShareSuccinctProofSetBindingMismatch",
-            "publicKeyShareSuccinctProofs must bind accepted public randomness, same-secret, share, proof, and material roots",
+            "publicKeyShareSuccinctProofs must bind accepted public randomness, share, proof, and material roots",
             "setupPackage.publicKeyShareSuccinctProofs",
         )?));
     }
@@ -248,8 +228,6 @@ pub(in super::super) fn verify_optional_public_key_share_succinct_proofs(
         public_matrix_seed_hash,
         share_records: &share_records,
         public_key_share_proof_records: &proof_records,
-        same_secret_records: &same_secret_records,
-        same_secret_proof_bindings: &same_secret_proof_bindings,
         material_bindings: &material_bindings,
         verified_same_secret_bridge,
     };
@@ -340,8 +318,6 @@ struct PublicKeyShareSuccinctProofVerificationContext<'a> {
     public_matrix_seed_hash: &'a str,
     share_records: &'a BTreeMap<u64, Value>,
     public_key_share_proof_records: &'a BTreeMap<u64, Value>,
-    same_secret_records: &'a BTreeMap<u64, Value>,
-    same_secret_proof_bindings: &'a BTreeMap<u64, SameSecretProofBinding>,
     material_bindings: &'a BTreeMap<u64, PublicKeyShareMaterialBinding>,
     verified_same_secret_bridge: Option<&'a VerifiedSameSecretBridgeMaterial>,
 }
@@ -365,7 +341,11 @@ fn verify_public_key_share_succinct_proof_record(
             "public-key share succinct proof objectType must be PublicKeyShareSuccinctProof",
         ));
     }
-    verify_same_secret_context(proof_record, context.setup_context)?;
+    verify_context_fields_match(
+        proof_record,
+        context.setup_context,
+        "publicKeyShareSuccinctProofs.proofRecords",
+    )?;
     for (field_name, expected_value) in [("proofFamily", PUBLIC_KEY_SHARE_PROOF_FAMILY)] {
         if proof_record.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Err(CanonicalError::new(
@@ -404,24 +384,6 @@ fn verify_public_key_share_succinct_proof_record(
                 "public-key share succinct proof must reference an accepted public-key proof statement",
             )
         })?;
-    let same_secret_record = context
-        .same_secret_records
-        .get(&trustee_roster_position)
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "public-key share succinct proof must reference an accepted same-secret statement",
-            )
-        })?;
-    let same_secret_proof_binding = context
-        .same_secret_proof_bindings
-        .get(&trustee_roster_position)
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "public-key share succinct proof must reference a verified same-secret proof",
-            )
-        })?;
     let material_binding = context
         .material_bindings
         .get(&trustee_roster_position)
@@ -431,12 +393,7 @@ fn verify_public_key_share_succinct_proof_record(
                 "public-key share succinct proof must reference accepted public-key share material",
             )
         })?;
-    for field_name in [
-        "trusteeIdentity",
-        "publicKeyShareRoot",
-        "sameSecretStatementRoot",
-        "trusteeSecretCommitmentRoot",
-    ] {
+    for field_name in ["trusteeIdentity", "publicKeyShareRoot"] {
         if proof_record.get(field_name) != public_key_share_proof_record.get(field_name) {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::ComponentMismatch,
@@ -456,52 +413,11 @@ fn verify_public_key_share_succinct_proof_record(
             != Some(material_binding.public_key_share_material_root.as_str())
         || proof_record.get("publicKeyShareProofRoot")
             != public_key_share_proof_record.get("publicKeyShareProofRoot")
-        || proof_record.get("sameSecretStatementRoot")
-            != same_secret_record.get("sameSecretStatementRoot")
-        || proof_record.get("trusteeSecretCommitmentRoot")
-            != same_secret_record.get("trusteeSecretCommitmentRoot")
-        || proof_record.get("trusteeIdentity") != same_secret_record.get("trusteeIdentity")
         || proof_record.get("trusteeIdentity") != share_record.get("trusteeIdentity")
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ComponentMismatch,
-            "public-key share succinct proof must bind the accepted share, proof statement, material, and same-secret roots",
-        ));
-    }
-    if proof_record
-        .get("sameSecretProofRoot")
-        .and_then(Value::as_str)
-        != Some(same_secret_proof_binding.same_secret_proof_root.as_str())
-        || proof_record
-            .get("sameSecretStatementRoot")
-            .and_then(Value::as_str)
-            != Some(
-                same_secret_proof_binding
-                    .same_secret_statement_root
-                    .as_str(),
-            )
-        || proof_record
-            .get("sameSecretProofFamilyBindingRoot")
-            .and_then(Value::as_str)
-            != Some(
-                same_secret_proof_binding
-                    .same_secret_proof_family_binding_root
-                    .as_str(),
-            )
-        || proof_record
-            .get("trusteeSecretCommitmentRoot")
-            .and_then(Value::as_str)
-            != Some(
-                same_secret_proof_binding
-                    .trustee_secret_commitment_root
-                    .as_str(),
-            )
-        || proof_record.get("trusteeIdentity").and_then(Value::as_str)
-            != Some(same_secret_proof_binding.trustee_identity.as_str())
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ComponentMismatch,
-            "public-key share succinct proof must bind the verified same-secret proof root",
+            "public-key share succinct proof must bind the accepted share, proof statement, and material",
         ));
     }
     let proof_bytes =
@@ -513,9 +429,8 @@ fn verify_public_key_share_succinct_proof_record(
             "public-key share succinct proofBytesHash must match supplied proof bytes",
         ));
     }
-    // The pk relation opens exactly the limb-zero constant commitment the
-    // same-secret proof binds. Packages carry that commitment through the
-    // same-secret bridge statement.
+    // The public-key relation opens the constant commitment bound by the
+    // verified same-secret bridge statement.
     let verified_same_secret_bridge = context
         .verified_same_secret_bridge
         .ok_or_else(|| {
@@ -526,18 +441,20 @@ fn verify_public_key_share_succinct_proof_record(
         })?;
     let bridge_binding =
         verified_same_secret_bridge.statement_for_roster_position(trustee_roster_position)?;
-    if bridge_binding.trustee_identity != same_secret_proof_binding.trustee_identity
-        || bridge_binding.trustee_secret_commitment_root
-            != same_secret_proof_binding.trustee_secret_commitment_root
-        || bridge_binding.same_secret_statement_root
-            != same_secret_proof_binding.same_secret_statement_root
-        || bridge_binding.same_secret_proof_root != same_secret_proof_binding.same_secret_proof_root
-        || bridge_binding.same_secret_proof_family_binding_root
-            != same_secret_proof_binding.same_secret_proof_family_binding_root
+    if proof_record.get("trusteeIdentity").and_then(Value::as_str)
+        != Some(bridge_binding.trustee_identity.as_str())
+        || proof_record
+            .get("sameSecretBridgeStatementRoot")
+            .and_then(Value::as_str)
+            != Some(bridge_binding.same_secret_bridge_statement_root.as_str())
+        || proof_record
+            .get("sameSecretBridgeProofRecordRoot")
+            .and_then(Value::as_str)
+            != Some(bridge_binding.same_secret_bridge_proof_record_root.as_str())
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ComponentMismatch,
-            "same-secret bridge statement must match the verified same-secret proof binding",
+            "public-key share succinct proof must bind the verified same-secret bridge statement and proof record",
         ));
     }
     let ring_degree = usize::try_from(value_u64(proof_record, "ringDegree")?).map_err(|_| {
@@ -574,12 +491,12 @@ fn verify_public_key_share_succinct_proof_record(
             setup_epoch: value_string(context.setup_context, "setupEpoch")?.to_string(),
             binding_roots: vec![
                 (
-                    "sameSecretStatementRoot".to_string(),
-                    same_secret_proof_binding.same_secret_statement_root.clone(),
+                    "sameSecretBridgeStatementRoot".to_string(),
+                    bridge_binding.same_secret_bridge_statement_root.clone(),
                 ),
                 (
-                    "sameSecretProofRoot".to_string(),
-                    same_secret_proof_binding.same_secret_proof_root.clone(),
+                    "sameSecretBridgeProofRecordRoot".to_string(),
+                    bridge_binding.same_secret_bridge_proof_record_root.clone(),
                 ),
             ],
         },

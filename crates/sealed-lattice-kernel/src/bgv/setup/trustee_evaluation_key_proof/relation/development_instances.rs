@@ -212,7 +212,7 @@ const LINKAGE_MATRIX_SEED_DOMAIN: &str =
 // the instance also carries the same-secret linkage: real BDLOP constant
 // commitments to the lifted secret message per Q_share limb, with fresh
 // ternary opening randomness.
-fn development_context(key_switch_seed_hex: &str, keyless: bool) -> SuccinctSetupProofContext {
+fn development_context(key_switch_seed_hex: &str) -> SuccinctSetupProofContext {
     let derived = |label: &str| -> String {
         hash512(
             "sealed-lattice/setup/trustee-evaluation-key/development-context",
@@ -222,27 +222,15 @@ fn development_context(key_switch_seed_hex: &str, keyless: bool) -> SuccinctSetu
         .map(|byte| format!("{byte:02x}"))
         .collect::<String>()
     };
-    let (proof_family, binding_labels): (&str, &[&str]) = if keyless {
-        (
-            super::SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY,
-            &SAME_SECRET_LINKAGE_ANCHOR_BINDING_LABELS,
-        )
-    } else {
-        (
-            super::TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
-            &TRUSTEE_EVALUATION_KEY_BINDING_LABELS,
-        )
-    };
-
     SuccinctSetupProofContext {
-        proof_family: proof_family.to_string(),
+        proof_family: super::TRUSTEE_EVALUATION_KEY_PROOF_FAMILY.to_string(),
         ceremony_id: format!("development-ceremony-{key_switch_seed_hex}"),
         manifest_hash: derived("manifest"),
         roster_hash: derived("roster"),
         trustee_identity: format!("development-trustee-{key_switch_seed_hex}"),
         trustee_roster_position: 1,
         setup_epoch: "development-epoch-1".to_string(),
-        binding_roots: binding_labels
+        binding_roots: TRUSTEE_EVALUATION_KEY_BINDING_LABELS
             .iter()
             .map(|label| ((*label).to_string(), derived(label)))
             .collect(),
@@ -332,7 +320,7 @@ pub(crate) fn generate_development_trustee_instance_with_linkage(
 
     Ok((
         TrusteeEvaluationKeyStatement {
-            context: development_context(key_switch_seed_hex, key_requests.is_empty()),
+            context: development_context(key_switch_seed_hex),
             ring_degree,
             keys,
             same_secret_linkage,
@@ -381,8 +369,8 @@ pub(crate) fn generate_development_trustee_instance(
 // Development public-key share instance: one ternary secret s and one
 // centered-binomial error e produce the published share b_l = p*e - a_l (*) s
 // over every Q_share limb against the seed-derived common reference
-// polynomial, plus one constant commitment (limb zero) opening s for the
-// anchor link.
+// polynomial. The statement carries the target commitment material established
+// by the separately verified full same-secret bridge.
 pub(crate) fn generate_development_public_key_share_instance(
     seed_hex: &str,
     ring_degree: usize,
@@ -441,44 +429,79 @@ pub(crate) fn generate_development_public_key_share_instance(
         component_b_by_digit: vec![component_b_by_limb],
         round_one_aggregate_diagonal: Vec::new(),
     };
-    // One constant commitment (limb zero) linking s to the anchor.
     let negative_indicator_coefficients = secret_coefficients
         .iter()
         .map(|coefficient| i64::from(*coefficient < 0))
         .collect::<Vec<_>>();
-    let source_modulus = DATA_PRIMES[0];
-    let randomness = (0..SETUP_COMMITMENT_RANDOMNESS_WIDTH)
-        .map(|column| {
-            DeterministicSampler::new(
-                LINKAGE_RANDOMNESS_DOMAIN,
-                &[seed_hex.as_bytes(), &(column as u64).to_le_bytes()],
-            )
-            .ternary(ring_degree)
-        })
-        .collect::<Vec<_>>();
-    let message = secret_coefficients
+    let mut target_constant_commitments = Vec::with_capacity(DATA_PRIMES.len());
+    let mut target_constant_commitment_roots = Vec::with_capacity(DATA_PRIMES.len());
+    let mut material_seeds = Vec::with_capacity(DATA_PRIMES.len());
+    let mut material_context_hashes = Vec::with_capacity(DATA_PRIMES.len());
+    for (target_rns_limb_index, target_rns_prime) in DATA_PRIMES.iter().copied().enumerate() {
+        let target_message_coefficients = secret_coefficients
+            .iter()
+            .zip(negative_indicator_coefficients.iter())
+            .map(|(secret_coefficient, negative_indicator)| {
+                u64::try_from(
+                    i128::from(*secret_coefficient)
+                        + i128::from(target_rns_prime) * i128::from(*negative_indicator),
+                )
+                .expect("development bridge message is canonical")
+            })
+            .collect::<Vec<_>>();
+        let material_seed_hex = hash512(
+            "sealed-lattice/setup/public-key-share/development-bridge-material-seed",
+            &[
+                seed_hex.as_bytes(),
+                &(target_rns_limb_index as u64).to_le_bytes(),
+            ],
+        )
         .iter()
-        .zip(negative_indicator_coefficients.iter())
-        .map(|(secret, indicator)| {
-            BigInt::from(*secret) + BigInt::from(*indicator) * BigInt::from(source_modulus)
-        })
-        .collect::<Vec<_>>();
-    let randomness_i128 = randomness
-        .iter()
-        .map(|column| column.iter().map(|value| i128::from(*value)).collect())
-        .collect::<Vec<Vec<i128>>>();
-    let commitment = compute_setup_big_signed_lifted_commitment(
-        &public_matrix_seed_hash,
-        0,
-        source_modulus,
-        0,
-        &message,
-        &randomness_i128,
-        ring_degree,
-    )?;
-    let same_secret_linkage = Some(SameSecretLinkageStatement {
-        public_matrix_seed_hash,
-        commitments: vec![commitment],
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+        let commitment_context = serde_json::json!({
+            "objectType": "DevelopmentSameSecretBridgeTarget",
+            "seed": seed_hex,
+            "targetRnsLimbIndex": target_rns_limb_index,
+        });
+        let computation =
+            crate::bgv::setup::vss_commitment::compute_vss_committed_material_commitment(
+                crate::bgv::setup::vss_commitment::VssCommittedMaterialCommitmentInput {
+                    commitment_role: "coefficient",
+                    commitment_context: &commitment_context,
+                    rns_limb_index: target_rns_limb_index,
+                    rns_prime: target_rns_prime,
+                    ring_degree,
+                    message_coefficients: &target_message_coefficients,
+                    message_coefficient_bound: target_rns_prime,
+                    material_seed_hex: &material_seed_hex,
+                },
+            )?;
+        target_constant_commitments.push(super::super::vss_share_linkage_commitment_from_value(
+            &computation.commitment,
+            super::super::VssPublicCommandCommitmentExpectation {
+                field_name: format!(
+                    "developmentSameSecretBridge.targetConstantCommitments.{target_rns_limb_index}"
+                ),
+                root: &computation.commitment_root,
+                role: "coefficient",
+                rns_limb_index: target_rns_limb_index,
+                rns_prime: target_rns_prime,
+                ring_degree,
+            },
+        )?);
+        target_constant_commitment_roots.push(computation.commitment_root);
+        material_seeds.push(material_seed_hex);
+        material_context_hashes.push(computation.commitment_context_hash);
+    }
+    let same_secret_bridge = Some(SameSecretBridgeStatement {
+        public_matrix_seed_hash: public_matrix_seed_hash.clone(),
+        source_trustee_identity: format!("development-trustee-{seed_hex}"),
+        source_trustee_roster_position: 1,
+        target_basis_hash: crate::bgv::evaluator::top_k::canonical_target_basis_hash()?,
+        target_rns_primes: DATA_PRIMES.to_vec(),
+        target_constant_commitment_roots,
+        target_constant_commitments,
     });
     let context = development_public_key_share_context(seed_hex);
 
@@ -487,17 +510,17 @@ pub(crate) fn generate_development_public_key_share_instance(
             context,
             ring_degree,
             keys: vec![descriptor],
-            same_secret_linkage,
+            same_secret_linkage: None,
             private_vss_share: None,
             vss_share_linkage: None,
-            same_secret_bridge: None,
+            same_secret_bridge,
             target_decryption_share: None,
         },
         TrusteeEvaluationKeyWitness {
             secret_coefficients,
             error_coefficients_by_key: vec![vec![error_coefficients]],
             negative_indicator_coefficients,
-            opening_randomness_by_limb: vec![randomness],
+            opening_randomness_by_limb: Vec::new(),
             private_vss_coefficient_messages_by_shamir_index: Vec::new(),
             private_vss_opening_randomness_by_shamir_index: Vec::new(),
             private_vss_carry_witnesses: Vec::new(),
@@ -511,8 +534,8 @@ pub(crate) fn generate_development_public_key_share_instance(
             vss_public_carry_witnesses_by_item: Vec::new(),
             target_decryption_message_vectors: Vec::new(),
             target_decryption_opening_randomness_by_commitment: Vec::new(),
-            vss_committed_material_seeds_by_bound_message: Vec::new(),
-            vss_committed_material_context_hashes_by_bound_message: Vec::new(),
+            vss_committed_material_seeds_by_bound_message: material_seeds,
+            vss_committed_material_context_hashes_by_bound_message: material_context_hashes,
         },
     ))
 }

@@ -37,7 +37,7 @@ pub(in super::super) fn verify_public_key_shares(
             "setupContext was required before public-key share verification",
         )
     })?;
-    if let Err(error) = verify_same_secret_context(share_set, setup_context) {
+    if let Err(error) = verify_context_fields_match(share_set, setup_context, "publicKeyShares") {
         return Ok(Some(public_key_refusal(
             "publicKeyShareSetContextMismatch",
             error.message,
@@ -64,21 +64,7 @@ pub(in super::super) fn verify_public_key_shares(
     {
         return Ok(Some(response));
     }
-    let same_secret_consistency_root = same_secret_consistency_root_from_package(setup_package)?;
-    if share_set
-        .get("sameSecretConsistencyRoot")
-        .and_then(Value::as_str)
-        != Some(same_secret_consistency_root.as_str())
-    {
-        return Ok(Some(public_key_refusal(
-            "publicKeyShareSameSecretRootMismatch",
-            "publicKeyShares.sameSecretConsistencyRoot must match accepted same-secret statements",
-            "setupPackage.publicKeyShares.sameSecretConsistencyRoot",
-        )?));
-    }
-
     let expected_trustees = expected_trustees_from_phase_transcript(setup_package)?;
-    let same_secret_bindings = same_secret_statement_bindings_from_package(setup_package)?;
     let Some(share_records) = share_set.get("shareRecords").and_then(Value::as_array) else {
         return Ok(Some(verification_response(
             Some("publicKeyShareProofs"),
@@ -100,7 +86,6 @@ pub(in super::super) fn verify_public_key_shares(
             share_record,
             setup_context,
             &expected_trustees,
-            &same_secret_bindings,
             &common_binding,
             &mut seen_roster_positions,
         )? {
@@ -144,7 +129,6 @@ fn verify_public_key_share_record(
     share_record: &Value,
     setup_context: &Value,
     expected_trustees: &BTreeMap<u64, String>,
-    same_secret_bindings: &BTreeMap<u64, SameSecretStatementBinding>,
     common_binding: &PublicKeyCommonBinding,
     seen_roster_positions: &mut BTreeSet<u64>,
 ) -> CanonicalResult<Option<Value>> {
@@ -163,7 +147,9 @@ fn verify_public_key_share_record(
             "setupPackage.publicKeyShares.shareRecords.objectType",
         )?));
     }
-    if let Err(error) = verify_same_secret_context(share_record, setup_context) {
+    if let Err(error) =
+        verify_context_fields_match(share_record, setup_context, "publicKeyShares.shareRecords")
+    {
         return Ok(Some(public_key_refusal(
             "publicKeyShareContextMismatch",
             error.message,
@@ -212,35 +198,6 @@ fn verify_public_key_share_record(
             "publicKeyShareTrusteeMismatch",
             "public-key share trustee identity must match the accepted setup roster",
             "setupPackage.publicKeyShares.shareRecords.trusteeIdentity",
-        )?));
-    }
-    let Some(same_secret_binding) = same_secret_bindings.get(&trustee_roster_position) else {
-        return Ok(Some(public_key_refusal(
-            "publicKeyShareSameSecretMissing",
-            "public-key share must reference an accepted same-secret statement",
-            "setupPackage.publicKeyShares.shareRecords.trusteeRosterPosition",
-        )?));
-    };
-    if same_secret_binding.trustee_identity != trustee_identity {
-        return Ok(Some(public_key_refusal(
-            "publicKeyShareSameSecretTrusteeMismatch",
-            "public-key share trustee must match the same-secret statement trustee",
-            "setupPackage.publicKeyShares.shareRecords.trusteeIdentity",
-        )?));
-    }
-    if share_record
-        .get("trusteeSecretCommitmentRoot")
-        .and_then(Value::as_str)
-        != Some(same_secret_binding.trustee_secret_commitment_root.as_str())
-        || share_record
-            .get("sameSecretStatementRoot")
-            .and_then(Value::as_str)
-            != Some(same_secret_binding.same_secret_statement_root.as_str())
-    {
-        return Ok(Some(public_key_refusal(
-            "publicKeyShareSameSecretBindingMismatch",
-            "public-key share must bind the accepted trustee secret and same-secret statement roots",
-            "setupPackage.publicKeyShares.shareRecords.sameSecretStatementRoot",
         )?));
     }
     if let Some(response) = verify_public_key_share_limb_hashes(

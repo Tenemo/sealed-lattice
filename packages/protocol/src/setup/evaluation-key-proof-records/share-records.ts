@@ -8,6 +8,7 @@ import {
     type EvaluationKeyProofCommonInput,
     type EvaluationKeyShareEmbeddedKeySwitchComponentMaterial,
     type EvaluationKeyShareMaterial,
+    type EvaluationKeyTrusteeReference,
     type GaloisKeyShareBatch,
     type GaloisKeyShareBatchContribution,
     type GaloisKeyShareBatchesInput,
@@ -17,7 +18,6 @@ import {
     type RelinearizationKeyShareRoundTwoRecord,
     type RelinearizationKeyShareRounds,
     type RelinearizationKeyShareRoundsInput,
-    type SameSecretProofReference,
     evaluationKeyShareComponentMaterialEncoding,
 } from './constants-and-types.js';
 import {
@@ -276,19 +276,19 @@ const assertGaloisKeySwitchSampleBinding = (
     }
 };
 
-const sortedSameSecretProofReferences = (
+const sortedTrusteeReferences = (
     input: Pick<
         EvaluationKeyProofCommonInput,
-        'participantCount' | 'sameSecretProofReferences'
+        'participantCount' | 'trusteeReferences'
     >,
-): SameSecretProofReference[] => {
-    const references = [...input.sameSecretProofReferences].sort(
+): EvaluationKeyTrusteeReference[] => {
+    const references = [...input.trusteeReferences].sort(
         (left, right) =>
             left.trusteeRosterPosition - right.trusteeRosterPosition,
     );
     if (references.length !== input.participantCount) {
         throw new Error(
-            'sameSecretProofReferences must contain one proof per participant.',
+            'trusteeReferences must contain one trustee per participant.',
         );
     }
     references.forEach((reference, expectedRosterPosition) => {
@@ -299,18 +299,8 @@ const sortedSameSecretProofReferences = (
         );
         if (reference.trusteeRosterPosition !== expectedRosterPosition) {
             throw new Error(
-                'sameSecretProofReferences roster positions must be contiguous from zero.',
+                'trusteeReferences roster positions must be contiguous from zero.',
             );
-        }
-        for (const [fieldName, hashValue] of [
-            ['sameSecretStatementRoot', reference.sameSecretStatementRoot],
-            [
-                'trusteeSecretCommitmentRoot',
-                reference.trusteeSecretCommitmentRoot,
-            ],
-            ['sameSecretProofRoot', reference.sameSecretProofRoot],
-        ] as const) {
-            assertProtocolHash(hashValue, fieldName);
         }
     });
 
@@ -319,7 +309,7 @@ const sortedSameSecretProofReferences = (
 
 export const validateCommonInput = (
     input: EvaluationKeyProofCommonInput,
-): SameSecretProofReference[] => {
+): EvaluationKeyTrusteeReference[] => {
     assertPositiveSafeInteger(input.participantCount, 'participantCount');
     if (input.qSharePrimes.length === 0) {
         throw new Error('qSharePrimes must contain at least one RNS prime.');
@@ -350,15 +340,6 @@ export const validateCommonInput = (
             input.evaluatorKeySchedule.evaluatorKeyScheduleRoot,
         ],
         [
-            'sameSecretConsistencyRoot',
-            input.evaluatorKeySchedule.sameSecretConsistencyRoot,
-        ],
-        ['sameSecretProofSetRoot', input.sameSecretProofSetRoot],
-        [
-            'sameSecretProofFamilyBindingRoot',
-            input.sameSecretProofFamilyBindingRoot,
-        ],
-        [
             'publicKeyShareSetRoot',
             input.evaluatorKeySchedule.publicKeyShareSetRoot,
         ],
@@ -379,7 +360,7 @@ export const validateCommonInput = (
         assertProtocolHash(hashValue, fieldName);
     }
 
-    return sortedSameSecretProofReferences(input);
+    return sortedTrusteeReferences(input);
 };
 
 const contributionMap = <
@@ -416,7 +397,7 @@ const contributionMap = <
 export const createRelinearizationKeyShareRounds = (
     input: RelinearizationKeyShareRoundsInput,
 ): RelinearizationKeyShareRounds => {
-    const sameSecretProofReferences = validateCommonInput(input);
+    const trusteeReferences = validateCommonInput(input);
     const roundOneContributions = contributionMap(
         input.roundOneContributions,
         'roundOneContributions',
@@ -433,11 +414,11 @@ export const createRelinearizationKeyShareRounds = (
     const roundOneRecordRoots = new Map<string, ProtocolHash>();
     const roundOneAggregateRootByLevel = new Map<number, ProtocolHash>();
     const roundOneAggregateRoots = levels.map((level) => {
-        const roundOneRecordRootsForLevel = sameSecretProofReferences.map(
-            (proofReference) => {
+        const roundOneRecordRootsForLevel = trusteeReferences.map(
+            (trusteeReference) => {
                 const key = contributionKey(
                     level,
-                    proofReference.trusteeRosterPosition,
+                    trusteeReference.trusteeRosterPosition,
                 );
                 const contribution = roundOneContributions.get(key);
                 if (contribution === undefined) {
@@ -465,23 +446,14 @@ export const createRelinearizationKeyShareRounds = (
                     objectType: 'RelinearizationKeyShareRoundOne',
                     proofFamily: 'relinearization-key-share',
                     ...contextFields(input.setupContext),
-                    trusteeIdentity: proofReference.trusteeIdentity,
-                    trusteeRosterPosition: proofReference.trusteeRosterPosition,
+                    trusteeIdentity: trusteeReference.trusteeIdentity,
+                    trusteeRosterPosition:
+                        trusteeReference.trusteeRosterPosition,
                     level,
                     evaluatorKeyScheduleRoot:
                         input.evaluatorKeySchedule.evaluatorKeyScheduleRoot,
-                    sameSecretConsistencyRoot:
-                        input.evaluatorKeySchedule.sameSecretConsistencyRoot,
-                    sameSecretProofSetRoot: input.sameSecretProofSetRoot,
-                    sameSecretProofFamilyBindingRoot:
-                        input.sameSecretProofFamilyBindingRoot,
                     publicKeyShareSuccinctProofSetRoot:
                         input.publicKeyShareSuccinctProofSetRoot,
-                    sameSecretStatementRoot:
-                        proofReference.sameSecretStatementRoot,
-                    trusteeSecretCommitmentRoot:
-                        proofReference.trusteeSecretCommitmentRoot,
-                    sameSecretProofRoot: proofReference.sameSecretProofRoot,
                     relinearizationCrpRoot:
                         input.evaluatorKeySchedule.relinearizationCrpRoot,
                     roundOneShareRoot: contribution.roundOneShareRoot,
@@ -497,8 +469,9 @@ export const createRelinearizationKeyShareRounds = (
                 } as RelinearizationKeyShareRoundOneRecord);
 
                 return {
-                    trusteeIdentity: proofReference.trusteeIdentity,
-                    trusteeRosterPosition: proofReference.trusteeRosterPosition,
+                    trusteeIdentity: trusteeReference.trusteeIdentity,
+                    trusteeRosterPosition:
+                        trusteeReference.trusteeRosterPosition,
                     roundOneRecordRoot,
                 };
             },
@@ -520,11 +493,11 @@ export const createRelinearizationKeyShareRounds = (
 
     const roundTwoRecords: RelinearizationKeyShareRoundTwoRecord[] = [];
     const roundTwoAggregateRoots = levels.map((level) => {
-        const roundTwoRecordRootsForLevel = sameSecretProofReferences.map(
-            (proofReference) => {
+        const roundTwoRecordRootsForLevel = trusteeReferences.map(
+            (trusteeReference) => {
                 const key = contributionKey(
                     level,
-                    proofReference.trusteeRosterPosition,
+                    trusteeReference.trusteeRosterPosition,
                 );
                 const contribution = roundTwoContributions.get(key);
                 const roundOneShareRoot = roundOneShareRoots.get(key);
@@ -561,23 +534,14 @@ export const createRelinearizationKeyShareRounds = (
                     objectType: 'RelinearizationKeyShareRoundTwo',
                     proofFamily: 'relinearization-key-share',
                     ...contextFields(input.setupContext),
-                    trusteeIdentity: proofReference.trusteeIdentity,
-                    trusteeRosterPosition: proofReference.trusteeRosterPosition,
+                    trusteeIdentity: trusteeReference.trusteeIdentity,
+                    trusteeRosterPosition:
+                        trusteeReference.trusteeRosterPosition,
                     level,
                     evaluatorKeyScheduleRoot:
                         input.evaluatorKeySchedule.evaluatorKeyScheduleRoot,
-                    sameSecretConsistencyRoot:
-                        input.evaluatorKeySchedule.sameSecretConsistencyRoot,
-                    sameSecretProofSetRoot: input.sameSecretProofSetRoot,
-                    sameSecretProofFamilyBindingRoot:
-                        input.sameSecretProofFamilyBindingRoot,
                     publicKeyShareSuccinctProofSetRoot:
                         input.publicKeyShareSuccinctProofSetRoot,
-                    sameSecretStatementRoot:
-                        proofReference.sameSecretStatementRoot,
-                    trusteeSecretCommitmentRoot:
-                        proofReference.trusteeSecretCommitmentRoot,
-                    sameSecretProofRoot: proofReference.sameSecretProofRoot,
                     relinearizationCrpRoot:
                         input.evaluatorKeySchedule.relinearizationCrpRoot,
                     roundOneShareRoot,
@@ -594,8 +558,9 @@ export const createRelinearizationKeyShareRounds = (
                 } as RelinearizationKeyShareRoundTwoRecord);
 
                 return {
-                    trusteeIdentity: proofReference.trusteeIdentity,
-                    trusteeRosterPosition: proofReference.trusteeRosterPosition,
+                    trusteeIdentity: trusteeReference.trusteeIdentity,
+                    trusteeRosterPosition:
+                        trusteeReference.trusteeRosterPosition,
                     roundTwoRecordRoot,
                 };
             },
@@ -629,11 +594,6 @@ export const createRelinearizationKeyShareRounds = (
         rnsLimbCount: input.qSharePrimes.length,
         evaluatorKeyScheduleRoot:
             input.evaluatorKeySchedule.evaluatorKeyScheduleRoot,
-        sameSecretConsistencyRoot:
-            input.evaluatorKeySchedule.sameSecretConsistencyRoot,
-        sameSecretProofSetRoot: input.sameSecretProofSetRoot,
-        sameSecretProofFamilyBindingRoot:
-            input.sameSecretProofFamilyBindingRoot,
         publicKeyShareSetRoot: input.evaluatorKeySchedule.publicKeyShareSetRoot,
         publicKeyShareSuccinctProofSetRoot:
             input.publicKeyShareSuccinctProofSetRoot,
@@ -660,7 +620,7 @@ export const createRelinearizationKeyShareRounds = (
 export const createGaloisKeyShareBatches = (
     input: GaloisKeyShareBatchesInput,
 ): readonly GaloisKeyShareBatch[] => {
-    const sameSecretProofReferences = validateCommonInput(input);
+    const trusteeReferences = validateCommonInput(input);
     const contributionsByRosterPosition = new Map<
         number,
         GaloisKeyShareBatchContribution
@@ -685,9 +645,9 @@ export const createGaloisKeyShareBatches = (
         );
     });
 
-    return sameSecretProofReferences.map((proofReference) => {
+    return trusteeReferences.map((trusteeReference) => {
         const contribution = contributionsByRosterPosition.get(
-            proofReference.trusteeRosterPosition,
+            trusteeReference.trusteeRosterPosition,
         );
         if (contribution === undefined) {
             throw new Error(
@@ -735,8 +695,9 @@ export const createGaloisKeyShareBatches = (
                 return {
                     objectType: 'GaloisKeyShareMaterial',
                     proofFamily: 'galois-key-share',
-                    trusteeIdentity: proofReference.trusteeIdentity,
-                    trusteeRosterPosition: proofReference.trusteeRosterPosition,
+                    trusteeIdentity: trusteeReference.trusteeIdentity,
+                    trusteeRosterPosition:
+                        trusteeReference.trusteeRosterPosition,
                     rotation: shareContribution.rotation,
                     level: shareContribution.level,
                     galoisKeyShareRoot: shareContribution.galoisKeyShareRoot,
@@ -750,21 +711,12 @@ export const createGaloisKeyShareBatches = (
             objectType: 'GaloisKeyShareBatch',
             proofFamily: 'galois-key-share',
             ...contextFields(input.setupContext),
-            trusteeIdentity: proofReference.trusteeIdentity,
-            trusteeRosterPosition: proofReference.trusteeRosterPosition,
+            trusteeIdentity: trusteeReference.trusteeIdentity,
+            trusteeRosterPosition: trusteeReference.trusteeRosterPosition,
             evaluatorKeyScheduleRoot:
                 input.evaluatorKeySchedule.evaluatorKeyScheduleRoot,
-            sameSecretConsistencyRoot:
-                input.evaluatorKeySchedule.sameSecretConsistencyRoot,
-            sameSecretProofSetRoot: input.sameSecretProofSetRoot,
-            sameSecretProofFamilyBindingRoot:
-                input.sameSecretProofFamilyBindingRoot,
             publicKeyShareSuccinctProofSetRoot:
                 input.publicKeyShareSuccinctProofSetRoot,
-            sameSecretStatementRoot: proofReference.sameSecretStatementRoot,
-            trusteeSecretCommitmentRoot:
-                proofReference.trusteeSecretCommitmentRoot,
-            sameSecretProofRoot: proofReference.sameSecretProofRoot,
             galoisKeyCrpRoot: input.evaluatorKeySchedule.galoisKeyCrpRoot,
             requiredGaloisSetHash:
                 input.evaluatorKeySchedule.requiredGaloisSetHash,

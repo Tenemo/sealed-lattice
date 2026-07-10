@@ -5,7 +5,6 @@ import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 
 import { computeSetupCommitmentWithKernel } from './commitment-values.js';
 import {
-    acceptedBgvFullRingDegree,
     type VssCoefficientCommitmentBundle,
     type VssCoefficientCommitmentBundleInput,
     type VssCoefficientCommitmentMaterialRecord,
@@ -324,10 +323,6 @@ export const createVssCoefficientCommitmentBundle = (
         thresholdDegree: input.thresholdDegree,
         rnsLimbCount: input.qSharePrimes.length,
         ringDegree: input.ringDegree,
-        ringDegreeStatus:
-            input.ringDegree === acceptedBgvFullRingDegree
-                ? 'full-ring'
-                : 'development-reduced-ring',
         materialRecordCount: coefficientCommitmentMaterial.length,
         coefficientCommitments: coefficientCommitmentMaterial,
     } as const satisfies Omit<

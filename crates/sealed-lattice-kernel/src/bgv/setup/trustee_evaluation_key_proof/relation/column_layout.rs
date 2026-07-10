@@ -94,11 +94,9 @@ pub(crate) struct LimbColumnLayout {
     same_secret_bridge_message_encoding_offsets: Vec<usize>,
     target_decryption_message_encoding_layouts: Vec<VssPublicMessageEncodingLayout>,
     target_decryption_message_encoding_offsets: Vec<usize>,
-    // Linkage logical columns active in this limb: the binary negative
-    // indicator plus the legacy anchor's per-commitment opening-randomness
-    // columns, or zero outside the commitment fields. Committed-material
-    // commitments (vss-public, bridge targets, target-decryption) carry no
-    // opening-randomness columns; their hiding is the tree mask and salts.
+    // Source-linkage opening-randomness columns active in this commitment
+    // field. Committed-material bridge targets carry no algebraic opening
+    // randomness; their hiding is the tree mask and salts.
     pub(crate) linkage_randomness_columns: usize,
     pub(crate) private_vss_randomness_columns: usize,
     claim_mask_digit_counts: Vec<usize>,
@@ -149,15 +147,12 @@ impl LimbColumnLayout {
             .into_iter()
             .enumerate()
             .map(|(message_index, message_bound)| {
-                if vss_public_is_threshold_aggregate
-                    && message_index < vss_public_coefficient_columns
-                {
-                    Ok(crate::bgv::setup::vss_commitment::vss_public_message_digit_only_encoding_layout())
-                } else {
-                    crate::bgv::setup::vss_commitment::vss_public_message_encoding_layout(
-                        message_bound,
-                    )
-                }
+                crate::bgv::setup::vss_commitment::vss_public_share_linkage_packed_message_encoding_layout(
+                    vss_public_is_threshold_aggregate,
+                    message_index,
+                    vss_public_coefficient_columns,
+                    message_bound,
+                )
             })
             .collect::<CanonicalResult<Vec<_>>>()?;
         if vss_public_message_encoding_layouts.len()
@@ -696,6 +691,16 @@ impl LimbColumnLayout {
         }
     }
 
+    pub(crate) fn linkage_relation_count(&self) -> usize {
+        if self.linkage_active() {
+            let commitment_count =
+                self.linkage_randomness_columns / SETUP_COMMITMENT_RANDOMNESS_WIDTH;
+            commitment_count * SETUP_COMMITMENT_ROW_COUNT * LINCHECK_REPETITIONS
+        } else {
+            0
+        }
+    }
+
     pub(crate) fn same_secret_bridge_message_trit_count(
         &self,
         target_index: usize,
@@ -718,14 +723,17 @@ impl LimbColumnLayout {
 
     pub(crate) fn same_secret_bridge_logical_columns(&self) -> usize {
         if self.same_secret_bridge_material_active() {
-            2 + self.same_secret_bridge_message_encoding_columns()
+            2 + self.same_secret_bridge_message_encoding_columns() + self.linkage_randomness_columns
         } else {
             0
         }
     }
 
     fn same_secret_bridge_trace_columns(&self) -> usize {
-        1 + 2 * self.total_error_columns + 1 + self.same_secret_bridge_message_encoding_columns()
+        1 + 2 * self.total_error_columns
+            + 1
+            + self.same_secret_bridge_message_encoding_columns()
+            + self.linkage_randomness_columns
     }
 
     pub(crate) fn target_decryption_message_encoding_columns(&self) -> usize {
@@ -781,7 +789,14 @@ impl LimbColumnLayout {
     ) -> usize {
         debug_assert!(self.linkage_active());
         debug_assert!(!self.private_vss_active());
-        TRACE_SPLIT * (1 + 2 * self.total_error_columns + 1 + randomness_position) + half
+        let bridge_message_columns = if self.same_secret_bridge_material_active() {
+            self.same_secret_bridge_message_encoding_columns()
+        } else {
+            0
+        };
+        TRACE_SPLIT
+            * (1 + 2 * self.total_error_columns + 1 + bridge_message_columns + randomness_position)
+            + half
     }
 
     pub(crate) fn physical_private_vss_message(
@@ -1022,8 +1037,8 @@ impl LimbColumnLayout {
                 .iter()
                 .map(|layout| layout.total_trit_count())
                 .sum::<usize>();
-            // The negative indicator row is present for the legacy anchor and
-            // for bridge-material statements; only the legacy anchor carries
+            // The negative indicator row is present for source-linkage and
+            // bridge-material statements; only source linkage carries
             // opening-randomness rows.
             let negative_indicator_columns =
                 if self.linkage_active() || self.same_secret_bridge_material_active() {

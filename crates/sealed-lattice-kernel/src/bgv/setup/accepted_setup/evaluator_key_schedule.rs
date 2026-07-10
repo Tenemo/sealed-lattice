@@ -101,11 +101,6 @@ pub(super) fn verify_evaluator_key_schedule(
 
     for (field_name, expected_value, message) in [
         (
-            "sameSecretConsistencyRoot",
-            same_secret_consistency_root_from_package(setup_package)?,
-            "same-secret statement root",
-        ),
-        (
             "publicKeyShareSetRoot",
             setup_package
                 .get("publicKeyShares")

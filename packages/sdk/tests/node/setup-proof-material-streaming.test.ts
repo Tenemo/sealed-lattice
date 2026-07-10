@@ -10,7 +10,6 @@ const alternateProofHash =
     'fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210';
 const expectedManifestHash = '1'.repeat(128);
 type SetupProofMaterialTransportFieldName =
-    | 'transportedSameSecretProofMaterial'
     | 'transportedPublicKeyShareProofMaterial'
     | 'transportedVssShareLinkageProofMaterial'
     | 'transportedSameSecretBridgeProofMaterial'
@@ -19,19 +18,16 @@ type SetupProofMaterialTransportFieldName =
 type SetupProofMaterialTransportCase = Readonly<{
     readonly fieldName: SetupProofMaterialTransportFieldName;
     readonly materialSetObjectType:
-        | 'SetupTransportedSameSecretProofMaterialSet'
         | 'SetupTransportedPublicKeyShareProofMaterialSet'
         | 'SetupTransportedVssShareLinkageProofMaterialSet'
         | 'SetupTransportedSameSecretBridgeProofMaterialSet'
         | 'SetupTransportedEvaluationKeyShareProofMaterialSet';
     readonly materialObjectType:
-        | 'SetupTransportedSameSecretProofMaterial'
         | 'SetupTransportedPublicKeyShareProofMaterial'
         | 'SetupTransportedVssShareLinkageProofMaterial'
         | 'SetupTransportedSameSecretBridgeProofMaterial'
         | 'SetupTransportedEvaluationKeyShareProofMaterial';
     readonly proofFamily:
-        | 'same-secret-linkage-anchor'
         | 'public-key-share'
         | 'vss-share-linkage'
         | 'same-secret-bridge'
@@ -39,12 +35,6 @@ type SetupProofMaterialTransportCase = Readonly<{
 }>;
 
 const setupProofMaterialTransportCases = [
-    {
-        fieldName: 'transportedSameSecretProofMaterial',
-        materialSetObjectType: 'SetupTransportedSameSecretProofMaterialSet',
-        materialObjectType: 'SetupTransportedSameSecretProofMaterial',
-        proofFamily: 'same-secret-linkage-anchor',
-    },
     {
         fieldName: 'transportedPublicKeyShareProofMaterial',
         materialSetObjectType: 'SetupTransportedPublicKeyShareProofMaterialSet',

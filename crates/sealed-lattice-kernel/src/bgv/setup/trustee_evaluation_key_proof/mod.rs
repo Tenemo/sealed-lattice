@@ -81,8 +81,10 @@ pub(in crate::bgv::setup) use relation::TrusteeEvaluationKeyWitness;
 pub(in crate::bgv::setup) use relation::public_key_switch_sample;
 pub(in crate::bgv::setup) use relation::{
     EvaluationKeyShareDescriptor, EvaluationKeyShareKind, PUBLIC_KEY_SHARE_COMMON_REFERENCE_LABEL,
-    PrivateVssShareStatement, SameSecretBridgeStatement, SameSecretLinkageStatement,
-    SuccinctSetupProofContext, TrusteeEvaluationKeyStatement,
+    PrivateVssShareStatement, SAME_SECRET_LINKAGE_ATOM_EXTENSION_DEGREE,
+    SAME_SECRET_LINKAGE_ATOM_LINCHECK_REPETITIONS, SameSecretBridgeStatement,
+    SameSecretLinkageAtomFieldForms, SameSecretLinkageStatement, SuccinctSetupProofContext,
+    TrusteeEvaluationKeyStatement, build_same_secret_linkage_atom_field_forms,
 };
 pub(in crate::bgv::setup) use verifier::verify_evaluation_key_share;
 
@@ -105,21 +107,11 @@ pub(in crate::bgv::setup) fn trustee_evaluation_key_proof_bytes_hash(proof_bytes
 }
 
 pub(crate) const TRUSTEE_EVALUATION_KEY_PROOF_FAMILY: &str = "trustee-evaluation-key";
-pub(crate) const SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY: &str = "same-secret-linkage-anchor";
 pub(crate) const PUBLIC_KEY_SHARE_PROOF_FAMILY: &str = "public-key-share";
 pub(crate) const PRIVATE_VSS_SHARE_PROOF_FAMILY: &str = "vss-opening-carry";
 pub(crate) const VSS_SHARE_LINKAGE_PROOF_FAMILY: &str = "vss-share-linkage";
 pub(crate) const SAME_SECRET_BRIDGE_PROOF_FAMILY: &str = "same-secret-bridge";
 pub(crate) const TARGET_DECRYPTION_SHARE_PROOF_FAMILY: &str = "target-decryption-share";
-// Canonical hash of transported same-secret linkage anchor proof bytes.
-#[cfg(test)]
-pub(in crate::bgv::setup) fn same_secret_anchor_proof_bytes_hash(proof_bytes: &[u8]) -> String {
-    hash512_hex(
-        "sealed-lattice/setup/same-secret-linkage-anchor/proof-bytes",
-        &[proof_bytes],
-    )
-}
-
 // Canonical hash of transported public-key share succinct proof bytes.
 pub(in crate::bgv::setup) fn public_key_share_succinct_proof_bytes_hash(
     proof_bytes: &[u8],

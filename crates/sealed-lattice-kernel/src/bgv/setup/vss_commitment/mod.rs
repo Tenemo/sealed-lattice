@@ -3,12 +3,9 @@ use crate::bgv::setup_helpers::{
     compare_required_string, compare_required_u64, read_positive_u64_at_path,
     read_positive_usize_at_path,
 };
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex, OnceLock};
 
 pub(super) const VSS_PUBLIC_COMMITMENT_BINARY_FORMAT: &str =
     "sealed-lattice-vss-public-commitment-binary";
-pub(crate) const VSS_PUBLIC_OUTPUT_COORDINATE_COUNT: usize = 16;
 pub(crate) const VSS_PUBLIC_MESSAGE_DIGIT_COUNT: usize = 2;
 #[cfg(test)]
 pub(crate) const VSS_PUBLIC_MESSAGE_BASE_DIGIT_TRIT_COUNT: usize = 17;
@@ -18,18 +15,11 @@ pub(crate) const VSS_PUBLIC_MESSAGE_DIGIT_BASE: u64 = 129_140_163;
 // single trit therefore ranges over {0, 1, 2}, which is the witness bound the
 // trit-granular share-linkage consistency claims publish.
 pub(crate) const VSS_PUBLIC_MESSAGE_TRIT_BASE: u64 = 3;
-pub(crate) const VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT: usize = 2;
-pub(in crate::bgv::setup) const VSS_PUBLIC_RANDOMNESS_PROJECTION_WEIGHT: usize = 32;
 // Single home: the VSS public commitment binds over exactly the BDLOP setup
 // commitment modulus limbs, so alias that constant instead of restating it and
 // letting the two drift.
 pub(in crate::bgv::setup) const VSS_PUBLIC_COMMITMENT_MODULUS_LIMB_INDICES: [usize; 3] =
     super::commitment::SETUP_COMMITMENT_MODULUS_LIMB_INDICES;
-const VSS_PUBLIC_SAMPLER_DOMAIN: &str = "sealed-lattice-vss-public-commitment/sampler";
-const VSS_PUBLIC_MATRIX_RESIDUE_HASH_DOMAIN: &str =
-    "sealed-lattice-vss-public-commitment/matrix-residue";
-const VSS_PUBLIC_PROJECTION_INDEX_HASH_DOMAIN: &str =
-    "sealed-lattice-vss-public-commitment/projection-index";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::bgv::setup) struct VssPublicMessageEncodingLayout {
@@ -322,7 +312,6 @@ pub(crate) fn verify_vss_public_aggregate_threshold_commitment_set_request(
                 recipient_record,
                 expected_recipient_roster_position: recipient_record_index / rns_limb_count,
                 expected_rns_limb_index: recipient_record_index % rns_limb_count,
-                participant_count,
             },
         )?);
     }
@@ -363,30 +352,27 @@ mod committed_material;
 mod message_encoding;
 mod readers;
 mod record_verification;
-mod sampler;
 mod share_linkage;
 
 use readers::*;
 use record_verification::*;
 
 pub(crate) use committed_material::compute_vss_committed_material_commitment_request;
+#[cfg(any(feature = "target-decryption-development-commands", test))]
 pub(crate) use committed_material::{
     VssCommittedMaterialCommitmentInput, compute_vss_committed_material_commitment,
 };
 
 pub(crate) use message_encoding::vss_public_canonical_message_digit_columns;
 pub(in crate::bgv::setup) use message_encoding::{
-    vss_public_message_digit_bound, vss_public_message_digit_column_label,
-    vss_public_message_digit_only_encoding_layout, vss_public_message_digit_trits_for_count,
-    vss_public_message_digit_weight, vss_public_message_digits, vss_public_message_encoding_layout,
-};
-// Consumed by the key-switch atom family backend same-secret linkage.
-pub(in crate::bgv::setup) use message_encoding::{
-    vss_public_message_coverage_terms_per_coordinate, vss_public_randomness_column_label,
+    vss_public_cross_limb_message_encoding_layout, vss_public_message_digit_bound,
+    vss_public_message_digit_trits_for_count, vss_public_message_digit_weight,
+    vss_public_message_digits, vss_public_message_encoding_layout,
+    vss_public_share_linkage_packed_message_encoding_layout,
+    vss_public_share_linkage_source_message_encoding_layout,
 };
 pub(crate) use record_verification::validate_standalone_vss_public_commitment_body;
-pub(in crate::bgv::setup) use sampler::{ProjectionTermsInput, projection_terms};
-pub(crate) use share_linkage::verify_vss_share_linkage_statement_request;
+pub(crate) use share_linkage::verify_vss_share_linkage_bindings_request;
 pub(crate) use share_linkage::{
     VssAggregateThresholdProofContext, verify_vss_public_aggregate_threshold_proofs,
 };

@@ -109,13 +109,13 @@ pub(in super::super::super) fn move_same_secret_bridge_proof_bytes_to_transport(
             .as_object_mut()
             .expect("same-secret bridge proof record object");
         record_object.remove("proofBytesBase64");
-        record_object.remove("proofRecordRoot");
+        record_object.remove("sameSecretBridgeProofRecordRoot");
         record_object.insert(
             "proofBytesEncoding".to_string(),
             serde_json::json!(SETUP_PROOF_MATERIAL_ENCODING),
         );
         insert_transport_reference(record_object, &proof_material_root, &transport_hashes);
-        proof_record["proofRecordRoot"] = serde_json::json!(
+        proof_record["sameSecretBridgeProofRecordRoot"] = serde_json::json!(
             derive_canonical_object_hash(proof_record)
                 .expect("same-secret bridge transported proof record root")
         );
@@ -389,14 +389,13 @@ fn same_secret_bridge_transported_proof_material_matches_embedded() {
         vss_public_recipient_share_commitment_set_object(&package);
     package["vssPublicAggregateThresholdCommitmentSet"] =
         vss_public_aggregate_threshold_commitment_set_object(&package);
-    package["sameSecretProofs"] = same_secret_proofs_object(&package);
     package["sameSecretBridgeStatementSet"] = same_secret_bridge_statement_set_object(&package);
-    let embedded_proof_material_set = same_secret_bridge_proof_material_set_object(&package, None);
+    let embedded_proof_material_set = same_secret_bridge_proof_material_set_object(&package);
 
     let embedded_request = serde_json::json!({
         "statementSet": package["sameSecretBridgeStatementSet"],
-        "sameSecretConsistency": package["sameSecretConsistency"],
-        "sameSecretProofs": package["sameSecretProofs"],
+        "coefficientCommitmentSet": package["vssPublicCoefficientCommitmentSet"],
+        "vssCoefficientCommitments": package["vssCoefficientCommitments"],
         "proofMaterialSet": embedded_proof_material_set,
     });
     let embedded_verification =
@@ -413,8 +412,8 @@ fn same_secret_bridge_transported_proof_material_matches_embedded() {
         crate::bgv::setup::verify_vss_same_secret_bridge_proof_material_set_request(
             &serde_json::json!({
                 "statementSet": package["sameSecretBridgeStatementSet"],
-                "sameSecretConsistency": package["sameSecretConsistency"],
-                "sameSecretProofs": package["sameSecretProofs"],
+                "coefficientCommitmentSet": package["vssPublicCoefficientCommitmentSet"],
+                "vssCoefficientCommitments": package["vssCoefficientCommitments"],
                 "proofMaterialSet": transported_proof_material_set,
                 "transportedSameSecretBridgeProofMaterial": transported_material,
             }),
@@ -440,8 +439,8 @@ fn same_secret_bridge_transported_proof_material_matches_embedded() {
         crate::bgv::setup::verify_vss_same_secret_bridge_proof_material_set_request(
             &serde_json::json!({
                 "statementSet": package["sameSecretBridgeStatementSet"],
-                "sameSecretConsistency": package["sameSecretConsistency"],
-                "sameSecretProofs": package["sameSecretProofs"],
+                "coefficientCommitmentSet": package["vssPublicCoefficientCommitmentSet"],
+                "vssCoefficientCommitments": package["vssCoefficientCommitments"],
                 "proofMaterialSet": transported_proof_material_set,
             }),
         )
@@ -456,8 +455,8 @@ fn same_secret_bridge_transported_proof_material_matches_embedded() {
         crate::bgv::setup::verify_vss_same_secret_bridge_proof_material_set_request(
             &serde_json::json!({
                 "statementSet": package["sameSecretBridgeStatementSet"],
-                "sameSecretConsistency": package["sameSecretConsistency"],
-                "sameSecretProofs": package["sameSecretProofs"],
+                "coefficientCommitmentSet": package["vssPublicCoefficientCommitmentSet"],
+                "vssCoefficientCommitments": package["vssCoefficientCommitments"],
                 "proofMaterialSet": transported_proof_material_set,
                 "transportedSameSecretBridgeProofMaterial": tampered_material,
             }),

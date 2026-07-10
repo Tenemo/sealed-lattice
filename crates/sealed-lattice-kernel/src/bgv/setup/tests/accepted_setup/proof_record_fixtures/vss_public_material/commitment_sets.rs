@@ -342,24 +342,6 @@ pub(super) fn vss_public_aggregate_threshold_commitment_record(
         .expect("threshold degree");
     let rns_prime = DATA_PRIMES[rns_limb_index];
     let recipient_identity = format!("trustee-{recipient_roster_position}");
-    let source_share_records = (0..participant_count)
-        .map(|source_trustee_roster_position| {
-            vss_public_recipient_share_commitment_record_from_package(
-                package,
-                source_trustee_roster_position,
-                recipient_roster_position,
-                rns_limb_index,
-            )
-        })
-        .collect::<Vec<_>>();
-    let source_share_commitment_roots = source_share_records
-        .iter()
-        .map(|record| record["shareCommitmentRoot"].clone())
-        .collect::<Vec<_>>();
-    let source_share_opening_roots = source_share_records
-        .iter()
-        .map(|record| record["shareOpeningRoot"].clone())
-        .collect::<Vec<_>>();
     // The threshold share is the modular sum of every source's recipient share
     // for this recipient and limb. The committed-material bodies carry no public
     // coordinates, so recompute the summands from the same deterministic fixture
@@ -393,8 +375,6 @@ pub(super) fn vss_public_aggregate_threshold_commitment_record(
         "recipientTrusteePoint": recipient_roster_position + 1,
         "rnsLimbIndex": rns_limb_index,
         "rnsPrime": rns_prime,
-        "sourceShareCommitmentRoots": source_share_commitment_roots.clone(),
-        "sourceShareOpeningRoots": source_share_opening_roots.clone(),
     });
     let context_hash =
         accepted_committed_material_context_hash("aggregate-threshold-share", &commitment_context);
@@ -422,7 +402,5 @@ pub(super) fn vss_public_aggregate_threshold_commitment_record(
         "aggregateCommitmentRoot": computation["commitmentRoot"],
         "aggregateOpeningRoot": computation["openingRoot"],
         "commitment": computation["commitment"],
-        "sourceShareCommitmentRoots": source_share_commitment_roots,
-        "sourceShareOpeningRoots": source_share_opening_roots,
     })
 }

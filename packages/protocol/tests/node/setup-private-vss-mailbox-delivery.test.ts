@@ -142,7 +142,6 @@ describe('private VSS mailbox delivery', () => {
                         ),
                         localVerificationRoot:
                             fixtureHash('local-verification'),
-                        verifiedPrivateVssShareProofCount: 1,
                         refusedObjects: [],
                     };
                 },
@@ -247,106 +246,5 @@ describe('private VSS mailbox delivery', () => {
                 .transportedPrivateVssShareProofMaterial?.proofMaterials[0]
                 .proofMaterialRoot,
         ).toBe(transportedProofRecord.proofMaterialRoot);
-    });
-
-    it('refuses accepted local verification that omits a private VSS proof limb', async () => {
-        const mailboxKeyPair = createPrivateVssMailboxKeyPair(
-            fixtureHash('short-proof-count-mailbox-key'),
-        );
-
-        await expect(
-            createPrivateVssMailboxDeliverySet({
-                kernel: {
-                    deriveCanonicalObjectHash: ({ value }) =>
-                        deriveCanonicalObjectHash(value),
-                    verifyPrivateVssShareEnvelope: (input) => ({
-                        isValid: true,
-                        privateEnvelopeHash: deriveCanonicalObjectHash(
-                            input.privateEnvelope,
-                        ),
-                        localVerificationRoot: fixtureHash(
-                            'short-proof-count-local-verification',
-                        ),
-                        verifiedPrivateVssShareProofCount: 1,
-                        refusedObjects: [],
-                    }),
-                },
-                setupContext,
-                phaseOrderHash: fixtureHash('phase-order'),
-                publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
-                vssCoefficientCommitmentRoot: fixtureHash(
-                    'vss-coefficient-commitment',
-                ),
-                qSharePrimes: [65_537, 65_539],
-                ringDegree: 2,
-                participantCount: 1,
-                deliveryPhaseNumber: 6,
-                verificationPhaseNumber: 7,
-                privateVssShareProofFactory: ({ rnsLimbIndex }) => ({
-                    objectType: 'PrivateVssShareProof',
-                    proofId: 'sealed-lattice-private-vss-share-proof-succinct',
-                    proofFamily: 'vss-opening-carry',
-                    proofBytesEncoding: 'embedded-binary-proof-bytes-hex',
-                    proofStatementRoot: fixtureHash(
-                        `short-proof-count-statement-root-${String(
-                            rnsLimbIndex,
-                        )}`,
-                    ),
-                    statementHash: fixtureHash(
-                        `short-proof-count-statement-hash-${String(
-                            rnsLimbIndex,
-                        )}`,
-                    ),
-                    proofBytesHash: fixtureHash(
-                        `short-proof-count-proof-bytes-${String(rnsLimbIndex)}`,
-                    ),
-                    proofMaterialRoot: fixtureHash(
-                        `short-proof-count-material-root-${String(
-                            rnsLimbIndex,
-                        )}`,
-                    ),
-                    proofBytesHex: '00010203',
-                }),
-                sourceTrusteeContributionStates: [
-                    {
-                        sourceTrusteeIdentity: 'trustee-0',
-                        sourceTrusteeRosterPosition: 0,
-                        sourceTrusteeCommitmentRoot: fixtureHash(
-                            'source-trustee-root',
-                        ),
-                        sourceTrusteeCoefficientCommitmentRecord: {},
-                        sourceTrusteeCoefficientCommitmentMaterialRecords: [],
-                        coefficientOpenings: [
-                            {
-                                rnsLimbIndex: 0,
-                                rnsPrime: 65_537,
-                                shamirCoefficientIndex: 0,
-                                commitmentRoot:
-                                    fixtureHash('coefficient-root-0'),
-                                coefficientMessage: [1, 2],
-                                randomnessByColumn: [[0, 1]],
-                            },
-                            {
-                                rnsLimbIndex: 1,
-                                rnsPrime: 65_539,
-                                shamirCoefficientIndex: 0,
-                                commitmentRoot:
-                                    fixtureHash('coefficient-root-1'),
-                                coefficientMessage: [3, 4],
-                                randomnessByColumn: [[1, 0]],
-                            },
-                        ],
-                    },
-                ],
-                recipients: [
-                    {
-                        recipientIdentity: 'trustee-0',
-                        recipientRosterPosition: 0,
-                        mailboxPublicKeyBytesHex:
-                            mailboxKeyPair.publicKeyBytesHex,
-                    },
-                ],
-            }),
-        ).rejects.toThrow(/verifiedPrivateVssShareProofCount/u);
     });
 });

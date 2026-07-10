@@ -6,11 +6,6 @@ fn terminal_full_ring_gate_refuses_reduced_public_key_material() {
         "vssPublicCoefficientCommitmentSet": {
             "ringDegree": POLYNOMIAL_DEGREE,
         },
-        "sameSecretProofs": {
-            "proofRecords": [
-                { "ringDegree": POLYNOMIAL_DEGREE }
-            ],
-        },
         "publicKeyShareMaterial": {
             "ringDegree": 8,
         },
@@ -36,11 +31,6 @@ fn terminal_full_ring_gate_refuses_reduced_evaluation_key_records() {
     let package = serde_json::json!({
         "vssPublicCoefficientCommitmentSet": {
             "ringDegree": POLYNOMIAL_DEGREE,
-        },
-        "sameSecretProofs": {
-            "proofRecords": [
-                { "ringDegree": POLYNOMIAL_DEGREE }
-            ],
         },
         "publicKeyShareMaterial": {
             "ringDegree": POLYNOMIAL_DEGREE,
@@ -180,11 +170,6 @@ fn terminal_transport_policy_package_with_material_encodings(
     serde_json::json!({
         "vssCoefficientCommitmentMaterial": {
             "materialEncoding": vss_material_encoding,
-        },
-        "sameSecretProofs": {
-            "proofRecords": [
-                proof_record.clone()
-            ],
         },
         "publicKeyShareMaterial": {
             "materialEncoding": public_key_share_material_encoding,

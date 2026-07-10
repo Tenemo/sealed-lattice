@@ -19,16 +19,6 @@ pub(in crate::bgv::setup) fn verify_full_ring_material(
             "setupPackage.vssPublicCoefficientCommitmentSet.ringDegree",
         )?));
     }
-    if let Some(proof_set) = setup_package.get("sameSecretProofs")
-        && let Some(response) = verify_full_ring_records(
-            proof_set,
-            "proofRecords",
-            "same-secret proof records must use the accepted full ring degree before terminal setup acceptance",
-            "setupPackage.sameSecretProofs.proofRecords.ringDegree",
-        )?
-    {
-        return Ok(Some(response));
-    }
     if let Some(material_set) = setup_package.get("publicKeyShareMaterial")
         && let Some(response) = verify_full_ring_record(
             material_set,

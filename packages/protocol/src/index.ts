@@ -66,6 +66,7 @@ export {
     setupCommitmentRandomnessWidth,
     setupTransportChunkSizeBytes,
     setupTransportSchemeId,
+    vssCoefficientCommitmentMaterialTransportEncoding,
 } from './setup/vss-coefficient-commitments.js';
 export {
     createEncryptedLocalTrusteeSetupStateFromVerifiedShares,
@@ -92,13 +93,6 @@ export {
     createSetupPackageVerificationInput,
     setupPackageHashInput,
 } from './setup/setup-package-assembly.js';
-export {
-    createSameSecretProofSet,
-    createSameSecretConsistencyStatementSet,
-    sameSecretBoundProofFamilies,
-    sameSecretProofFamily,
-    sameSecretRelation,
-} from './setup/same-secret-consistency-records.js';
 export {
     createBinaryChunkedSameSecretBridgeProofMaterialTransport,
     createBinaryChunkedVssShareLinkageProofMaterialTransport,
@@ -136,6 +130,7 @@ export type {
     EvaluationKeyShareMaterial,
     EvaluationKeyShareMaterialTransportInput,
     EvaluationKeyShareTransportedKeySwitchComponentMaterial,
+    EvaluationKeyTrusteeReference,
     GaloisKeyContributingShareRoot,
     GaloisKeyRootReference,
     GaloisKeyShareBatch,
@@ -157,7 +152,6 @@ export type {
     RelinearizationKeyShareRoundsInput,
     RelinearizationRoundOneContribution,
     RelinearizationRoundTwoContribution,
-    SameSecretProofReference,
     TransportedEvaluationKeyAggregateBindingOpening,
     TransportedEvaluationKeyAggregateBindingOpeningSet,
     TransportedEvaluationKeyShareComponentMaterialSet,
@@ -222,6 +216,7 @@ export type {
     SetupCommitmentValue,
     VssCoefficientCommitmentBundle,
     VssCoefficientCommitmentMaterialRecord,
+    VssCoefficientCommitmentMaterialBinaryReference,
     VssCoefficientCommitmentMaterialSet,
     VssCoefficientCommitmentRecord,
     VssCoefficientCommitmentSet,
@@ -282,20 +277,6 @@ export type {
     SetupPackageVerificationInput,
     SetupPackageVerificationInputSource,
 } from './setup/setup-package-assembly.js';
-export type {
-    SameSecretConsistencyStatementRecord,
-    SameSecretConsistencyStatementSet,
-    SameSecretConsistencyStatementSetInput,
-    SameSecretConstantCoefficientCommitmentRoot,
-    SameSecretEmbeddedProofBytes,
-    SameSecretProofByteMaterial,
-    SameSecretProofMaterial,
-    SameSecretProofRecord,
-    SameSecretProofSet,
-    SameSecretProofSetInput,
-    SameSecretTransportedProofBytes,
-    TransportedSameSecretProofMaterialSet,
-} from './setup/same-secret-consistency-records.js';
 export type {
     VerifiedSetupProofMaterial,
     VerifiedSetupProofMaterialSet,

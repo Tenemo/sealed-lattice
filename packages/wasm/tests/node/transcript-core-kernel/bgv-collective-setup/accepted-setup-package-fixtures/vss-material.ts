@@ -3,15 +3,18 @@ import {
     type JsonRecord,
 } from '../setup-fixture-primitives.js';
 
-import type {
-    SameSecretConsistencyStatementSet,
-    SameSecretProofSet,
-} from '#packages/protocol/src/setup/same-secret-consistency-records';
+import {
+    createVssCoefficientCommitmentBundle,
+    type VssCoefficientCommitmentMaterialSet,
+    type VssCoefficientCommitmentSet,
+    type VssSourceTrusteeCoefficientOpeningState,
+} from '#packages/protocol/src/setup/vss-coefficient-commitments';
 import {
     createThresholdShareCommitmentBinding,
+    assembleVssPublicAggregateThresholdCommitmentSet,
     createBinaryChunkedSameSecretBridgeProofMaterialTransport,
     createBinaryChunkedVssShareLinkageProofMaterialTransport,
-    createVssPublicAggregateThresholdCommitmentSet,
+    createLocalTrusteeVssPublicAggregateThresholdCommitmentBundle,
     createVssPublicCoefficientCommitmentSet,
     createVssPublicRecipientShareCommitmentSet,
     createVssSameSecretBridgeProofMaterialSet,
@@ -23,6 +26,7 @@ import {
     type VssCommittedMaterialSeedProvider,
     type VssPublicCoefficientCommitmentSet,
     type VssPublicCoefficientCredential,
+    type LocalTrusteeVssPublicAggregateOpeningCredentialHandoff,
     type VssPublicRecipientShareCommitmentSet,
     type VssPublicSourceTrusteeOpeningState,
 } from '#packages/protocol/src/setup/vss-commitments';
@@ -166,6 +170,7 @@ export type VssPublicMaterial = {
     readonly coefficientCommitmentSet: VssPublicCoefficientCommitmentSet;
     readonly recipientShareCommitmentSet: VssPublicRecipientShareCommitmentSet;
     readonly aggregateThresholdCommitmentSet: JsonRecord;
+    readonly localTrusteeAggregateOpeningCredentialHandoffs: readonly LocalTrusteeVssPublicAggregateOpeningCredentialHandoff[];
     readonly shareLinkageStatement: JsonRecord;
     readonly shareLinkageProofMaterialSet: JsonRecord;
     readonly transportedVssShareLinkageProofMaterial: TransportedVssShareLinkageProofMaterialSet;
@@ -229,44 +234,66 @@ export function acceptedVssPublicMaterial(
             computeVssCommittedMaterialCommitment:
                 vssCommittedMaterialCommitmentComputer,
         });
+    const localAggregateThresholdCommitmentBundles = Array.from(
+        { length: participantCount },
+        (_unused, localTrusteeRosterPosition) =>
+            createLocalTrusteeVssPublicAggregateThresholdCommitmentBundle({
+                setupContext,
+                publicMatrixSeedHash,
+                participantCount,
+                qSharePrimes,
+                ringDegree,
+                coefficientCommitmentSet:
+                    coefficientCommitmentBundle.coefficientCommitmentSet,
+                recipientShareCommitmentSet:
+                    recipientShareCommitmentBundle.recipientShareCommitmentSet,
+                localTrusteeRosterPosition,
+                localRecipientShareCredentials:
+                    recipientShareCommitmentBundle.recipientShareCredentials.filter(
+                        (credential) =>
+                            credential.recipientRosterPosition ===
+                            localTrusteeRosterPosition,
+                    ),
+                committedMaterialSeed,
+                computeVssCommittedMaterialCommitment:
+                    vssCommittedMaterialCommitmentComputer,
+                aggregateThresholdProofRandomness: ({
+                    recipientRosterPosition,
+                    rnsLimbIndex,
+                }) => ({
+                    seedHex: kernel.deriveCanonicalObjectHash({
+                        value: {
+                            objectType: 'VssAggregateThresholdProofRandomness',
+                            fixture: 'seed',
+                            recipientRosterPosition,
+                            rnsLimbIndex,
+                        },
+                    }),
+                    nonceHex: kernel.deriveCanonicalObjectHash({
+                        value: {
+                            objectType: 'VssAggregateThresholdProofRandomness',
+                            fixture: 'nonce',
+                            recipientRosterPosition,
+                            rnsLimbIndex,
+                        },
+                    }),
+                }),
+                generateVssShareLinkageProof: vssShareLinkageProofComputer,
+            }),
+    );
     const aggregateThresholdCommitmentSet =
-        createVssPublicAggregateThresholdCommitmentSet({
-            setupContext,
+        assembleVssPublicAggregateThresholdCommitmentSet({
             publicMatrixSeedHash,
             participantCount,
             qSharePrimes,
             ringDegree,
-            coefficientCommitmentSet:
-                coefficientCommitmentBundle.coefficientCommitmentSet,
             recipientShareCommitmentSet:
                 recipientShareCommitmentBundle.recipientShareCommitmentSet,
-            recipientShareCredentials:
-                recipientShareCommitmentBundle.recipientShareCredentials,
-            committedMaterialSeed,
-            computeVssCommittedMaterialCommitment:
-                vssCommittedMaterialCommitmentComputer,
-            aggregateThresholdProofRandomness: ({
-                recipientRosterPosition,
-                rnsLimbIndex,
-            }) => ({
-                seedHex: kernel.deriveCanonicalObjectHash({
-                    value: {
-                        objectType: 'VssAggregateThresholdProofRandomness',
-                        fixture: 'seed',
-                        recipientRosterPosition,
-                        rnsLimbIndex,
-                    },
-                }),
-                nonceHex: kernel.deriveCanonicalObjectHash({
-                    value: {
-                        objectType: 'VssAggregateThresholdProofRandomness',
-                        fixture: 'nonce',
-                        recipientRosterPosition,
-                        rnsLimbIndex,
-                    },
-                }),
-            }),
-            generateVssShareLinkageProof: vssShareLinkageProofComputer,
+            publicAggregateThresholdCommitmentContributions:
+                localAggregateThresholdCommitmentBundles.map(
+                    (bundle) =>
+                        bundle.publicAggregateThresholdCommitmentContribution,
+                ),
         });
     const shareLinkageStatement = createVssShareLinkageStatement({
         setupContext,
@@ -338,6 +365,11 @@ export function acceptedVssPublicMaterial(
         recipientShareCommitmentSet:
             recipientShareCommitmentBundle.recipientShareCommitmentSet,
         aggregateThresholdCommitmentSet,
+        localTrusteeAggregateOpeningCredentialHandoffs:
+            localAggregateThresholdCommitmentBundles.map(
+                (bundle) =>
+                    bundle.localTrusteeAggregateOpeningCredentialHandoff,
+            ),
         shareLinkageStatement,
         shareLinkageProofMaterialSet,
         transportedVssShareLinkageProofMaterial,
@@ -352,43 +384,126 @@ export type SameSecretBridge = {
     readonly bridgeStatementSet: JsonRecord;
     readonly bridgeProofMaterialSet: JsonRecord;
     readonly transportedSameSecretBridgeProofMaterial: TransportedSameSecretBridgeProofMaterialSet;
+    readonly sourceCoefficientCommitmentSet: VssCoefficientCommitmentSet;
+    readonly sourceCoefficientCommitmentMaterialSet: VssCoefficientCommitmentMaterialSet;
 };
 
-// Build the same-secret bridge: per source trustee it binds the
-// target-basis constant coefficient commitments to the accepted data-basis
-// same-secret proof, and one succinct bridge proof shows both open to the same
-// centered ternary secret. The bridge secret must be the exact secret the
-// same-secret proof binds.
+const sourceCommitmentRandomness = (
+    sourceTrusteeRosterPosition: number,
+    rnsLimbIndex: number,
+    shamirCoefficientIndex: number,
+    ringDegree: number,
+): number[][] =>
+    Array.from({ length: 5 }, (_unusedColumn, randomnessColumnIndex) =>
+        Array.from(
+            { length: ringDegree },
+            (_unusedCoefficient, coefficientPosition) =>
+                [-1, 0, 1][
+                    (sourceTrusteeRosterPosition +
+                        rnsLimbIndex +
+                        shamirCoefficientIndex +
+                        randomnessColumnIndex +
+                        coefficientPosition) %
+                        3
+                ],
+        ),
+    );
+
+// Build the combined bridge: canonical BDLOP source commitments and target
+// committed material are proven to share one centered ternary trustee secret.
 export function acceptedSameSecretBridge(
     kernel: TranscriptCoreKernel,
     setupContext: CollectiveBgvSetupContext,
     parameters: BgvCollectiveSetupParametersDescription,
     publicMatrixSeedHash: string,
     vssPublicMaterial: VssPublicMaterial,
-    sameSecretConsistency: SameSecretConsistencyStatementSet,
-    sameSecretProofs: SameSecretProofSet,
 ): SameSecretBridge {
     const { sameSecretBridgeProofComputer } =
         createVssCommitmentComputers(kernel);
+    const ringDegree = vssPublicMaterial.ringDegree;
+    const sourceTrusteeOpeningStates: VssSourceTrusteeCoefficientOpeningState[] =
+        Array.from(
+            { length: parameters.participantCount },
+            (_unusedTrustee, sourceTrusteeRosterPosition) => ({
+                sourceTrusteeIdentity: `trustee-${String(sourceTrusteeRosterPosition)}`,
+                sourceTrusteeRosterPosition,
+                coefficientOpenings: parameters.qShare.primes.flatMap(
+                    (rnsPrime, rnsLimbIndex) =>
+                        Array.from(
+                            { length: parameters.qDec },
+                            (_unusedCoefficient, shamirCoefficientIndex) => ({
+                                rnsLimbIndex,
+                                rnsPrime,
+                                shamirCoefficientIndex,
+                                coefficientMessage: vssPublicCoefficientMessage(
+                                    sourceTrusteeRosterPosition,
+                                    rnsLimbIndex,
+                                    shamirCoefficientIndex,
+                                    rnsPrime,
+                                    ringDegree,
+                                ),
+                                randomnessByColumn: sourceCommitmentRandomness(
+                                    sourceTrusteeRosterPosition,
+                                    rnsLimbIndex,
+                                    shamirCoefficientIndex,
+                                    ringDegree,
+                                ),
+                            }),
+                        ),
+                ),
+            }),
+        );
+    const sourceCommitmentBundle = createVssCoefficientCommitmentBundle({
+        setupContext,
+        publicMatrixSeedHash,
+        qSharePrimes: parameters.qShare.primes,
+        ringDegree,
+        participantCount: parameters.participantCount,
+        thresholdDegree: parameters.qDec,
+        sourceTrusteeOpeningStates,
+        setupCommitmentComputer: (commitmentInput) =>
+            kernel.computeSetupCommitmentFromOpening(commitmentInput),
+    });
     const bridgeStatementSet = createVssSameSecretBridgeStatementSet({
         setupContext,
         publicMatrixSeedHash,
         targetBasisHash: parameters.canonicalTargetBasisHash,
         coefficientCommitmentSet: vssPublicMaterial.coefficientCommitmentSet,
-        sameSecretConsistency: sameSecretConsistency,
-        sameSecretProofs: sameSecretProofs,
+        sourceCoefficientCommitmentSet: sourceCommitmentBundle.commitmentSet,
+        sourceCoefficientCommitmentMaterialSet:
+            sourceCommitmentBundle.materialSet,
     });
     const embeddedBridgeProofMaterialSet =
         createVssSameSecretBridgeProofMaterialSet({
             deriveProofMaterialSetRoot: false,
             statementSet: bridgeStatementSet,
             coefficientCredentials: vssPublicMaterial.coefficientCredentials,
-            bridgeSecret: ({ sourceTrusteeRosterPosition }) => ({
-                secretCoefficients: vssPublicTrusteeSecretCoefficients(
-                    sourceTrusteeRosterPosition,
-                    vssPublicMaterial.ringDegree,
-                ),
-            }),
+            sourceWitness: ({ sourceTrusteeRosterPosition }) => {
+                const sourceOpeningMaterial =
+                    sourceCommitmentBundle
+                        .privateOpeningMaterialBySourceTrustee[
+                        sourceTrusteeRosterPosition
+                    ];
+                if (sourceOpeningMaterial === undefined) {
+                    throw new Error(
+                        'Same-secret bridge fixture requires source opening material for every trustee.',
+                    );
+                }
+                const sourceConstantOpenings = [
+                    ...sourceOpeningMaterial.coefficientOpenings.filter(
+                        (opening) => opening.shamirCoefficientIndex === 0,
+                    ),
+                ].sort((left, right) => left.rnsLimbIndex - right.rnsLimbIndex);
+                return {
+                    secretCoefficients: vssPublicTrusteeSecretCoefficients(
+                        sourceTrusteeRosterPosition,
+                        ringDegree,
+                    ),
+                    sourceOpeningRandomnessByLimb: sourceConstantOpenings.map(
+                        (opening) => opening.randomnessByColumn,
+                    ),
+                };
+            },
             bridgeProofRandomness: ({ sourceTrusteeRosterPosition }) => ({
                 seedHex: kernel.deriveCanonicalObjectHash({
                     value: {
@@ -419,5 +534,8 @@ export function acceptedSameSecretBridge(
         bridgeStatementSet,
         bridgeProofMaterialSet,
         transportedSameSecretBridgeProofMaterial,
+        sourceCoefficientCommitmentSet: sourceCommitmentBundle.commitmentSet,
+        sourceCoefficientCommitmentMaterialSet:
+            sourceCommitmentBundle.materialSet,
     };
 }

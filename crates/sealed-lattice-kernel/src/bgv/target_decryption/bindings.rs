@@ -258,8 +258,6 @@ fn aggregate_threshold_commitment_set_value(
                 "aggregateCommitmentRoot": record.aggregate_commitment_root,
                 "aggregateOpeningRoot": record.aggregate_opening_root,
                 "commitment": record.aggregate_commitment,
-                "sourceShareCommitmentRoots": record.source_share_commitment_roots,
-                "sourceShareOpeningRoots": record.source_share_opening_roots,
             }));
         }
     }
@@ -381,14 +379,6 @@ fn read_aggregate_threshold_commitment_set_binding(
                 aggregate_opening_root: hash_at_path(record, &["aggregateOpeningRoot"])?
                     .to_string(),
                 aggregate_commitment: value_at_path(record, &["commitment"])?.clone(),
-                source_share_commitment_roots: string_array_at_path(
-                    record,
-                    "sourceShareCommitmentRoots",
-                )?,
-                source_share_opening_roots: string_array_at_path(
-                    record,
-                    "sourceShareOpeningRoots",
-                )?,
             });
         }
         recipient_records.push(limb_records);
@@ -399,21 +389,6 @@ fn read_aggregate_threshold_commitment_set_binding(
         rns_limb_count,
         recipient_records,
     })
-}
-
-fn string_array_at_path(value: &Value, field_name: &str) -> CanonicalResult<Vec<String>> {
-    array_at_path(value, &[field_name])?
-        .iter()
-        .enumerate()
-        .map(|(value_index, entry)| {
-            entry.as_str().map(str::to_string).ok_or_else(|| {
-                CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
-                    format!("{field_name}.{value_index} must be a string"),
-                )
-            })
-        })
-        .collect()
 }
 
 pub(super) fn read_target_accepted_binding(

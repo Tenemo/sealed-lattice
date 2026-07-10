@@ -1,27 +1,14 @@
 use super::*;
 
-// The key-bearing atom command path binds its same-secret anchor through the
-// atom schedule. Under the SEC-012 committed-material redesign the bridge's
-// target constants are hash-committed material roots, which the atom relation
-// system cannot open; the anchor is being re-anchored on the BDLOP constant
-// commitment (the same commitment the keyless anchor family opens). Until that
-// re-anchor lands, the atom schedule refuses key-bearing proofs fail-closed.
-// This test pins that fail-closed behavior so the migration state is a live
-// regression rather than a silent gap; restore the full round-trip when the
-// BDLOP re-anchor is implemented.
 #[test]
-fn key_bearing_atom_command_is_refused_pending_bdlop_reanchor() {
-    let (statement, mut witness) = generate_development_trustee_instance(
+fn key_bearing_atom_command_round_trips_with_bdlop_source_linkage() {
+    let (statement, witness) = generate_development_trustee_instance_with_linkage(
         "cdcdabab",
         &[round_one(2), round_two(2), rotation(3, 1)],
         SMALL_RING_DEGREE,
+        Some(1),
     )
     .expect("development instance");
-    witness.negative_indicator_coefficients = witness
-        .secret_coefficients
-        .iter()
-        .map(|coefficient| i64::from(*coefficient < 0))
-        .collect();
 
     let mut generate_request = statement_request_value(&statement);
     generate_request["secretCoefficients"] = serde_json::json!(witness.secret_coefficients);
@@ -29,13 +16,102 @@ fn key_bearing_atom_command_is_refused_pending_bdlop_reanchor() {
         serde_json::json!(witness.error_coefficients_by_key);
     generate_request["negativeIndicatorCoefficients"] =
         serde_json::json!(witness.negative_indicator_coefficients);
+    generate_request["openingRandomnessByLimb"] =
+        serde_json::json!(witness.opening_randomness_by_limb);
     generate_request["proofRandomnessSeedHex"] = serde_json::json!(PROOF_RANDOMNESS_SEED);
     generate_request["proofRandomnessNonceHex"] = serde_json::json!(PROOF_RANDOMNESS_NONCE);
 
-    // A key-bearing statement without any same-secret anchor is refused.
+    let generated = super::generate_trustee_evaluation_key_proof_from_request(&generate_request)
+        .expect("generate key-bearing atom proof");
+    assert_eq!(generated["proofFamily"], "trustee-evaluation-key");
+    verify_generated_proof(&statement, &generated);
+
+    let proof_bytes = generated_proof_bytes(&generated);
+    let mut tampered_proof_bytes = proof_bytes.clone();
+    let tamper_position = tampered_proof_bytes.len() / 2;
+    tampered_proof_bytes[tamper_position] ^= 1;
     assert!(
-        super::generate_trustee_evaluation_key_proof_from_request(&generate_request).is_err(),
-        "a key-bearing statement without the same-secret anchor must be refused"
+        verify_proof_bytes(&statement, &tampered_proof_bytes).is_err(),
+        "tampered key-bearing proof bytes must be rejected"
+    );
+
+    let (mut wrong_commitment_statement, _) = generate_development_trustee_instance_with_linkage(
+        "cdcdabab",
+        &[round_one(2), round_two(2), rotation(3, 1)],
+        SMALL_RING_DEGREE,
+        Some(1),
+    )
+    .expect("second development instance");
+    let commitment = &mut wrong_commitment_statement
+        .same_secret_linkage
+        .as_mut()
+        .expect("source linkage")
+        .commitments[0];
+    commitment.limbs[0].rows[0][0] =
+        (commitment.limbs[0].rows[0][0] + 1) % commitment.limbs[0].modulus;
+    assert!(
+        verify_proof_bytes(&wrong_commitment_statement, &proof_bytes).is_err(),
+        "a proof must not verify after its BDLOP source commitment is changed"
+    );
+
+    let (mut wrong_context_statement, _) = generate_development_trustee_instance_with_linkage(
+        "cdcdabab",
+        &[round_one(2), round_two(2), rotation(3, 1)],
+        SMALL_RING_DEGREE,
+        Some(1),
+    )
+    .expect("third development instance");
+    wrong_context_statement
+        .context
+        .binding_roots
+        .iter_mut()
+        .find(|(label, _)| label == "sourceConstantCoefficientCommitmentRoot")
+        .expect("source constant binding root")
+        .1 = "f".repeat(128);
+    assert!(
+        verify_proof_bytes(&wrong_context_statement, &proof_bytes).is_err(),
+        "a key proof must not replay under a different exact source-constant root"
+    );
+
+    let mut wrong_secret_request = generate_request.clone();
+    wrong_secret_request["secretCoefficients"][0] =
+        serde_json::json!(if witness.secret_coefficients[0] == 1 {
+            0
+        } else {
+            1
+        });
+    assert!(
+        super::generate_trustee_evaluation_key_proof_from_request(&wrong_secret_request).is_err(),
+        "a wrong key secret must not open the source commitment"
+    );
+
+    let mut wrong_randomness_request = generate_request.clone();
+    wrong_randomness_request["openingRandomnessByLimb"][0][0][0] =
+        serde_json::json!(if witness.opening_randomness_by_limb[0][0][0] == 1 {
+            0
+        } else {
+            1
+        });
+    assert!(
+        super::generate_trustee_evaluation_key_proof_from_request(&wrong_randomness_request)
+            .is_err(),
+        "wrong BDLOP opening randomness must be rejected"
+    );
+}
+
+#[test]
+fn key_bearing_atom_command_requires_source_linkage() {
+    let (statement, witness) =
+        generate_development_trustee_instance("cdcdabac", &[round_one(1)], SMALL_RING_DEGREE)
+            .expect("development instance without source linkage");
+    let mut request = statement_request_value(&statement);
+    request["secretCoefficients"] = serde_json::json!(witness.secret_coefficients);
+    request["errorCoefficientsByKey"] = serde_json::json!(witness.error_coefficients_by_key);
+    request["proofRandomnessSeedHex"] = serde_json::json!(PROOF_RANDOMNESS_SEED);
+    request["proofRandomnessNonceHex"] = serde_json::json!(PROOF_RANDOMNESS_NONCE);
+    assert!(
+        super::generate_trustee_evaluation_key_proof_from_request(&request).is_err(),
+        "a key-bearing statement without BDLOP source linkage must be refused"
     );
 }
 
@@ -98,61 +174,10 @@ fn trustee_proof_commands_reject_noncanonical_public_statement_material() {
 }
 
 #[test]
-fn anchor_proof_commands_round_trip_with_family_label() {
-    let (statement, witness) = generate_development_trustee_instance_with_linkage(
-        "fafa0101",
-        &[],
-        SMALL_RING_DEGREE,
-        Some(DATA_PRIMES.len()),
-    )
-    .expect("anchor instance");
-    let mut generate_request = statement_request_value(&statement);
-    generate_request["secretCoefficients"] = serde_json::json!(witness.secret_coefficients);
-    generate_request["negativeIndicatorCoefficients"] =
-        serde_json::json!(witness.negative_indicator_coefficients);
-    generate_request["openingRandomnessByLimb"] =
-        serde_json::json!(witness.opening_randomness_by_limb);
-    generate_request["proofRandomnessSeedHex"] = serde_json::json!(PROOF_RANDOMNESS_SEED);
-    generate_request["proofRandomnessNonceHex"] = serde_json::json!(PROOF_RANDOMNESS_NONCE);
-
-    let generated = super::generate_trustee_evaluation_key_proof_from_request(&generate_request)
-        .expect("generate anchor command");
-    assert_eq!(generated["proofFamily"], "same-secret-linkage-anchor");
-
-    verify_generated_proof(&statement, &generated);
-
-    // A keyless request whose context carries the evaluation-key binding
-    // labels must be refused: the family decides the expected label list.
-    let mut mislabeled_request = statement_request_value(&statement);
-    mislabeled_request["context"]["vssCoefficientCommitmentMaterialRoot"] = serde_json::Value::Null;
-    mislabeled_request["secretCoefficients"] = serde_json::json!(witness.secret_coefficients);
-    mislabeled_request["negativeIndicatorCoefficients"] =
-        serde_json::json!(witness.negative_indicator_coefficients);
-    mislabeled_request["openingRandomnessByLimb"] =
-        serde_json::json!(witness.opening_randomness_by_limb);
-    mislabeled_request["proofRandomnessSeedHex"] = serde_json::json!(PROOF_RANDOMNESS_SEED);
-    mislabeled_request["proofRandomnessNonceHex"] = serde_json::json!(PROOF_RANDOMNESS_NONCE);
-    assert!(
-        super::generate_trustee_evaluation_key_proof_from_request(&mislabeled_request).is_err(),
-        "a keyless statement without the anchor binding root must be refused"
-    );
-}
-
-#[test]
 fn public_key_share_commands_round_trip_with_family_label() {
-    let (statement, witness) =
-        generate_development_public_key_share_instance("cdcd010201", SMALL_RING_DEGREE)
-            .expect("public-key share instance");
-    let mut generate_request = statement_request_value(&statement);
-    generate_request["secretCoefficients"] = serde_json::json!(witness.secret_coefficients);
-    generate_request["errorCoefficientsByKey"] =
-        serde_json::json!(witness.error_coefficients_by_key);
-    generate_request["negativeIndicatorCoefficients"] =
-        serde_json::json!(witness.negative_indicator_coefficients);
-    generate_request["openingRandomnessByLimb"] =
-        serde_json::json!(witness.opening_randomness_by_limb);
-    generate_request["proofRandomnessSeedHex"] = serde_json::json!(PROOF_RANDOMNESS_SEED);
-    generate_request["proofRandomnessNonceHex"] = serde_json::json!(PROOF_RANDOMNESS_NONCE);
+    let generate_request = public_key_share_statement_hash_vector_request();
+    let statement = super::super::commands::statement_from_request(&generate_request)
+        .expect("public-key share statement");
 
     let generated = super::generate_trustee_evaluation_key_proof_from_request(&generate_request)
         .expect("generate public-key share command");
@@ -160,17 +185,10 @@ fn public_key_share_commands_round_trip_with_family_label() {
 
     verify_generated_proof(&statement, &generated);
 
-    // A public-key share request whose context carries the wrong binding
-    // labels (the anchor's) must be refused.
-    let mut mislabeled = statement_request_value(&statement);
-    mislabeled["context"]["sameSecretStatementRoot"] = serde_json::Value::Null;
-    mislabeled["secretCoefficients"] = serde_json::json!(witness.secret_coefficients);
-    mislabeled["errorCoefficientsByKey"] = serde_json::json!(witness.error_coefficients_by_key);
-    mislabeled["negativeIndicatorCoefficients"] =
-        serde_json::json!(witness.negative_indicator_coefficients);
-    mislabeled["openingRandomnessByLimb"] = serde_json::json!(witness.opening_randomness_by_limb);
-    mislabeled["proofRandomnessSeedHex"] = serde_json::json!(PROOF_RANDOMNESS_SEED);
-    mislabeled["proofRandomnessNonceHex"] = serde_json::json!(PROOF_RANDOMNESS_NONCE);
+    // A public-key share request missing one exact bridge binding must be
+    // refused.
+    let mut mislabeled = generate_request;
+    mislabeled["context"]["sameSecretBridgeStatementRoot"] = serde_json::Value::Null;
     assert!(
         super::generate_trustee_evaluation_key_proof_from_request(&mislabeled).is_err(),
         "a public-key share statement without its binding roots must be refused"
@@ -179,19 +197,7 @@ fn public_key_share_commands_round_trip_with_family_label() {
 
 #[test]
 fn proof_command_binds_randomness_seed_to_nonce_and_statement() {
-    let (statement, witness) =
-        generate_development_public_key_share_instance("ab12cd34", SMALL_RING_DEGREE)
-            .expect("public-key share instance");
-    let mut generate_request = statement_request_value(&statement);
-    generate_request["secretCoefficients"] = serde_json::json!(witness.secret_coefficients);
-    generate_request["errorCoefficientsByKey"] =
-        serde_json::json!(witness.error_coefficients_by_key);
-    generate_request["negativeIndicatorCoefficients"] =
-        serde_json::json!(witness.negative_indicator_coefficients);
-    generate_request["openingRandomnessByLimb"] =
-        serde_json::json!(witness.opening_randomness_by_limb);
-    generate_request["proofRandomnessSeedHex"] = serde_json::json!(PROOF_RANDOMNESS_SEED);
-    generate_request["proofRandomnessNonceHex"] = serde_json::json!(PROOF_RANDOMNESS_NONCE);
+    let generate_request = public_key_share_statement_hash_vector_request();
 
     let generated = super::generate_trustee_evaluation_key_proof_from_request(&generate_request)
         .expect("generate with nonce");
@@ -226,13 +232,9 @@ fn proof_command_binds_randomness_seed_to_nonce_and_statement() {
 
 #[test]
 fn proof_codec_round_trips_and_rejects_malformed_bytes() {
-    let (statement, witness) = generate_development_trustee_instance_with_linkage(
-        "c0dec0de",
-        &[],
-        SMALL_RING_DEGREE,
-        Some(DATA_PRIMES.len()),
-    )
-    .expect("anchor instance");
+    let (statement, witness) =
+        generate_development_public_key_share_instance("c0dec0de", SMALL_RING_DEGREE)
+            .expect("public-key share instance");
     let proof =
         prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
     let bytes = encode_trustee_evaluation_key_proof(&proof);
@@ -268,15 +270,14 @@ fn proof_codec_rejects_low_degree_shape_mismatches_before_verification() {
     // The adaptive low-degree final layer absorbs the whole recursion below a
     // 4096-coefficient claim bound, so folded-layer shape checks need the
     // smallest ring that still commits a folded Merkle layer.
-    let (statement, witness) = generate_development_trustee_instance_with_linkage(
-        "c0dec0de",
-        &[],
-        FOLDED_LAYER_RING_DEGREE,
-        Some(DATA_PRIMES.len()),
-    )
-    .expect("anchor instance");
-    let mut proof =
+    let (statement, witness) =
+        generate_development_public_key_share_instance("c0dec0de", FOLDED_LAYER_RING_DEGREE)
+            .expect("public-key share instance");
+    let canonical_proof =
         prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
+    let canonical_proof_bytes = encode_trustee_evaluation_key_proof(&canonical_proof);
+    let mut proof = decode_trustee_evaluation_key_proof(&statement, &canonical_proof_bytes)
+        .expect("decode canonical proof");
     proof.limb_proofs[0]
         .low_degree
         .folded_layer_roots
@@ -295,15 +296,8 @@ fn proof_codec_rejects_low_degree_shape_mismatches_before_verification() {
         error.message
     );
 
-    let (statement, witness) = generate_development_trustee_instance_with_linkage(
-        "cafe0dd0",
-        &[],
-        FOLDED_LAYER_RING_DEGREE,
-        Some(DATA_PRIMES.len()),
-    )
-    .expect("anchor instance");
-    let mut proof =
-        prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
+    let mut proof = decode_trustee_evaluation_key_proof(&statement, &canonical_proof_bytes)
+        .expect("decode canonical proof");
     proof.limb_proofs[0]
         .sumcheck_residual_low_degree
         .folded_layer_roots
@@ -322,15 +316,7 @@ fn proof_codec_rejects_low_degree_shape_mismatches_before_verification() {
         error.message
     );
 
-    let (statement, witness) = generate_development_trustee_instance_with_linkage(
-        "dec0ded0",
-        &[],
-        FOLDED_LAYER_RING_DEGREE,
-        Some(DATA_PRIMES.len()),
-    )
-    .expect("anchor instance");
-    let mut proof =
-        prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
+    let mut proof = canonical_proof;
     // A batched folded-layer opening whose node count exceeds its per-layer
     // bound by one is rejected at decode, before any oversized allocation. The
     // bound mirrors the decoder: LOW_DEGREE_QUERY_COUNT openings over a layer of
@@ -358,50 +344,84 @@ fn proof_codec_rejects_low_degree_shape_mismatches_before_verification() {
 
 fn assert_noncanonical_encoded_proof_rejects(
     label: &str,
+    statement: &TrusteeEvaluationKeyStatement,
+    canonical_proof_bytes: &[u8],
     mutate_proof: impl FnOnce(&mut super::prover::SuccinctEvaluationKeyProof, u64),
 ) {
-    let (statement, witness) = generate_development_trustee_instance_with_linkage(
-        "c0decafe",
-        &[],
-        FOLDED_LAYER_RING_DEGREE,
-        Some(DATA_PRIMES.len()),
-    )
-    .expect("anchor instance");
-    let mut proof =
-        prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
+    let mut proof = decode_trustee_evaluation_key_proof(statement, canonical_proof_bytes)
+        .expect("decode canonical proof");
     let modulus = statement.limb_moduli()[0];
     mutate_proof(&mut proof, modulus);
     let encoded = encode_trustee_evaluation_key_proof(&proof);
 
     assert!(
-        decode_trustee_evaluation_key_proof(&statement, &encoded).is_err(),
+        decode_trustee_evaluation_key_proof(statement, &encoded).is_err(),
         "{label} with a noncanonical residue must be rejected by the decoder"
     );
 }
 
 #[test]
 fn proof_codec_rejects_noncanonical_values_in_every_encoded_area() {
-    assert_noncanonical_encoded_proof_rejects("masked consistency claim", |proof, modulus| {
-        proof.limb_proofs[0].masked_consistency_claims[0] = modulus;
-    });
-    assert_noncanonical_encoded_proof_rejects("deep evaluation coordinate", |proof, modulus| {
-        proof.limb_proofs[0].deep_evaluations[0][0][0] = modulus;
-    });
-    assert_noncanonical_encoded_proof_rejects("phase-one query row", |proof, modulus| {
-        proof.limb_proofs[0].query_openings[0].phase_one_rows[0][0] = modulus;
-    });
-    assert_noncanonical_encoded_proof_rejects("phase-two coordinate row", |proof, modulus| {
-        proof.limb_proofs[0].query_openings[0].phase_two_rows[0][0] = modulus;
-    });
-    assert_noncanonical_encoded_proof_rejects("low-degree final coefficient", |proof, modulus| {
-        proof.limb_proofs[0].low_degree.final_coefficients[0][0] = modulus;
-    });
-    assert_noncanonical_encoded_proof_rejects("low-degree folded opening", |proof, modulus| {
-        proof.limb_proofs[0].low_degree.query_openings[0].folded_layer_siblings[0].sibling[0] =
-            modulus;
-    });
+    let (statement, witness) =
+        generate_development_public_key_share_instance("c0decafe", FOLDED_LAYER_RING_DEGREE)
+            .expect("public-key share instance");
+    let canonical_proof =
+        prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
+    let canonical_proof_bytes = encode_trustee_evaluation_key_proof(&canonical_proof);
+
+    assert_noncanonical_encoded_proof_rejects(
+        "masked consistency claim",
+        &statement,
+        &canonical_proof_bytes,
+        |proof, modulus| {
+            proof.limb_proofs[0].masked_consistency_claims[0] = modulus;
+        },
+    );
+    assert_noncanonical_encoded_proof_rejects(
+        "deep evaluation coordinate",
+        &statement,
+        &canonical_proof_bytes,
+        |proof, modulus| {
+            proof.limb_proofs[0].deep_evaluations[0][0][0] = modulus;
+        },
+    );
+    assert_noncanonical_encoded_proof_rejects(
+        "phase-one query row",
+        &statement,
+        &canonical_proof_bytes,
+        |proof, modulus| {
+            proof.limb_proofs[0].query_openings[0].phase_one_rows[0][0] = modulus;
+        },
+    );
+    assert_noncanonical_encoded_proof_rejects(
+        "phase-two coordinate row",
+        &statement,
+        &canonical_proof_bytes,
+        |proof, modulus| {
+            proof.limb_proofs[0].query_openings[0].phase_two_rows[0][0] = modulus;
+        },
+    );
+    assert_noncanonical_encoded_proof_rejects(
+        "low-degree final coefficient",
+        &statement,
+        &canonical_proof_bytes,
+        |proof, modulus| {
+            proof.limb_proofs[0].low_degree.final_coefficients[0][0] = modulus;
+        },
+    );
+    assert_noncanonical_encoded_proof_rejects(
+        "low-degree folded opening",
+        &statement,
+        &canonical_proof_bytes,
+        |proof, modulus| {
+            proof.limb_proofs[0].low_degree.query_openings[0].folded_layer_siblings[0].sibling[0] =
+                modulus;
+        },
+    );
     assert_noncanonical_encoded_proof_rejects(
         "residual low-degree final coefficient",
+        &statement,
+        &canonical_proof_bytes,
         |proof, modulus| {
             proof.limb_proofs[0]
                 .sumcheck_residual_low_degree
@@ -410,6 +430,8 @@ fn proof_codec_rejects_noncanonical_values_in_every_encoded_area() {
     );
     assert_noncanonical_encoded_proof_rejects(
         "residual low-degree folded opening",
+        &statement,
+        &canonical_proof_bytes,
         |proof, modulus| {
             proof.limb_proofs[0]
                 .sumcheck_residual_low_degree
@@ -423,13 +445,7 @@ fn proof_codec_rejects_noncanonical_values_in_every_encoded_area() {
 #[test]
 fn proof_codec_rejects_noncanonical_values_for_each_succinct_family_shape() {
     let family_cases = [
-        generate_development_trustee_instance_with_linkage(
-            "1111aaaa",
-            &[],
-            SMALL_RING_DEGREE,
-            Some(DATA_PRIMES.len()),
-        )
-        .expect("same-secret anchor instance"),
+        super::same_secret_bridge::same_secret_bridge_instance(),
         generate_development_public_key_share_instance("2222bbbb", SMALL_RING_DEGREE)
             .expect("public-key share instance"),
     ];

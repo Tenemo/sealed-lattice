@@ -9,7 +9,6 @@ mod private_vss_envelopes;
 mod public_key_share_material;
 mod public_key_shares;
 mod same_secret_bridge_verification;
-mod same_secret_consistency;
 mod setup_context;
 mod threshold_share_commitment_checks;
 mod transport_policy;
@@ -83,13 +82,6 @@ use self::public_key_shares::{
 };
 #[cfg(test)]
 pub(in crate::bgv::setup) use self::same_secret_bridge_verification::verified_same_secret_bridge_material_from_package;
-use self::same_secret_consistency::{
-    SameSecretProofBinding, SameSecretStatementBinding, same_secret_consistency_root_from_package,
-    same_secret_proof_bindings_from_package, same_secret_proof_family_binding_root,
-    same_secret_proof_set_root_from_package, same_secret_statement_bindings_from_package,
-    same_secret_statement_records_by_roster_position, verify_optional_same_secret_proofs,
-    verify_same_secret_consistency, verify_same_secret_context,
-};
 use self::setup_context::{q_share_value, verify_context, verify_q_share};
 use self::threshold_share_commitment_checks::verify_threshold_share_commitments;
 use self::transport_policy::{
@@ -153,9 +145,6 @@ use crate::protocol_signatures::{
 use crate::transcript_core::decode_hex;
 
 const SETUP_PACKAGE_OBJECT_TYPE: &str = "SetupPackage";
-const SAME_SECRET_CONSISTENCY_OBJECT_TYPE: &str = "SameSecretConsistencyStatementSet";
-const SAME_SECRET_STATEMENT_OBJECT_TYPE: &str = "SameSecretConsistencyStatement";
-const SAME_SECRET_PROOF_FAMILY_BINDING_OBJECT_TYPE: &str = "SameSecretProofFamilyBinding";
 const PUBLIC_KEY_SHARE_PROOF_TRANSPORT_SET_OBJECT_TYPE: &str =
     "SetupTransportedPublicKeyShareProofMaterialSet";
 const PUBLIC_KEY_SHARE_PROOF_TRANSPORT_OBJECT_TYPE: &str =
@@ -164,7 +153,6 @@ const EVALUATION_KEY_SHARE_PROOF_TRANSPORT_SET_OBJECT_TYPE: &str =
     "SetupTransportedEvaluationKeyShareProofMaterialSet";
 const EVALUATION_KEY_SHARE_PROOF_TRANSPORT_OBJECT_TYPE: &str =
     "SetupTransportedEvaluationKeyShareProofMaterial";
-const TRUSTEE_SECRET_COMMITMENT_OBJECT_TYPE: &str = "TrusteeSecretCommitment";
 const PUBLIC_KEY_SHARE_SET_OBJECT_TYPE: &str = "PublicKeyShareSet";
 const PUBLIC_KEY_SHARE_OBJECT_TYPE: &str = "PublicKeyShare";
 const PUBLIC_KEY_SHARE_PROOF_SET_OBJECT_TYPE: &str = "PublicKeyShareProofSet";
@@ -297,8 +285,6 @@ const SETUP_TRANSPORTED_VSS_MATERIAL_NAME: &str = "vssCoefficientCommitmentMater
 const SETUP_TRANSPORTED_VSS_MATERIAL_ROLE: &str = "public-vss-coefficient-commitment-material";
 const SETUP_TRANSPORTED_PUBLIC_KEY_SHARE_MATERIAL_NAME: &str = "publicKeyShareMaterial";
 const SETUP_TRANSPORTED_PUBLIC_KEY_SHARE_MATERIAL_ROLE: &str = "public-key-share-material";
-const SETUP_TRANSPORTED_SAME_SECRET_PROOF_MATERIAL_NAME: &str = "sameSecretProofMaterial";
-const SETUP_TRANSPORTED_SAME_SECRET_PROOF_MATERIAL_ROLE: &str = "same-secret-proof-material";
 const SETUP_TRANSPORTED_PUBLIC_KEY_SHARE_PROOF_MATERIAL_NAME: &str = "publicKeyShareProofMaterial";
 const SETUP_TRANSPORTED_PUBLIC_KEY_SHARE_PROOF_MATERIAL_ROLE: &str =
     "public-key-share-proof-material";
@@ -318,14 +304,7 @@ const PRIVATE_VSS_ENVELOPE_DELIVERY_PHASE_NUMBER: u64 = 6;
 const PRIVATE_VSS_ENVELOPE_VERIFICATION_PHASE_NUMBER: u64 = 7;
 const EVALUATOR_REPLAY_SCHEME_LABEL: &str = "direct-encrypted-ballot-evaluator-replay";
 const EVALUATOR_PACKING_SCHEME_LABEL: &str = "direct-score-packing-compact-generator-basis-direct-encrypted-score-comparison-generator-ordered-rank-packing";
-const SAME_SECRET_BOUND_PROOF_FAMILIES: &[&str] = &[
-    "vss-constant-relation",
-    "public-key-share",
-    "relinearization-key-share",
-    "galois-key-share",
-];
 const ACCEPTED_SETUP_SUCCINCT_PROOF_FAMILIES: &[&str] = &[
-    "same-secret-linkage-anchor",
     "public-key-share",
     "vss-opening-carry",
     "trustee-evaluation-key",
@@ -363,8 +342,6 @@ const REQUIRED_FINAL_OBJECTS: &[&str] = &[
     "privateVssEnvelopeCommitmentRoot",
     "vssShareAcceptances",
     "thresholdShareCommitments",
-    "sameSecretConsistency",
-    "sameSecretProofs",
     "publicKeyShares",
     "publicKeyShareProofs",
     "publicKeyShareMaterial",
@@ -487,8 +464,8 @@ pub(crate) fn verify_collective_bgv_setup_package(
     // Same lifecycle for this request's stream-verified setup proof material: the
     // SDK streams fresh sequence-numbered handles on every verify, so without
     // eviction the process-global store retains a full copy of every verified
-    // package's share-linkage, same-secret bridge and anchor, public-key share,
-    // and evaluation-key proof material.
+    // package's share-linkage, same-secret bridge, public-key share, and
+    // evaluation-key proof material.
     let _setup_proof_material_eviction_guard =
         VerifiedSetupProofMaterialEvictionGuard::for_request(request);
     if !setup_package.is_object() {
@@ -598,9 +575,6 @@ fn verify_collective_setup_package(
     {
         return Ok(VerificationFlow::Stop(response));
     }
-    if let Some(response) = verify_same_secret_consistency(setup_package)? {
-        return Ok(VerificationFlow::Stop(response));
-    }
     let verified_same_secret_bridge =
         match verify_optional_same_secret_bridge_statement_set(setup_package, request)? {
             SameSecretBridgeVerification::Absent => None,
@@ -609,11 +583,6 @@ fn verify_collective_setup_package(
                 return Ok(VerificationFlow::Stop(response));
             }
         };
-    if let Some(response) =
-        verify_optional_same_secret_proofs(verified_same_secret_bridge.as_ref())?
-    {
-        return Ok(VerificationFlow::Stop(response));
-    }
     if let Some(response) = verify_public_key_shares(setup_package)? {
         return Ok(VerificationFlow::Stop(response));
     }

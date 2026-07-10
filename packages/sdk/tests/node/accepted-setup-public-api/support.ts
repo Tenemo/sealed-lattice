@@ -15,7 +15,6 @@ import {
     createPublicKeyShareSet,
     createPublicKeyShareSuccinctProofSet,
     createRelinearizationKeyShareRounds,
-    createSameSecretProofSet,
     createSetupCertificates,
     createSetupCommonRandomness,
     createSetupContribution,
@@ -36,7 +35,6 @@ import {
 } from '#packages/crypto/tests/support/protocol-signature-fixtures';
 import {
     acceptedBgvSetupQSharePrimes,
-    createSameSecretConsistencyStatementSet,
     createVssCoefficientCommitmentBundle,
     publicKeyShareCoefficientVectorHashDomain,
     setupTransportChunkSizeBytes,
@@ -46,10 +44,7 @@ import {
 import type { TranscriptCoreKernel } from '#packages/wasm/src/index';
 
 export { hash512Hex };
-export {
-    createSameSecretConsistencyStatementSet,
-    createVssCoefficientCommitmentBundle,
-};
+export { createVssCoefficientCommitmentBundle };
 
 export type PublicSetupApi = {
     readonly createCommonRandomnessCommit: (
@@ -80,9 +75,6 @@ export type PublicSetupApi = {
         input: unknown,
     ) => Record<string, unknown>;
     readonly createRelinearizationKeyShareRounds: (
-        input: unknown,
-    ) => Record<string, unknown>;
-    readonly createSameSecretProofSet: (
         input: unknown,
     ) => Record<string, unknown>;
     readonly createSetupCommonRandomness: (
@@ -139,7 +131,6 @@ export const publicSetupApi = {
     createPublicKeyShareSet,
     createPublicKeyShareSuccinctProofSet,
     createRelinearizationKeyShareRounds,
-    createSameSecretProofSet,
     createSetupCertificates,
     createSetupCommonRandomness,
     createSetupContribution,
@@ -372,40 +363,13 @@ export const vssSourceTrusteeOpeningState = (
     ),
 });
 
-export const sameSecretProofMaterial = (
-    kernel: TranscriptCoreKernel,
-    statementRecord: Record<string, unknown>,
-): Record<string, unknown> => {
-    const proofRosterPosition = Number(statementRecord.trusteeRosterPosition);
-    const proofBytesHex = `aa55${proofRosterPosition.toString(16).padStart(4, '0')}`;
-
-    return {
-        proofFamily: 'same-secret-linkage-anchor',
-        trusteeIdentity: statementRecord.trusteeIdentity,
-        trusteeRosterPosition: proofRosterPosition,
-        statementHash: hashFromKernel(
-            kernel,
-            `same-secret-proof-statement-${String(proofRosterPosition)}`,
-        ),
-        proofBytesHash: hashFromKernel(
-            kernel,
-            `same-secret-proof-bytes-${String(proofRosterPosition)}`,
-        ),
-        proofBytesHex,
-    };
-};
-
-export const sameSecretProofReferencesFromSet = (
-    sameSecretProofs: Record<string, unknown>,
+export const trusteeReferencesFromPublicKeyShares = (
+    publicKeyShares: Record<string, unknown>,
 ): readonly Record<string, unknown>[] =>
-    (sameSecretProofs.proofRecords as readonly Record<string, unknown>[]).map(
-        (proofRecord) => ({
-            trusteeIdentity: proofRecord.trusteeIdentity,
-            trusteeRosterPosition: proofRecord.trusteeRosterPosition,
-            sameSecretStatementRoot: proofRecord.sameSecretStatementRoot,
-            trusteeSecretCommitmentRoot:
-                proofRecord.trusteeSecretCommitmentRoot,
-            sameSecretProofRoot: proofRecord.sameSecretProofRoot,
+    (publicKeyShares.shareRecords as readonly Record<string, unknown>[]).map(
+        (shareRecord) => ({
+            trusteeIdentity: shareRecord.trusteeIdentity,
+            trusteeRosterPosition: shareRecord.trusteeRosterPosition,
         }),
     );
 

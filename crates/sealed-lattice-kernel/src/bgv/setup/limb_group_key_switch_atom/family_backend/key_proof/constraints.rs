@@ -49,7 +49,7 @@ pub(super) fn support_value_at<const LIMB_COUNT: usize>(
     table_values_at_point: &[[u64; LIMB_COUNT]],
     challenge: &[u64; LIMB_COUNT],
     alpha: &[[u64; LIMB_COUNT]],
-    linkage_context: Option<&linkage::LinkageConstraintContext<LIMB_COUNT>>,
+    linkage_context: Option<&linkage::LinkageConstraintContext>,
 ) -> [u64; LIMB_COUNT] {
     let one = parameters.one();
     let four = parameters.unsigned_word_to_element(4);
@@ -98,7 +98,6 @@ pub(super) fn support_value_at<const LIMB_COUNT: usize>(
             aux_values,
             base_linkage_start(ring_degree, digit_count),
             aux_linkage_start(ring_degree, digit_count),
-            &secret,
             challenge,
             &mut constraints,
         );

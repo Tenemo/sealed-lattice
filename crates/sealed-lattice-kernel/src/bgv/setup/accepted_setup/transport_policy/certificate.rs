@@ -216,9 +216,9 @@ fn verify_setup_transported_objects(
             )));
         }
     };
-    // The setup path embeds the commitment sets in-package and has no large
-    // public VSS material to stream, so its transport certificate may carry no
-    // transported objects.
+    // A pre-terminal package may not yet reference any transported material, so
+    // an empty list is structurally valid. Any listed entries are validated
+    // below; object-specific acceptance paths decide when transport is required.
     let mut transported_objects = Vec::with_capacity(transported_object_values.len());
     let mut seen_object_roots = BTreeSet::new();
     let mut expected_chunk_start_index = 0_u64;

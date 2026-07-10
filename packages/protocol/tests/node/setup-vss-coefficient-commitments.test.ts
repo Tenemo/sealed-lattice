@@ -10,6 +10,11 @@ import {
     type VssCoefficientOpeningInput,
     type VssSourceTrusteeCoefficientOpeningState,
 } from '#packages/protocol/src/index';
+import {
+    createVssPublicCoefficientCommitmentSet,
+    createVssSameSecretBridgeStatementSet,
+    type VssCommittedMaterialCommitmentComputer,
+} from '#packages/protocol/src/setup/vss-commitments';
 import { setupCommitmentComputer } from '#tests/support/setup-commitment-computer';
 import {
     makeSetupContext,
@@ -31,6 +36,35 @@ const deterministicRandomBytes = makeVssOpeningRandomBytes(
 );
 
 const setupContext = makeSetupContext(fixtureHash);
+
+const committedMaterialComputer: VssCommittedMaterialCommitmentComputer = (
+    input,
+) => {
+    const commitmentContextHash = deriveCanonicalObjectHash(
+        input.commitmentContext,
+    );
+    const commitment = {
+        objectType: 'VssCommittedMaterialCommitment',
+        commitmentRole: input.commitmentRole,
+        commitmentContextHash,
+        rnsLimbIndex: input.rnsLimbIndex,
+        rnsPrime: input.rnsPrime,
+        ringDegree: input.ringDegree,
+        materialColumnMaskDegree: 1,
+        commitmentFields: [],
+    } as const;
+
+    return {
+        commitment,
+        commitmentRoot: deriveCanonicalObjectHash(commitment),
+        openingRoot: deriveCanonicalObjectHash({
+            objectType: 'VssCommittedMaterialOpening',
+            commitmentContextHash,
+            materialSeedHex: input.materialSeedHex,
+        }),
+        commitmentContextHash,
+    };
+};
 
 const coefficientMessage = (
     sourceTrusteeRosterPosition: number,
@@ -357,6 +391,104 @@ describe('VSS coefficient commitment builders', () => {
                 qSharePrimes.length * thresholdDegree,
             ),
         );
+    });
+
+    it('builds the bridge carrier only from matching canonical source material', () => {
+        const publicMatrixSeedHash = fixtureHash('public-matrix-seed');
+        const sourceBundle = createVssCoefficientCommitmentBundle({
+            setupContext,
+            publicMatrixSeedHash,
+            setupCommitmentComputer,
+            qSharePrimes,
+            ringDegree,
+            participantCount,
+            thresholdDegree,
+            sourceTrusteeOpeningStates: [
+                sourceTrusteeOpeningState(0),
+                sourceTrusteeOpeningState(1),
+            ],
+        });
+        const targetCommitmentBundle = createVssPublicCoefficientCommitmentSet({
+            setupContext,
+            publicMatrixSeedHash,
+            participantCount,
+            qSharePrimes,
+            ringDegree,
+            thresholdDegree,
+            sourceTrusteeOpeningStates: [
+                sourceTrusteeOpeningState(0),
+                sourceTrusteeOpeningState(1),
+            ],
+            committedMaterialSeed: ({
+                sourceTrusteeRosterPosition,
+                rnsLimbIndex,
+                shamirCoefficientIndex,
+            }) =>
+                fixtureHash(
+                    `target-${String(sourceTrusteeRosterPosition)}-${String(rnsLimbIndex)}-${String(shamirCoefficientIndex)}`,
+                ),
+            computeVssCommittedMaterialCommitment: committedMaterialComputer,
+        });
+        const buildStatementSet = (
+            sourceCoefficientCommitmentSet = sourceBundle.commitmentSet,
+            sourceCoefficientCommitmentMaterialSet = sourceBundle.materialSet,
+        ): ReturnType<typeof createVssSameSecretBridgeStatementSet> =>
+            createVssSameSecretBridgeStatementSet({
+                setupContext,
+                publicMatrixSeedHash,
+                targetBasisHash: fixtureHash('target-basis'),
+                coefficientCommitmentSet:
+                    targetCommitmentBundle.coefficientCommitmentSet,
+                sourceCoefficientCommitmentSet,
+                sourceCoefficientCommitmentMaterialSet,
+            });
+
+        const statementSet = buildStatementSet();
+        expect(
+            statementSet.statementRecords.map((statementRecord) =>
+                statementRecord.sourceConstantCoefficientCommitments.map(
+                    (sourceCommitment) =>
+                        sourceCommitment.commitment.sourceRnsLimbIndex,
+                ),
+            ),
+        ).toEqual([
+            [0, 1, 2],
+            [0, 1, 2],
+        ]);
+
+        expect(() =>
+            buildStatementSet({
+                ...sourceBundle.commitmentSet,
+                ceremonyId: 'other-ceremony',
+            }),
+        ).toThrow(/match the canonical source commitment set/u);
+        expect(() =>
+            buildStatementSet(sourceBundle.commitmentSet, {
+                ...sourceBundle.materialSet,
+                rnsLimbCount: qSharePrimes.length - 1,
+            }),
+        ).toThrow(/match the canonical source commitment set/u);
+
+        const [firstMaterialRecord, ...remainingMaterialRecords] =
+            sourceBundle.materialSet.coefficientCommitments;
+        if (firstMaterialRecord === undefined) {
+            throw new Error('bridge carrier fixture material is missing');
+        }
+        expect(() =>
+            buildStatementSet(sourceBundle.commitmentSet, {
+                ...sourceBundle.materialSet,
+                coefficientCommitments: [
+                    {
+                        ...firstMaterialRecord,
+                        commitment: {
+                            ...firstMaterialRecord.commitment,
+                            sourceRnsLimbIndex: 1,
+                        },
+                    },
+                    ...remainingMaterialRecords,
+                ],
+            }),
+        ).toThrow(/canonical public coordinates and roots/u);
     });
 
     it('rejects malformed local opening state before root publication', () => {

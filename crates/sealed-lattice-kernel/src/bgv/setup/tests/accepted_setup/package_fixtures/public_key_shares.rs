@@ -10,7 +10,6 @@ pub(in super::super) fn public_key_shares_object(
     setup_parameters_hash: &str,
     setup_epoch: &str,
     common_randomness: &serde_json::Value,
-    same_secret_consistency: &serde_json::Value,
     participant_count: u64,
 ) -> serde_json::Value {
     let public_matrix_seed_hash = common_randomness["publicMatrixSeedHash"]
@@ -24,13 +23,9 @@ pub(in super::super) fn public_key_shares_object(
         common_randomness["publicDerivations"]["bgvPublicA"]["publicPolynomialRoot"]
             .as_str()
             .expect("public a root");
-    let statement_records = same_secret_consistency["statementRecords"]
-        .as_array()
-        .expect("same-secret statement records");
     let mut share_records = Vec::new();
     for trustee_roster_position in 0..participant_count {
         let trustee_identity = format!("trustee-{trustee_roster_position}");
-        let same_secret_statement = &statement_records[trustee_roster_position as usize];
         let share_coefficient_hashes = DATA_PRIMES
             .iter()
             .enumerate()
@@ -61,8 +56,6 @@ pub(in super::super) fn public_key_shares_object(
             "publicMatrixSeedHash": public_matrix_seed_hash,
             "publicKeyCrpRoot": public_key_crp_root,
             "publicAPolynomialRoot": public_a_polynomial_root,
-            "sameSecretStatementRoot": same_secret_statement["sameSecretStatementRoot"],
-            "trusteeSecretCommitmentRoot": same_secret_statement["trusteeSecretCommitmentRoot"],
             "shareComponent": "component-zero-b_i",
             "rnsLimbCount": DATA_PRIMES.len(),
             "shareCoefficientVectorHash512ByLimb": share_coefficient_hashes,
@@ -84,7 +77,6 @@ pub(in super::super) fn public_key_shares_object(
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "publicKeyCrpRoot": public_key_crp_root,
         "publicAPolynomialRoot": public_a_polynomial_root,
-        "sameSecretConsistencyRoot": same_secret_consistency["sameSecretConsistencyRoot"],
         "shareRecords": share_records,
     });
     share_set["publicKeyShareSetRoot"] = serde_json::json!(
@@ -102,7 +94,6 @@ pub(in super::super) fn public_key_share_proofs_object(
     setup_parameters_hash: &str,
     setup_epoch: &str,
     common_randomness: &serde_json::Value,
-    same_secret_consistency: &serde_json::Value,
     public_key_shares: &serde_json::Value,
     participant_count: u64,
 ) -> serde_json::Value {
@@ -117,16 +108,12 @@ pub(in super::super) fn public_key_share_proofs_object(
         common_randomness["publicDerivations"]["bgvPublicA"]["publicPolynomialRoot"]
             .as_str()
             .expect("public a root");
-    let statement_records = same_secret_consistency["statementRecords"]
-        .as_array()
-        .expect("same-secret statement records");
     let share_records = public_key_shares["shareRecords"]
         .as_array()
         .expect("public-key share records");
     let mut proof_records = Vec::new();
     for trustee_roster_position in 0..participant_count {
         let trustee_identity = format!("trustee-{trustee_roster_position}");
-        let same_secret_statement = &statement_records[trustee_roster_position as usize];
         let share_record = &share_records[trustee_roster_position as usize];
         let mut proof_record = serde_json::json!({
             "objectType": "PublicKeyShareProof",
@@ -142,8 +129,6 @@ pub(in super::super) fn public_key_share_proofs_object(
             "publicKeyCrpRoot": public_key_crp_root,
             "publicAPolynomialRoot": public_a_polynomial_root,
             "publicKeyShareRoot": share_record["publicKeyShareRoot"],
-            "sameSecretStatementRoot": same_secret_statement["sameSecretStatementRoot"],
-            "trusteeSecretCommitmentRoot": same_secret_statement["trusteeSecretCommitmentRoot"],
             "rnsLimbCount": DATA_PRIMES.len(),
         });
         proof_record["publicKeyShareProofRoot"] = serde_json::json!(
@@ -164,7 +149,6 @@ pub(in super::super) fn public_key_share_proofs_object(
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "publicKeyCrpRoot": public_key_crp_root,
         "publicAPolynomialRoot": public_a_polynomial_root,
-        "sameSecretConsistencyRoot": same_secret_consistency["sameSecretConsistencyRoot"],
         "publicKeyShareSetRoot": public_key_shares["publicKeyShareSetRoot"],
         "proofRecords": proof_records,
     });
@@ -184,7 +168,6 @@ pub(in super::super) fn evaluator_key_schedule_object(
     setup_epoch: &str,
     parameters: &serde_json::Value,
     common_randomness: &serde_json::Value,
-    same_secret_consistency: &serde_json::Value,
     public_key_shares: &serde_json::Value,
     public_key_share_proofs: &serde_json::Value,
     participant_count: u64,
@@ -204,7 +187,6 @@ pub(in super::super) fn evaluator_key_schedule_object(
         "publicMatrixSeedHash": common_randomness["publicMatrixSeedHash"],
         "relinearizationCrpRoot": crp_roots["relinearizationCrpRoot"],
         "galoisKeyCrpRoot": crp_roots["galoisKeyCrpRoot"],
-        "sameSecretConsistencyRoot": same_secret_consistency["sameSecretConsistencyRoot"],
         "publicKeyShareSetRoot": public_key_shares["publicKeyShareSetRoot"],
         "publicKeyShareProofSetRoot": public_key_share_proofs["publicKeyShareProofSetRoot"],
         "relinearizationLevelSchedule": schedule_parameters["relinearizationLevelSchedule"],

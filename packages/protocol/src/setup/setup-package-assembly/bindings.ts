@@ -70,6 +70,47 @@ const assertCommonBindings = (input: SetupPackageInput): void => {
         'commonRandomness',
     );
     assertObjectType(
+        input.vssCoefficientCommitments,
+        'vssCoefficientCommitments',
+        'VssCoefficientCommitmentSet',
+    );
+    assertContextMatches(
+        input.setupContext,
+        input.vssCoefficientCommitments,
+        'vssCoefficientCommitments',
+    );
+    const vssCoefficientCommitmentRoot = hashField(
+        input.vssCoefficientCommitments,
+        'vssCoefficientCommitmentRoot',
+        'vssCoefficientCommitments',
+    );
+    assertObjectType(
+        input.vssCoefficientCommitmentMaterial,
+        'vssCoefficientCommitmentMaterial',
+        'VssCoefficientCommitmentMaterialSet',
+    );
+    assertContextMatches(
+        input.setupContext,
+        input.vssCoefficientCommitmentMaterial,
+        'vssCoefficientCommitmentMaterial',
+    );
+    hashField(
+        input.vssCoefficientCommitmentMaterial,
+        'vssCoefficientCommitmentMaterialRoot',
+        'vssCoefficientCommitmentMaterial',
+    );
+    if (
+        hashField(
+            input.vssCoefficientCommitmentMaterial,
+            'vssCoefficientCommitmentRoot',
+            'vssCoefficientCommitmentMaterial',
+        ) !== vssCoefficientCommitmentRoot
+    ) {
+        throw new Error(
+            'vssCoefficientCommitmentMaterial must bind vssCoefficientCommitments.',
+        );
+    }
+    assertObjectType(
         input.vssPublicCoefficientCommitmentSet,
         'vssPublicCoefficientCommitmentSet',
         'VssPublicCoefficientCommitmentSet',
@@ -143,26 +184,6 @@ const assertCommonBindings = (input: SetupPackageInput): void => {
 };
 
 const assertKeyRecordBindings = (input: SetupPackageInput): void => {
-    assertObjectType(
-        input.sameSecretConsistency,
-        'sameSecretConsistency',
-        'SameSecretConsistencyStatementSet',
-    );
-    hashField(
-        input.sameSecretConsistency,
-        'sameSecretConsistencyRoot',
-        'sameSecretConsistency',
-    );
-    assertObjectType(
-        input.sameSecretProofs,
-        'sameSecretProofs',
-        'SameSecretProofSet',
-    );
-    hashField(
-        input.sameSecretProofs,
-        'sameSecretProofSetRoot',
-        'sameSecretProofs',
-    );
     assertObjectType(
         input.publicKeyShares,
         'publicKeyShares',

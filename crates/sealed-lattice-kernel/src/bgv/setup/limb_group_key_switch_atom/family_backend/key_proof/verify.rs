@@ -75,25 +75,36 @@ pub(in super::super) fn verify_key_fri<const LIMB_COUNT: usize>(
         u64::from(linkage_statement.is_some()),
     );
     if let Some(statement) = linkage_statement {
-        linkage::absorb_linkage_statement(&mut transcript, statement);
+        linkage::absorb_linkage_statement(&mut transcript, statement)?;
     }
     transcript.absorb_digest("key-base-root", &proof.base_root);
     transcript.absorb_digest("key-material-root", &proof.material_root);
+    let linkage_public_forms = match linkage_statement {
+        Some(statement) => {
+            let challenges =
+                linkage::draw_linkage_challenges(&mut transcript, statement, ring_degree)?;
+            Some(linkage::build_linkage_public_forms(
+                statement,
+                &challenges,
+                ring_degree,
+            )?)
+        }
+        None => None,
+    };
     let gamma = transcript.challenge_field_elements(parameters, "key-gamma", ring_degree);
     let delta = transcript.challenge_field_elements(parameters, "key-delta", digit_count);
     let lookup_challenge = transcript.challenge_field_elements(parameters, "key-lookup-mu", 1);
     let mu = lookup_challenge[0];
-    let linkage_weights = linkage_statement.map(|_| {
+    transcript.absorb_digest("key-aux-root", &proof.aux_root);
+    transcript.absorb_field_elements("key-lookup-terminal", &[proof.lookup_terminal]);
+    transcript.absorb_field_elements("key-table-terminals", &proof.table_terminals);
+    let linkage_weights = linkage_public_forms.as_ref().map(|_| {
         transcript.challenge_field_elements(
             parameters,
             "key-linkage-omega",
             linkage::linkage_claim_count(),
         )
     });
-
-    transcript.absorb_digest("key-aux-root", &proof.aux_root);
-    transcript.absorb_field_elements("key-lookup-terminal", &[proof.lookup_terminal]);
-    transcript.absorb_field_elements("key-table-terminals", &proof.table_terminals);
     let sum_batch =
         transcript.challenge_field_elements(parameters, "key-sum-batch", 1 + table_count);
     let alpha = transcript.challenge_field_elements(
@@ -219,10 +230,10 @@ pub(in super::super) fn verify_key_fri<const LIMB_COUNT: usize>(
         .collect();
     // Linkage: the public opening forms evaluated at the opened points, plus
     // the constraint context for the support walk.
-    let linkage_forms = match (linkage_statement, &linkage_weights) {
-        (Some(statement), Some(weights)) => Some(linkage::build_linkage_forms(
+    let linkage_forms = match (&linkage_public_forms, &linkage_weights) {
+        (Some(public_forms), Some(weights)) => Some(linkage::build_linkage_forms(
             parameters,
-            statement,
+            public_forms,
             ring_degree,
             weights,
         )?),
@@ -230,20 +241,15 @@ pub(in super::super) fn verify_key_fri<const LIMB_COUNT: usize>(
     };
     let linkage_form_at_slot: Option<Vec<Vec<[u64; LIMB_COUNT]>>> =
         linkage_forms.as_ref().map(|forms| {
-            forms
-                .digit_forms
-                .iter()
+            std::iter::once(&forms.secret_form)
+                .chain(std::iter::once(&forms.negative_form))
                 .chain(forms.randomness_forms.iter())
-                .chain(std::iter::once(&forms.carry_form))
+                .chain(forms.carry_chunk_forms.iter())
                 .map(|form| evaluate_at_slots(&trace_domain.interpolate(form)))
                 .collect()
         });
     let linkage_context = match linkage_statement {
-        Some(statement) => Some(linkage::linkage_constraint_context(
-            parameters,
-            ring_degree,
-            statement.source_message_modulus,
-        )?),
+        Some(_) => Some(linkage::linkage_constraint_context(ring_degree)?),
         None => None,
     };
 
@@ -376,32 +382,52 @@ pub(in super::super) fn verify_key_fri<const LIMB_COUNT: usize>(
             }
             if let Some(layout_data) = linkage_layout_data.as_ref() {
                 let linkage_aux = aux_linkage_start(ring_degree, digit_count);
-                for offset in 0..linkage::linkage_aux_column_count(layout_data) {
-                    f_x = parameters.add(
-                        &f_x,
-                        &parameters.multiply(&sum_batch[0], &aux_values[linkage_aux + offset]),
-                    );
-                }
                 let forms_at_slot = linkage_form_at_slot
                     .as_ref()
                     .expect("linkage forms exist with a linkage statement");
                 let linkage_base = base_linkage_start(ring_degree, digit_count);
-                let form_columns = [
-                    linkage::link_digit(0),
-                    linkage::link_digit(1),
-                    linkage::link_randomness(layout_data, 0),
-                    linkage::link_randomness(layout_data, 1),
-                    linkage::link_carry(layout_data),
-                ];
-                for (form_values, column_offset) in forms_at_slot.iter().zip(form_columns) {
+                let mut form_index = 0;
+                f_x = parameters.add(
+                    &f_x,
+                    &parameters.multiply(
+                        &forms_at_slot[form_index][slot],
+                        &base_values[COLUMN_SECRET],
+                    ),
+                );
+                form_index += 1;
+                f_x = parameters.add(
+                    &f_x,
+                    &parameters.multiply(
+                        &forms_at_slot[form_index][slot],
+                        &base_values[linkage_base + linkage::LINK_NEG],
+                    ),
+                );
+                form_index += 1;
+                for randomness_column in
+                    0..crate::bgv::setup::commitment::SETUP_COMMITMENT_RANDOMNESS_WIDTH
+                {
                     f_x = parameters.add(
                         &f_x,
                         &parameters.multiply(
-                            &form_values[slot],
-                            &base_values[linkage_base + column_offset],
+                            &forms_at_slot[form_index][slot],
+                            &base_values
+                                [linkage_base + linkage::link_randomness(randomness_column)],
                         ),
                     );
+                    form_index += 1;
                 }
+                for chunk in 0..2 {
+                    f_x = parameters.add(
+                        &f_x,
+                        &parameters.multiply(
+                            &forms_at_slot[form_index][slot],
+                            &aux_values[linkage_aux + linkage::aux_carry_chunk(chunk)],
+                        ),
+                    );
+                    form_index += 1;
+                }
+                debug_assert_eq!(form_index, forms_at_slot.len());
+                let _ = layout_data;
             }
             let sumcheck_rhs = parameters.add(
                 &parameters.add(

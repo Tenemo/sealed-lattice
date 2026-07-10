@@ -166,8 +166,6 @@ struct AggregateThresholdCommitmentRecordBinding {
     aggregate_commitment_root: String,
     aggregate_opening_root: String,
     aggregate_commitment: Value,
-    source_share_commitment_roots: Vec<String>,
-    source_share_opening_roots: Vec<String>,
 }
 
 #[derive(Clone)]
@@ -194,31 +192,6 @@ struct TargetCiphertextPair {
     target_ciphertext_hash: String,
     target_ciphertext_binding_hash: String,
     top_count: usize,
-}
-
-fn aggregate_message_coefficient_bound(
-    rns_prime: u64,
-    participant_count: usize,
-) -> CanonicalResult<u64> {
-    if participant_count == 0 {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "aggregate opening participant count must be positive",
-        ));
-    }
-    rns_prime
-        .checked_mul(u64::try_from(participant_count).map_err(|_| {
-            CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "aggregate opening participant count does not fit u64",
-            )
-        })?)
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "aggregate opening message coefficient bound overflowed",
-            )
-        })
 }
 
 #[cfg(test)]

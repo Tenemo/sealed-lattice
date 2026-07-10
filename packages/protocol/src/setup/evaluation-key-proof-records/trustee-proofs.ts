@@ -20,7 +20,6 @@ import {
     type TrusteeEvaluationKeyProofsInput,
     type TrusteeEvaluationKeyStatementKey,
     type TrusteeEvaluationKeyWitnessInput,
-    type TrusteeSameSecretBridgeAnchorInput,
     evaluationKeyShareComponentMaterialEncoding,
     evaluationKeyShareComponentMaterialMagic,
     evaluationKeyShareProofTransportObjectType,
@@ -507,7 +506,7 @@ const roundOnePublicAggregateDiagonals = (
 export const createTrusteeEvaluationKeyProofs = (
     input: TrusteeEvaluationKeyProofsInput,
 ): TrusteeEvaluationKeyProofSet => {
-    const sameSecretProofReferences = validateCommonInput(input);
+    const trusteeReferences = validateCommonInput(input);
     assertProtocolHash(
         input.keySwitchDecompositionHash,
         'keySwitchDecompositionHash',
@@ -520,8 +519,6 @@ export const createTrusteeEvaluationKeyProofs = (
     if (
         input.relinearizationKeyShareRounds.evaluatorKeyScheduleRoot !==
             input.evaluatorKeySchedule.evaluatorKeyScheduleRoot ||
-        input.relinearizationKeyShareRounds.sameSecretProofSetRoot !==
-            input.sameSecretProofSetRoot ||
         input.relinearizationKeyShareRounds
             .publicKeyShareSuccinctProofSetRoot !==
             input.publicKeyShareSuccinctProofSetRoot
@@ -563,40 +560,115 @@ export const createTrusteeEvaluationKeyProofs = (
         }
         witnessesByRosterPosition.set(witness.trusteeRosterPosition, witness);
     });
-    const anchorsByRosterPosition = new Map<
-        number,
-        TrusteeSameSecretBridgeAnchorInput
-    >();
-    input.sameSecretBridgeAnchors.forEach((anchor) => {
-        assertNonNegativeSafeInteger(
-            anchor.trusteeRosterPosition,
-            'sameSecretBridgeAnchors.trusteeRosterPosition',
+    const sameSecretBridgeStatementSet = input.sameSecretBridgeStatementSet;
+    assertContextMatches(
+        input.setupContext,
+        sameSecretBridgeStatementSet,
+        'sameSecretBridgeStatementSet',
+    );
+    assertProtocolHash(
+        sameSecretBridgeStatementSet.publicMatrixSeedHash,
+        'sameSecretBridgeStatementSet.publicMatrixSeedHash',
+    );
+    if (
+        sameSecretBridgeStatementSet.participantCount !==
+            input.participantCount ||
+        sameSecretBridgeStatementSet.statementRecords.length !==
+            input.participantCount
+    ) {
+        throw new Error(
+            'sameSecretBridgeStatementSet must contain one statement per participant.',
         );
-        if (anchorsByRosterPosition.has(anchor.trusteeRosterPosition)) {
-            throw new Error(
-                'sameSecretBridgeAnchors must not repeat a trustee roster position.',
-            );
-        }
-        if (
-            anchor.targetRnsPrimes.length === 0 ||
-            anchor.targetRnsPrimes.length !==
-                anchor.targetConstantCommitmentRoots.length ||
-            anchor.targetRnsPrimes.length !==
-                anchor.targetConstantCommitments.length
-        ) {
-            throw new Error(
-                'sameSecretBridgeAnchors target primes, roots, and commitments must be non-empty and aligned.',
-            );
-        }
-        anchor.targetConstantCommitments.forEach(
-            (commitment, commitmentIndex) =>
-                assertJsonRecord(
-                    commitment,
-                    `sameSecretBridgeAnchors.targetConstantCommitments.${String(commitmentIndex)}`,
-                ),
+    }
+    if (
+        sameSecretBridgeStatementSet.publicMatrixSeedHash !==
+        input.evaluatorKeySchedule.publicMatrixSeedHash
+    ) {
+        throw new Error(
+            'sameSecretBridgeStatementSet.publicMatrixSeedHash must match evaluatorKeySchedule.publicMatrixSeedHash.',
         );
-        anchorsByRosterPosition.set(anchor.trusteeRosterPosition, anchor);
-    });
+    }
+    const bridgeStatementsByRosterPosition = new Map(
+        sameSecretBridgeStatementSet.statementRecords.map(
+            (statementRecord, expectedRosterPosition) => {
+                assertContextMatches(
+                    input.setupContext,
+                    statementRecord,
+                    'sameSecretBridgeStatementSet.statementRecords',
+                );
+                const expectedTrusteeReference =
+                    trusteeReferences[expectedRosterPosition];
+                if (
+                    expectedTrusteeReference === undefined ||
+                    statementRecord.trusteeRosterPosition !==
+                        expectedRosterPosition ||
+                    statementRecord.trusteeIdentity !==
+                        expectedTrusteeReference.trusteeIdentity
+                ) {
+                    throw new Error(
+                        'sameSecretBridgeStatementSet statement records must follow the canonical trustee roster order.',
+                    );
+                }
+                if (
+                    statementRecord.publicMatrixSeedHash !==
+                        sameSecretBridgeStatementSet.publicMatrixSeedHash ||
+                    statementRecord.ringDegree !==
+                        sameSecretBridgeStatementSet.ringDegree
+                ) {
+                    throw new Error(
+                        'sameSecretBridgeStatementSet statement records must match the set randomness and ring degree.',
+                    );
+                }
+                if (
+                    statementRecord.sourceConstantCoefficientCommitments
+                        .length !== input.qSharePrimes.length
+                ) {
+                    throw new Error(
+                        'sameSecretBridgeStatementSet source constant commitments must cover every source RNS limb.',
+                    );
+                }
+                statementRecord.sourceConstantCoefficientCommitments.forEach(
+                    (sourceCommitmentRecord, expectedRnsLimbIndex) => {
+                        const sourceCommitment = assertJsonRecord(
+                            sourceCommitmentRecord.commitment,
+                            'sameSecretBridgeStatementSet.sourceConstantCoefficientCommitments.commitment',
+                        );
+                        if (
+                            sourceCommitmentRecord.rnsLimbIndex !==
+                                expectedRnsLimbIndex ||
+                            sourceCommitmentRecord.rnsPrime !==
+                                input.qSharePrimes[expectedRnsLimbIndex] ||
+                            sourceCommitmentRecord.shamirCoefficientIndex !==
+                                0 ||
+                            sourceCommitment.objectType !== 'SetupCommitment' ||
+                            sourceCommitment.sourceRnsLimbIndex !==
+                                expectedRnsLimbIndex ||
+                            sourceCommitment.sourceMessageModulus !==
+                                sourceCommitmentRecord.rnsPrime ||
+                            sourceCommitment.shamirCoefficientIndex !== 0 ||
+                            sourceCommitment.ringDegree !==
+                                sameSecretBridgeStatementSet.ringDegree ||
+                            !Array.isArray(sourceCommitment.commitmentLimbs)
+                        ) {
+                            throw new Error(
+                                'sameSecretBridgeStatementSet source constant commitments must carry canonical source-limb bodies in order.',
+                            );
+                        }
+                    },
+                );
+
+                return [
+                    statementRecord.trusteeRosterPosition,
+                    statementRecord,
+                ] as const;
+            },
+        ),
+    );
+    if (bridgeStatementsByRosterPosition.size !== input.participantCount) {
+        throw new Error(
+            'sameSecretBridgeStatementSet must not repeat a trustee roster position.',
+        );
+    }
 
     const scheduledLevels =
         input.evaluatorKeySchedule.relinearizationLevelSchedule.map(
@@ -610,23 +682,32 @@ export const createTrusteeEvaluationKeyProofs = (
         input.evaluationKeyShareComponentMaterialChunkStreams,
     );
 
-    const proofRecords = sameSecretProofReferences.map((proofReference) => {
+    const proofRecords = trusteeReferences.map((trusteeReference) => {
         const witness = witnessesByRosterPosition.get(
-            proofReference.trusteeRosterPosition,
+            trusteeReference.trusteeRosterPosition,
         );
         if (witness === undefined) {
             throw new Error(
                 'trusteeWitnesses must contain one witness per participant.',
             );
         }
-        const bridgeAnchor = anchorsByRosterPosition.get(
-            proofReference.trusteeRosterPosition,
+        const bridgeStatement = bridgeStatementsByRosterPosition.get(
+            trusteeReference.trusteeRosterPosition,
         );
-        if (bridgeAnchor === undefined) {
+        if (bridgeStatement === undefined) {
             throw new Error(
-                'sameSecretBridgeAnchors must contain one anchor per participant.',
+                'sameSecretBridgeStatementSet must contain one statement per participant.',
             );
         }
+        const sourceConstantCommitment =
+            bridgeStatement.sourceConstantCoefficientCommitments[0];
+        if (sourceConstantCommitment === undefined) {
+            throw new Error(
+                'sameSecretBridgeStatementSet must carry the source-limb-zero constant commitment.',
+            );
+        }
+        const sourceConstantCoefficientCommitmentRoot =
+            deriveCanonicalObjectHash(sourceConstantCommitment.commitment);
         const statementKeys: TrusteeEvaluationKeyStatementKey[] = [];
         let ringDegree: number | undefined;
         const recordRingDegree = (record: JsonRecord): void => {
@@ -646,7 +727,7 @@ export const createTrusteeEvaluationKeyProofs = (
         for (const level of scheduledLevels) {
             const record = relinearizationRecordForTrusteeAndLevel(
                 input.relinearizationKeyShareRounds.roundOneRecords,
-                proofReference.trusteeRosterPosition,
+                trusteeReference.trusteeRosterPosition,
                 level,
                 'roundOneRecords',
             );
@@ -677,7 +758,7 @@ export const createTrusteeEvaluationKeyProofs = (
         for (const level of scheduledLevels) {
             const record = relinearizationRecordForTrusteeAndLevel(
                 input.relinearizationKeyShareRounds.roundTwoRecords,
-                proofReference.trusteeRosterPosition,
+                trusteeReference.trusteeRosterPosition,
                 level,
                 'roundTwoRecords',
             );
@@ -712,7 +793,8 @@ export const createTrusteeEvaluationKeyProofs = (
                 roundOneAggregateDiagonal: aggregateDiagonal,
             });
         }
-        const batch = sortedGaloisBatches[proofReference.trusteeRosterPosition];
+        const batch =
+            sortedGaloisBatches[trusteeReference.trusteeRosterPosition];
         for (const scheduleEntry of input.evaluatorKeySchedule
             .requiredGaloisKeySchedule) {
             const materialRecords = batch.galoisKeyShareMaterialRecords.filter(
@@ -756,6 +838,11 @@ export const createTrusteeEvaluationKeyProofs = (
                 'trustee evaluation-key statement requires at least one share record.',
             );
         }
+        if (ringDegree !== bridgeStatement.ringDegree) {
+            throw new Error(
+                'sameSecretBridgeStatementSet ring degree must match the evaluation-key share records.',
+            );
+        }
         if (witness.errorCoefficientsByKey.length !== statementKeys.length) {
             throw new Error(
                 'trusteeWitnesses.errorCoefficientsByKey must contain one error vector set per statement key.',
@@ -768,30 +855,22 @@ export const createTrusteeEvaluationKeyProofs = (
                 ceremonyId: input.setupContext.ceremonyId,
                 manifestHash: input.setupContext.manifestHash,
                 rosterHash: input.setupContext.rosterHash,
-                trusteeIdentity: proofReference.trusteeIdentity,
-                trusteeRosterPosition: proofReference.trusteeRosterPosition,
+                trusteeIdentity: trusteeReference.trusteeIdentity,
+                trusteeRosterPosition: trusteeReference.trusteeRosterPosition,
                 setupEpoch: input.setupContext.setupEpoch,
                 requiredGaloisSetHash:
                     input.evaluatorKeySchedule.requiredGaloisSetHash,
                 evaluatorKeyScheduleRoot:
                     input.evaluatorKeySchedule.evaluatorKeyScheduleRoot,
                 keySwitchDecompositionHash: input.keySwitchDecompositionHash,
-                sameSecretStatementRoot: proofReference.sameSecretStatementRoot,
-                sameSecretProofRoot: proofReference.sameSecretProofRoot,
+                sourceConstantCoefficientCommitmentRoot:
+                    sourceConstantCoefficientCommitmentRoot,
             },
             ringDegree,
             keys: statementKeys,
-            sameSecretBridge: {
-                publicMatrixSeedHash: bridgeAnchor.publicMatrixSeedHash,
-                targetBasisHash: bridgeAnchor.targetBasisHash,
-                sourceTrusteeIdentity: proofReference.trusteeIdentity,
-                sourceTrusteeRosterPosition:
-                    proofReference.trusteeRosterPosition,
-                targetRnsPrimes: bridgeAnchor.targetRnsPrimes,
-                targetConstantCommitmentRoots:
-                    bridgeAnchor.targetConstantCommitmentRoots,
-                targetConstantCommitments:
-                    bridgeAnchor.targetConstantCommitments,
+            sameSecretLinkage: {
+                publicMatrixSeedHash: bridgeStatement.publicMatrixSeedHash,
+                commitments: [sourceConstantCommitment.commitment],
             },
             secretCoefficients: witness.secretCoefficients,
             errorCoefficientsByKey: witness.errorCoefficientsByKey,
@@ -834,12 +913,8 @@ export const createTrusteeEvaluationKeyProofs = (
             objectType: 'TrusteeEvaluationKeyProof',
             proofFamily: trusteeEvaluationKeyProofFamily,
             ...contextFields(input.setupContext),
-            trusteeIdentity: proofReference.trusteeIdentity,
-            trusteeRosterPosition: proofReference.trusteeRosterPosition,
-            sameSecretStatementRoot: proofReference.sameSecretStatementRoot,
-            trusteeSecretCommitmentRoot:
-                proofReference.trusteeSecretCommitmentRoot,
-            sameSecretProofRoot: proofReference.sameSecretProofRoot,
+            trusteeIdentity: trusteeReference.trusteeIdentity,
+            trusteeRosterPosition: trusteeReference.trusteeRosterPosition,
             statementHash: generatedProof.statementHash,
             proofBytesHash: hash512Hex(
                 trusteeEvaluationKeyProofBytesHashDomain,
@@ -875,11 +950,6 @@ export const createTrusteeEvaluationKeyProofs = (
             input.evaluatorKeySchedule.evaluatorKeyScheduleRoot,
         requiredGaloisSetHash: input.evaluatorKeySchedule.requiredGaloisSetHash,
         keySwitchDecompositionHash: input.keySwitchDecompositionHash,
-        sameSecretConsistencyRoot:
-            input.evaluatorKeySchedule.sameSecretConsistencyRoot,
-        sameSecretProofSetRoot: input.sameSecretProofSetRoot,
-        sameSecretProofFamilyBindingRoot:
-            input.sameSecretProofFamilyBindingRoot,
         publicKeyShareSetRoot: input.evaluatorKeySchedule.publicKeyShareSetRoot,
         publicKeyShareSuccinctProofSetRoot:
             input.publicKeyShareSuccinctProofSetRoot,

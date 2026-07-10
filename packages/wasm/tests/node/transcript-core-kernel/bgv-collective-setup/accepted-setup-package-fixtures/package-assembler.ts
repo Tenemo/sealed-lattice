@@ -12,6 +12,7 @@ import {
 
 import {
     acceptedSetupTransportCertificate,
+    acceptedSetupVssCoefficientCommitmentMaterialReference,
     rebindCollectiveSetupPackageHash,
 } from './certificates.js';
 import {
@@ -27,10 +28,6 @@ import {
     acceptedPublicKeyShareProofs,
     acceptedPublicKeyShares,
 } from './public-key-shares.js';
-import {
-    acceptedSameSecretConsistency,
-    acceptedSameSecretProofs,
-} from './same-secret.js';
 import {
     acceptedSameSecretBridge,
     acceptedVssPublicMaterial,
@@ -279,52 +276,20 @@ async function buildAcceptedShapedSetupPackage(
         setupParameters,
         publicMatrixSeedHash,
     );
-    const sameSecretConsistency = acceptedSameSecretConsistency(
-        setupContext,
-        setupParameters,
-        vssPublicMaterial.coefficientCommitmentSet,
-    );
-    const sameSecretProofs = acceptedSameSecretProofs(
-        kernel,
-        setupContext,
-        setupParameters,
-        publicMatrixSeedHash,
-        sameSecretConsistency,
-        vssPublicMaterial.coefficientCommitmentSet.coefficientCommitmentRoot,
-        vssPublicMaterial.ringDegree,
-    );
     const sameSecretBridge = acceptedSameSecretBridge(
         generationKernel,
         setupContext,
         setupParameters,
         publicMatrixSeedHash,
         vssPublicMaterial,
-        sameSecretConsistency,
-        sameSecretProofs,
     );
-    // The private VSS envelope and share-acceptance material bind the coefficient
-    // commitment roots. Present the commitment set through a view that aliases the
-    // full-VSS field name to the source record root.
-    const coefficientCommitmentView = {
-        vssCoefficientCommitmentRoot:
-            vssPublicMaterial.coefficientCommitmentSet
-                .coefficientCommitmentRoot,
-        sourceTrusteeRecords:
-            vssPublicMaterial.coefficientCommitmentSet.sourceTrusteeRecords.map(
-                (sourceTrusteeRecord) => ({
-                    ...sourceTrusteeRecord,
-                    sourceTrusteeCommitmentRoot:
-                        sourceTrusteeRecord.sourceCoefficientCommitmentRoot,
-                }),
-            ),
-    };
     const privateVssEnvelopeCommitments =
         packageShapePrivateVssEnvelopeCommitments(
             kernel,
             setupParameters,
             setupContext,
             commonRandomness,
-            coefficientCommitmentView,
+            vssPublicMaterial.coefficientCommitmentSet,
         );
     const publicPrivateVssEnvelopeCommitments =
         publicPrivateVssEnvelopeCommitmentSet(privateVssEnvelopeCommitments);
@@ -339,33 +304,39 @@ async function buildAcceptedShapedSetupPackage(
         setupContext,
         setupParameters,
         commonRandomness,
-        sameSecretConsistency,
     );
     const publicKeyShareProofs = acceptedPublicKeyShareProofs(
         setupContext,
         setupParameters,
         commonRandomness,
-        sameSecretConsistency,
         publicKeyShares,
     );
     const evaluatorKeySchedule = acceptedEvaluatorKeySchedule(
         setupContext,
         setupParameters,
         commonRandomness,
-        sameSecretConsistency,
         publicKeyShares,
         publicKeyShareProofs,
     );
     const setupTransportCertificate = acceptedSetupTransportCertificate(
         kernel,
         setupParameters,
+        sameSecretBridge.sourceCoefficientCommitmentMaterialSet,
     );
+    const vssCoefficientCommitmentMaterial =
+        acceptedSetupVssCoefficientCommitmentMaterialReference(
+            sameSecretBridge.sourceCoefficientCommitmentMaterialSet,
+            setupTransportCertificate,
+        );
     const setupPackage: JsonRecord = {
         objectType: 'SetupPackage',
         setupContext,
         qShare: setupParameters.qShare,
         phaseTranscript,
         commonRandomness,
+        vssCoefficientCommitments:
+            sameSecretBridge.sourceCoefficientCommitmentSet,
+        vssCoefficientCommitmentMaterial,
         vssPublicCoefficientCommitmentSet:
             vssPublicMaterial.coefficientCommitmentSet,
         vssPublicRecipientShareCommitmentSet:
@@ -380,8 +351,6 @@ async function buildAcceptedShapedSetupPackage(
         vssShareAcceptances,
         thresholdShareCommitments:
             vssPublicMaterial.thresholdShareCommitmentBinding,
-        sameSecretConsistency,
-        sameSecretProofs,
         sameSecretBridgeStatementSet: sameSecretBridge.bridgeStatementSet,
         sameSecretBridgeProofMaterialSet:
             sameSecretBridge.bridgeProofMaterialSet,

@@ -1,6 +1,7 @@
 use super::*;
 
 use super::same_secret_bridge_verification::VerifiedSameSecretBridgeMaterial;
+use crate::bgv::setup::commitment::setup_commitment_root;
 use crate::bgv::setup::setup_proof::setup_proof_record_has_transport_reference;
 use crate::hashing::derive_canonical_object_hash;
 
@@ -164,6 +165,16 @@ fn verify_trustee_evaluation_key_proof_set(
             )
         })?;
     let key_switch_decomposition_hash = accepted_key_switch_decomposition_hash()?;
+    let vss_coefficient_commitment_root = setup_package
+        .get("vssCoefficientCommitments")
+        .and_then(|commitments| commitments.get("vssCoefficientCommitmentRoot"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "the verified VSS coefficient commitment root was required before trustee evaluation-key proof verification",
+            )
+        })?;
     for (field_name, expected_value) in [
         (
             "evaluatorKeyScheduleRoot",
@@ -178,16 +189,8 @@ fn verify_trustee_evaluation_key_proof_set(
             key_switch_decomposition_hash.as_str(),
         ),
         (
-            "sameSecretConsistencyRoot",
-            binding.same_secret_consistency_root.as_str(),
-        ),
-        (
-            "sameSecretProofSetRoot",
-            binding.same_secret_proof_set_root.as_str(),
-        ),
-        (
-            "sameSecretProofFamilyBindingRoot",
-            binding.same_secret_proof_family_binding_root.as_str(),
+            "vssCoefficientCommitmentRoot",
+            vss_coefficient_commitment_root,
         ),
         (
             "publicKeyShareSetRoot",
@@ -297,7 +300,6 @@ fn verify_trustee_evaluation_key_proof_set(
     }
 
     trustee_evaluation_key_verify_progress(|| "shared-inputs-start".to_string());
-    let same_secret_proof_bindings = same_secret_proof_bindings_from_package(setup_package)?;
     let transported_key_switch_component_material =
         transported_evaluation_key_share_component_material_from_request(request)?;
     let transported_key_switch_component_material = request
@@ -325,13 +327,7 @@ fn verify_trustee_evaluation_key_proof_set(
         trustee_evaluation_key_verify_progress(|| {
             format!("trustee={trustee_roster_position} statement-finish")
         });
-        verify_trustee_evaluation_key_proof_record(
-            proof_record,
-            setup_context,
-            &same_secret_proof_bindings,
-            &statement,
-            request,
-        )
+        verify_trustee_evaluation_key_proof_record(proof_record, setup_context, &statement, request)
     };
     if let Some((first_proof_record, remaining_proof_records)) = proof_records.split_first() {
         verify_record(0, first_proof_record)?;
@@ -438,7 +434,6 @@ pub(super) fn accepted_setup_atom_material_roots_by_trustee(
 fn verify_trustee_evaluation_key_proof_record(
     proof_record: &Value,
     setup_context: &Value,
-    same_secret_proof_bindings: &BTreeMap<u64, SameSecretProofBinding>,
     statement: &TrusteeEvaluationKeyStatement,
     request: &Value,
 ) -> CanonicalResult<()> {
@@ -466,28 +461,26 @@ fn verify_trustee_evaluation_key_proof_record(
         }
     }
     let trustee_roster_position = value_u64(proof_record, "trusteeRosterPosition")?;
-    let Some(same_secret_binding) = same_secret_proof_bindings.get(&trustee_roster_position) else {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ComponentMismatch,
-            "trustee evaluation-key proof trusteeRosterPosition must reference an accepted same-secret proof",
-        ));
-    };
+    let source_constant_commitment_root = statement
+        .context
+        .binding_roots
+        .iter()
+        .find(|(label, _)| label == "sourceConstantCoefficientCommitmentRoot")
+        .map(|(_, root)| root.as_str())
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "trustee evaluation-key statement is missing its source constant commitment root",
+            )
+        })?;
     for (field_name, expected_value) in [
         (
             "trusteeIdentity",
-            same_secret_binding.trustee_identity.as_str(),
+            statement.context.trustee_identity.as_str(),
         ),
         (
-            "trusteeSecretCommitmentRoot",
-            same_secret_binding.trustee_secret_commitment_root.as_str(),
-        ),
-        (
-            "sameSecretStatementRoot",
-            same_secret_binding.same_secret_statement_root.as_str(),
-        ),
-        (
-            "sameSecretProofRoot",
-            same_secret_binding.same_secret_proof_root.as_str(),
+            "sourceConstantCoefficientCommitmentRoot",
+            source_constant_commitment_root,
         ),
     ] {
         if proof_record.get(field_name).and_then(Value::as_str) != Some(expected_value) {
@@ -581,7 +574,7 @@ pub(in crate::bgv::setup) struct TrusteeEvaluationKeyStatementInputs<'a> {
 // Rebuild one trustee's batched evaluation-key statement from the package
 // share records: relinearization round-one keys in scheduled-level order,
 // round-two keys with the recomputed public aggregate diagonals, then Galois
-// keys in frozen schedule order, anchored to the same-secret commitments.
+// keys in frozen schedule order, linked to the same-secret commitments.
 // The proof generator assembles the identical statement, so a proof only
 // verifies against the exact records, aggregates, and ceremony context.
 pub(in crate::bgv::setup) fn trustee_evaluation_key_statement_from_package(
@@ -589,52 +582,12 @@ pub(in crate::bgv::setup) fn trustee_evaluation_key_statement_from_package(
 ) -> CanonicalResult<TrusteeEvaluationKeyStatement> {
     let setup_package = inputs.setup_package;
     let binding = evaluation_key_proof_common_binding(setup_package)?;
-    let same_secret_proof_bindings = same_secret_proof_bindings_from_package(setup_package)?;
-    let Some(same_secret_binding) = same_secret_proof_bindings.get(&inputs.trustee_roster_position)
-    else {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ComponentMismatch,
-            "trustee evaluation-key statement requires an accepted same-secret proof binding",
-        ));
-    };
     let setup_context = setup_package.get("setupContext").ok_or_else(|| {
         CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             "setupContext was required for trustee evaluation-key statement assembly",
         )
     })?;
-    let context = SuccinctSetupProofContext {
-        proof_family: TRUSTEE_EVALUATION_KEY_PROOF_FAMILY.to_string(),
-        ceremony_id: value_string(setup_context, "ceremonyId")?.to_string(),
-        manifest_hash: value_string(setup_context, "manifestHash")?.to_string(),
-        roster_hash: value_string(setup_context, "rosterHash")?.to_string(),
-        trustee_identity: same_secret_binding.trustee_identity.clone(),
-        trustee_roster_position: inputs.trustee_roster_position,
-        setup_epoch: value_string(setup_context, "setupEpoch")?.to_string(),
-        binding_roots: vec![
-            (
-                "requiredGaloisSetHash".to_string(),
-                binding.required_galois_set_hash.clone(),
-            ),
-            (
-                "evaluatorKeyScheduleRoot".to_string(),
-                binding.evaluator_key_schedule_root.clone(),
-            ),
-            (
-                "keySwitchDecompositionHash".to_string(),
-                accepted_key_switch_decomposition_hash()?,
-            ),
-            (
-                "sameSecretStatementRoot".to_string(),
-                same_secret_binding.same_secret_statement_root.clone(),
-            ),
-            (
-                "sameSecretProofRoot".to_string(),
-                same_secret_binding.same_secret_proof_root.clone(),
-            ),
-        ],
-    };
-
     let rounds = setup_package
         .get("relinearizationKeyShareRounds")
         .ok_or_else(|| {
@@ -739,16 +692,8 @@ pub(in crate::bgv::setup) fn trustee_evaluation_key_statement_from_package(
         )
     })?;
 
-    // The trustee evaluation-key linkage binds one commitment per active
-    // key-switch limb (the working-level RNS limbs the relinearization and
-    // Galois keys operate over), not every Q_share limb.
-    let active_key_switch_limb_count = keys.iter().map(|key| key.level + 1).max().unwrap_or(0);
-    // The trustee's key schedule is proven against the same-secret bridge's
-    // target constant commitments. The bridge is only a valid anchor if its
-    // binding matches the same-secret proof already accepted for this trustee,
-    // which is in turn bound (through the bridge statement set root and the
-    // coefficient commitment root) to the verified VSS material. This ties the
-    // evaluation keys to the exact secret committed in the VSS coefficients.
+    // The trustee's key schedule is proven against a bridge whose proof has
+    // already been verified against the canonical source VSS commitments.
     let verified_same_secret_bridge =
         inputs.verified_same_secret_bridge.ok_or_else(|| {
             CanonicalError::new(
@@ -758,47 +703,63 @@ pub(in crate::bgv::setup) fn trustee_evaluation_key_statement_from_package(
         })?;
     let bridge_binding = verified_same_secret_bridge
         .statement_for_roster_position(inputs.trustee_roster_position)?;
-    if bridge_binding.trustee_identity != same_secret_binding.trustee_identity
-        || bridge_binding.trustee_secret_commitment_root
-            != same_secret_binding.trustee_secret_commitment_root
-        || bridge_binding.same_secret_statement_root
-            != same_secret_binding.same_secret_statement_root
-        || bridge_binding.same_secret_proof_root != same_secret_binding.same_secret_proof_root
-        || bridge_binding.same_secret_proof_family_binding_root
-            != same_secret_binding.same_secret_proof_family_binding_root
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ComponentMismatch,
-            "same-secret bridge statement must match the accepted same-secret proof binding",
-        ));
-    }
-    let mut bridge_statement = bridge_binding.statement.clone();
-    if bridge_statement.target_rns_primes.len() < active_key_switch_limb_count
-        || bridge_statement.target_constant_commitment_roots.len() < active_key_switch_limb_count
-        || bridge_statement.target_constant_commitments.len() < active_key_switch_limb_count
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "same-secret bridge statement does not cover every active key-switch limb",
-        ));
-    }
-    bridge_statement
-        .target_rns_primes
-        .truncate(active_key_switch_limb_count);
-    bridge_statement
-        .target_constant_commitment_roots
-        .truncate(active_key_switch_limb_count);
-    bridge_statement
-        .target_constant_commitments
-        .truncate(active_key_switch_limb_count);
-    let same_secret_linkage: Option<SameSecretLinkageStatement> = None;
-    let same_secret_bridge = Some(bridge_statement);
+    // Link the key proof to the canonical source-limb-zero BDLOP
+    // constant commitment. The verified bridge proves the full source set and
+    // all target constants share one signed ternary secret; the key atom needs
+    // only one source opening to establish the same short secret.
+    let public_matrix_seed_hash = bridge_binding
+        .source_linkage
+        .public_matrix_seed_hash
+        .clone();
+    let source_constant_commitment = bridge_binding
+        .source_linkage
+        .commitments
+        .first()
+        .cloned()
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "verified same-secret bridge source linkage was empty",
+            )
+        })?;
+    let source_constant_commitment_root = setup_commitment_root(&source_constant_commitment)?;
+    let same_secret_linkage = Some(SameSecretLinkageStatement {
+        public_matrix_seed_hash,
+        commitments: vec![source_constant_commitment],
+    });
+    let context = SuccinctSetupProofContext {
+        proof_family: TRUSTEE_EVALUATION_KEY_PROOF_FAMILY.to_string(),
+        ceremony_id: value_string(setup_context, "ceremonyId")?.to_string(),
+        manifest_hash: value_string(setup_context, "manifestHash")?.to_string(),
+        roster_hash: value_string(setup_context, "rosterHash")?.to_string(),
+        trustee_identity: bridge_binding.trustee_identity.clone(),
+        trustee_roster_position: inputs.trustee_roster_position,
+        setup_epoch: value_string(setup_context, "setupEpoch")?.to_string(),
+        binding_roots: vec![
+            (
+                "requiredGaloisSetHash".to_string(),
+                binding.required_galois_set_hash.clone(),
+            ),
+            (
+                "evaluatorKeyScheduleRoot".to_string(),
+                binding.evaluator_key_schedule_root.clone(),
+            ),
+            (
+                "keySwitchDecompositionHash".to_string(),
+                accepted_key_switch_decomposition_hash()?,
+            ),
+            (
+                "sourceConstantCoefficientCommitmentRoot".to_string(),
+                source_constant_commitment_root,
+            ),
+        ],
+    };
     let statement = TrusteeEvaluationKeyStatement {
         context,
         ring_degree,
         keys,
         vss_share_linkage: None,
-        same_secret_bridge,
+        same_secret_bridge: None,
         same_secret_linkage,
         private_vss_share: None,
         target_decryption_share: None,

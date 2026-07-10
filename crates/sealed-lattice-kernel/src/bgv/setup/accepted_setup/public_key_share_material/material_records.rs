@@ -211,7 +211,7 @@ pub(in super::super) fn verify_public_key_share_material_set(
             "publicKeyShareMaterial.objectType must be PublicKeyShareMaterialSet",
         ));
     }
-    verify_same_secret_context(material_set, setup_context)?;
+    verify_context_fields_match(material_set, setup_context, "publicKeyShareMaterial")?;
     for (field_name, expected_value) in [("proofFamily", "public-key-share")] {
         if material_set.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Err(CanonicalError::new(
@@ -343,7 +343,11 @@ pub(super) fn verify_public_key_share_material_record(
             "public-key share material objectType must be PublicKeyShareMaterial",
         ));
     }
-    verify_same_secret_context(material_record, setup_context)?;
+    verify_context_fields_match(
+        material_record,
+        setup_context,
+        "publicKeyShareMaterial.materialRecords",
+    )?;
     for (field_name, expected_value) in [
         ("proofFamily", "public-key-share"),
         (

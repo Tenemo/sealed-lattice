@@ -2,6 +2,82 @@ use super::super::*;
 use super::*;
 use num_bigint::BigInt;
 
+pub(crate) const SAME_SECRET_LINKAGE_ATOM_EXTENSION_DEGREE: usize = CHALLENGE_EXTENSION_DEGREE;
+pub(crate) const SAME_SECRET_LINKAGE_ATOM_LINCHECK_REPETITIONS: usize = LINCHECK_REPETITIONS;
+
+// The limb-group atom reuses the same BDLOP lincheck as the general setup
+// proof. This small adapter keeps the extension-field implementation private
+// to this module while exposing the established relation as plain canonical
+// residues. Witness-vector order is secret, negative indicator, then every
+// opening-randomness column, exactly as `build_linkage_public_vectors`.
+pub(crate) struct SameSecretLinkageAtomFieldForms {
+    pub(crate) modulus: u64,
+    pub(crate) target: [u64; CHALLENGE_EXTENSION_DEGREE],
+    pub(crate) witness_vectors: Vec<Vec<[u64; CHALLENGE_EXTENSION_DEGREE]>>,
+}
+
+pub(crate) fn build_same_secret_linkage_atom_field_forms(
+    linkage: &SameSecretLinkageStatement,
+    commitment_field: usize,
+    lincheck_challenges: &[[u64; CHALLENGE_EXTENSION_DEGREE]],
+    linkage_alpha: &[[u64; CHALLENGE_EXTENSION_DEGREE]],
+) -> CanonicalResult<SameSecretLinkageAtomFieldForms> {
+    if linkage.commitments.len() != 1 {
+        return Err(invalid_succinct_setup_proof(
+            "the atom same-secret linkage requires exactly one constant commitment",
+        ));
+    }
+    if lincheck_challenges.len() != LINCHECK_REPETITIONS
+        || lincheck_challenges
+            .iter()
+            .any(ChallengeExtensionTower::is_zero)
+    {
+        return Err(invalid_succinct_setup_proof(
+            "the atom same-secret linkage requires the canonical nonzero lincheck challenges",
+        ));
+    }
+    let expected_alpha_count =
+        linkage.commitments.len() * SETUP_COMMITMENT_ROW_COUNT * LINCHECK_REPETITIONS;
+    if linkage_alpha.len() != expected_alpha_count {
+        return Err(invalid_succinct_setup_proof(
+            "the atom same-secret linkage alpha count does not match the BDLOP relation",
+        ));
+    }
+    let limb = linkage.commitments[0]
+        .limbs
+        .get(commitment_field)
+        .ok_or_else(|| {
+            invalid_succinct_setup_proof("the atom same-secret linkage commitment field is missing")
+        })?;
+    let tower = ChallengeExtensionTower::for_modulus(limb.modulus)?;
+    let ring_degree = linkage.commitments[0].ring_degree;
+    let u_power_vectors = lincheck_challenges
+        .iter()
+        .map(|challenge| {
+            let mut powers = Vec::with_capacity(ring_degree);
+            let mut power = ChallengeExtensionTower::one();
+            for _ in 0..ring_degree {
+                powers.push(power);
+                power = tower.mul(&power, challenge);
+            }
+            powers
+        })
+        .collect::<Vec<_>>();
+    let (target, witness_vectors) = build_linkage_public_vectors(
+        linkage,
+        commitment_field,
+        &tower,
+        &u_power_vectors,
+        linkage_alpha,
+    )?;
+
+    Ok(SameSecretLinkageAtomFieldForms {
+        modulus: limb.modulus,
+        target,
+        witness_vectors,
+    })
+}
+
 // Combined linkage lincheck vectors for one commitment field. For every
 // relation (commitment l, row k) and repetition r with Fiat-Shamir weight
 // alpha_{l,k,r}, the transposed matrix action of row k lands on each witness

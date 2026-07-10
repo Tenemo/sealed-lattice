@@ -16,9 +16,9 @@ fn collective_setup_verifier_refuses_malformed_public_key_share_statements() {
     );
 
     assert_minimal_collective_setup_package_refused(
-        "wrong public-key share proof same-secret statement binding",
+        "wrong public-key share proof share-root binding",
         |package| {
-            package["publicKeyShareProofs"]["proofRecords"][0]["sameSecretStatementRoot"] =
+            package["publicKeyShareProofs"]["proofRecords"][0]["publicKeyShareRoot"] =
                 serde_json::json!(valid_hash('9'));
             rebind_collective_public_key_share_proof_roots(package);
         },
@@ -178,36 +178,6 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_sh
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_requires_same_secret_proofs_before_public_key_succinct_proofs()
- {
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_requires_same_secret_proofs_before_public_key_succinct_proofs",
-    );
-    let mut package = public_key_share_succinct_proof_bearing_collective_setup_package();
-    package
-        .as_object_mut()
-        .expect("setup package")
-        .remove("sameSecretProofs");
-    rebind_collective_setup_package_hash(&mut package);
-
-    let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
-        .expect("verification response");
-
-    // The same-secret bridge now provides this gate: a package that
-    // carries the bridge material but drops the same-secret proofs is
-    // refused as incomplete bridge evidence before any public-key succinct
-    // proof can be accepted.
-    assert_eq!(result["isValid"], false);
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "sameSecretBridgeEvidenceIncomplete"
-    );
-    assert_eq!(result["refusedObjects"][0]["objectPath"], "setupPackage");
-    assert!(result["acceptedSetupHandoff"].is_null());
-}
-
-#[test]
-#[ignore = "heavy accepted setup test"]
 fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_share_succinct_proof_byte_content()
  {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
@@ -273,7 +243,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_collective_pu
             .expect("aggregate coefficients");
     let mut coefficients = coefficient_vector_from_le_hex(
         coefficients_hex,
-        same_secret_constant_commitments_from_fixture_package(&package, 0)[0].ring_degree,
+        source_constant_commitments_from_fixture_package(&package, 0)[0].ring_degree,
         "aggregate coefficient width",
     )
     .expect("aggregate coefficients decode");

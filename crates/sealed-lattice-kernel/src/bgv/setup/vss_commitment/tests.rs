@@ -5,7 +5,7 @@ use super::{
     verify_vss_public_aggregate_threshold_commitment_set_request,
     verify_vss_public_coefficient_commitment_set_request,
     verify_vss_public_recipient_share_commitment_set_request,
-    verify_vss_share_linkage_statement_request, vss_public_message_encoding_layout,
+    verify_vss_share_linkage_bindings_request, vss_public_message_encoding_layout,
 };
 use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 
@@ -136,21 +136,21 @@ fn aggregate_threshold_commitment_set_command_verifies_bound_roots() -> Canonica
 }
 
 #[test]
-fn share_linkage_statement_command_verifies_bound_roots() -> CanonicalResult<()> {
+fn share_linkage_bindings_command_verifies_bound_roots() -> CanonicalResult<()> {
     let coefficient_set = coefficient_commitment_set()?;
     let recipient_set = recipient_share_commitment_set()?;
     let aggregate_set = aggregate_threshold_commitment_set()?;
     let statement =
         share_linkage_statement_from_evidence(&coefficient_set, &recipient_set, &aggregate_set);
-    let verification = verify_vss_share_linkage_statement_request(&json!({
-        "command": "VerifyVssShareLinkageStatement",
+    let verification = verify_vss_share_linkage_bindings_request(&json!({
+        "command": "VerifyVssShareLinkageBindings",
         "statement": statement.clone(),
         "coefficientCommitmentSet": coefficient_set.clone(),
         "recipientShareCommitmentSet": recipient_set.clone(),
         "aggregateThresholdCommitmentSet": aggregate_set.clone(),
     }))?;
 
-    assert_eq!(verification["operation"], "verifyVssShareLinkageStatement");
+    assert_eq!(verification["operation"], "verifyVssShareLinkageBindings");
     assert_eq!(verification["statementRoot"], statement["statementRoot"]);
     assert_eq!(
         verification["aggregateThresholdCommitmentRoot"],
@@ -164,8 +164,8 @@ fn share_linkage_statement_command_verifies_bound_roots() -> CanonicalResult<()>
         &mut forged_source_statement["sourceStatementRecords"][0],
     )?;
     rebind_share_linkage_statement_root(&mut forged_source_statement)?;
-    let missing_evidence_error = verify_vss_share_linkage_statement_request(&json!({
-        "command": "VerifyVssShareLinkageStatement",
+    let missing_evidence_error = verify_vss_share_linkage_bindings_request(&json!({
+        "command": "VerifyVssShareLinkageBindings",
         "statement": forged_source_statement.clone(),
     }))
     .expect_err("share-linkage statement verification must require evidence sets");
@@ -176,8 +176,8 @@ fn share_linkage_statement_command_verifies_bound_roots() -> CanonicalResult<()>
         "missing share-linkage evidence should report the required evidence sets: {missing_evidence_error}"
     );
     assert!(
-        verify_vss_share_linkage_statement_request(&json!({
-            "command": "VerifyVssShareLinkageStatement",
+        verify_vss_share_linkage_bindings_request(&json!({
+            "command": "VerifyVssShareLinkageBindings",
             "statement": forged_source_statement,
             "coefficientCommitmentSet": coefficient_set.clone(),
             "recipientShareCommitmentSet": recipient_set.clone(),
@@ -195,8 +195,8 @@ fn share_linkage_statement_command_verifies_bound_roots() -> CanonicalResult<()>
     let mut tampered_statement = statement;
     tampered_statement["aggregateThresholdCommitmentRoot"] = json!("8".repeat(128));
     assert!(
-        verify_vss_share_linkage_statement_request(&json!({
-            "command": "VerifyVssShareLinkageStatement",
+        verify_vss_share_linkage_bindings_request(&json!({
+            "command": "VerifyVssShareLinkageBindings",
             "statement": tampered_statement,
             "coefficientCommitmentSet": coefficient_set,
             "recipientShareCommitmentSet": recipient_set,
@@ -496,13 +496,12 @@ fn aggregate_threshold_commitment_set() -> CanonicalResult<serde_json::Value> {
 }
 
 pub(in crate::bgv::setup) fn aggregate_threshold_commitment_set_from_recipient_set(
-    recipient_set: &serde_json::Value,
+    _recipient_set: &serde_json::Value,
 ) -> CanonicalResult<serde_json::Value> {
     let mut recipient_records = Vec::new();
     for recipient_roster_position in 0..test_participant_count() {
         for rns_limb_index in 0..test_rns_limb_count() {
             recipient_records.push(aggregate_threshold_commitment_record(
-                recipient_set,
                 recipient_roster_position,
                 rns_limb_index,
             )?);
@@ -526,15 +525,9 @@ pub(in crate::bgv::setup) fn aggregate_threshold_commitment_set_from_recipient_s
 }
 
 fn aggregate_threshold_commitment_record(
-    recipient_set: &serde_json::Value,
     recipient_roster_position: usize,
     rns_limb_index: usize,
 ) -> CanonicalResult<serde_json::Value> {
-    let source_share_records = source_share_records_for_recipient(
-        recipient_set,
-        recipient_roster_position,
-        rns_limb_index,
-    )?;
     let rns_prime = test_rns_prime(rns_limb_index);
     // The threshold share is the modular sum of every source's recipient share
     // for this recipient and limb, recomputed from the same fixture messages the
@@ -563,14 +556,6 @@ fn aggregate_threshold_commitment_record(
         &[recipient_roster_position, rns_limb_index, 5],
         &aggregate_message,
     )?;
-    let source_share_commitment_roots = source_share_records
-        .iter()
-        .map(|source_share_record| source_share_record["shareCommitmentRoot"].clone())
-        .collect::<Vec<_>>();
-    let source_share_opening_roots = source_share_records
-        .iter()
-        .map(|source_share_record| source_share_record["shareOpeningRoot"].clone())
-        .collect::<Vec<_>>();
 
     Ok(json!({
         "objectType": "VssPublicAggregateThresholdCommitment",
@@ -582,55 +567,7 @@ fn aggregate_threshold_commitment_record(
         "aggregateCommitmentRoot": computation.commitment_root,
         "aggregateOpeningRoot": computation.opening_root,
         "commitment": computation.commitment,
-        "sourceShareCommitmentRoots": source_share_commitment_roots,
-        "sourceShareOpeningRoots": source_share_opening_roots,
     }))
-}
-
-fn source_share_records_for_recipient(
-    recipient_set: &serde_json::Value,
-    recipient_roster_position: usize,
-    rns_limb_index: usize,
-) -> CanonicalResult<Vec<serde_json::Value>> {
-    let recipient_share_record_index = recipient_roster_position
-        .checked_mul(test_rns_limb_count())
-        .and_then(|offset| offset.checked_add(rns_limb_index))
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "VSS fixture recipient-share index overflowed",
-            )
-        })?;
-    let source_records = recipient_set["sourceTrusteeRecords"]
-        .as_array()
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "VSS fixture recipient source records must be an array",
-            )
-        })?;
-    source_records
-        .iter()
-        .map(|source_record| {
-            let recipient_share_records = source_record["recipientShareCommitments"]
-                .as_array()
-                .ok_or_else(|| {
-                    CanonicalError::new(
-                        CanonicalErrorCode::InvalidFixture,
-                        "VSS fixture recipient-share records must be an array",
-                    )
-                })?;
-            recipient_share_records
-                .get(recipient_share_record_index)
-                .cloned()
-                .ok_or_else(|| {
-                    CanonicalError::new(
-                        CanonicalErrorCode::MalformedLength,
-                        "VSS fixture recipient-share record is missing",
-                    )
-                })
-        })
-        .collect()
 }
 
 pub(in crate::bgv::setup) fn share_linkage_statement_from_evidence(

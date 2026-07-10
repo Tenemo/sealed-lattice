@@ -250,6 +250,15 @@ pub(crate) fn batched_row_check_value<Domain: CompositionColumnDomain>(
                 }
             }
         }
+        for randomness_position in 0..layout.linkage_randomness_columns {
+            for half in 0..TRACE_SPLIT {
+                let randomness =
+                    column_values[layout.physical_linkage_randomness(randomness_position, half)];
+                let cube =
+                    domain.value_mul(&domain.value_mul(&randomness, &randomness), &randomness);
+                absorb(&domain.value_sub(&cube, &randomness), &mut accumulated);
+            }
+        }
         for mask_column in 0..layout.mask_column_count {
             for half in 0..TRACE_SPLIT {
                 let mask = column_values[layout.physical_mask(mask_column, half)];
@@ -903,7 +912,14 @@ fn same_secret_bridge_column_value<Domain: CompositionColumnDomain>(
             column_values
                 [layout.physical_same_secret_bridge_message(target_index, encoding_column, half)]
         } else {
-            unreachable!("same-secret bridge vector index is outside the message column layout")
+            let randomness_position = vector_index - 2 - message_encoding_column_count;
+            if randomness_position < layout.linkage_randomness_columns {
+                column_values[layout.physical_linkage_randomness(randomness_position, half)]
+            } else {
+                unreachable!(
+                    "same-secret bridge vector index is outside the combined column layout"
+                )
+            }
         }
     }
 }

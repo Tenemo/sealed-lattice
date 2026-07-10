@@ -295,8 +295,8 @@ fn request_verified_setup_proof_material_verification_ids(request: &Value) -> Ve
 
 // Drop the verified setup proof material entries a completed verification
 // consumed, so the process-global store does not retain them. The verifier reads
-// each entry a few times (share-linkage, the same-secret bridge and anchor,
-// public-key shares, and the evaluation-key proof checks), so eviction happens
+// each entry a few times (share-linkage, the same-secret bridge, public-key
+// shares, and the evaluation-key proof checks), so eviction happens
 // once, after verify returns, rather than on first read. Absent ids are skipped,
 // so eviction is idempotent. Without it the store would grow with every verified
 // package on the wasm runtime, whose linear memory never returns to the OS.

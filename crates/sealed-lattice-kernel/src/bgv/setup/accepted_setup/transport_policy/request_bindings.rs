@@ -1,6 +1,16 @@
 use super::binary_material::*;
 use super::certificate::*;
+use super::field_access::*;
 use super::*;
+
+const VSS_COEFFICIENT_COMMITMENT_MATERIAL_OBJECT_TYPE: &str = "VssCoefficientCommitmentMaterialSet";
+const VSS_COEFFICIENT_COMMITMENT_MATERIAL_EMBEDDED_ENCODING: &str =
+    "full-public-setup-commitment-values";
+const VSS_COEFFICIENT_COMMITMENT_MATERIAL_OBJECT_NAME: &str = "vssCoefficientCommitmentMaterial";
+const VSS_COEFFICIENT_COMMITMENT_MATERIAL_OBJECT_ROLE: &str =
+    "public-vss-coefficient-commitment-material";
+const VSS_COEFFICIENT_COMMITMENT_MATERIAL_PATH: &str =
+    "setupPackage.vssCoefficientCommitmentMaterial";
 
 pub(super) fn verify_setup_transport_request_bindings(
     setup_package: &Value,
@@ -23,6 +33,11 @@ pub(super) fn verify_setup_transport_request_bindings(
             }
         };
     }
+
+    transport_canonical_try!(verify_vss_coefficient_commitment_material_reference(
+        setup_package,
+        transported_objects,
+    ));
 
     if let Some(transported_material) = request.get("transportedPublicKeyShareMaterial") {
         let Some(public_key_share_material_root) = setup_package
@@ -50,26 +65,6 @@ pub(super) fn verify_setup_transport_request_bindings(
                 SETUP_TRANSPORT_DIRECT_HASH_FIELDS,
                 "transportedPublicKeyShareMaterial",
             )?,
-        ));
-    }
-    if let Some(material_set) = request.get("transportedSameSecretProofMaterial") {
-        let referenced_material_roots = setup_transport_referenced_proof_material_roots(
-            setup_package,
-            "sameSecretProofs",
-            "proofRecords",
-            "proofMaterialRoot",
-        )?;
-        transport_canonical_try!(require_setup_transport_proof_material_entries(
-            transported_objects,
-            material_set,
-            "transportedSameSecretProofMaterial",
-            SetupTransportMaterialDescriptor {
-                object_name: SETUP_TRANSPORTED_SAME_SECRET_PROOF_MATERIAL_NAME,
-                object_role: SETUP_TRANSPORTED_SAME_SECRET_PROOF_MATERIAL_ROLE,
-                object_root: "proofMaterialRoot",
-                hash_fields: SETUP_TRANSPORT_DIRECT_HASH_FIELDS,
-            },
-            &referenced_material_roots,
         ));
     }
     if let Some(material_set) = request.get("transportedPublicKeyShareProofMaterial") {
@@ -150,6 +145,189 @@ pub(super) fn verify_setup_transport_request_bindings(
     }
 
     Ok(Ok(()))
+}
+
+fn verify_vss_coefficient_commitment_material_reference(
+    setup_package: &Value,
+    transported_objects: &[SetupTransportedObjectBinding],
+) -> CanonicalResult<Result<(), Refusal>> {
+    let matching_transport_objects = transported_objects
+        .iter()
+        .filter(|transported_object| {
+            transported_object.object_name == VSS_COEFFICIENT_COMMITMENT_MATERIAL_OBJECT_NAME
+                || transported_object.object_role == VSS_COEFFICIENT_COMMITMENT_MATERIAL_OBJECT_ROLE
+        })
+        .collect::<Vec<_>>();
+    if matching_transport_objects.len() > 1 {
+        return Ok(Err(vss_material_reference_refusal(
+            "vssMaterialTransportReferenceMismatch",
+            "SetupTransportCertificate must contain at most one VSS coefficient commitment material entry",
+            "setupPackage.setupTransportCertificate.transportedObjects",
+        )));
+    }
+    let transported_object = matching_transport_objects.first().copied();
+    let Some(material) = setup_package.get("vssCoefficientCommitmentMaterial") else {
+        return Ok(match transported_object {
+            Some(_) => Err(vss_material_reference_refusal(
+                "vssMaterialTransportReferenceMissing",
+                "setupPackage.vssCoefficientCommitmentMaterial must reference the material bound by SetupTransportCertificate",
+                VSS_COEFFICIENT_COMMITMENT_MATERIAL_PATH,
+            )),
+            None => Ok(()),
+        });
+    };
+
+    let material_object_type = match require_transport_non_empty_string_at(
+        material,
+        "objectType",
+        "vssMaterialTransportReferenceMissing",
+        "vssCoefficientCommitmentMaterial.objectType is required",
+        VSS_COEFFICIENT_COMMITMENT_MATERIAL_PATH,
+    ) {
+        Ok(value) => value,
+        Err(refusal) => return Ok(Err(refusal)),
+    };
+    if material_object_type != VSS_COEFFICIENT_COMMITMENT_MATERIAL_OBJECT_TYPE {
+        return Ok(Err(vss_material_reference_refusal(
+            "vssMaterialTransportReferenceMismatch",
+            "vssCoefficientCommitmentMaterial.objectType must identify its material set",
+            format!("{VSS_COEFFICIENT_COMMITMENT_MATERIAL_PATH}.objectType"),
+        )));
+    }
+    let material_encoding = match require_transport_non_empty_string_at(
+        material,
+        "materialEncoding",
+        "vssMaterialTransportReferenceMissing",
+        "vssCoefficientCommitmentMaterial.materialEncoding is required",
+        VSS_COEFFICIENT_COMMITMENT_MATERIAL_PATH,
+    ) {
+        Ok(value) => value,
+        Err(refusal) => return Ok(Err(refusal)),
+    };
+    if material_encoding != VSS_COEFFICIENT_COMMITMENT_MATERIAL_EMBEDDED_ENCODING
+        && material_encoding != VSS_COEFFICIENT_COMMITMENT_MATERIAL_TRANSPORT_ENCODING
+    {
+        return Ok(Err(vss_material_reference_refusal(
+            "vssMaterialTransportReferenceMismatch",
+            "vssCoefficientCommitmentMaterial.materialEncoding is not a supported embedded or binary-chunked encoding",
+            format!("{VSS_COEFFICIENT_COMMITMENT_MATERIAL_PATH}.materialEncoding"),
+        )));
+    }
+    let material_root = match require_transport_hash_at(
+        material,
+        "vssCoefficientCommitmentMaterialRoot",
+        "vssMaterialTransportReferenceMissing",
+        "vssCoefficientCommitmentMaterial.vssCoefficientCommitmentMaterialRoot is required",
+        VSS_COEFFICIENT_COMMITMENT_MATERIAL_PATH,
+    ) {
+        Ok(value) => value,
+        Err(refusal) => return Ok(Err(refusal)),
+    };
+
+    let Some(transported_object) = transported_object else {
+        return Ok(
+            if material_encoding == VSS_COEFFICIENT_COMMITMENT_MATERIAL_TRANSPORT_ENCODING {
+                Err(vss_material_reference_refusal(
+                    "vssMaterialTransportReferenceMissing",
+                    "SetupTransportCertificate must bind the binary-chunked VSS coefficient commitment material reference",
+                    "setupPackage.setupTransportCertificate.transportedObjects",
+                ))
+            } else {
+                Ok(())
+            },
+        );
+    };
+    if transported_object.object_name != VSS_COEFFICIENT_COMMITMENT_MATERIAL_OBJECT_NAME
+        || transported_object.object_role != VSS_COEFFICIENT_COMMITMENT_MATERIAL_OBJECT_ROLE
+        || transported_object.object_root != material_root
+    {
+        return Ok(Err(vss_material_reference_refusal(
+            "vssMaterialTransportReferenceMismatch",
+            "SetupTransportCertificate VSS material identity and root must match vssCoefficientCommitmentMaterial",
+            "setupPackage.setupTransportCertificate.transportedObjects",
+        )));
+    }
+    if material_encoding == VSS_COEFFICIENT_COMMITMENT_MATERIAL_EMBEDDED_ENCODING {
+        return Ok(Ok(()));
+    }
+
+    let total_byte_length = match require_positive_transport_u64_at(
+        material,
+        "totalByteLength",
+        "vssMaterialTransportReferenceMissing",
+        "binary-chunked VSS material totalByteLength is required",
+        VSS_COEFFICIENT_COMMITMENT_MATERIAL_PATH,
+    ) {
+        Ok(value) => value,
+        Err(refusal) => return Ok(Err(refusal)),
+    };
+    let chunk_count = match require_positive_transport_u64_at(
+        material,
+        "chunkCount",
+        "vssMaterialTransportReferenceMissing",
+        "binary-chunked VSS material chunkCount is required",
+        VSS_COEFFICIENT_COMMITMENT_MATERIAL_PATH,
+    ) {
+        Ok(value) => value,
+        Err(refusal) => return Ok(Err(refusal)),
+    };
+    let full_object_hash = match require_transport_hash_at(
+        material,
+        "fullObjectHash",
+        "vssMaterialTransportReferenceMissing",
+        "binary-chunked VSS material fullObjectHash is required",
+        VSS_COEFFICIENT_COMMITMENT_MATERIAL_PATH,
+    ) {
+        Ok(value) => value,
+        Err(refusal) => return Ok(Err(refusal)),
+    };
+    let chunk_root = match require_transport_hash_at(
+        material,
+        "chunkRoot",
+        "vssMaterialTransportReferenceMissing",
+        "binary-chunked VSS material chunkRoot is required",
+        VSS_COEFFICIENT_COMMITMENT_MATERIAL_PATH,
+    ) {
+        Ok(value) => value,
+        Err(refusal) => return Ok(Err(refusal)),
+    };
+    let expected_chunk_count = usize::try_from(chunk_count).map_err(|_| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "VSS material transport chunkCount does not fit usize",
+        )
+    })?;
+    let chunk_hashes = match transport_hashes_at(
+        material,
+        "chunkHashes",
+        expected_chunk_count,
+        VSS_COEFFICIENT_COMMITMENT_MATERIAL_PATH,
+    )? {
+        Ok(value) => value,
+        Err(refusal) => return Ok(Err(refusal)),
+    };
+    if total_byte_length != transported_object.byte_length
+        || chunk_count != transported_object.chunk_count
+        || full_object_hash != transported_object.full_object_hash
+        || chunk_root != transported_object.chunk_root
+        || chunk_hashes != transported_object.chunk_hashes
+    {
+        return Ok(Err(vss_material_reference_refusal(
+            "vssMaterialTransportReferenceMismatch",
+            "binary-chunked VSS material metadata must match SetupTransportCertificate",
+            VSS_COEFFICIENT_COMMITMENT_MATERIAL_PATH,
+        )));
+    }
+
+    Ok(Ok(()))
+}
+
+fn vss_material_reference_refusal(
+    reason_code: &'static str,
+    message: impl Into<String>,
+    object_path: impl Into<String>,
+) -> Refusal {
+    Refusal::new(reason_code, message, object_path)
 }
 
 fn setup_transport_referenced_proof_material_roots(
@@ -453,4 +631,158 @@ fn require_setup_transport_entry(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn protocol_hash(character: char) -> String {
+        character.to_string().repeat(128)
+    }
+
+    fn vss_transport_binding() -> SetupTransportedObjectBinding {
+        SetupTransportedObjectBinding {
+            object_name: VSS_COEFFICIENT_COMMITMENT_MATERIAL_OBJECT_NAME.to_string(),
+            object_role: VSS_COEFFICIENT_COMMITMENT_MATERIAL_OBJECT_ROLE.to_string(),
+            object_root: protocol_hash('1'),
+            byte_length: 1_500_000,
+            chunk_count: 2,
+            chunk_root: protocol_hash('3'),
+            chunk_hashes: vec![protocol_hash('4'), protocol_hash('5')],
+            full_object_hash: protocol_hash('2'),
+        }
+    }
+
+    fn binary_vss_material_reference() -> Value {
+        json!({
+            "objectType": VSS_COEFFICIENT_COMMITMENT_MATERIAL_OBJECT_TYPE,
+            "materialEncoding": VSS_COEFFICIENT_COMMITMENT_MATERIAL_TRANSPORT_ENCODING,
+            "vssCoefficientCommitmentMaterialRoot": protocol_hash('1'),
+            "chunkCount": 2,
+            "totalByteLength": 1_500_000,
+            "fullObjectHash": protocol_hash('2'),
+            "chunkRoot": protocol_hash('3'),
+            "chunkHashes": [protocol_hash('4'), protocol_hash('5')],
+        })
+    }
+
+    #[test]
+    fn binary_vss_material_reference_matches_transport_certificate_entry() {
+        let package = json!({
+            "vssCoefficientCommitmentMaterial": binary_vss_material_reference(),
+        });
+        let result = verify_vss_coefficient_commitment_material_reference(
+            &package,
+            &[vss_transport_binding()],
+        )
+        .expect("VSS transport reference verification");
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn vss_transport_certificate_entry_requires_package_reference() {
+        let refusal = verify_vss_coefficient_commitment_material_reference(
+            &json!({}),
+            &[vss_transport_binding()],
+        )
+        .expect("VSS transport reference verification")
+        .expect_err("missing package reference must refuse");
+
+        assert_eq!(refusal.reason_code, "vssMaterialTransportReferenceMissing");
+        assert_eq!(
+            refusal.object_path.as_deref(),
+            Some(VSS_COEFFICIENT_COMMITMENT_MATERIAL_PATH)
+        );
+    }
+
+    #[test]
+    fn binary_vss_material_reference_requires_complete_metadata() {
+        for field_name in [
+            "objectType",
+            "materialEncoding",
+            "vssCoefficientCommitmentMaterialRoot",
+            "chunkCount",
+            "totalByteLength",
+            "fullObjectHash",
+            "chunkRoot",
+            "chunkHashes",
+        ] {
+            let mut reference = binary_vss_material_reference();
+            reference
+                .as_object_mut()
+                .expect("VSS material reference")
+                .remove(field_name);
+            let package = json!({
+                "vssCoefficientCommitmentMaterial": reference,
+            });
+            let refusal = verify_vss_coefficient_commitment_material_reference(
+                &package,
+                &[vss_transport_binding()],
+            )
+            .expect("VSS transport reference verification")
+            .expect_err("incomplete package reference must refuse");
+
+            assert!(
+                matches!(
+                    refusal.reason_code,
+                    "vssMaterialTransportReferenceMissing" | "transportChunkHashesMissing"
+                ),
+                "unexpected refusal for missing {field_name}: {}",
+                refusal.reason_code
+            );
+        }
+    }
+
+    #[test]
+    fn binary_vss_material_reference_rejects_each_certificate_mismatch() {
+        let mismatches = [
+            ("objectType", json!("WrongMaterialType")),
+            ("materialEncoding", json!("wrong-encoding")),
+            (
+                "vssCoefficientCommitmentMaterialRoot",
+                json!(protocol_hash('6')),
+            ),
+            ("totalByteLength", json!(1_500_001)),
+            ("fullObjectHash", json!(protocol_hash('6'))),
+            ("chunkRoot", json!(protocol_hash('6'))),
+            (
+                "chunkHashes",
+                json!([protocol_hash('6'), protocol_hash('7')]),
+            ),
+        ];
+        for (field_name, field_value) in mismatches {
+            let mut reference = binary_vss_material_reference();
+            reference[field_name] = field_value;
+            let package = json!({
+                "vssCoefficientCommitmentMaterial": reference,
+            });
+            let refusal = verify_vss_coefficient_commitment_material_reference(
+                &package,
+                &[vss_transport_binding()],
+            )
+            .expect("VSS transport reference verification")
+            .expect_err("mismatched package reference must refuse");
+
+            assert_eq!(
+                refusal.reason_code, "vssMaterialTransportReferenceMismatch",
+                "unexpected refusal for mismatched {field_name}"
+            );
+        }
+
+        let mut reference = binary_vss_material_reference();
+        reference["chunkCount"] = json!(1);
+        reference["chunkHashes"] = json!([protocol_hash('4')]);
+        let package = json!({
+            "vssCoefficientCommitmentMaterial": reference,
+        });
+        let refusal = verify_vss_coefficient_commitment_material_reference(
+            &package,
+            &[vss_transport_binding()],
+        )
+        .expect("VSS transport reference verification")
+        .expect_err("mismatched chunkCount must refuse");
+        assert_eq!(refusal.reason_code, "vssMaterialTransportReferenceMismatch");
+    }
 }

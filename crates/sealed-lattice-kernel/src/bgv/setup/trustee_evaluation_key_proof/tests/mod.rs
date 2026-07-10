@@ -97,6 +97,7 @@ fn repeated_hash(byte_pair: &str) -> String {
 // so the prover rebuilds byte-identical trees and the binding rows hold.
 struct TestCommittedMaterialCommitment {
     commitment: super::relation::VssShareLinkageCommitment,
+    commitment_value: serde_json::Value,
     commitment_root: String,
     material_seed_hex: String,
     context_hash: String,
@@ -150,6 +151,7 @@ fn test_committed_material_commitment(
         commitment: super::relation::VssShareLinkageCommitment {
             material_roots_by_commitment_field,
         },
+        commitment_value: response["commitment"].clone(),
         commitment_root: response["commitmentRoot"]
             .as_str()
             .expect("commitment root")
@@ -391,20 +393,39 @@ fn same_secret_statement_hash_vector_request() -> serde_json::Value {
             setup_commitment_full_value(&zero_setup_commitment_value(rns_limb_index, rns_prime, 0))
         })
         .collect::<Vec<_>>();
+    let target_material = test_committed_material_commitment(
+        "coefficient",
+        serde_json::json!({ "testPurpose": "statement-vector-same-secret-bridge" }),
+        0,
+        DATA_PRIMES[0],
+        SMALL_RING_DEGREE,
+        &zero_u64_vector(),
+        DATA_PRIMES[0],
+    );
     let mut request = serde_json::json!({
-        "context": vector_context_base(serde_json::json!({
-            "vssCoefficientCommitmentMaterialRoot": repeated_hash("30"),
-        })),
+        "context": vector_context_base(serde_json::json!({})),
         "ringDegree": SMALL_RING_DEGREE,
         "keys": [],
         "sameSecretLinkage": {
             "publicMatrixSeedHash": repeated_hash("40"),
             "commitments": commitments,
         },
+        "sameSecretBridge": {
+            "publicMatrixSeedHash": repeated_hash("40"),
+            "targetBasisHash": crate::bgv::evaluator::top_k::canonical_target_basis_hash()
+                .expect("canonical target basis hash"),
+            "sourceTrusteeIdentity": "statement-vector-trustee",
+            "sourceTrusteeRosterPosition": 0,
+            "targetRnsPrimes": [DATA_PRIMES[0]],
+            "targetConstantCommitmentRoots": [target_material.commitment_root],
+            "targetConstantCommitments": [target_material.commitment_value],
+        },
         "secretCoefficients": zero_i64_vector(),
         "errorCoefficientsByKey": [],
         "negativeIndicatorCoefficients": zero_i64_vector(),
         "openingRandomnessByLimb": vec![zero_opening_randomness(); DATA_PRIMES.len()],
+        "vssCommittedMaterialSeedsByBoundMessage": [target_material.material_seed_hex],
+        "vssCommittedMaterialContextHashesByBoundMessage": [target_material.context_hash],
     });
     proof_randomness_fields(&mut request);
     request
@@ -415,12 +436,19 @@ fn public_key_share_statement_hash_vector_request() -> serde_json::Value {
         .iter()
         .map(|_| zero_u64_vector())
         .collect::<Vec<_>>();
-    let linkage_commitment =
-        setup_commitment_full_value(&zero_setup_commitment_value(0, DATA_PRIMES[0], 0));
+    let target_material = test_committed_material_commitment(
+        "coefficient",
+        serde_json::json!({ "testPurpose": "statement-vector-public-key-bridge" }),
+        0,
+        DATA_PRIMES[0],
+        SMALL_RING_DEGREE,
+        &zero_u64_vector(),
+        DATA_PRIMES[0],
+    );
     let mut request = serde_json::json!({
         "context": vector_context_base(serde_json::json!({
-            "sameSecretStatementRoot": repeated_hash("31"),
-            "sameSecretProofRoot": repeated_hash("32"),
+            "sameSecretBridgeStatementRoot": repeated_hash("31"),
+            "sameSecretBridgeProofRecordRoot": repeated_hash("32"),
         })),
         "ringDegree": SMALL_RING_DEGREE,
         "keys": [{
@@ -430,54 +458,38 @@ fn public_key_share_statement_hash_vector_request() -> serde_json::Value {
             "keySwitchSeedHex": repeated_hash("41"),
             "componentBByDigit": [component_b_by_limb],
         }],
-        "sameSecretLinkage": {
+        "sameSecretBridge": {
             "publicMatrixSeedHash": repeated_hash("41"),
-            "commitments": [linkage_commitment],
+            "targetBasisHash": crate::bgv::evaluator::top_k::canonical_target_basis_hash()
+                .expect("canonical target basis hash"),
+            "sourceTrusteeIdentity": "statement-vector-trustee",
+            "sourceTrusteeRosterPosition": 0,
+            "targetRnsPrimes": [DATA_PRIMES[0]],
+            "targetConstantCommitmentRoots": [target_material.commitment_root],
+            "targetConstantCommitments": [target_material.commitment_value],
         },
         "secretCoefficients": zero_i64_vector(),
         "errorCoefficientsByKey": [[zero_i64_vector()]],
         "negativeIndicatorCoefficients": zero_i64_vector(),
-        "openingRandomnessByLimb": [zero_opening_randomness()],
+        "vssCommittedMaterialSeedsByBoundMessage": [target_material.material_seed_hex],
+        "vssCommittedMaterialContextHashesByBoundMessage": [target_material.context_hash],
     });
     proof_randomness_fields(&mut request);
     request
 }
 
 fn trustee_evaluation_key_statement_hash_vector_request() -> serde_json::Value {
-    // The key-bearing family statement carries the same-secret bridge anchor.
-    // The vector's anchor is the committed-material commitment of the zero
-    // message computed by the live kernel command; the TS/WASM vector test
-    // computes the identical anchor through the same command, so both
-    // languages pin one hash.
-    let material = test_committed_material_commitment(
-        "coefficient",
-        serde_json::json!({ "testPurpose": "statement-vector-bridge" }),
-        0,
-        DATA_PRIMES[0],
-        SMALL_RING_DEGREE,
-        &vec![0_u64; SMALL_RING_DEGREE],
-        DATA_PRIMES[0],
-    );
-    let commitment_value =
-        crate::bgv::setup::compute_vss_committed_material_commitment_request(&serde_json::json!({
-            "commitmentRole": "coefficient",
-            "commitmentContext": { "testPurpose": "statement-vector-bridge" },
-            "rnsLimbIndex": 0,
-            "rnsPrime": DATA_PRIMES[0],
-            "ringDegree": SMALL_RING_DEGREE,
-            "messageCoefficients": vec![0_u64; SMALL_RING_DEGREE],
-            "messageCoefficientBound": DATA_PRIMES[0],
-            "materialSeedHex": material.material_seed_hex,
-        }))
-        .expect("statement-vector bridge commitment body")["commitment"]
-            .clone();
+    // The key-bearing family links its atom secret to the canonical source
+    // constant commitment directly. The TS/WASM vector builds the same source
+    // body so both languages pin one statement hash.
+    let source_commitment =
+        setup_commitment_full_value(&zero_setup_commitment_value(0, DATA_PRIMES[0], 0));
     let mut request = serde_json::json!({
         "context": vector_context_base(serde_json::json!({
             "requiredGaloisSetHash": repeated_hash("33"),
             "evaluatorKeyScheduleRoot": repeated_hash("34"),
             "keySwitchDecompositionHash": repeated_hash("35"),
-            "sameSecretStatementRoot": repeated_hash("36"),
-            "sameSecretProofRoot": repeated_hash("37"),
+            "sourceConstantCoefficientCommitmentRoot": repeated_hash("36"),
         })),
         "ringDegree": SMALL_RING_DEGREE,
         "keys": [{
@@ -491,19 +503,14 @@ fn trustee_evaluation_key_statement_hash_vector_request() -> serde_json::Value {
                 [zero_u64_vector(), zero_u64_vector(), zero_u64_vector()],
             ],
         }],
-        "sameSecretBridge": {
+        "sameSecretLinkage": {
             "publicMatrixSeedHash": repeated_hash("43"),
-            "targetBasisHash": crate::bgv::evaluator::top_k::canonical_target_basis_hash()
-                .expect("canonical target basis hash"),
-            "sourceTrusteeIdentity": "statement-vector-trustee",
-            "sourceTrusteeRosterPosition": 0,
-            "targetRnsPrimes": [DATA_PRIMES[0]],
-            "targetConstantCommitmentRoots": [material.commitment_root],
-            "targetConstantCommitments": [commitment_value],
+            "commitments": [source_commitment],
         },
         "secretCoefficients": zero_i64_vector(),
         "errorCoefficientsByKey": [[zero_i64_vector(), zero_i64_vector(), zero_i64_vector()]],
         "negativeIndicatorCoefficients": zero_i64_vector(),
+        "openingRandomnessByLimb": [zero_opening_randomness()],
     });
     proof_randomness_fields(&mut request);
     request

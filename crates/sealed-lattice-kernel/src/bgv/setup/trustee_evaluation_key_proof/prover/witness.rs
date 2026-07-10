@@ -282,6 +282,12 @@ pub(super) fn build_limb_witness_commitment(
                 append_logical_vector(&logical_vector);
             }
         }
+        for randomness_columns in &witness.opening_randomness_by_limb {
+            for column in randomness_columns {
+                let logical_vector = signed_residue_vector(column, modulus);
+                append_logical_vector(&logical_vector);
+            }
+        }
     } else if layout.target_decryption_active() {
         for local_message_index in 0..layout.target_decryption_message_columns {
             let global_message_index = statement
@@ -489,10 +495,17 @@ pub(super) fn validate_witness_support(
                 "same-secret bridge witness must not include key, private VSS, or share-linkage material",
             ));
         }
-        // Committed-material bridge targets carry no algebraic opening
-        // randomness; the trees hide via their masks and salts, so the
-        // witness must not carry randomness columns for them.
-        return validate_same_secret_bridge_witness(0, 0, witness, statement.ring_degree);
+        let source_linkage = statement.same_secret_linkage.as_ref().ok_or_else(|| {
+            invalid_succinct_setup_proof(
+                "same-secret bridge witness requires the source commitment linkage",
+            )
+        })?;
+        return validate_same_secret_bridge_witness(
+            source_linkage.commitments.len(),
+            crate::bgv::setup::commitment::SETUP_COMMITMENT_RANDOMNESS_WIDTH,
+            witness,
+            statement.ring_degree,
+        );
     }
     if let Some(target_decryption_share) = &statement.target_decryption_share {
         if !witness.secret_coefficients.is_empty()
@@ -616,10 +629,13 @@ pub(super) fn validate_witness_support(
                 ));
             }
         }
-        (Some(_), Some(_)) => {
-            return Err(invalid_succinct_setup_proof(
-                "witness must not carry both same-secret linkage forms",
-            ));
+        (Some(linkage), Some(_)) => {
+            validate_same_secret_bridge_witness(
+                linkage.commitments.len(),
+                crate::bgv::setup::commitment::SETUP_COMMITMENT_RANDOMNESS_WIDTH,
+                witness,
+                statement.ring_degree,
+            )?;
         }
     }
 

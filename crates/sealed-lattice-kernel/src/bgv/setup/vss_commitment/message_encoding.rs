@@ -1,105 +1,5 @@
 use super::*;
 
-pub(in crate::bgv::setup) fn vss_public_message_digit_column_label(
-    digit_index: usize,
-) -> CanonicalResult<String> {
-    Ok(vss_public_message_digit_column_label_str(digit_index)?.to_string())
-}
-
-pub(super) fn vss_public_message_digit_column_label_str(
-    digit_index: usize,
-) -> CanonicalResult<&'static str> {
-    match digit_index {
-        0 => Ok("message:0"),
-        1 => Ok("message:1"),
-        _ => Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "VSS message digit index is outside the selected profile",
-        )),
-    }
-}
-
-pub(super) fn is_vss_public_message_digit_column_label(input_column: &str) -> bool {
-    (0..VSS_PUBLIC_MESSAGE_DIGIT_COUNT).any(|digit_index| {
-        vss_public_message_digit_column_label_str(digit_index)
-            .map(|message_column| message_column == input_column)
-            .unwrap_or(false)
-    })
-}
-
-pub(in crate::bgv::setup) fn vss_public_coordinate_count_per_commitment() -> usize {
-    VSS_PUBLIC_COMMITMENT_MODULUS_LIMB_INDICES.len() * VSS_PUBLIC_OUTPUT_COORDINATE_COUNT
-}
-
-pub(in crate::bgv::setup) fn vss_public_message_coverage_terms_per_coordinate(
-    ring_degree: usize,
-) -> CanonicalResult<usize> {
-    let coordinate_count = vss_public_coordinate_count_per_commitment();
-    ring_degree
-        .checked_add(coordinate_count - 1)
-        .map(|adjusted| adjusted / coordinate_count)
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "VSS message coverage term count overflowed",
-            )
-        })
-}
-
-pub(super) fn vss_public_commitment_modulus_position(
-    commitment_modulus_index: usize,
-) -> CanonicalResult<usize> {
-    VSS_PUBLIC_COMMITMENT_MODULUS_LIMB_INDICES
-        .iter()
-        .position(|candidate_index| *candidate_index == commitment_modulus_index)
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "VSS commitment modulus index is outside the selected profile",
-            )
-        })
-}
-
-pub(super) fn vss_public_covered_message_ring_coefficient_index(
-    commitment_modulus_index: usize,
-    output_coordinate_index: usize,
-    coverage_term_index: usize,
-) -> CanonicalResult<usize> {
-    let commitment_modulus_position =
-        vss_public_commitment_modulus_position(commitment_modulus_index)?;
-    let coordinate_index = commitment_modulus_position
-        .checked_mul(VSS_PUBLIC_OUTPUT_COORDINATE_COUNT)
-        .and_then(|value| value.checked_add(output_coordinate_index))
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "VSS message coverage coordinate index overflowed",
-            )
-        })?;
-    coverage_term_index
-        .checked_mul(vss_public_coordinate_count_per_commitment())
-        .and_then(|value| value.checked_add(coordinate_index))
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "VSS message coverage coefficient index overflowed",
-            )
-        })
-}
-
-pub(in crate::bgv::setup) fn vss_public_randomness_column_label(
-    column_index: usize,
-) -> CanonicalResult<&'static str> {
-    match column_index {
-        0 => Ok("randomness:0"),
-        1 => Ok("randomness:1"),
-        _ => Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "VSS randomness column index is outside the selected profile",
-        )),
-    }
-}
-
 pub(in crate::bgv::setup) fn vss_public_message_digit_weight(
     digit_index: usize,
     modulus: u64,
@@ -260,6 +160,52 @@ pub(in crate::bgv::setup) fn vss_public_message_encoding_layout(
         low_digit_trit_count,
         high_digit_trit_count,
     })
+}
+
+/// Selects the source-message layout for a VSS share-linkage proof. A threshold
+/// aggregate reopens recipient-share digits whose range was already established
+/// by the source proofs, while an ordinary linkage proof must range-prove them.
+pub(in crate::bgv::setup) fn vss_public_share_linkage_source_message_encoding_layout(
+    is_threshold_aggregate: bool,
+    message_bound_exclusive: u64,
+) -> CanonicalResult<VssPublicMessageEncodingLayout> {
+    if is_threshold_aggregate {
+        Ok(vss_public_message_digit_only_encoding_layout())
+    } else {
+        vss_public_message_encoding_layout(message_bound_exclusive)
+    }
+}
+
+/// Selects the layout for one packed VSS share-linkage message. Source columns
+/// precede recipient-item columns in the packed relation.
+pub(in crate::bgv::setup) fn vss_public_share_linkage_packed_message_encoding_layout(
+    is_threshold_aggregate: bool,
+    message_position: usize,
+    source_message_count: usize,
+    message_bound_exclusive: u64,
+) -> CanonicalResult<VssPublicMessageEncodingLayout> {
+    if message_position < source_message_count {
+        vss_public_share_linkage_source_message_encoding_layout(
+            is_threshold_aggregate,
+            message_bound_exclusive,
+        )
+    } else {
+        vss_public_message_encoding_layout(message_bound_exclusive)
+    }
+}
+
+/// Selects the cross-limb layout for one message. Exactly one proof limb owns
+/// the range decoder; every other limb reuses only the canonical digit columns.
+pub(in crate::bgv::setup) fn vss_public_cross_limb_message_encoding_layout(
+    message_bound_exclusive: u64,
+    proof_limb_index: usize,
+    decoder_limb_index: usize,
+) -> CanonicalResult<VssPublicMessageEncodingLayout> {
+    if proof_limb_index == decoder_limb_index {
+        vss_public_message_encoding_layout(message_bound_exclusive)
+    } else {
+        Ok(vss_public_message_digit_only_encoding_layout())
+    }
 }
 
 pub(super) fn vss_public_trit_count_for_bound(bound_exclusive: u128) -> CanonicalResult<usize> {

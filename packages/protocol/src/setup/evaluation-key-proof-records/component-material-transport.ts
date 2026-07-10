@@ -8,8 +8,8 @@ import {
     type EvaluationKeyShareMaterial,
     type EvaluationKeyShareMaterialTransportInput,
     type EvaluationKeyShareProofFamily,
+    type EvaluationKeyTrusteeReference,
     type JsonRecord,
-    type SameSecretProofReference,
     evaluationKeyShareComponentMaterialEncoding,
     evaluationKeyShareComponentMaterialMagic,
     evaluationKeyShareComponentMaterialTransportObjectType,
@@ -40,24 +40,21 @@ type EvaluationKeyShareTransportWorkItem = Readonly<{
 }>;
 
 const trusteeIdentityByRosterPosition = (
-    sameSecretProofReferences: readonly Pick<
-        SameSecretProofReference,
-        'trusteeIdentity' | 'trusteeRosterPosition'
-    >[],
+    trusteeReferences: readonly EvaluationKeyTrusteeReference[],
 ): ReadonlyMap<number, string> => {
     const identities = new Map<number, string>();
-    sameSecretProofReferences.forEach((reference, referenceIndex) => {
+    trusteeReferences.forEach((reference, referenceIndex) => {
         assertNonEmptyString(
             reference.trusteeIdentity,
-            `sameSecretProofReferences.${String(referenceIndex)}.trusteeIdentity`,
+            `trusteeReferences.${String(referenceIndex)}.trusteeIdentity`,
         );
         assertNonNegativeSafeInteger(
             reference.trusteeRosterPosition,
-            `sameSecretProofReferences.${String(referenceIndex)}.trusteeRosterPosition`,
+            `trusteeReferences.${String(referenceIndex)}.trusteeRosterPosition`,
         );
         if (identities.has(reference.trusteeRosterPosition)) {
             throw new Error(
-                'sameSecretProofReferences must not repeat trusteeRosterPosition.',
+                'trusteeReferences must not repeat trusteeRosterPosition.',
             );
         }
         identities.set(
@@ -77,7 +74,7 @@ const trusteeIdentityForContribution = (
     const trusteeIdentity = identities.get(trusteeRosterPosition);
     if (trusteeIdentity === undefined) {
         throw new Error(
-            `${fieldName} references a trustee roster position without a same-secret proof reference.`,
+            `${fieldName} references a trustee roster position without a trustee reference.`,
         );
     }
 
@@ -321,9 +318,7 @@ const transportEvaluationKeyShareComponentMaterial = (
 export const createBinaryChunkedEvaluationKeyShareMaterialTransport = (
     input: EvaluationKeyShareMaterialTransportInput,
 ): BinaryChunkedEvaluationKeyShareMaterialTransport => {
-    const identities = trusteeIdentityByRosterPosition(
-        input.sameSecretProofReferences,
-    );
+    const identities = trusteeIdentityByRosterPosition(input.trusteeReferences);
     const componentMaterials: JsonRecord[] = [];
     const componentMaterialChunkStreams: EvaluationKeyShareComponentMaterialChunkStream[] =
         [];

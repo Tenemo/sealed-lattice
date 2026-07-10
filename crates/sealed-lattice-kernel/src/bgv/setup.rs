@@ -24,6 +24,7 @@ mod same_secret_bridge;
 mod sampling;
 mod setup_proof;
 mod sharing;
+mod source_constant_commitments;
 mod trustee_evaluation_key_proof;
 mod vss_commitment;
 pub(crate) use trustee_evaluation_key_proof::generate_trustee_evaluation_key_proof_from_request;
@@ -86,7 +87,7 @@ pub(crate) use vss_commitment::{
     verify_vss_public_aggregate_threshold_proofs,
     verify_vss_public_coefficient_commitment_set_request,
     verify_vss_public_recipient_share_commitment_set_request,
-    verify_vss_share_linkage_statement_request,
+    verify_vss_share_linkage_bindings_request,
 };
 #[cfg(any(feature = "target-decryption-development-commands", test))]
 pub(crate) use vss_commitment::{

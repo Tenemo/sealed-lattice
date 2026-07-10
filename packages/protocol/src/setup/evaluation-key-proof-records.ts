@@ -14,6 +14,7 @@ export {
     type EvaluationKeyShareMaterial,
     type EvaluationKeyShareMaterialTransportInput,
     type EvaluationKeyShareTransportedKeySwitchComponentMaterial,
+    type EvaluationKeyTrusteeReference,
     type GaloisKeyContributingShareRoot,
     type GaloisKeyRootReference,
     type GaloisKeyShareBatch,
@@ -35,7 +36,6 @@ export {
     type RelinearizationKeyShareRoundsInput,
     type RelinearizationRoundOneContribution,
     type RelinearizationRoundTwoContribution,
-    type SameSecretProofReference,
     type TransportedEvaluationKeyAggregateBindingOpening,
     type TransportedEvaluationKeyAggregateBindingOpeningSet,
     type TransportedEvaluationKeyShareComponentMaterialSet,
@@ -52,7 +52,6 @@ export {
     type TrusteeEvaluationKeyStatementKey,
     type TrusteeEvaluationKeyTransportedProofBytes,
     type TrusteeEvaluationKeyWitnessInput,
-    type TrusteeSameSecretBridgeAnchorInput,
 } from './evaluation-key-proof-records/constants-and-types.js';
 export {
     evaluationKeyShareComponentVectorHash,

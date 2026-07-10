@@ -241,15 +241,10 @@ pub(super) fn setup_proof_family_descriptions() -> CanonicalResult<Vec<Value>> {
         .iter()
         .map(|proof_family| {
             let (statement, witness, no_wrap_rule) = match *proof_family {
-                "same-secret-linkage-anchor" => (
-                    "same-secret linkage anchor opens every accepted VSS constant commitment to one short trustee secret",
-                    "one ternary trustee secret, negative indicators, and opening randomness for every accepted Q_share constant commitment",
-                    "commitment openings are checked over the accepted commitment-modulus fields and cross-limb consistency binds one centered integer secret",
-                ),
                 "public-key-share" => (
                     "public-key share relation proves b_l + a_l*s - p*e = 0 over every accepted Q_share limb",
                     "one ternary trustee secret, one centered-binomial error vector, and the selected limb-zero commitment opening randomness",
-                    "the selected limb-zero opening links the share secret to the same-secret anchor; ternary support makes the congruent secrets equal",
+                    "the selected limb-zero opening links the share secret to the verified same-secret bridge; ternary support makes the congruent secrets equal",
                 ),
                 "vss-opening-carry" => (
                     "private VSS share opens the homomorphic coefficient-commitment combination with explicit q_l carry",

@@ -1,32 +1,41 @@
 import os from 'node:os';
 import path from 'node:path';
 
+import {
+    createFocusedRustTestMatchTracker,
+    resolveFocusedRustTestRunResult,
+} from './focused-rust-test-match.js';
 import { createHeavyTestProgressReporter } from './heavy-test-progress.js';
 import { createLocalRunLog, currentProcessExitCode } from './local-run-log.js';
-import { runCommandsInSeries, type CommandInvocation } from './run-command.js';
 import {
-    heavyAcceptedSetupTestPattern,
+    runCommandsInSeries,
+    type CommandInvocation,
+    type CommandRunObserver,
+} from './run-command.js';
+import {
+    acceptedSetupTestModulePattern,
     normalizeRustTestFilter,
 } from './rust-kernel-test-arguments.js';
 
 import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
 
 // One implementation for the Rust accepted-setup proof-test runs. The heavy
-// accepted-setup suite is one set of `heavy_accepted_setup` tests sharing one
-// memoized package fixture; the entrypoint also accepts a single positional
-// test or file-stem filter for a focused local run. The default mode is
+// accepted-setup suite contains every test in the accepted-setup test module,
+// including ignored proof tests, and shares one memoized package fixture. The
+// entrypoint also accepts a single positional test or file-stem filter for a
+// focused local run. The default mode is
 // accelerated local execution. GitHub CI passes `--ci` to request the
 // conservative prove-fresh run:
 //
 //   default (no positional filter): accelerated local runs. They build the
-//     `heavy_accepted_setup` suite in a pinned warm target directory
+//     accepted-setup test module in a pinned warm target directory
 //     (`target/accepted-setup-accelerated/`), keep incremental compilation on,
 //     resume deterministic proof checkpoints from `temp/test-checkpoints/`, and
 //     size libtest/prover/Rayon concurrency from available memory. Run logs stay
 //     under `logs/`; proof checkpoints stay under `temp/test-checkpoints/`.
 //
-//   --ci: authoritative CI-style runs. They build the `heavy_accepted_setup`
-//     suite cleanly in the shared `target/` (CARGO_INCREMENTAL=0), prove every
+//   --ci: authoritative CI-style runs. They build the accepted-setup test
+//     module cleanly in the shared `target/` (CARGO_INCREMENTAL=0), prove every
 //     proof family fresh (no checkpoint resume), and size libtest/prover/rayon
 //     concurrency from available memory so a constrained runner does not
 //     exhaust RAM.
@@ -40,7 +49,7 @@ import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
 //     `temp/test-checkpoints/` instead of being re-proved. That trades the
 //     authoritative prove-fresh guarantee for speed.
 
-export { heavyAcceptedSetupTestPattern };
+export { acceptedSetupTestModulePattern };
 
 export type RustKernelAcceptedSetupRunMode = 'accelerated' | 'ci';
 
@@ -64,26 +73,104 @@ const gigabyte = 1024 ** 3;
 const availableGigabytes = os.freemem() / gigabyte;
 const logicalProcessorCount = os.cpus().length;
 
-const automaticTestThreadCount = (): number =>
-    Math.min(
-        logicalProcessorCount,
-        Math.max(
-            1,
-            Math.floor(
-                (availableGigabytes * heavyTestMemoryBudgetFraction) /
-                    approximateGigabytesPerHeavyTest,
-            ),
-        ),
-    );
-
 // Per-prover RAM budgets. Each trustee evaluation-key prover, the rayon
 // par_iter phases (public-key share succinct proofs, relinearization and
-// Galois records, same-secret anchors), and the per-prover RNS-limb proving
+// Galois records, same-secret bridge proofs), and the per-prover RNS-limb proving
 // all draw large working sets, so each concurrency knob is sized from available
 // memory below.
 const approximateGigabytesPerTrusteeProver = 10;
 const approximateGigabytesPerRayonThread = 2;
 const approximateGigabytesPerTrusteeProofLimb = 5;
+
+export type AutomaticAcceptedSetupConcurrency = {
+    readonly rayonThreadCount: number;
+    readonly testThreadCount: number;
+    readonly trusteeProofBatchSize: number;
+    readonly trusteeProofLimbBatchSize: number;
+};
+
+// The trustee, limb, and Rayon layers are nested during proof construction, so
+// they must share one memory budget. Sizing every layer independently lets each
+// consume the full host budget and was enough to terminate a 14 GiB CI runner.
+// Reserve one Rayon worker, then choose the trustee and per-trustee limb batches
+// from the remaining budget before assigning any remaining capacity to Rayon.
+// When even the minimum serial working-set estimate exceeds the budget, the
+// only executable configuration is one worker at every layer.
+export const deriveAutomaticAcceptedSetupConcurrency = (input: {
+    readonly availableGigabytes: number;
+    readonly logicalProcessorCount: number;
+}): AutomaticAcceptedSetupConcurrency => {
+    const memoryBudgetGigabytes =
+        input.availableGigabytes * heavyTestMemoryBudgetFraction;
+    const boundedProcessorCount = Math.max(1, input.logicalProcessorCount);
+    const testThreadCount = Math.min(
+        boundedProcessorCount,
+        Math.max(
+            1,
+            Math.floor(
+                memoryBudgetGigabytes / approximateGigabytesPerHeavyTest,
+            ),
+        ),
+    );
+
+    const memoryAfterMinimumRayon = Math.max(
+        0,
+        memoryBudgetGigabytes - approximateGigabytesPerRayonThread,
+    );
+    const minimumGigabytesPerTrustee =
+        approximateGigabytesPerTrusteeProver +
+        approximateGigabytesPerTrusteeProofLimb;
+    const coreDerivedTrusteeProverConcurrency = Math.max(
+        1,
+        Math.floor(boundedProcessorCount / 4),
+    );
+    const trusteeProofBatchSize = Math.min(
+        coreDerivedTrusteeProverConcurrency,
+        Math.max(
+            1,
+            Math.floor(memoryAfterMinimumRayon / minimumGigabytesPerTrustee),
+        ),
+    );
+
+    const memoryPerTrustee = memoryAfterMinimumRayon / trusteeProofBatchSize;
+    const trusteeProofLimbBatchSize = Math.min(
+        Math.max(1, Math.floor(boundedProcessorCount / trusteeProofBatchSize)),
+        Math.max(
+            1,
+            Math.floor(
+                Math.max(
+                    0,
+                    memoryPerTrustee - approximateGigabytesPerTrusteeProver,
+                ) / approximateGigabytesPerTrusteeProofLimb,
+            ),
+        ),
+    );
+
+    const reservedProofMemoryGigabytes =
+        trusteeProofBatchSize *
+        (approximateGigabytesPerTrusteeProver +
+            trusteeProofLimbBatchSize *
+                approximateGigabytesPerTrusteeProofLimb);
+    const rayonThreadCount = Math.min(
+        boundedProcessorCount,
+        Math.max(
+            1,
+            Math.floor(
+                Math.max(
+                    0,
+                    memoryBudgetGigabytes - reservedProofMemoryGigabytes,
+                ) / approximateGigabytesPerRayonThread,
+            ),
+        ),
+    );
+
+    return {
+        rayonThreadCount,
+        testThreadCount,
+        trusteeProofBatchSize,
+        trusteeProofLimbBatchSize,
+    };
+};
 
 // The pinned focused target directory. It lives under `target/` (already
 // git-ignored) but is distinct from the default `target/` the gate uses, so a
@@ -113,14 +200,14 @@ export type ResolvedKnob = {
     readonly source: string;
 };
 
-type ResolvedRunKnobs = {
+export type ResolvedRunKnobs = {
     readonly rayonThreadCount: ResolvedKnob;
     readonly testThreads: ResolvedKnob;
     readonly trusteeProofBatchSize: ResolvedKnob;
     readonly trusteeProofLimbBatchSize: ResolvedKnob;
 };
 
-type BuiltRustKernelAcceptedSetupCommand = {
+export type BuiltRustKernelAcceptedSetupCommand = {
     readonly command: CommandInvocation;
     readonly progressLabel: string;
     readonly setupMessages: readonly string[];
@@ -142,9 +229,9 @@ export const cargoTestArgumentsForAcceptedSetupTests = (
     'test',
     '-p',
     'sealed-lattice-kernel',
-    heavyAcceptedSetupTestPattern,
+    acceptedSetupTestModulePattern,
     '--',
-    '--ignored',
+    '--include-ignored',
     '--nocapture',
     '--test-threads',
     testThreadCount,
@@ -157,97 +244,81 @@ const acceptedSetupScriptName = 'test:rust:kernel:accepted-setup';
 // package proving concurrency; the kernel treats the exported values as
 // authoritative, so on a high-core but low-memory runner the RAM bound (not the
 // core count) wins.
-const resolveRunKnobs = (): ResolvedRunKnobs => {
-    const coreDerivedTrusteeProverConcurrency = Math.max(
-        1,
-        Math.floor(logicalProcessorCount / 4),
-    );
-    const memoryBoundedTrusteeProofBatchSize = Math.max(
-        1,
-        Math.floor(
-            (availableGigabytes * heavyTestMemoryBudgetFraction) /
-                approximateGigabytesPerTrusteeProver,
-        ),
-    );
-    const trusteeProofBatchSize = Math.min(
-        coreDerivedTrusteeProverConcurrency,
-        memoryBoundedTrusteeProofBatchSize,
-    );
-    const memoryBoundedRayonThreadCount = Math.max(
-        1,
-        Math.floor(
-            (availableGigabytes * heavyTestMemoryBudgetFraction) /
-                approximateGigabytesPerRayonThread,
-        ),
-    );
-    const rayonThreadCount = Math.min(
+export const resolveRunKnobs = (
+    mode: RustKernelAcceptedSetupRunMode,
+    environment: NodeJS.ProcessEnv = process.env,
+): ResolvedRunKnobs => {
+    const automaticConcurrency = deriveAutomaticAcceptedSetupConcurrency({
+        availableGigabytes,
         logicalProcessorCount,
-        memoryBoundedRayonThreadCount,
-    );
-    const memoryBoundedTrusteeProofLimbBatchSize = Math.max(
-        1,
-        Math.floor(
-            (availableGigabytes * heavyTestMemoryBudgetFraction) /
-                approximateGigabytesPerTrusteeProofLimb,
-        ),
-    );
-    const trusteeProofLimbBatchSize = Math.min(
-        rayonThreadCount,
-        memoryBoundedTrusteeProofLimbBatchSize,
-    );
+    });
+    const localOverride = (value: string | undefined): string | undefined =>
+        mode === 'accelerated' ? value : undefined;
 
     return {
         testThreads: {
-            value: String(automaticTestThreadCount()),
+            value: String(automaticConcurrency.testThreadCount),
             source: 'memory-bounded',
         },
         trusteeProofBatchSize: resolveKnob(
-            trusteeProofBatchSize,
-            'memory-bounded',
-            process.env.SEALED_LATTICE_TRUSTEE_PROOF_BATCH_SIZE,
+            automaticConcurrency.trusteeProofBatchSize,
+            'shared-memory-bounded',
+            localOverride(environment.SEALED_LATTICE_TRUSTEE_PROOF_BATCH_SIZE),
         ),
         trusteeProofLimbBatchSize: resolveKnob(
-            trusteeProofLimbBatchSize,
-            'memory-bounded',
-            process.env.SEALED_LATTICE_TRUSTEE_PROOF_LIMB_BATCH_SIZE,
+            automaticConcurrency.trusteeProofLimbBatchSize,
+            'shared-memory-bounded',
+            localOverride(
+                environment.SEALED_LATTICE_TRUSTEE_PROOF_LIMB_BATCH_SIZE,
+            ),
         ),
         rayonThreadCount: resolveKnob(
-            rayonThreadCount,
-            'memory-bounded',
-            process.env.RAYON_NUM_THREADS,
+            automaticConcurrency.rayonThreadCount,
+            'shared-memory-bounded',
+            localOverride(environment.RAYON_NUM_THREADS),
         ),
     };
 };
 
-const buildAcceptedSetupEnvironment = (input: {
+export const buildAcceptedSetupEnvironment = (input: {
+    readonly baseEnvironment?: NodeJS.ProcessEnv;
     readonly cargoIncremental: '0' | '1';
     readonly knobs: ResolvedRunKnobs;
     readonly resumeCheckpoints: boolean;
     readonly targetDirectoryPath?: string;
-}): NodeJS.ProcessEnv => ({
-    ...process.env,
-    CARGO_INCREMENTAL: input.cargoIncremental,
-    ...(input.targetDirectoryPath === undefined
-        ? {}
-        : { CARGO_TARGET_DIR: input.targetDirectoryPath }),
-    ...(input.resumeCheckpoints
-        ? {
-              SEALED_LATTICE_TEST_CHECKPOINT_ROOT:
-                  acceptedSetupCheckpointRootDirectory,
-              SEALED_LATTICE_RESUME_TEST_CHECKPOINTS: '1',
-          }
-        : {}),
-    RAYON_NUM_THREADS: input.knobs.rayonThreadCount.value,
-    SEALED_LATTICE_TRUSTEE_PROOF_BATCH_SIZE:
-        input.knobs.trusteeProofBatchSize.value,
-    SEALED_LATTICE_TRUSTEE_PROOF_LIMB_BATCH_SIZE:
-        input.knobs.trusteeProofLimbBatchSize.value,
-});
+}): NodeJS.ProcessEnv => {
+    const environment = {
+        ...(input.baseEnvironment ?? process.env),
+    };
+    delete environment.SEALED_LATTICE_RESUME_TEST_CHECKPOINTS;
+    delete environment.SEALED_LATTICE_TEST_CHECKPOINT_ROOT;
+    delete environment.CARGO_TARGET_DIR;
+
+    return {
+        ...environment,
+        CARGO_INCREMENTAL: input.cargoIncremental,
+        ...(input.targetDirectoryPath === undefined
+            ? {}
+            : { CARGO_TARGET_DIR: input.targetDirectoryPath }),
+        ...(input.resumeCheckpoints
+            ? {
+                  SEALED_LATTICE_TEST_CHECKPOINT_ROOT:
+                      acceptedSetupCheckpointRootDirectory,
+                  SEALED_LATTICE_RESUME_TEST_CHECKPOINTS: '1',
+              }
+            : {}),
+        RAYON_NUM_THREADS: input.knobs.rayonThreadCount.value,
+        SEALED_LATTICE_TRUSTEE_PROOF_BATCH_SIZE:
+            input.knobs.trusteeProofBatchSize.value,
+        SEALED_LATTICE_TRUSTEE_PROOF_LIMB_BATCH_SIZE:
+            input.knobs.trusteeProofLimbBatchSize.value,
+    };
+};
 
 const buildAcceptedSetupCommand = (
     mode: RustKernelAcceptedSetupRunMode,
 ): BuiltRustKernelAcceptedSetupCommand => {
-    const knobs = resolveRunKnobs();
+    const knobs = resolveRunKnobs(mode);
     const modeLabel =
         mode === 'accelerated' ? 'accelerated local' : 'CI prove-fresh';
     const setupMessages = [
@@ -277,7 +348,7 @@ const buildAcceptedSetupCommand = (
                 knobs.testThreads.value,
             ),
             command: 'cargo',
-            description: `cargo test Rust accepted setup proofs${
+            description: `cargo test Rust accepted setup${
                 mode === 'accelerated' ? ' (accelerated local)' : ''
             }`,
             env: buildAcceptedSetupEnvironment({
@@ -313,22 +384,31 @@ export const cargoTestArgumentsForFocusedFilter = (
     'sealed-lattice-kernel',
     testFilter,
     '--',
-    '--ignored',
+    '--include-ignored',
     '--show-output',
     '--test-threads',
     testThreadCount,
 ];
 
-const buildFocusedCommand = (
+export const buildFocusedCommand = (
     testFilter: string,
+    mode: RustKernelAcceptedSetupRunMode,
 ): BuiltRustKernelAcceptedSetupCommand => {
-    const knobs = resolveRunKnobs();
+    const knobs = resolveRunKnobs(mode);
+    const isAccelerated = mode === 'accelerated';
+    const modeLabel = isAccelerated ? 'accelerated local' : 'CI prove-fresh';
     const setupMessages = [
-        `Rust accepted setup focused run: filter [${testFilter}], ` +
+        `Rust accepted setup focused run (${modeLabel}): filter [${testFilter}], ` +
             `${knobs.testThreads.value} test thread(s) ` +
             `(${knobs.testThreads.source}; ${availableGigabytes.toFixed(1)} GiB available).`,
-        `Pinned target directory: ${acceptedSetupFocusedTargetDirectory}. ` +
-            `Incremental compilation: on. Proof checkpoint resume: on. Proof checkpoints ${acceptedSetupCheckpointDirectory}; run logs stay under logs/.`,
+        ...(isAccelerated
+            ? [
+                  `Pinned target directory: ${acceptedSetupFocusedTargetDirectory}. ` +
+                      `Incremental compilation: on. Proof checkpoint resume: on. Proof checkpoints ${acceptedSetupCheckpointDirectory}; run logs stay under logs/.`,
+              ]
+            : [
+                  'Incremental compilation: off. Proof checkpoint resume: off. Run logs stay under logs/.',
+              ]),
     ];
 
     return {
@@ -338,14 +418,18 @@ const buildFocusedCommand = (
                 knobs.testThreads.value,
             ),
             command: 'cargo',
-            description: `cargo test ${testFilter} (warm focused)`,
+            description: `cargo test ${testFilter} (${modeLabel} focused)`,
             env: buildAcceptedSetupEnvironment({
-                cargoIncremental: '1',
+                cargoIncremental: isAccelerated ? '1' : '0',
                 knobs,
-                resumeCheckpoints: true,
-                targetDirectoryPath: acceptedSetupFocusedTargetDirectory,
+                resumeCheckpoints: isAccelerated,
+                targetDirectoryPath: isAccelerated
+                    ? acceptedSetupFocusedTargetDirectory
+                    : undefined,
             }),
-            logFileSlug: 'cargo-test-rust-accepted-setup-focused',
+            logFileSlug: isAccelerated
+                ? 'cargo-test-rust-accepted-setup-focused'
+                : 'cargo-test-rust-accepted-setup-focused-ci',
         },
         progressLabel: 'accepted-setup:focused',
         setupMessages,
@@ -362,6 +446,26 @@ const writeRunnerSetupMessages = (
         runLog.writeCombinedOutput(`${message}\n`);
     }
 };
+
+const combineCommandRunObservers = (
+    observers: readonly CommandRunObserver[],
+): CommandRunObserver => ({
+    onCommandExit: (event): void => {
+        for (const observer of observers) {
+            observer.onCommandExit?.(event);
+        }
+    },
+    onCommandOutput: (event): void => {
+        for (const observer of observers) {
+            observer.onCommandOutput?.(event);
+        }
+    },
+    onCommandStart: (event): void => {
+        for (const observer of observers) {
+            observer.onCommandStart?.(event);
+        }
+    },
+});
 
 const usage =
     'Usage: run-rust-kernel-accepted-setup-tests.ts [--ci] [<test name, module name, or Rust file filter>]. ' +
@@ -413,7 +517,7 @@ export const parseRustKernelAcceptedSetupArguments = (
         testFilters:
             normalizedFocusedFilter !== undefined
                 ? [normalizedFocusedFilter]
-                : [heavyAcceptedSetupTestPattern],
+                : [acceptedSetupTestModulePattern],
     };
 };
 
@@ -435,8 +539,18 @@ export const runRustKernelAcceptedSetupTests = async (input: {
     });
 
     const builtCommand = parsedArguments.focused
-        ? buildFocusedCommand(parsedArguments.testFilters[0] ?? '')
+        ? buildFocusedCommand(
+              parsedArguments.testFilters[0] ?? '',
+              parsedArguments.mode,
+          )
         : buildAcceptedSetupCommand(parsedArguments.mode);
+    const focusedTestFilter = parsedArguments.focused
+        ? parsedArguments.testFilters[0]
+        : undefined;
+    const focusedTestMatchTracker =
+        focusedTestFilter === undefined
+            ? undefined
+            : createFocusedRustTestMatchTracker();
 
     let exitCode: number | undefined;
     try {
@@ -448,13 +562,37 @@ export const runRustKernelAcceptedSetupTests = async (input: {
 
         try {
             exitCode = await runCommandsInSeries([builtCommand.command], {
-                observer: progressReporter.observer,
+                observer:
+                    focusedTestMatchTracker === undefined
+                        ? progressReporter.observer
+                        : combineCommandRunObservers([
+                              progressReporter.observer,
+                              focusedTestMatchTracker.observer,
+                          ]),
                 outputMode: 'inherit',
                 runLog,
                 terminalOutputFilter: progressReporter.terminalOutputFilter,
             });
         } finally {
             progressReporter.stop();
+        }
+        if (
+            focusedTestMatchTracker !== undefined &&
+            focusedTestFilter !== undefined
+        ) {
+            const focusedRunResult = resolveFocusedRustTestRunResult({
+                commandExitCode: exitCode,
+                matchedTestCount: focusedTestMatchTracker.matchedTestCount(),
+                runnerName: 'Rust accepted setup focused',
+                testFilter: focusedTestFilter,
+            });
+            exitCode = focusedRunResult.exitCode;
+            if (focusedRunResult.failureMessage !== undefined) {
+                console.error(focusedRunResult.failureMessage);
+                runLog.writeCombinedOutput(
+                    `${focusedRunResult.failureMessage}\n`,
+                );
+            }
         }
         process.exitCode = exitCode;
     } finally {

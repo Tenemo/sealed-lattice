@@ -1,6 +1,6 @@
 use super::*;
 use crate::bgv::setup::trustee_evaluation_key_proof::{
-    SameSecretBridgeStatement, VssPublicCommandCommitmentExpectation,
+    SameSecretBridgeStatement, SameSecretLinkageStatement, VssPublicCommandCommitmentExpectation,
     vss_share_linkage_commitment_from_value,
 };
 
@@ -37,10 +37,9 @@ impl VerifiedSameSecretBridgeMaterial {
 #[derive(Clone)]
 pub(in crate::bgv::setup) struct SameSecretBridgeStatementBinding {
     pub(in crate::bgv::setup) trustee_identity: String,
-    pub(in crate::bgv::setup) trustee_secret_commitment_root: String,
-    pub(in crate::bgv::setup) same_secret_statement_root: String,
-    pub(in crate::bgv::setup) same_secret_proof_root: String,
-    pub(in crate::bgv::setup) same_secret_proof_family_binding_root: String,
+    pub(in crate::bgv::setup) same_secret_bridge_statement_root: String,
+    pub(in crate::bgv::setup) same_secret_bridge_proof_record_root: String,
+    pub(in crate::bgv::setup) source_linkage: SameSecretLinkageStatement,
     pub(in crate::bgv::setup) statement: SameSecretBridgeStatement,
 }
 
@@ -63,8 +62,8 @@ pub(super) fn verify_optional_same_secret_bridge_statement_set(
     let required_bridge_material_fields = [
         SAME_SECRET_BRIDGE_STATEMENT_SET_FIELD,
         SAME_SECRET_BRIDGE_PROOF_MATERIAL_SET_FIELD,
-        "sameSecretConsistency",
-        "sameSecretProofs",
+        "vssPublicCoefficientCommitmentSet",
+        "vssCoefficientCommitments",
     ];
     let present_field_count = required_bridge_material_fields
         .iter()
@@ -83,7 +82,7 @@ pub(super) fn verify_optional_same_secret_bridge_statement_set(
             same_secret_bridge_refusal(
                 "sameSecretBridgeEvidenceIncomplete",
                 format!(
-                    "same-secret bridge material requires the statement set, proof material set, same-secret statements, and same-secret proofs; missing {missing_fields}"
+                    "same-secret bridge material requires the statement set, proof material set, authoritative public coefficient commitments, and canonical source VSS commitments; missing {missing_fields}"
                 ),
                 "setupPackage",
             )?,
@@ -109,8 +108,6 @@ fn verify_same_secret_bridge_setup_binding(
     setup_package: &Value,
     statement_set: &Value,
     statement_verification: &Value,
-    same_secret_consistency: &Value,
-    same_secret_proofs: &Value,
 ) -> CanonicalResult<()> {
     let setup_context = setup_package
         .get("setupContext")
@@ -123,6 +120,14 @@ fn verify_same_secret_bridge_setup_binding(
         .ok_or_else(|| {
             same_secret_bridge_error("same-secret bridge requires the coefficient commitment set")
         })?;
+    let vss_coefficient_commitments =
+        setup_package
+            .get("vssCoefficientCommitments")
+            .ok_or_else(|| {
+                same_secret_bridge_error(
+                    "same-secret bridge requires the VSS coefficient commitments",
+                )
+            })?;
 
     compare_setup_context_binding(
         setup_context,
@@ -150,14 +155,12 @@ fn verify_same_secret_bridge_setup_binding(
         "same-secret bridge statement set coefficientCommitmentRoot",
     )?;
     compare_required_string(
-        hash_at_path(statement_verification, &["sameSecretConsistencyRoot"])?,
-        hash_at_path(same_secret_consistency, &["sameSecretConsistencyRoot"])?,
-        "same-secret bridge statement set sameSecretConsistencyRoot",
-    )?;
-    compare_required_string(
-        hash_at_path(statement_verification, &["sameSecretProofSetRoot"])?,
-        hash_at_path(same_secret_proofs, &["sameSecretProofSetRoot"])?,
-        "same-secret bridge statement set sameSecretProofSetRoot",
+        hash_at_path(statement_verification, &["vssCoefficientCommitmentRoot"])?,
+        hash_at_path(
+            vss_coefficient_commitments,
+            &["vssCoefficientCommitmentRoot"],
+        )?,
+        "same-secret bridge statement set vssCoefficientCommitmentRoot",
     )?;
 
     Ok(())
@@ -170,38 +173,19 @@ pub(in crate::bgv::setup) fn verified_same_secret_bridge_material_from_package(
     let statement_set = setup_package
         .get(SAME_SECRET_BRIDGE_STATEMENT_SET_FIELD)
         .ok_or_else(|| same_secret_bridge_error("same-secret bridge statement set"))?;
-    let same_secret_consistency = setup_package
-        .get("sameSecretConsistency")
-        .ok_or_else(|| same_secret_bridge_error("same-secret consistency"))?;
-    let same_secret_proofs = setup_package
-        .get("sameSecretProofs")
-        .ok_or_else(|| same_secret_bridge_error("same-secret proofs"))?;
     let statement_verification =
         crate::bgv::setup::verify_vss_same_secret_bridge_statement_set_request(
-            &same_secret_bridge_verification_request(
-                statement_set,
-                same_secret_consistency,
-                same_secret_proofs,
-                None,
-                request,
-            ),
+            &same_secret_bridge_verification_request(statement_set, None, setup_package, request),
         )?;
-    verify_same_secret_bridge_setup_binding(
-        setup_package,
-        statement_set,
-        &statement_verification,
-        same_secret_consistency,
-        same_secret_proofs,
-    )?;
+    verify_same_secret_bridge_setup_binding(setup_package, statement_set, &statement_verification)?;
     let proof_material_set = setup_package
         .get(SAME_SECRET_BRIDGE_PROOF_MATERIAL_SET_FIELD)
         .ok_or_else(|| same_secret_bridge_error("same-secret bridge proof material set"))?;
     crate::bgv::setup::verify_vss_same_secret_bridge_proof_material_set_request(
         &same_secret_bridge_verification_request(
             statement_set,
-            same_secret_consistency,
-            same_secret_proofs,
             Some(proof_material_set),
+            setup_package,
             request,
         ),
     )?;
@@ -220,6 +204,19 @@ pub(in crate::bgv::setup) fn verified_same_secret_bridge_material_from_package(
     )?;
     let target_basis_hash = value_string(statement_set, "targetBasisHash")?;
     let statement_records = array_value(statement_set, "statementRecords")?;
+    let proof_records = array_value(proof_material_set, "proofRecords")?;
+    if proof_records.len() != statement_records.len() {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "same-secret bridge statement and proof records must be aligned",
+        ));
+    }
+    let vss_coefficient_commitments =
+        setup_package
+            .get("vssCoefficientCommitments")
+            .ok_or_else(|| {
+                same_secret_bridge_error("same-secret bridge VSS coefficient commitments")
+            })?;
     let mut statements_by_roster_position = BTreeMap::new();
     for statement_record in statement_records {
         let trustee_roster_position = value_u64(statement_record, "trusteeRosterPosition")?;
@@ -297,22 +294,31 @@ pub(in crate::bgv::setup) fn verified_same_secret_bridge_material_from_package(
         }
 
         let trustee_identity = value_string(statement_record, "trusteeIdentity")?.to_string();
+        let source_constant_commitments = super::super::source_constant_commitments::canonical_source_constant_commitments_from_bridge_statement(
+            vss_coefficient_commitments,
+            statement_record,
+            &trustee_identity,
+            trustee_roster_position,
+            public_matrix_seed_hash,
+            ring_degree,
+        )?;
+        let proof_record = &proof_records[trustee_roster_position as usize];
         let binding = SameSecretBridgeStatementBinding {
             trustee_identity: trustee_identity.clone(),
-            trustee_secret_commitment_root: value_string(
+            same_secret_bridge_statement_root: value_string(
                 statement_record,
-                "trusteeSecretCommitmentRoot",
+                "sameSecretBridgeStatementRoot",
             )?
             .to_string(),
-            same_secret_statement_root: value_string(statement_record, "sameSecretStatementRoot")?
-                .to_string(),
-            same_secret_proof_root: value_string(statement_record, "sameSecretProofRoot")?
-                .to_string(),
-            same_secret_proof_family_binding_root: value_string(
-                statement_record,
-                "sameSecretProofFamilyBindingRoot",
+            same_secret_bridge_proof_record_root: value_string(
+                proof_record,
+                "sameSecretBridgeProofRecordRoot",
             )?
             .to_string(),
+            source_linkage: SameSecretLinkageStatement {
+                public_matrix_seed_hash: public_matrix_seed_hash.to_string(),
+                commitments: source_constant_commitments.commitments,
+            },
             statement: SameSecretBridgeStatement {
                 public_matrix_seed_hash: public_matrix_seed_hash.to_string(),
                 source_trustee_identity: trustee_identity,
@@ -341,24 +347,24 @@ pub(in crate::bgv::setup) fn verified_same_secret_bridge_material_from_package(
 
 fn same_secret_bridge_verification_request(
     statement_set: &Value,
-    same_secret_consistency: &Value,
-    same_secret_proofs: &Value,
     proof_material_set: Option<&Value>,
+    setup_package: &Value,
     request: &Value,
 ) -> Value {
-    let mut verification_request = serde_json::Map::from_iter([
-        ("statementSet".to_string(), statement_set.clone()),
-        (
-            "sameSecretConsistency".to_string(),
-            same_secret_consistency.clone(),
-        ),
-        ("sameSecretProofs".to_string(), same_secret_proofs.clone()),
-    ]);
+    let mut verification_request =
+        serde_json::Map::from_iter([("statementSet".to_string(), statement_set.clone())]);
+    if let Some(value) = setup_package.get("vssPublicCoefficientCommitmentSet") {
+        verification_request.insert("coefficientCommitmentSet".to_string(), value.clone());
+    }
+    for field_name in ["vssCoefficientCommitments"] {
+        if let Some(value) = setup_package.get(field_name) {
+            verification_request.insert(field_name.to_string(), value.clone());
+        }
+    }
     if let Some(proof_material_set) = proof_material_set {
         verification_request.insert("proofMaterialSet".to_string(), proof_material_set.clone());
     }
     for field_name in [
-        "transportedSameSecretProofMaterial",
         "transportedSameSecretBridgeProofMaterial",
         "verifiedSetupProofMaterials",
     ] {
@@ -400,20 +406,6 @@ mod tests {
     }
 
     #[test]
-    fn ordinary_same_secret_fields_do_not_enable_bridge() -> CanonicalResult<()> {
-        let response = verify_optional_same_secret_bridge_statement_set(
-            &json!({
-                "sameSecretConsistency": {},
-                "sameSecretProofs": {},
-            }),
-            &json!({}),
-        )?;
-
-        assert!(matches!(response, SameSecretBridgeVerification::Absent));
-        Ok(())
-    }
-
-    #[test]
     fn optional_same_secret_bridge_refuses_proof_material_without_statement_set()
     -> CanonicalResult<()> {
         let response = verify_optional_same_secret_bridge_statement_set(
@@ -429,6 +421,11 @@ mod tests {
             response["refusedObjects"][0]["reasonCode"],
             json!("sameSecretBridgeEvidenceIncomplete")
         );
+        let refusal_message = response["refusedObjects"][0]["message"]
+            .as_str()
+            .expect("incomplete bridge refusal message");
+        assert!(refusal_message.contains("vssPublicCoefficientCommitmentSet"));
+        assert!(refusal_message.contains("vssCoefficientCommitments"));
         Ok(())
     }
 
@@ -457,8 +454,8 @@ mod tests {
             &json!({
                 "sameSecretBridgeStatementSet": {},
                 "sameSecretBridgeProofMaterialSet": {},
-                "sameSecretConsistency": {},
-                "sameSecretProofs": {},
+                "vssPublicCoefficientCommitmentSet": {},
+                "vssCoefficientCommitments": {},
             }),
             &json!({}),
         )

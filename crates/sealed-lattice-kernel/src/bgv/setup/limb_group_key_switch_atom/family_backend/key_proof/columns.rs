@@ -128,12 +128,7 @@ impl<'a, const LIMB_COUNT: usize> KeyColumnPlan<'a, LIMB_COUNT> {
                 Some(LinkagePlanData { layout, values })
             }
         };
-        let extra_lookups = linkage_data
-            .as_ref()
-            .map(|data| linkage::linkage_lookup_values(&data.values))
-            .unwrap_or_default();
-        let multiplicity_values =
-            carry_multiplicity_values(parameters, ring_degree, digits, &extra_lookups);
+        let multiplicity_values = carry_multiplicity_values(parameters, ring_degree, digits);
         let steps = if mask_degree == 0 { 0 } else { mask_degree + 1 };
         let base_count = base_column_count(
             ring_degree,
@@ -180,6 +175,23 @@ impl<'a, const LIMB_COUNT: usize> KeyColumnPlan<'a, LIMB_COUNT> {
 
     pub(super) fn aux_column_count(&self) -> usize {
         aux_column_count(self.ring_degree, self.digits.len(), self.linkage_layout())
+    }
+
+    pub(super) fn populate_linkage_reduced_witness(
+        &mut self,
+        public_forms: &linkage::LinkagePublicForms,
+    ) -> CanonicalResult<()> {
+        let data = self
+            .linkage
+            .as_mut()
+            .ok_or_else(|| invalid_key("a BDLOP linkage reduction requires a linkage block"))?;
+        linkage::populate_linkage_reduced_witness(
+            &mut data.values,
+            public_forms,
+            self.secret,
+            self.ring_degree,
+            &data.layout,
+        )
     }
 
     // Record the logUp challenge and snapshot the aux columns' mask seeds,
@@ -361,14 +373,8 @@ impl<'a, const LIMB_COUNT: usize> KeyColumnPlan<'a, LIMB_COUNT> {
             .linkage
             .as_ref()
             .expect("linkage aux columns only exist with a linkage block");
-        let looked_up = linkage::linkage_lookup_value_column(
-            parameters,
-            &data.layout,
-            &data.values,
-            column - linkage_start,
-        );
-        carry_range_lookup::lookup_fraction_column(parameters, challenge, &looked_up)
-            .ok_or_else(|| invalid_key("logUp challenge collided with a linkage lookup"))
+        let linkage_offset = column - linkage_start;
+        linkage::linkage_aux_value_column(parameters, &data.layout, &data.values, linkage_offset)
     }
 
     // The masked coefficient vector for aux column `column`.
@@ -406,14 +412,6 @@ impl<'a, const LIMB_COUNT: usize> KeyColumnPlan<'a, LIMB_COUNT> {
                 &carry_range_lookup::column_sum(parameters, &column),
             );
         }
-        let linkage_start = aux_linkage_start(self.ring_degree, digit_count);
-        for column in linkage_start..self.aux_column_count() {
-            let fraction = self.aux_value_column(parameters, column)?;
-            lookup_terminal = parameters.add(
-                &lookup_terminal,
-                &carry_range_lookup::column_sum(parameters, &fraction),
-            );
-        }
         let table_count = carry_range_lookup::table_count(self.ring_degree);
         let mut table_terminals = Vec::with_capacity(table_count);
         for table_index in 0..table_count {
@@ -435,11 +433,10 @@ pub(super) fn carry_multiplicity_values<const LIMB_COUNT: usize>(
     parameters: &ProofFieldParameters<LIMB_COUNT>,
     ring_degree: usize,
     digits: &[DigitWitness],
-    extra_lookups: &[usize],
 ) -> Vec<Vec<[u64; LIMB_COUNT]>> {
     let shift = carry_range_lookup::carry_shift(ring_degree);
     let max_shifted = carry_range_lookup::max_shifted_value(ring_degree);
-    let mut shifted_in_range = Vec::with_capacity(digits.len() * ring_degree + extra_lookups.len());
+    let mut shifted_in_range = Vec::with_capacity(digits.len() * ring_degree);
     for digit in digits {
         for &carry in &digit.carry {
             let shifted = carry + shift;
@@ -448,6 +445,5 @@ pub(super) fn carry_multiplicity_values<const LIMB_COUNT: usize>(
             }
         }
     }
-    shifted_in_range.extend_from_slice(extra_lookups);
     carry_range_lookup::multiplicities(parameters, &shifted_in_range, ring_degree)
 }

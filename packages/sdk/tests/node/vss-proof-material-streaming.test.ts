@@ -13,8 +13,8 @@ type JsonRecord = Record<string, unknown>;
 // The two public-VSS proof material families the kernel streams through
 // the shared setup proof-material transport instead of embedding as base64 in the
 // package JSON. Each carries a distinct proof-family string, transported object
-// types, and proof-bytes hash domain; the streamed proofRecordRoot canonical form
-// otherwise differs only in the embedded identity fields.
+// types, proof-bytes hash domain, and family-specific proof-record root field;
+// the streamed canonical form otherwise differs only in the identity fields.
 type ProofMaterialCase = Readonly<{
     readonly proofFamily: 'vss-share-linkage' | 'same-secret-bridge';
     readonly proofRecordObjectType:
@@ -30,6 +30,9 @@ type ProofMaterialCase = Readonly<{
         | 'SetupTransportedVssShareLinkageProofMaterial'
         | 'SetupTransportedSameSecretBridgeProofMaterial';
     readonly proofBytesHashDomain: string;
+    readonly proofRecordRootField:
+        | 'proofRecordRoot'
+        | 'sameSecretBridgeProofRecordRoot';
     readonly moveEmbeddedToTransport: (proofMaterialSet: JsonRecord) => {
         readonly proofMaterialSet: JsonRecord;
         readonly transportedProofMaterialSet: JsonRecord;
@@ -71,6 +74,7 @@ const proofMaterialCases = [
             'SetupTransportedVssShareLinkageProofMaterial',
         proofBytesHashDomain:
             'sealed-lattice/setup/vss-share-linkage/proof-bytes',
+        proofRecordRootField: 'proofRecordRoot',
         moveEmbeddedToTransport: (proofMaterialSet: JsonRecord) => {
             const moved =
                 createBinaryChunkedVssShareLinkageProofMaterialTransport(
@@ -95,6 +99,7 @@ const proofMaterialCases = [
             'SetupTransportedSameSecretBridgeProofMaterial',
         proofBytesHashDomain:
             'sealed-lattice/setup/same-secret-bridge/proof-bytes',
+        proofRecordRootField: 'sameSecretBridgeProofRecordRoot',
         moveEmbeddedToTransport: (proofMaterialSet: JsonRecord) => {
             const moved =
                 createBinaryChunkedSameSecretBridgeProofMaterialTransport(
@@ -166,7 +171,7 @@ const embeddedProofMaterialSet = (
                     [proofBytes],
                 ),
                 proofBytesBase64: encodeStandardBase64(proofBytes),
-                proofRecordRoot: `stale-record-root-${String(recordIndex)}`,
+                [proofMaterialCase.proofRecordRootField]: `stale-record-root-${String(recordIndex)}`,
             };
         },
     );
@@ -217,10 +222,12 @@ describe('VSS proof material move to transport', () => {
                 );
                 // The record must rebind its root over the transport reference,
                 // not keep the stale embedded root.
-                expect(proofRecord.proofRecordRoot).not.toBe(
+                const proofRecordRoot =
+                    proofRecord[proofMaterialCase.proofRecordRootField];
+                expect(proofRecordRoot).not.toBe(
                     `stale-record-root-${String(recordIndex)}`,
                 );
-                expect(proofRecord.proofRecordRoot).toMatch(/^[0-9a-f]{128}$/u);
+                expect(proofRecordRoot).toMatch(/^[0-9a-f]{128}$/u);
 
                 const transportChunks =
                     transportMaterial.chunks as readonly JsonRecord[];

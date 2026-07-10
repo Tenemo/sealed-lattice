@@ -168,8 +168,15 @@ jobs:
               run: |
                   node --input-type=module <<'NODE'
                   const needs = ${{ toJSON(needs) }};
+                  const eventName = ${{ toJSON(github.event_name) }};
                   const failed = Object.entries(needs).filter(
-                    ([, job]) => job.result !== 'success',
+                    ([name, job]) =>
+                      job.result !== 'success' &&
+                      !(
+                        name === 'release-smoke' &&
+                        eventName !== 'pull_request' &&
+                        job.result === 'skipped'
+                      ),
                   );
                   if (failed.length > 0) {
                     console.error(

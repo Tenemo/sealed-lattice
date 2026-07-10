@@ -16,10 +16,6 @@ pub(in crate::bgv::setup) fn public_evaluation_key_material_manifest(
         "participantCount": value_u64(evaluation_keys, "participantCount")?,
         "rnsLimbCount": value_u64(evaluation_keys, "rnsLimbCount")?,
         "evaluatorKeyScheduleRoot": value_string(evaluation_keys, "evaluatorKeyScheduleRoot")?,
-        "sameSecretProofFamilyBindingRoot": value_string(
-            evaluation_keys,
-            "sameSecretProofFamilyBindingRoot",
-        )?,
         "publicKeyShareSuccinctProofSetRoot": value_string(
             evaluation_keys,
             "publicKeyShareSuccinctProofSetRoot",

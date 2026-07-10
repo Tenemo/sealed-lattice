@@ -58,10 +58,6 @@ pub(super) fn verify_aggregate_opening_credential(
     )?;
     let aggregate_share_values =
         derive_aggregate_share_values(&aggregate_commitment_message_values, input.rns_prime)?;
-    let message_coefficient_bound = aggregate_message_coefficient_bound(
-        input.rns_prime,
-        input.setup_binding.participants.len(),
-    )?;
     let computation = compute_aggregate_opening(AggregateOpeningRootsInput {
         setup_binding: input.setup_binding,
         participant: input.participant,
@@ -69,7 +65,7 @@ pub(super) fn verify_aggregate_opening_credential(
         rns_limb_index: input.rns_limb_index,
         rns_prime: input.rns_prime,
         aggregate_commitment_message_values: &aggregate_commitment_message_values,
-        message_coefficient_bound,
+        message_coefficient_bound: input.rns_prime,
         aggregate_material_seed_hex: &aggregate_material_seed_hex,
     })?;
     compare_hash_field(
@@ -93,15 +89,6 @@ pub(super) fn verify_aggregate_opening_credential(
         aggregate_commitment_message_values,
         aggregate_material_seed_hex,
     })
-}
-
-#[cfg(test)]
-pub(super) fn compute_aggregate_opening_roots(
-    input: AggregateOpeningRootsInput<'_>,
-) -> CanonicalResult<(String, String)> {
-    let computation = compute_aggregate_opening(input)?;
-
-    Ok((computation.commitment_root, computation.opening_root))
 }
 
 pub(super) fn compute_aggregate_opening(
@@ -176,7 +163,7 @@ fn aggregate_commitment_context(
     rns_prime: u64,
 ) -> Value {
     json!({
-        "objectType": "VssPublicAggregateThresholdShareCommitmentContext",
+        "objectType": "VssPublicAggregateThresholdCommitmentContext",
         "ceremonyId": setup_binding.ceremony_id.as_str(),
         "manifestHash": setup_binding.election_manifest_hash.as_str(),
         "rosterHash": setup_binding.roster_hash.as_str(),
@@ -184,6 +171,7 @@ fn aggregate_commitment_context(
         "setupEpoch": setup_epoch,
         "recipientIdentity": participant.trustee_identity.as_str(),
         "recipientRosterPosition": participant.roster_position,
+        "recipientTrusteePoint": participant.interpolation_point,
         "rnsLimbIndex": rns_limb_index,
         "rnsPrime": rns_prime,
     })

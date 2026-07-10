@@ -38,12 +38,13 @@ type ProofMaterialTransportParameters = Readonly<{
     readonly proofBytesHashDomain: string;
     readonly transportSetObjectType: string;
     readonly transportMaterialObjectType: string;
+    readonly proofRecordRootField: string;
 }>;
 
 // Move every proof record's embedded base64 proof bytes onto the shared
 // setup proof-material transport. Each record keeps its identity fields but drops
 // proofBytesBase64 for the transport reference fields and a recomputed
-// proofRecordRoot, exactly as the kernel verifier rebuilds it, and its proof
+// family-specific record root, exactly as the kernel verifier rebuilds it. Its proof
 // bytes travel as streamable chunks in the returned transported material set.
 // The proof material set root is rebound over the rewritten records because it
 // canonically binds the per-record proof-bytes encoding. This mirrors the kernel
@@ -113,13 +114,9 @@ const moveProofBytesToTransport = (
                 ),
             });
 
-            const {
-                proofBytesBase64: omittedProofBytesBase64,
-                proofRecordRoot: omittedProofRecordRoot,
-                ...proofRecordIdentity
-            } = proofRecord;
-            void omittedProofBytesBase64;
-            void omittedProofRecordRoot;
+            const proofRecordIdentity = { ...proofRecord };
+            delete proofRecordIdentity.proofBytesBase64;
+            delete proofRecordIdentity[parameters.proofRecordRootField];
             const transportedProofRecordWithoutRoot = {
                 ...proofRecordIdentity,
                 proofBytesEncoding: 'binary-chunked-proof-bytes',
@@ -131,7 +128,7 @@ const moveProofBytesToTransport = (
 
             return {
                 ...transportedProofRecordWithoutRoot,
-                proofRecordRoot: deriveCanonicalObjectHash(
+                [parameters.proofRecordRootField]: deriveCanonicalObjectHash(
                     transportedProofRecordWithoutRoot,
                 ),
             };
@@ -178,6 +175,7 @@ export const createBinaryChunkedVssShareLinkageProofMaterialTransport = (
             'SetupTransportedVssShareLinkageProofMaterialSet',
         transportMaterialObjectType:
             'SetupTransportedVssShareLinkageProofMaterial',
+        proofRecordRootField: 'proofRecordRoot',
     });
 
     return {
@@ -202,6 +200,7 @@ export const createBinaryChunkedSameSecretBridgeProofMaterialTransport = (
             'SetupTransportedSameSecretBridgeProofMaterialSet',
         transportMaterialObjectType:
             'SetupTransportedSameSecretBridgeProofMaterial',
+        proofRecordRootField: 'sameSecretBridgeProofRecordRoot',
     });
 
     return {

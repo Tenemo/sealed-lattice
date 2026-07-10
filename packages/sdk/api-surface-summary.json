@@ -13,7 +13,7 @@
         "packages/sdk/dist/internal/transcript-core.d.ts",
         "packages/sdk/dist/internal/types.d.ts"
     ],
-    "reachableDeclarationHash": "d19bbc738b84818b150f97dbb374f740ba5eff21aae6538fdeda0e36ebeae784",
+    "reachableDeclarationHash": "6221ac4c28245be6b8db5702a367f358fac32c73a7f40aeaa5bb40965aef3edb",
     "runtimeExports": [
         "createSetupPackageVerificationInput",
         "deriveCollectiveBgvSetupRosterHash",
@@ -144,7 +144,6 @@
         "TransportedPublicEvaluationKeyMaterialSet",
         "TransportedPublicKeyShareProofMaterialSet",
         "TransportedSameSecretBridgeProofMaterialSet",
-        "TransportedSameSecretProofMaterialSet",
         "TransportedVssShareLinkageProofMaterialSet",
         "TrusteeSetupEntry",
         "ValidatedFirstValidObject",

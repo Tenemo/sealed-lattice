@@ -21,18 +21,19 @@ import type {
     PublicKeyShareSuccinctProofSet,
     TransportedPublicKeyShareProofMaterialSet,
 } from '../public-key-share-records.js';
-import type {
-    SameSecretConsistencyStatementSet,
-    SameSecretProofSet,
-    TransportedSameSecretProofMaterialSet,
-} from '../same-secret-consistency-records.js';
 import type { SetupCertificatesInput } from '../setup-certificates.js';
 import type { SetupPhaseRecord } from '../setup-phase-records.js';
 import type { VerifiedSetupProofMaterialSet } from '../setup-proof-material-transport.js';
 import type {
+    SetupPackageVssCoefficientCommitmentMaterialSet,
+    VssCoefficientCommitmentSet,
+    VssCoefficientCommitmentMaterialBinaryReference,
+} from '../vss-coefficient-commitments.js';
+import type {
     VssPublicAggregateThresholdCommitmentSet,
     VssPublicCoefficientCommitmentSet,
     VssPublicRecipientShareCommitmentSet,
+    VssSameSecretBridgeProofMaterialSet,
     VssSameSecretBridgeStatementSet,
     VssShareLinkageStatement,
     TransportedSameSecretBridgeProofMaterialSet,
@@ -46,10 +47,7 @@ import type {
 
 export type JsonRecord = Record<string, unknown>;
 
-export type SetupPackageCertificateInput = Omit<
-    SetupCertificatesInput,
-    'vssCoefficientCommitmentMaterial'
->;
+export type SetupPackageCertificateInput = SetupCertificatesInput;
 
 export type SetupPackageCertificateRecords = Readonly<{
     readonly setupTransportCertificate: JsonRecord;
@@ -60,22 +58,21 @@ export type SetupPackageInput = Readonly<{
     readonly qShare: JsonRecord;
     readonly phaseTranscript: readonly SetupPhaseRecord[];
     readonly commonRandomness: SetupCommonRandomness;
+    readonly vssCoefficientCommitments: VssCoefficientCommitmentSet;
+    readonly vssCoefficientCommitmentMaterial:
+        | SetupPackageVssCoefficientCommitmentMaterialSet
+        | JsonRecord;
     readonly vssPublicCoefficientCommitmentSet: VssPublicCoefficientCommitmentSet;
     readonly vssPublicRecipientShareCommitmentSet: VssPublicRecipientShareCommitmentSet;
     readonly vssPublicAggregateThresholdCommitmentSet: VssPublicAggregateThresholdCommitmentSet;
     readonly vssShareLinkageStatement: VssShareLinkageStatement;
     readonly vssShareLinkageProofMaterialSet: JsonRecord;
     readonly sameSecretBridgeStatementSet: VssSameSecretBridgeStatementSet;
-    readonly sameSecretBridgeProofMaterialSet: JsonRecord;
+    readonly sameSecretBridgeProofMaterialSet: VssSameSecretBridgeProofMaterialSet;
     readonly privateVssEnvelopeCommitments: JsonRecord;
     readonly vssShareAcceptances: VssShareAcceptanceSet;
     readonly vssComplaints?: VssComplaintSet | JsonRecord;
     readonly thresholdShareCommitments: JsonRecord;
-    readonly sameSecretConsistency: SameSecretConsistencyStatementSet;
-    readonly sameSecretProofs: SameSecretProofSet | JsonRecord;
-    readonly transportedSameSecretProofMaterial?:
-        | TransportedSameSecretProofMaterialSet
-        | JsonRecord;
     readonly publicKeyShares: PublicKeyShareSet;
     readonly publicKeyShareProofs: PublicKeyShareProofSet;
     readonly publicKeyShareMaterial:
@@ -116,20 +113,20 @@ export type SetupPackage = Readonly<
         readonly qShare: JsonRecord;
         readonly phaseTranscript: readonly SetupPhaseRecord[];
         readonly commonRandomness: SetupCommonRandomness;
+        readonly vssCoefficientCommitments: VssCoefficientCommitmentSet;
+        readonly vssCoefficientCommitmentMaterial: VssCoefficientCommitmentMaterialBinaryReference;
         readonly vssPublicCoefficientCommitmentSet: VssPublicCoefficientCommitmentSet;
         readonly vssPublicRecipientShareCommitmentSet: VssPublicRecipientShareCommitmentSet;
         readonly vssPublicAggregateThresholdCommitmentSet: VssPublicAggregateThresholdCommitmentSet;
         readonly vssShareLinkageStatement: VssShareLinkageStatement;
         readonly vssShareLinkageProofMaterialSet: JsonRecord;
         readonly sameSecretBridgeStatementSet: VssSameSecretBridgeStatementSet;
-        readonly sameSecretBridgeProofMaterialSet: JsonRecord;
+        readonly sameSecretBridgeProofMaterialSet: VssSameSecretBridgeProofMaterialSet;
         readonly privateVssEnvelopeCommitments: JsonRecord;
         readonly privateVssEnvelopeCommitmentRoot: ProtocolHash;
         readonly vssShareAcceptances: VssShareAcceptanceSet;
         readonly vssComplaints?: VssComplaintSet | JsonRecord;
         readonly thresholdShareCommitments: JsonRecord;
-        readonly sameSecretConsistency: SameSecretConsistencyStatementSet;
-        readonly sameSecretProofs: SameSecretProofSet | JsonRecord;
         readonly publicKeyShares: PublicKeyShareSet;
         readonly publicKeyShareProofs: PublicKeyShareProofSet;
         readonly publicKeyShareMaterial:
@@ -155,7 +152,6 @@ export type SetupPackageVerificationInputSource = Readonly<{
     readonly setupPackage: SetupPackage;
     readonly expectedManifestHash: ProtocolHash;
     readonly expectedRosterHash: ProtocolHash;
-    readonly transportedSameSecretProofMaterial?: TransportedSameSecretProofMaterialSet;
     readonly transportedPublicKeyShareMaterial?: SetupTransportedPublicKeyShareMaterial;
     readonly transportedPublicKeyShareProofMaterial?: TransportedPublicKeyShareProofMaterialSet;
     readonly transportedEvaluationKeyShareProofMaterial?: TransportedEvaluationKeyShareProofMaterialSet;

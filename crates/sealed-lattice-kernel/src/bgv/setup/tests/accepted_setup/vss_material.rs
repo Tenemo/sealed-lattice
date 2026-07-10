@@ -189,3 +189,163 @@ fn collective_setup_verifier_refuses_malformed_vss_share_acceptance_records() {
         "InvalidSignature",
     );
 }
+
+#[test]
+fn collective_setup_verifier_refuses_malformed_aggregate_threshold_proofs() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_malformed_aggregate_threshold_proofs",
+    );
+
+    assert_minimal_collective_setup_package_refused(
+        "missing aggregate threshold proof",
+        |package| {
+            package["vssPublicAggregateThresholdCommitmentSet"]["aggregateThresholdProofs"]
+                .as_array_mut()
+                .expect("aggregate threshold proofs")
+                .pop();
+        },
+        "vssPublicMaterialMalformed",
+    );
+
+    assert_minimal_collective_setup_package_refused(
+        "duplicate aggregate threshold proof coordinate",
+        |package| {
+            let proofs =
+                package["vssPublicAggregateThresholdCommitmentSet"]["aggregateThresholdProofs"]
+                    .as_array_mut()
+                    .expect("aggregate threshold proofs");
+            proofs[1] = proofs[0].clone();
+        },
+        "vssPublicMaterialMalformed",
+    );
+
+    assert_minimal_collective_setup_package_refused(
+        "cross-wired aggregate threshold proof statement",
+        |package| {
+            let proofs =
+                package["vssPublicAggregateThresholdCommitmentSet"]["aggregateThresholdProofs"]
+                    .as_array_mut()
+                    .expect("aggregate threshold proofs");
+            let first_statement = proofs[0]["vssShareLinkage"].clone();
+            proofs[0]["vssShareLinkage"] = proofs[1]["vssShareLinkage"].clone();
+            proofs[1]["vssShareLinkage"] = first_statement;
+        },
+        "vssPublicMaterialMalformed",
+    );
+
+    assert_minimal_collective_setup_package_refused(
+        "aggregate threshold proof without aggregate mode",
+        |package| {
+            package["vssPublicAggregateThresholdCommitmentSet"]["aggregateThresholdProofs"][0]["vssShareLinkage"]
+                ["isThresholdAggregate"] = serde_json::json!(false);
+        },
+        "vssPublicMaterialMalformed",
+    );
+
+    assert_minimal_collective_setup_package_refused(
+        "wrong aggregate threshold source commitment root",
+        |package| {
+            package["vssPublicAggregateThresholdCommitmentSet"]["aggregateThresholdProofs"][0]["vssShareLinkage"]
+                ["coefficientCommitmentRoots"][0] = serde_json::json!(valid_hash('0'));
+        },
+        "vssPublicMaterialMalformed",
+    );
+
+    assert_minimal_collective_setup_package_refused(
+        "wrong aggregate threshold source opening root",
+        |package| {
+            package["vssPublicAggregateThresholdCommitmentSet"]["aggregateThresholdProofs"][0]["vssShareLinkage"]
+                ["coefficientOpeningRoots"][0] = serde_json::json!(valid_hash('1'));
+        },
+        "vssPublicMaterialMalformed",
+    );
+
+    assert_minimal_collective_setup_package_refused(
+        "wrong aggregate threshold commitment root",
+        |package| {
+            package["vssPublicAggregateThresholdCommitmentSet"]["aggregateThresholdProofs"][0]["vssShareLinkage"]
+                ["recipientShareCommitmentRoot"] = serde_json::json!(valid_hash('f'));
+        },
+        "vssPublicMaterialMalformed",
+    );
+
+    assert_minimal_collective_setup_package_refused(
+        "wrong aggregate threshold opening root",
+        |package| {
+            package["vssPublicAggregateThresholdCommitmentSet"]["aggregateThresholdProofs"][0]["vssShareLinkage"]
+                ["recipientShareOpeningRoot"] = serde_json::json!(valid_hash('e'));
+        },
+        "vssPublicMaterialMalformed",
+    );
+
+    assert_minimal_collective_setup_package_refused(
+        "wrong aggregate threshold recipient identity",
+        |package| {
+            package["vssPublicAggregateThresholdCommitmentSet"]["aggregateThresholdProofs"][0]["vssShareLinkage"]
+                ["recipientIdentity"] = serde_json::json!("wrong aggregate recipient");
+        },
+        "vssPublicMaterialMalformed",
+    );
+
+    assert_minimal_collective_setup_package_refused(
+        "wrong aggregate threshold source identity",
+        |package| {
+            package["vssPublicAggregateThresholdCommitmentSet"]["aggregateThresholdProofs"][0]["vssShareLinkage"]
+                ["sourceTrusteeIdentity"] = serde_json::json!("wrong aggregate source");
+        },
+        "vssPublicMaterialMalformed",
+    );
+
+    assert_minimal_collective_setup_package_refused(
+        "wrong aggregate threshold recipient position",
+        |package| {
+            package["vssPublicAggregateThresholdCommitmentSet"]["aggregateThresholdProofs"][0]["vssShareLinkage"]
+                ["recipientRosterPosition"] = serde_json::json!(1);
+        },
+        "vssPublicMaterialMalformed",
+    );
+
+    assert_minimal_collective_setup_package_refused(
+        "wrong aggregate threshold source position",
+        |package| {
+            package["vssPublicAggregateThresholdCommitmentSet"]["aggregateThresholdProofs"][0]["vssShareLinkage"]
+                ["sourceTrusteeRosterPosition"] = serde_json::json!(1);
+        },
+        "vssPublicMaterialMalformed",
+    );
+
+    assert_minimal_collective_setup_package_refused(
+        "wrong aggregate threshold summand count",
+        |package| {
+            package["vssPublicAggregateThresholdCommitmentSet"]["aggregateThresholdProofs"][0]
+                ["vssShareLinkage"]["coefficientCommitmentRoots"]
+                .as_array_mut()
+                .expect("aggregate threshold summand roots")
+                .pop();
+        },
+        "vssPublicMaterialMalformed",
+    );
+
+    assert_minimal_collective_setup_package_refused(
+        "tampered aggregate threshold proof authentication bytes",
+        |package| {
+            let proof_bytes_base64 =
+                package["vssPublicAggregateThresholdCommitmentSet"]["aggregateThresholdProofs"][0]
+                    ["proofBytesBase64"]
+                    .as_str()
+                    .expect("aggregate threshold proof bytes");
+            let mut proof_bytes = crate::transcript_core::decode_standard_base64(
+                proof_bytes_base64,
+                "aggregate threshold proof bytes",
+            )
+            .expect("decoded aggregate threshold proof bytes");
+            let final_proof_byte = proof_bytes
+                .last_mut()
+                .expect("aggregate threshold proof must not be empty");
+            *final_proof_byte ^= 0x01;
+            package["vssPublicAggregateThresholdCommitmentSet"]["aggregateThresholdProofs"][0]["proofBytesBase64"] =
+                serde_json::json!(crate::transcript_core::encode_standard_base64(&proof_bytes));
+        },
+        "vssPublicMaterialMalformed",
+    );
+}

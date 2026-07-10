@@ -1,8 +1,6 @@
 use super::*;
 
-pub(crate) fn verify_vss_share_linkage_statement_request(
-    request: &Value,
-) -> CanonicalResult<Value> {
+pub(crate) fn verify_vss_share_linkage_bindings_request(request: &Value) -> CanonicalResult<Value> {
     let statement = value_at_path(request, &["statement"])?;
     compare_required_string(
         string_at_path(statement, &["objectType"])?,
@@ -123,7 +121,7 @@ pub(crate) fn verify_vss_share_linkage_statement_request(
 
     Ok(json!({
         "ok": true,
-        "operation": "verifyVssShareLinkageStatement",
+        "operation": "verifyVssShareLinkageBindings",
         "statementRoot": statement_root,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "targetBasisHash": target_basis_hash,
@@ -427,12 +425,14 @@ pub(crate) struct VssAggregateThresholdProofContext<'a> {
     pub(crate) manifest_hash: &'a str,
     pub(crate) roster_hash: &'a str,
     pub(crate) setup_epoch: &'a str,
+    pub(crate) public_matrix_seed_hash: &'a str,
     pub(crate) ring_degree: usize,
     pub(crate) participant_count: usize,
     pub(crate) rns_limb_count: usize,
 }
 
 pub(crate) fn verify_vss_public_aggregate_threshold_proofs(
+    coefficient_commitment_set: &Value,
     recipient_share_commitment_set: &Value,
     aggregate_threshold_commitment_set: &Value,
     context: &VssAggregateThresholdProofContext<'_>,
@@ -441,6 +441,8 @@ pub(crate) fn verify_vss_public_aggregate_threshold_proofs(
     let rns_limb_count = context.rns_limb_count;
     let recipient_source_records =
         array_at_path(recipient_share_commitment_set, &["sourceTrusteeRecords"])?;
+    let coefficient_source_records =
+        array_at_path(coefficient_commitment_set, &["sourceTrusteeRecords"])?;
     let aggregate_recipient_records =
         array_at_path(aggregate_threshold_commitment_set, &["recipientRecords"])?;
     let aggregate_proofs = array_at_path(
@@ -452,6 +454,28 @@ pub(crate) fn verify_vss_public_aggregate_threshold_proofs(
             CanonicalErrorCode::MalformedLength,
             "VSS aggregate threshold proofs must cover every aggregate record",
         ));
+    }
+    let mut seen_proof_coordinates = std::collections::BTreeSet::new();
+    for proof in aggregate_proofs {
+        compare_required_string(
+            string_at_path(proof, &["objectType"])?,
+            "VssAggregateThresholdProofRecord",
+            "VSS aggregate threshold proof objectType",
+        )?;
+        compare_required_string(
+            string_at_path(proof, &["proofFamily"])?,
+            "vss-share-linkage",
+            "VSS aggregate threshold proof family",
+        )?;
+        let proof_recipient_roster_position =
+            unsigned_at_path(proof, &["recipientRosterPosition"])?;
+        let proof_rns_limb_index = unsigned_at_path(proof, &["rnsLimbIndex"])?;
+        if !seen_proof_coordinates.insert((proof_recipient_roster_position, proof_rns_limb_index)) {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "VSS aggregate threshold proofs must contain one proof per recipient limb",
+            ));
+        }
     }
     for aggregate_record in aggregate_recipient_records {
         let recipient_roster_position =
@@ -500,20 +524,124 @@ pub(crate) fn verify_vss_public_aggregate_threshold_proofs(
                 "VSS aggregate proof statement must set isThresholdAggregate",
             ));
         }
+        compare_required_string(
+            hash_at_path(vss_aggregate, &["publicMatrixSeedHash"])?,
+            context.public_matrix_seed_hash,
+            "VSS aggregate proof public matrix seed hash",
+        )?;
+        let recipient_identity = string_at_path(aggregate_record, &["recipientIdentity"])?;
+        compare_required_string(
+            string_at_path(vss_aggregate, &["sourceTrusteeIdentity"])?,
+            recipient_identity,
+            "VSS aggregate proof source trustee identity",
+        )?;
+        compare_required_u64(
+            unsigned_at_path(vss_aggregate, &["sourceTrusteeRosterPosition"])?,
+            recipient_roster_position,
+            "VSS aggregate proof source trustee roster position",
+        )?;
+        compare_required_string(
+            string_at_path(vss_aggregate, &["recipientIdentity"])?,
+            recipient_identity,
+            "VSS aggregate proof recipient identity",
+        )?;
+        compare_required_u64(
+            unsigned_at_path(vss_aggregate, &["recipientRosterPosition"])?,
+            recipient_roster_position,
+            "VSS aggregate proof recipient roster position",
+        )?;
+        compare_required_u64(
+            unsigned_at_path(vss_aggregate, &["sourceRnsLimbIndex"])?,
+            rns_limb_index as u64,
+            "VSS aggregate proof source RNS limb index",
+        )?;
+        compare_required_u64(
+            unsigned_at_path(vss_aggregate, &["sourceMessageModulus"])?,
+            unsigned_at_path(aggregate_record, &["rnsPrime"])?,
+            "VSS aggregate proof source message modulus",
+        )?;
+        let metadata_source_position =
+            usize::try_from(recipient_roster_position).map_err(|_| {
+                CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    "VSS aggregate recipient roster position does not fit usize",
+                )
+            })?;
+        let coefficient_source_record = coefficient_source_records
+            .get(metadata_source_position)
+            .ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    "VSS coefficient set is missing the aggregate proof metadata source record",
+                )
+            })?;
+        let recipient_source_record = recipient_source_records
+            .get(metadata_source_position)
+            .ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    "VSS recipient-share set is missing the aggregate proof metadata source record",
+                )
+            })?;
+        compare_required_string(
+            hash_at_path(vss_aggregate, &["sourceCoefficientCommitmentRoot"])?,
+            hash_at_path(
+                coefficient_source_record,
+                &["sourceCoefficientCommitmentRoot"],
+            )?,
+            "VSS aggregate proof source coefficient commitment root",
+        )?;
+        compare_required_string(
+            hash_at_path(vss_aggregate, &["sourceRecipientShareCommitmentRoot"])?,
+            hash_at_path(
+                recipient_source_record,
+                &["sourceRecipientShareCommitmentRoot"],
+            )?,
+            "VSS aggregate proof source recipient-share commitment root",
+        )?;
         // The proof's recipient share is the committed threshold share T_{j,l}.
         compare_required_string(
             hash_at_path(vss_aggregate, &["recipientShareCommitmentRoot"])?,
             hash_at_path(aggregate_record, &["aggregateCommitmentRoot"])?,
             "VSS aggregate proof threshold-share commitment root",
         )?;
+        compare_required_string(
+            hash_at_path(vss_aggregate, &["recipientShareOpeningRoot"])?,
+            hash_at_path(aggregate_record, &["aggregateOpeningRoot"])?,
+            "VSS aggregate proof threshold-share opening root",
+        )?;
+        if value_at_path(vss_aggregate, &["recipientShareCommitment"])?
+            != value_at_path(aggregate_record, &["commitment"])?
+        {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::ComponentMismatch,
+                "VSS aggregate proof threshold-share commitment body does not match the aggregate record",
+            ));
+        }
+        if !array_at_path(vss_aggregate, &["additionalLinkageItems"])?.is_empty() {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "VSS aggregate proof must not contain additional linkage items",
+            ));
+        }
         // The proof's coefficients are the committed source recipient shares
         // sigma_{i->j,l}, in source order, matching the recipient-share set.
         let coefficient_commitment_roots =
             array_at_path(vss_aggregate, &["coefficientCommitmentRoots"])?;
+        let coefficient_opening_roots = array_at_path(vss_aggregate, &["coefficientOpeningRoots"])?;
+        let coefficient_commitments = array_at_path(vss_aggregate, &["coefficientCommitments"])?;
         if coefficient_commitment_roots.len() != participant_count {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
                 "VSS aggregate proof must sum one source share per participant",
+            ));
+        }
+        if coefficient_opening_roots.len() != participant_count
+            || coefficient_commitments.len() != participant_count
+        {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "VSS aggregate proof source share openings and commitments must cover every participant",
             ));
         }
         for (source_roster_position, coefficient_commitment_root) in
@@ -549,6 +677,27 @@ pub(crate) fn verify_vss_public_aggregate_threshold_proofs(
                 expected_root,
                 "VSS aggregate proof source share commitment root",
             )?;
+            let bound_opening_root = coefficient_opening_roots[source_roster_position]
+                .as_str()
+                .ok_or_else(|| {
+                    CanonicalError::new(
+                        CanonicalErrorCode::InvalidFixture,
+                        "VSS aggregate proof source share opening root must be a string",
+                    )
+                })?;
+            compare_required_string(
+                bound_opening_root,
+                hash_at_path(recipient_share_record, &["shareOpeningRoot"])?,
+                "VSS aggregate proof source share opening root",
+            )?;
+            if &coefficient_commitments[source_roster_position]
+                != value_at_path(recipient_share_record, &["commitment"])?
+            {
+                return Err(CanonicalError::new(
+                    CanonicalErrorCode::ComponentMismatch,
+                    "VSS aggregate proof source share commitment body does not match the recipient-share record",
+                ));
+            }
         }
         // Verify the unit-point share-linkage proof that T_{j,l} is the modular
         // sum of the bound source shares.

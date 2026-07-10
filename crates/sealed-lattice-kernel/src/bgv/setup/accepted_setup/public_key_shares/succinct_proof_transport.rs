@@ -66,8 +66,8 @@ pub(super) fn public_key_share_succinct_proof_bytes_from_record(
 
 // Canonical transported proof material reference for one public-key share
 // succinct proof. The succinct proof has no LNP relation commitment or tbox
-// prefix, so the reference binds only the statement hash and proof byte
-// identity, mirroring the same-secret anchor proof material reference.
+// prefix, so the reference binds only the statement hash, proof byte identity,
+// and transport hashes.
 pub(in crate::bgv::setup) fn public_key_share_succinct_proof_material_root(
     proof_record: &Value,
     transport_hashes: &super::setup_proof::SetupProofMaterialTransportHashes,

@@ -11,7 +11,6 @@ pub(super) fn vss_coefficient_commitments_object(
     setup_epoch: &str,
     public_matrix_seed_hash: &str,
     ring_degree: usize,
-    ring_degree_status: &str,
     participant_count: u64,
 ) -> (serde_json::Value, serde_json::Value) {
     let decryption_threshold = participant_count / 3 + 1;
@@ -132,7 +131,6 @@ pub(super) fn vss_coefficient_commitments_object(
         "thresholdDegree": decryption_threshold,
         "rnsLimbCount": DATA_PRIMES.len(),
         "ringDegree": ring_degree,
-        "ringDegreeStatus": ring_degree_status,
         "materialRecordCount": coefficient_commitment_material.len(),
         "coefficientCommitments": coefficient_commitment_material,
     });

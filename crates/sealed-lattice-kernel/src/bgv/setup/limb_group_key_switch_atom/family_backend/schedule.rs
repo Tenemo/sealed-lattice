@@ -2,10 +2,9 @@
 //! evaluation-key statements: one atom family proof per scheduled key limb
 //! group (keys wider than the group capacity split into consecutive groups),
 //! each transcript-bound to the statement hash and its schedule position, with
-//! the same-secret linkage opening the statement's first bridge target
-//! constant commitment (the verified bridge proves cross-limb consistency, so
-//! one opened commitment binds every key's relation secret to the anchor, and
-//! all keys share one secret transitively).
+//! the same-secret linkage opening one original accepted VSS source constant
+//! commitment. Every scheduled key opens that exact canonical source commitment
+//! to the same short secret used by its key-switch relation.
 //!
 //! The container byte format is strict and self-describing: the schedule
 //! magic, the key count, then one length-framed atom proof per key in schedule
@@ -32,15 +31,15 @@ use super::statement_bridge::{
 };
 use crate::bgv::parameters::{DATA_PRIMES, PLAINTEXT_MODULUS};
 use crate::bgv::setup::trustee_evaluation_key_proof::{
-    EvaluationKeyShareDescriptor, EvaluationKeyShareKind, SameSecretBridgeStatement,
-    TrusteeEvaluationKeyStatement, TrusteeEvaluationKeyWitness, public_key_switch_sample,
+    EvaluationKeyShareDescriptor, EvaluationKeyShareKind, TrusteeEvaluationKeyStatement,
+    TrusteeEvaluationKeyWitness, public_key_switch_sample,
 };
 use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 use crate::hashing::hash512;
 #[cfg(test)]
 use crate::hashing::to_hex;
 
-const SCHEDULE_MAGIC: &[u8; 8] = b"SLKSATS1";
+const SCHEDULE_MAGIC: &[u8; 8] = b"SLKSATS2";
 const SCHEDULE_SALT_DOMAIN: &str = "sealed-lattice/setup/key-switch-atom/schedule-salt";
 // 80 queries at rate 1/4 give about 136 conditional classical bits under the
 // CS25 accounting the setup families use; the count is soundness-set. Shared with
@@ -66,32 +65,32 @@ fn schedule_mask_degree(ring_degree: usize) -> usize {
     ring_degree / 4
 }
 
-// The linkage statement every key proof in the schedule binds. The removed
-// 48-coordinate projection commitment (SEC-012) was the previous anchor
-// target; the replacement anchor is the BDLOP constant commitment (the same
-// commitment the keyless same-secret linkage anchor family opens), whose
-// linear opening relation the atom system hosts natively. Until that
-// re-anchor lands, the schedule refuses fail-closed rather than proving or
-// accepting key-bearing statements without a same-secret anchor.
-fn linkage_statement_from_bridge(
-    bridge: &SameSecretBridgeStatement,
+// The linkage statement every key proof in the schedule binds: exactly one
+// original accepted BDLOP source constant commitment.
+fn linkage_statement(
+    statement: &TrusteeEvaluationKeyStatement,
 ) -> CanonicalResult<LinkageStatement<'_>> {
-    if bridge.target_constant_commitments.is_empty() || bridge.target_rns_primes.is_empty() {
+    validate_key_bearing_statement(statement)?;
+    let same_secret_linkage = statement.same_secret_linkage.as_ref().ok_or_else(|| {
+        invalid_schedule(
+            "a key-bearing trustee evaluation-key statement requires one accepted BDLOP source constant commitment",
+        )
+    })?;
+    if same_secret_linkage.commitments.len() != 1 {
         return Err(invalid_schedule(
-            "the same-secret bridge carries no target commitments",
+            "the key-bearing BDLOP linkage must carry exactly one source constant commitment",
         ));
     }
-    Err(invalid_schedule(
-        "the key-bearing same-secret anchor is being re-anchored from the removed projection commitment to the BDLOP constant commitment; key-bearing proofs refuse until the anchor lands",
-    ))
+    Ok(LinkageStatement {
+        same_secret_linkage,
+    })
 }
 
 // The key-bearing statement checks shared by prove and verify: at least one
-// key, every kind diagonal (public-key shares stay on their own family), and
-// the fail-closed same-secret bridge anchor present.
-fn key_bearing_bridge(
+// key and every kind diagonal (public-key shares stay on their own family).
+fn validate_key_bearing_statement(
     statement: &TrusteeEvaluationKeyStatement,
-) -> CanonicalResult<&SameSecretBridgeStatement> {
+) -> CanonicalResult<()> {
     if statement.keys.is_empty() {
         return Err(invalid_schedule(
             "a key-bearing trustee evaluation-key statement lists at least one key",
@@ -106,11 +105,7 @@ fn key_bearing_bridge(
             "public-key share descriptors do not belong to the key-bearing schedule",
         ));
     }
-    statement.same_secret_bridge.as_ref().ok_or_else(|| {
-        invalid_schedule(
-            "a key-bearing trustee evaluation-key statement requires the same-secret bridge anchor",
-        )
-    })
+    Ok(())
 }
 
 // Whether a statement routes to the atom schedule backend (any diagonal-source
@@ -235,8 +230,7 @@ pub(crate) fn prove_key_bearing_trustee_evaluation_keys(
     statement: &TrusteeEvaluationKeyStatement,
     witness: &TrusteeEvaluationKeyWitness,
 ) -> CanonicalResult<Vec<u8>> {
-    let bridge = key_bearing_bridge(statement)?;
-    let linkage_statement = linkage_statement_from_bridge(bridge)?;
+    let linkage_statement = linkage_statement(statement)?;
     if witness.error_coefficients_by_key.len() != statement.keys.len() {
         return Err(invalid_schedule(
             "witness error vectors must cover every scheduled key",
@@ -372,8 +366,7 @@ pub(crate) fn verify_key_bearing_trustee_evaluation_keys(
     statement: &TrusteeEvaluationKeyStatement,
     proof_bytes: &[u8],
 ) -> CanonicalResult<()> {
-    let bridge = key_bearing_bridge(statement)?;
-    let linkage_statement = linkage_statement_from_bridge(bridge)?;
+    let linkage_statement = linkage_statement(statement)?;
     let parameters = sixteen_limb_group_field_parameters();
     let statement_hash = statement.statement_hash();
     let ring_degree = statement.ring_degree;
@@ -536,7 +529,7 @@ pub(crate) fn key_bearing_material_roots_by_key_group(
     statement: &TrusteeEvaluationKeyStatement,
     proof_bytes: &[u8],
 ) -> CanonicalResult<Vec<KeyGroupMaterialRoot>> {
-    key_bearing_bridge(statement)?;
+    linkage_statement(statement)?;
     let parameters = sixteen_limb_group_field_parameters();
 
     if proof_bytes.len() < SCHEDULE_MAGIC.len() + 4

@@ -332,21 +332,24 @@ fn prove_key_fri_streamed<const LIMB_COUNT: usize>(
     absorb_public(&mut transcript, ring_degree, public, source);
     transcript.absorb_u64("key-linkage-present", u64::from(linkage_inputs.is_some()));
     if let Some((statement, _)) = linkage_inputs {
-        linkage::absorb_linkage_statement(&mut transcript, statement);
+        linkage::absorb_linkage_statement(&mut transcript, statement)?;
     }
     transcript.absorb_digest("key-base-root", &base_commitment.root());
     transcript.absorb_digest("key-material-root", &material_commitment.root());
+    let linkage_public_forms = match linkage_inputs {
+        Some((statement, _)) => {
+            let challenges =
+                linkage::draw_linkage_challenges(&mut transcript, statement, ring_degree)?;
+            let forms = linkage::build_linkage_public_forms(statement, &challenges, ring_degree)?;
+            plan.populate_linkage_reduced_witness(&forms)?;
+            Some(forms)
+        }
+        None => None,
+    };
     let gamma = transcript.challenge_field_elements(parameters, "key-gamma", ring_degree);
     let delta = transcript.challenge_field_elements(parameters, "key-delta", digit_count);
     let lookup_challenge = transcript.challenge_field_elements(parameters, "key-lookup-mu", 1);
     let mu = lookup_challenge[0];
-    let linkage_weights = linkage_inputs.map(|_| {
-        transcript.challenge_field_elements(
-            parameters,
-            "key-linkage-omega",
-            linkage::linkage_claim_count(),
-        )
-    });
 
     // Round 2 (streamed): the logUp fraction columns, which depend on `mu`. The
     // lookup and table terminals are computed from the on-domain values and
@@ -365,6 +368,17 @@ fn prove_key_fri_streamed<const LIMB_COUNT: usize>(
     transcript.absorb_digest("key-aux-root", &aux_commitment.root());
     transcript.absorb_field_elements("key-lookup-terminal", &[lookup_terminal]);
     transcript.absorb_field_elements("key-table-terminals", &table_terminals);
+    // The quotient chunks depend on the BDLOP lincheck challenges and are
+    // fixed by the auxiliary commitment. Draw the final coordinate batching
+    // weights only now, so a prover cannot choose those chunks to cancel
+    // malformed claims across commitment fields or extension coordinates.
+    let linkage_weights = linkage_public_forms.as_ref().map(|_| {
+        transcript.challenge_field_elements(
+            parameters,
+            "key-linkage-omega",
+            linkage::linkage_claim_count(),
+        )
+    });
 
     // Batching challenges: one for the lookup terminal, one per table terminal,
     // folded into the single sumcheck; and the support-constraint weights.
@@ -461,30 +475,16 @@ fn prove_key_fri_streamed<const LIMB_COUNT: usize>(
     // omega weights against the linkage witness columns.
     let linkage_start_base = base_linkage_start(ring_degree, digit_count);
     let linkage_start_aux = aux_linkage_start(ring_degree, digit_count);
-    if plan.linkage_layout().is_some() {
-        for column in linkage_start_aux..aux_count {
-            let coefficients = plan.aux_column_coefficients(parameters, &trace_domain, column)?;
-            f = polynomial::add(
-                parameters,
-                &f,
-                &polynomial::scale(parameters, &coefficients, &lookup_weight),
-            );
-        }
-    }
-    let linkage_forms = match (linkage_inputs, &linkage_weights) {
-        (Some((statement, _)), Some(weights)) => Some(linkage::build_linkage_forms(
+    let linkage_forms = match (&linkage_public_forms, &linkage_weights) {
+        (Some(public_forms), Some(weights)) => Some(linkage::build_linkage_forms(
             parameters,
-            statement,
+            public_forms,
             ring_degree,
             weights,
         )?),
         _ => None,
     };
     if let Some(forms) = &linkage_forms {
-        let layout_data = plan
-            .linkage_layout()
-            .copied()
-            .expect("linkage forms imply a linkage layout");
         let mut fold_form = |form: &Vec<[u64; LIMB_COUNT]>, column: usize| -> CanonicalResult<()> {
             let form_polynomial = trace_domain.interpolate(form);
             let column_coefficients =
@@ -496,19 +496,27 @@ fn prove_key_fri_streamed<const LIMB_COUNT: usize>(
             );
             Ok(())
         };
-        for (digit_index, form) in forms.digit_forms.iter().enumerate() {
-            fold_form(form, linkage_start_base + linkage::link_digit(digit_index))?;
-        }
+        fold_form(&forms.secret_form, COLUMN_SECRET)?;
+        fold_form(&forms.negative_form, linkage_start_base + linkage::LINK_NEG)?;
         for (randomness_index, form) in forms.randomness_forms.iter().enumerate() {
             fold_form(
                 form,
-                linkage_start_base + linkage::link_randomness(&layout_data, randomness_index),
+                linkage_start_base + linkage::link_randomness(randomness_index),
             )?;
         }
-        fold_form(
-            &forms.carry_form,
-            linkage_start_base + linkage::link_carry(&layout_data),
-        )?;
+        for (chunk, form) in forms.carry_chunk_forms.iter().enumerate() {
+            let form_polynomial = trace_domain.interpolate(form);
+            let column_coefficients = plan.aux_column_coefficients(
+                parameters,
+                &trace_domain,
+                linkage_start_aux + linkage::aux_carry_chunk(chunk),
+            )?;
+            f = polynomial::add(
+                parameters,
+                &f,
+                &polynomial::multiply_via_ntt(parameters, &form_polynomial, &column_coefficients),
+            );
+        }
     }
     let mut target = parameters.add(
         &atom_target,
@@ -684,20 +692,16 @@ fn prove_key_fri_streamed<const LIMB_COUNT: usize>(
             ),
         );
     }
-    if let Some((statement, _)) = linkage_inputs {
-        let context = linkage::linkage_constraint_context(
-            parameters,
-            ring_degree,
-            statement.source_message_modulus,
-        )?;
+    if linkage_inputs.is_some() {
+        let context = linkage::linkage_constraint_context(ring_degree)?;
         let layout_data = *context.layout();
-        let one_element = parameters.one();
-        let secret_column = plan.base_column_coefficients(parameters, &trace_domain, COLUMN_SECRET);
         let base_poly = |offset: usize| {
             plan.base_column_coefficients(parameters, &trace_domain, linkage_start_base + offset)
         };
+        let aux_poly = |offset: usize| {
+            plan.aux_column_coefficients(parameters, &trace_domain, linkage_start_aux + offset)
+        };
         let negative_indicator = base_poly(linkage::LINK_NEG);
-        // NEG binary.
         fold_constraint(
             &mut v,
             &mut alpha_index,
@@ -707,107 +711,63 @@ fn prove_key_fri_streamed<const LIMB_COUNT: usize>(
                 &polynomial::subtract(parameters, &negative_indicator, &one),
             ),
         );
-        // Message consistency: D0 + base*D1 - S - q*NEG.
-        let mut message = base_poly(linkage::link_digit(0));
-        message = polynomial::add(
-            parameters,
-            &message,
-            &polynomial::scale(
-                parameters,
-                &base_poly(linkage::link_digit(1)),
-                &parameters.unsigned_word_to_element(
-                    crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_BASE,
-                ),
-            ),
-        );
-        message = polynomial::subtract(parameters, &message, &secret_column);
-        message = polynomial::subtract(
-            parameters,
-            &message,
-            &polynomial::scale(
-                parameters,
-                &negative_indicator,
-                &parameters.unsigned_word_to_element(statement.source_message_modulus),
-            ),
-        );
-        fold_constraint(&mut v, &mut alpha_index, message);
-        // Digit reconstructions.
-        let chunk_base =
-            parameters.unsigned_word_to_element(1_u64 << linkage::chunk_bits(ring_degree));
-        for digit_index in 0..2 {
-            let mut reconstruction = base_poly(linkage::link_digit(digit_index));
-            let mut power = one_element;
-            for chunk in 0..layout_data.digit_chunk_count {
-                reconstruction = polynomial::subtract(
-                    parameters,
-                    &reconstruction,
-                    &polynomial::scale(
-                        parameters,
-                        &base_poly(linkage::link_digit_chunk(&layout_data, digit_index, chunk)),
-                        &power,
-                    ),
-                );
-                power = parameters.multiply(&power, &chunk_base);
-            }
-            fold_constraint(&mut v, &mut alpha_index, reconstruction);
-        }
-        // Carry reconstruction.
-        let mut carry_reconstruction = base_poly(linkage::link_carry(&layout_data));
-        let mut power = one_element;
-        for chunk in 0..layout_data.carry_chunk_count {
-            carry_reconstruction = polynomial::subtract(
-                parameters,
-                &carry_reconstruction,
-                &polynomial::scale(
-                    parameters,
-                    &base_poly(linkage::link_carry_chunk(&layout_data, chunk)),
-                    &power,
-                ),
-            );
-            power = parameters.multiply(&power, &chunk_base);
-        }
-        fold_constraint(&mut v, &mut alpha_index, carry_reconstruction);
-        // Fraction pins: (mu - value) * f - 1 (shifted randomness subtracts one
-        // more from the challenge).
-        for offset in 0..linkage::linkage_aux_column_count(&layout_data) {
-            let fraction = plan.aux_column_coefficients(
-                parameters,
-                &trace_domain,
-                linkage_start_aux + offset,
-            )?;
-            let chunk_block = 2 * layout_data.digit_chunk_count;
-            let (value_poly, challenge_head): (Vec<[u64; LIMB_COUNT]>, [u64; LIMB_COUNT]) =
-                if offset < chunk_block {
-                    let digit_index = offset / layout_data.digit_chunk_count;
-                    let chunk = offset % layout_data.digit_chunk_count;
-                    (
-                        base_poly(linkage::link_digit_chunk(&layout_data, digit_index, chunk)),
-                        mu,
-                    )
-                } else if offset < chunk_block + 2 {
-                    (
-                        base_poly(linkage::link_randomness(&layout_data, offset - chunk_block)),
-                        parameters.subtract(&mu, &one_element),
-                    )
-                } else {
-                    (
-                        base_poly(linkage::link_carry_chunk(
-                            &layout_data,
-                            offset - chunk_block - 2,
-                        )),
-                        mu,
-                    )
-                };
-            let denominator = polynomial::subtract(parameters, &[challenge_head], &value_poly);
+        // The five BDLOP opening-randomness columns are genuinely ternary:
+        // square = randomness^2 and randomness * (square - 1) = 0.
+        for randomness_column in 0..crate::bgv::setup::commitment::SETUP_COMMITMENT_RANDOMNESS_WIDTH
+        {
+            let randomness = base_poly(linkage::link_randomness(randomness_column));
+            let randomness_square = base_poly(linkage::link_randomness_square(randomness_column));
             fold_constraint(
                 &mut v,
                 &mut alpha_index,
                 polynomial::subtract(
                     parameters,
-                    &polynomial::multiply_via_ntt(parameters, &denominator, &fraction),
-                    &one,
+                    &randomness_square,
+                    &polynomial::multiply_via_ntt(parameters, &randomness, &randomness),
                 ),
             );
+            fold_constraint(
+                &mut v,
+                &mut alpha_index,
+                polynomial::multiply_via_ntt(
+                    parameters,
+                    &randomness,
+                    &polynomial::subtract(parameters, &randomness_square, &one),
+                ),
+            );
+        }
+        // Each quotient chunk is reconstructed from committed binary columns.
+        let two = parameters.unsigned_word_to_element(2);
+        for chunk in 0..2 {
+            let mut reconstruction = aux_poly(linkage::aux_carry_chunk(chunk))?;
+            let mut power = parameters.one();
+            for bit in 0..linkage::carry_chunk_bit_count(&layout_data, chunk) {
+                reconstruction = polynomial::subtract(
+                    parameters,
+                    &reconstruction,
+                    &polynomial::scale(
+                        parameters,
+                        &aux_poly(linkage::aux_carry_bit(&layout_data, chunk, bit))?,
+                        &power,
+                    ),
+                );
+                power = parameters.multiply(&power, &two);
+            }
+            fold_constraint(&mut v, &mut alpha_index, reconstruction);
+        }
+        for chunk in 0..2 {
+            for bit in 0..linkage::carry_chunk_bit_count(&layout_data, chunk) {
+                let bit_polynomial = aux_poly(linkage::aux_carry_bit(&layout_data, chunk, bit))?;
+                fold_constraint(
+                    &mut v,
+                    &mut alpha_index,
+                    polynomial::multiply_via_ntt(
+                        parameters,
+                        &bit_polynomial,
+                        &polynomial::subtract(parameters, &bit_polynomial, &one),
+                    ),
+                );
+            }
         }
     }
     let q_support = polynomial::divide_by_vanishing(parameters, &v, layout.trace_size);

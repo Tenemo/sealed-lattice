@@ -88,7 +88,7 @@ pub(super) struct VssPublicCoefficientRecordInput<'a> {
     public_matrix_seed_hash: &'a str,
 }
 
-pub(super) struct VssPublicCommitmentBodyInput<'a> {
+pub(super) struct VssCommittedMaterialRecordCommitmentInput<'a> {
     commitment: &'a Value,
     expected_commitment_role: &'a str,
     expected_commitment_root: &'a str,
@@ -159,8 +159,8 @@ pub(crate) fn validate_standalone_vss_public_commitment_body(
     Ok(commitment.clone())
 }
 
-pub(super) fn verify_vss_public_commitment_body(
-    input: VssPublicCommitmentBodyInput<'_>,
+pub(super) fn verify_vss_committed_material_record_commitment(
+    input: VssCommittedMaterialRecordCommitmentInput<'_>,
 ) -> CanonicalResult<Value> {
     let commitment =
         validate_standalone_vss_public_commitment_body(input.commitment, input.field_name)?;
@@ -235,14 +235,16 @@ pub(super) fn verify_vss_public_coefficient_record(
         hash_at_path(input.coefficient_record, &["coefficientCommitmentRoot"])?;
     let coefficient_opening_root =
         hash_at_path(input.coefficient_record, &["coefficientOpeningRoot"])?;
-    let commitment = verify_vss_public_commitment_body(VssPublicCommitmentBodyInput {
-        commitment: value_at_path(input.coefficient_record, &["commitment"])?,
-        expected_commitment_role: "coefficient",
-        expected_commitment_root: coefficient_commitment_root,
-        expected_rns_limb_index: input.expected_rns_limb_index,
-        expected_rns_prime: rns_prime,
-        field_name: "VSS coefficient commitment commitment",
-    })?;
+    let commitment = verify_vss_committed_material_record_commitment(
+        VssCommittedMaterialRecordCommitmentInput {
+            commitment: value_at_path(input.coefficient_record, &["commitment"])?,
+            expected_commitment_role: "coefficient",
+            expected_commitment_root: coefficient_commitment_root,
+            expected_rns_limb_index: input.expected_rns_limb_index,
+            expected_rns_prime: rns_prime,
+            field_name: "VSS coefficient commitment commitment",
+        },
+    )?;
 
     Ok(json!({
         "objectType": "VssPublicCoefficientCommitment",
@@ -384,14 +386,16 @@ pub(super) fn verify_vss_public_recipient_share_record(
     let share_commitment_root =
         hash_at_path(input.recipient_share_record, &["shareCommitmentRoot"])?;
     let share_opening_root = hash_at_path(input.recipient_share_record, &["shareOpeningRoot"])?;
-    let commitment = verify_vss_public_commitment_body(VssPublicCommitmentBodyInput {
-        commitment: value_at_path(input.recipient_share_record, &["commitment"])?,
-        expected_commitment_role: "recipient-share",
-        expected_commitment_root: share_commitment_root,
-        expected_rns_limb_index: input.expected_rns_limb_index,
-        expected_rns_prime: rns_prime,
-        field_name: "VSS recipient-share commitment commitment",
-    })?;
+    let commitment = verify_vss_committed_material_record_commitment(
+        VssCommittedMaterialRecordCommitmentInput {
+            commitment: value_at_path(input.recipient_share_record, &["commitment"])?,
+            expected_commitment_role: "recipient-share",
+            expected_commitment_root: share_commitment_root,
+            expected_rns_limb_index: input.expected_rns_limb_index,
+            expected_rns_prime: rns_prime,
+            field_name: "VSS recipient-share commitment commitment",
+        },
+    )?;
 
     Ok(json!({
         "objectType": "VssPublicRecipientShareCommitment",
@@ -412,7 +416,6 @@ pub(super) struct VssPublicAggregateThresholdRecordInput<'a> {
     pub(super) recipient_record: &'a Value,
     pub(super) expected_recipient_roster_position: usize,
     pub(super) expected_rns_limb_index: usize,
-    pub(super) participant_count: usize,
 }
 
 pub(super) fn verify_vss_public_aggregate_threshold_record(
@@ -447,74 +450,16 @@ pub(super) fn verify_vss_public_aggregate_threshold_record(
     let aggregate_commitment_root =
         hash_at_path(input.recipient_record, &["aggregateCommitmentRoot"])?;
     let aggregate_opening_root = hash_at_path(input.recipient_record, &["aggregateOpeningRoot"])?;
-    let commitment = verify_vss_public_commitment_body(VssPublicCommitmentBodyInput {
-        commitment: value_at_path(input.recipient_record, &["commitment"])?,
-        expected_commitment_role: "aggregate-threshold-share",
-        expected_commitment_root: aggregate_commitment_root,
-        expected_rns_limb_index: input.expected_rns_limb_index,
-        expected_rns_prime: rns_prime,
-        field_name: "VSS aggregate threshold commitment commitment",
-    })?;
-    let source_share_commitment_roots =
-        array_at_path(input.recipient_record, &["sourceShareCommitmentRoots"])?;
-    if source_share_commitment_roots.len() != input.participant_count {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "VSS aggregate threshold commitment must bind one source share commitment root per participant",
-        ));
-    }
-    let verified_source_share_commitment_roots = source_share_commitment_roots
-        .iter()
-        .enumerate()
-        .map(|(source_roster_position, source_share_commitment_root)| {
-            let root = source_share_commitment_root.as_str().ok_or_else(|| {
-                CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
-                    format!(
-                        "VSS aggregate threshold commitment sourceShareCommitmentRoots.{source_roster_position} must be a string"
-                    ),
-                )
-            })?;
-            validate_hash_string(
-                root,
-                &format!(
-                    "VSS aggregate threshold commitment sourceShareCommitmentRoots.{source_roster_position}"
-                ),
-            )?;
-
-            Ok(Value::String(root.to_string()))
-        })
-        .collect::<CanonicalResult<Vec<_>>>()?;
-    let source_share_opening_roots =
-        array_at_path(input.recipient_record, &["sourceShareOpeningRoots"])?;
-    if source_share_opening_roots.len() != input.participant_count {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "VSS aggregate threshold commitment must bind one source share opening root per participant",
-        ));
-    }
-    let verified_source_share_opening_roots = source_share_opening_roots
-        .iter()
-        .enumerate()
-        .map(|(source_roster_position, source_share_opening_root)| {
-            let root = source_share_opening_root.as_str().ok_or_else(|| {
-                CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
-                    format!(
-                        "VSS aggregate threshold commitment sourceShareOpeningRoots.{source_roster_position} must be a string"
-                    ),
-                )
-            })?;
-            validate_hash_string(
-                root,
-                &format!(
-                    "VSS aggregate threshold commitment sourceShareOpeningRoots.{source_roster_position}"
-                ),
-            )?;
-
-            Ok(Value::String(root.to_string()))
-        })
-        .collect::<CanonicalResult<Vec<_>>>()?;
+    let commitment = verify_vss_committed_material_record_commitment(
+        VssCommittedMaterialRecordCommitmentInput {
+            commitment: value_at_path(input.recipient_record, &["commitment"])?,
+            expected_commitment_role: "aggregate-threshold-share",
+            expected_commitment_root: aggregate_commitment_root,
+            expected_rns_limb_index: input.expected_rns_limb_index,
+            expected_rns_prime: rns_prime,
+            field_name: "VSS aggregate threshold commitment commitment",
+        },
+    )?;
 
     Ok(json!({
         "objectType": "VssPublicAggregateThresholdCommitment",
@@ -526,7 +471,5 @@ pub(super) fn verify_vss_public_aggregate_threshold_record(
         "aggregateCommitmentRoot": aggregate_commitment_root,
         "aggregateOpeningRoot": aggregate_opening_root,
         "commitment": commitment,
-        "sourceShareCommitmentRoots": verified_source_share_commitment_roots,
-        "sourceShareOpeningRoots": verified_source_share_opening_roots,
     }))
 }
