@@ -284,8 +284,7 @@ describe('private VSS mailbox delivery', () => {
                 verificationPhaseNumber: 7,
                 privateVssShareProofFactory: ({ rnsLimbIndex }) => ({
                     objectType: 'PrivateVssShareProof',
-                    proofId:
-                        'sealed-lattice-private-vss-share-proof-succinct',
+                    proofId: 'sealed-lattice-private-vss-share-proof-succinct',
                     proofFamily: 'vss-opening-carry',
                     proofBytesEncoding: 'embedded-binary-proof-bytes-hex',
                     proofStatementRoot: fixtureHash(

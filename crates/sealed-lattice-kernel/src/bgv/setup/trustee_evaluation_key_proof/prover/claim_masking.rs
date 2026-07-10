@@ -351,11 +351,20 @@ pub(super) fn global_claim_integers(
             let coefficient_messages =
                 &witness.vss_public_coefficient_messages_by_shamir_index[coefficient_slot_index];
             validate_vss_public_vector(coefficient_messages);
-            append_vss_public_trit_vectors(
-                &mut owned_vss_public_claim_vectors,
-                coefficient_messages,
-                packed_message_bounds[message_position],
-            );
+            // A proven threshold aggregate carries its source (coefficient)
+            // messages with the digit-only encoding: their range is established
+            // by the separately verified recipient-share proofs, so no per-digit
+            // trit decoder claims are emitted here. The message position still
+            // advances so the recipient item reads its own bound. This matches
+            // the digit-only layout in `LimbColumnLayout::new` and the verifier's
+            // claim projection.
+            if !vss_share_linkage.is_threshold_aggregate {
+                append_vss_public_trit_vectors(
+                    &mut owned_vss_public_claim_vectors,
+                    coefficient_messages,
+                    packed_message_bounds[message_position],
+                );
+            }
             message_position += 1;
         }
 

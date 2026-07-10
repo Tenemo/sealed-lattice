@@ -4,7 +4,37 @@ use crate::bgv::setup::setup_proof::SetupProofMaterialTransportHashes;
 use crate::bgv::setup::trustee_evaluation_key_proof::{
     generate_same_secret_bridge_proof_from_request, generate_vss_share_linkage_proof_from_request,
 };
-use crate::hashing::derive_canonical_object_hash;
+use crate::hashing::{derive_canonical_object_hash, hash512_hex};
+
+const VSS_MATERIAL_SEED_DOMAIN: &str = "sealed-lattice/accepted-setup/vss-material-seed";
+
+// The canonical committed-material commitment-context hash for a role and
+// context, identical to the hash `compute_vss_committed_material_commitment`
+// derives internally, so a record builder can compute it before committing.
+pub(super) fn accepted_committed_material_context_hash(
+    commitment_role: &str,
+    commitment_context: &serde_json::Value,
+) -> String {
+    derive_canonical_object_hash(&serde_json::json!({
+        "objectType": "VssCommittedMaterialCommitmentContext",
+        "commitmentRole": commitment_role,
+        "commitmentContext": commitment_context,
+    }))
+    .expect("committed-material commitment context hash")
+}
+
+// The holder's private deterministic material seed, derived from the public
+// commitment-context hash. Both the record builder (which computes the context
+// hash before committing) and the proof-request builder (which reads
+// commitmentContextHash off the published commitment) reproduce the same seed,
+// so the prover regenerates byte-identical trees without the seed appearing in
+// the package.
+pub(super) fn accepted_vss_material_seed(commitment_context_hash: &str) -> String {
+    hash512_hex(
+        VSS_MATERIAL_SEED_DOMAIN,
+        &[commitment_context_hash.as_bytes()],
+    )
+}
 
 const VSS_PUBLIC_COMMITMENT_BINARY_FORMAT: &str = "sealed-lattice-vss-public-commitment-binary";
 const VSS_SHARE_LINKAGE_PROOF_FAMILY: &str = "vss-share-linkage";
@@ -25,6 +55,7 @@ pub(in super::super) const SAME_SECRET_BRIDGE_PROOF_CHECKPOINT_DIRECTORY: &str =
 pub(in super::super) const VSS_SHARE_LINKAGE_PROOF_CHECKPOINT_DIRECTORY: &str =
     "vss-share-linkage-proof-material";
 
+mod aggregate_threshold;
 mod commitment_sets;
 mod finalized_package;
 mod same_secret_bridge;

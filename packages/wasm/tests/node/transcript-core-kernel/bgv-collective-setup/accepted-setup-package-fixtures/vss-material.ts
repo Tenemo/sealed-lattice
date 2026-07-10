@@ -20,6 +20,7 @@ import {
     createVssShareLinkageStatement,
     type TransportedSameSecretBridgeProofMaterialSet,
     type TransportedVssShareLinkageProofMaterialSet,
+    type VssCommittedMaterialSeedProvider,
     type VssPublicCoefficientCommitmentSet,
     type VssPublicCoefficientCredential,
     type VssPublicRecipientShareCommitmentSet,
@@ -91,54 +92,42 @@ const vssPublicCoefficientMessage = (
     );
 };
 
-// Deterministic centered ternary commitment randomness. It is opaque to the
-// verifier (the commitment is hiding), so any deterministic ternary
-// value works as long as the commit and the proof reuse the same column, which
-// the builders guarantee by threading it through the credentials.
-const vssPublicCoefficientRandomness = (
-    sourceTrusteeRosterPosition: number,
-    rnsLimbIndex: number,
-    shamirCoefficientIndex: number,
-    ringDegree: number,
-): number[][] =>
-    Array.from({ length: 2 }, (_unusedColumn, randomnessColumnIndex) =>
-        Array.from(
-            { length: ringDegree },
-            (_unusedCoefficient, coefficientPosition) =>
-                [-1, 0, 1][
-                    (sourceTrusteeRosterPosition +
-                        rnsLimbIndex +
-                        shamirCoefficientIndex +
-                        randomnessColumnIndex +
-                        coefficientPosition) %
-                        3
-                ],
-        ),
-    );
-
-const vssPublicRecipientShareRandomness = (
-    sourceTrusteeRosterPosition: number,
-    recipientRosterPosition: number,
-    rnsLimbIndex: number,
-    ringDegree: number,
-): number[][] => {
-    const seedOffset =
-        10_000 +
-        sourceTrusteeRosterPosition * 503 +
-        recipientRosterPosition * 37 +
-        rnsLimbIndex * 11;
-
-    return Array.from({ length: 2 }, (_unusedColumn, randomnessColumnIndex) =>
-        Array.from(
-            { length: ringDegree },
-            (_unusedCoefficient, coefficientPosition) =>
-                ((seedOffset +
-                    randomnessColumnIndex * 5 +
-                    coefficientPosition * 7) %
-                    3) -
-                1,
-        ),
-    );
+// Deterministic private material seed per committed-material commitment. It is
+// opaque to the verifier (the commitment is hiding), so any deterministic
+// 128-character lowercase hexadecimal value works as long as the commit and the
+// proof reuse the same seed, which the builders guarantee by threading it
+// through the credentials. The canonical object hash already has the required
+// protocol-hash shape, so the fixture derives seeds from the commitment
+// coordinates through the kernel instead of inventing new derivation code.
+const vssCommittedMaterialSeedProvider = (
+    kernel: TranscriptCoreKernel,
+): VssCommittedMaterialSeedProvider => {
+    return (input) =>
+        kernel.deriveCanonicalObjectHash({
+            value: {
+                objectType: 'VssCommittedMaterialSeedFixture',
+                commitmentRole: input.commitmentRole,
+                rnsLimbIndex: input.rnsLimbIndex,
+                rnsPrime: input.rnsPrime,
+                ...(input.sourceTrusteeRosterPosition === undefined
+                    ? {}
+                    : {
+                          sourceTrusteeRosterPosition:
+                              input.sourceTrusteeRosterPosition,
+                      }),
+                ...(input.shamirCoefficientIndex === undefined
+                    ? {}
+                    : {
+                          shamirCoefficientIndex: input.shamirCoefficientIndex,
+                      }),
+                ...(input.recipientRosterPosition === undefined
+                    ? {}
+                    : {
+                          recipientRosterPosition:
+                              input.recipientRosterPosition,
+                      }),
+            },
+        });
 };
 
 const vssPublicSourceTrusteeOpeningStates = (
@@ -197,8 +186,10 @@ export function acceptedVssPublicMaterial(
     parameters: BgvCollectiveSetupParametersDescription,
     publicMatrixSeedHash: string,
 ): VssPublicMaterial {
-    const { vssPublicCommitmentComputer, vssShareLinkageProofComputer } =
-        createVssCommitmentComputers(kernel);
+    const {
+        vssCommittedMaterialCommitmentComputer,
+        vssShareLinkageProofComputer,
+    } = createVssCommitmentComputers(kernel);
     const qSharePrimes = parameters.qShare.primes;
     const ringDegree = minimumSuccinctProofFixtureRingDegree;
     const participantCount = parameters.participantCount;
@@ -209,6 +200,7 @@ export function acceptedVssPublicMaterial(
         participantCount,
         thresholdDegree,
     );
+    const committedMaterialSeed = vssCommittedMaterialSeedProvider(kernel);
 
     const coefficientCommitmentBundle = createVssPublicCoefficientCommitmentSet(
         {
@@ -219,18 +211,9 @@ export function acceptedVssPublicMaterial(
             ringDegree,
             thresholdDegree,
             sourceTrusteeOpeningStates,
-            coefficientOpeningRandomness: ({
-                trusteeRosterPosition,
-                rnsLimbIndex,
-                shamirCoefficientIndex,
-            }) =>
-                vssPublicCoefficientRandomness(
-                    trusteeRosterPosition,
-                    rnsLimbIndex,
-                    shamirCoefficientIndex,
-                    ringDegree,
-                ),
-            computeVssPublicCommitment: vssPublicCommitmentComputer,
+            committedMaterialSeed,
+            computeVssCommittedMaterialCommitment:
+                vssCommittedMaterialCommitmentComputer,
         },
     );
     const recipientShareCommitmentBundle =
@@ -242,18 +225,9 @@ export function acceptedVssPublicMaterial(
             ringDegree,
             thresholdDegree,
             sourceTrusteeOpeningStates,
-            recipientShareOpeningRandomness: ({
-                sourceTrusteeRosterPosition,
-                recipientRosterPosition,
-                rnsLimbIndex,
-            }) =>
-                vssPublicRecipientShareRandomness(
-                    sourceTrusteeRosterPosition,
-                    recipientRosterPosition,
-                    rnsLimbIndex,
-                    ringDegree,
-                ),
-            computeVssPublicCommitment: vssPublicCommitmentComputer,
+            committedMaterialSeed,
+            computeVssCommittedMaterialCommitment:
+                vssCommittedMaterialCommitmentComputer,
         });
     const aggregateThresholdCommitmentSet =
         createVssPublicAggregateThresholdCommitmentSet({
@@ -262,8 +236,37 @@ export function acceptedVssPublicMaterial(
             participantCount,
             qSharePrimes,
             ringDegree,
+            coefficientCommitmentSet:
+                coefficientCommitmentBundle.coefficientCommitmentSet,
+            recipientShareCommitmentSet:
+                recipientShareCommitmentBundle.recipientShareCommitmentSet,
             recipientShareCredentials:
                 recipientShareCommitmentBundle.recipientShareCredentials,
+            committedMaterialSeed,
+            computeVssCommittedMaterialCommitment:
+                vssCommittedMaterialCommitmentComputer,
+            aggregateThresholdProofRandomness: ({
+                recipientRosterPosition,
+                rnsLimbIndex,
+            }) => ({
+                seedHex: kernel.deriveCanonicalObjectHash({
+                    value: {
+                        objectType: 'VssAggregateThresholdProofRandomness',
+                        fixture: 'seed',
+                        recipientRosterPosition,
+                        rnsLimbIndex,
+                    },
+                }),
+                nonceHex: kernel.deriveCanonicalObjectHash({
+                    value: {
+                        objectType: 'VssAggregateThresholdProofRandomness',
+                        fixture: 'nonce',
+                        recipientRosterPosition,
+                        rnsLimbIndex,
+                    },
+                }),
+            }),
+            generateVssShareLinkageProof: vssShareLinkageProofComputer,
         });
     const shareLinkageStatement = createVssShareLinkageStatement({
         setupContext,

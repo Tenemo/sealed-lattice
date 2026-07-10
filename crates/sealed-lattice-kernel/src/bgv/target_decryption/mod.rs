@@ -79,19 +79,10 @@ use crate::{
     transcript_core::{decode_hex, decode_standard_base64},
 };
 
-#[cfg(any(feature = "target-decryption-development-commands", test))]
-use crate::bgv::coefficient_codec::signed_byte_vector_from_hex;
-#[cfg(test)]
-use crate::bgv::coefficient_codec::signed_byte_vector_hex;
 #[cfg(test)]
 use crate::bgv::evaluator::engine::DevelopmentBgvKey;
 #[cfg(test)]
 use crate::bgv::setup::development_evaluator_key_from_passive_setup_package;
-use crate::bgv::setup::{VSS_PUBLIC_OUTPUT_COORDINATE_COUNT, VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT};
-#[cfg(any(feature = "target-decryption-development-commands", test))]
-use crate::bgv::setup::{
-    VssPublicCommitmentOpeningInput, compute_vss_public_commitment_from_opening,
-};
 #[cfg(any(feature = "target-decryption-development-commands", test))]
 use crate::bgv::{
     coefficient_codec::coefficient_vector_le_hex,
@@ -122,8 +113,8 @@ const TARGET_DECRYPTION_SMUDGING_SEED_HASH_DOMAIN: &str =
 const TARGET_DECRYPTION_SMUDGING_ZERO_SHARE_DOMAIN: &str =
     "sealed-lattice-bgv-rns/target-decryption-smudging-zero-share";
 #[cfg(any(feature = "target-decryption-development-commands", test))]
-const TARGET_DECRYPTION_SMUDGING_COMMITMENT_RANDOMNESS_DOMAIN: &str =
-    "sealed-lattice-bgv-rns/target-decryption-smudging-commitment-randomness";
+const TARGET_DECRYPTION_SMUDGING_COMMITMENT_MATERIAL_SEED_DOMAIN: &str =
+    "sealed-lattice-bgv-rns/target-decryption-smudging-commitment-material-seed";
 pub(super) const TARGET_DECRYPTION_SMUDGING_COEFFICIENT_BOUND: i64 = 16;
 const TARGET_DECRYPTION_SMUDGING_COMMITMENT_ROLE: &str =
     "target-decryption-smudging-polynomial-coefficient";

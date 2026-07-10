@@ -348,7 +348,8 @@ fn aggregate_threshold_commitment_set(
             let rns_prime = DATA_PRIMES[rns_limb_index];
             let aggregate_commitment_message_values =
                 aggregate_opening_values(share_values, rns_prime);
-            let aggregate_randomness_by_column = vec![vec![0_i64; POLYNOMIAL_DEGREE]; 2];
+            let aggregate_material_seed_hex =
+                fixture_aggregate_material_seed_hex(participant.roster_position, rns_limb_index);
             let message_coefficient_bound =
                 aggregate_message_coefficient_bound(rns_prime, setup_binding.participants.len())
                     .expect("aggregate message coefficient bound");
@@ -356,12 +357,11 @@ fn aggregate_threshold_commitment_set(
                 setup_binding: &setup_binding,
                 participant,
                 setup_epoch: TARGET_DECRYPTION_FIXTURE_COMPACT_SETUP_EPOCH,
-                public_matrix_seed_hash: &setup_binding.public_matrix_seed_hash,
                 rns_limb_index,
                 rns_prime,
                 aggregate_commitment_message_values: &aggregate_commitment_message_values,
                 message_coefficient_bound,
-                aggregate_randomness_by_column: &aggregate_randomness_by_column,
+                aggregate_material_seed_hex: &aggregate_material_seed_hex,
             })
             .expect("aggregate opening computation");
             let source_share_commitment_roots = (0..setup_binding.participants.len())
@@ -397,6 +397,19 @@ fn aggregate_threshold_commitment_set(
     set["aggregateThresholdCommitmentRoot"] =
         json!(derive_canonical_object_hash(&set).expect("aggregate threshold commitment set root"));
     set
+}
+
+// A deterministic valid 128-hex private material seed per fixture aggregate
+// commitment, so distinct participants and limbs hide with distinct trees while
+// the fixture regenerates them byte-identically.
+fn fixture_aggregate_material_seed_hex(roster_position: usize, rns_limb_index: usize) -> String {
+    crate::hashing::hash512_hex(
+        "sealed-lattice-bgv-rns/target-decryption-fixture-aggregate-material-seed",
+        &[
+            &(roster_position as u64).to_le_bytes(),
+            &(rns_limb_index as u64).to_le_bytes(),
+        ],
+    )
 }
 
 fn aggregate_opening_values(share_values: &[u64], rns_prime: u64) -> Vec<u64> {
@@ -648,7 +661,10 @@ fn local_target_share_witness(
         .iter()
         .enumerate()
         .map(|(rns_limb_index, share_values)| {
-            let aggregate_randomness_by_column = vec![vec![0_i64; POLYNOMIAL_DEGREE]; 2];
+            let aggregate_material_seed_hex = fixture_aggregate_material_seed_hex(
+                participant.roster_position,
+                rns_limb_index,
+            );
             let rns_prime = DATA_PRIMES[rns_limb_index];
             let aggregate_commitment_message_values =
                 aggregate_opening_values(share_values, rns_prime);
@@ -662,12 +678,11 @@ fn local_target_share_witness(
                     setup_binding: &setup_binding,
                     participant,
                     setup_epoch,
-                    public_matrix_seed_hash: &public_matrix_seed_hash,
                     rns_limb_index,
                     rns_prime,
                     aggregate_commitment_message_values: &aggregate_commitment_message_values,
                     message_coefficient_bound,
-                    aggregate_randomness_by_column: &aggregate_randomness_by_column,
+                    aggregate_material_seed_hex: &aggregate_material_seed_hex,
                 })
                 .expect("aggregate opening roots");
             json!({
@@ -680,10 +695,7 @@ fn local_target_share_witness(
                 "aggregateCommitmentRoot": aggregate_commitment_root,
                 "aggregateOpeningRoot": aggregate_opening_root,
                 "aggregateCommitmentMessageValuesLeHex": coefficient_vector_le_hex(&aggregate_commitment_message_values),
-                "aggregateRandomnessByColumnSignedByteHex": aggregate_randomness_by_column
-                    .iter()
-                    .map(|column| signed_byte_vector_hex(column).expect("signed-byte randomness"))
-                    .collect::<Vec<_>>(),
+                "aggregateMaterialSeedHex": aggregate_material_seed_hex,
             })
         })
         .collect::<Vec<_>>();

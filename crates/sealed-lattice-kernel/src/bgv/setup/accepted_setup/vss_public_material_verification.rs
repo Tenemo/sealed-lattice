@@ -242,6 +242,34 @@ fn verify_vss_public_material_binding(
         "VSS share-linkage proof material set root",
     )?;
 
+    // The proven threshold-share aggregate binding: every aggregate record's
+    // committed T_{j,l} is shown to be the modular sum of the committed source
+    // recipient shares by a unit-point share-linkage proof.
+    crate::bgv::setup::verify_vss_public_aggregate_threshold_proofs(
+        recipient_share_set,
+        aggregate_threshold_set,
+        &crate::bgv::setup::VssAggregateThresholdProofContext {
+            ceremony_id: string_at_path(setup_context, &["ceremonyId"])?,
+            manifest_hash: hash_at_path(setup_context, &["manifestHash"])?,
+            roster_hash: hash_at_path(setup_context, &["rosterHash"])?,
+            setup_epoch: string_at_path(setup_context, &["setupEpoch"])?,
+            ring_degree: unsigned_at_path(&aggregate_threshold_verification, &["ringDegree"])?
+                .try_into()
+                .map_err(|_| public_material_error("aggregate ring degree does not fit usize"))?,
+            participant_count: unsigned_at_path(
+                &aggregate_threshold_verification,
+                &["participantCount"],
+            )?
+            .try_into()
+            .map_err(|_| public_material_error("aggregate participant count does not fit usize"))?,
+            rns_limb_count: unsigned_at_path(&aggregate_threshold_verification, &["rnsLimbCount"])?
+                .try_into()
+                .map_err(|_| {
+                    public_material_error("aggregate RNS limb count does not fit usize")
+                })?,
+        },
+    )?;
+
     Ok(VerifiedVssPublicMaterial {
         public_matrix_seed_hash: accepted_public_matrix_seed_hash.to_string(),
         aggregate_threshold_commitment_root: hash_at_path(

@@ -1,4 +1,3 @@
-use super::same_secret_bridge::*;
 use super::*;
 
 pub(in super::super::super) fn vss_share_linkage_statement_object(
@@ -424,19 +423,7 @@ pub(super) fn vss_share_linkage_proof_generation_request(
             .collect::<Vec<_>>()
         })
         .collect::<Vec<_>>();
-    let coefficient_opening_randomness_by_shamir_index = coefficient_slots
-        .iter()
-        .map(|(rns_limb_index, shamir_coefficient_index)| {
-            vss_public_coefficient_randomness_i64_fixture(
-                source_trustee_roster_position,
-                *rns_limb_index,
-                *shamir_coefficient_index,
-                ring_degree,
-            )
-        })
-        .collect::<Vec<_>>();
     let mut recipient_share_messages_by_item = Vec::new();
-    let mut recipient_share_opening_randomness_by_item = Vec::new();
     let mut carry_witnesses_by_item = Vec::new();
     for item in &linkage_items {
         let item_source_trustee_roster_position = item["sourceTrusteeRosterPosition"]
@@ -466,16 +453,15 @@ pub(super) fn vss_share_linkage_proof_generation_request(
                 .map(|value| i64::try_from(value).expect("recipient share fits i64"))
                 .collect::<Vec<_>>(),
         );
-        recipient_share_opening_randomness_by_item.push(
-            vss_public_recipient_share_randomness_i64_fixture(
-                source_trustee_roster_position,
-                recipient_roster_position,
-                rns_limb_index,
-                ring_degree,
-            ),
-        );
         carry_witnesses_by_item.push(carry_witnesses);
     }
+    // Committed-material regeneration inputs in bound-commitment order (every
+    // unique coefficient slot, then each item's recipient share), read off the
+    // published commitments' context hashes. The private seeds derive from those
+    // public hashes, so the prover reproduces byte-identical trees without any
+    // seed in the package.
+    let (bound_material_seeds, bound_material_context_hashes) =
+        vss_share_linkage_bound_material_inputs(&linkage_items, &coefficient_slots);
     let proof_randomness_seed_hex = derive_canonical_object_hash(&serde_json::json!({
         "objectType": "VssPublicMaterialFixtureRandomness",
         "fixture": "vss-share-linkage-proof-randomness",
@@ -507,19 +493,61 @@ pub(super) fn vss_share_linkage_proof_generation_request(
         "recipientShareMessages": recipient_share_messages_by_item
             .first()
             .expect("primary recipient share messages"),
-        "coefficientOpeningRandomnessByShamirIndex": coefficient_opening_randomness_by_shamir_index,
-        "recipientShareOpeningRandomness": recipient_share_opening_randomness_by_item
-            .first()
-            .expect("primary recipient share opening randomness"),
+        "coefficientOpeningRandomnessByShamirIndex": Vec::<Vec<Vec<i64>>>::new(),
+        "recipientShareOpeningRandomness": Vec::<Vec<i64>>::new(),
         "carryWitnesses": carry_witnesses_by_item
             .first()
             .expect("primary carry witnesses"),
         "recipientShareMessagesByItem": recipient_share_messages_by_item,
-        "recipientShareOpeningRandomnessByItem": recipient_share_opening_randomness_by_item,
+        "recipientShareOpeningRandomnessByItem": Vec::<Vec<Vec<i64>>>::new(),
         "carryWitnessesByItem": carry_witnesses_by_item,
+        "vssCommittedMaterialSeedsByBoundMessage": bound_material_seeds,
+        "vssCommittedMaterialContextHashesByBoundMessage": bound_material_context_hashes,
         "proofRandomnessSeedHex": proof_randomness_seed_hex,
         "proofRandomnessNonceHex": proof_randomness_nonce_hex,
     })
+}
+
+// Committed-material seeds and context hashes in the statement's
+// bound-commitment order: every unique coefficient slot (in first-seen order
+// across the linkage items) then each item's recipient share. Context hashes are
+// read from the published commitments; seeds derive from them.
+fn vss_share_linkage_bound_material_inputs(
+    linkage_items: &[&serde_json::Value],
+    coefficient_slots: &[(usize, u64)],
+) -> (Vec<String>, Vec<String>) {
+    let mut context_hashes = Vec::with_capacity(coefficient_slots.len() + linkage_items.len());
+    for (rns_limb_index, shamir_coefficient_index) in coefficient_slots {
+        let item = linkage_items
+            .iter()
+            .find(|item| {
+                item["sourceRnsLimbIndex"]
+                    .as_u64()
+                    .expect("linkage item limb") as usize
+                    == *rns_limb_index
+            })
+            .expect("linkage item for coefficient slot limb");
+        let context_hash = item["coefficientCommitments"][*shamir_coefficient_index as usize]
+            ["commitmentContextHash"]
+            .as_str()
+            .expect("coefficient commitment context hash")
+            .to_string();
+        context_hashes.push(context_hash);
+    }
+    for item in linkage_items {
+        context_hashes.push(
+            item["recipientShareCommitment"]["commitmentContextHash"]
+                .as_str()
+                .expect("recipient-share commitment context hash")
+                .to_string(),
+        );
+    }
+    let seeds = context_hashes
+        .iter()
+        .map(|context_hash| super::accepted_vss_material_seed(context_hash))
+        .collect::<Vec<_>>();
+
+    (seeds, context_hashes)
 }
 
 pub(super) fn vss_public_coefficient_source_record_from_package(
@@ -605,27 +633,4 @@ pub(super) fn vss_public_recipient_share_values_and_carries(
     }
 
     (share_coefficients, carry_witnesses)
-}
-
-pub(super) fn vss_public_recipient_share_randomness_i64_fixture(
-    source_trustee_roster_position: u64,
-    recipient_roster_position: u64,
-    rns_limb_index: usize,
-    ring_degree: usize,
-) -> Vec<Vec<i64>> {
-    let seed_offset = 10_000
-        + source_trustee_roster_position as i64 * 503
-        + recipient_roster_position as i64 * 37
-        + rns_limb_index as i64 * 11;
-    (0..crate::bgv::setup::vss_commitment::VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT)
-        .map(|column_index| {
-            (0..ring_degree)
-                .map(|coefficient_position| {
-                    ((seed_offset + column_index as i64 * 5 + coefficient_position as i64 * 7)
-                        .rem_euclid(3))
-                        - 1
-                })
-                .collect()
-        })
-        .collect()
 }

@@ -115,6 +115,15 @@ pub(crate) struct VssShareLinkageStatement {
     pub(crate) recipient_share_opening_root: String,
     pub(crate) recipient_share_commitment: VssShareLinkageCommitment,
     pub(crate) additional_linkage_items: Vec<VssShareLinkageItem>,
+    // The threshold-aggregate mode reuses this same share-linkage relation with
+    // a unit evaluation point: proving each recipient's threshold share
+    // T_{j,l} = sum_i sigma_{i->j,l} mod q_l is exactly the lincheck
+    // `sum_k point^k F_k - share - q * carry = 0` with `point = 1`, the summed
+    // sources standing in for the coefficient messages, T for the recipient
+    // share, and the mod-q wrap for the carry. When set, the coefficient
+    // commitments open recipient-share committed material and the recipient
+    // commitment opens aggregate-threshold-share committed material.
+    pub(crate) is_threshold_aggregate: bool,
 }
 
 #[derive(Clone)]

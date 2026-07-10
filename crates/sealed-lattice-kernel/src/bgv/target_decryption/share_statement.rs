@@ -635,27 +635,19 @@ fn validate_smudging_commitment_record(
 
 fn validate_smudging_commitment_shape(
     commitment: &Value,
-    setup_binding: &SetupBinding,
+    _setup_binding: &SetupBinding,
     expected_limb_index: usize,
     expected_rns_prime: u64,
 ) -> CanonicalResult<()> {
-    if string_at_path(commitment, &["objectType"])? != "VssPublicCommitment" {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "target decryption smudging commitment must be VssPublicCommitment version 1",
-        ));
-    }
+    crate::bgv::setup::validate_standalone_vss_public_commitment_body(
+        commitment,
+        "target decryption smudging commitment",
+    )?;
     compare_string_field(
         commitment,
         "commitmentRole",
         TARGET_DECRYPTION_SMUDGING_COMMITMENT_ROLE,
         "target decryption smudging commitment role",
-    )?;
-    compare_hash_field(
-        commitment,
-        "publicMatrixSeedHash",
-        &setup_binding.public_matrix_seed_hash,
-        "target decryption smudging commitment matrix seed",
     )?;
     compare_unsigned_field(
         commitment,
@@ -675,57 +667,6 @@ fn validate_smudging_commitment_shape(
         POLYNOMIAL_DEGREE as u64,
         "target decryption smudging commitment ring degree",
     )?;
-    compare_unsigned_field(
-        commitment,
-        "outputCoordinateCount",
-        VSS_PUBLIC_OUTPUT_COORDINATE_COUNT as u64,
-        "target decryption smudging commitment output coordinate count",
-    )?;
-    compare_unsigned_field(
-        commitment,
-        "randomnessColumnCount",
-        VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT as u64,
-        "target decryption smudging commitment randomness column count",
-    )?;
-    hash_at_path(commitment, &["commitmentContextHash"])?;
-    let commitment_limbs = array_at_path(commitment, &["commitmentLimbs"])?;
-    if commitment_limbs.len() != 3 {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "target decryption smudging commitment must include every commitment field",
-        ));
-    }
-    for (commitment_modulus_index, limb) in commitment_limbs.iter().enumerate() {
-        compare_unsigned_field(
-            limb,
-            "commitmentModulusIndex",
-            commitment_modulus_index as u64,
-            "target decryption smudging commitment modulus index",
-        )?;
-        compare_unsigned_field(
-            limb,
-            "modulus",
-            DATA_PRIMES[commitment_modulus_index],
-            "target decryption smudging commitment modulus",
-        )?;
-        let coordinates = array_at_path(limb, &["coordinates"])?;
-        if coordinates.len() != VSS_PUBLIC_OUTPUT_COORDINATE_COUNT {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "target decryption smudging commitment coordinate count does not match the profile",
-            ));
-        }
-        let modulus = DATA_PRIMES[commitment_modulus_index];
-        for coordinate in coordinates {
-            let coordinate_value = unsigned_at_path(coordinate, &[])?;
-            if coordinate_value >= modulus {
-                return Err(CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
-                    "target decryption smudging commitment coordinate is outside its commitment field",
-                ));
-            }
-        }
-    }
 
     Ok(())
 }
@@ -856,12 +797,6 @@ fn validate_aggregate_opening_statement_binding(
             "commitmentRole",
             "aggregate-threshold-share",
             "target decryption aggregate credential binding commitment role",
-        )?;
-        compare_hash_field(
-            aggregate_commitment,
-            "publicMatrixSeedHash",
-            &setup_binding.public_matrix_seed_hash,
-            "target decryption aggregate credential binding commitment public matrix seed hash",
         )?;
         compare_unsigned_field(
             aggregate_commitment,

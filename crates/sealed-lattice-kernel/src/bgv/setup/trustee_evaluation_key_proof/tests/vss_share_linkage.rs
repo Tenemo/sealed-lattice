@@ -93,6 +93,263 @@ fn vss_share_linkage_proof_round_trips_and_rejects_tampering() {
     );
 }
 
+#[test]
+fn vss_threshold_aggregate_proof_round_trips_and_rejects_tampering() {
+    let (statement, witness) = vss_threshold_aggregate_instance();
+    let proof = prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED)
+        .expect("prove threshold-aggregate");
+
+    verify_evaluation_key_share(&statement, &proof).expect("verify threshold-aggregate proof");
+
+    // A summand witness that no longer sums to the committed aggregate makes the
+    // regenerated recipient-share material root differ from the published one,
+    // so the prover refuses fail-closed before producing a proof.
+    let (mismatched_statement, mut mismatched_witness) = vss_threshold_aggregate_instance();
+    mismatched_witness.vss_public_coefficient_messages_by_shamir_index[0][0] =
+        (mismatched_witness.vss_public_coefficient_messages_by_shamir_index[0][0] + 1)
+            % i64::try_from(DATA_PRIMES[0]).expect("modulus fits i64");
+    assert!(
+        prove_evaluation_key_share(
+            &mismatched_statement,
+            &mismatched_witness,
+            PROOF_RANDOMNESS_SEED
+        )
+        .is_err(),
+        "proving must reject a summand witness that does not open its published recipient-share material"
+    );
+
+    // An aggregate witness that is not the modular sum of the summands breaks the
+    // unit-point lincheck, so proving refuses.
+    let (bad_sum_statement, mut bad_sum_witness) = vss_threshold_aggregate_instance();
+    bad_sum_witness.vss_public_recipient_share_messages_by_item[0][0] =
+        (bad_sum_witness.vss_public_recipient_share_messages_by_item[0][0] + 1)
+            % i64::try_from(DATA_PRIMES[0]).expect("modulus fits i64");
+    bad_sum_witness.vss_public_recipient_share_messages[0] =
+        bad_sum_witness.vss_public_recipient_share_messages_by_item[0][0];
+    assert!(
+        prove_evaluation_key_share(&bad_sum_statement, &bad_sum_witness, PROOF_RANDOMNESS_SEED)
+            .is_err(),
+        "proving must reject an aggregate witness that is not the modular sum of the summands"
+    );
+
+    // Tampering with the published aggregate (recipient) material root rejects.
+    let (mut tampered_aggregate_statement, _unused_witness) = vss_threshold_aggregate_instance();
+    tampered_aggregate_statement
+        .vss_share_linkage
+        .as_mut()
+        .expect("statement")
+        .recipient_share_commitment
+        .material_roots_by_commitment_field[0][0] ^= 0x01;
+    assert!(
+        verify_evaluation_key_share(&tampered_aggregate_statement, &proof).is_err(),
+        "tampering with the published aggregate material root must reject"
+    );
+
+    // Tampering with a summand (coefficient) material root rejects.
+    let (mut tampered_summand_statement, _unused_witness) = vss_threshold_aggregate_instance();
+    tampered_summand_statement
+        .vss_share_linkage
+        .as_mut()
+        .expect("statement")
+        .coefficient_commitments[0]
+        .material_roots_by_commitment_field[0][0] ^= 0x01;
+    assert!(
+        verify_evaluation_key_share(&tampered_summand_statement, &proof).is_err(),
+        "tampering with a published summand material root must reject"
+    );
+
+    // Flipping the threshold-aggregate flag changes the relation (unit point vs
+    // recipient trustee point) and the statement hash, so the proof no longer
+    // verifies against the mutated statement.
+    let (mut flipped_flag_statement, _unused_witness) = vss_threshold_aggregate_instance();
+    flipped_flag_statement
+        .vss_share_linkage
+        .as_mut()
+        .expect("statement")
+        .is_threshold_aggregate = false;
+    assert!(
+        verify_evaluation_key_share(&flipped_flag_statement, &proof).is_err(),
+        "clearing the threshold-aggregate flag must reject the aggregate proof"
+    );
+}
+
+// Build a single-recipient threshold-aggregate instance: three source recipient
+// shares (the summands) and their modular sum T with the per-coefficient wrap,
+// proved through the share-linkage relation with a unit evaluation point.
+fn vss_threshold_aggregate_instance() -> (
+    TrusteeEvaluationKeyStatement,
+    super::super::relation::TrusteeEvaluationKeyWitness,
+) {
+    let ring_degree = SMALL_RING_DEGREE;
+    let source_message_modulus = DATA_PRIMES[0];
+    let source_rns_limb_index = 0_usize;
+    let recipient_roster_position = 2_u64;
+    let summand_count = 3_usize;
+
+    // Three summands with large residues so several coefficient positions wrap
+    // the modulus when summed, exercising the wrap (carry) witness.
+    let summand_messages: Vec<Vec<u64>> = (0..summand_count)
+        .map(|summand_index| {
+            (0..ring_degree)
+                .map(|coefficient_position| {
+                    let base = source_message_modulus / 3 * 2;
+                    let jitter = (summand_index as u64 * 131 + coefficient_position as u64 * 17)
+                        % (source_message_modulus / 6).max(1);
+                    (base + jitter) % source_message_modulus
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    let mut aggregate_values = Vec::with_capacity(ring_degree);
+    let mut wrap_values = Vec::with_capacity(ring_degree);
+    for coefficient_position in 0..ring_degree {
+        let summed = summand_messages.iter().fold(0_u128, |sum, messages| {
+            sum + u128::from(messages[coefficient_position])
+        });
+        aggregate_values.push((summed % u128::from(source_message_modulus)) as u64);
+        wrap_values.push((summed / u128::from(source_message_modulus)) as i64);
+    }
+    assert!(
+        wrap_values.iter().any(|wrap| *wrap > 0),
+        "threshold-aggregate fixture must exercise wrapped coefficient sums"
+    );
+
+    let summand_commitment_computations: Vec<CommitmentComputationForTest> = summand_messages
+        .iter()
+        .enumerate()
+        .map(|(summand_index, messages)| {
+            commitment_computation_for_test(
+                "recipient-share",
+                json!({
+                    "testPurpose": "threshold-aggregate-proof",
+                    "sourceRosterPosition": summand_index,
+                    "recipientRosterPosition": recipient_roster_position,
+                }),
+                source_rns_limb_index,
+                source_message_modulus,
+                ring_degree,
+                messages,
+            )
+        })
+        .collect();
+    let aggregate_commitment_computation = commitment_computation_for_test(
+        "aggregate-threshold-share",
+        json!({
+            "testPurpose": "threshold-aggregate-proof",
+            "recipientRosterPosition": recipient_roster_position,
+        }),
+        source_rns_limb_index,
+        source_message_modulus,
+        ring_degree,
+        &aggregate_values,
+    );
+
+    let statement = TrusteeEvaluationKeyStatement {
+        context: SuccinctSetupProofContext {
+            proof_family: super::super::VSS_SHARE_LINKAGE_PROOF_FAMILY.to_string(),
+            ceremony_id: "vss-aggregate-test".to_string(),
+            manifest_hash: repeated_hash("11"),
+            roster_hash: repeated_hash("22"),
+            trustee_identity: "vss-threshold-aggregate".to_string(),
+            trustee_roster_position: 0,
+            setup_epoch: "setup-epoch-1".to_string(),
+            binding_roots: vec![("shareLinkageStatementRoot".to_string(), repeated_hash("a3"))],
+        },
+        ring_degree,
+        keys: Vec::new(),
+        same_secret_linkage: None,
+        private_vss_share: None,
+        vss_share_linkage: Some(VssShareLinkageStatement {
+            public_matrix_seed_hash: repeated_hash("bc"),
+            source_trustee_identity: "trustee-0".to_string(),
+            source_trustee_roster_position: 0,
+            recipient_identity: format!("trustee-{recipient_roster_position}"),
+            recipient_roster_position,
+            source_coefficient_commitment_root: repeated_hash("91"),
+            source_recipient_share_commitment_root: repeated_hash("92"),
+            source_rns_limb_index,
+            source_message_modulus,
+            coefficient_commitment_roots: summand_commitment_computations
+                .iter()
+                .map(|computation| computation.commitment_root.clone())
+                .collect(),
+            coefficient_opening_roots: summand_commitment_computations
+                .iter()
+                .map(|computation| computation.opening_root.clone())
+                .collect(),
+            coefficient_commitments: summand_commitment_computations
+                .iter()
+                .map(|computation| computation.commitment.clone())
+                .collect(),
+            recipient_share_commitment_root: aggregate_commitment_computation
+                .commitment_root
+                .clone(),
+            recipient_share_opening_root: aggregate_commitment_computation.opening_root.clone(),
+            recipient_share_commitment: aggregate_commitment_computation.commitment.clone(),
+            additional_linkage_items: Vec::new(),
+            is_threshold_aggregate: true,
+        }),
+        same_secret_bridge: None,
+        target_decryption_share: None,
+    };
+    statement
+        .validate_shape()
+        .expect("threshold-aggregate statement");
+
+    // Bound-commitment order: the three summand slots, then the aggregate.
+    let bound_commitment_computations: Vec<&CommitmentComputationForTest> =
+        summand_commitment_computations
+            .iter()
+            .chain(std::iter::once(&aggregate_commitment_computation))
+            .collect();
+
+    let witness = super::super::relation::TrusteeEvaluationKeyWitness {
+        secret_coefficients: Vec::new(),
+        error_coefficients_by_key: Vec::new(),
+        negative_indicator_coefficients: Vec::new(),
+        opening_randomness_by_limb: Vec::new(),
+        private_vss_coefficient_messages_by_shamir_index: Vec::new(),
+        private_vss_opening_randomness_by_shamir_index: Vec::new(),
+        private_vss_carry_witnesses: Vec::new(),
+        vss_public_coefficient_messages_by_shamir_index: summand_messages
+            .iter()
+            .map(|messages| {
+                messages
+                    .iter()
+                    .map(|value| i64::try_from(*value).expect("summand fits i64"))
+                    .collect()
+            })
+            .collect(),
+        vss_public_recipient_share_messages: aggregate_values
+            .iter()
+            .map(|value| i64::try_from(*value).expect("aggregate fits i64"))
+            .collect(),
+        vss_public_coefficient_opening_randomness_by_shamir_index: Vec::new(),
+        vss_public_recipient_share_opening_randomness: Vec::new(),
+        vss_public_carry_witnesses: wrap_values.clone(),
+        vss_public_recipient_share_messages_by_item: vec![
+            aggregate_values
+                .iter()
+                .map(|value| i64::try_from(*value).expect("aggregate fits i64"))
+                .collect(),
+        ],
+        vss_public_recipient_share_opening_randomness_by_item: Vec::new(),
+        vss_public_carry_witnesses_by_item: vec![wrap_values],
+        target_decryption_message_vectors: Vec::new(),
+        target_decryption_opening_randomness_by_commitment: Vec::new(),
+        vss_committed_material_seeds_by_bound_message: bound_commitment_computations
+            .iter()
+            .map(|computation| computation.material_seed_hex.clone())
+            .collect(),
+        vss_committed_material_context_hashes_by_bound_message: bound_commitment_computations
+            .iter()
+            .map(|computation| computation.context_hash.clone())
+            .collect(),
+    };
+
+    (statement, witness)
+}
+
 fn vss_share_linkage_instance() -> (
     TrusteeEvaluationKeyStatement,
     super::super::relation::TrusteeEvaluationKeyWitness,
@@ -168,6 +425,7 @@ fn vss_share_linkage_instance() -> (
                 share_linkage_item_statement(&same_source_additional_item),
                 share_linkage_item_statement(&additional_item),
             ],
+            is_threshold_aggregate: false,
         }),
         same_secret_bridge: None,
         target_decryption_share: None,

@@ -229,18 +229,19 @@ fn target_share_proof_statement_binding_rejects_rebound_wrong_aggregate_commitme
         trustee_identity: "trustee-1",
     })
     .expect("target share proof statement");
-    let first_coordinate =
+    let first_material_root =
         statement["aggregateOpeningBinding"]["activeCredentialBindings"][0]["aggregateCommitment"]
-            ["commitmentLimbs"][0]["coordinates"][0]
-            .as_u64()
-            .expect("first aggregate commitment coordinate");
-    let first_modulus =
-        statement["aggregateOpeningBinding"]["activeCredentialBindings"][0]["aggregateCommitment"]
-            ["commitmentLimbs"][0]["modulus"]
-            .as_u64()
-            .expect("first aggregate commitment modulus");
-    statement["aggregateOpeningBinding"]["activeCredentialBindings"][0]["aggregateCommitment"]["commitmentLimbs"]
-        [0]["coordinates"][0] = json!((first_coordinate + 1) % first_modulus);
+            ["commitmentFields"][0]["materialRootHex"]
+            .as_str()
+            .expect("first aggregate commitment material root")
+            .to_string();
+    let mut tampered_material_root_bytes = crate::transcript_core::decode_hex(&first_material_root)
+        .expect("aggregate material root bytes");
+    tampered_material_root_bytes[0] ^= 0x01;
+    statement["aggregateOpeningBinding"]["activeCredentialBindings"][0]["aggregateCommitment"]["commitmentFields"]
+        [0]["materialRootHex"] = json!(crate::transcript_core::encode_hex(
+        &tampered_material_root_bytes
+    ));
     rebind_active_credential_binding_root(&mut statement);
     rebind_share_proof_statement_root(&mut statement);
 

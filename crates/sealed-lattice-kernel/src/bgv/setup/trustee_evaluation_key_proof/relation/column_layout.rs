@@ -131,11 +131,33 @@ impl LimbColumnLayout {
             statement.target_decryption_message_count(limb_index);
         let target_decryption_relation_count =
             statement.target_decryption_relation_count(limb_index);
+        // For a proven threshold aggregate the source (coefficient) messages are
+        // the recipient shares, which the separately verified recipient-share
+        // proofs already range-prove while binding the same committed material
+        // roots. The aggregate opens their committed digit columns for the sum
+        // binding but skips the redundant per-digit range proofs; only the
+        // aggregate item message (proven nowhere else) keeps its full range-proof
+        // encoding. This mirrors the target-decryption cross-limb digit-only
+        // optimization and drops the source decoder claims that otherwise
+        // dominate the aggregate proof.
+        let vss_public_is_threshold_aggregate = statement
+            .vss_share_linkage
+            .as_ref()
+            .is_some_and(|share_linkage| share_linkage.is_threshold_aggregate);
         let vss_public_message_bounds = statement.vss_public_message_bounds(limb_index);
         let vss_public_message_encoding_layouts = vss_public_message_bounds
             .into_iter()
-            .map(|message_bound| {
-                crate::bgv::setup::vss_commitment::vss_public_message_encoding_layout(message_bound)
+            .enumerate()
+            .map(|(message_index, message_bound)| {
+                if vss_public_is_threshold_aggregate
+                    && message_index < vss_public_coefficient_columns
+                {
+                    Ok(crate::bgv::setup::vss_commitment::vss_public_message_digit_only_encoding_layout())
+                } else {
+                    crate::bgv::setup::vss_commitment::vss_public_message_encoding_layout(
+                        message_bound,
+                    )
+                }
             })
             .collect::<CanonicalResult<Vec<_>>>()?;
         if vss_public_message_encoding_layouts.len()

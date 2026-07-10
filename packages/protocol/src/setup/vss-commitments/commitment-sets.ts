@@ -1,94 +1,118 @@
 // VSS public material assembly. The trustees' per-coefficient secret
-// polynomial evaluations are committed with a single covered-message
+// polynomial evaluations are committed with a single committed-material
 // commitment per (source trustee, RNS limb, Shamir coefficient), and the whole
 // set is bound by canonical object roots. The heavy cryptography lives in the
 // kernel commands; this module orchestrates the per-coefficient commitment
 // computation and binds the roots the accepted-setup verifier recomputes.
-import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash, hash512Hex } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
+import { bytesFromHex } from '../common-fields.js';
+import { encodeStandardBase64 } from '../proof-byte-encoding.js';
 import type { CollectiveBgvSetupContext } from '../vss-share-verification-records.js';
 
-// Two base-3^17 message digits per coefficient. The kernel validates that the
-// canonical digit columns reproduce the message coefficients, so they must be
-// derived exactly this way (little-endian digits, transposed into columns).
-// 129_140_163 = 3^17, kept as the literal so it matches the kernel's
-// VSS_PUBLIC_MESSAGE_DIGIT_BASE verbatim instead of drifting from an
-// independent 3 ** 17 computation.
-const vssPublicMessageDigitBase = 129_140_163;
-const vssPublicMessageDigitCount = 2;
+export type VssCommittedMaterialCommitmentRole =
+    | 'coefficient'
+    | 'recipient-share'
+    | 'aggregate-threshold-share';
 
-const vssPublicCanonicalMessageDigitColumns = (
-    messageCoefficients: readonly number[],
-): number[][] => {
-    const ringDegree = messageCoefficients.length;
-    const columns: number[][] = Array.from(
-        { length: vssPublicMessageDigitCount },
-        () => new Array<number>(ringDegree).fill(0),
-    );
-    messageCoefficients.forEach((coefficient, coefficientIndex) => {
-        let remaining = coefficient;
-        for (
-            let digitIndex = 0;
-            digitIndex < vssPublicMessageDigitCount;
-            digitIndex += 1
-        ) {
-            columns[digitIndex][coefficientIndex] =
-                remaining % vssPublicMessageDigitBase;
-            remaining = Math.floor(remaining / vssPublicMessageDigitBase);
-        }
-    });
-
-    return columns;
+export type VssCommittedMaterialCommitmentField = {
+    readonly commitmentModulusIndex: number;
+    readonly modulus: number;
+    readonly materialRootHex: string;
 };
 
-export type VssPublicCommitmentOpeningInput = {
-    readonly commitmentRole:
-        | 'coefficient'
-        | 'recipient-share'
-        | 'aggregate-threshold-share';
+// The committed-material commitment body: per-commitment-field salted Merkle
+// roots over the message's canonical digit columns, derived from the holder's
+// private material seed and the public commitment context. There are no public
+// coordinates and no opening-randomness columns.
+export type VssCommittedMaterialCommitmentValue = {
+    readonly objectType: 'VssCommittedMaterialCommitment';
+    readonly commitmentRole: string;
+    readonly commitmentContextHash: ProtocolHash;
+    readonly rnsLimbIndex: number;
+    readonly rnsPrime: number;
+    readonly ringDegree: number;
+    readonly materialColumnMaskDegree: number;
+    readonly commitmentFields: readonly VssCommittedMaterialCommitmentField[];
+};
+
+export type VssCommittedMaterialCommitmentComputation = {
+    readonly commitment: VssCommittedMaterialCommitmentValue;
+    readonly commitmentRoot: ProtocolHash;
+    readonly openingRoot: ProtocolHash;
+    readonly commitmentContextHash: ProtocolHash;
+};
+
+// The kernel-backed commitment computation (bound to the WASM
+// `ComputeVssCommittedMaterialCommitment` command by the SDK layer). Injected
+// so the protocol layer never reimplements the certified commitment.
+export type VssCommittedMaterialCommitmentComputer = (input: {
+    readonly commitmentRole: VssCommittedMaterialCommitmentRole;
     readonly commitmentContext: Record<string, unknown>;
-    readonly publicMatrixSeedHash: ProtocolHash;
     readonly rnsLimbIndex: number;
     readonly rnsPrime: number;
     readonly ringDegree: number;
     readonly messageCoefficientBound?: number;
     readonly messageCoefficients: readonly number[];
-    readonly messageDigitColumns: readonly (readonly number[])[];
-    readonly randomnessByColumn: readonly (readonly number[])[];
-};
+    readonly materialSeedHex: string;
+}) => VssCommittedMaterialCommitmentComputation;
 
-export type VssPublicCommitmentLimbValue = {
-    readonly commitmentModulusIndex: number;
-    readonly modulus: number;
-    readonly coordinates: readonly number[];
-};
-
-export type VssPublicCommitmentValue = {
-    readonly objectType: 'VssPublicCommitment';
-    readonly commitmentRole: string;
-    readonly commitmentContextHash: ProtocolHash;
-    readonly publicMatrixSeedHash: ProtocolHash;
+export type VssCommittedMaterialSeedRequest = {
+    readonly commitmentRole: VssCommittedMaterialCommitmentRole;
     readonly rnsLimbIndex: number;
     readonly rnsPrime: number;
+    // Set for coefficient and recipient-share commitments: the committing
+    // source trustee.
+    readonly sourceTrusteeRosterPosition?: number;
+    // Set for coefficient commitments.
+    readonly shamirCoefficientIndex?: number;
+    // Set for recipient-share and aggregate-threshold-share commitments.
+    readonly recipientRosterPosition?: number;
+};
+
+// The holder's private deterministic material seed for one committed-material
+// commitment: a 128-character lowercase hexadecimal string. The same seed must
+// be threaded into every proof that opens the commitment, so the prover
+// regenerates byte-identical committed-material trees; the seed itself never
+// appears in the published package.
+export type VssCommittedMaterialSeedProvider = (
+    input: VssCommittedMaterialSeedRequest,
+) => string;
+
+export type VssShareLinkageProofContext = {
+    readonly ceremonyId: string;
+    readonly manifestHash: ProtocolHash;
+    readonly rosterHash: ProtocolHash;
+    readonly trusteeIdentity: string;
+    readonly trusteeRosterPosition: number;
+    readonly setupEpoch: string;
+    readonly shareLinkageStatementRoot: ProtocolHash;
+};
+
+// The kernel-backed share-linkage proof (bound to the WASM
+// `GenerateVssShareLinkageProof` command by the SDK). Injected so the
+// protocol layer assembles the witness but never runs the certified prover.
+// The committed-material commitments carry no algebraic opening randomness,
+// so the randomness arrays are always empty; the bound-message seed and
+// context-hash arrays let the prover regenerate the committed trees.
+export type VssShareLinkageProofComputer = (input: {
+    readonly context: VssShareLinkageProofContext;
     readonly ringDegree: number;
-    readonly outputCoordinateCount: number;
-    readonly randomnessColumnCount: number;
-    readonly commitmentLimbs: readonly VssPublicCommitmentLimbValue[];
-};
-
-export type VssPublicCommitmentComputation = {
-    readonly commitment: VssPublicCommitmentValue;
-    readonly commitmentRoot: ProtocolHash;
-    readonly openingRoot: ProtocolHash;
-};
-
-// The kernel-backed commitment computation (bound to the WASM
-// `ComputeVssPublicCommitmentFromOpening` command by the SDK layer). Injected
-// so the protocol layer never reimplements the certified commitment.
-export type VssPublicCommitmentComputer = (
-    input: VssPublicCommitmentOpeningInput,
-) => VssPublicCommitmentComputation;
+    readonly vssShareLinkage: Record<string, unknown>;
+    readonly coefficientMessagesByShamirIndex: readonly (readonly number[])[];
+    readonly recipientShareMessages: readonly number[];
+    readonly coefficientOpeningRandomnessByShamirIndex: readonly (readonly (readonly number[])[])[];
+    readonly recipientShareOpeningRandomness: readonly (readonly number[])[];
+    readonly carryWitnesses: readonly number[];
+    readonly recipientShareMessagesByItem: readonly (readonly number[])[];
+    readonly recipientShareOpeningRandomnessByItem: readonly (readonly (readonly number[])[])[];
+    readonly carryWitnessesByItem: readonly (readonly number[])[];
+    readonly vssCommittedMaterialSeedsByBoundMessage: readonly string[];
+    readonly vssCommittedMaterialContextHashesByBoundMessage: readonly string[];
+    readonly proofRandomnessSeedHex: string;
+    readonly proofRandomnessNonceHex: string;
+}) => { readonly proofBytesHex: string };
 
 // Typed commitment set outputs. These are the exact objects the
 // accepted-setup verifier recomputes canonical roots over, so downstream
@@ -104,7 +128,7 @@ export type VssPublicCoefficientCommitment = {
     readonly shamirCoefficientIndex: number;
     readonly coefficientCommitmentRoot: ProtocolHash;
     readonly coefficientOpeningRoot: ProtocolHash;
-    readonly commitment: VssPublicCommitmentValue;
+    readonly commitment: VssCommittedMaterialCommitmentValue;
 };
 
 export type VssPublicSourceCoefficientCommitments = {
@@ -138,7 +162,7 @@ export type VssPublicRecipientShareCommitment = {
     readonly rnsPrime: number;
     readonly shareCommitmentRoot: ProtocolHash;
     readonly shareOpeningRoot: ProtocolHash;
-    readonly commitment: VssPublicCommitmentValue;
+    readonly commitment: VssCommittedMaterialCommitmentValue;
 };
 
 export type VssPublicSourceRecipientShareCommitments = {
@@ -168,9 +192,23 @@ export type VssPublicAggregateThresholdCommitment = {
     readonly rnsPrime: number;
     readonly aggregateCommitmentRoot: ProtocolHash;
     readonly aggregateOpeningRoot: ProtocolHash;
-    readonly commitment: VssPublicCommitmentValue;
+    readonly commitment: VssCommittedMaterialCommitmentValue;
     readonly sourceShareCommitmentRoots: readonly ProtocolHash[];
     readonly sourceShareOpeningRoots: readonly ProtocolHash[];
+};
+
+// The proven "aggregate equals modular sum of the source shares" binding for
+// one aggregate record: a share-linkage proof with a unit evaluation point
+// whose "coefficients" are the source recipient-share commitments and whose
+// "recipient share" is the aggregate commitment.
+export type VssAggregateThresholdProofRecord = {
+    readonly objectType: 'VssAggregateThresholdProofRecord';
+    readonly proofFamily: string;
+    readonly recipientRosterPosition: number;
+    readonly rnsLimbIndex: number;
+    readonly vssShareLinkage: Record<string, unknown>;
+    readonly proofBytesHash: string;
+    readonly proofBytesBase64: string;
 };
 
 export type VssPublicAggregateThresholdCommitmentSet = {
@@ -181,6 +219,10 @@ export type VssPublicAggregateThresholdCommitmentSet = {
     readonly ringDegree: number;
     readonly recipientRecords: readonly VssPublicAggregateThresholdCommitment[];
     readonly aggregateThresholdCommitmentRoot: ProtocolHash;
+    // A sibling of the committed records, excluded from the set root: each
+    // proof is bound by its own statement, which references the committed
+    // roots the set root already covers.
+    readonly aggregateThresholdProofs: readonly VssAggregateThresholdProofRecord[];
 };
 
 export type VssPublicCoefficientOpening = {
@@ -196,26 +238,19 @@ export type VssPublicSourceTrusteeOpeningState = {
     readonly coefficientOpenings: readonly VssPublicCoefficientOpening[];
 };
 
-type VssPublicCoefficientOpeningRandomnessProvider = (input: {
-    readonly trusteeIdentity: string;
-    readonly trusteeRosterPosition: number;
-    readonly rnsLimbIndex: number;
-    readonly rnsPrime: number;
-    readonly shamirCoefficientIndex: number;
-    readonly ringDegree: number;
-}) => readonly (readonly number[])[];
-
 // The source trustee's per-coefficient opening witness (message plus the exact
-// commitment randomness). Carried out of the coefficient-set builder so the
-// share-linkage proof opens the same commitments the set bound, rather than
-// re-deriving randomness and risking a mismatch.
+// private material seed and public context hash of the committed-material
+// commitment). Carried out of the coefficient-set builder so the share-linkage
+// and bridge proofs regenerate the same committed trees the set bound, rather
+// than re-deriving a seed and risking a mismatch.
 export type VssPublicCoefficientCredential = {
     readonly sourceTrusteeRosterPosition: number;
     readonly rnsLimbIndex: number;
     readonly rnsPrime: number;
     readonly shamirCoefficientIndex: number;
     readonly coefficientMessage: readonly number[];
-    readonly randomnessByColumn: readonly (readonly number[])[];
+    readonly materialSeedHex: string;
+    readonly commitmentContextHash: ProtocolHash;
 };
 
 type VssPublicCoefficientCommitmentBundle = {
@@ -254,8 +289,8 @@ export const createVssPublicCoefficientCommitmentSet = (input: {
     readonly ringDegree: number;
     readonly thresholdDegree: number;
     readonly sourceTrusteeOpeningStates: readonly VssPublicSourceTrusteeOpeningState[];
-    readonly coefficientOpeningRandomness: VssPublicCoefficientOpeningRandomnessProvider;
-    readonly computeVssPublicCommitment: VssPublicCommitmentComputer;
+    readonly committedMaterialSeed: VssCommittedMaterialSeedProvider;
+    readonly computeVssCommittedMaterialCommitment: VssCommittedMaterialCommitmentComputer;
 }): VssPublicCoefficientCommitmentBundle => {
     const coefficientCredentials: VssPublicCoefficientCredential[] = [];
     const sourceTrusteeRecords = [...input.sourceTrusteeOpeningStates]
@@ -314,32 +349,25 @@ export const createVssPublicCoefficientCommitmentSet = (input: {
                             rnsPrime,
                             shamirCoefficientIndex,
                         };
-                        const randomnessByColumn =
-                            input.coefficientOpeningRandomness({
-                                trusteeIdentity:
-                                    sourceTrusteeOpeningState.sourceTrusteeIdentity,
-                                trusteeRosterPosition:
-                                    sourceTrusteeOpeningState.sourceTrusteeRosterPosition,
-                                rnsLimbIndex,
-                                rnsPrime,
-                                shamirCoefficientIndex,
-                                ringDegree: input.ringDegree,
-                            });
-                        const computation = input.computeVssPublicCommitment({
+                        const materialSeedHex = input.committedMaterialSeed({
                             commitmentRole: 'coefficient',
-                            commitmentContext,
-                            publicMatrixSeedHash: input.publicMatrixSeedHash,
                             rnsLimbIndex,
                             rnsPrime,
-                            ringDegree: input.ringDegree,
-                            messageCoefficientBound: rnsPrime,
-                            messageCoefficients: opening.coefficientMessage,
-                            messageDigitColumns:
-                                vssPublicCanonicalMessageDigitColumns(
-                                    opening.coefficientMessage,
-                                ),
-                            randomnessByColumn,
+                            sourceTrusteeRosterPosition:
+                                sourceTrusteeOpeningState.sourceTrusteeRosterPosition,
+                            shamirCoefficientIndex,
                         });
+                        const computation =
+                            input.computeVssCommittedMaterialCommitment({
+                                commitmentRole: 'coefficient',
+                                commitmentContext,
+                                rnsLimbIndex,
+                                rnsPrime,
+                                ringDegree: input.ringDegree,
+                                messageCoefficientBound: rnsPrime,
+                                messageCoefficients: opening.coefficientMessage,
+                                materialSeedHex,
+                            });
                         coefficientCommitments.push({
                             objectType: 'VssPublicCoefficientCommitment',
                             sourceTrusteeIdentity:
@@ -362,7 +390,9 @@ export const createVssPublicCoefficientCommitmentSet = (input: {
                             rnsPrime,
                             shamirCoefficientIndex,
                             coefficientMessage: opening.coefficientMessage,
-                            randomnessByColumn,
+                            materialSeedHex,
+                            commitmentContextHash:
+                                computation.commitmentContextHash,
                         });
                     }
                 });
@@ -406,15 +436,6 @@ export const createVssPublicCoefficientCommitmentSet = (input: {
     };
 };
 
-type VssPublicRecipientShareOpeningRandomnessProvider = (input: {
-    readonly sourceTrusteeIdentity: string;
-    readonly sourceTrusteeRosterPosition: number;
-    readonly recipientRosterPosition: number;
-    readonly rnsLimbIndex: number;
-    readonly rnsPrime: number;
-    readonly ringDegree: number;
-}) => readonly (readonly number[])[];
-
 export type VssPublicRecipientShareCredential = {
     readonly sourceTrusteeIdentity: string;
     readonly sourceTrusteeRosterPosition: number;
@@ -423,10 +444,11 @@ export type VssPublicRecipientShareCredential = {
     readonly rnsPrime: number;
     readonly shareValues: readonly number[];
     readonly carries: readonly number[];
-    readonly randomnessByColumn: readonly (readonly number[])[];
+    readonly materialSeedHex: string;
+    readonly commitmentContextHash: ProtocolHash;
     readonly shareCommitmentRoot: ProtocolHash;
     readonly shareOpeningRoot: ProtocolHash;
-    readonly commitment: VssPublicCommitmentValue;
+    readonly commitment: VssCommittedMaterialCommitmentValue;
 };
 
 type VssPublicRecipientShareCommitmentBundle = {
@@ -475,8 +497,8 @@ export const createVssPublicRecipientShareCommitmentSet = (input: {
     readonly ringDegree: number;
     readonly thresholdDegree: number;
     readonly sourceTrusteeOpeningStates: readonly VssPublicSourceTrusteeOpeningState[];
-    readonly recipientShareOpeningRandomness: VssPublicRecipientShareOpeningRandomnessProvider;
-    readonly computeVssPublicCommitment: VssPublicCommitmentComputer;
+    readonly committedMaterialSeed: VssCommittedMaterialSeedProvider;
+    readonly computeVssCommittedMaterialCommitment: VssCommittedMaterialCommitmentComputer;
 }): VssPublicRecipientShareCommitmentBundle => {
     const recipientShareCredentials: VssPublicRecipientShareCredential[] = [];
     const sourceTrusteeRecords = [...input.sourceTrusteeOpeningStates]
@@ -538,17 +560,6 @@ export const createVssPublicRecipientShareCommitmentSet = (input: {
                                 rnsPrime,
                                 ringDegree: input.ringDegree,
                             });
-                        const randomnessByColumn =
-                            input.recipientShareOpeningRandomness({
-                                sourceTrusteeIdentity:
-                                    sourceTrusteeOpeningState.sourceTrusteeIdentity,
-                                sourceTrusteeRosterPosition:
-                                    sourceTrusteeOpeningState.sourceTrusteeRosterPosition,
-                                recipientRosterPosition,
-                                rnsLimbIndex,
-                                rnsPrime,
-                                ringDegree: input.ringDegree,
-                            });
                         const commitmentContext = {
                             objectType:
                                 'VssPublicRecipientShareCommitmentContext',
@@ -563,21 +574,25 @@ export const createVssPublicRecipientShareCommitmentSet = (input: {
                             rnsLimbIndex,
                             rnsPrime,
                         };
-                        const computation = input.computeVssPublicCommitment({
+                        const materialSeedHex = input.committedMaterialSeed({
                             commitmentRole: 'recipient-share',
-                            commitmentContext,
-                            publicMatrixSeedHash: input.publicMatrixSeedHash,
                             rnsLimbIndex,
                             rnsPrime,
-                            ringDegree: input.ringDegree,
-                            messageCoefficientBound: rnsPrime,
-                            messageCoefficients: shareValues,
-                            messageDigitColumns:
-                                vssPublicCanonicalMessageDigitColumns(
-                                    shareValues,
-                                ),
-                            randomnessByColumn,
+                            sourceTrusteeRosterPosition:
+                                sourceTrusteeOpeningState.sourceTrusteeRosterPosition,
+                            recipientRosterPosition,
                         });
+                        const computation =
+                            input.computeVssCommittedMaterialCommitment({
+                                commitmentRole: 'recipient-share',
+                                commitmentContext,
+                                rnsLimbIndex,
+                                rnsPrime,
+                                ringDegree: input.ringDegree,
+                                messageCoefficientBound: rnsPrime,
+                                messageCoefficients: shareValues,
+                                materialSeedHex,
+                            });
                         recipientShareCommitments.push({
                             objectType: 'VssPublicRecipientShareCommitment',
                             sourceTrusteeIdentity:
@@ -603,7 +618,9 @@ export const createVssPublicRecipientShareCommitmentSet = (input: {
                             rnsPrime,
                             shareValues,
                             carries,
-                            randomnessByColumn,
+                            materialSeedHex,
+                            commitmentContextHash:
+                                computation.commitmentContextHash,
                             shareCommitmentRoot: computation.commitmentRoot,
                             shareOpeningRoot: computation.openingRoot,
                             commitment: computation.commitment,
@@ -652,68 +669,172 @@ const aggregateCoordinateGroupKey = (
     rnsLimbIndex: number,
 ): string => `${String(recipientRosterPosition)}:${String(rnsLimbIndex)}`;
 
-// The aggregate threshold commitment for one recipient at one RNS limb is the
-// coordinate-wise SUM of every source trustee's recipient-share commitment to
-// that recipient at that limb. The commitment is linear, so the summed
-// commitment opens to the summed share under the summed randomness, which is
-// exactly what the accepted-setup verifier recomputes. This is a client-side
-// sum, never a fresh compute-command call: a commitment of the summed share
-// under zero randomness would not equal the sum of the source commitments and
-// would fail the verifier. Each commitment modulus is a ~2^47 data prime and the
-// running remainder stays below it, so the plain-number modular sum is exact.
-const vssPublicSummedAggregateCommitment = (input: {
-    readonly commitmentContext: Record<string, unknown>;
-    readonly publicMatrixSeedHash: ProtocolHash;
+// The aggregate proofs reuse the share-linkage proof family: each one is a
+// unit-evaluation-point share-linkage proof showing the committed threshold
+// share is the modular sum of the committed source recipient shares.
+const vssAggregateThresholdProofFamily = 'vss-share-linkage';
+const vssAggregateThresholdProofBytesHashDomain =
+    'sealed-lattice/setup/vss-aggregate-threshold/proof-bytes';
+
+// Fresh prover blinding randomness per aggregate proof record. The proof is
+// zero-knowledge, so this is independent per (recipient, RNS limb) and binds
+// nothing the verifier recomputes.
+type VssAggregateThresholdProofRandomnessProvider = (input: {
+    readonly recipientRosterPosition: number;
+    readonly rnsLimbIndex: number;
+}) => { readonly seedHex: string; readonly nonceHex: string };
+
+// The per-record aggregation witness: the modular-sum message the aggregate
+// record committed, the integer wrap values of that sum, and the material seed
+// that built the aggregate commitment, kept alongside the summand credentials
+// so the aggregate proof opens exactly the committed trees.
+type VssPublicAggregateThresholdCredential = {
+    readonly recipientRosterPosition: number;
     readonly rnsLimbIndex: number;
     readonly rnsPrime: number;
+    readonly aggregateMessage: readonly number[];
+    readonly wrapWitnesses: readonly number[];
+    readonly materialSeedHex: string;
+    readonly sourceCredentials: readonly VssPublicRecipientShareCredential[];
+    readonly record: VssPublicAggregateThresholdCommitment;
+};
+
+// One aggregate threshold proof record: a unit-evaluation-point share-linkage
+// statement whose "coefficients" are the source recipient-share commitments
+// and whose "recipient share" is the aggregate commitment, plus the proof
+// bytes the injected kernel prover produced for it.
+const createVssAggregateThresholdProofRecord = (input: {
+    readonly setupContext: CollectiveBgvSetupContext;
+    readonly publicMatrixSeedHash: ProtocolHash;
     readonly ringDegree: number;
-    readonly sourceCommitments: readonly VssPublicCommitmentValue[];
-}): VssPublicCommitmentValue => {
-    const [firstCommitment] = input.sourceCommitments;
-    if (firstCommitment === undefined) {
+    readonly coefficientCommitmentSet: VssPublicCoefficientCommitmentSet;
+    readonly recipientShareCommitmentSet: VssPublicRecipientShareCommitmentSet;
+    readonly aggregateCredential: VssPublicAggregateThresholdCredential;
+    readonly aggregateThresholdProofRandomness: VssAggregateThresholdProofRandomnessProvider;
+    readonly generateVssShareLinkageProof: VssShareLinkageProofComputer;
+}): VssAggregateThresholdProofRecord => {
+    const { aggregateCredential } = input;
+    const {
+        recipientRosterPosition,
+        rnsLimbIndex,
+        rnsPrime,
+        sourceCredentials,
+        record,
+    } = aggregateCredential;
+    const recipientIdentity = record.recipientIdentity;
+    const coefficientSourceRecord =
+        input.coefficientCommitmentSet.sourceTrusteeRecords[
+            recipientRosterPosition
+        ];
+    const recipientSourceRecord =
+        input.recipientShareCommitmentSet.sourceTrusteeRecords[
+            recipientRosterPosition
+        ];
+    if (
+        coefficientSourceRecord === undefined ||
+        recipientSourceRecord === undefined
+    ) {
         throw new Error(
-            'Aggregate threshold commitment requires at least one source recipient-share commitment.',
+            'Aggregate threshold proof requires source records for every recipient roster position.',
         );
     }
-    const commitmentContextHash = deriveCanonicalObjectHash({
-        objectType: 'VssPublicCommitmentContext',
-        commitmentRole: 'aggregate-threshold-share',
-        commitmentContext: input.commitmentContext,
-    });
-    const commitmentLimbs = firstCommitment.commitmentLimbs.map(
-        (limb, limbPosition) => {
-            const { modulus } = limb;
-            const coordinates = limb.coordinates.map(
-                (_coordinate, coordinateIndex) =>
-                    input.sourceCommitments.reduce(
-                        (accumulatedCoordinate, sourceCommitment) =>
-                            (accumulatedCoordinate +
-                                sourceCommitment.commitmentLimbs[limbPosition]
-                                    .coordinates[coordinateIndex]) %
-                            modulus,
-                        0,
-                    ),
-            );
 
-            return {
-                commitmentModulusIndex: limb.commitmentModulusIndex,
-                modulus,
-                coordinates,
-            };
+    const statementWithoutRoot = {
+        objectType: 'VssShareLinkageStatement',
+        isThresholdAggregate: true,
+        publicMatrixSeedHash: input.publicMatrixSeedHash,
+        sourceTrusteeIdentity: recipientIdentity,
+        sourceTrusteeRosterPosition: recipientRosterPosition,
+        sourceCoefficientCommitmentRoot:
+            coefficientSourceRecord.sourceCoefficientCommitmentRoot,
+        sourceRecipientShareCommitmentRoot:
+            recipientSourceRecord.sourceRecipientShareCommitmentRoot,
+        recipientIdentity,
+        recipientRosterPosition,
+        sourceRnsLimbIndex: rnsLimbIndex,
+        sourceMessageModulus: rnsPrime,
+        coefficientCommitmentRoots: sourceCredentials.map(
+            (credential) => credential.shareCommitmentRoot,
+        ),
+        coefficientOpeningRoots: sourceCredentials.map(
+            (credential) => credential.shareOpeningRoot,
+        ),
+        coefficientCommitments: sourceCredentials.map(
+            (credential) => credential.commitment,
+        ),
+        recipientShareCommitmentRoot: record.aggregateCommitmentRoot,
+        recipientShareOpeningRoot: record.aggregateOpeningRoot,
+        recipientShareCommitment: record.commitment,
+        additionalLinkageItems: [],
+    };
+    const vssShareLinkage = {
+        ...statementWithoutRoot,
+        shareLinkageStatementRoot:
+            deriveCanonicalObjectHash(statementWithoutRoot),
+    };
+
+    // Bound-commitment order: the summand slots (the source recipient-share
+    // commitments in source order), then the single aggregate recipient
+    // share. Context hashes are read off the published commitments; the seeds
+    // are the same seeds those commitments were created with.
+    const vssCommittedMaterialSeedsByBoundMessage = [
+        ...sourceCredentials.map((credential) => credential.materialSeedHex),
+        aggregateCredential.materialSeedHex,
+    ];
+    const vssCommittedMaterialContextHashesByBoundMessage = [
+        ...sourceCredentials.map(
+            (credential) => credential.commitment.commitmentContextHash,
+        ),
+        record.commitment.commitmentContextHash,
+    ];
+
+    const proofRandomness = input.aggregateThresholdProofRandomness({
+        recipientRosterPosition,
+        rnsLimbIndex,
+    });
+    const generatedProof = input.generateVssShareLinkageProof({
+        context: {
+            ceremonyId: input.setupContext.ceremonyId,
+            manifestHash: input.setupContext.manifestHash,
+            rosterHash: input.setupContext.rosterHash,
+            trusteeIdentity: 'vss-aggregate-threshold',
+            trusteeRosterPosition: 0,
+            setupEpoch: input.setupContext.setupEpoch,
+            shareLinkageStatementRoot:
+                vssShareLinkage.shareLinkageStatementRoot,
         },
+        ringDegree: input.ringDegree,
+        vssShareLinkage,
+        coefficientMessagesByShamirIndex: sourceCredentials.map(
+            (credential) => credential.shareValues,
+        ),
+        recipientShareMessages: aggregateCredential.aggregateMessage,
+        coefficientOpeningRandomnessByShamirIndex: [],
+        recipientShareOpeningRandomness: [],
+        carryWitnesses: aggregateCredential.wrapWitnesses,
+        recipientShareMessagesByItem: [aggregateCredential.aggregateMessage],
+        recipientShareOpeningRandomnessByItem: [],
+        carryWitnessesByItem: [aggregateCredential.wrapWitnesses],
+        vssCommittedMaterialSeedsByBoundMessage,
+        vssCommittedMaterialContextHashesByBoundMessage,
+        proofRandomnessSeedHex: proofRandomness.seedHex,
+        proofRandomnessNonceHex: proofRandomness.nonceHex,
+    });
+    const proofBytes = bytesFromHex(
+        generatedProof.proofBytesHex,
+        'VSS aggregate threshold proofBytesHex',
     );
 
     return {
-        objectType: 'VssPublicCommitment',
-        commitmentRole: 'aggregate-threshold-share',
-        commitmentContextHash,
-        publicMatrixSeedHash: input.publicMatrixSeedHash,
-        rnsLimbIndex: input.rnsLimbIndex,
-        rnsPrime: input.rnsPrime,
-        ringDegree: input.ringDegree,
-        outputCoordinateCount: firstCommitment.outputCoordinateCount,
-        randomnessColumnCount: firstCommitment.randomnessColumnCount,
-        commitmentLimbs,
+        objectType: 'VssAggregateThresholdProofRecord',
+        proofFamily: vssAggregateThresholdProofFamily,
+        recipientRosterPosition,
+        rnsLimbIndex,
+        vssShareLinkage,
+        proofBytesHash: hash512Hex(vssAggregateThresholdProofBytesHashDomain, [
+            proofBytes,
+        ]),
+        proofBytesBase64: encodeStandardBase64(proofBytes),
     };
 };
 
@@ -723,7 +844,13 @@ export const createVssPublicAggregateThresholdCommitmentSet = (input: {
     readonly participantCount: number;
     readonly qSharePrimes: readonly number[];
     readonly ringDegree: number;
+    readonly coefficientCommitmentSet: VssPublicCoefficientCommitmentSet;
+    readonly recipientShareCommitmentSet: VssPublicRecipientShareCommitmentSet;
     readonly recipientShareCredentials: readonly VssPublicRecipientShareCredential[];
+    readonly committedMaterialSeed: VssCommittedMaterialSeedProvider;
+    readonly computeVssCommittedMaterialCommitment: VssCommittedMaterialCommitmentComputer;
+    readonly aggregateThresholdProofRandomness: VssAggregateThresholdProofRandomnessProvider;
+    readonly generateVssShareLinkageProof: VssShareLinkageProofComputer;
 }): VssPublicAggregateThresholdCommitmentSet => {
     const credentialsByCoordinate = new Map<
         string,
@@ -743,6 +870,7 @@ export const createVssPublicAggregateThresholdCommitmentSet = (input: {
     });
 
     const recipientRecords: VssPublicAggregateThresholdCommitment[] = [];
+    const aggregateCredentials: VssPublicAggregateThresholdCredential[] = [];
     for (
         let recipientRosterPosition = 0;
         recipientRosterPosition < input.participantCount;
@@ -774,6 +902,30 @@ export const createVssPublicAggregateThresholdCommitmentSet = (input: {
             const sourceShareOpeningRoots = sourceCredentials.map(
                 (credential) => credential.shareOpeningRoot,
             );
+            // The threshold share is the modular sum of every source's
+            // recipient share for this recipient and limb; the integer wrap of
+            // that sum is the carry witness the aggregate proof binds.
+            // Computed in BigInt because the pre-reduction sum can approach
+            // the safe-integer range.
+            const prime = BigInt(rnsPrime);
+            const aggregateMessage = new Array<number>(input.ringDegree).fill(
+                0,
+            );
+            const wrapWitnesses = new Array<number>(input.ringDegree).fill(0);
+            for (
+                let coefficientPosition = 0;
+                coefficientPosition < input.ringDegree;
+                coefficientPosition += 1
+            ) {
+                let summed = 0n;
+                sourceCredentials.forEach((credential) => {
+                    summed += BigInt(
+                        credential.shareValues[coefficientPosition],
+                    );
+                });
+                aggregateMessage[coefficientPosition] = Number(summed % prime);
+                wrapWitnesses[coefficientPosition] = Number(summed / prime);
+            }
             const commitmentContext = {
                 objectType: 'VssPublicAggregateThresholdCommitmentContext',
                 ...setupContextFields(input.setupContext),
@@ -785,38 +937,45 @@ export const createVssPublicAggregateThresholdCommitmentSet = (input: {
                 sourceShareCommitmentRoots,
                 sourceShareOpeningRoots,
             };
-            const commitment = vssPublicSummedAggregateCommitment({
-                commitmentContext,
-                publicMatrixSeedHash: input.publicMatrixSeedHash,
+            const materialSeedHex = input.committedMaterialSeed({
+                commitmentRole: 'aggregate-threshold-share',
                 rnsLimbIndex,
                 rnsPrime,
-                ringDegree: input.ringDegree,
-                sourceCommitments: sourceCredentials.map(
-                    (credential) => credential.commitment,
-                ),
+                recipientRosterPosition,
             });
-            const aggregateOpeningRoot = deriveCanonicalObjectHash({
-                objectType: 'VssPublicAggregateThresholdOpening',
+            const computation = input.computeVssCommittedMaterialCommitment({
                 commitmentRole: 'aggregate-threshold-share',
                 commitmentContext,
-                publicMatrixSeedHash: input.publicMatrixSeedHash,
                 rnsLimbIndex,
                 rnsPrime,
                 ringDegree: input.ringDegree,
-                sourceShareOpeningRoots,
+                messageCoefficientBound: rnsPrime,
+                messageCoefficients: aggregateMessage,
+                materialSeedHex,
             });
-            recipientRecords.push({
+            const record: VssPublicAggregateThresholdCommitment = {
                 objectType: 'VssPublicAggregateThresholdCommitment',
                 recipientIdentity,
                 recipientRosterPosition,
                 recipientTrusteePoint: recipientPoint,
                 rnsLimbIndex,
                 rnsPrime,
-                aggregateCommitmentRoot: deriveCanonicalObjectHash(commitment),
-                aggregateOpeningRoot,
-                commitment,
+                aggregateCommitmentRoot: computation.commitmentRoot,
+                aggregateOpeningRoot: computation.openingRoot,
+                commitment: computation.commitment,
                 sourceShareCommitmentRoots,
                 sourceShareOpeningRoots,
+            };
+            recipientRecords.push(record);
+            aggregateCredentials.push({
+                recipientRosterPosition,
+                rnsLimbIndex,
+                rnsPrime,
+                aggregateMessage,
+                wrapWitnesses,
+                materialSeedHex,
+                sourceCredentials,
+                record,
             });
         });
     }
@@ -829,10 +988,32 @@ export const createVssPublicAggregateThresholdCommitmentSet = (input: {
         ringDegree: input.ringDegree,
         recipientRecords,
     };
+    const aggregateThresholdCommitmentRoot =
+        deriveCanonicalObjectHash(setWithoutRoot);
+
+    // The proven "aggregate equals sum" bindings are a sibling of the records,
+    // added after the set root so they are bound by their own statements
+    // (which reference the committed roots), not folded into the commitment
+    // set root.
+    const aggregateThresholdProofs = aggregateCredentials.map(
+        (aggregateCredential): VssAggregateThresholdProofRecord =>
+            createVssAggregateThresholdProofRecord({
+                setupContext: input.setupContext,
+                publicMatrixSeedHash: input.publicMatrixSeedHash,
+                ringDegree: input.ringDegree,
+                coefficientCommitmentSet: input.coefficientCommitmentSet,
+                recipientShareCommitmentSet: input.recipientShareCommitmentSet,
+                aggregateCredential,
+                aggregateThresholdProofRandomness:
+                    input.aggregateThresholdProofRandomness,
+                generateVssShareLinkageProof:
+                    input.generateVssShareLinkageProof,
+            }),
+    );
 
     return {
         ...setWithoutRoot,
-        aggregateThresholdCommitmentRoot:
-            deriveCanonicalObjectHash(setWithoutRoot),
+        aggregateThresholdCommitmentRoot,
+        aggregateThresholdProofs,
     };
 };

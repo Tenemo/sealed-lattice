@@ -14,6 +14,7 @@ import type {
     BgvCollectiveSetupPublicDerivations,
     BgvCollectiveSetupVerification,
     BgvTrusteeEvaluationKeyProofGeneration,
+    BgvTrusteeEvaluationKeyStatementDescription,
     BgvEvaluatorOperationValidation,
     BgvLocalTrusteeSetupStateVerification,
     BgvObjectValidation,
@@ -23,7 +24,7 @@ import type {
     BgvOperationRejection,
     BgvRnsParametersDescription,
     BgvSameSecretBridgeProofGeneration,
-    BgvVssPublicCommitmentOpeningComputation,
+    BgvVssCommittedMaterialCommitmentComputation,
     BgvVssShareLinkageProofGeneration,
     BgvSetupCommitmentOpeningComputation,
     BgvSetupProofMaterialTransportStreamBegin,
@@ -415,6 +416,19 @@ export const createTranscriptCoreKernelLoader = (
                         proofRandomnessSeedHex: input.proofRandomnessSeedHex,
                         proofRandomnessNonceHex: input.proofRandomnessNonceHex,
                     }),
+                describeTrusteeEvaluationKeyStatement: (
+                    input,
+                ): BgvTrusteeEvaluationKeyStatementDescription =>
+                    executeCommand<BgvTrusteeEvaluationKeyStatementDescription>(
+                        {
+                            command: 'DescribeTrusteeEvaluationKeyStatement',
+                            context: input.context,
+                            ringDegree: input.ringDegree,
+                            keys: input.keys,
+                            sameSecretLinkage: input.sameSecretLinkage,
+                            sameSecretBridge: input.sameSecretBridge,
+                        },
+                    ),
                 computeSetupCommitmentFromOpening: (
                     input,
                 ): BgvSetupCommitmentOpeningComputation =>
@@ -428,27 +442,27 @@ export const createTranscriptCoreKernelLoader = (
                         randomnessByColumn: input.randomnessByColumn,
                         ringDegree: input.ringDegree,
                     }),
-                computeVssPublicCommitmentFromOpening: (
+                computeVssCommittedMaterialCommitment: (
                     input,
-                ): BgvVssPublicCommitmentOpeningComputation =>
-                    executeCommand<BgvVssPublicCommitmentOpeningComputation>({
-                        command: 'ComputeVssPublicCommitmentFromOpening',
-                        commitmentRole: input.commitmentRole,
-                        commitmentContext: input.commitmentContext,
-                        publicMatrixSeedHash: input.publicMatrixSeedHash,
-                        rnsLimbIndex: input.rnsLimbIndex,
-                        rnsPrime: input.rnsPrime,
-                        ringDegree: input.ringDegree,
-                        ...(input.messageCoefficientBound === undefined
-                            ? {}
-                            : {
-                                  messageCoefficientBound:
-                                      input.messageCoefficientBound,
-                              }),
-                        messageCoefficients: input.messageCoefficients,
-                        messageDigitColumns: input.messageDigitColumns,
-                        randomnessByColumn: input.randomnessByColumn,
-                    }),
+                ): BgvVssCommittedMaterialCommitmentComputation =>
+                    executeCommand<BgvVssCommittedMaterialCommitmentComputation>(
+                        {
+                            command: 'ComputeVssCommittedMaterialCommitment',
+                            commitmentRole: input.commitmentRole,
+                            commitmentContext: input.commitmentContext,
+                            rnsLimbIndex: input.rnsLimbIndex,
+                            rnsPrime: input.rnsPrime,
+                            ringDegree: input.ringDegree,
+                            ...(input.messageCoefficientBound === undefined
+                                ? {}
+                                : {
+                                      messageCoefficientBound:
+                                          input.messageCoefficientBound,
+                                  }),
+                            messageCoefficients: input.messageCoefficients,
+                            materialSeedHex: input.materialSeedHex,
+                        },
+                    ),
                 generateVssShareLinkageProof: (
                     input,
                 ): BgvVssShareLinkageProofGeneration =>
@@ -470,6 +484,10 @@ export const createTranscriptCoreKernelLoader = (
                         recipientShareOpeningRandomnessByItem:
                             input.recipientShareOpeningRandomnessByItem,
                         carryWitnessesByItem: input.carryWitnessesByItem,
+                        vssCommittedMaterialSeedsByBoundMessage:
+                            input.vssCommittedMaterialSeedsByBoundMessage,
+                        vssCommittedMaterialContextHashesByBoundMessage:
+                            input.vssCommittedMaterialContextHashesByBoundMessage,
                         proofRandomnessSeedHex: input.proofRandomnessSeedHex,
                         proofRandomnessNonceHex: input.proofRandomnessNonceHex,
                     }),
@@ -485,6 +503,10 @@ export const createTranscriptCoreKernelLoader = (
                         negativeIndicatorCoefficients:
                             input.negativeIndicatorCoefficients,
                         openingRandomnessByLimb: input.openingRandomnessByLimb,
+                        vssCommittedMaterialSeedsByBoundMessage:
+                            input.vssCommittedMaterialSeedsByBoundMessage,
+                        vssCommittedMaterialContextHashesByBoundMessage:
+                            input.vssCommittedMaterialContextHashesByBoundMessage,
                         proofRandomnessSeedHex: input.proofRandomnessSeedHex,
                         proofRandomnessNonceHex: input.proofRandomnessNonceHex,
                     }),

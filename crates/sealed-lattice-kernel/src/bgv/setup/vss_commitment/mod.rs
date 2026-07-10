@@ -30,8 +30,6 @@ const VSS_PUBLIC_MATRIX_RESIDUE_HASH_DOMAIN: &str =
     "sealed-lattice-vss-public-commitment/matrix-residue";
 const VSS_PUBLIC_PROJECTION_INDEX_HASH_DOMAIN: &str =
     "sealed-lattice-vss-public-commitment/projection-index";
-const VSS_PUBLIC_OPENING_PAYLOAD_HASH_DOMAIN: &str =
-    "sealed-lattice-vss-public-commitment/opening-payload";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::bgv::setup) struct VssPublicMessageEncodingLayout {
@@ -102,145 +100,6 @@ impl VssPublicMessageEncodingLayout {
 
         Ok(VSS_PUBLIC_MESSAGE_DIGIT_COUNT + previous_trit_count + trit_index)
     }
-}
-
-pub(crate) struct VssPublicCommitmentOpeningInput<'a> {
-    pub(crate) commitment_role: &'a str,
-    pub(crate) commitment_context: &'a Value,
-    pub(crate) public_matrix_seed_hash: &'a str,
-    pub(crate) rns_limb_index: usize,
-    pub(crate) rns_prime: u64,
-    pub(crate) ring_degree: usize,
-    pub(crate) message_coefficients: &'a [u64],
-    pub(crate) message_digit_columns: &'a [Vec<u64>],
-    pub(crate) message_coefficient_bound: u64,
-    pub(crate) randomness_by_column: &'a [Vec<i64>],
-}
-
-pub(crate) struct VssPublicCommitmentComputation {
-    pub(crate) commitment: Value,
-    pub(crate) commitment_root: String,
-    pub(crate) commitment_context_hash: String,
-    pub(crate) opening_root: String,
-}
-
-pub(crate) fn compute_vss_public_commitment_from_opening(
-    input: VssPublicCommitmentOpeningInput<'_>,
-) -> CanonicalResult<VssPublicCommitmentComputation> {
-    validate_hash_string(input.public_matrix_seed_hash, "publicMatrixSeedHash")?;
-    validate_vss_public_commitment_role(input.commitment_role)?;
-    if input.rns_prime == 0 {
-        return Err(invalid_vss_public_input("rnsPrime must be positive"));
-    }
-    if input.ring_degree == 0 {
-        return Err(invalid_vss_public_input("ringDegree must be positive"));
-    }
-    if input.message_coefficient_bound == 0 {
-        return Err(invalid_vss_public_input(
-            "messageCoefficientBound must be positive",
-        ));
-    }
-    if input.message_coefficients.len() != input.ring_degree {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "VSS message coefficient count must match ringDegree",
-        ));
-    }
-    for (coefficient_index, coefficient) in input.message_coefficients.iter().enumerate() {
-        if *coefficient >= input.message_coefficient_bound {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                format!(
-                    "VSS message coefficient {coefficient_index} must be below messageCoefficientBound"
-                ),
-            ));
-        }
-    }
-    let message_digit_columns = vss_public_message_digit_columns_for_opening(
-        input.message_coefficients,
-        input.message_digit_columns,
-        input.message_coefficient_bound,
-        input.ring_degree,
-    )?;
-    validate_vss_public_randomness_columns(
-        input.randomness_by_column,
-        input.ring_degree,
-        None,
-        "randomnessByColumn",
-    )?;
-
-    let commitment_context_hash = derive_canonical_object_hash(&json!({
-        "objectType": "VssPublicCommitmentContext",
-        "commitmentRole": input.commitment_role,
-        "commitmentContext": input.commitment_context,
-    }))?;
-    let commitment_limbs = VSS_PUBLIC_COMMITMENT_MODULUS_LIMB_INDICES
-        .iter()
-        .map(|commitment_modulus_index| {
-            let modulus = DATA_PRIMES[*commitment_modulus_index];
-            let coordinates = (0..VSS_PUBLIC_OUTPUT_COORDINATE_COUNT)
-                .map(|output_coordinate_index| {
-                    commitment_coordinate(CommitmentCoordinateInput {
-                        public_matrix_seed_hash: input.public_matrix_seed_hash,
-                        rns_limb_index: input.rns_limb_index,
-                        commitment_modulus_index: *commitment_modulus_index,
-                        output_coordinate_index,
-                        modulus,
-                        message_digit_columns: &message_digit_columns,
-                        randomness_by_column: input.randomness_by_column,
-                    })
-                })
-                .collect::<CanonicalResult<Vec<_>>>()?;
-
-            Ok(json!({
-                "commitmentModulusIndex": commitment_modulus_index,
-                "modulus": modulus,
-                "coordinates": coordinates,
-            }))
-        })
-        .collect::<CanonicalResult<Vec<_>>>()?;
-    let commitment = json!({
-        "objectType": "VssPublicCommitment",
-        "commitmentRole": input.commitment_role,
-        "commitmentContextHash": commitment_context_hash,
-        "publicMatrixSeedHash": input.public_matrix_seed_hash,
-        "rnsLimbIndex": input.rns_limb_index,
-        "rnsPrime": input.rns_prime,
-        "ringDegree": input.ring_degree,
-        "outputCoordinateCount": VSS_PUBLIC_OUTPUT_COORDINATE_COUNT,
-        "randomnessColumnCount": VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT,
-        "commitmentLimbs": commitment_limbs,
-    });
-    let commitment_root = derive_canonical_object_hash(&commitment)?;
-    let opening_root = derive_canonical_object_hash(&json!({
-        "objectType": "VssPublicCommitmentOpening",
-        "commitmentRole": input.commitment_role,
-        "commitmentContext": input.commitment_context,
-        "publicMatrixSeedHash": input.public_matrix_seed_hash,
-        "rnsLimbIndex": input.rns_limb_index,
-        "rnsPrime": input.rns_prime,
-        "ringDegree": input.ring_degree,
-        "openingPayloadHash512": vss_public_opening_payload_hash(
-            input.message_coefficients,
-            &message_digit_columns,
-            input.randomness_by_column,
-        )?,
-    }))?;
-
-    Ok(VssPublicCommitmentComputation {
-        commitment,
-        commitment_root,
-        commitment_context_hash,
-        opening_root,
-    })
-}
-
-pub(crate) fn compute_vss_public_commitment_from_opening_request(
-    request: &Value,
-) -> CanonicalResult<Value> {
-    let computation = compute_vss_public_commitment_from_opening_value(request)?;
-
-    Ok(vss_public_commitment_computation_response(&computation))
 }
 
 pub(crate) fn verify_vss_public_coefficient_commitment_set_request(
@@ -383,7 +242,6 @@ pub(crate) fn verify_vss_public_recipient_share_commitment_set_request(
                 expected_source_roster_position: expected_roster_position,
                 expected_recipient_share_count,
                 rns_limb_count,
-                public_matrix_seed_hash,
             },
         )?);
     }
@@ -465,7 +323,6 @@ pub(crate) fn verify_vss_public_aggregate_threshold_commitment_set_request(
                 expected_recipient_roster_position: recipient_record_index / rns_limb_count,
                 expected_rns_limb_index: recipient_record_index % rns_limb_count,
                 participant_count,
-                public_matrix_seed_hash,
             },
         )?);
     }
@@ -498,10 +355,6 @@ pub(crate) fn verify_vss_public_aggregate_threshold_commitment_set_request(
     }))
 }
 
-fn vss_public_encoded_commitment_byte_length() -> usize {
-    VSS_PUBLIC_COMMITMENT_MODULUS_LIMB_INDICES.len() * VSS_PUBLIC_OUTPUT_COORDINATE_COUNT * 8
-}
-
 fn invalid_vss_public_input(message: impl Into<String>) -> CanonicalError {
     CanonicalError::new(CanonicalErrorCode::InvalidFixture, message)
 }
@@ -515,9 +368,11 @@ mod share_linkage;
 
 use readers::*;
 use record_verification::*;
-use sampler::*;
 
 pub(crate) use committed_material::compute_vss_committed_material_commitment_request;
+pub(crate) use committed_material::{
+    VssCommittedMaterialCommitmentInput, compute_vss_committed_material_commitment,
+};
 
 pub(crate) use message_encoding::vss_public_canonical_message_digit_columns;
 pub(in crate::bgv::setup) use message_encoding::{
@@ -532,6 +387,9 @@ pub(in crate::bgv::setup) use message_encoding::{
 pub(crate) use record_verification::validate_standalone_vss_public_commitment_body;
 pub(in crate::bgv::setup) use sampler::{ProjectionTermsInput, projection_terms};
 pub(crate) use share_linkage::verify_vss_share_linkage_statement_request;
+pub(crate) use share_linkage::{
+    VssAggregateThresholdProofContext, verify_vss_public_aggregate_threshold_proofs,
+};
 
 #[cfg(test)]
 pub(in crate::bgv::setup) mod tests;

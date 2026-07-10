@@ -24,6 +24,7 @@ enum TranscriptCoreCommand {
     VerifyPrivateVssShareEnvelope,
     GeneratePrivateVssShareProof,
     GenerateTrusteeEvaluationKeyProof,
+    DescribeTrusteeEvaluationKeyStatement,
     ComputeSetupCommitmentFromOpening,
     BeginSetupProofMaterialTransportStream,
     AbsorbSetupProofMaterialTransportStreamChunk,
@@ -70,7 +71,6 @@ enum TranscriptCoreCommand {
     BeginBgvTargetDecryptionResultRelease,
     AbsorbBgvTargetDecryptionResultReleaseShare,
     FinishBgvTargetDecryptionResultRelease,
-    ComputeVssPublicCommitmentFromOpening,
     ComputeVssCommittedMaterialCommitment,
     GenerateVssShareLinkageProof,
     GenerateSameSecretBridgeProof,
@@ -254,9 +254,9 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
         | TranscriptCoreCommand::BeginBgvTargetDecryptionResultRelease
         | TranscriptCoreCommand::AbsorbBgvTargetDecryptionResultReleaseShare
         | TranscriptCoreCommand::FinishBgvTargetDecryptionResultRelease
-        | TranscriptCoreCommand::ComputeVssPublicCommitmentFromOpening
         | TranscriptCoreCommand::ComputeVssCommittedMaterialCommitment
         | TranscriptCoreCommand::GenerateVssShareLinkageProof
+        | TranscriptCoreCommand::DescribeTrusteeEvaluationKeyStatement
         | TranscriptCoreCommand::GenerateSameSecretBridgeProof => {
             run_bgv_command(command, &request)
         }
@@ -305,6 +305,9 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
         }
         TranscriptCoreCommand::GenerateTrusteeEvaluationKeyProof => {
             crate::bgv::commands::generate_trustee_evaluation_key_proof(request)
+        }
+        TranscriptCoreCommand::DescribeTrusteeEvaluationKeyStatement => {
+            crate::bgv::commands::describe_trustee_evaluation_key_statement(request)
         }
         TranscriptCoreCommand::ComputeSetupCommitmentFromOpening => {
             crate::bgv::commands::compute_setup_commitment_from_opening(request)
@@ -409,9 +412,6 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
             crate::bgv::target_decryption::finish_bgv_target_decryption_result_release_from_request(
                 request,
             )
-        }
-        TranscriptCoreCommand::ComputeVssPublicCommitmentFromOpening => {
-            crate::bgv::commands::compute_vss_public_commitment_from_opening(request)
         }
         TranscriptCoreCommand::ComputeVssCommittedMaterialCommitment => {
             crate::bgv::commands::compute_vss_committed_material_commitment(request)

@@ -98,7 +98,6 @@ fn repeated_hash(byte_pair: &str) -> String {
 struct TestCommittedMaterialCommitment {
     commitment: super::relation::VssShareLinkageCommitment,
     commitment_root: String,
-    opening_root: String,
     material_seed_hex: String,
     context_hash: String,
 }
@@ -154,10 +153,6 @@ fn test_committed_material_commitment(
         commitment_root: response["commitmentRoot"]
             .as_str()
             .expect("commitment root")
-            .to_string(),
-        opening_root: response["openingRoot"]
-            .as_str()
-            .expect("opening root")
             .to_string(),
         material_seed_hex,
         context_hash: response["commitmentContextHash"]

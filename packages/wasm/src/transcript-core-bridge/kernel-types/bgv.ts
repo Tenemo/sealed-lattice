@@ -578,19 +578,32 @@ export type BgvTrusteeEvaluationKeyProofGeneration = {
     readonly proofBytesHex: string;
 };
 
+// The proof family and canonical statement hash of a trustee-batched
+// evaluation-key statement, computed without proving it. The key-bearing
+// same-secret anchor stays fail-closed while it is re-anchored on the BDLOP
+// constant commitment, so its statement hash is obtained directly from the
+// parsed statement rather than from a generated proof.
+export type BgvTrusteeEvaluationKeyStatementDescription = {
+    readonly operation: 'describeTrusteeEvaluationKeyStatement';
+    readonly proofFamily:
+        | 'trustee-evaluation-key'
+        | 'same-secret-linkage-anchor'
+        | 'public-key-share';
+    readonly statementHash: ProtocolHash;
+};
+
 export type BgvSetupCommitmentOpeningComputation = {
     readonly operation: 'computeSetupCommitmentFromOpening';
     readonly commitment: Record<string, unknown>;
     readonly commitmentRoot: ProtocolHash;
 };
 
-export type BgvVssPublicCommitmentOpeningComputation = {
-    readonly operation: 'computeVssPublicCommitmentFromOpening';
+export type BgvVssCommittedMaterialCommitmentComputation = {
+    readonly operation: 'computeVssCommittedMaterialCommitment';
     readonly commitment: Record<string, unknown>;
     readonly commitmentRoot: ProtocolHash;
     readonly openingRoot: ProtocolHash;
     readonly commitmentContextHash: ProtocolHash;
-    readonly encodedCommitmentByteLength: number;
 };
 
 export type BgvVssShareLinkageProofGeneration = {

@@ -60,7 +60,13 @@ pub(super) fn target_decryption_share_all_active_limbs_proof_request_from_local_
     let mut message_vectors = Vec::with_capacity(
         active_limb_count * (1 + TARGET_DECRYPTION_SMUDGING_ROLES.len() * POLYNOMIAL_DEGREE),
     );
-    let mut opening_randomness = Vec::with_capacity(
+    // Committed-material regeneration inputs in the statement's bound-commitment
+    // order: per limb statement the aggregate, then each role's smudging
+    // commitments.
+    let mut bound_material_seeds = Vec::with_capacity(
+        active_limb_count * (1 + TARGET_DECRYPTION_SMUDGING_ROLES.len() * POLYNOMIAL_DEGREE),
+    );
+    let mut bound_material_context_hashes = Vec::with_capacity(
         active_limb_count * (1 + TARGET_DECRYPTION_SMUDGING_ROLES.len() * POLYNOMIAL_DEGREE),
     );
     for target_rns_limb_index in 0..active_limb_count {
@@ -99,7 +105,9 @@ pub(super) fn target_decryption_share_all_active_limbs_proof_request_from_local_
             &aggregate_opening.aggregate_commitment_message_values,
             "target proof slice aggregate message",
         )?);
-        opening_randomness.push(aggregate_opening.aggregate_randomness_by_column.clone());
+        bound_material_seeds.push(aggregate_opening.aggregate_material_seed_hex.clone());
+        bound_material_context_hashes
+            .push(aggregate_opening.aggregate_commitment_context_hash.clone());
         for target_role in TARGET_DECRYPTION_SMUDGING_ROLES {
             let smudging_openings = target_decryption_smudging_proof_openings_for_slice(
                 input.setup_binding,
@@ -123,11 +131,10 @@ pub(super) fn target_decryption_share_all_active_limbs_proof_request_from_local_
                     })
                     .collect::<CanonicalResult<Vec<_>>>()?,
             );
-            opening_randomness.extend(
-                smudging_openings
-                    .into_iter()
-                    .map(|opening| opening.randomness_by_column),
-            );
+            for smudging_opening in smudging_openings {
+                bound_material_seeds.push(smudging_opening.material_seed_hex);
+                bound_material_context_hashes.push(smudging_opening.commitment_context_hash);
+            }
         }
     }
 
@@ -143,7 +150,9 @@ pub(super) fn target_decryption_share_all_active_limbs_proof_request_from_local_
             },
         )?;
     proof_request["targetDecryptionMessageVectors"] = json!(message_vectors);
-    proof_request["targetDecryptionOpeningRandomnessByCommitment"] = json!(opening_randomness);
+    proof_request["vssCommittedMaterialSeedsByBoundMessage"] = json!(bound_material_seeds);
+    proof_request["vssCommittedMaterialContextHashesByBoundMessage"] =
+        json!(bound_material_context_hashes);
     proof_request["proofRandomnessSeedHex"] = json!(input.proof_randomness_seed_hex);
     proof_request["proofRandomnessNonceHex"] = json!(input.proof_randomness_nonce_hex);
 

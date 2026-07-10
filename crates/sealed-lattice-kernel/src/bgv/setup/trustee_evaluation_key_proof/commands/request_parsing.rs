@@ -187,8 +187,21 @@ pub(super) fn vss_share_linkage_statement_from_request(
         ));
     }
     let public_matrix_seed_hash = read_string(statement_value, "publicMatrixSeedHash")?.to_string();
-    let primary_item =
-        vss_share_linkage_item_from_value(statement_value, "vssShareLinkage", ring_degree)?;
+    let is_threshold_aggregate = match statement_value.get("isThresholdAggregate") {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(flag)) => *flag,
+        Some(_) => {
+            return Err(invalid_succinct_setup_proof(
+                "vssShareLinkage.isThresholdAggregate must be a boolean",
+            ));
+        }
+    };
+    let primary_item = vss_share_linkage_item_from_value(
+        statement_value,
+        "vssShareLinkage",
+        ring_degree,
+        is_threshold_aggregate,
+    )?;
     let additional_linkage_items = match statement_value.get("additionalLinkageItems") {
         None => Vec::new(),
         Some(Value::Array(items)) => items
@@ -199,6 +212,7 @@ pub(super) fn vss_share_linkage_statement_from_request(
                     item_value,
                     &format!("vssShareLinkage.additionalLinkageItems.{item_index}"),
                     ring_degree,
+                    is_threshold_aggregate,
                 )
             })
             .collect::<CanonicalResult<Vec<_>>>()?,
@@ -233,6 +247,7 @@ pub(super) fn vss_share_linkage_statement_from_request(
             recipient_share_opening_root: primary_item.recipient_share_opening_root,
             recipient_share_commitment: primary_item.recipient_share_commitment,
             additional_linkage_items,
+            is_threshold_aggregate,
         }),
         same_secret_bridge: None,
         target_decryption_share: None,
@@ -385,12 +400,27 @@ pub(super) fn vss_share_linkage_item_from_value(
     value: &Value,
     field_name: &str,
     ring_degree: usize,
+    is_threshold_aggregate: bool,
 ) -> CanonicalResult<VssShareLinkageItem> {
     if !value.is_object() {
         return Err(invalid_succinct_setup_proof(format!(
             "{field_name} must be an object"
         )));
     }
+    // In threshold-aggregate mode the "coefficients" open recipient-share
+    // committed material (the summands) and the "recipient share" opens
+    // aggregate-threshold-share committed material (the sum). In ordinary
+    // share-linkage mode they open coefficient and recipient-share material.
+    let coefficient_commitment_role = if is_threshold_aggregate {
+        "recipient-share"
+    } else {
+        "coefficient"
+    };
+    let recipient_commitment_role = if is_threshold_aggregate {
+        "aggregate-threshold-share"
+    } else {
+        "recipient-share"
+    };
     let source_rns_limb_index =
         usize::try_from(read_u64(value, "sourceRnsLimbIndex")?).map_err(|_| {
             invalid_succinct_setup_proof(format!(
@@ -431,7 +461,7 @@ pub(super) fn vss_share_linkage_item_from_value(
                             "{field_name}.coefficientCommitments.{coefficient_index}"
                         ),
                         root: expected_commitment_root,
-                        role: "coefficient",
+                        role: coefficient_commitment_role,
                         rns_limb_index: source_rns_limb_index,
                         rns_prime: source_message_modulus,
                         ring_degree,
@@ -452,7 +482,7 @@ pub(super) fn vss_share_linkage_item_from_value(
         VssPublicCommandCommitmentExpectation {
             field_name: format!("{field_name}.recipientShareCommitment"),
             root: &recipient_share_commitment_root,
-            role: "recipient-share",
+            role: recipient_commitment_role,
             rns_limb_index: source_rns_limb_index,
             rns_prime: source_message_modulus,
             ring_degree,

@@ -8,8 +8,10 @@ export {
     createVssPublicAggregateThresholdCommitmentSet,
 } from './vss-commitments/commitment-sets.js';
 export type {
-    VssPublicCommitmentValue,
-    VssPublicCommitmentComputer,
+    VssCommittedMaterialCommitmentValue,
+    VssCommittedMaterialCommitmentComputer,
+    VssCommittedMaterialSeedProvider,
+    VssShareLinkageProofComputer,
     VssPublicCoefficientCommitmentSet,
     VssPublicRecipientShareCommitmentSet,
     VssPublicAggregateThresholdCommitmentSet,
@@ -25,7 +27,6 @@ export {
 } from './vss-commitments/linkage-and-bridge.js';
 export type {
     VssShareLinkageStatement,
-    VssShareLinkageProofComputer,
     VssSameSecretBridgeStatementSet,
     SameSecretBridgeProofComputer,
 } from './vss-commitments/linkage-and-bridge.js';

@@ -361,38 +361,40 @@ fn same_secret_bridge_target_commitment_body(
     rns_limb_index: usize,
     rns_prime: u64,
 ) -> CanonicalResult<Value> {
-    let coordinate_count = crate::bgv::setup::vss_commitment::VSS_PUBLIC_OUTPUT_COORDINATE_COUNT;
-    let commitment_limbs = (0..3_usize)
+    // Committed-material commitment shape (VssCommittedMaterialCommitment): one
+    // salted-Merkle material root per setup commitment field. The bridge
+    // statement verifier binds the body by its canonical hash and checks the
+    // role, limb, prime, and ring degree, so a structurally valid committed-
+    // material body exercises the statement checks without proof machinery.
+    let commitment_fields = (0..3_usize)
         .map(|commitment_modulus_index| {
             let modulus = DATA_PRIMES[commitment_modulus_index];
-            let coordinates = (0..coordinate_count)
-                .map(|coordinate_index| {
-                    ((trustee_roster_position as u64 + 1) * 17
-                        + (rns_limb_index as u64 + 1) * 19
-                        + (commitment_modulus_index as u64 + 1) * 23
-                        + coordinate_index as u64)
-                        % modulus
-                })
-                .collect::<Vec<_>>();
+            let material_root_hex = format!(
+                "{:0>64}",
+                format!(
+                    "{:x}",
+                    (trustee_roster_position as u64 + 1) * 1_000_003
+                        + (rns_limb_index as u64 + 1) * 10_007
+                        + (commitment_modulus_index as u64 + 1)
+                )
+            );
             json!({
                 "commitmentModulusIndex": commitment_modulus_index,
                 "modulus": modulus,
-                "coordinates": coordinates,
+                "materialRootHex": material_root_hex,
             })
         })
         .collect::<Vec<_>>();
 
     Ok(json!({
-        "objectType": "VssPublicCommitment",
+        "objectType": "VssCommittedMaterialCommitment",
         "commitmentRole": "coefficient",
         "commitmentContextHash": "7".repeat(128),
-        "publicMatrixSeedHash": "8".repeat(128),
         "rnsLimbIndex": rns_limb_index,
         "rnsPrime": rns_prime,
         "ringDegree": 8,
-        "outputCoordinateCount": crate::bgv::setup::vss_commitment::VSS_PUBLIC_OUTPUT_COORDINATE_COUNT,
-        "randomnessColumnCount": crate::bgv::setup::vss_commitment::VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT,
-        "commitmentLimbs": commitment_limbs,
+        "materialColumnMaskDegree": 2,
+        "commitmentFields": commitment_fields,
     }))
 }
 

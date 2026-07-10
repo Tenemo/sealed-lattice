@@ -92,7 +92,6 @@ pub(super) struct VssPublicCommitmentBodyInput<'a> {
     commitment: &'a Value,
     expected_commitment_role: &'a str,
     expected_commitment_root: &'a str,
-    expected_public_matrix_seed_hash: &'a str,
     expected_rns_limb_index: usize,
     expected_rns_prime: u64,
     field_name: &'a str,
@@ -104,12 +103,11 @@ pub(crate) fn validate_standalone_vss_public_commitment_body(
 ) -> CanonicalResult<Value> {
     compare_required_string(
         string_at_path(commitment, &["objectType"])?,
-        "VssPublicCommitment",
+        "VssCommittedMaterialCommitment",
         &format!("{field_name} objectType"),
     )?;
     validate_vss_public_commitment_role(string_at_path(commitment, &["commitmentRole"])?)?;
     let _commitment_context_hash = hash_at_path(commitment, &["commitmentContextHash"])?;
-    let _public_matrix_seed_hash = hash_at_path(commitment, &["publicMatrixSeedHash"])?;
     let _rns_limb_index = usize_at_path(commitment, &["rnsLimbIndex"])?;
     let _rns_prime =
         read_positive_u64_at_path(commitment, &["rnsPrime"], &format!("{field_name} rnsPrime"))?;
@@ -118,63 +116,43 @@ pub(crate) fn validate_standalone_vss_public_commitment_body(
         &["ringDegree"],
         &format!("{field_name} ringDegree"),
     )?;
-    compare_required_u64(
-        unsigned_at_path(commitment, &["outputCoordinateCount"])?,
-        VSS_PUBLIC_OUTPUT_COORDINATE_COUNT as u64,
-        &format!("{field_name} outputCoordinateCount"),
-    )?;
-    compare_required_u64(
-        unsigned_at_path(commitment, &["randomnessColumnCount"])?,
-        VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT as u64,
-        &format!("{field_name} randomnessColumnCount"),
-    )?;
-    let commitment_limbs = array_at_path(commitment, &["commitmentLimbs"])?;
-    if commitment_limbs.len() != VSS_PUBLIC_COMMITMENT_MODULUS_LIMB_INDICES.len() {
+    let _material_column_mask_degree = unsigned_at_path(commitment, &["materialColumnMaskDegree"])?;
+    let commitment_fields = array_at_path(commitment, &["commitmentFields"])?;
+    if commitment_fields.len() != VSS_PUBLIC_COMMITMENT_MODULUS_LIMB_INDICES.len() {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            format!("{field_name} commitmentLimbs must cover the commitment modulus limbs"),
+            format!("{field_name} commitmentFields must cover the commitment modulus limbs"),
         ));
     }
-    for (limb_position, commitment_limb) in commitment_limbs.iter().enumerate() {
+    for (field_position, commitment_field) in commitment_fields.iter().enumerate() {
         let expected_commitment_modulus_index =
-            VSS_PUBLIC_COMMITMENT_MODULUS_LIMB_INDICES[limb_position];
+            VSS_PUBLIC_COMMITMENT_MODULUS_LIMB_INDICES[field_position];
         compare_required_u64(
-            unsigned_at_path(commitment_limb, &["commitmentModulusIndex"])?,
+            unsigned_at_path(commitment_field, &["commitmentModulusIndex"])?,
             expected_commitment_modulus_index as u64,
-            &format!("{field_name} commitmentLimbs.{limb_position}.commitmentModulusIndex"),
+            &format!("{field_name} commitmentFields.{field_position}.commitmentModulusIndex"),
         )?;
-        let expected_modulus = DATA_PRIMES[expected_commitment_modulus_index];
         compare_required_u64(
-            unsigned_at_path(commitment_limb, &["modulus"])?,
-            expected_modulus,
-            &format!("{field_name} commitmentLimbs.{limb_position}.modulus"),
+            unsigned_at_path(commitment_field, &["modulus"])?,
+            DATA_PRIMES[expected_commitment_modulus_index],
+            &format!("{field_name} commitmentFields.{field_position}.modulus"),
         )?;
-        let coordinates = array_at_path(commitment_limb, &["coordinates"])?;
-        if coordinates.len() != VSS_PUBLIC_OUTPUT_COORDINATE_COUNT {
+        // The material root is a fixed-width Merkle digest (32 bytes) in
+        // lowercase hex. Binding is checked by the canonical-root comparison in
+        // the caller and by the succinct proof's material openings; here it is
+        // only a well-formedness check.
+        let material_root_hex = string_at_path(commitment_field, &["materialRootHex"])?;
+        if material_root_hex.len() != 64
+            || !material_root_hex
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
+                CanonicalErrorCode::InvalidFixture,
                 format!(
-                    "{field_name} commitmentLimbs.{limb_position}.coordinates length must match the commitment output count"
+                    "{field_name} commitmentFields.{field_position}.materialRootHex must be a 32-byte lowercase hex digest"
                 ),
             ));
-        }
-        for (coordinate_index, coordinate) in coordinates.iter().enumerate() {
-            let coordinate_value = coordinate.as_u64().ok_or_else(|| {
-                CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
-                    format!(
-                        "{field_name} commitmentLimbs.{limb_position}.coordinates.{coordinate_index} must be an unsigned integer"
-                    ),
-                )
-            })?;
-            if coordinate_value >= expected_modulus {
-                return Err(CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
-                    format!(
-                        "{field_name} commitmentLimbs.{limb_position}.coordinates.{coordinate_index} must be below the commitment modulus"
-                    ),
-                ));
-            }
         }
     }
 
@@ -190,11 +168,6 @@ pub(super) fn verify_vss_public_commitment_body(
         string_at_path(&commitment, &["commitmentRole"])?,
         input.expected_commitment_role,
         &format!("{} commitmentRole", input.field_name),
-    )?;
-    compare_required_string(
-        hash_at_path(&commitment, &["publicMatrixSeedHash"])?,
-        input.expected_public_matrix_seed_hash,
-        &format!("{} publicMatrixSeedHash", input.field_name),
     )?;
     compare_required_u64(
         unsigned_at_path(&commitment, &["rnsLimbIndex"])?,
@@ -266,7 +239,6 @@ pub(super) fn verify_vss_public_coefficient_record(
         commitment: value_at_path(input.coefficient_record, &["commitment"])?,
         expected_commitment_role: "coefficient",
         expected_commitment_root: coefficient_commitment_root,
-        expected_public_matrix_seed_hash: input.public_matrix_seed_hash,
         expected_rns_limb_index: input.expected_rns_limb_index,
         expected_rns_prime: rns_prime,
         field_name: "VSS coefficient commitment commitment",
@@ -291,7 +263,6 @@ pub(super) struct VssPublicSourceRecipientShareRecordInput<'a> {
     pub(super) expected_source_roster_position: usize,
     pub(super) expected_recipient_share_count: usize,
     pub(super) rns_limb_count: usize,
-    pub(super) public_matrix_seed_hash: &'a str,
 }
 
 pub(super) fn verify_vss_public_source_recipient_share_record(
@@ -331,7 +302,6 @@ pub(super) fn verify_vss_public_source_recipient_share_record(
                 expected_recipient_roster_position: recipient_share_record_index
                     / input.rns_limb_count,
                 expected_rns_limb_index: recipient_share_record_index % input.rns_limb_count,
-                public_matrix_seed_hash: input.public_matrix_seed_hash,
             },
         )?);
     }
@@ -366,7 +336,6 @@ pub(super) struct VssPublicRecipientShareRecordInput<'a> {
     source_trustee_roster_position: usize,
     expected_recipient_roster_position: usize,
     expected_rns_limb_index: usize,
-    public_matrix_seed_hash: &'a str,
 }
 
 pub(super) fn verify_vss_public_recipient_share_record(
@@ -419,7 +388,6 @@ pub(super) fn verify_vss_public_recipient_share_record(
         commitment: value_at_path(input.recipient_share_record, &["commitment"])?,
         expected_commitment_role: "recipient-share",
         expected_commitment_root: share_commitment_root,
-        expected_public_matrix_seed_hash: input.public_matrix_seed_hash,
         expected_rns_limb_index: input.expected_rns_limb_index,
         expected_rns_prime: rns_prime,
         field_name: "VSS recipient-share commitment commitment",
@@ -445,7 +413,6 @@ pub(super) struct VssPublicAggregateThresholdRecordInput<'a> {
     pub(super) expected_recipient_roster_position: usize,
     pub(super) expected_rns_limb_index: usize,
     pub(super) participant_count: usize,
-    pub(super) public_matrix_seed_hash: &'a str,
 }
 
 pub(super) fn verify_vss_public_aggregate_threshold_record(
@@ -484,7 +451,6 @@ pub(super) fn verify_vss_public_aggregate_threshold_record(
         commitment: value_at_path(input.recipient_record, &["commitment"])?,
         expected_commitment_role: "aggregate-threshold-share",
         expected_commitment_root: aggregate_commitment_root,
-        expected_public_matrix_seed_hash: input.public_matrix_seed_hash,
         expected_rns_limb_index: input.expected_rns_limb_index,
         expected_rns_prime: rns_prime,
         field_name: "VSS aggregate threshold commitment commitment",

@@ -1,8 +1,7 @@
 use super::*;
 
 use crate::bgv::setup::{
-    VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT, VssPublicCommitmentOpeningInput,
-    compute_vss_public_commitment_from_opening, vss_public_canonical_message_digit_columns,
+    VssCommittedMaterialCommitmentInput, compute_vss_committed_material_commitment,
 };
 
 const VSS_PUBLIC_AGGREGATE_COMMITMENT_ROLE: &str = "aggregate-threshold-share";
@@ -11,46 +10,47 @@ pub(super) struct AggregateOpeningCheckInput<'a> {
     pub(super) setup_binding: &'a SetupBinding,
     pub(super) participant: &'a ParticipantBinding,
     pub(super) setup_epoch: &'a str,
-    pub(super) public_matrix_seed_hash: &'a str,
-    pub(super) credential: &'a Value,
     pub(super) rns_limb_index: usize,
     pub(super) rns_prime: u64,
+    pub(super) credential: &'a Value,
 }
 
 pub(super) struct AggregateOpeningRootsInput<'a> {
     pub(super) setup_binding: &'a SetupBinding,
     pub(super) participant: &'a ParticipantBinding,
     pub(super) setup_epoch: &'a str,
-    pub(super) public_matrix_seed_hash: &'a str,
     pub(super) rns_limb_index: usize,
     pub(super) rns_prime: u64,
     pub(super) aggregate_commitment_message_values: &'a [u64],
     pub(super) message_coefficient_bound: u64,
-    pub(super) aggregate_randomness_by_column: &'a [Vec<i64>],
+    // The trustee's private deterministic material seed for the aggregate
+    // committed-material trees; the same seed regenerates byte-identical trees
+    // at proof time.
+    pub(super) aggregate_material_seed_hex: &'a str,
 }
 
 pub(super) struct AggregateOpeningComputation {
     #[cfg(test)]
     pub(super) commitment: Value,
     pub(super) commitment_root: String,
+    pub(super) commitment_context_hash: String,
     pub(super) opening_root: String,
 }
 
 pub(super) struct VerifiedAggregateOpeningCredential {
     pub(super) commitment_root: String,
+    pub(super) commitment_context_hash: String,
     pub(super) opening_root: String,
     pub(super) aggregate_share_values: Vec<u64>,
     pub(super) aggregate_commitment_message_values: Vec<u64>,
-    pub(super) aggregate_randomness_by_column: Vec<Vec<i64>>,
+    pub(super) aggregate_material_seed_hex: String,
 }
 
 pub(super) fn verify_aggregate_opening_credential(
     input: AggregateOpeningCheckInput<'_>,
 ) -> CanonicalResult<VerifiedAggregateOpeningCredential> {
-    let aggregate_randomness_by_column = read_aggregate_randomness_by_column_signed_byte_hex(
-        input.credential,
-        input.setup_binding.participants.len(),
-    )?;
+    let aggregate_material_seed_hex =
+        string_at_path(input.credential, &["aggregateMaterialSeedHex"])?.to_string();
     let aggregate_commitment_message_values = read_aggregate_u64_vector_le_hex(
         input.credential,
         "aggregateCommitmentMessageValuesLeHex",
@@ -62,40 +62,40 @@ pub(super) fn verify_aggregate_opening_credential(
         input.rns_prime,
         input.setup_binding.participants.len(),
     )?;
-    let (commitment_root, opening_root) =
-        compute_aggregate_opening_roots(AggregateOpeningRootsInput {
-            setup_binding: input.setup_binding,
-            participant: input.participant,
-            setup_epoch: input.setup_epoch,
-            public_matrix_seed_hash: input.public_matrix_seed_hash,
-            rns_limb_index: input.rns_limb_index,
-            rns_prime: input.rns_prime,
-            aggregate_commitment_message_values: &aggregate_commitment_message_values,
-            message_coefficient_bound,
-            aggregate_randomness_by_column: &aggregate_randomness_by_column,
-        })?;
+    let computation = compute_aggregate_opening(AggregateOpeningRootsInput {
+        setup_binding: input.setup_binding,
+        participant: input.participant,
+        setup_epoch: input.setup_epoch,
+        rns_limb_index: input.rns_limb_index,
+        rns_prime: input.rns_prime,
+        aggregate_commitment_message_values: &aggregate_commitment_message_values,
+        message_coefficient_bound,
+        aggregate_material_seed_hex: &aggregate_material_seed_hex,
+    })?;
     compare_hash_field(
         input.credential,
         "aggregateCommitmentRoot",
-        &commitment_root,
+        &computation.commitment_root,
         "aggregate opening credential commitment root",
     )?;
     compare_hash_field(
         input.credential,
         "aggregateOpeningRoot",
-        &opening_root,
+        &computation.opening_root,
         "aggregate opening credential opening root",
     )?;
 
     Ok(VerifiedAggregateOpeningCredential {
-        commitment_root,
-        opening_root,
+        commitment_root: computation.commitment_root,
+        commitment_context_hash: computation.commitment_context_hash,
+        opening_root: computation.opening_root,
         aggregate_share_values,
         aggregate_commitment_message_values,
-        aggregate_randomness_by_column,
+        aggregate_material_seed_hex,
     })
 }
 
+#[cfg(test)]
 pub(super) fn compute_aggregate_opening_roots(
     input: AggregateOpeningRootsInput<'_>,
 ) -> CanonicalResult<(String, String)> {
@@ -114,28 +114,23 @@ pub(super) fn compute_aggregate_opening(
         input.rns_limb_index,
         input.rns_prime,
     );
-    let message_digit_columns = vss_public_canonical_message_digit_columns(
-        input.aggregate_commitment_message_values,
-        POLYNOMIAL_DEGREE,
-    )?;
     let computation =
-        compute_vss_public_commitment_from_opening(VssPublicCommitmentOpeningInput {
+        compute_vss_committed_material_commitment(VssCommittedMaterialCommitmentInput {
             commitment_role: VSS_PUBLIC_AGGREGATE_COMMITMENT_ROLE,
             commitment_context: &commitment_context,
-            public_matrix_seed_hash: input.public_matrix_seed_hash,
             rns_limb_index: input.rns_limb_index,
             rns_prime: input.rns_prime,
             ring_degree: POLYNOMIAL_DEGREE,
             message_coefficients: input.aggregate_commitment_message_values,
-            message_digit_columns: &message_digit_columns,
             message_coefficient_bound: input.message_coefficient_bound,
-            randomness_by_column: input.aggregate_randomness_by_column,
+            material_seed_hex: input.aggregate_material_seed_hex,
         })?;
 
     Ok(AggregateOpeningComputation {
         #[cfg(test)]
         commitment: computation.commitment,
         commitment_root: computation.commitment_root,
+        commitment_context_hash: computation.commitment_context_hash,
         opening_root: computation.opening_root,
     })
 }
@@ -150,57 +145,6 @@ pub(super) fn read_aggregate_u64_vector_le_hex(
         POLYNOMIAL_DEGREE,
         length_error_message,
     )
-}
-
-fn read_aggregate_randomness_by_column_signed_byte_hex(
-    credential: &Value,
-    participant_count: usize,
-) -> CanonicalResult<Vec<Vec<i64>>> {
-    let columns = array_at_path(credential, &["aggregateRandomnessByColumnSignedByteHex"])?;
-    if columns.len() != VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "aggregateRandomnessByColumnSignedByteHex must carry the randomness column count",
-        ));
-    }
-    let maximum_abs = i64::try_from(participant_count).map_err(|_| {
-        CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "aggregate opening participant count does not fit signed randomness bound",
-        )
-    })?;
-
-    let randomness_by_column = columns
-        .iter()
-        .enumerate()
-        .map(|(column_index, column)| {
-            let coefficients = signed_byte_vector_from_hex(
-                column.as_str().ok_or_else(|| {
-                    CanonicalError::new(
-                        CanonicalErrorCode::InvalidFixture,
-                        format!(
-                            "aggregateRandomnessByColumnSignedByteHex.{column_index} must be lowercase hex bytes"
-                        ),
-                    )
-                })?,
-                POLYNOMIAL_DEGREE,
-                "aggregate opening credential signed-byte randomness length must match ringDegree",
-            )?;
-            if coefficients
-                .iter()
-                .any(|coefficient| coefficient.unsigned_abs() > maximum_abs.unsigned_abs())
-            {
-                return Err(CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
-                    "VSS opening randomness coefficient exceeds the participant-count bound",
-                ));
-            }
-
-            Ok(coefficients)
-        })
-        .collect::<CanonicalResult<Vec<_>>>()?;
-
-    Ok(randomness_by_column)
 }
 
 fn derive_aggregate_share_values(

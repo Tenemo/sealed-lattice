@@ -17,6 +17,7 @@ import type {
     BgvCollectiveSetupPublicDerivations,
     BgvCollectiveSetupVerification,
     BgvTrusteeEvaluationKeyProofGeneration,
+    BgvTrusteeEvaluationKeyStatementDescription,
     BgvTrusteeEvaluationKeySameSecretBridge,
     BgvTrusteeEvaluationKeySameSecretLinkage,
     BgvTrusteeEvaluationKeyStatementContext,
@@ -32,7 +33,7 @@ import type {
     BgvRnsParametersDescription,
     BgvSameSecretBridgeProofContext,
     BgvSameSecretBridgeProofGeneration,
-    BgvVssPublicCommitmentOpeningComputation,
+    BgvVssCommittedMaterialCommitmentComputation,
     BgvVssShareLinkageProofContext,
     BgvVssShareLinkageProofGeneration,
     BgvSetupCommitmentOpeningComputation,
@@ -58,6 +59,7 @@ export type {
     BgvCollectiveSetupPublicDerivations,
     BgvCollectiveSetupVerification,
     BgvTrusteeEvaluationKeyProofGeneration,
+    BgvTrusteeEvaluationKeyStatementDescription,
     BgvTrusteeEvaluationKeySameSecretBridge,
     BgvTrusteeEvaluationKeySameSecretLinkage,
     BgvTrusteeEvaluationKeyStatementContext,
@@ -73,7 +75,7 @@ export type {
     BgvRnsParametersDescription,
     BgvSameSecretBridgeProofContext,
     BgvSameSecretBridgeProofGeneration,
-    BgvVssPublicCommitmentOpeningComputation,
+    BgvVssCommittedMaterialCommitmentComputation,
     BgvVssShareLinkageProofContext,
     BgvVssShareLinkageProofGeneration,
     BgvSetupCommitmentOpeningComputation,
@@ -213,6 +215,13 @@ export type TranscriptCoreKernel = {
         readonly proofRandomnessSeedHex: string;
         readonly proofRandomnessNonceHex: string;
     }): BgvTrusteeEvaluationKeyProofGeneration;
+    describeTrusteeEvaluationKeyStatement(input: {
+        readonly context: BgvTrusteeEvaluationKeyStatementContext;
+        readonly ringDegree: number;
+        readonly keys: readonly BgvTrusteeEvaluationKeyStatementKey[];
+        readonly sameSecretLinkage?: BgvTrusteeEvaluationKeySameSecretLinkage;
+        readonly sameSecretBridge?: BgvTrusteeEvaluationKeySameSecretBridge;
+    }): BgvTrusteeEvaluationKeyStatementDescription;
     computeSetupCommitmentFromOpening(input: {
         readonly publicMatrixSeedHash: ProtocolHash;
         readonly sourceRnsLimbIndex: number;
@@ -222,18 +231,16 @@ export type TranscriptCoreKernel = {
         readonly randomnessByColumn: readonly (readonly number[])[];
         readonly ringDegree: number;
     }): BgvSetupCommitmentOpeningComputation;
-    computeVssPublicCommitmentFromOpening(input: {
+    computeVssCommittedMaterialCommitment(input: {
         readonly commitmentRole: string;
         readonly commitmentContext: Record<string, unknown>;
-        readonly publicMatrixSeedHash: ProtocolHash;
         readonly rnsLimbIndex: number;
         readonly rnsPrime: number;
         readonly ringDegree: number;
         readonly messageCoefficientBound?: number;
         readonly messageCoefficients: readonly number[];
-        readonly messageDigitColumns: readonly (readonly number[])[];
-        readonly randomnessByColumn: readonly (readonly number[])[];
-    }): BgvVssPublicCommitmentOpeningComputation;
+        readonly materialSeedHex: string;
+    }): BgvVssCommittedMaterialCommitmentComputation;
     generateVssShareLinkageProof(input: {
         readonly context: BgvVssShareLinkageProofContext;
         readonly ringDegree: number;
@@ -246,6 +253,8 @@ export type TranscriptCoreKernel = {
         readonly recipientShareMessagesByItem?: readonly (readonly number[])[];
         readonly recipientShareOpeningRandomnessByItem?: readonly (readonly (readonly number[])[])[];
         readonly carryWitnessesByItem?: readonly (readonly number[])[];
+        readonly vssCommittedMaterialSeedsByBoundMessage: readonly string[];
+        readonly vssCommittedMaterialContextHashesByBoundMessage: readonly string[];
         readonly proofRandomnessSeedHex: string;
         readonly proofRandomnessNonceHex: string;
     }): BgvVssShareLinkageProofGeneration;
@@ -256,6 +265,8 @@ export type TranscriptCoreKernel = {
         readonly secretCoefficients: readonly number[];
         readonly negativeIndicatorCoefficients: readonly number[];
         readonly openingRandomnessByLimb: readonly (readonly (readonly number[])[])[];
+        readonly vssCommittedMaterialSeedsByBoundMessage: readonly string[];
+        readonly vssCommittedMaterialContextHashesByBoundMessage: readonly string[];
         readonly proofRandomnessSeedHex: string;
         readonly proofRandomnessNonceHex: string;
     }): BgvSameSecretBridgeProofGeneration;
@@ -421,12 +432,16 @@ type TranscriptCoreKernelCommand =
           'generateTrusteeEvaluationKeyProof'
       >
     | KernelCommandFromMethod<
+          'DescribeTrusteeEvaluationKeyStatement',
+          'describeTrusteeEvaluationKeyStatement'
+      >
+    | KernelCommandFromMethod<
           'ComputeSetupCommitmentFromOpening',
           'computeSetupCommitmentFromOpening'
       >
     | KernelCommandFromMethod<
-          'ComputeVssPublicCommitmentFromOpening',
-          'computeVssPublicCommitmentFromOpening'
+          'ComputeVssCommittedMaterialCommitment',
+          'computeVssCommittedMaterialCommitment'
       >
     | KernelCommandFromMethod<
           'GenerateVssShareLinkageProof',

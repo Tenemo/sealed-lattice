@@ -275,15 +275,23 @@ pub(super) fn same_secret_bridge_proof_generation_request(
     let ring_degree = statement_record["ringDegree"]
         .as_u64()
         .expect("bridge ring degree") as usize;
-    let opening_randomness_by_limb = (0..target_roots.len())
-        .map(|rns_limb_index| {
-            vss_public_coefficient_randomness_i64_fixture(
-                trustee_roster_position as u64,
-                rns_limb_index,
-                0,
-                ring_degree,
-            )
+    // Committed-material regeneration inputs in bound-commitment order: the
+    // bridge binds its target-constant commitments in target order. Context
+    // hashes are read off the published commitments; the private seeds derive
+    // from them. The committed-material targets carry no algebraic opening
+    // randomness.
+    let bound_material_context_hashes = target_commitments
+        .iter()
+        .map(|commitment_record| {
+            commitment_record["commitment"]["commitmentContextHash"]
+                .as_str()
+                .expect("bridge target commitment context hash")
+                .to_string()
         })
+        .collect::<Vec<_>>();
+    let bound_material_seeds = bound_material_context_hashes
+        .iter()
+        .map(|context_hash| super::accepted_vss_material_seed(context_hash))
         .collect::<Vec<_>>();
     let secret_coefficients = (0..ring_degree)
         .map(|coefficient_position| {
@@ -338,7 +346,9 @@ pub(super) fn same_secret_bridge_proof_generation_request(
         },
         "secretCoefficients": secret_coefficients,
         "negativeIndicatorCoefficients": negative_indicator_coefficients,
-        "openingRandomnessByLimb": opening_randomness_by_limb,
+        "openingRandomnessByLimb": Vec::<Vec<Vec<i64>>>::new(),
+        "vssCommittedMaterialSeedsByBoundMessage": bound_material_seeds,
+        "vssCommittedMaterialContextHashesByBoundMessage": bound_material_context_hashes,
         "proofRandomnessSeedHex": proof_randomness_seed_hex,
         "proofRandomnessNonceHex": proof_randomness_nonce_hex,
     });

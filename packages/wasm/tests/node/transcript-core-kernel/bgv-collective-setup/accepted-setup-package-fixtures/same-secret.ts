@@ -23,10 +23,9 @@ import type {
 } from '#packages/wasm/src/index';
 
 const sameSecretProofBytesHash = (proofBytesHex: string): string =>
-    hash512Hex(
-        'sealed-lattice/setup/same-secret-linkage-anchor/proof-bytes',
-        [hexToBytes(proofBytesHex)],
-    );
+    hash512Hex('sealed-lattice/setup/same-secret-linkage-anchor/proof-bytes', [
+        hexToBytes(proofBytesHex),
+    ]);
 
 // The same-secret consistency statement binds the public VSS coefficient
 // commitment roots. The consistency builder reads the full-VSS field names

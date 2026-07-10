@@ -242,8 +242,7 @@ describe('crypto primitive boundary', () => {
                     shareValues: [1, 2, 3],
                     privateVssShareProof: {
                         objectType: 'PrivateVssShareProof',
-                        proofId:
-                            'sealed-lattice-private-vss-share-proof-lnp',
+                        proofId: 'sealed-lattice-private-vss-share-proof-lnp',
                         proofMaterialRoot: deriveCanonicalObjectHash({
                             objectType: 'PrivateVssShareEnvelopeHash',
                             proof: 'material-root',

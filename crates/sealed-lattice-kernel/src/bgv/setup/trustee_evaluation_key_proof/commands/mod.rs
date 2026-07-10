@@ -150,6 +150,24 @@ pub(crate) fn generate_trustee_evaluation_key_proof_from_request(
     }))
 }
 
+// Describe a trustee-batched evaluation-key statement without proving it. The
+// key-bearing same-secret anchor is fail-closed while it is re-anchored on the
+// BDLOP constant commitment, so its statement hash cannot be obtained by
+// proving. This parses the statement and returns its proof family and canonical
+// statement hash directly, matching the native statement-hash vector path and
+// letting the WASM kernel pin the key-bearing statement encoding across the
+// Rust and JavaScript boundary.
+pub(crate) fn describe_trustee_evaluation_key_statement_from_request(
+    request: &Value,
+) -> CanonicalResult<Value> {
+    let statement = statement_from_request(request)?;
+    Ok(json!({
+        "operation": "describeTrusteeEvaluationKeyStatement",
+        "proofFamily": statement.context.proof_family,
+        "statementHash": to_hex(&statement.statement_hash()),
+    }))
+}
+
 fn statement_bound_proof_randomness_seed_hex(
     statement: &TrusteeEvaluationKeyStatement,
     proof_randomness_seed_hex: &str,

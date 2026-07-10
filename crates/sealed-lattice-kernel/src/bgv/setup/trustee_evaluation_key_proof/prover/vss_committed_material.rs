@@ -77,8 +77,6 @@ pub(crate) struct VssCommittedMaterialTreeInput<'a> {
 // tree. The share-linkage prover reuses these to answer the shared query
 // positions; the verifier only ever sees the root and the openings.
 pub(super) struct VssCommittedMaterialFieldTrees {
-    pub(super) modulus: u64,
-    pub(super) plan: EvaluationDomainPlan,
     pub(super) masked_coefficients: Vec<Vec<u64>>,
     pub(super) extension_columns: Vec<Vec<u64>>,
     pub(super) salted: SaltedTree,
@@ -159,8 +157,6 @@ pub(super) fn vss_committed_material_trees_by_commitment_field(
             &mut salt_sampler,
         )?;
         trees_by_field.push(VssCommittedMaterialFieldTrees {
-            modulus,
-            plan,
             masked_coefficients: masked_coefficients_by_column,
             extension_columns,
             salted,
@@ -190,23 +186,6 @@ pub(super) struct BoundCommittedMaterial {
 impl BoundCommittedMaterial {
     pub(super) fn is_empty(&self) -> bool {
         self.trees_by_bound_message.is_empty()
-    }
-
-    // The flattened material extension columns one limb proof commits to its
-    // DEEP evaluations and batched FRI combination: bound-message-major,
-    // digit-major, half-minor, matching `LimbColumnLayout::material_column_index`.
-    pub(super) fn extension_columns_for_field(
-        &self,
-        commitment_field_position: usize,
-    ) -> Vec<&Vec<u64>> {
-        self.trees_by_bound_message
-            .iter()
-            .flat_map(|field_trees| {
-                field_trees[commitment_field_position]
-                    .extension_columns
-                    .iter()
-            })
-            .collect()
     }
 }
 
@@ -447,8 +426,13 @@ mod tests {
         let regenerated_by_field =
             vss_committed_material_trees_by_commitment_field(&input).expect("regenerated trees");
 
-        for (field_trees, regenerated) in trees_by_field.iter().zip(regenerated_by_field.iter()) {
-            let pair_count = field_trees.plan.extension_size / 2;
+        for (field_position, (field_trees, regenerated)) in trees_by_field
+            .iter()
+            .zip(regenerated_by_field.iter())
+            .enumerate()
+        {
+            let field_modulus = DATA_PRIMES[SETUP_COMMITMENT_MODULUS_LIMB_INDICES[field_position]];
+            let pair_count = field_trees.extension_columns[0].len() / 2;
             let depth = pair_count.trailing_zeros() as usize;
             let root = field_trees.salted.tree.root();
 
@@ -513,7 +497,7 @@ mod tests {
                 .iter()
                 .map(|column| column[tampered_pair])
                 .collect();
-            tampered_first_row[0] = add_mod_fast(tampered_first_row[0], 1, field_trees.modulus);
+            tampered_first_row[0] = add_mod_fast(tampered_first_row[0], 1, field_modulus);
             let tampered_second_row: Vec<u64> = field_trees
                 .extension_columns
                 .iter()
@@ -539,7 +523,7 @@ mod tests {
         // A different field's root never authenticates this field's openings.
         let first_field = &trees_by_field[0];
         let other_root = trees_by_field[1].salted.tree.root();
-        let pair_count = first_field.plan.extension_size / 2;
+        let pair_count = first_field.extension_columns[0].len() / 2;
         let depth = pair_count.trailing_zeros() as usize;
         let pair_indices = sorted_unique_indices([3_usize, 8]);
         let batched_opening = first_field.salted.tree.open_batch(&pair_indices);
@@ -594,8 +578,10 @@ mod tests {
         let trace_size = TEST_RING_DEGREE / TRACE_SPLIT;
         let mask_degree = vss_committed_material_column_mask_degree(trace_size);
 
-        for field_trees in &trees_by_field {
-            let plan = &field_trees.plan;
+        for (field_position, field_trees) in trees_by_field.iter().enumerate() {
+            let field_modulus = DATA_PRIMES[SETUP_COMMITMENT_MODULUS_LIMB_INDICES[field_position]];
+            let plan =
+                EvaluationDomainPlan::new(field_modulus, trace_size).expect("field domain plan");
             for (physical_column_index, extension_column) in
                 field_trees.extension_columns.iter().enumerate()
             {
@@ -619,10 +605,10 @@ mod tests {
                 // digit values the binding row equates.
                 for trace_position in [0_usize, 1, trace_size - 1] {
                     let trace_point =
-                        pow_mod(plan.trace_root, trace_position as u64, field_trees.modulus)
+                        pow_mod(plan.trace_root, trace_position as u64, field_modulus)
                             .expect("trace point");
                     assert_eq!(
-                        evaluate_coefficients(&coefficients, trace_point, field_trees.modulus),
+                        evaluate_coefficients(&coefficients, trace_point, field_modulus),
                         digit_columns[digit_index][half * trace_size + trace_position],
                         "on-trace evaluations must equal the canonical digit values"
                     );

@@ -25,8 +25,7 @@ describe('collective BGV setup kernel commands', () => {
             qBallotRelease: 10,
             qFinal: 10,
             qDec: 4,
-            transportSchemeId:
-                'sealed-lattice-setup-binary-chunked-transport',
+            transportSchemeId: 'sealed-lattice-setup-binary-chunked-transport',
         });
         expect(parameters.qShare).toMatchObject({
             objectType: 'QSharePrimeList',

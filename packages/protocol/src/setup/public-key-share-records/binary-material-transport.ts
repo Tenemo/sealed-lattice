@@ -85,10 +85,11 @@ const publicKeyShareMaterialChunkHash = (
         true,
     );
 
-    return hash512Hex(
-        'sealed-lattice/setup/public-key-share-material/chunk',
-        [new TextEncoder().encode(fullObjectHash), chunkIndexBytes, chunk],
-    );
+    return hash512Hex('sealed-lattice/setup/public-key-share-material/chunk', [
+        new TextEncoder().encode(fullObjectHash),
+        chunkIndexBytes,
+        chunk,
+    ]);
 };
 
 const publicKeyShareMaterialTransportHashes = (

@@ -19,9 +19,9 @@ use crate::{
             begin_setup_proof_material_transport_stream_request,
             compute_setup_commitment_from_opening_request,
             compute_vss_committed_material_commitment_request,
-            compute_vss_public_commitment_from_opening_request,
             derive_collective_bgv_setup_public_derivations_from_request,
             describe_collective_bgv_setup_parameters,
+            describe_trustee_evaluation_key_statement_from_request,
             finish_evaluation_key_share_component_material_transport_stream_request,
             finish_setup_proof_material_transport_stream_request,
             generate_passive_setup_package_from_request,
@@ -134,10 +134,8 @@ pub(crate) fn generate_trustee_evaluation_key_proof(request: &Value) -> Canonica
     generate_trustee_evaluation_key_proof_from_request(request)
 }
 
-pub(crate) fn compute_vss_public_commitment_from_opening(
-    request: &Value,
-) -> CanonicalResult<Value> {
-    compute_vss_public_commitment_from_opening_request(request)
+pub(crate) fn describe_trustee_evaluation_key_statement(request: &Value) -> CanonicalResult<Value> {
+    describe_trustee_evaluation_key_statement_from_request(request)
 }
 
 pub(crate) fn compute_vss_committed_material_commitment(request: &Value) -> CanonicalResult<Value> {
@@ -465,7 +463,7 @@ mod tests {
 
         assert_eq!(
             encoded["plaintextRoot"],
-            "ad3aee0286a714f21117ade0043bd72ca51fb0108afe53e40b111655081bfe26d0fbe1838c3fca581f50747439efaf402dc090ee309d7a5494c7146e2324f63b"
+            "334c485a1f928757939c69db3deee117f791d216aea5c277127723d77e8e2f2d7e20d0c691b999cd988348062a48e5237654af745a0c7c8bbc93a04870a4d173"
         );
 
         let ciphertext =
@@ -476,7 +474,7 @@ mod tests {
             .expect("ciphertext fixture");
         assert_eq!(
             ciphertext["ciphertextRoot"],
-            "4acbb7e4c92e52dbce48bd01cae06fa2e0950ff9ceb0156d8f1945bfa3c753c547c39b8b2b473d5adca0b19936104382d6e1de348963e708ea1119cfa4cddfb3"
+            "c67ab9102937ceb90a9fa91c4ca8e78d34bd012039276199884681385ecd80475ca2ccf98d9a1b4136885738d65b48664d0dd3e30c468d44c3fddbcd35e024df"
         );
 
         let base_conversion =
@@ -486,11 +484,11 @@ mod tests {
             .expect("base conversion fixture");
         assert_eq!(
             base_conversion["sourcePlaintextRoot"],
-            "63af2d4084b0f4512ec84e58b1eb003cba68a702569b4d738bd3331264e8511747c00a66e331b1f7d09093c6a44246b26c748f1a4b3d5d7436b84af47fe70a53"
+            "687b0f77e2f9b356db52f5153ea3c4548a3fdeb49d307446ca256b5154a141f619402cfaf80146992eaa8c32b981c4f13ace18825b9a1d5d06eb8268d041eaf5"
         );
         assert_eq!(
             base_conversion["convertedPlaintextRoot"],
-            "11cb1d08c18df5c3b47d8f746af569401323c2e3243b65267b9b79afdc24b7ac227b015b2dbc034ac7f9cf8a3dbc61291e3facdad219f1d9e6478d4a72cd6ab9"
+            "e1501c3e6558f6fd7576ab1f9d98cdd000b768c5c5e966bda473e8b8d6d525d56c42ec97a20721480c8c4bf4cda91e842e70ef6d6e6e853ec4c234b6b1e994e5"
         );
     }
 

@@ -538,7 +538,7 @@ mod tests {
                     }
                 }),
                 "{\"a\":{\"z\":true},\"b\":[2,1],\"objectType\":\"CanonicalHashParityCase\",\"objectVersion\":1}",
-                "2ed1fd2293f48e6b4f7b9d7d4b0f105d3d6a9c4c392f70a3b9c6cade53247ee5f286f9b565258ef1f29fd6416aa349ab0388ef719303242382979a27da5a3589",
+                "4f432053917977cd39c0586aebfee7c89dbc800f302f058cdc5dd819b8bc0c6e48f9c193ba17661e52b4d305f1d293b51300405be27e2d734997ebb9b55405cb",
             ),
             (
                 serde_json::json!({
@@ -548,7 +548,7 @@ mod tests {
                     "2": "b"
                 }),
                 "{\"10\":\"a\",\"2\":\"b\",\"objectType\":\"CanonicalHashParityCase\",\"objectVersion\":1}",
-                "629347ec581398f06eea18e87c00946ec8eefa12574725b41a42b0056b97ec744d79ef8ed6d9c8b8a38e064e2dbde92f517206c3a32727bbd606e4e0c45de6b8",
+                "00afc8c82b82ab6d37ed1b43b310e075d5e496c597d848a308ef2a7c9f84f3368f95d5a52e364f8892f8b6748a39ff5a5ae1664e5c2a588b83607641011f8b96",
             ),
             (
                 serde_json::json!({
@@ -558,7 +558,7 @@ mod tests {
                     "supplementary": "\u{10000}"
                 }),
                 "{\"objectType\":\"CanonicalHashParityCase\",\"objectVersion\":1,\"supplementary\":\"\u{10000}\",\"value\":\"\u{00e9}\"}",
-                "4421299dcece175cc568f13535276189cf09949bc0e0babf88444a42584ce0e51306a8dc26329ec1be1f490589486a9bd1040589bfe0a21ec868ed413d7947a2",
+                "46ffacae8edfc56256c3bcd77395c4dabba324579b67623658f1c6a7b5e1bdf0f6ebdcfb2e6901442c2f4275ca7513e3807ca20ae8f23577fc113dd179dd8b3c",
             ),
         ];
 

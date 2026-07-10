@@ -161,18 +161,13 @@ pub(super) fn verify_statement_record(
             let commitment_body = value_at_path(commitment_record, &["commitment"])?;
             compare_required_string(
                 string_at_path(commitment_body, &["objectType"])?,
-                "VssPublicCommitment",
+                "VssCommittedMaterialCommitment",
                 "VSS same-secret bridge target constant commitment objectType",
             )?;
             compare_required_string(
                 string_at_path(commitment_body, &["commitmentRole"])?,
                 "coefficient",
                 "VSS same-secret bridge target constant commitment role",
-            )?;
-            compare_required_string(
-                hash_at_path(commitment_body, &["publicMatrixSeedHash"])?,
-                input.statement_set.public_matrix_seed_hash,
-                "VSS same-secret bridge target constant commitment publicMatrixSeedHash",
             )?;
             compare_required_u64(
                 unsigned_at_path(commitment_body, &["rnsLimbIndex"])?,

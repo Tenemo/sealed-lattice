@@ -344,6 +344,7 @@ impl TrusteeEvaluationKeyStatement {
         }
         if let Some(vss_share_linkage) = &self.vss_share_linkage {
             preimage.push(1);
+            preimage.push(u8::from(vss_share_linkage.is_threshold_aggregate));
             for field in [
                 vss_share_linkage.public_matrix_seed_hash.as_str(),
                 vss_share_linkage.source_trustee_identity.as_str(),

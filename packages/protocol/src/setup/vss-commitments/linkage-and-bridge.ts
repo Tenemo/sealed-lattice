@@ -11,12 +11,13 @@ import type { CollectiveBgvSetupContext } from '../vss-share-verification-record
 
 import {
     setupContextFields,
+    type VssCommittedMaterialCommitmentValue,
     type VssPublicAggregateThresholdCommitmentSet,
     type VssPublicCoefficientCommitmentSet,
     type VssPublicCoefficientCredential,
-    type VssPublicCommitmentValue,
     type VssPublicRecipientShareCommitmentSet,
     type VssPublicRecipientShareCredential,
+    type VssShareLinkageProofComputer,
 } from './commitment-sets.js';
 
 export type VssShareLinkageStatement = {
@@ -146,35 +147,6 @@ export const createVssShareLinkageStatement = (input: {
 export const vssShareLinkageProofFamily = 'vss-share-linkage';
 export const vssShareLinkageProofBytesHashDomain =
     'sealed-lattice/setup/vss-share-linkage/proof-bytes';
-
-export type VssShareLinkageProofContext = {
-    readonly ceremonyId: string;
-    readonly manifestHash: ProtocolHash;
-    readonly rosterHash: ProtocolHash;
-    readonly trusteeIdentity: string;
-    readonly trusteeRosterPosition: number;
-    readonly setupEpoch: string;
-    readonly shareLinkageStatementRoot: ProtocolHash;
-};
-
-// The kernel-backed share-linkage proof (bound to the WASM
-// `GenerateVssShareLinkageProof` command by the SDK). Injected so the
-// protocol layer assembles the witness but never runs the certified prover.
-export type VssShareLinkageProofComputer = (input: {
-    readonly context: VssShareLinkageProofContext;
-    readonly ringDegree: number;
-    readonly vssShareLinkage: Record<string, unknown>;
-    readonly coefficientMessagesByShamirIndex: readonly (readonly number[])[];
-    readonly recipientShareMessages: readonly number[];
-    readonly coefficientOpeningRandomnessByShamirIndex: readonly (readonly (readonly number[])[])[];
-    readonly recipientShareOpeningRandomness: readonly (readonly number[])[];
-    readonly carryWitnesses: readonly number[];
-    readonly recipientShareMessagesByItem: readonly (readonly number[])[];
-    readonly recipientShareOpeningRandomnessByItem: readonly (readonly (readonly number[])[])[];
-    readonly carryWitnessesByItem: readonly (readonly number[])[];
-    readonly proofRandomnessSeedHex: string;
-    readonly proofRandomnessNonceHex: string;
-}) => { readonly proofBytesHex: string };
 
 // Fresh prover blinding randomness per proof record. The share-linkage proof is
 // zero-knowledge, so this is independent per (source trustee, proof record) and
@@ -381,8 +353,9 @@ export function createVssShareLinkageProofMaterialSet(
             const linkageItemRecords: Record<string, unknown>[] = [];
             const linkageItems: Record<string, unknown>[] = [];
             const recipientShareMessagesByItem: number[][] = [];
-            const recipientShareOpeningRandomnessByItem: number[][][] = [];
             const carryWitnessesByItem: number[][] = [];
+            const recipientShareMaterialSeeds: string[] = [];
+            const recipientShareMaterialContextHashes: string[] = [];
             for (
                 let recipientRosterPosition = 0;
                 recipientRosterPosition < participantCount;
@@ -410,14 +383,15 @@ export function createVssShareLinkageProofMaterialSet(
                 recipientShareMessagesByItem.push([
                     ...recipientShareCredential.shareValues,
                 ]);
-                recipientShareOpeningRandomnessByItem.push(
-                    recipientShareCredential.randomnessByColumn.map(
-                        (column) => [...column],
-                    ),
-                );
                 carryWitnessesByItem.push([
                     ...recipientShareCredential.carries,
                 ]);
+                recipientShareMaterialSeeds.push(
+                    recipientShareCredential.materialSeedHex,
+                );
+                recipientShareMaterialContextHashes.push(
+                    recipientShareCredential.commitmentContextHash,
+                );
             }
 
             const [primaryLinkageItemRecord] = linkageItemRecords;
@@ -434,7 +408,8 @@ export function createVssShareLinkageProofMaterialSet(
             };
 
             const coefficientMessagesByShamirIndex: number[][] = [];
-            const coefficientOpeningRandomnessByShamirIndex: number[][][] = [];
+            const coefficientMaterialSeeds: string[] = [];
+            const coefficientMaterialContextHashes: string[] = [];
             for (
                 let shamirCoefficientIndex = 0;
                 shamirCoefficientIndex < thresholdDegree;
@@ -448,12 +423,28 @@ export function createVssShareLinkageProofMaterialSet(
                 coefficientMessagesByShamirIndex.push([
                     ...coefficientCredential.coefficientMessage,
                 ]);
-                coefficientOpeningRandomnessByShamirIndex.push(
-                    coefficientCredential.randomnessByColumn.map((column) => [
-                        ...column,
-                    ]),
+                coefficientMaterialSeeds.push(
+                    coefficientCredential.materialSeedHex,
+                );
+                coefficientMaterialContextHashes.push(
+                    coefficientCredential.commitmentContextHash,
                 );
             }
+
+            // Committed-material regeneration inputs in the statement's
+            // bound-commitment order: every unique coefficient witness slot
+            // (one proof record covers a single source limb, so the unique
+            // slots are its Shamir coefficients in order), then each linkage
+            // item's recipient share in item order. The committed-material
+            // commitments carry no algebraic opening randomness.
+            const vssCommittedMaterialSeedsByBoundMessage = [
+                ...coefficientMaterialSeeds,
+                ...recipientShareMaterialSeeds,
+            ];
+            const vssCommittedMaterialContextHashesByBoundMessage = [
+                ...coefficientMaterialContextHashes,
+                ...recipientShareMaterialContextHashes,
+            ];
 
             const proofRandomness = input.shareLinkageProofRandomness({
                 sourceTrusteeRosterPosition,
@@ -473,13 +464,14 @@ export function createVssShareLinkageProofMaterialSet(
                 vssShareLinkage,
                 coefficientMessagesByShamirIndex,
                 recipientShareMessages: recipientShareMessagesByItem[0],
-                coefficientOpeningRandomnessByShamirIndex,
-                recipientShareOpeningRandomness:
-                    recipientShareOpeningRandomnessByItem[0],
+                coefficientOpeningRandomnessByShamirIndex: [],
+                recipientShareOpeningRandomness: [],
                 carryWitnesses: carryWitnessesByItem[0],
                 recipientShareMessagesByItem,
-                recipientShareOpeningRandomnessByItem,
+                recipientShareOpeningRandomnessByItem: [],
                 carryWitnessesByItem,
+                vssCommittedMaterialSeedsByBoundMessage,
+                vssCommittedMaterialContextHashesByBoundMessage,
                 proofRandomnessSeedHex: proofRandomness.seedHex,
                 proofRandomnessNonceHex: proofRandomness.nonceHex,
             });
@@ -605,7 +597,7 @@ export type VssSameSecretBridgeTargetConstantCommitment = {
     readonly rnsLimbIndex: number;
     readonly rnsPrime: number;
     readonly shamirCoefficientIndex: number;
-    readonly commitment: VssPublicCommitmentValue;
+    readonly commitment: VssCommittedMaterialCommitmentValue;
 };
 
 export type VssSameSecretBridgeStatement = {
@@ -817,6 +809,9 @@ export type SameSecretBridgeProofContext = {
 // The kernel-backed same-secret bridge proof (bound to the WASM
 // `GenerateSameSecretBridgeProof` command by the SDK). Injected so the
 // protocol layer assembles the witness but never runs the certified prover.
+// The committed-material target commitments carry no algebraic opening
+// randomness, so that array is always empty; the bound-message seed and
+// context-hash arrays let the prover regenerate the committed trees.
 export type SameSecretBridgeProofComputer = (input: {
     readonly context: SameSecretBridgeProofContext;
     readonly ringDegree: number;
@@ -824,6 +819,8 @@ export type SameSecretBridgeProofComputer = (input: {
     readonly secretCoefficients: readonly number[];
     readonly negativeIndicatorCoefficients: readonly number[];
     readonly openingRandomnessByLimb: readonly (readonly (readonly number[])[])[];
+    readonly vssCommittedMaterialSeedsByBoundMessage: readonly string[];
+    readonly vssCommittedMaterialContextHashesByBoundMessage: readonly string[];
     readonly proofRandomnessSeedHex: string;
     readonly proofRandomnessNonceHex: string;
     readonly transportedSameSecretProofMaterial?: Record<string, unknown>;
@@ -879,28 +876,28 @@ export function createVssSameSecretBridgeProofMaterialSet(
     },
 ): Record<string, unknown> {
     const { statementSet } = input;
-    const constantCoefficientRandomnessByCoordinate = new Map(
+    const constantCoefficientCredentialByCoordinate = new Map(
         input.coefficientCredentials
             .filter((credential) => credential.shamirCoefficientIndex === 0)
             .map((credential) => [
                 `${String(credential.sourceTrusteeRosterPosition)}:${String(credential.rnsLimbIndex)}`,
-                credential.randomnessByColumn,
+                credential,
             ]),
     );
-    const requireConstantCoefficientRandomness = (
+    const requireConstantCoefficientCredential = (
         sourceTrusteeRosterPosition: number,
         rnsLimbIndex: number,
-    ): readonly (readonly number[])[] => {
-        const randomness = constantCoefficientRandomnessByCoordinate.get(
+    ): VssPublicCoefficientCredential => {
+        const credential = constantCoefficientCredentialByCoordinate.get(
             `${String(sourceTrusteeRosterPosition)}:${String(rnsLimbIndex)}`,
         );
-        if (randomness === undefined) {
+        if (credential === undefined) {
             throw new Error(
-                'Same-secret bridge proof requires constant coefficient commitment randomness per target limb.',
+                'Same-secret bridge proof requires a constant coefficient credential per target limb.',
             );
         }
 
-        return randomness;
+        return credential;
     };
 
     const proofRecords = statementSet.statementRecords.map(
@@ -913,13 +910,24 @@ export function createVssSameSecretBridgeProofMaterialSet(
             const negativeIndicatorCoefficients = secretCoefficients.map(
                 (coefficient) => (coefficient < 0 ? 1 : 0),
             );
-            const openingRandomnessByLimb =
-                statementRecord.targetConstantCoefficientCommitmentRoots.map(
-                    (targetConstantRoot) =>
-                        requireConstantCoefficientRandomness(
+            // Committed-material regeneration inputs in the statement's
+            // bound-commitment order: the bridge binds its target-constant
+            // commitments in target order. Context hashes are read off the
+            // published commitments; the seeds are the same seeds those
+            // commitments were created with.
+            const vssCommittedMaterialSeedsByBoundMessage =
+                statementRecord.targetConstantCoefficientCommitments.map(
+                    (targetConstantCommitment) =>
+                        requireConstantCoefficientCredential(
                             sourceTrusteeRosterPosition,
-                            targetConstantRoot.rnsLimbIndex,
-                        ).map((column) => [...column]),
+                            targetConstantCommitment.rnsLimbIndex,
+                        ).materialSeedHex,
+                );
+            const vssCommittedMaterialContextHashesByBoundMessage =
+                statementRecord.targetConstantCoefficientCommitments.map(
+                    (targetConstantCommitment) =>
+                        targetConstantCommitment.commitment
+                            .commitmentContextHash,
                 );
             const sameSecretBridge = {
                 sameSecretBridgeStatementRoot:
@@ -975,7 +983,9 @@ export function createVssSameSecretBridgeProofMaterialSet(
                 sameSecretBridge,
                 secretCoefficients,
                 negativeIndicatorCoefficients,
-                openingRandomnessByLimb,
+                openingRandomnessByLimb: [],
+                vssCommittedMaterialSeedsByBoundMessage,
+                vssCommittedMaterialContextHashesByBoundMessage,
                 proofRandomnessSeedHex: proofRandomness.seedHex,
                 proofRandomnessNonceHex: proofRandomness.nonceHex,
                 ...(transportedSameSecretProofMaterial === undefined

@@ -256,7 +256,6 @@ pub(in super::super) fn read_local_target_decryption_share_witness(
                 setup_binding,
                 participant,
                 setup_epoch,
-                public_matrix_seed_hash: &public_matrix_seed_hash,
                 credential,
                 rns_limb_index: limb_index,
                 rns_prime: expected_modulus,
@@ -294,10 +293,11 @@ pub(in super::super) fn read_local_target_decryption_share_witness(
             limb_index,
             rns_prime: expected_modulus,
             aggregate_commitment_root: verified_credential.commitment_root,
+            aggregate_commitment_context_hash: verified_credential.commitment_context_hash,
             aggregate_opening_root: verified_credential.opening_root,
             aggregate_commitment_message_values: verified_credential
                 .aggregate_commitment_message_values,
-            aggregate_randomness_by_column: verified_credential.aggregate_randomness_by_column,
+            aggregate_material_seed_hex: verified_credential.aggregate_material_seed_hex,
         });
     }
 

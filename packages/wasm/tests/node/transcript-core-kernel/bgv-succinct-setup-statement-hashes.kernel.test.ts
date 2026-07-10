@@ -287,68 +287,65 @@ describe('succinct setup statement hash vectors', () => {
         );
 
         // The key-bearing statement carries the same-secret bridge anchor:
-        // the zero opening computed through the kernel's live VssPublic
-        // commitment command, byte-identical to the Rust vector fixture.
+        // the zero-message committed-material commitment computed through the
+        // kernel's live command, byte-identical to the Rust vector fixture.
+        // The material seed literal is the Rust fixture's deterministic test
+        // seed (hash512 of the role and canonical context under the
+        // sealed-lattice/test/vss-committed-material-seed domain), pinned here
+        // because the derivation domain is not part of the kernel surface.
         const bridgeSeedHash = repeatedHash('43');
-        const zeroBridgeRandomness = Array.from({ length: 2 }, () =>
-            zeroI64Vector(),
-        );
-        const bridgeComputation = kernel.computeVssPublicCommitmentFromOpening({
+        const bridgeMaterialSeedHex =
+            '3e2cb0207270f9393d46fb69340376ddb61b329b665a5d9df9bcf0179686de0a0960bbcf6d1156eec2cc7a57aaa801e7ffabf344096b0d9d40e6b23001121cda';
+        const bridgeComputation = kernel.computeVssCommittedMaterialCommitment({
             commitmentRole: 'coefficient',
             commitmentContext: {
                 testPurpose: 'statement-vector-bridge',
             },
-            publicMatrixSeedHash: bridgeSeedHash,
             rnsLimbIndex: 0,
             rnsPrime: firstQSharePrime,
             ringDegree,
             messageCoefficients: zeroU64Vector(),
-            messageDigitColumns: Array.from({ length: 2 }, () =>
-                zeroU64Vector(),
-            ),
-            randomnessByColumn: zeroBridgeRandomness,
+            materialSeedHex: bridgeMaterialSeedHex,
         });
-        const trusteeEvaluationKey = kernel.generateTrusteeEvaluationKeyProof({
-            context: statementContext({
-                requiredGaloisSetHash: repeatedHash('33'),
-                evaluatorKeyScheduleRoot: repeatedHash('34'),
-                keySwitchDecompositionHash: repeatedHash('35'),
-                sameSecretStatementRoot: repeatedHash('36'),
-                sameSecretProofRoot: repeatedHash('37'),
-            }),
-            ringDegree,
-            keys: [
-                {
-                    proofFamily: 'relinearization-round-one',
-                    level: 2,
-                    keySwitchDomain: 'relinearization-round-one',
-                    keySwitchSeedHex: repeatedHash('42'),
-                    componentBByDigit: [
-                        [zeroU64Vector(), zeroU64Vector(), zeroU64Vector()],
-                        [zeroU64Vector(), zeroU64Vector(), zeroU64Vector()],
-                        [zeroU64Vector(), zeroU64Vector(), zeroU64Vector()],
-                    ],
-                },
-            ],
-            sameSecretBridge: {
-                publicMatrixSeedHash: bridgeSeedHash,
-                targetBasisHash: parameters.canonicalTargetBasisHash,
-                sourceTrusteeIdentity: 'statement-vector-trustee',
-                sourceTrusteeRosterPosition: 0,
-                targetRnsPrimes: [firstQSharePrime],
-                targetConstantCommitmentRoots: [
-                    bridgeComputation.commitmentRoot,
+        // The key-bearing same-secret anchor is fail-closed while it is
+        // re-anchored on the BDLOP constant commitment, so the statement hash is
+        // obtained through the describe command (the parsed statement, no proof)
+        // rather than by generating a proof, matching the Rust vector path.
+        const trusteeEvaluationKey =
+            kernel.describeTrusteeEvaluationKeyStatement({
+                context: statementContext({
+                    requiredGaloisSetHash: repeatedHash('33'),
+                    evaluatorKeyScheduleRoot: repeatedHash('34'),
+                    keySwitchDecompositionHash: repeatedHash('35'),
+                    sameSecretStatementRoot: repeatedHash('36'),
+                    sameSecretProofRoot: repeatedHash('37'),
+                }),
+                ringDegree,
+                keys: [
+                    {
+                        proofFamily: 'relinearization-round-one',
+                        level: 2,
+                        keySwitchDomain: 'relinearization-round-one',
+                        keySwitchSeedHex: repeatedHash('42'),
+                        componentBByDigit: [
+                            [zeroU64Vector(), zeroU64Vector(), zeroU64Vector()],
+                            [zeroU64Vector(), zeroU64Vector(), zeroU64Vector()],
+                            [zeroU64Vector(), zeroU64Vector(), zeroU64Vector()],
+                        ],
+                    },
                 ],
-                targetConstantCommitments: [bridgeComputation.commitment],
-            },
-            secretCoefficients: zeroI64Vector(),
-            errorCoefficientsByKey: [
-                [zeroI64Vector(), zeroI64Vector(), zeroI64Vector()],
-            ],
-            negativeIndicatorCoefficients: zeroI64Vector(),
-            openingRandomnessByLimb: [zeroBridgeRandomness],
-            ...proofRandomnessFields,
-        });
+                sameSecretBridge: {
+                    publicMatrixSeedHash: bridgeSeedHash,
+                    targetBasisHash: parameters.canonicalTargetBasisHash,
+                    sourceTrusteeIdentity: 'statement-vector-trustee',
+                    sourceTrusteeRosterPosition: 0,
+                    targetRnsPrimes: [firstQSharePrime],
+                    targetConstantCommitmentRoots: [
+                        bridgeComputation.commitmentRoot,
+                    ],
+                    targetConstantCommitments: [bridgeComputation.commitment],
+                },
+            });
         expect(trusteeEvaluationKey.proofFamily).toBe('trustee-evaluation-key');
         expect(trusteeEvaluationKey.statementHash).toBe(
             expectedStatementHashes.trusteeEvaluationKey,

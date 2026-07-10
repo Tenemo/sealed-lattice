@@ -352,16 +352,27 @@ pub(crate) fn masked_claim_bounds_for_global_claim(
             Some(vss_share_linkage) => {
                 let global_vector_index = global_claim_id as usize / consistency_repetitions;
                 if global_vector_index < vss_share_linkage.item_count() {
+                    // The threshold-aggregate mode uses a unit evaluation point,
+                    // so its lifted wrap is bounded by the summand count, not by
+                    // powers of a recipient trustee point.
                     let carry_bound = if global_vector_index == 0 {
                         private_vss_share_lifted_carry_bound(
-                            vss_share_linkage.recipient_roster_position,
+                            if vss_share_linkage.is_threshold_aggregate {
+                                0
+                            } else {
+                                vss_share_linkage.recipient_roster_position
+                            },
                             vss_share_linkage.coefficient_commitments.len(),
                         )?
                     } else {
                         let item =
                             &vss_share_linkage.additional_linkage_items[global_vector_index - 1];
                         private_vss_share_lifted_carry_bound(
-                            item.recipient_roster_position,
+                            if vss_share_linkage.is_threshold_aggregate {
+                                0
+                            } else {
+                                item.recipient_roster_position
+                            },
                             item.coefficient_commitments.len(),
                         )?
                     };

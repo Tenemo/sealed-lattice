@@ -492,9 +492,15 @@ pub(in super::super) fn target_decryption_smudging_proof_openings_for_slice(
             smudging_seed_hex,
             polynomial_opening,
         )?;
+        let commitment_context_hash = derive_canonical_object_hash(&json!({
+            "objectType": "VssCommittedMaterialCommitmentContext",
+            "commitmentRole": TARGET_DECRYPTION_SMUDGING_COMMITMENT_ROLE,
+            "commitmentContext": commitment_opening.commitment_context,
+        }))?;
         Ok(TargetDecryptionSmudgingProofOpening {
             message_coefficients: commitment_opening.message_coefficients,
-            randomness_by_column: commitment_opening.randomness_by_column,
+            material_seed_hex: commitment_opening.material_seed_hex,
+            commitment_context_hash,
         })
     })
     .collect()
@@ -528,7 +534,7 @@ fn target_decryption_smudging_commitment_opening(
             })
         })
         .collect::<CanonicalResult<Vec<_>>>()?;
-    let randomness_by_column = target_decryption_smudging_commitment_randomness_by_column(
+    let material_seed_hex = target_decryption_smudging_commitment_material_seed_hex(
         setup_binding,
         target_accepted,
         target_ciphertexts,
@@ -556,33 +562,27 @@ fn target_decryption_smudging_commitment_opening(
         rns_prime: polynomial_opening.rns_prime,
         polynomial_degree: polynomial_opening.polynomial_degree,
         message_coefficients,
-        randomness_by_column,
+        material_seed_hex,
         commitment_context,
-        public_matrix_seed_hash: setup_binding.public_matrix_seed_hash.clone(),
     })
 }
 
 fn target_decryption_smudging_commitment_record(
     opening: &TargetDecryptionSmudgingCommitmentOpening,
 ) -> CanonicalResult<Value> {
-    let message_digit_columns = crate::bgv::setup::vss_public_canonical_message_digit_columns(
-        &opening.message_coefficients,
-        POLYNOMIAL_DEGREE,
-    )?;
-    let computation =
-        compute_vss_public_commitment_from_opening(VssPublicCommitmentOpeningInput {
+    let computation = crate::bgv::setup::compute_vss_committed_material_commitment(
+        crate::bgv::setup::VssCommittedMaterialCommitmentInput {
             commitment_role: TARGET_DECRYPTION_SMUDGING_COMMITMENT_ROLE,
             commitment_context: &opening.commitment_context,
-            public_matrix_seed_hash: &opening.public_matrix_seed_hash,
             rns_limb_index: opening.rns_limb_index,
             rns_prime: opening.rns_prime,
             ring_degree: POLYNOMIAL_DEGREE,
             message_coefficients: &opening.message_coefficients,
-            message_digit_columns: &message_digit_columns,
             message_coefficient_bound: (TARGET_DECRYPTION_SMUDGING_COEFFICIENT_BOUND as u64) * 2
                 + 1,
-            randomness_by_column: &opening.randomness_by_column,
-        })?;
+            material_seed_hex: &opening.material_seed_hex,
+        },
+    )?;
 
     Ok(json!({
         "objectType": "TargetDecryptionSmudgingCommitment",
@@ -595,8 +595,13 @@ fn target_decryption_smudging_commitment_record(
     }))
 }
 
+// The private deterministic material seed for one smudging committed-material
+// commitment, derived from the trustee's private smudging seed and the full
+// target context so distinct roles, limbs, and degrees hide with distinct mask
+// and salt streams while the same inputs regenerate byte-identical trees at
+// proof time.
 #[allow(clippy::too_many_arguments)]
-fn target_decryption_smudging_commitment_randomness_by_column(
+fn target_decryption_smudging_commitment_material_seed_hex(
     setup_binding: &SetupBinding,
     target_accepted: &TargetAcceptedBinding,
     target_ciphertexts: &TargetCiphertextPair,
@@ -606,7 +611,7 @@ fn target_decryption_smudging_commitment_randomness_by_column(
     rns_limb_index: usize,
     rns_prime: u64,
     polynomial_degree: usize,
-) -> CanonicalResult<Vec<Vec<i64>>> {
+) -> CanonicalResult<String> {
     let smudging_seed_bytes = decode_hex(smudging_seed_hex)?;
     if smudging_seed_bytes.len() != 64 {
         return Err(CanonicalError::new(
@@ -618,40 +623,22 @@ fn target_decryption_smudging_commitment_randomness_by_column(
     let rns_prime_bytes = rns_prime.to_le_bytes();
     let polynomial_degree_bytes = (polynomial_degree as u64).to_le_bytes();
 
-    (0..VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT)
-        .map(|column_index| {
-            let column_index_bytes = (column_index as u64).to_le_bytes();
-            let mut sampler = DeterministicSampler::new(
-                TARGET_DECRYPTION_SMUDGING_COMMITMENT_RANDOMNESS_DOMAIN,
-                &[
-                    &smudging_seed_bytes,
-                    setup_binding.setup_package_hash.as_bytes(),
-                    target_accepted.target_accepted_record_hash.as_bytes(),
-                    target_accepted.target_context_hash.as_bytes(),
-                    target_accepted.target_ciphertext_hash.as_bytes(),
-                    target_ciphertexts.target_ciphertext_hash.as_bytes(),
-                    target_share_profile.hash.as_bytes(),
-                    role.as_bytes(),
-                    &rns_limb_index_bytes,
-                    &rns_prime_bytes,
-                    &polynomial_degree_bytes,
-                    &column_index_bytes,
-                ],
-            );
-            sampler
-                .uniform_residues(3, POLYNOMIAL_DEGREE)
-                .into_iter()
-                .map(|value| {
-                    i64::try_from(value).map_err(|_| {
-                        CanonicalError::new(
-                            CanonicalErrorCode::ComponentMismatch,
-                            "target-decryption smudging commitment randomness does not fit a signed integer",
-                        )
-                    }).map(|coefficient| coefficient - 1)
-                })
-                .collect::<CanonicalResult<Vec<_>>>()
-        })
-        .collect()
+    Ok(hash512_hex(
+        TARGET_DECRYPTION_SMUDGING_COMMITMENT_MATERIAL_SEED_DOMAIN,
+        &[
+            &smudging_seed_bytes,
+            setup_binding.setup_package_hash.as_bytes(),
+            target_accepted.target_accepted_record_hash.as_bytes(),
+            target_accepted.target_context_hash.as_bytes(),
+            target_accepted.target_ciphertext_hash.as_bytes(),
+            target_ciphertexts.target_ciphertext_hash.as_bytes(),
+            target_share_profile.hash.as_bytes(),
+            role.as_bytes(),
+            &rns_limb_index_bytes,
+            &rns_prime_bytes,
+            &polynomial_degree_bytes,
+        ],
+    ))
 }
 
 #[allow(clippy::too_many_arguments)]

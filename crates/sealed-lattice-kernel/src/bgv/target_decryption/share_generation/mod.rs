@@ -24,9 +24,10 @@ pub(super) struct AggregateOpeningCredentialBinding {
     pub(super) limb_index: usize,
     pub(super) rns_prime: u64,
     pub(super) aggregate_commitment_root: String,
+    pub(super) aggregate_commitment_context_hash: String,
     pub(super) aggregate_opening_root: String,
     pub(super) aggregate_commitment_message_values: Vec<u64>,
-    pub(super) aggregate_randomness_by_column: Vec<Vec<i64>>,
+    pub(super) aggregate_material_seed_hex: String,
 }
 
 pub(super) struct TargetDecryptionSmudgingCommitmentSet {
@@ -48,14 +49,14 @@ struct TargetDecryptionSmudgingCommitmentOpening {
     rns_prime: u64,
     polynomial_degree: usize,
     message_coefficients: Vec<u64>,
-    randomness_by_column: Vec<Vec<i64>>,
+    material_seed_hex: String,
     commitment_context: Value,
-    public_matrix_seed_hash: String,
 }
 
 pub(super) struct TargetDecryptionSmudgingProofOpening {
     pub(super) message_coefficients: Vec<u64>,
-    pub(super) randomness_by_column: Vec<Vec<i64>>,
+    pub(super) material_seed_hex: String,
+    pub(super) commitment_context_hash: String,
 }
 
 pub(super) fn generate_target_decryption_share_from_secret_share(

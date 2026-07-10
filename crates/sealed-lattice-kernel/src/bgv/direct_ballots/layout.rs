@@ -19,10 +19,8 @@ use crate::bgv::parameters::{PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE};
 use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 use crate::hashing::{canonical_json, hash512_hex};
 
-const BATCH_ENCODER_IDENTITY_DOMAIN: &str =
-    "sealed-lattice/direct-ballot/batch-encoder-identity";
-const ENCRYPTED_BALLOT_LAYOUT_DOMAIN: &str =
-    "sealed-lattice/direct-ballot/encrypted-ballot-layout";
+const BATCH_ENCODER_IDENTITY_DOMAIN: &str = "sealed-lattice/direct-ballot/batch-encoder-identity";
+const ENCRYPTED_BALLOT_LAYOUT_DOMAIN: &str = "sealed-lattice/direct-ballot/encrypted-ballot-layout";
 
 fn invalid_ballot_layout(message: &str) -> CanonicalError {
     CanonicalError::new(CanonicalErrorCode::InvalidFixture, message)

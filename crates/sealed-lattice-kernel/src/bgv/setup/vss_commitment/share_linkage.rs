@@ -281,13 +281,9 @@ pub(super) fn verify_vss_share_linkage_evidence_sets(
         input.statement.threshold_degree as u64,
         "VSS share linkage evidence coefficient thresholdDegree",
     )?;
-    verify_vss_public_aggregate_threshold_public_sums(
-        recipient_share_commitment_set,
-        aggregate_threshold_commitment_set,
-        input.statement.participant_count,
-        input.statement.target_rns_limb_count,
-    )?;
-
+    // The proven "T = sum" aggregate binding is verified separately, on the
+    // accepted-setup material-verification path, not here: the statement
+    // evidence check binds only the committed roots across the sets.
     let coefficient_source_records =
         array_at_path(coefficient_commitment_set, &["sourceTrusteeRecords"])?;
     let recipient_source_records =
@@ -419,27 +415,47 @@ pub(super) fn verify_vss_share_linkage_evidence_sets(
     Ok(())
 }
 
-pub(super) fn verify_vss_public_aggregate_threshold_public_sums(
+// Verify the proven threshold-share aggregate binding: for every aggregate
+// record, a unit-evaluation-point share-linkage proof shows the committed
+// threshold share T_{j,l} is the modular sum of the committed source recipient
+// shares sigma_{i->j,l}. Replaces the removed public homomorphic coordinate-sum.
+// Acceptance is by the proof plus the canonical binding of its statement's
+// committed roots to the recipient-share and aggregate commitment sets, never by
+// any self-attested field.
+pub(crate) struct VssAggregateThresholdProofContext<'a> {
+    pub(crate) ceremony_id: &'a str,
+    pub(crate) manifest_hash: &'a str,
+    pub(crate) roster_hash: &'a str,
+    pub(crate) setup_epoch: &'a str,
+    pub(crate) ring_degree: usize,
+    pub(crate) participant_count: usize,
+    pub(crate) rns_limb_count: usize,
+}
+
+pub(crate) fn verify_vss_public_aggregate_threshold_proofs(
     recipient_share_commitment_set: &Value,
     aggregate_threshold_commitment_set: &Value,
-    participant_count: usize,
-    rns_limb_count: usize,
+    context: &VssAggregateThresholdProofContext<'_>,
 ) -> CanonicalResult<()> {
+    let participant_count = context.participant_count;
+    let rns_limb_count = context.rns_limb_count;
     let recipient_source_records =
         array_at_path(recipient_share_commitment_set, &["sourceTrusteeRecords"])?;
     let aggregate_recipient_records =
         array_at_path(aggregate_threshold_commitment_set, &["recipientRecords"])?;
+    let aggregate_proofs = array_at_path(
+        aggregate_threshold_commitment_set,
+        &["aggregateThresholdProofs"],
+    )?;
+    if aggregate_proofs.len() != aggregate_recipient_records.len() {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "VSS aggregate threshold proofs must cover every aggregate record",
+        ));
+    }
     for aggregate_record in aggregate_recipient_records {
-        let recipient_roster_position = usize::try_from(unsigned_at_path(
-            aggregate_record,
-            &["recipientRosterPosition"],
-        )?)
-        .map_err(|_| {
-            CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "VSS aggregate recipient roster position does not fit usize",
-            )
-        })?;
+        let recipient_roster_position =
+            unsigned_at_path(aggregate_record, &["recipientRosterPosition"])?;
         let rns_limb_index =
             usize::try_from(unsigned_at_path(aggregate_record, &["rnsLimbIndex"])?).map_err(
                 |_| {
@@ -449,8 +465,9 @@ pub(super) fn verify_vss_public_aggregate_threshold_public_sums(
                     )
                 },
             )?;
-        let recipient_share_record_index = recipient_roster_position
-            .checked_mul(rns_limb_count)
+        let recipient_share_record_index = usize::try_from(recipient_roster_position)
+            .ok()
+            .and_then(|position| position.checked_mul(rns_limb_count))
             .and_then(|offset| offset.checked_add(rns_limb_index))
             .ok_or_else(|| {
                 CanonicalError::new(
@@ -458,25 +475,49 @@ pub(super) fn verify_vss_public_aggregate_threshold_public_sums(
                     "VSS aggregate recipient-share record index overflowed",
                 )
             })?;
-        let source_share_commitment_roots =
-            array_at_path(aggregate_record, &["sourceShareCommitmentRoots"])?;
-        if source_share_commitment_roots.len() != participant_count {
+        let proof = aggregate_proofs
+            .iter()
+            .find(|proof| {
+                unsigned_at_path(proof, &["recipientRosterPosition"]).ok()
+                    == Some(recipient_roster_position)
+                    && unsigned_at_path(proof, &["rnsLimbIndex"]).ok()
+                        == Some(rns_limb_index as u64)
+            })
+            .ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    "VSS aggregate threshold record is missing its proof",
+                )
+            })?;
+        let vss_aggregate = value_at_path(proof, &["vssShareLinkage"])?;
+        if vss_aggregate
+            .get("isThresholdAggregate")
+            .and_then(Value::as_bool)
+            != Some(true)
+        {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "VSS aggregate threshold commitment source roots must cover every participant",
+                CanonicalErrorCode::ComponentMismatch,
+                "VSS aggregate proof statement must set isThresholdAggregate",
             ));
         }
-        let source_share_opening_roots =
-            array_at_path(aggregate_record, &["sourceShareOpeningRoots"])?;
-        if source_share_opening_roots.len() != participant_count {
+        // The proof's recipient share is the committed threshold share T_{j,l}.
+        compare_required_string(
+            hash_at_path(vss_aggregate, &["recipientShareCommitmentRoot"])?,
+            hash_at_path(aggregate_record, &["aggregateCommitmentRoot"])?,
+            "VSS aggregate proof threshold-share commitment root",
+        )?;
+        // The proof's coefficients are the committed source recipient shares
+        // sigma_{i->j,l}, in source order, matching the recipient-share set.
+        let coefficient_commitment_roots =
+            array_at_path(vss_aggregate, &["coefficientCommitmentRoots"])?;
+        if coefficient_commitment_roots.len() != participant_count {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
-                "VSS aggregate threshold commitment source opening roots must cover every participant",
+                "VSS aggregate proof must sum one source share per participant",
             ));
         }
-        let mut source_recipient_share_records = Vec::with_capacity(participant_count);
-        for (source_roster_position, source_share_commitment_root) in
-            source_share_commitment_roots.iter().enumerate()
+        for (source_roster_position, coefficient_commitment_root) in
+            coefficient_commitment_roots.iter().enumerate()
         {
             let source_record = recipient_source_records
                 .get(source_roster_position)
@@ -493,94 +534,43 @@ pub(super) fn verify_vss_public_aggregate_threshold_public_sums(
                 .ok_or_else(|| {
                     CanonicalError::new(
                         CanonicalErrorCode::MalformedLength,
-                        "VSS aggregate threshold commitment references a missing recipient-share commitment",
+                        "VSS aggregate proof references a missing recipient-share commitment",
                     )
                 })?;
-            let share_commitment_root =
-                hash_at_path(recipient_share_record, &["shareCommitmentRoot"])?;
-            let expected_root = source_share_commitment_root.as_str().ok_or_else(|| {
+            let expected_root = hash_at_path(recipient_share_record, &["shareCommitmentRoot"])?;
+            let bound_root = coefficient_commitment_root.as_str().ok_or_else(|| {
                 CanonicalError::new(
                     CanonicalErrorCode::InvalidFixture,
-                    "VSS aggregate source share commitment root must be a string",
+                    "VSS aggregate proof source share commitment root must be a string",
                 )
             })?;
             compare_required_string(
-                share_commitment_root,
+                bound_root,
                 expected_root,
-                "VSS aggregate source share commitment root",
+                "VSS aggregate proof source share commitment root",
             )?;
-            let share_opening_root = hash_at_path(recipient_share_record, &["shareOpeningRoot"])?;
-            let expected_opening_root = source_share_opening_roots
-                .get(source_roster_position)
-                .and_then(Value::as_str)
-                .ok_or_else(|| {
-                    CanonicalError::new(
-                        CanonicalErrorCode::InvalidFixture,
-                        "VSS aggregate source share opening root must be a string",
-                    )
-                })?;
-            compare_required_string(
-                share_opening_root,
-                expected_opening_root,
-                "VSS aggregate source share opening root",
-            )?;
-            source_recipient_share_records.push(recipient_share_record);
         }
-        let aggregate_commitment = value_at_path(aggregate_record, &["commitment"])?;
-        let aggregate_limbs = array_at_path(aggregate_commitment, &["commitmentLimbs"])?;
-        for (limb_position, aggregate_limb) in aggregate_limbs.iter().enumerate() {
-            let aggregate_coordinates = array_at_path(aggregate_limb, &["coordinates"])?;
-            let modulus = unsigned_at_path(aggregate_limb, &["modulus"])?;
-            for (coordinate_index, aggregate_coordinate) in aggregate_coordinates.iter().enumerate()
-            {
-                let aggregate_coordinate_value =
-                    aggregate_coordinate.as_u64().ok_or_else(|| {
-                        CanonicalError::new(
-                            CanonicalErrorCode::InvalidFixture,
-                            "VSS aggregate coordinate must be an unsigned integer",
-                        )
-                    })?;
-                let mut summed_coordinate = 0_u128;
-                for recipient_share_record in &source_recipient_share_records {
-                    let commitment = value_at_path(recipient_share_record, &["commitment"])?;
-                    let limb = array_at_path(commitment, &["commitmentLimbs"])?
-                        .get(limb_position)
-                        .ok_or_else(|| {
-                            CanonicalError::new(
-                                CanonicalErrorCode::MalformedLength,
-                                "VSS recipient-share commitment is missing a limb",
-                            )
-                        })?;
-                    compare_required_u64(
-                        unsigned_at_path(limb, &["commitmentModulusIndex"])?,
-                        unsigned_at_path(aggregate_limb, &["commitmentModulusIndex"])?,
-                        "VSS aggregate source commitment modulus index",
-                    )?;
-                    compare_required_u64(
-                        unsigned_at_path(limb, &["modulus"])?,
-                        modulus,
-                        "VSS aggregate source commitment modulus",
-                    )?;
-                    let coordinate = array_at_path(limb, &["coordinates"])?
-                        .get(coordinate_index)
-                        .and_then(Value::as_u64)
-                        .ok_or_else(|| {
-                            CanonicalError::new(
-                                CanonicalErrorCode::MalformedLength,
-                                "VSS recipient-share commitment is missing a coordinate",
-                            )
-                        })?;
-                    summed_coordinate =
-                        (summed_coordinate + u128::from(coordinate)) % u128::from(modulus);
-                }
-                if summed_coordinate as u64 != aggregate_coordinate_value {
-                    return Err(CanonicalError::new(
-                        CanonicalErrorCode::ComponentMismatch,
-                        "VSS aggregate threshold commitment body is not the public sum of recipient-share commitments",
-                    ));
-                }
-            }
-        }
+        // Verify the unit-point share-linkage proof that T_{j,l} is the modular
+        // sum of the bound source shares.
+        let proof_bytes = crate::transcript_core::decode_standard_base64(
+            string_at_path(proof, &["proofBytesBase64"])?,
+            "VSS aggregate proof proofBytesBase64",
+        )?;
+        let proof_bytes_hex = crate::transcript_core::encode_hex(&proof_bytes);
+        crate::bgv::setup::verify_vss_share_linkage_proof_from_request(&json!({
+            "context": {
+                "ceremonyId": context.ceremony_id,
+                "manifestHash": context.manifest_hash,
+                "rosterHash": context.roster_hash,
+                "trusteeIdentity": "vss-aggregate-threshold",
+                "trusteeRosterPosition": 0,
+                "setupEpoch": context.setup_epoch,
+                "shareLinkageStatementRoot": vss_aggregate["shareLinkageStatementRoot"],
+            },
+            "ringDegree": context.ring_degree,
+            "vssShareLinkage": vss_aggregate,
+            "proofBytesHex": proof_bytes_hex,
+        }))?;
     }
 
     Ok(())

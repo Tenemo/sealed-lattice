@@ -36,10 +36,9 @@ import type {
 export const foundationParticipantCount = 10;
 export const foundationOptionCount = 20;
 export const foundationTopOptionCount = 10;
-export const foundationTiePolicyHash = deriveFixtureHash(
-    'fixture-tie-policy',
-    { tiePolicy: 'HigherScoreThenLowerOptionIndex' },
-);
+export const foundationTiePolicyHash = deriveFixtureHash('fixture-tie-policy', {
+    tiePolicy: 'HigherScoreThenLowerOptionIndex',
+});
 
 export type FoundationTranscriptFixture = {
     readonly input: FoundationTranscriptInput;

@@ -2,7 +2,8 @@ use super::super::*;
 use super::*;
 use crate::bgv::setup::vss_commitment::{
     VSS_PUBLIC_MESSAGE_DIGIT_COUNT, VssPublicMessageEncodingLayout,
-    vss_public_message_digit_weight, vss_public_message_encoding_layout,
+    vss_public_message_digit_only_encoding_layout, vss_public_message_digit_weight,
+    vss_public_message_encoding_layout,
 };
 
 // The committed-material VSS commitment carried by share-linkage, bridge, and
@@ -24,18 +25,19 @@ pub(crate) struct VssShareLinkagePublicVectorInput<'a> {
     pub(crate) recipient_roster_position: u64,
     pub(crate) ring_degree: usize,
     pub(crate) coefficient_commitments: &'a [VssShareLinkageCommitment],
-    pub(crate) recipient_share_commitment: &'a VssShareLinkageCommitment,
     pub(crate) relation_alpha: &'a [ChallengeExtensionElement],
     pub(crate) u_power_vectors: &'a [Vec<ChallengeExtensionElement>],
+    // Unit evaluation point (point = 1) instead of the recipient trustee point,
+    // turning the lifted evaluation into a plain sum for the threshold-aggregate
+    // relation.
+    pub(crate) is_threshold_aggregate: bool,
 }
 
 struct VssShareLinkageItemView<'a> {
-    source_rns_limb_index: usize,
     source_message_modulus: u64,
     recipient_roster_position: u64,
     coefficient_commitments: &'a [VssShareLinkageCommitment],
     coefficient_slot_indices: Vec<usize>,
-    recipient_share_commitment: &'a VssShareLinkageCommitment,
 }
 
 fn vss_public_message_encoding_offsets(
@@ -143,8 +145,18 @@ pub(crate) fn build_vss_share_linkage_public_vectors(
     }
 
     let share_relation_count = LINCHECK_REPETITIONS;
-    let coefficient_message_encoding_layout =
-        vss_public_message_encoding_layout(input.source_message_modulus)?;
+    // A proven threshold aggregate opens its source (coefficient) messages'
+    // committed digit columns for the sum binding but skips their range proofs
+    // (the recipient-share proofs range-prove the same committed material), so
+    // the coefficient messages carry the digit-only encoding with no decoder
+    // relations. The aggregate item message keeps its full range-proof encoding.
+    // This must match the digit-only choice in `LimbColumnLayout::new`, since the
+    // relation count derived here draws the same challenges.
+    let coefficient_message_encoding_layout = if input.is_threshold_aggregate {
+        vss_public_message_digit_only_encoding_layout()
+    } else {
+        vss_public_message_encoding_layout(input.source_message_modulus)?
+    };
     let recipient_message_encoding_layout =
         vss_public_message_encoding_layout(input.source_message_modulus)?;
     let decoder_relation_count = (input.coefficient_commitments.len()
@@ -169,12 +181,16 @@ pub(crate) fn build_vss_share_linkage_public_vectors(
         vec![extension_zero_vector(); vss_public_message_encoding_total(&message_encoding_offsets)];
     let mut recipient_share_carry_vector = extension_zero_vector();
 
-    let trustee_point = canonical_trustee_point(
-        usize::try_from(input.recipient_roster_position).map_err(|_| {
-            invalid_succinct_setup_proof("VSS recipient roster position does not fit usize")
-        })?,
-        input.source_message_modulus,
-    )?;
+    let trustee_point = if input.is_threshold_aggregate {
+        1
+    } else {
+        canonical_trustee_point(
+            usize::try_from(input.recipient_roster_position).map_err(|_| {
+                invalid_succinct_setup_proof("VSS recipient roster position does not fit usize")
+            })?,
+            input.source_message_modulus,
+        )?
+    };
     let source_modulus_residue = input.source_message_modulus % input.modulus;
     let negated_source_modulus = if source_modulus_residue == 0 {
         0
@@ -322,7 +338,6 @@ pub(crate) fn build_vss_share_linkage_batch_public_vectors(
     let coefficient_slot_indices_by_item = statement.coefficient_witness_slot_indices_by_item();
     let mut items = Vec::with_capacity(statement.item_count());
     items.push(VssShareLinkageItemView {
-        source_rns_limb_index: statement.source_rns_limb_index,
         source_message_modulus: statement.source_message_modulus,
         recipient_roster_position: statement.recipient_roster_position,
         coefficient_commitments: &statement.coefficient_commitments,
@@ -330,7 +345,6 @@ pub(crate) fn build_vss_share_linkage_batch_public_vectors(
             .first()
             .cloned()
             .unwrap_or_default(),
-        recipient_share_commitment: &statement.recipient_share_commitment,
     });
     for (item, coefficient_slot_indices) in statement
         .additional_linkage_items
@@ -338,20 +352,26 @@ pub(crate) fn build_vss_share_linkage_batch_public_vectors(
         .zip(coefficient_slot_indices_by_item.iter().skip(1))
     {
         items.push(VssShareLinkageItemView {
-            source_rns_limb_index: item.source_rns_limb_index,
             source_message_modulus: item.source_message_modulus,
             recipient_roster_position: item.recipient_roster_position,
             coefficient_commitments: &item.coefficient_commitments,
             coefficient_slot_indices: coefficient_slot_indices.clone(),
-            recipient_share_commitment: &item.recipient_share_commitment,
         });
     }
 
     let expected_relation_count = items
         .iter()
         .map(|item| {
-            let coefficient_layout =
-                vss_public_message_encoding_layout(item.source_message_modulus)?;
+            // Match the digit-only source encoding a proven threshold aggregate
+            // uses (see `build_vss_share_linkage_public_vectors` and
+            // `LimbColumnLayout::new`): the source coefficient messages carry no
+            // decoder relations, so only the aggregate item message contributes
+            // decoder claims here.
+            let coefficient_layout = if statement.is_threshold_aggregate {
+                vss_public_message_digit_only_encoding_layout()
+            } else {
+                vss_public_message_encoding_layout(item.source_message_modulus)?
+            };
             let recipient_layout = vss_public_message_encoding_layout(item.source_message_modulus)?;
             let decoder_relation_count = (item.coefficient_commitments.len()
                 * vss_public_decoder_digit_count(coefficient_layout)
@@ -389,9 +409,21 @@ pub(crate) fn build_vss_share_linkage_batch_public_vectors(
             "VSS packed message bounds do not match the packed column layout",
         ));
     }
+    // A proven threshold aggregate encodes its packed source (coefficient)
+    // messages digit-only (their range is covered by the recipient-share
+    // proofs); only the packed recipient item messages keep the full range-proof
+    // encoding. The coefficient slots occupy the first `coefficient_column_count`
+    // packed positions.
     let message_encoding_layouts = message_bounds
         .iter()
-        .map(|message_bound| vss_public_message_encoding_layout(*message_bound))
+        .enumerate()
+        .map(|(message_position, message_bound)| {
+            if statement.is_threshold_aggregate && message_position < coefficient_column_count {
+                Ok(vss_public_message_digit_only_encoding_layout())
+            } else {
+                vss_public_message_encoding_layout(*message_bound)
+            }
+        })
         .collect::<CanonicalResult<Vec<_>>>()?;
     let message_encoding_offsets = vss_public_message_encoding_offsets(&message_encoding_layouts)?;
     let mut message_encoding_vectors =
@@ -409,8 +441,11 @@ pub(crate) fn build_vss_share_linkage_batch_public_vectors(
                 "VSS coefficient witness slot layout does not match the item",
             ));
         }
-        let item_coefficient_message_encoding_layout =
-            vss_public_message_encoding_layout(item.source_message_modulus)?;
+        let item_coefficient_message_encoding_layout = if statement.is_threshold_aggregate {
+            vss_public_message_digit_only_encoding_layout()
+        } else {
+            vss_public_message_encoding_layout(item.source_message_modulus)?
+        };
         let item_recipient_message_encoding_layout =
             vss_public_message_encoding_layout(item.source_message_modulus)?;
         for coefficient_slot_index in &item.coefficient_slot_indices {
@@ -456,10 +491,10 @@ pub(crate) fn build_vss_share_linkage_batch_public_vectors(
                 recipient_roster_position: item.recipient_roster_position,
                 ring_degree,
                 coefficient_commitments: item.coefficient_commitments,
-                recipient_share_commitment: item.recipient_share_commitment,
                 relation_alpha: &relation_alpha
                     [relation_alpha_offset..relation_alpha_offset + item_relation_count],
                 u_power_vectors,
+                is_threshold_aggregate: statement.is_threshold_aggregate,
             },
             tower,
         )?;

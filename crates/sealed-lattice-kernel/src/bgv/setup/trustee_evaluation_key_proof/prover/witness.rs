@@ -103,24 +103,6 @@ fn vss_public_carry_witnesses_by_item(witness: &TrusteeEvaluationKeyWitness) -> 
             .collect()
     }
 }
-
-fn vss_public_recipient_share_opening_randomness_by_item(
-    witness: &TrusteeEvaluationKeyWitness,
-) -> Vec<&[Vec<i64>]> {
-    if witness
-        .vss_public_recipient_share_opening_randomness_by_item
-        .is_empty()
-    {
-        vec![&witness.vss_public_recipient_share_opening_randomness]
-    } else {
-        witness
-            .vss_public_recipient_share_opening_randomness_by_item
-            .iter()
-            .map(Vec::as_slice)
-            .collect()
-    }
-}
-
 pub(super) struct LimbWitnessCommitment {
     pub(super) plan: EvaluationDomainPlan,
     pub(super) layout: LimbColumnLayout,
@@ -938,7 +920,11 @@ fn validate_vss_public_witness(
             ));
         }
         let carry_bound = private_vss_share_lifted_carry_bound(
-            recipient_roster_position,
+            if statement.is_threshold_aggregate {
+                0
+            } else {
+                recipient_roster_position
+            },
             item_coefficient_count,
         )?;
         for carry in carry_witnesses {
@@ -949,12 +935,16 @@ fn validate_vss_public_witness(
                 ));
             }
         }
-        let trustee_point = i128::from(crate::bgv::setup::sharing::canonical_trustee_point(
-            usize::try_from(recipient_roster_position).map_err(|_| {
-                invalid_succinct_setup_proof("VSS recipient roster position does not fit usize")
-            })?,
-            source_message_modulus,
-        )?);
+        let trustee_point = if statement.is_threshold_aggregate {
+            1_i128
+        } else {
+            i128::from(crate::bgv::setup::sharing::canonical_trustee_point(
+                usize::try_from(recipient_roster_position).map_err(|_| {
+                    invalid_succinct_setup_proof("VSS recipient roster position does not fit usize")
+                })?,
+                source_message_modulus,
+            )?)
+        };
         let mut powers = Vec::with_capacity(item_coefficient_count);
         let mut power = 1_i128;
         for _ in 0..item_coefficient_count {

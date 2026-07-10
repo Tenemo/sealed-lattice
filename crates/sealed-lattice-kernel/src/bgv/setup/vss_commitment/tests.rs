@@ -2,14 +2,10 @@ use serde_json::json;
 
 use super::{
     VSS_PUBLIC_MESSAGE_BASE_DIGIT_TRIT_COUNT, VSS_PUBLIC_MESSAGE_DIGIT_BASE,
-    VSS_PUBLIC_OUTPUT_COORDINATE_COUNT, VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT,
-    VssPublicCommitmentComputation, VssPublicCommitmentOpeningInput,
-    compute_vss_public_commitment_from_opening, compute_vss_public_commitment_from_opening_request,
     verify_vss_public_aggregate_threshold_commitment_set_request,
     verify_vss_public_coefficient_commitment_set_request,
     verify_vss_public_recipient_share_commitment_set_request,
-    verify_vss_share_linkage_statement_request, vss_public_canonical_message_digit_columns,
-    vss_public_encoded_commitment_byte_length, vss_public_message_encoding_layout,
+    verify_vss_share_linkage_statement_request, vss_public_message_encoding_layout,
 };
 use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 
@@ -31,94 +27,6 @@ fn message_encoding_layout_uses_digit_bounds_for_trit_columns() -> CanonicalResu
         VSS_PUBLIC_MESSAGE_BASE_DIGIT_TRIT_COUNT
     );
     assert_eq!(full_low_digit_layout.digit_trit_count(1)?, 1);
-
-    Ok(())
-}
-
-#[test]
-fn commitment_command_verifies_and_rejects_tampering() -> CanonicalResult<()> {
-    let request = opening_request();
-    let response = compute_vss_public_commitment_from_opening_request(&request)?;
-
-    assert_eq!(
-        response["operation"],
-        "computeVssPublicCommitmentFromOpening"
-    );
-    assert_eq!(response["encodedCommitmentByteLength"], json!(384_u64));
-    assert_eq!(
-        response["commitment"]["commitmentLimbs"]
-            .as_array()
-            .expect("commitment limbs")
-            .len(),
-        3
-    );
-    assert_eq!(
-        response["commitmentRoot"]
-            .as_str()
-            .expect("commitment root")
-            .len(),
-        128
-    );
-
-    let mut tampered_opening = opening_request();
-    tampered_opening["messageCoefficients"][3] = json!(12_u64);
-    assert!(
-        compute_vss_public_commitment_from_opening_request(&tampered_opening).is_err(),
-        "tampered opening must reject"
-    );
-
-    let mut wrong_shape = opening_request();
-    wrong_shape["randomnessByColumn"][0] = json!([0, 1]);
-    assert!(
-        compute_vss_public_commitment_from_opening_request(&wrong_shape).is_err(),
-        "wrong randomness shape must reject"
-    );
-
-    let mut missing_digit_columns = opening_request();
-    missing_digit_columns
-        .as_object_mut()
-        .expect("opening request")
-        .remove("messageDigitColumns");
-    assert!(
-        compute_vss_public_commitment_from_opening_request(&missing_digit_columns).is_err(),
-        "opening command must require message digit columns"
-    );
-
-    Ok(())
-}
-
-#[test]
-fn commitment_opening_root_binds_explicit_message_digit_columns() -> CanonicalResult<()> {
-    let carried_message = VSS_PUBLIC_MESSAGE_DIGIT_BASE + 7;
-    let mut request = opening_request();
-    request["messageCoefficientBound"] = json!(VSS_PUBLIC_MESSAGE_DIGIT_BASE * 2);
-    request["messageCoefficients"][2] = json!(carried_message);
-    request["messageDigitColumns"] = json!([
-        [1_u64, 2, carried_message, 4, 5, 6, 7, 8],
-        [0_u64, 0, 0, 0, 0, 0, 0, 0],
-    ]);
-    let response = compute_vss_public_commitment_from_opening_request(&request)?;
-
-    let mut canonical_digits_request = request.clone();
-    canonical_digits_request["messageDigitColumns"] =
-        json!([[1_u64, 2, 7, 4, 5, 6, 7, 8], [0_u64, 0, 1, 0, 0, 0, 0, 0],]);
-    let canonical_digits_response =
-        compute_vss_public_commitment_from_opening_request(&canonical_digits_request)?;
-    assert_ne!(
-        response["commitmentRoot"],
-        canonical_digits_response["commitmentRoot"]
-    );
-    assert_ne!(
-        response["openingRoot"],
-        canonical_digits_response["openingRoot"]
-    );
-
-    let mut mismatched_digits_request = request;
-    mismatched_digits_request["messageDigitColumns"][0][2] = json!(carried_message - 1);
-    assert!(
-        compute_vss_public_commitment_from_opening_request(&mismatched_digits_request).is_err(),
-        "explicit VSS message digit columns must decode to the declared message coefficients"
-    );
 
     Ok(())
 }
@@ -176,7 +84,7 @@ fn recipient_share_commitment_set_command_verifies_bound_roots() -> CanonicalRes
     );
     assert_eq!(verification["participantCount"], json!(2_u64));
     assert_eq!(verification["rnsLimbCount"], json!(2_u64));
-    assert_eq!(verification["ringDegree"], json!(8_u64));
+    assert_eq!(verification["ringDegree"], json!(128_u64));
 
     let mut tampered_set = recipient_set;
     tampered_set["sourceTrusteeRecords"][0]["recipientShareCommitments"][1]["shareCommitmentRoot"] =
@@ -211,7 +119,7 @@ fn aggregate_threshold_commitment_set_command_verifies_bound_roots() -> Canonica
     );
     assert_eq!(verification["participantCount"], json!(2_u64));
     assert_eq!(verification["rnsLimbCount"], json!(2_u64));
-    assert_eq!(verification["ringDegree"], json!(8_u64));
+    assert_eq!(verification["ringDegree"], json!(128_u64));
 
     let mut tampered_set = aggregate_set;
     tampered_set["recipientRecords"][0]["aggregateCommitmentRoot"] = json!("f".repeat(128));
@@ -279,33 +187,10 @@ fn share_linkage_statement_command_verifies_bound_roots() -> CanonicalResult<()>
         "evidence-backed linkage verification must reject a source root absent from the recipient-share set"
     );
 
-    let mut mismatched_aggregate_set = aggregate_set.clone();
-    tamper_aggregate_commitment_body(&mut mismatched_aggregate_set)?;
-    assert!(
-        verify_vss_public_aggregate_threshold_commitment_set_request(&json!({
-            "command": "VerifyVssPublicAggregateThresholdCommitmentSet",
-            "aggregateThresholdCommitmentSet": mismatched_aggregate_set.clone(),
-        }))
-        .is_ok(),
-        "aggregate set verification only checks aggregate body canonical roots"
-    );
-    let mismatched_statement = share_linkage_statement_from_evidence(
-        &coefficient_set,
-        &recipient_set,
-        &mismatched_aggregate_set,
-    );
-    let mismatch_error = verify_vss_share_linkage_statement_request(&json!({
-        "command": "VerifyVssShareLinkageStatement",
-        "statement": mismatched_statement,
-        "coefficientCommitmentSet": coefficient_set.clone(),
-        "recipientShareCommitmentSet": recipient_set.clone(),
-        "aggregateThresholdCommitmentSet": mismatched_aggregate_set,
-    }))
-    .expect_err("evidence-backed linkage verification must reject a non-sum aggregate body");
-    assert!(
-        mismatch_error.to_string().contains("public sum"),
-        "aggregate body mismatch should be reported as a public-sum failure: {mismatch_error}"
-    );
+    // The "T = sum" aggregate binding is no longer a public homomorphic sum
+    // checked here; it is a threshold-aggregate proof verified on the
+    // accepted-setup material path. The statement evidence check binds only the
+    // committed roots across the sets.
 
     let mut tampered_statement = statement;
     tampered_statement["aggregateThresholdCommitmentRoot"] = json!("8".repeat(128));
@@ -324,104 +209,6 @@ fn share_linkage_statement_command_verifies_bound_roots() -> CanonicalResult<()>
     Ok(())
 }
 
-fn opening_request() -> serde_json::Value {
-    json!({
-        "command": "ComputeVssPublicCommitmentFromOpening",
-        "commitmentRole": "aggregate-threshold-share",
-        "commitmentContext": {
-            "objectType": "VssPublicAggregateThresholdShareCommitmentContext",
-            "ceremonyId": "vss-test",
-            "manifestHash": "1".repeat(128),
-            "rosterHash": "2".repeat(128),
-            "setupParametersHash": "3".repeat(128),
-            "qShareHash": "4".repeat(128),
-            "setupEpoch": "setup-epoch",
-            "recipientIdentity": "trustee-1",
-            "recipientRosterPosition": 0,
-            "rnsLimbIndex": 0,
-            "rnsPrime": 97,
-        },
-        "publicMatrixSeedHash": "7".repeat(128),
-        "rnsLimbIndex": 0,
-        "rnsPrime": 97,
-        "ringDegree": 8,
-        "messageCoefficients": [1, 2, 3, 4, 5, 6, 7, 8],
-        "messageDigitColumns": [
-            [1, 2, 3, 4, 5, 6, 7, 8],
-            [0, 0, 0, 0, 0, 0, 0, 0]
-        ],
-        "randomnessByColumn": [
-            [0, 1, -1, 2, -2, 3, -3, 4],
-            [5, -5, 6, -6, 7, -7, 8, -8]
-        ],
-    })
-}
-
-// Small final check for the public VSS commitment: the public commitment
-// body is a fixed set of field residues (three commitment limbs times
-// sixteen output coordinates), independent of the ring degree, whereas a
-// full-ring VSS coefficient commitment stores one residue per ring
-// coefficient. The constant-size property is the point of the public
-// commitment; the reduction against the first-profile ring is measured and
-// printed, never gated on.
-#[test]
-fn vss_public_commitment_body_is_constant_size_across_ring_degrees() -> CanonicalResult<()> {
-    let mut encoded_byte_lengths = Vec::new();
-    for ring_degree in [8_usize, 64] {
-        let message_coefficients: Vec<u64> =
-            (0..ring_degree).map(|index| (index % 7) as u64).collect();
-        let low_digit_column = message_coefficients.clone();
-        let high_digit_column = vec![0_u64; ring_degree];
-        let randomness_first: Vec<i64> = (0..ring_degree)
-            .map(|index| ((index % 3) as i64) - 1)
-            .collect();
-        let randomness_second: Vec<i64> = (0..ring_degree)
-            .map(|index| 1 - ((index % 3) as i64))
-            .collect();
-        let request = json!({
-            "commitmentRole": "aggregate-threshold-share",
-            "commitmentContext": {
-                "objectType": "VssPublicAggregateThresholdShareCommitmentContext",
-                "ceremonyId": "vss-measurement",
-                "manifestHash": "1".repeat(128),
-                "rosterHash": "2".repeat(128),
-                "setupParametersHash": "3".repeat(128),
-                "qShareHash": "4".repeat(128),
-                "setupEpoch": "setup-epoch",
-                "recipientIdentity": "trustee-1",
-                "recipientRosterPosition": 0,
-                "rnsLimbIndex": 0,
-                "rnsPrime": 97,
-            },
-            "publicMatrixSeedHash": "7".repeat(128),
-            "rnsLimbIndex": 0,
-            "rnsPrime": 97,
-            "ringDegree": ring_degree,
-            "messageCoefficients": message_coefficients,
-            "messageDigitColumns": [low_digit_column, high_digit_column],
-            "randomnessByColumn": [randomness_first, randomness_second],
-        });
-        compute_vss_public_commitment_from_opening_request(&request)?;
-        encoded_byte_lengths.push(vss_public_encoded_commitment_byte_length() as u64);
-    }
-
-    assert_eq!(
-        encoded_byte_lengths[0], encoded_byte_lengths[1],
-        "public commitment body must be a constant size independent of the ring degree"
-    );
-    let public_commitment_body_bytes = encoded_byte_lengths[0];
-    // Model a full-ring VSS coefficient commitment over the first-profile
-    // ring: one ~6-byte residue per ring coefficient per commitment limb.
-    let modeled_full_bytes_per_commitment =
-        crate::bgv::parameters::POLYNOMIAL_DEGREE as u64 * 3 * 6;
-    println!(
-        "sealed-lattice-vss-public-commitment-measurement public-commitment-body-bytes={public_commitment_body_bytes} modeled-full-bytes-per-commitment={modeled_full_bytes_per_commitment} reduction={}x",
-        modeled_full_bytes_per_commitment / public_commitment_body_bytes.max(1)
-    );
-
-    Ok(())
-}
-
 pub(in crate::bgv::setup) fn coefficient_commitment_set() -> CanonicalResult<serde_json::Value> {
     let mut source_trustee_records = Vec::new();
     for source_trustee_roster_position in 0..2_usize {
@@ -433,7 +220,7 @@ pub(in crate::bgv::setup) fn coefficient_commitment_set() -> CanonicalResult<ser
         "participantCount": 2,
         "rnsLimbCount": 2,
         "thresholdDegree": 2,
-        "ringDegree": 8,
+        "ringDegree": test_ring_degree(),
         "sourceTrusteeRecords": source_trustee_records,
     });
     let mut coefficient_set = set_without_root;
@@ -506,7 +293,10 @@ fn test_threshold_degree() -> usize {
 }
 
 fn test_ring_degree() -> usize {
-    8
+    // The committed-material commitment hosts TRACE_SPLIT half-columns over a
+    // trace domain with a minimum size, so the set-verifier fixtures use a valid
+    // supported ring degree rather than a tiny structural one.
+    128
 }
 
 fn test_public_matrix_seed_hash() -> String {
@@ -539,22 +329,27 @@ fn test_message_coefficients(seed: usize, modulus: u64) -> Vec<u64> {
         .collect()
 }
 
-fn test_randomness_by_column(seed: usize) -> Vec<Vec<i64>> {
-    (0..VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT)
-        .map(|column_index| {
-            (0..test_ring_degree())
-                .map(|coefficient_index| {
-                    let magnitude =
-                        ((seed + column_index * 11 + coefficient_index * 7) % 29) as i64;
-                    if (seed + column_index + coefficient_index).is_multiple_of(2) {
-                        magnitude
-                    } else {
-                        -magnitude
-                    }
-                })
-                .collect()
-        })
-        .collect()
+// The committed-material computation fields the set-builder fixtures consume:
+// the commitment body plus its canonical and opening roots.
+struct TestVssCommitmentComputation {
+    commitment: serde_json::Value,
+    commitment_root: String,
+    opening_root: String,
+}
+
+fn test_committed_material_seed(seed: usize) -> String {
+    // A distinct valid 128-hex protocol-hash-shaped seed per fixture commitment.
+    let mut material_seed = String::with_capacity(128);
+    let mut state = seed as u64;
+    for _ in 0..128 {
+        state = state
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        let nibble = (state >> 60) & 0x0f;
+        material_seed.push(char::from_digit(nibble as u32, 16).expect("hex nibble"));
+    }
+
+    material_seed
 }
 
 fn test_commitment(
@@ -562,33 +357,52 @@ fn test_commitment(
     rns_limb_index: usize,
     rns_prime: u64,
     seed_parts: &[usize],
-) -> CanonicalResult<VssPublicCommitmentComputation> {
+) -> CanonicalResult<TestVssCommitmentComputation> {
+    let message_coefficients = test_message_coefficients(test_seed(seed_parts), rns_prime);
+    test_committed_material_commitment(
+        commitment_role,
+        rns_limb_index,
+        rns_prime,
+        seed_parts,
+        &message_coefficients,
+    )
+}
+
+fn test_committed_material_commitment(
+    commitment_role: &str,
+    rns_limb_index: usize,
+    rns_prime: u64,
+    seed_parts: &[usize],
+    message_coefficients: &[u64],
+) -> CanonicalResult<TestVssCommitmentComputation> {
     let seed = test_seed(seed_parts);
     let commitment_context = json!({
         "objectType": "VssPublicTestCommitmentContext",
         "commitmentRole": commitment_role,
         "seedHash": test_hash_from_seed(seed, 9),
     });
-    let public_matrix_seed_hash = test_public_matrix_seed_hash();
-    let message_coefficients = test_message_coefficients(seed, rns_prime);
-    let message_digit_columns =
-        vss_public_canonical_message_digit_columns(&message_coefficients, test_ring_degree())?;
-    let randomness_by_column = test_randomness_by_column(seed);
-    let computation =
-        compute_vss_public_commitment_from_opening(VssPublicCommitmentOpeningInput {
-            commitment_role,
-            commitment_context: &commitment_context,
-            public_matrix_seed_hash: &public_matrix_seed_hash,
-            rns_limb_index,
-            rns_prime,
-            ring_degree: test_ring_degree(),
-            message_coefficients: &message_coefficients,
-            message_digit_columns: &message_digit_columns,
-            message_coefficient_bound: rns_prime,
-            randomness_by_column: &randomness_by_column,
-        })?;
+    let response = crate::bgv::setup::compute_vss_committed_material_commitment_request(&json!({
+        "commitmentRole": commitment_role,
+        "commitmentContext": commitment_context,
+        "rnsLimbIndex": rns_limb_index,
+        "rnsPrime": rns_prime,
+        "ringDegree": test_ring_degree(),
+        "messageCoefficients": message_coefficients,
+        "messageCoefficientBound": rns_prime,
+        "materialSeedHex": test_committed_material_seed(seed),
+    }))?;
 
-    Ok(computation)
+    Ok(TestVssCommitmentComputation {
+        commitment: response["commitment"].clone(),
+        commitment_root: response["commitmentRoot"]
+            .as_str()
+            .expect("commitment root")
+            .to_string(),
+        opening_root: response["openingRoot"]
+            .as_str()
+            .expect("opening root")
+            .to_string(),
+    })
 }
 
 pub(in crate::bgv::setup) fn recipient_share_commitment_set() -> CanonicalResult<serde_json::Value>
@@ -722,11 +536,32 @@ fn aggregate_threshold_commitment_record(
         rns_limb_index,
     )?;
     let rns_prime = test_rns_prime(rns_limb_index);
-    let commitment = aggregate_commitment_body(
-        recipient_roster_position,
+    // The threshold share is the modular sum of every source's recipient share
+    // for this recipient and limb, recomputed from the same fixture messages the
+    // recipient-share records commit and committed as committed material. The
+    // "T = sum" binding itself is a threshold-aggregate proof, not this record.
+    let mut aggregate_message = vec![0_u64; test_ring_degree()];
+    for source_trustee_roster_position in 0..test_participant_count() {
+        let source_message = test_message_coefficients(
+            test_seed(&[
+                source_trustee_roster_position,
+                recipient_roster_position,
+                rns_limb_index,
+                1,
+            ]),
+            rns_prime,
+        );
+        for (accumulator, value) in aggregate_message.iter_mut().zip(source_message.iter()) {
+            *accumulator =
+                ((u128::from(*accumulator) + u128::from(*value)) % u128::from(rns_prime)) as u64;
+        }
+    }
+    let computation = test_committed_material_commitment(
+        "aggregate-threshold-share",
         rns_limb_index,
         rns_prime,
-        &source_share_records,
+        &[recipient_roster_position, rns_limb_index, 5],
+        &aggregate_message,
     )?;
     let source_share_commitment_roots = source_share_records
         .iter()
@@ -736,7 +571,6 @@ fn aggregate_threshold_commitment_record(
         .iter()
         .map(|source_share_record| source_share_record["shareOpeningRoot"].clone())
         .collect::<Vec<_>>();
-    let seed = test_seed(&[recipient_roster_position, rns_limb_index, 5]);
 
     Ok(json!({
         "objectType": "VssPublicAggregateThresholdCommitment",
@@ -745,10 +579,9 @@ fn aggregate_threshold_commitment_record(
         "recipientTrusteePoint": recipient_roster_position + 1,
         "rnsLimbIndex": rns_limb_index,
         "rnsPrime": rns_prime,
-        "aggregateCommitmentRoot": crate::hashing::derive_canonical_object_hash(&commitment,
-        )?,
-        "aggregateOpeningRoot": test_hash_from_seed(seed, 0),
-        "commitment": commitment,
+        "aggregateCommitmentRoot": computation.commitment_root,
+        "aggregateOpeningRoot": computation.opening_root,
+        "commitment": computation.commitment,
         "sourceShareCommitmentRoots": source_share_commitment_roots,
         "sourceShareOpeningRoots": source_share_opening_roots,
     }))
@@ -800,93 +633,6 @@ fn source_share_records_for_recipient(
         .collect()
 }
 
-fn aggregate_commitment_body(
-    recipient_roster_position: usize,
-    rns_limb_index: usize,
-    rns_prime: u64,
-    source_share_records: &[serde_json::Value],
-) -> CanonicalResult<serde_json::Value> {
-    let first_source_share_record = source_share_records.first().ok_or_else(|| {
-        CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "VSS fixture aggregate body must have source share records",
-        )
-    })?;
-    let first_commitment_limbs = first_source_share_record["commitment"]["commitmentLimbs"]
-        .as_array()
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "VSS fixture commitment limbs must be an array",
-            )
-        })?;
-    let mut commitment_limbs = Vec::new();
-    for (commitment_limb_position, first_limb) in first_commitment_limbs.iter().enumerate() {
-        let commitment_modulus_index =
-            first_limb["commitmentModulusIndex"]
-                .as_u64()
-                .ok_or_else(|| {
-                    CanonicalError::new(
-                        CanonicalErrorCode::InvalidFixture,
-                        "VSS fixture commitment modulus index must be an unsigned integer",
-                    )
-                })?;
-        let modulus = first_limb["modulus"].as_u64().ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "VSS fixture commitment modulus must be an unsigned integer",
-            )
-        })?;
-        let mut summed_coordinates = Vec::new();
-        for coordinate_index in 0..VSS_PUBLIC_OUTPUT_COORDINATE_COUNT {
-            let mut summed_coordinate = 0_u128;
-            for source_share_record in source_share_records {
-                let source_limb = source_share_record["commitment"]["commitmentLimbs"]
-                    .as_array()
-                    .and_then(|limbs| limbs.get(commitment_limb_position))
-                    .ok_or_else(|| {
-                        CanonicalError::new(
-                            CanonicalErrorCode::MalformedLength,
-                            "VSS fixture source commitment limb is missing",
-                        )
-                    })?;
-                let coordinate = source_limb["coordinates"]
-                    .as_array()
-                    .and_then(|coordinates| coordinates.get(coordinate_index))
-                    .and_then(serde_json::Value::as_u64)
-                    .ok_or_else(|| {
-                        CanonicalError::new(
-                            CanonicalErrorCode::InvalidFixture,
-                            "VSS fixture source commitment coordinate must be an unsigned integer",
-                        )
-                    })?;
-                summed_coordinate =
-                    (summed_coordinate + u128::from(coordinate)) % u128::from(modulus);
-            }
-            summed_coordinates.push(summed_coordinate as u64);
-        }
-        commitment_limbs.push(json!({
-            "commitmentModulusIndex": commitment_modulus_index,
-            "modulus": modulus,
-            "coordinates": summed_coordinates,
-        }));
-    }
-
-    let seed = test_seed(&[recipient_roster_position, rns_limb_index, 4]);
-    Ok(json!({
-        "objectType": "VssPublicCommitment",
-        "commitmentRole": "aggregate-threshold-share",
-        "commitmentContextHash": test_hash_from_seed(seed, 0),
-        "publicMatrixSeedHash": test_public_matrix_seed_hash(),
-        "rnsLimbIndex": rns_limb_index,
-        "rnsPrime": rns_prime,
-        "ringDegree": test_ring_degree(),
-        "outputCoordinateCount": VSS_PUBLIC_OUTPUT_COORDINATE_COUNT,
-        "randomnessColumnCount": VSS_PUBLIC_RANDOMNESS_COLUMN_COUNT,
-        "commitmentLimbs": commitment_limbs,
-    }))
-}
-
 pub(in crate::bgv::setup) fn share_linkage_statement_from_evidence(
     coefficient_set: &serde_json::Value,
     recipient_set: &serde_json::Value,
@@ -931,7 +677,7 @@ pub(in crate::bgv::setup) fn share_linkage_statement_from_evidence(
                     "targetBasisHash": target_basis_hash.clone(),
                     "sourceTrusteeIdentity": format!("source-{source_trustee_roster_position}"),
                     "sourceTrusteeRosterPosition": source_trustee_roster_position,
-                    "ringDegree": 8,
+                    "ringDegree": test_ring_degree(),
                     "participantCount": 2,
                     "targetRnsLimbCount": 2,
                     "thresholdDegree": 2,
@@ -960,7 +706,7 @@ pub(in crate::bgv::setup) fn share_linkage_statement_from_evidence(
         "setupEpoch": "setup-epoch",
         "publicMatrixSeedHash": "7".repeat(128),
         "targetBasisHash": target_basis_hash,
-        "ringDegree": 8,
+        "ringDegree": test_ring_degree(),
         "participantCount": 2,
         "targetRnsLimbCount": 2,
         "thresholdDegree": 2,
@@ -1010,53 +756,6 @@ fn rebind_share_linkage_statement_root(statement: &mut serde_json::Value) -> Can
     statement["statementRoot"] = json!(crate::hashing::derive_canonical_object_hash(
         &serde_json::Value::Object(statement_without_root),
     )?);
-
-    Ok(())
-}
-
-fn tamper_aggregate_commitment_body(aggregate_set: &mut serde_json::Value) -> CanonicalResult<()> {
-    let aggregate_record = &mut aggregate_set["recipientRecords"][0];
-    let modulus = aggregate_record["commitment"]["commitmentLimbs"][0]["modulus"]
-        .as_u64()
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "VSS fixture aggregate modulus must be an unsigned integer",
-            )
-        })?;
-    let coordinate = aggregate_record["commitment"]["commitmentLimbs"][0]["coordinates"][0]
-        .as_u64()
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "VSS fixture aggregate coordinate must be an unsigned integer",
-            )
-        })?;
-    aggregate_record["commitment"]["commitmentLimbs"][0]["coordinates"][0] =
-        json!((coordinate + 1) % modulus);
-    aggregate_record["aggregateCommitmentRoot"] = json!(
-        crate::hashing::derive_canonical_object_hash(&aggregate_record["commitment"],)?
-    );
-    rebind_aggregate_threshold_commitment_set_root(aggregate_set)
-}
-
-fn rebind_aggregate_threshold_commitment_set_root(
-    aggregate_set: &mut serde_json::Value,
-) -> CanonicalResult<()> {
-    let mut aggregate_set_without_root = aggregate_set
-        .as_object()
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "VSS aggregate threshold commitment set must be an object",
-            )
-        })?
-        .clone();
-    aggregate_set_without_root.remove("aggregateThresholdCommitmentRoot");
-    aggregate_set["aggregateThresholdCommitmentRoot"] =
-        json!(crate::hashing::derive_canonical_object_hash(
-            &serde_json::Value::Object(aggregate_set_without_root),
-        )?);
 
     Ok(())
 }
