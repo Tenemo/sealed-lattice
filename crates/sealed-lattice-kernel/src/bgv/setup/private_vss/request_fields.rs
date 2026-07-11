@@ -1,6 +1,6 @@
 use super::*;
 
-use crate::bgv::setup_helpers::is_lowercase_protocol_hash;
+pub(super) use crate::bgv::setup_helpers::validate_hash_string;
 
 pub(super) fn compare_context_fields(
     value: &Value,
@@ -166,17 +166,6 @@ pub(super) fn hash_vector_field(
             Ok(hash.to_string())
         })
         .collect()
-}
-
-pub(super) fn validate_hash_string(hash: &str, field_name: &str) -> CanonicalResult<()> {
-    if is_lowercase_protocol_hash(hash) {
-        return Ok(());
-    }
-
-    Err(CanonicalError::new(
-        CanonicalErrorCode::InvalidFixture,
-        format!("{field_name} must be a lowercase 512-bit hex protocol hash"),
-    ))
 }
 
 pub(super) fn validate_exact_randomness_hex(

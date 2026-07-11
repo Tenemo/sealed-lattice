@@ -48,7 +48,6 @@ pub(super) fn read_target_ciphertext_pair(
     }
     let target_ciphertext_binding_hash = derive_canonical_object_hash(&json!({
         "objectType": "TargetDecryptionCiphertextBinding",
-        "objectVersion": 1,
         "aggregateCiphertextRoot": aggregate_ciphertext_root,
         "topCount": top_count,
         "targetLayoutHash": target_accepted.target_layout_hash,
@@ -118,7 +117,6 @@ pub(crate) fn direct_target_ciphertext_hash(
 ) -> CanonicalResult<String> {
     derive_canonical_object_hash(&json!({
         "objectType": "EncryptedSparseTargetCiphertext",
-        "objectVersion": 1,
         "aggregateCiphertextRoot": aggregate_ciphertext_root,
         "topCount": top_count,
         "tiePolicy": TIE_POLICY,

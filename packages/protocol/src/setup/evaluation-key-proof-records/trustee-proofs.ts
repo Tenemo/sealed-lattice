@@ -8,6 +8,8 @@ import {
 } from '../setup-proof-material-transport.js';
 
 import {
+    type EvaluationKeyShareComponentMaterialChunk,
+    type EvaluationKeyShareComponentMaterialChunkStream,
     type EvaluationKeyShareProofFamily,
     type JsonRecord,
     type RelinearizationKeyShareRounds,
@@ -46,15 +48,79 @@ import {
     validateCommonInput,
 } from './share-records.js';
 
+// The ordered chunk hex records for one transported component material: either
+// embedded inline on the component material (the additive inline path) or
+// carried out of band in the parallel chunk streams keyed by
+// keySwitchComponentMaterialRoot (the streamed path the terminal verify uses).
+const componentMaterialChunkRecords = (
+    componentMaterial: JsonRecord,
+    keySwitchComponentMaterialRoot: string,
+    componentMaterialChunkStreams:
+        | readonly EvaluationKeyShareComponentMaterialChunkStream[]
+        | undefined,
+    objectPath: string,
+): readonly EvaluationKeyShareComponentMaterialChunk[] => {
+    const inlineChunks = componentMaterial.chunks;
+    if (inlineChunks !== undefined) {
+        if (!Array.isArray(inlineChunks) || inlineChunks.length === 0) {
+            throw new Error(
+                `${objectPath} transported component material chunks must be a non-empty array.`,
+            );
+        }
+
+        return inlineChunks.map((chunkValue, chunkIndex) => {
+            const chunk = assertJsonRecord(
+                chunkValue,
+                `componentMaterial.chunks.${String(chunkIndex)}`,
+            );
+
+            return {
+                chunkIndex: assertNonNegativeSafeInteger(
+                    chunk.chunkIndex,
+                    `componentMaterial.chunks.${String(chunkIndex)}.chunkIndex`,
+                ),
+                bytesHex: stringRecordField(
+                    chunk,
+                    'bytesHex',
+                    `componentMaterial.chunks.${String(chunkIndex)}`,
+                ),
+            };
+        });
+    }
+    const matchingChunkStreams = (componentMaterialChunkStreams ?? []).filter(
+        (chunkStream) =>
+            chunkStream.keySwitchComponentMaterialRoot ===
+            keySwitchComponentMaterialRoot,
+    );
+    if (matchingChunkStreams.length !== 1) {
+        throw new Error(
+            `${objectPath} transported component material has no inline chunks and must match exactly one component material chunk stream.`,
+        );
+    }
+    const chunks = matchingChunkStreams[0].chunks;
+    if (chunks.length === 0) {
+        throw new Error(
+            `${objectPath} transported component material chunk stream must be a non-empty array.`,
+        );
+    }
+
+    return chunks;
+};
+
 // Decode one record's full public component-b material, mirroring the kernel
 // decoder: from embedded canonical component vector entries, or from the
-// binary chunked transport referenced by keySwitchComponentMaterialRoot.
+// binary chunked transport referenced by keySwitchComponentMaterialRoot. The
+// binary transport bytes come from the component material's inline chunks when
+// present, otherwise from the parallel component material chunk streams.
 const componentBVectorsFromMaterial = (
     proofFamily: EvaluationKeyShareProofFamily,
     record: JsonRecord,
     qSharePrimes: readonly number[],
     transportedComponentMaterial:
         | TransportedEvaluationKeyShareComponentMaterialSet
+        | undefined,
+    componentMaterialChunkStreams:
+        | readonly EvaluationKeyShareComponentMaterialChunkStream[]
         | undefined,
     objectPath: string,
 ): number[][][] => {
@@ -209,17 +275,13 @@ const componentBVectorsFromMaterial = (
         matchingMaterials[0],
         'componentMaterial',
     );
-    const chunksValue = componentMaterial.chunks;
-    if (!Array.isArray(chunksValue) || chunksValue.length === 0) {
-        throw new Error(
-            `${objectPath} transported component material chunks must be a non-empty array.`,
-        );
-    }
-    const materialBytesParts = chunksValue.map((chunkValue, chunkIndex) => {
-        const chunk = assertJsonRecord(
-            chunkValue,
-            `componentMaterial.chunks.${String(chunkIndex)}`,
-        );
+    const chunkRecords = componentMaterialChunkRecords(
+        componentMaterial,
+        expectedMaterialRoot,
+        componentMaterialChunkStreams,
+        objectPath,
+    );
+    const materialBytesParts = chunkRecords.map((chunk, chunkIndex) => {
         if (chunk.chunkIndex !== chunkIndex) {
             throw new Error(
                 'transported component material chunks must be in ascending chunk-index order.',
@@ -227,11 +289,7 @@ const componentBVectorsFromMaterial = (
         }
 
         return bytesFromHex(
-            stringRecordField(
-                chunk,
-                'bytesHex',
-                `componentMaterial.chunks.${String(chunkIndex)}`,
-            ),
+            chunk.bytesHex,
             'componentMaterial.chunks.bytesHex',
         );
     });
@@ -370,6 +428,9 @@ const roundOnePublicAggregateDiagonals = (
     transportedComponentMaterial:
         | TransportedEvaluationKeyShareComponentMaterialSet
         | undefined,
+    componentMaterialChunkStreams:
+        | readonly EvaluationKeyShareComponentMaterialChunkStream[]
+        | undefined,
 ): ReadonlyMap<number, number[][]> => {
     const aggregatesByLevel = new Map<
         number,
@@ -388,6 +449,7 @@ const roundOnePublicAggregateDiagonals = (
             recordFields,
             qSharePrimes,
             transportedComponentMaterial,
+            componentMaterialChunkStreams,
             'roundOneRecords',
         );
         const ringDegree = components[0]?.[0]?.length ?? 0;
@@ -444,7 +506,7 @@ const roundOnePublicAggregateDiagonals = (
 export const createTrusteeEvaluationKeyProofs = (
     input: TrusteeEvaluationKeyProofsInput,
 ): TrusteeEvaluationKeyProofSet => {
-    const sameSecretProofReferences = validateCommonInput(input);
+    const trusteeReferences = validateCommonInput(input);
     assertProtocolHash(
         input.keySwitchDecompositionHash,
         'keySwitchDecompositionHash',
@@ -457,8 +519,6 @@ export const createTrusteeEvaluationKeyProofs = (
     if (
         input.relinearizationKeyShareRounds.evaluatorKeyScheduleRoot !==
             input.evaluatorKeySchedule.evaluatorKeyScheduleRoot ||
-        input.relinearizationKeyShareRounds.sameSecretProofSetRoot !==
-            input.sameSecretProofSetRoot ||
         input.relinearizationKeyShareRounds
             .publicKeyShareSuccinctProofSetRoot !==
             input.publicKeyShareSuccinctProofSetRoot
@@ -500,6 +560,115 @@ export const createTrusteeEvaluationKeyProofs = (
         }
         witnessesByRosterPosition.set(witness.trusteeRosterPosition, witness);
     });
+    const sameSecretBridgeStatementSet = input.sameSecretBridgeStatementSet;
+    assertContextMatches(
+        input.setupContext,
+        sameSecretBridgeStatementSet,
+        'sameSecretBridgeStatementSet',
+    );
+    assertProtocolHash(
+        sameSecretBridgeStatementSet.publicMatrixSeedHash,
+        'sameSecretBridgeStatementSet.publicMatrixSeedHash',
+    );
+    if (
+        sameSecretBridgeStatementSet.participantCount !==
+            input.participantCount ||
+        sameSecretBridgeStatementSet.statementRecords.length !==
+            input.participantCount
+    ) {
+        throw new Error(
+            'sameSecretBridgeStatementSet must contain one statement per participant.',
+        );
+    }
+    if (
+        sameSecretBridgeStatementSet.publicMatrixSeedHash !==
+        input.evaluatorKeySchedule.publicMatrixSeedHash
+    ) {
+        throw new Error(
+            'sameSecretBridgeStatementSet.publicMatrixSeedHash must match evaluatorKeySchedule.publicMatrixSeedHash.',
+        );
+    }
+    const bridgeStatementsByRosterPosition = new Map(
+        sameSecretBridgeStatementSet.statementRecords.map(
+            (statementRecord, expectedRosterPosition) => {
+                assertContextMatches(
+                    input.setupContext,
+                    statementRecord,
+                    'sameSecretBridgeStatementSet.statementRecords',
+                );
+                const expectedTrusteeReference =
+                    trusteeReferences[expectedRosterPosition];
+                if (
+                    expectedTrusteeReference === undefined ||
+                    statementRecord.trusteeRosterPosition !==
+                        expectedRosterPosition ||
+                    statementRecord.trusteeIdentity !==
+                        expectedTrusteeReference.trusteeIdentity
+                ) {
+                    throw new Error(
+                        'sameSecretBridgeStatementSet statement records must follow the canonical trustee roster order.',
+                    );
+                }
+                if (
+                    statementRecord.publicMatrixSeedHash !==
+                        sameSecretBridgeStatementSet.publicMatrixSeedHash ||
+                    statementRecord.ringDegree !==
+                        sameSecretBridgeStatementSet.ringDegree
+                ) {
+                    throw new Error(
+                        'sameSecretBridgeStatementSet statement records must match the set randomness and ring degree.',
+                    );
+                }
+                if (
+                    statementRecord.sourceConstantCoefficientCommitments
+                        .length !== input.qSharePrimes.length
+                ) {
+                    throw new Error(
+                        'sameSecretBridgeStatementSet source constant commitments must cover every source RNS limb.',
+                    );
+                }
+                statementRecord.sourceConstantCoefficientCommitments.forEach(
+                    (sourceCommitmentRecord, expectedRnsLimbIndex) => {
+                        const sourceCommitment = assertJsonRecord(
+                            sourceCommitmentRecord.commitment,
+                            'sameSecretBridgeStatementSet.sourceConstantCoefficientCommitments.commitment',
+                        );
+                        if (
+                            sourceCommitmentRecord.rnsLimbIndex !==
+                                expectedRnsLimbIndex ||
+                            sourceCommitmentRecord.rnsPrime !==
+                                input.qSharePrimes[expectedRnsLimbIndex] ||
+                            sourceCommitmentRecord.shamirCoefficientIndex !==
+                                0 ||
+                            sourceCommitment.objectType !== 'SetupCommitment' ||
+                            sourceCommitment.sourceRnsLimbIndex !==
+                                expectedRnsLimbIndex ||
+                            sourceCommitment.sourceMessageModulus !==
+                                sourceCommitmentRecord.rnsPrime ||
+                            sourceCommitment.shamirCoefficientIndex !== 0 ||
+                            sourceCommitment.ringDegree !==
+                                sameSecretBridgeStatementSet.ringDegree ||
+                            !Array.isArray(sourceCommitment.commitmentLimbs)
+                        ) {
+                            throw new Error(
+                                'sameSecretBridgeStatementSet source constant commitments must carry canonical source-limb bodies in order.',
+                            );
+                        }
+                    },
+                );
+
+                return [
+                    statementRecord.trusteeRosterPosition,
+                    statementRecord,
+                ] as const;
+            },
+        ),
+    );
+    if (bridgeStatementsByRosterPosition.size !== input.participantCount) {
+        throw new Error(
+            'sameSecretBridgeStatementSet must not repeat a trustee roster position.',
+        );
+    }
 
     const scheduledLevels =
         input.evaluatorKeySchedule.relinearizationLevelSchedule.map(
@@ -510,17 +679,35 @@ export const createTrusteeEvaluationKeyProofs = (
         input.qSharePrimes,
         input.participantCount,
         input.transportedEvaluationKeyShareComponentMaterial,
+        input.evaluationKeyShareComponentMaterialChunkStreams,
     );
 
-    const proofRecords = sameSecretProofReferences.map((proofReference) => {
+    const proofRecords = trusteeReferences.map((trusteeReference) => {
         const witness = witnessesByRosterPosition.get(
-            proofReference.trusteeRosterPosition,
+            trusteeReference.trusteeRosterPosition,
         );
         if (witness === undefined) {
             throw new Error(
                 'trusteeWitnesses must contain one witness per participant.',
             );
         }
+        const bridgeStatement = bridgeStatementsByRosterPosition.get(
+            trusteeReference.trusteeRosterPosition,
+        );
+        if (bridgeStatement === undefined) {
+            throw new Error(
+                'sameSecretBridgeStatementSet must contain one statement per participant.',
+            );
+        }
+        const sourceConstantCommitment =
+            bridgeStatement.sourceConstantCoefficientCommitments[0];
+        if (sourceConstantCommitment === undefined) {
+            throw new Error(
+                'sameSecretBridgeStatementSet must carry the source-limb-zero constant commitment.',
+            );
+        }
+        const sourceConstantCoefficientCommitmentRoot =
+            deriveCanonicalObjectHash(sourceConstantCommitment.commitment);
         const statementKeys: TrusteeEvaluationKeyStatementKey[] = [];
         let ringDegree: number | undefined;
         const recordRingDegree = (record: JsonRecord): void => {
@@ -540,7 +727,7 @@ export const createTrusteeEvaluationKeyProofs = (
         for (const level of scheduledLevels) {
             const record = relinearizationRecordForTrusteeAndLevel(
                 input.relinearizationKeyShareRounds.roundOneRecords,
-                proofReference.trusteeRosterPosition,
+                trusteeReference.trusteeRosterPosition,
                 level,
                 'roundOneRecords',
             );
@@ -563,6 +750,7 @@ export const createTrusteeEvaluationKeyProofs = (
                     record,
                     input.qSharePrimes,
                     input.transportedEvaluationKeyShareComponentMaterial,
+                    input.evaluationKeyShareComponentMaterialChunkStreams,
                     'roundOneRecords',
                 ),
             });
@@ -570,7 +758,7 @@ export const createTrusteeEvaluationKeyProofs = (
         for (const level of scheduledLevels) {
             const record = relinearizationRecordForTrusteeAndLevel(
                 input.relinearizationKeyShareRounds.roundTwoRecords,
-                proofReference.trusteeRosterPosition,
+                trusteeReference.trusteeRosterPosition,
                 level,
                 'roundTwoRecords',
             );
@@ -599,12 +787,14 @@ export const createTrusteeEvaluationKeyProofs = (
                     record,
                     input.qSharePrimes,
                     input.transportedEvaluationKeyShareComponentMaterial,
+                    input.evaluationKeyShareComponentMaterialChunkStreams,
                     'roundTwoRecords',
                 ),
                 roundOneAggregateDiagonal: aggregateDiagonal,
             });
         }
-        const batch = sortedGaloisBatches[proofReference.trusteeRosterPosition];
+        const batch =
+            sortedGaloisBatches[trusteeReference.trusteeRosterPosition];
         for (const scheduleEntry of input.evaluatorKeySchedule
             .requiredGaloisKeySchedule) {
             const materialRecords = batch.galoisKeyShareMaterialRecords.filter(
@@ -638,6 +828,7 @@ export const createTrusteeEvaluationKeyProofs = (
                     materialRecord,
                     input.qSharePrimes,
                     input.transportedEvaluationKeyShareComponentMaterial,
+                    input.evaluationKeyShareComponentMaterialChunkStreams,
                     'galoisKeyShareMaterialRecords',
                 ),
             });
@@ -647,17 +838,16 @@ export const createTrusteeEvaluationKeyProofs = (
                 'trustee evaluation-key statement requires at least one share record.',
             );
         }
+        if (ringDegree !== bridgeStatement.ringDegree) {
+            throw new Error(
+                'sameSecretBridgeStatementSet ring degree must match the evaluation-key share records.',
+            );
+        }
         if (witness.errorCoefficientsByKey.length !== statementKeys.length) {
             throw new Error(
                 'trusteeWitnesses.errorCoefficientsByKey must contain one error vector set per statement key.',
             );
         }
-        witness.constantCommitments.forEach((commitment, commitmentIndex) =>
-            assertJsonRecord(
-                commitment,
-                `trusteeWitnesses.constantCommitments.${String(commitmentIndex)}`,
-            ),
-        );
         const proofRandomnessSeedHex = freshProofRandomnessHex();
         const proofRandomnessNonceHex = freshProofRandomnessHex();
         const generatedProof = input.trusteeEvaluationKeyProofGenerator({
@@ -665,23 +855,22 @@ export const createTrusteeEvaluationKeyProofs = (
                 ceremonyId: input.setupContext.ceremonyId,
                 manifestHash: input.setupContext.manifestHash,
                 rosterHash: input.setupContext.rosterHash,
-                trusteeIdentity: proofReference.trusteeIdentity,
-                trusteeRosterPosition: proofReference.trusteeRosterPosition,
+                trusteeIdentity: trusteeReference.trusteeIdentity,
+                trusteeRosterPosition: trusteeReference.trusteeRosterPosition,
                 setupEpoch: input.setupContext.setupEpoch,
                 requiredGaloisSetHash:
                     input.evaluatorKeySchedule.requiredGaloisSetHash,
                 evaluatorKeyScheduleRoot:
                     input.evaluatorKeySchedule.evaluatorKeyScheduleRoot,
                 keySwitchDecompositionHash: input.keySwitchDecompositionHash,
-                sameSecretStatementRoot: proofReference.sameSecretStatementRoot,
-                sameSecretProofRoot: proofReference.sameSecretProofRoot,
+                sourceConstantCoefficientCommitmentRoot:
+                    sourceConstantCoefficientCommitmentRoot,
             },
             ringDegree,
             keys: statementKeys,
             sameSecretLinkage: {
-                publicMatrixSeedHash:
-                    input.evaluatorKeySchedule.publicMatrixSeedHash,
-                commitments: witness.constantCommitments,
+                publicMatrixSeedHash: bridgeStatement.publicMatrixSeedHash,
+                commitments: [sourceConstantCommitment.commitment],
             },
             secretCoefficients: witness.secretCoefficients,
             errorCoefficientsByKey: witness.errorCoefficientsByKey,
@@ -700,11 +889,6 @@ export const createTrusteeEvaluationKeyProofs = (
             generatedProof.statementHash,
             'generatedProof.statementHash',
         );
-        if (generatedProof.sameSecretLinkageIncluded !== true) {
-            throw new Error(
-                'generatedProof must include the same-secret linkage.',
-            );
-        }
         assertNonEmptyString(
             generatedProof.proofBytesHex,
             'generatedProof.proofBytesHex',
@@ -727,15 +911,10 @@ export const createTrusteeEvaluationKeyProofs = (
         );
         const recordWithoutRoot = {
             objectType: 'TrusteeEvaluationKeyProof',
-            objectVersion: 1,
             proofFamily: trusteeEvaluationKeyProofFamily,
             ...contextFields(input.setupContext),
-            trusteeIdentity: proofReference.trusteeIdentity,
-            trusteeRosterPosition: proofReference.trusteeRosterPosition,
-            sameSecretStatementRoot: proofReference.sameSecretStatementRoot,
-            trusteeSecretCommitmentRoot:
-                proofReference.trusteeSecretCommitmentRoot,
-            sameSecretProofRoot: proofReference.sameSecretProofRoot,
+            trusteeIdentity: trusteeReference.trusteeIdentity,
+            trusteeRosterPosition: trusteeReference.trusteeRosterPosition,
             statementHash: generatedProof.statementHash,
             proofBytesHash: hash512Hex(
                 trusteeEvaluationKeyProofBytesHashDomain,
@@ -763,7 +942,6 @@ export const createTrusteeEvaluationKeyProofs = (
     }));
     const proofSetWithoutRoot = {
         objectType: 'TrusteeEvaluationKeyProofSet',
-        objectVersion: 1,
         proofFamily: trusteeEvaluationKeyProofFamily,
         ...contextFields(input.setupContext),
         participantCount: input.participantCount,
@@ -772,11 +950,6 @@ export const createTrusteeEvaluationKeyProofs = (
             input.evaluatorKeySchedule.evaluatorKeyScheduleRoot,
         requiredGaloisSetHash: input.evaluatorKeySchedule.requiredGaloisSetHash,
         keySwitchDecompositionHash: input.keySwitchDecompositionHash,
-        sameSecretConsistencyRoot:
-            input.evaluatorKeySchedule.sameSecretConsistencyRoot,
-        sameSecretProofSetRoot: input.sameSecretProofSetRoot,
-        sameSecretProofFamilyBindingRoot:
-            input.sameSecretProofFamilyBindingRoot,
         publicKeyShareSetRoot: input.evaluatorKeySchedule.publicKeyShareSetRoot,
         publicKeyShareSuccinctProofSetRoot:
             input.publicKeyShareSuccinctProofSetRoot,
@@ -841,7 +1014,6 @@ export const transportTrusteeEvaluationKeyProofSet = (
         );
         const proofMaterialRoot = deriveCanonicalObjectHash({
             objectType: 'TrusteeEvaluationKeyProofMaterialReference',
-            objectVersion: 1,
             proofFamily: trusteeEvaluationKeyProofFamily,
             trusteeIdentity: proofRecord.trusteeIdentity,
             trusteeRosterPosition: proofRecord.trusteeRosterPosition,
@@ -851,7 +1023,6 @@ export const transportTrusteeEvaluationKeyProofSet = (
         });
         transportedProofMaterials.push({
             objectType: evaluationKeyShareProofTransportObjectType,
-            objectVersion: 1,
             proofFamily: trusteeEvaluationKeyProofFamily,
             ...setupProofMaterialRecordTransportFields(
                 proofMaterialTransport,
@@ -892,7 +1063,6 @@ export const transportTrusteeEvaluationKeyProofSet = (
         } as TrusteeEvaluationKeyProofSet,
         transportedEvaluationKeyShareProofMaterial: {
             objectType: evaluationKeyShareProofTransportSetObjectType,
-            objectVersion: 1,
             proofFamily: trusteeEvaluationKeyProofFamily,
             proofMaterials: transportedProofMaterials,
         },

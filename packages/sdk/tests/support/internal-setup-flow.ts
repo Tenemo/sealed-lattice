@@ -12,7 +12,6 @@ import {
     createPublicKeyShareProofSet as createPublicKeyShareProofSetInternal,
     createPublicKeyShareSet as createPublicKeyShareSetInternal,
     createRelinearizationKeyShareRounds as createRelinearizationKeyShareRoundsInternal,
-    createSameSecretProofSet as createSameSecretProofSetInternal,
     createSetupCommonRandomness as createSetupCommonRandomnessInternal,
     createSetupContributionAssembly as createSetupContributionInternal,
     createSetupCertificates as createSetupCertificatesInternal,
@@ -28,6 +27,7 @@ import type {
     EvaluatorKeyScheduleInput as ProtocolEvaluatorKeyScheduleInput,
     GaloisKeyShareBatch as ProtocolGaloisKeyShareBatch,
     GaloisKeyShareBatchContribution as ProtocolGaloisKeyShareBatchContribution,
+    LocalTrusteeVssPublicAggregateOpeningCredentialHandoff,
     PublicEvaluationKeySet as ProtocolPublicEvaluationKeySet,
     PublicEvaluationKeySetInput as ProtocolPublicEvaluationKeySetInput,
     PublicKeyShareMaterialContributionInput as ProtocolPublicKeyShareMaterialContributionInput,
@@ -44,9 +44,6 @@ import type {
     PublicKeyShareSetInput as ProtocolPublicKeyShareSetInput,
     RelinearizationKeyShareRounds as ProtocolRelinearizationKeyShareRounds,
     RelinearizationKeyShareRoundsInput as ProtocolRelinearizationKeyShareRoundsInput,
-    SameSecretProofMaterial as ProtocolSameSecretProofMaterial,
-    SameSecretProofSet as ProtocolSameSecretProofSet,
-    SameSecretProofSetInput as ProtocolSameSecretProofSetInput,
     SetupCertificates as ProtocolSetupCertificates,
     SetupCertificateTransportedObjectInput as ProtocolSetupCertificateTransportedObjectInput,
     SetupTransportCertificate as ProtocolSetupTransportCertificate,
@@ -54,7 +51,6 @@ import type {
     SetupPackage as ProtocolSetupPackage,
     SetupPackageInput as ProtocolSetupPackageInput,
     SetupPhaseParticipantObjectInput as ProtocolSetupPhaseParticipantObjectInput,
-    LocalTrusteeSetupStateDecryptionInput,
 } from '@sealed-lattice/protocol';
 import type {
     ProtocolHash,
@@ -92,7 +88,6 @@ export type SetupIntentInput = Readonly<{
 export type SetupPhaseParticipantObject = Readonly<
     JsonRecord & {
         readonly objectType: 'SetupPhaseParticipantObject';
-        readonly objectVersion: 1;
         readonly phaseId: string;
         readonly phaseNumber: number;
         readonly ceremonyId: string;
@@ -153,7 +148,6 @@ export type CommonRandomnessRevealInput = Readonly<{
 export type CommonRandomnessReveal = Readonly<
     JsonRecord & {
         readonly objectType: 'CommonRandomnessReveal';
-        readonly objectVersion: 1;
         readonly ceremonyId: string;
         readonly manifestHash: ProtocolHash;
         readonly rosterHash: ProtocolHash;
@@ -185,7 +179,6 @@ export type CommonRandomnessCommitInput = Readonly<{
 export type CommonRandomnessCommit = Readonly<
     JsonRecord & {
         readonly objectType: 'CommonRandomnessCommit';
-        readonly objectVersion: 1;
         readonly ceremonyId: string;
         readonly manifestHash: ProtocolHash;
         readonly rosterHash: ProtocolHash;
@@ -212,7 +205,6 @@ export type SetupCommonRandomnessInput = Readonly<{
 export type SetupCommonRandomness = Readonly<
     JsonRecord & {
         readonly objectType: 'SetupCommonRandomness';
-        readonly objectVersion: 1;
         readonly ceremonyId: string;
         readonly manifestHash: ProtocolHash;
         readonly rosterHash: ProtocolHash;
@@ -224,7 +216,6 @@ export type SetupCommonRandomness = Readonly<
         readonly publicDerivations: Readonly<
             JsonRecord & {
                 readonly objectType: 'SetupPublicDerivations';
-                readonly objectVersion: 1;
                 readonly publicMatrixSeedHash: ProtocolHash;
                 readonly publicDerivationRoot: ProtocolHash;
             }
@@ -236,7 +227,6 @@ export type SetupCommonRandomness = Readonly<
 export type PrivateVssEnvelopeVerificationReference = Readonly<
     JsonRecord & {
         readonly objectType: 'PrivateVssEnvelopeCommitment';
-        readonly objectVersion: 1;
         readonly ceremonyId: string;
         readonly manifestHash: ProtocolHash;
         readonly rosterHash: ProtocolHash;
@@ -281,7 +271,6 @@ export type VssShareAcceptanceInput = Readonly<{
 export type VssShareAcceptance = Readonly<
     JsonRecord & {
         readonly objectType: 'VssShareAcceptance';
-        readonly objectVersion: 1;
         readonly sourceTrusteeIdentity: string;
         readonly sourceTrusteeRosterPosition: number;
         readonly recipientIdentity: string;
@@ -315,7 +304,6 @@ export type VssComplaintInput = Readonly<{
 export type VssComplaint = Readonly<
     JsonRecord & {
         readonly objectType: 'VssShareComplaint';
-        readonly objectVersion: 1;
         readonly sourceTrusteeIdentity: string;
         readonly sourceTrusteeRosterPosition: number;
         readonly recipientIdentity: string;
@@ -339,7 +327,6 @@ export type VssComplaint = Readonly<
 export type LocalTrusteeSetupStateDeletionReceipt = Readonly<
     JsonRecord & {
         readonly objectType: 'LocalTrusteeSetupStateDeletionReceipt';
-        readonly objectVersion: 1;
         readonly setupEpoch: string;
         readonly trusteeIdentity: string;
         readonly trusteeRosterPosition: number;
@@ -352,7 +339,6 @@ export type LocalTrusteeSetupStateDeletionReceipt = Readonly<
 export type LocalTrusteeSetupStateCommitment = Readonly<
     JsonRecord & {
         readonly objectType: 'LocalTrusteeSetupStateCommitment';
-        readonly objectVersion: 1;
         readonly ceremonyId: string;
         readonly manifestHash: ProtocolHash;
         readonly rosterHash: ProtocolHash;
@@ -374,7 +360,6 @@ export type LocalTrusteeSetupStateCommitment = Readonly<
 export type LocalTrusteeSetupStateSealedMaterial = Readonly<
     JsonRecord & {
         readonly objectType: 'LocalTrusteeSetupStateSealedMaterial';
-        readonly objectVersion: 1;
         readonly materialClass: 'aggregate-threshold-share-sealed';
         readonly materialRoot: ProtocolHash;
         readonly ciphertextReference: ProtocolHash;
@@ -385,7 +370,6 @@ export type LocalTrusteeSetupStateSealedMaterial = Readonly<
 export type LocalTrusteeSetupStateSealedPayload = Readonly<
     JsonRecord & {
         readonly objectType: 'LocalTrusteeSetupStateSealedPayload';
-        readonly objectVersion: 1;
         readonly ceremonyId: string;
         readonly manifestHash: ProtocolHash;
         readonly rosterHash: ProtocolHash;
@@ -403,9 +387,6 @@ export type LocalTrusteeSetupStateSealedPayload = Readonly<
 export type EncryptedLocalTrusteeSetupState = Readonly<
     JsonRecord & {
         readonly objectType: 'EncryptedLocalTrusteeSetupState';
-        readonly objectVersion: 1;
-        readonly storageScheme: string;
-        readonly ciphertextContentType: 'local-trustee-setup-state';
         readonly localStateRoot: ProtocolHash;
         readonly localStateCommitmentHash: ProtocolHash;
         readonly storageAad: Readonly<JsonRecord>;
@@ -413,8 +394,6 @@ export type EncryptedLocalTrusteeSetupState = Readonly<
         readonly keyCommitmentHash: ProtocolHash;
         readonly aeadNonceHex: string;
         readonly ciphertextBytesHex: string;
-        readonly ciphertextBytesHash: ProtocolHash;
-        readonly ciphertextByteLength: number;
         readonly plaintextByteLength: number;
         readonly aeadTagLength: 128;
         readonly encryptedLocalStateHash: ProtocolHash;
@@ -440,7 +419,6 @@ export type SetupContributionInput = Readonly<{
 export type SetupContribution = Readonly<
     JsonRecord & {
         readonly objectType: 'SetupContributionAssembly';
-        readonly objectVersion: 1;
         readonly ceremonyId: string;
         readonly manifestHash: ProtocolHash;
         readonly rosterHash: ProtocolHash;
@@ -486,19 +464,19 @@ export type SetupPackageInput = Readonly<{
     readonly qShare: JsonRecord;
     readonly phaseTranscript: readonly JsonRecord[];
     readonly commonRandomness: JsonRecord;
-    readonly compactVssCoefficientCommitmentSet: JsonRecord;
-    readonly compactVssRecipientShareCommitmentSet: JsonRecord;
-    readonly compactVssAggregateThresholdCommitmentSet: JsonRecord;
-    readonly compactVssShareLinkageStatement: JsonRecord;
-    readonly compactVssShareLinkageProofMaterialSet: JsonRecord;
-    readonly compactSameSecretBridgeStatementSet: JsonRecord;
-    readonly compactSameSecretBridgeProofMaterialSet: JsonRecord;
+    readonly vssCoefficientCommitments: JsonRecord;
+    readonly vssCoefficientCommitmentMaterial: JsonRecord;
+    readonly vssPublicCoefficientCommitmentSet: JsonRecord;
+    readonly vssPublicRecipientShareCommitmentSet: JsonRecord;
+    readonly vssPublicAggregateThresholdCommitmentSet: JsonRecord;
+    readonly vssShareLinkageStatement: JsonRecord;
+    readonly vssShareLinkageProofMaterialSet: JsonRecord;
+    readonly sameSecretBridgeStatementSet: JsonRecord;
+    readonly sameSecretBridgeProofMaterialSet: JsonRecord;
     readonly privateVssEnvelopeCommitments: JsonRecord;
     readonly vssShareAcceptances: JsonRecord;
     readonly vssComplaints?: JsonRecord;
     readonly thresholdShareCommitments: JsonRecord;
-    readonly sameSecretConsistency: JsonRecord;
-    readonly sameSecretProofs: JsonRecord;
     readonly publicKeyShares: JsonRecord;
     readonly publicKeyShareProofs: JsonRecord;
     readonly publicKeyShareMaterial:
@@ -511,10 +489,7 @@ export type SetupPackageInput = Readonly<{
     readonly galoisKeyShareBatches: readonly JsonRecord[];
     readonly trusteeEvaluationKeyProofs: JsonRecord;
     readonly evaluationKeys: JsonRecord;
-    readonly setupCertificateInput?: Omit<
-        SetupCertificatesInput,
-        'vssCoefficientCommitmentMaterial'
-    >;
+    readonly setupCertificateInput?: SetupCertificatesInput;
     readonly setupTransportCertificate?: JsonRecord;
 }>;
 
@@ -535,9 +510,6 @@ export type PublicKeyShareSuccinctProofSetInput =
     ProtocolPublicKeyShareSuccinctProofSetInput;
 export type EvaluatorKeySchedule = ProtocolEvaluatorKeySchedule;
 export type EvaluatorKeyScheduleInput = ProtocolEvaluatorKeyScheduleInput;
-export type SameSecretProofMaterial = ProtocolSameSecretProofMaterial;
-export type SameSecretProofSet = ProtocolSameSecretProofSet;
-export type SameSecretProofSetInput = ProtocolSameSecretProofSetInput;
 export type RelinearizationKeyShareRounds =
     ProtocolRelinearizationKeyShareRounds;
 type PublicEvaluationKeyProofCommonInput = Readonly<
@@ -576,6 +548,7 @@ export type ExportEncryptedLocalTrusteeSetupStateInput = Readonly<{
     readonly thresholdShareCommitments: unknown;
     readonly privateVssEnvelopeCommitments: unknown;
     readonly verifiedPrivateVssShareEnvelopes: readonly unknown[];
+    readonly localTrusteeAggregateOpeningCredentialHandoff: LocalTrusteeVssPublicAggregateOpeningCredentialHandoff;
     readonly vssShareAcceptances: unknown;
     readonly vssComplaints?: unknown;
     readonly storageKeyBytesHex: string;
@@ -642,7 +615,6 @@ const setupPhaseNumber = (
     return phase.phaseNumber;
 };
 
-/** Creates the signed setup intent object for one trustee. */
 export const createSetupIntent = async (
     input: SetupIntentInput,
 ): Promise<SetupPhaseParticipantObject> => {
@@ -658,25 +630,21 @@ export const createSetupIntent = async (
     } satisfies ProtocolSetupPhaseParticipantObjectInput) as Promise<SetupPhaseParticipantObject>;
 };
 
-/** Creates a deterministic setup phase record from signed participant objects. */
 export const createSetupPhaseRecord = (
     input: SetupPhaseRecordInput,
 ): SetupPhaseRecord =>
     createSetupPhaseRecordInternal(input) as SetupPhaseRecord;
 
-/** Creates a public common-randomness reveal record for one trustee. */
 export const createCommonRandomnessReveal = (
     input: CommonRandomnessRevealInput,
 ): Promise<CommonRandomnessReveal> =>
     createCommonRandomnessRevealInternal(input);
 
-/** Creates a public common-randomness commit record for one trustee. */
 export const createCommonRandomnessCommit = (
     input: CommonRandomnessCommitInput,
 ): Promise<CommonRandomnessCommit> =>
     createCommonRandomnessCommitInternal(input);
 
-/** Assembles full-roster common randomness and accepted public derivations. */
 export const createSetupCommonRandomness = async (
     input: SetupCommonRandomnessInput,
 ): Promise<SetupCommonRandomness> => {
@@ -735,7 +703,6 @@ const assertRefusedPrivateVssVerification = (
     }
 };
 
-/** Creates a signed VSS share acceptance from a matching accepted local verification. */
 export const createVssShareAcceptance = async (
     input: VssShareAcceptanceInput,
 ): Promise<VssShareAcceptance> => {
@@ -751,7 +718,6 @@ export const createVssShareAcceptance = async (
     );
 };
 
-/** Creates a signed VSS complaint from a refused local private VSS verification. */
 export const createVssComplaint = async (
     input: VssComplaintInput,
 ): Promise<VssComplaint> => {
@@ -769,7 +735,6 @@ export const createVssComplaint = async (
     } as unknown as Parameters<typeof createVssComplaintInternal>[0]);
 };
 
-/** Creates a roots-only setup contribution record for one trustee. */
 export const createSetupContribution = (
     input: SetupContributionInput,
 ): SetupContribution =>
@@ -777,63 +742,47 @@ export const createSetupContribution = (
         input as unknown as SetupContributionAssemblyInput,
     );
 
-/** Creates root-bound setup certificates from parameters and transport evidence. */
 export const createSetupCertificates = (
     input: SetupCertificatesInput,
 ): SetupCertificates => createSetupCertificatesInternal(input);
 
-/** Creates a hash-bound setup package from canonical public setup records. */
 export const createSetupPackage = (input: SetupPackageInput): SetupPackage =>
     createSetupPackageInternal(input as unknown as ProtocolSetupPackageInput);
 
-/** Creates root-bound public-key share records from public component hashes. */
 export const createPublicKeyShareSet = (
     input: PublicKeyShareSetInput,
 ): PublicKeyShareSet => createPublicKeyShareSetInternal(input);
 
-/** Creates root-bound public-key share proof statement records. */
 export const createPublicKeyShareProofSet = (
     input: PublicKeyShareProofSetInput,
 ): PublicKeyShareProofSet => createPublicKeyShareProofSetInternal(input);
 
-/** Creates root-bound same-secret proof records from generated proof material. */
-export const createSameSecretProofSet = (
-    input: SameSecretProofSetInput,
-): SameSecretProofSet => createSameSecretProofSetInternal(input);
-
-/** Creates root-bound public-key share material records from public coefficients. */
 export const createPublicKeyShareMaterialSet = (
     input: PublicKeyShareMaterialSetInput,
 ): PublicKeyShareMaterialSet => createPublicKeyShareMaterialSetInternal(input);
 
-/** Creates root-bound public-key succinct proof records from generated proof material. */
 export const createPublicKeyShareSuccinctProofSet = (
     input: PublicKeyShareSuccinctProofSetInput,
 ): PublicKeyShareSuccinctProofSet =>
     createPublicKeyShareSuccinctProofSetInternal(input);
 
-/** Freezes the evaluator-key schedule used by setup verification. */
 export const createEvaluatorKeySchedule = (
     input: EvaluatorKeyScheduleInput,
 ): EvaluatorKeySchedule => createEvaluatorKeyScheduleInternal(input);
 
-/** Creates root-bound relinearization share records from public share material. */
 export const createRelinearizationKeyShareRounds = (
     input: RelinearizationKeyShareRoundsInput,
 ): RelinearizationKeyShareRounds =>
     createRelinearizationKeyShareRoundsInternal(input);
 
-/** Creates root-bound Galois share batch records from public share material. */
 export const createGaloisKeyShareBatches = (
     input: GaloisKeyShareBatchesInput,
 ): readonly GaloisKeyShareBatch[] => createGaloisKeyShareBatchesInternal(input);
 
-/** Creates public evaluation-key roots from verified relinearization and Galois records. */
 export const createPublicEvaluationKeySet = (
     input: PublicEvaluationKeySetInput,
 ): PublicEvaluationKeySet => createPublicEvaluationKeySetInternal(input);
 
-/** Encrypts local setup state from verified private VSS shares without returning plaintext. */
 export const exportEncryptedLocalTrusteeSetupState = async (
     input: ExportEncryptedLocalTrusteeSetupStateInput,
 ): Promise<ExportEncryptedLocalTrusteeSetupStateResult> => {
@@ -877,7 +826,8 @@ const assertExpectedHash = (
     }
 };
 
-// Unconditional payload-to-commitment binding comes from the kernel localStateRoot check; the optional expected* arguments only add extra caller pins and are skipped when undefined.
+// The kernel binds payload to commitment through localStateRoot; the optional
+// expected* arguments are caller pins.
 const assertRestoredLocalStateBindings = (
     input: RestoreLocalTrusteeSetupStateInput,
     sealedLocalStatePayload: LocalTrusteeSetupStateSealedPayload,
@@ -973,7 +923,6 @@ const assertRestoredLocalStateBindings = (
     }
 };
 
-/** Restores encrypted local setup state and verifies the roots-only commitment. */
 export const restoreLocalTrusteeSetupState = async (
     input: RestoreLocalTrusteeSetupStateInput,
 ): Promise<RestoredLocalTrusteeSetupState> => {
@@ -998,8 +947,7 @@ export const restoreLocalTrusteeSetupState = async (
     }) as LocalTrusteeSetupStateVerification;
     const decryptedState = await restoreEncryptedLocalTrusteeSetupStateInternal(
         {
-            encryptedLocalState:
-                input.encryptedLocalState as unknown as LocalTrusteeSetupStateDecryptionInput['encryptedLocalState'],
+            encryptedLocalState: input.encryptedLocalState,
             expectedLocalStateRoot,
             setupContext: input.setupContext,
             storageKeyBytesHex: input.storageKeyBytesHex,

@@ -166,20 +166,9 @@ const verifyBoardConsistencyUnchecked = (
     const suppliedForkEvidence = validSuppliedForkEvidence[0];
     const discoveredForkEvidence =
         suppliedForkEvidence ?? findConflictingHeads(input.signedBoardHeads);
-    const boardAccepted =
-        refusedObjects.length === 0 && discoveredForkEvidence === undefined;
-
     return {
         isValid:
             refusedObjects.length === 0 && discoveredForkEvidence === undefined,
-        acceptedHashes: boardAccepted
-            ? uniqueStrings([
-                  ...input.signedBoardHeads.map((head) => head.headHash),
-                  ...(input.inclusionProofs ?? []).map(
-                      (proof) => proof.inclusionProofHash,
-                  ),
-              ])
-            : [],
         refusedObjects:
             discoveredForkEvidence === undefined
                 ? refusedObjects
@@ -206,7 +195,6 @@ export const verifyBoardConsistency = (
     } catch (error) {
         return {
             isValid: false,
-            acceptedHashes: [],
             refusedObjects: [
                 createRefusal(
                     'BoardConsistencyFailure',

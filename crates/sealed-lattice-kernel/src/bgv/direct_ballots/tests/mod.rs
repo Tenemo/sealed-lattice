@@ -11,7 +11,7 @@ use crate::hashing::derive_canonical_object_hash;
 
 use super::*;
 
-const DIRECT_BALLOT_TEST_SETUP_SEED: &str = "direct-encrypted-ballot-test-setup-seed";
+const TEST_SETUP_SEED: &str = "direct-encrypted-ballot-test-setup-seed";
 
 struct DirectBallotRelationProofFixture {
     setup_package: Value,
@@ -24,16 +24,14 @@ fn direct_ballot_relation_proof_fixture() -> &'static DirectBallotRelationProofF
     static FIXTURE: OnceLock<DirectBallotRelationProofFixture> = OnceLock::new();
     FIXTURE.get_or_init(|| {
         let setup_package = setup_package();
-        let evaluator_key = development_evaluator_key_from_passive_setup_package(
-            &setup_package,
-            DIRECT_BALLOT_TEST_SETUP_SEED,
-        )
-        .expect("evaluator key");
+        let evaluator_key =
+            development_evaluator_key_from_passive_setup_package(&setup_package, TEST_SETUP_SEED)
+                .expect("evaluator key");
         let encrypted_ballot =
             encrypt_direct_ballot(&setup_package, &evaluator_key, valid_ballot_input())
                 .expect("encrypted ballot");
         let proof_randomness_seed_hex =
-            direct_ballot_proof_randomness_seed(DIRECT_BALLOT_TEST_SETUP_SEED, &encrypted_ballot);
+            direct_ballot_proof_randomness_seed(TEST_SETUP_SEED, &encrypted_ballot);
         let proof_generation = generate_direct_ballot_relation_proof(
             &setup_package,
             &evaluator_key,
@@ -53,7 +51,7 @@ fn direct_ballot_relation_proof_fixture() -> &'static DirectBallotRelationProofF
 
 fn direct_ballot_test_proof_mask_randomness(ballot_count: usize) -> Value {
     json!({
-        "source": DIRECT_BALLOT_PROOF_MASK_RANDOMNESS_DEVELOPMENT_FIXTURE,
+        "source": PROOF_MASK_RANDOMNESS_DEVELOPMENT_FIXTURE,
         "ballotProofRandomnessHexes": (0..ballot_count)
             .map(|index| direct_ballot_test_randomness_hex("ballot-proof", index))
             .collect::<Vec<_>>()
@@ -62,7 +60,7 @@ fn direct_ballot_test_proof_mask_randomness(ballot_count: usize) -> Value {
 
 fn direct_ballot_test_ballot_encryption_randomness(ballot_count: usize) -> Value {
     json!({
-        "source": DIRECT_BALLOT_ENCRYPTION_RANDOMNESS_DEVELOPMENT_FIXTURE,
+        "source": ENCRYPTION_RANDOMNESS_DEVELOPMENT_FIXTURE,
         "encryptionSeedHexes": (0..ballot_count)
             .map(|index| direct_ballot_test_randomness_hex("ballot-encryption", index))
             .collect::<Vec<_>>()
@@ -90,14 +88,14 @@ fn direct_ballot_test_ballot_json(voter_identity: &str, ballot_index: usize) -> 
 
 fn direct_ballot_test_randomness_hex(label: &str, index: usize) -> String {
     let randomness_hex = hash512_hex(
-        "sealed-lattice/direct-encrypted-ballot/test-randomness-v1",
+        "sealed-lattice/direct-encrypted-ballot/test-randomness",
         &[
-            DIRECT_BALLOT_TEST_SETUP_SEED.as_bytes(),
+            TEST_SETUP_SEED.as_bytes(),
             label.as_bytes(),
             index.to_string().as_bytes(),
         ],
     );
-    randomness_hex[..DIRECT_BALLOT_PROOF_MASK_RANDOMNESS_HEX_BYTES * 2].to_string()
+    randomness_hex[..PROOF_MASK_RANDOMNESS_HEX_BYTES * 2].to_string()
 }
 
 fn valid_ballot_input() -> DirectBallotInput {
@@ -144,7 +142,7 @@ fn direct_ballot_score_response_offset(proof_bytes: &[u8]) -> usize {
 fn setup_package() -> Value {
     static SETUP_PACKAGE: OnceLock<Value> = OnceLock::new();
     SETUP_PACKAGE
-        .get_or_init(|| setup_package_with_seed(DIRECT_BALLOT_TEST_SETUP_SEED))
+        .get_or_init(|| setup_package_with_seed(TEST_SETUP_SEED))
         .clone()
 }
 

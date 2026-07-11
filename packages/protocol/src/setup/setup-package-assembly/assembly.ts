@@ -6,6 +6,7 @@ import {
     resolveSetupCertificateRecords,
 } from './certificates.js';
 import { hashField } from './constants-and-assertions.js';
+import { vssCoefficientCommitmentMaterialReferenceFromCertificate } from './transported-material.js';
 import type { SetupPackage, SetupPackageInput } from './types.js';
 import {
     publicPrivateVssEnvelopeCommitmentSet,
@@ -17,6 +18,11 @@ export const createSetupPackage = (input: SetupPackageInput): SetupPackage => {
     const thresholdShareCommitments = resolveThresholdShareCommitments(input);
     validateInput(input, certificates, thresholdShareCommitments);
     const collectivePublicKey = derivedCollectivePublicKey(input);
+    const vssCoefficientCommitmentMaterial =
+        vssCoefficientCommitmentMaterialReferenceFromCertificate(
+            input,
+            certificates.setupTransportCertificate,
+        );
 
     const privateVssEnvelopeCommitments = publicPrivateVssEnvelopeCommitmentSet(
         input.privateVssEnvelopeCommitments,
@@ -39,20 +45,20 @@ export const createSetupPackage = (input: SetupPackageInput): SetupPackage => {
 
     const packageWithoutHash = {
         objectType: 'SetupPackage',
-        objectVersion: 1,
         setupContext: input.setupContext,
         qShare: input.qShare,
         phaseTranscript: input.phaseTranscript,
         commonRandomness: input.commonRandomness,
-        compactVssCoefficientCommitmentSet:
-            input.compactVssCoefficientCommitmentSet,
-        compactVssRecipientShareCommitmentSet:
-            input.compactVssRecipientShareCommitmentSet,
-        compactVssAggregateThresholdCommitmentSet:
-            input.compactVssAggregateThresholdCommitmentSet,
-        compactVssShareLinkageStatement: input.compactVssShareLinkageStatement,
-        compactVssShareLinkageProofMaterialSet:
-            input.compactVssShareLinkageProofMaterialSet,
+        vssCoefficientCommitments: input.vssCoefficientCommitments,
+        vssCoefficientCommitmentMaterial,
+        vssPublicCoefficientCommitmentSet:
+            input.vssPublicCoefficientCommitmentSet,
+        vssPublicRecipientShareCommitmentSet:
+            input.vssPublicRecipientShareCommitmentSet,
+        vssPublicAggregateThresholdCommitmentSet:
+            input.vssPublicAggregateThresholdCommitmentSet,
+        vssShareLinkageStatement: input.vssShareLinkageStatement,
+        vssShareLinkageProofMaterialSet: input.vssShareLinkageProofMaterialSet,
         privateVssEnvelopeCommitments,
         privateVssEnvelopeCommitmentRoot,
         ...(input.vssComplaints === undefined
@@ -60,12 +66,9 @@ export const createSetupPackage = (input: SetupPackageInput): SetupPackage => {
             : { vssComplaints: input.vssComplaints }),
         vssShareAcceptances: input.vssShareAcceptances,
         thresholdShareCommitments,
-        sameSecretConsistency: input.sameSecretConsistency,
-        sameSecretProofs: input.sameSecretProofs,
-        compactSameSecretBridgeStatementSet:
-            input.compactSameSecretBridgeStatementSet,
-        compactSameSecretBridgeProofMaterialSet:
-            input.compactSameSecretBridgeProofMaterialSet,
+        sameSecretBridgeStatementSet: input.sameSecretBridgeStatementSet,
+        sameSecretBridgeProofMaterialSet:
+            input.sameSecretBridgeProofMaterialSet,
         publicKeyShares: input.publicKeyShares,
         publicKeyShareProofs: input.publicKeyShareProofs,
         publicKeyShareMaterial: input.publicKeyShareMaterial,

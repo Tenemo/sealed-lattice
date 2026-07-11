@@ -70,7 +70,6 @@ fn local_trustee_setup_state_request() -> serde_json::Value {
     let trustee_point = trustee_roster_position + 1;
     let mut deletion_receipt = serde_json::json!({
         "objectType": "LocalTrusteeSetupStateDeletionReceipt",
-        "objectVersion": 1,
         "ceremonyId": ceremony_id,
         "manifestHash": manifest_hash,
         "rosterHash": roster_hash,
@@ -97,7 +96,6 @@ fn local_trustee_setup_state_request() -> serde_json::Value {
     );
     let mut local_state = serde_json::json!({
         "objectType": "LocalTrusteeSetupStateCommitment",
-        "objectVersion": 1,
         "ceremonyId": ceremony_id,
         "manifestHash": manifest_hash,
         "rosterHash": roster_hash,

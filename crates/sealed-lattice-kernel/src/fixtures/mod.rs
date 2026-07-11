@@ -36,8 +36,6 @@ pub struct GoldenTranscriptCoreFixture {
     pub canonical_bytes_hex: String,
     #[serde(rename = "objectType")]
     pub object_type: String,
-    #[serde(rename = "objectVersion")]
-    pub object_version: u64,
     #[serde(rename = "expectedObjectHash512")]
     pub expected_object_hash512: String,
     #[serde(rename = "expectedChunkRoot")]
@@ -154,11 +152,6 @@ fn verify_golden_fixture(fixture: &GoldenTranscriptCoreFixture) -> CanonicalResu
         analysis.object_type,
     )?;
     compare_fixture_value(
-        "objectVersion",
-        fixture.object_version,
-        analysis.object_version,
-    )?;
-    compare_fixture_value(
         "expectedObjectHash512",
         fixture.expected_object_hash512.as_str(),
         analysis.object_hash512.as_str(),
@@ -220,7 +213,6 @@ fn build_golden_fixture(case_name: &str) -> CanonicalResult<GoldenTranscriptCore
         case_name: case_name.to_string(),
         canonical_bytes_hex: encode_hex(&canonical_bytes),
         object_type: analysis.object_type.to_string(),
-        object_version: analysis.object_version,
         expected_object_hash512: analysis.object_hash512,
         expected_chunk_root: analysis.chunk_root,
         chunk_size: analysis.chunk_size,

@@ -22,7 +22,7 @@ const browserServerHost = '127.0.0.1';
 // (for example 62744-65187 or 50000-50059) where bind fails with EACCES.
 // strictPort: false only falls through on EADDRINUSE, not EACCES, so the run
 // dies instead of retrying. Pin a base port in the registered range, below the
-// 49152+ dynamic range Windows reserves; strictPort: false still increments it
+// 49152+ ephemeral port range Windows reserves; strictPort: false still increments it
 // for concurrent browser lanes and clones.
 const browserServerBasePort = 41000;
 

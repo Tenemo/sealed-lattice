@@ -16,7 +16,6 @@ import {
     defaultSignedRootContextHash,
     isNonNegativeInteger,
     isProtocolHashString,
-    signedObjectRootByteLength,
 } from '../common/verification-helpers.js';
 
 import {
@@ -71,7 +70,6 @@ export const verifyRegistrationEntry = (
         ceremonyId: entry.ceremonyId,
         deviceEpoch: entry.deviceEpoch,
         objectType: entry.objectType,
-        objectVersion: entry.objectVersion,
         participantIdentity: entry.participantIdentity,
         recoveryEpoch: entry.recoveryEpoch,
         signingPublicKeyHash: entry.signingPublicKeyHash,
@@ -89,7 +87,6 @@ export const verifyRegistrationEntry = (
     }
     if (
         entry.objectType !== 'RegistrationEntry' ||
-        entry.objectVersion !== 1 ||
         !isNonNegativeInteger(entry.boardSequence) ||
         !isNonNegativeInteger(entry.boardPosition) ||
         !isNonNegativeInteger(entry.recoveryEpoch) ||
@@ -127,14 +124,12 @@ export const verifyRegistrationEntry = (
 
     const signatureResult = verifySignedObjectSignature(entry.signature, {
         objectType: 'RegistrationEntry',
-        objectVersion: 1,
         signerRole: 'Participant',
         signerIdentity: entry.participantIdentity,
         ceremonyId: input.ceremonyId,
         manifestHash: null,
         objectRoot: entry.registrationEntryHash,
         boardHeadHash: null,
-        byteLength: signedObjectRootByteLength,
         recoveryEpoch: entry.recoveryEpoch,
         deviceEpoch: entry.deviceEpoch,
         contextHash: defaultSignedRootContextHash,
@@ -160,7 +155,6 @@ export const verifyTrusteeSetupEntry = (
         deviceEpoch: entry.deviceEpoch,
         evaluationKeyRoot: entry.evaluationKeyRoot,
         objectType: entry.objectType,
-        objectVersion: entry.objectVersion,
         participantSetupRecordHash: entry.participantSetupRecordHash,
         publicKeyShareRoot: entry.publicKeyShareRoot,
         recoveryEpoch: entry.recoveryEpoch,
@@ -185,7 +179,6 @@ export const verifyTrusteeSetupEntry = (
     }
     if (
         entry.objectType !== 'TrusteeSetupEntry' ||
-        entry.objectVersion !== 1 ||
         !isNonNegativeInteger(entry.boardSequence) ||
         !isNonNegativeInteger(entry.boardPosition) ||
         !isNonNegativeInteger(entry.recoveryEpoch) ||
@@ -277,14 +270,12 @@ export const verifyTrusteeSetupEntry = (
 
     const signatureResult = verifySignedObjectSignature(entry.signature, {
         objectType: 'TrusteeSetupEntry',
-        objectVersion: 1,
         signerRole: 'Trustee',
         signerIdentity: entry.trusteeIdentity,
         ceremonyId: input.ceremonyId,
         manifestHash: null,
         objectRoot: entry.trusteeSetupEntryHash,
         boardHeadHash: null,
-        byteLength: signedObjectRootByteLength,
         recoveryEpoch: entry.recoveryEpoch,
         deviceEpoch: entry.deviceEpoch,
         contextHash: defaultSignedRootContextHash,
@@ -309,7 +300,6 @@ export const verifyManifest = (
         manifestOpaqueBindings: manifest.manifestOpaqueBindings,
         manifestPolicyHashes: manifest.manifestPolicyHashes,
         objectType: manifest.objectType,
-        objectVersion: manifest.objectVersion,
         pollSpecHash: manifest.pollSpecHash,
         rosterHash: manifest.rosterHash,
         thresholdParametersHash: manifest.thresholdParametersHash,
@@ -327,7 +317,6 @@ export const verifyManifest = (
     }
     if (
         manifest.objectType !== 'ElectionManifest' ||
-        manifest.objectVersion !== 1 ||
         !isNonNegativeInteger(manifest.boardSequence) ||
         !isNonNegativeInteger(manifest.boardPosition)
     ) {
@@ -387,14 +376,12 @@ export const verifyManifest = (
 
     const signatureResult = verifySignedObjectSignature(manifest.signature, {
         objectType: 'ElectionManifest',
-        objectVersion: 1,
         signerRole: 'Organizer',
         signerIdentity: input.organizerIdentity,
         ceremonyId: input.ceremonyId,
         manifestHash: null,
         objectRoot: manifest.electionManifestHash,
         boardHeadHash: null,
-        byteLength: signedObjectRootByteLength,
         recoveryEpoch: 0,
         deviceEpoch: 0,
         contextHash: defaultSignedRootContextHash,
@@ -416,7 +403,6 @@ export const verifyRosterExternalAcceptance = (
             ceremonyId: acceptance.ceremonyId,
             electionManifestHash: acceptance.electionManifestHash,
             objectType: acceptance.objectType,
-            objectVersion: acceptance.objectVersion,
             participantIdentity: acceptance.participantIdentity,
             rosterHash: acceptance.rosterHash,
             warningTextVersion: acceptance.warningTextVersion,
@@ -434,7 +420,6 @@ export const verifyRosterExternalAcceptance = (
         }
         if (
             acceptance.objectType !== 'RosterExternalAcceptance' ||
-            acceptance.objectVersion !== 1 ||
             acceptance.ceremonyId !== input.expectedCeremonyId ||
             acceptance.rosterHash !== input.expectedRosterHash ||
             acceptance.electionManifestHash !==
@@ -457,14 +442,12 @@ export const verifyRosterExternalAcceptance = (
             acceptance.signature,
             {
                 objectType: 'RosterExternalAcceptance',
-                objectVersion: 1,
                 signerRole: 'Participant',
                 signerIdentity: acceptance.participantIdentity,
                 ceremonyId: acceptance.ceremonyId,
                 manifestHash: acceptance.electionManifestHash,
                 objectRoot: acceptance.rosterExternalAcceptanceHash,
                 boardHeadHash: acceptance.acceptedBoardHeadHash,
-                byteLength: signedObjectRootByteLength,
                 recoveryEpoch: 0,
                 deviceEpoch: 0,
                 contextHash: defaultSignedRootContextHash,
@@ -475,10 +458,6 @@ export const verifyRosterExternalAcceptance = (
 
         return {
             isValid: refusedObjects.length === 0,
-            acceptedHashes:
-                refusedObjects.length === 0
-                    ? [acceptance.rosterExternalAcceptanceHash]
-                    : [],
             refusedObjects,
             rosterExternalAcceptanceHash:
                 refusedObjects.length === 0
@@ -488,7 +467,6 @@ export const verifyRosterExternalAcceptance = (
     } catch {
         return {
             isValid: false,
-            acceptedHashes: [],
             refusedObjects: [
                 createRefusal(
                     'RosterExternalAcceptanceInvalid',

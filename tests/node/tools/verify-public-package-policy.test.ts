@@ -62,6 +62,11 @@ describe('public package policy', () => {
             'vendoredCryptoRuntimeModules is missing reachable source "canonical-json.ts"',
             'vendoredCryptoRuntimeModules is missing reachable source "hashes.ts"',
             'vendoredCryptoRuntimeModules is missing reachable source "local-trustee-state-storage.ts"',
+            'vendoredCryptoRuntimeModules is missing reachable source "local-trustee-state-storage/aes-gcm.ts"',
+            'vendoredCryptoRuntimeModules is missing reachable source "local-trustee-state-storage/constants-and-types.ts"',
+            'vendoredCryptoRuntimeModules is missing reachable source "local-trustee-state-storage/envelope-validation.ts"',
+            'vendoredCryptoRuntimeModules is missing reachable source "local-trustee-state-storage/operations.ts"',
+            'vendoredCryptoRuntimeModules is missing reachable source "local-trustee-state-storage/validation.ts"',
             'vendoredCryptoRuntimeModules is missing reachable source "private-vss-mailbox.ts"',
             'vendoredCryptoRuntimeModules is missing reachable source "signatures.ts"',
         ]);

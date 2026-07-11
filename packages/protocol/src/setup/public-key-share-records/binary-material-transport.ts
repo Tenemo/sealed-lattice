@@ -10,7 +10,6 @@ import type { CollectiveBgvSetupContext } from '../vss-share-verification-record
 
 import {
     isJsonRecord,
-    publicKeyShareMaterialBinaryFormat,
     publicKeyShareMaterialEncoding,
     publicKeyShareMaterialTransportEncoding,
     publicKeyShareProofFamily,
@@ -35,7 +34,6 @@ import {
     publicKeyShareMaterialRootReferences,
 } from './embedded-material-records.js';
 import {
-    appendVaruint,
     assertContextMatches,
     bytesFromHex,
     bytesToHex,
@@ -47,17 +45,12 @@ import {
 import { publicKeyShareRecordsByRosterPosition } from './share-statement-records.js';
 
 const setupTransportChunkManifestRoot = (input: {
-    readonly chunkSizeBytes: number;
-    readonly chunkCount: number;
     readonly totalByteLength: number;
     readonly chunkHashes: readonly ProtocolHash[];
     readonly fullObjectHash: ProtocolHash;
 }): ProtocolHash =>
     deriveCanonicalObjectHash({
         objectType: 'SetupTransportChunkManifest',
-        objectVersion: 1,
-        chunkSizeBytes: input.chunkSizeBytes,
-        chunkCount: input.chunkCount,
         totalByteLength: input.totalByteLength,
         chunkHashes: input.chunkHashes,
         fullObjectHash: input.fullObjectHash,
@@ -75,7 +68,7 @@ const publicKeyShareMaterialFullObjectHash = (
     );
 
     return hash512Hex(
-        'sealed-lattice/setup/public-key-share-material/full-object-v1',
+        'sealed-lattice/setup/public-key-share-material/full-object',
         [totalLengthBytes, ...chunks],
     );
 };
@@ -92,10 +85,11 @@ const publicKeyShareMaterialChunkHash = (
         true,
     );
 
-    return hash512Hex(
-        'sealed-lattice/setup/public-key-share-material/chunk-v1',
-        [new TextEncoder().encode(fullObjectHash), chunkIndexBytes, chunk],
-    );
+    return hash512Hex('sealed-lattice/setup/public-key-share-material/chunk', [
+        new TextEncoder().encode(fullObjectHash),
+        chunkIndexBytes,
+        chunk,
+    ]);
 };
 
 const publicKeyShareMaterialTransportHashes = (
@@ -144,8 +138,6 @@ const publicKeyShareMaterialTransportHashes = (
         publicKeyShareMaterialChunkHash(fullObjectHash, chunkIndex, chunk),
     );
     const chunkRoot = setupTransportChunkManifestRoot({
-        chunkSizeBytes: setupTransportChunkSizeBytes,
-        chunkCount: chunks.length,
         totalByteLength,
         chunkHashes,
         fullObjectHash,
@@ -180,10 +172,8 @@ const binaryChunkedPublicKeyShareMaterialSetFromTransport = (
 ): BinaryChunkedPublicKeyShareMaterialSet => {
     const materialSetWithoutRoot = {
         objectType: 'PublicKeyShareMaterialSet',
-        objectVersion: 1,
         proofFamily: publicKeyShareProofFamily,
         materialEncoding: publicKeyShareMaterialTransportEncoding,
-        binaryFormat: publicKeyShareMaterialBinaryFormat,
         ...contextFields(input.setupContext),
         participantCount: input.participantCount,
         rnsLimbCount: input.rnsLimbCount,
@@ -195,7 +185,6 @@ const binaryChunkedPublicKeyShareMaterialSetFromTransport = (
         publicKeyShareMaterialRoots: input.publicKeyShareMaterialRoots,
         transport: {
             transportSchemeId: setupTransportSchemeId,
-            chunkSizeBytes: setupTransportChunkSizeBytes,
             chunkCount: input.chunkCount,
             totalByteLength: input.transportHashes.totalByteLength,
             fullObjectHash: input.transportHashes.fullObjectHash,
@@ -221,9 +210,6 @@ const transportedPublicKeyShareMaterialFromChunks = (
 
     return {
         objectType: 'SetupTransportedPublicKeyShareMaterial',
-        objectVersion: 1,
-        binaryFormat: publicKeyShareMaterialBinaryFormat,
-        chunkSizeBytes: setupTransportChunkSizeBytes,
         chunkCount: chunks.length,
         totalByteLength: transportHashes.totalByteLength,
         fullObjectHash: transportHashes.fullObjectHash,
@@ -312,73 +298,6 @@ export const createBinaryChunkedPublicKeyShareMaterialBundle = (
     };
 };
 
-class PublicKeyShareMaterialReader {
-    private readonly reader: ChunkedBinaryReader;
-
-    public constructor(chunks: readonly Uint8Array[]) {
-        this.reader = new ChunkedBinaryReader(chunks);
-    }
-
-    public isFinished(): boolean {
-        return this.reader.isFinished();
-    }
-
-    public readBytes(length: number, fieldName: string): Uint8Array {
-        return this.reader.readBytes(length, fieldName);
-    }
-
-    public readVaruint(fieldName: string): number {
-        let shift = 0n;
-        let value = 0n;
-        const consumed: number[] = [];
-        for (let byteIndex = 0; byteIndex < 10; byteIndex += 1) {
-            const byte = this.readBytes(1, fieldName)[0];
-            consumed.push(byte);
-            value |= BigInt(byte & 0x7f) << shift;
-            if ((byte & 0x80) === 0) {
-                if (value > BigInt(Number.MAX_SAFE_INTEGER)) {
-                    throw new Error(
-                        `${fieldName} does not fit a safe integer.`,
-                    );
-                }
-                const numericValue = Number(value);
-                const canonical: number[] = [];
-                appendVaruint(canonical, numericValue);
-                if (
-                    canonical.length !== consumed.length ||
-                    canonical.some(
-                        (canonicalByte, index) =>
-                            canonicalByte !== consumed[index],
-                    )
-                ) {
-                    throw new Error(
-                        `${fieldName} binary varuint is not minimally encoded.`,
-                    );
-                }
-
-                return numericValue;
-            }
-            shift += 7n;
-        }
-
-        throw new Error(`${fieldName} binary varuint is too long.`);
-    }
-
-    public readU64(fieldName: string): number {
-        const bytes = this.readBytes(8, fieldName);
-        let value = 0n;
-        for (let byteIndex = 7; byteIndex >= 0; byteIndex -= 1) {
-            value <<= 8n;
-            value |= BigInt(bytes[byteIndex] ?? 0);
-        }
-        if (value > BigInt(Number.MAX_SAFE_INTEGER)) {
-            throw new Error(`${fieldName} does not fit a safe integer.`);
-        }
-
-        return Number(value);
-    }
-}
-
 const transportedPublicKeyShareMaterialChunks = (
     transportedMaterial: SetupTransportedPublicKeyShareMaterial | JsonRecord,
 ): readonly Uint8Array[] => {
@@ -388,23 +307,6 @@ const transportedPublicKeyShareMaterialChunks = (
     ) {
         throw new Error(
             'transportedPublicKeyShareMaterial.objectType must be SetupTransportedPublicKeyShareMaterial.',
-        );
-    }
-    if (transportedMaterial.objectVersion !== 1) {
-        throw new Error(
-            'transportedPublicKeyShareMaterial.objectVersion must be 1.',
-        );
-    }
-    if (
-        transportedMaterial.binaryFormat !== publicKeyShareMaterialBinaryFormat
-    ) {
-        throw new Error(
-            'transportedPublicKeyShareMaterial.binaryFormat must match the accepted binary format.',
-        );
-    }
-    if (transportedMaterial.chunkSizeBytes !== setupTransportChunkSizeBytes) {
-        throw new Error(
-            'transportedPublicKeyShareMaterial.chunkSizeBytes must match the setup transport scheme.',
         );
     }
     if (!Array.isArray(transportedMaterial.chunks)) {
@@ -490,7 +392,7 @@ type TransportedPublicKeyShareMaterialReaderInput = Readonly<{
 const transportedPublicKeyShareMaterialReader = (
     input: TransportedPublicKeyShareMaterialReaderInput,
 ): Readonly<{
-    readonly reader: PublicKeyShareMaterialReader;
+    readonly reader: ChunkedBinaryReader;
     readonly shareRecords: ReadonlyMap<number, PublicKeyShareRecord>;
 }> => {
     const chunks = transportedPublicKeyShareMaterialChunks(
@@ -504,11 +406,8 @@ const transportedPublicKeyShareMaterialReader = (
     if (
         input.materialSet.materialEncoding !==
             publicKeyShareMaterialTransportEncoding ||
-        input.materialSet.binaryFormat !== publicKeyShareMaterialBinaryFormat ||
         input.materialSet.transport.transportSchemeId !==
             setupTransportSchemeId ||
-        input.materialSet.transport.chunkSizeBytes !==
-            setupTransportChunkSizeBytes ||
         input.materialSet.transport.chunkCount !== chunks.length ||
         input.materialSet.transport.totalByteLength !==
             transportHashes.totalByteLength ||
@@ -549,7 +448,7 @@ const transportedPublicKeyShareMaterialReader = (
         );
     }
 
-    const reader = new PublicKeyShareMaterialReader(chunks);
+    const reader = new ChunkedBinaryReader(chunks);
     const magic = reader.readBytes(
         publicKeyShareMaterialBinaryMagic.byteLength,
         'public-key share material magic',
@@ -680,7 +579,6 @@ export const materialRecordsFromTransportedPublicKeyShareMaterial = (
             );
         const materialRecordWithoutRoot = {
             objectType: 'PublicKeyShareMaterial',
-            objectVersion: 1,
             proofFamily: publicKeyShareProofFamily,
             materialEncoding: publicKeyShareMaterialEncoding,
             ...contextFields(input.setupContext),

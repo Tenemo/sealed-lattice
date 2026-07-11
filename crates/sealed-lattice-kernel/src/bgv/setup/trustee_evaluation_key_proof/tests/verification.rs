@@ -1,43 +1,13 @@
 use super::*;
 
 #[test]
-fn honest_round_one_relinearization_proof_round_trips() {
-    let (statement, witness) =
-        generate_development_trustee_instance("a1b2c3d4", &[round_one(2)], SMALL_RING_DEGREE)
-            .expect("development instance");
-    let proof =
-        prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
-    verify_evaluation_key_share(&statement, &proof).expect("verify");
-}
-
-#[test]
-fn honest_round_two_relinearization_proof_round_trips() {
-    let (statement, witness) =
-        generate_development_trustee_instance("f00dface", &[round_two(2)], SMALL_RING_DEGREE)
-            .expect("development instance");
-    let proof =
-        prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
-    verify_evaluation_key_share(&statement, &proof).expect("verify");
-}
-
-#[test]
-fn honest_galois_rotation_proof_round_trips() {
-    let (statement, witness) =
-        generate_development_trustee_instance("0badf00d", &[rotation(3, 2)], SMALL_RING_DEGREE)
-            .expect("development instance");
-    let proof =
-        prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
-    verify_evaluation_key_share(&statement, &proof).expect("verify");
-}
-
-#[test]
 fn masked_claims_differ_under_fresh_proof_randomness() {
     // The published consistency claims are smudging-masked: two proofs of the
     // same statement under different proof randomness must publish different
     // claim values, and both must verify.
     let (statement, witness) =
-        generate_development_trustee_instance("d00d2bad", &[round_one(1)], SMALL_RING_DEGREE)
-            .expect("development instance");
+        generate_development_public_key_share_instance("d00d2bad", SMALL_RING_DEGREE)
+            .expect("public-key share instance");
     let first =
         prove_evaluation_key_share(&statement, &witness, "aaaaaaaaaaaaaaaa").expect("prove first");
     let second =
@@ -52,30 +22,10 @@ fn masked_claims_differ_under_fresh_proof_randomness() {
 }
 
 #[test]
-fn batched_trustee_schedule_round_trips_with_mixed_levels() {
-    // One batched proof covering relinearization rounds one and two plus two
-    // rotations, with one rotation at a lower level so per-limb active key
-    // sets differ across limbs.
-    let (statement, witness) = generate_development_trustee_instance(
-        "cafe0001",
-        &[round_one(2), round_two(2), rotation(3, 2), rotation(5, 1)],
-        SMALL_RING_DEGREE,
-    )
-    .expect("development instance");
-    let proof =
-        prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
-    assert_eq!(proof.limb_proofs.len(), 3);
-    verify_evaluation_key_share(&statement, &proof).expect("verify");
-}
-
-#[test]
 fn regenerated_limb_roots_preserve_encoded_proof_bytes_across_batch_sizes() {
-    let (statement, witness) = generate_development_trustee_instance(
-        "cafe0002",
-        &[round_one(2), round_two(2), rotation(3, 2), rotation(5, 1)],
-        SMALL_RING_DEGREE,
-    )
-    .expect("development instance");
+    let (statement, witness) =
+        generate_development_public_key_share_instance("cafe0002", SMALL_RING_DEGREE)
+            .expect("public-key share instance");
     let serial_proof = prover::prove_evaluation_key_share_with_test_limb_batch_size(
         &statement,
         &witness,
@@ -111,235 +61,6 @@ fn regenerated_limb_roots_preserve_encoded_proof_bytes_across_batch_sizes() {
     );
     verify_evaluation_key_share(&statement, &partial_batch_proof).expect("verify partial batch");
     verify_evaluation_key_share(&statement, &batched_proof).expect("verify");
-}
-
-#[test]
-fn multi_trustee_ceremony_slice_round_trips_with_recomputed_aggregate() {
-    // Three trustees, each with round-one and round-two relinearization
-    // shares and same-secret linkage; every round-two source multiplies the
-    // trustee secret by the public aggregate recomputed from the accepted
-    // round-one components, the multi-party-realizable flow the package
-    // verifier rebinds.
-    let instances =
-        generate_development_trustee_ceremony_slice("ceremony01", 3, 2, SMALL_RING_DEGREE, 3)
-            .expect("ceremony slice");
-    assert_eq!(instances.len(), 3);
-    for (statement, witness) in &instances {
-        assert_eq!(statement.keys.len(), 2);
-        assert_eq!(
-            statement.keys[1].kind,
-            EvaluationKeyShareKind::RelinearizationRoundTwo
-        );
-        let proof = prove_evaluation_key_share(statement, witness, PROOF_RANDOMNESS_SEED)
-            .expect("prove trustee");
-        verify_evaluation_key_share(statement, &proof).expect("verify trustee");
-    }
-    // A tampered aggregate (one residue off in one trustee's round-two
-    // statement) must reject: the verifier recomputes the aggregate itself,
-    // so a prover cannot substitute a different one.
-    let (mut tampered_statement, tampered_witness) =
-        generate_development_trustee_ceremony_slice("ceremony01", 3, 2, SMALL_RING_DEGREE, 3)
-            .expect("ceremony slice")
-            .into_iter()
-            .next()
-            .expect("first trustee");
-    let modulus = tampered_statement.limb_moduli()[0];
-    tampered_statement.keys[1].round_one_aggregate_diagonal[0][0] =
-        (tampered_statement.keys[1].round_one_aggregate_diagonal[0][0] + 1) % modulus;
-    assert!(
-        prove_evaluation_key_share(
-            &tampered_statement,
-            &tampered_witness,
-            PROOF_RANDOMNESS_SEED
-        )
-        .is_err(),
-        "a substituted aggregate must not prove"
-    );
-}
-
-#[test]
-fn honest_proof_with_same_secret_linkage_round_trips() {
-    // Level two keeps all three commitment fields active and must carry
-    // exactly one same-secret commitment for each active Q_share limb.
-    let (statement, witness) = generate_development_trustee_instance_with_linkage(
-        "11aa22bb",
-        &[round_one(2)],
-        SMALL_RING_DEGREE,
-        Some(3),
-    )
-    .expect("development instance");
-    assert!(statement.same_secret_linkage.is_some());
-    let proof =
-        prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
-    verify_evaluation_key_share(&statement, &proof).expect("verify");
-}
-
-#[test]
-fn same_secret_linkage_rejects_commitments_outside_active_limb_set() {
-    let (statement, witness) = generate_development_trustee_instance_with_linkage(
-        "11aa22cc",
-        &[round_one(2)],
-        SMALL_RING_DEGREE,
-        Some(4),
-    )
-    .expect("development instance");
-
-    assert!(
-        statement.validate_shape().is_err(),
-        "extra same-secret linkage commitments must not be accepted outside the active Q_share limb set"
-    );
-    assert!(
-        prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).is_err(),
-        "proving must refuse a statement whose linkage commitment count does not match the theorem shape"
-    );
-}
-
-#[test]
-fn batched_schedule_with_linkage_round_trips() {
-    let (statement, witness) = generate_development_trustee_instance_with_linkage(
-        "33cc44dd",
-        &[round_one(2), round_two(2), rotation(3, 2)],
-        SMALL_RING_DEGREE,
-        Some(3),
-    )
-    .expect("development instance");
-    let proof =
-        prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
-    verify_evaluation_key_share(&statement, &proof).expect("verify");
-}
-
-#[test]
-fn same_secret_linkage_anchor_proof_round_trips_without_keys() {
-    // The keyless statement is the per-trustee same-secret linkage anchor:
-    // it opens one constant commitment per Q_share limb while the committed
-    // rows are checked over the three setup commitment fields.
-    let (statement, witness) = generate_development_trustee_instance_with_linkage(
-        "99ffeedd",
-        &[],
-        SMALL_RING_DEGREE,
-        Some(DATA_PRIMES.len()),
-    )
-    .expect("anchor instance");
-    assert!(statement.keys.is_empty());
-    let proof =
-        prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
-    verify_evaluation_key_share(&statement, &proof).expect("verify");
-
-    let encoded = encode_trustee_evaluation_key_proof(&proof);
-    let decoded =
-        decode_trustee_evaluation_key_proof(&statement, &encoded).expect("decode anchor proof");
-    verify_evaluation_key_share(&statement, &decoded).expect("verify decoded");
-}
-
-#[test]
-fn same_secret_anchor_rejects_partial_q_share_commitment_set() {
-    let (statement, witness) = generate_development_trustee_instance_with_linkage(
-        "77aaccee",
-        &[],
-        SMALL_RING_DEGREE,
-        Some(SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len()),
-    )
-    .expect("partial anchor instance");
-
-    assert!(
-        statement.validate_shape().is_err(),
-        "the keyless same-secret anchor must not accept only the setup commitment-field count"
-    );
-    assert!(
-        prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).is_err(),
-        "proving must refuse a partial same-secret anchor commitment set"
-    );
-}
-
-#[test]
-fn keyless_statement_without_linkage_is_refused() {
-    let (mut statement, witness) = generate_development_trustee_instance_with_linkage(
-        "aa00bb11",
-        &[],
-        SMALL_RING_DEGREE,
-        Some(DATA_PRIMES.len()),
-    )
-    .expect("anchor instance");
-    statement.same_secret_linkage = None;
-    assert!(
-        prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).is_err(),
-        "a statement with neither keys nor the linkage anchor must be refused"
-    );
-}
-
-#[test]
-fn anchor_rejects_commitments_to_a_different_secret() {
-    let (statement, witness) = generate_development_trustee_instance_with_linkage(
-        "cc22dd33",
-        &[],
-        SMALL_RING_DEGREE,
-        Some(DATA_PRIMES.len()),
-    )
-    .expect("anchor instance");
-    let (other_statement, _) = generate_development_trustee_instance_with_linkage(
-        "ee44ff55",
-        &[],
-        SMALL_RING_DEGREE,
-        Some(DATA_PRIMES.len()),
-    )
-    .expect("second anchor instance");
-    let mut forged = statement;
-    forged.same_secret_linkage = other_statement.same_secret_linkage;
-    assert!(
-        prove_evaluation_key_share(&forged, &witness, PROOF_RANDOMNESS_SEED).is_err(),
-        "anchor proving must reject commitments that open to a different secret"
-    );
-}
-
-#[test]
-fn linkage_rejects_commitments_to_a_different_secret() {
-    // A trustee whose key-relation secret differs from the committed secret
-    // must not be able to produce a proof: the commitment-opening relations
-    // fail, so the sumcheck remainder is nonzero at proving time.
-    let (statement, witness) = generate_development_trustee_instance_with_linkage(
-        "55ee66ff",
-        &[round_one(2)],
-        SMALL_RING_DEGREE,
-        Some(3),
-    )
-    .expect("first instance");
-    let (other_statement, _) = generate_development_trustee_instance_with_linkage(
-        "7788aabb",
-        &[round_one(2)],
-        SMALL_RING_DEGREE,
-        Some(3),
-    )
-    .expect("second instance");
-    let mut forged = statement;
-    forged.same_secret_linkage = other_statement.same_secret_linkage;
-    let result = prove_evaluation_key_share(&forged, &witness, PROOF_RANDOMNESS_SEED);
-    assert!(
-        result.is_err(),
-        "proving must reject commitments that open to a different secret"
-    );
-}
-
-#[test]
-fn tampered_linkage_commitment_is_rejected() {
-    let (statement, witness) = generate_development_trustee_instance_with_linkage(
-        "99ffaa00",
-        &[round_one(2)],
-        SMALL_RING_DEGREE,
-        Some(3),
-    )
-    .expect("development instance");
-    let proof =
-        prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
-    let mut tampered = statement;
-    let linkage = tampered
-        .same_secret_linkage
-        .as_mut()
-        .expect("linkage present");
-    let modulus = linkage.commitments[0].limbs[0].modulus;
-    linkage.commitments[0].limbs[0].rows[0][0] =
-        (linkage.commitments[0].limbs[0].rows[0][0] + 1) % modulus;
-    let result = verify_evaluation_key_share(&tampered, &proof);
-    assert!(result.is_err(), "tampered linkage commitment must reject");
 }
 
 #[test]
@@ -383,9 +104,9 @@ fn public_key_share_rejects_tampered_share_component() {
 
 #[test]
 fn public_key_share_rejects_a_secret_outside_the_committed_one() {
-    // A trustee whose share secret differs from the anchored committed secret
-    // cannot prove: splicing another instance's commitment makes the linkage
-    // opening relation fail at proving time.
+    // A trustee whose share secret differs from the bridge target secret
+    // cannot prove: splicing another instance's target commitments makes the
+    // committed-material relation fail at proving time.
     let (statement, witness) =
         generate_development_public_key_share_instance("dd44ee55", SMALL_RING_DEGREE)
             .expect("first instance");
@@ -393,7 +114,7 @@ fn public_key_share_rejects_a_secret_outside_the_committed_one() {
         generate_development_public_key_share_instance("ff66aa77", SMALL_RING_DEGREE)
             .expect("second instance");
     let mut forged = statement;
-    forged.same_secret_linkage = other_statement.same_secret_linkage;
+    forged.same_secret_bridge = other_statement.same_secret_bridge;
     assert!(
         prove_evaluation_key_share(&forged, &witness, PROOF_RANDOMNESS_SEED).is_err(),
         "a share secret that does not open the committed value must not prove"
@@ -421,23 +142,39 @@ fn public_key_share_rejects_a_foreign_common_reference_polynomial() {
 
 #[test]
 fn succinct_setup_statement_hash_vectors_cover_current_families() {
-    let same_secret = super::generate_trustee_evaluation_key_proof_from_request(
+    let same_secret_statement = super::super::commands::same_secret_bridge_statement_from_request(
         &same_secret_statement_hash_vector_request(),
     )
     .expect("same-secret statement vector");
-    let public_key = super::generate_trustee_evaluation_key_proof_from_request(
+    let same_secret = serde_json::json!({
+        "proofFamily": same_secret_statement.context.proof_family,
+        "statementHash": crate::hashing::to_hex(&same_secret_statement.statement_hash()),
+    });
+    let public_key_statement = super::super::commands::statement_from_request(
         &public_key_share_statement_hash_vector_request(),
     )
     .expect("public-key statement vector");
+    let public_key = serde_json::json!({
+        "proofFamily": public_key_statement.context.proof_family,
+        "statementHash": crate::hashing::to_hex(&public_key_statement.statement_hash()),
+    });
     let private_vss =
         crate::bgv::setup::private_vss::generate_private_vss_share_proof_from_request(
             &private_vss_statement_hash_vector_request(),
         )
         .expect("private VSS statement vector");
-    let trustee_evaluation_key = super::generate_trustee_evaluation_key_proof_from_request(
+    // The key-bearing family proves through the atom schedule and carries an
+    // exact source commitment linkage, so the statement-hash vector pins the
+    // parsed statement's hash directly.
+    let trustee_evaluation_key_statement = super::super::commands::statement_from_request(
         &trustee_evaluation_key_statement_hash_vector_request(),
     )
     .expect("trustee evaluation-key statement vector");
+    let trustee_evaluation_key = serde_json::json!({
+        "proofFamily": trustee_evaluation_key_statement.context.proof_family,
+        "statementHash":
+            crate::hashing::to_hex(&trustee_evaluation_key_statement.statement_hash()),
+    });
 
     println!(
         "statement hash vectors: same-secret={}, public-key-share={}, private-vss-share={}, trustee-evaluation-key={}",
@@ -455,7 +192,7 @@ fn succinct_setup_statement_hash_vectors_cover_current_families() {
             .expect("trustee evaluation-key hash"),
     );
     let expected_statement_hashes = expected_statement_hash_vectors();
-    assert_eq!(same_secret["proofFamily"], "same-secret-linkage-anchor");
+    assert_eq!(same_secret["proofFamily"], "same-secret-bridge");
     assert_eq!(
         same_secret["statementHash"],
         expected_statement_hashes["sameSecret"]

@@ -12,10 +12,7 @@ import type {
     SignedBoardHead,
 } from '@sealed-lattice/types';
 
-import {
-    buildBoardHeadMap,
-    uniqueStrings,
-} from '../common/verification-helpers.js';
+import { buildBoardHeadMap } from '../common/verification-helpers.js';
 
 import { verifyBoardConsistency } from './consistency.js';
 import { verifyInclusionProof } from './inclusion-proof.js';
@@ -31,7 +28,6 @@ type BoardInclusionEvidence = BoardEvidence & {
 
 type SignedBoardShellVerificationBase = {
     readonly isValid: boolean;
-    readonly acceptedHashes: readonly ProtocolHash[];
     readonly refusedObjects: readonly RefusalRecord[];
     readonly forkEvidence: BoardConsistencyVerification['forkEvidence'];
 };
@@ -74,9 +70,7 @@ export const collectSignedBoardInclusionEvidence = (input: {
     readonly objectRefusals: readonly RefusalRecord[];
     readonly signature: ProtocolSignatureEnvelope;
     readonly signatureExpectation: SignatureExpectation;
-}): BoardInclusionEvidence & {
-    readonly acceptedHashes: readonly ProtocolHash[];
-} => {
+}): BoardInclusionEvidence & {} => {
     const evidence = collectBoardInclusionEvidence(input);
     const refusedObjects = [...evidence.refusedObjects];
     const signatureResult = verifySignedObjectSignature(
@@ -88,27 +82,14 @@ export const collectSignedBoardInclusionEvidence = (input: {
 
     return {
         ...evidence,
-        acceptedHashes:
-            refusedObjects.length === 0
-                ? uniqueStrings([
-                      ...evidence.boardResult.acceptedHashes,
-                      input.acceptedObjectHash,
-                      input.inclusionProof.inclusionProofHash,
-                      ...(input.extraAcceptedHashes ?? []),
-                  ])
-                : [],
         refusedObjects,
     };
 };
 
 export const buildSignedBoardShellVerificationBase = (
-    evidence: BoardInclusionEvidence & {
-        readonly acceptedHashes: readonly ProtocolHash[];
-    },
+    evidence: BoardInclusionEvidence & {},
 ): SignedBoardShellVerificationBase => ({
     isValid: evidence.refusedObjects.length === 0,
-    acceptedHashes:
-        evidence.refusedObjects.length === 0 ? evidence.acceptedHashes : [],
     refusedObjects: evidence.refusedObjects,
     forkEvidence: evidence.boardResult.forkEvidence,
 });

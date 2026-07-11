@@ -202,7 +202,7 @@ impl DevelopmentBgvKey {
     #[cfg(test)]
     pub(crate) fn generate(seed_hex: &str) -> CanonicalResult<Self> {
         let secret = DeterministicSampler::new(
-            "sealed-lattice-bgv-evaluator/development-secret-v1",
+            "sealed-lattice-bgv-evaluator/development-secret",
             &[seed_hex.as_bytes()],
         )
         .ternary(POLYNOMIAL_DEGREE);
@@ -210,7 +210,7 @@ impl DevelopmentBgvKey {
         // The public-key error is a single small integer polynomial; its RNS
         // limbs are the same polynomial reduced per prime, not independent draws.
         let public_error = DeterministicSampler::new(
-            "sealed-lattice-bgv-evaluator/development-public-error-v1",
+            "sealed-lattice-bgv-evaluator/development-public-error",
             &[seed_hex.as_bytes()],
         )
         .centered_binomial_eta2(POLYNOMIAL_DEGREE);
@@ -224,7 +224,7 @@ impl DevelopmentBgvKey {
             // The public random sample `a` is uniform over the ring, so sampling
             // each RNS limb independently is a valid uniform-mod-q polynomial.
             let public_sample = DeterministicSampler::new(
-                "sealed-lattice-bgv-evaluator/development-public-sample-v1",
+                "sealed-lattice-bgv-evaluator/development-public-sample",
                 &[seed_hex.as_bytes(), &modulus_bytes],
             )
             .uniform_residues(modulus, POLYNOMIAL_DEGREE);
@@ -371,17 +371,17 @@ fn encrypt_coefficients_with_public_key_components(
         ));
     }
     let randomizer = DeterministicSampler::new(
-        "sealed-lattice-bgv-evaluator/development-encryption-randomizer-v1",
+        "sealed-lattice-bgv-evaluator/development-encryption-randomizer",
         &[seed_hex.as_bytes()],
     )
     .ternary(POLYNOMIAL_DEGREE);
     let error_zero = DeterministicSampler::new(
-        "sealed-lattice-bgv-evaluator/development-encryption-error-zero-v1",
+        "sealed-lattice-bgv-evaluator/development-encryption-error-zero",
         &[seed_hex.as_bytes()],
     )
     .centered_binomial_eta2(POLYNOMIAL_DEGREE);
     let error_one = DeterministicSampler::new(
-        "sealed-lattice-bgv-evaluator/development-encryption-error-one-v1",
+        "sealed-lattice-bgv-evaluator/development-encryption-error-one",
         &[seed_hex.as_bytes()],
     )
     .centered_binomial_eta2(POLYNOMIAL_DEGREE);

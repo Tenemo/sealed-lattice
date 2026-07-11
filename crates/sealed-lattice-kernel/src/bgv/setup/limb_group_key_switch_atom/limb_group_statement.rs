@@ -29,11 +29,14 @@
 //! field, and a carry whose centered lift stays within the derived bound
 //! forces the integer identity, hence every per-limb congruence.
 
+#[cfg(test)]
 use super::negacyclic_transform::NegacyclicDomain;
 use super::proof_field::ProofFieldParameters;
+#[cfg(test)]
+use super::wide_unsigned::to_u64;
 use super::wide_unsigned::{
     add_in_place, is_less_than, multiply_word_accumulate, multiply_word_in_place, remainder_word,
-    shift_right_one_in_place, subtract_in_place, to_u64,
+    shift_right_one_in_place, subtract_in_place,
 };
 use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 
@@ -49,7 +52,6 @@ pub(crate) struct LimbGroupContext<const LIMB_COUNT: usize> {
     group_modulus_half_floor: [u64; LIMB_COUNT],
     cofactors: Vec<[u64; LIMB_COUNT]>,
     cofactor_inverses: Vec<u64>,
-    reduced_basis_constants: Vec<[u64; LIMB_COUNT]>,
     gadget_idempotents_centered: Vec<[u64; LIMB_COUNT]>,
     group_modulus_inverse: [u64; LIMB_COUNT],
 }
@@ -127,7 +129,6 @@ impl<const LIMB_COUNT: usize> LimbGroupContext<LIMB_COUNT> {
             group_modulus_half_floor,
             cofactors,
             cofactor_inverses,
-            reduced_basis_constants,
             gadget_idempotents_centered,
             group_modulus_inverse,
         })
@@ -203,6 +204,29 @@ impl<const LIMB_COUNT: usize> LimbGroupContext<LIMB_COUNT> {
             .get(group_position)
             .ok_or_else(invalid_diagonal_group_position)
     }
+
+    /// The precomputed field inverse of the limb-group modulus `Q`.
+    pub(crate) fn group_modulus_inverse(&self) -> &[u64; LIMB_COUNT] {
+        &self.group_modulus_inverse
+    }
+
+    /// The limb-group modulus `Q` as a proof-field element.
+    pub(crate) fn group_modulus_element(
+        &self,
+        parameters: &ProofFieldParameters<LIMB_COUNT>,
+    ) -> [u64; LIMB_COUNT] {
+        parameters.raw_value_to_element(&self.group_modulus)
+    }
+
+    /// The degree-dependent exactness bound check for this group: the mod-p
+    /// relation equals the integer relation only when `p > 2 (Q (2N + 1) + 4t)`.
+    pub(crate) fn validate_exactness_bound(
+        &self,
+        parameters: &ProofFieldParameters<LIMB_COUNT>,
+        ring_degree: usize,
+    ) -> CanonicalResult<()> {
+        validate_limb_group_exactness_bound(parameters, &self.group_modulus, ring_degree)
+    }
 }
 
 fn invalid_diagonal_group_position() -> CanonicalError {
@@ -212,7 +236,9 @@ fn invalid_diagonal_group_position() -> CanonicalError {
     )
 }
 
-/// The diagonal source term of the digit atom.
+/// The diagonal source term of the digit atom (the standalone checker's
+/// input; the live path proves through the family backend).
+#[cfg(test)]
 pub(crate) enum DigitAtomSource<'a> {
     /// Round-one relinearization and Galois rotations: a small signed
     /// polynomial (the secret or its automorphism image).
@@ -227,6 +253,7 @@ pub(crate) enum DigitAtomSource<'a> {
     NoDiagonal,
 }
 
+#[cfg(test)]
 pub(crate) struct LimbGroupDigitAtomInput<'a, const LIMB_COUNT: usize> {
     pub(crate) group: &'a LimbGroupContext<LIMB_COUNT>,
     pub(crate) domain: &'a NegacyclicDomain<'a, LIMB_COUNT>,
@@ -239,6 +266,7 @@ pub(crate) struct LimbGroupDigitAtomInput<'a, const LIMB_COUNT: usize> {
     pub(crate) source: DigitAtomSource<'a>,
 }
 
+#[cfg(test)]
 pub(crate) struct LimbGroupDigitAtomReport {
     pub(crate) maximum_carry_magnitude: u64,
     pub(crate) carry_bound: u64,
@@ -256,6 +284,7 @@ pub(crate) struct LimbGroupDigitAtomReport {
 /// carry c = D / Q satisfies |c| <= N + 1. The proof field is checked with
 /// p > Q * (2N + 1) + 4t, so the mod-p computation of D equals the integer D
 /// and the check is exact.
+#[cfg(test)]
 pub(crate) fn verify_limb_group_digit_atom<const LIMB_COUNT: usize>(
     input: LimbGroupDigitAtomInput<'_, LIMB_COUNT>,
 ) -> CanonicalResult<LimbGroupDigitAtomReport> {
@@ -367,10 +396,12 @@ fn limb_group_exactness_bound_overflow() -> CanonicalError {
     )
 }
 
+#[cfg(test)]
 fn plaintext_modulus_i64() -> i64 {
     i64::try_from(crate::bgv::parameters::PLAINTEXT_MODULUS).expect("plaintext modulus fits i64")
 }
 
+#[cfg(test)]
 fn diagonal_term<const LIMB_COUNT: usize>(
     input: &LimbGroupDigitAtomInput<'_, LIMB_COUNT>,
 ) -> CanonicalResult<Option<Vec<[u64; LIMB_COUNT]>>> {
@@ -433,7 +464,7 @@ fn diagonal_term<const LIMB_COUNT: usize>(
     }
 }
 
-fn validate_signed_support(
+pub(crate) fn validate_signed_support(
     values: &[i64],
     ring_degree: usize,
     bound: i64,
@@ -630,14 +661,25 @@ mod tests {
     fn crt_basis_constants_are_gadget_idempotents() {
         let parameters = sixteen_limb_group_field_parameters();
         let group = LimbGroupContext::new(&parameters, &DATA_PRIMES[..16]).expect("group builds");
-        for (constant_index, constant) in group.reduced_basis_constants.iter().enumerate() {
+        // Recompute each reduced basis constant exactly as the constructor
+        // does (the context only retains the centered idempotents).
+        for (constant_index, (cofactor, cofactor_inverse)) in group
+            .cofactors
+            .iter()
+            .zip(group.cofactor_inverses.iter())
+            .enumerate()
+        {
+            let mut constant = *cofactor;
+            let carry = multiply_word_in_place(&mut constant, *cofactor_inverse);
+            assert_eq!(carry, 0);
+            reduce_by_shifted_modulus(&mut constant, &group.group_modulus, 48);
             assert!(
-                is_less_than(constant, &group.group_modulus),
+                is_less_than(&constant, &group.group_modulus),
                 "basis constant {constant_index} must be reduced modulo the group modulus"
             );
             for (prime_index, prime) in group.group_primes.iter().enumerate() {
                 let expected = u64::from(constant_index == prime_index);
-                assert_eq!(remainder_word(constant, *prime), expected);
+                assert_eq!(remainder_word(&constant, *prime), expected);
             }
         }
     }
@@ -942,7 +984,7 @@ mod tests {
         assert!(verify(&unreduced, &atom.secret, &atom.error, Some(2)).is_err());
     }
 
-    /// The load-bearing cross-check: material generated by the production
+    /// The required cross-check: material generated by the production
     /// kernel key-switch keygen satisfies the limb-group digit atom with the
     /// witnesses re-derived from the same deterministic seeds.
     #[test]

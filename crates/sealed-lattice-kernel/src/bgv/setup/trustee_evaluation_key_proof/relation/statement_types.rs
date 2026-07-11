@@ -69,6 +69,7 @@ pub(crate) struct EvaluationKeyShareDescriptor {
 // secret. Holding over all three commitment fields gives the equation over
 // the commitment modulus product by CRT, and binding makes the opened message
 // the committed one.
+#[derive(Clone)]
 pub(crate) struct SameSecretLinkageStatement {
     pub(crate) public_matrix_seed_hash: String,
     // One constant commitment per Q_share limb, in limb order.
@@ -98,7 +99,7 @@ pub(crate) struct PrivateVssShareStatement {
     pub(crate) coefficient_commitments: Vec<SetupCommitmentValue>,
 }
 
-pub(crate) struct CompactVssShareLinkageStatement {
+pub(crate) struct VssShareLinkageStatement {
     pub(crate) public_matrix_seed_hash: String,
     pub(crate) source_trustee_identity: String,
     pub(crate) source_trustee_roster_position: u64,
@@ -110,15 +111,24 @@ pub(crate) struct CompactVssShareLinkageStatement {
     pub(crate) source_message_modulus: u64,
     pub(crate) coefficient_commitment_roots: Vec<String>,
     pub(crate) coefficient_opening_roots: Vec<String>,
-    pub(crate) coefficient_commitments: Vec<CompactVssShareLinkageCommitment>,
+    pub(crate) coefficient_commitments: Vec<VssShareLinkageCommitment>,
     pub(crate) recipient_share_commitment_root: String,
     pub(crate) recipient_share_opening_root: String,
-    pub(crate) recipient_share_commitment: CompactVssShareLinkageCommitment,
-    pub(crate) additional_linkage_items: Vec<CompactVssShareLinkageItem>,
+    pub(crate) recipient_share_commitment: VssShareLinkageCommitment,
+    pub(crate) additional_linkage_items: Vec<VssShareLinkageItem>,
+    // The threshold-aggregate mode reuses this same share-linkage relation with
+    // a unit evaluation point: proving each recipient's threshold share
+    // T_{j,l} = sum_i sigma_{i->j,l} mod q_l is exactly the lincheck
+    // `sum_k point^k F_k - share - q * carry = 0` with `point = 1`, the summed
+    // sources standing in for the coefficient messages, T for the recipient
+    // share, and the mod-q wrap for the carry. When set, the coefficient
+    // commitments open recipient-share committed material and the recipient
+    // commitment opens aggregate-threshold-share committed material.
+    pub(crate) is_threshold_aggregate: bool,
 }
 
 #[derive(Clone)]
-pub(crate) struct CompactVssShareLinkageItem {
+pub(crate) struct VssShareLinkageItem {
     pub(crate) source_trustee_identity: String,
     pub(crate) source_trustee_roster_position: u64,
     pub(crate) source_coefficient_commitment_root: String,
@@ -129,14 +139,14 @@ pub(crate) struct CompactVssShareLinkageItem {
     pub(crate) source_message_modulus: u64,
     pub(crate) coefficient_commitment_roots: Vec<String>,
     pub(crate) coefficient_opening_roots: Vec<String>,
-    pub(crate) coefficient_commitments: Vec<CompactVssShareLinkageCommitment>,
+    pub(crate) coefficient_commitments: Vec<VssShareLinkageCommitment>,
     pub(crate) recipient_share_commitment_root: String,
     pub(crate) recipient_share_opening_root: String,
-    pub(crate) recipient_share_commitment: CompactVssShareLinkageCommitment,
+    pub(crate) recipient_share_commitment: VssShareLinkageCommitment,
 }
 
 #[derive(Clone, PartialEq, Eq)]
-pub(crate) struct CompactVssCoefficientWitnessSlot {
+pub(crate) struct VssPublicCoefficientWitnessSlot {
     pub(crate) source_trustee_roster_position: u64,
     pub(crate) source_rns_limb_index: usize,
     pub(crate) source_message_modulus: u64,
@@ -146,14 +156,14 @@ pub(crate) struct CompactVssCoefficientWitnessSlot {
 }
 
 #[derive(Clone, PartialEq, Eq)]
-pub(crate) struct CompactSameSecretBridgeStatement {
+pub(crate) struct SameSecretBridgeStatement {
     pub(crate) public_matrix_seed_hash: String,
     pub(crate) source_trustee_identity: String,
     pub(crate) source_trustee_roster_position: u64,
     pub(crate) target_basis_hash: String,
     pub(crate) target_rns_primes: Vec<u64>,
     pub(crate) target_constant_commitment_roots: Vec<String>,
-    pub(crate) target_constant_commitments: Vec<CompactVssShareLinkageCommitment>,
+    pub(crate) target_constant_commitments: Vec<VssShareLinkageCommitment>,
 }
 
 pub(crate) struct TargetDecryptionShareRoleStatement {
@@ -161,7 +171,7 @@ pub(crate) struct TargetDecryptionShareRoleStatement {
     pub(crate) target_ciphertext_component_one: Vec<u64>,
     pub(crate) released_partial_decryption: Vec<u64>,
     pub(crate) smudging_commitment_roots: Vec<String>,
-    pub(crate) smudging_commitments: Vec<CompactVssShareLinkageCommitment>,
+    pub(crate) smudging_commitments: Vec<VssShareLinkageCommitment>,
 }
 
 pub(crate) struct TargetDecryptionShareLimbStatement {
@@ -169,7 +179,7 @@ pub(crate) struct TargetDecryptionShareLimbStatement {
     pub(crate) target_rns_prime: u64,
     pub(crate) aggregate_commitment_root: String,
     pub(crate) aggregate_opening_root: String,
-    pub(crate) aggregate_commitment: CompactVssShareLinkageCommitment,
+    pub(crate) aggregate_commitment: VssShareLinkageCommitment,
     pub(crate) role_statements: Vec<TargetDecryptionShareRoleStatement>,
 }
 
@@ -194,10 +204,10 @@ pub(crate) struct TargetDecryptionShareStatement {
 // family label, and the family's ordered labeled binding roots. Every field
 // enters the statement hash, so a proof transplanted to another ceremony,
 // roster position, epoch, family, or binding object fails the transcript
-// rebinding. The binding label list is fixed per family: the keyless
-// same-secret linkage anchor binds the VSS coefficient commitment material
-// root it bridges, and the key-bearing evaluation-key family binds the
-// frozen schedule and its same-secret anchor references.
+// rebinding. The binding label list is fixed per family: the standalone bridge
+// carries no contextual binding roots because its canonical source and target
+// commitments enter the statement directly, while the key-bearing
+// evaluation-key family binds the frozen schedule and bridge proof record.
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) struct SuccinctSetupProofContext {
     pub(crate) proof_family: String,
@@ -219,8 +229,8 @@ pub(crate) struct TrusteeEvaluationKeyStatement {
     pub(crate) keys: Vec<EvaluationKeyShareDescriptor>,
     pub(crate) same_secret_linkage: Option<SameSecretLinkageStatement>,
     pub(crate) private_vss_share: Option<PrivateVssShareStatement>,
-    pub(crate) compact_vss_share_linkage: Option<CompactVssShareLinkageStatement>,
-    pub(crate) compact_same_secret_bridge: Option<CompactSameSecretBridgeStatement>,
+    pub(crate) vss_share_linkage: Option<VssShareLinkageStatement>,
+    pub(crate) same_secret_bridge: Option<SameSecretBridgeStatement>,
     pub(crate) target_decryption_share: Option<TargetDecryptionShareStatement>,
 }
 
@@ -229,7 +239,7 @@ pub(crate) struct TrusteeEvaluationKeyWitness {
     // error_coefficients_by_key[key][digit] follows each key's digit count.
     pub(crate) error_coefficients_by_key: Vec<Vec<Vec<i64>>>,
     // Linkage witnesses, present exactly when the statement carries the
-    // same-secret linkage or compact same-secret bridge: the binary
+    // same-secret linkage or same-secret bridge: the binary
     // negative-indicator vector and the ternary opening randomness per bound
     // commitment and column.
     pub(crate) negative_indicator_coefficients: Vec<i64>,
@@ -240,16 +250,23 @@ pub(crate) struct TrusteeEvaluationKeyWitness {
     pub(crate) private_vss_coefficient_messages_by_shamir_index: Vec<Vec<i64>>,
     pub(crate) private_vss_opening_randomness_by_shamir_index: Vec<Vec<Vec<i64>>>,
     pub(crate) private_vss_carry_witnesses: Vec<i64>,
-    pub(crate) compact_vss_coefficient_messages_by_shamir_index: Vec<Vec<i64>>,
-    pub(crate) compact_vss_recipient_share_messages: Vec<i64>,
-    pub(crate) compact_vss_coefficient_opening_randomness_by_shamir_index: Vec<Vec<Vec<i64>>>,
-    pub(crate) compact_vss_recipient_share_opening_randomness: Vec<Vec<i64>>,
-    pub(crate) compact_vss_carry_witnesses: Vec<i64>,
-    pub(crate) compact_vss_recipient_share_messages_by_item: Vec<Vec<i64>>,
-    pub(crate) compact_vss_recipient_share_opening_randomness_by_item: Vec<Vec<Vec<i64>>>,
-    pub(crate) compact_vss_carry_witnesses_by_item: Vec<Vec<i64>>,
+    pub(crate) vss_public_coefficient_messages_by_shamir_index: Vec<Vec<i64>>,
+    pub(crate) vss_public_recipient_share_messages: Vec<i64>,
+    pub(crate) vss_public_coefficient_opening_randomness_by_shamir_index: Vec<Vec<Vec<i64>>>,
+    pub(crate) vss_public_recipient_share_opening_randomness: Vec<Vec<i64>>,
+    pub(crate) vss_public_carry_witnesses: Vec<i64>,
+    pub(crate) vss_public_recipient_share_messages_by_item: Vec<Vec<i64>>,
+    pub(crate) vss_public_recipient_share_opening_randomness_by_item: Vec<Vec<Vec<i64>>>,
+    pub(crate) vss_public_carry_witnesses_by_item: Vec<Vec<i64>>,
     pub(crate) target_decryption_message_vectors: Vec<Vec<i64>>,
     pub(crate) target_decryption_opening_randomness_by_commitment: Vec<Vec<Vec<i64>>>,
+    // Committed-material regeneration inputs, one per bound message in the
+    // statement's bound-commitment order: the holder's private deterministic
+    // seed and the commitment-context hash. The prover regenerates the trees
+    // from these and refuses if any regenerated root differs from the
+    // statement's roots; it never commits fresh trees inside a proof.
+    pub(crate) vss_committed_material_seeds_by_bound_message: Vec<String>,
+    pub(crate) vss_committed_material_context_hashes_by_bound_message: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -398,58 +415,9 @@ impl EvaluationKeyShareDescriptor {
             ),
         }
     }
-
-    // The diagonal source vector D tested against the secret in limb l, chosen
-    // so that <U, source> = <D, s>: U for round one, Neg(A_l)^T U for round
-    // two, and M_phi^T U for a Galois rotation. The public-key share relation
-    // has no diagonal source.
-    pub(crate) fn diagonal_source_vector(
-        &self,
-        limb_index: usize,
-        u_powers: &[u64],
-        modulus: u64,
-    ) -> CanonicalResult<Vec<u64>> {
-        match self.kind {
-            EvaluationKeyShareKind::RelinearizationRoundOne => Ok(u_powers.to_vec()),
-            EvaluationKeyShareKind::RelinearizationRoundTwo => negacyclic_transpose_product(
-                &self.round_one_aggregate_diagonal[limb_index],
-                u_powers,
-                modulus,
-            ),
-            EvaluationKeyShareKind::GaloisRotation { galois_element } => {
-                galois_automorphism_transpose_apply(u_powers, galois_element, modulus)
-            }
-            EvaluationKeyShareKind::PublicKeyShare => Err(invalid_succinct_setup_proof(
-                "the public-key share relation has no diagonal source",
-            )),
-        }
-    }
-
-    // The same diagonal source action on an extension challenge vector: the
-    // action is base-linear, so it applies to each extension coordinate.
-    pub(crate) fn diagonal_source_vector_extension(
-        &self,
-        limb_index: usize,
-        u_powers: &[ChallengeExtensionElement],
-        modulus: u64,
-    ) -> CanonicalResult<Vec<ChallengeExtensionElement>> {
-        let mut result = vec![ChallengeExtensionTower::zero(); u_powers.len()];
-        let mut coordinate_vector = vec![0_u64; u_powers.len()];
-        for coordinate in 0..CHALLENGE_EXTENSION_DEGREE {
-            for (slot, element) in coordinate_vector.iter_mut().zip(u_powers.iter()) {
-                *slot = element[coordinate];
-            }
-            let applied = self.diagonal_source_vector(limb_index, &coordinate_vector, modulus)?;
-            for (target, value) in result.iter_mut().zip(applied.iter()) {
-                target[coordinate] = *value;
-            }
-        }
-
-        Ok(result)
-    }
 }
 
-impl CompactVssShareLinkageStatement {
+impl VssShareLinkageStatement {
     pub(crate) fn item_count(&self) -> usize {
         1 + self.additional_linkage_items.len()
     }
@@ -459,7 +427,7 @@ impl CompactVssShareLinkageStatement {
     }
 
     fn append_coefficient_witness_slots(
-        slots: &mut Vec<CompactVssCoefficientWitnessSlot>,
+        slots: &mut Vec<VssPublicCoefficientWitnessSlot>,
         slot_indices_by_item: &mut Vec<Vec<usize>>,
         source_trustee_roster_position: u64,
         source_rns_limb_index: usize,
@@ -474,7 +442,7 @@ impl CompactVssShareLinkageStatement {
                 .zip(coefficient_opening_roots.iter())
                 .enumerate()
         {
-            let slot = CompactVssCoefficientWitnessSlot {
+            let slot = VssPublicCoefficientWitnessSlot {
                 source_trustee_roster_position,
                 source_rns_limb_index,
                 source_message_modulus,
@@ -498,7 +466,7 @@ impl CompactVssShareLinkageStatement {
 
     fn coefficient_witness_slot_layout(
         &self,
-    ) -> (Vec<CompactVssCoefficientWitnessSlot>, Vec<Vec<usize>>) {
+    ) -> (Vec<VssPublicCoefficientWitnessSlot>, Vec<Vec<usize>>) {
         let mut slots = Vec::new();
         let mut slot_indices_by_item = Vec::with_capacity(self.item_count());
         Self::append_coefficient_witness_slots(
@@ -525,7 +493,7 @@ impl CompactVssShareLinkageStatement {
         (slots, slot_indices_by_item)
     }
 
-    pub(crate) fn coefficient_witness_slots(&self) -> Vec<CompactVssCoefficientWitnessSlot> {
+    pub(crate) fn coefficient_witness_slots(&self) -> Vec<VssPublicCoefficientWitnessSlot> {
         self.coefficient_witness_slot_layout().0
     }
 
@@ -561,26 +529,85 @@ impl CompactVssShareLinkageStatement {
                 .map(|item| item.coefficient_commitments.len())
                 .sum::<usize>()
     }
-
-    pub(crate) fn packed_opening_randomness_column_count(&self) -> usize {
-        (self.unique_coefficient_witness_slot_count() + self.item_count())
-            * crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_RANDOMNESS_COLUMN_COUNT
-    }
 }
 
 impl TrusteeEvaluationKeyStatement {
+    // Ordered committed-material commitments the material-binding families
+    // open, one per bound message, in the bound-message order the limb
+    // layouts use: vss-public - unique coefficient slots (slot order) then
+    // per-item recipient shares (item order); bridge - target constants in
+    // target order; target-decryption - per limb statement the aggregate then
+    // its smudging commitments. Every commitment-field limb proof opens its
+    // own field's tree of each bound commitment.
+    pub(crate) fn vss_committed_material_bound_commitments(
+        &self,
+    ) -> Vec<&VssShareLinkageCommitment> {
+        if let Some(share_linkage) = &self.vss_share_linkage {
+            let slot_indices_by_item = share_linkage.coefficient_witness_slot_indices_by_item();
+            let slot_count = share_linkage.unique_coefficient_witness_slot_count();
+            let mut commitment_by_slot: Vec<Option<&VssShareLinkageCommitment>> =
+                vec![None; slot_count];
+            let commitments_by_item: Vec<&[VssShareLinkageCommitment]> =
+                std::iter::once(share_linkage.coefficient_commitments.as_slice())
+                    .chain(
+                        share_linkage
+                            .additional_linkage_items
+                            .iter()
+                            .map(|item| item.coefficient_commitments.as_slice()),
+                    )
+                    .collect();
+            for (item_index, slot_indices) in slot_indices_by_item.iter().enumerate() {
+                for (coefficient_index, slot_index) in slot_indices.iter().enumerate() {
+                    if commitment_by_slot[*slot_index].is_none() {
+                        commitment_by_slot[*slot_index] =
+                            Some(&commitments_by_item[item_index][coefficient_index]);
+                    }
+                }
+            }
+            let mut bound_commitments = commitment_by_slot
+                .into_iter()
+                .map(|commitment| {
+                    commitment.expect("every coefficient witness slot originates from an item")
+                })
+                .collect::<Vec<_>>();
+            bound_commitments.push(&share_linkage.recipient_share_commitment);
+            for item in &share_linkage.additional_linkage_items {
+                bound_commitments.push(&item.recipient_share_commitment);
+            }
+
+            bound_commitments
+        } else if let Some(bridge) = &self.same_secret_bridge {
+            bridge.target_constant_commitments.iter().collect()
+        } else if let Some(target_decryption_share) = &self.target_decryption_share {
+            target_decryption_share
+                .limb_statements
+                .iter()
+                .flat_map(|limb_statement| {
+                    std::iter::once(&limb_statement.aggregate_commitment).chain(
+                        limb_statement
+                            .role_statements
+                            .iter()
+                            .flat_map(|role_statement| role_statement.smudging_commitments.iter()),
+                    )
+                })
+                .collect()
+        } else {
+            Vec::new()
+        }
+    }
+
     pub(crate) const TARGET_DECRYPTION_AGGREGATE_MESSAGE_MASKED_CLAIM_FIELD_COUNT: usize = 5;
     pub(crate) const TARGET_DECRYPTION_SMUDGING_MESSAGE_MASKED_CLAIM_FIELD_COUNT: usize = 4;
 
-    // The number of active limb fields: one past the highest key level. The
-    // keyless same-secret linkage anchor statement is active exactly on the
-    // commitment fields, where its opening relations live.
+    // The number of active limb fields: one past the highest key level. A
+    // standalone same-secret bridge statement is active on every source
+    // commitment field, where its opening relations live.
     pub(crate) fn limb_count(&self) -> usize {
-        if self.private_vss_share.is_some() || self.compact_vss_share_linkage.is_some() {
+        if self.private_vss_share.is_some() || self.vss_share_linkage.is_some() {
             return SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len();
         }
         let key_limb_count = self.keys.iter().map(|key| key.level + 1).max();
-        if self.compact_same_secret_bridge.is_some() {
+        if self.same_secret_bridge.is_some() {
             return key_limb_count
                 .into_iter()
                 .chain(std::iter::once(SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len()))
@@ -642,17 +669,15 @@ impl TrusteeEvaluationKeyStatement {
 
     // Number of linkage opening-randomness logical columns active in a limb:
     // the linkage relations live only in the commitment fields (the first
-    // three data primes).
+    // three data primes). Only the BDLOP source linkage carries opening
+    // randomness; the committed-material bridge targets hide
+    // via their tree masks and salts and have no algebraic opening randomness.
     pub(crate) fn linkage_randomness_count(&self, limb_index: usize) -> usize {
         if limb_index >= SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len() {
             return 0;
         }
         if let Some(linkage) = &self.same_secret_linkage {
             return linkage.commitments.len() * SETUP_COMMITMENT_RANDOMNESS_WIDTH;
-        }
-        if let Some(bridge) = &self.compact_same_secret_bridge {
-            return bridge.target_constant_commitments.len()
-                * crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_RANDOMNESS_COLUMN_COUNT;
         }
 
         0
@@ -667,8 +692,8 @@ impl TrusteeEvaluationKeyStatement {
         }
     }
 
-    pub(crate) fn compact_vss_coefficient_count(&self, limb_index: usize) -> usize {
-        match &self.compact_vss_share_linkage {
+    pub(crate) fn vss_public_coefficient_count(&self, limb_index: usize) -> usize {
+        match &self.vss_share_linkage {
             Some(statement) if limb_index < SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len() => {
                 statement.unique_coefficient_witness_slot_count()
             }
@@ -676,8 +701,8 @@ impl TrusteeEvaluationKeyStatement {
         }
     }
 
-    pub(crate) fn compact_vss_coefficient_relation_count(&self, limb_index: usize) -> usize {
-        match &self.compact_vss_share_linkage {
+    pub(crate) fn vss_public_coefficient_relation_count(&self, limb_index: usize) -> usize {
+        match &self.vss_share_linkage {
             Some(statement) if limb_index < SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len() => {
                 statement.total_coefficient_commitment_count()
             }
@@ -685,8 +710,8 @@ impl TrusteeEvaluationKeyStatement {
         }
     }
 
-    pub(crate) fn compact_vss_item_count(&self, limb_index: usize) -> usize {
-        match &self.compact_vss_share_linkage {
+    pub(crate) fn vss_public_item_count(&self, limb_index: usize) -> usize {
+        match &self.vss_share_linkage {
             Some(statement) if limb_index < SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len() => {
                 statement.item_count()
             }
@@ -694,17 +719,8 @@ impl TrusteeEvaluationKeyStatement {
         }
     }
 
-    pub(crate) fn compact_vss_randomness_count(&self, limb_index: usize) -> usize {
-        match &self.compact_vss_share_linkage {
-            Some(statement) if limb_index < SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len() => {
-                statement.packed_opening_randomness_column_count()
-            }
-            _ => 0,
-        }
-    }
-
-    pub(crate) fn compact_vss_message_bounds(&self, limb_index: usize) -> Vec<u64> {
-        match &self.compact_vss_share_linkage {
+    pub(crate) fn vss_public_message_bounds(&self, limb_index: usize) -> Vec<u64> {
+        match &self.vss_share_linkage {
             Some(statement) if limb_index < SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len() => {
                 statement.packed_message_bounds()
             }
@@ -712,8 +728,8 @@ impl TrusteeEvaluationKeyStatement {
         }
     }
 
-    pub(crate) fn compact_same_secret_bridge_message_bounds(&self, limb_index: usize) -> Vec<u64> {
-        match &self.compact_same_secret_bridge {
+    pub(crate) fn same_secret_bridge_message_bounds(&self, limb_index: usize) -> Vec<u64> {
+        match &self.same_secret_bridge {
             Some(statement) if limb_index < SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len() => {
                 statement.target_rns_primes.clone()
             }
@@ -746,7 +762,7 @@ impl TrusteeEvaluationKeyStatement {
 
     pub(crate) fn target_decryption_total_message_digit_count(&self) -> usize {
         self.target_decryption_total_message_count()
-            * crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT
+            * crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT
     }
 
     fn target_decryption_limb_message_range(
@@ -807,7 +823,7 @@ impl TrusteeEvaluationKeyStatement {
         global_message_index: usize,
         digit_index: usize,
     ) -> Option<u64> {
-        crate::bgv::setup::compact_vss_commitment::compact_vss_message_digit_bound(
+        crate::bgv::setup::vss_commitment::vss_public_message_digit_bound(
             self.target_decryption_message_bound(global_message_index)?,
             digit_index,
         )
@@ -941,8 +957,7 @@ impl TrusteeEvaluationKeyStatement {
         &self,
         proof_limb_index: usize,
         global_message_index: usize,
-    ) -> CanonicalResult<crate::bgv::setup::compact_vss_commitment::CompactVssMessageEncodingLayout>
-    {
+    ) -> CanonicalResult<crate::bgv::setup::vss_commitment::VssPublicMessageEncodingLayout> {
         let message_bound = self
             .target_decryption_message_bound(global_message_index)
             .ok_or_else(|| {
@@ -957,23 +972,18 @@ impl TrusteeEvaluationKeyStatement {
                     "target-decryption message decoder limb is missing from the statement layout",
                 )
             })?;
-        if proof_limb_index == decoder_limb_index {
-            crate::bgv::setup::compact_vss_commitment::compact_vss_message_encoding_layout(
-                message_bound,
-            )
-        } else {
-            Ok(
-                crate::bgv::setup::compact_vss_commitment::compact_vss_message_digit_only_encoding_layout(),
-            )
-        }
+        crate::bgv::setup::vss_commitment::vss_public_cross_limb_message_encoding_layout(
+            message_bound,
+            proof_limb_index,
+            decoder_limb_index,
+        )
     }
 
     pub(crate) fn target_decryption_message_encoding_layouts(
         &self,
         limb_index: usize,
-    ) -> CanonicalResult<
-        Vec<crate::bgv::setup::compact_vss_commitment::CompactVssMessageEncodingLayout>,
-    > {
+    ) -> CanonicalResult<Vec<crate::bgv::setup::vss_commitment::VssPublicMessageEncodingLayout>>
+    {
         self.target_decryption_message_indices(limb_index)
             .into_iter()
             .map(|global_message_index| {
@@ -982,40 +992,21 @@ impl TrusteeEvaluationKeyStatement {
             .collect()
     }
 
-    pub(crate) fn target_decryption_randomness_count(&self, limb_index: usize) -> usize {
-        self.target_decryption_share
-            .as_ref()
-            .filter(|_| limb_index < SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len())
-            .map(|_| {
-                self.target_decryption_total_message_count()
-                    * crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_RANDOMNESS_COLUMN_COUNT
-            })
-            .unwrap_or(0)
-    }
-
     fn target_decryption_decoder_digit_count_for_layout(
-        layout: crate::bgv::setup::compact_vss_commitment::CompactVssMessageEncodingLayout,
+        layout: crate::bgv::setup::vss_commitment::VssPublicMessageEncodingLayout,
     ) -> usize {
-        (0..crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT)
+        (0..crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT)
             .filter(|digit_index| layout.digit_trit_count(*digit_index).unwrap_or(0) > 0)
             .count()
     }
 
+    // Target-decryption relation challenges: the per-role target-share lincheck
+    // rows plus the digit decoder rows. The aggregate and smudging commitments
+    // are bound by the material openings and Z_H binding rows, so no additional
+    // per-coordinate relation blocks are needed.
     pub(crate) fn target_decryption_relation_count(&self, limb_index: usize) -> usize {
         match &self.target_decryption_share {
             Some(statement) => {
-                let commitment_relation_count = if limb_index
-                    < SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len()
-                {
-                    statement
-                        .limb_statements
-                        .iter()
-                        .map(Self::target_decryption_limb_message_count)
-                        .sum::<usize>()
-                        * crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_OUTPUT_COORDINATE_COUNT
-                } else {
-                    0
-                };
                 let target_relation_count = statement
                     .limb_statements
                     .iter()
@@ -1031,7 +1022,7 @@ impl TrusteeEvaluationKeyStatement {
                     .map(Self::target_decryption_decoder_digit_count_for_layout)
                     .sum::<usize>()
                     * LINCHECK_REPETITIONS;
-                commitment_relation_count + target_relation_count + decoder_relation_count
+                target_relation_count + decoder_relation_count
             }
             None => 0,
         }

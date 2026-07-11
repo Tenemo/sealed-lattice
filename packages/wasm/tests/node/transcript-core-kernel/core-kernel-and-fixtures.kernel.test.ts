@@ -43,26 +43,6 @@ type SetupCommitmentKernel = Readonly<{
     }) => SetupCommitmentOpeningComputation;
 }>;
 
-type ThresholdShareTransportStreamKernel = Readonly<{
-    readonly describeCollectiveBgvSetupParameters: () => {
-        readonly setupParametersHash: string;
-    };
-    readonly beginThresholdShareCommitmentsFromTransportStream: (input: {
-        readonly derivationId: string;
-        readonly setupContext: unknown;
-        readonly publicMatrixSeedHash: string;
-        readonly transportedVssCoefficientCommitmentMaterial: unknown;
-    }) => {
-        readonly operation: 'beginThresholdShareCommitmentsFromTransportStream';
-        readonly derivationId: string;
-    };
-    readonly finishThresholdShareCommitmentsFromTransportStream: (input: {
-        readonly derivationId: string;
-        readonly vssCoefficientCommitmentRoot: string;
-        readonly sourceTrusteeCoefficientCommitmentRecords: readonly unknown[];
-    }) => unknown;
-}>;
-
 const bytesToHex = (bytes: Uint8Array): string =>
     Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 
@@ -249,6 +229,27 @@ describe('transcript-core kernel in Node', () => {
                 shareVectorWidth: 220,
                 objectType: 'CanonicalJsonParityProbe',
             },
+            {
+                // Key order across the surrogate boundary: UTF-16 code-unit
+                // sorting and Unicode code-point sorting disagree on whether
+                // U+FFFF precedes U+10000.
+                objectType: 'CanonicalJsonParityProbe',
+                [String.fromCodePoint(0xff_ff)]: 'basic-plane boundary key',
+                [String.fromCodePoint(0x1_00_00)]:
+                    'supplementary-plane boundary key',
+                [String.fromCodePoint(0xfb_00)]: 'compatibility ligature key',
+            },
+            {
+                objectType: 'CanonicalJsonParityProbe',
+                separators: [0x20_28, 0x20_29]
+                    .map((codePoint) => String.fromCodePoint(codePoint))
+                    .join('separates'),
+                controls: [0x00_00, 0x00_09, 0x00_1b]
+                    .map((codePoint) => String.fromCodePoint(codePoint))
+                    .join('then'),
+                emptyContainers: [{}, []],
+                deep: [[[['edge']]]],
+            },
         ];
 
         for (const value of acceptedValues) {
@@ -256,6 +257,18 @@ describe('transcript-core kernel in Node', () => {
                 deriveCanonicalObjectHash(value),
             );
         }
+
+        // Negative zero collapses to zero on both sides of the boundary.
+        expect(
+            kernel.deriveCanonicalObjectHash({
+                value: { objectType: 'CanonicalJsonParityProbe', zero: -0 },
+            }),
+        ).toBe(
+            deriveCanonicalObjectHash({
+                objectType: 'CanonicalJsonParityProbe',
+                zero: 0,
+            }),
+        );
 
         const rejectedValues: readonly {
             readonly value: Record<string, unknown>;
@@ -354,52 +367,9 @@ describe('transcript-core kernel in Node', () => {
         ).toThrow(TranscriptCoreKernelCommandError);
     });
 
-    it('exposes chunk-fed VSS threshold derivation stream commands through WASM', async () => {
-        const kernel =
-            (await loadTranscriptCoreKernel()) as ThresholdShareTransportStreamKernel;
-        const parameters = kernel.describeCollectiveBgvSetupParameters();
-        const setupContext = {
-            ceremonyId: 'ceremony-main',
-            manifestHash: 'a'.repeat(128),
-            rosterHash: 'b'.repeat(128),
-            setupParametersHash: parameters.setupParametersHash,
-            setupEpoch: 'setup-epoch-1',
-        };
-        const derivationId = 'wasm-vss-stream-smoke';
-
-        const beginResult =
-            kernel.beginThresholdShareCommitmentsFromTransportStream({
-                derivationId,
-                setupContext,
-                publicMatrixSeedHash: 'c'.repeat(128),
-                transportedVssCoefficientCommitmentMaterial: {
-                    objectType:
-                        'SetupTransportedVssCoefficientCommitmentMaterial',
-                    objectVersion: 1,
-                    binaryFormat:
-                        'sealed-lattice-vss-coefficient-commitment-material-binary-v1',
-                    chunkSizeBytes: 1_048_576,
-                    chunkCount: 1,
-                    totalByteLength: 8,
-                },
-            });
-
-        expect(beginResult).toMatchObject({
-            operation: 'beginThresholdShareCommitmentsFromTransportStream',
-            derivationId,
-        });
-        expect(() =>
-            kernel.finishThresholdShareCommitmentsFromTransportStream({
-                derivationId,
-                vssCoefficientCommitmentRoot: 'd'.repeat(128),
-                sourceTrusteeCoefficientCommitmentRecords: [],
-            }),
-        ).toThrow(TranscriptCoreKernelCommandError);
-    });
-
     it('exposes chunk-fed setup proof material stream commands through WASM', async () => {
         const kernel = await loadTranscriptCoreKernel();
-        const proofFamily = 'same-secret-linkage-anchor';
+        const proofFamily = 'public-key-share';
         const proofChunk = textEncoder.encode('setup proof material stream');
         const proofChunks = [proofChunk] as const;
         const fullObjectHash = setupProofMaterialFullObjectHashHex(
@@ -427,8 +397,7 @@ describe('transcript-core kernel in Node', () => {
         const beginResult = kernel.beginSetupProofMaterialTransportStream({
             verificationId,
             transportedSetupProofMaterial: {
-                objectType: 'SetupTransportedSameSecretProofMaterial',
-                objectVersion: 1,
+                objectType: 'SetupTransportedPublicKeyShareProofMaterial',
                 proofFamily,
                 proofMaterialRoot,
                 chunkSizeBytes: setupProofTransportChunkSizeBytes,

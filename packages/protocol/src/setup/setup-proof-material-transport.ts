@@ -7,28 +7,19 @@ import type { ProtocolHash } from '@sealed-lattice/types';
 
 import {
     assertNonNegativeSafeInteger,
+    bytesToHex,
     type JsonRecord,
 } from './common-fields.js';
+import { appendVaruint } from './varuint-encoding.js';
 
 export const setupProofTransportChunkSizeBytes = 1_048_576;
 
 const textEncoder = new TextEncoder();
 
-const bytesToHex = (bytes: Uint8Array): string =>
-    [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('');
-
 const varUintBytes = (value: number, fieldName: string): Uint8Array => {
     const numericValue = assertNonNegativeSafeInteger(value, fieldName);
     const bytes: number[] = [];
-    let remainingValue = numericValue;
-    do {
-        let byte = remainingValue & 0x7f;
-        remainingValue = Math.floor(remainingValue / 128);
-        if (remainingValue !== 0) {
-            byte |= 0x80;
-        }
-        bytes.push(byte);
-    } while (remainingValue !== 0);
+    appendVaruint(bytes, numericValue);
 
     return Uint8Array.from(bytes);
 };
@@ -74,7 +65,6 @@ type SetupProofMaterialTransportChunk = Readonly<
 export const setupProofMaterialReferenceFields = (
     metadata: SetupProofMaterialTransportMetadata,
 ): JsonRecord => ({
-    chunkSizeBytes: setupProofTransportChunkSizeBytes,
     chunkCount: metadata.chunkHashes.length,
     totalByteLength: metadata.totalByteLength,
     fullObjectHash: metadata.fullObjectHash,
@@ -86,7 +76,6 @@ export const setupProofMaterialRecordTransportMetadataFields = (
     metadata: SetupProofMaterialTransportMetadata,
 ): Readonly<
     JsonRecord & {
-        readonly proofChunkSizeBytes: typeof setupProofTransportChunkSizeBytes;
         readonly proofChunkCount: number;
         readonly proofTotalByteLength: number;
         readonly proofFullObjectHash: ProtocolHash;
@@ -94,7 +83,6 @@ export const setupProofMaterialRecordTransportMetadataFields = (
         readonly proofChunkHashes: readonly ProtocolHash[];
     }
 > => ({
-    proofChunkSizeBytes: setupProofTransportChunkSizeBytes,
     proofChunkCount: metadata.chunkHashes.length,
     proofTotalByteLength: metadata.totalByteLength,
     proofFullObjectHash: metadata.fullObjectHash,
@@ -112,7 +100,6 @@ export const setupProofMaterialRecordTransportFields = <
     JsonRecord & {
         readonly proofBytesEncoding: ProofBytesEncoding;
         readonly proofMaterialRoot: ProtocolHash;
-        readonly proofChunkSizeBytes: typeof setupProofTransportChunkSizeBytes;
         readonly proofChunkCount: number;
         readonly proofTotalByteLength: number;
         readonly proofFullObjectHash: ProtocolHash;
@@ -131,7 +118,6 @@ export const setupTransportedProofMaterialFields = (
 ): Readonly<
     JsonRecord & {
         readonly proofMaterialRoot: ProtocolHash;
-        readonly chunkSizeBytes: typeof setupProofTransportChunkSizeBytes;
         readonly chunkCount: number;
         readonly totalByteLength: number;
         readonly fullObjectHash: ProtocolHash;
@@ -140,7 +126,6 @@ export const setupTransportedProofMaterialFields = (
     }
 > => ({
     proofMaterialRoot,
-    chunkSizeBytes: setupProofTransportChunkSizeBytes,
     chunkCount: metadata.chunkHashes.length,
     totalByteLength: metadata.totalByteLength,
     fullObjectHash: metadata.fullObjectHash,
@@ -163,7 +148,7 @@ export const setupProofMaterialChunkHash = (
     chunkIndex: number,
     chunk: Uint8Array,
 ): ProtocolHash =>
-    hash512Hex('sealed-lattice/setup/proof-material/chunk-v1', [
+    hash512Hex('sealed-lattice/setup/proof-material/chunk', [
         textEncoder.encode(proofFamily),
         textEncoder.encode(fullObjectHash),
         varUintBytes(chunkIndex, 'chunkIndex'),
@@ -178,10 +163,7 @@ export const setupProofChunkManifestRoot = (
 ): ProtocolHash =>
     deriveCanonicalObjectHash({
         objectType: 'SetupProofMaterialChunkManifest',
-        objectVersion: 1,
         proofFamily,
-        chunkSizeBytes: setupProofTransportChunkSizeBytes,
-        chunkCount: chunkHashes.length,
         totalByteLength,
         chunkHashes,
         fullObjectHash,
@@ -231,7 +213,6 @@ export type TransportedSetupProofMaterialSet<
 > = Readonly<
     JsonRecord & {
         readonly objectType: ObjectType;
-        readonly objectVersion: 1;
         readonly proofFamily: string;
         readonly proofMaterials: readonly JsonRecord[];
     }
@@ -240,12 +221,10 @@ export type TransportedSetupProofMaterialSet<
 export type VerifiedSetupProofMaterial = Readonly<
     JsonRecord & {
         readonly objectType: 'VerifiedSetupProofMaterial';
-        readonly objectVersion: 1;
         readonly verificationId: string;
         readonly proofFamily: string;
         readonly proofMaterialRoot: ProtocolHash;
         readonly proofBytesEncoding: 'binary-chunked-proof-bytes';
-        readonly proofChunkSizeBytes: typeof setupProofTransportChunkSizeBytes;
         readonly proofChunkCount: number;
         readonly proofTotalByteLength: number;
         readonly proofFullObjectHash: ProtocolHash;
@@ -257,7 +236,6 @@ export type VerifiedSetupProofMaterial = Readonly<
 export type VerifiedSetupProofMaterialSet = Readonly<
     JsonRecord & {
         readonly objectType: 'VerifiedSetupProofMaterialSet';
-        readonly objectVersion: 1;
         readonly proofMaterials: readonly VerifiedSetupProofMaterial[];
     }
 >;

@@ -4,6 +4,7 @@ import {
 } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
+import { protocolHashPattern } from '../common/verification-helpers.js';
 import { BinaryChunkWriter } from '../setup/binary-chunk-writer.js';
 import { bytesFromStandardBase64 } from '../setup/proof-byte-encoding.js';
 import {
@@ -16,7 +17,7 @@ type JsonRecord = Record<string, unknown>;
 
 export const targetDecryptionShareProofFamily = 'target-decryption-share';
 export const targetDecryptionShareProofMaterialBinaryFormat =
-    'sealed-lattice-target-decryption-share-proof-material-binary-v1';
+    'sealed-lattice-target-decryption-share-proof-material-binary';
 
 const targetDecryptionShareProofMaterialBinaryMagic = new TextEncoder().encode(
     'SEALED-LATTICE-TARGET-DECRYPTION-SHARE-PROOF-MATERIAL-BINARY-V1',
@@ -34,11 +35,9 @@ export type BgvTargetDecryptionShareProofMaterial = Readonly<
 type BgvTargetDecryptionShareBinaryProofMaterialTransport = Readonly<
     JsonRecord & {
         readonly objectType: 'BgvTargetDecryptionShareBinaryProofMaterialTransport';
-        readonly objectVersion: 1;
         readonly proofFamily: typeof targetDecryptionShareProofFamily;
         readonly binaryFormat: typeof targetDecryptionShareProofMaterialBinaryFormat;
         readonly proofMaterialRoot: ProtocolHash;
-        readonly chunkSizeBytes: typeof setupProofTransportChunkSizeBytes;
         readonly chunkCount: number;
         readonly totalByteLength: number;
         readonly fullObjectHash: ProtocolHash;
@@ -47,8 +46,6 @@ type BgvTargetDecryptionShareBinaryProofMaterialTransport = Readonly<
         readonly chunks: readonly Uint8Array[];
     }
 >;
-
-const protocolHashPattern = /^[0-9a-f]{128}$/u;
 
 const assertProtocolHash = (
     value: unknown,
@@ -207,11 +204,9 @@ export const encodeBgvTargetDecryptionShareProofMaterialBinary = (
 
     return {
         objectType: 'BgvTargetDecryptionShareBinaryProofMaterialTransport',
-        objectVersion: 1,
         proofFamily: targetDecryptionShareProofFamily,
         binaryFormat: targetDecryptionShareProofMaterialBinaryFormat,
         proofMaterialRoot,
-        chunkSizeBytes: setupProofTransportChunkSizeBytes,
         chunkCount,
         totalByteLength,
         fullObjectHash,

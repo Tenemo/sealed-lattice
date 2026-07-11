@@ -1,5 +1,4 @@
 import {
-    canonicalJson,
     deriveCanonicalObjectHash,
     verifySignedObjectSignature,
 } from '@sealed-lattice/crypto';
@@ -49,7 +48,6 @@ export type CommonRandomnessReveal = Readonly<
     JsonRecord &
         CommonRandomnessContextFields & {
             readonly objectType: 'CommonRandomnessReveal';
-            readonly objectVersion: 1;
             readonly signerRole: 'Trustee';
             readonly trusteeIdentity: string;
             readonly rosterPosition: number;
@@ -71,7 +69,6 @@ export type CommonRandomnessCommit = Readonly<
     JsonRecord &
         CommonRandomnessContextFields & {
             readonly objectType: 'CommonRandomnessCommit';
-            readonly objectVersion: 1;
             readonly signerRole: 'Trustee';
             readonly trusteeIdentity: string;
             readonly rosterPosition: number;
@@ -87,12 +84,10 @@ export type CommonRandomnessCommit = Readonly<
 export type SetupCommonRandomnessPublicDerivations = Readonly<
     JsonRecord & {
         readonly objectType: 'SetupPublicDerivations';
-        readonly objectVersion: 1;
         readonly publicMatrixSeedHash: ProtocolHash;
         readonly bgvPublicA: Readonly<
             JsonRecord & {
                 readonly objectType: 'BgvPublicAPolynomial';
-                readonly objectVersion: 1;
                 readonly publicMatrixSeedHash: ProtocolHash;
                 readonly publicPolynomialRoot: ProtocolHash;
             }
@@ -100,7 +95,6 @@ export type SetupCommonRandomnessPublicDerivations = Readonly<
         readonly publicMatrices: Readonly<
             JsonRecord & {
                 readonly objectType: 'SetupPublicMatrixMaterial';
-                readonly objectVersion: 1;
                 readonly publicMatrixSeedHash: ProtocolHash;
                 readonly publicMatricesRoot: ProtocolHash;
             }
@@ -129,7 +123,6 @@ export type SetupCommonRandomness = Readonly<
     JsonRecord &
         CommonRandomnessContextFields & {
             readonly objectType: 'SetupCommonRandomness';
-            readonly objectVersion: 1;
             readonly commitRecords: readonly CommonRandomnessCommit[];
             readonly revealRecords: readonly CommonRandomnessReveal[];
             readonly publicMatrixSeedHash: ProtocolHash;
@@ -140,7 +133,6 @@ export type SetupCommonRandomness = Readonly<
 
 // Each reveal contributes exactly 32 bytes (256 bits) of entropy to the joint public matrix seed.
 const revealHexPattern = /^[0-9a-f]{64}$/u;
-const textEncoder = new TextEncoder();
 
 const assertRevealHex = (value: string, fieldName: string): void => {
     if (!revealHexPattern.test(value)) {
@@ -185,9 +177,6 @@ const assertParticipantInput = (
     assertNonNegativeSafeInteger(input.deviceEpoch, 'deviceEpoch');
     assertProtocolHash(input.signingPublicKeyHash, 'signingPublicKeyHash');
 };
-
-const canonicalByteLength = (value: unknown): number =>
-    textEncoder.encode(canonicalJson(value)).byteLength;
 
 const commonRandomnessParticipantFields = (
     input: CommonRandomnessParticipantInput,
@@ -237,9 +226,6 @@ const assertRecordShape = (
         throw new Error(
             `${objectPath}.objectType must be ${expectedObjectType}.`,
         );
-    }
-    if (record.objectVersion !== 1) {
-        throw new Error(`${objectPath}.objectVersion must be 1.`);
     }
     if (record.signerRole !== 'Trustee') {
         throw new Error(`${objectPath}.signerRole must be Trustee.`);
@@ -354,9 +340,6 @@ const assertPublicDerivationsMatchKernelShape = (
             'publicDerivations.objectType must be SetupPublicDerivations.',
         );
     }
-    if (publicDerivations.objectVersion !== 1) {
-        throw new Error('publicDerivations.objectVersion must be 1.');
-    }
     if (publicDerivations.publicMatrixSeedHash !== publicMatrixSeedHash) {
         throw new Error(
             'publicDerivations.publicMatrixSeedHash must match the derived public matrix seed hash.',
@@ -369,7 +352,6 @@ const assertPublicDerivationsMatchKernelShape = (
     );
     if (
         bgvPublicA.objectType !== 'BgvPublicAPolynomial' ||
-        bgvPublicA.objectVersion !== 1 ||
         bgvPublicA.publicMatrixSeedHash !== publicMatrixSeedHash
     ) {
         throw new Error(
@@ -387,7 +369,6 @@ const assertPublicDerivationsMatchKernelShape = (
     );
     if (
         publicMatrices.objectType !== 'SetupPublicMatrixMaterial' ||
-        publicMatrices.objectVersion !== 1 ||
         publicMatrices.publicMatrixSeedHash !== publicMatrixSeedHash
     ) {
         throw new Error(
@@ -460,7 +441,6 @@ const verifyGeneratedSignatureEnvelope = (
 ): void => {
     const result = verifySignedObjectSignature(signatureEnvelope, {
         objectType: signedRoot.objectType,
-        objectVersion: signedRoot.objectVersion,
         signerRole: signedRoot.signerRole,
         signerIdentity: signedRoot.signerIdentity,
         ceremonyId: signedRoot.ceremonyId,
@@ -470,7 +450,6 @@ const verifyGeneratedSignatureEnvelope = (
         chunkMerkleRoot: signedRoot.chunkMerkleRoot,
         boardHeadHash: signedRoot.boardHeadHash,
         contextHash: signedRoot.contextHash,
-        byteLength: signedRoot.byteLength,
         recoveryEpoch: signedRoot.recoveryEpoch,
         deviceEpoch: signedRoot.deviceEpoch,
     });
@@ -480,11 +459,6 @@ const verifyGeneratedSignatureEnvelope = (
             refusedObject === undefined
                 ? `${recordLabel} signature envelope failed verification.`
                 : `${recordLabel} signature envelope failed verification: ${refusedObject.code}: ${refusedObject.message}`,
-        );
-    }
-    if (signatureEnvelope.signatureHash !== result.acceptedHashes[0]) {
-        throw new Error(
-            `${recordLabel} signature envelope hash does not match the verified signature hash.`,
         );
     }
 };
@@ -497,7 +471,6 @@ export const createCommonRandomnessReveal = async (
 
     const revealWithoutHash = {
         objectType: 'CommonRandomnessReveal',
-        objectVersion: 1,
         ...commonRandomnessParticipantFields(input),
         revealHex: input.revealHex,
     } as const satisfies JsonRecord;
@@ -510,13 +483,11 @@ export const createCommonRandomnessReveal = async (
     );
     const signedRoot = {
         objectType: 'CommonRandomnessReveal',
-        objectVersion: 1,
         ceremonyId: input.setupContext.ceremonyId,
         manifestHash: input.setupContext.manifestHash,
         boardHeadHash: null,
         objectRoot: revealHash,
         chunkMerkleRoot: null,
-        byteLength: canonicalByteLength(revealWithoutHash),
         signerRole: 'Trustee',
         signerIdentity: input.trusteeIdentity,
         recoveryEpoch: input.recoveryEpoch,
@@ -547,7 +518,6 @@ export const createCommonRandomnessCommit = async (
 
     const commitWithoutHash = {
         objectType: 'CommonRandomnessCommit',
-        objectVersion: 1,
         ...commonRandomnessParticipantFields(input),
         revealHash: input.revealHash,
     } as const satisfies JsonRecord;
@@ -560,13 +530,11 @@ export const createCommonRandomnessCommit = async (
     );
     const signedRoot = {
         objectType: 'CommonRandomnessCommit',
-        objectVersion: 1,
         ceremonyId: input.setupContext.ceremonyId,
         manifestHash: input.setupContext.manifestHash,
         boardHeadHash: null,
         objectRoot: commitHash,
         chunkMerkleRoot: null,
-        byteLength: canonicalByteLength(commitWithoutHash),
         signerRole: 'Trustee',
         signerIdentity: input.trusteeIdentity,
         recoveryEpoch: input.recoveryEpoch,
@@ -663,7 +631,6 @@ export const createSetupCommonRandomness = (
 
     const commonRandomnessWithoutRoot = {
         objectType: 'SetupCommonRandomness',
-        objectVersion: 1,
         ...commonRandomnessContextFields(input.setupContext),
         commitRecords,
         revealRecords,

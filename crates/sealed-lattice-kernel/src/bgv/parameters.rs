@@ -7,9 +7,9 @@ pub(crate) const POLYNOMIAL_DEGREE: usize = 32_768;
 // Plaintext modulus t. 65537 is the Fermat prime 2^16+1; t-1 = 2^16 is
 // divisible by 2N, so a length-2N NTT exists for batch (slot) encoding.
 pub(crate) const PLAINTEXT_MODULUS: u64 = 65_537;
-pub(crate) const DATA_BASIS_ID: &str = "sealed-lattice-bgv-rns-data-basis-v1";
-pub(crate) const EXTENDED_BASIS_ID: &str = "sealed-lattice-bgv-rns-extended-basis-v1";
-pub(crate) const SPECIAL_BASIS_ID: &str = "sealed-lattice-bgv-rns-special-basis-v1";
+pub(crate) const DATA_BASIS_ID: &str = "sealed-lattice-bgv-rns-data-basis";
+pub(crate) const EXTENDED_BASIS_ID: &str = "sealed-lattice-bgv-rns-extended-basis";
+pub(crate) const SPECIAL_BASIS_ID: &str = "sealed-lattice-bgv-rns-special-basis";
 
 mod root_parameters;
 
@@ -27,7 +27,6 @@ pub(crate) use root_parameters::{
 pub(crate) fn bgv_parameters_value() -> Value {
     json!({
         "objectType": "BgvParameters",
-        "objectVersion": 1,
         "polynomialDegree": POLYNOMIAL_DEGREE,
         "plaintextModulus": PLAINTEXT_MODULUS,
         "dataPrimes": DATA_PRIMES,

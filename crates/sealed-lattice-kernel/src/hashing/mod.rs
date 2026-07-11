@@ -16,7 +16,7 @@ mod namespaces;
 pub use chunk_tree::chunk_root;
 pub use namespaces::*;
 
-pub const HASH512_PREIMAGE_PREFIX: &[u8] = b"sealed.vote/v1/hash512";
+pub const HASH512_PREIMAGE_PREFIX: &[u8] = b"sealed.vote/hash512";
 
 pub fn to_hex(bytes: &[u8]) -> String {
     const LOWER_HEX: &[u8; 16] = b"0123456789abcdef";
@@ -33,7 +33,7 @@ pub fn to_hex(bytes: &[u8]) -> String {
 /// The `Hash512` name describes the output length. Security is bounded by
 /// SHAKE256, not by a generic 512-bit random-oracle assumption.
 ///
-/// This helper frames the `sealed.vote/v1/hash512` prefix, a caller-supplied
+/// This helper frames the `sealed.vote/hash512` prefix, a caller-supplied
 /// protocol step domain, and each supplied part. Canonical protocol objects
 /// must pass the frozen ceremony, statement, and encoded object material as
 /// explicit framed parts rather than using an informal parallel convention.
@@ -69,7 +69,7 @@ pub fn hash512_hex(domain: &str, parts: &[&[u8]]) -> String {
 /// prefix. Used for internal Merkle commitment nodes where the 256-bit width
 /// is the disclosed binding length.
 pub(crate) fn hash256(domain: &str, parts: &[&[u8]]) -> [u8; 32] {
-    const HASH256_PREIMAGE_PREFIX: &[u8] = b"sealed.vote/v1/hash256";
+    const HASH256_PREIMAGE_PREFIX: &[u8] = b"sealed.vote/hash256";
     let mut preimage = Vec::new();
     preimage.extend(HASH256_PREIMAGE_PREFIX);
     append_bytes(&mut preimage, domain.as_bytes());
@@ -85,6 +85,52 @@ pub(crate) fn hash256(domain: &str, parts: &[&[u8]]) -> [u8; 32] {
     reader.read(&mut output);
 
     output
+}
+
+/// A streaming variant of [`hash256`] producing byte-identical output for the
+/// same domain and parts, without buffering the whole preimage. The caller
+/// declares the part count up front, then either supplies whole framed parts or
+/// opens one part with its byte length and streams its bytes. Used by the atom
+/// family backend's streamed Merkle leaf hashing, where one leaf's row part is
+/// produced one committed column at a time.
+pub(crate) struct StreamingHash256 {
+    hasher: Shake256,
+}
+
+impl StreamingHash256 {
+    pub(crate) fn new(domain: &str, part_count: u64) -> Self {
+        const HASH256_PREIMAGE_PREFIX: &[u8] = b"sealed.vote/hash256";
+        let mut hasher = Shake256::default();
+        hasher.update(HASH256_PREIMAGE_PREFIX);
+        update_varuint(&mut hasher, domain.len() as u64);
+        hasher.update(domain.as_bytes());
+        update_varuint(&mut hasher, part_count);
+        Self { hasher }
+    }
+
+    // Absorb one whole length-framed part.
+    pub(crate) fn absorb_part(&mut self, part: &[u8]) {
+        update_varuint(&mut self.hasher, part.len() as u64);
+        self.hasher.update(part);
+    }
+
+    // Open a length-framed part whose bytes will follow through `absorb_raw`.
+    // The caller must then absorb exactly `byte_length` bytes.
+    pub(crate) fn begin_part(&mut self, byte_length: u64) {
+        update_varuint(&mut self.hasher, byte_length);
+    }
+
+    // Absorb raw bytes belonging to the currently open part.
+    pub(crate) fn absorb_raw(&mut self, bytes: &[u8]) {
+        self.hasher.update(bytes);
+    }
+
+    pub(crate) fn finalize(self) -> [u8; 32] {
+        let mut reader = self.hasher.finalize_xof();
+        let mut output = [0_u8; 32];
+        reader.read(&mut output);
+        output
+    }
 }
 
 fn update_varuint(hasher: &mut Shake256, value: u64) {
@@ -137,7 +183,7 @@ pub fn canonical_root(type_id: u64, version: u64, canonical_bytes: &[u8]) -> Str
     append_varuint(&mut version_bytes, version);
 
     hash512_hex(
-        "sealed-lattice-root/canonical-root-v1",
+        "sealed-lattice-root/canonical-root",
         &[&type_id_bytes, &version_bytes, canonical_bytes],
     )
 }
@@ -417,7 +463,7 @@ pub fn canonical_json_matches_bytes(value: &Value, expected_bytes: &[u8]) -> Can
 /// Single structural domain for canonical typed protocol objects, records, and
 /// roots. Domain separation comes from the mandatory `objectType` discriminator
 /// already inside the canonical JSON, not from a per-type namespace string. The
-/// non-empty-objectType check is load-bearing: it makes "never merge a typeless
+/// non-empty-objectType check is required: it makes "never merge a typeless
 /// preimage into the shared domain" a hard rejection, not a convention.
 pub fn derive_canonical_object_hash(value: &Value) -> CanonicalResult<String> {
     let has_object_type = value
@@ -492,7 +538,7 @@ mod tests {
                     }
                 }),
                 "{\"a\":{\"z\":true},\"b\":[2,1],\"objectType\":\"CanonicalHashParityCase\",\"objectVersion\":1}",
-                "2ed1fd2293f48e6b4f7b9d7d4b0f105d3d6a9c4c392f70a3b9c6cade53247ee5f286f9b565258ef1f29fd6416aa349ab0388ef719303242382979a27da5a3589",
+                "4f432053917977cd39c0586aebfee7c89dbc800f302f058cdc5dd819b8bc0c6e48f9c193ba17661e52b4d305f1d293b51300405be27e2d734997ebb9b55405cb",
             ),
             (
                 serde_json::json!({
@@ -502,7 +548,7 @@ mod tests {
                     "2": "b"
                 }),
                 "{\"10\":\"a\",\"2\":\"b\",\"objectType\":\"CanonicalHashParityCase\",\"objectVersion\":1}",
-                "629347ec581398f06eea18e87c00946ec8eefa12574725b41a42b0056b97ec744d79ef8ed6d9c8b8a38e064e2dbde92f517206c3a32727bbd606e4e0c45de6b8",
+                "00afc8c82b82ab6d37ed1b43b310e075d5e496c597d848a308ef2a7c9f84f3368f95d5a52e364f8892f8b6748a39ff5a5ae1664e5c2a588b83607641011f8b96",
             ),
             (
                 serde_json::json!({
@@ -512,7 +558,7 @@ mod tests {
                     "supplementary": "\u{10000}"
                 }),
                 "{\"objectType\":\"CanonicalHashParityCase\",\"objectVersion\":1,\"supplementary\":\"\u{10000}\",\"value\":\"\u{00e9}\"}",
-                "4421299dcece175cc568f13535276189cf09949bc0e0babf88444a42584ce0e51306a8dc26329ec1be1f490589486a9bd1040589bfe0a21ec868ed413d7947a2",
+                "46ffacae8edfc56256c3bcd77395c4dabba324579b67623658f1c6a7b5e1bdf0f6ebdcfb2e6901442c2f4275ca7513e3807ca20ae8f23577fc113dd179dd8b3c",
             ),
         ];
 

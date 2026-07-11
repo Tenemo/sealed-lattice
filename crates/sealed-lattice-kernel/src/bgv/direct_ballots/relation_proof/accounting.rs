@@ -5,10 +5,7 @@ use crate::hashing::derive_canonical_object_hash;
 pub(in crate::bgv::direct_ballots) fn direct_ballot_relation_proof_bytes_hash(
     proof_bytes: &[u8],
 ) -> String {
-    hash512_hex(
-        DIRECT_BALLOT_RELATION_PROOF_BYTES_HASH_DOMAIN,
-        &[proof_bytes],
-    )
+    hash512_hex(RELATION_PROOF_BYTES_HASH_DOMAIN, &[proof_bytes])
 }
 
 // Binds the operative shape of the internal direct-ballot validity relation proof: statement
@@ -24,11 +21,11 @@ pub(in crate::bgv::direct_ballots) fn direct_ballot_relation_proof_parameters_ha
 -> CanonicalResult<String> {
     derive_canonical_object_hash(&json!({
         "objectType": "BallotValidityProofParameters",
-        "statementHashDomain": DIRECT_BALLOT_RELATION_STATEMENT_HASH_DOMAIN,
+        "statementHashDomain": RELATION_STATEMENT_HASH_DOMAIN,
         "proofEncoding": "binary relation transcript",
-        "challengeBits": DIRECT_BALLOT_RELATION_PROOF_CHALLENGE_BITS,
-        "challengeDomain": "sealed-lattice/direct-encrypted-ballot/relation-challenge-v1",
-        "proofBytesDomain": DIRECT_BALLOT_RELATION_PROOF_BYTES_HASH_DOMAIN,
+        "challengeBits": RELATION_PROOF_CHALLENGE_BITS,
+        "challengeDomain": "sealed-lattice/direct-encrypted-ballot/relation-challenge",
+        "proofBytesDomain": RELATION_PROOF_BYTES_HASH_DOMAIN,
         "relation": "BGV all-limb encryption equations, score encoding, one-hot constraints, randomizer support, and error support",
         "sourceRingDegree": POLYNOMIAL_DEGREE,
         "dataPrimeCount": DATA_PRIMES.len(),
@@ -36,9 +33,9 @@ pub(in crate::bgv::direct_ballots) fn direct_ballot_relation_proof_parameters_ha
 }
 
 pub(in crate::bgv::direct_ballots) fn direct_ballot_relation_response_bytes() -> usize {
-    (DIRECT_BALLOT_RELATION_WITNESS_POLYNOMIALS * POLYNOMIAL_DEGREE
+    (RELATION_WITNESS_POLYNOMIALS * POLYNOMIAL_DEGREE
         + direct_ballot_relation_response_scalar_count())
-        * DIRECT_BALLOT_RELATION_RESPONSE_COEFFICIENT_BYTES
+        * RELATION_RESPONSE_COEFFICIENT_BYTES
 }
 
 pub(in crate::bgv::direct_ballots) fn direct_ballot_relation_commitment_bytes() -> usize {
@@ -49,11 +46,11 @@ pub(in crate::bgv::direct_ballots) fn direct_ballot_relation_commitment_bytes() 
 }
 
 pub(in crate::bgv::direct_ballots) fn direct_ballot_relation_response_scalar_count() -> usize {
-    DIRECT_BALLOT_OPTION_COUNT + DIRECT_BALLOT_OPTION_COUNT * DIRECT_BALLOT_SCORE_BUCKET_COUNT
+    OPTION_COUNT + OPTION_COUNT * SCORE_BUCKET_COUNT
 }
 
 pub(super) fn direct_ballot_score_linear_commitment_scalar_count() -> usize {
-    DIRECT_BALLOT_OPTION_COUNT * 2
+    OPTION_COUNT * 2
 }
 
 pub(super) fn direct_ballot_support_commitment_bytes() -> usize {
@@ -61,9 +58,7 @@ pub(super) fn direct_ballot_support_commitment_bytes() -> usize {
 }
 
 pub(super) fn direct_ballot_support_commitment_scalar_count() -> usize {
-    DIRECT_BALLOT_OPTION_COUNT
-        * DIRECT_BALLOT_SCORE_BUCKET_COUNT
-        * DIRECT_BALLOT_ONE_HOT_SUPPORT_EXPANSION_COEFFICIENTS
-        + POLYNOMIAL_DEGREE * DIRECT_BALLOT_RANDOMIZER_SUPPORT_EXPANSION_COEFFICIENTS
-        + 2 * POLYNOMIAL_DEGREE * DIRECT_BALLOT_ERROR_SUPPORT_EXPANSION_COEFFICIENTS
+    OPTION_COUNT * SCORE_BUCKET_COUNT * ONE_HOT_SUPPORT_EXPANSION_COEFFICIENTS
+        + POLYNOMIAL_DEGREE * RANDOMIZER_SUPPORT_EXPANSION_COEFFICIENTS
+        + 2 * POLYNOMIAL_DEGREE * ERROR_SUPPORT_EXPANSION_COEFFICIENTS
 }

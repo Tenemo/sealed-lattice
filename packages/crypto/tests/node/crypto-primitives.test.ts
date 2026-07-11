@@ -1,10 +1,10 @@
-import { hexToBytes } from '@noble/hashes/utils.js';
 import type { CanonicalSignedRootObject } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
 import {
     canonicalJson,
     createPrivateVssMailboxKeyPair,
+    decryptLocalTrusteeSetupSealedMaterial,
     decryptLocalTrusteeState,
     decryptPrivateVssMailboxEnvelope,
     deriveCanonicalObjectHash,
@@ -48,9 +48,6 @@ const changeLastHexByte = (hexEncodedBytes: string): string =>
         hexEncodedBytes.endsWith('00') ? '01' : '00'
     }`;
 
-const hashHexEncodedBytes = (domain: string, hexEncodedBytes: string): string =>
-    hash512Hex(domain, [hexToBytes(hexEncodedBytes)]);
-
 const createSignedRoot = (
     objectRoot = deriveCanonicalObjectHash({
         objectType: 'BoardHeadHash',
@@ -58,13 +55,11 @@ const createSignedRoot = (
     }),
 ): CanonicalSignedRootObject => ({
     objectType: 'BoardHead',
-    objectVersion: 1,
     ceremonyId: 'ceremony',
     manifestHash: null,
     boardHeadHash: null,
     objectRoot,
     chunkMerkleRoot: null,
-    byteLength: 64,
     signerRole: 'Board',
     signerIdentity: 'board',
     recoveryEpoch: 0,
@@ -79,7 +74,7 @@ describe('crypto primitive boundary', () => {
         largeCanonicalPart.fill(7);
 
         expect(
-            hash512Hex('sealed-lattice-root/plaintext-root-v1', [
+            hash512Hex('sealed-lattice-root/plaintext-root', [
                 largeCanonicalPart,
             ]),
         ).toHaveLength(128);
@@ -176,7 +171,6 @@ describe('crypto primitive boundary', () => {
         expect(
             verifySignedObjectSignature(signature, {
                 objectType: 'BoardHead',
-                objectVersion: 1,
                 signerRole: 'Board',
                 signerIdentity: 'board',
                 ceremonyId: 'ceremony',
@@ -190,7 +184,6 @@ describe('crypto primitive boundary', () => {
         expect(
             verifySignedObjectSignature(signature, {
                 objectType: 'BoardHead',
-                objectVersion: 1,
                 signerRole: 'Board',
                 signerIdentity: 'board',
                 ceremonyId: 'ceremony',
@@ -225,7 +218,6 @@ describe('crypto primitive boundary', () => {
             createPrivateVssMailboxKeyPair(mailboxKeySeed);
         const privateEnvelopeAad = {
             objectType: 'PrivateVssEnvelopeAad',
-            objectVersion: 1,
             ceremonyId: 'ceremony',
             manifestHash: deriveCanonicalObjectHash({
                 objectType: 'ElectionManifestHash',
@@ -241,7 +233,6 @@ describe('crypto primitive boundary', () => {
         };
         const privateEnvelope = {
             objectType: 'PrivateVssShareEnvelope',
-            objectVersion: 1,
             privateEnvelopeAadHash:
                 deriveCanonicalObjectHash(privateEnvelopeAad),
             sourceTrusteeIdentity: 'trustee-2',
@@ -252,9 +243,7 @@ describe('crypto primitive boundary', () => {
                     shareValues: [1, 2, 3],
                     privateVssShareProof: {
                         objectType: 'PrivateVssShareProof',
-                        objectVersion: 1,
-                        proofId:
-                            'sealed-lattice-private-vss-share-proof-lnp-v1',
+                        proofId: 'sealed-lattice-private-vss-share-proof-lnp',
                         proofMaterialRoot: deriveCanonicalObjectHash({
                             objectType: 'PrivateVssShareEnvelopeHash',
                             proof: 'material-root',
@@ -285,7 +274,6 @@ describe('crypto primitive boundary', () => {
 
         expect(encrypted.encryptedEnvelope).toMatchObject({
             objectType: 'EncryptedPrivateVssShareEnvelope',
-            objectVersion: 1,
             recipientMailboxPublicKeyHash:
                 recipientMailboxKeyPair.publicKeyHash,
             aeadNonceHex: aeadNonceBytesHex,
@@ -515,7 +503,6 @@ describe('crypto primitive boundary', () => {
                 materialClass: 'aggregate-threshold-share-sealed',
                 materialPlaintext: {
                     objectType: 'LocalTrusteeAggregateThresholdShareMaterial',
-                    objectVersion: 1,
                     trusteeIdentity: 'trustee-3',
                     trusteeRosterPosition: 3,
                     thresholdShareCommitmentRecipientRoot,
@@ -532,7 +519,6 @@ describe('crypto primitive boundary', () => {
             sealedAggregateThresholdShare.materialRoot;
         const localStateCommitment = {
             objectType: 'LocalTrusteeSetupStateCommitment',
-            objectVersion: 1,
             ceremonyId: setupContext.ceremonyId,
             manifestHash: setupContext.manifestHash,
             rosterHash: setupContext.rosterHash,
@@ -550,7 +536,6 @@ describe('crypto primitive boundary', () => {
         } as const;
         const localStatePlaintext = {
             objectType: 'LocalTrusteeSetupStateSealedPayload',
-            objectVersion: 1,
             ceremonyId: setupContext.ceremonyId,
             manifestHash: setupContext.manifestHash,
             rosterHash: setupContext.rosterHash,
@@ -576,7 +561,6 @@ describe('crypto primitive boundary', () => {
 
         expect(encrypted.encryptedLocalState).toMatchObject({
             objectType: 'EncryptedLocalTrusteeSetupState',
-            objectVersion: 1,
             localStateRoot: localStateCommitment.localStateRoot,
             aeadNonceHex: aeadNonceBytesHex,
             aeadTagLength: 128,
@@ -593,6 +577,56 @@ describe('crypto primitive boundary', () => {
             localStatePlaintextHash: encrypted.localStatePlaintextHash,
             storageAadHash: encrypted.storageAadHash,
         });
+        await expect(
+            decryptLocalTrusteeSetupSealedMaterial({
+                sealedMaterial: sealedAggregateThresholdShare.sealedMaterial,
+                expectedMaterialRoot: aggregateThresholdShareRoot,
+                localStateCommitment,
+                setupContext,
+                storageKeyBytesHex,
+            }),
+        ).resolves.toMatchObject({
+            materialPlaintext: {
+                objectType: 'LocalTrusteeAggregateThresholdShareMaterial',
+                shareValues: [1, 2, 3],
+            },
+            materialPlaintextHash:
+                sealedAggregateThresholdShare.materialPlaintextHash,
+            materialAadHash: sealedAggregateThresholdShare.materialAadHash,
+        });
+
+        const tamperedSealedCiphertextBytesHex = changeLastHexByte(
+            sealedAggregateThresholdShare.sealedMaterial.encryptedMaterial
+                .ciphertextBytesHex,
+        );
+        const tamperedSealedEnvelopeWithoutHash = {
+            ...objectWithoutField(
+                sealedAggregateThresholdShare.sealedMaterial.encryptedMaterial,
+                'encryptedMaterialHash',
+            ),
+            ciphertextBytesHex: tamperedSealedCiphertextBytesHex,
+        };
+        const tamperedSealedEnvelope = {
+            ...tamperedSealedEnvelopeWithoutHash,
+            encryptedMaterialHash: localTrusteeEnvelopeHash(
+                'sealed-lattice-local-trustee-state/sealed-material-envelope-hash',
+                tamperedSealedEnvelopeWithoutHash,
+            ),
+        } as typeof sealedAggregateThresholdShare.sealedMaterial.encryptedMaterial;
+        await expect(
+            decryptLocalTrusteeSetupSealedMaterial({
+                sealedMaterial: {
+                    ...sealedAggregateThresholdShare.sealedMaterial,
+                    ciphertextReference:
+                        tamperedSealedEnvelope.encryptedMaterialHash,
+                    encryptedMaterial: tamperedSealedEnvelope,
+                },
+                expectedMaterialRoot: aggregateThresholdShareRoot,
+                localStateCommitment,
+                setupContext,
+                storageKeyBytesHex,
+            }),
+        ).rejects.toThrow();
 
         const tamperedLocalStateCiphertextBytesHex = changeLastHexByte(
             encrypted.encryptedLocalState.ciphertextBytesHex,
@@ -603,17 +637,13 @@ describe('crypto primitive boundary', () => {
                 'encryptedLocalStateHash',
             ),
             ciphertextBytesHex: tamperedLocalStateCiphertextBytesHex,
-            ciphertextBytesHash: hashHexEncodedBytes(
-                'sealed-lattice-local-trustee-state/ciphertext-bytes-v1',
-                tamperedLocalStateCiphertextBytesHex,
-            ),
         };
         await expect(
             decryptLocalTrusteeState({
                 encryptedLocalState: {
                     ...tamperedLocalStateEnvelopeWithoutHash,
                     encryptedLocalStateHash: localTrusteeEnvelopeHash(
-                        'sealed-lattice-local-trustee-state/envelope-hash-v1',
+                        'sealed-lattice-local-trustee-state/envelope-hash',
                         tamperedLocalStateEnvelopeWithoutHash,
                     ),
                 } as typeof encrypted.encryptedLocalState,
@@ -642,7 +672,7 @@ describe('crypto primitive boundary', () => {
                 encryptedLocalState: {
                     ...nonceSwappedEnvelopeWithoutHash,
                     encryptedLocalStateHash: localTrusteeEnvelopeHash(
-                        'sealed-lattice-local-trustee-state/envelope-hash-v1',
+                        'sealed-lattice-local-trustee-state/envelope-hash',
                         nonceSwappedEnvelopeWithoutHash,
                     ),
                 } as typeof encrypted.encryptedLocalState,
@@ -670,7 +700,7 @@ describe('crypto primitive boundary', () => {
                 encryptedLocalState: {
                     ...reboundLocalStateEnvelope,
                     encryptedLocalStateHash: localTrusteeEnvelopeHash(
-                        'sealed-lattice-local-trustee-state/envelope-hash-v1',
+                        'sealed-lattice-local-trustee-state/envelope-hash',
                         reboundLocalStateEnvelope,
                     ),
                 } as typeof encrypted.encryptedLocalState,
@@ -694,7 +724,7 @@ describe('crypto primitive boundary', () => {
         const reboundEncryptedMaterial = {
             ...reboundSealedMaterialEnvelope,
             encryptedMaterialHash: localTrusteeEnvelopeHash(
-                'sealed-lattice-local-trustee-state/sealed-material-envelope-hash-v1',
+                'sealed-lattice-local-trustee-state/sealed-material-envelope-hash',
                 reboundSealedMaterialEnvelope,
             ),
         } as typeof sealedAggregateThresholdShare.sealedMaterial.encryptedMaterial;
@@ -817,7 +847,6 @@ describe('crypto primitive boundary', () => {
             expect(
                 verifySignedObjectSignature(rejectedSignature, {
                     objectType: 'BoardHead',
-                    objectVersion: 1,
                     signerRole: 'Board',
                     signerIdentity: 'board',
                     ceremonyId: 'ceremony',

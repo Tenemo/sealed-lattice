@@ -8,9 +8,7 @@ pub(super) fn evaluate_direct_ballot_support_commitment(
     validate_direct_ballot_witness_vector_shape(witness_vector)?;
     let modulus = direct_ballot_support_modulus();
     let mut one_hot_booleanity = Vec::with_capacity(
-        DIRECT_BALLOT_OPTION_COUNT
-            * DIRECT_BALLOT_SCORE_BUCKET_COUNT
-            * DIRECT_BALLOT_ONE_HOT_SUPPORT_EXPANSION_COEFFICIENTS,
+        OPTION_COUNT * SCORE_BUCKET_COUNT * ONE_HOT_SUPPORT_EXPANSION_COEFFICIENTS,
     );
     for (mask_row, witness_row) in mask_vector
         .one_hot_coefficients
@@ -86,10 +84,8 @@ pub(super) fn verify_direct_ballot_support_response(
     let challenge_residue = challenge_residue(challenge, modulus)?;
     for (option_index, row) in response_vector.one_hot_coefficients.iter().enumerate() {
         let commitment_offset = option_index
-            .checked_mul(DIRECT_BALLOT_SCORE_BUCKET_COUNT)
-            .and_then(|offset| {
-                offset.checked_mul(DIRECT_BALLOT_ONE_HOT_SUPPORT_EXPANSION_COEFFICIENTS)
-            })
+            .checked_mul(SCORE_BUCKET_COUNT)
+            .and_then(|offset| offset.checked_mul(ONE_HOT_SUPPORT_EXPANSION_COEFFICIENTS))
             .ok_or_else(|| {
                 invalid_direct_ballot_relation_proof(
                     "direct ballot one-hot support commitment offset overflowed",
@@ -100,9 +96,7 @@ pub(super) fn verify_direct_ballot_support_response(
             DirectBallotSupportKind::OneHot,
             row,
             &support_commitment.one_hot_booleanity[commitment_offset
-                ..commitment_offset
-                    + DIRECT_BALLOT_SCORE_BUCKET_COUNT
-                        * DIRECT_BALLOT_ONE_HOT_SUPPORT_EXPANSION_COEFFICIENTS],
+                ..commitment_offset + SCORE_BUCKET_COUNT * ONE_HOT_SUPPORT_EXPANSION_COEFFICIENTS],
             challenge_residue,
             modulus,
         )?;
@@ -310,9 +304,9 @@ pub(super) fn powers(value: u64, highest_power: usize, modulus: u64) -> Canonica
 impl DirectBallotSupportKind {
     fn expansion_coefficient_count(self) -> usize {
         match self {
-            Self::OneHot => DIRECT_BALLOT_ONE_HOT_SUPPORT_EXPANSION_COEFFICIENTS,
-            Self::Randomizer => DIRECT_BALLOT_RANDOMIZER_SUPPORT_EXPANSION_COEFFICIENTS,
-            Self::Error => DIRECT_BALLOT_ERROR_SUPPORT_EXPANSION_COEFFICIENTS,
+            Self::OneHot => ONE_HOT_SUPPORT_EXPANSION_COEFFICIENTS,
+            Self::Randomizer => RANDOMIZER_SUPPORT_EXPANSION_COEFFICIENTS,
+            Self::Error => ERROR_SUPPORT_EXPANSION_COEFFICIENTS,
         }
     }
 }

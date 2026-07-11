@@ -1,15 +1,37 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+    createIsolatedNpmEnvironment,
     extractPublishedKernelHash,
     hashPublishedKernelBytesSha256Hex,
     parsePackDryRunFilePaths,
+    resolvePackedPackageNpmCacheDirectory,
     validatePublishedKernelIntegrity,
     validatePublishedPackageFilePaths,
     validatePublishedPackageMetadata,
 } from '#tools/ci/verify-packed-package';
 
 describe('packed package policy checks', () => {
+    it('isolates npm cache writes inside the package-smoke temporary directory', () => {
+        expect(
+            createIsolatedNpmEnvironment('isolated-cache', {
+                NPM_CONFIG_CACHE: 'ambient-cache',
+                PATH: 'test-path',
+            }),
+        ).toEqual({
+            npm_config_cache: 'isolated-cache',
+            PATH: 'test-path',
+        });
+        expect(
+            resolvePackedPackageNpmCacheDirectory('default-cache', {
+                NPM_CONFIG_CACHE: 'configured-cache',
+            }),
+        ).toBe('configured-cache');
+        expect(resolvePackedPackageNpmCacheDirectory('default-cache', {})).toBe(
+            'default-cache',
+        );
+    });
+
     it('parses npm dry-run metadata into published file paths', () => {
         expect(
             parsePackDryRunFilePaths(

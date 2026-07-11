@@ -19,7 +19,16 @@ const TARGET_DECRYPTION_FIXTURE_PARTICIPANT_COUNT: u64 = 3;
 const TARGET_DECRYPTION_FIXTURE_SETUP_SEED: &str = "target-decryption-setup-seed";
 const TARGET_DECRYPTION_FIXTURE_CEREMONY_ID: &str = "target-decryption-ceremony";
 const TARGET_DECRYPTION_FIXTURE_SETUP_EPOCH: &str = "setup-epoch-1";
-const TARGET_DECRYPTION_FIXTURE_COMPACT_SETUP_EPOCH: &str = "target-decryption-test";
+
+struct AcceptedSetupFixture {
+    setup_package: Value,
+    local_aggregate_opening_handoffs: Vec<Value>,
+}
+
+struct AggregateThresholdCommitmentSetupOutput {
+    public_commitment_set: Value,
+    local_aggregate_opening_handoffs: Vec<Value>,
+}
 
 // The three fixture trustees, listed in roster order. Roster position is the
 // array index; the Shamir abscissa is roster_position + 1, matching
@@ -100,15 +109,17 @@ fn target_decryption_evaluator_key() -> DevelopmentBgvKey {
 // reads: a five-field setupContext (with participantCount so the roster-derived
 // setupParametersHash matches), a phaseTranscript whose setupIntent phase binds
 // the fixture roster, commonRandomness.publicMatrixSeedHash, and the injected
-// compact-VSS aggregate-threshold commitment set plus share-linkage statement
-// root. The compact commitments are built (see compact_aggregate_threshold_...)
+// VSS aggregate-threshold commitment set plus share-linkage statement
+// root. The commitments are built (see aggregate_threshold_...)
 // from the SAME Shamir shares the local witness opens, so the C2 binding in
 // share_generation is exercised, not bypassed.
 fn accepted_setup_package() -> Value {
-    static ACCEPTED_SETUP_PACKAGE_CACHE: OnceLock<Value> = OnceLock::new();
-    ACCEPTED_SETUP_PACKAGE_CACHE
-        .get_or_init(build_accepted_setup_package)
-        .clone()
+    accepted_setup_fixture().setup_package.clone()
+}
+
+fn accepted_setup_fixture() -> &'static AcceptedSetupFixture {
+    static ACCEPTED_SETUP_FIXTURE_CACHE: OnceLock<AcceptedSetupFixture> = OnceLock::new();
+    ACCEPTED_SETUP_FIXTURE_CACHE.get_or_init(build_accepted_setup_fixture)
 }
 
 fn accepted_setup_package_base() -> Value {
@@ -123,7 +134,6 @@ fn accepted_setup_package_base() -> Value {
         .enumerate()
         .map(|(roster_position, trustee_identity)| json!({
             "objectType": "SetupPhaseParticipantObject",
-            "objectVersion": 1,
             "phaseId": "setupIntent",
             "phaseNumber": 0,
             "ceremonyId": TARGET_DECRYPTION_FIXTURE_CEREMONY_ID,
@@ -135,7 +145,6 @@ fn accepted_setup_package_base() -> Value {
 
     json!({
         "objectType": "SetupPackage",
-        "objectVersion": 1,
         "setupContext": {
             "ceremonyId": TARGET_DECRYPTION_FIXTURE_CEREMONY_ID,
             "manifestHash": manifest_hash,
@@ -146,7 +155,6 @@ fn accepted_setup_package_base() -> Value {
         },
         "commonRandomness": {
             "objectType": "CollectiveBgvCommonRandomness",
-            "objectVersion": 1,
             "publicMatrixSeedHash": target_decryption_fixture_public_matrix_seed_hash(),
         },
         "phaseTranscript": [
@@ -160,20 +168,23 @@ fn accepted_setup_package_base() -> Value {
     })
 }
 
-fn build_accepted_setup_package() -> Value {
+fn build_accepted_setup_fixture() -> AcceptedSetupFixture {
     let mut accepted_setup_package = accepted_setup_package_base();
     let target_share_profile = target_share_profile(&accepted_setup_package);
-    let compact_aggregate_threshold_commitment_set =
-        compact_aggregate_threshold_commitment_set(&accepted_setup_package, &target_share_profile);
-    accepted_setup_package["compactVssAggregateThresholdCommitmentSet"] =
-        compact_aggregate_threshold_commitment_set;
-    accepted_setup_package["compactVssShareLinkageStatement"] = json!({
-        "objectType": "CompactVssShareLinkageStatement",
-        "objectVersion": 1,
+    let aggregate_threshold_commitment_setup_output =
+        aggregate_threshold_commitment_set(&accepted_setup_package, &target_share_profile);
+    accepted_setup_package["vssPublicAggregateThresholdCommitmentSet"] =
+        aggregate_threshold_commitment_setup_output.public_commitment_set;
+    accepted_setup_package["vssShareLinkageStatement"] = json!({
+        "objectType": "VssShareLinkageStatement",
         "statementRoot": "4".repeat(128),
     });
 
-    accepted_setup_package
+    AcceptedSetupFixture {
+        setup_package: accepted_setup_package,
+        local_aggregate_opening_handoffs: aggregate_threshold_commitment_setup_output
+            .local_aggregate_opening_handoffs,
+    }
 }
 
 // The target-share profile the reader re-derives (read_target_share_profile). Its
@@ -187,7 +198,6 @@ fn target_share_profile(_setup_package: &Value) -> Value {
         canonical_target_decryption_parameter_hashes().expect("target decryption profile hashes");
     let profile = json!({
         "objectType": "TargetDecryptionShareProfile",
-        "objectVersion": 1,
         "targetDecryptionProfileHash": target_decryption_profile_hash,
         "targetDecryptionProfileBindingHash": target_decryption_profile_binding_hash,
         "decryptionThreshold": 2,
@@ -245,7 +255,6 @@ fn accepted_record(target_ciphertext_hash: &str, target_layout_hash: &str) -> Va
         canonical_target_decryption_parameter_hashes().expect("target decryption parameters hash");
     let mut record = json!({
         "objectType": "TargetAcceptedRecord",
-        "objectVersion": 1,
         "ceremonyId": TARGET_DECRYPTION_FIXTURE_CEREMONY_ID,
         "electionManifestHash": target_decryption_fixture_manifest_hash(),
         "targetProposalHash": derive_canonical_object_hash(
@@ -329,10 +338,10 @@ fn target_fixture() -> (Value, Value, Value, Value) {
     )
 }
 
-fn compact_aggregate_threshold_commitment_set(
+fn aggregate_threshold_commitment_set(
     setup_package: &Value,
     target_share_profile: &Value,
-) -> Value {
+) -> AggregateThresholdCommitmentSetupOutput {
     let setup_binding = read_setup_binding(setup_package).expect("setup binding");
     let target_share_profile =
         read_target_share_profile(target_share_profile, &setup_binding).expect("share profile");
@@ -340,6 +349,7 @@ fn compact_aggregate_threshold_commitment_set(
     let rns_limb_count = CANONICAL_TARGET_CIPHERTEXT_LEVEL + 1;
     let mut recipient_records =
         Vec::with_capacity(setup_binding.participants.len() * rns_limb_count);
+    let mut local_aggregate_opening_handoffs = Vec::with_capacity(setup_binding.participants.len());
     for participant in &setup_binding.participants {
         let share_by_limb = derive_threshold_secret_share_by_limb(
             &evaluator_key,
@@ -350,38 +360,39 @@ fn compact_aggregate_threshold_commitment_set(
             CANONICAL_TARGET_CIPHERTEXT_LEVEL,
         )
         .expect("target share limbs");
+        let mut aggregate_opening_credentials = Vec::with_capacity(rns_limb_count);
         for (rns_limb_index, share_values) in share_by_limb.iter().enumerate() {
             let rns_prime = DATA_PRIMES[rns_limb_index];
-            let aggregate_commitment_message_values =
-                compact_aggregate_opening_values(share_values, rns_prime);
-            let aggregate_randomness_by_column = vec![vec![0_i64; POLYNOMIAL_DEGREE]; 2];
-            let message_coefficient_bound = compact_aggregate_message_coefficient_bound(
+            let aggregate_commitment_message_values = aggregate_opening_values(share_values);
+            let aggregate_material_seed_hex =
+                fixture_aggregate_material_seed_hex(participant.roster_position, rns_limb_index);
+            let computation = compute_aggregate_opening(AggregateOpeningRootsInput {
+                setup_binding: &setup_binding,
+                participant,
+                setup_epoch: TARGET_DECRYPTION_FIXTURE_SETUP_EPOCH,
+                rns_limb_index,
                 rns_prime,
-                setup_binding.participants.len(),
-            )
-            .expect("compact aggregate message coefficient bound");
-            let computation =
-                compute_compact_aggregate_opening(CompactAggregateOpeningRootsInput {
-                    setup_binding: &setup_binding,
-                    participant,
-                    setup_epoch: TARGET_DECRYPTION_FIXTURE_COMPACT_SETUP_EPOCH,
-                    public_matrix_seed_hash: &setup_binding.public_matrix_seed_hash,
-                    rns_limb_index,
-                    rns_prime,
-                    aggregate_commitment_message_values: &aggregate_commitment_message_values,
-                    message_coefficient_bound,
-                    aggregate_randomness_by_column: &aggregate_randomness_by_column,
-                })
-                .expect("compact aggregate opening computation");
-            let source_share_commitment_roots = (0..setup_binding.participants.len())
-                .map(|_| json!("9".repeat(128)))
-                .collect::<Vec<_>>();
-            let source_share_opening_roots = (0..setup_binding.participants.len())
-                .map(|_| json!("8".repeat(128)))
-                .collect::<Vec<_>>();
+                aggregate_commitment_message_values: &aggregate_commitment_message_values,
+                message_coefficient_bound: rns_prime,
+                aggregate_material_seed_hex: &aggregate_material_seed_hex,
+            })
+            .expect("aggregate opening computation");
+            aggregate_opening_credentials.push(json!({
+                "objectType": "LocalTrusteeVssPublicAggregateOpeningCredential",
+                "recipientIdentity": participant.trustee_identity.as_str(),
+                "recipientRosterPosition": participant.roster_position,
+                "recipientTrusteePoint": participant.interpolation_point,
+                "rnsLimbIndex": rns_limb_index,
+                "rnsPrime": rns_prime,
+                "aggregateCommitmentRoot": computation.commitment_root.clone(),
+                "aggregateOpeningRoot": computation.opening_root.clone(),
+                "aggregateCommitmentMessageValuesLeHex": coefficient_vector_le_hex(
+                    &aggregate_commitment_message_values,
+                ),
+                "aggregateMaterialSeedHex": aggregate_material_seed_hex,
+            }));
             recipient_records.push(json!({
-                "objectType": "CompactVssAggregateThresholdCommitment",
-                "objectVersion": 1,
+                "objectType": "VssPublicAggregateThresholdCommitment",
                 "recipientIdentity": participant.trustee_identity.as_str(),
                 "recipientRosterPosition": participant.roster_position,
                 "recipientTrusteePoint": participant.interpolation_point,
@@ -390,15 +401,17 @@ fn compact_aggregate_threshold_commitment_set(
                 "aggregateCommitmentRoot": computation.commitment_root,
                 "aggregateOpeningRoot": computation.opening_root,
                 "commitment": computation.commitment,
-                "sourceShareCommitmentRoots": source_share_commitment_roots,
-                "sourceShareOpeningRoots": source_share_opening_roots,
             }));
         }
+        local_aggregate_opening_handoffs.push(json!({
+            "trusteeIdentity": participant.trustee_identity.as_str(),
+            "trusteeRosterPosition": participant.roster_position,
+            "aggregateOpeningCredentials": aggregate_opening_credentials,
+        }));
     }
 
     let mut set = json!({
-        "objectType": "CompactVssAggregateThresholdCommitmentSet",
-        "objectVersion": 1,
+        "objectType": "VssPublicAggregateThresholdCommitmentSet",
         "publicMatrixSeedHash": setup_binding.public_matrix_seed_hash.as_str(),
         "participantCount": setup_binding.participants.len(),
         "rnsLimbCount": rns_limb_count,
@@ -407,13 +420,27 @@ fn compact_aggregate_threshold_commitment_set(
     });
     set["aggregateThresholdCommitmentRoot"] =
         json!(derive_canonical_object_hash(&set).expect("aggregate threshold commitment set root"));
-    set
+    AggregateThresholdCommitmentSetupOutput {
+        public_commitment_set: set,
+        local_aggregate_opening_handoffs,
+    }
 }
 
-fn compact_aggregate_opening_values(share_values: &[u64], rns_prime: u64) -> Vec<u64> {
-    let mut aggregate_commitment_message_values = share_values.to_vec();
-    aggregate_commitment_message_values[0] += rns_prime;
-    aggregate_commitment_message_values
+// A deterministic valid 128-hex private material seed per fixture aggregate
+// commitment, so distinct participants and limbs hide with distinct trees while
+// the fixture regenerates them byte-identically.
+fn fixture_aggregate_material_seed_hex(roster_position: usize, rns_limb_index: usize) -> String {
+    crate::hashing::hash512_hex(
+        "sealed-lattice-bgv-rns/target-decryption-fixture-aggregate-material-seed",
+        &[
+            &(roster_position as u64).to_le_bytes(),
+            &(rns_limb_index as u64).to_le_bytes(),
+        ],
+    )
+}
+
+fn aggregate_opening_values(share_values: &[u64]) -> Vec<u64> {
+    share_values.to_vec()
 }
 
 fn generate_share_from_fresh_local_witness(
@@ -535,11 +562,10 @@ fn rebind_target_accepted_record_hash(accepted_record: &mut Value) {
 
 fn rebind_active_credential_binding_root(statement: &mut Value) {
     let active_credential_bindings =
-        statement["compactAggregateOpeningBinding"]["activeCredentialBindings"].clone();
-    statement["compactAggregateOpeningBinding"]["activeCredentialBindingRoot"] = json!(
+        statement["aggregateOpeningBinding"]["activeCredentialBindings"].clone();
+    statement["aggregateOpeningBinding"]["activeCredentialBindingRoot"] = json!(
         derive_canonical_object_hash(&json!({
-            "objectType": "TargetDecryptionCompactAggregateOpeningCredentialBindingSet",
-            "objectVersion": 1,
+            "objectType": "TargetDecryptionAggregateOpeningCredentialBindingSet",
             "activeCredentialBindings": active_credential_bindings,
         }))
         .expect("active credential binding root")
@@ -633,76 +659,32 @@ fn local_target_share_witness(
         .iter()
         .find(|candidate| candidate.trustee_identity == trustee_identity)
         .expect("participant");
-    let evaluator_key = target_decryption_evaluator_key();
-    let share_by_limb = derive_threshold_secret_share_by_limb(
-        &evaluator_key,
-        &target_share_profile.hash,
-        TARGET_DECRYPTION_FIXTURE_SETUP_SEED,
-        participant.interpolation_point,
-        target_share_profile.minimum_shares_for_interpolation,
-        CANONICAL_TARGET_CIPHERTEXT_LEVEL,
-    )
-    .expect("target share limbs");
-    let setup_epoch = TARGET_DECRYPTION_FIXTURE_COMPACT_SETUP_EPOCH;
+    let setup_epoch = TARGET_DECRYPTION_FIXTURE_SETUP_EPOCH;
     let public_matrix_seed_hash = setup_binding.public_matrix_seed_hash.clone();
     let share_linkage_statement_root = hash_at_path(
         setup_package,
-        &["compactVssShareLinkageStatement", "statementRoot"],
+        &["vssShareLinkageStatement", "statementRoot"],
     )
-    .expect("compact share-linkage statement root");
+    .expect("share-linkage statement root");
     let aggregate_threshold_commitment_root = setup_package
-        .get("compactVssAggregateThresholdCommitmentSet")
+        .get("vssPublicAggregateThresholdCommitmentSet")
         .and_then(|aggregate_set| aggregate_set.get("aggregateThresholdCommitmentRoot"))
         .and_then(Value::as_str)
-        .expect("compact aggregate threshold commitment set root")
+        .expect("aggregate threshold commitment set root")
         .to_string();
-    let compact_aggregate_opening_credentials = share_by_limb
+    let aggregate_opening_handoff = accepted_setup_fixture()
+        .local_aggregate_opening_handoffs
         .iter()
-        .enumerate()
-        .map(|(rns_limb_index, share_values)| {
-            let aggregate_randomness_by_column = vec![vec![0_i64; POLYNOMIAL_DEGREE]; 2];
-            let rns_prime = DATA_PRIMES[rns_limb_index];
-            let aggregate_commitment_message_values =
-                compact_aggregate_opening_values(share_values, rns_prime);
-            let message_coefficient_bound = compact_aggregate_message_coefficient_bound(
-                rns_prime,
-                setup_binding.participants.len(),
-            )
-            .expect("compact aggregate message coefficient bound");
-            let (aggregate_commitment_root, aggregate_opening_root) =
-                compute_compact_aggregate_opening_roots(CompactAggregateOpeningRootsInput {
-                    setup_binding: &setup_binding,
-                    participant,
-                    setup_epoch,
-                    public_matrix_seed_hash: &public_matrix_seed_hash,
-                    rns_limb_index,
-                    rns_prime,
-                    aggregate_commitment_message_values: &aggregate_commitment_message_values,
-                    message_coefficient_bound,
-                    aggregate_randomness_by_column: &aggregate_randomness_by_column,
-                })
-                .expect("compact aggregate opening roots");
-            json!({
-                "objectType": "LocalTrusteeCompactVssAggregateOpeningCredential",
-                "objectVersion": 1,
-                "recipientIdentity": participant.trustee_identity.as_str(),
-                "recipientRosterPosition": participant.roster_position,
-                "recipientTrusteePoint": participant.interpolation_point,
-                "rnsLimbIndex": rns_limb_index,
-                "rnsPrime": rns_prime,
-                "aggregateCommitmentRoot": aggregate_commitment_root,
-                "aggregateOpeningRoot": aggregate_opening_root,
-                "aggregateCommitmentMessageValuesLeHex": coefficient_vector_le_hex(&aggregate_commitment_message_values),
-                "aggregateRandomnessByColumnSignedByteHex": aggregate_randomness_by_column
-                    .iter()
-                    .map(|column| signed_byte_vector_hex(column).expect("signed-byte randomness"))
-                    .collect::<Vec<_>>(),
-            })
-        })
-        .collect::<Vec<_>>();
+        .find(|handoff| handoff["trusteeIdentity"] == participant.trustee_identity)
+        .expect("setup-produced local aggregate opening handoff");
+    assert_eq!(
+        aggregate_opening_handoff["trusteeRosterPosition"], participant.roster_position,
+        "setup-produced aggregate opening handoff roster position",
+    );
+    let aggregate_opening_credentials =
+        aggregate_opening_handoff["aggregateOpeningCredentials"].clone();
     json!({
         "objectType": "LocalTrusteeTargetDecryptionProofWitnessMaterial",
-        "objectVersion": 1,
         "ceremonyId": setup_binding.ceremony_id.as_str(),
         "manifestHash": setup_binding.election_manifest_hash.as_str(),
         "rosterHash": setup_context_hashes.roster_hash,
@@ -717,14 +699,13 @@ fn local_target_share_witness(
             &target_share_profile,
             participant,
         ).expect("target-decryption smudging witness"),
-        "compactAggregateOpening": {
-            "objectType": "LocalTrusteeCompactVssAggregateOpeningWitness",
-            "objectVersion": 1,
+        "aggregateOpening": {
+            "objectType": "LocalTrusteeVssPublicAggregateOpeningWitness",
             "publicMatrixSeedHash": public_matrix_seed_hash,
             "targetBasisHash": canonical_target_basis_hash().expect("target basis hash"),
             "shareLinkageStatementRoot": share_linkage_statement_root,
             "aggregateThresholdCommitmentRoot": aggregate_threshold_commitment_root,
-            "compactAggregateOpeningCredentials": compact_aggregate_opening_credentials,
+            "aggregateOpeningCredentials": aggregate_opening_credentials,
         },
     })
 }
@@ -880,710 +861,6 @@ fn staged_target_result_release(
     }))
 }
 
-#[test]
-fn local_target_share_witness_generates_smudged_share() {
-    let (setup_package, accepted_record, target_ciphertext_binding, target_ciphertexts) =
-        target_fixture();
-    let target_share_profile = target_share_profile(&setup_package);
-    let local_target_share_witness_value = local_target_share_witness(
-        &setup_package,
-        &accepted_record,
-        &target_ciphertext_binding,
-        &target_ciphertexts,
-        &target_share_profile,
-        "trustee-1",
-    );
-
-    let local_share = generate_local_share(
-        &setup_package,
-        &accepted_record,
-        &target_ciphertext_binding,
-        &target_ciphertexts,
-        &target_share_profile,
-        &local_target_share_witness_value,
-        "trustee-1",
-    );
-
-    assert_eq!(
-        local_share["sharePayload"]["smudgingInputReport"]["objectType"],
-        json!("TargetDecryptionSmudgingInputReport")
-    );
-    assert_eq!(
-        local_share["sharePayload"]["smudgingInputReport"]["roleReports"]
-            .as_array()
-            .expect("role reports")
-            .len(),
-        2
-    );
-    assert_eq!(
-        local_share["sharePayload"]["smudgingInputReportHash"],
-        json!(
-            derive_canonical_object_hash(&local_share["sharePayload"]["smudgingInputReport"])
-                .expect("smudging input report hash")
-        )
-    );
-}
-
-#[test]
-fn target_decryption_smudging_zero_shares_cancel_for_interpolation_quorum() {
-    let (setup_package, accepted_record, target_ciphertext_binding, target_ciphertexts) =
-        target_fixture();
-    let target_share_profile_value = target_share_profile(&setup_package);
-    let setup_binding = read_setup_binding(&setup_package).expect("setup binding");
-    let target_share_profile_binding =
-        read_target_share_profile(&target_share_profile_value, &setup_binding)
-            .expect("target share profile");
-    let target_accepted =
-        read_target_accepted_binding(&accepted_record, &setup_binding).expect("target accepted");
-    let target_ciphertext_pair = read_target_ciphertext_pair(
-        &target_ciphertexts,
-        &target_ciphertext_binding,
-        &target_accepted,
-    )
-    .expect("target ciphertext pair");
-    let selected_participants = setup_binding
-        .participants
-        .iter()
-        .take(target_share_profile_binding.minimum_shares_for_interpolation)
-        .collect::<Vec<_>>();
-    assert_eq!(
-        selected_participants.len(),
-        target_share_profile_binding.minimum_shares_for_interpolation,
-        "fixture must include enough participants for interpolation"
-    );
-
-    let mut interpolation_points = Vec::with_capacity(selected_participants.len());
-    let mut target_id_smudging_by_participant = Vec::with_capacity(selected_participants.len());
-    let mut target_order_smudging_by_participant = Vec::with_capacity(selected_participants.len());
-    for participant in selected_participants {
-        interpolation_points.push(participant.interpolation_point);
-        let local_target_share_witness_value = local_target_share_witness(
-            &setup_package,
-            &accepted_record,
-            &target_ciphertext_binding,
-            &target_ciphertexts,
-            &target_share_profile_value,
-            &participant.trustee_identity,
-        );
-        let local_witness = read_local_target_decryption_share_witness(
-            &local_target_share_witness_value,
-            &setup_binding,
-            &target_accepted,
-            &target_ciphertext_pair,
-            &target_share_profile_binding,
-            participant,
-        )
-        .expect("local target-share witness");
-        let local_share = generate_local_share(
-            &setup_package,
-            &accepted_record,
-            &target_ciphertext_binding,
-            &target_ciphertexts,
-            &target_share_profile_value,
-            &local_target_share_witness_value,
-            &participant.trustee_identity,
-        );
-
-        let released_target_id_partials = read_partial_limb_set(
-            &local_share["sharePayload"],
-            "targetId",
-            target_ciphertext_pair.target_id.level,
-        )
-        .expect("released target-id partials");
-        let released_target_order_partials = read_partial_limb_set(
-            &local_share["sharePayload"],
-            "targetOrder",
-            target_ciphertext_pair.target_order.level,
-        )
-        .expect("released target-order partials");
-        let unsmudged_target_id_partials = partial_decryption_by_limb(
-            &target_ciphertext_pair.target_id,
-            &local_witness.secret_share_by_limb,
-        )
-        .expect("unsmudged target-id partials");
-        let unsmudged_target_order_partials = partial_decryption_by_limb(
-            &target_ciphertext_pair.target_order,
-            &local_witness.secret_share_by_limb,
-        )
-        .expect("unsmudged target-order partials");
-
-        target_id_smudging_by_participant.push(
-            limbwise_difference(&released_target_id_partials, &unsmudged_target_id_partials)
-                .expect("target-id smudging difference"),
-        );
-        target_order_smudging_by_participant.push(
-            limbwise_difference(
-                &released_target_order_partials,
-                &unsmudged_target_order_partials,
-            )
-            .expect("target-order smudging difference"),
-        );
-    }
-
-    assert_smudging_recombines_to_zero(
-        "target-id",
-        &interpolation_points,
-        &target_id_smudging_by_participant,
-    );
-    assert_smudging_recombines_to_zero(
-        "target-order",
-        &interpolation_points,
-        &target_order_smudging_by_participant,
-    );
-}
-
-#[test]
-fn target_decryption_quorum_release_recovers_target_slots() {
-    let (setup_package, accepted_record, target_ciphertext_binding, target_ciphertexts) =
-        target_fixture();
-    let target_share_profile_value = target_share_profile(&setup_package);
-    let setup_binding = read_setup_binding(&setup_package).expect("setup binding");
-    let target_share_profile_binding =
-        read_target_share_profile(&target_share_profile_value, &setup_binding)
-            .expect("target share profile");
-    let target_accepted =
-        read_target_accepted_binding(&accepted_record, &setup_binding).expect("target accepted");
-    let target_ciphertext_pair = read_target_ciphertext_pair(
-        &target_ciphertexts,
-        &target_ciphertext_binding,
-        &target_accepted,
-    )
-    .expect("target ciphertext pair");
-
-    let trustees = ["trustee-1", "trustee-2"];
-    let mut interpolation_points = Vec::with_capacity(trustees.len());
-    let mut target_id_partials_by_share = Vec::with_capacity(trustees.len());
-    let mut target_order_partials_by_share = Vec::with_capacity(trustees.len());
-    for trustee_identity in trustees {
-        let local_target_share_witness_value = local_target_share_witness(
-            &setup_package,
-            &accepted_record,
-            &target_ciphertext_binding,
-            &target_ciphertexts,
-            &target_share_profile_value,
-            trustee_identity,
-        );
-        let local_share = generate_local_share(
-            &setup_package,
-            &accepted_record,
-            &target_ciphertext_binding,
-            &target_ciphertexts,
-            &target_share_profile_value,
-            &local_target_share_witness_value,
-            trustee_identity,
-        );
-        interpolation_points.push(
-            local_share["interpolationPoint"]
-                .as_u64()
-                .expect("interpolation point"),
-        );
-        target_id_partials_by_share.push(
-            read_partial_limb_set(
-                &local_share["sharePayload"],
-                "targetId",
-                target_ciphertext_pair.target_id.level,
-            )
-            .expect("target-id partials"),
-        );
-        target_order_partials_by_share.push(
-            read_partial_limb_set(
-                &local_share["sharePayload"],
-                "targetOrder",
-                target_ciphertext_pair.target_order.level,
-            )
-            .expect("target-order partials"),
-        );
-    }
-    assert_eq!(
-        target_id_partials_by_share.len(),
-        target_share_profile_binding.minimum_shares_for_interpolation
-    );
-
-    let target_id_partial_refs = target_id_partials_by_share
-        .iter()
-        .map(Vec::as_slice)
-        .collect::<Vec<_>>();
-    let target_order_partial_refs = target_order_partials_by_share
-        .iter()
-        .map(Vec::as_slice)
-        .collect::<Vec<_>>();
-    let target_id_slots = release_target_role_slots(
-        &target_ciphertext_pair.target_id,
-        &interpolation_points,
-        &target_id_partial_refs,
-    )
-    .expect("target-id release");
-    let target_order_slots = release_target_role_slots(
-        &target_ciphertext_pair.target_order,
-        &interpolation_points,
-        &target_order_partial_refs,
-    )
-    .expect("target-order release");
-
-    let mut expected_target_ids = vec![0_u64; MAXIMUM_OPTION_COUNT];
-    let mut expected_target_orders = vec![0_u64; MAXIMUM_OPTION_COUNT];
-    expected_target_ids[0] = 1;
-    expected_target_ids[2] = 3;
-    expected_target_orders[0] = 1;
-    expected_target_orders[2] = 2;
-    assert_eq!(
-        packed_target_option_values(&target_id_slots, target_ciphertext_pair.top_count)
-            .expect("target-id options"),
-        expected_target_ids
-    );
-    assert_eq!(
-        packed_target_option_values(&target_order_slots, target_ciphertext_pair.top_count)
-            .expect("target-order options"),
-        expected_target_orders
-    );
-
-    let mut tampered_target_id_partials_by_share = target_id_partials_by_share;
-    tampered_target_id_partials_by_share[0][0][0] = add_mod_fast(
-        tampered_target_id_partials_by_share[0][0][0],
-        1,
-        DATA_PRIMES[0],
-    );
-    let tampered_target_id_partial_refs = tampered_target_id_partials_by_share
-        .iter()
-        .map(Vec::as_slice)
-        .collect::<Vec<_>>();
-    let tampered_target_id_slots = release_target_role_slots(
-        &target_ciphertext_pair.target_id,
-        &interpolation_points,
-        &tampered_target_id_partial_refs,
-    )
-    .expect("tampered target-id release");
-    assert_ne!(
-        packed_target_option_values(&tampered_target_id_slots, target_ciphertext_pair.top_count)
-            .expect("tampered target-id options"),
-        expected_target_ids
-    );
-}
-
-#[test]
-fn target_result_release_requires_proof_backed_quorum() {
-    let (setup_package, accepted_record, target_ciphertext_binding, target_ciphertexts) =
-        target_fixture();
-    let target_share_profile_value = target_share_profile(&setup_package);
-    let error = staged_target_result_release(
-        &setup_package,
-        &accepted_record,
-        &target_ciphertext_binding,
-        &target_ciphertexts,
-        &target_share_profile_value,
-        Vec::new(),
-        "rust-target-release-empty",
-    )
-    .expect_err("target result release must require a quorum");
-
-    assert_eq!(error.code, CanonicalErrorCode::MalformedLength);
-    assert!(error.message.contains("share quorum"));
-
-    let raw_share = generate_share_from_fresh_local_witness(
-        &setup_package,
-        &accepted_record,
-        &target_ciphertext_binding,
-        &target_ciphertexts,
-        &target_share_profile_value,
-        "trustee-1",
-    );
-    let error = staged_target_result_release(
-        &setup_package,
-        &accepted_record,
-        &target_ciphertext_binding,
-        &target_ciphertexts,
-        &target_share_profile_value,
-        vec![
-            json!({ "targetDecryptionShare": raw_share.clone() }),
-            json!({ "targetDecryptionShare": raw_share }),
-        ],
-        "rust-target-release-proofless",
-    )
-    .expect_err("target result release must reject proofless shares");
-
-    assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
-    assert!(error.message.contains("proofStatement"));
-}
-
-#[test]
-fn target_share_proof_statement_binds_compact_local_witness_and_share() {
-    let (setup_package, accepted_record, target_ciphertext_binding, target_ciphertexts) =
-        target_fixture();
-    let target_share_profile = target_share_profile(&setup_package);
-    let local_target_share_witness_value = local_target_share_witness(
-        &setup_package,
-        &accepted_record,
-        &target_ciphertext_binding,
-        &target_ciphertexts,
-        &target_share_profile,
-        "trustee-1",
-    );
-    let local_share = generate_local_share(
-        &setup_package,
-        &accepted_record,
-        &target_ciphertext_binding,
-        &target_ciphertexts,
-        &target_share_profile,
-        &local_target_share_witness_value,
-        "trustee-1",
-    );
-
-    let statement = derive_share_proof_statement(TargetShareProofStatementInput {
-        setup_package: &setup_package,
-        accepted_record: &accepted_record,
-        target_ciphertext_binding: &target_ciphertext_binding,
-        target_ciphertexts: &target_ciphertexts,
-        target_share_profile: &target_share_profile,
-        local_target_share_witness_value: &local_target_share_witness_value,
-        target_decryption_share: &local_share,
-        trustee_identity: "trustee-1",
-    })
-    .expect("target share proof statement");
-
-    assert_eq!(
-        statement["objectType"],
-        json!("BgvTargetDecryptionShareProofStatement")
-    );
-    assert_eq!(
-        statement["targetDecryptionShareHash"],
-        local_share["targetDecryptionShareHash"]
-    );
-    assert_eq!(statement["shareRoot"], local_share["shareRoot"]);
-    assert_eq!(
-        statement["compactAggregateOpeningBinding"]["publicMatrixSeedHash"],
-        setup_package["commonRandomness"]["publicMatrixSeedHash"]
-    );
-    assert_eq!(
-        statement["compactAggregateOpeningBinding"]["shareLinkageStatementRoot"],
-        setup_package["compactVssShareLinkageStatement"]["statementRoot"]
-    );
-    assert_eq!(
-        statement["compactAggregateOpeningBinding"]["aggregateThresholdCommitmentRoot"],
-        setup_package["compactVssAggregateThresholdCommitmentSet"]["aggregateThresholdCommitmentRoot"]
-    );
-    let expected_active_credential_binding_root = derive_canonical_object_hash(&json!({
-        "objectType": "TargetDecryptionCompactAggregateOpeningCredentialBindingSet",
-        "objectVersion": 1,
-        "activeCredentialBindings": statement["compactAggregateOpeningBinding"]["activeCredentialBindings"],
-    }))
-    .expect("active credential binding root");
-    assert_eq!(
-        statement["compactAggregateOpeningBinding"]["activeCredentialBindingRoot"],
-        json!(expected_active_credential_binding_root)
-    );
-    assert_eq!(
-        statement["compactAggregateOpeningBinding"]["activeCredentialBindings"]
-            .as_array()
-            .expect("active credential bindings")
-            .len(),
-        CANONICAL_TARGET_CIPHERTEXT_LEVEL + 1
-    );
-
-    let mut root_input = statement.clone();
-    root_input
-        .as_object_mut()
-        .expect("statement object")
-        .remove("proofStatementRoot");
-    assert_eq!(
-        statement["proofStatementRoot"],
-        json!(derive_canonical_object_hash(&root_input).expect("statement root"))
-    );
-}
-
-#[test]
-fn target_share_proof_relation_rejects_rebound_wrong_partial_decryption() {
-    let (setup_package, accepted_record, target_ciphertext_binding, target_ciphertexts) =
-        target_fixture();
-    let target_share_profile = target_share_profile(&setup_package);
-    let local_target_share_witness_value = local_target_share_witness(
-        &setup_package,
-        &accepted_record,
-        &target_ciphertext_binding,
-        &target_ciphertexts,
-        &target_share_profile,
-        "trustee-1",
-    );
-    let mut local_share = generate_local_share(
-        &setup_package,
-        &accepted_record,
-        &target_ciphertext_binding,
-        &target_ciphertexts,
-        &target_share_profile,
-        &local_target_share_witness_value,
-        "trustee-1",
-    );
-    change_first_partial_decryption_coefficient(&mut local_share);
-    rebind_target_decryption_share_hashes(
-        &setup_package,
-        &accepted_record,
-        &target_ciphertext_binding,
-        &target_ciphertexts,
-        &target_share_profile,
-        &mut local_share,
-        "trustee-1",
-    );
-
-    let error = derive_share_proof_statement(TargetShareProofStatementInput {
-        setup_package: &setup_package,
-        accepted_record: &accepted_record,
-        target_ciphertext_binding: &target_ciphertext_binding,
-        target_ciphertexts: &target_ciphertexts,
-        target_share_profile: &target_share_profile,
-        local_target_share_witness_value: &local_target_share_witness_value,
-        target_decryption_share: &local_share,
-        trustee_identity: "trustee-1",
-    })
-    .expect_err("rebound wrong partial decryption must not satisfy the relation");
-
-    assert_eq!(error.code, CanonicalErrorCode::ComponentMismatch);
-    assert!(error.message.contains("restored local witness relation"));
-}
-
-#[test]
-fn target_share_proof_statement_binding_accepts_bound_statement() {
-    let (setup_package, accepted_record, target_ciphertext_binding, target_ciphertexts) =
-        target_fixture();
-    let target_share_profile = target_share_profile(&setup_package);
-    let local_target_share_witness_value = local_target_share_witness(
-        &setup_package,
-        &accepted_record,
-        &target_ciphertext_binding,
-        &target_ciphertexts,
-        &target_share_profile,
-        "trustee-1",
-    );
-    let local_share = generate_local_share(
-        &setup_package,
-        &accepted_record,
-        &target_ciphertext_binding,
-        &target_ciphertexts,
-        &target_share_profile,
-        &local_target_share_witness_value,
-        "trustee-1",
-    );
-    let statement = derive_share_proof_statement(TargetShareProofStatementInput {
-        setup_package: &setup_package,
-        accepted_record: &accepted_record,
-        target_ciphertext_binding: &target_ciphertext_binding,
-        target_ciphertexts: &target_ciphertexts,
-        target_share_profile: &target_share_profile,
-        local_target_share_witness_value: &local_target_share_witness_value,
-        target_decryption_share: &local_share,
-        trustee_identity: "trustee-1",
-    })
-    .expect("target share proof statement");
-
-    let verification =
-        verify_share_proof_statement_binding(TargetShareProofStatementBindingInput {
-            setup_package: &setup_package,
-            accepted_record: &accepted_record,
-            target_ciphertext_binding: &target_ciphertext_binding,
-            target_ciphertexts: &target_ciphertexts,
-            target_share_profile: &target_share_profile,
-            target_decryption_share: &local_share,
-            proof_statement: &statement,
-        })
-        .expect("target share proof statement binding");
-
-    assert_eq!(verification["ok"], json!(false));
-    assert_eq!(
-        verification["operation"],
-        json!("verifyBgvTargetDecryptionShareProofStatementBinding")
-    );
-    assert_eq!(
-        verification["refusalReason"],
-        json!("TargetDecryptionProofUnavailable")
-    );
-}
-
-#[test]
-fn target_share_proof_statement_binding_rejects_rebound_wrong_aggregate_commitment_body() {
-    let (setup_package, accepted_record, target_ciphertext_binding, target_ciphertexts) =
-        target_fixture();
-    let target_share_profile = target_share_profile(&setup_package);
-    let local_target_share_witness_value = local_target_share_witness(
-        &setup_package,
-        &accepted_record,
-        &target_ciphertext_binding,
-        &target_ciphertexts,
-        &target_share_profile,
-        "trustee-1",
-    );
-    let local_share = generate_local_share(
-        &setup_package,
-        &accepted_record,
-        &target_ciphertext_binding,
-        &target_ciphertexts,
-        &target_share_profile,
-        &local_target_share_witness_value,
-        "trustee-1",
-    );
-    let mut statement = derive_share_proof_statement(TargetShareProofStatementInput {
-        setup_package: &setup_package,
-        accepted_record: &accepted_record,
-        target_ciphertext_binding: &target_ciphertext_binding,
-        target_ciphertexts: &target_ciphertexts,
-        target_share_profile: &target_share_profile,
-        local_target_share_witness_value: &local_target_share_witness_value,
-        target_decryption_share: &local_share,
-        trustee_identity: "trustee-1",
-    })
-    .expect("target share proof statement");
-    let first_coordinate = statement["compactAggregateOpeningBinding"]["activeCredentialBindings"]
-        [0]["aggregateCommitment"]["commitmentLimbs"][0]["coordinates"][0]
-        .as_u64()
-        .expect("first aggregate commitment coordinate");
-    let first_modulus = statement["compactAggregateOpeningBinding"]["activeCredentialBindings"][0]
-        ["aggregateCommitment"]["commitmentLimbs"][0]["modulus"]
-        .as_u64()
-        .expect("first aggregate commitment modulus");
-    statement["compactAggregateOpeningBinding"]["activeCredentialBindings"][0]["aggregateCommitment"]
-        ["commitmentLimbs"][0]["coordinates"][0] = json!((first_coordinate + 1) % first_modulus);
-    rebind_active_credential_binding_root(&mut statement);
-    rebind_share_proof_statement_root(&mut statement);
-
-    let error = verify_share_proof_statement_binding(TargetShareProofStatementBindingInput {
-        setup_package: &setup_package,
-        accepted_record: &accepted_record,
-        target_ciphertext_binding: &target_ciphertext_binding,
-        target_ciphertexts: &target_ciphertexts,
-        target_share_profile: &target_share_profile,
-        target_decryption_share: &local_share,
-        proof_statement: &statement,
-    })
-    .expect_err("wrong compact aggregate commitment body must be refused");
-
-    assert_eq!(error.code, CanonicalErrorCode::ComponentMismatch);
-    assert!(error.message.contains("commitment body"));
-}
-
-#[test]
-fn target_result_release_rejects_wrong_target_context_before_proof_bytes() {
-    let (setup_package, accepted_record, target_ciphertext_binding, target_ciphertexts) =
-        target_fixture();
-    let target_share_profile_value = target_share_profile(&setup_package);
-    let first_share_proof = statement_backed_target_share_with_malformed_proof_material(
-        &setup_package,
-        &accepted_record,
-        &target_ciphertext_binding,
-        &target_ciphertexts,
-        &target_share_profile_value,
-        "trustee-1",
-    );
-    let second_share_proof = statement_backed_target_share_with_malformed_proof_material(
-        &setup_package,
-        &accepted_record,
-        &target_ciphertext_binding,
-        &target_ciphertexts,
-        &target_share_profile_value,
-        "trustee-2",
-    );
-    let mut wrong_target_record = accepted_record.clone();
-    wrong_target_record["targetContextHash"] = json!("8".repeat(128));
-    rebind_target_accepted_record_hash(&mut wrong_target_record);
-
-    let error = staged_target_result_release(
-        &setup_package,
-        &wrong_target_record,
-        &target_ciphertext_binding,
-        &target_ciphertexts,
-        &target_share_profile_value,
-        vec![first_share_proof, second_share_proof],
-        "rust-target-release-wrong-context",
-    )
-    .expect_err("target result release must reject shares bound to another target context");
-
-    assert_eq!(error.code, CanonicalErrorCode::ComponentMismatch);
-    assert!(
-        error.message.contains("proof statement"),
-        "{}",
-        error.message
-    );
-}
-
-fn statement_backed_target_share_with_malformed_proof_material(
-    setup_package: &Value,
-    accepted_record: &Value,
-    target_ciphertext_binding: &Value,
-    target_ciphertexts: &Value,
-    target_share_profile: &Value,
-    trustee_identity: &str,
-) -> Value {
-    let local_target_share_witness_value = local_target_share_witness(
-        setup_package,
-        accepted_record,
-        target_ciphertext_binding,
-        target_ciphertexts,
-        target_share_profile,
-        trustee_identity,
-    );
-    let target_decryption_share = generate_local_share(
-        setup_package,
-        accepted_record,
-        target_ciphertext_binding,
-        target_ciphertexts,
-        target_share_profile,
-        &local_target_share_witness_value,
-        trustee_identity,
-    );
-    let proof_statement = derive_share_proof_statement(TargetShareProofStatementInput {
-        setup_package,
-        accepted_record,
-        target_ciphertext_binding,
-        target_ciphertexts,
-        target_share_profile,
-        local_target_share_witness_value: &local_target_share_witness_value,
-        target_decryption_share: &target_decryption_share,
-        trustee_identity,
-    })
-    .expect("target share proof statement");
-
-    json!({
-        "targetDecryptionShare": target_decryption_share,
-        "proofStatement": proof_statement,
-        "proofMaterial": {
-            "objectType": "BgvTargetDecryptionShareProofMaterial",
-            "objectVersion": 8,
-            "proofRecords": [
-                {
-                    "objectType": "BgvTargetDecryptionShareProofRecord",
-                    "objectVersion": 7,
-                    "proofBytesBase64": "AQIDBAU=",
-                },
-            ],
-        },
-    })
-}
-
-#[test]
-fn target_decryption_share_generation_refuses_passive_setup_package() {
-    // The passive development package carries the collective secret but is not the
-    // accepted, verifier-gated SetupPackage. read_setup_binding must refuse it at
-    // the trust boundary (objectType BgvPassiveSetupPackage, not SetupPackage) so
-    // shares can never be certified against a package the accepted-setup verifier
-    // never blessed. This fires before any witness material is read.
-    let (_accepted_setup_package, accepted_record, target_ciphertext_binding, target_ciphertexts) =
-        target_fixture();
-    let target_share_profile = target_share_profile(&_accepted_setup_package);
-    let local_target_share_witness_value = local_target_share_witness(
-        &_accepted_setup_package,
-        &accepted_record,
-        &target_ciphertext_binding,
-        &target_ciphertexts,
-        &target_share_profile,
-        "trustee-1",
-    );
-
-    let error = generate_bgv_target_decryption_share_from_local_share_request(&json!({
-        "setupPackage": passive_crypto_package(),
-        "localTargetShareWitness": local_target_share_witness_value,
-        "targetAcceptedRecord": accepted_record,
-        "targetCiphertextBinding": target_ciphertext_binding,
-        "targetCiphertexts": target_ciphertexts,
-        "targetShareProfile": target_share_profile,
-        "trusteeIdentity": "trustee-1",
-    }))
-    .expect_err("target decryption must refuse the passive setup package");
-
-    assert_eq!(error.code, CanonicalErrorCode::InvalidProtocolObject);
-}
+mod behavior_proof;
+mod behavior_witness;
+mod replay_release;

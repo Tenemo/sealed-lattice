@@ -1,3 +1,5 @@
+import { appendVaruint } from './varuint-encoding.js';
+
 export class ChunkedBinaryReader {
     private chunkIndex = 0;
 
@@ -7,13 +9,7 @@ export class ChunkedBinaryReader {
 
     private readonly totalByteLength: number;
 
-    public constructor(
-        private readonly chunks: readonly Uint8Array[],
-        input: { readonly emptyChunksMessage?: string } = {},
-    ) {
-        if (chunks.length === 0 && input.emptyChunksMessage !== undefined) {
-            throw new Error(input.emptyChunksMessage);
-        }
+    public constructor(private readonly chunks: readonly Uint8Array[]) {
         this.totalByteLength = chunks.reduce(
             (accumulatedLength, chunk) => accumulatedLength + chunk.byteLength,
             0,
@@ -63,5 +59,56 @@ export class ChunkedBinaryReader {
         }
 
         return outputBytes;
+    }
+
+    public readVaruint(fieldName: string): number {
+        let shift = 0n;
+        let value = 0n;
+        const consumed: number[] = [];
+        for (let byteIndex = 0; byteIndex < 10; byteIndex += 1) {
+            const byte = this.readBytes(1, fieldName)[0];
+            consumed.push(byte);
+            value |= BigInt(byte & 0x7f) << shift;
+            if ((byte & 0x80) === 0) {
+                if (value > BigInt(Number.MAX_SAFE_INTEGER)) {
+                    throw new Error(
+                        `${fieldName} does not fit a safe integer.`,
+                    );
+                }
+                const numericValue = Number(value);
+                const canonical: number[] = [];
+                appendVaruint(canonical, numericValue);
+                if (
+                    canonical.length !== consumed.length ||
+                    canonical.some(
+                        (canonicalByte, index) =>
+                            canonicalByte !== consumed[index],
+                    )
+                ) {
+                    throw new Error(
+                        `${fieldName} binary varuint is not minimally encoded.`,
+                    );
+                }
+
+                return numericValue;
+            }
+            shift += 7n;
+        }
+
+        throw new Error(`${fieldName} binary varuint is too long.`);
+    }
+
+    public readU64(fieldName: string): number {
+        const bytes = this.readBytes(8, fieldName);
+        let value = 0n;
+        for (let byteIndex = 7; byteIndex >= 0; byteIndex -= 1) {
+            value <<= 8n;
+            value |= BigInt(bytes[byteIndex] ?? 0);
+        }
+        if (value > BigInt(Number.MAX_SAFE_INTEGER)) {
+            throw new Error(`${fieldName} does not fit a safe integer.`);
+        }
+
+        return Number(value);
     }
 }

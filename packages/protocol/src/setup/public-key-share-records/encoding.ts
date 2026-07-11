@@ -1,13 +1,18 @@
 import { hash512Hex } from '@sealed-lattice/crypto';
 
-import { assertProtocolHash } from '../common-fields.js';
+import {
+    assertProtocolHash,
+    assertNonNegativeSafeInteger,
+    assertPositiveSafeInteger,
+    assertLowercaseHexBytes,
+    bytesFromHex,
+    bytesToHex,
+} from '../common-fields.js';
 
 import {
     publicKeyShareCoefficientVectorHashDomain,
     type PublicKeyShareSetInput,
 } from './constants-and-types.js';
-
-const lowercaseHexPattern = /^(?:[0-9a-f]{2})*$/u;
 
 export {
     assertContextMatches,
@@ -15,33 +20,12 @@ export {
     contextFields,
 } from '../common-fields.js';
 
-export const assertLowercaseHexBytes = (
-    value: string,
-    fieldName: string,
-): void => {
-    if (!lowercaseHexPattern.test(value)) {
-        throw new TypeError(`${fieldName} must be lowercase hex bytes.`);
-    }
-};
-
-export const assertPositiveSafeInteger = (
-    value: number,
-    fieldName: string,
-): void => {
-    if (!Number.isSafeInteger(value) || value <= 0) {
-        throw new TypeError(`${fieldName} must be a positive safe integer.`);
-    }
-};
-
-export const assertNonNegativeSafeInteger = (
-    value: number,
-    fieldName: string,
-): void => {
-    if (!Number.isSafeInteger(value) || value < 0) {
-        throw new TypeError(
-            `${fieldName} must be a non-negative safe integer.`,
-        );
-    }
+export {
+    assertNonNegativeSafeInteger,
+    assertPositiveSafeInteger,
+    assertLowercaseHexBytes,
+    bytesFromHex,
+    bytesToHex,
 };
 
 export const assertNonEmptyString = (
@@ -51,19 +35,6 @@ export const assertNonEmptyString = (
     if (value.length === 0) {
         throw new TypeError(`${fieldName} must be non-empty.`);
     }
-};
-
-export const bytesFromHex = (hex: string, fieldName: string): Uint8Array => {
-    assertLowercaseHexBytes(hex, fieldName);
-    const bytes = new Uint8Array(hex.length / 2);
-    for (let byteIndex = 0; byteIndex < bytes.length; byteIndex += 1) {
-        bytes[byteIndex] = Number.parseInt(
-            hex.slice(byteIndex * 2, byteIndex * 2 + 2),
-            16,
-        );
-    }
-
-    return bytes;
 };
 
 export const coefficientVectorFromLittleEndianHex = (
@@ -119,29 +90,9 @@ const coefficientVectorBytes = (
     return bytes;
 };
 
-export const bytesToHex = (bytes: Uint8Array): string =>
-    Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
-
 export const publicKeyShareMaterialBinaryMagic = new Uint8Array([
     0x53, 0x4c, 0x50, 0x4b, 0x53, 0x4d, 0x56, 0x31,
 ]);
-
-export const appendVaruint = (outputBytes: number[], value: number): void => {
-    if (!Number.isSafeInteger(value) || value < 0) {
-        throw new TypeError(
-            'binary varuint value must be a non-negative safe integer.',
-        );
-    }
-    let remainingValue = value;
-    do {
-        let byte = remainingValue & 0x7f;
-        remainingValue = Math.floor(remainingValue / 128);
-        if (remainingValue !== 0) {
-            byte |= 0x80;
-        }
-        outputBytes.push(byte);
-    } while (remainingValue !== 0);
-};
 
 export const coefficientVectorHash512 = (
     coefficients: readonly number[],

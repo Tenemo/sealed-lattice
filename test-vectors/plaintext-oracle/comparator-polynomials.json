@@ -3,7 +3,7 @@
   "rosterSize": 20,
   "domainMinimum": -180,
   "domainMaximum": 180,
-  "comparatorHash": "85863acd93545f3330b43624ac23c99ad02f6e3ea97be2e50411114f0ef2568d52ae10ab1c8eaca499e0b46db6f0bea5bd3661fc24788c335e2379edc5e7a78c",
+  "comparatorHash": "67887c197472094c6cc15a86b0cdc7d5b80e72b517872c385cc5204df7956c650e292350cecbd84aba0294cb0a0c4f401ff1ce974c2aabea63ff44286936744d",
   "greaterThanCoefficientCount": 361,
   "equalCoefficientCount": 361,
   "firstGreaterThanCoefficients": [
@@ -85,7 +85,7 @@
     "rosterSize": 50,
     "domainMinimum": -450,
     "domainMaximum": 450,
-    "comparatorHash": "406935cb8ea2f6cd65e728a46ae8e3fd7a72508f4920e59c61aae2a1a112c5d7e0919337378af859ef2b21caefb6423c4db0bbf48a2d8fc0b22289fcd616f7b6",
+    "comparatorHash": "1a69c61a0d700c364eedf753d688e25d08cf982276e0e269973ab3232a73905914158ec33f94b72a861e6d0cc499881ab7ca831e1298a33f7ab7242c70fa30d8",
     "greaterThanCoefficientCount": 901,
     "equalCoefficientCount": 901,
     "evaluationCases": [

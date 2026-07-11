@@ -171,33 +171,6 @@ pub(super) fn rebind_collective_vss_acceptance_root(package: &mut serde_json::Va
     );
 }
 
-pub(super) fn rebind_collective_same_secret_statement_roots(package: &mut serde_json::Value) {
-    let statement_records = package["sameSecretConsistency"]["statementRecords"]
-        .as_array_mut()
-        .expect("same-secret statement records");
-    for statement_record in statement_records {
-        statement_record
-            .as_object_mut()
-            .expect("same-secret statement record")
-            .remove("sameSecretStatementRoot");
-        statement_record["sameSecretStatementRoot"] = serde_json::json!(
-            derive_canonical_object_hash(statement_record).expect("same-secret statement root")
-        );
-    }
-    rebind_collective_same_secret_consistency_root(package);
-}
-
-pub(super) fn rebind_collective_same_secret_consistency_root(package: &mut serde_json::Value) {
-    package["sameSecretConsistency"]
-        .as_object_mut()
-        .expect("same-secret statement set")
-        .remove("sameSecretConsistencyRoot");
-    package["sameSecretConsistency"]["sameSecretConsistencyRoot"] = serde_json::json!(
-        derive_canonical_object_hash(&package["sameSecretConsistency"])
-            .expect("same-secret consistency root")
-    );
-}
-
 pub(super) fn rebind_collective_public_key_succinct_proof_roots(package: &mut serde_json::Value) {
     let proof_records = package["publicKeyShareSuccinctProofs"]["proofRecords"]
         .as_array_mut()

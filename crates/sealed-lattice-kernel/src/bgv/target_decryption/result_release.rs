@@ -11,6 +11,15 @@ static TARGET_RESULT_RELEASE_SESSIONS: OnceLock<
     Mutex<BTreeMap<String, TargetResultReleaseSession>>,
 > = OnceLock::new();
 
+// A released target is consumed one-shot: once its verified-share quorum has been
+// recombined into a plaintext result, the same target binding can never be
+// released again, even under a fresh release verification id or a fresh quorum
+// with different smudging. This in-process registry holds the canonical
+// target-binding key of every target a finish has released and enforces that
+// bound. Persistent consumed-state across process restarts remains an open
+// obligation (see SEC-002).
+static TARGET_RESULT_RELEASE_CONSUMED_TARGETS: OnceLock<Mutex<BTreeSet<String>>> = OnceLock::new();
+
 pub(super) struct TargetDecryptionResultReleaseBeginInput<'a> {
     pub(super) release_verification_id: &'a str,
     pub(super) setup_binding: &'a SetupBinding,
@@ -51,6 +60,30 @@ pub(super) fn begin_target_decryption_result_release(
     let release_verification_id =
         target_result_release_verification_id(input.release_verification_id)?.to_string();
     validate_target_result_release_profile(input.target_share_profile)?;
+    let consumption_key = target_release_consumption_key(
+        input.setup_binding,
+        input.target_accepted,
+        input.target_ciphertexts,
+    )?;
+    // Reject a target that a prior release already consumed before opening a new
+    // session. This is an early check; finish holds the registry lock across the
+    // recombination and is the authoritative one-shot gate.
+    {
+        let consumed_targets = target_result_release_consumed_targets()
+            .lock()
+            .map_err(|_| {
+                CanonicalError::new(
+                    CanonicalErrorCode::InvalidProtocolObject,
+                    "target result release consumed-target registry is unavailable",
+                )
+            })?;
+        if consumed_targets.contains(&consumption_key) {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidProtocolObject,
+                "target has already been released one-shot and cannot be released again",
+            ));
+        }
+    }
     let sessions = target_result_release_sessions();
     let mut sessions = sessions.lock().map_err(|_| {
         CanonicalError::new(
@@ -142,14 +175,42 @@ pub(super) fn finish_target_decryption_result_release(
         session.verified_shares.len(),
     )?;
 
-    release_verified_target_shares(
+    let consumption_key = target_release_consumption_key(
+        &session.setup_binding,
+        &session.target_accepted,
+        &session.target_ciphertexts,
+    )?;
+    // Hold the consumed-target registry across the check, the recombination, and
+    // the insert so the one-shot property is race-free: two finishes that both
+    // reached quorum for the same target serialize here, the first recombines and
+    // consumes the target, and the second is refused before a second plaintext is
+    // revealed. A recombination failure returns without consuming, so a failed
+    // release does not burn the target.
+    let mut consumed_targets = target_result_release_consumed_targets()
+        .lock()
+        .map_err(|_| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidProtocolObject,
+                "target result release consumed-target registry is unavailable",
+            )
+        })?;
+    if consumed_targets.contains(&consumption_key) {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidProtocolObject,
+            "target has already been released one-shot and cannot be released again",
+        ));
+    }
+    let release = release_verified_target_shares(
         &session.setup_binding,
         &session.target_accepted,
         &session.target_ciphertexts,
         &session.target_share_profile,
         session.verified_shares,
         "finishBgvTargetDecryptionResultRelease",
-    )
+    )?;
+    consumed_targets.insert(consumption_key);
+
+    Ok(release)
 }
 
 fn absorb_target_result_release_share(
@@ -236,6 +297,31 @@ fn target_result_release_sessions() -> &'static Mutex<BTreeMap<String, TargetRes
     TARGET_RESULT_RELEASE_SESSIONS.get_or_init(|| Mutex::new(BTreeMap::new()))
 }
 
+fn target_result_release_consumed_targets() -> &'static Mutex<BTreeSet<String>> {
+    TARGET_RESULT_RELEASE_CONSUMED_TARGETS.get_or_init(|| Mutex::new(BTreeSet::new()))
+}
+
+// The canonical one-shot consumption key for a target release. It binds the
+// accepted setup package, the accepted target record, and the exact target
+// ciphertext pair being decrypted, so every release of the same target under the
+// same setup collides on this key while genuinely different targets do not. The
+// target-share profile is deliberately excluded from the key: only the decryption
+// threshold is roster-pinned, so a second release under a different but still-valid
+// (minimum, quorum) profile must not mint a fresh key and escape the one-shot
+// bound.
+fn target_release_consumption_key(
+    setup_binding: &SetupBinding,
+    target_accepted: &TargetAcceptedBinding,
+    target_ciphertexts: &TargetCiphertextPair,
+) -> CanonicalResult<String> {
+    derive_canonical_object_hash(&json!({
+        "objectType": "BgvTargetDecryptionResultReleaseConsumptionKey",
+        "setupPackageHash": setup_binding.setup_package_hash,
+        "targetAcceptedRecordHash": target_accepted.target_accepted_record_hash,
+        "targetDecryptionCiphertextHash": target_ciphertexts.target_ciphertext_hash,
+    }))
+}
+
 fn target_result_release_verification_id(value: &str) -> CanonicalResult<&str> {
     if value.is_empty()
         || value.len() > TARGET_RESULT_RELEASE_VERIFICATION_ID_MAX_BYTES
@@ -292,7 +378,6 @@ fn release_verified_target_shares(
         .collect::<Vec<_>>();
     let result_preimage = json!({
         "objectType": "BgvTargetDecryptionResult",
-        "objectVersion": 1,
         "setupPackageHash": setup_binding.setup_package_hash,
         "targetAcceptedRecordHash": target_accepted.target_accepted_record_hash,
         "targetCiphertextHash": target_accepted.target_ciphertext_hash,

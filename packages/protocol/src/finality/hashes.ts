@@ -18,7 +18,6 @@ export const deriveWitnessCheckpointHash = (
     deriveCanonicalObjectHash({
         ceremonyId: checkpoint.ceremonyId,
         objectType: checkpoint.objectType,
-        objectVersion: checkpoint.objectVersion,
         targetFinalityCheckpointHash: checkpoint.targetFinalityCheckpointHash,
         targetFinalityPolicyHash: checkpoint.targetFinalityPolicyHash,
         targetFinalityScope: checkpoint.targetFinalityScope,
@@ -59,7 +58,6 @@ export const deriveTargetFinalityCheckpointHash = (
         evaluatorReplayRecordHash: checkpoint.evaluatorReplayRecordHash,
         finalizedBoardHeadHash: checkpoint.finalizedBoardHeadHash,
         objectType: checkpoint.objectType,
-        objectVersion: checkpoint.objectVersion,
         targetCiphertextHash: checkpoint.targetCiphertextHash,
         targetFinalityPolicyHash: checkpoint.targetFinalityPolicyHash,
         targetLayoutHash: checkpoint.targetLayoutHash,
@@ -99,7 +97,6 @@ export const deriveTargetFinalityRecordHash = (
         ceremonyId: record.ceremonyId,
         inclusionProof: record.inclusionProof,
         objectType: record.objectType,
-        objectVersion: record.objectVersion,
         targetFinalityCheckpointHash:
             record.targetFinalityCheckpoint.targetFinalityCheckpointHash,
         targetFinalityPolicyHash: record.targetFinalityPolicyHash,

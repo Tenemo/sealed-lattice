@@ -28,19 +28,13 @@ export const acceptedBgvSetupQSharePrimes = [
     140_737_471_774_721, 140_737_471_578_113,
 ] as const;
 
-export const acceptedBgvSetupQShare = {
-    objectType: 'QSharePrimeList',
-    objectVersion: 1,
-    primes: acceptedBgvSetupQSharePrimes,
-} as const;
-
 export const setupTransportSchemeId =
-    'sealed-lattice-setup-binary-chunked-transport-v1';
+    'sealed-lattice-setup-binary-chunked-transport';
 
 export const setupTransportChunkSizeBytes = 1_048_576;
 
-export const vssCoefficientCommitmentMaterialBinaryFormat =
-    'sealed-lattice-vss-coefficient-commitment-material-binary-v1';
+export const vssCoefficientCommitmentMaterialTransportEncoding =
+    'binary-chunked-full-public-setup-commitment-values';
 
 export const vssCoefficientCommitmentMaterialBinaryMagic =
     new TextEncoder().encode('SLVSSMAT');
@@ -52,6 +46,7 @@ export type SetupCommitmentLimbValue = {
 };
 
 export type SetupCommitmentValue = {
+    readonly objectType: 'SetupCommitment';
     readonly sourceRnsLimbIndex: number;
     readonly sourceMessageModulus: number;
     readonly shamirCoefficientIndex: number;
@@ -117,7 +112,6 @@ export type VssSourceTrusteeCoefficientOpeningStateProviderInput = Readonly<{
 export type VssCoefficientCommitmentRecord = Readonly<
     JsonRecord & {
         readonly objectType: 'VssCoefficientCommitment';
-        readonly objectVersion: 1;
         readonly sourceTrusteeIdentity: string;
         readonly sourceTrusteeRosterPosition: number;
         readonly publicMatrixSeedHash: ProtocolHash;
@@ -131,7 +125,6 @@ export type VssCoefficientCommitmentRecord = Readonly<
 export type VssSourceTrusteeCoefficientCommitmentRecord = Readonly<
     JsonRecord & {
         readonly objectType: 'VssSourceTrusteeCoefficientCommitments';
-        readonly objectVersion: 1;
         readonly sourceTrusteeIdentity: string;
         readonly sourceTrusteeRosterPosition: number;
         readonly publicMatrixSeedHash: ProtocolHash;
@@ -143,7 +136,6 @@ export type VssSourceTrusteeCoefficientCommitmentRecord = Readonly<
 export type VssCoefficientCommitmentMaterialRecord = Readonly<
     JsonRecord & {
         readonly objectType: 'VssCoefficientCommitmentMaterial';
-        readonly objectVersion: 1;
         readonly sourceTrusteeIdentity: string;
         readonly sourceTrusteeRosterPosition: number;
         readonly publicMatrixSeedHash: ProtocolHash;
@@ -151,14 +143,13 @@ export type VssCoefficientCommitmentMaterialRecord = Readonly<
         readonly rnsPrime: number;
         readonly shamirCoefficientIndex: number;
         readonly commitmentRoot: ProtocolHash;
-        readonly commitment: JsonRecord;
+        readonly commitment: SetupCommitmentValue;
     }
 >;
 
 export type VssCoefficientCommitmentSet = Readonly<
     JsonRecord & {
         readonly objectType: 'VssCoefficientCommitmentSet';
-        readonly objectVersion: 1;
         readonly publicMatrixSeedHash: ProtocolHash;
         readonly sourceTrusteeRecords: readonly VssSourceTrusteeCoefficientCommitmentRecord[];
         readonly vssCoefficientCommitmentRoot: ProtocolHash;
@@ -168,7 +159,6 @@ export type VssCoefficientCommitmentSet = Readonly<
 export type VssCoefficientCommitmentMaterialSet = Readonly<
     JsonRecord & {
         readonly objectType: 'VssCoefficientCommitmentMaterialSet';
-        readonly objectVersion: 1;
         readonly publicMatrixSeedHash: ProtocolHash;
         readonly vssCoefficientCommitmentRoot: ProtocolHash;
         readonly materialEncoding: 'full-public-setup-commitment-values';
@@ -176,75 +166,29 @@ export type VssCoefficientCommitmentMaterialSet = Readonly<
         readonly thresholdDegree: number;
         readonly rnsLimbCount: number;
         readonly ringDegree: number;
-        readonly ringDegreeStatus: 'full-ring' | 'development-reduced-ring';
         readonly materialRecordCount: number;
         readonly coefficientCommitments: readonly VssCoefficientCommitmentMaterialRecord[];
         readonly vssCoefficientCommitmentMaterialRoot: ProtocolHash;
     }
 >;
 
-export type SetupTransportChunk = Readonly<
-    JsonRecord & {
-        readonly chunkIndex: number;
-        readonly bytesHex: string;
-    }
->;
-
-export type SetupTransportedVssCoefficientCommitmentMaterial = Readonly<
-    JsonRecord & {
-        readonly objectType: 'SetupTransportedVssCoefficientCommitmentMaterial';
-        readonly objectVersion: 1;
-        readonly binaryFormat: typeof vssCoefficientCommitmentMaterialBinaryFormat;
-        readonly chunkSizeBytes: typeof setupTransportChunkSizeBytes;
+export type VssCoefficientCommitmentMaterialBinaryReference = Readonly<
+    Omit<
+        VssCoefficientCommitmentMaterialSet,
+        'materialEncoding' | 'coefficientCommitments'
+    > & {
+        readonly materialEncoding: typeof vssCoefficientCommitmentMaterialTransportEncoding;
         readonly chunkCount: number;
         readonly totalByteLength: number;
         readonly fullObjectHash: ProtocolHash;
-        readonly chunkHashes: readonly ProtocolHash[];
         readonly chunkRoot: ProtocolHash;
-        readonly chunks: readonly SetupTransportChunk[];
+        readonly chunkHashes: readonly ProtocolHash[];
     }
 >;
-
-export type SetupTransportedVssCoefficientCommitmentMaterialReference =
-    Readonly<
-        JsonRecord & {
-            readonly objectType: 'SetupTransportedVssCoefficientCommitmentMaterial';
-            readonly objectVersion: 1;
-            readonly binaryFormat: typeof vssCoefficientCommitmentMaterialBinaryFormat;
-            readonly chunkSizeBytes: typeof setupTransportChunkSizeBytes;
-            readonly chunkCount: number;
-            readonly totalByteLength: number;
-            readonly fullObjectHash: ProtocolHash;
-            readonly chunkHashes: readonly ProtocolHash[];
-            readonly chunkRoot: ProtocolHash;
-        }
-    >;
-
-export type SetupTransportedVssCoefficientCommitmentMaterialLike =
-    | SetupTransportedVssCoefficientCommitmentMaterial
-    | SetupTransportedVssCoefficientCommitmentMaterialReference;
 
 export type SetupPackageVssCoefficientCommitmentMaterialSet =
-    VssCoefficientCommitmentMaterialSet;
-
-export type VerifiedVssCoefficientCommitmentMaterial = Readonly<
-    JsonRecord & {
-        readonly objectType: 'VerifiedVssCoefficientCommitmentMaterial';
-        readonly objectVersion: 1;
-        readonly verificationId: string;
-        readonly materialBinaryFormat: typeof vssCoefficientCommitmentMaterialBinaryFormat;
-        readonly publicMatrixSeedHash: ProtocolHash;
-        readonly vssCoefficientCommitmentRoot: ProtocolHash;
-        readonly vssCoefficientCommitmentMaterialRoot: ProtocolHash;
-        readonly thresholdShareCommitmentRoot: ProtocolHash;
-        readonly transportSchemeId: typeof setupTransportSchemeId;
-        readonly transportChunkSizeBytes: typeof setupTransportChunkSizeBytes;
-        readonly transportChunkCount: number;
-        readonly transportTotalByteLength: number;
-        readonly transportFullObjectHash: ProtocolHash;
-        readonly transportChunkRoot: ProtocolHash;
-    }
->;
+    | VssCoefficientCommitmentMaterialSet
+    | VssCoefficientCommitmentMaterialBinaryReference;
 
 export type VssSourceTrusteeOpeningMaterial = Readonly<{
     readonly sourceTrusteeIdentity: string;
@@ -310,7 +254,7 @@ export type VssSourceTrusteeCoefficientCommitmentContributionOptions =
     }>;
 
 export type SetupCommitmentOpeningComputation = Readonly<{
-    readonly commitment: JsonRecord;
+    readonly commitment: SetupCommitmentValue;
     readonly commitmentRoot: ProtocolHash;
 }>;
 

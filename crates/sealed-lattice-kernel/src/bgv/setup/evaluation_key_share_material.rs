@@ -5,7 +5,14 @@
 
 mod component_material;
 
-pub(super) use self::component_material::component_b_vectors_from_record;
+pub(super) use self::component_material::{
+    VerifiedComponentMaterialEvictionGuard, component_b_vectors_from_record,
+};
+pub(crate) use self::component_material::{
+    absorb_evaluation_key_share_component_material_transport_stream_chunk_request,
+    begin_evaluation_key_share_component_material_transport_stream_request,
+    finish_evaluation_key_share_component_material_transport_stream_request,
+};
 #[cfg(test)]
 pub(in crate::bgv::setup) use self::component_material::{
     evaluation_key_share_component_vector_hash, evaluation_key_share_component_vector_root,
@@ -13,11 +20,12 @@ pub(in crate::bgv::setup) use self::component_material::{
 
 use std::{
     collections::BTreeMap,
-    fs::File,
-    io::Read,
-    path::PathBuf,
     sync::{Mutex, OnceLock},
 };
+// The component-material stream only touches the filesystem on native; the
+// browser wasm runtime stages in memory and never opens a file.
+#[cfg(not(target_arch = "wasm32"))]
+use std::{fs::File, io::Read, path::PathBuf};
 
 use serde_json::{Value, json};
 
@@ -34,7 +42,7 @@ use crate::{
 use super::setup_proof::SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES;
 
 pub(super) const EVALUATION_KEY_SHARE_COMPONENT_VECTOR_HASH_DOMAIN: &str =
-    "sealed-lattice-bgv-rns/evaluation-key-share-component-vector-v1";
+    "sealed-lattice-bgv-rns/evaluation-key-share-component-vector";
 pub(super) const EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING: &str =
     "binary-chunked-key-switch-component-vectors";
 pub(super) const EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_TRANSPORT_SET_OBJECT_TYPE: &str =

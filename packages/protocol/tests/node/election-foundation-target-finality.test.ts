@@ -67,7 +67,6 @@ describe('target finality', () => {
                 ceremonyId: duplicateWitnessRecord.ceremonyId,
                 inclusionProof: duplicateWitnessRecord.inclusionProof,
                 objectType: duplicateWitnessRecord.objectType,
-                objectVersion: duplicateWitnessRecord.objectVersion,
                 targetFinalityCheckpoint:
                     duplicateWitnessRecord.targetFinalityCheckpoint,
                 targetFinalityPolicyHash:
@@ -98,7 +97,7 @@ describe('target finality', () => {
         const head0 = createBoardHead(0, null);
         const head1 = createTargetProposalHead(1, head0.headHash, 'left');
         const forkEvaluatorReplayRecordHash = deriveFixtureHash(
-            'fixture-evaluator-replay-record-v1',
+            'fixture-evaluator-replay-record',
             { proposal: 'fork' },
         );
         const head1Fork = createTargetProposalHead(
@@ -167,7 +166,6 @@ describe('target finality', () => {
         });
 
         expect(forkedVerification.isValid).toBe(false);
-        expect(forkedVerification.acceptedHashes).toEqual([]);
         expect(forkedVerification.targetFinalityRecordHash).toBeUndefined();
         expect(forkedVerification.equivocatingWitnessIdentities).toEqual(
             witnessIdentities.slice(0, 5),
@@ -207,7 +205,6 @@ describe('target finality', () => {
             ceremonyId: record.ceremonyId,
             inclusionProof: record.inclusionProof,
             objectType: record.objectType,
-            objectVersion: record.objectVersion,
             targetFinalityCheckpoint: record.targetFinalityCheckpoint,
             targetFinalityPolicyHash: record.targetFinalityPolicyHash,
             targetFinalityScope: record.targetFinalityScope,
@@ -266,7 +263,7 @@ describe('target finality', () => {
             'first-target',
         );
         const secondEvaluatorReplayRecordHash = deriveFixtureHash(
-            'fixture-evaluator-replay-record-v1',
+            'fixture-evaluator-replay-record',
             { proposal: 'second-linear-target' },
         );
         const secondTargetHead = createTargetProposalHead(
@@ -294,7 +291,6 @@ describe('target finality', () => {
         });
 
         expect(verification.isValid).toBe(false);
-        expect(verification.acceptedHashes).toEqual([]);
         expect(verification.targetFinalityRecordHash).toBeUndefined();
         expect(verification.equivocatingWitnessIdentities).toEqual(
             witnessIdentities.slice(0, 5),

@@ -1,294 +1,73 @@
-import path from 'node:path';
-
 import { describe, expect, it } from 'vitest';
 
 import {
-    acceptedSetupCheckpointSourcePaths,
-    authoritativeCommandLanesForLane,
-    automaticTestThreadKnobForLane,
-    automaticTrusteeProofBatchKnobForLane,
+    acceptedSetupTestModulePattern,
+    buildAcceptedSetupEnvironment,
+    buildFocusedCommand,
+    cargoTestArgumentsForAcceptedSetupTests,
     cargoTestArgumentsForFocusedFilter,
-    cargoTestArgumentsForLane,
-    finalPackageCheckpointStoreIsWarmForInputs,
-    heavyAcceptedSetupFinalPackageTestPattern,
-    heavyAcceptedSetupTestPattern,
-    newestModificationTimeMillisecondsUnder,
+    deriveAcceptedSetupMemoryLimitGigabytes,
+    guardAcceptedSetupCommand,
     normalizeFocusedTestFilter,
     parseRustKernelAcceptedSetupArguments,
+    resolveAcceptedSetupMemoryLimitGigabytes,
+    resolveRunKnobs,
+    verifyProcessMemoryGuardCommand,
 } from '#tools/ci/run-rust-kernel-accepted-setup-tests';
 
 describe('Rust accepted setup runner arguments', () => {
-    it('runs the full accepted setup lane by default', () => {
+    it('runs the complete accepted setup module by default', () => {
         expect(parseRustKernelAcceptedSetupArguments([])).toEqual({
             focused: false,
-            lane: 'all',
             mode: 'accelerated',
-            testFilters: [heavyAcceptedSetupTestPattern],
+            testFilters: [acceptedSetupTestModulePattern],
         });
     });
 
     it('accepts an explicit CI prove-fresh mode', () => {
         expect(parseRustKernelAcceptedSetupArguments(['--ci'])).toEqual({
             focused: false,
-            lane: 'all',
             mode: 'ci',
-            testFilters: [heavyAcceptedSetupTestPattern],
+            testFilters: [acceptedSetupTestModulePattern],
         });
-    });
-
-    it('accepts the split package-script lanes through an explicit lane argument', () => {
-        expect(
-            parseRustKernelAcceptedSetupArguments(['--lane', 'fast']),
-        ).toEqual({
-            focused: false,
-            lane: 'fast',
-            mode: 'accelerated',
-            testFilters: [heavyAcceptedSetupTestPattern],
-        });
-        expect(
-            parseRustKernelAcceptedSetupArguments([
-                '--lane=final-package',
-                '--ci',
-            ]),
-        ).toEqual({
-            focused: false,
-            lane: 'final-package',
-            mode: 'ci',
-            testFilters: [heavyAcceptedSetupFinalPackageTestPattern],
-        });
-    });
-
-    it('expands the full authoritative lane into the two split lanes', () => {
-        expect(authoritativeCommandLanesForLane('all')).toEqual([
-            'fast',
-            'final-package',
-        ]);
-        expect(authoritativeCommandLanesForLane('fast')).toEqual(['fast']);
-        expect(authoritativeCommandLanesForLane('final-package')).toEqual([
-            'final-package',
-        ]);
-    });
-
-    it('caps final package libtest concurrency without slowing the fast lane', () => {
-        expect(automaticTestThreadKnobForLane('fast', 3)).toEqual({
-            source: 'memory-bounded',
-            value: '3',
-        });
-        expect(automaticTestThreadKnobForLane('final-package', 3)).toEqual({
-            source: 'final-package fixture cap',
-            value: '1',
-        });
-        expect(automaticTestThreadKnobForLane('final-package', 1)).toEqual({
-            source: 'memory-bounded',
-            value: '1',
-        });
-        expect(
-            automaticTestThreadKnobForLane('final-package', 3, 'accelerated'),
-        ).toEqual({
-            source: 'memory-bounded',
-            value: '3',
-        });
-    });
-
-    it('caps final package prover concurrency without slowing the fast lane', () => {
-        expect(automaticTrusteeProofBatchKnobForLane('fast', 5)).toEqual({
-            source: 'memory-bounded',
-            value: '5',
-        });
-        expect(
-            automaticTrusteeProofBatchKnobForLane('final-package', 5),
-        ).toEqual({
-            source: 'final-package prover cap',
-            value: '1',
-        });
-        expect(
-            automaticTrusteeProofBatchKnobForLane('final-package', 1),
-        ).toEqual({
-            source: 'memory-bounded',
-            value: '1',
-        });
-        expect(
-            automaticTrusteeProofBatchKnobForLane(
-                'final-package',
-                5,
-                'accelerated',
-            ),
-        ).toEqual({
-            source: 'local final-package workstation cap',
-            value: '3',
-        });
-    });
-
-    it('requires a current completion manifest before final package checkpoints are warm', () => {
-        const completionManifestProofFamilyCounts = new Map([
-            ['same-secret-anchor-proof-material', 4],
-            ['public-key-share-proof-material', 9],
-            ['trustee-evaluation-key-anchor-proof-material', 6],
-            ['trustee-evaluation-key-proof-material', 10],
-        ]);
-        const completeCurrentProofFamilyCounts = new Map([
-            ['same-secret-anchor-proof-material', 4],
-            ['public-key-share-proof-material', 9],
-            ['trustee-evaluation-key-anchor-proof-material', 6],
-            ['trustee-evaluation-key-proof-material', 10],
-        ]);
-
-        expect(
-            finalPackageCheckpointStoreIsWarmForInputs({
-                completionManifestModifiedAtMilliseconds: undefined,
-                completionManifestProofFamilyCounts: undefined,
-                proofFamilyCounts: completeCurrentProofFamilyCounts,
-                sourceNewestModificationTimeMilliseconds: 100,
-            }),
-        ).toBe(false);
-        expect(
-            finalPackageCheckpointStoreIsWarmForInputs({
-                completionManifestModifiedAtMilliseconds: 90,
-                completionManifestProofFamilyCounts,
-                proofFamilyCounts: completeCurrentProofFamilyCounts,
-                sourceNewestModificationTimeMilliseconds: 100,
-            }),
-        ).toBe(false);
-        expect(
-            finalPackageCheckpointStoreIsWarmForInputs({
-                completionManifestModifiedAtMilliseconds: 100,
-                completionManifestProofFamilyCounts,
-                proofFamilyCounts: new Map([
-                    ['same-secret-anchor-proof-material', 4],
-                    ['public-key-share-proof-material', 8],
-                    ['trustee-evaluation-key-anchor-proof-material', 6],
-                    ['trustee-evaluation-key-proof-material', 10],
-                ]),
-                sourceNewestModificationTimeMilliseconds: 100,
-            }),
-        ).toBe(false);
-        expect(
-            finalPackageCheckpointStoreIsWarmForInputs({
-                completionManifestModifiedAtMilliseconds: 100,
-                completionManifestProofFamilyCounts: new Map([
-                    ['same-secret-anchor-proof-material', 4],
-                    ['public-key-share-proof-material', 0],
-                    ['trustee-evaluation-key-anchor-proof-material', 6],
-                    ['trustee-evaluation-key-proof-material', 10],
-                ]),
-                proofFamilyCounts: completeCurrentProofFamilyCounts,
-                sourceNewestModificationTimeMilliseconds: 100,
-            }),
-        ).toBe(false);
-        expect(
-            finalPackageCheckpointStoreIsWarmForInputs({
-                completionManifestModifiedAtMilliseconds: 110,
-                completionManifestProofFamilyCounts,
-                proofFamilyCounts: completeCurrentProofFamilyCounts,
-                sourceNewestModificationTimeMilliseconds: 100,
-            }),
-        ).toBe(true);
-    });
-
-    it('keeps final package checkpoints cold until the transported trustee proof store is complete', () => {
-        const completionManifestProofFamilyCounts = new Map([
-            ['same-secret-anchor-proof-material', 4],
-            ['public-key-share-proof-material', 9],
-            ['trustee-evaluation-key-anchor-proof-material', 6],
-            ['trustee-evaluation-key-proof-material', 10],
-        ]);
-
-        expect(
-            finalPackageCheckpointStoreIsWarmForInputs({
-                completionManifestModifiedAtMilliseconds: 110,
-                completionManifestProofFamilyCounts,
-                proofFamilyCounts: new Map([
-                    ['same-secret-anchor-proof-material', 4],
-                    ['public-key-share-proof-material', 9],
-                    ['trustee-evaluation-key-anchor-proof-material', 6],
-                    ['trustee-evaluation-key-proof-material', 9],
-                ]),
-                sourceNewestModificationTimeMilliseconds: 100,
-            }),
-        ).toBe(false);
-    });
-
-    it('tracks the full kernel source tree for final package checkpoint staleness', () => {
-        expect(acceptedSetupCheckpointSourcePaths()).toContain(
-            path.resolve(
-                process.cwd(),
-                'crates',
-                'sealed-lattice-kernel',
-                'src',
-            ),
-        );
-    });
-
-    it('ignores files that disappear during source modification-time scanning', () => {
-        const rootPath = path.resolve('kernel-source');
-        const childPath = path.join(rootPath, 'child.rs');
-        const deletedPath = path.join(rootPath, 'deleted.rs');
-
-        const directoryEntry = (
-            name: string,
-            type: 'directory' | 'file',
-        ): {
-            readonly isDirectory: () => boolean;
-            readonly isFile: () => boolean;
-            readonly name: string;
-        } => ({
-            isDirectory: () => type === 'directory',
-            isFile: () => type === 'file',
-            name,
-        });
-
-        expect(
-            newestModificationTimeMillisecondsUnder(rootPath, {
-                readDirectory: () => [
-                    directoryEntry('child.rs', 'file'),
-                    directoryEntry('deleted.rs', 'file'),
-                ],
-                statPath: (filePath) => {
-                    if (filePath === deletedPath) {
-                        throw new Error('file disappeared');
-                    }
-
-                    return {
-                        isDirectory: () => filePath === rootPath,
-                        isFile: () => filePath === childPath,
-                        mtimeMs: filePath === childPath ? 250 : 100,
-                    };
-                },
-            }),
-        ).toBe(250);
     });
 
     it('treats one positional filter as a focused local run', () => {
         expect(parseRustKernelAcceptedSetupArguments(['one_test'])).toEqual({
             focused: true,
-            lane: 'all',
             mode: 'accelerated',
+            testFilters: ['one_test'],
+        });
+        expect(
+            parseRustKernelAcceptedSetupArguments(['--ci', 'one_test']),
+        ).toEqual({
+            focused: true,
+            mode: 'ci',
             testFilters: ['one_test'],
         });
     });
 
     it('normalizes Rust file paths into focused module filters', () => {
         expect(
-            normalizeFocusedTestFilter('evaluation_key_share_proofs.rs'),
-        ).toBe('evaluation_key_share_proofs');
+            normalizeFocusedTestFilter('terminal_evaluation_key_proofs.rs'),
+        ).toBe('terminal_evaluation_key_proofs');
         expect(
             normalizeFocusedTestFilter(
-                'crates/sealed-lattice-kernel/src/bgv/setup/tests/accepted_setup/evaluation_key_share_proofs.rs',
+                'crates/sealed-lattice-kernel/src/bgv/setup/tests/accepted_setup/terminal_evaluation_key_proofs.rs',
             ),
-        ).toBe('evaluation_key_share_proofs');
+        ).toBe('terminal_evaluation_key_proofs');
         expect(
             normalizeFocusedTestFilter(
-                'crates\\sealed-lattice-kernel\\src\\bgv\\setup\\tests\\accepted_setup\\evaluation_key_share_proofs.rs',
+                'crates\\sealed-lattice-kernel\\src\\bgv\\setup\\tests\\accepted_setup\\terminal_evaluation_key_proofs.rs',
             ),
-        ).toBe('evaluation_key_share_proofs');
+        ).toBe('terminal_evaluation_key_proofs');
     });
 
     it('ignores the package-manager argument separator', () => {
         expect(parseRustKernelAcceptedSetupArguments(['--'])).toEqual({
             focused: false,
-            lane: 'all',
             mode: 'accelerated',
-            testFilters: [heavyAcceptedSetupTestPattern],
+            testFilters: [acceptedSetupTestModulePattern],
         });
     });
 
@@ -300,53 +79,194 @@ describe('Rust accepted setup runner arguments', () => {
             parseRustKernelAcceptedSetupArguments(['--unsupported']),
         ).toThrow('Unknown argument: --unsupported');
         expect(() =>
-            parseRustKernelAcceptedSetupArguments(['--lane', 'unsupported']),
-        ).toThrow('Invalid accepted-setup lane');
+            parseRustKernelAcceptedSetupArguments(['--lane', 'fast']),
+        ).toThrow('Unknown argument: --lane');
     });
 
-    it('skips final package tests only in the fast lane', () => {
-        expect(cargoTestArgumentsForLane('fast', '4')).toEqual([
+    it('includes ordinary and ignored tests from the accepted setup module', () => {
+        expect(cargoTestArgumentsForAcceptedSetupTests('4')).toEqual([
             'test',
             '-p',
             'sealed-lattice-kernel',
-            heavyAcceptedSetupTestPattern,
+            acceptedSetupTestModulePattern,
             '--',
-            '--ignored',
+            '--include-ignored',
             '--nocapture',
-            '--skip',
-            heavyAcceptedSetupFinalPackageTestPattern,
             '--test-threads',
             '4',
-        ]);
-        expect(cargoTestArgumentsForLane('final-package', '2')).toEqual([
-            'test',
-            '-p',
-            'sealed-lattice-kernel',
-            heavyAcceptedSetupFinalPackageTestPattern,
-            '--',
-            '--ignored',
-            '--nocapture',
-            '--test-threads',
-            '2',
         ]);
     });
 
     it('builds focused cargo arguments from one normalized filter', () => {
         expect(
             cargoTestArgumentsForFocusedFilter(
-                'evaluation_key_share_proofs',
+                'terminal_evaluation_key_proofs',
                 '3',
             ),
         ).toEqual([
             'test',
             '-p',
             'sealed-lattice-kernel',
-            'evaluation_key_share_proofs',
+            'terminal_evaluation_key_proofs',
             '--',
-            '--ignored',
-            '--show-output',
+            '--include-ignored',
+            '--nocapture',
             '--test-threads',
             '3',
         ]);
+
+        expect(
+            cargoTestArgumentsForFocusedFilter('ceremony_phases', '1'),
+        ).toContain('--include-ignored');
+    });
+
+    it('uses a 32 GiB ceiling on large hosts and reserves memory on smaller hosts', () => {
+        expect(
+            deriveAcceptedSetupMemoryLimitGigabytes({
+                freeMemoryGigabytes: 95,
+                totalMemoryGigabytes: 127.7,
+            }),
+        ).toBe(32);
+        expect(
+            deriveAcceptedSetupMemoryLimitGigabytes({
+                freeMemoryGigabytes: 14,
+                totalMemoryGigabytes: 16,
+            }),
+        ).toBe(11);
+        expect(
+            deriveAcceptedSetupMemoryLimitGigabytes({
+                freeMemoryGigabytes: 6,
+                totalMemoryGigabytes: 7,
+            }),
+        ).toBe(4);
+        expect(() =>
+            deriveAcceptedSetupMemoryLimitGigabytes({
+                freeMemoryGigabytes: 2.5,
+                totalMemoryGigabytes: 8,
+            }),
+        ).toThrow('at least 3 GiB');
+    });
+
+    it('accepts only memory-limit overrides that lower the safe ceiling', () => {
+        expect(
+            resolveAcceptedSetupMemoryLimitGigabytes({
+                automaticLimitGigabytes: 32,
+                environment: {
+                    SEALED_LATTICE_ACCEPTED_SETUP_MEMORY_LIMIT_GIB: '24',
+                },
+            }),
+        ).toBe(24);
+        expect(() =>
+            resolveAcceptedSetupMemoryLimitGigabytes({
+                automaticLimitGigabytes: 32,
+                environment: {
+                    SEALED_LATTICE_ACCEPTED_SETUP_MEMORY_LIMIT_GIB: '64',
+                },
+            }),
+        ).toThrow('cannot exceed');
+        expect(() =>
+            resolveAcceptedSetupMemoryLimitGigabytes({
+                automaticLimitGigabytes: 32,
+                environment: {
+                    SEALED_LATTICE_ACCEPTED_SETUP_MEMORY_LIMIT_GIB: '2.5',
+                },
+            }),
+        ).toThrow('positive integer');
+    });
+
+    it('serializes every accepted setup concurrency layer', () => {
+        expect(resolveRunKnobs()).toEqual({
+            rayonThreadCount: { source: 'serialized', value: '1' },
+            testThreads: { source: 'serialized', value: '1' },
+            trusteeProofBatchSize: { source: 'serialized', value: '1' },
+            trusteeProofLimbBatchSize: {
+                source: 'serialized',
+                value: '1',
+            },
+        });
+    });
+
+    it('removes inherited checkpoint state from prove-fresh environments', () => {
+        const environment = buildAcceptedSetupEnvironment({
+            baseEnvironment: {
+                CARGO_TARGET_DIR: 'inherited-target',
+                SEALED_LATTICE_RESUME_TEST_CHECKPOINTS: '1',
+                SEALED_LATTICE_TEST_CHECKPOINT_ROOT: 'inherited-checkpoints',
+            },
+            cargoIncremental: '0',
+            knobs: {
+                rayonThreadCount: { source: 'test', value: '1' },
+                testThreads: { source: 'test', value: '1' },
+                trusteeProofBatchSize: { source: 'test', value: '1' },
+                trusteeProofLimbBatchSize: { source: 'test', value: '1' },
+            },
+            resumeCheckpoints: false,
+        });
+
+        expect(environment.CARGO_INCREMENTAL).toBe('0');
+        expect(environment.CARGO_BUILD_JOBS).toBe('1');
+        expect(environment.CARGO_TARGET_DIR).toBeUndefined();
+        expect(
+            environment.SEALED_LATTICE_RESUME_TEST_CHECKPOINTS,
+        ).toBeUndefined();
+        expect(environment.SEALED_LATTICE_TEST_CHECKPOINT_ROOT).toBeUndefined();
+    });
+
+    it('wraps cargo in the hard memory guard and builds the guard separately', () => {
+        const guardedCommand = guardAcceptedSetupCommand(
+            {
+                args: ['test', '--', '--test-threads', '1'],
+                command: 'cargo',
+                description: 'guarded test',
+            },
+            4096,
+        );
+        expect(guardedCommand.command).toContain(
+            'sealed-lattice-process-memory-guard',
+        );
+        expect(guardedCommand.args).toEqual([
+            '--memory-limit-bytes',
+            '4096',
+            '--',
+            'cargo',
+            'test',
+            '--',
+            '--test-threads',
+            '1',
+        ]);
+
+        const verificationCommand = verifyProcessMemoryGuardCommand();
+        expect(verificationCommand.command).toBe('cargo');
+        expect(verificationCommand.args).toContain('test');
+        expect(verificationCommand.args).toContain(
+            'sealed-lattice-process-memory-guard',
+        );
+        expect(verificationCommand.args).toContain('--locked');
+    });
+
+    it('keeps focused CI runs prove-fresh', () => {
+        const focusedCiCommand = buildFocusedCommand('ceremony_phases', 'ci');
+        expect(focusedCiCommand.command.env?.CARGO_INCREMENTAL).toBe('0');
+        expect(
+            focusedCiCommand.command.env
+                ?.SEALED_LATTICE_RESUME_TEST_CHECKPOINTS,
+        ).toBeUndefined();
+        expect(
+            focusedCiCommand.command.env?.SEALED_LATTICE_TEST_CHECKPOINT_ROOT,
+        ).toBeUndefined();
+        expect(focusedCiCommand.command.env?.CARGO_TARGET_DIR).toBeUndefined();
+
+        const focusedLocalCommand = buildFocusedCommand(
+            'ceremony_phases',
+            'accelerated',
+        );
+        expect(focusedLocalCommand.command.env?.CARGO_INCREMENTAL).toBe('1');
+        expect(
+            focusedLocalCommand.command.env
+                ?.SEALED_LATTICE_RESUME_TEST_CHECKPOINTS,
+        ).toBe('1');
+        expect(focusedLocalCommand.command.env?.CARGO_TARGET_DIR).toContain(
+            'accepted-setup-focused',
+        );
     });
 });

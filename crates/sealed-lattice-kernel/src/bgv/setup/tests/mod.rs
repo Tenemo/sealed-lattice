@@ -5,16 +5,11 @@ use super::sharing::{
     RnsShamirShare, canonical_trustee_point, evaluate_shamir_polynomial,
     interpolate_shamir_constant_with_threshold,
 };
-use super::threshold_share_commitments::derive_threshold_share_commitments_from_transport_request;
 use super::validation::{validate_setup_package_internal_bindings, validate_setup_package_shape};
 use super::vss::{evaluate_unreduced_shamir_polynomial, verify_carry_aware_vss_share_opening};
 use super::{
-    DATA_PRIMES, POLYNOMIAL_DEGREE,
-    absorb_threshold_share_commitment_transport_derivation_stream_chunk_request,
-    begin_threshold_share_commitment_transport_derivation_stream_request,
-    derive_threshold_share_commitments_from_request, describe_collective_bgv_setup_parameters,
+    DATA_PRIMES, POLYNOMIAL_DEGREE, describe_collective_bgv_setup_parameters,
     development_evaluator_key_from_passive_setup_package,
-    finish_threshold_share_commitment_transport_derivation_stream_request,
     generate_passive_setup_package_from_request, read_public_evaluation_key_rotation_requests,
     sample_public_residues, selected_public_evaluation_key_rotation_requests,
     verify_local_trustee_setup_state_from_request, verify_passive_setup_package_from_request,
@@ -54,7 +49,6 @@ mod payload_rejection;
 mod private_vss;
 mod sampling;
 mod sharing_algebra;
-mod threshold_share_commitments;
 mod vss_share_relation;
 
 type SetupPackageMutation = (&'static str, Box<dyn Fn(&mut serde_json::Value)>);

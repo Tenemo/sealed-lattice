@@ -289,7 +289,7 @@ fn sample_commitment_matrix_residue(
     loop {
         let block_index_text = block_index.to_string();
         let output = hash512(
-            "sealed-lattice-bdlop-commitment/matrix-coefficient-v1",
+            "sealed-lattice-bdlop-commitment/matrix-coefficient",
             &[
                 public_matrix_seed_hash.as_bytes(),
                 source_limb_text.as_bytes(),
@@ -321,7 +321,6 @@ fn setup_commitment_matrix_entry_hash(
 ) -> CanonicalResult<String> {
     derive_canonical_object_hash(&json!({
         "objectType": "SetupCommitmentMatrixEntryDerivation",
-        "objectVersion": 1,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "coordinate": coordinate,
         "coefficientValue": coefficient_value,

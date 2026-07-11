@@ -11,7 +11,6 @@ import type {
 import {
     createRefusal,
     isProtocolHashString,
-    uniqueStrings,
     verificationExceptionMessage,
 } from '../common/verification-helpers.js';
 import { verifyTargetFinality } from '../finality/index.js';
@@ -34,14 +33,12 @@ const nextFoundationEvidence = [
 
 const emptyFirstValidOrdering: FirstValidOrderingVerification = {
     isValid: false,
-    acceptedHashes: [],
     refusedObjects: [],
     orderedObjects: [],
 };
 
 const emptyTargetFinality: TargetFinalityVerification = {
     isValid: false,
-    acceptedHashes: [],
     refusedObjects: [],
     validWitnessIdentities: [],
     equivocatingWitnessIdentities: [],
@@ -52,21 +49,18 @@ const buildFailure = (
     componentResults?: Partial<FoundationTranscriptComponentResults>,
 ): FoundationTranscriptVerification => ({
     isValid: false,
-    acceptedHashes: [],
     refusedObjects,
     validWitnessIdentities: [],
     nextRequiredEvidence: nextFoundationEvidence,
     componentResults: {
         rosterManifest: componentResults?.rosterManifest ?? {
             isValid: false,
-            acceptedHashes: [],
             refusedObjects: [],
             participantIdentities: [],
         },
         rosterExternalAcceptance:
             componentResults?.rosterExternalAcceptance ?? {
                 isValid: false,
-                acceptedHashes: [],
                 refusedObjects: [],
             },
         recoveryEpochUpdates: componentResults?.recoveryEpochUpdates ?? [],
@@ -292,13 +286,6 @@ const verifyFoundationTranscriptUnchecked = (
 
     return {
         isValid: true,
-        acceptedHashes: uniqueStrings([
-            ...rosterManifest.acceptedHashes,
-            ...rosterExternalAcceptance.acceptedHashes,
-            ...recoveryEpochUpdates.flatMap((result) => result.acceptedHashes),
-            ...firstValidOrdering.acceptedHashes,
-            ...targetFinality.acceptedHashes,
-        ]),
         refusedObjects: [],
         electionManifestHash: rosterManifest.electionManifestHash,
         rosterHash: rosterManifest.rosterHash,

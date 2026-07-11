@@ -5,28 +5,29 @@
 //! primes. The shared witnesses are the ternary trustee secret and one
 //! centered-binomial error polynomial for the digit; the congruence uses a
 //! bounded carry polynomial over a large proof field. This test-only module
-//! implements the arithmetic needed for that relation:
+//! implements the arithmetic substrate for that relation and the proof backend
+//! built on top of it:
 //!
 //! - fixed-width Montgomery arithmetic over generalized-Fermat proof fields
-//!   whose shape is simultaneously NTT-friendly (2^16 divides p - 1) and
-//!   base-b digit-encodable (p = b^64 + 1);
+//!   whose shape is simultaneously NTT-friendly (a high power of two divides
+//!   p - 1) and base-b digit-encodable (p = b^64 + 1);
 //! - a negacyclic number-theoretic transform over those fields;
 //! - CRT recombination of limb-group kernel material into centered mod-Q
 //!   representatives, where the CRT basis constants are also the key-switch
 //!   gadget idempotents;
-//! - the limb-group digit-atom congruence check with an exact carry bound;
-//! - signed base-b witness digit encoding and a seeded Ajtai commitment
-//!   round sized for prover-cost measurement.
+//! - the limb-group digit-atom congruence check with an exact carry bound.
 //!
-//! The commitment-round dimensions are for measurement only, not a security
-//! parameter selection.
+//! The atom-family proof backend under `family_backend` is the single
+//! production backend: a masked univariate FRI polynomial-IOP over the proof
+//! field that commits the atom witness columns, checks the digit-atom
+//! congruences and the ternary/eta-2/carry support constraints, and opens a
+//! shared query set. It is the replacement for the per-limb multi-key FRI
+//! trustee evaluation-key prover, built and tested here before the command path
+//! is switched over to it.
 
-pub(crate) mod commitment_round;
 pub(crate) mod limb_group_statement;
 pub(crate) mod negacyclic_transform;
 pub(crate) mod proof_field;
 pub(crate) mod wide_unsigned;
-pub(crate) mod witness_encoding;
 
-#[cfg(test)]
-mod gate_benchmark;
+pub(crate) mod family_backend;

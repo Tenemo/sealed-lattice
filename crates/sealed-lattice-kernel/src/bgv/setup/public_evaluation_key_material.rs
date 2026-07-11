@@ -4,7 +4,7 @@ use crate::bgv::evaluator::top_k::SELECTED_EVALUATOR_WORKING_LEVEL;
 use crate::hashing::derive_canonical_object_hash;
 
 const PUBLIC_KEY_SWITCH_COMPONENT_VECTOR_HASH_DOMAIN: &str =
-    "sealed-lattice-bgv-rns/public-key-switch-component-vector-v1";
+    "sealed-lattice-bgv-rns/public-key-switch-component-vector";
 const PUBLIC_EVALUATION_KEY_COMPONENT_ENCODING: &str = "component-zero-b-little-endian-u64-coefficient-vectors-with-public-component-one-regenerated-from-stream-seed";
 
 pub(crate) struct PassiveSetupEvaluationKeySeeds {
@@ -188,7 +188,6 @@ pub(crate) fn generate_passive_setup_public_evaluation_keys_from_request(
     }
     let record = json!({
         "objectType": "PreparedBgvPublicEvaluationKeyMaterial",
-        "objectVersion": 1,
         "setupPackageHash": string_at_path(setup_package, &["setupPackageHash"])?,
         "collectivePublicKeyRoot": string_at_path(setup_package, &["collectivePublicKey", "collectivePublicKeyRoot"])?,
         "bgvPublicKeyRoot": string_at_path(setup_package, &["collectivePublicKey", "bgvPublicKeyRoot"])?,
@@ -222,12 +221,6 @@ pub(crate) fn public_evaluation_keys_from_material(
         "BgvPublicEvaluationKeyMaterial",
         "public evaluation-key material object type",
     )?;
-    if usize_at_path(material, &["objectVersion"])? != 1 {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ComponentMismatch,
-            "public evaluation-key material object version is unsupported",
-        ));
-    }
     compare_string_at_path(
         material,
         &["componentEncoding"],

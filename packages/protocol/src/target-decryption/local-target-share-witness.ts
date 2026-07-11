@@ -1,17 +1,25 @@
-import { hash512Hex } from '@sealed-lattice/crypto';
+import {
+    decryptLocalTrusteeSetupSealedMaterial,
+    decryptLocalTrusteeState,
+    deriveCanonicalObjectHash,
+    hash512Hex,
+    type EncryptedLocalTrusteeSetupState,
+    type LocalTrusteeSetupSealedMaterialDecryptionInput,
+} from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
 import {
     isProtocolHashString,
     isRecord,
 } from '../common/verification-helpers.js';
+import type { CollectiveBgvSetupContext } from '../setup/vss-share-verification-records.js';
 
 type JsonRecord = Record<string, unknown>;
 
 const targetDecryptionSmudgingProfileId =
-    'sealed-lattice-target-decryption-zero-share-smudging-v1';
+    'sealed-lattice-target-decryption-zero-share-smudging';
 const targetDecryptionSmudgingSeedHashDomain =
-    'sealed-lattice-bgv-rns/target-decryption-smudging-seed-v1';
+    'sealed-lattice-bgv-rns/target-decryption-smudging-seed';
 const targetDecryptionPlaintextMultiple = 65_537;
 
 const textEncoder = new TextEncoder();
@@ -26,7 +34,6 @@ type TargetDecryptionSmudgingSeedDerivationInput = Readonly<{
 type LocalTrusteeTargetDecryptionSmudgingWitness = Readonly<
     JsonRecord & {
         readonly objectType: 'LocalTrusteeTargetDecryptionSmudgingWitness';
-        readonly objectVersion: 1;
         readonly profileId: typeof targetDecryptionSmudgingProfileId;
         readonly setupPackageHash: ProtocolHash;
         readonly targetAcceptedRecordHash: ProtocolHash;
@@ -56,6 +63,17 @@ type PreparedLocalTargetDecryptionShareWitness = Readonly<
         readonly targetDecryptionSmudging: LocalTrusteeTargetDecryptionSmudgingWitness;
     }
 >;
+
+export type RestoredLocalTargetDecryptionShareWitnessInput = Readonly<{
+    readonly encryptedLocalState: EncryptedLocalTrusteeSetupState;
+    readonly expectedLocalStateRoot: ProtocolHash;
+    readonly setupContext: CollectiveBgvSetupContext;
+    readonly storageKeyBytesHex: string;
+    readonly setupPackage: unknown;
+    readonly targetAcceptedRecord: unknown;
+    readonly targetDecryptionCiphertextHash: ProtocolHash;
+    readonly targetShareProfile: unknown;
+}>;
 
 const jsonRecord = (value: unknown, objectPath: string): JsonRecord => {
     if (!isRecord(value) || Array.isArray(value)) {
@@ -125,20 +143,6 @@ const exactStringField = (
     }
 };
 
-const exactVersionField = (
-    value: JsonRecord,
-    fieldName: string,
-    expectedValue: number,
-    objectPath: string,
-): void => {
-    const fieldValue = value[fieldName];
-    if (fieldValue !== expectedValue) {
-        throw new Error(
-            `${objectPath}.${fieldName} must be ${String(expectedValue)}.`,
-        );
-    }
-};
-
 const compareProtocolHashField = (
     value: JsonRecord,
     fieldName: string,
@@ -188,11 +192,7 @@ const targetBindingHashes = (
     }
 
     return {
-        setupPackageHash: protocolHashField(
-            setupPackage,
-            'setupPackageHash',
-            'setupPackage',
-        ),
+        setupPackageHash: deriveCanonicalObjectHash(setupPackage),
         targetAcceptedRecordHash: protocolHashField(
             targetAcceptedRecord,
             'targetAcceptedRecordHash',
@@ -231,35 +231,58 @@ const setupParticipant = (
     readonly interpolationPoint: number;
 }> => {
     const setupPackage = jsonRecord(setupPackageValue, 'setupPackage');
-    const participants = setupPackage.participants;
-    if (!Array.isArray(participants)) {
-        throw new Error('setupPackage.participants must be an array.');
+    const aggregateThresholdCommitmentSet = jsonRecord(
+        setupPackage.vssPublicAggregateThresholdCommitmentSet,
+        'setupPackage.vssPublicAggregateThresholdCommitmentSet',
+    );
+    const recipientRecords = aggregateThresholdCommitmentSet.recipientRecords;
+    if (!Array.isArray(recipientRecords)) {
+        throw new Error(
+            'setupPackage.vssPublicAggregateThresholdCommitmentSet.recipientRecords must be an array.',
+        );
     }
-    const participant = participants
-        .map((participantValue, participantIndex) =>
+    const matchingRecipientRecords = recipientRecords
+        .map((recipientRecord, recipientRecordIndex) =>
             jsonRecord(
-                participantValue,
-                `setupPackage.participants.${String(participantIndex)}`,
+                recipientRecord,
+                `setupPackage.vssPublicAggregateThresholdCommitmentSet.recipientRecords.${String(recipientRecordIndex)}`,
             ),
         )
-        .find(
-            (participantValue) =>
-                participantValue.trusteeIdentity === trusteeIdentity,
+        .filter(
+            (recipientRecord) =>
+                recipientRecord.recipientIdentity === trusteeIdentity,
         );
+    const participant = matchingRecipientRecords[0];
     if (participant === undefined) {
-        throw new Error('setupPackage.participants must contain the trustee.');
+        throw new Error(
+            'setupPackage.vssPublicAggregateThresholdCommitmentSet must contain the trustee.',
+        );
     }
-    const participantObjectPath = 'setupPackage.participants.trustee';
+    const participantObjectPath =
+        'setupPackage.vssPublicAggregateThresholdCommitmentSet.recipientRecords.trustee';
     const rosterPosition = nonNegativeIntegerField(
         participant,
-        'rosterPosition',
+        'recipientRosterPosition',
         participantObjectPath,
     );
+    matchingRecipientRecords.forEach((recipientRecord) => {
+        if (
+            nonNegativeIntegerField(
+                recipientRecord,
+                'recipientRosterPosition',
+                participantObjectPath,
+            ) !== rosterPosition
+        ) {
+            throw new Error(
+                'setup package aggregate records must use one roster position per trustee identity.',
+            );
+        }
+    });
 
     return {
         trusteeIdentity: nonEmptyStringField(
             participant,
-            'trusteeIdentity',
+            'recipientIdentity',
             participantObjectPath,
         ),
         rosterPosition,
@@ -267,25 +290,25 @@ const setupParticipant = (
     };
 };
 
-const compactAggregateRecordKey = (
+const aggregateRecordKey = (
     recipientIdentity: string,
     recipientRosterPosition: number,
     rnsLimbIndex: number,
 ): string =>
-    `${recipientIdentity} ${String(recipientRosterPosition)} ${String(rnsLimbIndex)}`;
+    `${recipientIdentity}\u0000${String(recipientRosterPosition)}\u0000${String(rnsLimbIndex)}`;
 
-const compactAggregateRecordsByRecipientLimb = (
+const aggregateRecordsByRecipientLimb = (
     aggregateThresholdCommitmentSet: JsonRecord,
 ): ReadonlyMap<string, JsonRecord> => {
     const recipientRecords = aggregateThresholdCommitmentSet.recipientRecords;
     if (!Array.isArray(recipientRecords)) {
         throw new Error(
-            'setupPackage.compactVssAggregateThresholdCommitmentSet.recipientRecords must be an array.',
+            'setupPackage.vssPublicAggregateThresholdCommitmentSet.recipientRecords must be an array.',
         );
     }
     const recordsByRecipientLimb = new Map<string, JsonRecord>();
     recipientRecords.forEach((recordValue, recordIndex) => {
-        const objectPath = `setupPackage.compactVssAggregateThresholdCommitmentSet.recipientRecords.${String(recordIndex)}`;
+        const objectPath = `setupPackage.vssPublicAggregateThresholdCommitmentSet.recipientRecords.${String(recordIndex)}`;
         const record = jsonRecord(recordValue, objectPath);
         const recipientIdentity = nonEmptyStringField(
             record,
@@ -304,14 +327,14 @@ const compactAggregateRecordsByRecipientLimb = (
         );
         protocolHashField(record, 'aggregateCommitmentRoot', objectPath);
         protocolHashField(record, 'aggregateOpeningRoot', objectPath);
-        const recordKey = compactAggregateRecordKey(
+        const recordKey = aggregateRecordKey(
             recipientIdentity,
             recipientRosterPosition,
             rnsLimbIndex,
         );
         if (recordsByRecipientLimb.has(recordKey)) {
             throw new Error(
-                'setupPackage.compactVssAggregateThresholdCommitmentSet must contain at most one record per recipient limb.',
+                'setupPackage.vssPublicAggregateThresholdCommitmentSet must contain at most one record per recipient limb.',
             );
         }
         recordsByRecipientLimb.set(recordKey, record);
@@ -320,28 +343,22 @@ const compactAggregateRecordsByRecipientLimb = (
     return recordsByRecipientLimb;
 };
 
-const assertRestoredCompactAggregateOpeningBinding = (input: {
+const assertRestoredAggregateOpeningBinding = (input: {
     readonly restoredLocalTargetShareWitness: JsonRecord;
     readonly setupPackage: JsonRecord;
     readonly targetAcceptedRecord: JsonRecord;
     readonly trusteeIdentity: string;
     readonly rosterPosition: number;
 }): void => {
-    const compactAggregateOpening = jsonRecord(
-        input.restoredLocalTargetShareWitness.compactAggregateOpening,
-        'restoredLocalTargetShareWitness.compactAggregateOpening',
+    const aggregateOpening = jsonRecord(
+        input.restoredLocalTargetShareWitness.aggregateOpening,
+        'restoredLocalTargetShareWitness.aggregateOpening',
     );
     exactStringField(
-        compactAggregateOpening,
+        aggregateOpening,
         'objectType',
-        'LocalTrusteeCompactVssAggregateOpeningWitness',
-        'restoredLocalTargetShareWitness.compactAggregateOpening',
-    );
-    exactVersionField(
-        compactAggregateOpening,
-        'objectVersion',
-        1,
-        'restoredLocalTargetShareWitness.compactAggregateOpening',
+        'LocalTrusteeVssPublicAggregateOpeningWitness',
+        'restoredLocalTargetShareWitness.aggregateOpening',
     );
 
     const commonRandomness = jsonRecord(
@@ -349,166 +366,176 @@ const assertRestoredCompactAggregateOpeningBinding = (input: {
         'setupPackage.commonRandomness',
     );
     compareProtocolHashField(
-        compactAggregateOpening,
+        aggregateOpening,
         'publicMatrixSeedHash',
         protocolHashField(
             commonRandomness,
             'publicMatrixSeedHash',
             'setupPackage.commonRandomness',
         ),
-        'restoredLocalTargetShareWitness.compactAggregateOpening',
+        'restoredLocalTargetShareWitness.aggregateOpening',
         'setupPackage.commonRandomness.publicMatrixSeedHash',
     );
     compareProtocolHashField(
-        compactAggregateOpening,
+        aggregateOpening,
         'targetBasisHash',
         protocolHashField(
             input.targetAcceptedRecord,
             'targetBasisHash',
             'targetAcceptedRecord',
         ),
-        'restoredLocalTargetShareWitness.compactAggregateOpening',
+        'restoredLocalTargetShareWitness.aggregateOpening',
         'targetAcceptedRecord.targetBasisHash',
     );
 
     const shareLinkageStatement = jsonRecord(
-        input.setupPackage.compactVssShareLinkageStatement,
-        'setupPackage.compactVssShareLinkageStatement',
+        input.setupPackage.vssShareLinkageStatement,
+        'setupPackage.vssShareLinkageStatement',
     );
     compareProtocolHashField(
-        compactAggregateOpening,
+        aggregateOpening,
         'shareLinkageStatementRoot',
         protocolHashField(
             shareLinkageStatement,
             'statementRoot',
-            'setupPackage.compactVssShareLinkageStatement',
+            'setupPackage.vssShareLinkageStatement',
         ),
-        'restoredLocalTargetShareWitness.compactAggregateOpening',
-        'setupPackage.compactVssShareLinkageStatement.statementRoot',
+        'restoredLocalTargetShareWitness.aggregateOpening',
+        'setupPackage.vssShareLinkageStatement.statementRoot',
     );
 
     const aggregateThresholdCommitmentSet = jsonRecord(
-        input.setupPackage.compactVssAggregateThresholdCommitmentSet,
-        'setupPackage.compactVssAggregateThresholdCommitmentSet',
+        input.setupPackage.vssPublicAggregateThresholdCommitmentSet,
+        'setupPackage.vssPublicAggregateThresholdCommitmentSet',
     );
     compareProtocolHashField(
-        compactAggregateOpening,
+        aggregateOpening,
         'aggregateThresholdCommitmentRoot',
         protocolHashField(
             aggregateThresholdCommitmentSet,
             'aggregateThresholdCommitmentRoot',
-            'setupPackage.compactVssAggregateThresholdCommitmentSet',
+            'setupPackage.vssPublicAggregateThresholdCommitmentSet',
         ),
-        'restoredLocalTargetShareWitness.compactAggregateOpening',
-        'setupPackage.compactVssAggregateThresholdCommitmentSet.aggregateThresholdCommitmentRoot',
+        'restoredLocalTargetShareWitness.aggregateOpening',
+        'setupPackage.vssPublicAggregateThresholdCommitmentSet.aggregateThresholdCommitmentRoot',
     );
 
-    const compactAggregateOpeningCredentials =
-        compactAggregateOpening.compactAggregateOpeningCredentials;
+    const aggregateOpeningCredentials =
+        aggregateOpening.aggregateOpeningCredentials;
     if (
-        !Array.isArray(compactAggregateOpeningCredentials) ||
-        compactAggregateOpeningCredentials.length === 0
+        !Array.isArray(aggregateOpeningCredentials) ||
+        aggregateOpeningCredentials.length === 0
     ) {
         throw new Error(
-            'restoredLocalTargetShareWitness.compactAggregateOpening.compactAggregateOpeningCredentials must be a non-empty array.',
+            'restoredLocalTargetShareWitness.aggregateOpening.aggregateOpeningCredentials must be a non-empty array.',
         );
     }
-    const acceptedRecordsByRecipientLimb =
-        compactAggregateRecordsByRecipientLimb(aggregateThresholdCommitmentSet);
-    const seenCredentialKeys = new Set<string>();
-    compactAggregateOpeningCredentials.forEach(
-        (credentialValue, credentialIndex) => {
-            const objectPath = `restoredLocalTargetShareWitness.compactAggregateOpening.compactAggregateOpeningCredentials.${String(credentialIndex)}`;
-            const credential = jsonRecord(credentialValue, objectPath);
-            exactStringField(
-                credential,
-                'objectType',
-                'LocalTrusteeCompactVssAggregateOpeningCredential',
-                objectPath,
-            );
-            exactVersionField(credential, 'objectVersion', 1, objectPath);
-            const recipientIdentity = nonEmptyStringField(
-                credential,
-                'recipientIdentity',
-                objectPath,
-            );
-            const recipientRosterPosition = nonNegativeIntegerField(
-                credential,
-                'recipientRosterPosition',
-                objectPath,
-            );
-            if (
-                recipientIdentity !== input.trusteeIdentity ||
-                recipientRosterPosition !== input.rosterPosition
-            ) {
-                throw new Error(
-                    `${objectPath} must belong to the target-decryption trustee.`,
-                );
-            }
-            const rnsLimbIndex = nonNegativeIntegerField(
-                credential,
-                'rnsLimbIndex',
-                objectPath,
-            );
-            const credentialKey = compactAggregateRecordKey(
-                recipientIdentity,
-                recipientRosterPosition,
-                rnsLimbIndex,
-            );
-            if (seenCredentialKeys.has(credentialKey)) {
-                throw new Error(
-                    'restored compact aggregate opening credentials must contain at most one credential per recipient limb.',
-                );
-            }
-            seenCredentialKeys.add(credentialKey);
-            const acceptedRecord =
-                acceptedRecordsByRecipientLimb.get(credentialKey);
-            if (acceptedRecord === undefined) {
-                throw new Error(
-                    `${objectPath} must match an accepted compact aggregate commitment record.`,
-                );
-            }
-            const rnsPrime = nonNegativeIntegerField(
-                credential,
-                'rnsPrime',
-                objectPath,
-            );
-            if (
-                rnsPrime !==
-                nonNegativeIntegerField(
-                    acceptedRecord,
-                    'rnsPrime',
-                    'setupPackage.compactVssAggregateThresholdCommitmentSet.recipientRecords',
-                )
-            ) {
-                throw new Error(
-                    `${objectPath}.rnsPrime must match the accepted compact aggregate commitment record.`,
-                );
-            }
-            compareProtocolHashField(
-                credential,
-                'aggregateCommitmentRoot',
-                protocolHashField(
-                    acceptedRecord,
-                    'aggregateCommitmentRoot',
-                    'setupPackage.compactVssAggregateThresholdCommitmentSet.recipientRecords',
-                ),
-                objectPath,
-                'the accepted compact aggregate commitment record',
-            );
-            compareProtocolHashField(
-                credential,
-                'aggregateOpeningRoot',
-                protocolHashField(
-                    acceptedRecord,
-                    'aggregateOpeningRoot',
-                    'setupPackage.compactVssAggregateThresholdCommitmentSet.recipientRecords',
-                ),
-                objectPath,
-                'the accepted compact aggregate commitment record',
-            );
-        },
+    const acceptedRecordsByRecipientLimb = aggregateRecordsByRecipientLimb(
+        aggregateThresholdCommitmentSet,
     );
+    const seenCredentialKeys = new Set<string>();
+    aggregateOpeningCredentials.forEach((credentialValue, credentialIndex) => {
+        const objectPath = `restoredLocalTargetShareWitness.aggregateOpening.aggregateOpeningCredentials.${String(credentialIndex)}`;
+        const credential = jsonRecord(credentialValue, objectPath);
+        exactStringField(
+            credential,
+            'objectType',
+            'LocalTrusteeVssPublicAggregateOpeningCredential',
+            objectPath,
+        );
+        const recipientIdentity = nonEmptyStringField(
+            credential,
+            'recipientIdentity',
+            objectPath,
+        );
+        const recipientRosterPosition = nonNegativeIntegerField(
+            credential,
+            'recipientRosterPosition',
+            objectPath,
+        );
+        if (
+            recipientIdentity !== input.trusteeIdentity ||
+            recipientRosterPosition !== input.rosterPosition
+        ) {
+            throw new Error(
+                `${objectPath} must belong to the target-decryption trustee.`,
+            );
+        }
+        if (
+            nonNegativeIntegerField(
+                credential,
+                'recipientTrusteePoint',
+                objectPath,
+            ) !==
+            input.rosterPosition + 1
+        ) {
+            throw new Error(
+                `${objectPath}.recipientTrusteePoint must match the target-decryption trustee interpolation point.`,
+            );
+        }
+        const rnsLimbIndex = nonNegativeIntegerField(
+            credential,
+            'rnsLimbIndex',
+            objectPath,
+        );
+        const credentialKey = aggregateRecordKey(
+            recipientIdentity,
+            recipientRosterPosition,
+            rnsLimbIndex,
+        );
+        if (seenCredentialKeys.has(credentialKey)) {
+            throw new Error(
+                'restored aggregate opening credentials must contain at most one credential per recipient limb.',
+            );
+        }
+        seenCredentialKeys.add(credentialKey);
+        const acceptedRecord =
+            acceptedRecordsByRecipientLimb.get(credentialKey);
+        if (acceptedRecord === undefined) {
+            throw new Error(
+                `${objectPath} must match an accepted aggregate commitment record.`,
+            );
+        }
+        const rnsPrime = nonNegativeIntegerField(
+            credential,
+            'rnsPrime',
+            objectPath,
+        );
+        if (
+            rnsPrime !==
+            nonNegativeIntegerField(
+                acceptedRecord,
+                'rnsPrime',
+                'setupPackage.vssPublicAggregateThresholdCommitmentSet.recipientRecords',
+            )
+        ) {
+            throw new Error(
+                `${objectPath}.rnsPrime must match the accepted aggregate commitment record.`,
+            );
+        }
+        compareProtocolHashField(
+            credential,
+            'aggregateCommitmentRoot',
+            protocolHashField(
+                acceptedRecord,
+                'aggregateCommitmentRoot',
+                'setupPackage.vssPublicAggregateThresholdCommitmentSet.recipientRecords',
+            ),
+            objectPath,
+            'the accepted aggregate commitment record',
+        );
+        compareProtocolHashField(
+            credential,
+            'aggregateOpeningRoot',
+            protocolHashField(
+                acceptedRecord,
+                'aggregateOpeningRoot',
+                'setupPackage.vssPublicAggregateThresholdCommitmentSet.recipientRecords',
+            ),
+            objectPath,
+            'the accepted aggregate commitment record',
+        );
+    });
 };
 
 export const deriveTargetDecryptionSmudgingSeedHex = (
@@ -549,7 +576,6 @@ const createLocalTrusteeTargetDecryptionSmudgingWitness = (
 
     return {
         objectType: 'LocalTrusteeTargetDecryptionSmudgingWitness',
-        objectVersion: 1,
         profileId: targetDecryptionSmudgingProfileId,
         setupPackageHash: bindingHashes.setupPackageHash,
         targetAcceptedRecordHash: bindingHashes.targetAcceptedRecordHash,
@@ -581,8 +607,8 @@ export const prepareLocalTargetDecryptionShareWitness = (
         );
     }
     jsonRecord(
-        restoredLocalTargetShareWitness.compactAggregateOpening,
-        'restoredLocalTargetShareWitness.compactAggregateOpening',
+        restoredLocalTargetShareWitness.aggregateOpening,
+        'restoredLocalTargetShareWitness.aggregateOpening',
     );
     const witnessTrusteeIdentity = nonEmptyStringField(
         restoredLocalTargetShareWitness,
@@ -608,7 +634,7 @@ export const prepareLocalTargetDecryptionShareWitness = (
             'restoredLocalTargetShareWitness roster position must match the setup package trustee.',
         );
     }
-    assertRestoredCompactAggregateOpeningBinding({
+    assertRestoredAggregateOpeningBinding({
         restoredLocalTargetShareWitness,
         setupPackage: jsonRecord(input.setupPackage, 'setupPackage'),
         targetAcceptedRecord: jsonRecord(
@@ -624,4 +650,221 @@ export const prepareLocalTargetDecryptionShareWitness = (
         targetDecryptionSmudging:
             createLocalTrusteeTargetDecryptionSmudgingWitness(input),
     };
+};
+
+const assertRestoredSetupContext = (
+    expectedContext: CollectiveBgvSetupContext,
+    setupPackage: JsonRecord,
+    aggregateThresholdShareMaterial: JsonRecord,
+): void => {
+    const setupPackageContext = jsonRecord(
+        setupPackage.setupContext,
+        'setupPackage.setupContext',
+    );
+    for (const fieldName of ['ceremonyId', 'setupEpoch'] as const) {
+        const expectedValue = expectedContext[fieldName];
+        if (
+            nonEmptyStringField(
+                setupPackageContext,
+                fieldName,
+                'setupPackage.setupContext',
+            ) !== expectedValue ||
+            nonEmptyStringField(
+                aggregateThresholdShareMaterial,
+                fieldName,
+                'aggregateThresholdShareMaterial',
+            ) !== expectedValue
+        ) {
+            throw new Error(
+                `${fieldName} must match across the restored local state and setup package.`,
+            );
+        }
+    }
+    for (const fieldName of [
+        'manifestHash',
+        'rosterHash',
+        'setupParametersHash',
+    ] as const) {
+        const expectedValue = expectedContext[fieldName];
+        if (
+            protocolHashField(
+                setupPackageContext,
+                fieldName,
+                'setupPackage.setupContext',
+            ) !== expectedValue ||
+            protocolHashField(
+                aggregateThresholdShareMaterial,
+                fieldName,
+                'aggregateThresholdShareMaterial',
+            ) !== expectedValue
+        ) {
+            throw new Error(
+                `${fieldName} must match across the restored local state and setup package.`,
+            );
+        }
+    }
+};
+
+export const restoreAndPrepareLocalTargetDecryptionShareWitness = async (
+    input: RestoredLocalTargetDecryptionShareWitnessInput,
+): Promise<PreparedLocalTargetDecryptionShareWitness> => {
+    const restoredLocalState = await decryptLocalTrusteeState({
+        encryptedLocalState: input.encryptedLocalState,
+        expectedLocalStateRoot: input.expectedLocalStateRoot,
+        setupContext: input.setupContext,
+        storageKeyBytesHex: input.storageKeyBytesHex,
+    });
+    const storageAad = jsonRecord(
+        input.encryptedLocalState.storageAad,
+        'encryptedLocalState.storageAad',
+    );
+    const localStateCommitment = jsonRecord(
+        storageAad.localStateCommitment,
+        'encryptedLocalState.storageAad.localStateCommitment',
+    ) as LocalTrusteeSetupSealedMaterialDecryptionInput['localStateCommitment'];
+    const aggregateThresholdShareRoot = protocolHashField(
+        localStateCommitment,
+        'aggregateThresholdShareRoot',
+        'encryptedLocalState.storageAad.localStateCommitment',
+    );
+    const restoredAggregateThresholdShare =
+        await decryptLocalTrusteeSetupSealedMaterial({
+            sealedMaterial:
+                restoredLocalState.localStatePlaintext
+                    .sealedAggregateThresholdShare,
+            expectedMaterialRoot: aggregateThresholdShareRoot,
+            localStateCommitment,
+            setupContext: input.setupContext,
+            storageKeyBytesHex: input.storageKeyBytesHex,
+        });
+    const aggregateThresholdShareMaterial = jsonRecord(
+        restoredAggregateThresholdShare.materialPlaintext,
+        'aggregateThresholdShareMaterial',
+    );
+    exactStringField(
+        aggregateThresholdShareMaterial,
+        'objectType',
+        'LocalTrusteeAggregateThresholdShareMaterial',
+        'aggregateThresholdShareMaterial',
+    );
+    const setupPackage = jsonRecord(input.setupPackage, 'setupPackage');
+    assertRestoredSetupContext(
+        input.setupContext,
+        setupPackage,
+        aggregateThresholdShareMaterial,
+    );
+    const trusteeIdentity = nonEmptyStringField(
+        aggregateThresholdShareMaterial,
+        'trusteeIdentity',
+        'aggregateThresholdShareMaterial',
+    );
+    const trusteeRosterPosition = nonNegativeIntegerField(
+        aggregateThresholdShareMaterial,
+        'trusteeRosterPosition',
+        'aggregateThresholdShareMaterial',
+    );
+    const participant = setupParticipant(setupPackage, trusteeIdentity);
+    if (participant.rosterPosition !== trusteeRosterPosition) {
+        throw new Error(
+            'restored aggregate threshold share roster position must match the accepted setup package.',
+        );
+    }
+    compareProtocolHashField(
+        aggregateThresholdShareMaterial,
+        'thresholdShareCommitmentRecipientRoot',
+        protocolHashField(
+            restoredLocalState.localStatePlaintext,
+            'thresholdShareCommitmentRecipientRoot',
+            'localStatePlaintext',
+        ),
+        'aggregateThresholdShareMaterial',
+        'the restored local state threshold-share commitment root',
+    );
+    const aggregateOpeningCredentialHandoff = jsonRecord(
+        aggregateThresholdShareMaterial.aggregateOpeningCredentialHandoff,
+        'aggregateThresholdShareMaterial.aggregateOpeningCredentialHandoff',
+    );
+    exactStringField(
+        aggregateOpeningCredentialHandoff,
+        'objectType',
+        'LocalTrusteeVssPublicAggregateOpeningCredentialHandoff',
+        'aggregateThresholdShareMaterial.aggregateOpeningCredentialHandoff',
+    );
+    if (
+        nonEmptyStringField(
+            aggregateOpeningCredentialHandoff,
+            'trusteeIdentity',
+            'aggregateThresholdShareMaterial.aggregateOpeningCredentialHandoff',
+        ) !== trusteeIdentity ||
+        nonNegativeIntegerField(
+            aggregateOpeningCredentialHandoff,
+            'trusteeRosterPosition',
+            'aggregateThresholdShareMaterial.aggregateOpeningCredentialHandoff',
+        ) !== trusteeRosterPosition
+    ) {
+        throw new Error(
+            'restored aggregate opening credential handoff must belong to the local trustee.',
+        );
+    }
+
+    const commonRandomness = jsonRecord(
+        setupPackage.commonRandomness,
+        'setupPackage.commonRandomness',
+    );
+    const shareLinkageStatement = jsonRecord(
+        setupPackage.vssShareLinkageStatement,
+        'setupPackage.vssShareLinkageStatement',
+    );
+    const aggregateThresholdCommitmentSet = jsonRecord(
+        setupPackage.vssPublicAggregateThresholdCommitmentSet,
+        'setupPackage.vssPublicAggregateThresholdCommitmentSet',
+    );
+    const targetAcceptedRecord = jsonRecord(
+        input.targetAcceptedRecord,
+        'targetAcceptedRecord',
+    );
+    const restoredLocalTargetShareWitness = {
+        objectType: 'LocalTrusteeTargetDecryptionProofWitnessMaterial',
+        ceremonyId: input.setupContext.ceremonyId,
+        manifestHash: input.setupContext.manifestHash,
+        rosterHash: input.setupContext.rosterHash,
+        setupParametersHash: input.setupContext.setupParametersHash,
+        setupEpoch: input.setupContext.setupEpoch,
+        trusteeIdentity,
+        trusteeRosterPosition,
+        aggregateOpening: {
+            objectType: 'LocalTrusteeVssPublicAggregateOpeningWitness',
+            publicMatrixSeedHash: protocolHashField(
+                commonRandomness,
+                'publicMatrixSeedHash',
+                'setupPackage.commonRandomness',
+            ),
+            targetBasisHash: protocolHashField(
+                targetAcceptedRecord,
+                'targetBasisHash',
+                'targetAcceptedRecord',
+            ),
+            shareLinkageStatementRoot: protocolHashField(
+                shareLinkageStatement,
+                'statementRoot',
+                'setupPackage.vssShareLinkageStatement',
+            ),
+            aggregateThresholdCommitmentRoot: protocolHashField(
+                aggregateThresholdCommitmentSet,
+                'aggregateThresholdCommitmentRoot',
+                'setupPackage.vssPublicAggregateThresholdCommitmentSet',
+            ),
+            aggregateOpeningCredentials:
+                aggregateOpeningCredentialHandoff.aggregateOpeningCredentials,
+        },
+    };
+
+    return prepareLocalTargetDecryptionShareWitness({
+        restoredLocalTargetShareWitness,
+        setupPackage,
+        targetAcceptedRecord,
+        targetDecryptionCiphertextHash: input.targetDecryptionCiphertextHash,
+        targetShareProfile: input.targetShareProfile,
+        trusteeIdentity,
+    });
 };

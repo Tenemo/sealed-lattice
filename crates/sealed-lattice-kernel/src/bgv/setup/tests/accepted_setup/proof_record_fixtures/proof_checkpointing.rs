@@ -1,26 +1,23 @@
 use super::super::*;
 
-// Checkpoint subdirectories for the inline anchor proof families. The trustee
+// Checkpoint subdirectories for the expensive proof families. The trustee
 // evaluation-key family already persists its transported proof material under a
 // sibling directory; these two cover the other expensive prover outputs so a
 // resumed run skips re-proving every family, not just the trustee one.
-pub(in super::super) const SAME_SECRET_ANCHOR_PROOF_CHECKPOINT_DIRECTORY: &str =
-    "same-secret-anchor-proof-material";
+pub(in super::super) const SAME_SECRET_BRIDGE_PROOF_CHECKPOINT_DIRECTORY: &str =
+    "same-secret-bridge-proof-material";
 pub(in super::super) const PUBLIC_KEY_SHARE_PROOF_CHECKPOINT_DIRECTORY: &str =
     "public-key-share-proof-material";
-pub(in super::super) const TRUSTEE_EVALUATION_KEY_ANCHOR_PROOF_CHECKPOINT_DIRECTORY: &str =
-    "trustee-evaluation-key-anchor-proof-material";
+pub(in super::super) const TRUSTEE_EVALUATION_KEY_PROOF_CHECKPOINT_DIRECTORY: &str =
+    "trustee-evaluation-key-proof-material";
 
-fn anchor_proof_checkpoint_path(
-    family_directory: &str,
-    statement_hash_hex: &str,
-) -> std::path::PathBuf {
+fn proof_checkpoint_path(family_directory: &str, statement_hash_hex: &str) -> std::path::PathBuf {
     crate::bgv::setup::accepted_setup_final_package_material_store_checkpoint_directory()
         .join(family_directory)
         .join(format!("{statement_hash_hex}.bin"))
 }
 
-pub(in super::super) fn persist_checkpointed_anchor_proof_bytes(
+pub(in super::super) fn persist_checkpointed_proof_bytes(
     family_directory: &str,
     statement_hash_hex: &str,
     proof_bytes: &[u8],
@@ -28,18 +25,18 @@ pub(in super::super) fn persist_checkpointed_anchor_proof_bytes(
     if !final_package_checkpoint_resume_enabled() {
         return;
     }
-    let path = anchor_proof_checkpoint_path(family_directory, statement_hash_hex);
-    persist_anchor_proof_checkpoint(&path, statement_hash_hex, proof_bytes);
+    let path = proof_checkpoint_path(family_directory, statement_hash_hex);
+    persist_proof_checkpoint(&path, statement_hash_hex, proof_bytes);
 }
 
-// Returns the deterministic encoded proof bytes for one inline anchor proof,
+// Returns deterministic encoded proof bytes,
 // loading them from an on-disk checkpoint when checkpoint resume is enabled and a
 // matching file exists, and otherwise generating them and persisting them so a
 // later run can skip the prover. The statement hash content-addresses the proof:
 // a changed statement yields a new filename, so a stale proof is never reused,
 // and a witness-only divergence surfaces as a loud verifier rejection rather than
 // a silently accepted wrong proof.
-pub(in super::super) fn checkpointed_anchor_proof_bytes(
+pub(in super::super) fn checkpointed_proof_bytes(
     family_directory: &str,
     statement_hash_hex: &str,
     generate_proof_bytes: impl FnOnce() -> Vec<u8>,
@@ -47,7 +44,7 @@ pub(in super::super) fn checkpointed_anchor_proof_bytes(
     if !final_package_checkpoint_resume_enabled() {
         return generate_proof_bytes();
     }
-    let path = anchor_proof_checkpoint_path(family_directory, statement_hash_hex);
+    let path = proof_checkpoint_path(family_directory, statement_hash_hex);
     if let Ok(proof_bytes) = std::fs::read(&path) {
         final_package_phase(&format!(
             "resumed {family_directory} proof checkpoint {statement_hash_hex}"
@@ -55,20 +52,16 @@ pub(in super::super) fn checkpointed_anchor_proof_bytes(
         return proof_bytes;
     }
     let proof_bytes = generate_proof_bytes();
-    persist_checkpointed_anchor_proof_bytes(family_directory, statement_hash_hex, &proof_bytes);
+    persist_checkpointed_proof_bytes(family_directory, statement_hash_hex, &proof_bytes);
 
     proof_bytes
 }
 
-fn persist_anchor_proof_checkpoint(
-    path: &std::path::Path,
-    statement_hash_hex: &str,
-    proof_bytes: &[u8],
-) {
+fn persist_proof_checkpoint(path: &std::path::Path, statement_hash_hex: &str, proof_bytes: &[u8]) {
     let Some(parent) = path.parent() else {
         return;
     };
-    std::fs::create_dir_all(parent).expect("anchor proof checkpoint directory");
+    std::fs::create_dir_all(parent).expect("proof checkpoint directory");
     // Publish atomically through a process-unique temporary file so a concurrent
     // reader never observes a torn write and parallel writers never collide. If a
     // sibling process published the identical content first, the rename fails and
@@ -77,7 +70,7 @@ fn persist_anchor_proof_checkpoint(
         "{statement_hash_hex}.{}.partial",
         std::process::id()
     ));
-    std::fs::write(&temporary_path, proof_bytes).expect("anchor proof checkpoint write");
+    std::fs::write(&temporary_path, proof_bytes).expect("proof checkpoint write");
     if std::fs::rename(&temporary_path, path).is_err() {
         let _ = std::fs::remove_file(&temporary_path);
     }

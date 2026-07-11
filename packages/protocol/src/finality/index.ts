@@ -17,8 +17,6 @@ import {
     createRefusal,
     defaultSignedRootContextHash,
     isProtocolHashString,
-    signedObjectRootByteLength,
-    uniqueStrings,
     verificationExceptionMessage,
 } from '../common/verification-helpers.js';
 
@@ -51,7 +49,6 @@ const verifyTargetRecordShape = (
         ceremonyId: record.ceremonyId,
         inclusionProof: record.inclusionProof,
         objectType: record.objectType,
-        objectVersion: record.objectVersion,
         targetFinalityCheckpoint: checkpoint,
         targetFinalityPolicyHash: record.targetFinalityPolicyHash,
         targetFinalityScope: record.targetFinalityScope,
@@ -83,7 +80,6 @@ const verifyTargetRecordShape = (
         evaluatorReplayRecordHash: checkpoint.evaluatorReplayRecordHash,
         finalizedBoardHeadHash: checkpoint.finalizedBoardHeadHash,
         objectType: checkpoint.objectType,
-        objectVersion: checkpoint.objectVersion,
         targetCiphertextHash: checkpoint.targetCiphertextHash,
         targetFinalityPolicyHash: checkpoint.targetFinalityPolicyHash,
         targetLayoutHash: checkpoint.targetLayoutHash,
@@ -106,9 +102,7 @@ const verifyTargetRecordShape = (
     }
     if (
         record.objectType !== 'TargetFinalityRecord' ||
-        record.objectVersion !== 1 ||
-        checkpoint.objectType !== 'TargetFinalityCheckpoint' ||
-        checkpoint.objectVersion !== 1
+        checkpoint.objectType !== 'TargetFinalityCheckpoint'
     ) {
         refusedObjects.push(
             createRefusal(
@@ -310,7 +304,6 @@ const verifyWitnessCheckpoint = (
     const expectedCheckpointHash = deriveWitnessCheckpointHash({
         ceremonyId: checkpoint.ceremonyId,
         objectType: checkpoint.objectType,
-        objectVersion: checkpoint.objectVersion,
         targetFinalityCheckpointHash: checkpoint.targetFinalityCheckpointHash,
         targetFinalityPolicyHash: checkpoint.targetFinalityPolicyHash,
         targetFinalityScope: checkpoint.targetFinalityScope,
@@ -341,10 +334,7 @@ const verifyWitnessCheckpoint = (
             ),
         );
     }
-    if (
-        checkpoint.objectType !== 'WitnessCheckpoint' ||
-        checkpoint.objectVersion !== 1
-    ) {
+    if (checkpoint.objectType !== 'WitnessCheckpoint') {
         refusedObjects.push(
             createRefusal(
                 'InvalidSignedRoot',
@@ -386,7 +376,6 @@ const verifyWitnessCheckpoint = (
 
     const signatureResult = verifySignedObjectSignature(checkpoint.signature, {
         objectType: 'WitnessCheckpoint',
-        objectVersion: 1,
         signerRole: 'Witness',
         signerIdentity: checkpoint.witnessIdentity,
         ceremonyId: record.ceremonyId,
@@ -394,7 +383,6 @@ const verifyWitnessCheckpoint = (
         manifestHash: finalityCheckpoint.electionManifestHash,
         objectRoot: checkpoint.checkpointHash,
         boardHeadHash: finalityCheckpoint.finalizedBoardHeadHash,
-        byteLength: signedObjectRootByteLength,
         recoveryEpoch: 0,
         deviceEpoch: 0,
         contextHash: defaultSignedRootContextHash,
@@ -586,19 +574,11 @@ const verifyTargetFinalityUnchecked = (
     const forkEvidence = finalityForkEvidence ?? boardResult.forkEvidence;
     const equivocatingWitnessIdentities =
         forkEvidence?.equivocatingWitnessIdentities ?? [];
-    const acceptedHashes = uniqueStrings([
-        ...boardResult.acceptedHashes,
-        input.record.targetFinalityRecordHash,
-        ...input.record.witnessCheckpoints.map(
-            (checkpoint) => checkpoint.checkpointHash,
-        ),
-    ]);
     const finalityAccepted =
         refusedObjects.length === 0 && forkEvidence === undefined;
 
     return {
         isValid: finalityAccepted,
-        acceptedHashes: finalityAccepted ? acceptedHashes : [],
         refusedObjects:
             forkEvidence === undefined
                 ? refusedObjects
@@ -637,7 +617,6 @@ export const verifyTargetFinality = (
     } catch (error) {
         return {
             isValid: false,
-            acceptedHashes: [],
             refusedObjects: [
                 createRefusal(
                     'TargetFinalityPolicyMismatch',

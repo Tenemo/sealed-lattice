@@ -32,16 +32,6 @@ const assertCollectivePublicKeySourceBindings = (
     assertPositiveSafeInteger(input.ringDegree, 'ringDegree');
     assertContextMatches(
         input.setupContext,
-        input.sameSecretConsistency,
-        'sameSecretConsistency',
-    );
-    assertContextMatches(
-        input.setupContext,
-        input.sameSecretProofs,
-        'sameSecretProofs',
-    );
-    assertContextMatches(
-        input.setupContext,
         input.publicKeyShares,
         'publicKeyShares',
     );
@@ -61,18 +51,10 @@ const assertCollectivePublicKeySourceBindings = (
         'publicKeyShareSuccinctProofs',
     );
     if (
-        input.sameSecretProofs.sameSecretConsistencyRoot !==
-            input.sameSecretConsistency.sameSecretConsistencyRoot ||
-        input.sameSecretProofs.sameSecretProofFamilyBindingRoot !==
-            input.sameSecretConsistency.sameSecretProofFamilyBindingRoot ||
-        input.publicKeyShares.sameSecretConsistencyRoot !==
-            input.sameSecretConsistency.sameSecretConsistencyRoot ||
         input.publicKeyShareProofs.publicKeyShareSetRoot !==
             input.publicKeyShares.publicKeyShareSetRoot ||
         input.publicKeyShareMaterial.publicKeyShareSetRoot !==
             input.publicKeyShares.publicKeyShareSetRoot ||
-        input.publicKeyShareSuccinctProofs.sameSecretProofSetRoot !==
-            input.sameSecretProofs.sameSecretProofSetRoot ||
         input.publicKeyShareSuccinctProofs.publicKeyShareSetRoot !==
             input.publicKeyShares.publicKeyShareSetRoot ||
         input.publicKeyShareSuccinctProofs.publicKeyShareProofSetRoot !==
@@ -129,7 +111,6 @@ const createCollectivePublicKeyFromAggregateCoefficients = (
         });
     const collectivePublicKeyWithoutRoot = {
         objectType: 'CollectivePublicKey',
-        objectVersion: 1,
         proofFamily: publicKeyShareProofFamily,
         materialEncoding: 'embedded-full-collective-public-key-coefficients',
         ...contextFields(input.setupContext),
@@ -139,11 +120,6 @@ const createCollectivePublicKeyFromAggregateCoefficients = (
         publicMatrixSeedHash: input.publicMatrixSeedHash,
         publicKeyCrpRoot: input.publicKeyCrpRoot,
         publicAPolynomialRoot: input.publicAPolynomialRoot,
-        sameSecretConsistencyRoot:
-            input.sameSecretConsistency.sameSecretConsistencyRoot,
-        sameSecretProofSetRoot: input.sameSecretProofs.sameSecretProofSetRoot,
-        sameSecretProofFamilyBindingRoot:
-            input.sameSecretConsistency.sameSecretProofFamilyBindingRoot,
         publicKeyShareSetRoot: input.publicKeyShares.publicKeyShareSetRoot,
         publicKeyShareProofSetRoot:
             input.publicKeyShareProofs.publicKeyShareProofSetRoot,
@@ -355,7 +331,6 @@ export const createCollectivePublicKeyFromTransportedPublicKeyShareMaterial = (
             );
         const materialRecordWithoutRoot = {
             objectType: 'PublicKeyShareMaterial',
-            objectVersion: 1,
             proofFamily: publicKeyShareProofFamily,
             materialEncoding: publicKeyShareMaterialEncoding,
             ...contextFields(input.setupContext),

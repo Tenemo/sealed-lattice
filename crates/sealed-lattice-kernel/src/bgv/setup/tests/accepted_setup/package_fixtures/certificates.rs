@@ -46,8 +46,6 @@ pub(in super::super) fn setup_transport_certificate_fixture(
         .collect::<Vec<_>>();
     let vss_chunk_root = derive_canonical_object_hash(&serde_json::json!({
         "objectType": "SetupTransportChunkManifest",
-        "objectVersion": 1,
-        "chunkSizeBytes": chunk_size_bytes,
         "chunkCount": chunk_count,
         "totalByteLength": total_byte_length,
         "chunkHashes": chunk_hashes,
@@ -57,7 +55,6 @@ pub(in super::super) fn setup_transport_certificate_fixture(
     let transported_objects = serde_json::json!([
         {
             "objectType": "SetupTransportedObject",
-            "objectVersion": 1,
             "objectName": "vssCoefficientCommitmentMaterial",
             "objectRole": "public-vss-coefficient-commitment-material",
             "objectRoot": vss_coefficient_commitment_material["vssCoefficientCommitmentMaterialRoot"],
@@ -80,11 +77,9 @@ pub(in super::super) fn setup_transport_certificate_fixture(
         .expect("roster-derived setup parameters hash");
     let mut certificate = serde_json::json!({
         "objectType": "SetupTransportCertificate",
-        "objectVersion": 1,
         "setupParametersHash": setup_parameters_hash,
         "largeObjectEncoding": "binary",
         "chunking": "required",
-        "chunkSizeBytes": chunk_size_bytes,
         "chunkCount": chunk_count,
         "totalByteLength": total_byte_length,
         "storageQuotaBytes": 2_147_483_648_u64,

@@ -11,7 +11,6 @@ pub(in super::super) fn setup_commitment_root(
 pub(in super::super) fn setup_commitment_full_value(commitment: &SetupCommitmentValue) -> Value {
     json!({
         "objectType": "SetupCommitment",
-        "objectVersion": 1,
         "sourceRnsLimbIndex": commitment.source_rns_limb_index,
         "sourceMessageModulus": commitment.source_message_modulus,
         "shamirCoefficientIndex": commitment.shamir_coefficient_index,
@@ -32,11 +31,6 @@ pub(in super::super) fn parse_setup_commitment_full_value(
     if value.get("objectType").and_then(Value::as_str) != Some("SetupCommitment") {
         return Err(invalid_commitment_input(
             "setup commitment objectType must be SetupCommitment",
-        ));
-    }
-    if value.get("objectVersion").and_then(Value::as_u64) != Some(1) {
-        return Err(invalid_commitment_input(
-            "setup commitment objectVersion must be 1",
         ));
     }
     let source_rns_limb_index = read_usize(value, "sourceRnsLimbIndex")?;
@@ -109,7 +103,6 @@ pub(in super::super) fn parse_setup_commitment_full_value(
 fn setup_commitment_root_payload(commitment: &SetupCommitmentValue) -> Value {
     json!({
         "objectType": "SetupCommitment",
-        "objectVersion": 1,
         "sourceRnsLimbIndex": commitment.source_rns_limb_index,
         "sourceMessageModulus": commitment.source_message_modulus,
         "shamirCoefficientIndex": commitment.shamir_coefficient_index,
@@ -121,7 +114,7 @@ fn setup_commitment_root_payload(commitment: &SetupCommitmentValue) -> Value {
                 "rowCoefficientHash512": limb.rows.iter().map(|row| {
                     coefficient_vector_hash512(
                         row,
-                        "sealed-lattice-bdlop-commitment/row-coefficients-v1",
+                        "sealed-lattice-bdlop-commitment/row-coefficients",
                     )
                 }).collect::<Vec<_>>()
             })

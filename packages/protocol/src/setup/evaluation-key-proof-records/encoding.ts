@@ -1,7 +1,14 @@
 import { deriveCanonicalObjectHash, hash512Hex } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
-import { setupProofTransportChunkSizeBytes } from '../setup-proof-material-transport.js';
+import {
+    assertNonNegativeSafeInteger,
+    assertPositiveSafeInteger,
+    assertProtocolHash,
+    bytesFromHex,
+    bytesToHex,
+} from '../common-fields.js';
+import { appendVaruint } from '../varuint-encoding.js';
 
 import {
     type EvaluationKeyShareMaterial,
@@ -16,26 +23,12 @@ import {
 
 const lowercaseHexPattern = /^[0-9a-f]+$/u;
 
-export { assertProtocolHash } from '../common-fields.js';
-
-export const assertPositiveSafeInteger = (
-    value: number,
-    fieldName: string,
-): void => {
-    if (!Number.isSafeInteger(value) || value <= 0) {
-        throw new TypeError(`${fieldName} must be a positive safe integer.`);
-    }
-};
-
-export const assertNonNegativeSafeInteger = (
-    value: number,
-    fieldName: string,
-): void => {
-    if (!Number.isSafeInteger(value) || value < 0) {
-        throw new TypeError(
-            `${fieldName} must be a non-negative safe integer.`,
-        );
-    }
+export {
+    assertNonNegativeSafeInteger,
+    assertPositiveSafeInteger,
+    assertProtocolHash,
+    bytesFromHex,
+    bytesToHex,
 };
 
 export const assertNonEmptyString = (
@@ -96,24 +89,6 @@ export const nonNegativeIntegerRecordField = (
     return value;
 };
 
-export const bytesFromHex = (hex: string, fieldName: string): Uint8Array => {
-    if (!/^(?:[0-9a-f]{2})*$/u.test(hex)) {
-        throw new TypeError(`${fieldName} must be lowercase hex bytes.`);
-    }
-    const bytes = new Uint8Array(hex.length / 2);
-    for (let byteIndex = 0; byteIndex < bytes.length; byteIndex += 1) {
-        bytes[byteIndex] = Number.parseInt(
-            hex.slice(byteIndex * 2, byteIndex * 2 + 2),
-            16,
-        );
-    }
-
-    return bytes;
-};
-
-export const bytesToHex = (bytes: Uint8Array): string =>
-    Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
-
 const proofRandomnessByteLength = 64;
 
 const defaultProofRandomBytes = (byteLength: number): Uint8Array => {
@@ -138,23 +113,6 @@ export const freshProofRandomnessHex = (): string => {
     }
 
     return bytesToHex(bytes);
-};
-
-const appendVaruint = (outputBytes: number[], value: number): void => {
-    if (!Number.isSafeInteger(value) || value < 0) {
-        throw new TypeError(
-            'binary varuint value must be a non-negative safe integer.',
-        );
-    }
-    let remainingValue = value;
-    do {
-        let byte = remainingValue & 0x7f;
-        remainingValue = Math.floor(remainingValue / 128);
-        if (remainingValue !== 0) {
-            byte |= 0x80;
-        }
-        outputBytes.push(byte);
-    } while (remainingValue !== 0);
 };
 
 const varUintBytes = (value: number): Uint8Array => {
@@ -249,7 +207,6 @@ export const evaluationKeyShareComponentVectorRoot = (
 ): ProtocolHash =>
     deriveCanonicalObjectHash({
         objectType: 'EvaluationKeyShareComponentVectorSet',
-        objectVersion: 1,
         proofFamily,
         keySwitchDomain,
         keySwitchSeedHex,
@@ -314,10 +271,8 @@ export const evaluationKeyShareComponentMaterialTransportHashes = (
     );
     const chunkRoot = deriveCanonicalObjectHash({
         objectType: 'EvaluationKeyShareComponentMaterialChunkManifest',
-        objectVersion: 1,
         proofFamily,
         keySwitchMaterialEncoding: evaluationKeyShareComponentMaterialEncoding,
-        chunkSizeBytes: setupProofTransportChunkSizeBytes,
         chunkCount: chunkHashes.length,
         totalByteLength,
         chunkHashes,
@@ -342,7 +297,6 @@ export const evaluationKeyShareComponentMaterialReferenceRoot = (
 ): ProtocolHash =>
     deriveCanonicalObjectHash({
         objectType: 'EvaluationKeyShareComponentMaterialReference',
-        objectVersion: 1,
         proofFamily,
         keySwitchMaterialEncoding: evaluationKeyShareComponentMaterialEncoding,
         trusteeIdentity,
@@ -355,7 +309,6 @@ export const evaluationKeyShareComponentMaterialReferenceRoot = (
         rnsLimbCount: level + 1,
         keySwitchComponentVectorRoot:
             shareMaterial.keySwitchComponentVectorRoot,
-        chunkSizeBytes: setupProofTransportChunkSizeBytes,
         chunkCount: transportHashes.chunkHashes.length,
         totalByteLength: transportHashes.totalByteLength,
         fullObjectHash: transportHashes.fullObjectHash,

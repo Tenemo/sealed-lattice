@@ -160,8 +160,8 @@ pub(in super::super) fn evaluation_key_error_coefficients_for_fixture(
     digit_index: usize,
     ring_degree: usize,
 ) -> Vec<i64> {
-    // Roster positions below the n = 10 first-closure roster keep the historical
-    // position-independent error (a multiplier of 5 vanishes mod 5), so the n = 10
+    // Roster positions below the n = 10 first-closure roster use a
+    // position-independent error (a multiplier of 5 vanishes mod 5), so that
     // closure stays byte-identical. The base error aliases with period 5 in the
     // roster position and the fixture secret aliases with period 3, so a trustee's
     // key-switch component repeats every LCM(3, 5) = 15 roster positions. Within
@@ -259,7 +259,6 @@ pub(in super::super) fn relinearization_key_switch_seed_for_test(
 ) -> String {
     derive_canonical_object_hash(&serde_json::json!({
         "objectType": "RelinearizationKeySwitchPublicSampleSeed",
-        "objectVersion": 1,
         "proofFamily": "relinearization-key-share",
         "keySwitchSampleScope": "shared-by-scheduled-level-and-round",
         "evaluatorKeyScheduleRoot": schedule["evaluatorKeyScheduleRoot"],
@@ -279,7 +278,6 @@ pub(in super::super) fn galois_key_switch_seed_for_test(
 ) -> String {
     derive_canonical_object_hash(&serde_json::json!({
         "objectType": "GaloisKeySwitchPublicSampleSeed",
-        "objectVersion": 1,
         "proofFamily": "galois-key-share",
         "keySwitchSampleScope": "shared-by-scheduled-rotation-and-level",
         "evaluatorKeyScheduleRoot": schedule["evaluatorKeyScheduleRoot"],

@@ -70,7 +70,6 @@ export const collectiveSetupRosterHash = (
 
                     return {
                         objectType: 'CollectiveBgvSetupRosterEntry',
-                        objectVersion: 1,
                         rosterPosition,
                         trusteeIdentity,
                         signingPublicKeyHash,
@@ -128,7 +127,7 @@ export const privateVssMailboxKeyPairForRosterPosition = (
 export const privateVssMailboxPublicKeyBytesHash = (
     publicKeyBytesHex: string,
 ): string =>
-    hash512Hex('sealed-lattice-private-vss-mailbox/ml-kem-768-public-key-v1', [
+    hash512Hex('sealed-lattice-private-vss-mailbox/ml-kem-768-public-key', [
         hexToBytes(publicKeyBytesHex),
     ]);
 

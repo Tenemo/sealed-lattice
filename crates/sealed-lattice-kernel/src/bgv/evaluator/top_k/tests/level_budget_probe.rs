@@ -1,5 +1,6 @@
-// Development-only exact-noise probe for the target-level-budget work (restoring
-// proof-backed K_top = 1..19 target decryption). It measures true residual BGV
+// Development-only exact-noise probe for the evaluator level budget (the
+// measurements behind the K_top = 20-only decryption scope and the
+// comparison-input cleaning fix). It measures true residual BGV
 // noise, decrypting with the development key, at the comparison handoff (level 6),
 // through the degree-19 Paterson-Stockmeyer rank lookup, and at the terminal
 // target, and it measures the terminal (exit level, noise) for candidate terminal
@@ -9,8 +10,8 @@
 // faithful replica of the Paterson-Stockmeyer structure whose level-floor knob
 // reproduces production exactly at floor 0.
 //
-// Run: cargo test -p sealed-lattice-kernel --lib
-//   bgv::evaluator::top_k::tests::level_budget_probe -- --ignored --nocapture
+// Run through the guarded focused Rust runner:
+//   pnpm run test:rust:kernel:accepted-setup -- level_budget_probe
 
 use num_bigint::BigInt;
 use num_traits::{Signed, Zero};
@@ -37,9 +38,8 @@ use crate::bgv::parameters::DATA_PRIMES;
 // lookup input whose noise is within a few bits of the m = 20 handoff (the
 // pair-count term is additive, about log2(190 / pair_count)). Raise to 20 for the
 // exact handoff figure.
-const COMPARISON_OPTION_COUNT: usize = 8;
 const RANK_LOOKUP_DEGREE_OPTION_COUNT: usize = 20;
-const DEVELOPMENT_SEED: &str = "level-budget-probe-seed-v1";
+const DEVELOPMENT_SEED: &str = "level-budget-probe-seed";
 
 // True residual noise of a ciphertext under the development key, in bits
 // (ceil log2 of the infinity norm of the noise polynomial). Decryption computes
@@ -195,8 +195,9 @@ fn linear_combination_from_powers(
         .filter_map(|(power, _)| powers[power].as_ref().map(|ciphertext| ciphertext.level))
         .min();
     let anchor_level = target_level.unwrap_or(reference.level);
-    let anchor = normalize_scaling(&modulus_switch_to(reference, anchor_level).expect("anchor level"))
-        .expect("anchor scaling");
+    let anchor =
+        normalize_scaling(&modulus_switch_to(reference, anchor_level).expect("anchor level"))
+            .expect("anchor scaling");
     let mut result = add_plaintext_coefficients(
         &scalar_mul(&anchor, 0).expect("zero anchor"),
         &broadcast_constant_coefficients(coefficients[0]),
@@ -211,9 +212,11 @@ fn linear_combination_from_powers(
             &modulus_switch_to(power_ciphertext, anchor_level).expect("power to anchor level"),
         )
         .expect("power scaling");
-        let scaled =
-            scalar_mul(&leveled, i64::try_from(*coefficient).expect("coefficient fits i64"))
-                .expect("scale power");
+        let scaled = scalar_mul(
+            &leveled,
+            i64::try_from(*coefficient).expect("coefficient fits i64"),
+        )
+        .expect("scale power");
         result = ciphertext_add(&result, &scaled).expect("accumulate term");
     }
 
@@ -243,6 +246,7 @@ fn sum_ciphertexts_at_common_level(ciphertexts: &[Ciphertext]) -> Ciphertext {
 // Faithful replica of circuit.rs evaluate_polynomial_paterson_stockmeyer_with_baby_step_count
 // (defer_terminal_modulus_switch = true), with the added power-table level floor.
 // A floor of 0 reproduces the production rank lookup exactly.
+#[allow(clippy::too_many_arguments)]
 fn evaluate_lookup_with_level_floor(
     context: &EvaluatorContext,
     input: &Ciphertext,
@@ -251,9 +255,13 @@ fn evaluate_lookup_with_level_floor(
     level_floor: usize,
     key: &DevelopmentBgvKey,
     trace: bool,
+    defer_terminal: bool,
 ) -> Ciphertext {
     let degree = coefficients.len() - 1;
-    assert!(degree >= baby_step_count, "probe lookup expects a full block structure");
+    assert!(
+        degree >= baby_step_count,
+        "probe lookup expects a full block structure"
+    );
     let block_count = coefficients.len().div_ceil(baby_step_count);
     let working_input =
         modulus_switch_to(input, context.working_level()).expect("input to working level");
@@ -284,7 +292,10 @@ fn evaluate_lookup_with_level_floor(
         let start = block_index * baby_step_count;
         let end = coefficients.len().min(start + baby_step_count);
         let block_coefficients = &coefficients[start..end];
-        if block_coefficients.iter().all(|coefficient| *coefficient == 0) {
+        if block_coefficients
+            .iter()
+            .all(|coefficient| *coefficient == 0)
+        {
             continue;
         }
         let block_value =
@@ -294,7 +305,10 @@ fn evaluate_lookup_with_level_floor(
             continue;
         }
         let giant_power = giant_power.as_ref().expect("giant power present");
-        if block_coefficients[1..].iter().all(|coefficient| *coefficient == 0) {
+        if block_coefficients[1..]
+            .iter()
+            .all(|coefficient| *coefficient == 0)
+        {
             terms.push(
                 scalar_mul(
                     giant_power,
@@ -303,13 +317,22 @@ fn evaluate_lookup_with_level_floor(
                 .expect("scalar block"),
             );
         } else {
-            // Production always defers the terminal block products.
-            let product =
+            // Production defers the terminal block products (defer_terminal = true);
+            // defer_terminal = false rescales them instead (one extra level, lower noise).
+            let product = if defer_terminal {
                 multiply_without_immediate_modulus_switch(context, &block_value, giant_power)
-                    .expect("block product");
+                    .expect("deferred block product")
+            } else {
+                multiply(context, &block_value, giant_power).expect("rescaled block product")
+            };
             if trace {
                 println!(
-                    "    block {block_index} product [deferred]: level {}, noise {:.1} bits",
+                    "    block {block_index} product [{}]: level {}, noise {:.1} bits",
+                    if defer_terminal {
+                        "deferred"
+                    } else {
+                        "rescaled"
+                    },
                     product.level,
                     ciphertext_noise_bits(key, &product)
                 );
@@ -323,45 +346,7 @@ fn evaluate_lookup_with_level_floor(
 
 // A representative aggregate-score vector for m = 20 with n = 10 ballots: distinct
 // values across the certified aggregate domain [10, 100].
-fn representative_aggregate_scores() -> Vec<u64> {
-    (0..20u64).map(|option| 100 - option * 4).collect()
-}
-
-// The real level-6 comparison handoff (packed ranks) from encrypted scores at a
-// given comparison domain radius, mirroring the production evaluator_replay path.
-fn comparison_handoff(
-    context: &EvaluatorContext,
-    option_count: usize,
-    score_domain_max: u64,
-) -> Ciphertext {
-    let scores = representative_aggregate_scores();
-    let comparison_scores = &scores[..option_count];
-    let encrypted_scores = context
-        .key()
-        .encrypt_slots(comparison_scores, "level-budget-probe-scores")
-        .expect("score ciphertext");
-    let working_scores = modulus_switch_to(&encrypted_scores, context.working_level())
-        .expect("scores to working level");
-    let packed_scores =
-        pack_direct_score_slots(context, &working_scores, option_count, "level-budget-probe-pack")
-            .expect("packed scores");
-    let rank_evaluation = evaluate_packed_rank_evaluation_from_packed_scores_with_batched_pairs(
-        context,
-        &packed_scores,
-        option_count,
-        score_domain_max,
-        "level-budget-probe-rank",
-    )
-    .expect("rank evaluation");
-
-    rank_evaluation.packed_ranks
-}
-
-// A clean level-6 rank ciphertext (ranks 0..19 in slots 0..19), constructed by
-// direct encryption and modulus switching so the rank-lookup level budget can be
-// measured in isolation from the comparison circuit's noise. Normalized to scaling
-// one, matching the production lookup input.
-fn clean_level_six_rank_input(context: &EvaluatorContext, key: &DevelopmentBgvKey) -> Ciphertext {
+fn clean_level_six_rank_input(_context: &EvaluatorContext, key: &DevelopmentBgvKey) -> Ciphertext {
     let mut slots = vec![0u64; RANK_LOOKUP_DEGREE_OPTION_COUNT];
     for (rank, slot) in slots.iter_mut().enumerate() {
         *slot = rank as u64;
@@ -376,7 +361,7 @@ fn clean_level_six_rank_input(context: &EvaluatorContext, key: &DevelopmentBgvKe
 }
 
 #[test]
-#[ignore = "development-only noise probe for the target level budget; run explicitly with --ignored --nocapture"]
+#[ignore = "development-only noise probe; run via the guarded accepted-setup runner"]
 fn level_budget_rank_lookup_noise_probe() {
     let context = EvaluatorContext::new(DEVELOPMENT_SEED, SELECTED_EVALUATOR_WORKING_LEVEL)
         .expect("evaluator context");
@@ -463,11 +448,14 @@ fn level_budget_rank_lookup_noise_probe() {
         0,
         key,
         false,
+        true,
     );
     let production_slots = key
         .decrypt_to_slots(&production_terminal)
         .expect("production slots");
-    let replica_slots = key.decrypt_to_slots(&replica_current).expect("replica slots");
+    let replica_slots = key
+        .decrypt_to_slots(&replica_current)
+        .expect("replica slots");
     assert_eq!(
         production_slots, replica_slots,
         "level-floor-0 replica must decrypt identically to the production lookup"
@@ -477,9 +465,13 @@ fn level_budget_rank_lookup_noise_probe() {
         "level-floor-0 replica must exit at the production level"
     );
     // correctness: indicator flips at k on the clean ranks 0..19.
-    for rank in 0..RANK_LOOKUP_DEGREE_OPTION_COUNT {
+    for (rank, slot) in production_slots
+        .iter()
+        .enumerate()
+        .take(RANK_LOOKUP_DEGREE_OPTION_COUNT)
+    {
         assert_eq!(
-            production_slots[rank],
+            *slot,
             u64::from(rank < selection_threshold),
             "indicator at rank {rank}"
         );
@@ -499,6 +491,7 @@ fn level_budget_rank_lookup_noise_probe() {
             level_floor,
             key,
             true,
+            true,
         );
         let terminal_noise = ciphertext_noise_bits(key, &terminal);
         let margin = decode_margin_bits(&terminal);
@@ -507,7 +500,10 @@ fn level_budget_rank_lookup_noise_probe() {
             .all(|rank| terminal_slots[rank] == u64::from(rank < selection_threshold));
         println!(
             "  TERMINAL: exit level {}, noise {:.1} bits, margin {:.1} bits, headroom {:.1} bits, decrypts correctly = {decrypts_correctly}",
-            terminal.level, terminal_noise, margin, margin - terminal_noise,
+            terminal.level,
+            terminal_noise,
+            margin,
+            margin - terminal_noise,
         );
     }
 
@@ -533,50 +529,8 @@ fn level_budget_rank_lookup_noise_probe() {
     println!("\n=== rank-lookup probe complete ===\n");
 }
 
-#[test]
-#[ignore = "slow development-only diagnostic: real comparison handoff noise vs domain radius; run explicitly with --ignored --nocapture"]
-fn comparison_handoff_noise_diagnostic() {
-    let context = EvaluatorContext::new(DEVELOPMENT_SEED, SELECTED_EVALUATOR_WORKING_LEVEL)
-        .expect("evaluator context");
-    let key = context.key();
-    let option_count = COMPARISON_OPTION_COUNT;
-
-    println!("\n=== comparison handoff noise vs domain radius (option count {option_count}) ===");
-    println!("the handoff feeds the rank lookup at level 6; a handoff already at its decode");
-    println!("margin means the comparison, not the lookup, is the binding constraint.");
-
-    for (score_domain_max, label) in [
-        (9u64, "single-ballot n=1 (D=9)"),
-        (90u64, "first-profile n=10 (D=90)"),
-    ] {
-        println!("\n-- {label} --");
-        let handoff = comparison_handoff(&context, option_count, score_domain_max);
-        let noise = ciphertext_noise_bits(key, &handoff);
-        let margin = decode_margin_bits(&handoff);
-        let slots = key.decrypt_to_slots(&handoff).expect("handoff slots");
-        let decoded_ranks = (0..option_count)
-            .map(|option| slots[packed_score_slot(option)])
-            .collect::<Vec<_>>();
-        let plausible = decoded_ranks
-            .iter()
-            .all(|rank| (*rank as usize) < option_count);
-        println!(
-            "  handoff: level {}, noise {:.1} bits, margin {:.1} bits, headroom {:.1} bits",
-            handoff.level,
-            noise,
-            margin,
-            margin - noise,
-        );
-        println!("  decoded ranks {decoded_ranks:?}, plausible = {plausible}");
-    }
-
-    println!("\n=== comparison handoff diagnostic complete ===\n");
-}
-
-// A clean rank ciphertext (ranks 0..19 in slots 0..19) at a chosen level, for
-// measuring the natural (no-deferral) lookup exit from a raised handoff level.
 fn clean_rank_input_at_level(
-    context: &EvaluatorContext,
+    _context: &EvaluatorContext,
     key: &DevelopmentBgvKey,
     level: usize,
 ) -> Ciphertext {
@@ -597,7 +551,7 @@ fn clean_rank_input_at_level(
 // handoff - 5 at the natural B_eval; raising the handoff is the only lever that raises
 // the exit level without paying deferral noise.
 #[test]
-#[ignore = "development-only: natural-exit headroom vs handoff level; run explicitly with --ignored --nocapture"]
+#[ignore = "development-only natural-exit probe; run via the guarded accepted-setup runner"]
 fn natural_exit_headroom_by_handoff_level() {
     let context = EvaluatorContext::new(DEVELOPMENT_SEED, SELECTED_EVALUATOR_WORKING_LEVEL)
         .expect("evaluator context");
@@ -656,7 +610,7 @@ fn lcm_i128(a: i128, b: i128) -> i128 {
 // the minimal integer factor (lcm of the reduced denominators). The worst-case L1 sets
 // the C4 smudging need ~ lambda + log2(N) + log2(L1) + log2(t).
 #[test]
-#[ignore = "development-only enumeration: worst-case cleared-Lagrange L1; run explicitly with --ignored --nocapture"]
+#[ignore = "development-only Lagrange probe; run via the guarded accepted-setup runner"]
 fn lagrange_cleared_l1_worst_case() {
     let participant_count = 10i128;
     let quorum_size = 4usize;
@@ -742,103 +696,33 @@ fn lagrange_cleared_l1_worst_case() {
     println!("\n=== L1 enumeration complete ===\n");
 }
 
-// Step 1: faithful multi-ballot comparison handoff, swept over the domain radius by
-// ballot count (D = 9n): n=2 -> D=18 (degree 36), n=5 -> D=45 (degree 90), n=10 ->
-// D=90 (degree 180, the real first profile). The aggregate is the homomorphic sum of n
-// fresh ballot encryptions, scores in {1..10}, working level 15, and the decrypted
-// handoff ranks are checked against the plaintext tie-policy oracle. The handoff feeds
-// EVERY target (the small-K lookup and K=20 at level 6), so if it does not decrypt, the
-// whole n-ballot decryption path is broken, not just K<20. Sweeping D isolates whether
-// the comparison degree drives the noise. option_count is reduced to fit the foreground
-// budget; the soundness verdict is option-count-robust.
 #[test]
-#[ignore = "slow development-only: multi-ballot comparison handoff noise vs domain radius; run explicitly with --ignored --nocapture"]
-fn faithful_multiballot_handoff_noise() {
+#[ignore = "development-only rank-lookup probe; run via the guarded accepted-setup runner"]
+fn rank_lookup_terminal_by_k() {
     let context = EvaluatorContext::new(DEVELOPMENT_SEED, SELECTED_EVALUATOR_WORKING_LEVEL)
         .expect("evaluator context");
     let key = context.key();
-    let option_count = 12usize;
-    let ballot_scores: Vec<u64> = (0..option_count)
-        .map(|option| 1 + (option as u64 % 10))
-        .collect();
-
-    println!(
-        "\n=== faithful multi-ballot comparison handoff vs domain radius D=9n (option count {option_count}) ==="
-    );
-    println!("  the handoff feeds every target (small-K lookup AND K=20 at level 6);");
-    println!("  a non-decrypting handoff breaks the whole n-ballot decryption path.");
-
-    for ballot_count in [2usize, 5, 10] {
-        let score_domain_max = 9 * ballot_count as u64;
-        let aggregate_scores: Vec<u64> = ballot_scores
-            .iter()
-            .map(|score| score * ballot_count as u64)
-            .collect();
-
-        let mut aggregate = key
-            .encrypt_slots(&ballot_scores, &format!("faithful-ballot-0-n{ballot_count}"))
-            .expect("ballot 0");
-        for ballot_index in 1..ballot_count {
-            let ballot = key
-                .encrypt_slots(
-                    &ballot_scores,
-                    &format!("faithful-ballot-{ballot_index}-n{ballot_count}"),
-                )
-                .expect("ballot");
-            aggregate = ciphertext_add(&aggregate, &ballot).expect("aggregate add");
-        }
-
-        let working_aggregate = modulus_switch_to(&aggregate, context.working_level())
-            .expect("aggregate to working level");
-        let packed_scores = pack_direct_score_slots(
-            &context,
-            &working_aggregate,
-            option_count,
-            "faithful-multiballot-pack",
-        )
-        .expect("packed scores");
-        let rank_evaluation = evaluate_packed_rank_evaluation_from_packed_scores_with_batched_pairs(
-            &context,
-            &packed_scores,
-            option_count,
-            score_domain_max,
-            "faithful-multiballot-rank",
-        )
-        .expect("rank evaluation");
-        let handoff = rank_evaluation.packed_ranks;
-
-        let oracle_ranks: Vec<u64> = (0..option_count)
-            .map(|option| {
-                (0..option_count)
-                    .filter(|&other| {
-                        aggregate_scores[other] > aggregate_scores[option]
-                            || (aggregate_scores[other] == aggregate_scores[option]
-                                && other < option)
-                    })
-                    .count() as u64
-            })
-            .collect();
-        let handoff_slots = key.decrypt_to_slots(&handoff).expect("handoff slots");
-        let decoded_ranks: Vec<u64> = (0..option_count)
-            .map(|option| handoff_slots[packed_score_slot(option)])
-            .collect();
-        let ranks_correct = decoded_ranks == oracle_ranks;
-        let noise = ciphertext_noise_bits(key, &handoff);
-        let margin = decode_margin_bits(&handoff);
-
+    let input = clean_level_six_rank_input(&context, key);
+    assert_eq!(input.level, 6, "clean lookup input must be at level 6");
+    println!("\n== rank-lookup terminal per K (clean level-6 input, degree-19, baby-step 5) ==");
+    for k in [1usize, 10, 19] {
+        let indicator = (0..RANK_LOOKUP_DEGREE_OPTION_COUNT)
+            .map(|rank| u64::from(rank < k))
+            .collect::<Vec<_>>();
+        let terminal = evaluate_rank_lookup(&context, &input, &indicator).expect("lookup");
+        let b_eval = ciphertext_noise_bits(key, &terminal);
+        let margin = decode_margin_bits(&terminal);
+        let slots = key.decrypt_to_slots(&terminal).expect("terminal slots");
+        let correct =
+            (0..RANK_LOOKUP_DEGREE_OPTION_COUNT).all(|rank| slots[rank] == u64::from(rank < k));
         println!(
-            "\n  n={ballot_count} (D={score_domain_max}, comparison degree {}): handoff level {}, noise {:.1} bits, margin {:.1} bits, headroom {:.1} bits, ranks correct = {ranks_correct}",
-            2 * score_domain_max,
-            handoff.level,
-            noise,
+            "  K={k}: exit level {}, B_eval {:.1} bits, margin {:.1} bits, headroom {:.1} bits, correct={correct}",
+            terminal.level,
+            b_eval,
             margin,
-            margin - noise,
+            margin - b_eval,
         );
-        if !ranks_correct {
-            println!("    decoded {decoded_ranks:?}");
-            println!("    oracle  {oracle_ranks:?}");
-        }
     }
-
-    println!("\n=== faithful multi-ballot handoff sweep complete ===\n");
+    println!("  K=20: no lookup (full-ranking branch) -> target stays at level 6.");
+    println!("== per-K rank-lookup complete ==\n");
 }

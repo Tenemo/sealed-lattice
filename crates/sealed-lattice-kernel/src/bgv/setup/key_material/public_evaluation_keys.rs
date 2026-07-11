@@ -39,7 +39,6 @@ pub(in crate::bgv::setup) fn evaluation_keys(
     })?;
     let evaluation_key_record = json!({
         "objectType": "BgvEvaluationKeySet",
-        "objectVersion": 1,
         "ceremonyId": input.ceremony_id,
         "manifestHash": input.manifest_hash,
         "rosterHash": input.roster_hash,

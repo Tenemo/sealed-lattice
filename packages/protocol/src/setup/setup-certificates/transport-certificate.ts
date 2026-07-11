@@ -68,7 +68,6 @@ function transportedObjectRecords(
         objectRoots.add(input.objectRoot);
         transportedObjects.push({
             objectType: 'SetupTransportedObject',
-            objectVersion: 1,
             objectName: input.objectName,
             objectRole: input.objectRole,
             objectRoot: input.objectRoot,
@@ -91,10 +90,9 @@ const setupTransportCertificateBody = (
     setupParameters: CollectiveBgvSetupParametersForCertificates,
     transportInput: SetupCertificateTransportInput,
 ): SetupTransportCertificateBody => {
-    // On the compact path the public VSS coefficient material is no longer
-    // transported (the commitments are compact), so the transport certificate
-    // binds only the companion transported objects (public-key share, proof, and
-    // evaluation-key materials) rather than a primary VSS material object.
+    // The transport certificate binds the companion transported objects (public-key
+    // share, proof, and evaluation-key materials). The VSS coefficient commitments
+    // are carried in the setup package itself, not as a separate transported object.
     const transportedObjects = transportedObjectRecords([
         ...(transportInput.transportedObjects ?? []),
     ]);
@@ -111,11 +109,9 @@ const setupTransportCertificateBody = (
 
     return {
         objectType: 'SetupTransportCertificate',
-        objectVersion: 1,
         setupParametersHash: setupParameters.setupParametersHash,
         largeObjectEncoding: 'binary',
         chunking: 'required',
-        chunkSizeBytes: setupTransportChunkSizeBytes,
         chunkCount,
         totalByteLength,
         storageQuotaBytes: setupTransportStorageQuotaBytes,

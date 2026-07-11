@@ -5,7 +5,7 @@ use crate::bgv::coefficient_codec::{
 use crate::hashing::derive_canonical_object_hash;
 
 const PUBLIC_KEY_COEFFICIENT_VECTOR_HASH_DOMAIN: &str =
-    "sealed-lattice-bgv-rns/public-key-coefficient-vector-v1";
+    "sealed-lattice-bgv-rns/public-key-coefficient-vector";
 
 pub(in crate::bgv::setup) fn collective_public_key(
     input: &PassiveSetupInput,
@@ -42,7 +42,6 @@ pub(in crate::bgv::setup) fn collective_public_key(
         collective_public_key_coefficient_root(&coefficient_material)?;
     let record_without_roots = json!({
         "objectType": "BgvCollectivePublicKey",
-        "objectVersion": 1,
         "ceremonyId": input.ceremony_id,
         "manifestHash": input.manifest_hash,
         "rosterHash": input.roster_hash,
@@ -226,7 +225,6 @@ pub(in crate::bgv::setup) fn collective_public_key_coefficient_material(
 
     Ok(json!({
         "objectType": "BgvCollectivePublicKeyCoefficientMaterial",
-        "objectVersion": 1,
         "level": DATA_PRIMES.len() - 1,
         "coefficientCount": POLYNOMIAL_DEGREE,
         "componentModel": DECRYPTABLE_PUBLIC_KEY_COMPONENT_MODEL,
@@ -282,7 +280,7 @@ pub(in crate::bgv::setup) fn collective_public_key_coefficient_derivation_summar
     let participant_count_bytes = (participant_identities.len() as u64).to_le_bytes();
     let public_key_share_root_count_bytes = (public_key_share_roots.len() as u64).to_le_bytes();
     let component_zero_derivation_hash = hash512_hex(
-        "sealed-lattice-bgv-rns/collective-public-key-coefficient-derivation-v1",
+        "sealed-lattice-bgv-rns/collective-public-key-coefficient-derivation",
         &[
             b"component-zero",
             setup_seed_hash.as_bytes(),
@@ -293,7 +291,7 @@ pub(in crate::bgv::setup) fn collective_public_key_coefficient_derivation_summar
         ],
     );
     let component_one_derivation_hash = hash512_hex(
-        "sealed-lattice-bgv-rns/collective-public-key-coefficient-derivation-v1",
+        "sealed-lattice-bgv-rns/collective-public-key-coefficient-derivation",
         &[
             b"component-one",
             setup_seed_hash.as_bytes(),

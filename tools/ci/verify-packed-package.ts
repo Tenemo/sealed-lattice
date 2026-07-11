@@ -92,6 +92,32 @@ const createInstallArguments = (
         ? ['install', '--ignore-scripts', tarballPath]
         : ['add', '--ignore-scripts', tarballPath];
 
+export const createIsolatedNpmEnvironment = (
+    npmCacheDirectoryPath: string,
+    baseEnvironment: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv => {
+    const environment = { ...baseEnvironment };
+    for (const environmentVariableName of Object.keys(environment)) {
+        if (environmentVariableName.toLowerCase() === 'npm_config_cache') {
+            delete environment[environmentVariableName];
+        }
+    }
+
+    return {
+        ...environment,
+        npm_config_cache: npmCacheDirectoryPath,
+    };
+};
+
+export const resolvePackedPackageNpmCacheDirectory = (
+    defaultCacheDirectoryPath: string,
+    environment: NodeJS.ProcessEnv = process.env,
+): string =>
+    Object.entries(environment).find(
+        ([environmentVariableName]) =>
+            environmentVariableName.toLowerCase() === 'npm_config_cache',
+    )?.[1] ?? defaultCacheDirectoryPath;
+
 const isPackedFileMetadata = (value: unknown): value is PackedFileMetadata => {
     if (typeof value !== 'object' || value === null) {
         return false;
@@ -317,6 +343,9 @@ const main = async (): Promise<void> => {
     const packDirectory = join(tempRoot, 'pack');
     const consumerDirectory = join(tempRoot, 'consumer');
     const packageDirectory = join(tempRoot, 'package');
+    const packageManagerEnvironment = createIsolatedNpmEnvironment(
+        resolvePackedPackageNpmCacheDirectory(join(tempRoot, 'npm-cache')),
+    );
 
     try {
         await mkdir(packDirectory, { recursive: true });
@@ -365,6 +394,7 @@ const main = async (): Promise<void> => {
                 packageManagerRunner,
                 createDryRunPackArguments(),
                 packageDirectory,
+                { environment: packageManagerEnvironment },
             ),
         );
         const pathFailures = validatePublishedPackageFilePaths(
@@ -388,6 +418,7 @@ const main = async (): Promise<void> => {
             packageManagerRunner,
             createPackArguments(packDirectory),
             packageDirectory,
+            { environment: packageManagerEnvironment },
         );
 
         const tarballs = (await readdir(packDirectory)).filter((entry) =>
@@ -423,6 +454,7 @@ const main = async (): Promise<void> => {
             packageManagerRunner,
             createInstallArguments(packageManagerRunner.kind, tarballPath),
             consumerDirectory,
+            { environment: packageManagerEnvironment },
         );
         runSmokeEntryPoint(consumerDirectory);
 

@@ -9,7 +9,6 @@ import {
     createCollectivePublicKeyFromTransportedPublicKeyShareMaterial,
     publicKeyShareMaterialTransportEncoding,
 } from '../public-key-share-records.js';
-import type { SameSecretProofSet } from '../same-secret-consistency-records.js';
 import { createSetupCertificates } from '../setup-certificates.js';
 
 import { setupCertificateTransportedObjectsFromPackageInput } from './transported-material.js';
@@ -150,8 +149,6 @@ export const derivedCollectivePublicKey = (
         publicMatrixSeedHash: publicKeyShareMaterial.publicMatrixSeedHash,
         publicKeyCrpRoot: publicKeyShareMaterial.publicKeyCrpRoot,
         publicAPolynomialRoot: publicKeyShareMaterial.publicAPolynomialRoot,
-        sameSecretConsistency: input.sameSecretConsistency,
-        sameSecretProofs: input.sameSecretProofs as SameSecretProofSet,
         publicKeyShares: input.publicKeyShares,
         publicKeyShareProofs: input.publicKeyShareProofs,
         publicKeyShareMaterial,

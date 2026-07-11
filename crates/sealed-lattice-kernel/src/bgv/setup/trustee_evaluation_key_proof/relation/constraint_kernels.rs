@@ -99,19 +99,27 @@ impl CompositionColumnDomain for ExtensionColumnDomain {
 }
 
 // The batched row-check value sum_k beta_k * C_k at one point, given the
-// phase-one physical column values at that point in layout order. One
-// constraint per physical column:
+// phase-one physical column values at that point in layout order, plus the
+// opened committed-material column values for the families that bind material
+// trees. One constraint per physical column:
 //   secret halves:        S^3 - S            (ternary support)
 //   error halves:         E (E2 - 1)(E2 - 4) (centered binomial support)
 //   error-square halves:  E2 - E^2           (helper well-formedness)
 //   mask halves:          M (M - 1)(M - 2)   (base-3 digits)
+//   material binding:     D - material       (vanishes on the trace, so the
+//                         witness digit column is the committed column)
 pub(crate) fn batched_row_check_value<Domain: CompositionColumnDomain>(
     domain: &Domain,
     column_values: &[Domain::Value],
+    material_values: &[Domain::Value],
     beta: &[ChallengeExtensionElement],
     layout: &LimbColumnLayout,
 ) -> ChallengeExtensionElement {
     debug_assert_eq!(column_values.len(), layout.phase_one_physical_count());
+    debug_assert_eq!(
+        material_values.len(),
+        layout.vss_committed_material_physical_count()
+    );
     debug_assert_eq!(beta.len(), layout.row_check_constraint_count());
     let tower = *domain.tower();
     let mut accumulated = ChallengeExtensionTower::zero();
@@ -147,16 +155,15 @@ pub(crate) fn batched_row_check_value<Domain: CompositionColumnDomain>(
 
         return accumulated;
     }
-    if layout.compact_vss_active() {
-        for message_position in 0..layout.compact_vss_message_vector_count() {
-            for digit_index in
-                0..crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT
+    if layout.vss_public_active() {
+        for message_position in 0..layout.vss_public_message_vector_count() {
+            for digit_index in 0..crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT
             {
                 for trit_index in
-                    0..layout.compact_vss_message_trit_count(message_position, digit_index)
+                    0..layout.vss_public_message_trit_count(message_position, digit_index)
                 {
                     for half in 0..TRACE_SPLIT {
-                        let trit = column_values[layout.physical_compact_vss_message_trit(
+                        let trit = column_values[layout.physical_vss_public_message_trit(
                             message_position,
                             digit_index,
                             trit_index,
@@ -167,13 +174,22 @@ pub(crate) fn batched_row_check_value<Domain: CompositionColumnDomain>(
                 }
             }
         }
-        for randomness_position in 0..layout.compact_vss_randomness_columns {
-            for half in 0..TRACE_SPLIT {
-                let randomness = column_values
-                    [layout.physical_compact_vss_randomness(randomness_position, half)];
-                let cube =
-                    domain.value_mul(&domain.value_mul(&randomness, &randomness), &randomness);
-                absorb(&domain.value_sub(&cube, &randomness), &mut accumulated);
+        for bound_message_index in 0..layout.vss_committed_material_bound_message_count() {
+            for digit_index in 0..crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT
+            {
+                for half in 0..TRACE_SPLIT {
+                    let witness_digit = column_values[layout.physical_bound_message_digit(
+                        bound_message_index,
+                        digit_index,
+                        half,
+                    )];
+                    let material = material_values
+                        [layout.material_column_index(bound_message_index, digit_index, half)];
+                    absorb(
+                        &domain.value_sub(&witness_digit, &material),
+                        &mut accumulated,
+                    );
+                }
             }
         }
         for mask_column in 0..layout.mask_column_count {
@@ -185,7 +201,7 @@ pub(crate) fn batched_row_check_value<Domain: CompositionColumnDomain>(
 
         return accumulated;
     }
-    if layout.compact_same_secret_bridge_active() {
+    if layout.same_secret_bridge_active() {
         for half in 0..TRACE_SPLIT {
             let secret = column_values[layout.physical_secret(half)];
             let cube = domain.value_mul(&domain.value_mul(&secret, &secret), &secret);
@@ -198,23 +214,39 @@ pub(crate) fn batched_row_check_value<Domain: CompositionColumnDomain>(
                 &mut accumulated,
             );
         }
-        for target_index in 0..layout.compact_same_secret_bridge_target_count() {
-            for digit_index in
-                0..crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT
+        for target_index in 0..layout.same_secret_bridge_target_count() {
+            for digit_index in 0..crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT
             {
-                for trit_index in 0..layout
-                    .compact_same_secret_bridge_message_trit_count(target_index, digit_index)
+                for trit_index in
+                    0..layout.same_secret_bridge_message_trit_count(target_index, digit_index)
                 {
                     for half in 0..TRACE_SPLIT {
-                        let trit = column_values[layout
-                            .physical_compact_same_secret_bridge_message_trit(
-                                target_index,
-                                digit_index,
-                                trit_index,
-                                half,
-                            )];
+                        let trit = column_values[layout.physical_same_secret_bridge_message_trit(
+                            target_index,
+                            digit_index,
+                            trit_index,
+                            half,
+                        )];
                         absorb(&mask_digit_constraint(&trit), &mut accumulated);
                     }
+                }
+            }
+        }
+        for bound_message_index in 0..layout.vss_committed_material_bound_message_count() {
+            for digit_index in 0..crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT
+            {
+                for half in 0..TRACE_SPLIT {
+                    let witness_digit = column_values[layout.physical_bound_message_digit(
+                        bound_message_index,
+                        digit_index,
+                        half,
+                    )];
+                    let material = material_values
+                        [layout.material_column_index(bound_message_index, digit_index, half)];
+                    absorb(
+                        &domain.value_sub(&witness_digit, &material),
+                        &mut accumulated,
+                    );
                 }
             }
         }
@@ -238,8 +270,7 @@ pub(crate) fn batched_row_check_value<Domain: CompositionColumnDomain>(
     }
     if layout.target_decryption_active() {
         for message_position in 0..layout.target_decryption_message_columns {
-            for digit_index in
-                0..crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT
+            for digit_index in 0..crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT
             {
                 for trit_index in
                     0..layout.target_decryption_message_trit_count(message_position, digit_index)
@@ -256,13 +287,22 @@ pub(crate) fn batched_row_check_value<Domain: CompositionColumnDomain>(
                 }
             }
         }
-        for randomness_position in 0..layout.target_decryption_randomness_columns {
-            for half in 0..TRACE_SPLIT {
-                let randomness = column_values
-                    [layout.physical_target_decryption_randomness(randomness_position, half)];
-                let cube =
-                    domain.value_mul(&domain.value_mul(&randomness, &randomness), &randomness);
-                absorb(&domain.value_sub(&cube, &randomness), &mut accumulated);
+        for bound_message_index in 0..layout.vss_committed_material_bound_message_count() {
+            for digit_index in 0..crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT
+            {
+                for half in 0..TRACE_SPLIT {
+                    let witness_digit = column_values[layout.physical_bound_message_digit(
+                        bound_message_index,
+                        digit_index,
+                        half,
+                    )];
+                    let material = material_values
+                        [layout.material_column_index(bound_message_index, digit_index, half)];
+                    absorb(
+                        &domain.value_sub(&witness_digit, &material),
+                        &mut accumulated,
+                    );
+                }
             }
         }
         for mask_column in 0..layout.mask_column_count {
@@ -303,7 +343,7 @@ pub(crate) fn batched_row_check_value<Domain: CompositionColumnDomain>(
             );
         }
     }
-    if layout.linkage_active() {
+    if layout.linkage_active() || layout.same_secret_bridge_material_active() {
         for half in 0..TRACE_SPLIT {
             let indicator = column_values[layout.physical_negative_indicator(half)];
             absorb(
@@ -311,17 +351,17 @@ pub(crate) fn batched_row_check_value<Domain: CompositionColumnDomain>(
                 &mut accumulated,
             );
         }
-        if layout.compact_same_secret_bridge_material_active() {
-            for target_index in 0..layout.compact_same_secret_bridge_target_count() {
+        if layout.same_secret_bridge_material_active() {
+            for target_index in 0..layout.same_secret_bridge_target_count() {
                 for digit_index in
-                    0..crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT
+                    0..crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT
                 {
-                    for trit_index in 0..layout
-                        .compact_same_secret_bridge_message_trit_count(target_index, digit_index)
+                    for trit_index in
+                        0..layout.same_secret_bridge_message_trit_count(target_index, digit_index)
                     {
                         for half in 0..TRACE_SPLIT {
                             let trit = column_values[layout
-                                .physical_compact_same_secret_bridge_message_trit(
+                                .physical_same_secret_bridge_message_trit(
                                     target_index,
                                     digit_index,
                                     trit_index,
@@ -329,6 +369,25 @@ pub(crate) fn batched_row_check_value<Domain: CompositionColumnDomain>(
                                 )];
                             absorb(&mask_digit_constraint(&trit), &mut accumulated);
                         }
+                    }
+                }
+            }
+            for bound_message_index in 0..layout.vss_committed_material_bound_message_count() {
+                for digit_index in
+                    0..crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT
+                {
+                    for half in 0..TRACE_SPLIT {
+                        let witness_digit = column_values[layout.physical_bound_message_digit(
+                            bound_message_index,
+                            digit_index,
+                            half,
+                        )];
+                        let material = material_values
+                            [layout.material_column_index(bound_message_index, digit_index, half)];
+                        absorb(
+                            &domain.value_sub(&witness_digit, &material),
+                            &mut accumulated,
+                        );
                     }
                 }
             }
@@ -448,26 +507,23 @@ pub(crate) fn batched_sumcheck_value<Domain: CompositionColumnDomain>(
 
         return accumulated;
     }
-    if layout.compact_vss_active() {
+    if layout.vss_public_active() {
         let mut claim_alpha_index = 0_usize;
         for consistency_vector in 0..layout.consistency_vector_count() {
             for repetition in 0..layout.consistency_repetitions {
                 let alpha_value = &consistency_alpha[claim_alpha_index];
                 claim_alpha_index += 1;
                 for half in 0..TRACE_SPLIT {
-                    let witness_value = if consistency_vector < layout.compact_vss_item_columns {
-                        column_values
-                            [layout.physical_compact_vss_carry_at(consistency_vector, half)]
+                    let witness_value = if consistency_vector < layout.vss_public_item_columns {
+                        column_values[layout.physical_vss_public_carry_at(consistency_vector, half)]
                     } else {
-                        let digit_claim_index =
-                            consistency_vector - layout.compact_vss_item_columns;
-                        let message_position = digit_claim_index
-                            / crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT;
-                        let digit_index = digit_claim_index
-                            % crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT;
-                        column_values[layout.physical_compact_vss_message_digit(
+                        let trit_claim_index = consistency_vector - layout.vss_public_item_columns;
+                        let (message_position, digit_index, trit_index) =
+                            layout.vss_public_message_trit_claim_at(trit_claim_index);
+                        column_values[layout.physical_vss_public_message_trit(
                             message_position,
                             digit_index,
+                            trit_index,
                             half,
                         )]
                     };
@@ -491,11 +547,11 @@ pub(crate) fn batched_sumcheck_value<Domain: CompositionColumnDomain>(
                 );
             }
         }
-        debug_assert_eq!(publics.linkage.len(), layout.compact_vss_logical_columns());
+        debug_assert_eq!(publics.linkage.len(), layout.vss_public_logical_columns());
         for (column_index, relation_values) in publics.linkage.iter().enumerate() {
             for (half, relation_value) in relation_values.iter().enumerate().take(TRACE_SPLIT) {
                 let column_value =
-                    compact_vss_column_value::<Domain>(column_values, layout, column_index, half);
+                    vss_public_column_value::<Domain>(column_values, layout, column_index, half);
                 accumulated = tower.add(
                     &accumulated,
                     &domain.challenge_times(relation_value, &column_value),
@@ -505,10 +561,10 @@ pub(crate) fn batched_sumcheck_value<Domain: CompositionColumnDomain>(
 
         return accumulated;
     }
-    if layout.compact_same_secret_bridge_active() {
+    if layout.same_secret_bridge_active() {
         let mut claim_alpha_index = 0_usize;
-        let bridge_digit_vector_count = layout.compact_same_secret_bridge_target_count()
-            * crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT;
+        let bridge_digit_vector_count = layout.same_secret_bridge_target_count()
+            * crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT;
         for consistency_vector in 0..layout.consistency_vector_count() {
             for repetition in 0..layout.consistency_repetitions {
                 let alpha_value = &consistency_alpha[claim_alpha_index];
@@ -521,10 +577,10 @@ pub(crate) fn batched_sumcheck_value<Domain: CompositionColumnDomain>(
                     } else if consistency_vector < 2 + bridge_digit_vector_count {
                         let digit_vector_index = consistency_vector - 2;
                         let target_index = digit_vector_index
-                            / crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT;
+                            / crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT;
                         let digit_index = digit_vector_index
-                            % crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT;
-                        column_values[layout.physical_compact_same_secret_bridge_message_digit(
+                            % crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT;
+                        column_values[layout.physical_same_secret_bridge_message_digit(
                             target_index,
                             digit_index,
                             half,
@@ -557,11 +613,11 @@ pub(crate) fn batched_sumcheck_value<Domain: CompositionColumnDomain>(
         }
         debug_assert_eq!(
             publics.linkage.len(),
-            layout.compact_same_secret_bridge_logical_columns()
+            layout.same_secret_bridge_logical_columns()
         );
         for (column_index, relation_values) in publics.linkage.iter().enumerate() {
             for (half, relation_value) in relation_values.iter().enumerate().take(TRACE_SPLIT) {
-                let column_value = compact_same_secret_bridge_column_value::<Domain>(
+                let column_value = same_secret_bridge_column_value::<Domain>(
                     column_values,
                     layout,
                     column_index,
@@ -579,7 +635,7 @@ pub(crate) fn batched_sumcheck_value<Domain: CompositionColumnDomain>(
     if layout.target_decryption_active() {
         let mut claim_alpha_index = 0_usize;
         let target_decryption_message_digit_vectors = layout.target_decryption_message_columns
-            * crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT;
+            * crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT;
         for consistency_vector in 0..layout.consistency_vector_count() {
             for repetition in 0..layout.consistency_repetitions {
                 let alpha_value = &consistency_alpha[claim_alpha_index];
@@ -587,9 +643,9 @@ pub(crate) fn batched_sumcheck_value<Domain: CompositionColumnDomain>(
                 for half in 0..TRACE_SPLIT {
                     debug_assert!(consistency_vector < target_decryption_message_digit_vectors);
                     let message_position = consistency_vector
-                        / crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT;
+                        / crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT;
                     let digit_index = consistency_vector
-                        % crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT;
+                        % crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT;
                     let witness_value = column_values[layout
                         .physical_target_decryption_message_digit(
                             message_position,
@@ -674,29 +730,28 @@ pub(crate) fn batched_sumcheck_value<Domain: CompositionColumnDomain>(
             let alpha_value = &consistency_alpha[claim_alpha_index];
             claim_alpha_index += 1;
             for half in 0..TRACE_SPLIT {
-                let bridge_digit_vector_count =
-                    if layout.compact_same_secret_bridge_material_active() {
-                        layout.compact_same_secret_bridge_target_count()
-                        * crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT
-                    } else {
-                        0
-                    };
+                let bridge_digit_vector_count = if layout.same_secret_bridge_material_active() {
+                    layout.same_secret_bridge_target_count()
+                        * crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT
+                } else {
+                    0
+                };
                 let witness_value = if consistency_vector == 0 {
                     column_values[layout.physical_secret(half)]
                 } else if consistency_vector <= layout.total_error_columns {
                     column_values[layout.physical_error(consistency_vector - 1, half)]
                 } else if consistency_vector == layout.total_error_columns + 1 {
                     column_values[layout.physical_negative_indicator(half)]
-                } else if layout.compact_same_secret_bridge_material_active()
+                } else if layout.same_secret_bridge_material_active()
                     && consistency_vector
                         < layout.total_error_columns + 2 + bridge_digit_vector_count
                 {
                     let digit_vector_index = consistency_vector - layout.total_error_columns - 2;
                     let target_index = digit_vector_index
-                        / crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT;
+                        / crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT;
                     let digit_index = digit_vector_index
-                        % crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT;
-                    column_values[layout.physical_compact_same_secret_bridge_message_digit(
+                        % crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT;
+                    column_values[layout.physical_same_secret_bridge_message_digit(
                         target_index,
                         digit_index,
                         half,
@@ -728,14 +783,14 @@ pub(crate) fn batched_sumcheck_value<Domain: CompositionColumnDomain>(
             );
         }
     }
-    if layout.compact_same_secret_bridge_material_active() {
+    if layout.same_secret_bridge_material_active() {
         debug_assert_eq!(
             publics.linkage.len(),
-            layout.compact_same_secret_bridge_logical_columns()
+            layout.same_secret_bridge_logical_columns()
         );
         for (column_index, relation_values) in publics.linkage.iter().enumerate() {
             for (half, relation_value) in relation_values.iter().enumerate().take(TRACE_SPLIT) {
-                let column_value = compact_same_secret_bridge_column_value::<Domain>(
+                let column_value = same_secret_bridge_column_value::<Domain>(
                     column_values,
                     layout,
                     column_index,
@@ -787,35 +842,32 @@ fn private_vss_column_value<Domain: CompositionColumnDomain>(
     }
 }
 
-fn compact_vss_column_value<Domain: CompositionColumnDomain>(
+fn vss_public_column_value<Domain: CompositionColumnDomain>(
     column_values: &[Domain::Value],
     layout: &LimbColumnLayout,
     vector_index: usize,
     half: usize,
 ) -> Domain::Value {
-    let message_encoding_column_count = layout.compact_vss_message_encoding_columns();
+    let message_encoding_column_count = layout.vss_public_message_encoding_columns();
     if vector_index < message_encoding_column_count {
         let (message_position, encoding_column) = layout
-            .compact_vss_message_position_for_encoding_column(vector_index)
-            .expect("compact VSS vector index is in the layout");
-        if message_position < layout.compact_vss_coefficient_columns {
+            .vss_public_message_position_for_encoding_column(vector_index)
+            .expect("VSS vector index is in the layout");
+        if message_position < layout.vss_public_coefficient_columns {
             column_values
-                [layout.physical_compact_vss_message(message_position, encoding_column, half)]
+                [layout.physical_vss_public_message(message_position, encoding_column, half)]
         } else {
-            column_values[layout.physical_compact_vss_recipient_message_at(
-                message_position - layout.compact_vss_coefficient_columns,
+            column_values[layout.physical_vss_public_recipient_message_at(
+                message_position - layout.vss_public_coefficient_columns,
                 encoding_column,
                 half,
             )]
         }
-    } else if vector_index < message_encoding_column_count + layout.compact_vss_item_columns {
+    } else if vector_index < message_encoding_column_count + layout.vss_public_item_columns {
         column_values[layout
-            .physical_compact_vss_carry_at(vector_index - message_encoding_column_count, half)]
+            .physical_vss_public_carry_at(vector_index - message_encoding_column_count, half)]
     } else {
-        column_values[layout.physical_compact_vss_randomness(
-            vector_index - message_encoding_column_count - layout.compact_vss_item_columns,
-            half,
-        )]
+        unreachable!("VSS public vector index is outside the packed column layout")
     }
 }
 
@@ -836,14 +888,11 @@ fn target_decryption_column_value<Domain: CompositionColumnDomain>(
             half,
         )]
     } else {
-        column_values[layout.physical_target_decryption_randomness(
-            vector_index - message_encoding_column_count,
-            half,
-        )]
+        unreachable!("target-decryption vector index is outside the message column layout")
     }
 }
 
-fn compact_same_secret_bridge_column_value<Domain: CompositionColumnDomain>(
+fn same_secret_bridge_column_value<Domain: CompositionColumnDomain>(
     column_values: &[Domain::Value],
     layout: &LimbColumnLayout,
     vector_index: usize,
@@ -854,25 +903,23 @@ fn compact_same_secret_bridge_column_value<Domain: CompositionColumnDomain>(
     } else if vector_index == 1 {
         column_values[layout.physical_negative_indicator(half)]
     } else {
-        let message_encoding_column_count =
-            layout.compact_same_secret_bridge_message_encoding_columns();
+        let message_encoding_column_count = layout.same_secret_bridge_message_encoding_columns();
         if vector_index < 2 + message_encoding_column_count {
             let message_vector_index = vector_index - 2;
             let (target_index, encoding_column) = layout
-                .compact_same_secret_bridge_message_position_for_encoding_column(
-                    message_vector_index,
-                )
-                .expect("compact same-secret bridge vector index is in the layout");
-            column_values[layout.physical_compact_same_secret_bridge_message(
-                target_index,
-                encoding_column,
-                half,
-            )]
+                .same_secret_bridge_message_position_for_encoding_column(message_vector_index)
+                .expect("same-secret bridge vector index is in the layout");
+            column_values
+                [layout.physical_same_secret_bridge_message(target_index, encoding_column, half)]
         } else {
-            column_values[layout.physical_linkage_randomness(
-                vector_index - 2 - message_encoding_column_count,
-                half,
-            )]
+            let randomness_position = vector_index - 2 - message_encoding_column_count;
+            if randomness_position < layout.linkage_randomness_columns {
+                column_values[layout.physical_linkage_randomness(randomness_position, half)]
+            } else {
+                unreachable!(
+                    "same-secret bridge vector index is outside the combined column layout"
+                )
+            }
         }
     }
 }

@@ -52,33 +52,38 @@ mod prover;
 mod relation;
 mod verifier;
 
-pub(crate) use commands::generate_trustee_evaluation_key_proof_from_request;
-pub(crate) use commands::verify_target_decryption_share_proof_bytes_from_request;
 #[cfg(test)]
+pub(crate) use commands::describe_target_decryption_share_proof_layout_from_request;
+pub(crate) use commands::describe_trustee_evaluation_key_statement_from_request;
+pub(crate) use commands::generate_target_decryption_share_proof_bytes_from_request;
+pub(crate) use commands::generate_trustee_evaluation_key_proof_from_request;
+#[cfg(test)]
+pub(in crate::bgv::setup) use commands::prove_trustee_evaluation_key_proof_bytes;
+pub(crate) use commands::verify_target_decryption_share_proof_bytes_from_request;
 pub(crate) use commands::{
-    describe_target_decryption_share_proof_layout_from_request,
-    generate_target_decryption_share_proof_bytes_from_request,
-};
-pub(crate) use commands::{
-    generate_compact_same_secret_bridge_proof_from_request,
-    generate_compact_vss_share_linkage_proof_from_request,
-    verify_compact_same_secret_bridge_proof_from_request,
-    verify_compact_vss_share_linkage_proof_material_set_from_request,
+    generate_same_secret_bridge_proof_from_request, generate_vss_share_linkage_proof_from_request,
+    verify_same_secret_bridge_proof_from_request, verify_vss_share_linkage_proof_from_request,
+    verify_vss_share_linkage_proof_material_set_from_request,
 };
 
 pub(in crate::bgv::setup) use commands::{
-    CompactVssCommandCommitmentExpectation, compact_vss_share_linkage_commitment_from_value,
+    VssPublicCommandCommitmentExpectation, vss_share_linkage_commitment_from_value,
 };
 pub(in crate::bgv::setup) use proof_codec::decode_trustee_evaluation_key_proof;
 pub(in crate::bgv::setup) use proof_codec::encode_trustee_evaluation_key_proof;
 pub(in crate::bgv::setup) use prover::prove_evaluation_key_share;
+pub(in crate::bgv::setup) use prover::{
+    VssCommittedMaterialTreeInput, vss_committed_material_column_mask_degree,
+    vss_committed_material_roots_by_commitment_field,
+};
 pub(in crate::bgv::setup) use relation::TrusteeEvaluationKeyWitness;
-#[cfg(test)]
 pub(in crate::bgv::setup) use relation::public_key_switch_sample;
 pub(in crate::bgv::setup) use relation::{
-    CompactSameSecretBridgeStatement, EvaluationKeyShareDescriptor, EvaluationKeyShareKind,
-    PUBLIC_KEY_SHARE_COMMON_REFERENCE_LABEL, PrivateVssShareStatement, SameSecretLinkageStatement,
-    SuccinctSetupProofContext, TrusteeEvaluationKeyStatement,
+    EvaluationKeyShareDescriptor, EvaluationKeyShareKind, PUBLIC_KEY_SHARE_COMMON_REFERENCE_LABEL,
+    PrivateVssShareStatement, SAME_SECRET_LINKAGE_ATOM_EXTENSION_DEGREE,
+    SAME_SECRET_LINKAGE_ATOM_LINCHECK_REPETITIONS, SameSecretBridgeStatement,
+    SameSecretLinkageAtomFieldForms, SameSecretLinkageStatement, SuccinctSetupProofContext,
+    TrusteeEvaluationKeyStatement, build_same_secret_linkage_atom_field_forms,
 };
 pub(in crate::bgv::setup) use verifier::verify_evaluation_key_share;
 
@@ -95,33 +100,23 @@ use crate::{
 // the package proof records and the chunked proof transport reference.
 pub(in crate::bgv::setup) fn trustee_evaluation_key_proof_bytes_hash(proof_bytes: &[u8]) -> String {
     hash512_hex(
-        "sealed-lattice/setup/trustee-evaluation-key/proof-bytes-v1",
+        "sealed-lattice/setup/trustee-evaluation-key/proof-bytes",
         &[proof_bytes],
     )
 }
 
 pub(crate) const TRUSTEE_EVALUATION_KEY_PROOF_FAMILY: &str = "trustee-evaluation-key";
-pub(crate) const SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY: &str = "same-secret-linkage-anchor";
 pub(crate) const PUBLIC_KEY_SHARE_PROOF_FAMILY: &str = "public-key-share";
 pub(crate) const PRIVATE_VSS_SHARE_PROOF_FAMILY: &str = "vss-opening-carry";
-pub(crate) const COMPACT_VSS_SHARE_LINKAGE_PROOF_FAMILY: &str = "compact-vss-share-linkage";
-pub(crate) const COMPACT_SAME_SECRET_BRIDGE_PROOF_FAMILY: &str = "compact-same-secret-bridge";
+pub(crate) const VSS_SHARE_LINKAGE_PROOF_FAMILY: &str = "vss-share-linkage";
+pub(crate) const SAME_SECRET_BRIDGE_PROOF_FAMILY: &str = "same-secret-bridge";
 pub(crate) const TARGET_DECRYPTION_SHARE_PROOF_FAMILY: &str = "target-decryption-share";
-// Canonical hash of transported same-secret linkage anchor proof bytes.
-#[cfg(test)]
-pub(in crate::bgv::setup) fn same_secret_anchor_proof_bytes_hash(proof_bytes: &[u8]) -> String {
-    hash512_hex(
-        "sealed-lattice/setup/same-secret-linkage-anchor/proof-bytes-v1",
-        &[proof_bytes],
-    )
-}
-
 // Canonical hash of transported public-key share succinct proof bytes.
 pub(in crate::bgv::setup) fn public_key_share_succinct_proof_bytes_hash(
     proof_bytes: &[u8],
 ) -> String {
     hash512_hex(
-        "sealed-lattice/setup/public-key-share/succinct-proof-bytes-v1",
+        "sealed-lattice/setup/public-key-share/succinct-proof-bytes",
         &[proof_bytes],
     )
 }
@@ -131,7 +126,7 @@ pub(in crate::bgv::setup) fn private_vss_share_succinct_proof_bytes_hash(
     proof_bytes: &[u8],
 ) -> String {
     hash512_hex(
-        "sealed-lattice/setup/private-vss-share/succinct-proof-bytes-v1",
+        "sealed-lattice/setup/private-vss-share/succinct-proof-bytes",
         &[proof_bytes],
     )
 }
@@ -176,14 +171,18 @@ pub(super) const LINCHECK_REPETITIONS: usize = 2;
 // (at most 2 * N * 255, about 2^24) so the base-3 smudging masks dominate them
 // only as a bounded-leakage row; twenty repetitions put the per-difference
 // collision bound at 2^-160 before union and Fiat-Shamir losses, the pre-union
-// margin the disclosed accounting requires. Compact share-linkage uses fewer,
-// wider carry and message-digit combinations: four 40-bit repetitions preserve
-// the same 160-bit pre-union collision budget while avoiding mask columns for
-// repetitions that carry no additional collision margin.
+// margin the disclosed accounting requires. Share-linkage uses the same
+// twenty-repetition eight-bit schedule as the other families (2026-07-06,
+// Branch 2 decision in the setup proof decisions record): the earlier
+// four-40-bit schedule forced masks whose CRT lift consumed all three
+// commitment fields, leaving no check field; the standard schedule keeps both
+// carry and message-digit clear sums under the standard 58-digit mask so the
+// lift consumes two of the three commitment fields and the third is the check
+// field that catches an inconsistent per-field witness.
 pub(in crate::bgv::setup) const CONSISTENCY_REPETITIONS: usize = 20;
 pub(in crate::bgv::setup) const CONSISTENCY_COEFFICIENT_BITS: u32 = 8;
-pub(in crate::bgv::setup) const COMPACT_VSS_CONSISTENCY_REPETITIONS: usize = 4;
-pub(in crate::bgv::setup) const COMPACT_VSS_CONSISTENCY_COEFFICIENT_BITS: u32 = 40;
+pub(in crate::bgv::setup) const VSS_PUBLIC_CONSISTENCY_REPETITIONS: usize = 20;
+pub(in crate::bgv::setup) const VSS_PUBLIC_CONSISTENCY_COEFFICIENT_BITS: u32 = 8;
 // Each consistency claim is one shared integer (clear bounded combination plus
 // a family-selected mask committed digit-wise in base-3 mask columns) published
 // as its residue in every proof field carrying that claim. Setup proof families
@@ -192,12 +191,19 @@ pub(in crate::bgv::setup) const COMPACT_VSS_CONSISTENCY_COEFFICIENT_BITS: u32 = 
 // 2^-68. This is not a 128-bit zero-knowledge row.
 pub(in crate::bgv::setup) const CLAIM_MASK_RADIX: u64 = 3;
 pub(in crate::bgv::setup) const CLAIM_MASK_DIGIT_COUNT: usize = 58;
-pub(in crate::bgv::setup) const COMPACT_VSS_CARRY_CLAIM_MASK_DIGIT_COUNT: usize = 75;
-// Compact VSS digit consistency claims have a larger clear range than carries.
-// Eighty-seven base-3 mask digits stay inside the three setup-field CRT lift
-// window while keeping the digit-claim mask margin comparable to the carry
-// claim margin.
-pub(in crate::bgv::setup) const COMPACT_VSS_DIGIT_CLAIM_MASK_DIGIT_COUNT: usize = 87;
+// Share-linkage carry and message-trit consistency claims both take the
+// standard 58-digit mask under the twenty-repetition eight-bit schedule, so
+// their ~2^92 mask bound leaves the three-field lift with a check field. The
+// trit-claim per-claim leakage is the clear bound over the mask bound: the
+// message digit is trit-decomposed, so each claim commits a single base-three
+// trit (witness bound two) and its leakage is in the standard ~2^-68 class.
+pub(in crate::bgv::setup) const VSS_PUBLIC_CARRY_CLAIM_MASK_DIGIT_COUNT: usize = 58;
+pub(in crate::bgv::setup) const VSS_PUBLIC_SHARE_LINKAGE_TRIT_CLAIM_MASK_DIGIT_COUNT: usize = 58;
+// Same-secret-bridge digit consistency claims lift over up to seven target
+// fields, so the wider eighty-seven-digit mask stays inside that CRT window
+// while keeping a generous leakage margin; this constant serves the bridge
+// family only (share-linkage trit claims use the 58-digit mask above).
+pub(in crate::bgv::setup) const VSS_PUBLIC_DIGIT_CLAIM_MASK_DIGIT_COUNT: usize = 87;
 // Target-decryption message claims need wider masks than the setup families
 // because lifted aggregate-message openings have a much larger clear range. That
 // clear range is fixed by the largest active target prime, which is
@@ -219,9 +225,9 @@ pub(in crate::bgv::setup) const TARGET_DECRYPTION_SMUDGING_MESSAGE_CLAIM_MASK_DI
 // roughly 288 queries. No grinding is applied.
 pub(super) const LOW_DEGREE_QUERY_COUNT: usize = 168;
 pub(super) const MINIMUM_CONJECTURED_CLASSICAL_SOUNDNESS_AFTER_UNION_BITS: i64 = 128;
-pub(super) const MAIN_LOW_DEGREE_TRANSCRIPT_PURPOSE: &[u8] = b"batched-column-degree-v1";
+pub(super) const MAIN_LOW_DEGREE_TRANSCRIPT_PURPOSE: &[u8] = b"batched-column-degree";
 pub(super) const SUMCHECK_RESIDUAL_LOW_DEGREE_TRANSCRIPT_PURPOSE: &[u8] =
-    b"sumcheck-residual-degree-v1";
+    b"sumcheck-residual-degree";
 // The FRI recursion stops at a statement-derived final coefficient layer. The
 // minimum keeps tiny development traces usable; the cap removes committed
 // folded Merkle layers from production-size proofs while keeping final

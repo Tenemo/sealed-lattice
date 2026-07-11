@@ -3,40 +3,21 @@ use super::*;
 pub(in crate::bgv::setup) fn verify_full_ring_material(
     setup_package: &Value,
 ) -> CanonicalResult<Option<Value>> {
-    // On the compact path the full public VSS material is absent; the accepted
-    // ring is evidenced by the compact coefficient commitment set instead. Either
-    // way the reduced development ring must be refused (never accepted as the
-    // production ring) before terminal acceptance.
-    if let Some(material_set) = setup_package.get("vssCoefficientCommitmentMaterial") {
-        if material_set.get("ringDegree").and_then(Value::as_u64) != Some(POLYNOMIAL_DEGREE as u64)
-        {
-            return Ok(Some(vss_material_outside_full_ring(
-                "vssCoefficientCommitmentMaterial must use the accepted full ring degree",
-                "setupPackage.vssCoefficientCommitmentMaterial.ringDegree",
-            )?));
-        }
-    } else if let Some(compact_set) = setup_package.get("compactVssCoefficientCommitmentSet") {
-        if compact_set.get("ringDegree").and_then(Value::as_u64) != Some(POLYNOMIAL_DEGREE as u64) {
-            return Ok(Some(vss_material_outside_full_ring(
-                "compactVssCoefficientCommitmentSet must use the accepted full ring degree",
-                "setupPackage.compactVssCoefficientCommitmentSet.ringDegree",
-            )?));
-        }
-    } else {
+    // The accepted ring is evidenced by the proof-verified coefficient commitment
+    // set, whose ringDegree is bound into the recomputed set root the share-linkage
+    // proofs verify. The reduced development ring must be refused (never accepted as
+    // the production ring) before terminal acceptance.
+    let Some(commitment_set) = setup_package.get("vssPublicCoefficientCommitmentSet") else {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "vssCoefficientCommitmentMaterial or compactVssCoefficientCommitmentSet was required before full-ring verification",
+            "vssPublicCoefficientCommitmentSet was required before full-ring verification",
         ));
-    }
-    if let Some(proof_set) = setup_package.get("sameSecretProofs")
-        && let Some(response) = verify_full_ring_records(
-            proof_set,
-            "proofRecords",
-            "same-secret proof records must use the accepted full ring degree before terminal setup acceptance",
-            "setupPackage.sameSecretProofs.proofRecords.ringDegree",
-        )?
-    {
-        return Ok(Some(response));
+    };
+    if commitment_set.get("ringDegree").and_then(Value::as_u64) != Some(POLYNOMIAL_DEGREE as u64) {
+        return Ok(Some(vss_material_outside_full_ring(
+            "vssPublicCoefficientCommitmentSet must use the accepted full ring degree",
+            "setupPackage.vssPublicCoefficientCommitmentSet.ringDegree",
+        )?));
     }
     if let Some(material_set) = setup_package.get("publicKeyShareMaterial")
         && let Some(response) = verify_full_ring_record(

@@ -37,7 +37,6 @@ export type GoldenTranscriptCoreFixture = {
     readonly caseName: string;
     readonly canonicalBytesHex: string;
     readonly objectType: 'TranscriptCore';
-    readonly objectVersion: 1;
     readonly expectedObjectHash512: string;
     readonly expectedChunkRoot: string;
     readonly chunkSize: number;
@@ -61,7 +60,6 @@ export type TranscriptCoreFixture =
 export type TranscriptCoreAnalysis = {
     readonly canonicalBytesHex: string;
     readonly objectType: 'TranscriptCore';
-    readonly objectVersion: 1;
     readonly objectHash512: string;
     readonly chunkRoot: string;
     readonly chunkSize: number;

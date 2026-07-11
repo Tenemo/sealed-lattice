@@ -3,12 +3,13 @@ import { setupProofTransportChunkSizeBytes } from '../setup-proof-material-trans
 
 import {
     type BinaryChunkedEvaluationKeyShareMaterialTransport,
+    type EvaluationKeyShareComponentMaterialChunkStream,
     type EvaluationKeyShareEmbeddedKeySwitchComponentMaterial,
     type EvaluationKeyShareMaterial,
     type EvaluationKeyShareMaterialTransportInput,
     type EvaluationKeyShareProofFamily,
+    type EvaluationKeyTrusteeReference,
     type JsonRecord,
-    type SameSecretProofReference,
     evaluationKeyShareComponentMaterialEncoding,
     evaluationKeyShareComponentMaterialMagic,
     evaluationKeyShareComponentMaterialTransportObjectType,
@@ -39,24 +40,21 @@ type EvaluationKeyShareTransportWorkItem = Readonly<{
 }>;
 
 const trusteeIdentityByRosterPosition = (
-    sameSecretProofReferences: readonly Pick<
-        SameSecretProofReference,
-        'trusteeIdentity' | 'trusteeRosterPosition'
-    >[],
+    trusteeReferences: readonly EvaluationKeyTrusteeReference[],
 ): ReadonlyMap<number, string> => {
     const identities = new Map<number, string>();
-    sameSecretProofReferences.forEach((reference, referenceIndex) => {
+    trusteeReferences.forEach((reference, referenceIndex) => {
         assertNonEmptyString(
             reference.trusteeIdentity,
-            `sameSecretProofReferences.${String(referenceIndex)}.trusteeIdentity`,
+            `trusteeReferences.${String(referenceIndex)}.trusteeIdentity`,
         );
         assertNonNegativeSafeInteger(
             reference.trusteeRosterPosition,
-            `sameSecretProofReferences.${String(referenceIndex)}.trusteeRosterPosition`,
+            `trusteeReferences.${String(referenceIndex)}.trusteeRosterPosition`,
         );
         if (identities.has(reference.trusteeRosterPosition)) {
             throw new Error(
-                'sameSecretProofReferences must not repeat trusteeRosterPosition.',
+                'trusteeReferences must not repeat trusteeRosterPosition.',
             );
         }
         identities.set(
@@ -76,7 +74,7 @@ const trusteeIdentityForContribution = (
     const trusteeIdentity = identities.get(trusteeRosterPosition);
     if (trusteeIdentity === undefined) {
         throw new Error(
-            `${fieldName} references a trustee roster position without a same-secret proof reference.`,
+            `${fieldName} references a trustee roster position without a trustee reference.`,
         );
     }
 
@@ -239,6 +237,7 @@ const transportEvaluationKeyShareComponentMaterial = (
 ): Readonly<{
     readonly shareMaterial: EvaluationKeyShareMaterial;
     readonly componentMaterial: JsonRecord;
+    readonly componentMaterialChunkStream: EvaluationKeyShareComponentMaterialChunkStream;
 }> => {
     const chunks = encodeEvaluationKeyShareComponentMaterial(
         workItem.proofFamily,
@@ -274,11 +273,20 @@ const transportEvaluationKeyShareComponentMaterial = (
         keySwitchComponentChunkHashes: transportHashes.chunkHashes,
     };
 
+    const componentMaterialChunks = chunks.map((chunk, chunkIndex) => ({
+        chunkIndex,
+        bytesHex: bytesToHex(chunk),
+    }));
+
     return {
         shareMaterial,
+        // The transported component material is a chunkless manifest reference:
+        // the terminal accepted-setup verifier refuses inline chunks and instead
+        // reads the material from the file-backed component material transport
+        // stream, so the raw bytes are carried out of band in the chunk stream
+        // below rather than embedded here.
         componentMaterial: {
             objectType: evaluationKeyShareComponentMaterialTransportObjectType,
-            objectVersion: 1,
             proofFamily: workItem.proofFamily,
             keySwitchMaterialEncoding:
                 evaluationKeyShareComponentMaterialEncoding,
@@ -293,16 +301,16 @@ const transportEvaluationKeyShareComponentMaterial = (
             keySwitchComponentVectorRoot:
                 workItem.shareMaterial.keySwitchComponentVectorRoot,
             keySwitchComponentMaterialRoot,
-            chunkSizeBytes: setupProofTransportChunkSizeBytes,
             chunkCount: transportHashes.chunkHashes.length,
             totalByteLength: transportHashes.totalByteLength,
             fullObjectHash: transportHashes.fullObjectHash,
             chunkRoot: transportHashes.chunkRoot,
             chunkHashes: transportHashes.chunkHashes,
-            chunks: chunks.map((chunk, chunkIndex) => ({
-                chunkIndex,
-                bytesHex: bytesToHex(chunk),
-            })),
+        },
+        componentMaterialChunkStream: {
+            keySwitchComponentMaterialRoot,
+            proofFamily: workItem.proofFamily,
+            chunks: componentMaterialChunks,
         },
     };
 };
@@ -310,10 +318,10 @@ const transportEvaluationKeyShareComponentMaterial = (
 export const createBinaryChunkedEvaluationKeyShareMaterialTransport = (
     input: EvaluationKeyShareMaterialTransportInput,
 ): BinaryChunkedEvaluationKeyShareMaterialTransport => {
-    const identities = trusteeIdentityByRosterPosition(
-        input.sameSecretProofReferences,
-    );
+    const identities = trusteeIdentityByRosterPosition(input.trusteeReferences);
     const componentMaterials: JsonRecord[] = [];
+    const componentMaterialChunkStreams: EvaluationKeyShareComponentMaterialChunkStream[] =
+        [];
     const componentRoots = new Set<string>();
     const transportShareMaterial = (
         workItem: EvaluationKeyShareTransportWorkItem,
@@ -332,6 +340,9 @@ export const createBinaryChunkedEvaluationKeyShareMaterialTransport = (
         }
         componentRoots.add(componentMaterialRoot);
         componentMaterials.push(componentTransport.componentMaterial);
+        componentMaterialChunkStreams.push(
+            componentTransport.componentMaterialChunkStream,
+        );
 
         return componentTransport.shareMaterial;
     };
@@ -415,8 +426,9 @@ export const createBinaryChunkedEvaluationKeyShareMaterialTransport = (
         transportedEvaluationKeyShareComponentMaterial: {
             objectType:
                 evaluationKeyShareComponentMaterialTransportSetObjectType,
-            objectVersion: 1,
             componentMaterials,
         },
+        evaluationKeyShareComponentMaterialChunkStreams:
+            componentMaterialChunkStreams,
     };
 };

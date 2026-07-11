@@ -14,8 +14,7 @@ pub(in super::super) const SETUP_COMMITMENT_MODULUS_LIMB_INDICES: [usize; 3] = [
 pub(in super::super) fn setup_commitment_parameters_value() -> CanonicalResult<Value> {
     Ok(json!({
         "objectType": "BdlopCommitment",
-        "objectVersion": 1,
-        "construction": "BDLOP simplified matrix commitment",
+        "construction": "BDLOP matrix commitment",
         "ring": {
             "coefficientRing": "Z_q[X]/(X^N+1)",
             "ringDegree": POLYNOMIAL_DEGREE,

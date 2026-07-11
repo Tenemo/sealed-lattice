@@ -1,4 +1,92 @@
 use super::*;
+use crate::bgv::evaluator::engine::ciphertext_add;
+
+// The first-profile guard for the multi-ballot comparison handoff: a genuine
+// ten-ballot aggregate at the full score-difference domain (D = 90) must
+// produce ranks that decrypt correctly. The packing construction leaves the
+// comparison input structurally noisy and the comparison evaluation fails as
+// a cliff when that noise exceeds its input ceiling, so tiny-domain coverage
+// (score_domain_max = 2) cannot stand in for this case; this test exists so a
+// saturating handoff can never ship silently again. It runs one full
+// first-profile-domain comparison, which costs a couple of minutes.
+#[test]
+#[ignore = "heavy Rust kernel evaluator test; run pnpm run test:rust:kernel:heavy"]
+fn heavy_rust_kernel_first_profile_domain_multiballot_rank_evaluation_decrypts() {
+    let context = EvaluatorContext::new(
+        "first-profile-domain-multiballot-rank",
+        SELECTED_EVALUATOR_WORKING_LEVEL,
+    )
+    .expect("context");
+    let option_count = 6usize;
+    let ballot_count = 10usize;
+    let score_domain_max = 9 * ballot_count as u64;
+
+    let ballots: Vec<Vec<u64>> = (0..ballot_count)
+        .map(|ballot_index| {
+            (0..option_count)
+                .map(|option_index| 1 + ((option_index + ballot_index) % 10) as u64)
+                .collect()
+        })
+        .collect();
+    let aggregate_scores: Vec<u64> = (0..option_count)
+        .map(|option_index| ballots.iter().map(|ballot| ballot[option_index]).sum())
+        .collect();
+    let expected_rank_values: Vec<u64> = (0..option_count)
+        .map(|option_index| {
+            (0..option_count)
+                .filter(|&other_index| {
+                    aggregate_scores[other_index] > aggregate_scores[option_index]
+                        || (aggregate_scores[other_index] == aggregate_scores[option_index]
+                            && other_index < option_index)
+                })
+                .count() as u64
+        })
+        .collect();
+
+    let mut aggregate_ciphertext = context
+        .key()
+        .encrypt_slots(&ballots[0], "first-profile-domain-ballot-0")
+        .expect("ballot ciphertext");
+    for (ballot_index, ballot) in ballots.iter().enumerate().skip(1) {
+        let ballot_ciphertext = context
+            .key()
+            .encrypt_slots(
+                ballot,
+                &format!("first-profile-domain-ballot-{ballot_index}"),
+            )
+            .expect("ballot ciphertext");
+        aggregate_ciphertext =
+            ciphertext_add(&aggregate_ciphertext, &ballot_ciphertext).expect("aggregate sum");
+    }
+
+    let packed_scores = pack_direct_score_slots(
+        &context,
+        &aggregate_ciphertext,
+        option_count,
+        "first-profile-domain-pack",
+    )
+    .expect("packed scores");
+    let rank_evaluation = evaluate_packed_rank_evaluation_from_packed_scores_with_batched_pairs(
+        &context,
+        &packed_scores,
+        option_count,
+        score_domain_max,
+        "first-profile-domain-rank",
+    )
+    .expect("rank evaluation");
+    let decrypted_slots = context
+        .key()
+        .decrypt_to_slots(&rank_evaluation.packed_ranks)
+        .expect("rank slots");
+    let decrypted_rank_values = (0..option_count)
+        .map(|logical_index| decrypted_slots[packed_score_slot(logical_index)])
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        decrypted_rank_values, expected_rank_values,
+        "the first-profile-domain multi-ballot handoff must decrypt to the tie-policy ranks"
+    );
+}
 
 #[test]
 fn top_k_order_polynomial_masks_unselected_ranks() {
@@ -19,7 +107,8 @@ fn top_k_order_polynomial_masks_unselected_ranks() {
 }
 
 #[test]
-fn packed_rank_evaluation_decrypts_expected_ranks_and_tie_policy() {
+#[ignore = "heavy Rust kernel evaluator test; run pnpm run test:rust:kernel:heavy"]
+fn heavy_rust_kernel_packed_rank_evaluation_decrypts_expected_ranks_and_tie_policy() {
     let context = EvaluatorContext::new(
         "packed-rank-evaluation-decrypts-expected-ranks",
         SELECTED_EVALUATOR_WORKING_LEVEL,
@@ -62,7 +151,8 @@ fn packed_rank_evaluation_decrypts_expected_ranks_and_tie_policy() {
 }
 
 #[test]
-fn sparse_target_projection_decrypts_selected_ids_and_orders() {
+#[ignore = "heavy Rust kernel evaluator test; run pnpm run test:rust:kernel:heavy"]
+fn heavy_rust_kernel_sparse_target_projection_decrypts_selected_ids_and_orders() {
     let context = EvaluatorContext::new(
         "sparse-target-projection-decrypts-selected-values",
         SELECTED_EVALUATOR_WORKING_LEVEL,

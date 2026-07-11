@@ -4,11 +4,9 @@ import { setupRequest } from '../../bgv-passive-setup-fixtures.js';
 import {
     collectiveSetupRosterHash,
     setupTrusteeSignatureSeedLabel,
-    textEncoder,
     type JsonRecord,
 } from '../setup-fixture-primitives.js';
 
-import { canonicalJson } from '#packages/crypto/src/index';
 import {
     createMlDsaKeyPairFixture,
     createMlDsaSignatureProfileFixture,
@@ -18,9 +16,6 @@ import type {
     BgvCollectiveSetupParametersDescription,
     TranscriptCoreKernel,
 } from '#packages/wasm/src/index';
-
-const canonicalByteLength = (value: unknown): number =>
-    textEncoder.encode(canonicalJson(value)).byteLength;
 
 function commonRandomnessSignatureContextHash(input: {
     readonly kernel: TranscriptCoreKernel;
@@ -69,13 +64,11 @@ function commonRandomnessSignatureEnvelope(input: {
         secretKeyBytesHex: keyFixture.secretKeyBytesHex,
         signedRoot: {
             objectType: input.objectType,
-            objectVersion: 1,
             ceremonyId: String(input.payload.ceremonyId),
             manifestHash: String(input.payload.manifestHash),
             boardHeadHash: null,
             objectRoot: input.objectRoot,
             chunkMerkleRoot: null,
-            byteLength: canonicalByteLength(input.payload),
             signerRole: 'Trustee',
             signerIdentity: input.trusteeIdentity,
             recoveryEpoch: Number(input.payload.recoveryEpoch),
@@ -113,7 +106,6 @@ export function acceptedCommonRandomness(
             .slice(0, 64);
         const revealPayload: JsonRecord = {
             objectType: 'CommonRandomnessReveal',
-            objectVersion: 1,
             ceremonyId: setupRequest.ceremonyId,
             manifestHash: setupRequest.manifestHash,
             rosterHash,
@@ -148,7 +140,6 @@ export function acceptedCommonRandomness(
 
         const commitPayload: JsonRecord = {
             objectType: 'CommonRandomnessCommit',
-            objectVersion: 1,
             ceremonyId: setupRequest.ceremonyId,
             manifestHash: setupRequest.manifestHash,
             rosterHash,
@@ -202,7 +193,6 @@ export function acceptedCommonRandomness(
     ).toEqual(expect.any(Number));
     const commonRandomness: JsonRecord = {
         objectType: 'SetupCommonRandomness',
-        objectVersion: 1,
         ceremonyId: setupRequest.ceremonyId,
         manifestHash: setupRequest.manifestHash,
         rosterHash,

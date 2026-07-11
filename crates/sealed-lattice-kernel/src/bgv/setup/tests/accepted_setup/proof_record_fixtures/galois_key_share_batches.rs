@@ -13,14 +13,11 @@ pub(in super::super) fn galois_key_share_batches_object(
 ) -> serde_json::Value {
     let setup_context = &package["setupContext"];
     let schedule = &package["evaluatorKeySchedule"];
-    let same_secret_proofs = package["sameSecretProofs"]["proofRecords"]
-        .as_array()
-        .expect("same-secret proof records");
+    let participant_count = participant_count_from_package(package);
     let required_schedule = schedule["requiredGaloisKeySchedule"]
         .as_array()
         .expect("Galois key schedule");
-    let ring_degree =
-        same_secret_constant_commitments_from_fixture_package(package, 0)[0].ring_degree;
+    let ring_degree = source_constant_commitments_from_fixture_package(package, 0)[0].ring_degree;
     // Generate each trustee's Galois key-switch component material across the
     // scheduled rotations in parallel, then consume that trustee's material in
     // schedule order before moving to the next trustee, so peak memory stays
@@ -28,15 +25,9 @@ pub(in super::super) fn galois_key_share_batches_object(
     // trustee-by-rotation matrix. The per-trustee outer order and per-rotation
     // inner order are preserved, so the emitted batches and roots stay
     // byte-identical to sequential generation.
-    let batches = same_secret_proofs
-        .iter()
-        .map(|proof_record| {
-            let trustee_roster_position = proof_record["trusteeRosterPosition"]
-                .as_u64()
-                .expect("trustee roster position");
-            let trustee_identity = proof_record["trusteeIdentity"]
-                .as_str()
-                .expect("trustee identity");
+    let batches = (0..participant_count)
+        .map(|trustee_roster_position| {
+            let trustee_identity = format!("trustee-{trustee_roster_position}");
             let trustee_materials: Vec<EvaluationKeyShareFixtureMaterial> = required_schedule
                 .par_iter()
                 .map(|schedule_entry| {
@@ -67,9 +58,8 @@ pub(in super::super) fn galois_key_share_batches_object(
                     let root = fixture_material.component_vector_root.clone();
                     let material_record = serde_json::json!({
                         "objectType": "GaloisKeyShareMaterial",
-                        "objectVersion": 1,
                         "proofFamily": "galois-key-share",
-                        "trusteeIdentity": trustee_identity,
+                        "trusteeIdentity": trustee_identity.as_str(),
                         "trusteeRosterPosition": trustee_roster_position,
                         "rotation": rotation,
                         "level": level,
@@ -93,23 +83,16 @@ pub(in super::super) fn galois_key_share_batches_object(
                 .collect::<Vec<_>>();
             let mut batch = serde_json::json!({
                 "objectType": "GaloisKeyShareBatch",
-                "objectVersion": 1,
                 "proofFamily": "galois-key-share",
                 "ceremonyId": setup_context["ceremonyId"],
                 "manifestHash": setup_context["manifestHash"],
                 "rosterHash": setup_context["rosterHash"],
                 "setupParametersHash": setup_context["setupParametersHash"],
                 "setupEpoch": setup_context["setupEpoch"],
-                "trusteeIdentity": trustee_identity,
+                "trusteeIdentity": trustee_identity.as_str(),
                 "trusteeRosterPosition": trustee_roster_position,
                 "evaluatorKeyScheduleRoot": schedule["evaluatorKeyScheduleRoot"],
-                "sameSecretConsistencyRoot": package["sameSecretConsistency"]["sameSecretConsistencyRoot"],
-                "sameSecretProofSetRoot": package["sameSecretProofs"]["sameSecretProofSetRoot"],
-                "sameSecretProofFamilyBindingRoot": package["sameSecretConsistency"]["sameSecretProofFamilyBindingRoot"],
                 "publicKeyShareSuccinctProofSetRoot": package["publicKeyShareSuccinctProofs"]["publicKeyShareSuccinctProofSetRoot"],
-                "sameSecretStatementRoot": proof_record["sameSecretStatementRoot"],
-                "trusteeSecretCommitmentRoot": proof_record["trusteeSecretCommitmentRoot"],
-                "sameSecretProofRoot": proof_record["sameSecretProofRoot"],
                 "galoisKeyCrpRoot": package["commonRandomness"]["publicDerivations"]["crpRoots"]["galoisKeyCrpRoot"],
                 "requiredGaloisSetHash": schedule["requiredGaloisSetHash"],
                 "requiredGaloisKeySchedule": schedule["requiredGaloisKeySchedule"],

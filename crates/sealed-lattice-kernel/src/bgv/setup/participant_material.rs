@@ -16,7 +16,7 @@ pub(super) fn participant_setup_material(
         .map(|setup_participant| setup_participant.trustee_identity.clone())
         .collect::<Vec<_>>();
     let local_secret_share_commitment_hash = hash512_hex(
-        "sealed-lattice-bgv-rns/local-secret-share-commitment-v1",
+        "sealed-lattice-bgv-rns/local-secret-share-commitment",
         &[
             input.private_setup_seed_hash.as_bytes(),
             participant.trustee_identity.as_bytes(),
@@ -25,7 +25,7 @@ pub(super) fn participant_setup_material(
         ],
     );
     let local_error_commitment_hash = hash512_hex(
-        "sealed-lattice-bgv-rns/local-error-commitment-v1",
+        "sealed-lattice-bgv-rns/local-error-commitment",
         &[
             input.private_setup_seed_hash.as_bytes(),
             participant.trustee_identity.as_bytes(),
@@ -35,7 +35,6 @@ pub(super) fn participant_setup_material(
     );
     let public_key_share_record = json!({
         "objectType": "BgvPublicKeyShare",
-        "objectVersion": 1,
         "ceremonyId": input.ceremony_id,
         "manifestHash": input.manifest_hash,
         "rosterHash": input.roster_hash,
@@ -61,7 +60,6 @@ pub(super) fn participant_setup_material(
     let public_key_share_root = derive_canonical_object_hash(&public_key_share_record)?;
     let trustee_threshold_verification_key = json!({
         "objectType": "TrusteeThresholdVerificationKey",
-        "objectVersion": 1,
         "targetDecryptionParametersHash": target_decryption_parameters_hash,
         "targetDecryptionParametersBindingHash": target_decryption_parameters_binding_hash,
         "ceremonyId": input.ceremony_id,
@@ -76,7 +74,6 @@ pub(super) fn participant_setup_material(
         derive_canonical_object_hash(&trustee_threshold_verification_key)?;
     let participant_record_without_hash = json!({
         "objectType": "ParticipantBgvSetupRecord",
-        "objectVersion": 1,
         "ceremonyId": input.ceremony_id,
         "manifestHash": input.manifest_hash,
         "rosterHash": input.roster_hash,

@@ -1,9 +1,6 @@
 mod evaluation_keys;
 
-use self::evaluation_keys::{
-    evaluation_key_size_certificate, evaluation_key_streaming_commitment,
-    public_rlwe_samples_by_basis,
-};
+use self::evaluation_keys::{evaluation_key_streaming_commitment, public_rlwe_samples_by_basis};
 use super::*;
 use crate::bgv::evaluator::records::target_layout_hash;
 use crate::hashing::derive_canonical_object_hash;
@@ -19,17 +16,12 @@ pub(super) fn setup_certificates(
         .expect("rotation key roots use array");
     let rotation_key_count = rotation_key_roots.len();
     let public_samples = public_rlwe_samples_by_basis(participant_count, rotation_key_count);
-    let evaluation_key_size_certificate = evaluation_key_size_certificate(evaluation_keys)?;
-    let evaluation_key_size_parameters_hash =
-        derive_canonical_object_hash(&evaluation_key_size_certificate)?;
     let evaluation_key_streaming_commitment = evaluation_key_streaming_commitment(evaluation_keys)?;
 
     Ok(json!({
         "keySwitchDecomposition": key_switch_decomposition,
         "keySwitchDecompositionHash": key_switch_decomposition_hash,
         "publicRlweSamplesByBasis": public_samples,
-        "evaluationKeySizeCertificate": evaluation_key_size_certificate,
-        "evaluationKeySizeParametersHash": evaluation_key_size_parameters_hash,
         "evaluationKeyStreamingCommitment": evaluation_key_streaming_commitment,
     }))
 }
@@ -37,7 +29,6 @@ pub(super) fn setup_certificates(
 pub(super) fn key_switch_decomposition_parameters() -> CanonicalResult<Value> {
     Ok(json!({
         "objectType": "BgvKeySwitchDecompositionParameters",
-        "objectVersion": 1,
         "digitBaseBits": 23,
         "digitCountPerPrime": 3,
     }))
@@ -51,9 +42,8 @@ pub(super) fn key_switch_decomposition_parameters() -> CanonicalResult<Value> {
 pub(super) fn target_decryption_parameters(bgv_parameters_hash: &str) -> CanonicalResult<Value> {
     Ok(json!({
         "objectType": "TargetDecryptionParameters",
-        "objectVersion": 1,
         "bgvParametersHash": bgv_parameters_hash,
-        "secretShareDomain": "BGV-RNS-secret-share-polynomial-over-selected-Q-data",
+        "secretShareDomain": SECRET_SHARE_DOMAIN,
     }))
 }
 
@@ -62,7 +52,6 @@ pub(super) fn passive_setup_evaluator_context_bindings(
 ) -> CanonicalResult<Value> {
     let evaluator_binding_context = json!({
         "objectType": "PassiveSetupEvaluatorBindingContext",
-        "objectVersion": 1,
         "ceremonyId": string_at_path(setup_inputs, &["ceremonyId"])?,
         "manifestHash": string_at_path(setup_inputs, &["manifestHash"])?,
         "rosterHash": string_at_path(setup_inputs, &["rosterHash"])?,
@@ -74,16 +63,14 @@ pub(super) fn passive_setup_evaluator_context_bindings(
     let bgv_parameters_hash = bgv_parameters_hash()?;
     let comparison_input_derivation_record = json!({
         "objectType": "ComparisonInputDerivationCircuitBinding",
-        "objectVersion": 1,
         "evaluatorBindingContextHash": &evaluator_binding_context_hash,
-        "selectedEvaluatorPath": "direct-encrypted-score-comparison-v1",
+        "selectedEvaluatorPath": "direct-encrypted-score-comparison",
         "bgvParametersHash": &bgv_parameters_hash,
     });
     let encrypted_comparison_input_record = json!({
         "objectType": "EncryptedComparisonInputBinding",
-        "objectVersion": 1,
         "evaluatorBindingContextHash": &evaluator_binding_context_hash,
-        "selectedEvaluatorPath": "direct-encrypted-score-comparison-v1",
+        "selectedEvaluatorPath": "direct-encrypted-score-comparison",
         "comparisonInputDerivationCircuitHash": derive_canonical_object_hash(
             &comparison_input_derivation_record,
         )?,
@@ -91,7 +78,6 @@ pub(super) fn passive_setup_evaluator_context_bindings(
     });
     let sparse_target_projection_record = json!({
         "objectType": "EncryptedSparseTargetProjectionBinding",
-        "objectVersion": 1,
         "evaluatorBindingContextHash": &evaluator_binding_context_hash,
         "targetLayoutHash": target_layout_hash(MAXIMUM_OPTION_COUNT)?,
         "bgvParametersHash": &bgv_parameters_hash,
@@ -111,7 +97,7 @@ pub(super) fn passive_setup_evaluator_context_bindings(
         "encryptedComparisonInputHash": encrypted_comparison_input_hash,
         "encryptedSparseTargetProjectionHash": encrypted_sparse_target_projection_hash,
         "targetLayoutHash": sparse_target_projection_record["targetLayoutHash"],
-        "selectedEvaluatorPath": "direct-encrypted-score-comparison-v1",
+        "selectedEvaluatorPath": "direct-encrypted-score-comparison",
     });
 
     Ok(json!({
@@ -132,7 +118,6 @@ pub(super) fn public_common_random_polynomial_root(
 ) -> CanonicalResult<String> {
     derive_canonical_object_hash(&json!({
         "objectType": "BgvPublicCommonRandomPolynomial",
-        "objectVersion": 1,
         "ceremonyId": input.ceremony_id,
         "rosterHash": input.roster_hash,
         "setupSeedHash": input.setup_seed_hash,

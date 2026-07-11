@@ -3,16 +3,30 @@ mod aggregation;
 mod command;
 mod encryption;
 mod evaluator_replay;
+mod layout;
+mod package;
 mod proof_summary;
 mod proof_transport;
 mod randomness;
 mod request;
+mod setup_handoff;
 mod target_proposal;
 mod timing;
 use aggregation::*;
 pub(crate) use command::run_direct_encrypted_ballot;
 use encryption::*;
-use evaluator_replay::*;
+// The end-to-end first-profile evidence test under target_decryption::tests
+// replays a genuine ballot aggregate through this production evaluator path
+// before releasing it through the proof-backed staged decryption commands.
+pub(crate) use evaluator_replay::{
+    DirectBallotPackedBatchedPairEvaluatorInput,
+    run_direct_ballot_packed_batched_pair_evaluator_for_top_counts,
+};
+#[cfg(test)]
+pub(crate) use evaluator_replay::{
+    direct_ballot_comparison_domain_max, direct_ballot_evaluator_working_level,
+    direct_ballot_plaintext_target_slots,
+};
 use proof_summary::*;
 use proof_transport::*;
 use randomness::*;
@@ -59,16 +73,17 @@ use crate::{
     hashing::{canonical_json, chunk_root, hash512_hex},
 };
 
-const DIRECT_BALLOT_OPERATION: &str = "runDirectEncryptedBallot";
-const DIRECT_BALLOT_OPTION_COUNT: usize = 20;
-const DIRECT_BALLOT_MINIMUM_SCORE: u64 = 1;
-const DIRECT_BALLOT_MAXIMUM_SCORE: u64 = 10;
-const DIRECT_BALLOT_SCORE_BUCKET_COUNT: usize =
-    (DIRECT_BALLOT_MAXIMUM_SCORE - DIRECT_BALLOT_MINIMUM_SCORE + 1) as usize;
-const DIRECT_BALLOT_MAXIMUM_PROTOTYPE_BALLOTS: usize = 20;
-const DIRECT_BALLOT_DEFAULT_EVALUATOR_WORKING_LEVEL: usize = SELECTED_EVALUATOR_WORKING_LEVEL;
-const DIRECT_BALLOT_SINGLE_BALLOT_FULL_TARGET_WORKING_LEVEL: usize = 8;
-const DIRECT_BALLOT_PROTOTYPE_PROOF_CHUNK_BYTES: usize = 1024 * 1024;
+const OPERATION: &str = "runDirectEncryptedBallot";
+const OPTION_COUNT: usize = 20;
+// pub(crate): the setup-parameter identity binds the bounded-domain evaluator
+// profile (score span times roster size) from these score-domain constants.
+pub(crate) const MINIMUM_SCORE: u64 = 1;
+pub(crate) const MAXIMUM_SCORE: u64 = 10;
+const SCORE_BUCKET_COUNT: usize = (MAXIMUM_SCORE - MINIMUM_SCORE + 1) as usize;
+const MAXIMUM_PROTOTYPE_BALLOTS: usize = 20;
+const DEFAULT_EVALUATOR_WORKING_LEVEL: usize = SELECTED_EVALUATOR_WORKING_LEVEL;
+const SINGLE_BALLOT_TARGET_WORKING_LEVEL: usize = 8;
+const PROTOTYPE_PROOF_CHUNK_BYTES: usize = 1024 * 1024;
 
 #[derive(Clone)]
 struct DirectBallotInput {

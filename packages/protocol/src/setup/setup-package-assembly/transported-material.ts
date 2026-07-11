@@ -1,6 +1,10 @@
 import type { ProtocolHash } from '@sealed-lattice/types';
 
 import type { SetupCertificateTransportedObjectInput } from '../setup-certificates.js';
+import {
+    vssCoefficientCommitmentMaterialTransportEncoding,
+    type VssCoefficientCommitmentMaterialBinaryReference,
+} from '../vss-coefficient-commitments.js';
 
 import {
     assertObjectRecord,
@@ -8,6 +12,25 @@ import {
     hashField,
 } from './constants-and-assertions.js';
 import type { SetupPackageInput } from './types.js';
+
+const nonNegativeSafeIntegerField = (
+    value: Readonly<Record<string, unknown>>,
+    fieldName: string,
+    objectPath: string,
+): number => {
+    const fieldValue = value[fieldName];
+    if (
+        typeof fieldValue !== 'number' ||
+        !Number.isSafeInteger(fieldValue) ||
+        fieldValue < 0
+    ) {
+        throw new TypeError(
+            `${objectPath}.${fieldName} must be a non-negative safe integer.`,
+        );
+    }
+
+    return fieldValue;
+};
 
 const positiveSafeIntegerField = (
     value: Readonly<Record<string, unknown>>,
@@ -237,17 +260,177 @@ const transportedPublicKeyShareMaterialObject = (
     ];
 };
 
+const transportedVssCoefficientCommitmentMaterialObject = (
+    input: SetupPackageInput,
+): readonly SetupCertificateTransportedObjectInput[] => {
+    const material = assertObjectRecord(
+        input.vssCoefficientCommitmentMaterial,
+        'vssCoefficientCommitmentMaterial',
+    );
+    if (
+        material.materialEncoding !==
+        vssCoefficientCommitmentMaterialTransportEncoding
+    ) {
+        return [];
+    }
+
+    return [
+        transportedMaterialObject(
+            material,
+            'vssCoefficientCommitmentMaterial',
+            'vssCoefficientCommitmentMaterialRoot',
+            'vssCoefficientCommitmentMaterial',
+            'public-vss-coefficient-commitment-material',
+        ),
+    ];
+};
+
+export const vssCoefficientCommitmentMaterialReferenceFromCertificate = (
+    input: SetupPackageInput,
+    setupTransportCertificate: Readonly<Record<string, unknown>>,
+): VssCoefficientCommitmentMaterialBinaryReference => {
+    const material = assertObjectRecord(
+        input.vssCoefficientCommitmentMaterial,
+        'vssCoefficientCommitmentMaterial',
+    );
+    const transportedObjects = setupTransportCertificate.transportedObjects;
+    if (!Array.isArray(transportedObjects)) {
+        throw new TypeError(
+            'setupTransportCertificate.transportedObjects must be an array.',
+        );
+    }
+    const matchingTransportedObjects = transportedObjects.filter(
+        (transportedObjectValue) => {
+            const transportedObject = assertObjectRecord(
+                transportedObjectValue,
+                'setupTransportCertificate.transportedObjects',
+            );
+
+            return (
+                transportedObject.objectName ===
+                'vssCoefficientCommitmentMaterial'
+            );
+        },
+    );
+    if (matchingTransportedObjects.length !== 1) {
+        throw new Error(
+            'setupTransportCertificate must bind exactly one vssCoefficientCommitmentMaterial object.',
+        );
+    }
+    const transportedObject = assertObjectRecord(
+        matchingTransportedObjects[0],
+        'setupTransportCertificate.transportedObjects.vssCoefficientCommitmentMaterial',
+    );
+    if (
+        transportedObject.objectRole !==
+            'public-vss-coefficient-commitment-material' ||
+        transportedObject.encoding !== 'binary'
+    ) {
+        throw new Error(
+            'setupTransportCertificate vssCoefficientCommitmentMaterial must use the canonical role and binary encoding.',
+        );
+    }
+    const materialRoot = hashField(
+        material,
+        'vssCoefficientCommitmentMaterialRoot',
+        'vssCoefficientCommitmentMaterial',
+    );
+    if (
+        hashField(
+            transportedObject,
+            'objectRoot',
+            'setupTransportCertificate.transportedObjects.vssCoefficientCommitmentMaterial',
+        ) !== materialRoot
+    ) {
+        throw new Error(
+            'setupTransportCertificate vssCoefficientCommitmentMaterial root must match the pre-finalization material root.',
+        );
+    }
+    const chunkCount = positiveSafeIntegerField(
+        transportedObject,
+        'chunkCount',
+        'setupTransportCertificate.transportedObjects.vssCoefficientCommitmentMaterial',
+    );
+    const chunkHashes = protocolHashArrayField(
+        transportedObject,
+        'chunkHashes',
+        'setupTransportCertificate.transportedObjects.vssCoefficientCommitmentMaterial',
+    );
+    if (chunkHashes.length !== chunkCount) {
+        throw new Error(
+            'setupTransportCertificate vssCoefficientCommitmentMaterial chunk count must match its chunk hashes.',
+        );
+    }
+
+    return {
+        objectType: 'VssCoefficientCommitmentMaterialSet',
+        ceremonyId: input.setupContext.ceremonyId,
+        manifestHash: input.setupContext.manifestHash,
+        rosterHash: input.setupContext.rosterHash,
+        setupParametersHash: input.setupContext.setupParametersHash,
+        setupEpoch: input.setupContext.setupEpoch,
+        publicMatrixSeedHash: hashField(
+            material,
+            'publicMatrixSeedHash',
+            'vssCoefficientCommitmentMaterial',
+        ),
+        vssCoefficientCommitmentRoot: hashField(
+            material,
+            'vssCoefficientCommitmentRoot',
+            'vssCoefficientCommitmentMaterial',
+        ),
+        materialEncoding: vssCoefficientCommitmentMaterialTransportEncoding,
+        participantCount: positiveSafeIntegerField(
+            material,
+            'participantCount',
+            'vssCoefficientCommitmentMaterial',
+        ),
+        thresholdDegree: positiveSafeIntegerField(
+            material,
+            'thresholdDegree',
+            'vssCoefficientCommitmentMaterial',
+        ),
+        rnsLimbCount: positiveSafeIntegerField(
+            material,
+            'rnsLimbCount',
+            'vssCoefficientCommitmentMaterial',
+        ),
+        ringDegree: positiveSafeIntegerField(
+            material,
+            'ringDegree',
+            'vssCoefficientCommitmentMaterial',
+        ),
+        materialRecordCount: nonNegativeSafeIntegerField(
+            material,
+            'materialRecordCount',
+            'vssCoefficientCommitmentMaterial',
+        ),
+        vssCoefficientCommitmentMaterialRoot: materialRoot,
+        chunkCount,
+        totalByteLength: positiveSafeIntegerField(
+            transportedObject,
+            'byteLength',
+            'setupTransportCertificate.transportedObjects.vssCoefficientCommitmentMaterial',
+        ),
+        fullObjectHash: hashField(
+            transportedObject,
+            'fullObjectHash',
+            'setupTransportCertificate.transportedObjects.vssCoefficientCommitmentMaterial',
+        ),
+        chunkRoot: hashField(
+            transportedObject,
+            'chunkRoot',
+            'setupTransportCertificate.transportedObjects.vssCoefficientCommitmentMaterial',
+        ),
+        chunkHashes,
+    };
+};
+
 export const setupCertificateTransportedObjectsFromPackageInput = (
     input: SetupPackageInput,
 ): readonly SetupCertificateTransportedObjectInput[] => [
+    ...transportedVssCoefficientCommitmentMaterialObject(input),
     ...transportedPublicKeyShareMaterialObject(input),
-    ...transportedProofMaterialObjects(
-        input.transportedSameSecretProofMaterial,
-        'transportedSameSecretProofMaterial',
-        'sameSecretProofMaterial',
-        'same-secret-proof-material',
-        plainTransportedProofMaterialFields,
-    ),
     ...transportedProofMaterialObjects(
         input.transportedPublicKeyShareProofMaterial,
         'transportedPublicKeyShareProofMaterial',

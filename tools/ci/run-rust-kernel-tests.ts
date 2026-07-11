@@ -1,8 +1,12 @@
+import {
+    createFocusedRustTestMatchTracker,
+    resolveFocusedRustTestRunResult,
+} from './focused-rust-test-match.js';
 import { createLocalRunLog, currentProcessExitCode } from './local-run-log.js';
 import { runCommandsInSeries, type CommandInvocation } from './run-command.js';
 import {
     cargoTestArgumentsForRustKernelFast,
-    memoryBoundedFastTestThreadCount,
+    heavyRustKernelTestNamePrefix,
     normalizeRustTestFilter,
 } from './rust-kernel-test-arguments.js';
 
@@ -35,13 +39,19 @@ export const parseRustKernelArguments = (
         throw new Error(`Rust kernel test runs accept one filter. ${usage}`);
     }
 
+    const positionalFilter = positionalArguments[0];
     const normalizedFilter =
-        positionalArguments.length === 1
-            ? normalizeRustTestFilter(positionalArguments[0] ?? '')
+        positionalFilter !== undefined
+            ? normalizeRustTestFilter(positionalFilter)
             : undefined;
     if (normalizedFilter === '') {
         throw new Error(
             `Rust kernel test runs require a non-empty filter. ${usage}`,
+        );
+    }
+    if (normalizedFilter?.startsWith(heavyRustKernelTestNamePrefix) === true) {
+        throw new Error(
+            `Heavy Rust kernel tests must use "pnpm run test:rust:kernel:heavy -- ${normalizedFilter}".`,
         );
     }
 
@@ -52,12 +62,8 @@ export const parseRustKernelArguments = (
 
 export const buildRustKernelTestCommand = (
     parsedArguments: ParsedRustKernelArguments,
-    testThreadCount: number = memoryBoundedFastTestThreadCount(),
 ): CommandInvocation => ({
-    args: cargoTestArgumentsForRustKernelFast(
-        parsedArguments.testFilter,
-        testThreadCount,
-    ),
+    args: cargoTestArgumentsForRustKernelFast(parsedArguments.testFilter),
     command: 'cargo',
     description:
         parsedArguments.testFilter === undefined
@@ -80,15 +86,38 @@ export const runRustKernelTests = async (
         scriptName: 'test:rust:kernel',
     });
     let exitCode: number | undefined;
+    const focusedTestMatchTracker =
+        parsedArguments.testFilter === undefined
+            ? undefined
+            : createFocusedRustTestMatchTracker();
 
     try {
         exitCode = await runCommandsInSeries(
             [buildRustKernelTestCommand(parsedArguments)],
             {
+                observer: focusedTestMatchTracker?.observer,
                 outputMode: 'inherit',
                 runLog,
             },
         );
+        if (
+            focusedTestMatchTracker !== undefined &&
+            parsedArguments.testFilter !== undefined
+        ) {
+            const focusedRunResult = resolveFocusedRustTestRunResult({
+                commandExitCode: exitCode,
+                matchedTestCount: focusedTestMatchTracker.matchedTestCount(),
+                runnerName: 'Rust kernel fast',
+                testFilter: parsedArguments.testFilter,
+            });
+            exitCode = focusedRunResult.exitCode;
+            if (focusedRunResult.failureMessage !== undefined) {
+                console.error(focusedRunResult.failureMessage);
+                runLog.writeCombinedOutput(
+                    `${focusedRunResult.failureMessage}\n`,
+                );
+            }
+        }
         process.exitCode = exitCode;
     } finally {
         await runLog?.finish({

@@ -6,11 +6,15 @@ import {
 import type { ProtocolHash } from '@sealed-lattice/types';
 
 import {
+    assertNonNegativeSafeInteger,
+    bytesToHex,
+    protocolHashPattern,
+} from './common-fields.js';
+import {
     setupProofMaterialRecordTransportMetadataFields,
     setupProofMaterialRecordTransportFields,
     setupProofMaterialTransportChunks,
     setupProofMaterialTransportMetadata,
-    setupProofTransportChunkSizeBytes,
     setupTransportedProofMaterialFields,
 } from './setup-proof-material-transport.js';
 
@@ -116,7 +120,6 @@ export type PrivateVssMailboxDeliveryKernel = {
         readonly isValid: boolean;
         readonly privateEnvelopeHash: ProtocolHash | null;
         readonly localVerificationRoot: ProtocolHash | null;
-        readonly verifiedPrivateVssShareProofCount?: number;
         readonly refusedObjects: readonly {
             readonly reasonCode: string;
             readonly message: string;
@@ -180,27 +183,9 @@ const privateVssEnvelopeCommitmentSetRootInput = (
     ),
 });
 
-const assertAcceptedPrivateVssProofCoverage = (
-    localVerification: {
-        readonly verifiedPrivateVssShareProofCount?: number;
-    },
-    expectedProofCount: number,
-    objectPath: string,
-): void => {
-    if (
-        localVerification.verifiedPrivateVssShareProofCount !==
-        expectedProofCount
-    ) {
-        throw new Error(
-            `${objectPath}.verifiedPrivateVssShareProofCount must match the accepted Q_share limb count.`,
-        );
-    }
-};
-
 export type PrivateVssMailboxDeliverySet = Readonly<
     JsonRecord & {
         readonly objectType: 'PrivateVssEnvelopeCommitmentSet';
-        readonly objectVersion: 1;
         readonly privateVssEnvelopeCommitmentRoot: ProtocolHash;
         readonly envelopeReferences: readonly PrivateVssEnvelopeCommitment[];
     }
@@ -209,7 +194,6 @@ export type PrivateVssMailboxDeliverySet = Readonly<
 export type PrivateVssEnvelopeCommitment = Readonly<
     JsonRecord & {
         readonly objectType: 'PrivateVssEnvelopeCommitment';
-        readonly objectVersion: 1;
         readonly privateEnvelopeHash: ProtocolHash;
         readonly encryptedEnvelopeHash: ProtocolHash;
         readonly privateEnvelopeAad: JsonRecord;
@@ -245,10 +229,8 @@ export type TransportedPrivateVssShareProofChunk = Readonly<
 export type TransportedPrivateVssShareProofMaterial = Readonly<
     JsonRecord & {
         readonly objectType: 'SetupTransportedPrivateVssShareProofMaterial';
-        readonly objectVersion: 1;
         readonly proofFamily: typeof privateVssShareProofFamily;
         readonly proofMaterialRoot: ProtocolHash;
-        readonly chunkSizeBytes: typeof setupProofTransportChunkSizeBytes;
         readonly chunkCount: number;
         readonly totalByteLength: number;
         readonly fullObjectHash: ProtocolHash;
@@ -261,7 +243,6 @@ export type TransportedPrivateVssShareProofMaterial = Readonly<
 export type TransportedPrivateVssShareProofMaterialSet = Readonly<
     JsonRecord & {
         readonly objectType: 'SetupTransportedPrivateVssShareProofMaterialSet';
-        readonly objectVersion: 1;
         readonly proofFamily: typeof privateVssShareProofFamily;
         readonly proofMaterials: readonly TransportedPrivateVssShareProofMaterial[];
     }
@@ -275,9 +256,8 @@ const embeddedPrivateVssShareProofBytesEncoding =
     'embedded-binary-proof-bytes-hex';
 const transportedSetupProofMaterialEncoding = 'binary-chunked-proof-bytes';
 const privateVssShareProofBytesHashDomain =
-    'sealed-lattice/setup/private-vss-share/succinct-proof-bytes-v1';
+    'sealed-lattice/setup/private-vss-share/succinct-proof-bytes';
 const lowercaseHexPattern = /^[0-9a-f]+$/u;
-const protocolHashPattern = /^[0-9a-f]{128}$/u;
 
 const validatePositiveSafeInteger = (
     value: number,
@@ -303,23 +283,6 @@ const assertProtocolHash = (
     if (typeof value !== 'string' || !protocolHashPattern.test(value)) {
         throw new TypeError(
             `${fieldName} must be a lowercase 512-bit protocol hash.`,
-        );
-    }
-
-    return value;
-};
-
-const assertNonNegativeSafeInteger = (
-    value: unknown,
-    fieldName: string,
-): number => {
-    if (
-        typeof value !== 'number' ||
-        !Number.isSafeInteger(value) ||
-        value < 0
-    ) {
-        throw new TypeError(
-            `${fieldName} must be a non-negative safe integer.`,
         );
     }
 
@@ -358,9 +321,6 @@ const hexToBytes = (hex: string, fieldName: string): Uint8Array => {
 
     return output;
 };
-
-const bytesToHex = (bytes: Uint8Array): string =>
-    [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('');
 
 const proofRandomnessByteLength = 64;
 
@@ -576,7 +536,6 @@ const privateEnvelopeAad = (
     envelopeSequenceNumber: number,
 ): JsonRecord => ({
     objectType: privateEnvelopeAadObjectType,
-    objectVersion: 1,
     privateEnvelopeObjectType,
     ciphertextContentType: privateEnvelopeDeliveryContentType,
     ceremonyId: input.setupContext.ceremonyId,
@@ -637,7 +596,6 @@ const transportPrivateVssShareProofMaterial = (
     const proofMaterialRoot = kernel.deriveCanonicalObjectHash({
         value: {
             objectType: 'PrivateVssShareTransportedSuccinctProofMaterial',
-            objectVersion: 1,
             proofFamily: privateVssShareProofFamily,
             proofBytesEncoding: transportedSetupProofMaterialEncoding,
             statementHash,
@@ -662,7 +620,6 @@ const transportPrivateVssShareProofMaterial = (
         proofRecord: transportedProofRecord,
         proofMaterial: {
             objectType: 'SetupTransportedPrivateVssShareProofMaterial',
-            objectVersion: 1,
             proofFamily: privateVssShareProofFamily,
             ...setupTransportedProofMaterialFields(
                 proofMaterialTransport,
@@ -807,7 +764,6 @@ const privateEnvelope = (
 
             return {
                 objectType: 'PrivateVssShareLimbOpening',
-                objectVersion: 1,
                 rnsLimbIndex,
                 rnsPrime,
                 shareValues,
@@ -819,7 +775,6 @@ const privateEnvelope = (
 
     const privateShareEnvelope = {
         objectType: privateEnvelopeObjectType,
-        objectVersion: 1,
         ceremonyId: input.setupContext.ceremonyId,
         manifestHash: input.setupContext.manifestHash,
         rosterHash: input.setupContext.rosterHash,
@@ -845,7 +800,6 @@ const privateEnvelope = (
         privateEnvelope: privateShareEnvelope,
         transportedPrivateVssShareProofMaterial: {
             objectType: 'SetupTransportedPrivateVssShareProofMaterialSet',
-            objectVersion: 1,
             proofFamily: privateVssShareProofFamily,
             proofMaterials: transportedProofMaterials,
         },
@@ -905,11 +859,6 @@ const createEnvelopeCommitment = async (
                 : `Private VSS envelope failed local verification: ${refusal.reasonCode}: ${refusal.message}`,
         );
     }
-    assertAcceptedPrivateVssProofCoverage(
-        localVerification,
-        input.qSharePrimes.length,
-        'localVerification',
-    );
     const encryptedDelivery = await encryptPrivateVssMailboxEnvelope({
         privateEnvelope: privateShareEnvelopeBuild.privateEnvelope,
         privateEnvelopeAad: associatedData,
@@ -927,7 +876,6 @@ const createEnvelopeCommitment = async (
 
     const commitmentWithoutRoot = {
         objectType: 'PrivateVssEnvelopeCommitment',
-        objectVersion: 1,
         ceremonyId: input.setupContext.ceremonyId,
         manifestHash: input.setupContext.manifestHash,
         rosterHash: input.setupContext.rosterHash,
@@ -1027,7 +975,6 @@ export const createPrivateVssMailboxDeliverySetFromReferences = (
 
     const commitmentSetWithoutRoot = {
         objectType: 'PrivateVssEnvelopeCommitmentSet',
-        objectVersion: 1,
         ceremonyId: input.setupContext.ceremonyId,
         manifestHash: input.setupContext.manifestHash,
         rosterHash: input.setupContext.rosterHash,

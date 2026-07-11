@@ -151,7 +151,6 @@ export const publicKeyShareMaterialRecordsFromContributions = (
                 );
             const materialRecordWithoutRoot = {
                 objectType: 'PublicKeyShareMaterial',
-                objectVersion: 1,
                 proofFamily: publicKeyShareProofFamily,
                 materialEncoding: publicKeyShareMaterialEncoding,
                 ...contextFields(input.setupContext),
@@ -223,7 +222,6 @@ export const createPublicKeyShareMaterialSet = (
         publicKeyShareMaterialRecordsFromContributions(input);
     const materialSetWithoutRoot = {
         objectType: 'PublicKeyShareMaterialSet',
-        objectVersion: 1,
         proofFamily: publicKeyShareProofFamily,
         materialEncoding: publicKeyShareMaterialEncoding,
         ...contextFields(input.setupContext),

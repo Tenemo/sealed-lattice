@@ -29,7 +29,6 @@ const contextFields = {
 const phaseObject = (phaseNumber: number): SetupPhaseParticipantObject =>
     ({
         objectType: 'SetupPhaseParticipantObject',
-        objectVersion: 1,
         phaseId: `phase-${String(phaseNumber)}`,
         phaseNumber,
         trusteeIdentity: 'trustee-3',
@@ -53,7 +52,6 @@ const phaseObject = (phaseNumber: number): SetupPhaseParticipantObject =>
 
 const sourceTrusteeRecord = {
     objectType: 'VssSourceTrusteeCoefficientCommitments',
-    objectVersion: 1,
     ...contextFields,
     sourceTrusteeIdentity: 'trustee-3',
     sourceTrusteeRosterPosition: 3,
@@ -64,7 +62,6 @@ const sourceTrusteeRecord = {
 
 const envelopeReference = {
     objectType: 'PrivateVssEnvelopeCommitment',
-    objectVersion: 1,
     ...contextFields,
     sourceTrusteeIdentity: 'trustee-3',
     sourceTrusteeRosterPosition: 3,
@@ -78,7 +75,6 @@ const envelopeReference = {
 
 const acceptanceRecord = {
     objectType: 'VssShareAcceptance',
-    objectVersion: 1,
     ...contextFields,
     sourceTrusteeIdentity: 'trustee-1',
     sourceTrusteeRosterPosition: 1,
@@ -92,7 +88,6 @@ const acceptanceRecord = {
 
 const complaintRecord = {
     objectType: 'VssShareComplaint',
-    objectVersion: 1,
     ...contextFields,
     sourceTrusteeIdentity: 'trustee-2',
     sourceTrusteeRosterPosition: 2,
@@ -107,7 +102,6 @@ const complaintRecord = {
 
 const localStateCommitment = {
     objectType: 'LocalTrusteeSetupStateCommitment',
-    objectVersion: 1,
     ...contextFields,
     trusteeIdentity: 'trustee-3',
     trusteeRosterPosition: 3,

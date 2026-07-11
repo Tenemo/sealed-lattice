@@ -1,6 +1,5 @@
 use super::*;
 
-#[cfg(any(feature = "target-decryption-development-commands", test))]
 pub(super) fn read_partial_decryption_share(
     share: &Value,
     setup_binding: &SetupBinding,
@@ -8,9 +7,7 @@ pub(super) fn read_partial_decryption_share(
     target_ciphertexts: &TargetCiphertextPair,
     target_share_profile: &TargetShareProfile,
 ) -> CanonicalResult<()> {
-    if string_at_path(share, &["objectType"])? != "BgvTargetDecryptionShare"
-        || unsigned_at_path(share, &["objectVersion"])? != 1
-    {
+    if string_at_path(share, &["objectType"])? != "BgvTargetDecryptionShare" {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             "target decryption accepts only BgvTargetDecryptionShare records",
@@ -79,7 +76,6 @@ pub(super) fn read_partial_decryption_share(
     Ok(())
 }
 
-#[cfg(any(feature = "target-decryption-development-commands", test))]
 pub(super) fn compare_share_record_fields(
     share: &Value,
     setup_binding: &SetupBinding,
@@ -210,7 +206,6 @@ pub(super) fn compare_share_record_fields(
     Ok(())
 }
 
-#[cfg(any(feature = "target-decryption-development-commands", test))]
 pub(super) fn share_payload(
     level: usize,
     target_id_partials: &[Vec<u64>],
@@ -220,7 +215,6 @@ pub(super) fn share_payload(
 ) -> CanonicalResult<Value> {
     Ok(json!({
         "objectType": "BgvTargetDecryptionSharePayload",
-        "objectVersion": 1,
         "encoding": TARGET_SHARE_PAYLOAD_ENCODING,
         "level": level,
         "smudgingInputReport": smudging_input_report,
@@ -230,7 +224,6 @@ pub(super) fn share_payload(
     }))
 }
 
-#[cfg(any(feature = "target-decryption-development-commands", test))]
 pub(super) fn partial_limb_records(partials: &[Vec<u64>]) -> CanonicalResult<Vec<Value>> {
     partials
         .iter()
@@ -262,7 +255,6 @@ pub(super) fn read_partial_limb_set(
     level: usize,
 ) -> CanonicalResult<Vec<Vec<u64>>> {
     if string_at_path(payload, &["objectType"])? != "BgvTargetDecryptionSharePayload"
-        || unsigned_at_path(payload, &["objectVersion"])? != 1
         || string_at_path(payload, &["encoding"])? != TARGET_SHARE_PAYLOAD_ENCODING
         || usize_at_path(payload, &["level"])? != level
     {
@@ -318,7 +310,6 @@ pub(super) fn read_partial_limb_set(
         .collect()
 }
 
-#[cfg(any(feature = "target-decryption-development-commands", test))]
 fn validate_target_decryption_smudging_input_report(
     report: &Value,
     setup_binding: &SetupBinding,
@@ -327,9 +318,7 @@ fn validate_target_decryption_smudging_input_report(
     target_share_profile: &TargetShareProfile,
     participant: &ParticipantBinding,
 ) -> CanonicalResult<()> {
-    if string_at_path(report, &["objectType"])? != "TargetDecryptionSmudgingInputReport"
-        || unsigned_at_path(report, &["objectVersion"])? != 1
-    {
+    if string_at_path(report, &["objectType"])? != "TargetDecryptionSmudgingInputReport" {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             "target decryption smudging input report must be TargetDecryptionSmudgingInputReport version 1",
@@ -445,7 +434,6 @@ fn validate_target_decryption_smudging_input_report(
     )
 }
 
-#[cfg(any(feature = "target-decryption-development-commands", test))]
 fn validate_target_decryption_smudging_role_report(
     role_report: &Value,
     expected_role: &str,
@@ -494,7 +482,6 @@ fn validate_target_decryption_smudging_role_report(
     Ok(())
 }
 
-#[cfg(any(feature = "target-decryption-development-commands", test))]
 pub(super) fn share_record_hash_input(
     setup_binding: &SetupBinding,
     target_accepted: &TargetAcceptedBinding,
@@ -505,7 +492,6 @@ pub(super) fn share_record_hash_input(
 ) -> Value {
     json!({
         "objectType": "BgvTargetDecryptionShare",
-        "objectVersion": 1,
         "setupPackageHash": setup_binding.setup_package_hash,
         "ceremonyId": setup_binding.ceremony_id,
         "electionManifestHash": setup_binding.election_manifest_hash,

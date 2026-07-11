@@ -3,17 +3,16 @@
 // by the domain problem each part solves: shared vocabulary and types, stateless
 // encoding and sampling primitives, per-source-trustee opening-state generation,
 // BDLOP commitment value shaping, and the embedded commitment bundle constructor.
-// The commitments built here are the data basis the same-secret proof family
-// opens; the compact VSS commitment sets replace them as the transported public
-// setup material.
+// The commitments built here are the data basis the same-secret bridge opens;
+// the VSS commitment sets replace them as the transported public setup
+// material.
 export {
     setupCommitmentRandomnessWidth,
     acceptedBgvFullRingDegree,
     acceptedBgvSetupQSharePrimes,
-    acceptedBgvSetupQShare,
     setupTransportSchemeId,
     setupTransportChunkSizeBytes,
-    vssCoefficientCommitmentMaterialBinaryFormat,
+    vssCoefficientCommitmentMaterialTransportEncoding,
     type SetupCommitmentLimbValue,
     type SetupCommitmentValue,
     type VssCoefficientOpeningInput,
@@ -27,12 +26,8 @@ export {
     type VssCoefficientCommitmentMaterialRecord,
     type VssCoefficientCommitmentSet,
     type VssCoefficientCommitmentMaterialSet,
-    type SetupTransportChunk,
-    type SetupTransportedVssCoefficientCommitmentMaterial,
-    type SetupTransportedVssCoefficientCommitmentMaterialReference,
-    type SetupTransportedVssCoefficientCommitmentMaterialLike,
+    type VssCoefficientCommitmentMaterialBinaryReference,
     type SetupPackageVssCoefficientCommitmentMaterialSet,
-    type VerifiedVssCoefficientCommitmentMaterial,
     type VssSourceTrusteeOpeningMaterial,
     type VssSourceTrusteeOpeningMaterialReference,
     type VssSourceTrusteeOpeningMaterialSource,

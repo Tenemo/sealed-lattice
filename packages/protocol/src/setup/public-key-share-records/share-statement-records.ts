@@ -1,7 +1,5 @@
 import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 
-import { type SameSecretConsistencyStatementRecord } from '../same-secret-consistency-records.js';
-
 import {
     publicKeyShareProofFamily,
     type PublicKeyShareContributionInput,
@@ -22,60 +20,6 @@ import {
     sortedByRosterPosition,
     validateCommonInput,
 } from './encoding.js';
-
-export const statementRecordsByRosterPosition = (
-    input: Pick<
-        PublicKeyShareSetInput,
-        'participantCount' | 'sameSecretConsistency' | 'setupContext'
-    >,
-): ReadonlyMap<number, SameSecretConsistencyStatementRecord> => {
-    assertContextMatches(
-        input.setupContext,
-        input.sameSecretConsistency,
-        'sameSecretConsistency',
-    );
-    assertProtocolHash(
-        input.sameSecretConsistency.sameSecretConsistencyRoot,
-        'sameSecretConsistency.sameSecretConsistencyRoot',
-    );
-    const sortedStatements = sortedByRosterPosition(
-        input.sameSecretConsistency.statementRecords,
-    );
-    if (sortedStatements.length !== input.participantCount) {
-        throw new Error(
-            'sameSecretConsistency.statementRecords must contain every participant.',
-        );
-    }
-    const statementsByRosterPosition = new Map<
-        number,
-        SameSecretConsistencyStatementRecord
-    >();
-    sortedStatements.forEach((statementRecord, expectedRosterPosition) => {
-        assertNonEmptyString(
-            statementRecord.trusteeIdentity,
-            'sameSecretStatement.trusteeIdentity',
-        );
-        if (statementRecord.trusteeRosterPosition !== expectedRosterPosition) {
-            throw new Error(
-                'sameSecretConsistency.statementRecords roster positions must be contiguous from zero.',
-            );
-        }
-        assertProtocolHash(
-            statementRecord.sameSecretStatementRoot,
-            'sameSecretStatement.sameSecretStatementRoot',
-        );
-        assertProtocolHash(
-            statementRecord.trusteeSecretCommitmentRoot,
-            'sameSecretStatement.trusteeSecretCommitmentRoot',
-        );
-        statementsByRosterPosition.set(
-            statementRecord.trusteeRosterPosition,
-            statementRecord,
-        );
-    });
-
-    return statementsByRosterPosition;
-};
 
 const validateShareContribution = (
     contribution: PublicKeyShareContributionInput,
@@ -127,7 +71,6 @@ export const createPublicKeyShareSet = (
     input: PublicKeyShareSetInput,
 ): PublicKeyShareSet => {
     validateCommonInput(input);
-    const statementsByRosterPosition = statementRecordsByRosterPosition(input);
     const shareContributions = sortedByRosterPosition(input.shareContributions);
     if (shareContributions.length !== input.participantCount) {
         throw new Error(
@@ -141,35 +84,14 @@ export const createPublicKeyShareSet = (
                 expectedRosterPosition,
                 input.qSharePrimes,
             );
-            const sameSecretStatement = statementsByRosterPosition.get(
-                contribution.trusteeRosterPosition,
-            );
-            if (sameSecretStatement === undefined) {
-                throw new Error(
-                    'shareContributions must reference an accepted same-secret statement.',
-                );
-            }
-            if (
-                sameSecretStatement.trusteeIdentity !==
-                contribution.trusteeIdentity
-            ) {
-                throw new Error(
-                    'shareContributions trusteeIdentity must match same-secret statements.',
-                );
-            }
             const shareRecordWithoutRoot = {
                 objectType: 'PublicKeyShare',
-                objectVersion: 1,
                 ...contextFields(input.setupContext),
                 trusteeIdentity: contribution.trusteeIdentity,
                 trusteeRosterPosition: contribution.trusteeRosterPosition,
                 publicMatrixSeedHash: input.publicMatrixSeedHash,
                 publicKeyCrpRoot: input.publicKeyCrpRoot,
                 publicAPolynomialRoot: input.publicAPolynomialRoot,
-                sameSecretStatementRoot:
-                    sameSecretStatement.sameSecretStatementRoot,
-                trusteeSecretCommitmentRoot:
-                    sameSecretStatement.trusteeSecretCommitmentRoot,
                 shareComponent: 'component-zero-b_i',
                 rnsLimbCount: input.qSharePrimes.length,
                 shareCoefficientVectorHash512ByLimb:
@@ -189,15 +111,12 @@ export const createPublicKeyShareSet = (
     );
     const shareSetWithoutRoot = {
         objectType: 'PublicKeyShareSet',
-        objectVersion: 1,
         ...contextFields(input.setupContext),
         participantCount: input.participantCount,
         rnsLimbCount: input.qSharePrimes.length,
         publicMatrixSeedHash: input.publicMatrixSeedHash,
         publicKeyCrpRoot: input.publicKeyCrpRoot,
         publicAPolynomialRoot: input.publicAPolynomialRoot,
-        sameSecretConsistencyRoot:
-            input.sameSecretConsistency.sameSecretConsistencyRoot,
         shareRecords,
     } as const satisfies Omit<PublicKeyShareSet, 'publicKeyShareSetRoot'>;
 
@@ -221,15 +140,12 @@ export const createPublicKeyShareProofSet = (
             input.publicMatrixSeedHash ||
         input.publicKeyShares.publicKeyCrpRoot !== input.publicKeyCrpRoot ||
         input.publicKeyShares.publicAPolynomialRoot !==
-            input.publicAPolynomialRoot ||
-        input.publicKeyShares.sameSecretConsistencyRoot !==
-            input.sameSecretConsistency.sameSecretConsistencyRoot
+            input.publicAPolynomialRoot
     ) {
         throw new Error(
-            'publicKeyShares must bind the same common randomness and same-secret roots.',
+            'publicKeyShares must bind the same common randomness.',
         );
     }
-    const statementsByRosterPosition = statementRecordsByRosterPosition(input);
     const shareRecords = sortedByRosterPosition(
         input.publicKeyShares.shareRecords,
     );
@@ -245,29 +161,8 @@ export const createPublicKeyShareProofSet = (
                     'publicKeyShares.shareRecords roster positions must be contiguous from zero.',
                 );
             }
-            const sameSecretStatement = statementsByRosterPosition.get(
-                shareRecord.trusteeRosterPosition,
-            );
-            if (sameSecretStatement === undefined) {
-                throw new Error(
-                    'publicKeyShares.shareRecords must reference an accepted same-secret statement.',
-                );
-            }
-            if (
-                shareRecord.trusteeIdentity !==
-                    sameSecretStatement.trusteeIdentity ||
-                shareRecord.sameSecretStatementRoot !==
-                    sameSecretStatement.sameSecretStatementRoot ||
-                shareRecord.trusteeSecretCommitmentRoot !==
-                    sameSecretStatement.trusteeSecretCommitmentRoot
-            ) {
-                throw new Error(
-                    'publicKeyShares.shareRecords must bind the accepted same-secret statement.',
-                );
-            }
             const proofRecordWithoutRoot = {
                 objectType: 'PublicKeyShareProof',
-                objectVersion: 1,
                 proofFamily: publicKeyShareProofFamily,
                 ...contextFields(input.setupContext),
                 trusteeIdentity: shareRecord.trusteeIdentity,
@@ -276,10 +171,6 @@ export const createPublicKeyShareProofSet = (
                 publicKeyCrpRoot: input.publicKeyCrpRoot,
                 publicAPolynomialRoot: input.publicAPolynomialRoot,
                 publicKeyShareRoot: shareRecord.publicKeyShareRoot,
-                sameSecretStatementRoot:
-                    sameSecretStatement.sameSecretStatementRoot,
-                trusteeSecretCommitmentRoot:
-                    sameSecretStatement.trusteeSecretCommitmentRoot,
                 rnsLimbCount: input.qSharePrimes.length,
             } as const satisfies Omit<
                 PublicKeyShareProofRecord,
@@ -296,7 +187,6 @@ export const createPublicKeyShareProofSet = (
     );
     const proofSetWithoutRoot = {
         objectType: 'PublicKeyShareProofSet',
-        objectVersion: 1,
         proofFamily: publicKeyShareProofFamily,
         ...contextFields(input.setupContext),
         participantCount: input.participantCount,
@@ -304,8 +194,6 @@ export const createPublicKeyShareProofSet = (
         publicMatrixSeedHash: input.publicMatrixSeedHash,
         publicKeyCrpRoot: input.publicKeyCrpRoot,
         publicAPolynomialRoot: input.publicAPolynomialRoot,
-        sameSecretConsistencyRoot:
-            input.sameSecretConsistency.sameSecretConsistencyRoot,
         publicKeyShareSetRoot: input.publicKeyShares.publicKeyShareSetRoot,
         proofRecords,
     } as const satisfies Omit<

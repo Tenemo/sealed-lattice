@@ -24,7 +24,6 @@ pub(crate) fn bgv_operation_rejection(
     json!({
         "isValid": false,
         "operation": operation,
-        "acceptedHashes": [],
         "refusedObjects": [refused_object],
         "unresolvedReason": "BgvOperationRejected",
     })

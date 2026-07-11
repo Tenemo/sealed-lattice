@@ -3,10 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde_json::{Value, json};
 
 use crate::{
-    bgv::{
-        parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE},
-        setup_helpers::decimal_i128_value,
-    },
+    bgv::{parameters::DATA_PRIMES, setup_helpers::decimal_i128_value},
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
     hashing::derive_canonical_object_hash,
 };
@@ -159,19 +156,12 @@ fn verify_private_vss_share_envelope_inner(
         .first()
         .map(|verification| verification.ring_degree)
         .unwrap_or(0);
-    let ring_degree_status = if ring_degree == POLYNOMIAL_DEGREE {
-        "full-ring"
-    } else {
-        "development-reduced-ring"
-    };
-
     let local_verification_record = local_verification_record(
         setup_context,
         public_matrix_seed_hash,
         &source_trustee_binding,
         &envelope_binding,
         ring_degree,
-        ring_degree_status,
         &limb_verifications,
     )?;
     let local_verification_root = derive_canonical_object_hash(&local_verification_record)?;
@@ -220,12 +210,6 @@ fn verify_private_vss_share_envelope_inner(
         Vec::new(),
     );
     response["ringDegree"] = json!(ring_degree);
-    response["ringDegreeStatus"] = json!(ring_degree_status);
-    response["verifiedRnsLimbCount"] = json!(DATA_PRIMES.len());
-    let roster = super::accepted_setup::accepted_roster_from_setup_context(setup_context);
-    response["verifiedShamirCoefficientCommitmentCount"] =
-        json!(DATA_PRIMES.len() * roster.decryption_threshold as usize);
-    response["verifiedPrivateVssShareProofCount"] = json!(DATA_PRIMES.len());
 
     Ok(Ok(response))
 }

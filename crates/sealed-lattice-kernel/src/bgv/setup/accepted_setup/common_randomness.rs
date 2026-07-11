@@ -1,6 +1,5 @@
 use super::*;
 
-use crate::hashing::canonical_json;
 use crate::hashing::derive_canonical_object_hash;
 
 pub(super) fn verify_common_randomness(setup_package: &Value) -> CanonicalResult<Option<Value>> {
@@ -25,17 +24,6 @@ pub(super) fn verify_common_randomness(setup_package: &Value) -> CanonicalResult
             "commonRandomnessObjectTypeMismatch",
             "commonRandomness.objectType must be SetupCommonRandomness",
             "setupPackage.commonRandomness.objectType",
-        )?));
-    }
-    if common_randomness
-        .get("objectVersion")
-        .and_then(Value::as_u64)
-        != Some(1)
-    {
-        return Ok(Some(common_randomness_refusal(
-            "commonRandomnessObjectVersionMismatch",
-            "commonRandomness.objectVersion must be 1",
-            "setupPackage.commonRandomness.objectVersion",
         )?));
     }
 
@@ -255,7 +243,6 @@ pub(in crate::bgv::setup) fn derive_collective_bgv_setup_public_derivations(
         derive_setup_public_matrices(public_matrix_seed_hash, decryption_threshold)?;
     let mut derivations = json!({
         "objectType": "SetupPublicDerivations",
-        "objectVersion": 1,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "bgvPublicA": bgv_public_a,
         "publicMatrices": public_matrices,
@@ -281,7 +268,7 @@ pub(super) fn derive_bgv_public_a_polynomial(
             json!({
                 "modulus": modulus,
                 "coefficientDerivationHash": hash512_hex(
-                    "sealed-lattice-bgv-rns/accepted-public-a-derivation-v1",
+                    "sealed-lattice-bgv-rns/accepted-public-a-derivation",
                     &[
                         public_matrix_seed_hash.as_bytes(),
                         "accepted-bgv-public-a".as_bytes(),
@@ -293,7 +280,6 @@ pub(super) fn derive_bgv_public_a_polynomial(
         .collect::<Vec<_>>();
     let mut public_a = json!({
         "objectType": "BgvPublicAPolynomial",
-        "objectVersion": 1,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "derivationLabel": "accepted-bgv-public-a",
         "basisId": BgvBasisKind::Data.basis_id(),
@@ -320,7 +306,6 @@ fn derive_setup_public_matrices(
         derive_setup_commitment_matrix(public_matrix_seed_hash, decryption_threshold)?;
     let mut public_matrices = json!({
         "objectType": "SetupPublicMatrixMaterial",
-        "objectVersion": 1,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "commitmentMatrix": commitment_matrix,
     });
@@ -338,7 +323,6 @@ fn derive_setup_commitment_matrix(
     let sampled_entries = commitment_matrix_sampled_entries(public_matrix_seed_hash)?;
     let mut matrix = json!({
         "objectType": "SetupPublicMatrix",
-        "objectVersion": 1,
         "matrixKind": "commitment",
         "commitmentModulusLimbs": setup_commitment_modulus_limb_values(),
         "commitmentModuleRank": SETUP_COMMITMENT_MODULE_RANK,
@@ -380,7 +364,6 @@ fn setup_public_derivation_root(
 ) -> CanonicalResult<String> {
     derive_canonical_object_hash(&json!({
         "objectType": "SetupPublicDerivation",
-        "objectVersion": 1,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "componentName": component_name,
     }))
@@ -450,7 +433,6 @@ fn verify_common_randomness_commit_record(
             object_type: "CommonRandomnessCommit",
             context_purpose: "common-randomness-commit-signature-context",
             object_root: commit_hash,
-            payload: &commit_payload,
             object_path: "commonRandomness.commitRecords",
             trustee_registrations,
         },
@@ -505,7 +487,6 @@ fn verify_common_randomness_reveal_record(
             object_type: "CommonRandomnessReveal",
             context_purpose: "common-randomness-reveal-signature-context",
             object_root: reveal_hash,
-            payload: &reveal_payload,
             object_path: "commonRandomness.revealRecords",
             trustee_registrations,
         },
@@ -537,12 +518,6 @@ fn verify_common_randomness_participant_record_shape(
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             format!("{object_path} entries must use {object_type}"),
-        ));
-    }
-    if record.get("objectVersion").and_then(Value::as_u64) != Some(1) {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            format!("{object_type}.objectVersion must be 1"),
         ));
     }
     for field_name in [
@@ -628,7 +603,6 @@ fn verify_common_randomness_participant_record_shape(
 fn common_randomness_commit_payload_value(record: &Value) -> CanonicalResult<Value> {
     Ok(json!({
         "objectType": "CommonRandomnessCommit",
-        "objectVersion": 1,
         "ceremonyId": value_string(record, "ceremonyId")?,
         "manifestHash": value_string(record, "manifestHash")?,
         "rosterHash": value_string(record, "rosterHash")?,
@@ -646,7 +620,6 @@ fn common_randomness_commit_payload_value(record: &Value) -> CanonicalResult<Val
 fn common_randomness_reveal_payload_value(record: &Value) -> CanonicalResult<Value> {
     Ok(json!({
         "objectType": "CommonRandomnessReveal",
-        "objectVersion": 1,
         "ceremonyId": value_string(record, "ceremonyId")?,
         "manifestHash": value_string(record, "manifestHash")?,
         "rosterHash": value_string(record, "rosterHash")?,
@@ -665,7 +638,6 @@ struct CommonRandomnessSignatureExpectation<'a> {
     object_type: &'static str,
     context_purpose: &'static str,
     object_root: &'a str,
-    payload: &'a Value,
     object_path: &'static str,
     trustee_registrations:
         &'a BTreeMap<u64, super::phase_transcript::SetupIntentTrusteeRegistration>,
@@ -686,16 +658,6 @@ fn verify_common_randomness_signature(
                 CanonicalErrorCode::InvalidFixture,
                 format!(
                     "{}.rosterPosition is missing from setupIntent registrations",
-                    expectation.object_type,
-                ),
-            )
-        })?;
-    let payload_byte_length =
-        u64::try_from(canonical_json(expectation.payload)?.len()).map_err(|_| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                format!(
-                    "{} payload byte length does not fit u64",
                     expectation.object_type,
                 ),
             )
@@ -738,7 +700,6 @@ fn verify_common_randomness_signature(
         signature_envelope,
         &ProtocolSignatureExpectation {
             object_type: expectation.object_type,
-            object_version: 1,
             signer_role: "Trustee",
             signer_identity: trustee_identity,
             ceremony_id,
@@ -748,7 +709,6 @@ fn verify_common_randomness_signature(
             chunk_merkle_root: None,
             board_head_hash: None,
             context_hash: &context_hash,
-            byte_length: payload_byte_length,
             recovery_epoch: value_u64(record, "recoveryEpoch")?,
             device_epoch: value_u64(record, "deviceEpoch")?,
         },

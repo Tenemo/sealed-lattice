@@ -6,7 +6,6 @@ pub(in crate::bgv::setup) fn public_evaluation_key_material_manifest(
 ) -> CanonicalResult<Value> {
     Ok(json!({
         "objectType": "PublicEvaluationKeyMaterialManifest",
-        "objectVersion": 1,
         "materialEncoding": PUBLIC_EVALUATION_KEY_MATERIAL_ENCODING,
         "materialTransportEncoding": PUBLIC_EVALUATION_KEY_TRANSPORT_MATERIAL_ENCODING,
         "ceremonyId": value_string(evaluation_keys, "ceremonyId")?,
@@ -17,10 +16,6 @@ pub(in crate::bgv::setup) fn public_evaluation_key_material_manifest(
         "participantCount": value_u64(evaluation_keys, "participantCount")?,
         "rnsLimbCount": value_u64(evaluation_keys, "rnsLimbCount")?,
         "evaluatorKeyScheduleRoot": value_string(evaluation_keys, "evaluatorKeyScheduleRoot")?,
-        "sameSecretProofFamilyBindingRoot": value_string(
-            evaluation_keys,
-            "sameSecretProofFamilyBindingRoot",
-        )?,
         "publicKeyShareSuccinctProofSetRoot": value_string(
             evaluation_keys,
             "publicKeyShareSuccinctProofSetRoot",

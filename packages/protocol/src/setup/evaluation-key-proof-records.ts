@@ -1,22 +1,20 @@
-// Barrel for the evaluation-key proof record builders. The implementation lives
-// in the cohesive sub-modules under ./evaluation-key-proof-records/, grouped by
-// the domain problem each part solves: shared vocabulary and types, stateless
-// encoding and component-vector hashing primitives, the relinearization-round
-// and Galois-batch share-record families, the per-trustee succinct evaluation-
-// key proofs and their binary proof transport, binary chunked transport of the
-// embedded key-switch component vectors, and public evaluation-key assembly
-// with its binary material transport.
 export {
     evaluationKeyShareComponentMaterialEncoding,
     trusteeEvaluationKeyProofFamily,
     type BinaryChunkedEvaluationKeyShareMaterialTransport,
     type BinaryChunkedPublicEvaluationKeyMaterialTransport,
+    type EvaluationKeyAggregateBindingKeyGroup,
+    type EvaluationKeyAggregateBindingSet,
+    type EvaluationKeyAggregateBindingTrusteeMaterialRoot,
     type EvaluationKeyProofCommonInput,
+    type EvaluationKeyShareComponentMaterialChunk,
+    type EvaluationKeyShareComponentMaterialChunkStream,
     type EvaluationKeyShareEmbeddedKeySwitchComponentMaterial,
     type EvaluationKeyShareKeySwitchComponentMaterial,
     type EvaluationKeyShareMaterial,
     type EvaluationKeyShareMaterialTransportInput,
     type EvaluationKeyShareTransportedKeySwitchComponentMaterial,
+    type EvaluationKeyTrusteeReference,
     type GaloisKeyContributingShareRoot,
     type GaloisKeyRootReference,
     type GaloisKeyShareBatch,
@@ -38,7 +36,8 @@ export {
     type RelinearizationKeyShareRoundsInput,
     type RelinearizationRoundOneContribution,
     type RelinearizationRoundTwoContribution,
-    type SameSecretProofReference,
+    type TransportedEvaluationKeyAggregateBindingOpening,
+    type TransportedEvaluationKeyAggregateBindingOpeningSet,
     type TransportedEvaluationKeyShareComponentMaterialSet,
     type TransportedEvaluationKeyShareProofMaterialSet,
     type TransportedPublicEvaluationKeyMaterial,

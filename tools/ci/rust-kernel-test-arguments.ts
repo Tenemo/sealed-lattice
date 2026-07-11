@@ -1,8 +1,7 @@
-import os from 'node:os';
+export const acceptedSetupTestModulePattern =
+    'bgv::setup::tests::accepted_setup';
 
-export const heavyAcceptedSetupTestPattern = 'heavy_accepted_setup';
-export const heavyAcceptedSetupFinalPackageTestPattern =
-    'heavy_accepted_setup_final_package';
+export const heavyRustKernelTestNamePrefix = 'heavy_rust_kernel_';
 
 export const normalizeRustTestFilter = (filter: string): string => {
     const normalizedSeparators = filter.replace(/\\/gu, '/');
@@ -15,41 +14,8 @@ export const normalizeRustTestFilter = (filter: string): string => {
     return fileName;
 };
 
-// The non-ignored accepted-setup tests in this lane share a large transient
-// proof-generation working set (the memoized compact setup fixture is tens of
-// gibibytes resident while it is built and verified). libtest concurrency here
-// must therefore be memory-bounded the same way the dedicated accepted-setup
-// lane bounds it, or an oversubscribed default-parallelism run exhausts RAM on a
-// high-core machine and corrupts large proof buffers rather than failing
-// cleanly. Size the thread count from currently available memory using the same
-// per-test budget the accepted-setup runner uses, capped by the core count, so a
-// constrained runner stays serial and a workstation runs a few tests at once.
-const approximateGigabytesPerAcceptedSetupFixtureTest = 15;
-const fastLaneMemoryBudgetFraction = 0.7;
-
-export const memoryBoundedFastTestThreadCount = (): number => {
-    const gigabyte = 1024 ** 3;
-    const availableGigabytes = os.freemem() / gigabyte;
-    const logicalProcessorCount = os.cpus().length;
-
-    return Math.max(
-        1,
-        Math.min(
-            logicalProcessorCount,
-            Math.floor(
-                (availableGigabytes * fastLaneMemoryBudgetFraction) /
-                    approximateGigabytesPerAcceptedSetupFixtureTest,
-            ),
-        ),
-    );
-};
-
-// The optional `testThreadCount` keeps this builder a pure, deterministic
-// function of its inputs: callers that need the memory bound pass
-// `memoryBoundedFastTestThreadCount()`, and tests pass a fixed count.
 export const cargoTestArgumentsForRustKernelFast = (
     testFilter?: string,
-    testThreadCount?: number,
 ): readonly string[] => [
     'test',
     '-p',
@@ -57,9 +23,33 @@ export const cargoTestArgumentsForRustKernelFast = (
     ...(testFilter === undefined ? [] : [testFilter]),
     '--',
     '--skip',
-    heavyAcceptedSetupTestPattern,
-    ...(testThreadCount === undefined
-        ? []
-        : ['--test-threads', String(testThreadCount)]),
+    acceptedSetupTestModulePattern,
+    // Kernel proof and evaluator tests already parallelize their polynomial
+    // work through Rayon. Letting libtest start one such test per logical
+    // processor creates nested CPU and memory oversubscription: individually
+    // short setup tests remain active for more than a minute and the fast lane
+    // stretches past sixteen minutes. Serial libtest scheduling keeps every
+    // fast test deterministic while Rayon still uses the machine inside each
+    // test. These protections also apply to focused runs so an accepted-setup
+    // test-name filter cannot bypass the guarded accepted-setup runner.
+    '--test-threads',
+    '1',
+    '--show-output',
+];
+
+export const cargoTestArgumentsForRustKernelHeavy = (
+    testFilter = heavyRustKernelTestNamePrefix,
+): readonly string[] => [
+    'test',
+    '-p',
+    'sealed-lattice-kernel',
+    testFilter,
+    '--',
+    '--ignored',
+    // These proof and evaluator tests use Rayon internally. Serial libtest
+    // scheduling prevents nested CPU and memory oversubscription while keeping
+    // the implementation's own polynomial parallelism enabled.
+    '--test-threads',
+    '1',
     '--show-output',
 ];

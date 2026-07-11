@@ -1,12 +1,15 @@
 import {
-    setupTransportChunkCount,
     setupTransportChunkSizeBytes,
-    setupTransportTotalByteLength,
     type JsonRecord,
 } from '../setup-fixture-primitives.js';
 
 import { publicPrivateVssEnvelopeCommitmentSet } from './common-randomness.js';
 
+import {
+    binaryVssCoefficientCommitmentMaterialByteLength,
+    vssCoefficientCommitmentMaterialTransportEncoding,
+    type VssCoefficientCommitmentMaterialSet,
+} from '#packages/protocol/src/setup/vss-coefficient-commitments';
 import type {
     BgvCollectiveSetupParametersDescription,
     TranscriptCoreKernel,
@@ -36,67 +39,74 @@ export function rebindCollectiveSetupPackageHash(
 export function acceptedSetupTransportCertificate(
     kernel: TranscriptCoreKernel,
     parameters: BgvCollectiveSetupParametersDescription,
-    vssCoefficientCommitmentMaterial: JsonRecord,
+    vssCoefficientCommitmentMaterial: VssCoefficientCommitmentMaterialSet,
 ): JsonRecord {
-    const vssObjectFullObjectHash = kernel.deriveCanonicalObjectHash({
+    const totalByteLength = binaryVssCoefficientCommitmentMaterialByteLength({
+        participantCount: vssCoefficientCommitmentMaterial.participantCount,
+        thresholdDegree: vssCoefficientCommitmentMaterial.thresholdDegree,
+        rnsLimbCount: vssCoefficientCommitmentMaterial.rnsLimbCount,
+        ringDegree: vssCoefficientCommitmentMaterial.ringDegree,
+    });
+    const chunkCount = Math.ceil(
+        totalByteLength / setupTransportChunkSizeBytes,
+    );
+    const fullObjectHash = kernel.deriveCanonicalObjectHash({
         value: {
             objectType: 'SetupTransportChunkManifestRoot',
             fixture: 'setup-transport-full-object-hash',
-            totalByteLength: setupTransportTotalByteLength,
+            totalByteLength,
         },
     });
-    const chunkHashes = Array.from(
-        { length: setupTransportChunkCount },
-        (_unused, chunkIndex) =>
-            kernel.deriveCanonicalObjectHash({
-                value: {
-                    objectType: 'SetupTransportChunkManifestRoot',
-                    fixture: 'setup-transport-chunk-hash',
-                    chunkIndex,
-                },
-            }),
+    const chunkHashes = Array.from({ length: chunkCount }, (_, chunkIndex) =>
+        kernel.deriveCanonicalObjectHash({
+            value: {
+                objectType: 'SetupTransportChunkManifestRoot',
+                fixture: 'setup-transport-chunk-hash',
+                chunkIndex,
+            },
+        }),
     );
-    const vssObjectChunkRoot = kernel.deriveCanonicalObjectHash({
+    const chunkRoot = kernel.deriveCanonicalObjectHash({
         value: {
-            objectType: 'SetupTransportChunkManifestRoot',
-            fixture: 'setup-transport-vss-object-chunk-root',
-            totalByteLength: setupTransportTotalByteLength,
+            objectType: 'SetupTransportChunkManifest',
+            chunkCount,
+            totalByteLength,
+            chunkHashes,
+            fullObjectHash,
         },
     });
-    const transportedVssObject = {
-        objectType: 'SetupTransportedObject',
-        objectVersion: 1,
-        objectName: 'vssCoefficientCommitmentMaterial',
-        objectRole: 'public-vss-coefficient-commitment-material',
-        objectRoot: String(
-            vssCoefficientCommitmentMaterial.vssCoefficientCommitmentMaterialRoot,
-        ),
-        byteLength: setupTransportTotalByteLength,
-        chunkStartIndex: 0,
-        chunkCount: setupTransportChunkCount,
-        chunkRoot: vssObjectChunkRoot,
-        chunkHashes,
-        fullObjectHash: vssObjectFullObjectHash,
-        encoding: 'binary',
-        loadingPolicy: 'stream-verified-before-object-use',
-    };
     const certificate = {
         objectType: 'SetupTransportCertificate',
-        objectVersion: 1,
-        transportSchemeId: 'sealed-lattice-setup-binary-chunked-transport-v1',
+        transportSchemeId: 'sealed-lattice-setup-binary-chunked-transport',
         setupParametersHash: parameters.setupParametersHash,
         largeObjectEncoding: 'binary',
         chunking: 'required',
         chunkSizeBytes: setupTransportChunkSizeBytes,
-        chunkCount: setupTransportChunkCount,
-        totalByteLength: setupTransportTotalByteLength,
+        chunkCount,
+        totalByteLength,
         storageQuotaBytes: 2_147_483_648,
         largestSingleBufferBytes: 1_572_864,
         copyCountLimit: 2,
         streamVerificationOrder: 'ascending-chunk-index',
         resumePolicy: 'chunk-index-checkpointed-by-hash',
         lazyLoadingPolicy: 'root-addressed-large-object-loading',
-        transportedObjects: [transportedVssObject],
+        transportedObjects: [
+            {
+                objectType: 'SetupTransportedObject',
+                objectName: 'vssCoefficientCommitmentMaterial',
+                objectRole: 'public-vss-coefficient-commitment-material',
+                objectRoot:
+                    vssCoefficientCommitmentMaterial.vssCoefficientCommitmentMaterialRoot,
+                byteLength: totalByteLength,
+                chunkStartIndex: 0,
+                chunkCount,
+                chunkRoot,
+                chunkHashes,
+                fullObjectHash,
+                encoding: 'binary',
+                loadingPolicy: 'stream-verified-before-object-use',
+            },
+        ],
     };
 
     return {
@@ -107,35 +117,55 @@ export function acceptedSetupTransportCertificate(
     };
 }
 
-// The compact commitment sets are embedded and proof-verified in-package, so the
-// transport certificate carries no streamed objects on the compact path.
-export function acceptedCompactSetupTransportCertificate(
-    kernel: TranscriptCoreKernel,
-    parameters: BgvCollectiveSetupParametersDescription,
+export function acceptedSetupVssCoefficientCommitmentMaterialReference(
+    vssCoefficientCommitmentMaterial: VssCoefficientCommitmentMaterialSet,
+    setupTransportCertificate: JsonRecord,
 ): JsonRecord {
-    const certificate = {
-        objectType: 'SetupTransportCertificate',
-        objectVersion: 1,
-        transportSchemeId: 'sealed-lattice-setup-binary-chunked-transport-v1',
-        setupParametersHash: parameters.setupParametersHash,
-        largeObjectEncoding: 'binary',
-        chunking: 'required',
-        chunkSizeBytes: setupTransportChunkSizeBytes,
-        chunkCount: 0,
-        totalByteLength: 0,
-        storageQuotaBytes: 2_147_483_648,
-        largestSingleBufferBytes: 1_572_864,
-        copyCountLimit: 2,
-        streamVerificationOrder: 'ascending-chunk-index',
-        resumePolicy: 'chunk-index-checkpointed-by-hash',
-        lazyLoadingPolicy: 'root-addressed-large-object-loading',
-        transportedObjects: [],
-    };
+    const transportedObjects = setupTransportCertificate.transportedObjects;
+    if (!Array.isArray(transportedObjects)) {
+        throw new Error(
+            'Accepted setup transport certificate must contain transported objects.',
+        );
+    }
+    const transportedObject = transportedObjects.find(
+        (candidate) =>
+            (candidate as JsonRecord).objectName ===
+            'vssCoefficientCommitmentMaterial',
+    ) as JsonRecord | undefined;
+    if (
+        transportedObject?.objectRoot !==
+        vssCoefficientCommitmentMaterial.vssCoefficientCommitmentMaterialRoot
+    ) {
+        throw new Error(
+            'Accepted setup transport certificate must bind the VSS coefficient commitment material root.',
+        );
+    }
 
     return {
-        ...certificate,
-        setupTransportCertificateHash: kernel.deriveCanonicalObjectHash({
-            value: certificate,
-        }),
+        objectType: 'VssCoefficientCommitmentMaterialSet',
+        ceremonyId: vssCoefficientCommitmentMaterial.ceremonyId,
+        manifestHash: vssCoefficientCommitmentMaterial.manifestHash,
+        rosterHash: vssCoefficientCommitmentMaterial.rosterHash,
+        setupParametersHash:
+            vssCoefficientCommitmentMaterial.setupParametersHash,
+        setupEpoch: vssCoefficientCommitmentMaterial.setupEpoch,
+        publicMatrixSeedHash:
+            vssCoefficientCommitmentMaterial.publicMatrixSeedHash,
+        vssCoefficientCommitmentRoot:
+            vssCoefficientCommitmentMaterial.vssCoefficientCommitmentRoot,
+        materialEncoding: vssCoefficientCommitmentMaterialTransportEncoding,
+        participantCount: vssCoefficientCommitmentMaterial.participantCount,
+        thresholdDegree: vssCoefficientCommitmentMaterial.thresholdDegree,
+        rnsLimbCount: vssCoefficientCommitmentMaterial.rnsLimbCount,
+        ringDegree: vssCoefficientCommitmentMaterial.ringDegree,
+        materialRecordCount:
+            vssCoefficientCommitmentMaterial.materialRecordCount,
+        vssCoefficientCommitmentMaterialRoot:
+            vssCoefficientCommitmentMaterial.vssCoefficientCommitmentMaterialRoot,
+        chunkCount: transportedObject.chunkCount,
+        totalByteLength: transportedObject.byteLength,
+        fullObjectHash: transportedObject.fullObjectHash,
+        chunkRoot: transportedObject.chunkRoot,
+        chunkHashes: transportedObject.chunkHashes,
     };
 }

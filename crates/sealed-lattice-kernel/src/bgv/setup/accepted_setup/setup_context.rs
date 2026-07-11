@@ -237,7 +237,6 @@ pub(super) fn verify_q_share(setup_package: &Value) -> CanonicalResult<Option<Va
 pub(super) fn q_share_value() -> Value {
     json!({
         "objectType": "QSharePrimeList",
-        "objectVersion": 1,
         "primes": DATA_PRIMES,
     })
 }

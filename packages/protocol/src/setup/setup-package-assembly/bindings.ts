@@ -70,42 +70,83 @@ const assertCommonBindings = (input: SetupPackageInput): void => {
         'commonRandomness',
     );
     assertObjectType(
-        input.compactVssCoefficientCommitmentSet,
-        'compactVssCoefficientCommitmentSet',
-        'CompactVssCoefficientCommitmentSet',
+        input.vssCoefficientCommitments,
+        'vssCoefficientCommitments',
+        'VssCoefficientCommitmentSet',
+    );
+    assertContextMatches(
+        input.setupContext,
+        input.vssCoefficientCommitments,
+        'vssCoefficientCommitments',
+    );
+    const vssCoefficientCommitmentRoot = hashField(
+        input.vssCoefficientCommitments,
+        'vssCoefficientCommitmentRoot',
+        'vssCoefficientCommitments',
+    );
+    assertObjectType(
+        input.vssCoefficientCommitmentMaterial,
+        'vssCoefficientCommitmentMaterial',
+        'VssCoefficientCommitmentMaterialSet',
+    );
+    assertContextMatches(
+        input.setupContext,
+        input.vssCoefficientCommitmentMaterial,
+        'vssCoefficientCommitmentMaterial',
     );
     hashField(
-        input.compactVssCoefficientCommitmentSet,
+        input.vssCoefficientCommitmentMaterial,
+        'vssCoefficientCommitmentMaterialRoot',
+        'vssCoefficientCommitmentMaterial',
+    );
+    if (
+        hashField(
+            input.vssCoefficientCommitmentMaterial,
+            'vssCoefficientCommitmentRoot',
+            'vssCoefficientCommitmentMaterial',
+        ) !== vssCoefficientCommitmentRoot
+    ) {
+        throw new Error(
+            'vssCoefficientCommitmentMaterial must bind vssCoefficientCommitments.',
+        );
+    }
+    assertObjectType(
+        input.vssPublicCoefficientCommitmentSet,
+        'vssPublicCoefficientCommitmentSet',
+        'VssPublicCoefficientCommitmentSet',
+    );
+    hashField(
+        input.vssPublicCoefficientCommitmentSet,
         'coefficientCommitmentRoot',
-        'compactVssCoefficientCommitmentSet',
+        'vssPublicCoefficientCommitmentSet',
     );
     assertObjectType(
-        input.compactVssRecipientShareCommitmentSet,
-        'compactVssRecipientShareCommitmentSet',
-        'CompactVssRecipientShareCommitmentSet',
+        input.vssPublicRecipientShareCommitmentSet,
+        'vssPublicRecipientShareCommitmentSet',
+        'VssPublicRecipientShareCommitmentSet',
     );
     assertObjectType(
-        input.compactVssAggregateThresholdCommitmentSet,
-        'compactVssAggregateThresholdCommitmentSet',
-        'CompactVssAggregateThresholdCommitmentSet',
+        input.vssPublicAggregateThresholdCommitmentSet,
+        'vssPublicAggregateThresholdCommitmentSet',
+        'VssPublicAggregateThresholdCommitmentSet',
     );
     assertObjectType(
-        input.compactVssShareLinkageStatement,
-        'compactVssShareLinkageStatement',
-        'CompactVssShareLinkageStatement',
+        input.vssShareLinkageStatement,
+        'vssShareLinkageStatement',
+        'VssShareLinkageStatement',
     );
     assertObjectRecord(
-        input.compactVssShareLinkageProofMaterialSet,
-        'compactVssShareLinkageProofMaterialSet',
+        input.vssShareLinkageProofMaterialSet,
+        'vssShareLinkageProofMaterialSet',
     );
     assertObjectType(
-        input.compactSameSecretBridgeStatementSet,
-        'compactSameSecretBridgeStatementSet',
-        'CompactVssSameSecretBridgeStatementSet',
+        input.sameSecretBridgeStatementSet,
+        'sameSecretBridgeStatementSet',
+        'VssSameSecretBridgeStatementSet',
     );
     assertObjectRecord(
-        input.compactSameSecretBridgeProofMaterialSet,
-        'compactSameSecretBridgeProofMaterialSet',
+        input.sameSecretBridgeProofMaterialSet,
+        'sameSecretBridgeProofMaterialSet',
     );
     assertObjectType(
         input.privateVssEnvelopeCommitments,
@@ -143,26 +184,6 @@ const assertCommonBindings = (input: SetupPackageInput): void => {
 };
 
 const assertKeyRecordBindings = (input: SetupPackageInput): void => {
-    assertObjectType(
-        input.sameSecretConsistency,
-        'sameSecretConsistency',
-        'SameSecretConsistencyStatementSet',
-    );
-    hashField(
-        input.sameSecretConsistency,
-        'sameSecretConsistencyRoot',
-        'sameSecretConsistency',
-    );
-    assertObjectType(
-        input.sameSecretProofs,
-        'sameSecretProofs',
-        'SameSecretProofSet',
-    );
-    hashField(
-        input.sameSecretProofs,
-        'sameSecretProofSetRoot',
-        'sameSecretProofs',
-    );
     assertObjectType(
         input.publicKeyShares,
         'publicKeyShares',
@@ -268,7 +289,6 @@ const assertCommonRandomnessPublicDerivationsBindPackageInput = (
     );
     if (
         publicDerivations.objectType !== 'SetupPublicDerivations' ||
-        publicDerivations.objectVersion !== 1 ||
         publicDerivations.publicMatrixSeedHash !== publicMatrixSeedHash
     ) {
         throw new Error(
@@ -334,8 +354,8 @@ const assertCommonRandomnessPublicDerivationsBindPackageInput = (
 export const resolveThresholdShareCommitments = (
     input: SetupPackageInput,
 ): JsonRecord => {
-    // On the compact path the threshold-share commitment binding is a small
-    // record the compact VSS builders emit (it binds the compact coefficient
+    // The threshold-share commitment binding is a small
+    // record the VSS builders emit (it binds the coefficient
     // commitment root, the aggregate threshold commitment root and the share
     // linkage proof material set root). The kernel recomputes and re-binds it
     // during verification, so the assembler passes it through after a shape
@@ -347,7 +367,7 @@ export const resolveThresholdShareCommitments = (
     assertObjectType(
         thresholdShareCommitments,
         'thresholdShareCommitments',
-        'CompactThresholdShareCommitmentBinding',
+        'ThresholdShareCommitmentBinding',
     );
     hashField(
         thresholdShareCommitments,
@@ -410,7 +430,7 @@ export const validateInput = (
     assertObjectType(
         thresholdShareCommitments,
         'thresholdShareCommitments',
-        'CompactThresholdShareCommitmentBinding',
+        'ThresholdShareCommitmentBinding',
     );
     hashField(
         thresholdShareCommitments,

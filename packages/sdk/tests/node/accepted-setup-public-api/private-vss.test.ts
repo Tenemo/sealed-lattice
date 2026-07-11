@@ -35,7 +35,6 @@ describe('accepted setup public package API in Node', () => {
                 sourceTrusteeCoefficientCommitmentMaterialRecords: [],
                 privateEnvelope: {
                     objectType: 'PrivateVssShareEnvelope',
-                    objectVersion: 1,
                 },
             });
         expect(malformedVerification).toMatchObject({

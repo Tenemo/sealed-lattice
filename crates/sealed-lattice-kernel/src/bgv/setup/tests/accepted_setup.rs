@@ -1,12 +1,11 @@
 mod ceremony_phases;
-mod compact_terminal_evaluation_key_proofs;
 mod evaluation_key_share_proofs;
 mod material_transport_fixtures;
 mod package_fixtures;
 mod proof_record_fixtures;
 mod public_key_share_proofs;
 mod record_rebinding;
-mod same_secret_proofs;
+mod terminal_evaluation_key_proofs;
 mod transport_policy;
 mod vss_material;
 
@@ -14,16 +13,17 @@ use self::material_transport_fixtures::vss_material_binary_total_byte_length;
 use self::package_fixtures::{
     accepted_vss_coefficient_message_fixture, accepted_vss_randomness_fixture,
     accepted_vss_secret_coefficient_fixture,
-    collective_public_key_bearing_collective_setup_package, minimal_collective_setup_package,
-    minimal_collective_setup_package_for_participant_count,
+    collective_public_key_bearing_collective_setup_package, collective_setup_phase_package,
+    minimal_collective_setup_package, minimal_collective_setup_package_for_participant_count,
     public_key_share_succinct_proof_bearing_collective_setup_package,
 };
 use self::proof_record_fixtures::{
-    collective_public_key_object, compactify_collective_setup_package,
-    galois_key_share_batches_object, public_evaluation_key_set_object,
+    collective_public_key_object, compact_aggregate_threshold_proof_fixture,
+    evaluation_key_aggregate_binding_object, finalize_collective_setup_package,
+    galois_key_share_batches_object, public_evaluation_key_set_object_with_aggregate_binding,
     public_key_share_material_object, public_key_share_succinct_proofs_object,
     relinearization_key_share_rounds_fixture, replace_public_key_share_hashes_with_material_hashes,
-    same_secret_constant_commitments_from_fixture_package, trustee_evaluation_key_proofs_object,
+    source_constant_commitments_from_fixture_package, trustee_evaluation_key_proofs_object,
 };
 use self::record_rebinding::{
     private_vss_envelope_commitment_record_root_input,
@@ -31,7 +31,6 @@ use self::record_rebinding::{
     rebind_collective_phase_roots, rebind_collective_private_vss_envelope_commitment_root,
     rebind_collective_public_key_root, rebind_collective_public_key_share_proof_roots,
     rebind_collective_public_key_share_roots, rebind_collective_public_key_succinct_proof_roots,
-    rebind_collective_same_secret_consistency_root, rebind_collective_same_secret_statement_roots,
     rebind_collective_setup_package_hash, rebind_collective_vss_acceptance_root,
     rebind_first_private_vss_encrypted_envelope_hash,
     rebind_first_private_vss_envelope_commitment_record_root,
@@ -40,6 +39,7 @@ use self::record_rebinding::{
 use super::super::accepted_setup::{
     PUBLIC_EVALUATION_KEY_TRANSPORT_MATERIAL_ENCODING,
     PUBLIC_KEY_SHARE_MATERIAL_TRANSPORT_ENCODING,
+    VSS_COEFFICIENT_COMMITMENT_MATERIAL_TRANSPORT_ENCODING,
     accepted_setup_collective_public_key_from_package, public_key_share_coefficient_vector_hash,
     verify_collective_bgv_setup_package, verify_full_ring_material,
     verify_terminal_setup_transport_policy,

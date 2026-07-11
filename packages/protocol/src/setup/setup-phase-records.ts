@@ -42,7 +42,6 @@ export type SetupPhaseParticipantObjectInput = {
 export type SetupPhaseParticipantObject = Readonly<
     JsonRecord & {
         readonly objectType: 'SetupPhaseParticipantObject';
-        readonly objectVersion: 1;
         readonly phaseId: string;
         readonly phaseNumber: number;
         readonly trusteeIdentity: string;
@@ -72,7 +71,6 @@ export type SetupPhaseRecord = Readonly<
 
 type SetupPhasePayload = Readonly<{
     readonly objectType: 'SetupPhaseParticipantObject';
-    readonly objectVersion: 1;
     readonly phaseId: string;
     readonly phaseNumber: number;
     readonly ceremonyId: string;
@@ -100,7 +98,6 @@ const phasePayload = (
 ): SetupPhasePayload => {
     const payload = {
         objectType: 'SetupPhaseParticipantObject',
-        objectVersion: 1,
         phaseId: input.phaseId,
         phaseNumber: input.phaseNumber,
         ceremonyId: input.setupContext.ceremonyId,
@@ -158,7 +155,6 @@ const verifyGeneratedSignatureEnvelope = (
 ): void => {
     const result = verifySignedObjectSignature(signatureEnvelope, {
         objectType: signedRoot.objectType,
-        objectVersion: signedRoot.objectVersion,
         signerRole: signedRoot.signerRole,
         signerIdentity: signedRoot.signerIdentity,
         ceremonyId: signedRoot.ceremonyId,
@@ -168,7 +164,6 @@ const verifyGeneratedSignatureEnvelope = (
         chunkMerkleRoot: signedRoot.chunkMerkleRoot,
         boardHeadHash: signedRoot.boardHeadHash,
         contextHash: signedRoot.contextHash,
-        byteLength: signedRoot.byteLength,
         recoveryEpoch: signedRoot.recoveryEpoch,
         deviceEpoch: signedRoot.deviceEpoch,
     });
@@ -178,11 +173,6 @@ const verifyGeneratedSignatureEnvelope = (
             refusedObject === undefined
                 ? 'Setup phase participant signature envelope failed verification.'
                 : `Setup phase participant signature envelope failed verification: ${refusedObject.code}: ${refusedObject.message}`,
-        );
-    }
-    if (signatureEnvelope.signatureHash !== result.acceptedHashes[0]) {
-        throw new Error(
-            'Setup phase participant signature envelope hash does not match the verified signature hash.',
         );
     }
 };
@@ -236,13 +226,11 @@ export const createSetupPhaseParticipantObject = async (
     );
     const signedRoot = {
         objectType: 'SetupPhaseParticipantObject',
-        objectVersion: 1,
         ceremonyId: input.setupContext.ceremonyId,
         manifestHash: input.setupContext.manifestHash,
         boardHeadHash: null,
         objectRoot: phaseObjectRoot,
         chunkMerkleRoot: null,
-        byteLength: phaseObjectByteLength,
         signerRole: 'Trustee',
         signerIdentity: input.trusteeIdentity,
         recoveryEpoch: input.recoveryEpoch,

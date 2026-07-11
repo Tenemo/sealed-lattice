@@ -89,7 +89,6 @@ pub(super) fn evaluation_key_material_binding(
         .collect::<Vec<_>>();
     let relinearization_stream_record = json!({
         "objectType": "BgvRelinearizationKeyMaterialStream",
-        "objectVersion": 1,
         "streamPolicy": EVALUATION_KEY_STREAM_POLICY,
         "collectivePublicKeyRoot": collective_public_key_root,
         "bgvPublicKeyRoot": bgv_public_key_root,
@@ -101,7 +100,6 @@ pub(super) fn evaluation_key_material_binding(
     });
     let rotation_stream_record = json!({
         "objectType": "BgvRotationKeyMaterialStream",
-        "objectVersion": 1,
         "streamPolicy": EVALUATION_KEY_STREAM_POLICY,
         "collectivePublicKeyRoot": collective_public_key_root,
         "bgvPublicKeyRoot": bgv_public_key_root,
@@ -121,7 +119,6 @@ pub(super) fn evaluation_key_material_binding(
     let sampled_relation_checks = input.sampled_relation_checks;
     let relinearization_key_record = json!({
         "objectType": "BgvRelinearizationKey",
-        "objectVersion": 1,
         "ceremonyId": input.ceremony_id,
         "rosterHash": input.roster_hash,
         "collectivePublicKeyRoot": collective_public_key_root,
@@ -137,7 +134,6 @@ pub(super) fn evaluation_key_material_binding(
     for entry in &rotation_schedule {
         let entry_stream_record = json!({
             "objectType": "BgvRotationKeyMaterialStreamEntry",
-            "objectVersion": 1,
             "streamPolicy": EVALUATION_KEY_STREAM_POLICY,
             "collectivePublicKeyRoot": collective_public_key_root,
             "bgvPublicKeyRoot": bgv_public_key_root,
@@ -157,7 +153,6 @@ pub(super) fn evaluation_key_material_binding(
             evaluation_key_stream_hash("rotation-material-stream-entry", &entry_stream_record)?;
         let record = json!({
             "objectType": "BgvRotationKey",
-            "objectVersion": 1,
             "ceremonyId": input.ceremony_id,
             "rosterHash": input.roster_hash,
             "collectivePublicKeyRoot": collective_public_key_root,
@@ -180,7 +175,6 @@ pub(super) fn evaluation_key_material_binding(
     }
     let key_switch_stream_record = json!({
         "objectType": "BgvEvaluationKeySwitchMaterialStream",
-        "objectVersion": 1,
         "streamPolicy": EVALUATION_KEY_STREAM_POLICY,
         "relinearizationStreamHash": relinearization_stream_hash,
         "rotationStreamHash": rotation_stream_hash,
@@ -190,7 +184,6 @@ pub(super) fn evaluation_key_material_binding(
         evaluation_key_stream_hash("key-switch-material-stream", &key_switch_stream_record)?;
     let key_switch_key_record = json!({
         "objectType": "BgvKeySwitchKey",
-        "objectVersion": 1,
         "ceremonyId": input.ceremony_id,
         "rosterHash": input.roster_hash,
         "collectivePublicKeyRoot": collective_public_key_root,
@@ -202,7 +195,6 @@ pub(super) fn evaluation_key_material_binding(
     let key_switch_key_root = derive_canonical_object_hash(&key_switch_key_record)?;
     let record = json!({
         "objectType": "BgvEvaluationKeyMaterialCommitment",
-        "objectVersion": 1,
         "ceremonyId": input.ceremony_id,
         "manifestHash": input.manifest_hash,
         "rosterHash": input.roster_hash,

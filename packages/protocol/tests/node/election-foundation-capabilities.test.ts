@@ -546,9 +546,6 @@ describe('election foundation capability evaluator', () => {
 
     it('keeps reserved safe API actions fail-closed until their implementations exist', () => {
         expect(
-            evaluateActionCapability('VerifyTranscript', createContext()),
-        ).toMatchObject({ reason: 'OperationUnavailable' });
-        expect(
             evaluateActionCapability(
                 'CreateRecoveryEpochUpdate',
                 createContext(),

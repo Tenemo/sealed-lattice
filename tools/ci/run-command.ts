@@ -98,6 +98,9 @@ export const runPackageManagerAndCaptureOutput = (
     runner: PackageManagerRunner,
     commandArguments: readonly string[],
     workingDirectoryPath: string,
+    input: {
+        readonly environment?: NodeJS.ProcessEnv;
+    } = {},
 ): string => {
     const spawnCommand = createPackageManagerSpawnCommand(
         runner,
@@ -105,7 +108,7 @@ export const runPackageManagerAndCaptureOutput = (
     );
     const result = spawnSync(spawnCommand.command, spawnCommand.args, {
         cwd: workingDirectoryPath,
-        env: process.env,
+        env: input.environment ?? process.env,
         encoding: 'utf8',
         maxBuffer: 100 * 1024 * 1024,
     });

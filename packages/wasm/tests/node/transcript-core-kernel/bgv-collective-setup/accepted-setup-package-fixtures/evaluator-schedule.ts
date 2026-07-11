@@ -8,7 +8,6 @@ import {
     type PublicKeyShareProofSet,
     type PublicKeyShareSet,
 } from '#packages/protocol/src/setup/public-key-share-records';
-import { type SameSecretConsistencyStatementSet } from '#packages/protocol/src/setup/same-secret-consistency-records';
 import { type CollectiveBgvSetupContext } from '#packages/protocol/src/setup/vss-share-verification-records';
 import type { BgvCollectiveSetupParametersDescription } from '#packages/wasm/src/index';
 
@@ -16,7 +15,6 @@ export function acceptedEvaluatorKeySchedule(
     setupContext: CollectiveBgvSetupContext,
     parameters: BgvCollectiveSetupParametersDescription,
     commonRandomness: JsonRecord,
-    sameSecretConsistency: SameSecretConsistencyStatementSet,
     publicKeyShares: PublicKeyShareSet,
     publicKeyShareProofs: PublicKeyShareProofSet,
 ): EvaluatorKeySchedule {
@@ -31,7 +29,6 @@ export function acceptedEvaluatorKeySchedule(
         publicMatrixSeedHash,
         relinearizationCrpRoot: String(crpRoots.relinearizationCrpRoot),
         galoisKeyCrpRoot: String(crpRoots.galoisKeyCrpRoot),
-        sameSecretConsistency,
         publicKeyShares,
         publicKeyShareProofs,
         requiredGaloisKeySchedule:

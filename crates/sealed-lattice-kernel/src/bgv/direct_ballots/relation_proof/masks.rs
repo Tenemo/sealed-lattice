@@ -35,16 +35,16 @@ pub(super) fn sample_direct_ballot_relation_mask_vector(
             ciphertext_root,
             proof_randomness_seed_hex,
             4,
-            DIRECT_BALLOT_OPTION_COUNT,
+            OPTION_COUNT,
         )?,
-        one_hot_coefficients: (0..DIRECT_BALLOT_OPTION_COUNT)
+        one_hot_coefficients: (0..OPTION_COUNT)
             .map(|option_index| {
                 sample_direct_ballot_relation_mask_scalars(
                     statement_hash,
                     ciphertext_root,
                     proof_randomness_seed_hex,
                     5 + option_index,
-                    DIRECT_BALLOT_SCORE_BUCKET_COUNT,
+                    SCORE_BUCKET_COUNT,
                 )
             })
             .collect::<CanonicalResult<Vec<_>>>()?,
@@ -63,7 +63,7 @@ pub(super) fn sample_direct_ballot_relation_mask_scalars(
     while coefficients.len() < scalar_count {
         let coefficient_index_bytes = usize_to_u64_bytes(coefficients.len())?;
         let block = hash512(
-            "sealed-lattice/direct-encrypted-ballot/relation-mask-scalar-v1",
+            "sealed-lattice/direct-encrypted-ballot/relation-mask-scalar",
             &[
                 statement_hash,
                 ciphertext_root.as_bytes(),
@@ -89,7 +89,7 @@ pub(super) fn sample_direct_ballot_relation_mask_polynomial(
     while coefficients.len() < POLYNOMIAL_DEGREE {
         let coefficient_index_bytes = usize_to_u64_bytes(coefficients.len())?;
         let block = hash512(
-            "sealed-lattice/direct-encrypted-ballot/relation-mask-v1",
+            "sealed-lattice/direct-encrypted-ballot/relation-mask",
             &[
                 statement_hash,
                 ciphertext_root.as_bytes(),
@@ -105,14 +105,14 @@ pub(super) fn sample_direct_ballot_relation_mask_polynomial(
 }
 
 pub(super) fn direct_ballot_relation_mask_coefficient(block: &[u8; 64]) -> CanonicalResult<BigInt> {
-    let magnitude_byte_count = DIRECT_BALLOT_RELATION_MASK_COEFFICIENT_BITS.div_ceil(8);
+    let magnitude_byte_count = RELATION_MASK_COEFFICIENT_BITS.div_ceil(8);
     if magnitude_byte_count >= block.len() {
         return Err(invalid_direct_ballot_relation_proof(
             "direct ballot relation mask coefficient needs more hash material",
         ));
     }
     let mut magnitude_bytes = block[..magnitude_byte_count].to_vec();
-    let excess_bits = magnitude_byte_count * 8 - DIRECT_BALLOT_RELATION_MASK_COEFFICIENT_BITS;
+    let excess_bits = magnitude_byte_count * 8 - RELATION_MASK_COEFFICIENT_BITS;
     if excess_bits > 0 {
         let kept_bits = 8 - excess_bits;
         let mask = (1_u16 << kept_bits) - 1;

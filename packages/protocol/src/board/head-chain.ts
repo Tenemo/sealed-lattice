@@ -12,7 +12,6 @@ import {
     createRefusal,
     defaultSignedRootContextHash,
     isNonNegativeInteger,
-    signedObjectRootByteLength,
 } from '../common/verification-helpers.js';
 
 import {
@@ -59,8 +58,7 @@ export const verifyBoardHead = (
     }
     if (
         !isNonNegativeInteger(head.boardSequence) ||
-        head.objectType !== 'BoardHead' ||
-        head.objectVersion !== 1
+        head.objectType !== 'BoardHead'
     ) {
         refusedObjects.push(
             createRefusal(
@@ -94,14 +92,12 @@ export const verifyBoardHead = (
 
     const signatureResult = verifySignedObjectSignature(head.signature, {
         objectType: 'BoardHead',
-        objectVersion: 1,
         signerRole: 'Board',
         signerIdentity: 'board',
         ceremonyId: input.ceremonyId,
         manifestHash: null,
         objectRoot: head.headHash,
         boardHeadHash: null,
-        byteLength: signedObjectRootByteLength,
         recoveryEpoch: 0,
         deviceEpoch: 0,
         contextHash: defaultSignedRootContextHash,

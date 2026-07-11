@@ -36,7 +36,6 @@ const expectRefusalCode = (
     const verification = verifyFoundationTranscript(input);
 
     expect(verification.isValid).toBe(false);
-    expect(verification.acceptedHashes).toEqual([]);
     expect(verification.refusedObjects).toEqual(
         expect.arrayContaining([expect.objectContaining({ code })]),
     );
@@ -447,7 +446,6 @@ describe('integrated election foundation transcript', () => {
                         ceremonyId: duplicateWitnessRecord.ceremonyId,
                         inclusionProof: duplicateWitnessRecord.inclusionProof,
                         objectType: duplicateWitnessRecord.objectType,
-                        objectVersion: duplicateWitnessRecord.objectVersion,
                         targetFinalityCheckpoint:
                             duplicateWitnessRecord.targetFinalityCheckpoint,
                         targetFinalityPolicyHash:

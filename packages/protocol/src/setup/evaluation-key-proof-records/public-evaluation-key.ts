@@ -73,8 +73,6 @@ export function createPublicEvaluationKeySet(
     if (
         input.relinearizationKeyShareRounds.evaluatorKeyScheduleRoot !==
             input.evaluatorKeySchedule.evaluatorKeyScheduleRoot ||
-        input.relinearizationKeyShareRounds.sameSecretProofFamilyBindingRoot !==
-            input.sameSecretProofFamilyBindingRoot ||
         input.relinearizationKeyShareRounds
             .publicKeyShareSuccinctProofSetRoot !==
             input.publicKeyShareSuccinctProofSetRoot
@@ -112,12 +110,9 @@ export function createPublicEvaluationKeySet(
                 const decompositionDigitCount = level + 1;
                 const relinearizationKeyRoot = deriveCanonicalObjectHash({
                     objectType: 'RelinearizationKeyAggregate',
-                    objectVersion: 1,
                     materialEncoding: publicEvaluationKeyMaterialEncoding,
                     evaluatorKeyScheduleRoot:
                         input.evaluatorKeySchedule.evaluatorKeyScheduleRoot,
-                    sameSecretProofFamilyBindingRoot:
-                        input.sameSecretProofFamilyBindingRoot,
                     publicKeyShareSuccinctProofSetRoot:
                         input.publicKeyShareSuccinctProofSetRoot,
                     relinearizationKeyShareRoundsRoot:
@@ -160,8 +155,6 @@ export function createPublicEvaluationKeySet(
         if (
             batch.evaluatorKeyScheduleRoot !==
                 input.evaluatorKeySchedule.evaluatorKeyScheduleRoot ||
-            batch.sameSecretProofFamilyBindingRoot !==
-                input.sameSecretProofFamilyBindingRoot ||
             batch.publicKeyShareSuccinctProofSetRoot !==
                 input.publicKeyShareSuccinctProofSetRoot ||
             batch.requiredGaloisSetHash !==
@@ -200,12 +193,9 @@ export function createPublicEvaluationKeySet(
                 );
                 const galoisKeyRoot = deriveCanonicalObjectHash({
                     objectType: 'GaloisKeyAggregate',
-                    objectVersion: 1,
                     materialEncoding: publicEvaluationKeyMaterialEncoding,
                     evaluatorKeyScheduleRoot:
                         input.evaluatorKeySchedule.evaluatorKeyScheduleRoot,
-                    sameSecretProofFamilyBindingRoot:
-                        input.sameSecretProofFamilyBindingRoot,
                     publicKeyShareSuccinctProofSetRoot:
                         input.publicKeyShareSuccinctProofSetRoot,
                     galoisKeyCrpRoot:
@@ -283,15 +273,12 @@ export function createPublicEvaluationKeySet(
 
     const evaluationKeysWithoutHash = {
         objectType: 'PublicEvaluationKeySet',
-        objectVersion: 1,
         materialEncoding: publicEvaluationKeyMaterialEncoding,
         ...contextFields(input.setupContext),
         participantCount: input.participantCount,
         rnsLimbCount: input.qSharePrimes.length,
         evaluatorKeyScheduleRoot:
             input.evaluatorKeySchedule.evaluatorKeyScheduleRoot,
-        sameSecretProofFamilyBindingRoot:
-            input.sameSecretProofFamilyBindingRoot,
         publicKeyShareSuccinctProofSetRoot:
             input.publicKeyShareSuccinctProofSetRoot,
         relinearizationKeyShareRoundsRoot:
@@ -306,6 +293,12 @@ export function createPublicEvaluationKeySet(
         galoisKeyShareBatchRoots,
         galoisKeyRoots,
         ...(input.publicEvaluationKeyMaterialReference ?? {}),
+        // Carry an optional committed-material aggregate binding through verbatim
+        // so it enters the canonical evaluationKeySetHash the same object the
+        // kernel recomputes over. Absent by default.
+        ...(input.aggregateBinding === undefined
+            ? {}
+            : { aggregateBinding: input.aggregateBinding }),
     } as const satisfies Omit<PublicEvaluationKeySet, 'evaluationKeySetHash'>;
 
     return {
@@ -428,15 +421,12 @@ const publicEvaluationKeyMaterialManifest = (
     evaluationKeys: PublicEvaluationKeySet,
 ): JsonRecord => ({
     objectType: 'PublicEvaluationKeyMaterialManifest',
-    objectVersion: 1,
     materialEncoding: publicEvaluationKeyMaterialEncoding,
     materialTransportEncoding: publicEvaluationKeyTransportMaterialEncoding,
     ...contextFields(input.setupContext),
     participantCount: input.participantCount,
     rnsLimbCount: input.qSharePrimes.length,
     evaluatorKeyScheduleRoot: evaluationKeys.evaluatorKeyScheduleRoot,
-    sameSecretProofFamilyBindingRoot:
-        evaluationKeys.sameSecretProofFamilyBindingRoot,
     publicKeyShareSuccinctProofSetRoot:
         evaluationKeys.publicKeyShareSuccinctProofSetRoot,
     relinearizationKeyShareRoundsRoot:
@@ -498,7 +488,7 @@ const publicEvaluationKeyMaterialFullObjectHash = (
     chunks: readonly Uint8Array[],
 ): ProtocolHash =>
     hash512Hex(
-        'sealed-lattice/setup/public-evaluation-key-material/full-object-v1',
+        'sealed-lattice/setup/public-evaluation-key-material/full-object',
         [u64LittleEndianBytes(totalByteLength, 'totalByteLength'), ...chunks],
     );
 
@@ -507,7 +497,7 @@ const publicEvaluationKeyMaterialChunkHash = (
     chunkIndex: number,
     chunk: Uint8Array,
 ): ProtocolHash =>
-    hash512Hex('sealed-lattice/setup/public-evaluation-key-material/chunk-v1', [
+    hash512Hex('sealed-lattice/setup/public-evaluation-key-material/chunk', [
         textEncoder.encode(fullObjectHash),
         u64LittleEndianBytes(chunkIndex, 'chunkIndex'),
         chunk,
@@ -557,9 +547,7 @@ const publicEvaluationKeyMaterialTransportHashes = (
     );
     const chunkRoot = deriveCanonicalObjectHash({
         objectType: 'PublicEvaluationKeyMaterialChunkManifest',
-        objectVersion: 1,
         materialEncoding: publicEvaluationKeyTransportMaterialEncoding,
-        chunkSizeBytes: setupProofTransportChunkSizeBytes,
         chunkCount: chunkHashes.length,
         totalByteLength,
         chunkHashes,
@@ -583,7 +571,6 @@ const publicEvaluationKeyMaterialReferenceRoot = (
 ): ProtocolHash =>
     deriveCanonicalObjectHash({
         objectType: 'PublicEvaluationKeyMaterialReference',
-        objectVersion: 1,
         materialEncoding: publicEvaluationKeyTransportMaterialEncoding,
         ceremonyId: evaluationKeys.ceremonyId,
         manifestHash: evaluationKeys.manifestHash,
@@ -591,15 +578,12 @@ const publicEvaluationKeyMaterialReferenceRoot = (
         setupParametersHash: evaluationKeys.setupParametersHash,
         setupEpoch: evaluationKeys.setupEpoch,
         evaluatorKeyScheduleRoot: evaluationKeys.evaluatorKeyScheduleRoot,
-        sameSecretProofFamilyBindingRoot:
-            evaluationKeys.sameSecretProofFamilyBindingRoot,
         publicKeyShareSuccinctProofSetRoot:
             evaluationKeys.publicKeyShareSuccinctProofSetRoot,
         relinearizationKeyShareRoundsRoot:
             evaluationKeys.relinearizationKeyShareRoundsRoot,
         requiredGaloisSetHash: evaluationKeys.requiredGaloisSetHash,
         expectedMaterialManifest,
-        chunkSizeBytes: setupProofTransportChunkSizeBytes,
         chunkCount: transportHashes.chunkHashes.length,
         totalByteLength: transportHashes.totalByteLength,
         fullObjectHash: transportHashes.fullObjectHash,
@@ -737,17 +721,14 @@ export const createBinaryChunkedPublicEvaluationKeyMaterialTransport = (
     assertPublicEvaluationKeyComponentMaterialCoverage(input);
     const transportedPublicEvaluationKeyMaterial = {
         objectType: publicEvaluationKeyMaterialTransportSetObjectType,
-        objectVersion: 1,
         materialEncoding: publicEvaluationKeyTransportMaterialEncoding,
         publicEvaluationKeyMaterials: [
             {
                 objectType: publicEvaluationKeyMaterialTransportObjectType,
-                objectVersion: 1,
                 materialEncoding: publicEvaluationKeyTransportMaterialEncoding,
                 ...contextFields(input.setupContext),
                 evaluationKeySetHash: evaluationKeys.evaluationKeySetHash,
                 publicEvaluationKeyMaterialRoot,
-                chunkSizeBytes: setupProofTransportChunkSizeBytes,
                 chunkCount: transportHashes.chunkHashes.length,
                 totalByteLength: transportHashes.totalByteLength,
                 fullObjectHash: transportHashes.fullObjectHash,

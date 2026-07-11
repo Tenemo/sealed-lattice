@@ -31,12 +31,6 @@ pub(super) fn validate_participant_setup_records(
             "ParticipantBgvSetupRecord",
             "participant record object type",
         )?;
-        if unsigned_at_path(participant_record, &["objectVersion"])? != 1 {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "participant setup record object version must be 1",
-            ));
-        }
         compare_string_at_path(
             participant_record,
             &["ceremonyId"],
@@ -125,7 +119,6 @@ pub(super) fn validate_participant_setup_records(
 
         let trustee_threshold_verification_key = json!({
             "objectType": "TrusteeThresholdVerificationKey",
-            "objectVersion": 1,
             "targetDecryptionParametersHash": target_decryption_parameters_hash,
             "targetDecryptionParametersBindingHash": target_decryption_parameters_binding_hash,
             "ceremonyId": ceremony_id,

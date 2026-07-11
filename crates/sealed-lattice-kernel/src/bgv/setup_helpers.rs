@@ -85,17 +85,12 @@ pub(super) fn usize_field(value: &Value, field_name: &str) -> CanonicalResult<us
 }
 
 pub(super) fn setup_transport_chunk_manifest_root(
-    chunk_size_bytes: u64,
-    chunk_count: u64,
     total_byte_length: u64,
     chunk_hashes: &[String],
     full_object_hash: &str,
 ) -> CanonicalResult<String> {
     derive_canonical_object_hash(&json!({
         "objectType": "SetupTransportChunkManifest",
-        "objectVersion": 1,
-        "chunkSizeBytes": chunk_size_bytes,
-        "chunkCount": chunk_count,
         "totalByteLength": total_byte_length,
         "chunkHashes": chunk_hashes,
         "fullObjectHash": full_object_hash,
@@ -315,4 +310,51 @@ pub(super) fn compare_derived_hash(
     }
 
     Ok(())
+}
+
+pub(super) fn compare_required_u64(
+    actual: u64,
+    expected: u64,
+    description: &str,
+) -> CanonicalResult<()> {
+    if actual != expected {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ComponentMismatch,
+            format!("passive BGV setup package {description} does not match its canonical binding"),
+        ));
+    }
+
+    Ok(())
+}
+
+pub(super) fn read_positive_usize_at_path(
+    value: &Value,
+    path: &[&str],
+    description: &str,
+) -> CanonicalResult<usize> {
+    let field = usize_at_path(value, path)?;
+    if field == 0 {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            format!("{description} must be positive"),
+        ));
+    }
+
+    Ok(field)
+}
+
+pub(super) fn read_positive_u64_at_path(
+    value: &Value,
+    path: &[&str],
+    description: &str,
+) -> CanonicalResult<u64> {
+    let field = unsigned_at_path(value, path)?;
+    if field == 0 {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            format!("{description} must be positive"),
+        ));
+    }
+
+    Ok(field)
 }

@@ -124,6 +124,15 @@ mod tests {
         assert_eq!(converted.moduli.len(), 2);
         assert_eq!(converted.residues_by_modulus[0][0], 65_536);
         assert_eq!(converted.residues_by_modulus[1][1], 1);
+        // Every residue vector spans the full ring, and the unset coefficients
+        // stay zero in both bases: a conversion that corrupted or shifted other
+        // positions would still satisfy the two spot checks above.
+        assert_eq!(converted.residues_by_modulus[0].len(), POLYNOMIAL_DEGREE);
+        assert_eq!(converted.residues_by_modulus[1].len(), POLYNOMIAL_DEGREE);
+        for coefficient_index in 2..POLYNOMIAL_DEGREE {
+            assert_eq!(converted.residues_by_modulus[0][coefficient_index], 0);
+            assert_eq!(converted.residues_by_modulus[1][coefficient_index], 0);
+        }
     }
 
     #[test]

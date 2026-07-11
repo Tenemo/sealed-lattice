@@ -1,9 +1,11 @@
-﻿use super::extension_field::{CHALLENGE_EXTENSION_DEGREE, ChallengeExtensionElement};
+use super::extension_field::{CHALLENGE_EXTENSION_DEGREE, ChallengeExtensionElement};
 use super::low_degree_proof::{LowDegreeProof, LowDegreeQueryOpening, LowDegreeSiblingOpening};
 use super::merkle_commitment::{
     BatchedMerkleOpening, LEAF_SALT_BYTES, MERKLE_DIGEST_BYTES, MerkleDigest,
 };
-use super::prover::{LimbProof, PhaseQueryOpening, SuccinctEvaluationKeyProof};
+use super::prover::{
+    LimbProof, MaterialTreeQueryOpening, PhaseQueryOpening, SuccinctEvaluationKeyProof,
+};
 use super::relation::{LimbColumnLayout, PHASE_TWO_COLUMN_COUNT, TrusteeEvaluationKeyStatement};
 use super::*;
 use crate::bgv::parameters::DATA_PRIMES;
@@ -60,6 +62,17 @@ pub(crate) fn encode_trustee_evaluation_key_proof(proof: &SuccinctEvaluationKeyP
         }
         write_batched_opening(&mut bytes, &limb_proof.witness_batch_opening);
         write_batched_opening(&mut bytes, &limb_proof.quotient_batch_opening);
+        for tree_openings in &limb_proof.material_query_openings {
+            for opening in tree_openings {
+                for slot in 0..2 {
+                    write_field_residue_slice(&mut bytes, &opening.rows[slot]);
+                }
+                bytes.extend_from_slice(&opening.pair_salt);
+            }
+        }
+        for batch_opening in &limb_proof.material_batch_openings {
+            write_batched_opening(&mut bytes, batch_opening);
+        }
     }
 
     bytes
@@ -89,8 +102,24 @@ pub(crate) fn decode_trustee_evaluation_key_proof(
     for limb_index in proof_limb_indices {
         let layout = LimbColumnLayout::new(statement, limb_index)?;
         let trace_size = layout.trace_size;
-        let extension_size = trace_size * DOMAIN_BLOWUP;
-        let total_columns = layout.phase_one_physical_count() + PHASE_TWO_COLUMN_COUNT;
+        let extension_size = trace_size.checked_mul(DOMAIN_BLOWUP).ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "trustee evaluation-key proof extension size overflowed",
+            )
+        })?;
+        let total_columns = layout
+            .phase_one_physical_count()
+            .checked_add(PHASE_TWO_COLUMN_COUNT)
+            .and_then(|column_count| {
+                column_count.checked_add(layout.vss_committed_material_physical_count())
+            })
+            .ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    "trustee evaluation-key proof total column count overflowed",
+                )
+            })?;
         let phase_tree_depth = (extension_size / 2).trailing_zeros() as usize;
         let witness_tree_root = read_array::<MERKLE_DIGEST_BYTES>(bytes, &mut cursor)?;
         let quotient_tree_root = read_array::<MERKLE_DIGEST_BYTES>(bytes, &mut cursor)?;
@@ -152,6 +181,35 @@ pub(crate) fn decode_trustee_evaluation_key_proof(
             read_batched_opening(bytes, &mut cursor, witness_batch_node_bound)?;
         let quotient_batch_opening =
             read_batched_opening(bytes, &mut cursor, quotient_batch_node_bound)?;
+        let material_tree_count = layout.vss_committed_material_bound_message_count();
+        let material_columns_per_tree =
+            crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT * TRACE_SPLIT;
+        let mut material_query_openings = Vec::with_capacity(material_tree_count);
+        for _ in 0..material_tree_count {
+            let mut tree_openings = Vec::with_capacity(LOW_DEGREE_QUERY_COUNT);
+            for _ in 0..LOW_DEGREE_QUERY_COUNT {
+                let mut rows = [Vec::new(), Vec::new()];
+                for row in &mut rows {
+                    *row = read_base_field_vec(
+                        bytes,
+                        &mut cursor,
+                        material_columns_per_tree,
+                        modulus,
+                    )?;
+                }
+                let pair_salt = read_bytes(bytes, &mut cursor, LEAF_SALT_BYTES)?;
+                tree_openings.push(MaterialTreeQueryOpening { rows, pair_salt });
+            }
+            material_query_openings.push(tree_openings);
+        }
+        let mut material_batch_openings = Vec::with_capacity(material_tree_count);
+        for _ in 0..material_tree_count {
+            material_batch_openings.push(read_batched_opening(
+                bytes,
+                &mut cursor,
+                LOW_DEGREE_QUERY_COUNT * phase_tree_depth,
+            )?);
+        }
         limb_proofs.push(LimbProof {
             witness_tree_root,
             quotient_tree_root,
@@ -162,6 +220,8 @@ pub(crate) fn decode_trustee_evaluation_key_proof(
             query_openings,
             witness_batch_opening,
             quotient_batch_opening,
+            material_query_openings,
+            material_batch_openings,
         });
     }
     if cursor != bytes.len() {

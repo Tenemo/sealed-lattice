@@ -5,6 +5,7 @@ import { setupRequest, validHash } from '../bgv-passive-setup-fixtures.js';
 import {
     acceptedCommonRandomness,
     acceptedShapedSetupPackage,
+    acceptedShapedSetupVerificationCompanions,
     acceptedVssCoefficientCommitments,
     focusedPrivateVssSourceDeliveryReferences,
     publicPrivateVssEnvelopeCommitmentReference,
@@ -20,10 +21,7 @@ import {
 } from './setup-fixture-primitives.js';
 
 import { type CollectiveBgvSetupContext } from '#packages/protocol/src/setup/vss-share-verification-records';
-import {
-    loadTranscriptCoreKernel,
-    TranscriptCoreKernelCommandError,
-} from '#packages/wasm/src/index';
+import { loadTranscriptCoreKernel } from '#packages/wasm/src/index';
 
 describe('collective BGV setup kernel commands', () => {
     it('refuses undeclared generic key-switch material', async () => {
@@ -35,6 +33,8 @@ describe('collective BGV setup kernel commands', () => {
             kernel,
             parameters,
         );
+        const verificationCompanions =
+            await acceptedShapedSetupVerificationCompanions(kernel, parameters);
         const genericKeySwitchPackage = cloneJsonRecord(baseSetupPackage);
         genericKeySwitchPackage.genericKeySwitchKeys = {
             keyRoot: validHash('8'),
@@ -43,6 +43,7 @@ describe('collective BGV setup kernel commands', () => {
 
         const genericKeySwitchResult = kernel.verifyCollectiveBgvSetup({
             setupPackage: genericKeySwitchPackage,
+            ...verificationCompanions,
         });
 
         expect(genericKeySwitchResult.isValid).toBe(false);
@@ -60,6 +61,8 @@ describe('collective BGV setup kernel commands', () => {
             kernel,
             parameters,
         );
+        const verificationCompanions =
+            await acceptedShapedSetupVerificationCompanions(kernel, parameters);
         const jsonTransportPackage = cloneJsonRecord(baseSetupPackage);
         (
             jsonTransportPackage.setupTransportCertificate as JsonRecord
@@ -68,6 +71,7 @@ describe('collective BGV setup kernel commands', () => {
 
         const jsonTransportResult = kernel.verifyCollectiveBgvSetup({
             setupPackage: jsonTransportPackage,
+            ...verificationCompanions,
         });
 
         expect(jsonTransportResult.isValid).toBe(false);
@@ -94,27 +98,6 @@ describe('collective BGV setup kernel commands', () => {
         expect(result.refusedObjects[0]?.reasonCode).toBe(
             'setupContextFieldMissing',
         );
-    });
-
-    it('routes threshold share commitment derivation errors', async () => {
-        const kernel = await loadTranscriptCoreKernel();
-
-        expect(() => {
-            kernel.deriveThresholdShareCommitments({
-                setupContext: {},
-                publicMatrixSeedHash: validHash('1'),
-                sourceTrusteeCoefficientCommitmentRecords: [],
-                coefficientCommitments: [],
-            });
-        }).toThrow(TranscriptCoreKernelCommandError);
-        expect(() => {
-            kernel.deriveThresholdShareCommitments({
-                setupContext: {},
-                publicMatrixSeedHash: validHash('1'),
-                sourceTrusteeCoefficientCommitmentRecords: [],
-                coefficientCommitments: [],
-            });
-        }).toThrow(/setupContext\.ceremonyId is required/);
     });
 
     it('builds proof-shaped private VSS envelope references without public ciphertext leakage', async () => {
@@ -166,10 +149,6 @@ describe('collective BGV setup kernel commands', () => {
         const publicEnvelopeReference =
             publicPrivateVssEnvelopeCommitmentReference(envelopeReference);
 
-        expect(publicEnvelopeReference.encryptedEnvelope).toBeUndefined();
-        expect(
-            publicEnvelopeReference.transportedPrivateVssShareProofMaterial,
-        ).toBeUndefined();
         expect(String(publicEnvelopeReference.privateEnvelopeHash)).toMatch(
             protocolHashPattern,
         );

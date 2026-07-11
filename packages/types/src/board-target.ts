@@ -9,7 +9,6 @@ import type {
 /** Signed bulletin-board head used for append-only consistency checks. */
 export type SignedBoardHead = {
     readonly objectType: 'BoardHead';
-    readonly objectVersion: 1;
     readonly headHash: ProtocolHash;
     readonly ceremonyId: string;
     readonly boardSequence: number;
@@ -68,7 +67,6 @@ export type BoardConsistencyVerification =
 /** Signed receipt proving that one voter encrypted ballot was accepted. */
 export type CastReceipt = {
     readonly objectType: 'CastReceipt';
-    readonly objectVersion: 1;
     readonly castReceiptHash: ProtocolHash;
     readonly ceremonyId: string;
     readonly electionManifestHash: ProtocolHash;
@@ -88,7 +86,6 @@ export type CloseRecordKind = 'RegistrationClosed' | 'VotingClosed';
 /** Signed organizer record closing registration or voting. */
 export type CloseRecord = {
     readonly objectType: 'CloseRecord';
-    readonly objectVersion: 1;
     readonly closeRecordHash: ProtocolHash;
     readonly ceremonyId: string;
     readonly electionManifestHash: ProtocolHash;
@@ -167,7 +164,6 @@ export type TargetProposal = {
 /** Full checkpoint whose hash is signed by target-finality witnesses. */
 export type TargetFinalityCheckpoint = TargetProposal & {
     readonly objectType: 'TargetFinalityCheckpoint';
-    readonly objectVersion: 1;
     readonly targetFinalityCheckpointHash: ProtocolHash;
     readonly boardPolicyHash: ProtocolHash;
     readonly finalizedBoardHeadHash: ProtocolHash;
@@ -177,7 +173,6 @@ export type TargetFinalityCheckpoint = TargetProposal & {
 /** Signed witness checkpoint over a finalized board head and target policy. */
 export type WitnessCheckpoint = {
     readonly objectType: 'WitnessCheckpoint';
-    readonly objectVersion: 1;
     readonly checkpointHash: ProtocolHash;
     readonly ceremonyId: string;
     readonly targetFinalityScope: string;
@@ -192,7 +187,6 @@ export type WitnessCheckpoint = {
 /** Record proving that enough witnesses finalized one target acceptance. */
 export type TargetFinalityRecord = {
     readonly objectType: 'TargetFinalityRecord';
-    readonly objectVersion: 1;
     readonly targetFinalityRecordHash: ProtocolHash;
     readonly ceremonyId: string;
     readonly targetFinalityScope: string;
@@ -244,7 +238,6 @@ export type AcceptedTargetFinalityCheckpoint = {
 
 export type EvaluatorReplayRecord = {
     readonly objectType: 'EvaluatorReplayRecord';
-    readonly objectVersion: 1;
     readonly evaluatorReplayRecordHash: ProtocolHash;
     readonly ceremonyId: string;
     readonly electionManifestHash: ProtocolHash;
@@ -264,7 +257,6 @@ export type EvaluatorReplayRecord = {
 
 export type TargetAcceptedRecord = {
     readonly objectType: 'TargetAcceptedRecord';
-    readonly objectVersion: 1;
     readonly targetAcceptedRecordHash: ProtocolHash;
     readonly ceremonyId: string;
     readonly electionManifestHash: ProtocolHash;

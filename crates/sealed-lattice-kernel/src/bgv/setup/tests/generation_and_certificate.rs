@@ -26,12 +26,11 @@ fn passive_setup_generation_is_verifiable() {
             .get("sampledLocalErrorCoefficients")
             .is_none()
     );
-    let verification = verify_passive_setup_package_from_request(&serde_json::json!({
+    verify_passive_setup_package_from_request(&serde_json::json!({
         "setupPackage": first.clone(),
         "expectedRosterHash": request()["rosterHash"],
     }))
     .expect("verify setup package");
-    assert_eq!(verification["operation"], "verifyBgvPassiveSetupPackage");
 }
 
 #[test]
@@ -131,7 +130,6 @@ fn public_common_random_polynomial_root_matches_canonical_object_hash() {
         .expect("setup seed hash");
     let common_random_polynomial_record = serde_json::json!({
         "objectType": "BgvPublicCommonRandomPolynomial",
-        "objectVersion": 1,
         "ceremonyId": package["setupInputs"]["ceremonyId"],
         "rosterHash": package["setupInputs"]["rosterHash"],
         "setupSeedHash": setup_seed_hash,

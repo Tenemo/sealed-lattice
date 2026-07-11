@@ -18,22 +18,21 @@ fn signed_residue_vector(coefficients: &[i64], modulus: u64) -> Vec<u64> {
         .collect()
 }
 
-fn compact_vss_message_encoding_vectors_with_layout(
+fn vss_public_message_encoding_vectors_with_layout(
     coefficients: &[i64],
     message_bound: u64,
     modulus: u64,
-    layout: crate::bgv::setup::compact_vss_commitment::CompactVssMessageEncodingLayout,
+    layout: crate::bgv::setup::vss_commitment::VssPublicMessageEncodingLayout,
 ) -> CanonicalResult<Vec<Vec<u64>>> {
     let unsigned_coefficients = coefficients
         .iter()
         .map(|coefficient| {
-            u64::try_from(*coefficient).map_err(|_| {
-                invalid_succinct_setup_proof("compact VSS message coefficient is negative")
-            })
+            u64::try_from(*coefficient)
+                .map_err(|_| invalid_succinct_setup_proof("VSS message coefficient is negative"))
         })
         .collect::<CanonicalResult<Vec<_>>>()?;
 
-    compact_vss_message_encoding_vectors_from_unsigned(
+    vss_public_message_encoding_vectors_from_unsigned(
         &unsigned_coefficients,
         message_bound,
         modulus,
@@ -41,21 +40,20 @@ fn compact_vss_message_encoding_vectors_with_layout(
     )
 }
 
-fn compact_vss_message_encoding_vectors_from_unsigned(
+fn vss_public_message_encoding_vectors_from_unsigned(
     coefficients: &[u64],
     message_bound: u64,
     modulus: u64,
-    layout: crate::bgv::setup::compact_vss_commitment::CompactVssMessageEncodingLayout,
+    layout: crate::bgv::setup::vss_commitment::VssPublicMessageEncodingLayout,
 ) -> CanonicalResult<Vec<Vec<u64>>> {
     let mut columns = vec![vec![0_u64; coefficients.len()]; layout.encoding_column_count()];
     for (coefficient_index, coefficient) in coefficients.iter().enumerate() {
         if *coefficient >= message_bound {
             return Err(invalid_succinct_setup_proof(
-                "compact VSS message coefficient is outside the statement bound",
+                "VSS message coefficient is outside the statement bound",
             ));
         }
-        let digits =
-            crate::bgv::setup::compact_vss_commitment::compact_vss_message_digits(*coefficient)?;
+        let digits = crate::bgv::setup::vss_commitment::vss_public_message_digits(*coefficient)?;
         for (digit_index, digit) in digits.iter().enumerate() {
             let digit_column = layout.digit_encoding_column(digit_index)?;
             columns[digit_column][coefficient_index] = *digit % modulus;
@@ -64,9 +62,8 @@ fn compact_vss_message_encoding_vectors_from_unsigned(
                 continue;
             }
             let trits =
-                crate::bgv::setup::compact_vss_commitment::compact_vss_message_digit_trits_for_count(
-                    *digit,
-                    trit_count,
+                crate::bgv::setup::vss_commitment::vss_public_message_digit_trits_for_count(
+                    *digit, trit_count,
                 )?;
             for (trit_index, trit) in trits.iter().enumerate() {
                 let trit_column = layout.trit_encoding_column(digit_index, trit_index)?;
@@ -78,52 +75,34 @@ fn compact_vss_message_encoding_vectors_from_unsigned(
     Ok(columns)
 }
 
-fn compact_vss_recipient_share_messages_by_item(
+fn vss_public_recipient_share_messages_by_item(
     witness: &TrusteeEvaluationKeyWitness,
 ) -> Vec<&[i64]> {
     if witness
-        .compact_vss_recipient_share_messages_by_item
+        .vss_public_recipient_share_messages_by_item
         .is_empty()
     {
-        vec![&witness.compact_vss_recipient_share_messages]
+        vec![&witness.vss_public_recipient_share_messages]
     } else {
         witness
-            .compact_vss_recipient_share_messages_by_item
+            .vss_public_recipient_share_messages_by_item
             .iter()
             .map(Vec::as_slice)
             .collect()
     }
 }
 
-fn compact_vss_carry_witnesses_by_item(witness: &TrusteeEvaluationKeyWitness) -> Vec<&[i64]> {
-    if witness.compact_vss_carry_witnesses_by_item.is_empty() {
-        vec![&witness.compact_vss_carry_witnesses]
+fn vss_public_carry_witnesses_by_item(witness: &TrusteeEvaluationKeyWitness) -> Vec<&[i64]> {
+    if witness.vss_public_carry_witnesses_by_item.is_empty() {
+        vec![&witness.vss_public_carry_witnesses]
     } else {
         witness
-            .compact_vss_carry_witnesses_by_item
+            .vss_public_carry_witnesses_by_item
             .iter()
             .map(Vec::as_slice)
             .collect()
     }
 }
-
-fn compact_vss_recipient_share_opening_randomness_by_item(
-    witness: &TrusteeEvaluationKeyWitness,
-) -> Vec<&[Vec<i64>]> {
-    if witness
-        .compact_vss_recipient_share_opening_randomness_by_item
-        .is_empty()
-    {
-        vec![&witness.compact_vss_recipient_share_opening_randomness]
-    } else {
-        witness
-            .compact_vss_recipient_share_opening_randomness_by_item
-            .iter()
-            .map(Vec::as_slice)
-            .collect()
-    }
-}
-
 pub(super) struct LimbWitnessCommitment {
     pub(super) plan: EvaluationDomainPlan,
     pub(super) layout: LimbColumnLayout,
@@ -184,58 +163,40 @@ pub(super) fn build_limb_witness_commitment(
                 append_logical_vector(&logical_vector);
             }
         }
-    } else if layout.compact_vss_active() {
-        let compact_vss_share_linkage =
-            statement
-                .compact_vss_share_linkage
-                .as_ref()
-                .ok_or_else(|| {
-                    invalid_succinct_setup_proof(
-                        "compact VSS witness layout requires a share-linkage statement",
-                    )
-                })?;
-        let coefficient_slots = compact_vss_share_linkage.coefficient_witness_slots();
+    } else if layout.vss_public_active() {
+        let vss_share_linkage = statement.vss_share_linkage.as_ref().ok_or_else(|| {
+            invalid_succinct_setup_proof("VSS witness layout requires a share-linkage statement")
+        })?;
+        let coefficient_slots = vss_share_linkage.coefficient_witness_slots();
         if coefficient_slots.len()
             != witness
-                .compact_vss_coefficient_messages_by_shamir_index
+                .vss_public_coefficient_messages_by_shamir_index
                 .len()
         {
             return Err(invalid_succinct_setup_proof(
-                "compact VSS coefficient witness count does not match the statement",
+                "VSS coefficient witness count does not match the statement",
             ));
         }
-        if witness
-            .compact_vss_coefficient_opening_randomness_by_shamir_index
-            .len()
-            != coefficient_slots.len()
-        {
-            return Err(invalid_succinct_setup_proof(
-                "compact VSS coefficient randomness witness count does not match the statement",
-            ));
-        }
-        let item_count = compact_vss_share_linkage.item_count();
+        let item_count = vss_share_linkage.item_count();
         let coefficient_slot_indices_by_item =
-            compact_vss_share_linkage.coefficient_witness_slot_indices_by_item();
-        let recipient_messages_by_item = compact_vss_recipient_share_messages_by_item(witness);
-        let carry_witnesses_by_item = compact_vss_carry_witnesses_by_item(witness);
-        let recipient_randomness_by_item =
-            compact_vss_recipient_share_opening_randomness_by_item(witness);
+            vss_share_linkage.coefficient_witness_slot_indices_by_item();
+        let recipient_messages_by_item = vss_public_recipient_share_messages_by_item(witness);
+        let carry_witnesses_by_item = vss_public_carry_witnesses_by_item(witness);
         if coefficient_slot_indices_by_item.len() != item_count
             || recipient_messages_by_item.len() != item_count
             || carry_witnesses_by_item.len() != item_count
-            || recipient_randomness_by_item.len() != item_count
         {
             return Err(invalid_succinct_setup_proof(
-                "compact VSS packed witness item count does not match the statement",
+                "VSS packed witness item count does not match the statement",
             ));
         }
-        let message_bounds = compact_vss_share_linkage.packed_message_bounds();
-        if message_bounds.len() != layout.compact_vss_message_vector_count() {
+        let message_bounds = vss_share_linkage.packed_message_bounds();
+        if message_bounds.len() != layout.vss_public_message_vector_count() {
             return Err(invalid_succinct_setup_proof(
-                "compact VSS packed message bounds do not match the column layout",
+                "VSS packed message bounds do not match the column layout",
             ));
         }
-        let validate_compact_vss_vector =
+        let validate_vss_public_vector =
             |source: &[i64], field_name: &str| -> CanonicalResult<()> {
                 if source.len() != layout.base_ring_degree {
                     return Err(invalid_succinct_setup_proof(format!(
@@ -248,104 +209,48 @@ pub(super) fn build_limb_witness_commitment(
         for (coefficient_slot_index, message_bound) in message_bounds
             .iter()
             .copied()
-            .take(layout.compact_vss_coefficient_columns)
+            .take(layout.vss_public_coefficient_columns)
             .enumerate()
         {
             let coefficient_messages = witness
-                .compact_vss_coefficient_messages_by_shamir_index
+                .vss_public_coefficient_messages_by_shamir_index
                 .get(coefficient_slot_index)
                 .ok_or_else(|| {
                     invalid_succinct_setup_proof(
-                        "compact VSS coefficient witness slot is outside the witness",
+                        "VSS coefficient witness slot is outside the witness",
                     )
                 })?;
-            validate_compact_vss_vector(
-                coefficient_messages,
-                "compact VSS coefficient message witness",
-            )?;
-            for logical_vector in compact_vss_message_encoding_vectors_with_layout(
+            validate_vss_public_vector(coefficient_messages, "VSS coefficient message witness")?;
+            for logical_vector in vss_public_message_encoding_vectors_with_layout(
                 coefficient_messages,
                 message_bound,
                 modulus,
-                layout.compact_vss_message_encoding_layout(coefficient_slot_index),
+                layout.vss_public_message_encoding_layout(coefficient_slot_index),
             )? {
                 append_logical_vector(&logical_vector);
             }
         }
         for (item_index, recipient_messages) in recipient_messages_by_item.iter().enumerate() {
-            validate_compact_vss_vector(
-                recipient_messages,
-                "compact VSS recipient message witness",
-            )?;
-            let recipient_message_position = layout.compact_vss_coefficient_columns + item_index;
-            for logical_vector in compact_vss_message_encoding_vectors_with_layout(
+            validate_vss_public_vector(recipient_messages, "VSS recipient message witness")?;
+            let recipient_message_position = layout.vss_public_coefficient_columns + item_index;
+            for logical_vector in vss_public_message_encoding_vectors_with_layout(
                 recipient_messages,
                 message_bounds[recipient_message_position],
                 modulus,
-                layout.compact_vss_message_encoding_layout(recipient_message_position),
+                layout.vss_public_message_encoding_layout(recipient_message_position),
             )? {
                 append_logical_vector(&logical_vector);
             }
         }
         for carry_witnesses in carry_witnesses_by_item {
-            validate_compact_vss_vector(carry_witnesses, "compact VSS carry witness")?;
+            validate_vss_public_vector(carry_witnesses, "VSS carry witness")?;
             let carry_vector = signed_residue_vector(carry_witnesses, modulus);
             append_logical_vector(&carry_vector);
         }
-
-        let compact_vss_randomness_column_count =
-            crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_RANDOMNESS_COLUMN_COUNT;
-        for coefficient_slot_index in 0..layout.compact_vss_coefficient_columns {
-            for randomness_column_index in 0..compact_vss_randomness_column_count {
-                let randomness_columns = witness
-                    .compact_vss_coefficient_opening_randomness_by_shamir_index
-                    .get(coefficient_slot_index)
-                    .ok_or_else(|| {
-                        invalid_succinct_setup_proof(
-                            "compact VSS coefficient randomness slot is outside the witness",
-                        )
-                    })?;
-                let randomness_column = randomness_columns
-                    .get(randomness_column_index)
-                    .ok_or_else(|| {
-                        invalid_succinct_setup_proof(
-                            "compact VSS coefficient randomness column is missing",
-                        )
-                    })?;
-                validate_compact_vss_vector(
-                    randomness_column,
-                    "compact VSS coefficient randomness witness",
-                )?;
-                let logical_vector = signed_residue_vector(randomness_column, modulus);
-                append_logical_vector(&logical_vector);
-            }
-        }
-        for randomness_columns in recipient_randomness_by_item {
-            for randomness_column_index in 0..compact_vss_randomness_column_count {
-                let randomness_column = randomness_columns
-                    .get(randomness_column_index)
-                    .ok_or_else(|| {
-                        invalid_succinct_setup_proof(
-                            "compact VSS recipient randomness column is missing",
-                        )
-                    })?;
-                validate_compact_vss_vector(
-                    randomness_column,
-                    "compact VSS recipient randomness witness",
-                )?;
-                let logical_vector = signed_residue_vector(randomness_column, modulus);
-                append_logical_vector(&logical_vector);
-            }
-        }
-    } else if layout.compact_same_secret_bridge_active() {
-        let bridge = statement
-            .compact_same_secret_bridge
-            .as_ref()
-            .ok_or_else(|| {
-                invalid_succinct_setup_proof(
-                    "compact same-secret bridge layout requires a bridge statement",
-                )
-            })?;
+    } else if layout.same_secret_bridge_active() {
+        let bridge = statement.same_secret_bridge.as_ref().ok_or_else(|| {
+            invalid_succinct_setup_proof("same-secret bridge layout requires a bridge statement")
+        })?;
         let secret_vector = signed_residue_vector(&witness.secret_coefficients, modulus);
         append_logical_vector(&secret_vector);
         let negative_indicator_vector =
@@ -361,16 +266,16 @@ pub(super) fn build_limb_witness_commitment(
                         + i128::from(*target_rns_prime) * i128::from(*negative_indicator);
                     u64::try_from(target_message).map_err(|_| {
                         invalid_succinct_setup_proof(
-                            "compact same-secret bridge target message coefficient is negative",
+                            "same-secret bridge target message coefficient is negative",
                         )
                     })
                 })
                 .collect::<CanonicalResult<Vec<_>>>()?;
-            for logical_vector in compact_vss_message_encoding_vectors_from_unsigned(
+            for logical_vector in vss_public_message_encoding_vectors_from_unsigned(
                 &target_message_coefficients,
                 *target_rns_prime,
                 modulus,
-                crate::bgv::setup::compact_vss_commitment::compact_vss_message_encoding_layout(
+                crate::bgv::setup::vss_commitment::vss_public_message_encoding_layout(
                     *target_rns_prime,
                 )?,
             )? {
@@ -398,21 +303,13 @@ pub(super) fn build_limb_witness_commitment(
                 })?;
             let message_encoding_layout = statement
                 .target_decryption_message_encoding_layout(limb_index, global_message_index)?;
-            for logical_vector in compact_vss_message_encoding_vectors_with_layout(
+            for logical_vector in vss_public_message_encoding_vectors_with_layout(
                 message_vector,
                 message_bound,
                 modulus,
                 message_encoding_layout,
             )? {
                 append_logical_vector(&logical_vector);
-            }
-        }
-        if layout.target_decryption_randomness_columns > 0 {
-            for randomness_columns in &witness.target_decryption_opening_randomness_by_commitment {
-                for column in randomness_columns {
-                    let logical_vector = signed_residue_vector(column, modulus);
-                    append_logical_vector(&logical_vector);
-                }
             }
         }
     } else {
@@ -440,11 +337,11 @@ pub(super) fn build_limb_witness_commitment(
                 append_logical_vector(&error_square_vector);
             }
         }
-        if layout.linkage_active() {
+        if layout.linkage_active() || layout.same_secret_bridge_material_active() {
             let negative_indicator_vector =
                 signed_residue_vector(&witness.negative_indicator_coefficients, modulus);
             append_logical_vector(&negative_indicator_vector);
-            if let Some(bridge) = &statement.compact_same_secret_bridge {
+            if let Some(bridge) = &statement.same_secret_bridge {
                 for target_rns_prime in &bridge.target_rns_primes {
                     let target_message_coefficients = witness
                         .secret_coefficients
@@ -455,16 +352,16 @@ pub(super) fn build_limb_witness_commitment(
                                 + i128::from(*target_rns_prime) * i128::from(*negative_indicator);
                             u64::try_from(target_message).map_err(|_| {
                                 invalid_succinct_setup_proof(
-                                    "compact same-secret bridge target message coefficient is negative",
+                                    "same-secret bridge target message coefficient is negative",
                                 )
                             })
                         })
                         .collect::<CanonicalResult<Vec<_>>>()?;
-                    for logical_vector in compact_vss_message_encoding_vectors_from_unsigned(
+                    for logical_vector in vss_public_message_encoding_vectors_from_unsigned(
                         &target_message_coefficients,
                         *target_rns_prime,
                         modulus,
-                        crate::bgv::setup::compact_vss_commitment::compact_vss_message_encoding_layout(
+                        crate::bgv::setup::vss_commitment::vss_public_message_encoding_layout(
                             *target_rns_prime,
                         )?,
                     )? {
@@ -472,10 +369,12 @@ pub(super) fn build_limb_witness_commitment(
                     }
                 }
             }
-            for randomness_columns in &witness.opening_randomness_by_limb {
-                for column in randomness_columns {
-                    let logical_vector = signed_residue_vector(column, modulus);
-                    append_logical_vector(&logical_vector);
+            if layout.linkage_active() {
+                for randomness_columns in &witness.opening_randomness_by_limb {
+                    for column in randomness_columns {
+                        let logical_vector = signed_residue_vector(column, modulus);
+                        append_logical_vector(&logical_vector);
+                    }
                 }
             }
         }
@@ -519,17 +418,17 @@ pub(super) fn validate_witness_support(
             || !witness.negative_indicator_coefficients.is_empty()
             || !witness.opening_randomness_by_limb.is_empty()
             || !witness
-                .compact_vss_coefficient_messages_by_shamir_index
+                .vss_public_coefficient_messages_by_shamir_index
                 .is_empty()
-            || !witness.compact_vss_recipient_share_messages.is_empty()
+            || !witness.vss_public_recipient_share_messages.is_empty()
             || !witness
-                .compact_vss_coefficient_opening_randomness_by_shamir_index
+                .vss_public_coefficient_opening_randomness_by_shamir_index
                 .is_empty()
             || !witness
-                .compact_vss_recipient_share_opening_randomness
+                .vss_public_recipient_share_opening_randomness
                 .is_empty()
-            || !witness.compact_vss_carry_witnesses.is_empty()
-            || statement.compact_same_secret_bridge.is_some()
+            || !witness.vss_public_carry_witnesses.is_empty()
+            || statement.same_secret_bridge.is_some()
             || !witness.target_decryption_message_vectors.is_empty()
             || !witness
                 .target_decryption_opening_randomness_by_commitment
@@ -542,7 +441,7 @@ pub(super) fn validate_witness_support(
         }
         return validate_private_vss_witness(private_vss_share, witness, statement.ring_degree);
     }
-    if let Some(compact_vss_share_linkage) = &statement.compact_vss_share_linkage {
+    if let Some(vss_share_linkage) = &statement.vss_share_linkage {
         if !witness.secret_coefficients.is_empty()
             || !witness.error_coefficients_by_key.is_empty()
             || !witness.negative_indicator_coefficients.is_empty()
@@ -561,18 +460,12 @@ pub(super) fn validate_witness_support(
             || statement.target_decryption_share.is_some()
         {
             return Err(invalid_succinct_setup_proof(
-                "compact VSS share-linkage witness must not include key, same-secret, or private VSS material",
+                "VSS share-linkage witness must not include key, same-secret, or private VSS material",
             ));
         }
-        return validate_compact_vss_witness(
-            compact_vss_share_linkage,
-            witness,
-            statement.ring_degree,
-        );
+        return validate_vss_public_witness(vss_share_linkage, witness, statement.ring_degree);
     }
-    if let Some(compact_same_secret_bridge) = &statement.compact_same_secret_bridge
-        && statement.keys.is_empty()
-    {
+    if statement.same_secret_bridge.is_some() && statement.keys.is_empty() {
         if !witness.error_coefficients_by_key.is_empty()
             || !witness
                 .private_vss_coefficient_messages_by_shamir_index
@@ -582,16 +475,16 @@ pub(super) fn validate_witness_support(
                 .is_empty()
             || !witness.private_vss_carry_witnesses.is_empty()
             || !witness
-                .compact_vss_coefficient_messages_by_shamir_index
+                .vss_public_coefficient_messages_by_shamir_index
                 .is_empty()
-            || !witness.compact_vss_recipient_share_messages.is_empty()
+            || !witness.vss_public_recipient_share_messages.is_empty()
             || !witness
-                .compact_vss_coefficient_opening_randomness_by_shamir_index
+                .vss_public_coefficient_opening_randomness_by_shamir_index
                 .is_empty()
             || !witness
-                .compact_vss_recipient_share_opening_randomness
+                .vss_public_recipient_share_opening_randomness
                 .is_empty()
-            || !witness.compact_vss_carry_witnesses.is_empty()
+            || !witness.vss_public_carry_witnesses.is_empty()
             || !witness.target_decryption_message_vectors.is_empty()
             || !witness
                 .target_decryption_opening_randomness_by_commitment
@@ -599,12 +492,17 @@ pub(super) fn validate_witness_support(
             || statement.target_decryption_share.is_some()
         {
             return Err(invalid_succinct_setup_proof(
-                "compact same-secret bridge witness must not include key, private VSS, or share-linkage material",
+                "same-secret bridge witness must not include key, private VSS, or share-linkage material",
             ));
         }
-        return validate_compact_same_secret_bridge_witness(
-            compact_same_secret_bridge.target_constant_commitments.len(),
-            crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_RANDOMNESS_COLUMN_COUNT,
+        let source_linkage = statement.same_secret_linkage.as_ref().ok_or_else(|| {
+            invalid_succinct_setup_proof(
+                "same-secret bridge witness requires the source commitment linkage",
+            )
+        })?;
+        return validate_same_secret_bridge_witness(
+            source_linkage.commitments.len(),
+            crate::bgv::setup::commitment::SETUP_COMMITMENT_RANDOMNESS_WIDTH,
             witness,
             statement.ring_degree,
         );
@@ -622,16 +520,16 @@ pub(super) fn validate_witness_support(
                 .is_empty()
             || !witness.private_vss_carry_witnesses.is_empty()
             || !witness
-                .compact_vss_coefficient_messages_by_shamir_index
+                .vss_public_coefficient_messages_by_shamir_index
                 .is_empty()
-            || !witness.compact_vss_recipient_share_messages.is_empty()
+            || !witness.vss_public_recipient_share_messages.is_empty()
             || !witness
-                .compact_vss_coefficient_opening_randomness_by_shamir_index
+                .vss_public_coefficient_opening_randomness_by_shamir_index
                 .is_empty()
             || !witness
-                .compact_vss_recipient_share_opening_randomness
+                .vss_public_recipient_share_opening_randomness
                 .is_empty()
-            || !witness.compact_vss_carry_witnesses.is_empty()
+            || !witness.vss_public_carry_witnesses.is_empty()
         {
             return Err(invalid_succinct_setup_proof(
                 "target-decryption share witness must not include setup proof material",
@@ -685,7 +583,7 @@ pub(super) fn validate_witness_support(
     }
     match (
         &statement.same_secret_linkage,
-        &statement.compact_same_secret_bridge,
+        &statement.same_secret_bridge,
     ) {
         (Some(linkage), None) => {
             validate_linkage_witness(
@@ -695,13 +593,8 @@ pub(super) fn validate_witness_support(
                 statement.ring_degree,
             )?;
         }
-        (None, Some(compact_same_secret_bridge)) => {
-            validate_compact_same_secret_bridge_witness(
-                compact_same_secret_bridge.target_constant_commitments.len(),
-                crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_RANDOMNESS_COLUMN_COUNT,
-                witness,
-                statement.ring_degree,
-            )?;
+        (None, Some(_)) => {
+            validate_same_secret_bridge_witness(0, 0, witness, statement.ring_degree)?;
         }
         (None, None) => {
             if !witness.negative_indicator_coefficients.is_empty()
@@ -714,17 +607,17 @@ pub(super) fn validate_witness_support(
                     .is_empty()
                 || !witness.private_vss_carry_witnesses.is_empty()
                 || !witness
-                    .compact_vss_coefficient_messages_by_shamir_index
+                    .vss_public_coefficient_messages_by_shamir_index
                     .is_empty()
-                || !witness.compact_vss_recipient_share_messages.is_empty()
+                || !witness.vss_public_recipient_share_messages.is_empty()
                 || !witness
-                    .compact_vss_coefficient_opening_randomness_by_shamir_index
+                    .vss_public_coefficient_opening_randomness_by_shamir_index
                     .is_empty()
                 || !witness
-                    .compact_vss_recipient_share_opening_randomness
+                    .vss_public_recipient_share_opening_randomness
                     .is_empty()
-                || !witness.compact_vss_carry_witnesses.is_empty()
-                || statement.compact_same_secret_bridge.is_some()
+                || !witness.vss_public_carry_witnesses.is_empty()
+                || statement.same_secret_bridge.is_some()
                 || !witness.target_decryption_message_vectors.is_empty()
                 || !witness
                     .target_decryption_opening_randomness_by_commitment
@@ -736,10 +629,13 @@ pub(super) fn validate_witness_support(
                 ));
             }
         }
-        (Some(_), Some(_)) => {
-            return Err(invalid_succinct_setup_proof(
-                "witness must not carry both same-secret linkage forms",
-            ));
+        (Some(linkage), Some(_)) => {
+            validate_same_secret_bridge_witness(
+                linkage.commitments.len(),
+                crate::bgv::setup::commitment::SETUP_COMMITMENT_RANDOMNESS_WIDTH,
+                witness,
+                statement.ring_degree,
+            )?;
         }
     }
 
@@ -781,7 +677,7 @@ fn validate_linkage_witness(
     Ok(())
 }
 
-fn validate_compact_same_secret_bridge_witness(
+fn validate_same_secret_bridge_witness(
     commitment_count: usize,
     randomness_column_count: usize,
     witness: &TrusteeEvaluationKeyWitness,
@@ -794,7 +690,7 @@ fn validate_compact_same_secret_bridge_witness(
             .any(|coefficient| !(-1..=1).contains(coefficient))
     {
         return Err(invalid_succinct_setup_proof(
-            "compact same-secret bridge secret must be ternary at the ring degree",
+            "same-secret bridge secret must be ternary at the ring degree",
         ));
     }
 
@@ -822,11 +718,12 @@ fn validate_target_decryption_share_witness(
                 .sum::<usize>()
         })
         .sum::<usize>();
+    // Committed-material commitments carry no algebraic opening randomness;
+    // the trees hide via their masks and salts.
     if witness.target_decryption_message_vectors.len() != message_count
-        || witness
+        || !witness
             .target_decryption_opening_randomness_by_commitment
-            .len()
-            != message_count
+            .is_empty()
     {
         return Err(invalid_succinct_setup_proof(
             "target-decryption witness shape does not match the statement",
@@ -842,25 +739,6 @@ fn validate_target_decryption_share_witness(
         i64::try_from(statement.smudging_message_coefficient_bound).map_err(|_| {
             invalid_succinct_setup_proof("target-decryption smudging bound does not fit i64")
         })?;
-    for (commitment_index, randomness_columns) in witness
-        .target_decryption_opening_randomness_by_commitment
-        .iter()
-        .enumerate()
-    {
-        if randomness_columns.len()
-            != crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_RANDOMNESS_COLUMN_COUNT
-            || randomness_columns.iter().any(|column| {
-                column.len() != ring_degree
-                    || column
-                        .iter()
-                        .any(|coefficient| !(-1..=1).contains(coefficient))
-            })
-        {
-            return Err(invalid_succinct_setup_proof(format!(
-                "target-decryption opening randomness for commitment {commitment_index} has the wrong shape"
-            )));
-        }
-    }
 
     let mut limb_message_offset = 0;
     for limb_statement in &statement.limb_statements {
@@ -956,8 +834,8 @@ fn validate_target_decryption_share_witness(
     Ok(())
 }
 
-fn validate_compact_vss_witness(
-    statement: &super::super::relation::CompactVssShareLinkageStatement,
+fn validate_vss_public_witness(
+    statement: &super::super::relation::VssShareLinkageStatement,
     witness: &TrusteeEvaluationKeyWitness,
     ring_degree: usize,
 ) -> CanonicalResult<()> {
@@ -965,60 +843,50 @@ fn validate_compact_vss_witness(
     let coefficient_slots = statement.coefficient_witness_slots();
     let coefficient_count = coefficient_slots.len();
     let coefficient_slot_indices_by_item = statement.coefficient_witness_slot_indices_by_item();
-    let recipient_share_messages_by_item = compact_vss_recipient_share_messages_by_item(witness);
-    let carry_witnesses_by_item = compact_vss_carry_witnesses_by_item(witness);
-    let recipient_share_opening_randomness_by_item =
-        compact_vss_recipient_share_opening_randomness_by_item(witness);
+    let recipient_share_messages_by_item = vss_public_recipient_share_messages_by_item(witness);
+    let carry_witnesses_by_item = vss_public_carry_witnesses_by_item(witness);
+    // Committed-material commitments carry no algebraic opening randomness;
+    // the trees hide via their masks and salts, so no randomness columns are
+    // part of the witness.
     if witness
-        .compact_vss_coefficient_messages_by_shamir_index
+        .vss_public_coefficient_messages_by_shamir_index
         .len()
         != coefficient_count
-        || witness
-            .compact_vss_coefficient_opening_randomness_by_shamir_index
-            .len()
-            != coefficient_count
+        || !witness
+            .vss_public_coefficient_opening_randomness_by_shamir_index
+            .is_empty()
+        || !witness
+            .vss_public_recipient_share_opening_randomness
+            .is_empty()
+        || !witness
+            .vss_public_recipient_share_opening_randomness_by_item
+            .is_empty()
         || coefficient_slot_indices_by_item.len() != item_count
         || recipient_share_messages_by_item.len() != item_count
         || carry_witnesses_by_item.len() != item_count
-        || recipient_share_opening_randomness_by_item.len() != item_count
     {
         return Err(invalid_succinct_setup_proof(
-            "compact VSS witness shape does not match the statement",
+            "VSS witness shape does not match the statement",
         ));
     }
-    for (slot_index, (coefficient_slot, (messages, randomness_columns))) in coefficient_slots
+    for (slot_index, (coefficient_slot, messages)) in coefficient_slots
         .iter()
         .zip(
             witness
-                .compact_vss_coefficient_messages_by_shamir_index
-                .iter()
-                .zip(
-                    witness
-                        .compact_vss_coefficient_opening_randomness_by_shamir_index
-                        .iter(),
-                ),
+                .vss_public_coefficient_messages_by_shamir_index
+                .iter(),
         )
         .enumerate()
     {
-        let source_modulus_i64 =
-            i64::try_from(coefficient_slot.source_message_modulus).map_err(|_| {
-                invalid_succinct_setup_proof("compact VSS source modulus does not fit i64")
-            })?;
+        let source_modulus_i64 = i64::try_from(coefficient_slot.source_message_modulus)
+            .map_err(|_| invalid_succinct_setup_proof("VSS source modulus does not fit i64"))?;
         if messages.len() != ring_degree
             || messages
                 .iter()
                 .any(|coefficient| *coefficient < 0 || *coefficient >= source_modulus_i64)
-            || randomness_columns.len()
-                != crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_RANDOMNESS_COLUMN_COUNT
-            || randomness_columns.iter().any(|column| {
-                column.len() != ring_degree
-                    || column
-                        .iter()
-                        .any(|coefficient| !(-1..=1).contains(coefficient))
-            })
         {
             return Err(invalid_succinct_setup_proof(format!(
-                "compact VSS witness for shared coefficient slot {slot_index} has the wrong shape"
+                "VSS witness for shared coefficient slot {slot_index} has the wrong shape"
             )));
         }
     }
@@ -1050,68 +918,63 @@ fn validate_compact_vss_witness(
                 .any(|slot_index| *slot_index >= coefficient_count)
         {
             return Err(invalid_succinct_setup_proof(
-                "compact VSS coefficient witness slot layout does not match the item",
+                "VSS coefficient witness slot layout does not match the item",
             ));
         }
-        let source_modulus_i64 = i64::try_from(source_message_modulus).map_err(|_| {
-            invalid_succinct_setup_proof("compact VSS source modulus does not fit i64")
-        })?;
+        let source_modulus_i64 = i64::try_from(source_message_modulus)
+            .map_err(|_| invalid_succinct_setup_proof("VSS source modulus does not fit i64"))?;
         let recipient_share_messages = recipient_share_messages_by_item[item_index];
         let carry_witnesses = carry_witnesses_by_item[item_index];
-        let recipient_share_opening_randomness =
-            recipient_share_opening_randomness_by_item[item_index];
         if recipient_share_messages.len() != ring_degree
             || carry_witnesses.len() != ring_degree
             || recipient_share_messages
                 .iter()
                 .any(|coefficient| *coefficient < 0 || *coefficient >= source_modulus_i64)
-            || recipient_share_opening_randomness.len()
-                != crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_RANDOMNESS_COLUMN_COUNT
-            || recipient_share_opening_randomness.iter().any(|column| {
-                column.len() != ring_degree
-                    || column
-                        .iter()
-                        .any(|coefficient| !(-1..=1).contains(coefficient))
-            })
         {
             return Err(invalid_succinct_setup_proof(
-                "compact VSS recipient share witness has the wrong shape",
+                "VSS recipient share witness has the wrong shape",
             ));
         }
         let carry_bound = private_vss_share_lifted_carry_bound(
-            recipient_roster_position,
+            if statement.is_threshold_aggregate {
+                0
+            } else {
+                recipient_roster_position
+            },
             item_coefficient_count,
         )?;
         for carry in carry_witnesses {
             let carry_i128 = i128::from(*carry);
             if carry_i128 < 0 || carry_i128 > carry_bound {
                 return Err(invalid_succinct_setup_proof(
-                    "compact VSS carry witness is outside the accepted bound",
+                    "VSS carry witness is outside the accepted bound",
                 ));
             }
         }
-        let trustee_point = i128::from(crate::bgv::setup::sharing::canonical_trustee_point(
-            usize::try_from(recipient_roster_position).map_err(|_| {
-                invalid_succinct_setup_proof(
-                    "compact VSS recipient roster position does not fit usize",
-                )
-            })?,
-            source_message_modulus,
-        )?);
+        let trustee_point = if statement.is_threshold_aggregate {
+            1_i128
+        } else {
+            i128::from(crate::bgv::setup::sharing::canonical_trustee_point(
+                usize::try_from(recipient_roster_position).map_err(|_| {
+                    invalid_succinct_setup_proof("VSS recipient roster position does not fit usize")
+                })?,
+                source_message_modulus,
+            )?)
+        };
         let mut powers = Vec::with_capacity(item_coefficient_count);
         let mut power = 1_i128;
         for _ in 0..item_coefficient_count {
             powers.push(power);
-            power = power.checked_mul(trustee_point).ok_or_else(|| {
-                invalid_succinct_setup_proof("compact VSS point power overflowed")
-            })?;
+            power = power
+                .checked_mul(trustee_point)
+                .ok_or_else(|| invalid_succinct_setup_proof("VSS point power overflowed"))?;
         }
         for coefficient_position in 0..ring_degree {
             let mut left = 0_i128;
             for (coefficient_slot_index, trustee_point_power) in
                 item_coefficient_slot_indices.iter().zip(powers.iter())
             {
-                let messages = &witness.compact_vss_coefficient_messages_by_shamir_index
+                let messages = &witness.vss_public_coefficient_messages_by_shamir_index
                     [*coefficient_slot_index];
                 left = left
                     .checked_add(
@@ -1119,33 +982,27 @@ fn validate_compact_vss_witness(
                             .checked_mul(i128::from(messages[coefficient_position]))
                             .ok_or_else(|| {
                                 invalid_succinct_setup_proof(
-                                    "compact VSS lifted message product overflowed",
+                                    "VSS lifted message product overflowed",
                                 )
                             })?,
                     )
-                    .ok_or_else(|| {
-                        invalid_succinct_setup_proof("compact VSS lifted sum overflowed")
-                    })?;
+                    .ok_or_else(|| invalid_succinct_setup_proof("VSS lifted sum overflowed"))?;
             }
             left = left
                 .checked_sub(i128::from(recipient_share_messages[coefficient_position]))
-                .ok_or_else(|| {
-                    invalid_succinct_setup_proof("compact VSS lifted share overflowed")
-                })?;
+                .ok_or_else(|| invalid_succinct_setup_proof("VSS lifted share overflowed"))?;
             left = left
                 .checked_sub(
                     i128::from(source_message_modulus)
                         .checked_mul(i128::from(carry_witnesses[coefficient_position]))
                         .ok_or_else(|| {
-                            invalid_succinct_setup_proof("compact VSS lifted carry overflowed")
+                            invalid_succinct_setup_proof("VSS lifted carry overflowed")
                         })?,
                 )
-                .ok_or_else(|| {
-                    invalid_succinct_setup_proof("compact VSS lifted relation overflowed")
-                })?;
+                .ok_or_else(|| invalid_succinct_setup_proof("VSS lifted relation overflowed"))?;
             if left != 0 {
                 return Err(invalid_succinct_setup_proof(format!(
-                    "compact VSS lifted relation failed for item {item_index} at coefficient {coefficient_position}"
+                    "VSS lifted relation failed for item {item_index} at coefficient {coefficient_position}"
                 )));
             }
         }

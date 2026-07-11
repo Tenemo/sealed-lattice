@@ -4,10 +4,7 @@ const TARGET_DECRYPTION_SHARE_PROOF_MATERIAL_OBJECT_TYPE: &str =
     "BgvTargetDecryptionShareProofMaterial";
 const TARGET_DECRYPTION_SHARE_PROOF_RECORD_OBJECT_TYPE: &str =
     "BgvTargetDecryptionShareProofRecord";
-const TARGET_DECRYPTION_SHARE_PROOF_MATERIAL_OBJECT_VERSION: u64 = 8;
-const TARGET_DECRYPTION_SHARE_PROOF_RECORD_OBJECT_VERSION: u64 = 7;
 
-#[cfg(any(feature = "target-decryption-development-commands", test))]
 pub(super) struct TargetDecryptionShareProofMaterialGenerationInput<'a> {
     pub(super) setup_binding: &'a SetupBinding,
     pub(super) target_accepted: &'a TargetAcceptedBinding,
@@ -43,7 +40,6 @@ struct TargetDecryptionShareProofRecordVerificationInput<'a> {
     active_limb_count: usize,
 }
 
-#[cfg(any(feature = "target-decryption-development-commands", test))]
 pub(super) fn generate_target_decryption_share_proof_material_from_local_witness(
     input: TargetDecryptionShareProofMaterialGenerationInput<'_>,
 ) -> CanonicalResult<Value> {
@@ -93,13 +89,11 @@ pub(super) fn generate_target_decryption_share_proof_material_from_local_witness
     let proof_bytes_base64 = encode_standard_base64(&proof_bytes);
     let proof_record = json!({
         "objectType": TARGET_DECRYPTION_SHARE_PROOF_RECORD_OBJECT_TYPE,
-        "objectVersion": TARGET_DECRYPTION_SHARE_PROOF_RECORD_OBJECT_VERSION,
         "proofBytesBase64": proof_bytes_base64,
     });
 
     let mut proof_material = json!({
         "objectType": TARGET_DECRYPTION_SHARE_PROOF_MATERIAL_OBJECT_TYPE,
-        "objectVersion": TARGET_DECRYPTION_SHARE_PROOF_MATERIAL_OBJECT_VERSION,
         "proofRecords": [proof_record],
     });
     proof_material["proofMaterialRoot"] = json!(derive_canonical_object_hash(
@@ -123,12 +117,10 @@ pub(super) fn verify_target_decryption_share_proof_material(
     )?;
     if string_at_path(input.proof_material, &["objectType"])?
         != TARGET_DECRYPTION_SHARE_PROOF_MATERIAL_OBJECT_TYPE
-        || unsigned_at_path(input.proof_material, &["objectVersion"])?
-            != TARGET_DECRYPTION_SHARE_PROOF_MATERIAL_OBJECT_VERSION
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "target-decryption proof material must use the current compact target proof-material layout",
+            "target-decryption proof material must use the current target proof-material layout",
         ));
     }
     hash_at_path(input.proof_material, &["proofMaterialRoot"])?;
@@ -179,12 +171,10 @@ fn verify_target_decryption_share_proof_record(
     let proof_record = input.proof_record;
     if string_at_path(proof_record, &["objectType"])?
         != TARGET_DECRYPTION_SHARE_PROOF_RECORD_OBJECT_TYPE
-        || unsigned_at_path(proof_record, &["objectVersion"])?
-            != TARGET_DECRYPTION_SHARE_PROOF_RECORD_OBJECT_VERSION
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "target-decryption proof record must use the current compact target proof-record layout",
+            "target-decryption proof record must use the current target proof-record layout",
         ));
     }
     let expected_target_rns_limb_indices = (0..input.active_limb_count).collect::<Vec<_>>();

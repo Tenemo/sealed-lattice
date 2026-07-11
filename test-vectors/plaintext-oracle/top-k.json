@@ -84,8 +84,8 @@
       0,
       0
     ],
-    "tallyHash": "3c3aa36b7d7040e2d98eaf0df6eb471a79156b0e811dd7888db9ba6a57ced05d239f3646f4254df227430fc026e6b8ec177b8d6d0ea6c9ca60f3023e8a060dd3",
-    "oracleHash": "ec7a4b0bfda11c83f71af2689cf8e144d6c2641cf2eff19a77a04da1e953558fd7de78414c22695471eb6495452a4a12ad205accfa4cb406cf077c7c66aaccee"
+    "tallyHash": "4019a0331aa6274ed20a6ea7b4f6cce8a4dbf1072b7b6c3bd3867bf6ecf9fc5d38bff4000dd14326bbb939b3fc60f5b87115352498421d6080aedce6c4c54d6b",
+    "oracleHash": "0cd8499064243fafe5c37231fb3f79f51c2dbae036935fb9168eb159c25863064248a80d1c9f24fca9826cfd92ce9f224a337354346b2997061b24ca62d4bc16"
   },
   "fullTieCase": {
     "pollSpecInput": {
@@ -129,7 +129,7 @@
       2,
       3
     ],
-    "expectedOracleHash": "abb9b922982161605be34f1d55e6f90ec7bb64bca28d9102228c0b780dac1e3fdf768fa6ea81d964c7f71bfe08a96b55cd4d8b549f9d54afe3d980239bad76d7"
+    "expectedOracleHash": "42f0be9e2ffc6fb7e3e6680888e2383ac76b715e92a175ddcb681e6d3e3a9a0cff2eb73e6d25daa695a355445c7edae386e8ecfb71561dfa7c43d5c2ecc69589"
   },
   "topOneClearWinnerCase": {
     "pollSpecInput": {
@@ -196,8 +196,8 @@
       0,
       0
     ],
-    "expectedTallyHash": "d06cf0dc5eda03e8c30fd66ae936ff545067bef5e409dfdae6a6e220771dc5a8e3413b08734b0e51c03b88fc12e6da08cc03e1c713fe1b09b883d9a4d511198f",
-    "expectedOracleHash": "d1a053540004696d90656bbf663e5caeafc8ba10943b003357ff3ce093c8266736f049a3726d8c3ed042f2abb9ca7abdf109e242fce49d1ac62e33b133af3d67"
+    "expectedTallyHash": "5ed5782d907732d7fb496f57a47655d7dd24b7eb27c01373e8bace2f8e675d62c176ed93e457e4636df8e2c7aaeb1058b6b7247ecc520217ef0dc32ceb66902a",
+    "expectedOracleHash": "b8abd9f703d1ea771eb0172af4f3174b31103240fddf90a1cc4a9dba065ffda5980de5618653e9f01bec969fee4ee6939efcf1555ae8726b29bd5e2d174c9703"
   },
   "maximumNoWrapCase": {
     "pollSpecInput": {
@@ -296,7 +296,7 @@
       19,
       20
     ],
-    "expectedTallyHash": "b8d08ed106e99859756d030a5ba64b9e8b4299ad8f3715b68bd3d3e04d3cf8c6d2077746aa479ccfe833852f876a0b77940f48a29facca2207879352b0521819",
-    "expectedOracleHash": "38d409bfa0ab71adc32a81f434f43da59c99003574f24c978c3634be67a4963f3ff6bdcd79df232c27c40f8d4cfa7c158b6bd0ae2d4279f7d3a80496a43a8ca6"
+    "expectedTallyHash": "7d88e34cdec2e4a4b1f71b0996c4fbd717d1efc0540d94226e69143a11fb731c4c69b5b5da0c83658c4363b4a142a5ee86753a4f1271d9a5f16a10a0aa36ea7e",
+    "expectedOracleHash": "4dc95b55f9c168272df415ce9abad3dbed2a88b20a4bd7c6aacab150730d0a88355e5fe1659c4c4da62393670b880c1b937fadc85d4b4501a6093b036356c3ac"
   }
 }

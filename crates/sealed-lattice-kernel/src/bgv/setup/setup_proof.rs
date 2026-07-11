@@ -2,7 +2,8 @@ mod material_transport;
 
 pub(super) use self::material_transport::setup_proof_record_binding_value;
 pub(in crate::bgv::setup) use self::material_transport::{
-    SetupProofMaterialChunks, verified_setup_proof_material_chunks_from_request,
+    SetupProofMaterialBytes, VerifiedSetupProofMaterialEvictionGuard,
+    verified_setup_proof_material_bytes_from_request,
 };
 pub(crate) use self::material_transport::{
     SetupProofMaterialTransportHashes, absorb_setup_proof_material_transport_stream_chunk_request,
@@ -10,7 +11,7 @@ pub(crate) use self::material_transport::{
     finish_setup_proof_material_transport_stream_request, setup_proof_material_transport_hashes,
 };
 pub(in crate::bgv::setup) use self::material_transport::{
-    setup_proof_record_has_transport_reference, transported_setup_proof_material_chunks,
+    setup_proof_record_has_transport_reference, transported_setup_proof_material_bytes,
     verify_setup_proof_record_transport_reference, verify_transported_setup_proof_material_hashes,
 };
 
@@ -27,28 +28,24 @@ use crate::{
 };
 
 pub(super) const SETUP_PROOF_BYTES_DOMAIN: &str =
-    "sealed-lattice/collective-bgv-setup/succinct-proof-bytes-v1";
+    "sealed-lattice/collective-bgv-setup/succinct-proof-bytes";
 pub(super) const SETUP_PROOF_SERIALIZATION: &str = "binary";
 pub(crate) const SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES: u64 = 1_048_576;
 pub(crate) const SETUP_PROOF_MATERIAL_ENCODING: &str = "binary-chunked-proof-bytes";
 const SETUP_PROOF_MATERIAL_CHUNK_MANIFEST_OBJECT_TYPE: &str = "SetupProofMaterialChunkManifest";
-const SETUP_PROOF_BYTE_DECODER: &str = "sealed-lattice-succinct-setup-proof-byte-decoder-v1";
-// Families whose proof bytes ride the chunked setup proof-material transport:
-// private VSS plus the same-secret linkage anchor, public-key share, and
-// trustee evaluation-key succinct arguments. Their theorem accounting is bound
-// per family rather than through one shared parameter set.
+const SETUP_PROOF_BYTE_DECODER: &str = "sealed-lattice-succinct-setup-proof-byte-decoder";
+// Families whose proof bytes ride the chunked setup proof-material transport.
 pub(super) const SETUP_PROOF_TRANSPORT_FAMILIES: &[&str] = &[
     "vss-opening-carry",
     "public-key-share",
-    "same-secret-linkage-anchor",
     "trustee-evaluation-key",
-    // Compact public VSS material proof families. At production roster sizes the
-    // compact share-linkage and same-secret bridge proof material are the largest
+    // Public VSS material proof families. At production roster sizes the
+    // share-linkage and same-secret bridge proof material are the largest
     // objects in the setup package, so they stream through the same sidecar
-    // transport as the four families above instead of riding embedded in the
+    // transport as the families above instead of riding embedded in the
     // package JSON (which overflows the canonical string encoder at n=10).
-    "compact-vss-share-linkage",
-    "compact-same-secret-bridge",
+    "vss-share-linkage",
+    "same-secret-bridge",
 ];
 
 fn setup_proof_error(message: impl Into<String>) -> CanonicalError {

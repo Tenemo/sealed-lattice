@@ -13,23 +13,23 @@ use crate::{
             plaintext_root, serialize_bgv_object,
         },
         setup::{
+            absorb_evaluation_key_share_component_material_transport_stream_chunk_request,
             absorb_setup_proof_material_transport_stream_chunk_request,
-            absorb_threshold_share_commitment_transport_derivation_stream_chunk_request,
+            begin_evaluation_key_share_component_material_transport_stream_request,
             begin_setup_proof_material_transport_stream_request,
-            begin_threshold_share_commitment_transport_derivation_stream_request,
-            compute_compact_vss_commitment_from_opening_request,
             compute_setup_commitment_from_opening_request,
+            compute_vss_committed_material_commitment_request,
             derive_collective_bgv_setup_public_derivations_from_request,
-            derive_threshold_share_commitments_from_request,
             describe_collective_bgv_setup_parameters,
+            describe_trustee_evaluation_key_statement_from_request,
+            finish_evaluation_key_share_component_material_transport_stream_request,
             finish_setup_proof_material_transport_stream_request,
-            finish_threshold_share_commitment_transport_derivation_stream_request,
-            generate_compact_same_secret_bridge_proof_from_request,
-            generate_compact_vss_share_linkage_proof_from_request,
             generate_passive_setup_package_from_request,
             generate_passive_setup_public_evaluation_key_material_from_request,
             generate_private_vss_share_proof_from_request,
+            generate_same_secret_bridge_proof_from_request,
             generate_trustee_evaluation_key_proof_from_request,
+            generate_vss_share_linkage_proof_from_request,
             verify_collective_bgv_setup_package_from_request,
             verify_local_trustee_setup_state_from_request,
             verify_passive_setup_package_from_request,
@@ -134,44 +134,24 @@ pub(crate) fn generate_trustee_evaluation_key_proof(request: &Value) -> Canonica
     generate_trustee_evaluation_key_proof_from_request(request)
 }
 
-pub(crate) fn compute_compact_vss_commitment_from_opening(
-    request: &Value,
-) -> CanonicalResult<Value> {
-    compute_compact_vss_commitment_from_opening_request(request)
+pub(crate) fn describe_trustee_evaluation_key_statement(request: &Value) -> CanonicalResult<Value> {
+    describe_trustee_evaluation_key_statement_from_request(request)
 }
 
-pub(crate) fn generate_compact_vss_share_linkage_proof(request: &Value) -> CanonicalResult<Value> {
-    generate_compact_vss_share_linkage_proof_from_request(request)
+pub(crate) fn compute_vss_committed_material_commitment(request: &Value) -> CanonicalResult<Value> {
+    compute_vss_committed_material_commitment_request(request)
 }
 
-pub(crate) fn generate_compact_same_secret_bridge_proof(request: &Value) -> CanonicalResult<Value> {
-    generate_compact_same_secret_bridge_proof_from_request(request)
+pub(crate) fn generate_vss_share_linkage_proof(request: &Value) -> CanonicalResult<Value> {
+    generate_vss_share_linkage_proof_from_request(request)
+}
+
+pub(crate) fn generate_same_secret_bridge_proof(request: &Value) -> CanonicalResult<Value> {
+    generate_same_secret_bridge_proof_from_request(request)
 }
 
 pub(crate) fn compute_setup_commitment_from_opening(request: &Value) -> CanonicalResult<Value> {
     compute_setup_commitment_from_opening_request(request)
-}
-
-pub(crate) fn derive_threshold_share_commitments(request: &Value) -> CanonicalResult<Value> {
-    derive_threshold_share_commitments_from_request(request)
-}
-
-pub(crate) fn begin_threshold_share_commitments_from_transport_stream(
-    request: &Value,
-) -> CanonicalResult<Value> {
-    begin_threshold_share_commitment_transport_derivation_stream_request(request)
-}
-
-pub(crate) fn absorb_threshold_share_commitments_from_transport_stream_chunk(
-    request: &Value,
-) -> CanonicalResult<Value> {
-    absorb_threshold_share_commitment_transport_derivation_stream_chunk_request(request)
-}
-
-pub(crate) fn finish_threshold_share_commitments_from_transport_stream(
-    request: &Value,
-) -> CanonicalResult<Value> {
-    finish_threshold_share_commitment_transport_derivation_stream_request(request)
 }
 
 pub(crate) fn begin_setup_proof_material_transport_stream(
@@ -190,6 +170,24 @@ pub(crate) fn finish_setup_proof_material_transport_stream(
     request: &Value,
 ) -> CanonicalResult<Value> {
     finish_setup_proof_material_transport_stream_request(request)
+}
+
+pub(crate) fn begin_evaluation_key_share_component_material_transport_stream(
+    request: &Value,
+) -> CanonicalResult<Value> {
+    begin_evaluation_key_share_component_material_transport_stream_request(request)
+}
+
+pub(crate) fn absorb_evaluation_key_share_component_material_transport_stream_chunk(
+    request: &Value,
+) -> CanonicalResult<Value> {
+    absorb_evaluation_key_share_component_material_transport_stream_chunk_request(request)
+}
+
+pub(crate) fn finish_evaluation_key_share_component_material_transport_stream(
+    request: &Value,
+) -> CanonicalResult<Value> {
+    finish_evaluation_key_share_component_material_transport_stream_request(request)
 }
 
 pub(crate) fn verify_local_trustee_setup_state(request: &Value) -> CanonicalResult<Value> {
@@ -465,7 +463,7 @@ mod tests {
 
         assert_eq!(
             encoded["plaintextRoot"],
-            "bf291374550011a80ac717065a03e5b8a4c19a0bc9a43c2bf5c7dc2efa11b44fb7f7ae27cb587b64597ccacf5215811ce148cc08dc929d81ac997b4114a395c4"
+            "334c485a1f928757939c69db3deee117f791d216aea5c277127723d77e8e2f2d7e20d0c691b999cd988348062a48e5237654af745a0c7c8bbc93a04870a4d173"
         );
 
         let ciphertext =
@@ -476,7 +474,7 @@ mod tests {
             .expect("ciphertext fixture");
         assert_eq!(
             ciphertext["ciphertextRoot"],
-            "3c687b8049b3e12747a829993c88fe8a50fd39c64e7111a58781a1e1a699b07887feb6049364e841ab161e3b3d83044f94d383bda0a0dadf5a05422f3859131a"
+            "c67ab9102937ceb90a9fa91c4ca8e78d34bd012039276199884681385ecd80475ca2ccf98d9a1b4136885738d65b48664d0dd3e30c468d44c3fddbcd35e024df"
         );
 
         let base_conversion =
@@ -486,11 +484,11 @@ mod tests {
             .expect("base conversion fixture");
         assert_eq!(
             base_conversion["sourcePlaintextRoot"],
-            "6163e4c740720f19b10dd005fcd5a1b7b53294ec1d05d84c997b439dc6cad02e338923021138c521f9849a4f02904b776599334ae03ed9f9c35cb1951a573b30"
+            "687b0f77e2f9b356db52f5153ea3c4548a3fdeb49d307446ca256b5154a141f619402cfaf80146992eaa8c32b981c4f13ace18825b9a1d5d06eb8268d041eaf5"
         );
         assert_eq!(
             base_conversion["convertedPlaintextRoot"],
-            "b2dea4160315d3ffb5ac81f7bb89d14e8cd611411eae77d7637d98146fadd1ab61c3892d61e64823766762b4776061e35751188ab703f048702e86b7c0b56e05"
+            "e1501c3e6558f6fd7576ab1f9d98cdd000b768c5c5e966bda473e8b8d6d525d56c42ec97a20721480c8c4bf4cda91e842e70ef6d6e6e853ec4c234b6b1e994e5"
         );
     }
 

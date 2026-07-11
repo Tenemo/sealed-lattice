@@ -136,17 +136,6 @@ pub(super) fn verify_source_trustee_commitment_record(
             "sourceTrusteeCoefficientCommitmentRecord.objectType",
         )));
     }
-    if source_trustee_record
-        .get("objectVersion")
-        .and_then(Value::as_u64)
-        != Some(1)
-    {
-        return Ok(Err(PrivateVssRefusal::new(
-            "sourceTrusteeCommitmentRecordVersionMismatch",
-            "sourceTrusteeCoefficientCommitmentRecord.objectVersion must be 1",
-            "sourceTrusteeCoefficientCommitmentRecord.objectVersion",
-        )));
-    }
     if let Err(refusal) = compare_context_fields(
         source_trustee_record,
         setup_context,
@@ -373,13 +362,6 @@ fn verify_coefficient_commitment_material_record(
             "sourceTrusteeCommitmentMaterialTypeMismatch",
             "coefficient commitment material objectType must be VssCoefficientCommitmentMaterial",
             "sourceTrusteeCoefficientCommitmentMaterialRecords.objectType",
-        )));
-    }
-    if material_record.get("objectVersion").and_then(Value::as_u64) != Some(1) {
-        return Ok(Err(PrivateVssRefusal::new(
-            "sourceTrusteeCommitmentMaterialVersionMismatch",
-            "coefficient commitment material objectVersion must be 1",
-            "sourceTrusteeCoefficientCommitmentMaterialRecords.objectVersion",
         )));
     }
     if let Err(refusal) = compare_context_fields(

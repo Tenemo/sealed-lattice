@@ -1,0 +1,9 @@
+[package]
+name = "sealed-lattice-process-memory-guard"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[[bin]]
+name = "sealed-lattice-process-memory-guard"
+path = "src/main.rs"

@@ -212,7 +212,7 @@ describe('BGV-RNS backend kernel commands', () => {
         >;
 
         expect(baseConversion).toMatchObject({
-            convertedBasisId: 'sealed-lattice-bgv-rns-extended-basis-v1',
+            convertedBasisId: 'sealed-lattice-bgv-rns-extended-basis',
             convertedModulusCount: 2,
         });
         expectProtocolHash(

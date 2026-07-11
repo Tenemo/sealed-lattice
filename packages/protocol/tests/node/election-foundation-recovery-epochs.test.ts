@@ -73,7 +73,6 @@ describe('recovery epoch shells', () => {
         );
         const payload = {
             objectType: 'RecoveryEpochUpdate',
-            objectVersion: 1,
             ceremonyId,
             signerIdentity: 'participant-1',
             recoveryRootPublicKeyHash: recoveryRootKeyFixture.publicKeyHash,
@@ -88,7 +87,7 @@ describe('recovery epoch shells', () => {
             restoredEncryptedBallotStateCommitment: deriveCanonicalObjectHash({
                 objectType: 'ChallengeDomainHash',
                 payload: { encryptedBallotState: 'restored' },
-                purpose: 'fixture-restored-encrypted-ballot-state-root-v1',
+                purpose: 'fixture-restored-encrypted-ballot-state-root',
             }),
             newTrusteeSetupCommitment: deriveCanonicalObjectHash({
                 objectType: 'CollectivePublicKeyRoot',
@@ -171,7 +170,6 @@ describe('recovery epoch shells', () => {
         });
 
         expect(delayedRecoveryUpdateResult.isValid).toBe(false);
-        expect(delayedRecoveryUpdateResult.acceptedHashes).toEqual([]);
         expect(delayedRecoveryUpdateResult.refusedObjects).toEqual(
             expect.arrayContaining([
                 expect.objectContaining({ code: 'RecoveryUpdateInvalid' }),
@@ -251,7 +249,7 @@ describe('recovery epoch shells', () => {
             recoveryPolicyHash: deriveCanonicalObjectHash({
                 objectType: 'ChallengeDomainHash',
                 payload: { policy: 'wrong-recovery-policy' },
-                purpose: 'fixture-recovery-policy-v1',
+                purpose: 'fixture-recovery-policy',
             }),
         };
         const wrongRecoveryPolicyUpdateHash = deriveRecoveryEpochUpdateHash(
@@ -407,7 +405,6 @@ describe('recovery epoch shells', () => {
         });
 
         expect(wrongRosterActionResult.isValid).toBe(false);
-        expect(wrongRosterActionResult.acceptedHashes).toEqual([]);
         expect(wrongRosterActionResult.refusedObjects).toEqual(
             expect.arrayContaining([
                 expect.objectContaining({

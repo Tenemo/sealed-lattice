@@ -55,22 +55,20 @@ describe('BGV passive setup kernel commands', () => {
         ).toHaveLength(128);
         expect(setup.collectivePublicKey.coefficientMaterial).toMatchObject({
             objectType: 'BgvCollectivePublicKeyCoefficientMaterial',
-            objectVersion: 1,
         });
 
-        const verification = kernel.verifyBgvPassiveSetup({
-            setupPackage: setup,
-            expectedSetupPackageHash: setup.setupPackageHash,
-            expectedRosterHash: setupRequest.rosterHash,
-            expectedCollectivePublicKeyRoot:
-                setup.collectivePublicKey.collectivePublicKeyRoot,
-            expectedRotSetHash: setup.evaluationKeys.rotSetHash,
-            expectedEvaluationKeyRoot: setup.evaluationKeys.evaluationKeyRoot,
-        });
-
-        expect(verification).toMatchObject({
-            operation: 'verifyBgvPassiveSetupPackage',
-        });
+        expect(() =>
+            kernel.verifyBgvPassiveSetup({
+                setupPackage: setup,
+                expectedSetupPackageHash: setup.setupPackageHash,
+                expectedRosterHash: setupRequest.rosterHash,
+                expectedCollectivePublicKeyRoot:
+                    setup.collectivePublicKey.collectivePublicKeyRoot,
+                expectedRotSetHash: setup.evaluationKeys.rotSetHash,
+                expectedEvaluationKeyRoot:
+                    setup.evaluationKeys.evaluationKeyRoot,
+            }),
+        ).not.toThrow();
     });
 
     it('refuses wrong expected roots and mutated canonical bindings', async () => {

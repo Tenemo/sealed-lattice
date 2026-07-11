@@ -7,71 +7,24 @@ import {
     createPublicKeyShareProofSet,
     createPublicKeyShareSet,
     createRequiredGaloisSet,
-    createSameSecretConsistencyStatementSet,
-    createVssCoefficientCommitmentBundle,
-    createVssSourceTrusteeCoefficientOpeningState,
     type PublicKeyShareContributionInput,
     type PublicKeyShareProofSet,
     type PublicKeyShareSet,
     type RequiredGaloisKeyScheduleEntry,
-    type SameSecretConsistencyStatementSet,
 } from '#packages/protocol/src/index';
 import { selectedEvaluatorWorkingLevel } from '#packages/protocol/src/setup/evaluator-key-schedule';
-import { setupCommitmentComputer } from '#tests/support/setup-commitment-computer';
 import {
     makeSetupContext,
     makeSetupFixtureHash,
-    makeVssOpeningRandomBytes,
 } from '#tests/support/setup-fixtures';
 
 // The frozen evaluator working level requires the full accepted Q_share basis.
 const qSharePrimes = acceptedBgvSetupQSharePrimes;
-const ringDegree = 8;
 const participantCount = 2;
-const thresholdDegree = 2;
 
 const fixtureHash = makeSetupFixtureHash('setup-evaluator-key-schedule');
 
-const deterministicRandomBytes = makeVssOpeningRandomBytes(
-    'setup-evaluator-key-schedule',
-);
-
 const setupContext = makeSetupContext(fixtureHash);
-
-const sameSecretConsistency = (): SameSecretConsistencyStatementSet => {
-    const vssCoefficientCommitments = createVssCoefficientCommitmentBundle({
-        setupContext,
-        publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
-        setupCommitmentComputer,
-        qSharePrimes,
-        ringDegree,
-        participantCount,
-        thresholdDegree,
-        sourceTrusteeOpeningStates: Array.from(
-            { length: participantCount },
-            (_unused, sourceTrusteeRosterPosition) =>
-                createVssSourceTrusteeCoefficientOpeningState({
-                    sourceTrusteeIdentity: `trustee-${String(sourceTrusteeRosterPosition)}`,
-                    sourceTrusteeRosterPosition,
-                    participantCount,
-                    qSharePrimes,
-                    ringDegree,
-                    thresholdDegree,
-                    randomBytes: deterministicRandomBytes(
-                        `trustee-${String(sourceTrusteeRosterPosition)}`,
-                    ),
-                }),
-        ),
-    }).commitmentSet;
-
-    return createSameSecretConsistencyStatementSet({
-        setupContext,
-        qSharePrimes,
-        participantCount,
-        thresholdDegree,
-        vssCoefficientCommitments,
-    });
-};
 
 const shareContribution = (
     trusteeRosterPosition: number,
@@ -92,9 +45,7 @@ const shareContribution = (
     ),
 });
 
-const publicKeyShareObjects = (
-    sameSecretStatements: SameSecretConsistencyStatementSet,
-): {
+const publicKeyShareObjects = (): {
     readonly publicKeyShares: PublicKeyShareSet;
     readonly publicKeyShareProofs: PublicKeyShareProofSet;
 } => {
@@ -105,7 +56,6 @@ const publicKeyShareObjects = (
         publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
         publicKeyCrpRoot: fixtureHash('public-key-crp'),
         publicAPolynomialRoot: fixtureHash('public-a-polynomial'),
-        sameSecretConsistency: sameSecretStatements,
         shareContributions: [shareContribution(0), shareContribution(1)],
     });
 
@@ -118,7 +68,6 @@ const publicKeyShareObjects = (
             publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
             publicKeyCrpRoot: fixtureHash('public-key-crp'),
             publicAPolynomialRoot: fixtureHash('public-a-polynomial'),
-            sameSecretConsistency: sameSecretStatements,
             publicKeyShares,
         }),
     };
@@ -141,9 +90,8 @@ const requiredGaloisKeySchedule = [
 
 describe('evaluator key schedule builder', () => {
     it('creates a deterministic root-bound first-parameters schedule', () => {
-        const sameSecretStatements = sameSecretConsistency();
         const { publicKeyShares, publicKeyShareProofs } =
-            publicKeyShareObjects(sameSecretStatements);
+            publicKeyShareObjects();
         const evaluatorKeySchedule = createEvaluatorKeySchedule({
             setupContext,
             qSharePrimes,
@@ -151,7 +99,6 @@ describe('evaluator key schedule builder', () => {
             publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
             relinearizationCrpRoot: fixtureHash('relinearization-crp'),
             galoisKeyCrpRoot: fixtureHash('galois-key-crp'),
-            sameSecretConsistency: sameSecretStatements,
             publicKeyShares,
             publicKeyShareProofs,
             requiredGaloisKeySchedule,
@@ -185,9 +132,8 @@ describe('evaluator key schedule builder', () => {
     });
 
     it('rejects malformed schedule inputs', () => {
-        const sameSecretStatements = sameSecretConsistency();
         const { publicKeyShares, publicKeyShareProofs } =
-            publicKeyShareObjects(sameSecretStatements);
+            publicKeyShareObjects();
         const validInput = {
             setupContext,
             qSharePrimes,
@@ -195,7 +141,6 @@ describe('evaluator key schedule builder', () => {
             publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
             relinearizationCrpRoot: fixtureHash('relinearization-crp'),
             galoisKeyCrpRoot: fixtureHash('galois-key-crp'),
-            sameSecretConsistency: sameSecretStatements,
             publicKeyShares,
             publicKeyShareProofs,
             requiredGaloisKeySchedule,
@@ -220,6 +165,6 @@ describe('evaluator key schedule builder', () => {
                     ),
                 },
             }),
-        ).toThrow(/accepted same-secret and share-set roots/u);
+        ).toThrow(/accepted share-set root/u);
     });
 });

@@ -1,0 +1,281 @@
+import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
+import { describe, expect, it } from 'vitest';
+
+import {
+    assembleVssPublicAggregateThresholdCommitmentSet,
+    createLocalTrusteeVssPublicAggregateThresholdCommitmentBundle,
+    createVssPublicCoefficientCommitmentSet,
+    createVssPublicRecipientShareCommitmentSet,
+    type LocalTrusteeVssPublicAggregateThresholdCommitmentBundle,
+    type VssCommittedMaterialCommitmentComputer,
+    type VssPublicSourceTrusteeOpeningState,
+} from '#packages/protocol/src/setup/vss-commitments';
+import {
+    makeSetupContext,
+    makeSetupFixtureHash,
+} from '#tests/support/setup-fixtures';
+
+const fixtureHash = makeSetupFixtureHash(
+    'setup-vss-aggregate-threshold-commitments',
+);
+const setupContext = makeSetupContext(fixtureHash);
+const publicMatrixSeedHash = fixtureHash('public-matrix-seed');
+const qSharePrimes = [17] as const;
+const ringDegree = 2;
+const sourceTrusteeOpeningStates: readonly VssPublicSourceTrusteeOpeningState[] =
+    [
+        {
+            sourceTrusteeIdentity: 'North trustee',
+            sourceTrusteeRosterPosition: 0,
+            coefficientOpenings: [
+                {
+                    rnsLimbIndex: 0,
+                    rnsPrime: 17,
+                    shamirCoefficientIndex: 0,
+                    coefficientMessage: [16, 1],
+                },
+            ],
+        },
+        {
+            sourceTrusteeIdentity: 'South trustee',
+            sourceTrusteeRosterPosition: 1,
+            coefficientOpenings: [
+                {
+                    rnsLimbIndex: 0,
+                    rnsPrime: 17,
+                    shamirCoefficientIndex: 0,
+                    coefficientMessage: [2, 3],
+                },
+            ],
+        },
+    ];
+
+const aggregateCommitmentContexts: Record<string, unknown>[] = [];
+
+const computeVssCommittedMaterialCommitment: VssCommittedMaterialCommitmentComputer =
+    (input) => {
+        if (input.commitmentRole === 'aggregate-threshold-share') {
+            aggregateCommitmentContexts.push(input.commitmentContext);
+        }
+        const commitmentContextHash = deriveCanonicalObjectHash({
+            objectType: 'VssCommittedMaterialCommitmentContext',
+            commitmentRole: input.commitmentRole,
+            commitmentContext: input.commitmentContext,
+        });
+        const commitment = {
+            objectType: 'VssCommittedMaterialCommitment' as const,
+            commitmentRole: input.commitmentRole,
+            commitmentContextHash,
+            rnsLimbIndex: input.rnsLimbIndex,
+            rnsPrime: input.rnsPrime,
+            ringDegree: input.ringDegree,
+            materialColumnMaskDegree: 0,
+            commitmentFields: [],
+        };
+
+        return {
+            commitment,
+            commitmentRoot: deriveCanonicalObjectHash(commitment),
+            openingRoot: deriveCanonicalObjectHash({
+                objectType: 'FixtureVssOpening',
+                materialSeedHex: input.materialSeedHex,
+                messageCoefficients: input.messageCoefficients,
+            }),
+            commitmentContextHash,
+        };
+    };
+
+const materialSeed = (coordinate: Record<string, unknown>): string =>
+    deriveCanonicalObjectHash({
+        objectType: 'FixtureVssMaterialSeed',
+        ...coordinate,
+    });
+
+const littleEndianCoefficients = (hex: string): number[] => {
+    const bytes = Uint8Array.from(
+        hex.match(/.{2}/g)?.map((byte) => Number.parseInt(byte, 16)) ?? [],
+    );
+    const view = new DataView(bytes.buffer);
+
+    return Array.from(
+        { length: bytes.length / 8 },
+        (_unused, coefficientIndex) =>
+            Number(view.getBigUint64(coefficientIndex * 8, true)),
+    );
+};
+
+describe('VSS aggregate threshold commitment handoff', () => {
+    it('keeps opening credentials private and uses the accepted roster identities', () => {
+        aggregateCommitmentContexts.length = 0;
+        const coefficientBundle = createVssPublicCoefficientCommitmentSet({
+            setupContext,
+            publicMatrixSeedHash,
+            participantCount: 2,
+            qSharePrimes,
+            ringDegree,
+            thresholdDegree: 1,
+            sourceTrusteeOpeningStates,
+            committedMaterialSeed: materialSeed,
+            computeVssCommittedMaterialCommitment,
+        });
+        const recipientBundle = createVssPublicRecipientShareCommitmentSet({
+            setupContext,
+            publicMatrixSeedHash,
+            participantCount: 2,
+            qSharePrimes,
+            ringDegree,
+            thresholdDegree: 1,
+            sourceTrusteeOpeningStates,
+            committedMaterialSeed: materialSeed,
+            computeVssCommittedMaterialCommitment,
+        });
+        const createLocalAggregateBundle = (
+            localTrusteeRosterPosition: number,
+            localRecipientShareCredentials: typeof recipientBundle.recipientShareCredentials = recipientBundle.recipientShareCredentials.filter(
+                (credential) =>
+                    credential.recipientRosterPosition ===
+                    localTrusteeRosterPosition,
+            ),
+        ): LocalTrusteeVssPublicAggregateThresholdCommitmentBundle =>
+            createLocalTrusteeVssPublicAggregateThresholdCommitmentBundle({
+                setupContext,
+                publicMatrixSeedHash,
+                participantCount: 2,
+                qSharePrimes,
+                ringDegree,
+                coefficientCommitmentSet:
+                    coefficientBundle.coefficientCommitmentSet,
+                recipientShareCommitmentSet:
+                    recipientBundle.recipientShareCommitmentSet,
+                localTrusteeRosterPosition,
+                localRecipientShareCredentials,
+                committedMaterialSeed: materialSeed,
+                computeVssCommittedMaterialCommitment,
+                aggregateThresholdProofRandomness: ({
+                    recipientRosterPosition,
+                    rnsLimbIndex,
+                }) => ({
+                    seedHex: materialSeed({
+                        recipientRosterPosition,
+                        rnsLimbIndex,
+                        purpose: 'proof-seed',
+                    }),
+                    nonceHex: materialSeed({
+                        recipientRosterPosition,
+                        rnsLimbIndex,
+                        purpose: 'proof-nonce',
+                    }),
+                }),
+                generateVssShareLinkageProof: () => ({
+                    proofBytesHex: '00',
+                }),
+            });
+        const localAggregateBundles = [
+            createLocalAggregateBundle(0),
+            createLocalAggregateBundle(1),
+        ];
+        const aggregateThresholdCommitmentSet =
+            assembleVssPublicAggregateThresholdCommitmentSet({
+                publicMatrixSeedHash,
+                participantCount: 2,
+                qSharePrimes,
+                ringDegree,
+                recipientShareCommitmentSet:
+                    recipientBundle.recipientShareCommitmentSet,
+                publicAggregateThresholdCommitmentContributions:
+                    localAggregateBundles.map(
+                        (bundle) =>
+                            bundle.publicAggregateThresholdCommitmentContribution,
+                    ),
+            });
+
+        expect(
+            aggregateThresholdCommitmentSet.recipientRecords.map(
+                (record) => record.recipientIdentity,
+            ),
+        ).toEqual(['North trustee', 'South trustee']);
+        expect(
+            localAggregateBundles.map(
+                (bundle) =>
+                    bundle.localTrusteeAggregateOpeningCredentialHandoff
+                        .trusteeIdentity,
+            ),
+        ).toEqual(['North trustee', 'South trustee']);
+        expect(
+            littleEndianCoefficients(
+                localAggregateBundles[0]
+                    ?.localTrusteeAggregateOpeningCredentialHandoff
+                    ?.aggregateOpeningCredentials[0]
+                    ?.aggregateCommitmentMessageValuesLeHex ?? '',
+            ),
+        ).toEqual([1, 4]);
+        expect(
+            localAggregateBundles.flatMap((bundle) =>
+                bundle.localTrusteeAggregateOpeningCredentialHandoff.aggregateOpeningCredentials.map(
+                    (credential) => ({
+                        recipientRosterPosition:
+                            credential.recipientRosterPosition,
+                        aggregateCommitmentRoot:
+                            credential.aggregateCommitmentRoot,
+                        aggregateOpeningRoot: credential.aggregateOpeningRoot,
+                    }),
+                ),
+            ),
+        ).toEqual(
+            aggregateThresholdCommitmentSet.recipientRecords.map((record) => ({
+                recipientRosterPosition: record.recipientRosterPosition,
+                aggregateCommitmentRoot: record.aggregateCommitmentRoot,
+                aggregateOpeningRoot: record.aggregateOpeningRoot,
+            })),
+        );
+        expect(
+            aggregateThresholdCommitmentSet.aggregateThresholdCommitmentRoot,
+        ).toBe(
+            deriveCanonicalObjectHash({
+                objectType: 'VssPublicAggregateThresholdCommitmentSet',
+                publicMatrixSeedHash,
+                participantCount: 2,
+                rnsLimbCount: 1,
+                ringDegree,
+                recipientRecords:
+                    aggregateThresholdCommitmentSet.recipientRecords,
+            }),
+        );
+        expect(() =>
+            createLocalAggregateBundle(
+                0,
+                recipientBundle.recipientShareCredentials,
+            ),
+        ).toThrow(
+            'Local aggregate threshold commitment accepts credentials for exactly one recipient.',
+        );
+        expect(aggregateCommitmentContexts).toEqual([
+            {
+                objectType: 'VssPublicAggregateThresholdCommitmentContext',
+                ceremonyId: setupContext.ceremonyId,
+                manifestHash: setupContext.manifestHash,
+                rosterHash: setupContext.rosterHash,
+                setupParametersHash: setupContext.setupParametersHash,
+                setupEpoch: setupContext.setupEpoch,
+                recipientIdentity: 'North trustee',
+                recipientRosterPosition: 0,
+                recipientTrusteePoint: 1,
+                rnsLimbIndex: 0,
+                rnsPrime: 17,
+            },
+            {
+                objectType: 'VssPublicAggregateThresholdCommitmentContext',
+                ceremonyId: setupContext.ceremonyId,
+                manifestHash: setupContext.manifestHash,
+                rosterHash: setupContext.rosterHash,
+                setupParametersHash: setupContext.setupParametersHash,
+                setupEpoch: setupContext.setupEpoch,
+                recipientIdentity: 'South trustee',
+                recipientRosterPosition: 1,
+                recipientTrusteePoint: 2,
+                rnsLimbIndex: 0,
+                rnsPrime: 17,
+            },
+        ]);
+    });
+});

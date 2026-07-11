@@ -73,8 +73,7 @@ fn direct_ballot_shared_rns_relation_proof_rejects_single_bit_proof_mutations() 
         ),
         (
             "one-hot response",
-            score_response_offset
-                + DIRECT_BALLOT_OPTION_COUNT * direct_ballot_response_coefficient_bytes(),
+            score_response_offset + OPTION_COUNT * direct_ballot_response_coefficient_bytes(),
             "direct ballot score proof option 0",
         ),
         (
@@ -114,11 +113,9 @@ fn direct_ballot_shared_rns_relation_proof_rejects_single_bit_proof_mutations() 
 #[test]
 fn direct_ballot_relation_proof_rejects_linear_consistent_non_boolean_one_hot_witness() {
     let setup_package = setup_package();
-    let evaluator_key = development_evaluator_key_from_passive_setup_package(
-        &setup_package,
-        DIRECT_BALLOT_TEST_SETUP_SEED,
-    )
-    .expect("evaluator key");
+    let evaluator_key =
+        development_evaluator_key_from_passive_setup_package(&setup_package, TEST_SETUP_SEED)
+            .expect("evaluator key");
     let mut encrypted_ballot =
         encrypt_direct_ballot(&setup_package, &evaluator_key, valid_ballot_input())
             .expect("encrypted ballot");
@@ -126,7 +123,7 @@ fn direct_ballot_relation_proof_rejects_linear_consistent_non_boolean_one_hot_wi
     one_hot_witnesses[0] = vec![0, 0, 0, 0, 0, 0, 0, 65536, 2, 0];
     encrypted_ballot.input.one_hot_witnesses = Some(one_hot_witnesses);
     let proof_randomness_seed_hex =
-        direct_ballot_proof_randomness_seed(DIRECT_BALLOT_TEST_SETUP_SEED, &encrypted_ballot);
+        direct_ballot_proof_randomness_seed(TEST_SETUP_SEED, &encrypted_ballot);
     let proof_generation = generate_direct_ballot_relation_proof(
         &setup_package,
         &evaluator_key,
@@ -176,11 +173,9 @@ fn direct_ballot_shared_rns_relation_proof_rejects_wrong_public_key() {
 #[test]
 fn direct_ballot_all_limb_relation_rejects_last_limb_mutation() {
     let setup_package = setup_package();
-    let evaluator_key = development_evaluator_key_from_passive_setup_package(
-        &setup_package,
-        DIRECT_BALLOT_TEST_SETUP_SEED,
-    )
-    .expect("evaluator key");
+    let evaluator_key =
+        development_evaluator_key_from_passive_setup_package(&setup_package, TEST_SETUP_SEED)
+            .expect("evaluator key");
     let mut encrypted_ballot =
         encrypt_direct_ballot(&setup_package, &evaluator_key, valid_ballot_input())
             .expect("encrypted ballot");
@@ -202,11 +197,9 @@ fn direct_ballot_all_limb_relation_rejects_last_limb_mutation() {
 #[test]
 fn direct_ballot_all_limb_relation_rejects_different_plaintext_witness() {
     let setup_package = setup_package();
-    let evaluator_key = development_evaluator_key_from_passive_setup_package(
-        &setup_package,
-        DIRECT_BALLOT_TEST_SETUP_SEED,
-    )
-    .expect("evaluator key");
+    let evaluator_key =
+        development_evaluator_key_from_passive_setup_package(&setup_package, TEST_SETUP_SEED)
+            .expect("evaluator key");
     let mut encrypted_ballot =
         encrypt_direct_ballot(&setup_package, &evaluator_key, valid_ballot_input())
             .expect("encrypted ballot");
@@ -222,11 +215,9 @@ fn direct_ballot_all_limb_relation_rejects_different_plaintext_witness() {
 #[test]
 fn direct_ballot_support_rejects_out_of_range_randomizer() {
     let setup_package = setup_package();
-    let evaluator_key = development_evaluator_key_from_passive_setup_package(
-        &setup_package,
-        DIRECT_BALLOT_TEST_SETUP_SEED,
-    )
-    .expect("evaluator key");
+    let evaluator_key =
+        development_evaluator_key_from_passive_setup_package(&setup_package, TEST_SETUP_SEED)
+            .expect("evaluator key");
     let mut encrypted_ballot =
         encrypt_direct_ballot(&setup_package, &evaluator_key, valid_ballot_input())
             .expect("encrypted ballot");
@@ -244,11 +235,9 @@ fn direct_ballot_support_rejects_out_of_range_randomizer() {
 #[test]
 fn direct_ballot_support_rejects_out_of_range_error_polynomials() {
     let setup_package = setup_package();
-    let evaluator_key = development_evaluator_key_from_passive_setup_package(
-        &setup_package,
-        DIRECT_BALLOT_TEST_SETUP_SEED,
-    )
-    .expect("evaluator key");
+    let evaluator_key =
+        development_evaluator_key_from_passive_setup_package(&setup_package, TEST_SETUP_SEED)
+            .expect("evaluator key");
     let encrypted_ballot =
         encrypt_direct_ballot(&setup_package, &evaluator_key, valid_ballot_input())
             .expect("encrypted ballot");

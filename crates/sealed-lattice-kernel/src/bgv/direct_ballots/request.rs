@@ -73,7 +73,7 @@ pub(super) fn read_direct_ballot_top_count_value(value: &Value) -> CanonicalResu
             "topCount does not fit usize",
         )
     })?;
-    if top_count == 0 || top_count > DIRECT_BALLOT_OPTION_COUNT {
+    if top_count == 0 || top_count > OPTION_COUNT {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
             "topCount must be between one and the direct ballot option count",
@@ -112,7 +112,7 @@ pub(super) fn direct_ballot_proof_randomness_seed(
     ballot: &DirectEncryptedBallot,
 ) -> String {
     hash512_hex(
-        "sealed-lattice/direct-encrypted-ballot/proof-randomness-seed-v1",
+        "sealed-lattice/direct-encrypted-ballot/proof-randomness-seed",
         &[
             private_setup_seed.as_bytes(),
             ballot.ciphertext_root.as_bytes(),
@@ -124,7 +124,7 @@ pub(super) fn direct_ballot_proof_randomness_seed(
 
 pub(super) fn direct_ballot_slots(scores: &[u64]) -> Vec<u64> {
     let mut slots = vec![0_u64; POLYNOMIAL_DEGREE];
-    slots[..DIRECT_BALLOT_OPTION_COUNT].copy_from_slice(scores);
+    slots[..OPTION_COUNT].copy_from_slice(scores);
     slots
 }
 
@@ -142,7 +142,7 @@ pub(super) fn direct_encrypted_ballot_hash(
             "ciphertextCanonicalByteLength": ciphertext_canonical_byte_length
     }))?;
     Ok(hash512_hex(
-        "sealed-lattice/direct-encrypted-ballot/encrypted-ballot-hash-v1",
+        "sealed-lattice/direct-encrypted-ballot/encrypted-ballot-hash",
         &[package_json.as_bytes()],
     ))
 }
@@ -321,22 +321,14 @@ pub(super) fn validate_direct_ballot_proof_randomness_hex(
     value: &str,
     label: &str,
 ) -> CanonicalResult<()> {
-    validate_direct_ballot_randomness_hex(
-        value,
-        label,
-        DIRECT_BALLOT_PROOF_MASK_RANDOMNESS_HEX_BYTES,
-    )
+    validate_direct_ballot_randomness_hex(value, label, PROOF_MASK_RANDOMNESS_HEX_BYTES)
 }
 
 pub(super) fn validate_direct_ballot_encryption_randomness_hex(
     value: &str,
     label: &str,
 ) -> CanonicalResult<()> {
-    validate_direct_ballot_randomness_hex(
-        value,
-        label,
-        DIRECT_BALLOT_ENCRYPTION_RANDOMNESS_HEX_BYTES,
-    )
+    validate_direct_ballot_randomness_hex(value, label, ENCRYPTION_RANDOMNESS_HEX_BYTES)
 }
 
 pub(super) fn validate_direct_ballot_hash_hex(value: &str, label: &str) -> CanonicalResult<()> {

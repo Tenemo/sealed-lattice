@@ -114,6 +114,7 @@ pub(crate) fn shift_right_one_in_place<const LIMB_COUNT: usize>(value: &mut [u64
 }
 
 /// Converts a wide value to u64, or None when it does not fit.
+#[cfg(test)]
 pub(crate) fn to_u64<const LIMB_COUNT: usize>(value: &[u64; LIMB_COUNT]) -> Option<u64> {
     if value[1..].iter().any(|limb| *limb != 0) {
         return None;

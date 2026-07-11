@@ -1,40 +1,105 @@
 # sealed-lattice
 
-> This project is under active implementation. It has not been audited or externally reviewed.
+`sealed-lattice` is a browser-oriented TypeScript and Rust/WASM prototype for threshold homomorphic polling. It implements configuration and transcript checks, collective BGV setup records and proof checks, a bounded direct-ballot path, encrypted evaluator replay, and target-bound threshold result release.
 
-[![npm downloads](https://img.shields.io/npm/dm/sealed-lattice?color=5FA04E)](https://www.npmjs.com/package/sealed-lattice) [![CI](https://img.shields.io/github/actions/workflow/status/Tenemo/sealed-lattice/ci.yml?branch=master&label=tests&color=5FA04E)](https://github.com/Tenemo/sealed-lattice/actions/workflows/ci.yml) [![License](https://img.shields.io/github/license/Tenemo/sealed-lattice?color=5FA04E)](LICENSE)
+The repository is development software. It has not been independently audited, certified, or approved for production elections, and it must not be used with real ballots or secret material. The implementation summary below records what exists now; fixtures, local runs, and component tests do not expand the security boundary in [SECURITY.md](SECURITY.md).
 
-`sealed-lattice` is a browser-first, mobile-first, post-quantum threshold homomorphic voting library workspace. Every roster participant is intended to act as both voter and trustee. Untrusted services may store and distribute transcript objects, but the verification path is participant mobile browsers, not servers or dedicated heavy verifier machines.
+## Current implementation ledger
 
-The published npm package is intentionally narrow while the protocol implementation is still being built and checked. Use it for development verification, package integration, transcript helpers, and foundation checks. The canonical public security posture lives in [SECURITY.md](SECURITY.md).
+### Configuration and foundation
 
-## Selected direction
+The TypeScript protocol layer and published package provide:
 
-The selected construction is:
+- poll validation, canonical poll hashes, threshold derivation, and frozen-roster parameter derivation;
+- roster-manifest transcript checks and externally anchored roster acceptance;
+- lifecycle-transition, action-capability, recovery-epoch, and deterministic first-valid ordering checks;
+- foundation-transcript and append-only board-consistency checks; and
+- cast-receipt, close-record, and target-finality shells.
 
-```text
-active-static secure-with-abort collective BGV setup
--> direct BGV-encrypted ballots
--> ballot validity proofs for the fixed encrypted-ballot relation
--> public ciphertext aggregation
--> bounded-domain encrypted evaluator replay on mobile
--> target finality for the selected target
--> one-shot target-bound threshold decryption of C_target only
-```
+These helpers validate their stated inputs and return structured refusals. They do not create an election authority or decide whether caller-supplied policy, signer, witness, or roster keys are trustworthy. In particular, the target-finality helper is not an authorization decision because its witness keys are not yet bound to an accepted roster (`SEC-013`).
 
-The first target profile is planned around `n = 10`, `m = 20`, every `1 <= K_top <= 20`, `q_setup_complete = 10`, `q_ballot_release = 10`, `q_final = 10`, and `q_dec = 4`. The current target-finality verifier is a 5-of-7 witness-checkpoint shell; trustee-finality and target-decryption certification remain downstream. Current security limitations, profile caveats, HE evidence, and target-decryption boundaries are not repeated here; see [SECURITY.md](SECURITY.md).
+### Collective setup, VSS, and evaluation keys
 
-## Current package boundary
+The repository implements the following collective BGV setup path:
 
-The public package currently exposes helpers for poll validation, threshold derivation, lifecycle and capability checks, foundation transcript checks, and setup-development verification.
+- common-randomness commit and reveal records;
+- per-coefficient committed-material VSS commitments, private mailbox delivery, local share checks, acceptance records, and complaint records;
+- VSS share-linkage and aggregate-threshold proofs, plus a full-source same-secret bridge between the accepted BDLOP constant commitments and target committed material;
+- public-key share records, collective public-key construction, evaluator-key schedules, relinearization and Galois-key share records, and trustee evaluation-key proof material;
+- chunked binary transport for large public material and proof bytes;
+- encrypted local trustee setup state with explicit retained-material and deletion boundaries; and
+- setup phase records, transport certificates, package assembly, and Rust/WASM package acceptance against externally supplied manifest and roster hashes.
 
-Threshold derivation is a helper, not a security certificate. The first target profile above is the only current setup/evaluator evidence profile; other roster sizes returned by helper APIs need their own profile evidence, runtime measurements, and security review before they carry a security or mobile claim.
+VSS commitment records bind collision-resistant committed-material roots. Recipient shares and aggregate threshold shares are tied to those roots by proof relations; the aggregate is not accepted from a producer-supplied sum. The same-secret bridge opens the complete accepted BDLOP constant-commitment set and the target committed-material commitments to one ternary secret. Public-key share proofs bind to that bridge, while evaluation-key atom proofs open the exact canonical limb-zero source constant commitment (`SEC-012`).
 
-The first setup/evaluator boundary is implemented as development verification evidence for the first profile. Its public verifier requires externally supplied manifest and setup-roster hashes, verifies the active-static setup package, VSS acceptances, public key, evaluation keys, proof/key transport, and setup/evaluator HE boundary, and returns an accepted setup handoff for downstream development work. The missing public workflow pieces are listed below; security caveats and audit status live in [SECURITY.md](SECURITY.md).
+The implemented setup proofs remain development evidence. They do not meet the active 80-bit QROM soundness or ceremony-wide zero-knowledge and leakage targets, much less a later 128-bit profile (`SEC-004`, `SEC-005`), and secret-dependent evaluation-key material retains the construction's KDM or circular-security assumption (`SEC-011`).
 
-The kernel setup verifier accepts setup only through the compact VSS commitment path: constant-size public coefficient, recipient-share, and aggregate-threshold commitments (a fixed set of field residues per commitment, independent of the ring degree) verified through succinct share-linkage and same-secret bridge proofs, with a recomputed compact threshold-share commitment binding. The terminal public-key-share and evaluation-key succinct proofs open the compact same-secret bridge's target constant commitments, so a package without the verified bridge is refused and full-material public VSS acceptance is no longer reachable. Acceptance stays gated purely on recomputed roots and verified proof families. A development check measures the compact coefficient commitment set as a small fraction of the former full-material coefficient baseline (about 1.6 GB at the production ring). This is kernel-side development evidence only, and the compact commitment's Module-SIS binding has no recorded lattice-estimator run, so 128-bit binding is a target, not a measured value. The compact share-linkage and same-secret bridge proof material can be streamed through the setup-proof sidecar transport rather than embedded in the package, so the canonical setup package stays encodable at production roster sizes; this changes how the proof bytes move, not their total volume, which stays the tracked transport constraint. See `SEC-012` in [SECURITY.md](SECURITY.md).
+### Direct ballots
 
-Package tests are development evidence. Read [SECURITY.md](SECURITY.md) before treating any result as security evidence.
+The Rust kernel contains a bounded direct encrypted-ballot command. The current profile accepts one to twenty ballots, exactly twenty score options, and integer scores from 1 through 10. It validates the setup handoff and disjoint randomness, encrypts each ballot, creates and checks a ballot-relation proof, transports proof bytes in chunks, and aggregates the ciphertexts.
+
+This path is a kernel development path driven by a private setup witness. It is not exposed as a complete public cast, collection, receipt, and accepted-ballot workflow. The TypeScript plaintext oracle is test support for checking the bounded ranking and sparse-target semantics; it is not a voting or tallying API (`SEC-007`).
+
+### Aggregation and evaluator replay
+
+The kernel implements homomorphic addition of accepted direct-ballot ciphertexts and a deterministic packed BGV top-k evaluator for the bounded score domain. The evaluator performs encrypted comparisons, rank accumulation, and sparse target projection, and emits a target proposal and evaluator-replay record bound to the setup, aggregate, layout, and target context.
+
+The evaluator currently provides component and end-to-end development evidence. It does not by itself accept the target, prove the complete evaluation, or authorize result release. Fixtures and component tests do not establish complete ballot confidentiality or evaluation correctness (`SEC-006`).
+
+### Target finality and decryption
+
+The target-decryption kernel binds an accepted setup package, accepted target record, target ciphertext pair, target basis, and target share profile. Its staged result-release path:
+
+1. derives the release context from the accepted setup package;
+2. starts a release session for one target binding;
+3. checks each distinct trustee's target-bound share proof and accumulates exactly the required quorum; and
+4. interpolates only the selected target fields and consumes that target binding in process.
+
+The browser-compatible Rust/WebAssembly kernel can derive share statements and create target-bound shares and proof material from a trustee witness restored from AEAD-encrypted local setup state. Node.js/WebAssembly integration exercises setup handoff, encrypted restore, and target-share generation with canonical full-ring setup material and a valid level-zero target ciphertext. This is development evidence, not supported-phone runtime evidence. The published package exposes the staged result check, not a proofless raw-share interface.
+
+The one-shot consumption registry is process-local and is not persistent across restarts. Target release therefore remains development-only and must not be treated as a durable authorization boundary (`SEC-002`). Retry safety for setup, key switching, and decryption under reused secret material is also open (`SEC-003`).
+
+### Package and API surface
+
+The published `sealed-lattice` package is an ESM package that loads the Rust kernel through the bundled WebAssembly bridge. Public consumers must import from the package root; workspace packages, fixtures, or deep source paths are not public API.
+
+The package root currently exports these runtime functions:
+
+- Poll and roster helpers: `validatePollSpec`, `derivePollSpecHash`, `deriveThresholdParameters`, `deriveThresholdParametersHash`, `deriveFrozenRosterParameters`, and `deriveCollectiveBgvSetupRosterHash`.
+- Lifecycle and transcript helpers: `isValidLifecycleTransition`, `evaluateActionCapability`, `verifyFoundationTranscript`, `verifyBoardConsistency`, `verifyCastReceiptShell`, `verifyCloseRecordShell`, `deriveValidatedFirstValidOrder`, `verifyRosterExternalAcceptance`, `verifyRosterManifestTranscript`, `isActionCurrentForRecoveryEpoch`, and `verifyRecoveryEpochUpdate`.
+- Setup and kernel helpers: `verifyPrivateVssShare`, `createSetupPackageVerificationInput`, `verifySetupPackage`, `verifyTargetFinality`, `verifyTargetDecryptionResult`, and `verifyTranscriptCoreFixture`.
+
+TypeScript input, result, protocol-object, setup-transport, and verification types are exported from the same package root. `packages/sdk/api-surface-summary.json` is a generated review aid for intentional public API changes; package policy and packed-package smoke tests cover runtime exports and published behavior.
+
+### Runtime verification paths
+
+| Runtime path             | Evidence that exists now                                                                                                                                                                                                                                                                                                            | Current limit                                                                                                              |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Native Rust              | Kernel unit and integration tests cover setup commitments and proofs, direct ballots, evaluator operations, target-bound shares, and result release.                                                                                                                                                                                | Native execution is development evidence only and is not the participant-facing product runtime.                           |
+| Node.js with WebAssembly | Fast and heavy kernel suites exercise the built WebAssembly bridge, accepted setup packages, direct ballots, evaluator replay, and target decryption, including encrypted local-setup restore into target-share generation. TypeScript package suites cover foundation, setup construction, transport, and public package behavior. | Node.js evidence does not establish browser or supported-phone execution.                                                  |
+| Desktop browser          | Browser suites load the WebAssembly kernel, execute a canonical hashing command, exercise foundation package exports, and check the plaintext-oracle semantics without native helpers.                                                                                                                                              | The current browser suite does not run the full ceremony or its proof workloads. There is no browser proof benchmark lane. |
+| Supported phone          | No physical-device runtime evidence is recorded.                                                                                                                                                                                                                                                                                    | Native, Node.js, desktop-browser, and emulated runs cannot substitute for supported-phone evidence (`SEC-008`).            |
+
+Participant mobile browsers remain the required verification path: acceptance must not depend on a trusted tally server, external prover, dedicated auditor, or native-only verifier. Heavy trustee evaluation-key proving may currently require a participant-owned desktop device, but it is not an accepted native-only end state. Closing that runtime gap requires proof-size and runtime work plus evidence from the exact supported physical-device and build combination.
+
+## Public security and runtime boundaries
+
+The authoritative wording and correct-use consequences are in [SECURITY.md](SECURITY.md). In summary:
+
+- `SEC-001` and `SEC-009`: this is development software without production approval, independent audit, certification, or production hardening. Use only synthetic data.
+- `SEC-002`: target decryption does not yet provide a persistent one-shot release boundary.
+- `SEC-003`: repeated participation with reused setup, key-switching, or decryption secret material is not covered by an established retry-safety argument.
+- `SEC-004` and `SEC-005`: the implemented setup-proof path has not established the active 80-bit QROM soundness or ceremony-wide zero-knowledge and leakage targets.
+- `SEC-006`: homomorphic-encryption evidence covers components, not complete end-to-end ballot confidentiality, evaluator correctness, and target release.
+- `SEC-007`: the public encrypted-ballot creation, proof, transport, aggregation, and accepted-result workflow is incomplete.
+- `SEC-008`: there is no supported-phone runtime evidence.
+- `SEC-010`: accepting a roster size or derived parameter set does not certify a cryptographic or runtime profile.
+- `SEC-011`: evaluation-key material depends on the selected construction's KDM or circular-security assumptions.
+- `SEC-012`: acceptance requires committed-material roots, the full-source bridge proof, and canonical BDLOP source commitments to carry the complete VSS binding.
+- `SEC-013`: target-finality witness keys are caller supplied and are not bound to an accepted roster.
+- `SEC-014`: hash-critical non-ASCII text can diverge with ambient Unicode data; callers should independently enforce one canonical representation or keep those identifiers and labels ASCII.
+
+Do not expose VSS shares, trustee secret shares, encryption randomness, proof witnesses, decryption witnesses, or local secret state. Untrusted transcript and private-mailbox services may relay bytes, but acceptance must come from recomputed canonical encodings, hashes, roots, signatures, proof relations, and externally anchored prerequisites.
 
 ## Installation
 
@@ -42,126 +107,110 @@ Package tests are development evidence. Read [SECURITY.md](SECURITY.md) before t
 npm install sealed-lattice
 ```
 
+or:
+
 ```bash
 pnpm add sealed-lattice
 ```
 
-## Basic usage
+The package requires Node.js 24.14.1 or later when used in Node.js.
+
+## Usage
 
 ```typescript
-import { deriveThresholdParameters, validatePollSpec } from "sealed-lattice";
+import { deriveThresholdParameters, validatePollSpec } from 'sealed-lattice';
 
 const pollValidation = validatePollSpec({
-    pollId: "board-election-2026",
-    question: "Which proposal should be adopted?",
-    options: ["Proposal A", "Proposal B"],
-    topOptionCount: 1,
+    pollId: 'board-election-2026',
+    question: 'Which proposal should be adopted?',
+    options: Array.from(
+        { length: 20 },
+        (_unused, optionIndex) => `Proposal ${optionIndex + 1}`,
+    ),
+    topOptionCount: 5,
 });
 
 if (!pollValidation.isValid) {
     throw new Error(
-        pollValidation.errors[0]?.message ?? "Invalid poll specification.",
+        pollValidation.errors[0]?.message ?? 'Invalid poll specification.',
     );
 }
 
-const thresholdParameters = deriveThresholdParameters({
-    rosterSize: 10,
-});
+const thresholdParameters = deriveThresholdParameters({ rosterSize: 10 });
+
+console.log(pollValidation.normalized, thresholdParameters);
 ```
 
-`pollValidation.normalized` contains the validated poll with defaults applied. `thresholdParameters` contains the derived threshold, quorum, corruption-bound, and warning fields for the frozen roster size.
-
-## What you can use today
-
-- poll specification validation and canonical hash derivation;
-- threshold and frozen roster parameter derivation;
-- lifecycle transition and action capability checks;
-- board consistency, cast receipt, close record, target finality, roster manifest, recovery epoch, first-valid ordering, and foundation transcript checks;
-- setup-development verification helpers for local share checks, setup-roster hash derivation, setup package verification input construction, setup package verification, and accepted setup handoff consumption;
-- foundation transcript verification through the packaged kernel;
-- package-boundary and public API smoke coverage for development integration.
-
-## What is not available yet
-
-- a complete threshold voting workflow;
-- production-ready setup ceremony, ballot generation, or casting APIs;
-- public encrypted ballot package creation, verification, or accepted proof transport APIs;
-- public encrypted ballot aggregation APIs;
-- public bounded-domain mobile evaluator replay APIs;
-- target-bound decryption, target recombination, or result release APIs;
-- security claims beyond [SECURITY.md](SECURITY.md).
-
-The public package must not expose raw BGV decryption, arbitrary threshold decryption, individual ballot decryption, aggregate score decryption, rank or comparison opening, evaluator intermediate opening, raw VSS share export, secret-share export, ballot proof witness export, encryption randomness export, or test-only plaintext oracle access.
-
-## Security
-
-Read [SECURITY.md](SECURITY.md) before treating any verification result as security evidence. That file owns the public threat model, retry policy, audit status, unsupported-evidence rules, and cryptographic caveats.
-
-## Repository layout
-
-```text
-sealed-lattice/
-  crates/
-    sealed-lattice-kernel/      Rust transcript-core and proof-verifier kernel
-  packages/
-    crypto/                     Internal canonical JSON, hashes, signatures
-    protocol/                   Internal protocol logic and reference paths
-    sdk/                        Published sealed-lattice package
-    types/                      Shared TypeScript type declarations
-    wasm/                       Internal WASM loader package
-  test-vectors/                 Canonical public regression vectors
-  tools/                        CI and packaging tools
-```
+`pollValidation.normalized` contains the validated poll with defaults applied. Threshold derivation returns protocol parameters and warnings; it is not a security certificate.
 
 ## Development
 
-Install dependencies:
+The repository uses Node.js 24.14.1 and pnpm 10.33.0.
 
 ```bash
-pnpm install
-```
-
-Run the main local validation gate:
-
-```bash
+pnpm install --frozen-lockfile
 pnpm run check
 ```
 
-`pnpm run check` builds the workspace once, runs the type-check, then runs lint, package smoke verification, public package policy verification, test-lane coverage verification, package-boundary verification, dead-code scan, Rust formatting, Rust clippy, fast Rust kernel tests, fast Node tests, and the kernel-fast Node tests through the repository check runner.
+Useful full verification commands are:
 
-For public SDK API changes, run `pnpm run api-surface:generate` and review the compact summary diff manually in the PR. API surface review is not part of `pnpm run check`.
+```bash
+pnpm run tsc
+pnpm run build
+pnpm run test:node
+pnpm run test:browser
+pnpm run smoke:pack:npm
+```
 
-Common focused verification commands:
+Kernel proof changes also use the separate fast, measured-heavy, and
+accepted-setup Rust lanes:
 
 ```bash
 pnpm run test:rust:kernel
+pnpm run test:rust:kernel:heavy
 pnpm run test:rust:kernel:accepted-setup
-pnpm run test:node:fast
-pnpm run test:node:protocol
-pnpm run test:node:kernel
-pnpm run test:node
-pnpm run test:browser
-pnpm run test:lattigo-oracle
-pnpm run smoke:pack:npm
 ```
 
-Use the narrower command that matches the component being changed. Accepted-setup proof lanes are maintainer evidence for setup/proof changes; they do not change the public boundary in [SECURITY.md](SECURITY.md).
+The fast Rust runner always excludes the complete
+`bgv::setup::tests::accepted_setup` module, including focused filters. Use the
+measured-heavy runner for ignored `heavy_rust_kernel_` tests, and the guarded
+accepted-setup runner for accepted-setup tests and other explicitly selected
+ignored Rust tests.
 
-Accepted-setup proof lanes default to accelerated local mode: incremental Rust compilation, proof checkpoint resume under `temp/test-checkpoints/`, and run logs under `logs/`. CI passes `--ci` to use the conservative prove-fresh mode. The final-package lane keeps cold-store libtest parallelism until one accelerated final-package run completes and writes its checkpoint completion manifest.
+The measured-heavy Rust, accepted-setup Rust, and heavy Node kernel runners
+verify the shared process-memory guard before starting heavy work. It applies
+an aggregate Windows Job Object limit or inherited Linux address-space limit.
+The ceiling is 32 GiB on large hosts, or the lower of 70 percent of total
+memory and currently free memory after reserving 2 GiB on smaller hosts. The
+Rust heavy runners also serialize Cargo, libtest, Rayon, trustee-proof, and
+limb-proof concurrency; the heavy Node project disables file parallelism.
+Every Node command whose selected lanes include `kernel-heavy`, including
+`pnpm run test:node` and `pnpm run test:node:kernel`, is guarded.
+Proof-bearing functional and rejection fixtures use the minimum supported
+three-participant roster; the ten-participant parameter and phase fixtures
+remain lightweight. These tests exercise implementation behavior and do not
+certify either roster profile.
 
-Build and package-smoke the published SDK:
+After a measured-heavy failure, rerun one test by its full
+`heavy_rust_kernel_`-prefixed name:
 
 ```bash
-pnpm run build
-pnpm run smoke:pack:npm
+pnpm run test:rust:kernel:heavy -- heavy_rust_kernel_sparse_target_projection_decrypts_selected_ids_and_orders
 ```
 
-Install browser engines before the first local browser test run:
+The internal `@sealed-lattice/wasm` package's Node scripts delegate to the root
+runners so the WASM build and heavy-lane containment remain in force. The
+Docker-backed Lattigo arithmetic oracle is an optional development cross-check,
+not part of normal verification. Run it explicitly with
+`pnpm run test:lattigo-oracle`; it builds only from `tools/lattigo-oracle/` and
+runs with a 2 GiB memory-and-swap ceiling.
+
+Generate the public SDK review summary after an intentional API change:
 
 ```bash
-pnpm exec playwright install chromium firefox webkit
+pnpm run api-surface:generate
 ```
 
 ## License
 
-This project is licensed under MPL-2.0. See [LICENSE](LICENSE).
+This project is licensed under the Mozilla Public License 2.0. See [LICENSE](LICENSE).

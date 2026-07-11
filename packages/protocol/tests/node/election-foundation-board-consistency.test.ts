@@ -49,7 +49,7 @@ describe('board consistency', () => {
         const head0 = createBoardHead(0, null);
         const head1 = createBoardHead(1, head0.headHash);
         const evaluatorReplayRecordHash = deriveFixtureHash(
-            'fixture-evaluator-replay-record-v1',
+            'fixture-evaluator-replay-record',
             { proposal: 'target' },
         );
         const { head: head2, inclusionProofs } = createBoardHeadWithObjects(
@@ -79,7 +79,6 @@ describe('board consistency', () => {
         });
 
         expect(result.isValid).toBe(true);
-        expect(inclusionProof.boardEntryHashes).toBeUndefined();
         expect(inclusionProof.boardEntryCount).toBe(3);
         expect(inclusionProof.boardEntryMerklePath).toHaveLength(1);
         expect(result.verifiedHeadHashes).toEqual([
@@ -87,9 +86,6 @@ describe('board consistency', () => {
             head1.headHash,
             head2.headHash,
         ]);
-        expect(result.acceptedHashes).toContain(
-            inclusionProof.inclusionProofHash,
-        );
     });
 
     it('rejects board evidence without a trusted expected board key', () => {
@@ -112,7 +108,7 @@ describe('board consistency', () => {
     it('rejects a board-entry Merkle path with a substituted sibling', () => {
         const head0 = createBoardHead(0, null);
         const evaluatorReplayRecordHash = deriveFixtureHash(
-            'fixture-evaluator-replay-record-v1',
+            'fixture-evaluator-replay-record',
             { proposal: 'target' },
         );
         const { head, inclusionProofs } = createBoardHeadWithObjects(
@@ -167,7 +163,7 @@ describe('board consistency', () => {
         const fabricatedInclusionProof = createInclusionProof(
             head1,
             'EvaluatorReplayRecord',
-            deriveFixtureHash('fixture-evaluator-replay-record-v1', {
+            deriveFixtureHash('fixture-evaluator-replay-record', {
                 proposal: 'not-in-head',
             }),
         );
@@ -255,7 +251,6 @@ describe('board consistency', () => {
             createBoardEvidence([head0, head1, fork]),
         );
 
-        expect(forkedBoardResult.acceptedHashes).toEqual([]);
         expect(forkedBoardResult.refusedObjects).toEqual(
             expect.arrayContaining([
                 expect.objectContaining({ code: 'BoardForkDetected' }),
@@ -286,7 +281,7 @@ describe('board consistency', () => {
             evidenceHash: deriveCanonicalObjectHash({
                 objectType: 'ChallengeDomainHash',
                 payload: { wrong: true },
-                purpose: 'fixture-wrong-conflicting-head-evidence-v1',
+                purpose: 'fixture-wrong-conflicting-head-evidence',
             }),
         };
         const compatibleForkEvidence = {
@@ -481,7 +476,6 @@ describe('board consistency', () => {
         const malformedHeads = [
             createHeadWithSignedRoot(omitSignedRootField('manifestHash')),
             createHeadWithSignedRoot(omitSignedRootField('boardHeadHash')),
-            createHeadWithSignedRoot(omitSignedRootField('byteLength')),
             createHeadWithSignedRoot(omitSignedRootField('contextHash')),
             createHeadWithSignedRoot({
                 ...head1.signature.signedRoot,
@@ -529,7 +523,6 @@ describe('board consistency', () => {
         });
         const castReceipt = {
             objectType: 'CastReceipt',
-            objectVersion: 1,
             castReceiptHash,
             ceremonyId,
             electionManifestHash: deriveCanonicalObjectHash({

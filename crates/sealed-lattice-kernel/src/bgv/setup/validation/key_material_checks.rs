@@ -96,8 +96,7 @@ fn validate_collective_public_key_coefficient_material(
         "BgvCollectivePublicKeyCoefficientMaterial",
         "collective public key coefficient material object type",
     )?;
-    if usize_at_path(coefficient_material, &["objectVersion"])? != 1
-        || usize_at_path(coefficient_material, &["level"])? != DATA_PRIMES.len() - 1
+    if usize_at_path(coefficient_material, &["level"])? != DATA_PRIMES.len() - 1
         || usize_at_path(coefficient_material, &["coefficientCount"])? != POLYNOMIAL_DEGREE
         || usize_at_path(coefficient_material, &["participantCount"])? != participant_bindings.len()
     {
@@ -241,7 +240,7 @@ fn validate_coefficient_table(table: &Value, expected_modulus: u64) -> Canonical
             ));
         }
         let expected_hash = hash512_hex(
-            "sealed-lattice-bgv-rns/public-key-coefficient-vector-v1",
+            "sealed-lattice-bgv-rns/public-key-coefficient-vector",
             &[&bytes],
         );
         compare_hash_at_path(

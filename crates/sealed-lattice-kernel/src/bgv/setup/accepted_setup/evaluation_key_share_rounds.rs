@@ -4,7 +4,7 @@ use crate::hashing::derive_canonical_object_hash;
 
 // Share-record containers for the trustee evaluation-key proof path. The
 // records carry the public key-switch component material (the runtime key
-// shares), the ceremony context, and the same-secret anchors; the per-trustee
+// shares) and ceremony context; the per-trustee
 // succinct argument over every record is verified by
 // verify_trustee_evaluation_key_proofs, which rebuilds each statement from
 // these records, so the records themselves carry no proof fields.
@@ -38,13 +38,6 @@ pub(super) fn verify_relinearization_key_share_rounds(
             "relinearizationKeyShareRoundsTypeMismatch",
             "relinearizationKeyShareRounds.objectType must be RelinearizationKeyShareRounds",
             "setupPackage.relinearizationKeyShareRounds.objectType",
-        )?));
-    }
-    if rounds.get("objectVersion").and_then(Value::as_u64) != Some(1) {
-        return Ok(Some(evaluation_key_material_refusal(
-            "relinearizationKeyShareRoundsVersionMismatch",
-            "relinearizationKeyShareRounds.objectVersion must be 1",
-            "setupPackage.relinearizationKeyShareRounds.objectVersion",
         )?));
     }
     let setup_context = setup_package.get("setupContext").ok_or_else(|| {
@@ -91,18 +84,6 @@ pub(super) fn verify_relinearization_key_share_rounds(
             binding.evaluator_key_schedule_root.as_str(),
         ),
         (
-            "sameSecretConsistencyRoot",
-            binding.same_secret_consistency_root.as_str(),
-        ),
-        (
-            "sameSecretProofSetRoot",
-            binding.same_secret_proof_set_root.as_str(),
-        ),
-        (
-            "sameSecretProofFamilyBindingRoot",
-            binding.same_secret_proof_family_binding_root.as_str(),
-        ),
-        (
             "publicKeyShareSetRoot",
             binding.public_key_share_set_root.as_str(),
         ),
@@ -134,7 +115,7 @@ pub(super) fn verify_relinearization_key_share_rounds(
         )?));
     }
     let expected_levels = scheduled_relinearization_levels()?;
-    let same_secret_proof_bindings = same_secret_proof_bindings_from_package(setup_package)?;
+    let expected_trustees = expected_trustees_from_phase_transcript(setup_package)?;
     let round_one_records = array_value(rounds, "roundOneRecords")?;
     let round_two_records = array_value(rounds, "roundTwoRecords")?;
     let expected_record_count = expected_levels.len() * roster.participant_count as usize;
@@ -153,11 +134,7 @@ pub(super) fn verify_relinearization_key_share_rounds(
     let mut round_one_share_roots = BTreeMap::<(u64, u64), String>::new();
     for record in round_one_records {
         let (level, trustee_roster_position, record_root, share_root) =
-            match verify_relinearization_round_one_record(
-                record,
-                &binding,
-                &same_secret_proof_bindings,
-            ) {
+            match verify_relinearization_round_one_record(record, &binding, &expected_trustees) {
                 Ok(verified_record) => verified_record,
                 Err(error) => {
                     return Ok(Some(evaluation_key_material_refusal(
@@ -185,10 +162,9 @@ pub(super) fn verify_relinearization_key_share_rounds(
             )?));
         }
         round_one_share_roots.insert((level, trustee_roster_position), share_root);
-        let trustee_identity = same_secret_proof_bindings
+        let trustee_identity = expected_trustees
             .get(&trustee_roster_position)
-            .expect("same-secret proof binding exists after record verification")
-            .trustee_identity
+            .expect("trustee exists after record verification")
             .clone();
         round_one_roots_by_level
             .entry(level)
@@ -215,7 +191,6 @@ pub(super) fn verify_relinearization_key_share_rounds(
         };
         let expected_root = derive_canonical_object_hash(&json!({
             "objectType": "RelinearizationRoundOneAggregate",
-            "objectVersion": 1,
             "evaluatorKeyScheduleRoot": binding.evaluator_key_schedule_root.as_str(),
             "level": level,
             "roundOneRecordRoots": record_roots,
@@ -245,7 +220,7 @@ pub(super) fn verify_relinearization_key_share_rounds(
             match verify_relinearization_round_two_record(
                 record,
                 &binding,
-                &same_secret_proof_bindings,
+                &expected_trustees,
                 &round_one_state,
             ) {
                 Ok(verified_record) => verified_record,
@@ -271,10 +246,9 @@ pub(super) fn verify_relinearization_key_share_rounds(
                 "setupPackage.relinearizationKeyShareRounds.roundTwoRecords",
             )?));
         }
-        let trustee_identity = same_secret_proof_bindings
+        let trustee_identity = expected_trustees
             .get(&trustee_roster_position)
-            .expect("same-secret proof binding exists after record verification")
-            .trustee_identity
+            .expect("trustee exists after record verification")
             .clone();
         round_two_roots_by_level
             .entry(level)
@@ -300,7 +274,6 @@ pub(super) fn verify_relinearization_key_share_rounds(
         };
         let expected_root = derive_canonical_object_hash(&json!({
             "objectType": "RelinearizationRoundTwoAggregate",
-            "objectVersion": 1,
             "evaluatorKeyScheduleRoot": binding.evaluator_key_schedule_root.as_str(),
             "level": level,
             // Chaining round two onto the accepted round-one aggregate root binds the rounds together, so round-two material proven against a substituted or rolled-back round-one transcript cannot verify.
@@ -372,14 +345,14 @@ pub(super) fn verify_galois_key_share_batches(
         )?));
     }
     let binding = evaluation_key_proof_common_binding(setup_package)?;
-    let same_secret_proof_bindings = same_secret_proof_bindings_from_package(setup_package)?;
+    let expected_trustees = expected_trustees_from_phase_transcript(setup_package)?;
     let expected_schedule = expected_required_galois_key_schedule()?;
     let mut seen_roster_positions = BTreeSet::new();
     for batch in batches {
         if let Err(error) = verify_galois_key_share_batch(
             batch,
             &binding,
-            &same_secret_proof_bindings,
+            &expected_trustees,
             &expected_schedule,
             &mut seen_roster_positions,
         ) {
@@ -415,9 +388,6 @@ pub(super) fn galois_key_share_material_for_schedule(
 
 pub(super) struct EvaluationKeyProofCommonBinding {
     pub(super) evaluator_key_schedule_root: String,
-    pub(super) same_secret_consistency_root: String,
-    pub(super) same_secret_proof_set_root: String,
-    pub(super) same_secret_proof_family_binding_root: String,
     pub(super) public_key_share_set_root: String,
     pub(super) public_key_share_succinct_proof_set_root: String,
     pub(super) relinearization_crp_root: String,
@@ -462,9 +432,6 @@ pub(super) fn evaluation_key_proof_common_binding(
             "evaluatorKeyScheduleRoot",
         )?
         .to_string(),
-        same_secret_consistency_root: same_secret_consistency_root_from_package(setup_package)?,
-        same_secret_proof_set_root: same_secret_proof_set_root_from_package(setup_package)?,
-        same_secret_proof_family_binding_root: same_secret_proof_family_binding_root()?,
         public_key_share_set_root: setup_package
             .get("publicKeyShares")
             .and_then(|share_set| share_set.get("publicKeyShareSetRoot"))
@@ -544,7 +511,6 @@ pub(super) fn expected_relinearization_key_switch_seed(
 ) -> CanonicalResult<String> {
     derive_canonical_object_hash(&json!({
         "objectType": "RelinearizationKeySwitchPublicSampleSeed",
-        "objectVersion": 1,
         "proofFamily": "relinearization-key-share",
         "keySwitchSampleScope": "shared-by-scheduled-level-and-round",
         "evaluatorKeyScheduleRoot": binding.evaluator_key_schedule_root.as_str(),
@@ -561,7 +527,6 @@ pub(super) fn expected_galois_key_switch_seed(
 ) -> CanonicalResult<String> {
     derive_canonical_object_hash(&json!({
         "objectType": "GaloisKeySwitchPublicSampleSeed",
-        "objectVersion": 1,
         "proofFamily": "galois-key-share",
         "keySwitchSampleScope": "shared-by-scheduled-rotation-and-level",
         "evaluatorKeyScheduleRoot": binding.evaluator_key_schedule_root.as_str(),
@@ -638,7 +603,6 @@ fn verify_evaluation_key_component_material_encoding(record: &Value) -> Canonica
         "embedded-full-key-switch-component-vectors" => {
             if record.get("keySwitchComponentVectors").is_none()
                 || record.get("keySwitchComponentMaterialRoot").is_some()
-                || record.get("keySwitchComponentChunkSizeBytes").is_some()
                 || record.get("keySwitchComponentChunkCount").is_some()
                 || record.get("keySwitchComponentTotalByteLength").is_some()
                 || record.get("keySwitchComponentFullObjectHash").is_some()
@@ -660,7 +624,6 @@ fn verify_evaluation_key_component_material_encoding(record: &Value) -> Canonica
             }
             for field_name in [
                 "keySwitchComponentMaterialRoot",
-                "keySwitchComponentChunkSizeBytes",
                 "keySwitchComponentChunkCount",
                 "keySwitchComponentTotalByteLength",
                 "keySwitchComponentFullObjectHash",
@@ -702,7 +665,7 @@ fn verify_evaluation_key_component_material_encoding(record: &Value) -> Canonica
 fn verify_relinearization_round_one_record(
     record: &Value,
     binding: &EvaluationKeyProofCommonBinding,
-    same_secret_proof_bindings: &BTreeMap<u64, SameSecretProofBinding>,
+    expected_trustees: &BTreeMap<u64, String>,
 ) -> CanonicalResult<(u64, u64, String, String)> {
     verify_evaluation_key_record_object(
         record,
@@ -714,7 +677,7 @@ fn verify_relinearization_round_one_record(
     verify_evaluation_key_record_common_bindings(
         record,
         binding,
-        same_secret_proof_bindings,
+        expected_trustees,
         trustee_roster_position,
         "relinearizationCrpRoot",
         binding.relinearization_crp_root.as_str(),
@@ -758,7 +721,7 @@ fn verify_relinearization_round_one_record(
 fn verify_relinearization_round_two_record(
     record: &Value,
     binding: &EvaluationKeyProofCommonBinding,
-    same_secret_proof_bindings: &BTreeMap<u64, SameSecretProofBinding>,
+    expected_trustees: &BTreeMap<u64, String>,
     round_one_state: &RelinearizationRoundOneVerificationState<'_>,
 ) -> CanonicalResult<(u64, u64, String)> {
     verify_evaluation_key_record_object(
@@ -771,7 +734,7 @@ fn verify_relinearization_round_two_record(
     verify_evaluation_key_record_common_bindings(
         record,
         binding,
-        same_secret_proof_bindings,
+        expected_trustees,
         trustee_roster_position,
         "relinearizationCrpRoot",
         binding.relinearization_crp_root.as_str(),
@@ -832,7 +795,7 @@ fn verify_relinearization_round_two_record(
 fn verify_galois_key_share_batch(
     batch: &Value,
     binding: &EvaluationKeyProofCommonBinding,
-    same_secret_proof_bindings: &BTreeMap<u64, SameSecretProofBinding>,
+    expected_trustees: &BTreeMap<u64, String>,
     expected_schedule: &Value,
     seen_roster_positions: &mut BTreeSet<u64>,
 ) -> CanonicalResult<()> {
@@ -851,7 +814,7 @@ fn verify_galois_key_share_batch(
     verify_evaluation_key_record_common_bindings(
         batch,
         binding,
-        same_secret_proof_bindings,
+        expected_trustees,
         trustee_roster_position,
         "galoisKeyCrpRoot",
         binding.galois_key_crp_root.as_str(),
@@ -918,12 +881,6 @@ fn verify_galois_key_share_material_record(
             "Galois key share material objectType must be GaloisKeyShareMaterial",
         ));
     }
-    if material_record.get("objectVersion").and_then(Value::as_u64) != Some(1) {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "Galois key share material objectVersion must be 1",
-        ));
-    }
     for field_name in ["proofFamily", "trusteeIdentity", "trusteeRosterPosition"] {
         if material_record.get(field_name) != batch.get(field_name) {
             return Err(CanonicalError::new(
@@ -971,12 +928,6 @@ fn verify_evaluation_key_record_object(
             format!("evaluation-key share objectType must be {expected_object_type}"),
         ));
     }
-    if record.get("objectVersion").and_then(Value::as_u64) != Some(1) {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "evaluation-key share objectVersion must be 1",
-        ));
-    }
     for (field_name, expected_value) in [("proofFamily", expected_proof_family)] {
         if record.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Err(CanonicalError::new(
@@ -992,7 +943,7 @@ fn verify_evaluation_key_record_object(
 fn verify_evaluation_key_record_common_bindings(
     record: &Value,
     binding: &EvaluationKeyProofCommonBinding,
-    same_secret_proof_bindings: &BTreeMap<u64, SameSecretProofBinding>,
+    expected_trustees: &BTreeMap<u64, String>,
     trustee_roster_position: u64,
     crp_root_field_name: &str,
     expected_crp_root: &str,
@@ -1001,18 +952,6 @@ fn verify_evaluation_key_record_common_bindings(
         (
             "evaluatorKeyScheduleRoot",
             binding.evaluator_key_schedule_root.as_str(),
-        ),
-        (
-            "sameSecretConsistencyRoot",
-            binding.same_secret_consistency_root.as_str(),
-        ),
-        (
-            "sameSecretProofSetRoot",
-            binding.same_secret_proof_set_root.as_str(),
-        ),
-        (
-            "sameSecretProofFamilyBindingRoot",
-            binding.same_secret_proof_family_binding_root.as_str(),
         ),
         (
             "publicKeyShareSuccinctProofSetRoot",
@@ -1027,44 +966,19 @@ fn verify_evaluation_key_record_common_bindings(
             ));
         }
     }
-    let Some(same_secret_binding) = same_secret_proof_bindings.get(&trustee_roster_position) else {
+    let Some(expected_trustee_identity) = expected_trustees.get(&trustee_roster_position) else {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ComponentMismatch,
-            "evaluation-key share trusteeRosterPosition must reference an accepted same-secret proof",
+            "evaluation-key share trusteeRosterPosition must reference an accepted trustee",
         ));
     };
-    for (field_name, expected_value) in [
-        (
-            "trusteeIdentity",
-            same_secret_binding.trustee_identity.as_str(),
-        ),
-        (
-            "trusteeSecretCommitmentRoot",
-            same_secret_binding.trustee_secret_commitment_root.as_str(),
-        ),
-        (
-            "sameSecretStatementRoot",
-            same_secret_binding.same_secret_statement_root.as_str(),
-        ),
-        (
-            "sameSecretProofFamilyBindingRoot",
-            same_secret_binding
-                .same_secret_proof_family_binding_root
-                .as_str(),
-        ),
-        (
-            "sameSecretProofRoot",
-            same_secret_binding.same_secret_proof_root.as_str(),
-        ),
-    ] {
-        if record.get(field_name).and_then(Value::as_str) != Some(expected_value) {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::ComponentMismatch,
-                format!(
-                    "evaluation-key share {field_name} must match the accepted trustee secret binding"
-                ),
-            ));
-        }
+    if record.get("trusteeIdentity").and_then(Value::as_str)
+        != Some(expected_trustee_identity.as_str())
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ComponentMismatch,
+            "evaluation-key share trusteeIdentity must match the accepted trustee",
+        ));
     }
 
     Ok(())

@@ -30,7 +30,16 @@
             "project": ["src/**/*.ts"],
         },
         "packages/protocol": {
-            "entry": ["tests/**/*.ts"],
+            "entry": [
+                "tests/**/*.ts",
+                // Target-decryption modules ported ahead of their consumers:
+                // the local-state sealing, mailbox-credential, and SDK
+                // wiring that consumes them lands with the remaining
+                // target-decryption integration work.
+                "src/setup/proof-byte-encoding.ts",
+                "src/target-decryption/local-target-share-witness.ts",
+                "src/target-decryption/proof-material-transport.ts",
+            ],
             "project": ["src/**/*.ts", "tests/**/*.ts"],
         },
         "packages/crypto": {

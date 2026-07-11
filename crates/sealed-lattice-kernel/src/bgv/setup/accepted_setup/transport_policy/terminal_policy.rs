@@ -4,11 +4,16 @@ pub(in crate::bgv::setup) fn verify_terminal_setup_transport_policy(
     setup_package: &Value,
     request: &Value,
 ) -> CanonicalResult<Option<Value>> {
+    // Embedded VSS coefficient commitment material declares the full-public
+    // encoding; the terminal accepted setup requires the binary-chunked transport
+    // encoding instead. A missing field or any other encoding is refused too, so
+    // the check fails closed and only the transported form passes, mirroring the
+    // sibling proof-bytes, key-switch, and public-evaluation-key encoding checks.
     if setup_package
         .get("vssCoefficientCommitmentMaterial")
-        .and_then(|material_set| material_set.get("materialEncoding"))
+        .and_then(|material| material.get("materialEncoding"))
         .and_then(Value::as_str)
-        != Some("binary-chunked-full-public-setup-commitment-values")
+        != Some(VSS_COEFFICIENT_COMMITMENT_MATERIAL_TRANSPORT_ENCODING)
     {
         return Ok(Some(terminal_transport_policy_refusal(
             "terminalVssMaterialTransportRequired",
@@ -16,24 +21,17 @@ pub(in crate::bgv::setup) fn verify_terminal_setup_transport_policy(
             "setupPackage.vssCoefficientCommitmentMaterial.materialEncoding",
         )?));
     }
-    if setup_package
+    if !setup_package
         .get("publicKeyShareMaterial")
-        .and_then(|material_set| material_set.get("materialEncoding"))
-        .and_then(Value::as_str)
-        != Some(PUBLIC_KEY_SHARE_MATERIAL_TRANSPORT_ENCODING)
+        .is_some_and(public_key_share_material_uses_transport)
     {
         return Ok(Some(terminal_transport_policy_refusal(
             "terminalPublicKeyShareMaterialTransportRequired",
             "terminal accepted setup requires binary-chunked public-key share material",
-            "setupPackage.publicKeyShareMaterial.materialEncoding",
+            "setupPackage.publicKeyShareMaterial",
         )?));
     }
     for (record_set_name, records_field_name, object_path) in [
-        (
-            "sameSecretProofs",
-            "proofRecords",
-            "setupPackage.sameSecretProofs.proofRecords",
-        ),
         (
             "publicKeyShareSuccinctProofs",
             "proofRecords",
@@ -100,7 +98,6 @@ pub(in crate::bgv::setup) fn verify_terminal_setup_transport_policy(
     for field_name in [
         "publicEvaluationKeyMaterialEncoding",
         "publicEvaluationKeyMaterialRoot",
-        "publicEvaluationKeyMaterialChunkSizeBytes",
         "publicEvaluationKeyMaterialChunkCount",
         "publicEvaluationKeyMaterialTotalByteLength",
         "publicEvaluationKeyMaterialFullObjectHash",
@@ -126,40 +123,33 @@ pub(in crate::bgv::setup) fn verify_terminal_setup_transport_policy(
             "setupPackage.evaluationKeys.publicEvaluationKeyMaterialEncoding",
         )?));
     }
-    if let Some(response) = verify_terminal_vss_material_handle_policy(request)? {
+    if let Some(response) = verify_terminal_key_switch_material_handle_policy(request)? {
         return Ok(Some(response));
     }
 
     Ok(None)
 }
 
-fn verify_terminal_vss_material_handle_policy(request: &Value) -> CanonicalResult<Option<Value>> {
-    let Some(transported_material) = request.get("transportedVssCoefficientCommitmentMaterial")
-    else {
-        return Ok(Some(verification_response(
-            Some("setupPackageVerification"),
-            vec!["transportedVssCoefficientCommitmentMaterial".to_string()],
-            Vec::new(),
-            Vec::new(),
-        )?));
+// The terminal accepted setup must not carry the raw key-switch component
+// material inline in the package: the material streams through the file-backed
+// evaluation-key component material transport and the accepted-setup verifier
+// reads it transiently from the stream-verified handle. Any inline `chunks`
+// array on a transported component material is a raw embedded store and is
+// refused.
+fn verify_terminal_key_switch_material_handle_policy(
+    request: &Value,
+) -> CanonicalResult<Option<Value>> {
+    let Some(material_set) = request.get("transportedEvaluationKeyShareComponentMaterial") else {
+        return Ok(None);
     };
-    if transported_material.get("chunks").is_some() {
-        return Ok(Some(terminal_transport_policy_refusal(
-            "terminalVssMaterialHandleRequired",
-            "terminal accepted setup requires a chunkless VSS material transport reference plus a stream-verified VSS material handle",
-            "transportedVssCoefficientCommitmentMaterial.chunks",
-        )?));
-    }
-    if request
-        .get("verifiedVssCoefficientCommitmentMaterial")
-        .is_none()
-    {
-        return Ok(Some(verification_response(
-            Some("setupPackageVerification"),
-            vec!["verifiedVssCoefficientCommitmentMaterial".to_string()],
-            Vec::new(),
-            Vec::new(),
-        )?));
+    for component_material in array_value(material_set, "componentMaterials")? {
+        if component_material.get("chunks").is_some() {
+            return Ok(Some(terminal_transport_policy_refusal(
+                "terminalKeySwitchMaterialHandleRequired",
+                "terminal accepted setup requires a chunkless key-switch component material reference plus a stream-verified material handle",
+                "transportedEvaluationKeyShareComponentMaterial.componentMaterials.chunks",
+            )?));
+        }
     }
 
     Ok(None)

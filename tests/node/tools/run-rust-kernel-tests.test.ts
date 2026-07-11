@@ -1,5 +1,3 @@
-import os from 'node:os';
-
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -7,9 +5,9 @@ import {
     parseRustKernelArguments,
 } from '#tools/ci/run-rust-kernel-tests';
 import {
+    acceptedSetupTestModulePattern,
     cargoTestArgumentsForRustKernelFast,
-    heavyAcceptedSetupTestPattern,
-    memoryBoundedFastTestThreadCount,
+    heavyRustKernelTestNamePrefix,
     normalizeRustTestFilter,
 } from '#tools/ci/rust-kernel-test-arguments';
 
@@ -22,7 +20,9 @@ describe('Rust kernel runner arguments', () => {
             'sealed-lattice-kernel',
             '--',
             '--skip',
-            heavyAcceptedSetupTestPattern,
+            acceptedSetupTestModulePattern,
+            '--test-threads',
+            '1',
             '--show-output',
         ]);
     });
@@ -38,26 +38,29 @@ describe('Rust kernel runner arguments', () => {
             'direct_ballots',
             '--',
             '--skip',
-            heavyAcceptedSetupTestPattern,
+            acceptedSetupTestModulePattern,
+            '--test-threads',
+            '1',
             '--show-output',
         ]);
     });
 
-    it('memory-bounds the fast lane libtest thread count', () => {
-        const threadCount = memoryBoundedFastTestThreadCount();
-        expect(Number.isInteger(threadCount)).toBe(true);
-        expect(threadCount).toBeGreaterThanOrEqual(1);
-        expect(threadCount).toBeLessThanOrEqual(os.cpus().length);
+    it('keeps accepted-setup tests out of focused fast runs', () => {
+        const acceptedSetupTestName =
+            'collective_setup_verifier_refuses_malformed_aggregate_threshold_proofs';
 
-        expect(cargoTestArgumentsForRustKernelFast(undefined, 4)).toEqual([
+        expect(
+            cargoTestArgumentsForRustKernelFast(acceptedSetupTestName),
+        ).toEqual([
             'test',
             '-p',
             'sealed-lattice-kernel',
+            acceptedSetupTestName,
             '--',
             '--skip',
-            heavyAcceptedSetupTestPattern,
+            acceptedSetupTestModulePattern,
             '--test-threads',
-            '4',
+            '1',
             '--show-output',
         ]);
     });
@@ -89,19 +92,21 @@ describe('Rust kernel runner arguments', () => {
         expect(() => parseRustKernelArguments(['--unsupported'])).toThrow(
             'Unknown argument: --unsupported',
         );
+        expect(() =>
+            parseRustKernelArguments([
+                `${heavyRustKernelTestNamePrefix}one_test`,
+            ]),
+        ).toThrow('must use "pnpm run test:rust:kernel:heavy');
     });
 
     it('builds the cargo command for the package script', () => {
-        const command = buildRustKernelTestCommand(
-            {
-                testFilter: 'request_validation',
-            },
-            4,
-        );
+        const command = buildRustKernelTestCommand({
+            testFilter: 'request_validation',
+        });
 
         expect(command.command).toBe('cargo');
         expect(command.args).toEqual(
-            cargoTestArgumentsForRustKernelFast('request_validation', 4),
+            cargoTestArgumentsForRustKernelFast('request_validation'),
         );
         expect(command.description).toBe(
             'cargo test Rust kernel fast (request_validation)',

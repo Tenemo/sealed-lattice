@@ -21,7 +21,6 @@ const mlDsa65SignatureByteLength = ml_dsa65.lengths.signature!;
 
 export type SignatureExpectation = {
     readonly objectType?: SignedObjectType;
-    readonly objectVersion?: number;
     readonly signerRole?: SignerRole;
     readonly signerIdentity?: string;
     readonly ceremonyId?: string;
@@ -31,7 +30,6 @@ export type SignatureExpectation = {
     readonly chunkMerkleRoot?: ProtocolHash | null;
     readonly boardHeadHash?: ProtocolHash | null;
     readonly contextHash?: ProtocolHash;
-    readonly byteLength?: number;
     readonly recoveryEpoch?: number;
     readonly deviceEpoch?: number;
 };
@@ -42,7 +40,6 @@ const emptySignatureVerificationResult = (
     objectHash?: ProtocolHash,
 ): SignatureVerificationResult => ({
     isValid: false,
-    acceptedHashes: [],
     refusedObjects: [
         {
             code,
@@ -52,11 +49,8 @@ const emptySignatureVerificationResult = (
     ],
 });
 
-const successfulSignatureVerification = (
-    signatureHash: ProtocolHash,
-): SignatureVerificationResult => ({
+const successfulSignatureVerification = (): SignatureVerificationResult => ({
     isValid: true,
-    acceptedHashes: [signatureHash],
     refusedObjects: [],
 });
 
@@ -84,7 +78,7 @@ const canonicalProtocolSignatureMessage = (
 ): Uint8Array =>
     textEncoder.encode(
         canonicalJson({
-            messageDomain: 'sealed-lattice/protocol-signature-v1',
+            messageDomain: 'sealed-lattice/protocol-signature',
             profile: signature.profile,
             publicKeyHash: signature.publicKeyHash,
             signedRoot: signature.signedRoot,
@@ -221,13 +215,11 @@ const validateSignedRootShape = (
     const signedRootRecord = signedRoot as Record<string, unknown>;
     const requiredFields = [
         'objectType',
-        'objectVersion',
         'ceremonyId',
         'manifestHash',
         'boardHeadHash',
         'objectRoot',
         'chunkMerkleRoot',
-        'byteLength',
         'signerRole',
         'signerIdentity',
         'recoveryEpoch',
@@ -274,14 +266,12 @@ const validateSignedRootShape = (
         );
     }
     if (
-        !isNonNegativeInteger(signedRoot.objectVersion) ||
-        !isNonNegativeInteger(signedRoot.byteLength) ||
         !isNonNegativeInteger(signedRoot.recoveryEpoch) ||
         !isNonNegativeInteger(signedRoot.deviceEpoch)
     ) {
         return emptySignatureVerificationResult(
             'InvalidSignedRoot',
-            'Signed root version, byte length, and epochs must be non-negative integers.',
+            'Signed root epochs must be non-negative integers.',
         );
     }
     if (
@@ -311,16 +301,6 @@ const validateExpectation = (
         return emptySignatureVerificationResult(
             'WrongObjectType',
             'Signature root object type does not match the expected object.',
-            signature.signatureHash,
-        );
-    }
-    if (
-        expectation.objectVersion !== undefined &&
-        signedRoot.objectVersion !== expectation.objectVersion
-    ) {
-        return emptySignatureVerificationResult(
-            'InvalidSignedRoot',
-            'Signature root object version does not match the expected version.',
             signature.signatureHash,
         );
     }
@@ -405,16 +385,6 @@ const validateExpectation = (
         );
     }
     if (
-        expectation.byteLength !== undefined &&
-        signedRoot.byteLength !== expectation.byteLength
-    ) {
-        return emptySignatureVerificationResult(
-            'InvalidSignedRoot',
-            'Signature root byte length does not match the expected object.',
-            signature.signatureHash,
-        );
-    }
-    if (
         expectation.recoveryEpoch !== undefined &&
         signedRoot.recoveryEpoch !== expectation.recoveryEpoch
     ) {
@@ -453,7 +423,6 @@ const hasExplicitSignatureExpectationBinding = (
 ): boolean =>
     [
         expectation.objectType,
-        expectation.objectVersion,
         expectation.signerRole,
         expectation.signerIdentity,
         expectation.ceremonyId,
@@ -463,7 +432,6 @@ const hasExplicitSignatureExpectationBinding = (
         expectation.chunkMerkleRoot,
         expectation.boardHeadHash,
         expectation.contextHash,
-        expectation.byteLength,
         expectation.recoveryEpoch,
         expectation.deviceEpoch,
     ].some((value) => value !== undefined);
@@ -546,7 +514,7 @@ const verifySignedObjectSignatureInner = (
         );
     }
 
-    return successfulSignatureVerification(signature.signatureHash);
+    return successfulSignatureVerification();
 };
 
 export const verifySignedObjectSignature = (

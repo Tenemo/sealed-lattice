@@ -20,7 +20,7 @@ fn direct_ballot_public_proof_transport_rejects_wrong_chunk_hash() {
         &transport.proof_bytes,
         &transport.proof_bytes_hash,
         &chunk_hashes,
-        DIRECT_BALLOT_PROTOTYPE_PROOF_CHUNK_BYTES,
+        PROTOTYPE_PROOF_CHUNK_BYTES,
         &transport.chunk_merkle_root,
     )
     .expect_err("wrong chunk hash must reject");
@@ -49,7 +49,7 @@ fn direct_ballot_public_proof_transport_rejects_duplicate_chunk_hash() {
         &transport.proof_bytes,
         &transport.proof_bytes_hash,
         &chunk_hashes,
-        DIRECT_BALLOT_PROTOTYPE_PROOF_CHUNK_BYTES,
+        PROTOTYPE_PROOF_CHUNK_BYTES,
         &transport.chunk_merkle_root,
     )
     .expect_err("duplicate chunk hash must reject");
@@ -81,7 +81,7 @@ fn direct_ballot_public_proof_transport_rejects_truncated_proof_bytes() {
         &transport.proof_bytes[..truncated_len],
         &transport.proof_bytes_hash,
         &transport.chunk_hashes,
-        DIRECT_BALLOT_PROTOTYPE_PROOF_CHUNK_BYTES,
+        PROTOTYPE_PROOF_CHUNK_BYTES,
         &transport.chunk_merkle_root,
     )
     .expect_err("truncated proof bytes must reject");

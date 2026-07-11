@@ -73,7 +73,6 @@ pub(in super::super) fn private_vss_envelope_commitments_object(
                 .expect("local verification root");
                 let private_envelope_aad = serde_json::json!({
                     "objectType": "PrivateVssEnvelopeAad",
-                    "objectVersion": 1,
                     "privateEnvelopeObjectType": "PrivateVssShareEnvelope",
                     "ciphertextContentType": "private-vss-share-envelope",
                     "ceremonyId": ceremony_id,
@@ -102,17 +101,16 @@ pub(in super::super) fn private_vss_envelope_commitments_object(
                     private_vss_mailbox_public_key_bytes_hash(recipient_roster_position);
                 let kem_ciphertext_bytes = vec![0xa5_u8; 1088];
                 let kem_ciphertext_hash = hash512_hex(
-                    "sealed-lattice-private-vss-mailbox/ml-kem-768-ciphertext-v1",
+                    "sealed-lattice-private-vss-mailbox/ml-kem-768-ciphertext",
                     &[&kem_ciphertext_bytes],
                 );
                 let ciphertext_bytes = vec![0xc3_u8; 96];
                 let ciphertext_bytes_hash = hash512_hex(
-                    "sealed-lattice-private-vss-mailbox/aes-256-gcm-ciphertext-v1",
+                    "sealed-lattice-private-vss-mailbox/aes-256-gcm-ciphertext",
                     &[&ciphertext_bytes],
                 );
                 let mut encrypted_envelope = serde_json::json!({
                     "objectType": "EncryptedPrivateVssShareEnvelope",
-                    "objectVersion": 1,
                     "ciphertextContentType": "private-vss-share-envelope",
                     "ceremonyId": ceremony_id,
                     "manifestHash": manifest_hash,
@@ -150,7 +148,6 @@ pub(in super::super) fn private_vss_envelope_commitments_object(
                 let encrypted_envelope_hash = encrypted_envelope["encryptedEnvelopeHash"].clone();
                 let mut envelope_reference = serde_json::json!({
                     "objectType": "PrivateVssEnvelopeCommitment",
-                    "objectVersion": 1,
                     "ceremonyId": ceremony_id,
                     "manifestHash": manifest_hash,
                     "rosterHash": roster_hash,
@@ -187,7 +184,6 @@ pub(in super::super) fn private_vss_envelope_commitments_object(
         .collect::<Vec<_>>();
     let mut commitment_set = serde_json::json!({
         "objectType": "PrivateVssEnvelopeCommitmentSet",
-        "objectVersion": 1,
         "ceremonyId": ceremony_id,
         "manifestHash": manifest_hash,
         "rosterHash": roster_hash,
@@ -256,7 +252,6 @@ pub(in super::super) fn vss_share_acceptances_object(
                     .expect("local verification root");
                 let acceptance_payload = serde_json::json!({
                     "objectType": "VssShareAcceptance",
-                    "objectVersion": 1,
                     "ceremonyId": ceremony_id,
                     "manifestHash": manifest_hash,
                     "rosterHash": roster_hash,
@@ -304,7 +299,6 @@ pub(in super::super) fn vss_share_acceptances_object(
                     &signature_seed_label,
                     serde_json::json!({
                         "objectType": "VssShareAcceptance",
-                        "objectVersion": 1,
                         "ceremonyId": ceremony_id,
                         "manifestHash": manifest_hash,
                         "boardHeadHash": null,
@@ -336,7 +330,6 @@ pub(in super::super) fn vss_share_acceptances_object(
         .collect::<Vec<_>>();
     let mut acceptance_set = serde_json::json!({
         "objectType": "VssShareAcceptanceSet",
-        "objectVersion": 1,
         "ceremonyId": ceremony_id,
         "manifestHash": manifest_hash,
         "rosterHash": roster_hash,

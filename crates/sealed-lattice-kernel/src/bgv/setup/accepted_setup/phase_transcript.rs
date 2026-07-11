@@ -346,18 +346,6 @@ fn verify_participant_phase_object(
         )?));
     }
     if participant_phase_object
-        .get("objectVersion")
-        .and_then(Value::as_u64)
-        != Some(1)
-    {
-        return Ok(Some(phase_refusal(
-            phase_identifier,
-            "phaseParticipantObjectVersionMismatch",
-            "participant phase object version must be 1",
-            format!("setupPackage.phaseTranscript.{phase_identifier}.participantPhaseObjects"),
-        )?));
-    }
-    if participant_phase_object
         .get("phaseId")
         .and_then(Value::as_str)
         != Some(phase_identifier)
@@ -684,7 +672,6 @@ fn verify_participant_phase_object(
         signature_envelope,
         &ProtocolSignatureExpectation {
             object_type: "SetupPhaseParticipantObject",
-            object_version: 1,
             signer_role: "Trustee",
             signer_identity: trustee_identity,
             ceremony_id,
@@ -694,7 +681,6 @@ fn verify_participant_phase_object(
             chunk_merkle_root: None,
             board_head_hash: None,
             context_hash: phase_signature_context_hash,
-            byte_length: phase_object_byte_length,
             recovery_epoch,
             device_epoch,
         },
@@ -735,7 +721,6 @@ fn phase_participant_payload_value(
     } = input;
     let mut payload = json!({
         "objectType": "SetupPhaseParticipantObject",
-        "objectVersion": 1,
         "phaseId": phase_identifier,
         "phaseNumber": phase_number,
         "ceremonyId": setup_context_string(setup_context, "ceremonyId")?,
@@ -883,7 +868,6 @@ pub(super) fn setup_intent_roster_hash_from_registrations(
         .map(|(roster_position, registration)| {
             json!({
                 "objectType": "CollectiveBgvSetupRosterEntry",
-                "objectVersion": 1,
                 "rosterPosition": roster_position,
                 "trusteeIdentity": registration.trustee_identity,
                 "signingPublicKeyHash": registration.signing_public_key_hash,

@@ -3,7 +3,14 @@
 // uniform residue sampling, varuint helpers, the setup-context field
 // projection, and the binary material byte-length accounting.
 
-export { contextFields, setupContextFieldNames } from '../common-fields.js';
+export {
+    assertNonNegativeSafeInteger,
+    assertPositiveSafeInteger,
+    contextFields,
+    setupContextFieldNames,
+} from '../common-fields.js';
+
+import { appendVaruint } from '../varuint-encoding.js';
 
 import {
     setupCommitmentModulusLimbIndices,
@@ -14,26 +21,6 @@ import {
 } from './constants-and-types.js';
 
 const twoToTheSixtyFourth = 1n << 64n;
-
-export const assertPositiveSafeInteger = (
-    value: number,
-    fieldName: string,
-): void => {
-    if (!Number.isSafeInteger(value) || value <= 0) {
-        throw new TypeError(`${fieldName} must be a positive safe integer.`);
-    }
-};
-
-export const assertNonNegativeSafeInteger = (
-    value: number,
-    fieldName: string,
-): void => {
-    if (!Number.isSafeInteger(value) || value < 0) {
-        throw new TypeError(
-            `${fieldName} must be a non-negative safe integer.`,
-        );
-    }
-};
 
 export const assertNonEmptyString = (
     value: string,
@@ -234,26 +221,6 @@ export const sampleCommitmentOpeningRandomness = (
     Array.from({ length: setupCommitmentRandomnessWidth }, () =>
         sampleCenteredTernaryVector(sampler, ringDegree),
     );
-
-const appendVaruint = (outputBytes: number[], value: number): void => {
-    if (!Number.isSafeInteger(value) || value < 0) {
-        throw new TypeError(
-            'varuint values must be non-negative safe integers.',
-        );
-    }
-    let remainingValue = value;
-    for (;;) {
-        let byte = remainingValue & 0x7f;
-        remainingValue = Math.floor(remainingValue / 128);
-        if (remainingValue !== 0) {
-            byte |= 0x80;
-        }
-        outputBytes.push(byte);
-        if (remainingValue === 0) {
-            break;
-        }
-    }
-};
 
 const varuintBytes = (value: number): Uint8Array => {
     const outputBytes: number[] = [];

@@ -14,7 +14,6 @@ import type {
     PublicKeyShareProofSet,
     PublicKeyShareSet,
 } from './public-key-share-records.js';
-import type { SameSecretConsistencyStatementSet } from './same-secret-consistency-records.js';
 import type { CollectiveBgvSetupContext } from './vss-share-verification-records.js';
 
 export type RelinearizationLevelScheduleEntry = Readonly<{
@@ -33,7 +32,6 @@ export type RequiredGaloisKeyScheduleEntry = Readonly<{
 export type RequiredGaloisSet = Readonly<
     JsonRecord & {
         readonly objectType: 'RequiredGaloisSet';
-        readonly objectVersion: 1;
         readonly evaluatorScheme: 'direct-encrypted-ballot-evaluator-replay';
         readonly packingScheme: 'direct-score-packing-compact-generator-basis-direct-encrypted-score-comparison-generator-ordered-rank-packing';
         readonly rnsLimbCount: number;
@@ -44,13 +42,11 @@ export type RequiredGaloisSet = Readonly<
 export type EvaluatorKeySchedule = Readonly<
     JsonRecord & {
         readonly objectType: 'EvaluatorKeySchedule';
-        readonly objectVersion: 1;
         readonly participantCount: number;
         readonly rnsLimbCount: number;
         readonly publicMatrixSeedHash: ProtocolHash;
         readonly relinearizationCrpRoot: ProtocolHash;
         readonly galoisKeyCrpRoot: ProtocolHash;
-        readonly sameSecretConsistencyRoot: ProtocolHash;
         readonly publicKeyShareSetRoot: ProtocolHash;
         readonly publicKeyShareProofSetRoot: ProtocolHash;
         readonly relinearizationLevelSchedule: readonly RelinearizationLevelScheduleEntry[];
@@ -67,7 +63,6 @@ export type EvaluatorKeyScheduleInput = {
     readonly publicMatrixSeedHash: ProtocolHash;
     readonly relinearizationCrpRoot: ProtocolHash;
     readonly galoisKeyCrpRoot: ProtocolHash;
-    readonly sameSecretConsistency: SameSecretConsistencyStatementSet;
     readonly publicKeyShares: PublicKeyShareSet;
     readonly publicKeyShareProofs: PublicKeyShareProofSet;
     readonly requiredGaloisKeySchedule: readonly RequiredGaloisKeyScheduleEntry[];
@@ -113,7 +108,6 @@ export const createRequiredGaloisSet = (
 
     return {
         objectType: 'RequiredGaloisSet',
-        objectVersion: 1,
         evaluatorScheme: 'direct-encrypted-ballot-evaluator-replay',
         packingScheme:
             'direct-score-packing-compact-generator-basis-direct-encrypted-score-comparison-generator-ordered-rank-packing',
@@ -125,8 +119,9 @@ export const createRequiredGaloisSet = (
 // The selected evaluator working level: every evaluation key is generated at
 // this level and lower-level uses reuse the same key through CRT-idempotent
 // truncation, so the frozen schedule carries one relinearization entry per
-// round and no per-level entries. Mirrors the kernel evaluator constant.
-export const selectedEvaluatorWorkingLevel = 15;
+// round and no per-level entries. Mirrors the kernel evaluator constant
+// (raised to 16 with the comparison-input cleaning fix).
+export const selectedEvaluatorWorkingLevel = 16;
 
 export const createRelinearizationLevelSchedule = (
     rnsLimbCount: number,
@@ -169,11 +164,6 @@ export const createEvaluatorKeySchedule = (
     }
     assertContextMatches(
         input.setupContext,
-        input.sameSecretConsistency,
-        'sameSecretConsistency',
-    );
-    assertContextMatches(
-        input.setupContext,
         input.publicKeyShares,
         'publicKeyShares',
     );
@@ -183,15 +173,11 @@ export const createEvaluatorKeySchedule = (
         'publicKeyShareProofs',
     );
     if (
-        input.publicKeyShares.sameSecretConsistencyRoot !==
-            input.sameSecretConsistency.sameSecretConsistencyRoot ||
-        input.publicKeyShareProofs.sameSecretConsistencyRoot !==
-            input.sameSecretConsistency.sameSecretConsistencyRoot ||
         input.publicKeyShareProofs.publicKeyShareSetRoot !==
-            input.publicKeyShares.publicKeyShareSetRoot
+        input.publicKeyShares.publicKeyShareSetRoot
     ) {
         throw new Error(
-            'public-key share records must bind the accepted same-secret and share-set roots.',
+            'public-key share records must bind the accepted share-set root.',
         );
     }
 
@@ -203,15 +189,12 @@ export const createEvaluatorKeySchedule = (
     const requiredGaloisSetHash = deriveCanonicalObjectHash(requiredGaloisSet);
     const scheduleWithoutRoot = {
         objectType: 'EvaluatorKeySchedule',
-        objectVersion: 1,
         ...contextFields(input.setupContext),
         participantCount: input.participantCount,
         rnsLimbCount,
         publicMatrixSeedHash: input.publicMatrixSeedHash,
         relinearizationCrpRoot: input.relinearizationCrpRoot,
         galoisKeyCrpRoot: input.galoisKeyCrpRoot,
-        sameSecretConsistencyRoot:
-            input.sameSecretConsistency.sameSecretConsistencyRoot,
         publicKeyShareSetRoot: input.publicKeyShares.publicKeyShareSetRoot,
         publicKeyShareProofSetRoot:
             input.publicKeyShareProofs.publicKeyShareProofSetRoot,

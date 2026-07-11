@@ -1,10 +1,12 @@
 import type { ProtocolHash } from '@sealed-lattice/types';
 
+import { protocolHashPattern } from '../common/verification-helpers.js';
+
 import type { CollectiveBgvSetupContext } from './vss-share-verification-records.js';
 
 export type JsonRecord = Record<string, unknown>;
 
-export const protocolHashPattern = /^[0-9a-f]{128}$/u;
+export { protocolHashPattern };
 
 export const setupContextFieldNames = [
     'ceremonyId',
@@ -93,6 +95,33 @@ export const assertJsonRecordArray = (
         assertJsonRecord(entry, `${fieldName}.${String(entryIndex)}`),
     );
 };
+
+const lowercaseHexBytesPattern = /^(?:[0-9a-f]{2})*$/u;
+
+export const assertLowercaseHexBytes = (
+    value: string,
+    fieldName: string,
+): void => {
+    if (!lowercaseHexBytesPattern.test(value)) {
+        throw new TypeError(`${fieldName} must be lowercase hex bytes.`);
+    }
+};
+
+export const bytesFromHex = (hex: string, fieldName: string): Uint8Array => {
+    assertLowercaseHexBytes(hex, fieldName);
+    const bytes = new Uint8Array(hex.length / 2);
+    for (let byteIndex = 0; byteIndex < bytes.length; byteIndex += 1) {
+        bytes[byteIndex] = Number.parseInt(
+            hex.slice(byteIndex * 2, byteIndex * 2 + 2),
+            16,
+        );
+    }
+
+    return bytes;
+};
+
+export const bytesToHex = (bytes: Uint8Array): string =>
+    Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 
 export const contextFields = (
     setupContext: CollectiveBgvSetupContext,

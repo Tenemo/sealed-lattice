@@ -7,6 +7,12 @@ export {
 } from './closing/index.js';
 export { deriveValidatedFirstValidOrder } from './ordering/index.js';
 export { verifyTargetFinality } from './finality/index.js';
+export {
+    deriveTargetDecryptionSmudgingSeedHex,
+    prepareLocalTargetDecryptionShareWitness,
+    restoreAndPrepareLocalTargetDecryptionShareWitness,
+} from './target-decryption/local-target-share-witness.js';
+export type { RestoredLocalTargetDecryptionShareWitnessInput } from './target-decryption/local-target-share-witness.js';
 export { isValidLifecycleTransition } from './lifecycle/lifecycle.js';
 export { derivePollSpecHash, validatePollSpec } from './lifecycle/poll-spec.js';
 export {
@@ -26,14 +32,12 @@ export {
 export {
     createBinaryChunkedPublicKeyShareMaterialBundle,
     createBinaryChunkedPublicKeyShareMaterialTransport,
-    createBinaryChunkedPublicKeyShareProofMaterialTransport,
     createCollectivePublicKey,
     createPublicKeyShareSuccinctProofSet,
     createPublicKeyShareMaterialSet,
     createPublicKeyShareProofSet,
     createPublicKeyShareSet,
     publicKeyShareCoefficientVectorHashDomain,
-    publicKeyShareMaterialBinaryFormat,
     publicKeyShareMaterialTransportEncoding,
     publicKeyShareMaterialEncoding,
     publicKeyShareProofFamily,
@@ -59,7 +63,6 @@ export {
 } from './setup/evaluator-key-schedule.js';
 export {
     acceptedBgvFullRingDegree,
-    acceptedBgvSetupQShare,
     acceptedBgvSetupQSharePrimes,
     binaryVssCoefficientCommitmentMaterialByteLength,
     createVssSourceTrusteeCoefficientOpeningState,
@@ -69,7 +72,7 @@ export {
     setupCommitmentRandomnessWidth,
     setupTransportChunkSizeBytes,
     setupTransportSchemeId,
-    vssCoefficientCommitmentMaterialBinaryFormat,
+    vssCoefficientCommitmentMaterialTransportEncoding,
 } from './setup/vss-coefficient-commitments.js';
 export {
     createEncryptedLocalTrusteeSetupStateFromVerifiedShares,
@@ -97,17 +100,9 @@ export {
     setupPackageHashInput,
 } from './setup/setup-package-assembly.js';
 export {
-    createBinaryChunkedSameSecretProofMaterialTransport,
-    createSameSecretProofSet,
-    createSameSecretConsistencyStatementSet,
-    sameSecretBoundProofFamilies,
-    sameSecretProofFamily,
-    sameSecretRelation,
-} from './setup/same-secret-consistency-records.js';
-export {
-    createBinaryChunkedCompactSameSecretBridgeProofMaterialTransport,
-    createBinaryChunkedCompactVssShareLinkageProofMaterialTransport,
-} from './setup/compact-vss-commitments.js';
+    createBinaryChunkedSameSecretBridgeProofMaterialTransport,
+    createBinaryChunkedVssShareLinkageProofMaterialTransport,
+} from './setup/vss-commitments.js';
 export {
     createVssComplaintSet,
     createVssShareAcceptanceRecord,
@@ -130,12 +125,18 @@ export type {
 export type {
     BinaryChunkedEvaluationKeyShareMaterialTransport,
     BinaryChunkedPublicEvaluationKeyMaterialTransport,
+    EvaluationKeyAggregateBindingKeyGroup,
+    EvaluationKeyAggregateBindingSet,
+    EvaluationKeyAggregateBindingTrusteeMaterialRoot,
     EvaluationKeyProofCommonInput,
+    EvaluationKeyShareComponentMaterialChunk,
+    EvaluationKeyShareComponentMaterialChunkStream,
     EvaluationKeyShareEmbeddedKeySwitchComponentMaterial,
     EvaluationKeyShareKeySwitchComponentMaterial,
     EvaluationKeyShareMaterial,
     EvaluationKeyShareMaterialTransportInput,
     EvaluationKeyShareTransportedKeySwitchComponentMaterial,
+    EvaluationKeyTrusteeReference,
     GaloisKeyContributingShareRoot,
     GaloisKeyRootReference,
     GaloisKeyShareBatch,
@@ -157,7 +158,8 @@ export type {
     RelinearizationKeyShareRoundsInput,
     RelinearizationRoundOneContribution,
     RelinearizationRoundTwoContribution,
-    SameSecretProofReference,
+    TransportedEvaluationKeyAggregateBindingOpening,
+    TransportedEvaluationKeyAggregateBindingOpeningSet,
     TransportedEvaluationKeyShareComponentMaterialSet,
     TransportedEvaluationKeyShareProofMaterialSet,
     TransportedPublicEvaluationKeyMaterial,
@@ -183,7 +185,6 @@ export type {
 } from './setup/evaluator-key-schedule.js';
 export type {
     BinaryChunkedPublicKeyShareMaterialBundle,
-    BinaryChunkedPublicKeyShareProofMaterialTransport,
     BinaryChunkedPublicKeyShareMaterialSet,
     BinaryChunkedPublicKeyShareMaterialTransport,
     CollectivePublicKey,
@@ -219,13 +220,9 @@ export type {
     SetupPackageVssCoefficientCommitmentMaterialSet,
     SetupCommitmentLimbValue,
     SetupCommitmentValue,
-    SetupTransportChunk,
-    SetupTransportedVssCoefficientCommitmentMaterial,
-    SetupTransportedVssCoefficientCommitmentMaterialLike,
-    SetupTransportedVssCoefficientCommitmentMaterialReference,
-    VerifiedVssCoefficientCommitmentMaterial,
     VssCoefficientCommitmentBundle,
     VssCoefficientCommitmentMaterialRecord,
+    VssCoefficientCommitmentMaterialBinaryReference,
     VssCoefficientCommitmentMaterialSet,
     VssCoefficientCommitmentRecord,
     VssCoefficientCommitmentSet,
@@ -287,30 +284,16 @@ export type {
     SetupPackageVerificationInputSource,
 } from './setup/setup-package-assembly.js';
 export type {
-    BinaryChunkedSameSecretProofMaterialTransport,
-    SameSecretConsistencyStatementRecord,
-    SameSecretConsistencyStatementSet,
-    SameSecretConsistencyStatementSetInput,
-    SameSecretConstantCoefficientCommitmentRoot,
-    SameSecretEmbeddedProofBytes,
-    SameSecretProofByteMaterial,
-    SameSecretProofMaterial,
-    SameSecretProofRecord,
-    SameSecretProofSet,
-    SameSecretProofSetInput,
-    SameSecretTransportedProofBytes,
-    TransportedSameSecretProofMaterialSet,
-} from './setup/same-secret-consistency-records.js';
-export type {
     VerifiedSetupProofMaterial,
     VerifiedSetupProofMaterialSet,
 } from './setup/setup-proof-material-transport.js';
 export type {
-    BinaryChunkedCompactSameSecretBridgeProofMaterialTransport,
-    BinaryChunkedCompactVssShareLinkageProofMaterialTransport,
-    TransportedCompactSameSecretBridgeProofMaterialSet,
-    TransportedCompactVssShareLinkageProofMaterialSet,
-} from './setup/compact-vss-commitments.js';
+    BinaryChunkedSameSecretBridgeProofMaterialTransport,
+    BinaryChunkedVssShareLinkageProofMaterialTransport,
+    LocalTrusteeVssPublicAggregateOpeningCredentialHandoff,
+    TransportedSameSecretBridgeProofMaterialSet,
+    TransportedVssShareLinkageProofMaterialSet,
+} from './setup/vss-commitments.js';
 export type {
     CollectiveBgvSetupContext,
     PrivateVssLocalVerificationFailure,

@@ -3,6 +3,7 @@ use super::*;
 use crate::hashing::derive_canonical_object_hash;
 
 static MINIMAL_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<serde_json::Value> = OnceLock::new();
+static COLLECTIVE_SETUP_PHASE_PACKAGE_CACHE: OnceLock<serde_json::Value> = OnceLock::new();
 static PUBLIC_KEY_SHARE_SUCCINCT_PROOF_BEARING_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<
     serde_json::Value,
 > = OnceLock::new();
@@ -12,7 +13,6 @@ static COLLECTIVE_PUBLIC_KEY_BEARING_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<se
 struct VssMaterialPackageComponents {
     vss_coefficient_commitments: serde_json::Value,
     vss_coefficient_commitment_material: serde_json::Value,
-    threshold_share_commitments: serde_json::Value,
 }
 
 struct CollectiveSetupPackageFixture {
@@ -52,7 +52,6 @@ fn collective_setup_roster_hash_fixture(participant_count: u64) -> String {
             .expect("setup trustee signing public-key hash");
             serde_json::json!({
                 "objectType": "CollectiveBgvSetupRosterEntry",
-                "objectVersion": 1,
                 "rosterPosition": roster_position,
                 "trusteeIdentity": trustee_identity,
                 "signingPublicKeyHash": signing_public_key_hash,
@@ -67,8 +66,13 @@ fn collective_setup_roster_hash_fixture(participant_count: u64) -> String {
     .expect("collective setup roster hash")
 }
 
-/// The n = 10 fixture roster size used by the minimal package.
-const FIXTURE_FIRST_CLOSURE_PARTICIPANT_COUNT: u64 = 10;
+/// The ten-participant parameter profile used by the lightweight phase fixture.
+const PARAMETER_PROFILE_PARTICIPANT_COUNT: u64 = 10;
+
+/// The minimum roster accepted by the setup verifier. Proof-bearing rejection
+/// tests use this roster because their purpose is to exercise bindings and
+/// refusal behavior, not to benchmark proof material growth with roster size.
+const MINIMUM_SUPPORTED_PARTICIPANT_COUNT: u64 = 3;
 
 pub(super) fn minimal_collective_setup_package() -> serde_json::Value {
     // The reduced development ring must stay provable by the trustee
@@ -77,10 +81,23 @@ pub(super) fn minimal_collective_setup_package() -> serde_json::Value {
     // hundred twenty-eight.
     MINIMAL_COLLECTIVE_SETUP_PACKAGE_CACHE
         .get_or_init(|| {
-            super::proof_record_fixtures::compactify_collective_setup_package(
+            super::proof_record_fixtures::finalize_collective_setup_package(
                 minimal_collective_setup_package_for_participant_count(
-                    FIXTURE_FIRST_CLOSURE_PARTICIPANT_COUNT,
+                    MINIMUM_SUPPORTED_PARTICIPANT_COUNT,
                 ),
+            )
+        })
+        .clone()
+}
+
+/// Setup package through the phase transcript, before proof-bearing setup
+/// material is attached. Phase-order and phase-binding tests use this fixture
+/// so the ordinary Rust lane does not generate unrelated succinct proofs.
+pub(super) fn collective_setup_phase_package() -> serde_json::Value {
+    COLLECTIVE_SETUP_PHASE_PACKAGE_CACHE
+        .get_or_init(|| {
+            minimal_collective_setup_package_for_participant_count(
+                PARAMETER_PROFILE_PARTICIPANT_COUNT,
             )
         })
         .clone()
@@ -88,25 +105,21 @@ pub(super) fn minimal_collective_setup_package() -> serde_json::Value {
 
 /// Reduced development-ring (128) collective setup package for an arbitrary
 /// supported roster size, built through the non-streamed VSS path. Drives the
-/// same per-trustee material and roster-derived certificates as the n = 10
-/// path. At n = 10 this is byte identical to `minimal_collective_setup_package`.
+/// same per-trustee material and roster-derived certificates as the ten-participant
+/// phase-package path. The finalized fixture adds proof-bearing setup material
+/// on top of this package.
 pub(super) fn minimal_collective_setup_package_for_participant_count(
     participant_count: u64,
 ) -> serde_json::Value {
-    build_collective_setup_package_fixture(128, "development-reduced-ring", participant_count)
+    build_collective_setup_package_fixture(128, participant_count)
 }
 
 fn build_collective_setup_package_fixture(
     vss_material_ring_degree: usize,
-    vss_material_ring_degree_status: &str,
     participant_count: u64,
 ) -> serde_json::Value {
-    build_collective_setup_package_fixture_parts(
-        vss_material_ring_degree,
-        vss_material_ring_degree_status,
-        participant_count,
-    )
-    .package
+    build_collective_setup_package_fixture_parts(vss_material_ring_degree, participant_count)
+        .package
 }
 
 // The collective setup context shared by the package fixtures. Every fixture
@@ -140,7 +153,6 @@ fn collective_setup_context_fixture(
 
 fn build_collective_setup_package_fixture_parts(
     vss_material_ring_degree: usize,
-    vss_material_ring_degree_status: &str,
     participant_count: u64,
 ) -> CollectiveSetupPackageFixture {
     let setup_parameters = describe_collective_bgv_setup_parameters().expect("setup parameters");
@@ -191,7 +203,6 @@ fn build_collective_setup_package_fixture_parts(
                             .expect("signature key fixture");
                     let mut phase_payload = serde_json::json!({
                         "objectType": "SetupPhaseParticipantObject",
-                        "objectVersion": 1,
                         "phaseId": phase_identifier,
                         "phaseNumber": phase_number,
                         "ceremonyId": ceremony_id,
@@ -237,7 +248,6 @@ fn build_collective_setup_package_fixture_parts(
                         &signature_seed_label,
                         serde_json::json!({
                             "objectType": "SetupPhaseParticipantObject",
-                            "objectVersion": 1,
                             "ceremonyId": ceremony_id,
                             "manifestHash": manifest_hash,
                             "boardHeadHash": null,
@@ -256,7 +266,6 @@ fn build_collective_setup_package_fixture_parts(
                     let signature_envelope_hash = signature_envelope["signatureHash"].clone();
                     let mut participant_phase_object = serde_json::json!({
                         "objectType": "SetupPhaseParticipantObject",
-                        "objectVersion": 1,
                         "phaseId": phase_identifier,
                         "phaseNumber": phase_number,
                         "ceremonyId": ceremony_id,
@@ -328,28 +337,16 @@ fn build_collective_setup_package_fixture_parts(
                 setup_epoch,
                 public_matrix_seed_hash,
                 vss_material_ring_degree,
-                vss_material_ring_degree_status,
                 participant_count,
             );
-        let threshold_share_commitments =
-            derive_threshold_share_commitments_from_request(&serde_json::json!({
-                "setupContext": setup_context.clone(),
-                "publicMatrixSeedHash": public_matrix_seed_hash,
-                "sourceTrusteeCoefficientCommitmentRecords": vss_coefficient_commitments["sourceTrusteeRecords"].clone(),
-                "coefficientCommitments": vss_coefficient_commitment_material["coefficientCommitments"].clone(),
-            }))
-            .expect("threshold-share commitments")["thresholdShareCommitments"]
-                .clone();
         VssMaterialPackageComponents {
             vss_coefficient_commitments,
             vss_coefficient_commitment_material,
-            threshold_share_commitments,
         }
     };
     let vss_coefficient_commitments = vss_components.vss_coefficient_commitments.clone();
     let vss_coefficient_commitment_material =
         vss_components.vss_coefficient_commitment_material.clone();
-    let threshold_share_commitments = vss_components.threshold_share_commitments.clone();
     let private_vss_envelope_commitments = private_vss_envelope_commitments_object(
         ceremony_id,
         &manifest_hash,
@@ -375,15 +372,6 @@ fn build_collective_setup_package_fixture_parts(
         &vss_coefficient_commitments,
         participant_count,
     );
-    let same_secret_consistency = same_secret_consistency_object(
-        ceremony_id,
-        &manifest_hash,
-        &roster_hash,
-        setup_parameters_hash,
-        setup_epoch,
-        &vss_coefficient_commitments,
-        participant_count,
-    );
     let public_key_shares = public_key_shares_object(
         ceremony_id,
         &manifest_hash,
@@ -391,7 +379,6 @@ fn build_collective_setup_package_fixture_parts(
         setup_parameters_hash,
         setup_epoch,
         &common_randomness,
-        &same_secret_consistency,
         participant_count,
     );
     let public_key_share_proofs = public_key_share_proofs_object(
@@ -401,7 +388,6 @@ fn build_collective_setup_package_fixture_parts(
         setup_parameters_hash,
         setup_epoch,
         &common_randomness,
-        &same_secret_consistency,
         &public_key_shares,
         participant_count,
     );
@@ -413,7 +399,6 @@ fn build_collective_setup_package_fixture_parts(
         setup_epoch,
         &setup_parameters,
         &common_randomness,
-        &same_secret_consistency,
         &public_key_shares,
         &public_key_share_proofs,
         participant_count,
@@ -429,7 +414,6 @@ fn build_collective_setup_package_fixture_parts(
         .to_string();
     let mut package = serde_json::json!({
         "objectType": "SetupPackage",
-        "objectVersion": 1,
         "setupContext": setup_context,
         "qShare": setup_parameters["qShare"].clone(),
         "phaseTranscript": phase_transcript,
@@ -439,8 +423,6 @@ fn build_collective_setup_package_fixture_parts(
         "privateVssEnvelopeCommitments": private_vss_envelope_commitments,
         "privateVssEnvelopeCommitmentRoot": private_vss_envelope_commitment_root,
         "vssShareAcceptances": vss_share_acceptances,
-        "thresholdShareCommitments": threshold_share_commitments,
-        "sameSecretConsistency": same_secret_consistency,
         "publicKeyShares": public_key_shares,
         "publicKeyShareProofs": public_key_share_proofs,
         "evaluatorKeySchedule": evaluator_key_schedule,
@@ -456,16 +438,6 @@ fn build_collective_setup_package_fixture_parts(
     CollectiveSetupPackageFixture { package }
 }
 
-// The compact transform binds the same-secret proofs and the compact same-secret
-// bridge that references them, so the compact minimal package is already
-// same-secret-proof-bearing: this is exactly the minimal package. Reusing its
-// cache (rather than compactifying the same base into a second cache) avoids a
-// redundant heavy compact build that would otherwise race the minimal one under
-// parallel test execution.
-pub(super) fn same_secret_proof_bearing_collective_setup_package() -> serde_json::Value {
-    minimal_collective_setup_package()
-}
-
 pub(super) fn public_key_share_succinct_proof_bearing_collective_setup_package() -> serde_json::Value
 {
     PUBLIC_KEY_SHARE_SUCCINCT_PROOF_BEARING_COLLECTIVE_SETUP_PACKAGE_CACHE
@@ -474,7 +446,7 @@ pub(super) fn public_key_share_succinct_proof_bearing_collective_setup_package()
 }
 
 fn build_public_key_share_succinct_proof_bearing_collective_setup_package() -> serde_json::Value {
-    let mut package = same_secret_proof_bearing_collective_setup_package();
+    let mut package = minimal_collective_setup_package();
     replace_public_key_share_hashes_with_material_hashes(&mut package);
     package["publicKeyShareMaterial"] = public_key_share_material_object(&package);
     package["publicKeyShareSuccinctProofs"] = public_key_share_succinct_proofs_object(&package);
@@ -503,12 +475,10 @@ mod certificates;
 mod common_randomness;
 mod private_vss_envelopes;
 mod public_key_shares;
-mod same_secret_consistency;
 mod vss_coefficient_commitments;
 
 pub(super) use certificates::*;
 use common_randomness::*;
 pub(super) use private_vss_envelopes::*;
 pub(super) use public_key_shares::*;
-pub(super) use same_secret_consistency::*;
 pub(super) use vss_coefficient_commitments::*;

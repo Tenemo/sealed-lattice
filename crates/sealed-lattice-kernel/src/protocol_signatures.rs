@@ -15,14 +15,13 @@ use crate::{
 const ML_DSA_65_ALGORITHM: &str = "ML-DSA-65";
 const PURE_ML_DSA_MODE: &str = "PureMLDSA";
 const ML_DSA_CONTEXT_BYTE_LIMIT: usize = 255;
-const PROTOCOL_SIGNATURE_MESSAGE_DOMAIN: &str = "sealed-lattice/protocol-signature-v1";
+const PROTOCOL_SIGNATURE_MESSAGE_DOMAIN: &str = "sealed-lattice/protocol-signature";
 const SUPPORTED_ML_DSA_CONTEXT_STRING: &str = "sealed-lattice:v1";
 const MAX_SAFE_JSON_INTEGER: u64 = 9_007_199_254_740_991;
 
 #[derive(Debug)]
 pub(crate) struct ProtocolSignatureExpectation<'a> {
     pub object_type: &'a str,
-    pub object_version: u64,
     pub signer_role: &'a str,
     pub signer_identity: &'a str,
     pub ceremony_id: &'a str,
@@ -32,7 +31,6 @@ pub(crate) struct ProtocolSignatureExpectation<'a> {
     pub chunk_merkle_root: Option<&'a str>,
     pub board_head_hash: Option<&'a str>,
     pub context_hash: &'a str,
-    pub byte_length: u64,
     pub recovery_epoch: u64,
     pub device_epoch: u64,
 }
@@ -214,13 +212,11 @@ fn validate_signed_root_shape(signature: &Value) -> Option<ProtocolSignatureFail
 
     for field_name in [
         "objectType",
-        "objectVersion",
         "ceremonyId",
         "manifestHash",
         "boardHeadHash",
         "objectRoot",
         "chunkMerkleRoot",
-        "byteLength",
         "signerRole",
         "signerIdentity",
         "recoveryEpoch",
@@ -285,12 +281,7 @@ fn validate_signed_root_shape(signature: &Value) -> Option<ProtocolSignatureFail
         ));
     }
 
-    for field_name in [
-        "objectVersion",
-        "byteLength",
-        "recoveryEpoch",
-        "deviceEpoch",
-    ] {
+    for field_name in ["recoveryEpoch", "deviceEpoch"] {
         if signed_root
             .get(field_name)
             .and_then(Value::as_u64)
@@ -298,7 +289,7 @@ fn validate_signed_root_shape(signature: &Value) -> Option<ProtocolSignatureFail
         {
             return Some(ProtocolSignatureFailure::new(
                 "InvalidSignedRoot",
-                "Signed root version, byte length, and epochs must be safe non-negative integers.",
+                "Signed root byte length and epochs must be safe non-negative integers.",
                 Some(signature),
             ));
         }
@@ -332,14 +323,6 @@ fn validate_expectation(
         return Some(ProtocolSignatureFailure::new(
             "WrongObjectType",
             "Signature root object type does not match the expected object.",
-            Some(signature),
-        ));
-    }
-    if signed_root.get("objectVersion").and_then(Value::as_u64) != Some(expectation.object_version)
-    {
-        return Some(ProtocolSignatureFailure::new(
-            "InvalidSignedRoot",
-            "Signature root object version does not match the expected version.",
             Some(signature),
         ));
     }
@@ -395,14 +378,12 @@ fn validate_expectation(
             Some(signature),
         ));
     }
-    if signed_root.get("byteLength").and_then(Value::as_u64) != Some(expectation.byte_length)
-        || signed_root.get("recoveryEpoch").and_then(Value::as_u64)
-            != Some(expectation.recovery_epoch)
+    if signed_root.get("recoveryEpoch").and_then(Value::as_u64) != Some(expectation.recovery_epoch)
         || signed_root.get("deviceEpoch").and_then(Value::as_u64) != Some(expectation.device_epoch)
     {
         return Some(ProtocolSignatureFailure::new(
             "InvalidSignedRoot",
-            "Signature root byte length or epochs do not match the expected object.",
+            "Signature root epochs do not match the expected object.",
             Some(signature),
         ));
     }
@@ -697,13 +678,11 @@ mod tests {
         .expect("context hash");
         let signed_root = json!({
             "objectType": "SetupPhaseParticipantObject",
-            "objectVersion": 1,
             "ceremonyId": "ceremony-main",
             "manifestHash": object_root,
             "boardHeadHash": null,
             "objectRoot": object_root,
             "chunkMerkleRoot": null,
-            "byteLength": 37,
             "signerRole": "Trustee",
             "signerIdentity": "trustee-0",
             "recoveryEpoch": 0,
@@ -714,7 +693,6 @@ mod tests {
             create_protocol_signature_fixture("trustee-0", signed_root).expect("signature fixture");
         let expectation = ProtocolSignatureExpectation {
             object_type: "SetupPhaseParticipantObject",
-            object_version: 1,
             signer_role: "Trustee",
             signer_identity: "trustee-0",
             ceremony_id: "ceremony-main",
@@ -724,7 +702,6 @@ mod tests {
             chunk_merkle_root: None,
             board_head_hash: None,
             context_hash: &context_hash,
-            byte_length: 37,
             recovery_epoch: 0,
             device_epoch: 0,
         };
@@ -750,13 +727,11 @@ mod tests {
         .expect("context hash");
         let signed_root = json!({
             "objectType": "SetupPhaseParticipantObject",
-            "objectVersion": 1,
             "ceremonyId": "ceremony-main",
             "manifestHash": object_root,
             "boardHeadHash": null,
             "objectRoot": object_root,
             "chunkMerkleRoot": null,
-            "byteLength": 37,
             "signerRole": "Trustee",
             "signerIdentity": "trustee-0",
             "recoveryEpoch": 0,
@@ -773,7 +748,6 @@ mod tests {
         );
         let expectation = ProtocolSignatureExpectation {
             object_type: "SetupPhaseParticipantObject",
-            object_version: 1,
             signer_role: "Trustee",
             signer_identity: "trustee-0",
             ceremony_id: "ceremony-main",
@@ -783,7 +757,6 @@ mod tests {
             chunk_merkle_root: None,
             board_head_hash: None,
             context_hash: &context_hash,
-            byte_length: 38,
             recovery_epoch: 0,
             device_epoch: 0,
         };

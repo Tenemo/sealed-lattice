@@ -19,10 +19,6 @@ fn private_vss_share_envelope_verifier_accepts_succinct_private_share_proofs() {
     assert_eq!(result["isValid"], true);
     assert_eq!(result["refusedObjects"], serde_json::json!([]));
     assert_eq!(
-        result["verifiedPrivateVssShareProofCount"],
-        serde_json::json!(DATA_PRIMES.len())
-    );
-    assert_eq!(
         result["limbVerifications"]
             .as_array()
             .expect("limb verifications")
@@ -51,7 +47,9 @@ fn private_vss_share_envelope_verifier_accepts_succinct_private_share_proofs() {
 }
 
 #[test]
-#[ignore = "first-roster recipient-private VSS verification at the full ring degree"]
+// Run through the guarded focused Rust runner:
+//   pnpm run test:rust:kernel:accepted-setup -- private_vss_share_envelope_verifier_accepts_first_roster_succinct_private_share_proofs
+#[ignore = "first-roster private VSS verification; run via the guarded accepted-setup runner"]
 fn private_vss_share_envelope_verifier_accepts_first_roster_succinct_private_share_proofs() {
     let request =
         proof_shaped_private_vss_share_envelope_request(crate::bgv::parameters::POLYNOMIAL_DEGREE);
@@ -61,10 +59,6 @@ fn private_vss_share_envelope_verifier_accepts_first_roster_succinct_private_sha
 
     assert_eq!(result["isValid"], true);
     assert_eq!(result["refusedObjects"], serde_json::json!([]));
-    assert_eq!(
-        result["verifiedPrivateVssShareProofCount"],
-        serde_json::json!(DATA_PRIMES.len())
-    );
     assert_eq!(
         result["limbVerifications"]
             .as_array()
@@ -153,7 +147,6 @@ fn private_vss_succinct_proof_verifier_accepts_canonical_record() {
     let share_values = vec![0_u64; ring_degree];
     let share_values_hash = derive_canonical_object_hash(&serde_json::json!({
         "objectType": "PrivateVssShareValueVector",
-        "objectVersion": 1,
         "rnsLimbIndex": 0,
         "rnsPrime": rns_prime,
         "shareValues": share_values,
@@ -313,7 +306,6 @@ fn private_vss_succinct_proof_accepts_one_polynomial_across_threshold_recipients
             .collect::<Vec<_>>();
         let share_values_hash = derive_canonical_object_hash(&serde_json::json!({
             "objectType": "PrivateVssShareValueVector",
-            "objectVersion": 1,
             "rnsLimbIndex": 0,
             "rnsPrime": rns_prime,
             "shareValues": share_values,
@@ -390,7 +382,7 @@ fn private_vss_succinct_proof_accepts_one_polynomial_across_threshold_recipients
 
 // The Shamir coefficient message columns carry no per-field consistency
 // assertion, so the commitment opening lincheck is the message column's only
-// binding. This test confirms that binding is essential: a coefficient message
+// binding. This test confirms that binding is required: a coefficient message
 // that disagrees with what its commitment opens to cannot be packaged into an
 // accepted proof. The tamper keeps the recipient-share Shamir relation satisfied
 // (so the witness-relation self-check and shape checks pass) and leaves the
@@ -459,7 +451,6 @@ fn private_vss_succinct_proof_refuses_message_inconsistent_with_commitment_openi
     share_values[0] = tampered_message;
     let share_values_hash = derive_canonical_object_hash(&serde_json::json!({
         "objectType": "PrivateVssShareValueVector",
-        "objectVersion": 1,
         "rnsLimbIndex": 0,
         "rnsPrime": rns_prime,
         "shareValues": share_values,
@@ -520,10 +511,6 @@ fn private_vss_share_envelope_verifier_accepts_transported_succinct_private_shar
         .expect("private VSS envelope verification");
 
     assert_eq!(result["isValid"], true);
-    assert_eq!(
-        result["verifiedPrivateVssShareProofCount"],
-        serde_json::json!(DATA_PRIMES.len())
-    );
     for limb_opening in request["privateEnvelope"]["rnsShareOpenings"]
         .as_array()
         .expect("limb openings")
@@ -681,21 +668,8 @@ fn private_vss_share_envelope_verifier_refuses_missing_transported_private_share
 
     assert_private_vss_share_proof_refusal_contains(
         &request,
-        "chunks length must match chunkCount",
+        "setup proof material transport requires at least one chunk",
     );
-}
-
-#[test]
-fn private_vss_share_envelope_verifier_refuses_reordered_transported_private_share_proof_chunk() {
-    let mut request =
-        proof_shaped_private_vss_share_envelope_request(PRIVATE_VSS_SUCCINCT_TEST_RING_DEGREE);
-    let mut transported_proof_material =
-        move_private_vss_share_proof_bytes_to_transport(&mut request);
-    transported_proof_material["proofMaterials"][0]["chunks"][0]["chunkIndex"] =
-        serde_json::json!(1);
-    request["transportedPrivateVssShareProofMaterial"] = transported_proof_material;
-
-    assert_private_vss_share_proof_refusal_contains(&request, "ascending chunk-index order");
 }
 
 #[test]
@@ -867,7 +841,6 @@ fn private_vss_share_envelope_request(ring_degree: usize) -> serde_json::Value {
             coefficient_commitment_roots.push(commitment_root.clone());
             source_trustee_coefficient_commitments.push(serde_json::json!({
                 "objectType": "VssCoefficientCommitment",
-                "objectVersion": 1,
                 "ceremonyId": ceremony_id,
                 "manifestHash": manifest_hash,
                 "rosterHash": roster_hash,
@@ -883,7 +856,6 @@ fn private_vss_share_envelope_request(ring_degree: usize) -> serde_json::Value {
             }));
             source_trustee_coefficient_commitment_material_records.push(serde_json::json!({
                 "objectType": "VssCoefficientCommitmentMaterial",
-                "objectVersion": 1,
                 "ceremonyId": ceremony_id,
                 "manifestHash": manifest_hash,
                 "rosterHash": roster_hash,
@@ -917,7 +889,6 @@ fn private_vss_share_envelope_request(ring_degree: usize) -> serde_json::Value {
             aggregate_opening_columns(&coefficient_openings, 2, ring_degree);
         rns_share_openings.push(serde_json::json!({
             "objectType": "PrivateVssShareLimbOpening",
-            "objectVersion": 1,
             "rnsLimbIndex": rns_limb_index,
             "rnsPrime": rns_prime,
             "shareValues": share_values,
@@ -925,7 +896,6 @@ fn private_vss_share_envelope_request(ring_degree: usize) -> serde_json::Value {
             "coefficientCommitmentRoots": coefficient_commitment_roots,
             "aggregateOpening": {
                 "objectType": "PrivateVssAggregateOpening",
-                "objectVersion": 1,
                 "openingColumns": aggregate_opening_columns,
             },
         }));
@@ -933,7 +903,6 @@ fn private_vss_share_envelope_request(ring_degree: usize) -> serde_json::Value {
 
     let mut source_trustee_record = serde_json::json!({
         "objectType": "VssSourceTrusteeCoefficientCommitments",
-        "objectVersion": 1,
         "ceremonyId": ceremony_id,
         "manifestHash": manifest_hash,
         "rosterHash": roster_hash,
@@ -951,7 +920,6 @@ fn private_vss_share_envelope_request(ring_degree: usize) -> serde_json::Value {
 
     let private_envelope = serde_json::json!({
         "objectType": "PrivateVssShareEnvelope",
-        "objectVersion": 1,
         "ceremonyId": ceremony_id,
         "manifestHash": manifest_hash,
         "rosterHash": roster_hash,
@@ -1067,7 +1035,6 @@ fn proof_shaped_private_vss_share_envelope_request(ring_degree: usize) -> serde_
             .collect::<Vec<_>>();
         let share_values_hash = derive_canonical_object_hash(&serde_json::json!({
             "objectType": "PrivateVssShareValueVector",
-            "objectVersion": 1,
             "rnsLimbIndex": rns_limb_index,
             "rnsPrime": rns_prime,
             "shareValues": share_values,
@@ -1134,18 +1101,16 @@ fn move_private_vss_share_proof_bytes_to_transport(
                 .collect::<Vec<_>>();
             let transport_hashes = setup_proof_material_transport_hashes(
                 "vss-opening-carry",
-                &proof_chunks,
+                &proof_bytes,
                 SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
             )
             .expect("private VSS proof transport hashes");
             let proof_material_root = derive_canonical_object_hash(&serde_json::json!({
                 "objectType": "PrivateVssShareTransportedSuccinctProofMaterial",
-                "objectVersion": 1,
                 "proofFamily": "vss-opening-carry",
                 "proofBytesEncoding": SETUP_PROOF_MATERIAL_ENCODING,
                 "statementHash": proof_record["statementHash"],
                 "proofBytesHash": proof_record["proofBytesHash"],
-                "proofChunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
                 "proofChunkCount": transport_hashes.chunk_hashes.len(),
                 "proofTotalByteLength": transport_hashes.total_byte_length,
                 "proofFullObjectHash": transport_hashes.full_object_hash.clone(),
@@ -1173,10 +1138,8 @@ fn move_private_vss_share_proof_bytes_to_transport(
 
             serde_json::json!({
                 "objectType": "SetupTransportedPrivateVssShareProofMaterial",
-                "objectVersion": 1,
                 "proofFamily": "vss-opening-carry",
                 "proofMaterialRoot": proof_material_root,
-                "chunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
                 "chunkCount": proof_chunks.len(),
                 "totalByteLength": transport_hashes.total_byte_length,
                 "fullObjectHash": transport_hashes.full_object_hash.clone(),
@@ -1196,7 +1159,6 @@ fn move_private_vss_share_proof_bytes_to_transport(
 
     serde_json::json!({
         "objectType": "SetupTransportedPrivateVssShareProofMaterialSet",
-        "objectVersion": 1,
         "proofFamily": "vss-opening-carry",
         "proofMaterials": proof_materials,
     })

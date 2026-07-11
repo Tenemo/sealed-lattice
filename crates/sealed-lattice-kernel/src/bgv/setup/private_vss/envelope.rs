@@ -20,17 +20,6 @@ pub(super) fn verify_private_envelope_header(
             "privateEnvelope.objectType",
         )));
     }
-    if private_envelope
-        .get("objectVersion")
-        .and_then(Value::as_u64)
-        != Some(1)
-    {
-        return Ok(Err(PrivateVssRefusal::new(
-            "privateEnvelopeVersionMismatch",
-            "privateEnvelope.objectVersion must be 1",
-            "privateEnvelope.objectVersion",
-        )));
-    }
     if let Err(refusal) = compare_context_fields(private_envelope, setup_context, "privateEnvelope")
     {
         return Ok(Err(refusal));
@@ -230,13 +219,6 @@ fn verify_private_envelope_limb(
             "privateEnvelope.rnsShareOpenings.objectType",
         )));
     }
-    if limb_opening.get("objectVersion").and_then(Value::as_u64) != Some(1) {
-        return Ok(Err(PrivateVssRefusal::new(
-            "privateVssLimbOpeningVersionMismatch",
-            "private VSS limb opening objectVersion must be 1",
-            "privateEnvelope.rnsShareOpenings.objectVersion",
-        )));
-    }
     let rns_limb_index = match usize_field(
         limb_opening,
         "rnsLimbIndex",
@@ -353,7 +335,6 @@ fn verify_private_envelope_limb(
 
     let share_values_hash = derive_canonical_object_hash(&json!({
         "objectType": "PrivateVssShareValueVector",
-        "objectVersion": 1,
         "rnsLimbIndex": rns_limb_index,
         "rnsPrime": rns_prime,
         "shareValues": share_values,
@@ -390,7 +371,6 @@ fn verify_private_envelope_limb(
     };
     let limb_verification_record = json!({
         "objectType": "PrivateVssLimbVerification",
-        "objectVersion": 1,
         "rnsLimbIndex": rns_limb_index,
         "rnsPrime": rns_prime,
         "ringDegree": ring_degree,

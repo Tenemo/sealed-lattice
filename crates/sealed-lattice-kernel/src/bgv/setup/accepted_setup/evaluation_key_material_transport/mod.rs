@@ -1,5 +1,6 @@
 use super::*;
 
+mod aggregate_binding;
 mod expected_roots;
 mod manifest;
 mod material_transport;

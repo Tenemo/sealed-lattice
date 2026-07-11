@@ -19,10 +19,10 @@
         "check": "tsc --project tsconfig.json --pretty false --noEmit",
         "build:wasm": "tsx ../../tools/ci/build-wasm-kernel.ts",
         "build": "del-cli dist && tsc --project tsconfig.json && pnpm run build:wasm",
-        "test:node:kernel:fast": "vitest --root ../.. --config vitest.config.ts --project node-kernel-fast --run --dir packages/wasm/tests/node",
-        "test:node:kernel:heavy": "vitest --root ../.. --config vitest.config.ts --project node-kernel-heavy --run --dir packages/wasm/tests/node",
-        "test:node:kernel": "pnpm run test:node:kernel:fast && pnpm run test:node:kernel:heavy",
-        "test:node": "pnpm run test:node:kernel",
+        "test:node:kernel:fast": "pnpm --workspace-root run test:node:kernel:fast",
+        "test:node:kernel:heavy": "pnpm --workspace-root run test:node:kernel:heavy",
+        "test:node:kernel": "pnpm --workspace-root run test:node:kernel",
+        "test:node": "pnpm --workspace-root run test:node:kernel",
         "test:browser": "vitest --root ../.. --config vitest.config.ts --project browser-desktop --project browser-mobile --run --dir packages/wasm/tests/browser"
     },
     "devDependencies": {

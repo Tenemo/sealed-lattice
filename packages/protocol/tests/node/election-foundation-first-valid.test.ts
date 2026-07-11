@@ -104,7 +104,6 @@ describe('first-valid ordering shells', () => {
         const badResult = deriveValidatedFirstValidOrder(badInput);
 
         expect(badResult.isValid).toBe(false);
-        expect(badResult.acceptedHashes).toEqual([]);
         expect(badResult.refusedObjects).toEqual(
             expect.arrayContaining([
                 expect.objectContaining({ code: 'FirstValidContextMismatch' }),

@@ -14,10 +14,10 @@ import {
     trusteeEvaluationKeyProofFamily,
     type EvaluationKeyProofCommonInput,
     type EvaluationKeyShareMaterial,
+    type EvaluationKeyTrusteeReference,
     type GaloisKeyShareBatchContribution,
     type RelinearizationRoundOneContribution,
     type RelinearizationRoundTwoContribution,
-    type SameSecretProofReference,
     type TrusteeEvaluationKeyProofGenerator,
     type TrusteeEvaluationKeyWitnessInput,
 } from '#packages/protocol/src/setup/evaluation-key-proof-records';
@@ -26,6 +26,7 @@ import {
     type EvaluatorKeySchedule,
     type RequiredGaloisKeyScheduleEntry,
 } from '#packages/protocol/src/setup/evaluator-key-schedule';
+import type { VssSameSecretBridgeStatementSet } from '#packages/protocol/src/setup/vss-commitments';
 import {
     makeSetupContext,
     makeSetupFixtureHash,
@@ -68,14 +69,12 @@ const evaluatorKeySchedule = (): EvaluatorKeySchedule => {
     );
     const scheduleWithoutRoot = {
         objectType: 'EvaluatorKeySchedule',
-        objectVersion: 1,
         ...setupContext,
         participantCount,
         rnsLimbCount: qSharePrimes.length,
         publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
         relinearizationCrpRoot: fixtureHash('relinearization-crp'),
         galoisKeyCrpRoot: fixtureHash('galois-key-crp'),
-        sameSecretConsistencyRoot: fixtureHash('same-secret-consistency'),
         publicKeyShareSetRoot: fixtureHash('public-key-share-set'),
         publicKeyShareProofSetRoot: fixtureHash('public-key-share-proof-set'),
         relinearizationLevelSchedule: [
@@ -96,21 +95,12 @@ const evaluatorKeySchedule = (): EvaluatorKeySchedule => {
     } satisfies EvaluatorKeySchedule;
 };
 
-const sameSecretProofReferences = (): readonly SameSecretProofReference[] =>
+const trusteeReferences = (): readonly EvaluationKeyTrusteeReference[] =>
     Array.from(
         { length: participantCount },
         (_unused, trusteeRosterPosition) => ({
             trusteeIdentity: `trustee-${String(trusteeRosterPosition)}`,
             trusteeRosterPosition,
-            sameSecretStatementRoot: fixtureHash(
-                `same-secret-statement-${String(trusteeRosterPosition)}`,
-            ),
-            trusteeSecretCommitmentRoot: fixtureHash(
-                `trustee-secret-commitment-${String(trusteeRosterPosition)}`,
-            ),
-            sameSecretProofRoot: fixtureHash(
-                `same-secret-proof-${String(trusteeRosterPosition)}`,
-            ),
         }),
     );
 
@@ -121,7 +111,6 @@ const relinearizationKeySwitchSeed = (
 ): string =>
     deriveCanonicalObjectHash({
         objectType: 'RelinearizationKeySwitchPublicSampleSeed',
-        objectVersion: 1,
         proofFamily: 'relinearization-key-share',
         keySwitchSampleScope: 'shared-by-scheduled-level-and-round',
         evaluatorKeyScheduleRoot: schedule.evaluatorKeyScheduleRoot,
@@ -137,7 +126,6 @@ const galoisKeySwitchSeed = (
 ): string =>
     deriveCanonicalObjectHash({
         objectType: 'GaloisKeySwitchPublicSampleSeed',
-        objectVersion: 1,
         proofFamily: 'galois-key-share',
         keySwitchSampleScope: 'shared-by-scheduled-rotation-and-level',
         evaluatorKeyScheduleRoot: schedule.evaluatorKeyScheduleRoot,
@@ -260,14 +248,10 @@ const evaluationKeyFixture = (): EvaluationKeyFixture => {
         qSharePrimes,
         participantCount,
         evaluatorKeySchedule: schedule,
-        sameSecretProofSetRoot: fixtureHash('same-secret-proof-set'),
-        sameSecretProofFamilyBindingRoot: fixtureHash(
-            'same-secret-proof-family-binding',
-        ),
         publicKeyShareSuccinctProofSetRoot: fixtureHash(
             'public-key-share-lnp-proof-set',
         ),
-        sameSecretProofReferences: sameSecretProofReferences(),
+        trusteeReferences: trusteeReferences(),
     } satisfies EvaluationKeyProofCommonInput;
     const roundOneContributions = Array.from(
         { length: participantCount },
@@ -360,7 +344,7 @@ const trusteeEvaluationKeyProofBytesHash = (proofBytesHex: string): string => {
     );
 
     return hash512Hex(
-        'sealed-lattice/setup/trustee-evaluation-key/proof-bytes-v1',
+        'sealed-lattice/setup/trustee-evaluation-key/proof-bytes',
         [bytes],
     );
 };
@@ -385,7 +369,6 @@ const stubGenerator = (
                 `statement-${String(input.context.trusteeRosterPosition)}`,
             ),
             limbCount: qSharePrimes.length,
-            sameSecretLinkageIncluded: true,
             proofByteLength: proofBytesHex.length / 2,
             proofBytesHex,
         };
@@ -413,14 +396,85 @@ const trusteeWitnesses = (): TrusteeEvaluationKeyWitnessInput[] =>
                 { length: qSharePrimes.length },
                 () => [Array.from({ length: ringDegree }, () => 1)],
             ),
-            constantCommitments: [
-                {
-                    objectType: 'SetupCommitmentFixture',
-                    trusteeRosterPosition,
-                },
-            ],
         }),
     );
+
+const sameSecretBridgeStatementSet = (): VssSameSecretBridgeStatementSet => {
+    const statementRecords = trusteeReferences().map((trusteeReference) => {
+        const sourceConstantCoefficientCommitments = qSharePrimes.map(
+            (rnsPrime, rnsLimbIndex) => {
+                const commitment = {
+                    objectType: 'SetupCommitment',
+                    sourceRnsLimbIndex: rnsLimbIndex,
+                    sourceMessageModulus: rnsPrime,
+                    shamirCoefficientIndex: 0,
+                    ringDegree,
+                    commitmentLimbs: [],
+                } as const;
+
+                return {
+                    rnsLimbIndex,
+                    rnsPrime,
+                    shamirCoefficientIndex: 0,
+                    commitment,
+                } as const;
+            },
+        );
+        const statementWithoutRoot = {
+            objectType: 'VssSameSecretBridgeStatement',
+            proofFamily: 'same-secret-bridge',
+            ...setupContext,
+            targetBasisHash: fixtureHash('target-basis'),
+            publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
+            ringDegree,
+            ...trusteeReference,
+            dataBasisRelation: 'fixture data-basis relation',
+            integerSupport: 'fixture integer support',
+            signedRepresentativeConvention:
+                'fixture signed representative convention',
+            vssPublicCommitmentEncoding: 'fixture commitment encoding',
+            targetBasisLimbOrder: 'fixture target-basis limb order',
+            sourceConstantCoefficientCommitments,
+            targetConstantCoefficientCommitmentRoots: [],
+            targetConstantCoefficientCommitments: [],
+            relation: 'fixture same-secret relation',
+        } as const;
+
+        return {
+            ...statementWithoutRoot,
+            sameSecretBridgeStatementRoot:
+                deriveCanonicalObjectHash(statementWithoutRoot),
+        };
+    });
+    const statementSetWithoutRoot = {
+        objectType: 'VssSameSecretBridgeStatementSet',
+        proofFamily: 'same-secret-bridge',
+        ...setupContext,
+        targetBasisHash: fixtureHash('target-basis'),
+        publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
+        ringDegree,
+        participantCount,
+        targetRnsLimbCount: qSharePrimes.length,
+        thresholdDegree: participantCount,
+        coefficientCommitmentRoot: fixtureHash('coefficient-commitment-set'),
+        vssCoefficientCommitmentRoot: fixtureHash(
+            'vss-coefficient-commitment-set',
+        ),
+        integerSupport: 'fixture integer support',
+        signedRepresentativeConvention:
+            'fixture signed representative convention',
+        vssPublicCommitmentEncoding: 'fixture commitment encoding',
+        targetBasisLimbOrder: 'fixture target-basis limb order',
+        statementRecords,
+    } as const;
+
+    return {
+        ...statementSetWithoutRoot,
+        sameSecretBridgeStatementSetRoot: deriveCanonicalObjectHash(
+            statementSetWithoutRoot,
+        ),
+    };
+};
 
 type BuiltRoundsAndBatches = Readonly<{
     relinearizationKeyShareRounds: ReturnType<
@@ -462,6 +516,7 @@ const builtTrusteeProofs = (
         galoisKeyShareBatches,
         keySwitchDecompositionHash: fixtureHash('key-switch-decomposition'),
         trusteeWitnesses: trusteeWitnesses(),
+        sameSecretBridgeStatementSet: sameSecretBridgeStatementSet(),
         trusteeEvaluationKeyProofGenerator: stubGenerator(capturedInputs),
     });
 
@@ -518,7 +573,6 @@ describe('createRelinearizationKeyShareRounds', () => {
         }
         const expectedRoundOneAggregateRoot = deriveCanonicalObjectHash({
             objectType: 'RelinearizationRoundOneAggregate',
-            objectVersion: 1,
             evaluatorKeyScheduleRoot: fixture.schedule.evaluatorKeyScheduleRoot,
             level: scheduledLevel,
             roundOneRecordRoots: rounds.roundOneRecords.map((record) => ({
@@ -535,7 +589,6 @@ describe('createRelinearizationKeyShareRounds', () => {
         ]);
         const expectedRoundTwoAggregateRoot = deriveCanonicalObjectHash({
             objectType: 'RelinearizationRoundTwoAggregate',
-            objectVersion: 1,
             evaluatorKeyScheduleRoot: fixture.schedule.evaluatorKeyScheduleRoot,
             level: scheduledLevel,
             roundOneAggregateRoot: expectedRoundOneAggregateRoot,
@@ -747,6 +800,7 @@ describe('createTrusteeEvaluationKeyProofs', () => {
         const capturedInputs: TrusteeEvaluationKeyProofGeneratorInput[] = [];
         const { trusteeEvaluationKeyProofs, relinearizationKeyShareRounds } =
             builtTrusteeProofs(fixture, capturedInputs);
+        const bridgeStatementSet = sameSecretBridgeStatementSet();
 
         expect(capturedInputs).toHaveLength(participantCount);
         capturedInputs.forEach((generatorInput, trusteeRosterPosition) => {
@@ -807,8 +861,19 @@ describe('createTrusteeEvaluationKeyProofs', () => {
                 undefined,
             );
             expect(generatorInput.sameSecretLinkage.publicMatrixSeedHash).toBe(
-                fixture.schedule.publicMatrixSeedHash,
+                fixtureHash('public-matrix-seed'),
             );
+            const sourceConstantCommitment =
+                bridgeStatementSet.statementRecords[trusteeRosterPosition]
+                    ?.sourceConstantCoefficientCommitments[0]?.commitment;
+            expect(generatorInput.sameSecretLinkage.commitments).toEqual([
+                sourceConstantCommitment,
+            ]);
+            const expectedSourceConstantCommitmentRoot =
+                deriveCanonicalObjectHash(sourceConstantCommitment);
+            expect(
+                generatorInput.context.sourceConstantCoefficientCommitmentRoot,
+            ).toBe(expectedSourceConstantCommitmentRoot);
             expect(generatorInput.errorCoefficientsByKey).toHaveLength(
                 statementKeyCount,
             );
@@ -878,6 +943,7 @@ describe('createTrusteeEvaluationKeyProofs', () => {
                     'key-switch-decomposition',
                 ),
                 trusteeWitnesses: completeWitnesses.slice(0, 1),
+                sameSecretBridgeStatementSet: sameSecretBridgeStatementSet(),
                 trusteeEvaluationKeyProofGenerator: stubGenerator([]),
             }),
         ).toThrow('trusteeWitnesses must contain one witness per participant');
@@ -900,10 +966,99 @@ describe('createTrusteeEvaluationKeyProofs', () => {
                     },
                     completeWitnesses[1],
                 ],
+                sameSecretBridgeStatementSet: sameSecretBridgeStatementSet(),
                 trusteeEvaluationKeyProofGenerator: stubGenerator([]),
             }),
         ).toThrow(
             'trusteeWitnesses.errorCoefficientsByKey must contain one error vector set per statement key',
+        );
+    });
+
+    it('rejects bridge carriers outside the accepted setup coordinates', () => {
+        const fixture = evaluationKeyFixture();
+        const { relinearizationKeyShareRounds, galoisKeyShareBatches } =
+            builtRoundsAndBatches(fixture);
+        const bridgeStatementSet = sameSecretBridgeStatementSet();
+
+        expect(() =>
+            createTrusteeEvaluationKeyProofs({
+                ...fixture.commonInput,
+                relinearizationKeyShareRounds,
+                galoisKeyShareBatches,
+                keySwitchDecompositionHash: fixtureHash(
+                    'key-switch-decomposition',
+                ),
+                trusteeWitnesses: trusteeWitnesses(),
+                sameSecretBridgeStatementSet: {
+                    ...bridgeStatementSet,
+                    publicMatrixSeedHash: fixtureHash(
+                        'other-public-matrix-seed',
+                    ),
+                },
+                trusteeEvaluationKeyProofGenerator: stubGenerator([]),
+            }),
+        ).toThrow(
+            'sameSecretBridgeStatementSet.publicMatrixSeedHash must match evaluatorKeySchedule.publicMatrixSeedHash',
+        );
+        expect(() =>
+            createTrusteeEvaluationKeyProofs({
+                ...fixture.commonInput,
+                relinearizationKeyShareRounds,
+                galoisKeyShareBatches,
+                keySwitchDecompositionHash: fixtureHash(
+                    'key-switch-decomposition',
+                ),
+                trusteeWitnesses: trusteeWitnesses(),
+                sameSecretBridgeStatementSet: {
+                    ...bridgeStatementSet,
+                    statementRecords:
+                        bridgeStatementSet.statementRecords.slice(1),
+                },
+                trusteeEvaluationKeyProofGenerator: stubGenerator([]),
+            }),
+        ).toThrow(
+            'sameSecretBridgeStatementSet must contain one statement per participant',
+        );
+        const firstStatement = bridgeStatementSet.statementRecords[0];
+        const firstSourceCommitment =
+            firstStatement?.sourceConstantCoefficientCommitments[0];
+        if (
+            firstStatement === undefined ||
+            firstSourceCommitment === undefined
+        ) {
+            throw new Error('Bridge fixture must carry the first source limb.');
+        }
+        expect(() =>
+            createTrusteeEvaluationKeyProofs({
+                ...fixture.commonInput,
+                relinearizationKeyShareRounds,
+                galoisKeyShareBatches,
+                keySwitchDecompositionHash: fixtureHash(
+                    'key-switch-decomposition',
+                ),
+                trusteeWitnesses: trusteeWitnesses(),
+                sameSecretBridgeStatementSet: {
+                    ...bridgeStatementSet,
+                    statementRecords: [
+                        {
+                            ...firstStatement,
+                            sourceConstantCoefficientCommitments: [
+                                {
+                                    ...firstSourceCommitment,
+                                    rnsPrime: qSharePrimes[1],
+                                },
+                                ...firstStatement.sourceConstantCoefficientCommitments.slice(
+                                    1,
+                                ),
+                            ],
+                        },
+                        bridgeStatementSet.statementRecords[1],
+                    ],
+                },
+                trusteeEvaluationKeyProofGenerator: stubGenerator([]),
+            }),
+        ).toThrow(
+            'sameSecretBridgeStatementSet source constant commitments must carry canonical source-limb bodies in order',
         );
     });
 
@@ -914,13 +1069,16 @@ describe('createTrusteeEvaluationKeyProofs', () => {
         expect(() =>
             createTrusteeEvaluationKeyProofs({
                 ...fixture.commonInput,
-                sameSecretProofSetRoot: fixtureHash('other-proof-set'),
+                publicKeyShareSuccinctProofSetRoot: fixtureHash(
+                    'other-public-key-share-proof-set',
+                ),
                 relinearizationKeyShareRounds,
                 galoisKeyShareBatches,
                 keySwitchDecompositionHash: fixtureHash(
                     'key-switch-decomposition',
                 ),
                 trusteeWitnesses: trusteeWitnesses(),
+                sameSecretBridgeStatementSet: sameSecretBridgeStatementSet(),
                 trusteeEvaluationKeyProofGenerator: stubGenerator([]),
             }),
         ).toThrow(
@@ -949,6 +1107,7 @@ describe('createTrusteeEvaluationKeyProofs', () => {
                     'key-switch-decomposition',
                 ),
                 trusteeWitnesses: trusteeWitnesses(),
+                sameSecretBridgeStatementSet: sameSecretBridgeStatementSet(),
                 trusteeEvaluationKeyProofGenerator: stubGenerator([]),
             }),
         ).toThrow('coefficient hash does not match coefficientsLeHex');
@@ -1042,8 +1201,7 @@ describe('createBinaryChunkedEvaluationKeyShareMaterialTransport', () => {
         const fixture = evaluationKeyFixture();
         const transport =
             createBinaryChunkedEvaluationKeyShareMaterialTransport({
-                sameSecretProofReferences:
-                    fixture.commonInput.sameSecretProofReferences,
+                trusteeReferences: fixture.commonInput.trusteeReferences,
                 relinearizationRoundOneContributions:
                     fixture.roundOneContributions,
                 relinearizationRoundTwoContributions:
@@ -1067,6 +1225,19 @@ describe('createBinaryChunkedEvaluationKeyShareMaterialTransport', () => {
                 'binary-chunked-key-switch-component-vectors',
             );
         }
+        // Each transported component material is a chunkless manifest
+        // reference: the raw chunk bytes travel out of band in the parallel
+        // chunk streams so the terminal accepted-setup verifier can stream them
+        // through the file-backed component material transport.
+        const chunkStreamByRoot = new Map(
+            transport.evaluationKeyShareComponentMaterialChunkStreams.map(
+                (chunkStream) => [
+                    chunkStream.keySwitchComponentMaterialRoot,
+                    chunkStream,
+                ],
+            ),
+        );
+        expect(chunkStreamByRoot.size).toBe(expectedComponentMaterialCount);
         for (const componentMaterial of transport
             .transportedEvaluationKeyShareComponentMaterial
             .componentMaterials) {
@@ -1077,12 +1248,20 @@ describe('createBinaryChunkedEvaluationKeyShareMaterialTransport', () => {
             expect(material.digitCount).toBe(digitCount);
             expect(material.rnsLimbCount).toBe(digitCount);
             expect(material.ringDegree).toBe(ringDegree);
-            const chunks = material.chunks as readonly {
-                chunkIndex: number;
-                bytesHex: string;
-            }[];
-            expect(chunks.length).toBeGreaterThan(0);
-            expect(chunks[0].bytesHex.startsWith('534c454b434d5631')).toBe(
+            expect(
+                Object.prototype.hasOwnProperty.call(material, 'chunks'),
+            ).toBe(false);
+            const keySwitchComponentMaterialRoot =
+                material.keySwitchComponentMaterialRoot as string;
+            const chunkStream = chunkStreamByRoot.get(
+                keySwitchComponentMaterialRoot,
+            );
+            expect(chunkStream).toBeDefined();
+            expect(chunkStream?.proofFamily).toBe(material.proofFamily);
+            const chunks = chunkStream?.chunks ?? [];
+            expect(chunks.length).toBe(material.chunkCount);
+            expect(chunks[0]?.chunkIndex).toBe(0);
+            expect(chunks[0]?.bytesHex.startsWith('534c454b434d5631')).toBe(
                 true,
             );
         }
@@ -1100,8 +1279,7 @@ describe('createBinaryChunkedEvaluationKeyShareMaterialTransport', () => {
         const fixture = evaluationKeyFixture();
         const transport =
             createBinaryChunkedEvaluationKeyShareMaterialTransport({
-                sameSecretProofReferences:
-                    fixture.commonInput.sameSecretProofReferences,
+                trusteeReferences: fixture.commonInput.trusteeReferences,
                 relinearizationRoundOneContributions:
                     fixture.roundOneContributions,
                 relinearizationRoundTwoContributions:
@@ -1126,16 +1304,20 @@ describe('createBinaryChunkedEvaluationKeyShareMaterialTransport', () => {
             galoisKeyShareBatches: batches,
             keySwitchDecompositionHash: fixtureHash('key-switch-decomposition'),
             trusteeWitnesses: trusteeWitnesses(),
+            sameSecretBridgeStatementSet: sameSecretBridgeStatementSet(),
             trusteeEvaluationKeyProofGenerator: stubGenerator(capturedInputs),
             transportedEvaluationKeyShareComponentMaterial:
                 transport.transportedEvaluationKeyShareComponentMaterial,
+            evaluationKeyShareComponentMaterialChunkStreams:
+                transport.evaluationKeyShareComponentMaterialChunkStreams,
         });
 
         expect(trusteeEvaluationKeyProofs.proofRecords).toHaveLength(
             participantCount,
         );
-        // The decoded chunked material must reproduce the same component
-        // coefficients the embedded path supplies.
+        // The decoded chunk-streamed material must reproduce the same component
+        // coefficients the embedded path supplies, even though the transported
+        // component material now carries only the chunkless manifest reference.
         expect(capturedInputs[0].keys[0].componentBByDigit[0][0]).toEqual(
             componentCoefficients('round-one-0', 0, 0),
         );
@@ -1145,8 +1327,7 @@ describe('createBinaryChunkedEvaluationKeyShareMaterialTransport', () => {
         const fixture = evaluationKeyFixture();
         expect(() =>
             createBinaryChunkedEvaluationKeyShareMaterialTransport({
-                sameSecretProofReferences:
-                    fixture.commonInput.sameSecretProofReferences,
+                trusteeReferences: fixture.commonInput.trusteeReferences,
                 relinearizationRoundOneContributions: [
                     {
                         ...fixture.roundOneContributions[0],
@@ -1157,7 +1338,7 @@ describe('createBinaryChunkedEvaluationKeyShareMaterialTransport', () => {
                 galoisKeyShareBatchContributions: [],
             }),
         ).toThrow(
-            'references a trustee roster position without a same-secret proof reference',
+            'references a trustee roster position without a trustee reference',
         );
     });
 
@@ -1165,8 +1346,7 @@ describe('createBinaryChunkedEvaluationKeyShareMaterialTransport', () => {
         const fixture = evaluationKeyFixture();
         expect(() =>
             createBinaryChunkedEvaluationKeyShareMaterialTransport({
-                sameSecretProofReferences:
-                    fixture.commonInput.sameSecretProofReferences,
+                trusteeReferences: fixture.commonInput.trusteeReferences,
                 relinearizationRoundOneContributions: [
                     fixture.roundOneContributions[0],
                     fixture.roundOneContributions[0],
@@ -1311,7 +1491,6 @@ describe('createBinaryChunkedPublicEvaluationKeyMaterialTransport', () => {
                 transportedEvaluationKeyShareComponentMaterial: {
                     objectType:
                         'SetupTransportedEvaluationKeyShareComponentMaterialSet',
-                    objectVersion: 1,
                     componentMaterials: [
                         { keySwitchComponentMaterialRoot: fixtureHash('x') },
                     ],
@@ -1326,8 +1505,7 @@ describe('createBinaryChunkedPublicEvaluationKeyMaterialTransport', () => {
         const fixture = evaluationKeyFixture();
         const shareTransport =
             createBinaryChunkedEvaluationKeyShareMaterialTransport({
-                sameSecretProofReferences:
-                    fixture.commonInput.sameSecretProofReferences,
+                trusteeReferences: fixture.commonInput.trusteeReferences,
                 relinearizationRoundOneContributions:
                     fixture.roundOneContributions,
                 relinearizationRoundTwoContributions:

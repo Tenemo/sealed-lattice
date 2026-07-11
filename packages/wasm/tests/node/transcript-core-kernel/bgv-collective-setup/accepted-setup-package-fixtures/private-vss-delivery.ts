@@ -17,6 +17,7 @@ import {
     type PrivateVssMailboxDeliverySetInput,
 } from '#packages/protocol/src/setup/private-vss-mailbox-delivery';
 import { type VssSourceTrusteeOpeningMaterial } from '#packages/protocol/src/setup/vss-coefficient-commitments';
+import { type VssPublicCoefficientCommitmentSet } from '#packages/protocol/src/setup/vss-commitments';
 import {
     createVssComplaintSet,
     createVssShareAcceptanceRecord,
@@ -98,7 +99,6 @@ function packageShapePrivateVssEnvelopeAad(input: {
 }): JsonRecord {
     return {
         objectType: 'PrivateVssEnvelopeAad',
-        objectVersion: 1,
         privateEnvelopeObjectType: 'PrivateVssShareEnvelope',
         ciphertextContentType: 'private-vss-share-envelope',
         ceremonyId: input.setupContext.ceremonyId,
@@ -126,7 +126,7 @@ function packageShapePrivateVssEnvelopeReference(input: {
     readonly phaseOrderHash: string;
     readonly publicMatrixSeedHash: string;
     readonly vssCoefficientCommitmentRoot: string;
-    readonly sourceTrusteeRecord: JsonRecord;
+    readonly sourceTrusteeRecord: VssPublicCoefficientCommitmentSet['sourceTrusteeRecords'][number];
     readonly sourceTrusteeRosterPosition: number;
     readonly recipientRosterPosition: number;
     readonly participantCount: number;
@@ -139,7 +139,7 @@ function packageShapePrivateVssEnvelopeReference(input: {
         input.recipientRosterPosition,
     );
     const sourceTrusteeCommitmentRoot = String(
-        input.sourceTrusteeRecord.sourceTrusteeCommitmentRoot,
+        input.sourceTrusteeRecord.sourceCoefficientCommitmentRoot,
     );
     const envelopeSequenceNumber =
         input.sourceTrusteeRosterPosition * input.participantCount +
@@ -188,7 +188,6 @@ function packageShapePrivateVssEnvelopeReference(input: {
     });
     const referenceWithoutRoot = {
         objectType: 'PrivateVssEnvelopeCommitment',
-        objectVersion: 1,
         ceremonyId: input.setupContext.ceremonyId,
         manifestHash: input.setupContext.manifestHash,
         rosterHash: input.setupContext.rosterHash,
@@ -228,13 +227,13 @@ export function packageShapePrivateVssEnvelopeCommitments(
     setupParameters: BgvCollectiveSetupParametersDescription,
     setupContext: JsonRecord,
     commonRandomness: JsonRecord,
-    vssCoefficientCommitments: JsonRecord,
+    vssPublicCoefficientCommitmentSet: VssPublicCoefficientCommitmentSet,
 ): JsonRecord {
     const sourceTrusteeRecords =
-        vssCoefficientCommitments.sourceTrusteeRecords as JsonRecord[];
+        vssPublicCoefficientCommitmentSet.sourceTrusteeRecords;
     const publicMatrixSeedHash = String(commonRandomness.publicMatrixSeedHash);
     const vssCoefficientCommitmentRoot = String(
-        vssCoefficientCommitments.vssCoefficientCommitmentRoot,
+        vssPublicCoefficientCommitmentSet.coefficientCommitmentRoot,
     );
     const phaseOrderHash = collectiveSetupPhaseOrderHash(
         kernel,

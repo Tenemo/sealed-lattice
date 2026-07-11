@@ -84,7 +84,6 @@ export type VssShareComplaintFromLocalVerificationInput = Omit<
 export type VssShareAcceptanceRecord = Readonly<
     JsonRecord & {
         readonly objectType: 'VssShareAcceptance';
-        readonly objectVersion: 1;
         readonly sourceTrusteeIdentity: string;
         readonly sourceTrusteeRosterPosition: number;
         readonly recipientIdentity: string;
@@ -107,7 +106,6 @@ export type VssShareAcceptanceRecord = Readonly<
 export type VssShareComplaintRecord = Readonly<
     JsonRecord & {
         readonly objectType: 'VssShareComplaint';
-        readonly objectVersion: 1;
         readonly sourceTrusteeIdentity: string;
         readonly sourceTrusteeRosterPosition: number;
         readonly recipientIdentity: string;
@@ -131,7 +129,6 @@ export type VssShareComplaintRecord = Readonly<
 export type VssShareAcceptanceSet = Readonly<
     JsonRecord & {
         readonly objectType: 'VssShareAcceptanceSet';
-        readonly objectVersion: 1;
         readonly privateVssEnvelopeCommitmentRoot: ProtocolHash;
         readonly acceptanceRecords: readonly VssShareAcceptanceRecord[];
         readonly vssShareAcceptanceRoot: ProtocolHash;
@@ -141,7 +138,6 @@ export type VssShareAcceptanceSet = Readonly<
 export type VssComplaintSet = Readonly<
     JsonRecord & {
         readonly objectType: 'VssComplaintSet';
-        readonly objectVersion: 1;
         readonly privateVssEnvelopeCommitmentRoot: ProtocolHash;
         readonly complaintRecords: readonly VssShareComplaintRecord[];
         readonly vssComplaintRoot: ProtocolHash;
@@ -182,7 +178,6 @@ const verifyGeneratedSignatureEnvelope = (
 ): void => {
     const result = verifySignedObjectSignature(signatureEnvelope, {
         objectType: signedRoot.objectType,
-        objectVersion: signedRoot.objectVersion,
         signerRole: signedRoot.signerRole,
         signerIdentity: signedRoot.signerIdentity,
         ceremonyId: signedRoot.ceremonyId,
@@ -192,7 +187,6 @@ const verifyGeneratedSignatureEnvelope = (
         chunkMerkleRoot: signedRoot.chunkMerkleRoot,
         boardHeadHash: signedRoot.boardHeadHash,
         contextHash: signedRoot.contextHash,
-        byteLength: signedRoot.byteLength,
         recoveryEpoch: signedRoot.recoveryEpoch,
         deviceEpoch: signedRoot.deviceEpoch,
     });
@@ -202,11 +196,6 @@ const verifyGeneratedSignatureEnvelope = (
             refusedObject === undefined
                 ? `${recordLabel} signature envelope failed verification.`
                 : signatureFailureMessage(recordLabel, refusedObject),
-        );
-    }
-    if (signatureEnvelope.signatureHash !== result.acceptedHashes[0]) {
-        throw new Error(
-            `${recordLabel} signature envelope hash does not match the verified signature hash.`,
         );
     }
 };
@@ -282,7 +271,6 @@ export const createVssShareAcceptanceRecord = async (
 
     const acceptancePayload = {
         objectType: 'VssShareAcceptance',
-        objectVersion: 1,
         ...shareVerificationPayloadFields(
             input.setupContext,
             input.privateVssEnvelopeCommitmentRoot,
@@ -309,13 +297,11 @@ export const createVssShareAcceptanceRecord = async (
     });
     const signedRoot = {
         objectType: 'VssShareAcceptance',
-        objectVersion: 1,
         ceremonyId: input.setupContext.ceremonyId,
         manifestHash: input.setupContext.manifestHash,
         boardHeadHash: null,
         objectRoot: acceptanceRoot,
         chunkMerkleRoot: null,
-        byteLength: acceptanceByteLength,
         signerRole: 'Trustee',
         signerIdentity: input.envelopeReference.recipientIdentity,
         recoveryEpoch: input.recoveryEpoch,
@@ -354,7 +340,6 @@ export const createVssShareAcceptanceSet = (input: {
     );
     const acceptanceSetWithoutRoot = {
         objectType: 'VssShareAcceptanceSet',
-        objectVersion: 1,
         ceremonyId: input.setupContext.ceremonyId,
         manifestHash: input.setupContext.manifestHash,
         rosterHash: input.setupContext.rosterHash,
@@ -387,7 +372,6 @@ export const createVssShareComplaintRecord = async (
 
     const complaintPayload = {
         objectType: 'VssShareComplaint',
-        objectVersion: 1,
         ...shareVerificationPayloadFields(
             input.setupContext,
             input.privateVssEnvelopeCommitmentRoot,
@@ -414,13 +398,11 @@ export const createVssShareComplaintRecord = async (
     });
     const signedRoot = {
         objectType: 'VssShareComplaint',
-        objectVersion: 1,
         ceremonyId: input.setupContext.ceremonyId,
         manifestHash: input.setupContext.manifestHash,
         boardHeadHash: null,
         objectRoot: complaintRoot,
         chunkMerkleRoot: null,
-        byteLength: complaintByteLength,
         signerRole: 'Trustee',
         signerIdentity: input.envelopeReference.recipientIdentity,
         recoveryEpoch: input.recoveryEpoch,
@@ -476,7 +458,6 @@ export const createVssShareComplaintRecordFromLocalVerification = async (
 
     const evidencePayload = {
         objectType: 'VssShareComplaintEvidence',
-        objectVersion: 1,
         ...shareVerificationPayloadFields(
             input.setupContext,
             input.privateVssEnvelopeCommitmentRoot,
@@ -517,7 +498,6 @@ export const createVssComplaintSet = (input: {
     );
     const complaintSetWithoutRoot = {
         objectType: 'VssComplaintSet',
-        objectVersion: 1,
         ceremonyId: input.setupContext.ceremonyId,
         manifestHash: input.setupContext.manifestHash,
         rosterHash: input.setupContext.rosterHash,

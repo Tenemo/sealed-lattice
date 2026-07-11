@@ -20,7 +20,6 @@ import {
     createRefusal,
     defaultSignedRootContextHash,
     isNonNegativeInteger,
-    signedObjectRootByteLength,
     verificationExceptionMessage,
 } from '../common/verification-helpers.js';
 
@@ -59,7 +58,6 @@ export const deriveRecoveryEpochUpdateHash = (
         newSigningPublicKeyHash: update.newSigningPublicKeyHash,
         newTrusteeSetupCommitment: update.newTrusteeSetupCommitment,
         objectType: update.objectType,
-        objectVersion: update.objectVersion,
         oldActionCutoffBoardSequence: update.oldActionCutoffBoardSequence,
         previousDeviceEpoch: update.previousDeviceEpoch,
         previousRecoveryEpoch: update.previousRecoveryEpoch,
@@ -152,9 +150,6 @@ const isActionCurrentForRecoveryEpochUnchecked = (
         const actionCurrent = refusedObjects.length === 0;
         return {
             isValid: actionCurrent,
-            acceptedHashes: actionCurrent
-                ? [input.actionContext.actionContextHash]
-                : [],
             refusedObjects,
         };
     }
@@ -170,9 +165,6 @@ const isActionCurrentForRecoveryEpochUnchecked = (
         const actionCurrent = refusedObjects.length === 0;
         return {
             isValid: actionCurrent,
-            acceptedHashes: actionCurrent
-                ? [input.actionContext.actionContextHash]
-                : [],
             refusedObjects,
         };
     }
@@ -188,7 +180,6 @@ const isActionCurrentForRecoveryEpochUnchecked = (
 
     return {
         isValid: false,
-        acceptedHashes: [],
         refusedObjects,
     };
 };
@@ -201,7 +192,6 @@ export const isActionCurrentForRecoveryEpoch = (
     } catch (error) {
         return {
             isValid: false,
-            acceptedHashes: [],
             refusedObjects: [
                 createRefusal(
                     'InvalidSignedRoot',
@@ -235,7 +225,6 @@ const verifyRecoveryEpochUpdateUnchecked = (
         newSigningPublicKeyHash: update.newSigningPublicKeyHash,
         newTrusteeSetupCommitment: update.newTrusteeSetupCommitment,
         objectType: update.objectType,
-        objectVersion: update.objectVersion,
         oldActionCutoffBoardSequence: update.oldActionCutoffBoardSequence,
         previousDeviceEpoch: update.previousDeviceEpoch,
         previousRecoveryEpoch: update.previousRecoveryEpoch,
@@ -258,7 +247,6 @@ const verifyRecoveryEpochUpdateUnchecked = (
     }
     if (
         update.objectType !== 'RecoveryEpochUpdate' ||
-        update.objectVersion !== 1 ||
         !isNonNegativeInteger(update.previousRecoveryEpoch) ||
         !isNonNegativeInteger(update.newRecoveryEpoch) ||
         !isNonNegativeInteger(update.previousDeviceEpoch) ||
@@ -421,14 +409,12 @@ const verifyRecoveryEpochUpdateUnchecked = (
 
     const signatureResult = verifySignedObjectSignature(update.signature, {
         objectType: 'RecoveryEpochUpdate',
-        objectVersion: 1,
         signerRole: 'RecoveryRoot',
         signerIdentity: update.signerIdentity,
         ceremonyId: update.ceremonyId,
         manifestHash: null,
         objectRoot: update.recoveryEpochUpdateHash,
         boardHeadHash: update.boardHeadHash,
-        byteLength: signedObjectRootByteLength,
         recoveryEpoch: update.previousRecoveryEpoch,
         deviceEpoch: update.previousDeviceEpoch,
         contextHash: defaultSignedRootContextHash,
@@ -438,14 +424,6 @@ const verifyRecoveryEpochUpdateUnchecked = (
 
     return {
         isValid: refusedObjects.length === 0,
-        acceptedHashes:
-            refusedObjects.length === 0
-                ? [
-                      ...boardResult.acceptedHashes,
-                      update.recoveryEpochUpdateHash,
-                      input.updateInclusionProof.inclusionProofHash,
-                  ]
-                : [],
         refusedObjects,
         forkEvidence: boardResult.forkEvidence,
         updatedEntry:
@@ -469,7 +447,6 @@ export const verifyRecoveryEpochUpdate = (
     } catch (error) {
         return {
             isValid: false,
-            acceptedHashes: [],
             refusedObjects: [
                 createRefusal(
                     'RecoveryUpdateInvalid',

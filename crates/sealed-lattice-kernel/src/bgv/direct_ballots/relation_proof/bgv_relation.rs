@@ -100,7 +100,7 @@ pub(super) fn encoded_score_with_carry_residue(
     coefficient_index: usize,
     modulus: u64,
 ) -> CanonicalResult<u64> {
-    if score_encoding_basis.len() != DIRECT_BALLOT_OPTION_COUNT {
+    if score_encoding_basis.len() != OPTION_COUNT {
         return Err(invalid_direct_ballot_relation_proof(
             "direct ballot score encoding basis has the wrong option count",
         ));

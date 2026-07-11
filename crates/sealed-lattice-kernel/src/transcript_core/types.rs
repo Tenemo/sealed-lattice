@@ -36,8 +36,6 @@ pub struct TranscriptCoreAnalysis {
     pub canonical_bytes_hex: String,
     #[serde(rename = "objectType")]
     pub object_type: &'static str,
-    #[serde(rename = "objectVersion")]
-    pub object_version: u64,
     #[serde(rename = "objectHash512")]
     pub object_hash512: String,
     #[serde(rename = "chunkRoot")]

@@ -9,11 +9,6 @@ pub(super) fn validate_setup_certificates(setup_package: &Value) -> CanonicalRes
         hash_at_path(certificates, &["keySwitchDecompositionHash"])?,
         "key-switch decomposition hash",
     )?;
-    compare_derived_hash(
-        value_at_path(certificates, &["evaluationKeySizeCertificate"])?,
-        hash_at_path(certificates, &["evaluationKeySizeParametersHash"])?,
-        "evaluation key size parameters hash",
-    )?;
     validate_evaluation_key_streaming_commitment(certificates)?;
     Ok(())
 }
@@ -27,12 +22,6 @@ fn validate_evaluation_key_streaming_commitment(certificates: &Value) -> Canonic
         "BgvEvaluationKeyStreamingCommitment",
         "evaluation key streaming commitment object type",
     )?;
-    if usize_at_path(commitment_record, &["chunkSizeBytes"])? != EVALUATION_KEY_CHUNK_SIZE_BYTES {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidChunkSize,
-            "evaluation key streaming commitment chunk size changed",
-        ));
-    }
     let stream_record = value_at_path(commitment_record, &["streamRecord"])?;
     let stream_bytes = canonical_json(stream_record)?.into_bytes();
     if usize_at_path(commitment_record, &["canonicalStreamByteLength"])? != stream_bytes.len() {

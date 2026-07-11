@@ -42,28 +42,28 @@ pub(in super::super) fn global_claim_id(
     let vector_index = local_claim_index / layout.consistency_repetitions;
     if layout.target_decryption_active() {
         let local_message_digit_vectors = layout.target_decryption_message_columns
-            * crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT;
+            * crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT;
         debug_assert!(vector_index < local_message_digit_vectors);
-        let local_message_index = vector_index
-            / crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT;
-        let digit_index = vector_index
-            % crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT;
+        let local_message_index =
+            vector_index / crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT;
+        let digit_index =
+            vector_index % crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT;
         let global_message_index = statement
             .target_decryption_message_global_index(layout.limb_index, local_message_index)
             .expect("target-decryption message column is in the layout");
         let global_vector_index = global_message_index
-            * crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT
+            * crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT
             + digit_index;
 
         return (global_vector_index * layout.consistency_repetitions + repetition) as u64;
     }
-    if layout.private_vss_active() || layout.compact_vss_active() {
+    if layout.private_vss_active() || layout.vss_public_active() {
         debug_assert!(
-            statement.private_vss_share.is_some() || statement.compact_vss_share_linkage.is_some()
+            statement.private_vss_share.is_some() || statement.vss_share_linkage.is_some()
         );
         return (vector_index * layout.consistency_repetitions + repetition) as u64;
     }
-    if layout.compact_same_secret_bridge_active() {
+    if layout.same_secret_bridge_active() {
         return (vector_index * layout.consistency_repetitions + repetition) as u64;
     }
     if vector_index == 0 {
@@ -84,7 +84,7 @@ pub(in super::super) fn global_claim_id(
         }
         remaining -= digit_count;
     }
-    // Linkage vectors: the negative indicator, optional compact bridge message
+    // Linkage vectors: the negative indicator, optional bridge message
     // digits, then the opening-randomness columns, indexed after every
     // statement-global error vector.
     let total_error_vectors: usize = statement
@@ -93,9 +93,9 @@ pub(in super::super) fn global_claim_id(
         .map(|key| key.digit_count())
         .sum::<usize>();
     let linkage_position = remaining;
-    if let Some(bridge) = &statement.compact_same_secret_bridge {
+    if let Some(bridge) = &statement.same_secret_bridge {
         let bridge_digit_vector_count = bridge.target_rns_primes.len()
-            * crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT;
+            * crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT;
         debug_assert!(
             linkage_position < 1 + bridge_digit_vector_count + layout.linkage_randomness_columns
         );
@@ -136,8 +136,26 @@ pub(super) fn masked_half_coefficients(
     half_values: &[u64],
     mask_sampler: &mut DeterministicSampler,
 ) -> Vec<u64> {
+    masked_half_coefficients_with_mask_degree(
+        plan,
+        half_values,
+        column_mask_degree(plan.trace_size),
+        mask_sampler,
+    )
+}
+
+// The mask-degree-parameterized form: per-proof witness columns take the
+// `column_mask_degree` cap (they enter the cubic row-check composition), while
+// persistent VSS committed-material columns take their own larger budget (they
+// appear only in linear rows, so the cubic-composition cap does not apply and
+// the mask must instead cover every lifetime opening of the persistent tree).
+pub(super) fn masked_half_coefficients_with_mask_degree(
+    plan: &EvaluationDomainPlan,
+    half_values: &[u64],
+    mask_degree: usize,
+    mask_sampler: &mut DeterministicSampler,
+) -> Vec<u64> {
     let trace_size = plan.trace_size;
-    let mask_degree = column_mask_degree(trace_size);
     let mut coefficients = plan.coefficients_from_trace_values(half_values);
     coefficients.resize(trace_size + mask_degree, 0);
     let mask = mask_sampler.uniform_residues(plan.modulus, mask_degree);
@@ -154,55 +172,97 @@ pub(super) fn masked_half_coefficients(
     coefficients
 }
 
-fn compact_vss_recipient_share_messages_by_item_for_claims(
+fn vss_public_recipient_share_messages_by_item_for_claims(
     witness: &TrusteeEvaluationKeyWitness,
 ) -> Vec<&[i64]> {
     if witness
-        .compact_vss_recipient_share_messages_by_item
+        .vss_public_recipient_share_messages_by_item
         .is_empty()
     {
-        vec![&witness.compact_vss_recipient_share_messages]
+        vec![&witness.vss_public_recipient_share_messages]
     } else {
         witness
-            .compact_vss_recipient_share_messages_by_item
+            .vss_public_recipient_share_messages_by_item
             .iter()
             .map(Vec::as_slice)
             .collect()
     }
 }
 
-fn compact_vss_carry_witnesses_by_item_for_claims(
+fn vss_public_carry_witnesses_by_item_for_claims(
     witness: &TrusteeEvaluationKeyWitness,
 ) -> Vec<&[i64]> {
-    if witness.compact_vss_carry_witnesses_by_item.is_empty() {
-        vec![&witness.compact_vss_carry_witnesses]
+    if witness.vss_public_carry_witnesses_by_item.is_empty() {
+        vec![&witness.vss_public_carry_witnesses]
     } else {
         witness
-            .compact_vss_carry_witnesses_by_item
+            .vss_public_carry_witnesses_by_item
             .iter()
             .map(Vec::as_slice)
             .collect()
     }
 }
 
-fn append_compact_vss_digit_vectors(digit_vectors: &mut Vec<Vec<i64>>, message_vector: &[i64]) {
-    let mut vectors = (0
-        ..crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT)
+fn append_vss_public_digit_vectors(digit_vectors: &mut Vec<Vec<i64>>, message_vector: &[i64]) {
+    let mut vectors = (0..crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT)
         .map(|_| Vec::with_capacity(message_vector.len()))
         .collect::<Vec<_>>();
     for coefficient in message_vector {
         let unsigned_coefficient = u64::try_from(*coefficient)
-            .expect("compact VSS message coefficient is non-negative after validation");
-        let digits = crate::bgv::setup::compact_vss_commitment::compact_vss_message_digits(
-            unsigned_coefficient,
-        )
-        .expect("compact VSS message coefficient fits the digit layout");
+            .expect("VSS message coefficient is non-negative after validation");
+        let digits =
+            crate::bgv::setup::vss_commitment::vss_public_message_digits(unsigned_coefficient)
+                .expect("VSS message coefficient fits the digit layout");
         for (digit_index, digit) in digits.iter().enumerate() {
-            vectors[digit_index]
-                .push(i64::try_from(*digit).expect("compact VSS message digit fits i64"));
+            vectors[digit_index].push(i64::try_from(*digit).expect("VSS message digit fits i64"));
         }
     }
     digit_vectors.extend(vectors);
+}
+
+// Append the base-three trit decomposition of every message digit as separate
+// consistency-claim vectors. Where `append_vss_public_digit_vectors` binds a
+// whole digit (witness bound `3^trit_count - 1`) across commitment fields, this
+// binds each individual trit (witness bound two). The trit is the exact value
+// the committed decoder column already carries, so the cross-field claim window
+// shrinks from the digit range to a single ternary coefficient without changing
+// the committed trace. The message modulus selects the per-message trit counts,
+// matching the verifier's `physical_vss_public_message_trit` projection, and the
+// emission order (digit-major, trit-minor) matches
+// `vss_public_message_trit_claim_at`.
+fn append_vss_public_trit_vectors(
+    trit_vectors: &mut Vec<Vec<i64>>,
+    message_vector: &[i64],
+    encoding_layout: crate::bgv::setup::vss_commitment::VssPublicMessageEncodingLayout,
+) {
+    for digit_index in 0..crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT {
+        let trit_count = encoding_layout
+            .digit_trit_count(digit_index)
+            .expect("VSS digit is in the encoding layout");
+        if trit_count == 0 {
+            continue;
+        }
+        let mut vectors = (0..trit_count)
+            .map(|_| Vec::with_capacity(message_vector.len()))
+            .collect::<Vec<_>>();
+        for coefficient in message_vector {
+            let unsigned_coefficient = u64::try_from(*coefficient)
+                .expect("VSS message coefficient is non-negative after validation");
+            let digits =
+                crate::bgv::setup::vss_commitment::vss_public_message_digits(unsigned_coefficient)
+                    .expect("VSS message coefficient fits the digit layout");
+            let trits =
+                crate::bgv::setup::vss_commitment::vss_public_message_digit_trits_for_count(
+                    digits[digit_index],
+                    trit_count,
+                )
+                .expect("VSS message digit fits the selected trit count");
+            for (trit_index, trit) in trits.iter().enumerate() {
+                vectors[trit_index].push(i64::try_from(*trit).expect("VSS message trit fits i64"));
+            }
+        }
+        trit_vectors.extend(vectors);
+    }
 }
 
 // The shared global claim integers: for every statement-global witness
@@ -216,7 +276,7 @@ pub(super) fn global_claim_integers(
     consistency_vectors: &[Vec<u64>],
     proof_randomness_seed_hex: &str,
 ) -> Vec<BigInt> {
-    let mut owned_compact_vss_claim_vectors: Vec<Vec<i64>> = Vec::new();
+    let mut owned_vss_public_claim_vectors: Vec<Vec<i64>> = Vec::new();
     let mut signed_vectors: Vec<&[i64]> = Vec::new();
     if statement.private_vss_share.is_some() {
         // The message (Shamir coefficient) columns carry no consistency claim:
@@ -232,79 +292,108 @@ pub(super) fn global_claim_integers(
                 signed_vectors.push(column);
             }
         }
-    } else if let Some(compact_vss_share_linkage) = &statement.compact_vss_share_linkage {
-        // Compact share-linkage claims each lifted-carry vector followed by
-        // every compact-message digit vector. Opening randomness stays
-        // committed, ternary row-checked, and consumed by the opening lincheck,
-        // but it does not carry a separate cross-field integer-equality claim.
-        // This order must match consistency_vector_count and the compact branch
-        // of batched_sumcheck_value ([carries..., message_digits...]).
+    } else if let Some(vss_share_linkage) = &statement.vss_share_linkage {
+        // Share-linkage claims each lifted-carry vector followed by every message
+        // trit vector (each digit split into its base-three trits). Opening
+        // randomness stays committed, ternary row-checked, and consumed by the
+        // opening lincheck, but it does not carry a separate cross-field
+        // integer-equality claim. This order must match consistency_vector_count
+        // and the share-linkage branch of batched_sumcheck_value
+        // ([carries..., message_trits...]).
         let base_ring_degree = statement.ring_degree;
-        let item_count = compact_vss_share_linkage.item_count();
+        let item_count = vss_share_linkage.item_count();
         let coefficient_slot_indices_by_item =
-            compact_vss_share_linkage.coefficient_witness_slot_indices_by_item();
+            vss_share_linkage.coefficient_witness_slot_indices_by_item();
         let recipient_messages_by_item =
-            compact_vss_recipient_share_messages_by_item_for_claims(witness);
-        let carry_witnesses_by_item = compact_vss_carry_witnesses_by_item_for_claims(witness);
+            vss_public_recipient_share_messages_by_item_for_claims(witness);
+        let carry_witnesses_by_item = vss_public_carry_witnesses_by_item_for_claims(witness);
         assert_eq!(
             coefficient_slot_indices_by_item.len(),
             item_count,
-            "compact VSS coefficient slot layout matches the item count"
+            "VSS coefficient slot layout matches the item count"
         );
         assert_eq!(
             recipient_messages_by_item.len(),
             item_count,
-            "compact VSS recipient message witness count matches the item count"
+            "VSS recipient message witness count matches the item count"
         );
         assert_eq!(
             carry_witnesses_by_item.len(),
             item_count,
-            "compact VSS carry witness count matches the item count"
+            "VSS carry witness count matches the item count"
         );
-        let validate_compact_vss_vector = |source: &[i64]| {
+        let validate_vss_public_vector = |source: &[i64]| {
             assert_eq!(
                 source.len(),
                 base_ring_degree,
-                "compact VSS witness vector length matches the base ring degree"
+                "VSS witness vector length matches the base ring degree"
             );
         };
 
         for carry_witnesses in &carry_witnesses_by_item {
-            validate_compact_vss_vector(carry_witnesses);
-            owned_compact_vss_claim_vectors.push((*carry_witnesses).to_vec());
+            validate_vss_public_vector(carry_witnesses);
+            owned_vss_public_claim_vectors.push((*carry_witnesses).to_vec());
         }
 
-        for coefficient_slot_index in
-            0..compact_vss_share_linkage.unique_coefficient_witness_slot_count()
-        {
+        // The per-message moduli in message order ([coefficient slots...,
+        // recipient items...]) select each message's trit counts, matching the
+        // per-message encoding layouts the verifier projects through
+        // physical_vss_public_message_trit.
+        let packed_message_bounds = vss_share_linkage.packed_message_bounds();
+        assert_eq!(
+            packed_message_bounds.len(),
+            vss_share_linkage.unique_coefficient_witness_slot_count() + item_count,
+            "VSS packed message bounds cover every coefficient slot and recipient item"
+        );
+        let coefficient_message_count = vss_share_linkage.unique_coefficient_witness_slot_count();
+        let packed_message_encoding_layouts = packed_message_bounds
+            .iter()
+            .enumerate()
+            .map(|(message_position, message_bound)| {
+                crate::bgv::setup::vss_commitment::vss_public_share_linkage_packed_message_encoding_layout(
+                    vss_share_linkage.is_threshold_aggregate,
+                    message_position,
+                    coefficient_message_count,
+                    *message_bound,
+                )
+            })
+            .collect::<CanonicalResult<Vec<_>>>()
+            .expect("VSS packed message bounds fit the shared encoding layout");
+        let mut message_position = 0_usize;
+
+        for coefficient_slot_index in 0..coefficient_message_count {
             let coefficient_messages =
-                &witness.compact_vss_coefficient_messages_by_shamir_index[coefficient_slot_index];
-            validate_compact_vss_vector(coefficient_messages);
-            append_compact_vss_digit_vectors(
-                &mut owned_compact_vss_claim_vectors,
+                &witness.vss_public_coefficient_messages_by_shamir_index[coefficient_slot_index];
+            validate_vss_public_vector(coefficient_messages);
+            append_vss_public_trit_vectors(
+                &mut owned_vss_public_claim_vectors,
                 coefficient_messages,
+                packed_message_encoding_layouts[message_position],
             );
+            message_position += 1;
         }
 
         for recipient_messages in &recipient_messages_by_item {
-            validate_compact_vss_vector(recipient_messages);
-            append_compact_vss_digit_vectors(
-                &mut owned_compact_vss_claim_vectors,
+            validate_vss_public_vector(recipient_messages);
+            append_vss_public_trit_vectors(
+                &mut owned_vss_public_claim_vectors,
                 recipient_messages,
+                packed_message_encoding_layouts[message_position],
             );
+            message_position += 1;
         }
 
-        for claim_vector in &owned_compact_vss_claim_vectors {
+        for claim_vector in &owned_vss_public_claim_vectors {
             signed_vectors.push(claim_vector);
         }
     } else if statement.target_decryption_share.is_some() {
         // Target-decryption masked consistency claims bind direct message
         // digits. Opening randomness stays committed, ternary row-checked, and
-        // consumed by the compact-opening equations on setup commitment fields.
+        // consumed by the opening equations on setup commitment fields.
         for message_vector in &witness.target_decryption_message_vectors {
-            append_compact_vss_digit_vectors(&mut owned_compact_vss_claim_vectors, message_vector);
+            append_vss_public_digit_vectors(&mut owned_vss_public_claim_vectors, message_vector);
         }
-        for claim_vector in &owned_compact_vss_claim_vectors {
+        for claim_vector in &owned_vss_public_claim_vectors {
             signed_vectors.push(claim_vector);
         }
     } else {
@@ -314,10 +403,9 @@ pub(super) fn global_claim_integers(
                 signed_vectors.push(error_vector);
             }
         }
-        if statement.same_secret_linkage.is_some() || statement.compact_same_secret_bridge.is_some()
-        {
+        if statement.same_secret_linkage.is_some() || statement.same_secret_bridge.is_some() {
             signed_vectors.push(&witness.negative_indicator_coefficients);
-            if let Some(bridge) = &statement.compact_same_secret_bridge {
+            if let Some(bridge) = &statement.same_secret_bridge {
                 for target_rns_prime in &bridge.target_rns_primes {
                     let target_messages = witness
                         .secret_coefficients
@@ -327,18 +415,18 @@ pub(super) fn global_claim_integers(
                             let target_message = i128::from(*secret_coefficient)
                                 + i128::from(*target_rns_prime) * i128::from(*negative_indicator);
                             let unsigned_target_message = u64::try_from(target_message).expect(
-                                "compact same-secret bridge message is non-negative after validation",
+                                "same-secret bridge message is non-negative after validation",
                             );
                             i64::try_from(unsigned_target_message)
-                                .expect("compact same-secret bridge message fits i64")
+                                .expect("same-secret bridge message fits i64")
                         })
                         .collect::<Vec<_>>();
-                    append_compact_vss_digit_vectors(
-                        &mut owned_compact_vss_claim_vectors,
+                    append_vss_public_digit_vectors(
+                        &mut owned_vss_public_claim_vectors,
                         &target_messages,
                     );
                 }
-                for digit_vector in &owned_compact_vss_claim_vectors {
+                for digit_vector in &owned_vss_public_claim_vectors {
                     signed_vectors.push(digit_vector);
                 }
             }

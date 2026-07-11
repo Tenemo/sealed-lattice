@@ -1,6 +1,6 @@
 use super::*;
 
-use crate::bgv::setup_helpers::is_lowercase_protocol_hash;
+pub(super) use crate::bgv::setup_helpers::validate_hash_string;
 
 pub(super) fn centered_integer_to_residue(value: i128, modulus: u64) -> CanonicalResult<u64> {
     let modulus_wide = i128::from(modulus);
@@ -234,23 +234,6 @@ pub(super) fn validate_matrix_coordinate(
     if ring_coefficient_position >= POLYNOMIAL_DEGREE {
         return Err(invalid_commitment_input(
             "commitment matrix ring coefficient is outside the selected ring degree",
-        ));
-    }
-
-    Ok(())
-}
-
-pub(super) fn validate_hash_string(hash: &str, field_name: &str) -> CanonicalResult<()> {
-    if hash.len() != 128 || !hash.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            format!("{field_name} must be a lowercase Hash512 hex string"),
-        ));
-    }
-    if !is_lowercase_protocol_hash(hash) {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            format!("{field_name} must be lowercase hexadecimal"),
         ));
     }
 

@@ -18,7 +18,6 @@ import {
     createRefusal,
     defaultSignedRootContextHash,
     isNonNegativeInteger,
-    signedObjectRootByteLength,
     verificationExceptionMessage,
 } from '../common/verification-helpers.js';
 
@@ -34,7 +33,6 @@ export const deriveCastReceiptHash = (
         electionManifestHash: receipt.electionManifestHash,
         encryptedBallotHash: receipt.encryptedBallotHash,
         objectType: receipt.objectType,
-        objectVersion: receipt.objectVersion,
         recoveryEpoch: receipt.recoveryEpoch,
         voterIdentity: receipt.voterIdentity,
     });
@@ -47,7 +45,6 @@ export const derivePostVotingClosedContextHash = (input: {
 }): ProtocolHash =>
     deriveCanonicalObjectHash({
         objectType: 'PostVotingClosedContext',
-        objectVersion: 1,
         ceremonyId: input.ceremonyId,
         closeRecordHash: input.closeRecordHash,
         electionManifestHash: input.electionManifestHash,
@@ -68,7 +65,6 @@ export const deriveCloseRecordHash = (
         closedBoardHeadHash: closeRecord.closedBoardHeadHash,
         electionManifestHash: closeRecord.electionManifestHash,
         objectType: closeRecord.objectType,
-        objectVersion: closeRecord.objectVersion,
         organizerIdentity: closeRecord.organizerIdentity,
     });
 
@@ -86,7 +82,6 @@ const verifyCastReceiptShape = (
         electionManifestHash: receipt.electionManifestHash,
         encryptedBallotHash: receipt.encryptedBallotHash,
         objectType: receipt.objectType,
-        objectVersion: receipt.objectVersion,
         recoveryEpoch: receipt.recoveryEpoch,
         voterIdentity: receipt.voterIdentity,
     });
@@ -103,7 +98,6 @@ const verifyCastReceiptShape = (
     }
     if (
         receipt.objectType !== 'CastReceipt' ||
-        receipt.objectVersion !== 1 ||
         !isNonNegativeInteger(receipt.boardSequence) ||
         !isNonNegativeInteger(receipt.boardPosition) ||
         !isNonNegativeInteger(receipt.recoveryEpoch) ||
@@ -179,7 +173,6 @@ const verifyCastReceiptShellUnchecked = (
         signature: input.receipt.signature,
         signatureExpectation: {
             objectType: 'CastReceipt',
-            objectVersion: 1,
             signerRole: 'Voter',
             signerIdentity: input.receipt.voterIdentity,
             ceremonyId: input.receipt.ceremonyId,
@@ -188,7 +181,6 @@ const verifyCastReceiptShellUnchecked = (
             objectRoot: input.receipt.castReceiptHash,
             boardHeadHash: input.receiptInclusionProof.boardHeadHash,
             contextHash: input.receipt.contextHash,
-            byteLength: signedObjectRootByteLength,
             recoveryEpoch: input.receipt.recoveryEpoch,
             deviceEpoch: input.receipt.deviceEpoch,
         },
@@ -212,7 +204,6 @@ export const verifyCastReceiptShell = (
     } catch (error) {
         return {
             isValid: false,
-            acceptedHashes: [],
             refusedObjects: [
                 createRefusal(
                     'CastReceiptInvalid',
@@ -239,7 +230,6 @@ const verifyCloseRecordShape = (
         closedBoardHeadHash: closeRecord.closedBoardHeadHash,
         electionManifestHash: closeRecord.electionManifestHash,
         objectType: closeRecord.objectType,
-        objectVersion: closeRecord.objectVersion,
         organizerIdentity: closeRecord.organizerIdentity,
     });
 
@@ -255,7 +245,6 @@ const verifyCloseRecordShape = (
     }
     if (
         closeRecord.objectType !== 'CloseRecord' ||
-        closeRecord.objectVersion !== 1 ||
         !isNonNegativeInteger(closeRecord.boardSequence) ||
         !isNonNegativeInteger(closeRecord.boardPosition)
     ) {
@@ -380,7 +369,6 @@ const verifyCloseRecordShellUnchecked = (
         signature: input.closeRecord.signature,
         signatureExpectation: {
             objectType: 'CloseRecord',
-            objectVersion: 1,
             signerRole: 'Organizer',
             signerIdentity: input.closeRecord.organizerIdentity,
             ceremonyId: input.closeRecord.ceremonyId,
@@ -391,7 +379,6 @@ const verifyCloseRecordShellUnchecked = (
             contextHash:
                 input.closeRecord.postVotingClosedContextHash ??
                 defaultSignedRootContextHash,
-            byteLength: signedObjectRootByteLength,
             recoveryEpoch: 0,
             deviceEpoch: 0,
         },
@@ -445,7 +432,6 @@ export const verifyCloseRecordShell = (
     } catch (error) {
         return {
             isValid: false,
-            acceptedHashes: [],
             refusedObjects: [
                 createRefusal(
                     'CloseRecordInvalid',

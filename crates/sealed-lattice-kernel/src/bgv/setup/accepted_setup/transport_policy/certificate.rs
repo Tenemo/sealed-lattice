@@ -110,20 +110,6 @@ fn verify_transport_certificate_body(
     }
     transport_try!(expect_transport_u64(
         transport_certificate,
-        "objectVersion",
-        1,
-        "transportCertificateVersionMismatch",
-        "setupTransportCertificate.objectVersion must be 1",
-    ));
-    transport_try!(expect_transport_u64(
-        transport_certificate,
-        "chunkSizeBytes",
-        SETUP_TRANSPORT_CHUNK_SIZE_BYTES,
-        "transportChunkSizeMismatch",
-        "setupTransportCertificate.chunkSizeBytes must match the setup transport parameters",
-    ));
-    transport_try!(expect_transport_u64(
-        transport_certificate,
         "storageQuotaBytes",
         SETUP_TRANSPORT_STORAGE_QUOTA_BYTES,
         "transportStorageQuotaMismatch",
@@ -230,9 +216,9 @@ fn verify_setup_transported_objects(
             )));
         }
     };
-    // The compact setup path embeds the compact commitment sets in-package and has
-    // no large public VSS material to stream, so its transport certificate may
-    // carry no transported objects.
+    // A pre-terminal package may not yet reference any transported material, so
+    // an empty list is structurally valid. Any listed entries are validated
+    // below; object-specific acceptance paths decide when transport is required.
     let mut transported_objects = Vec::with_capacity(transported_object_values.len());
     let mut seen_object_roots = BTreeSet::new();
     let mut expected_chunk_start_index = 0_u64;
@@ -347,14 +333,6 @@ fn setup_transported_object_binding(
         SETUP_TRANSPORTED_OBJECT_TYPE,
         "transportedObjectTypeMismatch",
         "transported object objectType must be SetupTransportedObject",
-        &object_path,
-    ));
-    transport_try!(expect_transport_u64_at(
-        transported_object,
-        "objectVersion",
-        1,
-        "transportedObjectVersionMismatch",
-        "transported object objectVersion must be 1",
         &object_path,
     ));
     transport_try!(expect_transport_string_at(

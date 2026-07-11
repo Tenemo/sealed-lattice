@@ -18,11 +18,6 @@ export const createSetupPackageVerificationInput = (
     assertProtocolHash(input.expectedManifestHash, 'expectedManifestHash');
     assertProtocolHash(input.expectedRosterHash, 'expectedRosterHash');
 
-    const transportedSameSecretProofMaterial =
-        chunklessSetupProofMaterialSetForVerificationInput(
-            input.transportedSameSecretProofMaterial,
-            input.verifiedSetupProofMaterials,
-        );
     const transportedPublicKeyShareProofMaterial =
         chunklessSetupProofMaterialSetForVerificationInput(
             input.transportedPublicKeyShareProofMaterial,
@@ -33,14 +28,14 @@ export const createSetupPackageVerificationInput = (
             input.transportedEvaluationKeyShareProofMaterial,
             input.verifiedSetupProofMaterials,
         );
-    const transportedCompactVssShareLinkageProofMaterial =
+    const transportedVssShareLinkageProofMaterial =
         chunklessSetupProofMaterialSetForVerificationInput(
-            input.transportedCompactVssShareLinkageProofMaterial,
+            input.transportedVssShareLinkageProofMaterial,
             input.verifiedSetupProofMaterials,
         );
-    const transportedCompactSameSecretBridgeProofMaterial =
+    const transportedSameSecretBridgeProofMaterial =
         chunklessSetupProofMaterialSetForVerificationInput(
-            input.transportedCompactSameSecretBridgeProofMaterial,
+            input.transportedSameSecretBridgeProofMaterial,
             input.verifiedSetupProofMaterials,
         );
 
@@ -48,12 +43,6 @@ export const createSetupPackageVerificationInput = (
         setupPackage: input.setupPackage,
         expectedManifestHash: input.expectedManifestHash,
         expectedRosterHash: input.expectedRosterHash,
-        ...(transportedSameSecretProofMaterial === undefined
-            ? {}
-            : {
-                  transportedSameSecretProofMaterial:
-                      transportedSameSecretProofMaterial,
-              }),
         ...(input.transportedPublicKeyShareMaterial === undefined
             ? {}
             : {
@@ -72,23 +61,29 @@ export const createSetupPackageVerificationInput = (
                   transportedEvaluationKeyShareProofMaterial:
                       transportedEvaluationKeyShareProofMaterial,
               }),
-        ...(transportedCompactVssShareLinkageProofMaterial === undefined
+        ...(transportedVssShareLinkageProofMaterial === undefined
             ? {}
             : {
-                  transportedCompactVssShareLinkageProofMaterial:
-                      transportedCompactVssShareLinkageProofMaterial,
+                  transportedVssShareLinkageProofMaterial:
+                      transportedVssShareLinkageProofMaterial,
               }),
-        ...(transportedCompactSameSecretBridgeProofMaterial === undefined
+        ...(transportedSameSecretBridgeProofMaterial === undefined
             ? {}
             : {
-                  transportedCompactSameSecretBridgeProofMaterial:
-                      transportedCompactSameSecretBridgeProofMaterial,
+                  transportedSameSecretBridgeProofMaterial:
+                      transportedSameSecretBridgeProofMaterial,
               }),
         ...(input.transportedEvaluationKeyShareComponentMaterial === undefined
             ? {}
             : {
                   transportedEvaluationKeyShareComponentMaterial:
                       input.transportedEvaluationKeyShareComponentMaterial,
+              }),
+        ...(input.transportedEvaluationKeyAggregateBindingOpenings === undefined
+            ? {}
+            : {
+                  transportedEvaluationKeyAggregateBindingOpenings:
+                      input.transportedEvaluationKeyAggregateBindingOpenings,
               }),
         ...(input.transportedPublicEvaluationKeyMaterial === undefined
             ? {}

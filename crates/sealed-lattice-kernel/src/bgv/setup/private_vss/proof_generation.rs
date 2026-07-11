@@ -1,5 +1,6 @@
 use super::*;
 
+use crate::bgv::parameters::POLYNOMIAL_DEGREE;
 use crate::hashing::derive_canonical_object_hash;
 
 const PROOF_RANDOMNESS_SEED_BYTES: usize = 64;
@@ -229,7 +230,6 @@ pub(crate) fn generate_private_vss_share_proof_from_request(
     .map_err(private_vss_refusal_to_error)?;
     let share_values_hash = derive_canonical_object_hash(&json!({
         "objectType": "PrivateVssShareValueVector",
-        "objectVersion": 1,
         "rnsLimbIndex": rns_limb_index,
         "rnsPrime": rns_prime,
         "shareValues": share_values,
@@ -321,7 +321,6 @@ fn statement_bound_private_vss_proof_randomness_seed_hex(
 
     derive_canonical_object_hash(&json!({
         "objectType": "PrivateVssShareProofRandomnessBinding",
-        "objectVersion": 1,
         "proofFamily": "vss-opening-carry",
         "setupContext": setup_context,
         "publicMatrixSeedHash": public_matrix_seed_hash,

@@ -57,7 +57,6 @@ export type PrivateVssMailboxDecryptionInput = {
 export type PrivateVssEncryptedEnvelope = Readonly<
     Record<string, unknown> & {
         readonly objectType: 'EncryptedPrivateVssShareEnvelope';
-        readonly objectVersion: 1;
         readonly ciphertextContentType: 'private-vss-share-envelope';
         readonly privateEnvelopeHash: ProtocolHash;
         readonly privateEnvelopeAad: unknown;
@@ -261,7 +260,7 @@ export const encryptPrivateVssMailboxEnvelope = async (
         input.recipientMailboxPublicKeyBytesHex,
     );
     const recipientMailboxPublicKeyBytesHash = hashBytes(
-        'sealed-lattice-private-vss-mailbox/ml-kem-768-public-key-v1',
+        'sealed-lattice-private-vss-mailbox/ml-kem-768-public-key',
         recipientPublicKeyBytes,
     );
     const kemResult = ml_kem768.encapsulate(
@@ -269,7 +268,7 @@ export const encryptPrivateVssMailboxEnvelope = async (
         encapsulationRandomness,
     );
     const kemCiphertextHash = hashBytes(
-        'sealed-lattice-private-vss-mailbox/ml-kem-768-ciphertext-v1',
+        'sealed-lattice-private-vss-mailbox/ml-kem-768-ciphertext',
         kemResult.cipherText,
     );
     const aesGcmKeyBytes = deriveAesGcmKeyBytes(
@@ -299,12 +298,11 @@ export const encryptPrivateVssMailboxEnvelope = async (
         ),
     );
     const ciphertextBytesHash = hashBytes(
-        'sealed-lattice-private-vss-mailbox/aes-256-gcm-ciphertext-v1',
+        'sealed-lattice-private-vss-mailbox/aes-256-gcm-ciphertext',
         ciphertextBytes,
     );
     const envelopeWithoutHash = {
         objectType: 'EncryptedPrivateVssShareEnvelope',
-        objectVersion: 1,
         ciphertextContentType: 'private-vss-share-envelope',
         ...aadBindingFields(input.privateEnvelopeAad),
         privateEnvelopeHash,
@@ -361,7 +359,7 @@ export const decryptPrivateVssMailboxEnvelope = async (
         input.encryptedEnvelope.ciphertextBytesHex,
     );
     const expectedKemCiphertextHash = hashBytes(
-        'sealed-lattice-private-vss-mailbox/ml-kem-768-ciphertext-v1',
+        'sealed-lattice-private-vss-mailbox/ml-kem-768-ciphertext',
         kemCiphertextBytes,
     );
     if (
@@ -372,7 +370,7 @@ export const decryptPrivateVssMailboxEnvelope = async (
         );
     }
     const expectedCiphertextBytesHash = hashBytes(
-        'sealed-lattice-private-vss-mailbox/aes-256-gcm-ciphertext-v1',
+        'sealed-lattice-private-vss-mailbox/aes-256-gcm-ciphertext',
         ciphertextBytes,
     );
     if (

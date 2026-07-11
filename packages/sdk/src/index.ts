@@ -21,14 +21,13 @@ import {
 } from '@sealed-lattice/protocol';
 import type {
     SetupTransportedPublicKeyShareMaterial as ProtocolSetupTransportedPublicKeyShareMaterial,
-    SetupTransportedVssCoefficientCommitmentMaterialLike as ProtocolSetupTransportedVssCoefficientCommitmentMaterialLike,
-    VerifiedVssCoefficientCommitmentMaterial as ProtocolVerifiedVssCoefficientCommitmentMaterial,
+    EvaluationKeyShareComponentMaterialChunkStream as ProtocolEvaluationKeyShareComponentMaterialChunkStream,
     VerifiedSetupProofMaterial as ProtocolVerifiedSetupProofMaterial,
     VerifiedSetupProofMaterialSet as ProtocolVerifiedSetupProofMaterialSet,
-    TransportedSameSecretProofMaterialSet as ProtocolTransportedSameSecretProofMaterialSet,
     TransportedPublicKeyShareProofMaterialSet as ProtocolTransportedPublicKeyShareProofMaterialSet,
-    TransportedCompactVssShareLinkageProofMaterialSet as ProtocolTransportedCompactVssShareLinkageProofMaterialSet,
-    TransportedCompactSameSecretBridgeProofMaterialSet as ProtocolTransportedCompactSameSecretBridgeProofMaterialSet,
+    TransportedVssShareLinkageProofMaterialSet as ProtocolTransportedVssShareLinkageProofMaterialSet,
+    TransportedSameSecretBridgeProofMaterialSet as ProtocolTransportedSameSecretBridgeProofMaterialSet,
+    TransportedEvaluationKeyAggregateBindingOpeningSet as ProtocolTransportedEvaluationKeyAggregateBindingOpeningSet,
     TransportedEvaluationKeyShareComponentMaterialSet as ProtocolTransportedEvaluationKeyShareComponentMaterialSet,
     TransportedEvaluationKeyShareProofMaterialSet as ProtocolTransportedEvaluationKeyShareProofMaterialSet,
     TransportedPublicEvaluationKeyMaterialSet as ProtocolTransportedPublicEvaluationKeyMaterialSet,
@@ -69,9 +68,10 @@ import type {
     TargetFinalityVerification,
     TargetFinalityVerificationInput,
 } from '@sealed-lattice/types';
-import type { TranscriptCoreKernel } from '@sealed-lattice/wasm';
+import type { BgvTargetDecryptionResultReleaseCompletion } from '@sealed-lattice/wasm';
 
 import { loadTranscriptCoreKernel } from './kernel.js';
+import { prepareSetupPackageVerificationInputForKernel } from './setup-verification-input.js';
 
 const protocolHashPattern = /^[0-9a-f]{128}$/u;
 
@@ -185,8 +185,6 @@ export type {
     WitnessPolicy,
 } from '@sealed-lattice/types';
 
-type JsonRecord = Record<string, unknown>;
-
 export type CollectiveBgvSetupContext = Readonly<{
     readonly ceremonyId: string;
     readonly manifestHash: ProtocolHash;
@@ -212,10 +210,6 @@ export type PrivateVssShareVerification = Readonly<{
     readonly privateEnvelopeHash: ProtocolHash | null;
     readonly localVerificationRoot: ProtocolHash | null;
     readonly ringDegree?: number;
-    readonly ringDegreeStatus?: 'full-ring' | 'development-reduced-ring';
-    readonly verifiedRnsLimbCount?: number;
-    readonly verifiedShamirCoefficientCommitmentCount?: number;
-    readonly verifiedPrivateVssShareProofCount?: number;
     readonly limbVerifications: readonly Readonly<{
         readonly rnsLimbIndex: number;
         readonly rnsPrime: number;
@@ -237,27 +231,25 @@ export type SetupPackage = ProtocolSetupPackage;
 export type CollectiveBgvSetupRosterEntryInput =
     ProtocolCollectiveBgvSetupRosterEntryInput;
 
-export type SetupTransportedVssCoefficientCommitmentMaterialLike =
-    ProtocolSetupTransportedVssCoefficientCommitmentMaterialLike;
-export type VerifiedVssCoefficientCommitmentMaterial =
-    ProtocolVerifiedVssCoefficientCommitmentMaterial;
 export type VerifiedSetupProofMaterial = ProtocolVerifiedSetupProofMaterial;
 export type VerifiedSetupProofMaterialSet =
     ProtocolVerifiedSetupProofMaterialSet;
 export type SetupTransportedPublicKeyShareMaterial =
     ProtocolSetupTransportedPublicKeyShareMaterial;
-export type TransportedSameSecretProofMaterialSet =
-    ProtocolTransportedSameSecretProofMaterialSet;
 export type TransportedPublicKeyShareProofMaterialSet =
     ProtocolTransportedPublicKeyShareProofMaterialSet;
-export type TransportedCompactVssShareLinkageProofMaterialSet =
-    ProtocolTransportedCompactVssShareLinkageProofMaterialSet;
-export type TransportedCompactSameSecretBridgeProofMaterialSet =
-    ProtocolTransportedCompactSameSecretBridgeProofMaterialSet;
+export type TransportedVssShareLinkageProofMaterialSet =
+    ProtocolTransportedVssShareLinkageProofMaterialSet;
+export type TransportedSameSecretBridgeProofMaterialSet =
+    ProtocolTransportedSameSecretBridgeProofMaterialSet;
 export type TransportedEvaluationKeyShareProofMaterialSet =
     ProtocolTransportedEvaluationKeyShareProofMaterialSet;
 export type TransportedEvaluationKeyShareComponentMaterialSet =
     ProtocolTransportedEvaluationKeyShareComponentMaterialSet;
+export type TransportedEvaluationKeyAggregateBindingOpeningSet =
+    ProtocolTransportedEvaluationKeyAggregateBindingOpeningSet;
+export type EvaluationKeyShareComponentMaterialChunkStream =
+    ProtocolEvaluationKeyShareComponentMaterialChunkStream;
 export type TransportedPublicEvaluationKeyMaterialSet =
     ProtocolTransportedPublicEvaluationKeyMaterialSet;
 
@@ -266,15 +258,23 @@ export type VerifySetupPackageInput = Readonly<{
     readonly expectedSetupPackageHash?: ProtocolHash;
     readonly expectedManifestHash: ProtocolHash;
     readonly expectedRosterHash: ProtocolHash;
-    readonly transportedVssCoefficientCommitmentMaterial?: SetupTransportedVssCoefficientCommitmentMaterialLike;
-    readonly verifiedVssCoefficientCommitmentMaterial?: VerifiedVssCoefficientCommitmentMaterial;
-    readonly transportedSameSecretProofMaterial?: TransportedSameSecretProofMaterialSet;
     readonly transportedPublicKeyShareMaterial?: SetupTransportedPublicKeyShareMaterial;
     readonly transportedPublicKeyShareProofMaterial?: TransportedPublicKeyShareProofMaterialSet;
-    readonly transportedCompactVssShareLinkageProofMaterial?: TransportedCompactVssShareLinkageProofMaterialSet;
-    readonly transportedCompactSameSecretBridgeProofMaterial?: TransportedCompactSameSecretBridgeProofMaterialSet;
+    readonly transportedVssShareLinkageProofMaterial?: TransportedVssShareLinkageProofMaterialSet;
+    readonly transportedSameSecretBridgeProofMaterial?: TransportedSameSecretBridgeProofMaterialSet;
     readonly transportedEvaluationKeyShareProofMaterial?: TransportedEvaluationKeyShareProofMaterialSet;
     readonly transportedEvaluationKeyShareComponentMaterial?: TransportedEvaluationKeyShareComponentMaterialSet;
+    // Raw chunk bytes for the transported evaluation-key component material,
+    // supplied out of band so the verifier streams each component through the
+    // file-backed component material transport before the terminal setup package
+    // verification. The terminal accepted-setup verifier refuses inline chunks on
+    // the transported component material itself, so the bytes travel here.
+    readonly evaluationKeyShareComponentMaterialChunkStreams?: readonly EvaluationKeyShareComponentMaterialChunkStream[];
+    // Optional per-trustee batched linear-evaluation openings for the package
+    // aggregate binding, forwarded to the kernel verbatim. The kernel runs the
+    // committed-material aggregate binding only when the evaluation-key set
+    // publishes an aggregateBinding; otherwise the openings are unused.
+    readonly transportedEvaluationKeyAggregateBindingOpenings?: TransportedEvaluationKeyAggregateBindingOpeningSet;
     readonly transportedPublicEvaluationKeyMaterial?: TransportedPublicEvaluationKeyMaterialSet;
     readonly verifiedSetupProofMaterials?: VerifiedSetupProofMaterialSet;
 }>;
@@ -287,7 +287,6 @@ export type SetupPackageVerificationInputSource = Readonly<
 
 export type AcceptedSetupHandoff = Readonly<{
     readonly objectType: 'CollectiveBgvAcceptedSetupHandoff';
-    readonly objectVersion: 1;
     readonly ceremonyId: string;
     readonly manifestHash: ProtocolHash;
     readonly rosterHash: ProtocolHash;
@@ -320,7 +319,6 @@ export type SetupPackageVerification = Readonly<{
     readonly operation: 'verifyCollectiveBgvSetupPackage';
     readonly currentPhase: string | null;
     readonly phaseOrderHash: ProtocolHash;
-    readonly acceptedHashes: readonly ProtocolHash[];
     readonly acceptedSetupHandoff?: AcceptedSetupHandoff;
     readonly missingObjects: readonly string[];
     readonly refusedObjects: readonly Readonly<{
@@ -330,101 +328,99 @@ export type SetupPackageVerification = Readonly<{
     }>[];
 }>;
 
-/** Derives threshold, quorum, and warning parameters for a roster. */
+// The target-decryption share proofs, accepted record, ciphertexts, and share
+// profile are opaque protocol records that the kernel binds and recomputes; the
+// SDK forwards them without a precise protocol type, matching how the protocol
+// package itself types these target-decryption inputs.
+export type TargetDecryptionResultReleaseInput = Readonly<{
+    readonly setupPackage: unknown;
+    readonly targetAcceptedRecord: unknown;
+    readonly targetCiphertexts: unknown;
+    readonly targetCiphertextBinding: unknown;
+    readonly targetShareProfile: unknown;
+    readonly releaseVerificationId: string;
+    readonly shareProofs: readonly unknown[];
+}>;
+
+export type TargetDecryptionResultRelease =
+    BgvTargetDecryptionResultReleaseCompletion;
+
 export const deriveThresholdParameters = (
     input: ThresholdParametersInput,
 ): ThresholdParameters => deriveThresholdParametersInternal(input);
 
-/** Derives the concrete roster parameters after registration closes and the roster freezes. */
 export const deriveFrozenRosterParameters =
     deriveFrozenRosterParametersInternal;
 
-/** Derives the setup-roster hash consumed by collective BGV setup package verification. */
 export const deriveCollectiveBgvSetupRosterHash = (
     entries: readonly CollectiveBgvSetupRosterEntryInput[],
 ): ProtocolHash => deriveCollectiveBgvSetupRosterHashInternal(entries);
 
-/** Derives the canonical poll-spec hash including roster policy fields. */
 export const derivePollSpecHash = derivePollSpecHashInternal;
 
-/** Derives the canonical threshold parameters hash for frozen roster parameters. */
 export const deriveThresholdParametersHash =
     deriveThresholdParametersHashInternal;
 
-/** Validates and normalizes a poll specification from trusted or untrusted input. */
 export function validatePollSpec(input: PollSpecInput): PollSpecValidation;
 export function validatePollSpec(input: unknown): PollSpecValidation;
 export function validatePollSpec(input: unknown): PollSpecValidation {
     return validatePollSpecInternal(input);
 }
 
-/** Returns whether a lifecycle transition is part of the supported state graph. */
 export const isValidLifecycleTransition = (
     transition: LifecycleTransition,
 ): boolean => isValidLifecycleTransitionInternal(transition);
 
-/** Evaluates whether a protocol action is allowed in the current context. */
 export const evaluateActionCapability = (
     action: ProtocolAction,
     context: CapabilityContext,
 ): CapabilityDecision => evaluateActionCapabilityInternal(action, context);
 
-/** Verifies the integrated foundation transcript without claiming full election verification. */
 export const verifyFoundationTranscript = (
     input: FoundationTranscriptInput,
 ): FoundationTranscriptVerification =>
     verifyFoundationTranscriptInternal(input);
 
-/** Verifies signed board heads, inclusion proofs, and append-only evidence. */
 export const verifyBoardConsistency = (
     input: BoardConsistencyInput,
 ): BoardConsistencyVerification => verifyBoardConsistencyInternal(input);
 
-/** Verifies the signed shell and inclusion evidence for a cast receipt. */
 export const verifyCastReceiptShell = (
     input: CastReceiptVerificationInput,
 ): CastReceiptVerification => verifyCastReceiptShellInternal(input);
 
-/** Verifies the signed shell and inclusion evidence for a close record. */
 export const verifyCloseRecordShell = (
     input: CloseRecordVerificationInput,
 ): CloseRecordVerification => verifyCloseRecordShellInternal(input);
 
-/** Verifies witness checkpoints and board evidence for a target finality record. */
 export const verifyTargetFinality = (
     input: TargetFinalityVerificationInput,
 ): TargetFinalityVerification => verifyTargetFinalityInternal(input);
 
-/** Derives the deterministic first-valid order for validated objects. */
 export const deriveValidatedFirstValidOrder = (
     input: FirstValidOrderingInput,
 ): FirstValidOrderingVerification =>
     deriveValidatedFirstValidOrderInternal(input);
 
-/** Verifies one participant's local acceptance of the frozen public roster. */
 export const verifyRosterExternalAcceptance = (
     input: RosterExternalAcceptanceVerificationInput,
 ): RosterExternalAcceptanceVerification =>
     verifyRosterExternalAcceptanceInternal(input);
 
-/** Verifies roster freeze inputs, manifest evidence, and setup uniqueness. */
 export const verifyRosterManifestTranscript = (
     input: RosterManifestTranscriptInput,
 ): RosterManifestTranscriptVerification =>
     verifyRosterManifestTranscriptInternal(input);
 
-/** Checks whether an action context is current for a signer recovery epoch. */
 export const isActionCurrentForRecoveryEpoch = (
     input: ActionCurrentForRecoveryEpochInput,
 ): ActionCurrentForRecoveryEpochResult =>
     isActionCurrentForRecoveryEpochInternal(input);
 
-/** Verifies a recovery epoch update and returns the accepted epoch entry. */
 export const verifyRecoveryEpochUpdate = (
     input: RecoveryEpochVerificationInput,
 ): RecoveryEpochVerification => verifyRecoveryEpochUpdateInternal(input);
 
-/** Verifies one private VSS share envelope locally without returning raw shares. */
 export const verifyPrivateVssShare = async (
     input: VerifyPrivateVssShareInput,
 ): Promise<PrivateVssShareVerification> => {
@@ -433,179 +429,11 @@ export const verifyPrivateVssShare = async (
     return kernel.verifyPrivateVssShareEnvelope(input);
 };
 
-/** Builds the public-only setup package verification input from package and transported setup material. */
 export const createSetupPackageVerificationInput = (
     input: SetupPackageVerificationInputSource,
 ): VerifySetupPackageInput =>
     createSetupPackageVerificationInputInternal(input);
 
-type SetupProofMaterialTransportFieldName =
-    | 'transportedSameSecretProofMaterial'
-    | 'transportedPublicKeyShareProofMaterial'
-    | 'transportedCompactVssShareLinkageProofMaterial'
-    | 'transportedCompactSameSecretBridgeProofMaterial'
-    | 'transportedEvaluationKeyShareProofMaterial';
-
-type SetupProofMaterialTransportSet =
-    | TransportedSameSecretProofMaterialSet
-    | TransportedPublicKeyShareProofMaterialSet
-    | TransportedCompactVssShareLinkageProofMaterialSet
-    | TransportedCompactSameSecretBridgeProofMaterialSet
-    | TransportedEvaluationKeyShareProofMaterialSet;
-
-type SetupProofMaterialChunk = Readonly<{
-    readonly chunkIndex: number;
-    readonly bytesHex: string;
-}>;
-
-const setupProofMaterialTransportFieldNames = [
-    'transportedSameSecretProofMaterial',
-    'transportedPublicKeyShareProofMaterial',
-    'transportedCompactVssShareLinkageProofMaterial',
-    'transportedCompactSameSecretBridgeProofMaterial',
-    'transportedEvaluationKeyShareProofMaterial',
-] as const satisfies readonly SetupProofMaterialTransportFieldName[];
-
-let setupProofMaterialVerificationSequence = 0;
-
-// Verification ids are process-local kernel stream handles, not security bindings; the cryptographic binding is the full proof material root.
-const setupProofMaterialVerificationId = (
-    fieldName: SetupProofMaterialTransportFieldName,
-    materialIndex: number,
-    proofMaterial: JsonRecord,
-): string => {
-    setupProofMaterialVerificationSequence += 1;
-    const proofMaterialRoot =
-        typeof proofMaterial.proofMaterialRoot === 'string'
-            ? proofMaterial.proofMaterialRoot.slice(0, 24)
-            : 'unbound';
-
-    return [
-        'sdk-proof-material',
-        String(setupProofMaterialVerificationSequence),
-        fieldName,
-        String(materialIndex),
-        proofMaterialRoot,
-    ].join('-');
-};
-
-const setupProofMaterialReference = (proofMaterial: JsonRecord): JsonRecord => {
-    const { chunks: omittedChunks, ...reference } = proofMaterial;
-    void omittedChunks;
-
-    return reference;
-};
-
-const setupProofMaterialChunks = (
-    proofMaterial: unknown,
-): readonly SetupProofMaterialChunk[] | undefined => {
-    if (
-        proofMaterial === null ||
-        typeof proofMaterial !== 'object' ||
-        !Object.prototype.hasOwnProperty.call(proofMaterial, 'chunks')
-    ) {
-        return undefined;
-    }
-
-    const chunks = (proofMaterial as JsonRecord).chunks;
-
-    return Array.isArray(chunks)
-        ? (chunks as readonly SetupProofMaterialChunk[])
-        : undefined;
-};
-
-const streamSetupProofMaterialSet = (
-    kernel: TranscriptCoreKernel,
-    fieldName: SetupProofMaterialTransportFieldName,
-    materialSet: SetupProofMaterialTransportSet | undefined,
-): readonly VerifiedSetupProofMaterial[] => {
-    if (
-        materialSet === undefined ||
-        !Array.isArray(materialSet.proofMaterials)
-    ) {
-        return [];
-    }
-
-    const verifiedMaterials: VerifiedSetupProofMaterial[] = [];
-    materialSet.proofMaterials.forEach((proofMaterialValue, materialIndex) => {
-        const chunks = setupProofMaterialChunks(proofMaterialValue);
-        if (chunks === undefined) {
-            return;
-        }
-        const proofMaterial = proofMaterialValue as JsonRecord;
-        const proofMaterialReference =
-            setupProofMaterialReference(proofMaterial);
-        const verificationId = setupProofMaterialVerificationId(
-            fieldName,
-            materialIndex,
-            proofMaterial,
-        );
-        kernel.beginSetupProofMaterialTransportStream({
-            verificationId,
-            transportedSetupProofMaterial: proofMaterialReference,
-        });
-        chunks.forEach((chunk) => {
-            kernel.absorbSetupProofMaterialTransportStreamChunk({
-                verificationId,
-                chunkIndex: chunk.chunkIndex,
-                bytesHex: chunk.bytesHex,
-            });
-        });
-        const verification = kernel.finishSetupProofMaterialTransportStream({
-            verificationId,
-        });
-        verifiedMaterials.push(
-            verification.verifiedSetupProofMaterial as VerifiedSetupProofMaterial,
-        );
-    });
-
-    return verifiedMaterials;
-};
-
-const compactSetupPackageVerificationInput = (
-    input: VerifySetupPackageInput,
-): VerifySetupPackageInput => {
-    const verificationInput = createSetupPackageVerificationInputInternal(
-        input as unknown as SetupPackageVerificationInputSource,
-    ) as VerifySetupPackageInput;
-
-    return input.expectedSetupPackageHash === undefined
-        ? verificationInput
-        : {
-              ...verificationInput,
-              expectedSetupPackageHash: input.expectedSetupPackageHash,
-          };
-};
-
-const prepareSetupPackageVerificationInputForKernel = (
-    kernel: TranscriptCoreKernel,
-    input: VerifySetupPackageInput,
-): VerifySetupPackageInput => {
-    if (input.verifiedSetupProofMaterials !== undefined) {
-        return compactSetupPackageVerificationInput(input);
-    }
-
-    const verifiedMaterials = setupProofMaterialTransportFieldNames.flatMap(
-        (fieldName) =>
-            streamSetupProofMaterialSet(kernel, fieldName, input[fieldName]),
-    );
-    if (verifiedMaterials.length === 0) {
-        return input;
-    }
-
-    const verifiedSetupProofMaterials = {
-        objectType: 'VerifiedSetupProofMaterialSet',
-        objectVersion: 1,
-        proofMaterials: verifiedMaterials,
-    } as const satisfies VerifiedSetupProofMaterialSet;
-
-    return compactSetupPackageVerificationInput({
-        ...input,
-        verifiedSetupProofMaterials,
-    });
-};
-
-/** Verifies an accepted setup package with the packaged Rust/WASM kernel. */
 export const verifySetupPackage = async (
     input: VerifySetupPackageInput,
 ): Promise<SetupPackageVerification> => {
@@ -620,7 +448,42 @@ export const verifySetupPackage = async (
     return kernel.verifyCollectiveBgvSetup(verificationInput);
 };
 
-/** Verifies a transcript-core fixture with the packaged WASM kernel. */
+/**
+ * Drives the development-evidence staged target-decryption result release with
+ * the packaged Rust/WASM kernel: derive the release setup context from the
+ * accepted setup package, begin the staged session, absorb each trustee share
+ * proof, then finish and return the released target result. Each stage is bound
+ * and recomputed by the kernel; this path is development evidence, not certified
+ * decryption.
+ */
+export const verifyTargetDecryptionResult = async (
+    input: TargetDecryptionResultReleaseInput,
+): Promise<TargetDecryptionResultRelease> => {
+    const kernel = await loadTranscriptCoreKernel();
+    const releaseSetupContext =
+        kernel.deriveBgvTargetDecryptionResultReleaseSetupContext({
+            setupPackage: input.setupPackage,
+        });
+    kernel.beginBgvTargetDecryptionResultRelease({
+        releaseVerificationId: input.releaseVerificationId,
+        releaseSetupContext,
+        targetAcceptedRecord: input.targetAcceptedRecord,
+        targetCiphertexts: input.targetCiphertexts,
+        targetCiphertextBinding: input.targetCiphertextBinding,
+        targetShareProfile: input.targetShareProfile,
+    });
+    for (const targetShareProof of input.shareProofs) {
+        kernel.absorbBgvTargetDecryptionResultReleaseShare({
+            releaseVerificationId: input.releaseVerificationId,
+            targetShareProof,
+        });
+    }
+
+    return kernel.finishBgvTargetDecryptionResultRelease({
+        releaseVerificationId: input.releaseVerificationId,
+    });
+};
+
 export const verifyTranscriptCoreFixture = async (
     fixture: TranscriptCoreFixture,
 ): Promise<TranscriptCoreVerificationResult> => {

@@ -57,13 +57,6 @@ pub(in super::super) fn verify_public_evaluation_key_set(
             "setupPackage.evaluationKeys.objectType",
         )?));
     }
-    if evaluation_keys.get("objectVersion").and_then(Value::as_u64) != Some(1) {
-        return Ok(Some(evaluation_key_material_refusal(
-            "evaluationKeysVersionMismatch",
-            "evaluationKeys.objectVersion must be 1",
-            "setupPackage.evaluationKeys.objectVersion",
-        )?));
-    }
     let setup_context = setup_package.get("setupContext").ok_or_else(|| {
         CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -79,17 +72,6 @@ pub(in super::super) fn verify_public_evaluation_key_set(
             error.message,
             "setupPackage.evaluationKeys",
         )?));
-    }
-    for (field_name, expected_value) in
-        [("materialEncoding", PUBLIC_EVALUATION_KEY_MATERIAL_ENCODING)]
-    {
-        if evaluation_keys.get(field_name).and_then(Value::as_str) != Some(expected_value) {
-            return Ok(Some(evaluation_key_material_refusal(
-                "evaluationKeysParametersMismatch",
-                format!("evaluationKeys.{field_name} must be {expected_value}"),
-                format!("setupPackage.evaluationKeys.{field_name}"),
-            )?));
-        }
     }
     for (field_name, expected_value) in [
         ("participantCount", roster.participant_count),
@@ -118,10 +100,6 @@ pub(in super::super) fn verify_public_evaluation_key_set(
         (
             "evaluatorKeyScheduleRoot",
             binding.evaluator_key_schedule_root.as_str(),
-        ),
-        (
-            "sameSecretProofFamilyBindingRoot",
-            binding.same_secret_proof_family_binding_root.as_str(),
         ),
         (
             "publicKeyShareSuccinctProofSetRoot",
@@ -257,7 +235,6 @@ fn public_evaluation_key_set_has_material_reference(evaluation_keys: &Value) -> 
     [
         "publicEvaluationKeyMaterialEncoding",
         "publicEvaluationKeyMaterialRoot",
-        "publicEvaluationKeyMaterialChunkSizeBytes",
         "publicEvaluationKeyMaterialChunkCount",
         "publicEvaluationKeyMaterialTotalByteLength",
         "publicEvaluationKeyMaterialFullObjectHash",

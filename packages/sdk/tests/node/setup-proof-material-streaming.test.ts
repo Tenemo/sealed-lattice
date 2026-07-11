@@ -10,41 +10,31 @@ const alternateProofHash =
     'fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210';
 const expectedManifestHash = '1'.repeat(128);
 type SetupProofMaterialTransportFieldName =
-    | 'transportedSameSecretProofMaterial'
     | 'transportedPublicKeyShareProofMaterial'
-    | 'transportedCompactVssShareLinkageProofMaterial'
-    | 'transportedCompactSameSecretBridgeProofMaterial'
+    | 'transportedVssShareLinkageProofMaterial'
+    | 'transportedSameSecretBridgeProofMaterial'
     | 'transportedEvaluationKeyShareProofMaterial';
 
 type SetupProofMaterialTransportCase = Readonly<{
     readonly fieldName: SetupProofMaterialTransportFieldName;
     readonly materialSetObjectType:
-        | 'SetupTransportedSameSecretProofMaterialSet'
         | 'SetupTransportedPublicKeyShareProofMaterialSet'
-        | 'SetupTransportedCompactVssShareLinkageProofMaterialSet'
-        | 'SetupTransportedCompactSameSecretBridgeProofMaterialSet'
+        | 'SetupTransportedVssShareLinkageProofMaterialSet'
+        | 'SetupTransportedSameSecretBridgeProofMaterialSet'
         | 'SetupTransportedEvaluationKeyShareProofMaterialSet';
     readonly materialObjectType:
-        | 'SetupTransportedSameSecretProofMaterial'
         | 'SetupTransportedPublicKeyShareProofMaterial'
-        | 'SetupTransportedCompactVssShareLinkageProofMaterial'
-        | 'SetupTransportedCompactSameSecretBridgeProofMaterial'
+        | 'SetupTransportedVssShareLinkageProofMaterial'
+        | 'SetupTransportedSameSecretBridgeProofMaterial'
         | 'SetupTransportedEvaluationKeyShareProofMaterial';
     readonly proofFamily:
-        | 'same-secret-linkage-anchor'
         | 'public-key-share'
-        | 'compact-vss-share-linkage'
-        | 'compact-same-secret-bridge'
+        | 'vss-share-linkage'
+        | 'same-secret-bridge'
         | 'trustee-evaluation-key';
 }>;
 
 const setupProofMaterialTransportCases = [
-    {
-        fieldName: 'transportedSameSecretProofMaterial',
-        materialSetObjectType: 'SetupTransportedSameSecretProofMaterialSet',
-        materialObjectType: 'SetupTransportedSameSecretProofMaterial',
-        proofFamily: 'same-secret-linkage-anchor',
-    },
     {
         fieldName: 'transportedPublicKeyShareProofMaterial',
         materialSetObjectType: 'SetupTransportedPublicKeyShareProofMaterialSet',
@@ -52,20 +42,18 @@ const setupProofMaterialTransportCases = [
         proofFamily: 'public-key-share',
     },
     {
-        fieldName: 'transportedCompactVssShareLinkageProofMaterial',
+        fieldName: 'transportedVssShareLinkageProofMaterial',
         materialSetObjectType:
-            'SetupTransportedCompactVssShareLinkageProofMaterialSet',
-        materialObjectType:
-            'SetupTransportedCompactVssShareLinkageProofMaterial',
-        proofFamily: 'compact-vss-share-linkage',
+            'SetupTransportedVssShareLinkageProofMaterialSet',
+        materialObjectType: 'SetupTransportedVssShareLinkageProofMaterial',
+        proofFamily: 'vss-share-linkage',
     },
     {
-        fieldName: 'transportedCompactSameSecretBridgeProofMaterial',
+        fieldName: 'transportedSameSecretBridgeProofMaterial',
         materialSetObjectType:
-            'SetupTransportedCompactSameSecretBridgeProofMaterialSet',
-        materialObjectType:
-            'SetupTransportedCompactSameSecretBridgeProofMaterial',
-        proofFamily: 'compact-same-secret-bridge',
+            'SetupTransportedSameSecretBridgeProofMaterialSet',
+        materialObjectType: 'SetupTransportedSameSecretBridgeProofMaterial',
+        proofFamily: 'same-secret-bridge',
     },
     {
         fieldName: 'transportedEvaluationKeyShareProofMaterial',
@@ -109,12 +97,10 @@ const transportedSetupProofMaterialSet = (
 ) =>
     ({
         objectType: transportCase.materialSetObjectType,
-        objectVersion: 1,
         proofFamily: transportCase.proofFamily,
         proofMaterials: [
             {
                 objectType: transportCase.materialObjectType,
-                objectVersion: 1,
                 proofFamily: transportCase.proofFamily,
                 proofMaterialRoot: proofHash,
                 chunkSizeBytes: 1_048_576,
@@ -139,11 +125,9 @@ const verifiedSetupProofMaterials = (
 ) =>
     ({
         objectType: 'VerifiedSetupProofMaterialSet',
-        objectVersion: 1,
         proofMaterials: [
             {
                 objectType: 'VerifiedSetupProofMaterial',
-                objectVersion: 1,
                 verificationId: 'caller-supplied-handle',
                 proofFamily: transportCase.proofFamily,
                 proofMaterialRoot: proofHash,
@@ -193,7 +177,6 @@ describe('setup proof material streaming in the public package', () => {
                                 'finishSetupProofMaterialTransportStream',
                             verifiedSetupProofMaterial: {
                                 objectType: 'VerifiedSetupProofMaterial',
-                                objectVersion: 1,
                                 verificationId: input.verificationId,
                                 proofFamily: proofMaterial?.proofFamily,
                                 proofMaterialRoot:
@@ -226,7 +209,6 @@ describe('setup proof material streaming in the public package', () => {
         const acceptedSetupHandoffRoot = 'a'.repeat(128);
         const acceptedSetupHandoff = {
             objectType: 'CollectiveBgvAcceptedSetupHandoff',
-            objectVersion: 1,
             acceptedSetupHandoffRoot,
             directBallotEncryption: {
                 collectivePublicKeyRoot: proofHash,
@@ -250,7 +232,6 @@ describe('setup proof material streaming in the public package', () => {
                 isValid: true,
                 operation: 'verifyCollectiveBgvSetupPackage',
                 currentPhase: 'setupPackageVerification',
-                acceptedHashes: [acceptedSetupHandoffRoot],
                 missingObjects: [],
                 refusedObjects: [],
                 acceptedSetupHandoff,
@@ -261,7 +242,6 @@ describe('setup proof material streaming in the public package', () => {
         const result = await publicPackage.verifySetupPackage({
             setupPackage: {
                 objectType: 'SetupPackage',
-                objectVersion: 1,
             },
             ...setupVerificationBindings,
         });
@@ -277,7 +257,6 @@ describe('setup proof material streaming in the public package', () => {
         expect(mockKernel.verifyCollectiveBgvSetup).toHaveBeenCalledWith({
             setupPackage: {
                 objectType: 'SetupPackage',
-                objectVersion: 1,
             },
             ...setupVerificationBindings,
         });
@@ -287,7 +266,6 @@ describe('setup proof material streaming in the public package', () => {
         const inputWithoutExternalBindings = {
             setupPackage: {
                 objectType: 'SetupPackage',
-                objectVersion: 1,
             },
         } as unknown as VerifySetupPackageInput;
 
@@ -298,12 +276,11 @@ describe('setup proof material streaming in the public package', () => {
     });
 
     it.each(setupProofMaterialTransportCases)(
-        'streams $proofFamily proof chunks and verifies with compact handles',
+        'streams $proofFamily proof chunks and verifies with streamed handles',
         async (transportCase) => {
             await publicPackage.verifySetupPackage({
                 setupPackage: {
                     objectType: 'SetupPackage',
-                    objectVersion: 1,
                 },
                 ...setupVerificationBindings,
                 [transportCase.fieldName]:
@@ -344,7 +321,6 @@ describe('setup proof material streaming in the public package', () => {
             expect(finalVerifyInput?.verifiedSetupProofMaterials).toMatchObject(
                 {
                     objectType: 'VerifiedSetupProofMaterialSet',
-                    objectVersion: 1,
                     proofMaterials: [
                         expect.objectContaining({
                             objectType: 'VerifiedSetupProofMaterial',
@@ -361,7 +337,6 @@ describe('setup proof material streaming in the public package', () => {
         await publicPackage.verifySetupPackage({
             setupPackage: {
                 objectType: 'SetupPackage',
-                objectVersion: 1,
             },
             ...setupVerificationBindings,
             ...Object.fromEntries(
@@ -408,7 +383,6 @@ describe('setup proof material streaming in the public package', () => {
             });
         expect(finalVerifyInput?.verifiedSetupProofMaterials).toMatchObject({
             objectType: 'VerifiedSetupProofMaterialSet',
-            objectVersion: 1,
             proofMaterials: expectedVerifiedProofMaterials,
         });
     });
@@ -424,7 +398,6 @@ describe('setup proof material streaming in the public package', () => {
             await publicPackage.verifySetupPackage({
                 setupPackage: {
                     objectType: 'SetupPackage',
-                    objectVersion: 1,
                 },
                 ...setupVerificationBindings,
                 [transportCase.fieldName]:
