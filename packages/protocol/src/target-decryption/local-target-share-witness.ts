@@ -1,10 +1,18 @@
-import { hash512Hex } from '@sealed-lattice/crypto';
+import {
+    decryptLocalTrusteeSetupSealedMaterial,
+    decryptLocalTrusteeState,
+    deriveCanonicalObjectHash,
+    hash512Hex,
+    type EncryptedLocalTrusteeSetupState,
+    type LocalTrusteeSetupSealedMaterialDecryptionInput,
+} from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
 import {
     isProtocolHashString,
     isRecord,
 } from '../common/verification-helpers.js';
+import type { CollectiveBgvSetupContext } from '../setup/vss-share-verification-records.js';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -55,6 +63,17 @@ type PreparedLocalTargetDecryptionShareWitness = Readonly<
         readonly targetDecryptionSmudging: LocalTrusteeTargetDecryptionSmudgingWitness;
     }
 >;
+
+export type RestoredLocalTargetDecryptionShareWitnessInput = Readonly<{
+    readonly encryptedLocalState: EncryptedLocalTrusteeSetupState;
+    readonly expectedLocalStateRoot: ProtocolHash;
+    readonly setupContext: CollectiveBgvSetupContext;
+    readonly storageKeyBytesHex: string;
+    readonly setupPackage: unknown;
+    readonly targetAcceptedRecord: unknown;
+    readonly targetDecryptionCiphertextHash: ProtocolHash;
+    readonly targetShareProfile: unknown;
+}>;
 
 const jsonRecord = (value: unknown, objectPath: string): JsonRecord => {
     if (!isRecord(value) || Array.isArray(value)) {
@@ -173,11 +192,7 @@ const targetBindingHashes = (
     }
 
     return {
-        setupPackageHash: protocolHashField(
-            setupPackage,
-            'setupPackageHash',
-            'setupPackage',
-        ),
+        setupPackageHash: deriveCanonicalObjectHash(setupPackage),
         targetAcceptedRecordHash: protocolHashField(
             targetAcceptedRecord,
             'targetAcceptedRecordHash',
@@ -216,35 +231,58 @@ const setupParticipant = (
     readonly interpolationPoint: number;
 }> => {
     const setupPackage = jsonRecord(setupPackageValue, 'setupPackage');
-    const participants = setupPackage.participants;
-    if (!Array.isArray(participants)) {
-        throw new Error('setupPackage.participants must be an array.');
+    const aggregateThresholdCommitmentSet = jsonRecord(
+        setupPackage.vssPublicAggregateThresholdCommitmentSet,
+        'setupPackage.vssPublicAggregateThresholdCommitmentSet',
+    );
+    const recipientRecords = aggregateThresholdCommitmentSet.recipientRecords;
+    if (!Array.isArray(recipientRecords)) {
+        throw new Error(
+            'setupPackage.vssPublicAggregateThresholdCommitmentSet.recipientRecords must be an array.',
+        );
     }
-    const participant = participants
-        .map((participantValue, participantIndex) =>
+    const matchingRecipientRecords = recipientRecords
+        .map((recipientRecord, recipientRecordIndex) =>
             jsonRecord(
-                participantValue,
-                `setupPackage.participants.${String(participantIndex)}`,
+                recipientRecord,
+                `setupPackage.vssPublicAggregateThresholdCommitmentSet.recipientRecords.${String(recipientRecordIndex)}`,
             ),
         )
-        .find(
-            (participantValue) =>
-                participantValue.trusteeIdentity === trusteeIdentity,
+        .filter(
+            (recipientRecord) =>
+                recipientRecord.recipientIdentity === trusteeIdentity,
         );
+    const participant = matchingRecipientRecords[0];
     if (participant === undefined) {
-        throw new Error('setupPackage.participants must contain the trustee.');
+        throw new Error(
+            'setupPackage.vssPublicAggregateThresholdCommitmentSet must contain the trustee.',
+        );
     }
-    const participantObjectPath = 'setupPackage.participants.trustee';
+    const participantObjectPath =
+        'setupPackage.vssPublicAggregateThresholdCommitmentSet.recipientRecords.trustee';
     const rosterPosition = nonNegativeIntegerField(
         participant,
-        'rosterPosition',
+        'recipientRosterPosition',
         participantObjectPath,
     );
+    matchingRecipientRecords.forEach((recipientRecord) => {
+        if (
+            nonNegativeIntegerField(
+                recipientRecord,
+                'recipientRosterPosition',
+                participantObjectPath,
+            ) !== rosterPosition
+        ) {
+            throw new Error(
+                'setup package aggregate records must use one roster position per trustee identity.',
+            );
+        }
+    });
 
     return {
         trusteeIdentity: nonEmptyStringField(
             participant,
-            'trusteeIdentity',
+            'recipientIdentity',
             participantObjectPath,
         ),
         rosterPosition,
@@ -421,6 +459,18 @@ const assertRestoredAggregateOpeningBinding = (input: {
         ) {
             throw new Error(
                 `${objectPath} must belong to the target-decryption trustee.`,
+            );
+        }
+        if (
+            nonNegativeIntegerField(
+                credential,
+                'recipientTrusteePoint',
+                objectPath,
+            ) !==
+            input.rosterPosition + 1
+        ) {
+            throw new Error(
+                `${objectPath}.recipientTrusteePoint must match the target-decryption trustee interpolation point.`,
             );
         }
         const rnsLimbIndex = nonNegativeIntegerField(
@@ -600,4 +650,221 @@ export const prepareLocalTargetDecryptionShareWitness = (
         targetDecryptionSmudging:
             createLocalTrusteeTargetDecryptionSmudgingWitness(input),
     };
+};
+
+const assertRestoredSetupContext = (
+    expectedContext: CollectiveBgvSetupContext,
+    setupPackage: JsonRecord,
+    aggregateThresholdShareMaterial: JsonRecord,
+): void => {
+    const setupPackageContext = jsonRecord(
+        setupPackage.setupContext,
+        'setupPackage.setupContext',
+    );
+    for (const fieldName of ['ceremonyId', 'setupEpoch'] as const) {
+        const expectedValue = expectedContext[fieldName];
+        if (
+            nonEmptyStringField(
+                setupPackageContext,
+                fieldName,
+                'setupPackage.setupContext',
+            ) !== expectedValue ||
+            nonEmptyStringField(
+                aggregateThresholdShareMaterial,
+                fieldName,
+                'aggregateThresholdShareMaterial',
+            ) !== expectedValue
+        ) {
+            throw new Error(
+                `${fieldName} must match across the restored local state and setup package.`,
+            );
+        }
+    }
+    for (const fieldName of [
+        'manifestHash',
+        'rosterHash',
+        'setupParametersHash',
+    ] as const) {
+        const expectedValue = expectedContext[fieldName];
+        if (
+            protocolHashField(
+                setupPackageContext,
+                fieldName,
+                'setupPackage.setupContext',
+            ) !== expectedValue ||
+            protocolHashField(
+                aggregateThresholdShareMaterial,
+                fieldName,
+                'aggregateThresholdShareMaterial',
+            ) !== expectedValue
+        ) {
+            throw new Error(
+                `${fieldName} must match across the restored local state and setup package.`,
+            );
+        }
+    }
+};
+
+export const restoreAndPrepareLocalTargetDecryptionShareWitness = async (
+    input: RestoredLocalTargetDecryptionShareWitnessInput,
+): Promise<PreparedLocalTargetDecryptionShareWitness> => {
+    const restoredLocalState = await decryptLocalTrusteeState({
+        encryptedLocalState: input.encryptedLocalState,
+        expectedLocalStateRoot: input.expectedLocalStateRoot,
+        setupContext: input.setupContext,
+        storageKeyBytesHex: input.storageKeyBytesHex,
+    });
+    const storageAad = jsonRecord(
+        input.encryptedLocalState.storageAad,
+        'encryptedLocalState.storageAad',
+    );
+    const localStateCommitment = jsonRecord(
+        storageAad.localStateCommitment,
+        'encryptedLocalState.storageAad.localStateCommitment',
+    ) as LocalTrusteeSetupSealedMaterialDecryptionInput['localStateCommitment'];
+    const aggregateThresholdShareRoot = protocolHashField(
+        localStateCommitment,
+        'aggregateThresholdShareRoot',
+        'encryptedLocalState.storageAad.localStateCommitment',
+    );
+    const restoredAggregateThresholdShare =
+        await decryptLocalTrusteeSetupSealedMaterial({
+            sealedMaterial:
+                restoredLocalState.localStatePlaintext
+                    .sealedAggregateThresholdShare,
+            expectedMaterialRoot: aggregateThresholdShareRoot,
+            localStateCommitment,
+            setupContext: input.setupContext,
+            storageKeyBytesHex: input.storageKeyBytesHex,
+        });
+    const aggregateThresholdShareMaterial = jsonRecord(
+        restoredAggregateThresholdShare.materialPlaintext,
+        'aggregateThresholdShareMaterial',
+    );
+    exactStringField(
+        aggregateThresholdShareMaterial,
+        'objectType',
+        'LocalTrusteeAggregateThresholdShareMaterial',
+        'aggregateThresholdShareMaterial',
+    );
+    const setupPackage = jsonRecord(input.setupPackage, 'setupPackage');
+    assertRestoredSetupContext(
+        input.setupContext,
+        setupPackage,
+        aggregateThresholdShareMaterial,
+    );
+    const trusteeIdentity = nonEmptyStringField(
+        aggregateThresholdShareMaterial,
+        'trusteeIdentity',
+        'aggregateThresholdShareMaterial',
+    );
+    const trusteeRosterPosition = nonNegativeIntegerField(
+        aggregateThresholdShareMaterial,
+        'trusteeRosterPosition',
+        'aggregateThresholdShareMaterial',
+    );
+    const participant = setupParticipant(setupPackage, trusteeIdentity);
+    if (participant.rosterPosition !== trusteeRosterPosition) {
+        throw new Error(
+            'restored aggregate threshold share roster position must match the accepted setup package.',
+        );
+    }
+    compareProtocolHashField(
+        aggregateThresholdShareMaterial,
+        'thresholdShareCommitmentRecipientRoot',
+        protocolHashField(
+            restoredLocalState.localStatePlaintext,
+            'thresholdShareCommitmentRecipientRoot',
+            'localStatePlaintext',
+        ),
+        'aggregateThresholdShareMaterial',
+        'the restored local state threshold-share commitment root',
+    );
+    const aggregateOpeningCredentialHandoff = jsonRecord(
+        aggregateThresholdShareMaterial.aggregateOpeningCredentialHandoff,
+        'aggregateThresholdShareMaterial.aggregateOpeningCredentialHandoff',
+    );
+    exactStringField(
+        aggregateOpeningCredentialHandoff,
+        'objectType',
+        'LocalTrusteeVssPublicAggregateOpeningCredentialHandoff',
+        'aggregateThresholdShareMaterial.aggregateOpeningCredentialHandoff',
+    );
+    if (
+        nonEmptyStringField(
+            aggregateOpeningCredentialHandoff,
+            'trusteeIdentity',
+            'aggregateThresholdShareMaterial.aggregateOpeningCredentialHandoff',
+        ) !== trusteeIdentity ||
+        nonNegativeIntegerField(
+            aggregateOpeningCredentialHandoff,
+            'trusteeRosterPosition',
+            'aggregateThresholdShareMaterial.aggregateOpeningCredentialHandoff',
+        ) !== trusteeRosterPosition
+    ) {
+        throw new Error(
+            'restored aggregate opening credential handoff must belong to the local trustee.',
+        );
+    }
+
+    const commonRandomness = jsonRecord(
+        setupPackage.commonRandomness,
+        'setupPackage.commonRandomness',
+    );
+    const shareLinkageStatement = jsonRecord(
+        setupPackage.vssShareLinkageStatement,
+        'setupPackage.vssShareLinkageStatement',
+    );
+    const aggregateThresholdCommitmentSet = jsonRecord(
+        setupPackage.vssPublicAggregateThresholdCommitmentSet,
+        'setupPackage.vssPublicAggregateThresholdCommitmentSet',
+    );
+    const targetAcceptedRecord = jsonRecord(
+        input.targetAcceptedRecord,
+        'targetAcceptedRecord',
+    );
+    const restoredLocalTargetShareWitness = {
+        objectType: 'LocalTrusteeTargetDecryptionProofWitnessMaterial',
+        ceremonyId: input.setupContext.ceremonyId,
+        manifestHash: input.setupContext.manifestHash,
+        rosterHash: input.setupContext.rosterHash,
+        setupParametersHash: input.setupContext.setupParametersHash,
+        setupEpoch: input.setupContext.setupEpoch,
+        trusteeIdentity,
+        trusteeRosterPosition,
+        aggregateOpening: {
+            objectType: 'LocalTrusteeVssPublicAggregateOpeningWitness',
+            publicMatrixSeedHash: protocolHashField(
+                commonRandomness,
+                'publicMatrixSeedHash',
+                'setupPackage.commonRandomness',
+            ),
+            targetBasisHash: protocolHashField(
+                targetAcceptedRecord,
+                'targetBasisHash',
+                'targetAcceptedRecord',
+            ),
+            shareLinkageStatementRoot: protocolHashField(
+                shareLinkageStatement,
+                'statementRoot',
+                'setupPackage.vssShareLinkageStatement',
+            ),
+            aggregateThresholdCommitmentRoot: protocolHashField(
+                aggregateThresholdCommitmentSet,
+                'aggregateThresholdCommitmentRoot',
+                'setupPackage.vssPublicAggregateThresholdCommitmentSet',
+            ),
+            aggregateOpeningCredentials:
+                aggregateOpeningCredentialHandoff.aggregateOpeningCredentials,
+        },
+    };
+
+    return prepareLocalTargetDecryptionShareWitness({
+        restoredLocalTargetShareWitness,
+        setupPackage,
+        targetAcceptedRecord,
+        targetDecryptionCiphertextHash: input.targetDecryptionCiphertextHash,
+        targetShareProfile: input.targetShareProfile,
+        trusteeIdentity,
+    });
 };

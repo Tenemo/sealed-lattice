@@ -1,10 +1,10 @@
 //! Committed-material VSS commitment records.
 //!
-//! Replaces the removed 48-scalar projection body: the public commitment for a
-//! VSS message (a Shamir coefficient, a recipient share, an aggregate
-//! threshold share, or a target-decryption smudging coefficient) is the set of
-//! per-commitment-field committed-material roots over the message's canonical
-//! digit columns, built by the succinct-proof-side tree builder
+//! The public commitment for a VSS message (a Shamir coefficient, a recipient
+//! share, an aggregate threshold share, or a target-decryption smudging
+//! coefficient) is the set of per-commitment-field committed-material roots
+//! over the message's canonical digit columns, built by the succinct-proof-side
+//! tree builder
 //! (`trustee_evaluation_key_proof::vss_committed_material_roots_by_commitment_field`)
 //! so the share-linkage, bridge, aggregate-opening, and target-decryption
 //! proofs can open the same trees at their query positions. Binding is
@@ -353,11 +353,9 @@ mod tests {
         Ok(())
     }
 
-    // SEC-012 regression: the removed projection commitment admitted two
-    // distinct canonical openings with one commitment body. The
-    // committed-material roots must separate every distinct canonical message,
-    // including single-position and high-digit-only differences, under one
-    // fixed seed and context.
+    // SEC-012 binding regression: committed-material roots must separate every
+    // distinct canonical message, including single-position and
+    // high-digit-only differences, under one fixed seed and context.
     #[test]
     fn committed_material_commitment_separates_distinct_messages() -> CanonicalResult<()> {
         let seed = test_material_seed_hex(0x33);

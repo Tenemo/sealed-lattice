@@ -13,7 +13,7 @@ use crate::bgv::setup::vss_commitment::{
 // message's canonical digit columns. Binding is SHAKE256 collision resistance;
 // the proof opens each field's tree at its shared query positions and pins the
 // witness digit columns to the opened columns with Z_H-divisibility binding
-// rows. Replaces the removed 48-coordinate projection body (SEC-012).
+// rows.
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) struct VssShareLinkageCommitment {
     pub(crate) material_roots_by_commitment_field:

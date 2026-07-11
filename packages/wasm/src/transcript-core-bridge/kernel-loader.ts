@@ -34,6 +34,11 @@ import type {
     BgvEvaluationKeyShareComponentMaterialTransportStreamChunkAbsorption,
     BgvEvaluationKeyShareComponentMaterialTransportStreamVerification,
     BgvTargetDecryptionReleaseSetupContext,
+    BgvTargetDecryptionShare,
+    BgvTargetDecryptionShareProofMaterial,
+    BgvTargetDecryptionShareProofMaterialVerification,
+    BgvTargetDecryptionShareProofStatement,
+    BgvTargetDecryptionShareProofStatementBinding,
     BgvTargetDecryptionResultReleaseBegin,
     BgvTargetDecryptionResultReleaseShareAbsorption,
     BgvTargetDecryptionResultReleaseCompletion,
@@ -248,6 +253,87 @@ export const createTranscriptCoreKernelLoader = (
                         command: 'VerifyFixture',
                         fixture,
                     }),
+                generateBgvTargetDecryptionShareFromLocalShare: (
+                    input,
+                ): BgvTargetDecryptionShare =>
+                    executeCommand<BgvTargetDecryptionShare>({
+                        command:
+                            'GenerateBgvTargetDecryptionShareFromLocalShare',
+                        setupPackage: input.setupPackage,
+                        targetAcceptedRecord: input.targetAcceptedRecord,
+                        targetCiphertexts: input.targetCiphertexts,
+                        targetCiphertextBinding: input.targetCiphertextBinding,
+                        targetShareProfile: input.targetShareProfile,
+                        trusteeIdentity: input.trusteeIdentity,
+                        localTargetShareWitness: input.localTargetShareWitness,
+                    }),
+                deriveBgvTargetDecryptionShareProofStatement: (
+                    input,
+                ): BgvTargetDecryptionShareProofStatement =>
+                    executeCommand<BgvTargetDecryptionShareProofStatement>({
+                        command: 'DeriveBgvTargetDecryptionShareProofStatement',
+                        setupPackage: input.setupPackage,
+                        targetAcceptedRecord: input.targetAcceptedRecord,
+                        targetCiphertexts: input.targetCiphertexts,
+                        targetCiphertextBinding: input.targetCiphertextBinding,
+                        targetShareProfile: input.targetShareProfile,
+                        trusteeIdentity: input.trusteeIdentity,
+                        localTargetShareWitness: input.localTargetShareWitness,
+                        targetDecryptionShare: input.targetDecryptionShare,
+                    }),
+                generateBgvTargetDecryptionShareProofMaterialFromLocalWitness: (
+                    input,
+                ): BgvTargetDecryptionShareProofMaterial =>
+                    executeCommand<BgvTargetDecryptionShareProofMaterial>({
+                        command:
+                            'GenerateBgvTargetDecryptionShareProofMaterialFromLocalWitness',
+                        setupPackage: input.setupPackage,
+                        targetAcceptedRecord: input.targetAcceptedRecord,
+                        targetCiphertexts: input.targetCiphertexts,
+                        targetCiphertextBinding: input.targetCiphertextBinding,
+                        targetShareProfile: input.targetShareProfile,
+                        trusteeIdentity: input.trusteeIdentity,
+                        localTargetShareWitness: input.localTargetShareWitness,
+                        targetDecryptionShare: input.targetDecryptionShare,
+                        proofStatement: input.proofStatement,
+                        proofRandomnessSeedHex: input.proofRandomnessSeedHex,
+                        proofRandomnessNonceHex: input.proofRandomnessNonceHex,
+                    }),
+                verifyBgvTargetDecryptionShareProofMaterial: (
+                    input,
+                ): BgvTargetDecryptionShareProofMaterialVerification =>
+                    executeCommand<BgvTargetDecryptionShareProofMaterialVerification>(
+                        {
+                            command:
+                                'VerifyBgvTargetDecryptionShareProofMaterial',
+                            setupPackage: input.setupPackage,
+                            targetAcceptedRecord: input.targetAcceptedRecord,
+                            targetCiphertexts: input.targetCiphertexts,
+                            targetCiphertextBinding:
+                                input.targetCiphertextBinding,
+                            targetShareProfile: input.targetShareProfile,
+                            targetDecryptionShare: input.targetDecryptionShare,
+                            proofStatement: input.proofStatement,
+                            proofMaterial: input.proofMaterial,
+                        },
+                    ),
+                verifyBgvTargetDecryptionShareProofStatementBinding: (
+                    input,
+                ): BgvTargetDecryptionShareProofStatementBinding =>
+                    executeCommand<BgvTargetDecryptionShareProofStatementBinding>(
+                        {
+                            command:
+                                'VerifyBgvTargetDecryptionShareProofStatementBinding',
+                            setupPackage: input.setupPackage,
+                            targetAcceptedRecord: input.targetAcceptedRecord,
+                            targetCiphertexts: input.targetCiphertexts,
+                            targetCiphertextBinding:
+                                input.targetCiphertextBinding,
+                            targetShareProfile: input.targetShareProfile,
+                            targetDecryptionShare: input.targetDecryptionShare,
+                            proofStatement: input.proofStatement,
+                        },
+                    ),
                 describeBgvRnsParameters: (): BgvRnsParametersDescription =>
                     executeCommand<BgvRnsParametersDescription>({
                         command: 'DescribeBgvRnsParameters',

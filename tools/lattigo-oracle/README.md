@@ -7,7 +7,7 @@ The oracle compares against Lattigo at a fixed upstream commit:
 - Repository: `https://github.com/tuneinsight/lattigo`
 - Commit: `5dbffbdea05394de2ca3a432ed5318aa832e3f40`
 
-The commit is pinned as an ordinary Go module dependency: `go.mod` records the commit pseudo-version and `go.sum` records its cryptographic module checksum, so `go mod download` and `go mod verify` fetch and integrity-check the exact upstream source with no vendored archive. The Go toolchain and base image digest are pinned in `Dockerfile`. There is no separate metadata manifest to keep in sync.
+The commit is pinned as an ordinary Go module dependency: `go.mod` records the commit pseudo-version and `go.sum` records its cryptographic module checksum, so `go mod download` and `go mod verify` fetch and integrity-check the exact upstream source directly. The Go toolchain and base image digest are pinned in `Dockerfile`. There is no separate metadata manifest to keep in sync.
 
 The oracle may compare behavior that is actually comparable across all selected BGV-RNS moduli, such as selected ring construction, coefficient-domain addition, subtraction, Barrett multiplication, and NTT/INTT round trips. It must not accept Lattigo serialization, keys, default parameters, Docker output, or oracle roots as transcript objects. Coefficient ordering and NTT root direction are reviewed for parity; automorphism direction, key-switch decomposition, ciphertext component order, slot ordering, and plaintext encoding convention are out of scope and are never treated as protocol evidence.
 

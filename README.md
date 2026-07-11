@@ -30,9 +30,9 @@ The repository implements the following collective BGV setup path:
 - encrypted local trustee setup state with explicit retained-material and deletion boundaries; and
 - setup phase records, transport certificates, package assembly, and Rust/WASM package acceptance against externally supplied manifest and roster hashes.
 
-VSS commitment records bind collision-resistant committed-material roots. Recipient shares and aggregate threshold shares are tied to those roots by proof relations; the aggregate is not accepted from a producer-supplied sum. The same-secret bridge opens the complete accepted BDLOP constant-commitment set and the target committed-material commitments to one ternary secret. Public-key share proofs bind to that bridge, while evaluation-key atom proofs open the exact canonical limb-zero source constant commitment. Legacy projection and opaque same-secret-anchor artifacts do not contribute to acceptance (`SEC-012`).
+VSS commitment records bind collision-resistant committed-material roots. Recipient shares and aggregate threshold shares are tied to those roots by proof relations; the aggregate is not accepted from a producer-supplied sum. The same-secret bridge opens the complete accepted BDLOP constant-commitment set and the target committed-material commitments to one ternary secret. Public-key share proofs bind to that bridge, while evaluation-key atom proofs open the exact canonical limb-zero source constant commitment (`SEC-012`).
 
-The implemented setup proofs remain development evidence. They do not establish complete 128-bit quantum soundness or zero knowledge (`SEC-004`, `SEC-005`), and secret-dependent evaluation-key material retains the construction's KDM or circular-security assumption (`SEC-011`).
+The implemented setup proofs remain development evidence. They do not meet the active 80-bit QROM soundness or ceremony-wide zero-knowledge and leakage targets, much less a later 128-bit profile (`SEC-004`, `SEC-005`), and secret-dependent evaluation-key material retains the construction's KDM or circular-security assumption (`SEC-011`).
 
 ### Direct ballots
 
@@ -44,7 +44,7 @@ This path is a kernel development path driven by a private setup witness. It is 
 
 The kernel implements homomorphic addition of accepted direct-ballot ciphertexts and a deterministic packed BGV top-k evaluator for the bounded score domain. The evaluator performs encrypted comparisons, rank accumulation, and sparse target projection, and emits a target proposal and evaluator-replay record bound to the setup, aggregate, layout, and target context.
 
-The evaluator currently provides component and end-to-end development evidence. It does not by itself accept the target, prove the complete evaluation, or authorize result release. Existing estimator output, fixtures, and component tests do not establish complete ballot confidentiality or evaluation correctness (`SEC-006`).
+The evaluator currently provides component and end-to-end development evidence. It does not by itself accept the target, prove the complete evaluation, or authorize result release. Fixtures and component tests do not establish complete ballot confidentiality or evaluation correctness (`SEC-006`).
 
 ### Target finality and decryption
 
@@ -55,7 +55,7 @@ The target-decryption kernel binds an accepted setup package, accepted target re
 3. checks each distinct trustee's target-bound share proof and accumulates exactly the required quorum; and
 4. interpolates only the selected target fields and consumes that target binding in process.
 
-Development-only commands can derive share statements and create target-bound shares and proof material from a trustee's local witness. The published package exposes the staged result check, not a proofless raw-share interface.
+The browser-compatible Rust/WebAssembly kernel can derive share statements and create target-bound shares and proof material from a trustee witness restored from AEAD-encrypted local setup state. Node.js/WebAssembly integration exercises setup handoff, encrypted restore, and target-share generation with canonical full-ring setup material and a valid level-zero target ciphertext. This is development evidence, not supported-phone runtime evidence. The published package exposes the staged result check, not a proofless raw-share interface.
 
 The one-shot consumption registry is process-local and is not persistent across restarts. Target release therefore remains development-only and must not be treated as a durable authorization boundary (`SEC-002`). Retry safety for setup, key switching, and decryption under reused secret material is also open (`SEC-003`).
 
@@ -73,12 +73,12 @@ TypeScript input, result, protocol-object, setup-transport, and verification typ
 
 ### Runtime verification paths
 
-| Runtime path             | Evidence that exists now                                                                                                                                                                                                                                      | Current limit                                                                                                              |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| Native Rust              | Kernel unit and integration tests cover setup commitments and proofs, direct ballots, evaluator operations, target-bound shares, and result release.                                                                                                          | Native execution is development evidence only and is not the participant-facing product runtime.                           |
-| Node.js with WebAssembly | Fast and heavy kernel suites exercise the built WebAssembly bridge, accepted setup packages, direct ballots, evaluator replay, and target decryption. TypeScript package suites cover foundation, setup construction, transport, and public package behavior. | Node.js evidence does not establish browser or supported-phone execution.                                                  |
-| Desktop browser          | Browser suites load the WebAssembly kernel, execute a canonical hashing command, exercise foundation package exports, and check the plaintext-oracle semantics without native helpers.                                                                        | The current browser suite does not run the full ceremony or its proof workloads. There is no browser proof benchmark lane. |
-| Supported phone          | No physical-device runtime evidence is recorded.                                                                                                                                                                                                              | Native, Node.js, desktop-browser, and emulated runs cannot substitute for supported-phone evidence (`SEC-008`).            |
+| Runtime path             | Evidence that exists now                                                                                                                                                                                                                                                                                                            | Current limit                                                                                                              |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Native Rust              | Kernel unit and integration tests cover setup commitments and proofs, direct ballots, evaluator operations, target-bound shares, and result release.                                                                                                                                                                                | Native execution is development evidence only and is not the participant-facing product runtime.                           |
+| Node.js with WebAssembly | Fast and heavy kernel suites exercise the built WebAssembly bridge, accepted setup packages, direct ballots, evaluator replay, and target decryption, including encrypted local-setup restore into target-share generation. TypeScript package suites cover foundation, setup construction, transport, and public package behavior. | Node.js evidence does not establish browser or supported-phone execution.                                                  |
+| Desktop browser          | Browser suites load the WebAssembly kernel, execute a canonical hashing command, exercise foundation package exports, and check the plaintext-oracle semantics without native helpers.                                                                                                                                              | The current browser suite does not run the full ceremony or its proof workloads. There is no browser proof benchmark lane. |
+| Supported phone          | No physical-device runtime evidence is recorded.                                                                                                                                                                                                                                                                                    | Native, Node.js, desktop-browser, and emulated runs cannot substitute for supported-phone evidence (`SEC-008`).            |
 
 Participant mobile browsers remain the required verification path: acceptance must not depend on a trusted tally server, external prover, dedicated auditor, or native-only verifier. Heavy trustee evaluation-key proving may currently require a participant-owned desktop device, but it is not an accepted native-only end state. Closing that runtime gap requires proof-size and runtime work plus evidence from the exact supported physical-device and build combination.
 
@@ -89,13 +89,13 @@ The authoritative wording and correct-use consequences are in [SECURITY.md](SECU
 - `SEC-001` and `SEC-009`: this is development software without production approval, independent audit, certification, or production hardening. Use only synthetic data.
 - `SEC-002`: target decryption does not yet provide a persistent one-shot release boundary.
 - `SEC-003`: repeated participation with reused setup, key-switching, or decryption secret material is not covered by an established retry-safety argument.
-- `SEC-004` and `SEC-005`: the complete setup-proof system does not carry conventional 128-bit quantum soundness or full 128-bit zero-knowledge claims.
+- `SEC-004` and `SEC-005`: the implemented setup-proof path has not established the active 80-bit QROM soundness or ceremony-wide zero-knowledge and leakage targets.
 - `SEC-006`: homomorphic-encryption evidence covers components, not complete end-to-end ballot confidentiality, evaluator correctness, and target release.
 - `SEC-007`: the public encrypted-ballot creation, proof, transport, aggregation, and accepted-result workflow is incomplete.
 - `SEC-008`: there is no supported-phone runtime evidence.
 - `SEC-010`: accepting a roster size or derived parameter set does not certify a cryptographic or runtime profile.
 - `SEC-011`: evaluation-key material depends on the selected construction's KDM or circular-security assumptions.
-- `SEC-012`: legacy VSS projection and opaque anchor artifacts do not contribute to acceptance; committed-material roots, the full-source bridge proof, and canonical BDLOP source commitments carry the current binding.
+- `SEC-012`: acceptance requires committed-material roots, the full-source bridge proof, and canonical BDLOP source commitments to carry the complete VSS binding.
 - `SEC-013`: target-finality witness keys are caller supplied and are not bound to an accepted roster.
 - `SEC-014`: hash-critical non-ASCII text can diverge with ambient Unicode data; callers should independently enforce one canonical representation or keep those identifiers and labels ASCII.
 
@@ -162,11 +162,29 @@ pnpm run test:browser
 pnpm run smoke:pack:npm
 ```
 
-Kernel proof changes also use the Rust lanes:
+Kernel proof changes also use the separate fast, measured-heavy, and
+accepted-setup Rust lanes:
 
 ```bash
 pnpm run test:rust:kernel
+pnpm run test:rust:kernel:heavy
 pnpm run test:rust:kernel:accepted-setup
+```
+
+The accepted-setup runner serializes every nested proof-concurrency layer and
+applies a hard memory ceiling before spawning Cargo: an aggregate Windows Job
+Object limit or an inherited Linux address-space limit. The ceiling is 32 GiB
+on large hosts, or the lower of 70 percent of total memory and currently free
+memory after reserving 2 GiB on smaller hosts. Proof-bearing functional and
+rejection fixtures use the minimum supported three-participant roster; the
+ten-participant parameter and phase fixtures remain lightweight. These tests
+exercise implementation behavior and do not certify either roster profile.
+
+After a measured-heavy failure, rerun one test by its full
+`heavy_rust_kernel_`-prefixed name:
+
+```bash
+pnpm run test:rust:kernel:heavy -- heavy_rust_kernel_sparse_target_projection_decrypts_selected_ids_and_orders
 ```
 
 Generate the public SDK review summary after an intentional API change:

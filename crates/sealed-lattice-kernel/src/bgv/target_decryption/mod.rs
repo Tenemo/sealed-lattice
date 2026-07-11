@@ -2,14 +2,11 @@ mod bindings;
 mod ciphertext_codec;
 mod command;
 mod json_fields;
-#[cfg(any(feature = "target-decryption-development-commands", test))]
 mod opening;
 mod proof_material;
-#[cfg(any(feature = "target-decryption-development-commands", test))]
 mod proof_relation;
 mod proof_slice;
 mod result_release;
-#[cfg(any(feature = "target-decryption-development-commands", test))]
 mod share_generation;
 mod share_records;
 mod share_statement;
@@ -23,7 +20,6 @@ pub(crate) use command::{
     derive_bgv_target_decryption_result_release_setup_context_from_request,
     finish_bgv_target_decryption_result_release_from_request,
 };
-#[cfg(any(feature = "target-decryption-development-commands", test))]
 pub(crate) use command::{
     derive_bgv_target_decryption_share_proof_statement_from_request,
     generate_bgv_target_decryption_share_from_local_share_request,
@@ -32,14 +28,11 @@ pub(crate) use command::{
     verify_bgv_target_decryption_share_proof_statement_binding_from_request,
 };
 use json_fields::*;
-#[cfg(any(feature = "target-decryption-development-commands", test))]
 use opening::*;
 use proof_material::*;
-#[cfg(any(feature = "target-decryption-development-commands", test))]
 use proof_relation::*;
 use proof_slice::*;
 use result_release::*;
-#[cfg(any(feature = "target-decryption-development-commands", test))]
 use share_generation::*;
 use share_records::*;
 use share_statement::*;
@@ -83,7 +76,6 @@ use crate::{
 use crate::bgv::evaluator::engine::DevelopmentBgvKey;
 #[cfg(test)]
 use crate::bgv::setup::development_evaluator_key_from_passive_setup_package;
-#[cfg(any(feature = "target-decryption-development-commands", test))]
 use crate::bgv::{
     coefficient_codec::coefficient_vector_le_hex,
     evaluator::{
@@ -91,28 +83,20 @@ use crate::bgv::{
         prg::DeterministicSampler,
     },
 };
-#[cfg(any(feature = "target-decryption-development-commands", test))]
 use crate::hashing::hash512_hex;
-#[cfg(any(feature = "target-decryption-development-commands", test))]
 use crate::transcript_core::encode_standard_base64;
 
-#[cfg(all(
-    not(target_arch = "wasm32"),
-    any(feature = "target-decryption-development-commands", test)
-))]
+#[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::*;
 
 const TARGET_SHARE_PAYLOAD_ENCODING: &str =
     "coefficient-domain-u64-little-endian-partial-decryption-limbs";
 const TARGET_PARTIAL_DECRYPTION_LIMB_HASH_DOMAIN: &str =
     "sealed-lattice-bgv-rns/target-partial-decryption-limb";
-#[cfg(any(feature = "target-decryption-development-commands", test))]
 const TARGET_DECRYPTION_SMUDGING_SEED_HASH_DOMAIN: &str =
     "sealed-lattice-bgv-rns/target-decryption-smudging-seed";
-#[cfg(any(feature = "target-decryption-development-commands", test))]
 const TARGET_DECRYPTION_SMUDGING_ZERO_SHARE_DOMAIN: &str =
     "sealed-lattice-bgv-rns/target-decryption-smudging-zero-share";
-#[cfg(any(feature = "target-decryption-development-commands", test))]
 const TARGET_DECRYPTION_SMUDGING_COMMITMENT_MATERIAL_SEED_DOMAIN: &str =
     "sealed-lattice-bgv-rns/target-decryption-smudging-commitment-material-seed";
 pub(super) const TARGET_DECRYPTION_SMUDGING_COEFFICIENT_BOUND: i64 = 16;
@@ -142,6 +126,7 @@ struct ParticipantBinding {
 struct SetupBinding {
     setup_package_hash: String,
     ceremony_id: String,
+    setup_epoch: String,
     election_manifest_hash: String,
     roster_hash: String,
     setup_parameters_hash: String,

@@ -127,6 +127,20 @@ export type LocalTrusteeSetupSealedMaterialEncryptionResult = {
     readonly materialAadHash: ProtocolHash;
 };
 
+export type LocalTrusteeSetupSealedMaterialDecryptionInput = {
+    readonly sealedMaterial: LocalTrusteeSetupStateSealedMaterial;
+    readonly expectedMaterialRoot: ProtocolHash;
+    readonly localStateCommitment: LocalTrusteeStateStorageEncryptionInput['localStateCommitment'];
+    readonly setupContext: unknown;
+    readonly storageKeyBytesHex: string;
+};
+
+export type LocalTrusteeSetupSealedMaterialDecryptionResult = {
+    readonly materialPlaintext: unknown;
+    readonly materialPlaintextHash: ProtocolHash;
+    readonly materialAadHash: ProtocolHash;
+};
+
 export const protocolHashPattern = /^[0-9a-f]{128}$/u;
 
 export const setupContextFieldNames = [

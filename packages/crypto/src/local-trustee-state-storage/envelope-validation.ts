@@ -235,7 +235,7 @@ function validateEncryptedSealedMaterialEnvelope(
     return encryptedMaterial as EncryptedLocalTrusteeSetupMaterial;
 }
 
-const validateSealedMaterial = (
+export const validateSealedMaterial = (
     value: unknown,
     expectedMaterialClass: LocalTrusteeSetupStateSealedMaterial['materialClass'],
     expectedMaterialRoot: ProtocolHash,

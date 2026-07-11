@@ -287,6 +287,32 @@ pub(super) fn vss_public_recipient_share_commitment_record(
 pub(in super::super::super) fn vss_public_aggregate_threshold_commitment_set_object(
     package: &serde_json::Value,
 ) -> serde_json::Value {
+    let participant_count = participant_count_from_package(package);
+    let recipient_coordinates = (0..participant_count)
+        .flat_map(|recipient_roster_position| {
+            (0..DATA_PRIMES.len())
+                .map(move |rns_limb_index| (recipient_roster_position, rns_limb_index))
+        })
+        .collect::<Vec<_>>();
+    let mut aggregate_set =
+        vss_public_aggregate_threshold_commitment_set_without_proofs_for_coordinates(
+            package,
+            &recipient_coordinates,
+        );
+    // The proven "T = sum" bindings are a sibling of the records, added after the
+    // set root so they are bound by their own statements (which reference the
+    // committed roots), not folded into the commitment set root.
+    aggregate_set["aggregateThresholdProofs"] = serde_json::json!(
+        super::aggregate_threshold::vss_aggregate_threshold_proofs(package, &aggregate_set)
+    );
+
+    aggregate_set
+}
+
+pub(super) fn vss_public_aggregate_threshold_commitment_set_without_proofs_for_coordinates(
+    package: &serde_json::Value,
+    recipient_coordinates: &[(u64, usize)],
+) -> serde_json::Value {
     let public_matrix_seed_hash = package["commonRandomness"]["publicMatrixSeedHash"]
         .as_str()
         .expect("public matrix seed hash");
@@ -294,17 +320,16 @@ pub(in super::super::super) fn vss_public_aggregate_threshold_commitment_set_obj
     let ring_degree = package["vssPublicRecipientShareCommitmentSet"]["ringDegree"]
         .as_u64()
         .expect("recipient-share ring degree") as usize;
-    let recipient_records = (0..participant_count)
-        .flat_map(|recipient_roster_position| {
-            (0..DATA_PRIMES.len()).map(move |rns_limb_index| {
-                vss_public_aggregate_threshold_commitment_record(
-                    package,
-                    public_matrix_seed_hash,
-                    ring_degree,
-                    recipient_roster_position,
-                    rns_limb_index,
-                )
-            })
+    let recipient_records = recipient_coordinates
+        .iter()
+        .map(|&(recipient_roster_position, rns_limb_index)| {
+            vss_public_aggregate_threshold_commitment_record(
+                package,
+                public_matrix_seed_hash,
+                ring_degree,
+                recipient_roster_position,
+                rns_limb_index,
+            )
         })
         .collect::<Vec<_>>();
     let mut aggregate_set = serde_json::json!({
@@ -317,12 +342,6 @@ pub(in super::super::super) fn vss_public_aggregate_threshold_commitment_set_obj
     });
     aggregate_set["aggregateThresholdCommitmentRoot"] = serde_json::json!(
         derive_canonical_object_hash(&aggregate_set).expect("aggregate threshold commitment root")
-    );
-    // The proven "T = sum" bindings are a sibling of the records, added after the
-    // set root so they are bound by their own statements (which reference the
-    // committed roots), not folded into the commitment set root.
-    aggregate_set["aggregateThresholdProofs"] = serde_json::json!(
-        super::aggregate_threshold::vss_aggregate_threshold_proofs(package, &aggregate_set)
     );
 
     aggregate_set

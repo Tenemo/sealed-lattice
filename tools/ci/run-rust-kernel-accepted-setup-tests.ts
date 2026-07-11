@@ -31,14 +31,14 @@ import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
 //     accepted-setup test module in a pinned warm target directory
 //     (`target/accepted-setup-accelerated/`), keep incremental compilation on,
 //     resume deterministic proof checkpoints from `temp/test-checkpoints/`, and
-//     size libtest/prover/Rayon concurrency from available memory. Run logs stay
-//     under `logs/`; proof checkpoints stay under `temp/test-checkpoints/`.
+//     run under a hard process-memory ceiling with serialized libtest, prover,
+//     and Rayon execution. Run logs stay under `logs/`; proof checkpoints stay
+//     under `temp/test-checkpoints/`.
 //
 //   --ci: authoritative CI-style runs. They build the accepted-setup test
 //     module cleanly in the shared `target/` (CARGO_INCREMENTAL=0), prove every
-//     proof family fresh (no checkpoint resume), and size libtest/prover/rayon
-//     concurrency from available memory so a constrained runner does not
-//     exhaust RAM.
+//     proof family fresh (no checkpoint resume), under the same hard memory
+//     ceiling and serialized execution used by local runs.
 //
 //   <filter>: the fast developer inner loop. It runs only the filtered test or
 //     module in a separate pinned `target/accepted-setup-focused/`
@@ -59,118 +59,84 @@ export type ParsedRustKernelAcceptedSetupArguments = {
     readonly testFilters: readonly string[];
 };
 
-// Shared libtest-thread budget. The heavy suite uses transported
-// proof/key material, but package construction and verification still have a
-// transient working set large enough that libtest concurrency must be
-// memory-bound, and most of that working set is the shared memoized fixture
-// that concurrent tests reuse rather than a per-test cost multiplied by the
-// thread count. Size the thread pool from currently available memory, capped
-// by core count, so a constrained runner stays serial while a workstation runs
-// several tests; a single focused filter simply runs one thread.
-const approximateGigabytesPerHeavyTest = 15;
-const heavyTestMemoryBudgetFraction = 0.7;
 const gigabyte = 1024 ** 3;
-const availableGigabytes = os.freemem() / gigabyte;
-const logicalProcessorCount = os.cpus().length;
+const defaultHardMemoryLimitGigabytes = 32;
+const maximumHostMemoryFraction = 0.7;
+const reservedHostMemoryGigabytes = 2;
+const memoryLimitEnvironmentVariable =
+    'SEALED_LATTICE_ACCEPTED_SETUP_MEMORY_LIMIT_GIB';
 
-// Per-prover RAM budgets. Each trustee evaluation-key prover, the rayon
-// par_iter phases (public-key share succinct proofs, relinearization and
-// Galois records, same-secret bridge proofs), and the per-prover RNS-limb proving
-// all draw large working sets, so each concurrency knob is sized from available
-// memory below.
-const approximateGigabytesPerTrusteeProver = 10;
-const approximateGigabytesPerRayonThread = 2;
-const approximateGigabytesPerTrusteeProofLimb = 5;
+// Thirty-two GiB is the workstation ceiling. Smaller hosts receive a lower
+// ceiling, and every host retains at least two GiB of currently free memory for
+// the runner and operating system. This is a hard OS limit, not a scheduling
+// estimate.
+export const deriveAcceptedSetupMemoryLimitGigabytes = (input: {
+    readonly freeMemoryGigabytes: number;
+    readonly totalMemoryGigabytes: number;
+}): number => {
+    if (
+        !Number.isFinite(input.totalMemoryGigabytes) ||
+        input.totalMemoryGigabytes <= 0 ||
+        !Number.isFinite(input.freeMemoryGigabytes) ||
+        input.freeMemoryGigabytes <= 0
+    ) {
+        throw new Error('Host memory values must be positive finite numbers.');
+    }
+    const freeMemoryAfterReserve = Math.floor(
+        input.freeMemoryGigabytes - reservedHostMemoryGigabytes,
+    );
+    if (freeMemoryAfterReserve < 1) {
+        throw new Error(
+            `Accepted-setup tests require at least ${reservedHostMemoryGigabytes + 1} GiB of free host memory.`,
+        );
+    }
 
-export type AutomaticAcceptedSetupConcurrency = {
-    readonly rayonThreadCount: number;
-    readonly testThreadCount: number;
-    readonly trusteeProofBatchSize: number;
-    readonly trusteeProofLimbBatchSize: number;
+    return Math.min(
+        defaultHardMemoryLimitGigabytes,
+        Math.max(
+            1,
+            Math.floor(input.totalMemoryGigabytes * maximumHostMemoryFraction),
+        ),
+        freeMemoryAfterReserve,
+    );
 };
 
-// The trustee, limb, and Rayon layers are nested during proof construction, so
-// they must share one memory budget. Sizing every layer independently lets each
-// consume the full host budget and was enough to terminate a 14 GiB CI runner.
-// Reserve one Rayon worker, then choose the trustee and per-trustee limb batches
-// from the remaining budget before assigning any remaining capacity to Rayon.
-// When even the minimum serial working-set estimate exceeds the budget, the
-// only executable configuration is one worker at every layer.
-export const deriveAutomaticAcceptedSetupConcurrency = (input: {
-    readonly availableGigabytes: number;
-    readonly logicalProcessorCount: number;
-}): AutomaticAcceptedSetupConcurrency => {
-    const memoryBudgetGigabytes =
-        input.availableGigabytes * heavyTestMemoryBudgetFraction;
-    const boundedProcessorCount = Math.max(1, input.logicalProcessorCount);
-    const testThreadCount = Math.min(
-        boundedProcessorCount,
-        Math.max(
-            1,
-            Math.floor(
-                memoryBudgetGigabytes / approximateGigabytesPerHeavyTest,
-            ),
-        ),
-    );
+export const resolveAcceptedSetupMemoryLimitGigabytes = (input: {
+    readonly automaticLimitGigabytes: number;
+    readonly environment?: NodeJS.ProcessEnv;
+}): number => {
+    const override = (input.environment ?? process.env)[
+        memoryLimitEnvironmentVariable
+    ];
+    if (override === undefined) {
+        return input.automaticLimitGigabytes;
+    }
+    if (!/^[1-9][0-9]*$/u.test(override)) {
+        throw new Error(
+            `${memoryLimitEnvironmentVariable} must be a positive integer.`,
+        );
+    }
+    const overrideGigabytes = Number.parseInt(override, 10);
+    if (overrideGigabytes > input.automaticLimitGigabytes) {
+        throw new Error(
+            `${memoryLimitEnvironmentVariable} cannot exceed the automatic safe ceiling of ${input.automaticLimitGigabytes} GiB.`,
+        );
+    }
 
-    const memoryAfterMinimumRayon = Math.max(
-        0,
-        memoryBudgetGigabytes - approximateGigabytesPerRayonThread,
-    );
-    const minimumGigabytesPerTrustee =
-        approximateGigabytesPerTrusteeProver +
-        approximateGigabytesPerTrusteeProofLimb;
-    const coreDerivedTrusteeProverConcurrency = Math.max(
-        1,
-        Math.floor(boundedProcessorCount / 4),
-    );
-    const trusteeProofBatchSize = Math.min(
-        coreDerivedTrusteeProverConcurrency,
-        Math.max(
-            1,
-            Math.floor(memoryAfterMinimumRayon / minimumGigabytesPerTrustee),
-        ),
-    );
-
-    const memoryPerTrustee = memoryAfterMinimumRayon / trusteeProofBatchSize;
-    const trusteeProofLimbBatchSize = Math.min(
-        Math.max(1, Math.floor(boundedProcessorCount / trusteeProofBatchSize)),
-        Math.max(
-            1,
-            Math.floor(
-                Math.max(
-                    0,
-                    memoryPerTrustee - approximateGigabytesPerTrusteeProver,
-                ) / approximateGigabytesPerTrusteeProofLimb,
-            ),
-        ),
-    );
-
-    const reservedProofMemoryGigabytes =
-        trusteeProofBatchSize *
-        (approximateGigabytesPerTrusteeProver +
-            trusteeProofLimbBatchSize *
-                approximateGigabytesPerTrusteeProofLimb);
-    const rayonThreadCount = Math.min(
-        boundedProcessorCount,
-        Math.max(
-            1,
-            Math.floor(
-                Math.max(
-                    0,
-                    memoryBudgetGigabytes - reservedProofMemoryGigabytes,
-                ) / approximateGigabytesPerRayonThread,
-            ),
-        ),
-    );
-
-    return {
-        rayonThreadCount,
-        testThreadCount,
-        trusteeProofBatchSize,
-        trusteeProofLimbBatchSize,
-    };
+    return overrideGigabytes;
 };
+
+const automaticAcceptedSetupMemoryLimitGigabytes =
+    deriveAcceptedSetupMemoryLimitGigabytes({
+        freeMemoryGigabytes: os.freemem() / gigabyte,
+        totalMemoryGigabytes: os.totalmem() / gigabyte,
+    });
+const acceptedSetupMemoryLimitGigabytes =
+    resolveAcceptedSetupMemoryLimitGigabytes({
+        automaticLimitGigabytes: automaticAcceptedSetupMemoryLimitGigabytes,
+    });
+const acceptedSetupMemoryLimitBytes =
+    acceptedSetupMemoryLimitGigabytes * gigabyte;
 
 // The pinned focused target directory. It lives under `target/` (already
 // git-ignored) but is distinct from the default `target/` the gate uses, so a
@@ -184,6 +150,18 @@ const acceptedSetupAcceleratedTargetDirectory = path.resolve(
     process.cwd(),
     'target',
     'accepted-setup-accelerated',
+);
+const processMemoryGuardTargetDirectory = path.resolve(
+    process.cwd(),
+    'target',
+    'process-memory-guard',
+);
+const processMemoryGuardExecutablePath = path.join(
+    processMemoryGuardTargetDirectory,
+    'debug',
+    process.platform === 'win32'
+        ? 'sealed-lattice-process-memory-guard.exe'
+        : 'sealed-lattice-process-memory-guard',
 );
 const acceptedSetupCheckpointRootDirectory = path.resolve(
     process.cwd(),
@@ -214,15 +192,6 @@ export type BuiltRustKernelAcceptedSetupCommand = {
     readonly testThreadCount: number;
 };
 
-const resolveKnob = (
-    automaticValue: number,
-    automaticSource: string,
-    override: string | undefined,
-): ResolvedKnob =>
-    override === undefined
-        ? { value: String(automaticValue), source: automaticSource }
-        : { value: override, source: 'environment override' };
-
 export const cargoTestArgumentsForAcceptedSetupTests = (
     testThreadCount: string,
 ): readonly string[] => [
@@ -240,45 +209,15 @@ export const cargoTestArgumentsForAcceptedSetupTests = (
 const acceptedSetupRunName = 'Rust accepted setup';
 const acceptedSetupScriptName = 'test:rust:kernel:accepted-setup';
 
-// Resolve the concurrency knobs. The core-derived caps mirror the kernel's
-// package proving concurrency; the kernel treats the exported values as
-// authoritative, so on a high-core but low-memory runner the RAM bound (not the
-// core count) wins.
-export const resolveRunKnobs = (
-    mode: RustKernelAcceptedSetupRunMode,
-    environment: NodeJS.ProcessEnv = process.env,
-): ResolvedRunKnobs => {
-    const automaticConcurrency = deriveAutomaticAcceptedSetupConcurrency({
-        availableGigabytes,
-        logicalProcessorCount,
-    });
-    const localOverride = (value: string | undefined): string | undefined =>
-        mode === 'accelerated' ? value : undefined;
-
-    return {
-        testThreads: {
-            value: String(automaticConcurrency.testThreadCount),
-            source: 'memory-bounded',
-        },
-        trusteeProofBatchSize: resolveKnob(
-            automaticConcurrency.trusteeProofBatchSize,
-            'shared-memory-bounded',
-            localOverride(environment.SEALED_LATTICE_TRUSTEE_PROOF_BATCH_SIZE),
-        ),
-        trusteeProofLimbBatchSize: resolveKnob(
-            automaticConcurrency.trusteeProofLimbBatchSize,
-            'shared-memory-bounded',
-            localOverride(
-                environment.SEALED_LATTICE_TRUSTEE_PROOF_LIMB_BATCH_SIZE,
-            ),
-        ),
-        rayonThreadCount: resolveKnob(
-            automaticConcurrency.rayonThreadCount,
-            'shared-memory-bounded',
-            localOverride(environment.RAYON_NUM_THREADS),
-        ),
-    };
-};
+// Keep every nested scheduling layer serial until its peak memory has been
+// measured inside the hard ceiling. Environment overrides cannot weaken this
+// containment policy.
+export const resolveRunKnobs = (): ResolvedRunKnobs => ({
+    testThreads: { value: '1', source: 'serialized' },
+    trusteeProofBatchSize: { value: '1', source: 'serialized' },
+    trusteeProofLimbBatchSize: { value: '1', source: 'serialized' },
+    rayonThreadCount: { value: '1', source: 'serialized' },
+});
 
 export const buildAcceptedSetupEnvironment = (input: {
     readonly baseEnvironment?: NodeJS.ProcessEnv;
@@ -296,6 +235,7 @@ export const buildAcceptedSetupEnvironment = (input: {
 
     return {
         ...environment,
+        CARGO_BUILD_JOBS: '1',
         CARGO_INCREMENTAL: input.cargoIncremental,
         ...(input.targetDirectoryPath === undefined
             ? {}
@@ -315,25 +255,50 @@ export const buildAcceptedSetupEnvironment = (input: {
     };
 };
 
+export const verifyProcessMemoryGuardCommand = (): CommandInvocation => {
+    const environment = { ...process.env };
+    delete environment.CARGO_TARGET_DIR;
+
+    return {
+        args: [
+            'test',
+            '--locked',
+            '-p',
+            'sealed-lattice-process-memory-guard',
+            '--target-dir',
+            processMemoryGuardTargetDirectory,
+        ],
+        command: 'cargo',
+        description: 'verify process memory guard',
+        env: environment,
+        logFileSlug: 'cargo-test-process-memory-guard',
+    };
+};
+
+export const guardAcceptedSetupCommand = (
+    command: CommandInvocation,
+    memoryLimitBytes = acceptedSetupMemoryLimitBytes,
+): CommandInvocation => ({
+    ...command,
+    args: [
+        '--memory-limit-bytes',
+        String(memoryLimitBytes),
+        '--',
+        command.command,
+        ...command.args,
+    ],
+    command: processMemoryGuardExecutablePath,
+});
+
 const buildAcceptedSetupCommand = (
     mode: RustKernelAcceptedSetupRunMode,
 ): BuiltRustKernelAcceptedSetupCommand => {
-    const knobs = resolveRunKnobs(mode);
+    const knobs = resolveRunKnobs();
     const modeLabel =
         mode === 'accelerated' ? 'accelerated local' : 'CI prove-fresh';
     const setupMessages = [
-        `${acceptedSetupRunName} (${modeLabel}): running with ${knobs.testThreads.value} test thread(s) ` +
-            `(${knobs.testThreads.source}; ${availableGigabytes.toFixed(1)} GiB available, ` +
-            `${approximateGigabytesPerHeavyTest} GiB automatically budgeted per test).`,
-        `${acceptedSetupRunName} (${modeLabel}): proving up to ${knobs.trusteeProofBatchSize.value} trustee evaluation-key ` +
-            `proof(s) concurrently (${knobs.trusteeProofBatchSize.source}; automatic budget uses ` +
-            `${approximateGigabytesPerTrusteeProver} GiB per prover).`,
-        `${acceptedSetupRunName} (${modeLabel}): proving up to ${knobs.trusteeProofLimbBatchSize.value} RNS limb(s) per ` +
-            `trustee evaluation-key prover (${knobs.trusteeProofLimbBatchSize.source}; automatic budget uses ` +
-            `${approximateGigabytesPerTrusteeProofLimb} GiB per limb).`,
-        `${acceptedSetupRunName} (${modeLabel}): bounding the rayon pool to ${knobs.rayonThreadCount.value} thread(s) ` +
-            `(${knobs.rayonThreadCount.source}; automatic budget uses ` +
-            `${approximateGigabytesPerRayonThread} GiB per rayon thread).`,
+        `${acceptedSetupRunName} (${modeLabel}): hard inherited process-memory ceiling ${acceptedSetupMemoryLimitGigabytes} GiB.`,
+        `${acceptedSetupRunName} (${modeLabel}): serialized libtest, cargo build, trustee proof, RNS-limb proof, and Rayon execution.`,
     ];
     if (mode === 'accelerated') {
         setupMessages.push(
@@ -343,7 +308,7 @@ const buildAcceptedSetupCommand = (
     }
 
     return {
-        command: {
+        command: guardAcceptedSetupCommand({
             args: cargoTestArgumentsForAcceptedSetupTests(
                 knobs.testThreads.value,
             ),
@@ -364,7 +329,7 @@ const buildAcceptedSetupCommand = (
                 mode === 'accelerated'
                     ? 'cargo-test-rust-accepted-setup-accelerated'
                     : 'cargo-test-rust-accepted-setup',
-        },
+        }),
         progressLabel: 'accepted-setup',
         setupMessages,
         testThreadCount: Number.parseInt(knobs.testThreads.value, 10),
@@ -385,7 +350,7 @@ export const cargoTestArgumentsForFocusedFilter = (
     testFilter,
     '--',
     '--include-ignored',
-    '--show-output',
+    '--nocapture',
     '--test-threads',
     testThreadCount,
 ];
@@ -394,13 +359,13 @@ export const buildFocusedCommand = (
     testFilter: string,
     mode: RustKernelAcceptedSetupRunMode,
 ): BuiltRustKernelAcceptedSetupCommand => {
-    const knobs = resolveRunKnobs(mode);
+    const knobs = resolveRunKnobs();
     const isAccelerated = mode === 'accelerated';
     const modeLabel = isAccelerated ? 'accelerated local' : 'CI prove-fresh';
     const setupMessages = [
         `Rust accepted setup focused run (${modeLabel}): filter [${testFilter}], ` +
-            `${knobs.testThreads.value} test thread(s) ` +
-            `(${knobs.testThreads.source}; ${availableGigabytes.toFixed(1)} GiB available).`,
+            `${knobs.testThreads.value} serialized test thread; hard inherited process-memory ceiling ` +
+            `${acceptedSetupMemoryLimitGigabytes} GiB.`,
         ...(isAccelerated
             ? [
                   `Pinned target directory: ${acceptedSetupFocusedTargetDirectory}. ` +
@@ -412,7 +377,7 @@ export const buildFocusedCommand = (
     ];
 
     return {
-        command: {
+        command: guardAcceptedSetupCommand({
             args: cargoTestArgumentsForFocusedFilter(
                 testFilter,
                 knobs.testThreads.value,
@@ -430,7 +395,7 @@ export const buildFocusedCommand = (
             logFileSlug: isAccelerated
                 ? 'cargo-test-rust-accepted-setup-focused'
                 : 'cargo-test-rust-accepted-setup-focused-ci',
-        },
+        }),
         progressLabel: 'accepted-setup:focused',
         setupMessages,
         testThreadCount: Number.parseInt(knobs.testThreads.value, 10),
@@ -555,6 +520,18 @@ export const runRustKernelAcceptedSetupTests = async (input: {
     let exitCode: number | undefined;
     try {
         writeRunnerSetupMessages(runLog, builtCommand.setupMessages);
+        exitCode = await runCommandsInSeries(
+            [verifyProcessMemoryGuardCommand()],
+            {
+                outputMode: 'inherit',
+                runLog,
+            },
+        );
+        if (exitCode !== 0) {
+            process.exitCode = exitCode;
+            return;
+        }
+
         const progressReporter = createHeavyTestProgressReporter({
             label: builtCommand.progressLabel,
             threadCount: builtCommand.testThreadCount,

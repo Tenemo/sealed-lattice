@@ -358,7 +358,6 @@ use readers::*;
 use record_verification::*;
 
 pub(crate) use committed_material::compute_vss_committed_material_commitment_request;
-#[cfg(any(feature = "target-decryption-development-commands", test))]
 pub(crate) use committed_material::{
     VssCommittedMaterialCommitmentInput, compute_vss_committed_material_commitment,
 };
@@ -371,7 +370,7 @@ pub(in crate::bgv::setup) use message_encoding::{
     vss_public_share_linkage_packed_message_encoding_layout,
     vss_public_share_linkage_source_message_encoding_layout,
 };
-pub(crate) use record_verification::validate_standalone_vss_public_commitment_body;
+pub(crate) use record_verification::validate_standalone_vss_committed_material_commitment;
 pub(crate) use share_linkage::verify_vss_share_linkage_bindings_request;
 pub(crate) use share_linkage::{
     VssAggregateThresholdProofContext, verify_vss_public_aggregate_threshold_proofs,

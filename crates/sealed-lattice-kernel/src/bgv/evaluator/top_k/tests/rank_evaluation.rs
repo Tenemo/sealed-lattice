@@ -10,7 +10,8 @@ use crate::bgv::evaluator::engine::ciphertext_add;
 // saturating handoff can never ship silently again. It runs one full
 // first-profile-domain comparison, which costs a couple of minutes.
 #[test]
-fn first_profile_domain_multiballot_rank_evaluation_decrypts() {
+#[ignore = "heavy Rust kernel evaluator test; run pnpm run test:rust:kernel:heavy"]
+fn heavy_rust_kernel_first_profile_domain_multiballot_rank_evaluation_decrypts() {
     let context = EvaluatorContext::new(
         "first-profile-domain-multiballot-rank",
         SELECTED_EVALUATOR_WORKING_LEVEL,
@@ -106,7 +107,8 @@ fn top_k_order_polynomial_masks_unselected_ranks() {
 }
 
 #[test]
-fn packed_rank_evaluation_decrypts_expected_ranks_and_tie_policy() {
+#[ignore = "heavy Rust kernel evaluator test; run pnpm run test:rust:kernel:heavy"]
+fn heavy_rust_kernel_packed_rank_evaluation_decrypts_expected_ranks_and_tie_policy() {
     let context = EvaluatorContext::new(
         "packed-rank-evaluation-decrypts-expected-ranks",
         SELECTED_EVALUATOR_WORKING_LEVEL,
@@ -149,7 +151,8 @@ fn packed_rank_evaluation_decrypts_expected_ranks_and_tie_policy() {
 }
 
 #[test]
-fn sparse_target_projection_decrypts_selected_ids_and_orders() {
+#[ignore = "heavy Rust kernel evaluator test; run pnpm run test:rust:kernel:heavy"]
+fn heavy_rust_kernel_sparse_target_projection_decrypts_selected_ids_and_orders() {
     let context = EvaluatorContext::new(
         "sparse-target-projection-decrypts-selected-values",
         SELECTED_EVALUATOR_WORKING_LEVEL,

@@ -6,6 +6,8 @@
 export type {
     EncryptedLocalTrusteeSetupMaterial,
     EncryptedLocalTrusteeSetupState,
+    LocalTrusteeSetupSealedMaterialDecryptionInput,
+    LocalTrusteeSetupSealedMaterialDecryptionResult,
     LocalTrusteeSetupSealedMaterialEncryptionInput,
     LocalTrusteeSetupSealedMaterialEncryptionResult,
     LocalTrusteeSetupStateSealedMaterial,
@@ -16,6 +18,7 @@ export type {
     LocalTrusteeStateStorageEncryptionResult,
 } from './local-trustee-state-storage/constants-and-types.js';
 export {
+    decryptLocalTrusteeSetupSealedMaterial,
     decryptLocalTrusteeState,
     encryptLocalTrusteeSetupSealedMaterial,
     encryptLocalTrusteeState,

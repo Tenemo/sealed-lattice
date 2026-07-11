@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import {
     canonicalJson,
     createPrivateVssMailboxKeyPair,
+    decryptLocalTrusteeSetupSealedMaterial,
     decryptLocalTrusteeState,
     decryptPrivateVssMailboxEnvelope,
     deriveCanonicalObjectHash,
@@ -576,6 +577,56 @@ describe('crypto primitive boundary', () => {
             localStatePlaintextHash: encrypted.localStatePlaintextHash,
             storageAadHash: encrypted.storageAadHash,
         });
+        await expect(
+            decryptLocalTrusteeSetupSealedMaterial({
+                sealedMaterial: sealedAggregateThresholdShare.sealedMaterial,
+                expectedMaterialRoot: aggregateThresholdShareRoot,
+                localStateCommitment,
+                setupContext,
+                storageKeyBytesHex,
+            }),
+        ).resolves.toMatchObject({
+            materialPlaintext: {
+                objectType: 'LocalTrusteeAggregateThresholdShareMaterial',
+                shareValues: [1, 2, 3],
+            },
+            materialPlaintextHash:
+                sealedAggregateThresholdShare.materialPlaintextHash,
+            materialAadHash: sealedAggregateThresholdShare.materialAadHash,
+        });
+
+        const tamperedSealedCiphertextBytesHex = changeLastHexByte(
+            sealedAggregateThresholdShare.sealedMaterial.encryptedMaterial
+                .ciphertextBytesHex,
+        );
+        const tamperedSealedEnvelopeWithoutHash = {
+            ...objectWithoutField(
+                sealedAggregateThresholdShare.sealedMaterial.encryptedMaterial,
+                'encryptedMaterialHash',
+            ),
+            ciphertextBytesHex: tamperedSealedCiphertextBytesHex,
+        };
+        const tamperedSealedEnvelope = {
+            ...tamperedSealedEnvelopeWithoutHash,
+            encryptedMaterialHash: localTrusteeEnvelopeHash(
+                'sealed-lattice-local-trustee-state/sealed-material-envelope-hash',
+                tamperedSealedEnvelopeWithoutHash,
+            ),
+        } as typeof sealedAggregateThresholdShare.sealedMaterial.encryptedMaterial;
+        await expect(
+            decryptLocalTrusteeSetupSealedMaterial({
+                sealedMaterial: {
+                    ...sealedAggregateThresholdShare.sealedMaterial,
+                    ciphertextReference:
+                        tamperedSealedEnvelope.encryptedMaterialHash,
+                    encryptedMaterial: tamperedSealedEnvelope,
+                },
+                expectedMaterialRoot: aggregateThresholdShareRoot,
+                localStateCommitment,
+                setupContext,
+                storageKeyBytesHex,
+            }),
+        ).rejects.toThrow();
 
         const tamperedLocalStateCiphertextBytesHex = changeLastHexByte(
             encrypted.encryptedLocalState.ciphertextBytesHex,

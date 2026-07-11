@@ -24,6 +24,8 @@ import {
     textDecoder,
     textEncoder,
     type EncryptedLocalTrusteeSetupMaterial,
+    type LocalTrusteeSetupSealedMaterialDecryptionInput,
+    type LocalTrusteeSetupSealedMaterialDecryptionResult,
     type LocalTrusteeSetupSealedMaterialEncryptionInput,
     type LocalTrusteeSetupSealedMaterialEncryptionResult,
     type LocalTrusteeStateStorageDecryptionInput,
@@ -34,6 +36,7 @@ import {
 import {
     assertCommitmentHeader,
     validateLocalStatePlaintext,
+    validateSealedMaterial,
 } from './envelope-validation.js';
 import {
     assertNonEmptyString,
@@ -140,6 +143,82 @@ export const encryptLocalTrusteeSetupSealedMaterial = async (
             [materialPlaintextBytes],
         ),
         materialAadHash,
+    };
+};
+
+export const decryptLocalTrusteeSetupSealedMaterial = async (
+    input: LocalTrusteeSetupSealedMaterialDecryptionInput,
+): Promise<LocalTrusteeSetupSealedMaterialDecryptionResult> => {
+    assertProtocolHash(input.expectedMaterialRoot, 'expectedMaterialRoot');
+    assertCommitmentHeader(input.localStateCommitment);
+    const storageKeyBytes = decodeFixedHex(
+        input.storageKeyBytesHex,
+        aesGcmKeyByteLength,
+        'storageKeyBytesHex',
+    );
+    const sealedMaterial = validateSealedMaterial(
+        input.sealedMaterial,
+        'aggregate-threshold-share-sealed',
+        input.expectedMaterialRoot,
+        input.setupContext,
+        input.localStateCommitment,
+        storageKeyBytes,
+        'sealedMaterial',
+    );
+    const encryptedMaterial = sealedMaterial.encryptedMaterial;
+    const associatedDataBytes = textEncoder.encode(
+        canonicalJson(encryptedMaterial.materialAad),
+    );
+    const keyBytes = deriveSealedMaterialAesGcmKeyBytes(
+        storageKeyBytes,
+        input.expectedMaterialRoot,
+        encryptedMaterial.materialAadHash,
+    );
+    const key = await importAesGcmKey(keyBytes, ['decrypt']);
+    const nonceBytes = decodeFixedHex(
+        encryptedMaterial.aeadNonceHex,
+        aesGcmNonceByteLength,
+        'sealedMaterial.encryptedMaterial.aeadNonceHex',
+    );
+    const ciphertextBytes = hexToBytes(encryptedMaterial.ciphertextBytesHex);
+    const plaintextBytes = new Uint8Array(
+        await subtleCrypto().decrypt(
+            {
+                name: 'AES-GCM',
+                iv: arrayBufferFromBytes(nonceBytes),
+                additionalData: arrayBufferFromBytes(associatedDataBytes),
+                tagLength: aesGcmTagBitLength,
+            },
+            key,
+            arrayBufferFromBytes(ciphertextBytes),
+        ),
+    );
+    if (plaintextBytes.byteLength !== encryptedMaterial.plaintextByteLength) {
+        throw new Error(
+            'decrypted sealed material byte length does not match plaintextByteLength.',
+        );
+    }
+    const plaintextJson = textDecoder.decode(plaintextBytes);
+    const materialPlaintext: unknown = JSON.parse(plaintextJson);
+    if (canonicalJson(materialPlaintext) !== plaintextJson) {
+        throw new Error('decrypted sealed material must use canonical JSON.');
+    }
+    if (
+        deriveCanonicalObjectHash(materialPlaintext) !==
+        sealedMaterial.materialRoot
+    ) {
+        throw new Error(
+            'decrypted sealed material does not match sealedMaterial.materialRoot.',
+        );
+    }
+
+    return {
+        materialPlaintext,
+        materialPlaintextHash: hash512Hex(
+            'sealed-lattice-local-trustee-state/sealed-material-plaintext-hash',
+            [plaintextBytes],
+        ),
+        materialAadHash: encryptedMaterial.materialAadHash,
     };
 };
 

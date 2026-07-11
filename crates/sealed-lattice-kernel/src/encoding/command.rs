@@ -41,31 +41,14 @@ enum TranscriptCoreCommand {
     GenerateBgvBaseConversionFixture,
     AnalyzeBgvCanonicalObject,
     RunDirectEncryptedBallot,
-    // Target-decryption command boundary (deliberate, not drift):
-    // - The prover-side commands below (share/proof-material generation from a
-    //   local secret share or witness, plus the standalone proof-material and
-    //   statement-binding verify introspection commands) are dev/test tooling.
-    //   They consume raw local secret material and are feature/test-gated out of
-    //   the default command surface so a raw share-generation footgun cannot be
-    //   driven from a production build.
-    // - The result-release commands (derive-context/begin/absorb/finish) are the
-    //   production-shaped staged one-shot release path and are intentionally
-    //   ungated. Safety does not come from the gate: `Absorb` verifies each
-    //   share's proof material inline through the ungated verifier chain
-    //   (`target_decryption::verify_target_decryption_share_proof_material` ->
-    //   `verify_evaluation_key_share`), so a proofless or unverified share can
-    //   never reach recombination even when the standalone verify command above
-    //   is compiled out. This mirrors SEC-002: only the proofless raw commands
-    //   are gated; the staged release over a verified-share session is not.
-    #[cfg(any(feature = "target-decryption-development-commands", test))]
+    // Participant-side target-share and proof generation consume local witness
+    // material inside the caller's own browser. The staged result-release path
+    // still verifies every proof before recombination; exposing local generation
+    // does not make an unproved share acceptable.
     GenerateBgvTargetDecryptionShareFromLocalShare,
-    #[cfg(any(feature = "target-decryption-development-commands", test))]
     DeriveBgvTargetDecryptionShareProofStatement,
-    #[cfg(any(feature = "target-decryption-development-commands", test))]
     GenerateBgvTargetDecryptionShareProofMaterialFromLocalWitness,
-    #[cfg(any(feature = "target-decryption-development-commands", test))]
     VerifyBgvTargetDecryptionShareProofMaterial,
-    #[cfg(any(feature = "target-decryption-development-commands", test))]
     VerifyBgvTargetDecryptionShareProofStatementBinding,
     DeriveBgvTargetDecryptionResultReleaseSetupContext,
     BeginBgvTargetDecryptionResultRelease,
@@ -260,7 +243,6 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
         | TranscriptCoreCommand::GenerateSameSecretBridgeProof => {
             run_bgv_command(command, &request)
         }
-        #[cfg(any(feature = "target-decryption-development-commands", test))]
         TranscriptCoreCommand::GenerateBgvTargetDecryptionShareFromLocalShare
         | TranscriptCoreCommand::DeriveBgvTargetDecryptionShareProofStatement
         | TranscriptCoreCommand::GenerateBgvTargetDecryptionShareProofMaterialFromLocalWitness
@@ -363,31 +345,26 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
         TranscriptCoreCommand::RunDirectEncryptedBallot => {
             crate::bgv::direct_ballots::run_direct_encrypted_ballot(request)
         }
-        #[cfg(any(feature = "target-decryption-development-commands", test))]
         TranscriptCoreCommand::GenerateBgvTargetDecryptionShareFromLocalShare => {
             crate::bgv::target_decryption::generate_bgv_target_decryption_share_from_local_share_request(
                 request,
             )
         }
-        #[cfg(any(feature = "target-decryption-development-commands", test))]
         TranscriptCoreCommand::DeriveBgvTargetDecryptionShareProofStatement => {
             crate::bgv::target_decryption::derive_bgv_target_decryption_share_proof_statement_from_request(
                 request,
             )
         }
-        #[cfg(any(feature = "target-decryption-development-commands", test))]
         TranscriptCoreCommand::GenerateBgvTargetDecryptionShareProofMaterialFromLocalWitness => {
             crate::bgv::target_decryption::generate_bgv_target_decryption_share_proof_material_from_local_witness_request(
                 request,
             )
         }
-        #[cfg(any(feature = "target-decryption-development-commands", test))]
         TranscriptCoreCommand::VerifyBgvTargetDecryptionShareProofMaterial => {
             crate::bgv::target_decryption::verify_bgv_target_decryption_share_proof_material_from_request(
                 request,
             )
         }
-        #[cfg(any(feature = "target-decryption-development-commands", test))]
         TranscriptCoreCommand::VerifyBgvTargetDecryptionShareProofStatementBinding => {
             crate::bgv::target_decryption::verify_bgv_target_decryption_share_proof_statement_binding_from_request(
                 request,

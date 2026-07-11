@@ -30,6 +30,7 @@ pub(super) fn read_setup_binding(setup_package: &Value) -> CanonicalResult<Setup
     // hashes are dropped from the statement rather than re-derived.
     let setup_package_hash = derive_canonical_object_hash(setup_package)?;
     let ceremony_id = string_at_path(setup_package, &["setupContext", "ceremonyId"])?.to_string();
+    let setup_epoch = string_at_path(setup_package, &["setupContext", "setupEpoch"])?.to_string();
     let election_manifest_hash =
         hash_at_path(setup_package, &["setupContext", "manifestHash"])?.to_string();
     // Kernel-canonical target-decryption parameters (level 6, K_top = 20 scope),
@@ -84,6 +85,7 @@ pub(super) fn read_setup_binding(setup_package: &Value) -> CanonicalResult<Setup
     Ok(SetupBinding {
         setup_package_hash,
         ceremony_id,
+        setup_epoch,
         election_manifest_hash,
         roster_hash: setup_context_hashes.roster_hash,
         setup_parameters_hash: setup_context_hashes.setup_parameters_hash,
@@ -177,6 +179,7 @@ pub(super) fn read_target_result_release_setup_context(
     Ok(SetupBinding {
         setup_package_hash: hash_at_path(context, &["setupPackageHash"])?.to_string(),
         ceremony_id: string_at_path(context, &["ceremonyId"])?.to_string(),
+        setup_epoch: string_at_path(context, &["setupEpoch"])?.to_string(),
         election_manifest_hash: hash_at_path(context, &["electionManifestHash"])?.to_string(),
         roster_hash: hash_at_path(context, &["rosterHash"])?.to_string(),
         setup_parameters_hash: hash_at_path(context, &["setupParametersHash"])?.to_string(),
@@ -201,6 +204,7 @@ fn target_result_release_setup_context_from_binding(
         "objectType": "BgvTargetDecryptionReleaseSetupContext",
         "setupPackageHash": setup_binding.setup_package_hash,
         "ceremonyId": setup_binding.ceremony_id,
+        "setupEpoch": setup_binding.setup_epoch,
         "electionManifestHash": setup_binding.election_manifest_hash,
         "rosterHash": setup_binding.roster_hash,
         "setupParametersHash": setup_binding.setup_parameters_hash,

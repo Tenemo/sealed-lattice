@@ -16,10 +16,12 @@ import {
     assertNonEmptyString,
     assertNonNegativeSafeInteger,
     assertProtocolHash,
+    bytesFromHex,
     contextFields,
     setupContextFieldNames,
     type JsonRecord,
 } from './common-fields.js';
+import type { LocalTrusteeVssPublicAggregateOpeningCredentialHandoff } from './vss-commitments/commitment-sets.js';
 import type {
     CollectiveBgvSetupContext,
     PrivateVssEnvelopeVerificationReference,
@@ -73,6 +75,7 @@ export type GeneratedLocalTrusteeSetupStateInput = Readonly<{
     readonly thresholdShareCommitments: unknown;
     readonly privateVssEnvelopeCommitments: unknown;
     readonly verifiedPrivateVssShareEnvelopes: readonly unknown[];
+    readonly localTrusteeAggregateOpeningCredentialHandoff: LocalTrusteeVssPublicAggregateOpeningCredentialHandoff;
     readonly vssShareAcceptances: unknown;
     readonly vssComplaints?: unknown;
     readonly storageKeyBytesHex: string;
@@ -644,6 +647,89 @@ const aggregateVerifiedPrivateVssMaterial = (
     const orderedAggregates = [...aggregateByLimb.values()].sort(
         (left, right) => left.rnsLimbIndex - right.rnsLimbIndex,
     );
+    const aggregateOpeningCredentialHandoff = assertJsonRecord(
+        input.localTrusteeAggregateOpeningCredentialHandoff,
+        'localTrusteeAggregateOpeningCredentialHandoff',
+    );
+    if (
+        aggregateOpeningCredentialHandoff.objectType !==
+        'LocalTrusteeVssPublicAggregateOpeningCredentialHandoff'
+    ) {
+        throw new TypeError(
+            'localTrusteeAggregateOpeningCredentialHandoff.objectType must be LocalTrusteeVssPublicAggregateOpeningCredentialHandoff.',
+        );
+    }
+    if (
+        aggregateOpeningCredentialHandoff.trusteeIdentity !==
+            input.trusteeIdentity ||
+        aggregateOpeningCredentialHandoff.trusteeRosterPosition !==
+            input.trusteeRosterPosition
+    ) {
+        throw new Error(
+            'local aggregate opening credential handoff must belong to the local trustee.',
+        );
+    }
+    const aggregateOpeningCredentials = assertJsonRecordArray(
+        aggregateOpeningCredentialHandoff.aggregateOpeningCredentials,
+        'localTrusteeAggregateOpeningCredentialHandoff.aggregateOpeningCredentials',
+    );
+    if (aggregateOpeningCredentials.length !== orderedAggregates.length) {
+        throw new Error(
+            'local aggregate opening credential handoff must contain one credential per aggregate RNS limb.',
+        );
+    }
+    aggregateOpeningCredentials.forEach((credential, credentialIndex) => {
+        const objectPath = `localTrusteeAggregateOpeningCredentialHandoff.aggregateOpeningCredentials.${String(credentialIndex)}`;
+        const aggregate = orderedAggregates[credentialIndex];
+        if (
+            aggregate === undefined ||
+            credential.objectType !==
+                'LocalTrusteeVssPublicAggregateOpeningCredential' ||
+            credential.recipientIdentity !== input.trusteeIdentity ||
+            credential.recipientRosterPosition !==
+                input.trusteeRosterPosition ||
+            credential.recipientTrusteePoint !==
+                input.trusteeRosterPosition + 1 ||
+            credential.rnsLimbIndex !== aggregate.rnsLimbIndex ||
+            credential.rnsPrime !== aggregate.rnsPrime
+        ) {
+            throw new Error(
+                `${objectPath} must match the local trustee and aggregate RNS limb.`,
+            );
+        }
+        protocolHashField(credential, 'aggregateCommitmentRoot', objectPath);
+        protocolHashField(credential, 'aggregateOpeningRoot', objectPath);
+        protocolHashField(credential, 'aggregateMaterialSeedHex', objectPath);
+        const encodedMessage = stringField(
+            credential,
+            'aggregateCommitmentMessageValuesLeHex',
+            objectPath,
+        );
+        const messageBytes = bytesFromHex(
+            encodedMessage,
+            `${objectPath}.aggregateCommitmentMessageValuesLeHex`,
+        );
+        if (messageBytes.byteLength !== aggregate.shareValues.length * 8) {
+            throw new Error(
+                `${objectPath}.aggregateCommitmentMessageValuesLeHex must encode the complete aggregate share vector.`,
+            );
+        }
+        const messageView = new DataView(
+            messageBytes.buffer,
+            messageBytes.byteOffset,
+            messageBytes.byteLength,
+        );
+        aggregate.shareValues.forEach((shareValue, shareValueIndex) => {
+            if (
+                messageView.getBigUint64(shareValueIndex * 8, true) !==
+                shareValue
+            ) {
+                throw new Error(
+                    `${objectPath}.aggregateCommitmentMessageValuesLeHex must match the aggregate of the verified private VSS shares.`,
+                );
+            }
+        });
+    });
     const localEnvelopeReferences =
         sourcePrivateEnvelopeReferences(envelopeReferences);
     const materialCommonFields = {
@@ -660,6 +746,8 @@ const aggregateVerifiedPrivateVssMaterial = (
             objectType: 'LocalTrusteeAggregateThresholdShareMaterial',
             ...materialCommonFields,
             materialDerivation: 'sum-of-verified-private-vss-share-values',
+            aggregateOpeningCredentialHandoff:
+                input.localTrusteeAggregateOpeningCredentialHandoff,
             aggregateShareByRnsLimb: orderedAggregates.map((aggregate) => ({
                 objectType: 'LocalTrusteeAggregateThresholdShareLimb',
                 rnsLimbIndex: aggregate.rnsLimbIndex,

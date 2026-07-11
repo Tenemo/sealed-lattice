@@ -1,6 +1,8 @@
 export const acceptedSetupTestModulePattern =
     'bgv::setup::tests::accepted_setup';
 
+export const heavyRustKernelTestNamePrefix = 'heavy_rust_kernel_';
+
 export const normalizeRustTestFilter = (filter: string): string => {
     const normalizedSeparators = filter.replace(/\\/gu, '/');
     const pathParts = normalizedSeparators.split('/');
@@ -21,7 +23,37 @@ export const cargoTestArgumentsForRustKernelFast = (
     ...(testFilter === undefined ? [] : [testFilter]),
     '--',
     ...(testFilter === undefined
-        ? ['--skip', acceptedSetupTestModulePattern]
+        ? [
+              '--skip',
+              acceptedSetupTestModulePattern,
+              // Kernel proof and evaluator tests already parallelize their
+              // polynomial work through Rayon. Letting libtest start one such
+              // test per logical processor creates nested CPU and memory
+              // oversubscription: individually short setup tests remain active
+              // for more than a minute and the fast lane stretches past
+              // sixteen minutes. Serial libtest scheduling keeps every fast
+              // test deterministic while Rayon still uses the machine inside
+              // each test.
+              '--test-threads',
+              '1',
+          ]
         : []),
+    '--show-output',
+];
+
+export const cargoTestArgumentsForRustKernelHeavy = (
+    testFilter = heavyRustKernelTestNamePrefix,
+): readonly string[] => [
+    'test',
+    '-p',
+    'sealed-lattice-kernel',
+    testFilter,
+    '--',
+    '--ignored',
+    // These proof and evaluator tests use Rayon internally. Serial libtest
+    // scheduling prevents nested CPU and memory oversubscription while keeping
+    // the implementation's own polynomial parallelism enabled.
+    '--test-threads',
+    '1',
     '--show-output',
 ];

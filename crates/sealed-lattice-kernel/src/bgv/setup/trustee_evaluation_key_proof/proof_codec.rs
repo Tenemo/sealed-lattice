@@ -102,10 +102,24 @@ pub(crate) fn decode_trustee_evaluation_key_proof(
     for limb_index in proof_limb_indices {
         let layout = LimbColumnLayout::new(statement, limb_index)?;
         let trace_size = layout.trace_size;
-        let extension_size = trace_size * DOMAIN_BLOWUP;
-        let total_columns = layout.phase_one_physical_count()
-            + PHASE_TWO_COLUMN_COUNT
-            + layout.vss_committed_material_physical_count();
+        let extension_size = trace_size.checked_mul(DOMAIN_BLOWUP).ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "trustee evaluation-key proof extension size overflowed",
+            )
+        })?;
+        let total_columns = layout
+            .phase_one_physical_count()
+            .checked_add(PHASE_TWO_COLUMN_COUNT)
+            .and_then(|column_count| {
+                column_count.checked_add(layout.vss_committed_material_physical_count())
+            })
+            .ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    "trustee evaluation-key proof total column count overflowed",
+                )
+            })?;
         let phase_tree_depth = (extension_size / 2).trailing_zeros() as usize;
         let witness_tree_root = read_array::<MERKLE_DIGEST_BYTES>(bytes, &mut cursor)?;
         let quotient_tree_root = read_array::<MERKLE_DIGEST_BYTES>(bytes, &mut cursor)?;

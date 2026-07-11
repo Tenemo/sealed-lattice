@@ -26,10 +26,35 @@ jobs:
                   components: clippy, rustfmt
                   targets: wasm32-unknown-unknown
             - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
-            - run: cargo fmt --check -p sealed-lattice-kernel
+            - run: cargo fmt --check --all
             - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
             - name: Run Rust tests with optimized test profile
               run: pnpm run test:rust:kernel
+
+    rust-heavy:
+        name: rust heavy
+        runs-on: ubuntu-latest
+        timeout-minutes: 120
+        steps:
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+            - uses: ./.github/actions/bootstrap-pnpm
+            - uses: dtolnay/rust-toolchain@b18f7037bce1ea84c086f4d5e9493f853c0ce412
+              with:
+                  components: clippy, rustfmt
+                  targets: wasm32-unknown-unknown
+            - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
+            - name: Run measured-heavy Rust kernel tests
+              id: rust-heavy
+              timeout-minutes: 110
+              run: pnpm run test:rust:kernel:heavy
+            - name: Upload measured-heavy Rust kernel logs
+              if: ${{ failure() && steps['rust-heavy'].outcome == 'failure' }}
+              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+              with:
+                  if-no-files-found: error
+                  name: rust-heavy-logs
+                  retention-days: 7
+                  path: logs
 
     rust-accepted-setup:
         name: rust accepted setup
@@ -153,6 +178,7 @@ jobs:
         timeout-minutes: 5
         needs:
             - rust
+            - rust-heavy
             - rust-accepted-setup
             - wasm
             - verify-static

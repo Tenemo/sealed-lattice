@@ -27,6 +27,7 @@ import type {
     EvaluatorKeyScheduleInput as ProtocolEvaluatorKeyScheduleInput,
     GaloisKeyShareBatch as ProtocolGaloisKeyShareBatch,
     GaloisKeyShareBatchContribution as ProtocolGaloisKeyShareBatchContribution,
+    LocalTrusteeVssPublicAggregateOpeningCredentialHandoff,
     PublicEvaluationKeySet as ProtocolPublicEvaluationKeySet,
     PublicEvaluationKeySetInput as ProtocolPublicEvaluationKeySetInput,
     PublicKeyShareMaterialContributionInput as ProtocolPublicKeyShareMaterialContributionInput,
@@ -547,6 +548,7 @@ export type ExportEncryptedLocalTrusteeSetupStateInput = Readonly<{
     readonly thresholdShareCommitments: unknown;
     readonly privateVssEnvelopeCommitments: unknown;
     readonly verifiedPrivateVssShareEnvelopes: readonly unknown[];
+    readonly localTrusteeAggregateOpeningCredentialHandoff: LocalTrusteeVssPublicAggregateOpeningCredentialHandoff;
     readonly vssShareAcceptances: unknown;
     readonly vssComplaints?: unknown;
     readonly storageKeyBytesHex: string;

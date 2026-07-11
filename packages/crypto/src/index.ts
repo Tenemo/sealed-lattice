@@ -16,6 +16,7 @@ export {
     encryptPrivateVssMailboxEnvelope,
 } from './private-vss-mailbox.js';
 export {
+    decryptLocalTrusteeSetupSealedMaterial,
     decryptLocalTrusteeState,
     encryptLocalTrusteeSetupSealedMaterial,
     encryptLocalTrusteeState,
@@ -31,6 +32,8 @@ export type {
 export type {
     EncryptedLocalTrusteeSetupMaterial,
     EncryptedLocalTrusteeSetupState,
+    LocalTrusteeSetupSealedMaterialDecryptionInput,
+    LocalTrusteeSetupSealedMaterialDecryptionResult,
     LocalTrusteeSetupSealedMaterialEncryptionInput,
     LocalTrusteeSetupSealedMaterialEncryptionResult,
     LocalTrusteeSetupStateSealedMaterial,

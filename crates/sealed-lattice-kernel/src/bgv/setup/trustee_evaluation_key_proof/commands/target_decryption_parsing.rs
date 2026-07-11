@@ -471,7 +471,6 @@ pub(super) fn target_decryption_smudging_commitments_from_set(
     Ok((roots, commitments))
 }
 
-#[cfg(any(test, feature = "target-decryption-development-commands"))]
 pub(super) fn target_decryption_share_witness_from_request(
     request: &Value,
 ) -> CanonicalResult<TrusteeEvaluationKeyWitness> {

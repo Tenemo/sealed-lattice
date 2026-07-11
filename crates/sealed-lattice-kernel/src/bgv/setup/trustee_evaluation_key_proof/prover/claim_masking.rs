@@ -233,15 +233,15 @@ fn append_vss_public_digit_vectors(digit_vectors: &mut Vec<Vec<i64>>, message_ve
 fn append_vss_public_trit_vectors(
     trit_vectors: &mut Vec<Vec<i64>>,
     message_vector: &[i64],
-    message_modulus: u64,
+    encoding_layout: crate::bgv::setup::vss_commitment::VssPublicMessageEncodingLayout,
 ) {
-    let encoding_layout =
-        crate::bgv::setup::vss_commitment::vss_public_message_encoding_layout(message_modulus)
-            .expect("VSS message modulus fits the encoding layout");
     for digit_index in 0..crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT {
         let trit_count = encoding_layout
             .digit_trit_count(digit_index)
             .expect("VSS digit is in the encoding layout");
+        if trit_count == 0 {
+            continue;
+        }
         let mut vectors = (0..trit_count)
             .map(|_| Vec::with_capacity(message_vector.len()))
             .collect::<Vec<_>>();
@@ -345,26 +345,31 @@ pub(super) fn global_claim_integers(
             vss_share_linkage.unique_coefficient_witness_slot_count() + item_count,
             "VSS packed message bounds cover every coefficient slot and recipient item"
         );
+        let coefficient_message_count = vss_share_linkage.unique_coefficient_witness_slot_count();
+        let packed_message_encoding_layouts = packed_message_bounds
+            .iter()
+            .enumerate()
+            .map(|(message_position, message_bound)| {
+                crate::bgv::setup::vss_commitment::vss_public_share_linkage_packed_message_encoding_layout(
+                    vss_share_linkage.is_threshold_aggregate,
+                    message_position,
+                    coefficient_message_count,
+                    *message_bound,
+                )
+            })
+            .collect::<CanonicalResult<Vec<_>>>()
+            .expect("VSS packed message bounds fit the shared encoding layout");
         let mut message_position = 0_usize;
 
-        for coefficient_slot_index in 0..vss_share_linkage.unique_coefficient_witness_slot_count() {
+        for coefficient_slot_index in 0..coefficient_message_count {
             let coefficient_messages =
                 &witness.vss_public_coefficient_messages_by_shamir_index[coefficient_slot_index];
             validate_vss_public_vector(coefficient_messages);
-            // A proven threshold aggregate carries its source (coefficient)
-            // messages with the digit-only encoding: their range is established
-            // by the separately verified recipient-share proofs, so no per-digit
-            // trit decoder claims are emitted here. The message position still
-            // advances so the recipient item reads its own bound. This matches
-            // the digit-only layout in `LimbColumnLayout::new` and the verifier's
-            // claim projection.
-            if !vss_share_linkage.is_threshold_aggregate {
-                append_vss_public_trit_vectors(
-                    &mut owned_vss_public_claim_vectors,
-                    coefficient_messages,
-                    packed_message_bounds[message_position],
-                );
-            }
+            append_vss_public_trit_vectors(
+                &mut owned_vss_public_claim_vectors,
+                coefficient_messages,
+                packed_message_encoding_layouts[message_position],
+            );
             message_position += 1;
         }
 
@@ -373,7 +378,7 @@ pub(super) fn global_claim_integers(
             append_vss_public_trit_vectors(
                 &mut owned_vss_public_claim_vectors,
                 recipient_messages,
-                packed_message_bounds[message_position],
+                packed_message_encoding_layouts[message_position],
             );
             message_position += 1;
         }

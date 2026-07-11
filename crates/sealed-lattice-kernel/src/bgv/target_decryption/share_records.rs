@@ -1,6 +1,5 @@
 use super::*;
 
-#[cfg(any(feature = "target-decryption-development-commands", test))]
 pub(super) fn read_partial_decryption_share(
     share: &Value,
     setup_binding: &SetupBinding,
@@ -77,7 +76,6 @@ pub(super) fn read_partial_decryption_share(
     Ok(())
 }
 
-#[cfg(any(feature = "target-decryption-development-commands", test))]
 pub(super) fn compare_share_record_fields(
     share: &Value,
     setup_binding: &SetupBinding,
@@ -208,7 +206,6 @@ pub(super) fn compare_share_record_fields(
     Ok(())
 }
 
-#[cfg(any(feature = "target-decryption-development-commands", test))]
 pub(super) fn share_payload(
     level: usize,
     target_id_partials: &[Vec<u64>],
@@ -227,7 +224,6 @@ pub(super) fn share_payload(
     }))
 }
 
-#[cfg(any(feature = "target-decryption-development-commands", test))]
 pub(super) fn partial_limb_records(partials: &[Vec<u64>]) -> CanonicalResult<Vec<Value>> {
     partials
         .iter()
@@ -314,7 +310,6 @@ pub(super) fn read_partial_limb_set(
         .collect()
 }
 
-#[cfg(any(feature = "target-decryption-development-commands", test))]
 fn validate_target_decryption_smudging_input_report(
     report: &Value,
     setup_binding: &SetupBinding,
@@ -439,7 +434,6 @@ fn validate_target_decryption_smudging_input_report(
     )
 }
 
-#[cfg(any(feature = "target-decryption-development-commands", test))]
 fn validate_target_decryption_smudging_role_report(
     role_report: &Value,
     expected_role: &str,
@@ -488,7 +482,6 @@ fn validate_target_decryption_smudging_role_report(
     Ok(())
 }
 
-#[cfg(any(feature = "target-decryption-development-commands", test))]
 pub(super) fn share_record_hash_input(
     setup_binding: &SetupBinding,
     target_accepted: &TargetAcceptedBinding,

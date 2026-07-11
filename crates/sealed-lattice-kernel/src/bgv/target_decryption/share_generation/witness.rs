@@ -332,7 +332,6 @@ pub(in super::super) fn read_local_target_decryption_share_witness(
 
     Ok(LocalTargetDecryptionShareWitness {
         secret_share_by_limb,
-        setup_epoch: setup_epoch.to_string(),
         smudging_seed_hex,
         smudging_polynomial_openings,
         opening: AggregateOpeningWitnessBinding {

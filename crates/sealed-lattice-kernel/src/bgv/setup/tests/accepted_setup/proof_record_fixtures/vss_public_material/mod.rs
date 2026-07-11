@@ -59,4 +59,34 @@ mod same_secret_bridge;
 mod share_linkage;
 mod transport;
 
+// Builds only the two aggregate coordinates needed by the direct-verifier
+// mutation test. The aggregate proofs still use the content-addressed proof
+// checkpoint store; unrelated accepted-setup proof families are not generated.
+pub(in super::super) fn compact_aggregate_threshold_proof_fixture() -> serde_json::Value {
+    let mut package = minimal_collective_setup_package_for_participant_count(3);
+    let ring_degree = usize::try_from(
+        package["vssCoefficientCommitmentMaterial"]["ringDegree"]
+            .as_u64()
+            .expect("VSS coefficient commitment material ring degree"),
+    )
+    .expect("VSS coefficient commitment material ring degree fits usize");
+    package["vssPublicCoefficientCommitmentSet"] =
+        commitment_sets::vss_public_coefficient_commitment_set_object(&package, ring_degree);
+    package["vssPublicRecipientShareCommitmentSet"] =
+        commitment_sets::vss_public_recipient_share_commitment_set_object(&package);
+    let mut aggregate_threshold_commitment_set =
+        commitment_sets::vss_public_aggregate_threshold_commitment_set_without_proofs_for_coordinates(
+            &package,
+            &[(0, 0), (1, 0)],
+        );
+    aggregate_threshold_commitment_set["aggregateThresholdProofs"] =
+        serde_json::json!(aggregate_threshold::vss_aggregate_threshold_proofs(
+            &package,
+            &aggregate_threshold_commitment_set,
+        ));
+    package["vssPublicAggregateThresholdCommitmentSet"] = aggregate_threshold_commitment_set;
+
+    package
+}
+
 pub(in super::super) use finalized_package::finalize_collective_setup_package;

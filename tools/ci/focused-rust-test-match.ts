@@ -31,7 +31,6 @@ export const createFocusedRustTestMatchTracker =
             matchedTestCount +=
                 summary.passedTestCount +
                 summary.failedTestCount +
-                summary.ignoredTestCount +
                 summary.measuredTestCount;
         };
 

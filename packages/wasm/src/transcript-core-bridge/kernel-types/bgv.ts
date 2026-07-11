@@ -695,6 +695,38 @@ export type BgvLocalTrusteeSetupStateVerification = {
     readonly deletionBoundary: 'after-private-vss-aggregation';
 };
 
+export type BgvTargetDecryptionShare = Readonly<
+    BgvJsonRecord & {
+        readonly objectType: 'BgvTargetDecryptionShare';
+        readonly targetDecryptionShareHash: ProtocolHash;
+        readonly shareRoot: ProtocolHash;
+    }
+>;
+
+export type BgvTargetDecryptionShareProofStatement = Readonly<
+    BgvJsonRecord & {
+        readonly objectType: 'BgvTargetDecryptionShareProofStatement';
+        readonly proofStatementRoot: ProtocolHash;
+    }
+>;
+
+export type BgvTargetDecryptionShareProofMaterial = Readonly<
+    BgvJsonRecord & {
+        readonly objectType: 'BgvTargetDecryptionShareProofMaterial';
+        readonly proofMaterialRoot: ProtocolHash;
+    }
+>;
+
+export type BgvTargetDecryptionShareProofStatementBinding = Readonly<{
+    readonly operation: 'verifyBgvTargetDecryptionShareProofStatementBinding';
+    readonly proofStatementRoot: ProtocolHash;
+}>;
+
+export type BgvTargetDecryptionShareProofMaterialVerification = Readonly<{
+    readonly operation: 'verifyBgvTargetDecryptionShareProofMaterial';
+    readonly proofMaterialRoot: ProtocolHash;
+}>;
+
 // Opaque release setup context record derived from the accepted setup package.
 // It is round-tripped byte-for-byte as the begin command's releaseSetupContext
 // input; only objectType and releaseSetupContextHash are consumed on the

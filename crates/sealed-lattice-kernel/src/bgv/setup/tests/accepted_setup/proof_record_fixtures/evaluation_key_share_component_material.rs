@@ -160,8 +160,8 @@ pub(in super::super) fn evaluation_key_error_coefficients_for_fixture(
     digit_index: usize,
     ring_degree: usize,
 ) -> Vec<i64> {
-    // Roster positions below the n = 10 first-closure roster keep the historical
-    // position-independent error (a multiplier of 5 vanishes mod 5), so the n = 10
+    // Roster positions below the n = 10 first-closure roster use a
+    // position-independent error (a multiplier of 5 vanishes mod 5), so that
     // closure stays byte-identical. The base error aliases with period 5 in the
     // roster position and the fixture secret aliases with period 3, so a trustee's
     // key-switch component repeats every LCM(3, 5) = 15 roster positions. Within

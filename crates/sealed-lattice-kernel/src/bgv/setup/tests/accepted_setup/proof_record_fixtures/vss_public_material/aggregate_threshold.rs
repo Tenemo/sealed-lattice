@@ -8,10 +8,9 @@ pub(in super::super) const VSS_AGGREGATE_THRESHOLD_PROOF_CHECKPOINT_DIRECTORY: &
 // The proven threshold-share aggregate binding for every recipient and target
 // limb: one share-linkage proof with a unit evaluation point per aggregate
 // record, showing the committed threshold share T_{j,l} is the modular sum of
-// the committed source recipient shares sigma_{i->j,l}. Replaces the public
-// homomorphic coordinate-sum removed with the projection body. The proofs are a
-// sibling of the aggregate set's recipientRecords, excluded from the set root
-// (they are bound by their own statements, which reference the committed roots).
+// the committed source recipient shares sigma_{i->j,l}. The proofs are a sibling
+// of the aggregate set's recipientRecords, excluded from the set root (they are
+// bound by their own statements, which reference the committed roots).
 pub(in super::super) fn vss_aggregate_threshold_proofs(
     package: &serde_json::Value,
     aggregate_set: &serde_json::Value,

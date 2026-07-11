@@ -75,7 +75,7 @@ describe('focused Rust test matching', () => {
         );
         finishObserver(tracker.observer);
 
-        expect(tracker.matchedTestCount()).toBe(4);
+        expect(tracker.matchedTestCount()).toBe(3);
     });
 
     it('keeps stream fragments separate and resets between commands', () => {
@@ -116,6 +116,18 @@ describe('focused Rust test matching', () => {
             failureMessage:
                 'Rust kernel fast filter "misspelled_test" matched zero tests.',
         });
+    });
+
+    it('does not treat an ignored test as an executed focused match', () => {
+        const tracker = createFocusedRustTestMatchTracker();
+        startObserver(tracker.observer);
+        feedObserver(
+            tracker.observer,
+            'test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 50 filtered out; finished in 0.00s\n',
+        );
+        finishObserver(tracker.observer);
+
+        expect(tracker.matchedTestCount()).toBe(0);
     });
 
     it('preserves a command failure and accepts at least one matched test', () => {

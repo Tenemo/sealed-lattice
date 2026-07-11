@@ -204,9 +204,10 @@ const buildRustKernelLane = (): ValidationLane => ({
 // Independent checks run concurrently against the built output. The commit gate
 // runs the fast Node test project, the kernel-fast Node project, and the fast
 // Rust kernel tests. The heavier protocol, kernel-heavy Node project, ignored
-// Rust accepted-setup tests, including their ignored proof tests, and the
-// Playwright browser projects stay in their standalone lanes for pre-push
-// verification.
+// measured-heavy Rust proof and evaluator tests, Rust accepted-setup tests,
+// including their ignored proof tests, and the Playwright browser projects
+// stay in standalone lanes so local checks remain fast and CI can schedule the
+// expensive work independently.
 const buildParallelLanes = (
     packageManagerRunner: PackageManagerRunner,
 ): readonly ValidationLane[] => {

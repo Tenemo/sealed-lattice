@@ -266,7 +266,8 @@ fn proof_codec_round_trips_and_rejects_malformed_bytes() {
 }
 
 #[test]
-fn proof_codec_rejects_low_degree_shape_mismatches_before_verification() {
+#[ignore = "heavy Rust kernel proof test; run pnpm run test:rust:kernel:heavy"]
+fn heavy_rust_kernel_proof_codec_rejects_low_degree_shape_mismatches_before_verification() {
     // The adaptive low-degree final layer absorbs the whole recursion below a
     // 4096-coefficient claim bound, so folded-layer shape checks need the
     // smallest ring that still commits a folded Merkle layer.
@@ -361,7 +362,8 @@ fn assert_noncanonical_encoded_proof_rejects(
 }
 
 #[test]
-fn proof_codec_rejects_noncanonical_values_in_every_encoded_area() {
+#[ignore = "heavy Rust kernel proof test; run pnpm run test:rust:kernel:heavy"]
+fn heavy_rust_kernel_proof_codec_rejects_noncanonical_values_in_every_encoded_area() {
     let (statement, witness) =
         generate_development_public_key_share_instance("c0decafe", FOLDED_LAYER_RING_DEGREE)
             .expect("public-key share instance");

@@ -45,6 +45,10 @@ fn target_share_proof_statement_binds_local_witness_and_share() {
     );
     assert_eq!(statement["shareRoot"], local_share["shareRoot"]);
     assert_eq!(
+        statement["setupEpoch"],
+        setup_package["setupContext"]["setupEpoch"]
+    );
+    assert_eq!(
         statement["aggregateOpeningBinding"]["publicMatrixSeedHash"],
         setup_package["commonRandomness"]["publicMatrixSeedHash"]
     );
@@ -82,6 +86,57 @@ fn target_share_proof_statement_binds_local_witness_and_share() {
         statement["proofStatementRoot"],
         json!(derive_canonical_object_hash(&root_input).expect("statement root"))
     );
+}
+
+#[test]
+fn target_share_proof_statement_binding_rejects_recomputed_root_with_wrong_setup_epoch() {
+    let (setup_package, accepted_record, target_ciphertext_binding, target_ciphertexts) =
+        target_fixture();
+    let target_share_profile = target_share_profile(&setup_package);
+    let local_target_share_witness_value = local_target_share_witness(
+        &setup_package,
+        &accepted_record,
+        &target_ciphertext_binding,
+        &target_ciphertexts,
+        &target_share_profile,
+        "trustee-1",
+    );
+    let local_share = generate_local_share(
+        &setup_package,
+        &accepted_record,
+        &target_ciphertext_binding,
+        &target_ciphertexts,
+        &target_share_profile,
+        &local_target_share_witness_value,
+        "trustee-1",
+    );
+    let mut statement = derive_share_proof_statement(TargetShareProofStatementInput {
+        setup_package: &setup_package,
+        accepted_record: &accepted_record,
+        target_ciphertext_binding: &target_ciphertext_binding,
+        target_ciphertexts: &target_ciphertexts,
+        target_share_profile: &target_share_profile,
+        local_target_share_witness_value: &local_target_share_witness_value,
+        target_decryption_share: &local_share,
+        trustee_identity: "trustee-1",
+    })
+    .expect("target share proof statement");
+    statement["setupEpoch"] = json!("rebound-setup-epoch");
+    rebind_share_proof_statement_root(&mut statement);
+
+    let error = verify_share_proof_statement_binding(TargetShareProofStatementBindingInput {
+        setup_package: &setup_package,
+        accepted_record: &accepted_record,
+        target_ciphertext_binding: &target_ciphertext_binding,
+        target_ciphertexts: &target_ciphertexts,
+        target_share_profile: &target_share_profile,
+        target_decryption_share: &local_share,
+        proof_statement: &statement,
+    })
+    .expect_err("a rebound setup epoch must be refused");
+
+    assert_eq!(error.code, CanonicalErrorCode::ComponentMismatch);
+    assert!(error.message.contains("setup epoch"), "{}", error.message);
 }
 
 #[test]

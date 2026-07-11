@@ -7,7 +7,6 @@ pub(super) use self::witness::*;
 
 pub(super) struct LocalTargetDecryptionShareWitness {
     pub(super) secret_share_by_limb: Vec<Vec<u64>>,
-    pub(super) setup_epoch: String,
     pub(super) smudging_seed_hex: String,
     pub(super) smudging_polynomial_openings: Vec<TargetDecryptionSmudgingPolynomialOpening>,
     pub(super) opening: AggregateOpeningWitnessBinding,

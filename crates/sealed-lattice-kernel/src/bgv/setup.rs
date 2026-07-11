@@ -72,7 +72,6 @@ pub(crate) use setup_proof::{
 };
 pub(crate) use trustee_evaluation_key_proof::TARGET_DECRYPTION_SHARE_PROOF_FAMILY;
 pub(crate) use trustee_evaluation_key_proof::describe_trustee_evaluation_key_statement_from_request;
-#[cfg(any(test, feature = "target-decryption-development-commands"))]
 pub(crate) use trustee_evaluation_key_proof::generate_target_decryption_share_proof_bytes_from_request;
 pub(crate) use trustee_evaluation_key_proof::verify_target_decryption_share_proof_bytes_from_request;
 pub(crate) use trustee_evaluation_key_proof::verify_vss_share_linkage_proof_from_request;
@@ -82,14 +81,13 @@ pub(crate) use trustee_evaluation_key_proof::{
 };
 pub(crate) use vss_commitment::{
     VssAggregateThresholdProofContext, compute_vss_committed_material_commitment_request,
-    validate_standalone_vss_public_commitment_body,
+    validate_standalone_vss_committed_material_commitment,
     verify_vss_public_aggregate_threshold_commitment_set_request,
     verify_vss_public_aggregate_threshold_proofs,
     verify_vss_public_coefficient_commitment_set_request,
     verify_vss_public_recipient_share_commitment_set_request,
     verify_vss_share_linkage_bindings_request,
 };
-#[cfg(any(feature = "target-decryption-development-commands", test))]
 pub(crate) use vss_commitment::{
     VssCommittedMaterialCommitmentInput, compute_vss_committed_material_commitment,
 };

@@ -7,6 +7,7 @@ import {
 import {
     acceptedSetupTestModulePattern,
     cargoTestArgumentsForRustKernelFast,
+    heavyRustKernelTestNamePrefix,
     normalizeRustTestFilter,
 } from '#tools/ci/rust-kernel-test-arguments';
 
@@ -20,6 +21,8 @@ describe('Rust kernel runner arguments', () => {
             '--',
             '--skip',
             acceptedSetupTestModulePattern,
+            '--test-threads',
+            '1',
             '--show-output',
         ]);
     });
@@ -65,6 +68,11 @@ describe('Rust kernel runner arguments', () => {
         expect(() => parseRustKernelArguments(['--unsupported'])).toThrow(
             'Unknown argument: --unsupported',
         );
+        expect(() =>
+            parseRustKernelArguments([
+                `${heavyRustKernelTestNamePrefix}one_test`,
+            ]),
+        ).toThrow('must use "pnpm run test:rust:kernel:heavy');
     });
 
     it('builds the cargo command for the package script', () => {

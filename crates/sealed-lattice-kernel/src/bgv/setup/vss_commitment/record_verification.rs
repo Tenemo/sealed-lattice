@@ -97,7 +97,7 @@ pub(super) struct VssCommittedMaterialRecordCommitmentInput<'a> {
     field_name: &'a str,
 }
 
-pub(crate) fn validate_standalone_vss_public_commitment_body(
+pub(crate) fn validate_standalone_vss_committed_material_commitment(
     commitment: &Value,
     field_name: &str,
 ) -> CanonicalResult<Value> {
@@ -163,7 +163,7 @@ pub(super) fn verify_vss_committed_material_record_commitment(
     input: VssCommittedMaterialRecordCommitmentInput<'_>,
 ) -> CanonicalResult<Value> {
     let commitment =
-        validate_standalone_vss_public_commitment_body(input.commitment, input.field_name)?;
+        validate_standalone_vss_committed_material_commitment(input.commitment, input.field_name)?;
     compare_required_string(
         string_at_path(&commitment, &["commitmentRole"])?,
         input.expected_commitment_role,

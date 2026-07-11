@@ -66,8 +66,13 @@ fn collective_setup_roster_hash_fixture(participant_count: u64) -> String {
     .expect("collective setup roster hash")
 }
 
-/// The n = 10 fixture roster size used by the minimal package.
-const FIXTURE_FIRST_CLOSURE_PARTICIPANT_COUNT: u64 = 10;
+/// The ten-participant parameter profile used by the lightweight phase fixture.
+const PARAMETER_PROFILE_PARTICIPANT_COUNT: u64 = 10;
+
+/// The minimum roster accepted by the setup verifier. Proof-bearing rejection
+/// tests use this roster because their purpose is to exercise bindings and
+/// refusal behavior, not to benchmark proof material growth with roster size.
+const MINIMUM_SUPPORTED_PARTICIPANT_COUNT: u64 = 3;
 
 pub(super) fn minimal_collective_setup_package() -> serde_json::Value {
     // The reduced development ring must stay provable by the trustee
@@ -77,7 +82,9 @@ pub(super) fn minimal_collective_setup_package() -> serde_json::Value {
     MINIMAL_COLLECTIVE_SETUP_PACKAGE_CACHE
         .get_or_init(|| {
             super::proof_record_fixtures::finalize_collective_setup_package(
-                collective_setup_phase_package(),
+                minimal_collective_setup_package_for_participant_count(
+                    MINIMUM_SUPPORTED_PARTICIPANT_COUNT,
+                ),
             )
         })
         .clone()
@@ -90,7 +97,7 @@ pub(super) fn collective_setup_phase_package() -> serde_json::Value {
     COLLECTIVE_SETUP_PHASE_PACKAGE_CACHE
         .get_or_init(|| {
             minimal_collective_setup_package_for_participant_count(
-                FIXTURE_FIRST_CLOSURE_PARTICIPANT_COUNT,
+                PARAMETER_PROFILE_PARTICIPANT_COUNT,
             )
         })
         .clone()
@@ -98,7 +105,7 @@ pub(super) fn collective_setup_phase_package() -> serde_json::Value {
 
 /// Reduced development-ring (128) collective setup package for an arbitrary
 /// supported roster size, built through the non-streamed VSS path. Drives the
-/// same per-trustee material and roster-derived certificates as the n = 10
+/// same per-trustee material and roster-derived certificates as the ten-participant
 /// phase-package path. The finalized fixture adds proof-bearing setup material
 /// on top of this package.
 pub(super) fn minimal_collective_setup_package_for_participant_count(

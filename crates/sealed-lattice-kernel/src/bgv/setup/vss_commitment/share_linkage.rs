@@ -431,6 +431,96 @@ pub(crate) struct VssAggregateThresholdProofContext<'a> {
     pub(crate) rns_limb_count: usize,
 }
 
+pub(super) fn verify_vss_aggregate_threshold_statement_root(
+    vss_aggregate: &Value,
+) -> CanonicalResult<String> {
+    compare_required_string(
+        string_at_path(vss_aggregate, &["objectType"])?,
+        "VssShareLinkageStatement",
+        "VSS aggregate proof statement objectType",
+    )?;
+    if vss_aggregate
+        .get("isThresholdAggregate")
+        .and_then(Value::as_bool)
+        != Some(true)
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ComponentMismatch,
+            "VSS aggregate proof statement must set isThresholdAggregate",
+        ));
+    }
+    let additional_linkage_items = array_at_path(vss_aggregate, &["additionalLinkageItems"])?;
+    if !additional_linkage_items.is_empty() {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "VSS aggregate proof must not contain additional linkage items",
+        ));
+    }
+
+    // Rebuild the exact recognized aggregate statement instead of hashing the
+    // input object wholesale. This keeps unknown relay metadata irrelevant
+    // while ensuring the named statement root is derived from every field the
+    // aggregate proof parser and verifier consume.
+    let statement_without_root = json!({
+        "objectType": "VssShareLinkageStatement",
+        "isThresholdAggregate": true,
+        "publicMatrixSeedHash": hash_at_path(vss_aggregate, &["publicMatrixSeedHash"] )?,
+        "sourceTrusteeIdentity": string_at_path(vss_aggregate, &["sourceTrusteeIdentity"] )?,
+        "sourceTrusteeRosterPosition": unsigned_at_path(
+            vss_aggregate,
+            &["sourceTrusteeRosterPosition"],
+        )?,
+        "sourceCoefficientCommitmentRoot": hash_at_path(
+            vss_aggregate,
+            &["sourceCoefficientCommitmentRoot"],
+        )?,
+        "sourceRecipientShareCommitmentRoot": hash_at_path(
+            vss_aggregate,
+            &["sourceRecipientShareCommitmentRoot"],
+        )?,
+        "recipientIdentity": string_at_path(vss_aggregate, &["recipientIdentity"] )?,
+        "recipientRosterPosition": unsigned_at_path(
+            vss_aggregate,
+            &["recipientRosterPosition"],
+        )?,
+        "sourceRnsLimbIndex": unsigned_at_path(vss_aggregate, &["sourceRnsLimbIndex"] )?,
+        "sourceMessageModulus": unsigned_at_path(vss_aggregate, &["sourceMessageModulus"] )?,
+        "coefficientCommitmentRoots": array_at_path(
+            vss_aggregate,
+            &["coefficientCommitmentRoots"],
+        )?,
+        "coefficientOpeningRoots": array_at_path(
+            vss_aggregate,
+            &["coefficientOpeningRoots"],
+        )?,
+        "coefficientCommitments": array_at_path(
+            vss_aggregate,
+            &["coefficientCommitments"],
+        )?,
+        "recipientShareCommitmentRoot": hash_at_path(
+            vss_aggregate,
+            &["recipientShareCommitmentRoot"],
+        )?,
+        "recipientShareOpeningRoot": hash_at_path(
+            vss_aggregate,
+            &["recipientShareOpeningRoot"],
+        )?,
+        "recipientShareCommitment": value_at_path(
+            vss_aggregate,
+            &["recipientShareCommitment"],
+        )?,
+        "additionalLinkageItems": additional_linkage_items,
+    });
+    let expected_statement_root = derive_canonical_object_hash(&statement_without_root)?;
+    compare_required_string(
+        hash_at_path(vss_aggregate, &["shareLinkageStatementRoot"])?,
+        &expected_statement_root,
+        "VSS aggregate proof share-linkage statement root",
+    )?;
+
+    Ok(expected_statement_root)
+}
+
 pub(crate) fn verify_vss_public_aggregate_threshold_proofs(
     coefficient_commitment_set: &Value,
     recipient_share_commitment_set: &Value,
@@ -514,16 +604,8 @@ pub(crate) fn verify_vss_public_aggregate_threshold_proofs(
                 )
             })?;
         let vss_aggregate = value_at_path(proof, &["vssShareLinkage"])?;
-        if vss_aggregate
-            .get("isThresholdAggregate")
-            .and_then(Value::as_bool)
-            != Some(true)
-        {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::ComponentMismatch,
-                "VSS aggregate proof statement must set isThresholdAggregate",
-            ));
-        }
+        let expected_share_linkage_statement_root =
+            verify_vss_aggregate_threshold_statement_root(vss_aggregate)?;
         compare_required_string(
             hash_at_path(vss_aggregate, &["publicMatrixSeedHash"])?,
             context.public_matrix_seed_hash,
@@ -618,12 +700,6 @@ pub(crate) fn verify_vss_public_aggregate_threshold_proofs(
                 "VSS aggregate proof threshold-share commitment body does not match the aggregate record",
             ));
         }
-        if !array_at_path(vss_aggregate, &["additionalLinkageItems"])?.is_empty() {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "VSS aggregate proof must not contain additional linkage items",
-            ));
-        }
         // The proof's coefficients are the committed source recipient shares
         // sigma_{i->j,l}, in source order, matching the recipient-share set.
         let coefficient_commitment_roots =
@@ -714,7 +790,7 @@ pub(crate) fn verify_vss_public_aggregate_threshold_proofs(
                 "trusteeIdentity": "vss-aggregate-threshold",
                 "trusteeRosterPosition": 0,
                 "setupEpoch": context.setup_epoch,
-                "shareLinkageStatementRoot": vss_aggregate["shareLinkageStatementRoot"],
+                "shareLinkageStatementRoot": expected_share_linkage_statement_root,
             },
             "ringDegree": context.ring_degree,
             "vssShareLinkage": vss_aggregate,

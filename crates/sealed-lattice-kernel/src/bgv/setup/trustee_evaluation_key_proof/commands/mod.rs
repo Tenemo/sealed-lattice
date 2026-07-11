@@ -258,7 +258,6 @@ pub(in crate::bgv::setup::trustee_evaluation_key_proof) use request_parsing::sam
 pub(in crate::bgv::setup::trustee_evaluation_key_proof) use request_parsing::statement_from_request;
 use request_parsing::*;
 
-#[cfg(any(test, feature = "target-decryption-development-commands"))]
 pub(crate) use bridge_target_commands::generate_target_decryption_share_proof_bytes_from_request;
 pub(crate) use bridge_target_commands::{
     generate_same_secret_bridge_proof_from_request, verify_same_secret_bridge_proof_from_request,

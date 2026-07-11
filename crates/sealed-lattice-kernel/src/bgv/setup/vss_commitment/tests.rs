@@ -1,11 +1,13 @@
 use serde_json::json;
 
+use super::share_linkage::verify_vss_aggregate_threshold_statement_root;
 use super::{
     VSS_PUBLIC_MESSAGE_BASE_DIGIT_TRIT_COUNT, VSS_PUBLIC_MESSAGE_DIGIT_BASE,
     verify_vss_public_aggregate_threshold_commitment_set_request,
     verify_vss_public_coefficient_commitment_set_request,
     verify_vss_public_recipient_share_commitment_set_request,
     verify_vss_share_linkage_bindings_request, vss_public_message_encoding_layout,
+    vss_public_share_linkage_packed_message_encoding_layout,
 };
 use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 
@@ -27,6 +29,43 @@ fn message_encoding_layout_uses_digit_bounds_for_trit_columns() -> CanonicalResu
         VSS_PUBLIC_MESSAGE_BASE_DIGIT_TRIT_COUNT
     );
     assert_eq!(full_low_digit_layout.digit_trit_count(1)?, 1);
+
+    Ok(())
+}
+
+#[test]
+fn threshold_aggregate_layout_uses_digit_only_source_messages() -> CanonicalResult<()> {
+    let message_bound = 33;
+    let source_message_count = 2;
+    let first_aggregate_source_layout = vss_public_share_linkage_packed_message_encoding_layout(
+        true,
+        0,
+        source_message_count,
+        message_bound,
+    )?;
+    let second_aggregate_source_layout = vss_public_share_linkage_packed_message_encoding_layout(
+        true,
+        1,
+        source_message_count,
+        message_bound,
+    )?;
+    let aggregate_recipient_layout = vss_public_share_linkage_packed_message_encoding_layout(
+        true,
+        source_message_count,
+        source_message_count,
+        message_bound,
+    )?;
+    let ordinary_source_layout = vss_public_share_linkage_packed_message_encoding_layout(
+        false,
+        0,
+        source_message_count,
+        message_bound,
+    )?;
+
+    assert_eq!(first_aggregate_source_layout.total_trit_count(), 0);
+    assert_eq!(second_aggregate_source_layout.total_trit_count(), 0);
+    assert_eq!(aggregate_recipient_layout.total_trit_count(), 4);
+    assert_eq!(ordinary_source_layout.total_trit_count(), 4);
 
     Ok(())
 }
@@ -130,6 +169,67 @@ fn aggregate_threshold_commitment_set_command_verifies_bound_roots() -> Canonica
         }))
         .is_err(),
         "tampered aggregate threshold commitment root must reject"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn aggregate_threshold_statement_root_is_recomputed_from_recognized_fields() -> CanonicalResult<()>
+{
+    let statement_without_root = json!({
+        "objectType": "VssShareLinkageStatement",
+        "isThresholdAggregate": true,
+        "publicMatrixSeedHash": "1".repeat(128),
+        "sourceTrusteeIdentity": "trustee-1",
+        "sourceTrusteeRosterPosition": 0,
+        "sourceCoefficientCommitmentRoot": "2".repeat(128),
+        "sourceRecipientShareCommitmentRoot": "3".repeat(128),
+        "recipientIdentity": "trustee-1",
+        "recipientRosterPosition": 0,
+        "sourceRnsLimbIndex": 0,
+        "sourceMessageModulus": 17,
+        "coefficientCommitmentRoots": ["4".repeat(128), "5".repeat(128)],
+        "coefficientOpeningRoots": ["6".repeat(128), "7".repeat(128)],
+        "coefficientCommitments": [
+            { "objectType": "VssCommittedMaterialCommitment", "slot": 0 },
+            { "objectType": "VssCommittedMaterialCommitment", "slot": 1 },
+        ],
+        "recipientShareCommitmentRoot": "8".repeat(128),
+        "recipientShareOpeningRoot": "9".repeat(128),
+        "recipientShareCommitment": {
+            "objectType": "VssCommittedMaterialCommitment",
+            "slot": 2,
+        },
+        "additionalLinkageItems": [],
+    });
+    let expected_statement_root =
+        crate::hashing::derive_canonical_object_hash(&statement_without_root)?;
+    let mut statement = statement_without_root;
+    statement["shareLinkageStatementRoot"] = json!(expected_statement_root.clone());
+
+    assert_eq!(
+        verify_vss_aggregate_threshold_statement_root(&statement)?,
+        expected_statement_root,
+        "the canonical aggregate statement must round-trip through root verification"
+    );
+
+    statement["unrecognizedRelayMetadata"] = json!({ "ignored": true });
+    assert_eq!(
+        verify_vss_aggregate_threshold_statement_root(&statement)?,
+        expected_statement_root,
+        "unrecognized relay metadata must not influence the accepted statement"
+    );
+
+    statement["recipientIdentity"] = json!("trustee-2");
+    let error = verify_vss_aggregate_threshold_statement_root(&statement)
+        .expect_err("a changed recognized field with a stale root must reject");
+    assert_eq!(error.code, CanonicalErrorCode::ComponentMismatch);
+    assert!(
+        error
+            .message
+            .contains("share-linkage statement root does not match its canonical binding"),
+        "root mismatch should identify the canonical aggregate statement binding: {error}"
     );
 
     Ok(())

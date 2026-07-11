@@ -44,6 +44,11 @@ import type {
     BgvEvaluationKeyShareComponentMaterialTransportStreamChunkAbsorption,
     BgvEvaluationKeyShareComponentMaterialTransportStreamVerification,
     BgvTargetDecryptionReleaseSetupContext,
+    BgvTargetDecryptionShare,
+    BgvTargetDecryptionShareProofMaterial,
+    BgvTargetDecryptionShareProofMaterialVerification,
+    BgvTargetDecryptionShareProofStatement,
+    BgvTargetDecryptionShareProofStatementBinding,
     BgvTargetDecryptionResultReleaseBegin,
     BgvTargetDecryptionResultReleaseShareAbsorption,
     BgvTargetDecryptionResultReleaseCompletion,
@@ -86,6 +91,11 @@ export type {
     BgvEvaluationKeyShareComponentMaterialTransportStreamChunkAbsorption,
     BgvEvaluationKeyShareComponentMaterialTransportStreamVerification,
     BgvTargetDecryptionReleaseSetupContext,
+    BgvTargetDecryptionShare,
+    BgvTargetDecryptionShareProofMaterial,
+    BgvTargetDecryptionShareProofMaterialVerification,
+    BgvTargetDecryptionShareProofStatement,
+    BgvTargetDecryptionShareProofStatementBinding,
     BgvTargetDecryptionResultReleaseBegin,
     BgvTargetDecryptionResultReleaseShareAbsorption,
     BgvTargetDecryptionResultReleaseShareEvidence,
@@ -101,6 +111,14 @@ export type TranscriptCorePlaintextComparison = {
     readonly equal: FieldElement;
     readonly scoreDifference: number;
 };
+
+type BgvTargetDecryptionLocalCommandContext = Readonly<{
+    readonly setupPackage: unknown;
+    readonly targetAcceptedRecord: unknown;
+    readonly targetCiphertexts: unknown;
+    readonly targetCiphertextBinding: unknown;
+    readonly targetShareProfile: unknown;
+}>;
 
 export type TranscriptCoreKernel = {
     readonly exportedFunctionNames: readonly string[];
@@ -127,6 +145,42 @@ export type TranscriptCoreKernel = {
     verifyFixture(
         fixture: TranscriptCoreFixture,
     ): TranscriptCoreFixtureVerification;
+    generateBgvTargetDecryptionShareFromLocalShare(
+        input: BgvTargetDecryptionLocalCommandContext & {
+            readonly trusteeIdentity: string;
+            readonly localTargetShareWitness: unknown;
+        },
+    ): BgvTargetDecryptionShare;
+    deriveBgvTargetDecryptionShareProofStatement(
+        input: BgvTargetDecryptionLocalCommandContext & {
+            readonly trusteeIdentity: string;
+            readonly localTargetShareWitness: unknown;
+            readonly targetDecryptionShare: unknown;
+        },
+    ): BgvTargetDecryptionShareProofStatement;
+    generateBgvTargetDecryptionShareProofMaterialFromLocalWitness(
+        input: BgvTargetDecryptionLocalCommandContext & {
+            readonly trusteeIdentity: string;
+            readonly localTargetShareWitness: unknown;
+            readonly targetDecryptionShare: unknown;
+            readonly proofStatement: unknown;
+            readonly proofRandomnessSeedHex: string;
+            readonly proofRandomnessNonceHex: string;
+        },
+    ): BgvTargetDecryptionShareProofMaterial;
+    verifyBgvTargetDecryptionShareProofMaterial(
+        input: BgvTargetDecryptionLocalCommandContext & {
+            readonly targetDecryptionShare: unknown;
+            readonly proofStatement: unknown;
+            readonly proofMaterial: unknown;
+        },
+    ): BgvTargetDecryptionShareProofMaterialVerification;
+    verifyBgvTargetDecryptionShareProofStatementBinding(
+        input: BgvTargetDecryptionLocalCommandContext & {
+            readonly targetDecryptionShare: unknown;
+            readonly proofStatement: unknown;
+        },
+    ): BgvTargetDecryptionShareProofStatementBinding;
     describeBgvRnsParameters(): BgvRnsParametersDescription;
     describeBgvOperationRegistry(): unknown;
     describeCollectiveBgvSetupParameters(input?: {
@@ -391,6 +445,26 @@ type TranscriptCoreKernelCommand =
           readonly command: 'VerifyFixture';
           readonly fixture: TranscriptCoreFixture;
       }
+    | KernelCommandFromMethod<
+          'GenerateBgvTargetDecryptionShareFromLocalShare',
+          'generateBgvTargetDecryptionShareFromLocalShare'
+      >
+    | KernelCommandFromMethod<
+          'DeriveBgvTargetDecryptionShareProofStatement',
+          'deriveBgvTargetDecryptionShareProofStatement'
+      >
+    | KernelCommandFromMethod<
+          'GenerateBgvTargetDecryptionShareProofMaterialFromLocalWitness',
+          'generateBgvTargetDecryptionShareProofMaterialFromLocalWitness'
+      >
+    | KernelCommandFromMethod<
+          'VerifyBgvTargetDecryptionShareProofMaterial',
+          'verifyBgvTargetDecryptionShareProofMaterial'
+      >
+    | KernelCommandFromMethod<
+          'VerifyBgvTargetDecryptionShareProofStatementBinding',
+          'verifyBgvTargetDecryptionShareProofStatementBinding'
+      >
     | {
           readonly command: 'DescribeBgvRnsParameters';
       }

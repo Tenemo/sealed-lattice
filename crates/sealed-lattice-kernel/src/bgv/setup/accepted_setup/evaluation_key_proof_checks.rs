@@ -516,8 +516,8 @@ fn verify_trustee_evaluation_key_proof_record(
     if crate::bgv::setup::limb_group_key_switch_atom::family_backend::schedule::statement_is_key_bearing(
         statement,
     ) {
-        // Key-bearing statements verify against the key-switch atom backend;
-        // legacy engine bytes fail the schedule container magic.
+        // Key-bearing statements verify only against the key-switch atom
+        // schedule container; every other proof format fails its magic check.
         crate::bgv::setup::limb_group_key_switch_atom::family_backend::schedule::verify_key_bearing_trustee_evaluation_keys(
             statement,
             &proof_bytes,

@@ -6,6 +6,7 @@ import { createLocalRunLog, currentProcessExitCode } from './local-run-log.js';
 import { runCommandsInSeries, type CommandInvocation } from './run-command.js';
 import {
     cargoTestArgumentsForRustKernelFast,
+    heavyRustKernelTestNamePrefix,
     normalizeRustTestFilter,
 } from './rust-kernel-test-arguments.js';
 
@@ -46,6 +47,11 @@ export const parseRustKernelArguments = (
     if (normalizedFilter === '') {
         throw new Error(
             `Rust kernel test runs require a non-empty filter. ${usage}`,
+        );
+    }
+    if (normalizedFilter?.startsWith(heavyRustKernelTestNamePrefix) === true) {
+        throw new Error(
+            `Heavy Rust kernel tests must use "pnpm run test:rust:kernel:heavy -- ${normalizedFilter}".`,
         );
     }
 

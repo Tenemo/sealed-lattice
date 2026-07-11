@@ -1002,8 +1002,8 @@ impl TrusteeEvaluationKeyStatement {
 
     // Target-decryption relation challenges: the per-role target-share lincheck
     // rows plus the digit decoder rows. The aggregate and smudging commitments
-    // are bound by the material openings and Z_H binding rows, not by
-    // projection relation challenges, so no per-coordinate blocks remain.
+    // are bound by the material openings and Z_H binding rows, so no additional
+    // per-coordinate relation blocks are needed.
     pub(crate) fn target_decryption_relation_count(&self, limb_index: usize) -> usize {
         match &self.target_decryption_share {
             Some(statement) => {

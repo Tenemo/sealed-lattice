@@ -18,6 +18,44 @@ fn soundness_report_meets_the_conjectured_classical_policy_floor() {
 }
 
 #[test]
+fn trustee_statement_shape_rejects_ring_degree_above_the_configured_polynomial_degree() {
+    let mut statement = private_vss_statement_for_context_tests();
+    statement.ring_degree = crate::bgv::parameters::POLYNOMIAL_DEGREE
+        .checked_mul(2)
+        .expect("oversized test ring degree");
+
+    let error = statement
+        .validate_shape()
+        .expect_err("an oversized ringDegree must be rejected");
+
+    assert_eq!(
+        error.code,
+        crate::encoding::CanonicalErrorCode::MalformedLength
+    );
+    assert!(error.message.contains("ringDegree"));
+}
+
+#[test]
+fn trustee_verifier_rejects_oversized_ring_degree_before_processing_proof_limbs() {
+    let mut statement = private_vss_statement_for_context_tests();
+    statement.ring_degree = crate::bgv::parameters::POLYNOMIAL_DEGREE
+        .checked_mul(2)
+        .expect("oversized test ring degree");
+    let proof = prover::SuccinctEvaluationKeyProof {
+        limb_proofs: Vec::new(),
+    };
+
+    let error = verify_evaluation_key_share(&statement, &proof)
+        .expect_err("the verifier must reject an oversized ringDegree before proof processing");
+
+    assert_eq!(
+        error.code,
+        crate::encoding::CanonicalErrorCode::MalformedLength
+    );
+    assert!(error.message.contains("ringDegree"));
+}
+
+#[test]
 fn tampered_component_material_is_rejected() {
     let (mut statement, witness) =
         generate_development_public_key_share_instance("0011aabb", SMALL_RING_DEGREE)

@@ -7,6 +7,12 @@ export {
 } from './closing/index.js';
 export { deriveValidatedFirstValidOrder } from './ordering/index.js';
 export { verifyTargetFinality } from './finality/index.js';
+export {
+    deriveTargetDecryptionSmudgingSeedHex,
+    prepareLocalTargetDecryptionShareWitness,
+    restoreAndPrepareLocalTargetDecryptionShareWitness,
+} from './target-decryption/local-target-share-witness.js';
+export type { RestoredLocalTargetDecryptionShareWitnessInput } from './target-decryption/local-target-share-witness.js';
 export { isValidLifecycleTransition } from './lifecycle/lifecycle.js';
 export { derivePollSpecHash, validatePollSpec } from './lifecycle/poll-spec.js';
 export {
@@ -284,6 +290,7 @@ export type {
 export type {
     BinaryChunkedSameSecretBridgeProofMaterialTransport,
     BinaryChunkedVssShareLinkageProofMaterialTransport,
+    LocalTrusteeVssPublicAggregateOpeningCredentialHandoff,
     TransportedSameSecretBridgeProofMaterialSet,
     TransportedVssShareLinkageProofMaterialSet,
 } from './setup/vss-commitments.js';

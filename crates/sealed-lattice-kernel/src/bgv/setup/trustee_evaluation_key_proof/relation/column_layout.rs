@@ -418,8 +418,8 @@ impl LimbColumnLayout {
     // Relation challenges the share-linkage batch consumes: one lincheck
     // repetition set per item for the Shamir/carry share relation, plus the
     // digit decoder rows. The commitment itself is bound by the material
-    // openings and Z_H binding rows, not by projection relation challenges, so
-    // no per-coordinate relation blocks remain.
+    // openings and Z_H binding rows, so no additional per-coordinate relation
+    // blocks are needed.
     pub(crate) fn vss_public_relation_count(&self) -> usize {
         if self.vss_public_active() {
             let decoder_relation_count = (self.vss_public_coefficient_relation_columns
@@ -680,8 +680,7 @@ impl LimbColumnLayout {
 
     // Bridge relation challenges: one lincheck repetition set per target for
     // the secret/indicator/digit bridge relation, plus the digit decoder rows.
-    // The target-constant commitments are bound by the material openings, not
-    // by projection relation challenges.
+    // The material openings bind the target-constant commitments.
     pub(crate) fn same_secret_bridge_relation_count(&self) -> usize {
         if self.same_secret_bridge_material_active() {
             self.same_secret_bridge_target_count() * LINCHECK_REPETITIONS

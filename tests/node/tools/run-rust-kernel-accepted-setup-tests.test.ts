@@ -6,10 +6,13 @@ import {
     buildFocusedCommand,
     cargoTestArgumentsForAcceptedSetupTests,
     cargoTestArgumentsForFocusedFilter,
-    deriveAutomaticAcceptedSetupConcurrency,
+    deriveAcceptedSetupMemoryLimitGigabytes,
+    guardAcceptedSetupCommand,
     normalizeFocusedTestFilter,
     parseRustKernelAcceptedSetupArguments,
+    resolveAcceptedSetupMemoryLimitGigabytes,
     resolveRunKnobs,
+    verifyProcessMemoryGuardCommand,
 } from '#tools/ci/run-rust-kernel-accepted-setup-tests';
 
 describe('Rust accepted setup runner arguments', () => {
@@ -107,7 +110,7 @@ describe('Rust accepted setup runner arguments', () => {
             'terminal_evaluation_key_proofs',
             '--',
             '--include-ignored',
-            '--show-output',
+            '--nocapture',
             '--test-threads',
             '3',
         ]);
@@ -117,41 +120,69 @@ describe('Rust accepted setup runner arguments', () => {
         ).toContain('--include-ignored');
     });
 
-    it('shares one memory budget across nested proof concurrency', () => {
+    it('uses a 32 GiB ceiling on large hosts and reserves memory on smaller hosts', () => {
         expect(
-            deriveAutomaticAcceptedSetupConcurrency({
-                availableGigabytes: 14.2,
-                logicalProcessorCount: 4,
+            deriveAcceptedSetupMemoryLimitGigabytes({
+                freeMemoryGigabytes: 95,
+                totalMemoryGigabytes: 127.7,
             }),
-        ).toEqual({
-            rayonThreadCount: 1,
-            testThreadCount: 1,
-            trusteeProofBatchSize: 1,
-            trusteeProofLimbBatchSize: 1,
-        });
+        ).toBe(32);
+        expect(
+            deriveAcceptedSetupMemoryLimitGigabytes({
+                freeMemoryGigabytes: 14,
+                totalMemoryGigabytes: 16,
+            }),
+        ).toBe(11);
+        expect(
+            deriveAcceptedSetupMemoryLimitGigabytes({
+                freeMemoryGigabytes: 6,
+                totalMemoryGigabytes: 7,
+            }),
+        ).toBe(4);
+        expect(() =>
+            deriveAcceptedSetupMemoryLimitGigabytes({
+                freeMemoryGigabytes: 2.5,
+                totalMemoryGigabytes: 8,
+            }),
+        ).toThrow('at least 3 GiB');
+    });
 
+    it('accepts only memory-limit overrides that lower the safe ceiling', () => {
         expect(
-            deriveAutomaticAcceptedSetupConcurrency({
-                availableGigabytes: 64,
-                logicalProcessorCount: 16,
+            resolveAcceptedSetupMemoryLimitGigabytes({
+                automaticLimitGigabytes: 32,
+                environment: {
+                    SEALED_LATTICE_ACCEPTED_SETUP_MEMORY_LIMIT_GIB: '24',
+                },
             }),
-        ).toEqual({
-            rayonThreadCount: 2,
-            testThreadCount: 2,
-            trusteeProofBatchSize: 2,
-            trusteeProofLimbBatchSize: 2,
-        });
+        ).toBe(24);
+        expect(() =>
+            resolveAcceptedSetupMemoryLimitGigabytes({
+                automaticLimitGigabytes: 32,
+                environment: {
+                    SEALED_LATTICE_ACCEPTED_SETUP_MEMORY_LIMIT_GIB: '64',
+                },
+            }),
+        ).toThrow('cannot exceed');
+        expect(() =>
+            resolveAcceptedSetupMemoryLimitGigabytes({
+                automaticLimitGigabytes: 32,
+                environment: {
+                    SEALED_LATTICE_ACCEPTED_SETUP_MEMORY_LIMIT_GIB: '2.5',
+                },
+            }),
+        ).toThrow('positive integer');
+    });
 
-        expect(
-            deriveAutomaticAcceptedSetupConcurrency({
-                availableGigabytes: 128,
-                logicalProcessorCount: 32,
-            }),
-        ).toEqual({
-            rayonThreadCount: 7,
-            testThreadCount: 5,
-            trusteeProofBatchSize: 5,
-            trusteeProofLimbBatchSize: 1,
+    it('serializes every accepted setup concurrency layer', () => {
+        expect(resolveRunKnobs()).toEqual({
+            rayonThreadCount: { source: 'serialized', value: '1' },
+            testThreads: { source: 'serialized', value: '1' },
+            trusteeProofBatchSize: { source: 'serialized', value: '1' },
+            trusteeProofLimbBatchSize: {
+                source: 'serialized',
+                value: '1',
+            },
         });
     });
 
@@ -173,6 +204,7 @@ describe('Rust accepted setup runner arguments', () => {
         });
 
         expect(environment.CARGO_INCREMENTAL).toBe('0');
+        expect(environment.CARGO_BUILD_JOBS).toBe('1');
         expect(environment.CARGO_TARGET_DIR).toBeUndefined();
         expect(
             environment.SEALED_LATTICE_RESUME_TEST_CHECKPOINTS,
@@ -180,29 +212,36 @@ describe('Rust accepted setup runner arguments', () => {
         expect(environment.SEALED_LATTICE_TEST_CHECKPOINT_ROOT).toBeUndefined();
     });
 
-    it('ignores manual concurrency overrides in CI mode', () => {
-        const overrides = {
-            RAYON_NUM_THREADS: '999',
-            SEALED_LATTICE_TRUSTEE_PROOF_BATCH_SIZE: '999',
-            SEALED_LATTICE_TRUSTEE_PROOF_LIMB_BATCH_SIZE: '999',
-        };
-        const ciKnobs = resolveRunKnobs('ci', overrides);
-        expect(ciKnobs.rayonThreadCount.source).toBe('shared-memory-bounded');
-        expect(ciKnobs.trusteeProofBatchSize.source).toBe(
-            'shared-memory-bounded',
+    it('wraps cargo in the hard memory guard and builds the guard separately', () => {
+        const guardedCommand = guardAcceptedSetupCommand(
+            {
+                args: ['test', '--', '--test-threads', '1'],
+                command: 'cargo',
+                description: 'guarded test',
+            },
+            4096,
         );
-        expect(ciKnobs.trusteeProofLimbBatchSize.source).toBe(
-            'shared-memory-bounded',
+        expect(guardedCommand.command).toContain(
+            'sealed-lattice-process-memory-guard',
         );
-        expect(ciKnobs.rayonThreadCount.value).not.toBe('999');
+        expect(guardedCommand.args).toEqual([
+            '--memory-limit-bytes',
+            '4096',
+            '--',
+            'cargo',
+            'test',
+            '--',
+            '--test-threads',
+            '1',
+        ]);
 
-        const localKnobs = resolveRunKnobs('accelerated', overrides);
-        expect(localKnobs.rayonThreadCount).toEqual({
-            source: 'environment override',
-            value: '999',
-        });
-        expect(localKnobs.trusteeProofBatchSize.value).toBe('999');
-        expect(localKnobs.trusteeProofLimbBatchSize.value).toBe('999');
+        const verificationCommand = verifyProcessMemoryGuardCommand();
+        expect(verificationCommand.command).toBe('cargo');
+        expect(verificationCommand.args).toContain('test');
+        expect(verificationCommand.args).toContain(
+            'sealed-lattice-process-memory-guard',
+        );
+        expect(verificationCommand.args).toContain('--locked');
     });
 
     it('keeps focused CI runs prove-fresh', () => {

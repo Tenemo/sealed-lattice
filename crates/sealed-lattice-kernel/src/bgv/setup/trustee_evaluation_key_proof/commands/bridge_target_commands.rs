@@ -48,7 +48,6 @@ pub(crate) fn verify_same_secret_bridge_proof_from_request(
     }))
 }
 
-#[cfg(any(test, feature = "target-decryption-development-commands"))]
 #[derive(Debug)]
 pub(crate) struct GeneratedTargetDecryptionShareProofBytes {
     pub(crate) target_roles: Vec<String>,
@@ -56,7 +55,6 @@ pub(crate) struct GeneratedTargetDecryptionShareProofBytes {
     pub(crate) proof_bytes: Vec<u8>,
 }
 
-#[cfg(any(test, feature = "target-decryption-development-commands"))]
 pub(crate) fn generate_target_decryption_share_proof_bytes_from_request(
     request: &Value,
 ) -> CanonicalResult<GeneratedTargetDecryptionShareProofBytes> {

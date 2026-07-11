@@ -8,8 +8,8 @@
 //!
 //! The container byte format is strict and self-describing: the schedule
 //! magic, the key count, then one length-framed atom proof per key in schedule
-//! order. Legacy engine bytes fail the magic check, so a key-bearing statement
-//! can never verify against an old-format proof.
+//! order. Bytes from any other proof format fail the magic check, so a
+//! key-bearing statement can verify only against this schedule container.
 
 #[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::*;

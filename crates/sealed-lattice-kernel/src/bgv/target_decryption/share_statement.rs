@@ -1,6 +1,5 @@
 use super::*;
 
-#[cfg(any(feature = "target-decryption-development-commands", test))]
 pub(super) fn derive_target_decryption_share_proof_statement(
     setup_binding: &SetupBinding,
     target_accepted: &TargetAcceptedBinding,
@@ -36,7 +35,6 @@ pub(super) fn derive_target_decryption_share_proof_statement(
     Ok(statement)
 }
 
-#[cfg(any(feature = "target-decryption-development-commands", test))]
 pub(super) fn verify_target_decryption_share_proof_statement_binding(
     setup_binding: &SetupBinding,
     target_accepted: &TargetAcceptedBinding,
@@ -75,7 +73,6 @@ pub(super) fn verify_target_decryption_share_proof_statement_binding(
     }))
 }
 
-#[cfg(any(feature = "target-decryption-development-commands", test))]
 fn target_decryption_share_proof_statement_value(
     setup_binding: &SetupBinding,
     target_accepted: &TargetAcceptedBinding,
@@ -148,7 +145,7 @@ fn target_decryption_share_proof_statement_value(
         "objectType": "BgvTargetDecryptionShareProofStatement",
         "setupPackageHash": setup_binding.setup_package_hash,
         "ceremonyId": setup_binding.ceremony_id,
-        "setupEpoch": local_witness.setup_epoch,
+        "setupEpoch": setup_binding.setup_epoch,
         "electionManifestHash": setup_binding.election_manifest_hash,
         "targetDecryptionProfileHash": target_accepted.target_decryption_profile_hash,
         "targetDecryptionProfileBindingHash": setup_binding.target_decryption_profile_binding_hash,
@@ -349,7 +346,12 @@ pub(super) fn validate_target_decryption_share_proof_statement_shape(
             )?;
         }
     }
-    string_at_path(proof_statement, &["setupEpoch"])?;
+    compare_string_field(
+        proof_statement,
+        "setupEpoch",
+        &setup_binding.setup_epoch,
+        "target decryption share proof statement setup epoch",
+    )?;
     for (field_name, expected) in [
         (
             "decryptionThreshold",
@@ -639,7 +641,7 @@ fn validate_smudging_commitment_shape(
     expected_limb_index: usize,
     expected_rns_prime: u64,
 ) -> CanonicalResult<()> {
-    crate::bgv::setup::validate_standalone_vss_public_commitment_body(
+    crate::bgv::setup::validate_standalone_vss_committed_material_commitment(
         commitment,
         "target decryption smudging commitment",
     )?;
@@ -788,7 +790,7 @@ fn validate_aggregate_opening_statement_binding(
             "target decryption aggregate credential binding accepted aggregate opening record",
         )?;
         let aggregate_commitment = value_at_path(credential_binding, &["aggregateCommitment"])?;
-        crate::bgv::setup::validate_standalone_vss_public_commitment_body(
+        crate::bgv::setup::validate_standalone_vss_committed_material_commitment(
             aggregate_commitment,
             "public VSS commitment",
         )?;

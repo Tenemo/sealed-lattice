@@ -597,6 +597,12 @@ impl TrusteeEvaluationKeyStatement {
     }
 
     pub(in crate::bgv::setup) fn validate_shape(&self) -> CanonicalResult<()> {
+        if self.ring_degree > crate::bgv::parameters::POLYNOMIAL_DEGREE {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "trustee evaluation-key statement ringDegree exceeds the configured polynomial degree",
+            ));
+        }
         if self.keys.is_empty()
             && self.same_secret_linkage.is_none()
             && self.private_vss_share.is_none()

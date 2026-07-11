@@ -671,6 +671,38 @@ export const localStateInput = (
             ],
         },
         verifiedPrivateVssShareEnvelopes: [privateEnvelope],
+        localTrusteeAggregateOpeningCredentialHandoff: {
+            objectType:
+                'LocalTrusteeVssPublicAggregateOpeningCredentialHandoff',
+            trusteeIdentity,
+            trusteeRosterPosition,
+            aggregateOpeningCredentials: [
+                {
+                    objectType:
+                        'LocalTrusteeVssPublicAggregateOpeningCredential',
+                    recipientIdentity: trusteeIdentity,
+                    recipientRosterPosition: trusteeRosterPosition,
+                    recipientTrusteePoint: trusteeRosterPosition + 1,
+                    rnsLimbIndex: 0,
+                    rnsPrime: 65_537,
+                    aggregateCommitmentRoot: hashFromKernel(
+                        kernel,
+                        'aggregate-commitment-root',
+                    ),
+                    aggregateOpeningRoot: hashFromKernel(
+                        kernel,
+                        'aggregate-opening-root',
+                    ),
+                    aggregateCommitmentMessageValuesLeHex: bytesToHex(
+                        coefficientVectorBytes([7, 11, 13, 17]),
+                    ),
+                    aggregateMaterialSeedHex: hashFromKernel(
+                        kernel,
+                        'aggregate-material-seed',
+                    ),
+                },
+            ],
+        },
         vssShareAcceptances: {
             objectType: 'VssShareAcceptanceSet',
             ...commonFields,

@@ -238,6 +238,7 @@ type LocalTrusteeVssPublicAggregateOpeningCredential = {
 // Private setup output retained by the recipient that locally formed the
 // aggregate commitment. It is never an input to public-set assembly.
 export type LocalTrusteeVssPublicAggregateOpeningCredentialHandoff = {
+    readonly objectType: 'LocalTrusteeVssPublicAggregateOpeningCredentialHandoff';
     readonly trusteeIdentity: string;
     readonly trusteeRosterPosition: number;
     readonly aggregateOpeningCredentials: readonly LocalTrusteeVssPublicAggregateOpeningCredential[];
@@ -1177,6 +1178,8 @@ export const createLocalTrusteeVssPublicAggregateThresholdCommitmentBundle =
                 aggregateThresholdProofs,
             },
             localTrusteeAggregateOpeningCredentialHandoff: {
+                objectType:
+                    'LocalTrusteeVssPublicAggregateOpeningCredentialHandoff',
                 trusteeIdentity: recipientIdentity,
                 trusteeRosterPosition: recipientRosterPosition,
                 aggregateOpeningCredentials,
