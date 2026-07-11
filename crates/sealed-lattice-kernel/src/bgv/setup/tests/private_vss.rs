@@ -47,7 +47,9 @@ fn private_vss_share_envelope_verifier_accepts_succinct_private_share_proofs() {
 }
 
 #[test]
-#[ignore = "first-roster recipient-private VSS verification at the full ring degree"]
+// Run through the guarded focused Rust runner:
+//   pnpm run test:rust:kernel:accepted-setup -- private_vss_share_envelope_verifier_accepts_first_roster_succinct_private_share_proofs
+#[ignore = "first-roster private VSS verification; run via the guarded accepted-setup runner"]
 fn private_vss_share_envelope_verifier_accepts_first_roster_succinct_private_share_proofs() {
     let request =
         proof_shaped_private_vss_share_envelope_request(crate::bgv::parameters::POLYNOMIAL_DEGREE);

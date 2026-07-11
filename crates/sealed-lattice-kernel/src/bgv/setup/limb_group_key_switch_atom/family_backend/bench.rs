@@ -4,9 +4,8 @@
 //! two-adic ceiling raised to `2^20` the first profile `N = 32768` runs unsplit
 //! (coset `8N = 2^18`), so all three measured degrees use one column set.
 //!
-//! Run with:
-//! `cargo test -p sealed-lattice-kernel --release --lib
-//!  family_backend::bench::round_one_key_prover_cost -- --ignored --nocapture`
+//! Run through the guarded focused Rust runner:
+//! `pnpm run test:rust:kernel:accepted-setup -- round_one_key_prover_cost`
 //!
 //! This is native development measurement only. It is not browser or WASM
 //! evidence, and not supported-phone evidence.
@@ -152,7 +151,7 @@ fn synthetic_key(
 }
 
 #[test]
-#[ignore = "prover-cost benchmark; run explicitly with --ignored --nocapture"]
+#[ignore = "prover-cost benchmark; run via the guarded accepted-setup runner"]
 fn round_one_key_prover_cost() {
     use std::time::Instant;
     let parameters = sixteen_limb_group_field_parameters();

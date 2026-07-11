@@ -37,6 +37,30 @@ describe('Rust kernel runner arguments', () => {
             'sealed-lattice-kernel',
             'direct_ballots',
             '--',
+            '--skip',
+            acceptedSetupTestModulePattern,
+            '--test-threads',
+            '1',
+            '--show-output',
+        ]);
+    });
+
+    it('keeps accepted-setup tests out of focused fast runs', () => {
+        const acceptedSetupTestName =
+            'collective_setup_verifier_refuses_malformed_aggregate_threshold_proofs';
+
+        expect(
+            cargoTestArgumentsForRustKernelFast(acceptedSetupTestName),
+        ).toEqual([
+            'test',
+            '-p',
+            'sealed-lattice-kernel',
+            acceptedSetupTestName,
+            '--',
+            '--skip',
+            acceptedSetupTestModulePattern,
+            '--test-threads',
+            '1',
             '--show-output',
         ]);
     });

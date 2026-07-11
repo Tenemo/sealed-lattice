@@ -3,6 +3,10 @@ import {
     type PackageManagerRunner,
 } from './package-manager-runner.js';
 import {
+    createProcessMemoryGuard,
+    type ProcessMemoryGuard,
+} from './process-memory-guard.js';
+import {
     createPackageManagerCommand,
     type CommandInvocation,
 } from './run-command.js';
@@ -24,6 +28,16 @@ const kernelNodeTestLanes = ['kernel-fast', 'kernel-heavy'] as const;
 const internalWasmKernelNodeTestLanes = new Set<NodeTestLane>(
     kernelNodeTestLanes,
 );
+
+let nodeKernelHeavyProcessMemoryGuard: ProcessMemoryGuard | undefined;
+
+const getNodeKernelHeavyProcessMemoryGuard = (): ProcessMemoryGuard => {
+    nodeKernelHeavyProcessMemoryGuard ??= createProcessMemoryGuard({
+        insufficientFreeMemoryRunDescription: 'Node kernel heavy tests',
+    });
+
+    return nodeKernelHeavyProcessMemoryGuard;
+};
 
 const isNodeTestLane = (lane: string): lane is NodeTestLane =>
     nodeTestLaneValues.some((supportedLane) => supportedLane === lane);
@@ -76,14 +90,24 @@ export const buildNodeTestCommands = (
     const packageManagerRunner =
         input.packageManagerRunner ?? resolvePackageManagerRunner();
     const lanes = input.lanes ?? defaultNodeTestLanes;
+    const guardCommandWhenHeavyLaneIsIncluded = (
+        command: CommandInvocation,
+        commandLanes: readonly NodeTestLane[],
+    ): CommandInvocation =>
+        commandLanes.includes('kernel-heavy')
+            ? getNodeKernelHeavyProcessMemoryGuard().guardCommand(command)
+            : command;
     const buildCommand = (lane: NodeTestLane): CommandInvocation => {
         const laneDefinition = nodeTestLaneDefinitions[lane];
 
-        return buildVitestProjectCommand({
-            commandDescription: laneDefinition.commandDescription,
-            packageManagerRunner,
-            projectName: laneDefinition.projectName,
-        });
+        return guardCommandWhenHeavyLaneIsIncluded(
+            buildVitestProjectCommand({
+                commandDescription: laneDefinition.commandDescription,
+                packageManagerRunner,
+                projectName: laneDefinition.projectName,
+            }),
+            [lane],
+        );
     };
     const requestedKernelLanes = lanes.filter((lane) =>
         internalWasmKernelNodeTestLanes.has(lane),
@@ -94,13 +118,16 @@ export const buildNodeTestCommands = (
     if (requestedKernelLanes.length === kernelNodeTestLanes.length) {
         return [
             ...nonKernelCommands,
-            buildVitestProjectsCommand({
-                commandDescription: 'Run kernel Node tests',
-                packageManagerRunner,
-                projectNames: kernelNodeTestLanes.map(
-                    (lane) => nodeTestLaneDefinitions[lane].projectName,
-                ),
-            }),
+            guardCommandWhenHeavyLaneIsIncluded(
+                buildVitestProjectsCommand({
+                    commandDescription: 'Run kernel Node tests',
+                    packageManagerRunner,
+                    projectNames: kernelNodeTestLanes.map(
+                        (lane) => nodeTestLaneDefinitions[lane].projectName,
+                    ),
+                }),
+                requestedKernelLanes,
+            ),
         ];
     }
 
@@ -123,6 +150,18 @@ const buildInternalWasmKernelCommand = (
         },
     );
 
+export const buildNodeTestExtraGateCommands = (input: {
+    readonly lanes: readonly NodeTestLane[];
+    readonly packageManagerRunner: PackageManagerRunner;
+}): readonly CommandInvocation[] => [
+    ...(input.lanes.includes('kernel-heavy')
+        ? [getNodeKernelHeavyProcessMemoryGuard().buildVerificationCommand()]
+        : []),
+    ...(nodeTestLanesNeedInternalWasmKernel(input.lanes)
+        ? [buildInternalWasmKernelCommand(input.packageManagerRunner)]
+        : []),
+];
+
 const nodeTestScriptName = (lanes: readonly NodeTestLane[]): string => {
     if (
         lanes.length === kernelNodeTestLanes.length &&
@@ -143,11 +182,11 @@ const main = async (): Promise<void> => {
         buildCommands: (packageManagerRunner) =>
             buildNodeTestCommands({ lanes, packageManagerRunner }),
         commandLineArguments: rawArguments,
-        extraGateCommands: nodeTestLanesNeedInternalWasmKernel(lanes)
-            ? (packageManagerRunner) => [
-                  buildInternalWasmKernelCommand(packageManagerRunner),
-              ]
-            : undefined,
+        extraGateCommands: (packageManagerRunner) =>
+            buildNodeTestExtraGateCommands({
+                lanes,
+                packageManagerRunner,
+            }),
         lanes,
         scriptName: nodeTestScriptName(lanes),
     });

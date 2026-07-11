@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+    buildRustKernelHeavyProcessMemoryGuardVerificationCommand,
     buildRustKernelHeavyTestCommand,
     parseRustKernelHeavyArguments,
 } from '#tools/ci/run-rust-kernel-heavy-tests';
@@ -64,18 +65,46 @@ describe('Rust kernel heavy runner arguments', () => {
         ).toThrow('Heavy Rust kernel runs accept one filter');
     });
 
-    it('builds a focused heavy Rust cargo command', () => {
+    it('builds and verifies the process-memory guard before heavy Rust tests', () => {
+        const verificationCommand =
+            buildRustKernelHeavyProcessMemoryGuardVerificationCommand();
+
+        expect(verificationCommand.command).toBe('cargo');
+        expect(verificationCommand.args).toEqual([
+            'test',
+            '--locked',
+            '-p',
+            'sealed-lattice-process-memory-guard',
+            '--target-dir',
+            expect.stringContaining('process-memory-guard'),
+        ]);
+        expect(verificationCommand.env?.CARGO_TARGET_DIR).toBeUndefined();
+    });
+
+    it('guards and serializes a focused heavy Rust cargo command', () => {
         const testFilter = 'heavy_rust_kernel_one_test';
         const command = buildRustKernelHeavyTestCommand({ testFilter });
 
-        expect(command.command).toBe('cargo');
-        expect(command.args).toEqual(
-            cargoTestArgumentsForRustKernelHeavy(testFilter),
+        expect(command.command).toContain(
+            'sealed-lattice-process-memory-guard',
         );
+        expect(command.args[0]).toBe('--memory-limit-bytes');
+        expect(Number(command.args[1])).toBeGreaterThan(0);
+        expect(command.args.slice(2)).toEqual([
+            '--',
+            'cargo',
+            ...cargoTestArgumentsForRustKernelHeavy(testFilter),
+        ]);
         expect(command.description).toBe(
             'cargo test Rust kernel heavy (heavy_rust_kernel_one_test)',
         );
         expect(command.logFileSlug).toBe('cargo-test-rust-kernel-heavy');
+        expect(command.env?.CARGO_BUILD_JOBS).toBe('1');
         expect(command.env?.CARGO_INCREMENTAL).toBe('0');
+        expect(command.env?.RAYON_NUM_THREADS).toBe('1');
+        expect(command.env?.SEALED_LATTICE_TRUSTEE_PROOF_BATCH_SIZE).toBe('1');
+        expect(command.env?.SEALED_LATTICE_TRUSTEE_PROOF_LIMB_BATCH_SIZE).toBe(
+            '1',
+        );
     });
 });

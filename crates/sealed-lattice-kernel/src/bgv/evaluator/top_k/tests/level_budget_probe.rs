@@ -10,8 +10,8 @@
 // faithful replica of the Paterson-Stockmeyer structure whose level-floor knob
 // reproduces production exactly at floor 0.
 //
-// Run: cargo test -p sealed-lattice-kernel --lib
-//   bgv::evaluator::top_k::tests::level_budget_probe -- --ignored --nocapture
+// Run through the guarded focused Rust runner:
+//   pnpm run test:rust:kernel:accepted-setup -- level_budget_probe
 
 use num_bigint::BigInt;
 use num_traits::{Signed, Zero};
@@ -361,7 +361,7 @@ fn clean_level_six_rank_input(_context: &EvaluatorContext, key: &DevelopmentBgvK
 }
 
 #[test]
-#[ignore = "development-only noise probe for the target level budget; run explicitly with --ignored --nocapture"]
+#[ignore = "development-only noise probe; run via the guarded accepted-setup runner"]
 fn level_budget_rank_lookup_noise_probe() {
     let context = EvaluatorContext::new(DEVELOPMENT_SEED, SELECTED_EVALUATOR_WORKING_LEVEL)
         .expect("evaluator context");
@@ -551,7 +551,7 @@ fn clean_rank_input_at_level(
 // handoff - 5 at the natural B_eval; raising the handoff is the only lever that raises
 // the exit level without paying deferral noise.
 #[test]
-#[ignore = "development-only: natural-exit headroom vs handoff level; run explicitly with --ignored --nocapture"]
+#[ignore = "development-only natural-exit probe; run via the guarded accepted-setup runner"]
 fn natural_exit_headroom_by_handoff_level() {
     let context = EvaluatorContext::new(DEVELOPMENT_SEED, SELECTED_EVALUATOR_WORKING_LEVEL)
         .expect("evaluator context");
@@ -610,7 +610,7 @@ fn lcm_i128(a: i128, b: i128) -> i128 {
 // the minimal integer factor (lcm of the reduced denominators). The worst-case L1 sets
 // the C4 smudging need ~ lambda + log2(N) + log2(L1) + log2(t).
 #[test]
-#[ignore = "development-only enumeration: worst-case cleared-Lagrange L1; run explicitly with --ignored --nocapture"]
+#[ignore = "development-only Lagrange probe; run via the guarded accepted-setup runner"]
 fn lagrange_cleared_l1_worst_case() {
     let participant_count = 10i128;
     let quorum_size = 4usize;
@@ -697,7 +697,7 @@ fn lagrange_cleared_l1_worst_case() {
 }
 
 #[test]
-#[ignore = "development-only: rank-lookup terminal per K; run with --ignored --nocapture"]
+#[ignore = "development-only rank-lookup probe; run via the guarded accepted-setup runner"]
 fn rank_lookup_terminal_by_k() {
     let context = EvaluatorContext::new(DEVELOPMENT_SEED, SELECTED_EVALUATOR_WORKING_LEVEL)
         .expect("evaluator context");

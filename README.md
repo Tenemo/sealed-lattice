@@ -118,11 +118,11 @@ The package requires Node.js 24.14.1 or later when used in Node.js.
 ## Usage
 
 ```typescript
-import { deriveThresholdParameters, validatePollSpec } from "sealed-lattice";
+import { deriveThresholdParameters, validatePollSpec } from 'sealed-lattice';
 
 const pollValidation = validatePollSpec({
-    pollId: "board-election-2026",
-    question: "Which proposal should be adopted?",
+    pollId: 'board-election-2026',
+    question: 'Which proposal should be adopted?',
     options: Array.from(
         { length: 20 },
         (_unused, optionIndex) => `Proposal ${optionIndex + 1}`,
@@ -132,7 +132,7 @@ const pollValidation = validatePollSpec({
 
 if (!pollValidation.isValid) {
     throw new Error(
-        pollValidation.errors[0]?.message ?? "Invalid poll specification.",
+        pollValidation.errors[0]?.message ?? 'Invalid poll specification.',
     );
 }
 
@@ -171,14 +171,25 @@ pnpm run test:rust:kernel:heavy
 pnpm run test:rust:kernel:accepted-setup
 ```
 
-The accepted-setup runner serializes every nested proof-concurrency layer and
-applies a hard memory ceiling before spawning Cargo: an aggregate Windows Job
-Object limit or an inherited Linux address-space limit. The ceiling is 32 GiB
-on large hosts, or the lower of 70 percent of total memory and currently free
-memory after reserving 2 GiB on smaller hosts. Proof-bearing functional and
-rejection fixtures use the minimum supported three-participant roster; the
-ten-participant parameter and phase fixtures remain lightweight. These tests
-exercise implementation behavior and do not certify either roster profile.
+The fast Rust runner always excludes the complete
+`bgv::setup::tests::accepted_setup` module, including focused filters. Use the
+measured-heavy runner for ignored `heavy_rust_kernel_` tests, and the guarded
+accepted-setup runner for accepted-setup tests and other explicitly selected
+ignored Rust tests.
+
+The measured-heavy Rust, accepted-setup Rust, and heavy Node kernel runners
+verify the shared process-memory guard before starting heavy work. It applies
+an aggregate Windows Job Object limit or inherited Linux address-space limit.
+The ceiling is 32 GiB on large hosts, or the lower of 70 percent of total
+memory and currently free memory after reserving 2 GiB on smaller hosts. The
+Rust heavy runners also serialize Cargo, libtest, Rayon, trustee-proof, and
+limb-proof concurrency; the heavy Node project disables file parallelism.
+Every Node command whose selected lanes include `kernel-heavy`, including
+`pnpm run test:node` and `pnpm run test:node:kernel`, is guarded.
+Proof-bearing functional and rejection fixtures use the minimum supported
+three-participant roster; the ten-participant parameter and phase fixtures
+remain lightweight. These tests exercise implementation behavior and do not
+certify either roster profile.
 
 After a measured-heavy failure, rerun one test by its full
 `heavy_rust_kernel_`-prefixed name:
@@ -186,6 +197,13 @@ After a measured-heavy failure, rerun one test by its full
 ```bash
 pnpm run test:rust:kernel:heavy -- heavy_rust_kernel_sparse_target_projection_decrypts_selected_ids_and_orders
 ```
+
+The internal `@sealed-lattice/wasm` package's Node scripts delegate to the root
+runners so the WASM build and heavy-lane containment remain in force. The
+Docker-backed Lattigo arithmetic oracle is an optional development cross-check,
+not part of normal verification. Run it explicitly with
+`pnpm run test:lattigo-oracle`; it builds only from `tools/lattigo-oracle/` and
+runs with a 2 GiB memory-and-swap ceiling.
 
 Generate the public SDK review summary after an intentional API change:
 

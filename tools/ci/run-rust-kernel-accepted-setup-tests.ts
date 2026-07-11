@@ -1,4 +1,3 @@
-import os from 'node:os';
 import path from 'node:path';
 
 import {
@@ -7,6 +6,11 @@ import {
 } from './focused-rust-test-match.js';
 import { createHeavyTestProgressReporter } from './heavy-test-progress.js';
 import { createLocalRunLog, currentProcessExitCode } from './local-run-log.js';
+import {
+    createProcessMemoryGuard,
+    deriveProcessMemoryLimitGigabytes,
+    resolveProcessMemoryLimitGigabytes,
+} from './process-memory-guard.js';
 import {
     runCommandsInSeries,
     type CommandInvocation,
@@ -59,84 +63,35 @@ export type ParsedRustKernelAcceptedSetupArguments = {
     readonly testFilters: readonly string[];
 };
 
-const gigabyte = 1024 ** 3;
-const defaultHardMemoryLimitGigabytes = 32;
-const maximumHostMemoryFraction = 0.7;
-const reservedHostMemoryGigabytes = 2;
 const memoryLimitEnvironmentVariable =
     'SEALED_LATTICE_ACCEPTED_SETUP_MEMORY_LIMIT_GIB';
 
-// Thirty-two GiB is the workstation ceiling. Smaller hosts receive a lower
-// ceiling, and every host retains at least two GiB of currently free memory for
-// the runner and operating system. This is a hard OS limit, not a scheduling
-// estimate.
 export const deriveAcceptedSetupMemoryLimitGigabytes = (input: {
     readonly freeMemoryGigabytes: number;
     readonly totalMemoryGigabytes: number;
-}): number => {
-    if (
-        !Number.isFinite(input.totalMemoryGigabytes) ||
-        input.totalMemoryGigabytes <= 0 ||
-        !Number.isFinite(input.freeMemoryGigabytes) ||
-        input.freeMemoryGigabytes <= 0
-    ) {
-        throw new Error('Host memory values must be positive finite numbers.');
-    }
-    const freeMemoryAfterReserve = Math.floor(
-        input.freeMemoryGigabytes - reservedHostMemoryGigabytes,
-    );
-    if (freeMemoryAfterReserve < 1) {
-        throw new Error(
-            `Accepted-setup tests require at least ${reservedHostMemoryGigabytes + 1} GiB of free host memory.`,
-        );
-    }
-
-    return Math.min(
-        defaultHardMemoryLimitGigabytes,
-        Math.max(
-            1,
-            Math.floor(input.totalMemoryGigabytes * maximumHostMemoryFraction),
-        ),
-        freeMemoryAfterReserve,
-    );
-};
+}): number =>
+    deriveProcessMemoryLimitGigabytes({
+        ...input,
+        insufficientFreeMemoryRunDescription: 'Accepted-setup tests',
+    });
 
 export const resolveAcceptedSetupMemoryLimitGigabytes = (input: {
     readonly automaticLimitGigabytes: number;
     readonly environment?: NodeJS.ProcessEnv;
-}): number => {
-    const override = (input.environment ?? process.env)[
-        memoryLimitEnvironmentVariable
-    ];
-    if (override === undefined) {
-        return input.automaticLimitGigabytes;
-    }
-    if (!/^[1-9][0-9]*$/u.test(override)) {
-        throw new Error(
-            `${memoryLimitEnvironmentVariable} must be a positive integer.`,
-        );
-    }
-    const overrideGigabytes = Number.parseInt(override, 10);
-    if (overrideGigabytes > input.automaticLimitGigabytes) {
-        throw new Error(
-            `${memoryLimitEnvironmentVariable} cannot exceed the automatic safe ceiling of ${input.automaticLimitGigabytes} GiB.`,
-        );
-    }
-
-    return overrideGigabytes;
-};
-
-const automaticAcceptedSetupMemoryLimitGigabytes =
-    deriveAcceptedSetupMemoryLimitGigabytes({
-        freeMemoryGigabytes: os.freemem() / gigabyte,
-        totalMemoryGigabytes: os.totalmem() / gigabyte,
+}): number =>
+    resolveProcessMemoryLimitGigabytes({
+        ...input,
+        memoryLimitEnvironmentVariable,
     });
+
+const acceptedSetupProcessMemoryGuard = createProcessMemoryGuard({
+    insufficientFreeMemoryRunDescription: 'Accepted-setup tests',
+    memoryLimitEnvironmentVariable,
+});
 const acceptedSetupMemoryLimitGigabytes =
-    resolveAcceptedSetupMemoryLimitGigabytes({
-        automaticLimitGigabytes: automaticAcceptedSetupMemoryLimitGigabytes,
-    });
+    acceptedSetupProcessMemoryGuard.memoryLimitGigabytes;
 const acceptedSetupMemoryLimitBytes =
-    acceptedSetupMemoryLimitGigabytes * gigabyte;
+    acceptedSetupProcessMemoryGuard.memoryLimitBytes;
 
 // The pinned focused target directory. It lives under `target/` (already
 // git-ignored) but is distinct from the default `target/` the gate uses, so a
@@ -150,18 +105,6 @@ const acceptedSetupAcceleratedTargetDirectory = path.resolve(
     process.cwd(),
     'target',
     'accepted-setup-accelerated',
-);
-const processMemoryGuardTargetDirectory = path.resolve(
-    process.cwd(),
-    'target',
-    'process-memory-guard',
-);
-const processMemoryGuardExecutablePath = path.join(
-    processMemoryGuardTargetDirectory,
-    'debug',
-    process.platform === 'win32'
-        ? 'sealed-lattice-process-memory-guard.exe'
-        : 'sealed-lattice-process-memory-guard',
 );
 const acceptedSetupCheckpointRootDirectory = path.resolve(
     process.cwd(),
@@ -255,40 +198,14 @@ export const buildAcceptedSetupEnvironment = (input: {
     };
 };
 
-export const verifyProcessMemoryGuardCommand = (): CommandInvocation => {
-    const environment = { ...process.env };
-    delete environment.CARGO_TARGET_DIR;
-
-    return {
-        args: [
-            'test',
-            '--locked',
-            '-p',
-            'sealed-lattice-process-memory-guard',
-            '--target-dir',
-            processMemoryGuardTargetDirectory,
-        ],
-        command: 'cargo',
-        description: 'verify process memory guard',
-        env: environment,
-        logFileSlug: 'cargo-test-process-memory-guard',
-    };
-};
+export const verifyProcessMemoryGuardCommand = (): CommandInvocation =>
+    acceptedSetupProcessMemoryGuard.buildVerificationCommand();
 
 export const guardAcceptedSetupCommand = (
     command: CommandInvocation,
     memoryLimitBytes = acceptedSetupMemoryLimitBytes,
-): CommandInvocation => ({
-    ...command,
-    args: [
-        '--memory-limit-bytes',
-        String(memoryLimitBytes),
-        '--',
-        command.command,
-        ...command.args,
-    ],
-    command: processMemoryGuardExecutablePath,
-});
+): CommandInvocation =>
+    acceptedSetupProcessMemoryGuard.guardCommand(command, memoryLimitBytes);
 
 const buildAcceptedSetupCommand = (
     mode: RustKernelAcceptedSetupRunMode,

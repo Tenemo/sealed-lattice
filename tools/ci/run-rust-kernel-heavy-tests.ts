@@ -3,6 +3,7 @@ import {
     resolveFocusedRustTestRunResult,
 } from './focused-rust-test-match.js';
 import { createLocalRunLog, currentProcessExitCode } from './local-run-log.js';
+import { createProcessMemoryGuard } from './process-memory-guard.js';
 import { runCommandsInSeries, type CommandInvocation } from './run-command.js';
 import {
     cargoTestArgumentsForRustKernelHeavy,
@@ -17,6 +18,9 @@ export type ParsedRustKernelHeavyArguments = Readonly<{
 }>;
 
 const usage = 'Usage: run-rust-kernel-heavy-tests.ts [<heavy Rust test name>].';
+const rustKernelHeavyProcessMemoryGuard = createProcessMemoryGuard({
+    insufficientFreeMemoryRunDescription: 'Rust kernel heavy tests',
+});
 
 export const parseRustKernelHeavyArguments = (
     commandArguments: readonly string[],
@@ -52,16 +56,25 @@ export const parseRustKernelHeavyArguments = (
 
 export const buildRustKernelHeavyTestCommand = (
     parsedArguments: ParsedRustKernelHeavyArguments,
-): CommandInvocation => ({
-    args: cargoTestArgumentsForRustKernelHeavy(parsedArguments.testFilter),
-    command: 'cargo',
-    description: `cargo test Rust kernel heavy (${parsedArguments.testFilter})`,
-    env: {
-        ...process.env,
-        CARGO_INCREMENTAL: '0',
-    },
-    logFileSlug: 'cargo-test-rust-kernel-heavy',
-});
+): CommandInvocation =>
+    rustKernelHeavyProcessMemoryGuard.guardCommand({
+        args: cargoTestArgumentsForRustKernelHeavy(parsedArguments.testFilter),
+        command: 'cargo',
+        description: `cargo test Rust kernel heavy (${parsedArguments.testFilter})`,
+        env: {
+            ...process.env,
+            CARGO_BUILD_JOBS: '1',
+            CARGO_INCREMENTAL: '0',
+            RAYON_NUM_THREADS: '1',
+            SEALED_LATTICE_TRUSTEE_PROOF_BATCH_SIZE: '1',
+            SEALED_LATTICE_TRUSTEE_PROOF_LIMB_BATCH_SIZE: '1',
+        },
+        logFileSlug: 'cargo-test-rust-kernel-heavy',
+    });
+
+export const buildRustKernelHeavyProcessMemoryGuardVerificationCommand =
+    (): CommandInvocation =>
+        rustKernelHeavyProcessMemoryGuard.buildVerificationCommand();
 
 export const runRustKernelHeavyTests = async (
     rawArguments: readonly string[] = process.argv.slice(2),
@@ -76,6 +89,18 @@ export const runRustKernelHeavyTests = async (
     let exitCode: number | undefined;
 
     try {
+        exitCode = await runCommandsInSeries(
+            [buildRustKernelHeavyProcessMemoryGuardVerificationCommand()],
+            {
+                outputMode: 'inherit',
+                runLog,
+            },
+        );
+        if (exitCode !== 0) {
+            process.exitCode = exitCode;
+            return;
+        }
+
         exitCode = await runCommandsInSeries(
             [buildRustKernelHeavyTestCommand(parsedArguments)],
             {
