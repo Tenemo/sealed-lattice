@@ -1,15 +1,45 @@
 use super::*;
-use crate::bgv::setup::setup_proof::{
-    SETUP_PROOF_MATERIAL_ENCODING, SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
-    setup_proof_material_transport_hashes,
-};
+use crate::bgv::setup::setup_proof::SETUP_PROOF_MATERIAL_ENCODING;
 
 const PRIVATE_VSS_SUCCINCT_TEST_RING_DEGREE: usize = 128;
 
+struct TestPrivateVssProofMaterialEvictionGuard {
+    proof_material_roots: Vec<String>,
+}
+
+impl TestPrivateVssProofMaterialEvictionGuard {
+    fn from_material_set(material_set: &serde_json::Value) -> Self {
+        let proof_material_roots = material_set["proofMaterials"]
+            .as_array()
+            .expect("private VSS proof material references")
+            .iter()
+            .map(|proof_material| {
+                proof_material["proofMaterialRoot"]
+                    .as_str()
+                    .expect("private VSS proof material root")
+                    .to_string()
+            })
+            .collect();
+        Self {
+            proof_material_roots,
+        }
+    }
+}
+
+impl Drop for TestPrivateVssProofMaterialEvictionGuard {
+    fn drop(&mut self) {
+        crate::bgv::setup::evict_verified_canonical_setup_proof_materials(
+            &self.proof_material_roots,
+        );
+    }
+}
+
 #[test]
 fn private_vss_share_envelope_verifier_accepts_succinct_private_share_proofs() {
-    let request =
-        proof_shaped_private_vss_share_envelope_request(PRIVATE_VSS_SUCCINCT_TEST_RING_DEGREE);
+    let request = proof_shaped_private_vss_share_envelope_request(
+        PRIVATE_VSS_SUCCINCT_TEST_RING_DEGREE,
+        "accepts-succinct-private-share-proofs",
+    );
 
     let result = verify_private_vss_share_envelope_from_request(&request)
         .expect("private VSS envelope verification");
@@ -51,8 +81,10 @@ fn private_vss_share_envelope_verifier_accepts_succinct_private_share_proofs() {
 //   pnpm run test:rust:kernel:accepted-setup -- private_vss_share_envelope_verifier_accepts_foundation_roster_succinct_private_share_proofs
 #[ignore = "foundation-roster private VSS verification; run via the guarded accepted-setup runner"]
 fn private_vss_share_envelope_verifier_accepts_foundation_roster_succinct_private_share_proofs() {
-    let request =
-        proof_shaped_private_vss_share_envelope_request(crate::bgv::parameters::POLYNOMIAL_DEGREE);
+    let request = proof_shaped_private_vss_share_envelope_request(
+        crate::bgv::parameters::POLYNOMIAL_DEGREE,
+        "accepts-foundation-roster-succinct-private-share-proofs",
+    );
 
     let result = verify_private_vss_share_envelope_from_request(&request)
         .expect("foundation-roster private VSS envelope verification");
@@ -87,8 +119,10 @@ fn private_vss_share_envelope_verifier_accepts_foundation_roster_succinct_privat
 
 #[test]
 fn private_vss_share_envelope_verifier_refuses_noncanonical_succinct_context() {
-    let mut request =
-        proof_shaped_private_vss_share_envelope_request(PRIVATE_VSS_SUCCINCT_TEST_RING_DEGREE);
+    let mut request = proof_shaped_private_vss_share_envelope_request(
+        PRIVATE_VSS_SUCCINCT_TEST_RING_DEGREE,
+        "refuses-noncanonical-succinct-context",
+    );
     request["setupContext"]["setupEpoch"] = serde_json::json!("setup epoch 1");
 
     let result = verify_private_vss_share_envelope_from_request(&request)
@@ -184,7 +218,20 @@ fn private_vss_succinct_proof_verifier_accepts_canonical_record() {
         })
         .expect("private VSS proof record");
     assert_eq!(proof_record["proofFamily"], "vss-opening-carry");
-    assert!(proof_record.get("proofBytesHex").is_some());
+    assert_eq!(
+        proof_record["proofBytesEncoding"],
+        SETUP_PROOF_MATERIAL_ENCODING
+    );
+    assert_eq!(
+        proof_record["proofMaterialRoot"]
+            .as_str()
+            .expect("proof material root")
+            .len(),
+        128
+    );
+    let transported_proof_material = private_vss_proof_material_reference_set(&[&proof_record]);
+    let _proof_material_eviction_guard =
+        TestPrivateVssProofMaterialEvictionGuard::from_material_set(&transported_proof_material);
 
     let verification = verify_private_vss_share_succinct_relation_proof(
         PrivateVssShareSuccinctProofVerificationInput {
@@ -204,7 +251,7 @@ fn private_vss_succinct_proof_verifier_accepts_canonical_record() {
             share_values_hash: &share_values_hash,
             coefficient_commitments: &coefficient_commitments,
             proof_record: &proof_record,
-            transported_proof_material: None,
+            transported_proof_material: Some(&transported_proof_material),
         },
     )
     .expect("private VSS succinct proof verifies");
@@ -349,6 +396,11 @@ fn private_vss_succinct_proof_accepts_one_polynomial_across_threshold_recipients
                     error.message
                 )
             });
+        let transported_proof_material = private_vss_proof_material_reference_set(&[&proof_record]);
+        let _proof_material_eviction_guard =
+            TestPrivateVssProofMaterialEvictionGuard::from_material_set(
+                &transported_proof_material,
+            );
 
         verify_private_vss_share_succinct_relation_proof(
             PrivateVssShareSuccinctProofVerificationInput {
@@ -368,7 +420,7 @@ fn private_vss_succinct_proof_accepts_one_polynomial_across_threshold_recipients
                 share_values_hash: &share_values_hash,
                 coefficient_commitments: &coefficient_commitments,
                 proof_record: &proof_record,
-                transported_proof_material: None,
+                transported_proof_material: Some(&transported_proof_material),
             },
         )
         .unwrap_or_else(|error| {
@@ -502,10 +554,10 @@ fn private_vss_succinct_proof_refuses_message_inconsistent_with_commitment_openi
 
 #[test]
 fn private_vss_share_envelope_verifier_accepts_transported_succinct_private_share_proofs() {
-    let mut request =
-        proof_shaped_private_vss_share_envelope_request(PRIVATE_VSS_SUCCINCT_TEST_RING_DEGREE);
-    let transported_proof_material = move_private_vss_share_proof_bytes_to_transport(&mut request);
-    request["transportedPrivateVssShareProofMaterial"] = transported_proof_material;
+    let request = proof_shaped_private_vss_share_envelope_request(
+        PRIVATE_VSS_SUCCINCT_TEST_RING_DEGREE,
+        "accepts-transported-succinct-private-share-proofs",
+    );
 
     let result = verify_private_vss_share_envelope_from_request(&request)
         .expect("private VSS envelope verification");
@@ -532,9 +584,17 @@ fn private_vss_share_envelope_verifier_accepts_transported_succinct_private_shar
 
 #[test]
 fn private_vss_share_envelope_verifier_refuses_missing_transported_succinct_private_share_proofs() {
-    let mut request =
-        proof_shaped_private_vss_share_envelope_request(PRIVATE_VSS_SUCCINCT_TEST_RING_DEGREE);
-    let _transported_proof_material = move_private_vss_share_proof_bytes_to_transport(&mut request);
+    let mut request = proof_shaped_private_vss_share_envelope_request(
+        PRIVATE_VSS_SUCCINCT_TEST_RING_DEGREE,
+        "refuses-missing-transported-succinct-private-share-proofs",
+    );
+    let transported_proof_material = request["transportedPrivateVssShareProofMaterial"].clone();
+    let _proof_material_eviction_guard =
+        TestPrivateVssProofMaterialEvictionGuard::from_material_set(&transported_proof_material);
+    request
+        .as_object_mut()
+        .expect("private VSS request")
+        .remove("transportedPrivateVssShareProofMaterial");
 
     let result = verify_private_vss_share_envelope_from_request(&request)
         .expect("private VSS envelope verification");
@@ -553,57 +613,17 @@ fn private_vss_share_envelope_verifier_refuses_missing_transported_succinct_priv
 }
 
 #[test]
-fn private_vss_share_envelope_verifier_refuses_tampered_transported_succinct_private_share_proof_chunk()
- {
-    let mut request =
-        proof_shaped_private_vss_share_envelope_request(PRIVATE_VSS_SUCCINCT_TEST_RING_DEGREE);
-    let mut transported_proof_material =
-        move_private_vss_share_proof_bytes_to_transport(&mut request);
-    let first_chunk_hex = transported_proof_material["proofMaterials"][0]["chunks"][0]["bytesHex"]
-        .as_str()
-        .expect("first transported chunk")
-        .to_string();
-    let mut tampered_chunk_hex = first_chunk_hex;
-    let last_byte = tampered_chunk_hex
-        .as_bytes()
-        .last()
-        .copied()
-        .expect("transported chunk is non-empty");
-    let replacement = if last_byte == b'0' { '1' } else { '0' };
-    tampered_chunk_hex.pop();
-    tampered_chunk_hex.push(replacement);
-    transported_proof_material["proofMaterials"][0]["chunks"][0]["bytesHex"] =
-        serde_json::json!(tampered_chunk_hex);
-    request["transportedPrivateVssShareProofMaterial"] = transported_proof_material;
-
-    let result = verify_private_vss_share_envelope_from_request(&request)
-        .expect("private VSS envelope verification");
-
-    assert_eq!(result["isValid"], false);
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "privateVssShareProofVerificationFailed"
-    );
-    assert!(
-        result["refusedObjects"][0]["message"]
-            .as_str()
-            .expect("refusal message")
-            .contains("fullObjectHash")
-    );
-}
-
-#[test]
 fn private_vss_share_envelope_verifier_refuses_transported_private_share_proof_material_root_drift()
 {
-    let mut request =
-        proof_shaped_private_vss_share_envelope_request(PRIVATE_VSS_SUCCINCT_TEST_RING_DEGREE);
-    let transported_proof_material = move_private_vss_share_proof_bytes_to_transport(&mut request);
+    let mut request = proof_shaped_private_vss_share_envelope_request(
+        PRIVATE_VSS_SUCCINCT_TEST_RING_DEGREE,
+        "refuses-transported-private-share-proof-material-root-drift",
+    );
     replace_first_private_vss_proof_hash(
         &mut request,
         "proofMaterialRoot",
         "private-vss-transported-proof-material-root-drift",
     );
-    request["transportedPrivateVssShareProofMaterial"] = transported_proof_material;
 
     assert_private_vss_share_proof_refusal_contains(
         &request,
@@ -613,8 +633,10 @@ fn private_vss_share_envelope_verifier_refuses_transported_private_share_proof_m
 
 #[test]
 fn private_vss_share_envelope_verifier_refuses_private_share_proof_statement_root_drift() {
-    let mut request =
-        proof_shaped_private_vss_share_envelope_request(PRIVATE_VSS_SUCCINCT_TEST_RING_DEGREE);
+    let mut request = proof_shaped_private_vss_share_envelope_request(
+        PRIVATE_VSS_SUCCINCT_TEST_RING_DEGREE,
+        "refuses-private-share-proof-statement-root-drift",
+    );
     replace_first_private_vss_proof_hash(
         &mut request,
         "proofStatementRoot",
@@ -626,86 +648,65 @@ fn private_vss_share_envelope_verifier_refuses_private_share_proof_statement_roo
 
 #[test]
 fn private_vss_share_envelope_verifier_refuses_private_share_statement_hash_drift() {
-    let mut request =
-        proof_shaped_private_vss_share_envelope_request(PRIVATE_VSS_SUCCINCT_TEST_RING_DEGREE);
+    let mut request = proof_shaped_private_vss_share_envelope_request(
+        PRIVATE_VSS_SUCCINCT_TEST_RING_DEGREE,
+        "refuses-private-share-statement-hash-drift",
+    );
     replace_first_private_vss_proof_hash(
         &mut request,
         "statementHash",
         "private-vss-statement-hash-drift",
     );
 
-    assert_private_vss_share_proof_refusal_contains(&request, "statementHash");
+    assert_private_vss_share_proof_refusal_contains(&request, "proofMaterialRoot");
 }
 
 #[test]
 fn private_vss_share_envelope_verifier_refuses_duplicate_transported_private_share_proof_material_root()
  {
-    let mut request =
-        proof_shaped_private_vss_share_envelope_request(PRIVATE_VSS_SUCCINCT_TEST_RING_DEGREE);
-    let mut transported_proof_material =
-        move_private_vss_share_proof_bytes_to_transport(&mut request);
-    let first_proof_material = transported_proof_material["proofMaterials"][0].clone();
-    transported_proof_material["proofMaterials"]
+    let mut request = proof_shaped_private_vss_share_envelope_request(
+        PRIVATE_VSS_SUCCINCT_TEST_RING_DEGREE,
+        "refuses-duplicate-transported-private-share-proof-material-root",
+    );
+    let first_proof_material =
+        request["transportedPrivateVssShareProofMaterial"]["proofMaterials"][0].clone();
+    request["transportedPrivateVssShareProofMaterial"]["proofMaterials"]
         .as_array_mut()
         .expect("transported proof materials")
         .push(first_proof_material);
-    request["transportedPrivateVssShareProofMaterial"] = transported_proof_material;
 
     assert_private_vss_share_proof_refusal_contains(&request, "duplicate proofMaterialRoot");
 }
 
 #[test]
-fn private_vss_share_envelope_verifier_refuses_missing_transported_private_share_proof_chunk() {
-    let mut request =
-        proof_shaped_private_vss_share_envelope_request(PRIVATE_VSS_SUCCINCT_TEST_RING_DEGREE);
-    let mut transported_proof_material =
-        move_private_vss_share_proof_bytes_to_transport(&mut request);
-    transported_proof_material["proofMaterials"][0]["chunks"]
-        .as_array_mut()
-        .expect("transported proof chunks")
-        .clear();
-    request["transportedPrivateVssShareProofMaterial"] = transported_proof_material;
+fn private_vss_share_envelope_verifier_refuses_unauthenticated_proof_material_reference() {
+    let request = proof_shaped_private_vss_share_envelope_request(
+        PRIVATE_VSS_SUCCINCT_TEST_RING_DEGREE,
+        "refuses-unauthenticated-proof-material-reference",
+    );
+    let proof_material_root = request["privateEnvelope"]["rnsShareOpenings"][0]
+        ["privateVssShareProof"]["proofMaterialRoot"]
+        .as_str()
+        .expect("private VSS proof material root");
+    let _removed_proof_material = crate::bgv::setup::take_verified_canonical_proof_material_bytes(
+        "vss-opening-carry",
+        proof_material_root,
+    )
+    .expect("private VSS proof material store lookup")
+    .expect("private VSS proof material was retained");
 
     assert_private_vss_share_proof_refusal_contains(
         &request,
-        "setup proof material transport requires at least one chunk",
-    );
-}
-
-#[test]
-fn private_vss_share_envelope_verifier_refuses_tampered_succinct_private_share_proof_bytes() {
-    let mut request =
-        proof_shaped_private_vss_share_envelope_request(PRIVATE_VSS_SUCCINCT_TEST_RING_DEGREE);
-    let proof_bytes_hex = request["privateEnvelope"]["rnsShareOpenings"][0]["privateVssShareProof"]
-        ["proofBytesHex"]
-        .as_str()
-        .expect("proof bytes hex");
-    let mut tampered_proof_bytes_hex = proof_bytes_hex.to_string();
-    let last_byte = tampered_proof_bytes_hex
-        .as_bytes()
-        .last()
-        .copied()
-        .expect("proof bytes hex is non-empty");
-    let replacement = if last_byte == b'0' { '1' } else { '0' };
-    tampered_proof_bytes_hex.pop();
-    tampered_proof_bytes_hex.push(replacement);
-    request["privateEnvelope"]["rnsShareOpenings"][0]["privateVssShareProof"]["proofBytesHex"] =
-        serde_json::json!(tampered_proof_bytes_hex);
-
-    let result = verify_private_vss_share_envelope_from_request(&request)
-        .expect("private VSS envelope verification");
-
-    assert_eq!(result["isValid"], false);
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "privateVssShareProofVerificationFailed"
+        "not authenticated by the canonical binary stream",
     );
 }
 
 #[test]
 fn private_vss_share_envelope_verifier_refuses_share_value_drift_after_proof_generation() {
-    let mut request =
-        proof_shaped_private_vss_share_envelope_request(PRIVATE_VSS_SUCCINCT_TEST_RING_DEGREE);
+    let mut request = proof_shaped_private_vss_share_envelope_request(
+        PRIVATE_VSS_SUCCINCT_TEST_RING_DEGREE,
+        "refuses-share-value-drift-after-proof-generation",
+    );
     let rns_prime = request["privateEnvelope"]["rnsShareOpenings"][0]["rnsPrime"]
         .as_u64()
         .expect("RNS prime");
@@ -944,7 +945,10 @@ fn private_vss_share_envelope_request(ring_degree: usize) -> serde_json::Value {
     })
 }
 
-fn proof_shaped_private_vss_share_envelope_request(ring_degree: usize) -> serde_json::Value {
+fn proof_shaped_private_vss_share_envelope_request(
+    ring_degree: usize,
+    proof_fixture_label: &str,
+) -> serde_json::Value {
     let mut request = private_vss_share_envelope_request(ring_degree);
     let setup_context = request["setupContext"].clone();
     let public_matrix_seed_hash = request["publicMatrixSeedHash"]
@@ -1042,7 +1046,7 @@ fn proof_shaped_private_vss_share_envelope_request(ring_degree: usize) -> serde_
         .expect("share values hash");
         let proof_randomness_seed_hex = derive_canonical_object_hash(&serde_json::json!({
             "objectType": "PrivateVssLocalVerificationRoot",
-            "fixture": "private-vss-share-succinct-proof-randomness",
+            "fixture": proof_fixture_label,
             "rnsLimbIndex": rns_limb_index,
         }))
         .expect("private VSS proof randomness seed");
@@ -1076,83 +1080,30 @@ fn proof_shaped_private_vss_share_envelope_request(ring_degree: usize) -> serde_
         limb_object.insert("privateVssShareProof".to_string(), private_vss_share_proof);
     }
 
+    let transported_proof_material = {
+        let proof_records = request["privateEnvelope"]["rnsShareOpenings"]
+            .as_array()
+            .expect("private VSS limb openings")
+            .iter()
+            .map(|limb_opening| &limb_opening["privateVssShareProof"])
+            .collect::<Vec<_>>();
+        private_vss_proof_material_reference_set(&proof_records)
+    };
+    request["transportedPrivateVssShareProofMaterial"] = transported_proof_material;
+
     request
 }
 
-fn move_private_vss_share_proof_bytes_to_transport(
-    request: &mut serde_json::Value,
+fn private_vss_proof_material_reference_set(
+    proof_records: &[&serde_json::Value],
 ) -> serde_json::Value {
-    let proof_materials = request["privateEnvelope"]["rnsShareOpenings"]
-        .as_array_mut()
-        .expect("private VSS limb openings")
-        .iter_mut()
-        .map(|limb_opening| {
-            let proof_record = limb_opening
-                .get_mut("privateVssShareProof")
-                .expect("private VSS proof record");
-            let proof_bytes_hex = proof_record["proofBytesHex"]
-                .as_str()
-                .expect("embedded proof bytes")
-                .to_string();
-            let proof_bytes = hex_to_bytes(&proof_bytes_hex);
-            let proof_chunks = proof_bytes
-                .chunks(SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES as usize)
-                .map(<[u8]>::to_vec)
-                .collect::<Vec<_>>();
-            let transport_hashes = setup_proof_material_transport_hashes(
-                "vss-opening-carry",
-                &proof_bytes,
-                SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
-            )
-            .expect("private VSS proof transport hashes");
-            let proof_material_root = derive_canonical_object_hash(&serde_json::json!({
-                "objectType": "PrivateVssShareTransportedSuccinctProofMaterial",
-                "proofFamily": "vss-opening-carry",
-                "proofBytesEncoding": SETUP_PROOF_MATERIAL_ENCODING,
-                "statementHash": proof_record["statementHash"],
-                "proofBytesHash": proof_record["proofBytesHash"],
-                "proofChunkCount": transport_hashes.chunk_hashes.len(),
-                "proofTotalByteLength": transport_hashes.total_byte_length,
-                "proofFullObjectHash": transport_hashes.full_object_hash.clone(),
-                "proofChunkRoot": transport_hashes.chunk_root.clone(),
-                "proofChunkHashes": transport_hashes.chunk_hashes.clone(),
-            }))
-            .expect("private VSS transported proof material root");
-            proof_record
-                .as_object_mut()
-                .expect("proof record object")
-                .remove("proofBytesHex");
-            proof_record["proofBytesEncoding"] = serde_json::json!(SETUP_PROOF_MATERIAL_ENCODING);
-            proof_record["proofMaterialRoot"] = serde_json::json!(proof_material_root.clone());
-            proof_record["proofChunkSizeBytes"] =
-                serde_json::json!(SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES);
-            proof_record["proofChunkCount"] =
-                serde_json::json!(transport_hashes.chunk_hashes.len());
-            proof_record["proofTotalByteLength"] =
-                serde_json::json!(transport_hashes.total_byte_length);
-            proof_record["proofFullObjectHash"] =
-                serde_json::json!(transport_hashes.full_object_hash.clone());
-            proof_record["proofChunkRoot"] = serde_json::json!(transport_hashes.chunk_root.clone());
-            proof_record["proofChunkHashes"] =
-                serde_json::json!(transport_hashes.chunk_hashes.clone());
-
+    let proof_materials = proof_records
+        .iter()
+        .map(|proof_record| {
             serde_json::json!({
                 "objectType": "SetupTransportedPrivateVssShareProofMaterial",
                 "proofFamily": "vss-opening-carry",
-                "proofMaterialRoot": proof_material_root,
-                "chunkCount": proof_chunks.len(),
-                "totalByteLength": transport_hashes.total_byte_length,
-                "fullObjectHash": transport_hashes.full_object_hash.clone(),
-                "chunkHashes": transport_hashes.chunk_hashes.clone(),
-                "chunkRoot": transport_hashes.chunk_root.clone(),
-                "chunks": proof_chunks
-                    .iter()
-                    .enumerate()
-                    .map(|(chunk_index, chunk)| serde_json::json!({
-                        "chunkIndex": chunk_index,
-                        "bytesHex": bytes_to_hex(chunk),
-                    }))
-                    .collect::<Vec<_>>(),
+                "proofMaterialRoot": proof_record["proofMaterialRoot"],
             })
         })
         .collect::<Vec<_>>();
@@ -1162,40 +1113,6 @@ fn move_private_vss_share_proof_bytes_to_transport(
         "proofFamily": "vss-opening-carry",
         "proofMaterials": proof_materials,
     })
-}
-
-fn hex_to_bytes(hex: &str) -> Vec<u8> {
-    assert!(
-        hex.len().is_multiple_of(2),
-        "hex string must have even length"
-    );
-    hex.as_bytes()
-        .chunks_exact(2)
-        .map(|chunk| {
-            let high = hex_nibble(chunk[0]);
-            let low = hex_nibble(chunk[1]);
-            (high << 4) | low
-        })
-        .collect()
-}
-
-fn bytes_to_hex(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut output = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        output.push(HEX[(byte >> 4) as usize] as char);
-        output.push(HEX[(byte & 0x0f) as usize] as char);
-    }
-    output
-}
-
-fn hex_nibble(value: u8) -> u8 {
-    match value {
-        b'0'..=b'9' => value - b'0',
-        b'a'..=b'f' => value - b'a' + 10,
-        b'A'..=b'F' => value - b'A' + 10,
-        _ => panic!("hex string contains non-hex byte"),
-    }
 }
 
 fn coefficient_message_fixture(

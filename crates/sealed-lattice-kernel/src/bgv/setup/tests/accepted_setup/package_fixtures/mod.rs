@@ -5,10 +5,11 @@ use crate::hashing::derive_canonical_object_hash;
 static MINIMAL_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<serde_json::Value> = OnceLock::new();
 static COLLECTIVE_SETUP_PHASE_PACKAGE_CACHE: OnceLock<serde_json::Value> = OnceLock::new();
 static PUBLIC_KEY_SHARE_SUCCINCT_PROOF_BEARING_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<
-    serde_json::Value,
+    CachedPublicKeyShareCollectiveSetupFixture,
 > = OnceLock::new();
-static COLLECTIVE_PUBLIC_KEY_BEARING_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<serde_json::Value> =
-    OnceLock::new();
+static COLLECTIVE_PUBLIC_KEY_BEARING_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<
+    CollectiveSetupVerificationFixture,
+> = OnceLock::new();
 
 struct VssMaterialPackageComponents {
     vss_coefficient_commitments: serde_json::Value,
@@ -17,6 +18,17 @@ struct VssMaterialPackageComponents {
 
 struct CollectiveSetupPackageFixture {
     package: serde_json::Value,
+}
+
+#[derive(Clone)]
+pub(super) struct CollectiveSetupVerificationFixture {
+    pub(super) package: serde_json::Value,
+    pub(super) verification_request: serde_json::Value,
+}
+
+struct CachedPublicKeyShareCollectiveSetupFixture {
+    verification_fixture: CollectiveSetupVerificationFixture,
+    succinct_proof_fixture: PublicKeyShareSuccinctProofFixture,
 }
 
 fn private_vss_mailbox_public_key_hash(roster_position: u64) -> String {
@@ -438,37 +450,64 @@ fn build_collective_setup_package_fixture_parts(
     CollectiveSetupPackageFixture { package }
 }
 
-pub(super) fn public_key_share_succinct_proof_bearing_collective_setup_package() -> serde_json::Value
-{
-    PUBLIC_KEY_SHARE_SUCCINCT_PROOF_BEARING_COLLECTIVE_SETUP_PACKAGE_CACHE
-        .get_or_init(build_public_key_share_succinct_proof_bearing_collective_setup_package)
-        .clone()
+pub(super) fn public_key_share_succinct_proof_bearing_collective_setup_fixture()
+-> CollectiveSetupVerificationFixture {
+    let cached_fixture = PUBLIC_KEY_SHARE_SUCCINCT_PROOF_BEARING_COLLECTIVE_SETUP_PACKAGE_CACHE
+        .get_or_init(build_public_key_share_succinct_proof_bearing_collective_setup_package);
+    cached_fixture
+        .succinct_proof_fixture
+        .retain_proof_materials();
+    cached_fixture.verification_fixture.clone()
 }
 
-fn build_public_key_share_succinct_proof_bearing_collective_setup_package() -> serde_json::Value {
+fn build_public_key_share_succinct_proof_bearing_collective_setup_package()
+-> CachedPublicKeyShareCollectiveSetupFixture {
     let mut package = minimal_collective_setup_package();
     replace_public_key_share_hashes_with_material_hashes(&mut package);
     package["publicKeyShareMaterial"] = public_key_share_material_object(&package);
-    package["publicKeyShareSuccinctProofs"] = public_key_share_succinct_proofs_object(&package);
+    let succinct_proof_fixture = public_key_share_succinct_proofs_fixture(&package);
+    package["publicKeyShareSuccinctProofs"] = succinct_proof_fixture.proof_set.clone();
+    replace_setup_proof_material_transport_certificate_objects(
+        &mut package,
+        &succinct_proof_fixture.transported_proof_material,
+        PUBLIC_KEY_SHARE_PROOF_TRANSPORT_CERTIFICATE_FIELDS,
+    );
     rebind_collective_setup_package_hash(&mut package);
 
-    package
+    CachedPublicKeyShareCollectiveSetupFixture {
+        verification_fixture: CollectiveSetupVerificationFixture {
+            package,
+            verification_request: serde_json::json!({
+                "transportedPublicKeyShareProofMaterial":
+                    succinct_proof_fixture.transported_proof_material.clone(),
+            }),
+        },
+        succinct_proof_fixture,
+    }
 }
 
-pub(super) fn collective_public_key_bearing_collective_setup_package() -> serde_json::Value {
+pub(super) fn collective_public_key_bearing_collective_setup_fixture()
+-> CollectiveSetupVerificationFixture {
+    let _ = public_key_share_succinct_proof_bearing_collective_setup_fixture();
     COLLECTIVE_PUBLIC_KEY_BEARING_COLLECTIVE_SETUP_PACKAGE_CACHE
         .get_or_init(build_collective_public_key_bearing_collective_setup_package)
         .clone()
 }
 
-fn build_collective_public_key_bearing_collective_setup_package() -> serde_json::Value {
-    let mut package = build_public_key_share_succinct_proof_bearing_collective_setup_package();
+fn build_collective_public_key_bearing_collective_setup_package()
+-> CollectiveSetupVerificationFixture {
+    let public_key_share_fixture =
+        public_key_share_succinct_proof_bearing_collective_setup_fixture();
+    let mut package = public_key_share_fixture.package;
     package["collectivePublicKey"] = collective_public_key_object(&package);
     package["collectivePublicKeyRoot"] =
         package["collectivePublicKey"]["collectivePublicKeyRoot"].clone();
     rebind_collective_setup_package_hash(&mut package);
 
-    package
+    CollectiveSetupVerificationFixture {
+        package,
+        verification_request: public_key_share_fixture.verification_request,
+    }
 }
 
 mod certificates;

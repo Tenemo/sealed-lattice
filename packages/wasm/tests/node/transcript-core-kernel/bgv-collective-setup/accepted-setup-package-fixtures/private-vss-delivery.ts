@@ -313,13 +313,28 @@ export async function focusedPrivateVssSourceDeliveryReferences(
                 kernel.deriveCanonicalObjectHash(input),
             generatePrivateVssShareProof: (input) =>
                 kernel.generatePrivateVssShareProof(input),
-            exportCanonicalProofMaterial: async ({ proofMaterialRoot }) => ({
-                descriptorBytes: await canonicalStreamRuntime.writeMaterial({
-                    emitChunk: () => Promise.resolve(),
+            exportCanonicalProofMaterial: async ({ proofMaterialRoot }) => {
+                const storedChunks: ArrayBuffer[] = [];
+                const descriptorBytes =
+                    await canonicalStreamRuntime.writeMaterial({
+                        emitChunk: ({ bytes, chunkIndex }) => {
+                            storedChunks[chunkIndex] = bytes.slice(0);
+
+                            return Promise.resolve();
+                        },
+                        family: bgvCanonicalStreamFamilies.vssOpeningCarry,
+                        materialRoot: proofMaterialRoot,
+                    });
+                await canonicalStreamRuntime.readMaterial({
+                    descriptorBytes,
                     family: bgvCanonicalStreamFamilies.vssOpeningCarry,
                     materialRoot: proofMaterialRoot,
-                }),
-            }),
+                    pullChunk: ({ chunkIndex }) =>
+                        Promise.resolve(storedChunks[chunkIndex]?.slice(0)),
+                });
+
+                return { descriptorBytes };
+            },
             verifyPrivateVssShareEnvelope: (input) =>
                 kernel.verifyPrivateVssShareEnvelope(input),
         },

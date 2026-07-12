@@ -479,28 +479,32 @@ fn statement_backed_target_share_with_malformed_proof_material(
     })
     .expect("target share proof statement");
 
+    let mut proof_material = json!({
+        "objectType": "BgvTargetDecryptionShareProofMaterial",
+        "proofRecords": [
+            {
+                "objectType": "BgvTargetDecryptionShareProofRecord",
+                "proofBytesBase64": "AQIDBAU=",
+            },
+        ],
+    });
+    let proof_material_root =
+        derive_canonical_object_hash(&proof_material).expect("target proof material root");
+    proof_material["proofMaterialRoot"] = json!(proof_material_root);
+
     json!({
         "targetDecryptionShare": target_decryption_share,
         "proofStatement": proof_statement,
-        "proofMaterial": {
-            "objectType": "BgvTargetDecryptionShareProofMaterial",
-            "proofRecords": [
-                {
-                    "objectType": "BgvTargetDecryptionShareProofRecord",
-                    "proofBytesBase64": "AQIDBAU=",
-                },
-            ],
-        },
+        "proofMaterial": proof_material,
     })
 }
 
 #[test]
 fn target_decryption_share_generation_refuses_passive_setup_package() {
-    // The passive development package carries the collective secret but is not the
-    // accepted, verifier-gated SetupPackage. read_setup_binding must refuse it at
-    // the trust boundary (objectType BgvPassiveSetupPackage, not SetupPackage) so
-    // shares can never be certified against a package the accepted-setup verifier
-    // never blessed. This fires before any witness material is read.
+    // The passive development package carries the collective secret but is not a
+    // structurally valid SetupPackage. read_setup_binding must refuse the wrong
+    // object family before any witness material is read. This distinction does
+    // not establish setup acceptance, board inclusion, or finality.
     let (_accepted_setup_package, accepted_record, target_ciphertext_binding, target_ciphertexts) =
         target_fixture();
     let target_share_profile = target_share_profile(&_accepted_setup_package);

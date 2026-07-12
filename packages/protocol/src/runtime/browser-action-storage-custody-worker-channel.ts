@@ -1070,7 +1070,7 @@ const normalizeHostErrorCode = (
  * kernel, Web Lock handle, IndexedDB adapter, device key, wrapped envelope, and
  * plaintext root all remain in this worker realm.
  */
-export type BrowserActionStorageCustodyWorkerHostConfiguration = Readonly<{
+type BrowserActionStorageCustodyWorkerHostConfiguration = Readonly<{
     cryptoProvider?: Crypto;
     indexedDbFactory?: IDBFactory;
     keyRangeFactory?: typeof IDBKeyRange;

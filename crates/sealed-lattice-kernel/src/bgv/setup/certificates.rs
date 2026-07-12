@@ -34,11 +34,10 @@ pub(super) fn key_switch_decomposition_parameters() -> CanonicalResult<Value> {
     }))
 }
 
-// Identity of the target-decryption parameters: the bound BGV parameters
-// hash, the secret-share domain, and the async-Lagrange target direction. Implementation
-// and certification state (partial/final decryption maturity, C1-C4 certification, whether
-// Q_target is known) is not asserted as bound flags here; that scope lives in the README
-// safety boundaries and the target-decryption implementation notes.
+// Identity of the target-decryption parameters: the bound BGV parameters hash
+// and secret-share domain. Implementation maturity and the availability of the
+// target secret relation remain public scope constraints; they are not asserted
+// as self-attested bound fields.
 pub(super) fn target_decryption_parameters(bgv_parameters_hash: &str) -> CanonicalResult<Value> {
     Ok(json!({
         "objectType": "TargetDecryptionParameters",

@@ -39,12 +39,18 @@ vi.mock(
     }),
 );
 
-let mockKernel: {
+type MockKernel = {
     readonly verifyCollectiveBgvSetup: ReturnType<typeof vi.fn>;
     readonly verifyPrivateVssShareEnvelope: ReturnType<typeof vi.fn>;
 };
 
+let mockKernel: MockKernel;
+let createFreshMockKernel: () => MockKernel;
+let loadedFreshMockKernels: MockKernel[];
+
 vi.mock('../../dist/kernel.js', () => ({
+    loadFreshTranscriptCoreKernel: () =>
+        Promise.resolve(createFreshMockKernel()),
     loadTranscriptCoreKernel: () => Promise.resolve(mockKernel),
 }));
 
@@ -162,7 +168,7 @@ describe('canonical setup material streaming in the public package', () => {
                 await input.pullChunk({ chunkIndex: 1, expectedByteLength: 0 });
             },
         );
-        mockKernel = {
+        const newMockKernel = (): MockKernel => ({
             verifyCollectiveBgvSetup: vi.fn((input: JsonRecord) => ({
                 isValid: false,
                 observedInput: input,
@@ -173,7 +179,15 @@ describe('canonical setup material streaming in the public package', () => {
                 observedInput: input,
                 operation: 'verifyPrivateVssShareEnvelope',
             })),
+        });
+        loadedFreshMockKernels = [];
+        createFreshMockKernel = () => {
+            mockKernel = newMockKernel();
+            loadedFreshMockKernels.push(mockKernel);
+
+            return mockKernel;
         };
+        mockKernel = newMockKernel();
     });
 
     it.each(setupProofMaterialTransportCases)(
@@ -356,5 +370,92 @@ describe('canonical setup material streaming in the public package', () => {
         ).rejects.toThrow(/must match exactly one transported reference/u);
         expect(mockedReadMaterial).not.toHaveBeenCalled();
         expect(mockKernel.verifyCollectiveBgvSetup).not.toHaveBeenCalled();
+    });
+
+    it('discards a setup verification kernel after material staging fails', async () => {
+        const verificationInput = {
+            setupPackage: { objectType: 'SetupPackage' },
+            ...setupVerificationBindings,
+            transportedPublicKeyShareProofMaterial: {
+                objectType: 'SetupTransportedPublicKeyShareProofMaterialSet',
+                proofFamily: 'public-key-share',
+                proofMaterials: [
+                    {
+                        objectType:
+                            'SetupTransportedPublicKeyShareProofMaterial',
+                        proofFamily: 'public-key-share',
+                        proofMaterialRoot,
+                        descriptorBytes: Uint8Array.of(4),
+                    },
+                ],
+            },
+            setupProofMaterialChunkSources: [
+                proofMaterialSource(proofMaterialRoot, 53),
+            ],
+        } satisfies Parameters<typeof publicPackage.verifySetupPackage>[0];
+        mockedReadMaterial.mockRejectedValueOnce(
+            new Error('simulated material source failure'),
+        );
+
+        await expect(
+            publicPackage.verifySetupPackage(verificationInput),
+        ).rejects.toThrow('simulated material source failure');
+        const failedKernel = loadedFreshMockKernels[0];
+        expect(failedKernel?.verifyCollectiveBgvSetup).not.toHaveBeenCalled();
+
+        await publicPackage.verifySetupPackage(verificationInput);
+        const recoveryKernel = loadedFreshMockKernels[1];
+        expect(recoveryKernel).not.toBe(failedKernel);
+        expect(recoveryKernel?.verifyCollectiveBgvSetup).toHaveBeenCalledOnce();
+    });
+
+    it('discards a private VSS verification kernel after material staging fails', async () => {
+        const transportCase = {
+            materialSetObjectType:
+                'SetupTransportedPrivateVssShareProofMaterialSet',
+            materialObjectType:
+                'PrivateVssShareTransportedSuccinctProofMaterial',
+            proofFamily: 'vss-opening-carry',
+            runtimeFamily: 1,
+        } as const;
+        const verificationInput = {
+            setupContext: {
+                ceremonyId: 'ceremony',
+                manifestHash: expectedManifestHash,
+                rosterHash: expectedRosterHash,
+                setupEpoch: 'epoch',
+                setupParametersHash: proofMaterialRoot,
+            },
+            publicMatrixSeedHash: proofMaterialRoot,
+            sourceTrusteeCoefficientCommitmentMaterialRecords: [],
+            sourceTrusteeCoefficientCommitmentRecord: {},
+            privateEnvelope: {},
+            transportedPrivateVssShareProofMaterial:
+                transportedSetupProofMaterialSet(
+                    transportCase,
+                    alternateProofMaterialRoot,
+                ),
+            privateVssShareProofMaterialChunkSources: [
+                proofMaterialSource(alternateProofMaterialRoot, 59),
+            ],
+        };
+        mockedReadMaterial.mockRejectedValueOnce(
+            new Error('simulated private material source failure'),
+        );
+
+        await expect(
+            publicPackage.verifyPrivateVssShare(verificationInput),
+        ).rejects.toThrow('simulated private material source failure');
+        const failedKernel = loadedFreshMockKernels[0];
+        expect(
+            failedKernel?.verifyPrivateVssShareEnvelope,
+        ).not.toHaveBeenCalled();
+
+        await publicPackage.verifyPrivateVssShare(verificationInput);
+        const recoveryKernel = loadedFreshMockKernels[1];
+        expect(recoveryKernel).not.toBe(failedKernel);
+        expect(
+            recoveryKernel?.verifyPrivateVssShareEnvelope,
+        ).toHaveBeenCalledOnce();
     });
 });

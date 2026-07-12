@@ -442,9 +442,7 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
                                 capabilityByteLength,
                             ),
                     );
-                    if (
-                        (cancelStatus >>> 0) !== runtimeInvalidSessionStatus
-                    ) {
+                    if (cancelStatus >>> 0 !== runtimeInvalidSessionStatus) {
                         this.#throwStatus(cancelStatus);
                     }
                 } catch (error) {
@@ -469,9 +467,7 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
                                 capabilityByteLength,
                             ),
                     );
-                    if (
-                        (cancelStatus >>> 0) !== runtimeInvalidSessionStatus
-                    ) {
+                    if (cancelStatus >>> 0 !== runtimeInvalidSessionStatus) {
                         this.#throwStatus(cancelStatus);
                     }
                 } catch (error) {
@@ -755,7 +751,7 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
                             capabilityByteLength,
                         ),
                 );
-                if ((status >>> 0) !== runtimeInvalidSessionStatus) {
+                if (status >>> 0 !== runtimeInvalidSessionStatus) {
                     this.#throwStatus(status);
                 }
             } catch (error) {

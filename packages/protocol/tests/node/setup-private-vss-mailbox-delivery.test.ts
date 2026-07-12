@@ -198,15 +198,22 @@ describe('private VSS mailbox delivery', () => {
                 unknown
             >[];
         expect(proofMaterials).toHaveLength(1);
-        expect(proofMaterials[0].proofMaterialRoot).toBe(
-            transportedProofRecord.proofMaterialRoot,
-        );
-        expect(proofMaterials[0].descriptorBytes).toEqual(descriptorBytes);
-        expect(proofMaterials[0].descriptorBytes).not.toBe(descriptorBytes);
-        expect(
+        expect(proofMaterials[0]).toMatchObject({
+            objectType: 'SetupTransportedPrivateVssShareProofMaterial',
+            proofFamily: 'vss-opening-carry',
+            proofMaterialRoot: transportedProofRecord.proofMaterialRoot,
+        });
+        const returnedProofMaterial =
             deliverySet.envelopeReferences[0]
-                .transportedPrivateVssShareProofMaterial?.proofMaterials[0]
-                .proofMaterialRoot,
-        ).toBe(transportedProofRecord.proofMaterialRoot);
+                .transportedPrivateVssShareProofMaterial?.proofMaterials[0];
+        expect(returnedProofMaterial).toMatchObject({
+            objectType: 'SetupTransportedPrivateVssShareProofMaterial',
+            proofFamily: 'vss-opening-carry',
+            proofMaterialRoot: transportedProofRecord.proofMaterialRoot,
+            descriptorBytes,
+        });
+        expect(returnedProofMaterial?.descriptorBytes).not.toBe(
+            descriptorBytes,
+        );
     });
 });

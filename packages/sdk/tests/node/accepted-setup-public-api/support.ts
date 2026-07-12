@@ -25,6 +25,7 @@ import {
     createVssShareAcceptance,
     exportEncryptedLocalTrusteeSetupState,
     restoreLocalTrusteeSetupState,
+    type PublicKeyShareSuccinctProofMaterial,
 } from '../../support/internal-setup-flow.js';
 
 import { hash512Hex } from '#packages/crypto/src/index';
@@ -378,23 +379,48 @@ export const trusteeReferencesFromPublicKeyShares = (
 export const publicKeyShareSuccinctProofMaterial = (
     kernel: TranscriptCoreKernel,
     proofRecord: Record<string, unknown>,
-): Record<string, unknown> => {
-    const proofRosterPosition = Number(proofRecord.trusteeRosterPosition);
-    const proofBytesHex = `bb66${proofRosterPosition.toString(16).padStart(4, '0')}`;
+): PublicKeyShareSuccinctProofMaterial => {
+    const proofTrusteeIdentity = proofRecord.trusteeIdentity;
+    if (
+        typeof proofTrusteeIdentity !== 'string' ||
+        proofTrusteeIdentity.length === 0
+    ) {
+        throw new TypeError(
+            'Public-key proof record trusteeIdentity must be non-empty.',
+        );
+    }
+    const proofRosterPosition = proofRecord.trusteeRosterPosition;
+    if (
+        typeof proofRosterPosition !== 'number' ||
+        !Number.isSafeInteger(proofRosterPosition) ||
+        proofRosterPosition < 0
+    ) {
+        throw new TypeError(
+            'Public-key proof record trusteeRosterPosition must be a non-negative safe integer.',
+        );
+    }
+    const proofBytesHash = hashFromKernel(
+        kernel,
+        `public-key-succinct-proof-bytes-${String(proofRosterPosition)}`,
+    );
 
     return {
         proofFamily: 'public-key-share',
-        trusteeIdentity: proofRecord.trusteeIdentity,
+        trusteeIdentity: proofTrusteeIdentity,
         trusteeRosterPosition: proofRosterPosition,
         statementHash: hashFromKernel(
             kernel,
             `public-key-succinct-statement-${String(proofRosterPosition)}`,
         ),
-        proofBytesHash: hashFromKernel(
-            kernel,
-            `public-key-succinct-proof-bytes-${String(proofRosterPosition)}`,
-        ),
-        proofBytesHex,
+        proofBytesHash,
+        proofBytesEncoding: 'binary-chunked-proof-bytes',
+        proofMaterialRoot: kernel.deriveCanonicalObjectHash({
+            value: {
+                objectType: 'SetupProofMaterialReference',
+                proofFamily: 'public-key-share',
+                proofBytesHash,
+            },
+        }),
     };
 };
 

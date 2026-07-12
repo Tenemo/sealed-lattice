@@ -39,8 +39,6 @@ pub(crate) struct KeySwitchKey {
 
 #[derive(Clone)]
 pub(crate) struct KeySwitchComponent {
-    #[cfg(test)]
-    pub(crate) component_b: Option<Vec<Vec<u64>>>,
     component_b_ntt: Vec<Vec<u64>>,
     component_a_ntt: Option<Vec<Vec<u64>>>,
     component_a_source: KeySwitchComponentASource,
@@ -53,21 +51,18 @@ enum KeySwitchComponentASource {
     RetainedPublicSample,
 }
 
-impl KeySwitchKey {
-    #[cfg(test)]
-    pub(crate) fn drop_component_a_ntt(&mut self) {
-        for component in &mut self.components {
-            if matches!(
-                component.component_a_source,
-                KeySwitchComponentASource::DeterministicStream { .. }
-            ) {
-                component.component_a_ntt = None;
-            }
-        }
-    }
-}
-
 impl KeySwitchComponent {
+    #[cfg(test)]
+    pub(crate) fn component_b_coefficients(&self) -> CanonicalResult<Vec<Vec<u64>>> {
+        self.component_b_ntt
+            .iter()
+            .zip(DATA_PRIMES.iter())
+            .map(|(component_b_limb_ntt, modulus)| {
+                inverse_negacyclic_ntt(component_b_limb_ntt, *modulus)
+            })
+            .collect()
+    }
+
     fn from_coefficients(
         component_b: Vec<Vec<u64>>,
         component_a: Vec<Vec<u64>>,
@@ -112,13 +107,10 @@ impl KeySwitchComponent {
     ) -> CanonicalResult<Self> {
         let component_b_ntt = ntt_limbs(&component_b, primes)?;
         let component_a_ntt = ntt_limbs(&component_a, primes)?;
-        drop(component_a);
-        #[cfg(not(test))]
         drop(component_b);
+        drop(component_a);
 
         Ok(Self {
-            #[cfg(test)]
-            component_b: Some(component_b),
             component_b_ntt,
             component_a_ntt: Some(component_a_ntt),
             component_a_source,
@@ -614,14 +606,8 @@ mod tests {
         assert_eq!(lower.components.len(), 3);
         for (digit_index, lower_component) in lower.components.iter().enumerate() {
             let higher_component = &higher.components[digit_index];
-            let higher_b = higher_component
-                .component_b
-                .as_ref()
-                .expect("component b retained");
-            let lower_b = lower_component
-                .component_b
-                .as_ref()
-                .expect("component b retained");
+            let higher_b = &higher_component.component_b_ntt;
+            let lower_b = &lower_component.component_b_ntt;
             assert_eq!(
                 &higher_b[..lower_b.len()],
                 &lower_b[..],

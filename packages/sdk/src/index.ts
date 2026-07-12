@@ -69,7 +69,10 @@ import {
     type BgvTargetDecryptionResultReleaseCompletion,
 } from '@sealed-lattice/wasm';
 
-import { loadTranscriptCoreKernel } from './kernel.js';
+import {
+    loadFreshTranscriptCoreKernel,
+    loadTranscriptCoreKernel,
+} from './kernel.js';
 import {
     preparePrivateVssShareVerificationInputForKernel,
     prepareSetupPackageVerificationInputForKernel,
@@ -502,7 +505,7 @@ export const verifyRecoveryEpochUpdate = (
 export const verifyPrivateVssShare = async (
     input: VerifyPrivateVssShareInput,
 ): Promise<PrivateVssShareVerification> => {
-    const kernel = await loadTranscriptCoreKernel();
+    const kernel = await loadFreshTranscriptCoreKernel();
 
     return kernel.verifyPrivateVssShareEnvelope(
         await preparePrivateVssShareVerificationInputForKernel(kernel, input),
@@ -540,7 +543,7 @@ export const verifySetupPackage = async (
 ): Promise<SetupPackageVerification> => {
     assertSetupPackageVerificationBindings(input);
 
-    const kernel = await loadTranscriptCoreKernel();
+    const kernel = await loadFreshTranscriptCoreKernel();
     const verificationInput =
         await prepareSetupPackageVerificationInputForKernel(kernel, input);
 
@@ -550,7 +553,7 @@ export const verifySetupPackage = async (
 export const generateTargetDecryptionShareProofMaterial = async (
     input: TargetDecryptionShareProofMaterialGenerationInput,
 ): Promise<TargetDecryptionShareProofMaterialGeneration> => {
-    const kernel = await loadTranscriptCoreKernel();
+    const kernel = await loadFreshTranscriptCoreKernel();
     // Construct the reader runtime before the kernel retains generated proof
     // material. This prevents a runtime-construction failure from stranding a
     // newly generated proof; after reader acquisition, writeMaterial owns

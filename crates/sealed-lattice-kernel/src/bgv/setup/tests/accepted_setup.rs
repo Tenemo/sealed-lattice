@@ -11,19 +11,20 @@ mod vss_material;
 
 use self::material_transport_fixtures::vss_material_binary_total_byte_length;
 use self::package_fixtures::{
-    accepted_vss_coefficient_message_fixture, accepted_vss_randomness_fixture,
-    accepted_vss_secret_coefficient_fixture,
-    collective_public_key_bearing_collective_setup_package, collective_setup_phase_package,
+    PUBLIC_KEY_SHARE_PROOF_TRANSPORT_CERTIFICATE_FIELDS, accepted_vss_coefficient_message_fixture,
+    accepted_vss_randomness_fixture, accepted_vss_secret_coefficient_fixture,
+    collective_public_key_bearing_collective_setup_fixture, collective_setup_phase_package,
     minimal_collective_setup_package, minimal_collective_setup_package_for_participant_count,
-    public_key_share_succinct_proof_bearing_collective_setup_package,
+    public_key_share_succinct_proof_bearing_collective_setup_fixture,
+    replace_setup_proof_material_transport_certificate_objects,
 };
 use self::proof_record_fixtures::{
-    collective_public_key_object, compact_aggregate_threshold_proof_fixture,
-    evaluation_key_aggregate_binding_object, finalize_collective_setup_package,
+    PublicKeyShareSuccinctProofFixture, collective_public_key_object,
+    compact_aggregate_threshold_proof_fixture, evaluation_key_aggregate_binding_object,
     galois_key_share_batches_object,
     public_coefficient_commitment_ring_degree_from_fixture_package,
     public_evaluation_key_set_object_with_aggregate_binding, public_key_share_material_object,
-    public_key_share_succinct_proofs_object, relinearization_key_share_rounds_fixture,
+    public_key_share_succinct_proofs_fixture, relinearization_key_share_rounds_fixture,
     replace_public_key_share_hashes_with_material_hashes, trustee_evaluation_key_proofs_object,
 };
 use self::record_rebinding::{
@@ -63,7 +64,6 @@ use crate::hashing::{hash512_hex, to_hex};
 use crate::protocol_signatures::{
     create_ml_dsa_public_key_hash_fixture, create_protocol_signature_fixture,
 };
-use crate::transcript_core::decode_hex;
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
 use std::time::Instant;

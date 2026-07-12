@@ -125,8 +125,3 @@ export const createBgvTargetDecryptionShareCanonicalProofMaterialTransport = (
         descriptorBytes: materialExport.descriptorBytes.slice(),
     };
 };
-
-// Preserve the existing internal helper name while routing it through the sole
-// canonical stream representation. There is no target-specific binary framing.
-export const encodeBgvTargetDecryptionShareProofMaterialBinary =
-    createBgvTargetDecryptionShareCanonicalProofMaterialTransport;

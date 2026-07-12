@@ -283,7 +283,7 @@ type PublicKeyShareMaterialBinarySegment = Readonly<
       }
 >;
 
-export type PublicKeyShareMaterialEncodingSource = Readonly<{
+type PublicKeyShareMaterialEncodingSource = Readonly<{
     readonly pullChunk: CanonicalProofMaterialChunkPull;
     readonly totalByteLength: number;
 }>;

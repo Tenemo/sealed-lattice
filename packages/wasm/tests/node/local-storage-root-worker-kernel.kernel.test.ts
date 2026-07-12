@@ -1,4 +1,4 @@
-import { BrowserActionStorageCustodyError } from '@sealed-lattice/protocol/browser-action-storage-custody';
+import { BrowserActionStorageCustodyError } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
 import {

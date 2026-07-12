@@ -38,7 +38,7 @@ const orderedStateDigestDomain =
 const checkpointExclusiveLockNamePrefix =
     'sealed-lattice-authenticated-checkpoint-';
 
-export type AuthenticatedCheckpointErrorCode =
+type AuthenticatedCheckpointErrorCode =
     | 'AuthenticationFailed'
     | 'BoundsExceeded'
     | 'CleanupFailed'
@@ -50,7 +50,7 @@ export type AuthenticatedCheckpointErrorCode =
     | 'RestoreFailed'
     | 'ResumeMismatch';
 
-export class AuthenticatedCheckpointError extends Error {
+class AuthenticatedCheckpointError extends Error {
     public readonly code: AuthenticatedCheckpointErrorCode;
     public readonly failureCause: unknown;
 
@@ -96,12 +96,12 @@ export type AuthenticatedCheckpointRecordContext =
               chunkDigest: Uint8Array;
           }>);
 
-export type AuthenticatedCheckpointSealRecord = (input: {
+type AuthenticatedCheckpointSealRecord = (input: {
     context: AuthenticatedCheckpointRecordContext;
     plaintext: Uint8Array;
 }) => Promise<Uint8Array> | Uint8Array;
 
-export type AuthenticatedCheckpointOpenRecord = (input: {
+type AuthenticatedCheckpointOpenRecord = (input: {
     context: AuthenticatedCheckpointRecordContext;
     sealedBytes: Uint8Array;
 }) => Promise<Uint8Array> | Uint8Array;
@@ -208,7 +208,7 @@ export const createAuthenticatedCheckpointWebLock = (
     };
 };
 
-export type AuthenticatedCheckpointLimits = Readonly<{
+type AuthenticatedCheckpointLimits = Readonly<{
     checkpointChunkByteLength: number;
     maximumCheckpointByteLength: number;
     maximumCheckpointChunkCount: number;
@@ -216,13 +216,13 @@ export type AuthenticatedCheckpointLimits = Readonly<{
     transactionLifetimeMilliseconds: number;
 }>;
 
-export type AuthenticatedCheckpointDescriptor = Readonly<{
+type AuthenticatedCheckpointDescriptor = Readonly<{
     chunkCount: number;
     orderedStateDigest: Uint8Array;
     totalByteLength: number;
 }>;
 
-export type AuthenticatedCheckpointRestorer<Result> = Readonly<{
+type AuthenticatedCheckpointRestorer<Result> = Readonly<{
     acceptChunk(input: {
         bytes: Uint8Array;
         chunkIndex: number;
@@ -233,7 +233,7 @@ export type AuthenticatedCheckpointRestorer<Result> = Readonly<{
     discard(failure: unknown): Promise<void> | void;
 }>;
 
-export type AuthenticatedCheckpointStoreConfiguration = Readonly<{
+type AuthenticatedCheckpointStoreConfiguration = Readonly<{
     withExclusiveCheckpointLock: AuthenticatedCheckpointExclusiveLock;
     limits: AuthenticatedCheckpointLimits;
     openRecord: AuthenticatedCheckpointOpenRecord;

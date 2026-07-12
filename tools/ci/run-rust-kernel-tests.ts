@@ -4,6 +4,7 @@ import {
 } from './focused-rust-test-match.js';
 import { createLocalRunLog, currentProcessExitCode } from './local-run-log.js';
 import { runCommandsInSeries, type CommandInvocation } from './run-command.js';
+import { verifyFocusedRustLaneSelection } from './rust-focused-lane-selection.js';
 import {
     cargoTestArgumentsForRustKernelFast,
     heavyRustKernelTestNamePrefix,
@@ -80,6 +81,14 @@ export const runRustKernelTests = async (
     rawArguments: readonly string[] = process.argv.slice(2),
 ): Promise<void> => {
     const parsedArguments = parseRustKernelArguments(rawArguments);
+    const command = buildRustKernelTestCommand(parsedArguments);
+    if (parsedArguments.testFilter !== undefined) {
+        verifyFocusedRustLaneSelection({
+            environment: command.env,
+            lane: 'rust-kernel-fast',
+            testFilter: parsedArguments.testFilter,
+        });
+    }
     const runLog = await createLocalRunLog({
         commandLineArguments: rawArguments,
         lanes: ['Rust kernel fast'],
@@ -92,14 +101,11 @@ export const runRustKernelTests = async (
             : createFocusedRustTestMatchTracker();
 
     try {
-        exitCode = await runCommandsInSeries(
-            [buildRustKernelTestCommand(parsedArguments)],
-            {
-                observer: focusedTestMatchTracker?.observer,
-                outputMode: 'inherit',
-                runLog,
-            },
-        );
+        exitCode = await runCommandsInSeries([command], {
+            observer: focusedTestMatchTracker?.observer,
+            outputMode: 'inherit',
+            runLog,
+        });
         if (
             focusedTestMatchTracker !== undefined &&
             parsedArguments.testFilter !== undefined

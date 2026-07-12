@@ -14,8 +14,23 @@ const transcriptCoreKernelUrl = new URL(
 const packagedTranscriptCoreKernelNormalizedSha256Hex: string | undefined =
     undefined;
 
+const transcriptCoreKernelLoaderOptions = {
+    expectedKernelSha256Hex: packagedTranscriptCoreKernelNormalizedSha256Hex,
+} as const;
+
 export const loadTranscriptCoreKernel: () => Promise<TranscriptCoreKernel> =
-    createTranscriptCoreKernelLoader(transcriptCoreKernelUrl, {
-        expectedKernelSha256Hex:
-            packagedTranscriptCoreKernelNormalizedSha256Hex,
-    });
+    createTranscriptCoreKernelLoader(
+        transcriptCoreKernelUrl,
+        transcriptCoreKernelLoaderOptions,
+    );
+
+// Portable one-shot operations can own a disposable WASM instance. If source
+// staging or generated-material export fails, discarding that instance also
+// discards authenticated or generated one-shot roots and its linear-memory
+// high-water mark.
+export const loadFreshTranscriptCoreKernel =
+    (): Promise<TranscriptCoreKernel> =>
+        createTranscriptCoreKernelLoader(
+            transcriptCoreKernelUrl,
+            transcriptCoreKernelLoaderOptions,
+        )();

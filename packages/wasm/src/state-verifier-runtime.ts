@@ -12,7 +12,7 @@ import {
 import type { TranscriptCoreKernel } from './transcript-core-bridge/kernel-types.js';
 
 /** Internal bindings for the capability-scoped state verifier WASM exports. */
-export type StateVerifierKernelContext = Readonly<{
+type StateVerifierKernelContext = Readonly<{
     allocate(length: number): number;
     begin(
         configurationPointer: number,
@@ -203,7 +203,7 @@ export type StateVerifierSession = Readonly<{
     ): VerificationResult<VerifiedStateReservation>;
 }>;
 
-export class StateVerifierInternalError extends Error {
+class StateVerifierInternalError extends Error {
     public readonly failureCause: unknown;
 
     public constructor(message: string, failureCause?: unknown) {
@@ -213,7 +213,7 @@ export class StateVerifierInternalError extends Error {
     }
 }
 
-export class StateVerifierRefusalError extends Error {
+class StateVerifierRefusalError extends Error {
     public readonly refusalReason: RefusalReason;
 
     public constructor(refusalReason: RefusalReason) {

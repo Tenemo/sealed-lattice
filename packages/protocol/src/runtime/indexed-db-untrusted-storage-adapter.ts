@@ -19,7 +19,7 @@ const storageRootCommitmentByteLength = 64;
 const storageNamespacePattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 const deviceWrappingStorageKeyPrefix = 'sealed-lattice-device-wrapping/';
 
-export type IndexedDbUntrustedStorageAdapterErrorCode =
+type IndexedDbUntrustedStorageAdapterErrorCode =
     | 'Closed'
     | 'InvalidMutation'
     | 'OpenFailed'
@@ -28,7 +28,7 @@ export type IndexedDbUntrustedStorageAdapterErrorCode =
     | 'TransactionFailed'
     | 'Unavailable';
 
-export class IndexedDbUntrustedStorageAdapterError extends Error {
+class IndexedDbUntrustedStorageAdapterError extends Error {
     public readonly code: IndexedDbUntrustedStorageAdapterErrorCode;
     public readonly failureCause: unknown;
 
@@ -44,7 +44,7 @@ export class IndexedDbUntrustedStorageAdapterError extends Error {
     }
 }
 
-export type IndexedDbUntrustedStorageAdapterConfiguration = Readonly<{
+type IndexedDbUntrustedStorageAdapterConfiguration = Readonly<{
     databaseName: string;
     indexedDbFactory?: IDBFactory;
     keyRangeFactory?: typeof IDBKeyRange;

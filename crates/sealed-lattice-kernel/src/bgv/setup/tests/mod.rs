@@ -10,8 +10,7 @@ use super::vss::{evaluate_unreduced_shamir_polynomial, verify_carry_aware_vss_sh
 use super::{
     DATA_PRIMES, POLYNOMIAL_DEGREE, describe_collective_bgv_setup_parameters,
     development_evaluator_key_from_passive_setup_package,
-    generate_passive_setup_package_from_request, read_public_evaluation_key_rotation_requests,
-    sample_public_residues, selected_public_evaluation_key_rotation_requests,
+    generate_passive_setup_package_from_request, sample_public_residues,
     verify_local_trustee_setup_state_from_request, verify_passive_setup_package_from_request,
     verify_private_vss_share_envelope_from_request,
 };
@@ -30,7 +29,7 @@ use super::{
     vss::{CarryAwareVssCommitmentOpeningInput, verify_carry_aware_vss_commitment_opening},
 };
 use crate::bgv::evaluator::{
-    circuit::{EvaluatorContext, modulus_switch_to, multiply},
+    circuit::modulus_switch_to,
     engine::{DevelopmentBgvKey, ciphertext_tensor, encode_slots_to_coefficients},
     key_switch::{generate_galois_key, generate_relinearization_key, relinearize, rotate},
     top_k::DIRECT_COMPARISON_OUTPUT_LEVEL,
@@ -42,7 +41,7 @@ use crate::hashing::{derive_canonical_object_hash, hash512};
 use std::sync::OnceLock;
 
 mod accepted_setup;
-mod evaluation_key_material;
+mod evaluation_key_schedule;
 mod generation_and_certificate;
 mod local_trustee_state;
 mod payload_rejection;
@@ -55,10 +54,6 @@ type SetupPackageMutation = (&'static str, Box<dyn Fn(&mut serde_json::Value)>);
 
 static PASSIVE_SETUP_TEST_PACKAGE: OnceLock<serde_json::Value> = OnceLock::new();
 static PASSIVE_SETUP_TEST_EVALUATOR_KEY: OnceLock<DevelopmentBgvKey> = OnceLock::new();
-static PASSIVE_SETUP_LEVEL_ONE_PUBLIC_MATERIAL: OnceLock<serde_json::Value> = OnceLock::new();
-static PASSIVE_SETUP_LEVEL_ONE_PUBLIC_CONTEXT: OnceLock<EvaluatorContext> = OnceLock::new();
-static PASSIVE_SETUP_ROTATION_PUBLIC_MATERIAL: OnceLock<serde_json::Value> = OnceLock::new();
-static PASSIVE_SETUP_ROTATION_PUBLIC_CONTEXT: OnceLock<EvaluatorContext> = OnceLock::new();
 
 fn request() -> serde_json::Value {
     serde_json::json!({
@@ -150,111 +145,6 @@ fn setup_derived_evaluator_key_from_package(package: &serde_json::Value) -> Deve
 
     DevelopmentBgvKey::from_collective_components(collective_secret, public_b, public_a)
         .expect("setup-derived evaluator key")
-}
-
-fn level_one_public_material() -> &'static serde_json::Value {
-    PASSIVE_SETUP_LEVEL_ONE_PUBLIC_MATERIAL.get_or_init(|| {
-        super::generate_passive_setup_public_evaluation_key_material_from_request(
-            &serde_json::json!({
-                "setupPackage": setup_package_ref().clone(),
-                "setupPrivateWitness": {
-                    "setupSeed": "passive-bgv-setup-test-seed",
-                },
-                "workingLevel": 1,
-            }),
-        )
-        .expect("public evaluation-key material")
-    })
-}
-
-fn level_one_public_context() -> &'static EvaluatorContext {
-    PASSIVE_SETUP_LEVEL_ONE_PUBLIC_CONTEXT.get_or_init(|| {
-        EvaluatorContext::from_passive_setup_public_material(
-            setup_package_ref(),
-            level_one_public_material(),
-            1,
-        )
-        .expect("public evaluator context")
-    })
-}
-
-fn direct_comparison_rotation_request() -> (usize, usize) {
-    // Every scheduled rotation key now sits at the working level; the return
-    // rotation entry exercises truncated use at the comparison output level.
-    let rotation_request = setup_package_ref()["evaluationKeys"]["rotationKeyRoots"]
-        .as_array()
-        .expect("rotation key roots")
-        .iter()
-        .find(|entry| {
-            entry["purpose"].as_str() == Some("generator-ordered-packed-rank-return-basis")
-        })
-        .expect("packed-rank return rotation key");
-    let galois_element = rotation_request["rotation"]
-        .as_u64()
-        .expect("rotation")
-        .try_into()
-        .expect("rotation fits usize");
-    let level = rotation_request["level"]
-        .as_u64()
-        .expect("level")
-        .try_into()
-        .expect("level fits usize");
-
-    (galois_element, level)
-}
-
-fn rotation_public_material() -> &'static serde_json::Value {
-    PASSIVE_SETUP_ROTATION_PUBLIC_MATERIAL.get_or_init(|| {
-        let (galois_element, level) = direct_comparison_rotation_request();
-        super::generate_passive_setup_public_evaluation_key_material_from_request(
-            &serde_json::json!({
-                "setupPackage": setup_package_ref().clone(),
-                "setupPrivateWitness": {
-                    "setupSeed": "passive-bgv-setup-test-seed",
-                },
-                "workingLevel": 1,
-                "rotationKeys": [
-                    {
-                        "rotation": galois_element,
-                        "level": level,
-                    }
-                ],
-            }),
-        )
-        .expect("public evaluation-key material")
-    })
-}
-
-fn rotation_public_context() -> &'static EvaluatorContext {
-    PASSIVE_SETUP_ROTATION_PUBLIC_CONTEXT.get_or_init(|| {
-        EvaluatorContext::from_passive_setup_public_material(
-            setup_package_ref(),
-            rotation_public_material(),
-            1,
-        )
-        .expect("public evaluator context")
-    })
-}
-
-fn rebind_public_evaluation_key_material_hash(material: &mut serde_json::Value) {
-    material
-        .as_object_mut()
-        .expect("public evaluation-key material must be an object")
-        .remove("publicEvaluationKeyMaterialHash");
-    material["publicEvaluationKeyMaterialHash"] = serde_json::json!(
-        derive_canonical_object_hash(material).expect("public evaluation-key material hash")
-    );
-}
-
-fn public_evaluation_key_material_error(
-    package: &serde_json::Value,
-    material: &serde_json::Value,
-    working_level: usize,
-) -> crate::encoding::CanonicalError {
-    match super::public_evaluation_keys_from_material(package, material, working_level) {
-        Ok(_) => panic!("public evaluation-key material mutation must reject"),
-        Err(error) => error,
-    }
 }
 
 fn automorphism_residues(input: &[u64], galois_element: usize, modulus: u64) -> Vec<u64> {

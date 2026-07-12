@@ -6,11 +6,15 @@ valid canonical objects. A panic, sanitizer finding, or process abort is a
 failure; ordinary typed refusal responses are expected.
 
 `cargo-fuzz` requires a nightly Rust toolchain, LLVM sanitizer support, and a
-C++ compiler on a supported Unix-like host. Run the target from this directory:
+C++ compiler on a supported Unix-like host. Run the canonical root command for
+a bounded 60-second campaign:
 
 ```bash
-cargo +nightly fuzz run foundation-schema-object
+pnpm run test:fuzz:foundation-schema-object
 ```
+
+Pass one positive duration in seconds for a longer manual campaign, for example
+`pnpm run test:fuzz:foundation-schema-object -- 3600`.
 
 Retain minimized reproductions as reviewed regression vectors. A deterministic
 mutation unit test or a successful build of this target is not a substitute for

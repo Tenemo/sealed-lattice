@@ -45,8 +45,6 @@ export const evaluationKeyShareComponentMaterialEncoding =
 export const setupProofMaterialTransportEncoding = 'binary-chunked-proof-bytes';
 export const evaluationKeyShareComponentVectorHashDomain =
     'sealed-lattice-bgv-rns/evaluation-key-share-component-vector';
-export const trusteeEvaluationKeyProofBytesHashDomain =
-    'sealed-lattice/setup/trustee-evaluation-key/proof-bytes';
 export const evaluationKeyShareComponentMaterialMagic = new Uint8Array([
     0x53, 0x4c, 0x45, 0x4b, 0x43, 0x4d, 0x56, 0x31,
 ]);

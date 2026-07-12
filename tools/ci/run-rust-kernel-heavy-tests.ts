@@ -5,6 +5,7 @@ import {
 import { createLocalRunLog, currentProcessExitCode } from './local-run-log.js';
 import { createProcessMemoryGuard } from './process-memory-guard.js';
 import { runCommandsInSeries, type CommandInvocation } from './run-command.js';
+import { verifyFocusedRustLaneSelection } from './rust-focused-lane-selection.js';
 import {
     cargoTestArgumentsForRustKernelHeavy,
     heavyRustKernelTestNamePrefix,
@@ -45,12 +46,6 @@ export const parseRustKernelHeavyArguments = (
         positionalFilter === undefined
             ? heavyRustKernelTestNamePrefix
             : normalizeRustTestFilter(positionalFilter);
-    if (!testFilter.startsWith(heavyRustKernelTestNamePrefix)) {
-        throw new Error(
-            `Heavy Rust kernel filters must start with "${heavyRustKernelTestNamePrefix}". ${usage}`,
-        );
-    }
-
     return { testFilter };
 };
 
@@ -80,6 +75,14 @@ export const runRustKernelHeavyTests = async (
     rawArguments: readonly string[] = process.argv.slice(2),
 ): Promise<void> => {
     const parsedArguments = parseRustKernelHeavyArguments(rawArguments);
+    const command = buildRustKernelHeavyTestCommand(parsedArguments);
+    if (rawArguments.some((argument) => argument !== '--')) {
+        verifyFocusedRustLaneSelection({
+            environment: command.env,
+            lane: 'rust-kernel-heavy',
+            testFilter: parsedArguments.testFilter,
+        });
+    }
     const runLog = await createLocalRunLog({
         commandLineArguments: rawArguments,
         lanes: ['Rust kernel heavy'],
@@ -101,14 +104,11 @@ export const runRustKernelHeavyTests = async (
             return;
         }
 
-        exitCode = await runCommandsInSeries(
-            [buildRustKernelHeavyTestCommand(parsedArguments)],
-            {
-                observer: testMatchTracker.observer,
-                outputMode: 'inherit',
-                runLog,
-            },
-        );
+        exitCode = await runCommandsInSeries([command], {
+            observer: testMatchTracker.observer,
+            outputMode: 'inherit',
+            runLog,
+        });
         const runResult = resolveFocusedRustTestRunResult({
             commandExitCode: exitCode,
             matchedTestCount: testMatchTracker.matchedTestCount(),

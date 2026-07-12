@@ -1,7 +1,5 @@
 import { describe, expect, it } from 'vitest';
 
-import { loadPublicTranscriptCoreKernel } from './accepted-setup-public-api/support.js';
-
 import {
     deriveCanonicalObjectHash,
     hash512Hex,
@@ -17,6 +15,7 @@ import {
 } from '#packages/wasm/src/canonical-stream-runtime';
 import {
     bgvCanonicalStreamFamilies,
+    loadTranscriptCoreKernel,
     openBgvCanonicalStreamRuntime,
 } from '#packages/wasm/src/index';
 
@@ -27,10 +26,6 @@ type CanonicalProofMaterialBuild = Readonly<{
     readonly canonicalProofMaterials: readonly Readonly<{
         readonly proofMaterialRoot: string;
         readonly descriptorBytes: Uint8Array;
-        readonly chunks: readonly Readonly<{
-            readonly chunkIndex: number;
-            readonly bytes: ArrayBuffer;
-        }>[];
     }>[];
 }>;
 
@@ -168,7 +163,6 @@ const canonicalProofMaterialBuild = (
         canonicalProofMaterials.push({
             proofMaterialRoot,
             descriptorBytes,
-            chunks: [{ chunkIndex: 0, bytes: proofBytes.buffer }],
         });
 
         return {
@@ -196,7 +190,7 @@ const canonicalProofMaterialBuild = (
 
 describe('VSS canonical proof material transport', () => {
     it.each(proofMaterialCases)(
-        'maps $proofFamily semantic references to descriptor and binary-chunk sidecars',
+        'maps $proofFamily semantic references to descriptor sidecars',
         (proofMaterialCase) => {
             const build = canonicalProofMaterialBuild(proofMaterialCase, [
                 Uint8Array.of(1, 2, 3),
@@ -224,18 +218,6 @@ describe('VSS canonical proof material transport', () => {
                 expect(material.descriptorBytes).toEqual(
                     expectedMaterial?.descriptorBytes,
                 );
-                const chunks = material.chunks as readonly Readonly<{
-                    readonly chunkIndex: number;
-                    readonly bytes: ArrayBuffer;
-                }>[];
-                expect(chunks[0]?.chunkIndex).toBe(0);
-                expect([...new Uint8Array(chunks[0].bytes)]).toEqual([
-                    materialIndex,
-                    0x11,
-                    0x22,
-                    0x33,
-                    0x44,
-                ]);
             });
         },
     );
@@ -264,9 +246,9 @@ describe('VSS canonical proof material transport', () => {
 
 describe('VSS canonical proof material streaming through the kernel', () => {
     it.each(proofMaterialCases)(
-        'authenticates the supplied $proofFamily descriptor and chunks',
+        'authenticates the supplied $proofFamily descriptor and producer chunks',
         async (proofMaterialCase) => {
-            const kernel = await loadPublicTranscriptCoreKernel();
+            const kernel = await loadTranscriptCoreKernel();
             const chunk = Uint8Array.of(0, 0x11, 0x22, 0x33, 0x44).buffer;
             const writer = openCanonicalStreamWorkerRuntime({
                 kernel,
@@ -284,10 +266,6 @@ describe('VSS canonical proof material streaming through the kernel', () => {
                 transported.transportedProofMaterialSet
                     .proofMaterials as readonly JsonRecord[]
             )[0];
-            const chunks = material.chunks as readonly Readonly<{
-                readonly chunkIndex: number;
-                readonly bytes: ArrayBuffer;
-            }>[];
             const verifier = openBgvCanonicalStreamRuntime({
                 kernel,
             }).openVerifier({
@@ -295,12 +273,7 @@ describe('VSS canonical proof material streaming through the kernel', () => {
                 family: proofMaterialCase.runtimeFamily,
                 materialRoot: material.proofMaterialRoot as string,
             });
-            chunks.forEach((transportChunk) => {
-                verifier.absorbChunk(
-                    transportChunk.chunkIndex,
-                    transportChunk.bytes,
-                );
-            });
+            verifier.absorbChunk(0, chunk);
             verifier.finish();
 
             expect(verifier.state()).toBe('completed');

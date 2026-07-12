@@ -681,5 +681,3 @@ export const aggregateTransportedPublicKeyShareMaterial = async (
         reader.dispose();
     }
 };
-
-export { transportedPublicKeyShareMaterialReader };

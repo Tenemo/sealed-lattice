@@ -64,28 +64,6 @@ impl EvaluatorContext {
     }
 
     #[cfg(test)]
-    pub(crate) fn from_passive_setup_public_material(
-        setup_package: &serde_json::Value,
-        evaluation_key_material: &serde_json::Value,
-        working_level: usize,
-    ) -> CanonicalResult<Self> {
-        let key_material = super::super::setup::public_evaluation_keys_from_material(
-            setup_package,
-            evaluation_key_material,
-            working_level,
-        )?;
-
-        Ok(Self {
-            key: None,
-            working_level,
-            relinearization_key: key_material.relinearization_key,
-            rotation_keys: key_material.rotation_keys,
-            #[cfg(not(target_arch = "wasm32"))]
-            generated_rotation_keys: RwLock::new(BTreeMap::new()),
-        })
-    }
-
-    #[cfg(test)]
     pub(crate) fn key(&self) -> &DevelopmentBgvKey {
         self.key.as_ref().expect(
             "development evaluator key is unavailable in a public evaluation-key material context",

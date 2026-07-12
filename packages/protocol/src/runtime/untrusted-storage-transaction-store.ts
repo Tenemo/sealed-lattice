@@ -115,7 +115,7 @@ export type UntrustedStorageRecoveryReport = Readonly<{
     storedValueByteLength: number;
 }>;
 
-export type UntrustedStorageTransactionStoreOpenResult = Readonly<{
+type UntrustedStorageTransactionStoreOpenResult = Readonly<{
     recoveryReport: UntrustedStorageRecoveryReport;
     store: UntrustedStorageTransactionStore;
 }>;

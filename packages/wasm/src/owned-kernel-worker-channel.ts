@@ -43,7 +43,7 @@ export class KernelWorkerInternalError extends Error {
     }
 }
 
-export type KernelWorkerTraceEvent =
+type KernelWorkerTraceEvent =
     | Readonly<{
           eventKind: 'operation-started';
           inputByteLength: number;
@@ -55,7 +55,7 @@ export type KernelWorkerTraceEvent =
           operationKind: number;
       }>;
 
-export type KernelWorkerCounterSnapshot = Readonly<{
+type KernelWorkerCounterSnapshot = Readonly<{
     cancellationCount: number;
     completedOperationCount: number;
     cryptographicRefusalCount: number;
@@ -121,11 +121,11 @@ type WorkerLike = Pick<
     'addEventListener' | 'postMessage' | 'removeEventListener' | 'terminate'
 >;
 
-export type OwnedKernelWorkerChannelOptions = Readonly<{
+type OwnedKernelWorkerChannelOptions = Readonly<{
     trace?: (event: KernelWorkerTraceEvent) => void;
 }>;
 
-export type KernelWorkerOperationInput = Readonly<{
+type KernelWorkerOperationInput = Readonly<{
     abortSignal?: AbortSignal;
     inputBuffer: ArrayBuffer;
     maximumDurationMilliseconds: number;

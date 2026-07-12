@@ -18,6 +18,27 @@ export type ProcessMemoryGuard = Readonly<{
     memoryLimitGigabytes: number;
 }>;
 
+export const buildProcessMemoryGuardVerificationCommand =
+    (): CommandInvocation => {
+        const environment = { ...process.env };
+        delete environment.CARGO_TARGET_DIR;
+
+        return {
+            args: [
+                'test',
+                '--locked',
+                '-p',
+                'sealed-lattice-process-memory-guard',
+                '--target-dir',
+                path.resolve(process.cwd(), 'target', 'process-memory-guard'),
+            ],
+            command: 'cargo',
+            description: 'verify process memory guard',
+            env: environment,
+            logFileSlug: 'cargo-test-process-memory-guard',
+        };
+    };
+
 // Thirty-two GiB is the workstation ceiling. Smaller hosts receive a lower
 // ceiling, and every host retains at least two GiB of currently free memory for
 // the runner and operating system. This is a hard OS limit, not a scheduling
@@ -113,25 +134,7 @@ export const createProcessMemoryGuard = (input: {
     );
 
     return {
-        buildVerificationCommand: (): CommandInvocation => {
-            const environment = { ...process.env };
-            delete environment.CARGO_TARGET_DIR;
-
-            return {
-                args: [
-                    'test',
-                    '--locked',
-                    '-p',
-                    'sealed-lattice-process-memory-guard',
-                    '--target-dir',
-                    processMemoryGuardTargetDirectory,
-                ],
-                command: 'cargo',
-                description: 'verify process memory guard',
-                env: environment,
-                logFileSlug: 'cargo-test-process-memory-guard',
-            };
-        },
+        buildVerificationCommand: buildProcessMemoryGuardVerificationCommand,
         guardCommand: (
             command: CommandInvocation,
             commandMemoryLimitBytes = memoryLimitBytes,

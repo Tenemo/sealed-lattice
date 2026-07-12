@@ -5,10 +5,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { foundationProfile } from '#packages/types/src/foundation-contract.js';
 import { normalizeTranscriptCoreKernelBytesForHash } from '#packages/wasm/src/transcript-core-bridge.js';
 import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
 import { isWithinDirectory } from '#tools/internal/files.js';
-import { foundationProfile } from '@sealed-lattice/types';
 
 const repoRoot = path.resolve(
     fileURLToPath(new URL('../../', import.meta.url)),

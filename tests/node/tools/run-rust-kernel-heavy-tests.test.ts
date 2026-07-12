@@ -50,10 +50,10 @@ describe('Rust kernel heavy runner arguments', () => {
         ]);
     });
 
-    it('rejects non-heavy, ambiguous, and unsupported filters', () => {
-        expect(() => parseRustKernelHeavyArguments(['one_test'])).toThrow(
-            'Heavy Rust kernel filters must start with "heavy_rust_kernel_"',
-        );
+    it('defers lane ownership while rejecting ambiguous and unsupported filters', () => {
+        expect(parseRustKernelHeavyArguments(['one_test'])).toEqual({
+            testFilter: 'one_test',
+        });
         expect(() => parseRustKernelHeavyArguments(['--unsupported'])).toThrow(
             'Unknown argument: --unsupported',
         );

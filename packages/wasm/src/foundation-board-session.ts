@@ -68,7 +68,7 @@ export class FoundationBoardRefusalError extends Error {
     }
 }
 
-export type FoundationBoardKernelContext = Readonly<{
+type FoundationBoardKernelContext = Readonly<{
     allocate(length: number): number;
     begin(
         configurationPointer: number,

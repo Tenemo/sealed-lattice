@@ -28,6 +28,8 @@ jobs:
             - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
             - run: cargo fmt --check --all
             - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+            - run: pnpm run test:lanes:verify -- --rust
+            - run: pnpm run test:rust:process-memory-guard
             - name: Run Rust tests with optimized test profile
               run: pnpm run test:rust:kernel
 
@@ -112,7 +114,7 @@ jobs:
                   pnpm run tsc
                   pnpm exec tsx ./tools/ci/generate-api-surface-summary.ts
                   pnpm exec tsx ./tools/ci/verify-public-package-policy.ts
-                  pnpm exec tsx ./tools/ci/verify-test-lane-coverage.ts
+                  pnpm run test:lanes:verify -- --static
                   pnpm exec tsx ./tools/ci/check-package-boundaries.ts
                   pnpm exec knip
 

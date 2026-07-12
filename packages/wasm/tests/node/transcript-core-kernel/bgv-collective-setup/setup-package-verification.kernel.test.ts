@@ -4,7 +4,6 @@ import { setupRequest } from '../bgv-passive-setup-fixtures.js';
 
 import {
     acceptedShapedSetupPackage,
-    acceptedShapedSetupVerificationCompanions,
     acceptedVssComplaintSet,
     rebindCollectiveSetupPackageHash,
 } from './accepted-setup-package-fixtures.js';
@@ -58,50 +57,6 @@ describe('collective BGV setup kernel commands', () => {
         expect(commandError.message).toContain('setupPackage is required');
     });
 
-    it('refuses accepted-shaped setup when terminal public-key objects are missing', async () => {
-        const kernel = await loadTranscriptCoreKernel();
-        const parameters = kernel.describeCollectiveBgvSetupParameters({
-            participantCount: 3,
-        });
-        const setupPackage = await acceptedShapedSetupPackage(
-            kernel,
-            parameters,
-        );
-        const verificationCompanions =
-            await acceptedShapedSetupVerificationCompanions(kernel, parameters);
-
-        const result = kernel.verifyCollectiveBgvSetup({
-            setupPackage,
-            ...verificationCompanions,
-            expectedManifestHash: setupRequest.manifestHash,
-            expectedRosterHash: String(
-                (setupPackage.setupContext as JsonRecord).rosterHash,
-            ),
-        });
-
-        expect(result).toMatchObject({
-            isValid: false,
-            refusedObjects: [
-                {
-                    reasonCode: 'setupObjectMissing',
-                    objectPath: 'setupPackage.publicKeyShareMaterial',
-                },
-                {
-                    reasonCode: 'setupObjectMissing',
-                    objectPath: 'setupPackage.publicKeyShareSuccinctProofs',
-                },
-                {
-                    reasonCode: 'setupObjectMissing',
-                    objectPath: 'setupPackage.collectivePublicKey',
-                },
-                {
-                    reasonCode: 'setupObjectMissing',
-                    objectPath: 'setupPackage.collectivePublicKeyRoot',
-                },
-            ],
-        });
-    });
-
     it('refuses malformed setup context before reporting missing prerequisites', async () => {
         const kernel = await loadTranscriptCoreKernel();
         const parameters = kernel.describeCollectiveBgvSetupParameters({
@@ -112,13 +67,6 @@ describe('collective BGV setup kernel commands', () => {
             ['setupEpoch', 'setup-epoch 1'],
             ['ceremonyId', 'ceremony-1\nfork'],
         ] as const) {
-            // Each verify consumes and evicts its streamed proof-material handles,
-            // so this loop streams a fresh companions set for every iteration.
-            const verificationCompanions =
-                await acceptedShapedSetupVerificationCompanions(
-                    kernel,
-                    parameters,
-                );
             const setupPackage = await acceptedShapedSetupPackage(
                 kernel,
                 parameters,
@@ -130,7 +78,6 @@ describe('collective BGV setup kernel commands', () => {
 
             const result = kernel.verifyCollectiveBgvSetup({
                 setupPackage,
-                ...verificationCompanions,
                 expectedManifestHash: setupRequest.manifestHash,
                 expectedRosterHash: String(
                     (setupPackage.setupContext as JsonRecord).rosterHash,
@@ -154,8 +101,6 @@ describe('collective BGV setup kernel commands', () => {
             kernel,
             parameters,
         );
-        const verificationCompanions =
-            await acceptedShapedSetupVerificationCompanions(kernel, parameters);
         setupPackage.vssComplaints = await acceptedVssComplaintSet(
             setupPackage.setupContext as JsonRecord,
             setupPackage.privateVssEnvelopeCommitments as JsonRecord,
@@ -164,7 +109,6 @@ describe('collective BGV setup kernel commands', () => {
 
         const result = kernel.verifyCollectiveBgvSetup({
             setupPackage,
-            ...verificationCompanions,
             expectedManifestHash: setupRequest.manifestHash,
             expectedRosterHash: String(
                 (setupPackage.setupContext as JsonRecord).rosterHash,

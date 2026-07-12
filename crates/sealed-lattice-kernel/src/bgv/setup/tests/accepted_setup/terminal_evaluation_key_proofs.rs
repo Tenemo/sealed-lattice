@@ -1,45 +1,48 @@
+use super::package_fixtures::{
+    TRUSTEE_EVALUATION_KEY_PROOF_TRANSPORT_CERTIFICATE_FIELDS,
+    replace_setup_proof_material_transport_certificate_objects,
+};
 use super::*;
 
 // Assembles a terminal collective BGV setup package whose trustee
 // evaluation-key proofs are bound to the same-secret bridge: the
-// reduced-ring three-trustee package, plus the public-key share material
-// and same-secret-bridge-bound succinct proofs, the collective public key, the
-// relinearization rounds, the Galois batches, the same-secret-bridge-bound trustee
-// evaluation-key proofs, and the embedded public evaluation-key set. Every
-// evaluation-key object embeds its material and proof bytes, so no transported
-// material is required.
-fn terminal_evaluation_key_bearing_collective_setup_package() -> serde_json::Value {
-    terminal_evaluation_key_bearing_collective_setup_package_configured(false)
+// reduced-ring three-trustee package, plus the public-key share material and
+// same-secret-bridge-bound succinct proofs, the collective public key, the
+// relinearization rounds, the Galois batches, the same-secret-bridge-bound
+// trustee evaluation-key proofs, and the public evaluation-key set. Proof bytes
+// remain outside the package and are resolved from authenticated material roots.
+fn terminal_evaluation_key_bearing_collective_setup_fixture()
+-> super::package_fixtures::CollectiveSetupVerificationFixture {
+    terminal_evaluation_key_bearing_collective_setup_fixture_configured(false)
 }
 
 // The terminal package builder, optionally folding the committed-material
 // aggregate binding into the embedded evaluation-key set. The existing terminal
 // tests build without it (their focus is the trustee-proof and phase behavior);
 // the dedicated aggregate-binding test builds with it.
-fn terminal_evaluation_key_bearing_collective_setup_package_configured(
+fn terminal_evaluation_key_bearing_collective_setup_fixture_configured(
     with_aggregate_binding: bool,
-) -> serde_json::Value {
-    let mut package = finalize_collective_setup_package(
-        minimal_collective_setup_package_for_participant_count(3),
-    );
-    // Public-key share material and same-secret-bridge-bound succinct proofs.
-    replace_public_key_share_hashes_with_material_hashes(&mut package);
-    package["publicKeyShareMaterial"] = public_key_share_material_object(&package);
-    package["publicKeyShareSuccinctProofs"] = public_key_share_succinct_proofs_object(&package);
-    // Collective public key aggregated from the succinct-proof-bearing shares.
-    package["collectivePublicKey"] = collective_public_key_object(&package);
-    package["collectivePublicKeyRoot"] =
-        package["collectivePublicKey"]["collectivePublicKeyRoot"].clone();
+) -> super::package_fixtures::CollectiveSetupVerificationFixture {
+    let mut fixture = collective_public_key_bearing_collective_setup_fixture();
+    let package = &mut fixture.package;
     // Relinearization rounds (and the public round-one aggregate diagonals the
     // round-two shares and the trustee statements are proven against).
-    let relinearization = relinearization_key_share_rounds_fixture(&package);
+    let relinearization = relinearization_key_share_rounds_fixture(package);
     package["relinearizationKeyShareRounds"] = relinearization.rounds;
     // Galois batches.
-    package["galoisKeyShareBatches"] = galois_key_share_batches_object(&package);
+    package["galoisKeyShareBatches"] = galois_key_share_batches_object(package);
     // Same-secret-bridge-bound trustee evaluation-key proofs.
-    package["trusteeEvaluationKeyProofs"] = trustee_evaluation_key_proofs_object(
-        &package,
+    let trustee_proof_fixture = trustee_evaluation_key_proofs_object(
+        package,
         &relinearization.round_one_aggregate_diagonals_by_level,
+    );
+    package["trusteeEvaluationKeyProofs"] = trustee_proof_fixture.proof_set;
+    fixture.verification_request["transportedEvaluationKeyShareProofMaterial"] =
+        trustee_proof_fixture.transported_proof_material;
+    replace_setup_proof_material_transport_certificate_objects(
+        package,
+        &fixture.verification_request["transportedEvaluationKeyShareProofMaterial"],
+        TRUSTEE_EVALUATION_KEY_PROOF_TRANSPORT_CERTIFICATE_FIELDS,
     );
     // Committed-material aggregate binding: the package record and the transport
     // openings, produced from the same statements the trustee proofs bind. The
@@ -49,7 +52,7 @@ fn terminal_evaluation_key_bearing_collective_setup_package_configured(
     // material; folding it here keeps the record present, bound, and reproducible.
     let aggregate_binding = with_aggregate_binding.then(|| {
         let (aggregate_binding, _transported_openings) = evaluation_key_aggregate_binding_object(
-            &package,
+            package,
             &relinearization.round_one_aggregate_diagonals_by_level,
         );
         aggregate_binding
@@ -57,10 +60,10 @@ fn terminal_evaluation_key_bearing_collective_setup_package_configured(
     // Embedded public evaluation-key set, with the aggregate binding folded in when
     // requested.
     package["evaluationKeys"] =
-        public_evaluation_key_set_object_with_aggregate_binding(&package, aggregate_binding);
-    rebind_collective_setup_package_hash(&mut package);
+        public_evaluation_key_set_object_with_aggregate_binding(package, aggregate_binding);
+    rebind_collective_setup_package_hash(package);
 
-    package
+    fixture
 }
 
 // The evaluation-key phase-boundary refusal object path is the pending-object
@@ -93,10 +96,11 @@ fn heavy_accepted_setup_terminal_trustee_evaluation_key_proofs_pass_the_evaluati
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "heavy_accepted_setup_terminal_trustee_evaluation_key_proofs_pass_the_evaluation_key_phase",
     );
-    let package = terminal_evaluation_key_bearing_collective_setup_package();
+    let fixture = terminal_evaluation_key_bearing_collective_setup_fixture();
 
-    let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
-        .expect("verification response");
+    let result =
+        verify_collective_bgv_setup_package(&fixture.package, &fixture.verification_request)
+            .expect("verification response");
     let context = || serde_json::to_string_pretty(&result).expect("verification result JSON");
 
     // The same-secret-bridge-bound relinearization rounds, Galois batches, trustee
@@ -132,33 +136,18 @@ fn heavy_accepted_setup_terminal_tampered_trustee_evaluation_key_proof_is_refuse
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "heavy_accepted_setup_terminal_tampered_trustee_evaluation_key_proof_is_refused",
     );
-    let mut package = terminal_evaluation_key_bearing_collective_setup_package();
+    let mut fixture = terminal_evaluation_key_bearing_collective_setup_fixture();
 
-    // Flip one byte of the first trustee's embedded proof bytes and rebind the
-    // record, set, and package roots so the only inconsistency is the proof
-    // content itself. The recomputed statement no longer matches the tampered
-    // proof, so the succinct verifier rejects it.
-    let proof_bytes_hex = package["trusteeEvaluationKeyProofs"]["proofRecords"][0]["proofBytesHex"]
-        .as_str()
-        .expect("trustee proof bytes hex");
-    let mut proof_bytes = decode_hex(proof_bytes_hex).expect("trustee proof bytes");
-    let tampered_position = proof_bytes.len() / 2;
-    proof_bytes[tampered_position] ^= 1;
-    package["trusteeEvaluationKeyProofs"]["proofRecords"][0]["proofBytesHex"] =
-        serde_json::json!(to_hex(&proof_bytes));
-    package["trusteeEvaluationKeyProofs"]["proofRecords"][0]["proofBytesHash"] = serde_json::json!(
-        crate::bgv::setup::trustee_evaluation_key_proof::trustee_evaluation_key_proof_bytes_hash(
-            &proof_bytes
-        )
-    );
-    package["trusteeEvaluationKeyProofs"]["proofRecords"][0]["proofSizeBytes"] =
-        serde_json::json!(proof_bytes.len());
-    rebind_trustee_evaluation_key_proof_record_root_for_test(&mut package, 0);
-    rebind_trustee_evaluation_key_proof_set_root_for_test(&mut package);
-    rebind_collective_setup_package_hash(&mut package);
+    // Flip one byte of the first trustee's authenticated proof material and
+    // rebind the record, stream descriptor, certificate, and package roots so
+    // the only inconsistency is the proof content itself. The recomputed
+    // statement no longer matches the tampered proof, so the succinct verifier
+    // rejects it.
+    replace_first_trustee_evaluation_key_proof_with_tampered_material(&mut fixture);
 
-    let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
-        .expect("verification response");
+    let result =
+        verify_collective_bgv_setup_package(&fixture.package, &fixture.verification_request)
+            .expect("verification response");
     let context = || serde_json::to_string_pretty(&result).expect("verification result JSON");
 
     // The tampered proof no longer matches the statement the verifier rebuilds,
@@ -189,16 +178,8 @@ fn heavy_accepted_setup_empty_evaluation_key_objects_with_collective_public_key_
     // left as the empty {} / [] the base package ships. This is the trust-boundary
     // case: a package that declares public runtime material (the collective public
     // key) but carries no evaluation-key material must not reach accepted.
-    let mut package = finalize_collective_setup_package(
-        minimal_collective_setup_package_for_participant_count(3),
-    );
-    replace_public_key_share_hashes_with_material_hashes(&mut package);
-    package["publicKeyShareMaterial"] = public_key_share_material_object(&package);
-    package["publicKeyShareSuccinctProofs"] = public_key_share_succinct_proofs_object(&package);
-    package["collectivePublicKey"] = collective_public_key_object(&package);
-    package["collectivePublicKeyRoot"] =
-        package["collectivePublicKey"]["collectivePublicKeyRoot"].clone();
-    rebind_collective_setup_package_hash(&mut package);
+    let fixture = collective_public_key_bearing_collective_setup_fixture();
+    let package = fixture.package;
 
     assert_eq!(
         package["relinearizationKeyShareRounds"],
@@ -208,7 +189,7 @@ fn heavy_accepted_setup_empty_evaluation_key_objects_with_collective_public_key_
     assert_eq!(package["trusteeEvaluationKeyProofs"], serde_json::json!({}));
     assert_eq!(package["evaluationKeys"], serde_json::json!({}));
 
-    let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
+    let result = verify_collective_bgv_setup_package(&package, &fixture.verification_request)
         .expect("verification response");
     let context = || serde_json::to_string_pretty(&result).expect("verification result JSON");
 
@@ -231,7 +212,8 @@ fn heavy_accepted_setup_terminal_committed_material_aggregate_binding_is_bound_a
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "heavy_accepted_setup_terminal_committed_material_aggregate_binding_is_bound_and_well_formed",
     );
-    let package = terminal_evaluation_key_bearing_collective_setup_package_configured(true);
+    let fixture = terminal_evaluation_key_bearing_collective_setup_fixture_configured(true);
+    let package = fixture.package;
     let participant_count = package["setupContext"]["participantCount"]
         .as_u64()
         .expect("participant count") as usize;
@@ -331,7 +313,7 @@ fn heavy_accepted_setup_terminal_committed_material_aggregate_binding_is_bound_a
 
     // The whole package still passes the evaluation-key phase with the aggregate
     // binding folded in: no refusal references any evaluation-key object.
-    let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
+    let result = verify_collective_bgv_setup_package(&package, &fixture.verification_request)
         .expect("verification response");
     assert_eq!(
         evaluation_key_phase_refused(&result),
@@ -339,6 +321,81 @@ fn heavy_accepted_setup_terminal_committed_material_aggregate_binding_is_bound_a
         "the evaluation-key phase must still accept the set with the aggregate binding folded in: {}",
         serde_json::to_string_pretty(&result).expect("verification result JSON")
     );
+}
+
+// Replaces the first trustee's retained proof material with a byte-tampered
+// proof, then rebuilds every byte-derived reference and package binding. This
+// keeps transport authentication valid so the rejection reaches the succinct
+// relation verifier instead of stopping at a stale hash or certificate.
+fn replace_first_trustee_evaluation_key_proof_with_tampered_material(
+    fixture: &mut super::package_fixtures::CollectiveSetupVerificationFixture,
+) {
+    let original_proof_material_root =
+        fixture.package["trusteeEvaluationKeyProofs"]["proofRecords"][0]["proofMaterialRoot"]
+            .as_str()
+            .expect("trustee proof material root")
+            .to_string();
+    let retained_proof_material = crate::bgv::setup::verified_canonical_setup_proof_material_bytes(
+        crate::bgv::setup::trustee_evaluation_key_proof::TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
+        &original_proof_material_root,
+    )
+    .expect("trustee proof material lookup")
+    .expect("retained trustee proof material");
+    let mut proof_bytes = Vec::with_capacity(retained_proof_material.len());
+    for chunk in retained_proof_material.chunks() {
+        proof_bytes.extend_from_slice(chunk);
+    }
+    drop(retained_proof_material);
+    crate::bgv::setup::evict_verified_canonical_setup_proof_materials(std::slice::from_ref(
+        &original_proof_material_root,
+    ));
+
+    let tampered_position = proof_bytes.len() / 2;
+    proof_bytes[tampered_position] ^= 1;
+    let proof_bytes_hash =
+        crate::bgv::setup::trustee_evaluation_key_proof::trustee_evaluation_key_proof_bytes_hash(
+            &proof_bytes,
+        );
+    let proof_record = &mut fixture.package["trusteeEvaluationKeyProofs"]["proofRecords"][0];
+    proof_record["proofBytesHash"] = serde_json::json!(proof_bytes_hash);
+    let proof_material_root = super::proof_record_fixtures::
+        trustee_evaluation_key_proof_material_root_from_fixture_record(proof_record);
+    proof_record["proofMaterialRoot"] = serde_json::json!(&proof_material_root);
+
+    let transport_hashes = setup_proof_material_transport_hashes(
+        crate::bgv::setup::trustee_evaluation_key_proof::TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
+        &proof_bytes,
+        SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
+    )
+    .expect("tampered trustee proof transport hashes");
+    crate::bgv::setup::retain_generated_canonical_proof_material(
+        crate::bgv::setup::trustee_evaluation_key_proof::TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
+        proof_material_root.clone(),
+        proof_bytes,
+    )
+    .expect("retain tampered trustee proof material");
+
+    let transported_proof_material = &mut fixture.verification_request["transportedEvaluationKeyShareProofMaterial"]
+        ["proofMaterials"][0];
+    transported_proof_material["proofMaterialRoot"] = serde_json::json!(proof_material_root);
+    transported_proof_material["proofChunkCount"] =
+        serde_json::json!(transport_hashes.chunk_hashes.len());
+    transported_proof_material["proofTotalByteLength"] =
+        serde_json::json!(transport_hashes.total_byte_length);
+    transported_proof_material["proofFullObjectHash"] =
+        serde_json::json!(transport_hashes.full_object_hash);
+    transported_proof_material["proofChunkRoot"] = serde_json::json!(transport_hashes.chunk_root);
+    transported_proof_material["proofChunkHashes"] =
+        serde_json::json!(transport_hashes.chunk_hashes);
+
+    rebind_trustee_evaluation_key_proof_record_root_for_test(&mut fixture.package, 0);
+    rebind_trustee_evaluation_key_proof_set_root_for_test(&mut fixture.package);
+    replace_setup_proof_material_transport_certificate_objects(
+        &mut fixture.package,
+        &fixture.verification_request["transportedEvaluationKeyShareProofMaterial"],
+        TRUSTEE_EVALUATION_KEY_PROOF_TRANSPORT_CERTIFICATE_FIELDS,
+    );
+    rebind_collective_setup_package_hash(&mut fixture.package);
 }
 
 // Recomputes one trustee evaluation-key proof record's canonical root after a

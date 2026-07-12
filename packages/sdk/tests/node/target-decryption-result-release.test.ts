@@ -28,6 +28,8 @@ vi.mock(
 
 let absorbedShareCount: number;
 let cleanupFailure: Error | undefined;
+let freshKernelLoadCount: number;
+let sharedKernelLoadCount: number;
 let mockKernel: {
     readonly absorbBgvTargetDecryptionResultReleaseShare: ReturnType<
         typeof vi.fn
@@ -43,7 +45,14 @@ let mockKernel: {
 };
 
 vi.mock('../../dist/kernel.js', () => ({
-    loadTranscriptCoreKernel: () => Promise.resolve(mockKernel),
+    loadFreshTranscriptCoreKernel: () => {
+        freshKernelLoadCount += 1;
+        return Promise.resolve(mockKernel);
+    },
+    loadTranscriptCoreKernel: () => {
+        sharedKernelLoadCount += 1;
+        return Promise.resolve(mockKernel);
+    },
 }));
 
 const publicPackage = (await import('../../dist/index.js')) as Readonly<{
@@ -123,6 +132,8 @@ describe('target-decryption result release session cleanup', () => {
     beforeEach(() => {
         absorbedShareCount = 0;
         cleanupFailure = undefined;
+        freshKernelLoadCount = 0;
+        sharedKernelLoadCount = 0;
         readCanonicalMaterial.mockReset();
         openCanonicalRuntime.mockReset();
         openCanonicalRuntime.mockReturnValue({
@@ -189,6 +200,8 @@ describe('target-decryption result release session cleanup', () => {
         expect(
             mockKernel.generateBgvTargetDecryptionShareProofMaterialFromLocalWitness,
         ).not.toHaveBeenCalled();
+        expect(freshKernelLoadCount).toBe(1);
+        expect(sharedKernelLoadCount).toBe(0);
     });
 
     it('cleans an aborted pre-quorum session and permits a retry', async () => {
@@ -214,6 +227,8 @@ describe('target-decryption result release session cleanup', () => {
         expect(
             mockKernel.finishBgvTargetDecryptionResultRelease,
         ).toHaveBeenCalledTimes(2);
+        expect(freshKernelLoadCount).toBe(0);
+        expect(sharedKernelLoadCount).toBe(2);
     });
 
     it('cleans a session when canonical runtime construction fails after begin', async () => {

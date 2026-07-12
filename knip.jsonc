@@ -36,7 +36,6 @@
                 // the local-state sealing, mailbox-credential, and SDK
                 // wiring that consumes them lands with the remaining
                 // target-decryption integration work.
-                "src/setup/proof-byte-encoding.ts",
                 "src/target-decryption/local-target-share-witness.ts",
                 "src/target-decryption/proof-material-transport.ts",
             ],

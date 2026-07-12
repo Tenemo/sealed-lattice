@@ -208,6 +208,7 @@ const run = async (message: StartMessage): Promise<void> => {
         });
     } catch (error) {
         workerScope.postMessage({
+            consumedByteLength,
             counters: runtime.counterSnapshot(),
             failureKind:
                 error instanceof CanonicalStreamCancellationError

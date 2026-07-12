@@ -77,6 +77,25 @@ describe('abortable command process cleanup', () => {
         });
     });
 
+    it('passes an explicit working directory to cross-platform commands', () => {
+        const environment = { PATH: '/usr/bin' };
+        const workingDirectoryPath = path.resolve('fuzz');
+
+        expect(
+            createAbortableCommandSpawnOptions(
+                environment,
+                'inherit',
+                'linux',
+                workingDirectoryPath,
+            ),
+        ).toEqual({
+            cwd: workingDirectoryPath,
+            detached: true,
+            env: environment,
+            stdio: 'inherit',
+        });
+    });
+
     it('signals the non-Windows process group before falling back to the direct child', () => {
         const childProcess = {
             kill: vi.fn(() => true),

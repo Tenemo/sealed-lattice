@@ -23,7 +23,7 @@ const maximumLockAcquisitionDelayMilliseconds = 2_147_483_647;
 const namespacePattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 const lockNamePrefix = 'sealed-lattice-storage-namespace-';
 
-export type WebLockOwnedStorageErrorCode =
+type WebLockOwnedStorageErrorCode =
     | 'AcquisitionCancelled'
     | 'AcquisitionDeadlineExceeded'
     | 'InvalidConfiguration'
@@ -31,7 +31,7 @@ export type WebLockOwnedStorageErrorCode =
     | 'OpenFailed'
     | 'Unavailable';
 
-export class WebLockOwnedStorageError extends Error {
+class WebLockOwnedStorageError extends Error {
     public readonly code: WebLockOwnedStorageErrorCode;
     public readonly failureCause: unknown;
 
@@ -67,7 +67,7 @@ export type WebLockOwnedStorageConfiguration = Readonly<{
     lockManager?: LockManager | null;
 }>;
 
-export type WebLockOwnedBrowserActionStorageCustodyConfiguration =
+type WebLockOwnedBrowserActionStorageCustodyConfiguration =
     WebLockOwnedStorageConfiguration &
         Readonly<{
             binding: BrowserActionStorageRootBinding;

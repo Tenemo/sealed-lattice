@@ -98,10 +98,7 @@ export const assertJsonRecordArray = (
 
 const lowercaseHexBytesPattern = /^(?:[0-9a-f]{2})*$/u;
 
-export const assertLowercaseHexBytes = (
-    value: string,
-    fieldName: string,
-): void => {
+const assertLowercaseHexBytes = (value: string, fieldName: string): void => {
     if (!lowercaseHexBytesPattern.test(value)) {
         throw new TypeError(`${fieldName} must be lowercase hex bytes.`);
     }

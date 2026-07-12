@@ -33,7 +33,8 @@ const checkpointLimits = {
     maximumCheckpointByteLength: 16,
     maximumCheckpointChunkCount: 4,
     maximumSealedRecordByteLength: 1_024,
-    transactionLifetimeMilliseconds: 1_000,
+    transactionLifetimeMilliseconds:
+        storageLimits.maximumTransactionLifetimeMilliseconds,
 } as const;
 
 const bytesEqual = (left: Uint8Array, right: Uint8Array): boolean => {

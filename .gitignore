@@ -16,6 +16,7 @@ fuzz/artifacts/
 *.tsbuildinfo
 .vitest-attachments/
 **/__screenshots__/
+**/__traces__/
 .lighthouseci/
 
 # Miscellaneous

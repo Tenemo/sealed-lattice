@@ -11,6 +11,7 @@ import {
 } from './common-fields.js';
 import {
     canonicalGeneratedSetupProofMaterialDescriptor,
+    setupProofMaterialReferenceSetForVerificationInput,
     setupProofMaterialRecordTransportFields,
     setupTransportedProofMaterialFields,
     type CanonicalGeneratedSetupProofMaterial,
@@ -788,7 +789,9 @@ const createEnvelopeCommitment = async (
             ? {}
             : {
                   transportedPrivateVssShareProofMaterial:
-                      privateShareEnvelopeBuild.transportedPrivateVssShareProofMaterial,
+                      setupProofMaterialReferenceSetForVerificationInput(
+                          privateShareEnvelopeBuild.transportedPrivateVssShareProofMaterial,
+                      ),
               }),
     });
     if (

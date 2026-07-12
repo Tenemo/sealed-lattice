@@ -18,6 +18,7 @@ export type CommandInvocation = {
     readonly description: string;
     readonly env?: NodeJS.ProcessEnv;
     readonly logFileSlug?: string;
+    readonly workingDirectoryPath?: string;
 };
 
 type CommandOutputMode = 'capture' | 'inherit';
@@ -176,7 +177,11 @@ export const createAbortableCommandSpawnOptions = (
     env: NodeJS.ProcessEnv,
     stdio: SpawnOptions['stdio'],
     platform: NodeJS.Platform = process.platform,
+    workingDirectoryPath?: string,
 ): SpawnOptions => ({
+    ...(workingDirectoryPath === undefined
+        ? {}
+        : { cwd: workingDirectoryPath }),
     detached: platform !== 'win32',
     env,
     stdio,
@@ -334,6 +339,8 @@ const runCommandWithInheritedOutput = (
             createAbortableCommandSpawnOptions(
                 invocation.env ?? process.env,
                 'inherit',
+                process.platform,
+                invocation.workingDirectoryPath,
             ),
         );
         const untrackChildProcess =
@@ -485,11 +492,12 @@ const runCommandWithOptionalLog = async (
         const childProcess = spawn(
             invocation.command,
             invocation.args,
-            createAbortableCommandSpawnOptions(invocation.env ?? process.env, [
-                'ignore',
-                'pipe',
-                'pipe',
-            ]),
+            createAbortableCommandSpawnOptions(
+                invocation.env ?? process.env,
+                ['ignore', 'pipe', 'pipe'],
+                process.platform,
+                invocation.workingDirectoryPath,
+            ),
         );
         const untrackChildProcess =
             trackChildProcessForSignalCleanup(childProcess);

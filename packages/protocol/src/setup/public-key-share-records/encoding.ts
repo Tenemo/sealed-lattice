@@ -4,7 +4,6 @@ import {
     assertProtocolHash,
     assertNonNegativeSafeInteger,
     assertPositiveSafeInteger,
-    assertLowercaseHexBytes,
     bytesFromHex,
     bytesToHex,
 } from '../common-fields.js';
@@ -20,13 +19,7 @@ export {
     contextFields,
 } from '../common-fields.js';
 
-export {
-    assertNonNegativeSafeInteger,
-    assertPositiveSafeInteger,
-    assertLowercaseHexBytes,
-    bytesFromHex,
-    bytesToHex,
-};
+export { assertNonNegativeSafeInteger, assertPositiveSafeInteger };
 
 export const assertNonEmptyString = (
     value: string,

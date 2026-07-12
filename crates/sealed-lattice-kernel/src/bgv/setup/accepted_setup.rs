@@ -80,6 +80,8 @@ use self::public_key_share_material::{
     verify_collective_public_key_material, verify_collective_public_key_pair_consistency,
     verify_public_key_share_material_set,
 };
+#[cfg(test)]
+pub(in crate::bgv::setup) use self::public_key_shares::public_key_share_succinct_proof_material_root;
 use self::public_key_shares::{
     PublicKeyCommonBinding, public_key_common_binding, public_key_refusal,
     public_key_share_records_by_roster_position, verify_optional_public_key_share_succinct_proofs,
@@ -557,6 +559,15 @@ fn verify_collective_setup_package(
     if let Some(response) = verify_vss_share_acceptances(setup_package)? {
         return Ok(VerificationFlow::Stop(response));
     }
+    // These hash-bound policy checks consume only the canonical setup object
+    // and request metadata, so their typed refusals can be determined without
+    // requiring proof-material handles.
+    if let Some(response) = verify_generic_key_switch_policy(setup_package)? {
+        return Ok(VerificationFlow::Stop(response));
+    }
+    if let Some(response) = verify_transport_certificate(setup_package, request)? {
+        return Ok(VerificationFlow::Stop(response));
+    }
     let verified_vss_public_material =
         match verify_optional_vss_public_material(setup_package, request)? {
             VssPublicMaterialVerification::Absent => None,
@@ -602,12 +613,6 @@ fn verify_collective_setup_package(
         request,
         verified_same_secret_bridge.as_ref(),
     )? {
-        return Ok(VerificationFlow::Stop(response));
-    }
-    if let Some(response) = verify_generic_key_switch_policy(setup_package)? {
-        return Ok(VerificationFlow::Stop(response));
-    }
-    if let Some(response) = verify_transport_certificate(setup_package, request)? {
         return Ok(VerificationFlow::Stop(response));
     }
     let declares_public_runtime_material =

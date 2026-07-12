@@ -12,9 +12,6 @@ import type { CollectiveBgvSetupContext } from '../vss-share-verification-record
 
 export type JsonRecord = Record<string, unknown>;
 
-export const isJsonRecord = (value: unknown): value is JsonRecord =>
-    typeof value === 'object' && value !== null && !Array.isArray(value);
-
 export const publicKeyShareProofFamily = 'public-key-share';
 export const publicKeyShareMaterialEncoding =
     'embedded-full-public-key-share-coefficients';

@@ -410,12 +410,36 @@ fn proof_randomness_fields(request: &mut serde_json::Value) {
 }
 
 fn generated_proof_bytes(generated: &serde_json::Value) -> Vec<u8> {
-    crate::transcript_core::decode_hex(
-        generated["proofBytesHex"]
-            .as_str()
-            .expect("generated proof bytes"),
+    let proof_family = generated["proofFamily"]
+        .as_str()
+        .expect("generated proof family");
+    let proof_material_root = generated["proofMaterialRoot"]
+        .as_str()
+        .expect("generated proof material root");
+    let proof_material = crate::bgv::setup::take_verified_canonical_proof_material_bytes(
+        proof_family,
+        proof_material_root,
     )
-    .expect("generated proof bytes must decode")
+    .expect("generated proof material lookup")
+    .expect("generated proof material remains retained");
+    let proof_bytes_hash = match proof_family {
+        super::TRUSTEE_EVALUATION_KEY_PROOF_FAMILY => {
+            super::trustee_evaluation_key_proof_material_bytes_hash(&proof_material)
+        }
+        super::PUBLIC_KEY_SHARE_PROOF_FAMILY => {
+            super::public_key_share_succinct_proof_material_bytes_hash(&proof_material)
+        }
+        _ => panic!("unsupported generated proof family {proof_family}"),
+    }
+    .expect("generated proof bytes hash");
+    assert_eq!(
+        generated["proofBytesHash"]
+            .as_str()
+            .expect("generated proof bytes hash"),
+        proof_bytes_hash,
+    );
+
+    proof_material.chunks().flatten().copied().collect()
 }
 
 fn verify_proof_bytes(
@@ -439,9 +463,10 @@ fn verify_proof_bytes(
 fn verify_generated_proof(
     statement: &TrusteeEvaluationKeyStatement,
     generated: &serde_json::Value,
-) {
-    verify_proof_bytes(statement, &generated_proof_bytes(generated))
-        .expect("generated proof should verify");
+) -> Vec<u8> {
+    let proof_bytes = generated_proof_bytes(generated);
+    verify_proof_bytes(statement, &proof_bytes).expect("generated proof should verify");
+    proof_bytes
 }
 
 fn same_secret_statement_hash_vector_request() -> serde_json::Value {

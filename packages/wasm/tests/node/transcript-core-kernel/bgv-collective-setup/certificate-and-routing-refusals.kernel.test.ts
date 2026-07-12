@@ -5,7 +5,6 @@ import { setupRequest, validHash } from '../bgv-passive-setup-fixtures.js';
 import {
     acceptedCommonRandomness,
     acceptedShapedSetupPackage,
-    acceptedShapedSetupVerificationCompanions,
     acceptedVssCoefficientCommitments,
     focusedPrivateVssSourceDeliveryReferences,
     publicPrivateVssEnvelopeCommitmentReference,
@@ -33,8 +32,6 @@ describe('collective BGV setup kernel commands', () => {
             kernel,
             parameters,
         );
-        const verificationCompanions =
-            await acceptedShapedSetupVerificationCompanions(kernel, parameters);
         const genericKeySwitchPackage = cloneJsonRecord(baseSetupPackage);
         genericKeySwitchPackage.genericKeySwitchKeys = {
             keyRoot: validHash('8'),
@@ -43,7 +40,6 @@ describe('collective BGV setup kernel commands', () => {
 
         const genericKeySwitchResult = kernel.verifyCollectiveBgvSetup({
             setupPackage: genericKeySwitchPackage,
-            ...verificationCompanions,
         });
 
         expect(genericKeySwitchResult.isValid).toBe(false);
@@ -61,8 +57,6 @@ describe('collective BGV setup kernel commands', () => {
             kernel,
             parameters,
         );
-        const verificationCompanions =
-            await acceptedShapedSetupVerificationCompanions(kernel, parameters);
         const jsonTransportPackage = cloneJsonRecord(baseSetupPackage);
         (
             jsonTransportPackage.setupTransportCertificate as JsonRecord
@@ -71,7 +65,6 @@ describe('collective BGV setup kernel commands', () => {
 
         const jsonTransportResult = kernel.verifyCollectiveBgvSetup({
             setupPackage: jsonTransportPackage,
-            ...verificationCompanions,
         });
 
         expect(jsonTransportResult.isValid).toBe(false);

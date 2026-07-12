@@ -24,7 +24,6 @@ export {
     assertPositiveSafeInteger,
     assertProtocolHash,
     bytesFromHex,
-    bytesToHex,
 };
 
 export const assertNonEmptyString = (

@@ -13,7 +13,6 @@ export {
 export type { RestoredLocalTargetDecryptionShareWitnessInput } from './target-decryption/local-target-share-witness.js';
 export {
     createBgvTargetDecryptionShareCanonicalProofMaterialTransport,
-    encodeBgvTargetDecryptionShareProofMaterialBinary,
     targetDecryptionShareProofBytesEncoding,
     targetDecryptionShareProofFamily,
 } from './target-decryption/proof-material-transport.js';

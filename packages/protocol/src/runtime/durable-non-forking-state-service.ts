@@ -14,7 +14,7 @@ const maximumSupportedSealedExactOutputByteLength = 50_331_648;
 const maximumSupportedConflictRetryCount = 32;
 const generationReservationIdentifierByteLength = 32;
 
-export type DurableNonForkingStateErrorCode =
+type DurableNonForkingStateErrorCode =
     | 'AuthenticationFailed'
     | 'BoundsExceeded'
     | 'CertificateResolutionFailed'
@@ -142,17 +142,17 @@ export type DurableExactOutputInspector = (input: {
           exactOutputHash: Uint8Array;
       }>;
 
-export type DurableExactOutputSeal = (input: {
+type DurableExactOutputSeal = (input: {
     context: DurableExactOutputRecordContext;
     plaintext: Uint8Array;
 }) => Promise<Uint8Array> | Uint8Array;
 
-export type DurableExactOutputOpen = (input: {
+type DurableExactOutputOpen = (input: {
     context: DurableExactOutputRecordContext;
     sealedBytes: Uint8Array;
 }) => Promise<Uint8Array> | Uint8Array;
 
-export type DurableStateLimits = Readonly<{
+type DurableStateLimits = Readonly<{
     maximumCanonicalCarrierByteLength: number;
     maximumConflictRetryCount: number;
     maximumExactOutputByteLength: number;
@@ -161,7 +161,7 @@ export type DurableStateLimits = Readonly<{
     transactionLifetimeMilliseconds: number;
 }>;
 
-export type DurableNonForkingStateServiceConfiguration = Readonly<{
+type DurableNonForkingStateServiceConfiguration = Readonly<{
     cryptography: DurableStateCryptography;
     generationReservationCryptoProvider: Pick<Crypto, 'getRandomValues'>;
     limits: DurableStateLimits;
@@ -171,19 +171,19 @@ export type DurableNonForkingStateServiceConfiguration = Readonly<{
     witnessParticipantIdentity: Uint8Array;
 }>;
 
-export type DurableExactOutput = Readonly<{
+type DurableExactOutput = Readonly<{
     exactOutputBytes: Uint8Array;
     exactOutputHash: Uint8Array;
     reservationIntentObjectHash: Uint8Array;
     stateKey: Uint8Array;
 }>;
 
-export type DurableStateCertificateResolution<Result> = Readonly<{
+type DurableStateCertificateResolution<Result> = Readonly<{
     exactOutputBytes?: Uint8Array;
     verifiedCapability: Result;
 }>;
 
-export type DurableStateCertificateVerifier<Result> = (input: {
+type DurableStateCertificateVerifier<Result> = (input: {
     canonicalIntentCarrier: Uint8Array;
     canonicalStateCertificate: Uint8Array;
     exactOutputBytes?: Uint8Array;

@@ -1023,9 +1023,8 @@ mod tests {
 
         for (digit_index, component) in galois_key.components.iter().enumerate() {
             let component_b = component
-                .component_b
-                .as_ref()
-                .expect("generated keys retain component b");
+                .component_b_coefficients()
+                .expect("generated component b converts from NTT form");
             let digit_bytes = (digit_index as u64).to_le_bytes();
             let error = DeterministicSampler::new(
                 KEY_SWITCH_ERROR_DOMAIN,
@@ -1057,7 +1056,7 @@ mod tests {
                 group: &group,
                 domain: &domain,
                 diagonal_group_position: Some(digit_index),
-                component_b_by_limb: component_b,
+                component_b_by_limb: &component_b,
                 public_sample_by_limb: &public_sample_by_limb,
                 secret_coefficients: key.secret(),
                 error_coefficients: &error,

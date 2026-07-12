@@ -14,7 +14,6 @@ export type {
     VssCommittedMaterialSeedProvider,
     VssShareLinkageProofComputer,
     VssAggregateThresholdProofComputer,
-    VssAggregateThresholdProofMaterial,
     VssPublicCoefficientCommitmentSet,
     VssPublicRecipientShareCommitmentSet,
     VssPublicAggregateThresholdCommitmentSet,

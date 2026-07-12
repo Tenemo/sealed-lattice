@@ -23,11 +23,11 @@ export type VssCommitmentComputers = {
 // The VSS committed-material commitment and its share-linkage and same-secret
 // bridge proofs are computed only by the Rust/WASM kernel. Tests that assemble
 // setup material bind these kernel-backed computers to a caller-supplied kernel
-// so the protocol layer orchestrates the assembly while the certified
-// commitment and proof math stay in one place. Binding to a caller-supplied
-// instance (rather than a module-level singleton) lets heavy proof generation
-// run on a throwaway kernel whose linear memory is reclaimed after the setup
-// package is built.
+// so the protocol layer orchestrates the assembly while the canonical
+// commitment and proof implementation stays in one place. Binding to a
+// caller-supplied instance (rather than a module-level singleton) lets heavy
+// proof generation run on a throwaway kernel whose linear memory is reclaimed
+// after the setup package is built.
 export const createVssCommitmentComputers = (
     kernel: TranscriptCoreKernel,
 ): VssCommitmentComputers => {

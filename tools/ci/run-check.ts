@@ -172,7 +172,9 @@ const buildGatingLanes = (
     ),
 ];
 
-const buildRustKernelLane = (): ValidationLane => ({
+const buildRustKernelLane = (
+    packageManagerRunner: PackageManagerRunner,
+): ValidationLane => ({
     commands: [
         createCargoCommand(
             'cargo fmt --check',
@@ -191,6 +193,22 @@ const buildRustKernelLane = (): ValidationLane => ({
                 'warnings',
             ],
             'cargo-clippy',
+        ),
+        createPackageManagerCommand(
+            'Verify Rust test lane inventory',
+            ['run', 'test:lanes:verify', '--', '--rust'],
+            {
+                logFileSlug: 'test-lane-coverage-rust',
+                packageManagerRunner,
+            },
+        ),
+        createPackageManagerCommand(
+            'Test process memory guard',
+            ['run', 'test:rust:process-memory-guard'],
+            {
+                logFileSlug: 'process-memory-guard',
+                packageManagerRunner,
+            },
         ),
         createCargoCommand(
             'cargo test (optimized test profile, fast)',
@@ -225,16 +243,17 @@ const buildParallelLanes = (
 
     return [
         lane('Lint', 'lint', ['run', 'lint']),
-        buildRustKernelLane(),
+        buildRustKernelLane(packageManagerRunner),
         lane('Verify public package policy', 'package-policy', [
             'exec',
             'tsx',
             './tools/ci/verify-public-package-policy.ts',
         ]),
         lane('Verify test lane coverage', 'test-lane-coverage', [
-            'exec',
-            'tsx',
-            './tools/ci/verify-test-lane-coverage.ts',
+            'run',
+            'test:lanes:verify',
+            '--',
+            '--static',
         ]),
         lane('Check package boundaries', 'package-boundaries', [
             'exec',
@@ -242,27 +261,10 @@ const buildParallelLanes = (
             './tools/ci/check-package-boundaries.ts',
         ]),
         lane('Knip unused-code scan', 'knip', ['exec', 'knip']),
-        lane('Node tests (fast)', 'vitest-node', [
-            'exec',
-            'vitest',
-            '--project',
-            'node',
-            '--run',
-            '--reporter',
-            'default',
-            '--reporter',
-            './tools/ci/vitest-progress-reporter.ts',
-        ]),
+        lane('Node tests (fast)', 'vitest-node', ['run', 'test:node:fast']),
         lane('Node tests (kernel fast)', 'vitest-node-kernel-fast', [
-            'exec',
-            'vitest',
-            '--project',
-            'node-kernel-fast',
-            '--run',
-            '--reporter',
-            'default',
-            '--reporter',
-            './tools/ci/vitest-progress-reporter.ts',
+            'run',
+            'test:node:kernel:fast',
         ]),
     ];
 };

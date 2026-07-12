@@ -33,10 +33,11 @@ fn heavy_accepted_setup_collective_setup_verifier_checks_public_key_share_succin
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "heavy_accepted_setup_collective_setup_verifier_checks_public_key_share_succinct_proofs_before_collective_key_material",
     );
-    let package = public_key_share_succinct_proof_bearing_collective_setup_package();
+    let fixture = public_key_share_succinct_proof_bearing_collective_setup_fixture();
 
-    let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
-        .expect("verification response");
+    let result =
+        verify_collective_bgv_setup_package(&fixture.package, &fixture.verification_request)
+            .expect("verification response");
 
     assert_eq!(result["isValid"], false);
     let refused_objects = result["refusedObjects"]
@@ -60,8 +61,9 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_missing_dependent_publ
         "heavy_accepted_setup_collective_setup_verifier_refuses_missing_dependent_public_key_proofs",
     );
 
-    let mut missing_statement_proofs_package =
-        public_key_share_succinct_proof_bearing_collective_setup_package();
+    let missing_statement_proofs_fixture =
+        public_key_share_succinct_proof_bearing_collective_setup_fixture();
+    let mut missing_statement_proofs_package = missing_statement_proofs_fixture.package;
     missing_statement_proofs_package
         .as_object_mut()
         .expect("setup package")
@@ -70,7 +72,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_missing_dependent_publ
 
     let missing_statement_proofs_result = verify_collective_bgv_setup_package(
         &missing_statement_proofs_package,
-        &serde_json::json!({}),
+        &missing_statement_proofs_fixture.verification_request,
     )
     .expect("verification response");
 
@@ -79,8 +81,8 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_missing_dependent_publ
         missing_statement_proofs_result["refusedObjects"][0]["reasonCode"],
         "publicKeyShareProofsMissing"
     );
-    let mut missing_succinct_proofs_package =
-        collective_public_key_bearing_collective_setup_package();
+    let missing_succinct_proofs_fixture = collective_public_key_bearing_collective_setup_fixture();
+    let mut missing_succinct_proofs_package = missing_succinct_proofs_fixture.package;
     missing_succinct_proofs_package
         .as_object_mut()
         .expect("setup package")
@@ -89,7 +91,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_missing_dependent_publ
 
     let missing_succinct_proofs_result = verify_collective_bgv_setup_package(
         &missing_succinct_proofs_package,
-        &serde_json::json!({}),
+        &missing_succinct_proofs_fixture.verification_request,
     )
     .expect("verification response");
 
@@ -129,14 +131,15 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_malformed_public_key_p
             "publicKeyShareSuccinctProofSetRootMissing",
         ),
     ] {
-        let mut package = public_key_share_succinct_proof_bearing_collective_setup_package();
+        let fixture = public_key_share_succinct_proof_bearing_collective_setup_fixture();
+        let mut package = fixture.package;
         package[proof_set_name]
             .as_object_mut()
             .expect("public-key proof set")
             .remove(field_name);
         rebind_collective_setup_package_hash(&mut package);
 
-        let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
+        let result = verify_collective_bgv_setup_package(&package, &fixture.verification_request)
             .expect("verification response");
 
         assert_eq!(result["isValid"], false);
@@ -155,7 +158,8 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_sh
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_share_succinct_material",
     );
-    let mut package = public_key_share_succinct_proof_bearing_collective_setup_package();
+    let fixture = public_key_share_succinct_proof_bearing_collective_setup_fixture();
+    let mut package = fixture.package;
     let coefficients_hex = package["publicKeyShareMaterial"]["shareMaterialRecords"][0]
         ["shareCoefficientVectorsByLimb"][0]["coefficientsLeHex"]
         .as_str()
@@ -170,7 +174,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_sh
         [0]["coefficientsLeHex"] = serde_json::json!(tampered_hex);
     rebind_collective_setup_package_hash(&mut package);
 
-    let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
+    let result = verify_collective_bgv_setup_package(&package, &fixture.verification_request)
         .expect("verification response");
 
     assert_eq!(result["isValid"], false);
@@ -187,24 +191,70 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_sh
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_share_succinct_proof_byte_content",
     );
-    let mut package = public_key_share_succinct_proof_bearing_collective_setup_package();
-    let proof_bytes_hex =
-        package["publicKeyShareSuccinctProofs"]["proofRecords"][0]["proofBytesHex"]
+    let fixture = public_key_share_succinct_proof_bearing_collective_setup_fixture();
+    let mut package = fixture.package;
+    let mut verification_request = fixture.verification_request;
+    let original_proof_material_root =
+        package["publicKeyShareSuccinctProofs"]["proofRecords"][0]["proofMaterialRoot"]
             .as_str()
-            .expect("public-key proof bytes hex");
-    let mut proof_bytes = decode_hex(proof_bytes_hex).expect("proof bytes");
+            .expect("public-key proof material root")
+            .to_string();
+    let original_proof_material = crate::bgv::setup::take_verified_canonical_proof_material_bytes(
+        crate::bgv::setup::trustee_evaluation_key_proof::PUBLIC_KEY_SHARE_PROOF_FAMILY,
+        &original_proof_material_root,
+    )
+    .expect("public-key proof material lookup")
+    .expect("public-key proof material was retained");
+    let mut proof_bytes = original_proof_material
+        .chunks()
+        .flat_map(|chunk| chunk.iter().copied())
+        .collect::<Vec<_>>();
     set_first_masked_consistency_claim_to_noncanonical_modulus(&mut proof_bytes);
-    package["publicKeyShareSuccinctProofs"]["proofRecords"][0]["proofBytesHex"] =
-        serde_json::json!(to_hex(&proof_bytes));
-    package["publicKeyShareSuccinctProofs"]["proofRecords"][0]["proofBytesHash"] = serde_json::json!(
+    let proof_bytes_hash =
         crate::bgv::setup::trustee_evaluation_key_proof::public_key_share_succinct_proof_bytes_hash(
-            &proof_bytes
+            &proof_bytes,
+        );
+    let proof_record = &mut package["publicKeyShareSuccinctProofs"]["proofRecords"][0];
+    proof_record["proofBytesHash"] = serde_json::json!(&proof_bytes_hash);
+    let proof_material_root =
+        crate::bgv::setup::accepted_setup::public_key_share_succinct_proof_material_root(
+            proof_record,
         )
-    );
+        .expect("tampered public-key proof material root");
+    proof_record["proofMaterialRoot"] = serde_json::json!(&proof_material_root);
     rebind_collective_public_key_succinct_proof_roots(&mut package);
+
+    let transport_hashes = setup_proof_material_transport_hashes(
+        crate::bgv::setup::trustee_evaluation_key_proof::PUBLIC_KEY_SHARE_PROOF_FAMILY,
+        &proof_bytes,
+        SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
+    )
+    .expect("tampered public-key proof transport hashes");
+    let transported_proof_material =
+        &mut verification_request["transportedPublicKeyShareProofMaterial"]["proofMaterials"][0];
+    transported_proof_material["proofMaterialRoot"] = serde_json::json!(&proof_material_root);
+    transported_proof_material["chunkCount"] =
+        serde_json::json!(transport_hashes.chunk_hashes.len());
+    transported_proof_material["totalByteLength"] =
+        serde_json::json!(transport_hashes.total_byte_length);
+    transported_proof_material["fullObjectHash"] =
+        serde_json::json!(transport_hashes.full_object_hash);
+    transported_proof_material["chunkRoot"] = serde_json::json!(transport_hashes.chunk_root);
+    transported_proof_material["chunkHashes"] = serde_json::json!(transport_hashes.chunk_hashes);
+    crate::bgv::setup::retain_generated_canonical_proof_material(
+        crate::bgv::setup::trustee_evaluation_key_proof::PUBLIC_KEY_SHARE_PROOF_FAMILY,
+        proof_material_root,
+        proof_bytes,
+    )
+    .expect("retain tampered public-key proof material");
+    replace_setup_proof_material_transport_certificate_objects(
+        &mut package,
+        &verification_request["transportedPublicKeyShareProofMaterial"],
+        PUBLIC_KEY_SHARE_PROOF_TRANSPORT_CERTIFICATE_FIELDS,
+    );
     rebind_collective_setup_package_hash(&mut package);
 
-    let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
+    let result = verify_collective_bgv_setup_package(&package, &verification_request)
         .expect("verification response");
 
     assert_eq!(result["isValid"], false);
@@ -221,10 +271,11 @@ fn heavy_accepted_setup_collective_setup_verifier_checks_collective_public_key_f
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "heavy_accepted_setup_collective_setup_verifier_checks_collective_public_key_from_succinct_proof_bearing_shares",
     );
-    let package = collective_public_key_bearing_collective_setup_package();
+    let fixture = collective_public_key_bearing_collective_setup_fixture();
 
-    let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
-        .expect("verification response");
+    let result =
+        verify_collective_bgv_setup_package(&fixture.package, &fixture.verification_request)
+            .expect("verification response");
 
     assert_eq!(result["isValid"], false);
     assert_eq!(
@@ -240,7 +291,8 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_collective_pu
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "heavy_accepted_setup_collective_setup_verifier_refuses_tampered_collective_public_key_aggregate",
     );
-    let mut package = collective_public_key_bearing_collective_setup_package();
+    let fixture = collective_public_key_bearing_collective_setup_fixture();
+    let mut package = fixture.package;
     let coefficients_hex =
         package["collectivePublicKey"]["aggregateCoefficientVectorsByLimb"][0]["coefficientsLeHex"]
             .as_str()
@@ -259,7 +311,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_collective_pu
     rebind_collective_public_key_root(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
-    let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
+    let result = verify_collective_bgv_setup_package(&package, &fixture.verification_request)
         .expect("verification response");
 
     assert_eq!(result["isValid"], false);
@@ -275,9 +327,9 @@ fn heavy_accepted_setup_collective_setup_public_key_loader_refuses_reduced_ring_
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "heavy_accepted_setup_collective_setup_public_key_loader_refuses_reduced_ring_material",
     );
-    let package = collective_public_key_bearing_collective_setup_package();
+    let fixture = collective_public_key_bearing_collective_setup_fixture();
 
-    let error = match accepted_setup_collective_public_key_from_package(&package) {
+    let error = match accepted_setup_collective_public_key_from_package(&fixture.package) {
         Ok(_) => panic!("reduced-ring material must not become a runtime public key"),
         Err(error) => error,
     };
@@ -311,16 +363,19 @@ fn heavy_accepted_setup_collective_setup_verifier_requires_collective_public_key
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "heavy_accepted_setup_collective_setup_verifier_requires_collective_public_key_and_package_root",
     );
-    let mut missing_object_package = collective_public_key_bearing_collective_setup_package();
+    let missing_object_fixture = collective_public_key_bearing_collective_setup_fixture();
+    let mut missing_object_package = missing_object_fixture.package;
     missing_object_package
         .as_object_mut()
         .expect("setup package")
         .remove("collectivePublicKey");
     rebind_collective_setup_package_hash(&mut missing_object_package);
 
-    let missing_object_result =
-        verify_collective_bgv_setup_package(&missing_object_package, &serde_json::json!({}))
-            .expect("verification response");
+    let missing_object_result = verify_collective_bgv_setup_package(
+        &missing_object_package,
+        &missing_object_fixture.verification_request,
+    )
+    .expect("verification response");
 
     assert_eq!(missing_object_result["isValid"], false);
     assert_eq!(
@@ -332,16 +387,19 @@ fn heavy_accepted_setup_collective_setup_verifier_requires_collective_public_key
         "setupPackage.collectivePublicKey"
     );
 
-    let mut missing_root_package = collective_public_key_bearing_collective_setup_package();
+    let missing_root_fixture = collective_public_key_bearing_collective_setup_fixture();
+    let mut missing_root_package = missing_root_fixture.package;
     missing_root_package
         .as_object_mut()
         .expect("setup package")
         .remove("collectivePublicKeyRoot");
     rebind_collective_setup_package_hash(&mut missing_root_package);
 
-    let missing_root_result =
-        verify_collective_bgv_setup_package(&missing_root_package, &serde_json::json!({}))
-            .expect("verification response");
+    let missing_root_result = verify_collective_bgv_setup_package(
+        &missing_root_package,
+        &missing_root_fixture.verification_request,
+    )
+    .expect("verification response");
 
     assert_eq!(missing_root_result["isValid"], false);
     assert_eq!(
