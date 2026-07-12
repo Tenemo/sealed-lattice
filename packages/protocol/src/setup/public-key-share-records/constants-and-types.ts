@@ -1,7 +1,9 @@
 import type { ProtocolHash } from '@sealed-lattice/types';
 
-import type { TransportedSetupProofMaterialSet } from '../setup-proof-material-transport.js';
-import { setupTransportSchemeId } from '../vss-coefficient-commitments.js';
+import type {
+    CanonicalProofMaterialChunkPull,
+    TransportedSetupProofMaterialSet,
+} from '../setup-proof-material-transport.js';
 import type {
     VssSameSecretBridgeProofMaterialSet,
     VssSameSecretBridgeStatementSet,
@@ -164,13 +166,6 @@ export type BinaryChunkedPublicKeyShareMaterialSet = Readonly<
         readonly publicAPolynomialRoot: ProtocolHash;
         readonly publicKeyShareSetRoot: ProtocolHash;
         readonly publicKeyShareMaterialRoots: readonly PublicKeyShareMaterialRootReference[];
-        readonly transport: {
-            readonly transportSchemeId: typeof setupTransportSchemeId;
-            readonly chunkCount: number;
-            readonly totalByteLength: number;
-            readonly fullObjectHash: ProtocolHash;
-            readonly chunkRoot: ProtocolHash;
-        };
         readonly publicKeyShareMaterialSetRoot: ProtocolHash;
     }
 >;
@@ -178,44 +173,53 @@ export type BinaryChunkedPublicKeyShareMaterialSet = Readonly<
 export type SetupTransportedPublicKeyShareMaterial = Readonly<
     JsonRecord & {
         readonly objectType: 'SetupTransportedPublicKeyShareMaterial';
-        readonly chunkCount: number;
-        readonly totalByteLength: number;
-        readonly fullObjectHash: ProtocolHash;
-        readonly chunkHashes: readonly ProtocolHash[];
-        readonly chunkRoot: ProtocolHash;
-        readonly chunks: readonly {
-            readonly chunkIndex: number;
-            readonly bytesHex: string;
-        }[];
+        readonly publicKeyShareMaterialSetRoot: ProtocolHash;
+        readonly descriptorBytes: Uint8Array;
+    }
+>;
+
+export type PublicKeyShareMaterialChunkSource = Readonly<{
+    readonly publicKeyShareMaterialSetRoot: ProtocolHash;
+    readonly pullChunk: CanonicalProofMaterialChunkPull;
+}>;
+
+export type PublicKeyShareMaterialWriter = (input: {
+    readonly publicKeyShareMaterialSetRoot: ProtocolHash;
+    readonly pullChunk: CanonicalProofMaterialChunkPull;
+    readonly totalByteLength: number;
+}) => Promise<Uint8Array>;
+
+export type BinaryChunkedPublicKeyShareMaterialTransportInput = Readonly<{
+    readonly materialSet: PublicKeyShareMaterialSet;
+    readonly writePublicKeyShareMaterial: PublicKeyShareMaterialWriter;
+}>;
+
+export type BinaryChunkedPublicKeyShareMaterialBundleInput = Readonly<
+    PublicKeyShareMaterialSetInput & {
+        readonly writePublicKeyShareMaterial: PublicKeyShareMaterialWriter;
     }
 >;
 
 export type BinaryChunkedPublicKeyShareMaterialTransport = Readonly<{
     readonly materialSet: BinaryChunkedPublicKeyShareMaterialSet;
     readonly transportedPublicKeyShareMaterial: SetupTransportedPublicKeyShareMaterial;
+    readonly publicKeyShareMaterialChunkSource: PublicKeyShareMaterialChunkSource;
 }>;
 
 export type BinaryChunkedPublicKeyShareMaterialBundle = Readonly<{
     readonly materialSet: BinaryChunkedPublicKeyShareMaterialSet;
     readonly transportedPublicKeyShareMaterial: SetupTransportedPublicKeyShareMaterial;
+    readonly publicKeyShareMaterialChunkSource: PublicKeyShareMaterialChunkSource;
 }>;
 
 export type SetupPackagePublicKeyShareMaterialSet =
     | PublicKeyShareMaterialSet
     | BinaryChunkedPublicKeyShareMaterialSet;
 
-export type PublicKeyShareSuccinctEmbeddedProofBytes = Readonly<{
-    readonly proofBytesHex: string;
-}>;
-
-export type PublicKeyShareSuccinctTransportedProofBytes = Readonly<{
+export type PublicKeyShareSuccinctProofByteMaterial = Readonly<{
     readonly proofBytesEncoding: 'binary-chunked-proof-bytes';
     readonly proofMaterialRoot: ProtocolHash;
 }>;
-
-export type PublicKeyShareSuccinctProofByteMaterial =
-    | PublicKeyShareSuccinctEmbeddedProofBytes
-    | PublicKeyShareSuccinctTransportedProofBytes;
 
 export type PublicKeyShareSuccinctProofMaterial = Readonly<
     PublicKeyShareSuccinctProofByteMaterial & {
@@ -328,9 +332,7 @@ export type TransportedCollectivePublicKeyInput = Omit<
     'publicKeyShareMaterial'
 > & {
     readonly publicKeyShareMaterial: BinaryChunkedPublicKeyShareMaterialSet;
-    readonly transportedPublicKeyShareMaterial:
-        | SetupTransportedPublicKeyShareMaterial
-        | JsonRecord;
+    readonly publicKeyShareMaterialChunkSource: PublicKeyShareMaterialChunkSource;
 };
 
 export type PublicKeyShareSetInput = {

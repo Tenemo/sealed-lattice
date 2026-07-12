@@ -1,20 +1,20 @@
-import type { ProtocolHash } from "./protocol-hash.js";
+import type { ProtocolHash } from './protocol-hash.js';
 
 /** Closed semantic refusal taxonomy shared by every protocol verifier. */
 export const refusalReasons = Object.freeze([
-    "malformedEncoding",
-    "unsupportedVersionOrSuite",
-    "outsideSupportedProfile",
-    "wrongContext",
-    "wrongTypeOrLength",
-    "wrongHashOrRoot",
-    "invalidSignature",
-    "duplicateIdentity",
-    "equivocation",
-    "missingPrerequisite",
-    "invalidProof",
-    "invalidArithmeticRelation",
-    "consumedState",
+    'malformedEncoding',
+    'unsupportedVersionOrSuite',
+    'outsideSupportedProfile',
+    'wrongContext',
+    'wrongTypeOrLength',
+    'wrongHashOrRoot',
+    'invalidSignature',
+    'duplicateIdentity',
+    'equivocation',
+    'missingPrerequisite',
+    'invalidProof',
+    'invalidArithmeticRelation',
+    'consumedState',
 ] as const);
 
 /** A verifier refusal whose name has the same meaning in Rust, Node, and WASM. */
@@ -53,7 +53,7 @@ declare const participantIdentityBrand: unique symbol;
 
 /** A lowercase canonical participant identity derived from a roster ML-DSA-65 verification key. */
 export type ParticipantIdentity = ProtocolHash & {
-    readonly [participantIdentityBrand]: "ParticipantIdentity";
+    readonly [participantIdentityBrand]: 'ParticipantIdentity';
 };
 
 const participantIdentityPattern = /^[0-9a-f]{128}$/u;
@@ -61,7 +61,7 @@ const participantIdentityPattern = /^[0-9a-f]{128}$/u;
 export const isParticipantIdentity = (
     value: unknown,
 ): value is ParticipantIdentity =>
-    typeof value === "string" && participantIdentityPattern.test(value);
+    typeof value === 'string' && participantIdentityPattern.test(value);
 
 /** Parses the sole canonical string representation of a participant identity. */
 export const parseParticipantIdentity = (
@@ -69,7 +69,7 @@ export const parseParticipantIdentity = (
 ): ParticipantIdentity => {
     if (!isParticipantIdentity(value)) {
         throw new TypeError(
-            "participant identity must contain exactly 128 lowercase hexadecimal characters.",
+            'participant identity must contain exactly 128 lowercase hexadecimal characters.',
         );
     }
 
@@ -78,7 +78,7 @@ export const parseParticipantIdentity = (
 
 /** Fixed public parameters of the first supported foundation profile. */
 export const foundationProfile = Object.freeze({
-    protocolName: "sealed-lattice",
+    protocolName: 'sealed-lattice',
     protocolVersion: 1,
     participantCount: 10,
     activeFaultBound: 3,

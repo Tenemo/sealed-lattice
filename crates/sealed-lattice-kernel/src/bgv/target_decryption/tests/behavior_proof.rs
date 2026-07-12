@@ -359,6 +359,89 @@ fn target_result_release_rejects_wrong_target_context_before_proof_bytes() {
     );
 }
 
+#[test]
+fn malformed_setup_evicts_stream_authenticated_target_proof_material() {
+    let (setup_package, accepted_record, target_ciphertext_binding, target_ciphertexts) =
+        target_fixture();
+    let target_share_profile_value = target_share_profile(&setup_package);
+    let local_target_share_witness_value = local_target_share_witness(
+        &setup_package,
+        &accepted_record,
+        &target_ciphertext_binding,
+        &target_ciphertexts,
+        &target_share_profile_value,
+        "trustee-1",
+    );
+    let target_decryption_share = generate_local_share(
+        &setup_package,
+        &accepted_record,
+        &target_ciphertext_binding,
+        &target_ciphertexts,
+        &target_share_profile_value,
+        &local_target_share_witness_value,
+        "trustee-1",
+    );
+    let proof_statement = derive_share_proof_statement(TargetShareProofStatementInput {
+        setup_package: &setup_package,
+        accepted_record: &accepted_record,
+        target_ciphertext_binding: &target_ciphertext_binding,
+        target_ciphertexts: &target_ciphertexts,
+        target_share_profile: &target_share_profile_value,
+        local_target_share_witness_value: &local_target_share_witness_value,
+        target_decryption_share: &target_decryption_share,
+        trustee_identity: "trustee-1",
+    })
+    .expect("target share proof statement");
+    let mut malformed_setup_package = setup_package.clone();
+    malformed_setup_package["objectType"] = json!("MalformedSetupPackage");
+
+    let proof_bytes = vec![0x53, 0x4c, 0x54, 0x44];
+    let proof_record = json!({
+        "objectType": "BgvTargetDecryptionShareProofRecord",
+        "proofBytesEncoding": "binary-chunked-proof-bytes",
+        "proofBytesHash": hash512_hex(
+            "sealed-lattice/target-decryption/share-proof/proof-bytes",
+            &[&proof_bytes],
+        ),
+    });
+    let mut proof_material = json!({
+        "objectType": "BgvTargetDecryptionShareProofMaterial",
+        "proofRecords": [proof_record],
+    });
+    let proof_material_root =
+        derive_canonical_object_hash(&proof_material).expect("target proof material root");
+    proof_material["proofMaterialRoot"] = json!(&proof_material_root);
+    crate::bgv::setup::retain_generated_canonical_proof_material(
+        TARGET_DECRYPTION_SHARE_PROOF_FAMILY,
+        proof_material_root.clone(),
+        proof_bytes,
+    )
+    .expect("stream-authenticated target proof material fixture");
+
+    let error = verify_bgv_target_decryption_share_proof_material_from_request(&json!({
+        "setupPackage": malformed_setup_package,
+        "targetAcceptedRecord": accepted_record,
+        "targetCiphertextBinding": target_ciphertext_binding,
+        "targetCiphertexts": target_ciphertexts,
+        "targetShareProfile": target_share_profile_value,
+        "targetDecryptionShare": target_decryption_share,
+        "proofStatement": proof_statement,
+        "proofMaterial": proof_material,
+    }))
+    .expect_err("malformed setup package must be refused");
+
+    assert_eq!(error.code, CanonicalErrorCode::InvalidProtocolObject);
+    assert!(
+        crate::bgv::setup::take_verified_canonical_proof_material_bytes(
+            TARGET_DECRYPTION_SHARE_PROOF_FAMILY,
+            &proof_material_root,
+        )
+        .expect("target proof material store lookup")
+        .is_none(),
+        "failed target proof verification must evict authenticated material"
+    );
+}
+
 fn statement_backed_target_share_with_malformed_proof_material(
     setup_package: &Value,
     accepted_record: &Value,

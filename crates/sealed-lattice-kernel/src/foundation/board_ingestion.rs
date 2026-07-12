@@ -103,7 +103,7 @@ pub enum FoundationCarrierKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum FoundationExternalPrerequisiteKind {
     PublicSetupSeed,
-    VerifiedSetupSource,
+    SetupSourceAnchor,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -294,7 +294,7 @@ pub const FOUNDATION_ENVELOPE_POLICIES: [FoundationEnvelopePolicy; 18] = [
         carrier_kind: FoundationCarrierKind::SignedByRosterParticipant,
         signature_purpose: Some("direct-ballot"),
         prerequisite_rule: FoundationPrerequisiteRule::OneExternal {
-            prerequisite_kind: FoundationExternalPrerequisiteKind::VerifiedSetupSource,
+            prerequisite_kind: FoundationExternalPrerequisiteKind::SetupSourceAnchor,
         },
         producer_sequence_rule: FoundationProducerSequenceRule::Any,
         recovery_rule: FoundationRecoveryRule::None,
@@ -1599,13 +1599,13 @@ impl FoundationBoardIngestor {
             FoundationObjectVerificationRequirement::CanonicalCarrierAuthentication => {
                 VerificationResult::valid(authenticated)
             }
-            FoundationObjectVerificationRequirement::CommonProof => {
-                VerificationResult::refused(RefusalReason::InvalidProof)
-            }
-            FoundationObjectVerificationRequirement::DeterministicRecomputation => {
-                VerificationResult::refused(RefusalReason::InvalidArithmeticRelation)
-            }
+            // Carrier authentication cannot determine any relation, state, or
+            // storage result. Until the fixed follow-on verifier is composed,
+            // report the missing verifier prerequisite rather than inventing a
+            // cryptographic refusal for work that was never performed.
             FoundationObjectVerificationRequirement::PublicRandomnessRelation
+            | FoundationObjectVerificationRequirement::CommonProof
+            | FoundationObjectVerificationRequirement::DeterministicRecomputation
             | FoundationObjectVerificationRequirement::StateAuthorization
             | FoundationObjectVerificationRequirement::StorageRootBinding => {
                 VerificationResult::refused(RefusalReason::MissingPrerequisite)
@@ -2297,7 +2297,7 @@ mod tests {
         let fixture = TestFixture::new();
         let verified_setup_source_hash = Hash512::from_bytes([0xa1; 64]);
         let external_prerequisites = [FoundationExternalPrerequisite {
-            prerequisite_kind: FoundationExternalPrerequisiteKind::VerifiedSetupSource,
+            prerequisite_kind: FoundationExternalPrerequisiteKind::SetupSourceAnchor,
             object_hash: verified_setup_source_hash,
         }];
         let mut ingestor = fixture.ingestor(&external_prerequisites);
@@ -2321,7 +2321,7 @@ mod tests {
         let ballot_carrier = fixture.signed_carrier(0, ballot_envelope, 0x81);
         assert_refused(
             ingestor.ingest_canonical_carrier(&ballot_carrier),
-            RefusalReason::InvalidProof,
+            RefusalReason::MissingPrerequisite,
         );
         assert!(
             ingestor
@@ -2356,7 +2356,7 @@ mod tests {
                     .encode()
                     .expect("test aggregate envelope encodes"),
             ),
-            RefusalReason::InvalidArithmeticRelation,
+            RefusalReason::MissingPrerequisite,
         );
         assert!(
             ingestor
@@ -2436,7 +2436,7 @@ mod tests {
         let target_carrier = fixture.signed_carrier(1, target_envelope, 0x84);
         assert_refused(
             ingestor.ingest_canonical_carrier(&target_carrier),
-            RefusalReason::InvalidProof,
+            RefusalReason::MissingPrerequisite,
         );
         assert!(
             ingestor
@@ -2551,7 +2551,7 @@ mod tests {
         assert_eq!(
             missing_anchor_ingestor.register_external_prerequisite(
                 FoundationExternalPrerequisite {
-                    prerequisite_kind: FoundationExternalPrerequisiteKind::VerifiedSetupSource,
+                    prerequisite_kind: FoundationExternalPrerequisiteKind::SetupSourceAnchor,
                     object_hash: Hash512::from_bytes([0xf2; 64]),
                 },
             ),
@@ -2564,7 +2564,7 @@ mod tests {
         assert_refused(
             missing_anchor_ingestor.register_external_prerequisite(
                 FoundationExternalPrerequisite {
-                    prerequisite_kind: FoundationExternalPrerequisiteKind::VerifiedSetupSource,
+                    prerequisite_kind: FoundationExternalPrerequisiteKind::SetupSourceAnchor,
                     object_hash: expected_setup_hash,
                 },
             ),

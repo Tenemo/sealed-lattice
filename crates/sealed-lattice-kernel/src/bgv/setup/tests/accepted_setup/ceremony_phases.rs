@@ -145,9 +145,9 @@ fn collective_setup_verifier_refuses_passive_setup_packages() {
 }
 
 #[test]
-fn collective_setup_verifier_reports_missing_phase_as_pending() {
+fn collective_setup_verifier_refuses_a_missing_required_phase() {
     let _accepted_setup_test_timing =
-        accepted_setup_test_timing("collective_setup_verifier_reports_missing_phase_as_pending");
+        accepted_setup_test_timing("collective_setup_verifier_refuses_a_missing_required_phase");
     let mut package = collective_setup_phase_package();
     package
         .as_object_mut()
@@ -159,17 +159,20 @@ fn collective_setup_verifier_reports_missing_phase_as_pending() {
         .expect("verification response");
 
     assert_eq!(result["isValid"], false);
-    assert_eq!(result["currentPhase"], "rosterFreeze");
     assert_eq!(
-        result["missingObjects"],
-        serde_json::json!(["phaseTranscript"])
+        result["refusedObjects"],
+        serde_json::json!([{
+            "reasonCode": "setupObjectMissing",
+            "message": "A required setup object is missing.",
+            "objectPath": "setupPackage.phaseTranscript",
+        }])
     );
 }
 
 #[test]
-fn collective_setup_verifier_refuses_malformed_setup_context_tokens_before_later_pending() {
+fn collective_setup_verifier_refuses_malformed_setup_context_tokens_before_missing_prerequisites() {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "collective_setup_verifier_refuses_malformed_setup_context_tokens_before_later_pending",
+        "collective_setup_verifier_refuses_malformed_setup_context_tokens_before_missing_prerequisites",
     );
 
     for (field_name, malformed_value) in [
@@ -203,11 +206,6 @@ fn collective_setup_verifier_refuses_malformed_setup_context_tokens_before_later
         assert_eq!(
             result["refusedObjects"][0]["objectPath"],
             format!("setupPackage.setupContext.{field_name}")
-        );
-        assert_eq!(result["missingObjects"], serde_json::json!([]));
-        assert!(
-            result.get("acceptedSetupHandoff").is_none(),
-            "malformed setup context packages must not return an accepted setup handoff"
         );
     }
 }

@@ -9,7 +9,6 @@ import * as publicApiRuntime from '../../dist/index.js';
 
 import type {
     FoundationBoardCandidate,
-    FoundationBoardSession,
     FoundationBoardSessionInput,
 } from '#packages/sdk/src/index';
 import { createAuthenticatedSetupIntentTestVector } from '#packages/wasm/tests/foundation-board-test-vectors';
@@ -17,9 +16,16 @@ import { createAuthenticatedSetupIntentTestVector } from '#packages/wasm/tests/f
 type VerifyBoardConsistency = (
     input: BoardConsistencyInput,
 ) => BoardConsistencyVerification;
+type TestedFoundationBoardSession = Readonly<{
+    cancel(): void;
+    ingest(
+        canonicalCarrierBytes: Uint8Array,
+    ): VerificationResult<FoundationBoardCandidate>;
+    requireCompleteCarrierGraph(): VerificationResult<undefined>;
+}>;
 type CreateFoundationBoardSession = (
     configuration: FoundationBoardSessionInput,
-) => Promise<VerificationResult<FoundationBoardSession>>;
+) => Promise<VerificationResult<TestedFoundationBoardSession>>;
 type FoundationBoardCandidateObjectHash = (
     candidate: FoundationBoardCandidate,
 ) => Uint8Array;
@@ -34,7 +40,6 @@ const foundationBoardCandidateObjectHash =
 const requiredPublicFunctionNames = [
     'deriveThresholdParameters',
     'validatePollSpec',
-    'evaluateActionCapability',
     'deriveValidatedFirstValidOrder',
     'verifyBoardConsistency',
     'createFoundationBoardSession',

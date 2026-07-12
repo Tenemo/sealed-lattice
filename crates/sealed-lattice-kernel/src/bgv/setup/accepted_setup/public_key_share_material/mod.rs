@@ -292,3 +292,11 @@ use collective_public_key::*;
 pub(in crate::bgv::setup) use collective_public_key::accepted_setup_collective_public_key_from_package;
 pub(super) use material_records::verify_public_key_share_material_set;
 pub(super) use material_set::public_key_share_material_uses_transport;
+pub(in crate::bgv::setup) use transport::{
+    CanonicalPublicKeyShareMaterialStream,
+    absorb_verified_canonical_public_key_share_material_chunk,
+    begin_verified_canonical_public_key_share_material_stream,
+    cancel_verified_canonical_public_key_share_material_stream,
+    evict_verified_canonical_public_key_share_materials,
+    finish_verified_canonical_public_key_share_material_stream,
+};

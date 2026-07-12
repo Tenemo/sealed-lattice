@@ -43,7 +43,6 @@ export type SignedObjectType =
     | 'RegistrationEntry'
     | 'RosterExternalAcceptance'
     | 'SetupPhaseParticipantObject'
-    | 'TargetAcceptedRecord'
     | 'TargetFinalityRecord'
     | 'TopKDecryptionShare'
     | 'TrusteeSetupEntry'
@@ -175,7 +174,6 @@ export type StructuredProtocolVerificationResult = {
     readonly isValid: boolean;
     readonly refusedObjects: readonly RefusalRecord[];
     readonly forkEvidence?: ConflictingHeadEvidence;
-    readonly unresolvedReason?: string | null;
 };
 
 /** Structured result shape returned by signature verification. */

@@ -1,6 +1,5 @@
 import {
     encryptPrivateVssMailboxEnvelope,
-    hash512Hex,
     type PrivateVssEncryptedEnvelope,
 } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
@@ -11,10 +10,10 @@ import {
     protocolHashPattern,
 } from './common-fields.js';
 import {
+    canonicalGeneratedSetupProofMaterialDescriptor,
     setupProofMaterialRecordTransportFields,
-    setupProofMaterialTransportChunks,
-    setupProofMaterialTransportMetadata,
     setupTransportedProofMaterialFields,
+    type CanonicalGeneratedSetupProofMaterial,
 } from './setup-proof-material-transport.js';
 
 type JsonRecord = Record<string, unknown>;
@@ -68,7 +67,12 @@ export type PrivateVssShareProofFactoryInput = {
 
 export type PrivateVssShareProofFactory = (
     input: PrivateVssShareProofFactoryInput,
-) => JsonRecord;
+) => Promise<
+    Readonly<{
+        readonly proofRecord: JsonRecord;
+        readonly canonicalMaterial: CanonicalGeneratedSetupProofMaterial;
+    }>
+>;
 
 export type PrivateVssMailboxDeliveryKernel = {
     readonly deriveCanonicalObjectHash: (input: {
@@ -106,6 +110,10 @@ export type PrivateVssMailboxDeliveryKernel = {
     }) => {
         readonly privateVssShareProof: JsonRecord;
     };
+    readonly exportCanonicalProofMaterial?: (input: {
+        readonly proofFamily: typeof privateVssShareProofFamily;
+        readonly proofMaterialRoot: ProtocolHash;
+    }) => Promise<CanonicalGeneratedSetupProofMaterial>;
     readonly verifyPrivateVssShareEnvelope: (input: {
         readonly setupContext: unknown;
         readonly publicMatrixSeedHash: ProtocolHash;
@@ -138,9 +146,6 @@ export type PrivateVssMailboxDeliverySetInput = {
     readonly participantCount: number;
     readonly deliveryPhaseNumber: number;
     readonly verificationPhaseNumber: number;
-    readonly privateVssShareProofMaterialEncoding?:
-        | typeof embeddedPrivateVssShareProofBytesEncoding
-        | typeof transportedSetupProofMaterialEncoding;
     readonly privateVssShareProofFactory?: PrivateVssShareProofFactory;
     readonly sourceTrusteeContributionStates: readonly PrivateVssSourceTrusteeContributionState[];
     readonly recipients: readonly PrivateVssMailboxRecipient[];
@@ -218,19 +223,12 @@ type PrivateVssMailboxDeliverySetFromReferencesInput = Pick<
     readonly envelopeReferences: readonly PrivateVssEnvelopeCommitment[];
 };
 
-export type TransportedPrivateVssShareProofChunk = Readonly<
-    JsonRecord & {
-        readonly chunkIndex: number;
-        readonly bytes: ArrayBuffer;
-    }
->;
-
 export type TransportedPrivateVssShareProofMaterial = Readonly<
     JsonRecord & {
         readonly objectType: 'SetupTransportedPrivateVssShareProofMaterial';
         readonly proofFamily: typeof privateVssShareProofFamily;
         readonly proofMaterialRoot: ProtocolHash;
-        readonly chunks: readonly TransportedPrivateVssShareProofChunk[];
+        readonly descriptorBytes: Uint8Array;
     }
 >;
 
@@ -246,13 +244,7 @@ const privateEnvelopeDeliveryContentType = 'private-vss-share-envelope';
 const privateEnvelopeObjectType = 'PrivateVssShareEnvelope';
 const privateEnvelopeAadObjectType = 'PrivateVssEnvelopeAad';
 const privateVssShareProofFamily = 'vss-opening-carry';
-const embeddedPrivateVssShareProofBytesEncoding =
-    'embedded-binary-proof-bytes-hex';
 const transportedSetupProofMaterialEncoding = 'binary-chunked-proof-bytes';
-const privateVssShareProofBytesHashDomain =
-    'sealed-lattice/setup/private-vss-share/succinct-proof-bytes';
-const lowercaseHexPattern = /^[0-9a-f]+$/u;
-
 const validatePositiveSafeInteger = (
     value: number,
     fieldName: string,
@@ -281,39 +273,6 @@ const assertProtocolHash = (
     }
 
     return value;
-};
-
-const assertString = (value: unknown, fieldName: string): string => {
-    if (typeof value !== 'string' || value.length === 0) {
-        throw new TypeError(`${fieldName} must be a non-empty string.`);
-    }
-
-    return value;
-};
-
-const assertLowercaseEvenHex = (value: string, fieldName: string): void => {
-    if (
-        value.length === 0 ||
-        value.length % 2 !== 0 ||
-        !lowercaseHexPattern.test(value)
-    ) {
-        throw new TypeError(
-            `${fieldName} must be non-empty lowercase even-length hex.`,
-        );
-    }
-};
-
-const hexToBytes = (hex: string, fieldName: string): Uint8Array => {
-    assertLowercaseEvenHex(hex, fieldName);
-    const output = new Uint8Array(hex.length / 2);
-    for (let byteIndex = 0; byteIndex < output.length; byteIndex += 1) {
-        output[byteIndex] = Number.parseInt(
-            hex.slice(byteIndex * 2, byteIndex * 2 + 2),
-            16,
-        );
-    }
-
-    return output;
 };
 
 const proofRandomnessByteLength = 64;
@@ -553,40 +512,27 @@ const privateEnvelopeAad = (
 const transportPrivateVssShareProofMaterial = (
     kernel: PrivateVssMailboxDeliveryKernel,
     proofRecord: JsonRecord,
+    canonicalMaterial: CanonicalGeneratedSetupProofMaterial,
 ): {
     readonly proofRecord: JsonRecord;
     readonly proofMaterial: TransportedPrivateVssShareProofMaterial;
 } => {
-    const proofBytesHex = assertString(
-        proofRecord.proofBytesHex,
-        'privateVssShareProof.proofBytesHex',
-    );
-    const proofBytes = hexToBytes(
-        proofBytesHex,
-        'privateVssShareProof.proofBytesHex',
-    );
     const proofBytesHash = assertProtocolHash(
         proofRecord.proofBytesHash,
         'privateVssShareProof.proofBytesHash',
     );
-    const expectedProofBytesHash = hash512Hex(
-        privateVssShareProofBytesHashDomain,
-        [proofBytes],
-    );
-    if (proofBytesHash !== expectedProofBytesHash) {
+    if (
+        proofRecord.proofBytesEncoding !== transportedSetupProofMaterialEncoding
+    ) {
         throw new Error(
-            'privateVssShareProof.proofBytesHash must match proofBytesHex before transport.',
+            'privateVssShareProof.proofBytesEncoding must be binary-chunked-proof-bytes.',
         );
     }
-    const proofMaterialTransport = setupProofMaterialTransportMetadata(
-        proofBytes,
-        'privateVssShareProof proofBytesHex must produce at least one transported chunk.',
-    );
     const statementHash = assertProtocolHash(
         proofRecord.statementHash,
         'privateVssShareProof.statementHash',
     );
-    const proofMaterialRoot = kernel.deriveCanonicalObjectHash({
+    const expectedProofMaterialRoot = kernel.deriveCanonicalObjectHash({
         value: {
             objectType: 'PrivateVssShareTransportedSuccinctProofMaterial',
             proofFamily: privateVssShareProofFamily,
@@ -595,15 +541,22 @@ const transportPrivateVssShareProofMaterial = (
             proofBytesHash,
         },
     });
-    const transportedProofRecord = { ...proofRecord };
-    delete transportedProofRecord.proofBytesHex;
-    Object.assign(
-        transportedProofRecord,
-        setupProofMaterialRecordTransportFields(
+    const proofMaterialRoot = assertProtocolHash(
+        proofRecord.proofMaterialRoot,
+        'privateVssShareProof.proofMaterialRoot',
+    );
+    if (proofMaterialRoot !== expectedProofMaterialRoot) {
+        throw new Error(
+            'privateVssShareProof.proofMaterialRoot must match its semantic proof reference.',
+        );
+    }
+    const transportedProofRecord = {
+        ...proofRecord,
+        ...setupProofMaterialRecordTransportFields(
             proofMaterialRoot,
             transportedSetupProofMaterialEncoding,
         ),
-    );
+    };
 
     return {
         proofRecord: transportedProofRecord,
@@ -611,7 +564,10 @@ const transportPrivateVssShareProofMaterial = (
             objectType: 'SetupTransportedPrivateVssShareProofMaterial',
             proofFamily: privateVssShareProofFamily,
             ...setupTransportedProofMaterialFields(proofMaterialRoot),
-            chunks: setupProofMaterialTransportChunks(proofMaterialTransport),
+            descriptorBytes:
+                canonicalGeneratedSetupProofMaterialDescriptor(
+                    canonicalMaterial,
+                ),
         },
     };
 };
@@ -621,143 +577,145 @@ type PrivateVssShareEnvelopeBuild = Readonly<{
     readonly transportedPrivateVssShareProofMaterial?: TransportedPrivateVssShareProofMaterialSet;
 }>;
 
-const privateEnvelope = (
+const privateEnvelope = async (
     input: PrivateVssMailboxDeliveryContext,
     sourceTrusteeState: PrivateVssSourceTrusteeContributionState,
     recipient: PrivateVssMailboxRecipient,
     privateEnvelopeAadHash: ProtocolHash,
-): PrivateVssShareEnvelopeBuild => {
-    const proofMaterialEncoding =
-        input.privateVssShareProofMaterialEncoding ??
-        embeddedPrivateVssShareProofBytesEncoding;
-    if (
-        proofMaterialEncoding !== embeddedPrivateVssShareProofBytesEncoding &&
-        proofMaterialEncoding !== transportedSetupProofMaterialEncoding
-    ) {
-        throw new Error(
-            'privateVssShareProofMaterialEncoding must be embedded-binary-proof-bytes-hex or binary-chunked-proof-bytes.',
-        );
-    }
+): Promise<PrivateVssShareEnvelopeBuild> => {
     const transportedProofMaterials: TransportedPrivateVssShareProofMaterial[] =
         [];
-    const rnsShareOpenings = input.qSharePrimes.map(
-        (rnsPrime, rnsLimbIndex) => {
-            const coefficientOpenings = sourceTrusteeState.coefficientOpenings
-                .filter(
-                    (opening) =>
-                        opening.rnsLimbIndex === rnsLimbIndex &&
-                        opening.rnsPrime === rnsPrime,
-                )
-                .sort(
-                    (left, right) =>
-                        left.shamirCoefficientIndex -
-                        right.shamirCoefficientIndex,
-                );
-            if (coefficientOpenings.length === 0) {
-                throw new Error(
-                    'Source trustee local VSS state must contain every Q_share limb.',
-                );
-            }
-            const coefficientMessagesByShamirIndex = coefficientOpenings.map(
-                (opening) => {
-                    if (
-                        opening.coefficientMessage.length !== input.ringDegree
-                    ) {
-                        throw new Error(
-                            'VSS coefficient message length must match ringDegree.',
-                        );
-                    }
+    const rnsShareOpenings: JsonRecord[] = [];
+    for (
+        let rnsLimbIndex = 0;
+        rnsLimbIndex < input.qSharePrimes.length;
+        rnsLimbIndex += 1
+    ) {
+        const rnsPrime = input.qSharePrimes[rnsLimbIndex];
+        if (rnsPrime === undefined) {
+            throw new Error('Q_share prime schedule is incomplete.');
+        }
+        const coefficientOpenings = sourceTrusteeState.coefficientOpenings
+            .filter(
+                (opening) =>
+                    opening.rnsLimbIndex === rnsLimbIndex &&
+                    opening.rnsPrime === rnsPrime,
+            )
+            .sort(
+                (left, right) =>
+                    left.shamirCoefficientIndex - right.shamirCoefficientIndex,
+            );
+        if (coefficientOpenings.length === 0) {
+            throw new Error(
+                'Source trustee local VSS state must contain every Q_share limb.',
+            );
+        }
+        const coefficientMessagesByShamirIndex = coefficientOpenings.map(
+            (opening) => {
+                if (opening.coefficientMessage.length !== input.ringDegree) {
+                    throw new Error(
+                        'VSS coefficient message length must match ringDegree.',
+                    );
+                }
 
-                    return opening.coefficientMessage;
-                },
-            );
-            const shareValues = shareValuesForRecipient(
-                coefficientMessagesByShamirIndex,
-                recipient.recipientRosterPosition,
-                rnsPrime,
-                input.ringDegree,
-            );
-            const coefficientCommitmentRoots = coefficientOpenings.map(
-                (opening) => opening.commitmentRoot,
-            );
-            const proofFactoryInput = {
-                setupContext: input.setupContext,
-                publicMatrixSeedHash: input.publicMatrixSeedHash,
-                privateEnvelopeAadHash,
-                sourceTrusteeContributionState: sourceTrusteeState,
-                recipient,
-                rnsLimbIndex,
-                rnsPrime,
-                ringDegree: input.ringDegree,
-                shareValues,
-                coefficientCommitmentRoots,
-            };
-            const generatedPrivateVssShareProof =
-                input.privateVssShareProofFactory?.(proofFactoryInput) ??
-                (() => {
-                    if (
-                        input.kernel.generatePrivateVssShareProof === undefined
-                    ) {
-                        throw new Error(
-                            'Private VSS mailbox delivery requires recipient-local zero-knowledge privateVssShareProof generation; plaintext aggregate openings and carry witnesses are refused.',
-                        );
-                    }
-                    const proofRandomnessSeedHex = freshProofRandomnessHex();
-                    const proofRandomnessNonceHex = freshProofRandomnessHex();
-                    const generatedProof =
-                        input.kernel.generatePrivateVssShareProof({
-                            setupContext: input.setupContext,
-                            publicMatrixSeedHash: input.publicMatrixSeedHash,
-                            privateEnvelopeAadHash,
-                            sourceTrusteeCoefficientCommitmentRecord:
-                                sourceTrusteeState.sourceTrusteeCoefficientCommitmentRecord,
-                            sourceTrusteeCoefficientCommitmentMaterialRecords:
-                                sourceTrusteeState.sourceTrusteeCoefficientCommitmentMaterialRecords,
-                            recipientIdentity: recipient.recipientIdentity,
-                            recipientRosterPosition:
-                                recipient.recipientRosterPosition,
-                            rnsLimbIndex,
-                            rnsPrime,
-                            ringDegree: input.ringDegree,
-                            shareValues,
-                            coefficientCommitmentRoots,
-                            coefficientMessagesByShamirIndex,
-                            openingRandomnessByShamirIndex:
-                                coefficientOpenings.map(
-                                    (opening) => opening.randomnessByColumn,
-                                ),
-                            proofRandomnessSeedHex,
-                            proofRandomnessNonceHex,
-                        });
-
-                    return generatedProof.privateVssShareProof;
-                })();
-            const privateVssShareProof =
-                proofMaterialEncoding === transportedSetupProofMaterialEncoding
-                    ? (() => {
-                          const transportedProof =
-                              transportPrivateVssShareProofMaterial(
-                                  input.kernel,
-                                  generatedPrivateVssShareProof,
-                              );
-                          transportedProofMaterials.push(
-                              transportedProof.proofMaterial,
+                return opening.coefficientMessage;
+            },
+        );
+        const shareValues = shareValuesForRecipient(
+            coefficientMessagesByShamirIndex,
+            recipient.recipientRosterPosition,
+            rnsPrime,
+            input.ringDegree,
+        );
+        const coefficientCommitmentRoots = coefficientOpenings.map(
+            (opening) => opening.commitmentRoot,
+        );
+        const proofFactoryInput = {
+            setupContext: input.setupContext,
+            publicMatrixSeedHash: input.publicMatrixSeedHash,
+            privateEnvelopeAadHash,
+            sourceTrusteeContributionState: sourceTrusteeState,
+            recipient,
+            rnsLimbIndex,
+            rnsPrime,
+            ringDegree: input.ringDegree,
+            shareValues,
+            coefficientCommitmentRoots,
+        };
+        const generatedPrivateVssShareProof =
+            input.privateVssShareProofFactory === undefined
+                ? await (async () => {
+                      if (
+                          input.kernel.generatePrivateVssShareProof ===
+                              undefined ||
+                          input.kernel.exportCanonicalProofMaterial ===
+                              undefined
+                      ) {
+                          throw new Error(
+                              'Private VSS mailbox delivery requires recipient-local proof generation and canonical proof-material export.',
                           );
+                      }
+                      const proofRandomnessSeedHex = freshProofRandomnessHex();
+                      const proofRandomnessNonceHex = freshProofRandomnessHex();
+                      const generatedProof =
+                          input.kernel.generatePrivateVssShareProof({
+                              setupContext: input.setupContext,
+                              publicMatrixSeedHash: input.publicMatrixSeedHash,
+                              privateEnvelopeAadHash,
+                              sourceTrusteeCoefficientCommitmentRecord:
+                                  sourceTrusteeState.sourceTrusteeCoefficientCommitmentRecord,
+                              sourceTrusteeCoefficientCommitmentMaterialRecords:
+                                  sourceTrusteeState.sourceTrusteeCoefficientCommitmentMaterialRecords,
+                              recipientIdentity: recipient.recipientIdentity,
+                              recipientRosterPosition:
+                                  recipient.recipientRosterPosition,
+                              rnsLimbIndex,
+                              rnsPrime,
+                              ringDegree: input.ringDegree,
+                              shareValues,
+                              coefficientCommitmentRoots,
+                              coefficientMessagesByShamirIndex,
+                              openingRandomnessByShamirIndex:
+                                  coefficientOpenings.map(
+                                      (opening) => opening.randomnessByColumn,
+                                  ),
+                              proofRandomnessSeedHex,
+                              proofRandomnessNonceHex,
+                          });
 
-                          return transportedProof.proofRecord;
-                      })()
-                    : generatedPrivateVssShareProof;
+                      const proofRecord = generatedProof.privateVssShareProof;
+                      const proofMaterialRoot = assertProtocolHash(
+                          proofRecord.proofMaterialRoot,
+                          'privateVssShareProof.proofMaterialRoot',
+                      );
 
-            return {
-                objectType: 'PrivateVssShareLimbOpening',
-                rnsLimbIndex,
-                rnsPrime,
-                shareValues,
-                coefficientCommitmentRoots,
-                privateVssShareProof,
-            };
-        },
-    );
+                      return {
+                          proofRecord,
+                          canonicalMaterial:
+                              await input.kernel.exportCanonicalProofMaterial({
+                                  proofFamily: privateVssShareProofFamily,
+                                  proofMaterialRoot,
+                              }),
+                      };
+                  })()
+                : await input.privateVssShareProofFactory(proofFactoryInput);
+        const transportedProof = transportPrivateVssShareProofMaterial(
+            input.kernel,
+            generatedPrivateVssShareProof.proofRecord,
+            generatedPrivateVssShareProof.canonicalMaterial,
+        );
+        transportedProofMaterials.push(transportedProof.proofMaterial);
+        const privateVssShareProof = transportedProof.proofRecord;
+
+        rnsShareOpenings.push({
+            objectType: 'PrivateVssShareLimbOpening',
+            rnsLimbIndex,
+            rnsPrime,
+            shareValues,
+            coefficientCommitmentRoots,
+            privateVssShareProof,
+        });
+    }
 
     const privateShareEnvelope = {
         objectType: privateEnvelopeObjectType,
@@ -811,7 +769,7 @@ const createEnvelopeCommitment = async (
     const associatedDataHash = input.kernel.deriveCanonicalObjectHash({
         value: associatedData,
     });
-    const privateShareEnvelopeBuild = privateEnvelope(
+    const privateShareEnvelopeBuild = await privateEnvelope(
         input,
         sourceTrusteeState,
         recipient,

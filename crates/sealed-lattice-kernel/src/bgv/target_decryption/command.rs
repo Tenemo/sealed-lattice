@@ -145,6 +145,7 @@ pub(crate) fn generate_bgv_target_decryption_share_proof_material_from_local_wit
 pub(crate) fn verify_bgv_target_decryption_share_proof_material_from_request(
     request: &Value,
 ) -> CanonicalResult<Value> {
+    let _material_eviction_guard = target_proof_material_eviction_guard_for_request(request);
     let setup_package = value_at_path(request, &["setupPackage"])?;
     let setup_binding = read_setup_binding(setup_package)?;
     let target_accepted = read_target_accepted_binding(

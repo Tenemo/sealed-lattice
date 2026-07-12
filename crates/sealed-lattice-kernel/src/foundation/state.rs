@@ -1,11 +1,18 @@
 use core::fmt;
 use std::collections::HashMap;
 
+use sha3::{
+    Shake256,
+    digest::{ExtendableOutput, Update, XofReader},
+};
+
+use super::canonical_stream::VerifiedCanonicalStreamSummary;
 use super::{
-    CanonicalCodecError, CanonicalCodecErrorKind, CanonicalDecodeLimits, CanonicalItem,
-    CanonicalItemType, CanonicalTuple, FOUNDATION_PROFILE, FoundationObjectType,
-    FoundationSchemaError, Hash512, ObjectEnvelope, ParticipantIdentity, RefusalReason, Roster,
-    SignedCarrier, VerificationResult, hash512,
+    CANONICAL_TUPLE_SCHEMA_IDENTIFIER, CANONICAL_TUPLE_VERSION, CanonicalCodecError,
+    CanonicalCodecErrorKind, CanonicalDecodeLimits, CanonicalItem, CanonicalItemType,
+    CanonicalTuple, FOUNDATION_PROFILE, FoundationObjectType, FoundationSchemaError, Hash512,
+    ObjectEnvelope, ParticipantIdentity, RefusalReason, Roster, SignedCarrier, VerificationResult,
+    hash512,
 };
 
 pub const STATE_RESERVATION_INTENT_SCHEMA_IDENTIFIER: u16 = 0x1610;
@@ -15,6 +22,7 @@ pub const STATE_CERTIFICATE_SCHEMA_IDENTIFIER: u16 = 0x1613;
 pub const STATE_RECOVERY_TRANSITION_SCHEMA_IDENTIFIER: u16 = 0x1614;
 
 const STATE_SCHEMA_VERSION: u16 = 1;
+const STATE_EXACT_OUTPUT_HASH_DOMAIN: &str = "sealed-lattice/state/exact-output/v1";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u16)]
@@ -499,14 +507,117 @@ pub fn derive_state_exact_output_hash(
             "exact state output length does not fit u64",
         )
     })?;
-    Ok(hash512(
-        "sealed-lattice/state/exact-output/v1",
-        &[
-            CanonicalItem::unsigned16(capability_kind.canonical_code()),
-            CanonicalItem::unsigned64(byte_length),
-            CanonicalItem::variable_bytes(exact_output_bytes)?,
-        ],
-    )?)
+    let mut hasher = StateExactOutputHasher::new(capability_kind, byte_length)?;
+    hasher.absorb(exact_output_bytes)?;
+    hasher.finish()
+}
+
+/// Incremental form of the exact-output relation used by the canonical stream verifier.
+///
+/// Construction and completion stay crate-private so a `VerifiedCanonicalStreamSummary`
+/// can only carry this digest after the generic stream verifier has consumed every
+/// descriptor-bound byte.
+pub(crate) struct StateExactOutputHasher {
+    hasher: Shake256,
+    total_byte_length: u64,
+    observed_byte_length: u64,
+}
+
+impl StateExactOutputHasher {
+    pub(crate) fn new(
+        capability_kind: StateCapabilityKind,
+        total_byte_length: u64,
+    ) -> StateResult<Self> {
+        let raw_payload_byte_length = u32::try_from(total_byte_length).map_err(|_| {
+            StateError::new(
+                RefusalReason::OutsideSupportedProfile,
+                "exact state output exceeds canonical raw-byte framing",
+            )
+        })?;
+        let raw_item_byte_length = raw_payload_byte_length.checked_add(4).ok_or_else(|| {
+            StateError::new(
+                RefusalReason::OutsideSupportedProfile,
+                "exact state output item length overflows",
+            )
+        })?;
+        let domain_byte_length =
+            u32::try_from(STATE_EXACT_OUTPUT_HASH_DOMAIN.len()).map_err(|_| {
+                StateError::new(
+                    RefusalReason::OutsideSupportedProfile,
+                    "exact state output domain length does not fit u32",
+                )
+            })?;
+        let domain_item_byte_length = domain_byte_length.checked_add(4).ok_or_else(|| {
+            StateError::new(
+                RefusalReason::OutsideSupportedProfile,
+                "exact state output domain item length overflows",
+            )
+        })?;
+
+        let mut hasher = Shake256::default();
+        hasher.update(&CANONICAL_TUPLE_SCHEMA_IDENTIFIER.to_le_bytes());
+        hasher.update(&CANONICAL_TUPLE_VERSION.to_le_bytes());
+        hasher.update(&4_u32.to_le_bytes());
+        hasher.update(&CanonicalItemType::Ascii.canonical_code().to_le_bytes());
+        hasher.update(&domain_item_byte_length.to_le_bytes());
+        hasher.update(&domain_byte_length.to_le_bytes());
+        hasher.update(STATE_EXACT_OUTPUT_HASH_DOMAIN.as_bytes());
+        hasher.update(&CanonicalItemType::Unsigned16.canonical_code().to_le_bytes());
+        hasher.update(&2_u32.to_le_bytes());
+        hasher.update(&capability_kind.canonical_code().to_le_bytes());
+        hasher.update(&CanonicalItemType::Unsigned64.canonical_code().to_le_bytes());
+        hasher.update(&8_u32.to_le_bytes());
+        hasher.update(&total_byte_length.to_le_bytes());
+        hasher.update(&CanonicalItemType::RawBytes.canonical_code().to_le_bytes());
+        hasher.update(&raw_item_byte_length.to_le_bytes());
+        hasher.update(&raw_payload_byte_length.to_le_bytes());
+
+        Ok(Self {
+            hasher,
+            total_byte_length,
+            observed_byte_length: 0,
+        })
+    }
+
+    pub(crate) fn absorb(&mut self, bytes: &[u8]) -> StateResult<()> {
+        let byte_length = u64::try_from(bytes.len()).map_err(|_| {
+            StateError::new(
+                RefusalReason::OutsideSupportedProfile,
+                "exact state output chunk length does not fit u64",
+            )
+        })?;
+        let observed_byte_length = self
+            .observed_byte_length
+            .checked_add(byte_length)
+            .ok_or_else(|| {
+                StateError::new(
+                    RefusalReason::OutsideSupportedProfile,
+                    "exact state output observed length overflows",
+                )
+            })?;
+        if observed_byte_length > self.total_byte_length {
+            return Err(StateError::new(
+                RefusalReason::WrongTypeOrLength,
+                "exact state output exceeds its declared byte length",
+            ));
+        }
+        self.hasher.update(bytes);
+        self.observed_byte_length = observed_byte_length;
+        Ok(())
+    }
+
+    pub(crate) fn finish(self) -> StateResult<Hash512> {
+        if self.observed_byte_length != self.total_byte_length {
+            return Err(StateError::new(
+                RefusalReason::WrongTypeOrLength,
+                "exact state output is incomplete",
+            ));
+        }
+        let mut reader = self.hasher.finalize_xof();
+        let mut digest = [0_u8; Hash512::BYTE_LENGTH];
+        reader.read(&mut digest);
+        Ok(Hash512::from_bytes(digest))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -729,6 +840,7 @@ pub struct VerifiedStateOutput {
     output_intent_object_hash: Hash512,
     exact_output_hash: Hash512,
     exact_output_byte_length: u64,
+    _exact_output_stream_digest: Hash512,
     _certificate_provenance: StateCertificateProvenance,
 }
 
@@ -929,13 +1041,6 @@ pub struct StateReservationVerificationInput<'input, 'recovery> {
     pub canonical_state_certificate: &'input [u8],
 }
 
-pub struct StateOutputVerificationInput<'input, 'reservation, 'output> {
-    pub verified_reservation: &'reservation VerifiedStateReservation,
-    pub canonical_output_intent_carrier: &'input [u8],
-    pub canonical_state_certificate: &'input [u8],
-    pub exact_output_bytes: &'output [u8],
-}
-
 pub struct StateRecoveryVerificationInput<'input, 'state> {
     pub subject_participant_id: ParticipantIdentity,
     pub capability_kind: StateCapabilityKind,
@@ -1075,24 +1180,50 @@ impl StateVerifier {
         })
     }
 
-    pub fn verify_output(
+    pub(crate) fn verify_output_from_verified_stream(
         &self,
-        input: StateOutputVerificationInput<'_, '_, '_>,
+        verified_reservation: &VerifiedStateReservation,
+        canonical_output_intent_carrier: &[u8],
+        canonical_state_certificate: &[u8],
+        verified_stream: VerifiedCanonicalStreamSummary,
     ) -> VerificationResult<VerifiedStateOutput> {
-        match self.verify_output_inner(input) {
+        let binding = verified_reservation.binding;
+        if verified_stream
+            .stream_domain()
+            .state_exact_output_capability_kind()
+            != Some(binding.capability_kind)
+        {
+            return VerificationResult::refused(RefusalReason::WrongContext);
+        }
+        let Some(exact_output_hash) = verified_stream.state_exact_output_hash() else {
+            return VerificationResult::refused(RefusalReason::WrongTypeOrLength);
+        };
+        match self.verify_output_binding(
+            verified_reservation,
+            canonical_output_intent_carrier,
+            canonical_state_certificate,
+            exact_output_hash,
+            verified_stream.total_byte_length(),
+            verified_stream.full_object_digest(),
+        ) {
             Ok(value) => VerificationResult::valid(value),
             Err(error) => VerificationResult::refused(error.refusal_reason),
         }
     }
 
-    fn verify_output_inner(
+    fn verify_output_binding(
         &self,
-        input: StateOutputVerificationInput<'_, '_, '_>,
+        verified_reservation: &VerifiedStateReservation,
+        canonical_output_intent_carrier: &[u8],
+        canonical_state_certificate: &[u8],
+        exact_output_hash: Hash512,
+        exact_output_byte_length: u64,
+        exact_output_stream_digest: Hash512,
     ) -> StateResult<VerifiedStateOutput> {
-        self.require_reservation_context(input.verified_reservation)?;
-        let binding = input.verified_reservation.binding;
+        self.require_reservation_context(verified_reservation)?;
+        let binding = verified_reservation.binding;
         let carrier = self.decode_and_verify_subject_carrier(
-            input.canonical_output_intent_carrier,
+            canonical_output_intent_carrier,
             FoundationObjectType::StateOutputIntent,
             binding.subject_participant_id,
             binding.recovery_epoch,
@@ -1109,27 +1240,18 @@ impl StateVerifier {
                 "output intent does not reference its verified reservation",
             ));
         }
-        let exact_output_hash =
-            derive_state_exact_output_hash(binding.capability_kind, input.exact_output_bytes)?;
         if payload.exact_output_hash != exact_output_hash {
             return Err(StateError::new(
                 RefusalReason::WrongHashOrRoot,
                 "output intent does not bind the complete exact output",
             ));
         }
-        let exact_output_byte_length =
-            u64::try_from(input.exact_output_bytes.len()).map_err(|_| {
-                StateError::new(
-                    RefusalReason::OutsideSupportedProfile,
-                    "exact state output length does not fit u64",
-                )
-            })?;
         let output_intent_object_hash = carrier
             .envelope
             .object_hash()
             .map_err(StateError::from_schema)?;
         let provenance = self.verify_certificate(
-            input.canonical_state_certificate,
+            canonical_state_certificate,
             &ResolvedStateIntent {
                 intent_object_hash: output_intent_object_hash,
                 subject_participant_id: binding.subject_participant_id,
@@ -1142,6 +1264,7 @@ impl StateVerifier {
             output_intent_object_hash,
             exact_output_hash,
             exact_output_byte_length,
+            _exact_output_stream_digest: exact_output_stream_digest,
             _certificate_provenance: provenance,
         })
     }

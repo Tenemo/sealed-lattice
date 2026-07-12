@@ -746,7 +746,9 @@ export const createSetupCertificates = (
     input: SetupCertificatesInput,
 ): SetupCertificates => createSetupCertificatesInternal(input);
 
-export const createSetupPackage = (input: SetupPackageInput): SetupPackage =>
+export const createSetupPackage = (
+    input: SetupPackageInput,
+): Promise<SetupPackage> =>
     createSetupPackageInternal(input as unknown as ProtocolSetupPackageInput);
 
 export const createPublicKeyShareSet = (

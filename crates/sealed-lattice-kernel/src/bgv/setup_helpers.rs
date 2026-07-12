@@ -1,4 +1,4 @@
-use serde_json::{Value, json};
+use serde_json::Value;
 
 use crate::{
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
@@ -82,19 +82,6 @@ pub(super) fn u64_field(value: &Value, field_name: &str) -> CanonicalResult<u64>
 pub(super) fn usize_field(value: &Value, field_name: &str) -> CanonicalResult<usize> {
     usize::try_from(u64_field(value, field_name)?)
         .map_err(|_| invalid_setup_fixture(format!("{field_name} does not fit usize")))
-}
-
-pub(super) fn setup_transport_chunk_manifest_root(
-    total_byte_length: u64,
-    chunk_hashes: &[String],
-    full_object_hash: &str,
-) -> CanonicalResult<String> {
-    derive_canonical_object_hash(&json!({
-        "objectType": "SetupTransportChunkManifest",
-        "totalByteLength": total_byte_length,
-        "chunkHashes": chunk_hashes,
-        "fullObjectHash": full_object_hash,
-    }))
 }
 
 pub(super) fn validate_hash_string(hash: &str, field_name: &str) -> CanonicalResult<()> {

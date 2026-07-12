@@ -34,6 +34,10 @@ import type {
     BgvCollectiveSetupParametersDescription,
     TranscriptCoreKernel,
 } from '#packages/wasm/src/index';
+import {
+    bgvCanonicalStreamFamilies,
+    openBgvCanonicalStreamRuntime,
+} from '#packages/wasm/src/index';
 
 function collectiveSetupPhaseOrderHash(
     kernel: TranscriptCoreKernel,
@@ -301,6 +305,7 @@ export async function focusedPrivateVssSourceDeliveryReferences(
         );
     const recipientMailboxKeyPair =
         privateVssMailboxKeyPairForRosterPosition(0);
+    const canonicalStreamRuntime = openBgvCanonicalStreamRuntime({ kernel });
 
     return createPrivateVssMailboxSourceTrusteeDeliveryReferences({
         kernel: {
@@ -308,6 +313,13 @@ export async function focusedPrivateVssSourceDeliveryReferences(
                 kernel.deriveCanonicalObjectHash(input),
             generatePrivateVssShareProof: (input) =>
                 kernel.generatePrivateVssShareProof(input),
+            exportCanonicalProofMaterial: async ({ proofMaterialRoot }) => ({
+                descriptorBytes: await canonicalStreamRuntime.writeMaterial({
+                    emitChunk: () => Promise.resolve(),
+                    family: bgvCanonicalStreamFamilies.vssOpeningCarry,
+                    materialRoot: proofMaterialRoot,
+                }),
+            }),
             verifyPrivateVssShareEnvelope: (input) =>
                 kernel.verifyPrivateVssShareEnvelope(input),
         },
@@ -323,7 +335,6 @@ export async function focusedPrivateVssSourceDeliveryReferences(
         participantCount: 1,
         deliveryPhaseNumber: 6,
         verificationPhaseNumber: 7,
-        privateVssShareProofMaterialEncoding: 'binary-chunked-proof-bytes',
         sourceTrusteeContributionState,
         recipients: [
             {

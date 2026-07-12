@@ -15,6 +15,7 @@ import type { EvaluatorKeySchedule } from '../evaluator-key-schedule.js';
 import type {
     CollectivePublicKey,
     PublicKeyShareProofSet,
+    PublicKeyShareMaterialChunkSource,
     SetupPackagePublicKeyShareMaterialSet,
     SetupTransportedPublicKeyShareMaterial,
     PublicKeyShareSet,
@@ -80,13 +81,13 @@ export type SetupPackageInput = Readonly<{
     readonly transportedPublicKeyShareMaterial?:
         | SetupTransportedPublicKeyShareMaterial
         | JsonRecord;
+    readonly publicKeyShareMaterialChunkSource?: PublicKeyShareMaterialChunkSource;
     readonly publicKeyShareSuccinctProofs:
         | PublicKeyShareSuccinctProofSet
         | JsonRecord;
     readonly transportedPublicKeyShareProofMaterial?:
         | TransportedPublicKeyShareProofMaterialSet
         | JsonRecord;
-    readonly collectivePublicKey?: never;
     readonly evaluatorKeySchedule: EvaluatorKeySchedule;
     readonly relinearizationKeyShareRounds: RelinearizationKeyShareRounds;
     readonly galoisKeyShareBatches: readonly GaloisKeyShareBatch[];
@@ -164,4 +165,11 @@ export type SetupPackageVerificationInputSource = Readonly<{
     readonly transportedPublicEvaluationKeyMaterial?: TransportedPublicEvaluationKeyMaterialSet;
 }>;
 
-export type SetupPackageVerificationInput = SetupPackageVerificationInputSource;
+export type SetupPackageVerificationInput = Readonly<
+    Omit<
+        SetupPackageVerificationInputSource,
+        'transportedPublicKeyShareMaterial'
+    > & {
+        readonly transportedPublicKeyShareMaterial?: JsonRecord;
+    }
+>;

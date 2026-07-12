@@ -22,22 +22,34 @@ pub(crate) fn generate_same_secret_bridge_proof_from_request(
         .as_ref()
         .ok_or_else(|| invalid_succinct_setup_proof("same-secret bridge statement missing"))?;
 
+    let proof_bytes_hash = hash512_hex(SAME_SECRET_BRIDGE_PROOF_BYTES_HASH_DOMAIN, &[&proof_bytes]);
+    let proof_material_root = crate::bgv::setup::setup_proof::setup_proof_material_reference_root(
+        SAME_SECRET_BRIDGE_PROOF_FAMILY,
+        &proof_bytes_hash,
+    )?;
+    crate::bgv::setup::retain_generated_canonical_proof_material(
+        SAME_SECRET_BRIDGE_PROOF_FAMILY,
+        proof_material_root.clone(),
+        proof_bytes,
+    )?;
     Ok(json!({
         "operation": "generateSameSecretBridgeProof",
         "proofFamily": statement.context.proof_family,
         "statementHash": to_hex(&statement.statement_hash()),
         "limbCount": statement.proof_limb_count(),
         "targetRnsLimbCount": bridge_statement.target_rns_primes.len(),
-        "proofBytesHex": to_hex(&proof_bytes),
+        "proofBytesEncoding": SETUP_PROOF_MATERIAL_ENCODING,
+        "proofBytesHash": proof_bytes_hash,
+        "proofMaterialRoot": proof_material_root,
     }))
 }
 
-pub(crate) fn verify_same_secret_bridge_proof_from_request(
+pub(crate) fn verify_same_secret_bridge_proof_source_from_request(
     request: &Value,
+    proof_bytes: &(impl ProofByteSource + ?Sized),
 ) -> CanonicalResult<Value> {
     let statement = same_secret_bridge_statement_from_request(request)?;
-    let proof_bytes = read_hex_bytes(request, "proofBytesHex")?;
-    let proof = decode_trustee_evaluation_key_proof(&statement, &proof_bytes)?;
+    let proof = decode_trustee_evaluation_key_proof_from_source(&statement, proof_bytes)?;
     verify_evaluation_key_share(&statement, &proof)?;
     Ok(json!({
         "operation": "verifySameSecretBridgeProof",
@@ -89,12 +101,20 @@ pub(crate) fn generate_target_decryption_share_proof_bytes_from_request(
     })
 }
 
+#[cfg(test)]
 pub(crate) fn verify_target_decryption_share_proof_bytes_from_request(
     request: &Value,
     proof_bytes: &[u8],
 ) -> CanonicalResult<Value> {
+    verify_target_decryption_share_proof_source_from_request(request, proof_bytes)
+}
+
+pub(crate) fn verify_target_decryption_share_proof_source_from_request(
+    request: &Value,
+    proof_bytes: &(impl ProofByteSource + ?Sized),
+) -> CanonicalResult<Value> {
     let statement = target_decryption_share_statement_from_request(request)?;
-    let proof = decode_trustee_evaluation_key_proof(&statement, proof_bytes)?;
+    let proof = decode_trustee_evaluation_key_proof_from_source(&statement, proof_bytes)?;
     verify_evaluation_key_share(&statement, &proof)?;
     let target_statement = statement
         .target_decryption_share
@@ -128,7 +148,7 @@ pub(crate) fn verify_target_decryption_share_proof_bytes_from_request(
         "limbCount": statement.proof_limb_count(),
         "targetRoles": target_roles,
         "targetRnsLimbIndices": target_rns_limb_indices,
-        "proofByteLength": proof_bytes.len(),
+        "proofByteLength": proof_bytes.byte_length(),
     });
     if let Some(target_role) = single_target_role {
         response["targetRole"] = json!(target_role);

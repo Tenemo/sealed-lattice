@@ -301,14 +301,13 @@ fn target_result_release_consumed_targets() -> &'static Mutex<BTreeSet<String>> 
     TARGET_RESULT_RELEASE_CONSUMED_TARGETS.get_or_init(|| Mutex::new(BTreeSet::new()))
 }
 
-// The canonical one-shot consumption key for a target release. It binds the
-// accepted setup package, the accepted target record, and the exact target
-// ciphertext pair being decrypted, so every release of the same target under the
-// same setup collides on this key while genuinely different targets do not. The
-// target-share profile is deliberately excluded from the key: only the decryption
-// threshold is roster-pinned, so a second release under a different but still-valid
-// (minimum, quorum) profile must not mint a fresh key and escape the one-shot
-// bound.
+// The canonical one-shot consumption key for a target release binds the supplied
+// setup-package hash, caller-supplied target-binding hash, and exact target
+// ciphertext-pair hash. These hashes are structurally checked here; this key does
+// not authenticate accepted board or state capabilities. Repeating the same
+// supplied bindings collides on this key. The target-share profile is deliberately
+// excluded, so changing a still-valid (minimum, quorum) profile cannot mint a
+// fresh key and escape the one-shot bound.
 fn target_release_consumption_key(
     setup_binding: &SetupBinding,
     target_accepted: &TargetAcceptedBinding,

@@ -2,7 +2,7 @@ use super::*;
 
 pub(in crate::bgv::setup) fn verify_terminal_setup_transport_policy(
     setup_package: &Value,
-    request: &Value,
+    _request: &Value,
 ) -> CanonicalResult<Option<Value>> {
     // Embedded VSS coefficient commitment material declares the full-public
     // encoding; the terminal accepted setup requires the binary-chunked transport
@@ -98,11 +98,6 @@ pub(in crate::bgv::setup) fn verify_terminal_setup_transport_policy(
     for field_name in [
         "publicEvaluationKeyMaterialEncoding",
         "publicEvaluationKeyMaterialRoot",
-        "publicEvaluationKeyMaterialChunkCount",
-        "publicEvaluationKeyMaterialTotalByteLength",
-        "publicEvaluationKeyMaterialFullObjectHash",
-        "publicEvaluationKeyMaterialChunkRoot",
-        "publicEvaluationKeyMaterialChunkHashes",
     ] {
         if evaluation_keys.get(field_name).is_none() {
             return Ok(Some(terminal_transport_policy_refusal(
@@ -123,35 +118,6 @@ pub(in crate::bgv::setup) fn verify_terminal_setup_transport_policy(
             "setupPackage.evaluationKeys.publicEvaluationKeyMaterialEncoding",
         )?));
     }
-    if let Some(response) = verify_terminal_key_switch_material_handle_policy(request)? {
-        return Ok(Some(response));
-    }
-
-    Ok(None)
-}
-
-// The terminal accepted setup must not carry the raw key-switch component
-// material inline in the package: the material streams through the file-backed
-// evaluation-key component material transport and the accepted-setup verifier
-// reads it transiently from the stream-verified handle. Any inline `chunks`
-// array on a transported component material is a raw embedded store and is
-// refused.
-fn verify_terminal_key_switch_material_handle_policy(
-    request: &Value,
-) -> CanonicalResult<Option<Value>> {
-    let Some(material_set) = request.get("transportedEvaluationKeyShareComponentMaterial") else {
-        return Ok(None);
-    };
-    for component_material in array_value(material_set, "componentMaterials")? {
-        if component_material.get("chunks").is_some() {
-            return Ok(Some(terminal_transport_policy_refusal(
-                "terminalKeySwitchMaterialHandleRequired",
-                "terminal accepted setup requires a chunkless key-switch component material reference plus a stream-verified material handle",
-                "transportedEvaluationKeyShareComponentMaterial.componentMaterials.chunks",
-            )?));
-        }
-    }
-
     Ok(None)
 }
 
@@ -168,13 +134,6 @@ fn verify_terminal_proof_material_transport_records(
         )
     })?;
     for proof_record in array_value(record_set, records_field_name)? {
-        if proof_record.get("proofBytesHex").is_some() {
-            return Ok(Some(terminal_transport_policy_refusal(
-                "terminalProofMaterialTransportRequired",
-                "terminal accepted setup requires transported setup proof bytes",
-                format!("{object_path}.proofBytesHex"),
-            )?));
-        }
         if proof_record
             .get("proofBytesEncoding")
             .and_then(Value::as_str)

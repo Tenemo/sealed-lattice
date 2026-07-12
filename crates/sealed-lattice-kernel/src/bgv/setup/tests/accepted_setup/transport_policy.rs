@@ -202,13 +202,6 @@ fn terminal_transport_policy_package_with_material_encodings(
         "evaluationKeys": {
             "publicEvaluationKeyMaterialEncoding": PUBLIC_EVALUATION_KEY_TRANSPORT_MATERIAL_ENCODING,
             "publicEvaluationKeyMaterialRoot": valid_hash('1'),
-            "publicEvaluationKeyMaterialChunkCount": 1,
-            "publicEvaluationKeyMaterialTotalByteLength": 64,
-            "publicEvaluationKeyMaterialFullObjectHash": valid_hash('2'),
-            "publicEvaluationKeyMaterialChunkRoot": valid_hash('3'),
-            "publicEvaluationKeyMaterialChunkHashes": [
-                valid_hash('4')
-            ],
         },
     })
 }
@@ -247,7 +240,6 @@ fn collective_setup_verifier_refuses_public_key_share_transport_missing_certific
     .expect("verification response");
 
     assert_eq!(result["isValid"], false);
-    assert_eq!(result["currentPhase"], "setupPackageVerification");
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "transportedObjectBindingMissing"

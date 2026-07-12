@@ -14,8 +14,8 @@ pub(crate) const FOUNDATION_BOARD_CANDIDATE_HASH_BYTE_LENGTH: usize = Hash512::B
 
 const FOUNDATION_BOARD_SESSION_CONFIGURATION_VERSION: u16 = 1;
 const PUBLIC_SETUP_SEED_ANCHOR_MASK: u16 = 1 << 0;
-const VERIFIED_SETUP_SOURCE_ANCHOR_MASK: u16 = 1 << 1;
-const ASSIGNED_ANCHOR_MASK: u16 = PUBLIC_SETUP_SEED_ANCHOR_MASK | VERIFIED_SETUP_SOURCE_ANCHOR_MASK;
+const SETUP_SOURCE_ANCHOR_MASK: u16 = 1 << 1;
+const ASSIGNED_ANCHOR_MASK: u16 = PUBLIC_SETUP_SEED_ANCHOR_MASK | SETUP_SOURCE_ANCHOR_MASK;
 const FIXED_CONFIGURATION_BYTE_LENGTH: usize = 2 + 3 * Hash512::BYTE_LENGTH + 4 * 4 + 2 + 4;
 
 struct FoundationBoardRuntimeSession {
@@ -62,7 +62,7 @@ impl FoundationBoardRuntimeRegistry {
         })
         .into_result()
         .map_err(refusal_status)?;
-        let handle = self.take_handle();
+        let handle = self.take_handle()?;
         self.active_session = Some(FoundationBoardRuntimeSession {
             capability: Zeroizing::new(capability),
             handle,
@@ -129,13 +129,13 @@ impl FoundationBoardRuntimeRegistry {
         Ok(session)
     }
 
-    fn take_handle(&mut self) -> u32 {
-        let handle = self.next_handle;
-        self.next_handle = self.next_handle.wrapping_add(1);
+    fn take_handle(&mut self) -> RuntimeResult<u32> {
         if self.next_handle == 0 {
-            self.next_handle = 1;
+            return Err(refusal_status(RefusalReason::OutsideSupportedProfile));
         }
-        handle
+        let handle = self.next_handle;
+        self.next_handle = self.next_handle.checked_add(1).unwrap_or(0);
+        Ok(handle)
     }
 }
 
@@ -279,9 +279,9 @@ fn decode_configuration(
             object_hash: Hash512::from_bytes(reader.read_array()?),
         });
     }
-    if anchor_mask & VERIFIED_SETUP_SOURCE_ANCHOR_MASK != 0 {
+    if anchor_mask & SETUP_SOURCE_ANCHOR_MASK != 0 {
         external_prerequisites.push(FoundationExternalPrerequisite {
-            prerequisite_kind: FoundationExternalPrerequisiteKind::VerifiedSetupSource,
+            prerequisite_kind: FoundationExternalPrerequisiteKind::SetupSourceAnchor,
             object_hash: Hash512::from_bytes(reader.read_array()?),
         });
     }
@@ -323,4 +323,112 @@ fn require_session_binding(
 
 const fn refusal_status(refusal_reason: RefusalReason) -> u32 {
     refusal_reason.canonical_code() as u32
+}
+
+#[cfg(test)]
+mod tests {
+    use fips204::{
+        ml_dsa_65,
+        traits::{KeyGen, SerDes},
+    };
+
+    use super::*;
+    use crate::foundation::{FOUNDATION_PROFILE, RosterEntry};
+
+    fn configuration_bytes() -> Vec<u8> {
+        let roster_entries = (0..FOUNDATION_PROFILE.participant_count)
+            .map(|roster_position| {
+                let mut signing_seed = [0_u8; 32];
+                signing_seed[0] =
+                    u8::try_from(roster_position + 1).expect("test roster position fits u8");
+                signing_seed[31] =
+                    u8::try_from(FOUNDATION_PROFILE.participant_count - roster_position)
+                        .expect("test reverse roster position fits u8");
+                let (verification_key, _) = ml_dsa_65::KG::keygen_from_seed(&signing_seed);
+                let mut mailbox_encapsulation_key = [0_u8; 1_184];
+                mailbox_encapsulation_key[1_152] =
+                    u8::try_from(roster_position + 1).expect("test roster position fits u8");
+                RosterEntry {
+                    roster_position,
+                    signing_verification_key: verification_key.into_bytes(),
+                    mailbox_encapsulation_key,
+                }
+            })
+            .collect();
+        let roster_bytes = Roster::new(roster_entries)
+            .expect("test roster is valid")
+            .encode()
+            .expect("test roster encodes");
+        let mut configuration = Vec::new();
+        configuration
+            .extend_from_slice(&FOUNDATION_BOARD_SESSION_CONFIGURATION_VERSION.to_le_bytes());
+        configuration.extend_from_slice(&[0x11; Hash512::BYTE_LENGTH]);
+        configuration.extend_from_slice(&[0x22; Hash512::BYTE_LENGTH]);
+        configuration.extend_from_slice(&[0x33; Hash512::BYTE_LENGTH]);
+        configuration.extend_from_slice(&131_072_u32.to_le_bytes());
+        configuration.extend_from_slice(&32_u32.to_le_bytes());
+        configuration.extend_from_slice(&1_048_576_u32.to_le_bytes());
+        configuration.extend_from_slice(&128_u32.to_le_bytes());
+        configuration.extend_from_slice(&0_u16.to_le_bytes());
+        configuration.extend_from_slice(
+            &u32::try_from(roster_bytes.len())
+                .expect("test roster length fits u32")
+                .to_le_bytes(),
+        );
+        configuration.extend_from_slice(&roster_bytes);
+        configuration
+    }
+
+    #[test]
+    fn handles_never_wrap_or_reuse_after_exhaustion() {
+        let mut registry = FoundationBoardRuntimeRegistry {
+            active_session: None,
+            next_handle: u32::MAX,
+        };
+        assert_eq!(registry.take_handle(), Ok(u32::MAX));
+        assert_eq!(registry.next_handle, 0);
+        assert_eq!(
+            registry.take_handle(),
+            Err(refusal_status(RefusalReason::OutsideSupportedProfile))
+        );
+        assert_eq!(registry.next_handle, 0);
+    }
+
+    #[test]
+    fn forged_and_overlapping_requests_do_not_destroy_the_active_session() {
+        let configuration = configuration_bytes();
+        let owner = [0x41; FOUNDATION_BOARD_SESSION_CAPABILITY_BYTE_LENGTH];
+        let mut registry = FoundationBoardRuntimeRegistry::default();
+        let handle = registry
+            .begin(&configuration, owner)
+            .expect("board session begins");
+
+        assert_eq!(
+            registry.cancel(handle.wrapping_add(1), &owner),
+            Err(refusal_status(RefusalReason::ConsumedState))
+        );
+        assert!(registry.active_session.is_some());
+        assert_eq!(
+            registry.cancel(
+                handle,
+                &[0x42; FOUNDATION_BOARD_SESSION_CAPABILITY_BYTE_LENGTH],
+            ),
+            Err(refusal_status(RefusalReason::WrongContext))
+        );
+        assert!(registry.active_session.is_some());
+        assert_eq!(
+            registry.begin(
+                &configuration,
+                [0x43; FOUNDATION_BOARD_SESSION_CAPABILITY_BYTE_LENGTH],
+            ),
+            Err(refusal_status(RefusalReason::OutsideSupportedProfile))
+        );
+        assert!(registry.active_session.is_some());
+        assert_eq!(
+            registry.require_complete_carrier_graph(handle, &owner),
+            Ok(())
+        );
+        assert_eq!(registry.cancel(handle, &owner), Ok(()));
+        assert!(registry.active_session.is_none());
+    }
 }

@@ -1,5 +1,6 @@
 use super::proof_codec::{
-    decode_trustee_evaluation_key_proof, encode_trustee_evaluation_key_proof,
+    decode_trustee_evaluation_key_proof, decode_trustee_evaluation_key_proof_from_source,
+    encode_trustee_evaluation_key_proof,
 };
 use super::prover::prove_evaluation_key_share;
 use super::relation::{
@@ -15,6 +16,7 @@ use crate::bgv::setup::commitment::{
     SETUP_COMMITMENT_MODULUS_LIMB_INDICES, SETUP_COMMITMENT_ROW_COUNT, SetupCommitmentLimb,
     SetupCommitmentValue, setup_commitment_full_value, setup_commitment_root,
 };
+use crate::bgv::setup::setup_proof::ProofByteSource;
 use crate::hashing::derive_canonical_object_hash;
 
 use super::relation::{LimbColumnLayout, QUOTIENT_COLUMN_SUMCHECK_RESIDUAL};
@@ -52,6 +54,64 @@ const SMALL_RING_DEGREE: usize = 128;
 const FOLDED_LAYER_RING_DEGREE: usize = 8192;
 const PROOF_RANDOMNESS_SEED: &str = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
 const PROOF_RANDOMNESS_NONCE: &str = "ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100";
+
+struct TestChunkedProofBytes {
+    chunks: Vec<Vec<u8>>,
+    total_byte_length: usize,
+}
+
+impl TestChunkedProofBytes {
+    fn new(chunks: Vec<Vec<u8>>) -> Self {
+        Self {
+            total_byte_length: chunks.iter().map(Vec::len).sum(),
+            chunks,
+        }
+    }
+}
+
+impl ProofByteSource for TestChunkedProofBytes {
+    fn byte_length(&self) -> usize {
+        self.total_byte_length
+    }
+
+    fn copy_bytes(&self, offset: usize, destination: &mut [u8]) -> bool {
+        let Some(end) = offset.checked_add(destination.len()) else {
+            return false;
+        };
+        if end > self.total_byte_length {
+            return false;
+        }
+        let mut skipped_bytes = 0_usize;
+        let mut destination_offset = 0_usize;
+        for chunk in &self.chunks {
+            let chunk_end = skipped_bytes + chunk.len();
+            if offset + destination_offset < chunk_end {
+                let chunk_offset = (offset + destination_offset).saturating_sub(skipped_bytes);
+                let copy_length =
+                    (chunk.len() - chunk_offset).min(destination.len() - destination_offset);
+                destination[destination_offset..destination_offset + copy_length]
+                    .copy_from_slice(&chunk[chunk_offset..chunk_offset + copy_length]);
+                destination_offset += copy_length;
+                if destination_offset == destination.len() {
+                    return true;
+                }
+            }
+            skipped_bytes = chunk_end;
+        }
+        destination.is_empty()
+    }
+
+    fn byte_at(&self, offset: usize) -> Option<u8> {
+        let mut remaining_offset = offset;
+        for chunk in &self.chunks {
+            if remaining_offset < chunk.len() {
+                return chunk.get(remaining_offset).copied();
+            }
+            remaining_offset -= chunk.len();
+        }
+        None
+    }
+}
 
 fn folded_layer_path_length(extension_size: usize, fold_index: usize) -> usize {
     let leaf_count = extension_size >> (fold_index + 2);

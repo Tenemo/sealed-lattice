@@ -18,12 +18,6 @@ pub(super) fn resolve_vss_share_linkage_proof_bytes(
 ) -> CanonicalResult<ResolvedVssShareLinkageProofBytes> {
     let proof_bytes_hash = read_string(proof_record, "proofBytesHash")?;
     let proof_record_root = read_string(proof_record, "proofRecordRoot")?.to_string();
-    if proof_record.get("proofBytesBase64").is_some() {
-        return Err(invalid_succinct_setup_proof(
-            "share-linkage proof requires canonical streamed proof material",
-        ));
-    }
-
     compare_string_value(
         read_string(proof_record, "proofBytesEncoding")?,
         SETUP_PROOF_MATERIAL_ENCODING,
@@ -97,11 +91,6 @@ pub(super) fn transported_vss_share_linkage_proof_material_binding(
                 "transportedVssShareLinkageProofMaterial contains duplicate proofMaterialRoot entries",
             ));
         }
-        if proof_material.get("chunks").is_some() {
-            return Err(invalid_succinct_setup_proof(
-                "share-linkage proof material must arrive through the canonical binary stream",
-            ));
-        }
         let proof_bytes = verified_setup_proof_material_bytes_from_request(
             request,
             VSS_SHARE_LINKAGE_PROOF_FAMILY,
@@ -109,10 +98,8 @@ pub(super) fn transported_vss_share_linkage_proof_material_binding(
             proof_material,
             "transportedVssShareLinkageProofMaterial.proofMaterials",
         )?;
-        let proof_bytes_hash = hash512_hex(
-            VSS_SHARE_LINKAGE_PROOF_BYTES_HASH_DOMAIN,
-            &[&proof_bytes[..]],
-        );
+        let proof_bytes_hash =
+            proof_bytes.hash512_hex(VSS_SHARE_LINKAGE_PROOF_BYTES_HASH_DOMAIN)?;
         compare_string_value(
             expected_proof_material_root,
             &crate::bgv::setup::setup_proof::setup_proof_material_reference_root(
@@ -132,6 +119,22 @@ pub(super) fn transported_vss_share_linkage_proof_material_binding(
             "transportedVssShareLinkageProofMaterial is missing the requested proofMaterialRoot",
         )
     })
+}
+
+pub(in crate::bgv::setup) fn verified_vss_share_linkage_proof_material_bytes(
+    request: &Value,
+    proof_material_root: &str,
+    expected_proof_bytes_hash: &str,
+) -> CanonicalResult<SetupProofMaterialBytes> {
+    let binding =
+        transported_vss_share_linkage_proof_material_binding(request, proof_material_root)?;
+    compare_string_value(
+        &binding.proof_bytes_hash,
+        expected_proof_bytes_hash,
+        "VSS share-linkage proof bytes hash",
+    )?;
+
+    Ok(binding.proof_bytes)
 }
 
 pub(super) fn verify_transported_vss_share_linkage_proof_material_set_header(

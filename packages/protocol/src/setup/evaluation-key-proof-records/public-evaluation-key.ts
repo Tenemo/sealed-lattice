@@ -5,7 +5,10 @@ import {
 } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
-import { setupProofTransportChunkSizeBytes } from '../setup-proof-material-transport.js';
+import {
+    type CanonicalProofMaterialChunkPull,
+    setupProofTransportChunkSizeBytes,
+} from '../setup-proof-material-transport.js';
 
 import {
     type BinaryChunkedPublicEvaluationKeyMaterialTransport,
@@ -30,12 +33,7 @@ import {
     publicEvaluationKeyTransportMaterialEncoding,
     textEncoder,
 } from './constants-and-types.js';
-import {
-    assertPositiveSafeInteger,
-    assertProtocolHash,
-    bytesToHex,
-    u64LittleEndianBytes,
-} from './encoding.js';
+import { assertProtocolHash, u64LittleEndianBytes } from './encoding.js';
 import {
     assertContextMatches,
     contextFields,
@@ -233,42 +231,6 @@ export function createPublicEvaluationKeySet(
             reference.publicEvaluationKeyMaterialRoot,
             'publicEvaluationKeyMaterialRoot',
         );
-        assertProtocolHash(
-            reference.publicEvaluationKeyMaterialFullObjectHash,
-            'publicEvaluationKeyMaterialFullObjectHash',
-        );
-        assertProtocolHash(
-            reference.publicEvaluationKeyMaterialChunkRoot,
-            'publicEvaluationKeyMaterialChunkRoot',
-        );
-        assertPositiveSafeInteger(
-            reference.publicEvaluationKeyMaterialChunkSizeBytes,
-            'publicEvaluationKeyMaterialChunkSizeBytes',
-        );
-        assertPositiveSafeInteger(
-            reference.publicEvaluationKeyMaterialChunkCount,
-            'publicEvaluationKeyMaterialChunkCount',
-        );
-        assertPositiveSafeInteger(
-            reference.publicEvaluationKeyMaterialTotalByteLength,
-            'publicEvaluationKeyMaterialTotalByteLength',
-        );
-        if (
-            reference.publicEvaluationKeyMaterialChunkHashes.length !==
-            reference.publicEvaluationKeyMaterialChunkCount
-        ) {
-            throw new Error(
-                'publicEvaluationKeyMaterialChunkHashes must match publicEvaluationKeyMaterialChunkCount.',
-            );
-        }
-        reference.publicEvaluationKeyMaterialChunkHashes.forEach(
-            (chunkHash, chunkIndex) => {
-                assertProtocolHash(
-                    chunkHash,
-                    `publicEvaluationKeyMaterialChunkHashes[${chunkIndex}]`,
-                );
-            },
-        );
     }
 
     const evaluationKeysWithoutHash = {
@@ -458,7 +420,7 @@ const encodePublicEvaluationKeyMaterialManifest = (
     return materialBytes;
 };
 
-const publicEvaluationKeyMaterialChunks = (
+const publicEvaluationKeyMaterialChunkViews = (
     materialBytes: Uint8Array,
 ): readonly Uint8Array[] => {
     if (materialBytes.byteLength === 0) {
@@ -466,30 +428,71 @@ const publicEvaluationKeyMaterialChunks = (
             'public evaluation-key material transport requires bytes.',
         );
     }
-    const chunks: Uint8Array[] = [];
+    const chunkViews: Uint8Array[] = [];
     for (
         let byteOffset = 0;
         byteOffset < materialBytes.byteLength;
         byteOffset += setupProofTransportChunkSizeBytes
     ) {
-        chunks.push(
-            materialBytes.slice(
+        chunkViews.push(
+            materialBytes.subarray(
                 byteOffset,
                 byteOffset + setupProofTransportChunkSizeBytes,
             ),
         );
     }
 
-    return chunks;
+    return chunkViews;
 };
+
+const repeatablePublicEvaluationKeyMaterialChunkPull =
+    (materialBytes: Uint8Array): CanonicalProofMaterialChunkPull =>
+    ({ chunkIndex, expectedByteLength }) => {
+        if (!Number.isSafeInteger(chunkIndex) || chunkIndex < 0) {
+            throw new TypeError(
+                'public evaluation-key material chunkIndex must be a non-negative safe integer.',
+            );
+        }
+        const byteOffset = chunkIndex * setupProofTransportChunkSizeBytes;
+        if (!Number.isSafeInteger(byteOffset)) {
+            throw new RangeError(
+                'public evaluation-key material chunk offset exceeds the JavaScript safe integer range.',
+            );
+        }
+        if (byteOffset >= materialBytes.byteLength) {
+            if (expectedByteLength === 0) {
+                return Promise.resolve(undefined);
+            }
+            throw new RangeError(
+                'public evaluation-key material source was pulled past its declared length.',
+            );
+        }
+        const chunkByteLength = Math.min(
+            setupProofTransportChunkSizeBytes,
+            materialBytes.byteLength - byteOffset,
+        );
+        if (expectedByteLength !== chunkByteLength) {
+            throw new Error(
+                'public evaluation-key material pull length does not match the canonical chunk boundary.',
+            );
+        }
+
+        return Promise.resolve(
+            materialBytes.slice(byteOffset, byteOffset + chunkByteLength)
+                .buffer,
+        );
+    };
 
 const publicEvaluationKeyMaterialFullObjectHash = (
     totalByteLength: number,
-    chunks: readonly Uint8Array[],
+    chunkViews: readonly Uint8Array[],
 ): ProtocolHash =>
     hash512Hex(
         'sealed-lattice/setup/public-evaluation-key-material/full-object',
-        [u64LittleEndianBytes(totalByteLength, 'totalByteLength'), ...chunks],
+        [
+            u64LittleEndianBytes(totalByteLength, 'totalByteLength'),
+            ...chunkViews,
+        ],
     );
 
 const publicEvaluationKeyMaterialChunkHash = (
@@ -504,45 +507,49 @@ const publicEvaluationKeyMaterialChunkHash = (
     ]);
 
 const publicEvaluationKeyMaterialTransportHashes = (
-    chunks: readonly Uint8Array[],
+    materialBytes: Uint8Array,
 ): Readonly<{
     readonly fullObjectHash: ProtocolHash;
     readonly chunkHashes: readonly ProtocolHash[];
     readonly chunkRoot: ProtocolHash;
     readonly totalByteLength: number;
 }> => {
-    if (chunks.length === 0) {
+    const chunkViews = publicEvaluationKeyMaterialChunkViews(materialBytes);
+    if (chunkViews.length === 0) {
         throw new Error(
             'public evaluation-key material transport requires at least one chunk.',
         );
     }
-    const totalByteLength = chunks.reduce((byteLength, chunk, chunkIndex) => {
-        if (chunk.byteLength === 0) {
-            throw new Error(
-                'public evaluation-key material chunks must be non-empty.',
-            );
-        }
-        if (chunk.byteLength > setupProofTransportChunkSizeBytes) {
-            throw new Error(
-                'public evaluation-key material chunk exceeds the accepted chunk size.',
-            );
-        }
-        if (
-            chunkIndex + 1 < chunks.length &&
-            chunk.byteLength !== setupProofTransportChunkSizeBytes
-        ) {
-            throw new Error(
-                'public evaluation-key material contains a short non-final chunk.',
-            );
-        }
+    const totalByteLength = chunkViews.reduce(
+        (byteLength, chunk, chunkIndex) => {
+            if (chunk.byteLength === 0) {
+                throw new Error(
+                    'public evaluation-key material chunks must be non-empty.',
+                );
+            }
+            if (chunk.byteLength > setupProofTransportChunkSizeBytes) {
+                throw new Error(
+                    'public evaluation-key material chunk exceeds the accepted chunk size.',
+                );
+            }
+            if (
+                chunkIndex + 1 < chunkViews.length &&
+                chunk.byteLength !== setupProofTransportChunkSizeBytes
+            ) {
+                throw new Error(
+                    'public evaluation-key material contains a short non-final chunk.',
+                );
+            }
 
-        return byteLength + chunk.byteLength;
-    }, 0);
+            return byteLength + chunk.byteLength;
+        },
+        0,
+    );
     const fullObjectHash = publicEvaluationKeyMaterialFullObjectHash(
         totalByteLength,
-        chunks,
+        chunkViews,
     );
-    const chunkHashes = chunks.map((chunk, chunkIndex) =>
+    const chunkHashes = chunkViews.map((chunk, chunkIndex) =>
         publicEvaluationKeyMaterialChunkHash(fullObjectHash, chunkIndex, chunk),
     );
     const chunkRoot = deriveCanonicalObjectHash({
@@ -681,9 +688,9 @@ const assertPublicEvaluationKeyComponentMaterialCoverage = (
     }
 };
 
-export const createBinaryChunkedPublicEvaluationKeyMaterialTransport = (
+export const createBinaryChunkedPublicEvaluationKeyMaterialTransport = async (
     input: PublicEvaluationKeyMaterialTransportInput,
-): BinaryChunkedPublicEvaluationKeyMaterialTransport => {
+): Promise<BinaryChunkedPublicEvaluationKeyMaterialTransport> => {
     const evaluationKeysWithoutMaterialReference =
         createPublicEvaluationKeySet(input);
     const manifest = publicEvaluationKeyMaterialManifest(
@@ -691,8 +698,8 @@ export const createBinaryChunkedPublicEvaluationKeyMaterialTransport = (
         evaluationKeysWithoutMaterialReference,
     );
     const materialBytes = encodePublicEvaluationKeyMaterialManifest(manifest);
-    const chunks = publicEvaluationKeyMaterialChunks(materialBytes);
-    const transportHashes = publicEvaluationKeyMaterialTransportHashes(chunks);
+    const transportHashes =
+        publicEvaluationKeyMaterialTransportHashes(materialBytes);
     const publicEvaluationKeyMaterialRoot =
         publicEvaluationKeyMaterialReferenceRoot(
             evaluationKeysWithoutMaterialReference,
@@ -703,22 +710,28 @@ export const createBinaryChunkedPublicEvaluationKeyMaterialTransport = (
         publicEvaluationKeyMaterialEncoding:
             publicEvaluationKeyTransportMaterialEncoding,
         publicEvaluationKeyMaterialRoot,
-        publicEvaluationKeyMaterialChunkSizeBytes:
-            setupProofTransportChunkSizeBytes,
-        publicEvaluationKeyMaterialChunkCount:
-            transportHashes.chunkHashes.length,
-        publicEvaluationKeyMaterialTotalByteLength:
-            transportHashes.totalByteLength,
-        publicEvaluationKeyMaterialFullObjectHash:
-            transportHashes.fullObjectHash,
-        publicEvaluationKeyMaterialChunkRoot: transportHashes.chunkRoot,
-        publicEvaluationKeyMaterialChunkHashes: transportHashes.chunkHashes,
     } satisfies PublicEvaluationKeyMaterialReference;
     const evaluationKeys = createPublicEvaluationKeySet({
         ...input,
         publicEvaluationKeyMaterialReference,
     });
     assertPublicEvaluationKeyComponentMaterialCoverage(input);
+    const descriptorBytes = await input.writePublicEvaluationKeyMaterial({
+        publicEvaluationKeyMaterialRoot,
+        pullChunk:
+            repeatablePublicEvaluationKeyMaterialChunkPull(materialBytes),
+        totalByteLength: transportHashes.totalByteLength,
+    });
+    if (
+        !ArrayBuffer.isView(descriptorBytes) ||
+        Object.prototype.toString.call(descriptorBytes) !==
+            '[object Uint8Array]' ||
+        descriptorBytes.byteLength === 0
+    ) {
+        throw new TypeError(
+            'writePublicEvaluationKeyMaterial must return non-empty Uint8Array descriptor bytes.',
+        );
+    }
     const transportedPublicEvaluationKeyMaterial = {
         objectType: publicEvaluationKeyMaterialTransportSetObjectType,
         materialEncoding: publicEvaluationKeyTransportMaterialEncoding,
@@ -729,15 +742,7 @@ export const createBinaryChunkedPublicEvaluationKeyMaterialTransport = (
                 ...contextFields(input.setupContext),
                 evaluationKeySetHash: evaluationKeys.evaluationKeySetHash,
                 publicEvaluationKeyMaterialRoot,
-                chunkCount: transportHashes.chunkHashes.length,
-                totalByteLength: transportHashes.totalByteLength,
-                fullObjectHash: transportHashes.fullObjectHash,
-                chunkRoot: transportHashes.chunkRoot,
-                chunkHashes: transportHashes.chunkHashes,
-                chunks: chunks.map((chunk, chunkIndex) => ({
-                    chunkIndex,
-                    bytesHex: bytesToHex(chunk),
-                })),
+                descriptorBytes: descriptorBytes.slice(),
             },
         ],
     } satisfies TransportedPublicEvaluationKeyMaterialSet;

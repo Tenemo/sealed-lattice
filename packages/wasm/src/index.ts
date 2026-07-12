@@ -7,7 +7,6 @@ import {
     canonicalErrorCodes,
     createTranscriptCoreKernelLoader,
     TranscriptCoreKernelCommandError,
-    type BgvAcceptedSetupHandoff,
     type BgvCollectiveSetupParametersDescription,
     type BgvCollectiveSetupVerification,
     type BgvLocalTrusteeSetupStateVerification,
@@ -38,7 +37,6 @@ export {
     TranscriptCoreKernelCommandError,
 };
 export type {
-    BgvAcceptedSetupHandoff,
     TranscriptCoreKernel,
     BgvCollectiveSetupParametersDescription,
     BgvCollectiveSetupVerification,

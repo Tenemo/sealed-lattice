@@ -1,0 +1,130 @@
+import { foundationProfile } from '@sealed-lattice/types';
+import { describe, expect, it } from 'vitest';
+
+import {
+    canonicalStreamDomains,
+    openCanonicalStreamWorkerRuntime,
+} from '#packages/wasm/src/canonical-stream-runtime';
+import { loadFreshTranscriptCoreKernel } from '#packages/wasm/src/index';
+import {
+    openStateVerifierSession,
+    stateCapabilityKinds,
+} from '#packages/wasm/src/state-verifier-runtime';
+import { createStateVerifierTestVector } from '#packages/wasm/tests/state-verifier-test-vectors';
+
+const chunkBuffers = (bytes: Uint8Array): readonly ArrayBuffer[] => {
+    const chunks: ArrayBuffer[] = [];
+    for (
+        let offset = 0;
+        offset < bytes.byteLength;
+        offset += foundationProfile.streamChunkByteLength
+    ) {
+        chunks.push(
+            bytes.slice(
+                offset,
+                offset + foundationProfile.streamChunkByteLength,
+            ).buffer,
+        );
+    }
+    return chunks;
+};
+
+describe('State verifier real-WASM runtime in browsers', () => {
+    it('verifies streamed exact output and chained recovery with opaque handles', async () => {
+        const vector = createStateVerifierTestVector();
+        const kernel = await loadFreshTranscriptCoreKernel();
+        const openedSession = openStateVerifierSession({
+            configuration: {
+                actionContextHash: vector.actionContextHash,
+                canonicalRosterBytes: vector.canonicalRosterBytes,
+                ceremonyContextHash: vector.ceremonyContextHash,
+                maximumRecoveryTransitionsPerStateKey: 2,
+                suiteIdentifier: vector.suiteIdentifier,
+            },
+            kernel,
+        });
+        expect(openedSession.isValid).toBe(true);
+        if (!openedSession.isValid) {
+            throw new Error(openedSession.refusalReason);
+        }
+        const session = openedSession.value;
+        try {
+            const reservation = session.verifyReservation({
+                canonicalReservationIntentCarrier:
+                    vector.reservation.canonicalIntentCarrier,
+                canonicalStateCertificate:
+                    vector.reservation.canonicalStateCertificate,
+                capabilityKind: stateCapabilityKinds.targetRelease,
+                expectedAuthorizationHash: vector.authorizationHash,
+                subjectParticipantIdentity: vector.subjectParticipantIdentity,
+            });
+            expect(reservation.isValid).toBe(true);
+            if (!reservation.isValid) {
+                throw new Error(reservation.refusalReason);
+            }
+
+            const canonicalStreamRuntime = openCanonicalStreamWorkerRuntime({
+                kernel,
+            });
+            const writer = canonicalStreamRuntime.openWriter({
+                streamDomain:
+                    canonicalStreamDomains.stateTargetReleaseExactOutput,
+                totalByteLength: vector.exactOutputBytes.byteLength,
+            });
+            const outputChunks = chunkBuffers(vector.exactOutputBytes);
+            for (const [chunkIndex, chunk] of outputChunks.entries()) {
+                writer.absorbChunk(chunkIndex, chunk);
+            }
+            const openedOutput = session.openOutputVerification({
+                canonicalOutputIntentCarrier:
+                    vector.output.canonicalIntentCarrier,
+                canonicalStateCertificate:
+                    vector.output.canonicalStateCertificate,
+                exactOutputDescriptorBytes: writer.finish(),
+                verifiedReservation: reservation.value,
+            });
+            expect(openedOutput.isValid).toBe(true);
+            if (!openedOutput.isValid) {
+                throw new Error(openedOutput.refusalReason);
+            }
+            for (const [chunkIndex, chunk] of outputChunks.entries()) {
+                expect(
+                    openedOutput.value.absorbChunk(chunkIndex, chunk),
+                ).toEqual({ isValid: true, value: undefined });
+            }
+            const output = openedOutput.value.finish();
+            expect(output.isValid).toBe(true);
+            if (!output.isValid) {
+                throw new Error(output.refusalReason);
+            }
+            expect(Reflect.ownKeys(output.value)).toEqual([]);
+
+            const firstRecovery = session.verifyRecovery({
+                canonicalRecoveryTransitionCarrier:
+                    vector.recoveryFirst.canonicalIntentCarrier,
+                canonicalStateCertificate:
+                    vector.recoveryFirst.canonicalStateCertificate,
+                capabilityKind: stateCapabilityKinds.finalitySignature,
+                subjectParticipantIdentity: vector.subjectParticipantIdentity,
+            });
+            expect(firstRecovery.isValid).toBe(true);
+            if (!firstRecovery.isValid) {
+                throw new Error(firstRecovery.refusalReason);
+            }
+            expect(
+                session.verifyRecovery({
+                    canonicalRecoveryTransitionCarrier:
+                        vector.recoverySecond.canonicalIntentCarrier,
+                    canonicalStateCertificate:
+                        vector.recoverySecond.canonicalStateCertificate,
+                    capabilityKind: stateCapabilityKinds.finalitySignature,
+                    subjectParticipantIdentity:
+                        vector.subjectParticipantIdentity,
+                    verifiedPredecessorRecovery: firstRecovery.value,
+                }).isValid,
+            ).toBe(true);
+        } finally {
+            session.cancel();
+        }
+    }, 60_000);
+});

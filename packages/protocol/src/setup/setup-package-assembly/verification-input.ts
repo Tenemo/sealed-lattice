@@ -1,4 +1,4 @@
-import { chunklessSetupProofMaterialSetForVerificationInput } from '../setup-proof-material-transport.js';
+import { setupProofMaterialReferenceSetForVerificationInput } from '../setup-proof-material-transport.js';
 
 import {
     assertObjectRecord,
@@ -19,31 +19,41 @@ export const createSetupPackageVerificationInput = (
     assertProtocolHash(input.expectedRosterHash, 'expectedRosterHash');
 
     const transportedPublicKeyShareProofMaterial =
-        chunklessSetupProofMaterialSetForVerificationInput(
+        setupProofMaterialReferenceSetForVerificationInput(
             input.transportedPublicKeyShareProofMaterial,
         );
     const transportedEvaluationKeyShareProofMaterial =
-        chunklessSetupProofMaterialSetForVerificationInput(
+        setupProofMaterialReferenceSetForVerificationInput(
             input.transportedEvaluationKeyShareProofMaterial,
         );
     const transportedVssShareLinkageProofMaterial =
-        chunklessSetupProofMaterialSetForVerificationInput(
+        setupProofMaterialReferenceSetForVerificationInput(
             input.transportedVssShareLinkageProofMaterial,
         );
     const transportedSameSecretBridgeProofMaterial =
-        chunklessSetupProofMaterialSetForVerificationInput(
+        setupProofMaterialReferenceSetForVerificationInput(
             input.transportedSameSecretBridgeProofMaterial,
         );
+    const transportedPublicKeyShareMaterial =
+        input.transportedPublicKeyShareMaterial === undefined
+            ? undefined
+            : {
+                  objectType:
+                      input.transportedPublicKeyShareMaterial.objectType,
+                  publicKeyShareMaterialSetRoot:
+                      input.transportedPublicKeyShareMaterial
+                          .publicKeyShareMaterialSetRoot,
+              };
 
     return {
         setupPackage: input.setupPackage,
         expectedManifestHash: input.expectedManifestHash,
         expectedRosterHash: input.expectedRosterHash,
-        ...(input.transportedPublicKeyShareMaterial === undefined
+        ...(transportedPublicKeyShareMaterial === undefined
             ? {}
             : {
                   transportedPublicKeyShareMaterial:
-                      input.transportedPublicKeyShareMaterial,
+                      transportedPublicKeyShareMaterial,
               }),
         ...(transportedPublicKeyShareProofMaterial === undefined
             ? {}

@@ -1,81 +1,29 @@
-import { deriveCanonicalObjectHash, hash512Hex } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
 import type { JsonRecord } from './common-fields.js';
-import { appendVaruint } from './varuint-encoding.js';
 
 export const setupProofTransportChunkSizeBytes = 1_048_576;
 
-const varUintBytes = (value: number): Uint8Array => {
-    const outputBytes: number[] = [];
-    appendVaruint(outputBytes, value);
+export type CanonicalProofMaterialChunkPull = (input: {
+    readonly abortSignal?: AbortSignal;
+    readonly chunkIndex: number;
+    readonly expectedByteLength: number;
+}) => Promise<ArrayBuffer | undefined>;
 
-    return Uint8Array.from(outputBytes);
-};
+export type CanonicalProofMaterialChunkSink = (input: {
+    readonly abortSignal?: AbortSignal;
+    readonly bytes: ArrayBuffer;
+    readonly chunkIndex: number;
+}) => Promise<void>;
 
-// Target-decryption material has not migrated to canonical stream transport.
-// Keep its legacy framing local to that path while setup proof families rely
-// exclusively on the canonical stream descriptor.
-export const setupProofMaterialChunkHash = (
-    proofFamily: string,
-    fullObjectHash: ProtocolHash,
-    chunkIndex: number,
-    chunk: Uint8Array,
-): ProtocolHash =>
-    hash512Hex('sealed-lattice/setup/proof-material/chunk', [
-        new TextEncoder().encode(proofFamily),
-        new TextEncoder().encode(fullObjectHash),
-        varUintBytes(chunkIndex),
-        chunk,
-    ]);
-
-export const setupProofChunkManifestRoot = (
-    proofFamily: string,
-    chunkHashes: readonly ProtocolHash[],
-    fullObjectHash: ProtocolHash,
-    totalByteLength: number,
-): ProtocolHash =>
-    deriveCanonicalObjectHash({
-        objectType: 'SetupProofMaterialChunkManifest',
-        proofFamily,
-        totalByteLength,
-        chunkHashes,
-        fullObjectHash,
-    });
-
-const splitProofBytesIntoChunks = (
-    proofBytes: Uint8Array,
-): readonly Uint8Array[] => {
-    const chunks: Uint8Array[] = [];
-    for (
-        let chunkStart = 0;
-        chunkStart < proofBytes.byteLength;
-        chunkStart += setupProofTransportChunkSizeBytes
-    ) {
-        chunks.push(
-            proofBytes.slice(
-                chunkStart,
-                Math.min(
-                    chunkStart + setupProofTransportChunkSizeBytes,
-                    proofBytes.byteLength,
-                ),
-            ),
-        );
-    }
-
-    return chunks;
-};
-
-type SetupProofMaterialTransportMetadata = Readonly<{
-    readonly chunks: readonly Uint8Array[];
+export type CanonicalGeneratedSetupProofMaterial = Readonly<{
+    readonly descriptorBytes: Uint8Array;
 }>;
 
-type SetupProofMaterialTransportChunk = Readonly<
-    JsonRecord & {
-        readonly chunkIndex: number;
-        readonly bytes: ArrayBuffer;
-    }
->;
+export type SetupProofMaterialChunkSource = Readonly<{
+    readonly proofMaterialRoot: ProtocolHash;
+    readonly pullChunk: CanonicalProofMaterialChunkPull;
+}>;
 
 export const setupProofMaterialRecordTransportFields = <
     ProofBytesEncoding extends string,
@@ -102,24 +50,20 @@ export const setupTransportedProofMaterialFields = (
     proofMaterialRoot,
 });
 
-export const setupProofMaterialTransportChunks = (
-    metadata: SetupProofMaterialTransportMetadata,
-): readonly SetupProofMaterialTransportChunk[] =>
-    metadata.chunks.map((chunk, chunkIndex) => ({
-        chunkIndex,
-        bytes: chunk.slice().buffer,
-    }));
-
-export const setupProofMaterialTransportMetadata = (
-    proofBytes: Uint8Array,
-    emptyProofBytesMessage: string,
-): SetupProofMaterialTransportMetadata => {
-    const chunks = splitProofBytesIntoChunks(proofBytes);
-    if (chunks.length === 0) {
-        throw new Error(emptyProofBytesMessage);
+export const canonicalGeneratedSetupProofMaterialDescriptor = (
+    material: CanonicalGeneratedSetupProofMaterial,
+): Uint8Array => {
+    if (
+        !ArrayBuffer.isView(material.descriptorBytes) ||
+        Object.prototype.toString.call(material.descriptorBytes) !==
+            '[object Uint8Array]' ||
+        material.descriptorBytes.byteLength === 0
+    ) {
+        throw new TypeError(
+            'canonical generated proof material must contain a descriptor.',
+        );
     }
-
-    return { chunks };
+    return material.descriptorBytes.slice();
 };
 
 export type TransportedSetupProofMaterialSet<
@@ -132,7 +76,7 @@ export type TransportedSetupProofMaterialSet<
     }
 >;
 
-export const chunklessSetupProofMaterialSetForVerificationInput = <
+export const setupProofMaterialReferenceSetForVerificationInput = <
     TransportedSet extends TransportedSetupProofMaterialSet | undefined,
 >(
     transportedMaterialSet: TransportedSet,
@@ -140,28 +84,30 @@ export const chunklessSetupProofMaterialSetForVerificationInput = <
     if (transportedMaterialSet === undefined) {
         return transportedMaterialSet;
     }
-    let strippedAnyChunks = false;
+    let strippedAnyDescriptor = false;
     const proofMaterials = transportedMaterialSet.proofMaterials.map(
         (proofMaterial) => {
             if (
                 !Object.prototype.hasOwnProperty.call(
                     proofMaterial,
-                    'chunks',
+                    'descriptorBytes',
                 ) ||
                 typeof proofMaterial.proofMaterialRoot !== 'string'
             ) {
                 return proofMaterial;
             }
-            const { chunks: omittedChunks, ...proofMaterialReference } =
-                proofMaterial;
-            void omittedChunks;
-            strippedAnyChunks = true;
+            const {
+                descriptorBytes: omittedDescriptorBytes,
+                ...proofMaterialReference
+            } = proofMaterial;
+            void omittedDescriptorBytes;
+            strippedAnyDescriptor = true;
 
             return proofMaterialReference;
         },
     );
 
-    if (!strippedAnyChunks) {
+    if (!strippedAnyDescriptor) {
         return transportedMaterialSet;
     }
 

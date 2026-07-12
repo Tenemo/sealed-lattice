@@ -7,8 +7,8 @@ export {
     type EvaluationKeyAggregateBindingSet,
     type EvaluationKeyAggregateBindingTrusteeMaterialRoot,
     type EvaluationKeyProofCommonInput,
-    type EvaluationKeyShareComponentMaterialChunk,
-    type EvaluationKeyShareComponentMaterialChunkStream,
+    type EvaluationKeyShareComponentMaterialChunkSource,
+    type EvaluationKeyShareComponentMaterialWriter,
     type EvaluationKeyShareEmbeddedKeySwitchComponentMaterial,
     type EvaluationKeyShareKeySwitchComponentMaterial,
     type EvaluationKeyShareMaterial,
@@ -26,7 +26,9 @@ export {
     type GaloisKeyShareRootReference,
     type KeySwitchComponentVectorEntry,
     type PublicEvaluationKeyMaterialReference,
+    type PublicEvaluationKeyMaterialChunkSource,
     type PublicEvaluationKeyMaterialTransportInput,
+    type PublicEvaluationKeyMaterialWriter,
     type PublicEvaluationKeySet,
     type PublicEvaluationKeySetInput,
     type RelinearizationKeyRootReference,
@@ -42,7 +44,7 @@ export {
     type TransportedEvaluationKeyShareProofMaterialSet,
     type TransportedPublicEvaluationKeyMaterial,
     type TransportedPublicEvaluationKeyMaterialSet,
-    type TrusteeEvaluationKeyEmbeddedProofBytes,
+    type TrusteeEvaluationKeyCanonicalProofReference,
     type TrusteeEvaluationKeyProofGenerationOutput,
     type TrusteeEvaluationKeyProofGenerator,
     type TrusteeEvaluationKeyProofRecord,
@@ -50,7 +52,6 @@ export {
     type TrusteeEvaluationKeyProofsInput,
     type TrusteeEvaluationKeyStatementContext,
     type TrusteeEvaluationKeyStatementKey,
-    type TrusteeEvaluationKeyTransportedProofBytes,
     type TrusteeEvaluationKeyWitnessInput,
 } from './evaluation-key-proof-records/constants-and-types.js';
 export {
@@ -63,7 +64,6 @@ export {
 } from './evaluation-key-proof-records/share-records.js';
 export {
     createTrusteeEvaluationKeyProofs,
-    transportTrusteeEvaluationKeyProofSet,
     type TrusteeEvaluationKeyProofMaterialTransport,
 } from './evaluation-key-proof-records/trustee-proofs.js';
 export { createBinaryChunkedEvaluationKeyShareMaterialTransport } from './evaluation-key-proof-records/component-material-transport.js';

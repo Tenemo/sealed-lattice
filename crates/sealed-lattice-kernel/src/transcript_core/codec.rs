@@ -5,6 +5,7 @@ pub fn encode_hex(bytes: &[u8]) -> String {
     to_hex(bytes)
 }
 
+#[cfg(test)]
 pub fn encode_standard_base64(bytes: &[u8]) -> String {
     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
@@ -33,6 +34,7 @@ pub fn encode_standard_base64(bytes: &[u8]) -> String {
 // Canonical standard-base64 decoder: fixed four-byte chunks, padding only in
 // the final chunk, and zeroed padding bits, so exactly one encoding maps to
 // each byte string and transported proof bytes stay canonically bound.
+#[cfg(test)]
 pub fn decode_standard_base64(encoded: &str, field_name: &str) -> CanonicalResult<Vec<u8>> {
     let encoded_bytes = encoded.as_bytes();
     if !encoded_bytes.len().is_multiple_of(4) {
@@ -100,6 +102,7 @@ pub fn decode_standard_base64(encoded: &str, field_name: &str) -> CanonicalResul
     Ok(decoded)
 }
 
+#[cfg(test)]
 fn decode_standard_base64_digit(byte: u8, field_name: &str) -> CanonicalResult<u8> {
     match byte {
         b'A'..=b'Z' => Ok(byte - b'A'),

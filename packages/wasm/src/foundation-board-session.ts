@@ -7,7 +7,7 @@ const foundationBoardConfigurationVersion = 1;
 const foundationBoardCapabilityByteLength = 32;
 const foundationBoardCandidateHashByteLength = 64;
 const publicSetupSeedAnchorMask = 1 << 0;
-const verifiedSetupSourceAnchorMask = 1 << 1;
+const setupSourceAnchorMask = 1 << 1;
 const fixedConfigurationByteLength =
     2 + 3 * foundationBoardCandidateHashByteLength + 4 * 4 + 2 + 4;
 const wasm32WordByteLength = 4;
@@ -33,8 +33,8 @@ export type FoundationBoardSessionInput = Readonly<{
     ceremonyContextHash: Uint8Array;
     limits: FoundationBoardIngestionLimits;
     publicSetupSeedObjectHash?: Uint8Array;
+    setupSourceObjectHash?: Uint8Array;
     suiteIdentifier: Uint8Array;
-    verifiedSetupSourceObjectHash?: Uint8Array;
 }>;
 
 export type FoundationBoardSessionState = 'active' | 'cancelled';
@@ -213,12 +213,12 @@ const encodeConfiguration = (
                   input.publicSetupSeedObjectHash,
                   'public setup seed object hash',
               );
-    const verifiedSetupSourceObjectHash =
-        input.verifiedSetupSourceObjectHash === undefined
+    const setupSourceObjectHash =
+        input.setupSourceObjectHash === undefined
             ? undefined
             : requireHash(
-                  input.verifiedSetupSourceObjectHash,
-                  'verified setup source object hash',
+                  input.setupSourceObjectHash,
+                  'setup source object hash',
               );
     if (
         !isUint8Array(input.canonicalRosterBytes) ||
@@ -247,7 +247,7 @@ const encodeConfiguration = (
     );
     const anchorByteLength =
         (publicSetupSeedObjectHash === undefined ? 0 : 64) +
-        (verifiedSetupSourceObjectHash === undefined ? 0 : 64);
+        (setupSourceObjectHash === undefined ? 0 : 64);
     const configurationByteLength =
         fixedConfigurationByteLength +
         anchorByteLength +
@@ -284,8 +284,8 @@ const encodeConfiguration = (
     if (publicSetupSeedObjectHash !== undefined) {
         anchorMask |= publicSetupSeedAnchorMask;
     }
-    if (verifiedSetupSourceObjectHash !== undefined) {
-        anchorMask |= verifiedSetupSourceAnchorMask;
+    if (setupSourceObjectHash !== undefined) {
+        anchorMask |= setupSourceAnchorMask;
     }
     view.setUint16(offset, anchorMask, true);
     offset += 2;
@@ -293,9 +293,9 @@ const encodeConfiguration = (
         configuration.set(publicSetupSeedObjectHash, offset);
         offset += publicSetupSeedObjectHash.byteLength;
     }
-    if (verifiedSetupSourceObjectHash !== undefined) {
-        configuration.set(verifiedSetupSourceObjectHash, offset);
-        offset += verifiedSetupSourceObjectHash.byteLength;
+    if (setupSourceObjectHash !== undefined) {
+        configuration.set(setupSourceObjectHash, offset);
+        offset += setupSourceObjectHash.byteLength;
     }
     view.setUint32(offset, input.canonicalRosterBytes.byteLength, true);
     offset += wasm32WordByteLength;

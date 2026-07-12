@@ -213,9 +213,6 @@ const verifyRosterManifestTranscriptUnchecked = (
             pollSpec: input.pollSpec,
             rosterHash,
             rosterSize: participantIdentities.length,
-            dynamicRosterParametersCertificateHash:
-                input.frozenRosterParameters.thresholdParameters
-                    .dynamicRosterParametersCertificateHash ?? undefined,
         });
         if (
             expectedFrozenRosterParameters.thresholdParametersHash !==

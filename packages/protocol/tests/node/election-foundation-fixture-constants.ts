@@ -110,15 +110,6 @@ export const defaultThresholdParametersHash = deriveCanonicalObjectHash({
     objectType: 'ThresholdParametersHash',
     parameters: 'default-target-finality-threshold-parameters',
 });
-export const dynamicRosterParametersCertificateHash = 'a'.repeat(128);
-export const targetBoundShareSelectionParameters = {
-    certificateHash: 'target-bound-certificate-hash',
-    targetBasisHash: 'target-basis-hash',
-    decryptionShareQuorum: 9,
-    minimumSharesForInterpolation: 7,
-    minimumArrivalsForRobustDecode: 9,
-    invalidShareFilteringMode: 'ProofVerifiedSharesOnly',
-} as const;
 export const witnessPublicKeyHashes = Object.fromEntries(
     witnessIdentities.map((witnessIdentity) => [
         witnessIdentity,

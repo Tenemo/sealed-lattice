@@ -3,10 +3,12 @@ import { describe, expect, it } from 'vitest';
 
 import {
     assembleVssPublicAggregateThresholdCommitmentSet,
+    appendVssAggregateThresholdProofMaterials,
     createLocalTrusteeVssPublicAggregateThresholdCommitmentBundle,
     createVssPublicCoefficientCommitmentSet,
     createVssPublicRecipientShareCommitmentSet,
     type LocalTrusteeVssPublicAggregateThresholdCommitmentBundle,
+    type VssAggregateThresholdProofComputer,
     type VssCommittedMaterialCommitmentComputer,
     type VssPublicSourceTrusteeOpeningState,
 } from '#packages/protocol/src/setup/vss-commitments';
@@ -91,6 +93,28 @@ const materialSeed = (coordinate: Record<string, unknown>): string =>
         ...coordinate,
     });
 
+const generateAggregateThresholdProof: VssAggregateThresholdProofComputer = (
+    input,
+) => {
+    const proofBytesHash = fixtureHash(
+        `aggregate-proof-${input.context.shareLinkageStatementRoot}`,
+    );
+    const proofMaterialRoot = deriveCanonicalObjectHash({
+        objectType: 'SetupProofMaterialReference',
+        proofFamily: 'vss-share-linkage',
+        proofBytesHash,
+    });
+
+    return Promise.resolve({
+        proofBytesEncoding: 'binary-chunked-proof-bytes',
+        proofBytesHash,
+        proofMaterialRoot,
+        canonicalMaterial: {
+            descriptorBytes: Uint8Array.of(1),
+        },
+    });
+};
+
 const littleEndianCoefficients = (hex: string): number[] => {
     const bytes = Uint8Array.from(
         hex.match(/.{2}/g)?.map((byte) => Number.parseInt(byte, 16)) ?? [],
@@ -105,7 +129,7 @@ const littleEndianCoefficients = (hex: string): number[] => {
 };
 
 describe('VSS aggregate threshold commitment handoff', () => {
-    it('keeps opening credentials private and uses the accepted roster identities', () => {
+    it('keeps opening credentials private and uses the accepted roster identities', async () => {
         aggregateCommitmentContexts.length = 0;
         const coefficientBundle = createVssPublicCoefficientCommitmentSet({
             setupContext,
@@ -136,7 +160,7 @@ describe('VSS aggregate threshold commitment handoff', () => {
                     credential.recipientRosterPosition ===
                     localTrusteeRosterPosition,
             ),
-        ): LocalTrusteeVssPublicAggregateThresholdCommitmentBundle =>
+        ): Promise<LocalTrusteeVssPublicAggregateThresholdCommitmentBundle> =>
             createLocalTrusteeVssPublicAggregateThresholdCommitmentBundle({
                 setupContext,
                 publicMatrixSeedHash,
@@ -166,13 +190,11 @@ describe('VSS aggregate threshold commitment handoff', () => {
                         purpose: 'proof-nonce',
                     }),
                 }),
-                generateVssShareLinkageProof: () => ({
-                    proofBytesHex: '00',
-                }),
+                generateVssShareLinkageProof: generateAggregateThresholdProof,
             });
         const localAggregateBundles = [
-            createLocalAggregateBundle(0),
-            createLocalAggregateBundle(1),
+            await createLocalAggregateBundle(0),
+            await createLocalAggregateBundle(1),
         ];
         const aggregateThresholdCommitmentSet =
             assembleVssPublicAggregateThresholdCommitmentSet({
@@ -241,12 +263,55 @@ describe('VSS aggregate threshold commitment handoff', () => {
                     aggregateThresholdCommitmentSet.recipientRecords,
             }),
         );
+        expect(
+            aggregateThresholdCommitmentSet.aggregateThresholdProofs.every(
+                (proof) =>
+                    proof.proofBytesEncoding === 'binary-chunked-proof-bytes',
+            ),
+        ).toBe(true);
+        expect(
+            localAggregateBundles.flatMap(
+                (bundle) => bundle.aggregateThresholdProofMaterials,
+            ),
+        ).toHaveLength(2);
+        const aggregateProofMaterials = localAggregateBundles.flatMap(
+            (bundle) => bundle.aggregateThresholdProofMaterials,
+        );
+        const transportedProofMaterialSet =
+            appendVssAggregateThresholdProofMaterials(
+                {
+                    objectType:
+                        'SetupTransportedVssShareLinkageProofMaterialSet',
+                    proofFamily: 'vss-share-linkage',
+                    proofMaterials: [],
+                },
+                aggregateProofMaterials,
+            );
+        expect(
+            transportedProofMaterialSet.proofMaterials.map((material) => ({
+                proofMaterialRoot: material.proofMaterialRoot,
+                hasDescriptor: material.descriptorBytes instanceof Uint8Array,
+            })),
+        ).toEqual(
+            aggregateProofMaterials.map((material) => ({
+                proofMaterialRoot: material.proofMaterialRoot,
+                hasDescriptor: true,
+            })),
+        );
         expect(() =>
+            appendVssAggregateThresholdProofMaterials(
+                transportedProofMaterialSet,
+                aggregateProofMaterials,
+            ),
+        ).toThrow(
+            'Aggregate threshold proof material must be a unique VSS share-linkage transport entry.',
+        );
+        await expect(
             createLocalAggregateBundle(
                 0,
                 recipientBundle.recipientShareCredentials,
             ),
-        ).toThrow(
+        ).rejects.toThrow(
             'Local aggregate threshold commitment accepts credentials for exactly one recipient.',
         );
         expect(aggregateCommitmentContexts).toEqual([

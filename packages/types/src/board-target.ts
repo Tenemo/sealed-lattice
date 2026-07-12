@@ -217,24 +217,6 @@ export type TargetFinalityVerification =
         readonly equivocatingWitnessIdentities: readonly string[];
     };
 
-/** Minimal checkpoint values carried forward after target finality is accepted. */
-export type AcceptedTargetFinalityCheckpoint = {
-    readonly targetFinalityRecordHash: ProtocolHash;
-    readonly targetProposalHash: ProtocolHash;
-    readonly targetFinalityCheckpointHash: ProtocolHash;
-    readonly finalizedBoardHeadHash: ProtocolHash;
-    readonly evaluatorReplayRecordHash: ProtocolHash;
-    readonly thresholdParametersHash: ProtocolHash;
-    readonly evaluatorReplayContextHash: ProtocolHash;
-    readonly encryptedBallotAggregateHash: ProtocolHash;
-    readonly targetCiphertextHash: ProtocolHash;
-    readonly targetLayoutHash: ProtocolHash;
-    readonly bgvParametersHash: ProtocolHash;
-    readonly targetFinalityScope: string;
-    readonly witnessPolicyHash: ProtocolHash;
-    readonly targetFinalityPolicyHash: ProtocolHash;
-};
-
 export type EvaluatorReplayRecord = {
     readonly objectType: 'EvaluatorReplayRecord';
     readonly evaluatorReplayRecordHash: ProtocolHash;
@@ -271,9 +253,7 @@ export type TargetAcceptedRecord = {
     readonly targetLayoutHash: ProtocolHash;
     readonly targetDecryptionParametersHash: ProtocolHash;
     readonly targetBasisHash: ProtocolHash;
-    readonly acceptanceMode: 'evaluator-replay';
     readonly boardSequence: number;
     readonly boardPosition: number;
     readonly organizerIdentity: string;
-    readonly signature: ProtocolSignatureEnvelope;
 };

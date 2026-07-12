@@ -5,6 +5,15 @@ const VSS_AGGREGATE_THRESHOLD_PROOF_FAMILY: &str = "vss-share-linkage";
 pub(in super::super) const VSS_AGGREGATE_THRESHOLD_PROOF_CHECKPOINT_DIRECTORY: &str =
     "vss-aggregate-threshold-proof-material";
 
+struct VssAggregateThresholdProofMaterialReference {
+    proof_bytes_hash: String,
+    proof_material_root: String,
+}
+
+static VSS_AGGREGATE_THRESHOLD_PROOF_CHECKPOINT_CACHE: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::BTreeMap<String, Vec<u8>>>,
+> = std::sync::OnceLock::new();
+
 // The proven threshold-share aggregate binding for every recipient and target
 // limb: one share-linkage proof with a unit evaluation point per aggregate
 // record, showing the committed threshold share T_{j,l} is the modular sum of
@@ -41,6 +50,67 @@ pub(in super::super) fn vss_aggregate_threshold_proofs(
             )
         })
         .collect()
+}
+
+pub(super) fn append_vss_aggregate_threshold_proof_material_transport(
+    package: &mut serde_json::Value,
+) {
+    let aggregate_proofs =
+        package["vssPublicAggregateThresholdCommitmentSet"]["aggregateThresholdProofs"]
+            .as_array()
+            .expect("VSS aggregate threshold proof records");
+    let aggregate_materials = aggregate_proofs
+        .iter()
+        .map(|proof_record| {
+            serde_json::json!({
+                "objectType": "SetupTransportedVssShareLinkageProofMaterial",
+                "proofFamily": VSS_SHARE_LINKAGE_PROOF_FAMILY,
+                "proofMaterialRoot": proof_record["proofMaterialRoot"],
+            })
+        })
+        .collect::<Vec<_>>();
+
+    let package_object = package
+        .as_object_mut()
+        .expect("collective setup package object");
+    let transported_material_set = package_object
+        .entry("transportedVssShareLinkageProofMaterial")
+        .or_insert_with(|| {
+            serde_json::json!({
+                "objectType": "SetupTransportedVssShareLinkageProofMaterialSet",
+                "proofFamily": VSS_SHARE_LINKAGE_PROOF_FAMILY,
+                "proofMaterials": [],
+            })
+        });
+    assert_eq!(
+        transported_material_set["objectType"], "SetupTransportedVssShareLinkageProofMaterialSet",
+        "VSS share-linkage transport set object type",
+    );
+    assert_eq!(
+        transported_material_set["proofFamily"], VSS_SHARE_LINKAGE_PROOF_FAMILY,
+        "VSS share-linkage transport set proof family",
+    );
+    let transported_materials = transported_material_set["proofMaterials"]
+        .as_array_mut()
+        .expect("VSS share-linkage transported proof materials");
+    let mut retained_material_roots = transported_materials
+        .iter()
+        .map(|material| {
+            material["proofMaterialRoot"]
+                .as_str()
+                .expect("VSS share-linkage transported proof material root")
+                .to_string()
+        })
+        .collect::<std::collections::BTreeSet<_>>();
+    for aggregate_material in aggregate_materials {
+        let proof_material_root = aggregate_material["proofMaterialRoot"]
+            .as_str()
+            .expect("VSS aggregate threshold proof material root")
+            .to_string();
+        if retained_material_roots.insert(proof_material_root) {
+            transported_materials.push(aggregate_material);
+        }
+    }
 }
 
 fn vss_aggregate_threshold_proof_record(
@@ -129,7 +199,7 @@ fn vss_aggregate_threshold_proof_record(
         &source_share_records,
         aggregate_record,
     );
-    let proof_bytes_hex = vss_aggregate_threshold_proof_bytes_hex(
+    let proof_material = vss_aggregate_threshold_proof_material_reference(
         package,
         &vss_aggregate,
         &summand_messages,
@@ -138,8 +208,6 @@ fn vss_aggregate_threshold_proof_record(
         recipient_roster_position,
         rns_limb_index,
     );
-    let proof_bytes = crate::transcript_core::decode_hex(&proof_bytes_hex)
-        .expect("VSS aggregate threshold proof bytes");
 
     serde_json::json!({
         "objectType": "VssAggregateThresholdProofRecord",
@@ -147,7 +215,9 @@ fn vss_aggregate_threshold_proof_record(
         "recipientRosterPosition": recipient_roster_position,
         "rnsLimbIndex": rns_limb_index,
         "vssShareLinkage": vss_aggregate,
-        "proofBytesBase64": crate::transcript_core::encode_standard_base64(&proof_bytes),
+        "proofBytesEncoding": SETUP_PROOF_MATERIAL_ENCODING,
+        "proofBytesHash": proof_material.proof_bytes_hash,
+        "proofMaterialRoot": proof_material.proof_material_root,
     })
 }
 
@@ -206,7 +276,7 @@ fn vss_aggregate_threshold_statement_object(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn vss_aggregate_threshold_proof_bytes_hex(
+fn vss_aggregate_threshold_proof_material_reference(
     package: &serde_json::Value,
     vss_aggregate: &serde_json::Value,
     summand_messages: &[Vec<i64>],
@@ -214,7 +284,7 @@ fn vss_aggregate_threshold_proof_bytes_hex(
     wrap_witnesses: &[i64],
     recipient_roster_position: u64,
     rns_limb_index: usize,
-) -> String {
+) -> VssAggregateThresholdProofMaterialReference {
     let request = vss_aggregate_threshold_proof_generation_request(
         package,
         vss_aggregate,
@@ -232,22 +302,111 @@ fn vss_aggregate_threshold_proof_bytes_hex(
         "vssShareLinkage": vss_aggregate,
     }))
     .expect("VSS aggregate threshold proof checkpoint key");
-    let proof_bytes = checkpointed_proof_bytes(
-        VSS_AGGREGATE_THRESHOLD_PROOF_CHECKPOINT_DIRECTORY,
-        &checkpoint_key,
-        || {
-            let generated = generate_vss_share_linkage_proof_from_request(&request)
-                .expect("VSS aggregate threshold proof");
-            crate::transcript_core::decode_hex(
-                generated["proofBytesHex"]
-                    .as_str()
-                    .expect("VSS aggregate threshold proof bytes hex"),
-            )
-            .expect("VSS aggregate threshold proof bytes")
-        },
+    let proof_bytes = checkpointed_vss_aggregate_threshold_proof_bytes(&checkpoint_key, || {
+        generated_vss_aggregate_threshold_proof_bytes(&request)
+    });
+    let proof_bytes_hash = hash512_hex(VSS_SHARE_LINKAGE_PROOF_BYTES_HASH_DOMAIN, &[&proof_bytes]);
+    let proof_material_root = crate::bgv::setup::setup_proof::setup_proof_material_reference_root(
+        VSS_SHARE_LINKAGE_PROOF_FAMILY,
+        &proof_bytes_hash,
+    )
+    .expect("VSS aggregate threshold proof material root");
+    retain_vss_aggregate_threshold_proof_material(
+        &proof_material_root,
+        &proof_bytes_hash,
+        proof_bytes,
     );
 
-    to_hex(&proof_bytes)
+    VssAggregateThresholdProofMaterialReference {
+        proof_bytes_hash,
+        proof_material_root,
+    }
+}
+
+fn checkpointed_vss_aggregate_threshold_proof_bytes(
+    checkpoint_key: &str,
+    generate_proof_bytes: impl FnOnce() -> Vec<u8>,
+) -> Vec<u8> {
+    let proof_cache = VSS_AGGREGATE_THRESHOLD_PROOF_CHECKPOINT_CACHE
+        .get_or_init(|| std::sync::Mutex::new(std::collections::BTreeMap::new()));
+    if let Some(proof_bytes) = proof_cache
+        .lock()
+        .expect("VSS aggregate threshold proof cache")
+        .get(checkpoint_key)
+        .cloned()
+    {
+        return proof_bytes;
+    }
+
+    let proof_bytes = checkpointed_proof_bytes(
+        VSS_AGGREGATE_THRESHOLD_PROOF_CHECKPOINT_DIRECTORY,
+        checkpoint_key,
+        generate_proof_bytes,
+    );
+    proof_cache
+        .lock()
+        .expect("VSS aggregate threshold proof cache")
+        .insert(checkpoint_key.to_string(), proof_bytes.clone());
+    proof_bytes
+}
+
+fn generated_vss_aggregate_threshold_proof_bytes(request: &serde_json::Value) -> Vec<u8> {
+    let generated = generate_vss_share_linkage_proof_from_request(request)
+        .expect("VSS aggregate threshold proof");
+    let proof_bytes_hash = generated["proofBytesHash"]
+        .as_str()
+        .expect("VSS aggregate threshold proof bytes hash");
+    let proof_material_root = generated["proofMaterialRoot"]
+        .as_str()
+        .expect("VSS aggregate threshold proof material root");
+    let proof_material = crate::bgv::setup::verified_canonical_setup_proof_material_bytes(
+        VSS_SHARE_LINKAGE_PROOF_FAMILY,
+        proof_material_root,
+    )
+    .expect("VSS aggregate threshold generated proof material lookup")
+    .expect("VSS aggregate threshold generated proof material");
+    assert_eq!(
+        proof_material
+            .hash512_hex(VSS_SHARE_LINKAGE_PROOF_BYTES_HASH_DOMAIN)
+            .expect("VSS aggregate threshold streamed proof bytes hash"),
+        proof_bytes_hash,
+        "generated VSS aggregate threshold proof metadata must bind its retained bytes",
+    );
+
+    proof_material
+        .chunks()
+        .flat_map(|chunk| chunk.iter().copied())
+        .collect()
+}
+
+fn retain_vss_aggregate_threshold_proof_material(
+    proof_material_root: &str,
+    proof_bytes_hash: &str,
+    proof_bytes: Vec<u8>,
+) {
+    if let Some(existing_material) =
+        crate::bgv::setup::verified_canonical_setup_proof_material_bytes(
+            VSS_SHARE_LINKAGE_PROOF_FAMILY,
+            proof_material_root,
+        )
+        .expect("VSS aggregate threshold proof material lookup")
+    {
+        assert_eq!(
+            existing_material
+                .hash512_hex(VSS_SHARE_LINKAGE_PROOF_BYTES_HASH_DOMAIN)
+                .expect("existing VSS aggregate threshold proof bytes hash"),
+            proof_bytes_hash,
+            "retained VSS aggregate threshold proof material must match its reference",
+        );
+        return;
+    }
+
+    crate::bgv::setup::retain_generated_canonical_proof_material(
+        VSS_SHARE_LINKAGE_PROOF_FAMILY,
+        proof_material_root.to_string(),
+        proof_bytes,
+    )
+    .expect("retain VSS aggregate threshold proof material");
 }
 
 #[allow(clippy::too_many_arguments)]

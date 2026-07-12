@@ -1,17 +1,14 @@
 import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 
-import { transportedPublicKeyShareMaterialReader } from './binary-material-transport.js';
+import { aggregateTransportedPublicKeyShareMaterial } from './binary-material-transport.js';
 import {
-    publicKeyShareMaterialEncoding,
     publicKeyShareProofFamily,
     type CollectivePublicKey,
     type CollectivePublicKeyCoefficientVectorMaterial,
     type CollectivePublicKeyInput,
     type CollectivePublicKeySourceBindingInput,
     type CollectivePublicKeySourceShareMaterialRoot,
-    type PublicKeyShareCoefficientVectorMaterial,
     type PublicKeyShareMaterialRecord,
-    type PublicKeyShareMaterialRootReference,
     type TransportedCollectivePublicKeyInput,
 } from './constants-and-types.js';
 import {
@@ -140,13 +137,10 @@ const createCollectivePublicKeyFromAggregateCoefficients = (
     } satisfies CollectivePublicKey;
 };
 
-export const createCollectivePublicKey = (
-    input: CollectivePublicKeyInput,
+const createCollectivePublicKeyFromMaterialRecords = (
+    input: CollectivePublicKeySourceBindingInput,
+    materialRecords: readonly PublicKeyShareMaterialRecord[],
 ): CollectivePublicKey => {
-    assertCollectivePublicKeySourceBindings(input);
-    const materialRecords = sortedByRosterPosition(
-        input.publicKeyShareMaterial.shareMaterialRecords,
-    );
     if (materialRecords.length !== input.participantCount) {
         throw new Error(
             'publicKeyShareMaterial must contain one material record per participant.',
@@ -228,159 +222,35 @@ export const createCollectivePublicKey = (
     });
 };
 
-export const createCollectivePublicKeyFromTransportedPublicKeyShareMaterial = (
-    input: TransportedCollectivePublicKeyInput,
+export const createCollectivePublicKey = (
+    input: CollectivePublicKeyInput,
 ): CollectivePublicKey => {
     assertCollectivePublicKeySourceBindings(input);
-    const { reader, shareRecords } = transportedPublicKeyShareMaterialReader({
-        setupContext: input.setupContext,
-        publicKeyShares: input.publicKeyShares,
-        materialSet: input.publicKeyShareMaterial,
-        transportedPublicKeyShareMaterial:
-            input.transportedPublicKeyShareMaterial,
-    });
-    const aggregateCoefficientsByLimb = input.qSharePrimes.map(() =>
-        Array.from({ length: input.ringDegree }, () => 0),
+
+    return createCollectivePublicKeyFromMaterialRecords(
+        input,
+        sortedByRosterPosition(
+            input.publicKeyShareMaterial.shareMaterialRecords,
+        ),
     );
-    const materialRootReferences: PublicKeyShareMaterialRootReference[] = [];
-    const sourceShareMaterialRoots: CollectivePublicKeySourceShareMaterialRoot[] =
-        [];
-    for (
-        let expectedRosterPosition = 0;
-        expectedRosterPosition < input.publicKeyShareMaterial.participantCount;
-        expectedRosterPosition += 1
-    ) {
-        if (
-            reader.readVaruint('trusteeRosterPosition') !==
-            expectedRosterPosition
-        ) {
-            throw new Error(
-                'transported public-key share material trustee order is not canonical.',
-            );
-        }
-        const shareRecord = shareRecords.get(expectedRosterPosition);
-        if (shareRecord === undefined) {
-            throw new Error(
-                'transported public-key share material must reference an accepted share record.',
-            );
-        }
-        const shareCoefficientVectorsByLimb =
-            shareRecord.shareCoefficientVectorHash512ByLimb.map(
-                (shareCoefficientHash, rnsLimbIndex) => {
-                    if (reader.readVaruint('rnsLimbIndex') !== rnsLimbIndex) {
-                        throw new Error(
-                            'transported public-key share material RNS limb order is not canonical.',
-                        );
-                    }
-                    const rnsPrime = reader.readU64('rnsPrime');
-                    const aggregateCoefficients =
-                        aggregateCoefficientsByLimb[rnsLimbIndex];
-                    if (
-                        aggregateCoefficients === undefined ||
-                        shareCoefficientHash.rnsLimbIndex !== rnsLimbIndex ||
-                        shareCoefficientHash.rnsPrime !== rnsPrime ||
-                        shareCoefficientHash.component !== 'b_i'
-                    ) {
-                        throw new Error(
-                            'transported public-key share material limb metadata must match publicKeyShares.',
-                        );
-                    }
-                    const coefficients = Array.from(
-                        { length: input.publicKeyShareMaterial.ringDegree },
-                        () => {
-                            const coefficient = reader.readU64(
-                                'public-key share coefficient',
-                            );
-                            if (coefficient >= rnsPrime) {
-                                throw new Error(
-                                    'transported public-key share coefficient is not a canonical residue.',
-                                );
-                            }
-
-                            return coefficient;
-                        },
-                    );
-                    const coefficientVectorHash =
-                        coefficientVectorHash512(coefficients);
-                    if (
-                        shareCoefficientHash.coefficientVectorHash512 !==
-                        coefficientVectorHash
-                    ) {
-                        throw new Error(
-                            'transported public-key share coefficient hash must match publicKeyShares.',
-                        );
-                    }
-                    coefficients.forEach((coefficient, coefficientIndex) => {
-                        aggregateCoefficients[coefficientIndex] =
-                            (aggregateCoefficients[coefficientIndex] +
-                                coefficient) %
-                            rnsPrime;
-                    });
-
-                    return {
-                        rnsLimbIndex,
-                        rnsPrime,
-                        component: 'b_i',
-                        coefficientByteLength:
-                            input.publicKeyShareMaterial.ringDegree * 8,
-                        coefficientVectorHash512: coefficientVectorHash,
-                        coefficientsLeHex:
-                            coefficientVectorToLittleEndianHex(coefficients),
-                    } as const satisfies PublicKeyShareCoefficientVectorMaterial;
-                },
-            );
-        const materialRecordWithoutRoot = {
-            objectType: 'PublicKeyShareMaterial',
-            proofFamily: publicKeyShareProofFamily,
-            materialEncoding: publicKeyShareMaterialEncoding,
-            ...contextFields(input.setupContext),
-            trusteeIdentity: shareRecord.trusteeIdentity,
-            trusteeRosterPosition: shareRecord.trusteeRosterPosition,
-            rnsLimbCount: input.publicKeyShareMaterial.rnsLimbCount,
-            ringDegree: input.publicKeyShareMaterial.ringDegree,
-            publicMatrixSeedHash:
-                input.publicKeyShareMaterial.publicMatrixSeedHash,
-            publicKeyCrpRoot: input.publicKeyShareMaterial.publicKeyCrpRoot,
-            publicAPolynomialRoot:
-                input.publicKeyShareMaterial.publicAPolynomialRoot,
-            publicKeyShareRoot: shareRecord.publicKeyShareRoot,
-            shareCoefficientVectorsByLimb,
-        } as const satisfies Omit<
-            PublicKeyShareMaterialRecord,
-            'publicKeyShareMaterialRoot'
-        >;
-        const publicKeyShareMaterialRoot = deriveCanonicalObjectHash(
-            materialRecordWithoutRoot,
-        );
-        materialRootReferences.push({
-            trusteeIdentity: shareRecord.trusteeIdentity,
-            trusteeRosterPosition: shareRecord.trusteeRosterPosition,
-            publicKeyShareMaterialRoot,
-        });
-        sourceShareMaterialRoots.push({
-            trusteeIdentity: shareRecord.trusteeIdentity,
-            trusteeRosterPosition: shareRecord.trusteeRosterPosition,
-            publicKeyShareRoot: shareRecord.publicKeyShareRoot,
-            publicKeyShareMaterialRoot,
-        });
-    }
-    if (!reader.isFinished()) {
-        throw new Error(
-            'transported public-key share material has trailing bytes.',
-        );
-    }
-    if (
-        JSON.stringify(materialRootReferences) !==
-        JSON.stringify(input.publicKeyShareMaterial.publicKeyShareMaterialRoots)
-    ) {
-        throw new Error(
-            'transported public-key share material roots must match material set references.',
-        );
-    }
-
-    return createCollectivePublicKeyFromAggregateCoefficients({
-        ...input,
-        sourceShareMaterialRoots,
-        aggregateCoefficientsByLimb,
-    });
 };
+
+export const createCollectivePublicKeyFromTransportedPublicKeyShareMaterial =
+    async (
+        input: TransportedCollectivePublicKeyInput,
+    ): Promise<CollectivePublicKey> => {
+        assertCollectivePublicKeySourceBindings(input);
+
+        const aggregate = await aggregateTransportedPublicKeyShareMaterial({
+            setupContext: input.setupContext,
+            publicKeyShares: input.publicKeyShares,
+            materialSet: input.publicKeyShareMaterial,
+            publicKeyShareMaterialChunkSource:
+                input.publicKeyShareMaterialChunkSource,
+        });
+
+        return createCollectivePublicKeyFromAggregateCoefficients({
+            ...input,
+            ...aggregate,
+        });
+    };

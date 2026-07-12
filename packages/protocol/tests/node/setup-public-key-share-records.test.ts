@@ -8,7 +8,6 @@ import {
     createPublicKeyShareProofSet,
     createPublicKeyShareSet,
     createPublicKeyShareSuccinctProofSet,
-    materialRecordsFromTransportedPublicKeyShareMaterial,
     publicKeyShareCoefficientVectorHashDomain,
     type PublicKeyShareContributionInput,
     type PublicKeyShareMaterialContributionInput,
@@ -218,9 +217,10 @@ const createSuccinctProofFixture = (): PublicKeyShareSuccinctProofSetInput => {
                 proofBytesHash: fixtureHash(
                     `succinct-proof-bytes-${String(proofRecord.trusteeRosterPosition)}`,
                 ),
-                proofBytesHex: proofRecord.trusteeRosterPosition
-                    .toString(16)
-                    .padStart(2, '0'),
+                proofBytesEncoding: 'binary-chunked-proof-bytes',
+                proofMaterialRoot: fixtureHash(
+                    `succinct-proof-material-${String(proofRecord.trusteeRosterPosition)}`,
+                ),
             }),
         ),
     };
@@ -325,7 +325,7 @@ describe('public-key share statement builders', () => {
         ).toThrow(/same common randomness/u);
     });
 
-    it('builds direct binary-chunked public-key share material without an embedded material set', () => {
+    it('builds repeatable canonical public-key share material sources', async () => {
         const materialContributions = [
             shareMaterialContribution(1),
             shareMaterialContribution(0),
@@ -365,20 +365,31 @@ describe('public-key share statement builders', () => {
         } as const;
         const embeddedMaterialSet =
             createPublicKeyShareMaterialSet(materialSetInput);
+        let totalByteLength = 0;
+        const writePublicKeyShareMaterial = (input: {
+            readonly totalByteLength: number;
+        }): Promise<Uint8Array> => {
+            totalByteLength = input.totalByteLength;
+            return Promise.resolve(new Uint8Array([1, 2, 3, 4]));
+        };
         const transportedEmbeddedMaterial =
-            createBinaryChunkedPublicKeyShareMaterialTransport(
-                embeddedMaterialSet,
-            );
-        const directMaterialBundle =
-            createBinaryChunkedPublicKeyShareMaterialBundle(materialSetInput);
-        const reconstructedMaterialRecords =
-            materialRecordsFromTransportedPublicKeyShareMaterial({
-                setupContext,
-                publicKeyShares,
-                materialSet: directMaterialBundle.materialSet,
-                transportedPublicKeyShareMaterial:
-                    directMaterialBundle.transportedPublicKeyShareMaterial,
+            await createBinaryChunkedPublicKeyShareMaterialTransport({
+                materialSet: embeddedMaterialSet,
+                writePublicKeyShareMaterial,
             });
+        const directMaterialBundle =
+            await createBinaryChunkedPublicKeyShareMaterialBundle({
+                ...materialSetInput,
+                writePublicKeyShareMaterial,
+            });
+        const firstPull =
+            await directMaterialBundle.publicKeyShareMaterialChunkSource.pullChunk(
+                { chunkIndex: 0, expectedByteLength: totalByteLength },
+            );
+        const repeatedPull =
+            await directMaterialBundle.publicKeyShareMaterialChunkSource.pullChunk(
+                { chunkIndex: 0, expectedByteLength: totalByteLength },
+            );
 
         expect(directMaterialBundle.materialSet).toEqual(
             transportedEmbeddedMaterial.materialSet,
@@ -386,13 +397,10 @@ describe('public-key share statement builders', () => {
         expect(directMaterialBundle.transportedPublicKeyShareMaterial).toEqual(
             transportedEmbeddedMaterial.transportedPublicKeyShareMaterial,
         );
-        expect(
-            directMaterialBundle.transportedPublicKeyShareMaterial,
-        ).toMatchObject({
-            chunkCount: 1,
-        });
-        expect(reconstructedMaterialRecords).toEqual(
-            embeddedMaterialSet.shareMaterialRecords,
+        expect(firstPull).toBeInstanceOf(ArrayBuffer);
+        expect(repeatedPull).toBeInstanceOf(ArrayBuffer);
+        expect(new Uint8Array(firstPull ?? new ArrayBuffer(0))).toEqual(
+            new Uint8Array(repeatedPull ?? new ArrayBuffer(0)),
         );
     });
 
@@ -423,6 +431,45 @@ describe('public-key share statement builders', () => {
         expect(publicKeyShareSuccinctProofRoot).toBe(
             deriveCanonicalObjectHash(recordWithoutRoot),
         );
+        expect(firstProofRecord).toMatchObject({
+            proofBytesEncoding: 'binary-chunked-proof-bytes',
+            proofMaterialRoot: input.proofMaterials[0]?.proofMaterialRoot,
+        });
+    });
+
+    it('rejects malformed canonical proof-material references', () => {
+        const input = createSuccinctProofFixture();
+        const [firstProofMaterial, ...remainingProofMaterials] =
+            input.proofMaterials;
+        if (firstProofMaterial === undefined) {
+            throw new Error('Expected the first succinct proof material.');
+        }
+
+        expect(() =>
+            createPublicKeyShareSuccinctProofSet({
+                ...input,
+                proofMaterials: [
+                    {
+                        ...firstProofMaterial,
+                        proofBytesEncoding: 'embedded-proof-bytes',
+                    },
+                    ...remainingProofMaterials,
+                ] as unknown as PublicKeyShareSuccinctProofSetInput['proofMaterials'],
+            }),
+        ).toThrow('proofBytesEncoding must be binary-chunked-proof-bytes');
+
+        expect(() =>
+            createPublicKeyShareSuccinctProofSet({
+                ...input,
+                proofMaterials: [
+                    {
+                        ...firstProofMaterial,
+                        proofMaterialRoot: 'not-a-protocol-hash',
+                    },
+                    ...remainingProofMaterials,
+                ],
+            }),
+        ).toThrow('proofMaterialRoot must be a protocol hash');
     });
 
     it('rejects bridge records that do not cover the accepted public-key trustees', () => {

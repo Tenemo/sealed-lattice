@@ -571,17 +571,17 @@ pub(crate) fn verify_vss_share_linkage_proof_material_set_from_request(
             },
             "ringDegree": ring_degree,
             "vssShareLinkage": vss_share_linkage,
-            "proofBytesHex": to_hex(&proof_bytes[..]),
         });
-        verify_vss_share_linkage_proof_from_request(&proof_request).map_err(|error| {
-            CanonicalError::new(
-                error.code,
-                format!(
-                    "share-linkage proof record {proof_record_index} did not verify: {}",
-                    error.message
-                ),
-            )
-        })?;
+        verify_vss_share_linkage_proof_source_from_request(&proof_request, proof_bytes.as_ref())
+            .map_err(|error| {
+                CanonicalError::new(
+                    error.code,
+                    format!(
+                        "share-linkage proof record {proof_record_index} did not verify: {}",
+                        error.message
+                    ),
+                )
+            })?;
 
         let mut verified_record = proof_record_without_root;
         verified_record["proofRecordRoot"] = json!(expected_record_root);

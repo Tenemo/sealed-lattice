@@ -1,13 +1,18 @@
-use std::{collections::HashMap, sync::{Mutex, OnceLock}};
+use std::{
+    collections::HashMap,
+    sync::{Mutex, OnceLock},
+};
 
 use subtle::ConstantTimeEq;
 use zeroize::Zeroizing;
 
 use super::{
-    CanonicalDecodeLimits, FOUNDATION_PROFILE, Hash512, ParticipantIdentity, PreservedStateIntent,
-    RefusalReason, Roster, StateCapabilityKind, StateOutputVerificationInput,
+    CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH, CanonicalDecodeLimits, FOUNDATION_PROFILE, Hash512,
+    ParticipantIdentity, PreservedStateIntent, RefusalReason, Roster, StateCapabilityKind,
     StateRecoveryVerificationInput, StateReservationVerificationInput, StateVerifier,
     VerifiedStateOutput, VerifiedStateRecovery, VerifiedStateReservation,
+    canonical_stream::VerifiedCanonicalStreamSummary,
+    finish_canonical_stream_verifier_with_summary,
 };
 
 pub(crate) const STATE_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH: usize = 32;
@@ -39,10 +44,7 @@ impl StateVerifierRuntimeSession {
         Ok(())
     }
 
-    fn predecessor_recovery(
-        &self,
-        handle: u32,
-    ) -> RuntimeResult<Option<&VerifiedStateRecovery>> {
+    fn predecessor_recovery(&self, handle: u32) -> RuntimeResult<Option<&VerifiedStateRecovery>> {
         if handle == 0 {
             return Ok(None);
         }
@@ -145,8 +147,7 @@ impl StateVerifierRuntimeRegistry {
         let verified_reservation = {
             let session = self.require_active_session(session_handle, capability)?;
             session.require_object_capacity()?;
-            let predecessor_recovery =
-                session.predecessor_recovery(predecessor_recovery_handle)?;
+            let predecessor_recovery = session.predecessor_recovery(predecessor_recovery_handle)?;
             session
                 .verifier
                 .verify_reservation(StateReservationVerificationInput {
@@ -160,8 +161,7 @@ impl StateVerifierRuntimeRegistry {
                 .into_result()
                 .map_err(refusal_status)?
         };
-        let object_handle =
-            take_nonrepeating_handle(&mut self.next_verified_object_handle)?;
+        let object_handle = take_nonrepeating_handle(&mut self.next_verified_object_handle)?;
         self.require_active_session_mut(session_handle, capability)?
             .verified_objects
             .insert(
@@ -172,6 +172,18 @@ impl StateVerifierRuntimeRegistry {
     }
 
     #[allow(clippy::too_many_arguments)]
+    fn preflight_output(
+        &self,
+        session_handle: u32,
+        capability: &[u8],
+        verified_reservation_handle: u32,
+    ) -> RuntimeResult<()> {
+        let session = self.require_active_session(session_handle, capability)?;
+        session.require_object_capacity()?;
+        session.reservation(verified_reservation_handle)?;
+        Ok(())
+    }
+
     fn verify_output(
         &mut self,
         session_handle: u32,
@@ -179,28 +191,26 @@ impl StateVerifierRuntimeRegistry {
         verified_reservation_handle: u32,
         canonical_output_intent_carrier: &[u8],
         canonical_state_certificate: &[u8],
-        exact_output_bytes: &[u8],
+        verified_stream: VerifiedCanonicalStreamSummary,
     ) -> RuntimeResult<u32> {
         require_verification_input(canonical_output_intent_carrier, false)?;
         require_verification_input(canonical_state_certificate, false)?;
-        require_verification_input(exact_output_bytes, true)?;
         let verified_output = {
             let session = self.require_active_session(session_handle, capability)?;
             session.require_object_capacity()?;
             let reservation = session.reservation(verified_reservation_handle)?;
             session
                 .verifier
-                .verify_output(StateOutputVerificationInput {
-                    verified_reservation: reservation,
+                .verify_output_from_verified_stream(
+                    reservation,
                     canonical_output_intent_carrier,
                     canonical_state_certificate,
-                    exact_output_bytes,
-                })
+                    verified_stream,
+                )
                 .into_result()
                 .map_err(refusal_status)?
         };
-        let object_handle =
-            take_nonrepeating_handle(&mut self.next_verified_object_handle)?;
+        let object_handle = take_nonrepeating_handle(&mut self.next_verified_object_handle)?;
         self.require_active_session_mut(session_handle, capability)?
             .verified_objects
             .insert(
@@ -227,8 +237,7 @@ impl StateVerifierRuntimeRegistry {
         let verified_recovery = {
             let session = self.require_active_session(session_handle, capability)?;
             session.require_object_capacity()?;
-            let predecessor_recovery =
-                session.predecessor_recovery(predecessor_recovery_handle)?;
+            let predecessor_recovery = session.predecessor_recovery(predecessor_recovery_handle)?;
             let preserved_state_intent = session.preserved_intent(preserved_intent_handle)?;
             session
                 .verifier
@@ -243,8 +252,7 @@ impl StateVerifierRuntimeRegistry {
                 .into_result()
                 .map_err(refusal_status)?
         };
-        let object_handle =
-            take_nonrepeating_handle(&mut self.next_verified_object_handle)?;
+        let object_handle = take_nonrepeating_handle(&mut self.next_verified_object_handle)?;
         self.require_active_session_mut(session_handle, capability)?
             .verified_objects
             .insert(
@@ -420,14 +428,22 @@ pub(crate) fn verify_state_reservation(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn verify_state_output(
+pub(crate) fn finish_state_output_verification(
     session_handle: u32,
     capability: &[u8],
+    stream_handle: u32,
+    stream_capability: &[u8; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH],
     verified_reservation_handle: u32,
     canonical_output_intent_carrier: &[u8],
     canonical_state_certificate: &[u8],
-    exact_output_bytes: &[u8],
 ) -> RuntimeResult<u32> {
+    require_verification_input(canonical_output_intent_carrier, false)?;
+    require_verification_input(canonical_state_certificate, false)?;
+    with_runtime_registry(|registry| {
+        registry.preflight_output(session_handle, capability, verified_reservation_handle)
+    })?;
+    let verified_stream =
+        finish_canonical_stream_verifier_with_summary(stream_handle, stream_capability)?;
     with_runtime_registry(|registry| {
         registry.verify_output(
             session_handle,
@@ -435,7 +451,7 @@ pub(crate) fn verify_state_output(
             verified_reservation_handle,
             canonical_output_intent_carrier,
             canonical_state_certificate,
-            exact_output_bytes,
+            verified_stream,
         )
     })
 }
@@ -533,8 +549,7 @@ fn decode_hash(bytes: &[u8]) -> RuntimeResult<Hash512> {
 }
 
 fn decode_capability_kind(code: u32) -> RuntimeResult<StateCapabilityKind> {
-    let code = u16::try_from(code)
-        .map_err(|_| refusal_status(RefusalReason::WrongTypeOrLength))?;
+    let code = u16::try_from(code).map_err(|_| refusal_status(RefusalReason::WrongTypeOrLength))?;
     StateCapabilityKind::from_canonical_code(code)
         .ok_or_else(|| refusal_status(RefusalReason::WrongTypeOrLength))
 }
@@ -579,4 +594,128 @@ fn take_nonrepeating_handle(next_handle: &mut u32) -> RuntimeResult<u32> {
 
 const fn refusal_status(refusal_reason: RefusalReason) -> u32 {
     refusal_reason.canonical_code() as u32
+}
+
+#[cfg(test)]
+mod tests {
+    use fips204::{
+        ml_dsa_65,
+        traits::{KeyGen, SerDes},
+    };
+
+    use super::*;
+    use crate::foundation::{FOUNDATION_PROFILE, RosterEntry};
+
+    fn configuration_bytes() -> Vec<u8> {
+        let roster_entries = (0..FOUNDATION_PROFILE.participant_count)
+            .map(|roster_position| {
+                let mut signing_seed = [0_u8; 32];
+                signing_seed[0] =
+                    u8::try_from(roster_position + 1).expect("test roster position fits u8");
+                signing_seed[31] =
+                    u8::try_from(FOUNDATION_PROFILE.participant_count - roster_position)
+                        .expect("test reverse roster position fits u8");
+                let (verification_key, _) = ml_dsa_65::KG::keygen_from_seed(&signing_seed);
+                let mut mailbox_encapsulation_key = [0_u8; 1_184];
+                mailbox_encapsulation_key[1_152] =
+                    u8::try_from(roster_position + 1).expect("test roster position fits u8");
+                RosterEntry {
+                    roster_position,
+                    signing_verification_key: verification_key.into_bytes(),
+                    mailbox_encapsulation_key,
+                }
+            })
+            .collect();
+        let roster_bytes = Roster::new(roster_entries)
+            .expect("test roster is valid")
+            .encode()
+            .expect("test roster encodes");
+        let mut configuration = Vec::new();
+        configuration.extend_from_slice(&STATE_VERIFIER_CONFIGURATION_VERSION.to_le_bytes());
+        configuration.extend_from_slice(&[0x11; Hash512::BYTE_LENGTH]);
+        configuration.extend_from_slice(&[0x22; Hash512::BYTE_LENGTH]);
+        configuration.extend_from_slice(&[0x33; Hash512::BYTE_LENGTH]);
+        configuration.extend_from_slice(&8_u16.to_le_bytes());
+        configuration.extend_from_slice(
+            &u32::try_from(roster_bytes.len())
+                .expect("test roster length fits u32")
+                .to_le_bytes(),
+        );
+        configuration.extend_from_slice(&roster_bytes);
+        configuration
+    }
+
+    #[test]
+    fn forged_stale_and_overlapping_requests_preserve_the_active_state_session() {
+        let configuration = configuration_bytes();
+        let owner = [0x61; STATE_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH];
+        let mut registry = StateVerifierRuntimeRegistry::default();
+        let handle = registry
+            .begin(&configuration, owner)
+            .expect("state session begins");
+
+        assert_eq!(
+            registry.cancel(handle.wrapping_add(1), &owner),
+            Err(refusal_status(RefusalReason::ConsumedState))
+        );
+        assert!(registry.active_session.is_some());
+        assert_eq!(
+            registry.cancel(
+                handle,
+                &[0x62; STATE_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH],
+            ),
+            Err(refusal_status(RefusalReason::WrongContext))
+        );
+        assert!(registry.active_session.is_some());
+        assert_eq!(
+            registry.begin(
+                &configuration,
+                [0x63; STATE_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH],
+            ),
+            Err(refusal_status(RefusalReason::OutsideSupportedProfile))
+        );
+        assert!(registry.active_session.is_some());
+        assert_eq!(
+            registry.release_verified_object(handle, &owner, 1),
+            Err(refusal_status(RefusalReason::ConsumedState))
+        );
+        assert!(registry.active_session.is_some());
+        assert_eq!(registry.cancel(handle, &owner), Ok(()));
+    }
+
+    #[test]
+    fn session_and_verified_object_handles_never_wrap_or_reuse() {
+        let configuration = configuration_bytes();
+        let owner = [0x71; STATE_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH];
+        let mut registry = StateVerifierRuntimeRegistry {
+            active_session: None,
+            next_session_handle: u32::MAX,
+            next_verified_object_handle: u32::MAX,
+        };
+        let terminal_session = registry
+            .begin(&configuration, owner)
+            .expect("terminal session handle is issued once");
+        assert_eq!(terminal_session, u32::MAX);
+        registry
+            .cancel(terminal_session, &owner)
+            .expect("terminal session cancels");
+        assert_eq!(
+            registry.begin(
+                &configuration,
+                [0x72; STATE_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH],
+            ),
+            Err(refusal_status(RefusalReason::OutsideSupportedProfile))
+        );
+        assert!(registry.active_session.is_none());
+
+        assert_eq!(
+            take_nonrepeating_handle(&mut registry.next_verified_object_handle),
+            Ok(u32::MAX)
+        );
+        assert_eq!(
+            take_nonrepeating_handle(&mut registry.next_verified_object_handle),
+            Err(refusal_status(RefusalReason::OutsideSupportedProfile))
+        );
+        assert_eq!(registry.next_verified_object_handle, 0);
+    }
 }

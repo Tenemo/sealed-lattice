@@ -48,6 +48,16 @@ describe('foundation board session in browser WASM', () => {
                 isValid: false,
                 refusalReason: 'malformedEncoding',
             });
+            const invalidSignatureCarrier = Uint8Array.from(
+                authenticatedSetupIntent.canonicalCarrierBytes,
+            );
+            const signatureByteIndex = invalidSignatureCarrier.length - 1;
+            invalidSignatureCarrier[signatureByteIndex] =
+                (invalidSignatureCarrier[signatureByteIndex] ?? 0) ^ 1;
+            expect(session.ingest(invalidSignatureCarrier)).toEqual({
+                isValid: false,
+                refusalReason: 'invalidSignature',
+            });
             const accepted = session.ingest(
                 authenticatedSetupIntent.canonicalCarrierBytes,
             );

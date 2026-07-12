@@ -17,7 +17,6 @@ pub(super) struct DirectBallotRelationProofSummary {
 }
 
 pub(super) struct DirectBallotBinaryProofTransport {
-    pub(super) proof_bytes: Vec<u8>,
     pub(super) proof_size_bytes: usize,
     pub(super) proof_bytes_hash: String,
     pub(super) chunk_count: usize,

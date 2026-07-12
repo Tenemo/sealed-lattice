@@ -16,6 +16,8 @@ mod setup_helpers;
 mod validation;
 
 pub(crate) use setup::{
-    absorb_bgv_canonical_stream_chunk, begin_bgv_canonical_stream, cancel_bgv_canonical_stream,
-    finish_bgv_canonical_stream,
+    absorb_bgv_canonical_stream_chunk, begin_bgv_canonical_material_reader,
+    begin_bgv_canonical_stream, cancel_bgv_canonical_material_reader, cancel_bgv_canonical_stream,
+    finish_bgv_canonical_material_reader, finish_bgv_canonical_stream,
+    read_bgv_canonical_material_chunk,
 };

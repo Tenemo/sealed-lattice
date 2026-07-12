@@ -13,11 +13,13 @@ import {
     setupPackageHashInput,
 } from './verification-input.js';
 
-export const createSetupPackage = (input: SetupPackageInput): SetupPackage => {
+export const createSetupPackage = async (
+    input: SetupPackageInput,
+): Promise<SetupPackage> => {
     const certificates = resolveSetupCertificateRecords(input);
     const thresholdShareCommitments = resolveThresholdShareCommitments(input);
     validateInput(input, certificates, thresholdShareCommitments);
-    const collectivePublicKey = derivedCollectivePublicKey(input);
+    const collectivePublicKey = await derivedCollectivePublicKey(input);
     const vssCoefficientCommitmentMaterial =
         vssCoefficientCommitmentMaterialReferenceFromCertificate(
             input,

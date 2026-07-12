@@ -146,7 +146,7 @@ fn galois_share_material_manifest(setup_package: &Value) -> CanonicalResult<Vec<
 }
 
 pub(super) fn decode_public_evaluation_key_material_manifest(
-    chunks: &[Vec<u8>],
+    material: &crate::bgv::setup::BgvProofMaterialBytes,
     transport_hashes: &PublicEvaluationKeyMaterialTransportHashes,
 ) -> CanonicalResult<Value> {
     let total_byte_length = usize::try_from(transport_hashes.total_byte_length).map_err(|_| {
@@ -156,7 +156,7 @@ pub(super) fn decode_public_evaluation_key_material_manifest(
         )
     })?;
     let mut material_bytes = Vec::with_capacity(total_byte_length);
-    for chunk in chunks {
+    for chunk in material.chunks() {
         material_bytes.extend_from_slice(chunk);
     }
     if material_bytes.len() < PUBLIC_EVALUATION_KEY_MATERIAL_MAGIC.len()

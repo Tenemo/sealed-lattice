@@ -11,6 +11,7 @@ import {
     createVssPublicCoefficientCommitmentSet,
     createVssPublicRecipientShareCommitmentSet,
     type LocalTrusteeVssPublicAggregateOpeningCredentialHandoff,
+    type VssAggregateThresholdProofComputer,
     type VssCommittedMaterialCommitmentComputer,
 } from '#packages/protocol/src/setup/vss-commitments';
 import {
@@ -26,6 +27,27 @@ const publicMatrixSeedHash = fixtureHash('public-matrix-seed');
 const rnsPrime = 17;
 const ringDegree = 2;
 const aggregateMaterialSeedHex = fixtureHash('aggregate-material-seed');
+
+const generateAggregateThresholdProof: VssAggregateThresholdProofComputer = (
+    input,
+) => {
+    const proofBytesHash = fixtureHash(
+        `aggregate-proof-${input.context.shareLinkageStatementRoot}`,
+    );
+
+    return Promise.resolve({
+        proofBytesEncoding: 'binary-chunked-proof-bytes',
+        proofBytesHash,
+        proofMaterialRoot: deriveCanonicalObjectHash({
+            objectType: 'SetupProofMaterialReference',
+            proofFamily: 'vss-share-linkage',
+            proofBytesHash,
+        }),
+        canonicalMaterial: {
+            descriptorBytes: Uint8Array.of(1),
+        },
+    });
+};
 
 type AggregateThresholdCommitmentSet = ReturnType<
     typeof assembleVssPublicAggregateThresholdCommitmentSet
@@ -87,7 +109,7 @@ const computeVssCommittedMaterialCommitment: VssCommittedMaterialCommitmentCompu
         };
     };
 
-const setupArtifacts = (): SetupArtifacts => {
+const setupArtifacts = async (): Promise<SetupArtifacts> => {
     const sourceTrusteeOpeningStates = [
         {
             sourceTrusteeIdentity: trusteeIdentity,
@@ -134,7 +156,7 @@ const setupArtifacts = (): SetupArtifacts => {
         computeVssCommittedMaterialCommitment,
     });
     const aggregateBundle =
-        createLocalTrusteeVssPublicAggregateThresholdCommitmentBundle({
+        await createLocalTrusteeVssPublicAggregateThresholdCommitmentBundle({
             setupContext,
             publicMatrixSeedHash,
             participantCount: 1,
@@ -153,7 +175,7 @@ const setupArtifacts = (): SetupArtifacts => {
                 seedHex: fixtureHash('aggregate-proof-seed'),
                 nonceHex: fixtureHash('aggregate-proof-nonce'),
             }),
-            generateVssShareLinkageProof: () => ({ proofBytesHex: '00' }),
+            generateVssShareLinkageProof: generateAggregateThresholdProof,
         });
     const aggregateThresholdCommitmentSet =
         assembleVssPublicAggregateThresholdCommitmentSet({
@@ -296,7 +318,7 @@ const targetContext = (
 
 describe('local setup-to-target-share witness lifecycle', () => {
     it('restores the setup-produced aggregate opening only from encrypted local state', async () => {
-        const artifacts = setupArtifacts();
+        const artifacts = await setupArtifacts();
         const encryptedState =
             await createEncryptedLocalTrusteeSetupStateFromVerifiedShares(
                 artifacts.localStateInput,
@@ -339,7 +361,7 @@ describe('local setup-to-target-share witness lifecycle', () => {
     });
 
     it('rejects changed trustee, aggregate message, accepted root, and setup context', async () => {
-        const artifacts = setupArtifacts();
+        const artifacts = await setupArtifacts();
         const handoff = artifacts.aggregateOpeningCredentialHandoff;
         await expect(
             createEncryptedLocalTrusteeSetupStateFromVerifiedShares({

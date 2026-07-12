@@ -21,12 +21,14 @@ export {
     type PublicKeyShareMaterialRootReference,
     type PublicKeyShareMaterialSet,
     type BinaryChunkedPublicKeyShareMaterialSet,
+    type BinaryChunkedPublicKeyShareMaterialBundleInput,
+    type BinaryChunkedPublicKeyShareMaterialTransportInput,
     type SetupTransportedPublicKeyShareMaterial,
+    type PublicKeyShareMaterialChunkSource,
+    type PublicKeyShareMaterialWriter,
     type BinaryChunkedPublicKeyShareMaterialTransport,
     type BinaryChunkedPublicKeyShareMaterialBundle,
     type SetupPackagePublicKeyShareMaterialSet,
-    type PublicKeyShareSuccinctEmbeddedProofBytes,
-    type PublicKeyShareSuccinctTransportedProofBytes,
     type PublicKeyShareSuccinctProofByteMaterial,
     type PublicKeyShareSuccinctProofMaterial,
     type PublicKeyShareSuccinctProofRecord,
@@ -49,7 +51,6 @@ export { createPublicKeyShareMaterialSet } from './public-key-share-records/embe
 export {
     createBinaryChunkedPublicKeyShareMaterialTransport,
     createBinaryChunkedPublicKeyShareMaterialBundle,
-    materialRecordsFromTransportedPublicKeyShareMaterial,
 } from './public-key-share-records/binary-material-transport.js';
 export {
     createCollectivePublicKey,

@@ -39,10 +39,18 @@ fn heavy_accepted_setup_collective_setup_verifier_checks_public_key_share_succin
         .expect("verification response");
 
     assert_eq!(result["isValid"], false);
-    assert_eq!(
-        result["missingObjects"],
-        serde_json::json!(["collectivePublicKey", "collectivePublicKeyRoot"])
-    );
+    let refused_objects = result["refusedObjects"]
+        .as_array()
+        .expect("missing public-key objects must be typed refusals");
+    assert_eq!(refused_objects.len(), 2);
+    assert!(refused_objects.iter().all(|refusal| {
+        refusal["reasonCode"] == "setupObjectMissing"
+            && matches!(
+                refusal["objectPath"].as_str(),
+                Some("setupPackage.collectivePublicKey")
+                    | Some("setupPackage.collectivePublicKeyRoot")
+            )
+    }));
 }
 
 #[test]
@@ -71,8 +79,6 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_missing_dependent_publ
         missing_statement_proofs_result["refusedObjects"][0]["reasonCode"],
         "publicKeyShareProofsMissing"
     );
-    assert!(missing_statement_proofs_result["acceptedSetupHandoff"].is_null());
-
     let mut missing_succinct_proofs_package =
         collective_public_key_bearing_collective_setup_package();
     missing_succinct_proofs_package
@@ -92,7 +98,6 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_missing_dependent_publ
         missing_succinct_proofs_result["refusedObjects"][0]["reasonCode"],
         "publicKeyShareSuccinctProofsMissing"
     );
-    assert!(missing_succinct_proofs_result["acceptedSetupHandoff"].is_null());
 }
 
 #[test]
@@ -140,7 +145,6 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_malformed_public_key_p
             result["refusedObjects"][0]["objectPath"],
             format!("setupPackage.{proof_set_name}.{field_name}")
         );
-        assert!(result["acceptedSetupHandoff"].is_null());
     }
 }
 

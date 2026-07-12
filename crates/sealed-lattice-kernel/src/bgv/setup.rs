@@ -37,6 +37,7 @@ pub(super) const SETUP_TRANSPORT_CHUNK_SIZE_BYTES: u64 = 1_048_576;
 #[cfg(test)]
 mod tests;
 
+pub(in crate::bgv::setup) use accepted_setup::evict_verified_canonical_public_key_share_materials;
 pub(crate) use accepted_setup::{
     accepted_setup_participant_roster_from_package,
     derive_collective_bgv_setup_public_derivations_from_request,
@@ -45,8 +46,11 @@ pub(crate) use accepted_setup::{
     verify_collective_bgv_setup_package_from_request,
 };
 pub(crate) use canonical_stream_transport::{
-    absorb_bgv_canonical_stream_chunk, begin_bgv_canonical_stream, cancel_bgv_canonical_stream,
-    finish_bgv_canonical_stream,
+    absorb_bgv_canonical_stream_chunk, begin_bgv_canonical_material_reader,
+    begin_bgv_canonical_stream, cancel_bgv_canonical_material_reader, cancel_bgv_canonical_stream,
+    evict_verified_canonical_proof_materials, finish_bgv_canonical_material_reader,
+    finish_bgv_canonical_stream, read_bgv_canonical_material_chunk,
+    retain_generated_canonical_proof_material, take_verified_canonical_proof_material_bytes,
 };
 pub(in crate::bgv::setup) use canonical_stream_transport::{
     evict_verified_canonical_setup_proof_materials, verified_canonical_setup_proof_material_bytes,
@@ -68,11 +72,11 @@ pub(crate) use same_secret_bridge::{
     verify_vss_same_secret_bridge_proof_material_set_request,
     verify_vss_same_secret_bridge_statement_set_request,
 };
+pub(crate) use setup_proof::{BgvProofMaterialBytes, ProofByteSource};
 pub(crate) use trustee_evaluation_key_proof::TARGET_DECRYPTION_SHARE_PROOF_FAMILY;
 pub(crate) use trustee_evaluation_key_proof::describe_trustee_evaluation_key_statement_from_request;
 pub(crate) use trustee_evaluation_key_proof::generate_target_decryption_share_proof_bytes_from_request;
-pub(crate) use trustee_evaluation_key_proof::verify_target_decryption_share_proof_bytes_from_request;
-pub(crate) use trustee_evaluation_key_proof::verify_vss_share_linkage_proof_from_request;
+pub(crate) use trustee_evaluation_key_proof::verify_target_decryption_share_proof_source_from_request;
 pub(crate) use trustee_evaluation_key_proof::verify_vss_share_linkage_proof_material_set_from_request;
 pub(crate) use trustee_evaluation_key_proof::{
     generate_same_secret_bridge_proof_from_request, generate_vss_share_linkage_proof_from_request,

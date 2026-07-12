@@ -280,9 +280,9 @@ const validatedTargetCiphertext = (
     return { canonicalBytesHex, ciphertextRoot: validation.ciphertextRoot };
 };
 
-const setupLifecycleArtifacts = (
+const setupLifecycleArtifacts = async (
     kernel: TranscriptCoreKernel,
-): SetupLifecycleArtifacts => {
+): Promise<SetupLifecycleArtifacts> => {
     const setupParameters = kernel.describeCollectiveBgvSetupParameters({
         participantCount,
     });
@@ -361,44 +361,76 @@ const setupLifecycleArtifacts = (
         computeVssCommittedMaterialCommitment:
             vssCommittedMaterialCommitmentComputer,
     });
-    const aggregateBundles = Array.from(
-        { length: participantCount },
-        (_unusedRecipient, recipientRosterPosition) =>
-            createLocalTrusteeVssPublicAggregateThresholdCommitmentBundle({
-                setupContext,
-                publicMatrixSeedHash,
-                participantCount,
-                qSharePrimes: [firstRnsPrime],
-                ringDegree,
-                coefficientCommitmentSet:
-                    coefficientBundle.coefficientCommitmentSet,
-                recipientShareCommitmentSet:
-                    recipientBundle.recipientShareCommitmentSet,
-                localTrusteeRosterPosition: recipientRosterPosition,
-                localRecipientShareCredentials:
-                    recipientBundle.recipientShareCredentials.filter(
-                        (credential) =>
-                            credential.recipientRosterPosition ===
-                            recipientRosterPosition,
-                    ),
-                committedMaterialSeed,
-                computeVssCommittedMaterialCommitment:
-                    vssCommittedMaterialCommitmentComputer,
-                aggregateThresholdProofRandomness: ({ rnsLimbIndex }) => ({
-                    seedHex: hash(
-                        kernel,
-                        `aggregate-proof-seed-${String(recipientRosterPosition)}-${String(rnsLimbIndex)}`,
-                    ),
-                    nonceHex: hash(
-                        kernel,
-                        `aggregate-proof-nonce-${String(recipientRosterPosition)}-${String(rnsLimbIndex)}`,
-                    ),
-                }),
-                generateVssShareLinkageProof: () => ({
-                    proofBytesHex: '00',
-                }),
-            }),
-    );
+    const aggregateBundles: Awaited<
+        ReturnType<
+            typeof createLocalTrusteeVssPublicAggregateThresholdCommitmentBundle
+        >
+    >[] = [];
+    for (
+        let recipientRosterPosition = 0;
+        recipientRosterPosition < participantCount;
+        recipientRosterPosition += 1
+    ) {
+        aggregateBundles.push(
+            await createLocalTrusteeVssPublicAggregateThresholdCommitmentBundle(
+                {
+                    setupContext,
+                    publicMatrixSeedHash,
+                    participantCount,
+                    qSharePrimes: [firstRnsPrime],
+                    ringDegree,
+                    coefficientCommitmentSet:
+                        coefficientBundle.coefficientCommitmentSet,
+                    recipientShareCommitmentSet:
+                        recipientBundle.recipientShareCommitmentSet,
+                    localTrusteeRosterPosition: recipientRosterPosition,
+                    localRecipientShareCredentials:
+                        recipientBundle.recipientShareCredentials.filter(
+                            (credential) =>
+                                credential.recipientRosterPosition ===
+                                recipientRosterPosition,
+                        ),
+                    committedMaterialSeed,
+                    computeVssCommittedMaterialCommitment:
+                        vssCommittedMaterialCommitmentComputer,
+                    aggregateThresholdProofRandomness: ({ rnsLimbIndex }) => ({
+                        seedHex: hash(
+                            kernel,
+                            `aggregate-proof-seed-${String(recipientRosterPosition)}-${String(rnsLimbIndex)}`,
+                        ),
+                        nonceHex: hash(
+                            kernel,
+                            `aggregate-proof-nonce-${String(recipientRosterPosition)}-${String(rnsLimbIndex)}`,
+                        ),
+                    }),
+                    generateVssShareLinkageProof: (proofInput) => {
+                        const proofBytesHash = hash(
+                            kernel,
+                            `aggregate-proof-${proofInput.context.shareLinkageStatementRoot}`,
+                        );
+
+                        return Promise.resolve({
+                            proofBytesEncoding: 'binary-chunked-proof-bytes',
+                            proofBytesHash,
+                            proofMaterialRoot: kernel.deriveCanonicalObjectHash(
+                                {
+                                    value: {
+                                        objectType:
+                                            'SetupProofMaterialReference',
+                                        proofFamily: 'vss-share-linkage',
+                                        proofBytesHash,
+                                    },
+                                },
+                            ),
+                            canonicalMaterial: {
+                                descriptorBytes: Uint8Array.of(1),
+                            },
+                        });
+                    },
+                },
+            ),
+        );
+    }
     const aggregateThresholdCommitmentSet =
         assembleVssPublicAggregateThresholdCommitmentSet({
             publicMatrixSeedHash,
@@ -687,7 +719,7 @@ const targetArtifacts = (
 
 const createLifecycleArtifacts = async (): LifecycleArtifactsPromise => {
     const kernel = await loadTranscriptCoreKernel();
-    const setup = setupLifecycleArtifacts(kernel);
+    const setup = await setupLifecycleArtifacts(kernel);
     const target = targetArtifacts(
         kernel,
         setup.setupPackage,

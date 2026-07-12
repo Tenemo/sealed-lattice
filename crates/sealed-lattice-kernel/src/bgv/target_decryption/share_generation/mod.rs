@@ -205,8 +205,8 @@ pub(super) fn derive_threshold_secret_share_by_limb(
 // This is a centralized dealer simulating a DKG, not a real distributed key
 // generation; the shares are only as private as the seed. The random
 // coefficients are domain-separated by the private seed, the target-share
-// profile hash, and the limb, but NOT by the accepted setup package hash: the
-// accepted package embeds the aggregate-threshold commitments derived
+// profile hash, and the limb, but NOT by the setup-package hash: that package
+// embeds the aggregate-threshold commitments derived
 // from these very shares, so folding the package hash into the polynomial would
 // be circular (the shares would depend on a hash that depends on the shares).
 // The constant term is still the secret, so recombination at x=0 is unchanged.

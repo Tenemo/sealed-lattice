@@ -43,11 +43,6 @@ pub(super) fn verify_public_evaluation_key_material_transport(
     for field_name in [
         "publicEvaluationKeyMaterialEncoding",
         "publicEvaluationKeyMaterialRoot",
-        "publicEvaluationKeyMaterialChunkCount",
-        "publicEvaluationKeyMaterialTotalByteLength",
-        "publicEvaluationKeyMaterialFullObjectHash",
-        "publicEvaluationKeyMaterialChunkRoot",
-        "publicEvaluationKeyMaterialChunkHashes",
     ] {
         if evaluation_keys.get(field_name).is_none() {
             return Ok(Some(evaluation_key_material_refusal(
@@ -139,44 +134,35 @@ pub(super) fn verify_public_evaluation_key_material_transport(
             "transportedPublicEvaluationKeyMaterial.publicEvaluationKeyMaterials",
         )?));
     }
-    let chunks = match public_evaluation_key_material_chunks(material_entry) {
-        Ok(chunks) => chunks,
+    let canonical_material = match crate::bgv::setup::take_verified_canonical_proof_material_bytes(
+        "public-evaluation-key-material",
+        expected_material_root,
+    ) {
+        Ok(Some(material)) => material,
+        Ok(None) => {
+            return Ok(Some(evaluation_key_material_refusal(
+                "publicEvaluationKeyMaterialMissingCanonicalStream",
+                "public evaluation-key material requires a canonical stream-authenticated source",
+                "transportedPublicEvaluationKeyMaterial.publicEvaluationKeyMaterials",
+            )?));
+        }
         Err(error) => {
             return Ok(Some(evaluation_key_material_verification_failure(
                 error,
-                "transportedPublicEvaluationKeyMaterial.publicEvaluationKeyMaterials.chunks",
+                "transportedPublicEvaluationKeyMaterial.publicEvaluationKeyMaterials",
             )?));
         }
     };
-    let transport_hashes = match public_evaluation_key_material_transport_hashes(&chunks) {
-        Ok(transport_hashes) => transport_hashes,
-        Err(error) => {
-            return Ok(Some(evaluation_key_material_verification_failure(
-                error,
-                "transportedPublicEvaluationKeyMaterial.publicEvaluationKeyMaterials.chunks",
-            )?));
-        }
-    };
-    if let Err(error) = verify_public_evaluation_key_material_hash_fields(
-        material_entry,
-        &transport_hashes,
-        "transported public evaluation-key material",
-    ) {
-        return Ok(Some(evaluation_key_material_verification_failure(
-            error,
-            "transportedPublicEvaluationKeyMaterial.publicEvaluationKeyMaterials",
-        )?));
-    }
-    if let Err(error) = verify_public_evaluation_key_material_hash_fields(
-        evaluation_keys,
-        &transport_hashes,
-        "public evaluation-key material reference",
-    ) {
-        return Ok(Some(evaluation_key_material_verification_failure(
-            error,
-            "setupPackage.evaluationKeys",
-        )?));
-    }
+    let transport_hashes =
+        match public_evaluation_key_material_transport_hashes(&canonical_material) {
+            Ok(transport_hashes) => transport_hashes,
+            Err(error) => {
+                return Ok(Some(evaluation_key_material_verification_failure(
+                    error,
+                    "transportedPublicEvaluationKeyMaterial.publicEvaluationKeyMaterials",
+                )?));
+            }
+        };
     let expected_manifest =
         public_evaluation_key_material_manifest(setup_package, evaluation_keys)?;
     let canonical_material_root = public_evaluation_key_material_reference_root(
@@ -191,20 +177,22 @@ pub(super) fn verify_public_evaluation_key_material_transport(
             "setupPackage.evaluationKeys.publicEvaluationKeyMaterialRoot",
         )?));
     }
-    let decoded_manifest =
-        match decode_public_evaluation_key_material_manifest(&chunks, &transport_hashes) {
-            Ok(decoded_manifest) => decoded_manifest,
-            Err(error) => {
-                return Ok(Some(evaluation_key_material_verification_failure(
-                    error,
-                    "transportedPublicEvaluationKeyMaterial.publicEvaluationKeyMaterials",
-                )?));
-            }
-        };
+    let decoded_manifest = match decode_public_evaluation_key_material_manifest(
+        &canonical_material,
+        &transport_hashes,
+    ) {
+        Ok(decoded_manifest) => decoded_manifest,
+        Err(error) => {
+            return Ok(Some(evaluation_key_material_verification_failure(
+                error,
+                "transportedPublicEvaluationKeyMaterial.publicEvaluationKeyMaterials",
+            )?));
+        }
+    };
     if decoded_manifest != expected_manifest {
         return Ok(Some(evaluation_key_material_refusal(
             "publicEvaluationKeyMaterialManifestMismatch",
-            "transported public evaluation-key material manifest does not match the verified setup package",
+            "transported public evaluation-key material manifest does not match the candidate setup package",
             "transportedPublicEvaluationKeyMaterial.publicEvaluationKeyMaterials",
         )?));
     }
@@ -446,20 +434,10 @@ fn verify_public_evaluation_key_material_entry_header(
     Ok(())
 }
 
-fn public_evaluation_key_material_chunks(value: &Value) -> CanonicalResult<Vec<Vec<u8>>> {
-    let chunk_values = array_value(value, "chunks")?;
-    let mut chunks = Vec::with_capacity(chunk_values.len());
-    for chunk_value in chunk_values.iter() {
-        chunks.push(decode_hex(value_string(chunk_value, "bytesHex")?)?);
-    }
-
-    Ok(chunks)
-}
-
 pub(in crate::bgv::setup) fn public_evaluation_key_material_transport_hashes(
-    chunks: &[Vec<u8>],
+    material: &crate::bgv::setup::BgvProofMaterialBytes,
 ) -> CanonicalResult<PublicEvaluationKeyMaterialTransportHashes> {
-    if chunks.is_empty() {
+    if material.len() == 0 {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
             "public evaluation-key material transport requires at least one chunk",
@@ -472,8 +450,8 @@ pub(in crate::bgv::setup) fn public_evaluation_key_material_transport_hashes(
         )
     })?;
     let total_byte_length =
-        chunks
-            .iter()
+        material
+            .chunks()
             .enumerate()
             .try_fold(0_u64, |byte_count, (chunk_index, chunk)| {
                 if chunk.is_empty() {
@@ -488,7 +466,7 @@ pub(in crate::bgv::setup) fn public_evaluation_key_material_transport_hashes(
                         "public evaluation-key material chunk exceeds the accepted chunk size",
                     ));
                 }
-                if chunk_index + 1 < chunks.len() && chunk.len() != chunk_size {
+                if chunk_index + 1 < material.chunk_count() && chunk.len() != chunk_size {
                     return Err(CanonicalError::new(
                         CanonicalErrorCode::MalformedLength,
                         "public evaluation-key material contains a short non-final chunk",
@@ -509,9 +487,9 @@ pub(in crate::bgv::setup) fn public_evaluation_key_material_transport_hashes(
                     })
             })?;
     let full_object_hash =
-        public_evaluation_key_material_full_object_hash(total_byte_length, chunks);
-    let chunk_hashes = chunks
-        .iter()
+        public_evaluation_key_material_full_object_hash(total_byte_length, material);
+    let chunk_hashes = material
+        .chunks()
         .enumerate()
         .map(|(chunk_index, chunk)| {
             public_evaluation_key_material_chunk_hash(&full_object_hash, chunk_index, chunk)
@@ -537,13 +515,13 @@ pub(in crate::bgv::setup) fn public_evaluation_key_material_transport_hashes(
 // Prefixing the total length (and folding chunk_index per chunk) makes the chunk concatenation injective, so a re-chunked or reordered stream cannot collide to the same full-object hash.
 fn public_evaluation_key_material_full_object_hash(
     total_byte_length: u64,
-    chunks: &[Vec<u8>],
+    material: &crate::bgv::setup::BgvProofMaterialBytes,
 ) -> String {
     let total_length_bytes = total_byte_length.to_le_bytes();
-    let mut parts = Vec::with_capacity(chunks.len() + 1);
+    let mut parts = Vec::with_capacity(material.chunk_count() + 1);
     parts.push(total_length_bytes.as_slice());
-    for chunk in chunks {
-        parts.push(chunk.as_slice());
+    for chunk in material.chunks() {
+        parts.push(chunk);
     }
 
     hash512_hex(
@@ -570,66 +548,6 @@ fn public_evaluation_key_material_chunk_hash(
         "sealed-lattice/setup/public-evaluation-key-material/chunk",
         &[full_object_hash.as_bytes(), &chunk_index_bytes, chunk],
     ))
-}
-
-fn verify_public_evaluation_key_material_hash_fields(
-    value: &Value,
-    transport_hashes: &PublicEvaluationKeyMaterialTransportHashes,
-    value_name: &str,
-) -> CanonicalResult<()> {
-    let chunk_count = value_u64(value, "chunkCount")
-        .or_else(|_| value_u64(value, "publicEvaluationKeyMaterialChunkCount"))?;
-    let total_byte_length = value_u64(value, "totalByteLength")
-        .or_else(|_| value_u64(value, "publicEvaluationKeyMaterialTotalByteLength"))?;
-    let full_object_hash = value_string(value, "fullObjectHash")
-        .or_else(|_| value_string(value, "publicEvaluationKeyMaterialFullObjectHash"))?;
-    let chunk_root = value_string(value, "chunkRoot")
-        .or_else(|_| value_string(value, "publicEvaluationKeyMaterialChunkRoot"))?;
-    if chunk_count
-        != u64::try_from(transport_hashes.chunk_hashes.len()).map_err(|_| {
-            CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "public evaluation-key material chunk count does not fit u64",
-            )
-        })?
-        || total_byte_length != transport_hashes.total_byte_length
-        || full_object_hash != transport_hashes.full_object_hash
-        || chunk_root != transport_hashes.chunk_root
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            format!("{value_name} hash metadata does not match supplied chunks"),
-        ));
-    }
-    let chunk_hash_values = value
-        .get("chunkHashes")
-        .or_else(|| value.get("publicEvaluationKeyMaterialChunkHashes"))
-        .and_then(Value::as_array)
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                format!("{value_name} must list every public evaluation-key material chunk hash"),
-            )
-        })?;
-    if chunk_hash_values.len() != transport_hashes.chunk_hashes.len() {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            format!("{value_name} chunk hash count must match supplied chunks"),
-        ));
-    }
-    for (chunk_hash_value, expected_chunk_hash) in chunk_hash_values
-        .iter()
-        .zip(transport_hashes.chunk_hashes.iter())
-    {
-        if chunk_hash_value.as_str() != Some(expected_chunk_hash.as_str()) {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                format!("{value_name} chunk hashes must match supplied chunks"),
-            ));
-        }
-    }
-
-    Ok(())
 }
 
 pub(in crate::bgv::setup) fn public_evaluation_key_material_reference_root(

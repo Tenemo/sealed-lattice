@@ -1,12 +1,4 @@
-import type {
-    HeBackendCorruptionModel,
-    ScoreDomain,
-    SmallRosterPolicy,
-} from '@sealed-lattice/types';
-
-export const structuralOneThirdModel = {
-    kind: 'StructuralOneThird',
-} as const satisfies HeBackendCorruptionModel;
+import type { ScoreDomain, SmallRosterPolicy } from '@sealed-lattice/types';
 
 export const defaultScoreDomain = {
     min: 1,
@@ -19,10 +11,8 @@ export const defaultSmallRosterPolicy =
 
 // Roster-size landmarks:
 //  3  - absolute minimum supported roster.
-//  10 - the fixed foundation profile roster size.
-//  20 - hard maximum supported roster; the parameterized upper bound for which
-//       code paths exist but no end-to-end/runtime evidence is claimed yet.
+//  10 - boundary below which the poll's micro-roster policy applies.
+//  20 - hard maximum accepted by this structural calculator.
 export const minimumSupportedRosterSize = 3;
-export const minimumDynamicRosterSize = 10;
-export const foundationRosterSize = 10;
+export const minimumNonMicroRosterSize = 10;
 export const maximumSupportedRosterSize = 20;

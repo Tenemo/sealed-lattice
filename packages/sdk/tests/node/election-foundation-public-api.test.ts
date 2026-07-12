@@ -6,7 +6,6 @@ import * as publicApiRuntime from '../../dist/index.js';
 import { deriveCanonicalObjectHash } from '#packages/crypto/src/index';
 import type {
     FoundationBoardCandidate,
-    FoundationBoardSession,
     FoundationBoardSessionInput,
 } from '#packages/sdk/src/index';
 import { createAuthenticatedSetupIntentTestVector } from '#packages/wasm/tests/foundation-board-test-vectors';
@@ -18,9 +17,16 @@ type DeriveCollectiveBgvSetupRosterHash = (
         readonly signingPublicKeyHash: string;
     }>[],
 ) => string;
+type TestedFoundationBoardSession = Readonly<{
+    cancel(): void;
+    ingest(
+        canonicalCarrierBytes: Uint8Array,
+    ): VerificationResult<FoundationBoardCandidate>;
+    requireCompleteCarrierGraph(): VerificationResult<undefined>;
+}>;
 type CreateFoundationBoardSession = (
     configuration: FoundationBoardSessionInput,
-) => Promise<VerificationResult<FoundationBoardSession>>;
+) => Promise<VerificationResult<TestedFoundationBoardSession>>;
 type FoundationBoardCandidateObjectHash = (
     candidate: FoundationBoardCandidate,
 ) => Uint8Array;
@@ -56,10 +62,6 @@ const requiredPublicFunctions = [
         publicApiRuntimeRecord.deriveValidatedFirstValidOrder,
     ],
     [
-        'evaluateActionCapability',
-        publicApiRuntimeRecord.evaluateActionCapability,
-    ],
-    [
         'createSetupPackageVerificationInput',
         publicApiRuntimeRecord.createSetupPackageVerificationInput,
     ],
@@ -74,10 +76,6 @@ const requiredPublicFunctions = [
     [
         'isActionCurrentForRecoveryEpoch',
         publicApiRuntimeRecord.isActionCurrentForRecoveryEpoch,
-    ],
-    [
-        'isValidLifecycleTransition',
-        publicApiRuntimeRecord.isValidLifecycleTransition,
     ],
     ['validatePollSpec', publicApiRuntimeRecord.validatePollSpec],
     ['verifyBoardConsistency', publicApiRuntimeRecord.verifyBoardConsistency],

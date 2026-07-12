@@ -31,7 +31,6 @@ describe('collective BGV setup kernel commands', () => {
         expect(result.refusedObjects[0]?.reasonCode).toBe(
             'outsideCollectiveBgvSetupParameters',
         );
-        expect(result.acceptedSetupHandoff).toBeUndefined();
     });
 
     it('maps malformed accepted setup command errors to neutral protocol errors', async () => {
@@ -59,7 +58,7 @@ describe('collective BGV setup kernel commands', () => {
         expect(commandError.message).toContain('setupPackage is required');
     });
 
-    it('reports accepted-shaped setup as pending before reduced-ring public VSS parameters checks', async () => {
+    it('refuses accepted-shaped setup when terminal public-key objects are missing', async () => {
         const kernel = await loadTranscriptCoreKernel();
         const parameters = kernel.describeCollectiveBgvSetupParameters({
             participantCount: 3,
@@ -82,18 +81,28 @@ describe('collective BGV setup kernel commands', () => {
 
         expect(result).toMatchObject({
             isValid: false,
-            currentPhase: 'setupPackageVerification',
-            missingObjects: [
-                'publicKeyShareMaterial',
-                'publicKeyShareSuccinctProofs',
-                'collectivePublicKey',
-                'collectivePublicKeyRoot',
+            refusedObjects: [
+                {
+                    reasonCode: 'setupObjectMissing',
+                    objectPath: 'setupPackage.publicKeyShareMaterial',
+                },
+                {
+                    reasonCode: 'setupObjectMissing',
+                    objectPath: 'setupPackage.publicKeyShareSuccinctProofs',
+                },
+                {
+                    reasonCode: 'setupObjectMissing',
+                    objectPath: 'setupPackage.collectivePublicKey',
+                },
+                {
+                    reasonCode: 'setupObjectMissing',
+                    objectPath: 'setupPackage.collectivePublicKeyRoot',
+                },
             ],
-            refusedObjects: [],
         });
     });
 
-    it('refuses protocol-built setup packages with malformed setup context before later pending', async () => {
+    it('refuses malformed setup context before reporting missing prerequisites', async () => {
         const kernel = await loadTranscriptCoreKernel();
         const parameters = kernel.describeCollectiveBgvSetupParameters({
             participantCount: 3,
@@ -133,8 +142,6 @@ describe('collective BGV setup kernel commands', () => {
                 reasonCode: 'setupContextTokenMalformed',
                 objectPath: `setupPackage.setupContext.${fieldName}`,
             });
-            expect(result.missingObjects).toEqual([]);
-            expect(result.acceptedSetupHandoff).toBeUndefined();
         }
     });
 
@@ -164,10 +171,7 @@ describe('collective BGV setup kernel commands', () => {
             ),
         });
 
-        expect(result).toMatchObject({
-            isValid: false,
-            currentPhase: 'vssAcceptanceOrComplaint',
-        });
+        expect(result.isValid).toBe(false);
         expect(result.refusedObjects[0]?.reasonCode).toBe(
             'vssComplaintAcceptedAbort',
         );

@@ -344,8 +344,8 @@ fn evaluate_lookup_with_level_floor(
     sum_ciphertexts_at_common_level(&terms)
 }
 
-// A representative aggregate-score vector for m = 20 with n = 10 ballots: distinct
-// values across the certified aggregate domain [10, 100].
+// A representative aggregate-score vector for m = 20 with n = 10 ballots:
+// distinct values across the bounded aggregate domain [10, 100].
 fn clean_level_six_rank_input(_context: &EvaluatorContext, key: &DevelopmentBgvKey) -> Ciphertext {
     let mut slots = vec![0u64; RANK_LOOKUP_DEGREE_OPTION_COUNT];
     for (rank, slot) in slots.iter_mut().enumerate() {

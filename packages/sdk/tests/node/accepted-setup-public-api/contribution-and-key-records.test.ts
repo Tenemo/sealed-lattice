@@ -583,7 +583,7 @@ describe('accepted setup public package API in Node', () => {
             },
         };
         const setupPackage =
-            publicSetupApi.createSetupPackage(setupPackageInput);
+            await publicSetupApi.createSetupPackage(setupPackageInput);
         const { setupPackageHash, ...setupPackageHashInput } = setupPackage;
         const transportedVssCoefficientMaterial =
             transportedCompanionObjects[0];
@@ -673,7 +673,7 @@ describe('accepted setup public package API in Node', () => {
                 value: setupPackageHashInput,
             }),
         );
-        expect(() =>
+        await expect(
             publicSetupApi.createSetupPackage({
                 ...setupPackageInput,
                 thresholdShareCommitments: {
@@ -681,7 +681,7 @@ describe('accepted setup public package API in Node', () => {
                     objectType: 'ThresholdShareCommitmentSet',
                 },
             }),
-        ).toThrow(/ThresholdShareCommitmentBinding/u);
+        ).rejects.toThrow(/ThresholdShareCommitmentBinding/u);
         for (const requiredPublicKeyField of [
             'publicKeyShareMaterial',
             'publicKeyShareSuccinctProofs',
@@ -693,9 +693,9 @@ describe('accepted setup public package API in Node', () => {
                 requiredPublicKeyField as keyof typeof incompleteSetupPackageInput
             ];
 
-            expect(() =>
+            await expect(
                 publicSetupApi.createSetupPackage(incompleteSetupPackageInput),
-            ).toThrow(
+            ).rejects.toThrow(
                 new RegExp(`${requiredPublicKeyField} must be an object`, 'u'),
             );
         }

@@ -51,7 +51,8 @@ pub(crate) use canonical_stream_runtime::{
     CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH, CANONICAL_STREAM_RUNTIME_INTERNAL_FAILURE,
     CANONICAL_STREAM_RUNTIME_INVALID_SESSION, CanonicalStreamRuntimeBegin,
     absorb_canonical_stream_chunk, begin_canonical_stream_verifier, begin_canonical_stream_writer,
-    cancel_canonical_stream, finish_canonical_stream_verifier, finish_canonical_stream_writer,
+    cancel_canonical_stream, finish_canonical_stream_verifier,
+    finish_canonical_stream_verifier_with_summary, finish_canonical_stream_writer,
 };
 pub use canonical_tuple::{
     CANONICAL_TUPLE_SCHEMA_IDENTIFIER, CANONICAL_TUPLE_VERSION, CanonicalCodecError,
@@ -159,17 +160,17 @@ pub use state::{
     STATE_CERTIFICATE_SCHEMA_IDENTIFIER, STATE_OUTPUT_INTENT_SCHEMA_IDENTIFIER,
     STATE_RECOVERY_TRANSITION_SCHEMA_IDENTIFIER, STATE_RESERVATION_INTENT_SCHEMA_IDENTIFIER,
     STATE_WITNESS_VOTE_SCHEMA_IDENTIFIER, StateCapabilityKind, StateCertificate, StateError,
-    StateOutputIntentPayload, StateOutputVerificationInput, StateRecoveryTransitionPayload,
-    StateRecoveryVerificationInput, StateReservationIntentPayload,
-    StateReservationVerificationInput, StateVerifier, StateWitnessLock, StateWitnessVoteKind,
-    StateWitnessVotePayload, StateWitnessVoteReplayDisposition, StateWitnessVoteReplayKey,
-    VerifiedStateOutput, VerifiedStateRecovery, VerifiedStateReservation,
-    derive_state_exact_output_hash, derive_state_key, derive_state_recovery_producer_sequence,
-    derive_state_witness_vote_sequence, verify_state_witness_lock_preservation,
+    StateOutputIntentPayload, StateRecoveryTransitionPayload, StateRecoveryVerificationInput,
+    StateReservationIntentPayload, StateReservationVerificationInput, StateVerifier,
+    StateWitnessLock, StateWitnessVoteKind, StateWitnessVotePayload,
+    StateWitnessVoteReplayDisposition, StateWitnessVoteReplayKey, VerifiedStateOutput,
+    VerifiedStateRecovery, VerifiedStateReservation, derive_state_exact_output_hash,
+    derive_state_key, derive_state_recovery_producer_sequence, derive_state_witness_vote_sequence,
+    verify_state_witness_lock_preservation,
 };
 pub(crate) use state_runtime::{
     STATE_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH, begin_state_verifier_session,
-    cancel_state_verifier_session, release_verified_state_object, verify_state_output,
+    cancel_state_verifier_session, finish_state_output_verification, release_verified_state_object,
     verify_state_recovery, verify_state_reservation,
 };
 pub use suite_record::{SUITE_RECORD_MAXIMUM_BYTE_LENGTH, SuiteRecord};

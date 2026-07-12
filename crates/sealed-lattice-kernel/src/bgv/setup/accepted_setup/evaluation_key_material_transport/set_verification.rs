@@ -235,11 +235,6 @@ fn public_evaluation_key_set_has_material_reference(evaluation_keys: &Value) -> 
     [
         "publicEvaluationKeyMaterialEncoding",
         "publicEvaluationKeyMaterialRoot",
-        "publicEvaluationKeyMaterialChunkCount",
-        "publicEvaluationKeyMaterialTotalByteLength",
-        "publicEvaluationKeyMaterialFullObjectHash",
-        "publicEvaluationKeyMaterialChunkRoot",
-        "publicEvaluationKeyMaterialChunkHashes",
     ]
     .into_iter()
     .any(|field_name| evaluation_keys.get(field_name).is_some())

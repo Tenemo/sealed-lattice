@@ -191,6 +191,46 @@ export const createTranscriptCoreKernelLoader = (
                           TranscriptCoreKernelExports['sealed_lattice_bgv_canonical_stream_finish']
                       >)
                     : undefined;
+            const bgvCanonicalMaterialReaderBegin =
+                typeof exports.sealed_lattice_bgv_canonical_material_reader_begin ===
+                'function'
+                    ? (resolveNumberExport(
+                          exports,
+                          'sealed_lattice_bgv_canonical_material_reader_begin',
+                      ) as NonNullable<
+                          TranscriptCoreKernelExports['sealed_lattice_bgv_canonical_material_reader_begin']
+                      >)
+                    : undefined;
+            const bgvCanonicalMaterialReaderCancel =
+                typeof exports.sealed_lattice_bgv_canonical_material_reader_cancel ===
+                'function'
+                    ? (resolveNumberExport(
+                          exports,
+                          'sealed_lattice_bgv_canonical_material_reader_cancel',
+                      ) as NonNullable<
+                          TranscriptCoreKernelExports['sealed_lattice_bgv_canonical_material_reader_cancel']
+                      >)
+                    : undefined;
+            const bgvCanonicalMaterialReaderFinish =
+                typeof exports.sealed_lattice_bgv_canonical_material_reader_finish ===
+                'function'
+                    ? (resolveNumberExport(
+                          exports,
+                          'sealed_lattice_bgv_canonical_material_reader_finish',
+                      ) as NonNullable<
+                          TranscriptCoreKernelExports['sealed_lattice_bgv_canonical_material_reader_finish']
+                      >)
+                    : undefined;
+            const bgvCanonicalMaterialReaderReadChunk =
+                typeof exports.sealed_lattice_bgv_canonical_material_reader_read_chunk ===
+                'function'
+                    ? (resolveNumberExport(
+                          exports,
+                          'sealed_lattice_bgv_canonical_material_reader_read_chunk',
+                      ) as NonNullable<
+                          TranscriptCoreKernelExports['sealed_lattice_bgv_canonical_material_reader_read_chunk']
+                      >)
+                    : undefined;
             const foundationBoardBegin =
                 typeof exports.sealed_lattice_foundation_board_begin ===
                 'function'
@@ -271,14 +311,14 @@ export const createTranscriptCoreKernelLoader = (
                           TranscriptCoreKernelExports['sealed_lattice_state_verifier_release']
                       >)
                     : undefined;
-            const stateVerifierVerifyOutput =
-                typeof exports.sealed_lattice_state_verifier_verify_output ===
+            const stateVerifierFinishOutput =
+                typeof exports.sealed_lattice_state_verifier_finish_output ===
                 'function'
                     ? (resolveNumberExport(
                           exports,
-                          'sealed_lattice_state_verifier_verify_output',
+                          'sealed_lattice_state_verifier_finish_output',
                       ) as NonNullable<
-                          TranscriptCoreKernelExports['sealed_lattice_state_verifier_verify_output']
+                          TranscriptCoreKernelExports['sealed_lattice_state_verifier_finish_output']
                       >)
                     : undefined;
             const stateVerifierVerifyRecovery =
@@ -962,6 +1002,11 @@ export const createTranscriptCoreKernelLoader = (
                     bgvBegin: bgvCanonicalStreamBegin,
                     bgvCancel: bgvCanonicalStreamCancel,
                     bgvFinish: bgvCanonicalStreamFinish,
+                    bgvMaterialReaderBegin: bgvCanonicalMaterialReaderBegin,
+                    bgvMaterialReaderCancel: bgvCanonicalMaterialReaderCancel,
+                    bgvMaterialReaderFinish: bgvCanonicalMaterialReaderFinish,
+                    bgvMaterialReaderReadChunk:
+                        bgvCanonicalMaterialReaderReadChunk,
                     beginVerifier: canonicalStreamBeginVerifier,
                     beginWriter: canonicalStreamBeginWriter,
                     cancel: canonicalStreamCancel,
@@ -1003,7 +1048,7 @@ export const createTranscriptCoreKernelLoader = (
                 stateVerifierBegin !== undefined &&
                 stateVerifierCancel !== undefined &&
                 stateVerifierRelease !== undefined &&
-                stateVerifierVerifyOutput !== undefined &&
+                stateVerifierFinishOutput !== undefined &&
                 stateVerifierVerifyRecovery !== undefined &&
                 stateVerifierVerifyReservation !== undefined
             ) {
@@ -1015,7 +1060,7 @@ export const createTranscriptCoreKernelLoader = (
                     memory,
                     release: stateVerifierRelease,
                     runExclusive: runExclusiveKernelOperation,
-                    verifyOutput: stateVerifierVerifyOutput,
+                    finishOutput: stateVerifierFinishOutput,
                     verifyRecovery: stateVerifierVerifyRecovery,
                     verifyReservation: stateVerifierVerifyReservation,
                 });

@@ -486,7 +486,7 @@ describe('crypto primitive boundary', () => {
         );
         const issuedVssAcceptanceRoot = deriveCanonicalObjectHash({
             objectType: 'VssShareAcceptanceRoot',
-            accepted: 'source-trustee-1',
+            sourceTrusteeIdentity: 'source-trustee-1',
         });
         const issuedVssComplaintRoots = [
             deriveCanonicalObjectHash({

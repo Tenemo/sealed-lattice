@@ -8,9 +8,10 @@ use crate::hashing::derive_canonical_object_hash;
 use rayon::prelude::*;
 
 use crate::bgv::setup::trustee_evaluation_key_proof::{
-    decode_trustee_evaluation_key_proof, trustee_evaluation_key_proof_bytes_hash,
-    verify_evaluation_key_share, EvaluationKeyShareDescriptor, EvaluationKeyShareKind,
-    SameSecretLinkageStatement, SuccinctSetupProofContext, TrusteeEvaluationKeyStatement,
+    EvaluationKeyShareDescriptor, EvaluationKeyShareKind, SameSecretLinkageStatement,
+    SuccinctSetupProofContext, TrusteeEvaluationKeyStatement,
+    decode_trustee_evaluation_key_proof_from_source,
+    trustee_evaluation_key_proof_material_bytes_hash, verify_evaluation_key_share,
 };
 use crate::hashing::to_hex;
 
@@ -412,7 +413,7 @@ pub(super) fn accepted_setup_atom_material_roots_by_trustee(
         let proof_bytes = trustee_evaluation_key_proof_bytes_from_record(proof_record, request)?;
         let roots = crate::bgv::setup::limb_group_key_switch_atom::family_backend::schedule::key_bearing_material_roots_by_key_group(
             &statement,
-            &proof_bytes,
+            proof_bytes.as_ref(),
         )?;
         material_roots_by_trustee.push(roots);
     }
@@ -492,7 +493,7 @@ fn verify_trustee_evaluation_key_proof_record(
     }
     let proof_bytes = trustee_evaluation_key_proof_bytes_from_record(proof_record, request)?;
     if value_string(proof_record, "proofBytesHash")?
-        != trustee_evaluation_key_proof_bytes_hash(&proof_bytes)
+        != trustee_evaluation_key_proof_material_bytes_hash(proof_bytes.as_ref())?
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -509,10 +510,11 @@ fn verify_trustee_evaluation_key_proof_record(
         // schedule container; every other proof format fails its magic check.
         crate::bgv::setup::limb_group_key_switch_atom::family_backend::schedule::verify_key_bearing_trustee_evaluation_keys(
             statement,
-            &proof_bytes,
+            proof_bytes.as_ref(),
         )?;
     } else {
-        let proof = decode_trustee_evaluation_key_proof(statement, &proof_bytes)?;
+        let proof =
+            decode_trustee_evaluation_key_proof_from_source(statement, proof_bytes.as_ref())?;
         verify_evaluation_key_share(statement, &proof)?;
     }
     trustee_evaluation_key_verify_progress(|| {
@@ -910,13 +912,7 @@ pub(in crate::bgv::setup) fn round_one_public_aggregate_diagonals_from_package(
 fn trustee_evaluation_key_proof_bytes_from_record(
     proof_record: &Value,
     request: &Value,
-) -> CanonicalResult<Vec<u8>> {
-    if proof_record.get("proofBytesHex").is_some() {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "trustee evaluation-key proof requires canonical streamed proof material",
-        ));
-    }
+) -> CanonicalResult<SetupProofMaterialBytes> {
     if value_string(proof_record, "proofBytesEncoding")? != SETUP_PROOF_MATERIAL_ENCODING {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -938,7 +934,7 @@ fn trustee_evaluation_key_proof_bytes_from_record(
         ));
     }
 
-    Ok(proof_bytes.as_ref().clone())
+    Ok(proof_bytes)
 }
 
 pub(in crate::bgv::setup) fn trustee_evaluation_key_proof_material_root(
@@ -1010,12 +1006,6 @@ fn transported_trustee_evaluation_key_proof_material_bytes(
             return Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
                 "transportedEvaluationKeyShareProofMaterial contains duplicate proofMaterialRoot entries",
-            ));
-        }
-        if proof_material.get("chunks").is_some() {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "trustee evaluation-key proof material must arrive through the canonical binary stream",
             ));
         }
         let proof_bytes = verified_setup_proof_material_bytes_from_request(

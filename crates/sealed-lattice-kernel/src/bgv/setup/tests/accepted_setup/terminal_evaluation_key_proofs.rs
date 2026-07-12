@@ -176,7 +176,6 @@ fn heavy_accepted_setup_terminal_tampered_trustee_evaluation_key_proof_is_refuse
         result["refusedObjects"][0]["objectPath"],
         "setupPackage.trusteeEvaluationKeyProofs"
     );
-    assert!(result["acceptedSetupHandoff"].is_null());
 }
 
 #[test]
@@ -224,7 +223,6 @@ fn heavy_accepted_setup_empty_evaluation_key_objects_with_collective_public_key_
         "a package with empty evaluation-key objects and a collective public key must not be accepted: {}",
         context()
     );
-    assert!(result["acceptedSetupHandoff"].is_null());
 }
 
 #[test]

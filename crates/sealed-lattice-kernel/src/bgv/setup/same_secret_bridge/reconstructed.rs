@@ -26,7 +26,7 @@ pub(super) struct ReconstructedSameSecretBridgeProofVerification<'a> {
     pub(super) bridge_statement: &'a Value,
     pub(super) statement_set: StatementSetBinding<'a>,
     pub(super) expected_position: usize,
-    pub(super) proof_bytes: &'a [u8],
+    pub(super) proof_bytes: &'a SetupProofMaterialBytes,
     pub(super) source_constant_commitment_values: &'a [Value],
 }
 
@@ -146,11 +146,11 @@ pub(super) fn verify_reconstructed_same_secret_bridge_proof(
             "targetConstantCommitmentRoots": target_constant_commitment_roots,
             "targetConstantCommitments": target_constant_commitments,
         },
-        "proofBytesHex": crate::transcript_core::encode_hex(input.proof_bytes),
     });
     let proof_verification =
-        super::trustee_evaluation_key_proof::verify_same_secret_bridge_proof_from_request(
+        super::trustee_evaluation_key_proof::verify_same_secret_bridge_proof_source_from_request(
             &proof_verification_request,
+            input.proof_bytes.as_ref(),
         )?;
     compare_required_string(
         string_at_path(&proof_verification, &["proofFamily"])?,

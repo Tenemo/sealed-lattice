@@ -68,14 +68,6 @@ const createFrozenRosterParameters = (
     const rosterSize = registrations.length;
 
     return deriveFrozenRosterParameters({
-        dynamicRosterParametersCertificateHash:
-            rosterSize >= 10 && rosterSize !== 10
-                ? deriveCanonicalObjectHash({
-                      objectType: 'ThresholdParametersHash',
-                      certificate: 'dynamic-roster-parameters',
-                      rosterSize,
-                  })
-                : undefined,
         pollSpec,
         rosterHash,
         rosterSize,

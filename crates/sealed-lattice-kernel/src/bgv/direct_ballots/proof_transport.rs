@@ -39,7 +39,6 @@ pub(super) fn transport_direct_ballot_binary_proof(
         ));
     }
     let chunk_count = chunk_count_for_bytes(proof_bytes.len(), PROTOTYPE_PROOF_CHUNK_BYTES)?;
-    let mut transported_proof_bytes = Vec::with_capacity(proof_bytes.len());
     let mut chunk_hashes = Vec::with_capacity(chunk_count);
     let mut observed_chunk_count = 0_usize;
     for (chunk_index, chunk) in proof_bytes.chunks(PROTOTYPE_PROOF_CHUNK_BYTES).enumerate() {
@@ -55,7 +54,6 @@ pub(super) fn transport_direct_ballot_binary_proof(
                 format!("{label} transport has a short non-final chunk"),
             ));
         }
-        transported_proof_bytes.extend_from_slice(chunk);
         observed_chunk_count = observed_chunk_count.checked_add(1).ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
@@ -74,16 +72,16 @@ pub(super) fn transport_direct_ballot_binary_proof(
             format!("{label} transport chunk count does not match the byte length"),
         ));
     }
-    let transported_proof_bytes_hash = proof_bytes_hash(&transported_proof_bytes);
+    let transported_proof_bytes_hash = proof_bytes_hash(proof_bytes);
     if transported_proof_bytes_hash != expected_proof_bytes_hash {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             format!("{label} transported proof bytes do not match the proof hash"),
         ));
     }
-    let chunk_merkle_root = chunk_root(&transported_proof_bytes, PROTOTYPE_PROOF_CHUNK_BYTES)?;
+    let chunk_merkle_root = chunk_root(proof_bytes, PROTOTYPE_PROOF_CHUNK_BYTES)?;
     verify_direct_ballot_public_proof_transport(
-        &transported_proof_bytes,
+        proof_bytes,
         expected_proof_bytes_hash,
         &chunk_hashes,
         PROTOTYPE_PROOF_CHUNK_BYTES,
@@ -102,8 +100,7 @@ pub(super) fn transport_direct_ballot_binary_proof(
         })?;
 
     Ok(DirectBallotBinaryProofTransport {
-        proof_size_bytes: transported_proof_bytes.len(),
-        proof_bytes: transported_proof_bytes,
+        proof_size_bytes: proof_bytes.len(),
         proof_bytes_hash: transported_proof_bytes_hash,
         chunk_count,
         chunk_merkle_root,

@@ -9,6 +9,7 @@ use super::prover::{
 use super::relation::{LimbColumnLayout, PHASE_TWO_COLUMN_COUNT, TrusteeEvaluationKeyStatement};
 use super::*;
 use crate::bgv::parameters::DATA_PRIMES;
+use crate::bgv::setup::ProofByteSource;
 
 // Canonical binary proof encoding. The decoder is statement-driven: every
 // count and width is derived from the statement and the fixed parameters, so
@@ -78,18 +79,26 @@ pub(crate) fn encode_trustee_evaluation_key_proof(proof: &SuccinctEvaluationKeyP
     bytes
 }
 
+#[cfg(test)]
 pub(crate) fn decode_trustee_evaluation_key_proof(
     statement: &TrusteeEvaluationKeyStatement,
     bytes: &[u8],
 ) -> CanonicalResult<SuccinctEvaluationKeyProof> {
+    decode_trustee_evaluation_key_proof_from_source(statement, bytes)
+}
+
+pub(crate) fn decode_trustee_evaluation_key_proof_from_source(
+    statement: &TrusteeEvaluationKeyStatement,
+    source: &(impl ProofByteSource + ?Sized),
+) -> CanonicalResult<SuccinctEvaluationKeyProof> {
     let mut cursor = 0_usize;
-    let magic = read_array::<8>(bytes, &mut cursor)?;
+    let magic = read_array::<8>(source, &mut cursor)?;
     if &magic != PROOF_MAGIC {
         return Err(invalid_succinct_setup_proof(
             "trustee evaluation-key proof has the wrong format marker",
         ));
     }
-    let limb_count = usize::try_from(read_u64(bytes, &mut cursor)?).map_err(|_| {
+    let limb_count = usize::try_from(read_u64(source, &mut cursor)?).map_err(|_| {
         invalid_succinct_setup_proof("trustee evaluation-key proof limb count does not fit usize")
     })?;
     let proof_limb_indices = statement.proof_limb_indices();
@@ -121,51 +130,51 @@ pub(crate) fn decode_trustee_evaluation_key_proof(
                 )
             })?;
         let phase_tree_depth = (extension_size / 2).trailing_zeros() as usize;
-        let witness_tree_root = read_array::<MERKLE_DIGEST_BYTES>(bytes, &mut cursor)?;
-        let quotient_tree_root = read_array::<MERKLE_DIGEST_BYTES>(bytes, &mut cursor)?;
+        let witness_tree_root = read_array::<MERKLE_DIGEST_BYTES>(source, &mut cursor)?;
+        let quotient_tree_root = read_array::<MERKLE_DIGEST_BYTES>(source, &mut cursor)?;
         let modulus = DATA_PRIMES[limb_index];
         let masked_consistency_claims =
-            read_base_field_vec(bytes, &mut cursor, layout.claim_count(), modulus)?;
+            read_base_field_vec(source, &mut cursor, layout.claim_count(), modulus)?;
         let mut deep_evaluations = Vec::with_capacity(DEEP_EVALUATION_POINT_COUNT);
         for _ in 0..DEEP_EVALUATION_POINT_COUNT {
             deep_evaluations.push(read_extension_vec(
-                bytes,
+                source,
                 &mut cursor,
                 total_columns,
                 modulus,
             )?);
         }
         let low_degree = decode_low_degree_proof(
-            bytes,
+            source,
             &mut cursor,
             extension_size,
             COMMITMENT_BOUND_FACTOR * trace_size,
             modulus,
         )?;
         let sumcheck_residual_low_degree =
-            decode_low_degree_proof(bytes, &mut cursor, extension_size, trace_size, modulus)?;
+            decode_low_degree_proof(source, &mut cursor, extension_size, trace_size, modulus)?;
         let mut query_openings = Vec::with_capacity(LOW_DEGREE_QUERY_COUNT);
         for _ in 0..LOW_DEGREE_QUERY_COUNT {
             let mut phase_one_rows = [Vec::new(), Vec::new()];
             let mut phase_two_rows = [Vec::new(), Vec::new()];
             for phase_one_row in &mut phase_one_rows {
                 *phase_one_row = read_base_field_vec(
-                    bytes,
+                    source,
                     &mut cursor,
                     layout.phase_one_physical_count(),
                     modulus,
                 )?;
             }
-            let phase_one_pair_salt = read_bytes(bytes, &mut cursor, LEAF_SALT_BYTES)?;
+            let phase_one_pair_salt = read_bytes(source, &mut cursor, LEAF_SALT_BYTES)?;
             for phase_two_row in &mut phase_two_rows {
                 *phase_two_row = read_base_field_vec(
-                    bytes,
+                    source,
                     &mut cursor,
                     PHASE_TWO_COLUMN_COUNT * CHALLENGE_EXTENSION_DEGREE,
                     modulus,
                 )?;
             }
-            let phase_two_pair_salt = read_bytes(bytes, &mut cursor, LEAF_SALT_BYTES)?;
+            let phase_two_pair_salt = read_bytes(source, &mut cursor, LEAF_SALT_BYTES)?;
             query_openings.push(PhaseQueryOpening {
                 phase_one_rows,
                 phase_one_pair_salt,
@@ -178,9 +187,9 @@ pub(crate) fn decode_trustee_evaluation_key_proof(
         let witness_batch_node_bound = LOW_DEGREE_QUERY_COUNT * phase_tree_depth;
         let quotient_batch_node_bound = LOW_DEGREE_QUERY_COUNT * phase_tree_depth;
         let witness_batch_opening =
-            read_batched_opening(bytes, &mut cursor, witness_batch_node_bound)?;
+            read_batched_opening(source, &mut cursor, witness_batch_node_bound)?;
         let quotient_batch_opening =
-            read_batched_opening(bytes, &mut cursor, quotient_batch_node_bound)?;
+            read_batched_opening(source, &mut cursor, quotient_batch_node_bound)?;
         let material_tree_count = layout.vss_committed_material_bound_message_count();
         let material_columns_per_tree =
             crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT * TRACE_SPLIT;
@@ -191,13 +200,13 @@ pub(crate) fn decode_trustee_evaluation_key_proof(
                 let mut rows = [Vec::new(), Vec::new()];
                 for row in &mut rows {
                     *row = read_base_field_vec(
-                        bytes,
+                        source,
                         &mut cursor,
                         material_columns_per_tree,
                         modulus,
                     )?;
                 }
-                let pair_salt = read_bytes(bytes, &mut cursor, LEAF_SALT_BYTES)?;
+                let pair_salt = read_bytes(source, &mut cursor, LEAF_SALT_BYTES)?;
                 tree_openings.push(MaterialTreeQueryOpening { rows, pair_salt });
             }
             material_query_openings.push(tree_openings);
@@ -205,7 +214,7 @@ pub(crate) fn decode_trustee_evaluation_key_proof(
         let mut material_batch_openings = Vec::with_capacity(material_tree_count);
         for _ in 0..material_tree_count {
             material_batch_openings.push(read_batched_opening(
-                bytes,
+                source,
                 &mut cursor,
                 LOW_DEGREE_QUERY_COUNT * phase_tree_depth,
             )?);
@@ -224,7 +233,7 @@ pub(crate) fn decode_trustee_evaluation_key_proof(
             material_batch_openings,
         });
     }
-    if cursor != bytes.len() {
+    if cursor != source.byte_length() {
         return Err(invalid_succinct_setup_proof(
             "trustee evaluation-key proof has trailing bytes",
         ));
@@ -323,13 +332,13 @@ fn write_low_degree_sibling_references(bytes: &mut Vec<u8>, references: &[u8], t
 }
 
 fn decode_low_degree_proof(
-    bytes: &[u8],
+    source: &(impl ProofByteSource + ?Sized),
     cursor: &mut usize,
     initial_domain_size: usize,
     initial_degree_bound: usize,
     modulus: u64,
 ) -> CanonicalResult<LowDegreeProof> {
-    let fold_count = usize::try_from(read_u64(bytes, cursor)?)
+    let fold_count = usize::try_from(read_u64(source, cursor)?)
         .map_err(|_| invalid_succinct_setup_proof("low-degree fold count does not fit usize"))?;
     let expected_fold_count = expected_low_degree_committed_fold_count(initial_degree_bound)?;
     if fold_count != expected_fold_count {
@@ -337,16 +346,16 @@ fn decode_low_degree_proof(
             "low-degree committed fold count does not match the statement",
         ));
     }
-    let folded_layer_roots = read_hash_vec(bytes, cursor, fold_count)?;
+    let folded_layer_roots = read_hash_vec(source, cursor, fold_count)?;
     let final_coefficient_count =
         expected_low_degree_final_coefficient_count(initial_degree_bound)?;
-    let final_coefficients = read_extension_vec(bytes, cursor, final_coefficient_count, modulus)?;
+    let final_coefficients = read_extension_vec(source, cursor, final_coefficient_count, modulus)?;
     let mut folded_layer_siblings_by_query: Vec<Vec<LowDegreeSiblingOpening>> = (0
         ..LOW_DEGREE_QUERY_COUNT)
         .map(|_| Vec::with_capacity(fold_count))
         .collect();
     for _fold_index in 0..fold_count {
-        let siblings = read_low_degree_sibling_table(bytes, cursor, modulus)?;
+        let siblings = read_low_degree_sibling_table(source, cursor, modulus)?;
         for (query_siblings, sibling) in folded_layer_siblings_by_query
             .iter_mut()
             .zip(siblings.into_iter())
@@ -367,7 +376,7 @@ fn decode_low_degree_proof(
         let layer_depth =
             expected_low_degree_folded_layer_path_length(initial_domain_size, fold_index)?;
         let maximum_nodes = LOW_DEGREE_QUERY_COUNT * layer_depth;
-        layer_batch_openings.push(read_batched_opening(bytes, cursor, maximum_nodes)?);
+        layer_batch_openings.push(read_batched_opening(source, cursor, maximum_nodes)?);
     }
 
     Ok(LowDegreeProof {
@@ -379,11 +388,11 @@ fn decode_low_degree_proof(
 }
 
 fn read_low_degree_sibling_table(
-    bytes: &[u8],
+    source: &(impl ProofByteSource + ?Sized),
     cursor: &mut usize,
     modulus: u64,
 ) -> CanonicalResult<Vec<ChallengeExtensionElement>> {
-    let table_count = usize::try_from(read_u64(bytes, cursor)?).map_err(|_| {
+    let table_count = usize::try_from(read_u64(source, cursor)?).map_err(|_| {
         invalid_succinct_setup_proof("low-degree sibling table count does not fit usize")
     })?;
     if table_count == 0 || table_count > LOW_DEGREE_QUERY_COUNT {
@@ -391,7 +400,7 @@ fn read_low_degree_sibling_table(
             "low-degree sibling table count exceeds the statement bound",
         ));
     }
-    let table = read_extension_vec(bytes, cursor, table_count, modulus)?;
+    let table = read_extension_vec(source, cursor, table_count, modulus)?;
     if table_count == LOW_DEGREE_QUERY_COUNT {
         let mut unique_siblings: Vec<ChallengeExtensionElement> = Vec::new();
         for sibling in &table {
@@ -430,7 +439,7 @@ fn read_low_degree_sibling_table(
     let mut next_first_use_index = 0_usize;
     let bit_width = low_degree_sibling_reference_bit_width(table_count);
     let reference_byte_count = low_degree_sibling_reference_byte_count(table_count);
-    let reference_bytes = read_bytes(bytes, cursor, reference_byte_count)?;
+    let reference_bytes = read_bytes(source, cursor, reference_byte_count)?;
     let mut bit_cursor = 0_usize;
     for _query_index in 0..LOW_DEGREE_QUERY_COUNT {
         let reference =
@@ -599,11 +608,11 @@ fn write_batched_opening(bytes: &mut Vec<u8>, opening: &BatchedMerkleOpening) {
 // so a malformed proof cannot force an oversized allocation; the verifier then
 // rejects any count that does not reconstruct the committed root.
 fn read_batched_opening(
-    bytes: &[u8],
+    source: &(impl ProofByteSource + ?Sized),
     cursor: &mut usize,
     maximum_nodes: usize,
 ) -> CanonicalResult<BatchedMerkleOpening> {
-    let node_count = usize::try_from(read_u64(bytes, cursor)?).map_err(|_| {
+    let node_count = usize::try_from(read_u64(source, cursor)?).map_err(|_| {
         invalid_succinct_setup_proof("batched opening node count does not fit usize")
     })?;
     if node_count > maximum_nodes {
@@ -611,7 +620,7 @@ fn read_batched_opening(
             "batched opening node count exceeds the statement bound",
         ));
     }
-    let authentication_nodes = read_hash_vec(bytes, cursor, node_count)?;
+    let authentication_nodes = read_hash_vec(source, cursor, node_count)?;
 
     Ok(BatchedMerkleOpening {
         authentication_nodes,
@@ -619,40 +628,48 @@ fn read_batched_opening(
 }
 
 fn read_array<const BYTES: usize>(
-    bytes: &[u8],
+    source: &(impl ProofByteSource + ?Sized),
     cursor: &mut usize,
 ) -> CanonicalResult<[u8; BYTES]> {
     let end = cursor.checked_add(BYTES).ok_or_else(|| {
         invalid_succinct_setup_proof("trustee evaluation-key proof cursor overflowed")
     })?;
-    let slice = bytes.get(*cursor..end).ok_or_else(|| {
-        invalid_succinct_setup_proof("trustee evaluation-key proof ended unexpectedly")
-    })?;
-    *cursor = end;
     let mut array = [0_u8; BYTES];
-    array.copy_from_slice(slice);
+    if !source.copy_bytes(*cursor, &mut array) {
+        return Err(invalid_succinct_setup_proof(
+            "trustee evaluation-key proof ended unexpectedly",
+        ));
+    }
+    *cursor = end;
 
     Ok(array)
 }
 
-fn read_bytes(bytes: &[u8], cursor: &mut usize, count: usize) -> CanonicalResult<Vec<u8>> {
+fn read_bytes(
+    source: &(impl ProofByteSource + ?Sized),
+    cursor: &mut usize,
+    count: usize,
+) -> CanonicalResult<Vec<u8>> {
     let end = cursor.checked_add(count).ok_or_else(|| {
         invalid_succinct_setup_proof("trustee evaluation-key proof cursor overflowed")
     })?;
-    let slice = bytes.get(*cursor..end).ok_or_else(|| {
-        invalid_succinct_setup_proof("trustee evaluation-key proof ended unexpectedly")
-    })?;
+    let mut bytes = vec![0_u8; count];
+    if !source.copy_bytes(*cursor, &mut bytes) {
+        return Err(invalid_succinct_setup_proof(
+            "trustee evaluation-key proof ended unexpectedly",
+        ));
+    }
     *cursor = end;
 
-    Ok(slice.to_vec())
+    Ok(bytes)
 }
 
-fn read_u64(bytes: &[u8], cursor: &mut usize) -> CanonicalResult<u64> {
-    Ok(u64::from_le_bytes(read_array::<8>(bytes, cursor)?))
+fn read_u64(source: &(impl ProofByteSource + ?Sized), cursor: &mut usize) -> CanonicalResult<u64> {
+    Ok(u64::from_le_bytes(read_array::<8>(source, cursor)?))
 }
 
 fn read_base_field_vec(
-    bytes: &[u8],
+    source: &(impl ProofByteSource + ?Sized),
     cursor: &mut usize,
     count: usize,
     modulus: u64,
@@ -663,14 +680,24 @@ fn read_base_field_vec(
     let end = cursor.checked_add(byte_count).ok_or_else(|| {
         invalid_succinct_setup_proof("trustee evaluation-key proof cursor overflowed")
     })?;
-    let slice = bytes.get(*cursor..end).ok_or_else(|| {
-        invalid_succinct_setup_proof("trustee evaluation-key proof ended unexpectedly")
-    })?;
-    *cursor = end;
+    if end > source.byte_length() {
+        return Err(invalid_succinct_setup_proof(
+            "trustee evaluation-key proof ended unexpectedly",
+        ));
+    }
+    let packed_byte_offset = *cursor;
     let mut values = Vec::with_capacity(count);
     let mut bit_cursor = 0_usize;
     for _ in 0..count {
-        let value = read_fixed_width_bits(slice, &mut bit_cursor, FIELD_RESIDUE_BIT_WIDTH);
+        let value = read_fixed_width_bits_from_source(
+            source,
+            packed_byte_offset,
+            &mut bit_cursor,
+            FIELD_RESIDUE_BIT_WIDTH,
+        )
+        .ok_or_else(|| {
+            invalid_succinct_setup_proof("trustee evaluation-key proof ended unexpectedly")
+        })?;
         if value >= modulus {
             return Err(invalid_succinct_setup_proof(
                 "trustee evaluation-key proof contains a noncanonical field residue",
@@ -681,12 +708,16 @@ fn read_base_field_vec(
     let used_bits_in_final_byte = bit_cursor % 8;
     if used_bits_in_final_byte != 0 {
         let padding_mask = u8::MAX << used_bits_in_final_byte;
-        if slice[byte_count - 1] & padding_mask != 0 {
+        if source
+            .byte_at(packed_byte_offset + byte_count - 1)
+            .is_none_or(|byte| byte & padding_mask != 0)
+        {
             return Err(invalid_succinct_setup_proof(
                 "trustee evaluation-key proof contains noncanonical field-residue padding",
             ));
         }
     }
+    *cursor = end;
 
     Ok(values)
 }
@@ -709,8 +740,31 @@ fn read_fixed_width_bits(bytes: &[u8], bit_cursor: &mut usize, bit_width: usize)
     value
 }
 
+fn read_fixed_width_bits_from_source(
+    source: &(impl ProofByteSource + ?Sized),
+    byte_offset: usize,
+    bit_cursor: &mut usize,
+    bit_width: usize,
+) -> Option<u64> {
+    let mut value = 0_u64;
+    let mut read_bits = 0_usize;
+    while read_bits < bit_width {
+        let byte = source.byte_at(byte_offset.checked_add(*bit_cursor / 8)?)?;
+        let bit_index = *bit_cursor % 8;
+        let available_bits = 8 - bit_index;
+        let chunk_bits = (bit_width - read_bits).min(available_bits);
+        let chunk_mask = ((1_u16 << chunk_bits) - 1) as u8;
+        let chunk = ((byte >> bit_index) & chunk_mask) as u64;
+        value |= chunk << read_bits;
+        *bit_cursor += chunk_bits;
+        read_bits += chunk_bits;
+    }
+
+    Some(value)
+}
+
 fn read_extension_vec(
-    bytes: &[u8],
+    source: &(impl ProofByteSource + ?Sized),
     cursor: &mut usize,
     count: usize,
     modulus: u64,
@@ -720,7 +774,7 @@ fn read_extension_vec(
         .ok_or_else(|| {
             invalid_succinct_setup_proof("trustee evaluation-key proof extension count overflowed")
         })?;
-    let residues = read_base_field_vec(bytes, cursor, residue_count, modulus)?;
+    let residues = read_base_field_vec(source, cursor, residue_count, modulus)?;
     Ok(residues
         .chunks_exact(CHALLENGE_EXTENSION_DEGREE)
         .map(|chunk| chunk.try_into().expect("chunk has extension degree"))
@@ -728,11 +782,11 @@ fn read_extension_vec(
 }
 
 fn read_hash_vec(
-    bytes: &[u8],
+    source: &(impl ProofByteSource + ?Sized),
     cursor: &mut usize,
     count: usize,
 ) -> CanonicalResult<Vec<MerkleDigest>> {
     (0..count)
-        .map(|_| read_array::<MERKLE_DIGEST_BYTES>(bytes, cursor))
+        .map(|_| read_array::<MERKLE_DIGEST_BYTES>(source, cursor))
         .collect()
 }

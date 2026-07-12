@@ -89,7 +89,9 @@ export type PublicSetupApi = {
     readonly createSetupIntent: (
         input: unknown,
     ) => Promise<Record<string, unknown>>;
-    readonly createSetupPackage: (input: unknown) => Record<string, unknown>;
+    readonly createSetupPackage: (
+        input: unknown,
+    ) => Promise<Record<string, unknown>>;
     readonly createSetupPackageVerificationInput: (
         input: unknown,
     ) => Record<string, unknown>;

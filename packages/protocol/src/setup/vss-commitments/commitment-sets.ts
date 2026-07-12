@@ -7,8 +7,11 @@
 import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
-import { bytesFromHex, bytesToHex } from '../common-fields.js';
-import { encodeStandardBase64 } from '../proof-byte-encoding.js';
+import { bytesToHex } from '../common-fields.js';
+import {
+    canonicalGeneratedSetupProofMaterialDescriptor,
+    type CanonicalGeneratedSetupProofMaterial,
+} from '../setup-proof-material-transport.js';
 import type { CollectiveBgvSetupContext } from '../vss-share-verification-records.js';
 
 export type VssCommittedMaterialCommitmentRole =
@@ -46,7 +49,7 @@ export type VssCommittedMaterialCommitmentComputation = {
 
 // The kernel-backed commitment computation (bound to the WASM
 // `ComputeVssCommittedMaterialCommitment` command by the SDK layer). Injected
-// so the protocol layer never reimplements the certified commitment.
+// so the protocol layer never reimplements the kernel-owned commitment.
 export type VssCommittedMaterialCommitmentComputer = (input: {
     readonly commitmentRole: VssCommittedMaterialCommitmentRole;
     readonly commitmentContext: Record<string, unknown>;
@@ -92,11 +95,11 @@ export type VssShareLinkageProofContext = {
 
 // The kernel-backed share-linkage proof (bound to the WASM
 // `GenerateVssShareLinkageProof` command by the SDK). Injected so the
-// protocol layer assembles the witness but never runs the certified prover.
+// protocol layer assembles the witness but never runs the kernel prover.
 // The committed-material commitments carry no algebraic opening randomness,
 // so the randomness arrays are always empty; the bound-message seed and
 // context-hash arrays let the prover regenerate the committed trees.
-export type VssShareLinkageProofComputer = (input: {
+export type VssShareLinkageProofInput = {
     readonly context: VssShareLinkageProofContext;
     readonly ringDegree: number;
     readonly vssShareLinkage: Record<string, unknown>;
@@ -112,7 +115,26 @@ export type VssShareLinkageProofComputer = (input: {
     readonly vssCommittedMaterialContextHashesByBoundMessage: readonly string[];
     readonly proofRandomnessSeedHex: string;
     readonly proofRandomnessNonceHex: string;
-}) => { readonly proofBytesHex: string };
+};
+
+export type VssGeneratedCanonicalProofMaterial = {
+    readonly proofBytesEncoding: 'binary-chunked-proof-bytes';
+    readonly proofBytesHash: ProtocolHash;
+    readonly proofMaterialRoot: ProtocolHash;
+    readonly canonicalMaterial: CanonicalGeneratedSetupProofMaterial;
+};
+
+export type VssShareLinkageProofComputer = (
+    input: VssShareLinkageProofInput,
+) => Promise<VssGeneratedCanonicalProofMaterial>;
+
+// Aggregate-threshold proofs use the share-linkage relation, but their local
+// setup path receives only the canonical stream reference and its external
+// descriptor. The proof bytes never cross the Rust/WASM boundary as a
+// whole hexadecimal or base64 string.
+export type VssAggregateThresholdProofComputer = (
+    input: VssShareLinkageProofInput,
+) => Promise<VssGeneratedCanonicalProofMaterial>;
 
 // Typed commitment set outputs. These are the exact objects the
 // accepted-setup verifier recomputes canonical roots over, so downstream
@@ -205,7 +227,16 @@ export type VssAggregateThresholdProofRecord = {
     readonly recipientRosterPosition: number;
     readonly rnsLimbIndex: number;
     readonly vssShareLinkage: Record<string, unknown>;
-    readonly proofBytesBase64: string;
+    readonly proofBytesEncoding: 'binary-chunked-proof-bytes';
+    readonly proofBytesHash: ProtocolHash;
+    readonly proofMaterialRoot: ProtocolHash;
+};
+
+export type VssAggregateThresholdProofMaterial = {
+    readonly objectType: 'SetupTransportedVssShareLinkageProofMaterial';
+    readonly proofFamily: 'vss-share-linkage';
+    readonly proofMaterialRoot: ProtocolHash;
+    readonly descriptorBytes: Uint8Array;
 };
 
 export type VssPublicAggregateThresholdCommitmentSet = {
@@ -258,6 +289,10 @@ type VssPublicAggregateThresholdCommitmentContribution = {
 
 export type LocalTrusteeVssPublicAggregateThresholdCommitmentBundle = {
     readonly publicAggregateThresholdCommitmentContribution: VssPublicAggregateThresholdCommitmentContribution;
+    // External canonical proof material for the public contribution. Callers
+    // merge these entries into transportedVssShareLinkageProofMaterial; they
+    // are never embedded in the semantic aggregate commitment set.
+    readonly aggregateThresholdProofMaterials: readonly VssAggregateThresholdProofMaterial[];
     readonly localTrusteeAggregateOpeningCredentialHandoff: LocalTrusteeVssPublicAggregateOpeningCredentialHandoff;
 };
 
@@ -792,6 +827,50 @@ const coefficientVectorToLittleEndianHex = (
 // unit-evaluation-point share-linkage proof showing the committed threshold
 // share is the modular sum of the committed source recipient shares.
 const vssAggregateThresholdProofFamily = 'vss-share-linkage';
+const canonicalProofMaterialEncoding = 'binary-chunked-proof-bytes';
+const protocolHashPattern = /^[0-9a-f]{128}$/u;
+
+const assertCanonicalAggregateProofMaterial = (
+    generatedProof: VssGeneratedCanonicalProofMaterial,
+): Readonly<{
+    readonly proofBytesHash: ProtocolHash;
+    readonly proofMaterialRoot: ProtocolHash;
+    readonly descriptorBytes: Uint8Array;
+}> => {
+    if (generatedProof.proofBytesEncoding !== canonicalProofMaterialEncoding) {
+        throw new TypeError(
+            'VSS aggregate threshold proof bytes must use the canonical binary chunked encoding.',
+        );
+    }
+    if (!protocolHashPattern.test(generatedProof.proofBytesHash)) {
+        throw new TypeError(
+            'VSS aggregate threshold proofBytesHash must be a protocol hash.',
+        );
+    }
+    if (!protocolHashPattern.test(generatedProof.proofMaterialRoot)) {
+        throw new TypeError(
+            'VSS aggregate threshold proofMaterialRoot must be a protocol hash.',
+        );
+    }
+    const expectedProofMaterialRoot = deriveCanonicalObjectHash({
+        objectType: 'SetupProofMaterialReference',
+        proofFamily: vssAggregateThresholdProofFamily,
+        proofBytesHash: generatedProof.proofBytesHash,
+    });
+    if (generatedProof.proofMaterialRoot !== expectedProofMaterialRoot) {
+        throw new Error(
+            'VSS aggregate threshold proofMaterialRoot must bind its proof family and proofBytesHash.',
+        );
+    }
+
+    return {
+        proofBytesHash: generatedProof.proofBytesHash,
+        proofMaterialRoot: generatedProof.proofMaterialRoot,
+        descriptorBytes: canonicalGeneratedSetupProofMaterialDescriptor(
+            generatedProof.canonicalMaterial,
+        ),
+    };
+};
 
 // Fresh prover blinding randomness per aggregate proof record. The proof is
 // zero-knowledge, so this is independent per (recipient, RNS limb) and binds
@@ -818,9 +897,10 @@ type VssPublicAggregateThresholdCredential = {
 
 // One aggregate threshold proof record: a unit-evaluation-point share-linkage
 // statement whose "coefficients" are the source recipient-share commitments
-// and whose "recipient share" is the aggregate commitment, plus the proof
-// bytes the injected kernel prover produced for it.
-const createVssAggregateThresholdProofRecord = (input: {
+// and whose "recipient share" is the aggregate commitment. The semantic record
+// retains only the proof hash and canonical stream material root; the external
+// descriptor travels as its sibling transport material.
+const createVssAggregateThresholdProofRecord = async (input: {
     readonly setupContext: CollectiveBgvSetupContext;
     readonly publicMatrixSeedHash: ProtocolHash;
     readonly ringDegree: number;
@@ -828,8 +908,13 @@ const createVssAggregateThresholdProofRecord = (input: {
     readonly recipientShareCommitmentSet: VssPublicRecipientShareCommitmentSet;
     readonly aggregateCredential: VssPublicAggregateThresholdCredential;
     readonly aggregateThresholdProofRandomness: VssAggregateThresholdProofRandomnessProvider;
-    readonly generateVssShareLinkageProof: VssShareLinkageProofComputer;
-}): VssAggregateThresholdProofRecord => {
+    readonly generateVssShareLinkageProof: VssAggregateThresholdProofComputer;
+}): Promise<
+    Readonly<{
+        readonly proofRecord: VssAggregateThresholdProofRecord;
+        readonly proofMaterial: VssAggregateThresholdProofMaterial;
+    }>
+> => {
     const { aggregateCredential } = input;
     const {
         recipientRosterPosition,
@@ -913,7 +998,7 @@ const createVssAggregateThresholdProofRecord = (input: {
         recipientRosterPosition,
         rnsLimbIndex,
     });
-    const generatedProof = input.generateVssShareLinkageProof({
+    const generatedProof = await input.generateVssShareLinkageProof({
         context: {
             ceremonyId: input.setupContext.ceremonyId,
             manifestHash: input.setupContext.manifestHash,
@@ -941,23 +1026,31 @@ const createVssAggregateThresholdProofRecord = (input: {
         proofRandomnessSeedHex: proofRandomness.seedHex,
         proofRandomnessNonceHex: proofRandomness.nonceHex,
     });
-    const proofBytes = bytesFromHex(
-        generatedProof.proofBytesHex,
-        'VSS aggregate threshold proofBytesHex',
-    );
+    const canonicalProofMaterial =
+        assertCanonicalAggregateProofMaterial(generatedProof);
 
     return {
-        objectType: 'VssAggregateThresholdProofRecord',
-        proofFamily: vssAggregateThresholdProofFamily,
-        recipientRosterPosition,
-        rnsLimbIndex,
-        vssShareLinkage,
-        proofBytesBase64: encodeStandardBase64(proofBytes),
+        proofRecord: {
+            objectType: 'VssAggregateThresholdProofRecord',
+            proofFamily: vssAggregateThresholdProofFamily,
+            recipientRosterPosition,
+            rnsLimbIndex,
+            vssShareLinkage,
+            proofBytesEncoding: canonicalProofMaterialEncoding,
+            proofBytesHash: canonicalProofMaterial.proofBytesHash,
+            proofMaterialRoot: canonicalProofMaterial.proofMaterialRoot,
+        },
+        proofMaterial: {
+            objectType: 'SetupTransportedVssShareLinkageProofMaterial',
+            proofFamily: vssAggregateThresholdProofFamily,
+            proofMaterialRoot: canonicalProofMaterial.proofMaterialRoot,
+            descriptorBytes: canonicalProofMaterial.descriptorBytes,
+        },
     };
 };
 
 export const createLocalTrusteeVssPublicAggregateThresholdCommitmentBundle =
-    (input: {
+    async (input: {
         readonly setupContext: CollectiveBgvSetupContext;
         readonly publicMatrixSeedHash: ProtocolHash;
         readonly participantCount: number;
@@ -970,8 +1063,8 @@ export const createLocalTrusteeVssPublicAggregateThresholdCommitmentBundle =
         readonly committedMaterialSeed: VssCommittedMaterialSeedProvider;
         readonly computeVssCommittedMaterialCommitment: VssCommittedMaterialCommitmentComputer;
         readonly aggregateThresholdProofRandomness: VssAggregateThresholdProofRandomnessProvider;
-        readonly generateVssShareLinkageProof: VssShareLinkageProofComputer;
-    }): LocalTrusteeVssPublicAggregateThresholdCommitmentBundle => {
+        readonly generateVssShareLinkageProof: VssAggregateThresholdProofComputer;
+    }): Promise<LocalTrusteeVssPublicAggregateThresholdCommitmentBundle> => {
         const recipientRosterPosition = input.localTrusteeRosterPosition;
         if (
             !Number.isSafeInteger(recipientRosterPosition) ||
@@ -1152,9 +1245,12 @@ export const createLocalTrusteeVssPublicAggregateThresholdCommitmentBundle =
             });
         });
 
-        const aggregateThresholdProofs = aggregateCredentials.map(
-            (aggregateCredential): VssAggregateThresholdProofRecord =>
-                createVssAggregateThresholdProofRecord({
+        const aggregateThresholdProofOutputs: Awaited<
+            ReturnType<typeof createVssAggregateThresholdProofRecord>
+        >[] = [];
+        for (const aggregateCredential of aggregateCredentials) {
+            aggregateThresholdProofOutputs.push(
+                await createVssAggregateThresholdProofRecord({
                     setupContext: input.setupContext,
                     publicMatrixSeedHash: input.publicMatrixSeedHash,
                     ringDegree: input.ringDegree,
@@ -1167,6 +1263,10 @@ export const createLocalTrusteeVssPublicAggregateThresholdCommitmentBundle =
                     generateVssShareLinkageProof:
                         input.generateVssShareLinkageProof,
                 }),
+            );
+        }
+        const aggregateThresholdProofs = aggregateThresholdProofOutputs.map(
+            (output) => output.proofRecord,
         );
 
         return {
@@ -1177,6 +1277,10 @@ export const createLocalTrusteeVssPublicAggregateThresholdCommitmentBundle =
                 recipientRecords,
                 aggregateThresholdProofs,
             },
+            aggregateThresholdProofMaterials:
+                aggregateThresholdProofOutputs.map(
+                    (output) => output.proofMaterial,
+                ),
             localTrusteeAggregateOpeningCredentialHandoff: {
                 objectType:
                     'LocalTrusteeVssPublicAggregateOpeningCredentialHandoff',
@@ -1186,6 +1290,20 @@ export const createLocalTrusteeVssPublicAggregateThresholdCommitmentBundle =
             },
         };
     };
+
+const aggregateProofReferenceIsCanonical = (
+    proof: VssAggregateThresholdProofRecord,
+): boolean =>
+    proof.proofFamily === vssAggregateThresholdProofFamily &&
+    proof.proofBytesEncoding === canonicalProofMaterialEncoding &&
+    protocolHashPattern.test(proof.proofBytesHash) &&
+    protocolHashPattern.test(proof.proofMaterialRoot) &&
+    proof.proofMaterialRoot ===
+        deriveCanonicalObjectHash({
+            objectType: 'SetupProofMaterialReference',
+            proofFamily: vssAggregateThresholdProofFamily,
+            proofBytesHash: proof.proofBytesHash,
+        });
 
 export const assembleVssPublicAggregateThresholdCommitmentSet = (input: {
     readonly publicMatrixSeedHash: ProtocolHash;
@@ -1246,7 +1364,8 @@ export const assembleVssPublicAggregateThresholdCommitmentSet = (input: {
                 deriveCanonicalObjectHash(record.commitment) !==
                     record.aggregateCommitmentRoot ||
                 proof?.recipientRosterPosition !== trusteeRosterPosition ||
-                proof.rnsLimbIndex !== rnsLimbIndex
+                proof.rnsLimbIndex !== rnsLimbIndex ||
+                !aggregateProofReferenceIsCanonical(proof)
             ) {
                 throw new Error(
                     'Public aggregate threshold contribution coordinates and commitments must be canonical.',

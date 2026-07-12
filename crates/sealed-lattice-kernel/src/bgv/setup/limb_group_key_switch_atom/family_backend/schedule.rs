@@ -30,6 +30,7 @@ use super::statement_bridge::{
     bridge_key_public,
 };
 use crate::bgv::parameters::{DATA_PRIMES, PLAINTEXT_MODULUS};
+use crate::bgv::setup::ProofByteSource;
 use crate::bgv::setup::trustee_evaluation_key_proof::{
     EvaluationKeyShareDescriptor, EvaluationKeyShareKind, TrusteeEvaluationKeyStatement,
     TrusteeEvaluationKeyWitness, public_key_switch_sample,
@@ -362,9 +363,32 @@ fn prove_one_key<const LIMB_COUNT: usize>(
 // Verify a key-bearing statement's container bytes: strict container shape,
 // then one atom verification per key against the statement-derived public
 // inputs, the shared linkage statement, and the statement/index binding.
+fn read_schedule_u32(
+    proof_bytes: &(impl ProofByteSource + ?Sized),
+    offset: usize,
+) -> CanonicalResult<u32> {
+    let mut encoded = [0_u8; 4];
+    if !proof_bytes.copy_bytes(offset, &mut encoded) {
+        return Err(invalid_schedule("schedule proof stream is truncated"));
+    }
+    Ok(u32::from_le_bytes(encoded))
+}
+
+fn copy_schedule_proof_bytes(
+    proof_bytes: &(impl ProofByteSource + ?Sized),
+    offset: usize,
+    byte_length: usize,
+) -> CanonicalResult<Vec<u8>> {
+    let mut encoded = vec![0_u8; byte_length];
+    if !proof_bytes.copy_bytes(offset, &mut encoded) {
+        return Err(invalid_schedule("schedule proof stream is truncated"));
+    }
+    Ok(encoded)
+}
+
 pub(crate) fn verify_key_bearing_trustee_evaluation_keys(
     statement: &TrusteeEvaluationKeyStatement,
-    proof_bytes: &[u8],
+    proof_bytes: &(impl ProofByteSource + Sync + ?Sized),
 ) -> CanonicalResult<()> {
     let linkage_statement = linkage_statement(statement)?;
     let parameters = sixteen_limb_group_field_parameters();
@@ -375,19 +399,17 @@ pub(crate) fn verify_key_bearing_trustee_evaluation_keys(
         mask_degree: schedule_mask_degree(ring_degree),
     };
 
-    if proof_bytes.len() < SCHEDULE_MAGIC.len() + 4
-        || &proof_bytes[..SCHEDULE_MAGIC.len()] != SCHEDULE_MAGIC
+    let mut observed_magic = [0_u8; 8];
+    if proof_bytes.byte_length() < SCHEDULE_MAGIC.len() + 4
+        || !proof_bytes.copy_bytes(0, &mut observed_magic)
+        || &observed_magic != SCHEDULE_MAGIC
     {
         return Err(invalid_schedule(
             "key-bearing trustee evaluation-key proof bytes are not schedule-format",
         ));
     }
     let mut position = SCHEDULE_MAGIC.len();
-    let count = u32::from_le_bytes(
-        proof_bytes[position..position + 4]
-            .try_into()
-            .expect("four bytes"),
-    ) as usize;
+    let count = read_schedule_u32(proof_bytes, position)? as usize;
     position += 4;
     let scheduled = scheduled_proofs(statement)?;
     if count != scheduled.len() {
@@ -395,35 +417,37 @@ pub(crate) fn verify_key_bearing_trustee_evaluation_keys(
             "schedule proof count must match the statement's scheduled proof count",
         ));
     }
-    let mut per_proof_bytes = Vec::with_capacity(count);
+    let mut per_proof_ranges = Vec::with_capacity(count);
     for _ in 0..count {
-        if position + 4 > proof_bytes.len() {
+        if position + 4 > proof_bytes.byte_length() {
             return Err(invalid_schedule("schedule proof stream is truncated"));
         }
-        let length = u32::from_le_bytes(
-            proof_bytes[position..position + 4]
-                .try_into()
-                .expect("four bytes"),
-        ) as usize;
+        let length = read_schedule_u32(proof_bytes, position)? as usize;
         position += 4;
         let end = position
             .checked_add(length)
             .ok_or_else(|| invalid_schedule("schedule proof length overflows"))?;
-        if end > proof_bytes.len() {
+        if end > proof_bytes.byte_length() {
             return Err(invalid_schedule("schedule proof stream is truncated"));
         }
-        per_proof_bytes.push(&proof_bytes[position..end]);
+        per_proof_ranges.push((position, length));
         position = end;
     }
-    if position != proof_bytes.len() {
+    if position != proof_bytes.byte_length() {
         return Err(invalid_schedule("schedule proof stream has trailing bytes"));
     }
 
-    for (chunk_start, chunk) in per_proof_bytes
+    for (chunk_start, chunk) in per_proof_ranges
         .chunks(PARALLEL_KEY_GROUP)
         .enumerate()
-        .map(|(chunk, bytes)| (chunk * PARALLEL_KEY_GROUP, bytes))
+        .map(|(chunk_index, ranges)| (chunk_index * PARALLEL_KEY_GROUP, ranges))
     {
+        let chunk_proof_bytes = chunk
+            .iter()
+            .map(|(offset, byte_length)| {
+                copy_schedule_proof_bytes(proof_bytes, *offset, *byte_length)
+            })
+            .collect::<CanonicalResult<Vec<_>>>()?;
         let verify_at = |offset: usize, bytes: &[u8]| -> CanonicalResult<()> {
             let proof_index = chunk_start + offset;
             let scheduled_proof = &scheduled[proof_index];
@@ -466,13 +490,13 @@ pub(crate) fn verify_key_bearing_trustee_evaluation_keys(
             Ok(())
         };
         #[cfg(not(target_arch = "wasm32"))]
-        let results: Vec<CanonicalResult<()>> = chunk
+        let results: Vec<CanonicalResult<()>> = chunk_proof_bytes
             .par_iter()
             .enumerate()
             .map(|(offset, bytes)| verify_at(offset, bytes))
             .collect();
         #[cfg(target_arch = "wasm32")]
-        let results: Vec<CanonicalResult<()>> = chunk
+        let results: Vec<CanonicalResult<()>> = chunk_proof_bytes
             .iter()
             .enumerate()
             .map(|(offset, bytes)| verify_at(offset, bytes))
@@ -527,24 +551,22 @@ fn key_group_runtime_identity(key: &EvaluationKeyShareDescriptor) -> Option<(Opt
 // any per-key decode failure returns `Err`.
 pub(crate) fn key_bearing_material_roots_by_key_group(
     statement: &TrusteeEvaluationKeyStatement,
-    proof_bytes: &[u8],
+    proof_bytes: &(impl ProofByteSource + ?Sized),
 ) -> CanonicalResult<Vec<KeyGroupMaterialRoot>> {
     linkage_statement(statement)?;
     let parameters = sixteen_limb_group_field_parameters();
 
-    if proof_bytes.len() < SCHEDULE_MAGIC.len() + 4
-        || &proof_bytes[..SCHEDULE_MAGIC.len()] != SCHEDULE_MAGIC
+    let mut observed_magic = [0_u8; 8];
+    if proof_bytes.byte_length() < SCHEDULE_MAGIC.len() + 4
+        || !proof_bytes.copy_bytes(0, &mut observed_magic)
+        || &observed_magic != SCHEDULE_MAGIC
     {
         return Err(invalid_schedule(
             "key-bearing trustee evaluation-key proof bytes are not schedule-format",
         ));
     }
     let mut position = SCHEDULE_MAGIC.len();
-    let count = u32::from_le_bytes(
-        proof_bytes[position..position + 4]
-            .try_into()
-            .expect("four bytes"),
-    ) as usize;
+    let count = read_schedule_u32(proof_bytes, position)? as usize;
     position += 4;
     let scheduled = scheduled_proofs(statement)?;
     if count != scheduled.len() {
@@ -554,24 +576,21 @@ pub(crate) fn key_bearing_material_roots_by_key_group(
     }
     let mut material_roots = Vec::new();
     for scheduled_proof in &scheduled {
-        if position + 4 > proof_bytes.len() {
+        if position + 4 > proof_bytes.byte_length() {
             return Err(invalid_schedule("schedule proof stream is truncated"));
         }
-        let length = u32::from_le_bytes(
-            proof_bytes[position..position + 4]
-                .try_into()
-                .expect("four bytes"),
-        ) as usize;
+        let length = read_schedule_u32(proof_bytes, position)? as usize;
         position += 4;
         let end = position
             .checked_add(length)
             .ok_or_else(|| invalid_schedule("schedule proof length overflows"))?;
-        if end > proof_bytes.len() {
+        if end > proof_bytes.byte_length() {
             return Err(invalid_schedule("schedule proof stream is truncated"));
         }
         let key = &statement.keys[scheduled_proof.key_index];
         if let Some((rotation, level)) = key_group_runtime_identity(key) {
-            let proof = decode_key_proof(&parameters, &proof_bytes[position..end])?;
+            let encoded_proof = copy_schedule_proof_bytes(proof_bytes, position, length)?;
+            let proof = decode_key_proof(&parameters, &encoded_proof)?;
             material_roots.push(KeyGroupMaterialRoot {
                 rotation,
                 level,
@@ -582,7 +601,7 @@ pub(crate) fn key_bearing_material_roots_by_key_group(
         }
         position = end;
     }
-    if position != proof_bytes.len() {
+    if position != proof_bytes.byte_length() {
         return Err(invalid_schedule("schedule proof stream has trailing bytes"));
     }
 

@@ -7,42 +7,24 @@ pub(super) fn decode_public_key_share_material_bindings(
     common_binding: &PublicKeyCommonBinding,
     ring_degree: usize,
     share_records: &BTreeMap<u64, Value>,
-    chunks: &[Vec<u8>],
+    material: &VerifiedCanonicalPublicKeyShareMaterial,
 ) -> CanonicalResult<(BTreeMap<u64, PublicKeyShareMaterialBinding>, Vec<Value>)> {
-    let mut reader = PublicKeyShareMaterialByteReader::new(chunks)?;
-    let magic = reader.read_exact(PUBLIC_KEY_SHARE_MATERIAL_BINARY_MAGIC.len())?;
-    if magic != PUBLIC_KEY_SHARE_MATERIAL_BINARY_MAGIC {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "transported public-key share material binary magic does not match",
-        ));
-    }
-    if reader.read_varuint("binary version")? != PUBLIC_KEY_SHARE_MATERIAL_BINARY_VERSION {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "transported public-key share material binary version is unsupported",
-        ));
-    }
     let roster = super::accepted_roster_from_setup_context(setup_context);
-    if reader.read_varuint("participantCount")? != roster.participant_count {
+    if material.participant_count != roster.participant_count
+        || material.records.len() != roster.participant_count as usize
+    {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ComponentMismatch,
             "transported public-key share material participant count does not match the accepted roster",
         ));
     }
-    if reader.read_varuint("rnsLimbCount")? != DATA_PRIMES.len() as u64 {
+    if material.rns_limb_count != DATA_PRIMES.len() {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ComponentMismatch,
             "transported public-key share material RNS limb count does not match Q_share",
         ));
     }
-    if usize::try_from(reader.read_varuint("ringDegree")?).map_err(|_| {
-        CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "transported public-key share material ringDegree does not fit usize",
-        )
-    })? != ring_degree
-    {
+    if material.ring_degree != ring_degree {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ComponentMismatch,
             "transported public-key share material ring degree must match the material set",
@@ -52,7 +34,16 @@ pub(super) fn decode_public_key_share_material_bindings(
     let mut bindings = BTreeMap::new();
     let mut material_roots = Vec::new();
     for expected_roster_position in 0..roster.participant_count {
-        if reader.read_varuint("trusteeRosterPosition")? != expected_roster_position {
+        let transported_record = material
+            .records
+            .get(expected_roster_position as usize)
+            .ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    "transported public-key share material is missing a trustee record",
+                )
+            })?;
+        if transported_record.trustee_roster_position != expected_roster_position {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
                 "transported public-key share material trustee order is not canonical",
@@ -79,31 +70,34 @@ pub(super) fn decode_public_key_share_material_bindings(
             })?;
         let mut coefficients_by_limb = Vec::with_capacity(DATA_PRIMES.len());
         let mut limb_records = Vec::with_capacity(DATA_PRIMES.len());
+        if transported_record.limbs.len() != DATA_PRIMES.len() {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "transported public-key share material must contain one coefficient vector per Q_share limb",
+            ));
+        }
         for (rns_limb_index, modulus) in DATA_PRIMES.iter().copied().enumerate() {
-            if reader.read_varuint("rnsLimbIndex")? != rns_limb_index as u64 {
+            let transported_limb = &transported_record.limbs[rns_limb_index];
+            if transported_limb.rns_limb_index != rns_limb_index {
                 return Err(CanonicalError::new(
                     CanonicalErrorCode::InvalidFixture,
                     "transported public-key share material RNS limb order is not canonical",
                 ));
             }
-            if reader.read_u64_le("rnsPrime")? != modulus {
+            if transported_limb.rns_prime != modulus {
                 return Err(CanonicalError::new(
                     CanonicalErrorCode::ComponentMismatch,
                     "transported public-key share material RNS prime does not match Q_share",
                 ));
             }
-            let mut coefficients = Vec::with_capacity(ring_degree);
-            for _coefficient_index in 0..ring_degree {
-                let coefficient = reader.read_u64_le("public-key share coefficient")?;
-                if coefficient >= modulus {
-                    return Err(CanonicalError::new(
-                        CanonicalErrorCode::ComponentMismatch,
-                        "transported public-key share coefficient is not a canonical residue",
-                    ));
-                }
-                coefficients.push(coefficient);
+            if transported_limb.coefficients.len() != ring_degree {
+                return Err(CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    "transported public-key share coefficient vector width does not match the material ring degree",
+                ));
             }
-            let coefficient_hash = public_key_share_coefficient_vector_hash(&coefficients);
+            let coefficient_hash =
+                public_key_share_coefficient_vector_hash(&transported_limb.coefficients);
             if share_hashes
                 .get(rns_limb_index)
                 .and_then(|share_hash| share_hash.get("rnsLimbIndex"))
@@ -136,9 +130,9 @@ pub(super) fn decode_public_key_share_material_bindings(
                 "component": "b_i",
                 "coefficientByteLength": ring_degree * 8,
                 "coefficientVectorHash512": coefficient_hash,
-                "coefficientsLeHex": coefficient_vector_le_hex(&coefficients),
+                "coefficientsLeHex": coefficient_vector_le_hex(&transported_limb.coefficients),
             }));
-            coefficients_by_limb.push(coefficients);
+            coefficients_by_limb.push(transported_limb.coefficients.clone());
         }
         let material_record = json!({
             "objectType": PUBLIC_KEY_SHARE_MATERIAL_OBJECT_TYPE,
@@ -179,13 +173,6 @@ pub(super) fn decode_public_key_share_material_bindings(
             ));
         }
     }
-    if !reader.is_finished() {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "transported public-key share material has trailing bytes after the final trustee record",
-        ));
-    }
-
     Ok((bindings, material_roots))
 }
 

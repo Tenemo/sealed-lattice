@@ -26,7 +26,7 @@ const configuration = (
     },
     publicSetupSeedObjectHash: new Uint8Array(64).fill(0x44),
     suiteIdentifier: new Uint8Array(64).fill(0x11),
-    verifiedSetupSourceObjectHash: new Uint8Array(64).fill(0x55),
+    setupSourceObjectHash: new Uint8Array(64).fill(0x55),
 });
 
 describe('foundation board session in Node WASM', () => {
@@ -66,6 +66,16 @@ describe('foundation board session in Node WASM', () => {
             expect(session.requireCompleteCarrierGraph()).toEqual({
                 isValid: true,
                 value: undefined,
+            });
+            const invalidSignatureCarrier = Uint8Array.from(
+                authenticatedSetupIntent.canonicalCarrierBytes,
+            );
+            const signatureByteIndex = invalidSignatureCarrier.length - 1;
+            invalidSignatureCarrier[signatureByteIndex] =
+                (invalidSignatureCarrier[signatureByteIndex] ?? 0) ^ 1;
+            expect(session.ingest(invalidSignatureCarrier)).toEqual({
+                isValid: false,
+                refusalReason: 'invalidSignature',
             });
             const accepted = session.ingest(
                 authenticatedSetupIntent.canonicalCarrierBytes,

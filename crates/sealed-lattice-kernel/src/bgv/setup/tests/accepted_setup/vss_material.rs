@@ -121,7 +121,7 @@ fn collective_setup_verifier_refuses_malformed_vss_share_acceptance_records() {
         "vssShareAcceptanceSourceTrusteeCommitmentRootMismatch",
     );
 
-    assert_minimal_collective_setup_package_refused_without_handoff(
+    assert_minimal_collective_setup_package_refused(
         "drifted private VSS envelope local verification root",
         |package| {
             package["privateVssEnvelopeCommitments"]["envelopeReferences"][0]["localVerificationRoot"] =
@@ -132,7 +132,7 @@ fn collective_setup_verifier_refuses_malformed_vss_share_acceptance_records() {
         "vssShareAcceptancePrivateEnvelopeRootMismatch",
     );
 
-    assert_minimal_collective_setup_package_refused_without_handoff(
+    assert_minimal_collective_setup_package_refused(
         "wrong VSS share acceptance local verification root",
         |package| {
             package["vssShareAcceptances"]["acceptanceRecords"][0]["localVerificationRoot"] =
@@ -142,7 +142,7 @@ fn collective_setup_verifier_refuses_malformed_vss_share_acceptance_records() {
         "vssShareAcceptanceLocalVerificationRootMismatch",
     );
 
-    assert_minimal_collective_setup_package_refused_without_handoff(
+    assert_minimal_collective_setup_package_refused(
         "wrong VSS share acceptance private envelope hash",
         |package| {
             package["vssShareAcceptances"]["acceptanceRecords"][0]["privateEnvelopeHash"] =
@@ -232,6 +232,7 @@ fn verify_compact_aggregate_threshold_proofs(
     aggregate_threshold_commitment_set: &serde_json::Value,
 ) -> crate::encoding::CanonicalResult<()> {
     crate::bgv::setup::verify_vss_public_aggregate_threshold_proofs(
+        fixture,
         &fixture["vssPublicCoefficientCommitmentSet"],
         &fixture["vssPublicRecipientShareCommitmentSet"],
         aggregate_threshold_commitment_set,
@@ -287,6 +288,10 @@ fn collective_setup_verifier_refuses_malformed_aggregate_threshold_proofs() {
         "collective_setup_verifier_refuses_malformed_aggregate_threshold_proofs",
     );
     let fixture = compact_aggregate_threshold_proof_fixture();
+    let _proof_material_eviction_guard =
+        crate::bgv::setup::setup_proof::VerifiedSetupProofMaterialEvictionGuard::for_request(
+            &fixture,
+        );
     verify_compact_aggregate_threshold_proofs(
         &fixture,
         &fixture["vssPublicAggregateThresholdCommitmentSet"],
@@ -491,25 +496,12 @@ fn collective_setup_verifier_refuses_malformed_aggregate_threshold_proofs() {
 
     assert_compact_aggregate_threshold_proofs_refused(
         &fixture,
-        "tampered aggregate threshold proof authentication bytes",
+        "tampered aggregate threshold proof bytes hash",
         |aggregate_threshold_commitment_set| {
-            let proof_bytes_base64 = aggregate_threshold_commitment_set["aggregateThresholdProofs"]
-                [0]["proofBytesBase64"]
-                .as_str()
-                .expect("aggregate threshold proof bytes");
-            let mut proof_bytes = crate::transcript_core::decode_standard_base64(
-                proof_bytes_base64,
-                "aggregate threshold proof bytes",
-            )
-            .expect("decoded aggregate threshold proof bytes");
-            let final_proof_byte = proof_bytes
-                .last_mut()
-                .expect("aggregate threshold proof must not be empty");
-            *final_proof_byte ^= 0x01;
-            aggregate_threshold_commitment_set["aggregateThresholdProofs"][0]["proofBytesBase64"] =
-                serde_json::json!(crate::transcript_core::encode_standard_base64(&proof_bytes));
+            aggregate_threshold_commitment_set["aggregateThresholdProofs"][0]["proofBytesHash"] =
+                serde_json::json!(valid_hash('a'));
         },
-        CanonicalErrorCode::InvalidProtocolObject,
-        None,
+        CanonicalErrorCode::ComponentMismatch,
+        Some("proof material root"),
     );
 }

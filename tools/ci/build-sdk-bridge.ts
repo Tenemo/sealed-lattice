@@ -67,6 +67,13 @@ const bridgeSupportSourcePaths = [
         'src',
         'foundation-board-session.ts',
     ),
+    path.resolve(
+        repoRoot,
+        'packages',
+        'wasm',
+        'src',
+        'state-verifier-runtime.ts',
+    ),
 ] as const;
 const bridgePartsSourceDirectoryPath = path.resolve(
     repoRoot,

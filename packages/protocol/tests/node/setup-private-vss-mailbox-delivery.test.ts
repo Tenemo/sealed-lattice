@@ -1,8 +1,6 @@
 import {
     createPrivateVssMailboxKeyPair,
     deriveCanonicalObjectHash,
-    hash512Hex,
-    setupProofMaterialFullObjectHashHex,
 } from '@sealed-lattice/crypto';
 import { describe, expect, it } from 'vitest';
 
@@ -69,49 +67,20 @@ describe('private VSS mailbox delivery', () => {
                     },
                 ],
             }),
-        ).rejects.toThrow(/privateVssShareProof generation/u);
+        ).rejects.toThrow(
+            /proof generation and canonical proof-material export/u,
+        );
     });
 
-    it('moves private VSS proof bytes into root-bound transported material when requested', async () => {
-        const proofBytesHex = '0001020304050607';
-        const proofBytes = Uint8Array.from([0, 1, 2, 3, 4, 5, 6, 7]);
-        const proofBytesHash = hash512Hex(
-            'sealed-lattice/setup/private-vss-share/succinct-proof-bytes',
-            [proofBytes],
-        );
-        const textEncoder = new TextEncoder();
-        const expectedFullObjectHash = setupProofMaterialFullObjectHashHex(
-            'vss-opening-carry',
-            proofBytes.byteLength,
-            [proofBytes],
-        );
-        const expectedChunkHash = hash512Hex(
-            'sealed-lattice/setup/proof-material/chunk',
-            [
-                textEncoder.encode('vss-opening-carry'),
-                textEncoder.encode(expectedFullObjectHash),
-                Uint8Array.of(0),
-                proofBytes,
-            ],
-        );
-        const expectedChunkRoot = deriveCanonicalObjectHash({
-            objectType: 'SetupProofMaterialChunkManifest',
-            proofFamily: 'vss-opening-carry',
-            totalByteLength: proofBytes.byteLength,
-            chunkHashes: [expectedChunkHash],
-            fullObjectHash: expectedFullObjectHash,
-        });
+    it('transports private VSS proof material under its canonical descriptor and semantic root', async () => {
+        const proofBytesHash = fixtureHash('proof-bytes');
+        const descriptorBytes = Uint8Array.of(9, 8, 7, 6);
         const expectedTransportedMaterialRoot = deriveCanonicalObjectHash({
             objectType: 'PrivateVssShareTransportedSuccinctProofMaterial',
             proofFamily: 'vss-opening-carry',
             proofBytesEncoding: 'binary-chunked-proof-bytes',
             statementHash: fixtureHash('statement-hash'),
             proofBytesHash,
-            proofChunkCount: 1,
-            proofTotalByteLength: proofBytes.byteLength,
-            proofFullObjectHash: expectedFullObjectHash,
-            proofChunkRoot: expectedChunkRoot,
-            proofChunkHashes: [expectedChunkHash],
         });
         let observedPrivateEnvelope: Record<string, unknown> | undefined;
         let observedTransportedProofMaterial:
@@ -157,18 +126,23 @@ describe('private VSS mailbox delivery', () => {
             participantCount: 1,
             deliveryPhaseNumber: 6,
             verificationPhaseNumber: 7,
-            privateVssShareProofMaterialEncoding: 'binary-chunked-proof-bytes',
-            privateVssShareProofFactory: () => ({
-                objectType: 'PrivateVssShareProof',
-                proofId: 'sealed-lattice-private-vss-share-proof-succinct',
-                proofFamily: 'vss-opening-carry',
-                proofBytesEncoding: 'embedded-binary-proof-bytes-hex',
-                proofStatementRoot: fixtureHash('statement-root'),
-                statementHash: fixtureHash('statement-hash'),
-                proofBytesHash,
-                proofMaterialRoot: fixtureHash('embedded-material-root'),
-                proofBytesHex,
-            }),
+            privateVssShareProofFactory: () =>
+                Promise.resolve({
+                    proofRecord: {
+                        objectType: 'PrivateVssShareProof',
+                        proofId:
+                            'sealed-lattice-private-vss-share-proof-succinct',
+                        proofFamily: 'vss-opening-carry',
+                        proofBytesEncoding: 'binary-chunked-proof-bytes',
+                        proofStatementRoot: fixtureHash('statement-root'),
+                        statementHash: fixtureHash('statement-hash'),
+                        proofBytesHash,
+                        proofMaterialRoot: expectedTransportedMaterialRoot,
+                    },
+                    canonicalMaterial: {
+                        descriptorBytes,
+                    },
+                }),
             sourceTrusteeContributionStates: [
                 {
                     sourceTrusteeIdentity: 'trustee-0',
@@ -214,13 +188,6 @@ describe('private VSS mailbox delivery', () => {
         expect(transportedProofRecord.proofMaterialRoot).toBe(
             expectedTransportedMaterialRoot,
         );
-        expect(transportedProofRecord.proofFullObjectHash).toBe(
-            expectedFullObjectHash,
-        );
-        expect(transportedProofRecord.proofChunkRoot).toBe(expectedChunkRoot);
-        expect(transportedProofRecord.proofChunkHashes).toEqual([
-            expectedChunkHash,
-        ]);
         expect(observedTransportedProofMaterial).toBeDefined();
         expect(observedTransportedProofMaterial?.objectType).toBe(
             'SetupTransportedPrivateVssShareProofMaterialSet',
@@ -234,13 +201,8 @@ describe('private VSS mailbox delivery', () => {
         expect(proofMaterials[0].proofMaterialRoot).toBe(
             transportedProofRecord.proofMaterialRoot,
         );
-        expect(proofMaterials[0].fullObjectHash).toBe(expectedFullObjectHash);
-        expect(proofMaterials[0].chunkRoot).toBe(expectedChunkRoot);
-        expect(proofMaterials[0].chunkHashes).toEqual([expectedChunkHash]);
-        expect(
-            (proofMaterials[0].chunks as Record<string, unknown>[])[0]
-                .bytesHex as string,
-        ).toBe(proofBytesHex);
+        expect(proofMaterials[0].descriptorBytes).toEqual(descriptorBytes);
+        expect(proofMaterials[0].descriptorBytes).not.toBe(descriptorBytes);
         expect(
             deliverySet.envelopeReferences[0]
                 .transportedPrivateVssShareProofMaterial?.proofMaterials[0]

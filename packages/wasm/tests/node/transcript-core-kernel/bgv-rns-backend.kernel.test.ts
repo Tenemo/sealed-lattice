@@ -7,7 +7,6 @@ import {
 
 type BgvParametersRejected = {
     readonly isValid: false;
-    readonly unresolvedReason: 'BgvOperationRejected';
     readonly refusedObjects: readonly {
         readonly code: 'BgvOperationRejected';
         readonly reasonCode: string;
@@ -19,11 +18,9 @@ const expectBgvParametersRejected = (
     value: unknown,
     reasonCode?: string,
 ): BgvParametersRejected => {
-    expect(value).toMatchObject({
-        isValid: false,
-        unresolvedReason: 'BgvOperationRejected',
-    });
+    expect(value).toMatchObject({ isValid: false });
     const rejection = value as BgvParametersRejected;
+    expect(Array.isArray(rejection.refusedObjects)).toBe(true);
     expect(
         rejection.refusedObjects.some(
             (refusedObject) => refusedObject.code === 'BgvOperationRejected',

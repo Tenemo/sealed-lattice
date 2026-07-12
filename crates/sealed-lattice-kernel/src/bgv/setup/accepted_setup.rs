@@ -3,7 +3,6 @@ mod evaluation_key_material_transport;
 mod evaluation_key_proof_checks;
 mod evaluation_key_share_rounds;
 mod evaluator_key_schedule;
-mod nested_hash;
 mod phase_transcript;
 mod private_vss_envelopes;
 mod public_key_share_material;
@@ -55,7 +54,6 @@ use self::evaluator_key_schedule::{
     verify_context_fields_match, verify_evaluator_key_schedule, verify_generic_key_switch_policy,
     verify_pending_evaluation_key_material_boundary,
 };
-use self::nested_hash::{optional_nested_hash_value, package_nested_hash};
 pub(crate) use self::phase_transcript::accepted_setup_participant_roster_from_package;
 use self::phase_transcript::{
     setup_context_string, verify_abort_absence, verify_phase_transcript,
@@ -69,6 +67,14 @@ use self::private_vss_envelopes::{
 pub(in crate::bgv::setup) use self::public_key_share_material::accepted_setup_collective_public_key_from_package;
 #[cfg(test)]
 pub(in crate::bgv::setup) use self::public_key_share_material::public_key_share_coefficient_vector_hash;
+pub(in crate::bgv::setup) use self::public_key_share_material::{
+    CanonicalPublicKeyShareMaterialStream,
+    absorb_verified_canonical_public_key_share_material_chunk,
+    begin_verified_canonical_public_key_share_material_stream,
+    cancel_verified_canonical_public_key_share_material_stream,
+    evict_verified_canonical_public_key_share_materials,
+    finish_verified_canonical_public_key_share_material_stream,
+};
 use self::public_key_share_material::{
     PublicKeyShareMaterialBinding, public_key_share_material_uses_transport,
     verify_collective_public_key_material, verify_collective_public_key_pair_consistency,
@@ -77,16 +83,14 @@ use self::public_key_share_material::{
 use self::public_key_shares::{
     PublicKeyCommonBinding, public_key_common_binding, public_key_refusal,
     public_key_share_records_by_roster_position, verify_optional_public_key_share_succinct_proofs,
-    verify_public_key_material_acceptance_boundary, verify_public_key_share_proofs,
-    verify_public_key_shares,
+    verify_public_key_share_proofs, verify_public_key_shares,
 };
 #[cfg(test)]
 pub(in crate::bgv::setup) use self::same_secret_bridge_verification::verified_same_secret_bridge_material_from_package;
 use self::setup_context::{q_share_value, verify_context, verify_q_share};
 use self::threshold_share_commitment_checks::verify_threshold_share_commitments;
 use self::transport_policy::{
-    setup_transport_chunk_manifest_root, setup_transport_vss_material_byte_length_for_roster,
-    verify_transport_certificate,
+    setup_transport_vss_material_byte_length_for_roster, verify_transport_certificate,
 };
 use self::vss_coefficient_commitments::expected_trustees_from_phase_transcript;
 use self::vss_complaints_and_acceptances::{
@@ -101,9 +105,7 @@ use crate::bgv::setup_helpers::compare_required_string;
 
 #[cfg(test)]
 use serde_json::{Value, json};
-use std::{
-    collections::{BTreeMap, BTreeSet},
-};
+use std::collections::{BTreeMap, BTreeSet};
 use unicode_normalization::UnicodeNormalization;
 
 use super::*;
@@ -198,12 +200,12 @@ const PRIVATE_VSS_ENVELOPE_AAD_OBJECT_TYPE: &str = "PrivateVssEnvelopeAad";
 const ENCRYPTED_PRIVATE_VSS_ENVELOPE_OBJECT_TYPE: &str = "EncryptedPrivateVssShareEnvelope";
 const FOUNDATION_ROSTER_PARTICIPANT_COUNT: u64 = 10;
 const FOUNDATION_DECRYPTION_THRESHOLD: u64 = 4;
-// Supported parameterized roster range. The first setup/evaluator roster
-// (n = 10) is the only benchmarked and certified instance; supported-phone
+// Parameterized development roster range. The first setup/evaluator roster
+// (n = 10) is the only benchmarked development instance; supported-phone
 // evidence is still future work. The verifier accepts any 3 <= n <= 20 by
-// deriving the canonical quorums and threshold from the roster size, but no
-// runtime/security/mobile evidence is established for n != 10 until those
-// rosters receive their own certificates and measurements.
+// deriving the canonical quorums and threshold from the roster size, but that
+// structural acceptance is not cryptographic, runtime, or mobile evidence for
+// any roster size.
 pub(super) const MINIMUM_SUPPORTED_PARTICIPANT_COUNT: u64 = 3;
 pub(super) const MAXIMUM_SUPPORTED_PARTICIPANT_COUNT: u64 = 20;
 
@@ -280,8 +282,6 @@ const SETUP_TRANSPORT_RESUME_POLICY: &str = "chunk-index-checkpointed-by-hash";
 const SETUP_TRANSPORT_LAZY_LOADING_POLICY: &str = "root-addressed-large-object-loading";
 const SETUP_TRANSPORTED_VSS_MATERIAL_NAME: &str = "vssCoefficientCommitmentMaterial";
 const SETUP_TRANSPORTED_VSS_MATERIAL_ROLE: &str = "public-vss-coefficient-commitment-material";
-const SETUP_TRANSPORTED_PUBLIC_KEY_SHARE_MATERIAL_NAME: &str = "publicKeyShareMaterial";
-const SETUP_TRANSPORTED_PUBLIC_KEY_SHARE_MATERIAL_ROLE: &str = "public-key-share-material";
 const SETUP_TRANSPORTED_PUBLIC_KEY_SHARE_PROOF_MATERIAL_NAME: &str = "publicKeyShareProofMaterial";
 const SETUP_TRANSPORTED_PUBLIC_KEY_SHARE_PROOF_MATERIAL_ROLE: &str =
     "public-key-share-proof-material";
@@ -476,7 +476,7 @@ pub(crate) fn verify_collective_bgv_setup_package(
         );
     }
     match verify_collective_setup_package(setup_package, request)? {
-        VerificationFlow::Continue => accepted_setup_verification_response(setup_package),
+        VerificationFlow::Continue => accepted_setup_verification_response(),
         VerificationFlow::Stop(response) => Ok(response),
     }
 }
@@ -592,9 +592,6 @@ fn verify_collective_setup_package(
         return Ok(VerificationFlow::Stop(response));
     }
     if let Some(response) = verify_collective_public_key_material(setup_package, request)? {
-        return Ok(VerificationFlow::Stop(response));
-    }
-    if let Some(response) = verify_public_key_material_acceptance_boundary(setup_package)? {
         return Ok(VerificationFlow::Stop(response));
     }
     if let Some(response) = verify_evaluator_key_schedule(setup_package)? {
@@ -732,104 +729,13 @@ fn setup_package_declares_public_runtime_material(setup_package: &Value) -> bool
             .is_some_and(|evaluation_keys| !evaluation_keys.is_empty())
 }
 
-fn accepted_setup_verification_response(setup_package: &Value) -> CanonicalResult<Value> {
-    let mut response = verification_response(
+fn accepted_setup_verification_response() -> CanonicalResult<Value> {
+    verification_response(
         Some("setupPackageVerification"),
         Vec::new(),
         Vec::new(),
         Vec::new(),
-    )?;
-    response
-        .as_object_mut()
-        .expect("verification response is a JSON object")
-        .insert(
-            "acceptedSetupHandoff".to_string(),
-            accepted_setup_handoff_value(setup_package)?,
-        );
-
-    Ok(response)
-}
-
-fn accepted_setup_handoff_value(setup_package: &Value) -> CanonicalResult<Value> {
-    let setup_context = setup_package.get("setupContext").ok_or_else(|| {
-        CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "setupContext was required before accepted setup handoff construction",
-        )
-    })?;
-    let mut handoff = json!({
-        "objectType": "CollectiveBgvAcceptedSetupHandoff",
-        "ceremonyId": value_string(setup_context, "ceremonyId")?,
-        "manifestHash": value_string(setup_context, "manifestHash")?,
-        "rosterHash": value_string(setup_context, "rosterHash")?,
-        "setupParametersHash": value_string(setup_context, "setupParametersHash")?,
-        "setupEpoch": value_string(setup_context, "setupEpoch")?,
-        "setupPackageHash": value_string(setup_package, "setupPackageHash")?,
-        "directBallotEncryptionHandoff": {
-            "collectivePublicKeyRoot": package_nested_hash(
-                setup_package,
-                "collectivePublicKey",
-                "collectivePublicKeyRoot",
-            )?,
-            "publicKeyShareMaterialSetRoot": package_nested_hash(
-                setup_package,
-                "publicKeyShareMaterial",
-                "publicKeyShareMaterialSetRoot",
-            )?,
-            "publicKeyShareSuccinctProofSetRoot": package_nested_hash(
-                setup_package,
-                "publicKeyShareSuccinctProofs",
-                "publicKeyShareSuccinctProofSetRoot",
-            )?,
-        },
-        "publicAggregationHandoff": {
-            "thresholdShareCommitmentRoot": package_nested_hash(
-                setup_package,
-                "thresholdShareCommitments",
-                "thresholdShareCommitmentRoot",
-            )?,
-        },
-        "boundedEvaluatorReplayHandoff": {
-            "evaluatorKeyScheduleRoot": package_nested_hash(
-                setup_package,
-                "evaluatorKeySchedule",
-                "evaluatorKeyScheduleRoot",
-            )?,
-            "relinearizationKeyShareRoundsRoot": package_nested_hash(
-                setup_package,
-                "relinearizationKeyShareRounds",
-                "relinearizationKeyShareRoundsRoot",
-            )?,
-            "trusteeEvaluationKeyProofSetRoot": package_nested_hash(
-                setup_package,
-                "trusteeEvaluationKeyProofs",
-                "trusteeEvaluationKeyProofSetRoot",
-            )?,
-            "evaluationKeySetHash": package_nested_hash(
-                setup_package,
-                "evaluationKeys",
-                "evaluationKeySetHash",
-            )?,
-            "publicEvaluationKeyMaterialRoot": optional_nested_hash_value(
-                setup_package,
-                "evaluationKeys",
-                "publicEvaluationKeyMaterialRoot",
-            )?,
-        },
-        "certificateRoots": {
-            "setupTransportCertificateHash": value_string(
-                setup_package,
-                "setupTransportCertificateHash",
-            )?,
-        },
-    });
-    let handoff_root = derive_canonical_object_hash(&handoff)?;
-    handoff
-        .as_object_mut()
-        .expect("accepted setup handoff is a JSON object")
-        .insert("acceptedSetupHandoffRoot".to_string(), json!(handoff_root));
-
-    Ok(handoff)
+    )
 }
 
 fn outside_accepted_parameters(
@@ -849,19 +755,23 @@ fn outside_accepted_parameters(
 }
 
 fn verification_response(
-    current_phase: Option<&str>,
+    _current_phase: Option<&str>,
     missing_objects: Vec<String>,
-    refused_objects: Vec<Refusal>,
+    mut refused_objects: Vec<Refusal>,
     _accepted_hashes: Vec<String>,
 ) -> CanonicalResult<Value> {
-    let accepted = refused_objects.is_empty() && missing_objects.is_empty();
+    refused_objects.extend(missing_objects.into_iter().map(|missing_object| {
+        Refusal::new(
+            "setupObjectMissing",
+            "A required setup object is missing.",
+            format!("setupPackage.{missing_object}"),
+        )
+    }));
+    let accepted = refused_objects.is_empty();
 
     Ok(json!({
         "isValid": accepted,
         "operation": "verifyCollectiveBgvSetupPackage",
-        "currentPhase": current_phase,
-        "phaseOrderHash": phase_order_hash()?,
-        "missingObjects": missing_objects,
         "refusedObjects": refused_objects
             .into_iter()
             .map(|refusal| refusal.to_value())

@@ -215,51 +215,6 @@ const transportedMaterialObjects = (
     );
 };
 
-const transportedPublicKeyShareMaterialObject = (
-    input: SetupPackageInput,
-): readonly SetupCertificateTransportedObjectInput[] => {
-    if (input.transportedPublicKeyShareMaterial === undefined) {
-        return [];
-    }
-    const transportedMaterial = assertObjectRecord(
-        input.transportedPublicKeyShareMaterial,
-        'transportedPublicKeyShareMaterial',
-    );
-    const packageMaterialRoot = hashField(
-        input.publicKeyShareMaterial,
-        'publicKeyShareMaterialSetRoot',
-        'publicKeyShareMaterial',
-    );
-
-    return [
-        {
-            objectName: 'publicKeyShareMaterial',
-            objectRole: 'public-key-share-material',
-            objectRoot: packageMaterialRoot,
-            byteLength: positiveSafeIntegerField(
-                transportedMaterial,
-                'totalByteLength',
-                'transportedPublicKeyShareMaterial',
-            ),
-            fullObjectHash: hashField(
-                transportedMaterial,
-                'fullObjectHash',
-                'transportedPublicKeyShareMaterial',
-            ),
-            chunkRoot: hashField(
-                transportedMaterial,
-                'chunkRoot',
-                'transportedPublicKeyShareMaterial',
-            ),
-            chunkHashes: protocolHashArrayField(
-                transportedMaterial,
-                'chunkHashes',
-                'transportedPublicKeyShareMaterial',
-            ),
-        },
-    ];
-};
-
 const transportedVssCoefficientCommitmentMaterialObject = (
     input: SetupPackageInput,
 ): readonly SetupCertificateTransportedObjectInput[] => {
@@ -430,7 +385,6 @@ export const setupCertificateTransportedObjectsFromPackageInput = (
     input: SetupPackageInput,
 ): readonly SetupCertificateTransportedObjectInput[] => [
     ...transportedVssCoefficientCommitmentMaterialObject(input),
-    ...transportedPublicKeyShareMaterialObject(input),
     ...transportedProofMaterialObjects(
         input.transportedPublicKeyShareProofMaterial,
         'transportedPublicKeyShareProofMaterial',

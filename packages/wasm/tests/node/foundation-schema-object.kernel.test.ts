@@ -2,7 +2,11 @@ import { foundationProfile } from '@sealed-lattice/types';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import {
+    foundationHashContractVector,
+    invalidFoundationSchemaObjectVectors,
     invalidFoundationDisplayTextVectors,
+    participantIdentityContractVector,
+    validFoundationSchemaObjectVectors,
     validFoundationDisplayTextVectors,
 } from '../foundation-canonical-test-vectors.js';
 
@@ -13,134 +17,8 @@ import {
     type TranscriptCoreKernel,
 } from '#packages/wasm/src/index';
 
-const unsigned16LittleEndian = (value: number): Uint8Array => {
-    const bytes = new Uint8Array(2);
-    new DataView(bytes.buffer).setUint16(0, value, true);
-    return bytes;
-};
-
-const unsigned32LittleEndian = (value: number): Uint8Array => {
-    const bytes = new Uint8Array(4);
-    new DataView(bytes.buffer).setUint32(0, value, true);
-    return bytes;
-};
-
-const unsigned64LittleEndian = (value: bigint): Uint8Array => {
-    const bytes = new Uint8Array(8);
-    new DataView(bytes.buffer).setBigUint64(0, value, true);
-    return bytes;
-};
-
-const concatenateBytes = (...chunks: readonly Uint8Array[]): Uint8Array => {
-    const byteLength = chunks.reduce(
-        (total, chunk) => total + chunk.byteLength,
-        0,
-    );
-    const bytes = new Uint8Array(byteLength);
-    let offset = 0;
-    for (const chunk of chunks) {
-        bytes.set(chunk, offset);
-        offset += chunk.byteLength;
-    }
-    return bytes;
-};
-
-const canonicalItem = (
-    itemType: number,
-    canonicalBytes: Uint8Array,
-): Uint8Array =>
-    concatenateBytes(
-        unsigned16LittleEndian(itemType),
-        unsigned32LittleEndian(canonicalBytes.byteLength),
-        canonicalBytes,
-    );
-
-const canonicalTuple = (
-    schemaIdentifier: number,
-    schemaVersion: number,
-    ...items: readonly Uint8Array[]
-): Uint8Array =>
-    concatenateBytes(
-        unsigned16LittleEndian(schemaIdentifier),
-        unsigned16LittleEndian(schemaVersion),
-        unsigned32LittleEndian(items.length),
-        ...items,
-    );
-
-const textEncoder = new TextEncoder();
-const variableBytes = (bytes: Uint8Array): Uint8Array =>
-    concatenateBytes(unsigned32LittleEndian(bytes.byteLength), bytes);
-const ascii = (value: string): Uint8Array =>
-    canonicalItem(0x02, variableBytes(textEncoder.encode(value)));
-const displayText = (value: string): Uint8Array =>
-    canonicalItem(0x0c, variableBytes(textEncoder.encode(value)));
-const hash = (byte: number): Uint8Array =>
-    canonicalItem(0x06, new Uint8Array(64).fill(byte));
-const participantIdentity = (byte: number): Uint8Array =>
-    canonicalItem(0x07, new Uint8Array(64).fill(byte));
-const unsigned16 = (value: number): Uint8Array =>
-    canonicalItem(0x03, unsigned16LittleEndian(value));
-const unsigned32 = (value: number): Uint8Array =>
-    canonicalItem(0x04, unsigned32LittleEndian(value));
-const unsigned64 = (value: bigint): Uint8Array =>
-    canonicalItem(0x05, unsigned64LittleEndian(value));
-const fixedBytes = (byteLength: number, byte: number): Uint8Array =>
-    canonicalItem(0x01, new Uint8Array(byteLength).fill(byte));
-const emptyHashList = (): Uint8Array =>
-    canonicalItem(
-        0x0e,
-        concatenateBytes(
-            unsigned16LittleEndian(0x06),
-            unsigned32LittleEndian(0),
-        ),
-    );
-
-const mailboxKeyScheduleInput = canonicalTuple(
-    0x0200,
-    1,
-    ascii('sealed-lattice/mailbox/key-schedule/v1'),
-    unsigned16(1),
-    hash(1),
-    hash(2),
-    hash(3),
-    hash(4),
-    participantIdentity(5),
-    participantIdentity(6),
-    unsigned64(7n),
-    fixedBytes(32, 8),
-    ascii('source-to-recipient'),
-    unsigned16(1),
-    unsigned16(1),
-    hash(9),
-    emptyHashList(),
-    hash(10),
-);
-
-const representativeObjects = [
-    canonicalTuple(
-        0x0111,
-        1,
-        unsigned16(0),
-        ascii('option-1'),
-        displayText('Option 1'),
-    ),
-    mailboxKeyScheduleInput,
-    canonicalTuple(0x0303, 1, hash(11)),
-    canonicalTuple(0x1610, 1, unsigned16(1), hash(12)),
-    canonicalTuple(0x1806, 1, unsigned16(1), unsigned16(2)),
-    canonicalTuple(0x0106, 1, unsigned32(3), unsigned64(4n), hash(13)),
-    canonicalTuple(
-        0x2203,
-        1,
-        unsigned16(0),
-        unsigned32(4),
-        unsigned64(3n),
-        unsigned16(2),
-        unsigned32(8),
-        unsigned32(4),
-        unsigned16(2),
-    ),
-] as const;
+const hexadecimal = (bytes: Uint8Array): string =>
+    Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 
 const validate = (
     kernel: TranscriptCoreKernel,
@@ -165,17 +43,22 @@ const expectCommandErrorCode = (
 };
 
 describe('Foundation schema object WASM boundary', () => {
-    it('derives schema identity and re-encodes representative families byte-identically', async () => {
+    it('derives schema identity and re-encodes every accepted schema byte-identically', async () => {
         const kernel = await loadTranscriptCoreKernel();
 
-        for (const canonicalBytes of representativeObjects) {
+        expect(validFoundationSchemaObjectVectors).toHaveLength(45);
+        expect(
+            new Set(
+                validFoundationSchemaObjectVectors.map(
+                    (vector) => vector.schemaIdentifier,
+                ),
+            ).size,
+        ).toBe(45);
+        for (const vector of validFoundationSchemaObjectVectors) {
+            const canonicalBytes = vector.canonicalBytes;
             const result = validate(kernel, canonicalBytes);
-            expect(result).toEqual({
-                schemaIdentifier: new DataView(
-                    canonicalBytes.buffer,
-                    canonicalBytes.byteOffset,
-                    canonicalBytes.byteLength,
-                ).getUint16(0, true),
+            expect(result, vector.name).toEqual({
+                schemaIdentifier: vector.schemaIdentifier,
                 schemaVersion: 1,
                 canonicalByteLength: canonicalBytes.byteLength,
             });
@@ -183,6 +66,26 @@ describe('Foundation schema object WASM boundary', () => {
                 result,
             ).toEqualTypeOf<FoundationSchemaObjectValidation>();
         }
+    });
+
+    it('matches independent foundation hash and participant-identity vectors', async () => {
+        const kernel = await loadTranscriptCoreKernel();
+
+        expect(
+            kernel.computeFoundationHash512({
+                domain: foundationHashContractVector.domain,
+                canonicalItemsTupleHex: hexadecimal(
+                    foundationHashContractVector.canonicalItemsTupleBytes,
+                ),
+            }),
+        ).toBe(foundationHashContractVector.expectedHash);
+        expect(
+            kernel.deriveFoundationParticipantIdentity({
+                signingVerificationKeyHex: hexadecimal(
+                    participantIdentityContractVector.signingVerificationKey,
+                ),
+            }),
+        ).toBe(participantIdentityContractVector.expectedParticipantIdentity);
     });
 
     it('enforces the pinned Unicode 17 canonical-text corpus', async () => {
@@ -209,29 +112,12 @@ describe('Foundation schema object WASM boundary', () => {
 
     it('refuses unknown, unsupported-version, trailing, malformed, oversized, and invalid runtime inputs', async () => {
         const kernel = await loadTranscriptCoreKernel();
-        expectCommandErrorCode(
-            () => validate(kernel, canonicalTuple(0xffff, 1)),
-            'UnsupportedObjectType',
-        );
-        expectCommandErrorCode(
-            () => validate(kernel, canonicalTuple(0x0303, 2, hash(1))),
-            'UnsupportedObjectVersion',
-        );
-        expectCommandErrorCode(
-            () =>
-                validate(
-                    kernel,
-                    concatenateBytes(
-                        canonicalTuple(0x0303, 1, hash(1)),
-                        Uint8Array.of(0),
-                    ),
-                ),
-            'InvalidProtocolObject',
-        );
-        expectCommandErrorCode(
-            () => validate(kernel, canonicalTuple(0x0303, 1, unsigned16(1))),
-            'InvalidProtocolObject',
-        );
+        for (const vector of invalidFoundationSchemaObjectVectors) {
+            expectCommandErrorCode(
+                () => validate(kernel, vector.canonicalBytes),
+                vector.expectedCode,
+            );
+        }
         expectCommandErrorCode(
             () =>
                 validate(

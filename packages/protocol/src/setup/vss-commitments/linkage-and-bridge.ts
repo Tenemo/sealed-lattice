@@ -1,8 +1,10 @@
-import { deriveCanonicalObjectHash, hash512Hex } from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
-import { bytesFromHex } from '../common-fields.js';
-import { encodeStandardBase64 } from '../proof-byte-encoding.js';
+import {
+    canonicalGeneratedSetupProofMaterialDescriptor,
+    type CanonicalGeneratedSetupProofMaterial,
+} from '../setup-proof-material-transport.js';
 import type {
     SetupCommitmentValue,
     VssCoefficientCommitmentMaterialSet,
@@ -18,6 +20,7 @@ import {
     type VssPublicCoefficientCredential,
     type VssPublicRecipientShareCommitmentSet,
     type VssPublicRecipientShareCredential,
+    type VssGeneratedCanonicalProofMaterial,
     type VssShareLinkageProofComputer,
 } from './commitment-sets.js';
 
@@ -146,8 +149,57 @@ export const createVssShareLinkageStatement = (input: {
 };
 
 export const vssShareLinkageProofFamily = 'vss-share-linkage';
-export const vssShareLinkageProofBytesHashDomain =
-    'sealed-lattice/setup/vss-share-linkage/proof-bytes';
+
+const canonicalSetupProofMaterialEncoding = 'binary-chunked-proof-bytes';
+const protocolHashPattern = /^[0-9a-f]{128}$/u;
+
+export type GeneratedVssCanonicalProofMaterial = Readonly<{
+    readonly proofMaterialRoot: ProtocolHash;
+    readonly descriptorBytes: Uint8Array;
+}>;
+
+const validatedGeneratedVssCanonicalProofMaterial = (
+    proofFamily: string,
+    generatedProof: VssGeneratedCanonicalProofMaterial,
+): GeneratedVssCanonicalProofMaterial => {
+    if (
+        generatedProof.proofBytesEncoding !==
+        canonicalSetupProofMaterialEncoding
+    ) {
+        throw new TypeError(
+            `${proofFamily} proof bytes must use the canonical binary chunked encoding.`,
+        );
+    }
+    if (!protocolHashPattern.test(generatedProof.proofBytesHash)) {
+        throw new TypeError(
+            `${proofFamily} proofBytesHash must be a protocol hash.`,
+        );
+    }
+    if (!protocolHashPattern.test(generatedProof.proofMaterialRoot)) {
+        throw new TypeError(
+            `${proofFamily} proofMaterialRoot must be a protocol hash.`,
+        );
+    }
+    const expectedProofMaterialRoot = deriveCanonicalObjectHash({
+        objectType: 'SetupProofMaterialReference',
+        proofFamily,
+        proofBytesHash: generatedProof.proofBytesHash,
+    });
+    if (generatedProof.proofMaterialRoot !== expectedProofMaterialRoot) {
+        throw new Error(
+            `${proofFamily} proofMaterialRoot must bind its proof family and proofBytesHash.`,
+        );
+    }
+
+    const canonicalMaterial: CanonicalGeneratedSetupProofMaterial =
+        generatedProof.canonicalMaterial;
+
+    return {
+        proofMaterialRoot: generatedProof.proofMaterialRoot,
+        descriptorBytes:
+            canonicalGeneratedSetupProofMaterialDescriptor(canonicalMaterial),
+    };
+};
 
 // Fresh prover blinding randomness per proof record. The share-linkage proof is
 // zero-knowledge, so this is independent per (source trustee, proof record) and
@@ -166,6 +218,13 @@ type VssShareLinkageProofMaterialSetInput = {
     readonly shareLinkageProofRandomness: VssShareLinkageProofRandomnessProvider;
     readonly generateVssShareLinkageProof: VssShareLinkageProofComputer;
 };
+
+export type VssShareLinkageProofMaterialBuild<
+    ProofMaterialSet extends Record<string, unknown> = Record<string, unknown>,
+> = Readonly<{
+    readonly proofMaterialSet: ProofMaterialSet;
+    readonly canonicalProofMaterials: readonly GeneratedVssCanonicalProofMaterial[];
+}>;
 
 const vssShareLinkageCoordinateKey = (
     sourceTrusteeRosterPosition: number,
@@ -190,19 +249,23 @@ export function createVssShareLinkageProofMaterialSet(
     input: VssShareLinkageProofMaterialSetInput & {
         readonly deriveProofMaterialSetRoot?: true;
     },
-): Record<string, unknown> & {
-    readonly proofMaterialSetRoot: ProtocolHash;
-};
+): Promise<
+    VssShareLinkageProofMaterialBuild<
+        Record<string, unknown> & {
+            readonly proofMaterialSetRoot: ProtocolHash;
+        }
+    >
+>;
 export function createVssShareLinkageProofMaterialSet(
     input: VssShareLinkageProofMaterialSetInput & {
         readonly deriveProofMaterialSetRoot: false;
     },
-): Record<string, unknown>;
-export function createVssShareLinkageProofMaterialSet(
+): Promise<VssShareLinkageProofMaterialBuild>;
+export async function createVssShareLinkageProofMaterialSet(
     input: VssShareLinkageProofMaterialSetInput & {
         readonly deriveProofMaterialSetRoot?: boolean;
     },
-): Record<string, unknown> {
+): Promise<VssShareLinkageProofMaterialBuild> {
     const { statement, coefficientCommitmentSet, recipientShareCommitmentSet } =
         input;
     const {
@@ -340,6 +403,7 @@ export function createVssShareLinkageProofMaterialSet(
     };
 
     const proofRecords: Record<string, unknown>[] = [];
+    const canonicalProofMaterials: GeneratedVssCanonicalProofMaterial[] = [];
     for (
         let sourceTrusteeRosterPosition = 0;
         sourceTrusteeRosterPosition < participantCount;
@@ -451,7 +515,7 @@ export function createVssShareLinkageProofMaterialSet(
                 sourceTrusteeRosterPosition,
                 proofRecordIndex,
             });
-            const generatedProof = input.generateVssShareLinkageProof({
+            const generatedProof = await input.generateVssShareLinkageProof({
                 context: {
                     ceremonyId: statement.ceremonyId,
                     manifestHash: statement.manifestHash,
@@ -476,20 +540,20 @@ export function createVssShareLinkageProofMaterialSet(
                 proofRandomnessSeedHex: proofRandomness.seedHex,
                 proofRandomnessNonceHex: proofRandomness.nonceHex,
             });
-            const proofBytes = bytesFromHex(
-                generatedProof.proofBytesHex,
-                'VSS share linkage proofBytesHex',
-            );
+            const canonicalProofMaterial =
+                validatedGeneratedVssCanonicalProofMaterial(
+                    vssShareLinkageProofFamily,
+                    generatedProof,
+                );
+            canonicalProofMaterials.push(canonicalProofMaterial);
             const proofRecordWithoutRoot = {
                 objectType: 'VssShareLinkageProofRecord',
                 proofFamily: vssShareLinkageProofFamily,
                 linkageItems,
                 vssShareLinkage,
-                proofBytesHash: hash512Hex(
-                    vssShareLinkageProofBytesHashDomain,
-                    [proofBytes],
-                ),
-                proofBytesBase64: encodeStandardBase64(proofBytes),
+                proofBytesHash: generatedProof.proofBytesHash,
+                proofBytesEncoding: canonicalSetupProofMaterialEncoding,
+                proofMaterialRoot: generatedProof.proofMaterialRoot,
             };
             proofRecords.push({
                 ...proofRecordWithoutRoot,
@@ -523,14 +587,20 @@ export function createVssShareLinkageProofMaterialSet(
     };
 
     if (input.deriveProofMaterialSetRoot === false) {
-        return proofMaterialSetWithoutRoot;
+        return {
+            proofMaterialSet: proofMaterialSetWithoutRoot,
+            canonicalProofMaterials,
+        };
     }
 
     return {
-        ...proofMaterialSetWithoutRoot,
-        proofMaterialSetRoot: deriveCanonicalObjectHash(
-            proofMaterialSetWithoutRoot,
-        ),
+        proofMaterialSet: {
+            ...proofMaterialSetWithoutRoot,
+            proofMaterialSetRoot: deriveCanonicalObjectHash(
+                proofMaterialSetWithoutRoot,
+            ),
+        },
+        canonicalProofMaterials,
     };
 }
 
@@ -583,8 +653,6 @@ const vssPublicCommitmentBinaryFormat =
 const sameSecretBridgeTargetBasisLimbOrder =
     'target constant roots are ordered by contiguous target-basis rnsLimbIndex values starting at zero and bind the listed target-basis prime';
 export const sameSecretBridgeProofFamily = 'same-secret-bridge';
-export const sameSecretBridgeProofBytesHashDomain =
-    'sealed-lattice/setup/same-secret-bridge/proof-bytes';
 
 export type VssSameSecretBridgeTargetConstantRoot = {
     readonly rnsLimbIndex: number;
@@ -919,7 +987,7 @@ export type SameSecretBridgeSourceLinkage = {
 
 // The kernel-backed same-secret bridge proof (bound to the WASM
 // `GenerateSameSecretBridgeProof` command by the SDK). Injected so the
-// protocol layer assembles the witness but never runs the certified prover.
+// protocol layer assembles the witness but never runs the kernel prover.
 // Target committed material carries no algebraic opening randomness. The
 // opening-randomness witness belongs to the full source BDLOP commitment set;
 // target seeds and context hashes regenerate the committed-material trees.
@@ -935,7 +1003,7 @@ export type SameSecretBridgeProofComputer = (input: {
     readonly vssCommittedMaterialContextHashesByBoundMessage: readonly string[];
     readonly proofRandomnessSeedHex: string;
     readonly proofRandomnessNonceHex: string;
-}) => { readonly proofBytesHex: string };
+}) => Promise<VssGeneratedCanonicalProofMaterial>;
 
 // Private prover input for one trustee. The statement carries the canonical
 // shamir-zero source bodies; this provider supplies only their secret opening
@@ -964,7 +1032,8 @@ type VssSameSecretBridgeProofRecord = {
     readonly proofFamily: typeof sameSecretBridgeProofFamily;
     readonly sameSecretBridgeStatementRoot: ProtocolHash;
     readonly proofBytesHash: ProtocolHash;
-    readonly proofBytesBase64: string;
+    readonly proofBytesEncoding: typeof canonicalSetupProofMaterialEncoding;
+    readonly proofMaterialRoot: ProtocolHash;
     readonly sameSecretBridgeProofRecordRoot: ProtocolHash;
 };
 
@@ -989,6 +1058,14 @@ export type VssSameSecretBridgeProofMaterialSet = {
     readonly proofMaterialSetRoot?: ProtocolHash;
 };
 
+export type VssSameSecretBridgeProofMaterialBuild<
+    ProofMaterialSet extends VssSameSecretBridgeProofMaterialSet =
+        VssSameSecretBridgeProofMaterialSet,
+> = Readonly<{
+    readonly proofMaterialSet: ProofMaterialSet;
+    readonly canonicalProofMaterials: readonly GeneratedVssCanonicalProofMaterial[];
+}>;
+
 // The same-secret bridge proof material set: one succinct bridge proof
 // per source trustee. The verifier recomputes the statement roots and the proof
 // bytes hash and checks each proof, so this builder assembles the witness (the
@@ -998,18 +1075,31 @@ export function createVssSameSecretBridgeProofMaterialSet(
     input: VssSameSecretBridgeProofMaterialSetInput & {
         readonly deriveProofMaterialSetRoot?: true;
     },
-): VssSameSecretBridgeProofMaterialSet &
-    Required<Pick<VssSameSecretBridgeProofMaterialSet, 'proofMaterialSetRoot'>>;
+): Promise<
+    VssSameSecretBridgeProofMaterialBuild<
+        VssSameSecretBridgeProofMaterialSet &
+            Required<
+                Pick<
+                    VssSameSecretBridgeProofMaterialSet,
+                    'proofMaterialSetRoot'
+                >
+            >
+    >
+>;
 export function createVssSameSecretBridgeProofMaterialSet(
     input: VssSameSecretBridgeProofMaterialSetInput & {
         readonly deriveProofMaterialSetRoot: false;
     },
-): Omit<VssSameSecretBridgeProofMaterialSet, 'proofMaterialSetRoot'>;
-export function createVssSameSecretBridgeProofMaterialSet(
+): Promise<
+    VssSameSecretBridgeProofMaterialBuild<
+        Omit<VssSameSecretBridgeProofMaterialSet, 'proofMaterialSetRoot'>
+    >
+>;
+export async function createVssSameSecretBridgeProofMaterialSet(
     input: VssSameSecretBridgeProofMaterialSetInput & {
         readonly deriveProofMaterialSetRoot?: boolean;
     },
-): VssSameSecretBridgeProofMaterialSet {
+): Promise<VssSameSecretBridgeProofMaterialBuild> {
     const { statementSet } = input;
     const constantCoefficientCredentialByCoordinate = new Map(
         input.coefficientCredentials
@@ -1035,139 +1125,137 @@ export function createVssSameSecretBridgeProofMaterialSet(
         return credential;
     };
 
-    const proofRecords = statementSet.statementRecords.map(
-        (statementRecord): VssSameSecretBridgeProofRecord => {
-            const sourceTrusteeRosterPosition =
-                statementRecord.trusteeRosterPosition;
-            const { secretCoefficients, sourceOpeningRandomnessByLimb } =
-                input.sourceWitness({ sourceTrusteeRosterPosition });
-            const sourceConstantCommitments =
-                statementRecord.sourceConstantCoefficientCommitments.map(
-                    (sourceConstantCommitment, sourceRnsLimbIndex) => {
-                        if (
-                            sourceConstantCommitment.rnsLimbIndex !==
-                                sourceRnsLimbIndex ||
-                            sourceConstantCommitment.shamirCoefficientIndex !==
-                                0 ||
-                            sourceConstantCommitment.commitment
-                                .sourceRnsLimbIndex !== sourceRnsLimbIndex ||
-                            sourceConstantCommitment.commitment
-                                .sourceMessageModulus !==
-                                sourceConstantCommitment.rnsPrime ||
-                            sourceConstantCommitment.commitment
-                                .shamirCoefficientIndex !== 0 ||
-                            sourceConstantCommitment.commitment.ringDegree !==
-                                statementRecord.ringDegree
-                        ) {
-                            throw new Error(
-                                'Same-secret bridge statement must carry canonical source constant commitments in source-limb order.',
-                            );
-                        }
+    const canonicalProofMaterials: GeneratedVssCanonicalProofMaterial[] = [];
+    const proofRecords: VssSameSecretBridgeProofRecord[] = [];
+    for (const statementRecord of statementSet.statementRecords) {
+        const sourceTrusteeRosterPosition =
+            statementRecord.trusteeRosterPosition;
+        const { secretCoefficients, sourceOpeningRandomnessByLimb } =
+            input.sourceWitness({ sourceTrusteeRosterPosition });
+        const sourceConstantCommitments =
+            statementRecord.sourceConstantCoefficientCommitments.map(
+                (sourceConstantCommitment, sourceRnsLimbIndex) => {
+                    if (
+                        sourceConstantCommitment.rnsLimbIndex !==
+                            sourceRnsLimbIndex ||
+                        sourceConstantCommitment.shamirCoefficientIndex !== 0 ||
+                        sourceConstantCommitment.commitment
+                            .sourceRnsLimbIndex !== sourceRnsLimbIndex ||
+                        sourceConstantCommitment.commitment
+                            .sourceMessageModulus !==
+                            sourceConstantCommitment.rnsPrime ||
+                        sourceConstantCommitment.commitment
+                            .shamirCoefficientIndex !== 0 ||
+                        sourceConstantCommitment.commitment.ringDegree !==
+                            statementRecord.ringDegree
+                    ) {
+                        throw new Error(
+                            'Same-secret bridge statement must carry canonical source constant commitments in source-limb order.',
+                        );
+                    }
 
-                        return sourceConstantCommitment.commitment;
-                    },
-                );
-            if (
-                sourceConstantCommitments.length === 0 ||
-                sourceOpeningRandomnessByLimb.length !==
-                    sourceConstantCommitments.length
-            ) {
-                throw new Error(
-                    'Same-secret bridge source witness must cover every canonical source limb exactly once in order.',
-                );
-            }
-            const negativeIndicatorCoefficients = secretCoefficients.map(
-                (coefficient) => (coefficient < 0 ? 1 : 0),
+                    return sourceConstantCommitment.commitment;
+                },
             );
-            // Committed-material regeneration inputs in the statement's
-            // bound-commitment order: the bridge binds its target-constant
-            // commitments in target order. Context hashes are read off the
-            // published commitments; the seeds are the same seeds those
-            // commitments were created with.
-            const vssCommittedMaterialSeedsByBoundMessage =
+        if (
+            sourceConstantCommitments.length === 0 ||
+            sourceOpeningRandomnessByLimb.length !==
+                sourceConstantCommitments.length
+        ) {
+            throw new Error(
+                'Same-secret bridge source witness must cover every canonical source limb exactly once in order.',
+            );
+        }
+        const negativeIndicatorCoefficients = secretCoefficients.map(
+            (coefficient) => (coefficient < 0 ? 1 : 0),
+        );
+        // Committed-material regeneration inputs in the statement's
+        // bound-commitment order: the bridge binds its target-constant
+        // commitments in target order. Context hashes are read off the
+        // published commitments; the seeds are the same seeds those
+        // commitments were created with.
+        const vssCommittedMaterialSeedsByBoundMessage =
+            statementRecord.targetConstantCoefficientCommitments.map(
+                (targetConstantCommitment) =>
+                    requireConstantCoefficientCredential(
+                        sourceTrusteeRosterPosition,
+                        targetConstantCommitment.rnsLimbIndex,
+                    ).materialSeedHex,
+            );
+        const vssCommittedMaterialContextHashesByBoundMessage =
+            statementRecord.targetConstantCoefficientCommitments.map(
+                (targetConstantCommitment) =>
+                    targetConstantCommitment.commitment.commitmentContextHash,
+            );
+        const sameSecretBridge = {
+            publicMatrixSeedHash: statementRecord.publicMatrixSeedHash,
+            sourceTrusteeIdentity: statementRecord.trusteeIdentity,
+            sourceTrusteeRosterPosition,
+            targetBasisHash: statementRecord.targetBasisHash,
+            targetRnsPrimes:
+                statementRecord.targetConstantCoefficientCommitmentRoots.map(
+                    (targetConstantRoot) => targetConstantRoot.rnsPrime,
+                ),
+            targetConstantCommitmentRoots:
+                statementRecord.targetConstantCoefficientCommitmentRoots.map(
+                    (targetConstantRoot) =>
+                        targetConstantRoot.coefficientCommitmentRoot,
+                ),
+            targetConstantCommitments:
                 statementRecord.targetConstantCoefficientCommitments.map(
                     (targetConstantCommitment) =>
-                        requireConstantCoefficientCredential(
-                            sourceTrusteeRosterPosition,
-                            targetConstantCommitment.rnsLimbIndex,
-                        ).materialSeedHex,
-                );
-            const vssCommittedMaterialContextHashesByBoundMessage =
-                statementRecord.targetConstantCoefficientCommitments.map(
-                    (targetConstantCommitment) =>
-                        targetConstantCommitment.commitment
-                            .commitmentContextHash,
-                );
-            const sameSecretBridge = {
+                        targetConstantCommitment.commitment,
+                ),
+        };
+        const proofRandomness = input.bridgeProofRandomness({
+            sourceTrusteeRosterPosition,
+        });
+        const generatedProof = await input.generateSameSecretBridgeProof({
+            context: {
+                ceremonyId: statementSet.ceremonyId,
+                manifestHash: statementSet.manifestHash,
+                rosterHash: statementSet.rosterHash,
+                trusteeIdentity: statementRecord.trusteeIdentity,
+                trusteeRosterPosition: sourceTrusteeRosterPosition,
+                setupEpoch: statementSet.setupEpoch,
+            },
+            ringDegree: statementRecord.ringDegree,
+            sameSecretLinkage: {
                 publicMatrixSeedHash: statementRecord.publicMatrixSeedHash,
-                sourceTrusteeIdentity: statementRecord.trusteeIdentity,
-                sourceTrusteeRosterPosition,
-                targetBasisHash: statementRecord.targetBasisHash,
-                targetRnsPrimes:
-                    statementRecord.targetConstantCoefficientCommitmentRoots.map(
-                        (targetConstantRoot) => targetConstantRoot.rnsPrime,
-                    ),
-                targetConstantCommitmentRoots:
-                    statementRecord.targetConstantCoefficientCommitmentRoots.map(
-                        (targetConstantRoot) =>
-                            targetConstantRoot.coefficientCommitmentRoot,
-                    ),
-                targetConstantCommitments:
-                    statementRecord.targetConstantCoefficientCommitments.map(
-                        (targetConstantCommitment) =>
-                            targetConstantCommitment.commitment,
-                    ),
-            };
-            const proofRandomness = input.bridgeProofRandomness({
-                sourceTrusteeRosterPosition,
-            });
-            const generatedProof = input.generateSameSecretBridgeProof({
-                context: {
-                    ceremonyId: statementSet.ceremonyId,
-                    manifestHash: statementSet.manifestHash,
-                    rosterHash: statementSet.rosterHash,
-                    trusteeIdentity: statementRecord.trusteeIdentity,
-                    trusteeRosterPosition: sourceTrusteeRosterPosition,
-                    setupEpoch: statementSet.setupEpoch,
-                },
-                ringDegree: statementRecord.ringDegree,
-                sameSecretLinkage: {
-                    publicMatrixSeedHash: statementRecord.publicMatrixSeedHash,
-                    commitments: sourceConstantCommitments,
-                },
-                sameSecretBridge,
-                secretCoefficients,
-                negativeIndicatorCoefficients,
-                openingRandomnessByLimb: sourceOpeningRandomnessByLimb,
-                vssCommittedMaterialSeedsByBoundMessage,
-                vssCommittedMaterialContextHashesByBoundMessage,
-                proofRandomnessSeedHex: proofRandomness.seedHex,
-                proofRandomnessNonceHex: proofRandomness.nonceHex,
-            });
-            const proofBytes = bytesFromHex(
-                generatedProof.proofBytesHex,
-                'same-secret bridge proofBytesHex',
+                commitments: sourceConstantCommitments,
+            },
+            sameSecretBridge,
+            secretCoefficients,
+            negativeIndicatorCoefficients,
+            openingRandomnessByLimb: sourceOpeningRandomnessByLimb,
+            vssCommittedMaterialSeedsByBoundMessage,
+            vssCommittedMaterialContextHashesByBoundMessage,
+            proofRandomnessSeedHex: proofRandomness.seedHex,
+            proofRandomnessNonceHex: proofRandomness.nonceHex,
+        });
+        const canonicalProofMaterial =
+            validatedGeneratedVssCanonicalProofMaterial(
+                sameSecretBridgeProofFamily,
+                generatedProof,
             );
-            const proofRecordWithoutRoot = {
-                objectType: 'VssSameSecretBridgeProofRecord',
-                proofFamily: sameSecretBridgeProofFamily,
-                sameSecretBridgeStatementRoot:
-                    statementRecord.sameSecretBridgeStatementRoot,
-                proofBytesHash: hash512Hex(
-                    sameSecretBridgeProofBytesHashDomain,
-                    [proofBytes],
-                ),
-                proofBytesBase64: encodeStandardBase64(proofBytes),
-            } as const;
+        canonicalProofMaterials.push(canonicalProofMaterial);
+        const proofRecordWithoutRoot = {
+            objectType: 'VssSameSecretBridgeProofRecord',
+            proofFamily: sameSecretBridgeProofFamily,
+            sameSecretBridgeStatementRoot:
+                statementRecord.sameSecretBridgeStatementRoot,
+            proofBytesHash: generatedProof.proofBytesHash,
+            proofBytesEncoding: canonicalSetupProofMaterialEncoding,
+            proofMaterialRoot: generatedProof.proofMaterialRoot,
+        } as const;
 
-            return {
-                ...proofRecordWithoutRoot,
-                sameSecretBridgeProofRecordRoot: deriveCanonicalObjectHash(
-                    proofRecordWithoutRoot,
-                ),
-            };
-        },
-    );
+        proofRecords.push({
+            ...proofRecordWithoutRoot,
+            sameSecretBridgeProofRecordRoot: deriveCanonicalObjectHash(
+                proofRecordWithoutRoot,
+            ),
+        });
+    }
 
     const proofMaterialSetWithoutRoot = {
         objectType: 'VssSameSecretBridgeProofMaterialSet',
@@ -1191,13 +1279,19 @@ export function createVssSameSecretBridgeProofMaterialSet(
     } as const;
 
     if (input.deriveProofMaterialSetRoot === false) {
-        return proofMaterialSetWithoutRoot;
+        return {
+            proofMaterialSet: proofMaterialSetWithoutRoot,
+            canonicalProofMaterials,
+        };
     }
 
     return {
-        ...proofMaterialSetWithoutRoot,
-        proofMaterialSetRoot: deriveCanonicalObjectHash(
-            proofMaterialSetWithoutRoot,
-        ),
+        proofMaterialSet: {
+            ...proofMaterialSetWithoutRoot,
+            proofMaterialSetRoot: deriveCanonicalObjectHash(
+                proofMaterialSetWithoutRoot,
+            ),
+        },
+        canonicalProofMaterials,
     };
 }

@@ -45,15 +45,6 @@ pub(super) fn resolve_transported_proof_material(
                 ),
             ));
         }
-        if proof_material.get("chunks").is_some() {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::ComponentMismatch,
-                format!(
-                    "transported {} proof material must arrive through the canonical binary stream",
-                    family.family_prose
-                ),
-            ));
-        }
         let proof_bytes = verified_setup_proof_material_bytes_from_request(
             request,
             family.proof_family,

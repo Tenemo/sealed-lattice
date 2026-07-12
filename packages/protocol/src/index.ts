@@ -1,4 +1,3 @@
-export { evaluateActionCapability } from './lifecycle/capabilities.js';
 export { verifyBoardConsistency } from './board/index.js';
 export {
     verifyCastReceiptShell,
@@ -12,7 +11,17 @@ export {
     restoreAndPrepareLocalTargetDecryptionShareWitness,
 } from './target-decryption/local-target-share-witness.js';
 export type { RestoredLocalTargetDecryptionShareWitnessInput } from './target-decryption/local-target-share-witness.js';
-export { isValidLifecycleTransition } from './lifecycle/lifecycle.js';
+export {
+    createBgvTargetDecryptionShareCanonicalProofMaterialTransport,
+    encodeBgvTargetDecryptionShareProofMaterialBinary,
+    targetDecryptionShareProofBytesEncoding,
+    targetDecryptionShareProofFamily,
+} from './target-decryption/proof-material-transport.js';
+export type {
+    BgvTargetDecryptionShareCanonicalMaterialExport,
+    BgvTargetDecryptionShareCanonicalProofMaterialTransport,
+    BgvTargetDecryptionShareProofMaterial,
+} from './target-decryption/proof-material-transport.js';
 export { derivePollSpecHash, validatePollSpec } from './lifecycle/poll-spec.js';
 export {
     isActionCurrentForRecoveryEpoch,
@@ -28,6 +37,11 @@ export {
     createPrivateVssMailboxSourceTrusteeDeliveryReferences,
     createPrivateVssMailboxDeliverySet,
 } from './setup/private-vss-mailbox-delivery.js';
+export type {
+    CanonicalProofMaterialChunkPull,
+    CanonicalProofMaterialChunkSink,
+    SetupProofMaterialChunkSource,
+} from './setup/setup-proof-material-transport.js';
 export {
     createBinaryChunkedPublicKeyShareMaterialBundle,
     createBinaryChunkedPublicKeyShareMaterialTransport,
@@ -40,7 +54,6 @@ export {
     publicKeyShareMaterialTransportEncoding,
     publicKeyShareMaterialEncoding,
     publicKeyShareProofFamily,
-    materialRecordsFromTransportedPublicKeyShareMaterial,
 } from './setup/public-key-share-records.js';
 export {
     createBinaryChunkedEvaluationKeyShareMaterialTransport,
@@ -52,7 +65,6 @@ export {
     evaluationKeyShareComponentMaterialEncoding,
     evaluationKeyShareComponentVectorHash,
     evaluationKeyShareComponentVectorRoot,
-    transportTrusteeEvaluationKeyProofSet,
     trusteeEvaluationKeyProofFamily,
 } from './setup/evaluation-key-proof-records.js';
 export {
@@ -128,8 +140,8 @@ export type {
     EvaluationKeyAggregateBindingSet,
     EvaluationKeyAggregateBindingTrusteeMaterialRoot,
     EvaluationKeyProofCommonInput,
-    EvaluationKeyShareComponentMaterialChunk,
-    EvaluationKeyShareComponentMaterialChunkStream,
+    EvaluationKeyShareComponentMaterialChunkSource,
+    EvaluationKeyShareComponentMaterialWriter,
     EvaluationKeyShareEmbeddedKeySwitchComponentMaterial,
     EvaluationKeyShareKeySwitchComponentMaterial,
     EvaluationKeyShareMaterial,
@@ -146,8 +158,10 @@ export type {
     GaloisKeyShareMaterialRecord,
     GaloisKeyShareRootReference,
     KeySwitchComponentVectorEntry,
+    PublicEvaluationKeyMaterialChunkSource,
     PublicEvaluationKeyMaterialReference,
     PublicEvaluationKeyMaterialTransportInput,
+    PublicEvaluationKeyMaterialWriter,
     PublicEvaluationKeySet,
     PublicEvaluationKeySetInput,
     RelinearizationKeyRootReference,
@@ -163,7 +177,7 @@ export type {
     TransportedEvaluationKeyShareProofMaterialSet,
     TransportedPublicEvaluationKeyMaterial,
     TransportedPublicEvaluationKeyMaterialSet,
-    TrusteeEvaluationKeyEmbeddedProofBytes,
+    TrusteeEvaluationKeyCanonicalProofReference,
     TrusteeEvaluationKeyProofGenerationOutput,
     TrusteeEvaluationKeyProofGenerator,
     TrusteeEvaluationKeyProofMaterialTransport,
@@ -172,7 +186,6 @@ export type {
     TrusteeEvaluationKeyProofsInput,
     TrusteeEvaluationKeyStatementContext,
     TrusteeEvaluationKeyStatementKey,
-    TrusteeEvaluationKeyTransportedProofBytes,
     TrusteeEvaluationKeyWitnessInput,
 } from './setup/evaluation-key-proof-records.js';
 export type {
@@ -184,8 +197,10 @@ export type {
 } from './setup/evaluator-key-schedule.js';
 export type {
     BinaryChunkedPublicKeyShareMaterialBundle,
+    BinaryChunkedPublicKeyShareMaterialBundleInput,
     BinaryChunkedPublicKeyShareMaterialSet,
     BinaryChunkedPublicKeyShareMaterialTransport,
+    BinaryChunkedPublicKeyShareMaterialTransportInput,
     CollectivePublicKey,
     CollectivePublicKeyCoefficientVectorMaterial,
     CollectivePublicKeyInput,
@@ -194,17 +209,17 @@ export type {
     PublicKeyShareCoefficientVectorMaterial,
     PublicKeyShareContributionInput,
     PublicKeyShareMaterialContributionInput,
+    PublicKeyShareMaterialChunkSource,
     PublicKeyShareMaterialRecord,
     PublicKeyShareMaterialRootReference,
     PublicKeyShareMaterialSet,
     PublicKeyShareMaterialSetInput,
-    PublicKeyShareSuccinctEmbeddedProofBytes,
+    PublicKeyShareMaterialWriter,
     PublicKeyShareSuccinctProofByteMaterial,
     PublicKeyShareSuccinctProofMaterial,
     PublicKeyShareSuccinctProofRecord,
     PublicKeyShareSuccinctProofSet,
     PublicKeyShareSuccinctProofSetInput,
-    PublicKeyShareSuccinctTransportedProofBytes,
     SetupPackagePublicKeyShareMaterialSet,
     SetupTransportedPublicKeyShareMaterial,
     TransportedPublicKeyShareProofMaterialSet,

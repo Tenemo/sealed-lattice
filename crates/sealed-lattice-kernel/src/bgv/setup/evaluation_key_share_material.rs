@@ -6,13 +6,13 @@
 mod component_material;
 
 pub(crate) use self::component_material::{
-    absorb_verified_canonical_component_material_chunk,
+    CanonicalComponentMaterialStream, absorb_verified_canonical_component_material_chunk,
     begin_verified_canonical_component_material_stream,
     cancel_verified_canonical_component_material_stream,
-    finish_verified_canonical_component_material_stream, CanonicalComponentMaterialStream,
+    finish_verified_canonical_component_material_stream,
 };
 pub(super) use self::component_material::{
-    component_b_vectors_from_record, VerifiedComponentMaterialEvictionGuard,
+    VerifiedComponentMaterialEvictionGuard, component_b_vectors_from_record,
 };
 #[cfg(test)]
 pub(in crate::bgv::setup) use self::component_material::{
@@ -28,7 +28,7 @@ use std::{
 #[cfg(not(target_arch = "wasm32"))]
 use std::{fs::File, io::Read, path::PathBuf};
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::{
     bgv::coefficient_codec::{coefficient_vector_hash512, coefficient_vector_le_hex},

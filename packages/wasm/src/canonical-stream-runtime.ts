@@ -36,6 +36,11 @@ export const canonicalStreamDomains = Object.freeze({
     targetOrderPartialDecryption: 20,
     maliciousTargetShareProof: 21,
     checkpointState: 22,
+    stateBallotCandidateListExactOutput: 23,
+    stateFinalitySignatureExactOutput: 24,
+    stateTargetReleaseExactOutput: 25,
+    publicKeyShareMaterial: 26,
+    publicEvaluationKeyMaterial: 27,
 } as const);
 
 export type CanonicalStreamDomain =
@@ -218,6 +223,34 @@ type CanonicalStreamKernelContext = Readonly<{
         capabilityPointer: number,
         capabilityLength: number,
     ) => number;
+    bgvMaterialReaderBegin?: (
+        familyCode: number,
+        materialRootPointer: number,
+        materialRootLength: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        statusPointer: number,
+        totalByteLengthPointer: number,
+        chunkCountPointer: number,
+    ) => number;
+    bgvMaterialReaderCancel?: (
+        handle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+    ) => number;
+    bgvMaterialReaderFinish?: (
+        handle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+    ) => number;
+    bgvMaterialReaderReadChunk?: (
+        handle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        chunkIndex: number,
+        outputPointer: number,
+        outputLength: number,
+    ) => number;
     cancel(
         handle: number,
         capabilityPointer: number,
@@ -253,6 +286,12 @@ type CanonicalStreamKernelContext = Readonly<{
 
 type FillRandomValues = (destination: Uint8Array<ArrayBuffer>) => void;
 
+type CanonicalStreamAtomicVerifierFinish = (input: {
+    readonly streamCapabilityLength: number;
+    readonly streamCapabilityPointer: number;
+    readonly streamHandle: number;
+}) => void;
+
 const contexts = new WeakMap<
     TranscriptCoreKernel,
     CanonicalStreamKernelContext
@@ -274,6 +313,7 @@ type MutableCounters = {
 };
 
 type ActiveLease = {
+    atomicVerifierFinish?: CanonicalStreamAtomicVerifierFinish;
     capabilityPointer: number;
     chunkCount: number;
     handle: number;
@@ -292,7 +332,7 @@ const refusalReasonByCode = new Map<number, RefusalReason>(
 const isCanonicalStreamDomain = (
     value: number,
 ): value is CanonicalStreamDomain =>
-    Number.isSafeInteger(value) && value >= 1 && value <= 22;
+    Number.isSafeInteger(value) && value >= 1 && value <= 25;
 
 const isArrayBuffer = (value: unknown): value is ArrayBuffer =>
     Object.prototype.toString.call(value) === '[object ArrayBuffer]';
@@ -420,10 +460,13 @@ class CanonicalStreamWorkerRuntimeImplementation implements CanonicalStreamWorke
         }
     }
 
-    public openVerifier(input: {
-        readonly descriptorBytes: Uint8Array;
-        readonly streamDomain: CanonicalStreamDomain;
-    }): CanonicalStreamVerifierLease {
+    public openVerifier(
+        input: {
+            readonly descriptorBytes: Uint8Array;
+            readonly streamDomain: CanonicalStreamDomain;
+        },
+        atomicVerifierFinish?: CanonicalStreamAtomicVerifierFinish,
+    ): CanonicalStreamVerifierLease {
         this.#prepareBegin(input.streamDomain);
         if (
             !ArrayBuffer.isView(input.descriptorBytes) ||
@@ -471,6 +514,9 @@ class CanonicalStreamWorkerRuntimeImplementation implements CanonicalStreamWorke
                 );
             }
             const lease: ActiveLease = {
+                ...(atomicVerifierFinish === undefined
+                    ? {}
+                    : { atomicVerifierFinish }),
                 capabilityPointer,
                 chunkCount: metadata[2],
                 handle,
@@ -849,16 +895,24 @@ class CanonicalStreamWorkerRuntimeImplementation implements CanonicalStreamWorke
             );
         }
         try {
-            const status = this.#context.runExclusive(
-                'canonical stream verifier finish',
-                () =>
-                    this.#context.finishVerifier(
-                        lease.handle,
-                        lease.capabilityPointer,
-                        canonicalStreamCapabilityByteLength,
-                    ),
-            );
-            this.#throwStatus(status);
+            if (lease.atomicVerifierFinish === undefined) {
+                const status = this.#context.runExclusive(
+                    'canonical stream verifier finish',
+                    () =>
+                        this.#context.finishVerifier(
+                            lease.handle,
+                            lease.capabilityPointer,
+                            canonicalStreamCapabilityByteLength,
+                        ),
+                );
+                this.#throwStatus(status);
+            } else {
+                lease.atomicVerifierFinish({
+                    streamCapabilityLength: canonicalStreamCapabilityByteLength,
+                    streamCapabilityPointer: lease.capabilityPointer,
+                    streamHandle: lease.handle,
+                });
+            }
             this.#completeLease(lease);
         } catch (error) {
             return this.#throwAfterFailingLease(lease, error);
@@ -1190,6 +1244,36 @@ export const openCanonicalStreamWorkerRuntime = (input: {
             context,
             input.fillRandomValues ?? defaultFillRandomValues,
         ),
+    );
+};
+
+/** Internal composition hook for consumers that must atomically consume a
+ * generic verifier lease in another kernel verifier. The stream handle and
+ * capability never leave the callback invoked by `finish()`.
+ */
+export const openCanonicalStreamVerifierForAtomicFinish = (input: {
+    readonly atomicFinish: CanonicalStreamAtomicVerifierFinish;
+    readonly descriptorBytes: Uint8Array;
+    readonly fillRandomValues?: FillRandomValues;
+    readonly kernel: TranscriptCoreKernel;
+    readonly streamDomain: CanonicalStreamDomain;
+}): CanonicalStreamVerifierLease => {
+    const context = contexts.get(input.kernel);
+    if (context === undefined) {
+        throw new CanonicalStreamInternalError(
+            'The transcript-core kernel has no registered stream boundary.',
+        );
+    }
+    const runtime = new CanonicalStreamWorkerRuntimeImplementation(
+        context,
+        input.fillRandomValues ?? defaultFillRandomValues,
+    );
+    return runtime.openVerifier(
+        {
+            descriptorBytes: input.descriptorBytes,
+            streamDomain: input.streamDomain,
+        },
+        input.atomicFinish,
     );
 };
 

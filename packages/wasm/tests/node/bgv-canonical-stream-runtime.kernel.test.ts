@@ -7,6 +7,7 @@ import {
 } from '#packages/wasm/src/bgv-canonical-stream-runtime';
 import {
     canonicalStreamDomains,
+    CanonicalStreamCancellationError,
     CanonicalStreamRefusalError,
     CanonicalStreamResourceError,
     openCanonicalStreamWorkerRuntime,
@@ -43,6 +44,41 @@ const descriptorFor = (
     return writer.finish();
 };
 
+const pullChunks =
+    (chunks: readonly ArrayBuffer[]) =>
+    (input: {
+        readonly chunkIndex: number;
+        readonly expectedByteLength: number;
+    }): Promise<ArrayBuffer | undefined> => {
+        const chunk = chunks[input.chunkIndex];
+        if (chunk === undefined) {
+            return Promise.resolve(undefined);
+        }
+        expect(chunk.byteLength).toBe(input.expectedByteLength);
+        return Promise.resolve(chunk.slice(0));
+    };
+
+const authenticateMaterial = async (
+    kernel: TranscriptCoreKernel,
+    runtime: ReturnType<typeof openBgvCanonicalStreamRuntime>,
+    input: {
+        readonly chunks: readonly ArrayBuffer[];
+        readonly family: Parameters<typeof runtime.readMaterial>[0]['family'];
+        readonly materialRoot: string;
+        readonly streamDomain: CanonicalStreamDomain;
+    },
+): Promise<void> =>
+    runtime.readMaterial({
+        descriptorBytes: descriptorFor(
+            kernel,
+            input.streamDomain,
+            input.chunks,
+        ),
+        family: input.family,
+        materialRoot: input.materialRoot,
+        pullChunk: pullChunks(input.chunks),
+    });
+
 describe('BGV canonical stream runtime with the real WASM kernel', () => {
     let kernel: TranscriptCoreKernel;
 
@@ -50,28 +86,29 @@ describe('BGV canonical stream runtime with the real WASM kernel', () => {
         kernel = await loadFreshTranscriptCoreKernel();
     });
 
-    it('stages setup proof bytes only after canonical terminal authentication', () => {
+    it('retains setup proof bytes only after canonical terminal authentication', async () => {
         const runtime = openBgvCanonicalStreamRuntime({ kernel });
         const chunks = [makeChunk(73, 11)];
         const materialRoot = '11'.repeat(64);
 
-        const descriptor = runtime.stage({
+        await authenticateMaterial(kernel, runtime, {
             chunks,
             family: bgvCanonicalStreamFamilies.publicKeyShare,
             materialRoot,
+            streamDomain: canonicalStreamDomains.publicKeyShareProof,
         });
 
-        expect(descriptor.byteLength).toBeGreaterThan(0);
-        expect(() =>
-            runtime.stage({
+        await expect(
+            authenticateMaterial(kernel, runtime, {
                 chunks,
                 family: bgvCanonicalStreamFamilies.publicKeyShare,
                 materialRoot,
+                streamDomain: canonicalStreamDomains.publicKeyShareProof,
             }),
-        ).toThrowError(CanonicalStreamRefusalError);
+        ).rejects.toThrowError(CanonicalStreamRefusalError);
     });
 
-    it('refuses domain substitution, reordering, replay, and truncation and then permits a clean retry', () => {
+    it('refuses domain substitution, reordering, replay, and truncation and then permits a clean retry', async () => {
         const runtime = openBgvCanonicalStreamRuntime({ kernel });
         const chunks = [
             makeChunk(foundationProfile.streamChunkByteLength, 17),
@@ -130,16 +167,17 @@ describe('BGV canonical stream runtime with the real WASM kernel', () => {
         );
         expect(truncated.state()).toBe('failed');
 
-        expect(() =>
-            runtime.stage({
+        await expect(
+            authenticateMaterial(kernel, runtime, {
                 chunks,
                 family: bgvCanonicalStreamFamilies.publicKeyShare,
                 materialRoot: '25'.repeat(64),
+                streamDomain: canonicalStreamDomains.publicKeyShareProof,
             }),
-        ).not.toThrow();
+        ).resolves.toBeUndefined();
     });
 
-    it('binds exact retransmission and keeps cancellation idempotent', () => {
+    it('binds exact retransmission and keeps cancellation idempotent', async () => {
         const runtime = openBgvCanonicalStreamRuntime({ kernel });
         const original = makeChunk(89, 37);
         const descriptor = descriptorFor(
@@ -168,16 +206,17 @@ describe('BGV canonical stream runtime with the real WASM kernel', () => {
         expect(() => cancelled.cancel()).not.toThrow();
         expect(cancelled.state()).toBe('cancelled');
 
-        expect(() =>
-            runtime.stage({
+        await expect(
+            authenticateMaterial(kernel, runtime, {
                 chunks: [original],
                 family: bgvCanonicalStreamFamilies.relinearizationComponent,
                 materialRoot: '33'.repeat(64),
+                streamDomain: canonicalStreamDomains.evaluatorKeyStore,
             }),
-        ).not.toThrow();
+        ).resolves.toBeUndefined();
     });
 
-    it('fails closed on overlapping ownership without exposing capabilities', () => {
+    it('fails closed on overlapping ownership without exposing capabilities', async () => {
         const firstRuntime = openBgvCanonicalStreamRuntime({ kernel });
         const secondRuntime = openBgvCanonicalStreamRuntime({ kernel });
         const chunks = [makeChunk(47, 41)];
@@ -199,15 +238,107 @@ describe('BGV canonical stream runtime with the real WASM kernel', () => {
                 materialRoot: '42'.repeat(64),
             }),
         ).toThrowError(CanonicalStreamResourceError);
-        expect(() => first.absorbChunk(0, chunks[0])).toThrow();
-        expect(first.state()).toBe('failed');
+        expect(() => first.absorbChunk(0, chunks[0])).not.toThrow();
+        expect(() => first.finish()).not.toThrow();
+        expect(first.state()).toBe('completed');
 
-        expect(() =>
-            firstRuntime.stage({
+        await expect(
+            authenticateMaterial(kernel, firstRuntime, {
                 chunks,
                 family: bgvCanonicalStreamFamilies.publicKeyShare,
                 materialRoot: '43'.repeat(64),
+                streamDomain: canonicalStreamDomains.publicKeyShareProof,
             }),
-        ).not.toThrow();
+        ).resolves.toBeUndefined();
+    });
+
+    it('releases each pulled chunk before requesting the next chunk', async () => {
+        const runtime = openBgvCanonicalStreamRuntime({ kernel });
+        const chunks = [
+            makeChunk(foundationProfile.streamChunkByteLength, 51),
+            makeChunk(37, 52),
+        ];
+        let liveChunk: ArrayBuffer | undefined;
+        let liveChunkCount = 0;
+        let maximumLiveChunkCount = 0;
+
+        await runtime.readMaterial({
+            descriptorBytes: descriptorFor(
+                kernel,
+                canonicalStreamDomains.publicKeyShareProof,
+                chunks,
+            ),
+            family: bgvCanonicalStreamFamilies.publicKeyShare,
+            materialRoot: '51'.repeat(64),
+            pullChunk: (request) => {
+                if (liveChunk !== undefined) {
+                    if (
+                        !new Uint8Array(liveChunk).every((byte) => byte === 0)
+                    ) {
+                        throw new Error(
+                            'The runtime retained a prior canonical chunk.',
+                        );
+                    }
+                    liveChunk = undefined;
+                    liveChunkCount -= 1;
+                }
+                const sourceChunk = chunks[request.chunkIndex];
+                if (sourceChunk === undefined) {
+                    return Promise.resolve(undefined);
+                }
+                expect(sourceChunk.byteLength).toBe(request.expectedByteLength);
+                liveChunk = sourceChunk.slice(0);
+                liveChunkCount += 1;
+                maximumLiveChunkCount = Math.max(
+                    maximumLiveChunkCount,
+                    liveChunkCount,
+                );
+                return Promise.resolve(liveChunk);
+            },
+        });
+
+        expect(maximumLiveChunkCount).toBe(1);
+        expect(liveChunkCount).toBe(0);
+    });
+
+    it('cancels an aborted pull transaction and permits a clean retry', async () => {
+        const runtime = openBgvCanonicalStreamRuntime({ kernel });
+        const chunks = [makeChunk(43, 61)];
+        const descriptorBytes = descriptorFor(
+            kernel,
+            canonicalStreamDomains.publicKeyShareProof,
+            chunks,
+        );
+        const abortController = new AbortController();
+        let cancelledChunk: ArrayBuffer | undefined;
+
+        await expect(
+            runtime.readMaterial({
+                abortSignal: abortController.signal,
+                descriptorBytes,
+                family: bgvCanonicalStreamFamilies.publicKeyShare,
+                materialRoot: '61'.repeat(64),
+                pullChunk: () => {
+                    cancelledChunk = chunks[0].slice(0);
+                    abortController.abort();
+                    return Promise.resolve(cancelledChunk);
+                },
+            }),
+        ).rejects.toThrowError(CanonicalStreamCancellationError);
+        if (cancelledChunk === undefined) {
+            throw new Error('The cancelled pull did not return its chunk.');
+        }
+        expect(new Uint8Array(cancelledChunk).every((byte) => byte === 0)).toBe(
+            true,
+        );
+
+        await expect(
+            runtime.readMaterial({
+                descriptorBytes,
+                family: bgvCanonicalStreamFamilies.publicKeyShare,
+                materialRoot: '61'.repeat(64),
+                pullChunk: pullChunks(chunks),
+            }),
+        ).resolves.toBeUndefined();
     });
 });

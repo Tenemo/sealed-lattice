@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 
-import { dynamicRosterParametersCertificateHash } from './election-foundation-fixture-constants';
 import {
     collectContributorPositionSets,
     createDeterministicPolynomial,
@@ -44,11 +43,6 @@ describe('plaintext oracle Shamir and interpolation', () => {
         (rosterSize) => {
             const thresholdParameters = deriveThresholdParameters({
                 rosterSize,
-                isCasualMicroRosterAcknowledged: rosterSize < 10,
-                dynamicRosterParametersCertificateHash:
-                    rosterSize >= 10 && rosterSize !== 10
-                        ? dynamicRosterParametersCertificateHash
-                        : undefined,
             });
             const polynomial = createDeterministicPolynomial(
                 normalizeFieldElement(rosterSize * 19),
@@ -80,7 +74,6 @@ describe('plaintext oracle Shamir and interpolation', () => {
         (rosterSize) => {
             const thresholdParameters = deriveThresholdParameters({
                 rosterSize,
-                isCasualMicroRosterAcknowledged: true,
             });
             const secret = normalizeFieldElement(rosterSize * 23);
             const polynomial = createDeterministicPolynomial(

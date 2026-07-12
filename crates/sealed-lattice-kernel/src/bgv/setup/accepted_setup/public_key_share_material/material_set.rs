@@ -1,5 +1,5 @@
 use super::material_records::*;
-use super::transport::*;
+use super::transport::verified_canonical_public_key_share_material;
 use super::*;
 
 pub(in super::super) fn public_key_share_material_uses_transport(material_set: &Value) -> bool {
@@ -82,22 +82,48 @@ pub(super) fn verify_transport_public_key_share_material_set(
             "transportedPublicKeyShareMaterial is required for binary-chunked public-key share material",
         ));
     };
-    verify_public_key_share_material_transport_header(transported_material)?;
-    let chunks = public_key_share_material_chunks(transported_material)?;
-    let transport_hashes = public_key_share_material_transport_hashes(&chunks)?;
-    verify_public_key_share_material_transport_hash_fields(
-        transported_material,
-        &transport_hashes,
-        true,
-        "transported public-key share material",
+    if !transported_material.is_object()
+        || transported_material
+            .get("objectType")
+            .and_then(Value::as_str)
+            != Some(PUBLIC_KEY_SHARE_MATERIAL_TRANSPORT_OBJECT_TYPE)
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "transportedPublicKeyShareMaterial must be a SetupTransportedPublicKeyShareMaterial object",
+        ));
+    }
+    let transported_material_root =
+        value_string(transported_material, "publicKeyShareMaterialSetRoot")?;
+    validate_hash_string(
+        transported_material_root,
+        "transportedPublicKeyShareMaterial.publicKeyShareMaterialSetRoot",
     )?;
-    verify_public_key_share_material_set_transport_reference(material_set, &transport_hashes)?;
+    if material_set
+        .get("publicKeyShareMaterialSetRoot")
+        .and_then(Value::as_str)
+        != Some(transported_material_root)
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ComponentMismatch,
+            "transported public-key share material root must match the public-key share material set",
+        ));
+    }
+    let verified_material = verified_canonical_public_key_share_material(
+        transported_material_root,
+    )?
+    .ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "transported public-key share material was not accepted by the canonical stream verifier",
+        )
+    })?;
     let (bindings, material_roots) = decode_public_key_share_material_bindings(
         setup_context,
         common_binding,
         ring_degree,
         share_records,
-        &chunks,
+        &verified_material,
     )?;
 
     Ok((bindings, material_roots))

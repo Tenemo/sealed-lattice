@@ -52,25 +52,12 @@ struct RootRegistry {
 }
 
 impl RootRegistry {
-    fn allocate_handle(&mut self) -> u32 {
-        loop {
-            self.next_handle = self.next_handle.wrapping_add(1);
-            if self.next_handle == 0 {
-                self.next_handle = 1;
-            }
-            let candidate = self.next_handle;
-            if self
-                .active
-                .as_ref()
-                .is_none_or(|lease| lease.handle != candidate)
-                && self
-                    .staged
-                    .as_ref()
-                    .is_none_or(|lease| lease.handle != candidate)
-            {
-                return candidate;
-            }
-        }
+    fn allocate_handle(&mut self) -> RuntimeResult<u32> {
+        self.next_handle = self
+            .next_handle
+            .checked_add(1)
+            .ok_or(LOCAL_STORAGE_ROOT_STATUS_RESOURCE_LIMIT)?;
+        Ok(self.next_handle)
     }
 
     fn stage(
@@ -84,7 +71,7 @@ impl RootRegistry {
         if capability.iter().all(|byte| *byte == 0) {
             return Err(LOCAL_STORAGE_ROOT_STATUS_CAPABILITY_MISMATCH);
         }
-        let handle = self.allocate_handle();
+        let handle = self.allocate_handle()?;
         self.staged = Some(RootLease {
             capability: Zeroizing::new(capability),
             handle,

@@ -266,6 +266,39 @@ fn proof_codec_round_trips_and_rejects_malformed_bytes() {
 }
 
 #[test]
+fn proof_codec_decodes_chunked_material_across_adversarial_boundaries() {
+    let (statement, witness) =
+        generate_development_public_key_share_instance("c0dec0df", SMALL_RING_DEGREE)
+            .expect("public-key share instance");
+    let proof =
+        prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
+    let bytes = encode_trustee_evaluation_key_proof(&proof);
+    let chunk_widths = [3_usize, 5, 7, 11, 257, 4093];
+    let mut chunks = Vec::new();
+    let mut byte_offset = 0;
+    let mut width_index = 0;
+    while byte_offset < bytes.len() {
+        let chunk_end =
+            (byte_offset + chunk_widths[width_index % chunk_widths.len()]).min(bytes.len());
+        chunks.push(bytes[byte_offset..chunk_end].to_vec());
+        byte_offset = chunk_end;
+        width_index += 1;
+    }
+    let chunked_material = TestChunkedProofBytes::new(chunks);
+    let decoded = decode_trustee_evaluation_key_proof_from_source(&statement, &chunked_material)
+        .expect("decode proof across chunk boundaries");
+    verify_evaluation_key_share(&statement, &decoded).expect("verify chunk-decoded proof");
+
+    let mut truncated_chunks = chunked_material.chunks.to_vec();
+    truncated_chunks.last_mut().expect("final chunk").pop();
+    let truncated_material = TestChunkedProofBytes::new(truncated_chunks);
+    assert!(
+        decode_trustee_evaluation_key_proof_from_source(&statement, &truncated_material).is_err(),
+        "a chunked proof truncated at the final byte must reject"
+    );
+}
+
+#[test]
 #[ignore = "heavy Rust kernel proof test; run pnpm run test:rust:kernel:heavy"]
 fn heavy_rust_kernel_proof_codec_rejects_low_degree_shape_mismatches_before_verification() {
     // The adaptive low-degree final layer absorbs the whole recursion below a

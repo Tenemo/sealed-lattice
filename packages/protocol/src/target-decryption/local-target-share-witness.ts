@@ -766,7 +766,7 @@ export const restoreAndPrepareLocalTargetDecryptionShareWitness = async (
     const participant = setupParticipant(setupPackage, trusteeIdentity);
     if (participant.rosterPosition !== trusteeRosterPosition) {
         throw new Error(
-            'restored aggregate threshold share roster position must match the accepted setup package.',
+            'restored aggregate threshold share roster position must match the supplied setup package.',
         );
     }
     compareProtocolHashField(

@@ -138,6 +138,7 @@ pub(in super::super) fn compact_aggregate_threshold_proof_fixture() -> serde_jso
             &aggregate_threshold_commitment_set,
         ));
     package["vssPublicAggregateThresholdCommitmentSet"] = aggregate_threshold_commitment_set;
+    aggregate_threshold::append_vss_aggregate_threshold_proof_material_transport(&mut package);
 
     package
 }

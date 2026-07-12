@@ -25,7 +25,6 @@ pub(crate) fn bgv_operation_rejection(
         "isValid": false,
         "operation": operation,
         "refusedObjects": [refused_object],
-        "unresolvedReason": "BgvOperationRejected",
     })
 }
 

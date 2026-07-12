@@ -61,7 +61,7 @@ pub(crate) fn run_direct_encrypted_ballot(request: &Value) -> CanonicalResult<Va
             setup_package,
             &evaluator_key,
             encrypted_ballot,
-            &proof_transport.proof_bytes,
+            &proof_generation.proof_bytes,
         )?;
         total_verification_time_milliseconds.add(proof_verification_started.elapsed_milliseconds());
         proof_summaries.push(DirectBallotRelationProofSummary::from_verified_proof(

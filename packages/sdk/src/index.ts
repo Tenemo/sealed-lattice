@@ -6,20 +6,26 @@ import {
     derivePollSpecHash as derivePollSpecHashInternal,
     deriveThresholdParameters as deriveThresholdParametersInternal,
     deriveThresholdParametersHash as deriveThresholdParametersHashInternal,
-    evaluateActionCapability as evaluateActionCapabilityInternal,
     verifyCastReceiptShell as verifyCastReceiptShellInternal,
     verifyCloseRecordShell as verifyCloseRecordShellInternal,
-    isValidLifecycleTransition as isValidLifecycleTransitionInternal,
     isActionCurrentForRecoveryEpoch as isActionCurrentForRecoveryEpochInternal,
     validatePollSpec as validatePollSpecInternal,
     verifyBoardConsistency as verifyBoardConsistencyInternal,
     verifyRecoveryEpochUpdate as verifyRecoveryEpochUpdateInternal,
     verifyRosterExternalAcceptance as verifyRosterExternalAcceptanceInternal,
     verifyRosterManifestTranscript as verifyRosterManifestTranscriptInternal,
+    createBgvTargetDecryptionShareCanonicalProofMaterialTransport,
 } from '@sealed-lattice/protocol';
 import type {
+    BgvTargetDecryptionShareCanonicalProofMaterialTransport,
+    BgvTargetDecryptionShareProofMaterial,
+    CanonicalProofMaterialChunkPull as ProtocolCanonicalProofMaterialChunkPull,
+    CanonicalProofMaterialChunkSink as ProtocolCanonicalProofMaterialChunkSink,
+    SetupProofMaterialChunkSource as ProtocolSetupProofMaterialChunkSource,
     SetupTransportedPublicKeyShareMaterial as ProtocolSetupTransportedPublicKeyShareMaterial,
-    EvaluationKeyShareComponentMaterialChunkStream as ProtocolEvaluationKeyShareComponentMaterialChunkStream,
+    PublicKeyShareMaterialChunkSource as ProtocolPublicKeyShareMaterialChunkSource,
+    EvaluationKeyShareComponentMaterialChunkSource as ProtocolEvaluationKeyShareComponentMaterialChunkSource,
+    PublicEvaluationKeyMaterialChunkSource as ProtocolPublicEvaluationKeyMaterialChunkSource,
     TransportedPublicKeyShareProofMaterialSet as ProtocolTransportedPublicKeyShareProofMaterialSet,
     TransportedVssShareLinkageProofMaterialSet as ProtocolTransportedVssShareLinkageProofMaterialSet,
     TransportedSameSecretBridgeProofMaterialSet as ProtocolTransportedSameSecretBridgeProofMaterialSet,
@@ -38,16 +44,12 @@ import type {
     BoardConsistencyVerification,
     CastReceiptVerification,
     CastReceiptVerificationInput,
-    CapabilityContext,
-    CapabilityDecision,
     CloseRecordVerification,
     CloseRecordVerificationInput,
     FirstValidOrderingInput,
     FirstValidOrderingVerification,
-    LifecycleTransition,
     PollSpecInput,
     PollSpecValidation,
-    ProtocolAction,
     ProtocolHash,
     RecoveryEpochVerification,
     RecoveryEpochVerificationInput,
@@ -61,6 +63,8 @@ import type {
 } from '@sealed-lattice/types';
 import {
     foundationBoardCandidateObjectHash as foundationBoardCandidateObjectHashInternal,
+    bgvCanonicalStreamFamilies,
+    openBgvCanonicalStreamRuntime,
     openFoundationBoardSession as openFoundationBoardSessionInternal,
     type BgvTargetDecryptionResultReleaseCompletion,
 } from '@sealed-lattice/wasm';
@@ -90,20 +94,14 @@ const assertSetupPackageVerificationBindings = (
 };
 
 export type {
-    AcceptedTargetFinalityCheckpoint,
     ActionContext,
     ActionCurrentForRecoveryEpochInput,
     ActionCurrentForRecoveryEpochResult,
-    TargetBoundShareSelectionParameters,
     AppendOnlyConsistencyProof,
     BoardConsistencyInput,
     BoardConsistencyVerification,
     BoardEntryMerklePathStep,
-    CanonicalError,
-    CanonicalErrorCode,
     CanonicalSignedRootObject,
-    CapabilityContext,
-    CapabilityDecision,
     CastReceipt,
     CastReceiptVerification,
     CastReceiptVerificationInput,
@@ -114,14 +112,10 @@ export type {
     ConflictingHeadEvidence,
     ConflictingManifestEvidence,
     ElectionManifest,
-    DecryptionShareFilteringMode,
     FirstValidOrderingInput,
     FirstValidOrderingVerification,
     FrozenRosterParameters,
-    HeBackendCorruptionModel,
     InclusionProof,
-    LifecycleState,
-    LifecycleTransition,
     ManifestOpaqueBindings,
     ManifestPolicyHashes,
     MlDsaSignatureMode,
@@ -131,7 +125,6 @@ export type {
     PollSpecValidation,
     PollSpecValidationError,
     PollSpecValidationErrorCode,
-    ProtocolAction,
     ProtocolHash,
     ProtocolObjectType,
     ProtocolRefusalCode,
@@ -140,7 +133,6 @@ export type {
     RecoveryEpochUpdate,
     RecoveryEpochVerification,
     RecoveryEpochVerificationInput,
-    RecoveryState,
     RefusalReason,
     RefusalRecord,
     RegistrationEntry,
@@ -149,25 +141,16 @@ export type {
     RosterExternalAcceptanceVerificationInput,
     RosterManifestTranscriptInput,
     RosterManifestTranscriptVerification,
-    RosterParametersKind,
     ScoreDomain,
-    SignatureVerificationResult,
     SignedBoardHead,
     SignedObjectType,
     SignerRole,
     SmallRosterPolicy,
     StructuredProtocolVerificationResult,
-    TargetFinalityPolicy,
-    TargetFinalityCheckpoint,
-    TargetFinalityRecord,
-    TargetProposal,
     ThresholdParameters,
     ThresholdParametersInput,
-    ThresholdWarning,
     TrusteeSetupEntry,
     ValidatedFirstValidObject,
-    WitnessCheckpoint,
-    WitnessPolicy,
 } from '@sealed-lattice/types';
 
 declare const foundationBoardCandidateBrand: unique symbol;
@@ -189,9 +172,11 @@ export type FoundationBoardSessionInput = Readonly<{
     canonicalRosterBytes: Uint8Array;
     ceremonyContextHash: Uint8Array;
     limits: FoundationBoardIngestionLimits;
+    /** Externally trusted anchor; the board session does not establish its provenance. */
     publicSetupSeedObjectHash?: Uint8Array;
+    /** Externally trusted anchor; the board session does not establish its provenance. */
+    setupSourceObjectHash?: Uint8Array;
     suiteIdentifier: Uint8Array;
-    verifiedSetupSourceObjectHash?: Uint8Array;
 }>;
 
 export type FoundationBoardSessionState = 'active' | 'cancelled';
@@ -288,6 +273,7 @@ export type VerifyPrivateVssShareInput = Readonly<{
     readonly sourceTrusteeCoefficientCommitmentMaterialRecords: readonly unknown[];
     readonly privateEnvelope: unknown;
     readonly transportedPrivateVssShareProofMaterial?: unknown;
+    readonly privateVssShareProofMaterialChunkSources?: readonly SetupProofMaterialChunkSource[];
     readonly expectedPrivateEnvelopeHash?: ProtocolHash;
     readonly expectedLocalVerificationRoot?: ProtocolHash;
 }>;
@@ -321,6 +307,8 @@ export type CollectiveBgvSetupRosterEntryInput =
 
 export type SetupTransportedPublicKeyShareMaterial =
     ProtocolSetupTransportedPublicKeyShareMaterial;
+export type PublicKeyShareMaterialChunkSource =
+    ProtocolPublicKeyShareMaterialChunkSource;
 export type TransportedPublicKeyShareProofMaterialSet =
     ProtocolTransportedPublicKeyShareProofMaterialSet;
 export type TransportedVssShareLinkageProofMaterialSet =
@@ -333,8 +321,16 @@ export type TransportedEvaluationKeyShareComponentMaterialSet =
     ProtocolTransportedEvaluationKeyShareComponentMaterialSet;
 export type TransportedEvaluationKeyAggregateBindingOpeningSet =
     ProtocolTransportedEvaluationKeyAggregateBindingOpeningSet;
-export type EvaluationKeyShareComponentMaterialChunkStream =
-    ProtocolEvaluationKeyShareComponentMaterialChunkStream;
+export type EvaluationKeyShareComponentMaterialChunkSource =
+    ProtocolEvaluationKeyShareComponentMaterialChunkSource;
+export type PublicEvaluationKeyMaterialChunkSource =
+    ProtocolPublicEvaluationKeyMaterialChunkSource;
+export type CanonicalProofMaterialChunkPull =
+    ProtocolCanonicalProofMaterialChunkPull;
+export type CanonicalProofMaterialChunkSink =
+    ProtocolCanonicalProofMaterialChunkSink;
+export type SetupProofMaterialChunkSource =
+    ProtocolSetupProofMaterialChunkSource;
 export type TransportedPublicEvaluationKeyMaterialSet =
     ProtocolTransportedPublicEvaluationKeyMaterialSet;
 
@@ -344,17 +340,20 @@ export type VerifySetupPackageInput = Readonly<{
     readonly expectedManifestHash: ProtocolHash;
     readonly expectedRosterHash: ProtocolHash;
     readonly transportedPublicKeyShareMaterial?: SetupTransportedPublicKeyShareMaterial;
+    readonly publicKeyShareMaterialChunkSource?: PublicKeyShareMaterialChunkSource;
     readonly transportedPublicKeyShareProofMaterial?: TransportedPublicKeyShareProofMaterialSet;
     readonly transportedVssShareLinkageProofMaterial?: TransportedVssShareLinkageProofMaterialSet;
     readonly transportedSameSecretBridgeProofMaterial?: TransportedSameSecretBridgeProofMaterialSet;
     readonly transportedEvaluationKeyShareProofMaterial?: TransportedEvaluationKeyShareProofMaterialSet;
+    readonly setupProofMaterialChunkSources?: readonly SetupProofMaterialChunkSource[];
     readonly transportedEvaluationKeyShareComponentMaterial?: TransportedEvaluationKeyShareComponentMaterialSet;
-    // Raw chunk bytes for the transported evaluation-key component material,
-    // supplied out of band so the verifier streams each component through the
-    // file-backed component material transport before the terminal setup package
-    // verification. The terminal accepted-setup verifier refuses inline chunks on
-    // the transported component material itself, so the bytes travel here.
-    readonly evaluationKeyShareComponentMaterialChunkStreams?: readonly EvaluationKeyShareComponentMaterialChunkStream[];
+    // Bounded evaluation-key component sources are supplied out of band. Each
+    // source is authenticated against the descriptor on its transported
+    // component reference before terminal setup verification.
+    readonly evaluationKeyShareComponentMaterialChunkSources?: readonly EvaluationKeyShareComponentMaterialChunkSource[];
+    // Public evaluation-key bytes are supplied out of band and authenticated
+    // against the descriptor on each transported material reference.
+    readonly publicEvaluationKeyMaterialChunkSources?: readonly PublicEvaluationKeyMaterialChunkSource[];
     // Optional per-trustee batched linear-evaluation openings for the package
     // aggregate binding, forwarded to the kernel verbatim. The kernel runs the
     // committed-material aggregate binding only when the evaluation-key set
@@ -366,45 +365,13 @@ export type VerifySetupPackageInput = Readonly<{
 export type SetupPackageVerificationInputSource = Readonly<
     Omit<ProtocolSetupPackageVerificationInputSource, 'setupPackage'> & {
         readonly setupPackage: SetupPackage;
+        readonly publicKeyShareMaterialChunkSource?: PublicKeyShareMaterialChunkSource;
     }
 >;
-
-export type AcceptedSetupHandoff = Readonly<{
-    readonly objectType: 'CollectiveBgvAcceptedSetupHandoff';
-    readonly ceremonyId: string;
-    readonly manifestHash: ProtocolHash;
-    readonly rosterHash: ProtocolHash;
-    readonly setupParametersHash: ProtocolHash;
-    readonly setupEpoch: string;
-    readonly setupPackageHash: ProtocolHash;
-    readonly directBallotEncryptionHandoff: Readonly<{
-        readonly collectivePublicKeyRoot: ProtocolHash;
-        readonly publicKeyShareMaterialSetRoot: ProtocolHash;
-        readonly publicKeyShareSuccinctProofSetRoot: ProtocolHash;
-    }>;
-    readonly publicAggregationHandoff: Readonly<{
-        readonly thresholdShareCommitmentRoot: ProtocolHash;
-    }>;
-    readonly boundedEvaluatorReplayHandoff: Readonly<{
-        readonly evaluatorKeyScheduleRoot: ProtocolHash;
-        readonly relinearizationKeyShareRoundsRoot: ProtocolHash;
-        readonly trusteeEvaluationKeyProofSetRoot: ProtocolHash;
-        readonly evaluationKeySetHash: ProtocolHash;
-        readonly publicEvaluationKeyMaterialRoot?: ProtocolHash;
-    }>;
-    readonly certificateRoots: Readonly<{
-        readonly setupTransportCertificateHash: ProtocolHash;
-    }>;
-    readonly acceptedSetupHandoffRoot: ProtocolHash;
-}>;
 
 export type SetupPackageVerification = Readonly<{
     readonly isValid: boolean;
     readonly operation: 'verifyCollectiveBgvSetupPackage';
-    readonly currentPhase: string | null;
-    readonly phaseOrderHash: ProtocolHash;
-    readonly acceptedSetupHandoff?: AcceptedSetupHandoff;
-    readonly missingObjects: readonly string[];
     readonly refusedObjects: readonly Readonly<{
         readonly reasonCode: string;
         readonly message: string;
@@ -412,22 +379,67 @@ export type SetupPackageVerification = Readonly<{
     }>[];
 }>;
 
-// The target-decryption share proofs, accepted record, ciphertexts, and share
-// profile are opaque protocol records that the kernel binds and recomputes; the
-// SDK forwards them without a precise protocol type, matching how the protocol
-// package itself types these target-decryption inputs.
+// These target-decryption records are opaque at the SDK boundary. In
+// particular, targetAcceptedRecord is a caller-supplied target binding whose
+// internal context and hashes are structurally checked by the kernel; this
+// function does not authenticate board inclusion, evaluator replay, finality,
+// or state authorization for that binding.
 export type TargetDecryptionResultReleaseInput = Readonly<{
+    readonly abortSignal?: AbortSignal;
     readonly setupPackage: unknown;
     readonly targetAcceptedRecord: unknown;
     readonly targetCiphertexts: unknown;
     readonly targetCiphertextBinding: unknown;
     readonly targetShareProfile: unknown;
     readonly releaseVerificationId: string;
-    readonly shareProofs: readonly unknown[];
+    readonly shareProofs: readonly TargetDecryptionShareProof[];
+}>;
+
+export type TargetDecryptionShareProof = Readonly<{
+    readonly targetDecryptionShare: unknown;
+    readonly proofStatement: unknown;
+    readonly proofMaterial: BgvTargetDecryptionShareProofMaterial;
+    readonly proofMaterialTransport: BgvTargetDecryptionShareCanonicalProofMaterialTransport;
+    readonly pullProofMaterialChunk: CanonicalProofMaterialChunkPull;
+}>;
+
+export type TargetDecryptionShareProofMaterialGenerationInput = Readonly<{
+    readonly abortSignal?: AbortSignal;
+    readonly emitProofMaterialChunk: CanonicalProofMaterialChunkSink;
+    readonly setupPackage: unknown;
+    readonly targetAcceptedRecord: unknown;
+    readonly targetCiphertexts: unknown;
+    readonly targetCiphertextBinding: unknown;
+    readonly targetShareProfile: unknown;
+    readonly trusteeIdentity: string;
+    readonly localTargetShareWitness: unknown;
+    readonly targetDecryptionShare: unknown;
+    readonly proofStatement: unknown;
+    readonly proofRandomnessSeedHex: string;
+    readonly proofRandomnessNonceHex: string;
+}>;
+
+export type TargetDecryptionShareProofMaterialGeneration = Readonly<{
+    readonly proofMaterial: BgvTargetDecryptionShareProofMaterial;
+    readonly proofMaterialTransport: BgvTargetDecryptionShareCanonicalProofMaterialTransport;
 }>;
 
 export type TargetDecryptionResultRelease =
     BgvTargetDecryptionResultReleaseCompletion;
+
+class TargetDecryptionResultReleaseCleanupError extends Error {
+    public readonly cleanupFailure: unknown;
+    public readonly operationFailure: unknown;
+
+    public constructor(operationFailure: unknown, cleanupFailure: unknown) {
+        super(
+            'Target-decryption result release failed and its incomplete session cleanup also refused.',
+        );
+        this.name = 'TargetDecryptionResultReleaseCleanupError';
+        this.operationFailure = operationFailure;
+        this.cleanupFailure = cleanupFailure;
+    }
+}
 
 export const deriveThresholdParameters = (
     input: ThresholdParametersInput,
@@ -450,15 +462,6 @@ export function validatePollSpec(input: unknown): PollSpecValidation;
 export function validatePollSpec(input: unknown): PollSpecValidation {
     return validatePollSpecInternal(input);
 }
-
-export const isValidLifecycleTransition = (
-    transition: LifecycleTransition,
-): boolean => isValidLifecycleTransitionInternal(transition);
-
-export const evaluateActionCapability = (
-    action: ProtocolAction,
-    context: CapabilityContext,
-): CapabilityDecision => evaluateActionCapabilityInternal(action, context);
 
 export const verifyBoardConsistency = (
     input: BoardConsistencyInput,
@@ -502,14 +505,35 @@ export const verifyPrivateVssShare = async (
     const kernel = await loadTranscriptCoreKernel();
 
     return kernel.verifyPrivateVssShareEnvelope(
-        preparePrivateVssShareVerificationInputForKernel(kernel, input),
+        await preparePrivateVssShareVerificationInputForKernel(kernel, input),
     );
 };
 
 export const createSetupPackageVerificationInput = (
     input: SetupPackageVerificationInputSource,
-): VerifySetupPackageInput =>
-    createSetupPackageVerificationInputInternal(input);
+): VerifySetupPackageInput => {
+    const {
+        transportedPublicKeyShareMaterial: kernelMaterialReference,
+        ...verificationInput
+    } = createSetupPackageVerificationInputInternal(input);
+    void kernelMaterialReference;
+
+    return {
+        ...verificationInput,
+        ...(input.transportedPublicKeyShareMaterial === undefined
+            ? {}
+            : {
+                  transportedPublicKeyShareMaterial:
+                      input.transportedPublicKeyShareMaterial,
+              }),
+        ...(input.publicKeyShareMaterialChunkSource === undefined
+            ? {}
+            : {
+                  publicKeyShareMaterialChunkSource:
+                      input.publicKeyShareMaterialChunkSource,
+              }),
+    };
+};
 
 export const verifySetupPackage = async (
     input: VerifySetupPackageInput,
@@ -517,21 +541,52 @@ export const verifySetupPackage = async (
     assertSetupPackageVerificationBindings(input);
 
     const kernel = await loadTranscriptCoreKernel();
-    const verificationInput = prepareSetupPackageVerificationInputForKernel(
-        kernel,
-        input,
-    );
+    const verificationInput =
+        await prepareSetupPackageVerificationInputForKernel(kernel, input);
 
     return kernel.verifyCollectiveBgvSetup(verificationInput);
 };
 
+export const generateTargetDecryptionShareProofMaterial = async (
+    input: TargetDecryptionShareProofMaterialGenerationInput,
+): Promise<TargetDecryptionShareProofMaterialGeneration> => {
+    const kernel = await loadTranscriptCoreKernel();
+    // Construct the reader runtime before the kernel retains generated proof
+    // material. This prevents a runtime-construction failure from stranding a
+    // newly generated proof; after reader acquisition, writeMaterial owns
+    // cancellation and eviction on completion or failure.
+    const proofMaterialRuntime = openBgvCanonicalStreamRuntime({ kernel });
+    const proofMaterial =
+        kernel.generateBgvTargetDecryptionShareProofMaterialFromLocalWitness(
+            input,
+        );
+    const descriptorBytes = await proofMaterialRuntime.writeMaterial({
+        ...(input.abortSignal === undefined
+            ? {}
+            : { abortSignal: input.abortSignal }),
+        emitChunk: input.emitProofMaterialChunk,
+        family: bgvCanonicalStreamFamilies.targetDecryptionShare,
+        materialRoot: proofMaterial.proofMaterialRoot,
+    });
+
+    return {
+        proofMaterial,
+        proofMaterialTransport:
+            createBgvTargetDecryptionShareCanonicalProofMaterialTransport(
+                proofMaterial,
+                { descriptorBytes },
+            ),
+    };
+};
+
 /**
  * Drives the development-evidence staged target-decryption result release with
- * the packaged Rust/WASM kernel: derive the release setup context from the
- * accepted setup package, begin the staged session, absorb each trustee share
- * proof, then finish and return the released target result. Each stage is bound
- * and recomputed by the kernel; this path is development evidence, not certified
- * decryption.
+ * the packaged Rust/WASM kernel: derive the release setup context from a
+ * structurally checked caller-supplied setup package, begin the staged session,
+ * absorb each trustee share proof, then finish and return the released target
+ * result. Neither the setup package nor the caller-supplied target binding is a
+ * verifier-issued authority capability for this call. Board inclusion,
+ * evaluator replay, finality, and state authorization remain outside this path.
  */
 export const verifyTargetDecryptionResult = async (
     input: TargetDecryptionResultReleaseInput,
@@ -541,7 +596,7 @@ export const verifyTargetDecryptionResult = async (
         kernel.deriveBgvTargetDecryptionResultReleaseSetupContext({
             setupPackage: input.setupPackage,
         });
-    kernel.beginBgvTargetDecryptionResultRelease({
+    const releaseBegin = kernel.beginBgvTargetDecryptionResultRelease({
         releaseVerificationId: input.releaseVerificationId,
         releaseSetupContext,
         targetAcceptedRecord: input.targetAcceptedRecord,
@@ -549,14 +604,85 @@ export const verifyTargetDecryptionResult = async (
         targetCiphertextBinding: input.targetCiphertextBinding,
         targetShareProfile: input.targetShareProfile,
     });
-    for (const targetShareProof of input.shareProofs) {
-        kernel.absorbBgvTargetDecryptionResultReleaseShare({
-            releaseVerificationId: input.releaseVerificationId,
-            targetShareProof,
-        });
-    }
+    let absorbedShareCount = 0;
+    let releaseSessionOpen = true;
+    try {
+        const proofMaterialRuntime = openBgvCanonicalStreamRuntime({ kernel });
+        if (input.shareProofs.length !== releaseBegin.requiredShareCount) {
+            throw new Error(
+                'target-decryption share proof count must equal the required release quorum.',
+            );
+        }
+        for (const targetShareProof of input.shareProofs) {
+            const normalizedTransport =
+                createBgvTargetDecryptionShareCanonicalProofMaterialTransport(
+                    targetShareProof.proofMaterial,
+                    targetShareProof.proofMaterialTransport,
+                );
+            if (
+                normalizedTransport.proofMaterialRoot !==
+                targetShareProof.proofMaterial.proofMaterialRoot
+            ) {
+                throw new Error(
+                    'target-decryption proof material transport root must match its proof material.',
+                );
+            }
+            await proofMaterialRuntime.readMaterial({
+                ...(input.abortSignal === undefined
+                    ? {}
+                    : { abortSignal: input.abortSignal }),
+                descriptorBytes: normalizedTransport.descriptorBytes,
+                family: bgvCanonicalStreamFamilies.targetDecryptionShare,
+                materialRoot: normalizedTransport.proofMaterialRoot,
+                pullChunk: targetShareProof.pullProofMaterialChunk,
+            });
+            const absorption =
+                kernel.absorbBgvTargetDecryptionResultReleaseShare({
+                    releaseVerificationId: input.releaseVerificationId,
+                    targetShareProof: {
+                        targetDecryptionShare:
+                            targetShareProof.targetDecryptionShare,
+                        proofStatement: targetShareProof.proofStatement,
+                        proofMaterial: targetShareProof.proofMaterial,
+                    },
+                });
+            if (
+                absorption.requiredShareCount !==
+                    releaseBegin.requiredShareCount ||
+                absorption.absorbedShareCount !== absorbedShareCount + 1
+            ) {
+                throw new Error(
+                    'target-decryption release absorption count does not match the active release session.',
+                );
+            }
+            absorbedShareCount = absorption.absorbedShareCount;
+            if (absorbedShareCount === releaseBegin.requiredShareCount) {
+                releaseSessionOpen = false;
+                return kernel.finishBgvTargetDecryptionResultRelease({
+                    releaseVerificationId: input.releaseVerificationId,
+                });
+            }
+        }
 
-    return kernel.finishBgvTargetDecryptionResultRelease({
-        releaseVerificationId: input.releaseVerificationId,
-    });
+        throw new Error(
+            'target-decryption release did not absorb the required share quorum.',
+        );
+    } catch (operationFailure) {
+        if (
+            releaseSessionOpen &&
+            absorbedShareCount < releaseBegin.requiredShareCount
+        ) {
+            try {
+                kernel.finishBgvTargetDecryptionResultRelease({
+                    releaseVerificationId: input.releaseVerificationId,
+                });
+            } catch (cleanupFailure) {
+                throw new TargetDecryptionResultReleaseCleanupError(
+                    operationFailure,
+                    cleanupFailure,
+                );
+            }
+        }
+        throw operationFailure;
+    }
 };

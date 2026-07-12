@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+    foundationHashContractVector,
+    invalidFoundationSchemaObjectVectors,
     invalidFoundationDisplayTextVectors,
+    participantIdentityContractVector,
+    validFoundationSchemaObjectVectors,
     validFoundationDisplayTextVectors,
 } from '../foundation-canonical-test-vectors.js';
 
@@ -12,17 +16,8 @@ import {
 
 const hash512Pattern = /^[a-f0-9]{128}$/u;
 
-const storageRootCommitmentPayload = (): Uint8Array => {
-    const bytes = new Uint8Array(78);
-    const view = new DataView(bytes.buffer);
-    view.setUint16(0, 0x0303, true);
-    view.setUint16(2, 1, true);
-    view.setUint32(4, 1, true);
-    view.setUint16(8, 0x06, true);
-    view.setUint32(10, 64, true);
-    bytes.fill(0x5a, 14);
-    return bytes;
-};
+const hexadecimal = (bytes: Uint8Array): string =>
+    Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 
 describe('transcript-core kernel in browsers', () => {
     it('loads the transcript-core module and runs a command through browser WASM', async () => {
@@ -44,20 +39,69 @@ describe('transcript-core kernel in browsers', () => {
         expect(pollSpecHash).toMatch(hash512Pattern);
     });
 
-    it('validates an independently encoded foundation schema without returning its bytes', async () => {
+    it('re-encodes every accepted foundation schema without returning producer bytes', async () => {
         const kernel = await loadTranscriptCoreKernel();
-        const canonicalBytes = storageRootCommitmentPayload();
 
-        const result = kernel.validateFoundationSchemaObject({
-            canonicalBytes,
-        });
-        expect(result).toEqual({
-            schemaIdentifier: 0x0303,
-            schemaVersion: 1,
-            canonicalByteLength: canonicalBytes.byteLength,
-        });
-        expect(result).not.toHaveProperty('canonicalBytes');
-        expect(result).not.toHaveProperty('canonicalObjectHex');
+        expect(validFoundationSchemaObjectVectors).toHaveLength(45);
+        expect(
+            new Set(
+                validFoundationSchemaObjectVectors.map(
+                    (vector) => vector.schemaIdentifier,
+                ),
+            ).size,
+        ).toBe(45);
+        for (const vector of validFoundationSchemaObjectVectors) {
+            const result = kernel.validateFoundationSchemaObject({
+                canonicalBytes: vector.canonicalBytes,
+            });
+            expect(result, vector.name).toEqual({
+                schemaIdentifier: vector.schemaIdentifier,
+                schemaVersion: 1,
+                canonicalByteLength: vector.canonicalBytes.byteLength,
+            });
+        }
+    });
+
+    it('matches independent foundation hash and participant-identity vectors', async () => {
+        const kernel = await loadTranscriptCoreKernel();
+
+        expect(
+            kernel.computeFoundationHash512({
+                domain: foundationHashContractVector.domain,
+                canonicalItemsTupleHex: hexadecimal(
+                    foundationHashContractVector.canonicalItemsTupleBytes,
+                ),
+            }),
+        ).toBe(foundationHashContractVector.expectedHash);
+        expect(
+            kernel.deriveFoundationParticipantIdentity({
+                signingVerificationKeyHex: hexadecimal(
+                    participantIdentityContractVector.signingVerificationKey,
+                ),
+            }),
+        ).toBe(participantIdentityContractVector.expectedParticipantIdentity);
+    });
+
+    it('returns the same stable refusal codes as Node for invalid schema objects', async () => {
+        const kernel = await loadTranscriptCoreKernel();
+
+        for (const vector of invalidFoundationSchemaObjectVectors) {
+            let observedError: unknown;
+            try {
+                kernel.validateFoundationSchemaObject({
+                    canonicalBytes: vector.canonicalBytes,
+                });
+            } catch (error) {
+                observedError = error;
+            }
+            expect(observedError, vector.name).toBeInstanceOf(
+                TranscriptCoreKernelCommandError,
+            );
+            expect(
+                (observedError as TranscriptCoreKernelCommandError).code,
+                vector.name,
+            ).toBe(vector.expectedCode);
+        }
     });
 
     it('enforces the same pinned Unicode 17 corpus as Node', async () => {

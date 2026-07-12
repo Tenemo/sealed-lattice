@@ -38,8 +38,8 @@ pub(in crate::bgv::setup) fn evaluation_key_share_component_vector_root(
     }))
 }
 
-fn verified_evaluation_key_share_component_material_chunks(
-) -> &'static Mutex<BTreeMap<String, VerifiedEvaluationKeyShareComponentMaterialChunkStoreEntry>> {
+fn verified_evaluation_key_share_component_material_chunks()
+-> &'static Mutex<BTreeMap<String, VerifiedEvaluationKeyShareComponentMaterialChunkStoreEntry>> {
     VERIFIED_EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_CHUNKS
         .get_or_init(|| Mutex::new(BTreeMap::new()))
 }
@@ -368,11 +368,6 @@ fn verify_evaluation_key_share_component_material_header(
 }
 
 fn evaluation_key_share_component_material_chunks(value: &Value) -> CanonicalResult<Vec<Vec<u8>>> {
-    if value.get("chunks").is_some() {
-        return Err(invalid_evaluation_key_share_material(
-            "evaluation-key component material must arrive through the canonical binary stream",
-        ));
-    }
     let material_root = string_field(value, "keySwitchComponentMaterialRoot")?;
     stored_verified_evaluation_key_share_component_material_chunks(material_root).map_err(|_| {
         invalid_evaluation_key_share_material(
@@ -506,21 +501,21 @@ fn decode_evaluation_key_share_component_vectors(
     for expected_digit_index in 0..digit_count {
         for expected_rns_limb_index in 0..limb_count {
             let digit_index = usize::try_from(reader.read_u64()?).map_err(|_| {
-                    invalid_evaluation_key_share_material(
-                        "evaluation-key component material digit index does not fit usize",
-                    )
-                })?;
+                invalid_evaluation_key_share_material(
+                    "evaluation-key component material digit index does not fit usize",
+                )
+            })?;
             let rns_limb_index = usize::try_from(reader.read_u64()?).map_err(|_| {
-                    invalid_evaluation_key_share_material(
-                        "evaluation-key component material RNS limb index does not fit usize",
-                    )
-                })?;
+                invalid_evaluation_key_share_material(
+                    "evaluation-key component material RNS limb index does not fit usize",
+                )
+            })?;
             let rns_prime = reader.read_u64()?;
             let coefficient_count = usize::try_from(reader.read_u64()?).map_err(|_| {
-                    invalid_evaluation_key_share_material(
-                        "evaluation-key component material coefficient count does not fit usize",
-                    )
-                })?;
+                invalid_evaluation_key_share_material(
+                    "evaluation-key component material coefficient count does not fit usize",
+                )
+            })?;
             if digit_index != expected_digit_index
                 || rns_limb_index != expected_rns_limb_index
                 || rns_limb_index >= DATA_PRIMES.len()
@@ -614,10 +609,10 @@ enum VerifiedComponentMaterialBacking {
 // the shared read path. The material size, not the staging backend, is the open
 // supported-phone runtime constraint (see SEC-008 and SEC-012).
 pub(crate) use component_material_stream::{
-    absorb_verified_canonical_component_material_chunk,
+    CanonicalComponentMaterialStream, absorb_verified_canonical_component_material_chunk,
     begin_verified_canonical_component_material_stream,
     cancel_verified_canonical_component_material_stream,
-    finish_verified_canonical_component_material_stream, CanonicalComponentMaterialStream,
+    finish_verified_canonical_component_material_stream,
 };
 
 mod component_material_stream {

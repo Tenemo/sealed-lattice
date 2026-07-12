@@ -1,20 +1,23 @@
 mod material_transport;
 
 pub(super) use self::material_transport::setup_proof_record_binding_value;
-#[cfg(test)]
 pub(crate) use self::material_transport::{
-    setup_proof_material_transport_hashes, SetupProofMaterialTransportHashes,
+    BgvProofMaterialBytes, CanonicalProofMaterialBytes, ProofByteSource,
 };
 pub(in crate::bgv::setup) use self::material_transport::{
-    verified_setup_proof_material_bytes_from_request, SetupProofMaterialBytes,
-    VerifiedSetupProofMaterialEvictionGuard,
+    SetupProofMaterialBytes, VerifiedSetupProofMaterialEvictionGuard,
+    verified_setup_proof_material_bytes_from_request,
+};
+#[cfg(test)]
+pub(crate) use self::material_transport::{
+    SetupProofMaterialTransportHashes, setup_proof_material_transport_hashes,
 };
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 #[cfg(test)]
 use sha3::{
-    digest::{ExtendableOutput, Update, XofReader},
     Shake256,
+    digest::{ExtendableOutput, Update, XofReader},
 };
 
 use crate::{
@@ -25,7 +28,7 @@ use crate::{
 #[cfg(test)]
 use crate::{
     encoding::{append_bytes, append_varuint},
-    hashing::{hash512_hex, to_hex, HASH512_PREIMAGE_PREFIX},
+    hashing::{HASH512_PREIMAGE_PREFIX, hash512_hex, to_hex},
 };
 
 pub(super) const SETUP_PROOF_BYTES_DOMAIN: &str =

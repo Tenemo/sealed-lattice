@@ -13,6 +13,9 @@ pub(in super::super::super) fn finalize_collective_setup_package(
         vss_public_recipient_share_commitment_set_object(&package);
     package["vssPublicAggregateThresholdCommitmentSet"] =
         vss_public_aggregate_threshold_commitment_set_object(&package);
+    super::aggregate_threshold::append_vss_aggregate_threshold_proof_material_transport(
+        &mut package,
+    );
     package["vssShareLinkageStatement"] = vss_share_linkage_statement_object(&package);
     package["vssShareLinkageProofMaterialSet"] =
         vss_share_linkage_proof_material_set_object(&package);
@@ -195,36 +198,25 @@ fn minimal_finalized_collective_setup_package_passes_accepted_setup() {
     )
     .expect("finalized collective setup package verification result");
     let context = || serde_json::to_string_pretty(&result).unwrap();
-    // No phase refuses the material.
-    assert!(
-        result["refusedObjects"]
-            .as_array()
-            .is_none_or(|refused| refused.is_empty()),
-        "finalized package must not be refused at any phase: {}",
-        context()
-    );
-    // Every phase passed, so the flow reached the final phase.
-    assert_eq!(
-        result["currentPhase"],
-        "setupPackageVerification",
-        "{}",
-        context()
-    );
     // The embedded commitment sets satisfy the coefficient-commitment requirement;
     // only the terminal runtime objects a pre-terminal setup package lacks may
     // remain.
-    let missing_objects = result["missingObjects"]
+    let refused_objects = result["refusedObjects"]
         .as_array()
         .cloned()
         .unwrap_or_default();
     assert!(
-        missing_objects.iter().all(|missing_object| matches!(
-            missing_object.as_str(),
-            Some("publicKeyShareMaterial")
-                | Some("publicKeyShareSuccinctProofs")
-                | Some("collectivePublicKey")
-                | Some("collectivePublicKeyRoot")
-        )),
+        !refused_objects.is_empty()
+            && refused_objects.iter().all(|refusal| {
+                refusal["reasonCode"] == "setupObjectMissing"
+                    && matches!(
+                        refusal["objectPath"].as_str(),
+                        Some("setupPackage.publicKeyShareMaterial")
+                            | Some("setupPackage.publicKeyShareSuccinctProofs")
+                            | Some("setupPackage.collectivePublicKey")
+                            | Some("setupPackage.collectivePublicKeyRoot")
+                    )
+            }),
         "only terminal runtime objects may remain missing for the pre-terminal finalized package: {}",
         context()
     );

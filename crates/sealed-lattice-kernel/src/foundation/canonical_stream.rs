@@ -3,9 +3,11 @@ use sha3::{
     digest::{ExtendableOutput, Update, XofReader},
 };
 
+use super::state::StateExactOutputHasher;
 use super::{
     CANONICAL_TUPLE_SCHEMA_IDENTIFIER, CANONICAL_TUPLE_VERSION, CanonicalItemType,
-    FOUNDATION_PROFILE, Hash512, RefusalReason, StreamDescriptor, VerificationResult,
+    FOUNDATION_PROFILE, Hash512, RefusalReason, StateCapabilityKind, StreamDescriptor,
+    VerificationResult,
 };
 
 #[cfg(test)]
@@ -43,10 +45,15 @@ pub enum CanonicalStreamDomain {
     TargetOrderPartialDecryption,
     MaliciousTargetShareProof,
     CheckpointState,
+    StateBallotCandidateListExactOutput,
+    StateFinalitySignatureExactOutput,
+    StateTargetReleaseExactOutput,
+    PublicKeyShareMaterial,
+    PublicEvaluationKeyMaterial,
 }
 
 impl CanonicalStreamDomain {
-    pub const ALL: [Self; 22] = [
+    pub const ALL: [Self; 27] = [
         Self::PrivateMailboxCiphertext,
         Self::DealerVssShareLinkageProof,
         Self::RecipientAggregateThresholdShareProof,
@@ -69,6 +76,11 @@ impl CanonicalStreamDomain {
         Self::TargetOrderPartialDecryption,
         Self::MaliciousTargetShareProof,
         Self::CheckpointState,
+        Self::StateBallotCandidateListExactOutput,
+        Self::StateFinalitySignatureExactOutput,
+        Self::StateTargetReleaseExactOutput,
+        Self::PublicKeyShareMaterial,
+        Self::PublicEvaluationKeyMaterial,
     ];
 
     pub const fn canonical_domain(self) -> &'static str {
@@ -115,6 +127,21 @@ impl CanonicalStreamDomain {
                 "sealed-lattice/stream/target-release/malicious-share-proof/v1"
             }
             Self::CheckpointState => "sealed-lattice/stream/checkpoint/state/v1",
+            Self::StateBallotCandidateListExactOutput => {
+                "sealed-lattice/stream/state/ballot-candidate-list-exact-output/v1"
+            }
+            Self::StateFinalitySignatureExactOutput => {
+                "sealed-lattice/stream/state/finality-signature-exact-output/v1"
+            }
+            Self::StateTargetReleaseExactOutput => {
+                "sealed-lattice/stream/state/target-release-exact-output/v1"
+            }
+            Self::PublicKeyShareMaterial => {
+                "sealed-lattice/stream/setup/public-key-share-material/v1"
+            }
+            Self::PublicEvaluationKeyMaterial => {
+                "sealed-lattice/stream/setup/public-evaluation-key-material/v1"
+            }
         }
     }
 
@@ -142,6 +169,11 @@ impl CanonicalStreamDomain {
             Self::TargetOrderPartialDecryption => 20,
             Self::MaliciousTargetShareProof => 21,
             Self::CheckpointState => 22,
+            Self::StateBallotCandidateListExactOutput => 23,
+            Self::StateFinalitySignatureExactOutput => 24,
+            Self::StateTargetReleaseExactOutput => 25,
+            Self::PublicKeyShareMaterial => 26,
+            Self::PublicEvaluationKeyMaterial => 27,
         }
     }
 
@@ -169,8 +201,54 @@ impl CanonicalStreamDomain {
             20 => Some(Self::TargetOrderPartialDecryption),
             21 => Some(Self::MaliciousTargetShareProof),
             22 => Some(Self::CheckpointState),
+            23 => Some(Self::StateBallotCandidateListExactOutput),
+            24 => Some(Self::StateFinalitySignatureExactOutput),
+            25 => Some(Self::StateTargetReleaseExactOutput),
+            26 => Some(Self::PublicKeyShareMaterial),
+            27 => Some(Self::PublicEvaluationKeyMaterial),
             _ => None,
         }
+    }
+
+    pub(crate) const fn state_exact_output_capability_kind(self) -> Option<StateCapabilityKind> {
+        match self {
+            Self::StateBallotCandidateListExactOutput => {
+                Some(StateCapabilityKind::BallotCandidateList)
+            }
+            Self::StateFinalitySignatureExactOutput => Some(StateCapabilityKind::FinalitySignature),
+            Self::StateTargetReleaseExactOutput => Some(StateCapabilityKind::TargetRelease),
+            _ => None,
+        }
+    }
+}
+
+/// Verifier-owned terminal binding for one complete canonical stream.
+///
+/// Its fields and constructor stay private to the stream engine. Downstream
+/// verifiers may consume the summary, but cannot create one from a caller-supplied
+/// digest or descriptor alone.
+pub(crate) struct VerifiedCanonicalStreamSummary {
+    stream_domain: CanonicalStreamDomain,
+    total_byte_length: u64,
+    full_object_digest: Hash512,
+    state_exact_output_hash: Option<Hash512>,
+}
+
+impl VerifiedCanonicalStreamSummary {
+    pub(crate) const fn stream_domain(&self) -> CanonicalStreamDomain {
+        self.stream_domain
+    }
+
+    pub(crate) const fn total_byte_length(&self) -> u64 {
+        self.total_byte_length
+    }
+
+    pub(crate) const fn full_object_digest(&self) -> Hash512 {
+        self.full_object_digest
+    }
+
+    pub(crate) const fn state_exact_output_hash(&self) -> Option<Hash512> {
+        self.state_exact_output_hash
     }
 }
 
@@ -184,6 +262,7 @@ pub struct CanonicalStreamVerifier {
     next_chunk_index: usize,
     observed_byte_length: u64,
     full_object_hasher: Shake256,
+    state_exact_output_hasher: Option<StateExactOutputHasher>,
     refusal_reason: Option<RefusalReason>,
 }
 
@@ -307,12 +386,20 @@ impl CanonicalStreamVerifier {
         validate_descriptor(&descriptor)?;
         let full_object_hasher =
             initialize_full_object_hasher(stream_domain, descriptor.total_byte_length)?;
+        let state_exact_output_hasher = stream_domain
+            .state_exact_output_capability_kind()
+            .map(|capability_kind| {
+                StateExactOutputHasher::new(capability_kind, descriptor.total_byte_length)
+                    .map_err(|error| error.refusal_reason)
+            })
+            .transpose()?;
         Ok(Self {
             stream_domain,
             descriptor,
             next_chunk_index: 0,
             observed_byte_length: 0,
             full_object_hasher,
+            state_exact_output_hasher,
             refusal_reason: None,
         })
     }
@@ -344,6 +431,15 @@ impl CanonicalStreamVerifier {
     }
 
     pub fn finish(self) -> VerificationResult<()> {
+        match self.finish_with_summary() {
+            VerificationResult::Valid { .. } => VerificationResult::valid(()),
+            VerificationResult::Refused { refusal_reason } => {
+                VerificationResult::refused(refusal_reason)
+            }
+        }
+    }
+
+    pub(crate) fn finish_with_summary(self) -> VerificationResult<VerifiedCanonicalStreamSummary> {
         if let Some(refusal_reason) = self.refusal_reason {
             return VerificationResult::refused(refusal_reason);
         }
@@ -359,7 +455,19 @@ impl CanonicalStreamVerifier {
         if Hash512::from_bytes(observed_digest) != self.descriptor.full_object_digest {
             return VerificationResult::refused(RefusalReason::WrongHashOrRoot);
         }
-        VerificationResult::valid(())
+        let state_exact_output_hash = match self.state_exact_output_hasher {
+            Some(hasher) => match hasher.finish() {
+                Ok(digest) => Some(digest),
+                Err(error) => return VerificationResult::refused(error.refusal_reason),
+            },
+            None => None,
+        };
+        VerificationResult::valid(VerifiedCanonicalStreamSummary {
+            stream_domain: self.stream_domain,
+            total_byte_length: self.descriptor.total_byte_length,
+            full_object_digest: self.descriptor.full_object_digest,
+            state_exact_output_hash,
+        })
     }
 
     fn verify_and_absorb_chunk(
@@ -388,6 +496,11 @@ impl CanonicalStreamVerifier {
         }
 
         self.full_object_hasher.update(chunk_bytes);
+        if let Some(hasher) = self.state_exact_output_hasher.as_mut() {
+            hasher
+                .absorb(chunk_bytes)
+                .map_err(|error| error.refusal_reason)?;
+        }
         self.observed_byte_length = self
             .observed_byte_length
             .checked_add(
@@ -485,7 +598,7 @@ fn chunk_digest(
     let mut hasher = Shake256::default();
     hasher.update(&CANONICAL_TUPLE_SCHEMA_IDENTIFIER.to_le_bytes());
     hasher.update(&CANONICAL_TUPLE_VERSION.to_le_bytes());
-    hasher.update(&4_u32.to_le_bytes());
+    hasher.update(&5_u32.to_le_bytes());
     absorb_ascii_item(&mut hasher, CHUNK_DIGEST_DOMAIN)?;
     absorb_ascii_item(&mut hasher, stream_domain.canonical_domain())?;
     absorb_fixed_item(
@@ -599,7 +712,56 @@ mod tests {
             );
         }
         assert_eq!(CanonicalStreamDomain::from_canonical_code(0), None);
-        assert_eq!(CanonicalStreamDomain::from_canonical_code(23), None);
+        assert_eq!(CanonicalStreamDomain::from_canonical_code(27), None);
+    }
+
+    #[test]
+    fn state_exact_output_streams_preserve_the_raw_byte_hash_relation() {
+        let bytes = (0..FOUNDATION_PROFILE.stream_chunk_byte_length + 19)
+            .map(|index| (index.wrapping_mul(211) & 0xff) as u8)
+            .collect::<Vec<_>>();
+        for (stream_domain, capability_kind) in [
+            (
+                CanonicalStreamDomain::StateBallotCandidateListExactOutput,
+                StateCapabilityKind::BallotCandidateList,
+            ),
+            (
+                CanonicalStreamDomain::StateFinalitySignatureExactOutput,
+                StateCapabilityKind::FinalitySignature,
+            ),
+            (
+                CanonicalStreamDomain::StateTargetReleaseExactOutput,
+                StateCapabilityKind::TargetRelease,
+            ),
+        ] {
+            let descriptor = descriptor_for(stream_domain, &bytes);
+            let expected_full_object_digest = descriptor.full_object_digest;
+            let mut verifier = CanonicalStreamVerifier::new(stream_domain, descriptor)
+                .expect("state exact-output verifier begins");
+            for (chunk_index, chunk) in bytes
+                .chunks(FOUNDATION_PROFILE.stream_chunk_byte_length)
+                .enumerate()
+            {
+                assert_eq!(
+                    verifier.absorb_chunk(chunk_index, chunk),
+                    VerificationResult::valid(())
+                );
+            }
+            let summary = verifier
+                .finish_with_summary()
+                .into_result()
+                .expect("complete exact-output stream verifies");
+            assert_eq!(summary.stream_domain(), stream_domain);
+            assert_eq!(summary.total_byte_length(), bytes.len() as u64);
+            assert_eq!(summary.full_object_digest(), expected_full_object_digest);
+            assert_eq!(
+                summary.state_exact_output_hash(),
+                Some(
+                    crate::foundation::derive_state_exact_output_hash(capability_kind, &bytes)
+                        .expect("in-memory relation derives")
+                )
+            );
+        }
     }
 
     #[test]

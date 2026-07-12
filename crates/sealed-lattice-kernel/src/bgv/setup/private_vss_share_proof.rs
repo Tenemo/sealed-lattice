@@ -1,4 +1,4 @@
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::{
     bgv::parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE},
@@ -8,14 +8,16 @@ use crate::{
 
 use super::{
     accepted_setup::setup_parameters_hash,
-    commitment::{setup_commitment_root, SetupCommitmentValue, SETUP_COMMITMENT_RANDOMNESS_WIDTH},
-    setup_proof::SETUP_PROOF_MATERIAL_ENCODING,
+    commitment::{SETUP_COMMITMENT_RANDOMNESS_WIDTH, SetupCommitmentValue, setup_commitment_root},
+    setup_proof::{SETUP_PROOF_MATERIAL_ENCODING, SetupProofMaterialBytes},
     sharing::canonical_trustee_point,
     trustee_evaluation_key_proof::{
-        decode_trustee_evaluation_key_proof, encode_trustee_evaluation_key_proof,
-        private_vss_share_succinct_proof_bytes_hash, prove_evaluation_key_share,
-        verify_evaluation_key_share, PrivateVssShareStatement, SuccinctSetupProofContext,
-        TrusteeEvaluationKeyStatement, TrusteeEvaluationKeyWitness, PRIVATE_VSS_SHARE_PROOF_FAMILY,
+        PRIVATE_VSS_SHARE_PROOF_FAMILY, PrivateVssShareStatement, SuccinctSetupProofContext,
+        TrusteeEvaluationKeyStatement, TrusteeEvaluationKeyWitness,
+        decode_trustee_evaluation_key_proof_from_source, encode_trustee_evaluation_key_proof,
+        private_vss_share_succinct_proof_bytes_hash,
+        private_vss_share_succinct_proof_material_bytes_hash, prove_evaluation_key_share,
+        verify_evaluation_key_share,
     },
 };
 
@@ -85,7 +87,8 @@ pub(super) fn verify_private_vss_share_succinct_relation_proof(
     validate_private_vss_share_proof_record(input.proof_record)?;
 
     let proof_bytes = private_vss_share_succinct_proof_bytes_from_record(&input)?;
-    let proof_bytes_hash = private_vss_share_succinct_proof_bytes_hash(&proof_bytes);
+    let proof_bytes_hash =
+        private_vss_share_succinct_proof_material_bytes_hash(proof_bytes.as_ref())?;
     if value_string(input.proof_record, "proofBytesHash")? != proof_bytes_hash {
         return Err(invalid_private_vss_share_proof(
             "private VSS share proofBytesHash must match supplied proof bytes",
@@ -107,7 +110,8 @@ pub(super) fn verify_private_vss_share_succinct_relation_proof(
         ));
     }
 
-    let decoded_proof = decode_trustee_evaluation_key_proof(&statement, &proof_bytes)?;
+    let decoded_proof =
+        decode_trustee_evaluation_key_proof_from_source(&statement, proof_bytes.as_ref())?;
     verify_evaluation_key_share(&statement, &decoded_proof)?;
     let proof_material_root =
         if private_vss_share_succinct_proof_uses_transport(input.proof_record)? {
@@ -199,9 +203,7 @@ fn validate_private_vss_share_proof_record(proof_record: &Value) -> CanonicalRes
         PRIVATE_VSS_SHARE_PROOF_FAMILY,
         "private VSS share proofFamily does not match the VSS opening/carry family",
     )?;
-    if value_string(proof_record, "proofBytesEncoding")? != SETUP_PROOF_MATERIAL_ENCODING
-        || proof_record.get("proofBytesHex").is_some()
-    {
+    if value_string(proof_record, "proofBytesEncoding")? != SETUP_PROOF_MATERIAL_ENCODING {
         return Err(invalid_private_vss_share_proof(
             "private VSS share proof requires canonical streamed proof material",
         ));
@@ -224,13 +226,13 @@ fn private_vss_share_succinct_proof_uses_transport(proof_record: &Value) -> Cano
 
 fn private_vss_share_succinct_proof_bytes_from_record(
     input: &PrivateVssShareSuccinctProofVerificationInput<'_>,
-) -> CanonicalResult<Vec<u8>> {
+) -> CanonicalResult<SetupProofMaterialBytes> {
     private_vss_share_succinct_transported_proof_bytes_from_record(input)
 }
 
 fn private_vss_share_succinct_transported_proof_bytes_from_record(
     input: &PrivateVssShareSuccinctProofVerificationInput<'_>,
-) -> CanonicalResult<Vec<u8>> {
+) -> CanonicalResult<SetupProofMaterialBytes> {
     let proof_record = input.proof_record;
     let Some(material_set) = input.transported_proof_material else {
         return Err(invalid_private_vss_share_proof(
@@ -260,7 +262,7 @@ fn private_vss_share_succinct_transported_proof_bytes_from_record(
 fn transported_private_vss_share_proof_material_bytes(
     material_set: &Value,
     expected_proof_material_root: &str,
-) -> CanonicalResult<Vec<u8>> {
+) -> CanonicalResult<SetupProofMaterialBytes> {
     verify_transported_private_vss_share_proof_material_set_header(material_set)?;
     let Some(proof_materials) = material_set.get("proofMaterials").and_then(Value::as_array) else {
         return Err(invalid_private_vss_share_proof(
@@ -279,11 +281,6 @@ fn transported_private_vss_share_proof_material_bytes(
                 "transportedPrivateVssShareProofMaterial contains duplicate proofMaterialRoot entries",
             ));
         }
-        if proof_material.get("chunks").is_some() {
-            return Err(invalid_private_vss_share_proof(
-                "private VSS share proof material must arrive through the canonical binary stream",
-            ));
-        }
         matching_reference = Some(proof_material);
     }
     matching_reference.ok_or_else(|| {
@@ -300,7 +297,7 @@ fn transported_private_vss_share_proof_material_bytes(
             "private VSS share proof material was not authenticated by the canonical binary stream",
         )
     })?;
-    Ok(proof_bytes.as_ref().clone())
+    Ok(proof_bytes)
 }
 
 fn verify_transported_private_vss_share_proof_material_set_header(
@@ -661,15 +658,19 @@ pub(super) fn private_vss_share_succinct_proof_record(
     let proof_bytes_hash = private_vss_share_succinct_proof_bytes_hash(&proof_bytes);
     let proof_material_root =
         private_vss_share_succinct_proof_material_root(&statement_hash_hex, &proof_bytes_hash)?;
+    crate::bgv::setup::retain_generated_canonical_proof_material(
+        PRIVATE_VSS_SHARE_PROOF_FAMILY,
+        proof_material_root.clone(),
+        proof_bytes,
+    )?;
     Ok(json!({
         "objectType": "PrivateVssShareProof",
         "proofFamily": PRIVATE_VSS_SHARE_PROOF_FAMILY,
-        "proofBytesEncoding": "embedded-binary-proof-bytes-hex",
+        "proofBytesEncoding": SETUP_PROOF_MATERIAL_ENCODING,
         "proofStatementRoot": proof_statement_root,
         "statementHash": statement_hash_hex,
         "proofBytesHash": proof_bytes_hash,
         "proofMaterialRoot": proof_material_root,
-        "proofBytesHex": to_hex(&proof_bytes),
     }))
 }
 

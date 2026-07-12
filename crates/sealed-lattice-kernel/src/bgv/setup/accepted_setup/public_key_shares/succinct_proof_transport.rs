@@ -7,14 +7,7 @@ use crate::bgv::setup::trustee_evaluation_key_proof::PUBLIC_KEY_SHARE_PROOF_FAMI
 pub(super) fn public_key_share_succinct_proof_bytes_from_record(
     proof_record: &Value,
     request: &Value,
-) -> CanonicalResult<Vec<u8>> {
-    if proof_record.get("proofBytesHex").is_some() {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "public-key share proof requires canonical streamed proof material",
-        ));
-    }
-
+) -> CanonicalResult<SetupProofMaterialBytes> {
     let proof_bytes_encoding = value_string(proof_record, "proofBytesEncoding")?;
     if proof_bytes_encoding != SETUP_PROOF_MATERIAL_ENCODING {
         return Err(CanonicalError::new(
@@ -37,7 +30,7 @@ pub(super) fn public_key_share_succinct_proof_bytes_from_record(
         ));
     }
 
-    Ok(proof_bytes.as_ref().clone())
+    Ok(proof_bytes)
 }
 
 // Semantic identity for one public-key share proof material. Transport
@@ -85,12 +78,6 @@ fn transported_public_key_share_proof_material_bytes(
             return Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
                 "transportedPublicKeyShareProofMaterial contains duplicate proofMaterialRoot entries",
-            ));
-        }
-        if proof_material.get("chunks").is_some() {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "public-key share proof material must arrive through the canonical binary stream",
             ));
         }
         let proof_bytes = verified_setup_proof_material_bytes_from_request(

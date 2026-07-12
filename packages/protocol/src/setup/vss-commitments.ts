@@ -13,6 +13,8 @@ export type {
     VssCommittedMaterialCommitmentComputer,
     VssCommittedMaterialSeedProvider,
     VssShareLinkageProofComputer,
+    VssAggregateThresholdProofComputer,
+    VssAggregateThresholdProofMaterial,
     VssPublicCoefficientCommitmentSet,
     VssPublicRecipientShareCommitmentSet,
     VssPublicAggregateThresholdCommitmentSet,
@@ -37,6 +39,7 @@ export type {
 export {
     createBinaryChunkedVssShareLinkageProofMaterialTransport,
     createBinaryChunkedSameSecretBridgeProofMaterialTransport,
+    appendVssAggregateThresholdProofMaterials,
 } from './vss-commitments/proof-material-transport.js';
 export type {
     TransportedVssShareLinkageProofMaterialSet,

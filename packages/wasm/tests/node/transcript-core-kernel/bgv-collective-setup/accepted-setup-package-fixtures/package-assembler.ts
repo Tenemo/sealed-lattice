@@ -40,6 +40,7 @@ import {
     createSetupPhaseParticipantObject,
     createSetupPhaseRecord,
 } from '#packages/protocol/src/setup/setup-phase-records';
+import type { SetupProofMaterialChunkSource } from '#packages/protocol/src/setup/setup-proof-material-transport';
 import {
     type CollectiveBgvSetupContext,
     type ProtocolRootSigner,
@@ -76,25 +77,12 @@ type CompanionSameSecretBridgeProofMaterial = Required<
     >
 >['transportedSameSecretBridgeProofMaterial'];
 
-// One transported proof-material set held compactly: the chunkless transported
-// reference set (small, immutable, reused directly as verification input) paired
-// with each material's contiguous proof bytes, decoded once from the transport
-// builder's chunked output. The raw chunk hex strings are dropped so the
-// parameters-keyed cache retains one Uint8Array per material for the worker
-// lifetime instead of roughly twice its size as V8 heap strings. The set type is
-// preserved so each material set keeps its specific objectType literal.
-type CompactTransportedProofMaterialSet<
-    MaterialSet extends BgvTransportedSetupProofMaterialSet =
-        BgvTransportedSetupProofMaterialSet,
-> = {
-    readonly chunklessSet: MaterialSet;
-    readonly materialChunks: readonly (readonly ArrayBuffer[])[];
-};
-
 type AcceptedShapedSetupPackageFixture = {
     readonly setupPackage: JsonRecord;
-    readonly vssShareLinkageProofMaterial: CompactTransportedProofMaterialSet<CompanionVssShareLinkageProofMaterial>;
-    readonly sameSecretBridgeProofMaterial: CompactTransportedProofMaterialSet<CompanionSameSecretBridgeProofMaterial>;
+    readonly vssShareLinkageProofMaterial: CompanionVssShareLinkageProofMaterial;
+    readonly vssShareLinkageProofMaterialSources: readonly SetupProofMaterialChunkSource[];
+    readonly sameSecretBridgeProofMaterial: CompanionSameSecretBridgeProofMaterial;
+    readonly sameSecretBridgeProofMaterialSources: readonly SetupProofMaterialChunkSource[];
 };
 
 export type AcceptedShapedSetupVerificationCompanions = Required<
@@ -116,58 +104,6 @@ function acceptedShapedSetupPackageCacheKey(
         bgvParameters.bgvParametersHash,
     ].join('|');
 }
-
-// Keep the transport builder's canonical binary windows separate so the
-// fixture never creates a second contiguous copy of a large proof object.
-const compactTransportedProofMaterialSet = <
-    MaterialSet extends BgvTransportedSetupProofMaterialSet,
->(
-    materialSet: MaterialSet,
-): CompactTransportedProofMaterialSet<MaterialSet> => {
-    const proofMaterials = materialSet.proofMaterials;
-    if (!Array.isArray(proofMaterials)) {
-        throw new TypeError(
-            'transported proof material set proofMaterials must be an array.',
-        );
-    }
-    const materialChunks: (readonly ArrayBuffer[])[] = [];
-    const chunklessProofMaterials = proofMaterials.map((proofMaterialValue) => {
-        const proofMaterial = proofMaterialValue as JsonRecord;
-        const chunks = proofMaterial.chunks;
-        if (!Array.isArray(chunks)) {
-            throw new TypeError(
-                'transported proof material chunks must be an array.',
-            );
-        }
-        materialChunks.push(
-            chunks.map((chunkValue, chunkIndex) => {
-                const chunk = chunkValue as JsonRecord;
-                if (
-                    chunk.chunkIndex !== chunkIndex ||
-                    Object.prototype.toString.call(chunk.bytes) !==
-                        '[object ArrayBuffer]'
-                ) {
-                    throw new TypeError(
-                        'transported proof material chunks must carry ordered binary bytes.',
-                    );
-                }
-                return (chunk.bytes as ArrayBuffer).slice(0);
-            }),
-        );
-        const { chunks: omittedChunks, ...chunklessReference } = proofMaterial;
-        void omittedChunks;
-
-        return chunklessReference;
-    });
-
-    return {
-        chunklessSet: {
-            ...materialSet,
-            proofMaterials: chunklessProofMaterials,
-        },
-        materialChunks,
-    };
-};
 
 async function buildAcceptedShapedSetupPackage(
     kernel: TranscriptCoreKernel,
@@ -256,13 +192,13 @@ async function buildAcceptedShapedSetupPackage(
     // and verification, so the prover's transient peak never ratchets it. The
     // fixture returned below holds only data, never this kernel or its computers.
     const generationKernel = await loadFreshTranscriptCoreKernel();
-    const vssPublicMaterial = acceptedVssPublicMaterial(
+    const vssPublicMaterial = await acceptedVssPublicMaterial(
         generationKernel,
         setupContext,
         setupParameters,
         publicMatrixSeedHash,
     );
-    const sameSecretBridge = acceptedSameSecretBridge(
+    const sameSecretBridge = await acceptedSameSecretBridge(
         generationKernel,
         setupContext,
         setupParameters,
@@ -355,40 +291,68 @@ async function buildAcceptedShapedSetupPackage(
 
     return {
         setupPackage,
-        vssShareLinkageProofMaterial: compactTransportedProofMaterialSet(
+        vssShareLinkageProofMaterial:
             vssPublicMaterial.transportedVssShareLinkageProofMaterial,
-        ),
-        sameSecretBridgeProofMaterial: compactTransportedProofMaterialSet(
+        vssShareLinkageProofMaterialSources:
+            vssPublicMaterial.proofMaterialChunkSources,
+        sameSecretBridgeProofMaterial:
             sameSecretBridge.transportedSameSecretBridgeProofMaterial,
-        ),
+        sameSecretBridgeProofMaterialSources:
+            sameSecretBridge.proofMaterialChunkSources,
     };
 }
 
 // Authenticate each canonical binary window directly into the family-specific
 // semantic sink before terminal setup verification consumes the references.
-const streamCompactTransportedProofMaterialSet = (
+const streamTransportedProofMaterialSet = async (
     runtime: BgvCanonicalStreamRuntime,
-    compactSet: CompactTransportedProofMaterialSet,
+    materialSet: BgvTransportedSetupProofMaterialSet,
+    materialSources: readonly SetupProofMaterialChunkSource[],
     family: BgvCanonicalStreamFamily,
-): void => {
-    compactSet.chunklessSet.proofMaterials.forEach(
-        (proofMaterialReference, materialIndex) => {
-            const chunks = compactSet.materialChunks[materialIndex];
-            if (chunks === undefined) {
-                throw new Error(
-                    `transported setup proof material is missing binary chunks for material ${String(materialIndex)}.`,
-                );
-            }
-            const proofMaterialRoot = String(
-                (proofMaterialReference as JsonRecord).proofMaterialRoot,
-            );
-            runtime.stage({
-                chunks,
-                family,
-                materialRoot: proofMaterialRoot,
-            });
-        },
+): Promise<void> => {
+    const sourcesByRoot = new Map(
+        materialSources.map((source) => [source.proofMaterialRoot, source]),
     );
+    for (
+        let materialIndex = 0;
+        materialIndex < materialSet.proofMaterials.length;
+        materialIndex += 1
+    ) {
+        const proofMaterialReference = materialSet.proofMaterials[
+            materialIndex
+        ] as JsonRecord;
+        const proofMaterialRoot = String(
+            proofMaterialReference.proofMaterialRoot,
+        );
+        const source = sourcesByRoot.get(proofMaterialRoot);
+        if (source === undefined) {
+            throw new Error(
+                `transported setup proof material is missing a bounded source for material ${String(materialIndex)}.`,
+            );
+        }
+        const descriptorBytes = proofMaterialReference.descriptorBytes;
+        if (
+            !ArrayBuffer.isView(descriptorBytes) ||
+            Object.prototype.toString.call(descriptorBytes) !==
+                '[object Uint8Array]'
+        ) {
+            throw new TypeError(
+                'transported setup proof material requires descriptor bytes.',
+            );
+        }
+        await runtime.readMaterial({
+            descriptorBytes: descriptorBytes as Uint8Array,
+            family,
+            materialRoot: proofMaterialRoot,
+            pullChunk: source.pullChunk,
+        });
+        sourcesByRoot.delete(proofMaterialRoot);
+    }
+    if (sourcesByRoot.size !== 0) {
+        throw new Error(
+            'transported setup proof material sources must match references exactly.',
+        );
+    }
 };
 
 export async function acceptedShapedSetupPackageFixture(
@@ -426,22 +390,24 @@ export async function acceptedShapedSetupVerificationCompanions(
         setupParameters,
     );
     const runtime = openBgvCanonicalStreamRuntime({ kernel });
-    streamCompactTransportedProofMaterialSet(
+    await streamTransportedProofMaterialSet(
         runtime,
         fixture.vssShareLinkageProofMaterial,
+        fixture.vssShareLinkageProofMaterialSources,
         bgvCanonicalStreamFamilies.vssShareLinkage,
     );
-    streamCompactTransportedProofMaterialSet(
+    await streamTransportedProofMaterialSet(
         runtime,
         fixture.sameSecretBridgeProofMaterial,
+        fixture.sameSecretBridgeProofMaterialSources,
         bgvCanonicalStreamFamilies.sameSecretBridge,
     );
 
     return {
         transportedVssShareLinkageProofMaterial:
-            fixture.vssShareLinkageProofMaterial.chunklessSet,
+            fixture.vssShareLinkageProofMaterial,
         transportedSameSecretBridgeProofMaterial:
-            fixture.sameSecretBridgeProofMaterial.chunklessSet,
+            fixture.sameSecretBridgeProofMaterial,
     };
 }
 

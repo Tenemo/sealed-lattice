@@ -176,6 +176,49 @@ fn finalize_hash512_hex(hasher: Shake256) -> String {
     to_hex(&output)
 }
 
+/// Hashes one length-framed part without first joining its chunks. The output
+/// is byte-identical to `hash512_hex(domain, &[contiguous_bytes])`; the declared
+/// byte length is checked against the bytes actually absorbed.
+pub(crate) fn hash512_hex_streamed_part<'a>(
+    domain: &str,
+    total_byte_length: usize,
+    chunks: impl IntoIterator<Item = &'a [u8]>,
+) -> CanonicalResult<String> {
+    let mut hasher = Shake256::default();
+    hasher.update(HASH512_PREIMAGE_PREFIX);
+    update_bytes_prefix(&mut hasher, domain.len())?;
+    hasher.update(domain.as_bytes());
+    update_varuint(&mut hasher, 1);
+    update_bytes_prefix(&mut hasher, total_byte_length)?;
+
+    let mut absorbed_byte_length = 0_usize;
+    for chunk in chunks {
+        absorbed_byte_length = absorbed_byte_length
+            .checked_add(chunk.len())
+            .ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    "streamed hash input length overflowed usize",
+                )
+            })?;
+        if absorbed_byte_length > total_byte_length {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "streamed hash input exceeded its declared byte length",
+            ));
+        }
+        hasher.update(chunk);
+    }
+    if absorbed_byte_length != total_byte_length {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "streamed hash input did not reach its declared byte length",
+        ));
+    }
+
+    Ok(finalize_hash512_hex(hasher))
+}
+
 pub fn namespace_root(namespace: &str, canonical_bytes: &[u8]) -> String {
     hash512_hex(namespace, &[canonical_bytes])
 }
@@ -633,7 +676,7 @@ pub(crate) fn derive_canonical_object_hash_omitting_field_paths(
 mod tests {
     use super::{
         CanonicalJsonPathSegment, canonical_json, canonical_json_matches_bytes, chunk_root,
-        derive_canonical_object_hash_omitting_field_paths, hash512_hex,
+        derive_canonical_object_hash_omitting_field_paths, hash512_hex, hash512_hex_streamed_part,
     };
     use crate::encoding::CanonicalErrorCode;
 
@@ -662,6 +705,35 @@ mod tests {
         let right = hash512_hex("transcript-core/b", &[b"same"]);
 
         assert_ne!(left, right);
+    }
+
+    #[test]
+    fn streamed_hash512_part_matches_contiguous_hash_and_checks_length() {
+        let chunks: [&[u8]; 3] = [b"canonical ", b"proof ", b"bytes"];
+        let contiguous = chunks.concat();
+        let expected = hash512_hex("transcript-core/streamed-part", &[&contiguous]);
+
+        assert_eq!(
+            hash512_hex_streamed_part("transcript-core/streamed-part", contiguous.len(), chunks,)
+                .expect("exact streamed bytes should hash"),
+            expected,
+        );
+        assert!(
+            hash512_hex_streamed_part(
+                "transcript-core/streamed-part",
+                contiguous.len() - 1,
+                chunks,
+            )
+            .is_err()
+        );
+        assert!(
+            hash512_hex_streamed_part(
+                "transcript-core/streamed-part",
+                contiguous.len() + 1,
+                chunks,
+            )
+            .is_err()
+        );
     }
 
     #[test]

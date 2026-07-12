@@ -4,6 +4,9 @@ const TARGET_DECRYPTION_SHARE_PROOF_MATERIAL_OBJECT_TYPE: &str =
     "BgvTargetDecryptionShareProofMaterial";
 const TARGET_DECRYPTION_SHARE_PROOF_RECORD_OBJECT_TYPE: &str =
     "BgvTargetDecryptionShareProofRecord";
+const TARGET_DECRYPTION_SHARE_PROOF_BYTES_ENCODING: &str = "binary-chunked-proof-bytes";
+const TARGET_DECRYPTION_SHARE_PROOF_BYTES_HASH_DOMAIN: &str =
+    "sealed-lattice/target-decryption/share-proof/proof-bytes";
 
 pub(super) struct TargetDecryptionShareProofMaterialGenerationInput<'a> {
     pub(super) setup_binding: &'a SetupBinding,
@@ -31,6 +34,7 @@ pub(super) struct TargetDecryptionShareProofMaterialVerificationInput<'a> {
 
 struct TargetDecryptionShareProofRecordVerificationInput<'a> {
     proof_record: &'a Value,
+    proof_bytes: &'a crate::bgv::setup::BgvProofMaterialBytes,
     setup_binding: &'a SetupBinding,
     target_accepted: &'a TargetAcceptedBinding,
     target_ciphertexts: &'a TargetCiphertextPair,
@@ -38,6 +42,30 @@ struct TargetDecryptionShareProofRecordVerificationInput<'a> {
     target_decryption_share: &'a Value,
     target_share_proof_statement: &'a Value,
     active_limb_count: usize,
+}
+
+pub(super) struct TargetProofMaterialEvictionGuard {
+    proof_material_root: String,
+}
+
+pub(super) fn target_proof_material_eviction_guard_for_request(
+    request: &Value,
+) -> Option<TargetProofMaterialEvictionGuard> {
+    request
+        .get("proofMaterial")
+        .and_then(|proof_material| proof_material.get("proofMaterialRoot"))
+        .and_then(Value::as_str)
+        .map(|proof_material_root| TargetProofMaterialEvictionGuard {
+            proof_material_root: proof_material_root.to_string(),
+        })
+}
+
+impl Drop for TargetProofMaterialEvictionGuard {
+    fn drop(&mut self) {
+        crate::bgv::setup::evict_verified_canonical_proof_materials(std::slice::from_ref(
+            &self.proof_material_root,
+        ));
+    }
 }
 
 pub(super) fn generate_target_decryption_share_proof_material_from_local_witness(
@@ -86,19 +114,29 @@ pub(super) fn generate_target_decryption_share_proof_material_from_local_witness
         ));
     }
     let proof_bytes = generated.proof_bytes;
-    let proof_bytes_base64 = encode_standard_base64(&proof_bytes);
+    let proof_bytes_hash = hash512_hex(
+        TARGET_DECRYPTION_SHARE_PROOF_BYTES_HASH_DOMAIN,
+        &[&proof_bytes],
+    );
     let proof_record = json!({
         "objectType": TARGET_DECRYPTION_SHARE_PROOF_RECORD_OBJECT_TYPE,
-        "proofBytesBase64": proof_bytes_base64,
+        "proofBytesEncoding": TARGET_DECRYPTION_SHARE_PROOF_BYTES_ENCODING,
+        "proofBytesHash": proof_bytes_hash,
     });
 
     let mut proof_material = json!({
         "objectType": TARGET_DECRYPTION_SHARE_PROOF_MATERIAL_OBJECT_TYPE,
         "proofRecords": [proof_record],
     });
-    proof_material["proofMaterialRoot"] = json!(derive_canonical_object_hash(
-        &target_decryption_share_proof_material_root_preimage(&proof_material)?
-    )?);
+    let proof_material_root = derive_canonical_object_hash(
+        &target_decryption_share_proof_material_root_preimage(&proof_material)?,
+    )?;
+    proof_material["proofMaterialRoot"] = json!(&proof_material_root);
+    crate::bgv::setup::retain_generated_canonical_proof_material(
+        TARGET_DECRYPTION_SHARE_PROOF_FAMILY,
+        proof_material_root,
+        proof_bytes,
+    )?;
 
     Ok(proof_material)
 }
@@ -106,6 +144,10 @@ pub(super) fn generate_target_decryption_share_proof_material_from_local_witness
 pub(super) fn verify_target_decryption_share_proof_material(
     input: TargetDecryptionShareProofMaterialVerificationInput<'_>,
 ) -> CanonicalResult<Value> {
+    let supplied_material_root = hash_at_path(input.proof_material, &["proofMaterialRoot"])?;
+    let _material_eviction_guard = TargetProofMaterialEvictionGuard {
+        proof_material_root: supplied_material_root.to_string(),
+    };
     validate_target_decryption_share_proof_statement_shape(
         input.proof_statement,
         input.setup_binding,
@@ -123,7 +165,6 @@ pub(super) fn verify_target_decryption_share_proof_material(
             "target-decryption proof material must use the current target proof-material layout",
         ));
     }
-    hash_at_path(input.proof_material, &["proofMaterialRoot"])?;
     let expected_material_root = derive_canonical_object_hash(
         &target_decryption_share_proof_material_root_preimage(input.proof_material)?,
     )?;
@@ -142,11 +183,22 @@ pub(super) fn verify_target_decryption_share_proof_material(
             "target-decryption proof material must include one all-active-limb proof record",
         ));
     }
+    let proof_bytes = crate::bgv::setup::take_verified_canonical_proof_material_bytes(
+        TARGET_DECRYPTION_SHARE_PROOF_FAMILY,
+        &expected_material_root,
+    )?
+    .ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidProtocolObject,
+            "target-decryption proof material is missing its canonical stream-authenticated bytes",
+        )
+    })?;
 
     for proof_record in proof_records {
         verify_target_decryption_share_proof_record(
             TargetDecryptionShareProofRecordVerificationInput {
                 proof_record,
+                proof_bytes: &proof_bytes,
                 setup_binding: input.setup_binding,
                 target_accepted: input.target_accepted,
                 target_ciphertexts: input.target_ciphertexts,
@@ -178,10 +230,26 @@ fn verify_target_decryption_share_proof_record(
     }
     let expected_target_rns_limb_indices = (0..input.active_limb_count).collect::<Vec<_>>();
     let expected_target_roles = expected_target_roles();
-    let proof_bytes = decode_standard_base64(
-        string_at_path(proof_record, &["proofBytesBase64"])?,
-        "target-decryption proofBytesBase64",
+    if string_at_path(proof_record, &["proofBytesEncoding"])?
+        != TARGET_DECRYPTION_SHARE_PROOF_BYTES_ENCODING
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "target-decryption proof bytes must use canonical binary stream encoding",
+        ));
+    }
+    let proof_bytes_hash = hash_at_path(proof_record, &["proofBytesHash"])?;
+    let recomputed_proof_bytes_hash = crate::hashing::hash512_hex_streamed_part(
+        TARGET_DECRYPTION_SHARE_PROOF_BYTES_HASH_DOMAIN,
+        input.proof_bytes.len(),
+        input.proof_bytes.chunks(),
     )?;
+    if proof_bytes_hash != recomputed_proof_bytes_hash {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "target-decryption proofBytesHash does not match the authenticated proof bytes",
+        ));
+    }
     let proof_verification_request =
         target_decryption_share_all_active_limbs_proof_statement_from_public_inputs(
             TargetDecryptionShareAllActiveLimbsProofStatementInput {
@@ -194,9 +262,9 @@ fn verify_target_decryption_share_proof_record(
             },
         )?;
     let proof_verification =
-        crate::bgv::setup::verify_target_decryption_share_proof_bytes_from_request(
+        crate::bgv::setup::verify_target_decryption_share_proof_source_from_request(
             &proof_verification_request,
-            &proof_bytes,
+            input.proof_bytes.as_ref(),
         )?;
     compare_string_field(
         &proof_verification,
@@ -217,7 +285,7 @@ fn verify_target_decryption_share_proof_record(
     compare_unsigned_field(
         &proof_verification,
         "proofByteLength",
-        proof_bytes.len() as u64,
+        input.proof_bytes.len() as u64,
         "target-decryption proof verification proof byte length",
     )?;
 

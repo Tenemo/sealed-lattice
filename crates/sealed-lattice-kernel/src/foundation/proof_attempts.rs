@@ -329,21 +329,6 @@ enum ProofAttemptState {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum PersistedProofAttemptState {
-    Reserved,
-    CryptographicVerificationBegan,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct PersistedProofAttemptRecord {
-    pub slot: ProofApplicationSlot,
-    pub proof_header_hash: Hash512,
-    pub complete_proof_digest: Hash512,
-    pub complete_proof_byte_length: u64,
-    pub state: PersistedProofAttemptState,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct ProofAttemptRecord {
     proof_header_hash: Hash512,
     complete_proof_digest: Hash512,
@@ -396,59 +381,6 @@ impl EphemeralProofAttemptTracker {
 
     pub fn family_reserved_count(&self, family: ProofFamily) -> u64 {
         self.family_reserved_counts[family.profile_index()]
-    }
-
-    pub(crate) fn persisted_records(&self) -> Vec<PersistedProofAttemptRecord> {
-        self.attempts
-            .iter()
-            .map(|(slot, record)| PersistedProofAttemptRecord {
-                slot: *slot,
-                proof_header_hash: record.proof_header_hash,
-                complete_proof_digest: record.complete_proof_digest,
-                complete_proof_byte_length: record.complete_proof_byte_length,
-                state: match record.state {
-                    ProofAttemptState::Reserved => PersistedProofAttemptState::Reserved,
-                    ProofAttemptState::CryptographicVerificationBegan => {
-                        PersistedProofAttemptState::CryptographicVerificationBegan
-                    }
-                },
-            })
-            .collect()
-    }
-
-    pub(crate) fn try_restore_persisted_records(
-        profile: ProofAttemptProfile,
-        records: &[PersistedProofAttemptRecord],
-    ) -> Result<Self, RefusalReason> {
-        if records
-            .windows(2)
-            .any(|adjacent| adjacent[0].slot >= adjacent[1].slot)
-        {
-            return Err(RefusalReason::MalformedEncoding);
-        }
-        let mut tracker = Self::new(profile);
-        for record in records {
-            if tracker.reserve(
-                record.slot,
-                record.proof_header_hash,
-                record.complete_proof_digest,
-                record.complete_proof_byte_length,
-            )? != ProofAttemptReservationDisposition::Reserved
-            {
-                return Err(RefusalReason::Equivocation);
-            }
-            if record.state == PersistedProofAttemptState::CryptographicVerificationBegan
-                && tracker.begin_cryptographic_verification(
-                    record.slot,
-                    record.proof_header_hash,
-                    record.complete_proof_digest,
-                    record.complete_proof_byte_length,
-                )? != ProofAttemptStartDisposition::BeginCryptographicVerification
-            {
-                return Err(RefusalReason::ConsumedState);
-            }
-        }
-        Ok(tracker)
     }
 
     pub fn reserve(

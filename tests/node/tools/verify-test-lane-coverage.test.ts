@@ -7,7 +7,7 @@ describe('test lane coverage verification', () => {
     it('classifies the current lane patterns', () => {
         expect(
             testLaneGroupsForRelativePath(
-                'packages/protocol/tests/node/election-foundation-lifecycle.test.ts',
+                'packages/protocol/tests/node/election-foundation-thresholds.test.ts',
             ),
         ).toEqual(['node-protocol']);
         expect(

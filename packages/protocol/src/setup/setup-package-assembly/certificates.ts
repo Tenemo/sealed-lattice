@@ -123,18 +123,9 @@ const qSharePrimesFromPublicKeyShares = (
     return qSharePrimes;
 };
 
-export const derivedCollectivePublicKey = (
+export const derivedCollectivePublicKey = async (
     input: SetupPackageInput,
-): CollectivePublicKey => {
-    if (
-        Object.prototype.hasOwnProperty.call(input, 'collectivePublicKey') &&
-        (input as Readonly<{ readonly collectivePublicKey?: unknown }>)
-            .collectivePublicKey !== undefined
-    ) {
-        throw new Error(
-            'collectivePublicKey is derived from accepted public-key material and must not be supplied by callers.',
-        );
-    }
+): Promise<CollectivePublicKey> => {
     const publicKeyShareMaterial =
         input.publicKeyShareMaterial as SetupPackagePublicKeyShareMaterialSet;
     const qSharePrimes = qSharePrimesFromPublicKeyShares(
@@ -160,17 +151,17 @@ export const derivedCollectivePublicKey = (
         publicKeyShareMaterial.materialEncoding ===
         publicKeyShareMaterialTransportEncoding
     ) {
-        if (input.transportedPublicKeyShareMaterial === undefined) {
+        if (input.publicKeyShareMaterialChunkSource === undefined) {
             throw new Error(
-                'transportedPublicKeyShareMaterial is required when publicKeyShareMaterial is binary-chunked.',
+                'publicKeyShareMaterialChunkSource is required when publicKeyShareMaterial is binary-chunked.',
             );
         }
 
         return createCollectivePublicKeyFromTransportedPublicKeyShareMaterial({
             ...commonCollectivePublicKeyInput,
             publicKeyShareMaterial,
-            transportedPublicKeyShareMaterial:
-                input.transportedPublicKeyShareMaterial,
+            publicKeyShareMaterialChunkSource:
+                input.publicKeyShareMaterialChunkSource,
         });
     }
 

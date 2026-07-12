@@ -4,13 +4,8 @@ use std::collections::BTreeMap;
 use tiny_keccak::{Hasher, Kmac};
 use zeroize::{Zeroize, Zeroizing};
 
-use super::schemas::{
-    read_fixed_bytes, read_hash, read_item, read_nested_tuple_list, read_u16, read_u64,
-    require_header,
-};
 use super::{
-    CanonicalCodecError, CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple,
-    FoundationSchemaError, Hash512,
+    CanonicalCodecError, CanonicalItem, CanonicalTuple, Hash512,
     PRIVATE_RANDOM_BLOCK_INPUT_SCHEMA_IDENTIFIER, ParticipantIdentity, RandomCursor,
 };
 
@@ -20,9 +15,6 @@ const ACTION_RANDOMNESS_ROOT_BYTE_LENGTH: usize = 64;
 const ATTEMPT_IDENTIFIER_BYTE_LENGTH: usize = 32;
 const RANDOM_BLOCK_BYTE_LENGTH: usize = 64;
 const PROOF_LEAF_SALT_PURPOSE: u16 = 0xfffe;
-const ACTION_RANDOMNESS_STATE_SCHEMA_IDENTIFIER: u16 = 0x0401;
-const ACTION_RANDOMNESS_ATTEMPT_IDENTIFIER_SCHEMA_IDENTIFIER: u16 = 0x0402;
-const ACTION_RANDOMNESS_STREAM_STATE_SCHEMA_IDENTIFIER: u16 = 0x0403;
 
 /// An entropy provider injected by the browser or native host.
 ///
@@ -341,188 +333,6 @@ impl PrivateRandomnessResumeSnapshot {
             })
             .collect()
     }
-
-    pub(crate) fn attempt_identifier_bytes(
-        &self,
-    ) -> &[u8; ATTEMPT_IDENTIFIER_BYTE_LENGTH] {
-        &self.attempt_identifier
-    }
-
-    pub(crate) fn live_stream_contexts(&self) -> Vec<PrivateRandomStreamContext> {
-        self.streams
-            .iter()
-            .map(|stream| PrivateRandomStreamContext {
-                stream_key: stream.stream_key,
-            })
-            .collect()
-    }
-
-    /// Encodes secret continuation state only for immediate encryption under
-    /// the worker-owned action storage root. This encoding is never a public
-    /// protocol value and the returned buffer zeroizes on drop.
-    pub(crate) fn encode_for_encrypted_storage(
-        &self,
-    ) -> Result<Zeroizing<Vec<u8>>, PrivateRandomnessError> {
-        let attempt_identifier_items = self
-            .used_attempt_identifiers
-            .iter()
-            .map(|identifier| {
-                Ok(CanonicalItem::nested_tuple(&CanonicalTuple::new(
-                    ACTION_RANDOMNESS_ATTEMPT_IDENTIFIER_SCHEMA_IDENTIFIER,
-                    FOUNDATION_PROTOCOL_VERSION,
-                    vec![CanonicalItem::fixed_bytes(identifier.as_ref())?],
-                ))?)
-            })
-            .collect::<Result<Vec<_>, CanonicalCodecError>>()?;
-        let stream_items = self
-            .streams
-            .iter()
-            .map(|stream| {
-                Ok(CanonicalItem::nested_tuple(&CanonicalTuple::new(
-                    ACTION_RANDOMNESS_STREAM_STATE_SCHEMA_IDENTIFIER,
-                    FOUNDATION_PROTOCOL_VERSION,
-                    vec![
-                        CanonicalItem::unsigned16(stream.stream_key.family),
-                        CanonicalItem::unsigned16(stream.stream_key.purpose),
-                        CanonicalItem::hash512(stream.stream_key.derivation_context_hash),
-                        CanonicalItem::unsigned64(stream.next_counter),
-                        CanonicalItem::fixed_bytes(stream.unread_block.as_ref())?,
-                        CanonicalItem::unsigned16(
-                            u16::try_from(stream.unread_block_offset)
-                                .expect("a private-randomness block offset fits u16"),
-                        ),
-                    ],
-                ))?)
-            })
-            .collect::<Result<Vec<_>, CanonicalCodecError>>()?;
-        let encoded = CanonicalTuple::new(
-            ACTION_RANDOMNESS_STATE_SCHEMA_IDENTIFIER,
-            FOUNDATION_PROTOCOL_VERSION,
-            vec![
-                CanonicalItem::hash512(self.binding.suite_id.into_bytes()),
-                CanonicalItem::hash512(self.binding.ceremony_context_hash.into_bytes()),
-                CanonicalItem::hash512(self.binding.action_context_hash.into_bytes()),
-                CanonicalItem::participant_identity(
-                    self.binding.participant_identity.into_bytes(),
-                ),
-                CanonicalItem::fixed_bytes(self.action_randomness_root.as_ref())?,
-                CanonicalItem::homogeneous_list(
-                    CanonicalItemType::NestedTuple,
-                    &attempt_identifier_items,
-                )?,
-                CanonicalItem::fixed_bytes(self.attempt_identifier.as_ref())?,
-                CanonicalItem::homogeneous_list(CanonicalItemType::NestedTuple, &stream_items)?,
-            ],
-        )
-        .encode()?;
-        Ok(Zeroizing::new(encoded))
-    }
-
-    pub(crate) fn decode_from_encrypted_storage(
-        bytes: &[u8],
-        expected_binding: PrivateRandomnessActionBinding,
-    ) -> Result<Self, PrivateRandomnessError> {
-        let limits = CanonicalDecodeLimits::default();
-        let tuple = CanonicalTuple::decode(bytes, &limits)?;
-        require_header(&tuple, ACTION_RANDOMNESS_STATE_SCHEMA_IDENTIFIER, 8)
-            .map_err(invalid_persisted_randomness_state)?;
-        let participant_identity_bytes: [u8; Hash512::BYTE_LENGTH] = read_item(
-            &tuple.items[3],
-            CanonicalItemType::ParticipantIdentity,
-        )
-        .map_err(invalid_persisted_randomness_state)?
-        .try_into()
-        .map_err(|_| PrivateRandomnessError::InvalidResumeSecretState)?;
-        let binding = PrivateRandomnessActionBinding::new(
-            read_hash(&tuple.items[0]).map_err(invalid_persisted_randomness_state)?,
-            read_hash(&tuple.items[1]).map_err(invalid_persisted_randomness_state)?,
-            read_hash(&tuple.items[2]).map_err(invalid_persisted_randomness_state)?,
-            ParticipantIdentity::from_bytes(participant_identity_bytes),
-        );
-        if binding != expected_binding {
-            return Err(PrivateRandomnessError::ResumeBindingMismatch);
-        }
-        let action_randomness_root = Zeroizing::new(
-            read_fixed_bytes(&tuple.items[4]).map_err(invalid_persisted_randomness_state)?,
-        );
-        let attempt_identifier_tuples = read_nested_tuple_list(&tuple.items[5], &limits)
-            .map_err(invalid_persisted_randomness_state)?;
-        let used_attempt_identifiers = attempt_identifier_tuples
-            .iter()
-            .map(|attempt_tuple| {
-                require_header(
-                    attempt_tuple,
-                    ACTION_RANDOMNESS_ATTEMPT_IDENTIFIER_SCHEMA_IDENTIFIER,
-                    1,
-                )
-                .map_err(invalid_persisted_randomness_state)?;
-                Ok(Zeroizing::new(
-                    read_fixed_bytes(&attempt_tuple.items[0])
-                        .map_err(invalid_persisted_randomness_state)?,
-                ))
-            })
-            .collect::<Result<Vec<_>, PrivateRandomnessError>>()?;
-        let attempt_identifier = Zeroizing::new(
-            read_fixed_bytes(&tuple.items[6]).map_err(invalid_persisted_randomness_state)?,
-        );
-        let stream_tuples = read_nested_tuple_list(&tuple.items[7], &limits)
-            .map_err(invalid_persisted_randomness_state)?;
-        let streams = stream_tuples
-            .iter()
-            .map(|stream_tuple| {
-                require_header(
-                    stream_tuple,
-                    ACTION_RANDOMNESS_STREAM_STATE_SCHEMA_IDENTIFIER,
-                    6,
-                )
-                .map_err(invalid_persisted_randomness_state)?;
-                Ok(PrivateRandomStreamSnapshot {
-                    stream_key: PrivateRandomStreamKey {
-                        family: read_u16(&stream_tuple.items[0])
-                            .map_err(invalid_persisted_randomness_state)?,
-                        purpose: read_u16(&stream_tuple.items[1])
-                            .map_err(invalid_persisted_randomness_state)?,
-                        derivation_context_hash: read_hash(&stream_tuple.items[2])
-                            .map_err(invalid_persisted_randomness_state)?
-                            .into_bytes(),
-                    },
-                    next_counter: read_u64(&stream_tuple.items[3])
-                        .map_err(invalid_persisted_randomness_state)?,
-                    unread_block: Zeroizing::new(
-                        read_fixed_bytes(&stream_tuple.items[4])
-                            .map_err(invalid_persisted_randomness_state)?,
-                    ),
-                    unread_block_offset: usize::from(
-                        read_u16(&stream_tuple.items[5])
-                            .map_err(invalid_persisted_randomness_state)?,
-                    ),
-                })
-            })
-            .collect::<Result<Vec<_>, PrivateRandomnessError>>()?;
-        let snapshot = Self {
-            binding,
-            action_randomness_root,
-            used_attempt_identifiers,
-            attempt_identifier,
-            streams,
-        };
-        let live_streams = snapshot.live_stream_contexts();
-        let random_cursors = snapshot.try_derive_random_cursors()?;
-        validate_private_randomness_resume(
-            &snapshot,
-            expected_binding,
-            snapshot.attempt_identifier_bytes(),
-            &live_streams,
-            &random_cursors,
-        )?;
-        Ok(snapshot)
-    }
-}
-
-fn invalid_persisted_randomness_state(
-    _error: FoundationSchemaError,
-) -> PrivateRandomnessError {
-    PrivateRandomnessError::InvalidResumeSecretState
 }
 
 impl fmt::Debug for PrivateRandomnessResumeSnapshot {

@@ -378,7 +378,7 @@ pub(crate) fn verify_vss_same_secret_bridge_proof_material_set_request(
                     public_matrix_seed_hash,
                 },
                 expected_position,
-                proof_bytes: &proof_bytes[..],
+                proof_bytes: &proof_bytes,
                 source_constant_commitment_values: &source_constant_commitments.commitment_values,
             },
         )?;

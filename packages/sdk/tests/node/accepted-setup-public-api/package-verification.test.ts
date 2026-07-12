@@ -188,7 +188,6 @@ describe('accepted setup public package API in Node', () => {
             isValid: false,
             operation: 'verifyCollectiveBgvSetupPackage',
         });
-        expect(verification.acceptedSetupHandoff).toBeUndefined();
     });
 
     it('creates setup verification input for every verified proof material family', () => {

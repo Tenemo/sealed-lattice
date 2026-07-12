@@ -45,7 +45,6 @@ import type {
 } from './kernel-types/bgv.js';
 
 export type {
-    BgvAcceptedSetupHandoff,
     BgvBatchPlaintextEncoding,
     BgvCanonicalObjectAnalysis,
     BgvCollectiveSetupParametersDescription,
@@ -598,6 +597,34 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         capabilityPointer: number,
         capabilityLength: number,
     ) => number;
+    sealed_lattice_bgv_canonical_material_reader_begin?: (
+        familyCode: number,
+        materialRootPointer: number,
+        materialRootLength: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        statusPointer: number,
+        totalByteLengthPointer: number,
+        chunkCountPointer: number,
+    ) => number;
+    sealed_lattice_bgv_canonical_material_reader_cancel?: (
+        handle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+    ) => number;
+    sealed_lattice_bgv_canonical_material_reader_finish?: (
+        handle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+    ) => number;
+    sealed_lattice_bgv_canonical_material_reader_read_chunk?: (
+        handle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        chunkIndex: number,
+        outputPointer: number,
+        outputLength: number,
+    ) => number;
     sealed_lattice_canonical_stream_absorb_chunk?: (
         handle: number,
         capabilityPointer: number,
@@ -693,17 +720,18 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         capabilityLength: number,
         verifiedObjectHandle: number,
     ) => number;
-    sealed_lattice_state_verifier_verify_output?: (
+    sealed_lattice_state_verifier_finish_output?: (
         sessionHandle: number,
         capabilityPointer: number,
         capabilityLength: number,
+        streamHandle: number,
+        streamCapabilityPointer: number,
+        streamCapabilityLength: number,
         verifiedReservationHandle: number,
         canonicalOutputIntentCarrierPointer: number,
         canonicalOutputIntentCarrierLength: number,
         canonicalStateCertificatePointer: number,
         canonicalStateCertificateLength: number,
-        exactOutputPointer: number,
-        exactOutputLength: number,
         statusPointer: number,
     ) => number;
     sealed_lattice_state_verifier_verify_recovery?: (

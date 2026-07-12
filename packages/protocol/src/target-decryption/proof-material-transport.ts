@@ -1,51 +1,32 @@
-import {
-    deriveCanonicalObjectHash,
-    setupProofMaterialFullObjectHashHex,
-} from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
 import { protocolHashPattern } from '../common/verification-helpers.js';
-import { BinaryChunkWriter } from '../setup/binary-chunk-writer.js';
-import { bytesFromStandardBase64 } from '../setup/proof-byte-encoding.js';
-import {
-    setupProofChunkManifestRoot,
-    setupProofMaterialChunkHash,
-    setupProofTransportChunkSizeBytes,
-} from '../setup/setup-proof-material-transport.js';
 
 type JsonRecord = Record<string, unknown>;
 
 export const targetDecryptionShareProofFamily = 'target-decryption-share';
-export const targetDecryptionShareProofMaterialBinaryFormat =
-    'sealed-lattice-target-decryption-share-proof-material-binary';
-
-const targetDecryptionShareProofMaterialBinaryMagic = new TextEncoder().encode(
-    'SEALED-LATTICE-TARGET-DECRYPTION-SHARE-PROOF-MATERIAL-BINARY-V1',
-);
+export const targetDecryptionShareProofBytesEncoding =
+    'binary-chunked-proof-bytes';
 
 export type BgvTargetDecryptionShareProofMaterial = Readonly<
     JsonRecord & {
         readonly objectType: 'BgvTargetDecryptionShareProofMaterial';
-        readonly objectVersion: 8;
         readonly proofRecords: readonly unknown[];
         readonly proofMaterialRoot: ProtocolHash;
     }
 >;
 
-type BgvTargetDecryptionShareBinaryProofMaterialTransport = Readonly<
-    JsonRecord & {
-        readonly objectType: 'BgvTargetDecryptionShareBinaryProofMaterialTransport';
-        readonly proofFamily: typeof targetDecryptionShareProofFamily;
-        readonly binaryFormat: typeof targetDecryptionShareProofMaterialBinaryFormat;
-        readonly proofMaterialRoot: ProtocolHash;
-        readonly chunkCount: number;
-        readonly totalByteLength: number;
-        readonly fullObjectHash: ProtocolHash;
-        readonly chunkRoot: ProtocolHash;
-        readonly chunkHashes: readonly ProtocolHash[];
-        readonly chunks: readonly Uint8Array[];
-    }
->;
+export type BgvTargetDecryptionShareCanonicalProofMaterialTransport = Readonly<{
+    readonly objectType: 'BgvTargetDecryptionShareCanonicalProofMaterialTransport';
+    readonly proofFamily: typeof targetDecryptionShareProofFamily;
+    readonly proofMaterialRoot: ProtocolHash;
+    readonly descriptorBytes: Uint8Array;
+}>;
+
+export type BgvTargetDecryptionShareCanonicalMaterialExport = Readonly<{
+    readonly descriptorBytes: Uint8Array;
+}>;
 
 const assertProtocolHash = (
     value: unknown,
@@ -58,16 +39,6 @@ const assertProtocolHash = (
     return value;
 };
 
-const assertExactStringField = (
-    value: unknown,
-    fieldName: string,
-    expectedValue: string,
-): void => {
-    if (value !== expectedValue) {
-        throw new TypeError(`${fieldName} must be ${expectedValue}.`);
-    }
-};
-
 const assertObject = (value: unknown, fieldName: string): JsonRecord => {
     if (typeof value !== 'object' || value === null || Array.isArray(value)) {
         throw new TypeError(`${fieldName} must be an object.`);
@@ -76,40 +47,39 @@ const assertObject = (value: unknown, fieldName: string): JsonRecord => {
     return value as JsonRecord;
 };
 
-const assertObjectVersion = (
-    value: unknown,
-    fieldName: string,
-    expectedValue: number,
-): void => {
-    if (value !== expectedValue) {
-        throw new TypeError(`${fieldName} objectVersion is not supported.`);
-    }
-};
-
-const hexToBytes = (hex: ProtocolHash): Uint8Array => {
-    const bytes = new Uint8Array(hex.length / 2);
-    for (let byteIndex = 0; byteIndex < bytes.length; byteIndex += 1) {
-        bytes[byteIndex] = Number.parseInt(
-            hex.slice(byteIndex * 2, byteIndex * 2 + 2),
-            16,
-        );
-    }
-
-    return bytes;
-};
-
 const validatedTargetProofMaterialRoot = (
     proofMaterial: BgvTargetDecryptionShareProofMaterial,
 ): ProtocolHash => {
-    assertExactStringField(
-        proofMaterial.objectType,
-        'target-decryption proof material objectType',
-        'BgvTargetDecryptionShareProofMaterial',
+    if (proofMaterial.objectType !== 'BgvTargetDecryptionShareProofMaterial') {
+        throw new TypeError(
+            'target-decryption proof material objectType must be BgvTargetDecryptionShareProofMaterial.',
+        );
+    }
+    if (proofMaterial.proofRecords.length !== 1) {
+        throw new TypeError(
+            'target-decryption proof material must contain one all-active-limb proof record.',
+        );
+    }
+    const proofRecord = assertObject(
+        proofMaterial.proofRecords[0],
+        'target-decryption proof material proofRecords.0',
     );
-    assertObjectVersion(
-        proofMaterial.objectVersion,
-        'target-decryption proof material',
-        8,
+    if (proofRecord.objectType !== 'BgvTargetDecryptionShareProofRecord') {
+        throw new TypeError(
+            'target-decryption proof record objectType must be BgvTargetDecryptionShareProofRecord.',
+        );
+    }
+    if (
+        proofRecord.proofBytesEncoding !==
+        targetDecryptionShareProofBytesEncoding
+    ) {
+        throw new TypeError(
+            'target-decryption proof record proofBytesEncoding must be binary-chunked-proof-bytes.',
+        );
+    }
+    assertProtocolHash(
+        proofRecord.proofBytesHash,
+        'target-decryption proof record proofBytesHash',
     );
     const proofMaterialRoot = assertProtocolHash(
         proofMaterial.proofMaterialRoot,
@@ -120,10 +90,10 @@ const validatedTargetProofMaterialRoot = (
         ...proofMaterialRootPreimage
     } = proofMaterial;
     void omittedProofMaterialRoot;
-    const expectedProofMaterialRoot = deriveCanonicalObjectHash(
-        proofMaterialRootPreimage,
-    );
-    if (proofMaterialRoot !== expectedProofMaterialRoot) {
+    if (
+        proofMaterialRoot !==
+        deriveCanonicalObjectHash(proofMaterialRootPreimage)
+    ) {
         throw new Error(
             'target-decryption proof material root does not match its proof records.',
         );
@@ -132,86 +102,31 @@ const validatedTargetProofMaterialRoot = (
     return proofMaterialRoot;
 };
 
-export const encodeBgvTargetDecryptionShareProofMaterialBinary = (
+export const createBgvTargetDecryptionShareCanonicalProofMaterialTransport = (
     proofMaterial: BgvTargetDecryptionShareProofMaterial,
-): BgvTargetDecryptionShareBinaryProofMaterialTransport => {
+    materialExport: BgvTargetDecryptionShareCanonicalMaterialExport,
+): BgvTargetDecryptionShareCanonicalProofMaterialTransport => {
     const proofMaterialRoot = validatedTargetProofMaterialRoot(proofMaterial);
-    if (proofMaterial.proofRecords.length !== 1) {
+    if (
+        !ArrayBuffer.isView(materialExport.descriptorBytes) ||
+        Object.prototype.toString.call(materialExport.descriptorBytes) !==
+            '[object Uint8Array]' ||
+        materialExport.descriptorBytes.byteLength === 0
+    ) {
         throw new TypeError(
-            'target-decryption proof material must contain one all-active-limb proof record.',
+            'target-decryption canonical material descriptorBytes must be a non-empty Uint8Array.',
         );
     }
 
-    const writer = new BinaryChunkWriter({
-        chunkSizeBytes: setupProofTransportChunkSizeBytes,
-        emptyErrorMessage:
-            'target-decryption proof material binary transport requires bytes.',
-    });
-
-    writer.writeBytes(targetDecryptionShareProofMaterialBinaryMagic);
-    writer.writeVaruint(1);
-    writer.writeBytes(hexToBytes(proofMaterialRoot));
-    writer.writeVaruint(proofMaterial.proofRecords.length);
-    proofMaterial.proofRecords.forEach((proofRecordValue, proofRecordIndex) => {
-        const proofRecord = assertObject(
-            proofRecordValue,
-            `target-decryption proof material proofRecords.${String(proofRecordIndex)}`,
-        );
-        assertExactStringField(
-            proofRecord.objectType,
-            `target-decryption proof material proofRecords.${String(proofRecordIndex)} objectType`,
-            'BgvTargetDecryptionShareProofRecord',
-        );
-        assertObjectVersion(
-            proofRecord.objectVersion,
-            `target-decryption proof material proofRecords.${String(proofRecordIndex)}`,
-            7,
-        );
-        const proofBytesBase64 = proofRecord.proofBytesBase64;
-        if (typeof proofBytesBase64 !== 'string') {
-            throw new TypeError(
-                `target-decryption proof material proofRecords.${String(proofRecordIndex)} proofBytesBase64 must be a string.`,
-            );
-        }
-        const proofBytes = bytesFromStandardBase64(
-            proofBytesBase64,
-            `target-decryption proof material proofRecords.${String(proofRecordIndex)} proofBytesBase64`,
-        );
-        writer.writeVaruint(proofBytes.byteLength);
-        writer.writeBytes(proofBytes);
-    });
-
-    const { chunks, chunkCount, totalByteLength } = writer.finishWithSummary();
-    const fullObjectHash = setupProofMaterialFullObjectHashHex(
-        targetDecryptionShareProofFamily,
-        totalByteLength,
-        chunks,
-    );
-    const chunkHashes = chunks.map((chunk, chunkIndex) =>
-        setupProofMaterialChunkHash(
-            targetDecryptionShareProofFamily,
-            fullObjectHash,
-            chunkIndex,
-            chunk,
-        ),
-    );
-    const chunkRoot = setupProofChunkManifestRoot(
-        targetDecryptionShareProofFamily,
-        chunkHashes,
-        fullObjectHash,
-        totalByteLength,
-    );
-
     return {
-        objectType: 'BgvTargetDecryptionShareBinaryProofMaterialTransport',
+        objectType: 'BgvTargetDecryptionShareCanonicalProofMaterialTransport',
         proofFamily: targetDecryptionShareProofFamily,
-        binaryFormat: targetDecryptionShareProofMaterialBinaryFormat,
         proofMaterialRoot,
-        chunkCount,
-        totalByteLength,
-        fullObjectHash,
-        chunkRoot,
-        chunkHashes,
-        chunks,
+        descriptorBytes: materialExport.descriptorBytes.slice(),
     };
 };
+
+// Preserve the existing internal helper name while routing it through the sole
+// canonical stream representation. There is no target-specific binary framing.
+export const encodeBgvTargetDecryptionShareProofMaterialBinary =
+    createBgvTargetDecryptionShareCanonicalProofMaterialTransport;

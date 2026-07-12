@@ -5,6 +5,10 @@ import {
     type RelinearizationLevelScheduleEntry,
     type RequiredGaloisKeyScheduleEntry,
 } from '../evaluator-key-schedule.js';
+import type {
+    CanonicalGeneratedSetupProofMaterial,
+    CanonicalProofMaterialChunkPull,
+} from '../setup-proof-material-transport.js';
 import type { VssSameSecretBridgeStatementSet } from '../vss-commitments/linkage-and-bridge.js';
 import type { CollectiveBgvSetupContext } from '../vss-share-verification-records.js';
 
@@ -213,28 +217,22 @@ export type GaloisKeyShareBatch = Readonly<
     }
 >;
 
-export type TrusteeEvaluationKeyEmbeddedProofBytes = Readonly<{
-    readonly proofBytesHex: string;
-}>;
-
-export type TrusteeEvaluationKeyTransportedProofBytes = Readonly<{
+export type TrusteeEvaluationKeyCanonicalProofReference = Readonly<{
     readonly proofBytesEncoding: typeof setupProofMaterialTransportEncoding;
     readonly proofMaterialRoot: ProtocolHash;
 }>;
 
 export type TrusteeEvaluationKeyProofRecord = Readonly<
-    JsonRecord & {
-        readonly objectType: 'TrusteeEvaluationKeyProof';
-        readonly proofFamily: typeof trusteeEvaluationKeyProofFamily;
-        readonly trusteeIdentity: string;
-        readonly trusteeRosterPosition: number;
-        readonly statementHash: ProtocolHash;
-        readonly proofBytesHash: ProtocolHash;
-        readonly trusteeEvaluationKeyProofRoot: ProtocolHash;
-    } & (
-            | TrusteeEvaluationKeyEmbeddedProofBytes
-            | TrusteeEvaluationKeyTransportedProofBytes
-        )
+    JsonRecord &
+        TrusteeEvaluationKeyCanonicalProofReference & {
+            readonly objectType: 'TrusteeEvaluationKeyProof';
+            readonly proofFamily: typeof trusteeEvaluationKeyProofFamily;
+            readonly trusteeIdentity: string;
+            readonly trusteeRosterPosition: number;
+            readonly statementHash: ProtocolHash;
+            readonly proofBytesHash: ProtocolHash;
+            readonly trusteeEvaluationKeyProofRoot: ProtocolHash;
+        }
 >;
 
 export type TrusteeEvaluationKeyProofSet = Readonly<
@@ -296,8 +294,10 @@ export type TrusteeEvaluationKeyProofGenerationOutput = Readonly<{
     readonly operation: 'generateTrusteeEvaluationKeyProof';
     readonly statementHash: ProtocolHash;
     readonly limbCount: number;
-    readonly proofByteLength: number;
-    readonly proofBytesHex: string;
+    readonly proofBytesEncoding: typeof setupProofMaterialTransportEncoding;
+    readonly proofBytesHash: ProtocolHash;
+    readonly proofMaterialRoot: ProtocolHash;
+    readonly canonicalMaterial: CanonicalGeneratedSetupProofMaterial;
 }>;
 
 export type TrusteeEvaluationKeyProofGenerator = (
@@ -316,7 +316,7 @@ export type TrusteeEvaluationKeyProofGenerator = (
         readonly proofRandomnessSeedHex: string;
         readonly proofRandomnessNonceHex: string;
     }>,
-) => TrusteeEvaluationKeyProofGenerationOutput;
+) => Promise<TrusteeEvaluationKeyProofGenerationOutput>;
 
 // One trustee's private witness for its batched evaluation-key statement: the
 // shared ternary secret, per-key centered-binomial errors in statement key
@@ -437,12 +437,6 @@ export type PublicEvaluationKeySet = Readonly<
         readonly galoisKeyRoots: readonly GaloisKeyRootReference[];
         readonly publicEvaluationKeyMaterialEncoding?: typeof publicEvaluationKeyTransportMaterialEncoding;
         readonly publicEvaluationKeyMaterialRoot?: ProtocolHash;
-        readonly publicEvaluationKeyMaterialChunkSizeBytes?: number;
-        readonly publicEvaluationKeyMaterialChunkCount?: number;
-        readonly publicEvaluationKeyMaterialTotalByteLength?: number;
-        readonly publicEvaluationKeyMaterialFullObjectHash?: ProtocolHash;
-        readonly publicEvaluationKeyMaterialChunkRoot?: ProtocolHash;
-        readonly publicEvaluationKeyMaterialChunkHashes?: readonly ProtocolHash[];
         readonly aggregateBinding?: EvaluationKeyAggregateBindingSet;
         readonly evaluationKeySetHash: ProtocolHash;
     }
@@ -451,19 +445,20 @@ export type PublicEvaluationKeySet = Readonly<
 export type PublicEvaluationKeyMaterialReference = Readonly<{
     readonly publicEvaluationKeyMaterialEncoding: typeof publicEvaluationKeyTransportMaterialEncoding;
     readonly publicEvaluationKeyMaterialRoot: ProtocolHash;
-    readonly publicEvaluationKeyMaterialChunkSizeBytes: number;
-    readonly publicEvaluationKeyMaterialChunkCount: number;
-    readonly publicEvaluationKeyMaterialTotalByteLength: number;
-    readonly publicEvaluationKeyMaterialFullObjectHash: ProtocolHash;
-    readonly publicEvaluationKeyMaterialChunkRoot: ProtocolHash;
-    readonly publicEvaluationKeyMaterialChunkHashes: readonly ProtocolHash[];
 }>;
 
 export type TransportedEvaluationKeyShareProofMaterialSet = Readonly<
     JsonRecord & {
         readonly objectType: typeof evaluationKeyShareProofTransportSetObjectType;
         readonly proofFamily: typeof trusteeEvaluationKeyProofFamily;
-        readonly proofMaterials: readonly JsonRecord[];
+        readonly proofMaterials: readonly Readonly<
+            JsonRecord & {
+                readonly objectType: typeof evaluationKeyShareProofTransportObjectType;
+                readonly proofFamily: typeof trusteeEvaluationKeyProofFamily;
+                readonly proofMaterialRoot: ProtocolHash;
+                readonly descriptorBytes: Uint8Array;
+            }
+        >[];
     }
 >;
 
@@ -474,22 +469,39 @@ export type TransportedEvaluationKeyShareComponentMaterialSet = Readonly<
     }
 >;
 
-export type EvaluationKeyShareComponentMaterialChunk = Readonly<{
-    readonly chunkIndex: number;
-    readonly bytes: ArrayBuffer;
-}>;
-
-// The raw chunk bytes for one transported evaluation-key component material,
-// exposed out of band so a caller can stream them through the file-backed
-// component material transport before the terminal setup package verification.
-// The terminal accepted-setup verifier refuses an inline `chunks` array on the
-// transported component material, so the manifest reference and its bytes are
-// carried separately, keyed by keySwitchComponentMaterialRoot.
-export type EvaluationKeyShareComponentMaterialChunkStream = Readonly<{
+// A repeatable bounded source for one transported evaluation-key component
+// material. The canonical descriptor remains on the component sidecar while
+// the source supplies one requested chunk at a time.
+export type EvaluationKeyShareComponentMaterialChunkSource = Readonly<{
     readonly keySwitchComponentMaterialRoot: ProtocolHash;
     readonly proofFamily: EvaluationKeyShareProofFamily;
-    readonly chunks: readonly EvaluationKeyShareComponentMaterialChunk[];
+    readonly pullChunk: CanonicalProofMaterialChunkPull;
 }>;
+
+export type EvaluationKeyShareComponentMaterialWriter = (
+    input: Readonly<{
+        readonly keySwitchComponentMaterialRoot: ProtocolHash;
+        readonly proofFamily: EvaluationKeyShareProofFamily;
+        readonly totalByteLength: number;
+        readonly pullChunk: CanonicalProofMaterialChunkPull;
+    }>,
+) => Promise<Uint8Array>;
+
+// A repeatable bounded source for one canonical public evaluation-key
+// material stream. The descriptor remains on the transported reference while
+// the source is supplied separately to verification.
+export type PublicEvaluationKeyMaterialChunkSource = Readonly<{
+    readonly publicEvaluationKeyMaterialRoot: ProtocolHash;
+    readonly pullChunk: CanonicalProofMaterialChunkPull;
+}>;
+
+export type PublicEvaluationKeyMaterialWriter = (
+    input: Readonly<{
+        readonly publicEvaluationKeyMaterialRoot: ProtocolHash;
+        readonly totalByteLength: number;
+        readonly pullChunk: CanonicalProofMaterialChunkPull;
+    }>,
+) => Promise<Uint8Array>;
 
 export type TransportedPublicEvaluationKeyMaterial = Readonly<
     JsonRecord & {
@@ -502,15 +514,7 @@ export type TransportedPublicEvaluationKeyMaterial = Readonly<
         readonly setupEpoch: string;
         readonly evaluationKeySetHash: ProtocolHash;
         readonly publicEvaluationKeyMaterialRoot: ProtocolHash;
-        readonly chunkCount: number;
-        readonly totalByteLength: number;
-        readonly fullObjectHash: ProtocolHash;
-        readonly chunkRoot: ProtocolHash;
-        readonly chunkHashes: readonly ProtocolHash[];
-        readonly chunks: readonly {
-            readonly chunkIndex: number;
-            readonly bytesHex: string;
-        }[];
+        readonly descriptorBytes: Uint8Array;
     }
 >;
 
@@ -534,7 +538,6 @@ export type BinaryChunkedEvaluationKeyShareMaterialTransport = Readonly<{
     readonly relinearizationRoundTwoContributions: readonly RelinearizationRoundTwoContribution[];
     readonly galoisKeyShareBatchContributions: readonly GaloisKeyShareBatchContribution[];
     readonly transportedEvaluationKeyShareComponentMaterial: TransportedEvaluationKeyShareComponentMaterialSet;
-    readonly evaluationKeyShareComponentMaterialChunkStreams: readonly EvaluationKeyShareComponentMaterialChunkStream[];
 }>;
 
 export type EvaluationKeyShareMaterialTransportInput = Readonly<{
@@ -542,6 +545,7 @@ export type EvaluationKeyShareMaterialTransportInput = Readonly<{
     readonly relinearizationRoundOneContributions: readonly RelinearizationRoundOneContribution[];
     readonly relinearizationRoundTwoContributions: readonly RelinearizationRoundTwoContribution[];
     readonly galoisKeyShareBatchContributions: readonly GaloisKeyShareBatchContribution[];
+    readonly writeEvaluationKeyShareComponentMaterial: EvaluationKeyShareComponentMaterialWriter;
 }>;
 
 export type EvaluationKeyProofCommonInput = Readonly<{
@@ -573,11 +577,10 @@ export type TrusteeEvaluationKeyProofsInput = EvaluationKeyProofCommonInput &
         readonly sameSecretBridgeStatementSet: VssSameSecretBridgeStatementSet;
         readonly trusteeEvaluationKeyProofGenerator: TrusteeEvaluationKeyProofGenerator;
         readonly transportedEvaluationKeyShareComponentMaterial?: TransportedEvaluationKeyShareComponentMaterialSet;
-        // Raw chunk bytes for the transported evaluation-key component material,
-        // supplied out of band when the transported component material is a
-        // chunkless manifest reference so the prover can reconstruct the binary
-        // component vectors from the parallel chunk streams.
-        readonly evaluationKeyShareComponentMaterialChunkStreams?: readonly EvaluationKeyShareComponentMaterialChunkStream[];
+        // Bounded component sources supplied out of band so the prover can
+        // reconstruct transported public component vectors without retaining a
+        // second whole-material byte representation.
+        readonly evaluationKeyShareComponentMaterialChunkSources?: readonly EvaluationKeyShareComponentMaterialChunkSource[];
     }>;
 
 export type PublicEvaluationKeySetInput = EvaluationKeyProofCommonInput &
@@ -598,4 +601,5 @@ export type PublicEvaluationKeyMaterialTransportInput = Omit<
 > &
     Readonly<{
         readonly transportedEvaluationKeyShareComponentMaterial?: TransportedEvaluationKeyShareComponentMaterialSet;
+        readonly writePublicEvaluationKeyMaterial: PublicEvaluationKeyMaterialWriter;
     }>;

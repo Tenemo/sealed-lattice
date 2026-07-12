@@ -3,6 +3,7 @@ use std::sync::{Mutex, OnceLock};
 use super::{
     CanonicalDecodeLimits, CanonicalStreamDomain, CanonicalStreamVerifier, CanonicalStreamWriter,
     FOUNDATION_PROFILE, MAXIMUM_CANONICAL_STREAM_BYTE_LENGTH, RefusalReason, StreamDescriptor,
+    canonical_stream::VerifiedCanonicalStreamSummary,
 };
 
 pub(crate) const CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH: usize = 32;
@@ -22,8 +23,8 @@ pub(crate) struct CanonicalStreamRuntimeBegin {
 }
 
 enum CanonicalStreamRuntimeSessionKind {
-    Writer(CanonicalStreamWriter),
-    Verifier(CanonicalStreamVerifier),
+    Writer(Box<CanonicalStreamWriter>),
+    Verifier(Box<CanonicalStreamVerifier>),
 }
 
 struct CanonicalStreamRuntimeSession {
@@ -59,11 +60,11 @@ impl CanonicalStreamRuntimeRegistry {
         let writer = CanonicalStreamWriter::new(stream_domain, u64::from(total_byte_length))
             .map_err(refusal_status)?;
         let chunk_count = canonical_stream_chunk_count(u64::from(total_byte_length))?;
-        let handle = self.take_handle();
+        let handle = self.take_handle()?;
         self.active_session = Some(CanonicalStreamRuntimeSession {
             capability,
             handle,
-            kind: CanonicalStreamRuntimeSessionKind::Writer(writer),
+            kind: CanonicalStreamRuntimeSessionKind::Writer(Box::new(writer)),
         });
         Ok(CanonicalStreamRuntimeBegin {
             handle,
@@ -92,11 +93,11 @@ impl CanonicalStreamRuntimeRegistry {
             .map_err(|_| refusal_status(RefusalReason::OutsideSupportedProfile))?;
         let verifier =
             CanonicalStreamVerifier::new(stream_domain, descriptor).map_err(refusal_status)?;
-        let handle = self.take_handle();
+        let handle = self.take_handle()?;
         self.active_session = Some(CanonicalStreamRuntimeSession {
             capability,
             handle,
-            kind: CanonicalStreamRuntimeSessionKind::Verifier(verifier),
+            kind: CanonicalStreamRuntimeSessionKind::Verifier(Box::new(verifier)),
         });
         Ok(CanonicalStreamRuntimeBegin {
             handle,
@@ -152,11 +153,23 @@ impl CanonicalStreamRuntimeRegistry {
         handle: u32,
         capability: &[u8; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH],
     ) -> Result<(), u32> {
+        self.finish_verifier_with_summary(handle, capability)
+            .map(|_| ())
+    }
+
+    fn finish_verifier_with_summary(
+        &mut self,
+        handle: u32,
+        capability: &[u8; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH],
+    ) -> Result<VerifiedCanonicalStreamSummary, u32> {
         let session = self.take_owned_session(handle, capability)?;
         let CanonicalStreamRuntimeSessionKind::Verifier(verifier) = session.kind else {
             return Err(CANONICAL_STREAM_RUNTIME_INVALID_SESSION);
         };
-        verifier.finish().into_result().map_err(refusal_status)
+        verifier
+            .finish_with_summary()
+            .into_result()
+            .map_err(refusal_status)
     }
 
     fn cancel(
@@ -164,10 +177,11 @@ impl CanonicalStreamRuntimeRegistry {
         handle: u32,
         capability: &[u8; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH],
     ) -> Result<(), u32> {
-        let Some(session) = self.active_session.take() else {
+        let Some(session) = self.active_session.as_ref() else {
             return Ok(());
         };
         if session.handle == handle && constant_time_equal(&session.capability, capability) {
+            self.active_session = None;
             Ok(())
         } else {
             Err(CANONICAL_STREAM_RUNTIME_INVALID_SESSION)
@@ -175,7 +189,7 @@ impl CanonicalStreamRuntimeRegistry {
     }
 
     fn refuse_overlapping_begin(&mut self) -> Result<(), u32> {
-        if self.active_session.take().is_some() {
+        if self.active_session.is_some() {
             Err(refusal_status(RefusalReason::OutsideSupportedProfile))
         } else {
             Ok(())
@@ -189,21 +203,23 @@ impl CanonicalStreamRuntimeRegistry {
     ) -> Result<CanonicalStreamRuntimeSession, u32> {
         let session = self
             .active_session
-            .take()
+            .as_ref()
             .ok_or(CANONICAL_STREAM_RUNTIME_INVALID_SESSION)?;
         if session.handle != handle || !constant_time_equal(&session.capability, capability) {
             return Err(CANONICAL_STREAM_RUNTIME_INVALID_SESSION);
         }
-        Ok(session)
+        self.active_session
+            .take()
+            .ok_or(CANONICAL_STREAM_RUNTIME_INTERNAL_FAILURE)
     }
 
-    fn take_handle(&mut self) -> u32 {
-        let handle = self.next_handle;
-        self.next_handle = self.next_handle.wrapping_add(1);
+    fn take_handle(&mut self) -> Result<u32, u32> {
         if self.next_handle == 0 {
-            self.next_handle = 1;
+            return Err(refusal_status(RefusalReason::OutsideSupportedProfile));
         }
-        handle
+        let handle = self.next_handle;
+        self.next_handle = self.next_handle.checked_add(1).unwrap_or(0);
+        Ok(handle)
     }
 }
 
@@ -271,6 +287,13 @@ pub(crate) fn finish_canonical_stream_verifier(
     capability: &[u8; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH],
 ) -> Result<(), u32> {
     with_runtime_registry(|registry| registry.finish_verifier(handle, capability))
+}
+
+pub(crate) fn finish_canonical_stream_verifier_with_summary(
+    handle: u32,
+    capability: &[u8; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH],
+) -> Result<VerifiedCanonicalStreamSummary, u32> {
+    with_runtime_registry(|registry| registry.finish_verifier_with_summary(handle, capability))
 }
 
 pub(crate) fn cancel_canonical_stream(
@@ -396,7 +419,7 @@ mod tests {
     }
 
     #[test]
-    fn every_failed_operation_removes_the_active_session_and_cancel_is_idempotent() {
+    fn authenticated_operation_failures_are_terminal_but_overlap_is_non_destructive() {
         let mut registry = CanonicalStreamRuntimeRegistry::default();
         let owner = capability(0x63);
         let first = registry
@@ -414,11 +437,14 @@ mod tests {
             ),
             Err(refusal_status(RefusalReason::OutsideSupportedProfile))
         );
+        assert!(registry.active_session.is_some());
+        registry
+            .absorb_chunk(first.handle, &owner, 0, &[0; 17])
+            .expect("the legitimate writer remains active");
+        registry
+            .finish_writer(first.handle, &owner)
+            .expect("the legitimate writer still finishes");
         assert!(registry.active_session.is_none());
-        assert_eq!(
-            registry.absorb_chunk(first.handle, &owner, 0, &[0; 17]),
-            Err(CANONICAL_STREAM_RUNTIME_INVALID_SESSION)
-        );
 
         let second = registry
             .begin_writer(
@@ -498,6 +524,18 @@ mod tests {
             registry.absorb_chunk(session.handle, &capability(0x76), 0, &[1]),
             Err(CANONICAL_STREAM_RUNTIME_INVALID_SESSION)
         );
+        assert!(registry.active_session.is_some());
+        assert_eq!(
+            registry.cancel(session.handle, &capability(0x76)),
+            Err(CANONICAL_STREAM_RUNTIME_INVALID_SESSION)
+        );
+        assert!(registry.active_session.is_some());
+        registry
+            .absorb_chunk(session.handle, &owner, 0, &[1])
+            .expect("owner remains able to absorb after forged requests");
+        registry
+            .finish_writer(session.handle, &owner)
+            .expect("owner remains able to finish after forged requests");
         assert!(registry.active_session.is_none());
 
         assert_eq!(
@@ -509,5 +547,35 @@ mod tests {
             Err(refusal_status(RefusalReason::MalformedEncoding))
         );
         assert!(registry.active_session.is_none());
+    }
+
+    #[test]
+    fn stream_handles_never_wrap_or_reuse_after_exhaustion() {
+        let mut registry = CanonicalStreamRuntimeRegistry {
+            active_session: None,
+            next_handle: u32::MAX,
+        };
+        let owner = capability(0x7a);
+        let terminal = registry
+            .begin_writer(
+                CanonicalStreamDomain::CheckpointState.canonical_code(),
+                1,
+                owner,
+            )
+            .expect("terminal stream handle is issued once");
+        assert_eq!(terminal.handle, u32::MAX);
+        registry
+            .cancel(terminal.handle, &owner)
+            .expect("terminal stream lease cancels");
+        assert_eq!(
+            registry.begin_writer(
+                CanonicalStreamDomain::CheckpointState.canonical_code(),
+                1,
+                capability(0x7b),
+            ),
+            Err(refusal_status(RefusalReason::OutsideSupportedProfile))
+        );
+        assert!(registry.active_session.is_none());
+        assert_eq!(registry.next_handle, 0);
     }
 }

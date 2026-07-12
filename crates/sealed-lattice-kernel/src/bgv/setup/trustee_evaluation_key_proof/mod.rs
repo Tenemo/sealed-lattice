@@ -54,17 +54,20 @@ pub(crate) use commands::generate_target_decryption_share_proof_bytes_from_reque
 pub(crate) use commands::generate_trustee_evaluation_key_proof_from_request;
 #[cfg(test)]
 pub(in crate::bgv::setup) use commands::prove_trustee_evaluation_key_proof_bytes;
+#[cfg(test)]
 pub(crate) use commands::verify_target_decryption_share_proof_bytes_from_request;
+pub(crate) use commands::verify_target_decryption_share_proof_source_from_request;
 pub(crate) use commands::{
     generate_same_secret_bridge_proof_from_request, generate_vss_share_linkage_proof_from_request,
-    verify_same_secret_bridge_proof_from_request, verify_vss_share_linkage_proof_from_request,
+    verify_same_secret_bridge_proof_source_from_request,
     verify_vss_share_linkage_proof_material_set_from_request,
 };
 
 pub(in crate::bgv::setup) use commands::{
-    VssPublicCommandCommitmentExpectation, vss_share_linkage_commitment_from_value,
+    VssPublicCommandCommitmentExpectation, verified_vss_share_linkage_proof_material_bytes,
+    verify_vss_share_linkage_proof_source_from_request, vss_share_linkage_commitment_from_value,
 };
-pub(in crate::bgv::setup) use proof_codec::decode_trustee_evaluation_key_proof;
+pub(in crate::bgv::setup) use proof_codec::decode_trustee_evaluation_key_proof_from_source;
 pub(in crate::bgv::setup) use proof_codec::encode_trustee_evaluation_key_proof;
 pub(in crate::bgv::setup) use prover::prove_evaluation_key_share;
 pub(in crate::bgv::setup) use prover::{
@@ -87,17 +90,32 @@ mod tests;
 
 use crate::{
     bgv::modular_arithmetic::{add_mod_fast, mul_mod_fast, sub_mod_fast},
+    bgv::setup::setup_proof::CanonicalProofMaterialBytes,
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
     hashing::hash512_hex,
 };
 
+const TRUSTEE_EVALUATION_KEY_PROOF_BYTES_HASH_DOMAIN: &str =
+    "sealed-lattice/setup/trustee-evaluation-key/proof-bytes";
+const PUBLIC_KEY_SHARE_PROOF_BYTES_HASH_DOMAIN: &str =
+    "sealed-lattice/setup/public-key-share/succinct-proof-bytes";
+const PRIVATE_VSS_SHARE_PROOF_BYTES_HASH_DOMAIN: &str =
+    "sealed-lattice/setup/private-vss-share/succinct-proof-bytes";
+
 // Canonical hash of transported trustee evaluation-key proof bytes, bound into
 // the package proof records and the chunked proof transport reference.
+#[cfg(test)]
 pub(in crate::bgv::setup) fn trustee_evaluation_key_proof_bytes_hash(proof_bytes: &[u8]) -> String {
     hash512_hex(
-        "sealed-lattice/setup/trustee-evaluation-key/proof-bytes",
+        TRUSTEE_EVALUATION_KEY_PROOF_BYTES_HASH_DOMAIN,
         &[proof_bytes],
     )
+}
+
+pub(in crate::bgv::setup) fn trustee_evaluation_key_proof_material_bytes_hash(
+    proof_bytes: &CanonicalProofMaterialBytes,
+) -> CanonicalResult<String> {
+    proof_bytes.hash512_hex(TRUSTEE_EVALUATION_KEY_PROOF_BYTES_HASH_DOMAIN)
 }
 
 pub(crate) const TRUSTEE_EVALUATION_KEY_PROOF_FAMILY: &str = "trustee-evaluation-key";
@@ -107,23 +125,30 @@ pub(crate) const VSS_SHARE_LINKAGE_PROOF_FAMILY: &str = "vss-share-linkage";
 pub(crate) const SAME_SECRET_BRIDGE_PROOF_FAMILY: &str = "same-secret-bridge";
 pub(crate) const TARGET_DECRYPTION_SHARE_PROOF_FAMILY: &str = "target-decryption-share";
 // Canonical hash of transported public-key share succinct proof bytes.
+#[cfg(test)]
 pub(in crate::bgv::setup) fn public_key_share_succinct_proof_bytes_hash(
     proof_bytes: &[u8],
 ) -> String {
-    hash512_hex(
-        "sealed-lattice/setup/public-key-share/succinct-proof-bytes",
-        &[proof_bytes],
-    )
+    hash512_hex(PUBLIC_KEY_SHARE_PROOF_BYTES_HASH_DOMAIN, &[proof_bytes])
+}
+
+pub(in crate::bgv::setup) fn public_key_share_succinct_proof_material_bytes_hash(
+    proof_bytes: &CanonicalProofMaterialBytes,
+) -> CanonicalResult<String> {
+    proof_bytes.hash512_hex(PUBLIC_KEY_SHARE_PROOF_BYTES_HASH_DOMAIN)
 }
 
 // Canonical hash of transported private VSS succinct proof bytes.
 pub(in crate::bgv::setup) fn private_vss_share_succinct_proof_bytes_hash(
     proof_bytes: &[u8],
 ) -> String {
-    hash512_hex(
-        "sealed-lattice/setup/private-vss-share/succinct-proof-bytes",
-        &[proof_bytes],
-    )
+    hash512_hex(PRIVATE_VSS_SHARE_PROOF_BYTES_HASH_DOMAIN, &[proof_bytes])
+}
+
+pub(in crate::bgv::setup) fn private_vss_share_succinct_proof_material_bytes_hash(
+    proof_bytes: &CanonicalProofMaterialBytes,
+) -> CanonicalResult<String> {
+    proof_bytes.hash512_hex(PRIVATE_VSS_SHARE_PROOF_BYTES_HASH_DOMAIN)
 }
 
 // Each logical length-N witness vector is split into TRACE_SPLIT physical

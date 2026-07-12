@@ -1,4 +1,4 @@
-import { describe, expect, expectTypeOf, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import {
     artifactKinds,
@@ -13,14 +13,14 @@ import {
     stateCapabilityKinds,
     type ParticipantIdentity,
     type ProtocolHash,
-} from "@sealed-lattice/types";
+} from '@sealed-lattice/types';
 
-describe("foundation contract", () => {
-    it("parses only the canonical participant identity string form", () => {
+describe('foundation contract', () => {
+    it('parses only the canonical participant identity string form', () => {
         const canonicalIdentities = [
-            "0".repeat(128),
-            "f".repeat(128),
-            "0123456789abcdef".repeat(8),
+            '0'.repeat(128),
+            'f'.repeat(128),
+            '0123456789abcdef'.repeat(8),
         ];
         for (const canonicalIdentity of canonicalIdentities) {
             const identity = parseParticipantIdentity(canonicalIdentity);
@@ -34,10 +34,10 @@ describe("foundation contract", () => {
         expectTypeOf<ProtocolHash>().not.toMatchTypeOf<ParticipantIdentity>();
     });
 
-    it("refuses malformed and noncanonical participant identities", () => {
-        const canonicalIdentity = "a".repeat(128);
+    it('refuses malformed and noncanonical participant identities', () => {
+        const canonicalIdentity = 'a'.repeat(128);
         const invalidIdentities: readonly unknown[] = [
-            "",
+            '',
             canonicalIdentity.slice(1),
             `${canonicalIdentity}0`,
             `A${canonicalIdentity.slice(1)}`,
@@ -60,7 +60,7 @@ describe("foundation contract", () => {
         }
     });
 
-    it("keeps the refusal wire codes closed, unique, and contiguous", () => {
+    it('keeps the refusal wire codes closed, unique, and contiguous', () => {
         const codes = refusalReasons.map(
             (refusalReason) => refusalReasonCodes[refusalReason],
         );
@@ -75,7 +75,7 @@ describe("foundation contract", () => {
         expect(refusalReasonCodes.consumedState).toBe(0x000d);
     });
 
-    it("pins a state quorum that preserves an honest lock after the recovery loss budget", () => {
+    it('pins a state quorum that preserves an honest lock after the recovery loss budget', () => {
         const quorumIntersection =
             2 * foundationProfile.stateWitnessQuorum -
             (foundationProfile.participantCount - 1);
@@ -91,7 +91,7 @@ describe("foundation contract", () => {
         );
     });
 
-    it("does not reuse a schema or object-family identifier", () => {
+    it('does not reuse a schema or object-family identifier', () => {
         const schemaIdentifiers = Object.values(foundationSchemaIdentifiers);
         const objectTypes = Object.values(foundationObjectTypes);
 
@@ -101,7 +101,7 @@ describe("foundation contract", () => {
         expect(Math.min(...schemaIdentifiers)).toBeGreaterThan(0);
     });
 
-    it("pins the assigned distribution and artifact registries", () => {
+    it('pins the assigned distribution and artifact registries', () => {
         expect(distributionKinds).toEqual({
             ternary: 1,
             centeredBinomial: 2,
@@ -121,7 +121,7 @@ describe("foundation contract", () => {
         });
     });
 
-    it("freezes every runtime registry and profile", () => {
+    it('freezes every runtime registry and profile', () => {
         for (const registry of [
             refusalReasons,
             refusalReasonCodes,
@@ -133,7 +133,7 @@ describe("foundation contract", () => {
             stateCapabilityKinds,
         ]) {
             expect(Object.isFrozen(registry)).toBe(true);
-            expect(Reflect.set(registry, "unexpected", 1)).toBe(false);
+            expect(Reflect.set(registry, 'unexpected', 1)).toBe(false);
         }
     });
 });

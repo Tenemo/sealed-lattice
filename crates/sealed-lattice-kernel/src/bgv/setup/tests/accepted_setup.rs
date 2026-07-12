@@ -147,29 +147,6 @@ fn assert_collective_setup_package_refused(
     );
 }
 
-// Like assert_collective_setup_package_refused, but also asserts that the
-// refusal carries no accepted setup handoff. Used by the rejection cases that
-// must additionally prove a refused package never produces a terminal handoff.
-fn assert_collective_setup_package_refused_without_handoff(
-    case_label: &str,
-    package: serde_json::Value,
-    expected_reason_code: &str,
-) {
-    let result = verify_collective_setup_package(&package);
-    assert_eq!(
-        result["isValid"], false,
-        "{case_label}: unexpected verifier result: {result}"
-    );
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"], expected_reason_code,
-        "{case_label}: unexpected refusal reason code: {result}"
-    );
-    assert!(
-        result["acceptedSetupHandoff"].is_null(),
-        "{case_label}: refused package must not return an accepted setup handoff: {result}"
-    );
-}
-
 // Builds the minimal collective setup package, applies a single labeled
 // mutation (which performs any record-level rebinds it needs), rebinds the
 // outer package hash, and asserts the verifier refuses with the expected reason
@@ -185,24 +162,6 @@ fn assert_minimal_collective_setup_package_refused(
     mutate(&mut package);
     rebind_collective_setup_package_hash(&mut package);
     assert_collective_setup_package_refused(case_label, package, expected_reason_code);
-}
-
-// Like assert_minimal_collective_setup_package_refused, but also asserts the
-// refusal carries no accepted setup handoff, for cases that must prove the
-// terminal handoff stays withheld on rejection.
-fn assert_minimal_collective_setup_package_refused_without_handoff(
-    case_label: &str,
-    mutate: impl FnOnce(&mut serde_json::Value),
-    expected_reason_code: &str,
-) {
-    let mut package = minimal_collective_setup_package();
-    mutate(&mut package);
-    rebind_collective_setup_package_hash(&mut package);
-    assert_collective_setup_package_refused_without_handoff(
-        case_label,
-        package,
-        expected_reason_code,
-    );
 }
 
 // Shared elapsed-clock logger for final-package accepted-setup fixture phases.

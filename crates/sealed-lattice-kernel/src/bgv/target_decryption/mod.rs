@@ -69,7 +69,7 @@ use crate::{
         },
     },
     encoding::{CanonicalError, CanonicalErrorCode},
-    transcript_core::{decode_hex, decode_standard_base64},
+    transcript_core::decode_hex,
 };
 
 #[cfg(test)]
@@ -84,8 +84,6 @@ use crate::bgv::{
     },
 };
 use crate::hashing::hash512_hex;
-use crate::transcript_core::encode_standard_base64;
-
 #[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::*;
 

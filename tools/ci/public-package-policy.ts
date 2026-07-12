@@ -18,10 +18,7 @@ export const vendoredProtocolRuntimeModules = [
     'board/shell-evidence.ts',
     'closing/index.ts',
     'common/verification-helpers.ts',
-    'lifecycle/capabilities.ts',
-    'lifecycle/lifecycle.ts',
     'lifecycle/poll-spec.ts',
-    'lifecycle/refusal.ts',
     'lifecycle/roster-policy.ts',
     'lifecycle/thresholds.ts',
     'ordering/index.ts',
@@ -32,8 +29,6 @@ export const vendoredProtocolRuntimeModules = [
     'roster/object-validation.ts',
     'roster/verification.ts',
     'setup/common-randomness-records.ts',
-    'setup/binary-chunk-writer.ts',
-    'setup/chunked-binary-reader.ts',
     'setup/common-fields.ts',
     'setup/varuint-encoding.ts',
     'setup/evaluation-key-proof-records.ts',
@@ -45,7 +40,6 @@ export const vendoredProtocolRuntimeModules = [
     'setup/evaluation-key-proof-records/public-evaluation-key.ts',
     'setup/evaluator-key-schedule.ts',
     'setup/private-vss-mailbox-delivery.ts',
-    'setup/proof-byte-encoding.ts',
     'setup/public-key-share-records.ts',
     'setup/public-key-share-records/constants-and-types.ts',
     'setup/public-key-share-records/encoding.ts',
@@ -82,6 +76,7 @@ export const vendoredProtocolRuntimeModules = [
     'setup/vss-coefficient-commitments/commitment-values.ts',
     'setup/vss-coefficient-commitments/commitment-bundles.ts',
     'setup/vss-share-verification-records.ts',
+    'target-decryption/proof-material-transport.ts',
 ] as const;
 
 export const vendoredCryptoRuntimeModules = [
@@ -106,14 +101,6 @@ export const vendoredProtocolRuntimeEntryExports = [
     {
         source: 'closing/index.js',
         exports: ['verifyCastReceiptShell', 'verifyCloseRecordShell'],
-    },
-    {
-        source: 'lifecycle/capabilities.js',
-        exports: ['evaluateActionCapability'],
-    },
-    {
-        source: 'lifecycle/lifecycle.js',
-        exports: ['isValidLifecycleTransition'],
     },
     {
         source: 'lifecycle/poll-spec.js',
@@ -149,6 +136,12 @@ export const vendoredProtocolRuntimeEntryExports = [
     {
         source: 'setup/setup-package-assembly.js',
         exports: ['createSetupPackageVerificationInput'],
+    },
+    {
+        source: 'target-decryption/proof-material-transport.js',
+        exports: [
+            'createBgvTargetDecryptionShareCanonicalProofMaterialTransport',
+        ],
     },
 ] as const satisfies readonly VendoredProtocolRuntimeEntryExport[];
 

@@ -18,19 +18,22 @@ use core::{ptr, slice};
 use std::vec::Vec;
 
 use bgv::{
-    absorb_bgv_canonical_stream_chunk, begin_bgv_canonical_stream, cancel_bgv_canonical_stream,
-    finish_bgv_canonical_stream,
+    absorb_bgv_canonical_stream_chunk, begin_bgv_canonical_material_reader,
+    begin_bgv_canonical_stream, cancel_bgv_canonical_material_reader, cancel_bgv_canonical_stream,
+    finish_bgv_canonical_material_reader, finish_bgv_canonical_stream,
+    read_bgv_canonical_material_chunk,
 };
 use foundation::{
     CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH, CanonicalStreamRuntimeBegin,
     FOUNDATION_BOARD_CANDIDATE_HASH_BYTE_LENGTH, FOUNDATION_BOARD_SESSION_CAPABILITY_BYTE_LENGTH,
-    absorb_canonical_stream_chunk, begin_canonical_stream_verifier, begin_canonical_stream_writer,
-    begin_foundation_board_session, cancel_canonical_stream, cancel_foundation_board_session,
-    finish_canonical_stream_verifier, finish_canonical_stream_writer,
-    ingest_foundation_board_carrier, require_complete_foundation_board_carrier_graph,
-    run_local_storage_root_command, STATE_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH,
-    begin_state_verifier_session, cancel_state_verifier_session, release_verified_state_object,
-    verify_state_output, verify_state_recovery, verify_state_reservation,
+    STATE_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH, absorb_canonical_stream_chunk,
+    begin_canonical_stream_verifier, begin_canonical_stream_writer, begin_foundation_board_session,
+    begin_state_verifier_session, cancel_canonical_stream, cancel_foundation_board_session,
+    cancel_state_verifier_session, finish_canonical_stream_verifier,
+    finish_canonical_stream_writer, finish_state_output_verification,
+    ingest_foundation_board_carrier, release_verified_state_object,
+    require_complete_foundation_board_carrier_graph, run_local_storage_root_command,
+    verify_state_recovery, verify_state_reservation,
 };
 
 pub use encoding::{roundtrip_bytes, run_transcript_core_command};
@@ -416,7 +419,7 @@ pub unsafe extern "C" fn sealed_lattice_bgv_canonical_stream_finish(
 }
 
 /// Cancels both the canonical verifier and its operation-owned BGV sink.
-/// Repeated cancellation after removal is a no-op.
+/// A stale or already-consumed handle is refused.
 ///
 /// # Safety
 ///
@@ -429,6 +432,94 @@ pub unsafe extern "C" fn sealed_lattice_bgv_canonical_stream_cancel(
 ) -> u32 {
     let capability = unsafe { canonical_stream_capability(capability_pointer, capability_length) };
     cancel_bgv_canonical_stream(handle, &capability).map_or_else(|status| status, |()| 0)
+}
+
+/// Begins a capability-owned bounded reader for proof material retained by a
+/// BGV semantic sink. The reader supplies raw chunks to the generic canonical
+/// stream writer; it does not define transport framing or digests itself.
+///
+/// # Safety
+///
+/// Every input pointer must name its declared readable range. Every non-null
+/// output pointer must point to one writable `u32` in WASM memory.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_bgv_canonical_material_reader_begin(
+    family_code: u32,
+    material_root_pointer: *const u8,
+    material_root_length: usize,
+    capability_pointer: *const u8,
+    capability_length: usize,
+    status_pointer: *mut u32,
+    total_byte_length_pointer: *mut u32,
+    chunk_count_pointer: *mut u32,
+) -> u32 {
+    let material_root =
+        unsafe { canonical_stream_input(material_root_pointer, material_root_length) };
+    let capability = unsafe { canonical_stream_capability(capability_pointer, capability_length) };
+    let result = begin_bgv_canonical_material_reader(family_code, material_root, capability);
+    unsafe {
+        write_canonical_stream_begin(
+            result,
+            status_pointer,
+            total_byte_length_pointer,
+            chunk_count_pointer,
+        )
+    }
+}
+
+/// Copies the next exact retained proof-material chunk into caller-owned WASM
+/// memory. Chunk order and output length are fixed by the reader lease.
+///
+/// # Safety
+///
+/// The capability pointer must name its declared readable range. The output
+/// pointer must name exactly `output_length` writable bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_bgv_canonical_material_reader_read_chunk(
+    handle: u32,
+    capability_pointer: *const u8,
+    capability_length: usize,
+    chunk_index: u32,
+    output_pointer: *mut u8,
+    output_length: usize,
+) -> u32 {
+    if output_pointer.is_null() || output_length == 0 {
+        return u32::from(foundation::RefusalReason::WrongTypeOrLength.canonical_code());
+    }
+    let capability = unsafe { canonical_stream_capability(capability_pointer, capability_length) };
+    let output = unsafe { slice::from_raw_parts_mut(output_pointer, output_length) };
+    read_bgv_canonical_material_chunk(handle, &capability, chunk_index, output)
+        .map_or_else(|status| status, |()| 0)
+}
+
+/// Finishes and invalidates a fully consumed BGV material-reader lease.
+///
+/// # Safety
+///
+/// `capability_pointer` must name its declared readable range.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_bgv_canonical_material_reader_finish(
+    handle: u32,
+    capability_pointer: *const u8,
+    capability_length: usize,
+) -> u32 {
+    let capability = unsafe { canonical_stream_capability(capability_pointer, capability_length) };
+    finish_bgv_canonical_material_reader(handle, &capability).map_or_else(|status| status, |()| 0)
+}
+
+/// Cancels and invalidates one capability-owned BGV material-reader lease.
+///
+/// # Safety
+///
+/// `capability_pointer` must name its declared readable range.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_bgv_canonical_material_reader_cancel(
+    handle: u32,
+    capability_pointer: *const u8,
+    capability_length: usize,
+) -> u32 {
+    let capability = unsafe { canonical_stream_capability(capability_pointer, capability_length) };
+    cancel_bgv_canonical_material_reader(handle, &capability).map_or_else(|status| status, |()| 0)
 }
 
 /// Begins the sole active bounded foundation-board session in this WASM
@@ -659,8 +750,9 @@ pub unsafe extern "C" fn sealed_lattice_state_verifier_verify_reservation(
     }
 }
 
-/// Verifies a state output against its reservation and the complete exact-output
-/// bytes. The bytes are consumed only for recomputation and never returned.
+/// Atomically consumes a completed generic canonical-stream verifier and verifies
+/// the state output against its reservation. Exact-output bytes cross the WASM
+/// boundary only through bounded stream chunks and are never returned.
 ///
 /// # Safety
 ///
@@ -668,20 +760,23 @@ pub unsafe extern "C" fn sealed_lattice_state_verifier_verify_reservation(
 /// pointer must point to one writable `u32` in WASM memory.
 #[unsafe(no_mangle)]
 #[allow(clippy::too_many_arguments)]
-pub unsafe extern "C" fn sealed_lattice_state_verifier_verify_output(
+pub unsafe extern "C" fn sealed_lattice_state_verifier_finish_output(
     session_handle: u32,
     capability_pointer: *const u8,
     capability_length: usize,
+    stream_handle: u32,
+    stream_capability_pointer: *const u8,
+    stream_capability_length: usize,
     verified_reservation_handle: u32,
     canonical_output_intent_carrier_pointer: *const u8,
     canonical_output_intent_carrier_length: usize,
     canonical_state_certificate_pointer: *const u8,
     canonical_state_certificate_length: usize,
-    exact_output_pointer: *const u8,
-    exact_output_length: usize,
     status_pointer: *mut u32,
 ) -> u32 {
     let capability = unsafe { canonical_stream_input(capability_pointer, capability_length) };
+    let stream_capability =
+        unsafe { canonical_stream_capability(stream_capability_pointer, stream_capability_length) };
     let canonical_output_intent_carrier = unsafe {
         canonical_stream_input(
             canonical_output_intent_carrier_pointer,
@@ -694,14 +789,14 @@ pub unsafe extern "C" fn sealed_lattice_state_verifier_verify_output(
             canonical_state_certificate_length,
         )
     };
-    let exact_output = unsafe { canonical_stream_input(exact_output_pointer, exact_output_length) };
-    match verify_state_output(
+    match finish_state_output_verification(
         session_handle,
         capability,
+        stream_handle,
+        &stream_capability,
         verified_reservation_handle,
         canonical_output_intent_carrier,
         canonical_state_certificate,
-        exact_output,
     ) {
         Ok(handle) => {
             unsafe {
@@ -799,12 +894,8 @@ pub unsafe extern "C" fn sealed_lattice_state_verifier_release(
     verified_object_handle: u32,
 ) -> u32 {
     let capability = unsafe { canonical_stream_input(capability_pointer, capability_length) };
-    release_verified_state_object(
-        session_handle,
-        capability,
-        verified_object_handle,
-    )
-    .map_or_else(|status| status, |()| 0)
+    release_verified_state_object(session_handle, capability, verified_object_handle)
+        .map_or_else(|status| status, |()| 0)
 }
 
 /// Cancels the state-verifier session and drops every retained verified object.
@@ -819,8 +910,7 @@ pub unsafe extern "C" fn sealed_lattice_state_verifier_cancel(
     capability_length: usize,
 ) -> u32 {
     let capability = unsafe { canonical_stream_input(capability_pointer, capability_length) };
-    cancel_state_verifier_session(session_handle, capability)
-        .map_or_else(|status| status, |()| 0)
+    cancel_state_verifier_session(session_handle, capability).map_or_else(|status| status, |()| 0)
 }
 
 /// Runs one bounded command against the opaque local-storage-root registry.

@@ -296,3 +296,106 @@ fn root_registry_refuses_wrong_binding_commitment_capability_and_resource_exhaus
     );
     reset_registry();
 }
+
+#[test]
+fn root_handles_never_repeat_and_exhaustion_fails_closed() {
+    reset_registry();
+    let previous_next_handle = ROOT_REGISTRY.with(|registry| {
+        let mut registry = registry.borrow_mut();
+        let previous = registry.next_handle;
+        registry.next_handle = u32::MAX - 1;
+        previous
+    });
+    let capability = test_capability(41);
+    let staged = run_local_storage_root_command(
+        LOCAL_STORAGE_ROOT_COMMAND_STAGE_NEW,
+        &stage_new_input(&capability, &test_binding(43), &test_root(47)),
+    )
+    .expect("the final nonzero handle is issued once");
+    let (final_handle, _) = stage_output(&staged);
+    assert_eq!(final_handle, u32::MAX);
+    run_local_storage_root_command(
+        LOCAL_STORAGE_ROOT_COMMAND_DISCARD,
+        &lease_input(final_handle, &capability),
+    )
+    .expect("the final handle can be discarded");
+    assert_eq!(
+        run_local_storage_root_command(
+            LOCAL_STORAGE_ROOT_COMMAND_STAGE_NEW,
+            &stage_new_input(&test_capability(53), &test_binding(59), &test_root(61),),
+        ),
+        Err(LOCAL_STORAGE_ROOT_STATUS_RESOURCE_LIMIT)
+    );
+    ROOT_REGISTRY.with(|registry| {
+        let mut registry = registry.borrow_mut();
+        registry.reset();
+        registry.next_handle = previous_next_handle;
+    });
+}
+
+#[test]
+fn forged_or_stale_mutations_cannot_clear_legitimate_root_leases() {
+    reset_registry();
+    let capability = test_capability(67);
+    let staged = run_local_storage_root_command(
+        LOCAL_STORAGE_ROOT_COMMAND_STAGE_NEW,
+        &stage_new_input(&capability, &test_binding(71), &test_root(73)),
+    )
+    .expect("legitimate root stages");
+    let (handle, _) = stage_output(&staged);
+    let mutation_identifier = [0x79; MUTATION_IDENTIFIER_BYTE_LENGTH];
+
+    assert_eq!(
+        run_local_storage_root_command(
+            LOCAL_STORAGE_ROOT_COMMAND_COMMIT,
+            &[
+                handle.to_le_bytes().as_slice(),
+                test_capability(83).as_slice(),
+                mutation_identifier.as_slice(),
+            ]
+            .concat(),
+        ),
+        Err(LOCAL_STORAGE_ROOT_STATUS_CAPABILITY_MISMATCH)
+    );
+    assert_eq!(
+        run_local_storage_root_command(
+            LOCAL_STORAGE_ROOT_COMMAND_DISCARD,
+            &lease_input(handle.wrapping_sub(1), &capability),
+        ),
+        Err(LOCAL_STORAGE_ROOT_STATUS_STALE_HANDLE)
+    );
+    run_local_storage_root_command(
+        LOCAL_STORAGE_ROOT_COMMAND_ASSOCIATED_DATA,
+        &lease_input(handle, &capability),
+    )
+    .expect("failed forged mutations retain the legitimate staged root");
+
+    run_local_storage_root_command(
+        LOCAL_STORAGE_ROOT_COMMAND_COMMIT,
+        &[
+            handle.to_le_bytes().as_slice(),
+            capability.as_slice(),
+            mutation_identifier.as_slice(),
+        ]
+        .concat(),
+    )
+    .expect("legitimate root commits");
+    assert_eq!(
+        run_local_storage_root_command(
+            LOCAL_STORAGE_ROOT_COMMAND_DESTROY,
+            &lease_input(handle, &test_capability(89)),
+        ),
+        Err(LOCAL_STORAGE_ROOT_STATUS_CAPABILITY_MISMATCH)
+    );
+    run_local_storage_root_command(
+        LOCAL_STORAGE_ROOT_COMMAND_PREPARE_RECOVERY,
+        &[
+            handle.to_le_bytes().as_slice(),
+            capability.as_slice(),
+            mutation_identifier.as_slice(),
+        ]
+        .concat(),
+    )
+    .expect("failed forged destruction retains the legitimate active root");
+    reset_registry();
+}

@@ -12,8 +12,8 @@ use rayon::prelude::*;
 use crate::bgv::setup::trustee_evaluation_key_proof::{
     EvaluationKeyShareDescriptor, EvaluationKeyShareKind, PUBLIC_KEY_SHARE_COMMON_REFERENCE_LABEL,
     PUBLIC_KEY_SHARE_PROOF_FAMILY, SameSecretLinkageStatement, SuccinctSetupProofContext,
-    TrusteeEvaluationKeyStatement, decode_trustee_evaluation_key_proof,
-    public_key_share_succinct_proof_bytes_hash, verify_evaluation_key_share,
+    TrusteeEvaluationKeyStatement, decode_trustee_evaluation_key_proof_from_source,
+    public_key_share_succinct_proof_material_bytes_hash, verify_evaluation_key_share,
 };
 
 pub(super) fn public_key_share_proofs_have_terminal_dependents(setup_package: &Value) -> bool {
@@ -296,22 +296,6 @@ pub(in super::super) fn verify_optional_public_key_share_succinct_proofs(
     Ok(None)
 }
 
-pub(in super::super) fn verify_public_key_material_acceptance_boundary(
-    setup_package: &Value,
-) -> CanonicalResult<Option<Value>> {
-    for field_name in ["bgvPublicKey", "bgvPublicKeyRoot"] {
-        if setup_package.get(field_name).is_some() {
-            return Ok(Some(public_key_refusal(
-                "publicKeyMaterialBeforeProofVerification",
-                "raw BGV public-key material is not accepted until accepted public-key proof-byte verifiers pass",
-                format!("setupPackage.{field_name}"),
-            )?));
-        }
-    }
-
-    Ok(None)
-}
-
 struct PublicKeyShareSuccinctProofVerificationContext<'a> {
     request: &'a Value,
     setup_context: &'a Value,
@@ -423,7 +407,9 @@ fn verify_public_key_share_succinct_proof_record(
     let proof_bytes =
         public_key_share_succinct_proof_bytes_from_record(proof_record, context.request)?;
     let proof_bytes_hash = value_string(proof_record, "proofBytesHash")?;
-    if proof_bytes_hash != public_key_share_succinct_proof_bytes_hash(&proof_bytes) {
+    if proof_bytes_hash
+        != public_key_share_succinct_proof_material_bytes_hash(proof_bytes.as_ref())?
+    {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             "public-key share succinct proofBytesHash must match supplied proof bytes",
@@ -529,7 +515,7 @@ fn verify_public_key_share_succinct_proof_record(
             "public-key share succinct proof statementHash must match the rebuilt statement",
         ));
     }
-    let proof = decode_trustee_evaluation_key_proof(&statement, &proof_bytes)?;
+    let proof = decode_trustee_evaluation_key_proof_from_source(&statement, proof_bytes.as_ref())?;
     verify_evaluation_key_share(&statement, &proof)?;
     let proof_root = value_string(proof_record, "publicKeyShareSuccinctProofRoot")?;
     let mut root_input = proof_record.clone();

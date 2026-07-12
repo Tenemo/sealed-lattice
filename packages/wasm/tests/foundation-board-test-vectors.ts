@@ -9,25 +9,27 @@ import {
 const mlDsa65VerificationKeyByteLength = 1_952;
 const mlKem768EncapsulationKeyByteLength = 1_184;
 
-const unsigned16LittleEndian = (value: number): Uint8Array => {
+export const unsigned16LittleEndian = (value: number): Uint8Array => {
     const bytes = new Uint8Array(2);
     new DataView(bytes.buffer).setUint16(0, value, true);
     return bytes;
 };
 
-const unsigned32LittleEndian = (value: number): Uint8Array => {
+export const unsigned32LittleEndian = (value: number): Uint8Array => {
     const bytes = new Uint8Array(4);
     new DataView(bytes.buffer).setUint32(0, value, true);
     return bytes;
 };
 
-const unsigned64LittleEndian = (value: bigint): Uint8Array => {
+export const unsigned64LittleEndian = (value: bigint): Uint8Array => {
     const bytes = new Uint8Array(8);
     new DataView(bytes.buffer).setBigUint64(0, value, true);
     return bytes;
 };
 
-const concatenateBytes = (...chunks: readonly Uint8Array[]): Uint8Array => {
+export const concatenateBytes = (
+    ...chunks: readonly Uint8Array[]
+): Uint8Array => {
     const byteLength = chunks.reduce(
         (total, chunk) => total + chunk.byteLength,
         0,
@@ -41,7 +43,7 @@ const concatenateBytes = (...chunks: readonly Uint8Array[]): Uint8Array => {
     return bytes;
 };
 
-const canonicalItem = (
+export const canonicalItem = (
     itemType: number,
     canonicalBytes: Uint8Array,
 ): Uint8Array =>
@@ -51,7 +53,7 @@ const canonicalItem = (
         canonicalBytes,
     );
 
-const canonicalTuple = (
+export const canonicalTuple = (
     schemaIdentifier: number,
     ...items: readonly Uint8Array[]
 ): Uint8Array =>
@@ -62,27 +64,28 @@ const canonicalTuple = (
         ...items,
     );
 
-const unsigned16Item = (value: number): Uint8Array =>
+export const unsigned16Item = (value: number): Uint8Array =>
     canonicalItem(0x03, unsigned16LittleEndian(value));
 
-const rawBytesItem = (bytes: Uint8Array): Uint8Array =>
+export const rawBytesItem = (bytes: Uint8Array): Uint8Array =>
     canonicalItem(0x01, bytes);
 
-const variableValue = (bytes: Uint8Array): Uint8Array =>
+export const variableValue = (bytes: Uint8Array): Uint8Array =>
     concatenateBytes(unsigned32LittleEndian(bytes.byteLength), bytes);
 
-const variableBytesItem = (bytes: Uint8Array): Uint8Array =>
+export const variableBytesItem = (bytes: Uint8Array): Uint8Array =>
     rawBytesItem(variableValue(bytes));
 
-const asciiItem = (value: string): Uint8Array =>
+export const asciiItem = (value: string): Uint8Array =>
     canonicalItem(0x02, variableValue(new TextEncoder().encode(value)));
 
-const unsigned64Item = (value: bigint): Uint8Array =>
+export const unsigned64Item = (value: bigint): Uint8Array =>
     canonicalItem(0x05, unsigned64LittleEndian(value));
 
-const hashItem = (hash: Uint8Array): Uint8Array => canonicalItem(0x06, hash);
+export const hashItem = (hash: Uint8Array): Uint8Array =>
+    canonicalItem(0x06, hash);
 
-const emptyOptionalItem = (containedItemType: number): Uint8Array =>
+export const emptyOptionalItem = (containedItemType: number): Uint8Array =>
     canonicalItem(
         0x0d,
         concatenateBytes(
@@ -91,7 +94,7 @@ const emptyOptionalItem = (containedItemType: number): Uint8Array =>
         ),
     );
 
-const presentOptionalItem = (
+export const presentOptionalItem = (
     containedItemType: number,
     canonicalValue: Uint8Array,
 ): Uint8Array =>
@@ -104,7 +107,7 @@ const presentOptionalItem = (
         ),
     );
 
-const emptyHomogeneousListItem = (elementItemType: number): Uint8Array =>
+export const emptyHomogeneousListItem = (elementItemType: number): Uint8Array =>
     canonicalItem(
         0x0e,
         concatenateBytes(
@@ -113,7 +116,7 @@ const emptyHomogeneousListItem = (elementItemType: number): Uint8Array =>
         ),
     );
 
-const foundationHash512 = (
+export const foundationHash512 = (
     domain: string,
     ...items: readonly Uint8Array[]
 ): Uint8Array =>

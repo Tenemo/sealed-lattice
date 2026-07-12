@@ -1,14 +1,12 @@
-import { deriveCanonicalObjectHash, hash512Hex } from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 
 import {
-    setupProofMaterialRecordTransportFields,
-    setupProofMaterialTransportChunks,
-    setupProofMaterialTransportMetadata,
+    canonicalGeneratedSetupProofMaterialDescriptor,
+    setupProofTransportChunkSizeBytes,
 } from '../setup-proof-material-transport.js';
 
 import {
-    type EvaluationKeyShareComponentMaterialChunk,
-    type EvaluationKeyShareComponentMaterialChunkStream,
+    type EvaluationKeyShareComponentMaterialChunkSource,
     type EvaluationKeyShareProofFamily,
     type JsonRecord,
     type RelinearizationKeyShareRounds,
@@ -24,16 +22,12 @@ import {
     evaluationKeyShareProofTransportObjectType,
     evaluationKeyShareProofTransportSetObjectType,
     setupProofMaterialTransportEncoding,
-    trusteeEvaluationKeyProofBytesHashDomain,
     trusteeEvaluationKeyProofFamily,
 } from './constants-and-types.js';
 import {
-    assertLowercaseHex,
-    assertNonEmptyString,
     assertNonNegativeSafeInteger,
     assertProtocolHash,
     assertJsonRecord,
-    bytesFromHex,
     coefficientVectorFromLittleEndianHex,
     evaluationKeyShareComponentVectorHash,
     evaluationKeyShareComponentVectorRoot,
@@ -47,91 +41,190 @@ import {
     validateCommonInput,
 } from './share-records.js';
 
-const componentMaterialChunkBytes = (
-    value: unknown,
-    fieldPath: string,
-): ArrayBuffer => {
-    if (Object.prototype.toString.call(value) !== '[object ArrayBuffer]') {
-        throw new TypeError(`${fieldPath} must be an ArrayBuffer.`);
-    }
-    return value as ArrayBuffer;
-};
+class BoundedComponentMaterialReader {
+    readonly #pullChunk: EvaluationKeyShareComponentMaterialChunkSource['pullChunk'];
+    readonly #totalByteLength: number;
+    #chunk?: Uint8Array;
+    #chunkByteOffset = 0;
+    #chunkIndex = 0;
+    #consumedByteLength = 0;
 
-// The ordered binary chunk records for one transported component material: either
-// embedded inline on the component material (the additive inline path) or
-// carried out of band in the parallel chunk streams keyed by
-// keySwitchComponentMaterialRoot (the streamed path the terminal verify uses).
-const componentMaterialChunkRecords = (
-    componentMaterial: JsonRecord,
-    keySwitchComponentMaterialRoot: string,
-    componentMaterialChunkStreams:
-        | readonly EvaluationKeyShareComponentMaterialChunkStream[]
-        | undefined,
-    objectPath: string,
-): readonly EvaluationKeyShareComponentMaterialChunk[] => {
-    const inlineChunks = componentMaterial.chunks;
-    if (inlineChunks !== undefined) {
-        if (!Array.isArray(inlineChunks) || inlineChunks.length === 0) {
+    public constructor(
+        pullChunk: EvaluationKeyShareComponentMaterialChunkSource['pullChunk'],
+        totalByteLength: number,
+    ) {
+        this.#pullChunk = pullChunk;
+        this.#totalByteLength = totalByteLength;
+    }
+
+    public async readBytes(byteLength: number): Promise<Uint8Array> {
+        const output = new Uint8Array(byteLength);
+        let outputOffset = 0;
+        while (outputOffset < output.length) {
+            await this.#ensureChunk();
+            const chunk = this.#chunk;
+            if (chunk === undefined) {
+                throw new Error(
+                    'transported component material ended unexpectedly.',
+                );
+            }
+            const copyByteLength = Math.min(
+                chunk.length - this.#chunkByteOffset,
+                output.length - outputOffset,
+            );
+            output.set(
+                chunk.subarray(
+                    this.#chunkByteOffset,
+                    this.#chunkByteOffset + copyByteLength,
+                ),
+                outputOffset,
+            );
+            this.#chunkByteOffset += copyByteLength;
+            this.#consumedByteLength += copyByteLength;
+            outputOffset += copyByteLength;
+        }
+        return output;
+    }
+
+    public async readUnsignedWords(wordCount: number): Promise<number[]> {
+        const words: number[] = [];
+        while (words.length < wordCount) {
+            await this.#ensureChunk();
+            const chunk = this.#chunk;
+            if (chunk === undefined) {
+                throw new Error(
+                    'transported component material ended unexpectedly.',
+                );
+            }
+            const availableWordCount = Math.floor(
+                (chunk.length - this.#chunkByteOffset) / 8,
+            );
+            if (availableWordCount === 0) {
+                const wordBytes = await this.readBytes(8);
+                words.push(this.#wordFromBytes(wordBytes));
+                wordBytes.fill(0);
+                continue;
+            }
+            const view = new DataView(
+                chunk.buffer,
+                chunk.byteOffset,
+                chunk.byteLength,
+            );
+            const readableWordCount = Math.min(
+                availableWordCount,
+                wordCount - words.length,
+            );
+            for (
+                let readableWordIndex = 0;
+                readableWordIndex < readableWordCount;
+                readableWordIndex += 1
+            ) {
+                const word = view.getBigUint64(this.#chunkByteOffset, true);
+                if (word > BigInt(Number.MAX_SAFE_INTEGER)) {
+                    throw new Error(
+                        'transported component material contains a value outside the JavaScript safe integer range.',
+                    );
+                }
+                words.push(Number(word));
+                this.#chunkByteOffset += 8;
+                this.#consumedByteLength += 8;
+            }
+        }
+        return words;
+    }
+
+    public async finish(): Promise<void> {
+        if (this.#consumedByteLength !== this.#totalByteLength) {
             throw new Error(
-                `${objectPath} transported component material chunks must be a non-empty array.`,
+                'transported component material has trailing bytes.',
             );
         }
-
-        return inlineChunks.map((chunkValue, chunkIndex) => {
-            const chunk = assertJsonRecord(
-                chunkValue,
-                `componentMaterial.chunks.${String(chunkIndex)}`,
-            );
-
-            return {
-                chunkIndex: assertNonNegativeSafeInteger(
-                    chunk.chunkIndex,
-                    `componentMaterial.chunks.${String(chunkIndex)}.chunkIndex`,
-                ),
-                bytes: componentMaterialChunkBytes(
-                    chunk.bytes,
-                    `componentMaterial.chunks.${String(chunkIndex)}.bytes`,
-                ),
-            };
+        this.#releaseChunk();
+        const trailingChunk = await this.#pullChunk({
+            chunkIndex: this.#chunkIndex,
+            expectedByteLength: 0,
         });
-    }
-    const matchingChunkStreams = (componentMaterialChunkStreams ?? []).filter(
-        (chunkStream) =>
-            chunkStream.keySwitchComponentMaterialRoot ===
-            keySwitchComponentMaterialRoot,
-    );
-    if (matchingChunkStreams.length !== 1) {
-        throw new Error(
-            `${objectPath} transported component material has no inline chunks and must match exactly one component material chunk stream.`,
-        );
-    }
-    const chunks = matchingChunkStreams[0].chunks;
-    if (chunks.length === 0) {
-        throw new Error(
-            `${objectPath} transported component material chunk stream must be a non-empty array.`,
-        );
+        if (trailingChunk !== undefined) {
+            new Uint8Array(trailingChunk).fill(0);
+            throw new Error(
+                'transported component material has trailing chunks.',
+            );
+        }
     }
 
-    return chunks;
-};
+    async #ensureChunk(): Promise<void> {
+        if (
+            this.#chunk !== undefined &&
+            this.#chunkByteOffset < this.#chunk.length
+        ) {
+            return;
+        }
+        this.#releaseChunk();
+        if (this.#consumedByteLength === this.#totalByteLength) {
+            return;
+        }
+        const expectedByteLength = Math.min(
+            setupProofTransportChunkSizeBytes,
+            this.#totalByteLength - this.#consumedByteLength,
+        );
+        const chunk = await this.#pullChunk({
+            chunkIndex: this.#chunkIndex,
+            expectedByteLength,
+        });
+        if (
+            chunk === undefined ||
+            Object.prototype.toString.call(chunk) !== '[object ArrayBuffer]' ||
+            chunk.byteLength !== expectedByteLength
+        ) {
+            throw new Error(
+                'transported component material source returned the wrong chunk length.',
+            );
+        }
+        this.#chunk = new Uint8Array(chunk);
+        this.#chunkByteOffset = 0;
+        this.#chunkIndex += 1;
+    }
+
+    #releaseChunk(): void {
+        this.#chunk?.fill(0);
+        this.#chunk = undefined;
+        this.#chunkByteOffset = 0;
+    }
+
+    #wordFromBytes(bytes: Uint8Array): number {
+        const word = new DataView(
+            bytes.buffer,
+            bytes.byteOffset,
+            bytes.byteLength,
+        ).getBigUint64(0, true);
+        if (word > BigInt(Number.MAX_SAFE_INTEGER)) {
+            throw new Error(
+                'transported component material contains a value outside the JavaScript safe integer range.',
+            );
+        }
+        return Number(word);
+    }
+}
 
 // Decode one record's full public component-b material, mirroring the kernel
 // decoder: from embedded canonical component vector entries, or from the
 // binary chunked transport referenced by keySwitchComponentMaterialRoot. The
 // binary transport bytes come from the component material's inline chunks when
 // present, otherwise from the parallel component material chunk streams.
-const componentBVectorsFromMaterial = (
+const componentBVectorsFromMaterial = async (
     proofFamily: EvaluationKeyShareProofFamily,
     record: JsonRecord,
     qSharePrimes: readonly number[],
     transportedComponentMaterial:
         | TransportedEvaluationKeyShareComponentMaterialSet
         | undefined,
-    componentMaterialChunkStreams:
-        | readonly EvaluationKeyShareComponentMaterialChunkStream[]
-        | undefined,
+    componentMaterialSourcesByRoot: ReadonlyMap<
+        string,
+        EvaluationKeyShareComponentMaterialChunkSource
+    >,
+    usedComponentMaterialRoots: Set<string>,
     objectPath: string,
-): number[][][] => {
+): Promise<number[][][]> => {
     const level = nonNegativeIntegerRecordField(record, 'level', objectPath);
     const ringDegree = nonNegativeIntegerRecordField(
         record,
@@ -283,60 +376,48 @@ const componentBVectorsFromMaterial = (
         matchingMaterials[0],
         'componentMaterial',
     );
-    const chunkRecords = componentMaterialChunkRecords(
-        componentMaterial,
-        expectedMaterialRoot,
-        componentMaterialChunkStreams,
-        objectPath,
-    );
-    const materialBytesParts = chunkRecords.map((chunk, chunkIndex) => {
-        if (chunk.chunkIndex !== chunkIndex) {
-            throw new Error(
-                'transported component material chunks must be in ascending chunk-index order.',
-            );
-        }
-
-        return new Uint8Array(chunk.bytes);
-    });
-    const totalByteLength = materialBytesParts.reduce(
-        (byteLength, part) => byteLength + part.byteLength,
-        0,
-    );
-    const materialBytes = new Uint8Array(totalByteLength);
-    let writeOffset = 0;
-    for (const part of materialBytesParts) {
-        materialBytes.set(part, writeOffset);
-        writeOffset += part.byteLength;
+    const descriptorBytes = componentMaterial.descriptorBytes;
+    if (
+        !ArrayBuffer.isView(descriptorBytes) ||
+        Object.prototype.toString.call(descriptorBytes) !==
+            '[object Uint8Array]' ||
+        (descriptorBytes as Uint8Array).byteLength === 0
+    ) {
+        throw new TypeError(
+            `${objectPath} transported component material requires non-empty descriptorBytes.`,
+        );
     }
-    const view = new DataView(
-        materialBytes.buffer,
-        materialBytes.byteOffset,
-        materialBytes.byteLength,
+    const componentMaterialSource =
+        componentMaterialSourcesByRoot.get(expectedMaterialRoot);
+    if (componentMaterialSource?.proofFamily !== proofFamily) {
+        throw new Error(
+            `${objectPath} transported component material must match exactly one bounded component source.`,
+        );
+    }
+    usedComponentMaterialRoots.add(expectedMaterialRoot);
+    const totalByteLength =
+        evaluationKeyShareComponentMaterialMagic.byteLength +
+        4 * 8 +
+        digitCount * digitCount * (4 * 8 + ringDegree * 8);
+    if (!Number.isSafeInteger(totalByteLength) || totalByteLength <= 0) {
+        throw new Error(
+            `${objectPath} transported component material length is outside the JavaScript safe integer range.`,
+        );
+    }
+    const reader = new BoundedComponentMaterialReader(
+        componentMaterialSource.pullChunk,
+        totalByteLength,
     );
-    let cursor = 0;
-    const readWord = (): number => {
-        if (cursor + 8 > materialBytes.byteLength) {
-            throw new Error(
-                'transported component material ended unexpectedly.',
-            );
-        }
-        const word = view.getBigUint64(cursor, true);
-        cursor += 8;
-        if (word > BigInt(Number.MAX_SAFE_INTEGER)) {
-            throw new Error(
-                'transported component material contains a value outside the JavaScript safe integer range.',
-            );
-        }
-
-        return Number(word);
-    };
+    const magic = await reader.readBytes(
+        evaluationKeyShareComponentMaterialMagic.length,
+    );
     for (
         let magicIndex = 0;
         magicIndex < evaluationKeyShareComponentMaterialMagic.length;
         magicIndex += 1
     ) {
         if (
-            materialBytes[magicIndex] !==
+            magic[magicIndex] !==
             evaluationKeyShareComponentMaterialMagic[magicIndex]
         ) {
             throw new Error(
@@ -344,11 +425,13 @@ const componentBVectorsFromMaterial = (
             );
         }
     }
-    cursor = evaluationKeyShareComponentMaterialMagic.length;
-    const decodedLevel = readWord();
-    const decodedRingDegree = readWord();
-    const decodedDigitCount = readWord();
-    const decodedLimbCount = readWord();
+    magic.fill(0);
+    const [
+        decodedLevel,
+        decodedRingDegree,
+        decodedDigitCount,
+        decodedLimbCount,
+    ] = await reader.readUnsignedWords(4);
     if (
         decodedLevel !== level ||
         decodedRingDegree !== ringDegree ||
@@ -367,37 +450,37 @@ const componentBVectorsFromMaterial = (
             rnsLimbIndex < digitCount;
             rnsLimbIndex += 1
         ) {
+            const [
+                decodedDigitIndex,
+                decodedRnsLimbIndex,
+                decodedRnsPrime,
+                decodedCoefficientCount,
+            ] = await reader.readUnsignedWords(4);
             if (
-                readWord() !== digitIndex ||
-                readWord() !== rnsLimbIndex ||
-                readWord() !== qSharePrimes[rnsLimbIndex] ||
-                readWord() !== ringDegree
+                decodedDigitIndex !== digitIndex ||
+                decodedRnsLimbIndex !== rnsLimbIndex ||
+                decodedRnsPrime !== qSharePrimes[rnsLimbIndex] ||
+                decodedCoefficientCount !== ringDegree
             ) {
                 throw new Error(
                     'transported component material record order or metadata is invalid.',
                 );
             }
-            const coefficients: number[] = [];
-            for (
-                let coefficientIndex = 0;
-                coefficientIndex < ringDegree;
-                coefficientIndex += 1
+            const coefficients = await reader.readUnsignedWords(ringDegree);
+            if (
+                coefficients.some(
+                    (coefficient) => coefficient >= qSharePrimes[rnsLimbIndex],
+                )
             ) {
-                const coefficient = readWord();
-                if (coefficient >= qSharePrimes[rnsLimbIndex]) {
-                    throw new Error(
-                        'transported component material contains non-canonical Q_share residues.',
-                    );
-                }
-                coefficients.push(coefficient);
+                throw new Error(
+                    'transported component material contains non-canonical Q_share residues.',
+                );
             }
             componentBByLimb.push(coefficients);
         }
         componentBByDigit.push(componentBByLimb);
     }
-    if (cursor !== materialBytes.byteLength) {
-        throw new Error('transported component material has trailing bytes.');
-    }
+    await reader.finish();
 
     return componentBByDigit;
 };
@@ -426,22 +509,24 @@ const relinearizationRecordForTrusteeAndLevel = (
 // the sum over every trustee of its round-one component b at (digit j, limb j)
 // mod the j-th Q_share prime. Mirrors the kernel recomputation so the prover
 // statement matches the verifier-rebuilt statement.
-const roundOnePublicAggregateDiagonals = (
+const roundOnePublicAggregateDiagonals = async (
     relinearizationKeyShareRounds: RelinearizationKeyShareRounds,
     qSharePrimes: readonly number[],
     participantCount: number,
     transportedComponentMaterial:
         | TransportedEvaluationKeyShareComponentMaterialSet
         | undefined,
-    componentMaterialChunkStreams:
-        | readonly EvaluationKeyShareComponentMaterialChunkStream[]
-        | undefined,
-): ReadonlyMap<number, number[][]> => {
+    componentMaterialSourcesByRoot: ReadonlyMap<
+        string,
+        EvaluationKeyShareComponentMaterialChunkSource
+    >,
+    usedComponentMaterialRoots: Set<string>,
+): Promise<ReadonlyMap<number, number[][]>> => {
     const aggregatesByLevel = new Map<
         number,
         { aggregate: number[][]; contributionCount: number }
     >();
-    relinearizationKeyShareRounds.roundOneRecords.forEach((record) => {
+    for (const record of relinearizationKeyShareRounds.roundOneRecords) {
         const recordFields = record as JsonRecord;
         const level = nonNegativeIntegerRecordField(
             recordFields,
@@ -449,12 +534,13 @@ const roundOnePublicAggregateDiagonals = (
             'roundOneRecords',
         );
         const digitCount = level + 1;
-        const components = componentBVectorsFromMaterial(
+        const components = await componentBVectorsFromMaterial(
             'relinearization-key-share',
             recordFields,
             qSharePrimes,
             transportedComponentMaterial,
-            componentMaterialChunkStreams,
+            componentMaterialSourcesByRoot,
+            usedComponentMaterialRoots,
             'roundOneRecords',
         );
         const ringDegree = components[0]?.[0]?.length ?? 0;
@@ -494,7 +580,7 @@ const roundOnePublicAggregateDiagonals = (
             }
         }
         aggregateEntry.contributionCount += 1;
-    });
+    }
     const aggregateDiagonalsByLevel = new Map<number, number[][]>();
     for (const [level, aggregateEntry] of aggregatesByLevel) {
         if (aggregateEntry.contributionCount !== participantCount) {
@@ -508,9 +594,9 @@ const roundOnePublicAggregateDiagonals = (
     return aggregateDiagonalsByLevel;
 };
 
-export const createTrusteeEvaluationKeyProofs = (
+export const createTrusteeEvaluationKeyProofs = async (
     input: TrusteeEvaluationKeyProofsInput,
-): TrusteeEvaluationKeyProofSet => {
+): Promise<TrusteeEvaluationKeyProofMaterialTransport> => {
     const trusteeReferences = validateCommonInput(input);
     assertProtocolHash(
         input.keySwitchDecompositionHash,
@@ -679,15 +765,44 @@ export const createTrusteeEvaluationKeyProofs = (
         input.evaluatorKeySchedule.relinearizationLevelSchedule.map(
             (entry) => entry.level,
         );
-    const aggregateDiagonalsByLevel = roundOnePublicAggregateDiagonals(
+    const componentMaterialSourcesByRoot = new Map<
+        string,
+        EvaluationKeyShareComponentMaterialChunkSource
+    >();
+    for (const source of input.evaluationKeyShareComponentMaterialChunkSources ??
+        []) {
+        assertProtocolHash(
+            source.keySwitchComponentMaterialRoot,
+            'evaluationKeyShareComponentMaterialChunkSources.keySwitchComponentMaterialRoot',
+        );
+        if (
+            componentMaterialSourcesByRoot.has(
+                source.keySwitchComponentMaterialRoot,
+            )
+        ) {
+            throw new Error(
+                'evaluationKeyShareComponentMaterialChunkSources must not repeat a material root.',
+            );
+        }
+        componentMaterialSourcesByRoot.set(
+            source.keySwitchComponentMaterialRoot,
+            source,
+        );
+    }
+    const usedComponentMaterialRoots = new Set<string>();
+    const aggregateDiagonalsByLevel = await roundOnePublicAggregateDiagonals(
         input.relinearizationKeyShareRounds,
         input.qSharePrimes,
         input.participantCount,
         input.transportedEvaluationKeyShareComponentMaterial,
-        input.evaluationKeyShareComponentMaterialChunkStreams,
+        componentMaterialSourcesByRoot,
+        usedComponentMaterialRoots,
     );
 
-    const proofRecords = trusteeReferences.map((trusteeReference) => {
+    const transportedProofMaterials: TransportedEvaluationKeyShareProofMaterialSet['proofMaterials'][number][] =
+        [];
+    const proofRecords: TrusteeEvaluationKeyProofRecord[] = [];
+    for (const trusteeReference of trusteeReferences) {
         const witness = witnessesByRosterPosition.get(
             trusteeReference.trusteeRosterPosition,
         );
@@ -750,12 +865,13 @@ export const createTrusteeEvaluationKeyProofs = (
                     'keySwitchSeedHex',
                     'roundOneRecords',
                 ),
-                componentBByDigit: componentBVectorsFromMaterial(
+                componentBByDigit: await componentBVectorsFromMaterial(
                     'relinearization-key-share',
                     record,
                     input.qSharePrimes,
                     input.transportedEvaluationKeyShareComponentMaterial,
-                    input.evaluationKeyShareComponentMaterialChunkStreams,
+                    componentMaterialSourcesByRoot,
+                    usedComponentMaterialRoots,
                     'roundOneRecords',
                 ),
             });
@@ -787,12 +903,13 @@ export const createTrusteeEvaluationKeyProofs = (
                     'keySwitchSeedHex',
                     'roundTwoRecords',
                 ),
-                componentBByDigit: componentBVectorsFromMaterial(
+                componentBByDigit: await componentBVectorsFromMaterial(
                     'relinearization-key-share',
                     record,
                     input.qSharePrimes,
                     input.transportedEvaluationKeyShareComponentMaterial,
-                    input.evaluationKeyShareComponentMaterialChunkStreams,
+                    componentMaterialSourcesByRoot,
+                    usedComponentMaterialRoots,
                     'roundTwoRecords',
                 ),
                 roundOneAggregateDiagonal: aggregateDiagonal,
@@ -828,12 +945,13 @@ export const createTrusteeEvaluationKeyProofs = (
                     'keySwitchSeedHex',
                     'galoisKeyShareMaterialRecords',
                 ),
-                componentBByDigit: componentBVectorsFromMaterial(
+                componentBByDigit: await componentBVectorsFromMaterial(
                     'galois-key-share',
                     materialRecord,
                     input.qSharePrimes,
                     input.transportedEvaluationKeyShareComponentMaterial,
-                    input.evaluationKeyShareComponentMaterialChunkStreams,
+                    componentMaterialSourcesByRoot,
+                    usedComponentMaterialRoots,
                     'galoisKeyShareMaterialRecords',
                 ),
             });
@@ -855,7 +973,7 @@ export const createTrusteeEvaluationKeyProofs = (
         }
         const proofRandomnessSeedHex = freshProofRandomnessHex();
         const proofRandomnessNonceHex = freshProofRandomnessHex();
-        const generatedProof = input.trusteeEvaluationKeyProofGenerator({
+        const generatedProof = await input.trusteeEvaluationKeyProofGenerator({
             context: {
                 ceremonyId: input.setupContext.ceremonyId,
                 manifestHash: input.setupContext.manifestHash,
@@ -894,26 +1012,43 @@ export const createTrusteeEvaluationKeyProofs = (
             generatedProof.statementHash,
             'generatedProof.statementHash',
         );
-        assertNonEmptyString(
-            generatedProof.proofBytesHex,
-            'generatedProof.proofBytesHex',
+        assertProtocolHash(
+            generatedProof.proofBytesHash,
+            'generatedProof.proofBytesHash',
         );
-        assertLowercaseHex(
-            generatedProof.proofBytesHex,
-            'generatedProof.proofBytesHex',
+        assertProtocolHash(
+            generatedProof.proofMaterialRoot,
+            'generatedProof.proofMaterialRoot',
         );
         if (
-            generatedProof.proofBytesHex.length !==
-            generatedProof.proofByteLength * 2
+            generatedProof.proofBytesEncoding !==
+            setupProofMaterialTransportEncoding
         ) {
             throw new Error(
-                'generatedProof.proofBytesHex length must match proofByteLength.',
+                'generatedProof.proofBytesEncoding must be binary-chunked-proof-bytes.',
             );
         }
-        const proofBytes = bytesFromHex(
-            generatedProof.proofBytesHex,
-            'generatedProof.proofBytesHex',
-        );
+        const expectedProofMaterialRoot = deriveCanonicalObjectHash({
+            objectType: 'TrusteeEvaluationKeyProofMaterialReference',
+            proofFamily: trusteeEvaluationKeyProofFamily,
+            trusteeIdentity: trusteeReference.trusteeIdentity,
+            trusteeRosterPosition: trusteeReference.trusteeRosterPosition,
+            statementHash: generatedProof.statementHash,
+            proofBytesHash: generatedProof.proofBytesHash,
+        });
+        if (generatedProof.proofMaterialRoot !== expectedProofMaterialRoot) {
+            throw new Error(
+                'generatedProof.proofMaterialRoot must bind the trustee proof identity, statement, and proof hash.',
+            );
+        }
+        transportedProofMaterials.push({
+            objectType: evaluationKeyShareProofTransportObjectType,
+            proofFamily: trusteeEvaluationKeyProofFamily,
+            proofMaterialRoot: generatedProof.proofMaterialRoot,
+            descriptorBytes: canonicalGeneratedSetupProofMaterialDescriptor(
+                generatedProof.canonicalMaterial,
+            ),
+        });
         const recordWithoutRoot = {
             objectType: 'TrusteeEvaluationKeyProof',
             proofFamily: trusteeEvaluationKeyProofFamily,
@@ -921,22 +1056,27 @@ export const createTrusteeEvaluationKeyProofs = (
             trusteeIdentity: trusteeReference.trusteeIdentity,
             trusteeRosterPosition: trusteeReference.trusteeRosterPosition,
             statementHash: generatedProof.statementHash,
-            proofBytesHash: hash512Hex(
-                trusteeEvaluationKeyProofBytesHashDomain,
-                [proofBytes],
-            ),
-            proofBytesHex: generatedProof.proofBytesHex,
+            proofBytesHash: generatedProof.proofBytesHash,
+            proofBytesEncoding: generatedProof.proofBytesEncoding,
+            proofMaterialRoot: generatedProof.proofMaterialRoot,
         } as JsonRecord;
 
-        return {
+        proofRecords.push({
             ...recordWithoutRoot,
             trusteeEvaluationKeyProofRoot:
                 deriveCanonicalObjectHash(recordWithoutRoot),
-        } as TrusteeEvaluationKeyProofRecord;
-    });
+        } as TrusteeEvaluationKeyProofRecord);
+    }
     if (proofRecords.length === 0) {
         throw new Error(
             'trustee evaluation-key proofs require at least one participant.',
+        );
+    }
+    if (
+        usedComponentMaterialRoots.size !== componentMaterialSourcesByRoot.size
+    ) {
+        throw new Error(
+            'evaluationKeyShareComponentMaterialChunkSources contains material that no evaluation-key share record references.',
         );
     }
 
@@ -972,96 +1112,14 @@ export const createTrusteeEvaluationKeyProofs = (
         'trusteeEvaluationKeyProofSetRoot'
     >;
 
-    return {
+    const trusteeEvaluationKeyProofs = {
         ...proofSetWithoutRoot,
         trusteeEvaluationKeyProofSetRoot:
             deriveCanonicalObjectHash(proofSetWithoutRoot),
     } satisfies TrusteeEvaluationKeyProofSet;
-};
-
-export type TrusteeEvaluationKeyProofMaterialTransport = Readonly<{
-    readonly trusteeEvaluationKeyProofs: TrusteeEvaluationKeyProofSet;
-    readonly transportedEvaluationKeyShareProofMaterial: TransportedEvaluationKeyShareProofMaterialSet;
-}>;
-
-// Move every trustee proof's embedded bytes into binary chunked transport and
-// rebind the record and set roots, mirroring the kernel terminal-transport
-// flow: the proof record keeps the transport reference, the chunks travel in
-// the request-side transported proof material set.
-export const transportTrusteeEvaluationKeyProofSet = (
-    proofSet: TrusteeEvaluationKeyProofSet,
-): TrusteeEvaluationKeyProofMaterialTransport => {
-    const transportedProofMaterials: JsonRecord[] = [];
-    const transportedProofRecords = proofSet.proofRecords.map((proofRecord) => {
-        const recordFields = proofRecord as JsonRecord;
-        const proofBytesHex = stringRecordField(
-            recordFields,
-            'proofBytesHex',
-            'proofRecords',
-        );
-        const proofBytes = bytesFromHex(
-            proofBytesHex,
-            'proofRecords.proofBytesHex',
-        );
-        if (
-            hash512Hex(trusteeEvaluationKeyProofBytesHashDomain, [
-                proofBytes,
-            ]) !== proofRecord.proofBytesHash
-        ) {
-            throw new Error(
-                'proofRecords.proofBytesHash must match proofBytesHex before transport.',
-            );
-        }
-        const proofMaterialTransport = setupProofMaterialTransportMetadata(
-            proofBytes,
-            'proofRecords.proofBytesHex must produce at least one transported chunk.',
-        );
-        const proofMaterialRoot = deriveCanonicalObjectHash({
-            objectType: 'TrusteeEvaluationKeyProofMaterialReference',
-            proofFamily: trusteeEvaluationKeyProofFamily,
-            trusteeIdentity: proofRecord.trusteeIdentity,
-            trusteeRosterPosition: proofRecord.trusteeRosterPosition,
-            statementHash: proofRecord.statementHash,
-            proofBytesHash: proofRecord.proofBytesHash,
-        });
-        transportedProofMaterials.push({
-            objectType: evaluationKeyShareProofTransportObjectType,
-            proofFamily: trusteeEvaluationKeyProofFamily,
-            ...setupProofMaterialRecordTransportFields(
-                proofMaterialRoot,
-                setupProofMaterialTransportEncoding,
-            ),
-            chunks: setupProofMaterialTransportChunks(proofMaterialTransport),
-        });
-        const transportedRecordWithoutRoot = {
-            ...recordFields,
-            ...setupProofMaterialRecordTransportFields(
-                proofMaterialRoot,
-                setupProofMaterialTransportEncoding,
-            ),
-        } as JsonRecord;
-        delete transportedRecordWithoutRoot.proofBytesHex;
-        delete transportedRecordWithoutRoot.trusteeEvaluationKeyProofRoot;
-
-        return {
-            ...transportedRecordWithoutRoot,
-            trusteeEvaluationKeyProofRoot: deriveCanonicalObjectHash(
-                transportedRecordWithoutRoot,
-            ),
-        } as TrusteeEvaluationKeyProofRecord;
-    });
-    const proofSetWithoutRoot: JsonRecord = {
-        ...(proofSet as JsonRecord),
-        proofRecords: transportedProofRecords,
-    };
-    delete proofSetWithoutRoot.trusteeEvaluationKeyProofSetRoot;
 
     return {
-        trusteeEvaluationKeyProofs: {
-            ...proofSetWithoutRoot,
-            trusteeEvaluationKeyProofSetRoot:
-                deriveCanonicalObjectHash(proofSetWithoutRoot),
-        } as TrusteeEvaluationKeyProofSet,
+        trusteeEvaluationKeyProofs,
         transportedEvaluationKeyShareProofMaterial: {
             objectType: evaluationKeyShareProofTransportSetObjectType,
             proofFamily: trusteeEvaluationKeyProofFamily,
@@ -1069,3 +1127,8 @@ export const transportTrusteeEvaluationKeyProofSet = (
         },
     };
 };
+
+export type TrusteeEvaluationKeyProofMaterialTransport = Readonly<{
+    readonly trusteeEvaluationKeyProofs: TrusteeEvaluationKeyProofSet;
+    readonly transportedEvaluationKeyShareProofMaterial: TransportedEvaluationKeyShareProofMaterialSet;
+}>;

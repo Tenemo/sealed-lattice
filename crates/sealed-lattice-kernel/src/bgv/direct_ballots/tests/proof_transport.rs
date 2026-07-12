@@ -17,7 +17,7 @@ fn direct_ballot_public_proof_transport_rejects_wrong_chunk_hash() {
     chunk_hashes[0] = "0".repeat(128);
 
     let error = verify_direct_ballot_public_proof_transport(
-        &transport.proof_bytes,
+        &fixture.proof_generation.proof_bytes,
         &transport.proof_bytes_hash,
         &chunk_hashes,
         PROTOTYPE_PROOF_CHUNK_BYTES,
@@ -46,7 +46,7 @@ fn direct_ballot_public_proof_transport_rejects_duplicate_chunk_hash() {
     chunk_hashes[1] = chunk_hashes[0].clone();
 
     let error = verify_direct_ballot_public_proof_transport(
-        &transport.proof_bytes,
+        &fixture.proof_generation.proof_bytes,
         &transport.proof_bytes_hash,
         &chunk_hashes,
         PROTOTYPE_PROOF_CHUNK_BYTES,
@@ -71,14 +71,15 @@ fn direct_ballot_public_proof_transport_rejects_truncated_proof_bytes() {
         "direct ballot relation proof",
     )
     .expect("proof transport");
-    let truncated_len = transport
+    let truncated_len = fixture
+        .proof_generation
         .proof_bytes
         .len()
         .checked_sub(1)
         .expect("proof has bytes");
 
     let error = verify_direct_ballot_public_proof_transport(
-        &transport.proof_bytes[..truncated_len],
+        &fixture.proof_generation.proof_bytes[..truncated_len],
         &transport.proof_bytes_hash,
         &transport.chunk_hashes,
         PROTOTYPE_PROOF_CHUNK_BYTES,

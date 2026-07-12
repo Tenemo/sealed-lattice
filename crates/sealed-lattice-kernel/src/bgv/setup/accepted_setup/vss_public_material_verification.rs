@@ -246,6 +246,7 @@ fn verify_vss_public_material_binding(
     // committed T_{j,l} is shown to be the modular sum of the committed source
     // recipient shares by a unit-point share-linkage proof.
     crate::bgv::setup::verify_vss_public_aggregate_threshold_proofs(
+        request,
         coefficient_set,
         recipient_share_set,
         aggregate_threshold_set,

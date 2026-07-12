@@ -36,13 +36,13 @@ describe('SDK bridge build helpers', () => {
             `
                 import type { ThresholdParameters } from '@sealed-lattice/types';
 
-                export const isSupportedSafeRange = (parameters: ThresholdParameters): boolean =>
-                    parameters.rosterParametersKind === 'SupportedRosterRange';
+                export const hasExpectedRosterSize = (parameters: ThresholdParameters): boolean =>
+                    parameters.rosterSize === 10;
             `,
             'packages/protocol/src/lifecycle/thresholds.ts',
         );
 
-        expect(outputText).toContain('export const isSupportedSafeRange');
+        expect(outputText).toContain('export const hasExpectedRosterSize');
         expect(outputText).not.toContain('ThresholdParameters');
     });
 

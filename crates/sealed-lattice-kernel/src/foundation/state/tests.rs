@@ -207,6 +207,41 @@ fn object_hash(canonical_signed_carrier: &[u8]) -> Hash512 {
         .expect("test object hash derives")
 }
 
+fn verified_exact_output_stream(
+    capability_kind: StateCapabilityKind,
+    exact_output_bytes: &[u8],
+) -> VerifiedCanonicalStreamSummary {
+    let stream_domain = match capability_kind {
+        StateCapabilityKind::BallotCandidateList => {
+            crate::foundation::CanonicalStreamDomain::StateBallotCandidateListExactOutput
+        }
+        StateCapabilityKind::FinalitySignature => {
+            crate::foundation::CanonicalStreamDomain::StateFinalitySignatureExactOutput
+        }
+        StateCapabilityKind::TargetRelease => {
+            crate::foundation::CanonicalStreamDomain::StateTargetReleaseExactOutput
+        }
+    };
+    let descriptor =
+        crate::foundation::derive_canonical_stream_descriptor(stream_domain, exact_output_bytes)
+            .expect("exact-output stream descriptor derives");
+    let mut verifier = crate::foundation::CanonicalStreamVerifier::new(stream_domain, descriptor)
+        .expect("exact-output stream verifier begins");
+    for (chunk_index, chunk) in exact_output_bytes
+        .chunks(FOUNDATION_PROFILE.stream_chunk_byte_length)
+        .enumerate()
+    {
+        assert_eq!(
+            verifier.absorb_chunk(chunk_index, chunk),
+            VerificationResult::valid(())
+        );
+    }
+    verifier
+        .finish_with_summary()
+        .into_result()
+        .expect("exact-output stream verifies")
+}
+
 fn expect_refusal<Value>(
     result: VerificationResult<Value>,
     expected_refusal_reason: RefusalReason,
@@ -599,12 +634,12 @@ fn state_verifier_accepts_exact_quorums_and_refuses_every_malformed_extra_or_con
         &[1, 2, 3, 4, 5, 6, 7, 8],
     );
     let verified_output = verifier
-        .verify_output(StateOutputVerificationInput {
-            verified_reservation: &verified_reservation,
-            canonical_output_intent_carrier: &output_carrier,
-            canonical_state_certificate: &output_certificate,
-            exact_output_bytes: EXACT_OUTPUT_BYTES,
-        })
+        .verify_output_from_verified_stream(
+            &verified_reservation,
+            &output_carrier,
+            &output_certificate,
+            verified_exact_output_stream(capability_kind, EXACT_OUTPUT_BYTES),
+        )
         .into_result()
         .expect("valid output quorum verifies");
     assert_eq!(
@@ -747,12 +782,12 @@ fn state_verifier_accepts_exact_quorums_and_refuses_every_malformed_extra_or_con
     );
 
     expect_refusal(
-        verifier.verify_output(StateOutputVerificationInput {
-            verified_reservation: &verified_reservation,
-            canonical_output_intent_carrier: &output_carrier,
-            canonical_state_certificate: &output_certificate,
-            exact_output_bytes: b"different complete output bytes",
-        }),
+        verifier.verify_output_from_verified_stream(
+            &verified_reservation,
+            &output_carrier,
+            &output_certificate,
+            verified_exact_output_stream(capability_kind, b"different complete output bytes"),
+        ),
         RefusalReason::WrongHashOrRoot,
     );
 

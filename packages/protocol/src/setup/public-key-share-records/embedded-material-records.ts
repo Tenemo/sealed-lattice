@@ -1,7 +1,8 @@
 import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 
-import { BinaryChunkWriter } from '../binary-chunk-writer.js';
-import { setupTransportChunkSizeBytes } from '../vss-coefficient-commitments.js';
+import type { CanonicalProofMaterialChunkPull } from '../setup-proof-material-transport.js';
+import { setupProofTransportChunkSizeBytes } from '../setup-proof-material-transport.js';
+import { appendVaruint } from '../varuint-encoding.js';
 
 import {
     publicKeyShareMaterialEncoding,
@@ -269,71 +270,221 @@ const sortedPublicKeyShareMaterialRecords = (input: {
     return materialRecords;
 };
 
-export const encodePublicKeyShareMaterialRecords = (
+type PublicKeyShareMaterialBinarySegment = Readonly<
+    | {
+          readonly byteLength: number;
+          readonly byteOffset: number;
+          readonly bytes: Uint8Array;
+      }
+    | {
+          readonly byteLength: number;
+          readonly byteOffset: number;
+          readonly bytesHex: string;
+      }
+>;
+
+export type PublicKeyShareMaterialEncodingSource = Readonly<{
+    readonly pullChunk: CanonicalProofMaterialChunkPull;
+    readonly totalByteLength: number;
+}>;
+
+const encodedVaruint = (value: number): Uint8Array => {
+    const bytes: number[] = [];
+    appendVaruint(bytes, value);
+    return Uint8Array.from(bytes);
+};
+
+const encodedUnsigned64 = (value: number, fieldName: string): Uint8Array => {
+    if (!Number.isSafeInteger(value) || value < 0) {
+        throw new TypeError(
+            `${fieldName} must be a non-negative safe integer.`,
+        );
+    }
+    const bytes = new Uint8Array(8);
+    new DataView(bytes.buffer).setBigUint64(0, BigInt(value), true);
+    return bytes;
+};
+
+const publicKeyShareMaterialBinarySegments = (
     input: Readonly<{
         readonly participantCount: number;
         readonly rnsLimbCount: number;
         readonly ringDegree: number;
         readonly shareMaterialRecords: readonly PublicKeyShareMaterialRecord[];
     }>,
-): readonly Uint8Array[] => {
-    const writer = new BinaryChunkWriter({
-        chunkSizeBytes: setupTransportChunkSizeBytes,
-        emptyErrorMessage:
-            'public-key share material transport requires bytes.',
-    });
-    writer.writeBytes(publicKeyShareMaterialBinaryMagic);
-    writer.writeVaruint(1);
-    writer.writeVaruint(input.participantCount);
-    writer.writeVaruint(input.rnsLimbCount);
-    writer.writeVaruint(input.ringDegree);
-    sortedPublicKeyShareMaterialRecords(input).forEach((materialRecord) => {
-        writer.writeVaruint(materialRecord.trusteeRosterPosition);
-        materialRecord.shareCoefficientVectorsByLimb.forEach(
-            (coefficientVector, expectedRnsLimbIndex) => {
-                if (
-                    coefficientVector.rnsLimbIndex !== expectedRnsLimbIndex ||
-                    coefficientVector.component !== 'b_i'
-                ) {
-                    throw new Error(
-                        'publicKeyShareMaterial coefficient vector limbs must follow Q_share order.',
-                    );
-                }
-                writer.writeVaruint(expectedRnsLimbIndex);
-                writer.writeU64LittleEndian(
+): readonly PublicKeyShareMaterialBinarySegment[] => {
+    const segments: PublicKeyShareMaterialBinarySegment[] = [];
+    let byteOffset = 0;
+    const appendBytes = (bytes: Uint8Array): void => {
+        segments.push({ byteLength: bytes.byteLength, byteOffset, bytes });
+        byteOffset += bytes.byteLength;
+    };
+    const appendHex = (bytesHex: string): void => {
+        const byteLength = bytesHex.length / 2;
+        segments.push({ byteLength, byteOffset, bytesHex });
+        byteOffset += byteLength;
+    };
+
+    appendBytes(publicKeyShareMaterialBinaryMagic.slice());
+    for (const headerValue of [
+        1,
+        input.participantCount,
+        input.rnsLimbCount,
+        input.ringDegree,
+    ]) {
+        appendBytes(encodedVaruint(headerValue));
+    }
+    for (const materialRecord of sortedPublicKeyShareMaterialRecords(input)) {
+        appendBytes(encodedVaruint(materialRecord.trusteeRosterPosition));
+        for (const [
+            expectedRnsLimbIndex,
+            coefficientVector,
+        ] of materialRecord.shareCoefficientVectorsByLimb.entries()) {
+            if (
+                coefficientVector.rnsLimbIndex !== expectedRnsLimbIndex ||
+                coefficientVector.component !== 'b_i'
+            ) {
+                throw new Error(
+                    'publicKeyShareMaterial coefficient vector limbs must follow Q_share order.',
+                );
+            }
+            appendBytes(encodedVaruint(expectedRnsLimbIndex));
+            appendBytes(
+                encodedUnsigned64(
                     coefficientVector.rnsPrime,
                     'publicKeyShareMaterial.rnsPrime',
+                ),
+            );
+            const coefficients = coefficientVectorFromLittleEndianHex(
+                coefficientVector.coefficientsLeHex,
+                input.ringDegree,
+                'publicKeyShareMaterial.coefficientsLeHex',
+            );
+            if (
+                coefficients.some(
+                    (coefficient) => coefficient >= coefficientVector.rnsPrime,
+                ) ||
+                coefficientVector.coefficientVectorHash512 !==
+                    coefficientVectorHash512(coefficients)
+            ) {
+                throw new Error(
+                    'publicKeyShareMaterial coefficient vectors must be canonical and hash-bound before transport encoding.',
                 );
-                const coefficients = coefficientVectorFromLittleEndianHex(
-                    coefficientVector.coefficientsLeHex,
-                    input.ringDegree,
-                    'publicKeyShareMaterial.coefficientsLeHex',
-                );
-                if (
-                    coefficients.some(
-                        (coefficient) =>
-                            coefficient >= coefficientVector.rnsPrime,
-                    ) ||
-                    coefficientVector.coefficientVectorHash512 !==
-                        coefficientVectorHash512(coefficients)
-                ) {
-                    throw new Error(
-                        'publicKeyShareMaterial coefficient vectors must be canonical and hash-bound before transport encoding.',
-                    );
-                }
-                coefficients.forEach((coefficient) =>
-                    writer.writeU64LittleEndian(
-                        coefficient,
-                        'publicKeyShareMaterial.coefficient',
-                    ),
-                );
-            },
-        );
-    });
+            }
+            appendHex(coefficientVector.coefficientsLeHex);
+        }
+    }
 
-    return writer.finish();
+    return segments;
 };
 
-export const encodePublicKeyShareMaterial = (
+const copyHexBytes = (
+    bytesHex: string,
+    sourceByteOffset: number,
+    destination: Uint8Array,
+    destinationByteOffset: number,
+    byteLength: number,
+): void => {
+    for (let byteIndex = 0; byteIndex < byteLength; byteIndex += 1) {
+        const hexByteOffset = (sourceByteOffset + byteIndex) * 2;
+        const byte = Number.parseInt(
+            bytesHex.slice(hexByteOffset, hexByteOffset + 2),
+            16,
+        );
+        if (!Number.isInteger(byte)) {
+            throw new Error(
+                'public-key share material contains malformed coefficient hex.',
+            );
+        }
+        destination[destinationByteOffset + byteIndex] = byte;
+    }
+};
+
+export const createPublicKeyShareMaterialEncodingSource = (
+    input: Readonly<{
+        readonly participantCount: number;
+        readonly rnsLimbCount: number;
+        readonly ringDegree: number;
+        readonly shareMaterialRecords: readonly PublicKeyShareMaterialRecord[];
+    }>,
+): PublicKeyShareMaterialEncodingSource => {
+    const segments = publicKeyShareMaterialBinarySegments(input);
+    const finalSegment = segments[segments.length - 1];
+    if (finalSegment === undefined) {
+        throw new Error('public-key share material transport requires bytes.');
+    }
+    const totalByteLength = finalSegment.byteOffset + finalSegment.byteLength;
+    if (!Number.isSafeInteger(totalByteLength) || totalByteLength <= 0) {
+        throw new Error(
+            'public-key share material byte length is outside the JavaScript safe integer range.',
+        );
+    }
+
+    const pullChunk: CanonicalProofMaterialChunkPull = ({
+        chunkIndex,
+        expectedByteLength,
+    }) => {
+        if (!Number.isSafeInteger(chunkIndex) || chunkIndex < 0) {
+            throw new TypeError(
+                'public-key share material chunk index must be a non-negative safe integer.',
+            );
+        }
+        const chunkByteOffset = chunkIndex * setupProofTransportChunkSizeBytes;
+        if (chunkByteOffset >= totalByteLength) {
+            if (expectedByteLength !== 0) {
+                throw new Error(
+                    'public-key share material source was pulled past its canonical end.',
+                );
+            }
+            return Promise.resolve(undefined);
+        }
+        const canonicalByteLength = Math.min(
+            setupProofTransportChunkSizeBytes,
+            totalByteLength - chunkByteOffset,
+        );
+        if (expectedByteLength !== canonicalByteLength) {
+            throw new Error(
+                'public-key share material pull length must match the canonical chunk boundary.',
+            );
+        }
+        const chunk = new Uint8Array(canonicalByteLength);
+        const chunkEndOffset = chunkByteOffset + canonicalByteLength;
+        for (const segment of segments) {
+            const segmentEndOffset = segment.byteOffset + segment.byteLength;
+            const overlapStart = Math.max(chunkByteOffset, segment.byteOffset);
+            const overlapEnd = Math.min(chunkEndOffset, segmentEndOffset);
+            if (overlapStart >= overlapEnd) {
+                continue;
+            }
+            const sourceByteOffset = overlapStart - segment.byteOffset;
+            const destinationByteOffset = overlapStart - chunkByteOffset;
+            const overlapByteLength = overlapEnd - overlapStart;
+            if ('bytes' in segment) {
+                chunk.set(
+                    segment.bytes.subarray(
+                        sourceByteOffset,
+                        sourceByteOffset + overlapByteLength,
+                    ),
+                    destinationByteOffset,
+                );
+            } else {
+                copyHexBytes(
+                    segment.bytesHex,
+                    sourceByteOffset,
+                    chunk,
+                    destinationByteOffset,
+                    overlapByteLength,
+                );
+            }
+        }
+
+        return Promise.resolve(chunk.buffer);
+    };
+
+    return { pullChunk, totalByteLength };
+};
+
+export const createPublicKeyShareMaterialSetEncodingSource = (
     materialSet: PublicKeyShareMaterialSet,
-): readonly Uint8Array[] => encodePublicKeyShareMaterialRecords(materialSet);
+): PublicKeyShareMaterialEncodingSource =>
+    createPublicKeyShareMaterialEncodingSource(materialSet);

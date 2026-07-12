@@ -4,14 +4,18 @@ import { foundationProfile, refusalReasonCodes } from '@sealed-lattice/types';
 import {
     canonicalStreamDomains,
     canonicalStreamKernelContext,
+    CanonicalStreamCancellationError,
     CanonicalStreamCleanupError,
     CanonicalStreamInternalError,
     CanonicalStreamRefusalError,
     CanonicalStreamResourceError,
     openCanonicalStreamWorkerRuntime,
     type CanonicalStreamDomain,
+    type CanonicalStreamChunkPull,
+    type CanonicalStreamChunkSink,
     type CanonicalStreamKernelContext,
     type CanonicalStreamLeaseState,
+    type CanonicalStreamWriterLease,
     type FillRandomValues,
 } from './canonical-stream-runtime.js';
 import type { TranscriptCoreKernel } from './transcript-core-bridge/kernel-types.js';
@@ -30,6 +34,9 @@ export const bgvCanonicalStreamFamilies = Object.freeze({
     trusteeEvaluationKey: 5,
     relinearizationComponent: 6,
     galoisComponent: 7,
+    targetDecryptionShare: 8,
+    publicKeyShareMaterial: 9,
+    publicEvaluationKeyMaterial: 10,
 } as const);
 
 export type BgvCanonicalStreamFamily =
@@ -45,22 +52,39 @@ export type BgvCanonicalStreamVerifierLease = Readonly<{
 }>;
 
 export type BgvCanonicalStreamRuntime = Readonly<{
+    writeMaterial(input: {
+        readonly abortSignal?: AbortSignal;
+        readonly emitChunk: CanonicalStreamChunkSink;
+        readonly family: BgvCanonicalStreamFamily;
+        readonly materialRoot: string;
+    }): Promise<Uint8Array>;
+    writeSourceMaterial(input: {
+        readonly abortSignal?: AbortSignal;
+        readonly emitChunk: CanonicalStreamChunkSink;
+        readonly family: BgvCanonicalStreamFamily;
+        readonly materialRoot: string;
+        readonly pullChunk: CanonicalStreamChunkPull;
+        readonly totalByteLength: number;
+    }): Promise<Uint8Array>;
+    readMaterial(input: {
+        readonly abortSignal?: AbortSignal;
+        readonly descriptorBytes: Uint8Array;
+        readonly family: BgvCanonicalStreamFamily;
+        readonly materialRoot: string;
+        readonly pullChunk: CanonicalStreamChunkPull;
+    }): Promise<void>;
     openVerifier(input: {
         readonly descriptorBytes: Uint8Array;
         readonly family: BgvCanonicalStreamFamily;
         readonly materialRoot: string;
     }): BgvCanonicalStreamVerifierLease;
-    stage(input: {
-        readonly chunks: readonly ArrayBuffer[];
-        readonly family: BgvCanonicalStreamFamily;
-        readonly materialRoot: string;
-    }): Uint8Array;
 }>;
 
 type ActiveLease = {
     capabilityPointer: number;
     chunkCount: number;
     handle: number;
+    kind: 'material-reader' | 'verifier';
     state: CanonicalStreamLeaseState;
     totalByteLength: number;
 };
@@ -100,6 +124,18 @@ const familyDomain = new Map<BgvCanonicalStreamFamily, CanonicalStreamDomain>([
     [
         bgvCanonicalStreamFamilies.galoisComponent,
         canonicalStreamDomains.evaluatorKeyStore,
+    ],
+    [
+        bgvCanonicalStreamFamilies.targetDecryptionShare,
+        canonicalStreamDomains.maliciousTargetShareProof,
+    ],
+    [
+        bgvCanonicalStreamFamilies.publicKeyShareMaterial,
+        canonicalStreamDomains.publicKeyShareMaterial,
+    ],
+    [
+        bgvCanonicalStreamFamilies.publicEvaluationKeyMaterial,
+        canonicalStreamDomains.publicEvaluationKeyMaterial,
     ],
 ]);
 
@@ -212,6 +248,7 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
                 capabilityPointer,
                 chunkCount,
                 handle,
+                kind: 'verifier',
                 state: 'active',
                 totalByteLength,
             };
@@ -245,71 +282,343 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
         }
     }
 
-    public stage(input: {
-        readonly chunks: readonly ArrayBuffer[];
+    public async writeMaterial(input: {
+        readonly abortSignal?: AbortSignal;
+        readonly emitChunk: CanonicalStreamChunkSink;
         readonly family: BgvCanonicalStreamFamily;
         readonly materialRoot: string;
-    }): Uint8Array {
+    }): Promise<Uint8Array> {
+        this.#prepareBegin(input.family);
+        this.#requireMaterialReaderBoundary();
         const streamDomain = familyDomain.get(input.family);
         if (streamDomain === undefined) {
             throw new CanonicalStreamRefusalError('malformedEncoding');
         }
-        if (
-            Object.prototype.toString.call(input.chunks) !== '[object Array]' ||
-            input.chunks.length === 0
-        ) {
-            throw new CanonicalStreamRefusalError('wrongTypeOrLength');
-        }
-        let totalByteLength = 0;
-        for (const chunk of input.chunks) {
-            if (!isArrayBuffer(chunk) || chunk.byteLength === 0) {
-                throw new CanonicalStreamRefusalError('wrongTypeOrLength');
-            }
-            totalByteLength += chunk.byteLength;
+        const rootBytes = materialRootBytes(input.materialRoot);
+        const capabilityPointer = this.#createCapability();
+        let capabilityReleased = false;
+        let handle = 0;
+        let metadataPointer = 0;
+        let rootPointer = 0;
+        let readerLease: ActiveLease | undefined;
+        let writer: CanonicalStreamWriterLease | undefined;
+        try {
+            rootPointer = this.#copyMetadataIntoWasm(rootBytes);
+            metadataPointer = this.#allocateMetadata(3);
+            handle = this.#context.runExclusive(
+                'BGV canonical material reader begin',
+                () =>
+                    this.#context.bgvMaterialReaderBegin!(
+                        input.family,
+                        rootPointer,
+                        rootBytes.byteLength,
+                        capabilityPointer,
+                        capabilityByteLength,
+                        metadataPointer,
+                        metadataPointer + wasm32WordByteLength,
+                        metadataPointer + 2 * wasm32WordByteLength,
+                    ),
+            );
+            const [status, totalByteLength, chunkCount] = this.#readWords(
+                metadataPointer,
+                3,
+            );
+            this.#throwStatus(status);
             if (
-                !Number.isSafeInteger(totalByteLength) ||
-                totalByteLength > 0xffff_ffff
+                handle === 0 ||
+                totalByteLength === 0 ||
+                chunkCount === 0 ||
+                chunkCount !==
+                    Math.ceil(
+                        totalByteLength /
+                            foundationProfile.streamChunkByteLength,
+                    )
             ) {
-                throw new CanonicalStreamResourceError();
+                throw new CanonicalStreamInternalError(
+                    'The BGV material reader returned malformed begin metadata.',
+                );
             }
-        }
+            readerLease = {
+                capabilityPointer,
+                chunkCount,
+                handle,
+                kind: 'material-reader',
+                state: 'active',
+                totalByteLength,
+            };
+            this.#activeLease = readerLease;
 
-        const writerRuntime = openCanonicalStreamWorkerRuntime({
-            fillRandomValues: this.#fillRandomValues,
-            kernel: this.#kernel,
-        });
-        const writer = writerRuntime.openWriter({
-            streamDomain,
-            totalByteLength,
-        });
-        let descriptorBytes: Uint8Array;
-        try {
-            if (writer.chunkCount !== input.chunks.length) {
-                throw new CanonicalStreamRefusalError('wrongTypeOrLength');
+            writer = openCanonicalStreamWorkerRuntime({
+                fillRandomValues: this.#fillRandomValues,
+                kernel: this.#kernel,
+            }).openWriter({ streamDomain, totalByteLength });
+            if (writer.chunkCount !== chunkCount) {
+                throw new CanonicalStreamInternalError(
+                    'The material reader and canonical writer disagree on chunk count.',
+                );
             }
-            input.chunks.forEach((chunk, chunkIndex) => {
-                writer.absorbChunk(chunkIndex, chunk);
-            });
-            descriptorBytes = writer.finish();
-        } catch (error) {
-            writer.cancel();
-            throw error;
-        }
+            for (let chunkIndex = 0; chunkIndex < chunkCount; chunkIndex += 1) {
+                this.#throwIfCancelled(input.abortSignal);
+                const consumedByteLength =
+                    chunkIndex * foundationProfile.streamChunkByteLength;
+                const chunkByteLength = Math.min(
+                    foundationProfile.streamChunkByteLength,
+                    totalByteLength - consumedByteLength,
+                );
+                let chunk: ArrayBuffer;
+                const outputPointer = this.#allocate(chunkByteLength);
+                try {
+                    const readStatus = this.#context.runExclusive(
+                        'BGV canonical material reader chunk',
+                        () =>
+                            this.#context.bgvMaterialReaderReadChunk!(
+                                handle,
+                                capabilityPointer,
+                                capabilityByteLength,
+                                chunkIndex,
+                                outputPointer,
+                                chunkByteLength,
+                            ),
+                    );
+                    this.#throwStatus(readStatus);
+                    chunk = new Uint8Array(
+                        this.#context.memory.buffer,
+                        outputPointer,
+                        chunkByteLength,
+                    ).slice().buffer;
+                } finally {
+                    this.#zeroAndDeallocate(outputPointer, chunkByteLength);
+                }
+                try {
+                    this.#throwIfCancelled(input.abortSignal);
+                    writer.absorbChunk(chunkIndex, chunk);
+                    await input.emitChunk({
+                        ...(input.abortSignal === undefined
+                            ? {}
+                            : { abortSignal: input.abortSignal }),
+                        bytes: chunk,
+                        chunkIndex,
+                    });
+                } finally {
+                    this.#releaseBuffer(chunk);
+                }
+            }
+            this.#throwIfCancelled(input.abortSignal);
+            const finishStatus = this.#context.runExclusive(
+                'BGV canonical material reader finish',
+                () =>
+                    this.#context.bgvMaterialReaderFinish!(
+                        handle,
+                        capabilityPointer,
+                        capabilityByteLength,
+                    ),
+            );
+            this.#throwStatus(finishStatus);
+            readerLease.state = 'completed';
+            this.#release(readerLease);
+            capabilityReleased = true;
+            readerLease = undefined;
+            const descriptorBytes = writer.finish();
+            writer = undefined;
 
-        const verifier = this.openVerifier({
-            descriptorBytes,
-            family: input.family,
-            materialRoot: input.materialRoot,
-        });
-        try {
-            input.chunks.forEach((chunk, chunkIndex) => {
-                verifier.absorbChunk(chunkIndex, chunk);
-            });
-            verifier.finish();
             return descriptorBytes;
+        } catch (operationFailure) {
+            let cleanupFailure: unknown;
+            if (writer?.state() === 'active') {
+                try {
+                    writer.cancel();
+                } catch (error) {
+                    cleanupFailure = error;
+                }
+            }
+            if (readerLease?.state === 'active') {
+                try {
+                    const cancelStatus = this.#context.runExclusive(
+                        'BGV canonical material reader failure cleanup',
+                        () =>
+                            this.#context.bgvMaterialReaderCancel!(
+                                readerLease!.handle,
+                                readerLease!.capabilityPointer,
+                                capabilityByteLength,
+                            ),
+                    );
+                    if (cancelStatus !== runtimeInvalidSessionStatus) {
+                        this.#throwStatus(cancelStatus);
+                    }
+                } catch (error) {
+                    cleanupFailure ??= error;
+                }
+                readerLease.state = 'failed';
+                this.#release(readerLease);
+                capabilityReleased = true;
+                readerLease = undefined;
+            } else if (
+                !capabilityReleased &&
+                handle !== 0 &&
+                this.#activeLease === undefined
+            ) {
+                try {
+                    const cancelStatus = this.#context.runExclusive(
+                        'BGV canonical material reader begin cleanup',
+                        () =>
+                            this.#context.bgvMaterialReaderCancel!(
+                                handle,
+                                capabilityPointer,
+                                capabilityByteLength,
+                            ),
+                    );
+                    if (cancelStatus !== runtimeInvalidSessionStatus) {
+                        this.#throwStatus(cancelStatus);
+                    }
+                } catch (error) {
+                    cleanupFailure ??= error;
+                }
+            }
+            if (cleanupFailure !== undefined) {
+                throw new CanonicalStreamCleanupError(
+                    operationFailure,
+                    cleanupFailure,
+                );
+            }
+            throw operationFailure;
+        } finally {
+            rootBytes.fill(0);
+            this.#zeroAndDeallocate(rootPointer, rootBytes.byteLength);
+            if (metadataPointer !== 0) {
+                this.#context.deallocate(
+                    metadataPointer,
+                    3 * wasm32WordByteLength,
+                );
+            }
+            if (!capabilityReleased) {
+                this.#zeroAndDeallocate(
+                    capabilityPointer,
+                    capabilityByteLength,
+                );
+            }
+        }
+    }
+
+    public async writeSourceMaterial(input: {
+        readonly abortSignal?: AbortSignal;
+        readonly emitChunk: CanonicalStreamChunkSink;
+        readonly family: BgvCanonicalStreamFamily;
+        readonly materialRoot: string;
+        readonly pullChunk: CanonicalStreamChunkPull;
+        readonly totalByteLength: number;
+    }): Promise<Uint8Array> {
+        this.#prepareBegin(input.family);
+        const streamDomain = familyDomain.get(input.family);
+        if (streamDomain === undefined) {
+            throw new CanonicalStreamRefusalError('malformedEncoding');
+        }
+        const rootBytes = materialRootBytes(input.materialRoot);
+        try {
+            return await openCanonicalStreamWorkerRuntime({
+                fillRandomValues: this.#fillRandomValues,
+                kernel: this.#kernel,
+            }).write({
+                ...(input.abortSignal === undefined
+                    ? {}
+                    : { abortSignal: input.abortSignal }),
+                emitChunk: input.emitChunk,
+                pullChunk: input.pullChunk,
+                streamDomain,
+                totalByteLength: input.totalByteLength,
+            });
+        } finally {
+            rootBytes.fill(0);
+        }
+    }
+
+    public async readMaterial(input: {
+        readonly abortSignal?: AbortSignal;
+        readonly descriptorBytes: Uint8Array;
+        readonly family: BgvCanonicalStreamFamily;
+        readonly materialRoot: string;
+        readonly pullChunk: CanonicalStreamChunkPull;
+    }): Promise<void> {
+        const verifier = this.openVerifier(input);
+        let operationFailure: unknown;
+        let operationFailed = false;
+        let sourceEndedBeforeTrailingCheck = false;
+        try {
+            for (
+                let chunkIndex = 0;
+                chunkIndex < verifier.chunkCount;
+                chunkIndex += 1
+            ) {
+                this.#throwIfCancelled(input.abortSignal);
+                const bytes = await input.pullChunk({
+                    ...(input.abortSignal === undefined
+                        ? {}
+                        : { abortSignal: input.abortSignal }),
+                    chunkIndex,
+                    expectedByteLength: this.#expectedChunkByteLength(
+                        verifier,
+                        chunkIndex,
+                    ),
+                });
+                if (bytes === undefined) {
+                    this.#throwIfCancelled(input.abortSignal);
+                    verifier.finish();
+                    sourceEndedBeforeTrailingCheck = true;
+                    break;
+                }
+                try {
+                    this.#throwIfCancelled(input.abortSignal);
+                    verifier.absorbChunk(chunkIndex, bytes);
+                } finally {
+                    this.#releaseBuffer(bytes);
+                }
+            }
+            if (!sourceEndedBeforeTrailingCheck) {
+                const trailingBytes = await input.pullChunk({
+                    ...(input.abortSignal === undefined
+                        ? {}
+                        : { abortSignal: input.abortSignal }),
+                    chunkIndex: verifier.chunkCount,
+                    expectedByteLength: 0,
+                });
+                if (trailingBytes !== undefined) {
+                    try {
+                        this.#throwIfCancelled(input.abortSignal);
+                        verifier.absorbChunk(
+                            verifier.chunkCount,
+                            trailingBytes,
+                        );
+                    } finally {
+                        this.#releaseBuffer(trailingBytes);
+                    }
+                } else {
+                    this.#throwIfCancelled(input.abortSignal);
+                }
+                verifier.finish();
+            }
         } catch (error) {
+            operationFailure = error;
+            operationFailed = true;
+        }
+
+        let cleanupFailure: unknown;
+        let cleanupFailed = false;
+        try {
             verifier.cancel();
-            throw error;
+        } catch (error) {
+            cleanupFailure = error;
+            cleanupFailed = true;
+        }
+        if (cleanupFailed) {
+            if (operationFailed) {
+                throw new CanonicalStreamCleanupError(
+                    operationFailure,
+                    cleanupFailure,
+                );
+            }
+            throw cleanupFailure;
+        }
+        if (operationFailed) {
+            throw operationFailure;
         }
     }
 
@@ -332,6 +641,11 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
     ): void {
         try {
             this.#requireActive(lease);
+            if (lease.kind !== 'verifier') {
+                throw new CanonicalStreamInternalError(
+                    'A material-reader lease cannot absorb verifier chunks.',
+                );
+            }
             if (
                 !Number.isSafeInteger(chunkIndex) ||
                 chunkIndex < 0 ||
@@ -372,6 +686,11 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
     #finish(lease: ActiveLease): void {
         try {
             this.#requireActive(lease);
+            if (lease.kind !== 'verifier') {
+                throw new CanonicalStreamInternalError(
+                    'A material-reader lease cannot finish as a verifier.',
+                );
+            }
             const status = this.#context.runExclusive(
                 'BGV canonical stream finish',
                 () =>
@@ -397,11 +716,17 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
             const status = this.#context.runExclusive(
                 'BGV canonical stream cancellation',
                 () =>
-                    this.#context.bgvCancel!(
-                        lease.handle,
-                        lease.capabilityPointer,
-                        capabilityByteLength,
-                    ),
+                    lease.kind === 'material-reader'
+                        ? this.#context.bgvMaterialReaderCancel!(
+                              lease.handle,
+                              lease.capabilityPointer,
+                              capabilityByteLength,
+                          )
+                        : this.#context.bgvCancel!(
+                              lease.handle,
+                              lease.capabilityPointer,
+                              capabilityByteLength,
+                          ),
             );
             this.#throwStatus(status);
             lease.state = 'cancelled';
@@ -426,7 +751,9 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
                             capabilityByteLength,
                         ),
                 );
-                this.#throwStatus(status);
+                if (status !== runtimeInvalidSessionStatus) {
+                    this.#throwStatus(status);
+                }
             } catch (error) {
                 cleanupFailure = error;
             }
@@ -469,13 +796,37 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
 
     #prepareBegin(family: number): void {
         if (this.#activeLease !== undefined) {
-            this.#cancel(this.#activeLease);
             throw new CanonicalStreamResourceError(
                 'Only one BGV canonical stream may be active in a WASM instance.',
             );
         }
         if (!familyDomain.has(family as BgvCanonicalStreamFamily)) {
             throw new CanonicalStreamRefusalError('malformedEncoding');
+        }
+    }
+
+    #throwIfCancelled(abortSignal: AbortSignal | undefined): void {
+        if (abortSignal?.aborted === true) {
+            throw new CanonicalStreamCancellationError();
+        }
+    }
+
+    #expectedChunkByteLength(
+        lease: BgvCanonicalStreamVerifierLease,
+        chunkIndex: number,
+    ): number {
+        if (chunkIndex + 1 < lease.chunkCount) {
+            return foundationProfile.streamChunkByteLength;
+        }
+        return (
+            lease.totalByteLength -
+            (lease.chunkCount - 1) * foundationProfile.streamChunkByteLength
+        );
+    }
+
+    #releaseBuffer(buffer: ArrayBuffer): void {
+        if (buffer.byteLength > 0) {
+            new Uint8Array(buffer).fill(0);
         }
     }
 
@@ -488,6 +839,19 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
         ) {
             throw new CanonicalStreamInternalError(
                 'The transcript-core kernel has no BGV canonical stream boundary.',
+            );
+        }
+    }
+
+    #requireMaterialReaderBoundary(): void {
+        if (
+            this.#context.bgvMaterialReaderBegin === undefined ||
+            this.#context.bgvMaterialReaderCancel === undefined ||
+            this.#context.bgvMaterialReaderFinish === undefined ||
+            this.#context.bgvMaterialReaderReadChunk === undefined
+        ) {
+            throw new CanonicalStreamInternalError(
+                'The transcript-core kernel has no BGV canonical material-reader boundary.',
             );
         }
     }

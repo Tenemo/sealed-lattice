@@ -3,7 +3,6 @@ import type { ProtocolHash } from '@sealed-lattice/types';
 
 import {
     publicKeyShareProofFamily,
-    type JsonRecord,
     type PublicKeyShareMaterialRootReference,
     type PublicKeyShareMaterialSet,
     type PublicKeyShareProofRecord,
@@ -12,10 +11,8 @@ import {
     type PublicKeyShareSuccinctProofRecord,
     type PublicKeyShareSuccinctProofSet,
     type PublicKeyShareSuccinctProofSetInput,
-    type PublicKeyShareSuccinctTransportedProofBytes,
 } from './constants-and-types.js';
 import {
-    assertLowercaseHexBytes,
     assertNonEmptyString,
     assertNonNegativeSafeInteger,
     assertProtocolHash,
@@ -307,54 +304,23 @@ const validatePublicKeyShareSuccinctProofMaterial = (
     );
     assertProtocolHash(material.statementHash, `${fieldName}.statementHash`);
     assertProtocolHash(material.proofBytesHash, `${fieldName}.proofBytesHash`);
-    const proofBytesHex = (material as JsonRecord).proofBytesHex;
-    if (proofBytesHex !== undefined) {
-        if (typeof proofBytesHex !== 'string') {
-            throw new TypeError(`${fieldName}.proofBytesHex must be a string.`);
-        }
-        assertLowercaseHexBytes(proofBytesHex, `${fieldName}.proofBytesHex`);
-
-        return;
-    }
-
-    const transportedMaterial =
-        material as PublicKeyShareSuccinctTransportedProofBytes;
-    if (
-        transportedMaterial.proofBytesEncoding !== 'binary-chunked-proof-bytes'
-    ) {
+    if (material.proofBytesEncoding !== 'binary-chunked-proof-bytes') {
         throw new TypeError(
             `${fieldName}.proofBytesEncoding must be binary-chunked-proof-bytes.`,
         );
     }
     assertProtocolHash(
-        transportedMaterial.proofMaterialRoot,
+        material.proofMaterialRoot,
         `${fieldName}.proofMaterialRoot`,
     );
 };
 
 const publicKeyShareSuccinctProofByteMaterial = (
     material: PublicKeyShareSuccinctProofMaterial,
-): PublicKeyShareSuccinctProofByteMaterial => {
-    const proofBytesHex = (material as JsonRecord).proofBytesHex;
-    if (proofBytesHex !== undefined) {
-        if (typeof proofBytesHex !== 'string') {
-            throw new TypeError(
-                'publicKeyShareSuccinctProofMaterial.proofBytesHex must be a string.',
-            );
-        }
-        return {
-            proofBytesHex,
-        };
-    }
-
-    const transportedMaterial =
-        material as PublicKeyShareSuccinctTransportedProofBytes;
-
-    return {
-        proofBytesEncoding: transportedMaterial.proofBytesEncoding,
-        proofMaterialRoot: transportedMaterial.proofMaterialRoot,
-    };
-};
+): PublicKeyShareSuccinctProofByteMaterial => ({
+    proofBytesEncoding: material.proofBytesEncoding,
+    proofMaterialRoot: material.proofMaterialRoot,
+});
 
 const sortedPublicKeyShareSuccinctProofMaterials = (
     input: Pick<

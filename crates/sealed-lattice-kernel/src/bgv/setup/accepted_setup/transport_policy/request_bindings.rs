@@ -17,14 +17,6 @@ pub(super) fn verify_setup_transport_request_bindings(
     request: &Value,
     transported_objects: &[SetupTransportedObjectBinding],
 ) -> CanonicalResult<Result<(), Refusal>> {
-    macro_rules! transport_try {
-        ($expression:expr) => {
-            match $expression {
-                Ok(value) => value,
-                Err(refusal) => return Ok(Err(refusal)),
-            }
-        };
-    }
     macro_rules! transport_canonical_try {
         ($expression:expr) => {
             match $expression? {
@@ -39,34 +31,6 @@ pub(super) fn verify_setup_transport_request_bindings(
         transported_objects,
     ));
 
-    if let Some(transported_material) = request.get("transportedPublicKeyShareMaterial") {
-        let Some(public_key_share_material_root) = setup_package
-            .get("publicKeyShareMaterial")
-            .and_then(|material| material.get("publicKeyShareMaterialSetRoot"))
-            .and_then(serde_json::Value::as_str)
-        else {
-            return Ok(Err(Refusal::new(
-                "transportedObjectBindingMissing",
-                "transportedPublicKeyShareMaterial requires setupPackage.publicKeyShareMaterial.publicKeyShareMaterialSetRoot",
-                "setupPackage.publicKeyShareMaterial.publicKeyShareMaterialSetRoot",
-            )));
-        };
-        validate_hash_string(
-            public_key_share_material_root,
-            "setupPackage.publicKeyShareMaterial.publicKeyShareMaterialSetRoot",
-        )?;
-        transport_try!(require_setup_transport_entry(
-            transported_objects,
-            &setup_transport_expected_direct_material(
-                transported_material,
-                public_key_share_material_root.to_string(),
-                SETUP_TRANSPORTED_PUBLIC_KEY_SHARE_MATERIAL_NAME,
-                SETUP_TRANSPORTED_PUBLIC_KEY_SHARE_MATERIAL_ROLE,
-                SETUP_TRANSPORT_DIRECT_HASH_FIELDS,
-                "transportedPublicKeyShareMaterial",
-            )?,
-        ));
-    }
     if let Some(material_set) = request.get("transportedPublicKeyShareProofMaterial") {
         let referenced_material_roots = setup_transport_referenced_proof_material_roots(
             setup_package,
@@ -525,24 +489,6 @@ fn require_setup_transport_material_entries(
     }
 
     Ok(Ok(()))
-}
-
-fn setup_transport_expected_direct_material(
-    material: &Value,
-    object_root: String,
-    object_name: &'static str,
-    object_role: &'static str,
-    hash_fields: SetupTransportHashFieldNames,
-    object_path: &'static str,
-) -> CanonicalResult<SetupTransportExpectedObject> {
-    setup_transport_expected_material_with_root(
-        material,
-        object_root,
-        object_name,
-        object_role,
-        hash_fields,
-        object_path.to_string(),
-    )
 }
 
 fn referenced_material_root(

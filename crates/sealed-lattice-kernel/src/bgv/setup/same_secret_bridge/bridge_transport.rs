@@ -17,13 +17,6 @@ pub(super) fn resolve_same_secret_bridge_proof_bytes(
     let proof_bytes_hash = hash_at_path(proof_record, &["proofBytesHash"])?;
     let proof_record_root =
         hash_at_path(proof_record, &["sameSecretBridgeProofRecordRoot"])?.to_string();
-    if proof_record.get("proofBytesBase64").is_some() {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ComponentMismatch,
-            "same-secret bridge proof requires canonical streamed proof material",
-        ));
-    }
-
     compare_required_string(
         string_at_path(proof_record, &["proofBytesEncoding"])?,
         SETUP_PROOF_MATERIAL_ENCODING,
@@ -82,10 +75,7 @@ pub(super) fn transported_same_secret_bridge_proof_material_binding(
         expected_proof_material_root,
         &SAME_SECRET_BRIDGE_TRANSPORT_FAMILY,
     )?;
-    let proof_bytes_hash = hash512_hex(
-        SAME_SECRET_BRIDGE_PROOF_BYTES_HASH_DOMAIN,
-        &[&proof_bytes[..]],
-    );
+    let proof_bytes_hash = proof_bytes.hash512_hex(SAME_SECRET_BRIDGE_PROOF_BYTES_HASH_DOMAIN)?;
     compare_required_string(
         expected_proof_material_root,
         &crate::bgv::setup::setup_proof::setup_proof_material_reference_root(

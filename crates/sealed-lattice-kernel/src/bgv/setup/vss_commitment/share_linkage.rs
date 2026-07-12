@@ -521,6 +521,7 @@ pub(super) fn verify_vss_aggregate_threshold_statement_root(
 }
 
 pub(crate) fn verify_vss_public_aggregate_threshold_proofs(
+    proof_material_request: &Value,
     coefficient_commitment_set: &Value,
     recipient_share_commitment_set: &Value,
     aggregate_threshold_commitment_set: &Value,
@@ -555,6 +556,21 @@ pub(crate) fn verify_vss_public_aggregate_threshold_proofs(
             string_at_path(proof, &["proofFamily"])?,
             "vss-share-linkage",
             "VSS aggregate threshold proof family",
+        )?;
+        compare_required_string(
+            string_at_path(proof, &["proofBytesEncoding"])?,
+            crate::bgv::setup::setup_proof::SETUP_PROOF_MATERIAL_ENCODING,
+            "VSS aggregate threshold proof bytes encoding",
+        )?;
+        let proof_bytes_hash = hash_at_path(proof, &["proofBytesHash"])?;
+        let proof_material_root = hash_at_path(proof, &["proofMaterialRoot"])?;
+        compare_required_string(
+            proof_material_root,
+            &crate::bgv::setup::setup_proof::setup_proof_material_reference_root(
+                crate::bgv::setup::trustee_evaluation_key_proof::VSS_SHARE_LINKAGE_PROOF_FAMILY,
+                proof_bytes_hash,
+            )?,
+            "VSS aggregate threshold proof material root",
         )?;
         let proof_recipient_roster_position =
             unsigned_at_path(proof, &["recipientRosterPosition"])?;
@@ -775,13 +791,14 @@ pub(crate) fn verify_vss_public_aggregate_threshold_proofs(
             }
         }
         // Verify the unit-point share-linkage proof that T_{j,l} is the modular
-        // sum of the bound source shares.
-        let proof_bytes = crate::transcript_core::decode_standard_base64(
-            string_at_path(proof, &["proofBytesBase64"])?,
-            "VSS aggregate proof proofBytesBase64",
+        // sum of the bound source shares. The source-aware decoder reads the
+        // authenticated canonical stream chunks directly.
+        let proof_bytes = crate::bgv::setup::trustee_evaluation_key_proof::verified_vss_share_linkage_proof_material_bytes(
+            proof_material_request,
+            hash_at_path(proof, &["proofMaterialRoot"])?,
+            hash_at_path(proof, &["proofBytesHash"])?,
         )?;
-        let proof_bytes_hex = crate::transcript_core::encode_hex(&proof_bytes);
-        crate::bgv::setup::verify_vss_share_linkage_proof_from_request(&json!({
+        crate::bgv::setup::trustee_evaluation_key_proof::verify_vss_share_linkage_proof_source_from_request(&json!({
             "context": {
                 "ceremonyId": context.ceremony_id,
                 "manifestHash": context.manifest_hash,
@@ -793,8 +810,7 @@ pub(crate) fn verify_vss_public_aggregate_threshold_proofs(
             },
             "ringDegree": context.ring_degree,
             "vssShareLinkage": vss_aggregate,
-            "proofBytesHex": proof_bytes_hex,
-        }))?;
+        }), proof_bytes.as_ref())?;
     }
 
     Ok(())

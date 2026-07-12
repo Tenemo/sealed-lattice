@@ -5,23 +5,23 @@ const VSS_PUBLIC_AGGREGATE_THRESHOLD_COMMITMENT_SET_FIELD: &str =
 const VSS_SHARE_LINKAGE_STATEMENT_FIELD: &str = "vssShareLinkageStatement";
 const TARGET_RESULT_RELEASE_SETUP_CONTEXT_HASH_FIELD: &str = "releaseSetupContextHash";
 
-// Target decryption binds the accepted, verifier-gated SetupPackage that every
-// other proof family binds - never the passive development package, which is
-// documented development evidence and must not enter the trust boundary.
-fn require_accepted_setup_package(setup_package: &Value) -> CanonicalResult<()> {
+// This is an object-shape check, not setup verification. The public SDK must
+// obtain setup authority from the setup verifier; a caller-selected package
+// cannot become accepted merely by naming itself `SetupPackage`.
+fn require_setup_package_shape(setup_package: &Value) -> CanonicalResult<()> {
     if string_at_path(setup_package, &["objectType"])? != "SetupPackage" {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidProtocolObject,
-            "target decryption requires the accepted SetupPackage; passive or unknown setup packages are refused",
+            "target decryption requires a SetupPackage-shaped input; passive or unknown setup packages are refused",
         ));
     }
     Ok(())
 }
 
 pub(super) fn read_setup_binding(setup_package: &Value) -> CanonicalResult<SetupBinding> {
-    require_accepted_setup_package(setup_package)?;
+    require_setup_package_shape(setup_package)?;
     let setup_context_hashes = collective_bgv_setup_context_hashes_from_package(setup_package)?;
-    // The accepted package carries no setupPackageHash field; recompute the
+    // The package carries no setupPackageHash field; recompute the
     // canonical hash of the whole package. It is the single subsuming anchor -
     // every package-derived binding the share statement and release context
     // commit to (participants, public-key-share roots, the VSS graph,
@@ -35,16 +35,16 @@ pub(super) fn read_setup_binding(setup_package: &Value) -> CanonicalResult<Setup
         hash_at_path(setup_package, &["setupContext", "manifestHash"])?.to_string();
     // Kernel-canonical target-decryption parameters (level 6, K_top = 20 scope),
     // recomputed from the bound BGV parameters rather than read from a package
-    // field. The accepted target record's targetDecryptionParametersHash is
+    // field. The target record's targetDecryptionParametersHash is
     // cross-checked against this value in read_target_accepted_binding.
     let (target_decryption_profile_hash, target_decryption_profile_binding_hash) =
         canonical_target_decryption_parameter_hashes()?;
     let public_matrix_seed_hash =
         hash_at_path(setup_package, &["commonRandomness", "publicMatrixSeedHash"])?.to_string();
-    // The accepted package carries no top-level participants array; identities
-    // and roster positions come from the verified setupIntent registrations.
-    // Board position equals the roster index and epochs are 0 in a fresh
-    // accepted setup, matching the canonical participant construction.
+    // The package carries no top-level participants array; identities and
+    // roster positions come from registrations inside the caller-supplied
+    // setupIntent. Board position equals the roster index and epochs are 0 in
+    // this setup-package shape, matching the participant construction.
     let participants = accepted_setup_participant_roster_from_package(setup_package)?
         .into_iter()
         .map(|(roster_position, trustee_identity)| {
@@ -395,6 +395,10 @@ fn read_aggregate_threshold_commitment_set_binding(
     })
 }
 
+// This parser establishes only canonical field and hash consistency against
+// the supplied setup binding. It does not authenticate finality, evaluator
+// replay, board inclusion, or state authorization, so its result is not a
+// participant-acceptance capability.
 pub(super) fn read_target_accepted_binding(
     record: &Value,
     setup_binding: &SetupBinding,

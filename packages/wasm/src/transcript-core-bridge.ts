@@ -1,6 +1,5 @@
 export { canonicalErrorCodes } from './transcript-core-bridge/kernel-contracts.js';
 export type {
-    BgvAcceptedSetupHandoff,
     TranscriptCoreKernelSharePoint,
     TranscriptCorePlaintextComparison,
     BgvCollectiveSetupParametersDescription,

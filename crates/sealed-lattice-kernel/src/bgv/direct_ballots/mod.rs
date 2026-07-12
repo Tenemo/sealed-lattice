@@ -9,7 +9,6 @@ mod proof_summary;
 mod proof_transport;
 mod randomness;
 mod request;
-mod setup_handoff;
 mod target_proposal;
 mod timing;
 use aggregation::*;
