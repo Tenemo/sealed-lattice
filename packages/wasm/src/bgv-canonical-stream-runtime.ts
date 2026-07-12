@@ -442,7 +442,9 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
                                 capabilityByteLength,
                             ),
                     );
-                    if (cancelStatus !== runtimeInvalidSessionStatus) {
+                    if (
+                        (cancelStatus >>> 0) !== runtimeInvalidSessionStatus
+                    ) {
                         this.#throwStatus(cancelStatus);
                     }
                 } catch (error) {
@@ -467,7 +469,9 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
                                 capabilityByteLength,
                             ),
                     );
-                    if (cancelStatus !== runtimeInvalidSessionStatus) {
+                    if (
+                        (cancelStatus >>> 0) !== runtimeInvalidSessionStatus
+                    ) {
                         this.#throwStatus(cancelStatus);
                     }
                 } catch (error) {
@@ -751,7 +755,7 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
                             capabilityByteLength,
                         ),
                 );
-                if (status !== runtimeInvalidSessionStatus) {
+                if ((status >>> 0) !== runtimeInvalidSessionStatus) {
                     this.#throwStatus(status);
                 }
             } catch (error) {
@@ -974,18 +978,19 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
     }
 
     #throwStatus(status: number): void {
-        if (status === 0) {
+        const normalizedStatus = status >>> 0;
+        if (normalizedStatus === 0) {
             return;
         }
         if (
-            status === runtimeInternalFailureStatus ||
-            status === runtimeInvalidSessionStatus
+            normalizedStatus === runtimeInternalFailureStatus ||
+            normalizedStatus === runtimeInvalidSessionStatus
         ) {
             throw new CanonicalStreamInternalError(
                 'The WASM BGV canonical stream session failed internally.',
             );
         }
-        const refusalReason = refusalReasonByCode.get(status);
+        const refusalReason = refusalReasonByCode.get(normalizedStatus);
         if (refusalReason === undefined) {
             throw new CanonicalStreamInternalError(
                 'The WASM BGV canonical stream returned an unknown status code.',

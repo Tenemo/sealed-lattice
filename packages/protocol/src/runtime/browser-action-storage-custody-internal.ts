@@ -1,13 +1,26 @@
 import {
     BrowserActionStorageCustodyError,
-    type BrowserActionStorageCustody,
+    browserActionStorageCustodyErrorCodes,
     type BrowserActionStorageCustodyErrorCode,
     type BrowserActionStorageRootBinding,
-    type BrowserDeviceWrappingSnapshot,
+    type BrowserActionStorageWorkerKernel,
     type ExternallyVerifiedStorageRootCommitment,
-    type BrowserRecoveryExportChallenge,
-    type BrowserRecoveryExportConfirmation,
+    type WorkerPreparedDeviceWrappingState,
+} from '@sealed-lattice/types';
+
+import type {
+    BrowserActionStorageCustody,
+    BrowserDeviceWrappingSnapshot,
+    BrowserRecoveryExportChallenge,
+    BrowserRecoveryExportConfirmation,
 } from './browser-action-storage-custody.js';
+
+export type {
+    BrowserActionStorageWorkerKernel,
+    LocalStorageRecoveryExportMaterial,
+    WorkerPreparedDeviceWrappingState,
+    WorkerPreparedRecoveryState,
+} from '@sealed-lattice/types';
 
 const deviceWrappingMutationIdentifierByteLength = 32;
 const foundationHashByteLength = 64;
@@ -15,21 +28,6 @@ const maximumWrappedStorageRootByteLength = 492;
 const recoveryChecksumByteLength = 16;
 const recoveryTextLength = 708;
 const recoveryTextPattern = /^[A-Z2-7]{708}$/u;
-
-const custodyErrorCodes: readonly BrowserActionStorageCustodyErrorCode[] = [
-    'Closed',
-    'CommitmentMismatch',
-    'CommitmentRequired',
-    'Conflict',
-    'InvalidCanonicalMaterial',
-    'InvalidInput',
-    'InvalidState',
-    'OwnedWorkerFailure',
-    'RecoveryAlreadyExported',
-    'RecoveryConfirmationFailed',
-    'StorageFailure',
-    'Unavailable',
-];
 
 export type BrowserDeviceWrappingState = Readonly<{
     deviceKey: CryptoKey;
@@ -49,54 +47,6 @@ export type BrowserDeviceWrappingStateStorage = Readonly<{
     compareAndSwapState(
         mutation: BrowserDeviceWrappingStateMutation,
     ): Promise<boolean>;
-}>;
-
-export type WorkerPreparedDeviceWrappingState = Readonly<{
-    deviceKey: CryptoKey;
-    storageRootCommitment: Uint8Array;
-    wrappedStorageRoot: Uint8Array;
-}>;
-
-export type WorkerPreparedRecoveryState = WorkerPreparedDeviceWrappingState &
-    Readonly<{
-        canonicalRecoveryText: string;
-    }>;
-
-export type LocalStorageRecoveryExportMaterial = Readonly<{
-    canonicalRecoveryText: string;
-    recoveryChecksum: Uint8Array;
-}>;
-
-/**
- * Internal cryptographic kernel retained by the dedicated worker. None of
- * these methods or values may be proxied to the main thread.
- */
-export type BrowserActionStorageWorkerKernel = Readonly<{
-    createAndStageDeviceWrappingState(input: {
-        binding: BrowserActionStorageRootBinding;
-    }): Promise<WorkerPreparedDeviceWrappingState>;
-    stageDeviceWrappingStateOpen(input: {
-        binding: BrowserActionStorageRootBinding;
-        externallyVerifiedCommitment: ExternallyVerifiedStorageRootCommitment;
-        state: WorkerPreparedDeviceWrappingState;
-    }): Promise<void>;
-    stageRecoveryValueImportAndDeviceWrapping(input: {
-        binding: BrowserActionStorageRootBinding;
-        caseInsensitiveRecoveryText: string;
-        externallyVerifiedCommitment: ExternallyVerifiedStorageRootCommitment;
-    }): Promise<WorkerPreparedRecoveryState>;
-    commitStagedActionStorageRoot(input: {
-        mutationIdentifier: Uint8Array;
-    }): Promise<void>;
-    discardStagedActionStorageRoot(): Promise<void>;
-    destroyActiveActionStorageRoot(): Promise<void>;
-    prepareRecoveryExport(input: {
-        activeMutationIdentifier: Uint8Array;
-    }): Promise<LocalStorageRecoveryExportMaterial>;
-    confirmRecoveryChecksum(input: {
-        canonicalRecoveryText: string;
-        confirmedChecksum: Uint8Array;
-    }): Promise<void>;
 }>;
 
 type PendingRecoveryExport = Readonly<{
@@ -373,7 +323,7 @@ const isBrowserActionStorageCustodyError = (
         error.name === 'BrowserActionStorageCustodyError' &&
         'code' in error &&
         typeof error.code === 'string' &&
-        custodyErrorCodes.includes(
+        browserActionStorageCustodyErrorCodes.includes(
             error.code as BrowserActionStorageCustodyErrorCode,
         ) &&
         'failureCause' in error);

@@ -111,60 +111,6 @@ describe('BGV passive setup kernel commands', () => {
         ).toThrow(TranscriptCoreKernelCommandError);
     });
 
-    it('generates public evaluation-key material and rejects the wrong setup witness', async () => {
-        const kernel = await loadTranscriptCoreKernel();
-        const setup = kernel.generateBgvPassiveSetup(setupRequest);
-        const material = kernel.generateBgvEvaluationKeyMaterial({
-            setupPackage: setup,
-            setupPrivateWitness: {
-                setupSeed: setupRequest.setupSeed,
-            },
-            workingLevel: 1,
-        });
-
-        expect(material).toMatchObject({
-            objectType: 'BgvPublicEvaluationKeyMaterial',
-            setupPackageHash: setup.setupPackageHash,
-            evaluationKeyRoot: setup.evaluationKeys.evaluationKeyRoot,
-        });
-        expect((material.rotationKeys as readonly unknown[]).length).toBe(0);
-        expect(() =>
-            kernel.generateBgvEvaluationKeyMaterial({
-                setupPackage: setup,
-                setupPrivateWitness: {
-                    setupSeed: 'wrong-private-setup-seed',
-                },
-                workingLevel: 1,
-            }),
-        ).toThrow(TranscriptCoreKernelCommandError);
-    });
-
-    it('rejects duplicate public evaluation-key rotation requests', async () => {
-        const kernel = await loadTranscriptCoreKernel();
-        const setup = kernel.generateBgvPassiveSetup(setupRequest);
-        const selectedRotationKeyRoot = arrayAtPath(setup, [
-            'evaluationKeys',
-            'rotationKeyRoots',
-        ])[0] as
-            | { readonly rotation: number; readonly level: number }
-            | undefined;
-
-        expect(selectedRotationKeyRoot).toBeDefined();
-        expect(() =>
-            kernel.generateBgvEvaluationKeyMaterial({
-                setupPackage: setup,
-                setupPrivateWitness: {
-                    setupSeed: setupRequest.setupSeed,
-                },
-                workingLevel: 1,
-                rotationKeys: [
-                    selectedRotationKeyRoot!,
-                    selectedRotationKeyRoot!,
-                ],
-            }),
-        ).toThrow(TranscriptCoreKernelCommandError);
-    });
-
     it('refuses non-canonical participants and setup Hashes', async () => {
         const kernel = await loadTranscriptCoreKernel();
 

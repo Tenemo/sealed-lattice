@@ -1,32 +1,11 @@
-export type BrowserActionStorageCustodyErrorCode =
-    | 'Closed'
-    | 'CommitmentMismatch'
-    | 'CommitmentRequired'
-    | 'Conflict'
-    | 'InvalidCanonicalMaterial'
-    | 'InvalidInput'
-    | 'InvalidState'
-    | 'OwnedWorkerFailure'
-    | 'RecoveryAlreadyExported'
-    | 'RecoveryConfirmationFailed'
-    | 'StorageFailure'
-    | 'Unavailable';
+import type { ExternallyVerifiedStorageRootCommitment } from '@sealed-lattice/types';
 
-export class BrowserActionStorageCustodyError extends Error {
-    public readonly code: BrowserActionStorageCustodyErrorCode;
-    public readonly failureCause: unknown;
-
-    public constructor(
-        code: BrowserActionStorageCustodyErrorCode,
-        message: string,
-        failureCause?: unknown,
-    ) {
-        super(message);
-        this.name = 'BrowserActionStorageCustodyError';
-        this.code = code;
-        this.failureCause = failureCause;
-    }
-}
+export { BrowserActionStorageCustodyError } from '@sealed-lattice/types';
+export type {
+    BrowserActionStorageCustodyErrorCode,
+    BrowserActionStorageRootBinding,
+    ExternallyVerifiedStorageRootCommitment,
+} from '@sealed-lattice/types';
 
 /**
  * Optimistic-concurrency metadata for one local wrapping pair. This snapshot
@@ -35,23 +14,6 @@ export class BrowserActionStorageCustodyError extends Error {
 export type BrowserDeviceWrappingSnapshot = Readonly<{
     mutationIdentifier: Uint8Array;
     recoveryValueExported: boolean;
-    storageRootCommitment: Uint8Array;
-}>;
-
-/** Complete public binding used by the Rust local-storage root commitment. */
-export type BrowserActionStorageRootBinding = Readonly<{
-    actionContextHash: Uint8Array;
-    ceremonyContextHash: Uint8Array;
-    participantId: Uint8Array;
-    suiteId: Uint8Array;
-}>;
-
-/**
- * Public commitment obtained from a signature- and context-verified
- * storage-root commitment object. Constructing this value is the caller's
- * explicit handoff from protocol verification into local custody.
- */
-export type ExternallyVerifiedStorageRootCommitment = Readonly<{
     storageRootCommitment: Uint8Array;
 }>;
 

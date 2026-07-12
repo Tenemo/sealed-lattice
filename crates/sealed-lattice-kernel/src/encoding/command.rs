@@ -40,7 +40,6 @@ enum TranscriptCoreCommand {
     DescribeTrusteeEvaluationKeyStatement,
     ComputeSetupCommitmentFromOpening,
     VerifyLocalTrusteeSetupState,
-    GenerateBgvEvaluationKeyMaterial,
     EncodeBgvBatchPlaintext,
     ValidateBgvPlaintextObject,
     ValidateBgvCiphertextObject,
@@ -283,7 +282,6 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
         | TranscriptCoreCommand::GenerateTrusteeEvaluationKeyProof
         | TranscriptCoreCommand::ComputeSetupCommitmentFromOpening
         | TranscriptCoreCommand::VerifyLocalTrusteeSetupState
-        | TranscriptCoreCommand::GenerateBgvEvaluationKeyMaterial
         | TranscriptCoreCommand::EncodeBgvBatchPlaintext
         | TranscriptCoreCommand::ValidateBgvPlaintextObject
         | TranscriptCoreCommand::ValidateBgvCiphertextObject
@@ -429,9 +427,6 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
         }
         TranscriptCoreCommand::VerifyLocalTrusteeSetupState => {
             crate::bgv::commands::verify_local_trustee_setup_state(request)
-        }
-        TranscriptCoreCommand::GenerateBgvEvaluationKeyMaterial => {
-            crate::bgv::commands::generate_bgv_evaluation_key_material_from_request(request)
         }
         TranscriptCoreCommand::EncodeBgvBatchPlaintext => {
             crate::bgv::commands::encode_bgv_batch_plaintext_from_request(request)

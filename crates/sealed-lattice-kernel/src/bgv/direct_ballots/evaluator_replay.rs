@@ -10,7 +10,6 @@ pub(crate) struct DirectBallotPackedBatchedPairEvaluatorInput<'a> {
     pub(crate) aggregate_scores: &'a [u64],
     pub(crate) ballot_count: usize,
     pub(crate) top_counts: &'a [usize],
-    pub(crate) public_evaluation_key_material: Option<&'a Value>,
     pub(crate) target_finality_policy_hash: Option<&'a str>,
 }
 
@@ -24,7 +23,6 @@ pub(crate) fn run_direct_ballot_packed_batched_pair_evaluator_for_top_counts(
         aggregate_scores,
         ballot_count,
         top_counts,
-        public_evaluation_key_material,
         target_finality_policy_hash,
     } = input;
 
@@ -51,26 +49,8 @@ pub(crate) fn run_direct_ballot_packed_batched_pair_evaluator_for_top_counts(
         ],
     );
     let working_level = direct_ballot_evaluator_working_level(ballot_count);
-    let (context, evaluation_key_material_source, public_evaluation_key_material_hash) =
-        match public_evaluation_key_material {
-            Some(material) => (
-                EvaluatorContext::from_passive_setup_public_material(
-                    setup_package,
-                    material,
-                    working_level,
-                )?,
-                "supplied public evaluation-key material",
-                Some(required_string_path(
-                    material,
-                    &["publicEvaluationKeyMaterialHash"],
-                )?),
-            ),
-            None => (
-                EvaluatorContext::from_key(evaluator_key.clone(), &replay_seed, working_level)?,
-                "development private setup witness key synthesis",
-                None,
-            ),
-        };
+    let evaluation_key_material_source = "development private setup witness key synthesis";
+    let context = EvaluatorContext::from_key(evaluator_key.clone(), &replay_seed, working_level)?;
     let working_aggregate = modulus_switch_to(aggregate_ciphertext, context.working_level())?;
     let replay_started = DirectBallotTimingStart::now();
     let packed_scores =
@@ -115,7 +95,6 @@ pub(crate) fn run_direct_ballot_packed_batched_pair_evaluator_for_top_counts(
                 working_level: context.working_level(),
                 target_layout_hash: &target_layout_root,
                 evaluation_key_material_source,
-                public_evaluation_key_material_hash,
             },
         )?;
         let evaluator_replay_record_hash = direct_ballot_evaluator_replay_record_hash(
@@ -148,7 +127,7 @@ pub(crate) fn run_direct_ballot_packed_batched_pair_evaluator_for_top_counts(
             target_finality_policy_hash,
         )?;
 
-        let mut evaluation = json!({
+        let evaluation = json!({
             "topCount": top_count,
             "scoreDomainMax": score_domain_max,
             "tiePolicy": TIE_POLICY,
@@ -163,9 +142,6 @@ pub(crate) fn run_direct_ballot_packed_batched_pair_evaluator_for_top_counts(
             "targetProposal": target_proposal,
             "replayTimeMilliseconds": direct_ballot_timing_report_value(replay_time_milliseconds)
         });
-        if let Some(material_hash) = public_evaluation_key_material_hash {
-            evaluation["publicEvaluationKeyMaterialHash"] = json!(material_hash);
-        }
         evaluations.push(evaluation);
     }
 
@@ -250,18 +226,14 @@ pub(super) struct DirectBallotEvaluatorReplayContextHashInput<'a> {
     working_level: usize,
     target_layout_hash: &'a str,
     evaluation_key_material_source: &'a str,
-    public_evaluation_key_material_hash: Option<&'a str>,
 }
 
 pub(super) fn direct_ballot_evaluator_replay_context_hash(
     input: DirectBallotEvaluatorReplayContextHashInput<'_>,
 ) -> CanonicalResult<String> {
-    let mut evaluation_key_material = json!({
+    let evaluation_key_material = json!({
         "source": input.evaluation_key_material_source,
     });
-    if let Some(material_hash) = input.public_evaluation_key_material_hash {
-        evaluation_key_material["publicEvaluationKeyMaterialHash"] = json!(material_hash);
-    }
 
     derive_canonical_object_hash(&json!({
         "objectType": "DirectEncryptedBallotEvaluatorReplayContext",

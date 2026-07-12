@@ -20,6 +20,7 @@ mod package_builder;
 mod participant_material;
 mod private_vss;
 mod private_vss_share_proof;
+#[cfg(test)]
 mod public_evaluation_key_material;
 mod same_secret_bridge;
 mod sampling;
@@ -60,6 +61,7 @@ pub(crate) use local_trustee_state::verify_local_trustee_setup_state_from_reques
 pub(crate) use private_vss::{
     generate_private_vss_share_proof_from_request, verify_private_vss_share_envelope_from_request,
 };
+#[cfg(test)]
 pub(crate) use public_evaluation_key_material::{
     generate_passive_setup_public_evaluation_key_material_from_request,
     public_evaluation_keys_from_material,
@@ -126,14 +128,18 @@ use sampling::{
 };
 
 use crate::bgv::evaluator::key_switch::key_switch_key_from_public_component_b;
+#[cfg(test)]
+use crate::bgv::{
+    coefficient_codec::{
+        coefficient_vector_from_le_hex, coefficient_vector_hash512, coefficient_vector_le_hex,
+    },
+    evaluator::key_switch::{generate_galois_key, generate_relinearization_key},
+};
 use crate::{
     bgv::{
-        coefficient_codec::{
-            coefficient_vector_from_le_hex, coefficient_vector_hash512, coefficient_vector_le_hex,
-        },
         evaluator::{
             engine::{BgvPublicKey, DevelopmentBgvKey},
-            key_switch::{KeySwitchKey, generate_galois_key, generate_relinearization_key},
+            key_switch::KeySwitchKey,
             records::MAXIMUM_OPTION_COUNT,
         },
         modular_arithmetic::{add_mod, mul_mod, sub_mod},

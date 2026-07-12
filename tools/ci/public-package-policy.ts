@@ -1,5 +1,6 @@
 export type VendoredProtocolRuntimeEntryExport = {
     readonly exports: readonly string[];
+    readonly runtimeVisibility: 'internal' | 'public';
     readonly source: string;
 };
 
@@ -97,14 +98,17 @@ export const vendoredProtocolRuntimeEntryExports = [
     {
         source: 'board/index.js',
         exports: ['verifyBoardConsistency'],
+        runtimeVisibility: 'public',
     },
     {
         source: 'closing/index.js',
         exports: ['verifyCastReceiptShell', 'verifyCloseRecordShell'],
+        runtimeVisibility: 'public',
     },
     {
         source: 'lifecycle/poll-spec.js',
         exports: ['derivePollSpecHash', 'validatePollSpec'],
+        runtimeVisibility: 'public',
     },
     {
         source: 'lifecycle/thresholds.js',
@@ -113,10 +117,12 @@ export const vendoredProtocolRuntimeEntryExports = [
             'deriveThresholdParameters',
             'deriveThresholdParametersHash',
         ],
+        runtimeVisibility: 'public',
     },
     {
         source: 'ordering/index.js',
         exports: ['deriveValidatedFirstValidOrder'],
+        runtimeVisibility: 'public',
     },
     {
         source: 'recovery/index.js',
@@ -124,6 +130,7 @@ export const vendoredProtocolRuntimeEntryExports = [
             'isActionCurrentForRecoveryEpoch',
             'verifyRecoveryEpochUpdate',
         ],
+        runtimeVisibility: 'public',
     },
     {
         source: 'roster/index.js',
@@ -132,16 +139,19 @@ export const vendoredProtocolRuntimeEntryExports = [
             'verifyRosterExternalAcceptance',
             'verifyRosterManifestTranscript',
         ],
+        runtimeVisibility: 'public',
     },
     {
         source: 'setup/setup-package-assembly.js',
         exports: ['createSetupPackageVerificationInput'],
+        runtimeVisibility: 'public',
     },
     {
         source: 'target-decryption/proof-material-transport.js',
         exports: [
             'createBgvTargetDecryptionShareCanonicalProofMaterialTransport',
         ],
+        runtimeVisibility: 'internal',
     },
 ] as const satisfies readonly VendoredProtocolRuntimeEntryExport[];
 

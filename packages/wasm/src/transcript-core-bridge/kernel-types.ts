@@ -198,17 +198,6 @@ export type TranscriptCoreKernel = {
         readonly participants: readonly BgvPassiveSetupParticipantInput[];
         readonly setupSeed?: string;
     }): BgvPassiveSetupPackage;
-    generateBgvEvaluationKeyMaterial(input: {
-        readonly setupPackage: BgvPassiveSetupPackage;
-        readonly setupPrivateWitness: {
-            readonly setupSeed: string;
-        };
-        readonly workingLevel?: number;
-        readonly rotationKeys?: readonly {
-            readonly rotation: number;
-            readonly level: number;
-        }[];
-    }): Record<string, unknown>;
     verifyBgvPassiveSetup(input: {
         readonly setupPackage: BgvPassiveSetupPackage;
         readonly expectedSetupPackageHash?: ProtocolHash;
@@ -463,10 +452,6 @@ type TranscriptCoreKernelCommand =
           'GenerateBgvPassiveSetup',
           'generateBgvPassiveSetup'
       >
-    | KernelCommandFromMethod<
-          'GenerateBgvEvaluationKeyMaterial',
-          'generateBgvEvaluationKeyMaterial'
-      >
     | KernelCommandFromMethod<'VerifyBgvPassiveSetup', 'verifyBgvPassiveSetup'>
     | KernelCommandFromMethod<
           'VerifyCollectiveBgvSetup',
@@ -560,7 +545,6 @@ type TranscriptCoreKernelCommand =
           }[];
           readonly topCount?: number;
           readonly topCounts?: readonly number[];
-          readonly publicEvaluationKeyMaterial?: unknown;
           readonly targetFinalityPolicyHash?: string;
       };
 

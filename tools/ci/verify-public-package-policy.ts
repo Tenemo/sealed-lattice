@@ -229,9 +229,20 @@ const validateVendoredProtocolRuntime = async (
         }
 
         for (const exportName of entry.exports) {
-            if (!runtimeExports.has(exportName)) {
+            if (
+                entry.runtimeVisibility === 'public' &&
+                !runtimeExports.has(exportName)
+            ) {
                 failures.push(
                     `vendoredProtocolRuntimeEntryExports ${entry.source} exposes "${exportName}" outside the SDK runtime facade`,
+                );
+            }
+            if (
+                entry.runtimeVisibility === 'internal' &&
+                runtimeExports.has(exportName)
+            ) {
+                failures.push(
+                    `vendoredProtocolRuntimeEntryExports ${entry.source} marks "${exportName}" internal but the SDK runtime exports it`,
                 );
             }
         }

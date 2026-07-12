@@ -71,7 +71,7 @@ describe('Canonical stream real-WASM runtime', () => {
     it('round-trips exact chunk boundaries in every verifier-owned domain', () => {
         const runtime = openCanonicalStreamWorkerRuntime({ kernel });
         const domains = Object.values(canonicalStreamDomains);
-        expect(domains).toHaveLength(25);
+        expect(domains).toHaveLength(27);
 
         for (const [domainIndex, streamDomain] of domains.entries()) {
             const byteLength =
@@ -94,7 +94,7 @@ describe('Canonical stream real-WASM runtime', () => {
 
         const counters = runtime.counterSnapshot();
         expect(counters.activeSessionCount).toBe(0);
-        expect(counters.completedSessionCount).toBe(50);
+        expect(counters.completedSessionCount).toBe(54);
         expect(counters.maximumObservedCopiedPayloadByteLength).toBe(
             foundationProfile.streamChunkByteLength,
         );

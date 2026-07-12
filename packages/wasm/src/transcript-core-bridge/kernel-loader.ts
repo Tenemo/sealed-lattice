@@ -682,16 +682,6 @@ export const createTranscriptCoreKernelLoader = (
                         participants: input.participants,
                         setupSeed: input.setupSeed,
                     }),
-                generateBgvEvaluationKeyMaterial: (
-                    input,
-                ): Record<string, unknown> =>
-                    executeCommand<Record<string, unknown>>({
-                        command: 'GenerateBgvEvaluationKeyMaterial',
-                        setupPackage: input.setupPackage,
-                        setupPrivateWitness: input.setupPrivateWitness,
-                        workingLevel: input.workingLevel,
-                        rotationKeys: input.rotationKeys,
-                    }),
                 verifyBgvPassiveSetup: (input): void =>
                     executeCommand<void>({
                         command: 'VerifyBgvPassiveSetup',

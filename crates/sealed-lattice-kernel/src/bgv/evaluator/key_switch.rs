@@ -39,6 +39,7 @@ pub(crate) struct KeySwitchKey {
 
 #[derive(Clone)]
 pub(crate) struct KeySwitchComponent {
+    #[cfg(test)]
     pub(crate) component_b: Option<Vec<Vec<u64>>>,
     component_b_ntt: Vec<Vec<u64>>,
     component_a_ntt: Option<Vec<Vec<u64>>>,
@@ -53,6 +54,7 @@ enum KeySwitchComponentASource {
 }
 
 impl KeySwitchKey {
+    #[cfg(test)]
     pub(crate) fn drop_component_a_ntt(&mut self) {
         for component in &mut self.components {
             if matches!(
@@ -111,8 +113,11 @@ impl KeySwitchComponent {
         let component_b_ntt = ntt_limbs(&component_b, primes)?;
         let component_a_ntt = ntt_limbs(&component_a, primes)?;
         drop(component_a);
+        #[cfg(not(test))]
+        drop(component_b);
 
         Ok(Self {
+            #[cfg(test)]
             component_b: Some(component_b),
             component_b_ntt,
             component_a_ntt: Some(component_a_ntt),

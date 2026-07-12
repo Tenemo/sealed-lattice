@@ -1,4 +1,5 @@
 export * from './board-target.js';
+export * from './browser-action-storage.js';
 export * from './field.js';
 export * from './foundation-contract.js';
 export * from './lifecycle.js';

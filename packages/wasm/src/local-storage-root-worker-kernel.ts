@@ -1,14 +1,12 @@
 import {
     BrowserActionStorageCustodyError,
     type BrowserActionStorageRootBinding,
+    type BrowserActionStorageWorkerKernel,
     type ExternallyVerifiedStorageRootCommitment,
-} from '@sealed-lattice/protocol/browser-action-storage-custody';
-import type {
-    BrowserActionStorageWorkerKernel,
-    LocalStorageRecoveryExportMaterial,
-    WorkerPreparedDeviceWrappingState,
-    WorkerPreparedRecoveryState,
-} from '@sealed-lattice/protocol/browser-action-storage-worker-kernel';
+    type LocalStorageRecoveryExportMaterial,
+    type WorkerPreparedDeviceWrappingState,
+    type WorkerPreparedRecoveryState,
+} from '@sealed-lattice/types';
 
 import type { TranscriptCoreKernel } from './transcript-core-bridge/kernel-types.js';
 import {

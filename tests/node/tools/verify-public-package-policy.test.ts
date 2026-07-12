@@ -14,7 +14,8 @@ describe('public package policy', () => {
     it('rejects missing protocol runtime entry exports from the SDK facade', async () => {
         const requiredRuntimeExports =
             publicPackagePolicy.vendoredProtocolRuntimeEntryExports.flatMap(
-                (entry) => entry.exports,
+                (entry) =>
+                    entry.runtimeVisibility === 'public' ? entry.exports : [],
             );
         const failures = await validatePublicPackagePolicy(
             publicPackagePolicy,
@@ -28,10 +29,30 @@ describe('public package policy', () => {
         ]);
     });
 
+    it('rejects an internal protocol helper exposed from the SDK facade', async () => {
+        const publicRuntimeExports =
+            publicPackagePolicy.vendoredProtocolRuntimeEntryExports.flatMap(
+                (entry) =>
+                    entry.runtimeVisibility === 'public' ? entry.exports : [],
+            );
+        const failures = await validatePublicPackagePolicy(
+            publicPackagePolicy,
+            [
+                ...publicRuntimeExports,
+                'createBgvTargetDecryptionShareCanonicalProofMaterialTransport',
+            ],
+        );
+
+        expect(failures).toEqual([
+            'vendoredProtocolRuntimeEntryExports target-decryption/proof-material-transport.js marks "createBgvTargetDecryptionShareCanonicalProofMaterialTransport" internal but the SDK runtime exports it',
+        ]);
+    });
+
     it('rejects unreachable vendored protocol runtime modules', async () => {
         const requiredRuntimeExports =
             publicPackagePolicy.vendoredProtocolRuntimeEntryExports.flatMap(
-                (entry) => entry.exports,
+                (entry) =>
+                    entry.runtimeVisibility === 'public' ? entry.exports : [],
             );
         const failures = await validatePublicPackagePolicy(
             {

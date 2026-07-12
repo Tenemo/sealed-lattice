@@ -332,7 +332,7 @@ const refusalReasonByCode = new Map<number, RefusalReason>(
 const isCanonicalStreamDomain = (
     value: number,
 ): value is CanonicalStreamDomain =>
-    Number.isSafeInteger(value) && value >= 1 && value <= 25;
+    Number.isSafeInteger(value) && value >= 1 && value <= 27;
 
 const isArrayBuffer = (value: unknown): value is ArrayBuffer =>
     Object.prototype.toString.call(value) === '[object ArrayBuffer]';
@@ -1195,18 +1195,19 @@ class CanonicalStreamWorkerRuntimeImplementation implements CanonicalStreamWorke
     }
 
     #throwStatus(status: number): void {
-        if (status === 0) {
+        const normalizedStatus = status >>> 0;
+        if (normalizedStatus === 0) {
             return;
         }
         if (
-            status === runtimeInternalFailureStatus ||
-            status === runtimeInvalidSessionStatus
+            normalizedStatus === runtimeInternalFailureStatus ||
+            normalizedStatus === runtimeInvalidSessionStatus
         ) {
             throw new CanonicalStreamInternalError(
                 'The WASM canonical stream session failed internally.',
             );
         }
-        const refusalReason = refusalReasonByCode.get(status);
+        const refusalReason = refusalReasonByCode.get(normalizedStatus);
         if (refusalReason === undefined) {
             throw new CanonicalStreamInternalError(
                 'The WASM canonical stream returned an unknown status code.',

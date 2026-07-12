@@ -143,9 +143,6 @@ importers:
 
   packages/wasm:
     dependencies:
-      '@sealed-lattice/protocol':
-        specifier: workspace:*
-        version: link:../protocol
       '@sealed-lattice/types':
         specifier: workspace:*
         version: link:../types

@@ -88,7 +88,6 @@ fn foundation_profile_replay_target_release_matches_plaintext_oracle() {
             aggregate_scores: &aggregate_scores,
             ballot_count,
             top_counts: &[top_count],
-            public_evaluation_key_material: None,
             target_finality_policy_hash: None,
         },
     )

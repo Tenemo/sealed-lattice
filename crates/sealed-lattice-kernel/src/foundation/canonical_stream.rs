@@ -712,7 +712,7 @@ mod tests {
             );
         }
         assert_eq!(CanonicalStreamDomain::from_canonical_code(0), None);
-        assert_eq!(CanonicalStreamDomain::from_canonical_code(27), None);
+        assert_eq!(CanonicalStreamDomain::from_canonical_code(28), None);
     }
 
     #[test]

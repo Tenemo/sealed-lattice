@@ -13,7 +13,6 @@
         }
     },
     "dependencies": {
-        "@sealed-lattice/protocol": "workspace:*",
         "@sealed-lattice/types": "workspace:*"
     },
     "scripts": {

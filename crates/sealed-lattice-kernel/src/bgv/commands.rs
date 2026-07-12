@@ -18,7 +18,6 @@ use crate::{
             describe_collective_bgv_setup_parameters,
             describe_trustee_evaluation_key_statement_from_request,
             generate_passive_setup_package_from_request,
-            generate_passive_setup_public_evaluation_key_material_from_request,
             generate_private_vss_share_proof_from_request,
             generate_same_secret_bridge_proof_from_request,
             generate_trustee_evaluation_key_proof_from_request,
@@ -149,12 +148,6 @@ pub(crate) fn compute_setup_commitment_from_opening(request: &Value) -> Canonica
 
 pub(crate) fn verify_local_trustee_setup_state(request: &Value) -> CanonicalResult<Value> {
     verify_local_trustee_setup_state_from_request(request)
-}
-
-pub(crate) fn generate_bgv_evaluation_key_material_from_request(
-    request: &Value,
-) -> CanonicalResult<Value> {
-    generate_passive_setup_public_evaluation_key_material_from_request(request)
 }
 
 pub(crate) fn encode_bgv_batch_plaintext_from_request(request: &Value) -> CanonicalResult<Value> {
