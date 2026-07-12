@@ -87,18 +87,6 @@ fn verify_transport_certificate_body(
             "transportStreamOrderMismatch",
             "setupTransportCertificate.streamVerificationOrder must match the setup transport parameters",
         ),
-        (
-            "resumePolicy",
-            SETUP_TRANSPORT_RESUME_POLICY,
-            "transportResumePolicyMismatch",
-            "setupTransportCertificate.resumePolicy must match the setup transport parameters",
-        ),
-        (
-            "lazyLoadingPolicy",
-            SETUP_TRANSPORT_LAZY_LOADING_POLICY,
-            "transportLazyLoadingPolicyMismatch",
-            "setupTransportCertificate.lazyLoadingPolicy must match the setup transport parameters",
-        ),
     ] {
         transport_try!(expect_transport_string(
             transport_certificate,
@@ -108,28 +96,6 @@ fn verify_transport_certificate_body(
             message,
         ));
     }
-    transport_try!(expect_transport_u64(
-        transport_certificate,
-        "storageQuotaBytes",
-        SETUP_TRANSPORT_STORAGE_QUOTA_BYTES,
-        "transportStorageQuotaMismatch",
-        "setupTransportCertificate.storageQuotaBytes must match the setup transport parameters",
-    ));
-    transport_try!(expect_transport_u64(
-        transport_certificate,
-        "largestSingleBufferBytes",
-        SETUP_TRANSPORT_LARGEST_SINGLE_BUFFER_BYTES,
-        "transportLargestBufferMismatch",
-        "setupTransportCertificate.largestSingleBufferBytes must match the setup transport parameters",
-    ));
-    transport_try!(expect_transport_u64(
-        transport_certificate,
-        "copyCountLimit",
-        SETUP_TRANSPORT_COPY_COUNT_LIMIT,
-        "transportCopyCountMismatch",
-        "setupTransportCertificate.copyCountLimit must match the setup transport parameters",
-    ));
-
     let setup_parameters_hash_value = transport_canonical_try!(require_transport_hash(
         transport_certificate,
         "setupParametersHash",

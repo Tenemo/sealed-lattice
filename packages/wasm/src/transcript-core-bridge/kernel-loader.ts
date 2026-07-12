@@ -719,8 +719,6 @@ export const createTranscriptCoreKernelLoader = (
                                 input.transportedSameSecretBridgeProofMaterial,
                             transportedEvaluationKeyShareComponentMaterial:
                                 input.transportedEvaluationKeyShareComponentMaterial,
-                            transportedEvaluationKeyAggregateBindingOpenings:
-                                input.transportedEvaluationKeyAggregateBindingOpenings,
                             transportedPublicEvaluationKeyMaterial:
                                 input.transportedPublicEvaluationKeyMaterial,
                         },
@@ -850,12 +848,8 @@ export const createTranscriptCoreKernelLoader = (
                         vssShareLinkage: input.vssShareLinkage,
                         coefficientMessagesByShamirIndex:
                             input.coefficientMessagesByShamirIndex,
-                        recipientShareMessages: input.recipientShareMessages,
                         coefficientOpeningRandomnessByShamirIndex:
                             input.coefficientOpeningRandomnessByShamirIndex,
-                        recipientShareOpeningRandomness:
-                            input.recipientShareOpeningRandomness,
-                        carryWitnesses: input.carryWitnesses,
                         recipientShareMessagesByItem:
                             input.recipientShareMessagesByItem,
                         recipientShareOpeningRandomnessByItem:

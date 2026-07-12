@@ -13,10 +13,6 @@ type GitHubReleaseDisposition =
     | { readonly action: 'create' };
 
 const publicPackageManifestPath = 'packages/sdk/package.json';
-const allowedReleaseMetadataPaths = new Set([
-    publicPackageManifestPath,
-    'pnpm-lock.yaml',
-]);
 
 const formatProbeOutput = (probe: ReleaseCommandProbe): string => {
     const output = [probe.stdout.trim(), probe.stderr.trim()]
@@ -98,7 +94,7 @@ export const validateReleaseMetadataPaths = (input: {
     }
 
     const unexpectedChangedPath = input.changedPaths.find(
-        (changedPath) => !allowedReleaseMetadataPaths.has(changedPath),
+        (changedPath) => changedPath !== publicPackageManifestPath,
     );
     if (unexpectedChangedPath !== undefined) {
         throw new Error(

@@ -146,7 +146,6 @@ describe('BGV-RNS backend kernel commands', () => {
             }),
         ).toMatchObject({
             isValid: true,
-            acceptedOperation: 'homomorphicEncryptedBallotAggregation',
         });
         expectBgvParametersRejected(
             kernel.validateBgvEvaluatorOperation({

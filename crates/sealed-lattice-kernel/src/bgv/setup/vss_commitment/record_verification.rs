@@ -1,6 +1,21 @@
 use super::readers::*;
 use super::*;
 
+fn verify_canonical_q_share_prime(
+    rns_prime: u64,
+    rns_limb_index: usize,
+    field_name: &str,
+) -> CanonicalResult<()> {
+    if DATA_PRIMES.get(rns_limb_index).copied() == Some(rns_prime) {
+        return Ok(());
+    }
+
+    Err(CanonicalError::new(
+        CanonicalErrorCode::ComponentMismatch,
+        format!("{field_name} must match the canonical Q_share basis"),
+    ))
+}
+
 pub(super) struct VssPublicSourceCoefficientRecordInput<'a> {
     pub(super) source_record: &'a Value,
     pub(super) expected_roster_position: usize,
@@ -226,6 +241,11 @@ pub(super) fn verify_vss_public_coefficient_record(
         &["rnsPrime"],
         "VSS coefficient commitment rnsPrime",
     )?;
+    verify_canonical_q_share_prime(
+        rns_prime,
+        input.expected_rns_limb_index,
+        "VSS coefficient commitment rnsPrime",
+    )?;
     compare_required_u64(
         unsigned_at_path(input.coefficient_record, &["shamirCoefficientIndex"])?,
         input.expected_shamir_coefficient_index as u64,
@@ -383,6 +403,11 @@ pub(super) fn verify_vss_public_recipient_share_record(
         &["rnsPrime"],
         "VSS recipient-share commitment rnsPrime",
     )?;
+    verify_canonical_q_share_prime(
+        rns_prime,
+        input.expected_rns_limb_index,
+        "VSS recipient-share commitment rnsPrime",
+    )?;
     let share_commitment_root =
         hash_at_path(input.recipient_share_record, &["shareCommitmentRoot"])?;
     let share_opening_root = hash_at_path(input.recipient_share_record, &["shareOpeningRoot"])?;
@@ -445,6 +470,11 @@ pub(super) fn verify_vss_public_aggregate_threshold_record(
     let rns_prime = read_positive_u64_at_path(
         input.recipient_record,
         &["rnsPrime"],
+        "VSS aggregate threshold commitment rnsPrime",
+    )?;
+    verify_canonical_q_share_prime(
+        rns_prime,
+        input.expected_rns_limb_index,
         "VSS aggregate threshold commitment rnsPrime",
     )?;
     let aggregate_commitment_root =

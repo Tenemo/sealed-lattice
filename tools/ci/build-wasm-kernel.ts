@@ -22,7 +22,8 @@ const repoRoot = path.resolve(
 const cargoTargetDirectory = path.resolve(repoRoot, 'target', 'wasm-kernel');
 const wasmBuildScratchRoot = path.resolve(
     repoRoot,
-    '.turbo',
+    'temp',
+    'build-scratch',
     'wasm-kernel-builds',
 );
 const encodedRustflagSeparator = '\x1f';

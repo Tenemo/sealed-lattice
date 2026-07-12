@@ -11,39 +11,7 @@ import {
     requireSuccessfulDockerCapture,
 } from '#tools/lattigo-oracle/run-lattigo-oracle';
 
-describe('independent test entrypoint containment', () => {
-    it('routes internal WASM kernel scripts through root orchestration', async () => {
-        const internalWasmPackageManifest = JSON.parse(
-            await readFile(
-                path.resolve('packages', 'wasm', 'package.json'),
-                'utf8',
-            ),
-        ) as {
-            readonly scripts?: Readonly<Record<string, string>>;
-        };
-        const workspacePackageManifest = JSON.parse(
-            await readFile(path.resolve('package.json'), 'utf8'),
-        ) as {
-            readonly scripts?: Readonly<Record<string, string>>;
-        };
-
-        expect(internalWasmPackageManifest.scripts).toMatchObject({
-            'test:node': 'pnpm --workspace-root run test:node:kernel',
-            'test:node:kernel': 'pnpm --workspace-root run test:node:kernel',
-            'test:node:kernel:fast':
-                'pnpm --workspace-root run test:node:kernel:fast',
-            'test:node:kernel:heavy':
-                'pnpm --workspace-root run test:node:kernel:heavy',
-        });
-        expect(workspacePackageManifest.scripts).toMatchObject({
-            'test:node:kernel': 'tsx ./tools/ci/run-node-tests.ts kernel',
-            'test:node:kernel:fast':
-                'tsx ./tools/ci/run-node-tests.ts kernel-fast',
-            'test:node:kernel:heavy':
-                'tsx ./tools/ci/run-node-tests.ts kernel-heavy',
-        });
-    });
-
+describe('external oracle containment', () => {
     it('builds the oracle from its own directory and caps the container memory', async () => {
         expect(path.resolve(lattigoOracleDirectoryPath)).toBe(
             path.resolve('tools', 'lattigo-oracle'),

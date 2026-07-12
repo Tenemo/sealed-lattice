@@ -1,4 +1,4 @@
-mod material_transport;
+pub(in crate::bgv::setup) mod material_transport;
 
 pub(super) use self::material_transport::setup_proof_record_binding_value;
 pub(crate) use self::material_transport::{

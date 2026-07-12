@@ -78,17 +78,14 @@ fn collective_setup_parameters_expose_foundation_state_machine() {
         "SetupTransport"
     );
     assert_eq!(
-        setup_parameters["setupTransport"]["storageQuotaBytes"],
-        2_147_483_648_u64
+        setup_parameters["setupTransport"]["largeObjectEncoding"],
+        "binary"
     );
     assert_eq!(
         setup_parameters["setupTransport"]["streamVerificationOrder"],
         "ascending-chunk-index"
     );
-    assert_eq!(
-        setup_parameters["setupTransport"]["lazyLoadingPolicy"],
-        "root-addressed-large-object-loading"
-    );
+    assert_eq!(setup_parameters["setupTransport"]["chunking"], "required");
     assert_eq!(
         setup_parameters["evaluatorKeySchedule"]["objectType"],
         "EvaluatorKeySchedule"

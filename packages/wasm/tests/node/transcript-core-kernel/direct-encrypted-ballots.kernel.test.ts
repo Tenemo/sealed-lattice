@@ -35,7 +35,6 @@ describe('direct encrypted ballot kernel command', () => {
             setupPackage,
         });
 
-        expect(result.operation).toBe('runDirectEncryptedBallot');
         expect(result.input.ballotCount).toBe(1);
         expect(result.ballotLayout.optionCount).toBe(20);
         expect(result.parameters.dataPrimeCount).toBe(17);

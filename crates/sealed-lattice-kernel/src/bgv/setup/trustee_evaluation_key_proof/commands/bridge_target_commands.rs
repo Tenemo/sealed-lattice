@@ -33,7 +33,6 @@ pub(crate) fn generate_same_secret_bridge_proof_from_request(
         proof_bytes,
     )?;
     Ok(json!({
-        "operation": "generateSameSecretBridgeProof",
         "proofFamily": statement.context.proof_family,
         "statementHash": to_hex(&statement.statement_hash()),
         "limbCount": statement.proof_limb_count(),
@@ -52,7 +51,6 @@ pub(crate) fn verify_same_secret_bridge_proof_source_from_request(
     let proof = decode_trustee_evaluation_key_proof_from_source(&statement, proof_bytes)?;
     verify_evaluation_key_share(&statement, &proof)?;
     Ok(json!({
-        "operation": "verifySameSecretBridgeProof",
         "proofFamily": statement.context.proof_family,
         "statementHash": to_hex(&statement.statement_hash()),
     }))
@@ -142,7 +140,6 @@ pub(crate) fn verify_target_decryption_share_proof_source_from_request(
         .filter(|_| target_rns_limb_indices.len() == 1)
         .copied();
     let mut response = json!({
-        "operation": "verifyTargetDecryptionProofBytes",
         "proofFamily": statement.context.proof_family,
         "statementHash": to_hex(&statement.statement_hash()),
         "limbCount": statement.proof_limb_count(),

@@ -1,6 +1,7 @@
 use super::decoding::*;
 use super::share_linkage_verification::*;
 use super::*;
+use crate::bgv::setup_helpers::compare_required_string;
 
 // Resolved share-linkage proof bytes plus the canonical proof record whose root
 // binds the canonical stream reference.
@@ -59,65 +60,36 @@ pub(super) struct VssShareLinkageProofTransportBinding {
     pub(super) proof_bytes_hash: String,
 }
 
+const VSS_SHARE_LINKAGE_TRANSPORT_FAMILY: SetupProofMaterialTransportFamily =
+    SetupProofMaterialTransportFamily {
+        proof_family: VSS_SHARE_LINKAGE_PROOF_FAMILY,
+        transport_field: "transportedVssShareLinkageProofMaterial",
+        set_object_type: VSS_SHARE_LINKAGE_TRANSPORT_SET_OBJECT_TYPE,
+        material_object_type: VSS_SHARE_LINKAGE_TRANSPORT_OBJECT_TYPE,
+        family_description: "share-linkage",
+    };
+
 pub(super) fn transported_vss_share_linkage_proof_material_binding(
     request: &Value,
     expected_proof_material_root: &str,
 ) -> CanonicalResult<VssShareLinkageProofTransportBinding> {
-    let material_set = request
-        .get("transportedVssShareLinkageProofMaterial")
-        .ok_or_else(|| {
-            invalid_succinct_setup_proof(
-                "transportedVssShareLinkageProofMaterial is required by transported share-linkage proof records",
-            )
-        })?;
-    verify_transported_vss_share_linkage_proof_material_set_header(material_set)?;
-    let proof_materials = material_set
-        .get("proofMaterials")
-        .and_then(Value::as_array)
-        .ok_or_else(|| {
-            invalid_succinct_setup_proof(
-                "transportedVssShareLinkageProofMaterial.proofMaterials must be an array",
-            )
-        })?;
-    let mut matching_binding = None;
-    for proof_material in proof_materials {
-        verify_transported_vss_share_linkage_proof_material_header(proof_material)?;
-        let proof_material_root = read_string(proof_material, "proofMaterialRoot")?;
-        if proof_material_root != expected_proof_material_root {
-            continue;
-        }
-        if matching_binding.is_some() {
-            return Err(invalid_succinct_setup_proof(
-                "transportedVssShareLinkageProofMaterial contains duplicate proofMaterialRoot entries",
-            ));
-        }
-        let proof_bytes = verified_setup_proof_material_bytes_from_request(
-            request,
+    let proof_bytes = resolve_transported_setup_proof_material(
+        request,
+        expected_proof_material_root,
+        &VSS_SHARE_LINKAGE_TRANSPORT_FAMILY,
+    )?;
+    let proof_bytes_hash = proof_bytes.hash512_hex(VSS_SHARE_LINKAGE_PROOF_BYTES_HASH_DOMAIN)?;
+    compare_required_string(
+        expected_proof_material_root,
+        &crate::bgv::setup::setup_proof::setup_proof_material_reference_root(
             VSS_SHARE_LINKAGE_PROOF_FAMILY,
-            expected_proof_material_root,
-            proof_material,
-            "transportedVssShareLinkageProofMaterial.proofMaterials",
-        )?;
-        let proof_bytes_hash =
-            proof_bytes.hash512_hex(VSS_SHARE_LINKAGE_PROOF_BYTES_HASH_DOMAIN)?;
-        compare_string_value(
-            expected_proof_material_root,
-            &crate::bgv::setup::setup_proof::setup_proof_material_reference_root(
-                VSS_SHARE_LINKAGE_PROOF_FAMILY,
-                &proof_bytes_hash,
-            )?,
-            "share-linkage proof material root",
-        )?;
-        matching_binding = Some(VssShareLinkageProofTransportBinding {
-            proof_bytes,
-            proof_bytes_hash,
-        });
-    }
-
-    matching_binding.ok_or_else(|| {
-        invalid_succinct_setup_proof(
-            "transportedVssShareLinkageProofMaterial is missing the requested proofMaterialRoot",
-        )
+            &proof_bytes_hash,
+        )?,
+        "share-linkage proof material root",
+    )?;
+    Ok(VssShareLinkageProofTransportBinding {
+        proof_bytes,
+        proof_bytes_hash,
     })
 }
 
@@ -135,38 +107,4 @@ pub(in crate::bgv::setup) fn verified_vss_share_linkage_proof_material_bytes(
     )?;
 
     Ok(binding.proof_bytes)
-}
-
-pub(super) fn verify_transported_vss_share_linkage_proof_material_set_header(
-    value: &Value,
-) -> CanonicalResult<()> {
-    for (field_name, expected_value) in [
-        ("objectType", VSS_SHARE_LINKAGE_TRANSPORT_SET_OBJECT_TYPE),
-        ("proofFamily", VSS_SHARE_LINKAGE_PROOF_FAMILY),
-    ] {
-        compare_string_value(
-            read_string(value, field_name)?,
-            expected_value,
-            &format!("transportedVssShareLinkageProofMaterial.{field_name}"),
-        )?;
-    }
-    Ok(())
-}
-
-pub(super) fn verify_transported_vss_share_linkage_proof_material_header(
-    value: &Value,
-) -> CanonicalResult<()> {
-    for (field_name, expected_value) in [
-        ("objectType", VSS_SHARE_LINKAGE_TRANSPORT_OBJECT_TYPE),
-        ("proofFamily", VSS_SHARE_LINKAGE_PROOF_FAMILY),
-    ] {
-        compare_string_value(
-            read_string(value, field_name)?,
-            expected_value,
-            &format!("transported share-linkage proof material {field_name}"),
-        )?;
-    }
-    read_string(value, "proofMaterialRoot")?;
-
-    Ok(())
 }

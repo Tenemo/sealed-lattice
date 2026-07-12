@@ -9,6 +9,7 @@ use super::{
     verify_vss_share_linkage_bindings_request, vss_public_message_encoding_layout,
     vss_public_share_linkage_packed_message_encoding_layout,
 };
+use crate::bgv::parameters::DATA_PRIMES;
 use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 
 #[test]
@@ -79,10 +80,6 @@ fn coefficient_commitment_set_command_verifies_bound_roots() -> CanonicalResult<
     }))?;
 
     assert_eq!(
-        verification["operation"],
-        "verifyVssPublicCoefficientCommitmentSet"
-    );
-    assert_eq!(
         verification["coefficientCommitmentRoot"],
         coefficient_set["coefficientCommitmentRoot"]
     );
@@ -106,6 +103,34 @@ fn coefficient_commitment_set_command_verifies_bound_roots() -> CanonicalResult<
 }
 
 #[test]
+fn coefficient_commitment_set_rejects_a_rebound_noncanonical_rns_prime() -> CanonicalResult<()> {
+    let mut coefficient_set = coefficient_commitment_set()?;
+    let noncanonical_prime = DATA_PRIMES[1];
+    let coefficient_record =
+        &mut coefficient_set["sourceTrusteeRecords"][0]["coefficientCommitments"][0];
+    coefficient_record["rnsPrime"] = json!(noncanonical_prime);
+    coefficient_record["commitment"]["rnsPrime"] = json!(noncanonical_prime);
+    coefficient_record["coefficientCommitmentRoot"] = json!(
+        crate::hashing::derive_canonical_object_hash(&coefficient_record["commitment"])?
+    );
+    rebind_canonical_object_root(
+        &mut coefficient_set["sourceTrusteeRecords"][0],
+        "sourceCoefficientCommitmentRoot",
+    )?;
+    rebind_canonical_object_root(&mut coefficient_set, "coefficientCommitmentRoot")?;
+
+    let error = verify_vss_public_coefficient_commitment_set_request(&json!({
+        "command": "VerifyVssPublicCoefficientCommitmentSet",
+        "coefficientCommitmentSet": coefficient_set,
+    }))
+    .expect_err("a rebound coefficient record using another limb's prime must reject");
+
+    assert_eq!(error.code, CanonicalErrorCode::ComponentMismatch);
+    assert!(error.message.contains("canonical Q_share basis"));
+    Ok(())
+}
+
+#[test]
 fn recipient_share_commitment_set_command_verifies_bound_roots() -> CanonicalResult<()> {
     let recipient_set = recipient_share_commitment_set()?;
     let verification = verify_vss_public_recipient_share_commitment_set_request(&json!({
@@ -113,10 +138,6 @@ fn recipient_share_commitment_set_command_verifies_bound_roots() -> CanonicalRes
         "recipientShareCommitmentSet": recipient_set,
     }))?;
 
-    assert_eq!(
-        verification["operation"],
-        "verifyVssPublicRecipientShareCommitmentSet"
-    );
     assert_eq!(
         verification["recipientShareCommitmentRoot"],
         recipient_set["recipientShareCommitmentRoot"]
@@ -141,6 +162,35 @@ fn recipient_share_commitment_set_command_verifies_bound_roots() -> CanonicalRes
 }
 
 #[test]
+fn recipient_share_commitment_set_rejects_a_rebound_noncanonical_rns_prime() -> CanonicalResult<()>
+{
+    let mut recipient_set = recipient_share_commitment_set()?;
+    let noncanonical_prime = DATA_PRIMES[1];
+    let recipient_share_record =
+        &mut recipient_set["sourceTrusteeRecords"][0]["recipientShareCommitments"][0];
+    recipient_share_record["rnsPrime"] = json!(noncanonical_prime);
+    recipient_share_record["commitment"]["rnsPrime"] = json!(noncanonical_prime);
+    recipient_share_record["shareCommitmentRoot"] = json!(
+        crate::hashing::derive_canonical_object_hash(&recipient_share_record["commitment"])?
+    );
+    rebind_canonical_object_root(
+        &mut recipient_set["sourceTrusteeRecords"][0],
+        "sourceRecipientShareCommitmentRoot",
+    )?;
+    rebind_canonical_object_root(&mut recipient_set, "recipientShareCommitmentRoot")?;
+
+    let error = verify_vss_public_recipient_share_commitment_set_request(&json!({
+        "command": "VerifyVssPublicRecipientShareCommitmentSet",
+        "recipientShareCommitmentSet": recipient_set,
+    }))
+    .expect_err("a rebound recipient-share record using another limb's prime must reject");
+
+    assert_eq!(error.code, CanonicalErrorCode::ComponentMismatch);
+    assert!(error.message.contains("canonical Q_share basis"));
+    Ok(())
+}
+
+#[test]
 fn aggregate_threshold_commitment_set_command_verifies_bound_roots() -> CanonicalResult<()> {
     let aggregate_set = aggregate_threshold_commitment_set()?;
     let verification = verify_vss_public_aggregate_threshold_commitment_set_request(&json!({
@@ -148,10 +198,6 @@ fn aggregate_threshold_commitment_set_command_verifies_bound_roots() -> Canonica
         "aggregateThresholdCommitmentSet": aggregate_set,
     }))?;
 
-    assert_eq!(
-        verification["operation"],
-        "verifyVssPublicAggregateThresholdCommitmentSet"
-    );
     assert_eq!(
         verification["aggregateThresholdCommitmentRoot"],
         aggregate_set["aggregateThresholdCommitmentRoot"]
@@ -171,6 +217,30 @@ fn aggregate_threshold_commitment_set_command_verifies_bound_roots() -> Canonica
         "tampered aggregate threshold commitment root must reject"
     );
 
+    Ok(())
+}
+
+#[test]
+fn aggregate_threshold_commitment_set_rejects_a_rebound_noncanonical_rns_prime()
+-> CanonicalResult<()> {
+    let mut aggregate_set = aggregate_threshold_commitment_set()?;
+    let noncanonical_prime = DATA_PRIMES[1];
+    let aggregate_record = &mut aggregate_set["recipientRecords"][0];
+    aggregate_record["rnsPrime"] = json!(noncanonical_prime);
+    aggregate_record["commitment"]["rnsPrime"] = json!(noncanonical_prime);
+    aggregate_record["aggregateCommitmentRoot"] = json!(
+        crate::hashing::derive_canonical_object_hash(&aggregate_record["commitment"])?
+    );
+    rebind_canonical_object_root(&mut aggregate_set, "aggregateThresholdCommitmentRoot")?;
+
+    let error = verify_vss_public_aggregate_threshold_commitment_set_request(&json!({
+        "command": "VerifyVssPublicAggregateThresholdCommitmentSet",
+        "aggregateThresholdCommitmentSet": aggregate_set,
+    }))
+    .expect_err("a rebound aggregate-threshold record using another limb's prime must reject");
+
+    assert_eq!(error.code, CanonicalErrorCode::ComponentMismatch);
+    assert!(error.message.contains("canonical Q_share basis"));
     Ok(())
 }
 
@@ -250,7 +320,6 @@ fn share_linkage_bindings_command_verifies_bound_roots() -> CanonicalResult<()> 
         "aggregateThresholdCommitmentSet": aggregate_set.clone(),
     }))?;
 
-    assert_eq!(verification["operation"], "verifyVssShareLinkageBindings");
     assert_eq!(verification["statementRoot"], statement["statementRoot"]);
     assert_eq!(
         verification["aggregateThresholdCommitmentRoot"],
@@ -404,7 +473,7 @@ fn test_public_matrix_seed_hash() -> String {
 }
 
 fn test_rns_prime(rns_limb_index: usize) -> u64 {
-    if rns_limb_index == 0 { 97 } else { 193 }
+    DATA_PRIMES[rns_limb_index]
 }
 
 fn test_seed(seed_parts: &[usize]) -> usize {
@@ -785,6 +854,27 @@ fn rebind_share_linkage_statement_root(statement: &mut serde_json::Value) -> Can
     statement_without_root.remove("statementRoot");
     statement["statementRoot"] = json!(crate::hashing::derive_canonical_object_hash(
         &serde_json::Value::Object(statement_without_root),
+    )?);
+
+    Ok(())
+}
+
+fn rebind_canonical_object_root(
+    object: &mut serde_json::Value,
+    root_field_name: &str,
+) -> CanonicalResult<()> {
+    let mut root_input = object
+        .as_object()
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "VSS commitment root input must be an object",
+            )
+        })?
+        .clone();
+    root_input.remove(root_field_name);
+    object[root_field_name] = json!(crate::hashing::derive_canonical_object_hash(
+        &serde_json::Value::Object(root_input),
     )?);
 
     Ok(())

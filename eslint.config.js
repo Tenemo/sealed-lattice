@@ -43,6 +43,19 @@ const importResolverSettings = {
     ],
 };
 
+const packageSourceImportPatterns = [
+    {
+        group: ['#packages/*', '#test-vectors/*', '#tests/*', '#tools/*'],
+        message:
+            'Published package source must not depend on repository-private aliases.',
+    },
+    {
+        group: ['@sealed-lattice/*/*', 'sealed-lattice/*'],
+        message:
+            'Workspace packages must import another package through its public entry point.',
+    },
+];
+
 export default defineConfig(
     globalIgnores([
         '.tmp',
@@ -67,10 +80,6 @@ export default defineConfig(
         'tmp.*/**',
         'node_modules',
         'node_modules/**',
-        '.turbo',
-        '.turbo/**',
-        '**/.turbo',
-        '**/.turbo/**',
         'reference-projects',
         'reference-projects/**',
         'dist',
@@ -190,6 +199,76 @@ export default defineConfig(
         files: typeScriptFiles,
         rules: {
             '@typescript-eslint/no-unused-vars': OFF,
+        },
+    },
+    {
+        files: ['packages/*/src/**/*.ts'],
+        rules: {
+            'no-restricted-imports': [
+                ERROR,
+                { patterns: packageSourceImportPatterns },
+            ],
+        },
+    },
+    {
+        files: ['packages/types/src/**/*.ts'],
+        rules: {
+            'no-restricted-imports': [
+                ERROR,
+                {
+                    paths: [
+                        '@sealed-lattice/crypto',
+                        '@sealed-lattice/protocol',
+                        '@sealed-lattice/wasm',
+                        'sealed-lattice',
+                    ],
+                    patterns: packageSourceImportPatterns,
+                },
+            ],
+        },
+    },
+    {
+        files: ['packages/crypto/src/**/*.ts'],
+        rules: {
+            'no-restricted-imports': [
+                ERROR,
+                {
+                    paths: [
+                        '@sealed-lattice/protocol',
+                        '@sealed-lattice/wasm',
+                        'sealed-lattice',
+                    ],
+                    patterns: packageSourceImportPatterns,
+                },
+            ],
+        },
+    },
+    {
+        files: ['packages/wasm/src/**/*.ts'],
+        rules: {
+            'no-restricted-imports': [
+                ERROR,
+                {
+                    paths: [
+                        '@sealed-lattice/crypto',
+                        '@sealed-lattice/protocol',
+                        'sealed-lattice',
+                    ],
+                    patterns: packageSourceImportPatterns,
+                },
+            ],
+        },
+    },
+    {
+        files: ['packages/protocol/src/**/*.ts'],
+        rules: {
+            'no-restricted-imports': [
+                ERROR,
+                {
+                    paths: ['@sealed-lattice/wasm', 'sealed-lattice'],
+                    patterns: packageSourceImportPatterns,
+                },
+            ],
         },
     },
     {

@@ -323,7 +323,11 @@ describe('Canonical stream real-WASM runtime', () => {
                 totalByteLength: 1,
             }),
         ).toThrowError(CanonicalStreamResourceError);
-        expect(first.state()).toBe('cancelled');
+        expect(first.state()).toBe('active');
+        expect(runtime.counterSnapshot().activeSessionCount).toBe(1);
+        first.absorbChunk(0, new Uint8Array([1]).buffer);
+        expect(first.finish()).toBeInstanceOf(Uint8Array);
+        expect(first.state()).toBe('completed');
         expect(runtime.counterSnapshot().activeSessionCount).toBe(0);
 
         const exactMaximum = runtime.openWriter({

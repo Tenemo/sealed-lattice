@@ -24,18 +24,16 @@ use crate::bgv::setup::commitment::{
     SETUP_COMMITMENT_MODULUS_LIMB_INDICES, parse_setup_commitment_full_value,
 };
 use crate::bgv::setup::limb_group_key_switch_atom::family_backend::schedule as atom_schedule;
-use crate::bgv::setup::setup_proof::{
-    SETUP_PROOF_MATERIAL_ENCODING, SetupProofMaterialBytes,
-    verified_setup_proof_material_bytes_from_request,
+use crate::bgv::setup::same_secret_bridge::SAME_SECRET_BRIDGE_PROOF_BYTES_HASH_DOMAIN;
+use crate::bgv::setup::setup_proof::material_transport::{
+    SetupProofMaterialTransportFamily, resolve_transported_setup_proof_material,
 };
+use crate::bgv::setup::setup_proof::{SETUP_PROOF_MATERIAL_ENCODING, SetupProofMaterialBytes};
+use crate::bgv::setup::vss_commitment::VSS_SHARE_LINKAGE_PROOF_BYTES_HASH_DOMAIN;
 use crate::hashing::{derive_canonical_object_hash, hash512_hex, to_hex};
 
 const PROOF_RANDOMNESS_SEED_BYTES: usize = 64;
 const PROOF_RANDOMNESS_NONCE_BYTES: usize = 64;
-const VSS_SHARE_LINKAGE_PROOF_BYTES_HASH_DOMAIN: &str =
-    "sealed-lattice/setup/vss-share-linkage/proof-bytes";
-const SAME_SECRET_BRIDGE_PROOF_BYTES_HASH_DOMAIN: &str =
-    "sealed-lattice/setup/same-secret-bridge/proof-bytes";
 const VSS_SHARE_LINKAGE_TRANSPORT_SET_OBJECT_TYPE: &str =
     "SetupTransportedVssShareLinkageProofMaterialSet";
 const VSS_SHARE_LINKAGE_TRANSPORT_OBJECT_TYPE: &str =
@@ -116,10 +114,7 @@ pub(crate) fn generate_trustee_evaluation_key_proof_from_request(
         private_vss_opening_randomness_by_shamir_index: Vec::new(),
         private_vss_carry_witnesses: Vec::new(),
         vss_public_coefficient_messages_by_shamir_index: Vec::new(),
-        vss_public_recipient_share_messages: Vec::new(),
         vss_public_coefficient_opening_randomness_by_shamir_index: Vec::new(),
-        vss_public_recipient_share_opening_randomness: Vec::new(),
-        vss_public_carry_witnesses: Vec::new(),
         vss_public_recipient_share_messages_by_item: Vec::new(),
         vss_public_recipient_share_opening_randomness_by_item: Vec::new(),
         vss_public_carry_witnesses_by_item: Vec::new(),
@@ -189,7 +184,6 @@ pub(crate) fn generate_trustee_evaluation_key_proof_from_request(
         proof_bytes,
     )?;
     Ok(json!({
-        "operation": "generateTrusteeEvaluationKeyProof",
         "proofFamily": statement.context.proof_family,
         "statementHash": statement_hash,
         "limbCount": statement.proof_limb_count(),
@@ -211,7 +205,6 @@ pub(crate) fn describe_trustee_evaluation_key_statement_from_request(
 ) -> CanonicalResult<Value> {
     let statement = statement_from_request(request)?;
     Ok(json!({
-        "operation": "describeTrusteeEvaluationKeyStatement",
         "proofFamily": statement.context.proof_family,
         "statementHash": to_hex(&statement.statement_hash()),
     }))
@@ -276,7 +269,6 @@ pub(crate) fn generate_vss_share_linkage_proof_from_request(
         proof_bytes,
     )?;
     Ok(json!({
-        "operation": "generateVssShareLinkageProof",
         "proofFamily": statement.context.proof_family,
         "statementHash": to_hex(&statement.statement_hash()),
         "limbCount": statement.proof_limb_count(),
@@ -297,7 +289,6 @@ pub(crate) fn verify_vss_share_linkage_proof_source_from_request(
     verify_evaluation_key_share(&statement, &proof)?;
 
     Ok(json!({
-        "operation": "verifyVssShareLinkageProof",
         "proofFamily": statement.context.proof_family,
         "statementHash": to_hex(&statement.statement_hash()),
     }))
@@ -326,7 +317,9 @@ pub(crate) use bridge_target_commands::{
     verify_same_secret_bridge_proof_source_from_request,
     verify_target_decryption_share_proof_source_from_request,
 };
+#[cfg(test)]
 pub(crate) use share_linkage_verification::verify_vss_share_linkage_proof_material_set_from_request;
+pub(in crate::bgv::setup) use share_linkage_verification::verify_vss_share_linkage_statement_and_proof_material_set_from_request;
 #[cfg(test)]
 pub(crate) use target_decryption_parsing::describe_target_decryption_share_proof_layout_from_request;
 pub(in crate::bgv::setup) use target_decryption_parsing::vss_share_linkage_commitment_from_value;

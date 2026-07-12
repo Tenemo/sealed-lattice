@@ -1170,6 +1170,41 @@ mod tests {
             .is_none()
         );
 
+        authenticate_bgv_material_stream(
+            crate::bgv::setup::canonical_stream_transport::BGV_CANONICAL_STREAM_FAMILY_RELINEARIZATION_COMPONENT,
+            CanonicalStreamDomain::EvaluatorKeyStore,
+            &component_material_root,
+            &component_bytes,
+            0xa4,
+        );
+        let (mut missing_family_request, missing_family_binding) =
+            component_request_and_binding(&component_accounting, "relinearization-key-share");
+        missing_family_request["transportedEvaluationKeyShareComponentMaterial"]
+            ["componentMaterials"][0]
+            .as_object_mut()
+            .expect("component material descriptor")
+            .remove("proofFamily");
+        {
+            let _eviction_guard =
+                VerifiedComponentMaterialEvictionGuard::for_request(&missing_family_request);
+            let refusal = verify_setup_transport_request_bindings(
+                &component_package,
+                &missing_family_request,
+                &[missing_family_binding],
+            )
+            .expect("missing-family component transport verification")
+            .expect_err("component material without its proof family must refuse");
+            assert_eq!(refusal.reason_code, "transportedMaterialProofFamilyMissing");
+        }
+        assert!(
+            authenticated_evaluation_key_component_stream_summary(
+                "relinearization-key-share",
+                &component_material_root,
+            )
+            .expect("post-missing-family-refusal component material lookup")
+            .is_none()
+        );
+
         let public_key_material_root = protocol_hash('d');
         let public_key_material_bytes = public_key_share_material_bytes();
         let mut alternate_public_key_material_bytes = public_key_material_bytes.clone();

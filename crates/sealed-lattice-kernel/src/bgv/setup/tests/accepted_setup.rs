@@ -20,10 +20,9 @@ use self::package_fixtures::{
 };
 use self::proof_record_fixtures::{
     PublicKeyShareSuccinctProofFixture, collective_public_key_object,
-    compact_aggregate_threshold_proof_fixture, evaluation_key_aggregate_binding_object,
-    galois_key_share_batches_object,
+    compact_aggregate_threshold_proof_fixture, galois_key_share_batches_object,
     public_coefficient_commitment_ring_degree_from_fixture_package,
-    public_evaluation_key_set_object_with_aggregate_binding, public_key_share_material_object,
+    public_evaluation_key_set_object, public_key_share_material_object,
     public_key_share_succinct_proofs_fixture, relinearization_key_share_rounds_fixture,
     replace_public_key_share_hashes_with_material_hashes, trustee_evaluation_key_proofs_object,
 };

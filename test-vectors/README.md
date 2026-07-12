@@ -4,7 +4,6 @@ Deterministic known-answer vectors consumed by the test suite. Each vector carri
 
 ## Files
 
-- `plaintext-oracle/`: comparator polynomials, field arithmetic, Shamir recovery, sparse targets, and top-k derivation, exercised by the `plaintext-oracle-*` protocol tests.
 - `succinct-setup-statement-hashes.json`: byte-identical succinct-setup statement hashes the Rust and TS/WASM provers must both reproduce.
 
 When the producing code changes a vector's output on purpose, update the expected values in the JSON; the consuming test verifies them, and git tracks the change.

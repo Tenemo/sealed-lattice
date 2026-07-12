@@ -1,7 +1,7 @@
-use super::setup_proof::{
-    SETUP_PROOF_MATERIAL_ENCODING, SetupProofMaterialBytes,
-    verified_setup_proof_material_bytes_from_request,
+use super::setup_proof::material_transport::{
+    SetupProofMaterialTransportFamily, resolve_transported_setup_proof_material,
 };
+use super::setup_proof::{SETUP_PROOF_MATERIAL_ENCODING, SetupProofMaterialBytes};
 use super::vss_commitment::VSS_PUBLIC_COMMITMENT_BINARY_FORMAT;
 use super::*;
 use crate::bgv::setup_helpers::{
@@ -12,7 +12,7 @@ const SAME_SECRET_RELATION: &str =
     "vss-constant-commitments-open-to-one-short-secret-across-q-share-limbs";
 const VSS_SAME_SECRET_BRIDGE_RELATION: &str = "public constant coefficient commitments bind to the same signed ternary trustee secret as the source VSS constant commitments across Q_share";
 const SAME_SECRET_BRIDGE_PROOF_FAMILY: &str = "same-secret-bridge";
-const SAME_SECRET_BRIDGE_PROOF_BYTES_HASH_DOMAIN: &str =
+pub(in crate::bgv::setup) const SAME_SECRET_BRIDGE_PROOF_BYTES_HASH_DOMAIN: &str =
     "sealed-lattice/setup/same-secret-bridge/proof-bytes";
 const SAME_SECRET_BRIDGE_TRANSPORT_SET_OBJECT_TYPE: &str =
     "SetupTransportedSameSecretBridgeProofMaterialSet";
@@ -188,7 +188,6 @@ pub(crate) fn verify_vss_same_secret_bridge_statement_set_request(
         ));
     }
     Ok(json!({
-        "operation": "verifyVssSameSecretBridgeStatementSet",
         "sameSecretBridgeStatementSetRoot": statement_set_root,
         "participantCount": participant_count,
         "qShareRnsLimbCount": q_share_rns_limb_count,
@@ -403,7 +402,6 @@ pub(crate) fn verify_vss_same_secret_bridge_proof_material_set_request(
     }
 
     Ok(json!({
-        "operation": "verifyVssSameSecretBridgeProofMaterialSet",
         "proofFamily": SAME_SECRET_BRIDGE_PROOF_FAMILY,
         "sameSecretBridgeStatementSetRoot": statement_set_root,
         "proofMaterialSetRoot": proof_material_set_root,
@@ -414,7 +412,6 @@ pub(crate) fn verify_vss_same_secret_bridge_proof_material_set_request(
 mod bridge_transport;
 mod reconstructed;
 mod statement_record;
-mod transport_common;
 
 use bridge_transport::*;
 use reconstructed::*;

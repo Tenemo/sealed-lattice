@@ -32,19 +32,8 @@ const writeFixtureProject = async (projectRoot: string): Promise<void> => {
         'utf8',
     );
     await writeFile(
-        path.join(projectRoot, 'package.json'),
-        `${JSON.stringify(
-            {
-                description: 'Root public package description.',
-            },
-            null,
-            4,
-        )}\n`,
-        'utf8',
-    );
-    await writeFile(
-        path.join(publicPackageDirectory, 'README.md'),
-        '# SDK readme\n\nThis stays package-local.\n',
+        path.join(projectRoot, 'LICENSE'),
+        'canonical license text\n',
         'utf8',
     );
     await writeFile(
@@ -53,6 +42,7 @@ const writeFixtureProject = async (projectRoot: string): Promise<void> => {
             {
                 name: 'sealed-lattice',
                 version: '0.0.0',
+                description: 'Public package description.',
                 files: ['dist', 'README.md', 'LICENSE'],
                 scripts: {
                     build: 'pnpm run build',
@@ -64,11 +54,6 @@ const writeFixtureProject = async (projectRoot: string): Promise<void> => {
             null,
             4,
         )}\n`,
-        'utf8',
-    );
-    await writeFile(
-        path.join(publicPackageDirectory, 'LICENSE'),
-        'license text\n',
         'utf8',
     );
     await writeFile(
@@ -99,7 +84,7 @@ describe('public package staging', () => {
         );
     });
 
-    it('stages public package files from the SDK package and root README', async () => {
+    it('stages SDK output with the canonical root README and license', async () => {
         const projectRoot = await createTemporaryRoot();
         await writeFixtureProject(projectRoot);
         const destinationPath = path.join(projectRoot, 'staged-package');
@@ -115,11 +100,8 @@ describe('public package staging', () => {
             readFile(path.join(destinationPath, 'dist', 'index.js'), 'utf8'),
         ).resolves.toBe('export {};\n');
         await expect(
-            readFile(
-                path.join(projectRoot, 'packages', 'sdk', 'README.md'),
-                'utf8',
-            ),
-        ).resolves.toBe('# SDK readme\n\nThis stays package-local.\n');
+            readFile(path.join(destinationPath, 'LICENSE'), 'utf8'),
+        ).resolves.toBe('canonical license text\n');
     });
 
     it('sanitizes staged package metadata', async () => {
@@ -144,7 +126,7 @@ describe('public package staging', () => {
                 (contents) => JSON.parse(contents) as Record<string, unknown>,
             ),
         ).resolves.toMatchObject({
-            description: 'Root public package description.',
+            description: 'Public package description.',
         });
     });
 
@@ -164,35 +146,18 @@ describe('public package staging', () => {
                         dependencies: {
                             '@noble/hashes': '^2.2.0',
                         },
+                        description: 'Public package description.',
                     }),
-                    {
-                        description: 'Root public package description.',
-                    },
                 ),
             ),
         ).toEqual({
             name: 'sealed-lattice',
             version: '0.0.0',
-            description: 'Root public package description.',
+            description: 'Public package description.',
             dependencies: {
                 '@noble/hashes': '^2.2.0',
             },
         });
-    });
-
-    it('rejects missing root description metadata', async () => {
-        const projectRoot = await createTemporaryRoot();
-        await writeFixtureProject(projectRoot);
-        const destinationPath = path.join(projectRoot, 'staged-package');
-        await writeFile(
-            path.join(projectRoot, 'package.json'),
-            '{"name":"sealed-lattice-workspace"}\n',
-            'utf8',
-        );
-
-        await expect(
-            stagePublicPackage({ destinationPath, projectRoot }),
-        ).rejects.toThrow('Root package.json must define package description.');
     });
 
     it('rejects empty staging destinations', async () => {

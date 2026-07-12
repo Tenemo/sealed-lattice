@@ -141,8 +141,6 @@ use crate::hashing::{
 use crate::protocol_signatures::{
     ProtocolSignatureExpectation, verify_protocol_signature_envelope,
 };
-use crate::transcript_core::decode_hex;
-
 const SETUP_PACKAGE_OBJECT_TYPE: &str = "SetupPackage";
 const PUBLIC_KEY_SHARE_PROOF_TRANSPORT_SET_OBJECT_TYPE: &str =
     "SetupTransportedPublicKeyShareProofMaterialSet";
@@ -272,12 +270,7 @@ pub(super) fn accepted_roster_from_package(setup_package: &Value) -> AcceptedRos
 const SETUP_TRANSPORT_SCHEME_ID: &str = "sealed-lattice-setup-binary-chunked-transport";
 const SETUP_TRANSPORT_CERTIFICATE_OBJECT_TYPE: &str = "SetupTransportCertificate";
 const SETUP_TRANSPORTED_OBJECT_TYPE: &str = "SetupTransportedObject";
-const SETUP_TRANSPORT_STORAGE_QUOTA_BYTES: u64 = 2_147_483_648;
-const SETUP_TRANSPORT_LARGEST_SINGLE_BUFFER_BYTES: u64 = 1_572_864;
-const SETUP_TRANSPORT_COPY_COUNT_LIMIT: u64 = 2;
 const SETUP_TRANSPORT_STREAM_ORDER: &str = "ascending-chunk-index";
-const SETUP_TRANSPORT_RESUME_POLICY: &str = "chunk-index-checkpointed-by-hash";
-const SETUP_TRANSPORT_LAZY_LOADING_POLICY: &str = "root-addressed-large-object-loading";
 const SETUP_TRANSPORTED_PUBLIC_KEY_SHARE_MATERIAL_NAME: &str = "publicKeyShareMaterial";
 const SETUP_TRANSPORTED_PUBLIC_KEY_SHARE_MATERIAL_ROLE: &str = "public-key-share-material";
 const SETUP_TRANSPORTED_PUBLIC_KEY_SHARE_PROOF_MATERIAL_NAME: &str = "publicKeyShareProofMaterial";
@@ -793,7 +786,6 @@ fn verification_response(
 
     Ok(json!({
         "isValid": accepted,
-        "operation": "verifyCollectiveBgvSetupPackage",
         "refusedObjects": refused_objects
             .into_iter()
             .map(|refusal| refusal.to_value())

@@ -111,28 +111,25 @@ const serializeBoundedKernelCommandRequest = (
         }
         measuredByteLength += additionalByteLength;
     };
-    const isOmittedObjectValue = (value: unknown): boolean =>
-        value === undefined ||
-        typeof value === 'function' ||
-        typeof value === 'symbol';
-
-    const measureValue = (
+    const omittedObjectValue = Symbol('omitted-object-value');
+    const serializeValue = (
         value: unknown,
         arrayElement: boolean,
         containerDepth: number,
-    ): boolean => {
+    ): string | typeof omittedObjectValue => {
         if (value === null) {
             charge(4);
-            return true;
+            return 'null';
         }
 
         switch (typeof value) {
-            case 'string':
+            case 'string': {
                 charge(jsonStringByteLength(value));
-                return true;
+                return JSON.stringify(value);
+            }
             case 'boolean':
                 charge(value ? 4 : 5);
-                return true;
+                return value ? 'true' : 'false';
             case 'number': {
                 if (!Number.isFinite(value)) {
                     throw commandBoundaryError(
@@ -146,17 +143,20 @@ const serializeBoundedKernelCommandRequest = (
                         'The transcript-core command contains an integer outside the interoperable safe range.',
                     );
                 }
-                charge(String(Object.is(value, -0) ? 0 : value).length);
-                return true;
+                const serializedNumber = String(
+                    Object.is(value, -0) ? 0 : value,
+                );
+                charge(serializedNumber.length);
+                return serializedNumber;
             }
             case 'undefined':
             case 'function':
             case 'symbol':
                 if (arrayElement) {
                     charge(4);
-                    return true;
+                    return 'null';
                 }
-                return false;
+                return omittedObjectValue;
             case 'bigint':
                 throw commandBoundaryError(
                     'InvalidProtocolObject',
@@ -165,7 +165,7 @@ const serializeBoundedKernelCommandRequest = (
             case 'object':
                 break;
             default:
-                return false;
+                return omittedObjectValue;
         }
 
         const container = value;
@@ -201,31 +201,59 @@ const serializeBoundedKernelCommandRequest = (
             }
 
             if (Array.isArray(container)) {
-                charge(2);
-                for (let index = 0; index < container.length; index += 1) {
-                    if (index > 0) {
-                        charge(1);
-                    }
+                const prototype = Reflect.getPrototypeOf(container);
+                if (prototype !== Array.prototype && prototype !== null) {
+                    throw commandBoundaryError(
+                        'InvalidProtocolObject',
+                        'The transcript-core command must contain only plain objects and arrays.',
+                    );
+                }
+                const lengthDescriptor = Object.getOwnPropertyDescriptor(
+                    container,
+                    'length',
+                );
+                if (
+                    lengthDescriptor === undefined ||
+                    !('value' in lengthDescriptor) ||
+                    !Number.isSafeInteger(lengthDescriptor.value) ||
+                    lengthDescriptor.value < 0
+                ) {
+                    throw commandBoundaryError(
+                        'InvalidProtocolObject',
+                        'The transcript-core command contains an invalid array length.',
+                    );
+                }
+                const arrayLength = lengthDescriptor.value as number;
+                charge(2 + Math.max(0, arrayLength - 1));
+                const serializedItems: string[] = [];
+                for (let index = 0; index < arrayLength; index += 1) {
                     const descriptor = Object.getOwnPropertyDescriptor(
                         container,
                         String(index),
                     );
                     if (descriptor === undefined) {
                         charge(4);
+                        serializedItems.push('null');
                     } else if ('get' in descriptor || 'set' in descriptor) {
                         throw commandBoundaryError(
                             'InvalidProtocolObject',
                             'The transcript-core command cannot contain accessor properties.',
                         );
                     } else {
-                        measureValue(
+                        const serializedItem = serializeValue(
                             descriptor.value,
                             true,
                             containerDepth + 1,
                         );
+                        if (serializedItem === omittedObjectValue) {
+                            throw new Error(
+                                'Array-element JSON serialization unexpectedly omitted a value.',
+                            );
+                        }
+                        serializedItems.push(serializedItem);
                     }
                 }
-                return true;
+                return `[${serializedItems.join(',')}]`;
             }
 
             const prototype = Reflect.getPrototypeOf(container);
@@ -237,8 +265,7 @@ const serializeBoundedKernelCommandRequest = (
             }
 
             const descriptors = Object.getOwnPropertyDescriptors(container);
-            charge(2);
-            let emittedPropertyCount = 0;
+            const serializedEntries: string[] = [];
             for (const [fieldName, descriptor] of Object.entries(descriptors)) {
                 if (descriptor.enumerable !== true) {
                     continue;
@@ -249,34 +276,31 @@ const serializeBoundedKernelCommandRequest = (
                         'The transcript-core command cannot contain accessor properties.',
                     );
                 }
-                if (isOmittedObjectValue(descriptor.value)) {
+                const serializedValue = serializeValue(
+                    descriptor.value,
+                    false,
+                    containerDepth + 1,
+                );
+                if (serializedValue === omittedObjectValue) {
                     continue;
                 }
-                if (emittedPropertyCount > 0) {
-                    charge(1);
-                }
                 charge(jsonStringByteLength(fieldName) + 1);
-                measureValue(descriptor.value, false, containerDepth + 1);
-                emittedPropertyCount += 1;
+                serializedEntries.push(
+                    `${JSON.stringify(fieldName)}:${serializedValue}`,
+                );
             }
-            return true;
+            charge(2 + Math.max(0, serializedEntries.length - 1));
+            return `{${serializedEntries.join(',')}}`;
         } finally {
             activeContainers.delete(container);
         }
     };
 
-    if (!measureValue(request, false, 0)) {
+    const serializedRequest = serializeValue(request, false, 0);
+    if (serializedRequest === omittedObjectValue) {
         throw commandBoundaryError(
             'InvalidProtocolObject',
             'The transcript-core command is not a JSON object.',
-        );
-    }
-
-    const serializedRequest = JSON.stringify(request);
-    if (typeof serializedRequest !== 'string') {
-        throw commandBoundaryError(
-            'InvalidProtocolObject',
-            'The transcript-core command is not serializable JSON.',
         );
     }
     const requestBytes = textEncoder.encode(serializedRequest);

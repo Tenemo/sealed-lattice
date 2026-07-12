@@ -72,7 +72,6 @@ export type DirectEncryptedBallotEvaluatorReplayResult = {
 };
 
 export type DirectEncryptedBallotResult = {
-    readonly operation: 'runDirectEncryptedBallot';
     readonly parameters: {
         readonly dataPrimeCount: number;
     };

@@ -622,10 +622,7 @@ pub(super) fn private_vss_share_succinct_proof_record(
             })
             .collect::<CanonicalResult<Vec<i64>>>()?,
         vss_public_coefficient_messages_by_shamir_index: Vec::new(),
-        vss_public_recipient_share_messages: Vec::new(),
         vss_public_coefficient_opening_randomness_by_shamir_index: Vec::new(),
-        vss_public_recipient_share_opening_randomness: Vec::new(),
-        vss_public_carry_witnesses: Vec::new(),
         vss_public_recipient_share_messages_by_item: Vec::new(),
         vss_public_recipient_share_opening_randomness_by_item: Vec::new(),
         vss_public_carry_witnesses_by_item: Vec::new(),

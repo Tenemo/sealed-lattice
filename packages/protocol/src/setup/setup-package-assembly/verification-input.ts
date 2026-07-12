@@ -200,12 +200,6 @@ export const createSetupPackageVerificationInput = (
                   transportedEvaluationKeyShareComponentMaterial:
                       transportedEvaluationKeyShareComponentMaterial,
               }),
-        ...(input.transportedEvaluationKeyAggregateBindingOpenings === undefined
-            ? {}
-            : {
-                  transportedEvaluationKeyAggregateBindingOpenings:
-                      input.transportedEvaluationKeyAggregateBindingOpenings,
-              }),
         ...(transportedPublicEvaluationKeyMaterial === undefined
             ? {}
             : {

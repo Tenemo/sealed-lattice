@@ -78,6 +78,7 @@ export type FrozenRosterParameters = {
 export type PollSpecValidationErrorCode =
     | 'EmptyPollId'
     | 'EmptyQuestion'
+    | 'UnsupportedHashCriticalText'
     | 'InvalidOptionCount'
     | 'EmptyOptionLabel'
     | 'DuplicateOptionLabel'

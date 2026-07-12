@@ -254,15 +254,11 @@ pub(in crate::bgv::setup) fn verified_same_secret_bridge_material_from_package(
                     "same-secret bridge target commitments must be ordered by limb",
                 ));
             }
-            let target_rns_prime = value_u64(target_root_record, "rnsPrime")?;
-            if value_u64(target_commitment_record, "rnsPrime")? != target_rns_prime
-                || DATA_PRIMES.get(target_rns_limb_index).copied() != Some(target_rns_prime)
-            {
-                return Err(CanonicalError::new(
-                    CanonicalErrorCode::ComponentMismatch,
-                    "same-secret bridge prime must match the canonical Q_share basis",
-                ));
-            }
+            let target_rns_prime = verified_same_secret_bridge_target_rns_prime(
+                target_root_record,
+                target_commitment_record,
+                target_rns_limb_index,
+            )?;
             if value_u64(target_root_record, "shamirCoefficientIndex")? != 0
                 || value_u64(target_commitment_record, "shamirCoefficientIndex")? != 0
             {
@@ -349,6 +345,23 @@ pub(in crate::bgv::setup) fn verified_same_secret_bridge_material_from_package(
     })
 }
 
+fn verified_same_secret_bridge_target_rns_prime(
+    target_root_record: &Value,
+    target_commitment_record: &Value,
+    target_rns_limb_index: usize,
+) -> CanonicalResult<u64> {
+    let target_rns_prime = value_u64(target_root_record, "rnsPrime")?;
+    if value_u64(target_commitment_record, "rnsPrime")? != target_rns_prime
+        || DATA_PRIMES.get(target_rns_limb_index).copied() != Some(target_rns_prime)
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ComponentMismatch,
+            "same-secret bridge prime must match the canonical Q_share basis",
+        ));
+    }
+    Ok(target_rns_prime)
+}
+
 fn same_secret_bridge_verification_request(
     statement_set: &Value,
     proof_material_set: Option<&Value>,
@@ -400,6 +413,23 @@ fn same_secret_bridge_refusal(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn accepted_same_secret_bridge_rejects_a_noncanonical_target_prime() {
+        let noncanonical_prime = DATA_PRIMES[1];
+        let error = verified_same_secret_bridge_target_rns_prime(
+            &json!({ "rnsPrime": noncanonical_prime }),
+            &json!({ "rnsPrime": noncanonical_prime }),
+            0,
+        )
+        .expect_err("a valid-shaped prime from the wrong Q_share limb must be rejected");
+
+        assert_eq!(error.code, CanonicalErrorCode::ComponentMismatch);
+        assert_eq!(
+            error.message,
+            "same-secret bridge prime must match the canonical Q_share basis"
+        );
+    }
 
     #[test]
     fn optional_same_secret_bridge_is_absent_by_default() -> CanonicalResult<()> {

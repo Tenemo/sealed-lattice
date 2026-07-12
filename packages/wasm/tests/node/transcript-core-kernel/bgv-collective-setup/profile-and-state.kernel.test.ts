@@ -33,10 +33,9 @@ describe('collective BGV setup kernel commands', () => {
         expect(parameters.setupParametersHash).toHaveLength(128);
         expect(parameters.setupTransport).toMatchObject({
             objectType: 'SetupTransport',
-            storageQuotaBytes: 2_147_483_648,
-            largestSingleBufferBytes: 1_572_864,
+            largeObjectEncoding: 'binary',
+            chunking: 'required',
             streamVerificationOrder: 'ascending-chunk-index',
-            lazyLoadingPolicy: 'root-addressed-large-object-loading',
         });
         expect(parameters.carryAwareVssShareRelation).toMatchObject({
             objectType: 'CarryAwareVssShareRelation',
@@ -97,7 +96,6 @@ describe('collective BGV setup kernel commands', () => {
                 localStateCommitment,
             }),
         ).toMatchObject({
-            operation: 'verifyLocalTrusteeSetupState',
             trusteeIdentity: 'trustee-3',
             trusteeRosterPosition: 3,
             trusteePoint: 4,

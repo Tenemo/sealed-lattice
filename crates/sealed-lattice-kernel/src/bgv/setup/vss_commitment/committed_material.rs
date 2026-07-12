@@ -211,7 +211,6 @@ pub(crate) fn compute_vss_committed_material_commitment_request(
         })?;
 
     Ok(json!({
-        "operation": "computeVssCommittedMaterialCommitment",
         "commitment": computation.commitment,
         "commitmentRoot": computation.commitment_root,
         "openingRoot": computation.opening_root,
@@ -293,10 +292,6 @@ mod tests {
         assert_eq!(
             first, second,
             "the committed-material commitment must regenerate byte-identically from the same message and seed"
-        );
-        assert_eq!(
-            first["operation"].as_str(),
-            Some("computeVssCommittedMaterialCommitment")
         );
         let roots = material_root_hexes(&first);
         assert_eq!(

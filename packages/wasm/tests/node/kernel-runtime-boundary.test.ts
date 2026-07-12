@@ -164,6 +164,31 @@ describe('Transcript-core command boundary', () => {
         expect(serializeBoundedKernelCommandRequest(request)).toEqual(expected);
     });
 
+    it('serializes the validated descriptor snapshot without revisiting a proxy', () => {
+        let customSerializationReadCount = 0;
+        const request = new Proxy(
+            { command: 'HashRaw', inputHex: '00' },
+            {
+                get: (target, propertyKey, receiver): unknown => {
+                    if (propertyKey === 'toJSON') {
+                        customSerializationReadCount += 1;
+                        return () => ({ command: 'ListCanonicalErrorCodes' });
+                    }
+                    return Reflect.get(
+                        target,
+                        propertyKey,
+                        receiver,
+                    ) as unknown;
+                },
+            },
+        );
+
+        expect(serializeBoundedKernelCommandRequest(request)).toEqual(
+            new TextEncoder().encode('{"command":"HashRaw","inputHex":"00"}'),
+        );
+        expect(customSerializationReadCount).toBe(0);
+    });
+
     it('accepts exactly 64 JSON containers and refuses a deeper request', () => {
         const requestWithArrayDepth = (arrayDepth: number): unknown => {
             let nestedValue: unknown = null;

@@ -212,25 +212,6 @@ pub(super) fn verify_public_evaluation_key_material_transport(
                 "transportedPublicEvaluationKeyMaterial.componentMaterials",
             )?));
         }
-        // Committed-material aggregate binding: when the evaluation-key set
-        // publishes the aggregate-binding record, bind the just-reconstructed
-        // runtime key to the trustee-committed material through the atom material
-        // roots and the transported linear-evaluation openings. This does NOT
-        // replace `public_key_reconstruction` yet - the runtime key is still
-        // derived and returned above for downstream use; a follow-up retires the
-        // raw-material summing as the binding once the creation side emits the
-        // openings. A package whose published runtime key does not match the
-        // committed-material aggregate is refused here.
-        if super::aggregate_binding::evaluation_key_set_has_aggregate_binding(evaluation_keys)
-            && let Some(response) =
-                super::aggregate_binding::verify_accepted_key_switch_aggregate_binding(
-                    setup_package,
-                    evaluation_keys,
-                    request,
-                )?
-        {
-            return Ok(Some(response));
-        }
     }
 
     Ok(None)

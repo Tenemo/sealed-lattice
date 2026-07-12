@@ -6,6 +6,8 @@ use crate::bgv::setup_helpers::{
 
 pub(super) const VSS_PUBLIC_COMMITMENT_BINARY_FORMAT: &str =
     "sealed-lattice-vss-public-commitment-binary";
+pub(in crate::bgv::setup) const VSS_SHARE_LINKAGE_PROOF_BYTES_HASH_DOMAIN: &str =
+    "sealed-lattice/setup/vss-share-linkage/proof-bytes";
 pub(crate) const VSS_PUBLIC_MESSAGE_DIGIT_COUNT: usize = 2;
 #[cfg(test)]
 pub(crate) const VSS_PUBLIC_MESSAGE_BASE_DIGIT_TRIT_COUNT: usize = 17;
@@ -171,7 +173,6 @@ pub(crate) fn verify_vss_public_coefficient_commitment_set_request(
     }
 
     Ok(json!({
-        "operation": "verifyVssPublicCoefficientCommitmentSet",
         "coefficientCommitmentRoot": coefficient_commitment_root,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "participantCount": participant_count,
@@ -253,7 +254,6 @@ pub(crate) fn verify_vss_public_recipient_share_commitment_set_request(
     }
 
     Ok(json!({
-        "operation": "verifyVssPublicRecipientShareCommitmentSet",
         "recipientShareCommitmentRoot": recipient_share_commitment_root,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "participantCount": participant_count,
@@ -332,7 +332,6 @@ pub(crate) fn verify_vss_public_aggregate_threshold_commitment_set_request(
     }
 
     Ok(json!({
-        "operation": "verifyVssPublicAggregateThresholdCommitmentSet",
         "aggregateThresholdCommitmentRoot": aggregate_threshold_commitment_root,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "participantCount": participant_count,

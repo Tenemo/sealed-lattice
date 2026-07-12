@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -7,7 +7,6 @@ import { describe, expect, it, vi } from 'vitest';
 import {
     determineNpmPublication,
     verifyCheckedOutReleaseTag,
-    verifyReleaseWithoutMutation,
     type ReleaseCommandExecutor,
 } from '#tools/ci/release-gates.js';
 import {
@@ -54,10 +53,10 @@ describe('release policy', () => {
         ).toThrow('does not resolve to the release commit');
     });
 
-    it('allows only the public version manifest and an optional lockfile change', () => {
+    it('allows only the public version manifest change', () => {
         expect(() =>
             validateReleaseMetadataPaths({
-                changedPaths: ['packages/sdk/package.json', 'pnpm-lock.yaml'],
+                changedPaths: ['packages/sdk/package.json'],
                 untrackedPaths: [],
             }),
         ).not.toThrow();
@@ -69,10 +68,7 @@ describe('release policy', () => {
         ).toThrow('missing the public package version');
         expect(() =>
             validateReleaseMetadataPaths({
-                changedPaths: [
-                    'packages/sdk/package.json',
-                    'packages/crypto/package.json',
-                ],
+                changedPaths: ['packages/sdk/package.json', 'pnpm-lock.yaml'],
                 untrackedPaths: [],
             }),
         ).toThrow('Unexpected release metadata change');
@@ -314,133 +310,6 @@ describe('release policy', () => {
             ).rejects.toThrow('does not resolve to the release commit');
         } finally {
             await rm(packageDirectory, { force: true, recursive: true });
-        }
-    });
-});
-
-describe('mutation-free release verification', () => {
-    it('uses the next staged version while leaving release inputs unchanged', async () => {
-        const temporaryRepositoryPath = await mkdtemp(
-            path.join(tmpdir(), 'sealed-lattice-release-gates-'),
-        );
-        const manifestPath = path.join(
-            temporaryRepositoryPath,
-            'packages',
-            'sdk',
-            'package.json',
-        );
-        const manifestText = '{"name":"sealed-lattice","version":"0.4.8"}\n';
-        const verifiedTargets: string[] = [];
-        let publishedVersion = '';
-
-        try {
-            await mkdir(path.dirname(manifestPath), { recursive: true });
-            await writeFile(manifestPath, manifestText, 'utf8');
-            const buildAndSmoke = vi.fn(() => Promise.resolve());
-            const result = await verifyReleaseWithoutMutation({
-                dependencies: {
-                    buildAndSmoke,
-                    createTemporaryDirectory: () =>
-                        Promise.resolve(
-                            path.join(temporaryRepositoryPath, 'staged'),
-                        ),
-                    inspectWorkingTree: () => Promise.resolve(''),
-                    publishDryRun: async (packageDirectory) => {
-                        const stagedManifest = JSON.parse(
-                            await readFile(
-                                path.join(packageDirectory, 'package.json'),
-                                'utf8',
-                            ),
-                        ) as { readonly version: string };
-                        publishedVersion = stagedManifest.version;
-                    },
-                    removeTemporaryDirectory: async (
-                        temporaryDirectoryPath,
-                    ) => {
-                        await rm(temporaryDirectoryPath, {
-                            force: true,
-                            recursive: true,
-                        });
-                    },
-                    stagePackage: async (temporaryDirectoryPath) => {
-                        await mkdir(temporaryDirectoryPath, {
-                            recursive: true,
-                        });
-                        const packageJsonPath = path.join(
-                            temporaryDirectoryPath,
-                            'package.json',
-                        );
-                        await writeFile(packageJsonPath, manifestText, 'utf8');
-                        return {
-                            packageDirectory: temporaryDirectoryPath,
-                            packageJsonPath,
-                        };
-                    },
-                    verifyTargets: (releaseVersion) => {
-                        verifiedTargets.push(releaseVersion.tag);
-                        return Promise.resolve();
-                    },
-                },
-                increment: 'patch',
-                manifestPath,
-            });
-
-            expect(result).toEqual({
-                previousVersion: '0.4.8',
-                tag: 'v0.4.9',
-                version: '0.4.9',
-            });
-            expect(buildAndSmoke).toHaveBeenCalledExactlyOnceWith(
-                path.join(temporaryRepositoryPath, 'staged'),
-                result,
-            );
-            expect(verifiedTargets).toEqual(['v0.4.9']);
-            expect(publishedVersion).toBe('0.4.9');
-            expect(await readFile(manifestPath, 'utf8')).toBe(manifestText);
-        } finally {
-            await rm(temporaryRepositoryPath, {
-                force: true,
-                recursive: true,
-            });
-        }
-    });
-
-    it('refuses dirty inputs before running release work', async () => {
-        const temporaryRepositoryPath = await mkdtemp(
-            path.join(tmpdir(), 'sealed-lattice-release-dirty-'),
-        );
-        const manifestPath = path.join(temporaryRepositoryPath, 'package.json');
-        const buildAndSmoke = vi.fn(() => Promise.resolve());
-
-        try {
-            await writeFile(
-                manifestPath,
-                '{"name":"sealed-lattice","version":"0.4.8"}\n',
-                'utf8',
-            );
-            await expect(
-                verifyReleaseWithoutMutation({
-                    dependencies: {
-                        buildAndSmoke,
-                        createTemporaryDirectory: () => Promise.resolve(''),
-                        inspectWorkingTree: () =>
-                            Promise.resolve(' M README.md\n'),
-                        publishDryRun: () => Promise.resolve(),
-                        removeTemporaryDirectory: () => Promise.resolve(),
-                        stagePackage: () =>
-                            Promise.reject(new Error('must not stage')),
-                        verifyTargets: () => Promise.resolve(),
-                    },
-                    increment: 'minor',
-                    manifestPath,
-                }),
-            ).rejects.toThrow('clean working tree');
-            expect(buildAndSmoke).not.toHaveBeenCalled();
-        } finally {
-            await rm(temporaryRepositoryPath, {
-                force: true,
-                recursive: true,
-            });
         }
     });
 });

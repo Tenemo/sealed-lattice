@@ -666,6 +666,9 @@ mod component_material_stream {
     #[cfg(not(target_arch = "wasm32"))]
     const COMPONENT_MATERIAL_STREAM_TEMP_FILE_DOMAIN: &str =
         "sealed-lattice/setup/evaluation-key-share/component-material/stream-temp";
+    #[cfg(not(target_arch = "wasm32"))]
+    static NEXT_COMPONENT_MATERIAL_STREAM_TEMP_FILE_SEQUENCE: std::sync::atomic::AtomicU64 =
+        std::sync::atomic::AtomicU64::new(1);
 
     // Where an in-flight stream stages its chunks before finish verifies them.
     // Native stages to a temp file; the browser wasm runtime stages in memory.
@@ -703,12 +706,7 @@ mod component_material_stream {
     ) -> CanonicalResult<ComponentMaterialStreamSink> {
         #[cfg(not(target_arch = "wasm32"))]
         {
-            let path = component_material_stream_temp_path(verification_id)?;
-            let file = File::create(&path).map_err(|error| {
-                invalid_evaluation_key_share_material(format!(
-                    "evaluation-key component material stream temp file could not be created: {error}"
-                ))
-            })?;
+            let (path, file) = create_component_material_stream_temp_file(verification_id)?;
             Ok(ComponentMaterialStreamSink::TempFile {
                 path,
                 writer: BufWriter::new(file),
@@ -874,7 +872,9 @@ mod component_material_stream {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    fn component_material_stream_temp_path(verification_id: &str) -> CanonicalResult<PathBuf> {
+    fn create_component_material_stream_temp_file(
+        verification_id: &str,
+    ) -> CanonicalResult<(PathBuf, File)> {
         let mut directory = std::env::temp_dir();
         directory.push("sealed-lattice-evaluation-key-component-material");
         std::fs::create_dir_all(&directory).map_err(|error| {
@@ -882,12 +882,161 @@ mod component_material_stream {
             "evaluation-key component material stream temp directory could not be created: {error}"
         ))
         })?;
-        let file_name = hash512_hex(
-            COMPONENT_MATERIAL_STREAM_TEMP_FILE_DOMAIN,
-            &[verification_id.as_bytes()],
-        );
-        directory.push(format!("{file_name}.bin"));
+        let process_identifier = std::process::id().to_le_bytes();
+        loop {
+            let sequence = NEXT_COMPONENT_MATERIAL_STREAM_TEMP_FILE_SEQUENCE
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                .to_le_bytes();
+            let file_name = hash512_hex(
+                COMPONENT_MATERIAL_STREAM_TEMP_FILE_DOMAIN,
+                &[verification_id.as_bytes(), &process_identifier, &sequence],
+            );
+            let path = directory.join(format!("{file_name}.bin"));
+            match std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&path)
+            {
+                Ok(file) => return Ok((path, file)),
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => {
+                    return Err(invalid_evaluation_key_share_material(format!(
+                        "evaluation-key component material stream temp file could not be created: {error}"
+                    )));
+                }
+            }
+        }
+    }
 
-        Ok(directory)
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use crate::foundation::{
+            CanonicalStreamDomain, CanonicalStreamVerifier, derive_canonical_stream_descriptor,
+        };
+
+        fn verified_stream_summary(
+            stream_domain: CanonicalStreamDomain,
+            bytes: &[u8],
+        ) -> Arc<VerifiedCanonicalStreamSummary> {
+            let descriptor = derive_canonical_stream_descriptor(stream_domain, bytes)
+                .expect("component material stream descriptor");
+            let mut verifier = CanonicalStreamVerifier::new(stream_domain, descriptor)
+                .expect("component material stream verifier");
+            assert!(verifier.absorb_chunk(0, bytes).is_valid());
+            Arc::new(
+                verifier
+                    .finish_with_summary()
+                    .into_result()
+                    .expect("authenticated component material stream summary"),
+            )
+        }
+
+        #[test]
+        fn component_material_stream_rejects_a_mismatched_authenticated_summary() {
+            let material_root = "d1".repeat(64);
+            let material_bytes = [0x5a; 17];
+            let mut stream = begin_verified_canonical_component_material_stream(
+                0xd100_0001,
+                material_root.clone(),
+                "relinearization-key-share",
+                material_bytes.len() as u64,
+            )
+            .expect("component material stream begins");
+            absorb_verified_canonical_component_material_chunk(&mut stream, &material_bytes)
+                .expect("component material chunk stages");
+
+            let error = finish_verified_canonical_component_material_stream(
+                stream,
+                verified_stream_summary(
+                    CanonicalStreamDomain::PublicKeyShareProof,
+                    &material_bytes,
+                ),
+            )
+            .expect_err("a summary from another canonical stream domain must reject");
+
+            assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
+            assert!(
+                error
+                    .message
+                    .contains("does not match its authenticated stream summary")
+            );
+            assert!(
+                super::super::authenticated_evaluation_key_component_stream_summary(
+                    "relinearization-key-share",
+                    &material_root,
+                )
+                .expect("component material store lookup")
+                .is_none()
+            );
+        }
+
+        #[test]
+        fn component_material_stream_rejects_a_duplicate_material_root() {
+            let material_root = "d2".repeat(64);
+            let material_bytes = [0x6b; 19];
+            super::super::evict_verified_evaluation_key_share_component_material(
+                std::slice::from_ref(&material_root),
+            );
+            let mut stream = begin_verified_canonical_component_material_stream(
+                0xd200_0001,
+                material_root.clone(),
+                "galois-key-share",
+                material_bytes.len() as u64,
+            )
+            .expect("first component material stream begins");
+            absorb_verified_canonical_component_material_chunk(&mut stream, &material_bytes)
+                .expect("first component material chunk stages");
+            finish_verified_canonical_component_material_stream(
+                stream,
+                verified_stream_summary(CanonicalStreamDomain::EvaluatorKeyStore, &material_bytes),
+            )
+            .expect("first component material stream authenticates");
+
+            let error = match begin_verified_canonical_component_material_stream(
+                0xd200_0002,
+                material_root.clone(),
+                "galois-key-share",
+                material_bytes.len() as u64,
+            ) {
+                Ok(stream) => {
+                    cancel_verified_canonical_component_material_stream(stream);
+                    panic!("the same component material root must not be staged twice");
+                }
+                Err(error) => error,
+            };
+
+            assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
+            assert!(error.message.contains("root is already staged"));
+            super::super::evict_verified_evaluation_key_share_component_material(&[material_root]);
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        #[test]
+        fn component_material_temp_files_are_unique_for_a_repeated_stream_identifier() {
+            let (first_path, mut first_file) =
+                create_component_material_stream_temp_file("repeated-stream-identifier")
+                    .expect("first component material temp file");
+            first_file
+                .write_all(b"first-stream-material")
+                .expect("first component material temp file write");
+            first_file
+                .flush()
+                .expect("first component material temp file flush");
+
+            let (second_path, second_file) =
+                create_component_material_stream_temp_file("repeated-stream-identifier")
+                    .expect("second component material temp file");
+            assert_ne!(first_path, second_path);
+            assert_eq!(
+                std::fs::read(&first_path).expect("first component material temp file read"),
+                b"first-stream-material",
+            );
+
+            drop(first_file);
+            drop(second_file);
+            std::fs::remove_file(&first_path).expect("remove first component material temp file");
+            std::fs::remove_file(&second_path).expect("remove second component material temp file");
+        }
     }
 }

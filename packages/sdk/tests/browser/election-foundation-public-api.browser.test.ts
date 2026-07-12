@@ -37,30 +37,8 @@ const createFoundationBoardSession =
     publicApiRuntimeRecord.createFoundationBoardSession as CreateFoundationBoardSession;
 const foundationBoardCandidateObjectHash =
     publicApiRuntimeRecord.foundationBoardCandidateObjectHash as FoundationBoardCandidateObjectHash;
-const requiredPublicFunctionNames = [
-    'deriveThresholdParameters',
-    'validatePollSpec',
-    'deriveValidatedFirstValidOrder',
-    'verifyBoardConsistency',
-    'createFoundationBoardSession',
-    'foundationBoardCandidateObjectHash',
-] as const;
 
 describe('election foundation public package API in browsers', () => {
-    it('exposes callable safe runtime functions', () => {
-        const runtimeExportNames = Object.keys(publicApiRuntimeRecord).sort();
-
-        expect(runtimeExportNames).toEqual(
-            expect.arrayContaining([...requiredPublicFunctionNames]),
-        );
-        for (const publicFunctionName of runtimeExportNames) {
-            expect(
-                typeof publicApiRuntimeRecord[publicFunctionName],
-                publicFunctionName,
-            ).toBe('function');
-        }
-    });
-
     it('runs a no-WASM board-consistency smoke path', () => {
         expect(
             verifyBoardConsistency({
@@ -117,9 +95,5 @@ describe('election foundation public package API in browsers', () => {
         } finally {
             opened.value.cancel();
         }
-        expect(
-            publicApiRuntimeRecord.verifyFoundationTranscript,
-        ).toBeUndefined();
-        expect(publicApiRuntimeRecord.verifyTargetFinality).toBeUndefined();
     });
 });

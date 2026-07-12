@@ -105,7 +105,5 @@ describe('SDK package build', () => {
         expect(sdkManifest.scripts.build).toContain('build-sdk-package.ts');
         expect(sdkBuilder).not.toMatch(/command:\s*['"]cargo['"]/u);
         expect(sdkBuilder).not.toContain('wasm-opt');
-        expect(sdkBuilder).not.toContain('mkdtemp');
-        expect(sdkBuilder).toContain("'sdk-package-declarations'");
     });
 });

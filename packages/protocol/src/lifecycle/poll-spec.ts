@@ -1,14 +1,13 @@
 import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
-import type {
-    PollSpec,
-    PollSpecValidation,
-    PollSpecValidationError,
-    ProtocolHash,
-    ScoreDomain,
-    SmallRosterPolicy,
+import {
+    foundationProfile,
+    type PollSpec,
+    type PollSpecValidation,
+    type PollSpecValidationError,
+    type ProtocolHash,
+    type ScoreDomain,
+    type SmallRosterPolicy,
 } from '@sealed-lattice/types';
-
-import { isRecord } from '../common/verification-helpers.js';
 
 import {
     defaultScoreDomain,
@@ -17,16 +16,70 @@ import {
     minimumSupportedRosterSize,
 } from './roster-policy.js';
 
-const isSupportedScoreDomain = (scoreDomain: unknown): boolean =>
-    scoreDomain === undefined ||
-    (isRecord(scoreDomain) &&
-        scoreDomain.min === 1 &&
-        scoreDomain.max === 10 &&
-        scoreDomain.skippedOptionScore === 1);
+const invalidDataProperty = Symbol('invalid-data-property');
+
+type OwnPropertyDescriptors = Readonly<Record<PropertyKey, PropertyDescriptor>>;
+
+const ownPropertyDescriptors = (
+    value: object,
+): OwnPropertyDescriptors | undefined => {
+    try {
+        return Object.getOwnPropertyDescriptors(value);
+    } catch {
+        return undefined;
+    }
+};
+
+const ordinaryRecordDescriptors = (
+    value: unknown,
+): OwnPropertyDescriptors | undefined => {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+        return undefined;
+    }
+    try {
+        const prototype = Reflect.getPrototypeOf(value);
+        if (prototype !== Object.prototype && prototype !== null) {
+            return undefined;
+        }
+    } catch {
+        return undefined;
+    }
+
+    return ownPropertyDescriptors(value);
+};
+
+const dataPropertyValue = (
+    descriptors: OwnPropertyDescriptors | undefined,
+    propertyName: string,
+): unknown => {
+    const descriptor = descriptors?.[propertyName];
+    if (descriptor === undefined) {
+        return undefined;
+    }
+
+    return 'value' in descriptor ? descriptor.value : invalidDataProperty;
+};
+
+const isSupportedScoreDomain = (scoreDomain: unknown): boolean => {
+    if (scoreDomain === undefined) {
+        return true;
+    }
+    const descriptors = ordinaryRecordDescriptors(scoreDomain);
+
+    return (
+        descriptors !== undefined &&
+        dataPropertyValue(descriptors, 'min') === 1 &&
+        dataPropertyValue(descriptors, 'max') === 10 &&
+        dataPropertyValue(descriptors, 'skippedOptionScore') === 1
+    );
+};
 
 const normalizeScoreDomain = (
     scoreDomain: ScoreDomain | undefined,
-): ScoreDomain => scoreDomain ?? defaultScoreDomain;
+): ScoreDomain =>
+    scoreDomain === undefined
+        ? defaultScoreDomain
+        : { max: 10, min: 1, skippedOptionScore: 1 };
 
 const supportedSmallRosterPolicies = new Set<SmallRosterPolicy>([
     'ForbidMicroRoster',
@@ -44,7 +97,24 @@ const isSupportedSmallRosterPolicy = (
         ));
 
 const normalizeRosterBound = (value: unknown, defaultValue: number): number =>
-    typeof value === 'number' ? value : defaultValue;
+    value === undefined
+        ? defaultValue
+        : typeof value === 'number'
+          ? value
+          : Number.NaN;
+
+const containsOnlyAsciiCharacters = (value: string): boolean => {
+    for (
+        let characterIndex = 0;
+        characterIndex < value.length;
+        characterIndex += 1
+    ) {
+        if (value.charCodeAt(characterIndex) > 0x7f) {
+            return false;
+        }
+    }
+    return true;
+};
 
 export const derivePollSpecHash = (pollSpec: PollSpec): ProtocolHash =>
     deriveCanonicalObjectHash({
@@ -62,44 +132,105 @@ export const derivePollSpecHash = (pollSpec: PollSpec): ProtocolHash =>
 export const validatePollSpec = (input: unknown): PollSpecValidation => {
     const errors: PollSpecValidationError[] = [];
     const optionLabels = new Set<string>();
-    const inputRecord: Readonly<Record<string, unknown>> = isRecord(input)
-        ? input
-        : {};
-    const pollId =
-        typeof inputRecord.pollId === 'string' ? inputRecord.pollId : undefined;
-    const question =
-        typeof inputRecord.question === 'string'
-            ? inputRecord.question
-            : undefined;
-    const rawOptions = inputRecord.options;
-    const options: readonly unknown[] = Array.isArray(rawOptions)
-        ? rawOptions
-        : [];
-    const topOptionCount = inputRecord.topOptionCount;
-    const scoreDomain = inputRecord.scoreDomain;
-    const smallRosterPolicy = inputRecord.smallRosterPolicy;
-    const minRosterSize = inputRecord.minRosterSize;
-    const maxRosterSize = inputRecord.maxRosterSize;
-    const normalizedOptions: string[] = [];
+    const inputRecordDescriptors = ordinaryRecordDescriptors(input);
+    let remainingDisplayTextByteLength =
+        foundationProfile.maximumCopiedBufferByteLength;
+    const consumeDisplayTextByteLength = (value: string): boolean => {
+        if (value.length > remainingDisplayTextByteLength) {
+            return false;
+        }
+        remainingDisplayTextByteLength -= value.length;
 
-    if (pollId === undefined || pollId.length === 0) {
+        return true;
+    };
+    const pollId = dataPropertyValue(inputRecordDescriptors, 'pollId');
+    const question = dataPropertyValue(inputRecordDescriptors, 'question');
+    const rawOptions = dataPropertyValue(inputRecordDescriptors, 'options');
+    const topOptionCount = dataPropertyValue(
+        inputRecordDescriptors,
+        'topOptionCount',
+    );
+    const scoreDomain = dataPropertyValue(
+        inputRecordDescriptors,
+        'scoreDomain',
+    );
+    const smallRosterPolicy = dataPropertyValue(
+        inputRecordDescriptors,
+        'smallRosterPolicy',
+    );
+    const minRosterSize = dataPropertyValue(
+        inputRecordDescriptors,
+        'minRosterSize',
+    );
+    const maxRosterSize = dataPropertyValue(
+        inputRecordDescriptors,
+        'maxRosterSize',
+    );
+    const validatedOptions: string[] = [];
+
+    let optionCount = 0;
+    let optionDescriptors: OwnPropertyDescriptors | undefined;
+    if (Array.isArray(rawOptions)) {
+        try {
+            const prototype = Reflect.getPrototypeOf(rawOptions);
+            if (prototype === Array.prototype || prototype === null) {
+                optionDescriptors = ownPropertyDescriptors(rawOptions);
+            }
+        } catch {
+            optionDescriptors = undefined;
+        }
+        const lengthDescriptor = optionDescriptors?.length;
+        if (
+            lengthDescriptor !== undefined &&
+            'value' in lengthDescriptor &&
+            Number.isSafeInteger(lengthDescriptor.value) &&
+            lengthDescriptor.value >= 0
+        ) {
+            optionCount = lengthDescriptor.value as number;
+        } else {
+            optionDescriptors = undefined;
+        }
+    }
+
+    if (typeof pollId !== 'string' || pollId.length === 0) {
         errors.push({
             code: 'EmptyPollId',
             field: 'pollId',
             message: 'pollId must be a nonempty string.',
         });
+    } else if (
+        pollId.length > foundationProfile.maximumIdentifierByteLength ||
+        !containsOnlyAsciiCharacters(pollId)
+    ) {
+        errors.push({
+            code: 'UnsupportedHashCriticalText',
+            field: 'pollId',
+            message:
+                'pollId must contain only ASCII characters and fit the foundation identifier limit.',
+        });
     }
-    if (question === undefined || question.length === 0) {
+    if (typeof question !== 'string' || question.length === 0) {
         errors.push({
             code: 'EmptyQuestion',
             field: 'question',
             message: 'question must be a nonempty string.',
         });
+    } else if (
+        question.length > foundationProfile.maximumCopiedBufferByteLength ||
+        !containsOnlyAsciiCharacters(question) ||
+        !consumeDisplayTextByteLength(question)
+    ) {
+        errors.push({
+            code: 'UnsupportedHashCriticalText',
+            field: 'question',
+            message:
+                'question must contain only ASCII characters and fit the bounded poll display-text budget.',
+        });
     }
     if (
-        !Array.isArray(rawOptions) ||
-        options.length < 1 ||
-        options.length > 20
+        optionDescriptors === undefined ||
+        optionCount < 1 ||
+        optionCount > 20
     ) {
         errors.push({
             code: 'InvalidOptionCount',
@@ -108,34 +239,56 @@ export const validatePollSpec = (input: unknown): PollSpecValidation => {
         });
     }
 
-    options.forEach((optionLabel, optionIndex) => {
+    for (
+        let optionIndex = 0;
+        optionDescriptors !== undefined &&
+        optionCount <= 20 &&
+        optionIndex < optionCount;
+        optionIndex += 1
+    ) {
+        const optionLabel = dataPropertyValue(
+            optionDescriptors,
+            String(optionIndex),
+        );
         if (typeof optionLabel !== 'string' || optionLabel.length === 0) {
             errors.push({
                 code: 'EmptyOptionLabel',
                 field: `options[${optionIndex}]`,
                 message: 'option labels must be nonempty strings.',
             });
-            return;
+            continue;
         }
-        const normalizedOptionLabel = optionLabel.normalize('NFC');
-        if (optionLabels.has(normalizedOptionLabel)) {
+        if (
+            optionLabel.length >
+                foundationProfile.maximumCopiedBufferByteLength ||
+            !containsOnlyAsciiCharacters(optionLabel) ||
+            !consumeDisplayTextByteLength(optionLabel)
+        ) {
+            errors.push({
+                code: 'UnsupportedHashCriticalText',
+                field: `options[${optionIndex}]`,
+                message:
+                    'option labels must contain only ASCII characters and fit the bounded poll display-text budget.',
+            });
+            continue;
+        }
+        if (optionLabels.has(optionLabel)) {
             errors.push({
                 code: 'DuplicateOptionLabel',
                 field: `options[${optionIndex}]`,
-                message:
-                    'option labels must be unique after Unicode NFC normalization.',
+                message: 'option labels must be unique.',
             });
         }
 
-        optionLabels.add(normalizedOptionLabel);
-        normalizedOptions.push(normalizedOptionLabel);
-    });
+        optionLabels.add(optionLabel);
+        validatedOptions.push(optionLabel);
+    }
 
     if (
         typeof topOptionCount !== 'number' ||
         !Number.isInteger(topOptionCount) ||
         topOptionCount < 1 ||
-        topOptionCount > options.length
+        topOptionCount > optionCount
     ) {
         errors.push({
             code: 'InvalidTopOptionCount',
@@ -189,9 +342,9 @@ export const validatePollSpec = (input: unknown): PollSpecValidation => {
     return {
         isValid: true,
         normalized: {
-            pollId: pollId ?? '',
-            question: question ?? '',
-            options: normalizedOptions,
+            pollId: typeof pollId === 'string' ? pollId : '',
+            question: typeof question === 'string' ? question : '',
+            options: validatedOptions,
             topOptionCount:
                 typeof topOptionCount === 'number' ? topOptionCount : 0,
             scoreDomain: normalizeScoreDomain(

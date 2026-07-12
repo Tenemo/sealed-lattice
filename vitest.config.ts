@@ -9,11 +9,6 @@ import { defineConfig, type UserWorkspaceConfig } from 'vitest/config';
 import type { BrowserInstanceOption } from 'vitest/node';
 
 import { resolveTestDiagnosticPaths } from './tools/ci/test-diagnostic-environment.js';
-import {
-    browserTestLaneDefinitions,
-    nodeHookTimeoutMs,
-    nodeTestProjectDefinitions,
-} from './tools/ci/test-lanes.js';
 import { VitestDiagnosticReporter } from './tools/ci/vitest-diagnostic-reporter.js';
 
 const repoRoot = path.dirname(fileURLToPath(import.meta.url));
@@ -29,6 +24,64 @@ const browserServerHost = '127.0.0.1';
 // 49152+ ephemeral port range Windows reserves; strictPort: false still increments it
 // for concurrent browser lanes and clones.
 const browserServerBasePort = 41000;
+const nodeHookTimeoutMs = 240_000;
+const nodeTestTimeoutMs = 60_000;
+const nodeKernelTestTimeoutMs = 15 * 60_000;
+const nodeKernelHeavyTestTimeoutMs = 60 * 60_000;
+
+const protocolNodeTestGlobs = [
+    'packages/protocol/tests/node/**/*.test.ts',
+] as const;
+const kernelNodeTestGlobs = [
+    'packages/wasm/tests/node/**/*.kernel.test.ts',
+    'tests/node/**/*.kernel.test.ts',
+] as const;
+const heavyKernelNodeTestGlobs = [
+    'packages/wasm/tests/node/transcript-core-kernel/bgv-collective-setup/**/*.kernel.test.ts',
+] as const;
+
+const nodeTestProjectDefinitions = [
+    {
+        exclude: [...protocolNodeTestGlobs, ...kernelNodeTestGlobs],
+        include: [
+            'packages/*/tests/node/**/*.test.ts',
+            'tests/node/**/*.test.ts',
+        ],
+        projectName: 'node',
+        testTimeout: nodeTestTimeoutMs,
+    },
+    {
+        include: protocolNodeTestGlobs,
+        projectName: 'node-protocol',
+        testTimeout: nodeKernelTestTimeoutMs,
+    },
+    {
+        exclude: heavyKernelNodeTestGlobs,
+        fileParallelism: false,
+        include: kernelNodeTestGlobs,
+        projectName: 'node-kernel-fast',
+        testTimeout: nodeKernelTestTimeoutMs,
+    },
+    {
+        fileParallelism: false,
+        include: heavyKernelNodeTestGlobs,
+        projectName: 'node-kernel-heavy',
+        testTimeout: nodeKernelHeavyTestTimeoutMs,
+    },
+] as const;
+
+const desktopBrowserTestGlobs = [
+    'packages/*/tests/browser/**/*.browser.test.ts',
+] as const;
+const mobileBrowserTestGlobs = [
+    'packages/sdk/tests/browser/election-foundation-public-api.browser.test.ts',
+    'packages/wasm/tests/browser/owned-kernel-worker-channel.browser.test.ts',
+    'packages/protocol/tests/browser/authenticated-checkpoint-store.browser.test.ts',
+    'packages/protocol/tests/browser/browser-action-storage-custody.browser.test.ts',
+    'packages/protocol/tests/browser/durable-non-forking-state-service.browser.test.ts',
+    'packages/protocol/tests/browser/indexed-db-untrusted-storage-adapter.browser.test.ts',
+    'packages/protocol/tests/browser/web-lock-owned-untrusted-storage-transaction-store.browser.test.ts',
+] as const;
 
 const testDiagnosticPaths = resolveTestDiagnosticPaths();
 const testAttachmentDirectoryPath = testDiagnosticPaths.attachmentDirectoryPath;
@@ -259,12 +312,14 @@ export default defineConfig({
                 makeNodeProject(projectDefinition),
             ),
             makeBrowserProject({
-                ...browserTestLaneDefinitions.desktop,
+                include: desktopBrowserTestGlobs,
                 instances: desktopBrowserInstances,
+                projectName: 'browser-desktop',
             }),
             makeBrowserProject({
-                ...browserTestLaneDefinitions.mobile,
+                include: mobileBrowserTestGlobs,
                 instances: mobileBrowserInstances,
+                projectName: 'browser-mobile',
             }),
         ],
     },

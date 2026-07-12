@@ -111,7 +111,6 @@ pub(super) fn begin_target_decryption_result_release(
     );
 
     Ok(json!({
-        "operation": "beginBgvTargetDecryptionResultRelease",
         "releaseVerificationId": release_verification_id,
         "setupPackageHash": input.setup_binding.setup_package_hash,
         "targetAcceptedRecordHash": input.target_accepted.target_accepted_record_hash,
@@ -208,7 +207,6 @@ pub(super) fn finish_target_decryption_result_release(
         &session.target_ciphertexts,
         &session.target_share_profile,
         session.verified_shares,
-        "finishBgvTargetDecryptionResultRelease",
     )?;
     consumed_targets.insert(consumption_key);
 
@@ -255,7 +253,6 @@ fn absorb_target_result_release_share(
     session.verified_shares.push(verified_share);
 
     Ok(json!({
-        "operation": "absorbBgvTargetDecryptionResultReleaseShare",
         "absorbedShareCount": session.verified_shares.len(),
         "requiredShareCount": session.target_share_profile.decryption_share_quorum,
         "rosterPosition": roster_position,
@@ -345,7 +342,6 @@ fn release_verified_target_shares(
     target_ciphertexts: &TargetCiphertextPair,
     target_share_profile: &TargetShareProfile,
     verified_shares: Vec<VerifiedTargetShareRelease>,
-    operation: &str,
 ) -> CanonicalResult<Value> {
     let interpolation_points = verified_shares
         .iter()
@@ -393,7 +389,6 @@ fn release_verified_target_shares(
     let target_result_hash = derive_canonical_object_hash(&result_preimage)?;
 
     Ok(json!({
-        "operation": operation,
         "targetResultHash": target_result_hash,
         "targetIdByOption": result_preimage["targetIdByOption"].clone(),
         "targetOrderByOption": result_preimage["targetOrderByOption"].clone(),

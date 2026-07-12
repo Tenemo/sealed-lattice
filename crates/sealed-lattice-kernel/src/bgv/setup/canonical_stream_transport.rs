@@ -618,23 +618,37 @@ pub(crate) fn read_bgv_canonical_material_chunk(
 ) -> Result<(), u32> {
     let mut registry = lock_registry()?;
     let mut reader = registry.take_owned_material_reader(handle, capability)?;
-    let chunk_index = usize::try_from(chunk_index)
-        .map_err(|_| refusal_status(RefusalReason::WrongTypeOrLength))?;
+    let chunk_index = match usize::try_from(chunk_index) {
+        Ok(chunk_index) => chunk_index,
+        Err(_) => {
+            return terminate_material_reader_with_refusal(
+                &reader,
+                RefusalReason::WrongTypeOrLength,
+            );
+        }
+    };
     if chunk_index != reader.next_chunk_index {
-        return Err(refusal_status(RefusalReason::WrongTypeOrLength));
+        return terminate_material_reader_with_refusal(&reader, RefusalReason::WrongTypeOrLength);
     }
-    let chunk = reader
-        .material
-        .chunk(chunk_index)
-        .ok_or_else(|| refusal_status(RefusalReason::WrongTypeOrLength))?;
+    let Some(chunk) = reader.material.chunk(chunk_index) else {
+        return terminate_material_reader_with_refusal(&reader, RefusalReason::WrongTypeOrLength);
+    };
     if output.len() != chunk.len() {
-        return Err(refusal_status(RefusalReason::WrongTypeOrLength));
+        return terminate_material_reader_with_refusal(&reader, RefusalReason::WrongTypeOrLength);
     }
     output.copy_from_slice(chunk);
     reader.next_chunk_index += 1;
     registry.active_material_reader = Some(reader);
 
     Ok(())
+}
+
+fn terminate_material_reader_with_refusal(
+    reader: &BgvCanonicalMaterialReaderSession,
+    refusal_reason: RefusalReason,
+) -> Result<(), u32> {
+    evict_material_reader_source(reader)?;
+    Err(refusal_status(refusal_reason))
 }
 
 pub(crate) fn finish_bgv_canonical_material_reader(
@@ -942,6 +956,105 @@ mod tests {
         assert!(
             verified_canonical_proof_material_bytes("public-key-share", &cancelled_root)
                 .expect("cancelled material store lookup")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn malformed_material_reader_chunks_terminate_evict_and_allow_a_clean_retry() {
+        let wrong_index_root = "b1".repeat(MATERIAL_ROOT_BYTE_LENGTH);
+        let wrong_output_length_root = "b2".repeat(MATERIAL_ROOT_BYTE_LENGTH);
+        let retry_root = "b3".repeat(MATERIAL_ROOT_BYTE_LENGTH);
+        let roots = [
+            wrong_index_root.clone(),
+            wrong_output_length_root.clone(),
+            retry_root.clone(),
+        ];
+        evict_verified_canonical_proof_materials(&roots);
+
+        let retain_material = |material_root: &str, byte: u8| {
+            retain_generated_canonical_proof_material(
+                "public-key-share",
+                material_root.to_string(),
+                vec![byte; 17],
+            )
+            .expect("reader source material fixture");
+        };
+        let material_root_bytes = |material_root: &str| {
+            crate::transcript_core::decode_hex(material_root)
+                .expect("reader source material root is canonical hex")
+        };
+
+        retain_material(&wrong_index_root, 0x71);
+        let wrong_index_capability = [0x71; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH];
+        let wrong_index_reader = begin_bgv_canonical_material_reader(
+            BGV_CANONICAL_STREAM_FAMILY_PUBLIC_KEY_SHARE,
+            &material_root_bytes(&wrong_index_root),
+            wrong_index_capability,
+        )
+        .expect("wrong-index reader begins");
+        let mut correct_length_output = [0_u8; 17];
+        assert_eq!(
+            read_bgv_canonical_material_chunk(
+                wrong_index_reader.handle,
+                &wrong_index_capability,
+                1,
+                &mut correct_length_output,
+            ),
+            Err(refusal_status(RefusalReason::WrongTypeOrLength)),
+        );
+        assert!(
+            verified_canonical_proof_material_bytes("public-key-share", &wrong_index_root)
+                .expect("wrong-index source lookup")
+                .is_none()
+        );
+
+        retain_material(&wrong_output_length_root, 0x72);
+        let wrong_output_length_capability = [0x72; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH];
+        let wrong_output_length_reader = begin_bgv_canonical_material_reader(
+            BGV_CANONICAL_STREAM_FAMILY_PUBLIC_KEY_SHARE,
+            &material_root_bytes(&wrong_output_length_root),
+            wrong_output_length_capability,
+        )
+        .expect("wrong-output-length reader begins after wrong-index termination");
+        let mut short_output = [0_u8; 16];
+        assert_eq!(
+            read_bgv_canonical_material_chunk(
+                wrong_output_length_reader.handle,
+                &wrong_output_length_capability,
+                0,
+                &mut short_output,
+            ),
+            Err(refusal_status(RefusalReason::WrongTypeOrLength)),
+        );
+        assert!(
+            verified_canonical_proof_material_bytes("public-key-share", &wrong_output_length_root,)
+                .expect("wrong-output-length source lookup")
+                .is_none()
+        );
+
+        retain_material(&retry_root, 0x73);
+        let retry_capability = [0x73; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH];
+        let retry_reader = begin_bgv_canonical_material_reader(
+            BGV_CANONICAL_STREAM_FAMILY_PUBLIC_KEY_SHARE,
+            &material_root_bytes(&retry_root),
+            retry_capability,
+        )
+        .expect("clean retry reader begins");
+        let mut retry_output = [0_u8; 17];
+        read_bgv_canonical_material_chunk(
+            retry_reader.handle,
+            &retry_capability,
+            0,
+            &mut retry_output,
+        )
+        .expect("clean retry chunk reads");
+        assert_eq!(retry_output, [0x73; 17]);
+        finish_bgv_canonical_material_reader(retry_reader.handle, &retry_capability)
+            .expect("clean retry reader finishes");
+        assert!(
+            verified_canonical_proof_material_bytes("public-key-share", &retry_root)
+                .expect("clean retry source lookup")
                 .is_none()
         );
     }

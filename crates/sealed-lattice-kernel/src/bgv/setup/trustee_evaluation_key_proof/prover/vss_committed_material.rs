@@ -228,18 +228,11 @@ fn bound_message_coefficients(
                 "VSS coefficient message coefficient",
             )?);
         }
-        let recipient_messages_by_item: Vec<&[i64]> = if witness
+        let recipient_messages_by_item: Vec<&[i64]> = witness
             .vss_public_recipient_share_messages_by_item
-            .is_empty()
-        {
-            vec![witness.vss_public_recipient_share_messages.as_slice()]
-        } else {
-            witness
-                .vss_public_recipient_share_messages_by_item
-                .iter()
-                .map(Vec::as_slice)
-                .collect()
-        };
+            .iter()
+            .map(Vec::as_slice)
+            .collect();
         if recipient_messages_by_item.len() != share_linkage.item_count() {
             return Err(invalid_succinct_setup_proof(
                 "VSS recipient share witness count does not match the bound commitments",

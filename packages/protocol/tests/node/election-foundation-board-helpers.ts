@@ -3,25 +3,13 @@ import type {
     BoardConsistencyInput,
     InclusionProof,
     SignedBoardHead,
-    TargetFinalityRecord,
-    TargetProposal,
-    WitnessCheckpoint,
 } from '@sealed-lattice/types';
 
 import {
     boardPolicyHash,
     boardPublicKeyHash,
     ceremonyId,
-    createKeyFixture,
-    deriveFixtureHash,
     createSignature,
-    defaultThresholdParametersHash,
-    defaultEvaluatorReplayRecordHash,
-    manifestOpaqueBindings,
-    targetFinalityPolicyHash,
-    witnessIdentities,
-    witnessPolicyHash,
-    witnessPublicKeyHashes,
 } from './election-foundation-fixture-constants';
 
 import {
@@ -31,12 +19,6 @@ import {
     deriveBoardRootHash,
     deriveInclusionProofHash,
 } from '#packages/protocol/src/board/index';
-import {
-    deriveTargetFinalityCheckpointHash,
-    deriveTargetFinalityRecordHash,
-    deriveTargetProposalHash,
-    deriveWitnessCheckpointHash,
-} from '#packages/protocol/src/finality/index';
 
 export const createBoardHead = (
     boardSequence: number,
@@ -182,166 +164,6 @@ export const createBoardHeadWithObjects = (
     );
 
     return { head, inclusionProofs };
-};
-
-export const createTargetProposalHead = (
-    boardSequence: number,
-    previousHeadHash: string | null,
-    branchName = 'main',
-    evaluatorReplayRecordHash = defaultEvaluatorReplayRecordHash,
-): SignedBoardHead =>
-    createBoardHeadWithObjects(
-        boardSequence,
-        previousHeadHash,
-        [
-            {
-                objectType: 'EvaluatorReplayRecord',
-                objectHash: evaluatorReplayRecordHash,
-                boardPosition: 0,
-            },
-        ],
-        branchName,
-    ).head;
-
-export const createWitnessCheckpoint = (
-    witnessIdentity: string,
-    finalizedBoardHeadHash: string,
-    targetProposalHash = deriveCanonicalObjectHash({
-        objectType: 'WitnessCheckpointProposalPlaceholder',
-        finalizedBoardHeadHash,
-        witnessIdentity,
-    }),
-    targetFinalityCheckpointHash = deriveCanonicalObjectHash({
-        objectType: 'WitnessCheckpointFinalityPlaceholder',
-        finalizedBoardHeadHash,
-        targetProposalHash,
-        witnessIdentity,
-    }),
-    electionManifestHash: string | null = null,
-    overrides: Partial<WitnessCheckpoint> = {},
-): WitnessCheckpoint => {
-    const checkpointPayload = {
-        objectType: 'WitnessCheckpoint',
-        ceremonyId,
-        targetFinalityScope: 'target',
-        targetProposalHash,
-        targetFinalityCheckpointHash,
-        witnessPolicyHash,
-        targetFinalityPolicyHash,
-        witnessIdentity,
-        ...overrides,
-    } satisfies Omit<WitnessCheckpoint, 'checkpointHash' | 'signature'>;
-    const checkpointHash = deriveWitnessCheckpointHash(checkpointPayload);
-
-    return {
-        ...checkpointPayload,
-        checkpointHash,
-        signature: createSignature(
-            'WitnessCheckpoint',
-            'Witness',
-            witnessIdentity,
-            witnessPublicKeyHashes[witnessIdentity] ??
-                createKeyFixture(`unknown-witness:${witnessIdentity}`)
-                    .publicKeyHash,
-            checkpointHash,
-            {
-                boardHeadHash: finalizedBoardHeadHash,
-                manifestHash: electionManifestHash,
-            },
-        ),
-    };
-};
-
-export const createTargetFinalityRecord = (
-    finalizedHead: SignedBoardHead,
-    evaluatorReplayRecordHash = defaultEvaluatorReplayRecordHash,
-    witnessCount = 5,
-    proposalOverrides: Partial<Omit<TargetProposal, 'targetProposalHash'>> = {},
-): TargetFinalityRecord => {
-    const proposalPayload = {
-        ceremonyId,
-        electionManifestHash: deriveCanonicalObjectHash({
-            objectType: 'FixtureManifestPlaceholder',
-            ceremonyId,
-            marker: 'default-manifest',
-        }),
-        thresholdParametersHash: defaultThresholdParametersHash,
-        evaluatorReplayContextHash: deriveCanonicalObjectHash({
-            objectType: 'FixtureEvaluatorReplayContextPlaceholder',
-            ceremonyId,
-            marker: 'direct-evaluator-replay',
-        }),
-        evaluatorReplayRecordHash,
-        encryptedBallotAggregateHash: deriveCanonicalObjectHash({
-            objectType: 'FixtureCiphertextRootPlaceholder',
-            ceremonyId,
-            marker: 'direct-encrypted-ballot-aggregate',
-        }),
-        targetCiphertextHash: deriveCanonicalObjectHash({
-            objectType: 'FixtureCiphertextRootPlaceholder',
-            ceremonyId,
-            marker: 'direct-target-ciphertext',
-        }),
-        targetLayoutHash: deriveCanonicalObjectHash({
-            objectType: 'FixtureTargetLayoutPlaceholder',
-            layout: 'direct-sparse-target-layout',
-        }),
-        bgvParametersHash: manifestOpaqueBindings.bgvParametersHash,
-        targetFinalityPolicyHash,
-        topOptionCount: 2,
-        tiePolicyHash: deriveFixtureHash('fixture-tie-policy', {
-            tiePolicy: 'HigherScoreThenLowerOptionIndex',
-        }),
-        ...proposalOverrides,
-    } satisfies Omit<TargetProposal, 'targetProposalHash'>;
-    const targetProposalHash = deriveTargetProposalHash(proposalPayload);
-    const targetFinalityCheckpointPayload = {
-        ...proposalPayload,
-        targetProposalHash,
-        objectType: 'TargetFinalityCheckpoint',
-        boardPolicyHash,
-        finalizedBoardHeadHash: finalizedHead.headHash,
-        witnessPolicyHash,
-    } as const;
-    const targetFinalityCheckpointHash = deriveTargetFinalityCheckpointHash(
-        targetFinalityCheckpointPayload,
-    );
-    const targetFinalityCheckpoint = {
-        ...targetFinalityCheckpointPayload,
-        targetFinalityCheckpointHash,
-    };
-    const inclusionProof = createInclusionProof(
-        finalizedHead,
-        'EvaluatorReplayRecord',
-        evaluatorReplayRecordHash,
-    );
-    const witnessCheckpoints = witnessIdentities
-        .slice(0, witnessCount)
-        .map((witnessIdentity) =>
-            createWitnessCheckpoint(
-                witnessIdentity,
-                finalizedHead.headHash,
-                targetProposalHash,
-                targetFinalityCheckpointHash,
-                proposalPayload.electionManifestHash,
-            ),
-        );
-    const payload = {
-        objectType: 'TargetFinalityRecord',
-        ceremonyId,
-        targetFinalityScope: 'target',
-        targetProposalHash,
-        targetFinalityCheckpoint,
-        witnessPolicyHash,
-        targetFinalityPolicyHash,
-        inclusionProof,
-        witnessCheckpoints,
-    } satisfies Omit<TargetFinalityRecord, 'targetFinalityRecordHash'>;
-
-    return {
-        ...payload,
-        targetFinalityRecordHash: deriveTargetFinalityRecordHash(payload),
-    };
 };
 
 export const createBoardEvidence = (

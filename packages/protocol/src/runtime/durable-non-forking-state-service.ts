@@ -233,6 +233,11 @@ type AuthenticatedIntentRecord = Readonly<{
     intent: InternalResolvedStateIntent;
 }>;
 
+type IntentRecordMutation = Readonly<{
+    expectedCurrentValue: Uint8Array | null;
+    record: AuthenticatedIntentRecord;
+}>;
+
 type StateLockSnapshot = Readonly<{
     output: AuthenticatedIntentRecord | undefined;
     reservation: AuthenticatedIntentRecord | undefined;
@@ -1254,9 +1259,12 @@ export class DurableNonForkingStateService {
             bytes: input.canonicalIntentCarrier.slice(),
             intent: input.intent,
         };
-        const writes = new Map<string, AuthenticatedIntentRecord>();
+        const writes = new Map<string, IntentRecordMutation>();
         if (existingVoteIntent === undefined) {
-            writes.set(input.voteIntentLogicalRecordKey, voteIntent);
+            writes.set(input.voteIntentLogicalRecordKey, {
+                expectedCurrentValue: null,
+                record: voteIntent,
+            });
         }
         if (input.intent.voteKind === 'reservation') {
             if (stateSnapshot.reservation !== undefined) {
@@ -1280,8 +1288,11 @@ export class DurableNonForkingStateService {
                 writes.set(
                     reservationLockLogicalRecordKey(input.intent.stateKey),
                     {
-                        bytes: input.canonicalIntentCarrier.slice(),
-                        intent: input.intent,
+                        expectedCurrentValue: null,
+                        record: {
+                            bytes: input.canonicalIntentCarrier.slice(),
+                            intent: input.intent,
+                        },
                     },
                 );
             }
@@ -1318,11 +1329,18 @@ export class DurableNonForkingStateService {
             } else {
                 writes.set(
                     reservationLockLogicalRecordKey(input.intent.stateKey),
-                    stateSnapshot.reservation,
+                    {
+                        expectedCurrentValue:
+                            stateSnapshot.reservation.bytes.slice(),
+                        record: stateSnapshot.reservation,
+                    },
                 );
                 writes.set(outputLockLogicalRecordKey(input.intent.stateKey), {
-                    bytes: input.canonicalIntentCarrier.slice(),
-                    intent: input.intent,
+                    expectedCurrentValue: null,
+                    record: {
+                        bytes: input.canonicalIntentCarrier.slice(),
+                        intent: input.intent,
+                    },
                 });
             }
         } else {
@@ -1372,14 +1390,19 @@ export class DurableNonForkingStateService {
             if (reservation !== undefined) {
                 writes.set(
                     reservationLockLogicalRecordKey(input.intent.stateKey),
-                    reservation,
+                    {
+                        expectedCurrentValue:
+                            stateSnapshot.reservation?.bytes.slice() ?? null,
+                        record: reservation,
+                    },
                 );
             }
             if (output !== undefined) {
-                writes.set(
-                    outputLockLogicalRecordKey(input.intent.stateKey),
-                    output,
-                );
+                writes.set(outputLockLogicalRecordKey(input.intent.stateKey), {
+                    expectedCurrentValue:
+                        stateSnapshot.output?.bytes.slice() ?? null,
+                    record: output,
+                });
             }
         }
 
@@ -1572,16 +1595,18 @@ export class DurableNonForkingStateService {
     }
 
     async #writeIntentRecords(
-        records: ReadonlyMap<string, AuthenticatedIntentRecord>,
+        mutations: ReadonlyMap<string, IntentRecordMutation>,
     ): Promise<void> {
         const transaction = await this.#store.beginTransaction({
             lifetimeMilliseconds: this.#limits.transactionLifetimeMilliseconds,
         });
         let commitStarted = false;
         try {
-            for (const [logicalRecordKey, record] of records) {
+            for (const [logicalRecordKey, mutation] of mutations) {
+                const { expectedCurrentValue, record } = mutation;
                 const lease = await transaction.issueWriteLease({
                     declaredByteLength: record.bytes.byteLength,
+                    expectedCurrentValue,
                     logicalRecordKey,
                 });
                 await lease.write(record.bytes.slice());
@@ -1707,6 +1732,7 @@ export class DurableNonForkingStateService {
                     reservationLockLogicalRecordKey(
                         input.expectedVote.stateKey,
                     ),
+                    null,
                 );
             } else {
                 await this.#stageIntentRecord(
@@ -1715,26 +1741,31 @@ export class DurableNonForkingStateService {
                         input.expectedVote.stateKey,
                     ),
                     input.lockSnapshot.reservation,
+                    input.lockSnapshot.reservation.bytes,
                 );
             }
             if (input.lockSnapshot.output === undefined) {
                 await transaction.stageDeletion(
                     outputLockLogicalRecordKey(input.expectedVote.stateKey),
+                    null,
                 );
             } else {
                 await this.#stageIntentRecord(
                     transaction,
                     outputLockLogicalRecordKey(input.expectedVote.stateKey),
                     input.lockSnapshot.output,
+                    input.lockSnapshot.output.bytes,
                 );
             }
             await this.#stageIntentRecord(
                 transaction,
                 input.lockSnapshot.voteIntentLogicalRecordKey,
                 input.lockSnapshot.voteIntent,
+                input.lockSnapshot.voteIntent.bytes,
             );
             const voteLease = await transaction.issueWriteLease({
                 declaredByteLength: input.candidateCarrier.byteLength,
+                expectedCurrentValue: null,
                 logicalRecordKey: input.voteLogicalRecordKey,
             });
             await voteLease.write(input.candidateCarrier.slice());
@@ -1756,9 +1787,11 @@ export class DurableNonForkingStateService {
         transaction: UntrustedStorageTransaction,
         logicalRecordKey: string,
         record: AuthenticatedIntentRecord,
+        expectedCurrentValue: Uint8Array,
     ): Promise<void> {
         const lease = await transaction.issueWriteLease({
             declaredByteLength: record.bytes.byteLength,
+            expectedCurrentValue,
             logicalRecordKey,
         });
         await lease.write(record.bytes.slice());

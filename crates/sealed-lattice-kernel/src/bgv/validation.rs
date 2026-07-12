@@ -7,7 +7,6 @@ use crate::{
 };
 
 pub(crate) fn bgv_operation_rejection(
-    operation: &str,
     reason_code: &str,
     message: impl Into<String>,
     object_hash: Option<&str>,
@@ -23,7 +22,6 @@ pub(crate) fn bgv_operation_rejection(
 
     json!({
         "isValid": false,
-        "operation": operation,
         "refusedObjects": [refused_object],
     })
 }

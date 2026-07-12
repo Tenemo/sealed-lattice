@@ -2,11 +2,6 @@ import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 
 import {
     setupTransportChunkSizeBytes,
-    setupTransportCopyCountLimit,
-    setupTransportLargestSingleBufferBytes,
-    setupTransportLazyLoadingPolicy,
-    setupTransportResumePolicy,
-    setupTransportStorageQuotaBytes,
     setupTransportStreamOrder,
 } from './constants.js';
 import { assertProtocolHash } from './field-helpers.js';
@@ -111,12 +106,7 @@ const setupTransportCertificateBody = (
         chunking: 'required',
         chunkCount,
         totalByteLength,
-        storageQuotaBytes: setupTransportStorageQuotaBytes,
-        largestSingleBufferBytes: setupTransportLargestSingleBufferBytes,
-        copyCountLimit: setupTransportCopyCountLimit,
         streamVerificationOrder: setupTransportStreamOrder,
-        resumePolicy: setupTransportResumePolicy,
-        lazyLoadingPolicy: setupTransportLazyLoadingPolicy,
         transportedObjects,
     };
 };

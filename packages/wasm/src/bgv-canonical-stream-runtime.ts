@@ -244,6 +244,14 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
                     'The BGV canonical stream returned malformed begin metadata.',
                 );
             }
+            if (
+                this.#context.memory.buffer.byteLength >
+                foundationProfile.maximumWasmMemoryByteLength - totalByteLength
+            ) {
+                throw new CanonicalStreamResourceError(
+                    'Retaining the BGV canonical material would exceed the remaining WASM memory profile.',
+                );
+            }
             const lease: ActiveLease = {
                 capabilityPointer,
                 chunkCount,

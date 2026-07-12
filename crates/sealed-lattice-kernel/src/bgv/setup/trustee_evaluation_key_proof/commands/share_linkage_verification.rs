@@ -360,23 +360,46 @@ pub(super) fn verify_vss_share_linkage_item_against_public_records(
     }))
 }
 
+#[cfg(test)]
 pub(crate) fn verify_vss_share_linkage_proof_material_set_from_request(
     request: &Value,
+) -> CanonicalResult<Value> {
+    let statement_verification =
+        crate::bgv::setup::vss_commitment::verify_vss_share_linkage_bindings_request(request)?;
+    verify_vss_share_linkage_proof_material_set_with_statement_verification(
+        request,
+        &statement_verification,
+    )
+}
+
+pub(in crate::bgv::setup) fn verify_vss_share_linkage_statement_and_proof_material_set_from_request(
+    request: &Value,
+) -> CanonicalResult<(Value, Value)> {
+    let statement_verification =
+        crate::bgv::setup::vss_commitment::verify_vss_share_linkage_bindings_request(request)?;
+    let proof_material_verification =
+        verify_vss_share_linkage_proof_material_set_with_statement_verification(
+            request,
+            &statement_verification,
+        )?;
+    Ok((statement_verification, proof_material_verification))
+}
+
+fn verify_vss_share_linkage_proof_material_set_with_statement_verification(
+    request: &Value,
+    statement_verification: &Value,
 ) -> CanonicalResult<Value> {
     let statement = request.get("statement").ok_or_else(|| {
         invalid_succinct_setup_proof("share-linkage material statement must be present")
     })?;
-    let statement_verification =
-        crate::bgv::setup::vss_commitment::verify_vss_share_linkage_bindings_request(request)?;
-    let statement_root = read_string(&statement_verification, "statementRoot")?;
-    let participant_count = usize::try_from(read_u64(&statement_verification, "participantCount")?)
+    let statement_root = read_string(statement_verification, "statementRoot")?;
+    let participant_count = usize::try_from(read_u64(statement_verification, "participantCount")?)
         .map_err(|_| invalid_succinct_setup_proof("participantCount does not fit usize"))?;
     let q_share_rns_limb_count =
-        usize::try_from(read_u64(&statement_verification, "qShareRnsLimbCount")?)
+        usize::try_from(read_u64(statement_verification, "qShareRnsLimbCount")?)
             .map_err(|_| invalid_succinct_setup_proof("qShareRnsLimbCount does not fit usize"))?;
-    let threshold_degree =
-        usize::try_from(read_u64(&statement_verification, "thresholdDegree")?)
-            .map_err(|_| invalid_succinct_setup_proof("thresholdDegree does not fit usize"))?;
+    let threshold_degree = usize::try_from(read_u64(statement_verification, "thresholdDegree")?)
+        .map_err(|_| invalid_succinct_setup_proof("thresholdDegree does not fit usize"))?;
     let coefficient_commitment_set = request.get("coefficientCommitmentSet").ok_or_else(|| {
         invalid_succinct_setup_proof(
             "share-linkage material coefficientCommitmentSet must be present",
@@ -639,7 +662,6 @@ pub(crate) fn verify_vss_share_linkage_proof_material_set_from_request(
     )?;
 
     Ok(json!({
-        "operation": "verifyVssShareLinkageProofMaterialSet",
         "proofFamily": VSS_SHARE_LINKAGE_PROOF_FAMILY,
         "statementRoot": statement_root,
         "proofMaterialSetRoot": expected_material_root,

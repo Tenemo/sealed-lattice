@@ -123,7 +123,6 @@ pub(crate) fn run_direct_encrypted_ballot(request: &Value) -> CanonicalResult<Va
         .collect::<Vec<_>>();
 
     Ok(json!({
-        "operation": OPERATION,
         "parameters": {
             "bgvParametersHash": bgv_parameters_hash()?,
             "polynomialDegree": POLYNOMIAL_DEGREE,

@@ -7,7 +7,6 @@ import {
     type ProtocolSignatureEnvelope,
     type RegistrationEntry,
     type SignedBoardHead,
-    type TargetFinalityRecord,
     boardKeyFixture,
     boardPolicyHash,
     boardPublicKeyHash,
@@ -23,8 +22,6 @@ import {
     createRegistrationEntry,
     createRosterManifestTranscriptInput,
     createSignature,
-    createTargetFinalityRecord,
-    createTargetProposalHead,
     deriveFixtureHash,
     deriveConflictingHeadEvidenceHash,
     deriveInclusionProofHash,
@@ -34,14 +31,10 @@ import {
     replaceSignatureBytes,
     replaceSignatureProfile,
     replaceSignaturePublicKeyBytes,
-    targetFinalityPolicy,
     verifyBoardConsistency,
     verifyCastReceiptShell,
     verifyRosterManifestTranscript,
     verifySignedObjectSignature,
-    verifyTargetFinality,
-    witnessPolicy,
-    witnessPublicKeyHashes,
 } from './election-foundation-test-helpers';
 
 describe('board consistency', () => {
@@ -215,7 +208,7 @@ describe('board consistency', () => {
             ...head1,
             signature: createSignature(
                 'BoardHead',
-                'Witness',
+                'Trustee',
                 'board',
                 boardPublicKeyHash,
                 head1.headHash,
@@ -506,17 +499,11 @@ describe('board consistency', () => {
 
     it('returns structured refusals for malformed JavaScript verifier inputs', () => {
         const head0 = createBoardHead(0, null);
-        const targetHead = createTargetProposalHead(1, head0.headHash);
-        const targetRecord = createTargetFinalityRecord(targetHead);
         const malformedBoardHead = { ...head0 } as Record<string, unknown>;
         const malformedSignature = {
             ...head0.signature,
             signedRoot: undefined,
         } as unknown as ProtocolSignatureEnvelope;
-        const malformedTargetRecord = {
-            ...targetRecord,
-            witnessCheckpoints: undefined,
-        } as unknown as TargetFinalityRecord;
         const castReceiptHash = deriveCanonicalObjectHash({
             objectType: 'CastReceiptHash',
             malformed: 'receipt',
@@ -615,17 +602,6 @@ describe('board consistency', () => {
         expectFailClosed(
             () => verifySignedObjectSignature(malformedSignature),
             'InvalidSignature',
-        );
-        expectFailClosed(
-            () =>
-                verifyTargetFinality({
-                    boardEvidence: createBoardEvidence([head0, targetHead]),
-                    record: malformedTargetRecord,
-                    targetFinalityPolicy,
-                    witnessPolicy,
-                    witnessPublicKeyHashes,
-                }),
-            'TargetFinalityPolicyMismatch',
         );
         expectFailClosed(
             () =>

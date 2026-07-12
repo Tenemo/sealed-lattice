@@ -1086,25 +1086,6 @@ export const runCommandAndCaptureOutput = async (
     };
 };
 
-const runCommandsInParallel = async (
-    invocations: readonly CommandInvocation[],
-    input: {
-        readonly observer?: CommandRunObserver;
-        readonly outputMode?: CommandOutputMode;
-        readonly runLog?: ActiveLocalRunLog;
-        readonly signal?: AbortSignal;
-        readonly terminalOutputFilter?: (line: string) => boolean;
-    } = {},
-): Promise<number> => {
-    const exitCodes = await Promise.all(
-        invocations.map((invocation) =>
-            runCommandWithOptionalLog(invocation, input),
-        ),
-    );
-
-    return exitCodes.find((exitCode) => exitCode !== 0) ?? 0;
-};
-
 export const runCommandsInSeries = async (
     invocations: readonly CommandInvocation[],
     input: {
@@ -1126,25 +1107,4 @@ export const runCommandsInSeries = async (
     }
 
     return 0;
-};
-
-export const runCommandsAfterSeriesGate = async (
-    input: {
-        readonly gateCommands: readonly CommandInvocation[];
-        readonly parallelCommands: readonly CommandInvocation[];
-    },
-    options: {
-        readonly observer?: CommandRunObserver;
-        readonly outputMode?: CommandOutputMode;
-        readonly runLog?: ActiveLocalRunLog;
-        readonly signal?: AbortSignal;
-        readonly terminalOutputFilter?: (line: string) => boolean;
-    } = {},
-): Promise<number> => {
-    const gateExitCode = await runCommandsInSeries(input.gateCommands, options);
-    if (gateExitCode !== 0) {
-        return gateExitCode;
-    }
-
-    return runCommandsInParallel(input.parallelCommands, options);
 };

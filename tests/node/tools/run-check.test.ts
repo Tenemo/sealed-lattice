@@ -6,10 +6,8 @@ import type { PackageManagerRunner } from '#tools/ci/package-manager-runner';
 import {
     buildCheckGatingLanes,
     buildCheckParallelLanes,
-    buildProgressLanePlans,
     formatValidationSummary,
     parseCheckArguments,
-    redrawEnabledForProgressMode,
 } from '#tools/ci/run-check';
 
 const packageManagerRunner: PackageManagerRunner = {
@@ -46,18 +44,15 @@ describe('check runner arguments', () => {
         );
     });
 
-    it('does not redraw forced progress on a non-terminal stream', () => {
-        expect(redrawEnabledForProgressMode('always', true)).toBe(true);
-        expect(redrawEnabledForProgressMode('always', false)).toBe(false);
-        expect(redrawEnabledForProgressMode('auto', false)).toBeUndefined();
-        expect(redrawEnabledForProgressMode('never', true)).toBe(false);
-    });
-
     it('runs prebuilt Vitest projects without rebuilding the workspace', () => {
         const nodeLanes = buildCheckParallelLanes(packageManagerRunner).filter(
             (lane) => lane.name.startsWith('Node tests'),
         );
-        expect(nodeLanes).toHaveLength(2);
+        expect(nodeLanes.map((lane) => lane.name)).toEqual([
+            'Node tests (fast)',
+            'Node tests (protocol)',
+            'Node tests (kernel fast)',
+        ]);
         for (const lane of nodeLanes) {
             expect(lane.commands).toHaveLength(1);
             expect(lane.commands[0]?.args).toContain('vitest');
@@ -65,7 +60,7 @@ describe('check runner arguments', () => {
         }
     });
 
-    it('builds once and provides fresh-checkout duration estimates for every lane', () => {
+    it('builds once and keeps only checks that affect the result', () => {
         const lanes = [
             ...buildCheckGatingLanes(packageManagerRunner),
             ...buildCheckParallelLanes(packageManagerRunner),
@@ -79,20 +74,12 @@ describe('check runner arguments', () => {
         );
         expect(buildCommands).toHaveLength(1);
         expect(buildCommands[0]?.description).toBe('Build workspace packages');
-
-        const plans = buildProgressLanePlans(lanes, {
-            commandDurationMilliseconds: new Map(),
-            laneDurationMilliseconds: new Map(),
-            laneProgress: new Map(),
-        });
-        expect(plans).toHaveLength(lanes.length);
-        expect(
-            plans.every(
-                (plan) =>
-                    plan.expectedDurationMilliseconds !== undefined &&
-                    plan.expectedDurationMilliseconds > 0,
-            ),
-        ).toBe(true);
+        expect(lanes.map((lane) => lane.name)).not.toContain(
+            'Verify test lane coverage',
+        );
+        expect(lanes.map((lane) => lane.name)).not.toContain(
+            'Check package boundaries',
+        );
     });
 
     it('keeps visible pre-commit progress with a terminal and its controlling-terminal fallback', () => {
@@ -120,7 +107,7 @@ describe('check runner arguments', () => {
 });
 
 describe('check validation summary', () => {
-    it('reports every successful lane and the persisted expected duration', () => {
+    it('reports every successful lane without timing-history estimates', () => {
         expect(
             formatValidationSummary(
                 [
@@ -139,7 +126,6 @@ describe('check validation summary', () => {
                 ],
                 {
                     failureDetails: [],
-                    previousSuccessfulDurationMilliseconds: 65_432,
                 },
             ),
         ).toEqual([
@@ -149,7 +135,6 @@ describe('check validation summary', () => {
             '  PASS      0.1s  Lint',
             '',
             'All validation lanes passed.',
-            'Expected duration from previous successful check: 1m05s.',
         ]);
     });
 

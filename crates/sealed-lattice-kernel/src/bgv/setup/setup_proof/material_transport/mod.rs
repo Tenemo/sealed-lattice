@@ -2,6 +2,10 @@ use super::*;
 
 use std::{collections::BTreeSet, sync::Arc};
 
+use crate::bgv::setup_helpers::{
+    array_at_path, compare_required_string, hash_at_path, string_at_path, value_at_path,
+};
+
 #[cfg(test)]
 #[derive(Debug, Clone)]
 pub(crate) struct SetupProofMaterialTransportHashes {
@@ -202,6 +206,90 @@ impl ProofByteSource for CanonicalProofMaterialBytes {
 
 pub(crate) type BgvProofMaterialBytes = Arc<CanonicalProofMaterialBytes>;
 pub(in crate::bgv::setup) type SetupProofMaterialBytes = BgvProofMaterialBytes;
+
+pub(in crate::bgv::setup) struct SetupProofMaterialTransportFamily {
+    pub(in crate::bgv::setup) proof_family: &'static str,
+    pub(in crate::bgv::setup) transport_field: &'static str,
+    pub(in crate::bgv::setup) set_object_type: &'static str,
+    pub(in crate::bgv::setup) material_object_type: &'static str,
+    pub(in crate::bgv::setup) family_description: &'static str,
+}
+
+// Resolve proof bytes already authenticated by the canonical binary stream.
+// The JSON sidecar is only a semantic reference and never carries proof bytes.
+pub(in crate::bgv::setup) fn resolve_transported_setup_proof_material(
+    request: &Value,
+    expected_proof_material_root: &str,
+    family: &SetupProofMaterialTransportFamily,
+) -> CanonicalResult<SetupProofMaterialBytes> {
+    let material_set = value_at_path(request, &[family.transport_field]).map_err(|_| {
+        CanonicalError::new(
+            CanonicalErrorCode::ComponentMismatch,
+            format!(
+                "{} is required by transported {} proof records",
+                family.transport_field, family.family_description
+            ),
+        )
+    })?;
+    for (field_name, expected_value) in [
+        ("objectType", family.set_object_type),
+        ("proofFamily", family.proof_family),
+    ] {
+        compare_required_string(
+            string_at_path(material_set, &[field_name])?,
+            expected_value,
+            &format!("{}.{field_name}", family.transport_field),
+        )?;
+    }
+
+    let proof_materials = array_at_path(material_set, &["proofMaterials"])?;
+    let mut matching_material = None;
+    for proof_material in proof_materials {
+        for (field_name, expected_value) in [
+            ("objectType", family.material_object_type),
+            ("proofFamily", family.proof_family),
+        ] {
+            compare_required_string(
+                string_at_path(proof_material, &[field_name])?,
+                expected_value,
+                &format!(
+                    "transported {} proof material {field_name}",
+                    family.family_description
+                ),
+            )?;
+        }
+        let proof_material_root = hash_at_path(proof_material, &["proofMaterialRoot"])?;
+        if proof_material_root != expected_proof_material_root {
+            continue;
+        }
+        if matching_material.is_some() {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::ComponentMismatch,
+                format!(
+                    "{} contains duplicate proofMaterialRoot entries",
+                    family.transport_field
+                ),
+            ));
+        }
+        matching_material = Some(verified_setup_proof_material_bytes_from_request(
+            request,
+            family.proof_family,
+            expected_proof_material_root,
+            proof_material,
+            &format!("{}.proofMaterials", family.transport_field),
+        )?);
+    }
+
+    matching_material.ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::ComponentMismatch,
+            format!(
+                "{} is missing the requested proofMaterialRoot",
+                family.transport_field
+            ),
+        )
+    })
+}
 
 pub(in crate::bgv::setup) fn setup_proof_record_binding_value(
     setup_parameters_hash: &str,

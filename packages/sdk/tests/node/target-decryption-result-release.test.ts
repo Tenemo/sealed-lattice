@@ -31,6 +31,7 @@ vi.mock('@sealed-lattice/wasm', async (importOriginal) => ({
 let absorbedShareCount: number;
 let cleanupFailure: Error | undefined;
 let freshKernelLoadCount: number;
+let freshKernelLoadMutation: (() => void) | undefined;
 let sharedKernelLoadCount: number;
 let sharedKernelLoadMutation: (() => void) | undefined;
 let mockKernel: {
@@ -48,9 +49,11 @@ let mockKernel: {
 };
 
 vi.mock('../../src/kernel.js', () => ({
-    loadFreshTranscriptCoreKernel: () => {
+    loadFreshTranscriptCoreKernel: async () => {
         freshKernelLoadCount += 1;
-        return Promise.resolve(mockKernel);
+        await Promise.resolve();
+        freshKernelLoadMutation?.();
+        return mockKernel;
     },
     loadTranscriptCoreKernel: async () => {
         sharedKernelLoadCount += 1;
@@ -142,6 +145,7 @@ describe('target-decryption result release session cleanup', () => {
         absorbedShareCount = 0;
         cleanupFailure = undefined;
         freshKernelLoadCount = 0;
+        freshKernelLoadMutation = undefined;
         sharedKernelLoadCount = 0;
         sharedKernelLoadMutation = undefined;
         readCanonicalMaterial.mockReset();
@@ -161,13 +165,12 @@ describe('target-decryption result release session cleanup', () => {
             },
         );
         mockKernel = {
-            deriveBgvTargetDecryptionResultReleaseSetupContext: vi.fn(() => ({
-                operation: 'deriveBgvTargetDecryptionResultReleaseSetupContext',
-            })),
+            deriveBgvTargetDecryptionResultReleaseSetupContext: vi.fn(
+                () => ({}),
+            ),
             beginBgvTargetDecryptionResultRelease: vi.fn(() => {
                 absorbedShareCount = 0;
                 return {
-                    operation: 'beginBgvTargetDecryptionResultRelease',
                     requiredShareCount: 2,
                 };
             }),
@@ -175,7 +178,6 @@ describe('target-decryption result release session cleanup', () => {
                 absorbedShareCount += 1;
                 return {
                     absorbedShareCount,
-                    operation: 'absorbBgvTargetDecryptionResultReleaseShare',
                     requiredShareCount: 2,
                 };
             }),
@@ -184,7 +186,6 @@ describe('target-decryption result release session cleanup', () => {
                     throw cleanupFailure;
                 }
                 return {
-                    operation: 'finishBgvTargetDecryptionResultRelease',
                     shareEvidence: [],
                     targetIdByOption: [7],
                     targetOrderByOption: [0],
@@ -212,6 +213,112 @@ describe('target-decryption result release session cleanup', () => {
         ).not.toHaveBeenCalled();
         expect(freshKernelLoadCount).toBe(1);
         expect(sharedKernelLoadCount).toBe(0);
+    });
+
+    it('snapshots proof generation input before loading the fresh kernel', async () => {
+        const originalEmitProofMaterialChunk = vi.fn(() => Promise.resolve());
+        const generationInput: TargetDecryptionShareProofMaterialGenerationInput =
+            {
+                ...proofMaterialGenerationInput(),
+                emitProofMaterialChunk: originalEmitProofMaterialChunk,
+                localTargetShareWitness: { witness: { generation: 1 } },
+                proofStatement: { statement: { generation: 1 } },
+                setupPackage: { setup: { generation: 1 } },
+                targetAcceptedRecord: { accepted: { generation: 1 } },
+                targetCiphertextBinding: { binding: { generation: 1 } },
+                targetCiphertexts: { ciphertexts: [{ generation: 1 }] },
+                targetDecryptionShare: { share: { generation: 1 } },
+                targetShareProfile: { profile: { generation: 1 } },
+            };
+        const mutableGenerationInput = generationInput as unknown as JsonRecord;
+        freshKernelLoadMutation = () => {
+            mutableGenerationInput.emitProofMaterialChunk = vi.fn();
+            mutableGenerationInput.localTargetShareWitness = {
+                witness: { generation: 99 },
+            };
+            mutableGenerationInput.proofRandomnessNonceHex = '99'.repeat(32);
+            mutableGenerationInput.proofRandomnessSeedHex = '88'.repeat(32);
+            mutableGenerationInput.proofStatement = {
+                statement: { generation: 99 },
+            };
+            mutableGenerationInput.setupPackage = {
+                setup: { generation: 99 },
+            };
+            mutableGenerationInput.targetAcceptedRecord = {
+                accepted: { generation: 99 },
+            };
+            mutableGenerationInput.targetCiphertextBinding = {
+                binding: { generation: 99 },
+            };
+            mutableGenerationInput.targetCiphertexts = {
+                ciphertexts: [{ generation: 99 }],
+            };
+            mutableGenerationInput.targetDecryptionShare = {
+                share: { generation: 99 },
+            };
+            mutableGenerationInput.targetShareProfile = {
+                profile: { generation: 99 },
+            };
+            mutableGenerationInput.trusteeIdentity = 'trustee-99';
+        };
+        const generatedProofMaterial = shareProof(
+            0,
+            successfulPull,
+        ).proofMaterial;
+        mockKernel.generateBgvTargetDecryptionShareProofMaterialFromLocalWitness.mockReturnValue(
+            generatedProofMaterial,
+        );
+        const writeMaterial = vi.fn(() =>
+            Promise.resolve(canonicalStreamDescriptorFixture(1)),
+        );
+        openCanonicalRuntime.mockReturnValueOnce({ writeMaterial });
+
+        await publicPackage.generateTargetDecryptionShareProofMaterial(
+            generationInput,
+        );
+
+        expect(
+            mockKernel.generateBgvTargetDecryptionShareProofMaterialFromLocalWitness,
+        ).toHaveBeenCalledWith({
+            emitProofMaterialChunk: originalEmitProofMaterialChunk,
+            localTargetShareWitness: { witness: { generation: 1 } },
+            proofRandomnessNonceHex: '22'.repeat(32),
+            proofRandomnessSeedHex: '11'.repeat(32),
+            proofStatement: { statement: { generation: 1 } },
+            setupPackage: { setup: { generation: 1 } },
+            targetAcceptedRecord: { accepted: { generation: 1 } },
+            targetCiphertextBinding: { binding: { generation: 1 } },
+            targetCiphertexts: { ciphertexts: [{ generation: 1 }] },
+            targetDecryptionShare: { share: { generation: 1 } },
+            targetShareProfile: { profile: { generation: 1 } },
+            trusteeIdentity: 'trustee-1',
+        });
+        expect(writeMaterial).toHaveBeenCalledWith(
+            expect.objectContaining({
+                emitChunk: originalEmitProofMaterialChunk,
+                materialRoot: generatedProofMaterial.proofMaterialRoot,
+            }),
+        );
+    });
+
+    it('rejects proof generation accessors before loading the fresh kernel', async () => {
+        let accessorReadCount = 0;
+        const generationInput = proofMaterialGenerationInput();
+        Object.defineProperty(generationInput, 'setupPackage', {
+            enumerable: true,
+            get: () => {
+                accessorReadCount += 1;
+                return { executed: true };
+            },
+        });
+
+        await expect(
+            publicPackage.generateTargetDecryptionShareProofMaterial(
+                generationInput,
+            ),
+        ).rejects.toThrow('setupPackage cannot be an accessor property.');
+        expect(accessorReadCount).toBe(0);
+        expect(freshKernelLoadCount).toBe(0);
     });
 
     it('uses one deep target release snapshot across kernel loading and chunk callbacks', async () => {
@@ -324,9 +431,7 @@ describe('target-decryption result release session cleanup', () => {
             mockKernel.beginBgvTargetDecryptionResultRelease,
         ).toHaveBeenCalledWith({
             releaseVerificationId: 'release-verification-1',
-            releaseSetupContext: {
-                operation: 'deriveBgvTargetDecryptionResultReleaseSetupContext',
-            },
+            releaseSetupContext: {},
             targetAcceptedRecord: {
                 acceptedTarget: { targetIndex: 2 },
             },

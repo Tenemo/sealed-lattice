@@ -3,8 +3,6 @@ mod aggregation;
 mod command;
 mod encryption;
 mod evaluator_replay;
-mod layout;
-mod package;
 mod proof_summary;
 mod proof_transport;
 mod randomness;
@@ -72,7 +70,6 @@ use crate::{
     hashing::{canonical_json, chunk_root, hash512_hex},
 };
 
-const OPERATION: &str = "runDirectEncryptedBallot";
 const OPTION_COUNT: usize = 20;
 // pub(crate): the setup-parameter identity binds the bounded-domain evaluator
 // profile (score span times roster size) from these score-domain constants.

@@ -86,7 +86,6 @@ describe('collective BGV setup kernel commands', () => {
 
         expect(result).toMatchObject({
             isValid: false,
-            operation: 'verifyPrivateVssShareEnvelope',
         });
         expect(result.refusedObjects[0]?.reasonCode).toBe(
             'setupContextFieldMissing',

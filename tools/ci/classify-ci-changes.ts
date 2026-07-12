@@ -2,7 +2,6 @@ import { appendFileSync, readFileSync } from 'node:fs';
 
 import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
 
-const generatedApiSurfaceSummaryPath = 'packages/sdk/api-surface-summary.json';
 const documentationDirectoryPrefixes = ['reference-documents/'] as const;
 const licenseFilePattern =
     /(?:^|\/)(?:copying|licen[cs]e|notice)(?:\.(?:md|txt))?$/iu;
@@ -25,8 +24,7 @@ export const isDocumentationOnlyCiPath = (changedPath: string): boolean => {
         licenseFilePattern.test(normalizedPath) ||
         documentationDirectoryPrefixes.some((directoryPrefix) =>
             normalizedPath.startsWith(directoryPrefix),
-        ) ||
-        normalizedPath === generatedApiSurfaceSummaryPath
+        )
     );
 };
 

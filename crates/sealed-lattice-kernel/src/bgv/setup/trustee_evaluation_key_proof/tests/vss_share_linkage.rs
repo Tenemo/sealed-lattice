@@ -165,8 +165,6 @@ fn vss_threshold_aggregate_proof_round_trips_and_rejects_tampering() {
     bad_sum_witness.vss_public_recipient_share_messages_by_item[0][0] =
         (bad_sum_witness.vss_public_recipient_share_messages_by_item[0][0] + 1)
             % i64::try_from(DATA_PRIMES[0]).expect("modulus fits i64");
-    bad_sum_witness.vss_public_recipient_share_messages[0] =
-        bad_sum_witness.vss_public_recipient_share_messages_by_item[0][0];
     assert!(
         prove_evaluation_key_share(&bad_sum_statement, &bad_sum_witness, PROOF_RANDOMNESS_SEED)
             .is_err(),
@@ -361,13 +359,7 @@ fn vss_threshold_aggregate_instance() -> (
                     .collect()
             })
             .collect(),
-        vss_public_recipient_share_messages: aggregate_values
-            .iter()
-            .map(|value| i64::try_from(*value).expect("aggregate fits i64"))
-            .collect(),
         vss_public_coefficient_opening_randomness_by_shamir_index: Vec::new(),
-        vss_public_recipient_share_opening_randomness: Vec::new(),
-        vss_public_carry_witnesses: wrap_values.clone(),
         vss_public_recipient_share_messages_by_item: vec![
             aggregate_values
                 .iter()
@@ -598,14 +590,7 @@ fn vss_share_linkage_instance() -> (
                     .collect()
             })
             .collect(),
-        vss_public_recipient_share_messages: primary_item
-            .recipient_share_values
-            .iter()
-            .map(|value| i64::try_from(*value).expect("share fits i64"))
-            .collect(),
         vss_public_coefficient_opening_randomness_by_shamir_index: Vec::new(),
-        vss_public_recipient_share_opening_randomness: Vec::new(),
-        vss_public_carry_witnesses: primary_item.recipient_share_carry_values.clone(),
         vss_public_recipient_share_messages_by_item: vec![
             primary_item
                 .recipient_share_values

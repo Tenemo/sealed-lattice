@@ -27,17 +27,6 @@ pub(crate) mod column_commitment;
 pub(crate) mod domain;
 pub(crate) mod key_proof;
 pub(crate) mod low_degree;
-pub(crate) mod material_aggregate;
-#[cfg(test)]
-#[allow(clippy::too_many_arguments)]
-pub(crate) mod material_aggregate_creation;
-pub(crate) mod material_aggregate_opening;
-#[allow(
-    clippy::too_many_arguments,
-    clippy::needless_range_loop,
-    clippy::unusual_byte_groupings
-)]
-pub(crate) mod material_aggregate_verify;
 pub(crate) mod merkle;
 pub(crate) mod polynomial;
 pub(crate) mod proof_codec;

@@ -5,9 +5,22 @@ import {
     verifyPrivateVssShare,
     verifySetupPackage,
 } from '../../../dist/index.js';
+
 import {
+    hash512Hex,
+    type EncryptedLocalTrusteeSetupState,
+    type LocalTrusteeSetupStateSealedPayload,
+} from '#packages/crypto/src/index';
+import {
+    createMlDsaKeyPairFixture,
+    createMlDsaSignatureProfileFixture,
+    createProtocolSignatureFixture,
+} from '#packages/crypto/tests/support/protocol-signature-fixtures';
+import {
+    acceptedBgvSetupQSharePrimes,
     createCommonRandomnessCommit,
     createCommonRandomnessReveal,
+    createEncryptedLocalTrusteeSetupStateFromVerifiedShares,
     createEvaluatorKeySchedule,
     createGaloisKeyShareBatches,
     createPublicEvaluationKeySet,
@@ -18,28 +31,22 @@ import {
     createRelinearizationKeyShareRounds,
     createSetupCertificates,
     createSetupCommonRandomness,
-    createSetupContribution,
-    createSetupIntent,
-    createSetupPackage,
-    createSetupPhaseRecord,
-    createVssComplaint,
-    createVssShareAcceptance,
-    exportEncryptedLocalTrusteeSetupState,
-    restoreLocalTrusteeSetupState,
-    type PublicKeyShareSuccinctProofMaterial,
-} from '../../support/internal-setup-flow.js';
-
-import { hash512Hex } from '#packages/crypto/src/index';
-import {
-    createMlDsaKeyPairFixture,
-    createMlDsaSignatureProfileFixture,
-    createProtocolSignatureFixture,
-} from '#packages/crypto/tests/support/protocol-signature-fixtures';
-import {
-    acceptedBgvSetupQSharePrimes,
+    createSetupContributionAssembly,
     createVssCoefficientCommitmentBundle,
+    createSetupPackage,
+    createSetupPhaseParticipantObject,
+    createSetupPhaseRecord,
+    createVssShareAcceptanceRecord,
+    createVssShareComplaintRecordFromLocalVerification,
+    decryptLocalTrusteeSetupState,
     publicKeyShareCoefficientVectorHashDomain,
     setupTransportChunkSizeBytes,
+    type CollectiveBgvSetupContext,
+    type GeneratedLocalTrusteeSetupStateInput,
+    type LocalTrusteeSetupStateCommitment,
+    type PublicKeyShareSuccinctProofMaterial,
+    type SetupCommonRandomnessInput,
+    type SetupPhaseParticipantObjectInput,
     type VssCoefficientOpeningInput,
     type VssSourceTrusteeCoefficientOpeningState,
 } from '#packages/protocol/src/index';
@@ -48,83 +55,332 @@ import type { TranscriptCoreKernel } from '#packages/wasm/src/index';
 export { hash512Hex };
 export { createVssCoefficientCommitmentBundle };
 
-export type PublicSetupApi = {
-    readonly createCommonRandomnessCommit: (
-        input: unknown,
-    ) => Promise<Record<string, unknown>>;
-    readonly createCommonRandomnessReveal: (
-        input: unknown,
-    ) => Promise<Record<string, unknown>>;
-    readonly createEvaluatorKeySchedule: (
-        input: unknown,
-    ) => Record<string, unknown>;
-    readonly createGaloisKeyShareBatches: (
-        input: unknown,
-    ) => readonly Record<string, unknown>[];
-    readonly createPublicEvaluationKeySet: (
-        input: unknown,
-    ) => Record<string, unknown>;
-    readonly createPublicKeyShareSuccinctProofSet: (
-        input: unknown,
-    ) => Record<string, unknown>;
-    readonly createPublicKeyShareMaterialSet: (
-        input: unknown,
-    ) => Record<string, unknown>;
-    readonly createPublicKeyShareProofSet: (
-        input: unknown,
-    ) => Record<string, unknown>;
-    readonly createPublicKeyShareSet: (
-        input: unknown,
-    ) => Record<string, unknown>;
-    readonly createRelinearizationKeyShareRounds: (
-        input: unknown,
-    ) => Record<string, unknown>;
-    readonly createSetupCommonRandomness: (
-        input: unknown,
-    ) => Promise<Record<string, unknown>>;
-    readonly createSetupContribution: (
-        input: unknown,
-    ) => Record<string, unknown>;
-    readonly createSetupCertificates: (
-        input: unknown,
-    ) => Record<string, unknown>;
-    readonly createSetupIntent: (
-        input: unknown,
-    ) => Promise<Record<string, unknown>>;
-    readonly createSetupPackage: (
-        input: unknown,
-    ) => Promise<Record<string, unknown>>;
-    readonly createSetupPackageVerificationInput: (
-        input: unknown,
-    ) => Record<string, unknown>;
-    readonly createSetupPhaseRecord: (
-        input: unknown,
-    ) => Record<string, unknown>;
-    readonly createVssShareAcceptance: (
-        input: unknown,
-    ) => Promise<Record<string, unknown>>;
-    readonly createVssComplaint: (
-        input: unknown,
-    ) => Promise<Record<string, unknown>>;
-    readonly exportEncryptedLocalTrusteeSetupState: (
-        input: unknown,
-    ) => Promise<Record<string, unknown>>;
-    readonly restoreLocalTrusteeSetupState: (
-        input: unknown,
-    ) => Promise<Record<string, unknown>>;
-    readonly verifySetupPackage: (
-        input: unknown,
-    ) => Promise<Record<string, unknown>>;
-    readonly verifyPrivateVssShare: (
-        input: unknown,
-    ) => Promise<Record<string, unknown>>;
+type JsonRecord = Record<string, unknown>;
+
+const setupPhaseNumber = (
+    phaseOrder: readonly {
+        readonly phaseId: string;
+        readonly phaseNumber: number;
+    }[],
+    phaseId: string,
+): number => {
+    const phase = phaseOrder.find(
+        (candidatePhase) => candidatePhase.phaseId === phaseId,
+    );
+    if (phase === undefined) {
+        throw new Error(`Accepted setup phase ${phaseId} is not available.`);
+    }
+
+    return phase.phaseNumber;
 };
 
-// The setup-assembly builders are demoted out of the public verifier-only SDK and now live
-// in the relocated test-support module; the verifier path stays on the published dist surface.
-// The test still builds a package through the relocated internal flow and verifies it through
-// the public verifier path.
-export const publicSetupApi = {
+type SetupIntentInput = Omit<
+    SetupPhaseParticipantObjectInput,
+    'phaseId' | 'phaseNumber'
+>;
+
+const createSetupIntent = async (
+    input: SetupIntentInput,
+): Promise<Awaited<ReturnType<typeof createSetupPhaseParticipantObject>>> => {
+    const kernel = await loadTranscriptCoreKernel();
+
+    return createSetupPhaseParticipantObject({
+        ...input,
+        phaseId: 'setupIntent',
+        phaseNumber: setupPhaseNumber(
+            kernel.describeCollectiveBgvSetupParameters().phaseOrder,
+            'setupIntent',
+        ),
+    });
+};
+
+type CommonRandomnessInput = Omit<
+    SetupCommonRandomnessInput,
+    'derivePublicDerivations' | 'participantCount'
+>;
+
+const createSetupCommonRandomnessForTest = async (
+    input: CommonRandomnessInput,
+): Promise<ReturnType<typeof createSetupCommonRandomness>> => {
+    const kernel = await loadTranscriptCoreKernel();
+
+    return createSetupCommonRandomness({
+        ...input,
+        participantCount:
+            kernel.describeCollectiveBgvSetupParameters().participantCount,
+        derivePublicDerivations: (publicMatrixSeedHash) =>
+            kernel.deriveCollectiveBgvSetupPublicDerivations({
+                publicMatrixSeedHash,
+            }),
+    });
+};
+
+type PrivateVssVerificationResult = Readonly<{
+    readonly isValid: boolean;
+    readonly privateEnvelopeHash: string | null;
+    readonly localVerificationRoot: string | null;
+    readonly refusedObjects: readonly Readonly<{
+        readonly reasonCode: string;
+        readonly message: string;
+        readonly objectPath?: string;
+    }>[];
+}>;
+
+type VssShareAcceptanceInput = Parameters<
+    typeof createVssShareAcceptanceRecord
+>[0] & {
+    readonly localVerification: PrivateVssVerificationResult;
+};
+
+const createVssShareAcceptance = async (
+    input: VssShareAcceptanceInput,
+): Promise<Awaited<ReturnType<typeof createVssShareAcceptanceRecord>>> => {
+    if (!input.localVerification.isValid) {
+        throw new Error(
+            'localVerification must be accepted before creating a VSS share acceptance.',
+        );
+    }
+    if (
+        input.localVerification.privateEnvelopeHash !==
+        input.envelopeReference.privateEnvelopeHash
+    ) {
+        throw new Error(
+            'localVerification.privateEnvelopeHash must match envelopeReference.privateEnvelopeHash.',
+        );
+    }
+    if (
+        input.localVerification.localVerificationRoot !==
+        input.envelopeReference.localVerificationRoot
+    ) {
+        throw new Error(
+            'localVerification.localVerificationRoot must match envelopeReference.localVerificationRoot.',
+        );
+    }
+
+    return createVssShareAcceptanceRecord(input);
+};
+
+type VssComplaintInput = Omit<
+    Parameters<typeof createVssShareComplaintRecordFromLocalVerification>[0],
+    'localVerification'
+> & {
+    readonly localVerification: PrivateVssVerificationResult;
+};
+
+const createVssComplaint = async (
+    input: VssComplaintInput,
+): Promise<
+    Awaited<
+        ReturnType<typeof createVssShareComplaintRecordFromLocalVerification>
+    >
+> => {
+    if (input.localVerification.isValid) {
+        throw new Error(
+            'localVerification must be refused before creating a VSS complaint.',
+        );
+    }
+    if (input.localVerification.refusedObjects.length === 0) {
+        throw new Error(
+            'localVerification.refusedObjects must include the local verification failure.',
+        );
+    }
+
+    return createVssShareComplaintRecordFromLocalVerification({
+        ...input,
+        localVerification: {
+            isValid: false,
+            privateEnvelopeHash: input.localVerification.privateEnvelopeHash,
+            localVerificationRoot:
+                input.localVerification.localVerificationRoot,
+            refusedObjects: input.localVerification.refusedObjects,
+        },
+    });
+};
+
+type ExportedLocalTrusteeSetupState = Readonly<{
+    readonly localStateCommitment: LocalTrusteeSetupStateCommitment;
+    readonly encryptedLocalState: EncryptedLocalTrusteeSetupState;
+    readonly sealedLocalStatePayloadHash: string;
+    readonly storageAadHash: string;
+}>;
+
+const exportEncryptedLocalTrusteeSetupState = async (
+    input: GeneratedLocalTrusteeSetupStateInput,
+): Promise<ExportedLocalTrusteeSetupState> => {
+    const result =
+        await createEncryptedLocalTrusteeSetupStateFromVerifiedShares(input);
+
+    return {
+        localStateCommitment: result.localStateCommitment,
+        encryptedLocalState: result.encryptedLocalState,
+        sealedLocalStatePayloadHash: result.localStatePlaintextHash,
+        storageAadHash: result.storageAadHash,
+    };
+};
+
+type RestoreLocalTrusteeSetupStateInput = Readonly<{
+    readonly encryptedLocalState: EncryptedLocalTrusteeSetupState;
+    readonly localStateCommitment: LocalTrusteeSetupStateCommitment;
+    readonly setupContext: CollectiveBgvSetupContext;
+    readonly storageKeyBytesHex: string;
+    readonly expectedTrusteeIdentity?: string;
+    readonly expectedTrusteeRosterPosition?: number;
+    readonly expectedDeviceEpoch?: number;
+    readonly minimumDeviceEpoch?: number;
+    readonly expectedThresholdShareCommitmentRecipientRoot?: string;
+    readonly expectedAggregateThresholdShareRoot?: string;
+    readonly expectedIssuedVssAcceptanceRoot?: string;
+}>;
+
+type RestoredLocalTrusteeSetupState = Readonly<{
+    readonly localStateCommitment: LocalTrusteeSetupStateCommitment;
+    readonly sealedLocalStatePayload: LocalTrusteeSetupStateSealedPayload;
+    readonly sealedLocalStatePayloadHash: string;
+    readonly storageAadHash: string;
+    readonly localStateVerification: ReturnType<
+        TranscriptCoreKernel['verifyLocalTrusteeSetupState']
+    >;
+}>;
+
+const assertExpectedValue = <Value>(
+    actual: Value,
+    expected: Value | undefined,
+    fieldName: string,
+): void => {
+    if (expected !== undefined && actual !== expected) {
+        throw new Error(`${fieldName} does not match the expected value.`);
+    }
+};
+
+const assertRestoredLocalStateBindings = (
+    input: RestoreLocalTrusteeSetupStateInput,
+    sealedLocalStatePayload: LocalTrusteeSetupStateSealedPayload,
+): void => {
+    for (const [fieldName, actualSetupEpoch] of [
+        [
+            'localStateCommitment.setupEpoch',
+            input.localStateCommitment.setupEpoch,
+        ],
+        [
+            'sealedLocalStatePayload.setupEpoch',
+            sealedLocalStatePayload.setupEpoch,
+        ],
+    ] as const) {
+        assertExpectedValue(
+            actualSetupEpoch,
+            input.setupContext.setupEpoch,
+            fieldName,
+        );
+    }
+    assertExpectedValue(
+        input.localStateCommitment.trusteeIdentity,
+        input.expectedTrusteeIdentity,
+        'localStateCommitment.trusteeIdentity',
+    );
+    assertExpectedValue(
+        sealedLocalStatePayload.trusteeIdentity,
+        input.expectedTrusteeIdentity,
+        'sealedLocalStatePayload.trusteeIdentity',
+    );
+    assertExpectedValue(
+        input.localStateCommitment.trusteeRosterPosition,
+        input.expectedTrusteeRosterPosition,
+        'localStateCommitment.trusteeRosterPosition',
+    );
+    assertExpectedValue(
+        sealedLocalStatePayload.trusteeRosterPosition,
+        input.expectedTrusteeRosterPosition,
+        'sealedLocalStatePayload.trusteeRosterPosition',
+    );
+    assertExpectedValue(
+        sealedLocalStatePayload.deviceEpoch,
+        input.expectedDeviceEpoch,
+        'sealedLocalStatePayload.deviceEpoch',
+    );
+    if (
+        input.minimumDeviceEpoch !== undefined &&
+        sealedLocalStatePayload.deviceEpoch < input.minimumDeviceEpoch
+    ) {
+        throw new Error(
+            'sealedLocalStatePayload.deviceEpoch is older than the minimum accepted device epoch.',
+        );
+    }
+    assertExpectedValue(
+        input.localStateCommitment.thresholdShareCommitmentRecipientRoot,
+        input.expectedThresholdShareCommitmentRecipientRoot,
+        'localStateCommitment.thresholdShareCommitmentRecipientRoot',
+    );
+    assertExpectedValue(
+        sealedLocalStatePayload.thresholdShareCommitmentRecipientRoot,
+        input.expectedThresholdShareCommitmentRecipientRoot,
+        'sealedLocalStatePayload.thresholdShareCommitmentRecipientRoot',
+    );
+    assertExpectedValue(
+        input.localStateCommitment.aggregateThresholdShareRoot,
+        input.expectedAggregateThresholdShareRoot,
+        'localStateCommitment.aggregateThresholdShareRoot',
+    );
+    assertExpectedValue(
+        sealedLocalStatePayload.sealedAggregateThresholdShare.materialRoot,
+        input.expectedAggregateThresholdShareRoot,
+        'sealedLocalStatePayload.sealedAggregateThresholdShare.materialRoot',
+    );
+    assertExpectedValue(
+        input.localStateCommitment.issuedVssAcceptanceRoot,
+        input.expectedIssuedVssAcceptanceRoot,
+        'localStateCommitment.issuedVssAcceptanceRoot',
+    );
+    if (sealedLocalStatePayload.issuedVssAcceptanceRoots.length !== 1) {
+        throw new Error(
+            'sealedLocalStatePayload.issuedVssAcceptanceRoots must contain exactly one issued acceptance root.',
+        );
+    }
+    assertExpectedValue(
+        sealedLocalStatePayload.issuedVssAcceptanceRoots[0],
+        input.expectedIssuedVssAcceptanceRoot ??
+            input.localStateCommitment.issuedVssAcceptanceRoot,
+        'sealedLocalStatePayload.issuedVssAcceptanceRoots.0',
+    );
+    assertExpectedValue(
+        sealedLocalStatePayload.sealedAggregateThresholdShare.materialRoot,
+        input.localStateCommitment.aggregateThresholdShareRoot,
+        'sealedLocalStatePayload.sealedAggregateThresholdShare.materialRoot',
+    );
+};
+
+const restoreLocalTrusteeSetupState = async (
+    input: RestoreLocalTrusteeSetupStateInput,
+): Promise<RestoredLocalTrusteeSetupState> => {
+    const expectedLocalStateRoot = input.localStateCommitment.localStateRoot;
+    assertExpectedValue(
+        input.encryptedLocalState.localStateRoot,
+        expectedLocalStateRoot,
+        'encryptedLocalState.localStateRoot',
+    );
+    const kernel = await loadTranscriptCoreKernel();
+    const localStateVerification = kernel.verifyLocalTrusteeSetupState({
+        setupContext: input.setupContext,
+        localStateCommitment: input.localStateCommitment,
+    });
+    const decryptedState = await decryptLocalTrusteeSetupState({
+        encryptedLocalState: input.encryptedLocalState,
+        expectedLocalStateRoot,
+        setupContext: input.setupContext,
+        storageKeyBytesHex: input.storageKeyBytesHex,
+    });
+    const sealedLocalStatePayload = decryptedState.localStatePlaintext;
+    assertRestoredLocalStateBindings(input, sealedLocalStatePayload);
+
+    return {
+        localStateCommitment: input.localStateCommitment,
+        sealedLocalStatePayload,
+        sealedLocalStatePayloadHash: decryptedState.localStatePlaintextHash,
+        storageAadHash: decryptedState.storageAadHash,
+        localStateVerification,
+    };
+};
+
+const setupApiImplementation = {
     createCommonRandomnessCommit,
     createCommonRandomnessReveal,
     createEvaluatorKeySchedule,
@@ -136,8 +392,8 @@ export const publicSetupApi = {
     createPublicKeyShareSuccinctProofSet,
     createRelinearizationKeyShareRounds,
     createSetupCertificates,
-    createSetupCommonRandomness,
-    createSetupContribution,
+    createSetupCommonRandomness: createSetupCommonRandomnessForTest,
+    createSetupContribution: createSetupContributionAssembly,
     createSetupIntent,
     createSetupPackage,
     createSetupPackageVerificationInput,
@@ -148,7 +404,21 @@ export const publicSetupApi = {
     restoreLocalTrusteeSetupState,
     verifyPrivateVssShare,
     verifySetupPackage,
-} as unknown as PublicSetupApi;
+};
+
+type TestSetupApi<Implementation> = {
+    readonly [Name in keyof Implementation]: Implementation[Name] extends (
+        ...arguments_: infer _Arguments
+    ) => infer Result
+        ? (input: JsonRecord) => Result
+        : never;
+};
+
+// Inputs are deliberately loose because the tests construct malformed partial
+// records. Return types still come directly from the actual builders.
+export const publicSetupApi = setupApiImplementation as unknown as TestSetupApi<
+    typeof setupApiImplementation
+>;
 export const loadPublicTranscriptCoreKernel: () => Promise<TranscriptCoreKernel> =
     loadTranscriptCoreKernel;
 export const trusteeIdentity = 'trustee-0';

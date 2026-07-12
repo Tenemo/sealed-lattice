@@ -1,16 +1,7 @@
 import path from 'node:path';
 import { performance } from 'node:perf_hooks';
 
-import {
-    CheckProgressReporter,
-    checkCommandTimingKey,
-    formatProgressDuration,
-    readPreviousCheckTimingHistory,
-    type CheckFailureDetail,
-    type CheckProgressLanePlan,
-    type CheckRunTimingDetails,
-    type CheckTimingHistory,
-} from './check-progress-reporter.js';
+import { CheckReporter, type CheckFailureDetail } from './check-reporter.js';
 import { createHeavyTestProgressReporter } from './heavy-test-progress.js';
 import {
     createLocalRunLog,
@@ -27,23 +18,13 @@ import {
     type CommandInvocation,
     type CommandRunObserver,
 } from './run-command.js';
-import { buildVitestProjectCommand } from './run-vitest-lanes.js';
 import { cargoTestArgumentsForRustKernelFast } from './rust-kernel-test-arguments.js';
-import {
-    canonicalTestLaneDefinitions,
-    nodeTestLaneDefinitions,
-} from './test-lanes.js';
 
 import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
 
-// `passed` and `failed` are a lane's own result; `stopped` means a sibling lane
-// failed first and this lane was killed before it could finish.
 type LaneStatus = 'failed' | 'passed' | 'stopped';
 
-// A validation lane is a named group of commands that run in series with one
-// another. Lanes may run concurrently during the independent-check phase.
 type ValidationLane = {
-    readonly baselineDurationMilliseconds: number;
     readonly commands: readonly CommandInvocation[];
     readonly name: string;
 };
@@ -57,7 +38,6 @@ export type ValidationLaneResult = {
 
 type ValidationSummaryContext = {
     readonly failureDetails: readonly CheckFailureDetail[];
-    readonly previousSuccessfulDurationMilliseconds?: number;
     readonly runLogDirectoryPath?: string;
 };
 
@@ -110,46 +90,27 @@ const checkRunLaneNames = [
     'Smoke npm package',
     'Lint',
     rustKernelLaneName,
-    'Verify public package policy',
-    'Verify test lane coverage',
-    'Check package boundaries',
     'Knip unused-code scan',
     'Node tests (fast)',
+    'Node tests (protocol)',
     'Node tests (kernel fast)',
 ] as const;
-const checkLaneBaselineDurationMilliseconds = {
-    'Build workspace packages': 20_000,
-    'Check package boundaries': 1_000,
-    'Knip unused-code scan': 4_000,
-    Lint: 30_000,
-    'Smoke npm package': 5_000,
-    'Type-check workspace': 8_000,
-    'Verify public package policy': 1_000,
-    'Verify test lane coverage': 3_000,
-} as const;
-
-const baselineDurationForCheckLane = (laneName: string): number =>
-    checkLaneBaselineDurationMilliseconds[
-        laneName as keyof typeof checkLaneBaselineDurationMilliseconds
-    ] ?? 5_000;
 
 const isCheckProgressMode = (value: string): value is CheckProgressMode =>
     value === 'always' || value === 'auto' || value === 'never';
 
+// Husky still passes this option. The plain reporter intentionally renders the
+// same line-oriented output in every environment, but validating the option
+// preserves the hook and direct command interface.
 export const parseCheckArguments = (
     commandArguments: readonly string[],
 ): ParsedCheckArguments => {
     let progressMode: CheckProgressMode = 'auto';
     for (let index = 0; index < commandArguments.length; index += 1) {
         const argument = commandArguments[index];
-        if (argument === undefined) {
+        if (argument === undefined || argument === '--') {
             continue;
         }
-
-        if (argument === '--') {
-            continue;
-        }
-
         if (argument === '--progress') {
             const value = commandArguments[index + 1];
             if (value === undefined || !isCheckProgressMode(value)) {
@@ -159,35 +120,18 @@ export const parseCheckArguments = (
             index += 1;
             continue;
         }
-
-        const progressPrefix = '--progress=';
-        if (argument.startsWith(progressPrefix)) {
-            const value = argument.slice(progressPrefix.length);
+        if (argument.startsWith('--progress=')) {
+            const value = argument.slice('--progress='.length);
             if (!isCheckProgressMode(value)) {
                 throw new Error(checkUsage);
             }
             progressMode = value;
             continue;
         }
-
         throw new Error(checkUsage);
     }
 
     return { progressMode };
-};
-
-export const redrawEnabledForProgressMode = (
-    progressMode: CheckProgressMode,
-    standardOutputIsTerminal = process.stdout.isTTY === true,
-): boolean | undefined => {
-    if (progressMode === 'always') {
-        return standardOutputIsTerminal;
-    }
-    if (progressMode === 'never') {
-        return false;
-    }
-
-    return undefined;
 };
 
 const createCargoCommand = (
@@ -212,7 +156,6 @@ const createPackageManagerLane = (
     logFileSlug: string,
     commandArguments: readonly string[],
 ): ValidationLane => ({
-    baselineDurationMilliseconds: baselineDurationForCheckLane(name),
     commands: [
         createPackageManagerCommand(name, commandArguments, {
             logFileSlug,
@@ -222,13 +165,6 @@ const createPackageManagerLane = (
     name,
 });
 
-// The gating lanes run first, in series. The workspace build emits every
-// `dist/` artifact and compiles the Rust kernel to WebAssembly (holding the
-// cargo build lock); the type-check also emits declarations; the smoke package
-// lane stages and hashes the built public package. Keeping these ahead of the
-// parallel phase means no lane writes or stages `dist/` while test lanes import
-// it, and no `cargo` lane competes with the WebAssembly build for `target/`. A
-// failure here makes the rest pointless, so the run stops immediately.
 export const buildCheckGatingLanes = (
     packageManagerRunner: PackageManagerRunner,
 ): readonly ValidationLane[] => [
@@ -255,9 +191,6 @@ export const buildCheckGatingLanes = (
 const buildRustKernelLane = (
     packageManagerRunner: PackageManagerRunner,
 ): ValidationLane => ({
-    baselineDurationMilliseconds:
-        canonicalTestLaneDefinitions['rust-kernel-fast']
-            .baselineDurationMilliseconds,
     commands: [
         createCargoCommand(
             'cargo fmt --check',
@@ -279,14 +212,6 @@ const buildRustKernelLane = (
             'cargo-clippy',
         ),
         createPackageManagerCommand(
-            'Verify Rust test lane inventory',
-            ['run', 'test:lanes:verify', '--', '--rust'],
-            {
-                logFileSlug: 'test-lane-coverage-rust',
-                packageManagerRunner,
-            },
-        ),
-        createPackageManagerCommand(
             'Test process memory guard',
             ['run', 'test:rust:process-memory-guard'],
             {
@@ -303,13 +228,6 @@ const buildRustKernelLane = (
     name: rustKernelLaneName,
 });
 
-// Independent checks run concurrently against the built output. The commit gate
-// runs the fast Node test project, the kernel-fast Node project, and the fast
-// Rust kernel tests. The heavier protocol, kernel-heavy Node project, ignored
-// measured-heavy Rust proof and evaluator tests, Rust accepted-setup tests,
-// including their ignored proof tests, and the Playwright browser projects
-// stay in standalone lanes so local checks remain fast and CI can schedule the
-// expensive work independently.
 export const buildCheckParallelLanes = (
     packageManagerRunner: PackageManagerRunner,
 ): readonly ValidationLane[] => {
@@ -326,131 +244,30 @@ export const buildCheckParallelLanes = (
         );
     const vitestLane = (
         name: string,
-        laneName: 'fast' | 'kernel-fast',
-    ): ValidationLane => ({
-        baselineDurationMilliseconds:
-            canonicalTestLaneDefinitions[
-                laneName === 'fast' ? 'node-fast' : 'node-kernel-fast'
-            ].baselineDurationMilliseconds,
-        commands: [
-            buildVitestProjectCommand({
-                commandDescription: name,
-                packageManagerRunner,
-                projectName: nodeTestLaneDefinitions[laneName].projectName,
-            }),
-        ],
-        name,
-    });
+        projectName: 'node' | 'node-kernel-fast' | 'node-protocol',
+    ): ValidationLane =>
+        lane(name, projectName, [
+            'exec',
+            'vitest',
+            '--project',
+            projectName,
+            '--run',
+        ]);
 
     return [
         lane('Lint', 'lint', ['run', 'lint']),
         buildRustKernelLane(packageManagerRunner),
-        lane('Verify public package policy', 'package-policy', [
-            'exec',
-            'tsx',
-            './tools/ci/verify-public-package-policy.ts',
-        ]),
-        lane('Verify test lane coverage', 'test-lane-coverage', [
-            'run',
-            'test:lanes:verify',
-            '--',
-            '--static',
-        ]),
-        lane('Check package boundaries', 'package-boundaries', [
-            'exec',
-            'tsx',
-            './tools/ci/check-package-boundaries.ts',
-        ]),
         lane('Knip unused-code scan', 'knip', ['exec', 'knip']),
-        vitestLane('Node tests (fast)', 'fast'),
-        vitestLane('Node tests (kernel fast)', 'kernel-fast'),
+        vitestLane('Node tests (fast)', 'node'),
+        vitestLane('Node tests (protocol)', 'node-protocol'),
+        vitestLane('Node tests (kernel fast)', 'node-kernel-fast'),
     ];
-};
-
-export const buildProgressLanePlans = (
-    lanes: readonly ValidationLane[],
-    timingHistory: CheckTimingHistory,
-): readonly CheckProgressLanePlan[] => {
-    const progressSourceForLane = (
-        lane: ValidationLane,
-    ): CheckProgressLanePlan['progress'] => {
-        const previousProgress =
-            lane.name === rustKernelLaneName
-                ? timingHistory.laneProgress.get(rustKernelLaneName)
-                : timingHistory.laneProgress.get(lane.name);
-        if (lane.name === 'Build workspace packages') {
-            return {
-                primary:
-                    previousProgress?.primary === undefined
-                        ? undefined
-                        : {
-                              completed: 0,
-                              total: previousProgress.primary.total,
-                              unit: 'task seen',
-                          },
-                source: 'turbo',
-            };
-        }
-        if (
-            lane.name === 'Node tests (fast)' ||
-            lane.name === 'Node tests (kernel fast)'
-        ) {
-            return {
-                secondary:
-                    previousProgress?.secondary === undefined
-                        ? undefined
-                        : {
-                              completed: 0,
-                              total: previousProgress.secondary.total,
-                              unit: 'test',
-                          },
-                source: 'vitest',
-            };
-        }
-        if (lane.name === rustKernelLaneName) {
-            return {
-                secondary:
-                    previousProgress?.secondary === undefined
-                        ? undefined
-                        : {
-                              completed: 0,
-                              total: previousProgress.secondary.total,
-                              unit: 'test',
-                          },
-                source: 'libtest',
-            };
-        }
-        if (lane.commands.length > 1) {
-            return {
-                source: 'commands',
-            };
-        }
-
-        return {
-            source: 'opaque',
-        };
-    };
-
-    return lanes.map((lane) => ({
-        commands: lane.commands.map((command) => ({
-            description: command.description,
-            expectedDurationMilliseconds:
-                timingHistory.commandDurationMilliseconds.get(
-                    checkCommandTimingKey(lane.name, command.description),
-                ),
-        })),
-        expectedDurationMilliseconds:
-            timingHistory.laneDurationMilliseconds.get(lane.name) ??
-            lane.baselineDurationMilliseconds,
-        name: lane.name,
-        progress: progressSourceForLane(lane),
-    }));
 };
 
 const runGatingLane = async (
     lane: ValidationLane,
-    runLog: ActiveLocalRunLog | undefined,
-    reporter: CheckProgressReporter,
+    runLog: ActiveLocalRunLog,
+    reporter: CheckReporter,
 ): Promise<ValidationLaneResult> => {
     const startedAtMilliseconds = performance.now();
     const exitCode = await runCommandsInSeries(lane.commands, {
@@ -458,7 +275,6 @@ const runGatingLane = async (
         outputMode: 'capture',
         runLog,
     });
-    reporter.recordLaneResult(lane.name, exitCode === 0 ? 'passed' : 'failed');
 
     return {
         durationMilliseconds: Math.round(
@@ -472,18 +288,22 @@ const runGatingLane = async (
 
 const runParallelLane = async (
     lane: ValidationLane,
-    runLog: ActiveLocalRunLog | undefined,
+    runLog: ActiveLocalRunLog,
     abortController: AbortController,
-    reporter: CheckProgressReporter,
+    reporter: CheckReporter,
     additionalObserver?: CommandRunObserver,
 ): Promise<ValidationLaneResult> => {
     const startedAtMilliseconds = performance.now();
+    const checkObserver = reporter.createCommandObserver(
+        lane.name,
+        abortController.signal,
+    );
     const exitCode = await runCommandsInSeries(lane.commands, {
         observer:
             additionalObserver === undefined
-                ? reporter.createCommandObserver(lane.name)
+                ? checkObserver
                 : combineCommandRunObservers([
-                      reporter.createCommandObserver(lane.name),
+                      checkObserver,
                       additionalObserver,
                   ]),
         outputMode: 'capture',
@@ -495,8 +315,6 @@ const runParallelLane = async (
     );
 
     if (exitCode === 0) {
-        reporter.recordLaneResult(lane.name, 'passed');
-
         return {
             durationMilliseconds,
             exitCode,
@@ -505,8 +323,7 @@ const runParallelLane = async (
         };
     }
     if (abortController.signal.aborted) {
-        reporter.recordLaneResult(lane.name, 'stopped');
-
+        reporter.recordStoppedLane(lane.name, durationMilliseconds);
         return {
             durationMilliseconds,
             exitCode,
@@ -515,15 +332,11 @@ const runParallelLane = async (
         };
     }
 
-    // This lane failed on its own. Abort so every other still-running lane is
-    // killed instead of grinding to completion behind a known failure.
     abortController.abort({
         classification: 'sibling-abort',
         initiator: lane.name,
         objectVersion: 'sealed-lattice-command-abort-reason-v1',
     });
-    reporter.recordLaneResult(lane.name, 'failed');
-
     return {
         durationMilliseconds,
         exitCode,
@@ -547,11 +360,8 @@ export const formatValidationSummary = (
 ): readonly string[] => {
     const lines = ['', 'Validation summary'];
     for (const result of results) {
-        const duration = formatDurationSeconds(
-            result.durationMilliseconds,
-        ).padStart(8);
         lines.push(
-            `  ${statusLabels[result.status]}  ${duration}  ${result.name}`,
+            `  ${statusLabels[result.status]}  ${formatDurationSeconds(result.durationMilliseconds).padStart(8)}  ${result.name}`,
         );
     }
 
@@ -563,14 +373,6 @@ export const formatValidationSummary = (
     ).length;
     if (failedResults.length === 0) {
         lines.push('', 'All validation lanes passed.');
-        if (context.previousSuccessfulDurationMilliseconds !== undefined) {
-            lines.push(
-                `Expected duration from previous successful check: ${formatProgressDuration(
-                    context.previousSuccessfulDurationMilliseconds,
-                )}.`,
-            );
-        }
-
         return lines;
     }
 
@@ -580,9 +382,7 @@ export const formatValidationSummary = (
             : '';
     lines.push(
         '',
-        `Failed: ${failedResults
-            .map((result) => result.name)
-            .join(', ')}${stoppedNote}.`,
+        `Failed: ${failedResults.map((result) => result.name).join(', ')}${stoppedNote}.`,
     );
     if (context.runLogDirectoryPath !== undefined) {
         lines.push(`Per-lane logs: ${context.runLogDirectoryPath}`);
@@ -599,10 +399,10 @@ export const formatValidationSummary = (
             lines.push(`Log: ${failureDetail.logPath}`);
         }
         if (failureDetail.recentOutputLines.length > 0) {
-            lines.push('Recent output:');
-            for (const line of failureDetail.recentOutputLines) {
-                lines.push(`  ${line}`);
-            }
+            lines.push(
+                'Recent output:',
+                ...failureDetail.recentOutputLines.map((line) => `  ${line}`),
+            );
         }
     }
 
@@ -611,18 +411,14 @@ export const formatValidationSummary = (
 
 const printValidationSummary = (
     results: readonly ValidationLaneResult[],
-    runLog: ActiveLocalRunLog | undefined,
-    timingHistory: CheckTimingHistory,
+    runLog: ActiveLocalRunLog,
     failureDetails: readonly CheckFailureDetail[],
 ): void => {
-    const lines = formatValidationSummary(results, {
+    for (const line of formatValidationSummary(results, {
         failureDetails,
-        previousSuccessfulDurationMilliseconds:
-            timingHistory.totalDurationMilliseconds,
-        runLogDirectoryPath: runLog?.runDirectoryPath,
-    });
-    for (const line of lines) {
-        console.log(line);
+        runLogDirectoryPath: runLog.runDirectoryPath,
+    })) {
+        process.stdout.write(`${line}\n`);
     }
 };
 
@@ -641,8 +437,8 @@ const main = async (): Promise<void> => {
         lanes: checkRunLaneNames,
         scriptName: 'check',
     });
-    let timingDetails: CheckRunTimingDetails | undefined;
-    let reporter: CheckProgressReporter | undefined;
+    const results: ValidationLaneResult[] = [];
+    const reporter = new CheckReporter();
     let rustTestProgressReporter:
         | ReturnType<typeof createHeavyTestProgressReporter>
         | undefined;
@@ -650,19 +446,10 @@ const main = async (): Promise<void> => {
     let logFinishingError: unknown;
 
     try {
-        const parsedArguments = parseCheckArguments(rawArguments);
+        parseCheckArguments(rawArguments);
         const packageManagerRunner = resolvePackageManagerRunner();
         const gatingLanes = buildCheckGatingLanes(packageManagerRunner);
         const parallelLanes = buildCheckParallelLanes(packageManagerRunner);
-        const validationLanes = [...gatingLanes, ...parallelLanes];
-        const timingHistory = await readPreviousCheckTimingHistory();
-        reporter = new CheckProgressReporter({
-            history: timingHistory,
-            lanes: buildProgressLanePlans(validationLanes, timingHistory),
-            redrawEnabled: redrawEnabledForProgressMode(
-                parsedArguments.progressMode,
-            ),
-        });
         rustTestProgressReporter = createHeavyTestProgressReporter({
             eventFilePath: path.join(
                 runLog.runDirectoryPath,
@@ -672,29 +459,22 @@ const main = async (): Promise<void> => {
             label: 'rust-kernel-fast',
             threadCount: 1,
         });
-        const results: ValidationLaneResult[] = [];
-        reporter.start();
 
         for (const lane of gatingLanes) {
             const result = await runGatingLane(lane, runLog, reporter);
             results.push(result);
             if (result.exitCode !== 0) {
-                reporter.stop();
-                timingDetails = reporter.createTimingDetails();
                 printValidationSummary(
                     results,
                     runLog,
-                    timingHistory,
                     reporter.failureDetails(),
                 );
                 process.exitCode = result.exitCode;
-
                 return;
             }
         }
 
         const abortController = new AbortController();
-        const activeReporter = reporter;
         const rustTestObserver = scopeCommandRunObserver(
             'cargo test (optimized test profile, fast)',
             rustTestProgressReporter.observer,
@@ -705,7 +485,7 @@ const main = async (): Promise<void> => {
                     lane,
                     runLog,
                     abortController,
-                    activeReporter,
+                    reporter,
                     lane.name === rustKernelLaneName
                         ? rustTestObserver
                         : undefined,
@@ -718,38 +498,16 @@ const main = async (): Promise<void> => {
                     second.durationMilliseconds - first.durationMilliseconds,
             ),
         );
-        if (parallelResults.some((result) => result.exitCode !== 0)) {
-            reporter.stop();
-            timingDetails = reporter.createTimingDetails();
-            printValidationSummary(
-                results,
-                runLog,
-                timingHistory,
-                reporter.failureDetails(),
-            );
-            process.exitCode = overallExitCode(results);
-
-            return;
-        }
-
-        reporter.stop();
-        timingDetails = reporter.createTimingDetails();
-        printValidationSummary(
-            results,
-            runLog,
-            timingHistory,
-            reporter.failureDetails(),
-        );
+        printValidationSummary(results, runLog, reporter.failureDetails());
         process.exitCode = overallExitCode(results);
     } catch (error) {
         executionError = error;
         process.exitCode = currentProcessExitCode() || 1;
     } finally {
-        reporter?.stop();
         rustTestProgressReporter?.stop();
         try {
             await runLog.finish({
-                details: timingDetails,
+                details: { results },
                 ...(executionError === undefined
                     ? {}
                     : { error: executionError }),
@@ -771,9 +529,7 @@ const main = async (): Promise<void> => {
             ? finalError
             : Object.assign(
                   new Error('Check runner threw a non-Error value.'),
-                  {
-                      cause: finalError,
-                  },
+                  { cause: finalError },
               );
     }
 };

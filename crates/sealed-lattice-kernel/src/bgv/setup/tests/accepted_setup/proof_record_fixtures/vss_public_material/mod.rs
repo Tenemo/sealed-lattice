@@ -1,10 +1,12 @@
 use super::*;
 
+use crate::bgv::setup::same_secret_bridge::SAME_SECRET_BRIDGE_PROOF_BYTES_HASH_DOMAIN;
 use crate::bgv::setup::trustee_evaluation_key_proof::{
     generate_same_secret_bridge_proof_from_request, generate_vss_share_linkage_proof_from_request,
     verify_same_secret_bridge_proof_source_from_request,
     verify_vss_share_linkage_proof_source_from_request,
 };
+use crate::bgv::setup::vss_commitment::VSS_SHARE_LINKAGE_PROOF_BYTES_HASH_DOMAIN;
 use crate::hashing::{derive_canonical_object_hash, hash512_hex};
 
 const VSS_MATERIAL_SEED_DOMAIN: &str = "sealed-lattice/accepted-setup/vss-material-seed";
@@ -92,11 +94,7 @@ pub(super) fn same_secret_bridge_committed_material_regeneration_inputs_from_fix
 
 const VSS_PUBLIC_COMMITMENT_BINARY_FORMAT: &str = "sealed-lattice-vss-public-commitment-binary";
 const VSS_SHARE_LINKAGE_PROOF_FAMILY: &str = "vss-share-linkage";
-const VSS_SHARE_LINKAGE_PROOF_BYTES_HASH_DOMAIN: &str =
-    "sealed-lattice/setup/vss-share-linkage/proof-bytes";
 const SAME_SECRET_BRIDGE_PROOF_FAMILY: &str = "same-secret-bridge";
-const SAME_SECRET_BRIDGE_PROOF_BYTES_HASH_DOMAIN: &str =
-    "sealed-lattice/setup/same-secret-bridge/proof-bytes";
 const SAME_SECRET_RELATION: &str =
     "vss-constant-commitments-open-to-one-short-secret-across-q-share-limbs";
 const SAME_SECRET_BRIDGE_RELATION: &str = "public constant coefficient commitments bind to the same signed ternary trustee secret as the source VSS constant commitments across Q_share";

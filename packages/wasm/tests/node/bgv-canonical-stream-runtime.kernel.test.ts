@@ -17,6 +17,7 @@ import {
     loadFreshTranscriptCoreKernel,
     type TranscriptCoreKernel,
 } from '#packages/wasm/src/index';
+import { canonicalStreamDescriptorFixture } from '#tests/support/canonical-stream-descriptor-fixture';
 
 const makeChunk = (byteLength: number, seed: number): ArrayBuffer => {
     const bytes = new Uint8Array(new ArrayBuffer(byteLength));
@@ -212,6 +213,60 @@ describe('BGV canonical stream runtime with the real WASM kernel', () => {
                 family: bgvCanonicalStreamFamilies.relinearizationComponent,
                 materialRoot: '33'.repeat(64),
                 streamDomain: canonicalStreamDomains.evaluatorKeyStore,
+            }),
+        ).resolves.toBeUndefined();
+    });
+
+    it('refuses oversized component material before pulling or emitting bytes', async () => {
+        const runtime = openBgvCanonicalStreamRuntime({ kernel });
+        let pullCount = 0;
+        let emissionCount = 0;
+
+        await expect(
+            runtime.writeSourceMaterial({
+                emitChunk: () => {
+                    emissionCount += 1;
+                    return Promise.resolve();
+                },
+                family: bgvCanonicalStreamFamilies.relinearizationComponent,
+                materialRoot: '34'.repeat(64),
+                pullChunk: () => {
+                    pullCount += 1;
+                    return Promise.resolve(undefined);
+                },
+                totalByteLength: 2_147_483_649,
+            }),
+        ).rejects.toThrowError(CanonicalStreamResourceError);
+        expect(pullCount).toBe(0);
+        expect(emissionCount).toBe(0);
+    });
+
+    it('refuses retained material that cannot fit the remaining WASM profile before pulling bytes', async () => {
+        const runtime = openBgvCanonicalStreamRuntime({ kernel });
+        const descriptorBytes = canonicalStreamDescriptorFixture(
+            foundationProfile.maximumWasmMemoryByteLength,
+        );
+        let pullCount = 0;
+
+        await expect(
+            runtime.readMaterial({
+                descriptorBytes,
+                family: bgvCanonicalStreamFamilies.publicKeyShare,
+                materialRoot: '35'.repeat(64),
+                pullChunk: () => {
+                    pullCount += 1;
+                    return Promise.resolve(undefined);
+                },
+            }),
+        ).rejects.toThrowError(CanonicalStreamResourceError);
+        expect(pullCount).toBe(0);
+
+        await expect(
+            authenticateMaterial(kernel, runtime, {
+                chunks: [makeChunk(41, 35)],
+                family: bgvCanonicalStreamFamilies.publicKeyShare,
+                materialRoot: '36'.repeat(64),
+                streamDomain: canonicalStreamDomains.publicKeyShareProof,
             }),
         ).resolves.toBeUndefined();
     });

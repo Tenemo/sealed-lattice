@@ -71,13 +71,7 @@ pub(super) fn setup_transport_parameters_value_for_roster(
         "objectType": "SetupTransport",
         "largeObjectEncoding": "binary",
         "chunking": "required",
-        "storageQuotaBytes": SETUP_TRANSPORT_STORAGE_QUOTA_BYTES,
-        "largestSingleBufferBytes": SETUP_TRANSPORT_LARGEST_SINGLE_BUFFER_BYTES,
-        "copyCountLimit": SETUP_TRANSPORT_COPY_COUNT_LIMIT,
         "streamVerificationOrder": SETUP_TRANSPORT_STREAM_ORDER,
-        "resumePolicy": SETUP_TRANSPORT_RESUME_POLICY,
-        "lazyLoadingPolicy": SETUP_TRANSPORT_LAZY_LOADING_POLICY,
-        "requiredTransportedObjects": [],
     }))
 }
 

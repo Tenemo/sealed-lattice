@@ -41,9 +41,6 @@ const findConflictingRawManifest = (
     );
 };
 
-const normalizeIdentityForComparison = (identity: string): string =>
-    identity.normalize('NFC');
-
 const verifyRosterManifestTranscriptUnchecked = (
     input: RosterManifestTranscriptInput,
 ): RosterManifestTranscriptVerification => {
@@ -84,14 +81,12 @@ const verifyRosterManifestTranscriptUnchecked = (
             }),
         );
 
-        const normalizedParticipantIdentity = normalizeIdentityForComparison(
-            entry.participantIdentity,
-        );
-        if (seenParticipantIdentities.has(normalizedParticipantIdentity)) {
+        const participantIdentity = entry.participantIdentity;
+        if (seenParticipantIdentities.has(participantIdentity)) {
             refusedObjects.push(
                 createRefusal(
                     'DuplicateRegistration',
-                    'Roster freeze rejects duplicate participant registrations after Unicode NFC normalization.',
+                    'Roster freeze rejects duplicate canonical participant identities.',
                     entry.registrationEntryHash,
                     'RegistrationEntry',
                 ),
@@ -99,16 +94,16 @@ const verifyRosterManifestTranscriptUnchecked = (
             continue;
         }
 
-        seenParticipantIdentities.add(normalizedParticipantIdentity);
+        seenParticipantIdentities.add(participantIdentity);
         participantPublicKeys.set(
-            normalizedParticipantIdentity,
+            participantIdentity,
             entry.signingPublicKeyHash,
         );
-        participantIdentities.push(normalizedParticipantIdentity);
+        participantIdentities.push(participantIdentity);
     }
 
     const organizerPublicKeyHash = participantPublicKeys.get(
-        normalizeIdentityForComparison(input.organizerIdentity),
+        input.organizerIdentity,
     );
     if (organizerPublicKeyHash === undefined) {
         refusedObjects.push(
@@ -128,25 +123,23 @@ const verifyRosterManifestTranscriptUnchecked = (
 
     const trusteeIdentities = new Set<string>();
     for (const entry of input.trusteeSetupEntries) {
-        const normalizedTrusteeIdentity = normalizeIdentityForComparison(
-            entry.trusteeIdentity,
-        );
-        if (trusteeIdentities.has(normalizedTrusteeIdentity)) {
+        const trusteeIdentity = entry.trusteeIdentity;
+        if (trusteeIdentities.has(trusteeIdentity)) {
             refusedObjects.push(
                 createRefusal(
                     'DuplicateTrusteeSetupEntry',
-                    'Roster freeze rejects duplicate trustee setup entries after Unicode NFC normalization.',
+                    'Roster freeze rejects duplicate canonical trustee identities.',
                     entry.trusteeSetupEntryHash,
                     'TrusteeSetupEntry',
                 ),
             );
         }
-        trusteeIdentities.add(normalizedTrusteeIdentity);
+        trusteeIdentities.add(trusteeIdentity);
         refusedObjects.push(
             ...verifyTrusteeSetupEntry(
                 input,
                 entry,
-                participantPublicKeys.get(normalizedTrusteeIdentity),
+                participantPublicKeys.get(trusteeIdentity),
             ),
         );
         refusedObjects.push(

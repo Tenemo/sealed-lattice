@@ -3,9 +3,9 @@
     "compilerOptions": {
         "composite": true,
         "declaration": true,
-        "outDir": "../../.turbo/typescript/sdk",
+        "outDir": "../../temp/typescript/sdk",
         "rootDir": "./src",
-        "tsBuildInfoFile": "../../.turbo/typescript/sdk.tsbuildinfo"
+        "tsBuildInfoFile": "../../temp/typescript/sdk.tsbuildinfo"
     },
     "include": ["src/**/*.ts"],
     "references": [

@@ -104,10 +104,7 @@ export type VssShareLinkageProofInput = {
     readonly ringDegree: number;
     readonly vssShareLinkage: Record<string, unknown>;
     readonly coefficientMessagesByShamirIndex: readonly (readonly number[])[];
-    readonly recipientShareMessages: readonly number[];
     readonly coefficientOpeningRandomnessByShamirIndex: readonly (readonly (readonly number[])[])[];
-    readonly recipientShareOpeningRandomness: readonly (readonly number[])[];
-    readonly carryWitnesses: readonly number[];
     readonly recipientShareMessagesByItem: readonly (readonly number[])[];
     readonly recipientShareOpeningRandomnessByItem: readonly (readonly (readonly number[])[])[];
     readonly carryWitnessesByItem: readonly (readonly number[])[];
@@ -572,6 +569,7 @@ const vssPublicRecipientShareValuesAndCarries = (input: {
 }): { readonly shareValues: number[]; readonly carries: number[] } => {
     const point = BigInt(input.recipientPoint);
     const prime = BigInt(input.rnsPrime);
+    const maximumSafeCarry = BigInt(Number.MAX_SAFE_INTEGER);
     const shareValues = new Array<number>(input.ringDegree).fill(0);
     const carries = new Array<number>(input.ringDegree).fill(0);
     for (
@@ -585,8 +583,14 @@ const vssPublicRecipientShareValuesAndCarries = (input: {
             liftedShare += BigInt(messages[coefficientPosition]) * pointPower;
             pointPower *= point;
         });
+        const carry = liftedShare / prime;
+        if (carry > maximumSafeCarry) {
+            throw new RangeError(
+                'VSS recipient-share carry exceeds the JavaScript safe integer range',
+            );
+        }
         shareValues[coefficientPosition] = Number(liftedShare % prime);
-        carries[coefficientPosition] = Number(liftedShare / prime);
+        carries[coefficientPosition] = Number(carry);
     }
 
     return { shareValues, carries };
@@ -1014,10 +1018,7 @@ const createVssAggregateThresholdProofRecord = async (input: {
         coefficientMessagesByShamirIndex: sourceCredentials.map(
             (credential) => credential.shareValues,
         ),
-        recipientShareMessages: aggregateCredential.aggregateMessage,
         coefficientOpeningRandomnessByShamirIndex: [],
-        recipientShareOpeningRandomness: [],
-        carryWitnesses: aggregateCredential.wrapWitnesses,
         recipientShareMessagesByItem: [aggregateCredential.aggregateMessage],
         recipientShareOpeningRandomnessByItem: [],
         carryWitnessesByItem: [aggregateCredential.wrapWitnesses],

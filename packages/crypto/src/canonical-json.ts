@@ -3,20 +3,71 @@ import { bytesToHex } from '@noble/hashes/utils.js';
 
 const textEncoder = new TextEncoder();
 const hash512PreimagePrefix = textEncoder.encode('sealed.vote/hash512');
+const maximumCanonicalJsonContainerDepth = 64;
+const maximumCanonicalJsonValueCount = 1_000_000;
+const maximumCanonicalJsonStringCodeUnitCount = 64 * 1024 * 1024;
+const maximumCanonicalJsonByteLength = 64 * 1024 * 1024;
 
 const isCanonicalInteger = (value: number): boolean =>
     Number.isSafeInteger(value) && !Object.is(value, -0);
 
-const isPlainObject = (
-    value: unknown,
-): value is Readonly<Record<string, unknown>> =>
-    typeof value === 'object' &&
-    value !== null &&
-    !Array.isArray(value) &&
-    Object.getPrototypeOf(value) === Object.prototype;
+type CanonicalJsonSerializationState = {
+    readonly activeContainers: WeakSet<object>;
+    byteLength: number;
+    rootObjectType: unknown;
+    stringCodeUnitCount: number;
+    valueCount: number;
+};
 
-const hasOwnProperty = (value: object, key: PropertyKey): boolean =>
-    Object.prototype.hasOwnProperty.call(value, key);
+const createCanonicalJsonSerializationState =
+    (): CanonicalJsonSerializationState => ({
+        activeContainers: new WeakSet<object>(),
+        byteLength: 0,
+        rootObjectType: undefined,
+        stringCodeUnitCount: 0,
+        valueCount: 0,
+    });
+
+const chargeCanonicalJsonByteLength = (
+    state: CanonicalJsonSerializationState,
+    additionalByteLength: number,
+): void => {
+    if (
+        additionalByteLength >
+        maximumCanonicalJsonByteLength - state.byteLength
+    ) {
+        throw new RangeError(
+            'Canonical JSON exceeds the accepted byte length.',
+        );
+    }
+    state.byteLength += additionalByteLength;
+};
+
+const chargeCanonicalJsonValue = (
+    state: CanonicalJsonSerializationState,
+): void => {
+    if (state.valueCount >= maximumCanonicalJsonValueCount) {
+        throw new RangeError(
+            'Canonical JSON exceeds the accepted value count.',
+        );
+    }
+    state.valueCount += 1;
+};
+
+const chargeCanonicalJsonString = (
+    state: CanonicalJsonSerializationState,
+    value: string,
+): void => {
+    if (
+        value.length >
+        maximumCanonicalJsonStringCodeUnitCount - state.stringCodeUnitCount
+    ) {
+        throw new RangeError(
+            'Canonical JSON exceeds the accepted string size.',
+        );
+    }
+    state.stringCodeUnitCount += value.length;
+};
 
 const containsLoneSurrogate = (value: string): boolean => {
     for (let index = 0; index < value.length; index += 1) {
@@ -39,26 +90,104 @@ const containsLoneSurrogate = (value: string): boolean => {
     return false;
 };
 
-const normalizeCanonicalString = (value: string): string => {
-    // Canonical strings must be surrogate-free and NFC-normalized so that
-    // byte-different-but-equivalent inputs cannot collide under the hash.
+const validateCanonicalString = (
+    value: string,
+    state: CanonicalJsonSerializationState,
+): string => {
+    chargeCanonicalJsonString(state, value);
     if (containsLoneSurrogate(value)) {
         throw new TypeError(
             'Canonical strings cannot contain lone UTF-16 surrogates.',
         );
     }
 
-    return value.normalize('NFC');
+    for (
+        let characterIndex = 0;
+        characterIndex < value.length;
+        characterIndex += 1
+    ) {
+        if (value.charCodeAt(characterIndex) > 0x7f) {
+            throw new TypeError(
+                'Canonical strings in TypeScript hash paths must contain only ASCII characters; use the Unicode 17 Rust/WASM foundation codec for display text.',
+            );
+        }
+    }
+
+    return value;
 };
 
-const serializeCanonicalValue = (value: unknown): string => {
+const serializedCanonicalString = (
+    value: string,
+    state: CanonicalJsonSerializationState,
+): string => {
+    const serialized = JSON.stringify(validateCanonicalString(value, state));
+    chargeCanonicalJsonByteLength(state, serialized.length);
+
+    return serialized;
+};
+
+const containerPrototype = (value: object): object | null => {
+    try {
+        return Reflect.getPrototypeOf(value);
+    } catch {
+        throw new TypeError(
+            'Canonical JSON containers must expose an ordinary prototype.',
+        );
+    }
+};
+
+const ownPropertyDescriptor = (
+    value: object,
+    propertyKey: PropertyKey,
+): PropertyDescriptor | undefined => {
+    try {
+        return Object.getOwnPropertyDescriptor(value, propertyKey);
+    } catch {
+        throw new TypeError(
+            'Canonical JSON containers must expose stable own data properties.',
+        );
+    }
+};
+
+const ownPropertyKeys = (value: object): readonly PropertyKey[] => {
+    try {
+        return Reflect.ownKeys(value);
+    } catch {
+        throw new TypeError(
+            'Canonical JSON containers must expose stable own property keys.',
+        );
+    }
+};
+
+const rejectCustomJsonSerialization = (value: object): void => {
+    const descriptor = ownPropertyDescriptor(value, 'toJSON');
+    if (
+        descriptor !== undefined &&
+        ('get' in descriptor ||
+            'set' in descriptor ||
+            ('value' in descriptor && typeof descriptor.value === 'function'))
+    ) {
+        throw new TypeError(
+            'Canonical JSON cannot contain custom serialization.',
+        );
+    }
+};
+
+const serializeCanonicalValue = (
+    value: unknown,
+    state: CanonicalJsonSerializationState,
+    containerDepth: number,
+): string => {
+    chargeCanonicalJsonValue(state);
     if (value === null) {
+        chargeCanonicalJsonByteLength(state, 4);
         return 'null';
     }
     if (typeof value === 'string') {
-        return JSON.stringify(normalizeCanonicalString(value));
+        return serializedCanonicalString(value, state);
     }
     if (typeof value === 'boolean') {
+        chargeCanonicalJsonByteLength(state, value ? 4 : 5);
         return value ? 'true' : 'false';
     }
     if (typeof value === 'number') {
@@ -68,61 +197,152 @@ const serializeCanonicalValue = (value: unknown): string => {
             );
         }
 
-        return JSON.stringify(value);
-    }
-    if (Array.isArray(value)) {
-        const serializedItems: string[] = [];
-        for (let index = 0; index < value.length; index += 1) {
-            if (!hasOwnProperty(value, index)) {
-                throw new TypeError('Canonical arrays cannot be sparse.');
-            }
-            serializedItems.push(serializeCanonicalValue(value[index]));
-        }
+        const serialized = JSON.stringify(value);
+        chargeCanonicalJsonByteLength(state, serialized.length);
 
-        return `[${serializedItems.join(',')}]`;
+        return serialized;
     }
-    if (isPlainObject(value)) {
-        const serializedEntries: {
-            readonly key: string;
-            readonly value: string;
-        }[] = [];
-        for (const key of Object.keys(value)) {
-            const normalizedKey = normalizeCanonicalString(key);
-            if (
-                serializedEntries.some((entry) => entry.key === normalizedKey)
-            ) {
+    if (typeof value !== 'object' || value === null) {
+        throw new TypeError('Unsupported canonical value.');
+    }
+    if (containerDepth >= maximumCanonicalJsonContainerDepth) {
+        throw new RangeError(
+            'Canonical JSON exceeds the accepted container depth.',
+        );
+    }
+    const container = value;
+    if (state.activeContainers.has(container)) {
+        throw new TypeError('Canonical JSON cannot contain cycles.');
+    }
+    state.activeContainers.add(container);
+    try {
+        rejectCustomJsonSerialization(container);
+        if (Array.isArray(container)) {
+            const prototype = containerPrototype(container);
+            if (prototype !== Array.prototype && prototype !== null) {
                 throw new TypeError(
-                    'Canonical object keys must be unique after NFC normalization.',
+                    'Canonical arrays must have an ordinary prototype.',
                 );
             }
-            const entry = value[key];
-            if (entry === undefined) {
+            const lengthDescriptor = ownPropertyDescriptor(container, 'length');
+            if (
+                lengthDescriptor === undefined ||
+                !('value' in lengthDescriptor) ||
+                !Number.isSafeInteger(lengthDescriptor.value) ||
+                lengthDescriptor.value < 0
+            ) {
+                throw new TypeError('Canonical arrays have an invalid length.');
+            }
+            const arrayLength = lengthDescriptor.value as number;
+            if (
+                arrayLength >
+                maximumCanonicalJsonValueCount - state.valueCount
+            ) {
+                throw new RangeError(
+                    'Canonical JSON exceeds the accepted value count.',
+                );
+            }
+            chargeCanonicalJsonByteLength(
+                state,
+                2 + Math.max(0, arrayLength - 1),
+            );
+            const serializedItems: string[] = [];
+            for (let index = 0; index < arrayLength; index += 1) {
+                const descriptor = ownPropertyDescriptor(
+                    container,
+                    String(index),
+                );
+                if (descriptor === undefined) {
+                    throw new TypeError('Canonical arrays cannot be sparse.');
+                }
+                if ('get' in descriptor || 'set' in descriptor) {
+                    throw new TypeError(
+                        'Canonical arrays cannot contain accessor properties.',
+                    );
+                }
+                serializedItems.push(
+                    serializeCanonicalValue(
+                        descriptor.value,
+                        state,
+                        containerDepth + 1,
+                    ),
+                );
+            }
+
+            return `[${serializedItems.join(',')}]`;
+        }
+
+        const prototype = containerPrototype(container);
+        if (prototype !== Object.prototype && prototype !== null) {
+            throw new TypeError(
+                'Canonical objects must have an ordinary prototype.',
+            );
+        }
+        const entries: {
+            readonly descriptor: PropertyDescriptor;
+            readonly key: string;
+        }[] = [];
+        for (const propertyKey of ownPropertyKeys(container)) {
+            if (typeof propertyKey !== 'string') {
+                continue;
+            }
+            const descriptor = ownPropertyDescriptor(container, propertyKey);
+            if (descriptor?.enumerable !== true) {
+                continue;
+            }
+            if ('get' in descriptor || 'set' in descriptor) {
+                throw new TypeError(
+                    'Canonical objects cannot contain accessor properties.',
+                );
+            }
+            validateCanonicalString(propertyKey, state);
+            entries.push({ descriptor, key: propertyKey });
+        }
+        entries.sort((left, right) =>
+            left.key < right.key ? -1 : left.key > right.key ? 1 : 0,
+        );
+        chargeCanonicalJsonByteLength(
+            state,
+            2 + Math.max(0, entries.length - 1),
+        );
+        const serializedEntries: string[] = [];
+        for (const { descriptor, key } of entries) {
+            if (descriptor.value === undefined) {
                 throw new TypeError(
                     'Canonical objects cannot contain undefined.',
                 );
             }
-            serializedEntries.push({
-                key: normalizedKey,
-                value: serializeCanonicalValue(entry),
-            });
+            const serializedKey = JSON.stringify(key);
+            chargeCanonicalJsonByteLength(state, serializedKey.length + 1);
+            if (containerDepth === 0 && key === 'objectType') {
+                state.rootObjectType = descriptor.value;
+            }
+            serializedEntries.push(
+                `${serializedKey}:${serializeCanonicalValue(
+                    descriptor.value,
+                    state,
+                    containerDepth + 1,
+                )}`,
+            );
         }
-        // Keys sorted by UTF-16 code-unit comparison (`<`/`>` on JS strings),
-        // not code-point or locale order. This ordering is part of the hash
-        // contract and must byte-match the Rust kernel.
-        serializedEntries.sort((left, right) =>
-            left.key < right.key ? -1 : left.key > right.key ? 1 : 0,
-        );
 
-        return `{${serializedEntries
-            .map((entry) => `${JSON.stringify(entry.key)}:${entry.value}`)
-            .join(',')}}`;
+        return `{${serializedEntries.join(',')}}`;
+    } finally {
+        state.activeContainers.delete(container);
     }
+};
 
-    throw new TypeError('Unsupported canonical value.');
+export const canonicalJsonWithRootObjectType = (
+    value: unknown,
+): Readonly<{ json: string; rootObjectType: unknown }> => {
+    const state = createCanonicalJsonSerializationState();
+    const json = serializeCanonicalValue(value, state, 0);
+
+    return { json, rootObjectType: state.rootObjectType };
 };
 
 export const canonicalJson = (value: unknown): string =>
-    serializeCanonicalValue(value);
+    canonicalJsonWithRootObjectType(value).json;
 
 const appendVarUintToHash = (
     hash: ReturnType<typeof shake256.create>,

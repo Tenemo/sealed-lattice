@@ -136,20 +136,12 @@ describe('roster and manifest shells', () => {
         );
     });
 
-    it('rejects roster identities that collide after Unicode normalization', () => {
-        const registrations = [
-            createRegistrationEntry('Cafe\u0301', 1, 0),
-            createRegistrationEntry('Caf\u00e9', 1, 1),
-            createRegistrationEntry('participant-3', 1, 2),
-        ];
-        const input = createRosterManifestTranscriptInput(registrations);
-        const result = verifyRosterManifestTranscript(input);
-
-        expect(result.isValid).toBe(false);
-        expect(result.refusedObjects).toEqual(
-            expect.arrayContaining([
-                expect.objectContaining({ code: 'DuplicateRegistration' }),
-            ]),
+    it('rejects non-ASCII roster identities before hashing', () => {
+        expect(() => createRegistrationEntry('Cafe\u0301', 1, 0)).toThrow(
+            'only ASCII characters',
+        );
+        expect(() => createRegistrationEntry('Caf\u00e9', 1, 0)).toThrow(
+            'only ASCII characters',
         );
     });
 

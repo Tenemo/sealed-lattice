@@ -121,64 +121,6 @@ describe('local run logs', () => {
         }
     });
 
-    it('appends successful check summaries without deleting prior history', async () => {
-        const rootDirectoryPath = await createTemporaryLogRoot();
-        try {
-            const previousSuccessfulChecks = Array.from(
-                { length: 10 },
-                (_, index) => ({
-                    durationMilliseconds: index,
-                    exitCode: 0,
-                    scriptName: 'check',
-                }),
-            );
-            const existingLines = [
-                '{corrupt',
-                JSON.stringify({ exitCode: 1, scriptName: 'check' }),
-                JSON.stringify({
-                    exitCode: 0,
-                    scriptName: 'test:node',
-                }),
-                ...previousSuccessfulChecks.map((entry) =>
-                    JSON.stringify(entry),
-                ),
-            ];
-            await writeFile(
-                path.join(rootDirectoryPath, 'runs.jsonl'),
-                `${existingLines.join('\n')}\n`,
-                'utf8',
-            );
-
-            const log = await createLocalRunLog({
-                commandLineArguments: [],
-                lanes: ['sample'],
-                now: new Date('2026-05-29T18:30:00.000Z'),
-                rootDirectoryPath,
-                scriptName: 'check',
-            });
-            await log.finish({ exitCode: 0 });
-
-            const finalLines = (
-                await readFile(
-                    path.join(rootDirectoryPath, 'runs.jsonl'),
-                    'utf8',
-                )
-            )
-                .trim()
-                .split('\n');
-            expect(finalLines.slice(0, -1)).toEqual(existingLines);
-            expect(
-                JSON.parse(finalLines[finalLines.length - 1] ?? '') as Record<
-                    string,
-                    unknown
-                >,
-            ).toMatchObject({ exitCode: 0, scriptName: 'check' });
-            await expect(access(log.runDirectoryPath)).resolves.toBeUndefined();
-        } finally {
-            await rm(rootDirectoryPath, { force: true, recursive: true });
-        }
-    });
-
     it('writes attributed stdout and stderr once in the run output log', async () => {
         const rootDirectoryPath = await createTemporaryLogRoot();
         try {

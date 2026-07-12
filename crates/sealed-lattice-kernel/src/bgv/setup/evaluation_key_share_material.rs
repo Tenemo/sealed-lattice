@@ -38,10 +38,12 @@ use crate::{
     bgv::setup_helpers::{array_field, string_field},
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
     foundation::VerifiedCanonicalStreamSummary,
-    hashing::hash512_hex,
 };
 
+#[cfg(not(target_arch = "wasm32"))]
 use super::setup_proof::SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::hashing::hash512_hex;
 
 pub(super) const EVALUATION_KEY_SHARE_COMPONENT_VECTOR_HASH_DOMAIN: &str =
     "sealed-lattice-bgv-rns/evaluation-key-share-component-vector";

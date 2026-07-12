@@ -12,11 +12,10 @@ describe('CI heavy-lane change classification', () => {
     it('skips heavy lanes only for explicitly recognized documentation', () => {
         const documentationPaths = [
             'README.md',
-            'packages/sdk/README.md',
+            'packages/protocol/README.md',
             'SECURITY.md',
             'LICENSE',
             'reference-documents/paper.txt',
-            'packages/sdk/api-surface-summary.json',
         ];
 
         expect(documentationPaths.every(isDocumentationOnlyCiPath)).toBe(true);

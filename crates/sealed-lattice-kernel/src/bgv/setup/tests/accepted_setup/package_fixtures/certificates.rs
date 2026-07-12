@@ -72,12 +72,7 @@ pub(in super::super) fn setup_transport_certificate_fixture(
         "chunking": "required",
         "chunkCount": 0_u64,
         "totalByteLength": 0_u64,
-        "storageQuotaBytes": 2_147_483_648_u64,
-        "largestSingleBufferBytes": 1_572_864_u64,
-        "copyCountLimit": 2_u64,
         "streamVerificationOrder": "ascending-chunk-index",
-        "resumePolicy": "chunk-index-checkpointed-by-hash",
-        "lazyLoadingPolicy": "root-addressed-large-object-loading",
         "transportedObjects": [],
     });
     let certificate_hash =

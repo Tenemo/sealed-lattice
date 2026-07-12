@@ -29,7 +29,6 @@ import type {
     TransportedPublicKeyShareProofMaterialSet as ProtocolTransportedPublicKeyShareProofMaterialSet,
     TransportedVssShareLinkageProofMaterialSet as ProtocolTransportedVssShareLinkageProofMaterialSet,
     TransportedSameSecretBridgeProofMaterialSet as ProtocolTransportedSameSecretBridgeProofMaterialSet,
-    TransportedEvaluationKeyAggregateBindingOpeningSet as ProtocolTransportedEvaluationKeyAggregateBindingOpeningSet,
     TransportedEvaluationKeyShareComponentMaterialSet as ProtocolTransportedEvaluationKeyShareComponentMaterialSet,
     TransportedEvaluationKeyShareProofMaterialSet as ProtocolTransportedEvaluationKeyShareProofMaterialSet,
     TransportedPublicEvaluationKeyMaterialSet as ProtocolTransportedPublicEvaluationKeyMaterialSet,
@@ -38,27 +37,9 @@ import type {
     CollectiveBgvSetupRosterEntryInput as ProtocolCollectiveBgvSetupRosterEntryInput,
 } from '@sealed-lattice/protocol';
 import type {
-    ActionCurrentForRecoveryEpochInput,
-    ActionCurrentForRecoveryEpochResult,
-    BoardConsistencyInput,
-    BoardConsistencyVerification,
-    CastReceiptVerification,
-    CastReceiptVerificationInput,
-    CloseRecordVerification,
-    CloseRecordVerificationInput,
-    FirstValidOrderingInput,
-    FirstValidOrderingVerification,
     PollSpecInput,
     PollSpecValidation,
     ProtocolHash,
-    RecoveryEpochVerification,
-    RecoveryEpochVerificationInput,
-    ThresholdParameters,
-    ThresholdParametersInput,
-    RosterManifestTranscriptInput,
-    RosterManifestTranscriptVerification,
-    RosterExternalAcceptanceVerification,
-    RosterExternalAcceptanceVerificationInput,
     VerificationResult,
 } from '@sealed-lattice/types';
 import {
@@ -294,7 +275,6 @@ export type VerifyPrivateVssShareInput = Readonly<{
 
 export type PrivateVssShareVerification = Readonly<{
     readonly isValid: boolean;
-    readonly operation: 'verifyPrivateVssShareEnvelope';
     readonly privateEnvelopeHash: ProtocolHash | null;
     readonly localVerificationRoot: ProtocolHash | null;
     readonly ringDegree?: number;
@@ -333,8 +313,6 @@ export type TransportedEvaluationKeyShareProofMaterialSet =
     ProtocolTransportedEvaluationKeyShareProofMaterialSet;
 export type TransportedEvaluationKeyShareComponentMaterialSet =
     ProtocolTransportedEvaluationKeyShareComponentMaterialSet;
-export type TransportedEvaluationKeyAggregateBindingOpeningSet =
-    ProtocolTransportedEvaluationKeyAggregateBindingOpeningSet;
 export type EvaluationKeyShareComponentMaterialChunkSource =
     ProtocolEvaluationKeyShareComponentMaterialChunkSource;
 export type PublicEvaluationKeyMaterialChunkSource =
@@ -368,11 +346,6 @@ export type VerifySetupPackageInput = Readonly<{
     // Public evaluation-key bytes are supplied out of band and authenticated
     // against the descriptor on each transported material reference.
     readonly publicEvaluationKeyMaterialChunkSources?: readonly PublicEvaluationKeyMaterialChunkSource[];
-    // Optional per-trustee batched linear-evaluation openings for the package
-    // aggregate binding, forwarded to the kernel verbatim. The kernel runs the
-    // committed-material aggregate binding only when the evaluation-key set
-    // publishes an aggregateBinding; otherwise the openings are unused.
-    readonly transportedEvaluationKeyAggregateBindingOpenings?: TransportedEvaluationKeyAggregateBindingOpeningSet;
     readonly transportedPublicEvaluationKeyMaterial?: TransportedPublicEvaluationKeyMaterialSet;
 }>;
 
@@ -388,7 +361,6 @@ export type SetupPackageVerificationInputSource = Readonly<
 
 export type SetupPackageVerification = Readonly<{
     readonly isValid: boolean;
-    readonly operation: 'verifyCollectiveBgvSetupPackage';
     readonly refusedObjects: readonly Readonly<{
         readonly reasonCode: string;
         readonly message: string;
@@ -610,6 +582,123 @@ export type TargetDecryptionShareProofMaterialGenerationInput = Readonly<{
     readonly proofRandomnessNonceHex: string;
 }>;
 
+const targetDecryptionShareProofMaterialGenerationInputSnapshot = (
+    input: TargetDecryptionShareProofMaterialGenerationInput,
+): TargetDecryptionShareProofMaterialGenerationInput => {
+    const descriptors = plainRecordDescriptors(input, 'input');
+    const state = createKernelJsonSnapshotState();
+    const abortSignal = dataPropertyValue(
+        descriptors,
+        'abortSignal',
+        'abortSignal',
+    ) as AbortSignal | undefined;
+    const emitProofMaterialChunk = dataPropertyValue(
+        descriptors,
+        'emitProofMaterialChunk',
+        'emitProofMaterialChunk',
+    );
+    if (typeof emitProofMaterialChunk !== 'function') {
+        throw new TypeError('emitProofMaterialChunk must be a function.');
+    }
+    const trusteeIdentity = dataPropertyValue(
+        descriptors,
+        'trusteeIdentity',
+        'trusteeIdentity',
+    );
+    if (typeof trusteeIdentity !== 'string') {
+        throw new TypeError('trusteeIdentity must be a string.');
+    }
+    const proofRandomnessSeedHex = dataPropertyValue(
+        descriptors,
+        'proofRandomnessSeedHex',
+        'proofRandomnessSeedHex',
+    );
+    if (typeof proofRandomnessSeedHex !== 'string') {
+        throw new TypeError('proofRandomnessSeedHex must be a string.');
+    }
+    const proofRandomnessNonceHex = dataPropertyValue(
+        descriptors,
+        'proofRandomnessNonceHex',
+        'proofRandomnessNonceHex',
+    );
+    if (typeof proofRandomnessNonceHex !== 'string') {
+        throw new TypeError('proofRandomnessNonceHex must be a string.');
+    }
+
+    return {
+        ...(abortSignal === undefined ? {} : { abortSignal }),
+        emitProofMaterialChunk:
+            emitProofMaterialChunk as CanonicalProofMaterialChunkSink,
+        setupPackage: snapshotKernelJsonValue(
+            dataPropertyValue(descriptors, 'setupPackage', 'setupPackage'),
+            'setupPackage',
+            state,
+        ),
+        targetAcceptedRecord: snapshotKernelJsonValue(
+            dataPropertyValue(
+                descriptors,
+                'targetAcceptedRecord',
+                'targetAcceptedRecord',
+            ),
+            'targetAcceptedRecord',
+            state,
+        ),
+        targetCiphertexts: snapshotKernelJsonValue(
+            dataPropertyValue(
+                descriptors,
+                'targetCiphertexts',
+                'targetCiphertexts',
+            ),
+            'targetCiphertexts',
+            state,
+        ),
+        targetCiphertextBinding: snapshotKernelJsonValue(
+            dataPropertyValue(
+                descriptors,
+                'targetCiphertextBinding',
+                'targetCiphertextBinding',
+            ),
+            'targetCiphertextBinding',
+            state,
+        ),
+        targetShareProfile: snapshotKernelJsonValue(
+            dataPropertyValue(
+                descriptors,
+                'targetShareProfile',
+                'targetShareProfile',
+            ),
+            'targetShareProfile',
+            state,
+        ),
+        trusteeIdentity,
+        localTargetShareWitness: snapshotKernelJsonValue(
+            dataPropertyValue(
+                descriptors,
+                'localTargetShareWitness',
+                'localTargetShareWitness',
+            ),
+            'localTargetShareWitness',
+            state,
+        ),
+        targetDecryptionShare: snapshotKernelJsonValue(
+            dataPropertyValue(
+                descriptors,
+                'targetDecryptionShare',
+                'targetDecryptionShare',
+            ),
+            'targetDecryptionShare',
+            state,
+        ),
+        proofStatement: snapshotKernelJsonValue(
+            dataPropertyValue(descriptors, 'proofStatement', 'proofStatement'),
+            'proofStatement',
+            state,
+        ),
+        proofRandomnessSeedHex,
+        proofRandomnessNonceHex,
+    };
+};
+
 export type TargetDecryptionShareProofMaterialGeneration = Readonly<{
     readonly proofMaterial: BgvTargetDecryptionShareProofMaterial;
     readonly proofMaterialTransport: BgvTargetDecryptionShareCanonicalProofMaterialTransport;
@@ -632,16 +721,13 @@ class TargetDecryptionResultReleaseCleanupError extends Error {
     }
 }
 
-export const deriveThresholdParameters = (
-    input: ThresholdParametersInput,
-): ThresholdParameters => deriveThresholdParametersInternal(input);
+export const deriveThresholdParameters = deriveThresholdParametersInternal;
 
 export const deriveFrozenRosterParameters =
     deriveFrozenRosterParametersInternal;
 
-export const deriveCollectiveBgvSetupRosterHash = (
-    entries: readonly CollectiveBgvSetupRosterEntryInput[],
-): ProtocolHash => deriveCollectiveBgvSetupRosterHashInternal(entries);
+export const deriveCollectiveBgvSetupRosterHash =
+    deriveCollectiveBgvSetupRosterHashInternal;
 
 export const derivePollSpecHash = derivePollSpecHashInternal;
 
@@ -654,41 +740,25 @@ export function validatePollSpec(input: unknown): PollSpecValidation {
     return validatePollSpecInternal(input);
 }
 
-export const verifyBoardConsistency = (
-    input: BoardConsistencyInput,
-): BoardConsistencyVerification => verifyBoardConsistencyInternal(input);
+export const verifyBoardConsistency = verifyBoardConsistencyInternal;
 
-export const verifyCastReceiptShell = (
-    input: CastReceiptVerificationInput,
-): CastReceiptVerification => verifyCastReceiptShellInternal(input);
+export const verifyCastReceiptShell = verifyCastReceiptShellInternal;
 
-export const verifyCloseRecordShell = (
-    input: CloseRecordVerificationInput,
-): CloseRecordVerification => verifyCloseRecordShellInternal(input);
+export const verifyCloseRecordShell = verifyCloseRecordShellInternal;
 
-export const deriveValidatedFirstValidOrder = (
-    input: FirstValidOrderingInput,
-): FirstValidOrderingVerification =>
-    deriveValidatedFirstValidOrderInternal(input);
+export const deriveValidatedFirstValidOrder =
+    deriveValidatedFirstValidOrderInternal;
 
-export const verifyRosterExternalAcceptance = (
-    input: RosterExternalAcceptanceVerificationInput,
-): RosterExternalAcceptanceVerification =>
-    verifyRosterExternalAcceptanceInternal(input);
+export const verifyRosterExternalAcceptance =
+    verifyRosterExternalAcceptanceInternal;
 
-export const verifyRosterManifestTranscript = (
-    input: RosterManifestTranscriptInput,
-): RosterManifestTranscriptVerification =>
-    verifyRosterManifestTranscriptInternal(input);
+export const verifyRosterManifestTranscript =
+    verifyRosterManifestTranscriptInternal;
 
-export const isActionCurrentForRecoveryEpoch = (
-    input: ActionCurrentForRecoveryEpochInput,
-): ActionCurrentForRecoveryEpochResult =>
-    isActionCurrentForRecoveryEpochInternal(input);
+export const isActionCurrentForRecoveryEpoch =
+    isActionCurrentForRecoveryEpochInternal;
 
-export const verifyRecoveryEpochUpdate = (
-    input: RecoveryEpochVerificationInput,
-): RecoveryEpochVerification => verifyRecoveryEpochUpdateInternal(input);
+export const verifyRecoveryEpochUpdate = verifyRecoveryEpochUpdateInternal;
 
 export const verifyPrivateVssShare = async (
     input: VerifyPrivateVssShareInput,
@@ -774,12 +844,6 @@ export const createSetupPackageVerificationInput = (
                   transportedEvaluationKeyShareComponentMaterial:
                       input.transportedEvaluationKeyShareComponentMaterial,
               }),
-        ...(input.transportedEvaluationKeyAggregateBindingOpenings === undefined
-            ? {}
-            : {
-                  transportedEvaluationKeyAggregateBindingOpenings:
-                      input.transportedEvaluationKeyAggregateBindingOpenings,
-              }),
         ...(input.transportedPublicEvaluationKeyMaterial === undefined
             ? {}
             : {
@@ -809,6 +873,8 @@ export const verifySetupPackage = async (
 export const generateTargetDecryptionShareProofMaterial = async (
     input: TargetDecryptionShareProofMaterialGenerationInput,
 ): Promise<TargetDecryptionShareProofMaterialGeneration> => {
+    const inputSnapshot =
+        targetDecryptionShareProofMaterialGenerationInputSnapshot(input);
     const kernel = await loadFreshTranscriptCoreKernel();
     // Construct the reader runtime before the kernel retains generated proof
     // material. This prevents a runtime-construction failure from stranding a
@@ -817,13 +883,13 @@ export const generateTargetDecryptionShareProofMaterial = async (
     const proofMaterialRuntime = openBgvCanonicalStreamRuntime({ kernel });
     const proofMaterial =
         kernel.generateBgvTargetDecryptionShareProofMaterialFromLocalWitness(
-            input,
+            inputSnapshot,
         );
     const descriptorBytes = await proofMaterialRuntime.writeMaterial({
-        ...(input.abortSignal === undefined
+        ...(inputSnapshot.abortSignal === undefined
             ? {}
-            : { abortSignal: input.abortSignal }),
-        emitChunk: input.emitProofMaterialChunk,
+            : { abortSignal: inputSnapshot.abortSignal }),
+        emitChunk: inputSnapshot.emitProofMaterialChunk,
         family: bgvCanonicalStreamFamilies.targetDecryptionShare,
         materialRoot: proofMaterial.proofMaterialRoot,
     });

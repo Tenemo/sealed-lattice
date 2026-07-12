@@ -1003,11 +1003,6 @@ export const createTrusteeEvaluationKeyProofs = async (
             proofRandomnessSeedHex,
             proofRandomnessNonceHex,
         });
-        if (generatedProof.operation !== 'generateTrusteeEvaluationKeyProof') {
-            throw new Error(
-                'trusteeEvaluationKeyProofGenerator returned the wrong operation.',
-            );
-        }
         assertProtocolHash(
             generatedProof.statementHash,
             'generatedProof.statementHash',

@@ -78,30 +78,19 @@ fn vss_public_message_encoding_vectors_from_unsigned(
 fn vss_public_recipient_share_messages_by_item(
     witness: &TrusteeEvaluationKeyWitness,
 ) -> Vec<&[i64]> {
-    if witness
+    witness
         .vss_public_recipient_share_messages_by_item
-        .is_empty()
-    {
-        vec![&witness.vss_public_recipient_share_messages]
-    } else {
-        witness
-            .vss_public_recipient_share_messages_by_item
-            .iter()
-            .map(Vec::as_slice)
-            .collect()
-    }
+        .iter()
+        .map(Vec::as_slice)
+        .collect()
 }
 
 fn vss_public_carry_witnesses_by_item(witness: &TrusteeEvaluationKeyWitness) -> Vec<&[i64]> {
-    if witness.vss_public_carry_witnesses_by_item.is_empty() {
-        vec![&witness.vss_public_carry_witnesses]
-    } else {
-        witness
-            .vss_public_carry_witnesses_by_item
-            .iter()
-            .map(Vec::as_slice)
-            .collect()
-    }
+    witness
+        .vss_public_carry_witnesses_by_item
+        .iter()
+        .map(Vec::as_slice)
+        .collect()
 }
 pub(super) struct LimbWitnessCommitment {
     pub(super) plan: EvaluationDomainPlan,
@@ -420,14 +409,16 @@ pub(super) fn validate_witness_support(
             || !witness
                 .vss_public_coefficient_messages_by_shamir_index
                 .is_empty()
-            || !witness.vss_public_recipient_share_messages.is_empty()
+            || !witness
+                .vss_public_recipient_share_messages_by_item
+                .is_empty()
             || !witness
                 .vss_public_coefficient_opening_randomness_by_shamir_index
                 .is_empty()
             || !witness
-                .vss_public_recipient_share_opening_randomness
+                .vss_public_recipient_share_opening_randomness_by_item
                 .is_empty()
-            || !witness.vss_public_carry_witnesses.is_empty()
+            || !witness.vss_public_carry_witnesses_by_item.is_empty()
             || statement.same_secret_bridge.is_some()
             || !witness.target_decryption_message_vectors.is_empty()
             || !witness
@@ -477,14 +468,16 @@ pub(super) fn validate_witness_support(
             || !witness
                 .vss_public_coefficient_messages_by_shamir_index
                 .is_empty()
-            || !witness.vss_public_recipient_share_messages.is_empty()
+            || !witness
+                .vss_public_recipient_share_messages_by_item
+                .is_empty()
             || !witness
                 .vss_public_coefficient_opening_randomness_by_shamir_index
                 .is_empty()
             || !witness
-                .vss_public_recipient_share_opening_randomness
+                .vss_public_recipient_share_opening_randomness_by_item
                 .is_empty()
-            || !witness.vss_public_carry_witnesses.is_empty()
+            || !witness.vss_public_carry_witnesses_by_item.is_empty()
             || !witness.target_decryption_message_vectors.is_empty()
             || !witness
                 .target_decryption_opening_randomness_by_commitment
@@ -522,14 +515,16 @@ pub(super) fn validate_witness_support(
             || !witness
                 .vss_public_coefficient_messages_by_shamir_index
                 .is_empty()
-            || !witness.vss_public_recipient_share_messages.is_empty()
+            || !witness
+                .vss_public_recipient_share_messages_by_item
+                .is_empty()
             || !witness
                 .vss_public_coefficient_opening_randomness_by_shamir_index
                 .is_empty()
             || !witness
-                .vss_public_recipient_share_opening_randomness
+                .vss_public_recipient_share_opening_randomness_by_item
                 .is_empty()
-            || !witness.vss_public_carry_witnesses.is_empty()
+            || !witness.vss_public_carry_witnesses_by_item.is_empty()
         {
             return Err(invalid_succinct_setup_proof(
                 "target-decryption share witness must not include setup proof material",
@@ -609,14 +604,16 @@ pub(super) fn validate_witness_support(
                 || !witness
                     .vss_public_coefficient_messages_by_shamir_index
                     .is_empty()
-                || !witness.vss_public_recipient_share_messages.is_empty()
+                || !witness
+                    .vss_public_recipient_share_messages_by_item
+                    .is_empty()
                 || !witness
                     .vss_public_coefficient_opening_randomness_by_shamir_index
                     .is_empty()
                 || !witness
-                    .vss_public_recipient_share_opening_randomness
+                    .vss_public_recipient_share_opening_randomness_by_item
                     .is_empty()
-                || !witness.vss_public_carry_witnesses.is_empty()
+                || !witness.vss_public_carry_witnesses_by_item.is_empty()
                 || statement.same_secret_bridge.is_some()
                 || !witness.target_decryption_message_vectors.is_empty()
                 || !witness
@@ -854,9 +851,6 @@ fn validate_vss_public_witness(
         != coefficient_count
         || !witness
             .vss_public_coefficient_opening_randomness_by_shamir_index
-            .is_empty()
-        || !witness
-            .vss_public_recipient_share_opening_randomness
             .is_empty()
         || !witness
             .vss_public_recipient_share_opening_randomness_by_item

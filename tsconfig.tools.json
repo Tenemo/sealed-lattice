@@ -3,7 +3,7 @@
     "compilerOptions": {
         "composite": true,
         "noEmit": true,
-        "tsBuildInfoFile": "./.turbo/typescript/tools.tsbuildinfo",
+        "tsBuildInfoFile": "./temp/typescript/tools.tsbuildinfo",
         "types": ["node"]
     },
     "include": [

@@ -21,11 +21,9 @@ export type ProtocolObjectType =
     | 'Roster'
     | 'RosterExternalAcceptance'
     | 'TargetAcceptedRecord'
-    | 'TargetFinalityCheckpoint'
     | 'TargetFinalityRecord'
     | 'TopKDecryptionShare'
-    | 'TrusteeSetupEntry'
-    | 'WitnessCheckpoint';
+    | 'TrusteeSetupEntry';
 
 /** Object type that is signed as a canonical signed root. */
 export type SignedObjectType =
@@ -47,8 +45,7 @@ export type SignedObjectType =
     | 'TopKDecryptionShare'
     | 'TrusteeSetupEntry'
     | 'VssShareAcceptance'
-    | 'VssShareComplaint'
-    | 'WitnessCheckpoint';
+    | 'VssShareComplaint';
 
 /** Role asserted by a protocol signature envelope. */
 export type SignerRole =
@@ -57,8 +54,7 @@ export type SignerRole =
     | 'Participant'
     | 'RecoveryRoot'
     | 'Trustee'
-    | 'Voter'
-    | 'Witness';
+    | 'Voter';
 
 /** ML-DSA signature mode recorded in signature profiles. */
 export type MlDsaSignatureMode = 'PureMLDSA' | 'HashMLDSA' | 'ExternalMuMLDSA';
@@ -114,8 +110,6 @@ export type ProtocolRefusalCode =
     | 'DuplicateFirstValidObject'
     | 'DuplicateRegistration'
     | 'DuplicateTrusteeSetupEntry'
-    | 'DuplicateWitness'
-    | 'FieldElementInvalid'
     | 'EvaluatorReplayInvalid'
     | 'FirstValidContextMismatch'
     | 'FirstValidPolicyMismatch'
@@ -127,24 +121,15 @@ export type ProtocolRefusalCode =
     | 'ManifestHashMismatch'
     | 'MissingTrusteeSetupEntry'
     | 'OperationUnavailable'
-    | 'PlaintextOracleInvalid'
     | 'RecoveryUpdateConflict'
     | 'RecoveryUpdateInvalid'
     | 'RecoveryUpdateStale'
     | 'RosterHashMismatch'
     | 'RosterExternalAcceptanceInvalid'
-    | 'ShamirInputInvalid'
-    | 'SparseTargetInvalid'
     | 'TargetAcceptedRecordInvalid'
-    | 'TargetFinalityPolicyMismatch'
-    | 'TargetAcceptanceAuthorizationFailure'
-    | 'EvaluatorReplayRecordNotIncluded'
     | 'StaleRecoveryEpoch'
     | 'UnknownBoardHead'
     | 'UnknownRecoveryEpoch'
-    | 'UnknownWitness'
-    | 'WitnessPolicyMismatch'
-    | 'WitnessQuorumNotReached'
     | 'WrongCeremony'
     | 'WrongObjectType'
     | 'WrongPublicKey'

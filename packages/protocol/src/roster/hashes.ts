@@ -56,9 +56,9 @@ export const deriveTrusteeSetupEntryHash = (
         trusteeSetupRoot: entry.trusteeSetupRoot,
     });
 
-// Order-independent by design: entries are NFC-normalized and sorted by
-// identity before hashing, so any party computes the same roster hash
-// regardless of the original registration order.
+// Order-independent by design: canonical ASCII identities are sorted before
+// hashing, so any party computes the same roster hash regardless of the
+// original registration order.
 export const deriveRosterHash = (
     entries: readonly RegistrationEntry[],
 ): ProtocolHash =>
@@ -66,7 +66,7 @@ export const deriveRosterHash = (
         objectType: 'Roster',
         entries: entries
             .map((entry) => ({
-                participantIdentity: entry.participantIdentity.normalize('NFC'),
+                participantIdentity: entry.participantIdentity,
                 registrationEntryHash: entry.registrationEntryHash,
                 signingPublicKeyHash: entry.signingPublicKeyHash,
             }))

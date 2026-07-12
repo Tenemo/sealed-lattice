@@ -700,7 +700,6 @@ class CanonicalStreamWorkerRuntimeImplementation implements CanonicalStreamWorke
 
     #prepareBegin(streamDomain: number): void {
         if (this.#activeLease !== undefined) {
-            this.#cancelLease(this.#activeLease);
             throw new CanonicalStreamResourceError(
                 'Only one canonical stream may be active in a WASM instance.',
             );

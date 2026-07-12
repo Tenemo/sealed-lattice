@@ -4,7 +4,6 @@ export {
     verifyCloseRecordShell,
 } from './closing/index.js';
 export { deriveValidatedFirstValidOrder } from './ordering/index.js';
-export { verifyTargetFinality } from './finality/index.js';
 export {
     deriveTargetDecryptionSmudgingSeedHex,
     prepareLocalTargetDecryptionShareWitness,
@@ -136,9 +135,6 @@ export type {
 export type {
     BinaryChunkedEvaluationKeyShareMaterialTransport,
     BinaryChunkedPublicEvaluationKeyMaterialTransport,
-    EvaluationKeyAggregateBindingKeyGroup,
-    EvaluationKeyAggregateBindingSet,
-    EvaluationKeyAggregateBindingTrusteeMaterialRoot,
     EvaluationKeyProofCommonInput,
     EvaluationKeyShareComponentMaterialChunkSource,
     EvaluationKeyShareComponentMaterialWriter,
@@ -171,8 +167,6 @@ export type {
     RelinearizationKeyShareRoundsInput,
     RelinearizationRoundOneContribution,
     RelinearizationRoundTwoContribution,
-    TransportedEvaluationKeyAggregateBindingOpening,
-    TransportedEvaluationKeyAggregateBindingOpeningSet,
     TransportedEvaluationKeyShareComponentMaterialSet,
     TransportedEvaluationKeyShareProofMaterialSet,
     TransportedPublicEvaluationKeyMaterial,

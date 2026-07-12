@@ -131,7 +131,7 @@ describe('accepted setup public package API in Node', () => {
             expect.arrayContaining([revealRecords[0]]),
         );
         expect(
-            (commonRandomness.commitRecords as Record<string, unknown>[]).map(
+            commonRandomness.commitRecords.map(
                 (commitRecord) => commitRecord.rosterPosition,
             ),
         ).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);

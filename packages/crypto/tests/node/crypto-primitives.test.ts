@@ -90,19 +90,6 @@ describe('crypto primitive boundary', () => {
             configurable: true,
             writable: true,
         });
-        const objectWithEquivalentUnicodeKeys: Record<string, unknown> = {};
-        Object.defineProperty(objectWithEquivalentUnicodeKeys, '\u0065\u0301', {
-            value: 'first',
-            enumerable: true,
-            configurable: true,
-            writable: true,
-        });
-        Object.defineProperty(objectWithEquivalentUnicodeKeys, '\u00e9', {
-            value: 'second',
-            enumerable: true,
-            configurable: true,
-            writable: true,
-        });
         const sparseArray = new Array<unknown>(1);
 
         expect(canonicalJson({ b: [2, 1], a: { z: true } })).toBe(
@@ -111,20 +98,11 @@ describe('crypto primitive boundary', () => {
         expect(canonicalJson({ '10': 'a', '2': 'b' })).toBe(
             '{"10":"a","2":"b"}',
         );
-        expect(canonicalJson({ '\u0065\u0301': 1, z: 2 })).toBe(
-            '{"z":2,"é":1}',
+        expect(() => canonicalJson({ '\u0065\u0301': 1, z: 2 })).toThrow(
+            'only ASCII characters',
         );
-        expect(canonicalJson({ '\u0061\u0303': 1, z: 2 })).toBe(
-            `{"z":2,"${'\u00e3'}":1}`,
-        );
-        expect(canonicalJson({ '\u00e4': 1, '\u00e3': 2 })).toBe(
-            `{"${'\u00e3'}":2,"${'\u00e4'}":1}`,
-        );
-        expect(canonicalJson({ value: '\u0065\u0301' })).toBe(
-            '{"value":"\u00e9"}',
-        );
-        expect(() => canonicalJson(objectWithEquivalentUnicodeKeys)).toThrow(
-            'NFC normalization',
+        expect(() => canonicalJson({ value: '\u00e9' })).toThrow(
+            'only ASCII characters',
         );
         expect(() => canonicalJson({ value: '\ud800' })).toThrow(
             'lone UTF-16 surrogates',
@@ -149,6 +127,76 @@ describe('crypto primitive boundary', () => {
         ).toThrow('Canonical numeric fields must be safe integers.');
         expect(() => canonicalJson({ value: -0 })).toThrow(
             'Canonical numeric fields must be safe integers.',
+        );
+    });
+
+    it('rejects executable, cyclic, and excessively deep canonical inputs without invoking accessors', () => {
+        let accessorReadCount = 0;
+        const objectWithAccessor: Record<string, unknown> = {};
+        Object.defineProperty(objectWithAccessor, 'value', {
+            enumerable: true,
+            get: () => {
+                accessorReadCount += 1;
+                return 'executed';
+            },
+        });
+        const arrayWithAccessor = ['safe'];
+        Object.defineProperty(arrayWithAccessor, '0', {
+            enumerable: true,
+            get: () => {
+                accessorReadCount += 1;
+                return 'executed';
+            },
+        });
+        const objectWithCustomSerialization = { safe: true };
+        Object.defineProperty(objectWithCustomSerialization, 'toJSON', {
+            value: () => {
+                accessorReadCount += 1;
+                return { replaced: true };
+            },
+        });
+        const objectWithObjectTypeAccessor: Record<string, unknown> = {
+            value: 'safe',
+        };
+        Object.defineProperty(objectWithObjectTypeAccessor, 'objectType', {
+            enumerable: true,
+            get: () => {
+                accessorReadCount += 1;
+                return 'ExecutableObjectType';
+            },
+        });
+        const cyclicObject: Record<string, unknown> = {};
+        cyclicObject.self = cyclicObject;
+        const customPrototypeObject = Object.create({
+            inherited: true,
+        }) as Record<string, unknown>;
+        customPrototypeObject.safe = true;
+        let excessivelyDeepObject: Record<string, unknown> = { leaf: true };
+        for (let depth = 0; depth < 65; depth += 1) {
+            excessivelyDeepObject = { child: excessivelyDeepObject };
+        }
+
+        expect(() => canonicalJson(objectWithAccessor)).toThrow(
+            'Canonical objects cannot contain accessor properties.',
+        );
+        expect(() => canonicalJson(arrayWithAccessor)).toThrow(
+            'Canonical arrays cannot contain accessor properties.',
+        );
+        expect(() => canonicalJson(objectWithCustomSerialization)).toThrow(
+            'Canonical JSON cannot contain custom serialization.',
+        );
+        expect(() =>
+            deriveCanonicalObjectHash(objectWithObjectTypeAccessor),
+        ).toThrow('Canonical objects cannot contain accessor properties.');
+        expect(accessorReadCount).toBe(0);
+        expect(() => canonicalJson(cyclicObject)).toThrow(
+            'Canonical JSON cannot contain cycles.',
+        );
+        expect(() => canonicalJson(customPrototypeObject)).toThrow(
+            'Canonical objects must have an ordinary prototype.',
+        );
+        expect(() => canonicalJson(excessivelyDeepObject)).toThrow(
+            'Canonical JSON exceeds the accepted container depth.',
         );
     });
 

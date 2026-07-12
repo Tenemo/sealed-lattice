@@ -45,7 +45,6 @@ fn private_vss_share_envelope_verifier_accepts_succinct_private_share_proofs() {
         .expect("private VSS envelope verification");
 
     assert_eq!(result["isValid"], true);
-    assert_eq!(result["operation"], "verifyPrivateVssShareEnvelope");
     assert_eq!(result["isValid"], true);
     assert_eq!(result["refusedObjects"], serde_json::json!([]));
     assert_eq!(
@@ -78,8 +77,8 @@ fn private_vss_share_envelope_verifier_accepts_succinct_private_share_proofs() {
 
 #[test]
 // Run through the guarded focused Rust runner:
-//   pnpm run test:rust:kernel:accepted-setup -- private_vss_share_envelope_verifier_accepts_foundation_roster_succinct_private_share_proofs
-#[ignore = "foundation-roster private VSS verification; run via the guarded accepted-setup runner"]
+//   pnpm run test:rust:kernel:full-profile-evidence -- private_vss_share_envelope_verifier_accepts_foundation_roster_succinct_private_share_proofs
+#[ignore = "foundation-roster private VSS verification; run via the guarded full-profile-evidence runner"]
 fn private_vss_share_envelope_verifier_accepts_foundation_roster_succinct_private_share_proofs() {
     let request = proof_shaped_private_vss_share_envelope_request(
         crate::bgv::parameters::POLYNOMIAL_DEGREE,

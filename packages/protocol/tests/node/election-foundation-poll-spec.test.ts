@@ -1,4 +1,4 @@
-import type { PollSpecInput } from '@sealed-lattice/types';
+import { foundationProfile, type PollSpecInput } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
 import { validatePollSpec } from '#packages/protocol/src/lifecycle/poll-spec';
@@ -137,6 +137,79 @@ describe('election foundation poll-spec validation', () => {
         expectErrorCodes(decodedPollSpec, ['EmptyOptionLabel']);
     });
 
+    it('does not execute poll, option, or score-domain accessors', () => {
+        let accessorReadCount = 0;
+        const pollWithAccessor = createValidPollSpecInput();
+        Object.defineProperty(pollWithAccessor, 'pollId', {
+            enumerable: true,
+            get: () => {
+                accessorReadCount += 1;
+                return 'executed';
+            },
+        });
+        const optionAccessor = ['Alpha', 'Beta'];
+        Object.defineProperty(optionAccessor, '1', {
+            enumerable: true,
+            get: () => {
+                accessorReadCount += 1;
+                return 'executed';
+            },
+        });
+        const scoreDomainWithAccessor: Record<string, unknown> = {
+            max: 10,
+            skippedOptionScore: 1,
+        };
+        Object.defineProperty(scoreDomainWithAccessor, 'min', {
+            enumerable: true,
+            get: () => {
+                accessorReadCount += 1;
+                return 1;
+            },
+        });
+
+        expectErrorCodes(pollWithAccessor, ['EmptyPollId']);
+        expectErrorCodes(
+            createValidPollSpecInput({
+                options: optionAccessor,
+                topOptionCount: 1,
+            }),
+            ['EmptyOptionLabel'],
+        );
+        expectErrorCodes(
+            createValidPollSpecInput({
+                scoreDomain:
+                    scoreDomainWithAccessor as PollSpecInput['scoreDomain'],
+            }),
+            ['UnsupportedScoreDomain'],
+        );
+        expect(accessorReadCount).toBe(0);
+    });
+
+    it('rejects sparse options and custom score-domain prototypes', () => {
+        const sparseOptions = new Array<string>(2);
+        sparseOptions[0] = 'Alpha';
+        const customScoreDomain = Object.create({ min: 1 }) as Record<
+            string,
+            number
+        >;
+        customScoreDomain.max = 10;
+        customScoreDomain.skippedOptionScore = 1;
+
+        expectErrorCodes(
+            createValidPollSpecInput({
+                options: sparseOptions,
+                topOptionCount: 1,
+            }),
+            ['EmptyOptionLabel'],
+        );
+        expectErrorCodes(
+            createValidPollSpecInput({
+                scoreDomain: customScoreDomain as PollSpecInput['scoreDomain'],
+            }),
+            ['UnsupportedScoreDomain'],
+        );
+    });
+
     it('returns structured errors for non-number top option counts', () => {
         expectErrorCodes(
             {
@@ -174,7 +247,7 @@ describe('election foundation poll-spec validation', () => {
         );
     });
 
-    it('rejects empty and duplicate option labels after Unicode normalization', () => {
+    it('rejects empty, duplicate, and non-ASCII hash-critical text', () => {
         expectErrorCodes(
             createValidPollSpecInput({
                 options: [
@@ -190,12 +263,54 @@ describe('election foundation poll-spec validation', () => {
             [
                 'EmptyOptionLabel',
                 'DuplicateOptionLabel',
-                'DuplicateOptionLabel',
+                'UnsupportedHashCriticalText',
+                'UnsupportedHashCriticalText',
             ],
+        );
+
+        expectErrorCodes(
+            createValidPollSpecInput({
+                pollId: 'g\u0142osowanie',
+                question: 'Wyb\u00f3r',
+            }),
+            ['UnsupportedHashCriticalText', 'UnsupportedHashCriticalText'],
         );
     });
 
-    it('accepts labels that differ only by trailing whitespace after normalization', () => {
+    it('enforces the identifier and aggregate display-text budgets', () => {
+        expectErrorCodes(
+            createValidPollSpecInput({
+                pollId: 'p'.repeat(
+                    foundationProfile.maximumIdentifierByteLength + 1,
+                ),
+            }),
+            ['UnsupportedHashCriticalText'],
+        );
+
+        const exactBudgetValidation = validatePollSpec(
+            createValidPollSpecInput({
+                options: ['A'],
+                question: 'Q'.repeat(
+                    foundationProfile.maximumCopiedBufferByteLength - 1,
+                ),
+                topOptionCount: 1,
+            }),
+        );
+        expect(exactBudgetValidation.isValid).toBe(true);
+
+        expectErrorCodes(
+            createValidPollSpecInput({
+                options: ['A'],
+                question: 'Q'.repeat(
+                    foundationProfile.maximumCopiedBufferByteLength,
+                ),
+                topOptionCount: 1,
+            }),
+            ['UnsupportedHashCriticalText'],
+        );
+    });
+
+    it('accepts ASCII labels that differ only by trailing whitespace', () => {
         const validation = validatePollSpec(
             createValidPollSpecInput({
                 options: ['Alpha', 'Alpha '],

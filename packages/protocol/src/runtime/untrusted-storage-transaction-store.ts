@@ -102,8 +102,12 @@ export type UntrustedStorageTransaction = Readonly<{
     issueWriteLease(input: {
         logicalRecordKey: string;
         declaredByteLength: number;
+        expectedCurrentValue?: Uint8Array | null;
     }): Promise<UntrustedStorageWriteLease>;
-    stageDeletion(logicalRecordKey: string): Promise<void>;
+    stageDeletion(
+        logicalRecordKey: string,
+        expectedCurrentValue?: Uint8Array | null,
+    ): Promise<void>;
     commit(): Promise<void>;
     abort(): Promise<void>;
 }>;
@@ -133,6 +137,7 @@ type StoreConfiguration = Readonly<{
 
 type LeaseRecord = {
     declaredByteLength: number;
+    expectedExistingObjectValue: Uint8Array | undefined;
     expectedIndexValue: Uint8Array | undefined;
     existingObjectKey: string | undefined;
     indexKey: string;
@@ -144,6 +149,7 @@ type LeaseRecord = {
 };
 
 type DeletionRecord = {
+    expectedExistingObjectValue: Uint8Array | undefined;
     expectedIndexValue: Uint8Array | undefined;
     existingObjectKey: string | undefined;
     indexKey: string;
@@ -573,13 +579,21 @@ export class UntrustedStorageTransactionStore {
             issueWriteLease: (input: {
                 logicalRecordKey: string;
                 declaredByteLength: number;
+                expectedCurrentValue?: Uint8Array | null;
             }) =>
                 this.#runExclusive(() =>
                     this.#issueWriteLease(transaction, input),
                 ),
-            stageDeletion: (logicalRecordKey: string) =>
+            stageDeletion: (
+                logicalRecordKey: string,
+                expectedCurrentValue?: Uint8Array | null,
+            ) =>
                 this.#runExclusive(() =>
-                    this.#stageDeletion(transaction, logicalRecordKey),
+                    this.#stageDeletion(
+                        transaction,
+                        logicalRecordKey,
+                        expectedCurrentValue,
+                    ),
                 ),
             commit: () =>
                 this.#runExclusive(() => this.#commitTransaction(transaction)),
@@ -593,6 +607,7 @@ export class UntrustedStorageTransactionStore {
         input: {
             logicalRecordKey: string;
             declaredByteLength: number;
+            expectedCurrentValue?: Uint8Array | null;
         },
     ): Promise<UntrustedStorageWriteLease> {
         this.#assertActiveTransaction(transaction);
@@ -640,13 +655,29 @@ export class UntrustedStorageTransactionStore {
             expectedIndexValue === undefined
                 ? undefined
                 : this.#decodeIndexValue(expectedIndexValue);
+        const existingObjectValue =
+            existingObjectKey === undefined
+                ? undefined
+                : await this.#readOwnedObjectValue(existingObjectKey);
         if (
             existingObjectKey !== undefined &&
-            (await this.#readOwnedObjectValue(existingObjectKey)) === undefined
+            existingObjectValue === undefined
         ) {
             throw new UntrustedStorageTransactionError(
                 'CorruptIndex',
                 'storage index references a missing object.',
+            );
+        }
+        if (
+            input.expectedCurrentValue !== undefined &&
+            !bytesEqual(
+                existingObjectValue,
+                input.expectedCurrentValue ?? undefined,
+            )
+        ) {
+            throw new UntrustedStorageTransactionError(
+                'Conflict',
+                'logical record changed after the caller inspected it.',
             );
         }
         const leaseIdentifier = this.#createIdentifier('lease');
@@ -675,6 +706,7 @@ export class UntrustedStorageTransactionStore {
         const lease: LeaseRecord = {
             authenticate: undefined,
             declaredByteLength: input.declaredByteLength,
+            expectedExistingObjectValue: existingObjectValue?.slice(),
             expectedIndexValue: expectedIndexValue?.slice(),
             existingObjectKey,
             indexKey,
@@ -813,6 +845,7 @@ export class UntrustedStorageTransactionStore {
     async #stageDeletion(
         transaction: TransactionRecord,
         logicalRecordKey: string,
+        expectedCurrentValue: Uint8Array | null | undefined,
     ): Promise<void> {
         this.#assertActiveTransaction(transaction);
         if (
@@ -836,18 +869,32 @@ export class UntrustedStorageTransactionStore {
             expectedIndexValue === undefined
                 ? undefined
                 : this.#decodeIndexValue(expectedIndexValue);
+        const existingObjectValue =
+            existingObjectKey === undefined
+                ? undefined
+                : await this.#readOwnedObjectValue(existingObjectKey);
         if (
             existingObjectKey !== undefined &&
-            (await this.#readOwnedObjectValue(existingObjectKey)) === undefined
+            existingObjectValue === undefined
         ) {
             throw new UntrustedStorageTransactionError(
                 'CorruptIndex',
                 'storage index references a missing object.',
             );
         }
+        if (
+            expectedCurrentValue !== undefined &&
+            !bytesEqual(existingObjectValue, expectedCurrentValue ?? undefined)
+        ) {
+            throw new UntrustedStorageTransactionError(
+                'Conflict',
+                'logical record changed after the caller inspected it.',
+            );
+        }
         transaction.changes.set(logicalRecordKey, {
             kind: 'delete',
             deletion: {
+                expectedExistingObjectValue: existingObjectValue?.slice(),
                 expectedIndexValue: expectedIndexValue?.slice(),
                 existingObjectKey,
                 indexKey,
@@ -920,6 +967,10 @@ export class UntrustedStorageTransactionStore {
                 deletes.push(change.deletion.indexKey);
             }
             if (record.existingObjectKey !== undefined) {
+                expectedValues.push({
+                    key: record.existingObjectKey,
+                    value: record.expectedExistingObjectValue?.slice(),
+                });
                 transaction.pendingCleanupObjectKeys.add(
                     record.existingObjectKey,
                 );

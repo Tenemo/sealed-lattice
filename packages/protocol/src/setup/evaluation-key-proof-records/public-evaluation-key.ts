@@ -256,12 +256,6 @@ export function createPublicEvaluationKeySet(
         galoisKeyShareBatchRoots,
         galoisKeyRoots,
         ...(input.publicEvaluationKeyMaterialReference ?? {}),
-        // Carry an optional committed-material aggregate binding through verbatim
-        // so it enters the canonical evaluationKeySetHash the same object the
-        // kernel recomputes over. Absent by default.
-        ...(input.aggregateBinding === undefined
-            ? {}
-            : { aggregateBinding: input.aggregateBinding }),
     } as const satisfies Omit<PublicEvaluationKeySet, 'evaluationKeySetHash'>;
 
     return {

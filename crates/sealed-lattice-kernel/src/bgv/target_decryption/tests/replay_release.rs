@@ -31,12 +31,12 @@ use crate::hashing::hash512_hex;
 //
 // The replay leg is minutes-long at the full twenty-option domain and each
 // share proof runs the real succinct prover, so the test is ignored in the
-// fast lanes and runs manually through the focused accepted-setup runner,
+// fast lanes and runs manually through the focused full-profile-evidence runner,
 // which passes --ignored and pins a warm target directory:
 //
-//   pnpm run test:rust:kernel:accepted-setup -- replay_release
+//   pnpm run test:rust:kernel:full-profile-evidence -- replay_release
 #[test]
-#[ignore = "long-running foundation-profile evidence; run via the focused accepted-setup runner"]
+#[ignore = "long-running foundation-profile evidence; run via the focused full-profile-evidence runner"]
 fn foundation_profile_replay_target_release_matches_plaintext_oracle() {
     let started = std::time::Instant::now();
     let phase = |message: &str| {

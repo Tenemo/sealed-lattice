@@ -130,6 +130,44 @@ const littleEndianCoefficients = (hex: string): number[] => {
 };
 
 describe('VSS aggregate threshold commitment handoff', () => {
+    it('refuses recipient-share carries outside the JavaScript safe integer range', () => {
+        const participantCount = 33;
+        const thresholdDegree = 22;
+        const largeRosterOpeningStates: readonly VssPublicSourceTrusteeOpeningState[] =
+            Array.from(
+                { length: participantCount },
+                (_unused, sourceTrusteeRosterPosition) => ({
+                    sourceTrusteeIdentity: `Trustee ${sourceTrusteeRosterPosition}`,
+                    sourceTrusteeRosterPosition,
+                    coefficientOpenings: Array.from(
+                        { length: thresholdDegree },
+                        (_unusedOpening, shamirCoefficientIndex) => ({
+                            rnsLimbIndex: 0,
+                            rnsPrime: 17,
+                            shamirCoefficientIndex,
+                            coefficientMessage: [16],
+                        }),
+                    ),
+                }),
+            );
+
+        expect(() =>
+            createVssPublicRecipientShareCommitmentSet({
+                setupContext,
+                publicMatrixSeedHash,
+                participantCount,
+                qSharePrimes,
+                ringDegree: 1,
+                thresholdDegree,
+                sourceTrusteeOpeningStates: largeRosterOpeningStates,
+                committedMaterialSeed: materialSeed,
+                computeVssCommittedMaterialCommitment,
+            }),
+        ).toThrow(
+            'VSS recipient-share carry exceeds the JavaScript safe integer range',
+        );
+    });
+
     it('keeps opening credentials private and uses the accepted roster identities', async () => {
         aggregateCommitmentContexts.length = 0;
         const coefficientBundle = createVssPublicCoefficientCommitmentSet({

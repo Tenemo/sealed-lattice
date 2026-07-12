@@ -503,14 +503,7 @@ pub(super) fn vss_share_linkage_proof_generation_request(
         "ringDegree": ring_degree,
         "vssShareLinkage": vss_share_linkage,
         "coefficientMessagesByShamirIndex": coefficient_messages_by_shamir_index,
-        "recipientShareMessages": recipient_share_messages_by_item
-            .first()
-            .expect("primary recipient share messages"),
         "coefficientOpeningRandomnessByShamirIndex": Vec::<Vec<Vec<i64>>>::new(),
-        "recipientShareOpeningRandomness": Vec::<Vec<i64>>::new(),
-        "carryWitnesses": carry_witnesses_by_item
-            .first()
-            .expect("primary carry witnesses"),
         "recipientShareMessagesByItem": recipient_share_messages_by_item,
         "recipientShareOpeningRandomnessByItem": Vec::<Vec<Vec<i64>>>::new(),
         "carryWitnessesByItem": carry_witnesses_by_item,

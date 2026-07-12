@@ -263,7 +263,6 @@ pub(crate) fn compute_setup_commitment_from_opening_request(
     let commitment_root = setup_commitment_root(&commitment)?;
 
     Ok(json!({
-        "operation": "computeSetupCommitmentFromOpening",
         "commitment": setup_commitment_full_value(&commitment),
         "commitmentRoot": commitment_root,
     }))

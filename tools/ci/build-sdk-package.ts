@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { copyFile, mkdir, readFile, rm } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -18,9 +18,10 @@ const wasmKernelSourcePath = path.resolve(
     'sealed-lattice-kernel.wasm',
 );
 const sdkDistDirectoryPath = path.resolve(repoRoot, 'packages', 'sdk', 'dist');
-const sdkDeclarationScratchDirectoryPath = path.resolve(
+const sdkDeclarationScratchRoot = path.resolve(
     repoRoot,
-    '.turbo',
+    'temp',
+    'build-scratch',
     'sdk-package-declarations',
 );
 const sdkKernelOutputPath = path.join(
@@ -121,18 +122,17 @@ export const buildSdkPackage = async (): Promise<void> => {
         kernelBytes = await readFile(wasmKernelSourcePath);
     } catch (error) {
         const buildError = new Error(
-            'Cannot build the public SDK before @sealed-lattice/wasm. Run the workspace build so Turborepo builds package dependencies first.',
+            'Cannot build the public SDK before @sealed-lattice/wasm. Run the workspace build so pnpm builds package dependencies first.',
         ) as Error & { cause: unknown };
         buildError.cause = error;
         throw buildError;
     }
 
     const kernelHash = hashNormalizedWasmKernel(kernelBytes);
-    await rm(sdkDeclarationScratchDirectoryPath, {
-        force: true,
-        recursive: true,
-    });
-    await mkdir(sdkDeclarationScratchDirectoryPath, { recursive: true });
+    await mkdir(sdkDeclarationScratchRoot, { recursive: true });
+    const sdkDeclarationScratchDirectoryPath = await mkdtemp(
+        path.join(sdkDeclarationScratchRoot, 'build-'),
+    );
 
     try {
         emitSdkDeclarationEntry(sdkDeclarationScratchDirectoryPath);

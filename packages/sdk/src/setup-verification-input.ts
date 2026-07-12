@@ -446,17 +446,6 @@ export const snapshotSetupPackageVerificationInput = (
             ['publicEvaluationKeyMaterialRoot'],
             state,
         );
-    const transportedEvaluationKeyAggregateBindingOpenings =
-        snapshotKernelJsonValue(
-            dataPropertyValue(
-                inputDescriptors,
-                'transportedEvaluationKeyAggregateBindingOpenings',
-                'transportedEvaluationKeyAggregateBindingOpenings',
-            ),
-            'transportedEvaluationKeyAggregateBindingOpenings',
-            state,
-        ) as VerifySetupPackageInput['transportedEvaluationKeyAggregateBindingOpenings'];
-
     return {
         setupPackage,
         expectedManifestHash,
@@ -497,9 +486,6 @@ export const snapshotSetupPackageVerificationInput = (
         ...(publicEvaluationKeyMaterialChunkSources === undefined
             ? {}
             : { publicEvaluationKeyMaterialChunkSources }),
-        ...(transportedEvaluationKeyAggregateBindingOpenings === undefined
-            ? {}
-            : { transportedEvaluationKeyAggregateBindingOpenings }),
     } as unknown as VerifySetupPackageInput;
 };
 

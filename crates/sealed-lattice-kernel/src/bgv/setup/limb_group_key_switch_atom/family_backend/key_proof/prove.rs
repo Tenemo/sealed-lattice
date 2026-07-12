@@ -106,9 +106,8 @@ pub(in super::super) fn prove_key_fri_with_component_b<const LIMB_COUNT: usize>(
 
 // Regenerate the material commitment the atom proof publishes as
 // `KeyFriProof.material_root` and the exact masked material columns it committed.
-// Both `prove_key_fri_streamed` and the aggregate binding route through this
-// helper, so the aggregate opens the atom commitment rather than a fresh
-// commitment with the same public values.
+// The streamed prover routes its column derivation and its commitment-root check
+// through this helper so those two uses cannot diverge.
 //
 // The regeneration mirrors the salt discipline `prove_key_fri_streamed` runs, in
 // order: `KeyColumnPlan::new` snapshots the base then the material mask seeds
@@ -126,7 +125,7 @@ pub(in super::super) fn prove_key_fri_with_component_b<const LIMB_COUNT: usize>(
 // Returns the masked material columns (in digit order), the material-commit salt
 // seed, and the material root.
 #[allow(clippy::type_complexity)]
-pub(crate) fn regenerate_material_commitment_inputs<const LIMB_COUNT: usize>(
+fn regenerate_material_commitment_inputs<const LIMB_COUNT: usize>(
     parameters: &ProofFieldParameters<LIMB_COUNT>,
     ring_degree: usize,
     mask_degree: usize,
@@ -247,7 +246,7 @@ fn prove_key_fri_streamed<const LIMB_COUNT: usize>(
     // through `regenerate_material_commitment_inputs`.
     let initial_salt_seed = *salt_seed;
     // The recombined material `B_j` per digit, as owned vectors: exactly the
-    // material the plan commits, so the shared material-commitment helper's
+    // material the plan commits, so the material-commitment helper's
     // regenerated columns and root match the plan's committed material. In
     // production this equals `public.digits[digit].recombined_component_b`; a
     // test override may commit different material, and the helper must follow the
@@ -281,8 +280,7 @@ fn prove_key_fri_streamed<const LIMB_COUNT: usize>(
 
     // The material commitment: one masked column per digit holding the recombined
     // component material `B_j`. The masked columns and the material-commit salt
-    // seed come from `regenerate_material_commitment_inputs`, which the material
-    // aggregate binding also uses to open exactly this commitment. Committed before
+    // seed come from `regenerate_material_commitment_inputs`. Committed before
     // `gamma` is drawn, so the material is fixed prior to its reduction challenge.
     //
     // The helper derived the material-commit salt seed from `initial_salt_seed` on

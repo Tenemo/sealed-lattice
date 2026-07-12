@@ -226,12 +226,10 @@ describe('canonical setup material streaming in the public package', () => {
             verifyCollectiveBgvSetup: vi.fn((input: JsonRecord) => ({
                 isValid: false,
                 observedInput: input,
-                operation: 'verifyCollectiveBgvSetupPackage',
             })),
             verifyPrivateVssShareEnvelope: vi.fn((input: JsonRecord) => ({
                 isValid: false,
                 observedInput: input,
-                operation: 'verifyPrivateVssShareEnvelope',
             })),
         });
         loadedFreshMockKernels = [];

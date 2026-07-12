@@ -67,8 +67,8 @@ describe('GitHub workflow policy', () => {
 
         expect(workflow).not.toMatch(/^concurrency:/mu);
         expect(workflow).not.toContain('retention-days:');
-        expect(workflow.match(/if-no-files-found: warn/gu)).toHaveLength(8);
-        expect(workflow.match(/if: \$\{\{ always\(\) \}\}/gu)).toHaveLength(9);
+        expect(workflow.match(/if-no-files-found: warn/gu)).toHaveLength(7);
+        expect(workflow.match(/if: \$\{\{ always\(\) \}\}/gu)).toHaveLength(8);
         expect(workflow).toContain(
             'static-verification-logs-${{ github.run_id }}-${{ github.run_attempt }}',
         );

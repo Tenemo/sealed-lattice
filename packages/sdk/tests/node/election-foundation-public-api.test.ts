@@ -39,81 +39,35 @@ const createFoundationBoardSession =
 const foundationBoardCandidateObjectHash =
     publicApiRuntimeRecord.foundationBoardCandidateObjectHash as FoundationBoardCandidateObjectHash;
 
-const requiredPublicFunctions = [
-    [
-        'deriveCollectiveBgvSetupRosterHash',
-        publicApiRuntimeRecord.deriveCollectiveBgvSetupRosterHash,
-    ],
-    [
-        'deriveFrozenRosterParameters',
-        publicApiRuntimeRecord.deriveFrozenRosterParameters,
-    ],
-    ['derivePollSpecHash', publicApiRuntimeRecord.derivePollSpecHash],
-    [
-        'deriveThresholdParameters',
-        publicApiRuntimeRecord.deriveThresholdParameters,
-    ],
-    [
-        'deriveThresholdParametersHash',
-        publicApiRuntimeRecord.deriveThresholdParametersHash,
-    ],
-    [
-        'deriveValidatedFirstValidOrder',
-        publicApiRuntimeRecord.deriveValidatedFirstValidOrder,
-    ],
-    [
-        'createSetupPackageVerificationInput',
-        publicApiRuntimeRecord.createSetupPackageVerificationInput,
-    ],
-    [
-        'createFoundationBoardSession',
-        publicApiRuntimeRecord.createFoundationBoardSession,
-    ],
-    [
-        'foundationBoardCandidateObjectHash',
-        publicApiRuntimeRecord.foundationBoardCandidateObjectHash,
-    ],
-    [
-        'isActionCurrentForRecoveryEpoch',
-        publicApiRuntimeRecord.isActionCurrentForRecoveryEpoch,
-    ],
-    ['validatePollSpec', publicApiRuntimeRecord.validatePollSpec],
-    ['verifyBoardConsistency', publicApiRuntimeRecord.verifyBoardConsistency],
-    ['verifyCastReceiptShell', publicApiRuntimeRecord.verifyCastReceiptShell],
-    ['verifyCloseRecordShell', publicApiRuntimeRecord.verifyCloseRecordShell],
-    [
-        'verifyRecoveryEpochUpdate',
-        publicApiRuntimeRecord.verifyRecoveryEpochUpdate,
-    ],
-    [
-        'verifyRosterExternalAcceptance',
-        publicApiRuntimeRecord.verifyRosterExternalAcceptance,
-    ],
-    [
-        'verifyRosterManifestTranscript',
-        publicApiRuntimeRecord.verifyRosterManifestTranscript,
-    ],
-    ['verifySetupPackage', publicApiRuntimeRecord.verifySetupPackage],
-    ['verifyPrivateVssShare', publicApiRuntimeRecord.verifyPrivateVssShare],
+const expectedPublicRuntimeExportNames = [
+    'createFoundationBoardSession',
+    'createSetupPackageVerificationInput',
+    'deriveCollectiveBgvSetupRosterHash',
+    'deriveFrozenRosterParameters',
+    'derivePollSpecHash',
+    'deriveThresholdParameters',
+    'deriveThresholdParametersHash',
+    'deriveValidatedFirstValidOrder',
+    'foundationBoardCandidateObjectHash',
+    'generateTargetDecryptionShareProofMaterial',
+    'isActionCurrentForRecoveryEpoch',
+    'validatePollSpec',
+    'verifyBoardConsistency',
+    'verifyCastReceiptShell',
+    'verifyCloseRecordShell',
+    'verifyPrivateVssShare',
+    'verifyRecoveryEpochUpdate',
+    'verifyRosterExternalAcceptance',
+    'verifyRosterManifestTranscript',
+    'verifySetupPackage',
+    'verifyTargetDecryptionResult',
 ] as const;
-
-const requiredPublicFunctionNames = requiredPublicFunctions
-    .map(([publicFunctionName]) => publicFunctionName)
-    .sort();
 
 describe('election foundation public package API in Node', () => {
     it('exposes safe runtime functions and keeps runtime exports callable', () => {
         const runtimeExportNames = Object.keys(publicApiRuntimeRecord).sort();
 
-        expect(runtimeExportNames).toEqual(
-            expect.arrayContaining(requiredPublicFunctionNames),
-        );
-        for (const [
-            publicFunctionName,
-            publicFunction,
-        ] of requiredPublicFunctions) {
-            expect(typeof publicFunction, publicFunctionName).toBe('function');
-        }
+        expect(runtimeExportNames).toEqual(expectedPublicRuntimeExportNames);
         for (const publicFunctionName of runtimeExportNames) {
             expect(
                 typeof publicApiRuntimeRecord[publicFunctionName],
@@ -171,10 +125,6 @@ describe('election foundation public package API in Node', () => {
                 >[0],
             ),
         ).toThrow('was not issued by this SDK instance');
-        expect(
-            publicApiRuntimeRecord.verifyFoundationTranscript,
-        ).toBeUndefined();
-        expect(publicApiRuntimeRecord.verifyTargetFinality).toBeUndefined();
     });
 
     it('derives the setup roster hash used by setup package verification', () => {

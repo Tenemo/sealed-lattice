@@ -17,7 +17,7 @@ import { buildBoardHeadMap } from '../common/verification-helpers.js';
 import { verifyBoardConsistency } from './consistency.js';
 import { verifyInclusionProof } from './inclusion-proof.js';
 
-export type BoardEvidence = {
+type BoardEvidence = {
     readonly boardResult: BoardConsistencyVerification;
     readonly headsByHash: ReadonlyMap<ProtocolHash, SignedBoardHead>;
 };
@@ -45,7 +45,7 @@ export const verifyBoardInclusionProof = (
 ): readonly RefusalRecord[] =>
     verifyInclusionProof(inclusionProof, evidence.headsByHash);
 
-export const collectBoardInclusionEvidence = (input: {
+const collectBoardInclusionEvidence = (input: {
     readonly boardEvidence: BoardConsistencyInput;
     readonly inclusionProof: InclusionProof;
     readonly objectRefusals?: readonly RefusalRecord[];
@@ -70,7 +70,7 @@ export const collectSignedBoardInclusionEvidence = (input: {
     readonly objectRefusals: readonly RefusalRecord[];
     readonly signature: ProtocolSignatureEnvelope;
     readonly signatureExpectation: SignatureExpectation;
-}): BoardInclusionEvidence & {} => {
+}): BoardInclusionEvidence => {
     const evidence = collectBoardInclusionEvidence(input);
     const refusedObjects = [...evidence.refusedObjects];
     const signatureResult = verifySignedObjectSignature(
@@ -87,7 +87,7 @@ export const collectSignedBoardInclusionEvidence = (input: {
 };
 
 export const buildSignedBoardShellVerificationBase = (
-    evidence: BoardInclusionEvidence & {},
+    evidence: BoardInclusionEvidence,
 ): SignedBoardShellVerificationBase => ({
     isValid: evidence.refusedObjects.length === 0,
     refusedObjects: evidence.refusedObjects,

@@ -175,32 +175,21 @@ pub(super) fn masked_half_coefficients_with_mask_degree(
 fn vss_public_recipient_share_messages_by_item_for_claims(
     witness: &TrusteeEvaluationKeyWitness,
 ) -> Vec<&[i64]> {
-    if witness
+    witness
         .vss_public_recipient_share_messages_by_item
-        .is_empty()
-    {
-        vec![&witness.vss_public_recipient_share_messages]
-    } else {
-        witness
-            .vss_public_recipient_share_messages_by_item
-            .iter()
-            .map(Vec::as_slice)
-            .collect()
-    }
+        .iter()
+        .map(Vec::as_slice)
+        .collect()
 }
 
 fn vss_public_carry_witnesses_by_item_for_claims(
     witness: &TrusteeEvaluationKeyWitness,
 ) -> Vec<&[i64]> {
-    if witness.vss_public_carry_witnesses_by_item.is_empty() {
-        vec![&witness.vss_public_carry_witnesses]
-    } else {
-        witness
-            .vss_public_carry_witnesses_by_item
-            .iter()
-            .map(Vec::as_slice)
-            .collect()
-    }
+    witness
+        .vss_public_carry_witnesses_by_item
+        .iter()
+        .map(Vec::as_slice)
+        .collect()
 }
 
 fn append_vss_public_digit_vectors(digit_vectors: &mut Vec<Vec<i64>>, message_vector: &[i64]) {

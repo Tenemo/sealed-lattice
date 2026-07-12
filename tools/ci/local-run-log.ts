@@ -6,7 +6,7 @@ import {
     readdirSync,
     writeSync,
 } from 'node:fs';
-import { appendFile, mkdir, rename, writeFile } from 'node:fs/promises';
+import { mkdir, rename, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { performance } from 'node:perf_hooks';
@@ -269,25 +269,6 @@ const allocateRunDirectory = async (
     }
 };
 
-const isSuccessfulCheckSummary = (value: unknown): boolean =>
-    typeof value === 'object' &&
-    value !== null &&
-    'scriptName' in value &&
-    value.scriptName === 'check' &&
-    'exitCode' in value &&
-    value.exitCode === 0;
-
-const appendSuccessfulCheckHistory = async (
-    rootDirectoryPath: string,
-    summary: LocalRunLogSummary,
-): Promise<void> => {
-    if (!isSuccessfulCheckSummary(summary)) {
-        return;
-    }
-    const historyPath = path.join(rootDirectoryPath, 'runs.jsonl');
-    await appendFile(historyPath, `${JSON.stringify(summary)}\n`, 'utf8');
-};
-
 class LocalRunLog implements ActiveLocalRunLog {
     readonly runDirectoryPath: string;
     #activeCommandIds = new Set<string>();
@@ -315,7 +296,6 @@ class LocalRunLog implements ActiveLocalRunLog {
     #resourceSampleInterval: NodeJS.Timeout;
     #resourceSampleSequenceNumber = 0;
     #resourcesFileDescriptor: number;
-    #rootDirectoryPath: string;
     #scriptName: string;
     #startedAtIso: string;
     #startedAtMilliseconds: number;
@@ -327,7 +307,6 @@ class LocalRunLog implements ActiveLocalRunLog {
         readonly processEventSource?: ProcessEventSource;
         readonly resourceSampleIntervalMilliseconds: number;
         readonly resourcesPath: string;
-        readonly rootDirectoryPath: string;
         readonly runDirectoryPath: string;
         readonly scriptName: string;
         readonly startedAtIso: string;
@@ -343,7 +322,6 @@ class LocalRunLog implements ActiveLocalRunLog {
             input.processEventSource ??
             (process as unknown as ProcessEventSource);
         this.#resourcesFileDescriptor = openSync(input.resourcesPath, 'ax');
-        this.#rootDirectoryPath = input.rootDirectoryPath;
         this.#scriptName = input.scriptName;
         this.#startedAtIso = input.startedAtIso;
         this.#startedAtMilliseconds = input.startedAtMilliseconds;
@@ -475,10 +453,6 @@ class LocalRunLog implements ActiveLocalRunLog {
                 path.join(this.runDirectoryPath, 'diagnostics.txt'),
                 this.#formatDiagnostics(summary),
                 'utf8',
-            );
-            await appendSuccessfulCheckHistory(
-                this.#rootDirectoryPath,
-                summary,
             );
         } finally {
             this.#closeFileDescriptors();
@@ -937,7 +911,6 @@ export const createLocalRunLog = async (
             input.resourceSampleIntervalMilliseconds ??
             defaultResourceSampleIntervalMilliseconds,
         resourcesPath: path.join(runDirectoryPath, 'resources.jsonl'),
-        rootDirectoryPath,
         runDirectoryPath,
         scriptName: input.scriptName,
         startedAtIso,

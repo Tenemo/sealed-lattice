@@ -36,12 +36,6 @@ export type BgvTransportedPublicEvaluationKeyMaterialSet =
             readonly componentMaterials?: readonly BgvJsonRecord[];
         }>;
 
-export type BgvTransportedEvaluationKeyAggregateBindingOpeningSet =
-    BgvTransportedMaterialObject<'SetupTransportedEvaluationKeyAggregateBindingOpeningSet'> &
-        Readonly<{
-            readonly openings: readonly BgvJsonRecord[];
-        }>;
-
 export type BgvCollectiveSetupTransportCompanions = Readonly<{
     readonly transportedPublicKeyShareMaterial?: BgvTransportedPublicKeyShareMaterial;
     readonly transportedPublicKeyShareProofMaterial?: BgvTransportedSetupProofMaterialSet<'SetupTransportedPublicKeyShareProofMaterialSet'>;
@@ -49,7 +43,6 @@ export type BgvCollectiveSetupTransportCompanions = Readonly<{
     readonly transportedVssShareLinkageProofMaterial?: BgvTransportedSetupProofMaterialSet<'SetupTransportedVssShareLinkageProofMaterialSet'>;
     readonly transportedSameSecretBridgeProofMaterial?: BgvTransportedSetupProofMaterialSet<'SetupTransportedSameSecretBridgeProofMaterialSet'>;
     readonly transportedEvaluationKeyShareComponentMaterial?: BgvTransportedEvaluationKeyShareComponentMaterialSet;
-    readonly transportedEvaluationKeyAggregateBindingOpenings?: BgvTransportedEvaluationKeyAggregateBindingOpeningSet;
     readonly transportedPublicEvaluationKeyMaterial?: BgvTransportedPublicEvaluationKeyMaterialSet;
 }>;
 
@@ -97,7 +90,6 @@ export type BgvCanonicalObjectAnalysis = {
 
 export type BgvOperationRejection = {
     readonly isValid: false;
-    readonly operation: string;
     readonly refusedObjects: readonly {
         readonly code: 'BgvOperationRejected';
         readonly reasonCode: string;
@@ -109,8 +101,6 @@ export type BgvOperationRejection = {
 export type BgvEvaluatorOperationValidation =
     | {
           readonly isValid: true;
-          readonly operation: 'validateBgvEvaluatorOperation';
-          readonly acceptedOperation: string;
           readonly bgvParametersHash: ProtocolHash;
       }
     | BgvOperationRejection;
@@ -232,15 +222,7 @@ export type BgvCollectiveSetupParametersDescription = {
         readonly objectType: 'SetupTransport';
         readonly largeObjectEncoding: 'binary';
         readonly chunking: 'required';
-        readonly storageQuotaBytes: number;
-        readonly largestSingleBufferBytes: number;
-        readonly copyCountLimit: number;
         readonly streamVerificationOrder: string;
-        readonly resumePolicy: string;
-        readonly lazyLoadingPolicy: string;
-        readonly requiredTransportedObjects: readonly Readonly<
-            Record<string, unknown>
-        >[];
     };
     readonly evaluatorKeySchedule: {
         readonly objectType: 'EvaluatorKeySchedule';
@@ -338,7 +320,6 @@ export type BgvCollectiveSetupPublicMatrix = {
 
 export type BgvCollectiveSetupVerification = {
     readonly isValid: boolean;
-    readonly operation: 'verifyCollectiveBgvSetupPackage';
     readonly refusedObjects: readonly {
         readonly reasonCode: string;
         readonly message: string;
@@ -348,7 +329,6 @@ export type BgvCollectiveSetupVerification = {
 
 export type BgvPrivateVssShareEnvelopeVerification = {
     readonly isValid: boolean;
-    readonly operation: 'verifyPrivateVssShareEnvelope';
     readonly privateEnvelopeHash: ProtocolHash | null;
     readonly localVerificationRoot: ProtocolHash | null;
     readonly ringDegree?: number;
@@ -370,7 +350,6 @@ export type BgvPrivateVssShareEnvelopeVerification = {
 };
 
 export type BgvPrivateVssShareProofGeneration = {
-    readonly operation: 'generatePrivateVssShareProof';
     readonly sourceTrusteeIdentity: string;
     readonly sourceTrusteeRosterPosition: number;
     readonly recipientIdentity: string;
@@ -460,7 +439,6 @@ export type BgvSameSecretBridgeProofContext = {
 };
 
 export type BgvTrusteeEvaluationKeyProofGeneration = {
-    readonly operation: 'generateTrusteeEvaluationKeyProof';
     readonly proofFamily: 'trustee-evaluation-key' | 'public-key-share';
     readonly statementHash: ProtocolHash;
     readonly limbCount: number;
@@ -472,7 +450,6 @@ export type BgvTrusteeEvaluationKeyProofGeneration = {
 // The proof family and canonical statement hash of a key-bearing setup
 // statement, computed without proving it.
 export type BgvTrusteeEvaluationKeyStatementDescription = {
-    readonly operation: 'describeTrusteeEvaluationKeyStatement';
     readonly proofFamily: 'trustee-evaluation-key' | 'public-key-share';
     readonly statementHash: ProtocolHash;
 };
@@ -491,13 +468,11 @@ export type BgvSetupCommitmentValue = {
 };
 
 export type BgvSetupCommitmentOpeningComputation = {
-    readonly operation: 'computeSetupCommitmentFromOpening';
     readonly commitment: BgvSetupCommitmentValue;
     readonly commitmentRoot: ProtocolHash;
 };
 
 export type BgvVssCommittedMaterialCommitmentComputation = {
-    readonly operation: 'computeVssCommittedMaterialCommitment';
     readonly commitment: Record<string, unknown>;
     readonly commitmentRoot: ProtocolHash;
     readonly openingRoot: ProtocolHash;
@@ -505,7 +480,6 @@ export type BgvVssCommittedMaterialCommitmentComputation = {
 };
 
 export type BgvVssShareLinkageProofGeneration = {
-    readonly operation: 'generateVssShareLinkageProof';
     readonly proofFamily: 'vss-share-linkage';
     readonly statementHash: ProtocolHash;
     readonly limbCount: number;
@@ -517,7 +491,6 @@ export type BgvVssShareLinkageProofGeneration = {
 };
 
 export type BgvSameSecretBridgeProofGeneration = {
-    readonly operation: 'generateSameSecretBridgeProof';
     readonly proofFamily: 'same-secret-bridge';
     readonly statementHash: ProtocolHash;
     readonly limbCount: number;
@@ -528,7 +501,6 @@ export type BgvSameSecretBridgeProofGeneration = {
 };
 
 export type BgvLocalTrusteeSetupStateVerification = {
-    readonly operation: 'verifyLocalTrusteeSetupState';
     readonly trusteeIdentity: string;
     readonly trusteeRosterPosition: number;
     readonly trusteePoint: number;
@@ -561,12 +533,10 @@ export type BgvTargetDecryptionShareProofMaterial = Readonly<
 >;
 
 export type BgvTargetDecryptionShareProofStatementBinding = Readonly<{
-    readonly operation: 'verifyBgvTargetDecryptionShareProofStatementBinding';
     readonly proofStatementRoot: ProtocolHash;
 }>;
 
 export type BgvTargetDecryptionShareProofMaterialVerification = Readonly<{
-    readonly operation: 'verifyBgvTargetDecryptionShareProofMaterial';
     readonly proofMaterialRoot: ProtocolHash;
 }>;
 
@@ -583,13 +553,11 @@ export type BgvTargetDecryptionReleaseSetupContext = Readonly<
 >;
 
 export type BgvTargetDecryptionResultReleaseBegin = {
-    readonly operation: 'beginBgvTargetDecryptionResultRelease';
     readonly releaseVerificationId: string;
     readonly requiredShareCount: number;
 };
 
 export type BgvTargetDecryptionResultReleaseShareAbsorption = {
-    readonly operation: 'absorbBgvTargetDecryptionResultReleaseShare';
     readonly absorbedShareCount: number;
     readonly requiredShareCount: number;
     readonly rosterPosition: number;
@@ -607,7 +575,6 @@ export type BgvTargetDecryptionResultReleaseShareEvidence = {
 };
 
 export type BgvTargetDecryptionResultReleaseCompletion = {
-    readonly operation: 'finishBgvTargetDecryptionResultRelease';
     readonly targetResultHash: ProtocolHash;
     readonly targetIdByOption: readonly number[];
     readonly targetOrderByOption: readonly number[];

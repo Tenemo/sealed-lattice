@@ -3,7 +3,6 @@ export * from './browser-action-storage.js';
 export * from './field.js';
 export * from './foundation-contract.js';
 export * from './lifecycle.js';
-export * from './plaintext-oracle.js';
 export * from './protocol-hash.js';
 export * from './protocol-objects.js';
 export * from './roster-recovery.js';

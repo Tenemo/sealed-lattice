@@ -55,10 +55,11 @@ pub(crate) use commands::generate_trustee_evaluation_key_proof_from_request;
 #[cfg(test)]
 pub(crate) use commands::verify_target_decryption_share_proof_bytes_from_request;
 pub(crate) use commands::verify_target_decryption_share_proof_source_from_request;
+#[cfg(test)]
+pub(crate) use commands::verify_vss_share_linkage_proof_material_set_from_request;
 pub(crate) use commands::{
     generate_same_secret_bridge_proof_from_request, generate_vss_share_linkage_proof_from_request,
     verify_same_secret_bridge_proof_source_from_request,
-    verify_vss_share_linkage_proof_material_set_from_request,
 };
 #[cfg(test)]
 pub(in crate::bgv::setup) use commands::{
@@ -67,7 +68,9 @@ pub(in crate::bgv::setup) use commands::{
 
 pub(in crate::bgv::setup) use commands::{
     VssPublicCommandCommitmentExpectation, verified_vss_share_linkage_proof_material_bytes,
-    verify_vss_share_linkage_proof_source_from_request, vss_share_linkage_commitment_from_value,
+    verify_vss_share_linkage_proof_source_from_request,
+    verify_vss_share_linkage_statement_and_proof_material_set_from_request,
+    vss_share_linkage_commitment_from_value,
 };
 pub(in crate::bgv::setup) use proof_codec::decode_trustee_evaluation_key_proof_from_source;
 pub(in crate::bgv::setup) use proof_codec::encode_trustee_evaluation_key_proof;

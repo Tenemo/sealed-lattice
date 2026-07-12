@@ -6,4 +6,4 @@ These helpers validate their documented inputs and recompute local bindings, but
 
 Complete workflow boundaries and current implementation status are documented in the root `README.md` and `SECURITY.md`.
 
-It does not expose raw BGV operations, bridge routes, or plaintext oracle helpers.
+It does not expose raw BGV operations or bridge routes.

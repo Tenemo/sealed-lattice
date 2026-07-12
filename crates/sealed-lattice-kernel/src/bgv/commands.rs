@@ -67,14 +67,11 @@ pub(crate) fn validate_bgv_evaluator_operation_from_request(
     {
         return Ok(json!({
             "isValid": true,
-            "operation": "validateBgvEvaluatorOperation",
-            "acceptedOperation": operation_name,
             "bgvParametersHash": bgv_parameters_hash()?,
         }));
     }
 
     Ok(bgv_operation_rejection(
-        "validateBgvEvaluatorOperation",
         "UncertifiedEvaluatorOperation",
         format!(
             "BGV evaluator operation {operation_name} is not part of the selected BGV-RNS/evaluator operation registry"

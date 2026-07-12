@@ -150,10 +150,6 @@ fn target_decryption_share_proof_bytes_round_trips_and_rejects_tampering() {
         &generated.proof_bytes,
     )
     .expect("verify target-decryption share proof bytes");
-    assert_eq!(
-        verified["operation"],
-        json!("verifyTargetDecryptionProofBytes")
-    );
     assert_eq!(verified["proofFamily"], json!("target-decryption-share"));
     assert_eq!(verified["limbCount"], json!(5));
     assert_eq!(
@@ -979,10 +975,7 @@ fn target_decryption_share_instance_parts_for_active_limb_count(
         private_vss_opening_randomness_by_shamir_index: Vec::new(),
         private_vss_carry_witnesses: Vec::new(),
         vss_public_coefficient_messages_by_shamir_index: Vec::new(),
-        vss_public_recipient_share_messages: Vec::new(),
         vss_public_coefficient_opening_randomness_by_shamir_index: Vec::new(),
-        vss_public_recipient_share_opening_randomness: Vec::new(),
-        vss_public_carry_witnesses: Vec::new(),
         vss_public_recipient_share_messages_by_item: Vec::new(),
         vss_public_recipient_share_opening_randomness_by_item: Vec::new(),
         vss_public_carry_witnesses_by_item: Vec::new(),

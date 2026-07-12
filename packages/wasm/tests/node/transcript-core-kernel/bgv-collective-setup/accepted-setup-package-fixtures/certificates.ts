@@ -2,7 +2,6 @@ import { type JsonRecord } from '../setup-fixture-primitives.js';
 
 import { publicPrivateVssEnvelopeCommitmentSet } from './common-randomness.js';
 
-import { setupTransportChunkSizeBytes } from '#packages/protocol/src/setup/vss-coefficient-commitments';
 import type {
     BgvCollectiveSetupParametersDescription,
     TranscriptCoreKernel,
@@ -35,19 +34,12 @@ export function acceptedSetupTransportCertificate(
 ): JsonRecord {
     const certificate = {
         objectType: 'SetupTransportCertificate',
-        transportSchemeId: 'sealed-lattice-setup-binary-chunked-transport',
         setupParametersHash: parameters.setupParametersHash,
         largeObjectEncoding: 'binary',
         chunking: 'required',
-        chunkSizeBytes: setupTransportChunkSizeBytes,
         chunkCount: 0,
         totalByteLength: 0,
-        storageQuotaBytes: 2_147_483_648,
-        largestSingleBufferBytes: 1_572_864,
-        copyCountLimit: 2,
         streamVerificationOrder: 'ascending-chunk-index',
-        resumePolicy: 'chunk-index-checkpointed-by-hash',
-        lazyLoadingPolicy: 'root-addressed-large-object-loading',
         transportedObjects: [],
     };
 

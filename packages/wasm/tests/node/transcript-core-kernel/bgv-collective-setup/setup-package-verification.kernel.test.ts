@@ -25,7 +25,6 @@ describe('collective BGV setup kernel commands', () => {
 
         expect(result).toMatchObject({
             isValid: false,
-            operation: 'verifyCollectiveBgvSetupPackage',
         });
         expect(result.refusedObjects[0]?.reasonCode).toBe(
             'outsideCollectiveBgvSetupParameters',

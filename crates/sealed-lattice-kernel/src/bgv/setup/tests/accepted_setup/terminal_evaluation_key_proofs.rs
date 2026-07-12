@@ -14,16 +14,6 @@ use super::*;
 // remain outside the package and are resolved from authenticated material roots.
 fn terminal_evaluation_key_bearing_collective_setup_fixture()
 -> super::package_fixtures::CollectiveSetupVerificationFixture {
-    terminal_evaluation_key_bearing_collective_setup_fixture_configured(false)
-}
-
-// The terminal package builder, optionally folding the committed-material
-// aggregate binding into the embedded evaluation-key set. The existing terminal
-// tests build without it (their focus is the trustee-proof and phase behavior);
-// the dedicated aggregate-binding test builds with it.
-fn terminal_evaluation_key_bearing_collective_setup_fixture_configured(
-    with_aggregate_binding: bool,
-) -> super::package_fixtures::CollectiveSetupVerificationFixture {
     let mut fixture = collective_public_key_bearing_collective_setup_fixture();
     let package = &mut fixture.package;
     // Relinearization rounds (and the public round-one aggregate diagonals the
@@ -57,24 +47,7 @@ fn terminal_evaluation_key_bearing_collective_setup_fixture_configured(
         &fixture.verification_request["transportedEvaluationKeyShareProofMaterial"],
         TRUSTEE_EVALUATION_KEY_PROOF_TRANSPORT_CERTIFICATE_FIELDS,
     );
-    // Committed-material aggregate binding: the package record and the transport
-    // openings, produced from the same statements the trustee proofs bind. The
-    // record is folded into the evaluation-key set (bound by its hash). The
-    // embedded (reference-free) set does not trigger the verifier's
-    // aggregate-binding crypto check, which runs only for transported full-ring
-    // material; folding it here keeps the record present, bound, and reproducible.
-    let aggregate_binding = with_aggregate_binding.then(|| {
-        let (aggregate_binding, _transported_openings) = evaluation_key_aggregate_binding_object(
-            package,
-            &fixture.verification_request,
-            &relinearization.round_one_aggregate_diagonals_by_level,
-        );
-        aggregate_binding
-    });
-    // Embedded public evaluation-key set, with the aggregate binding folded in when
-    // requested.
-    package["evaluationKeys"] =
-        public_evaluation_key_set_object_with_aggregate_binding(package, aggregate_binding);
+    package["evaluationKeys"] = public_evaluation_key_set_object(package);
     rebind_collective_setup_package_hash(package);
 
     fixture
@@ -221,123 +194,6 @@ fn heavy_accepted_setup_empty_evaluation_key_objects_with_collective_public_key_
         false,
         "a package with empty evaluation-key objects and a collective public key must not be accepted: {}",
         context()
-    );
-}
-
-#[test]
-#[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_terminal_committed_material_aggregate_binding_is_bound_and_well_formed() {
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_terminal_committed_material_aggregate_binding_is_bound_and_well_formed",
-    );
-    let fixture = terminal_evaluation_key_bearing_collective_setup_fixture_configured(true);
-    let package = fixture.package;
-    let participant_count = package["setupContext"]["participantCount"]
-        .as_u64()
-        .expect("participant count") as usize;
-
-    // The aggregate-binding record is present and bound: the evaluation-key set
-    // still recomputes its own hash with the record folded in, so a verifier that
-    // recomputes `evaluationKeySetHash` accepts it.
-    let evaluation_keys = &package["evaluationKeys"];
-    let aggregate_binding = &evaluation_keys["aggregateBinding"];
-    assert_eq!(
-        aggregate_binding["objectType"], "EvaluationKeyAggregateBindingSet",
-        "the folded record must be an aggregate-binding set"
-    );
-    let mut hashable = evaluation_keys.clone();
-    hashable
-        .as_object_mut()
-        .expect("evaluation-key set object")
-        .remove("evaluationKeySetHash");
-    assert_eq!(
-        evaluation_keys["evaluationKeySetHash"],
-        serde_json::json!(
-            crate::hashing::derive_canonical_object_hash(&hashable)
-                .expect("evaluation key set hash")
-        ),
-        "the aggregate binding must be bound by the evaluation-key set hash"
-    );
-
-    // Every key group carries a full-ring wrap row per digit and one material root
-    // per trustee, and each key group's digit count equals its level + 1 (limbs)
-    // clamped to the group span.
-    let key_groups = aggregate_binding["keyGroups"]
-        .as_array()
-        .expect("aggregate-binding key groups");
-    assert!(
-        !key_groups.is_empty(),
-        "the aggregate binding must cover at least one runtime key group"
-    );
-    for key_group in key_groups {
-        assert_eq!(
-            key_group["objectType"], "EvaluationKeyAggregateBindingKeyGroup",
-            "each key group is a key-group record"
-        );
-        // This terminal fixture uses a reduced development ring, so the record's
-        // ring degree is the statement's ring degree (below POLYNOMIAL_DEGREE). The
-        // record is self-consistent: its wrap rows span exactly this degree. The
-        // verifier requires POLYNOMIAL_DEGREE and would fail-close on this reduced
-        // ring, which is the intended full-ring gate.
-        let record_ring_degree = key_group["ringDegree"].as_u64().expect("ring degree");
-        assert!(
-            record_ring_degree > 0,
-            "each key group declares a positive ring degree"
-        );
-        let trustee_roots = key_group["trusteeMaterialRoots"]
-            .as_array()
-            .expect("trustee material roots");
-        assert_eq!(
-            trustee_roots.len(),
-            participant_count,
-            "one material root per trustee"
-        );
-        for entry in trustee_roots {
-            let material_root = entry["materialRoot"].as_str().expect("material root hex");
-            assert_eq!(
-                material_root.len(),
-                64,
-                "a material root is a 32-byte Merkle digest in lowercase hex"
-            );
-            assert!(
-                material_root
-                    .bytes()
-                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)),
-                "a material root must be lowercase hex"
-            );
-        }
-        // The wrap multiples carry one row per key digit (a key at level L has
-        // L + 1 digits), independent of the group's limb span: the aggregate
-        // identity binds the full digit set while the residues are restricted to
-        // the group's limbs. This matches `verify_material_aggregate`, which
-        // requires `wrap_multiples.len() == runtime_key_by_digit.len()`.
-        let wrap_multiples = key_group["wrapMultiples"]
-            .as_array()
-            .expect("wrap multiples");
-        let level = key_group["level"].as_u64().expect("level");
-        assert_eq!(
-            wrap_multiples.len() as u64,
-            level + 1,
-            "one wrap row per key digit (level + 1)"
-        );
-        for wrap_row in wrap_multiples {
-            assert_eq!(
-                wrap_row.as_array().expect("wrap row").len() as u64,
-                record_ring_degree,
-                "each wrap row spans the record's ring degree"
-            );
-        }
-    }
-
-    // The whole package still passes the evaluation-key phase with the aggregate
-    // binding folded in: no refusal references any evaluation-key object.
-    let result = verify_collective_bgv_setup_package(&package, &fixture.verification_request)
-        .expect("verification response");
-    assert_eq!(
-        evaluation_key_phase_refused(&result),
-        None,
-        "the evaluation-key phase must still accept the set with the aggregate binding folded in: {}",
-        serde_json::to_string_pretty(&result).expect("verification result JSON")
     );
 }
 

@@ -291,13 +291,10 @@ export type TranscriptCoreKernel = {
         readonly ringDegree: number;
         readonly vssShareLinkage: Record<string, unknown>;
         readonly coefficientMessagesByShamirIndex: readonly (readonly number[])[];
-        readonly recipientShareMessages: readonly number[];
         readonly coefficientOpeningRandomnessByShamirIndex: readonly (readonly (readonly number[])[])[];
-        readonly recipientShareOpeningRandomness: readonly (readonly number[])[];
-        readonly carryWitnesses: readonly number[];
-        readonly recipientShareMessagesByItem?: readonly (readonly number[])[];
-        readonly recipientShareOpeningRandomnessByItem?: readonly (readonly (readonly number[])[])[];
-        readonly carryWitnessesByItem?: readonly (readonly number[])[];
+        readonly recipientShareMessagesByItem: readonly (readonly number[])[];
+        readonly recipientShareOpeningRandomnessByItem: readonly (readonly (readonly number[])[])[];
+        readonly carryWitnessesByItem: readonly (readonly number[])[];
         readonly vssCommittedMaterialSeedsByBoundMessage: readonly string[];
         readonly vssCommittedMaterialContextHashesByBoundMessage: readonly string[];
         readonly proofRandomnessSeedHex: string;

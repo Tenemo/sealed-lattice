@@ -69,6 +69,7 @@ pub(crate) use trustee_evaluation_key_proof::TARGET_DECRYPTION_SHARE_PROOF_FAMIL
 pub(crate) use trustee_evaluation_key_proof::describe_trustee_evaluation_key_statement_from_request;
 pub(crate) use trustee_evaluation_key_proof::generate_target_decryption_share_proof_bytes_from_request;
 pub(crate) use trustee_evaluation_key_proof::verify_target_decryption_share_proof_source_from_request;
+#[cfg(test)]
 pub(crate) use trustee_evaluation_key_proof::verify_vss_share_linkage_proof_material_set_from_request;
 pub(crate) use trustee_evaluation_key_proof::{
     generate_same_secret_bridge_proof_from_request, generate_vss_share_linkage_proof_from_request,
@@ -78,14 +79,10 @@ pub(crate) use vss_commitment::{
     validate_standalone_vss_committed_material_commitment,
     verify_vss_public_aggregate_threshold_commitment_set_request,
     verify_vss_public_aggregate_threshold_proofs,
-    verify_vss_public_coefficient_commitment_set_request,
-    verify_vss_public_recipient_share_commitment_set_request,
-    verify_vss_share_linkage_bindings_request,
 };
 pub(crate) use vss_commitment::{
     VssCommittedMaterialCommitmentInput, compute_vss_committed_material_commitment,
 };
-
 // The target-decryption secret-share domain label, bound identically into the
 // target-decryption parameters certificate and the threshold-verification
 // material so the two records describe the same secret-share space.

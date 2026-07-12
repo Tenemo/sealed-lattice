@@ -97,113 +97,6 @@ fn verify_vss_public_material_binding(
         .get(VSS_SHARE_LINKAGE_PROOF_MATERIAL_SET_FIELD)
         .ok_or_else(|| public_material_error("share-linkage proof material set"))?;
 
-    let coefficient_verification =
-        crate::bgv::setup::verify_vss_public_coefficient_commitment_set_request(&json!({
-            "coefficientCommitmentSet": coefficient_set,
-        }))?;
-    let recipient_share_verification =
-        crate::bgv::setup::verify_vss_public_recipient_share_commitment_set_request(&json!({
-            "recipientShareCommitmentSet": recipient_share_set,
-        }))?;
-    let aggregate_threshold_verification =
-        crate::bgv::setup::verify_vss_public_aggregate_threshold_commitment_set_request(&json!({
-            "aggregateThresholdCommitmentSet": aggregate_threshold_set,
-        }))?;
-    let statement_request = json!({
-        "statement": statement,
-        "coefficientCommitmentSet": coefficient_set,
-        "recipientShareCommitmentSet": recipient_share_set,
-        "aggregateThresholdCommitmentSet": aggregate_threshold_set,
-    });
-    let statement_verification =
-        crate::bgv::setup::verify_vss_share_linkage_bindings_request(&statement_request)?;
-
-    let setup_context = setup_package
-        .get("setupContext")
-        .ok_or_else(|| public_material_error("VSS public material requires setup context"))?;
-    compare_setup_context_binding(setup_context, statement, "VSS share-linkage statement")?;
-    compare_setup_context_participant_count(
-        setup_context,
-        &coefficient_verification,
-        "VSS coefficient commitment set",
-    )?;
-    compare_setup_context_threshold_degree(
-        setup_context,
-        &coefficient_verification,
-        "VSS coefficient commitment set",
-    )?;
-    compare_setup_context_participant_count(
-        setup_context,
-        &recipient_share_verification,
-        "VSS recipient-share commitment set",
-    )?;
-    compare_setup_context_participant_count(
-        setup_context,
-        &aggregate_threshold_verification,
-        "VSS aggregate threshold commitment set",
-    )?;
-    compare_setup_context_participant_count(
-        setup_context,
-        &statement_verification,
-        "VSS share-linkage statement",
-    )?;
-    compare_setup_context_threshold_degree(
-        setup_context,
-        &statement_verification,
-        "VSS share-linkage statement",
-    )?;
-
-    let common_randomness = setup_package
-        .get("commonRandomness")
-        .ok_or_else(|| public_material_error("VSS public material requires common randomness"))?;
-    let accepted_public_matrix_seed_hash =
-        hash_at_path(common_randomness, &["publicMatrixSeedHash"])?;
-    compare_required_string(
-        hash_at_path(&coefficient_verification, &["publicMatrixSeedHash"])?,
-        accepted_public_matrix_seed_hash,
-        "VSS coefficient set publicMatrixSeedHash",
-    )?;
-    compare_required_string(
-        hash_at_path(&recipient_share_verification, &["publicMatrixSeedHash"])?,
-        accepted_public_matrix_seed_hash,
-        "VSS recipient-share set publicMatrixSeedHash",
-    )?;
-    compare_required_string(
-        hash_at_path(&aggregate_threshold_verification, &["publicMatrixSeedHash"])?,
-        accepted_public_matrix_seed_hash,
-        "VSS aggregate set publicMatrixSeedHash",
-    )?;
-    compare_required_string(
-        hash_at_path(&statement_verification, &["publicMatrixSeedHash"])?,
-        accepted_public_matrix_seed_hash,
-        "VSS share-linkage statement publicMatrixSeedHash",
-    )?;
-    compare_complete_q_share_limb_count(&statement_verification, "VSS share-linkage statement")?;
-    compare_required_string(
-        hash_at_path(&statement_verification, &["coefficientCommitmentRoot"])?,
-        hash_at_path(&coefficient_verification, &["coefficientCommitmentRoot"])?,
-        "VSS share-linkage statement coefficientCommitmentRoot",
-    )?;
-    compare_required_string(
-        hash_at_path(&statement_verification, &["recipientShareCommitmentRoot"])?,
-        hash_at_path(
-            &recipient_share_verification,
-            &["recipientShareCommitmentRoot"],
-        )?,
-        "VSS share-linkage statement recipientShareCommitmentRoot",
-    )?;
-    compare_required_string(
-        hash_at_path(
-            &statement_verification,
-            &["aggregateThresholdCommitmentRoot"],
-        )?,
-        hash_at_path(
-            &aggregate_threshold_verification,
-            &["aggregateThresholdCommitmentRoot"],
-        )?,
-        "VSS share-linkage statement aggregateThresholdCommitmentRoot",
-    )?;
-
     let mut proof_material_request = serde_json::Map::from_iter([
         ("statement".to_string(), statement.clone()),
         (
@@ -228,10 +121,36 @@ fn verify_vss_public_material_binding(
             proof_material_request.insert(field_name.to_string(), value.clone());
         }
     }
-    let proof_material_verification =
-        crate::bgv::setup::verify_vss_share_linkage_proof_material_set_from_request(
+    let (statement_verification, proof_material_verification) =
+        crate::bgv::setup::trustee_evaluation_key_proof::verify_vss_share_linkage_statement_and_proof_material_set_from_request(
             &Value::Object(proof_material_request),
         )?;
+    let setup_context = setup_package
+        .get("setupContext")
+        .ok_or_else(|| public_material_error("VSS public material requires setup context"))?;
+    compare_setup_context_binding(setup_context, statement, "VSS share-linkage statement")?;
+    compare_setup_context_participant_count(
+        setup_context,
+        &statement_verification,
+        "VSS share-linkage statement",
+    )?;
+    compare_setup_context_threshold_degree(
+        setup_context,
+        &statement_verification,
+        "VSS share-linkage statement",
+    )?;
+
+    let common_randomness = setup_package
+        .get("commonRandomness")
+        .ok_or_else(|| public_material_error("VSS public material requires common randomness"))?;
+    let accepted_public_matrix_seed_hash =
+        hash_at_path(common_randomness, &["publicMatrixSeedHash"])?;
+    compare_required_string(
+        hash_at_path(&statement_verification, &["publicMatrixSeedHash"])?,
+        accepted_public_matrix_seed_hash,
+        "VSS share-linkage statement publicMatrixSeedHash",
+    )?;
+    compare_complete_q_share_limb_count(&statement_verification, "VSS share-linkage statement")?;
     compare_required_string(
         hash_at_path(&proof_material_verification, &["proofMaterialSetRoot"])?,
         hash_at_path(proof_material_set, &["proofMaterialSetRoot"])?,
@@ -252,16 +171,15 @@ fn verify_vss_public_material_binding(
             manifest_hash: hash_at_path(setup_context, &["manifestHash"])?,
             roster_hash: hash_at_path(setup_context, &["rosterHash"])?,
             setup_epoch: string_at_path(setup_context, &["setupEpoch"])?,
-            ring_degree: unsigned_at_path(&aggregate_threshold_verification, &["ringDegree"])?
+            ring_degree: unsigned_at_path(&statement_verification, &["ringDegree"])?
                 .try_into()
                 .map_err(|_| public_material_error("aggregate ring degree does not fit usize"))?,
-            participant_count: unsigned_at_path(
-                &aggregate_threshold_verification,
-                &["participantCount"],
-            )?
-            .try_into()
-            .map_err(|_| public_material_error("aggregate participant count does not fit usize"))?,
-            rns_limb_count: unsigned_at_path(&aggregate_threshold_verification, &["rnsLimbCount"])?
+            participant_count: unsigned_at_path(&statement_verification, &["participantCount"])?
+                .try_into()
+                .map_err(|_| {
+                    public_material_error("aggregate participant count does not fit usize")
+                })?,
+            rns_limb_count: unsigned_at_path(&statement_verification, &["qShareRnsLimbCount"])?
                 .try_into()
                 .map_err(|_| {
                     public_material_error("aggregate RNS limb count does not fit usize")
@@ -272,7 +190,7 @@ fn verify_vss_public_material_binding(
     Ok(VerifiedVssPublicMaterial {
         public_matrix_seed_hash: accepted_public_matrix_seed_hash.to_string(),
         aggregate_threshold_commitment_root: hash_at_path(
-            &aggregate_threshold_verification,
+            &statement_verification,
             &["aggregateThresholdCommitmentRoot"],
         )?
         .to_string(),
@@ -282,13 +200,10 @@ fn verify_vss_public_material_binding(
             &["proofMaterialSetRoot"],
         )?
         .to_string(),
-        participant_count: unsigned_at_path(
-            &aggregate_threshold_verification,
-            &["participantCount"],
-        )?,
+        participant_count: unsigned_at_path(&statement_verification, &["participantCount"])?,
         q_share_rns_limb_count: unsigned_at_path(&statement_verification, &["qShareRnsLimbCount"])?,
         threshold_degree: unsigned_at_path(&statement_verification, &["thresholdDegree"])?,
-        ring_degree: unsigned_at_path(&aggregate_threshold_verification, &["ringDegree"])?,
+        ring_degree: unsigned_at_path(&statement_verification, &["ringDegree"])?,
     })
 }
 
@@ -391,12 +306,6 @@ mod tests {
         assert_eq!(
             response["refusedObjects"][0]["reasonCode"],
             json!("vssPublicMaterialMalformed")
-        );
-        assert!(
-            response["refusedObjects"][0]["message"]
-                .as_str()
-                .expect("refusal message")
-                .contains("objectType")
         );
         Ok(())
     }

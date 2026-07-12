@@ -10,7 +10,6 @@ use super::{
     derive_state_recovery_producer_sequence, derive_state_witness_vote_sequence, hash512,
 };
 
-const FOUNDATION_OBJECT_VERSION: u16 = 1;
 const FOUNDATION_PAYLOAD_VERSION: u16 = 1;
 
 const PUBLIC_RANDOMNESS_COMMITMENT_SCHEMA_IDENTIFIER: u16 = 0x1201;
@@ -166,7 +165,6 @@ pub enum FoundationObjectVerificationRequirement {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FoundationEnvelopePolicy {
     pub object_type: FoundationObjectType,
-    pub accepted_object_version: u16,
     pub carrier_kind: FoundationCarrierKind,
     pub signature_purpose: Option<&'static str>,
     pub prerequisite_rule: FoundationPrerequisiteRule,
@@ -182,7 +180,6 @@ pub struct FoundationEnvelopePolicy {
 pub const FOUNDATION_ENVELOPE_POLICIES: [FoundationEnvelopePolicy; 18] = [
     FoundationEnvelopePolicy {
         object_type: FoundationObjectType::PublicRandomnessCommitment,
-        accepted_object_version: FOUNDATION_OBJECT_VERSION,
         carrier_kind: FoundationCarrierKind::SignedByRosterParticipant,
         signature_purpose: Some("public-randomness-commitment"),
         prerequisite_rule: FoundationPrerequisiteRule::RosterOrderedObjects {
@@ -198,7 +195,6 @@ pub const FOUNDATION_ENVELOPE_POLICIES: [FoundationEnvelopePolicy; 18] = [
     },
     FoundationEnvelopePolicy {
         object_type: FoundationObjectType::PublicRandomnessReveal,
-        accepted_object_version: FOUNDATION_OBJECT_VERSION,
         carrier_kind: FoundationCarrierKind::SignedByRosterParticipant,
         signature_purpose: Some("public-randomness-reveal"),
         prerequisite_rule: FoundationPrerequisiteRule::RosterOrderedObjects {
@@ -214,7 +210,6 @@ pub const FOUNDATION_ENVELOPE_POLICIES: [FoundationEnvelopePolicy; 18] = [
     },
     FoundationEnvelopePolicy {
         object_type: FoundationObjectType::PublicRandomnessLock,
-        accepted_object_version: FOUNDATION_OBJECT_VERSION,
         carrier_kind: FoundationCarrierKind::SignedByRosterParticipant,
         signature_purpose: Some("public-randomness-lock"),
         prerequisite_rule: FoundationPrerequisiteRule::RosterOrderedObjects {
@@ -230,7 +225,6 @@ pub const FOUNDATION_ENVELOPE_POLICIES: [FoundationEnvelopePolicy; 18] = [
     },
     FoundationEnvelopePolicy {
         object_type: FoundationObjectType::SetupIntent,
-        accepted_object_version: FOUNDATION_OBJECT_VERSION,
         carrier_kind: FoundationCarrierKind::SignedByRosterParticipant,
         signature_purpose: Some("setup-intent"),
         prerequisite_rule: FoundationPrerequisiteRule::None,
@@ -245,7 +239,6 @@ pub const FOUNDATION_ENVELOPE_POLICIES: [FoundationEnvelopePolicy; 18] = [
     },
     FoundationEnvelopePolicy {
         object_type: FoundationObjectType::PrivateShareAcceptance,
-        accepted_object_version: FOUNDATION_OBJECT_VERSION,
         carrier_kind: FoundationCarrierKind::SignedByRosterParticipant,
         signature_purpose: Some("private-share-acceptance"),
         prerequisite_rule: FoundationPrerequisiteRule::None,
@@ -259,7 +252,6 @@ pub const FOUNDATION_ENVELOPE_POLICIES: [FoundationEnvelopePolicy; 18] = [
     },
     FoundationEnvelopePolicy {
         object_type: FoundationObjectType::Complaint,
-        accepted_object_version: FOUNDATION_OBJECT_VERSION,
         carrier_kind: FoundationCarrierKind::SignedByRosterParticipant,
         signature_purpose: Some("setup-complaint"),
         prerequisite_rule: FoundationPrerequisiteRule::None,
@@ -274,7 +266,6 @@ pub const FOUNDATION_ENVELOPE_POLICIES: [FoundationEnvelopePolicy; 18] = [
     },
     FoundationEnvelopePolicy {
         object_type: FoundationObjectType::PublicSetupRecord,
-        accepted_object_version: FOUNDATION_OBJECT_VERSION,
         carrier_kind: FoundationCarrierKind::SignedByRosterParticipant,
         signature_purpose: Some("dealer-public-setup"),
         prerequisite_rule: FoundationPrerequisiteRule::OneExternal {
@@ -290,7 +281,6 @@ pub const FOUNDATION_ENVELOPE_POLICIES: [FoundationEnvelopePolicy; 18] = [
     },
     FoundationEnvelopePolicy {
         object_type: FoundationObjectType::BallotPackage,
-        accepted_object_version: FOUNDATION_OBJECT_VERSION,
         carrier_kind: FoundationCarrierKind::SignedByRosterParticipant,
         signature_purpose: Some("direct-ballot"),
         prerequisite_rule: FoundationPrerequisiteRule::OneExternal {
@@ -306,7 +296,6 @@ pub const FOUNDATION_ENVELOPE_POLICIES: [FoundationEnvelopePolicy; 18] = [
     },
     FoundationEnvelopePolicy {
         object_type: FoundationObjectType::BallotCandidateList,
-        accepted_object_version: FOUNDATION_OBJECT_VERSION,
         carrier_kind: FoundationCarrierKind::SignedByRosterParticipant,
         signature_purpose: Some("ballot-candidate-list"),
         prerequisite_rule: FoundationPrerequisiteRule::None,
@@ -322,7 +311,6 @@ pub const FOUNDATION_ENVELOPE_POLICIES: [FoundationEnvelopePolicy; 18] = [
     },
     FoundationEnvelopePolicy {
         object_type: FoundationObjectType::Aggregate,
-        accepted_object_version: FOUNDATION_OBJECT_VERSION,
         carrier_kind: FoundationCarrierKind::UnsignedDeterministic,
         signature_purpose: None,
         prerequisite_rule: FoundationPrerequisiteRule::None,
@@ -337,7 +325,6 @@ pub const FOUNDATION_ENVELOPE_POLICIES: [FoundationEnvelopePolicy; 18] = [
     },
     FoundationEnvelopePolicy {
         object_type: FoundationObjectType::EvaluatorReplay,
-        accepted_object_version: FOUNDATION_OBJECT_VERSION,
         carrier_kind: FoundationCarrierKind::UnsignedDeterministic,
         signature_purpose: None,
         prerequisite_rule: FoundationPrerequisiteRule::None,
@@ -352,7 +339,6 @@ pub const FOUNDATION_ENVELOPE_POLICIES: [FoundationEnvelopePolicy; 18] = [
     },
     FoundationEnvelopePolicy {
         object_type: FoundationObjectType::FinalitySignature,
-        accepted_object_version: FOUNDATION_OBJECT_VERSION,
         carrier_kind: FoundationCarrierKind::SignedByRosterParticipant,
         signature_purpose: Some("target-finality"),
         prerequisite_rule: FoundationPrerequisiteRule::OneObject {
@@ -370,7 +356,6 @@ pub const FOUNDATION_ENVELOPE_POLICIES: [FoundationEnvelopePolicy; 18] = [
     },
     FoundationEnvelopePolicy {
         object_type: FoundationObjectType::StateReservation,
-        accepted_object_version: FOUNDATION_OBJECT_VERSION,
         carrier_kind: FoundationCarrierKind::SignedByRosterParticipant,
         signature_purpose: Some("state-reservation-intent"),
         prerequisite_rule: FoundationPrerequisiteRule::None,
@@ -384,7 +369,6 @@ pub const FOUNDATION_ENVELOPE_POLICIES: [FoundationEnvelopePolicy; 18] = [
     },
     FoundationEnvelopePolicy {
         object_type: FoundationObjectType::StateOutputIntent,
-        accepted_object_version: FOUNDATION_OBJECT_VERSION,
         carrier_kind: FoundationCarrierKind::SignedByRosterParticipant,
         signature_purpose: Some("state-output-intent"),
         prerequisite_rule: FoundationPrerequisiteRule::None,
@@ -398,7 +382,6 @@ pub const FOUNDATION_ENVELOPE_POLICIES: [FoundationEnvelopePolicy; 18] = [
     },
     FoundationEnvelopePolicy {
         object_type: FoundationObjectType::StateWitnessVote,
-        accepted_object_version: FOUNDATION_OBJECT_VERSION,
         carrier_kind: FoundationCarrierKind::SignedByRosterParticipant,
         signature_purpose: Some("state-witness-vote"),
         prerequisite_rule: FoundationPrerequisiteRule::None,
@@ -412,7 +395,6 @@ pub const FOUNDATION_ENVELOPE_POLICIES: [FoundationEnvelopePolicy; 18] = [
     },
     FoundationEnvelopePolicy {
         object_type: FoundationObjectType::RecoveryTransition,
-        accepted_object_version: FOUNDATION_OBJECT_VERSION,
         carrier_kind: FoundationCarrierKind::SignedByRosterParticipant,
         signature_purpose: Some("state-recovery-transition"),
         prerequisite_rule: FoundationPrerequisiteRule::None,
@@ -426,7 +408,6 @@ pub const FOUNDATION_ENVELOPE_POLICIES: [FoundationEnvelopePolicy; 18] = [
     },
     FoundationEnvelopePolicy {
         object_type: FoundationObjectType::TargetDecryptionShare,
-        accepted_object_version: FOUNDATION_OBJECT_VERSION,
         carrier_kind: FoundationCarrierKind::SignedByRosterParticipant,
         signature_purpose: Some("target-release-output"),
         prerequisite_rule: FoundationPrerequisiteRule::None,
@@ -442,7 +423,6 @@ pub const FOUNDATION_ENVELOPE_POLICIES: [FoundationEnvelopePolicy; 18] = [
     },
     FoundationEnvelopePolicy {
         object_type: FoundationObjectType::StorageRootCommitment,
-        accepted_object_version: FOUNDATION_OBJECT_VERSION,
         carrier_kind: FoundationCarrierKind::SignedByRosterParticipant,
         signature_purpose: Some("storage-root-commitment"),
         prerequisite_rule: FoundationPrerequisiteRule::None,
@@ -1937,7 +1917,6 @@ mod tests {
             .zip(FOUNDATION_ENVELOPE_POLICIES)
         {
             assert_eq!(policy.object_type, object_type);
-            assert_eq!(policy.accepted_object_version, FOUNDATION_OBJECT_VERSION);
             assert_eq!(policy.payload_schema_version, FOUNDATION_PAYLOAD_VERSION);
             assert_eq!(foundation_envelope_policy(object_type), &policy);
             assert!(assigned_codes.insert(object_type.canonical_code()));

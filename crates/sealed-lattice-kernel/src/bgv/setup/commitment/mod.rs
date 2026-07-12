@@ -203,7 +203,6 @@ mod tests {
             "ringDegree": TEST_RING_DEGREE,
         }))?;
 
-        assert_eq!(response["operation"], "computeSetupCommitmentFromOpening");
         assert_eq!(
             response["commitmentRoot"]
                 .as_str()

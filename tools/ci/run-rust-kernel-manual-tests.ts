@@ -7,15 +7,21 @@ import {
     runGuardedRustKernelCommands,
     type RustKernelAcceptedSetupRunMode,
 } from './run-rust-kernel-accepted-setup-tests.js';
-import { verifyFocusedRustLaneSelection } from './rust-focused-lane-selection.js';
 import {
-    canonicalTestLaneDefinitions,
-    rustKernelManualTestLanes,
-} from './test-lanes.js';
+    focusedRustLaneScripts,
+    fullProfileEvidenceRustTests,
+    measurementRustTests,
+    verifyFocusedRustLaneSelection,
+} from './rust-focused-lane-selection.js';
 
 import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
 
-type ManualRustKernelLane = keyof typeof rustKernelManualTestLanes;
+const manualRustKernelTests = {
+    'rust-full-profile-evidence': fullProfileEvidenceRustTests,
+    'rust-measurements': measurementRustTests,
+} as const;
+
+type ManualRustKernelLane = keyof typeof manualRustKernelTests;
 
 const laneLabels = {
     'rust-full-profile-evidence': 'Rust full-profile evidence',
@@ -32,7 +38,7 @@ const parseArguments = (
     const [rawLane, ...remainingArguments] = commandArguments.filter(
         (argument) => argument !== '--' && argument !== undefined,
     );
-    if (!(rawLane !== undefined && rawLane in rustKernelManualTestLanes)) {
+    if (!(rawLane !== undefined && rawLane in manualRustKernelTests)) {
         throw new Error(
             'The guarded manual Rust runner requires lane rust-full-profile-evidence or rust-measurements.',
         );
@@ -52,7 +58,7 @@ const parseArguments = (
     }
     if (positionalArguments.length > 1) {
         throw new Error(
-            `${canonicalTestLaneDefinitions[lane].rootScript} accepts one optional test or module filter.`,
+            `${focusedRustLaneScripts[lane]} accepts one optional test or module filter.`,
         );
     }
     const focusedFilter =
@@ -61,7 +67,7 @@ const parseArguments = (
             : normalizeFocusedTestFilter(positionalArguments[0] ?? '');
     if (focusedFilter === '') {
         throw new Error(
-            `${canonicalTestLaneDefinitions[lane].rootScript} requires a non-empty filter.`,
+            `${focusedRustLaneScripts[lane]} requires a non-empty filter.`,
         );
     }
 
@@ -74,8 +80,7 @@ export const runRustKernelManualTests = async (): Promise<void> => {
         (argument) => argument !== '--' && argument !== undefined,
     );
     const diagnosticLane =
-        requestedLane !== undefined &&
-        requestedLane in rustKernelManualTestLanes
+        requestedLane !== undefined && requestedLane in manualRustKernelTests
             ? (requestedLane as ManualRustKernelLane)
             : undefined;
     await runWithLocalRunLog(
@@ -89,14 +94,14 @@ export const runRustKernelManualTests = async (): Promise<void> => {
             scriptName:
                 diagnosticLane === undefined
                     ? 'test:rust:kernel:manual'
-                    : canonicalTestLaneDefinitions[diagnosticLane].rootScript,
+                    : focusedRustLaneScripts[diagnosticLane],
         },
         async (runLog) => {
             const parsed = parseArguments(rawArguments);
             const label = laneLabels[parsed.lane];
             const testFilters =
                 parsed.focusedFilter === undefined
-                    ? rustKernelManualTestLanes[parsed.lane]
+                    ? manualRustKernelTests[parsed.lane]
                     : [parsed.focusedFilter];
             const targetDirectoryPath = path.resolve(
                 process.cwd(),

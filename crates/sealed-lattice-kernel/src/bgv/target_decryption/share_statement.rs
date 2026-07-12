@@ -68,7 +68,6 @@ pub(super) fn verify_target_decryption_share_proof_statement_binding(
     // statement root as evidence of the binding it checked, and carries no
     // self-attested status/verdict/refusal field.
     Ok(json!({
-        "operation": "verifyBgvTargetDecryptionShareProofStatementBinding",
         "proofStatementRoot": hash_at_path(proof_statement, &["proofStatementRoot"])?,
     }))
 }

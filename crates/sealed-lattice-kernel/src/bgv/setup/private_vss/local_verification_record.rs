@@ -83,7 +83,6 @@ pub(super) fn verification_response(
 ) -> Value {
     json!({
         "isValid": is_valid,
-        "operation": "verifyPrivateVssShareEnvelope",
         "privateEnvelopeHash": private_envelope_hash,
         "localVerificationRoot": local_verification_root,
         "limbVerifications": limb_verifications,

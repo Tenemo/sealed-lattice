@@ -9,13 +9,8 @@ import type {
     ProtocolSignatureEnvelope,
     SignedObjectType,
     SignerRole,
-    WitnessPolicy,
 } from '@sealed-lattice/types';
 
-import {
-    deriveTargetFinalityPolicyHash,
-    deriveWitnessPolicyHash,
-} from '#packages/protocol/src/finality/index';
 import {
     createMlDsaKeyPairFixture,
     createMlDsaSignatureProfileFixture,
@@ -71,10 +66,6 @@ export const getParticipantKeyFixture = (
     participantIdentity: string,
 ): ReturnType<typeof createMlDsaKeyPairFixture> =>
     createKeyFixture(`participant:${participantIdentity}`);
-export const getWitnessKeyFixture = (
-    witnessIdentity: string,
-): ReturnType<typeof createMlDsaKeyPairFixture> =>
-    createKeyFixture(`witness:${witnessIdentity}`);
 export const boardPublicKeyHash = boardKeyFixture.publicKeyHash;
 export const organizerPublicKeyHash = organizerKeyFixture.publicKeyHash;
 export const getParticipantSigningPublicKeyHash = (
@@ -83,7 +74,7 @@ export const getParticipantSigningPublicKeyHash = (
     participantIdentity === 'organizer'
         ? organizerPublicKeyHash
         : getParticipantKeyFixture(participantIdentity).publicKeyHash;
-export const witnessIdentities = [
+const witnessIdentities = [
     'witness-1',
     'witness-2',
     'witness-3',
@@ -92,42 +83,18 @@ export const witnessIdentities = [
     'witness-6',
     'witness-7',
 ] as const;
-export const witnessPolicyHash = deriveWitnessPolicyHash({
+const witnessPolicyHash = deriveCanonicalObjectHash({
+    objectType: 'WitnessPolicy',
     witnessIdentities,
     witnessQuorum: 5,
     totalWitnesses: 7,
 });
-export const targetFinalityPolicyHash = deriveTargetFinalityPolicyHash({
+const targetFinalityPolicyHash = deriveCanonicalObjectHash({
+    objectType: 'TargetFinalityPolicy',
     targetFinalityScope: 'target',
     witnessQuorum: 5,
     totalWitnesses: 7,
 });
-export const defaultEvaluatorReplayRecordHash = deriveFixtureHash(
-    'fixture-evaluator-replay-record',
-    { proposal: 'direct-evaluator-replay' },
-);
-export const defaultThresholdParametersHash = deriveCanonicalObjectHash({
-    objectType: 'ThresholdParametersHash',
-    parameters: 'default-target-finality-threshold-parameters',
-});
-export const witnessPublicKeyHashes = Object.fromEntries(
-    witnessIdentities.map((witnessIdentity) => [
-        witnessIdentity,
-        getWitnessKeyFixture(witnessIdentity).publicKeyHash,
-    ]),
-);
-export const witnessPolicy: WitnessPolicy = {
-    witnessPolicyHash,
-    witnessIdentities,
-    witnessQuorum: 5,
-    totalWitnesses: 7,
-};
-export const targetFinalityPolicy = {
-    targetFinalityPolicyHash,
-    targetFinalityScope: 'target',
-    witnessQuorum: 5,
-    totalWitnesses: 7,
-};
 
 export const manifestPolicyHashes: ManifestPolicyHashes = {
     aggregateSelectionPolicyHash: deriveFixtureHash(

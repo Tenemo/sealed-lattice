@@ -100,11 +100,10 @@ const parsePublicPackageManifest = (
     return parsedManifest as PublicPackageManifest;
 };
 
-export const deriveReleaseVersion = (
-    manifestText: string,
+const deriveReleaseVersionFromManifest = (
+    manifest: PublicPackageManifest,
     increment: ReleaseIncrement,
 ): ReleaseVersionResult => {
-    const manifest = parsePublicPackageManifest(manifestText);
     const previousVersion = manifest.version;
     const version = incrementPrototypeVersion(previousVersion, increment);
 
@@ -114,6 +113,15 @@ export const deriveReleaseVersion = (
         version,
     };
 };
+
+export const deriveReleaseVersion = (
+    manifestText: string,
+    increment: ReleaseIncrement,
+): ReleaseVersionResult =>
+    deriveReleaseVersionFromManifest(
+        parsePublicPackageManifest(manifestText),
+        increment,
+    );
 
 const writeManifestAtomically = async (
     manifestPath: string,
@@ -143,7 +151,10 @@ export const prepareReleaseVersion = async (input: {
     );
     const manifestText = await fs.readFile(manifestPath, 'utf8');
     const manifest = parsePublicPackageManifest(manifestText);
-    const releaseVersion = deriveReleaseVersion(manifestText, input.increment);
+    const releaseVersion = deriveReleaseVersionFromManifest(
+        manifest,
+        input.increment,
+    );
     manifest.version = releaseVersion.version;
 
     await writeManifestAtomically(

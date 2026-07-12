@@ -5,7 +5,6 @@ import type {
     GaloisKeyShareBatch,
     PublicEvaluationKeySet,
     RelinearizationKeyShareRounds,
-    TransportedEvaluationKeyAggregateBindingOpeningSet,
     TransportedEvaluationKeyShareComponentMaterialSet,
     TransportedEvaluationKeyShareProofMaterialSet,
     TransportedPublicEvaluationKeyMaterialSet,
@@ -162,10 +161,6 @@ export type SetupPackageVerificationInputSource = Readonly<{
     readonly transportedVssShareLinkageProofMaterial?: TransportedVssShareLinkageProofMaterialSet;
     readonly transportedSameSecretBridgeProofMaterial?: TransportedSameSecretBridgeProofMaterialSet;
     readonly transportedEvaluationKeyShareComponentMaterial?: TransportedEvaluationKeyShareComponentMaterialSet;
-    // Optional per-trustee batched linear-evaluation openings for the package
-    // aggregate binding. Carried alongside the package when the evaluation-key
-    // set publishes an aggregate binding; the kernel skips the check otherwise.
-    readonly transportedEvaluationKeyAggregateBindingOpenings?: TransportedEvaluationKeyAggregateBindingOpeningSet;
     readonly transportedPublicEvaluationKeyMaterial?: TransportedPublicEvaluationKeyMaterialSet;
 }>;
 

@@ -156,7 +156,6 @@ describe('accepted setup public package API in Node', () => {
 
         expect(verification).toMatchObject({
             isValid: false,
-            operation: 'verifyCollectiveBgvSetupPackage',
         });
     });
 
@@ -185,11 +184,6 @@ describe('accepted setup public package API in Node', () => {
             transportedSetupProofMaterialSet(
                 setupProofMaterialTransportCases[3],
             );
-        const transportedEvaluationKeyAggregateBindingOpenings = {
-            objectType:
-                'SetupTransportedEvaluationKeyAggregateBindingOpeningSet',
-            openings: [],
-        };
         const publicKeyShareMaterialChunkSource = {
             publicKeyShareMaterialSetRoot:
                 publicCompanions.transportedPublicKeyShareMaterial
@@ -205,7 +199,6 @@ describe('accepted setup public package API in Node', () => {
                 transportedEvaluationKeyShareProofMaterial,
                 transportedVssShareLinkageProofMaterial,
                 transportedSameSecretBridgeProofMaterial,
-                transportedEvaluationKeyAggregateBindingOpenings,
                 publicKeyShareMaterialChunkSource,
                 ...publicCompanions,
             });
@@ -236,9 +229,6 @@ describe('accepted setup public package API in Node', () => {
         expect(
             verificationInput.transportedEvaluationKeyShareComponentMaterial,
         ).toBe(publicCompanions.transportedEvaluationKeyShareComponentMaterial);
-        expect(
-            verificationInput.transportedEvaluationKeyAggregateBindingOpenings,
-        ).toBe(transportedEvaluationKeyAggregateBindingOpenings);
         expect(verificationInput.transportedPublicEvaluationKeyMaterial).toBe(
             publicCompanions.transportedPublicEvaluationKeyMaterial,
         );

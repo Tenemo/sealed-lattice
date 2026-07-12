@@ -469,7 +469,6 @@ const stubGenerator = (
         });
 
         return Promise.resolve({
-            operation: 'generateTrusteeEvaluationKeyProof',
             statementHash,
             limbCount: qSharePrimes.length,
             proofBytesEncoding: 'binary-chunked-proof-bytes',

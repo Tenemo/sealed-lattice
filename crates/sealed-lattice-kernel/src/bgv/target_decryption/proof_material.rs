@@ -211,7 +211,6 @@ pub(super) fn verify_target_decryption_share_proof_material(
     }
 
     Ok(json!({
-        "operation": "verifyBgvTargetDecryptionShareProofMaterial",
         "proofMaterialRoot": expected_material_root,
     }))
 }

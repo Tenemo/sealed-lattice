@@ -39,7 +39,6 @@ describe('accepted setup public package API in Node', () => {
             });
         expect(malformedVerification).toMatchObject({
             isValid: false,
-            operation: 'verifyPrivateVssShareEnvelope',
         });
         expect(JSON.stringify(malformedVerification)).not.toMatch(
             /shareValues|coefficientMessage|randomnessByColumn/u,
@@ -47,7 +46,6 @@ describe('accepted setup public package API in Node', () => {
 
         const acceptedLocalVerification = {
             isValid: true,
-            operation: 'verifyPrivateVssShareEnvelope',
             privateEnvelopeHash: envelopeReference.privateEnvelopeHash,
             localVerificationRoot: envelopeReference.localVerificationRoot,
             limbVerifications: [],
@@ -55,7 +53,6 @@ describe('accepted setup public package API in Node', () => {
         };
         const refusedLocalVerification = {
             isValid: false,
-            operation: 'verifyPrivateVssShareEnvelope',
             privateEnvelopeHash: envelopeReference.privateEnvelopeHash,
             localVerificationRoot: null,
             limbVerifications: [],

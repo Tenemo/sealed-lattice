@@ -665,6 +665,131 @@ describe('untrusted storage transaction store', () => {
         ).toEqual(new Uint8Array([2]));
     });
 
+    it('conflicts when indexed object bytes change in place after staging', async () => {
+        const { adapter, store } = await openTestStore();
+        await writeRecord(store, 'shared-record', new Uint8Array([1]));
+        const sharedRecordIndexKey = indexKey('test-runtime', 'shared-record');
+        const sharedRecordIndexValue = requiredRawValue(
+            adapter,
+            sharedRecordIndexKey,
+        );
+        const sharedRecordObjectKey = textDecoder.decode(
+            sharedRecordIndexValue,
+        );
+        const transaction = await store.beginTransaction({
+            lifetimeMilliseconds: 100,
+        });
+        const lease = await transaction.issueWriteLease({
+            declaredByteLength: 1,
+            expectedCurrentValue: new Uint8Array([1]),
+            logicalRecordKey: 'shared-record',
+        });
+        await lease.write(new Uint8Array([2]));
+        await lease.seal(
+            exactAuthenticator('shared-record', new Uint8Array([2])),
+        );
+
+        adapter.rawWrite(sharedRecordObjectKey, new Uint8Array([9]));
+
+        await expectStorageError(transaction.commit(), 'Conflict');
+        expect(lease.state()).toBe('sealed');
+        expect(adapter.rawRead(sharedRecordIndexKey)).toEqual(
+            sharedRecordIndexValue,
+        );
+        expect(adapter.rawRead(sharedRecordObjectKey)).toEqual(
+            new Uint8Array([9]),
+        );
+        await transaction.abort();
+    });
+
+    it('binds staged mutations to bytes inspected through another store instance', async () => {
+        const adapter = new DeterministicInMemoryStorageAdapter();
+        const createFirstStoreIdentifier =
+            createDeterministicIdentifierFactory();
+        const createSecondStoreIdentifier =
+            createDeterministicIdentifierFactory();
+        const { store: firstStore } = await openTestStore({
+            adapter,
+            createIdentifier: (kind) =>
+                `first-${createFirstStoreIdentifier(kind)}`,
+        });
+        const { store: secondStore } = await openTestStore({
+            adapter,
+            createIdentifier: (kind) =>
+                `second-${createSecondStoreIdentifier(kind)}`,
+        });
+
+        await expect(
+            secondStore.readAuthenticated({
+                authenticate: exactAuthenticator(
+                    'shared-record',
+                    new Uint8Array(),
+                ),
+                logicalRecordKey: 'shared-record',
+            }),
+        ).resolves.toBeUndefined();
+        await writeRecord(firstStore, 'shared-record', new Uint8Array([1]));
+
+        const staleAbsentTransaction = await secondStore.beginTransaction({
+            lifetimeMilliseconds: 100,
+        });
+        await expectStorageError(
+            staleAbsentTransaction.issueWriteLease({
+                declaredByteLength: 1,
+                expectedCurrentValue: null,
+                logicalRecordKey: 'shared-record',
+            }),
+            'Conflict',
+        );
+        await staleAbsentTransaction.abort();
+
+        const inspectedBytes = await secondStore.readAuthenticated({
+            authenticate: exactAuthenticator(
+                'shared-record',
+                new Uint8Array([1]),
+            ),
+            logicalRecordKey: 'shared-record',
+        });
+        if (inspectedBytes === undefined) {
+            throw new Error('The shared record unexpectedly disappeared.');
+        }
+        await writeRecord(firstStore, 'shared-record', new Uint8Array([2]));
+
+        const staleReplacementTransaction = await secondStore.beginTransaction({
+            lifetimeMilliseconds: 100,
+        });
+        await expectStorageError(
+            staleReplacementTransaction.issueWriteLease({
+                declaredByteLength: 1,
+                expectedCurrentValue: inspectedBytes,
+                logicalRecordKey: 'shared-record',
+            }),
+            'Conflict',
+        );
+        await staleReplacementTransaction.abort();
+
+        const staleDeletionTransaction = await secondStore.beginTransaction({
+            lifetimeMilliseconds: 100,
+        });
+        await expectStorageError(
+            staleDeletionTransaction.stageDeletion(
+                'shared-record',
+                inspectedBytes,
+            ),
+            'Conflict',
+        );
+        await staleDeletionTransaction.abort();
+        await expect(
+            secondStore.readAuthenticated({
+                authenticate: exactAuthenticator(
+                    'shared-record',
+                    new Uint8Array([2]),
+                ),
+                logicalRecordKey: 'shared-record',
+            }),
+        ).resolves.toEqual(new Uint8Array([2]));
+    });
+
     it('publishes multi-record changes atomically when one expected index conflicts', async () => {
         const { store } = await openTestStore();
         await writeRecord(store, 'record-one', new Uint8Array([1]));

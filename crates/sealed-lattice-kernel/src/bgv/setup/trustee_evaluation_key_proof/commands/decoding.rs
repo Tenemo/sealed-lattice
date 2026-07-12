@@ -215,17 +215,6 @@ pub(super) fn read_i64_matrix2(value: &Value, field_name: &str) -> CanonicalResu
         .collect()
 }
 
-pub(super) fn read_optional_i64_matrix2(
-    value: &Value,
-    field_name: &str,
-) -> CanonicalResult<Vec<Vec<i64>>> {
-    if value.get(field_name).is_some() {
-        read_i64_matrix2(value, field_name)
-    } else {
-        Ok(Vec::new())
-    }
-}
-
 pub(super) fn read_i64_matrix(
     value: &Value,
     field_name: &str,
@@ -265,17 +254,6 @@ pub(super) fn read_i64_matrix(
                 .collect()
         })
         .collect()
-}
-
-pub(super) fn read_optional_i64_matrix(
-    value: &Value,
-    field_name: &str,
-) -> CanonicalResult<Vec<Vec<Vec<i64>>>> {
-    if value.get(field_name).is_some() {
-        read_i64_matrix(value, field_name)
-    } else {
-        Ok(Vec::new())
-    }
 }
 
 pub(super) fn read_u64_matrix(value: &Value, field_name: &str) -> CanonicalResult<Vec<Vec<u64>>> {

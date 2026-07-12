@@ -38,15 +38,6 @@ export {
     deriveTrusteeSetupEntryHash,
     verifyRosterManifestTranscript,
 } from '#packages/protocol/src/roster/index';
-export {
-    deriveTargetFinalityCheckpointHash,
-    deriveTargetFinalityPolicyHash,
-    deriveTargetFinalityRecordHash,
-    deriveTargetProposalHash,
-    deriveWitnessCheckpointHash,
-    deriveWitnessPolicyHash,
-    verifyTargetFinality,
-} from '#packages/protocol/src/finality/index';
 export { deriveValidatedFirstValidOrder } from '#packages/protocol/src/ordering/index';
 export type {
     ActionContext,
@@ -67,12 +58,8 @@ export type {
     SignedBoardHead,
     SignedObjectType,
     SignerRole,
-    TargetFinalityRecord,
-    TargetFinalityVerification,
     TrusteeSetupEntry,
     ValidatedFirstValidObject,
-    WitnessCheckpoint,
-    WitnessPolicy,
 } from '@sealed-lattice/types';
 export * from './election-foundation-board-helpers';
 export * from './election-foundation-fixture-constants';

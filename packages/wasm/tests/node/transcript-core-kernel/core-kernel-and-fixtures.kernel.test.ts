@@ -14,7 +14,6 @@ import {
 } from '#packages/wasm/src/transcript-core-bridge';
 
 type SetupCommitmentOpeningComputation = Readonly<{
-    readonly operation: 'computeSetupCommitmentFromOpening';
     readonly commitment: Record<string, unknown>;
     readonly commitmentRoot: string;
 }>;
@@ -180,9 +179,21 @@ describe('transcript-core kernel in Node', () => {
         });
     });
 
-    it('keeps TypeScript and Rust canonical JSON behavior aligned for canonical object Hashes', async () => {
+    it('keeps canonical JSON aligned for ASCII and sends Unicode through the Rust path', async () => {
         const kernel = await loadTranscriptCoreKernel();
-        const acceptedValues: readonly Record<string, unknown>[] = [
+        const asciiValue = {
+            objectType: 'CanonicalJsonParityProbe',
+            controls: '\u0000then\u0009then\u001b',
+            flags: [true, false, null],
+            nested: { first: 'Cafe', second: 'supplementary key' },
+            numbers: [Number.MIN_SAFE_INTEGER, 0, Number.MAX_SAFE_INTEGER],
+        };
+
+        expect(kernel.deriveCanonicalObjectHash({ value: asciiValue })).toBe(
+            deriveCanonicalObjectHash(asciiValue),
+        );
+
+        const rustUnicodeValues: readonly Record<string, unknown>[] = [
             {
                 objectType: 'CanonicalJsonParityProbe',
                 flags: [true, false, null],
@@ -224,11 +235,30 @@ describe('transcript-core kernel in Node', () => {
             },
         ];
 
-        for (const value of acceptedValues) {
-            expect(kernel.deriveCanonicalObjectHash({ value })).toBe(
-                deriveCanonicalObjectHash(value),
+        for (const value of rustUnicodeValues) {
+            const firstHash = kernel.deriveCanonicalObjectHash({ value });
+
+            expect(firstHash).toMatch(/^[a-f0-9]{128}$/u);
+            expect(kernel.deriveCanonicalObjectHash({ value })).toBe(firstHash);
+            expect(() => deriveCanonicalObjectHash(value)).toThrow(
+                'only ASCII characters',
             );
         }
+        expect(
+            kernel.deriveCanonicalObjectHash({
+                value: {
+                    objectType: 'CanonicalJsonParityProbe',
+                    text: 'Cafe\u0301',
+                },
+            }),
+        ).toBe(
+            kernel.deriveCanonicalObjectHash({
+                value: {
+                    objectType: 'CanonicalJsonParityProbe',
+                    text: 'Caf\u00e9',
+                },
+            }),
+        );
 
         // Negative zero collapses to zero on both sides of the boundary.
         expect(
@@ -316,7 +346,6 @@ describe('transcript-core kernel in Node', () => {
                 ringDegree,
             });
 
-        expect(computation.operation).toBe('computeSetupCommitmentFromOpening');
         expect(computation.commitmentRoot).toHaveLength(128);
         expect(computation.commitment).toMatchObject({
             objectType: 'SetupCommitment',

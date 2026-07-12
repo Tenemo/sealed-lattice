@@ -110,6 +110,7 @@ const copyVote = (
 
 class InMemoryStorageAdapter implements UntrustedStorageAdapter {
     #values = new Map<string, Uint8Array>();
+    public afterRead: ((key: string) => Promise<void> | void) | undefined;
     public afterSuccessfulAtomicMutation:
         | ((mutationAttemptCount: number) => void)
         | undefined;
@@ -117,8 +118,11 @@ class InMemoryStorageAdapter implements UntrustedStorageAdapter {
     public readonly conflictMutationAttempts = new Set<number>();
     public deleteFailure: Error | undefined;
 
-    public read(key: string): Promise<Uint8Array | undefined> {
-        return Promise.resolve(this.#values.get(key)?.slice());
+    public async read(key: string): Promise<Uint8Array | undefined> {
+        const value = this.#values.get(key)?.slice();
+        await this.afterRead?.(key);
+
+        return value;
     }
 
     public write(key: string, value: Uint8Array): Promise<void> {
@@ -234,6 +238,35 @@ class InMemoryStorageAdapter implements UntrustedStorageAdapter {
         )}`;
     }
 }
+
+const pauseNextVoteIntentIndexRead = (
+    adapter: InMemoryStorageAdapter,
+): Readonly<{
+    readPaused: Promise<void>;
+    releaseRead(): void;
+}> => {
+    let reportReadPaused: () => void = () => undefined;
+    const readPaused = new Promise<void>((resolve) => {
+        reportReadPaused = resolve;
+    });
+    let releaseRead: () => void = () => undefined;
+    const readRelease = new Promise<void>((resolve) => {
+        releaseRead = resolve;
+    });
+    const voteIntentIndexPrefix = `sealed-lattice-runtime-store/${storageNamespace}/indices/${bytesToHex(
+        textEncoder.encode('non-forking-state/vote-intents/'),
+    )}`;
+    adapter.afterRead = async (key) => {
+        if (!key.startsWith(voteIntentIndexPrefix)) {
+            return;
+        }
+        adapter.afterRead = undefined;
+        reportReadPaused();
+        await readRelease;
+    };
+
+    return { readPaused, releaseRead };
+};
 
 class TestStateWorld {
     readonly intentBindings = new Map<string, ResolvedDurableStateIntent>();
@@ -787,61 +820,88 @@ describe('durable non-forking state service', () => {
         ).resolves.toBeInstanceOf(Uint8Array);
     });
 
-    it('allows one concurrent reservation and refuses the conflicting caller', async () => {
-        const { store } = await openStorage();
+    it('prevents a stale independent store from replacing a concurrent reservation lock', async () => {
+        const adapter = new InMemoryStorageAdapter();
+        const { store: winningStore } = await openStorage(adapter);
+        const { store: staleStore } = await openStorage(adapter);
         const world = new TestStateWorld();
-        const first = world.registerIntent(
+        const winningIntentCarrier = world.registerIntent(
             reservationIntent({ intentSeed: 36, stateSeed: 45 }),
         );
-        const second = world.registerIntent(
+        const staleIntentCarrier = world.registerIntent(
             reservationIntent({ intentSeed: 37, stateSeed: 45 }),
         );
-        const firstService = createService(
-            store,
+        const winningService = createService(
+            winningStore,
             new TestStateCryptography(world),
         );
-        const secondService = createService(
-            store,
+        const staleService = createService(
+            staleStore,
             new TestStateCryptography(world),
         );
+        const pausedRead = pauseNextVoteIntentIndexRead(adapter);
 
-        const outcomes = await Promise.allSettled([
-            firstService.obtainSignedWitnessVote({
-                canonicalIntentCarrier: first,
-            }),
-            secondService.obtainSignedWitnessVote({
-                canonicalIntentCarrier: second,
+        const staleOutcomePromise = staleService.obtainSignedWitnessVote({
+            canonicalIntentCarrier: staleIntentCarrier,
+        });
+        await pausedRead.readPaused;
+        const [winningOutcome] = await Promise.allSettled([
+            winningService.obtainSignedWitnessVote({
+                canonicalIntentCarrier: winningIntentCarrier,
             }),
         ]);
-        expect(
-            outcomes.filter((outcome) => outcome.status === 'fulfilled'),
-        ).toHaveLength(1);
-        const rejection = outcomes.find(
-            (outcome) => outcome.status === 'rejected',
-        )!;
-        expect(rejection.reason).toMatchObject({ code: 'Equivocation' });
+        pausedRead.releaseRead();
+        const [staleOutcome] = await Promise.allSettled([staleOutcomePromise]);
+
+        if (winningOutcome.status !== 'fulfilled') {
+            throw winningOutcome.reason;
+        }
+        if (staleOutcome.status !== 'rejected') {
+            throw new Error('The stale conflicting caller unexpectedly won.');
+        }
+        expect(staleOutcome.reason).toMatchObject({ code: 'Equivocation' });
+        await expect(
+            winningService.obtainSignedWitnessVote({
+                canonicalIntentCarrier: winningIntentCarrier,
+            }),
+        ).resolves.toEqual(winningOutcome.value);
     });
 
-    it('makes concurrent identical callers converge on one exact signed carrier', async () => {
-        const { store } = await openStorage();
+    it('makes stale identical callers on independent stores converge on one exact signed carrier', async () => {
+        const adapter = new InMemoryStorageAdapter();
+        const { store: winningStore } = await openStorage(adapter);
+        const { store: staleStore } = await openStorage(adapter);
         const world = new TestStateWorld();
         const carrier = world.registerIntent(
             reservationIntent({ intentSeed: 38, stateSeed: 46 }),
         );
-        const services = Array.from({ length: 6 }, () =>
-            createService(store, new TestStateCryptography(world)),
-        );
+        const winningCryptography = new TestStateCryptography(world);
+        const staleCryptography = new TestStateCryptography(world);
+        const winningService = createService(winningStore, winningCryptography);
+        const staleService = createService(staleStore, staleCryptography);
+        const pausedRead = pauseNextVoteIntentIndexRead(adapter);
 
-        const carriers = await Promise.all(
-            services.map((service) =>
-                service.obtainSignedWitnessVote({
-                    canonicalIntentCarrier: carrier,
-                }),
-            ),
-        );
-        for (const observed of carriers) {
-            expect(observed).toEqual(carriers[0]);
+        const staleCarrierPromise = staleService.obtainSignedWitnessVote({
+            canonicalIntentCarrier: carrier,
+        });
+        await pausedRead.readPaused;
+        const [winningOutcome] = await Promise.allSettled([
+            winningService.obtainSignedWitnessVote({
+                canonicalIntentCarrier: carrier,
+            }),
+        ]);
+        pausedRead.releaseRead();
+        const [staleOutcome] = await Promise.allSettled([staleCarrierPromise]);
+
+        if (winningOutcome.status !== 'fulfilled') {
+            throw winningOutcome.reason;
         }
+        if (staleOutcome.status !== 'fulfilled') {
+            throw staleOutcome.reason;
+        }
+        expect(staleOutcome.value).toEqual(winningOutcome.value);
+        expect(winningCryptography.signingCount).toBe(1);
+        expect(staleCryptography.signingCount).toBe(0);
     });
 
     it('requires the matching reservation before locking an output and refuses a second output', async () => {

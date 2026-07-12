@@ -1,4 +1,3 @@
-use super::transport_common::*;
 use super::*;
 
 // Resolved same-secret bridge proof bytes plus the canonical proof record whose
@@ -58,19 +57,20 @@ pub(super) struct SameSecretBridgeProofTransportBinding {
     pub(super) proof_bytes_hash: String,
 }
 
-const SAME_SECRET_BRIDGE_TRANSPORT_FAMILY: TransportFamily = TransportFamily {
-    proof_family: SAME_SECRET_BRIDGE_PROOF_FAMILY,
-    transport_field: "transportedSameSecretBridgeProofMaterial",
-    set_object_type: SAME_SECRET_BRIDGE_TRANSPORT_SET_OBJECT_TYPE,
-    material_object_type: SAME_SECRET_BRIDGE_TRANSPORT_OBJECT_TYPE,
-    family_prose: "same-secret bridge",
-};
+const SAME_SECRET_BRIDGE_TRANSPORT_FAMILY: SetupProofMaterialTransportFamily =
+    SetupProofMaterialTransportFamily {
+        proof_family: SAME_SECRET_BRIDGE_PROOF_FAMILY,
+        transport_field: "transportedSameSecretBridgeProofMaterial",
+        set_object_type: SAME_SECRET_BRIDGE_TRANSPORT_SET_OBJECT_TYPE,
+        material_object_type: SAME_SECRET_BRIDGE_TRANSPORT_OBJECT_TYPE,
+        family_description: "same-secret bridge",
+    };
 
 pub(super) fn transported_same_secret_bridge_proof_material_binding(
     request: &Value,
     expected_proof_material_root: &str,
 ) -> CanonicalResult<SameSecretBridgeProofTransportBinding> {
-    let proof_bytes = resolve_transported_proof_material(
+    let proof_bytes = resolve_transported_setup_proof_material(
         request,
         expected_proof_material_root,
         &SAME_SECRET_BRIDGE_TRANSPORT_FAMILY,
