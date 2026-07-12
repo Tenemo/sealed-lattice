@@ -103,59 +103,6 @@ pub(super) fn setup_transport_expected_hash_array(
     Ok(chunk_hashes)
 }
 
-pub(in super::super) fn setup_transport_vss_material_byte_length_for_roster(
-    roster: &AcceptedRosterParameters,
-    ring_degree: u64,
-) -> CanonicalResult<u64> {
-    let participant_count = roster.participant_count;
-    let decryption_threshold = roster.decryption_threshold;
-    let mut header = Vec::new();
-    header.extend(b"SLVSSMAT");
-    crate::encoding::append_varuint(&mut header, 1);
-    crate::encoding::append_varuint(&mut header, participant_count);
-    crate::encoding::append_varuint(&mut header, decryption_threshold);
-    crate::encoding::append_varuint(&mut header, DATA_PRIMES.len() as u64);
-    crate::encoding::append_varuint(&mut header, ring_degree);
-    crate::encoding::append_varuint(
-        &mut header,
-        SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len() as u64,
-    );
-    crate::encoding::append_varuint(&mut header, SETUP_COMMITMENT_ROW_COUNT as u64);
-
-    let coordinate_byte_length = (0..participant_count)
-        .flat_map(|source_trustee_roster_position| {
-            (0..DATA_PRIMES.len()).flat_map(move |rns_limb_index| {
-                (0..decryption_threshold).map(move |shamir_coefficient_index| {
-                    let mut coordinate_bytes = Vec::new();
-                    crate::encoding::append_varuint(
-                        &mut coordinate_bytes,
-                        source_trustee_roster_position,
-                    );
-                    crate::encoding::append_varuint(&mut coordinate_bytes, rns_limb_index as u64);
-                    crate::encoding::append_varuint(
-                        &mut coordinate_bytes,
-                        shamir_coefficient_index,
-                    );
-                    coordinate_bytes.len() as u64
-                })
-            })
-        })
-        .sum::<u64>();
-    let commitment_limb_byte_length = SETUP_COMMITMENT_MODULUS_LIMB_INDICES
-        .iter()
-        .map(|commitment_modulus_index| {
-            let mut index_bytes = Vec::new();
-            crate::encoding::append_varuint(&mut index_bytes, *commitment_modulus_index as u64);
-            index_bytes.len() as u64 + 8 + (SETUP_COMMITMENT_ROW_COUNT as u64 * ring_degree * 8)
-        })
-        .sum::<u64>();
-    let material_record_count = participant_count * DATA_PRIMES.len() as u64 * decryption_threshold;
-
-    Ok(header.len() as u64
-        + coordinate_byte_length
-        + material_record_count * commitment_limb_byte_length)
-}
-
 pub(super) fn setup_transport_chunk_count(byte_length: u64) -> CanonicalResult<u64> {
     if SETUP_TRANSPORT_CHUNK_SIZE_BYTES == 0 {
         return Err(CanonicalError::new(

@@ -12,6 +12,7 @@ import {
     type VssCommittedMaterialCommitmentComputer,
     type VssPublicSourceTrusteeOpeningState,
 } from '#packages/protocol/src/setup/vss-commitments';
+import { canonicalStreamDescriptorFixture } from '#tests/support/canonical-stream-descriptor-fixture';
 import {
     makeSetupContext,
     makeSetupFixtureHash,
@@ -110,7 +111,7 @@ const generateAggregateThresholdProof: VssAggregateThresholdProofComputer = (
         proofBytesHash,
         proofMaterialRoot,
         canonicalMaterial: {
-            descriptorBytes: Uint8Array.of(1),
+            descriptorBytes: canonicalStreamDescriptorFixture(1),
         },
     });
 };

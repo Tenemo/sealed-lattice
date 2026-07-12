@@ -70,6 +70,7 @@ pub(in crate::bgv::setup) use self::public_key_share_material::public_key_share_
 pub(in crate::bgv::setup) use self::public_key_share_material::{
     CanonicalPublicKeyShareMaterialStream,
     absorb_verified_canonical_public_key_share_material_chunk,
+    authenticated_public_key_share_material_stream_summary,
     begin_verified_canonical_public_key_share_material_stream,
     cancel_verified_canonical_public_key_share_material_stream,
     evict_verified_canonical_public_key_share_materials,
@@ -91,9 +92,7 @@ use self::public_key_shares::{
 pub(in crate::bgv::setup) use self::same_secret_bridge_verification::verified_same_secret_bridge_material_from_package;
 use self::setup_context::{q_share_value, verify_context, verify_q_share};
 use self::threshold_share_commitment_checks::verify_threshold_share_commitments;
-use self::transport_policy::{
-    setup_transport_vss_material_byte_length_for_roster, verify_transport_certificate,
-};
+use self::transport_policy::verify_transport_certificate;
 use self::vss_coefficient_commitments::expected_trustees_from_phase_transcript;
 use self::vss_complaints_and_acceptances::{
     source_trustee_commitment_roots_from_vss_commitments, verify_vss_complaints,
@@ -113,8 +112,7 @@ use unicode_normalization::UnicodeNormalization;
 use super::*;
 use super::{
     commitment::{
-        SETUP_COMMITMENT_MODULE_RANK, SETUP_COMMITMENT_MODULUS_LIMB_INDICES,
-        SETUP_COMMITMENT_RANDOMNESS_WIDTH, SETUP_COMMITMENT_ROW_COUNT,
+        SETUP_COMMITMENT_MODULE_RANK, SETUP_COMMITMENT_RANDOMNESS_WIDTH,
         setup_commitment_matrix_sampled_entries, setup_commitment_modulus_limb_values,
         setup_commitment_parameters_value,
     },
@@ -122,7 +120,7 @@ use super::{
         EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
         EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_TRANSPORT_SET_OBJECT_TYPE,
         EvaluationKeyShareProofFamily, VerifiedComponentMaterialEvictionGuard,
-        component_b_vectors_from_record,
+        authenticated_evaluation_key_component_stream_summary, component_b_vectors_from_record,
     },
     setup_proof::{
         SETUP_PROOF_BYTES_DOMAIN, SETUP_PROOF_MATERIAL_ENCODING, SETUP_PROOF_SERIALIZATION,
@@ -190,12 +188,10 @@ const PUBLIC_EVALUATION_KEY_MATERIAL_ENCODING: &str =
 pub(super) const PUBLIC_EVALUATION_KEY_TRANSPORT_MATERIAL_ENCODING: &str =
     "binary-chunked-public-evaluation-key-root-manifest";
 const PUBLIC_EVALUATION_KEY_MATERIAL_MAGIC: &[u8; 8] = b"SLEKPMV1";
-// The terminal accepted setup carries the VSS coefficient commitment material as
-// a binary-chunked transport reference, never as the embedded full commitment
-// values, so the terminal transport policy requires this encoding.
-pub(super) const VSS_COEFFICIENT_COMMITMENT_MATERIAL_TRANSPORT_ENCODING: &str =
-    "binary-chunked-full-public-setup-commitment-values";
-use super::trustee_evaluation_key_proof::TRUSTEE_EVALUATION_KEY_PROOF_FAMILY;
+use super::trustee_evaluation_key_proof::{
+    PUBLIC_KEY_SHARE_PROOF_FAMILY, SAME_SECRET_BRIDGE_PROOF_FAMILY,
+    TRUSTEE_EVALUATION_KEY_PROOF_FAMILY, VSS_SHARE_LINKAGE_PROOF_FAMILY,
+};
 const PRIVATE_VSS_ENVELOPE_COMMITMENT_SET_OBJECT_TYPE: &str = "PrivateVssEnvelopeCommitmentSet";
 const PRIVATE_VSS_ENVELOPE_COMMITMENT_OBJECT_TYPE: &str = "PrivateVssEnvelopeCommitment";
 const PRIVATE_VSS_ENVELOPE_AAD_OBJECT_TYPE: &str = "PrivateVssEnvelopeAad";
@@ -282,11 +278,19 @@ const SETUP_TRANSPORT_COPY_COUNT_LIMIT: u64 = 2;
 const SETUP_TRANSPORT_STREAM_ORDER: &str = "ascending-chunk-index";
 const SETUP_TRANSPORT_RESUME_POLICY: &str = "chunk-index-checkpointed-by-hash";
 const SETUP_TRANSPORT_LAZY_LOADING_POLICY: &str = "root-addressed-large-object-loading";
-const SETUP_TRANSPORTED_VSS_MATERIAL_NAME: &str = "vssCoefficientCommitmentMaterial";
-const SETUP_TRANSPORTED_VSS_MATERIAL_ROLE: &str = "public-vss-coefficient-commitment-material";
+const SETUP_TRANSPORTED_PUBLIC_KEY_SHARE_MATERIAL_NAME: &str = "publicKeyShareMaterial";
+const SETUP_TRANSPORTED_PUBLIC_KEY_SHARE_MATERIAL_ROLE: &str = "public-key-share-material";
 const SETUP_TRANSPORTED_PUBLIC_KEY_SHARE_PROOF_MATERIAL_NAME: &str = "publicKeyShareProofMaterial";
 const SETUP_TRANSPORTED_PUBLIC_KEY_SHARE_PROOF_MATERIAL_ROLE: &str =
     "public-key-share-proof-material";
+const SETUP_TRANSPORTED_VSS_SHARE_LINKAGE_PROOF_MATERIAL_NAME: &str =
+    "vssShareLinkageProofMaterial";
+const SETUP_TRANSPORTED_VSS_SHARE_LINKAGE_PROOF_MATERIAL_ROLE: &str =
+    "vss-share-linkage-proof-material";
+const SETUP_TRANSPORTED_SAME_SECRET_BRIDGE_PROOF_MATERIAL_NAME: &str =
+    "sameSecretBridgeProofMaterial";
+const SETUP_TRANSPORTED_SAME_SECRET_BRIDGE_PROOF_MATERIAL_ROLE: &str =
+    "same-secret-bridge-proof-material";
 const SETUP_TRANSPORTED_EVALUATION_KEY_SHARE_PROOF_MATERIAL_NAME: &str =
     "evaluationKeyShareProofMaterial";
 const SETUP_TRANSPORTED_EVALUATION_KEY_SHARE_PROOF_MATERIAL_ROLE: &str =
@@ -298,6 +302,7 @@ const SETUP_TRANSPORTED_EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ROLE: &str =
 const SETUP_TRANSPORTED_PUBLIC_EVALUATION_KEY_MATERIAL_NAME: &str = "publicEvaluationKeyMaterial";
 const SETUP_TRANSPORTED_PUBLIC_EVALUATION_KEY_MATERIAL_ROLE: &str =
     "public-evaluation-key-runtime-material";
+const PUBLIC_EVALUATION_KEY_MATERIAL_STREAM_FAMILY: &str = "public-evaluation-key-material";
 const PRIVATE_VSS_ENVELOPE_DELIVERY_PHASE_NUMBER: u64 = 6;
 const PRIVATE_VSS_ENVELOPE_VERIFICATION_PHASE_NUMBER: u64 = 7;
 const EVALUATOR_REPLAY_SCHEME_LABEL: &str = "direct-encrypted-ballot-evaluator-replay";
@@ -440,13 +445,17 @@ pub(crate) fn describe_collective_bgv_setup_parameters_for_participant_count(
 pub(crate) fn verify_collective_bgv_setup_package_from_request(
     request: &Value,
 ) -> CanonicalResult<Value> {
+    let _component_material_eviction_guard =
+        VerifiedComponentMaterialEvictionGuard::for_request(request);
+    let _setup_proof_material_eviction_guard =
+        VerifiedSetupProofMaterialEvictionGuard::for_request(request);
     let setup_package = request.get("setupPackage").ok_or_else(|| {
         CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             "setupPackage is required",
         )
     })?;
-    verify_collective_bgv_setup_package(setup_package, request)
+    verify_collective_bgv_setup_package_inner(setup_package, request)
 }
 
 pub(crate) fn verify_collective_bgv_setup_package(
@@ -465,6 +474,13 @@ pub(crate) fn verify_collective_bgv_setup_package(
     // evaluation-key proof material.
     let _setup_proof_material_eviction_guard =
         VerifiedSetupProofMaterialEvictionGuard::for_request(request);
+    verify_collective_bgv_setup_package_inner(setup_package, request)
+}
+
+fn verify_collective_bgv_setup_package_inner(
+    setup_package: &Value,
+    request: &Value,
+) -> CanonicalResult<Value> {
     if !setup_package.is_object() {
         return verification_response(
             None,

@@ -1,41 +1,49 @@
 {
     "$schema": "https://turbo.build/schema.json",
+    "globalDependencies": [
+        ".nvmrc",
+        "package.json",
+        "pnpm-lock.yaml",
+        "pnpm-workspace.yaml",
+        "tsconfig.base.json"
+    ],
     "tasks": {
         "build": {
             "dependsOn": ["^build"],
+            "inputs": ["package.json", "src/**", "tsconfig.json"],
             "outputs": ["dist/**"]
         },
         "@sealed-lattice/wasm#build": {
             "dependsOn": ["^build"],
             "inputs": [
-                "$TURBO_DEFAULT$",
+                "package.json",
+                "src/**",
+                "tsconfig.json",
                 "../../Cargo.lock",
                 "../../Cargo.toml",
-                "../../crates/**",
-                "!../../crates/**/target/**",
+                "../../rust-toolchain.toml",
+                "../../crates/*/Cargo.toml",
+                "../../crates/*/src/**",
+                "!../../crates/*/src/**/temp/**",
                 "../../tools/ci/build-wasm-kernel.ts",
-                "../../tools/internal/**"
+                "../../tools/internal/entry-point.ts"
             ],
             "outputs": ["dist/**"]
         },
         "sealed-lattice#build": {
             "dependsOn": ["^build"],
             "inputs": [
-                "$TURBO_DEFAULT$",
-                "../../Cargo.lock",
-                "../../Cargo.toml",
-                "../../crates/**",
-                "!../../crates/**/target/**",
-                "../../tools/ci/build-sdk-bridge.ts",
-                "../../tools/ci/build-wasm-kernel.ts",
-                "../../tools/ci/public-package-policy.ts",
-                "../../tools/internal/**"
+                "package.json",
+                "src/**",
+                "tsconfig.json",
+                "../../tools/ci/build-sdk-package.ts",
+                "../../tools/ci/sdk-package-tsdown.config.ts",
+                "../../tools/ci/package-manager-runner.ts",
+                "../../tools/ci/run-command.ts",
+                "../../tools/ci/terminal-line-filter.ts",
+                "../../tools/internal/entry-point.ts"
             ],
             "outputs": ["dist/**"]
-        },
-        "check": {
-            "dependsOn": ["build", "^build", "^check"],
-            "outputs": []
         }
     }
 }

@@ -16,8 +16,7 @@ use super::{
 };
 use super::{
     commitment::{
-        SETUP_COMMITMENT_MODULUS_LIMB_INDICES, SETUP_COMMITMENT_RANDOMNESS_INFINITY_BOUND,
-        SETUP_COMMITMENT_RANDOMNESS_WIDTH, SETUP_COMMITMENT_ROW_COUNT,
+        SETUP_COMMITMENT_RANDOMNESS_INFINITY_BOUND, SETUP_COMMITMENT_RANDOMNESS_WIDTH,
         compute_setup_commitment_for_tests, parse_setup_commitment_full_value,
         setup_commitment_full_value, setup_commitment_root,
     },

@@ -10,7 +10,6 @@ import {
 
 import {
     acceptedSetupTransportCertificate,
-    acceptedSetupVssCoefficientCommitmentMaterialReference,
     rebindCollectiveSetupPackageHash,
 } from './certificates.js';
 import {
@@ -204,13 +203,7 @@ async function buildAcceptedShapedSetupPackage(
     const setupTransportCertificate = acceptedSetupTransportCertificate(
         kernel,
         setupParameters,
-        sameSecretBridge.sourceCoefficientCommitmentMaterialSet,
     );
-    const vssCoefficientCommitmentMaterial =
-        acceptedSetupVssCoefficientCommitmentMaterialReference(
-            sameSecretBridge.sourceCoefficientCommitmentMaterialSet,
-            setupTransportCertificate,
-        );
     const setupPackage: JsonRecord = {
         objectType: 'SetupPackage',
         setupContext,
@@ -219,7 +212,6 @@ async function buildAcceptedShapedSetupPackage(
         commonRandomness,
         vssCoefficientCommitments:
             sameSecretBridge.sourceCoefficientCommitmentSet,
-        vssCoefficientCommitmentMaterial,
         vssPublicCoefficientCommitmentSet:
             vssPublicMaterial.coefficientCommitmentSet,
         vssPublicRecipientShareCommitmentSet:

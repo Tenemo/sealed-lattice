@@ -14,6 +14,7 @@ import {
     loadTranscriptCoreKernel,
     type TranscriptCoreKernel,
 } from '#packages/wasm/src/index';
+import { canonicalStreamDescriptorFixture } from '#tests/support/canonical-stream-descriptor-fixture';
 import { createVssCommitmentComputers } from '#tests/support/vss-commitment-computer';
 
 type JsonRecord = Record<string, unknown>;
@@ -423,7 +424,12 @@ const setupLifecycleArtifacts = async (
                                 },
                             ),
                             canonicalMaterial: {
-                                descriptorBytes: Uint8Array.of(1),
+                                descriptorBytes:
+                                    canonicalStreamDescriptorFixture(
+                                        4,
+                                        0x53,
+                                        0x4c,
+                                    ),
                             },
                         });
                     },

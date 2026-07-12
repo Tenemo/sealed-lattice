@@ -5,6 +5,7 @@ import {
     createBgvTargetDecryptionShareCanonicalProofMaterialTransport,
     type BgvTargetDecryptionShareProofMaterial,
 } from '#packages/protocol/src/target-decryption/proof-material-transport';
+import { canonicalStreamDescriptorFixture } from '#tests/support/canonical-stream-descriptor-fixture';
 
 const proofBytesHash = '11'.repeat(64);
 
@@ -28,7 +29,7 @@ const proofMaterial = (): BgvTargetDecryptionShareProofMaterial => {
 
 describe('target-decryption canonical proof material transport', () => {
     it('copies the canonical descriptor and binds the semantic root', () => {
-        const descriptorBytes = Uint8Array.of(1, 2, 3, 4);
+        const descriptorBytes = canonicalStreamDescriptorFixture(4);
         const transport =
             createBgvTargetDecryptionShareCanonicalProofMaterialTransport(
                 proofMaterial(),
@@ -41,7 +42,7 @@ describe('target-decryption canonical proof material transport', () => {
             'BgvTargetDecryptionShareCanonicalProofMaterialTransport',
         );
         expect(transport.descriptorBytes).not.toBe(descriptorBytes);
-        expect([...transport.descriptorBytes]).toEqual([1, 2, 3, 4]);
+        expect(transport.descriptorBytes).toEqual(descriptorBytes);
     });
 
     it('refuses a wrong semantic root and malformed descriptor', () => {
@@ -66,5 +67,29 @@ describe('target-decryption canonical proof material transport', () => {
                 },
             ),
         ).toThrow(/non-empty Uint8Array/u);
+    });
+
+    it('rejects an oversized descriptor before copying it', () => {
+        class SliceTrackingUint8Array extends Uint8Array {
+            public sliceWasCalled = false;
+
+            public override slice(
+                start?: number,
+                end?: number,
+            ): Uint8Array<ArrayBuffer> {
+                this.sliceWasCalled = true;
+
+                return super.slice(start, end);
+            }
+        }
+
+        const descriptorBytes = new SliceTrackingUint8Array(131_177);
+        expect(() =>
+            createBgvTargetDecryptionShareCanonicalProofMaterialTransport(
+                proofMaterial(),
+                { descriptorBytes },
+            ),
+        ).toThrow(/exceeds the canonical stream descriptor bound/u);
+        expect(descriptorBytes.sliceWasCalled).toBe(false);
     });
 });

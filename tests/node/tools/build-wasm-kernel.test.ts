@@ -2,81 +2,52 @@ import path from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import {
-    pinKernelHashInLoaderSource,
-    resolveOutputFilePath,
-} from '#tools/ci/build-wasm-kernel';
+import { createDeterministicCargoEnvironment } from '#tools/ci/build-wasm-kernel';
 
-const repoRoot = path.resolve('C:\\repo\\sealed-lattice');
+const encodedRustflagSeparator = '\x1f';
 
-describe('WASM kernel build helpers', () => {
-    it('resolves the default output inside the repository', () => {
-        expect(resolveOutputFilePath([], repoRoot)).toBe(
-            path.resolve(
-                repoRoot,
-                'packages',
-                'wasm',
-                'dist',
-                'sealed-lattice-kernel.wasm',
-            ),
+describe('WASM kernel build environment', () => {
+    it('sets the complete deterministic Rust flag list and target directory', () => {
+        const projectRoot = path.resolve('C:\\repo\\sealed-lattice');
+        const cargoHome = path.resolve('C:\\cargo-home');
+        const targetDirectory = path.resolve(projectRoot, 'target');
+        const environment = createDeterministicCargoEnvironment(
+            { PATH: 'toolchain' },
+            { cargoHome, projectRoot, targetDirectory },
         );
+        const rustflags = environment.CARGO_ENCODED_RUSTFLAGS?.split(
+            encodedRustflagSeparator,
+        );
+
+        expect(rustflags).toEqual([
+            '--remap-path-prefix',
+            `${projectRoot}=/workspace`,
+            '--remap-path-prefix',
+            `${cargoHome}=/cargo`,
+            '-C',
+            expect.stringMatching(/^link-arg=--max-memory=\d+$/u),
+        ]);
+        expect(environment.CARGO_TARGET_DIR).toBe(targetDirectory);
+        expect(environment.CARGO_INCREMENTAL).toBe('0');
+        expect(environment.PATH).toBe('toolchain');
+        expect(environment.SOURCE_DATE_EPOCH).toBe('0');
     });
 
-    it('rejects absolute and escaping output paths', () => {
+    it('refuses inherited encoded Rust flags instead of producing environment-dependent bytes', () => {
         expect(() =>
-            resolveOutputFilePath(
-                ['--out', path.resolve('C:\\outside.wasm')],
-                repoRoot,
-            ),
-        ).toThrow('--out must be repository-relative');
-        expect(() =>
-            resolveOutputFilePath(['--out', '..\\outside.wasm'], repoRoot),
-        ).toThrow('--out must resolve inside the repository');
-    });
-
-    it('pins the built SDK loader hash from a generated build artifact', () => {
-        const sourceText = [
-            'const transcriptCoreKernelUrl = new URL("./sealed-lattice-kernel.wasm", import.meta.url);',
-            'const packagedTranscriptCoreKernelNormalizedSha256Hex = undefined;',
-            'export const loadTranscriptCoreKernel = createTranscriptCoreKernelLoader(transcriptCoreKernelUrl, { expectedKernelSha256Hex: packagedTranscriptCoreKernelNormalizedSha256Hex });',
-        ].join('\n');
-        const hash = 'a'.repeat(64);
-
-        expect(pinKernelHashInLoaderSource(sourceText, hash)).toContain(
-            [
-                'const packagedTranscriptCoreKernelNormalizedSha256Hex =',
-                `    '${hash}';`,
-            ].join('\n'),
-        );
-    });
-
-    it('updates an already pinned SDK loader hash and rejects missing assignments', () => {
-        const oldHash = 'b'.repeat(64);
-        const newHash = 'c'.repeat(64);
-        const sourceText = `const packagedTranscriptCoreKernelNormalizedSha256Hex = '${oldHash}';`;
-
-        expect(pinKernelHashInLoaderSource(sourceText, newHash)).toBe(
-            [
-                'const packagedTranscriptCoreKernelNormalizedSha256Hex =',
-                `    '${newHash}';`,
-            ].join('\n'),
-        );
-        expect(pinKernelHashInLoaderSource(sourceText, oldHash)).toBe(
-            [
-                'const packagedTranscriptCoreKernelNormalizedSha256Hex =',
-                `    '${oldHash}';`,
-            ].join('\n'),
-        );
-        expect(() =>
-            pinKernelHashInLoaderSource(
-                'const unrelated = undefined;',
-                newHash,
-            ),
+            createDeterministicCargoEnvironment({
+                CARGO_ENCODED_RUSTFLAGS: '-C\x1ftarget-cpu=native',
+            }),
         ).toThrow(
-            'Cannot pin the transcript-core kernel hash because the loader file does not contain the expected hash assignment.',
+            'CARGO_ENCODED_RUSTFLAGS must be unset for the deterministic WASM build.',
         );
-        expect(() =>
-            pinKernelHashInLoaderSource(sourceText, 'not-a-hash'),
-        ).toThrow('Cannot pin an invalid transcript-core kernel hash');
+    });
+
+    it('accepts an explicitly empty inherited flag value', () => {
+        expect(
+            createDeterministicCargoEnvironment({
+                CARGO_ENCODED_RUSTFLAGS: '',
+            }).CARGO_ENCODED_RUSTFLAGS,
+        ).toContain('--remap-path-prefix');
     });
 });

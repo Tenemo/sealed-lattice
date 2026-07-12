@@ -57,17 +57,29 @@ describe('independent test entrypoint containment', () => {
         expect(buildLattigoOracleDockerRunArguments()).toEqual([
             'run',
             '--rm',
+            '--network',
+            'none',
+            '--read-only',
+            '--cap-drop',
+            'ALL',
+            '--security-opt',
+            'no-new-privileges',
+            '--pids-limit',
+            '128',
             '--memory',
             '2g',
             '--memory-swap',
             '2g',
             'sealed-lattice-lattigo-oracle:bgv-rns',
         ]);
-        await expect(
-            readFile(
-                path.resolve('tools', 'lattigo-oracle', 'Dockerfile'),
-                'utf8',
-            ),
-        ).resolves.toContain('COPY . .');
+        const dockerfile = await readFile(
+            path.resolve('tools', 'lattigo-oracle', 'Dockerfile'),
+            'utf8',
+        );
+        expect(dockerfile).toContain('AS build');
+        expect(dockerfile).toContain('FROM scratch');
+        expect(dockerfile).toContain('CGO_ENABLED=0 go build');
+        expect(dockerfile).toContain('USER 65532:65532');
+        expect(dockerfile).not.toContain('go run');
     });
 });

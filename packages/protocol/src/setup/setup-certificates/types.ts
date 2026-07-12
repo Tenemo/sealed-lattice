@@ -57,8 +57,6 @@ export type SetupCertificateTransportedObjectInput = Readonly<{
 }>;
 
 export type SetupCertificateTransportInput = Readonly<{
-    readonly fullObjectHash: ProtocolHash;
-    readonly chunkHashes: readonly ProtocolHash[];
     readonly transportedObjects?: readonly SetupCertificateTransportedObjectInput[];
 }>;
 

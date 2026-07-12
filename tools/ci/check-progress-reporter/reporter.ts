@@ -344,6 +344,9 @@ export class CheckProgressReporter {
         command.durationMilliseconds = event.durationMilliseconds;
         command.exitCode = event.exitCode;
         command.status = event.exitCode === 0 ? 'passed' : 'failed';
+        if (command.status === 'passed') {
+            command.logPath = undefined;
+        }
 
         if (!this.#redrawEnabled) {
             const commandDescription =

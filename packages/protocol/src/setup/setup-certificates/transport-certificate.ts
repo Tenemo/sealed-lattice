@@ -88,9 +88,8 @@ const setupTransportCertificateBody = (
     setupParameters: CollectiveBgvSetupParametersForCertificates,
     transportInput: SetupCertificateTransportInput,
 ): SetupTransportCertificateBody => {
-    // The transport certificate binds the companion transported objects (public-key
-    // share, proof, and evaluation-key materials). The VSS coefficient commitments
-    // are carried in the setup package itself, not as a separate transported object.
+    // Package assembly supplies each streamed public setup object; the
+    // certificate binds exactly that list.
     const transportedObjects = transportedObjectRecords([
         ...(transportInput.transportedObjects ?? []),
     ]);

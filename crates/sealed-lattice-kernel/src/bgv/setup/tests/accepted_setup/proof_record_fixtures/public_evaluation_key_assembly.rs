@@ -193,6 +193,7 @@ pub(in super::super) fn public_evaluation_key_set_object_with_aggregate_binding(
 // relinearization rounds fixture. Returns `(aggregateBinding, transportedOpenings)`.
 pub(in super::super) fn evaluation_key_aggregate_binding_object(
     package: &serde_json::Value,
+    proof_material_request: &serde_json::Value,
     round_one_aggregate_diagonals_by_level: &BTreeMap<u64, Vec<Vec<u64>>>,
 ) -> (serde_json::Value, serde_json::Value) {
     use crate::bgv::setup::accepted_setup::{
@@ -203,7 +204,7 @@ pub(in super::super) fn evaluation_key_aggregate_binding_object(
 
     let participant_count = participant_count_from_package(package);
     let verified_same_secret_bridge = package.get("sameSecretBridgeStatementSet").map(|_| {
-        verified_same_secret_bridge_material_from_package(package, &serde_json::json!({}))
+        verified_same_secret_bridge_material_from_package(package, proof_material_request)
             .expect("same-secret bridge material")
     });
 
@@ -211,7 +212,8 @@ pub(in super::super) fn evaluation_key_aggregate_binding_object(
         .map(|trustee_roster_position| {
             trustee_evaluation_key_statement_from_package(&TrusteeEvaluationKeyStatementInputs {
                 setup_package: package,
-                transported_key_switch_component_material: None,
+                transported_key_switch_component_material: proof_material_request
+                    .get("transportedEvaluationKeyShareComponentMaterial"),
                 verified_same_secret_bridge: verified_same_secret_bridge.as_ref(),
                 round_one_aggregate_diagonals_by_level,
                 trustee_roster_position,

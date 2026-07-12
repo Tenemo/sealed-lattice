@@ -365,6 +365,11 @@ describe('check progress reporter state', () => {
         reporter.start();
         observer.onCommandStart?.({
             invocation: fmtInvocation,
+            logFiles: {
+                combinedPath: 'cargo-fmt.log',
+                stderrPath: 'cargo-fmt.stderr.log',
+                stdoutPath: 'cargo-fmt.stdout.log',
+            },
             startedAtMilliseconds: nowMilliseconds,
         });
         nowMilliseconds = 1_050;
@@ -400,7 +405,8 @@ describe('check progress reporter state', () => {
         expect(terminalOutput).toContain(
             'Rust kernel (fmt, clippy, test) > test bgv::setup::tests::long_case ... ok',
         );
-        expect(reporter.createTimingDetails()).toMatchObject({
+        const timingDetails = reporter.createTimingDetails();
+        expect(timingDetails).toMatchObject({
             lanes: [
                 {
                     progress: {
@@ -413,5 +419,6 @@ describe('check progress reporter state', () => {
                 },
             ],
         });
+        expect(timingDetails.lanes[0]?.commands[0]?.logPath).toBeUndefined();
     });
 });

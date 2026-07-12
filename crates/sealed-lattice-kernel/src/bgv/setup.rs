@@ -52,6 +52,7 @@ pub(crate) use canonical_stream_transport::{
     retain_generated_canonical_proof_material, take_verified_canonical_proof_material_bytes,
 };
 pub(in crate::bgv::setup) use canonical_stream_transport::{
+    authenticated_setup_proof_material_stream_summary, authenticated_setup_transport_accounting,
     evict_verified_canonical_setup_proof_materials, verified_canonical_setup_proof_material_bytes,
 };
 pub(crate) use commitment::compute_setup_commitment_from_opening_request;

@@ -27,7 +27,6 @@ import type { SetupPhaseRecord } from '../setup-phase-records.js';
 import type {
     SetupPackageVssCoefficientCommitmentMaterialSet,
     VssCoefficientCommitmentSet,
-    VssCoefficientCommitmentMaterialBinaryReference,
 } from '../vss-coefficient-commitments.js';
 import type {
     VssPublicAggregateThresholdCommitmentSet,
@@ -67,8 +66,14 @@ export type SetupPackageInput = Readonly<{
     readonly vssPublicAggregateThresholdCommitmentSet: VssPublicAggregateThresholdCommitmentSet;
     readonly vssShareLinkageStatement: VssShareLinkageStatement;
     readonly vssShareLinkageProofMaterialSet: JsonRecord;
+    readonly transportedVssShareLinkageProofMaterial?:
+        | TransportedVssShareLinkageProofMaterialSet
+        | JsonRecord;
     readonly sameSecretBridgeStatementSet: VssSameSecretBridgeStatementSet;
     readonly sameSecretBridgeProofMaterialSet: VssSameSecretBridgeProofMaterialSet;
+    readonly transportedSameSecretBridgeProofMaterial?:
+        | TransportedSameSecretBridgeProofMaterialSet
+        | JsonRecord;
     readonly privateVssEnvelopeCommitments: JsonRecord;
     readonly vssShareAcceptances: VssShareAcceptanceSet;
     readonly vssComplaints?: VssComplaintSet | JsonRecord;
@@ -114,7 +119,6 @@ export type SetupPackage = Readonly<
         readonly phaseTranscript: readonly SetupPhaseRecord[];
         readonly commonRandomness: SetupCommonRandomness;
         readonly vssCoefficientCommitments: VssCoefficientCommitmentSet;
-        readonly vssCoefficientCommitmentMaterial: VssCoefficientCommitmentMaterialBinaryReference;
         readonly vssPublicCoefficientCommitmentSet: VssPublicCoefficientCommitmentSet;
         readonly vssPublicRecipientShareCommitmentSet: VssPublicRecipientShareCommitmentSet;
         readonly vssPublicAggregateThresholdCommitmentSet: VssPublicAggregateThresholdCommitmentSet;
@@ -168,8 +172,20 @@ export type SetupPackageVerificationInputSource = Readonly<{
 export type SetupPackageVerificationInput = Readonly<
     Omit<
         SetupPackageVerificationInputSource,
-        'transportedPublicKeyShareMaterial'
+        | 'transportedPublicKeyShareMaterial'
+        | 'transportedPublicKeyShareProofMaterial'
+        | 'transportedEvaluationKeyShareProofMaterial'
+        | 'transportedVssShareLinkageProofMaterial'
+        | 'transportedSameSecretBridgeProofMaterial'
+        | 'transportedEvaluationKeyShareComponentMaterial'
+        | 'transportedPublicEvaluationKeyMaterial'
     > & {
         readonly transportedPublicKeyShareMaterial?: JsonRecord;
+        readonly transportedPublicKeyShareProofMaterial?: JsonRecord;
+        readonly transportedEvaluationKeyShareProofMaterial?: JsonRecord;
+        readonly transportedVssShareLinkageProofMaterial?: JsonRecord;
+        readonly transportedSameSecretBridgeProofMaterial?: JsonRecord;
+        readonly transportedEvaluationKeyShareComponentMaterial?: JsonRecord;
+        readonly transportedPublicEvaluationKeyMaterial?: JsonRecord;
     }
 >;

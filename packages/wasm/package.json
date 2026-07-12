@@ -16,14 +16,13 @@
         "@sealed-lattice/types": "workspace:*"
     },
     "scripts": {
-        "check": "tsc --project tsconfig.json --pretty false --noEmit",
         "build:wasm": "tsx ../../tools/ci/build-wasm-kernel.ts",
         "build": "del-cli dist && tsc --project tsconfig.json && pnpm run build:wasm",
         "test:node:kernel:fast": "pnpm --workspace-root run test:node:kernel:fast",
         "test:node:kernel:heavy": "pnpm --workspace-root run test:node:kernel:heavy",
         "test:node:kernel": "pnpm --workspace-root run test:node:kernel",
         "test:node": "pnpm --workspace-root run test:node:kernel",
-        "test:browser": "vitest --root ../.. --config vitest.config.ts --project browser-desktop --project browser-mobile --run --dir packages/wasm/tests/browser"
+        "test:browser": "pnpm --workspace-root run test:browser"
     },
     "devDependencies": {
         "vitest": "^4.1.4"

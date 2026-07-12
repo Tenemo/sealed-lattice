@@ -14,12 +14,11 @@ const packageManagerRunner: PackageManagerRunner = {
 };
 
 describe('Node test runner arguments', () => {
-    it('runs every Node lane by default', () => {
+    it('keeps the heavy kernel lane out of the default Node aggregate', () => {
         expect(parseRequestedNodeTestLanes([])).toEqual([
             'fast',
             'protocol',
             'kernel-fast',
-            'kernel-heavy',
         ]);
     });
 
@@ -52,6 +51,21 @@ describe('Node test runner arguments', () => {
         expect(() => parseRequestedNodeTestLanes(['--unsupported'])).toThrow(
             'Unsupported Node test lane: --unsupported',
         );
+    });
+
+    it('rejects duplicate lanes before command or containment selection', () => {
+        expect(() =>
+            parseRequestedNodeTestLanes(['kernel-fast,kernel-fast']),
+        ).toThrow('Node test lane requested more than once: kernel-fast');
+        expect(() =>
+            parseRequestedNodeTestLanes(['kernel', 'kernel-heavy']),
+        ).toThrow('Node test lane requested more than once: kernel-heavy');
+        expect(() =>
+            buildNodeTestCommands({
+                lanes: ['kernel-fast', 'kernel-fast'],
+                packageManagerRunner,
+            }),
+        ).toThrow('Node test commands require distinct lanes.');
     });
 
     it('wraps heavy Node kernel commands in the process-memory guard', () => {
@@ -102,29 +116,19 @@ describe('Node test runner arguments', () => {
         );
     });
 
-    it('verifies the guard before building and running a heavy Node lane', () => {
+    it('verifies the guard only for a heavy Node lane', () => {
         const heavyGateCommands = buildNodeTestExtraGateCommands({
             lanes: ['kernel-heavy'],
-            packageManagerRunner,
         });
-        expect(heavyGateCommands).toHaveLength(2);
+        expect(heavyGateCommands).toHaveLength(1);
         expect(heavyGateCommands[0]?.command).toBe('cargo');
         expect(heavyGateCommands[0]?.args).toContain(
             'sealed-lattice-process-memory-guard',
         );
-        expect(heavyGateCommands[1]?.args).toEqual([
-            'pnpm-entry.js',
-            '--filter',
-            '@sealed-lattice/wasm',
-            'run',
-            'build:wasm',
-        ]);
 
         const fastGateCommands = buildNodeTestExtraGateCommands({
             lanes: ['kernel-fast'],
-            packageManagerRunner,
         });
-        expect(fastGateCommands).toHaveLength(1);
-        expect(fastGateCommands[0]?.command).toBe('node');
+        expect(fastGateCommands).toEqual([]);
     });
 });

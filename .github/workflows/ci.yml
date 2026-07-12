@@ -5,6 +5,7 @@ on:
         branches:
             - master
     pull_request:
+    workflow_dispatch:
 
 permissions:
     contents: read
@@ -14,37 +15,127 @@ concurrency:
     cancel-in-progress: true
 
 jobs:
-    rust:
-        name: rust
-        runs-on: ubuntu-latest
+    changes:
+        name: changes
+        runs-on: ubuntu-24.04
+        timeout-minutes: 10
+        outputs:
+            run_heavy: ${{ steps.classify.outputs.run_heavy }}
+        steps:
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+              with:
+                  fetch-depth: 0
+                  persist-credentials: false
+            - uses: ./.github/actions/bootstrap-pnpm
+            - name: Classify expensive proof lanes
+              id: classify
+              env:
+                  EVENT_NAME: ${{ github.event_name }}
+                  PULL_REQUEST_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+                  PULL_REQUEST_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+                  PUSH_BASE_SHA: ${{ github.event.before }}
+              run: |
+                  if [[ "${EVENT_NAME}" == "pull_request" ]]; then
+                    BASE_SHA="${PULL_REQUEST_BASE_SHA}"
+                    HEAD_SHA="${PULL_REQUEST_HEAD_SHA}"
+                  elif [[ "${EVENT_NAME}" == "push" ]]; then
+                    if [[ "${PUSH_BASE_SHA}" =~ ^0+$ ]]; then
+                      printf '' | pnpm exec tsx ./tools/ci/classify-ci-changes.ts
+                      exit 0
+                    fi
+                    BASE_SHA="${PUSH_BASE_SHA}"
+                    HEAD_SHA="${GITHUB_SHA}"
+                  else
+                    if ! BASE_SHA="$(git rev-parse "${GITHUB_SHA}^")"; then
+                      printf '' | pnpm exec tsx ./tools/ci/classify-ci-changes.ts
+                      exit 0
+                    fi
+                    HEAD_SHA="${GITHUB_SHA}"
+                  fi
+
+                  CHANGED_PATHS_FILE="$(mktemp)"
+                  if ! git diff --name-status -z "${BASE_SHA}" "${HEAD_SHA}" > "${CHANGED_PATHS_FILE}"; then
+                    echo "Could not compare ${BASE_SHA} with ${HEAD_SHA}; running expensive proof lanes." >&2
+                    printf '' | pnpm exec tsx ./tools/ci/classify-ci-changes.ts
+                    exit 0
+                  fi
+                  pnpm exec tsx ./tools/ci/classify-ci-changes.ts < "${CHANGED_PATHS_FILE}"
+
+    static-build:
+        name: static and build
+        runs-on: ubuntu-24.04
+        timeout-minutes: 30
+        steps:
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+              with:
+                  persist-credentials: false
+            - uses: ./.github/actions/bootstrap-pnpm
+            - uses: dtolnay/rust-toolchain@b18f7037bce1ea84c086f4d5e9493f853c0ce412
+              with:
+                  toolchain: 1.90.0
+                  targets: wasm32-unknown-unknown
+            - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
+            - run: pnpm run build
+            - run: pnpm run build:verify-reproducible
+            - run: pnpm run lint
+            - run: pnpm run tsc
+            - run: pnpm exec tsx ./tools/ci/verify-public-package-policy.ts
+            - run: pnpm run test:lanes:verify -- --static
+            - run: pnpm exec tsx ./tools/ci/check-package-boundaries.ts
+            - run: pnpm exec knip
+
+    rust-fast:
+        name: rust fast
+        runs-on: ubuntu-24.04
         timeout-minutes: 120
         steps:
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+              with:
+                  persist-credentials: false
             - uses: ./.github/actions/bootstrap-pnpm
             - uses: dtolnay/rust-toolchain@b18f7037bce1ea84c086f4d5e9493f853c0ce412
               with:
                   components: clippy, rustfmt
-                  targets: wasm32-unknown-unknown
-            - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
-            - run: cargo fmt --check --all
-            - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+                  toolchain: 1.90.0
+            - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
+            - run: cargo fmt --all --check
+            - run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
             - run: pnpm run test:lanes:verify -- --rust
             - run: pnpm run test:rust:process-memory-guard
-            - name: Run Rust tests with optimized test profile
-              run: pnpm run test:rust:kernel
+            - run: pnpm run test:rust:kernel
+
+    node:
+        name: node
+        runs-on: ubuntu-24.04
+        timeout-minutes: 120
+        steps:
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+              with:
+                  persist-credentials: false
+            - uses: ./.github/actions/bootstrap-pnpm
+            - uses: dtolnay/rust-toolchain@b18f7037bce1ea84c086f4d5e9493f853c0ce412
+              with:
+                  toolchain: 1.90.0
+                  targets: wasm32-unknown-unknown
+            - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
+            - run: pnpm run test:node
 
     rust-heavy:
         name: rust heavy
-        runs-on: ubuntu-latest
+        needs:
+            - changes
+        if: ${{ needs.changes.outputs.run_heavy == 'true' }}
+        runs-on: ubuntu-24.04
         timeout-minutes: 120
         steps:
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+              with:
+                  persist-credentials: false
             - uses: ./.github/actions/bootstrap-pnpm
             - uses: dtolnay/rust-toolchain@b18f7037bce1ea84c086f4d5e9493f853c0ce412
               with:
-                  components: clippy, rustfmt
-                  targets: wasm32-unknown-unknown
-            - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
+                  toolchain: 1.90.0
+            - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
             - name: Run measured-heavy Rust kernel tests
               id: rust-heavy
               timeout-minutes: 110
@@ -60,16 +151,20 @@ jobs:
 
     rust-accepted-setup:
         name: rust accepted setup
-        runs-on: ubuntu-latest
+        needs:
+            - changes
+        if: ${{ needs.changes.outputs.run_heavy == 'true' }}
+        runs-on: ubuntu-24.04
         timeout-minutes: 360
         steps:
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+              with:
+                  persist-credentials: false
             - uses: ./.github/actions/bootstrap-pnpm
             - uses: dtolnay/rust-toolchain@b18f7037bce1ea84c086f4d5e9493f853c0ce412
               with:
-                  components: clippy, rustfmt
-                  targets: wasm32-unknown-unknown
-            - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
+                  toolchain: 1.90.0
+            - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
             - name: Run Rust accepted setup proof tests
               id: rust-accepted-setup
               timeout-minutes: 350
@@ -83,172 +178,111 @@ jobs:
                   retention-days: 7
                   path: logs
 
-    wasm:
-        name: wasm
-        runs-on: ubuntu-latest
-        timeout-minutes: 20
+    node-kernel-heavy:
+        name: node kernel heavy
+        needs:
+            - changes
+        if: ${{ needs.changes.outputs.run_heavy == 'true' }}
+        runs-on: ubuntu-24.04
+        timeout-minutes: 90
         steps:
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-            - uses: dtolnay/rust-toolchain@b18f7037bce1ea84c086f4d5e9493f853c0ce412
               with:
-                  components: clippy, rustfmt
-                  targets: wasm32-unknown-unknown
-            - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
-            - run: cargo build --workspace --lib --target wasm32-unknown-unknown --release
-
-    verify-static:
-        name: verify static
-        runs-on: ubuntu-latest
-        timeout-minutes: 25
-        steps:
-            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+                  persist-credentials: false
             - uses: ./.github/actions/bootstrap-pnpm
             - uses: dtolnay/rust-toolchain@b18f7037bce1ea84c086f4d5e9493f853c0ce412
               with:
-                  components: clippy, rustfmt
+                  toolchain: 1.90.0
                   targets: wasm32-unknown-unknown
-            - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
-            - run: |
-                  pnpm run build
-                  pnpm run lint
-                  pnpm run tsc
-                  pnpm exec tsx ./tools/ci/generate-api-surface-summary.ts
-                  pnpm exec tsx ./tools/ci/verify-public-package-policy.ts
-                  pnpm run test:lanes:verify -- --static
-                  pnpm exec tsx ./tools/ci/check-package-boundaries.ts
-                  pnpm exec knip
+            - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
+            - run: pnpm run test:node:kernel:heavy
 
-    node-fast:
-        name: node fast
-        runs-on: ubuntu-latest
-        timeout-minutes: 15
-        steps:
-            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-            - uses: ./.github/actions/bootstrap-pnpm
-            - uses: dtolnay/rust-toolchain@b18f7037bce1ea84c086f4d5e9493f853c0ce412
-              with:
-                  components: clippy, rustfmt
-                  targets: wasm32-unknown-unknown
-            - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
-            - run: pnpm run test:node:fast
-
-    node-protocol:
-        name: node protocol
-        runs-on: ubuntu-latest
+    browser:
+        name: browser
+        runs-on: ubuntu-24.04
         timeout-minutes: 60
         steps:
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+              with:
+                  persist-credentials: false
             - uses: ./.github/actions/bootstrap-pnpm
             - uses: dtolnay/rust-toolchain@b18f7037bce1ea84c086f4d5e9493f853c0ce412
               with:
-                  components: clippy, rustfmt
+                  toolchain: 1.90.0
                   targets: wasm32-unknown-unknown
-            - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
-            - run: pnpm run test:node:protocol
+            - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
+            - run: pnpm exec playwright install --with-deps chromium firefox webkit
+            - run: pnpm run test:browser
 
-    node-kernel-fast:
-        name: node kernel fast
-        runs-on: ubuntu-latest
-        timeout-minutes: 90
+    release-smoke:
+        name: release smoke
+        if: ${{ github.event_name == 'pull_request' }}
+        runs-on: ubuntu-24.04
+        timeout-minutes: 60
         steps:
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+              with:
+                  persist-credentials: false
             - uses: ./.github/actions/bootstrap-pnpm
             - uses: dtolnay/rust-toolchain@b18f7037bce1ea84c086f4d5e9493f853c0ce412
               with:
-                  components: clippy, rustfmt
+                  toolchain: 1.90.0
                   targets: wasm32-unknown-unknown
-            - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
-            - run: pnpm run test:node:kernel:fast
-
-    node-kernel-heavy:
-        name: node kernel heavy
-        runs-on: ubuntu-latest
-        timeout-minutes: 90
-        steps:
-            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-            - uses: ./.github/actions/bootstrap-pnpm
-            - uses: dtolnay/rust-toolchain@b18f7037bce1ea84c086f4d5e9493f853c0ce412
-              with:
-                  components: clippy, rustfmt
-                  targets: wasm32-unknown-unknown
-            - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
-            - run: pnpm run test:node:kernel:heavy
+            - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
+            - run: pnpm run smoke:pack:npm
 
     verify:
         name: verify
-        runs-on: ubuntu-latest
+        runs-on: ubuntu-24.04
         timeout-minutes: 5
         needs:
-            - rust
+            - changes
+            - static-build
+            - rust-fast
+            - node
             - rust-heavy
             - rust-accepted-setup
-            - wasm
-            - verify-static
-            - node-fast
-            - node-protocol
-            - node-kernel-fast
             - node-kernel-heavy
             - browser
             - release-smoke
         if: ${{ always() }}
         steps:
             - name: Check verify jobs
+              env:
+                  EVENT_NAME: ${{ github.event_name }}
+                  RUN_HEAVY: ${{ needs.changes.outputs.run_heavy }}
               run: |
                   node --input-type=module <<'NODE'
                   const needs = ${{ toJSON(needs) }};
-                  const eventName = ${{ toJSON(github.event_name) }};
+                  if (!['true', 'false'].includes(process.env.RUN_HEAVY)) {
+                    console.error(`Invalid run_heavy output: ${String(process.env.RUN_HEAVY)}`);
+                    process.exit(1);
+                  }
+                  const allowedSkippedJobs = new Set();
+                  if (process.env.RUN_HEAVY === 'false') {
+                    allowedSkippedJobs.add('rust-heavy');
+                    allowedSkippedJobs.add('rust-accepted-setup');
+                    allowedSkippedJobs.add('node-kernel-heavy');
+                  }
+                  if (process.env.EVENT_NAME !== 'pull_request') {
+                    allowedSkippedJobs.add('release-smoke');
+                  }
+
                   const failed = Object.entries(needs).filter(
-                    ([name, job]) =>
+                    ([jobName, job]) =>
                       job.result !== 'success' &&
                       !(
-                        name === 'release-smoke' &&
-                        eventName !== 'pull_request' &&
-                        job.result === 'skipped'
+                        job.result === 'skipped' &&
+                        allowedSkippedJobs.has(jobName)
                       ),
                   );
                   if (failed.length > 0) {
                     console.error(
                       failed
-                        .map(([name, job]) => `${name}: ${job.result}`)
+                        .map(([jobName, job]) => `${jobName}: ${job.result}`)
                         .join('\n'),
                     );
                     process.exit(1);
                   }
                   console.log('Verify jobs passed.');
                   NODE
-
-    browser:
-        name: browser
-        runs-on: macos-latest
-        timeout-minutes: 45
-        steps:
-            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-            - uses: ./.github/actions/bootstrap-pnpm
-            - uses: dtolnay/rust-toolchain@b18f7037bce1ea84c086f4d5e9493f853c0ce412
-              with:
-                  components: clippy, rustfmt
-                  targets: wasm32-unknown-unknown
-            - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
-            - run: pnpm exec playwright install --with-deps chromium firefox webkit
-            - run: pnpm run test:browser
-
-    release-smoke:
-        name: release smoke
-        if: github.event_name == 'pull_request'
-        runs-on: ubuntu-latest
-        timeout-minutes: 60
-        steps:
-            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-            - uses: ./.github/actions/bootstrap-pnpm
-            - uses: dtolnay/rust-toolchain@b18f7037bce1ea84c086f4d5e9493f853c0ce412
-              with:
-                  components: clippy, rustfmt
-                  targets: wasm32-unknown-unknown
-            - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
-            - run: pnpm run build
-            - run: pnpm run smoke:pack:npm
-            - run: |
-                  PUBLIC_PACKAGE_DIR="$(mktemp -d)"
-                  node ./tools/ci/stage-public-package.mjs --out "${PUBLIC_PACKAGE_DIR}"
-                  cd "${PUBLIC_PACKAGE_DIR}"
-                  npm pack --dry-run --ignore-scripts

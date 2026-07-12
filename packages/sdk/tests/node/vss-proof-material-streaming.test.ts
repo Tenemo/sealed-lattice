@@ -18,6 +18,7 @@ import {
     loadTranscriptCoreKernel,
     openBgvCanonicalStreamRuntime,
 } from '#packages/wasm/src/index';
+import { canonicalStreamDescriptorFixture } from '#tests/support/canonical-stream-descriptor-fixture';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -193,8 +194,8 @@ describe('VSS canonical proof material transport', () => {
         'maps $proofFamily semantic references to descriptor sidecars',
         (proofMaterialCase) => {
             const build = canonicalProofMaterialBuild(proofMaterialCase, [
-                Uint8Array.of(1, 2, 3),
-                Uint8Array.of(4, 5, 6),
+                canonicalStreamDescriptorFixture(3, 1, 2),
+                canonicalStreamDescriptorFixture(3, 4, 5),
             ]);
             const transported = proofMaterialCase.createTransport(build);
 

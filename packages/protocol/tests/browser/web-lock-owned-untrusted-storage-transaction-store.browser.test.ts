@@ -7,6 +7,7 @@ import {
     type WebLockOwnedStorageConfiguration,
     type WebLockOwnedStorageTransactionStore,
 } from '#packages/protocol/src/runtime/web-lock-owned-untrusted-storage-transaction-store';
+import { webLocksAvailable } from '#tests/support/browser-capabilities';
 
 const transactionLimits = {
     maximumActiveTransactionCount: 2,
@@ -23,8 +24,6 @@ const pendingOpenRequests = new Set<
 >();
 const databaseNames = new Set<string>();
 const openedFrames: HTMLIFrameElement[] = [];
-const webLocksAvailable = typeof navigator.locks?.request === 'function';
-
 const createDatabaseName = (): string => {
     const randomBytes = new Uint8Array(16);
     crypto.getRandomValues(randomBytes);

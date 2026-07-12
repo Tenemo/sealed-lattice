@@ -10,34 +10,22 @@ pub(in crate::bgv::setup) use self::material_transport::{
 };
 #[cfg(test)]
 pub(crate) use self::material_transport::{
-    SetupProofMaterialTransportHashes, setup_proof_material_transport_hashes,
+    authenticate_setup_proof_material_stream_for_test,
+    canonical_setup_proof_material_transport_accounting,
 };
 
 use serde_json::{Value, json};
-#[cfg(test)]
-use sha3::{
-    Shake256,
-    digest::{ExtendableOutput, Update, XofReader},
-};
 
 use crate::{
     bgv::setup_helpers::validate_hash_string,
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
     hashing::derive_canonical_object_hash,
 };
-#[cfg(test)]
-use crate::{
-    encoding::{append_bytes, append_varuint},
-    hashing::{HASH512_PREIMAGE_PREFIX, hash512_hex, to_hex},
-};
-
 pub(super) const SETUP_PROOF_BYTES_DOMAIN: &str =
     "sealed-lattice/collective-bgv-setup/succinct-proof-bytes";
 pub(super) const SETUP_PROOF_SERIALIZATION: &str = "binary";
 pub(crate) const SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES: u64 = 1_048_576;
 pub(crate) const SETUP_PROOF_MATERIAL_ENCODING: &str = "binary-chunked-proof-bytes";
-#[cfg(test)]
-const SETUP_PROOF_MATERIAL_CHUNK_MANIFEST_OBJECT_TYPE: &str = "SetupProofMaterialChunkManifest";
 const SETUP_PROOF_BYTE_DECODER: &str = "sealed-lattice-succinct-setup-proof-byte-decoder";
 // Families whose proof bytes ride the chunked setup proof-material transport.
 pub(super) const SETUP_PROOF_TRANSPORT_FAMILIES: &[&str] = &[

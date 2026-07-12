@@ -1,10 +1,14 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { createLocalRunLog, safeLogSlug } from '#tools/ci/local-run-log';
+import {
+    createLocalRunLog,
+    safeLogSlug,
+    successfulCheckTimingHistoryLimit,
+} from '#tools/ci/local-run-log';
 import {
     runCommandsInSeries,
     type CommandInvocation,
@@ -54,7 +58,7 @@ const captureProcessOutput = async <Result>(
 };
 
 describe('local run logs', () => {
-    it('creates a timestamped run directory with metadata, summary, and an index entry', async () => {
+    it('creates a timestamped run directory with metadata and summary', async () => {
         const rootDirectoryPath = await createTemporaryLogRoot();
         try {
             const log = await createLocalRunLog({
@@ -97,18 +101,74 @@ describe('local run logs', () => {
                 objectVersion: 'sealed-lattice-local-run-log-summary-v1',
                 scriptName: 'test:node:kernel',
             });
-            const indexLines = (
+            await expect(
+                access(path.join(rootDirectoryPath, 'runs.jsonl')),
+            ).rejects.toMatchObject({ code: 'ENOENT' });
+        } finally {
+            await rm(rootDirectoryPath, { force: true, recursive: true });
+        }
+    });
+
+    it('bounds timing history to the latest successful check summaries', async () => {
+        const rootDirectoryPath = await createTemporaryLogRoot();
+        try {
+            const previousSuccessfulChecks = Array.from(
+                { length: successfulCheckTimingHistoryLimit + 2 },
+                (_, index) => ({
+                    durationMilliseconds: index,
+                    exitCode: 0,
+                    scriptName: 'check',
+                }),
+            );
+            await writeFile(
+                path.join(rootDirectoryPath, 'runs.jsonl'),
+                [
+                    '{corrupt',
+                    JSON.stringify({ exitCode: 1, scriptName: 'check' }),
+                    JSON.stringify({
+                        exitCode: 0,
+                        scriptName: 'test:node',
+                    }),
+                    ...previousSuccessfulChecks.map((entry) =>
+                        JSON.stringify(entry),
+                    ),
+                ].join('\n'),
+                'utf8',
+            );
+
+            const log = await createLocalRunLog({
+                commandLineArguments: [],
+                lanes: ['sample'],
+                now: new Date('2026-05-29T18:30:00.000Z'),
+                rootDirectoryPath,
+                scriptName: 'check',
+            });
+            await log.finish({ exitCode: 0 });
+
+            const summaries = (
                 await readFile(
                     path.join(rootDirectoryPath, 'runs.jsonl'),
                     'utf8',
                 )
             )
                 .trim()
-                .split('\n');
-            expect(indexLines).toHaveLength(1);
-            expect(JSON.parse(indexLines[0])).toMatchObject({
-                exitCode: 0,
-                scriptName: 'test:node:kernel',
+                .split('\n')
+                .map((line) => JSON.parse(line) as Record<string, unknown>);
+            expect(summaries).toHaveLength(successfulCheckTimingHistoryLimit);
+            expect(
+                summaries.every(
+                    (summary) =>
+                        summary.scriptName === 'check' &&
+                        summary.exitCode === 0,
+                ),
+            ).toBe(true);
+            expect(
+                summaries
+                    .slice(0, -1)
+                    .map((summary) => summary.durationMilliseconds),
+            ).toEqual([3, 4, 5, 6, 7, 8, 9]);
+            await expect(access(log.runDirectoryPath)).rejects.toMatchObject({
+                code: 'ENOENT',
             });
         } finally {
             await rm(rootDirectoryPath, { force: true, recursive: true });
@@ -234,15 +294,15 @@ describe('local run logs', () => {
             expect(stderr).not.toContain('captured stderr');
             expect(observedOutput.join('')).toContain('stdout:captured stdout');
             expect(observedOutput.join('')).toContain('stderr:captured stderr');
-            await expect(
-                readFile(
-                    path.join(
-                        log.runDirectoryPath,
-                        'captured-output.stdout.log',
-                    ),
-                    'utf8',
-                ),
-            ).resolves.toContain('captured stdout');
+            for (const fileName of [
+                'captured-output.log',
+                'captured-output.stderr.log',
+                'captured-output.stdout.log',
+            ]) {
+                await expect(
+                    access(path.join(log.runDirectoryPath, fileName)),
+                ).rejects.toMatchObject({ code: 'ENOENT' });
+            }
             await expect(
                 readFile(combinedLogPathForRun(log.runDirectoryPath), 'utf8'),
             ).resolves.toContain('captured stderr');

@@ -2,10 +2,7 @@ import eslintJs from '@eslint/js';
 import * as vitestPluginModule from '@vitest/eslint-plugin';
 import { defineConfig, globalIgnores } from 'eslint/config';
 import { createTypeScriptImportResolver } from 'eslint-import-resolver-typescript';
-import {
-    createNodeResolver,
-    flatConfigs as importFlatConfigs,
-} from 'eslint-plugin-import-x';
+import { flatConfigs as importFlatConfigs } from 'eslint-plugin-import-x';
 import prettierPluginRecommended from 'eslint-plugin-prettier/recommended';
 import * as unusedImportsPluginModule from 'eslint-plugin-unused-imports';
 import globals from 'globals';
@@ -17,11 +14,11 @@ import {
 const OFF = 0;
 const ERROR = 2;
 
-const sourceFiles = ['**/*.{js,jsx,mjs,cjs,ts,tsx,mts,cts}'];
-const typeScriptFiles = ['**/*.{ts,tsx,mts,cts}'];
-const javaScriptFiles = ['**/*.{js,jsx,mjs,cjs}'];
-const testFiles = ['packages/*/tests/**/*.{ts,tsx}', 'tests/**/*.{ts,tsx}'];
-const toolFiles = ['tools/**/*.{ts,mts,mjs,cjs}', '*.config.{ts,mjs,cjs,js}'];
+const sourceFiles = ['**/*.{js,mjs,ts}'];
+const typeScriptFiles = ['**/*.ts'];
+const javaScriptFiles = ['**/*.{js,mjs}'];
+const testFiles = ['packages/*/tests/**/*.ts', 'tests/**/*.ts'];
+const toolFiles = ['tools/**/*.{ts,mjs}', '*.config.{ts,js}'];
 
 const projectPaths = ['./tsconfig.tools.json', './packages/*/tsconfig.json'];
 
@@ -30,64 +27,18 @@ const vitestPlugin = vitestPluginModule.default;
 
 const parserOptions = {
     sourceType: 'module',
-    ecmaFeatures: {
-        jsx: true,
-    },
     project: projectPaths,
     noWarnOnMultipleProjects: true,
     ecmaVersion: 2021,
 };
 
 const importResolverSettings = {
-    react: {
-        version: 'detect',
-    },
     'import-x/internal-regex': '^#(?:packages|test-vectors|tests|tools)(?:/|$)',
     'import-x/resolver-next': [
         createTypeScriptImportResolver({
             alwaysTryTypes: true,
             noWarnOnMultipleProjects: true,
             project: projectPaths,
-        }),
-        createNodeResolver({
-            extensions: [
-                '.ts',
-                '.tsx',
-                '.d.ts',
-                '.js',
-                '.jsx',
-                '.json',
-                '.node',
-            ],
-            extensionAlias: {
-                '.js': ['.ts', '.tsx', '.d.ts', '.js'],
-                '.jsx': ['.tsx', '.d.ts', '.jsx'],
-                '.cjs': ['.cts', '.d.cts', '.cjs'],
-                '.mjs': ['.mts', '.d.mts', '.mjs'],
-            },
-            conditionNames: [
-                'types',
-                'import',
-                'esm2020',
-                'es2020',
-                'es2015',
-                'require',
-                'node',
-                'node-addons',
-                'browser',
-                'default',
-            ],
-            mainFields: [
-                'types',
-                'typings',
-                'fesm2020',
-                'fesm2015',
-                'esm2020',
-                'es2020',
-                'module',
-                'jsnext:main',
-                'main',
-            ],
         }),
     ],
 };
@@ -116,6 +67,10 @@ export default defineConfig(
         'tmp.*/**',
         'node_modules',
         'node_modules/**',
+        '.turbo',
+        '.turbo/**',
+        '**/.turbo',
+        '**/.turbo/**',
         'reference-projects',
         'reference-projects/**',
         'dist',
@@ -124,6 +79,8 @@ export default defineConfig(
         '**/dist/**',
         'target',
         'target/**',
+        '**/target',
+        '**/target/**',
     ]),
     {
         linterOptions: {
@@ -143,9 +100,7 @@ export default defineConfig(
             parserOptions,
             globals: {
                 ...globals.browser,
-                ...globals.node,
                 ...globals.es2021,
-                ...globals.commonjs,
             },
         },
         plugins: {
@@ -198,7 +153,6 @@ export default defineConfig(
                     useTabs: false,
                     semi: true,
                     singleQuote: true,
-                    jsxSingleQuote: false,
                     trailingComma: 'all',
                     arrowParens: 'always',
                     endOfLine: 'lf',
@@ -218,13 +172,8 @@ export default defineConfig(
                 'ignorePackages',
                 {
                     js: 'never',
-                    jsx: 'never',
-                    cjs: 'never',
-                    cts: 'never',
                     mjs: 'never',
-                    mts: 'never',
                     ts: 'never',
-                    tsx: 'never',
                 },
             ],
             'import-x/order': [
@@ -249,22 +198,13 @@ export default defineConfig(
             parserOptions: {
                 project: './tsconfig.tools.json',
             },
-        },
-    },
-    {
-        files: ['**/*.{cjs,cts,mts}'],
-        languageOptions: {
-            parser: typescriptParser,
-            parserOptions,
             globals: {
                 ...globals.node,
-                ...globals.es2021,
-                ...globals.commonjs,
             },
         },
     },
     {
-        files: [...javaScriptFiles, '**/*.mts'],
+        files: javaScriptFiles,
         rules: {
             '@typescript-eslint/no-unsafe-assignment': OFF,
             '@typescript-eslint/no-unsafe-member-access': OFF,
@@ -322,17 +262,6 @@ export default defineConfig(
             '@typescript-eslint/explicit-module-boundary-types': OFF,
             '@typescript-eslint/explicit-function-return-type': OFF,
             '@typescript-eslint/no-unsafe-argument': OFF,
-        },
-    },
-    {
-        files: ['**/*.cjs'],
-        rules: {
-            '@typescript-eslint/explicit-function-return-type': OFF,
-            '@typescript-eslint/explicit-module-boundary-types': OFF,
-            '@typescript-eslint/no-require-imports': OFF,
-            '@typescript-eslint/no-unsafe-assignment': OFF,
-            '@typescript-eslint/no-unsafe-call': OFF,
-            '@typescript-eslint/no-unsafe-member-access': OFF,
         },
     },
 );

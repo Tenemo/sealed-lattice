@@ -224,10 +224,9 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_sh
     proof_record["proofMaterialRoot"] = serde_json::json!(&proof_material_root);
     rebind_collective_public_key_succinct_proof_roots(&mut package);
 
-    let transport_hashes = setup_proof_material_transport_hashes(
+    let transport_hashes = canonical_setup_proof_material_transport_accounting(
         crate::bgv::setup::trustee_evaluation_key_proof::PUBLIC_KEY_SHARE_PROOF_FAMILY,
         &proof_bytes,
-        SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
     )
     .expect("tampered public-key proof transport hashes");
     let transported_proof_material =
@@ -241,12 +240,12 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_sh
         serde_json::json!(transport_hashes.full_object_hash);
     transported_proof_material["chunkRoot"] = serde_json::json!(transport_hashes.chunk_root);
     transported_proof_material["chunkHashes"] = serde_json::json!(transport_hashes.chunk_hashes);
-    crate::bgv::setup::retain_generated_canonical_proof_material(
+    authenticate_setup_proof_material_stream_for_test(
         crate::bgv::setup::trustee_evaluation_key_proof::PUBLIC_KEY_SHARE_PROOF_FAMILY,
-        proof_material_root,
-        proof_bytes,
+        &proof_material_root,
+        &proof_bytes,
     )
-    .expect("retain tampered public-key proof material");
+    .expect("authenticate tampered public-key proof material stream");
     replace_setup_proof_material_transport_certificate_objects(
         &mut package,
         &verification_request["transportedPublicKeyShareProofMaterial"],
@@ -280,7 +279,7 @@ fn heavy_accepted_setup_collective_setup_verifier_checks_collective_public_key_f
     assert_eq!(result["isValid"], false);
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
-        "vssCoefficientCommitmentMaterialOutsideAcceptedRing"
+        "setupMaterialOutsideAcceptedRing"
     );
 }
 

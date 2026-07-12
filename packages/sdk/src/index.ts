@@ -70,12 +70,23 @@ import {
 } from '@sealed-lattice/wasm';
 
 import {
+    chargeKernelJsonSnapshotValues,
+    createKernelJsonSnapshotState,
+    dataPropertyValue,
+    ordinaryArrayDescriptors,
+    plainRecordDescriptors,
+    snapshotKernelJsonValue,
+    type KernelJsonSnapshotState,
+} from './kernel-json-snapshot.js';
+import {
     loadFreshTranscriptCoreKernel,
     loadTranscriptCoreKernel,
 } from './kernel.js';
 import {
-    preparePrivateVssShareVerificationInputForKernel,
-    prepareSetupPackageVerificationInputForKernel,
+    prepareSnapshottedPrivateVssShareVerificationInputForKernel,
+    prepareSnapshottedSetupPackageVerificationInputForKernel,
+    snapshotPrivateVssShareVerificationInput,
+    snapshotSetupPackageVerificationInput,
 } from './setup-verification-input.js';
 
 const protocolHashPattern = /^[0-9a-f]{128}$/u;
@@ -369,6 +380,9 @@ export type SetupPackageVerificationInputSource = Readonly<
     Omit<ProtocolSetupPackageVerificationInputSource, 'setupPackage'> & {
         readonly setupPackage: SetupPackage;
         readonly publicKeyShareMaterialChunkSource?: PublicKeyShareMaterialChunkSource;
+        readonly setupProofMaterialChunkSources?: readonly SetupProofMaterialChunkSource[];
+        readonly evaluationKeyShareComponentMaterialChunkSources?: readonly EvaluationKeyShareComponentMaterialChunkSource[];
+        readonly publicEvaluationKeyMaterialChunkSources?: readonly PublicEvaluationKeyMaterialChunkSource[];
     }
 >;
 
@@ -405,6 +419,180 @@ export type TargetDecryptionShareProof = Readonly<{
     readonly proofMaterialTransport: BgvTargetDecryptionShareCanonicalProofMaterialTransport;
     readonly pullProofMaterialChunk: CanonicalProofMaterialChunkPull;
 }>;
+
+const targetDecryptionShareProofSnapshot = (
+    targetShareProofValue: unknown,
+    proofIndex: number,
+    state: KernelJsonSnapshotState,
+): TargetDecryptionShareProof => {
+    const proofPath = `shareProofs.${String(proofIndex)}`;
+    const descriptors = plainRecordDescriptors(
+        targetShareProofValue,
+        proofPath,
+    );
+    const proofMaterial = snapshotKernelJsonValue(
+        dataPropertyValue(
+            descriptors,
+            'proofMaterial',
+            `${proofPath}.proofMaterial`,
+        ),
+        `${proofPath}.proofMaterial`,
+        state,
+    ) as BgvTargetDecryptionShareProofMaterial;
+    const transportPath = `${proofPath}.proofMaterialTransport`;
+    const transportDescriptors = plainRecordDescriptors(
+        dataPropertyValue(descriptors, 'proofMaterialTransport', transportPath),
+        transportPath,
+    );
+    const proofMaterialTransport =
+        createBgvTargetDecryptionShareCanonicalProofMaterialTransport(
+            proofMaterial,
+            {
+                descriptorBytes: dataPropertyValue(
+                    transportDescriptors,
+                    'descriptorBytes',
+                    `${transportPath}.descriptorBytes`,
+                ) as Uint8Array,
+            },
+        );
+    const pullProofMaterialChunk = dataPropertyValue(
+        descriptors,
+        'pullProofMaterialChunk',
+        `${proofPath}.pullProofMaterialChunk`,
+    );
+    if (typeof pullProofMaterialChunk !== 'function') {
+        throw new TypeError(
+            `${proofPath}.pullProofMaterialChunk must be a function.`,
+        );
+    }
+
+    return {
+        targetDecryptionShare: snapshotKernelJsonValue(
+            dataPropertyValue(
+                descriptors,
+                'targetDecryptionShare',
+                `${proofPath}.targetDecryptionShare`,
+            ),
+            `${proofPath}.targetDecryptionShare`,
+            state,
+        ),
+        proofStatement: snapshotKernelJsonValue(
+            dataPropertyValue(
+                descriptors,
+                'proofStatement',
+                `${proofPath}.proofStatement`,
+            ),
+            `${proofPath}.proofStatement`,
+            state,
+        ),
+        proofMaterial,
+        proofMaterialTransport,
+        pullProofMaterialChunk:
+            pullProofMaterialChunk as CanonicalProofMaterialChunkPull,
+    };
+};
+
+const targetDecryptionShareProofListSnapshot = (
+    value: unknown,
+    state: KernelJsonSnapshotState,
+): readonly TargetDecryptionShareProof[] => {
+    const { descriptors, length } = ordinaryArrayDescriptors(
+        value,
+        'shareProofs',
+    );
+    chargeKernelJsonSnapshotValues(state, length);
+    const snapshots: TargetDecryptionShareProof[] = [];
+    for (let proofIndex = 0; proofIndex < length; proofIndex += 1) {
+        const descriptor = descriptors[String(proofIndex)];
+        if (descriptor === undefined) {
+            throw new TypeError('shareProofs cannot contain array holes.');
+        }
+        if ('get' in descriptor || 'set' in descriptor) {
+            throw new TypeError(
+                `shareProofs.${String(proofIndex)} cannot be an accessor property.`,
+            );
+        }
+        snapshots.push(
+            targetDecryptionShareProofSnapshot(
+                descriptor.value,
+                proofIndex,
+                state,
+            ),
+        );
+    }
+
+    return snapshots;
+};
+
+const targetDecryptionResultReleaseInputSnapshot = (
+    input: TargetDecryptionResultReleaseInput,
+): TargetDecryptionResultReleaseInput => {
+    const descriptors = plainRecordDescriptors(input, 'input');
+    const state = createKernelJsonSnapshotState();
+    const abortSignal = dataPropertyValue(
+        descriptors,
+        'abortSignal',
+        'abortSignal',
+    ) as AbortSignal | undefined;
+    const releaseVerificationId = dataPropertyValue(
+        descriptors,
+        'releaseVerificationId',
+        'releaseVerificationId',
+    );
+    if (typeof releaseVerificationId !== 'string') {
+        throw new TypeError('releaseVerificationId must be a string.');
+    }
+
+    return {
+        ...(abortSignal === undefined ? {} : { abortSignal }),
+        setupPackage: snapshotKernelJsonValue(
+            dataPropertyValue(descriptors, 'setupPackage', 'setupPackage'),
+            'setupPackage',
+            state,
+        ),
+        targetAcceptedRecord: snapshotKernelJsonValue(
+            dataPropertyValue(
+                descriptors,
+                'targetAcceptedRecord',
+                'targetAcceptedRecord',
+            ),
+            'targetAcceptedRecord',
+            state,
+        ),
+        targetCiphertexts: snapshotKernelJsonValue(
+            dataPropertyValue(
+                descriptors,
+                'targetCiphertexts',
+                'targetCiphertexts',
+            ),
+            'targetCiphertexts',
+            state,
+        ),
+        targetCiphertextBinding: snapshotKernelJsonValue(
+            dataPropertyValue(
+                descriptors,
+                'targetCiphertextBinding',
+                'targetCiphertextBinding',
+            ),
+            'targetCiphertextBinding',
+            state,
+        ),
+        targetShareProfile: snapshotKernelJsonValue(
+            dataPropertyValue(
+                descriptors,
+                'targetShareProfile',
+                'targetShareProfile',
+            ),
+            'targetShareProfile',
+            state,
+        ),
+        releaseVerificationId,
+        shareProofs: targetDecryptionShareProofListSnapshot(
+            dataPropertyValue(descriptors, 'shareProofs', 'shareProofs'),
+            state,
+        ),
+    };
+};
 
 export type TargetDecryptionShareProofMaterialGenerationInput = Readonly<{
     readonly abortSignal?: AbortSignal;
@@ -505,24 +693,27 @@ export const verifyRecoveryEpochUpdate = (
 export const verifyPrivateVssShare = async (
     input: VerifyPrivateVssShareInput,
 ): Promise<PrivateVssShareVerification> => {
+    const verificationInputSnapshot =
+        snapshotPrivateVssShareVerificationInput(input);
     const kernel = await loadFreshTranscriptCoreKernel();
 
     return kernel.verifyPrivateVssShareEnvelope(
-        await preparePrivateVssShareVerificationInputForKernel(kernel, input),
+        await prepareSnapshottedPrivateVssShareVerificationInputForKernel(
+            kernel,
+            verificationInputSnapshot,
+        ),
     );
 };
 
 export const createSetupPackageVerificationInput = (
     input: SetupPackageVerificationInputSource,
 ): VerifySetupPackageInput => {
-    const {
-        transportedPublicKeyShareMaterial: kernelMaterialReference,
-        ...verificationInput
-    } = createSetupPackageVerificationInputInternal(input);
-    void kernelMaterialReference;
+    const validatedInput = createSetupPackageVerificationInputInternal(input);
 
     return {
-        ...verificationInput,
+        setupPackage: validatedInput.setupPackage,
+        expectedManifestHash: validatedInput.expectedManifestHash,
+        expectedRosterHash: validatedInput.expectedRosterHash,
         ...(input.transportedPublicKeyShareMaterial === undefined
             ? {}
             : {
@@ -535,17 +726,82 @@ export const createSetupPackageVerificationInput = (
                   publicKeyShareMaterialChunkSource:
                       input.publicKeyShareMaterialChunkSource,
               }),
+        ...(input.setupProofMaterialChunkSources === undefined
+            ? {}
+            : {
+                  setupProofMaterialChunkSources:
+                      input.setupProofMaterialChunkSources,
+              }),
+        ...(input.evaluationKeyShareComponentMaterialChunkSources === undefined
+            ? {}
+            : {
+                  evaluationKeyShareComponentMaterialChunkSources:
+                      input.evaluationKeyShareComponentMaterialChunkSources,
+              }),
+        ...(input.publicEvaluationKeyMaterialChunkSources === undefined
+            ? {}
+            : {
+                  publicEvaluationKeyMaterialChunkSources:
+                      input.publicEvaluationKeyMaterialChunkSources,
+              }),
+        ...(input.transportedPublicKeyShareProofMaterial === undefined
+            ? {}
+            : {
+                  transportedPublicKeyShareProofMaterial:
+                      input.transportedPublicKeyShareProofMaterial,
+              }),
+        ...(input.transportedVssShareLinkageProofMaterial === undefined
+            ? {}
+            : {
+                  transportedVssShareLinkageProofMaterial:
+                      input.transportedVssShareLinkageProofMaterial,
+              }),
+        ...(input.transportedSameSecretBridgeProofMaterial === undefined
+            ? {}
+            : {
+                  transportedSameSecretBridgeProofMaterial:
+                      input.transportedSameSecretBridgeProofMaterial,
+              }),
+        ...(input.transportedEvaluationKeyShareProofMaterial === undefined
+            ? {}
+            : {
+                  transportedEvaluationKeyShareProofMaterial:
+                      input.transportedEvaluationKeyShareProofMaterial,
+              }),
+        ...(input.transportedEvaluationKeyShareComponentMaterial === undefined
+            ? {}
+            : {
+                  transportedEvaluationKeyShareComponentMaterial:
+                      input.transportedEvaluationKeyShareComponentMaterial,
+              }),
+        ...(input.transportedEvaluationKeyAggregateBindingOpenings === undefined
+            ? {}
+            : {
+                  transportedEvaluationKeyAggregateBindingOpenings:
+                      input.transportedEvaluationKeyAggregateBindingOpenings,
+              }),
+        ...(input.transportedPublicEvaluationKeyMaterial === undefined
+            ? {}
+            : {
+                  transportedPublicEvaluationKeyMaterial:
+                      input.transportedPublicEvaluationKeyMaterial,
+              }),
     };
 };
 
 export const verifySetupPackage = async (
     input: VerifySetupPackageInput,
 ): Promise<SetupPackageVerification> => {
-    assertSetupPackageVerificationBindings(input);
+    const verificationInputSnapshot =
+        snapshotSetupPackageVerificationInput(input);
+    assertSetupPackageVerificationBindings(verificationInputSnapshot);
 
     const kernel = await loadFreshTranscriptCoreKernel();
     const verificationInput =
-        await prepareSetupPackageVerificationInputForKernel(kernel, input);
+        await prepareSnapshottedSetupPackageVerificationInputForKernel(
+            kernel,
+            verificationInputSnapshot,
+        );
 
     return kernel.verifyCollectiveBgvSetup(verificationInput);
 };
@@ -594,46 +850,36 @@ export const generateTargetDecryptionShareProofMaterial = async (
 export const verifyTargetDecryptionResult = async (
     input: TargetDecryptionResultReleaseInput,
 ): Promise<TargetDecryptionResultRelease> => {
+    const inputSnapshot = targetDecryptionResultReleaseInputSnapshot(input);
+    const abortSignal = inputSnapshot.abortSignal;
+    const releaseVerificationId = inputSnapshot.releaseVerificationId;
+    const targetShareProofs = inputSnapshot.shareProofs;
     const kernel = await loadTranscriptCoreKernel();
     const releaseSetupContext =
         kernel.deriveBgvTargetDecryptionResultReleaseSetupContext({
-            setupPackage: input.setupPackage,
+            setupPackage: inputSnapshot.setupPackage,
         });
     const releaseBegin = kernel.beginBgvTargetDecryptionResultRelease({
-        releaseVerificationId: input.releaseVerificationId,
+        releaseVerificationId,
         releaseSetupContext,
-        targetAcceptedRecord: input.targetAcceptedRecord,
-        targetCiphertexts: input.targetCiphertexts,
-        targetCiphertextBinding: input.targetCiphertextBinding,
-        targetShareProfile: input.targetShareProfile,
+        targetAcceptedRecord: inputSnapshot.targetAcceptedRecord,
+        targetCiphertexts: inputSnapshot.targetCiphertexts,
+        targetCiphertextBinding: inputSnapshot.targetCiphertextBinding,
+        targetShareProfile: inputSnapshot.targetShareProfile,
     });
     let absorbedShareCount = 0;
     let releaseSessionOpen = true;
     try {
         const proofMaterialRuntime = openBgvCanonicalStreamRuntime({ kernel });
-        if (input.shareProofs.length !== releaseBegin.requiredShareCount) {
+        if (targetShareProofs.length !== releaseBegin.requiredShareCount) {
             throw new Error(
                 'target-decryption share proof count must equal the required release quorum.',
             );
         }
-        for (const targetShareProof of input.shareProofs) {
-            const normalizedTransport =
-                createBgvTargetDecryptionShareCanonicalProofMaterialTransport(
-                    targetShareProof.proofMaterial,
-                    targetShareProof.proofMaterialTransport,
-                );
-            if (
-                normalizedTransport.proofMaterialRoot !==
-                targetShareProof.proofMaterial.proofMaterialRoot
-            ) {
-                throw new Error(
-                    'target-decryption proof material transport root must match its proof material.',
-                );
-            }
+        for (const targetShareProof of targetShareProofs) {
+            const normalizedTransport = targetShareProof.proofMaterialTransport;
             await proofMaterialRuntime.readMaterial({
-                ...(input.abortSignal === undefined
-                    ? {}
-                    : { abortSignal: input.abortSignal }),
+                ...(abortSignal === undefined ? {} : { abortSignal }),
                 descriptorBytes: normalizedTransport.descriptorBytes,
                 family: bgvCanonicalStreamFamilies.targetDecryptionShare,
                 materialRoot: normalizedTransport.proofMaterialRoot,
@@ -641,7 +887,7 @@ export const verifyTargetDecryptionResult = async (
             });
             const absorption =
                 kernel.absorbBgvTargetDecryptionResultReleaseShare({
-                    releaseVerificationId: input.releaseVerificationId,
+                    releaseVerificationId,
                     targetShareProof: {
                         targetDecryptionShare:
                             targetShareProof.targetDecryptionShare,
@@ -662,7 +908,7 @@ export const verifyTargetDecryptionResult = async (
             if (absorbedShareCount === releaseBegin.requiredShareCount) {
                 releaseSessionOpen = false;
                 return kernel.finishBgvTargetDecryptionResultRelease({
-                    releaseVerificationId: input.releaseVerificationId,
+                    releaseVerificationId,
                 });
             }
         }
@@ -677,7 +923,7 @@ export const verifyTargetDecryptionResult = async (
         ) {
             try {
                 kernel.finishBgvTargetDecryptionResultRelease({
-                    releaseVerificationId: input.releaseVerificationId,
+                    releaseVerificationId,
                 });
             } catch (cleanupFailure) {
                 throw new TargetDecryptionResultReleaseCleanupError(

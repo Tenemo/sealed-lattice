@@ -302,9 +302,13 @@ fn vss_aggregate_threshold_proof_material_reference(
         "vssShareLinkage": vss_aggregate,
     }))
     .expect("VSS aggregate threshold proof checkpoint key");
-    let proof_bytes = checkpointed_vss_aggregate_threshold_proof_bytes(&checkpoint_key, || {
-        generated_vss_aggregate_threshold_proof_bytes(&request)
-    });
+    let proof_bytes = checkpointed_vss_aggregate_threshold_proof_bytes(
+        &checkpoint_key,
+        |proof_bytes| {
+            verify_vss_share_linkage_proof_source_from_request(&request, proof_bytes).map(|_| ())
+        },
+        || generated_vss_aggregate_threshold_proof_bytes(&request),
+    );
     let proof_bytes_hash = hash512_hex(VSS_SHARE_LINKAGE_PROOF_BYTES_HASH_DOMAIN, &[&proof_bytes]);
     let proof_material_root = crate::bgv::setup::setup_proof::setup_proof_material_reference_root(
         VSS_SHARE_LINKAGE_PROOF_FAMILY,
@@ -325,6 +329,7 @@ fn vss_aggregate_threshold_proof_material_reference(
 
 fn checkpointed_vss_aggregate_threshold_proof_bytes(
     checkpoint_key: &str,
+    verify_resumed_proof_bytes: impl FnOnce(&[u8]) -> crate::encoding::CanonicalResult<()>,
     generate_proof_bytes: impl FnOnce() -> Vec<u8>,
 ) -> Vec<u8> {
     let proof_cache = VSS_AGGREGATE_THRESHOLD_PROOF_CHECKPOINT_CACHE
@@ -341,6 +346,7 @@ fn checkpointed_vss_aggregate_threshold_proof_bytes(
     let proof_bytes = checkpointed_proof_bytes(
         VSS_AGGREGATE_THRESHOLD_PROOF_CHECKPOINT_DIRECTORY,
         checkpoint_key,
+        verify_resumed_proof_bytes,
         generate_proof_bytes,
     );
     proof_cache
@@ -401,12 +407,12 @@ fn retain_vss_aggregate_threshold_proof_material(
         return;
     }
 
-    crate::bgv::setup::retain_generated_canonical_proof_material(
+    authenticate_setup_proof_material_stream_for_test(
         VSS_SHARE_LINKAGE_PROOF_FAMILY,
-        proof_material_root.to_string(),
-        proof_bytes,
+        proof_material_root,
+        &proof_bytes,
     )
-    .expect("retain VSS aggregate threshold proof material");
+    .expect("authenticate VSS aggregate threshold proof material stream");
 }
 
 #[allow(clippy::too_many_arguments)]

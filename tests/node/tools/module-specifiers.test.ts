@@ -1,10 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import {
-    collectModuleSpecifierLiterals,
-    extractModuleSpecifiers,
-    rewriteModuleSpecifiers,
-} from '#tools/internal/module-specifiers';
+import { extractModuleSpecifiers } from '#tools/internal/module-specifiers';
 
 describe('module specifier helpers', () => {
     it('collects static, side-effect, dynamic, and import type specifiers', () => {
@@ -25,7 +21,7 @@ describe('module specifier helpers', () => {
         ]);
     });
 
-    it('deduplicates repeated specifiers without hiding separate literal positions', () => {
+    it('deduplicates repeated specifiers', () => {
         const sourceText = `
             import type { ThresholdParameters } from '@sealed-lattice/types';
             export type { ThresholdParameters } from '@sealed-lattice/types';
@@ -34,7 +30,6 @@ describe('module specifier helpers', () => {
         expect(extractModuleSpecifiers(sourceText)).toEqual([
             '@sealed-lattice/types',
         ]);
-        expect(collectModuleSpecifierLiterals(sourceText)).toHaveLength(2);
     });
 
     it('ignores import-like syntax whose target is not a string literal', () => {
@@ -46,54 +41,5 @@ describe('module specifier helpers', () => {
         `;
 
         expect(extractModuleSpecifiers(sourceText)).toEqual([]);
-    });
-
-    it('rewrites every supported module specifier while preserving quote style', () => {
-        const sourceText = [
-            "import type { Foo } from '@sealed-lattice/types';",
-            'export { verify } from "@sealed-lattice/protocol";',
-            "const loaded = await import('@sealed-lattice/wasm');",
-            'type Kernel = import("@sealed-lattice/wasm").TranscriptCoreKernel;',
-        ].join('\n');
-        const rewritten = rewriteModuleSpecifiers(
-            'sdk/index.d.ts',
-            sourceText,
-            (specifier) => {
-                if (specifier === '@sealed-lattice/types') {
-                    return './internal/types.js';
-                }
-                if (specifier === '@sealed-lattice/protocol') {
-                    return './internal/election-foundation/index.js';
-                }
-                if (specifier === '@sealed-lattice/wasm') {
-                    return './internal/transcript-core-bridge.js';
-                }
-
-                return undefined;
-            },
-        );
-
-        expect(rewritten).toBe(
-            [
-                "import type { Foo } from './internal/types.js';",
-                'export { verify } from "./internal/election-foundation/index.js";',
-                "const loaded = await import('./internal/transcript-core-bridge.js');",
-                'type Kernel = import("./internal/transcript-core-bridge.js").TranscriptCoreKernel;',
-            ].join('\n'),
-        );
-    });
-
-    it('escapes rewritten specifiers for the original quote delimiter', () => {
-        const sourceText =
-            'const loaded = await import("@sealed-lattice/wasm");';
-        const rewritten = rewriteModuleSpecifiers(
-            'sdk/index.js',
-            sourceText,
-            () => './internal/"quoted".js',
-        );
-
-        expect(rewritten).toBe(
-            'const loaded = await import("./internal/\\"quoted\\".js");',
-        );
     });
 });

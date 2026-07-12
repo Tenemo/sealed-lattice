@@ -3,7 +3,10 @@ import {
     resolveFocusedRustTestRunResult,
 } from './focused-rust-test-match.js';
 import { createLocalRunLog, currentProcessExitCode } from './local-run-log.js';
-import { createProcessMemoryGuard } from './process-memory-guard.js';
+import {
+    createProcessMemoryGuard,
+    type ProcessMemoryGuard,
+} from './process-memory-guard.js';
 import { runCommandsInSeries, type CommandInvocation } from './run-command.js';
 import { verifyFocusedRustLaneSelection } from './rust-focused-lane-selection.js';
 import {
@@ -19,9 +22,15 @@ export type ParsedRustKernelHeavyArguments = Readonly<{
 }>;
 
 const usage = 'Usage: run-rust-kernel-heavy-tests.ts [<heavy Rust test name>].';
-const rustKernelHeavyProcessMemoryGuard = createProcessMemoryGuard({
-    insufficientFreeMemoryRunDescription: 'Rust kernel heavy tests',
-});
+let rustKernelHeavyProcessMemoryGuard: ProcessMemoryGuard | undefined;
+
+const getRustKernelHeavyProcessMemoryGuard = (): ProcessMemoryGuard => {
+    rustKernelHeavyProcessMemoryGuard ??= createProcessMemoryGuard({
+        insufficientFreeMemoryRunDescription: 'Rust kernel heavy tests',
+    });
+
+    return rustKernelHeavyProcessMemoryGuard;
+};
 
 export const parseRustKernelHeavyArguments = (
     commandArguments: readonly string[],
@@ -52,7 +61,7 @@ export const parseRustKernelHeavyArguments = (
 export const buildRustKernelHeavyTestCommand = (
     parsedArguments: ParsedRustKernelHeavyArguments,
 ): CommandInvocation =>
-    rustKernelHeavyProcessMemoryGuard.guardCommand({
+    getRustKernelHeavyProcessMemoryGuard().guardCommand({
         args: cargoTestArgumentsForRustKernelHeavy(parsedArguments.testFilter),
         command: 'cargo',
         description: `cargo test Rust kernel heavy (${parsedArguments.testFilter})`,
@@ -69,7 +78,7 @@ export const buildRustKernelHeavyTestCommand = (
 
 export const buildRustKernelHeavyProcessMemoryGuardVerificationCommand =
     (): CommandInvocation =>
-        rustKernelHeavyProcessMemoryGuard.buildVerificationCommand();
+        getRustKernelHeavyProcessMemoryGuard().buildVerificationCommand();
 
 export const runRustKernelHeavyTests = async (
     rawArguments: readonly string[] = process.argv.slice(2),

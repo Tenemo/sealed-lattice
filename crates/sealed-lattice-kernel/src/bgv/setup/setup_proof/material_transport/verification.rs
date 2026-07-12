@@ -1,63 +1,74 @@
-use super::helpers::*;
 use super::*;
+use crate::{
+    foundation::{
+        CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH, CanonicalStreamDomain, FOUNDATION_PROFILE,
+        derive_canonical_stream_descriptor,
+    },
+    hashing::derive_canonical_object_hash,
+};
 
-// Recompute the transport manifest over a contiguous proof-byte buffer. The only
-// valid chunking binds every non-final chunk to exactly `chunk_size_bytes`, so
-// the canonical chunk windows are fully determined by the total length and are
-// recovered here with `proof_bytes.chunks(chunk_size)`. Every hash is therefore
-// byte-for-byte identical to the per-chunk form this replaced.
-pub(crate) fn setup_proof_material_transport_hashes(
+fn setup_proof_stream_family(proof_family: &str) -> CanonicalResult<(u32, CanonicalStreamDomain)> {
+    use crate::bgv::setup::canonical_stream_transport::*;
+
+    match proof_family {
+        "vss-opening-carry" => Ok((
+            BGV_CANONICAL_STREAM_FAMILY_VSS_OPENING_CARRY,
+            CanonicalStreamDomain::DealerVssShareLinkageProof,
+        )),
+        "vss-share-linkage" => Ok((
+            BGV_CANONICAL_STREAM_FAMILY_VSS_SHARE_LINKAGE,
+            CanonicalStreamDomain::DealerVssShareLinkageProof,
+        )),
+        "same-secret-bridge" => Ok((
+            BGV_CANONICAL_STREAM_FAMILY_SAME_SECRET,
+            CanonicalStreamDomain::SameSecretProof,
+        )),
+        "public-key-share" => Ok((
+            BGV_CANONICAL_STREAM_FAMILY_PUBLIC_KEY_SHARE,
+            CanonicalStreamDomain::PublicKeyShareProof,
+        )),
+        "trustee-evaluation-key" => Ok((
+            BGV_CANONICAL_STREAM_FAMILY_TRUSTEE_EVALUATION_KEY,
+            CanonicalStreamDomain::EvaluatorKeyAggregateProof,
+        )),
+        _ => Err(setup_proof_error(
+            "setup proof material family has no canonical BGV stream",
+        )),
+    }
+}
+
+pub(crate) fn canonical_setup_proof_material_transport_accounting(
     proof_family: &str,
     proof_bytes: &[u8],
-    chunk_size_bytes: u64,
 ) -> CanonicalResult<SetupProofMaterialTransportHashes> {
     if !SETUP_PROOF_TRANSPORT_FAMILIES.contains(&proof_family) {
         return Err(setup_proof_error(
             "setup proof material proof family is not in the fixed setup-proof parameters",
         ));
     }
-    if chunk_size_bytes == 0 {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "setup proof material chunk size must be positive",
-        ));
-    }
-    if proof_bytes.is_empty() {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "setup proof material transport requires at least one chunk",
-        ));
-    }
-    let chunk_size_usize = usize::try_from(chunk_size_bytes).map_err(|_| {
-        CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "setup proof material chunk size does not fit usize",
-        )
-    })?;
-    let total_byte_length = u64::try_from(proof_bytes.len()).map_err(|_| {
-        CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "setup proof material byte length does not fit u64",
-        )
-    })?;
-
-    let full_object_hash =
-        setup_proof_material_full_object_hash(proof_family, total_byte_length, proof_bytes)?;
-    let mut chunk_hashes = Vec::with_capacity(proof_bytes.len().div_ceil(chunk_size_usize));
-    for (chunk_index, chunk) in proof_bytes.chunks(chunk_size_usize).enumerate() {
-        chunk_hashes.push(setup_proof_material_chunk_hash(
-            proof_family,
-            &full_object_hash,
-            chunk_index,
-            chunk,
-        )?);
-    }
-    let chunk_root = setup_proof_material_chunk_manifest_root(
-        proof_family,
-        total_byte_length,
-        &chunk_hashes,
-        &full_object_hash,
+    let (_, stream_domain) = setup_proof_stream_family(proof_family)?;
+    let descriptor = derive_canonical_stream_descriptor(stream_domain, proof_bytes).map_err(
+        |refusal_reason| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidProtocolObject,
+                format!("setup proof canonical stream descriptor was refused: {refusal_reason:?}"),
+            )
+        },
     )?;
+    let chunk_hashes = descriptor
+        .ordered_chunk_digests
+        .iter()
+        .map(|digest| digest.to_lowercase_hex())
+        .collect::<Vec<_>>();
+    let full_object_hash = descriptor.full_object_digest.to_lowercase_hex();
+    let total_byte_length = descriptor.total_byte_length;
+    let chunk_root = derive_canonical_object_hash(&json!({
+        "objectType": "SetupTransportChunkManifest",
+        "chunkCount": chunk_hashes.len(),
+        "totalByteLength": total_byte_length,
+        "chunkHashes": chunk_hashes,
+        "fullObjectHash": full_object_hash,
+    }))?;
 
     Ok(SetupProofMaterialTransportHashes {
         full_object_hash,
@@ -65,4 +76,72 @@ pub(crate) fn setup_proof_material_transport_hashes(
         chunk_root,
         total_byte_length,
     })
+}
+
+pub(crate) fn authenticate_setup_proof_material_stream_for_test(
+    proof_family: &str,
+    proof_material_root: &str,
+    proof_bytes: &[u8],
+) -> CanonicalResult<SetupProofMaterialTransportHashes> {
+    let (family_code, stream_domain) = setup_proof_stream_family(proof_family)?;
+    let descriptor = derive_canonical_stream_descriptor(stream_domain, proof_bytes).map_err(
+        |refusal_reason| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidProtocolObject,
+                format!("setup proof canonical stream descriptor was refused: {refusal_reason:?}"),
+            )
+        },
+    )?;
+    let descriptor_bytes = descriptor.encode().map_err(|error| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidProtocolObject,
+            format!("setup proof canonical stream descriptor did not encode: {error}"),
+        )
+    })?;
+    let material_root_bytes = crate::transcript_core::decode_hex(proof_material_root)?;
+    let capability = [0x73; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH];
+    let stream = crate::bgv::setup::begin_bgv_canonical_stream(
+        family_code,
+        &material_root_bytes,
+        &descriptor_bytes,
+        capability,
+    )
+    .map_err(|status| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidProtocolObject,
+            format!("setup proof canonical stream did not begin: status {status}"),
+        )
+    })?;
+    for (chunk_index, chunk) in proof_bytes
+        .chunks(FOUNDATION_PROFILE.stream_chunk_byte_length)
+        .enumerate()
+    {
+        crate::bgv::setup::absorb_bgv_canonical_stream_chunk(
+            stream.handle,
+            &capability,
+            u32::try_from(chunk_index).map_err(|_| {
+                CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    "setup proof canonical stream chunk index does not fit u32",
+                )
+            })?,
+            chunk,
+        )
+        .map_err(|status| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidProtocolObject,
+                format!("setup proof canonical stream chunk was refused: status {status}"),
+            )
+        })?;
+    }
+    crate::bgv::setup::finish_bgv_canonical_stream(stream.handle, &capability).map_err(
+        |status| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidProtocolObject,
+                format!("setup proof canonical stream did not finish: status {status}"),
+            )
+        },
+    )?;
+
+    canonical_setup_proof_material_transport_accounting(proof_family, proof_bytes)
 }

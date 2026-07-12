@@ -5,6 +5,7 @@ import {
 } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
+import { copyCanonicalStreamDescriptor } from '../canonical-stream-descriptor.js';
 import {
     type CanonicalProofMaterialChunkPull,
     setupProofTransportChunkSizeBytes,
@@ -716,22 +717,15 @@ export const createBinaryChunkedPublicEvaluationKeyMaterialTransport = async (
         publicEvaluationKeyMaterialReference,
     });
     assertPublicEvaluationKeyComponentMaterialCoverage(input);
-    const descriptorBytes = await input.writePublicEvaluationKeyMaterial({
-        publicEvaluationKeyMaterialRoot,
-        pullChunk:
-            repeatablePublicEvaluationKeyMaterialChunkPull(materialBytes),
-        totalByteLength: transportHashes.totalByteLength,
-    });
-    if (
-        !ArrayBuffer.isView(descriptorBytes) ||
-        Object.prototype.toString.call(descriptorBytes) !==
-            '[object Uint8Array]' ||
-        descriptorBytes.byteLength === 0
-    ) {
-        throw new TypeError(
-            'writePublicEvaluationKeyMaterial must return non-empty Uint8Array descriptor bytes.',
-        );
-    }
+    const descriptorBytes = copyCanonicalStreamDescriptor(
+        await input.writePublicEvaluationKeyMaterial({
+            publicEvaluationKeyMaterialRoot,
+            pullChunk:
+                repeatablePublicEvaluationKeyMaterialChunkPull(materialBytes),
+            totalByteLength: transportHashes.totalByteLength,
+        }),
+        'writePublicEvaluationKeyMaterial descriptorBytes',
+    );
     const transportedPublicEvaluationKeyMaterial = {
         objectType: publicEvaluationKeyMaterialTransportSetObjectType,
         materialEncoding: publicEvaluationKeyTransportMaterialEncoding,
@@ -742,7 +736,7 @@ export const createBinaryChunkedPublicEvaluationKeyMaterialTransport = async (
                 ...contextFields(input.setupContext),
                 evaluationKeySetHash: evaluationKeys.evaluationKeySetHash,
                 publicEvaluationKeyMaterialRoot,
-                descriptorBytes: descriptorBytes.slice(),
+                descriptorBytes,
             },
         ],
     } satisfies TransportedPublicEvaluationKeyMaterialSet;

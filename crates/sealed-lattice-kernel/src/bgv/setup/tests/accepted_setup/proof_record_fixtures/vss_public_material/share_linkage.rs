@@ -344,15 +344,35 @@ pub(super) fn vss_share_linkage_proof_bytes_hex(
     let proof_bytes = checkpointed_proof_bytes(
         VSS_SHARE_LINKAGE_PROOF_CHECKPOINT_DIRECTORY,
         &checkpoint_key,
+        |proof_bytes| {
+            verify_vss_share_linkage_proof_source_from_request(&request, proof_bytes).map(|_| ())
+        },
         || {
             let generated = generate_vss_share_linkage_proof_from_request(&request)
                 .expect("VSS share-linkage proof");
-            crate::transcript_core::decode_hex(
-                generated["proofBytesHex"]
-                    .as_str()
-                    .expect("VSS share-linkage proof bytes hex"),
+            let proof_material_root = generated["proofMaterialRoot"]
+                .as_str()
+                .expect("VSS share-linkage proof material root");
+            let proof_bytes_hash = generated["proofBytesHash"]
+                .as_str()
+                .expect("VSS share-linkage proof bytes hash");
+            let proof_material = crate::bgv::setup::verified_canonical_setup_proof_material_bytes(
+                VSS_SHARE_LINKAGE_PROOF_FAMILY,
+                proof_material_root,
             )
-            .expect("VSS share-linkage proof bytes")
+            .expect("VSS share-linkage generated proof material lookup")
+            .expect("VSS share-linkage generated proof material");
+            assert_eq!(
+                proof_material
+                    .hash512_hex(VSS_SHARE_LINKAGE_PROOF_BYTES_HASH_DOMAIN)
+                    .expect("VSS share-linkage streamed proof bytes hash"),
+                proof_bytes_hash,
+                "generated VSS share-linkage metadata must bind its retained bytes",
+            );
+            proof_material
+                .chunks()
+                .flat_map(|chunk| chunk.iter().copied())
+                .collect()
         },
     );
 

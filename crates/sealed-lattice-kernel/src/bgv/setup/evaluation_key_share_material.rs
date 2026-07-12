@@ -12,16 +12,18 @@ pub(crate) use self::component_material::{
     finish_verified_canonical_component_material_stream,
 };
 pub(super) use self::component_material::{
-    VerifiedComponentMaterialEvictionGuard, component_b_vectors_from_record,
+    VerifiedComponentMaterialEvictionGuard, authenticated_evaluation_key_component_stream_summary,
+    component_b_vectors_from_record,
 };
 #[cfg(test)]
 pub(in crate::bgv::setup) use self::component_material::{
+    evaluation_key_share_component_material_reference_root,
     evaluation_key_share_component_vector_hash, evaluation_key_share_component_vector_root,
 };
 
 use std::{
     collections::BTreeMap,
-    sync::{Mutex, OnceLock},
+    sync::{Arc, Mutex, OnceLock},
 };
 // The component-material stream only touches the filesystem on native; the
 // browser wasm runtime stages in memory and never opens a file.
@@ -35,6 +37,7 @@ use crate::{
     bgv::parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE},
     bgv::setup_helpers::{array_field, string_field},
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
+    foundation::VerifiedCanonicalStreamSummary,
     hashing::hash512_hex,
 };
 

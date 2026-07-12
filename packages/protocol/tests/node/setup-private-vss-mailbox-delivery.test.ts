@@ -5,6 +5,7 @@ import {
 import { describe, expect, it } from 'vitest';
 
 import { createPrivateVssMailboxDeliverySet } from '#packages/protocol/src/index';
+import { canonicalStreamDescriptorFixture } from '#tests/support/canonical-stream-descriptor-fixture';
 import {
     makeSetupContext,
     makeSetupFixtureHash,
@@ -74,7 +75,7 @@ describe('private VSS mailbox delivery', () => {
 
     it('transports private VSS proof material under its canonical descriptor and semantic root', async () => {
         const proofBytesHash = fixtureHash('proof-bytes');
-        const descriptorBytes = Uint8Array.of(9, 8, 7, 6);
+        const descriptorBytes = canonicalStreamDescriptorFixture(4, 9, 8);
         const expectedTransportedMaterialRoot = deriveCanonicalObjectHash({
             objectType: 'PrivateVssShareTransportedSuccinctProofMaterial',
             proofFamily: 'vss-opening-carry',

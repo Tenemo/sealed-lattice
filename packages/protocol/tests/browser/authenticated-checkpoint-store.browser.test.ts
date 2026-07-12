@@ -12,13 +12,12 @@ import {
     openWebLockOwnedStorageTransactionStore,
     type WebLockOwnedStorageTransactionStore,
 } from '#packages/protocol/src/runtime/web-lock-owned-untrusted-storage-transaction-store';
+import { webLocksAvailable } from '#tests/support/browser-capabilities';
 
 const authenticationTagByteLength = 64;
 const textEncoder = new TextEncoder();
 const openedHandles: WebLockOwnedStorageTransactionStore[] = [];
 const databaseNames = new Set<string>();
-const webLocksAvailable = typeof navigator.locks?.request === 'function';
-
 const storageLimits = {
     maximumActiveTransactionCount: 4,
     maximumLeaseByteLength: 2_048,

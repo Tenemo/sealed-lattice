@@ -27,7 +27,6 @@
     "#packages/protocol/tests/*": "./tests/*.ts"
   },
   "scripts": {
-    "check": "tsc --project tsconfig.json --pretty false --noEmit",
     "build": "del-cli dist && tsc --project tsconfig.json"
   },
   "dependencies": {

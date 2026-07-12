@@ -1,3 +1,4 @@
+import { copyCanonicalStreamDescriptor } from '../canonical-stream-descriptor.js';
 import type { TransportedSetupProofMaterialSet } from '../setup-proof-material-transport.js';
 
 import type { VssAggregateThresholdProofMaterial } from './commitment-sets.js';
@@ -84,7 +85,10 @@ const canonicalProofMaterialsToTransport = (
                 objectType: parameters.transportMaterialObjectType,
                 proofFamily: parameters.proofFamily,
                 proofMaterialRoot: proofMaterial.proofMaterialRoot,
-                descriptorBytes: proofMaterial.descriptorBytes.slice(),
+                descriptorBytes: copyCanonicalStreamDescriptor(
+                    proofMaterial.descriptorBytes,
+                    `${parameters.proofFamily} canonical proof material descriptorBytes`,
+                ),
             };
         },
     );
@@ -160,7 +164,10 @@ export const appendVssAggregateThresholdProofMaterials = (
                 objectType: material.objectType,
                 proofFamily: material.proofFamily,
                 proofMaterialRoot: material.proofMaterialRoot,
-                descriptorBytes: material.descriptorBytes.slice(),
+                descriptorBytes: copyCanonicalStreamDescriptor(
+                    material.descriptorBytes,
+                    'VSS aggregate threshold proof material descriptorBytes',
+                ),
             };
         },
     );

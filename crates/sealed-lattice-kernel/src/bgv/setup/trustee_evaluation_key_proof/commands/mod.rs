@@ -71,6 +71,19 @@ pub(in crate::bgv::setup) fn prove_trustee_evaluation_key_proof_bytes(
     }
 }
 
+#[cfg(test)]
+pub(in crate::bgv::setup) fn verify_trustee_evaluation_key_proof_bytes(
+    statement: &TrusteeEvaluationKeyStatement,
+    proof_bytes: &(impl ProofByteSource + Sync + ?Sized),
+) -> CanonicalResult<()> {
+    if atom_schedule::statement_is_key_bearing(statement) {
+        atom_schedule::verify_key_bearing_trustee_evaluation_keys(statement, proof_bytes)
+    } else {
+        let proof = decode_trustee_evaluation_key_proof_from_source(statement, proof_bytes)?;
+        verify_evaluation_key_share(statement, &proof)
+    }
+}
+
 // Generate one trustee-batched evaluation-key proof from a JSON request. The
 // statement carries the ceremony context, the key descriptors with embedded
 // component material, and the same-secret linkage commitments; the witness

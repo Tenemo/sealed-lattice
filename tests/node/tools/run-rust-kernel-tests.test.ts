@@ -16,6 +16,7 @@ describe('Rust kernel runner arguments', () => {
         expect(parseRustKernelArguments([])).toEqual({});
         expect(cargoTestArgumentsForRustKernelFast()).toEqual([
             'test',
+            '--locked',
             '-p',
             'sealed-lattice-kernel',
             '--',
@@ -33,6 +34,7 @@ describe('Rust kernel runner arguments', () => {
         });
         expect(cargoTestArgumentsForRustKernelFast('direct_ballots')).toEqual([
             'test',
+            '--locked',
             '-p',
             'sealed-lattice-kernel',
             'direct_ballots',
@@ -53,6 +55,7 @@ describe('Rust kernel runner arguments', () => {
             cargoTestArgumentsForRustKernelFast(acceptedSetupTestName),
         ).toEqual([
             'test',
+            '--locked',
             '-p',
             'sealed-lattice-kernel',
             acceptedSetupTestName,

@@ -14,6 +14,7 @@ import {
     type PublicKeyShareSet,
     type PublicKeyShareSuccinctProofSetInput,
 } from '#packages/protocol/src/index';
+import { canonicalStreamDescriptorFixture } from '#tests/support/canonical-stream-descriptor-fixture';
 import {
     makeSetupContext,
     makeSetupFixtureHash,
@@ -370,7 +371,9 @@ describe('public-key share statement builders', () => {
             readonly totalByteLength: number;
         }): Promise<Uint8Array> => {
             totalByteLength = input.totalByteLength;
-            return Promise.resolve(new Uint8Array([1, 2, 3, 4]));
+            return Promise.resolve(
+                canonicalStreamDescriptorFixture(input.totalByteLength),
+            );
         };
         const transportedEmbeddedMaterial =
             await createBinaryChunkedPublicKeyShareMaterialTransport({

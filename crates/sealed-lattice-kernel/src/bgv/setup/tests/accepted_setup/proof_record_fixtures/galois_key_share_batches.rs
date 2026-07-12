@@ -6,11 +6,12 @@ use crate::hashing::derive_canonical_object_hash;
 
 // Builds one Galois key-share batch per trustee, covering every scheduled
 // rotation and level, as `verify_galois_key_share_batches` recomputes it. Each
-// material record embeds its key-switch component vectors and the batch root is a
-// canonical object hash with no profile-identifier fields.
+// material record references component vectors authenticated by the canonical
+// stream, and the batch root is a canonical object hash with no
+// profile-identifier fields.
 pub(in super::super) fn galois_key_share_batches_object(
     package: &serde_json::Value,
-) -> serde_json::Value {
+) -> GaloisKeyShareBatchesFixture {
     let setup_context = &package["setupContext"];
     let schedule = &package["evaluatorKeySchedule"];
     let participant_count = participant_count_from_package(package);
@@ -25,6 +26,7 @@ pub(in super::super) fn galois_key_share_batches_object(
     // trustee-by-rotation matrix. The per-trustee outer order and per-rotation
     // inner order are preserved, so the emitted batches and roots stay
     // byte-identical to sequential generation.
+    let mut transported_component_materials = Vec::new();
     let batches = (0..participant_count)
         .map(|trustee_roster_position| {
             let trustee_identity = format!("trustee-{trustee_roster_position}");
@@ -56,7 +58,7 @@ pub(in super::super) fn galois_key_share_batches_object(
                     let key_switch_seed_hex =
                         galois_key_switch_seed_for_test(schedule, rotation, level);
                     let root = fixture_material.component_vector_root.clone();
-                    let material_record = serde_json::json!({
+                    let mut material_record = serde_json::json!({
                         "objectType": "GaloisKeyShareMaterial",
                         "proofFamily": "galois-key-share",
                         "trusteeIdentity": trustee_identity.as_str(),
@@ -64,15 +66,22 @@ pub(in super::super) fn galois_key_share_batches_object(
                         "rotation": rotation,
                         "level": level,
                         "galoisKeyShareRoot": root.clone(),
-                        "keySwitchMaterialEncoding": "embedded-full-key-switch-component-vectors",
+                        "keySwitchMaterialEncoding": EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
                         "keySwitchDomain": format!("galois-{rotation}"),
                         "keySwitchSeedHex": key_switch_seed_hex,
                         "ringDegree": ring_degree,
                         "keySwitchComponentVectorRoot": fixture_material.component_vector_root,
-                        "keySwitchComponentVectors": serde_json::Value::Array(
-                            fixture_material.component_vector_entries.clone(),
-                        ),
                     });
+                    let authenticated_material =
+                        authenticate_evaluation_key_share_component_material_fixture(
+                            EvaluationKeyShareProofFamily::Galois,
+                            &material_record,
+                            &fixture_material,
+                        );
+                    material_record["keySwitchComponentMaterialRoot"] =
+                        serde_json::json!(authenticated_material.material_root);
+                    transported_component_materials
+                        .push(authenticated_material.transported_material);
                     galois_key_share_material_records.push(material_record);
                     serde_json::json!({
                         "rotation": schedule_entry["rotation"],
@@ -106,5 +115,8 @@ pub(in super::super) fn galois_key_share_batches_object(
         })
         .collect::<Vec<_>>();
 
-    serde_json::Value::Array(batches)
+    GaloisKeyShareBatchesFixture {
+        batches: serde_json::Value::Array(batches),
+        transported_component_materials,
+    }
 }

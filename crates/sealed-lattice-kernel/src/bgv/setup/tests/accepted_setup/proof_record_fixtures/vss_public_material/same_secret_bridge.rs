@@ -1,5 +1,3 @@
-use super::commitment_sets::*;
-use super::share_linkage::*;
 use super::*;
 
 pub(in super::super::super) fn same_secret_bridge_statement_set_object(
@@ -228,15 +226,35 @@ pub(super) fn same_secret_bridge_proof_bytes_hex(
     let proof_bytes = checkpointed_proof_bytes(
         SAME_SECRET_BRIDGE_PROOF_CHECKPOINT_DIRECTORY,
         &checkpoint_key,
+        |proof_bytes| {
+            verify_same_secret_bridge_proof_source_from_request(&request, proof_bytes).map(|_| ())
+        },
         || {
             let generated = generate_same_secret_bridge_proof_from_request(&request)
                 .expect("same-secret bridge proof");
-            crate::transcript_core::decode_hex(
-                generated["proofBytesHex"]
-                    .as_str()
-                    .expect("same-secret bridge proof bytes hex"),
+            let proof_material_root = generated["proofMaterialRoot"]
+                .as_str()
+                .expect("same-secret bridge proof material root");
+            let proof_bytes_hash = generated["proofBytesHash"]
+                .as_str()
+                .expect("same-secret bridge proof bytes hash");
+            let proof_material = crate::bgv::setup::verified_canonical_setup_proof_material_bytes(
+                SAME_SECRET_BRIDGE_PROOF_FAMILY,
+                proof_material_root,
             )
-            .expect("same-secret bridge proof bytes")
+            .expect("same-secret bridge generated proof material lookup")
+            .expect("same-secret bridge generated proof material");
+            assert_eq!(
+                proof_material
+                    .hash512_hex(SAME_SECRET_BRIDGE_PROOF_BYTES_HASH_DOMAIN)
+                    .expect("same-secret bridge streamed proof bytes hash"),
+                proof_bytes_hash,
+                "generated same-secret bridge metadata must bind its retained bytes",
+            );
+            proof_material
+                .chunks()
+                .flat_map(|chunk| chunk.iter().copied())
+                .collect()
         },
     );
 
@@ -392,16 +410,13 @@ fn rebind_same_secret_bridge_object_root(object: &mut serde_json::Value, root_fi
 
 #[test]
 fn vss_public_material_fixture_verifies_generated_fields() {
-    let mut package = minimal_collective_setup_package_for_participant_count(3);
-    package["vssPublicCoefficientCommitmentSet"] =
-        vss_public_coefficient_commitment_set_object(&package, 128);
-    package["vssPublicRecipientShareCommitmentSet"] =
-        vss_public_recipient_share_commitment_set_object(&package);
-    package["vssPublicAggregateThresholdCommitmentSet"] =
-        vss_public_aggregate_threshold_commitment_set_object(&package);
-    package["vssShareLinkageStatement"] = vss_share_linkage_statement_object(&package);
-    package["vssShareLinkageProofMaterialSet"] =
-        vss_share_linkage_proof_material_set_object(&package);
+    let mut package = minimal_collective_setup_package();
+    let proof_material_fixture =
+        super::transport::descriptor_backed_vss_proof_material_fixture(&mut package);
+    let _proof_material_eviction_guard =
+        crate::bgv::setup::setup_proof::VerifiedSetupProofMaterialEvictionGuard::for_request(
+            &proof_material_fixture.verification_request,
+        );
 
     let verification = crate::bgv::setup::verify_vss_share_linkage_proof_material_set_from_request(
         &serde_json::json!({
@@ -410,6 +425,8 @@ fn vss_public_material_fixture_verifies_generated_fields() {
             "recipientShareCommitmentSet": package["vssPublicRecipientShareCommitmentSet"],
             "aggregateThresholdCommitmentSet": package["vssPublicAggregateThresholdCommitmentSet"],
             "proofMaterialSet": package["vssShareLinkageProofMaterialSet"],
+            "transportedVssShareLinkageProofMaterial":
+                proof_material_fixture.verification_request["transportedVssShareLinkageProofMaterial"],
         }),
     )
     .expect("generated VSS public material verifies");
@@ -424,14 +441,13 @@ fn vss_public_material_fixture_verifies_generated_fields() {
     // set and the target-basis committed material share one signed ternary
     // secret. Verify both public bridge objects through the same kernel
     // verifier used by accepted setup.
-    package["sameSecretBridgeStatementSet"] = same_secret_bridge_statement_set_object(&package);
-    package["sameSecretBridgeProofMaterialSet"] =
-        same_secret_bridge_proof_material_set_object(&package);
     let bridge_request = serde_json::json!({
         "statementSet": package["sameSecretBridgeStatementSet"],
         "coefficientCommitmentSet": package["vssPublicCoefficientCommitmentSet"],
         "vssCoefficientCommitments": package["vssCoefficientCommitments"],
         "proofMaterialSet": package["sameSecretBridgeProofMaterialSet"],
+        "transportedSameSecretBridgeProofMaterial":
+            proof_material_fixture.verification_request["transportedSameSecretBridgeProofMaterial"],
     });
     let bridge_statement_verification =
         crate::bgv::setup::verify_vss_same_secret_bridge_statement_set_request(&bridge_request)

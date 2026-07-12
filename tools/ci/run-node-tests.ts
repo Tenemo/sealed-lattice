@@ -6,10 +6,7 @@ import {
     createProcessMemoryGuard,
     type ProcessMemoryGuard,
 } from './process-memory-guard.js';
-import {
-    createPackageManagerCommand,
-    type CommandInvocation,
-} from './run-command.js';
+import { type CommandInvocation } from './run-command.js';
 import {
     buildVitestProjectCommand,
     buildVitestProjectsCommand,
@@ -70,12 +67,21 @@ export const parseRequestedNodeTestLanes = (
         throw new Error('At least one Node test lane is required.');
     }
     const requestedLanes: NodeTestLane[] = [];
+    const requestedLaneSet = new Set<NodeTestLane>();
     for (const requestedLane of requestedLaneList) {
         const expandedLanes = expandNodeTestLane(requestedLane);
         if (expandedLanes === undefined) {
             throw new Error(`Unsupported Node test lane: ${requestedLane}`);
         }
-        requestedLanes.push(...expandedLanes);
+        for (const expandedLane of expandedLanes) {
+            if (requestedLaneSet.has(expandedLane)) {
+                throw new Error(
+                    `Node test lane requested more than once: ${expandedLane}`,
+                );
+            }
+            requestedLaneSet.add(expandedLane);
+            requestedLanes.push(expandedLane);
+        }
     }
 
     return requestedLanes;
@@ -90,6 +96,9 @@ export const buildNodeTestCommands = (
     const packageManagerRunner =
         input.packageManagerRunner ?? resolvePackageManagerRunner();
     const lanes = input.lanes ?? defaultNodeTestLanes;
+    if (new Set(lanes).size !== lanes.length) {
+        throw new Error('Node test commands require distinct lanes.');
+    }
     const guardCommandWhenHeavyLaneIsIncluded = (
         command: CommandInvocation,
         commandLanes: readonly NodeTestLane[],
@@ -112,10 +121,11 @@ export const buildNodeTestCommands = (
     const requestedKernelLanes = lanes.filter((lane) =>
         internalWasmKernelNodeTestLanes.has(lane),
     );
+    const requestedKernelLaneSet = new Set(requestedKernelLanes);
     const nonKernelCommands = lanes
         .filter((lane) => !internalWasmKernelNodeTestLanes.has(lane))
         .map((lane) => buildCommand(lane));
-    if (requestedKernelLanes.length === kernelNodeTestLanes.length) {
+    if (kernelNodeTestLanes.every((lane) => requestedKernelLaneSet.has(lane))) {
         return [
             ...nonKernelCommands,
             guardCommandWhenHeavyLaneIsIncluded(
@@ -134,31 +144,11 @@ export const buildNodeTestCommands = (
     return [...nonKernelCommands, ...requestedKernelLanes.map(buildCommand)];
 };
 
-const nodeTestLanesNeedInternalWasmKernel = (
-    lanes: readonly NodeTestLane[],
-): boolean => lanes.some((lane) => internalWasmKernelNodeTestLanes.has(lane));
-
-const buildInternalWasmKernelCommand = (
-    packageManagerRunner: PackageManagerRunner,
-): CommandInvocation =>
-    createPackageManagerCommand(
-        'Build internal WASM kernel artifact',
-        ['--filter', '@sealed-lattice/wasm', 'run', 'build:wasm'],
-        {
-            logFileSlug: 'build-internal-wasm-kernel',
-            packageManagerRunner,
-        },
-    );
-
 export const buildNodeTestExtraGateCommands = (input: {
     readonly lanes: readonly NodeTestLane[];
-    readonly packageManagerRunner: PackageManagerRunner;
 }): readonly CommandInvocation[] => [
     ...(input.lanes.includes('kernel-heavy')
         ? [getNodeKernelHeavyProcessMemoryGuard().buildVerificationCommand()]
-        : []),
-    ...(nodeTestLanesNeedInternalWasmKernel(input.lanes)
-        ? [buildInternalWasmKernelCommand(input.packageManagerRunner)]
         : []),
 ];
 
@@ -182,10 +172,9 @@ const main = async (): Promise<void> => {
         buildCommands: (packageManagerRunner) =>
             buildNodeTestCommands({ lanes, packageManagerRunner }),
         commandLineArguments: rawArguments,
-        extraGateCommands: (packageManagerRunner) =>
+        extraGateCommands: () =>
             buildNodeTestExtraGateCommands({
                 lanes,
-                packageManagerRunner,
             }),
         lanes,
         scriptName: nodeTestScriptName(lanes),

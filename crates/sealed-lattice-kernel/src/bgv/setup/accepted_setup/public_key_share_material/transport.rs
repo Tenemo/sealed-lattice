@@ -5,6 +5,7 @@ use std::{
 };
 
 use super::*;
+use crate::foundation::{CanonicalStreamDomain, VerifiedCanonicalStreamSummary};
 
 #[derive(Clone)]
 pub(in crate::bgv::setup) struct CanonicalPublicKeyShareMaterialLimb {
@@ -30,11 +31,16 @@ pub(in crate::bgv::setup) type VerifiedCanonicalPublicKeyShareMaterialHandle =
     Arc<VerifiedCanonicalPublicKeyShareMaterial>;
 
 static VERIFIED_CANONICAL_PUBLIC_KEY_SHARE_MATERIALS: OnceLock<
-    Mutex<BTreeMap<String, VerifiedCanonicalPublicKeyShareMaterialHandle>>,
+    Mutex<BTreeMap<String, VerifiedCanonicalPublicKeyShareMaterialStoreEntry>>,
 > = OnceLock::new();
 
+struct VerifiedCanonicalPublicKeyShareMaterialStoreEntry {
+    material: VerifiedCanonicalPublicKeyShareMaterialHandle,
+    stream_summary: Arc<VerifiedCanonicalStreamSummary>,
+}
+
 fn verified_canonical_public_key_share_materials()
--> &'static Mutex<BTreeMap<String, VerifiedCanonicalPublicKeyShareMaterialHandle>> {
+-> &'static Mutex<BTreeMap<String, VerifiedCanonicalPublicKeyShareMaterialStoreEntry>> {
     VERIFIED_CANONICAL_PUBLIC_KEY_SHARE_MATERIALS.get_or_init(|| Mutex::new(BTreeMap::new()))
 }
 
@@ -44,7 +50,20 @@ pub(in crate::bgv::setup) fn verified_canonical_public_key_share_material(
     let materials = verified_canonical_public_key_share_materials()
         .lock()
         .map_err(|_| public_key_share_material_store_error())?;
-    Ok(materials.get(material_root).map(Arc::clone))
+    Ok(materials
+        .get(material_root)
+        .map(|entry| Arc::clone(&entry.material)))
+}
+
+pub(in crate::bgv::setup) fn authenticated_public_key_share_material_stream_summary(
+    material_root: &str,
+) -> CanonicalResult<Option<Arc<VerifiedCanonicalStreamSummary>>> {
+    let materials = verified_canonical_public_key_share_materials()
+        .lock()
+        .map_err(|_| public_key_share_material_store_error())?;
+    Ok(materials
+        .get(material_root)
+        .map(|entry| Arc::clone(&entry.stream_summary)))
 }
 
 pub(in crate::bgv::setup) fn evict_verified_canonical_public_key_share_materials(
@@ -61,6 +80,7 @@ pub(in crate::bgv::setup) fn evict_verified_canonical_public_key_share_materials
 pub(in crate::bgv::setup) struct CanonicalPublicKeyShareMaterialStream {
     material_root: String,
     decoder: CanonicalPublicKeyShareMaterialDecoder,
+    total_byte_length: u64,
 }
 
 pub(in crate::bgv::setup) fn begin_verified_canonical_public_key_share_material_stream(
@@ -89,6 +109,7 @@ pub(in crate::bgv::setup) fn begin_verified_canonical_public_key_share_material_
     Ok(CanonicalPublicKeyShareMaterialStream {
         material_root,
         decoder: CanonicalPublicKeyShareMaterialDecoder::new(),
+        total_byte_length,
     })
 }
 
@@ -101,14 +122,26 @@ pub(in crate::bgv::setup) fn absorb_verified_canonical_public_key_share_material
 
 pub(in crate::bgv::setup) fn finish_verified_canonical_public_key_share_material_stream(
     stream: CanonicalPublicKeyShareMaterialStream,
+    stream_summary: Arc<VerifiedCanonicalStreamSummary>,
 ) -> CanonicalResult<()> {
+    if stream_summary.stream_domain() != CanonicalStreamDomain::PublicKeyShareMaterial
+        || stream_summary.total_byte_length() != stream.total_byte_length
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ComponentMismatch,
+            "public-key share material does not match its authenticated stream summary",
+        ));
+    }
     let material = Arc::new(stream.decoder.finish()?);
     let mut materials = verified_canonical_public_key_share_materials()
         .lock()
         .map_err(|_| public_key_share_material_store_error())?;
     match materials.entry(stream.material_root) {
         Entry::Vacant(entry) => {
-            entry.insert(material);
+            entry.insert(VerifiedCanonicalPublicKeyShareMaterialStoreEntry {
+                material,
+                stream_summary,
+            });
             Ok(())
         }
         Entry::Occupied(_) => Err(CanonicalError::new(

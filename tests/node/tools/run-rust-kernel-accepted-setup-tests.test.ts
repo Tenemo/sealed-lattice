@@ -86,6 +86,7 @@ describe('Rust accepted setup runner arguments', () => {
     it('includes ordinary and ignored tests from the accepted setup module', () => {
         expect(cargoTestArgumentsForAcceptedSetupTests('4')).toEqual([
             'test',
+            '--locked',
             '-p',
             'sealed-lattice-kernel',
             acceptedSetupTestModulePattern,
@@ -105,6 +106,7 @@ describe('Rust accepted setup runner arguments', () => {
             ),
         ).toEqual([
             'test',
+            '--locked',
             '-p',
             'sealed-lattice-kernel',
             'terminal_evaluation_key_proofs',

@@ -1,9 +1,10 @@
+import { loadTranscriptCoreKernel } from '@sealed-lattice/wasm';
+
 import {
     createSetupPackageVerificationInput,
     verifyPrivateVssShare,
     verifySetupPackage,
 } from '../../../dist/index.js';
-import { loadTranscriptCoreKernel } from '../../../dist/kernel.js';
 import {
     createCommonRandomnessCommit,
     createCommonRandomnessReveal,

@@ -586,9 +586,11 @@ pub(super) fn verify_galois_key_switch_sample_binding(
 
 // Structural checks for the public key-switch component material carried by a
 // share record: exactly one of the embedded and the transported encodings,
-// with a valid component vector root. The full material content is decoded
-// and verified against these roots when the trustee evaluation-key proof
-// statements are rebuilt.
+// with a valid component vector root. Transport byte accounting belongs to the
+// authenticated request sidecar and setup transport certificate, so a binary
+// share record carries only its canonical material root. The full material
+// content is decoded and verified against these roots when the trustee
+// evaluation-key proof statements are rebuilt.
 fn verify_evaluation_key_component_material_encoding(record: &Value) -> CanonicalResult<()> {
     let material_encoding = record
         .get("keySwitchMaterialEncoding")
@@ -603,11 +605,6 @@ fn verify_evaluation_key_component_material_encoding(record: &Value) -> Canonica
         "embedded-full-key-switch-component-vectors" => {
             if record.get("keySwitchComponentVectors").is_none()
                 || record.get("keySwitchComponentMaterialRoot").is_some()
-                || record.get("keySwitchComponentChunkCount").is_some()
-                || record.get("keySwitchComponentTotalByteLength").is_some()
-                || record.get("keySwitchComponentFullObjectHash").is_some()
-                || record.get("keySwitchComponentChunkRoot").is_some()
-                || record.get("keySwitchComponentChunkHashes").is_some()
             {
                 return Err(CanonicalError::new(
                     CanonicalErrorCode::ComponentMismatch,
@@ -616,26 +613,13 @@ fn verify_evaluation_key_component_material_encoding(record: &Value) -> Canonica
             }
         }
         EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING => {
-            if record.get("keySwitchComponentVectors").is_some() {
+            if record.get("keySwitchComponentVectors").is_some()
+                || record.get("keySwitchComponentMaterialRoot").is_none()
+            {
                 return Err(CanonicalError::new(
                     CanonicalErrorCode::ComponentMismatch,
-                    "binary evaluation-key share material must not embed keySwitchComponentVectors",
+                    "binary evaluation-key share material must carry a material root and must not embed keySwitchComponentVectors",
                 ));
-            }
-            for field_name in [
-                "keySwitchComponentMaterialRoot",
-                "keySwitchComponentChunkCount",
-                "keySwitchComponentTotalByteLength",
-                "keySwitchComponentFullObjectHash",
-                "keySwitchComponentChunkRoot",
-                "keySwitchComponentChunkHashes",
-            ] {
-                if record.get(field_name).is_none() {
-                    return Err(CanonicalError::new(
-                        CanonicalErrorCode::ComponentMismatch,
-                        format!("binary evaluation-key share material requires {field_name}"),
-                    ));
-                }
             }
         }
         _ => {

@@ -1,6 +1,7 @@
 import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
+import { copyCanonicalStreamDescriptor } from '../canonical-stream-descriptor.js';
 import { setupProofTransportChunkSizeBytes } from '../setup-proof-material-transport.js';
 import { appendVaruint } from '../varuint-encoding.js';
 import type { CollectiveBgvSetupContext } from '../vss-share-verification-records.js';
@@ -78,21 +79,6 @@ const binaryChunkedPublicKeyShareMaterialSet = (
     } satisfies BinaryChunkedPublicKeyShareMaterialSet;
 };
 
-const canonicalDescriptorBytes = (descriptorBytes: Uint8Array): Uint8Array => {
-    if (
-        !ArrayBuffer.isView(descriptorBytes) ||
-        Object.prototype.toString.call(descriptorBytes) !==
-            '[object Uint8Array]' ||
-        descriptorBytes.byteLength === 0
-    ) {
-        throw new TypeError(
-            'writePublicKeyShareMaterial must return non-empty Uint8Array descriptor bytes.',
-        );
-    }
-
-    return descriptorBytes.slice();
-};
-
 const finishPublicKeyShareMaterialTransport = async (
     materialSet: BinaryChunkedPublicKeyShareMaterialSet,
     encodingSource: Readonly<{
@@ -101,13 +87,14 @@ const finishPublicKeyShareMaterialTransport = async (
     }>,
     writePublicKeyShareMaterial: BinaryChunkedPublicKeyShareMaterialTransportInput['writePublicKeyShareMaterial'],
 ): Promise<BinaryChunkedPublicKeyShareMaterialTransport> => {
-    const descriptorBytes = canonicalDescriptorBytes(
+    const descriptorBytes = copyCanonicalStreamDescriptor(
         await writePublicKeyShareMaterial({
             publicKeyShareMaterialSetRoot:
                 materialSet.publicKeyShareMaterialSetRoot,
             pullChunk: encodingSource.pullChunk,
             totalByteLength: encodingSource.totalByteLength,
         }),
+        'writePublicKeyShareMaterial descriptorBytes',
     );
     const publicKeyShareMaterialChunkSource = {
         publicKeyShareMaterialSetRoot:

@@ -1,8 +1,9 @@
 use super::*;
 
-use crate::bgv::setup::setup_proof::SetupProofMaterialTransportHashes;
 use crate::bgv::setup::trustee_evaluation_key_proof::{
     generate_same_secret_bridge_proof_from_request, generate_vss_share_linkage_proof_from_request,
+    verify_same_secret_bridge_proof_source_from_request,
+    verify_vss_share_linkage_proof_source_from_request,
 };
 use crate::hashing::{derive_canonical_object_hash, hash512_hex};
 
@@ -144,3 +145,6 @@ pub(in super::super) fn compact_aggregate_threshold_proof_fixture() -> serde_jso
 }
 
 pub(in super::super) use finalized_package::finalize_collective_setup_package;
+pub(in super::super) use transport::{
+    DescriptorBackedVssProofMaterialFixture, descriptor_backed_vss_proof_material_fixture,
+};

@@ -43,6 +43,7 @@ pub(crate) use board_ingestion_runtime::{
     begin_foundation_board_session, cancel_foundation_board_session,
     ingest_foundation_board_carrier, require_complete_foundation_board_carrier_graph,
 };
+pub(crate) use canonical_stream::VerifiedCanonicalStreamSummary;
 pub use canonical_stream::{
     CanonicalStreamDomain, CanonicalStreamVerifier, CanonicalStreamWriter,
     MAXIMUM_CANONICAL_STREAM_BYTE_LENGTH, derive_canonical_stream_descriptor,

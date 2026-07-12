@@ -1,7 +1,5 @@
 import {
     assertObjectRecord,
-    hashArrayField,
-    hashField,
     setupCertificateTransportedObjectInputs,
 } from './field-helpers.js';
 import { setupParametersForCertificates } from './parameter-derivations.js';
@@ -16,8 +14,6 @@ export const createSetupCertificates = (
     );
     const transport = assertObjectRecord(input.transport, 'transport');
     const transportInput = {
-        fullObjectHash: hashField(transport, 'fullObjectHash', 'transport'),
-        chunkHashes: hashArrayField(transport, 'chunkHashes', 'transport'),
         transportedObjects: setupCertificateTransportedObjectInputs(transport),
     };
 

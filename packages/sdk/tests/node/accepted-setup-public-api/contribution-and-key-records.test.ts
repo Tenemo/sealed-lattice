@@ -307,11 +307,6 @@ describe('accepted setup public package API in Node', () => {
         );
         const transportedCompanionObjects = [
             {
-                objectName: 'vssCoefficientCommitmentMaterial',
-                objectRole: 'public-vss-coefficient-commitment-material',
-                objectRoot: vssCoefficientCommitmentMaterialRoot,
-            },
-            {
                 objectName: 'publicKeyShareMaterial',
                 objectRole: 'public-key-share-material',
                 objectRoot:
@@ -368,13 +363,6 @@ describe('accepted setup public package API in Node', () => {
                 0,
             );
         const setupTransport = {
-            fullObjectHash: hashFromKernel(
-                kernel,
-                'setup-transport-full-object',
-            ),
-            chunkHashes: [
-                hashFromKernel(kernel, 'setup-transport-companion-chunk'),
-            ],
             transportedObjects: transportedCompanionObjects,
         };
         const setupCertificates = publicSetupApi.createSetupCertificates({
@@ -585,13 +573,6 @@ describe('accepted setup public package API in Node', () => {
         const setupPackage =
             await publicSetupApi.createSetupPackage(setupPackageInput);
         const { setupPackageHash, ...setupPackageHashInput } = setupPackage;
-        const transportedVssCoefficientMaterial =
-            transportedCompanionObjects[0];
-        if (transportedVssCoefficientMaterial === undefined) {
-            throw new Error(
-                'Accepted setup fixture must transport the VSS coefficient commitment material.',
-            );
-        }
 
         expect(publicKeyShares).toMatchObject({
             objectType: 'PublicKeyShareSet',
@@ -633,18 +614,6 @@ describe('accepted setup public package API in Node', () => {
         expect(setupPackage.setupTransportCertificate).toMatchObject({
             chunkCount: transportedCompanionObjects.length,
             totalByteLength: transportedCompanionByteLength,
-        });
-        expect(setupPackage.vssCoefficientCommitmentMaterial).toMatchObject({
-            objectType: 'VssCoefficientCommitmentMaterialSet',
-            materialEncoding:
-                'binary-chunked-full-public-setup-commitment-values',
-            vssCoefficientCommitmentRoot,
-            vssCoefficientCommitmentMaterialRoot,
-            chunkCount: transportedVssCoefficientMaterial.chunkHashes.length,
-            totalByteLength: transportedVssCoefficientMaterial.byteLength,
-            fullObjectHash: transportedVssCoefficientMaterial.fullObjectHash,
-            chunkRoot: transportedVssCoefficientMaterial.chunkRoot,
-            chunkHashes: transportedVssCoefficientMaterial.chunkHashes,
         });
         expect(
             (setupPackage.setupTransportCertificate as Record<string, unknown>)

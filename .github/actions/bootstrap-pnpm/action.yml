@@ -4,7 +4,7 @@ description: Set up pnpm, install Node from .nvmrc, and install dependencies
 runs:
     using: composite
     steps:
-        - uses: pnpm/action-setup@b307475762933b98ed359c036b0e51f26b63b74b
+        - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271
           with:
               run_install: false
         - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f
@@ -12,4 +12,6 @@ runs:
               node-version-file: .nvmrc
               cache: pnpm
         - shell: bash
+          env:
+              HUSKY: 0
           run: pnpm install --frozen-lockfile

@@ -17,6 +17,7 @@ describe('Rust kernel heavy runner arguments', () => {
         });
         expect(cargoTestArgumentsForRustKernelHeavy()).toEqual([
             'test',
+            '--locked',
             '-p',
             'sealed-lattice-kernel',
             heavyRustKernelTestNamePrefix,
@@ -39,6 +40,7 @@ describe('Rust kernel heavy runner arguments', () => {
         });
         expect(cargoTestArgumentsForRustKernelHeavy(heavyTestName)).toEqual([
             'test',
+            '--locked',
             '-p',
             'sealed-lattice-kernel',
             heavyTestName,

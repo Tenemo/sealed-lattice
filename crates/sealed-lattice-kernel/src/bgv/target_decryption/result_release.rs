@@ -124,6 +124,8 @@ pub(super) fn begin_target_decryption_result_release(
 pub(super) fn absorb_target_decryption_result_release_share(
     input: TargetDecryptionResultReleaseShareInput<'_>,
 ) -> CanonicalResult<Value> {
+    let _material_eviction_guard =
+        target_proof_material_eviction_guard_for_request(input.target_share_proof);
     let release_verification_id =
         target_result_release_verification_id(input.release_verification_id)?.to_string();
     let sessions = target_result_release_sessions();

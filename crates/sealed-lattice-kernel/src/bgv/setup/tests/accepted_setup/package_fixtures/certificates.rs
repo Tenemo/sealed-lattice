@@ -1,5 +1,3 @@
-use super::*;
-
 use crate::hashing::derive_canonical_object_hash;
 
 #[derive(Clone, Copy)]
@@ -24,6 +22,28 @@ pub(in super::super) const PUBLIC_KEY_SHARE_PROOF_TRANSPORT_CERTIFICATE_FIELDS:
     chunk_hashes: "chunkHashes",
 };
 
+pub(in super::super) const VSS_SHARE_LINKAGE_PROOF_TRANSPORT_CERTIFICATE_FIELDS:
+    SetupProofMaterialTransportCertificateFields = SetupProofMaterialTransportCertificateFields {
+    object_name: "vssShareLinkageProofMaterial",
+    object_role: "vss-share-linkage-proof-material",
+    byte_length: "totalByteLength",
+    chunk_count: "chunkCount",
+    full_object_hash: "fullObjectHash",
+    chunk_root: "chunkRoot",
+    chunk_hashes: "chunkHashes",
+};
+
+pub(in super::super) const SAME_SECRET_BRIDGE_PROOF_TRANSPORT_CERTIFICATE_FIELDS:
+    SetupProofMaterialTransportCertificateFields = SetupProofMaterialTransportCertificateFields {
+    object_name: "sameSecretBridgeProofMaterial",
+    object_role: "same-secret-bridge-proof-material",
+    byte_length: "totalByteLength",
+    chunk_count: "chunkCount",
+    full_object_hash: "fullObjectHash",
+    chunk_root: "chunkRoot",
+    chunk_hashes: "chunkHashes",
+};
+
 pub(in super::super) const TRUSTEE_EVALUATION_KEY_PROOF_TRANSPORT_CERTIFICATE_FIELDS:
     SetupProofMaterialTransportCertificateFields = SetupProofMaterialTransportCertificateFields {
     object_name: "evaluationKeyShareProofMaterial",
@@ -36,74 +56,12 @@ pub(in super::super) const TRUSTEE_EVALUATION_KEY_PROOF_TRANSPORT_CERTIFICATE_FI
 };
 
 pub(in super::super) fn setup_transport_certificate_fixture(
-    _parameters: &serde_json::Value,
-    vss_coefficient_commitment_material: &serde_json::Value,
+    participant_count: u64,
 ) -> serde_json::Value {
-    let chunk_size_bytes = 1_048_576_u64;
-    // The transported VSS object byte length is a function of the material's
-    // roster and ring degree, matching the verifier's roster-and-ring-derived
-    // expectation (transport_policy::setup_transport_vss_material_byte_length_for_roster).
-    // It is read from the material set so a reduced-ring or non-foundation
-    // material declares a consistent transport object. The streamed path then
-    // overrides byteLength from the actually transported material.
-    let material_participant_count = vss_coefficient_commitment_material["participantCount"]
-        .as_u64()
-        .expect("VSS material participant count");
-    let material_decryption_threshold = vss_coefficient_commitment_material["thresholdDegree"]
-        .as_u64()
-        .expect("VSS material threshold degree");
-    let material_ring_degree = vss_coefficient_commitment_material["ringDegree"]
-        .as_u64()
-        .expect("VSS material ring degree") as usize;
-    let total_byte_length = vss_material_binary_total_byte_length(
-        material_ring_degree,
-        material_participant_count,
-        material_decryption_threshold,
-    );
-    let chunk_count = total_byte_length.div_ceil(chunk_size_bytes);
-    let vss_full_object_hash = derive_canonical_object_hash(&serde_json::json!({
-        "objectType": "SetupTransportChunkManifestRoot",
-        "fixture": "setup-transport-full-object-hash",
-        "totalByteLength": total_byte_length,
-    }))
-    .expect("transport full object hash");
-    let chunk_hashes = (0..chunk_count)
-        .map(|chunk_index| {
-            derive_canonical_object_hash(&serde_json::json!({
-                "objectType": "SetupTransportChunkManifestRoot",
-                "fixture": "setup-transport-chunk-hash",
-                "chunkIndex": chunk_index,
-            }))
-            .expect("transport chunk hash")
-        })
-        .collect::<Vec<_>>();
-    let vss_chunk_root = derive_canonical_object_hash(&serde_json::json!({
-        "objectType": "SetupTransportChunkManifest",
-        "chunkCount": chunk_count,
-        "totalByteLength": total_byte_length,
-        "chunkHashes": chunk_hashes,
-        "fullObjectHash": vss_full_object_hash,
-    }))
-    .expect("setup transport chunk root");
-    let transported_objects = serde_json::json!([
-        {
-            "objectType": "SetupTransportedObject",
-            "objectName": "vssCoefficientCommitmentMaterial",
-            "objectRole": "public-vss-coefficient-commitment-material",
-            "objectRoot": vss_coefficient_commitment_material["vssCoefficientCommitmentMaterialRoot"],
-            "byteLength": total_byte_length,
-            "chunkStartIndex": 0_u64,
-            "chunkCount": chunk_count,
-            "chunkRoot": vss_chunk_root,
-            "chunkHashes": chunk_hashes,
-            "fullObjectHash": vss_full_object_hash,
-            "encoding": "binary",
-        }
-    ]);
     let setup_parameters_hash =
         crate::bgv::setup::accepted_setup::setup_parameters_hash_for_roster(
             &crate::bgv::setup::accepted_setup::roster_parameters_from_participant_count(
-                material_participant_count,
+                participant_count,
             ),
         )
         .expect("roster-derived setup parameters hash");
@@ -112,15 +70,15 @@ pub(in super::super) fn setup_transport_certificate_fixture(
         "setupParametersHash": setup_parameters_hash,
         "largeObjectEncoding": "binary",
         "chunking": "required",
-        "chunkCount": chunk_count,
-        "totalByteLength": total_byte_length,
+        "chunkCount": 0_u64,
+        "totalByteLength": 0_u64,
         "storageQuotaBytes": 2_147_483_648_u64,
         "largestSingleBufferBytes": 1_572_864_u64,
         "copyCountLimit": 2_u64,
         "streamVerificationOrder": "ascending-chunk-index",
         "resumePolicy": "chunk-index-checkpointed-by-hash",
         "lazyLoadingPolicy": "root-addressed-large-object-loading",
-        "transportedObjects": transported_objects,
+        "transportedObjects": [],
     });
     let certificate_hash =
         derive_canonical_object_hash(&certificate).expect("setup transport certificate hash");
@@ -179,6 +137,60 @@ pub(in super::super) fn replace_setup_proof_material_transport_certificate_objec
         })
         .collect::<Vec<_>>();
 
+    replace_setup_transport_certificate_objects(
+        package,
+        replacement_objects,
+        fields.object_name,
+        fields.object_role,
+    );
+}
+
+// Replaces all evaluation-key component-material entries with the authenticated
+// request sidecars. Component bytes and their descriptors stay outside the
+// package; the certificate binds the same roots and canonical stream hashes the
+// verifier resolved before it examines the package records.
+pub(in super::super) fn replace_setup_component_material_transport_certificate_objects(
+    package: &mut serde_json::Value,
+    transported_component_material: &serde_json::Value,
+) {
+    const OBJECT_NAME: &str = "evaluationKeyShareComponentMaterial";
+    const OBJECT_ROLE: &str = "evaluation-key-share-component-material";
+
+    let replacement_objects = transported_component_material["componentMaterials"]
+        .as_array()
+        .expect("transported evaluation-key component materials")
+        .iter()
+        .map(|component_material| {
+            serde_json::json!({
+                "objectType": "SetupTransportedObject",
+                "objectName": OBJECT_NAME,
+                "objectRole": OBJECT_ROLE,
+                "objectRoot": component_material["keySwitchComponentMaterialRoot"],
+                "byteLength": component_material["totalByteLength"],
+                "chunkStartIndex": 0,
+                "chunkCount": component_material["chunkCount"],
+                "chunkRoot": component_material["chunkRoot"],
+                "chunkHashes": component_material["chunkHashes"],
+                "fullObjectHash": component_material["fullObjectHash"],
+                "encoding": "binary",
+            })
+        })
+        .collect::<Vec<_>>();
+
+    replace_setup_transport_certificate_objects(
+        package,
+        replacement_objects,
+        OBJECT_NAME,
+        OBJECT_ROLE,
+    );
+}
+
+fn replace_setup_transport_certificate_objects(
+    package: &mut serde_json::Value,
+    replacement_objects: Vec<serde_json::Value>,
+    object_name: &str,
+    object_role: &str,
+) {
     let certificate = package["setupTransportCertificate"]
         .as_object_mut()
         .expect("setup transport certificate");
@@ -186,8 +198,8 @@ pub(in super::super) fn replace_setup_proof_material_transport_certificate_objec
         .as_array_mut()
         .expect("setup transport certificate objects");
     transported_objects.retain(|transported_object| {
-        transported_object["objectName"].as_str() != Some(fields.object_name)
-            || transported_object["objectRole"].as_str() != Some(fields.object_role)
+        transported_object["objectName"].as_str() != Some(object_name)
+            || transported_object["objectRole"].as_str() != Some(object_role)
     });
     transported_objects.extend(replacement_objects);
 
@@ -214,6 +226,9 @@ pub(in super::super) fn replace_setup_proof_material_transport_certificate_objec
     let certificate_hash =
         derive_canonical_object_hash(&serde_json::Value::Object(certificate.clone()))
             .expect("setup transport certificate hash");
-    certificate["setupTransportCertificateHash"] = serde_json::json!(&certificate_hash);
+    certificate.insert(
+        "setupTransportCertificateHash".to_owned(),
+        serde_json::json!(&certificate_hash),
+    );
     package["setupTransportCertificateHash"] = serde_json::json!(certificate_hash);
 }

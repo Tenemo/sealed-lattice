@@ -647,6 +647,14 @@ const runCommandWithOptionalLog = async (
                         terminationSignal,
                     });
                     await closeOptionalCommandLogStreams(commandLogStreams);
+                    if (
+                        resolvedExitCode === 0 &&
+                        commandLogFiles !== undefined
+                    ) {
+                        await input.runLog?.discardCommandLogFiles(
+                            commandLogFiles,
+                        );
+                    }
                     resolve(resolvedExitCode);
                 } catch (error) {
                     reject(

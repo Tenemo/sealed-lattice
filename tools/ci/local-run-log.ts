@@ -1,5 +1,5 @@
 import { createWriteStream, type WriteStream } from 'node:fs';
-import { appendFile, mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { performance } from 'node:perf_hooks';
@@ -18,6 +18,7 @@ export type CommandLogRequest = {
 export type ActiveLocalRunLog = {
     readonly runDirectoryPath: string;
     createCommandLogFiles(request: CommandLogRequest): CommandLogFiles;
+    discardCommandLogFiles(files: CommandLogFiles): Promise<void>;
     finish(input: {
         readonly details?: unknown;
         readonly exitCode: number;
@@ -56,6 +57,8 @@ type LocalRunLogInput = {
     readonly rootDirectoryPath?: string;
     readonly scriptName: string;
 };
+
+export const successfulCheckTimingHistoryLimit = 8;
 
 export const currentProcessExitCode = (): number => {
     if (process.exitCode === undefined) {
@@ -96,6 +99,65 @@ const closeStream = async (stream: WriteStream): Promise<void> =>
         stream.once('error', reject);
         stream.end(resolve);
     });
+
+const isSuccessfulCheckSummary = (value: unknown): boolean =>
+    typeof value === 'object' &&
+    value !== null &&
+    'scriptName' in value &&
+    value.scriptName === 'check' &&
+    'exitCode' in value &&
+    value.exitCode === 0;
+
+const readSuccessfulCheckSummaries = async (
+    historyPath: string,
+): Promise<readonly unknown[]> => {
+    let historyText: string;
+    try {
+        historyText = await readFile(historyPath, 'utf8');
+    } catch (error) {
+        if (
+            typeof error === 'object' &&
+            error !== null &&
+            'code' in error &&
+            error.code === 'ENOENT'
+        ) {
+            return [];
+        }
+        throw error;
+    }
+
+    return historyText
+        .split(/\r?\n/u)
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0)
+        .flatMap((line) => {
+            try {
+                const value = JSON.parse(line) as unknown;
+                return isSuccessfulCheckSummary(value) ? [value] : [];
+            } catch {
+                return [];
+            }
+        });
+};
+
+const writeBoundedSuccessfulCheckHistory = async (
+    rootDirectoryPath: string,
+    summary: LocalRunLogSummary,
+): Promise<void> => {
+    if (!isSuccessfulCheckSummary(summary)) {
+        return;
+    }
+    const historyPath = path.join(rootDirectoryPath, 'runs.jsonl');
+    const previousSummaries = await readSuccessfulCheckSummaries(historyPath);
+    const summaries = [...previousSummaries, summary].slice(
+        -successfulCheckTimingHistoryLimit,
+    );
+    await writeFile(
+        historyPath,
+        `${summaries.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
+        'utf8',
+    );
+};
 
 class LocalRunLog implements ActiveLocalRunLog {
     readonly runDirectoryPath: string;
@@ -144,6 +206,14 @@ class LocalRunLog implements ActiveLocalRunLog {
         };
     }
 
+    async discardCommandLogFiles(files: CommandLogFiles): Promise<void> {
+        await Promise.all([
+            rm(files.combinedPath, { force: true }),
+            rm(files.stderrPath, { force: true }),
+            rm(files.stdoutPath, { force: true }),
+        ]);
+    }
+
     async finish(input: {
         readonly details?: unknown;
         readonly exitCode: number;
@@ -166,13 +236,22 @@ class LocalRunLog implements ActiveLocalRunLog {
             scriptName: this.#scriptName,
             startedAtIso: this.#startedAtIso,
         };
-        await writeJsonFile(this.#summaryPath, summary);
-        await appendFile(
-            path.join(this.#rootDirectoryPath, 'runs.jsonl'),
-            `${JSON.stringify(summary)}\n`,
-            'utf8',
-        );
-        await closeStream(this.#combinedStream);
+        const discardSuccessfulCheckRun = isSuccessfulCheckSummary(summary);
+        try {
+            await writeJsonFile(this.#summaryPath, summary);
+            await writeBoundedSuccessfulCheckHistory(
+                this.#rootDirectoryPath,
+                summary,
+            );
+        } finally {
+            await closeStream(this.#combinedStream);
+        }
+        if (discardSuccessfulCheckRun) {
+            await rm(this.runDirectoryPath, {
+                force: true,
+                recursive: true,
+            });
+        }
     }
 
     writeCombinedOutput(chunk: string | Uint8Array): void {

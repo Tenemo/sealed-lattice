@@ -26,7 +26,6 @@ export {
     type VssCoefficientCommitmentMaterialRecord,
     type VssCoefficientCommitmentSet,
     type VssCoefficientCommitmentMaterialSet,
-    type VssCoefficientCommitmentMaterialBinaryReference,
     type SetupPackageVssCoefficientCommitmentMaterialSet,
     type VssSourceTrusteeOpeningMaterial,
     type VssSourceTrusteeOpeningMaterialReference,

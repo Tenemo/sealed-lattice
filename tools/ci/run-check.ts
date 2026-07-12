@@ -24,7 +24,12 @@ import {
     runCommandsInSeries,
     type CommandInvocation,
 } from './run-command.js';
+import { buildVitestProjectCommand } from './run-vitest-lanes.js';
 import { cargoTestArgumentsForRustKernelFast } from './rust-kernel-test-arguments.js';
+import {
+    canonicalTestLaneDefinitions,
+    nodeTestLaneDefinitions,
+} from './test-lanes.js';
 
 import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
 
@@ -35,15 +40,22 @@ type LaneStatus = 'failed' | 'passed' | 'stopped';
 // A validation lane is a named group of commands that run in series with one
 // another. Lanes may run concurrently during the independent-check phase.
 type ValidationLane = {
+    readonly baselineDurationMilliseconds: number;
     readonly commands: readonly CommandInvocation[];
     readonly name: string;
 };
 
-type ValidationLaneResult = {
+export type ValidationLaneResult = {
     readonly durationMilliseconds: number;
     readonly exitCode: number;
     readonly name: string;
     readonly status: LaneStatus;
+};
+
+type ValidationSummaryContext = {
+    readonly failureDetails: readonly CheckFailureDetail[];
+    readonly previousSuccessfulDurationMilliseconds?: number;
+    readonly runLogDirectoryPath?: string;
 };
 
 export type CheckProgressMode = 'always' | 'auto' | 'never';
@@ -54,6 +66,21 @@ export type ParsedCheckArguments = {
 
 const checkUsage = 'Usage: run-check.ts [--progress=auto|always|never].';
 const rustKernelLaneName = 'Rust kernel (fmt, clippy, fast test)';
+const checkLaneBaselineDurationMilliseconds = {
+    'Build workspace packages': 20_000,
+    'Check package boundaries': 1_000,
+    'Knip unused-code scan': 4_000,
+    Lint: 30_000,
+    'Smoke npm package': 5_000,
+    'Type-check workspace': 8_000,
+    'Verify public package policy': 1_000,
+    'Verify test lane coverage': 3_000,
+} as const;
+
+const baselineDurationForCheckLane = (laneName: string): number =>
+    checkLaneBaselineDurationMilliseconds[
+        laneName as keyof typeof checkLaneBaselineDurationMilliseconds
+    ] ?? 5_000;
 
 const isCheckProgressMode = (value: string): value is CheckProgressMode =>
     value === 'always' || value === 'auto' || value === 'never';
@@ -133,6 +160,7 @@ const createPackageManagerLane = (
     logFileSlug: string,
     commandArguments: readonly string[],
 ): ValidationLane => ({
+    baselineDurationMilliseconds: baselineDurationForCheckLane(name),
     commands: [
         createPackageManagerCommand(name, commandArguments, {
             logFileSlug,
@@ -149,7 +177,7 @@ const createPackageManagerLane = (
 // parallel phase means no lane writes or stages `dist/` while test lanes import
 // it, and no `cargo` lane competes with the WebAssembly build for `target/`. A
 // failure here makes the rest pointless, so the run stops immediately.
-const buildGatingLanes = (
+export const buildCheckGatingLanes = (
     packageManagerRunner: PackageManagerRunner,
 ): readonly ValidationLane[] => [
     createPackageManagerLane(
@@ -175,16 +203,20 @@ const buildGatingLanes = (
 const buildRustKernelLane = (
     packageManagerRunner: PackageManagerRunner,
 ): ValidationLane => ({
+    baselineDurationMilliseconds:
+        canonicalTestLaneDefinitions['rust-kernel-fast']
+            .baselineDurationMilliseconds,
     commands: [
         createCargoCommand(
             'cargo fmt --check',
-            ['fmt', '--check', '-p', 'sealed-lattice-kernel'],
+            ['fmt', '--all', '--check'],
             'cargo-fmt',
         ),
         createCargoCommand(
             'cargo clippy',
             [
                 'clippy',
+                '--locked',
                 '--workspace',
                 '--all-targets',
                 '--all-features',
@@ -226,7 +258,7 @@ const buildRustKernelLane = (
 // including their ignored proof tests, and the Playwright browser projects
 // stay in standalone lanes so local checks remain fast and CI can schedule the
 // expensive work independently.
-const buildParallelLanes = (
+export const buildCheckParallelLanes = (
     packageManagerRunner: PackageManagerRunner,
 ): readonly ValidationLane[] => {
     const lane = (
@@ -240,6 +272,23 @@ const buildParallelLanes = (
             logFileSlug,
             commandArguments,
         );
+    const vitestLane = (
+        name: string,
+        laneName: 'fast' | 'kernel-fast',
+    ): ValidationLane => ({
+        baselineDurationMilliseconds:
+            canonicalTestLaneDefinitions[
+                laneName === 'fast' ? 'node-fast' : 'node-kernel-fast'
+            ].baselineDurationMilliseconds,
+        commands: [
+            buildVitestProjectCommand({
+                commandDescription: name,
+                packageManagerRunner,
+                projectName: nodeTestLaneDefinitions[laneName].projectName,
+            }),
+        ],
+        name,
+    });
 
     return [
         lane('Lint', 'lint', ['run', 'lint']),
@@ -261,15 +310,12 @@ const buildParallelLanes = (
             './tools/ci/check-package-boundaries.ts',
         ]),
         lane('Knip unused-code scan', 'knip', ['exec', 'knip']),
-        lane('Node tests (fast)', 'vitest-node', ['run', 'test:node:fast']),
-        lane('Node tests (kernel fast)', 'vitest-node-kernel-fast', [
-            'run',
-            'test:node:kernel:fast',
-        ]),
+        vitestLane('Node tests (fast)', 'fast'),
+        vitestLane('Node tests (kernel fast)', 'kernel-fast'),
     ];
 };
 
-const buildProgressLanePlans = (
+export const buildProgressLanePlans = (
     lanes: readonly ValidationLane[],
     timingHistory: CheckTimingHistory,
 ): readonly CheckProgressLanePlan[] => {
@@ -342,7 +388,8 @@ const buildProgressLanePlans = (
                 ),
         })),
         expectedDurationMilliseconds:
-            timingHistory.laneDurationMilliseconds.get(lane.name),
+            timingHistory.laneDurationMilliseconds.get(lane.name) ??
+            lane.baselineDurationMilliseconds,
         name: lane.name,
         progress: progressSourceForLane(lane),
     }));
@@ -431,18 +478,16 @@ const statusLabels: Readonly<Record<LaneStatus, string>> = {
 const formatDurationSeconds = (durationMilliseconds: number): string =>
     `${(durationMilliseconds / 1000).toFixed(1)}s`;
 
-const printValidationSummary = (
+export const formatValidationSummary = (
     results: readonly ValidationLaneResult[],
-    runLog: ActiveLocalRunLog | undefined,
-    timingHistory: CheckTimingHistory,
-    failureDetails: readonly CheckFailureDetail[],
-): void => {
-    console.log('\nValidation summary');
+    context: ValidationSummaryContext,
+): readonly string[] => {
+    const lines = ['', 'Validation summary'];
     for (const result of results) {
         const duration = formatDurationSeconds(
             result.durationMilliseconds,
         ).padStart(8);
-        console.log(
+        lines.push(
             `  ${statusLabels[result.status]}  ${duration}  ${result.name}`,
         );
     }
@@ -454,47 +499,67 @@ const printValidationSummary = (
         (result) => result.status === 'stopped',
     ).length;
     if (failedResults.length === 0) {
-        console.log('\nAll validation lanes passed.');
-        if (timingHistory.totalDurationMilliseconds !== undefined) {
-            console.log(
+        lines.push('', 'All validation lanes passed.');
+        if (context.previousSuccessfulDurationMilliseconds !== undefined) {
+            lines.push(
                 `Expected duration from previous successful check: ${formatProgressDuration(
-                    timingHistory.totalDurationMilliseconds,
+                    context.previousSuccessfulDurationMilliseconds,
                 )}.`,
             );
         }
 
-        return;
+        return lines;
     }
 
     const stoppedNote =
         stoppedCount > 0
             ? ` (${stoppedCount} other lane(s) stopped early)`
             : '';
-    console.log(
-        `\nFailed: ${failedResults
+    lines.push(
+        '',
+        `Failed: ${failedResults
             .map((result) => result.name)
             .join(', ')}${stoppedNote}.`,
     );
-    if (runLog !== undefined) {
-        console.log(`Per-lane logs: ${runLog.runDirectoryPath}`);
+    if (context.runLogDirectoryPath !== undefined) {
+        lines.push(`Per-lane logs: ${context.runLogDirectoryPath}`);
     }
-    for (const failureDetail of failureDetails) {
-        console.log(`\nFailure detail: ${failureDetail.laneName}`);
+    for (const failureDetail of context.failureDetails) {
+        lines.push('', `Failure detail: ${failureDetail.laneName}`);
         if (failureDetail.commandDescription !== undefined) {
-            console.log(`Command: ${failureDetail.commandDescription}`);
+            lines.push(`Command: ${failureDetail.commandDescription}`);
         }
         if (failureDetail.exitCode !== undefined) {
-            console.log(`Exit code: ${failureDetail.exitCode}`);
+            lines.push(`Exit code: ${failureDetail.exitCode}`);
         }
         if (failureDetail.logPath !== undefined) {
-            console.log(`Log: ${failureDetail.logPath}`);
+            lines.push(`Log: ${failureDetail.logPath}`);
         }
         if (failureDetail.recentOutputLines.length > 0) {
-            console.log('Recent output:');
+            lines.push('Recent output:');
             for (const line of failureDetail.recentOutputLines) {
-                console.log(`  ${line}`);
+                lines.push(`  ${line}`);
             }
         }
+    }
+
+    return lines;
+};
+
+const printValidationSummary = (
+    results: readonly ValidationLaneResult[],
+    runLog: ActiveLocalRunLog | undefined,
+    timingHistory: CheckTimingHistory,
+    failureDetails: readonly CheckFailureDetail[],
+): void => {
+    const lines = formatValidationSummary(results, {
+        failureDetails,
+        previousSuccessfulDurationMilliseconds:
+            timingHistory.totalDurationMilliseconds,
+        runLogDirectoryPath: runLog?.runDirectoryPath,
+    });
+    for (const line of lines) {
+        console.log(line);
     }
 };
 
@@ -510,8 +575,8 @@ const main = async (): Promise<void> => {
     const rawArguments = process.argv.slice(2);
     const parsedArguments = parseCheckArguments(rawArguments);
     const packageManagerRunner = resolvePackageManagerRunner();
-    const gatingLanes = buildGatingLanes(packageManagerRunner);
-    const parallelLanes = buildParallelLanes(packageManagerRunner);
+    const gatingLanes = buildCheckGatingLanes(packageManagerRunner);
+    const parallelLanes = buildCheckParallelLanes(packageManagerRunner);
     const validationLanes = [...gatingLanes, ...parallelLanes];
     const timingHistory = await readPreviousCheckTimingHistory();
     const reporter = new CheckProgressReporter({

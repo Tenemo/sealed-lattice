@@ -1,5 +1,6 @@
 use super::package_fixtures::{
     TRUSTEE_EVALUATION_KEY_PROOF_TRANSPORT_CERTIFICATE_FIELDS,
+    replace_setup_component_material_transport_certificate_objects,
     replace_setup_proof_material_transport_certificate_objects,
 };
 use super::*;
@@ -30,10 +31,22 @@ fn terminal_evaluation_key_bearing_collective_setup_fixture_configured(
     let relinearization = relinearization_key_share_rounds_fixture(package);
     package["relinearizationKeyShareRounds"] = relinearization.rounds;
     // Galois batches.
-    package["galoisKeyShareBatches"] = galois_key_share_batches_object(package);
+    let galois = galois_key_share_batches_object(package);
+    package["galoisKeyShareBatches"] = galois.batches;
+    let mut transported_component_materials = relinearization.transported_component_materials;
+    transported_component_materials.extend(galois.transported_component_materials);
+    fixture.verification_request["transportedEvaluationKeyShareComponentMaterial"] = serde_json::json!({
+        "objectType": "SetupTransportedEvaluationKeyShareComponentMaterialSet",
+        "componentMaterials": transported_component_materials,
+    });
+    replace_setup_component_material_transport_certificate_objects(
+        package,
+        &fixture.verification_request["transportedEvaluationKeyShareComponentMaterial"],
+    );
     // Same-secret-bridge-bound trustee evaluation-key proofs.
     let trustee_proof_fixture = trustee_evaluation_key_proofs_object(
         package,
+        &fixture.verification_request,
         &relinearization.round_one_aggregate_diagonals_by_level,
     );
     package["trusteeEvaluationKeyProofs"] = trustee_proof_fixture.proof_set;
@@ -53,6 +66,7 @@ fn terminal_evaluation_key_bearing_collective_setup_fixture_configured(
     let aggregate_binding = with_aggregate_binding.then(|| {
         let (aggregate_binding, _transported_openings) = evaluation_key_aggregate_binding_object(
             package,
+            &fixture.verification_request,
             &relinearization.round_one_aggregate_diagonals_by_level,
         );
         aggregate_binding
@@ -121,9 +135,7 @@ fn heavy_accepted_setup_terminal_trustee_evaluation_key_proofs_pass_the_evaluati
         .as_str()
         .unwrap_or_default();
     assert!(
-        result["isValid"] == true
-            || refusal_reason == "vssCoefficientCommitmentMaterialOutsideAcceptedRing"
-            || refusal_reason == "vssCoefficientCommitmentMaterialOutsideProfile",
+        result["isValid"] == true || refusal_reason == "setupMaterialOutsideAcceptedRing",
         "reduced-ring terminal package must either accept or stop only at the \
          profile-ring boundary after the evaluation-key phase: {}",
         context()
@@ -164,6 +176,12 @@ fn heavy_accepted_setup_terminal_tampered_trustee_evaluation_key_proof_is_refuse
     assert_eq!(
         result["refusedObjects"][0]["objectPath"],
         "setupPackage.trusteeEvaluationKeyProofs"
+    );
+    assert_eq!(
+        result["refusedObjects"][0]["message"],
+        "a scheduled trustee evaluation-key atom proof was rejected",
+        "{}",
+        context()
     );
 }
 
@@ -362,18 +380,17 @@ fn replace_first_trustee_evaluation_key_proof_with_tampered_material(
         trustee_evaluation_key_proof_material_root_from_fixture_record(proof_record);
     proof_record["proofMaterialRoot"] = serde_json::json!(&proof_material_root);
 
-    let transport_hashes = setup_proof_material_transport_hashes(
+    let transport_hashes = canonical_setup_proof_material_transport_accounting(
         crate::bgv::setup::trustee_evaluation_key_proof::TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
         &proof_bytes,
-        SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
     )
     .expect("tampered trustee proof transport hashes");
-    crate::bgv::setup::retain_generated_canonical_proof_material(
+    authenticate_setup_proof_material_stream_for_test(
         crate::bgv::setup::trustee_evaluation_key_proof::TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
-        proof_material_root.clone(),
-        proof_bytes,
+        &proof_material_root,
+        &proof_bytes,
     )
-    .expect("retain tampered trustee proof material");
+    .expect("authenticate tampered trustee proof material stream");
 
     let transported_proof_material = &mut fixture.verification_request["transportedEvaluationKeyShareProofMaterial"]
         ["proofMaterials"][0];

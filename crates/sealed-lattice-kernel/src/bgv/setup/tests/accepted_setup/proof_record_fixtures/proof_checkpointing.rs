@@ -39,6 +39,7 @@ pub(in super::super) fn persist_checkpointed_proof_bytes(
 pub(in super::super) fn checkpointed_proof_bytes(
     family_directory: &str,
     statement_hash_hex: &str,
+    verify_resumed_proof_bytes: impl FnOnce(&[u8]) -> crate::encoding::CanonicalResult<()>,
     generate_proof_bytes: impl FnOnce() -> Vec<u8>,
 ) -> Vec<u8> {
     if !final_package_checkpoint_resume_enabled() {
@@ -46,6 +47,10 @@ pub(in super::super) fn checkpointed_proof_bytes(
     }
     let path = proof_checkpoint_path(family_directory, statement_hash_hex);
     if let Ok(proof_bytes) = std::fs::read(&path) {
+        verify_resumed_proof_bytes(&proof_bytes)
+            .expect("resumed proof checkpoint must verify against its current statement");
+        refresh_checkpoint_last_used(&path)
+            .expect("resumed proof checkpoint modification time must be refreshed");
         final_package_phase(&format!(
             "resumed {family_directory} proof checkpoint {statement_hash_hex}"
         ));
@@ -55,6 +60,15 @@ pub(in super::super) fn checkpointed_proof_bytes(
     persist_checkpointed_proof_bytes(family_directory, statement_hash_hex, &proof_bytes);
 
     proof_bytes
+}
+
+fn refresh_checkpoint_last_used(path: &std::path::Path) -> std::io::Result<()> {
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(path)
+        .and_then(|file| {
+            file.set_times(std::fs::FileTimes::new().set_modified(std::time::SystemTime::now()))
+        })
 }
 
 fn persist_proof_checkpoint(path: &std::path::Path, statement_hash_hex: &str, proof_bytes: &[u8]) {

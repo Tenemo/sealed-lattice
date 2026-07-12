@@ -14,7 +14,7 @@ pub(in crate::bgv::setup) fn verify_full_ring_material(
         ));
     };
     if commitment_set.get("ringDegree").and_then(Value::as_u64) != Some(POLYNOMIAL_DEGREE as u64) {
-        return Ok(Some(vss_material_outside_full_ring(
+        return Ok(Some(setup_material_outside_full_ring(
             "vssPublicCoefficientCommitmentSet must use the accepted full ring degree",
             "setupPackage.vssPublicCoefficientCommitmentSet.ringDegree",
         )?));
@@ -101,21 +101,24 @@ fn verify_full_ring_record(
     object_path: impl Into<String>,
 ) -> CanonicalResult<Option<Value>> {
     if record.get("ringDegree").and_then(Value::as_u64) != Some(POLYNOMIAL_DEGREE as u64) {
-        return Ok(Some(vss_material_outside_full_ring(message, object_path)?));
+        return Ok(Some(setup_material_outside_full_ring(
+            message,
+            object_path,
+        )?));
     }
 
     Ok(None)
 }
 
-fn vss_material_outside_full_ring(
+fn setup_material_outside_full_ring(
     message: impl Into<String>,
     object_path: impl Into<String>,
 ) -> CanonicalResult<Value> {
     verification_response(
-        Some("vssCoefficientCommitments"),
+        Some("setupMaterial"),
         Vec::new(),
         vec![Refusal::new(
-            "vssCoefficientCommitmentMaterialOutsideAcceptedRing",
+            "setupMaterialOutsideAcceptedRing",
             message,
             object_path,
         )],

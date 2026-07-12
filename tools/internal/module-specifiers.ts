@@ -14,51 +14,21 @@ import {
     type StringLiteral,
 } from 'typescript';
 
-type ModuleSpecifierLiteral = {
-    readonly end: number;
-    readonly quote: string;
-    readonly start: number;
-    readonly text: string;
-};
-
-type ModuleSpecifierRewrite = (specifier: string) => string | undefined;
-
-type ModuleSpecifierReplacement = {
-    readonly end: number;
-    readonly start: number;
-    readonly text: string;
-};
-
-const quoteModuleSpecifier = (specifier: string, quote: string): string => {
-    const escapedSpecifier = specifier
-        .replace(/\\/g, '\\\\')
-        .split(quote)
-        .join(`\\${quote}`);
-
-    return `${quote}${escapedSpecifier}${quote}`;
-};
-
-export const collectModuleSpecifierLiterals = (
+export const extractModuleSpecifiers = (
     sourceText: string,
-    sourcePath = 'module-specifier-source.tsx',
-): readonly ModuleSpecifierLiteral[] => {
+    sourcePath = 'module-specifier-source.ts',
+): string[] => {
     const sourceFile = createSourceFile(
         sourcePath,
         sourceText,
         ScriptTarget.Latest,
         true,
-        ScriptKind.TSX,
+        ScriptKind.TS,
     );
-    const literals: ModuleSpecifierLiteral[] = [];
+    const specifiers = new Set<string>();
 
     const pushLiteral = (literal: StringLiteral): void => {
-        const start = literal.getStart(sourceFile);
-        literals.push({
-            start,
-            end: literal.end,
-            quote: sourceText[start] ?? "'",
-            text: literal.text,
-        });
+        specifiers.add(literal.text);
     };
 
     const visit = (node: Node): void => {
@@ -99,56 +69,5 @@ export const collectModuleSpecifierLiterals = (
 
     visit(sourceFile);
 
-    return literals;
-};
-
-export const extractModuleSpecifiers = (
-    sourceText: string,
-    sourcePath?: string,
-): string[] => {
-    const specifiers = new Set<string>();
-
-    for (const moduleSpecifier of collectModuleSpecifierLiterals(
-        sourceText,
-        sourcePath,
-    )) {
-        specifiers.add(moduleSpecifier.text);
-    }
-
     return [...specifiers];
-};
-
-export const rewriteModuleSpecifiers = (
-    sourcePath: string,
-    sourceText: string,
-    rewriteSpecifier: ModuleSpecifierRewrite,
-): string => {
-    const replacements: ModuleSpecifierReplacement[] = [];
-
-    for (const literal of collectModuleSpecifierLiterals(
-        sourceText,
-        sourcePath,
-    )) {
-        const rewrittenSpecifier = rewriteSpecifier(literal.text);
-        if (
-            rewrittenSpecifier === undefined ||
-            rewrittenSpecifier === literal.text
-        ) {
-            continue;
-        }
-
-        replacements.push({
-            start: literal.start,
-            end: literal.end,
-            text: quoteModuleSpecifier(rewrittenSpecifier, literal.quote),
-        });
-    }
-
-    return replacements
-        .sort((left, right) => right.start - left.start)
-        .reduce(
-            (rewrittenText, replacement) =>
-                `${rewrittenText.slice(0, replacement.start)}${replacement.text}${rewrittenText.slice(replacement.end)}`,
-            sourceText,
-        );
 };

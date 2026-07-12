@@ -1,11 +1,10 @@
 use super::*;
 
-// Public key-switch component material for one evaluation-key share, along with
-// its canonical component-vector entries and root, as the deterministic fixture
-// builders assemble it before it is embedded into a share record.
+// Public key-switch component material for one evaluation-key share and its
+// canonical component-vector root, as the deterministic fixture builders
+// assemble it before moving the vectors into authenticated transport.
 pub(super) struct EvaluationKeyShareFixtureMaterial {
     pub(super) component_b_by_digit: Vec<Vec<Vec<u64>>>,
-    pub(super) component_vector_entries: Vec<serde_json::Value>,
     pub(super) component_vector_root: String,
 }
 
@@ -14,6 +13,16 @@ pub(super) struct EvaluationKeyShareFixtureMaterial {
 pub(super) struct RelinearizationKeyShareRoundsFixture {
     pub(super) rounds: serde_json::Value,
     pub(super) round_one_aggregate_diagonals_by_level: BTreeMap<u64, Vec<Vec<u64>>>,
+    pub(super) transported_component_materials: Vec<serde_json::Value>,
+}
+
+// The Galois key-share batches and their authenticated component-material
+// descriptors. Keeping the two together prevents a package record from being
+// assembled without the request-side material that production verification
+// resolves by root.
+pub(super) struct GaloisKeyShareBatchesFixture {
+    pub(super) batches: serde_json::Value,
+    pub(super) transported_component_materials: Vec<serde_json::Value>,
 }
 
 pub(in super::super) fn source_constant_commitments_from_fixture_package(
@@ -83,5 +92,6 @@ pub(super) use public_key_share_proofs::*;
 pub(super) use relinearization_key_share_rounds::*;
 pub(super) use trustee_evaluation_key_proofs::*;
 pub(super) use vss_public_material::{
-    compact_aggregate_threshold_proof_fixture, finalize_collective_setup_package,
+    DescriptorBackedVssProofMaterialFixture, compact_aggregate_threshold_proof_fixture,
+    descriptor_backed_vss_proof_material_fixture, finalize_collective_setup_package,
 };

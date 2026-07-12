@@ -9,13 +9,13 @@ use crate::bgv::setup::accepted_setup::{
 };
 use crate::bgv::setup::evaluation_key_share_material::EvaluationKeyShareProofFamily;
 use crate::bgv::setup::setup_proof::{
-    SETUP_PROOF_MATERIAL_ENCODING, SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
-    setup_proof_material_transport_hashes,
+    SETUP_PROOF_MATERIAL_ENCODING, authenticate_setup_proof_material_stream_for_test,
+    canonical_setup_proof_material_transport_accounting,
 };
-use crate::bgv::setup::trustee_evaluation_key_proof::prove_trustee_evaluation_key_proof_bytes;
 use crate::bgv::setup::trustee_evaluation_key_proof::{
     EvaluationKeyShareKind, TRUSTEE_EVALUATION_KEY_PROOF_FAMILY, TrusteeEvaluationKeyStatement,
-    TrusteeEvaluationKeyWitness, trustee_evaluation_key_proof_bytes_hash,
+    TrusteeEvaluationKeyWitness, prove_trustee_evaluation_key_proof_bytes,
+    trustee_evaluation_key_proof_bytes_hash, verify_trustee_evaluation_key_proof_bytes,
 };
 use crate::hashing::{derive_canonical_object_hash, to_hex};
 
@@ -61,16 +61,17 @@ fn trustee_proof_batch_size(value: Option<&str>, proof_count: usize) -> Result<u
 
 pub(in super::super) fn trustee_evaluation_key_proofs_object(
     package: &serde_json::Value,
+    proof_material_request: &serde_json::Value,
     round_one_aggregate_diagonals_by_level: &BTreeMap<u64, Vec<Vec<u64>>>,
 ) -> TrusteeEvaluationKeyProofFixture {
     let setup_context = &package["setupContext"];
     let schedule = &package["evaluatorKeySchedule"];
     let participant_count = participant_count_from_package(package);
     let trustee_roster_positions = (0..participant_count).collect::<Vec<_>>();
-    // The bridge material the verifier reconstructs; the package embeds it so an
-    // empty transport request reconstructs it.
+    // The bridge material the verifier reconstructs from the package records
+    // and their authenticated proof-material request.
     let verified_same_secret_bridge = package.get("sameSecretBridgeStatementSet").map(|_| {
-        verified_same_secret_bridge_material_from_package(package, &serde_json::json!({}))
+        verified_same_secret_bridge_material_from_package(package, proof_material_request)
             .expect("same-secret bridge material")
     });
     assert!(
@@ -98,7 +99,8 @@ pub(in super::super) fn trustee_evaluation_key_proofs_object(
                 let statement = trustee_evaluation_key_statement_from_package(
                     &TrusteeEvaluationKeyStatementInputs {
                         setup_package: package,
-                        transported_key_switch_component_material: None,
+                        transported_key_switch_component_material: proof_material_request
+                            .get("transportedEvaluationKeyShareComponentMaterial"),
                         verified_same_secret_bridge: verified_same_secret_bridge.as_ref(),
                         round_one_aggregate_diagonals_by_level,
                         trustee_roster_position,
@@ -135,6 +137,9 @@ pub(in super::super) fn trustee_evaluation_key_proofs_object(
                 let proof_bytes = checkpointed_proof_bytes(
                     TRUSTEE_EVALUATION_KEY_PROOF_CHECKPOINT_DIRECTORY,
                     &checkpoint_key,
+                    |proof_bytes| {
+                        verify_trustee_evaluation_key_proof_bytes(&statement, proof_bytes)
+                    },
                     || {
                         prove_trustee_evaluation_key_proof_bytes(
                             &statement,
@@ -162,18 +167,11 @@ pub(in super::super) fn trustee_evaluation_key_proofs_object(
                 });
                 let proof_material_root =
                     trustee_evaluation_key_proof_material_root_from_fixture_record(&record);
-                let transport_hashes = setup_proof_material_transport_hashes(
+                let transport_hashes = canonical_setup_proof_material_transport_accounting(
                     TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
                     &proof_bytes,
-                    SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
                 )
                 .expect("trustee evaluation-key proof transport hashes");
-                crate::bgv::setup::retain_generated_canonical_proof_material(
-                    TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
-                    proof_material_root.clone(),
-                    proof_bytes,
-                )
-                .expect("retain trustee evaluation-key proof material");
                 record["proofMaterialRoot"] = serde_json::json!(proof_material_root);
                 record["trusteeEvaluationKeyProofRoot"] = serde_json::json!(
                     derive_canonical_object_hash(&record)
@@ -198,21 +196,28 @@ pub(in super::super) fn trustee_evaluation_key_proofs_object(
                     trustee_roster_position,
                     record,
                     transported_proof_material,
+                    proof_material_root,
+                    proof_bytes,
                 )
             })
             .collect::<Vec<_>>();
         per_trustee_records.append(&mut batch_records);
     }
     let mut ordered_records = per_trustee_records;
-    ordered_records.sort_by_key(|(trustee_roster_position, _, _)| *trustee_roster_position);
-    let proof_records = ordered_records
-        .iter()
-        .map(|(_, record, _)| record.clone())
-        .collect::<Vec<_>>();
-    let transported_proof_materials = ordered_records
-        .into_iter()
-        .map(|(_, _, transported_proof_material)| transported_proof_material)
-        .collect::<Vec<_>>();
+    ordered_records.sort_by_key(|(trustee_roster_position, _, _, _, _)| *trustee_roster_position);
+    let mut proof_records = Vec::with_capacity(ordered_records.len());
+    let mut transported_proof_materials = Vec::with_capacity(ordered_records.len());
+    for (_, record, transported_proof_material, proof_material_root, proof_bytes) in ordered_records
+    {
+        authenticate_setup_proof_material_stream_for_test(
+            TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
+            &proof_material_root,
+            &proof_bytes,
+        )
+        .expect("authenticate trustee evaluation-key proof material stream");
+        proof_records.push(record);
+        transported_proof_materials.push(transported_proof_material);
+    }
 
     let mut galois_batches = package["galoisKeyShareBatches"]
         .as_array()
@@ -253,6 +258,7 @@ pub(in super::super) fn trustee_evaluation_key_proofs_object(
         "relinearizationCrpRoot": package["commonRandomness"]["publicDerivations"]["crpRoots"]["relinearizationCrpRoot"],
         "galoisKeyCrpRoot": package["commonRandomness"]["publicDerivations"]["crpRoots"]["galoisKeyCrpRoot"],
         "publicMatrixSeedHash": package["commonRandomness"]["publicMatrixSeedHash"],
+        "vssCoefficientCommitmentRoot": package["vssCoefficientCommitments"]["vssCoefficientCommitmentRoot"],
         "relinearizationKeyShareRoundsRoot": package["relinearizationKeyShareRounds"]["relinearizationKeyShareRoundsRoot"],
         "galoisKeyShareBatchRoots": galois_key_share_batch_roots,
         "proofRecords": proof_records,

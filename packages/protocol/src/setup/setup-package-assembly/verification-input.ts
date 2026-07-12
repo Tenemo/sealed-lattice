@@ -1,4 +1,7 @@
-import { setupProofMaterialReferenceSetForVerificationInput } from '../setup-proof-material-transport.js';
+import {
+    canonicalStreamTransportAccountingFromDescriptor,
+    type CanonicalStreamTransportAccounting,
+} from '../canonical-stream-descriptor.js';
 
 import {
     assertObjectRecord,
@@ -12,6 +15,94 @@ import type {
     SetupPackageVerificationInputSource,
 } from './types.js';
 
+type KernelTransportAccountingFieldNames = Readonly<{
+    readonly totalByteLength: string;
+    readonly fullObjectHash: string;
+    readonly chunkRoot: string;
+    readonly chunkHashes: string;
+}>;
+
+const directKernelTransportAccountingFieldNames: KernelTransportAccountingFieldNames =
+    {
+        totalByteLength: 'totalByteLength',
+        fullObjectHash: 'fullObjectHash',
+        chunkRoot: 'chunkRoot',
+        chunkHashes: 'chunkHashes',
+    };
+
+const proofPrefixedKernelTransportAccountingFieldNames: KernelTransportAccountingFieldNames =
+    {
+        totalByteLength: 'proofTotalByteLength',
+        fullObjectHash: 'proofFullObjectHash',
+        chunkRoot: 'proofChunkRoot',
+        chunkHashes: 'proofChunkHashes',
+    };
+
+const kernelTransportAccountingFields = (
+    accounting: CanonicalStreamTransportAccounting,
+    fieldNames: KernelTransportAccountingFieldNames,
+): JsonRecord => ({
+    [fieldNames.totalByteLength]: accounting.totalByteLength,
+    [fieldNames.fullObjectHash]: accounting.fullObjectHash,
+    [fieldNames.chunkRoot]: accounting.chunkRoot,
+    [fieldNames.chunkHashes]: accounting.chunkHashes,
+});
+
+const descriptorBackedMaterialReferenceForVerificationInput = (
+    materialValue: unknown,
+    materialPath: string,
+    accountingFieldNames?: KernelTransportAccountingFieldNames,
+): JsonRecord => {
+    const material = assertObjectRecord(materialValue, materialPath);
+    const accounting = canonicalStreamTransportAccountingFromDescriptor(
+        material.descriptorBytes,
+        `${materialPath}.descriptorBytes`,
+    );
+    const { descriptorBytes: omittedDescriptorBytes, ...materialReference } =
+        material;
+    void omittedDescriptorBytes;
+
+    return accountingFieldNames === undefined
+        ? materialReference
+        : {
+              ...materialReference,
+              ...kernelTransportAccountingFields(
+                  accounting,
+                  accountingFieldNames,
+              ),
+          };
+};
+
+const descriptorBackedMaterialSetForVerificationInput = (
+    materialSetValue: unknown,
+    materialSetPath: string,
+    materialArrayFieldName: string,
+    accountingFieldNames?: KernelTransportAccountingFieldNames,
+): JsonRecord | undefined => {
+    if (materialSetValue === undefined) {
+        return undefined;
+    }
+    const materialSet = assertObjectRecord(materialSetValue, materialSetPath);
+    const materials = materialSet[materialArrayFieldName];
+    if (!Array.isArray(materials)) {
+        throw new TypeError(
+            `${materialSetPath}.${materialArrayFieldName} must be an array.`,
+        );
+    }
+
+    return {
+        ...materialSet,
+        [materialArrayFieldName]: materials.map(
+            (materialValue, materialIndex) =>
+                descriptorBackedMaterialReferenceForVerificationInput(
+                    materialValue,
+                    `${materialSetPath}.${materialArrayFieldName}.${String(materialIndex)}`,
+                    accountingFieldNames,
+                ),
+        ),
+    };
+};
+
 export const createSetupPackageVerificationInput = (
     input: SetupPackageVerificationInputSource,
 ): SetupPackageVerificationInput => {
@@ -19,31 +110,55 @@ export const createSetupPackageVerificationInput = (
     assertProtocolHash(input.expectedRosterHash, 'expectedRosterHash');
 
     const transportedPublicKeyShareProofMaterial =
-        setupProofMaterialReferenceSetForVerificationInput(
+        descriptorBackedMaterialSetForVerificationInput(
             input.transportedPublicKeyShareProofMaterial,
+            'transportedPublicKeyShareProofMaterial',
+            'proofMaterials',
+            directKernelTransportAccountingFieldNames,
         );
     const transportedEvaluationKeyShareProofMaterial =
-        setupProofMaterialReferenceSetForVerificationInput(
+        descriptorBackedMaterialSetForVerificationInput(
             input.transportedEvaluationKeyShareProofMaterial,
+            'transportedEvaluationKeyShareProofMaterial',
+            'proofMaterials',
+            proofPrefixedKernelTransportAccountingFieldNames,
         );
     const transportedVssShareLinkageProofMaterial =
-        setupProofMaterialReferenceSetForVerificationInput(
+        descriptorBackedMaterialSetForVerificationInput(
             input.transportedVssShareLinkageProofMaterial,
+            'transportedVssShareLinkageProofMaterial',
+            'proofMaterials',
+            directKernelTransportAccountingFieldNames,
         );
     const transportedSameSecretBridgeProofMaterial =
-        setupProofMaterialReferenceSetForVerificationInput(
+        descriptorBackedMaterialSetForVerificationInput(
             input.transportedSameSecretBridgeProofMaterial,
+            'transportedSameSecretBridgeProofMaterial',
+            'proofMaterials',
+            directKernelTransportAccountingFieldNames,
         );
     const transportedPublicKeyShareMaterial =
         input.transportedPublicKeyShareMaterial === undefined
             ? undefined
-            : {
-                  objectType:
-                      input.transportedPublicKeyShareMaterial.objectType,
-                  publicKeyShareMaterialSetRoot:
-                      input.transportedPublicKeyShareMaterial
-                          .publicKeyShareMaterialSetRoot,
-              };
+            : descriptorBackedMaterialReferenceForVerificationInput(
+                  input.transportedPublicKeyShareMaterial,
+                  'transportedPublicKeyShareMaterial',
+                  directKernelTransportAccountingFieldNames,
+              );
+    const transportedEvaluationKeyShareComponentMaterial =
+        descriptorBackedMaterialSetForVerificationInput(
+            input.transportedEvaluationKeyShareComponentMaterial,
+            'transportedEvaluationKeyShareComponentMaterial',
+            'componentMaterials',
+            directKernelTransportAccountingFieldNames,
+        );
+    const transportedPublicEvaluationKeyMaterial =
+        descriptorBackedMaterialSetForVerificationInput(
+            input.transportedPublicEvaluationKeyMaterial,
+            'transportedPublicEvaluationKeyMaterial',
+            'publicEvaluationKeyMaterials',
+            directKernelTransportAccountingFieldNames,
+        );
 
     return {
         setupPackage: input.setupPackage,
@@ -79,11 +194,11 @@ export const createSetupPackageVerificationInput = (
                   transportedSameSecretBridgeProofMaterial:
                       transportedSameSecretBridgeProofMaterial,
               }),
-        ...(input.transportedEvaluationKeyShareComponentMaterial === undefined
+        ...(transportedEvaluationKeyShareComponentMaterial === undefined
             ? {}
             : {
                   transportedEvaluationKeyShareComponentMaterial:
-                      input.transportedEvaluationKeyShareComponentMaterial,
+                      transportedEvaluationKeyShareComponentMaterial,
               }),
         ...(input.transportedEvaluationKeyAggregateBindingOpenings === undefined
             ? {}
@@ -91,11 +206,11 @@ export const createSetupPackageVerificationInput = (
                   transportedEvaluationKeyAggregateBindingOpenings:
                       input.transportedEvaluationKeyAggregateBindingOpenings,
               }),
-        ...(input.transportedPublicEvaluationKeyMaterial === undefined
+        ...(transportedPublicEvaluationKeyMaterial === undefined
             ? {}
             : {
                   transportedPublicEvaluationKeyMaterial:
-                      input.transportedPublicEvaluationKeyMaterial,
+                      transportedPublicEvaluationKeyMaterial,
               }),
     };
 };

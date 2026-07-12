@@ -227,9 +227,11 @@ impl CanonicalStreamDomain {
 /// Its fields and constructor stay private to the stream engine. Downstream
 /// verifiers may consume the summary, but cannot create one from a caller-supplied
 /// digest or descriptor alone.
+#[derive(Debug)]
 pub(crate) struct VerifiedCanonicalStreamSummary {
     stream_domain: CanonicalStreamDomain,
     total_byte_length: u64,
+    ordered_chunk_digests: Vec<Hash512>,
     full_object_digest: Hash512,
     state_exact_output_hash: Option<Hash512>,
 }
@@ -241,6 +243,10 @@ impl VerifiedCanonicalStreamSummary {
 
     pub(crate) const fn total_byte_length(&self) -> u64 {
         self.total_byte_length
+    }
+
+    pub(crate) fn ordered_chunk_digests(&self) -> &[Hash512] {
+        &self.ordered_chunk_digests
     }
 
     pub(crate) const fn full_object_digest(&self) -> Hash512 {
@@ -465,6 +471,7 @@ impl CanonicalStreamVerifier {
         VerificationResult::valid(VerifiedCanonicalStreamSummary {
             stream_domain: self.stream_domain,
             total_byte_length: self.descriptor.total_byte_length,
+            ordered_chunk_digests: self.descriptor.ordered_chunk_digests,
             full_object_digest: self.descriptor.full_object_digest,
             state_exact_output_hash,
         })

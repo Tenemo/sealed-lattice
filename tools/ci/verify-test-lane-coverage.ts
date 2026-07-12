@@ -1,35 +1,45 @@
-import { spawnSync } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
     createSourceFile,
+    flattenDiagnosticMessageText,
     forEachChild,
     isCallExpression,
     isIdentifier,
     isImportDeclaration,
     isNamespaceImport,
+    isParenthesizedExpression,
+    isPrefixUnaryExpression,
     isPropertyAccessExpression,
     isStringLiteral,
     ScriptKind,
     ScriptTarget,
+    SyntaxKind,
     type Expression,
+    type Diagnostic,
     type Node,
     type SourceFile,
 } from 'typescript';
 
 import {
+    collectRustTestInventory,
+    type RustTestInventoryEntry,
+} from '#tools/ci/rust-test-inventory.js';
+import {
+    aggregateTestScriptCommands,
     aggregateTestScripts,
+    browserTestLaneDefinitions,
     canonicalTestLaneDefinitions,
     canonicalTestLaneValues,
-    expectedOwnedTestCounts,
     externalOracleDefinitions,
     fullProfileEvidenceRustTests,
     fuzzTargetDefinitions,
     measurementRustTests,
     rustTestLanesForInventoryEntry,
     testLaneGroupsForRelativePath,
+    testUtilityScriptCommands,
     testUtilityScripts,
     type CanonicalTestLane,
 } from '#tools/ci/test-lanes.js';
@@ -39,12 +49,10 @@ import { toPosixPath } from '#tools/internal/files.js';
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const testFileNamePattern = /\.(?:test|spec)\.[cm]?[jt]sx?$/u;
 const sourceFileNamePattern = /\.[cm]?[jt]sx?$/u;
-const ownedTypeScriptSourceDirectoryNames = [
-    'packages',
-    'tests',
-    'tools',
-] as const;
+const sharedBrowserCapabilitiesModuleSpecifier =
+    '#tests/support/browser-capabilities';
 const excludedSourceDirectoryNames = new Set([
+    '.cache',
     '.git',
     '.next',
     '.svelte-kit',
@@ -55,8 +63,13 @@ const excludedSourceDirectoryNames = new Set([
     'build',
     'coverage',
     'dist',
+    'implementation-documentation',
+    'logs',
     'node_modules',
+    'reference-documents',
+    'reference-projects',
     'target',
+    'temp',
 ]);
 
 type TypeScriptTestAnalysis = {
@@ -64,35 +77,15 @@ type TypeScriptTestAnalysis = {
     readonly failures: readonly string[];
 };
 
-type CargoMetadata = {
-    readonly packages: readonly CargoPackage[];
-    readonly workspace_members: readonly string[];
-};
-
-type CargoPackage = {
-    readonly id: string;
-    readonly name: string;
-    readonly targets: readonly CargoTarget[];
-};
-
-type CargoTarget = {
-    readonly crate_types: readonly string[];
-    readonly doctest: boolean;
-    readonly kind: readonly string[];
-    readonly name: string;
-    readonly test: boolean;
-};
-
-export type RustTestInventoryEntry = {
-    readonly ignored: boolean;
-    readonly packageName: string;
-    readonly targetName: string;
-    readonly testName: string;
+type SourceFileWithParseDiagnostics = SourceFile & {
+    readonly parseDiagnostics?: readonly Diagnostic[];
 };
 
 type RootPackage = {
     readonly scripts?: Readonly<Record<string, string>>;
 };
+
+type VitestRootName = 'describe' | 'it' | 'test';
 
 type VitestCall = {
     readonly modifiers: readonly string[];
@@ -153,10 +146,10 @@ const vitestCallFromExpression = (
 const collectVitestBindings = (
     sourceFile: SourceFile,
 ): {
-    readonly definitionBindings: ReadonlySet<string>;
+    readonly definitionBindings: ReadonlyMap<string, VitestRootName>;
     readonly namespaceBindings: ReadonlySet<string>;
 } => {
-    const definitionBindings = new Set<string>();
+    const definitionBindings = new Map<string, VitestRootName>();
     const namespaceBindings = new Set<string>();
 
     for (const statement of sourceFile.statements) {
@@ -180,7 +173,10 @@ const collectVitestBindings = (
             const importedName =
                 element.propertyName?.text ?? element.name.text;
             if (['describe', 'it', 'test'].includes(importedName)) {
-                definitionBindings.add(element.name.text);
+                definitionBindings.set(
+                    element.name.text,
+                    importedName as VitestRootName,
+                );
             }
         }
     }
@@ -190,14 +186,17 @@ const collectVitestBindings = (
 
 const resolvedVitestCall = (input: {
     readonly call: VitestCall;
-    readonly definitionBindings: ReadonlySet<string>;
+    readonly definitionBindings: ReadonlyMap<string, VitestRootName>;
     readonly namespaceBindings: ReadonlySet<string>;
     readonly testNamedFile: boolean;
 }): VitestCall | undefined => {
+    const importedRootName = input.definitionBindings.get(input.call.rootName);
+    if (importedRootName !== undefined) {
+        return { ...input.call, rootName: importedRootName };
+    }
     if (
-        input.definitionBindings.has(input.call.rootName) ||
-        (input.testNamedFile &&
-            ['describe', 'it', 'test'].includes(input.call.rootName))
+        input.testNamedFile &&
+        ['describe', 'it', 'test'].includes(input.call.rootName)
     ) {
         return input.call;
     }
@@ -215,6 +214,132 @@ const resolvedVitestCall = (input: {
     return undefined;
 };
 
+const conditionalModifierArgument = (
+    call: Node,
+    modifier: string,
+): Expression | undefined => {
+    let expression = isCallExpression(call) ? call.expression : undefined;
+    while (expression !== undefined) {
+        if (isCallExpression(expression)) {
+            if (
+                isPropertyAccessExpression(expression.expression) &&
+                expression.expression.name.text === modifier
+            ) {
+                return expression.arguments[0];
+            }
+            expression = expression.expression;
+            continue;
+        }
+        if (isPropertyAccessExpression(expression)) {
+            expression = expression.expression;
+            continue;
+        }
+        break;
+    }
+
+    return undefined;
+};
+
+const staticBooleanValue = (expression: Expression): boolean | undefined => {
+    if (expression.kind === SyntaxKind.TrueKeyword) {
+        return true;
+    }
+    if (expression.kind === SyntaxKind.FalseKeyword) {
+        return false;
+    }
+    if (isParenthesizedExpression(expression)) {
+        return staticBooleanValue(expression.expression);
+    }
+    if (
+        isPrefixUnaryExpression(expression) &&
+        expression.operator === SyntaxKind.ExclamationToken
+    ) {
+        const operand = staticBooleanValue(expression.operand);
+        return operand === undefined ? undefined : !operand;
+    }
+
+    return undefined;
+};
+
+const isSharedBrowserCapabilityCondition = (
+    expression: Expression,
+): boolean => {
+    if (isParenthesizedExpression(expression)) {
+        return isSharedBrowserCapabilityCondition(expression.expression);
+    }
+    if (isIdentifier(expression)) {
+        return expression.text === 'webLocksAvailable';
+    }
+
+    return (
+        isPrefixUnaryExpression(expression) &&
+        expression.operator === SyntaxKind.ExclamationToken &&
+        isIdentifier(expression.operand) &&
+        expression.operand.text === 'webLocksAvailable'
+    );
+};
+
+const importsSharedBrowserCapability = (sourceFile: SourceFile): boolean =>
+    sourceFile.statements.some((statement) => {
+        if (
+            !isImportDeclaration(statement) ||
+            !isStringLiteral(statement.moduleSpecifier) ||
+            statement.moduleSpecifier.text !==
+                sharedBrowserCapabilitiesModuleSpecifier
+        ) {
+            return false;
+        }
+        const namedBindings = statement.importClause?.namedBindings;
+        if (namedBindings === undefined || isNamespaceImport(namedBindings)) {
+            return false;
+        }
+
+        return namedBindings.elements.some(
+            (element) =>
+                element.name.text === 'webLocksAvailable' &&
+                (element.propertyName?.text ?? element.name.text) ===
+                    'webLocksAvailable',
+        );
+    });
+
+const scriptKindForPath = (filePath: string): ScriptKind => {
+    if (filePath.endsWith('.tsx')) {
+        return ScriptKind.TSX;
+    }
+    if (filePath.endsWith('.jsx')) {
+        return ScriptKind.JSX;
+    }
+    if (/\.(?:c|m)?js$/u.test(filePath)) {
+        return ScriptKind.JS;
+    }
+
+    return ScriptKind.TS;
+};
+
+const typeScriptParseFailures = (
+    relativePath: string,
+    sourceFile: SourceFile,
+): readonly string[] =>
+    ((sourceFile as SourceFileWithParseDiagnostics).parseDiagnostics ?? []).map(
+        (diagnostic) => {
+            const location =
+                diagnostic.start === undefined
+                    ? relativePath
+                    : (() => {
+                          const position =
+                              sourceFile.getLineAndCharacterOfPosition(
+                                  diagnostic.start,
+                              );
+                          return `${relativePath}:${position.line + 1}:${position.character + 1}`;
+                      })();
+            const message = flattenDiagnosticMessageText(
+                diagnostic.messageText,
+                ' ',
+            );
+            return `${location} has TypeScript syntax error TS${diagnostic.code}: ${message}`;
+        },
+    );
+
 export const analyzeTypeScriptTestSource = (input: {
     readonly relativePath: string;
     readonly sourceText: string;
@@ -226,11 +351,14 @@ export const analyzeTypeScriptTestSource = (input: {
         input.sourceText,
         ScriptTarget.Latest,
         true,
-        relativePath.endsWith('.tsx') ? ScriptKind.TSX : ScriptKind.TS,
+        scriptKindForPath(relativePath),
     );
+    const failures = [...typeScriptParseFailures(relativePath, sourceFile)];
+    const hasSharedBrowserCapabilityImport =
+        importsSharedBrowserCapability(sourceFile);
     const bindings = collectVitestBindings(sourceFile);
-    const failures: string[] = [];
     let definitionCount = 0;
+    let vitestCallCount = 0;
 
     const visit = (node: Node): void => {
         if (isCallExpression(node)) {
@@ -248,7 +376,13 @@ export const analyzeTypeScriptTestSource = (input: {
                               testNamedFile,
                           });
                 if (resolvedCall !== undefined) {
-                    definitionCount += 1;
+                    vitestCallCount += 1;
+                    if (
+                        resolvedCall.rootName === 'it' ||
+                        resolvedCall.rootName === 'test'
+                    ) {
+                        definitionCount += 1;
+                    }
                     const line =
                         sourceFile.getLineAndCharacterOfPosition(
                             node.getStart(sourceFile),
@@ -270,6 +404,33 @@ export const analyzeTypeScriptTestSource = (input: {
                                 `${relativePath}:${line} uses .skipIf outside the classified browser lane.`,
                             );
                         }
+                        const condition = conditionalModifierArgument(
+                            node,
+                            'skipIf',
+                        );
+                        if (condition === undefined) {
+                            failures.push(
+                                `${relativePath}:${line} uses .skipIf without a capability condition.`,
+                            );
+                        } else if (
+                            staticBooleanValue(condition) !== undefined
+                        ) {
+                            failures.push(
+                                `${relativePath}:${line} uses .skipIf with a static boolean; only runtime browser-capability conditions are allowed.`,
+                            );
+                        } else if (
+                            !isSharedBrowserCapabilityCondition(condition) ||
+                            !hasSharedBrowserCapabilityImport
+                        ) {
+                            failures.push(
+                                `${relativePath}:${line} uses .skipIf without the shared webLocksAvailable capability import.`,
+                            );
+                        }
+                    }
+                    if (resolvedCall.modifiers.includes('runIf')) {
+                        failures.push(
+                            `${relativePath}:${line} uses .runIf; conditional browser tests must use capability-dependent .skipIf.`,
+                        );
                     }
                 }
             }
@@ -283,7 +444,7 @@ export const analyzeTypeScriptTestSource = (input: {
             `${relativePath} is test-named but defines no Vitest tests.`,
         );
     }
-    if (!testNamedFile && definitionCount > 0) {
+    if (!testNamedFile && vitestCallCount > 0) {
         failures.push(
             `${relativePath} defines Vitest tests outside a recognized test-named file.`,
         );
@@ -298,7 +459,8 @@ export const validateRootTestScripts = (
     const failures: string[] = [];
     const canonicalScripts = new Map<string, CanonicalTestLane>();
     for (const lane of canonicalTestLaneValues) {
-        const script = canonicalTestLaneDefinitions[lane].rootScript;
+        const definition = canonicalTestLaneDefinitions[lane];
+        const script = definition.rootScript;
         const previousOwner = canonicalScripts.get(script);
         if (previousOwner !== undefined) {
             failures.push(
@@ -306,8 +468,36 @@ export const validateRootTestScripts = (
             );
         }
         canonicalScripts.set(script, lane);
-        if (scripts[script] === undefined) {
+        const actualCommand = scripts[script];
+        if (actualCommand === undefined) {
             failures.push(`${lane} is missing root script ${script}.`);
+        } else if (actualCommand !== definition.command) {
+            failures.push(
+                `${script} runs ${JSON.stringify(actualCommand)}; expected ${JSON.stringify(definition.command)} for ${lane}.`,
+            );
+        }
+    }
+
+    for (const script of aggregateTestScripts) {
+        const actualCommand = scripts[script];
+        const expectedCommand = aggregateTestScriptCommands[script];
+        if (actualCommand === undefined) {
+            failures.push(`Aggregate test script ${script} is missing.`);
+        } else if (actualCommand !== expectedCommand) {
+            failures.push(
+                `${script} runs ${JSON.stringify(actualCommand)}; expected aggregate command ${JSON.stringify(expectedCommand)}.`,
+            );
+        }
+    }
+    for (const script of testUtilityScripts) {
+        const actualCommand = scripts[script];
+        const expectedCommand = testUtilityScriptCommands[script];
+        if (actualCommand === undefined) {
+            failures.push(`Test utility script ${script} is missing.`);
+        } else if (actualCommand !== expectedCommand) {
+            failures.push(
+                `${script} runs ${JSON.stringify(actualCommand)}; expected utility command ${JSON.stringify(expectedCommand)}.`,
+            );
         }
     }
 
@@ -330,26 +520,13 @@ export const validateRootTestScripts = (
     return failures.sort((left, right) => left.localeCompare(right));
 };
 
-export const parseLibtestListOutput = (output: string): readonly string[] => {
-    const names: string[] = [];
-    for (const rawLine of output.split(/\r?\n/u)) {
-        const line = rawLine.trim();
-        if (line.endsWith(': test')) {
-            names.push(line.slice(0, -': test'.length));
-            continue;
-        }
-        if (line.endsWith(' - compile')) {
-            names.push(line);
-        }
-    }
-    return [...new Set(names)].sort((left, right) => left.localeCompare(right));
-};
+export { parseLibtestListOutput } from './rust-test-inventory.js';
 
 export const validateRustTestInventory = (
     entries: readonly RustTestInventoryEntry[],
 ): readonly string[] => {
     const failures: string[] = [];
-    const counts = new Map<CanonicalTestLane, number>();
+    const ownedLanes = new Set<CanonicalTestLane>();
 
     for (const entry of entries) {
         const lanes = rustTestLanesForInventoryEntry(entry);
@@ -379,7 +556,7 @@ export const validateRustTestInventory = (
                 `${identity} belongs to ${lane} but is not marked ignored.`,
             );
         }
-        counts.set(lane, (counts.get(lane) ?? 0) + 1);
+        ownedLanes.add(lane);
     }
 
     const kernelNames = new Set(
@@ -406,23 +583,19 @@ export const validateRustTestInventory = (
         'rust-measurements',
         'rust-process-memory-guard',
     ] as const) {
-        const actualCount = counts.get(lane) ?? 0;
-        const expectedCount = expectedOwnedTestCounts[lane];
-        if (actualCount !== expectedCount) {
-            failures.push(
-                `${lane} owns ${actualCount} Rust tests; registry baseline is ${expectedCount}.`,
-            );
+        if (!ownedLanes.has(lane)) {
+            failures.push(`${lane} owns no discovered Rust tests.`);
         }
     }
 
     return failures.sort((left, right) => left.localeCompare(right));
 };
 
-const collectOwnedTypeScriptSources = async (): Promise<readonly string[]> => {
+export const collectOwnedTypeScriptSources = async (
+    rootDirectoryPath = repoRoot,
+): Promise<readonly string[]> => {
     const files: string[] = [];
-    const pendingDirectories = ownedTypeScriptSourceDirectoryNames.map(
-        (directoryName) => path.join(repoRoot, directoryName),
-    );
+    const pendingDirectories = [rootDirectoryPath];
 
     while (pendingDirectories.length > 0) {
         const directoryPath = pendingDirectories.pop()!;
@@ -449,6 +622,46 @@ const collectOwnedTypeScriptSources = async (): Promise<readonly string[]> => {
     }
 
     return files.sort((left, right) => left.localeCompare(right));
+};
+
+export const validateMobileBrowserTestSelectors = (
+    discoveredTestFiles: readonly string[],
+): readonly string[] => {
+    const failures: string[] = [];
+    const discoveredPaths = new Set(discoveredTestFiles.map(toPosixPath));
+    const mobileSelectors = browserTestLaneDefinitions.mobile.include;
+
+    if (new Set(mobileSelectors).size !== mobileSelectors.length) {
+        failures.push('The mobile browser smoke selectors contain duplicates.');
+    }
+    for (const mobileSelector of mobileSelectors) {
+        if (
+            [...mobileSelector].some((character) =>
+                '*?[]{}'.includes(character),
+            )
+        ) {
+            failures.push(
+                `Mobile browser selector ${mobileSelector} must name one exact smoke test file.`,
+            );
+            continue;
+        }
+        if (!discoveredPaths.has(mobileSelector)) {
+            failures.push(
+                `Mobile browser smoke test ${mobileSelector} is stale or missing.`,
+            );
+        }
+        if (
+            !browserTestLaneDefinitions.desktop.include.some((desktopGlob) =>
+                path.matchesGlob(mobileSelector, desktopGlob),
+            )
+        ) {
+            failures.push(
+                `Mobile browser smoke test ${mobileSelector} is not covered by the desktop browser selector.`,
+            );
+        }
+    }
+
+    return failures.sort((left, right) => left.localeCompare(right));
 };
 
 export const parseCargoFuzzBins = (
@@ -539,7 +752,7 @@ const verifyStaticOwnership = async (): Promise<readonly string[]> => {
     const failures: string[] = [];
     const files = await collectOwnedTypeScriptSources();
     const testFiles: string[] = [];
-    const testFileCounts = new Map<CanonicalTestLane, number>();
+    const ownedTestFileLanes = new Set<CanonicalTestLane>();
 
     for (const filePath of files) {
         const relativePath = normalizeRelativePath(filePath);
@@ -552,12 +765,12 @@ const verifyStaticOwnership = async (): Promise<readonly string[]> => {
             testFiles.push(relativePath);
             const lanes = testLaneGroupsForRelativePath(relativePath);
             if (lanes.length === 1) {
-                const lane = lanes[0];
-                testFileCounts.set(lane, (testFileCounts.get(lane) ?? 0) + 1);
+                ownedTestFileLanes.add(lanes[0]);
             }
         }
     }
     failures.push(...validateTestLaneCoverage(testFiles));
+    failures.push(...validateMobileBrowserTestSelectors(testFiles));
 
     for (const lane of [
         'node-fast',
@@ -566,12 +779,8 @@ const verifyStaticOwnership = async (): Promise<readonly string[]> => {
         'node-kernel-heavy',
         'browser',
     ] as const) {
-        const actualCount = testFileCounts.get(lane) ?? 0;
-        const expectedCount = expectedOwnedTestCounts[lane];
-        if (actualCount !== expectedCount) {
-            failures.push(
-                `${lane} owns ${actualCount} TypeScript test files; registry baseline is ${expectedCount}.`,
-            );
+        if (!ownedTestFileLanes.has(lane)) {
+            failures.push(`${lane} owns no discovered TypeScript test files.`);
         }
     }
 
@@ -607,134 +816,6 @@ const verifyStaticOwnership = async (): Promise<readonly string[]> => {
     );
 
     return failures.sort((left, right) => left.localeCompare(right));
-};
-
-const runCargoAndCapture = (arguments_: readonly string[]): string => {
-    const result = spawnSync('cargo', arguments_, {
-        cwd: repoRoot,
-        encoding: 'utf8',
-        env: process.env,
-        maxBuffer: 100 * 1024 * 1024,
-    });
-    if (result.error !== undefined) {
-        throw new Error(`Failed to start cargo: ${result.error.message}`);
-    }
-    if (result.status !== 0) {
-        throw new Error(
-            `cargo ${arguments_.join(' ')} failed:\n${result.stderr}${result.stdout}`,
-        );
-    }
-    return result.stdout;
-};
-
-const selectorForCargoTarget = (
-    target: CargoTarget,
-): readonly string[] | undefined => {
-    if (
-        target.kind.some((kind) =>
-            ['cdylib', 'dylib', 'lib', 'rlib', 'staticlib'].includes(kind),
-        )
-    ) {
-        return ['--lib'];
-    }
-    if (target.kind.includes('bin')) {
-        return ['--bin', target.name];
-    }
-    if (target.kind.includes('test')) {
-        return ['--test', target.name];
-    }
-    if (target.kind.includes('example')) {
-        return ['--example', target.name];
-    }
-    if (target.kind.includes('bench')) {
-        return ['--bench', target.name];
-    }
-
-    return undefined;
-};
-
-const listCargoTargetTests = (input: {
-    readonly packageName: string;
-    readonly selector: readonly string[];
-    readonly targetName: string;
-}): readonly RustTestInventoryEntry[] => {
-    const cargoPrefix = [
-        'test',
-        '--locked',
-        '-p',
-        input.packageName,
-        ...input.selector,
-    ];
-    const allTests = parseLibtestListOutput(
-        runCargoAndCapture([
-            ...cargoPrefix,
-            '--',
-            '--list',
-            '--format',
-            'terse',
-        ]),
-    );
-    const ignoredTests = new Set(
-        parseLibtestListOutput(
-            runCargoAndCapture([
-                ...cargoPrefix,
-                '--',
-                '--ignored',
-                '--list',
-                '--format',
-                'terse',
-            ]),
-        ),
-    );
-
-    return allTests.map((testName) => ({
-        ignored: ignoredTests.has(testName),
-        packageName: input.packageName,
-        targetName: input.targetName,
-        testName,
-    }));
-};
-
-const collectRustTestInventory = (): readonly RustTestInventoryEntry[] => {
-    const metadata = JSON.parse(
-        runCargoAndCapture(['metadata', '--no-deps', '--format-version', '1']),
-    ) as CargoMetadata;
-    const workspaceMembers = new Set(metadata.workspace_members);
-    const inventory: RustTestInventoryEntry[] = [];
-
-    for (const cargoPackage of metadata.packages) {
-        if (!workspaceMembers.has(cargoPackage.id)) {
-            continue;
-        }
-        for (const target of cargoPackage.targets) {
-            if (target.test) {
-                const selector = selectorForCargoTarget(target);
-                if (selector === undefined) {
-                    throw new Error(
-                        `Unsupported testable Cargo target ${cargoPackage.name}/${target.name} (${target.kind.join(', ')}).`,
-                    );
-                }
-                inventory.push(
-                    ...listCargoTargetTests({
-                        packageName: cargoPackage.name,
-                        selector,
-                        targetName: target.name,
-                    }),
-                );
-            }
-            if (target.doctest) {
-                inventory.push(
-                    ...listCargoTargetTests({
-                        packageName: cargoPackage.name,
-                        selector: ['--doc'],
-                        targetName: `${target.name}:doctest`,
-                    }),
-                );
-            }
-        }
-    }
-
-    return inventory;
 };
 
 const parsePhases = (

@@ -172,23 +172,8 @@ export type VssCoefficientCommitmentMaterialSet = Readonly<
     }
 >;
 
-export type VssCoefficientCommitmentMaterialBinaryReference = Readonly<
-    Omit<
-        VssCoefficientCommitmentMaterialSet,
-        'materialEncoding' | 'coefficientCommitments'
-    > & {
-        readonly materialEncoding: typeof vssCoefficientCommitmentMaterialTransportEncoding;
-        readonly chunkCount: number;
-        readonly totalByteLength: number;
-        readonly fullObjectHash: ProtocolHash;
-        readonly chunkRoot: ProtocolHash;
-        readonly chunkHashes: readonly ProtocolHash[];
-    }
->;
-
 export type SetupPackageVssCoefficientCommitmentMaterialSet =
-    | VssCoefficientCommitmentMaterialSet
-    | VssCoefficientCommitmentMaterialBinaryReference;
+    VssCoefficientCommitmentMaterialSet;
 
 export type VssSourceTrusteeOpeningMaterial = Readonly<{
     readonly sourceTrusteeIdentity: string;

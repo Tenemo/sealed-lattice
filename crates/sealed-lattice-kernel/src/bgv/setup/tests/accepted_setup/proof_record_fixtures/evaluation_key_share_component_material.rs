@@ -1,10 +1,12 @@
 use super::*;
 
 use crate::bgv::setup::evaluation_key_share_material::{
-    EvaluationKeyShareProofFamily, evaluation_key_share_component_vector_hash,
-    evaluation_key_share_component_vector_root,
+    EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING, EvaluationKeyShareProofFamily,
+    evaluation_key_share_component_material_reference_root,
+    evaluation_key_share_component_vector_hash, evaluation_key_share_component_vector_root,
 };
 use crate::bgv::setup::trustee_evaluation_key_proof::public_key_switch_sample;
+use crate::foundation::{CanonicalStreamDomain, CanonicalStreamWriter};
 use crate::hashing::derive_canonical_object_hash;
 
 // Deterministic public key-switch component material for one evaluation-key
@@ -82,7 +84,7 @@ pub(in super::super) fn evaluation_key_share_fixture_material(
             .collect::<Vec<_>>();
         component_b_by_digit.push(component_b_by_limb);
     }
-    let (component_vector_entries, component_vector_root) = evaluation_key_component_vector_entries(
+    let component_vector_root = evaluation_key_component_vector_root(
         proof_family,
         &key_switch_domain,
         key_switch_seed_hex,
@@ -93,9 +95,179 @@ pub(in super::super) fn evaluation_key_share_fixture_material(
 
     EvaluationKeyShareFixtureMaterial {
         component_b_by_digit,
-        component_vector_entries,
         component_vector_root,
     }
+}
+
+pub(in super::super) struct AuthenticatedEvaluationKeyShareComponentMaterialFixture {
+    pub(in super::super) material_root: String,
+    pub(in super::super) transported_material: serde_json::Value,
+}
+
+// Moves one deterministic share's component vectors through the same canonical
+// stream verifier used by the browser bridge. The package retains only the
+// canonical material reference; statement construction and terminal
+// verification resolve the authenticated bytes from the verifier-owned store.
+pub(in super::super) fn authenticate_evaluation_key_share_component_material_fixture(
+    proof_family: EvaluationKeyShareProofFamily,
+    record: &serde_json::Value,
+    fixture_material: &EvaluationKeyShareFixtureMaterial,
+) -> AuthenticatedEvaluationKeyShareComponentMaterialFixture {
+    let material_root =
+        evaluation_key_share_component_material_reference_root(proof_family, record)
+            .expect("evaluation-key component material reference root");
+    let material_bytes = encode_evaluation_key_share_component_material(
+        record,
+        &fixture_material.component_b_by_digit,
+    );
+    let total_byte_length =
+        u64::try_from(material_bytes.len()).expect("component material byte length fits u64");
+    let chunk_size = usize::try_from(SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES)
+        .expect("component material chunk size fits usize");
+    let mut descriptor_writer =
+        CanonicalStreamWriter::new(CanonicalStreamDomain::EvaluatorKeyStore, total_byte_length)
+            .expect("component material canonical descriptor writer");
+    for (chunk_index, chunk) in material_bytes.chunks(chunk_size).enumerate() {
+        descriptor_writer
+            .absorb_chunk(chunk_index, chunk)
+            .expect("canonical component material descriptor chunk");
+    }
+    let descriptor = descriptor_writer
+        .finish()
+        .expect("canonical component material descriptor");
+    let descriptor_bytes = descriptor
+        .encode()
+        .expect("canonical component material descriptor bytes");
+    let chunk_hashes = descriptor
+        .ordered_chunk_digests
+        .iter()
+        .map(|digest| digest.to_lowercase_hex())
+        .collect::<Vec<_>>();
+    let full_object_hash = descriptor.full_object_digest.to_lowercase_hex();
+    let chunk_root = derive_canonical_object_hash(&serde_json::json!({
+        "objectType": "SetupTransportChunkManifest",
+        "chunkCount": chunk_hashes.len(),
+        "totalByteLength": total_byte_length,
+        "chunkHashes": chunk_hashes,
+        "fullObjectHash": full_object_hash,
+    }))
+    .expect("evaluation-key component material chunk root");
+
+    authenticate_evaluation_key_share_component_material_stream(
+        proof_family,
+        &material_root,
+        &descriptor_bytes,
+        &material_bytes,
+        chunk_size,
+    );
+
+    let level = record["level"].as_u64().expect("component material level");
+    let digit_count = level
+        .checked_add(1)
+        .expect("component material digit count");
+    AuthenticatedEvaluationKeyShareComponentMaterialFixture {
+        material_root: material_root.clone(),
+        transported_material: serde_json::json!({
+            "objectType": "SetupTransportedEvaluationKeyShareComponentMaterial",
+            "proofFamily": proof_family.proof_family(),
+            "keySwitchMaterialEncoding": EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
+            "trusteeIdentity": record["trusteeIdentity"],
+            "trusteeRosterPosition": record["trusteeRosterPosition"],
+            "keySwitchDomain": record["keySwitchDomain"],
+            "keySwitchSeedHex": record["keySwitchSeedHex"],
+            "level": level,
+            "ringDegree": record["ringDegree"],
+            "digitCount": digit_count,
+            "rnsLimbCount": digit_count,
+            "keySwitchComponentVectorRoot": record["keySwitchComponentVectorRoot"],
+            "keySwitchComponentMaterialRoot": material_root,
+            "chunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
+            "chunkCount": chunk_hashes.len(),
+            "totalByteLength": total_byte_length,
+            "fullObjectHash": full_object_hash,
+            "chunkRoot": chunk_root,
+            "chunkHashes": chunk_hashes,
+        }),
+    }
+}
+
+fn encode_evaluation_key_share_component_material(
+    record: &serde_json::Value,
+    component_b_by_digit: &[Vec<Vec<u64>>],
+) -> Vec<u8> {
+    const COMPONENT_MATERIAL_MAGIC: &[u8; 8] = b"SLEKCMV1";
+
+    let level = record["level"].as_u64().expect("component material level");
+    let ring_degree = record["ringDegree"]
+        .as_u64()
+        .expect("component material ring degree");
+    let digit_count = level
+        .checked_add(1)
+        .expect("component material digit count");
+    let expected_digit_count =
+        usize::try_from(digit_count).expect("component material digit count fits usize");
+    let expected_ring_degree =
+        usize::try_from(ring_degree).expect("component material ring degree fits usize");
+    assert_eq!(component_b_by_digit.len(), expected_digit_count);
+
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(COMPONENT_MATERIAL_MAGIC);
+    for word in [level, ring_degree, digit_count, digit_count] {
+        bytes.extend_from_slice(&word.to_le_bytes());
+    }
+    for (digit_index, component_b_by_limb) in component_b_by_digit.iter().enumerate() {
+        assert_eq!(component_b_by_limb.len(), expected_digit_count);
+        for (rns_limb_index, coefficients) in component_b_by_limb.iter().enumerate() {
+            assert_eq!(coefficients.len(), expected_ring_degree);
+            for word in [
+                u64::try_from(digit_index).expect("digit index fits u64"),
+                u64::try_from(rns_limb_index).expect("RNS limb index fits u64"),
+                DATA_PRIMES[rns_limb_index],
+                ring_degree,
+            ] {
+                bytes.extend_from_slice(&word.to_le_bytes());
+            }
+            for coefficient in coefficients {
+                bytes.extend_from_slice(&coefficient.to_le_bytes());
+            }
+        }
+    }
+
+    bytes
+}
+
+fn authenticate_evaluation_key_share_component_material_stream(
+    proof_family: EvaluationKeyShareProofFamily,
+    material_root: &str,
+    descriptor_bytes: &[u8],
+    material_bytes: &[u8],
+    chunk_size: usize,
+) {
+    let family_code = match proof_family {
+        EvaluationKeyShareProofFamily::Relinearization => crate::bgv::setup::canonical_stream_transport::BGV_CANONICAL_STREAM_FAMILY_RELINEARIZATION_COMPONENT,
+        EvaluationKeyShareProofFamily::Galois => crate::bgv::setup::canonical_stream_transport::BGV_CANONICAL_STREAM_FAMILY_GALOIS_COMPONENT,
+    };
+    let material_root_bytes =
+        crate::transcript_core::decode_hex(material_root).expect("component material root bytes");
+    let capability = [0x63; crate::foundation::CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH];
+    let stream = crate::bgv::setup::begin_bgv_canonical_stream(
+        family_code,
+        &material_root_bytes,
+        descriptor_bytes,
+        capability,
+    )
+    .expect("begin authenticated component material stream");
+    for (chunk_index, chunk) in material_bytes.chunks(chunk_size).enumerate() {
+        crate::bgv::setup::absorb_bgv_canonical_stream_chunk(
+            stream.handle,
+            &capability,
+            u32::try_from(chunk_index).expect("component material chunk index fits u32"),
+            chunk,
+        )
+        .expect("authenticate component material chunk");
+    }
+    crate::bgv::setup::finish_bgv_canonical_stream(stream.handle, &capability)
+        .expect("finish authenticated component material stream");
 }
 
 pub(in super::super) fn evaluation_key_secret_coefficients_for_fixture(
@@ -207,14 +379,14 @@ pub(in super::super) fn evaluation_key_error_coefficients_for_fixture(
         .collect()
 }
 
-fn evaluation_key_component_vector_entries(
+fn evaluation_key_component_vector_root(
     proof_family: EvaluationKeyShareProofFamily,
     key_switch_domain: &str,
     key_switch_seed_hex: &str,
     level: usize,
     ring_degree: usize,
     component_b_by_digit: &[Vec<Vec<u64>>],
-) -> (Vec<serde_json::Value>, String) {
+) -> String {
     let entries = component_b_by_digit
         .iter()
         .enumerate()
@@ -235,7 +407,7 @@ fn evaluation_key_component_vector_entries(
                 })
         })
         .collect::<Vec<_>>();
-    let root = evaluation_key_share_component_vector_root(
+    evaluation_key_share_component_vector_root(
         proof_family,
         key_switch_domain,
         key_switch_seed_hex,
@@ -243,9 +415,7 @@ fn evaluation_key_component_vector_entries(
         ring_degree,
         &entries,
     )
-    .expect("evaluation-key component vector root");
-
-    (entries, root)
+    .expect("evaluation-key component vector root")
 }
 
 // The shared relinearization key-switch sample seed, byte-identical to the

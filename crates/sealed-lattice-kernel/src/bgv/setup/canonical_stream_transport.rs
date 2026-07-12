@@ -8,11 +8,14 @@ use crate::{
     foundation::{
         CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH, CANONICAL_STREAM_RUNTIME_INTERNAL_FAILURE,
         CANONICAL_STREAM_RUNTIME_INVALID_SESSION, CanonicalStreamDomain,
-        CanonicalStreamRuntimeBegin, RefusalReason, absorb_canonical_stream_chunk,
-        begin_canonical_stream_verifier, cancel_canonical_stream, finish_canonical_stream_verifier,
+        CanonicalStreamRuntimeBegin, CanonicalStreamVerifier, FOUNDATION_PROFILE, RefusalReason,
+        VerifiedCanonicalStreamSummary, absorb_canonical_stream_chunk,
+        begin_canonical_stream_verifier, cancel_canonical_stream,
+        derive_canonical_stream_descriptor, finish_canonical_stream_verifier_with_summary,
     },
-    hashing::to_hex,
+    hashing::{derive_canonical_object_hash, to_hex},
 };
+use serde_json::json;
 
 use super::{
     accepted_setup::{
@@ -48,6 +51,41 @@ const MATERIAL_ROOT_BYTE_LENGTH: usize = 64;
 struct VerifiedCanonicalProofMaterial {
     proof_bytes: BgvProofMaterialBytes,
     proof_family: &'static str,
+    stream_summary: Arc<VerifiedCanonicalStreamSummary>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::bgv::setup) struct AuthenticatedSetupTransportAccounting {
+    pub(in crate::bgv::setup) total_byte_length: u64,
+    pub(in crate::bgv::setup) full_object_hash: String,
+    pub(in crate::bgv::setup) chunk_root: String,
+    pub(in crate::bgv::setup) chunk_hashes: Vec<String>,
+}
+
+pub(in crate::bgv::setup) fn authenticated_setup_transport_accounting(
+    stream_summary: &VerifiedCanonicalStreamSummary,
+) -> CanonicalResult<AuthenticatedSetupTransportAccounting> {
+    let chunk_hashes = stream_summary
+        .ordered_chunk_digests()
+        .iter()
+        .map(|digest| digest.to_lowercase_hex())
+        .collect::<Vec<_>>();
+    let full_object_hash = stream_summary.full_object_digest().to_lowercase_hex();
+    let total_byte_length = stream_summary.total_byte_length();
+    let chunk_root = derive_canonical_object_hash(&json!({
+        "objectType": "SetupTransportChunkManifest",
+        "chunkCount": chunk_hashes.len(),
+        "totalByteLength": total_byte_length,
+        "chunkHashes": chunk_hashes,
+        "fullObjectHash": full_object_hash,
+    }))?;
+
+    Ok(AuthenticatedSetupTransportAccounting {
+        total_byte_length,
+        full_object_hash,
+        chunk_root,
+        chunk_hashes,
+    })
 }
 
 static VERIFIED_CANONICAL_PROOF_MATERIALS: OnceLock<
@@ -83,6 +121,26 @@ pub(crate) fn verified_canonical_proof_material_bytes(
         ));
     }
     Ok(Some(Arc::clone(&material.proof_bytes)))
+}
+
+pub(in crate::bgv::setup) fn authenticated_setup_proof_material_stream_summary(
+    proof_family: &str,
+    proof_material_root: &str,
+) -> CanonicalResult<Option<Arc<VerifiedCanonicalStreamSummary>>> {
+    let materials = verified_canonical_proof_materials()
+        .lock()
+        .map_err(|_| canonical_proof_store_error())?;
+    let Some(material) = materials.get(proof_material_root) else {
+        return Ok(None);
+    };
+    if material.proof_family != proof_family {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ComponentMismatch,
+            "canonical setup proof material root belongs to a different proof family",
+        ));
+    }
+
+    Ok(Some(Arc::clone(&material.stream_summary)))
 }
 
 pub(crate) fn take_verified_canonical_proof_material_bytes(
@@ -126,6 +184,7 @@ pub(crate) fn retain_generated_canonical_proof_material(
     proof_material_root: String,
     proof_bytes: Vec<u8>,
 ) -> CanonicalResult<BgvProofMaterialBytes> {
+    let stream_summary = verifier_owned_generated_proof_stream_summary(proof_family, &proof_bytes)?;
     let proof_bytes = Arc::new(CanonicalProofMaterialBytes::from_contiguous(proof_bytes)?);
     let mut materials = verified_canonical_proof_materials()
         .lock()
@@ -135,6 +194,7 @@ pub(crate) fn retain_generated_canonical_proof_material(
             entry.insert(VerifiedCanonicalProofMaterial {
                 proof_bytes: Arc::clone(&proof_bytes),
                 proof_family,
+                stream_summary,
             });
             Ok(proof_bytes)
         }
@@ -143,6 +203,56 @@ pub(crate) fn retain_generated_canonical_proof_material(
             "canonical generated proof material root is already retained",
         )),
     }
+}
+
+fn verifier_owned_generated_proof_stream_summary(
+    proof_family: &str,
+    proof_bytes: &[u8],
+) -> CanonicalResult<Arc<VerifiedCanonicalStreamSummary>> {
+    let stream_domain = proof_material_stream_domain(proof_family)?;
+    let descriptor =
+        derive_canonical_stream_descriptor(stream_domain, proof_bytes).map_err(|error| {
+            canonical_stream_summary_error(format!(
+                "generated proof descriptor was refused: {error:?}"
+            ))
+        })?;
+    let mut verifier = CanonicalStreamVerifier::new(stream_domain, descriptor)
+        .map_err(|_| canonical_stream_summary_error("generated proof descriptor was refused"))?;
+    for (chunk_index, chunk) in proof_bytes
+        .chunks(FOUNDATION_PROFILE.stream_chunk_byte_length)
+        .enumerate()
+    {
+        verifier
+            .absorb_chunk(chunk_index, chunk)
+            .into_result()
+            .map_err(|_| canonical_stream_summary_error("generated proof chunk was refused"))?;
+    }
+    let stream_summary = verifier.finish_with_summary().into_result().map_err(|_| {
+        canonical_stream_summary_error("generated proof stream did not finish completely")
+    })?;
+
+    Ok(Arc::new(stream_summary))
+}
+
+fn proof_material_stream_domain(proof_family: &str) -> CanonicalResult<CanonicalStreamDomain> {
+    match proof_family {
+        "vss-opening-carry" | "vss-share-linkage" => {
+            Ok(CanonicalStreamDomain::DealerVssShareLinkageProof)
+        }
+        "same-secret-bridge" => Ok(CanonicalStreamDomain::SameSecretProof),
+        "public-key-share" => Ok(CanonicalStreamDomain::PublicKeyShareProof),
+        "trustee-evaluation-key" => Ok(CanonicalStreamDomain::EvaluatorKeyAggregateProof),
+        "target-decryption-share" => Ok(CanonicalStreamDomain::MaliciousTargetShareProof),
+        "public-evaluation-key-material" => Ok(CanonicalStreamDomain::PublicEvaluationKeyMaterial),
+        _ => Err(CanonicalError::new(
+            CanonicalErrorCode::ComponentMismatch,
+            "canonical proof material family has no stream domain",
+        )),
+    }
+}
+
+fn canonical_stream_summary_error(message: impl Into<String>) -> CanonicalError {
+    CanonicalError::new(CanonicalErrorCode::InvalidProtocolObject, message)
 }
 
 enum BgvCanonicalStreamSink {
@@ -171,7 +281,7 @@ impl BgvCanonicalStreamSink {
         }
     }
 
-    fn finish(self) -> CanonicalResult<()> {
+    fn finish(self, stream_summary: Arc<VerifiedCanonicalStreamSummary>) -> CanonicalResult<()> {
         match self {
             Self::ProofMaterial {
                 chunks,
@@ -180,6 +290,20 @@ impl BgvCanonicalStreamSink {
             } => {
                 let proof_bytes =
                     Arc::new(CanonicalProofMaterialBytes::from_stream_chunks(chunks)?);
+                if stream_summary.stream_domain() != proof_material_stream_domain(proof_family)?
+                    || stream_summary.total_byte_length()
+                        != u64::try_from(proof_bytes.len()).map_err(|_| {
+                            CanonicalError::new(
+                                CanonicalErrorCode::MalformedLength,
+                                "canonical proof material byte length does not fit u64",
+                            )
+                        })?
+                {
+                    return Err(CanonicalError::new(
+                        CanonicalErrorCode::ComponentMismatch,
+                        "canonical proof material does not match its authenticated stream summary",
+                    ));
+                }
                 let materials = verified_canonical_proof_materials();
                 let mut materials = materials
                     .lock()
@@ -189,6 +313,7 @@ impl BgvCanonicalStreamSink {
                         entry.insert(VerifiedCanonicalProofMaterial {
                             proof_bytes,
                             proof_family,
+                            stream_summary,
                         });
                         Ok(())
                     }
@@ -199,10 +324,10 @@ impl BgvCanonicalStreamSink {
                 }
             }
             Self::EvaluationKeyComponent(stream) => {
-                finish_verified_canonical_component_material_stream(stream)
+                finish_verified_canonical_component_material_stream(stream, stream_summary)
             }
             Self::PublicKeyShareMaterial(stream) => {
-                finish_verified_canonical_public_key_share_material_stream(stream)
+                finish_verified_canonical_public_key_share_material_stream(stream, stream_summary)
             }
         }
     }
@@ -346,10 +471,11 @@ pub(crate) fn begin_bgv_canonical_stream(
                 proof_material_root: material_root,
             }
         }
-        StreamFamilyKind::EvaluationKeyComponent => {
+        StreamFamilyKind::EvaluationKeyComponent { proof_family } => {
             let component_stream = begin_verified_canonical_component_material_stream(
                 begin.handle,
                 material_root,
+                proof_family,
                 u64::from(begin.total_byte_length),
             )
             .map_err(|_| CANONICAL_STREAM_RUNTIME_INTERNAL_FAILURE);
@@ -417,14 +543,16 @@ pub(crate) fn finish_bgv_canonical_stream(
 ) -> Result<(), u32> {
     let mut registry = lock_registry()?;
     let session = registry.take_owned_stream_session(handle, capability)?;
-    let canonical_result = finish_canonical_stream_verifier(handle, capability);
-    if let Err(error) = canonical_result {
-        session.sink.cancel();
-        return Err(error);
-    }
+    let stream_summary = match finish_canonical_stream_verifier_with_summary(handle, capability) {
+        Ok(stream_summary) => Arc::new(stream_summary),
+        Err(error) => {
+            session.sink.cancel();
+            return Err(error);
+        }
+    };
     session
         .sink
-        .finish()
+        .finish(stream_summary)
         .map_err(|_| CANONICAL_STREAM_RUNTIME_INTERNAL_FAILURE)
 }
 
@@ -570,7 +698,7 @@ struct StreamFamily {
 
 enum StreamFamilyKind {
     ProofMaterial { proof_family: &'static str },
-    EvaluationKeyComponent,
+    EvaluationKeyComponent { proof_family: &'static str },
     PublicKeyShareMaterial,
 }
 
@@ -606,9 +734,16 @@ fn stream_family(family_code: u32) -> Result<StreamFamily, u32> {
             },
             stream_domain: CanonicalStreamDomain::EvaluatorKeyAggregateProof,
         },
-        BGV_CANONICAL_STREAM_FAMILY_RELINEARIZATION_COMPONENT
-        | BGV_CANONICAL_STREAM_FAMILY_GALOIS_COMPONENT => StreamFamily {
-            kind: StreamFamilyKind::EvaluationKeyComponent,
+        BGV_CANONICAL_STREAM_FAMILY_RELINEARIZATION_COMPONENT => StreamFamily {
+            kind: StreamFamilyKind::EvaluationKeyComponent {
+                proof_family: "relinearization-key-share",
+            },
+            stream_domain: CanonicalStreamDomain::EvaluatorKeyStore,
+        },
+        BGV_CANONICAL_STREAM_FAMILY_GALOIS_COMPONENT => StreamFamily {
+            kind: StreamFamilyKind::EvaluationKeyComponent {
+                proof_family: "galois-key-share",
+            },
             stream_domain: CanonicalStreamDomain::EvaluatorKeyStore,
         },
         BGV_CANONICAL_STREAM_FAMILY_TARGET_DECRYPTION_SHARE => StreamFamily {

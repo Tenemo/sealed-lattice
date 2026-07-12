@@ -1,6 +1,6 @@
 use super::*;
 
-use std::sync::Arc;
+use std::{collections::BTreeSet, sync::Arc};
 
 #[cfg(test)]
 #[derive(Debug, Clone)]
@@ -246,35 +246,47 @@ pub(in crate::bgv::setup) fn verified_setup_proof_material_bytes_from_request(
 }
 
 fn request_verified_canonical_setup_proof_material_roots(request: &Value) -> Vec<String> {
-    let mut material_roots = [
+    let mut material_roots = BTreeSet::new();
+    for field_name in [
         "transportedPrivateVssShareProofMaterial",
         "transportedPublicKeyShareProofMaterial",
         "transportedVssShareLinkageProofMaterial",
         "transportedSameSecretBridgeProofMaterial",
         "transportedEvaluationKeyShareProofMaterial",
-    ]
-    .into_iter()
-    .filter_map(|field_name| request.get(field_name))
-    .filter_map(|material_set| material_set.get("proofMaterials"))
-    .filter_map(Value::as_array)
-    .flatten()
-    .filter_map(|proof_material| proof_material.get("proofMaterialRoot"))
-    .filter_map(Value::as_str)
-    .map(str::to_string)
-    .collect::<Vec<_>>();
-    material_roots.extend(
-        request
-            .get("transportedPublicEvaluationKeyMaterial")
-            .and_then(|material_set| material_set.get("publicEvaluationKeyMaterials"))
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-            .filter_map(|material| material.get("publicEvaluationKeyMaterialRoot"))
-            .filter_map(Value::as_str)
-            .map(str::to_string),
-    );
+    ] {
+        if let Some(sidecar) = request.get(field_name) {
+            collect_request_material_roots(sidecar, "proofMaterialRoot", &mut material_roots);
+        }
+    }
+    if let Some(sidecar) = request.get("transportedPublicEvaluationKeyMaterial") {
+        collect_request_material_roots(
+            sidecar,
+            "publicEvaluationKeyMaterialRoot",
+            &mut material_roots,
+        );
+    }
 
-    material_roots
+    material_roots.into_iter().collect()
+}
+
+fn collect_request_material_roots(
+    value: &Value,
+    root_field_name: &str,
+    material_roots: &mut BTreeSet<String>,
+) {
+    let mut pending_values = vec![value];
+    while let Some(current_value) = pending_values.pop() {
+        match current_value {
+            Value::Object(fields) => {
+                if let Some(root) = fields.get(root_field_name).and_then(Value::as_str) {
+                    material_roots.insert(root.to_string());
+                }
+                pending_values.extend(fields.values());
+            }
+            Value::Array(items) => pending_values.extend(items),
+            _ => {}
+        }
+    }
 }
 
 pub(in crate::bgv::setup) struct VerifiedSetupProofMaterialEvictionGuard {
@@ -290,11 +302,16 @@ impl VerifiedSetupProofMaterialEvictionGuard {
             ),
             canonical_public_key_share_material_roots: request
                 .get("transportedPublicKeyShareMaterial")
-                .and_then(|material| material.get("publicKeyShareMaterialSetRoot"))
-                .and_then(Value::as_str)
-                .map(str::to_string)
-                .into_iter()
-                .collect(),
+                .map(|material| {
+                    let mut roots = BTreeSet::new();
+                    collect_request_material_roots(
+                        material,
+                        "publicKeyShareMaterialSetRoot",
+                        &mut roots,
+                    );
+                    roots.into_iter().collect()
+                })
+                .unwrap_or_default(),
         }
     }
 }
@@ -311,9 +328,10 @@ impl Drop for VerifiedSetupProofMaterialEvictionGuard {
 }
 
 #[cfg(test)]
-mod helpers;
-#[cfg(test)]
 mod verification;
 
 #[cfg(test)]
-pub(crate) use verification::setup_proof_material_transport_hashes;
+pub(crate) use verification::{
+    authenticate_setup_proof_material_stream_for_test,
+    canonical_setup_proof_material_transport_accounting,
+};

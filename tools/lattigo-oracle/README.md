@@ -13,6 +13,6 @@ The oracle may compare behavior that is actually comparable across all selected 
 
 ## Running it
 
-Run `pnpm run test:lattigo-oracle` (requires Docker and network access to fetch the pinned module). It sends only this directory as the Docker build context, then runs the comparison against the committed fixtures in `sealed-lattice-canonical-rns-fixtures.json` with a 2 GiB memory and swap ceiling.
+Run `pnpm run test:lattigo-oracle` (requires Docker and network access to fetch the pinned module). It sends only this directory as the Docker build context. The final scratch image contains a static oracle executable and the committed fixture, runs under a numeric non-root user, and has no Go toolchain. The container runs without a network or writable root filesystem, with all capabilities dropped, no privilege escalation, at most 128 processes, and a 2 GiB memory and swap ceiling.
 
 To move to a different upstream release or commit, run `go get github.com/tuneinsight/lattigo/v6@<version-or-commit>` in this directory (updates `go.mod` and `go.sum`), then re-run the oracle.

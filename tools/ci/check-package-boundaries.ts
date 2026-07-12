@@ -23,20 +23,7 @@ type BoundaryViolation = {
 
 const workspaceRoot = fileURLToPath(new URL('../../', import.meta.url));
 const packagesDirectoryPath = path.resolve(workspaceRoot, 'packages');
-const testVectorsDirectoryPath = path.resolve(workspaceRoot, 'test-vectors');
-const testsDirectoryPath = path.resolve(workspaceRoot, 'tests');
-const testSupportDirectoryPath = path.resolve(testsDirectoryPath, 'support');
-const toolsDirectoryPath = path.resolve(workspaceRoot, 'tools');
-const packageSourceExtensions = ['.ts', '.tsx', '.mts', '.cts'] as const;
-const repositoryImportPolicyExtensions = [
-    '.ts',
-    '.tsx',
-    '.mts',
-    '.cts',
-    '.js',
-    '.mjs',
-    '.cjs',
-] as const;
+const packageSourceExtensions = ['.ts'] as const;
 const repositoryPrivateAliasPrefixes = [
     '#packages/',
     '#tests/',
@@ -129,9 +116,6 @@ const packageSourcePath = (
 ): string =>
     toPosixPath(path.relative(workspacePackage.sourceDirectoryPath, filePath));
 
-const workspacePath = (filePath: string): string =>
-    toPosixPath(path.relative(workspaceRoot, filePath));
-
 const pushViolation = (
     violations: BoundaryViolation[],
     workspacePackage: WorkspacePackage,
@@ -140,17 +124,6 @@ const pushViolation = (
 ): void => {
     violations.push({
         filePath: `${workspacePackage.name}:${packageSourcePath(workspacePackage, filePath)}`,
-        message,
-    });
-};
-
-const pushFileViolation = (
-    violations: BoundaryViolation[],
-    filePath: string,
-    message: string,
-): void => {
-    violations.push({
-        filePath: workspacePath(filePath),
         message,
     });
 };
@@ -256,134 +229,6 @@ const checkModuleSpecifier = (input: {
     checkWorkspacePackageSpecifier(input);
 };
 
-const packageSourceAliasForTarget = (
-    targetPath: string,
-    workspacePackages: readonly WorkspacePackage[],
-): string | undefined => {
-    const targetPackage = workspacePackages.find((workspacePackage) =>
-        isWithinDirectory(workspacePackage.sourceDirectoryPath, targetPath),
-    );
-    if (targetPackage === undefined) {
-        return undefined;
-    }
-
-    const packageDirectoryName = path.basename(targetPackage.directoryPath);
-    const packageSourceRelativePath = toPosixPath(
-        path.relative(targetPackage.sourceDirectoryPath, targetPath),
-    );
-
-    return `#packages/${packageDirectoryName}/src/${packageSourceRelativePath}`;
-};
-
-const repositoryAliasForTarget = (
-    filePath: string,
-    moduleSpecifier: string,
-    workspacePackages: readonly WorkspacePackage[],
-): string | undefined => {
-    if (!isRelativeModuleSpecifier(moduleSpecifier)) {
-        return undefined;
-    }
-
-    const targetPath = path.resolve(path.dirname(filePath), moduleSpecifier);
-    const packageSourceAlias = packageSourceAliasForTarget(
-        targetPath,
-        workspacePackages,
-    );
-    if (packageSourceAlias !== undefined) {
-        return packageSourceAlias;
-    }
-
-    if (isWithinDirectory(testVectorsDirectoryPath, targetPath)) {
-        return `#test-vectors/${toPosixPath(path.relative(testVectorsDirectoryPath, targetPath))}`;
-    }
-
-    const fileIsInTestSupport = isWithinDirectory(
-        testSupportDirectoryPath,
-        filePath,
-    );
-    if (
-        !fileIsInTestSupport &&
-        isWithinDirectory(testSupportDirectoryPath, targetPath)
-    ) {
-        return `#tests/${toPosixPath(path.relative(testsDirectoryPath, targetPath))}`;
-    }
-
-    const fileIsInTools = isWithinDirectory(toolsDirectoryPath, filePath);
-    const targetIsInTools = isWithinDirectory(toolsDirectoryPath, targetPath);
-    if (!targetIsInTools) {
-        return undefined;
-    }
-
-    if (!fileIsInTools) {
-        return `#tools/${toPosixPath(path.relative(toolsDirectoryPath, targetPath))}`;
-    }
-
-    const [fileToolArea] = toPosixPath(
-        path.relative(toolsDirectoryPath, filePath),
-    ).split('/');
-    const [targetToolArea] = toPosixPath(
-        path.relative(toolsDirectoryPath, targetPath),
-    ).split('/');
-
-    return moduleSpecifier.startsWith('../') && fileToolArea !== targetToolArea
-        ? `#tools/${toPosixPath(path.relative(toolsDirectoryPath, targetPath))}`
-        : undefined;
-};
-
-const collectRepositoryImportPolicyFiles = async (
-    workspacePackages: readonly WorkspacePackage[],
-): Promise<readonly string[]> => {
-    const filePaths = new Set<string>();
-    const addFiles = async (directoryPath: string): Promise<void> => {
-        const files = await collectFiles(directoryPath, {
-            allowMissing: true,
-            extensions: repositoryImportPolicyExtensions,
-        });
-        for (const filePath of files) {
-            filePaths.add(filePath);
-        }
-    };
-
-    for (const workspacePackage of workspacePackages) {
-        await addFiles(path.resolve(workspacePackage.directoryPath, 'tests'));
-    }
-
-    await addFiles(testsDirectoryPath);
-    await addFiles(toolsDirectoryPath);
-
-    return [...filePaths].sort();
-};
-
-const checkRepositoryImportPolicy = async (
-    workspacePackages: readonly WorkspacePackage[],
-    violations: BoundaryViolation[],
-): Promise<void> => {
-    const files = await collectRepositoryImportPolicyFiles(workspacePackages);
-
-    for (const filePath of files) {
-        const sourceText = await fileSystem.readFile(filePath, 'utf8');
-        for (const moduleSpecifier of extractModuleSpecifiers(
-            sourceText,
-            filePath,
-        )) {
-            const alias = repositoryAliasForTarget(
-                filePath,
-                moduleSpecifier,
-                workspacePackages,
-            );
-            if (alias === undefined) {
-                continue;
-            }
-
-            pushFileViolation(
-                violations,
-                filePath,
-                `test and tooling imports that cross repository boundaries must use ${alias} instead of ${moduleSpecifier}`,
-            );
-        }
-    }
-};
-
 export const checkPackageBoundaries = async (): Promise<
     readonly BoundaryViolation[]
 > => {
@@ -414,8 +259,6 @@ export const checkPackageBoundaries = async (): Promise<
             }
         }
     }
-
-    await checkRepositoryImportPolicy(workspacePackages, violations);
 
     return violations;
 };

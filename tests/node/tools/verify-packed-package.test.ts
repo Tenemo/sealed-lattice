@@ -65,7 +65,10 @@ describe('packed package policy checks', () => {
         expect(errors).toEqual(
             expect.arrayContaining([
                 'Published package is missing required file: LICENSE',
-                'Published package is missing required file: dist/kernel.js',
+                'Published package is missing required file: dist/index.d.ts',
+                'Published package is missing required file: dist/index.js.map',
+                'Published package is missing required file: dist/sealed-lattice-kernel.wasm',
+                'Published package is missing required file: package.json',
                 'Published package must not include TypeScript build metadata: dist/tsconfig.tsbuildinfo',
                 'Published package must not include internal protocol runtime: dist/internal/election-foundation/plaintext-oracle/index.js',
                 'Published package must not include test-only type support: dist/internal/plaintext-oracle.d.ts',
@@ -98,7 +101,7 @@ describe('packed package policy checks', () => {
 
         const kernelBytes = Uint8Array.from([0]);
         const hash = hashPublishedKernelBytesSha256Hex(kernelBytes);
-        const kernelRuntimeText = `const packagedTranscriptCoreKernelNormalizedSha256Hex = '${hash}';`;
+        const kernelRuntimeText = `const options = { expectedKernelSha256Hex: '${hash}' };`;
 
         expect(extractPublishedKernelHash(kernelRuntimeText)).toBe(hash);
         expect(
@@ -106,7 +109,7 @@ describe('packed package policy checks', () => {
         ).toEqual([]);
         expect(
             validatePublishedKernelIntegrity(
-                'const packagedTranscriptCoreKernelNormalizedSha256Hex = undefined;',
+                'const options = { expectedKernelSha256Hex: undefined };',
                 kernelBytes,
             ),
         ).toEqual([

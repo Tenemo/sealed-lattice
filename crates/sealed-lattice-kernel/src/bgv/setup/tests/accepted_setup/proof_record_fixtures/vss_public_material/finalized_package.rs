@@ -46,8 +46,8 @@ pub(in super::super::super) fn finalize_collective_setup_package(
 
     // The small canonical BDLOP commitment-root set remains public. Bridge
     // construction above consumes the full opening material and carries only
-    // the constant commitment bodies its proof needs; the large material store
-    // is replaced with its binary-chunked transport reference below.
+    // the constant commitment bodies its proof needs. The final package omits
+    // the prover-only full opening material below.
 
     // The private VSS envelopes bind (as AAD) to the accepted coefficient
     // commitment root and each source trustee's per-trustee coefficient root,
@@ -118,65 +118,27 @@ pub(in super::super::super) fn finalize_collective_setup_package(
     package["privateVssEnvelopeCommitments"] = rebuilt_envelopes;
     package["vssShareAcceptances"] = rebuilt_acceptances;
 
-    replace_vss_coefficient_commitment_material_with_transport_reference(&mut package);
+    package
+        .as_object_mut()
+        .expect("collective setup package")
+        .remove("vssCoefficientCommitmentMaterial");
 
     rebind_collective_setup_package_hash(&mut package);
     package
 }
 
-fn replace_vss_coefficient_commitment_material_with_transport_reference(
-    package: &mut serde_json::Value,
-) {
-    let material = package["vssCoefficientCommitmentMaterial"].clone();
-    let transported_object = package["setupTransportCertificate"]["transportedObjects"]
-        .as_array()
-        .expect("setup transport certificate objects")
-        .iter()
-        .find(|transported_object| {
-            transported_object["objectName"] == "vssCoefficientCommitmentMaterial"
-        })
-        .cloned()
-        .expect("transported VSS coefficient commitment material");
-    assert_eq!(
-        transported_object["objectRoot"], material["vssCoefficientCommitmentMaterialRoot"],
-        "transport certificate must bind the VSS coefficient commitment material root"
-    );
-
-    package["vssCoefficientCommitmentMaterial"] = serde_json::json!({
-        "objectType": "VssCoefficientCommitmentMaterialSet",
-        "ceremonyId": material["ceremonyId"],
-        "manifestHash": material["manifestHash"],
-        "rosterHash": material["rosterHash"],
-        "setupParametersHash": material["setupParametersHash"],
-        "setupEpoch": material["setupEpoch"],
-        "publicMatrixSeedHash": material["publicMatrixSeedHash"],
-        "vssCoefficientCommitmentRoot": material["vssCoefficientCommitmentRoot"],
-        "materialEncoding": VSS_COEFFICIENT_COMMITMENT_MATERIAL_TRANSPORT_ENCODING,
-        "participantCount": material["participantCount"],
-        "thresholdDegree": material["thresholdDegree"],
-        "rnsLimbCount": material["rnsLimbCount"],
-        "ringDegree": material["ringDegree"],
-        "materialRecordCount": material["materialRecordCount"],
-        "vssCoefficientCommitmentMaterialRoot": material["vssCoefficientCommitmentMaterialRoot"],
-        "chunkCount": transported_object["chunkCount"],
-        "totalByteLength": transported_object["byteLength"],
-        "fullObjectHash": transported_object["fullObjectHash"],
-        "chunkRoot": transported_object["chunkRoot"],
-        "chunkHashes": transported_object["chunkHashes"],
-    });
-}
-
-// The reference finalized package: the reduced-ring three-trustee base package
-// run through the finalize transform. Accepted-setup verification is exercised
-// against it.
-pub(in super::super::super) fn minimal_finalized_collective_setup_package() -> serde_json::Value {
-    finalize_collective_setup_package(minimal_collective_setup_package_for_participant_count(3))
+// The reference finalized fixture carries the descriptor-backed package and
+// the matching authenticated-material request. The cached fixture getter
+// rehydrates proof material before each verification because the verifier
+// consumes it at the end of the call.
+fn minimal_finalized_collective_setup_fixture() -> CollectiveSetupVerificationFixture {
+    descriptor_backed_vss_collective_setup_fixture()
 }
 
 // The finalized setup package flows through every accepted-setup phase: the
 // canonical BDLOP commitment roots and bridge-carried constant bodies remain
-// alongside the committed-material sets, while the large opening-material store
-// is represented only by its binary-chunked transport reference. Every downstream phase
+// alongside the committed-material sets, while the prover-only full opening
+// material is omitted. Every downstream phase
 // (private VSS envelopes, share acceptances, public key shares and proofs,
 // evaluator schedule, transport certificate, final objects) binds the relevant
 // roots.
@@ -186,15 +148,16 @@ pub(in super::super::super) fn minimal_finalized_collective_setup_package() -> s
 // runtime objects missing.
 #[test]
 fn minimal_finalized_collective_setup_package_passes_accepted_setup() {
-    let package = minimal_finalized_collective_setup_package();
+    let fixture = minimal_finalized_collective_setup_fixture();
+    let package = &fixture.package;
     assert_eq!(
-        public_coefficient_commitment_ring_degree_from_fixture_package(&package),
+        public_coefficient_commitment_ring_degree_from_fixture_package(package),
         128,
         "finalized fixtures must retain the accepted public commitment ring degree",
     );
     let result = crate::bgv::setup::accepted_setup::verify_collective_bgv_setup_package(
-        &package,
-        &serde_json::json!({}),
+        package,
+        &fixture.verification_request,
     )
     .expect("finalized collective setup package verification result");
     let context = || serde_json::to_string_pretty(&result).unwrap();

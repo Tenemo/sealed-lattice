@@ -1,5 +1,6 @@
 import type { ProtocolHash } from '@sealed-lattice/types';
 
+import { copyCanonicalStreamDescriptor } from './canonical-stream-descriptor.js';
 import type { JsonRecord } from './common-fields.js';
 
 export const setupProofTransportChunkSizeBytes = 1_048_576;
@@ -52,19 +53,11 @@ export const setupTransportedProofMaterialFields = (
 
 export const canonicalGeneratedSetupProofMaterialDescriptor = (
     material: CanonicalGeneratedSetupProofMaterial,
-): Uint8Array => {
-    if (
-        !ArrayBuffer.isView(material.descriptorBytes) ||
-        Object.prototype.toString.call(material.descriptorBytes) !==
-            '[object Uint8Array]' ||
-        material.descriptorBytes.byteLength === 0
-    ) {
-        throw new TypeError(
-            'canonical generated proof material must contain a descriptor.',
-        );
-    }
-    return material.descriptorBytes.slice();
-};
+): Uint8Array =>
+    copyCanonicalStreamDescriptor(
+        material.descriptorBytes,
+        'canonical generated proof material descriptorBytes',
+    );
 
 export type TransportedSetupProofMaterialSet<
     ObjectType extends string = string,

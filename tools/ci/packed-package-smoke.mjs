@@ -24,6 +24,7 @@ const publicApi = await import('sealed-lattice');
 const {
     deriveThresholdParameters,
     deriveValidatedFirstValidOrder,
+    validatePollSpec,
     verifyPrivateVssShare,
 } = publicApi;
 
@@ -53,6 +54,25 @@ assert(
 assert(
     typeof deriveThresholdParameters === 'function',
     'Threshold parameters calculator must be exported as a function',
+);
+assert(
+    typeof validatePollSpec === 'function',
+    'Poll specification validator must be exported as a function',
+);
+const pollValidation = validatePollSpec({
+    pollId: 'board-election-2026',
+    question: 'Which proposal should be adopted?',
+    options: Array.from(
+        { length: 20 },
+        (_unused, optionIndex) => `Proposal ${optionIndex + 1}`,
+    ),
+    topOptionCount: 5,
+});
+assert(
+    pollValidation.isValid === true &&
+        pollValidation.normalized?.options.length === 20 &&
+        pollValidation.normalized.topOptionCount === 5,
+    `README poll example failed validation: ${JSON.stringify(pollValidation)}`,
 );
 assert(
     deriveThresholdParameters({ rosterSize: 10 }).privacyCorruptionBound === 3,

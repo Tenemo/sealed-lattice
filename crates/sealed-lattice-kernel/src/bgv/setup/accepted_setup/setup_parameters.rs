@@ -65,7 +65,7 @@ pub(super) fn bounded_domain_evaluator_value_for_roster(
 }
 
 pub(super) fn setup_transport_parameters_value_for_roster(
-    roster: &AcceptedRosterParameters,
+    _roster: &AcceptedRosterParameters,
 ) -> CanonicalResult<Value> {
     Ok(json!({
         "objectType": "SetupTransport",
@@ -77,19 +77,7 @@ pub(super) fn setup_transport_parameters_value_for_roster(
         "streamVerificationOrder": SETUP_TRANSPORT_STREAM_ORDER,
         "resumePolicy": SETUP_TRANSPORT_RESUME_POLICY,
         "lazyLoadingPolicy": SETUP_TRANSPORT_LAZY_LOADING_POLICY,
-        "requiredTransportedObjects": [
-            {
-                "objectName": SETUP_TRANSPORTED_VSS_MATERIAL_NAME,
-                "objectRole": SETUP_TRANSPORTED_VSS_MATERIAL_ROLE,
-                // The transport minimum is the full-ring full-material size,
-                // independent of any development-reduced-ring package; this keeps
-                // the transport hash a pure function of the roster.
-                "minimumByteLength": setup_transport_vss_material_byte_length_for_roster(
-                    roster,
-                    POLYNOMIAL_DEGREE as u64,
-                )?,
-            }
-        ],
+        "requiredTransportedObjects": [],
     }))
 }
 

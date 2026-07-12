@@ -7,29 +7,32 @@ import type {
     TargetDecryptionResultReleaseInput,
     verifyTargetDecryptionResult,
 } from '#packages/sdk/src/index.js';
+import { canonicalStreamDescriptorFixture } from '#tests/support/canonical-stream-descriptor-fixture';
 
+type JsonRecord = Record<string, unknown>;
 type ProofMaterialChunkPull =
     TargetDecryptionResultReleaseInput['shareProofs'][number]['pullProofMaterialChunk'];
 type CanonicalReadInput = Readonly<{
     readonly abortSignal?: AbortSignal;
+    readonly descriptorBytes: Uint8Array;
+    readonly family: number;
+    readonly materialRoot: string;
     readonly pullChunk: ProofMaterialChunkPull;
 }>;
 
 const readCanonicalMaterial = vi.hoisted(() => vi.fn());
 const openCanonicalRuntime = vi.hoisted(() => vi.fn());
 
-vi.mock(
-    '../../dist/internal/transcript-core-bridge.js',
-    async (importOriginal) => ({
-        ...(await importOriginal<Record<string, unknown>>()),
-        openBgvCanonicalStreamRuntime: openCanonicalRuntime,
-    }),
-);
+vi.mock('@sealed-lattice/wasm', async (importOriginal) => ({
+    ...(await importOriginal<Record<string, unknown>>()),
+    openBgvCanonicalStreamRuntime: openCanonicalRuntime,
+}));
 
 let absorbedShareCount: number;
 let cleanupFailure: Error | undefined;
 let freshKernelLoadCount: number;
 let sharedKernelLoadCount: number;
+let sharedKernelLoadMutation: (() => void) | undefined;
 let mockKernel: {
     readonly absorbBgvTargetDecryptionResultReleaseShare: ReturnType<
         typeof vi.fn
@@ -44,18 +47,20 @@ let mockKernel: {
     >;
 };
 
-vi.mock('../../dist/kernel.js', () => ({
+vi.mock('../../src/kernel.js', () => ({
     loadFreshTranscriptCoreKernel: () => {
         freshKernelLoadCount += 1;
         return Promise.resolve(mockKernel);
     },
-    loadTranscriptCoreKernel: () => {
+    loadTranscriptCoreKernel: async () => {
         sharedKernelLoadCount += 1;
-        return Promise.resolve(mockKernel);
+        await Promise.resolve();
+        sharedKernelLoadMutation?.();
+        return mockKernel;
     },
 }));
 
-const publicPackage = (await import('../../dist/index.js')) as Readonly<{
+const publicPackage = (await import('../../src/index.js')) as Readonly<{
     readonly generateTargetDecryptionShareProofMaterial: typeof generateTargetDecryptionShareProofMaterial;
     readonly verifyTargetDecryptionResult: typeof verifyTargetDecryptionResult;
 }>;
@@ -87,7 +92,11 @@ const shareProof = (
                 'BgvTargetDecryptionShareCanonicalProofMaterialTransport',
             proofFamily: 'target-decryption-share',
             proofMaterialRoot: proofMaterial.proofMaterialRoot,
-            descriptorBytes: Uint8Array.of(proofIndex + 1),
+            descriptorBytes: canonicalStreamDescriptorFixture(
+                1,
+                0x41 + proofIndex,
+                0x51 + proofIndex,
+            ),
         },
         proofStatement: { proofIndex },
         pullProofMaterialChunk,
@@ -134,6 +143,7 @@ describe('target-decryption result release session cleanup', () => {
         cleanupFailure = undefined;
         freshKernelLoadCount = 0;
         sharedKernelLoadCount = 0;
+        sharedKernelLoadMutation = undefined;
         readCanonicalMaterial.mockReset();
         openCanonicalRuntime.mockReset();
         openCanonicalRuntime.mockReturnValue({
@@ -201,6 +211,282 @@ describe('target-decryption result release session cleanup', () => {
             mockKernel.generateBgvTargetDecryptionShareProofMaterialFromLocalWitness,
         ).not.toHaveBeenCalled();
         expect(freshKernelLoadCount).toBe(1);
+        expect(sharedKernelLoadCount).toBe(0);
+    });
+
+    it('uses one deep target release snapshot across kernel loading and chunk callbacks', async () => {
+        const verificationInputReference: {
+            current?: TargetDecryptionResultReleaseInput;
+        } = {};
+        const mutatingPull: ProofMaterialChunkPull = () => {
+            const callerShareProof =
+                verificationInputReference.current?.shareProofs[0];
+            if (callerShareProof === undefined) {
+                throw new Error('Missing target share proof fixture.');
+            }
+            const mutableShareProof = callerShareProof as unknown as JsonRecord;
+            const callerProofMaterial =
+                callerShareProof.proofMaterial as unknown as JsonRecord;
+            const callerProofRecords = callerProofMaterial.proofRecords as
+                | JsonRecord[]
+                | undefined;
+            const callerProofRecord = callerProofRecords?.[0];
+            const callerTransport =
+                callerShareProof.proofMaterialTransport as unknown as JsonRecord;
+            const callerDescriptor =
+                callerTransport.descriptorBytes as Uint8Array;
+            if (callerProofRecord === undefined) {
+                throw new Error('Missing target proof record fixture.');
+            }
+
+            mutableShareProof.proofStatement = { proofIndex: 99 };
+            mutableShareProof.targetDecryptionShare = { proofIndex: 99 };
+            callerProofMaterial.objectType = 'MutatedTargetProofMaterial';
+            callerProofMaterial.proofMaterialRoot = protocolHash('8');
+            callerProofRecord.proofBytesHash = protocolHash('9');
+            callerTransport.objectType = 'MutatedTargetProofTransport';
+            callerTransport.proofFamily = 'mutated-target-proof-family';
+            callerTransport.proofMaterialRoot = protocolHash('8');
+            callerDescriptor.fill(0xff);
+
+            return successfulPull();
+        };
+        const verificationInput = releaseInput([mutatingPull, successfulPull]);
+        verificationInputReference.current = verificationInput;
+        const mutableVerificationInput =
+            verificationInput as unknown as JsonRecord;
+        mutableVerificationInput.setupPackage = {
+            setupContext: { generation: 1 },
+        };
+        mutableVerificationInput.targetAcceptedRecord = {
+            acceptedTarget: { targetIndex: 2 },
+        };
+        mutableVerificationInput.targetCiphertexts = {
+            ciphertextSet: { ciphertextCount: 3 },
+        };
+        mutableVerificationInput.targetCiphertextBinding = {
+            ciphertextBinding: { bindingIndex: 4 },
+        };
+        mutableVerificationInput.targetShareProfile = {
+            shareProfile: { threshold: 5 },
+        };
+        const callerShareProof = verificationInput.shareProofs[0];
+        if (callerShareProof === undefined) {
+            throw new Error('Missing target share proof fixture.');
+        }
+        const expectedProofMaterialRoot =
+            callerShareProof.proofMaterial.proofMaterialRoot;
+        const expectedProofBytesHash = (
+            callerShareProof.proofMaterial.proofRecords[0] as JsonRecord
+        ).proofBytesHash;
+        const callerDescriptor =
+            callerShareProof.proofMaterialTransport.descriptorBytes;
+        const authenticatedDescriptor = callerDescriptor.slice();
+        sharedKernelLoadMutation = () => {
+            const setupPackage = verificationInput.setupPackage as JsonRecord;
+            const targetAcceptedRecord =
+                verificationInput.targetAcceptedRecord as JsonRecord;
+            const targetCiphertexts =
+                verificationInput.targetCiphertexts as JsonRecord;
+            const targetCiphertextBinding =
+                verificationInput.targetCiphertextBinding as JsonRecord;
+            const targetShareProfile =
+                verificationInput.targetShareProfile as JsonRecord;
+            (setupPackage.setupContext as JsonRecord).generation = 91;
+            (targetAcceptedRecord.acceptedTarget as JsonRecord).targetIndex =
+                92;
+            (targetCiphertexts.ciphertextSet as JsonRecord).ciphertextCount =
+                93;
+            (
+                targetCiphertextBinding.ciphertextBinding as JsonRecord
+            ).bindingIndex = 94;
+            (targetShareProfile.shareProfile as JsonRecord).threshold = 95;
+            mutableVerificationInput.releaseVerificationId =
+                'release-verification-mutated';
+            (callerShareProof.targetDecryptionShare as JsonRecord).proofIndex =
+                96;
+            (callerShareProof.proofStatement as JsonRecord).proofIndex = 97;
+            (
+                callerShareProof.proofMaterial.proofRecords[0] as JsonRecord
+            ).proofBytesHash = protocolHash('6');
+        };
+
+        const result =
+            await publicPackage.verifyTargetDecryptionResult(verificationInput);
+
+        expect(result.targetResultHash).toBe(protocolHash('7'));
+        expect(
+            mockKernel.deriveBgvTargetDecryptionResultReleaseSetupContext,
+        ).toHaveBeenCalledWith({
+            setupPackage: { setupContext: { generation: 1 } },
+        });
+        expect(
+            mockKernel.beginBgvTargetDecryptionResultRelease,
+        ).toHaveBeenCalledWith({
+            releaseVerificationId: 'release-verification-1',
+            releaseSetupContext: {
+                operation: 'deriveBgvTargetDecryptionResultReleaseSetupContext',
+            },
+            targetAcceptedRecord: {
+                acceptedTarget: { targetIndex: 2 },
+            },
+            targetCiphertexts: {
+                ciphertextSet: { ciphertextCount: 3 },
+            },
+            targetCiphertextBinding: {
+                ciphertextBinding: { bindingIndex: 4 },
+            },
+            targetShareProfile: {
+                shareProfile: { threshold: 5 },
+            },
+        });
+        const firstStreamInput = readCanonicalMaterial.mock.calls[0]?.[0] as
+            | CanonicalReadInput
+            | undefined;
+        expect(firstStreamInput).toMatchObject({
+            descriptorBytes: authenticatedDescriptor,
+            family: 8,
+            materialRoot: expectedProofMaterialRoot,
+        });
+        expect(firstStreamInput?.descriptorBytes).not.toBe(callerDescriptor);
+        const firstAbsorptionInput = mockKernel
+            .absorbBgvTargetDecryptionResultReleaseShare.mock.calls[0]?.[0] as
+            | JsonRecord
+            | undefined;
+        const absorbedShareProof = firstAbsorptionInput?.targetShareProof as
+            | JsonRecord
+            | undefined;
+        const absorbedProofMaterial = absorbedShareProof?.proofMaterial as
+            | JsonRecord
+            | undefined;
+        const absorbedProofRecords = absorbedProofMaterial?.proofRecords as
+            | JsonRecord[]
+            | undefined;
+        expect(absorbedShareProof).toMatchObject({
+            proofStatement: { proofIndex: 0 },
+            targetDecryptionShare: { proofIndex: 0 },
+        });
+        expect(absorbedProofMaterial).toMatchObject({
+            objectType: 'BgvTargetDecryptionShareProofMaterial',
+            proofMaterialRoot: expectedProofMaterialRoot,
+        });
+        expect(absorbedProofRecords?.[0]).toMatchObject({
+            proofBytesHash: expectedProofBytesHash,
+        });
+        expect(firstAbsorptionInput?.releaseVerificationId).toBe(
+            'release-verification-1',
+        );
+        expect(callerDescriptor).toEqual(
+            new Uint8Array(callerDescriptor.byteLength).fill(0xff),
+        );
+    });
+
+    it('rejects an oversized proof descriptor before copying or loading the kernel', async () => {
+        class SliceTrackingUint8Array extends Uint8Array {
+            public sliceWasCalled = false;
+
+            public override slice(
+                start?: number,
+                end?: number,
+            ): Uint8Array<ArrayBuffer> {
+                this.sliceWasCalled = true;
+
+                return super.slice(start, end);
+            }
+        }
+
+        const verificationInput = releaseInput([
+            successfulPull,
+            successfulPull,
+        ]);
+        const firstShareProof = verificationInput.shareProofs[0];
+        const secondShareProof = verificationInput.shareProofs[1];
+        if (firstShareProof === undefined || secondShareProof === undefined) {
+            throw new Error('Missing target share proof fixture.');
+        }
+        const descriptorBytes = new SliceTrackingUint8Array(131_177);
+
+        await expect(
+            publicPackage.verifyTargetDecryptionResult({
+                ...verificationInput,
+                shareProofs: [
+                    {
+                        ...firstShareProof,
+                        proofMaterialTransport: {
+                            ...firstShareProof.proofMaterialTransport,
+                            descriptorBytes,
+                        },
+                    },
+                    secondShareProof,
+                ],
+            }),
+        ).rejects.toThrow(/exceeds the canonical stream descriptor bound/u);
+        expect(descriptorBytes.sliceWasCalled).toBe(false);
+        expect(sharedKernelLoadCount).toBe(0);
+    });
+
+    it('refuses accessor-backed release records without invoking accessors', async () => {
+        let accessorWasRead = false;
+        const setupPackage = {} as JsonRecord;
+        Object.defineProperty(setupPackage, 'setupContext', {
+            enumerable: true,
+            get: () => {
+                accessorWasRead = true;
+                return {};
+            },
+        });
+        const verificationInput = releaseInput([
+            successfulPull,
+            successfulPull,
+        ]);
+        (verificationInput as unknown as JsonRecord).setupPackage =
+            setupPackage;
+
+        await expect(
+            publicPackage.verifyTargetDecryptionResult(verificationInput),
+        ).rejects.toThrow('setupPackage.setupContext cannot be an accessor');
+        expect(accessorWasRead).toBe(false);
+        expect(sharedKernelLoadCount).toBe(0);
+    });
+
+    it('refuses custom-prototype and typed-array release records', async () => {
+        const customPrototypeInput = releaseInput([
+            successfulPull,
+            successfulPull,
+        ]);
+        (customPrototypeInput as unknown as JsonRecord).targetAcceptedRecord =
+            Object.create({ inheritedTargetIndex: 1 });
+
+        await expect(
+            publicPackage.verifyTargetDecryptionResult(customPrototypeInput),
+        ).rejects.toThrow(
+            'targetAcceptedRecord must contain only plain objects and arrays',
+        );
+
+        const typedArrayInput = releaseInput([successfulPull, successfulPull]);
+        (typedArrayInput as unknown as JsonRecord).targetCiphertexts =
+            Uint8Array.of(1);
+        await expect(
+            publicPackage.verifyTargetDecryptionResult(typedArrayInput),
+        ).rejects.toThrow(
+            'targetCiphertexts must contain only plain objects and arrays',
+        );
+        expect(sharedKernelLoadCount).toBe(0);
+    });
+
+    it('refuses cyclic release records before loading the kernel', async () => {
+        const cyclicCiphertexts = {} as JsonRecord;
+        cyclicCiphertexts.self = cyclicCiphertexts;
+        const verificationInput = releaseInput([
+            successfulPull,
+            successfulPull,
+        ]);
+        (verificationInput as unknown as JsonRecord).targetCiphertexts =
+            cyclicCiphertexts;
+
+        await expect(
+            publicPackage.verifyTargetDecryptionResult(verificationInput),
+        ).rejects.toThrow('targetCiphertexts.self cannot contain a cyclic');
         expect(sharedKernelLoadCount).toBe(0);
     });
 

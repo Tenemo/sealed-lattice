@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::BTreeSet;
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::io::{BufWriter, Write};
@@ -46,6 +47,7 @@ fn verified_evaluation_key_share_component_material_chunks()
 
 fn stored_verified_evaluation_key_share_component_material_chunks(
     material_root: &str,
+    proof_family: &str,
 ) -> CanonicalResult<Vec<Vec<u8>>> {
     let stored_chunks = verified_evaluation_key_share_component_material_chunks()
         .lock()
@@ -59,6 +61,11 @@ fn stored_verified_evaluation_key_share_component_material_chunks(
             "transported evaluation-key component material requires chunks or a live verified material handle",
         )
     })?;
+    if store_entry.proof_family != proof_family {
+        return Err(invalid_evaluation_key_share_material(
+            "transported evaluation-key component material belongs to a different proof family",
+        ));
+    }
     // The entry is cloned once so the read (a native file read) never holds the
     // store lock; it is then consumed by value below, so the chunk bytes are moved
     // out rather than cloned a second time. The original stays in the store for the
@@ -74,6 +81,7 @@ fn read_verified_evaluation_key_share_component_material_chunks(
     let VerifiedEvaluationKeyShareComponentMaterialChunkStoreEntry {
         backing,
         total_byte_length,
+        ..
     } = store_entry;
     match backing {
         #[cfg(target_arch = "wasm32")]
@@ -146,22 +154,32 @@ fn read_verified_evaluation_key_share_component_material_chunks(
 // references, so the eviction guard drops exactly those store entries and leaves a
 // concurrent verification's entries untouched.
 fn request_component_material_roots(request: &Value) -> Vec<String> {
-    let Some(component_materials) = request
-        .get("transportedEvaluationKeyShareComponentMaterial")
-        .and_then(|material_set| material_set.get("componentMaterials"))
-        .and_then(Value::as_array)
+    let Some(material_sidecar) = request.get("transportedEvaluationKeyShareComponentMaterial")
     else {
         return Vec::new();
     };
-    component_materials
-        .iter()
-        .filter_map(|component_material| {
-            component_material
-                .get("keySwitchComponentMaterialRoot")
-                .and_then(Value::as_str)
-                .map(str::to_string)
-        })
-        .collect()
+    let mut material_roots = BTreeSet::new();
+    collect_component_material_roots(material_sidecar, &mut material_roots);
+    material_roots.into_iter().collect()
+}
+
+fn collect_component_material_roots(value: &Value, material_roots: &mut BTreeSet<String>) {
+    let mut pending_values = vec![value];
+    while let Some(current_value) = pending_values.pop() {
+        match current_value {
+            Value::Object(fields) => {
+                if let Some(root) = fields
+                    .get("keySwitchComponentMaterialRoot")
+                    .and_then(Value::as_str)
+                {
+                    material_roots.insert(root.to_string());
+                }
+                pending_values.extend(fields.values());
+            }
+            Value::Array(items) => pending_values.extend(items),
+            _ => {}
+        }
+    }
 }
 
 // Drop the staged backing of an evicted store entry: on native this removes the
@@ -369,11 +387,13 @@ fn verify_evaluation_key_share_component_material_header(
 
 fn evaluation_key_share_component_material_chunks(value: &Value) -> CanonicalResult<Vec<Vec<u8>>> {
     let material_root = string_field(value, "keySwitchComponentMaterialRoot")?;
-    stored_verified_evaluation_key_share_component_material_chunks(material_root).map_err(|_| {
-        invalid_evaluation_key_share_material(
-            "evaluation-key component material was not authenticated by the canonical binary stream",
-        )
-    })
+    let proof_family = string_field(value, "proofFamily")?;
+    stored_verified_evaluation_key_share_component_material_chunks(material_root, proof_family)
+        .map_err(|_| {
+            invalid_evaluation_key_share_material(
+                "evaluation-key component material was not authenticated by the canonical binary stream",
+            )
+        })
 }
 
 // Canonical decode: fixed record order, in-range residues, and zero trailing
@@ -581,7 +601,32 @@ static VERIFIED_EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_CHUNKS: OnceLock<
 #[derive(Debug, Clone)]
 struct VerifiedEvaluationKeyShareComponentMaterialChunkStoreEntry {
     backing: VerifiedComponentMaterialBacking,
+    proof_family: &'static str,
+    stream_summary: Arc<VerifiedCanonicalStreamSummary>,
     total_byte_length: u64,
+}
+
+pub(in crate::bgv::setup) fn authenticated_evaluation_key_component_stream_summary(
+    proof_family: &str,
+    material_root: &str,
+) -> CanonicalResult<Option<Arc<VerifiedCanonicalStreamSummary>>> {
+    let store = verified_evaluation_key_share_component_material_chunks()
+        .lock()
+        .map_err(|_| {
+            invalid_evaluation_key_share_material(
+                "verified evaluation-key component material store is unavailable",
+            )
+        })?;
+    let Some(entry) = store.get(material_root) else {
+        return Ok(None);
+    };
+    if entry.proof_family != proof_family {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ComponentMismatch,
+            "canonical evaluation-key component material root belongs to a different proof family",
+        ));
+    }
+    Ok(Some(Arc::clone(&entry.stream_summary)))
 }
 
 // Where verified component material lives after a stream finishes. Native runs
@@ -638,6 +683,7 @@ mod component_material_stream {
 
     pub(crate) struct CanonicalComponentMaterialStream {
         material_root: String,
+        proof_family: &'static str,
         sink: Option<ComponentMaterialStreamSink>,
         total_byte_length: u64,
     }
@@ -730,6 +776,7 @@ mod component_material_stream {
     pub(crate) fn begin_verified_canonical_component_material_stream(
         stream_handle: u32,
         material_root: String,
+        proof_family: &'static str,
         total_byte_length: u64,
     ) -> CanonicalResult<CanonicalComponentMaterialStream> {
         validate_hex_string(&material_root, "keySwitchComponentMaterialRoot")?;
@@ -756,6 +803,7 @@ mod component_material_stream {
         ))?;
         Ok(CanonicalComponentMaterialStream {
             material_root,
+            proof_family,
             sink: Some(sink),
             total_byte_length,
         })
@@ -775,7 +823,16 @@ mod component_material_stream {
 
     pub(crate) fn finish_verified_canonical_component_material_stream(
         mut stream: CanonicalComponentMaterialStream,
+        stream_summary: Arc<VerifiedCanonicalStreamSummary>,
     ) -> CanonicalResult<()> {
+        if stream_summary.stream_domain()
+            != crate::foundation::CanonicalStreamDomain::EvaluatorKeyStore
+            || stream_summary.total_byte_length() != stream.total_byte_length
+        {
+            return Err(invalid_evaluation_key_share_material(
+                "evaluation-key component material does not match its authenticated stream summary",
+            ));
+        }
         let sink = stream.sink.take().ok_or_else(|| {
             invalid_evaluation_key_share_material(
                 "canonical evaluation-key component material stream is no longer active",
@@ -793,6 +850,8 @@ mod component_material_stream {
             std::collections::btree_map::Entry::Vacant(entry) => {
                 entry.insert(VerifiedEvaluationKeyShareComponentMaterialChunkStoreEntry {
                     backing,
+                    proof_family: stream.proof_family,
+                    stream_summary,
                     total_byte_length: stream.total_byte_length,
                 });
             }

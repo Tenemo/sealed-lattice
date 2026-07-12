@@ -2,6 +2,7 @@ import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
 import { protocolHashPattern } from '../common/verification-helpers.js';
+import { copyCanonicalStreamDescriptor } from '../setup/canonical-stream-descriptor.js';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -107,21 +108,14 @@ export const createBgvTargetDecryptionShareCanonicalProofMaterialTransport = (
     materialExport: BgvTargetDecryptionShareCanonicalMaterialExport,
 ): BgvTargetDecryptionShareCanonicalProofMaterialTransport => {
     const proofMaterialRoot = validatedTargetProofMaterialRoot(proofMaterial);
-    if (
-        !ArrayBuffer.isView(materialExport.descriptorBytes) ||
-        Object.prototype.toString.call(materialExport.descriptorBytes) !==
-            '[object Uint8Array]' ||
-        materialExport.descriptorBytes.byteLength === 0
-    ) {
-        throw new TypeError(
-            'target-decryption canonical material descriptorBytes must be a non-empty Uint8Array.',
-        );
-    }
 
     return {
         objectType: 'BgvTargetDecryptionShareCanonicalProofMaterialTransport',
         proofFamily: targetDecryptionShareProofFamily,
         proofMaterialRoot,
-        descriptorBytes: materialExport.descriptorBytes.slice(),
+        descriptorBytes: copyCanonicalStreamDescriptor(
+            materialExport.descriptorBytes,
+            'target-decryption canonical material descriptorBytes',
+        ),
     };
 };

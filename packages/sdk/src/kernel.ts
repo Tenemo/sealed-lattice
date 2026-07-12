@@ -7,12 +7,16 @@ const transcriptCoreKernelUrl = new URL(
     './sealed-lattice-kernel.wasm',
     import.meta.url,
 );
-// Shipped undefined on purpose: the build step rewrites this literal to pin the real
-// normalized hash into dist/kernel.js. Loading an unpinned source build throws (the
-// loader requires expectedKernelSha256Hex), and verify-packed-package.ts enforces
-// that the published value is non-undefined.
-const packagedTranscriptCoreKernelNormalizedSha256Hex: string | undefined =
-    undefined;
+// The package build replaces this identifier with the normalized hash of the
+// exact WASM bytes copied into the published package. Source-level execution
+// remains deliberately unpinned and is useful only to the build and test tools.
+declare const __SEALED_LATTICE_KERNEL_NORMALIZED_SHA256_HEX__:
+    | string
+    | undefined;
+const packagedTranscriptCoreKernelNormalizedSha256Hex =
+    typeof __SEALED_LATTICE_KERNEL_NORMALIZED_SHA256_HEX__ === 'undefined'
+        ? undefined
+        : __SEALED_LATTICE_KERNEL_NORMALIZED_SHA256_HEX__;
 
 const transcriptCoreKernelLoaderOptions = {
     expectedKernelSha256Hex: packagedTranscriptCoreKernelNormalizedSha256Hex,

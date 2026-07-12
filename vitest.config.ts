@@ -2,6 +2,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { playwright } from '@vitest/browser-playwright';
+import { devices } from 'playwright';
 import type { PluginOption } from 'vite';
 import { defineConfig, type UserWorkspaceConfig } from 'vitest/config';
 import type { BrowserInstanceOption } from 'vitest/node';
@@ -73,38 +74,12 @@ const createPublicPackageResolutionPlugin = (): PluginOption => ({
 
 const copyGlobs = (globs: readonly string[]): string[] => [...globs];
 
-const mobileContextOptions = {
-    'Pixel 5': {
-        userAgent:
-            'Mozilla/5.0 (Linux; Android 11; Pixel 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.7727.15 Mobile Safari/537.36',
-        viewport: {
-            width: 393,
-            height: 727,
-        },
-        screen: {
-            width: 393,
-            height: 851,
-        },
-        deviceScaleFactor: 2.75,
-        isMobile: true,
-        hasTouch: true,
-    },
-    'iPhone 12': {
-        userAgent:
-            'Mozilla/5.0 (iPhone; CPU iPhone OS 14_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.4 Mobile/15E148 Safari/604.1',
-        viewport: {
-            width: 390,
-            height: 664,
-        },
-        screen: {
-            width: 390,
-            height: 844,
-        },
-        deviceScaleFactor: 3,
-        isMobile: true,
-        hasTouch: true,
-    },
-} as const;
+const { defaultBrowserType: _pixelDefaultBrowserType, ...pixelContextOptions } =
+    devices['Pixel 5'];
+const {
+    defaultBrowserType: _iphoneDefaultBrowserType,
+    ...iphoneContextOptions
+} = devices['iPhone 12'];
 
 const desktopBrowserInstances: BrowserInstanceOption[] = [
     { browser: 'chromium', name: 'chromium-desktop' },
@@ -115,16 +90,16 @@ const desktopBrowserInstances: BrowserInstanceOption[] = [
 const mobileBrowserInstances: BrowserInstanceOption[] = [
     {
         browser: 'chromium',
-        name: 'chromium-mobile',
+        name: 'pixel-5-chromium',
         provider: playwright({
-            contextOptions: mobileContextOptions['Pixel 5'],
+            contextOptions: pixelContextOptions,
         }),
     },
     {
         browser: 'webkit',
-        name: 'webkit-mobile',
+        name: 'iphone-12-webkit',
         provider: playwright({
-            contextOptions: mobileContextOptions['iPhone 12'],
+            contextOptions: iphoneContextOptions,
         }),
     },
 ];

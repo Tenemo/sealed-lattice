@@ -36,9 +36,7 @@ type PackDryRunMetadataEntry = {
 };
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
-const forbiddenPublishedRuntimePathFragments = [
-    'dist/internal/election-foundation/plaintext-oracle/',
-] as const;
+const forbiddenPublishedRuntimePathFragments = ['dist/internal/'] as const;
 const forbiddenPublishedTypeSupportPathFragments = [
     'dist/internal/plaintext-oracle.',
 ] as const;
@@ -52,16 +50,11 @@ const forbiddenPublishedTestVectorPathFragments = ['test-vectors/'] as const;
 const requiredPublishedPackageFilePaths = [
     'LICENSE',
     'README.md',
-    'dist/kernel.js',
+    'dist/index.d.ts',
+    'dist/index.js',
+    'dist/index.js.map',
     'dist/sealed-lattice-kernel.wasm',
-    'dist/internal/board-target.d.ts',
-    'dist/internal/field.d.ts',
-    'dist/internal/lifecycle.d.ts',
-    'dist/internal/protocol-hash.d.ts',
-    'dist/internal/protocol-objects.d.ts',
-    'dist/internal/roster-recovery.d.ts',
-    'dist/internal/target-result.d.ts',
-    'dist/internal/transcript-core.d.ts',
+    'package.json',
 ] as const;
 const forbiddenPublishedOracleFileNames = new Set([
     'Dockerfile',
@@ -69,7 +62,7 @@ const forbiddenPublishedOracleFileNames = new Set([
     'go.sum',
 ]);
 const publishedKernelHashPattern =
-    /const packagedTranscriptCoreKernelNormalizedSha256Hex\s*=\s*(?<hash>undefined|'[a-f0-9]{64}');/u;
+    /expectedKernelSha256Hex:\s*(?<hash>undefined|['"][a-f0-9]{64}['"])/u;
 
 const createDryRunPackArguments = (): readonly string[] => [
     'pack',
@@ -336,6 +329,58 @@ const runSmokeEntryPoint = (consumerDirectory: string): void => {
     }
 };
 
+const runSmokeTypeEntryPoint = (consumerDirectory: string): void => {
+    const typeScriptEntryPointPath = path.resolve(
+        repoRoot,
+        'node_modules',
+        'typescript',
+        'bin',
+        'tsc',
+    );
+    const result = spawnSync(
+        process.execPath,
+        [
+            typeScriptEntryPointPath,
+            '--module',
+            'NodeNext',
+            '--moduleResolution',
+            'NodeNext',
+            '--noEmit',
+            '--strict',
+            '--target',
+            'ES2020',
+            'smoke.ts',
+        ],
+        {
+            cwd: consumerDirectory,
+            env: process.env,
+            encoding: 'utf8',
+            maxBuffer: 100 * 1024 * 1024,
+        },
+    );
+
+    if (result.error !== undefined) {
+        throw new Error(
+            `Failed to start packed-package type smoke test: ${result.error.message}`,
+        );
+    }
+    if (result.signal !== null) {
+        throw new Error(
+            `Packed-package type smoke test terminated by signal ${result.signal}`,
+        );
+    }
+    if (result.status !== 0) {
+        throw new Error(
+            `Packed-package type smoke test failed:\n${[
+                result.stdout,
+                result.stderr,
+            ]
+                .filter(Boolean)
+                .join('\n')}`,
+        );
+    }
+};
+
 const main = async (): Promise<void> => {
     const packageManagerRunner =
         resolvePackageManagerRunnerForPackageManager('npm');
@@ -405,7 +450,7 @@ const main = async (): Promise<void> => {
         }
 
         const kernelIntegrityFailures = validatePublishedKernelIntegrity(
-            await readFile(join(packageDirectory, 'dist', 'kernel.js'), 'utf8'),
+            await readFile(join(packageDirectory, 'dist', 'index.js'), 'utf8'),
             await readFile(
                 join(packageDirectory, 'dist', 'sealed-lattice-kernel.wasm'),
             ),
@@ -449,6 +494,26 @@ const main = async (): Promise<void> => {
             path.join(repoRoot, 'tools', 'ci', 'packed-package-smoke.mjs'),
             join(consumerDirectory, 'smoke.mjs'),
         );
+        await writeFile(
+            join(consumerDirectory, 'smoke.ts'),
+            [
+                "import { deriveThresholdParameters, validatePollSpec, type PollSpecInput, type ThresholdParameters } from 'sealed-lattice';",
+                '',
+                'const pollSpecInput: PollSpecInput = {',
+                "    pollId: 'packed-package-types',",
+                "    question: 'Which option?',",
+                "    options: ['A', 'B'],",
+                '    topOptionCount: 1,',
+                '};',
+                'const pollValidation = validatePollSpec(pollSpecInput);',
+                "if (!pollValidation.isValid) throw new Error('Packed poll validation failed.');",
+                'const parameters: ThresholdParameters = deriveThresholdParameters({ rosterSize: 10 });',
+                'void pollValidation.normalized;',
+                'void parameters;',
+                '',
+            ].join('\n'),
+            'utf8',
+        );
 
         runPackageManagerAndCaptureOutput(
             packageManagerRunner,
@@ -457,6 +522,7 @@ const main = async (): Promise<void> => {
             { environment: packageManagerEnvironment },
         );
         runSmokeEntryPoint(consumerDirectory);
+        runSmokeTypeEntryPoint(consumerDirectory);
 
         console.log(
             `Packed package smoke test passed with ${packageManagerRunner.kind}.`,

@@ -1,3 +1,4 @@
+import { copyCanonicalStreamDescriptor } from '../canonical-stream-descriptor.js';
 import {
     type CanonicalProofMaterialChunkPull,
     setupProofTransportChunkSizeBytes,
@@ -391,29 +392,22 @@ const transportEvaluationKeyShareComponentMaterial = async (
         keySwitchMaterialEncoding: evaluationKeyShareComponentMaterialEncoding,
         keySwitchComponentMaterialRoot,
     };
-    const descriptorBytes = await writeComponentMaterial({
-        keySwitchComponentMaterialRoot,
-        proofFamily: workItem.proofFamily,
-        pullChunk: sequentialChunkPull(
-            evaluationKeyShareComponentMaterialSegments(
-                workItem.level,
-                workItem.shareMaterial.ringDegree,
-                validatedMaterial,
+    const descriptorBytes = copyCanonicalStreamDescriptor(
+        await writeComponentMaterial({
+            keySwitchComponentMaterialRoot,
+            proofFamily: workItem.proofFamily,
+            pullChunk: sequentialChunkPull(
+                evaluationKeyShareComponentMaterialSegments(
+                    workItem.level,
+                    workItem.shareMaterial.ringDegree,
+                    validatedMaterial,
+                ),
+                validatedMaterial.totalByteLength,
             ),
-            validatedMaterial.totalByteLength,
-        ),
-        totalByteLength: validatedMaterial.totalByteLength,
-    });
-    if (
-        !ArrayBuffer.isView(descriptorBytes) ||
-        Object.prototype.toString.call(descriptorBytes) !==
-            '[object Uint8Array]' ||
-        descriptorBytes.byteLength === 0
-    ) {
-        throw new TypeError(
-            'writeEvaluationKeyShareComponentMaterial must return non-empty Uint8Array descriptor bytes.',
-        );
-    }
+            totalByteLength: validatedMaterial.totalByteLength,
+        }),
+        'writeEvaluationKeyShareComponentMaterial descriptorBytes',
+    );
 
     return {
         shareMaterial,
@@ -433,7 +427,7 @@ const transportEvaluationKeyShareComponentMaterial = async (
             keySwitchComponentVectorRoot:
                 workItem.shareMaterial.keySwitchComponentVectorRoot,
             keySwitchComponentMaterialRoot,
-            descriptorBytes: descriptorBytes.slice(),
+            descriptorBytes,
         },
     };
 };

@@ -1,21 +1,32 @@
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
 import { parseFuzzDurationSeconds } from '#tools/ci/run-foundation-parser-fuzzing';
 import { validateFocusedRustLaneSelection } from '#tools/ci/rust-focused-lane-selection';
+import { inventoryEntriesFromListedTests } from '#tools/ci/rust-test-inventory';
 import {
+    aggregateTestScriptCommands,
     aggregateTestScripts,
+    browserTestLaneDefinitions,
     canonicalTestLaneDefinitions,
     canonicalTestLaneValues,
+    defaultNodeTestLanes,
     rustTestLanesForInventoryEntry,
     testLaneGroupsForRelativePath,
+    testUtilityScriptCommands,
     testUtilityScripts,
 } from '#tools/ci/test-lanes';
 import {
     analyzeTypeScriptTestSource,
+    collectOwnedTypeScriptSources,
     parseCargoFuzzBins,
     parseLibtestListOutput,
     validateExternalOracleInventory,
     validateFuzzTargetInventory,
+    validateMobileBrowserTestSelectors,
     validateRootTestScripts,
     validateRustTestInventory,
     validateTestLaneCoverage,
@@ -23,6 +34,16 @@ import {
 
 describe('test lane coverage verification', () => {
     it('classifies the current lane patterns', () => {
+        expect(defaultNodeTestLanes).toEqual([
+            'fast',
+            'protocol',
+            'kernel-fast',
+        ]);
+        expect(browserTestLaneDefinitions.mobile.include).toEqual([
+            'packages/sdk/tests/browser/election-foundation-public-api.browser.test.ts',
+            'packages/wasm/tests/browser/owned-kernel-worker-channel.browser.test.ts',
+            'packages/protocol/tests/browser/browser-action-storage-custody.browser.test.ts',
+        ]);
         expect(
             testLaneGroupsForRelativePath(
                 'packages/protocol/tests/node/election-foundation-thresholds.test.ts',
@@ -63,6 +84,57 @@ describe('test lane coverage verification', () => {
         ]);
     });
 
+    it('cross-checks the exact mobile smoke selectors against discovered browser tests', () => {
+        const mobileTests = browserTestLaneDefinitions.mobile.include;
+        expect(validateMobileBrowserTestSelectors(mobileTests)).toEqual([]);
+        expect(
+            validateMobileBrowserTestSelectors(mobileTests.slice(1)),
+        ).toEqual([
+            `Mobile browser smoke test ${mobileTests[0]} is stale or missing.`,
+        ]);
+    });
+
+    it('discovers TypeScript tests in unconventional owned directories while excluding private and generated trees', async () => {
+        const temporaryRoot = await mkdtemp(
+            path.join(tmpdir(), 'sealed-lattice-test-discovery-'),
+        );
+        try {
+            const ownedTestPath = path.join(
+                temporaryRoot,
+                'unusual-source',
+                'hidden.test.ts',
+            );
+            const privateTestPath = path.join(
+                temporaryRoot,
+                'implementation-documentation',
+                'private.test.ts',
+            );
+            const generatedTestPath = path.join(
+                temporaryRoot,
+                'dist',
+                'generated.test.ts',
+            );
+            for (const filePath of [
+                ownedTestPath,
+                privateTestPath,
+                generatedTestPath,
+            ]) {
+                await mkdir(path.dirname(filePath), { recursive: true });
+                await writeFile(
+                    filePath,
+                    "import { it } from 'vitest';\n",
+                    'utf8',
+                );
+            }
+
+            const discoveredFiles =
+                await collectOwnedTypeScriptSources(temporaryRoot);
+            expect(discoveredFiles).toEqual([ownedTestPath]);
+        } finally {
+            await rm(temporaryRoot, { force: true, recursive: true });
+        }
+    });
+
     it('finds hidden definitions and rejects empty, focused, and disabled tests', () => {
         expect(
             analyzeTypeScriptTestSource({
@@ -76,7 +148,8 @@ describe('test lane coverage verification', () => {
         expect(
             analyzeTypeScriptTestSource({
                 relativePath: 'tests/node/empty.test.ts',
-                sourceText: 'export {};',
+                sourceText:
+                    "import { describe } from 'vitest'; describe('suite', () => {});",
             }).failures,
         ).toContain(
             'tests/node/empty.test.ts is test-named but defines no Vitest tests.',
@@ -91,25 +164,101 @@ describe('test lane coverage verification', () => {
         expect(disabledAnalysis.failures.join('\n')).toMatch(/\.only/u);
         expect(disabledAnalysis.failures.join('\n')).toMatch(/\.skip/u);
         expect(disabledAnalysis.failures.join('\n')).toMatch(/\.todo/u);
+
+        expect(
+            analyzeTypeScriptTestSource({
+                relativePath: 'tools/hidden-suite.ts',
+                sourceText:
+                    "import * as vitest from 'vitest'; vitest.describe('hidden', () => {});",
+            }).failures,
+        ).toContain(
+            'tools/hidden-suite.ts defines Vitest tests outside a recognized test-named file.',
+        );
     });
 
-    it('allows capability skip only in classified browser tests', () => {
+    it('reports every TypeScript parse diagnostic without hiding recovered test ownership', () => {
+        const malformedOwnedTest = analyzeTypeScriptTestSource({
+            relativePath: 'tests/node/malformed.test.ts',
+            sourceText:
+                "import { it } from 'vitest';\nit('still discovered', () => {});\nconst firstBrokenValue = ;\nconst secondBrokenValue = ;",
+        });
+
+        expect(malformedOwnedTest.definitionCount).toBe(1);
+        expect(malformedOwnedTest.failures).toEqual([
+            'tests/node/malformed.test.ts:3:26 has TypeScript syntax error TS1109: Expression expected.',
+            'tests/node/malformed.test.ts:4:27 has TypeScript syntax error TS1109: Expression expected.',
+        ]);
+
+        const malformedHiddenTest = analyzeTypeScriptTestSource({
+            relativePath: 'tools/malformed-hidden-tests.ts',
+            sourceText:
+                "import { test } from 'vitest';\ntest('hidden but recoverable', () => {});\nconst brokenValue = ;",
+        });
+
+        expect(malformedHiddenTest.definitionCount).toBe(1);
+        expect(malformedHiddenTest.failures).toEqual([
+            'tools/malformed-hidden-tests.ts:3:21 has TypeScript syntax error TS1109: Expression expected.',
+            'tools/malformed-hidden-tests.ts defines Vitest tests outside a recognized test-named file.',
+        ]);
+    });
+
+    it('allows runtime browser capability skips and rejects static or unsupported conditional modifiers', () => {
         expect(
             analyzeTypeScriptTestSource({
                 relativePath:
                     'packages/sdk/tests/browser/capability.browser.test.ts',
                 sourceText:
-                    "import { describe } from 'vitest'; describe.skipIf(true)('browser', () => {});",
+                    "import { describe, it } from 'vitest'; import { webLocksAvailable } from '#tests/support/browser-capabilities'; describe.skipIf(!webLocksAvailable)('browser', () => { it('works', () => {}); });",
             }).failures,
         ).toEqual([]);
         expect(
             analyzeTypeScriptTestSource({
+                relativePath:
+                    'packages/sdk/tests/browser/local-capability.browser.test.ts',
+                sourceText:
+                    "import { describe, it } from 'vitest'; const webLocksAvailable = 'locks' in navigator; describe.skipIf(!webLocksAvailable)('browser', () => { it('works', () => {}); });",
+            }).failures,
+        ).toContain(
+            'packages/sdk/tests/browser/local-capability.browser.test.ts:1 uses .skipIf without the shared webLocksAvailable capability import.',
+        );
+        expect(
+            analyzeTypeScriptTestSource({
+                relativePath:
+                    'packages/sdk/tests/browser/static-capability.browser.test.ts',
+                sourceText:
+                    "import { describe, it } from 'vitest'; describe.skipIf(true)('browser', () => { it('works', () => {}); });",
+            }).failures,
+        ).toContain(
+            'packages/sdk/tests/browser/static-capability.browser.test.ts:1 uses .skipIf with a static boolean; only runtime browser-capability conditions are allowed.',
+        );
+        expect(
+            analyzeTypeScriptTestSource({
+                relativePath:
+                    'packages/sdk/tests/browser/other-capability.browser.test.ts',
+                sourceText:
+                    "import { describe, it } from 'vitest'; const otherCapability = 'serviceWorker' in navigator; describe.skipIf(otherCapability)('browser', () => { it('works', () => {}); });",
+            }).failures,
+        ).toContain(
+            'packages/sdk/tests/browser/other-capability.browser.test.ts:1 uses .skipIf without the shared webLocksAvailable capability import.',
+        );
+        expect(
+            analyzeTypeScriptTestSource({
                 relativePath: 'tests/node/capability.test.ts',
                 sourceText:
-                    "import { describe } from 'vitest'; describe.skipIf(true)('node', () => {});",
+                    "import { describe, it } from 'vitest'; const capabilityAvailable = true; describe.skipIf(capabilityAvailable)('node', () => { it('works', () => {}); });",
             }).failures,
         ).toContain(
             'tests/node/capability.test.ts:1 uses .skipIf outside the classified browser lane.',
+        );
+        expect(
+            analyzeTypeScriptTestSource({
+                relativePath:
+                    'packages/sdk/tests/browser/run-if.browser.test.ts',
+                sourceText:
+                    "import { it } from 'vitest'; const capabilityAvailable = true; it.runIf(capabilityAvailable)('conditional', () => {});",
+            }).failures,
+        ).toContain(
+            'packages/sdk/tests/browser/run-if.browser.test.ts:1 uses .runIf; conditional browser tests must use capability-dependent .skipIf.',
         );
     });
 
@@ -122,6 +271,27 @@ describe('test lane coverage verification', () => {
             'crate::example - compile',
             'integration_case',
             'module::unit',
+        ]);
+        expect(
+            inventoryEntriesFromListedTests({
+                allTests: ['ordinary', 'ignored'],
+                ignoredTests: new Set(['ignored']),
+                packageName: 'sealed-lattice-kernel',
+                targetName: 'sealed_lattice_kernel',
+            }),
+        ).toEqual([
+            {
+                ignored: false,
+                packageName: 'sealed-lattice-kernel',
+                targetName: 'sealed_lattice_kernel',
+                testName: 'ordinary',
+            },
+            {
+                ignored: true,
+                packageName: 'sealed-lattice-kernel',
+                targetName: 'sealed_lattice_kernel',
+                testName: 'ignored',
+            },
         ]);
     });
 
@@ -193,22 +363,24 @@ describe('test lane coverage verification', () => {
     it('rejects missing and undeclared root scripts', () => {
         const validScripts: Record<string, string> = {};
         for (const lane of canonicalTestLaneValues) {
-            validScripts[canonicalTestLaneDefinitions[lane].rootScript] =
-                'runner';
+            const definition = canonicalTestLaneDefinitions[lane];
+            validScripts[definition.rootScript] = definition.command;
         }
         for (const script of aggregateTestScripts) {
-            validScripts[script] = 'aggregate';
+            validScripts[script] = aggregateTestScriptCommands[script];
         }
         for (const script of testUtilityScripts) {
-            validScripts[script] = 'utility';
+            validScripts[script] = testUtilityScriptCommands[script];
         }
         expect(validateRootTestScripts(validScripts)).toEqual([]);
 
         delete validScripts['test:rust:kernel:measurements'];
+        validScripts['test:node:fast'] = 'tsx ./tools/ci/wrong-runner.ts';
         validScripts['test:unregistered'] = 'runner';
         expect(validateRootTestScripts(validScripts)).toEqual(
             expect.arrayContaining([
                 'rust-measurements is missing root script test:rust:kernel:measurements.',
+                'test:node:fast runs "tsx ./tools/ci/wrong-runner.ts"; expected "tsx ./tools/ci/run-node-tests.ts fast" for node-fast.',
                 'test:unregistered is an undeclared root test script; register it as a canonical lane or aggregate alias.',
             ]),
         );
@@ -256,15 +428,52 @@ describe('test lane coverage verification', () => {
             validateFocusedRustLaneSelection({
                 lane: 'rust-measurements',
                 testFilter: 'missing',
-                testNames: [],
+                tests: [],
             }),
         ).toThrow('selects zero tests');
         expect(() =>
             validateFocusedRustLaneSelection({
                 lane: 'rust-measurements',
                 testFilter: 'heavy_rust_kernel_',
-                testNames: ['bgv::tests::heavy_rust_kernel_expensive_relation'],
+                tests: [
+                    {
+                        ignored: true,
+                        packageName: 'sealed-lattice-kernel',
+                        targetName: 'sealed_lattice_kernel',
+                        testName:
+                            'bgv::tests::heavy_rust_kernel_expensive_relation',
+                    },
+                ],
             }),
         ).toThrow('test:rust:kernel:heavy');
+        expect(() =>
+            validateFocusedRustLaneSelection({
+                lane: 'rust-kernel-fast',
+                testFilter: 'ignored_without_registry_owner',
+                tests: [
+                    {
+                        ignored: true,
+                        packageName: 'sealed-lattice-kernel',
+                        targetName: 'sealed_lattice_kernel',
+                        testName: 'foundation::tests::ignored_without_owner',
+                    },
+                ],
+            }),
+        ).toThrow('updated canonical lane registry');
+        expect(() =>
+            validateFocusedRustLaneSelection({
+                lane: 'rust-accepted-setup',
+                testFilter: 'overlap',
+                tests: [
+                    {
+                        ignored: true,
+                        packageName: 'sealed-lattice-kernel',
+                        targetName: 'sealed_lattice_kernel',
+                        testName:
+                            'bgv::setup::tests::accepted_setup::heavy_rust_kernel_overlap',
+                    },
+                ],
+            }),
+        ).toThrow('owned by multiple canonical lanes');
     });
 });

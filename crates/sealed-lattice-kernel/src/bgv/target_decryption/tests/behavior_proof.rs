@@ -360,6 +360,50 @@ fn target_result_release_rejects_wrong_target_context_before_proof_bytes() {
 }
 
 #[test]
+fn failed_staged_target_release_absorption_evicts_material_for_retry() {
+    let proof_bytes = vec![0x53, 0x4c, 0x54, 0x44, 0x2d, 0x52, 0x45, 0x54, 0x52, 0x59];
+    let proof_record = json!({
+        "objectType": "BgvTargetDecryptionShareProofRecord",
+        "proofBytesEncoding": "binary-chunked-proof-bytes",
+        "proofBytesHash": hash512_hex(
+            "sealed-lattice/target-decryption/share-proof/proof-bytes",
+            &[&proof_bytes],
+        ),
+    });
+    let mut proof_material = json!({
+        "objectType": "BgvTargetDecryptionShareProofMaterial",
+        "proofRecords": [proof_record],
+    });
+    let proof_material_root =
+        derive_canonical_object_hash(&proof_material).expect("target proof material root");
+    proof_material["proofMaterialRoot"] = json!(&proof_material_root);
+    crate::bgv::setup::retain_generated_canonical_proof_material(
+        TARGET_DECRYPTION_SHARE_PROOF_FAMILY,
+        proof_material_root.clone(),
+        proof_bytes.clone(),
+    )
+    .expect("first staged target proof material");
+
+    let error = absorb_bgv_target_decryption_result_release_share_from_request(&json!({
+        "releaseVerificationId": "inactive-release-for-material-retry",
+        "targetShareProof": {
+            "proofMaterial": proof_material,
+        },
+    }))
+    .expect_err("an inactive release session must refuse absorption");
+    assert_eq!(error.code, CanonicalErrorCode::InvalidProtocolObject);
+    assert!(error.message.contains("is not active"), "{}", error.message);
+
+    crate::bgv::setup::retain_generated_canonical_proof_material(
+        TARGET_DECRYPTION_SHARE_PROOF_FAMILY,
+        proof_material_root.clone(),
+        proof_bytes,
+    )
+    .expect("a refused staged absorption must permit the material retry");
+    crate::bgv::setup::evict_verified_canonical_proof_materials(&[proof_material_root]);
+}
+
+#[test]
 fn malformed_setup_evicts_stream_authenticated_target_proof_material() {
     let (setup_package, accepted_record, target_ciphertext_binding, target_ciphertexts) =
         target_fixture();
@@ -479,12 +523,17 @@ fn statement_backed_target_share_with_malformed_proof_material(
     })
     .expect("target share proof statement");
 
+    let proof_bytes = [1_u8, 2, 3, 4, 5];
     let mut proof_material = json!({
         "objectType": "BgvTargetDecryptionShareProofMaterial",
         "proofRecords": [
             {
                 "objectType": "BgvTargetDecryptionShareProofRecord",
-                "proofBytesBase64": "AQIDBAU=",
+                "proofBytesEncoding": "binary-chunked-proof-bytes",
+                "proofBytesHash": hash512_hex(
+                    "sealed-lattice/target-decryption/share-proof/proof-bytes",
+                    &[&proof_bytes],
+                ),
             },
         ],
     });

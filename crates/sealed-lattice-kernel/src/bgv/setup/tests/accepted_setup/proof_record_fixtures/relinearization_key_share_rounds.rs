@@ -8,10 +8,10 @@ use crate::hashing::derive_canonical_object_hash;
 // verifier's `verify_relinearization_key_share_rounds` recomputes: two-round
 // collective relinearization with round-one shares of the trustee secret, the
 // public round-one aggregate diagonals, and round-two shares against that
-// aggregate. Component vectors are embedded (the accepted-setup verifier accepts
-// the `embedded-full-key-switch-component-vectors` encoding directly), and every
-// record and aggregate root is a canonical object hash with no profile-identifier
-// fields, matching the verifier's recompute exactly.
+// aggregate. Component vectors cross the canonical authenticated stream and the
+// records retain only their material roots. Every record and aggregate root is a
+// canonical object hash with no profile-identifier fields, matching the
+// verifier's recompute exactly.
 pub(in super::super) fn relinearization_key_share_rounds_fixture(
     package: &serde_json::Value,
 ) -> RelinearizationKeyShareRoundsFixture {
@@ -32,6 +32,7 @@ pub(in super::super) fn relinearization_key_share_rounds_fixture(
     let mut round_one_share_roots = BTreeMap::<(u64, u64), String>::new();
     let mut round_one_record_roots = BTreeMap::<(u64, u64), String>::new();
     let mut round_one_aggregate_diagonals_by_level = BTreeMap::<u64, Vec<Vec<u64>>>::new();
+    let mut transported_component_materials = Vec::new();
     let ring_degree = public_coefficient_commitment_ring_degree_from_fixture_package(package);
     for level in &scheduled_levels {
         let level = *level;
@@ -100,15 +101,21 @@ pub(in super::super) fn relinearization_key_share_rounds_fixture(
                 "publicKeyShareSuccinctProofSetRoot": package["publicKeyShareSuccinctProofs"]["publicKeyShareSuccinctProofSetRoot"],
                 "relinearizationCrpRoot": package["commonRandomness"]["publicDerivations"]["crpRoots"]["relinearizationCrpRoot"],
                 "roundOneShareRoot": round_one_share_root,
-                "keySwitchMaterialEncoding": "embedded-full-key-switch-component-vectors",
+                "keySwitchMaterialEncoding": EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
                 "keySwitchDomain": "relinearization",
                 "keySwitchSeedHex": key_switch_seed_hex,
                 "ringDegree": ring_degree,
                 "keySwitchComponentVectorRoot": fixture_material.component_vector_root,
-                "keySwitchComponentVectors": serde_json::Value::Array(
-                    fixture_material.component_vector_entries.clone(),
-                ),
             });
+            let authenticated_material =
+                authenticate_evaluation_key_share_component_material_fixture(
+                    EvaluationKeyShareProofFamily::Relinearization,
+                    &record,
+                    &fixture_material,
+                );
+            record["keySwitchComponentMaterialRoot"] =
+                serde_json::json!(authenticated_material.material_root);
+            transported_component_materials.push(authenticated_material.transported_material);
             record["roundOneRecordRoot"] = serde_json::json!(
                 derive_canonical_object_hash(&record).expect("round-one record root")
             );
@@ -209,15 +216,21 @@ pub(in super::super) fn relinearization_key_share_rounds_fixture(
                     .get(&level)
                     .expect("round-one aggregate root"),
                 "roundTwoShareRoot": round_two_share_root,
-                "keySwitchMaterialEncoding": "embedded-full-key-switch-component-vectors",
+                "keySwitchMaterialEncoding": EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
                 "keySwitchDomain": "relinearization",
                 "keySwitchSeedHex": key_switch_seed_hex,
                 "ringDegree": ring_degree,
                 "keySwitchComponentVectorRoot": fixture_material.component_vector_root,
-                "keySwitchComponentVectors": serde_json::Value::Array(
-                    fixture_material.component_vector_entries.clone(),
-                ),
             });
+            let authenticated_material =
+                authenticate_evaluation_key_share_component_material_fixture(
+                    EvaluationKeyShareProofFamily::Relinearization,
+                    &record,
+                    &fixture_material,
+                );
+            record["keySwitchComponentMaterialRoot"] =
+                serde_json::json!(authenticated_material.material_root);
+            transported_component_materials.push(authenticated_material.transported_material);
             record["roundTwoRecordRoot"] = serde_json::json!(
                 derive_canonical_object_hash(&record).expect("round-two record root")
             );
@@ -285,5 +298,6 @@ pub(in super::super) fn relinearization_key_share_rounds_fixture(
     RelinearizationKeyShareRoundsFixture {
         rounds,
         round_one_aggregate_diagonals_by_level,
+        transported_component_materials,
     }
 }

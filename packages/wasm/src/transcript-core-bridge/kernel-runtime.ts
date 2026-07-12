@@ -395,17 +395,11 @@ const requireKernelIntegrityExpectation = (
     );
 };
 
-const toArrayBuffer = (bytes: Uint8Array): ArrayBuffer =>
-    Uint8Array.from(bytes).buffer;
-
 const readWasmFile = async (fileUrl: URL): Promise<ArrayBuffer> => {
-    const [{ readFile }, { fileURLToPath }] = await Promise.all([
-        import('node:fs/promises'),
-        import('node:url'),
-    ]);
-    const bytes = await readFile(fileURLToPath(fileUrl));
+    const { readNodeFileAsArrayBuffer } =
+        await import('./kernel-node-file-loader.js');
 
-    return toArrayBuffer(bytes);
+    return readNodeFileAsArrayBuffer(fileUrl);
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>

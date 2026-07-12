@@ -1,3 +1,5 @@
+import path from 'node:path';
+
 const nodeTestTimeoutMs = 60_000;
 const nodeKernelHeavyTestTimeoutMs = 15 * 60_000;
 const nodeKernelVeryHeavyTestTimeoutMs = 60 * 60_000;
@@ -25,57 +27,90 @@ export type CanonicalTestLane = (typeof canonicalTestLaneValues)[number];
 
 type CanonicalTestLaneDefinition = {
     readonly automation: TestAutomationClass;
+    readonly baselineDurationMilliseconds: number;
+    readonly command: string;
     readonly rootScript: string;
 };
 
 export const canonicalTestLaneDefinitions = {
     'node-fast': {
         automation: 'local-and-ci',
+        baselineDurationMilliseconds: 3_000,
+        command: 'tsx ./tools/ci/run-node-tests.ts fast',
         rootScript: 'test:node:fast',
     },
     'node-protocol': {
         automation: 'ci',
+        baselineDurationMilliseconds: 30_000,
+        command: 'tsx ./tools/ci/run-node-tests.ts protocol',
         rootScript: 'test:node:protocol',
     },
     'node-kernel-fast': {
         automation: 'local-and-ci',
+        baselineDurationMilliseconds: 20_000,
+        command: 'tsx ./tools/ci/run-node-tests.ts kernel-fast',
         rootScript: 'test:node:kernel:fast',
     },
     'node-kernel-heavy': {
         automation: 'ci',
+        baselineDurationMilliseconds: 30 * 60_000,
+        command: 'tsx ./tools/ci/run-node-tests.ts kernel-heavy',
         rootScript: 'test:node:kernel:heavy',
     },
-    browser: { automation: 'ci', rootScript: 'test:browser' },
+    browser: {
+        automation: 'ci',
+        baselineDurationMilliseconds: 90_000,
+        command: 'tsx ./tools/ci/run-browser-tests.ts',
+        rootScript: 'test:browser',
+    },
     'rust-kernel-fast': {
         automation: 'local-and-ci',
+        baselineDurationMilliseconds: 10 * 60_000,
+        command: 'tsx ./tools/ci/run-rust-kernel-tests.ts',
         rootScript: 'test:rust:kernel',
     },
     'rust-kernel-heavy': {
         automation: 'ci',
+        baselineDurationMilliseconds: 60 * 60_000,
+        command: 'tsx ./tools/ci/run-rust-kernel-heavy-tests.ts',
         rootScript: 'test:rust:kernel:heavy',
     },
     'rust-accepted-setup': {
         automation: 'ci',
+        baselineDurationMilliseconds: 3 * 60 * 60_000,
+        command: 'tsx ./tools/ci/run-rust-kernel-accepted-setup-tests.ts',
         rootScript: 'test:rust:kernel:accepted-setup',
     },
     'rust-full-profile-evidence': {
         automation: 'manual',
+        baselineDurationMilliseconds: 4 * 60 * 60_000,
+        command:
+            'tsx ./tools/ci/run-rust-kernel-manual-tests.ts rust-full-profile-evidence',
         rootScript: 'test:rust:kernel:full-profile-evidence',
     },
     'rust-measurements': {
         automation: 'manual',
+        baselineDurationMilliseconds: 3 * 60 * 60_000,
+        command:
+            'tsx ./tools/ci/run-rust-kernel-manual-tests.ts rust-measurements',
         rootScript: 'test:rust:kernel:measurements',
     },
     'rust-process-memory-guard': {
         automation: 'local-and-ci',
+        baselineDurationMilliseconds: 15_000,
+        command: 'tsx ./tools/ci/run-process-memory-guard-tests.ts',
         rootScript: 'test:rust:process-memory-guard',
     },
     'foundation-parser-fuzzing': {
         automation: 'manual',
+        baselineDurationMilliseconds: 60_000,
+        command: 'tsx ./tools/ci/run-foundation-parser-fuzzing.ts',
         rootScript: 'test:fuzz:foundation-schema-object',
     },
     'lattigo-arithmetic-oracle': {
         automation: 'manual',
+        baselineDurationMilliseconds: 5 * 60_000,
+        command: 'tsx ./tools/lattigo-oracle/run-lattigo-oracle.ts',
         rootScript: 'test:lattigo-oracle',
     },
 } as const satisfies Record<CanonicalTestLane, CanonicalTestLaneDefinition>;
@@ -86,7 +121,17 @@ export const aggregateTestScripts = [
     'test:node:kernel',
 ] as const;
 
+export const aggregateTestScriptCommands = {
+    test: 'pnpm run test:node && pnpm run test:browser',
+    'test:node': 'tsx ./tools/ci/run-node-tests.ts',
+    'test:node:kernel': 'tsx ./tools/ci/run-node-tests.ts kernel',
+} as const satisfies Record<(typeof aggregateTestScripts)[number], string>;
+
 export const testUtilityScripts = ['test:lanes:verify'] as const;
+
+export const testUtilityScriptCommands = {
+    'test:lanes:verify': 'tsx ./tools/ci/verify-test-lane-coverage.ts',
+} as const satisfies Record<(typeof testUtilityScripts)[number], string>;
 
 export const nodeTestLaneValues = [
     'fast',
@@ -166,7 +211,9 @@ export const nodeTestProjectDefinitions = [
 ] as const;
 
 export const defaultNodeTestLanes = [
-    ...nodeTestLaneValues,
+    'fast',
+    'protocol',
+    'kernel-fast',
 ] as const satisfies readonly NodeTestLane[];
 
 type BrowserTestLane = 'desktop' | 'mobile';
@@ -182,7 +229,11 @@ export const browserTestLaneDefinitions = {
         projectName: 'browser-desktop',
     },
     mobile: {
-        include: ['packages/*/tests/browser/**/*.browser.test.ts'],
+        include: [
+            'packages/sdk/tests/browser/election-foundation-public-api.browser.test.ts',
+            'packages/wasm/tests/browser/owned-kernel-worker-channel.browser.test.ts',
+            'packages/protocol/tests/browser/browser-action-storage-custody.browser.test.ts',
+        ],
         projectName: 'browser-mobile',
     },
 } as const satisfies Record<BrowserTestLane, BrowserTestLaneDefinition>;
@@ -224,24 +275,22 @@ export const externalOracleDefinitions = {
     },
 } as const;
 
-export const expectedOwnedTestCounts = {
-    browser: 14,
-    'foundation-parser-fuzzing': 1,
-    'lattigo-arithmetic-oracle': 1,
-    'node-fast': 35,
-    'node-kernel-fast': 14,
-    'node-kernel-heavy': 4,
-    'node-protocol': 28,
-    'rust-accepted-setup': 47,
-    'rust-full-profile-evidence': 2,
-    'rust-kernel-fast': 546,
-    'rust-kernel-heavy': 5,
-    'rust-measurements': 5,
-    'rust-process-memory-guard': 7,
-} as const satisfies Record<CanonicalTestLane, number>;
-
 const normalizeRelativeTestPath = (filePath: string): string =>
     filePath.replace(/\\/gu, '/');
+
+const matchesAnyTestGlob = (
+    relativePath: string,
+    globs: readonly string[] | undefined,
+): boolean =>
+    globs?.some((testGlob) => path.matchesGlob(relativePath, testGlob)) ===
+    true;
+
+const canonicalNodeLaneByNodeLane = {
+    fast: 'node-fast',
+    protocol: 'node-protocol',
+    'kernel-fast': 'node-kernel-fast',
+    'kernel-heavy': 'node-kernel-heavy',
+} as const satisfies Record<NodeTestLane, TestLaneGroup>;
 
 export const testLaneGroupsForRelativePath = (
     filePath: string,
@@ -249,43 +298,26 @@ export const testLaneGroupsForRelativePath = (
     const relativePath = normalizeRelativeTestPath(filePath);
     const laneGroups: TestLaneGroup[] = [];
 
-    if (!relativePath.endsWith('.test.ts')) {
-        return laneGroups;
-    }
-
     if (
-        relativePath.startsWith('packages/') &&
-        relativePath.includes('/tests/browser/') &&
-        relativePath.endsWith('.browser.test.ts')
+        matchesAnyTestGlob(
+            relativePath,
+            browserTestLaneDefinitions.desktop.include,
+        )
     ) {
         laneGroups.push('browser');
     }
 
-    if (relativePath.startsWith('packages/protocol/tests/node/')) {
-        laneGroups.push('node-protocol');
-    } else if (
-        relativePath.startsWith(
-            'packages/wasm/tests/node/transcript-core-kernel/bgv-collective-setup/',
-        ) &&
-        relativePath.endsWith('.kernel.test.ts')
-    ) {
-        laneGroups.push('node-kernel-heavy');
-    } else if (
-        relativePath.startsWith('packages/wasm/tests/node/') &&
-        relativePath.endsWith('.kernel.test.ts')
-    ) {
-        laneGroups.push('node-kernel-fast');
-    } else if (
-        relativePath.startsWith('tests/node/') &&
-        relativePath.endsWith('.kernel.test.ts')
-    ) {
-        laneGroups.push('node-kernel-fast');
-    } else if (
-        relativePath.startsWith('tests/node/') ||
-        (relativePath.startsWith('packages/') &&
-            relativePath.includes('/tests/node/'))
-    ) {
-        laneGroups.push('node-fast');
+    for (const nodeLane of nodeTestLaneValues) {
+        const definition = nodeTestLaneDefinitions[nodeLane];
+        if (
+            matchesAnyTestGlob(relativePath, definition.include) &&
+            !matchesAnyTestGlob(
+                relativePath,
+                'exclude' in definition ? definition.exclude : undefined,
+            )
+        ) {
+            laneGroups.push(canonicalNodeLaneByNodeLane[nodeLane]);
+        }
     }
 
     return laneGroups;

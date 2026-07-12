@@ -339,12 +339,12 @@ impl PublicKeyShareSuccinctProofFixture {
                 continue;
             }
 
-            crate::bgv::setup::retain_generated_canonical_proof_material(
+            authenticate_setup_proof_material_stream_for_test(
                 PUBLIC_KEY_SHARE_PROOF_FAMILY,
-                material.proof_material_root.clone(),
-                material.proof_bytes.clone(),
+                &material.proof_material_root,
+                &material.proof_bytes,
             )
-            .expect("retain public-key share proof material");
+            .expect("authenticate public-key share proof material stream");
         }
     }
 }
@@ -357,11 +357,12 @@ struct PublicKeyShareSuccinctProofRecordFixture {
 
 pub(in super::super) fn public_key_share_succinct_proofs_fixture(
     package: &serde_json::Value,
+    proof_material_request: &serde_json::Value,
 ) -> PublicKeyShareSuccinctProofFixture {
     use crate::bgv::setup::trustee_evaluation_key_proof::{
         EvaluationKeyShareDescriptor, PUBLIC_KEY_SHARE_COMMON_REFERENCE_LABEL,
         PUBLIC_KEY_SHARE_PROOF_FAMILY, SuccinctSetupProofContext, TrusteeEvaluationKeyStatement,
-        public_key_share_succinct_proof_bytes_hash,
+        public_key_share_succinct_proof_bytes_hash, verify_trustee_evaluation_key_proof_bytes,
     };
     let setup_context = &package["setupContext"];
     let public_matrix_seed_hash = package["commonRandomness"]["publicMatrixSeedHash"]
@@ -390,7 +391,7 @@ pub(in super::super) fn public_key_share_succinct_proofs_fixture(
     let verified_same_secret_bridge =
         crate::bgv::setup::accepted_setup::verified_same_secret_bridge_material_from_package(
             package,
-            &serde_json::json!({}),
+            proof_material_request,
         )
         .expect("same-secret bridge material");
     let per_trustee_records = (0..participant_count)
@@ -513,6 +514,7 @@ pub(in super::super) fn public_key_share_succinct_proofs_fixture(
         let proof_bytes = checkpointed_proof_bytes(
             PUBLIC_KEY_SHARE_PROOF_CHECKPOINT_DIRECTORY,
             &statement_hash_hex,
+            |proof_bytes| verify_trustee_evaluation_key_proof_bytes(&statement, proof_bytes),
             || {
                 let proof =
                     prove_evaluation_key_share(&statement, &witness, &proof_randomness_seed_hex)
@@ -550,10 +552,9 @@ pub(in super::super) fn public_key_share_succinct_proofs_fixture(
             derive_canonical_object_hash(&proof_record)
                 .expect("public-key share succinct proof root")
         );
-        let transport_hashes = setup_proof_material_transport_hashes(
+        let transport_hashes = canonical_setup_proof_material_transport_accounting(
             PUBLIC_KEY_SHARE_PROOF_FAMILY,
             &proof_bytes,
-            SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
         )
         .expect("public-key share proof transport hashes");
         let transported_proof_material = serde_json::json!({

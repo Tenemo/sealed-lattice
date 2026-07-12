@@ -1,16 +1,14 @@
 {
-    "$schema": "https://unpkg.com/knip@5/schema.json",
+    "$schema": "https://unpkg.com/knip@6/schema.json",
     "workspaces": {
         ".": {
             "entry": [
                 "tests/**/*.ts",
                 "tools/ci/packed-package-smoke.mjs",
-                "tools/ci/vitest-progress-reporter.ts",
+                "tools/ci/sdk-package-tsdown.config.ts",
             ],
             "project": ["tests/**/*.ts", "tools/**/*.ts", "tools/**/*.mjs"],
             "ignoreDependencies": [
-                // The packed-package verifier invokes publint through the shared package-manager runner.
-                "publint",
                 // The packed-package smoke script imports the tarball-installed SDK inside a temporary consumer.
                 "sealed-lattice",
                 // The Wasm kernel build resolves binaryen's wasm-opt script by path.
@@ -30,15 +28,7 @@
             "project": ["src/**/*.ts"],
         },
         "packages/protocol": {
-            "entry": [
-                "tests/**/*.ts",
-                // Target-decryption modules ported ahead of their consumers:
-                // the local-state sealing, mailbox-credential, and SDK
-                // wiring that consumes them lands with the remaining
-                // target-decryption integration work.
-                "src/target-decryption/local-target-share-witness.ts",
-                "src/target-decryption/proof-material-transport.ts",
-            ],
+            "entry": ["tests/**/*.ts"],
             "project": ["src/**/*.ts", "tests/**/*.ts"],
         },
         "packages/crypto": {

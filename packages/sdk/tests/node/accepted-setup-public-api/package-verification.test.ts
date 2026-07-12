@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import { hash512Hex, publicSetupApi } from './support.js';
 
+import { canonicalStreamDescriptorFixture } from '#tests/support/canonical-stream-descriptor-fixture';
+
 type JsonRecord = Record<string, unknown>;
 const expectedManifestHash = '1'.repeat(128);
 const expectedRosterHash = '2'.repeat(128);
@@ -9,20 +11,30 @@ const setupVerificationBindings = {
     expectedManifestHash,
     expectedRosterHash,
 } as const;
-
+const canonicalDescriptorBytes = canonicalStreamDescriptorFixture(4);
 type SetupProofMaterialTransportFieldName =
     | 'transportedPublicKeyShareProofMaterial'
-    | 'transportedEvaluationKeyShareProofMaterial';
+    | 'transportedEvaluationKeyShareProofMaterial'
+    | 'transportedVssShareLinkageProofMaterial'
+    | 'transportedSameSecretBridgeProofMaterial';
 
 type SetupProofMaterialTransportCase = Readonly<{
     readonly fieldName: SetupProofMaterialTransportFieldName;
     readonly materialSetObjectType:
         | 'SetupTransportedPublicKeyShareProofMaterialSet'
-        | 'SetupTransportedEvaluationKeyShareProofMaterialSet';
+        | 'SetupTransportedEvaluationKeyShareProofMaterialSet'
+        | 'SetupTransportedVssShareLinkageProofMaterialSet'
+        | 'SetupTransportedSameSecretBridgeProofMaterialSet';
     readonly materialObjectType:
         | 'SetupTransportedPublicKeyShareProofMaterial'
-        | 'SetupTransportedEvaluationKeyShareProofMaterial';
-    readonly proofFamily: 'public-key-share' | 'trustee-evaluation-key';
+        | 'SetupTransportedEvaluationKeyShareProofMaterial'
+        | 'SetupTransportedVssShareLinkageProofMaterial'
+        | 'SetupTransportedSameSecretBridgeProofMaterial';
+    readonly proofFamily:
+        | 'public-key-share'
+        | 'trustee-evaluation-key'
+        | 'vss-share-linkage'
+        | 'same-secret-bridge';
 }>;
 
 const setupProofMaterialTransportCases = [
@@ -38,6 +50,20 @@ const setupProofMaterialTransportCases = [
             'SetupTransportedEvaluationKeyShareProofMaterialSet',
         materialObjectType: 'SetupTransportedEvaluationKeyShareProofMaterial',
         proofFamily: 'trustee-evaluation-key',
+    },
+    {
+        fieldName: 'transportedVssShareLinkageProofMaterial',
+        materialSetObjectType:
+            'SetupTransportedVssShareLinkageProofMaterialSet',
+        materialObjectType: 'SetupTransportedVssShareLinkageProofMaterial',
+        proofFamily: 'vss-share-linkage',
+    },
+    {
+        fieldName: 'transportedSameSecretBridgeProofMaterial',
+        materialSetObjectType:
+            'SetupTransportedSameSecretBridgeProofMaterialSet',
+        materialObjectType: 'SetupTransportedSameSecretBridgeProofMaterial',
+        proofFamily: 'same-secret-bridge',
     },
 ] as const satisfies readonly SetupProofMaterialTransportCase[];
 
@@ -61,47 +87,11 @@ const transportedSetupProofMaterialSet = (
                 objectType: transportCase.materialObjectType,
                 proofFamily: transportCase.proofFamily,
                 proofMaterialRoot,
-                chunkSizeBytes: 1_048_576,
-                chunkCount: 1,
-                totalByteLength: 4,
-                fullObjectHash: proofMaterialRoot,
-                chunkHashes: [proofMaterialRoot],
-                chunkRoot: proofMaterialRoot,
-                chunks: [
-                    {
-                        chunkIndex: 0,
-                        bytesHex: '01020304',
-                    },
-                ],
+                descriptorBytes: canonicalDescriptorBytes.slice(),
             },
         ],
     };
 };
-
-const verifiedSetupProofMaterials = (
-    proofMaterialRootForCase: (
-        transportCase: SetupProofMaterialTransportCase,
-    ) => string = setupProofMaterialRoot,
-): JsonRecord => ({
-    objectType: 'VerifiedSetupProofMaterialSet',
-    proofMaterials: setupProofMaterialTransportCases.map((transportCase) => {
-        const proofMaterialRoot = proofMaterialRootForCase(transportCase);
-
-        return {
-            objectType: 'VerifiedSetupProofMaterial',
-            verificationId: `sdk-public-${transportCase.proofFamily}`,
-            proofFamily: transportCase.proofFamily,
-            proofMaterialRoot,
-            proofBytesEncoding: 'binary-chunked-proof-bytes',
-            proofChunkSizeBytes: 1_048_576,
-            proofChunkCount: 1,
-            proofTotalByteLength: 4,
-            proofFullObjectHash: proofMaterialRoot,
-            proofChunkRoot: proofMaterialRoot,
-            proofChunkHashes: [proofMaterialRoot],
-        };
-    }),
-});
 
 const transportedPublicCompanions = (): Readonly<{
     readonly transportedPublicKeyShareMaterial: JsonRecord;
@@ -123,19 +113,9 @@ const transportedPublicCompanions = (): Readonly<{
 
     return {
         transportedPublicKeyShareMaterial: {
-            objectType: 'SetupTransportedPublicKeyShareMaterialSet',
-            publicKeyShareMaterials: [
-                {
-                    objectType: 'SetupTransportedPublicKeyShareMaterial',
-                    publicKeyShareMaterialRoot,
-                    chunkSizeBytes: 1_048_576,
-                    chunkCount: 1,
-                    totalByteLength: 4,
-                    fullObjectHash: publicKeyShareMaterialRoot,
-                    chunkRoot: publicKeyShareMaterialRoot,
-                    chunkHashes: [publicKeyShareMaterialRoot],
-                },
-            ],
+            objectType: 'SetupTransportedPublicKeyShareMaterial',
+            publicKeyShareMaterialSetRoot: publicKeyShareMaterialRoot,
+            descriptorBytes: canonicalDescriptorBytes.slice(),
         },
         transportedEvaluationKeyShareComponentMaterial: {
             objectType:
@@ -145,12 +125,7 @@ const transportedPublicCompanions = (): Readonly<{
                     objectType:
                         'SetupTransportedEvaluationKeyShareComponentMaterial',
                     keySwitchComponentMaterialRoot: evaluationKeyComponentRoot,
-                    chunkSizeBytes: 1_048_576,
-                    chunkCount: 1,
-                    totalByteLength: 4,
-                    fullObjectHash: evaluationKeyComponentRoot,
-                    chunkRoot: evaluationKeyComponentRoot,
-                    chunkHashes: [evaluationKeyComponentRoot],
+                    descriptorBytes: canonicalDescriptorBytes.slice(),
                 },
             ],
         },
@@ -162,12 +137,7 @@ const transportedPublicCompanions = (): Readonly<{
                 {
                     objectType: 'SetupTransportedPublicEvaluationKeyMaterial',
                     publicEvaluationKeyMaterialRoot,
-                    chunkSizeBytes: 1_048_576,
-                    chunkCount: 1,
-                    totalByteLength: 4,
-                    fullObjectHash: publicEvaluationKeyMaterialRoot,
-                    chunkRoot: publicEvaluationKeyMaterialRoot,
-                    chunkHashes: [publicEvaluationKeyMaterialRoot],
+                    descriptorBytes: canonicalDescriptorBytes.slice(),
                 },
             ],
             componentMaterials: [],
@@ -199,20 +169,45 @@ describe('accepted setup public package API in Node', () => {
             ),
         };
         const publicCompanions = transportedPublicCompanions();
+        const transportedPublicKeyShareProofMaterial =
+            transportedSetupProofMaterialSet(
+                setupProofMaterialTransportCases[0],
+            );
+        const transportedEvaluationKeyShareProofMaterial =
+            transportedSetupProofMaterialSet(
+                setupProofMaterialTransportCases[1],
+            );
+        const transportedVssShareLinkageProofMaterial =
+            transportedSetupProofMaterialSet(
+                setupProofMaterialTransportCases[2],
+            );
+        const transportedSameSecretBridgeProofMaterial =
+            transportedSetupProofMaterialSet(
+                setupProofMaterialTransportCases[3],
+            );
+        const transportedEvaluationKeyAggregateBindingOpenings = {
+            objectType:
+                'SetupTransportedEvaluationKeyAggregateBindingOpeningSet',
+            openings: [],
+        };
+        const publicKeyShareMaterialChunkSource = {
+            publicKeyShareMaterialSetRoot:
+                publicCompanions.transportedPublicKeyShareMaterial
+                    .publicKeyShareMaterialSetRoot,
+            pullChunk: (): Promise<ArrayBuffer> =>
+                Promise.resolve(new ArrayBuffer(0)),
+        };
         const verificationInput =
             publicSetupApi.createSetupPackageVerificationInput({
                 setupPackage,
                 ...setupVerificationBindings,
-                transportedPublicKeyShareProofMaterial:
-                    transportedSetupProofMaterialSet(
-                        setupProofMaterialTransportCases[0],
-                    ),
-                transportedEvaluationKeyShareProofMaterial:
-                    transportedSetupProofMaterialSet(
-                        setupProofMaterialTransportCases[1],
-                    ),
+                transportedPublicKeyShareProofMaterial,
+                transportedEvaluationKeyShareProofMaterial,
+                transportedVssShareLinkageProofMaterial,
+                transportedSameSecretBridgeProofMaterial,
+                transportedEvaluationKeyAggregateBindingOpenings,
+                publicKeyShareMaterialChunkSource,
                 ...publicCompanions,
-                verifiedSetupProofMaterials: verifiedSetupProofMaterials(),
             });
 
         expect(verificationInput.setupPackage).toBe(setupPackage);
@@ -223,72 +218,59 @@ describe('accepted setup public package API in Node', () => {
         expect(verificationInput.transportedPublicKeyShareMaterial).toBe(
             publicCompanions.transportedPublicKeyShareMaterial,
         );
+        expect(verificationInput.publicKeyShareMaterialChunkSource).toBe(
+            publicKeyShareMaterialChunkSource,
+        );
+        expect(verificationInput.transportedPublicKeyShareProofMaterial).toBe(
+            transportedPublicKeyShareProofMaterial,
+        );
+        expect(
+            verificationInput.transportedEvaluationKeyShareProofMaterial,
+        ).toBe(transportedEvaluationKeyShareProofMaterial);
+        expect(verificationInput.transportedVssShareLinkageProofMaterial).toBe(
+            transportedVssShareLinkageProofMaterial,
+        );
+        expect(verificationInput.transportedSameSecretBridgeProofMaterial).toBe(
+            transportedSameSecretBridgeProofMaterial,
+        );
         expect(
             verificationInput.transportedEvaluationKeyShareComponentMaterial,
         ).toBe(publicCompanions.transportedEvaluationKeyShareComponentMaterial);
+        expect(
+            verificationInput.transportedEvaluationKeyAggregateBindingOpenings,
+        ).toBe(transportedEvaluationKeyAggregateBindingOpenings);
         expect(verificationInput.transportedPublicEvaluationKeyMaterial).toBe(
             publicCompanions.transportedPublicEvaluationKeyMaterial,
         );
-        for (const transportCase of setupProofMaterialTransportCases) {
-            const materialSet = verificationInput[transportCase.fieldName] as
-                | Readonly<{
-                      readonly proofMaterials: readonly JsonRecord[];
-                  }>
-                | undefined;
-            expect(materialSet?.proofMaterials[0]).toMatchObject({
-                objectType: transportCase.materialObjectType,
-                proofFamily: transportCase.proofFamily,
-                proofMaterialRoot: setupProofMaterialRoot(transportCase),
-            });
-        }
     });
 
-    it('keeps setup proof chunks when no verified handle binds that proof root', () => {
+    it('rejects malformed canonical descriptors during verification-input construction', () => {
         const setupPackage = {
             objectType: 'SetupPackage',
             setupPackageHash: hash512Hex(
-                'sealed-lattice/test/setup-package-hash-with-unverified-proof-material',
+                'sealed-lattice/test/setup-package-hash-with-malformed-proof-material',
                 [new Uint8Array([9, 10, 11, 12])],
             ),
         };
-        const verificationInput =
+        const malformedProofMaterial = transportedSetupProofMaterialSet(
+            setupProofMaterialTransportCases[0],
+        );
+        const proofMaterials =
+            malformedProofMaterial.proofMaterials as JsonRecord[];
+        proofMaterials[0].descriptorBytes = canonicalDescriptorBytes.subarray(
+            0,
+            canonicalDescriptorBytes.byteLength - 1,
+        );
+
+        expect(() =>
             publicSetupApi.createSetupPackageVerificationInput({
                 setupPackage,
                 ...setupVerificationBindings,
-                transportedPublicKeyShareProofMaterial:
-                    transportedSetupProofMaterialSet(
-                        setupProofMaterialTransportCases[0],
-                    ),
-                transportedEvaluationKeyShareProofMaterial:
-                    transportedSetupProofMaterialSet(
-                        setupProofMaterialTransportCases[1],
-                    ),
-                verifiedSetupProofMaterials: verifiedSetupProofMaterials(
-                    (transportCase) =>
-                        hash512Hex(
-                            'sealed-lattice/test/foreign-setup-proof-material-root',
-                            [
-                                new TextEncoder().encode(
-                                    transportCase.proofFamily,
-                                ),
-                            ],
-                        ),
-                ),
-            });
-
-        for (const transportCase of setupProofMaterialTransportCases) {
-            const materialSet = verificationInput[transportCase.fieldName] as
-                | Readonly<{
-                      readonly proofMaterials: readonly JsonRecord[];
-                  }>
-                | undefined;
-            expect(materialSet?.proofMaterials[0]).toMatchObject({
-                objectType: transportCase.materialObjectType,
-                proofFamily: transportCase.proofFamily,
-                proofMaterialRoot: setupProofMaterialRoot(transportCase),
-            });
-            expect(materialSet?.proofMaterials[0]).toHaveProperty('chunks');
-        }
+                transportedPublicKeyShareProofMaterial: malformedProofMaterial,
+            }),
+        ).toThrow(
+            'transportedPublicKeyShareProofMaterial.proofMaterials.0.descriptorBytes.fullObjectHash is truncated',
+        );
     });
 
     it('requires expected manifest and roster hashes for public setup verification input construction', () => {

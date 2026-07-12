@@ -104,6 +104,7 @@ export {
 } from './setup/common-randomness-records.js';
 export { createSetupContributionAssembly } from './setup/setup-contribution-orchestration.js';
 export { createSetupCertificates } from './setup/setup-certificates.js';
+export { copyCanonicalStreamDescriptor } from './setup/canonical-stream-descriptor.js';
 export {
     createSetupPackage,
     createSetupPackageVerificationInput,
@@ -235,7 +236,6 @@ export type {
     SetupCommitmentValue,
     VssCoefficientCommitmentBundle,
     VssCoefficientCommitmentMaterialRecord,
-    VssCoefficientCommitmentMaterialBinaryReference,
     VssCoefficientCommitmentMaterialSet,
     VssCoefficientCommitmentRecord,
     VssCoefficientCommitmentSet,

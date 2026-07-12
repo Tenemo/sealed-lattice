@@ -18,7 +18,7 @@ fn terminal_full_ring_gate_refuses_reduced_public_key_material() {
     assert_eq!(response["isValid"], false);
     assert_eq!(
         response["refusedObjects"][0]["reasonCode"],
-        "vssCoefficientCommitmentMaterialOutsideAcceptedRing"
+        "setupMaterialOutsideAcceptedRing"
     );
     assert_eq!(
         response["refusedObjects"][0]["objectPath"],
@@ -67,7 +67,7 @@ fn terminal_full_ring_gate_refuses_reduced_evaluation_key_records() {
     assert_eq!(response["isValid"], false);
     assert_eq!(
         response["refusedObjects"][0]["reasonCode"],
-        "vssCoefficientCommitmentMaterialOutsideAcceptedRing"
+        "setupMaterialOutsideAcceptedRing"
     );
     assert_eq!(
         response["refusedObjects"][0]["objectPath"],
@@ -76,29 +76,8 @@ fn terminal_full_ring_gate_refuses_reduced_evaluation_key_records() {
 }
 
 #[test]
-fn terminal_transport_policy_refuses_embedded_setup_material() {
+fn terminal_transport_policy_accepts_binary_key_material_references() {
     let package = terminal_transport_policy_package_with_material_encodings(
-        "full-public-setup-commitment-values",
-        PUBLIC_KEY_SHARE_MATERIAL_TRANSPORT_ENCODING,
-        SETUP_PROOF_MATERIAL_ENCODING,
-        EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
-    );
-
-    let response = verify_terminal_setup_transport_policy(&package, &serde_json::json!({}))
-        .expect("terminal transport policy")
-        .expect("embedded VSS material refusal");
-
-    assert_eq!(response["isValid"], false);
-    assert_eq!(
-        response["refusedObjects"][0]["reasonCode"],
-        "terminalVssMaterialTransportRequired"
-    );
-}
-
-#[test]
-fn terminal_transport_policy_accepts_binary_setup_and_key_material_references() {
-    let package = terminal_transport_policy_package_with_material_encodings(
-        "binary-chunked-full-public-setup-commitment-values",
         PUBLIC_KEY_SHARE_MATERIAL_TRANSPORT_ENCODING,
         SETUP_PROOF_MATERIAL_ENCODING,
         EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
@@ -113,7 +92,6 @@ fn terminal_transport_policy_accepts_binary_setup_and_key_material_references() 
 #[test]
 fn terminal_transport_policy_refuses_raw_key_switch_component_chunk_sidecar() {
     let package = terminal_transport_policy_package_with_material_encodings(
-        "binary-chunked-full-public-setup-commitment-values",
         PUBLIC_KEY_SHARE_MATERIAL_TRANSPORT_ENCODING,
         SETUP_PROOF_MATERIAL_ENCODING,
         EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
@@ -155,7 +133,6 @@ fn terminal_transport_policy_refuses_raw_key_switch_component_chunk_sidecar() {
 }
 
 fn terminal_transport_policy_package_with_material_encodings(
-    vss_material_encoding: &str,
     public_key_share_material_encoding: &str,
     proof_material_encoding: &str,
     key_switch_material_encoding: &str,
@@ -168,9 +145,6 @@ fn terminal_transport_policy_package_with_material_encodings(
     });
 
     serde_json::json!({
-        "vssCoefficientCommitmentMaterial": {
-            "materialEncoding": vss_material_encoding,
-        },
         "publicKeyShareMaterial": {
             "materialEncoding": public_key_share_material_encoding,
         },
@@ -224,20 +198,17 @@ fn collective_setup_verifier_refuses_public_key_share_transport_missing_certific
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "collective_setup_verifier_refuses_public_key_share_transport_missing_certificate_object",
     );
-    let package = minimal_collective_setup_package();
+    let mut fixture = descriptor_backed_vss_collective_setup_fixture();
+    fixture.verification_request["transportedPublicKeyShareMaterial"] = serde_json::json!({
+        "totalByteLength": 1_u64,
+        "fullObjectHash": valid_hash('1'),
+        "chunkRoot": valid_hash('2'),
+        "chunkHashes": [valid_hash('3')],
+    });
 
-    let result = verify_collective_bgv_setup_package(
-        &package,
-        &serde_json::json!({
-            "transportedPublicKeyShareMaterial": {
-                "totalByteLength": 1_u64,
-                "fullObjectHash": valid_hash('1'),
-                "chunkRoot": valid_hash('2'),
-                "chunkHashes": [valid_hash('3')],
-            },
-        }),
-    )
-    .expect("verification response");
+    let result =
+        verify_collective_bgv_setup_package(&fixture.package, &fixture.verification_request)
+            .expect("verification response");
 
     assert_eq!(result["isValid"], false);
     assert_eq!(
@@ -263,7 +234,7 @@ fn terminal_full_ring_gate_refuses_reduced_vss_material() {
     assert_eq!(response["isValid"], false);
     assert_eq!(
         response["refusedObjects"][0]["reasonCode"],
-        "vssCoefficientCommitmentMaterialOutsideAcceptedRing"
+        "setupMaterialOutsideAcceptedRing"
     );
     assert_eq!(
         response["refusedObjects"][0]["objectPath"],

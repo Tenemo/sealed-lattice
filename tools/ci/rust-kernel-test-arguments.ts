@@ -18,6 +18,7 @@ export const cargoTestArgumentsForRustKernelFast = (
     testFilter?: string,
 ): readonly string[] => [
     'test',
+    '--locked',
     '-p',
     'sealed-lattice-kernel',
     ...(testFilter === undefined ? [] : [testFilter]),
@@ -41,6 +42,7 @@ export const cargoTestArgumentsForRustKernelHeavy = (
     testFilter = heavyRustKernelTestNamePrefix,
 ): readonly string[] => [
     'test',
+    '--locked',
     '-p',
     'sealed-lattice-kernel',
     testFilter,

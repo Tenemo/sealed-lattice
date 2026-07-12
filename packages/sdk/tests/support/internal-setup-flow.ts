@@ -56,8 +56,7 @@ import type {
     ProtocolHash,
     ProtocolSignatureEnvelope,
 } from '@sealed-lattice/types';
-
-import { loadTranscriptCoreKernel } from '../../dist/kernel.js';
+import { loadTranscriptCoreKernel } from '@sealed-lattice/wasm';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -443,8 +442,6 @@ export type SetupContribution = Readonly<
 >;
 
 export type SetupCertificateTransportInput = Readonly<{
-    readonly fullObjectHash: ProtocolHash;
-    readonly chunkHashes: readonly ProtocolHash[];
     readonly transportedObjects?: readonly ProtocolSetupCertificateTransportedObjectInput[];
 }>;
 export type SetupCertificateTransportedObjectInput =

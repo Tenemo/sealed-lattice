@@ -1,7 +1,10 @@
 if [ -t 1 ]; then
     pnpm run check -- --progress=always
-elif [ -e /dev/tty ]; then
-    pnpm run check -- --progress=always > /dev/tty 2>&1
+elif { exec 3>/dev/tty; } 2>/dev/null; then
+    pnpm run check -- --progress=always >&3 2>&1
+    hook_status=$?
+    exec 3>&-
+    exit "$hook_status"
 else
     pnpm run check -- --progress=never
 fi

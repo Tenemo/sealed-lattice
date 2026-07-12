@@ -10,6 +10,7 @@ import {
     createProcessMemoryGuard,
     deriveProcessMemoryLimitGigabytes,
     resolveProcessMemoryLimitGigabytes,
+    type ProcessMemoryGuard,
 } from './process-memory-guard.js';
 import {
     runCommandsInSeries,
@@ -85,14 +86,16 @@ export const resolveAcceptedSetupMemoryLimitGigabytes = (input: {
         memoryLimitEnvironmentVariable,
     });
 
-const acceptedSetupProcessMemoryGuard = createProcessMemoryGuard({
-    insufficientFreeMemoryRunDescription: 'Accepted-setup tests',
-    memoryLimitEnvironmentVariable,
-});
-const acceptedSetupMemoryLimitGigabytes =
-    acceptedSetupProcessMemoryGuard.memoryLimitGigabytes;
-const acceptedSetupMemoryLimitBytes =
-    acceptedSetupProcessMemoryGuard.memoryLimitBytes;
+let acceptedSetupProcessMemoryGuard: ProcessMemoryGuard | undefined;
+
+const getAcceptedSetupProcessMemoryGuard = (): ProcessMemoryGuard => {
+    acceptedSetupProcessMemoryGuard ??= createProcessMemoryGuard({
+        insufficientFreeMemoryRunDescription: 'Accepted-setup tests',
+        memoryLimitEnvironmentVariable,
+    });
+
+    return acceptedSetupProcessMemoryGuard;
+};
 
 // The pinned focused target directory. It lives under `target/` (already
 // git-ignored) but is distinct from the default `target/` the gate uses, so a
@@ -145,6 +148,7 @@ export const cargoTestArgumentsForAcceptedSetupTests = (
     testThreadCount: string,
 ): readonly string[] => [
     'test',
+    '--locked',
     '-p',
     'sealed-lattice-kernel',
     acceptedSetupTestModulePattern,
@@ -205,22 +209,29 @@ export const buildAcceptedSetupEnvironment = (input: {
 };
 
 export const verifyProcessMemoryGuardCommand = (): CommandInvocation =>
-    acceptedSetupProcessMemoryGuard.buildVerificationCommand();
+    getAcceptedSetupProcessMemoryGuard().buildVerificationCommand();
 
 export const guardAcceptedSetupCommand = (
     command: CommandInvocation,
-    memoryLimitBytes = acceptedSetupMemoryLimitBytes,
-): CommandInvocation =>
-    acceptedSetupProcessMemoryGuard.guardCommand(command, memoryLimitBytes);
+    memoryLimitBytes?: number,
+): CommandInvocation => {
+    const processMemoryGuard = getAcceptedSetupProcessMemoryGuard();
+    return processMemoryGuard.guardCommand(
+        command,
+        memoryLimitBytes ?? processMemoryGuard.memoryLimitBytes,
+    );
+};
 
 const buildAcceptedSetupCommand = (
     mode: RustKernelAcceptedSetupRunMode,
 ): BuiltRustKernelAcceptedSetupCommand => {
+    const memoryLimitGigabytes =
+        getAcceptedSetupProcessMemoryGuard().memoryLimitGigabytes;
     const knobs = resolveRunKnobs();
     const modeLabel =
         mode === 'accelerated' ? 'accelerated local' : 'CI prove-fresh';
     const setupMessages = [
-        `${acceptedSetupRunName} (${modeLabel}): hard inherited process-memory ceiling ${acceptedSetupMemoryLimitGigabytes} GiB.`,
+        `${acceptedSetupRunName} (${modeLabel}): hard inherited process-memory ceiling ${memoryLimitGigabytes} GiB.`,
         `${acceptedSetupRunName} (${modeLabel}): serialized libtest, cargo build, trustee proof, RNS-limb proof, and Rayon execution.`,
     ];
     if (mode === 'accelerated') {
@@ -268,6 +279,7 @@ export const cargoTestArgumentsForFocusedFilter = (
     testThreadCount: string,
 ): readonly string[] => [
     'test',
+    '--locked',
     '-p',
     'sealed-lattice-kernel',
     testFilter,
@@ -288,6 +300,8 @@ export const buildFocusedCommand = (
         readonly targetDirectoryPath?: string;
     } = {},
 ): BuiltRustKernelAcceptedSetupCommand => {
+    const memoryLimitGigabytes =
+        getAcceptedSetupProcessMemoryGuard().memoryLimitGigabytes;
     const knobs = resolveRunKnobs();
     const isAccelerated = mode === 'accelerated';
     const modeLabel = isAccelerated ? 'accelerated local' : 'CI prove-fresh';
@@ -298,7 +312,7 @@ export const buildFocusedCommand = (
     const setupMessages = [
         `${runName} (${modeLabel}): filter [${testFilter}], ` +
             `${knobs.testThreads.value} serialized test thread; hard inherited process-memory ceiling ` +
-            `${acceptedSetupMemoryLimitGigabytes} GiB.`,
+            `${memoryLimitGigabytes} GiB.`,
         ...(isAccelerated
             ? [
                   `Pinned target directory: ${targetDirectoryPath}. ` +

@@ -295,6 +295,7 @@ pub(super) use material_set::public_key_share_material_uses_transport;
 pub(in crate::bgv::setup) use transport::{
     CanonicalPublicKeyShareMaterialStream,
     absorb_verified_canonical_public_key_share_material_chunk,
+    authenticated_public_key_share_material_stream_summary,
     begin_verified_canonical_public_key_share_material_stream,
     cancel_verified_canonical_public_key_share_material_stream,
     evict_verified_canonical_public_key_share_materials,

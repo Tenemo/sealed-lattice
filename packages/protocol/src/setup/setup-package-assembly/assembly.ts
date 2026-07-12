@@ -6,7 +6,6 @@ import {
     resolveSetupCertificateRecords,
 } from './certificates.js';
 import { hashField } from './constants-and-assertions.js';
-import { vssCoefficientCommitmentMaterialReferenceFromCertificate } from './transported-material.js';
 import type { SetupPackage, SetupPackageInput } from './types.js';
 import {
     publicPrivateVssEnvelopeCommitmentSet,
@@ -20,11 +19,6 @@ export const createSetupPackage = async (
     const thresholdShareCommitments = resolveThresholdShareCommitments(input);
     validateInput(input, certificates, thresholdShareCommitments);
     const collectivePublicKey = await derivedCollectivePublicKey(input);
-    const vssCoefficientCommitmentMaterial =
-        vssCoefficientCommitmentMaterialReferenceFromCertificate(
-            input,
-            certificates.setupTransportCertificate,
-        );
 
     const privateVssEnvelopeCommitments = publicPrivateVssEnvelopeCommitmentSet(
         input.privateVssEnvelopeCommitments,
@@ -52,7 +46,6 @@ export const createSetupPackage = async (
         phaseTranscript: input.phaseTranscript,
         commonRandomness: input.commonRandomness,
         vssCoefficientCommitments: input.vssCoefficientCommitments,
-        vssCoefficientCommitmentMaterial,
         vssPublicCoefficientCommitmentSet:
             input.vssPublicCoefficientCommitmentSet,
         vssPublicRecipientShareCommitmentSet:

@@ -1,9 +1,15 @@
+use super::proof_record_fixtures::{
+    DescriptorBackedVssProofMaterialFixture, descriptor_backed_vss_proof_material_fixture,
+};
 use super::*;
 
 use crate::hashing::derive_canonical_object_hash;
 
 static MINIMAL_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<serde_json::Value> = OnceLock::new();
 static COLLECTIVE_SETUP_PHASE_PACKAGE_CACHE: OnceLock<serde_json::Value> = OnceLock::new();
+static DESCRIPTOR_BACKED_VSS_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<
+    CachedDescriptorBackedVssCollectiveSetupFixture,
+> = OnceLock::new();
 static PUBLIC_KEY_SHARE_SUCCINCT_PROOF_BEARING_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<
     CachedPublicKeyShareCollectiveSetupFixture,
 > = OnceLock::new();
@@ -29,6 +35,11 @@ pub(super) struct CollectiveSetupVerificationFixture {
 struct CachedPublicKeyShareCollectiveSetupFixture {
     verification_fixture: CollectiveSetupVerificationFixture,
     succinct_proof_fixture: PublicKeyShareSuccinctProofFixture,
+}
+
+struct CachedDescriptorBackedVssCollectiveSetupFixture {
+    verification_fixture: CollectiveSetupVerificationFixture,
+    proof_material_fixture: DescriptorBackedVssProofMaterialFixture,
 }
 
 fn private_vss_mailbox_public_key_hash(roster_position: u64) -> String {
@@ -87,10 +98,14 @@ const PARAMETER_PROFILE_PARTICIPANT_COUNT: u64 = 10;
 const MINIMUM_SUPPORTED_PARTICIPANT_COUNT: u64 = 3;
 
 pub(super) fn minimal_collective_setup_package() -> serde_json::Value {
-    // The reduced development ring must stay provable by the trustee
-    // evaluation-key argument: the trace splits each vector in two and the
-    // smallest supported trace is sixty-four, so the development ring is one
-    // hundred twenty-eight.
+    // This cached package is the fixture-builder intermediate with raw VSS
+    // proof bytes. Accepted-setup verification must use
+    // descriptor_backed_vss_collective_setup_fixture(), which rewrites those
+    // bytes into authenticated material references and rehydrates them before
+    // each consuming call. The reduced development ring must stay provable by
+    // the trustee evaluation-key argument: the trace splits each vector in two
+    // and the smallest supported trace is sixty-four, so the development ring
+    // is one hundred twenty-eight.
     MINIMAL_COLLECTIVE_SETUP_PACKAGE_CACHE
         .get_or_init(|| {
             super::proof_record_fixtures::finalize_collective_setup_package(
@@ -415,10 +430,7 @@ fn build_collective_setup_package_fixture_parts(
         &public_key_share_proofs,
         participant_count,
     );
-    let setup_transport_certificate = setup_transport_certificate_fixture(
-        &setup_parameters,
-        &vss_coefficient_commitment_material,
-    );
+    let setup_transport_certificate = setup_transport_certificate_fixture(participant_count);
     let setup_transport_certificate_hash = setup_transport_certificate
         .get("setupTransportCertificateHash")
         .and_then(serde_json::Value::as_str)
@@ -452,6 +464,7 @@ fn build_collective_setup_package_fixture_parts(
 
 pub(super) fn public_key_share_succinct_proof_bearing_collective_setup_fixture()
 -> CollectiveSetupVerificationFixture {
+    let _ = descriptor_backed_vss_collective_setup_fixture();
     let cached_fixture = PUBLIC_KEY_SHARE_SUCCINCT_PROOF_BEARING_COLLECTIVE_SETUP_PACKAGE_CACHE
         .get_or_init(build_public_key_share_succinct_proof_bearing_collective_setup_package);
     cached_fixture
@@ -462,10 +475,13 @@ pub(super) fn public_key_share_succinct_proof_bearing_collective_setup_fixture()
 
 fn build_public_key_share_succinct_proof_bearing_collective_setup_package()
 -> CachedPublicKeyShareCollectiveSetupFixture {
-    let mut package = minimal_collective_setup_package();
+    let descriptor_backed_vss_fixture = descriptor_backed_vss_collective_setup_fixture();
+    let mut package = descriptor_backed_vss_fixture.package;
+    let mut verification_request = descriptor_backed_vss_fixture.verification_request;
     replace_public_key_share_hashes_with_material_hashes(&mut package);
     package["publicKeyShareMaterial"] = public_key_share_material_object(&package);
-    let succinct_proof_fixture = public_key_share_succinct_proofs_fixture(&package);
+    let succinct_proof_fixture =
+        public_key_share_succinct_proofs_fixture(&package, &verification_request);
     package["publicKeyShareSuccinctProofs"] = succinct_proof_fixture.proof_set.clone();
     replace_setup_proof_material_transport_certificate_objects(
         &mut package,
@@ -473,16 +489,50 @@ fn build_public_key_share_succinct_proof_bearing_collective_setup_package()
         PUBLIC_KEY_SHARE_PROOF_TRANSPORT_CERTIFICATE_FIELDS,
     );
     rebind_collective_setup_package_hash(&mut package);
+    verification_request["transportedPublicKeyShareProofMaterial"] =
+        succinct_proof_fixture.transported_proof_material.clone();
 
     CachedPublicKeyShareCollectiveSetupFixture {
         verification_fixture: CollectiveSetupVerificationFixture {
             package,
-            verification_request: serde_json::json!({
-                "transportedPublicKeyShareProofMaterial":
-                    succinct_proof_fixture.transported_proof_material.clone(),
-            }),
+            verification_request,
         },
         succinct_proof_fixture,
+    }
+}
+
+pub(super) fn descriptor_backed_vss_collective_setup_fixture() -> CollectiveSetupVerificationFixture
+{
+    let cached_fixture = DESCRIPTOR_BACKED_VSS_COLLECTIVE_SETUP_PACKAGE_CACHE
+        .get_or_init(build_descriptor_backed_vss_collective_setup_fixture);
+    cached_fixture
+        .proof_material_fixture
+        .retain_proof_materials();
+    cached_fixture.verification_fixture.clone()
+}
+
+fn build_descriptor_backed_vss_collective_setup_fixture()
+-> CachedDescriptorBackedVssCollectiveSetupFixture {
+    let mut package = minimal_collective_setup_package();
+    let proof_material_fixture = descriptor_backed_vss_proof_material_fixture(&mut package);
+    replace_setup_proof_material_transport_certificate_objects(
+        &mut package,
+        &proof_material_fixture.verification_request["transportedVssShareLinkageProofMaterial"],
+        VSS_SHARE_LINKAGE_PROOF_TRANSPORT_CERTIFICATE_FIELDS,
+    );
+    replace_setup_proof_material_transport_certificate_objects(
+        &mut package,
+        &proof_material_fixture.verification_request["transportedSameSecretBridgeProofMaterial"],
+        SAME_SECRET_BRIDGE_PROOF_TRANSPORT_CERTIFICATE_FIELDS,
+    );
+    rebind_collective_setup_package_hash(&mut package);
+
+    CachedDescriptorBackedVssCollectiveSetupFixture {
+        verification_fixture: CollectiveSetupVerificationFixture {
+            package,
+            verification_request: proof_material_fixture.verification_request.clone(),
+        },
+        proof_material_fixture,
     }
 }
 
