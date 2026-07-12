@@ -11,6 +11,7 @@ debug.log
 # Build
 dist/
 target/
+fuzz/artifacts/
 .turbo/
 *.tsbuildinfo
 .vitest-attachments/

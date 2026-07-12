@@ -150,7 +150,6 @@ fn target_decryption_share_proof_bytes_round_trips_and_rejects_tampering() {
         &generated.proof_bytes,
     )
     .expect("verify target-decryption share proof bytes");
-    assert_eq!(verified["ok"], true);
     assert_eq!(
         verified["operation"],
         json!("verifyTargetDecryptionProofBytes")

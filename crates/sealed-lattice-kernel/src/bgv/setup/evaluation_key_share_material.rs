@@ -5,13 +5,14 @@
 
 mod component_material;
 
-pub(super) use self::component_material::{
-    VerifiedComponentMaterialEvictionGuard, component_b_vectors_from_record,
-};
 pub(crate) use self::component_material::{
-    absorb_evaluation_key_share_component_material_transport_stream_chunk_request,
-    begin_evaluation_key_share_component_material_transport_stream_request,
-    finish_evaluation_key_share_component_material_transport_stream_request,
+    absorb_verified_canonical_component_material_chunk,
+    begin_verified_canonical_component_material_stream,
+    cancel_verified_canonical_component_material_stream,
+    finish_verified_canonical_component_material_stream, CanonicalComponentMaterialStream,
+};
+pub(super) use self::component_material::{
+    component_b_vectors_from_record, VerifiedComponentMaterialEvictionGuard,
 };
 #[cfg(test)]
 pub(in crate::bgv::setup) use self::component_material::{
@@ -27,15 +28,13 @@ use std::{
 #[cfg(not(target_arch = "wasm32"))]
 use std::{fs::File, io::Read, path::PathBuf};
 
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use crate::{
-    bgv::coefficient_codec::{
-        coefficient_vector_from_le_hex, coefficient_vector_hash512, coefficient_vector_le_hex,
-    },
+    bgv::coefficient_codec::{coefficient_vector_hash512, coefficient_vector_le_hex},
     bgv::parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE},
     bgv::setup_helpers::{array_field, string_field},
-    encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult, append_varuint},
+    encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
     hashing::hash512_hex,
 };
 
@@ -69,14 +68,6 @@ impl EvaluationKeyShareProofFamily {
     }
 }
 
-#[derive(Debug, Clone)]
-pub(super) struct EvaluationKeyShareComponentMaterialTransportHashes {
-    pub(super) full_object_hash: String,
-    pub(super) chunk_hashes: Vec<String>,
-    pub(super) chunk_root: String,
-    pub(super) total_byte_length: u64,
-}
-
 fn invalid_evaluation_key_share_material(message: impl Into<String>) -> CanonicalError {
     CanonicalError::new(CanonicalErrorCode::InvalidFixture, message)
 }
@@ -107,25 +98,4 @@ fn validate_hex_string(value: &str, field_name: &str) -> CanonicalResult<()> {
     }
 
     Ok(())
-}
-
-fn read_u64(material_bytes: &[u8], cursor: &mut usize) -> CanonicalResult<u64> {
-    let bytes = read_fixed::<8>(material_bytes, cursor)?;
-    Ok(u64::from_le_bytes(bytes))
-}
-
-fn read_fixed<const LENGTH: usize>(
-    material_bytes: &[u8],
-    cursor: &mut usize,
-) -> CanonicalResult<[u8; LENGTH]> {
-    let end = cursor.checked_add(LENGTH).ok_or_else(|| {
-        invalid_evaluation_key_share_material("evaluation-key component material cursor overflowed")
-    })?;
-    let bytes = material_bytes.get(*cursor..end).ok_or_else(|| {
-        invalid_evaluation_key_share_material("evaluation-key component material ended early")
-    })?;
-    let mut output = [0_u8; LENGTH];
-    output.copy_from_slice(bytes);
-    *cursor = end;
-    Ok(output)
 }

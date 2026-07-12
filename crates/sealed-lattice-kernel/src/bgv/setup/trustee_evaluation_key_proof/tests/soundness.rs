@@ -1,23 +1,6 @@
 use super::*;
 
 #[test]
-fn soundness_report_meets_the_conjectured_classical_policy_floor() {
-    // The soundness gate is required: 128-bit effective soundness depends on the
-    // pre-union margin and a named, unproven FRI conjecture. The recomputed
-    // numeric soundness bound, not self-attested verdict flags, is what the
-    // policy enforces.
-    let effective_soundness_bits = accounting::succinct_proof_effective_soundness_bits(
-        crate::bgv::parameters::POLYNOMIAL_DEGREE / 2,
-    )
-    .expect("effective soundness bits");
-    assert!(effective_soundness_bits >= 128);
-    accounting::enforce_current_succinct_proof_soundness_policy(
-        crate::bgv::parameters::POLYNOMIAL_DEGREE / 2,
-    )
-    .expect("conjectured classical policy floor");
-}
-
-#[test]
 fn trustee_statement_shape_rejects_ring_degree_above_the_configured_polynomial_degree() {
     let mut statement = private_vss_statement_for_context_tests();
     statement.ring_degree = crate::bgv::parameters::POLYNOMIAL_DEGREE

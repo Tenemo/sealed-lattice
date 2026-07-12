@@ -4,16 +4,51 @@ const assert = (condition, message) => {
     }
 };
 
+const assertImportIsRefused = async ({ specifier, expectedErrorCode }) => {
+    try {
+        await import(specifier);
+    } catch (error) {
+        assert(
+            error instanceof Error &&
+                'code' in error &&
+                error.code === expectedErrorCode,
+            `Importing ${specifier} failed with an unexpected error: ${String(error)}`,
+        );
+        return;
+    }
+
+    throw new Error(`Production package unexpectedly exposed ${specifier}`);
+};
+
 const publicApi = await import('sealed-lattice');
 const {
     deriveThresholdParameters,
     deriveValidatedFirstValidOrder,
-    verifyTranscriptCoreFixture,
+    verifyPrivateVssShare,
 } = publicApi;
 
+await Promise.all([
+    assertImportIsRefused({
+        specifier: 'sealed-lattice/dist/internal/transcript-core-bridge.js',
+        expectedErrorCode: 'ERR_PACKAGE_PATH_NOT_EXPORTED',
+    }),
+    assertImportIsRefused({
+        specifier: 'sealed-lattice/package.json',
+        expectedErrorCode: 'ERR_PACKAGE_PATH_NOT_EXPORTED',
+    }),
+    assertImportIsRefused({
+        specifier: '@sealed-lattice/protocol',
+        expectedErrorCode: 'ERR_MODULE_NOT_FOUND',
+    }),
+    assertImportIsRefused({
+        specifier: '@sealed-lattice/wasm',
+        expectedErrorCode: 'ERR_MODULE_NOT_FOUND',
+    }),
+]);
+
 assert(
-    typeof verifyTranscriptCoreFixture === 'function',
-    'Transcript-core fixture verifier must be exported as a function',
+    typeof verifyPrivateVssShare === 'function',
+    'Private VSS verifier must be exported as a function',
 );
 assert(
     typeof deriveThresholdParameters === 'function',
@@ -51,17 +86,28 @@ assert(
     }).orderedObjects[0]?.objectHash === 'candidate',
     'First-valid ordering helper must be exported and deterministic',
 );
-const verification = await verifyTranscriptCoreFixture({
-    kind: 'malformed-object',
-    fixtureVersion: 1,
-    caseName: 'packed-malformed-magic-smoke',
-    canonicalBytesHex: '42414421',
-    expectedErrorCode: 'MalformedMagic',
+const verification = await verifyPrivateVssShare({
+    setupContext: {
+        ceremonyId: 'packed-package-smoke',
+        manifestHash: '0'.repeat(128),
+        rosterHash: '1'.repeat(128),
+        setupParametersHash: '2'.repeat(128),
+        setupEpoch: 'packed-package-smoke',
+    },
+    publicMatrixSeedHash: '3'.repeat(128),
+    sourceTrusteeCoefficientCommitmentRecord: {
+        objectType: 'VssSourceTrusteeCoefficientCommitments',
+    },
+    sourceTrusteeCoefficientCommitmentMaterialRecords: [],
+    privateEnvelope: {
+        objectType: 'PrivateVssShareEnvelope',
+    },
 });
 assert(
     verification.isValid === false &&
-        verification.rejection?.code === 'MalformedMagic',
-    'Packed transcript-core verifier did not reject malformed bytes as expected',
+        verification.refusedObjects[0]?.reasonCode ===
+            'setupParametersHashMismatch',
+    'Packed private VSS verifier did not reject mismatched setup parameters as expected',
 );
 
 console.log('Packed package public API smoke test passed.');

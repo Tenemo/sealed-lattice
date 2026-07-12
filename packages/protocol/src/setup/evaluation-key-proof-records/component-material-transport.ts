@@ -19,10 +19,8 @@ import {
     assertNonEmptyString,
     assertNonNegativeSafeInteger,
     assertJsonRecord,
-    bytesToHex,
     coefficientVectorFromLittleEndianHex,
     evaluationKeyShareComponentMaterialReferenceRoot,
-    evaluationKeyShareComponentMaterialTransportHashes,
     evaluationKeyShareComponentVectorHash,
     evaluationKeyShareComponentVectorRoot,
     nonNegativeIntegerRecordField,
@@ -244,10 +242,6 @@ const transportEvaluationKeyShareComponentMaterial = (
         workItem.shareMaterial,
         workItem.level,
     );
-    const transportHashes = evaluationKeyShareComponentMaterialTransportHashes(
-        workItem.proofFamily,
-        chunks,
-    );
     const keySwitchComponentMaterialRoot =
         evaluationKeyShareComponentMaterialReferenceRoot(
             workItem.proofFamily,
@@ -255,7 +249,6 @@ const transportEvaluationKeyShareComponentMaterial = (
             workItem.trusteeIdentity,
             workItem.trusteeRosterPosition,
             workItem.level,
-            transportHashes,
         );
     const shareMaterial: EvaluationKeyShareMaterial = {
         keySwitchDomain: workItem.shareMaterial.keySwitchDomain,
@@ -265,17 +258,11 @@ const transportEvaluationKeyShareComponentMaterial = (
             workItem.shareMaterial.keySwitchComponentVectorRoot,
         keySwitchMaterialEncoding: evaluationKeyShareComponentMaterialEncoding,
         keySwitchComponentMaterialRoot,
-        keySwitchComponentChunkSizeBytes: setupProofTransportChunkSizeBytes,
-        keySwitchComponentChunkCount: transportHashes.chunkHashes.length,
-        keySwitchComponentTotalByteLength: transportHashes.totalByteLength,
-        keySwitchComponentFullObjectHash: transportHashes.fullObjectHash,
-        keySwitchComponentChunkRoot: transportHashes.chunkRoot,
-        keySwitchComponentChunkHashes: transportHashes.chunkHashes,
     };
 
     const componentMaterialChunks = chunks.map((chunk, chunkIndex) => ({
         chunkIndex,
-        bytesHex: bytesToHex(chunk),
+        bytes: chunk.slice().buffer,
     }));
 
     return {
@@ -301,11 +288,6 @@ const transportEvaluationKeyShareComponentMaterial = (
             keySwitchComponentVectorRoot:
                 workItem.shareMaterial.keySwitchComponentVectorRoot,
             keySwitchComponentMaterialRoot,
-            chunkCount: transportHashes.chunkHashes.length,
-            totalByteLength: transportHashes.totalByteLength,
-            fullObjectHash: transportHashes.fullObjectHash,
-            chunkRoot: transportHashes.chunkRoot,
-            chunkHashes: transportHashes.chunkHashes,
         },
         componentMaterialChunkStream: {
             keySwitchComponentMaterialRoot,

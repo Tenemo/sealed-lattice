@@ -55,9 +55,7 @@ export type DirectEncryptedBallotEvaluatorReplayResult = {
     readonly evaluatorReplayContextHash: string;
     readonly evaluatorReplayRecordHash: string;
     readonly targetProposal:
-        | {
-              readonly status: string;
-          }
+        | Readonly<Record<string, never>>
         | {
               readonly targetProposalHash: string;
               readonly ceremonyId: string;
@@ -86,15 +84,9 @@ export type DirectEncryptedBallotResult = {
         readonly ballotCount: number;
     };
     readonly encryptedBallots: {
-        readonly ballotEncryptionRandomness: {
-            readonly source:
-                | 'fresh-csprng'
-                | 'development-deterministic-fixture';
-            readonly ballotEncryptionRandomnessCount: number;
-            readonly randomnessBytesPerBallot: number;
-            readonly retention: string;
-            readonly sourceStatement: string;
-        };
+        readonly encryptedBallotHashes: readonly string[];
+        readonly ciphertextRoots: readonly string[];
+        readonly ciphertextCanonicalByteLengths: readonly number[];
     };
     readonly proofAttempt: {
         readonly proofCount: number;
@@ -117,15 +109,6 @@ export type DirectEncryptedBallotResult = {
             readonly firstProofPublicTransportHash: string;
             readonly firstProofStatementHash: string;
             readonly proofParametersHash: string;
-        };
-        readonly proofMaskRandomness: {
-            readonly source:
-                | 'fresh-csprng'
-                | 'development-deterministic-fixture';
-            readonly ballotProofRandomnessCount: number;
-            readonly randomnessBytesPerProof: number;
-            readonly retention: string;
-            readonly sourceStatement: string;
         };
     };
     readonly aggregation: {
@@ -236,13 +219,7 @@ const createRandomnessHexes = (input: {
     readonly label: string;
     readonly requiredCount: number;
     readonly suppliedRandomnessHexes: readonly string[] | undefined;
-}): {
-    readonly randomnessHexes: readonly string[];
-    readonly sources: readonly (
-        | 'fresh-csprng'
-        | 'development-deterministic-fixture'
-    )[];
-} => {
+}): readonly string[] => {
     if (
         input.suppliedRandomnessHexes !== undefined &&
         input.suppliedRandomnessHexes.length !== input.requiredCount
@@ -252,50 +229,19 @@ const createRandomnessHexes = (input: {
         );
     }
 
-    return Array.from(
-        { length: input.requiredCount },
-        (_unused, randomnessIndex) => {
-            const suppliedRandomnessHex =
-                input.suppliedRandomnessHexes?.[randomnessIndex];
-            if (
-                suppliedRandomnessHex !== undefined &&
-                input.developmentRandomnessOverrideAcknowledged !== true
-            ) {
-                throw new RangeError(
-                    `Caller-supplied ${input.label} requires developmentRandomnessOverrideAcknowledged.`,
-                );
-            }
-
-            const randomnessSource:
-                | 'fresh-csprng'
-                | 'development-deterministic-fixture' =
-                suppliedRandomnessHex === undefined
-                    ? 'fresh-csprng'
-                    : 'development-deterministic-fixture';
-
-            return {
-                randomnessHex: suppliedOrFreshRandomnessHex(
-                    suppliedRandomnessHex,
-                ),
-                randomnessSource,
-            };
-        },
-    ).reduce<{
-        randomnessHexes: string[];
-        sources: ('fresh-csprng' | 'development-deterministic-fixture')[];
-    }>(
-        (accumulatedRandomness, proofRandomness) => {
-            accumulatedRandomness.randomnessHexes.push(
-                proofRandomness.randomnessHex,
+    return Array.from({ length: input.requiredCount }, (_unused, index) => {
+        const suppliedRandomnessHex = input.suppliedRandomnessHexes?.[index];
+        if (
+            suppliedRandomnessHex !== undefined &&
+            input.developmentRandomnessOverrideAcknowledged !== true
+        ) {
+            throw new RangeError(
+                `Caller-supplied ${input.label} requires developmentRandomnessOverrideAcknowledged.`,
             );
-            accumulatedRandomness.sources.push(
-                proofRandomness.randomnessSource,
-            );
+        }
 
-            return accumulatedRandomness;
-        },
-        { randomnessHexes: [], sources: [] },
-    );
+        return suppliedOrFreshRandomnessHex(suppliedRandomnessHex);
+    });
 };
 
 const createBallotEncryptionRandomness = (
@@ -303,20 +249,14 @@ const createBallotEncryptionRandomness = (
         readonly ballotCount: number;
     },
 ): Record<string, unknown> => {
-    const encryptionSeedHexes = createRandomnessHexes({
-        developmentRandomnessOverrideAcknowledged:
-            input.developmentRandomnessOverrideAcknowledged,
-        label: 'encryptionSeedHexes',
-        requiredCount: input.ballotCount,
-        suppliedRandomnessHexes: input.ballotEncryptionSeedHexes,
-    });
-    const source = encryptionSeedHexes.sources.find(
-        (randomnessSource) => randomnessSource !== 'fresh-csprng',
-    );
-
     return {
-        source: source ?? 'fresh-csprng',
-        encryptionSeedHexes: encryptionSeedHexes.randomnessHexes,
+        encryptionSeedHexes: createRandomnessHexes({
+            developmentRandomnessOverrideAcknowledged:
+                input.developmentRandomnessOverrideAcknowledged,
+            label: 'encryptionSeedHexes',
+            requiredCount: input.ballotCount,
+            suppliedRandomnessHexes: input.ballotEncryptionSeedHexes,
+        }),
     };
 };
 
@@ -325,20 +265,14 @@ const createProofMaskRandomness = (
         readonly ballotCount: number;
     },
 ): Record<string, unknown> => {
-    const ballotProofRandomnessHexes = createRandomnessHexes({
-        developmentRandomnessOverrideAcknowledged:
-            input.developmentRandomnessOverrideAcknowledged,
-        label: 'ballotProofRandomnessHexes',
-        requiredCount: input.ballotCount,
-        suppliedRandomnessHexes: input.ballotProofRandomnessHexes,
-    });
-    const source = ballotProofRandomnessHexes.sources.find(
-        (randomnessSource) => randomnessSource !== 'fresh-csprng',
-    );
-
     return {
-        source: source ?? 'fresh-csprng',
-        ballotProofRandomnessHexes: ballotProofRandomnessHexes.randomnessHexes,
+        ballotProofRandomnessHexes: createRandomnessHexes({
+            developmentRandomnessOverrideAcknowledged:
+                input.developmentRandomnessOverrideAcknowledged,
+            label: 'ballotProofRandomnessHexes',
+            requiredCount: input.ballotCount,
+            suppliedRandomnessHexes: input.ballotProofRandomnessHexes,
+        }),
     };
 };
 

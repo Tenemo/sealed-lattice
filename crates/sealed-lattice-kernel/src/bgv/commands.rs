@@ -2,28 +2,21 @@ use serde_json::{Value, json};
 
 use crate::{
     bgv::{
-        base_conversion::convert_plaintext_lifted_basis,
         encoding::{decode_batch_plaintext_polynomial, encode_batch_plaintext_slots},
         parameters::{
-            BgvBasisKind, DATA_PRIMES, POLYNOMIAL_DEGREE, allowed_operation_registry_value,
-            bgv_parameters_hash, bgv_parameters_value,
+            DATA_PRIMES, POLYNOMIAL_DEGREE, allowed_operation_registry_value, bgv_parameters_hash,
+            bgv_parameters_value,
         },
         serialization::{
-            BgvObjectKind, canonical_bytes_hex, ciphertext_root, parse_bgv_object_hex,
-            plaintext_root, serialize_bgv_object,
+            BgvObjectKind, canonical_bytes_hex, parse_bgv_object_hex, plaintext_root,
+            serialize_bgv_object,
         },
         setup::{
-            absorb_evaluation_key_share_component_material_transport_stream_chunk_request,
-            absorb_setup_proof_material_transport_stream_chunk_request,
-            begin_evaluation_key_share_component_material_transport_stream_request,
-            begin_setup_proof_material_transport_stream_request,
             compute_setup_commitment_from_opening_request,
             compute_vss_committed_material_commitment_request,
             derive_collective_bgv_setup_public_derivations_from_request,
             describe_collective_bgv_setup_parameters,
             describe_trustee_evaluation_key_statement_from_request,
-            finish_evaluation_key_share_component_material_transport_stream_request,
-            finish_setup_proof_material_transport_stream_request,
             generate_passive_setup_package_from_request,
             generate_passive_setup_public_evaluation_key_material_from_request,
             generate_private_vss_share_proof_from_request,
@@ -154,42 +147,6 @@ pub(crate) fn compute_setup_commitment_from_opening(request: &Value) -> Canonica
     compute_setup_commitment_from_opening_request(request)
 }
 
-pub(crate) fn begin_setup_proof_material_transport_stream(
-    request: &Value,
-) -> CanonicalResult<Value> {
-    begin_setup_proof_material_transport_stream_request(request)
-}
-
-pub(crate) fn absorb_setup_proof_material_transport_stream_chunk(
-    request: &Value,
-) -> CanonicalResult<Value> {
-    absorb_setup_proof_material_transport_stream_chunk_request(request)
-}
-
-pub(crate) fn finish_setup_proof_material_transport_stream(
-    request: &Value,
-) -> CanonicalResult<Value> {
-    finish_setup_proof_material_transport_stream_request(request)
-}
-
-pub(crate) fn begin_evaluation_key_share_component_material_transport_stream(
-    request: &Value,
-) -> CanonicalResult<Value> {
-    begin_evaluation_key_share_component_material_transport_stream_request(request)
-}
-
-pub(crate) fn absorb_evaluation_key_share_component_material_transport_stream_chunk(
-    request: &Value,
-) -> CanonicalResult<Value> {
-    absorb_evaluation_key_share_component_material_transport_stream_chunk_request(request)
-}
-
-pub(crate) fn finish_evaluation_key_share_component_material_transport_stream(
-    request: &Value,
-) -> CanonicalResult<Value> {
-    finish_evaluation_key_share_component_material_transport_stream_request(request)
-}
-
 pub(crate) fn verify_local_trustee_setup_state(request: &Value) -> CanonicalResult<Value> {
     verify_local_trustee_setup_state_from_request(request)
 }
@@ -270,59 +227,6 @@ pub(crate) fn validate_bgv_ciphertext_from_request(request: &Value) -> Canonical
     validate_ciphertext_hex(canonical_bytes_hex, expected_ciphertext_root)
 }
 
-pub(crate) fn generate_bgv_ciphertext_convention_fixture_from_request(
-    request: &Value,
-) -> CanonicalResult<Value> {
-    let left_slots = read_named_slots(request, "leftSlots")?;
-    let right_slots = read_named_slots(request, "rightSlots")?;
-    let left = encode_batch_plaintext_slots(&left_slots, 0)?;
-    let right = encode_batch_plaintext_slots(&right_slots, 0)?;
-    let canonical_bytes = serialize_bgv_object(
-        BgvObjectKind::Ciphertext,
-        &[left.polynomial.clone(), right.polynomial.clone()],
-    )?;
-    let root = ciphertext_root(&canonical_bytes);
-    let validation = validate_ciphertext_hex(&canonical_bytes_hex(&canonical_bytes), Some(&root))?;
-    let mut value = json!({
-        "bgvParametersHash": bgv_parameters_hash()?,
-        "ciphertextRoot": root,
-        "componentCount": 2,
-        "validation": validation,
-    });
-    if request
-        .get("includeCanonicalBytesHex")
-        .and_then(Value::as_bool)
-        == Some(true)
-    {
-        value["canonicalBytesHex"] = Value::String(canonical_bytes_hex(&canonical_bytes));
-    }
-
-    Ok(value)
-}
-
-pub(crate) fn generate_bgv_base_conversion_fixture_from_request(
-    request: &Value,
-) -> CanonicalResult<Value> {
-    let slots = read_slots(request)?;
-    let encoded = encode_batch_plaintext_slots(&slots, 0)?;
-    let converted = convert_plaintext_lifted_basis(&encoded.polynomial, BgvBasisKind::Extended, 1)?;
-    let source_bytes = serialize_bgv_object(
-        BgvObjectKind::Plaintext,
-        std::slice::from_ref(&encoded.polynomial),
-    )?;
-    let converted_bytes =
-        serialize_bgv_object(BgvObjectKind::Plaintext, std::slice::from_ref(&converted))?;
-
-    Ok(json!({
-        "sourcePlaintextRoot": plaintext_root(&source_bytes),
-        "convertedPlaintextRoot": plaintext_root(&converted_bytes),
-        "sourceBasisId": encoded.polynomial.basis_id,
-        "convertedBasisId": converted.basis_id,
-        "convertedModulusCount": converted.moduli.len(),
-        "sampledConvertedResidues": sample_positions(&converted.residues_by_modulus[1]),
-    }))
-}
-
 pub(crate) fn analyze_bgv_canonical_object_from_request(request: &Value) -> CanonicalResult<Value> {
     let canonical_bytes_hex = read_string_field(request, "canonicalBytesHex")?;
     let object = parse_bgv_object_hex(canonical_bytes_hex)?;
@@ -338,18 +242,11 @@ pub(crate) fn analyze_bgv_canonical_object_from_request(request: &Value) -> Cano
 }
 
 fn read_slots(request: &Value) -> CanonicalResult<Vec<u64>> {
-    read_named_slots(request, "slots")
-}
-
-fn read_named_slots(request: &Value, field_name: &str) -> CanonicalResult<Vec<u64>> {
     let slots = request
-        .get(field_name)
+        .get("slots")
         .and_then(Value::as_array)
         .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                format!("{field_name} must be an array"),
-            )
+            CanonicalError::new(CanonicalErrorCode::InvalidFixture, "slots must be an array")
         })?;
     slots
         .iter()
@@ -357,7 +254,7 @@ fn read_named_slots(request: &Value, field_name: &str) -> CanonicalResult<Vec<u6
             slot.as_u64().ok_or_else(|| {
                 CanonicalError::new(
                     CanonicalErrorCode::InvalidFixture,
-                    format!("{field_name} entries must be non-negative integers"),
+                    "slots entries must be non-negative integers",
                 )
             })
         })
@@ -404,9 +301,13 @@ fn sample_positions(values: &[u64]) -> Vec<Value> {
 mod tests {
     use super::{
         describe_bgv_rns_parameters, encode_bgv_batch_plaintext_from_request,
-        generate_bgv_base_conversion_fixture_from_request,
-        generate_bgv_ciphertext_convention_fixture_from_request,
         validate_bgv_plaintext_from_request,
+    };
+    use crate::bgv::{
+        base_conversion::convert_plaintext_lifted_basis,
+        encoding::encode_batch_plaintext_slots,
+        parameters::BgvBasisKind,
+        serialization::{BgvObjectKind, ciphertext_root, plaintext_root, serialize_bgv_object},
     };
 
     #[test]
@@ -459,52 +360,49 @@ mod tests {
             "level": 0,
             "layoutBinding": layout_binding
         }))
-        .expect("encoded fixture");
+        .expect("encoded plaintext");
 
         assert_eq!(
             encoded["plaintextRoot"],
             "334c485a1f928757939c69db3deee117f791d216aea5c277127723d77e8e2f2d7e20d0c691b999cd988348062a48e5237654af745a0c7c8bbc93a04870a4d173"
         );
 
-        let ciphertext =
-            generate_bgv_ciphertext_convention_fixture_from_request(&serde_json::json!({
-                "leftSlots": [1, 2, 3],
-                "rightSlots": [4, 5, 6]
-            }))
-            .expect("ciphertext fixture");
+        let left = encode_batch_plaintext_slots(&[1, 2, 3], 0).expect("left component");
+        let right = encode_batch_plaintext_slots(&[4, 5, 6], 0).expect("right component");
+        let ciphertext_bytes = serialize_bgv_object(
+            BgvObjectKind::Ciphertext,
+            &[left.polynomial, right.polynomial],
+        )
+        .expect("canonical ciphertext bytes");
         assert_eq!(
-            ciphertext["ciphertextRoot"],
+            ciphertext_root(&ciphertext_bytes),
             "c67ab9102937ceb90a9fa91c4ca8e78d34bd012039276199884681385ecd80475ca2ccf98d9a1b4136885738d65b48664d0dd3e30c468d44c3fddbcd35e024df"
         );
 
-        let base_conversion =
-            generate_bgv_base_conversion_fixture_from_request(&serde_json::json!({
-                "slots": [7, 8, 9, 65_536]
-            }))
-            .expect("base conversion fixture");
+        let source = encode_batch_plaintext_slots(&[7, 8, 9, 65_536], 0).expect("source plaintext");
+        let converted =
+            convert_plaintext_lifted_basis(&source.polynomial, BgvBasisKind::Extended, 1)
+                .expect("base conversion");
+        let source_bytes = serialize_bgv_object(
+            BgvObjectKind::Plaintext,
+            std::slice::from_ref(&source.polynomial),
+        )
+        .expect("source canonical bytes");
+        let converted_bytes =
+            serialize_bgv_object(BgvObjectKind::Plaintext, std::slice::from_ref(&converted))
+                .expect("converted canonical bytes");
         assert_eq!(
-            base_conversion["sourcePlaintextRoot"],
+            plaintext_root(&source_bytes),
             "687b0f77e2f9b356db52f5153ea3c4548a3fdeb49d307446ca256b5154a141f619402cfaf80146992eaa8c32b981c4f13ace18825b9a1d5d06eb8268d041eaf5"
         );
         assert_eq!(
-            base_conversion["convertedPlaintextRoot"],
+            plaintext_root(&converted_bytes),
             "e1501c3e6558f6fd7576ab1f9d98cdd000b768c5c5e966bda473e8b8d6d525d56c42ec97a20721480c8c4bf4cda91e842e70ef6d6e6e853ec4c234b6b1e994e5"
         );
-    }
-
-    #[test]
-    fn commands_produce_convention_and_base_conversion_fixtures_without_claiming_encryption() {
-        generate_bgv_ciphertext_convention_fixture_from_request(&serde_json::json!({
-            "leftSlots": [1, 2, 3],
-            "rightSlots": [4, 5, 6]
-        }))
-        .expect("ciphertext fixture");
-
-        let base_conversion =
-            generate_bgv_base_conversion_fixture_from_request(&serde_json::json!({
-                "slots": [7, 8, 9]
-            }))
-            .expect("base conversion fixture");
-        assert_eq!(base_conversion["convertedModulusCount"], 2);
+        assert_eq!(converted.moduli.len(), 2);
+        assert_ne!(
+            plaintext_root(&source_bytes),
+            plaintext_root(&converted_bytes)
+        );
     }
 }

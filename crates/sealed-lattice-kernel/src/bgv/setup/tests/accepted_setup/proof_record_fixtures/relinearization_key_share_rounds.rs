@@ -32,7 +32,7 @@ pub(in super::super) fn relinearization_key_share_rounds_fixture(
     let mut round_one_share_roots = BTreeMap::<(u64, u64), String>::new();
     let mut round_one_record_roots = BTreeMap::<(u64, u64), String>::new();
     let mut round_one_aggregate_diagonals_by_level = BTreeMap::<u64, Vec<Vec<u64>>>::new();
-    let ring_degree = source_constant_commitments_from_fixture_package(package, 0)[0].ring_degree;
+    let ring_degree = public_coefficient_commitment_ring_degree_from_fixture_package(package);
     for level in &scheduled_levels {
         let level = *level;
         let key_switch_seed_hex =

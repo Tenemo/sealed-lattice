@@ -211,8 +211,6 @@ pub(super) fn read_direct_ballot_encryption_randomness(
     ballot_count: usize,
 ) -> CanonicalResult<DirectBallotEncryptionRandomness> {
     let value = required_object_field(request, "ballotEncryptionRandomness")?;
-    let source =
-        DirectBallotEncryptionRandomnessSource::from_str(required_string_field(value, "source")?)?;
     let encryption_seed_hexes = required_string_array_field(value, "encryptionSeedHexes")?;
     if encryption_seed_hexes.len() != ballot_count {
         return Err(CanonicalError::new(
@@ -232,7 +230,6 @@ pub(super) fn read_direct_ballot_encryption_randomness(
     )?;
 
     Ok(DirectBallotEncryptionRandomness {
-        source,
         encryption_seed_hexes,
     })
 }
@@ -242,8 +239,6 @@ pub(super) fn read_direct_ballot_proof_mask_randomness(
     ballot_count: usize,
 ) -> CanonicalResult<DirectBallotProofMaskRandomness> {
     let value = required_object_field(request, "proofMaskRandomness")?;
-    let source =
-        DirectBallotProofMaskRandomnessSource::from_str(required_string_field(value, "source")?)?;
     let ballot_proof_randomness_hexes =
         required_string_array_field(value, "ballotProofRandomnessHexes")?;
     if ballot_proof_randomness_hexes.len() != ballot_count {
@@ -264,7 +259,6 @@ pub(super) fn read_direct_ballot_proof_mask_randomness(
     )?;
 
     Ok(DirectBallotProofMaskRandomness {
-        source,
         ballot_proof_randomness_hexes,
     })
 }

@@ -45,6 +45,29 @@ const bridgeOutputPath = path.resolve(
     'internal',
     'transcript-core-bridge.js',
 );
+const bridgeSupportSourcePaths = [
+    path.resolve(
+        repoRoot,
+        'packages',
+        'wasm',
+        'src',
+        'canonical-stream-runtime.ts',
+    ),
+    path.resolve(
+        repoRoot,
+        'packages',
+        'wasm',
+        'src',
+        'bgv-canonical-stream-runtime.ts',
+    ),
+    path.resolve(
+        repoRoot,
+        'packages',
+        'wasm',
+        'src',
+        'foundation-board-session.ts',
+    ),
+] as const;
 const bridgePartsSourceDirectoryPath = path.resolve(
     repoRoot,
     'packages',
@@ -223,6 +246,19 @@ export const buildSdkBridge = async (): Promise<void> => {
     const outputText = transpileBridgeSource(sourceText);
 
     await writeOutputFile(bridgeOutputPath, outputText);
+
+    await Promise.all(
+        bridgeSupportSourcePaths.map(async (sourcePath) => {
+            await transpileSourceFileToOutput(
+                sourcePath,
+                path.join(
+                    sdkDistDirectoryPath,
+                    'internal',
+                    path.basename(sourcePath).replace(/\.ts$/u, '.js'),
+                ),
+            );
+        }),
+    );
 
     const bridgePartSourcePaths = await collectFiles(
         bridgePartsSourceDirectoryPath,

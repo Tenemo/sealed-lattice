@@ -1,23 +1,12 @@
 // This file is one targeted part of the split test suite.
 import { describe, expect, it } from 'vitest';
 
-import {
-    foundationTranscriptCoreFixture,
-    textDecoder,
-    textEncoder,
-    wasmHeader,
-} from './shared.js';
+import { textDecoder, textEncoder, wasmHeader } from './shared.js';
 
 import {
     canonicalJson,
     deriveCanonicalObjectHash,
-    setupProofMaterialFullObjectHashHex,
 } from '#packages/crypto/src/index';
-import {
-    setupProofChunkManifestRoot,
-    setupProofMaterialChunkHash,
-    setupProofTransportChunkSizeBytes,
-} from '#packages/protocol/src/setup/setup-proof-material-transport';
 import { loadTranscriptCoreKernel } from '#packages/wasm/src/index';
 import {
     normalizeTranscriptCoreKernelBytesForHash,
@@ -42,9 +31,6 @@ type SetupCommitmentKernel = Readonly<{
         readonly ringDegree: number;
     }) => SetupCommitmentOpeningComputation;
 }>;
-
-const bytesToHex = (bytes: Uint8Array): string =>
-    Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 
 describe('transcript-core kernel in Node', () => {
     it('normalizes host-specific Rust source paths before hashing', () => {
@@ -170,20 +156,6 @@ describe('transcript-core kernel in Node', () => {
         );
     });
 
-    it('analyzes the foundation transcript-core fixture through WASM', async () => {
-        const kernel = await loadTranscriptCoreKernel();
-
-        const foundationAnalysis = kernel.analyzeCanonicalObject({
-            canonicalBytesHex:
-                foundationTranscriptCoreFixture.canonicalBytesHex,
-            chunkSize: foundationTranscriptCoreFixture.chunkSize,
-        });
-
-        expect(foundationAnalysis.tags).toContain('direct-route');
-        expect(foundationAnalysis.title).toBe('Foundation transcript roots');
-        expect(foundationAnalysis.sequence).toBe(10);
-    });
-
     it('computes Shamir interpolation and plaintext comparison through WASM', async () => {
         const kernel = await loadTranscriptCoreKernel();
 
@@ -287,7 +259,7 @@ describe('transcript-core kernel in Node', () => {
                     objectType: 'CanonicalJsonParityProbe',
                     unsafeInteger: Number.MAX_SAFE_INTEGER + 1,
                 },
-                expectedKernelCode: 'InvalidFixture',
+                expectedKernelCode: 'InvalidProtocolObject',
             },
             {
                 value: {
@@ -365,127 +337,6 @@ describe('transcript-core kernel in Node', () => {
                 ringDegree,
             }),
         ).toThrow(TranscriptCoreKernelCommandError);
-    });
-
-    it('exposes chunk-fed setup proof material stream commands through WASM', async () => {
-        const kernel = await loadTranscriptCoreKernel();
-        const proofFamily = 'public-key-share';
-        const proofChunk = textEncoder.encode('setup proof material stream');
-        const proofChunks = [proofChunk] as const;
-        const fullObjectHash = setupProofMaterialFullObjectHashHex(
-            proofFamily,
-            proofChunk.byteLength,
-            proofChunks,
-        );
-        const chunkHashes = [
-            setupProofMaterialChunkHash(
-                proofFamily,
-                fullObjectHash,
-                0,
-                proofChunk,
-            ),
-        ];
-        const chunkRoot = setupProofChunkManifestRoot(
-            proofFamily,
-            chunkHashes,
-            fullObjectHash,
-            proofChunk.byteLength,
-        );
-        const proofMaterialRoot = fullObjectHash;
-        const verificationId = 'wasm-setup-proof-material-stream-smoke';
-
-        const beginResult = kernel.beginSetupProofMaterialTransportStream({
-            verificationId,
-            transportedSetupProofMaterial: {
-                objectType: 'SetupTransportedPublicKeyShareProofMaterial',
-                proofFamily,
-                proofMaterialRoot,
-                chunkSizeBytes: setupProofTransportChunkSizeBytes,
-                chunkCount: 1,
-                totalByteLength: proofChunk.byteLength,
-                fullObjectHash,
-                chunkRoot,
-                chunkHashes,
-            },
-        });
-
-        expect(beginResult).toMatchObject({
-            operation: 'beginSetupProofMaterialTransportStream',
-            verificationId,
-            proofFamily,
-            proofMaterialRoot,
-        });
-
-        const absorbResult =
-            kernel.absorbSetupProofMaterialTransportStreamChunk({
-                verificationId,
-                chunkIndex: 0,
-                bytesHex: bytesToHex(proofChunk),
-            });
-
-        expect(absorbResult).toMatchObject({
-            operation: 'absorbSetupProofMaterialTransportStreamChunk',
-            absorbedChunkIndex: 0,
-            nextChunkIndex: 1,
-            observedTotalByteLength: proofChunk.byteLength,
-        });
-
-        const finishResult = kernel.finishSetupProofMaterialTransportStream({
-            verificationId,
-        });
-
-        expect(finishResult).toMatchObject({
-            operation: 'finishSetupProofMaterialTransportStream',
-            verificationId,
-            proofFamily,
-            proofMaterialRoot,
-            verifiedSetupProofMaterial: {
-                objectType: 'VerifiedSetupProofMaterial',
-                verificationId,
-                proofFamily,
-                proofMaterialRoot,
-                proofFullObjectHash: fullObjectHash,
-                proofChunkRoot: chunkRoot,
-                proofChunkHashes: chunkHashes,
-            },
-        });
-    });
-
-    it('verifies golden and malformed fixtures with stable outputs', async () => {
-        const kernel = await loadTranscriptCoreKernel();
-
-        expect(kernel.verifyFixture(foundationTranscriptCoreFixture)).toEqual({
-            caseName: 'foundation-transcript-roots',
-            objectHash512:
-                foundationTranscriptCoreFixture.expectedObjectHash512,
-            chunkRoot: foundationTranscriptCoreFixture.expectedChunkRoot,
-        });
-    });
-
-    it('maps canonical rejection errors from command responses', async () => {
-        const kernel = await loadTranscriptCoreKernel();
-        const malformedMagicHex = '42414421';
-
-        expect(() =>
-            kernel.analyzeCanonicalObject({
-                canonicalBytesHex: malformedMagicHex,
-                chunkSize: 8,
-            }),
-        ).toThrow(TranscriptCoreKernelCommandError);
-
-        let canonicalError: unknown;
-        try {
-            kernel.analyzeCanonicalObject({
-                canonicalBytesHex: malformedMagicHex,
-                chunkSize: 8,
-            });
-        } catch (error) {
-            canonicalError = error;
-        }
-        expect(canonicalError).toBeInstanceOf(TranscriptCoreKernelCommandError);
-        expect((canonicalError as TranscriptCoreKernelCommandError).code).toBe(
-            'MalformedMagic',
-        );
     });
 
     it('keeps byte round-trip as an allocation smoke path', async () => {

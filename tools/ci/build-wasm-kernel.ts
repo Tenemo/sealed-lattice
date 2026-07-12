@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { normalizeTranscriptCoreKernelBytesForHash } from '#packages/wasm/src/transcript-core-bridge.js';
 import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
 import { isWithinDirectory } from '#tools/internal/files.js';
+import { foundationProfile } from '@sealed-lattice/types';
 
 const repoRoot = path.resolve(
     fileURLToPath(new URL('../../', import.meta.url)),
@@ -120,6 +121,8 @@ const runCargoBuild = (): void => {
         `${repoRoot}=/workspace`,
         '--remap-path-prefix',
         `${cargoHome}=/cargo`,
+        '-C',
+        `link-arg=--max-memory=${foundationProfile.maximumWasmMemoryByteLength}`,
     ];
     runCheckedCommand({
         command: 'cargo',

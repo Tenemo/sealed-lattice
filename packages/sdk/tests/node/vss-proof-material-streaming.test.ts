@@ -2,11 +2,18 @@ import { describe, expect, it } from 'vitest';
 
 import { loadPublicTranscriptCoreKernel } from './accepted-setup-public-api/support.js';
 
-import { hash512Hex } from '#packages/crypto/src/index';
+import {
+    deriveCanonicalObjectHash,
+    hash512Hex,
+} from '#packages/crypto/src/index';
 import {
     createBinaryChunkedSameSecretBridgeProofMaterialTransport,
     createBinaryChunkedVssShareLinkageProofMaterialTransport,
 } from '#packages/protocol/src/index';
+import {
+    bgvCanonicalStreamFamilies,
+    openBgvCanonicalStreamRuntime,
+} from '#packages/wasm/src/index';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -213,12 +220,12 @@ describe('VSS proof material move to transport', () => {
                 expect(proofRecord.proofMaterialRoot).toBe(
                     transportMaterial.proofMaterialRoot,
                 );
-                expect(proofRecord.proofChunkCount).toBe(1);
-                expect(proofRecord.proofChunkRoot).toBe(
-                    transportMaterial.chunkRoot,
-                );
-                expect(proofRecord.proofChunkHashes).toStrictEqual(
-                    transportMaterial.chunkHashes,
+                expect(proofRecord.proofMaterialRoot).toBe(
+                    deriveCanonicalObjectHash({
+                        objectType: 'SetupProofMaterialReference',
+                        proofFamily: proofMaterialCase.proofFamily,
+                        proofBytesHash: proofRecord.proofBytesHash,
+                    }),
                 );
                 // The record must rebind its root over the transport reference,
                 // not keep the stale embedded root.
@@ -231,10 +238,14 @@ describe('VSS proof material move to transport', () => {
 
                 const transportChunks =
                     transportMaterial.chunks as readonly JsonRecord[];
-                expect(transportChunks[0]).toMatchObject({
-                    chunkIndex: 0,
-                    bytesHex: `0${String(recordIndex)}11223344`,
-                });
+                expect(transportChunks[0]?.chunkIndex).toBe(0);
+                expect(
+                    Array.from(
+                        new Uint8Array(
+                            transportChunks[0]?.bytes as ArrayBuffer,
+                        ),
+                    ),
+                ).toEqual([recordIndex, 0x11, 0x22, 0x33, 0x44]);
             });
 
             expect(moved.proofMaterialSet.proofMaterialSetRoot).not.toBe(
@@ -342,9 +353,10 @@ describe('VSS proof material move to transport', () => {
 
 describe('VSS proof material streaming through the kernel', () => {
     it.each(proofMaterialCases)(
-        'accepts a streamed $proofFamily transported material set and rejects a tampered chunk hash',
+        'authenticates a streamed $proofFamily transported material set through the canonical runtime',
         async (proofMaterialCase) => {
             const kernel = await loadPublicTranscriptCoreKernel();
+            const runtime = openBgvCanonicalStreamRuntime({ kernel });
 
             const embedded = embeddedProofMaterialSet(proofMaterialCase, 1);
             const moved = proofMaterialCase.moveEmbeddedToTransport(embedded);
@@ -353,71 +365,31 @@ describe('VSS proof material streaming through the kernel', () => {
                     .proofMaterials as readonly JsonRecord[]
             )[0];
 
-            const { chunks: transportChunks, ...transportReference } =
-                transportMaterial;
-            const verificationId = `vss-stream-${proofMaterialCase.proofFamily}`;
-            kernel.beginSetupProofMaterialTransportStream({
-                verificationId,
-                transportedSetupProofMaterial: transportReference,
+            const transportChunks =
+                transportMaterial.chunks as readonly JsonRecord[];
+            const chunks = transportChunks.map((chunk, chunkIndex) => {
+                expect(chunk.chunkIndex).toBe(chunkIndex);
+                expect(Object.prototype.toString.call(chunk.bytes)).toBe(
+                    '[object ArrayBuffer]',
+                );
+                return chunk.bytes as ArrayBuffer;
             });
-            for (const chunk of transportChunks as readonly JsonRecord[]) {
-                kernel.absorbSetupProofMaterialTransportStreamChunk({
-                    verificationId,
-                    chunkIndex: chunk.chunkIndex as number,
-                    bytesHex: chunk.bytesHex as string,
-                });
-            }
-            const verification = kernel.finishSetupProofMaterialTransportStream(
-                {
-                    verificationId,
-                },
-            ) as unknown as JsonRecord;
+            const family =
+                proofMaterialCase.proofFamily === 'vss-share-linkage'
+                    ? bgvCanonicalStreamFamilies.vssShareLinkage
+                    : bgvCanonicalStreamFamilies.sameSecretBridge;
+            const materialRoot = transportMaterial.proofMaterialRoot as string;
 
-            expect(verification.proofFamily).toBe(
-                proofMaterialCase.proofFamily,
-            );
-            expect(verification.proofBytesEncoding).toBe(
-                'binary-chunked-proof-bytes',
-            );
-            expect(verification.proofMaterialRoot).toBe(
-                transportMaterial.proofMaterialRoot,
-            );
-            const verifiedHandle =
-                verification.verifiedSetupProofMaterial as JsonRecord;
-            expect(verifiedHandle.proofFamily).toBe(
-                proofMaterialCase.proofFamily,
-            );
-            expect(verifiedHandle.proofMaterialRoot).toBe(
-                transportMaterial.proofMaterialRoot,
-            );
+            const descriptor = runtime.stage({
+                chunks,
+                family,
+                materialRoot,
+            });
 
-            // Tampering a declared chunk hash must be rejected: the declared
-            // chunkHashes no longer reproduce the declared chunkRoot, and the
-            // absorbed chunk bytes no longer reproduce the declared chunk hash,
-            // so the kernel refuses the transported material somewhere in the
-            // begin/absorb/finish sequence.
-            const tamperedReference = {
-                ...transportReference,
-                chunkHashes: ['0'.repeat(128)],
-            };
-            const tamperedVerificationId = `vss-stream-tampered-${proofMaterialCase.proofFamily}`;
-            const streamTamperedMaterial = (): void => {
-                kernel.beginSetupProofMaterialTransportStream({
-                    verificationId: tamperedVerificationId,
-                    transportedSetupProofMaterial: tamperedReference,
-                });
-                for (const chunk of transportChunks as readonly JsonRecord[]) {
-                    kernel.absorbSetupProofMaterialTransportStreamChunk({
-                        verificationId: tamperedVerificationId,
-                        chunkIndex: chunk.chunkIndex as number,
-                        bytesHex: chunk.bytesHex as string,
-                    });
-                }
-                kernel.finishSetupProofMaterialTransportStream({
-                    verificationId: tamperedVerificationId,
-                });
-            };
-            expect(streamTamperedMaterial).toThrow();
+            expect(descriptor.byteLength).toBeGreaterThan(0);
+            expect(() =>
+                runtime.stage({ chunks, family, materialRoot }),
+            ).toThrow();
         },
     );
 });

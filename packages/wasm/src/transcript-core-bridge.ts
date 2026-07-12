@@ -3,8 +3,6 @@ export type {
     BgvAcceptedSetupHandoff,
     TranscriptCoreKernelSharePoint,
     TranscriptCorePlaintextComparison,
-    BgvBaseConversionFixture,
-    BgvCiphertextConventionFixture,
     BgvCollectiveSetupParametersDescription,
     BgvCollectiveSetupVerification,
     BgvLocalTrusteeSetupStateVerification,
@@ -13,6 +11,8 @@ export type {
     BgvTargetDecryptionReleaseSetupContext,
     BgvTargetDecryptionResultReleaseShareEvidence,
     BgvTargetDecryptionResultReleaseCompletion,
+    FoundationCanonicalTupleValidation,
+    FoundationSchemaObjectValidation,
     TranscriptCoreKernel,
 } from './transcript-core-bridge/kernel-contracts.js';
 export {
@@ -21,3 +21,16 @@ export {
 } from './transcript-core-bridge/kernel-runtime.js';
 export type { TranscriptCoreKernelLoaderOptions } from './transcript-core-bridge/kernel-runtime.js';
 export { createTranscriptCoreKernelLoader } from './transcript-core-bridge/kernel-loader.js';
+export {
+    bgvCanonicalStreamFamilies,
+    openBgvCanonicalStreamRuntime,
+} from './bgv-canonical-stream-runtime.js';
+export type {
+    BgvCanonicalStreamFamily,
+    BgvCanonicalStreamRuntime,
+    BgvCanonicalStreamVerifierLease,
+} from './bgv-canonical-stream-runtime.js';
+export {
+    foundationBoardCandidateObjectHash,
+    openFoundationBoardSession,
+} from './foundation-board-session.js';

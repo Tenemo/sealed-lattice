@@ -745,7 +745,6 @@ const aggregateVerifiedPrivateVssMaterial = (
         aggregateThresholdShareMaterial: {
             objectType: 'LocalTrusteeAggregateThresholdShareMaterial',
             ...materialCommonFields,
-            materialDerivation: 'sum-of-verified-private-vss-share-values',
             aggregateOpeningCredentialHandoff:
                 input.localTrusteeAggregateOpeningCredentialHandoff,
             aggregateShareByRnsLimb: orderedAggregates.map((aggregate) => ({

@@ -13,8 +13,34 @@ export const textDecoder = new TextDecoder('utf-8', { fatal: true });
 
 export const textEncoder = new TextEncoder();
 
-export const bytesToHex = (bytes: Uint8Array): string =>
-    Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+const hexadecimalByteStrings = Object.freeze(
+    Array.from({ length: 256 }, (_, byte) =>
+        byte.toString(16).padStart(2, '0'),
+    ),
+);
+const hexadecimalEncodingChunkByteLength = 8_192;
+
+export const bytesToHex = (bytes: Uint8Array): string => {
+    const chunks: string[] = [];
+    for (
+        let chunkStart = 0;
+        chunkStart < bytes.byteLength;
+        chunkStart += hexadecimalEncodingChunkByteLength
+    ) {
+        const chunkEnd = Math.min(
+            bytes.byteLength,
+            chunkStart + hexadecimalEncodingChunkByteLength,
+        );
+        const encodedBytes = new Array<string>(chunkEnd - chunkStart);
+        for (let byteIndex = chunkStart; byteIndex < chunkEnd; byteIndex += 1) {
+            encodedBytes[byteIndex - chunkStart] =
+                hexadecimalByteStrings[bytes[byteIndex]] ?? '';
+        }
+        chunks.push(encodedBytes.join(''));
+    }
+
+    return chunks.join('');
+};
 
 const isPrintableAscii = (byte: number): boolean =>
     byte >= 0x20 && byte <= 0x7e;

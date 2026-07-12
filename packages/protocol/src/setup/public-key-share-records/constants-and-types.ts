@@ -211,11 +211,6 @@ export type PublicKeyShareSuccinctEmbeddedProofBytes = Readonly<{
 export type PublicKeyShareSuccinctTransportedProofBytes = Readonly<{
     readonly proofBytesEncoding: 'binary-chunked-proof-bytes';
     readonly proofMaterialRoot: ProtocolHash;
-    readonly proofChunkCount: number;
-    readonly proofTotalByteLength: number;
-    readonly proofFullObjectHash: ProtocolHash;
-    readonly proofChunkRoot: ProtocolHash;
-    readonly proofChunkHashes: readonly ProtocolHash[];
 }>;
 
 export type PublicKeyShareSuccinctProofByteMaterial =

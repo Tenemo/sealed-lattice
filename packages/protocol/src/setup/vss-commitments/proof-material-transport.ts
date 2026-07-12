@@ -2,8 +2,6 @@ import { deriveCanonicalObjectHash, hash512Hex } from '@sealed-lattice/crypto';
 
 import { bytesFromStandardBase64 } from '../proof-byte-encoding.js';
 import {
-    setupProofMaterialRecordTransportMetadataFields,
-    setupProofMaterialReferenceFields,
     setupProofMaterialTransportChunks,
     setupProofMaterialTransportMetadata,
     setupTransportedProofMaterialFields,
@@ -92,7 +90,6 @@ const moveProofBytesToTransport = (
                 );
             }
             const proofMaterialTransport = setupProofMaterialTransportMetadata(
-                parameters.proofFamily,
                 proofBytes,
                 `${parameters.proofFamily} proofRecords.${String(proofIndex)}.proofBytesBase64 must produce at least one transported chunk.`,
             );
@@ -100,15 +97,11 @@ const moveProofBytesToTransport = (
                 objectType: 'SetupProofMaterialReference',
                 proofFamily: parameters.proofFamily,
                 proofBytesHash: proofRecord.proofBytesHash,
-                ...setupProofMaterialReferenceFields(proofMaterialTransport),
             });
             transportedProofMaterials.push({
                 objectType: parameters.transportMaterialObjectType,
                 proofFamily: parameters.proofFamily,
-                ...setupTransportedProofMaterialFields(
-                    proofMaterialTransport,
-                    proofMaterialRoot,
-                ),
+                ...setupTransportedProofMaterialFields(proofMaterialRoot),
                 chunks: setupProofMaterialTransportChunks(
                     proofMaterialTransport,
                 ),
@@ -121,9 +114,6 @@ const moveProofBytesToTransport = (
                 ...proofRecordIdentity,
                 proofBytesEncoding: 'binary-chunked-proof-bytes',
                 proofMaterialRoot,
-                ...setupProofMaterialRecordTransportMetadataFields(
-                    proofMaterialTransport,
-                ),
             };
 
             return {

@@ -13,11 +13,9 @@ import {
 import {
     deriveBoardBranchNodeHash,
     deriveBoardEntryHash,
-    deriveBoardEntryListRootHash,
     deriveBoardLeafNodeHash,
     deriveBoardRootFromNodeHash,
     deriveInclusionProofHash,
-    inclusionProofUsesMerklePath,
     isBoardEntryMerklePath,
 } from './hashes.js';
 
@@ -97,20 +95,13 @@ export const verifyInclusionProof = (
         includedObjectHash: inclusionProof.includedObjectHash,
         includedObjectType: inclusionProof.includedObjectType,
     });
-    const usesMerklePath = inclusionProofUsesMerklePath(inclusionProof);
-    const usesBoardEntryHashList =
-        inclusionProof.boardEntryHashes !== undefined;
-    const expectedBoardRoot = usesMerklePath
-        ? deriveBoardRootFromMerkleInclusionProof(inclusionProof)
-        : Array.isArray(inclusionProof.boardEntryHashes)
-          ? deriveBoardEntryListRootHash(inclusionProof.boardEntryHashes)
-          : undefined;
+    const expectedBoardRoot =
+        deriveBoardRootFromMerkleInclusionProof(inclusionProof);
     const expectedHash = deriveInclusionProofHash({
         boardHeadHash: inclusionProof.boardHeadHash,
         boardEntryHash: inclusionProof.boardEntryHash,
         boardEntryCount: inclusionProof.boardEntryCount,
         boardEntryMerklePath: inclusionProof.boardEntryMerklePath,
-        boardEntryHashes: inclusionProof.boardEntryHashes,
         boardPosition: inclusionProof.boardPosition,
         boardRoot: inclusionProof.boardRoot,
         boardSequence: inclusionProof.boardSequence,
@@ -132,24 +123,6 @@ export const verifyInclusionProof = (
             createRefusal(
                 'InclusionProofInvalid',
                 'Inclusion proof board-entry hash does not match its canonical payload.',
-                inclusionProof.inclusionProofHash,
-            ),
-        );
-    }
-    if (usesMerklePath && usesBoardEntryHashList) {
-        refusedObjects.push(
-            createRefusal(
-                'InclusionProofInvalid',
-                'Inclusion proof must use exactly one board inclusion witness model.',
-                inclusionProof.inclusionProofHash,
-            ),
-        );
-    }
-    if (!usesMerklePath && !usesBoardEntryHashList) {
-        refusedObjects.push(
-            createRefusal(
-                'InclusionProofInvalid',
-                'Inclusion proof must include a board inclusion witness.',
                 inclusionProof.inclusionProofHash,
             ),
         );
@@ -202,18 +175,6 @@ export const verifyInclusionProof = (
             createRefusal(
                 'InclusionProofInvalid',
                 'Inclusion proof board position must be a non-negative integer.',
-                inclusionProof.inclusionProofHash,
-            ),
-        );
-    } else if (
-        Array.isArray(inclusionProof.boardEntryHashes) &&
-        inclusionProof.boardEntryHashes[inclusionProof.boardPosition] !==
-            inclusionProof.boardEntryHash
-    ) {
-        refusedObjects.push(
-            createRefusal(
-                'InclusionProofInvalid',
-                'Inclusion proof board entry is not present at the claimed board position.',
                 inclusionProof.inclusionProofHash,
             ),
         );

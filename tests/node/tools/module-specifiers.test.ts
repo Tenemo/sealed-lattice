@@ -27,8 +27,8 @@ describe('module specifier helpers', () => {
 
     it('deduplicates repeated specifiers without hiding separate literal positions', () => {
         const sourceText = `
-            import type { TranscriptCoreFixture } from '@sealed-lattice/types';
-            export type { TranscriptCoreFixture } from '@sealed-lattice/types';
+            import type { ThresholdParameters } from '@sealed-lattice/types';
+            export type { ThresholdParameters } from '@sealed-lattice/types';
         `;
 
         expect(extractModuleSpecifiers(sourceText)).toEqual([

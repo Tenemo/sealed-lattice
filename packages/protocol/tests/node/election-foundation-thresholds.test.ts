@@ -180,7 +180,7 @@ describe('election foundation threshold parameters', () => {
         });
 
         expect(thresholdParameters.rosterParametersKind).toBe(
-            'FirstParametersRoster',
+            'FoundationRoster',
         );
         expect(
             thresholdParameters.dynamicRosterParametersCertificateHash,
@@ -227,7 +227,7 @@ describe('election foundation threshold parameters', () => {
         });
 
         expect(thresholdParameters.rosterParametersKind).toBe(
-            'FirstParametersRoster',
+            'FoundationRoster',
         );
         expect(
             thresholdParameters.dynamicRosterParametersCertificateHash,

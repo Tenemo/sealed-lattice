@@ -171,7 +171,6 @@ pub(crate) fn verify_vss_public_coefficient_commitment_set_request(
     }
 
     Ok(json!({
-        "ok": true,
         "operation": "verifyVssPublicCoefficientCommitmentSet",
         "coefficientCommitmentRoot": coefficient_commitment_root,
         "publicMatrixSeedHash": public_matrix_seed_hash,
@@ -254,7 +253,6 @@ pub(crate) fn verify_vss_public_recipient_share_commitment_set_request(
     }
 
     Ok(json!({
-        "ok": true,
         "operation": "verifyVssPublicRecipientShareCommitmentSet",
         "recipientShareCommitmentRoot": recipient_share_commitment_root,
         "publicMatrixSeedHash": public_matrix_seed_hash,
@@ -334,7 +332,6 @@ pub(crate) fn verify_vss_public_aggregate_threshold_commitment_set_request(
     }
 
     Ok(json!({
-        "ok": true,
         "operation": "verifyVssPublicAggregateThresholdCommitmentSet",
         "aggregateThresholdCommitmentRoot": aggregate_threshold_commitment_root,
         "publicMatrixSeedHash": public_matrix_seed_hash,

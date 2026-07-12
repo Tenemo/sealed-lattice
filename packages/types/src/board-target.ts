@@ -33,9 +33,8 @@ export type InclusionProof = {
     readonly includedObjectHash: ProtocolHash;
     readonly boardEntryHash: ProtocolHash;
     readonly boardRoot: ProtocolHash;
-    readonly boardEntryCount?: number;
-    readonly boardEntryMerklePath?: readonly BoardEntryMerklePathStep[];
-    readonly boardEntryHashes?: readonly ProtocolHash[];
+    readonly boardEntryCount: number;
+    readonly boardEntryMerklePath: readonly BoardEntryMerklePathStep[];
     readonly inclusionProofHash: ProtocolHash;
 };
 

@@ -9,6 +9,7 @@ use super::super::{
 use super::*;
 use crate::bgv::setup::compute_vss_committed_material_commitment_request;
 use crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_TRIT_BASE;
+use crate::encoding::CanonicalErrorCode;
 use crate::hashing::hash512_hex;
 use num_bigint::BigInt;
 use serde_json::json;
@@ -90,6 +91,46 @@ fn vss_share_linkage_proof_round_trips_and_rejects_tampering() {
     assert!(
         verify_evaluation_key_share(&tampered_additional_statement, &proof).is_err(),
         "tampering with an additional recipient-share material root must reject"
+    );
+}
+
+#[test]
+fn vss_share_linkage_proof_rejects_tampered_committed_material_openings() {
+    let (statement, witness) = vss_share_linkage_instance();
+    let proof =
+        prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
+    let encoded_proof = encode_trustee_evaluation_key_proof(&proof);
+
+    let mut proof_with_tampered_material_row =
+        decode_trustee_evaluation_key_proof(&statement, &encoded_proof).expect("decode proof");
+    let opened_residue = &mut proof_with_tampered_material_row.limb_proofs[0]
+        .material_query_openings[0][0]
+        .rows[0][0];
+    *opened_residue = if *opened_residue == 0 { 1 } else { 0 };
+    let row_error = verify_evaluation_key_share(&statement, &proof_with_tampered_material_row)
+        .expect_err("a changed opened material row must reject without changing the statement");
+    assert_eq!(row_error.code, CanonicalErrorCode::InvalidProtocolObject);
+
+    let mut proof_with_tampered_material_authentication_node =
+        decode_trustee_evaluation_key_proof(&statement, &encoded_proof).expect("decode proof");
+    let authentication_node = proof_with_tampered_material_authentication_node.limb_proofs[0]
+        .material_batch_openings[0]
+        .authentication_nodes
+        .first_mut()
+        .expect("small-ring material opening has an authentication node");
+    authentication_node[0] ^= 0x01;
+    let authentication_error = verify_evaluation_key_share(
+        &statement,
+        &proof_with_tampered_material_authentication_node,
+    )
+    .expect_err("a changed material authentication node must reject against the statement root");
+    assert_eq!(
+        authentication_error.code,
+        CanonicalErrorCode::InvalidProtocolObject
+    );
+    assert_eq!(
+        authentication_error.message,
+        "material tree query openings failed batched Merkle verification against the statement root"
     );
 }
 

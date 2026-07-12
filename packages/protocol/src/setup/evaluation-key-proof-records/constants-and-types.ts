@@ -41,10 +41,6 @@ export const evaluationKeyShareComponentMaterialEncoding =
 export const setupProofMaterialTransportEncoding = 'binary-chunked-proof-bytes';
 export const evaluationKeyShareComponentVectorHashDomain =
     'sealed-lattice-bgv-rns/evaluation-key-share-component-vector';
-export const evaluationKeyShareComponentMaterialFullObjectHashDomain =
-    'sealed-lattice/setup/evaluation-key-share/component-material/full-object';
-export const evaluationKeyShareComponentMaterialChunkHashDomain =
-    'sealed-lattice/setup/evaluation-key-share/component-material/chunk';
 export const trusteeEvaluationKeyProofBytesHashDomain =
     'sealed-lattice/setup/trustee-evaluation-key/proof-bytes';
 export const evaluationKeyShareComponentMaterialMagic = new Uint8Array([
@@ -70,12 +66,6 @@ export type EvaluationKeyShareEmbeddedKeySwitchComponentMaterial = Readonly<{
 export type EvaluationKeyShareTransportedKeySwitchComponentMaterial = Readonly<{
     readonly keySwitchMaterialEncoding: typeof evaluationKeyShareComponentMaterialEncoding;
     readonly keySwitchComponentMaterialRoot: ProtocolHash;
-    readonly keySwitchComponentChunkSizeBytes: number;
-    readonly keySwitchComponentChunkCount: number;
-    readonly keySwitchComponentTotalByteLength: number;
-    readonly keySwitchComponentFullObjectHash: ProtocolHash;
-    readonly keySwitchComponentChunkRoot: ProtocolHash;
-    readonly keySwitchComponentChunkHashes: readonly ProtocolHash[];
 }>;
 
 export type EvaluationKeyShareKeySwitchComponentMaterial =
@@ -230,11 +220,6 @@ export type TrusteeEvaluationKeyEmbeddedProofBytes = Readonly<{
 export type TrusteeEvaluationKeyTransportedProofBytes = Readonly<{
     readonly proofBytesEncoding: typeof setupProofMaterialTransportEncoding;
     readonly proofMaterialRoot: ProtocolHash;
-    readonly proofChunkCount: number;
-    readonly proofTotalByteLength: number;
-    readonly proofFullObjectHash: ProtocolHash;
-    readonly proofChunkRoot: ProtocolHash;
-    readonly proofChunkHashes: readonly ProtocolHash[];
 }>;
 
 export type TrusteeEvaluationKeyProofRecord = Readonly<
@@ -491,7 +476,7 @@ export type TransportedEvaluationKeyShareComponentMaterialSet = Readonly<
 
 export type EvaluationKeyShareComponentMaterialChunk = Readonly<{
     readonly chunkIndex: number;
-    readonly bytesHex: string;
+    readonly bytes: ArrayBuffer;
 }>;
 
 // The raw chunk bytes for one transported evaluation-key component material,

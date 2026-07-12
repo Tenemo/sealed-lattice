@@ -1,7 +1,5 @@
 import type { ProtocolHash } from '@sealed-lattice/types';
 
-import type { setupTransportedObjectLoadingPolicy } from './constants.js';
-
 export type JsonRecord = Record<string, unknown>;
 
 export type CollectiveBgvSetupParametersForCertificates = Readonly<
@@ -101,5 +99,4 @@ export type SetupTransportedObjectRecord = Readonly<{
     readonly chunkHashes: readonly ProtocolHash[];
     readonly fullObjectHash: ProtocolHash;
     readonly encoding: 'binary';
-    readonly loadingPolicy: typeof setupTransportedObjectLoadingPolicy;
 }>;

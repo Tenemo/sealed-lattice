@@ -28,11 +28,11 @@ use super::{
 // `folded_layer_path_length` (used by both the codec shape test and the size
 // profiler). Each sibling opens with `use super::*;` to reach this surface.
 //
-// `accounting`, `prover`, and the command/family items are re-exported here so
-// the sibling tests can keep referencing them through `super::` unchanged after
-// the move under this `tests/` directory.
+// `prover` and the command/family items are re-exported here so the sibling
+// tests can keep referencing them through `super::` after the move under this
+// `tests/` directory.
 use super::{
-    accounting, describe_target_decryption_share_proof_layout_from_request,
+    describe_target_decryption_share_proof_layout_from_request,
     generate_target_decryption_share_proof_bytes_from_request,
     generate_trustee_evaluation_key_proof_from_request, prover,
     verify_target_decryption_share_proof_bytes_from_request,

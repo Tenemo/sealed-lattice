@@ -36,6 +36,59 @@ pub(super) fn accepted_vss_material_seed(commitment_context_hash: &str) -> Strin
     )
 }
 
+pub(super) struct SameSecretBridgeCommittedMaterialRegenerationInputs {
+    pub(super) seeds_by_bound_message: Vec<String>,
+    pub(super) context_hashes_by_bound_message: Vec<String>,
+}
+
+fn same_secret_bridge_committed_material_regeneration_inputs_from_statement_record(
+    statement_record: &serde_json::Value,
+) -> SameSecretBridgeCommittedMaterialRegenerationInputs {
+    let context_hashes_by_bound_message = statement_record["targetConstantCoefficientCommitments"]
+        .as_array()
+        .expect("bridge target commitments")
+        .iter()
+        .map(|commitment_record| {
+            commitment_record["commitment"]["commitmentContextHash"]
+                .as_str()
+                .expect("bridge target commitment context hash")
+                .to_string()
+        })
+        .collect::<Vec<_>>();
+    let seeds_by_bound_message = context_hashes_by_bound_message
+        .iter()
+        .map(|context_hash| accepted_vss_material_seed(context_hash))
+        .collect::<Vec<_>>();
+
+    SameSecretBridgeCommittedMaterialRegenerationInputs {
+        seeds_by_bound_message,
+        context_hashes_by_bound_message,
+    }
+}
+
+pub(super) fn same_secret_bridge_committed_material_regeneration_inputs_from_fixture_package(
+    package: &serde_json::Value,
+    trustee_roster_position: u64,
+) -> SameSecretBridgeCommittedMaterialRegenerationInputs {
+    let matching_statement_records = package["sameSecretBridgeStatementSet"]["statementRecords"]
+        .as_array()
+        .expect("same-secret bridge statement records")
+        .iter()
+        .filter(|statement_record| {
+            statement_record["trusteeRosterPosition"].as_u64() == Some(trustee_roster_position)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        matching_statement_records.len(),
+        1,
+        "one same-secret bridge statement must bind each trustee"
+    );
+
+    same_secret_bridge_committed_material_regeneration_inputs_from_statement_record(
+        matching_statement_records[0],
+    )
+}
+
 const VSS_PUBLIC_COMMITMENT_BINARY_FORMAT: &str = "sealed-lattice-vss-public-commitment-binary";
 const VSS_SHARE_LINKAGE_PROOF_FAMILY: &str = "vss-share-linkage";
 const VSS_SHARE_LINKAGE_PROOF_BYTES_HASH_DOMAIN: &str =

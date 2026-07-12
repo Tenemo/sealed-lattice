@@ -123,7 +123,7 @@ fn build_collective_setup_package_fixture(
 }
 
 // The collective setup context shared by the package fixtures. Every fixture
-// builds the same first-closure context shape, so this keeps one definition of
+// builds the same foundation context shape, so this keeps one definition of
 // it instead of repeating the json! block at each construction site.
 fn collective_setup_context_fixture(
     ceremony_id: &str,

@@ -51,7 +51,6 @@ fn direct_ballot_relation_proof_fixture() -> &'static DirectBallotRelationProofF
 
 fn direct_ballot_test_proof_mask_randomness(ballot_count: usize) -> Value {
     json!({
-        "source": PROOF_MASK_RANDOMNESS_DEVELOPMENT_FIXTURE,
         "ballotProofRandomnessHexes": (0..ballot_count)
             .map(|index| direct_ballot_test_randomness_hex("ballot-proof", index))
             .collect::<Vec<_>>()
@@ -60,7 +59,6 @@ fn direct_ballot_test_proof_mask_randomness(ballot_count: usize) -> Value {
 
 fn direct_ballot_test_ballot_encryption_randomness(ballot_count: usize) -> Value {
     json!({
-        "source": ENCRYPTION_RANDOMNESS_DEVELOPMENT_FIXTURE,
         "encryptionSeedHexes": (0..ballot_count)
             .map(|index| direct_ballot_test_randomness_hex("ballot-encryption", index))
             .collect::<Vec<_>>()

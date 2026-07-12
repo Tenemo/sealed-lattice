@@ -98,7 +98,7 @@ pub(in super::super) fn replace_public_key_share_hashes_with_material_hashes(
         .as_str()
         .expect("public matrix seed hash")
         .to_string();
-    let ring_degree = source_constant_commitments_from_fixture_package(package, 0)[0].ring_degree;
+    let ring_degree = public_coefficient_commitment_ring_degree_from_fixture_package(package);
     let participant_count = participant_count_from_package(package);
     for trustee_roster_position in 0..participant_count {
         let (coefficients_by_limb, _) = public_key_share_coefficients_and_errors_for_fixture(
@@ -154,7 +154,7 @@ pub(in super::super) fn public_key_share_material_object(
         package["commonRandomness"]["publicDerivations"]["bgvPublicA"]["publicPolynomialRoot"]
             .as_str()
             .expect("public a root");
-    let ring_degree = source_constant_commitments_from_fixture_package(package, 0)[0].ring_degree;
+    let ring_degree = public_coefficient_commitment_ring_degree_from_fixture_package(package);
     let participant_count = participant_count_from_package(package);
     let mut material_records = Vec::new();
     let mut material_roots = Vec::new();
@@ -375,6 +375,11 @@ pub(in super::super) fn public_key_share_succinct_proofs_object(
             .iter()
             .map(|coefficient| i64::from(*coefficient < 0))
             .collect::<Vec<_>>();
+        let committed_material_regeneration_inputs =
+            vss_public_material::same_secret_bridge_committed_material_regeneration_inputs_from_fixture_package(
+                package,
+                trustee_roster_position,
+            );
         let statement = TrusteeEvaluationKeyStatement {
             context: SuccinctSetupProofContext {
                 proof_family: PUBLIC_KEY_SHARE_PROOF_FAMILY.to_string(),
@@ -440,8 +445,10 @@ pub(in super::super) fn public_key_share_succinct_proofs_object(
             vss_public_carry_witnesses_by_item: Vec::new(),
             target_decryption_message_vectors: Vec::new(),
             target_decryption_opening_randomness_by_commitment: Vec::new(),
-            vss_committed_material_seeds_by_bound_message: Vec::new(),
-            vss_committed_material_context_hashes_by_bound_message: Vec::new(),
+            vss_committed_material_seeds_by_bound_message: committed_material_regeneration_inputs
+                .seeds_by_bound_message,
+            vss_committed_material_context_hashes_by_bound_message:
+                committed_material_regeneration_inputs.context_hashes_by_bound_message,
         };
         let proof_randomness_seed_hex = derive_canonical_object_hash(&serde_json::json!({
             "objectType": "PublicKeyShareProofRoot",

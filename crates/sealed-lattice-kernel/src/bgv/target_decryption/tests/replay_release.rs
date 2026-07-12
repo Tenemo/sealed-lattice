@@ -13,9 +13,9 @@ use crate::bgv::evaluator::top_k::{
 };
 use crate::hashing::hash512_hex;
 
-// End-to-end first-profile evidence: ten genuine ballots are aggregated,
+// End-to-end foundation-profile evidence: ten genuine ballots are aggregated,
 // replayed through the production packed batched-pair evaluator at the
-// twenty-option first-profile domain, and the resulting genuine level-6 target
+// twenty-option foundation-profile domain, and the resulting genuine level-6 target
 // pair is released through the proof-backed staged decryption commands. The
 // released per-option identifiers and orders must equal the plaintext oracle,
 // and the one-shot release session must refuse a second finish. This is the
@@ -36,8 +36,8 @@ use crate::hashing::hash512_hex;
 //
 //   pnpm run test:rust:kernel:accepted-setup -- replay_release
 #[test]
-#[ignore = "long-running first-profile evidence; run via the focused accepted-setup runner"]
-fn first_profile_replay_target_release_matches_plaintext_oracle() {
+#[ignore = "long-running foundation-profile evidence; run via the focused accepted-setup runner"]
+fn foundation_profile_replay_target_release_matches_plaintext_oracle() {
     let started = std::time::Instant::now();
     let phase = |message: &str| {
         eprintln!(
@@ -261,7 +261,7 @@ fn first_profile_replay_target_release_matches_plaintext_oracle() {
     let re_release_share_proofs = target_share_proofs.clone();
 
     phase("releasing the genuine target through the staged one-shot session");
-    let release_verification_id = "replay-release-first-profile";
+    let release_verification_id = "replay-release-foundation-profile";
     let release_result = staged_target_result_release(
         &setup_package,
         &accepted,
@@ -308,7 +308,7 @@ fn first_profile_replay_target_release_matches_plaintext_oracle() {
         &target_ciphertexts,
         &target_share_profile_value,
         re_release_share_proofs,
-        "replay-release-first-profile-second-attempt",
+        "replay-release-foundation-profile-second-attempt",
     )
     .expect_err(
         "a target already released one-shot must refuse a fresh release under a new verification id",

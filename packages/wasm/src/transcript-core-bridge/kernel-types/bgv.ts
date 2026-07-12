@@ -23,28 +23,6 @@ export type BgvTransportedSetupProofMaterialSet<
         readonly proofMaterials: readonly BgvJsonRecord[];
     }>;
 
-export type BgvVerifiedSetupProofMaterial = Readonly<
-    BgvJsonRecord & {
-        readonly objectType: 'VerifiedSetupProofMaterial';
-        readonly verificationId: string;
-        readonly proofFamily: string;
-        readonly proofMaterialRoot: ProtocolHash;
-        readonly proofBytesEncoding: string;
-        readonly proofChunkCount: number;
-        readonly proofTotalByteLength: number;
-        readonly proofFullObjectHash: ProtocolHash;
-        readonly proofChunkRoot: ProtocolHash;
-        readonly proofChunkHashes: readonly ProtocolHash[];
-    }
->;
-
-export type BgvVerifiedSetupProofMaterialSet = Readonly<
-    BgvJsonRecord & {
-        readonly objectType: 'VerifiedSetupProofMaterialSet';
-        readonly proofMaterials: readonly BgvVerifiedSetupProofMaterial[];
-    }
->;
-
 export type BgvTransportedPublicKeyShareMaterial =
     BgvTransportedMaterialObject<'SetupTransportedPublicKeyShareMaterial'> &
         Readonly<{
@@ -85,7 +63,6 @@ export type BgvCollectiveSetupTransportCompanions = Readonly<{
     readonly transportedEvaluationKeyShareComponentMaterial?: BgvTransportedEvaluationKeyShareComponentMaterialSet;
     readonly transportedEvaluationKeyAggregateBindingOpenings?: BgvTransportedEvaluationKeyAggregateBindingOpeningSet;
     readonly transportedPublicEvaluationKeyMaterial?: BgvTransportedPublicEvaluationKeyMaterialSet;
-    readonly verifiedSetupProofMaterials?: BgvVerifiedSetupProofMaterialSet;
 }>;
 
 export type BgvRnsParametersDescription = {
@@ -171,26 +148,6 @@ export type BgvBatchPlaintextEncoding = {
     readonly canonicalBytesHex?: string;
 };
 
-export type BgvCiphertextConventionFixture = {
-    readonly bgvParametersHash: ProtocolHash;
-    readonly ciphertextRoot: ProtocolHash;
-    readonly componentCount: number;
-    readonly validation: BgvObjectValidation;
-    readonly canonicalBytesHex?: string;
-};
-
-export type BgvBaseConversionFixture = {
-    readonly sourcePlaintextRoot: ProtocolHash;
-    readonly convertedPlaintextRoot: ProtocolHash;
-    readonly sourceBasisId: string;
-    readonly convertedBasisId: string;
-    readonly convertedModulusCount: number;
-    readonly sampledConvertedResidues: readonly {
-        readonly position: number;
-        readonly value: number;
-    }[];
-};
-
 export type BgvPassiveSetupParticipantInput =
     | string
     | {
@@ -247,7 +204,6 @@ export type BgvCollectiveSetupParametersDescription = {
     readonly objectType: 'SetupPackage';
     readonly adversaryModel: 'active-static';
     readonly livenessModel: 'secure-with-abort';
-    readonly sharingModel: 'recipient-verified-vss';
     readonly sharingDomain: 'per-rns-prime';
     readonly completionRule: 'full-roster';
     readonly participantCount: number;
@@ -280,13 +236,10 @@ export type BgvCollectiveSetupParametersDescription = {
     };
     readonly setupProof: {
         readonly objectType: 'SetupProof';
-        readonly proofBackendBoundary: string;
-        readonly arbitraryRelationApi: string;
         readonly relationModel: Readonly<Record<string, unknown>>;
         readonly witnessBounds: Readonly<Record<string, unknown>>;
         readonly proofFamilies: readonly Readonly<Record<string, unknown>>[];
         readonly proofSerialization: Readonly<Record<string, unknown>>;
-        readonly verificationPolicy: Readonly<Record<string, unknown>>;
     };
     readonly setupTransport: {
         readonly objectType: 'SetupTransport';
@@ -616,74 +569,6 @@ export type BgvSameSecretBridgeProofGeneration = {
     readonly proofByteLength: number;
     readonly proofBytesHex: string;
 };
-
-export type BgvSetupProofMaterialTransportStreamBegin = {
-    readonly operation: 'beginSetupProofMaterialTransportStream';
-    readonly verificationId: string;
-    readonly proofFamily: string;
-    readonly proofMaterialRoot: ProtocolHash;
-    readonly proofBytesEncoding: string;
-    readonly transport: Readonly<Record<string, unknown>>;
-};
-
-export type BgvSetupProofMaterialTransportStreamChunkAbsorption = {
-    readonly operation: 'absorbSetupProofMaterialTransportStreamChunk';
-    readonly absorbedChunkIndex: number;
-    readonly nextChunkIndex: number;
-    readonly observedTotalByteLength: number;
-};
-
-export type BgvSetupProofMaterialTransportStreamVerification = {
-    readonly operation: 'finishSetupProofMaterialTransportStream';
-    readonly verificationId: string;
-    readonly proofFamily: string;
-    readonly proofMaterialRoot: ProtocolHash;
-    readonly proofBytesEncoding: string;
-    readonly transport: Readonly<Record<string, unknown>>;
-    readonly verifiedSetupProofMaterial: BgvVerifiedSetupProofMaterial;
-};
-
-export type BgvVerifiedEvaluationKeyShareComponentMaterial = Readonly<
-    BgvJsonRecord & {
-        readonly objectType: 'VerifiedEvaluationKeyShareComponentMaterial';
-        readonly verificationId: string;
-        readonly proofFamily: string;
-        readonly keySwitchComponentMaterialRoot: ProtocolHash;
-        readonly keySwitchMaterialEncoding: string;
-        readonly chunkCount: number;
-        readonly totalByteLength: number;
-        readonly fullObjectHash: ProtocolHash;
-        readonly chunkRoot: ProtocolHash;
-        readonly chunkHashes: readonly ProtocolHash[];
-    }
->;
-
-export type BgvEvaluationKeyShareComponentMaterialTransportStreamBegin = {
-    readonly operation: 'beginEvaluationKeyShareComponentMaterialTransportStream';
-    readonly verificationId: string;
-    readonly proofFamily: string;
-    readonly keySwitchComponentMaterialRoot: ProtocolHash;
-    readonly keySwitchMaterialEncoding: string;
-    readonly transport: Readonly<Record<string, unknown>>;
-};
-
-export type BgvEvaluationKeyShareComponentMaterialTransportStreamChunkAbsorption =
-    {
-        readonly operation: 'absorbEvaluationKeyShareComponentMaterialTransportStreamChunk';
-        readonly absorbedChunkIndex: number;
-        readonly nextChunkIndex: number;
-        readonly observedTotalByteLength: number;
-    };
-
-export type BgvEvaluationKeyShareComponentMaterialTransportStreamVerification =
-    {
-        readonly operation: 'finishEvaluationKeyShareComponentMaterialTransportStream';
-        readonly verificationId: string;
-        readonly proofFamily: string;
-        readonly keySwitchComponentMaterialRoot: ProtocolHash;
-        readonly keySwitchMaterialEncoding: string;
-        readonly verifiedEvaluationKeyShareComponentMaterial: BgvVerifiedEvaluationKeyShareComponentMaterial;
-    };
 
 export type BgvLocalTrusteeSetupStateVerification = {
     readonly operation: 'verifyLocalTrusteeSetupState';

@@ -134,7 +134,7 @@ pub(super) fn verify_common_randomness(setup_package: &Value) -> CanonicalResult
     if ordered_reveal_hashes.len() != roster.participant_count as usize {
         return Ok(Some(common_randomness_refusal(
             "commonRandomnessRevealCoverageMismatch",
-            "commonRandomness.revealRecords must cover the full first roster",
+            "commonRandomness.revealRecords must cover the full foundation roster",
             "setupPackage.commonRandomness.revealRecords",
         )?));
     }

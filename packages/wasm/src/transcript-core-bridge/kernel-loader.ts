@@ -1,15 +1,20 @@
 import type {
     FieldElement,
+    ParticipantIdentity,
     ProtocolHash,
-    TranscriptCoreAnalysis,
-    TranscriptCoreFixtureVerification,
 } from '@sealed-lattice/types';
+import {
+    foundationProfile,
+    parseParticipantIdentity,
+} from '@sealed-lattice/types';
+
+import { registerCanonicalStreamKernelContext } from '../canonical-stream-runtime.js';
+import { registerFoundationBoardKernelContext } from '../foundation-board-session.js';
+import { registerStateVerifierKernelContext } from '../state-verifier-runtime.js';
 
 import type {
     BgvCanonicalObjectAnalysis,
-    BgvBaseConversionFixture,
     BgvBatchPlaintextEncoding,
-    BgvCiphertextConventionFixture,
     BgvCollectiveSetupParametersDescription,
     BgvCollectiveSetupPublicDerivations,
     BgvCollectiveSetupVerification,
@@ -27,12 +32,6 @@ import type {
     BgvVssCommittedMaterialCommitmentComputation,
     BgvVssShareLinkageProofGeneration,
     BgvSetupCommitmentOpeningComputation,
-    BgvSetupProofMaterialTransportStreamBegin,
-    BgvSetupProofMaterialTransportStreamChunkAbsorption,
-    BgvSetupProofMaterialTransportStreamVerification,
-    BgvEvaluationKeyShareComponentMaterialTransportStreamBegin,
-    BgvEvaluationKeyShareComponentMaterialTransportStreamChunkAbsorption,
-    BgvEvaluationKeyShareComponentMaterialTransportStreamVerification,
     BgvTargetDecryptionReleaseSetupContext,
     BgvTargetDecryptionShare,
     BgvTargetDecryptionShareProofMaterial,
@@ -42,11 +41,14 @@ import type {
     BgvTargetDecryptionResultReleaseBegin,
     BgvTargetDecryptionResultReleaseShareAbsorption,
     BgvTargetDecryptionResultReleaseCompletion,
+    FoundationCanonicalTupleValidation,
+    FoundationSchemaObjectValidation,
     TranscriptCoreKernel,
     TranscriptCoreKernelCommand,
     TranscriptCoreKernelExports,
     TranscriptCorePlaintextComparison,
 } from './kernel-contracts.js';
+import { bytesToHex } from './kernel-contracts.js';
 import type { TranscriptCoreKernelLoaderOptions } from './kernel-runtime.js';
 import {
     TranscriptCoreKernelCommandError,
@@ -59,6 +61,18 @@ import {
     runKernelCommand,
     verifyKernelIntegrity,
 } from './kernel-runtime.js';
+import { registerLocalStorageRootKernelContext } from './local-storage-root-kernel-context.js';
+
+const maximumFoundationSchemaObjectByteLength =
+    foundationProfile.maximumCopiedBufferByteLength;
+
+const typedArrayPrototype = Reflect.getPrototypeOf(Uint8Array.prototype);
+
+const isUint8Array = (value: unknown): value is Uint8Array =>
+    ArrayBuffer.isView(value) &&
+    typedArrayPrototype !== null &&
+    Reflect.get(typedArrayPrototype, Symbol.toStringTag, value) ===
+        'Uint8Array';
 
 export const createTranscriptCoreKernelLoader = (
     transcriptCoreKernelUrl: URL,
@@ -86,6 +100,207 @@ export const createTranscriptCoreKernelLoader = (
                 exports,
                 'sealed_lattice_deallocate',
             );
+            const hasCanonicalStreamBoundary =
+                typeof exports.sealed_lattice_canonical_stream_absorb_chunk ===
+                'function';
+            const canonicalStreamAbsorbChunk = hasCanonicalStreamBoundary
+                ? (resolveNumberExport(
+                      exports,
+                      'sealed_lattice_canonical_stream_absorb_chunk',
+                  ) as NonNullable<
+                      TranscriptCoreKernelExports['sealed_lattice_canonical_stream_absorb_chunk']
+                  >)
+                : undefined;
+            const canonicalStreamBeginVerifier = hasCanonicalStreamBoundary
+                ? (resolveNumberExport(
+                      exports,
+                      'sealed_lattice_canonical_stream_begin_verifier',
+                  ) as NonNullable<
+                      TranscriptCoreKernelExports['sealed_lattice_canonical_stream_begin_verifier']
+                  >)
+                : undefined;
+            const canonicalStreamBeginWriter = hasCanonicalStreamBoundary
+                ? (resolveNumberExport(
+                      exports,
+                      'sealed_lattice_canonical_stream_begin_writer',
+                  ) as NonNullable<
+                      TranscriptCoreKernelExports['sealed_lattice_canonical_stream_begin_writer']
+                  >)
+                : undefined;
+            const canonicalStreamCancel = hasCanonicalStreamBoundary
+                ? (resolveNumberExport(
+                      exports,
+                      'sealed_lattice_canonical_stream_cancel',
+                  ) as NonNullable<
+                      TranscriptCoreKernelExports['sealed_lattice_canonical_stream_cancel']
+                  >)
+                : undefined;
+            const canonicalStreamFinishVerifier = hasCanonicalStreamBoundary
+                ? (resolveNumberExport(
+                      exports,
+                      'sealed_lattice_canonical_stream_finish_verifier',
+                  ) as NonNullable<
+                      TranscriptCoreKernelExports['sealed_lattice_canonical_stream_finish_verifier']
+                  >)
+                : undefined;
+            const canonicalStreamFinishWriter = hasCanonicalStreamBoundary
+                ? (resolveNumberExport(
+                      exports,
+                      'sealed_lattice_canonical_stream_finish_writer',
+                  ) as NonNullable<
+                      TranscriptCoreKernelExports['sealed_lattice_canonical_stream_finish_writer']
+                  >)
+                : undefined;
+            const bgvCanonicalStreamAbsorbChunk =
+                typeof exports.sealed_lattice_bgv_canonical_stream_absorb_chunk ===
+                'function'
+                    ? (resolveNumberExport(
+                          exports,
+                          'sealed_lattice_bgv_canonical_stream_absorb_chunk',
+                      ) as NonNullable<
+                          TranscriptCoreKernelExports['sealed_lattice_bgv_canonical_stream_absorb_chunk']
+                      >)
+                    : undefined;
+            const bgvCanonicalStreamBegin =
+                typeof exports.sealed_lattice_bgv_canonical_stream_begin ===
+                'function'
+                    ? (resolveNumberExport(
+                          exports,
+                          'sealed_lattice_bgv_canonical_stream_begin',
+                      ) as NonNullable<
+                          TranscriptCoreKernelExports['sealed_lattice_bgv_canonical_stream_begin']
+                      >)
+                    : undefined;
+            const bgvCanonicalStreamCancel =
+                typeof exports.sealed_lattice_bgv_canonical_stream_cancel ===
+                'function'
+                    ? (resolveNumberExport(
+                          exports,
+                          'sealed_lattice_bgv_canonical_stream_cancel',
+                      ) as NonNullable<
+                          TranscriptCoreKernelExports['sealed_lattice_bgv_canonical_stream_cancel']
+                      >)
+                    : undefined;
+            const bgvCanonicalStreamFinish =
+                typeof exports.sealed_lattice_bgv_canonical_stream_finish ===
+                'function'
+                    ? (resolveNumberExport(
+                          exports,
+                          'sealed_lattice_bgv_canonical_stream_finish',
+                      ) as NonNullable<
+                          TranscriptCoreKernelExports['sealed_lattice_bgv_canonical_stream_finish']
+                      >)
+                    : undefined;
+            const foundationBoardBegin =
+                typeof exports.sealed_lattice_foundation_board_begin ===
+                'function'
+                    ? (resolveNumberExport(
+                          exports,
+                          'sealed_lattice_foundation_board_begin',
+                      ) as NonNullable<
+                          TranscriptCoreKernelExports['sealed_lattice_foundation_board_begin']
+                      >)
+                    : undefined;
+            const foundationBoardCancel =
+                typeof exports.sealed_lattice_foundation_board_cancel ===
+                'function'
+                    ? (resolveNumberExport(
+                          exports,
+                          'sealed_lattice_foundation_board_cancel',
+                      ) as NonNullable<
+                          TranscriptCoreKernelExports['sealed_lattice_foundation_board_cancel']
+                      >)
+                    : undefined;
+            const foundationBoardIngest =
+                typeof exports.sealed_lattice_foundation_board_ingest ===
+                'function'
+                    ? (resolveNumberExport(
+                          exports,
+                          'sealed_lattice_foundation_board_ingest',
+                      ) as NonNullable<
+                          TranscriptCoreKernelExports['sealed_lattice_foundation_board_ingest']
+                      >)
+                    : undefined;
+            const foundationBoardRequireCompleteCarrierGraph =
+                typeof exports.sealed_lattice_foundation_board_require_complete_carrier_graph ===
+                'function'
+                    ? (resolveNumberExport(
+                          exports,
+                          'sealed_lattice_foundation_board_require_complete_carrier_graph',
+                      ) as NonNullable<
+                          TranscriptCoreKernelExports['sealed_lattice_foundation_board_require_complete_carrier_graph']
+                      >)
+                    : undefined;
+            const localStorageRootCommand =
+                typeof exports.sealed_lattice_local_storage_root_command ===
+                'function'
+                    ? (resolveNumberExport(
+                          exports,
+                          'sealed_lattice_local_storage_root_command',
+                      ) as NonNullable<
+                          TranscriptCoreKernelExports['sealed_lattice_local_storage_root_command']
+                      >)
+                    : undefined;
+            const stateVerifierBegin =
+                typeof exports.sealed_lattice_state_verifier_begin ===
+                'function'
+                    ? (resolveNumberExport(
+                          exports,
+                          'sealed_lattice_state_verifier_begin',
+                      ) as NonNullable<
+                          TranscriptCoreKernelExports['sealed_lattice_state_verifier_begin']
+                      >)
+                    : undefined;
+            const stateVerifierCancel =
+                typeof exports.sealed_lattice_state_verifier_cancel ===
+                'function'
+                    ? (resolveNumberExport(
+                          exports,
+                          'sealed_lattice_state_verifier_cancel',
+                      ) as NonNullable<
+                          TranscriptCoreKernelExports['sealed_lattice_state_verifier_cancel']
+                      >)
+                    : undefined;
+            const stateVerifierRelease =
+                typeof exports.sealed_lattice_state_verifier_release ===
+                'function'
+                    ? (resolveNumberExport(
+                          exports,
+                          'sealed_lattice_state_verifier_release',
+                      ) as NonNullable<
+                          TranscriptCoreKernelExports['sealed_lattice_state_verifier_release']
+                      >)
+                    : undefined;
+            const stateVerifierVerifyOutput =
+                typeof exports.sealed_lattice_state_verifier_verify_output ===
+                'function'
+                    ? (resolveNumberExport(
+                          exports,
+                          'sealed_lattice_state_verifier_verify_output',
+                      ) as NonNullable<
+                          TranscriptCoreKernelExports['sealed_lattice_state_verifier_verify_output']
+                      >)
+                    : undefined;
+            const stateVerifierVerifyRecovery =
+                typeof exports.sealed_lattice_state_verifier_verify_recovery ===
+                'function'
+                    ? (resolveNumberExport(
+                          exports,
+                          'sealed_lattice_state_verifier_verify_recovery',
+                      ) as NonNullable<
+                          TranscriptCoreKernelExports['sealed_lattice_state_verifier_verify_recovery']
+                      >)
+                    : undefined;
+            const stateVerifierVerifyReservation =
+                typeof exports.sealed_lattice_state_verifier_verify_reservation ===
+                'function'
+                    ? (resolveNumberExport(
+                          exports,
+                          'sealed_lattice_state_verifier_verify_reservation',
+                      ) as NonNullable<
+                          TranscriptCoreKernelExports['sealed_lattice_state_verifier_verify_reservation']
+                      >)
+                    : undefined;
             const transcriptCoreCommandWithLength = resolveNumberExport(
                 exports,
                 'sealed_lattice_transcript_core_command_with_length',
@@ -163,20 +378,35 @@ export const createTranscriptCoreKernelLoader = (
                 }
             };
 
-            return {
+            const kernel: TranscriptCoreKernel = {
                 exportedFunctionNames,
-                analyzeCanonicalObject: (input): TranscriptCoreAnalysis =>
-                    executeCommand<TranscriptCoreAnalysis>({
-                        command: 'AnalyzeCanonicalObject',
-                        canonicalBytesHex: input.canonicalBytesHex,
-                        chunkSize: input.chunkSize,
-                    }),
                 computeChunkRoot: (input): string =>
                     executeCommand<{ readonly chunkRoot: string }>({
                         command: 'ComputeChunkRoot',
                         inputHex: input.inputHex,
                         chunkSize: input.chunkSize,
                     }).chunkRoot,
+                computeFoundationHash512: (input): ProtocolHash =>
+                    executeCommand<{ readonly hash512: ProtocolHash }>({
+                        command: 'ComputeFoundationHash512',
+                        domain: input.domain,
+                        canonicalItemsTupleHex: input.canonicalItemsTupleHex,
+                    }).hash512,
+                deriveFoundationParticipantIdentity: (
+                    input,
+                ): ParticipantIdentity => {
+                    const response = executeCommand<{
+                        readonly participantIdentity: unknown;
+                    }>({
+                        command: 'DeriveFoundationParticipantIdentity',
+                        signingVerificationKeyHex:
+                            input.signingVerificationKeyHex,
+                    });
+
+                    return parseParticipantIdentity(
+                        response.participantIdentity,
+                    );
+                },
                 deriveCanonicalObjectHash: (input): ProtocolHash =>
                     executeCommand<{
                         readonly canonicalObjectHash: ProtocolHash;
@@ -248,11 +478,42 @@ export const createTranscriptCoreKernelLoader = (
                             }
                         }
                     }),
-                verifyFixture: (fixture): TranscriptCoreFixtureVerification =>
-                    executeCommand<TranscriptCoreFixtureVerification>({
-                        command: 'VerifyFixture',
-                        fixture,
+                validateFoundationCanonicalTuple: (
+                    input,
+                ): FoundationCanonicalTupleValidation =>
+                    executeCommand<FoundationCanonicalTupleValidation>({
+                        command: 'ValidateFoundationCanonicalTuple',
+                        canonicalTupleHex: input.canonicalTupleHex,
                     }),
+                validateFoundationSchemaObject: (
+                    input,
+                ): FoundationSchemaObjectValidation => {
+                    if (!isUint8Array(input.canonicalBytes)) {
+                        throw new TranscriptCoreKernelCommandError({
+                            code: 'InvalidProtocolObject',
+                            message:
+                                'foundation schema object must be a Uint8Array',
+                        });
+                    }
+                    if (
+                        input.canonicalBytes.byteLength >
+                        maximumFoundationSchemaObjectByteLength
+                    ) {
+                        throw new TranscriptCoreKernelCommandError({
+                            code: 'MalformedLength',
+                            message:
+                                'foundation schema object exceeds the accepted byte length',
+                        });
+                    }
+                    const canonicalBytes = new Uint8Array(
+                        input.canonicalBytes.byteLength,
+                    );
+                    canonicalBytes.set(input.canonicalBytes);
+                    return executeCommand<FoundationSchemaObjectValidation>({
+                        command: 'ValidateFoundationSchemaObject',
+                        canonicalObjectHex: bytesToHex(canonicalBytes),
+                    });
+                },
                 generateBgvTargetDecryptionShareFromLocalShare: (
                     input,
                 ): BgvTargetDecryptionShare =>
@@ -432,8 +693,6 @@ export const createTranscriptCoreKernelLoader = (
                                 input.transportedEvaluationKeyAggregateBindingOpenings,
                             transportedPublicEvaluationKeyMaterial:
                                 input.transportedPublicEvaluationKeyMaterial,
-                            verifiedSetupProofMaterials:
-                                input.verifiedSetupProofMaterials,
                         },
                     ),
                 verifyPrivateVssShareEnvelope: (
@@ -599,70 +858,6 @@ export const createTranscriptCoreKernelLoader = (
                         proofRandomnessSeedHex: input.proofRandomnessSeedHex,
                         proofRandomnessNonceHex: input.proofRandomnessNonceHex,
                     }),
-                beginSetupProofMaterialTransportStream: (
-                    input,
-                ): BgvSetupProofMaterialTransportStreamBegin =>
-                    executeCommand<BgvSetupProofMaterialTransportStreamBegin>({
-                        command: 'BeginSetupProofMaterialTransportStream',
-                        verificationId: input.verificationId,
-                        transportedSetupProofMaterial:
-                            input.transportedSetupProofMaterial,
-                    }),
-                absorbSetupProofMaterialTransportStreamChunk: (
-                    input,
-                ): BgvSetupProofMaterialTransportStreamChunkAbsorption =>
-                    executeCommand<BgvSetupProofMaterialTransportStreamChunkAbsorption>(
-                        {
-                            command:
-                                'AbsorbSetupProofMaterialTransportStreamChunk',
-                            verificationId: input.verificationId,
-                            chunkIndex: input.chunkIndex,
-                            bytesHex: input.bytesHex,
-                        },
-                    ),
-                finishSetupProofMaterialTransportStream: (
-                    input,
-                ): BgvSetupProofMaterialTransportStreamVerification =>
-                    executeCommand<BgvSetupProofMaterialTransportStreamVerification>(
-                        {
-                            command: 'FinishSetupProofMaterialTransportStream',
-                            verificationId: input.verificationId,
-                        },
-                    ),
-                beginEvaluationKeyShareComponentMaterialTransportStream: (
-                    input,
-                ): BgvEvaluationKeyShareComponentMaterialTransportStreamBegin =>
-                    executeCommand<BgvEvaluationKeyShareComponentMaterialTransportStreamBegin>(
-                        {
-                            command:
-                                'BeginEvaluationKeyShareComponentMaterialTransportStream',
-                            verificationId: input.verificationId,
-                            transportedEvaluationKeyShareComponentMaterial:
-                                input.transportedEvaluationKeyShareComponentMaterial,
-                        },
-                    ),
-                absorbEvaluationKeyShareComponentMaterialTransportStreamChunk: (
-                    input,
-                ): BgvEvaluationKeyShareComponentMaterialTransportStreamChunkAbsorption =>
-                    executeCommand<BgvEvaluationKeyShareComponentMaterialTransportStreamChunkAbsorption>(
-                        {
-                            command:
-                                'AbsorbEvaluationKeyShareComponentMaterialTransportStreamChunk',
-                            verificationId: input.verificationId,
-                            chunkIndex: input.chunkIndex,
-                            bytesHex: input.bytesHex,
-                        },
-                    ),
-                finishEvaluationKeyShareComponentMaterialTransportStream: (
-                    input,
-                ): BgvEvaluationKeyShareComponentMaterialTransportStreamVerification =>
-                    executeCommand<BgvEvaluationKeyShareComponentMaterialTransportStreamVerification>(
-                        {
-                            command:
-                                'FinishEvaluationKeyShareComponentMaterialTransportStream',
-                            verificationId: input.verificationId,
-                        },
-                    ),
                 deriveBgvTargetDecryptionResultReleaseSetupContext: (
                     input,
                 ): BgvTargetDecryptionReleaseSetupContext =>
@@ -742,27 +937,6 @@ export const createTranscriptCoreKernelLoader = (
                                 input.expectedCiphertextRoot,
                         },
                     ),
-                generateBgvCiphertextConventionFixture: (
-                    input,
-                ): BgvCiphertextConventionFixture | BgvOperationRejection =>
-                    executeCommand<
-                        BgvCiphertextConventionFixture | BgvOperationRejection
-                    >({
-                        command: 'GenerateBgvCiphertextConventionFixture',
-                        leftSlots: input.leftSlots,
-                        rightSlots: input.rightSlots,
-                        includeCanonicalBytesHex:
-                            input.includeCanonicalBytesHex,
-                    }),
-                generateBgvBaseConversionFixture: (
-                    input,
-                ): BgvBaseConversionFixture | BgvOperationRejection =>
-                    executeCommand<
-                        BgvBaseConversionFixture | BgvOperationRejection
-                    >({
-                        command: 'GenerateBgvBaseConversionFixture',
-                        slots: input.slots,
-                    }),
                 analyzeBgvCanonicalObject: (
                     input,
                 ): BgvCanonicalObjectAnalysis | BgvOperationRejection =>
@@ -773,6 +947,80 @@ export const createTranscriptCoreKernelLoader = (
                         canonicalBytesHex: input.canonicalBytesHex,
                     }),
             };
+            if (
+                canonicalStreamAbsorbChunk !== undefined &&
+                canonicalStreamBeginVerifier !== undefined &&
+                canonicalStreamBeginWriter !== undefined &&
+                canonicalStreamCancel !== undefined &&
+                canonicalStreamFinishVerifier !== undefined &&
+                canonicalStreamFinishWriter !== undefined
+            ) {
+                registerCanonicalStreamKernelContext(kernel, {
+                    absorbChunk: canonicalStreamAbsorbChunk,
+                    allocate,
+                    bgvAbsorbChunk: bgvCanonicalStreamAbsorbChunk,
+                    bgvBegin: bgvCanonicalStreamBegin,
+                    bgvCancel: bgvCanonicalStreamCancel,
+                    bgvFinish: bgvCanonicalStreamFinish,
+                    beginVerifier: canonicalStreamBeginVerifier,
+                    beginWriter: canonicalStreamBeginWriter,
+                    cancel: canonicalStreamCancel,
+                    deallocate,
+                    finishVerifier: canonicalStreamFinishVerifier,
+                    finishWriter: canonicalStreamFinishWriter,
+                    memory,
+                    runExclusive: runExclusiveKernelOperation,
+                });
+            }
+            if (localStorageRootCommand !== undefined) {
+                registerLocalStorageRootKernelContext(kernel, {
+                    allocate,
+                    command: localStorageRootCommand,
+                    deallocate,
+                    memory,
+                    runExclusive: runExclusiveKernelOperation,
+                });
+            }
+            if (
+                foundationBoardBegin !== undefined &&
+                foundationBoardCancel !== undefined &&
+                foundationBoardIngest !== undefined &&
+                foundationBoardRequireCompleteCarrierGraph !== undefined
+            ) {
+                registerFoundationBoardKernelContext(kernel, {
+                    allocate,
+                    begin: foundationBoardBegin,
+                    cancel: foundationBoardCancel,
+                    deallocate,
+                    ingest: foundationBoardIngest,
+                    memory,
+                    requireCompleteCarrierGraph:
+                        foundationBoardRequireCompleteCarrierGraph,
+                    runExclusive: runExclusiveKernelOperation,
+                });
+            }
+            if (
+                stateVerifierBegin !== undefined &&
+                stateVerifierCancel !== undefined &&
+                stateVerifierRelease !== undefined &&
+                stateVerifierVerifyOutput !== undefined &&
+                stateVerifierVerifyRecovery !== undefined &&
+                stateVerifierVerifyReservation !== undefined
+            ) {
+                registerStateVerifierKernelContext(kernel, {
+                    allocate,
+                    begin: stateVerifierBegin,
+                    cancel: stateVerifierCancel,
+                    deallocate,
+                    memory,
+                    release: stateVerifierRelease,
+                    runExclusive: runExclusiveKernelOperation,
+                    verifyOutput: stateVerifierVerifyOutput,
+                    verifyRecovery: stateVerifierVerifyRecovery,
+                    verifyReservation: stateVerifierVerifyReservation,
+                });
+            }
+            return kernel;
         })().catch((error: unknown) => {
             // Clear the cached promise on failure so a later call can retry
             // instantiation instead of permanently re-throwing the cached rejection.

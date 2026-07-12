@@ -969,7 +969,7 @@ pub(super) fn verify_abort_absence(setup_package: &Value) -> CanonicalResult<Opt
             Vec::new(),
             vec![Refusal::new(
                 "abortRecordPresent",
-                "an abort record prevents first-roster setup acceptance",
+                "an abort record prevents foundation-roster setup acceptance",
                 "setupPackage.abortRecords".to_string(),
             )],
             Vec::new(),

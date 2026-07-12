@@ -18,7 +18,6 @@ import {
     assertLowercaseHexBytes,
     assertNonEmptyString,
     assertNonNegativeSafeInteger,
-    assertPositiveSafeInteger,
     assertProtocolHash,
     assertContextMatches,
     contextFields,
@@ -331,36 +330,6 @@ const validatePublicKeyShareSuccinctProofMaterial = (
         transportedMaterial.proofMaterialRoot,
         `${fieldName}.proofMaterialRoot`,
     );
-    assertPositiveSafeInteger(
-        transportedMaterial.proofChunkCount,
-        `${fieldName}.proofChunkCount`,
-    );
-    assertPositiveSafeInteger(
-        transportedMaterial.proofTotalByteLength,
-        `${fieldName}.proofTotalByteLength`,
-    );
-    assertProtocolHash(
-        transportedMaterial.proofFullObjectHash,
-        `${fieldName}.proofFullObjectHash`,
-    );
-    assertProtocolHash(
-        transportedMaterial.proofChunkRoot,
-        `${fieldName}.proofChunkRoot`,
-    );
-    transportedMaterial.proofChunkHashes.forEach((proofChunkHash, chunkIndex) =>
-        assertProtocolHash(
-            proofChunkHash,
-            `${fieldName}.proofChunkHashes.${String(chunkIndex)}`,
-        ),
-    );
-    if (
-        transportedMaterial.proofChunkHashes.length !==
-        transportedMaterial.proofChunkCount
-    ) {
-        throw new Error(
-            `${fieldName}.proofChunkHashes must match proofChunkCount.`,
-        );
-    }
 };
 
 const publicKeyShareSuccinctProofByteMaterial = (
@@ -384,11 +353,6 @@ const publicKeyShareSuccinctProofByteMaterial = (
     return {
         proofBytesEncoding: transportedMaterial.proofBytesEncoding,
         proofMaterialRoot: transportedMaterial.proofMaterialRoot,
-        proofChunkCount: transportedMaterial.proofChunkCount,
-        proofTotalByteLength: transportedMaterial.proofTotalByteLength,
-        proofFullObjectHash: transportedMaterial.proofFullObjectHash,
-        proofChunkRoot: transportedMaterial.proofChunkRoot,
-        proofChunkHashes: transportedMaterial.proofChunkHashes,
     };
 };
 

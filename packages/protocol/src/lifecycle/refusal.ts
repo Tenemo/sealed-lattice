@@ -1,7 +1,7 @@
 import type {
     CapabilityDecision,
+    LifecycleRefusalReason,
     ProtocolAction,
-    RefusalReason,
 } from '@sealed-lattice/types';
 
 export const allowAction = (action: ProtocolAction): CapabilityDecision => ({
@@ -11,7 +11,7 @@ export const allowAction = (action: ProtocolAction): CapabilityDecision => ({
 
 export const refuseAction = (
     action: ProtocolAction,
-    reason: RefusalReason,
+    reason: LifecycleRefusalReason,
 ): CapabilityDecision => ({
     allowed: false,
     action,

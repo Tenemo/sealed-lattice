@@ -270,24 +270,14 @@ pub(super) fn same_secret_bridge_proof_generation_request(
     let ring_degree = statement_record["ringDegree"]
         .as_u64()
         .expect("bridge ring degree") as usize;
-    // Committed-material regeneration inputs in bound-commitment order: the
-    // bridge binds its target-constant commitments in target order. Context
-    // hashes are read off the published commitments; the private seeds derive
-    // from them. The committed-material targets carry no algebraic opening
-    // randomness.
-    let bound_material_context_hashes = target_commitments
-        .iter()
-        .map(|commitment_record| {
-            commitment_record["commitment"]["commitmentContextHash"]
-                .as_str()
-                .expect("bridge target commitment context hash")
-                .to_string()
-        })
-        .collect::<Vec<_>>();
-    let bound_material_seeds = bound_material_context_hashes
-        .iter()
-        .map(|context_hash| super::accepted_vss_material_seed(context_hash))
-        .collect::<Vec<_>>();
+    // Committed-material regeneration inputs follow the same target-commitment
+    // order bound by every terminal proof statement that consumes this bridge.
+    let super::SameSecretBridgeCommittedMaterialRegenerationInputs {
+        seeds_by_bound_message: bound_material_seeds,
+        context_hashes_by_bound_message: bound_material_context_hashes,
+    } = super::same_secret_bridge_committed_material_regeneration_inputs_from_statement_record(
+        statement_record,
+    );
     let secret_coefficients = (0..ring_degree)
         .map(|coefficient_position| {
             accepted_vss_secret_coefficient_fixture(
@@ -424,15 +414,15 @@ fn vss_public_material_fixture_verifies_generated_fields() {
     )
     .expect("generated VSS public material verifies");
 
-    assert_eq!(verification["ok"], serde_json::json!(true));
-    assert!(
-        verification["proofMaterialSetRoot"].is_string(),
-        "generated VSS proof material set must bind a root"
+    assert_eq!(
+        verification["proofMaterialSetRoot"],
+        package["vssShareLinkageProofMaterialSet"]["proofMaterialSetRoot"],
+        "generated VSS verification must recompute the proof material set root"
     );
 
     // The same-secret bridge proves the canonical full source VSS commitment
     // set and the target-basis committed material share one signed ternary
-    // secret. Exercise both public bridge objects through the same kernel
+    // secret. Verify both public bridge objects through the same kernel
     // verifier used by accepted setup.
     package["sameSecretBridgeStatementSet"] = same_secret_bridge_statement_set_object(&package);
     package["sameSecretBridgeProofMaterialSet"] =
@@ -446,13 +436,21 @@ fn vss_public_material_fixture_verifies_generated_fields() {
     let bridge_statement_verification =
         crate::bgv::setup::verify_vss_same_secret_bridge_statement_set_request(&bridge_request)
             .expect("generated same-secret bridge statement set verifies");
-    assert_eq!(bridge_statement_verification["ok"], serde_json::json!(true));
+    assert_eq!(
+        bridge_statement_verification["sameSecretBridgeStatementSetRoot"],
+        package["sameSecretBridgeStatementSet"]["sameSecretBridgeStatementSetRoot"],
+        "generated bridge statement verification must recompute the statement set root"
+    );
     let bridge_proof_verification =
         crate::bgv::setup::verify_vss_same_secret_bridge_proof_material_set_request(
             &bridge_request,
         )
         .expect("generated same-secret bridge proof material set verifies");
-    assert_eq!(bridge_proof_verification["ok"], serde_json::json!(true));
+    assert_eq!(
+        bridge_proof_verification["proofMaterialSetRoot"],
+        package["sameSecretBridgeProofMaterialSet"]["proofMaterialSetRoot"],
+        "generated bridge proof verification must recompute the proof material set root"
+    );
 
     // Replacing a target body and all of its dependent roots creates a
     // self-consistent alternate bridge package. It must still refuse while

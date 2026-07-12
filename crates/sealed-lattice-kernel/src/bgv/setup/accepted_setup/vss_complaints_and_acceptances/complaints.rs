@@ -136,7 +136,7 @@ pub(in super::super) fn verify_vss_complaints(
         Vec::new(),
         vec![Refusal::new(
             "vssComplaintAcceptedAbort",
-            "a valid VSS complaint aborts the first-roster setup ceremony",
+            "a valid VSS complaint aborts the foundation-roster setup ceremony",
             "setupPackage.vssComplaints",
         )],
         Vec::new(),

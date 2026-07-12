@@ -160,24 +160,24 @@ pub(in super::super) fn evaluation_key_error_coefficients_for_fixture(
     digit_index: usize,
     ring_degree: usize,
 ) -> Vec<i64> {
-    // Roster positions below the n = 10 first-closure roster use a
+    // Roster positions below the fixed n = 10 foundation roster use a
     // position-independent error (a multiplier of 5 vanishes mod 5), so that
-    // closure stays byte-identical. The base error aliases with period 5 in the
+    // foundation fixture stays byte-identical. The base error aliases with period 5 in the
     // roster position and the fixture secret aliases with period 3, so a trustee's
     // key-switch component repeats every LCM(3, 5) = 15 roster positions. Within
     // n = 10 no two positions are 15 apart, but across the 3..20 supported range
     // positions (0, 15), (1, 16), ... would emit byte-identical component material
     // and alias in the setup transport certificate's aggregate chunk hashes.
-    // Positions at or beyond the first closure use a position-dependent error
+    // Positions at or beyond the foundation roster use a position-dependent error
     // (multiplier coprime to 5): a position-varying error can never equal a
-    // first-closure position-constant one, and within the higher positions the
+    // foundation position-constant one, and within the higher positions the
     // period-15 partners all fall outside the supported range, so every supported
     // roster carries pairwise-distinct component material. The error stays in the
     // centered {-2..2} range, so the key-switch noise bound is unchanged.
-    // FIRST_CLOSURE_ROSTER_SIZE mirrors package_fixtures' pinned first-closure
+    // FOUNDATION_ROSTER_SIZE mirrors package_fixtures' pinned foundation
     // participant count.
-    const FIRST_CLOSURE_ROSTER_SIZE: u64 = 10;
-    let position_multiplier = if trustee_roster_position < FIRST_CLOSURE_ROSTER_SIZE {
+    const FOUNDATION_ROSTER_SIZE: u64 = 10;
+    let position_multiplier = if trustee_roster_position < FOUNDATION_ROSTER_SIZE {
         5
     } else {
         1

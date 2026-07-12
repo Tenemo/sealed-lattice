@@ -2,7 +2,6 @@ import { deriveCanonicalObjectHash, hash512Hex } from '@sealed-lattice/crypto';
 
 import {
     setupProofMaterialRecordTransportFields,
-    setupProofMaterialReferenceFields,
     setupProofMaterialTransportChunks,
     setupProofMaterialTransportMetadata,
 } from '../setup-proof-material-transport.js';
@@ -48,7 +47,17 @@ import {
     validateCommonInput,
 } from './share-records.js';
 
-// The ordered chunk hex records for one transported component material: either
+const componentMaterialChunkBytes = (
+    value: unknown,
+    fieldPath: string,
+): ArrayBuffer => {
+    if (Object.prototype.toString.call(value) !== '[object ArrayBuffer]') {
+        throw new TypeError(`${fieldPath} must be an ArrayBuffer.`);
+    }
+    return value as ArrayBuffer;
+};
+
+// The ordered binary chunk records for one transported component material: either
 // embedded inline on the component material (the additive inline path) or
 // carried out of band in the parallel chunk streams keyed by
 // keySwitchComponentMaterialRoot (the streamed path the terminal verify uses).
@@ -79,10 +88,9 @@ const componentMaterialChunkRecords = (
                     chunk.chunkIndex,
                     `componentMaterial.chunks.${String(chunkIndex)}.chunkIndex`,
                 ),
-                bytesHex: stringRecordField(
-                    chunk,
-                    'bytesHex',
-                    `componentMaterial.chunks.${String(chunkIndex)}`,
+                bytes: componentMaterialChunkBytes(
+                    chunk.bytes,
+                    `componentMaterial.chunks.${String(chunkIndex)}.bytes`,
                 ),
             };
         });
@@ -288,10 +296,7 @@ const componentBVectorsFromMaterial = (
             );
         }
 
-        return bytesFromHex(
-            chunk.bytesHex,
-            'componentMaterial.chunks.bytesHex',
-        );
+        return new Uint8Array(chunk.bytes);
     });
     const totalByteLength = materialBytesParts.reduce(
         (byteLength, part) => byteLength + part.byteLength,
@@ -1008,7 +1013,6 @@ export const transportTrusteeEvaluationKeyProofSet = (
             );
         }
         const proofMaterialTransport = setupProofMaterialTransportMetadata(
-            trusteeEvaluationKeyProofFamily,
             proofBytes,
             'proofRecords.proofBytesHex must produce at least one transported chunk.',
         );
@@ -1019,13 +1023,11 @@ export const transportTrusteeEvaluationKeyProofSet = (
             trusteeRosterPosition: proofRecord.trusteeRosterPosition,
             statementHash: proofRecord.statementHash,
             proofBytesHash: proofRecord.proofBytesHash,
-            ...setupProofMaterialReferenceFields(proofMaterialTransport),
         });
         transportedProofMaterials.push({
             objectType: evaluationKeyShareProofTransportObjectType,
             proofFamily: trusteeEvaluationKeyProofFamily,
             ...setupProofMaterialRecordTransportFields(
-                proofMaterialTransport,
                 proofMaterialRoot,
                 setupProofMaterialTransportEncoding,
             ),
@@ -1034,7 +1036,6 @@ export const transportTrusteeEvaluationKeyProofSet = (
         const transportedRecordWithoutRoot = {
             ...recordFields,
             ...setupProofMaterialRecordTransportFields(
-                proofMaterialTransport,
                 proofMaterialRoot,
                 setupProofMaterialTransportEncoding,
             ),

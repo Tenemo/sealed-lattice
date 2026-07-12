@@ -14,3 +14,8 @@ mod serialization;
 mod setup;
 mod setup_helpers;
 mod validation;
+
+pub(crate) use setup::{
+    absorb_bgv_canonical_stream_chunk, begin_bgv_canonical_stream, cancel_bgv_canonical_stream,
+    finish_bgv_canonical_stream,
+};

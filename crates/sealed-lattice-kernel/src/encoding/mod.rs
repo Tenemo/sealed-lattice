@@ -1,17 +1,19 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use std::io::{self, Write};
 
 use crate::{
-    fixtures::{TranscriptCoreFixture, verify_fixture},
     hashing::{chunk_root, hash512_hex},
     ring::{
         MAXIMUM_SHAMIR_INTERPOLATION_POINTS, ShamirSharePoint, evaluate_plaintext_comparison,
         interpolate_shamir_constant_term,
     },
-    transcript_core::analyze_canonical_object_hex,
 };
 
 mod command;
+mod json_ingress;
+
+const MAXIMUM_TRANSCRIPT_CORE_COMMAND_RESPONSE_BYTE_LENGTH: usize = 256 * 1024 * 1024;
 
 #[cfg(test)]
 use command::run_transcript_core_command_inner;
@@ -170,10 +172,6 @@ impl<'a> CanonicalReader<'a> {
         Self { bytes, offset: 0 }
     }
 
-    pub fn remaining_len(&self) -> usize {
-        self.bytes.len().saturating_sub(self.offset)
-    }
-
     pub fn is_finished(&self) -> bool {
         self.offset == self.bytes.len()
     }
@@ -261,20 +259,93 @@ impl<'a> CanonicalReader<'a> {
     }
 }
 
+struct BoundedJsonWriter {
+    bytes: Vec<u8>,
+    maximum_byte_length: usize,
+    limit_exceeded: bool,
+}
+
+impl BoundedJsonWriter {
+    fn new(maximum_byte_length: usize) -> Self {
+        Self {
+            bytes: Vec::new(),
+            maximum_byte_length,
+            limit_exceeded: false,
+        }
+    }
+}
+
+impl Write for BoundedJsonWriter {
+    fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+        let required_byte_length = self
+            .bytes
+            .len()
+            .checked_add(buffer.len())
+            .ok_or_else(|| io::Error::other("command response byte length overflows usize"))?;
+        if required_byte_length > self.maximum_byte_length {
+            self.limit_exceeded = true;
+            return Err(io::Error::other(
+                "command response exceeds the accepted byte length",
+            ));
+        }
+        if required_byte_length > self.bytes.capacity() {
+            self.bytes
+                .try_reserve_exact(buffer.len())
+                .map_err(|_| io::Error::other("command response allocation failed"))?;
+        }
+        self.bytes.extend_from_slice(buffer);
+        Ok(buffer.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+fn encode_json_response_with_limit(
+    response: &Value,
+    maximum_byte_length: usize,
+) -> CanonicalResult<Vec<u8>> {
+    let mut writer = BoundedJsonWriter::new(maximum_byte_length);
+    if let Err(error) = serde_json::to_writer(&mut writer, response) {
+        let (code, message) = if writer.limit_exceeded {
+            (
+                CanonicalErrorCode::MalformedLength,
+                "command response exceeds the accepted byte length".to_owned(),
+            )
+        } else {
+            (
+                CanonicalErrorCode::InvalidProtocolObject,
+                format!("command response serialization failed: {error}"),
+            )
+        };
+        return Err(CanonicalError::new(code, message));
+    }
+    Ok(writer.bytes)
+}
+
 pub fn encode_success(value: Value) -> Vec<u8> {
-    serde_json::to_vec(&json!({
+    let response = json!({
         "success": true,
         "value": value,
-    }))
-    .expect("serializing command success response should not fail")
+    });
+    encode_json_response_with_limit(
+        &response,
+        MAXIMUM_TRANSCRIPT_CORE_COMMAND_RESPONSE_BYTE_LENGTH,
+    )
+    .unwrap_or_else(encode_error)
 }
 
 pub fn encode_error(error: CanonicalError) -> Vec<u8> {
-    serde_json::to_vec(&json!({
+    let response = json!({
         "success": false,
         "error": error.to_json_value(),
-    }))
-    .expect("serializing command error response should not fail")
+    });
+    encode_json_response_with_limit(
+        &response,
+        MAXIMUM_TRANSCRIPT_CORE_COMMAND_RESPONSE_BYTE_LENGTH,
+    )
+    .expect("serializing a bounded command error response should not fail")
 }
 
 pub fn run_transcript_core_command(input: &[u8]) -> Vec<u8> {
@@ -289,8 +360,27 @@ pub fn run_transcript_core_command(input: &[u8]) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::{
-        CanonicalErrorCode, CanonicalReader, append_varuint, encode_error, encode_varuint,
+        CanonicalErrorCode, CanonicalReader, append_varuint, encode_error,
+        encode_json_response_with_limit, encode_varuint,
     };
+    use crate::foundation::{
+        CanonicalDecodeLimits, CanonicalItem, CanonicalTuple, FOUNDATION_PROFILE, ProofObjectHeader,
+    };
+
+    fn foundation_item_tuple_bytes() -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&0x0001_u16.to_le_bytes());
+        bytes.extend_from_slice(&1_u16.to_le_bytes());
+        bytes.extend_from_slice(&2_u32.to_le_bytes());
+        bytes.extend_from_slice(&0x03_u16.to_le_bytes());
+        bytes.extend_from_slice(&2_u32.to_le_bytes());
+        bytes.extend_from_slice(&0x0201_u16.to_le_bytes());
+        bytes.extend_from_slice(&0x01_u16.to_le_bytes());
+        bytes.extend_from_slice(&7_u32.to_le_bytes());
+        bytes.extend_from_slice(&3_u32.to_le_bytes());
+        bytes.extend_from_slice(&[7, 8, 9]);
+        bytes
+    }
 
     #[test]
     fn varuint_round_trips_boundary_values() {
@@ -311,6 +401,23 @@ mod tests {
             .expect_err("redundant varuint should fail");
 
         assert_eq!(error.code, CanonicalErrorCode::NonCanonicalVarUint);
+    }
+
+    #[test]
+    fn response_serialization_accepts_the_exact_boundary_and_refuses_one_byte_over() {
+        let response = serde_json::json!({
+            "success": true,
+            "value": { "payload": "bounded response" },
+        });
+        let expected = serde_json::to_vec(&response).expect("test response serializes");
+        assert_eq!(
+            encode_json_response_with_limit(&response, expected.len())
+                .expect("the exact response boundary must serialize"),
+            expected
+        );
+        let error = encode_json_response_with_limit(&response, expected.len() - 1)
+            .expect_err("one byte over the response limit must refuse");
+        assert_eq!(error.code, CanonicalErrorCode::MalformedLength);
     }
 
     #[test]
@@ -404,5 +511,174 @@ mod tests {
         assert_eq!(response["greaterThan"], 1);
         assert_eq!(response["equal"], 0);
         assert_eq!(response["scoreDifference"], 1);
+    }
+
+    #[test]
+    fn command_validates_and_hashes_foundation_canonical_items() {
+        let tuple_bytes = foundation_item_tuple_bytes();
+        let tuple_hex = crate::transcript_core::encode_hex(&tuple_bytes);
+        let validation = super::run_transcript_core_command_inner(
+            serde_json::json!({
+                "command": "ValidateFoundationCanonicalTuple",
+                "canonicalTupleHex": tuple_hex,
+            })
+            .to_string()
+            .as_bytes(),
+        )
+        .expect("foundation tuple should validate");
+        assert_eq!(validation["schemaIdentifier"], 1);
+        assert_eq!(validation["schemaVersion"], 1);
+        assert_eq!(validation["itemCount"], 2);
+        assert_eq!(validation["canonicalTupleHex"], tuple_hex);
+
+        let hash = super::run_transcript_core_command_inner(
+            serde_json::json!({
+                "command": "ComputeFoundationHash512",
+                "domain": "sealed-lattice/test/hash/v1",
+                "canonicalItemsTupleHex": tuple_hex,
+            })
+            .to_string()
+            .as_bytes(),
+        )
+        .expect("foundation hash should derive");
+        assert_eq!(
+            hash["hash512"]
+                .as_str()
+                .expect("foundation hash should be a string")
+                .len(),
+            128
+        );
+    }
+
+    #[test]
+    fn command_refuses_trailing_and_hostile_foundation_tuple_lengths() {
+        let mut trailing_bytes = foundation_item_tuple_bytes();
+        trailing_bytes.push(0);
+        let trailing_error = super::run_transcript_core_command_inner(
+            serde_json::json!({
+                "command": "ValidateFoundationCanonicalTuple",
+                "canonicalTupleHex": crate::transcript_core::encode_hex(&trailing_bytes),
+            })
+            .to_string()
+            .as_bytes(),
+        )
+        .expect_err("trailing bytes must refuse");
+        assert_eq!(trailing_error.code, CanonicalErrorCode::TrailingBytes);
+
+        let mut hostile_count = Vec::new();
+        hostile_count.extend_from_slice(&0x0001_u16.to_le_bytes());
+        hostile_count.extend_from_slice(&1_u16.to_le_bytes());
+        hostile_count.extend_from_slice(&u32::MAX.to_le_bytes());
+        let count_error = super::run_transcript_core_command_inner(
+            serde_json::json!({
+                "command": "ValidateFoundationCanonicalTuple",
+                "canonicalTupleHex": crate::transcript_core::encode_hex(&hostile_count),
+            })
+            .to_string()
+            .as_bytes(),
+        )
+        .expect_err("hostile item count must refuse before allocation");
+        assert_eq!(count_error.code, CanonicalErrorCode::MalformedLength);
+
+        let mut hostile_item_length = Vec::new();
+        hostile_item_length.extend_from_slice(&0x0001_u16.to_le_bytes());
+        hostile_item_length.extend_from_slice(&1_u16.to_le_bytes());
+        hostile_item_length.extend_from_slice(&1_u32.to_le_bytes());
+        hostile_item_length.extend_from_slice(&0x01_u16.to_le_bytes());
+        hostile_item_length.extend_from_slice(&u32::MAX.to_le_bytes());
+        let length_error = super::run_transcript_core_command_inner(
+            serde_json::json!({
+                "command": "ValidateFoundationCanonicalTuple",
+                "canonicalTupleHex": crate::transcript_core::encode_hex(&hostile_item_length),
+            })
+            .to_string()
+            .as_bytes(),
+        )
+        .expect_err("hostile item length must refuse before allocation");
+        assert_eq!(length_error.code, CanonicalErrorCode::MalformedLength);
+    }
+
+    #[test]
+    fn schema_object_command_accepts_the_copy_boundary_and_refuses_one_byte_over() {
+        const PROOF_HEADER_AND_INNER_TUPLE_OVERHEAD_BYTE_LENGTH: usize = 32;
+
+        let maximum_byte_length = FOUNDATION_PROFILE.maximum_copied_buffer_byte_length;
+        let inner_payload_byte_length = maximum_byte_length
+            .checked_sub(PROOF_HEADER_AND_INNER_TUPLE_OVERHEAD_BYTE_LENGTH)
+            .expect("foundation copy boundary holds the canonical framing");
+        let canonical_application_statement = CanonicalTuple::new(
+            0x7fff,
+            1,
+            vec![
+                CanonicalItem::fixed_bytes(vec![0x5a; inner_payload_byte_length])
+                    .expect("boundary payload fits the canonical item limit"),
+            ],
+        )
+        .encode()
+        .expect("boundary application statement encodes");
+        let canonical_object = ProofObjectHeader {
+            canonical_application_statement,
+        }
+        .encode(&CanonicalDecodeLimits::default())
+        .expect("boundary proof header encodes");
+        assert_eq!(canonical_object.len(), maximum_byte_length);
+
+        let validation = super::run_transcript_core_command_inner(
+            serde_json::json!({
+                "command": "ValidateFoundationSchemaObject",
+                "canonicalObjectHex": crate::transcript_core::encode_hex(&canonical_object),
+            })
+            .to_string()
+            .as_bytes(),
+        )
+        .expect("the exact foundation copy boundary must validate");
+        assert_eq!(validation["canonicalByteLength"], maximum_byte_length);
+
+        let mut one_byte_over = canonical_object;
+        one_byte_over.push(0);
+        let error = super::run_transcript_core_command_inner(
+            serde_json::json!({
+                "command": "ValidateFoundationSchemaObject",
+                "canonicalObjectHex": crate::transcript_core::encode_hex(&one_byte_over),
+            })
+            .to_string()
+            .as_bytes(),
+        )
+        .expect_err("one byte over the foundation copy boundary must refuse before decoding");
+        assert_eq!(error.code, CanonicalErrorCode::MalformedLength);
+    }
+
+    #[test]
+    fn command_derives_identity_only_from_an_exact_ml_dsa_key() {
+        let signing_verification_key_hex = "00".repeat(1_952);
+        let identity = super::run_transcript_core_command_inner(
+            serde_json::json!({
+                "command": "DeriveFoundationParticipantIdentity",
+                "signingVerificationKeyHex": signing_verification_key_hex,
+            })
+            .to_string()
+            .as_bytes(),
+        )
+        .expect("an exact ML-DSA-65 key should derive an identity");
+        assert_eq!(
+            identity["participantIdentity"]
+                .as_str()
+                .expect("participant identity should be a string")
+                .len(),
+            128
+        );
+
+        for invalid_byte_length in [0, 1_951, 1_953] {
+            let error = super::run_transcript_core_command_inner(
+                serde_json::json!({
+                    "command": "DeriveFoundationParticipantIdentity",
+                    "signingVerificationKeyHex": "00".repeat(invalid_byte_length),
+                })
+                .to_string()
+                .as_bytes(),
+            )
+            .expect_err("an inexact ML-DSA-65 key length must refuse");
+            assert_eq!(error.code, CanonicalErrorCode::MalformedLength);
+        }
     }
 }

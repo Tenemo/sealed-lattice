@@ -29,10 +29,6 @@ export const deriveBoardEntryHash = (
         includedObjectType: entry.includedObjectType,
     });
 
-// The structured Merkle-tree model (leaf/branch/root variants below) and the
-// flat boardEntryHashes-list model (deriveBoardEntryListRootHash) are kept
-// disjoint by their distinct `objectType` discriminators under the shared
-// canonical-object hash domain.
 export const deriveBoardLeafNodeHash = (
     boardPosition: number,
     boardEntryHash: ProtocolHash,
@@ -83,16 +79,6 @@ const deriveNextBoardMerkleLevel = (
 
     return nextLevelHashes;
 };
-
-// Flat board-root model: hashes the whole boardEntryHashes list directly. Its
-// `objectType` discriminator keeps it disjoint from the structured tree model.
-export const deriveBoardEntryListRootHash = (
-    boardEntryHashes: readonly ProtocolHash[],
-): ProtocolHash =>
-    deriveCanonicalObjectHash({
-        objectType: 'BoardEntryListRoot',
-        boardEntryHashes,
-    });
 
 export const deriveBoardRootHash = (
     boardEntryHashes: readonly ProtocolHash[],
@@ -171,12 +157,6 @@ export const deriveBoardHeadHash = (head: SignedBoardHead): ProtocolHash =>
         previousHeadHash: head.previousHeadHash,
     });
 
-export const inclusionProofUsesMerklePath = (
-    inclusionProof: Omit<InclusionProof, 'inclusionProofHash'>,
-): boolean =>
-    inclusionProof.boardEntryCount !== undefined ||
-    inclusionProof.boardEntryMerklePath !== undefined;
-
 const isBoardEntryMerklePathStep = (
     value: unknown,
 ): value is BoardEntryMerklePathStep => {
@@ -210,19 +190,11 @@ export const deriveInclusionProofHash = (
         includedObjectType: inclusionProof.includedObjectType,
     };
 
-    return deriveCanonicalObjectHash(
-        inclusionProofUsesMerklePath(inclusionProof)
-            ? {
-                  ...sharedPayload,
-                  boardEntryCount: inclusionProof.boardEntryCount ?? null,
-                  boardEntryMerklePath:
-                      inclusionProof.boardEntryMerklePath ?? [],
-              }
-            : {
-                  ...sharedPayload,
-                  boardEntryHashes: inclusionProof.boardEntryHashes ?? [],
-              },
-    );
+    return deriveCanonicalObjectHash({
+        ...sharedPayload,
+        boardEntryCount: inclusionProof.boardEntryCount,
+        boardEntryMerklePath: inclusionProof.boardEntryMerklePath,
+    });
 };
 
 export const deriveConflictingHeadEvidenceHash = (

@@ -20,10 +20,11 @@ use self::package_fixtures::{
 use self::proof_record_fixtures::{
     collective_public_key_object, compact_aggregate_threshold_proof_fixture,
     evaluation_key_aggregate_binding_object, finalize_collective_setup_package,
-    galois_key_share_batches_object, public_evaluation_key_set_object_with_aggregate_binding,
-    public_key_share_material_object, public_key_share_succinct_proofs_object,
-    relinearization_key_share_rounds_fixture, replace_public_key_share_hashes_with_material_hashes,
-    source_constant_commitments_from_fixture_package, trustee_evaluation_key_proofs_object,
+    galois_key_share_batches_object,
+    public_coefficient_commitment_ring_degree_from_fixture_package,
+    public_evaluation_key_set_object_with_aggregate_binding, public_key_share_material_object,
+    public_key_share_succinct_proofs_object, relinearization_key_share_rounds_fixture,
+    replace_public_key_share_hashes_with_material_hashes, trustee_evaluation_key_proofs_object,
 };
 use self::record_rebinding::{
     private_vss_envelope_commitment_record_root_input,
@@ -174,7 +175,7 @@ fn assert_collective_setup_package_refused_without_handoff(
 // outer package hash, and asserts the verifier refuses with the expected reason
 // code. This captures the "mutate one field, expect a specific refusal" shape
 // shared by the fast accepted-setup rejection tests while keeping each case a
-// distinct, individually labeled mutation closure.
+// distinct, individually labeled mutation case.
 fn assert_minimal_collective_setup_package_refused(
     case_label: &str,
     mutate: impl FnOnce(&mut serde_json::Value),

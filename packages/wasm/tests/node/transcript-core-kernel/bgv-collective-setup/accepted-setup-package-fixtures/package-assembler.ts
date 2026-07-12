@@ -1,9 +1,7 @@
 import { setupRequest } from '../../bgv-passive-setup-fixtures.js';
 import {
-    bytesToHex,
     cloneJsonRecord,
     collectiveSetupRosterHash,
-    hexToBytes,
     privateVssMailboxKeyPairForRosterPosition,
     privateVssMailboxPublicKeyBytesHash,
     setupTrusteeSignatureSeedLabel,
@@ -43,18 +41,17 @@ import {
     createSetupPhaseRecord,
 } from '#packages/protocol/src/setup/setup-phase-records';
 import {
-    setupProofTransportChunkSizeBytes,
-    type VerifiedSetupProofMaterial,
-    type VerifiedSetupProofMaterialSet,
-} from '#packages/protocol/src/setup/setup-proof-material-transport';
-import {
     type CollectiveBgvSetupContext,
     type ProtocolRootSigner,
 } from '#packages/protocol/src/setup/vss-share-verification-records';
-import { loadFreshTranscriptCoreKernel } from '#packages/wasm/src/index';
-import type {
+import {
+    bgvCanonicalStreamFamilies,
+    loadFreshTranscriptCoreKernel,
+    openBgvCanonicalStreamRuntime,
+    type BgvCanonicalStreamFamily,
+    type BgvCanonicalStreamRuntime,
     BgvCollectiveSetupParametersDescription,
-    TranscriptCoreKernel,
+    type TranscriptCoreKernel,
 } from '#packages/wasm/src/index';
 import type {
     BgvCollectiveSetupTransportCompanions,
@@ -91,7 +88,7 @@ type CompactTransportedProofMaterialSet<
         BgvTransportedSetupProofMaterialSet,
 > = {
     readonly chunklessSet: MaterialSet;
-    readonly materialBytes: readonly Uint8Array[];
+    readonly materialChunks: readonly (readonly ArrayBuffer[])[];
 };
 
 type AcceptedShapedSetupPackageFixture = {
@@ -105,16 +102,8 @@ export type AcceptedShapedSetupVerificationCompanions = Required<
         BgvCollectiveSetupTransportCompanions,
         | 'transportedVssShareLinkageProofMaterial'
         | 'transportedSameSecretBridgeProofMaterial'
-        | 'verifiedSetupProofMaterials'
     >
 >;
-
-// A per-process sequence prefix keeps every streamed verificationId unique
-// across companions calls, mirroring the SDK's counter in
-// setup-verification-input.ts, so a fresh stream never collides with a prior
-// call's handle (which the kernel evicts once its verify returns) or with a
-// session a mid-stream failure wedged.
-let setupProofMaterialFixtureVerificationSequence = 0;
 
 function acceptedShapedSetupPackageCacheKey(
     kernel: TranscriptCoreKernel,
@@ -128,11 +117,8 @@ function acceptedShapedSetupPackageCacheKey(
     ].join('|');
 }
 
-// Decode a transport builder's chunked material set into the compact cached
-// form: each material's chunk hex is concatenated once into a single Uint8Array,
-// and the chunkless transported reference (metadata only) is kept for streaming
-// and for the verification input. Every material is streamed and verified, so
-// the chunkless reference is always safe to reuse directly as verification input.
+// Keep the transport builder's canonical binary windows separate so the
+// fixture never creates a second contiguous copy of a large proof object.
 const compactTransportedProofMaterialSet = <
     MaterialSet extends BgvTransportedSetupProofMaterialSet,
 >(
@@ -144,7 +130,7 @@ const compactTransportedProofMaterialSet = <
             'transported proof material set proofMaterials must be an array.',
         );
     }
-    const materialBytes: Uint8Array[] = [];
+    const materialChunks: (readonly ArrayBuffer[])[] = [];
     const chunklessProofMaterials = proofMaterials.map((proofMaterialValue) => {
         const proofMaterial = proofMaterialValue as JsonRecord;
         const chunks = proofMaterial.chunks;
@@ -153,21 +139,21 @@ const compactTransportedProofMaterialSet = <
                 'transported proof material chunks must be an array.',
             );
         }
-        const chunkByteArrays = chunks.map((chunkValue) =>
-            hexToBytes(String((chunkValue as JsonRecord).bytesHex)),
+        materialChunks.push(
+            chunks.map((chunkValue, chunkIndex) => {
+                const chunk = chunkValue as JsonRecord;
+                if (
+                    chunk.chunkIndex !== chunkIndex ||
+                    Object.prototype.toString.call(chunk.bytes) !==
+                        '[object ArrayBuffer]'
+                ) {
+                    throw new TypeError(
+                        'transported proof material chunks must carry ordered binary bytes.',
+                    );
+                }
+                return (chunk.bytes as ArrayBuffer).slice(0);
+            }),
         );
-        const totalByteLength = chunkByteArrays.reduce(
-            (runningLength, chunkBytes) =>
-                runningLength + chunkBytes.byteLength,
-            0,
-        );
-        const proofBytes = new Uint8Array(totalByteLength);
-        let writeOffset = 0;
-        for (const chunkBytes of chunkByteArrays) {
-            proofBytes.set(chunkBytes, writeOffset);
-            writeOffset += chunkBytes.byteLength;
-        }
-        materialBytes.push(proofBytes);
         const { chunks: omittedChunks, ...chunklessReference } = proofMaterial;
         void omittedChunks;
 
@@ -179,7 +165,7 @@ const compactTransportedProofMaterialSet = <
             ...materialSet,
             proofMaterials: chunklessProofMaterials,
         },
-        materialBytes,
+        materialChunks,
     };
 };
 
@@ -378,76 +364,32 @@ async function buildAcceptedShapedSetupPackage(
     };
 }
 
-// Stream a compact material set fresh through begin/absorb/finish, re-encoding
-// each 1 MiB window to hex transiently. Each call mints unique sequence-prefixed
-// verificationIds and returns the verified handles; the caller threads those into
-// verifiedSetupProofMaterials for one verify, after which the kernel evicts them.
+// Authenticate each canonical binary window directly into the family-specific
+// semantic sink before terminal setup verification consumes the references.
 const streamCompactTransportedProofMaterialSet = (
-    kernel: TranscriptCoreKernel,
+    runtime: BgvCanonicalStreamRuntime,
     compactSet: CompactTransportedProofMaterialSet,
-    verificationIdPrefix: string,
-): readonly VerifiedSetupProofMaterial[] =>
-    compactSet.chunklessSet.proofMaterials.map(
+    family: BgvCanonicalStreamFamily,
+): void => {
+    compactSet.chunklessSet.proofMaterials.forEach(
         (proofMaterialReference, materialIndex) => {
-            const proofBytes = compactSet.materialBytes[materialIndex];
-            if (proofBytes === undefined) {
+            const chunks = compactSet.materialChunks[materialIndex];
+            if (chunks === undefined) {
                 throw new Error(
-                    `${verificationIdPrefix} is missing decoded proof bytes for material ${String(materialIndex)}.`,
+                    `transported setup proof material is missing binary chunks for material ${String(materialIndex)}.`,
                 );
             }
-            setupProofMaterialFixtureVerificationSequence += 1;
             const proofMaterialRoot = String(
                 (proofMaterialReference as JsonRecord).proofMaterialRoot,
             );
-            const verificationId = [
-                verificationIdPrefix,
-                String(setupProofMaterialFixtureVerificationSequence),
-                String(materialIndex),
-                proofMaterialRoot.slice(0, 16),
-            ].join('-');
-            kernel.beginSetupProofMaterialTransportStream({
-                verificationId,
-                transportedSetupProofMaterial: proofMaterialReference,
+            runtime.stage({
+                chunks,
+                family,
+                materialRoot: proofMaterialRoot,
             });
-            let chunkIndex = 0;
-            for (
-                let chunkStart = 0;
-                chunkStart < proofBytes.byteLength;
-                chunkStart += setupProofTransportChunkSizeBytes
-            ) {
-                const chunkEnd = Math.min(
-                    chunkStart + setupProofTransportChunkSizeBytes,
-                    proofBytes.byteLength,
-                );
-                kernel.absorbSetupProofMaterialTransportStreamChunk({
-                    verificationId,
-                    chunkIndex,
-                    bytesHex: bytesToHex(
-                        proofBytes.subarray(chunkStart, chunkEnd),
-                    ),
-                });
-                chunkIndex += 1;
-            }
-            const verification = kernel.finishSetupProofMaterialTransportStream(
-                {
-                    verificationId,
-                },
-            ) as unknown as JsonRecord;
-            const verifiedSetupProofMaterial =
-                verification.verifiedSetupProofMaterial;
-            if (
-                typeof verifiedSetupProofMaterial !== 'object' ||
-                verifiedSetupProofMaterial === null ||
-                Array.isArray(verifiedSetupProofMaterial)
-            ) {
-                throw new Error(
-                    `${verificationIdPrefix} stream verification did not return a verified setup proof material handle.`,
-                );
-            }
-
-            return verifiedSetupProofMaterial as VerifiedSetupProofMaterial;
         },
     );
+};
 
 export async function acceptedShapedSetupPackageFixture(
     kernel: TranscriptCoreKernel,
@@ -473,12 +415,8 @@ export async function acceptedShapedSetupPackageFixture(
     return acceptedShapedSetupPackagePromise;
 }
 
-// Stream fresh verified proof-material handles on every call. The kernel evicts
-// a request's handles once its verify returns, so companions cannot be cached and
-// reused across verifies; each verify gets its own freshly streamed set. The
-// chunkless transported reference sets are immutable and shared from the cache.
-// Cost per call is hashing the roughly 60-90 MB of proof bytes, well under a
-// second in a lane with minute-scale test timeouts.
+// Authenticate fresh proof material on every call. Terminal verification evicts
+// the roots it consumes, so each verification stages the cached chunks again.
 export async function acceptedShapedSetupVerificationCompanions(
     kernel: TranscriptCoreKernel,
     setupParameters: BgvCollectiveSetupParametersDescription,
@@ -487,31 +425,23 @@ export async function acceptedShapedSetupVerificationCompanions(
         kernel,
         setupParameters,
     );
-    const verificationIdHashFragment =
-        setupParameters.setupParametersHash.slice(0, 16);
-    const proofMaterials = [
-        ...streamCompactTransportedProofMaterialSet(
-            kernel,
-            fixture.vssShareLinkageProofMaterial,
-            `accepted-setup-vss-share-linkage-${verificationIdHashFragment}`,
-        ),
-        ...streamCompactTransportedProofMaterialSet(
-            kernel,
-            fixture.sameSecretBridgeProofMaterial,
-            `accepted-setup-same-secret-bridge-${verificationIdHashFragment}`,
-        ),
-    ];
-    const verifiedSetupProofMaterials = {
-        objectType: 'VerifiedSetupProofMaterialSet',
-        proofMaterials,
-    } satisfies VerifiedSetupProofMaterialSet;
+    const runtime = openBgvCanonicalStreamRuntime({ kernel });
+    streamCompactTransportedProofMaterialSet(
+        runtime,
+        fixture.vssShareLinkageProofMaterial,
+        bgvCanonicalStreamFamilies.vssShareLinkage,
+    );
+    streamCompactTransportedProofMaterialSet(
+        runtime,
+        fixture.sameSecretBridgeProofMaterial,
+        bgvCanonicalStreamFamilies.sameSecretBridge,
+    );
 
     return {
         transportedVssShareLinkageProofMaterial:
             fixture.vssShareLinkageProofMaterial.chunklessSet,
         transportedSameSecretBridgeProofMaterial:
             fixture.sameSecretBridgeProofMaterial.chunklessSet,
-        verifiedSetupProofMaterials,
     };
 }
 

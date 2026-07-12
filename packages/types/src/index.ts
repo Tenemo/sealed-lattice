@@ -1,6 +1,6 @@
 export * from './board-target.js';
 export * from './field.js';
-export * from './foundation.js';
+export * from './foundation-contract.js';
 export * from './lifecycle.js';
 export * from './plaintext-oracle.js';
 export * from './protocol-hash.js';

@@ -18,9 +18,6 @@ export const vendoredProtocolRuntimeModules = [
     'board/shell-evidence.ts',
     'closing/index.ts',
     'common/verification-helpers.ts',
-    'finality/hashes.ts',
-    'finality/index.ts',
-    'foundation/index.ts',
     'lifecycle/capabilities.ts',
     'lifecycle/lifecycle.ts',
     'lifecycle/poll-spec.ts',
@@ -109,14 +106,6 @@ export const vendoredProtocolRuntimeEntryExports = [
     {
         source: 'closing/index.js',
         exports: ['verifyCastReceiptShell', 'verifyCloseRecordShell'],
-    },
-    {
-        source: 'finality/index.js',
-        exports: ['verifyTargetFinality'],
-    },
-    {
-        source: 'foundation/index.js',
-        exports: ['verifyFoundationTranscript'],
     },
     {
         source: 'lifecycle/capabilities.js',

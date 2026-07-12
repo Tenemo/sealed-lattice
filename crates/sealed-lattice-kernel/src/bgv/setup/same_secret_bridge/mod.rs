@@ -1,6 +1,5 @@
 use super::setup_proof::{
-    SETUP_PROOF_MATERIAL_ENCODING, SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES, SetupProofMaterialBytes,
-    SetupProofMaterialTransportHashes, setup_proof_material_transport_hashes,
+    SETUP_PROOF_MATERIAL_ENCODING, SetupProofMaterialBytes,
     verified_setup_proof_material_bytes_from_request,
 };
 use super::vss_commitment::VSS_PUBLIC_COMMITMENT_BINARY_FORMAT;
@@ -9,8 +8,6 @@ use crate::bgv::setup_helpers::{
     compare_required_string, compare_required_u64, read_positive_u64_at_path,
     read_positive_usize_at_path,
 };
-use std::sync::Arc;
-
 const SAME_SECRET_RELATION: &str =
     "vss-constant-commitments-open-to-one-short-secret-across-q-share-limbs";
 const VSS_SAME_SECRET_BRIDGE_RELATION: &str = "target-basis constant coefficient commitments bind to the same signed ternary trustee secret as the source data-basis VSS constant commitments";
@@ -199,7 +196,6 @@ pub(crate) fn verify_vss_same_secret_bridge_statement_set_request(
         ));
     }
     Ok(json!({
-        "ok": true,
         "operation": "verifyVssSameSecretBridgeStatementSet",
         "sameSecretBridgeStatementSetRoot": statement_set_root,
         "participantCount": participant_count,
@@ -420,7 +416,6 @@ pub(crate) fn verify_vss_same_secret_bridge_proof_material_set_request(
     }
 
     Ok(json!({
-        "ok": true,
         "operation": "verifyVssSameSecretBridgeProofMaterialSet",
         "proofFamily": SAME_SECRET_BRIDGE_PROOF_FAMILY,
         "sameSecretBridgeStatementSetRoot": statement_set_root,

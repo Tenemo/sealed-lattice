@@ -1,10 +1,13 @@
 import {
+    bgvCanonicalStreamFamilies,
+    openBgvCanonicalStreamRuntime,
+} from './bgv-canonical-stream-runtime.js';
+import { createWasmBrowserActionStorageWorkerKernel } from './local-storage-root-worker-kernel.js';
+import {
     canonicalErrorCodes,
     createTranscriptCoreKernelLoader,
     TranscriptCoreKernelCommandError,
     type BgvAcceptedSetupHandoff,
-    type BgvBaseConversionFixture,
-    type BgvCiphertextConventionFixture,
     type BgvCollectiveSetupParametersDescription,
     type BgvCollectiveSetupVerification,
     type BgvLocalTrusteeSetupStateVerification,
@@ -13,6 +16,8 @@ import {
     type BgvTargetDecryptionReleaseSetupContext,
     type BgvTargetDecryptionResultReleaseShareEvidence,
     type BgvTargetDecryptionResultReleaseCompletion,
+    type FoundationCanonicalTupleValidation,
+    type FoundationSchemaObjectValidation,
     type TranscriptCoreKernelLoaderOptions,
     type TranscriptCoreKernelSharePoint,
     type TranscriptCorePlaintextComparison,
@@ -26,14 +31,15 @@ const transcriptCoreKernelUrl = new URL(
 
 export {
     canonicalErrorCodes,
+    bgvCanonicalStreamFamilies,
+    createWasmBrowserActionStorageWorkerKernel,
     createTranscriptCoreKernelLoader,
+    openBgvCanonicalStreamRuntime,
     TranscriptCoreKernelCommandError,
 };
 export type {
     BgvAcceptedSetupHandoff,
     TranscriptCoreKernel,
-    BgvBaseConversionFixture,
-    BgvCiphertextConventionFixture,
     BgvCollectiveSetupParametersDescription,
     BgvCollectiveSetupVerification,
     BgvLocalTrusteeSetupStateVerification,
@@ -42,10 +48,30 @@ export type {
     BgvTargetDecryptionReleaseSetupContext,
     BgvTargetDecryptionResultReleaseShareEvidence,
     BgvTargetDecryptionResultReleaseCompletion,
+    FoundationCanonicalTupleValidation,
+    FoundationSchemaObjectValidation,
     TranscriptCoreKernelLoaderOptions,
     TranscriptCoreKernelSharePoint,
     TranscriptCorePlaintextComparison,
 };
+export type {
+    BgvCanonicalStreamFamily,
+    BgvCanonicalStreamRuntime,
+    BgvCanonicalStreamVerifierLease,
+} from './bgv-canonical-stream-runtime.js';
+export {
+    FoundationBoardInternalError,
+    FoundationBoardRefusalError,
+    foundationBoardCandidateObjectHash,
+    openFoundationBoardSession,
+} from './foundation-board-session.js';
+export type {
+    FoundationBoardCandidate,
+    FoundationBoardIngestionLimits,
+    FoundationBoardSession,
+    FoundationBoardSessionInput,
+    FoundationBoardSessionState,
+} from './foundation-board-session.js';
 
 // This private, never-published workspace loader is dev- and test-only scaffolding: it
 // loads the freshly built dist kernel with the explicit unpinned opt-in so committed

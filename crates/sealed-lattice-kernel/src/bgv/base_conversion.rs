@@ -51,6 +51,7 @@ pub(crate) fn lift_plaintext_coefficients_to_basis(
 // across every RNS limb at each coefficient, not a general CRT object. This
 // rejects limbs that disagree, AND residues that are congruent mod 65537 but
 // not the identical lifted value (e.g. 7 vs 7+65537).
+#[cfg(test)]
 pub(crate) fn convert_plaintext_lifted_basis(
     source: &RnsPolynomial,
     target_basis_kind: BgvBasisKind,

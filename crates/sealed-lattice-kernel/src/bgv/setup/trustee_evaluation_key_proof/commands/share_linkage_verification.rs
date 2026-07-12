@@ -641,7 +641,6 @@ pub(crate) fn verify_vss_share_linkage_proof_material_set_from_request(
     )?;
 
     Ok(json!({
-        "ok": true,
         "operation": "verifyVssShareLinkageProofMaterialSet",
         "proofFamily": VSS_SHARE_LINKAGE_PROOF_FAMILY,
         "statementRoot": statement_root,

@@ -211,7 +211,6 @@ pub(crate) fn compute_vss_committed_material_commitment_request(
         })?;
 
     Ok(json!({
-        "ok": true,
         "operation": "computeVssCommittedMaterialCommitment",
         "commitment": computation.commitment,
         "commitmentRoot": computation.commitment_root,

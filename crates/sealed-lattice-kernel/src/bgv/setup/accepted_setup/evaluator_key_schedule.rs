@@ -146,7 +146,7 @@ pub(super) fn verify_evaluator_key_schedule(
     {
         return Ok(Some(evaluator_key_schedule_refusal(
             "evaluatorKeyScheduleRelinearizationMismatch",
-            "evaluatorKeySchedule.relinearizationLevelSchedule must match the frozen first-roster relinearization levels",
+            "evaluatorKeySchedule.relinearizationLevelSchedule must match the frozen foundation-roster relinearization levels",
             "setupPackage.evaluatorKeySchedule.relinearizationLevelSchedule",
         )?));
     }
@@ -154,7 +154,7 @@ pub(super) fn verify_evaluator_key_schedule(
     if schedule.get("requiredGaloisKeySchedule") != Some(&expected_required_galois_key_schedule) {
         return Ok(Some(evaluator_key_schedule_refusal(
             "evaluatorKeyScheduleGaloisMismatch",
-            "evaluatorKeySchedule.requiredGaloisKeySchedule must match the frozen first-roster Galois key schedule",
+            "evaluatorKeySchedule.requiredGaloisKeySchedule must match the frozen foundation-roster Galois key schedule",
             "setupPackage.evaluatorKeySchedule.requiredGaloisKeySchedule",
         )?));
     }
@@ -167,7 +167,7 @@ pub(super) fn verify_evaluator_key_schedule(
     {
         return Ok(Some(evaluator_key_schedule_refusal(
             "requiredGaloisSetHashMismatch",
-            "evaluatorKeySchedule.requiredGaloisSetHash does not match the frozen first-roster Galois set",
+            "evaluatorKeySchedule.requiredGaloisSetHash does not match the frozen foundation-roster Galois set",
             "setupPackage.evaluatorKeySchedule.requiredGaloisSetHash",
         )?));
     }
@@ -267,7 +267,7 @@ pub(super) fn verify_pending_evaluation_key_material_boundary(
 pub(super) fn verify_generic_key_switch_policy(
     setup_package: &Value,
 ) -> CanonicalResult<Option<Value>> {
-    // The first roster never schedules generic key-switch material and the matching
+    // The foundation roster never schedules generic key-switch material and the matching
     // proof family is unimplemented, so any generic key-switch keys are refused
     // unconditionally. The frozen evaluator-key schedule the verifier recomputes
     // (verify_evaluator_key_schedule, EvaluatorKeyScheduleRoot) covers only the
@@ -279,7 +279,7 @@ pub(super) fn verify_generic_key_switch_policy(
             Vec::new(),
             vec![Refusal::new(
                 "genericKeySwitchOutsideParameters",
-                "generic key-switch material is refused: the first roster never schedules it and the matching proof family is unimplemented",
+                "generic key-switch material is refused: the foundation roster never schedules it and the matching proof family is unimplemented",
                 "setupPackage.genericKeySwitchKeys".to_string(),
             )],
             Vec::new(),

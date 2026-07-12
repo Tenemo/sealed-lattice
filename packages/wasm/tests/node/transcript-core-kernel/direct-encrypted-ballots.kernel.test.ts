@@ -10,6 +10,24 @@ import { loadTranscriptCoreKernel } from '#packages/wasm/src/index';
 import type { BgvPassiveSetupPackage } from '#packages/wasm/src/transcript-core-bridge/kernel-contracts';
 
 describe('direct encrypted ballot kernel command', () => {
+    it('requires explicit acknowledgement for caller-supplied deterministic randomness', async () => {
+        const kernel = await loadTranscriptCoreKernel();
+        const setupPackage = createDirectBallotSetupPackage(kernel);
+
+        expect(() =>
+            runDirectEncryptedBallot({
+                ballotEncryptionSeedHexes: ['11'.repeat(32)],
+                setupPackage,
+            }),
+        ).toThrow(/requires developmentRandomnessOverrideAcknowledged/u);
+        expect(() =>
+            runDirectEncryptedBallot({
+                ballotProofRandomnessHexes: ['22'.repeat(32)],
+                setupPackage,
+            }),
+        ).toThrow(/requires developmentRandomnessOverrideAcknowledged/u);
+    });
+
     it('generates and verifies one full direct ballot proof through Node/WASM', async () => {
         const kernel = await loadTranscriptCoreKernel();
         const setupPackage = createDirectBallotSetupPackage(kernel);
@@ -25,18 +43,11 @@ describe('direct encrypted ballot kernel command', () => {
             proofCount: 1,
             rnsLimbCount: 17,
         });
+        expect(result.encryptedBallots.encryptedBallotHashes).toHaveLength(1);
+        expect(result.encryptedBallots.ciphertextRoots).toHaveLength(1);
         expect(
-            result.encryptedBallots.ballotEncryptionRandomness,
-        ).toMatchObject({
-            source: 'fresh-csprng',
-            ballotEncryptionRandomnessCount: 1,
-            randomnessBytesPerBallot: 32,
-        });
-        expect(result.proofAttempt.proofMaskRandomness).toMatchObject({
-            source: 'fresh-csprng',
-            ballotProofRandomnessCount: 1,
-            randomnessBytesPerProof: 32,
-        });
+            result.encryptedBallots.ciphertextCanonicalByteLengths[0],
+        ).toBeGreaterThan(0);
         expect(result.proofAttempt.proofSizeBytes).toBeGreaterThan(0);
         expect(result.proofAttempt.totalProofBytes).toBe(
             result.proofAttempt.proofSizeBytes,

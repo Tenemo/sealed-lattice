@@ -1,17 +1,13 @@
 import type {
     CanonicalError,
     FieldElement,
+    ParticipantIdentity,
     ProtocolHash,
-    TranscriptCoreAnalysis,
-    TranscriptCoreFixture,
-    TranscriptCoreFixtureVerification,
 } from '@sealed-lattice/types';
 
 import type {
-    BgvBaseConversionFixture,
     BgvBatchPlaintextEncoding,
     BgvCanonicalObjectAnalysis,
-    BgvCiphertextConventionFixture,
     BgvCollectiveSetupTransportCompanions,
     BgvCollectiveSetupParametersDescription,
     BgvCollectiveSetupPublicDerivations,
@@ -37,12 +33,6 @@ import type {
     BgvVssShareLinkageProofContext,
     BgvVssShareLinkageProofGeneration,
     BgvSetupCommitmentOpeningComputation,
-    BgvSetupProofMaterialTransportStreamBegin,
-    BgvSetupProofMaterialTransportStreamChunkAbsorption,
-    BgvSetupProofMaterialTransportStreamVerification,
-    BgvEvaluationKeyShareComponentMaterialTransportStreamBegin,
-    BgvEvaluationKeyShareComponentMaterialTransportStreamChunkAbsorption,
-    BgvEvaluationKeyShareComponentMaterialTransportStreamVerification,
     BgvTargetDecryptionReleaseSetupContext,
     BgvTargetDecryptionShare,
     BgvTargetDecryptionShareProofMaterial,
@@ -56,10 +46,8 @@ import type {
 
 export type {
     BgvAcceptedSetupHandoff,
-    BgvBaseConversionFixture,
     BgvBatchPlaintextEncoding,
     BgvCanonicalObjectAnalysis,
-    BgvCiphertextConventionFixture,
     BgvCollectiveSetupParametersDescription,
     BgvCollectiveSetupPublicDerivations,
     BgvCollectiveSetupVerification,
@@ -84,12 +72,6 @@ export type {
     BgvVssShareLinkageProofContext,
     BgvVssShareLinkageProofGeneration,
     BgvSetupCommitmentOpeningComputation,
-    BgvSetupProofMaterialTransportStreamBegin,
-    BgvSetupProofMaterialTransportStreamChunkAbsorption,
-    BgvSetupProofMaterialTransportStreamVerification,
-    BgvEvaluationKeyShareComponentMaterialTransportStreamBegin,
-    BgvEvaluationKeyShareComponentMaterialTransportStreamChunkAbsorption,
-    BgvEvaluationKeyShareComponentMaterialTransportStreamVerification,
     BgvTargetDecryptionReleaseSetupContext,
     BgvTargetDecryptionShare,
     BgvTargetDecryptionShareProofMaterial,
@@ -112,6 +94,19 @@ export type TranscriptCorePlaintextComparison = {
     readonly scoreDifference: number;
 };
 
+export type FoundationCanonicalTupleValidation = {
+    readonly canonicalTupleHex: string;
+    readonly schemaIdentifier: number;
+    readonly schemaVersion: number;
+    readonly itemCount: number;
+};
+
+export type FoundationSchemaObjectValidation = {
+    readonly schemaIdentifier: number;
+    readonly schemaVersion: number;
+    readonly canonicalByteLength: number;
+};
+
 type BgvTargetDecryptionLocalCommandContext = Readonly<{
     readonly setupPackage: unknown;
     readonly targetAcceptedRecord: unknown;
@@ -122,14 +117,17 @@ type BgvTargetDecryptionLocalCommandContext = Readonly<{
 
 export type TranscriptCoreKernel = {
     readonly exportedFunctionNames: readonly string[];
-    analyzeCanonicalObject(input: {
-        readonly canonicalBytesHex: string;
-        readonly chunkSize: number;
-    }): TranscriptCoreAnalysis;
     computeChunkRoot(input: {
         readonly inputHex: string;
         readonly chunkSize: number;
     }): string;
+    computeFoundationHash512(input: {
+        readonly domain: string;
+        readonly canonicalItemsTupleHex: string;
+    }): ProtocolHash;
+    deriveFoundationParticipantIdentity(input: {
+        readonly signingVerificationKeyHex: string;
+    }): ParticipantIdentity;
     deriveCanonicalObjectHash(input: { readonly value: unknown }): ProtocolHash;
     evaluatePlaintextComparison(input: {
         readonly leftTotalScore: number;
@@ -142,9 +140,12 @@ export type TranscriptCoreKernel = {
     }): FieldElement;
     listCanonicalErrorCodes(): readonly string[];
     roundTripBytes(input: Uint8Array): Uint8Array;
-    verifyFixture(
-        fixture: TranscriptCoreFixture,
-    ): TranscriptCoreFixtureVerification;
+    validateFoundationCanonicalTuple(input: {
+        readonly canonicalTupleHex: string;
+    }): FoundationCanonicalTupleValidation;
+    validateFoundationSchemaObject(input: {
+        readonly canonicalBytes: Uint8Array;
+    }): FoundationSchemaObjectValidation;
     generateBgvTargetDecryptionShareFromLocalShare(
         input: BgvTargetDecryptionLocalCommandContext & {
             readonly trusteeIdentity: string;
@@ -327,30 +328,6 @@ export type TranscriptCoreKernel = {
         readonly proofRandomnessSeedHex: string;
         readonly proofRandomnessNonceHex: string;
     }): BgvSameSecretBridgeProofGeneration;
-    beginSetupProofMaterialTransportStream(input: {
-        readonly verificationId: string;
-        readonly transportedSetupProofMaterial: unknown;
-    }): BgvSetupProofMaterialTransportStreamBegin;
-    absorbSetupProofMaterialTransportStreamChunk(input: {
-        readonly verificationId: string;
-        readonly chunkIndex: number;
-        readonly bytesHex: string;
-    }): BgvSetupProofMaterialTransportStreamChunkAbsorption;
-    finishSetupProofMaterialTransportStream(input: {
-        readonly verificationId: string;
-    }): BgvSetupProofMaterialTransportStreamVerification;
-    beginEvaluationKeyShareComponentMaterialTransportStream(input: {
-        readonly verificationId: string;
-        readonly transportedEvaluationKeyShareComponentMaterial: unknown;
-    }): BgvEvaluationKeyShareComponentMaterialTransportStreamBegin;
-    absorbEvaluationKeyShareComponentMaterialTransportStreamChunk(input: {
-        readonly verificationId: string;
-        readonly chunkIndex: number;
-        readonly bytesHex: string;
-    }): BgvEvaluationKeyShareComponentMaterialTransportStreamChunkAbsorption;
-    finishEvaluationKeyShareComponentMaterialTransportStream(input: {
-        readonly verificationId: string;
-    }): BgvEvaluationKeyShareComponentMaterialTransportStreamVerification;
     deriveBgvTargetDecryptionResultReleaseSetupContext(input: {
         readonly setupPackage: unknown;
     }): BgvTargetDecryptionReleaseSetupContext;
@@ -386,14 +363,6 @@ export type TranscriptCoreKernel = {
         readonly canonicalBytesHex: string;
         readonly expectedCiphertextRoot?: string;
     }): BgvObjectValidation | BgvOperationRejection;
-    generateBgvCiphertextConventionFixture(input: {
-        readonly leftSlots: readonly number[];
-        readonly rightSlots: readonly number[];
-        readonly includeCanonicalBytesHex?: boolean;
-    }): BgvCiphertextConventionFixture | BgvOperationRejection;
-    generateBgvBaseConversionFixture(input: {
-        readonly slots: readonly number[];
-    }): BgvBaseConversionFixture | BgvOperationRejection;
     analyzeBgvCanonicalObject(input: {
         readonly canonicalBytesHex: string;
     }): BgvCanonicalObjectAnalysis | BgvOperationRejection;
@@ -417,11 +386,15 @@ type KernelCommandFromMethod<
 >;
 
 type TranscriptCoreKernelCommand =
-    | KernelCommandFromMethod<
-          'AnalyzeCanonicalObject',
-          'analyzeCanonicalObject'
-      >
     | KernelCommandFromMethod<'ComputeChunkRoot', 'computeChunkRoot'>
+    | KernelCommandFromMethod<
+          'ComputeFoundationHash512',
+          'computeFoundationHash512'
+      >
+    | KernelCommandFromMethod<
+          'DeriveFoundationParticipantIdentity',
+          'deriveFoundationParticipantIdentity'
+      >
     | KernelCommandFromMethod<
           'DeriveCanonicalObjectHash',
           'deriveCanonicalObjectHash'
@@ -441,9 +414,13 @@ type TranscriptCoreKernelCommand =
     | {
           readonly command: 'ListCanonicalErrorCodes';
       }
+    | KernelCommandFromMethod<
+          'ValidateFoundationCanonicalTuple',
+          'validateFoundationCanonicalTuple'
+      >
     | {
-          readonly command: 'VerifyFixture';
-          readonly fixture: TranscriptCoreFixture;
+          readonly command: 'ValidateFoundationSchemaObject';
+          readonly canonicalObjectHex: string;
       }
     | KernelCommandFromMethod<
           'GenerateBgvTargetDecryptionShareFromLocalShare',
@@ -529,30 +506,6 @@ type TranscriptCoreKernelCommand =
           'generateSameSecretBridgeProof'
       >
     | KernelCommandFromMethod<
-          'BeginSetupProofMaterialTransportStream',
-          'beginSetupProofMaterialTransportStream'
-      >
-    | KernelCommandFromMethod<
-          'AbsorbSetupProofMaterialTransportStreamChunk',
-          'absorbSetupProofMaterialTransportStreamChunk'
-      >
-    | KernelCommandFromMethod<
-          'FinishSetupProofMaterialTransportStream',
-          'finishSetupProofMaterialTransportStream'
-      >
-    | KernelCommandFromMethod<
-          'BeginEvaluationKeyShareComponentMaterialTransportStream',
-          'beginEvaluationKeyShareComponentMaterialTransportStream'
-      >
-    | KernelCommandFromMethod<
-          'AbsorbEvaluationKeyShareComponentMaterialTransportStreamChunk',
-          'absorbEvaluationKeyShareComponentMaterialTransportStreamChunk'
-      >
-    | KernelCommandFromMethod<
-          'FinishEvaluationKeyShareComponentMaterialTransportStream',
-          'finishEvaluationKeyShareComponentMaterialTransportStream'
-      >
-    | KernelCommandFromMethod<
           'DeriveBgvTargetDecryptionResultReleaseSetupContext',
           'deriveBgvTargetDecryptionResultReleaseSetupContext'
       >
@@ -585,14 +538,6 @@ type TranscriptCoreKernelCommand =
           'validateBgvCiphertextObject'
       >
     | KernelCommandFromMethod<
-          'GenerateBgvCiphertextConventionFixture',
-          'generateBgvCiphertextConventionFixture'
-      >
-    | KernelCommandFromMethod<
-          'GenerateBgvBaseConversionFixture',
-          'generateBgvBaseConversionFixture'
-      >
-    | KernelCommandFromMethod<
           'AnalyzeBgvCanonicalObject',
           'analyzeBgvCanonicalObject'
       >
@@ -603,15 +548,9 @@ type TranscriptCoreKernelCommand =
               readonly setupSeed: string;
           };
           readonly ballotEncryptionRandomness: {
-              readonly source:
-                  | 'fresh-csprng'
-                  | 'development-deterministic-fixture';
               readonly encryptionSeedHexes: readonly string[];
           };
           readonly proofMaskRandomness: {
-              readonly source:
-                  | 'fresh-csprng'
-                  | 'development-deterministic-fixture';
               readonly ballotProofRandomnessHexes: readonly string[];
           };
           readonly ballots: readonly {
@@ -629,7 +568,175 @@ type TranscriptCoreKernelCommand =
 type TranscriptCoreKernelExports = WebAssembly.Exports & {
     memory?: WebAssembly.Memory;
     sealed_lattice_allocate?: (length: number) => number;
+    sealed_lattice_bgv_canonical_stream_absorb_chunk?: (
+        handle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        chunkIndex: number,
+        chunkPointer: number,
+        chunkLength: number,
+    ) => number;
+    sealed_lattice_bgv_canonical_stream_begin?: (
+        familyCode: number,
+        materialRootPointer: number,
+        materialRootLength: number,
+        descriptorPointer: number,
+        descriptorLength: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        statusPointer: number,
+        totalByteLengthPointer: number,
+        chunkCountPointer: number,
+    ) => number;
+    sealed_lattice_bgv_canonical_stream_cancel?: (
+        handle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+    ) => number;
+    sealed_lattice_bgv_canonical_stream_finish?: (
+        handle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+    ) => number;
+    sealed_lattice_canonical_stream_absorb_chunk?: (
+        handle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        chunkIndex: number,
+        chunkPointer: number,
+        chunkLength: number,
+    ) => number;
+    sealed_lattice_canonical_stream_begin_verifier?: (
+        streamDomain: number,
+        descriptorPointer: number,
+        descriptorLength: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        statusPointer: number,
+        totalByteLengthPointer: number,
+        chunkCountPointer: number,
+    ) => number;
+    sealed_lattice_canonical_stream_begin_writer?: (
+        streamDomain: number,
+        totalByteLength: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        statusPointer: number,
+        chunkCountPointer: number,
+    ) => number;
+    sealed_lattice_canonical_stream_cancel?: (
+        handle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+    ) => number;
+    sealed_lattice_canonical_stream_finish_verifier?: (
+        handle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+    ) => number;
+    sealed_lattice_canonical_stream_finish_writer?: (
+        handle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        statusPointer: number,
+        outputLengthPointer: number,
+    ) => number;
+    sealed_lattice_foundation_board_begin?: (
+        configurationPointer: number,
+        configurationLength: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_foundation_board_cancel?: (
+        handle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+    ) => number;
+    sealed_lattice_foundation_board_ingest?: (
+        handle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        canonicalCarrierPointer: number,
+        canonicalCarrierLength: number,
+        candidateHashPointer: number,
+        candidateHashLength: number,
+    ) => number;
+    sealed_lattice_foundation_board_require_complete_carrier_graph?: (
+        handle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+    ) => number;
     sealed_lattice_deallocate?: (pointer: number, length: number) => void;
+    sealed_lattice_local_storage_root_command?: (
+        command: number,
+        inputPointer: number,
+        inputLength: number,
+        statusPointer: number,
+        outputLengthPointer: number,
+    ) => number;
+    sealed_lattice_state_verifier_begin?: (
+        configurationPointer: number,
+        configurationLength: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_state_verifier_cancel?: (
+        sessionHandle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+    ) => number;
+    sealed_lattice_state_verifier_release?: (
+        sessionHandle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        verifiedObjectHandle: number,
+    ) => number;
+    sealed_lattice_state_verifier_verify_output?: (
+        sessionHandle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        verifiedReservationHandle: number,
+        canonicalOutputIntentCarrierPointer: number,
+        canonicalOutputIntentCarrierLength: number,
+        canonicalStateCertificatePointer: number,
+        canonicalStateCertificateLength: number,
+        exactOutputPointer: number,
+        exactOutputLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_state_verifier_verify_recovery?: (
+        sessionHandle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        subjectParticipantIdentityPointer: number,
+        subjectParticipantIdentityLength: number,
+        capabilityKindCode: number,
+        predecessorRecoveryHandle: number,
+        preservedIntentHandle: number,
+        canonicalRecoveryTransitionCarrierPointer: number,
+        canonicalRecoveryTransitionCarrierLength: number,
+        canonicalStateCertificatePointer: number,
+        canonicalStateCertificateLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_state_verifier_verify_reservation?: (
+        sessionHandle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        subjectParticipantIdentityPointer: number,
+        subjectParticipantIdentityLength: number,
+        capabilityKindCode: number,
+        predecessorRecoveryHandle: number,
+        expectedAuthorizationHashPointer: number,
+        expectedAuthorizationHashLength: number,
+        canonicalReservationIntentCarrierPointer: number,
+        canonicalReservationIntentCarrierLength: number,
+        canonicalStateCertificatePointer: number,
+        canonicalStateCertificateLength: number,
+        statusPointer: number,
+    ) => number;
     sealed_lattice_transcript_core_command_with_length?: (
         pointer: number,
         length: number,

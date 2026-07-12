@@ -123,6 +123,163 @@ const addResidueVectors = (
         return (leftValue + rightValue) % modulus;
     });
 
+const decodeHex = (hexValue: string): Uint8Array => {
+    if (hexValue.length % 2 !== 0 || !/^[0-9a-f]*$/u.test(hexValue)) {
+        throw new Error(
+            'Canonical test bytes must use lowercase even-length hex.',
+        );
+    }
+
+    return Uint8Array.from(
+        { length: hexValue.length / 2 },
+        (_unusedByte, byteIndex) =>
+            Number.parseInt(
+                hexValue.slice(byteIndex * 2, byteIndex * 2 + 2),
+                16,
+            ),
+    );
+};
+
+const encodeHex = (bytes: Uint8Array): string =>
+    Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+
+const encodeCanonicalVaruint = (value: number): Uint8Array => {
+    const encodedBytes: number[] = [];
+    let remainingValue = value;
+    do {
+        let nextByte = remainingValue % 128;
+        remainingValue = Math.floor(remainingValue / 128);
+        if (remainingValue !== 0) {
+            nextByte |= 0x80;
+        }
+        encodedBytes.push(nextByte);
+    } while (remainingValue !== 0);
+
+    return Uint8Array.from(encodedBytes);
+};
+
+const canonicalStringBytes = (value: string): Uint8Array => {
+    const valueBytes = new TextEncoder().encode(value);
+
+    return Uint8Array.from([
+        ...encodeCanonicalVaruint(valueBytes.length),
+        ...valueBytes,
+    ]);
+};
+
+const readCanonicalVaruint = (
+    bytes: Uint8Array,
+    cursor: { offset: number },
+): number => {
+    let value = 0;
+    let multiplier = 1;
+    while (cursor.offset < bytes.length) {
+        const byte = bytes[cursor.offset];
+        if (byte === undefined) {
+            break;
+        }
+        cursor.offset += 1;
+        value += (byte & 0x7f) * multiplier;
+        if ((byte & 0x80) === 0) {
+            return value;
+        }
+        multiplier *= 128;
+        if (!Number.isSafeInteger(value) || !Number.isSafeInteger(multiplier)) {
+            throw new Error(
+                'Canonical test varuint exceeds the safe integer range.',
+            );
+        }
+    }
+
+    throw new Error('Canonical test varuint is truncated.');
+};
+
+const readCanonicalString = (
+    bytes: Uint8Array,
+    cursor: { offset: number },
+): string => {
+    const byteLength = readCanonicalVaruint(bytes, cursor);
+    const endOffset = cursor.offset + byteLength;
+    if (endOffset > bytes.length) {
+        throw new Error('Canonical test string is truncated.');
+    }
+    const value = new TextDecoder('utf-8', { fatal: true }).decode(
+        bytes.subarray(cursor.offset, endOffset),
+    );
+    cursor.offset = endOffset;
+
+    return value;
+};
+
+const canonicalPlaintextComponentBytes = (
+    canonicalBytesHex: string,
+): Uint8Array => {
+    const bytes = decodeHex(canonicalBytesHex);
+    const cursor = { offset: 0 };
+    const magic = readCanonicalString(bytes, cursor);
+    const version = readCanonicalVaruint(bytes, cursor);
+    const objectKind = readCanonicalString(bytes, cursor);
+    const componentCount = readCanonicalVaruint(bytes, cursor);
+    if (
+        magic !== 'sealed-lattice-bgv-rns-canonical-object' ||
+        version !== 1 ||
+        objectKind !== 'plaintext' ||
+        componentCount !== 1
+    ) {
+        throw new Error('Expected one canonical BGV plaintext component.');
+    }
+
+    return bytes.slice(cursor.offset);
+};
+
+const validatedTargetCiphertext = (
+    kernel: TranscriptCoreKernel,
+    leftSlots: readonly number[],
+    rightSlots: readonly number[],
+): Readonly<{ canonicalBytesHex: string; ciphertextRoot: string }> => {
+    const left = kernel.encodeBgvBatchPlaintext({
+        slots: leftSlots,
+        level: 0,
+        includeCanonicalBytesHex: true,
+    });
+    const right = kernel.encodeBgvBatchPlaintext({
+        slots: rightSlots,
+        level: 0,
+        includeCanonicalBytesHex: true,
+    });
+    if (
+        !('canonicalBytesHex' in left) ||
+        typeof left.canonicalBytesHex !== 'string' ||
+        !('canonicalBytesHex' in right) ||
+        typeof right.canonicalBytesHex !== 'string'
+    ) {
+        throw new Error('Target test plaintexts must include canonical bytes.');
+    }
+    const canonicalBytes = Uint8Array.from([
+        ...canonicalStringBytes('sealed-lattice-bgv-rns-canonical-object'),
+        ...encodeCanonicalVaruint(1),
+        ...canonicalStringBytes('ciphertext'),
+        ...encodeCanonicalVaruint(2),
+        ...canonicalPlaintextComponentBytes(left.canonicalBytesHex),
+        ...canonicalPlaintextComponentBytes(right.canonicalBytesHex),
+    ]);
+    const canonicalBytesHex = encodeHex(canonicalBytes);
+    const validation = kernel.validateBgvCiphertextObject({
+        canonicalBytesHex,
+    });
+    if (
+        !('ciphertextRoot' in validation) ||
+        typeof validation.ciphertextRoot !== 'string' ||
+        validation.isValid !== true
+    ) {
+        throw new Error(
+            'Target test ciphertext must pass canonical validation.',
+        );
+    }
+
+    return { canonicalBytesHex, ciphertextRoot: validation.ciphertextRoot };
+};
+
 const setupLifecycleArtifacts = (
     kernel: TranscriptCoreKernel,
 ): SetupLifecycleArtifacts => {
@@ -430,28 +587,8 @@ const targetArtifacts = (
     ringDegree: number,
     targetBasisHash: string,
 ): TargetArtifacts => {
-    const targetId = kernel.generateBgvCiphertextConventionFixture({
-        leftSlots: [1, 0, 3],
-        rightSlots: [0, 1, 0],
-        includeCanonicalBytesHex: true,
-    });
-    const targetOrder = kernel.generateBgvCiphertextConventionFixture({
-        leftSlots: [1, 0, 2],
-        rightSlots: [0, 1, 0],
-        includeCanonicalBytesHex: true,
-    });
-    if (
-        !('canonicalBytesHex' in targetId) ||
-        typeof targetId.canonicalBytesHex !== 'string' ||
-        !('canonicalBytesHex' in targetOrder) ||
-        typeof targetOrder.canonicalBytesHex !== 'string' ||
-        !('ciphertextRoot' in targetId) ||
-        !('ciphertextRoot' in targetOrder)
-    ) {
-        throw new Error(
-            'Target ciphertext fixtures must include canonical bytes.',
-        );
-    }
+    const targetId = validatedTargetCiphertext(kernel, [1, 0, 3], [0, 1, 0]);
+    const targetOrder = validatedTargetCiphertext(kernel, [1, 0, 2], [0, 1, 0]);
     const targetLayoutHash = kernel.deriveCanonicalObjectHash({
         value: {
             objectType: 'DirectEncryptedBallotTargetLayout',

@@ -14,17 +14,13 @@
 // accepted BDLOP constant commitments natively over the commitment-modulus
 // fields, so the proven key-relation secret is the committed trustee secret.
 //
-// Trust boundary: this argument is the evaluation-key proof path of the
-// accepted setup package; the package verifier rebuilds every statement from
-// the transported share records, the recomputed round-one public aggregates,
-// and the accepted same-secret commitments. The accounting object in this
-// module is closed: every post-commitment challenge is drawn from the
-// degree-four challenge extension of the limb field, the masked claims are
-// integer-bound across the active proof fields, and every theorem row
-// carries its closure argument with one explicitly named conjecture (the CS25
-// entropy-capacity FRI proximity-gap bound), CMS19 QROM accounting at the
-// achieved setup-proof level, and a bounded-leakage smudging scope rather than
-// 128-bit zero-knowledge.
+// Trust boundary: this argument is an experimental evaluation-key proof path.
+// The package verifier rebuilds every statement from transported share records,
+// recomputed round-one public aggregates, and same-secret commitments before
+// checking the implemented polynomial identities. The current proof does not
+// have an accepted end-to-end extraction, QROM, or zero-knowledge theorem at the
+// required profile, so callers must not treat successful verification as
+// certified foundation evidence.
 //
 // Argument shape per limb field F_{q_l} (one trace commitment and one batched
 // FRI instance per limb, shared by every listed key):
@@ -40,7 +36,6 @@
 // - DEEP out-of-domain points binding the identities to the committed columns
 //   through quotients in the per-limb batched FRI instance.
 
-mod accounting;
 mod commands;
 mod evaluation_domain;
 mod extension_field;
@@ -169,11 +164,9 @@ pub(super) const LINCHECK_REPETITIONS: usize = 2;
 // Cross-limb witness-consistency repetitions and the bit width of the public
 // integer coefficients. Narrow eight-bit coefficients keep the clear sums small
 // (at most 2 * N * 255, about 2^24) so the base-3 smudging masks dominate them
-// only as a bounded-leakage row; twenty repetitions put the per-difference
-// collision bound at 2^-160 before union and Fiat-Shamir losses, the pre-union
-// margin the disclosed accounting requires. Share-linkage uses the same
-// twenty-repetition eight-bit schedule as the other families (2026-07-06,
-// Branch 2 decision in the setup proof decisions record): the earlier
+// only as a bounded-leakage row. This local repetition count is not an
+// end-to-end soundness or zero-knowledge estimate. Share-linkage uses the same
+// twenty-repetition eight-bit schedule as the other families; the earlier
 // four-40-bit schedule forced masks whose CRT lift consumed all three
 // commitment fields, leaving no check field; the standard schedule keeps both
 // carry and message-digit clear sums under the standard 58-digit mask so the
@@ -218,13 +211,11 @@ pub(in crate::bgv::setup) const TARGET_DECRYPTION_AGGREGATE_MESSAGE_CLAIM_MASK_D
     142;
 pub(in crate::bgv::setup) const TARGET_DECRYPTION_SMUDGING_MESSAGE_CLAIM_MASK_DIGIT_COUNT: usize =
     114;
-// FRI query count at rate 1/2. The CS25 entropy-capacity bound gives about
-// 0.938 bit per query for the prime base field. The selected 168 queries record
-// 156 bits before the union allowance and 140 after it, clearing 128 with
-// margin. The proven BCIKS20 Johnson fallback (half a bit per query) would need
-// roughly 288 queries. No grinding is applied.
+// Experimental FRI query count at rate 1/2. Query positions are sampled
+// independently with replacement; repeated positions remain separate trials
+// while their Merkle openings may be deduplicated for transport. No accepted
+// end-to-end soundness claim is derived from this count.
 pub(super) const LOW_DEGREE_QUERY_COUNT: usize = 168;
-pub(super) const MINIMUM_CONJECTURED_CLASSICAL_SOUNDNESS_AFTER_UNION_BITS: i64 = 128;
 pub(super) const MAIN_LOW_DEGREE_TRANSCRIPT_PURPOSE: &[u8] = b"batched-column-degree";
 pub(super) const SUMCHECK_RESIDUAL_LOW_DEGREE_TRANSCRIPT_PURPOSE: &[u8] =
     b"sumcheck-residual-degree";

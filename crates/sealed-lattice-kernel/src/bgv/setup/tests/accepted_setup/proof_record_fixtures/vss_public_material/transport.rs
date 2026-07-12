@@ -253,7 +253,7 @@ pub(super) fn transport_material_object(
     })
 }
 
-// Assert two proof-material-set verification responses accept and agree
+// Assert two successful proof-material-set verification responses agree
 // on every verified field except the proof material set root, which binds the
 // per-record proof-bytes encoding and so legitimately differs between the
 // embedded and transported forms.
@@ -261,16 +261,6 @@ pub(super) fn assert_semantically_identical_verification(
     embedded: &serde_json::Value,
     transported: &serde_json::Value,
 ) {
-    assert_eq!(
-        embedded["ok"],
-        serde_json::json!(true),
-        "embedded verification must accept"
-    );
-    assert_eq!(
-        transported["ok"],
-        serde_json::json!(true),
-        "transported verification must accept"
-    );
     let mut embedded_without_root = embedded.clone();
     let mut transported_without_root = transported.clone();
     for response in [&mut embedded_without_root, &mut transported_without_root] {

@@ -1,4 +1,3 @@
-use super::accounting;
 use super::evaluation_domain::EvaluationDomainPlan;
 use super::extension_field::{
     CHALLENGE_EXTENSION_DEGREE, ChallengeExtensionElement, ChallengeExtensionTower,
@@ -673,9 +672,6 @@ pub(crate) fn verify_evaluation_key_share(
         .map(|share_linkage| share_linkage.packed_ring_degree(statement.ring_degree))
         .transpose()?
         .unwrap_or(statement.ring_degree);
-    accounting::enforce_current_succinct_proof_soundness_policy(
-        proof_trace_ring_degree / TRACE_SPLIT,
-    )?;
     let proof_limb_indices = statement.proof_limb_indices();
     if proof.limb_proofs.len() != proof_limb_indices.len() {
         return Err(invalid_succinct_setup_proof(

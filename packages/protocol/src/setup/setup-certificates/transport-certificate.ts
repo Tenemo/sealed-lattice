@@ -3,7 +3,6 @@ import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 import {
     setupTransportChunkSizeBytes,
     setupTransportCopyCountLimit,
-    setupTransportedObjectLoadingPolicy,
     setupTransportLargestSingleBufferBytes,
     setupTransportLazyLoadingPolicy,
     setupTransportResumePolicy,
@@ -78,7 +77,6 @@ function transportedObjectRecords(
             chunkHashes: input.chunkHashes,
             fullObjectHash: input.fullObjectHash,
             encoding: 'binary',
-            loadingPolicy: setupTransportedObjectLoadingPolicy,
         });
         chunkStartIndex += expectedChunkCount;
     });

@@ -38,7 +38,7 @@ export type ThresholdParametersInput = {
 /** Roster parameters classification for the derived threshold parameters. */
 export type RosterParametersKind =
     | 'CasualMicroRoster'
-    | 'FirstParametersRoster'
+    | 'FoundationRoster'
     | 'SupportedDynamicRosterRange'
     | 'UncertifiedDynamicRoster';
 
@@ -247,12 +247,11 @@ export type CapabilityContext = {
     readonly isDirectProofTransportPresent?: boolean;
     readonly isMobileReplayEvidencePresent?: boolean;
     readonly isTargetDecryptionCertificatePresent?: boolean;
-    readonly isTargetDecryptionClosureApplied?: boolean;
     readonly recoveryState?: RecoveryState;
 };
 
 /** Stable reason returned when a protocol action is refused. */
-export type RefusalReason =
+export type LifecycleRefusalReason =
     | 'OperationUnavailable'
     | 'InvalidLifecycleState'
     | 'PollSpecInvalid'
@@ -273,7 +272,6 @@ export type RefusalReason =
     | 'MissingMobileReplayEvidence'
     | 'MissingTargetDecryptionCertificate'
     | 'FrozenStateIncomplete'
-    | 'TargetDecryptionClosureMissing'
     | 'AmbiguousRecoveryState'
     | 'StaleRecoveryEpoch'
     | 'ClonedDeviceState'
@@ -288,5 +286,5 @@ export type CapabilityDecision =
     | {
           readonly allowed: false;
           readonly action: ProtocolAction;
-          readonly reason: RefusalReason;
+          readonly reason: LifecycleRefusalReason;
       };

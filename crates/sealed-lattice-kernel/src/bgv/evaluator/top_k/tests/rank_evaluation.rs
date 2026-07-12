@@ -1,19 +1,19 @@
 use super::*;
 use crate::bgv::evaluator::engine::ciphertext_add;
 
-// The first-profile guard for the multi-ballot comparison handoff: a genuine
+// The foundation-profile guard for the multi-ballot comparison handoff: a genuine
 // ten-ballot aggregate at the full score-difference domain (D = 90) must
 // produce ranks that decrypt correctly. The packing construction leaves the
 // comparison input structurally noisy and the comparison evaluation fails as
 // a cliff when that noise exceeds its input ceiling, so tiny-domain coverage
 // (score_domain_max = 2) cannot stand in for this case; this test exists so a
 // saturating handoff can never ship silently again. It runs one full
-// first-profile-domain comparison, which costs a couple of minutes.
+// foundation-profile-domain comparison, which costs a couple of minutes.
 #[test]
 #[ignore = "heavy Rust kernel evaluator test; run pnpm run test:rust:kernel:heavy"]
-fn heavy_rust_kernel_first_profile_domain_multiballot_rank_evaluation_decrypts() {
+fn heavy_rust_kernel_foundation_profile_domain_multiballot_rank_evaluation_decrypts() {
     let context = EvaluatorContext::new(
-        "first-profile-domain-multiballot-rank",
+        "foundation-profile-domain-multiballot-rank",
         SELECTED_EVALUATOR_WORKING_LEVEL,
     )
     .expect("context");
@@ -45,14 +45,14 @@ fn heavy_rust_kernel_first_profile_domain_multiballot_rank_evaluation_decrypts()
 
     let mut aggregate_ciphertext = context
         .key()
-        .encrypt_slots(&ballots[0], "first-profile-domain-ballot-0")
+        .encrypt_slots(&ballots[0], "foundation-profile-domain-ballot-0")
         .expect("ballot ciphertext");
     for (ballot_index, ballot) in ballots.iter().enumerate().skip(1) {
         let ballot_ciphertext = context
             .key()
             .encrypt_slots(
                 ballot,
-                &format!("first-profile-domain-ballot-{ballot_index}"),
+                &format!("foundation-profile-domain-ballot-{ballot_index}"),
             )
             .expect("ballot ciphertext");
         aggregate_ciphertext =
@@ -63,7 +63,7 @@ fn heavy_rust_kernel_first_profile_domain_multiballot_rank_evaluation_decrypts()
         &context,
         &aggregate_ciphertext,
         option_count,
-        "first-profile-domain-pack",
+        "foundation-profile-domain-pack",
     )
     .expect("packed scores");
     let rank_evaluation = evaluate_packed_rank_evaluation_from_packed_scores_with_batched_pairs(
@@ -71,7 +71,7 @@ fn heavy_rust_kernel_first_profile_domain_multiballot_rank_evaluation_decrypts()
         &packed_scores,
         option_count,
         score_domain_max,
-        "first-profile-domain-rank",
+        "foundation-profile-domain-rank",
     )
     .expect("rank evaluation");
     let decrypted_slots = context
@@ -84,7 +84,7 @@ fn heavy_rust_kernel_first_profile_domain_multiballot_rank_evaluation_decrypts()
 
     assert_eq!(
         decrypted_rank_values, expected_rank_values,
-        "the first-profile-domain multi-ballot handoff must decrypt to the tie-policy ranks"
+        "the foundation-profile-domain multi-ballot handoff must decrypt to the tie-policy ranks"
     );
 }
 

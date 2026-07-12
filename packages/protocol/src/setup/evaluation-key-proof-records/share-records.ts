@@ -105,49 +105,9 @@ const assertShareMaterial = (
         shareMaterial.keySwitchMaterialEncoding ===
         evaluationKeyShareComponentMaterialEncoding
     ) {
-        for (const [hashFieldName, hashValue] of [
-            [
-                'keySwitchComponentMaterialRoot',
-                shareMaterial.keySwitchComponentMaterialRoot,
-            ],
-            [
-                'keySwitchComponentFullObjectHash',
-                shareMaterial.keySwitchComponentFullObjectHash,
-            ],
-            [
-                'keySwitchComponentChunkRoot',
-                shareMaterial.keySwitchComponentChunkRoot,
-            ],
-        ] as const) {
-            assertProtocolHash(hashValue, `${fieldName}.${hashFieldName}`);
-        }
-        assertPositiveSafeInteger(
-            shareMaterial.keySwitchComponentChunkSizeBytes,
-            `${fieldName}.keySwitchComponentChunkSizeBytes`,
-        );
-        assertPositiveSafeInteger(
-            shareMaterial.keySwitchComponentChunkCount,
-            `${fieldName}.keySwitchComponentChunkCount`,
-        );
-        assertPositiveSafeInteger(
-            shareMaterial.keySwitchComponentTotalByteLength,
-            `${fieldName}.keySwitchComponentTotalByteLength`,
-        );
-        if (
-            shareMaterial.keySwitchComponentChunkHashes.length !==
-            shareMaterial.keySwitchComponentChunkCount
-        ) {
-            throw new Error(
-                `${fieldName}.keySwitchComponentChunkHashes must match keySwitchComponentChunkCount.`,
-            );
-        }
-        shareMaterial.keySwitchComponentChunkHashes.forEach(
-            (chunkHash, chunkIndex) => {
-                assertProtocolHash(
-                    chunkHash,
-                    `${fieldName}.keySwitchComponentChunkHashes.${String(chunkIndex)}`,
-                );
-            },
+        assertProtocolHash(
+            shareMaterial.keySwitchComponentMaterialRoot,
+            `${fieldName}.keySwitchComponentMaterialRoot`,
         );
     } else {
         throw new TypeError(
@@ -176,18 +136,6 @@ const shareMaterialRecordFields = (
                   shareMaterial.keySwitchMaterialEncoding,
               keySwitchComponentMaterialRoot:
                   shareMaterial.keySwitchComponentMaterialRoot,
-              keySwitchComponentChunkSizeBytes:
-                  shareMaterial.keySwitchComponentChunkSizeBytes,
-              keySwitchComponentChunkCount:
-                  shareMaterial.keySwitchComponentChunkCount,
-              keySwitchComponentTotalByteLength:
-                  shareMaterial.keySwitchComponentTotalByteLength,
-              keySwitchComponentFullObjectHash:
-                  shareMaterial.keySwitchComponentFullObjectHash,
-              keySwitchComponentChunkRoot:
-                  shareMaterial.keySwitchComponentChunkRoot,
-              keySwitchComponentChunkHashes:
-                  shareMaterial.keySwitchComponentChunkHashes,
           }),
 });
 

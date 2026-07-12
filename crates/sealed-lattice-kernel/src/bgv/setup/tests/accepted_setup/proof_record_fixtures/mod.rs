@@ -49,6 +49,17 @@ pub(super) fn participant_count_from_package(package: &serde_json::Value) -> u64
         .expect("participant count")
 }
 
+pub(in super::super) fn public_coefficient_commitment_ring_degree_from_fixture_package(
+    package: &serde_json::Value,
+) -> usize {
+    usize::try_from(
+        package["vssPublicCoefficientCommitmentSet"]["ringDegree"]
+            .as_u64()
+            .expect("public VSS coefficient commitment ring degree"),
+    )
+    .expect("public VSS coefficient commitment ring degree fits usize")
+}
+
 // The proof-bearing fixtures are split by proof family. Sub-modules use
 // `super::*` to reach the shared work-item types here and sibling fixture
 // builders, and only import the accepted_setup test glob when they need it.

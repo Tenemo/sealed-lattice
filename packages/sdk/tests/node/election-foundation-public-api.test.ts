@@ -1,25 +1,16 @@
-import type {
-    FoundationTranscriptInput,
-    FoundationTranscriptVerification,
-    TranscriptCoreFixture,
-    TranscriptCoreVerificationResult,
-} from '@sealed-lattice/types';
+import type { VerificationResult } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
 import * as publicApiRuntime from '../../dist/index.js';
 
 import { deriveCanonicalObjectHash } from '#packages/crypto/src/index';
-import {
-    createFoundationTranscriptCoreFixture,
-    createFoundationTranscriptFixture,
-} from '#tests/support/foundation-transcript-fixture';
+import type {
+    FoundationBoardCandidate,
+    FoundationBoardSession,
+    FoundationBoardSessionInput,
+} from '#packages/sdk/src/index';
+import { createAuthenticatedSetupIntentTestVector } from '#packages/wasm/tests/foundation-board-test-vectors';
 
-type VerifyFoundationTranscript = (
-    input: FoundationTranscriptInput,
-) => FoundationTranscriptVerification;
-type VerifyTranscriptCoreFixture = (
-    fixture: TranscriptCoreFixture,
-) => Promise<TranscriptCoreVerificationResult>;
 type DeriveCollectiveBgvSetupRosterHash = (
     entries: readonly Readonly<{
         readonly rosterPosition: number;
@@ -27,14 +18,20 @@ type DeriveCollectiveBgvSetupRosterHash = (
         readonly signingPublicKeyHash: string;
     }>[],
 ) => string;
+type CreateFoundationBoardSession = (
+    configuration: FoundationBoardSessionInput,
+) => Promise<VerificationResult<FoundationBoardSession>>;
+type FoundationBoardCandidateObjectHash = (
+    candidate: FoundationBoardCandidate,
+) => Uint8Array;
 
 const publicApiRuntimeRecord = publicApiRuntime as Record<string, unknown>;
-const verifyFoundationTranscript =
-    publicApiRuntimeRecord.verifyFoundationTranscript as VerifyFoundationTranscript;
-const verifyTranscriptCoreFixture =
-    publicApiRuntimeRecord.verifyTranscriptCoreFixture as VerifyTranscriptCoreFixture;
 const deriveCollectiveBgvSetupRosterHash =
     publicApiRuntimeRecord.deriveCollectiveBgvSetupRosterHash as DeriveCollectiveBgvSetupRosterHash;
+const createFoundationBoardSession =
+    publicApiRuntimeRecord.createFoundationBoardSession as CreateFoundationBoardSession;
+const foundationBoardCandidateObjectHash =
+    publicApiRuntimeRecord.foundationBoardCandidateObjectHash as FoundationBoardCandidateObjectHash;
 
 const requiredPublicFunctions = [
     [
@@ -67,6 +64,14 @@ const requiredPublicFunctions = [
         publicApiRuntimeRecord.createSetupPackageVerificationInput,
     ],
     [
+        'createFoundationBoardSession',
+        publicApiRuntimeRecord.createFoundationBoardSession,
+    ],
+    [
+        'foundationBoardCandidateObjectHash',
+        publicApiRuntimeRecord.foundationBoardCandidateObjectHash,
+    ],
+    [
         'isActionCurrentForRecoveryEpoch',
         publicApiRuntimeRecord.isActionCurrentForRecoveryEpoch,
     ],
@@ -89,12 +94,6 @@ const requiredPublicFunctions = [
     [
         'verifyRosterManifestTranscript',
         publicApiRuntimeRecord.verifyRosterManifestTranscript,
-    ],
-    ['verifyFoundationTranscript', verifyFoundationTranscript],
-    ['verifyTargetFinality', publicApiRuntimeRecord.verifyTargetFinality],
-    [
-        'verifyTranscriptCoreFixture',
-        publicApiRuntimeRecord.verifyTranscriptCoreFixture,
     ],
     ['verifySetupPackage', publicApiRuntimeRecord.verifySetupPackage],
     ['verifyPrivateVssShare', publicApiRuntimeRecord.verifyPrivateVssShare],
@@ -125,44 +124,59 @@ describe('election foundation public package API in Node', () => {
         }
     });
 
-    it('verifies the deterministic foundation transcript through the public package', () => {
-        const fixture = createFoundationTranscriptFixture();
-        const verification = verifyFoundationTranscript(fixture.input);
+    it('opens the packaged canonical board boundary and keeps refusals non-consuming', async () => {
+        const authenticatedSetupIntent =
+            createAuthenticatedSetupIntentTestVector();
+        const opened = await createFoundationBoardSession({
+            actionContextHash: new Uint8Array(64).fill(0x33),
+            canonicalRosterBytes: authenticatedSetupIntent.canonicalRosterBytes,
+            ceremonyContextHash: new Uint8Array(64).fill(0x22),
+            limits: {
+                maximumCarrierByteLength: 131_072,
+                maximumCarrierCount: 32,
+                maximumRetainedCarrierByteLength: 1_048_576,
+                maximumUnresolvedDependencyCount: 128,
+            },
+            suiteIdentifier: new Uint8Array(64).fill(0x11),
+        });
+        expect(opened.isValid).toBe(true);
+        if (!opened.isValid) {
+            throw new Error(opened.refusalReason);
+        }
+        try {
+            expect(opened.value.ingest(Uint8Array.from([1, 2, 3]))).toEqual({
+                isValid: false,
+                refusalReason: 'malformedEncoding',
+            });
+            const accepted = opened.value.ingest(
+                authenticatedSetupIntent.canonicalCarrierBytes,
+            );
+            expect(accepted.isValid).toBe(true);
+            if (!accepted.isValid) {
+                throw new Error(accepted.refusalReason);
+            }
+            expect(foundationBoardCandidateObjectHash(accepted.value)).toEqual(
+                authenticatedSetupIntent.objectHash,
+            );
+            expect(opened.value.requireCompleteCarrierGraph()).toEqual({
+                isValid: true,
+                value: undefined,
+            });
+        } finally {
+            opened.value.cancel();
+        }
 
-        expect(verification.isValid).toBe(true);
-        expect(verification.electionManifestHash).toBe(
-            fixture.expectedHashes.electionManifestHash,
-        );
-        expect(verification.rosterExternalAcceptanceHash).toBe(
-            fixture.expectedHashes.rosterExternalAcceptanceHash,
-        );
-        expect(verification.firstValidOrderHash).toBe(
-            fixture.expectedHashes.firstValidOrderHash,
-        );
-        expect(verification.targetFinalityRecordHash).toBe(
-            fixture.expectedHashes.targetFinalityRecordHash,
-        );
-        expect(verification.nextRequiredEvidence).toEqual(
-            expect.arrayContaining([
-                'direct ballot proof verification',
-                'decoded result verification',
-                'supported-phone mobile runtime evidence',
-            ]),
-        );
-
-        const wrongTopCountInput = {
-            ...fixture.input,
-            expectedTopOptionCount: fixture.input.expectedTopOptionCount - 1,
-        };
+        expect(() =>
+            foundationBoardCandidateObjectHash(
+                Object.freeze({}) as Parameters<
+                    typeof foundationBoardCandidateObjectHash
+                >[0],
+            ),
+        ).toThrow('was not issued by this SDK instance');
         expect(
-            verifyFoundationTranscript(wrongTopCountInput).refusedObjects,
-        ).toEqual(
-            expect.arrayContaining([
-                expect.objectContaining({
-                    code: 'TargetFinalityPolicyMismatch',
-                }),
-            ]),
-        );
+            publicApiRuntimeRecord.verifyFoundationTranscript,
+        ).toBeUndefined();
+        expect(publicApiRuntimeRecord.verifyTargetFinality).toBeUndefined();
     });
 
     it('derives the setup roster hash used by setup package verification', () => {
@@ -198,22 +212,5 @@ describe('election foundation public package API in Node', () => {
                 },
             ]),
         ).toBe(expectedSetupRosterHash);
-    });
-
-    it('matches foundation roots through the packaged transcript-core WASM verifier', async () => {
-        const fixture = createFoundationTranscriptFixture();
-        const transcriptCoreFixture = createFoundationTranscriptCoreFixture(
-            fixture.expectedHashes,
-        );
-        const transcriptCoreVerification = await verifyTranscriptCoreFixture(
-            transcriptCoreFixture,
-        );
-
-        expect(transcriptCoreVerification).toMatchObject({
-            isValid: true,
-            caseName: 'foundation-transcript-roots',
-            objectHash512: transcriptCoreFixture.expectedObjectHash512,
-            chunkRoot: transcriptCoreFixture.expectedChunkRoot,
-        });
     });
 });

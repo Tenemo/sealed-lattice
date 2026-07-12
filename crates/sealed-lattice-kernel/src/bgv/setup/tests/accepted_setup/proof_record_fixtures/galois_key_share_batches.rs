@@ -17,7 +17,7 @@ pub(in super::super) fn galois_key_share_batches_object(
     let required_schedule = schedule["requiredGaloisKeySchedule"]
         .as_array()
         .expect("Galois key schedule");
-    let ring_degree = source_constant_commitments_from_fixture_package(package, 0)[0].ring_degree;
+    let ring_degree = public_coefficient_commitment_ring_degree_from_fixture_package(package);
     // Generate each trustee's Galois key-switch component material across the
     // scheduled rotations in parallel, then consume that trustee's material in
     // schedule order before moving to the next trustee, so peak memory stays

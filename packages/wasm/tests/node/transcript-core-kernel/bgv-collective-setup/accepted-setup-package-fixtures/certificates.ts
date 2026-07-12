@@ -104,7 +104,6 @@ export function acceptedSetupTransportCertificate(
                 chunkHashes,
                 fullObjectHash,
                 encoding: 'binary',
-                loadingPolicy: 'stream-verified-before-object-use',
             },
         ],
     };

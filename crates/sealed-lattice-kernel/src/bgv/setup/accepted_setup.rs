@@ -97,17 +97,12 @@ use self::vss_public_material_verification::{
     VssPublicMaterialVerification, verify_optional_vss_public_material,
 };
 
-use super::setup_proof;
 use crate::bgv::setup_helpers::compare_required_string;
 
 #[cfg(test)]
 use serde_json::{Value, json};
 use std::{
     collections::{BTreeMap, BTreeSet},
-    fs::File,
-    io::Read,
-    path::PathBuf,
-    sync::{Arc, Mutex, OnceLock},
 };
 use unicode_normalization::UnicodeNormalization;
 
@@ -127,8 +122,7 @@ use super::{
     },
     setup_proof::{
         SETUP_PROOF_BYTES_DOMAIN, SETUP_PROOF_MATERIAL_ENCODING, SETUP_PROOF_SERIALIZATION,
-        SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES, SetupProofMaterialBytes,
-        VerifiedSetupProofMaterialEvictionGuard, setup_proof_material_transport_hashes,
+        SetupProofMaterialBytes, VerifiedSetupProofMaterialEvictionGuard,
         verified_setup_proof_material_bytes_from_request,
     },
     vss::carry_aware_vss_share_relation_value,
@@ -138,7 +132,10 @@ use crate::bgv::evaluator::top_k::{
     SELECTED_EVALUATOR_WORKING_LEVEL, direct_score_packing_basis_galois_elements,
     packed_rank_forward_basis_galois_elements, packed_rank_return_basis_galois_elements,
 };
-use crate::hashing::derive_canonical_object_hash;
+use crate::hashing::{
+    CanonicalJsonPathSegment, derive_canonical_object_hash,
+    derive_canonical_object_hash_omitting_field_paths,
+};
 use crate::protocol_signatures::{
     ProtocolSignatureExpectation, verify_protocol_signature_envelope,
 };
@@ -199,8 +196,8 @@ const PRIVATE_VSS_ENVELOPE_COMMITMENT_SET_OBJECT_TYPE: &str = "PrivateVssEnvelop
 const PRIVATE_VSS_ENVELOPE_COMMITMENT_OBJECT_TYPE: &str = "PrivateVssEnvelopeCommitment";
 const PRIVATE_VSS_ENVELOPE_AAD_OBJECT_TYPE: &str = "PrivateVssEnvelopeAad";
 const ENCRYPTED_PRIVATE_VSS_ENVELOPE_OBJECT_TYPE: &str = "EncryptedPrivateVssShareEnvelope";
-const FIRST_ROSTER_PARTICIPANT_COUNT: u64 = 10;
-const FIRST_ROSTER_DECRYPTION_THRESHOLD: u64 = 4;
+const FOUNDATION_ROSTER_PARTICIPANT_COUNT: u64 = 10;
+const FOUNDATION_DECRYPTION_THRESHOLD: u64 = 4;
 // Supported parameterized roster range. The first setup/evaluator roster
 // (n = 10) is the only benchmarked and certified instance; supported-phone
 // evidence is still future work. The verifier accepts any 3 <= n <= 20 by
@@ -248,8 +245,8 @@ pub(super) fn roster_parameters_from_participant_count(
     }
 }
 
-pub(super) fn first_closure_roster_parameters() -> AcceptedRosterParameters {
-    roster_parameters_from_participant_count(FIRST_ROSTER_PARTICIPANT_COUNT)
+pub(super) fn foundation_roster_parameters() -> AcceptedRosterParameters {
+    roster_parameters_from_participant_count(FOUNDATION_ROSTER_PARTICIPANT_COUNT)
 }
 
 /// Roster parameters for the roster size declared in a verified setup context.
@@ -262,7 +259,7 @@ pub(super) fn accepted_roster_from_setup_context(
     let participant_count = setup_context
         .get("participantCount")
         .and_then(Value::as_u64)
-        .unwrap_or(FIRST_ROSTER_PARTICIPANT_COUNT);
+        .unwrap_or(FOUNDATION_ROSTER_PARTICIPANT_COUNT);
     roster_parameters_from_participant_count(participant_count)
 }
 
@@ -270,7 +267,7 @@ pub(super) fn accepted_roster_from_package(setup_package: &Value) -> AcceptedRos
     setup_package
         .get("setupContext")
         .map(accepted_roster_from_setup_context)
-        .unwrap_or_else(first_closure_roster_parameters)
+        .unwrap_or_else(foundation_roster_parameters)
 }
 const SETUP_TRANSPORT_SCHEME_ID: &str = "sealed-lattice-setup-binary-chunked-transport";
 const SETUP_TRANSPORT_CERTIFICATE_OBJECT_TYPE: &str = "SetupTransportCertificate";
@@ -299,7 +296,6 @@ const SETUP_TRANSPORTED_EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ROLE: &str =
 const SETUP_TRANSPORTED_PUBLIC_EVALUATION_KEY_MATERIAL_NAME: &str = "publicEvaluationKeyMaterial";
 const SETUP_TRANSPORTED_PUBLIC_EVALUATION_KEY_MATERIAL_ROLE: &str =
     "public-evaluation-key-runtime-material";
-const SETUP_TRANSPORTED_OBJECT_LOADING_POLICY: &str = "stream-verified-before-object-use";
 const PRIVATE_VSS_ENVELOPE_DELIVERY_PHASE_NUMBER: u64 = 6;
 const PRIVATE_VSS_ENVELOPE_VERIFICATION_PHASE_NUMBER: u64 = 7;
 const EVALUATOR_REPLAY_SCHEME_LABEL: &str = "direct-encrypted-ballot-evaluator-replay";
@@ -395,7 +391,7 @@ enum VerificationFlow {
 }
 
 pub(crate) fn describe_collective_bgv_setup_parameters() -> CanonicalResult<Value> {
-    describe_collective_bgv_setup_parameters_for_roster(&first_closure_roster_parameters())
+    describe_collective_bgv_setup_parameters_for_roster(&foundation_roster_parameters())
 }
 
 pub(crate) fn describe_collective_bgv_setup_parameters_for_roster(
@@ -407,7 +403,6 @@ pub(crate) fn describe_collective_bgv_setup_parameters_for_roster(
         "objectType": SETUP_PACKAGE_OBJECT_TYPE,
         "adversaryModel": "active-static",
         "livenessModel": "secure-with-abort",
-        "sharingModel": "recipient-verified-vss",
         "sharingDomain": "per-rns-prime",
         "completionRule": "full-roster",
         "participantCount": roster.participant_count,
@@ -429,8 +424,8 @@ pub(crate) fn describe_collective_bgv_setup_parameters_for_roster(
 }
 
 // The setup parameters for a reduced roster size, used by test fixtures that
-// exercise the accepted-setup path at a smaller participant count than the first
-// closure roster. The parameters hash and quorums are derived from the roster, so
+// exercise the accepted-setup path at a smaller participant count than the fixed
+// foundation roster. The parameters hash and quorums are derived from the roster, so
 // the reduced-roster setup context binds the hash the verifier recomputes.
 pub(crate) fn describe_collective_bgv_setup_parameters_for_participant_count(
     participant_count: u64,
@@ -507,7 +502,7 @@ pub(crate) fn derive_collective_bgv_setup_public_derivations_from_request(
     let decryption_threshold = request
         .get("decryptionThreshold")
         .and_then(Value::as_u64)
-        .unwrap_or(FIRST_ROSTER_DECRYPTION_THRESHOLD);
+        .unwrap_or(FOUNDATION_DECRYPTION_THRESHOLD);
     derive_collective_bgv_setup_public_derivations(public_matrix_seed_hash, decryption_threshold)
 }
 
@@ -659,8 +654,7 @@ fn verify_setup_package_hash(
     };
     validate_hash_string(setup_package_hash, "setupPackage.setupPackageHash")?;
 
-    let hash_input = setup_package_hash_input(setup_package);
-    let expected_hash = derive_canonical_object_hash(&hash_input)?;
+    let expected_hash = derive_collective_setup_package_hash(setup_package)?;
     if setup_package_hash != expected_hash {
         return Ok(Some(verification_response(
             Some("setupPackageAssembly"),
@@ -695,35 +689,21 @@ fn verify_setup_package_hash(
     Ok(None)
 }
 
-fn setup_package_hash_input(setup_package: &Value) -> Value {
-    let mut hash_input = setup_package.clone();
-    let hash_input_object = hash_input
-        .as_object_mut()
-        .expect("setup package object was checked");
-    hash_input_object.remove("setupPackageHash");
-    strip_private_vss_encrypted_envelopes_from_package_hash_input(&mut hash_input);
-
-    hash_input
-}
-
-fn strip_private_vss_encrypted_envelopes_from_package_hash_input(hash_input: &mut Value) {
-    let Some(private_vss_envelope_commitments) = hash_input
-        .get_mut("privateVssEnvelopeCommitments")
-        .and_then(Value::as_object_mut)
-    else {
-        return;
-    };
-    let Some(envelope_references) = private_vss_envelope_commitments
-        .get_mut("envelopeReferences")
-        .and_then(Value::as_array_mut)
-    else {
-        return;
-    };
-    for envelope_reference in envelope_references {
-        if let Some(envelope_reference_object) = envelope_reference.as_object_mut() {
-            envelope_reference_object.remove("encryptedEnvelope");
-        }
-    }
+pub(in crate::bgv::setup) fn derive_collective_setup_package_hash(
+    setup_package: &Value,
+) -> CanonicalResult<String> {
+    derive_canonical_object_hash_omitting_field_paths(
+        setup_package,
+        &[
+            &[CanonicalJsonPathSegment::ObjectField("setupPackageHash")],
+            &[
+                CanonicalJsonPathSegment::ObjectField("privateVssEnvelopeCommitments"),
+                CanonicalJsonPathSegment::ObjectField("envelopeReferences"),
+                CanonicalJsonPathSegment::ArrayElement,
+                CanonicalJsonPathSegment::ObjectField("encryptedEnvelope"),
+            ],
+        ],
+    )
 }
 
 fn verify_required_final_objects(setup_package: &Value) -> CanonicalResult<Option<Value>> {
@@ -918,3 +898,133 @@ use setup_parameters::*;
 
 pub(super) use binding_checks::accepted_vss_coefficient_commitment_root;
 pub(super) use setup_parameters::{setup_parameters_hash, setup_parameters_hash_for_roster};
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn collective_setup_package_hash_matches_clone_and_remove_reference() {
+        let setup_package = json!({
+            "objectType": "CollectiveBgvSetupPackage",
+            "setupPackageHash": "excluded-self-hash",
+            "privateVssEnvelopeCommitments": {
+                "encryptedEnvelope": "bound-at-the-parent-object",
+                "envelopeReferences": [
+                    {
+                        "encryptedEnvelope": {
+                            "objectType": "PrivateVssEncryptedEnvelope",
+                            "ciphertext": "excluded-private-envelope",
+                        },
+                        "encryptedEnvelopeHash": "bound-envelope-hash",
+                    },
+                    {
+                        "encryptedEnvelope": null,
+                        "encryptedEnvelopeHash": "second-bound-envelope-hash",
+                    },
+                ],
+            },
+            "nested": {
+                "encryptedEnvelope": "bound-at-an-unrelated-path",
+                "setupPackageHash": "bound-because-it-is-not-the-root-field",
+            },
+        });
+        let mut reference_hash_input = setup_package.clone();
+        reference_hash_input
+            .as_object_mut()
+            .expect("setup package object")
+            .remove("setupPackageHash");
+        for envelope_reference in
+            reference_hash_input["privateVssEnvelopeCommitments"]["envelopeReferences"]
+                .as_array_mut()
+                .expect("envelope reference array")
+        {
+            envelope_reference
+                .as_object_mut()
+                .expect("envelope reference object")
+                .remove("encryptedEnvelope");
+        }
+
+        let expected_hash =
+            derive_canonical_object_hash(&reference_hash_input).expect("reference hash");
+        assert_eq!(
+            derive_collective_setup_package_hash(&setup_package).expect("filtered hash"),
+            expected_hash
+        );
+
+        let mut changed_excluded_fields = setup_package.clone();
+        changed_excluded_fields["setupPackageHash"] = json!("changed-excluded-self-hash");
+        changed_excluded_fields["privateVssEnvelopeCommitments"]["envelopeReferences"][0]["encryptedEnvelope"]
+            ["ciphertext"] = json!("changed-excluded-private-envelope");
+        assert_eq!(
+            derive_collective_setup_package_hash(&changed_excluded_fields)
+                .expect("hash with changed excluded fields"),
+            expected_hash
+        );
+
+        let mut changed_unrelated_field = setup_package.clone();
+        changed_unrelated_field["nested"]["encryptedEnvelope"] = json!("changed-bound-value");
+        assert_ne!(
+            derive_collective_setup_package_hash(&changed_unrelated_field)
+                .expect("changed filtered hash"),
+            expected_hash
+        );
+
+        let mut changed_nested_self_hash = setup_package.clone();
+        changed_nested_self_hash["nested"]["setupPackageHash"] = json!("changed-bound-value");
+        assert_ne!(
+            derive_collective_setup_package_hash(&changed_nested_self_hash)
+                .expect("hash with changed nested self-hash field"),
+            expected_hash
+        );
+
+        let mut malformed_nested_array = setup_package.clone();
+        malformed_nested_array["privateVssEnvelopeCommitments"]["envelopeReferences"] = json!([[{
+            "encryptedEnvelope": "still-bound-inside-a-nested-array",
+            "encryptedEnvelopeHash": "nested-envelope-hash",
+        }]]);
+        let mut malformed_nested_array_reference_input = malformed_nested_array.clone();
+        malformed_nested_array_reference_input
+            .as_object_mut()
+            .expect("malformed setup package object")
+            .remove("setupPackageHash");
+        let malformed_nested_array_reference =
+            derive_canonical_object_hash(&malformed_nested_array_reference_input)
+                .expect("malformed reference hash");
+        assert_eq!(
+            derive_collective_setup_package_hash(&malformed_nested_array)
+                .expect("filtered malformed hash"),
+            malformed_nested_array_reference
+        );
+
+        for malformed_private_vss_envelope_commitments in [
+            json!({
+                "envelopeReferences": {
+                    "encryptedEnvelope": "still-bound-without-an-array",
+                },
+            }),
+            json!([{
+                "envelopeReferences": {
+                    "encryptedEnvelope": "still-bound-after-an-earlier-array",
+                },
+            }]),
+        ] {
+            let mut malformed_container = setup_package.clone();
+            malformed_container["privateVssEnvelopeCommitments"] =
+                malformed_private_vss_envelope_commitments;
+            let mut malformed_container_reference_input = malformed_container.clone();
+            malformed_container_reference_input
+                .as_object_mut()
+                .expect("malformed setup package object")
+                .remove("setupPackageHash");
+            let malformed_container_reference =
+                derive_canonical_object_hash(&malformed_container_reference_input)
+                    .expect("malformed container reference hash");
+            assert_eq!(
+                derive_collective_setup_package_hash(&malformed_container)
+                    .expect("filtered malformed container hash"),
+                malformed_container_reference
+            );
+        }
+    }
+}

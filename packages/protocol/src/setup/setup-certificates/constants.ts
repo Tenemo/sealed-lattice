@@ -8,5 +8,3 @@ export const setupTransportStreamOrder = 'ascending-chunk-index';
 export const setupTransportResumePolicy = 'chunk-index-checkpointed-by-hash';
 export const setupTransportLazyLoadingPolicy =
     'root-addressed-large-object-loading';
-export const setupTransportedObjectLoadingPolicy =
-    'stream-verified-before-object-use';

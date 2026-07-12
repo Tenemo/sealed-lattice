@@ -11,7 +11,6 @@ import {
     protocolHashPattern,
 } from './common-fields.js';
 import {
-    setupProofMaterialRecordTransportMetadataFields,
     setupProofMaterialRecordTransportFields,
     setupProofMaterialTransportChunks,
     setupProofMaterialTransportMetadata,
@@ -222,7 +221,7 @@ type PrivateVssMailboxDeliverySetFromReferencesInput = Pick<
 export type TransportedPrivateVssShareProofChunk = Readonly<
     JsonRecord & {
         readonly chunkIndex: number;
-        readonly bytesHex: string;
+        readonly bytes: ArrayBuffer;
     }
 >;
 
@@ -231,11 +230,6 @@ export type TransportedPrivateVssShareProofMaterial = Readonly<
         readonly objectType: 'SetupTransportedPrivateVssShareProofMaterial';
         readonly proofFamily: typeof privateVssShareProofFamily;
         readonly proofMaterialRoot: ProtocolHash;
-        readonly chunkCount: number;
-        readonly totalByteLength: number;
-        readonly fullObjectHash: ProtocolHash;
-        readonly chunkHashes: readonly ProtocolHash[];
-        readonly chunkRoot: ProtocolHash;
         readonly chunks: readonly TransportedPrivateVssShareProofChunk[];
     }
 >;
@@ -585,7 +579,6 @@ const transportPrivateVssShareProofMaterial = (
         );
     }
     const proofMaterialTransport = setupProofMaterialTransportMetadata(
-        privateVssShareProofFamily,
         proofBytes,
         'privateVssShareProof proofBytesHex must produce at least one transported chunk.',
     );
@@ -600,9 +593,6 @@ const transportPrivateVssShareProofMaterial = (
             proofBytesEncoding: transportedSetupProofMaterialEncoding,
             statementHash,
             proofBytesHash,
-            ...setupProofMaterialRecordTransportMetadataFields(
-                proofMaterialTransport,
-            ),
         },
     });
     const transportedProofRecord = { ...proofRecord };
@@ -610,7 +600,6 @@ const transportPrivateVssShareProofMaterial = (
     Object.assign(
         transportedProofRecord,
         setupProofMaterialRecordTransportFields(
-            proofMaterialTransport,
             proofMaterialRoot,
             transportedSetupProofMaterialEncoding,
         ),
@@ -621,10 +610,7 @@ const transportPrivateVssShareProofMaterial = (
         proofMaterial: {
             objectType: 'SetupTransportedPrivateVssShareProofMaterial',
             proofFamily: privateVssShareProofFamily,
-            ...setupTransportedProofMaterialFields(
-                proofMaterialTransport,
-                proofMaterialRoot,
-            ),
+            ...setupTransportedProofMaterialFields(proofMaterialRoot),
             chunks: setupProofMaterialTransportChunks(proofMaterialTransport),
         },
     };

@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn q_share_trustee_points_are_distinct_for_first_roster() {
+fn q_share_trustee_points_are_distinct_for_foundation_roster() {
     for modulus in DATA_PRIMES {
         let trustee_points = (0..10)
             .map(|roster_position| {

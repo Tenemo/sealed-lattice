@@ -116,7 +116,6 @@ fn direct_encrypted_ballot_command_rejects_reused_encryption_randomness() {
             "setupSeed": TEST_SETUP_SEED
         },
         "ballotEncryptionRandomness": {
-            "source": ENCRYPTION_RANDOMNESS_DEVELOPMENT_FIXTURE,
             "encryptionSeedHexes": [
                 reused_randomness,
                 reused_randomness
@@ -145,7 +144,6 @@ fn direct_encrypted_ballot_command_rejects_reused_proof_randomness() {
         },
         "ballotEncryptionRandomness": direct_ballot_test_ballot_encryption_randomness(2),
         "proofMaskRandomness": {
-            "source": PROOF_MASK_RANDOMNESS_DEVELOPMENT_FIXTURE,
             "ballotProofRandomnessHexes": [
                 reused_randomness,
                 reused_randomness
@@ -172,11 +170,9 @@ fn direct_encrypted_ballot_command_rejects_proof_and_encryption_randomness_overl
             "setupSeed": TEST_SETUP_SEED
         },
         "ballotEncryptionRandomness": {
-            "source": ENCRYPTION_RANDOMNESS_DEVELOPMENT_FIXTURE,
             "encryptionSeedHexes": [reused_randomness]
         },
         "proofMaskRandomness": {
-            "source": PROOF_MASK_RANDOMNESS_DEVELOPMENT_FIXTURE,
             "ballotProofRandomnessHexes": [reused_randomness]
         },
         "ballots": [

@@ -120,7 +120,6 @@ pub(crate) fn verify_vss_share_linkage_bindings_request(request: &Value) -> Cano
     })?;
 
     Ok(json!({
-        "ok": true,
         "operation": "verifyVssShareLinkageBindings",
         "statementRoot": statement_root,
         "publicMatrixSeedHash": public_matrix_seed_hash,

@@ -1,5 +1,4 @@
 export { evaluateActionCapability } from './lifecycle/capabilities.js';
-export { verifyFoundationTranscript } from './foundation/index.js';
 export { verifyBoardConsistency } from './board/index.js';
 export {
     verifyCastReceiptShell,
@@ -283,10 +282,6 @@ export type {
     SetupPackageVerificationInput,
     SetupPackageVerificationInputSource,
 } from './setup/setup-package-assembly.js';
-export type {
-    VerifiedSetupProofMaterial,
-    VerifiedSetupProofMaterialSet,
-} from './setup/setup-proof-material-transport.js';
 export type {
     BinaryChunkedSameSecretBridgeProofMaterialTransport,
     BinaryChunkedVssShareLinkageProofMaterialTransport,

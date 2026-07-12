@@ -343,14 +343,6 @@ fn setup_transported_object_binding(
         "transported object encoding must be binary",
         &object_path,
     ));
-    transport_try!(expect_transport_string_at(
-        transported_object,
-        "loadingPolicy",
-        SETUP_TRANSPORTED_OBJECT_LOADING_POLICY,
-        "transportedObjectLoadingPolicyMismatch",
-        "transported object loading policy must match the setup transport parameters",
-        &object_path,
-    ));
     let object_name = transport_try!(require_transport_non_empty_string_at(
         transported_object,
         "objectName",

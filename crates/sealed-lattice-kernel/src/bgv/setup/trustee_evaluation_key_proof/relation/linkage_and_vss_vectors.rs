@@ -322,11 +322,10 @@ pub(crate) fn build_private_vss_public_vectors(
 // claims use the digit bound. Every other family uses 2
 // (centered-binomial magnitude).
 // The mask is one-sided in [0, CLAIM_MASK_RADIX^mask_digit_count), so the centered claim
-// lies in [-clear_bound, mask_bound + clear_bound]. The disclosed smudging
-// figure in accounting.rs recomputes from this same family-aware bound, so the
-// relation bound and the disclosed leakage figure agree by construction. The
-// carry's range bound here is required for the global sharing-soundness
-// argument: it keeps the pinned evaluation a bounded centered lift.
+// lies in [-clear_bound, mask_bound + clear_bound]. The carry's range bound is
+// required by the implemented relation: it keeps the pinned evaluation a
+// bounded centered lift. This bound does not by itself establish a
+// ceremony-wide zero-knowledge claim.
 pub(crate) fn claim_mask_digit_count_for_global_claim(
     statement: &TrusteeEvaluationKeyStatement,
     global_claim_id: u64,

@@ -21,22 +21,18 @@ export const createSetupPackageVerificationInput = (
     const transportedPublicKeyShareProofMaterial =
         chunklessSetupProofMaterialSetForVerificationInput(
             input.transportedPublicKeyShareProofMaterial,
-            input.verifiedSetupProofMaterials,
         );
     const transportedEvaluationKeyShareProofMaterial =
         chunklessSetupProofMaterialSetForVerificationInput(
             input.transportedEvaluationKeyShareProofMaterial,
-            input.verifiedSetupProofMaterials,
         );
     const transportedVssShareLinkageProofMaterial =
         chunklessSetupProofMaterialSetForVerificationInput(
             input.transportedVssShareLinkageProofMaterial,
-            input.verifiedSetupProofMaterials,
         );
     const transportedSameSecretBridgeProofMaterial =
         chunklessSetupProofMaterialSetForVerificationInput(
             input.transportedSameSecretBridgeProofMaterial,
-            input.verifiedSetupProofMaterials,
         );
 
     return {
@@ -90,12 +86,6 @@ export const createSetupPackageVerificationInput = (
             : {
                   transportedPublicEvaluationKeyMaterial:
                       input.transportedPublicEvaluationKeyMaterial,
-              }),
-        ...(input.verifiedSetupProofMaterials === undefined
-            ? {}
-            : {
-                  verifiedSetupProofMaterials:
-                      input.verifiedSetupProofMaterials,
               }),
     };
 };

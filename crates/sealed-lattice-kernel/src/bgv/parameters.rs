@@ -124,6 +124,10 @@ mod tests {
     fn selected_moduli_are_ntt_ready_primes() {
         assert_eq!(POLYNOMIAL_DEGREE, 32_768);
         assert_eq!(PLAINTEXT_MODULUS, 65_537);
+        assert!(
+            is_prime_for_tests(PLAINTEXT_MODULUS),
+            "the selected plaintext modulus must reproduce as prime"
+        );
         for modulus in DATA_PRIMES.into_iter().chain([SPECIAL_PRIME]) {
             assert_eq!((modulus - 1) % (2 * POLYNOMIAL_DEGREE as u64), 0);
             assert!(is_prime_for_tests(modulus));

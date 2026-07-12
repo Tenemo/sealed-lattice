@@ -41,9 +41,39 @@ use request_fields::*;
 
 pub(crate) use proof_generation::generate_private_vss_share_proof_from_request;
 
+struct CanonicalPrivateVssProofMaterialEvictionGuard {
+    proof_material_roots: Vec<String>,
+}
+
+impl CanonicalPrivateVssProofMaterialEvictionGuard {
+    fn from_request(request: &Value) -> Self {
+        let proof_material_roots = request
+            .get("transportedPrivateVssShareProofMaterial")
+            .and_then(|material_set| material_set.get("proofMaterials"))
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|proof_material| proof_material.get("proofMaterialRoot"))
+            .filter_map(Value::as_str)
+            .map(str::to_string)
+            .collect();
+        Self {
+            proof_material_roots,
+        }
+    }
+}
+
+impl Drop for CanonicalPrivateVssProofMaterialEvictionGuard {
+    fn drop(&mut self) {
+        super::evict_verified_canonical_setup_proof_materials(&self.proof_material_roots);
+    }
+}
+
 pub(crate) fn verify_private_vss_share_envelope_from_request(
     request: &Value,
 ) -> CanonicalResult<Value> {
+    let _proof_material_eviction_guard =
+        CanonicalPrivateVssProofMaterialEvictionGuard::from_request(request);
     match verify_private_vss_share_envelope_inner(request)? {
         Ok(response) => Ok(response),
         Err(refusal) => Ok(verification_response(

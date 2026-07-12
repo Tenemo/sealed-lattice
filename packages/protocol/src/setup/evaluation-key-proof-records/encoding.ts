@@ -8,17 +8,13 @@ import {
     bytesFromHex,
     bytesToHex,
 } from '../common-fields.js';
-import { appendVaruint } from '../varuint-encoding.js';
 
 import {
     type EvaluationKeyShareMaterial,
     type EvaluationKeyShareProofFamily,
     type JsonRecord,
-    evaluationKeyShareComponentMaterialChunkHashDomain,
     evaluationKeyShareComponentMaterialEncoding,
-    evaluationKeyShareComponentMaterialFullObjectHashDomain,
     evaluationKeyShareComponentVectorHashDomain,
-    textEncoder,
 } from './constants-and-types.js';
 
 const lowercaseHexPattern = /^[0-9a-f]+$/u;
@@ -113,13 +109,6 @@ export const freshProofRandomnessHex = (): string => {
     }
 
     return bytesToHex(bytes);
-};
-
-const varUintBytes = (value: number): Uint8Array => {
-    const outputBytes: number[] = [];
-    appendVaruint(outputBytes, value);
-
-    return Uint8Array.from(outputBytes);
 };
 
 export const coefficientVectorFromLittleEndianHex = (
@@ -217,83 +206,12 @@ export const evaluationKeyShareComponentVectorRoot = (
         componentVectors,
     });
 
-const evaluationKeyShareComponentMaterialFullObjectHash = (
-    proofFamily: EvaluationKeyShareProofFamily,
-    totalByteLength: number,
-    chunks: readonly Uint8Array[],
-): ProtocolHash =>
-    hash512Hex(evaluationKeyShareComponentMaterialFullObjectHashDomain, [
-        textEncoder.encode(proofFamily),
-        varUintBytes(totalByteLength),
-        ...chunks,
-    ]);
-
-const evaluationKeyShareComponentMaterialChunkHash = (
-    proofFamily: EvaluationKeyShareProofFamily,
-    fullObjectHash: ProtocolHash,
-    chunkIndex: number,
-    chunk: Uint8Array,
-): ProtocolHash =>
-    hash512Hex(evaluationKeyShareComponentMaterialChunkHashDomain, [
-        textEncoder.encode(proofFamily),
-        textEncoder.encode(fullObjectHash),
-        varUintBytes(chunkIndex),
-        chunk,
-    ]);
-
-type ComponentMaterialTransportHashes = Readonly<{
-    readonly fullObjectHash: ProtocolHash;
-    readonly chunkHashes: readonly ProtocolHash[];
-    readonly chunkRoot: ProtocolHash;
-    readonly totalByteLength: number;
-}>;
-
-export const evaluationKeyShareComponentMaterialTransportHashes = (
-    proofFamily: EvaluationKeyShareProofFamily,
-    chunks: readonly Uint8Array[],
-): ComponentMaterialTransportHashes => {
-    const totalByteLength = chunks.reduce(
-        (byteLength, chunk) => byteLength + chunk.byteLength,
-        0,
-    );
-    const fullObjectHash = evaluationKeyShareComponentMaterialFullObjectHash(
-        proofFamily,
-        totalByteLength,
-        chunks,
-    );
-    const chunkHashes = chunks.map((chunk, chunkIndex) =>
-        evaluationKeyShareComponentMaterialChunkHash(
-            proofFamily,
-            fullObjectHash,
-            chunkIndex,
-            chunk,
-        ),
-    );
-    const chunkRoot = deriveCanonicalObjectHash({
-        objectType: 'EvaluationKeyShareComponentMaterialChunkManifest',
-        proofFamily,
-        keySwitchMaterialEncoding: evaluationKeyShareComponentMaterialEncoding,
-        chunkCount: chunkHashes.length,
-        totalByteLength,
-        chunkHashes,
-        fullObjectHash,
-    });
-
-    return {
-        fullObjectHash,
-        chunkHashes,
-        chunkRoot,
-        totalByteLength,
-    };
-};
-
 export const evaluationKeyShareComponentMaterialReferenceRoot = (
     proofFamily: EvaluationKeyShareProofFamily,
     shareMaterial: EvaluationKeyShareMaterial,
     trusteeIdentity: string,
     trusteeRosterPosition: number,
     level: number,
-    transportHashes: ComponentMaterialTransportHashes,
 ): ProtocolHash =>
     deriveCanonicalObjectHash({
         objectType: 'EvaluationKeyShareComponentMaterialReference',
@@ -309,9 +227,4 @@ export const evaluationKeyShareComponentMaterialReferenceRoot = (
         rnsLimbCount: level + 1,
         keySwitchComponentVectorRoot:
             shareMaterial.keySwitchComponentVectorRoot,
-        chunkCount: transportHashes.chunkHashes.length,
-        totalByteLength: transportHashes.totalByteLength,
-        fullObjectHash: transportHashes.fullObjectHash,
-        chunkRoot: transportHashes.chunkRoot,
-        chunkHashes: transportHashes.chunkHashes,
     });

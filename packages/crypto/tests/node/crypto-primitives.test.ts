@@ -256,8 +256,6 @@ describe('crypto primitive boundary', () => {
                             objectType: 'PrivateVssShareEnvelopeHash',
                             proof: 'statement-root',
                         }),
-                        proofVerificationStatus:
-                            'verifier-required-not-implemented',
                     },
                 },
             ],

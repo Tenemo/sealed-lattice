@@ -19,7 +19,7 @@ import {
 
 import { derivePollSpecHash } from './poll-spec.js';
 import {
-    firstClosureRosterSize,
+    foundationRosterSize,
     maximumSupportedRosterSize,
     minimumDynamicRosterSize,
     minimumSupportedRosterSize,
@@ -195,13 +195,12 @@ const deriveRosterParameters = (
             warnings: ['CasualMicroRoster'],
         };
     }
-    // Size 10 is the pre-certified first parameter set and is the only
-    // dynamic-range size that runs without a separate dynamic-roster
-    // parameter certificate.
-    if (rosterSize === firstClosureRosterSize) {
+    // The fixed foundation profile is the only dynamic-range size that runs
+    // without a separate dynamic-roster parameter certificate.
+    if (rosterSize === foundationRosterSize) {
         return {
             dynamicRosterParametersCertificateHash: null,
-            rosterParametersKind: 'FirstParametersRoster',
+            rosterParametersKind: 'FoundationRoster',
             warnings: [],
         };
     }
@@ -375,7 +374,7 @@ export const deriveFrozenRosterParameters = (input: {
     }
     if (
         rosterSize >= minimumDynamicRosterSize &&
-        rosterSize !== firstClosureRosterSize &&
+        rosterSize !== foundationRosterSize &&
         dynamicRosterParametersCertificateHash === null
     ) {
         throw new Error(

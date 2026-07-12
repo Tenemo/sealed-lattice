@@ -112,5 +112,14 @@ describe('packed package policy checks', () => {
         ).toEqual([
             'Published package kernel loader must pin the packaged transcript-core WASM hash',
         ]);
+        const tamperedKernelBytes = Uint8Array.from([1]);
+        expect(
+            validatePublishedKernelIntegrity(
+                kernelRuntimeText,
+                tamperedKernelBytes,
+            ),
+        ).toEqual([
+            `Published package kernel hash mismatch: expected ${hash}, received ${hashPublishedKernelBytesSha256Hex(tamperedKernelBytes)}`,
+        ]);
     });
 });

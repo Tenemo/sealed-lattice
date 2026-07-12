@@ -1,7 +1,7 @@
 use super::*;
 
 pub(in super::super) fn setup_parameters_hash() -> CanonicalResult<String> {
-    setup_parameters_hash_for_roster(&first_closure_roster_parameters())
+    setup_parameters_hash_for_roster(&foundation_roster_parameters())
 }
 
 pub(in super::super) fn setup_parameters_hash_for_roster(
@@ -22,7 +22,6 @@ pub(super) fn setup_parameters_value(roster: &AcceptedRosterParameters) -> Canon
         "objectType": "SetupParameters",
         "adversaryModel": "active-static",
         "livenessModel": "secure-with-abort",
-        "sharingModel": "recipient-verified-vss",
         "participantCount": roster.participant_count,
         "qSetupComplete": roster.setup_completion_quorum,
         "qBallotRelease": roster.ballot_release_quorum,
@@ -180,8 +179,6 @@ pub(super) fn required_galois_set_value(required_galois_key_schedule: Value) -> 
 pub(super) fn setup_proof_parameters_value() -> CanonicalResult<Value> {
     Ok(json!({
         "objectType": "SetupProof",
-        "proofBackendBoundary": "sealed-lattice-rust-wasm-fixed-relations-only",
-        "arbitraryRelationApi": "not-exposed",
         "relationModel": {
             "applicationRing": "Z_q[X]/(X^N+1)",
             "applicationRingDegree": POLYNOMIAL_DEGREE,
@@ -201,13 +198,8 @@ pub(super) fn setup_proof_parameters_value() -> CanonicalResult<Value> {
                 "domain": "non-negative-bounded-integer",
                 "boundSource": "carry-aware-vss-share-opening-relation"
             },
-            "publicKeyError": {
-                "distribution": "accepted-error-support-pending-certificate",
-                "requiredBeforeAcceptance": "proof verifier rejects missing support certificate"
-            },
             "noWrapCarry": {
-                "domain": "bounded-lifted-integer",
-                "requiredBeforeAcceptance": "proof verifier rejects missing carry bounds"
+                "domain": "bounded-lifted-integer"
             }
         },
         "proofFamilies": setup_proof_family_descriptions()?,
@@ -215,23 +207,10 @@ pub(super) fn setup_proof_parameters_value() -> CanonicalResult<Value> {
             "encoding": SETUP_PROOF_SERIALIZATION,
             "proofBytesDomain": SETUP_PROOF_BYTES_DOMAIN,
             "succinctProofByteLayout": {
-                "encoding": "sealed-lattice-succinct-setup-proof-bytes",
-                "canonicalFieldElementStatus": "decoder-rejects-non-canonical-base-and-extension-field-coordinates",
-                "transportRootStatus": "embedded-and-binary-chunked-proof-material-roots-bind-proof-size-bytes-proof-bytes-hash-and-statement-hash"
+                "encoding": "sealed-lattice-succinct-setup-proof-bytes"
             },
             "chunking": "required-for-large-proof-material",
             "canonicalJsonRole": "root-bound metadata only"
-        },
-        "verificationPolicy": {
-            "rejectionRules": [
-                "wrong setup-proof parameters",
-                "wrong setup-proof record binding",
-                "wrong statement root",
-                "wrong proof chunk root",
-                "missing witness bounds",
-                "modulo-only relation check",
-                "generic or undeclared proof family"
-            ]
         }
     }))
 }

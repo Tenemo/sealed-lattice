@@ -15,7 +15,7 @@ mod timing;
 use aggregation::*;
 pub(crate) use command::run_direct_encrypted_ballot;
 use encryption::*;
-// The end-to-end first-profile evidence test under target_decryption::tests
+// The end-to-end foundation-profile evidence test under target_decryption::tests
 // replays a genuine ballot aggregate through this production evaluator path
 // before releasing it through the proof-backed staged decryption commands.
 pub(crate) use evaluator_replay::{

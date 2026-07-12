@@ -435,7 +435,7 @@ describe('election foundation capability evaluator', () => {
         });
     });
 
-    it('allows recombination only after target decryption parameters and closure evidence', () => {
+    it('allows recombination only after target decryption parameters and the share quorum', () => {
         expect(
             evaluateActionCapability(
                 'RecombineAcceptedTarget',
@@ -458,21 +458,6 @@ describe('election foundation capability evaluator', () => {
                     isTargetFinalityAccepted: true,
                     isTargetAccepted: true,
                     isTargetDecryptionParametersVerified: true,
-                    decryptionShareCount:
-                        certifiedThresholdParameters.decryptionShareQuorum ?? 0,
-                }),
-            ),
-        ).toMatchObject({ reason: 'TargetDecryptionClosureMissing' });
-        expect(
-            evaluateActionCapability(
-                'RecombineAcceptedTarget',
-                createContext({
-                    lifecycleState: 'decryptionSharesReady',
-                    thresholdParameters: certifiedThresholdParameters,
-                    isTargetFinalityAccepted: true,
-                    isTargetAccepted: true,
-                    isTargetDecryptionParametersVerified: true,
-                    isTargetDecryptionClosureApplied: true,
                     decryptionShareCount:
                         certifiedThresholdParameters.decryptionShareQuorum ?? 0,
                 }),

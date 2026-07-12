@@ -7,12 +7,19 @@ import type {
     TransportedPublicKeyShareProofMaterialSet,
     TransportedSameSecretBridgeProofMaterialSet,
     TransportedVssShareLinkageProofMaterialSet,
-    VerifiedSetupProofMaterial,
-    VerifiedSetupProofMaterialSet,
 } from '@sealed-lattice/protocol';
-import type { TranscriptCoreKernel } from '@sealed-lattice/wasm';
+import {
+    bgvCanonicalStreamFamilies,
+    openBgvCanonicalStreamRuntime,
+    type BgvCanonicalStreamFamily,
+    type BgvCanonicalStreamRuntime,
+    type TranscriptCoreKernel,
+} from '@sealed-lattice/wasm';
 
-import type { VerifySetupPackageInput } from './index.js';
+import type {
+    VerifyPrivateVssShareInput,
+    VerifySetupPackageInput,
+} from './index.js';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -28,144 +35,106 @@ type SetupProofMaterialTransportSet =
     | TransportedSameSecretBridgeProofMaterialSet
     | TransportedEvaluationKeyShareProofMaterialSet;
 
-type SetupProofMaterialChunk = Readonly<{
-    readonly chunkIndex: number;
-    readonly bytesHex: string;
-}>;
+const setupProofMaterialFamilies = Object.freeze({
+    transportedEvaluationKeyShareProofMaterial:
+        bgvCanonicalStreamFamilies.trusteeEvaluationKey,
+    transportedPublicKeyShareProofMaterial:
+        bgvCanonicalStreamFamilies.publicKeyShare,
+    transportedSameSecretBridgeProofMaterial:
+        bgvCanonicalStreamFamilies.sameSecretBridge,
+    transportedVssShareLinkageProofMaterial:
+        bgvCanonicalStreamFamilies.vssShareLinkage,
+} as const satisfies Readonly<
+    Record<SetupProofMaterialTransportFieldName, BgvCanonicalStreamFamily>
+>);
 
-const setupProofMaterialTransportFieldNames = [
-    'transportedPublicKeyShareProofMaterial',
-    'transportedVssShareLinkageProofMaterial',
-    'transportedSameSecretBridgeProofMaterial',
-    'transportedEvaluationKeyShareProofMaterial',
-] as const satisfies readonly SetupProofMaterialTransportFieldName[];
+const setupProofMaterialTransportFieldNames = Object.freeze(
+    Object.keys(
+        setupProofMaterialFamilies,
+    ) as SetupProofMaterialTransportFieldName[],
+);
 
-let setupProofMaterialVerificationSequence = 0;
+const isArrayBuffer = (value: unknown): value is ArrayBuffer =>
+    Object.prototype.toString.call(value) === '[object ArrayBuffer]';
 
-// Verification ids are process-local kernel stream handles, not security bindings; the cryptographic binding is the full proof material root.
-const setupProofMaterialVerificationId = (
-    fieldName: SetupProofMaterialTransportFieldName,
-    materialIndex: number,
-    proofMaterial: JsonRecord,
-): string => {
-    setupProofMaterialVerificationSequence += 1;
-    const proofMaterialRoot =
-        typeof proofMaterial.proofMaterialRoot === 'string'
-            ? proofMaterial.proofMaterialRoot.slice(0, 24)
-            : 'unbound';
-
-    return [
-        'sdk-proof-material',
-        String(setupProofMaterialVerificationSequence),
-        fieldName,
-        String(materialIndex),
-        proofMaterialRoot,
-    ].join('-');
+const protocolHash = (value: unknown, fieldPath: string): string => {
+    if (typeof value !== 'string' || !/^[0-9a-f]{128}$/u.test(value)) {
+        throw new TypeError(`${fieldPath} must be a protocol hash.`);
+    }
+    return value;
 };
 
-const setupProofMaterialReference = (proofMaterial: JsonRecord): JsonRecord => {
-    const { chunks: omittedChunks, ...reference } = proofMaterial;
-    void omittedChunks;
-
-    return reference;
-};
-
-const setupProofMaterialChunks = (
-    proofMaterial: unknown,
-): readonly SetupProofMaterialChunk[] | undefined => {
-    if (
-        proofMaterial === null ||
-        typeof proofMaterial !== 'object' ||
-        !Object.prototype.hasOwnProperty.call(proofMaterial, 'chunks')
-    ) {
+const orderedBinaryChunks = (
+    value: unknown,
+    fieldPath: string,
+): readonly ArrayBuffer[] | undefined => {
+    if (value === undefined) {
         return undefined;
     }
-
-    const chunks = (proofMaterial as JsonRecord).chunks;
-
-    return Array.isArray(chunks)
-        ? (chunks as readonly SetupProofMaterialChunk[])
-        : undefined;
+    if (!Array.isArray(value) || value.length === 0) {
+        throw new TypeError(`${fieldPath} must be a non-empty array.`);
+    }
+    return value.map((chunkValue, chunkIndex) => {
+        if (chunkValue === null || typeof chunkValue !== 'object') {
+            throw new TypeError(
+                `${fieldPath}.${String(chunkIndex)} must be an object.`,
+            );
+        }
+        const chunk = chunkValue as JsonRecord;
+        if (chunk.chunkIndex !== chunkIndex || !isArrayBuffer(chunk.bytes)) {
+            throw new TypeError(
+                `${fieldPath}.${String(chunkIndex)} must carry the expected binary chunk.`,
+            );
+        }
+        return chunk.bytes;
+    });
 };
 
 const streamSetupProofMaterialSet = (
-    kernel: TranscriptCoreKernel,
+    runtime: BgvCanonicalStreamRuntime,
     fieldName: SetupProofMaterialTransportFieldName,
     materialSet: SetupProofMaterialTransportSet | undefined,
-): readonly VerifiedSetupProofMaterial[] => {
-    if (
-        materialSet === undefined ||
-        !Array.isArray(materialSet.proofMaterials)
-    ) {
-        return [];
+): void => {
+    if (materialSet === undefined) {
+        return;
     }
-
-    const verifiedMaterials: VerifiedSetupProofMaterial[] = [];
+    if (!Array.isArray(materialSet.proofMaterials)) {
+        throw new TypeError(`${fieldName}.proofMaterials must be an array.`);
+    }
     materialSet.proofMaterials.forEach((proofMaterialValue, materialIndex) => {
-        const chunks = setupProofMaterialChunks(proofMaterialValue);
+        const proofMaterial = proofMaterialValue as JsonRecord;
+        const chunks = orderedBinaryChunks(
+            proofMaterial.chunks,
+            `${fieldName}.proofMaterials.${String(materialIndex)}.chunks`,
+        );
         if (chunks === undefined) {
             return;
         }
-        const proofMaterial = proofMaterialValue as JsonRecord;
-        const proofMaterialReference =
-            setupProofMaterialReference(proofMaterial);
-        const verificationId = setupProofMaterialVerificationId(
-            fieldName,
-            materialIndex,
-            proofMaterial,
-        );
-        kernel.beginSetupProofMaterialTransportStream({
-            verificationId,
-            transportedSetupProofMaterial: proofMaterialReference,
+        runtime.stage({
+            chunks,
+            family: setupProofMaterialFamilies[fieldName],
+            materialRoot: protocolHash(
+                proofMaterial.proofMaterialRoot,
+                `${fieldName}.proofMaterials.${String(materialIndex)}.proofMaterialRoot`,
+            ),
         });
-        chunks.forEach((chunk) => {
-            kernel.absorbSetupProofMaterialTransportStreamChunk({
-                verificationId,
-                chunkIndex: chunk.chunkIndex,
-                bytesHex: chunk.bytesHex,
-            });
-        });
-        const verification = kernel.finishSetupProofMaterialTransportStream({
-            verificationId,
-        });
-        verifiedMaterials.push(
-            verification.verifiedSetupProofMaterial as VerifiedSetupProofMaterial,
-        );
     });
-
-    return verifiedMaterials;
 };
 
-type JsonRecordWithRoot = JsonRecord &
-    Readonly<{ readonly keySwitchComponentMaterialRoot?: unknown }>;
-
-let evaluationKeyShareComponentMaterialVerificationSequence = 0;
-
-// Verification ids are process-local kernel stream handles, not security bindings; the cryptographic binding is the component material root. A per-process sequence prefix (as for setup proof material above) keeps the id unique even when a prior stream for the same root wedged its session after a mid-stream throw, so a retry does not collide on an already-active id.
-const evaluationKeyShareComponentMaterialVerificationId = (
-    streamIndex: number,
-    keySwitchComponentMaterialRoot: string,
-): string => {
-    evaluationKeyShareComponentMaterialVerificationSequence += 1;
-
-    return [
-        'sdk-evaluation-key-component-material',
-        String(evaluationKeyShareComponentMaterialVerificationSequence),
-        String(streamIndex),
-        keySwitchComponentMaterialRoot.slice(0, 24),
-    ].join('-');
+const componentFamily = (proofFamily: string): BgvCanonicalStreamFamily => {
+    if (proofFamily === 'relinearization-key-share') {
+        return bgvCanonicalStreamFamilies.relinearizationComponent;
+    }
+    if (proofFamily === 'galois-key-share') {
+        return bgvCanonicalStreamFamilies.galoisComponent;
+    }
+    throw new TypeError(
+        'An evaluation-key component material stream has an unsupported proof family.',
+    );
 };
 
-// Streams each transported evaluation-key component material through the
-// file-backed component material transport so the kernel holds a stream-verified
-// handle keyed by keySwitchComponentMaterialRoot before the terminal setup
-// package verification runs. This mirrors the setup proof material streaming
-// above: begin the stream with the chunkless component material reference,
-// absorb each chunk, then finish. The terminal accepted-setup verifier reads the
-// verified handle transiently, so the transported component material carries only
-// the chunkless manifest reference and never the raw chunk bytes.
 const streamEvaluationKeyShareComponentMaterial = (
-    kernel: TranscriptCoreKernel,
+    runtime: BgvCanonicalStreamRuntime,
     transportedMaterialSet:
         | TransportedEvaluationKeyShareComponentMaterialSet
         | undefined,
@@ -173,72 +142,63 @@ const streamEvaluationKeyShareComponentMaterial = (
         | readonly EvaluationKeyShareComponentMaterialChunkStream[]
         | undefined,
 ): void => {
-    if (
-        transportedMaterialSet === undefined ||
-        chunkStreams === undefined ||
-        chunkStreams.length === 0
-    ) {
+    if (transportedMaterialSet === undefined || chunkStreams === undefined) {
         return;
     }
     if (!Array.isArray(transportedMaterialSet.componentMaterials)) {
         throw new TypeError(
-            'transportedEvaluationKeyShareComponentMaterial.componentMaterials must be an array to stream component material.',
+            'transportedEvaluationKeyShareComponentMaterial.componentMaterials must be an array.',
         );
     }
-    const componentMaterialReferenceByRoot = new Map<
-        string,
-        JsonRecordWithRoot
-    >();
+    const referenceFamilyByRoot = new Map<string, string>();
     transportedMaterialSet.componentMaterials.forEach(
-        (componentMaterialValue, componentMaterialIndex) => {
-            const componentMaterial =
-                componentMaterialValue as JsonRecordWithRoot;
-            const keySwitchComponentMaterialRoot =
-                componentMaterial.keySwitchComponentMaterialRoot;
-            if (typeof keySwitchComponentMaterialRoot !== 'string') {
+        (componentMaterialValue, componentIndex) => {
+            const componentMaterial = componentMaterialValue as JsonRecord;
+            const root = protocolHash(
+                componentMaterial.keySwitchComponentMaterialRoot,
+                `transportedEvaluationKeyShareComponentMaterial.componentMaterials.${String(componentIndex)}.keySwitchComponentMaterialRoot`,
+            );
+            if (typeof componentMaterial.proofFamily !== 'string') {
                 throw new TypeError(
-                    `transportedEvaluationKeyShareComponentMaterial.componentMaterials.${String(
-                        componentMaterialIndex,
-                    )}.keySwitchComponentMaterialRoot must be a string.`,
+                    'An evaluation-key component material reference must carry its proof family.',
                 );
             }
-            componentMaterialReferenceByRoot.set(
-                keySwitchComponentMaterialRoot,
-                componentMaterial,
-            );
+            if (referenceFamilyByRoot.has(root)) {
+                throw new TypeError(
+                    'Evaluation-key component material references must not repeat a root.',
+                );
+            }
+            referenceFamilyByRoot.set(root, componentMaterial.proofFamily);
         },
     );
 
     chunkStreams.forEach((chunkStream, streamIndex) => {
-        const componentMaterialReference = componentMaterialReferenceByRoot.get(
+        const root = protocolHash(
             chunkStream.keySwitchComponentMaterialRoot,
+            `evaluationKeyShareComponentMaterialChunkStreams.${String(streamIndex)}.keySwitchComponentMaterialRoot`,
         );
-        if (componentMaterialReference === undefined) {
-            throw new Error(
-                'evaluationKeyShareComponentMaterialChunkStreams references a keySwitchComponentMaterialRoot without a transported component material reference.',
+        const referenceFamily = referenceFamilyByRoot.get(root);
+        if (
+            referenceFamily === undefined ||
+            referenceFamily !== chunkStream.proofFamily
+        ) {
+            throw new TypeError(
+                'An evaluation-key component chunk stream must match exactly one transported reference and proof family.',
             );
         }
-        const verificationId =
-            evaluationKeyShareComponentMaterialVerificationId(
-                streamIndex,
-                chunkStream.keySwitchComponentMaterialRoot,
+        const chunks = orderedBinaryChunks(
+            chunkStream.chunks,
+            `evaluationKeyShareComponentMaterialChunkStreams.${String(streamIndex)}.chunks`,
+        );
+        if (chunks === undefined) {
+            throw new TypeError(
+                'An evaluation-key component chunk stream must carry binary chunks.',
             );
-        kernel.beginEvaluationKeyShareComponentMaterialTransportStream({
-            verificationId,
-            transportedEvaluationKeyShareComponentMaterial:
-                componentMaterialReference,
-        });
-        chunkStream.chunks.forEach((chunk) => {
-            kernel.absorbEvaluationKeyShareComponentMaterialTransportStreamChunk(
-                {
-                    verificationId,
-                    chunkIndex: chunk.chunkIndex,
-                    bytesHex: chunk.bytesHex,
-                },
-            );
-        });
-        kernel.finishEvaluationKeyShareComponentMaterialTransportStream({
-            verificationId,
+        }
+        runtime.stage({
+            chunks,
+            family: componentFamily(referenceFamily),
+            materialRoot: root,
         });
     });
 };
@@ -262,40 +222,76 @@ export const prepareSetupPackageVerificationInputForKernel = (
     kernel: TranscriptCoreKernel,
     input: VerifySetupPackageInput,
 ): VerifySetupPackageInput => {
-    // The evaluation-key component material streams independently of the setup
-    // proof material and of any caller-supplied verified proof handles, so it is
-    // streamed first regardless of which proof material branch is taken. The
-    // chunkless component material reference stays in
-    // transportedEvaluationKeyShareComponentMaterial; only the raw chunk bytes
-    // are consumed here.
+    const runtime = openBgvCanonicalStreamRuntime({ kernel });
     streamEvaluationKeyShareComponentMaterial(
-        kernel,
+        runtime,
         input.transportedEvaluationKeyShareComponentMaterial,
         input.evaluationKeyShareComponentMaterialChunkStreams,
     );
-
-    if (input.verifiedSetupProofMaterials !== undefined) {
-        return setupPackageVerificationInput(input);
-    }
-
-    const verifiedMaterials = setupProofMaterialTransportFieldNames.flatMap(
-        (fieldName) =>
-            streamSetupProofMaterialSet(kernel, fieldName, input[fieldName]),
-    );
-    if (verifiedMaterials.length === 0) {
-        // No streamed proof-material handles to thread; the public-only
-        // verification input is still rebuilt so the out-of-band component
-        // material chunk streams are dropped before the kernel verify.
-        return setupPackageVerificationInput(input);
-    }
-
-    const verifiedSetupProofMaterials = {
-        objectType: 'VerifiedSetupProofMaterialSet',
-        proofMaterials: verifiedMaterials,
-    } as const satisfies VerifiedSetupProofMaterialSet;
-
-    return setupPackageVerificationInput({
-        ...input,
-        verifiedSetupProofMaterials,
+    setupProofMaterialTransportFieldNames.forEach((fieldName) => {
+        streamSetupProofMaterialSet(runtime, fieldName, input[fieldName]);
     });
+
+    return setupPackageVerificationInput(input);
+};
+
+export const preparePrivateVssShareVerificationInputForKernel = (
+    kernel: TranscriptCoreKernel,
+    input: VerifyPrivateVssShareInput,
+): VerifyPrivateVssShareInput => {
+    const transportedMaterial = input.transportedPrivateVssShareProofMaterial;
+    if (transportedMaterial === undefined) {
+        return input;
+    }
+    if (
+        transportedMaterial === null ||
+        typeof transportedMaterial !== 'object' ||
+        !Array.isArray((transportedMaterial as JsonRecord).proofMaterials)
+    ) {
+        throw new TypeError(
+            'transportedPrivateVssShareProofMaterial.proofMaterials must be an array.',
+        );
+    }
+    const materialSet = transportedMaterial as JsonRecord & {
+        readonly proofMaterials: readonly unknown[];
+    };
+    const runtime = openBgvCanonicalStreamRuntime({ kernel });
+    const proofMaterials = materialSet.proofMaterials.map(
+        (proofMaterialValue, proofMaterialIndex) => {
+            if (
+                proofMaterialValue === null ||
+                typeof proofMaterialValue !== 'object'
+            ) {
+                throw new TypeError(
+                    'A transported private VSS proof material must be an object.',
+                );
+            }
+            const proofMaterial = proofMaterialValue as JsonRecord;
+            const chunks = orderedBinaryChunks(
+                proofMaterial.chunks,
+                `transportedPrivateVssShareProofMaterial.proofMaterials.${String(proofMaterialIndex)}.chunks`,
+            );
+            if (chunks !== undefined) {
+                runtime.stage({
+                    chunks,
+                    family: bgvCanonicalStreamFamilies.vssOpeningCarry,
+                    materialRoot: protocolHash(
+                        proofMaterial.proofMaterialRoot,
+                        `transportedPrivateVssShareProofMaterial.proofMaterials.${String(proofMaterialIndex)}.proofMaterialRoot`,
+                    ),
+                });
+            }
+            const { chunks: omittedChunks, ...reference } = proofMaterial;
+            void omittedChunks;
+            return reference;
+        },
+    );
+
+    return {
+        ...input,
+        transportedPrivateVssShareProofMaterial: {
+            ...materialSet,
+            proofMaterials,
+        },
+    };
 };

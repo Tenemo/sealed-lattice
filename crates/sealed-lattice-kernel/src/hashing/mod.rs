@@ -176,22 +176,6 @@ fn finalize_hash512_hex(hasher: Shake256) -> String {
     to_hex(&output)
 }
 
-pub fn canonical_root(type_id: u64, version: u64, canonical_bytes: &[u8]) -> String {
-    let mut type_id_bytes = Vec::new();
-    append_varuint(&mut type_id_bytes, type_id);
-    let mut version_bytes = Vec::new();
-    append_varuint(&mut version_bytes, version);
-
-    hash512_hex(
-        "sealed-lattice-root/canonical-root",
-        &[&type_id_bytes, &version_bytes, canonical_bytes],
-    )
-}
-
-pub fn object_root(canonical_bytes: &[u8]) -> String {
-    canonical_root(1, 1, canonical_bytes)
-}
-
 pub fn namespace_root(namespace: &str, canonical_bytes: &[u8]) -> String {
     hash512_hex(namespace, &[canonical_bytes])
 }
@@ -348,7 +332,52 @@ fn serialized_json_string_len(value: &str) -> CanonicalResult<usize> {
     Ok(serialize_json_string(value)?.len())
 }
 
-fn canonical_json_len(value: &Value) -> CanonicalResult<usize> {
+pub(crate) enum CanonicalJsonPathSegment<'path> {
+    ObjectField(&'path str),
+    ArrayElement,
+}
+
+type CanonicalJsonFieldPaths<'path> = [&'path [CanonicalJsonPathSegment<'path>]];
+
+fn canonical_json_path_segments_match(
+    left: &CanonicalJsonPathSegment<'_>,
+    right: &CanonicalJsonPathSegment<'_>,
+) -> bool {
+    match (left, right) {
+        (
+            CanonicalJsonPathSegment::ObjectField(left_field_name),
+            CanonicalJsonPathSegment::ObjectField(right_field_name),
+        ) => left_field_name == right_field_name,
+        (CanonicalJsonPathSegment::ArrayElement, CanonicalJsonPathSegment::ArrayElement) => true,
+        _ => false,
+    }
+}
+
+fn should_omit_canonical_json_field(
+    current_path: &[CanonicalJsonPathSegment<'_>],
+    field_name: &str,
+    omitted_field_paths: &CanonicalJsonFieldPaths<'_>,
+) -> bool {
+    omitted_field_paths.iter().any(|omitted_field_path| {
+        omitted_field_path.len() == current_path.len() + 1
+            && current_path.iter().zip(omitted_field_path.iter()).all(
+                |(current_segment, omitted_segment)| {
+                    canonical_json_path_segments_match(current_segment, omitted_segment)
+                },
+            )
+            && matches!(
+                omitted_field_path.last(),
+                Some(CanonicalJsonPathSegment::ObjectField(omitted_field_name))
+                    if *omitted_field_name == field_name
+            )
+    })
+}
+
+fn canonical_json_len_omitting_field_paths<'value>(
+    value: &'value Value,
+    current_path: &mut Vec<CanonicalJsonPathSegment<'value>>,
+    omitted_field_paths: Option<&CanonicalJsonFieldPaths<'_>>,
+) -> CanonicalResult<usize> {
     match value {
         Value::Null => Ok(4),
         Value::Bool(boolean) => Ok(boolean.to_string().len()),
@@ -360,7 +389,18 @@ fn canonical_json_len(value: &Value) -> CanonicalResult<usize> {
                 if item_index > 0 {
                     length = checked_len_add(length, 1)?;
                 }
-                length = checked_len_add(length, canonical_json_len(item)?)?;
+                if omitted_field_paths.is_some() {
+                    current_path.push(CanonicalJsonPathSegment::ArrayElement);
+                }
+                let item_length = canonical_json_len_omitting_field_paths(
+                    item,
+                    current_path,
+                    omitted_field_paths,
+                );
+                if omitted_field_paths.is_some() {
+                    current_path.pop();
+                }
+                length = checked_len_add(length, item_length?)?;
             }
 
             Ok(length)
@@ -369,6 +409,11 @@ fn canonical_json_len(value: &Value) -> CanonicalResult<usize> {
             let mut entries = Vec::<String>::with_capacity(map.len());
             let mut length = 2_usize;
             for (key, entry_value) in map {
+                if omitted_field_paths.is_some_and(|field_paths| {
+                    should_omit_canonical_json_field(current_path, key, field_paths)
+                }) {
+                    continue;
+                }
                 let normalized_key = normalize_json_string(key).into_owned();
                 if entries
                     .iter()
@@ -385,7 +430,18 @@ fn canonical_json_len(value: &Value) -> CanonicalResult<usize> {
                 }
                 length = checked_len_add(length, serialized_json_string_len(&normalized_key)?)?;
                 length = checked_len_add(length, 1)?;
-                length = checked_len_add(length, canonical_json_len(entry_value)?)?;
+                if omitted_field_paths.is_some() {
+                    current_path.push(CanonicalJsonPathSegment::ObjectField(key));
+                }
+                let entry_length = canonical_json_len_omitting_field_paths(
+                    entry_value,
+                    current_path,
+                    omitted_field_paths,
+                );
+                if omitted_field_paths.is_some() {
+                    current_path.pop();
+                }
+                length = checked_len_add(length, entry_length?)?;
             }
 
             Ok(length)
@@ -393,7 +449,16 @@ fn canonical_json_len(value: &Value) -> CanonicalResult<usize> {
     }
 }
 
-fn write_canonical_json(value: &Value, sink: &mut impl CanonicalJsonSink) -> CanonicalResult<()> {
+fn canonical_json_len(value: &Value) -> CanonicalResult<usize> {
+    canonical_json_len_omitting_field_paths(value, &mut Vec::new(), None)
+}
+
+fn write_canonical_json_omitting_field_paths<'value>(
+    value: &'value Value,
+    sink: &mut impl CanonicalJsonSink,
+    current_path: &mut Vec<CanonicalJsonPathSegment<'value>>,
+    omitted_field_paths: Option<&CanonicalJsonFieldPaths<'_>>,
+) -> CanonicalResult<()> {
     match value {
         Value::Null => sink.write_str("null"),
         Value::Bool(boolean) => sink.write_str(&boolean.to_string()),
@@ -407,39 +472,74 @@ fn write_canonical_json(value: &Value, sink: &mut impl CanonicalJsonSink) -> Can
                 if item_index > 0 {
                     sink.write_char(',')?;
                 }
-                write_canonical_json(item, sink)?;
+                if omitted_field_paths.is_some() {
+                    current_path.push(CanonicalJsonPathSegment::ArrayElement);
+                }
+                let write_result = write_canonical_json_omitting_field_paths(
+                    item,
+                    sink,
+                    current_path,
+                    omitted_field_paths,
+                );
+                if omitted_field_paths.is_some() {
+                    current_path.pop();
+                }
+                write_result?;
             }
             sink.write_char(']')
         }
         Value::Object(map) => {
-            let mut entries = Vec::<(String, &Value)>::with_capacity(map.len());
+            let mut entries = Vec::<(String, &'value str, &'value Value)>::with_capacity(map.len());
             for (key, entry_value) in map {
+                if omitted_field_paths.is_some_and(|field_paths| {
+                    should_omit_canonical_json_field(current_path, key, field_paths)
+                }) {
+                    continue;
+                }
                 let normalized_key = normalize_json_string(key).into_owned();
                 if entries
                     .iter()
-                    .any(|(existing_key, _)| existing_key == &normalized_key)
+                    .any(|(existing_key, _, _)| existing_key == &normalized_key)
                 {
                     return Err(CanonicalError::new(
                         CanonicalErrorCode::DuplicateField,
                         "canonical JSON object keys collide after normalization",
                     ));
                 }
-                entries.push((normalized_key, entry_value));
+                entries.push((normalized_key, key, entry_value));
             }
             entries.sort_by(|left, right| compare_utf16(&left.0, &right.0));
 
             sink.write_char('{')?;
-            for (entry_index, (key, entry_value)) in entries.iter().enumerate() {
+            for (entry_index, (normalized_key, source_key, entry_value)) in
+                entries.iter().enumerate()
+            {
                 if entry_index > 0 {
                     sink.write_char(',')?;
                 }
-                sink.write_str(&serialize_json_string(key)?)?;
+                sink.write_str(&serialize_json_string(normalized_key)?)?;
                 sink.write_char(':')?;
-                write_canonical_json(entry_value, sink)?;
+                if omitted_field_paths.is_some() {
+                    current_path.push(CanonicalJsonPathSegment::ObjectField(source_key));
+                }
+                let write_result = write_canonical_json_omitting_field_paths(
+                    entry_value,
+                    sink,
+                    current_path,
+                    omitted_field_paths,
+                );
+                if omitted_field_paths.is_some() {
+                    current_path.pop();
+                }
+                write_result?;
             }
             sink.write_char('}')
         }
     }
+}
+
+fn write_canonical_json(value: &Value, sink: &mut impl CanonicalJsonSink) -> CanonicalResult<()> {
+    write_canonical_json_omitting_field_paths(value, sink, &mut Vec::new(), None)
 }
 
 pub fn canonical_json(value: &Value) -> CanonicalResult<String> {
@@ -465,7 +565,10 @@ pub fn canonical_json_matches_bytes(value: &Value, expected_bytes: &[u8]) -> Can
 /// already inside the canonical JSON, not from a per-type namespace string. The
 /// non-empty-objectType check is required: it makes "never merge a typeless
 /// preimage into the shared domain" a hard rejection, not a convention.
-pub fn derive_canonical_object_hash(value: &Value) -> CanonicalResult<String> {
+fn derive_canonical_object_hash_with_omitted_field_paths(
+    value: &Value,
+    omitted_field_paths: Option<&CanonicalJsonFieldPaths<'_>>,
+) -> CanonicalResult<String> {
     let has_object_type = value
         .get("objectType")
         .and_then(Value::as_str)
@@ -480,28 +583,78 @@ pub fn derive_canonical_object_hash(value: &Value) -> CanonicalResult<String> {
     // Single structural hash domain. Length-framed preimage: fixed prefix, the
     // canonical-object domain, a varuint part count, then the length-framed
     // canonical JSON. This MUST byte-match the TypeScript reference.
-    let canonical_json_length = canonical_json_len(value)?;
+    let canonical_json_length =
+        canonical_json_len_omitting_field_paths(value, &mut Vec::new(), omitted_field_paths)?;
     let mut hasher = Shake256::default();
     hasher.update(HASH512_PREIMAGE_PREFIX);
     update_bytes_prefix(&mut hasher, CANONICAL_OBJECT_HASH_NAMESPACE.len())?;
     hasher.update(CANONICAL_OBJECT_HASH_NAMESPACE.as_bytes());
     update_varuint(&mut hasher, 1);
     update_bytes_prefix(&mut hasher, canonical_json_length)?;
-    write_canonical_json(
+    write_canonical_json_omitting_field_paths(
         value,
         &mut HashingCanonicalJsonSink {
             hasher: &mut hasher,
         },
+        &mut Vec::new(),
+        omitted_field_paths,
     )?;
 
     Ok(finalize_hash512_hex(hasher))
 }
 
+pub fn derive_canonical_object_hash(value: &Value) -> CanonicalResult<String> {
+    derive_canonical_object_hash_with_omitted_field_paths(value, None)
+}
+
+/// Hashes a canonical object while omitting fields selected by their exact
+/// structural path, without cloning or rewriting the input tree. Array-element
+/// segments identify container boundaries but deliberately omit array indices,
+/// so one field path selects the same field from every direct array element.
+pub(crate) fn derive_canonical_object_hash_omitting_field_paths(
+    value: &Value,
+    omitted_field_paths: &CanonicalJsonFieldPaths<'_>,
+) -> CanonicalResult<String> {
+    if omitted_field_paths.iter().any(|omitted_field_path| {
+        matches!(
+            *omitted_field_path,
+            [CanonicalJsonPathSegment::ObjectField("objectType")]
+        )
+    }) {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "canonical object hash cannot omit the root objectType discriminator",
+        ));
+    }
+    derive_canonical_object_hash_with_omitted_field_paths(value, Some(omitted_field_paths))
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        canonical_json, canonical_json_matches_bytes, canonical_root, chunk_root, hash512_hex,
+        CanonicalJsonPathSegment, canonical_json, canonical_json_matches_bytes, chunk_root,
+        derive_canonical_object_hash_omitting_field_paths, hash512_hex,
     };
+    use crate::encoding::CanonicalErrorCode;
+
+    #[test]
+    fn canonical_object_hash_cannot_omit_root_object_type() {
+        let value = serde_json::json!({
+            "objectType": "BoundType",
+            "value": 7,
+        });
+        let error = derive_canonical_object_hash_omitting_field_paths(
+            &value,
+            &[&[CanonicalJsonPathSegment::ObjectField("objectType")]],
+        )
+        .expect_err("the shared object-hash domain requires a bound object type");
+
+        assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
+        assert_eq!(
+            error.message,
+            "canonical object hash cannot omit the root objectType discriminator"
+        );
+    }
 
     #[test]
     fn hash512_is_domain_separated() {
@@ -590,20 +743,6 @@ mod tests {
         assert!(
             !canonical_json_matches_bytes(&value, b"{\"a\":0}")
                 .expect("byte comparison should reject mismatched bytes")
-        );
-    }
-
-    #[test]
-    fn canonical_root_binds_object_type_and_version() {
-        let canonical_bytes = b"canonical";
-
-        assert_ne!(
-            canonical_root(1, 1, canonical_bytes),
-            canonical_root(2, 1, canonical_bytes),
-        );
-        assert_ne!(
-            canonical_root(1, 1, canonical_bytes),
-            canonical_root(1, 2, canonical_bytes),
         );
     }
 

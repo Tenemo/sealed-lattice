@@ -1,7 +1,5 @@
+use serde_json::{json, Value};
 use std::collections::BTreeSet;
-use std::sync::Arc;
-
-use serde_json::{Value, json};
 
 use super::proof_codec::{
     decode_trustee_evaluation_key_proof, encode_trustee_evaluation_key_proof,
@@ -14,7 +12,7 @@ use super::relation::{
     VssShareLinkageItem, VssShareLinkageStatement,
 };
 #[cfg(test)]
-use super::relation::{LimbColumnLayout, PHASE_TWO_COLUMN_COUNT, TargetDecryptionMessageClaimKind};
+use super::relation::{LimbColumnLayout, TargetDecryptionMessageClaimKind, PHASE_TWO_COLUMN_COUNT};
 use super::relation::{
     TargetDecryptionShareLimbStatement, TargetDecryptionShareRoleStatement,
     TargetDecryptionShareStatement,
@@ -22,13 +20,12 @@ use super::relation::{
 use super::*;
 use crate::bgv::parameters::DATA_PRIMES;
 use crate::bgv::setup::commitment::{
-    SETUP_COMMITMENT_MODULUS_LIMB_INDICES, parse_setup_commitment_full_value,
+    parse_setup_commitment_full_value, SETUP_COMMITMENT_MODULUS_LIMB_INDICES,
 };
 use crate::bgv::setup::limb_group_key_switch_atom::family_backend::schedule as atom_schedule;
 use crate::bgv::setup::setup_proof::{
-    SETUP_PROOF_MATERIAL_ENCODING, SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES, SetupProofMaterialBytes,
-    SetupProofMaterialTransportHashes, setup_proof_material_transport_hashes,
-    verified_setup_proof_material_bytes_from_request,
+    verified_setup_proof_material_bytes_from_request, SetupProofMaterialBytes,
+    SETUP_PROOF_MATERIAL_ENCODING,
 };
 use crate::hashing::{derive_canonical_object_hash, hash512_hex, to_hex};
 
@@ -217,7 +214,6 @@ pub(crate) fn generate_vss_share_linkage_proof_from_request(
         .ok_or_else(|| invalid_succinct_setup_proof("share-linkage statement missing"))?;
 
     Ok(json!({
-        "ok": true,
         "operation": "generateVssShareLinkageProof",
         "proofFamily": statement.context.proof_family,
         "statementHash": to_hex(&statement.statement_hash()),
@@ -238,7 +234,6 @@ pub(crate) fn verify_vss_share_linkage_proof_from_request(
     verify_evaluation_key_share(&statement, &proof)?;
 
     Ok(json!({
-        "ok": true,
         "operation": "verifyVssShareLinkageProof",
         "proofFamily": statement.context.proof_family,
         "statementHash": to_hex(&statement.statement_hash()),

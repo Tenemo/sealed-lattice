@@ -148,7 +148,7 @@ pub(super) fn common_randomness_object(
     .expect("public matrix seed hash");
     // The public matrices are derived per roster decryption threshold, so the
     // fixture must derive them with the same threshold the verifier recomputes
-    // for this roster, not the first-closure default the standalone command uses.
+    // for this roster, not the foundation default the standalone command uses.
     let public_derivations = crate::bgv::setup::accepted_setup::derive_collective_bgv_setup_public_derivations_for_roster(
         &public_matrix_seed_hash,
         participant_count / 3 + 1,

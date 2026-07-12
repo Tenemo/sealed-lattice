@@ -661,7 +661,6 @@ describe('accepted setup public package API in Node', () => {
                     chunkHashes: transportedObject.chunkHashes,
                     fullObjectHash: transportedObject.fullObjectHash,
                     encoding: 'binary',
-                    loadingPolicy: 'stream-verified-before-object-use',
                 }),
             ),
         );
@@ -683,7 +682,7 @@ describe('accepted setup public package API in Node', () => {
                 },
             }),
         ).toThrow(/ThresholdShareCommitmentBinding/u);
-        for (const requiredPublicKeyClosureField of [
+        for (const requiredPublicKeyField of [
             'publicKeyShareMaterial',
             'publicKeyShareSuccinctProofs',
         ]) {
@@ -691,16 +690,13 @@ describe('accepted setup public package API in Node', () => {
                 ...setupPackageInput,
             };
             delete incompleteSetupPackageInput[
-                requiredPublicKeyClosureField as keyof typeof incompleteSetupPackageInput
+                requiredPublicKeyField as keyof typeof incompleteSetupPackageInput
             ];
 
             expect(() =>
                 publicSetupApi.createSetupPackage(incompleteSetupPackageInput),
             ).toThrow(
-                new RegExp(
-                    `${requiredPublicKeyClosureField} must be an object`,
-                    'u',
-                ),
+                new RegExp(`${requiredPublicKeyField} must be an object`, 'u'),
             );
         }
     });

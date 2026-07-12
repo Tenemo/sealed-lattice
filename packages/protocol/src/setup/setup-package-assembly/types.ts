@@ -23,7 +23,6 @@ import type {
 } from '../public-key-share-records.js';
 import type { SetupCertificatesInput } from '../setup-certificates.js';
 import type { SetupPhaseRecord } from '../setup-phase-records.js';
-import type { VerifiedSetupProofMaterialSet } from '../setup-proof-material-transport.js';
 import type {
     SetupPackageVssCoefficientCommitmentMaterialSet,
     VssCoefficientCommitmentSet,
@@ -163,7 +162,6 @@ export type SetupPackageVerificationInputSource = Readonly<{
     // set publishes an aggregate binding; the kernel skips the check otherwise.
     readonly transportedEvaluationKeyAggregateBindingOpenings?: TransportedEvaluationKeyAggregateBindingOpeningSet;
     readonly transportedPublicEvaluationKeyMaterial?: TransportedPublicEvaluationKeyMaterialSet;
-    readonly verifiedSetupProofMaterials?: VerifiedSetupProofMaterialSet;
 }>;
 
 export type SetupPackageVerificationInput = SetupPackageVerificationInputSource;

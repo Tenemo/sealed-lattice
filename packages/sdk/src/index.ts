@@ -7,7 +7,6 @@ import {
     deriveThresholdParameters as deriveThresholdParametersInternal,
     deriveThresholdParametersHash as deriveThresholdParametersHashInternal,
     evaluateActionCapability as evaluateActionCapabilityInternal,
-    verifyFoundationTranscript as verifyFoundationTranscriptInternal,
     verifyCastReceiptShell as verifyCastReceiptShellInternal,
     verifyCloseRecordShell as verifyCloseRecordShellInternal,
     isValidLifecycleTransition as isValidLifecycleTransitionInternal,
@@ -17,13 +16,10 @@ import {
     verifyRecoveryEpochUpdate as verifyRecoveryEpochUpdateInternal,
     verifyRosterExternalAcceptance as verifyRosterExternalAcceptanceInternal,
     verifyRosterManifestTranscript as verifyRosterManifestTranscriptInternal,
-    verifyTargetFinality as verifyTargetFinalityInternal,
 } from '@sealed-lattice/protocol';
 import type {
     SetupTransportedPublicKeyShareMaterial as ProtocolSetupTransportedPublicKeyShareMaterial,
     EvaluationKeyShareComponentMaterialChunkStream as ProtocolEvaluationKeyShareComponentMaterialChunkStream,
-    VerifiedSetupProofMaterial as ProtocolVerifiedSetupProofMaterial,
-    VerifiedSetupProofMaterialSet as ProtocolVerifiedSetupProofMaterialSet,
     TransportedPublicKeyShareProofMaterialSet as ProtocolTransportedPublicKeyShareProofMaterialSet,
     TransportedVssShareLinkageProofMaterialSet as ProtocolTransportedVssShareLinkageProofMaterialSet,
     TransportedSameSecretBridgeProofMaterialSet as ProtocolTransportedSameSecretBridgeProofMaterialSet,
@@ -48,8 +44,6 @@ import type {
     CloseRecordVerificationInput,
     FirstValidOrderingInput,
     FirstValidOrderingVerification,
-    FoundationTranscriptInput,
-    FoundationTranscriptVerification,
     LifecycleTransition,
     PollSpecInput,
     PollSpecValidation,
@@ -59,19 +53,23 @@ import type {
     RecoveryEpochVerificationInput,
     ThresholdParameters,
     ThresholdParametersInput,
-    TranscriptCoreFixture,
-    TranscriptCoreVerificationResult,
     RosterManifestTranscriptInput,
     RosterManifestTranscriptVerification,
     RosterExternalAcceptanceVerification,
     RosterExternalAcceptanceVerificationInput,
-    TargetFinalityVerification,
-    TargetFinalityVerificationInput,
+    VerificationResult,
 } from '@sealed-lattice/types';
-import type { BgvTargetDecryptionResultReleaseCompletion } from '@sealed-lattice/wasm';
+import {
+    foundationBoardCandidateObjectHash as foundationBoardCandidateObjectHashInternal,
+    openFoundationBoardSession as openFoundationBoardSessionInternal,
+    type BgvTargetDecryptionResultReleaseCompletion,
+} from '@sealed-lattice/wasm';
 
 import { loadTranscriptCoreKernel } from './kernel.js';
-import { prepareSetupPackageVerificationInputForKernel } from './setup-verification-input.js';
+import {
+    preparePrivateVssShareVerificationInputForKernel,
+    prepareSetupPackageVerificationInputForKernel,
+} from './setup-verification-input.js';
 
 const protocolHashPattern = /^[0-9a-f]{128}$/u;
 
@@ -117,20 +115,13 @@ export type {
     ConflictingManifestEvidence,
     ElectionManifest,
     DecryptionShareFilteringMode,
-    FoundationTranscriptComponentResults,
-    FoundationTranscriptInput,
-    FoundationTranscriptVerification,
     FirstValidOrderingInput,
     FirstValidOrderingVerification,
     FrozenRosterParameters,
-    GoldenTranscriptCoreFixture,
-    GoldenTranscriptCoreFixtureVerification,
     HeBackendCorruptionModel,
     InclusionProof,
     LifecycleState,
     LifecycleTransition,
-    MalformedObjectFixture,
-    MalformedObjectFixtureVerification,
     ManifestOpaqueBindings,
     ManifestPolicyHashes,
     MlDsaSignatureMode,
@@ -169,21 +160,118 @@ export type {
     TargetFinalityPolicy,
     TargetFinalityCheckpoint,
     TargetFinalityRecord,
-    TargetFinalityVerification,
-    TargetFinalityVerificationInput,
     TargetProposal,
     ThresholdParameters,
     ThresholdParametersInput,
     ThresholdWarning,
-    TranscriptCoreAnalysis,
-    TranscriptCoreFixture,
-    TranscriptCoreFixtureVerification,
-    TranscriptCoreVerificationResult,
     TrusteeSetupEntry,
     ValidatedFirstValidObject,
     WitnessCheckpoint,
     WitnessPolicy,
 } from '@sealed-lattice/types';
+
+declare const foundationBoardCandidateBrand: unique symbol;
+
+/** An opaque carrier candidate issued only after the kernel's fixed verifier route accepts it. */
+export type FoundationBoardCandidate = Readonly<{
+    readonly [foundationBoardCandidateBrand]: true;
+}>;
+
+export type FoundationBoardIngestionLimits = Readonly<{
+    maximumCarrierByteLength: number;
+    maximumCarrierCount: number;
+    maximumRetainedCarrierByteLength: number;
+    maximumUnresolvedDependencyCount: number;
+}>;
+
+export type FoundationBoardSessionInput = Readonly<{
+    actionContextHash: Uint8Array;
+    canonicalRosterBytes: Uint8Array;
+    ceremonyContextHash: Uint8Array;
+    limits: FoundationBoardIngestionLimits;
+    publicSetupSeedObjectHash?: Uint8Array;
+    suiteIdentifier: Uint8Array;
+    verifiedSetupSourceObjectHash?: Uint8Array;
+}>;
+
+export type FoundationBoardSessionState = 'active' | 'cancelled';
+
+export type FoundationBoardSession = Readonly<{
+    cancel(): void;
+    ingest(
+        canonicalCarrierBytes: Uint8Array,
+    ): VerificationResult<FoundationBoardCandidate>;
+    requireCompleteCarrierGraph(): VerificationResult<undefined>;
+    state(): FoundationBoardSessionState;
+}>;
+
+type InternalFoundationBoardCandidate = Parameters<
+    typeof foundationBoardCandidateObjectHashInternal
+>[0];
+type InternalFoundationBoardSession = Extract<
+    ReturnType<typeof openFoundationBoardSessionInternal>,
+    { readonly isValid: true }
+>['value'];
+
+const internalCandidates = new WeakMap<
+    FoundationBoardCandidate,
+    InternalFoundationBoardCandidate
+>();
+
+/** Returns a defensive copy of a genuine candidate's recomputed object hash. */
+export const foundationBoardCandidateObjectHash = (
+    candidate: FoundationBoardCandidate,
+): Uint8Array => {
+    const internalCandidate = internalCandidates.get(candidate);
+    if (internalCandidate === undefined) {
+        throw new TypeError(
+            'The foundation board candidate was not issued by this SDK instance.',
+        );
+    }
+    return foundationBoardCandidateObjectHashInternal(internalCandidate);
+};
+
+const wrapFoundationBoardSession = (
+    internalSession: InternalFoundationBoardSession,
+): FoundationBoardSession =>
+    Object.freeze({
+        cancel: (): void => {
+            internalSession.cancel();
+        },
+        ingest: (
+            canonicalCarrierBytes: Uint8Array,
+        ): VerificationResult<FoundationBoardCandidate> => {
+            const result = internalSession.ingest(canonicalCarrierBytes);
+            if (!result.isValid) {
+                return result;
+            }
+            const candidate = Object.freeze(
+                Object.create(null) as FoundationBoardCandidate,
+            );
+            internalCandidates.set(candidate, result.value);
+            return Object.freeze({ isValid: true, value: candidate });
+        },
+        requireCompleteCarrierGraph: (): VerificationResult<undefined> =>
+            internalSession.requireCompleteCarrierGraph(),
+        state: (): FoundationBoardSessionState => internalSession.state(),
+    });
+
+/** Opens the sole bounded board-ingestion session in the packaged Rust/WASM kernel. */
+export const createFoundationBoardSession = async (
+    configuration: FoundationBoardSessionInput,
+): Promise<VerificationResult<FoundationBoardSession>> => {
+    const kernel = await loadTranscriptCoreKernel();
+    const result = openFoundationBoardSessionInternal({
+        configuration,
+        kernel,
+    });
+    return result.isValid
+        ? Object.freeze({
+              isValid: true,
+              value: wrapFoundationBoardSession(result.value),
+          })
+        : result;
+};
 
 export type CollectiveBgvSetupContext = Readonly<{
     readonly ceremonyId: string;
@@ -231,9 +319,6 @@ export type SetupPackage = ProtocolSetupPackage;
 export type CollectiveBgvSetupRosterEntryInput =
     ProtocolCollectiveBgvSetupRosterEntryInput;
 
-export type VerifiedSetupProofMaterial = ProtocolVerifiedSetupProofMaterial;
-export type VerifiedSetupProofMaterialSet =
-    ProtocolVerifiedSetupProofMaterialSet;
 export type SetupTransportedPublicKeyShareMaterial =
     ProtocolSetupTransportedPublicKeyShareMaterial;
 export type TransportedPublicKeyShareProofMaterialSet =
@@ -276,7 +361,6 @@ export type VerifySetupPackageInput = Readonly<{
     // publishes an aggregateBinding; otherwise the openings are unused.
     readonly transportedEvaluationKeyAggregateBindingOpenings?: TransportedEvaluationKeyAggregateBindingOpeningSet;
     readonly transportedPublicEvaluationKeyMaterial?: TransportedPublicEvaluationKeyMaterialSet;
-    readonly verifiedSetupProofMaterials?: VerifiedSetupProofMaterialSet;
 }>;
 
 export type SetupPackageVerificationInputSource = Readonly<
@@ -376,11 +460,6 @@ export const evaluateActionCapability = (
     context: CapabilityContext,
 ): CapabilityDecision => evaluateActionCapabilityInternal(action, context);
 
-export const verifyFoundationTranscript = (
-    input: FoundationTranscriptInput,
-): FoundationTranscriptVerification =>
-    verifyFoundationTranscriptInternal(input);
-
 export const verifyBoardConsistency = (
     input: BoardConsistencyInput,
 ): BoardConsistencyVerification => verifyBoardConsistencyInternal(input);
@@ -392,10 +471,6 @@ export const verifyCastReceiptShell = (
 export const verifyCloseRecordShell = (
     input: CloseRecordVerificationInput,
 ): CloseRecordVerification => verifyCloseRecordShellInternal(input);
-
-export const verifyTargetFinality = (
-    input: TargetFinalityVerificationInput,
-): TargetFinalityVerification => verifyTargetFinalityInternal(input);
 
 export const deriveValidatedFirstValidOrder = (
     input: FirstValidOrderingInput,
@@ -426,7 +501,9 @@ export const verifyPrivateVssShare = async (
 ): Promise<PrivateVssShareVerification> => {
     const kernel = await loadTranscriptCoreKernel();
 
-    return kernel.verifyPrivateVssShareEnvelope(input);
+    return kernel.verifyPrivateVssShareEnvelope(
+        preparePrivateVssShareVerificationInputForKernel(kernel, input),
+    );
 };
 
 export const createSetupPackageVerificationInput = (
@@ -482,28 +559,4 @@ export const verifyTargetDecryptionResult = async (
     return kernel.finishBgvTargetDecryptionResultRelease({
         releaseVerificationId: input.releaseVerificationId,
     });
-};
-
-export const verifyTranscriptCoreFixture = async (
-    fixture: TranscriptCoreFixture,
-): Promise<TranscriptCoreVerificationResult> => {
-    const kernel = await loadTranscriptCoreKernel();
-    const verification = kernel.verifyFixture(fixture);
-
-    if ('expectedErrorCode' in verification) {
-        return {
-            isValid: false,
-            caseName: verification.caseName,
-            rejection: {
-                code: verification.expectedErrorCode,
-            },
-        };
-    }
-
-    return {
-        isValid: true,
-        caseName: verification.caseName,
-        objectHash512: verification.objectHash512,
-        chunkRoot: verification.chunkRoot,
-    };
 };

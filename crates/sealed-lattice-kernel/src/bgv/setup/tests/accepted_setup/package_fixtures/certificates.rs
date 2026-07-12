@@ -10,7 +10,7 @@ pub(in super::super) fn setup_transport_certificate_fixture(
     // The transported VSS object byte length is a function of the material's
     // roster and ring degree, matching the verifier's roster-and-ring-derived
     // expectation (transport_policy::setup_transport_vss_material_byte_length_for_roster).
-    // It is read from the material set so a reduced-ring or non-first-closure
+    // It is read from the material set so a reduced-ring or non-foundation
     // material declares a consistent transport object. The streamed path then
     // overrides byteLength from the actually transported material.
     let material_participant_count = vss_coefficient_commitment_material["participantCount"]
@@ -65,7 +65,6 @@ pub(in super::super) fn setup_transport_certificate_fixture(
             "chunkHashes": chunk_hashes,
             "fullObjectHash": vss_full_object_hash,
             "encoding": "binary",
-            "loadingPolicy": "stream-verified-before-object-use",
         }
     ]);
     let setup_parameters_hash =

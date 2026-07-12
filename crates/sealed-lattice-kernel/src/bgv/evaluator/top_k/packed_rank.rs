@@ -80,7 +80,7 @@ pub(crate) fn evaluate_packed_rank_evaluation_from_packed_scores_with_batched_pa
     // noisy (about 87 bits, dominated by the score-packing stage and the
     // per-window mask multiplications; measured, value-independent), and the
     // deferred comparison evaluation decodes only when its input noise sits
-    // under a start-level-independent ceiling near 22 bits at the first-profile
+    // under a start-level-independent ceiling near 22 bits at the foundation-profile
     // domain. One switch reaches about 40 bits; the second reaches the switch
     // noise floor (about 8 bits). The single-ballot development path (working
     // level below the selected multi-ballot level) keeps one switch: its

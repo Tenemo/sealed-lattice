@@ -3,10 +3,11 @@ use super::*;
 use crate::hashing::derive_canonical_object_hash;
 
 #[test]
-fn first_closure_setup_parameters_hash_is_byte_stable() {
-    // Byte-identity guard for the current n=10 closure setup parameters. This
+fn foundation_setup_parameters_hash_is_byte_stable() {
+    // Byte-identity guard for the fixed n=10 foundation setup parameters. This
     // pin tracks the full n=10 binding, including the inlined sub-configuration
-    // values and the BGV parameters; if those
+    // values and the BGV parameters. It intentionally excludes the removed
+    // conjectural proof-accounting record, which was not verifier evidence; if those
     // binding inputs intentionally change, re-pin to the new n=10 value and
     // treat stale proof corpora as invalid.
     let setup_parameters = describe_collective_bgv_setup_parameters().expect("setup parameters");
@@ -14,15 +15,14 @@ fn first_closure_setup_parameters_hash_is_byte_stable() {
         setup_parameters["setupParametersHash"]
             .as_str()
             .expect("setup parameters hash"),
-        "a9e42323b5e4c81adceaba08525bc94ee4811491bff17add1f9be359e2d110b967ac44a60213c518248c2c49cddb5fba507b46c8b043a6ddfcadee1dfef36993",
+        "baac7ded3f867bf74ec7e03e8c887ccb5034a1599d0219bad22d33709be23c74d93f833f195ba5f0b3ca08192d5ef14a910c1c4ff3c017a34da02e78fb3e9b03",
     );
 }
 
 #[test]
-fn collective_setup_parameters_expose_first_closure_state_machine() {
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "collective_setup_parameters_expose_first_closure_state_machine",
-    );
+fn collective_setup_parameters_expose_foundation_state_machine() {
+    let _accepted_setup_test_timing =
+        accepted_setup_test_timing("collective_setup_parameters_expose_foundation_state_machine");
     let setup_parameters = describe_collective_bgv_setup_parameters().expect("setup parameters");
 
     assert_eq!(setup_parameters["objectType"], "SetupPackage");

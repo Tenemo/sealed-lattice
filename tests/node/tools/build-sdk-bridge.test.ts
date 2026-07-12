@@ -22,12 +22,12 @@ const typesRuntime = path.resolve(distRoot, 'internal/types.js');
 describe('SDK bridge build helpers', () => {
     it('removes type-only workspace imports from the published bridge copy', () => {
         const outputText = transpileBridgeSource(`
-            import type { TranscriptCoreFixture } from '@sealed-lattice/types';
+            import type { VerificationResult } from '@sealed-lattice/types';
 
-            export const acceptsFixture = (_fixture: TranscriptCoreFixture): boolean => true;
+            export const acceptsResult = (_input: VerificationResult<unknown>): boolean => true;
         `);
 
-        expect(outputText).toContain('export const acceptsFixture');
+        expect(outputText).toContain('export const acceptsResult');
         expect(outputText).not.toContain('@sealed-lattice/types');
     });
 

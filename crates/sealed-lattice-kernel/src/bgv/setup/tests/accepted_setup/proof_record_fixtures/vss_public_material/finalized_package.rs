@@ -184,6 +184,11 @@ pub(in super::super::super) fn minimal_finalized_collective_setup_package() -> s
 #[test]
 fn minimal_finalized_collective_setup_package_passes_accepted_setup() {
     let package = minimal_finalized_collective_setup_package();
+    assert_eq!(
+        public_coefficient_commitment_ring_degree_from_fixture_package(&package),
+        128,
+        "finalized fixtures must retain the accepted public commitment ring degree",
+    );
     let result = crate::bgv::setup::accepted_setup::verify_collective_bgv_setup_package(
         &package,
         &serde_json::json!({}),

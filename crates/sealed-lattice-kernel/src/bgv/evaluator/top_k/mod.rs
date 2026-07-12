@@ -48,7 +48,7 @@ pub(crate) const SELECTED_EVALUATOR_WORKING_LEVEL: usize = 16;
 // Level 16 uses the full data basis. The packing construction leaves the
 // comparison input structurally noisy (about 87 bits before any switch,
 // measured), and the deferred comparison evaluation only decodes when its
-// input noise sits under a ceiling near 22 bits at the first-profile domain,
+// input noise sits under a ceiling near 22 bits at the foundation-profile domain,
 // so the multi-ballot pipeline spends two modulus switches after packing (the
 // refresh plus one cleaning switch, reaching the switch noise floor) and runs
 // the depth-8 comparison from level 14 down to the level-6 output; the rank

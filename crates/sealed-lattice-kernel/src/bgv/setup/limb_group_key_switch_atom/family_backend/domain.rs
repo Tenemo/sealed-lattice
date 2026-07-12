@@ -15,7 +15,7 @@
 //! prime `p = b^64 + 1` with even `b`, so `p - 1 = b^64` has `2^64` as a factor
 //! and the field has a power-of-two subgroup of every order up to `2^64`. The
 //! spike precomputed only the order-2^16 root; larger domains are computed on
-//! demand, which is what lets the full first profile (N = 32768) run without a
+//! demand, which is what lets the full foundation profile (N = 32768) run without a
 //! trace column split.
 
 use super::super::proof_field::ProofFieldParameters;

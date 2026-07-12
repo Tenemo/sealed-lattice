@@ -18,7 +18,6 @@ describe('collective BGV setup kernel commands', () => {
             objectType: 'SetupPackage',
             adversaryModel: 'active-static',
             livenessModel: 'secure-with-abort',
-            sharingModel: 'recipient-verified-vss',
             sharingDomain: 'per-rns-prime',
             participantCount: 10,
             qSetupComplete: 10,

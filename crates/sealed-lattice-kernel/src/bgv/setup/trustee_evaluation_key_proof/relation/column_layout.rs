@@ -454,7 +454,7 @@ impl LimbColumnLayout {
             // and >= t honest recipients at distinct points force the degree
             // (t-1) sharing polynomial to be consistent. This requires
             // q_setup_complete - c_priv >= t honest verifying recipients
-            // (7 >= 4 in the first roster). Dropping the carry from this set, or
+            // (7 >= 4 in the foundation roster). Dropping the carry from this set, or
             // weakening the carry/share range checks, breaks the argument.
             // private_vss_logical_columns() still counts the message columns
             // because they remain witnesses for the opening and share linchecks.

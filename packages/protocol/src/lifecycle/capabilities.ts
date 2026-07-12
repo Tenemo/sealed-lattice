@@ -3,7 +3,7 @@ import type {
     CapabilityDecision,
     LifecycleState,
     ProtocolAction,
-    RefusalReason,
+    LifecycleRefusalReason,
     RecoveryState,
 } from '@sealed-lattice/types';
 
@@ -40,7 +40,7 @@ const getCertifiedDecryptionShareQuorum = (
 
 const isRecoveryRefused = (
     recoveryState: RecoveryState | undefined,
-): RefusalReason | undefined => {
+): LifecycleRefusalReason | undefined => {
     if (
         recoveryState === 'Ambiguous' ||
         recoveryState === 'MissingRecoveryMaterial'
@@ -287,10 +287,6 @@ const evaluateRecombination = (
     ) {
         return refuseAction(action, 'FirstThresholdSharesNotReached');
     }
-    if (context.isTargetDecryptionClosureApplied !== true) {
-        return refuseAction(action, 'TargetDecryptionClosureMissing');
-    }
-
     return allowAction(action);
 };
 

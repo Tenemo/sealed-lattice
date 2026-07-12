@@ -117,8 +117,8 @@ pub(super) fn verify_context(
     // Roster parameters: accept any supported roster size 3 <= n <= 20 by
     // deriving the canonical full-roster quorums and decryption threshold from
     // participantCount. n != 10 is implementation-supported but not
-    // benchmarked, not supported-phone evidence, and not part of the first
-    // setup/evaluator closure roster (n = 10).
+    // benchmarked, not supported-phone evidence, and not part of the fixed
+    // foundation roster.
     let Some(participant_count) = setup_context
         .get("participantCount")
         .and_then(Value::as_u64)

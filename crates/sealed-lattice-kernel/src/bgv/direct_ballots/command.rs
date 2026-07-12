@@ -144,8 +144,7 @@ pub(crate) fn run_direct_encrypted_ballot(request: &Value) -> CanonicalResult<Va
         "encryptedBallots": {
             "encryptedBallotHashes": encrypted_ballot_hashes,
             "ciphertextRoots": ciphertext_roots,
-            "ciphertextCanonicalByteLengths": ciphertext_byte_lengths,
-            "ballotEncryptionRandomness": ballot_encryption_randomness.report_value()
+            "ciphertextCanonicalByteLengths": ciphertext_byte_lengths
         },
         "proofAttempt": {
             "proofEncoding": "internal binary feasibility encoding",
@@ -174,7 +173,6 @@ pub(crate) fn run_direct_encrypted_ballot(request: &Value) -> CanonicalResult<Va
                 "firstProofStatementHash": first_proof.statement_hash_hex,
                 "proofParametersHash": direct_ballot_relation_proof_parameters_hash()?
             },
-            "proofMaskRandomness": proof_mask_randomness.report_value(),
             "provingTimeMilliseconds": total_proving_time_milliseconds.report_value(),
             "verificationTimeMilliseconds": total_verification_time_milliseconds.report_value()
         },

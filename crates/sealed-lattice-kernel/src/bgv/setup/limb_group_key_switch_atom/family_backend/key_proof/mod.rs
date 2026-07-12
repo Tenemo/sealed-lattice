@@ -266,7 +266,7 @@ fn layout(ring_degree: usize) -> CanonicalResult<Layout> {
     // Committed degree bound `2m` covers the masked columns and the support
     // quotient (bit range products are degree 2); the coset is `FRI_RATE_BLOWUP`
     // times that, giving FRI rate 1/4. With the two-adic ceiling at 2^20 the
-    // first profile N = 32768 runs unsplit.
+    // foundation profile N = 32768 runs unsplit.
     let coset_size = FRI_RATE_BLOWUP * 2 * ring_degree;
     if coset_size > super::domain::MAX_TWO_ADIC_ORDER {
         return Err(invalid_key(

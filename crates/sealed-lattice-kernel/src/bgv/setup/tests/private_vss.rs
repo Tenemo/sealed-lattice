@@ -48,14 +48,14 @@ fn private_vss_share_envelope_verifier_accepts_succinct_private_share_proofs() {
 
 #[test]
 // Run through the guarded focused Rust runner:
-//   pnpm run test:rust:kernel:accepted-setup -- private_vss_share_envelope_verifier_accepts_first_roster_succinct_private_share_proofs
-#[ignore = "first-roster private VSS verification; run via the guarded accepted-setup runner"]
-fn private_vss_share_envelope_verifier_accepts_first_roster_succinct_private_share_proofs() {
+//   pnpm run test:rust:kernel:accepted-setup -- private_vss_share_envelope_verifier_accepts_foundation_roster_succinct_private_share_proofs
+#[ignore = "foundation-roster private VSS verification; run via the guarded accepted-setup runner"]
+fn private_vss_share_envelope_verifier_accepts_foundation_roster_succinct_private_share_proofs() {
     let request =
         proof_shaped_private_vss_share_envelope_request(crate::bgv::parameters::POLYNOMIAL_DEGREE);
 
     let result = verify_private_vss_share_envelope_from_request(&request)
-        .expect("first-roster private VSS envelope verification");
+        .expect("foundation-roster private VSS envelope verification");
 
     assert_eq!(result["isValid"], true);
     assert_eq!(result["refusedObjects"], serde_json::json!([]));
@@ -67,7 +67,7 @@ fn private_vss_share_envelope_verifier_accepts_first_roster_succinct_private_sha
         DATA_PRIMES.len()
     );
     // The recipient-local verification root and envelope hash are the integration
-    // handles a signed VssShareAcceptance commits to, so the first-roster path
+    // handles a signed VssShareAcceptance commits to, so the foundation-roster path
     // produces the same accepted evidence the reduced-ring path does at scale.
     assert_eq!(
         result["localVerificationRoot"]

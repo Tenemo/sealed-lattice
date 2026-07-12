@@ -19,10 +19,10 @@ export const defaultSmallRosterPolicy =
 
 // Roster-size landmarks:
 //  3  - absolute minimum supported roster.
-//  10 - the first (and only) end-to-end closure roster size.
+//  10 - the fixed foundation profile roster size.
 //  20 - hard maximum supported roster; the parameterized upper bound for which
 //       code paths exist but no end-to-end/runtime evidence is claimed yet.
 export const minimumSupportedRosterSize = 3;
 export const minimumDynamicRosterSize = 10;
-export const firstClosureRosterSize = 10;
+export const foundationRosterSize = 10;
 export const maximumSupportedRosterSize = 20;
