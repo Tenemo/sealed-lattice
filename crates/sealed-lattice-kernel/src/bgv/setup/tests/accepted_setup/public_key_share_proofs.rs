@@ -81,12 +81,17 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_missing_dependent_publ
         missing_statement_proofs_result["refusedObjects"][0]["reasonCode"],
         "publicKeyShareProofsMissing"
     );
-    let missing_succinct_proofs_fixture = collective_public_key_bearing_collective_setup_fixture();
+    let mut missing_succinct_proofs_fixture =
+        collective_public_key_bearing_collective_setup_fixture();
     let mut missing_succinct_proofs_package = missing_succinct_proofs_fixture.package;
     missing_succinct_proofs_package
         .as_object_mut()
         .expect("setup package")
         .remove("publicKeyShareSuccinctProofs");
+    remove_public_key_share_proof_transport(
+        &mut missing_succinct_proofs_package,
+        &mut missing_succinct_proofs_fixture.verification_request,
+    );
     rebind_collective_setup_package_hash(&mut missing_succinct_proofs_package);
 
     let missing_succinct_proofs_result = verify_collective_bgv_setup_package(
@@ -137,9 +142,13 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_malformed_public_key_p
             .as_object_mut()
             .expect("public-key proof set")
             .remove(field_name);
+        let mut verification_request = fixture.verification_request;
+        if proof_set_name == "publicKeyShareSuccinctProofs" && field_name == "proofRecords" {
+            remove_public_key_share_proof_transport(&mut package, &mut verification_request);
+        }
         rebind_collective_setup_package_hash(&mut package);
 
-        let result = verify_collective_bgv_setup_package(&package, &fixture.verification_request)
+        let result = verify_collective_bgv_setup_package(&package, &verification_request)
             .expect("verification response");
 
         assert_eq!(result["isValid"], false);
@@ -149,6 +158,21 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_malformed_public_key_p
             format!("setupPackage.{proof_set_name}.{field_name}")
         );
     }
+}
+
+fn remove_public_key_share_proof_transport(
+    package: &mut serde_json::Value,
+    verification_request: &mut serde_json::Value,
+) {
+    verification_request
+        .as_object_mut()
+        .expect("setup verification request")
+        .remove("transportedPublicKeyShareProofMaterial");
+    replace_setup_proof_material_transport_certificate_objects(
+        package,
+        &serde_json::json!({ "proofMaterials": [] }),
+        PUBLIC_KEY_SHARE_PROOF_TRANSPORT_CERTIFICATE_FIELDS,
+    );
 }
 
 #[test]

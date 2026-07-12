@@ -216,18 +216,20 @@ describe('release policy', () => {
         );
         const packageExecutor: ReleaseCommandExecutor = (invocation) => {
             if (invocation.arguments.includes('pack')) {
-                return successfulProbe(
-                    JSON.stringify([
-                        {
-                            filename: 'sealed-lattice-0.2.1.tgz',
-                            integrity: 'sha512-local',
-                            name: 'sealed-lattice',
-                            version: '0.2.1',
-                        },
-                    ]),
+                return Promise.resolve(
+                    successfulProbe(
+                        JSON.stringify([
+                            {
+                                filename: 'sealed-lattice-0.2.1.tgz',
+                                integrity: 'sha512-local',
+                                name: 'sealed-lattice',
+                                version: '0.2.1',
+                            },
+                        ]),
+                    ),
                 );
             }
-            return failedProbe(1, 'npm error code E404');
+            return Promise.resolve(failedProbe(1, 'npm error code E404'));
         };
 
         try {
@@ -294,22 +296,22 @@ describe('release policy', () => {
                 }),
             ).rejects.toThrow('expected sealed-lattice@0.2.1');
 
-            expect(() =>
+            await expect(
                 verifyCheckedOutReleaseTag({
                     executor: () => successfulProbe('release-revision\n'),
                     releaseRevision: 'release-revision',
                     tag: 'v0.2.1',
                     workingDirectoryPath: packageDirectory,
                 }),
-            ).not.toThrow();
-            expect(() =>
+            ).resolves.toBeUndefined();
+            await expect(
                 verifyCheckedOutReleaseTag({
                     executor: () => successfulProbe('other-revision\n'),
                     releaseRevision: 'release-revision',
                     tag: 'v0.2.1',
                     workingDirectoryPath: packageDirectory,
                 }),
-            ).toThrow('does not resolve to the release commit');
+            ).rejects.toThrow('does not resolve to the release commit');
         } finally {
             await rm(packageDirectory, { force: true, recursive: true });
         }

@@ -618,7 +618,6 @@ const sameSecretBridgeStatementSet = (): VssSameSecretBridgeStatementSet => {
             objectType: 'VssSameSecretBridgeStatement',
             proofFamily: 'same-secret-bridge',
             ...setupContext,
-            targetBasisHash: fixtureHash('target-basis'),
             publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
             ringDegree,
             ...trusteeReference,
@@ -627,7 +626,7 @@ const sameSecretBridgeStatementSet = (): VssSameSecretBridgeStatementSet => {
             signedRepresentativeConvention:
                 'fixture signed representative convention',
             vssPublicCommitmentEncoding: 'fixture commitment encoding',
-            targetBasisLimbOrder: 'fixture target-basis limb order',
+            qShareLimbOrder: 'fixture Q_share limb order',
             sourceConstantCoefficientCommitments,
             targetConstantCoefficientCommitmentRoots: [],
             targetConstantCoefficientCommitments: [],
@@ -644,11 +643,10 @@ const sameSecretBridgeStatementSet = (): VssSameSecretBridgeStatementSet => {
         objectType: 'VssSameSecretBridgeStatementSet',
         proofFamily: 'same-secret-bridge',
         ...setupContext,
-        targetBasisHash: fixtureHash('target-basis'),
         publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
         ringDegree,
         participantCount,
-        targetRnsLimbCount: qSharePrimes.length,
+        qShareRnsLimbCount: qSharePrimes.length,
         thresholdDegree: participantCount,
         coefficientCommitmentRoot: fixtureHash('coefficient-commitment-set'),
         vssCoefficientCommitmentRoot: fixtureHash(
@@ -658,7 +656,7 @@ const sameSecretBridgeStatementSet = (): VssSameSecretBridgeStatementSet => {
         signedRepresentativeConvention:
             'fixture signed representative convention',
         vssPublicCommitmentEncoding: 'fixture commitment encoding',
-        targetBasisLimbOrder: 'fixture target-basis limb order',
+        qShareLimbOrder: 'fixture Q_share limb order',
         statementRecords,
     } as const;
 

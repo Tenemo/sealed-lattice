@@ -144,6 +144,10 @@ fn verify_same_secret_bridge_setup_binding(
         statement_verification,
         "same-secret bridge statement set",
     )?;
+    compare_complete_q_share_limb_count(
+        statement_verification,
+        "same-secret bridge statement set",
+    )?;
     compare_required_string(
         hash_at_path(statement_verification, &["publicMatrixSeedHash"])?,
         hash_at_path(common_randomness, &["publicMatrixSeedHash"])?,
@@ -202,7 +206,7 @@ pub(in crate::bgv::setup) fn verified_same_secret_bridge_material_from_package(
         hash_at_path(&statement_verification, &["publicMatrixSeedHash"])?,
         "same-secret bridge publicMatrixSeedHash",
     )?;
-    let target_basis_hash = value_string(statement_set, "targetBasisHash")?;
+    let setup_parameters_hash = value_string(statement_set, "setupParametersHash")?;
     let statement_records = array_value(statement_set, "statementRecords")?;
     let proof_records = array_value(proof_material_set, "proofRecords")?;
     if proof_records.len() != statement_records.len() {
@@ -230,7 +234,7 @@ pub(in crate::bgv::setup) fn verified_same_secret_bridge_material_from_package(
                 "same-secret bridge target roots and commitments must be aligned",
             ));
         }
-        let mut target_rns_primes = Vec::with_capacity(target_constant_root_records.len());
+        let mut bridge_rns_primes = Vec::with_capacity(target_constant_root_records.len());
         let mut target_constant_commitment_roots =
             Vec::with_capacity(target_constant_root_records.len());
         let mut target_constant_commitments =
@@ -256,7 +260,7 @@ pub(in crate::bgv::setup) fn verified_same_secret_bridge_material_from_package(
             {
                 return Err(CanonicalError::new(
                     CanonicalErrorCode::ComponentMismatch,
-                    "same-secret bridge target prime must match the canonical target basis",
+                    "same-secret bridge prime must match the canonical Q_share basis",
                 ));
             }
             if value_u64(target_root_record, "shamirCoefficientIndex")? != 0
@@ -288,7 +292,7 @@ pub(in crate::bgv::setup) fn verified_same_secret_bridge_material_from_package(
                     ring_degree,
                 },
             )?;
-            target_rns_primes.push(target_rns_prime);
+            bridge_rns_primes.push(target_rns_prime);
             target_constant_commitment_roots.push(target_commitment_root.to_string());
             target_constant_commitments.push(commitment);
         }
@@ -323,8 +327,8 @@ pub(in crate::bgv::setup) fn verified_same_secret_bridge_material_from_package(
                 public_matrix_seed_hash: public_matrix_seed_hash.to_string(),
                 source_trustee_identity: trustee_identity,
                 source_trustee_roster_position: trustee_roster_position,
-                target_basis_hash: target_basis_hash.to_string(),
-                target_rns_primes,
+                setup_parameters_hash: setup_parameters_hash.to_string(),
+                bridge_rns_primes,
                 target_constant_commitment_roots,
                 target_constant_commitments,
             },

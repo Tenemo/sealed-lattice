@@ -88,7 +88,7 @@ export const objectField = (
 ): JsonRecord =>
     assertObjectRecord(value[fieldName], `${objectPath}.${fieldName}`);
 
-export const hashArrayField = (
+const hashArrayField = (
     value: Readonly<Record<string, unknown>>,
     fieldName: string,
     objectPath: string,

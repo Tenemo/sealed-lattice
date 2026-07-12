@@ -6,16 +6,15 @@ use crate::hashing::derive_canonical_object_hash;
 fn foundation_setup_parameters_hash_is_byte_stable() {
     // Byte-identity guard for the fixed n=10 foundation setup parameters. This
     // pin tracks the full n=10 binding, including the inlined sub-configuration
-    // values and the BGV parameters. It intentionally excludes the removed
-    // conjectural proof-accounting record, which was not verifier evidence; if those
-    // binding inputs intentionally change, re-pin to the new n=10 value and
-    // treat stale proof corpora as invalid.
+    // values, the bounded-domain evaluator profile, and the BGV parameters. If
+    // those binding inputs intentionally change, re-pin to the new n=10 value
+    // and treat stale proof corpora as invalid.
     let setup_parameters = describe_collective_bgv_setup_parameters().expect("setup parameters");
     assert_eq!(
         setup_parameters["setupParametersHash"]
             .as_str()
             .expect("setup parameters hash"),
-        "baac7ded3f867bf74ec7e03e8c887ccb5034a1599d0219bad22d33709be23c74d93f833f195ba5f0b3ca08192d5ef14a910c1c4ff3c017a34da02e78fb3e9b03",
+        "cb2a6917276f3a10b0a169a84caa15e92a65b7dd34b001f1e3a2fadf01ef4533410e869c9e83163c19780a018614117705c6ae39cdaf46d277e3b251a8a2a8b0",
     );
 }
 
@@ -110,6 +109,22 @@ fn collective_setup_parameters_expose_foundation_state_machine() {
         setup_parameters["evaluatorKeySchedule"]["requiredGaloisSetHash"]
             .as_str()
             .is_some()
+    );
+    assert_eq!(
+        setup_parameters["boundedDomainEvaluator"]["objectType"],
+        "BoundedDomainEvaluatorParameters"
+    );
+    assert_eq!(
+        setup_parameters["boundedDomainEvaluator"]["scoreDifferenceBound"],
+        90
+    );
+    assert_eq!(
+        setup_parameters["boundedDomainEvaluator"]["directComparisonOutputLevel"],
+        6
+    );
+    assert_eq!(
+        setup_parameters["boundedDomainEvaluator"]["tiePolicy"],
+        "higher-sum-first-then-lower-option-index"
     );
     assert_eq!(
         setup_parameters["phaseOrder"]

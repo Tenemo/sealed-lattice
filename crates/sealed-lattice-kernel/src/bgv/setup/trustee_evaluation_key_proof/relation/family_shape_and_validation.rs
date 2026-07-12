@@ -421,7 +421,7 @@ impl TrusteeEvaluationKeyStatement {
             for field in [
                 same_secret_bridge.public_matrix_seed_hash.as_str(),
                 same_secret_bridge.source_trustee_identity.as_str(),
-                same_secret_bridge.target_basis_hash.as_str(),
+                same_secret_bridge.setup_parameters_hash.as_str(),
             ] {
                 append_len_prefixed_str(&mut preimage, field);
             }
@@ -430,9 +430,9 @@ impl TrusteeEvaluationKeyStatement {
                     .source_trustee_roster_position
                     .to_le_bytes(),
             );
-            append_usize(&mut preimage, same_secret_bridge.target_rns_primes.len());
-            for target_rns_prime in &same_secret_bridge.target_rns_primes {
-                preimage.extend_from_slice(&target_rns_prime.to_le_bytes());
+            append_usize(&mut preimage, same_secret_bridge.bridge_rns_primes.len());
+            for bridge_rns_prime in &same_secret_bridge.bridge_rns_primes {
+                preimage.extend_from_slice(&bridge_rns_prime.to_le_bytes());
             }
             append_usize(
                 &mut preimage,
@@ -1316,33 +1316,28 @@ fn validate_same_secret_bridge_statement(
         &statement.source_trustee_identity,
     )?;
     validate_protocol_hash_hex(
-        "sameSecretBridge.targetBasisHash",
-        &statement.target_basis_hash,
+        "sameSecretBridge.setupParametersHash",
+        &statement.setup_parameters_hash,
     )?;
-    if statement.target_basis_hash != crate::bgv::evaluator::top_k::canonical_target_basis_hash()? {
-        return Err(invalid_succinct_setup_proof(
-            "same-secret bridge target basis hash must match the canonical target basis",
-        ));
-    }
-    if statement.target_rns_primes.is_empty()
-        || statement.target_rns_primes.len() > DATA_PRIMES.len()
-        || statement.target_rns_primes.len() != statement.target_constant_commitment_roots.len()
-        || statement.target_rns_primes.len() != statement.target_constant_commitments.len()
+    if statement.bridge_rns_primes.is_empty()
+        || statement.bridge_rns_primes.len() > DATA_PRIMES.len()
+        || statement.bridge_rns_primes.len() != statement.target_constant_commitment_roots.len()
+        || statement.bridge_rns_primes.len() != statement.target_constant_commitments.len()
     {
         return Err(invalid_succinct_setup_proof(
-            "same-secret bridge target commitments and target primes must be non-empty and aligned",
+            "same-secret bridge commitments and primes must be non-empty and aligned",
         ));
     }
-    for (target_rns_limb_index, target_rns_prime) in statement.target_rns_primes.iter().enumerate()
+    for (bridge_rns_limb_index, bridge_rns_prime) in statement.bridge_rns_primes.iter().enumerate()
     {
-        if *target_rns_prime != DATA_PRIMES[target_rns_limb_index] {
+        if *bridge_rns_prime != DATA_PRIMES[bridge_rns_limb_index] {
             return Err(invalid_succinct_setup_proof(
-                "same-secret bridge target primes must match the canonical target basis",
+                "same-secret bridge primes must be a canonical Q_share prefix",
             ));
         }
         validate_protocol_hash_hex(
             "sameSecretBridge.targetConstantCommitmentRoot",
-            &statement.target_constant_commitment_roots[target_rns_limb_index],
+            &statement.target_constant_commitment_roots[bridge_rns_limb_index],
         )?;
     }
     for commitment in &statement.target_constant_commitments {

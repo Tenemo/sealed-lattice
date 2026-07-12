@@ -130,6 +130,17 @@ pub(super) fn compare_setup_context_threshold_degree(
     )
 }
 
+pub(super) fn compare_complete_q_share_limb_count(
+    bound_value: &Value,
+    bound_object_description: &str,
+) -> CanonicalResult<()> {
+    compare_required_u64(
+        value_u64(bound_value, "qShareRnsLimbCount")?,
+        DATA_PRIMES.len() as u64,
+        &format!("{bound_object_description} qShareRnsLimbCount"),
+    )
+}
+
 pub(super) fn validate_lowercase_hex(value: &str, field_name: &str) -> CanonicalResult<()> {
     if value.len().is_multiple_of(2)
         && value
@@ -159,4 +170,26 @@ pub(super) fn validate_lowercase_hex_length(
         CanonicalErrorCode::InvalidFixture,
         format!("{field_name} must be {expected_byte_length} bytes"),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn complete_q_share_limb_count_requires_every_data_prime() {
+        compare_complete_q_share_limb_count(
+            &json!({ "qShareRnsLimbCount": DATA_PRIMES.len() }),
+            "test statement",
+        )
+        .expect("the complete Q_share basis must pass");
+
+        let error = compare_complete_q_share_limb_count(
+            &json!({ "qShareRnsLimbCount": DATA_PRIMES.len() - 1 }),
+            "test statement",
+        )
+        .expect_err("a strict Q_share prefix must not pass accepted setup");
+        assert_eq!(error.code, CanonicalErrorCode::ComponentMismatch);
+        assert!(error.message.contains("qShareRnsLimbCount"));
+    }
 }

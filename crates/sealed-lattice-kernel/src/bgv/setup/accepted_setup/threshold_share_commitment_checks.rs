@@ -87,7 +87,7 @@ fn verify_threshold_share_commitment_binding(
         "publicMatrixSeedHash": verified_material.public_matrix_seed_hash.as_str(),
         "participantCount": verified_material.participant_count,
         "thresholdDegree": verified_material.threshold_degree,
-        "targetRnsLimbCount": verified_material.target_rns_limb_count,
+        "qShareRnsLimbCount": verified_material.q_share_rns_limb_count,
         "ringDegree": verified_material.ring_degree,
         "aggregateThresholdCommitmentRoot": verified_material
             .aggregate_threshold_commitment_root

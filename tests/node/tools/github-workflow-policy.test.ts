@@ -41,10 +41,58 @@ describe('GitHub workflow policy', () => {
             2,
         );
         expect(workflow).not.toContain('--prerelease');
-        expect(workflow).not.toContain('upload-artifact');
         expect(workflow).not.toContain('download-artifact');
+        expect(workflow).not.toContain('retention-days:');
+        expect(workflow.match(/actions\/upload-artifact@/gu)).toHaveLength(4);
+        expect(workflow).toContain(
+            'prepare-release-logs-${{ github.run_id }}-${{ github.run_attempt }}',
+        );
+        expect(workflow).toContain(
+            'push-release-logs-${{ github.run_id }}-${{ github.run_attempt }}',
+        );
+        expect(workflow).toContain(
+            'publish-npm-logs-${{ github.run_id }}-${{ github.run_attempt }}',
+        );
+        expect(workflow).toContain(
+            'create-github-release-logs-${{ github.run_id }}-${{ github.run_attempt }}',
+        );
+        expect(workflow.match(/if-no-files-found: warn/gu)).toHaveLength(4);
         expect(workflow).toContain(
             'ref: ${{ needs.prepare-release.outputs.tag }}',
         );
+    });
+
+    it('preserves test diagnostics with timeout headroom and non-cancellable expensive lanes', async () => {
+        const workflow = await readFile(workflowPath('ci.yml'), 'utf8');
+
+        expect(workflow).not.toMatch(/^concurrency:/mu);
+        expect(workflow).not.toContain('retention-days:');
+        expect(workflow.match(/if-no-files-found: warn/gu)).toHaveLength(8);
+        expect(workflow.match(/if: \$\{\{ always\(\) \}\}/gu)).toHaveLength(9);
+        expect(workflow).toContain(
+            'static-verification-logs-${{ github.run_id }}-${{ github.run_attempt }}',
+        );
+        for (const lane of [
+            'rust-heavy',
+            'rust-accepted-setup',
+            'node-kernel-heavy',
+        ]) {
+            const laneStart = workflow.indexOf(`    ${lane}:`);
+            const remainingWorkflow = workflow.slice(laneStart + 1);
+            const nextLaneMatch = /\n {4}[a-z][a-z0-9-]*:\r?\n/u.exec(
+                remainingWorkflow,
+            );
+            const nextLaneStart =
+                nextLaneMatch?.index === undefined
+                    ? -1
+                    : laneStart + 1 + nextLaneMatch.index;
+            const laneBlock = workflow.slice(
+                laneStart,
+                nextLaneStart === -1 ? undefined : nextLaneStart,
+            );
+            expect(laneBlock).toContain('cancel-in-progress: false');
+        }
+        expect(workflow).toContain('timeout-minutes: 350');
+        expect(workflow).toContain('timeout-minutes: 370');
     });
 });

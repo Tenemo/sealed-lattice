@@ -15,4 +15,13 @@ The oracle may compare behavior that is actually comparable across all selected 
 
 Run `pnpm run test:lattigo-oracle` (requires Docker and network access to fetch the pinned module). It sends only this directory as the Docker build context. The final scratch image contains a static oracle executable and the committed fixture, runs under a numeric non-root user, and has no Go toolchain. The container runs without a network or writable root filesystem, with all capabilities dropped, no privilege escalation, at most 128 processes, and a 2 GiB memory and swap ceiling.
 
+The runner gives each invocation a unique container name and retains the
+container until its state has been inspected. Its run directory under `logs/`
+records command runtimes, the Docker server version, image identity, exit
+state, Docker error text, timestamps, and `OOMKilled` result before the owned
+container is removed. Version, image-identity, state-inspection, and container
+cleanup failures are loud and remain attributed to their individual commands.
+This preserves the distinction between an oracle failure, a Docker failure,
+a cleanup failure, and a container memory kill.
+
 To move to a different upstream release or commit, run `go get github.com/tuneinsight/lattigo/v6@<version-or-commit>` in this directory (updates `go.mod` and `go.sum`), then re-run the oracle.

@@ -7,6 +7,8 @@ import {
     buildLattigoOracleDockerBuildArguments,
     buildLattigoOracleDockerRunArguments,
     lattigoOracleDirectoryPath,
+    parseDockerContainerState,
+    requireSuccessfulDockerCapture,
 } from '#tools/lattigo-oracle/run-lattigo-oracle';
 
 describe('independent test entrypoint containment', () => {
@@ -54,24 +56,27 @@ describe('independent test entrypoint containment', () => {
             'sealed-lattice-lattigo-oracle:bgv-rns',
             '.',
         ]);
-        expect(buildLattigoOracleDockerRunArguments()).toEqual([
-            'run',
-            '--rm',
-            '--network',
-            'none',
-            '--read-only',
-            '--cap-drop',
-            'ALL',
-            '--security-opt',
-            'no-new-privileges',
-            '--pids-limit',
-            '128',
-            '--memory',
-            '2g',
-            '--memory-swap',
-            '2g',
-            'sealed-lattice-lattigo-oracle:bgv-rns',
-        ]);
+        expect(buildLattigoOracleDockerRunArguments('oracle-test-run')).toEqual(
+            [
+                'run',
+                '--name',
+                'oracle-test-run',
+                '--network',
+                'none',
+                '--read-only',
+                '--cap-drop',
+                'ALL',
+                '--security-opt',
+                'no-new-privileges',
+                '--pids-limit',
+                '128',
+                '--memory',
+                '2g',
+                '--memory-swap',
+                '2g',
+                'sealed-lattice-lattigo-oracle:bgv-rns',
+            ],
+        );
         const dockerfile = await readFile(
             path.resolve('tools', 'lattigo-oracle', 'Dockerfile'),
             'utf8',
@@ -81,5 +86,54 @@ describe('independent test entrypoint containment', () => {
         expect(dockerfile).toContain('CGO_ENABLED=0 go build');
         expect(dockerfile).toContain('USER 65532:65532');
         expect(dockerfile).not.toContain('go run');
+        expect(
+            parseDockerContainerState(
+                '{"Status":"exited","OOMKilled":true,"ExitCode":137,"Error":""}',
+            ),
+        ).toMatchObject({
+            Error: '',
+            ExitCode: 137,
+            OOMKilled: true,
+            Status: 'exited',
+        });
+        expect(parseDockerContainerState('not JSON')).toBeUndefined();
+    });
+
+    it('rejects failed or empty Docker identity probes', () => {
+        expect(
+            requireSuccessfulDockerCapture(
+                {
+                    exitCode: 0,
+                    stderr: '',
+                    stdout: 'sha256:abc\n',
+                    terminationSignal: null,
+                },
+                'image identity',
+                { requireOutput: true },
+            ),
+        ).toBe('sha256:abc');
+        expect(() =>
+            requireSuccessfulDockerCapture(
+                {
+                    exitCode: 1,
+                    stderr: 'daemon unavailable',
+                    stdout: '',
+                    terminationSignal: null,
+                },
+                'Docker version',
+            ),
+        ).toThrow(/daemon unavailable/u);
+        expect(() =>
+            requireSuccessfulDockerCapture(
+                {
+                    exitCode: 0,
+                    stderr: '',
+                    stdout: '  ',
+                    terminationSignal: null,
+                },
+                'image identity',
+                { requireOutput: true },
+            ),
+        ).toThrow(/returned no output/u);
     });
 });

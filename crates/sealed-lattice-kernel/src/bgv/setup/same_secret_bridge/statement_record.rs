@@ -16,11 +16,6 @@ pub(super) fn verify_statement_record(
     )?;
     compare_setup_context(input.statement_record, input.statement_set)?;
     compare_required_string(
-        hash_at_path(input.statement_record, &["targetBasisHash"])?,
-        input.statement_set.target_basis_hash,
-        "VSS same-secret bridge statement targetBasisHash",
-    )?;
-    compare_required_string(
         hash_at_path(input.statement_record, &["publicMatrixSeedHash"])?,
         input.statement_set.public_matrix_seed_hash,
         "VSS same-secret bridge statement publicMatrixSeedHash",
@@ -79,9 +74,9 @@ pub(super) fn verify_statement_record(
         "VSS same-secret bridge statement vssPublicCommitmentEncoding",
     )?;
     compare_required_string(
-        string_at_path(input.statement_record, &["targetBasisLimbOrder"])?,
-        VSS_SAME_SECRET_BRIDGE_TARGET_BASIS_LIMB_ORDER,
-        "VSS same-secret bridge statement targetBasisLimbOrder",
+        string_at_path(input.statement_record, &["qShareLimbOrder"])?,
+        VSS_SAME_SECRET_BRIDGE_Q_SHARE_LIMB_ORDER,
+        "VSS same-secret bridge statement qShareLimbOrder",
     )?;
     compare_required_string(
         string_at_path(input.statement_record, &["relation"])?,
@@ -97,8 +92,8 @@ pub(super) fn verify_statement_record(
         input.statement_record,
         &["targetConstantCoefficientCommitments"],
     )?;
-    if target_constant_roots.len() != input.target_rns_limb_count
-        || target_constant_commitments.len() != input.target_rns_limb_count
+    if target_constant_roots.len() != input.q_share_rns_limb_count
+        || target_constant_commitments.len() != input.q_share_rns_limb_count
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
@@ -141,7 +136,7 @@ pub(super) fn verify_statement_record(
     let authoritative_coefficient_records =
         array_at_path(authoritative_source_record, &["coefficientCommitments"])?;
     let expected_authoritative_record_count = input
-        .target_rns_limb_count
+        .q_share_rns_limb_count
         .checked_mul(input.threshold_degree)
         .ok_or_else(|| {
             CanonicalError::new(
@@ -155,7 +150,7 @@ pub(super) fn verify_statement_record(
             "authoritative VSS coefficient commitments must cover every bridge target coordinate",
         ));
     }
-    let mut verified_target_constant_commitments = Vec::with_capacity(input.target_rns_limb_count);
+    let mut verified_target_constant_commitments = Vec::with_capacity(input.q_share_rns_limb_count);
     let verified_target_constant_roots = target_constant_roots
         .iter()
         .enumerate()
@@ -224,7 +219,7 @@ pub(super) fn verify_statement_record(
                 .ok_or_else(|| {
                     CanonicalError::new(
                         CanonicalErrorCode::MalformedLength,
-                        "VSS same-secret bridge targetRnsLimbCount exceeds the available target primes",
+                        "VSS same-secret bridge qShareRnsLimbCount exceeds the available Q_share primes",
                     )
                 })?;
             compare_required_u64(
@@ -338,7 +333,6 @@ pub(super) fn verify_statement_record(
         "rosterHash": input.statement_set.roster_hash,
         "setupParametersHash": input.statement_set.setup_parameters_hash,
         "setupEpoch": input.statement_set.setup_epoch,
-        "targetBasisHash": input.statement_set.target_basis_hash,
         "publicMatrixSeedHash": input.statement_set.public_matrix_seed_hash,
         "ringDegree": input.ring_degree,
         "trusteeIdentity": trustee_identity,
@@ -347,7 +341,7 @@ pub(super) fn verify_statement_record(
         "integerSupport": VSS_SAME_SECRET_BRIDGE_INTEGER_SUPPORT,
         "signedRepresentativeConvention": VSS_SAME_SECRET_BRIDGE_SIGNED_REPRESENTATIVE_CONVENTION,
         "vssPublicCommitmentEncoding": VSS_PUBLIC_COMMITMENT_BINARY_FORMAT,
-        "targetBasisLimbOrder": VSS_SAME_SECRET_BRIDGE_TARGET_BASIS_LIMB_ORDER,
+        "qShareLimbOrder": VSS_SAME_SECRET_BRIDGE_Q_SHARE_LIMB_ORDER,
         "sourceConstantCoefficientCommitments": verified_source_constant_commitments,
         "targetConstantCoefficientCommitmentRoots": verified_target_constant_roots,
         "targetConstantCoefficientCommitments": verified_target_constant_commitments,
@@ -371,7 +365,6 @@ pub(super) fn verify_statement_record(
         "rosterHash": input.statement_set.roster_hash,
         "setupParametersHash": input.statement_set.setup_parameters_hash,
         "setupEpoch": input.statement_set.setup_epoch,
-        "targetBasisHash": input.statement_set.target_basis_hash,
         "publicMatrixSeedHash": input.statement_set.public_matrix_seed_hash,
         "ringDegree": input.ring_degree,
         "trusteeIdentity": trustee_identity,
@@ -380,7 +373,7 @@ pub(super) fn verify_statement_record(
         "integerSupport": VSS_SAME_SECRET_BRIDGE_INTEGER_SUPPORT,
         "signedRepresentativeConvention": VSS_SAME_SECRET_BRIDGE_SIGNED_REPRESENTATIVE_CONVENTION,
         "vssPublicCommitmentEncoding": VSS_PUBLIC_COMMITMENT_BINARY_FORMAT,
-        "targetBasisLimbOrder": VSS_SAME_SECRET_BRIDGE_TARGET_BASIS_LIMB_ORDER,
+        "qShareLimbOrder": VSS_SAME_SECRET_BRIDGE_Q_SHARE_LIMB_ORDER,
         "sourceConstantCoefficientCommitments": verified_source_constant_commitments,
         "targetConstantCoefficientCommitmentRoots": verified_target_constant_roots,
         "targetConstantCoefficientCommitments": verified_target_constant_commitments,

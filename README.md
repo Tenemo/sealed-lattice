@@ -38,13 +38,13 @@ The repository implements the following collective BGV setup path:
 
 - common-randomness commit and reveal records;
 - per-coefficient committed-material VSS commitments, private mailbox delivery, local share checks, acceptance records, and complaint records;
-- VSS share-linkage and aggregate-threshold proofs, plus a full-source same-secret bridge between the accepted BDLOP constant commitments and target committed material;
+- VSS share-linkage and aggregate-threshold proofs, plus a complete-`Q_share` same-secret bridge between the accepted BDLOP constant commitments and public committed material;
 - public-key share records, collective public-key construction, evaluator-key schedules, relinearization and Galois-key share records, and trustee evaluation-key proof material;
 - descriptor-bound, pull-based binary transport for large public material and most proof bytes, with aggregate-binding openings still carried as inline hexadecimal;
 - encrypted local trustee setup state with explicit retained-material and deletion boundaries; and
 - setup phase records, transport certificates, package assembly, and Rust/WASM package verification against externally supplied manifest and roster hashes.
 
-VSS commitment records bind collision-resistant committed-material roots. Recipient shares and aggregate threshold shares are tied to those roots by proof relations; the aggregate is not accepted from a producer-supplied sum. The same-secret bridge opens the complete accepted BDLOP constant-commitment set and the target committed-material commitments to one ternary secret. Public-key share proofs bind to that bridge, while evaluation-key atom proofs open the exact canonical limb-zero source constant commitment (`SEC-012`).
+VSS commitment records bind collision-resistant committed-material roots. Recipient shares and aggregate threshold shares are tied to those roots by proof relations; the aggregate is not accepted from a producer-supplied sum. The same-secret bridge opens the complete accepted BDLOP constant-commitment set and the public committed-material commitments across the complete `Q_share` basis to one ternary secret. Its setup identity is `setupParametersHash`; the evaluator's final seven-prime target-basis identity remains confined to evaluator output and target decryption. Public-key share proofs bind to that bridge, while evaluation-key atom proofs open the exact canonical limb-zero source constant commitment (`SEC-012`).
 
 The implemented setup proofs remain development evidence. They do not meet the active 80-bit QROM soundness or ceremony-wide zero-knowledge and leakage targets, much less a later 128-bit profile (`SEC-004`, `SEC-005`), and secret-dependent evaluation-key material retains the construction's KDM or circular-security assumption (`SEC-011`). The available perfect honest-verifier zero-knowledge theorem covers one narrowly instantiated neighboring-row AIR and does not establish the repository's permutation, lookup, persistent-state, multi-family, or ceremony-wide composition. Incomplete FRI, QROM, and leakage formulas are not reported as a security level; the remaining claim requires an application-witness extractor, theorem-matched FRI knowledge, exact multi-family compiler accounting, and a ceremony-wide simulator.
 
@@ -110,7 +110,7 @@ The authoritative wording and correct-use consequences are in [SECURITY.md](SECU
 - `SEC-008`: there is no supported-phone runtime evidence.
 - `SEC-010`: accepting a roster size or derived parameter set does not certify a cryptographic or runtime profile.
 - `SEC-011`: evaluation-key material depends on the selected construction's KDM or circular-security assumptions.
-- `SEC-012`: acceptance requires committed-material roots, the full-source bridge proof, and canonical BDLOP source commitments to carry the complete VSS binding.
+- `SEC-012`: acceptance requires committed-material roots, the complete-`Q_share` bridge proof, its bound setup parameters, and canonical BDLOP source commitments to carry the complete VSS binding.
 - `SEC-013`: finality carrier signatures are bound to the external canonical roster, but the fixed state-authorization follow-on is not yet composed, so finality remains fail-closed.
 - `SEC-014`: the Rust/WASM foundation codec pins Unicode 17, but older TypeScript hash paths still depend on ambient Unicode data; callers should independently enforce one canonical representation or keep hash-critical identifiers and labels ASCII.
 - `SEC-015`: canonical foundation, signed-carrier, non-forking state, and durable browser-storage acceptance are incomplete.

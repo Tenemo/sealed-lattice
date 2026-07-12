@@ -436,7 +436,6 @@ describe('VSS coefficient commitment builders', () => {
             createVssSameSecretBridgeStatementSet({
                 setupContext,
                 publicMatrixSeedHash,
-                targetBasisHash: fixtureHash('target-basis'),
                 coefficientCommitmentSet:
                     targetCommitmentBundle.coefficientCommitmentSet,
                 sourceCoefficientCommitmentSet,

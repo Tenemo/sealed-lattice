@@ -494,12 +494,19 @@ pub(crate) fn generate_development_public_key_share_instance(
         material_seeds.push(material_seed_hex);
         material_context_hashes.push(computation.commitment_context_hash);
     }
+    let setup_parameters_hash = hash512(
+        "sealed-lattice/setup/public-key-share/development-setup-parameters",
+        &[seed_hex.as_bytes()],
+    )
+    .iter()
+    .map(|byte| format!("{byte:02x}"))
+    .collect::<String>();
     let same_secret_bridge = Some(SameSecretBridgeStatement {
         public_matrix_seed_hash: public_matrix_seed_hash.clone(),
         source_trustee_identity: format!("development-trustee-{seed_hex}"),
         source_trustee_roster_position: 1,
-        target_basis_hash: crate::bgv::evaluator::top_k::canonical_target_basis_hash()?,
-        target_rns_primes: DATA_PRIMES.to_vec(),
+        setup_parameters_hash,
+        bridge_rns_primes: DATA_PRIMES.to_vec(),
         target_constant_commitment_roots,
         target_constant_commitments,
     });

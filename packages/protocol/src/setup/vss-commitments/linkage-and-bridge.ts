@@ -32,10 +32,9 @@ export type VssShareLinkageStatement = {
     readonly setupParametersHash: ProtocolHash;
     readonly setupEpoch: string;
     readonly publicMatrixSeedHash: ProtocolHash;
-    readonly targetBasisHash: ProtocolHash;
     readonly ringDegree: number;
     readonly participantCount: number;
-    readonly targetRnsLimbCount: number;
+    readonly qShareRnsLimbCount: number;
     readonly thresholdDegree: number;
     readonly coefficientCommitmentRoot: ProtocolHash;
     readonly recipientShareCommitmentRoot: ProtocolHash;
@@ -52,7 +51,6 @@ export type VssShareLinkageStatement = {
 export const createVssShareLinkageStatement = (input: {
     readonly setupContext: CollectiveBgvSetupContext;
     readonly publicMatrixSeedHash: ProtocolHash;
-    readonly targetBasisHash: ProtocolHash;
     readonly coefficientCommitmentSet: VssPublicCoefficientCommitmentSet;
     readonly recipientShareCommitmentSet: VssPublicRecipientShareCommitmentSet;
     readonly aggregateThresholdCommitmentSet: VssPublicAggregateThresholdCommitmentSet;
@@ -62,10 +60,10 @@ export const createVssShareLinkageStatement = (input: {
         recipientShareCommitmentSet,
         aggregateThresholdCommitmentSet,
     } = input;
-    const targetRnsLimbCount = recipientShareCommitmentSet.rnsLimbCount;
+    const qShareRnsLimbCount = recipientShareCommitmentSet.rnsLimbCount;
     const { ringDegree, participantCount, thresholdDegree } =
         coefficientCommitmentSet;
-    const coefficientOpeningRootCount = targetRnsLimbCount * thresholdDegree;
+    const coefficientOpeningRootCount = qShareRnsLimbCount * thresholdDegree;
     const sourceStatementRecords =
         coefficientCommitmentSet.sourceTrusteeRecords.map(
             (coefficientSourceRecord, sourceRecordIndex) => {
@@ -94,14 +92,13 @@ export const createVssShareLinkageStatement = (input: {
                     objectType: 'VssShareLinkageSourceStatement',
                     ...setupContextFields(input.setupContext),
                     publicMatrixSeedHash: input.publicMatrixSeedHash,
-                    targetBasisHash: input.targetBasisHash,
                     sourceTrusteeIdentity:
                         coefficientSourceRecord.sourceTrusteeIdentity,
                     sourceTrusteeRosterPosition:
                         coefficientSourceRecord.sourceTrusteeRosterPosition,
                     ringDegree,
                     participantCount,
-                    targetRnsLimbCount,
+                    qShareRnsLimbCount,
                     thresholdDegree,
                     coefficientCommitmentRoot:
                         coefficientCommitmentSet.coefficientCommitmentRoot,
@@ -128,10 +125,9 @@ export const createVssShareLinkageStatement = (input: {
         objectType: 'VssShareLinkageStatement',
         ...setupContextFields(input.setupContext),
         publicMatrixSeedHash: input.publicMatrixSeedHash,
-        targetBasisHash: input.targetBasisHash,
         ringDegree,
         participantCount,
-        targetRnsLimbCount,
+        qShareRnsLimbCount,
         thresholdDegree,
         coefficientCommitmentRoot:
             coefficientCommitmentSet.coefficientCommitmentRoot,
@@ -241,7 +237,7 @@ const vssPublicRecipientShareCoordinateKey = (
     `${String(sourceTrusteeRosterPosition)}:${String(recipientRosterPosition)}:${String(rnsLimbIndex)}`;
 
 // The share-linkage proof material set: one succinct proof per source trustee
-// per target RNS limb, each covering that source's Shamir share to every
+// per Q_share RNS limb, each covering that source's Shamir share to every
 // recipient at that limb. The verifier recomputes the covered opening roots and
 // the statement root and checks the proof, so this builder only assembles the
 // witness the injected prover consumes and binds the proof bytes.
@@ -270,7 +266,7 @@ export async function createVssShareLinkageProofMaterialSet(
         input;
     const {
         participantCount,
-        targetRnsLimbCount,
+        qShareRnsLimbCount,
         thresholdDegree,
         ringDegree,
     } = statement;
@@ -411,7 +407,7 @@ export async function createVssShareLinkageProofMaterialSet(
     ) {
         for (
             let rnsLimbIndex = 0;
-            rnsLimbIndex < targetRnsLimbCount;
+            rnsLimbIndex < qShareRnsLimbCount;
             rnsLimbIndex += 1
         ) {
             const proofRecordIndex = rnsLimbIndex;
@@ -573,10 +569,9 @@ export async function createVssShareLinkageProofMaterialSet(
         setupParametersHash: statement.setupParametersHash,
         setupEpoch: statement.setupEpoch,
         publicMatrixSeedHash: statement.publicMatrixSeedHash,
-        targetBasisHash: statement.targetBasisHash,
         ringDegree,
         participantCount,
-        targetRnsLimbCount,
+        qShareRnsLimbCount,
         thresholdDegree,
         coefficientCommitmentRoot: statement.coefficientCommitmentRoot,
         recipientShareCommitmentRoot: statement.recipientShareCommitmentRoot,
@@ -620,7 +615,7 @@ export const createThresholdShareCommitmentBinding = (input: {
             input.coefficientCommitmentSet.publicMatrixSeedHash,
         participantCount: input.coefficientCommitmentSet.participantCount,
         thresholdDegree: input.coefficientCommitmentSet.thresholdDegree,
-        targetRnsLimbCount: input.statement.targetRnsLimbCount,
+        qShareRnsLimbCount: input.statement.qShareRnsLimbCount,
         ringDegree: input.coefficientCommitmentSet.ringDegree,
         aggregateThresholdCommitmentRoot:
             input.aggregateThresholdCommitmentSet
@@ -643,15 +638,15 @@ export const createThresholdShareCommitmentBinding = (input: {
 const sameSecretRelation =
     'vss-constant-commitments-open-to-one-short-secret-across-q-share-limbs';
 const sameSecretBridgeRelation =
-    'target-basis constant coefficient commitments bind to the same signed ternary trustee secret as the source data-basis VSS constant commitments';
+    'public constant coefficient commitments bind to the same signed ternary trustee secret as the source VSS constant commitments across Q_share';
 const sameSecretBridgeIntegerSupport =
-    'the bridge proof must show one centered ternary integer coefficient vector whose signed coefficients reduce into every bound data-basis and target-basis limb';
+    'the bridge proof must show one centered ternary integer coefficient vector whose signed coefficients reduce into every bound source and public commitment over Q_share';
 const sameSecretBridgeSignedRepresentativeConvention =
-    'coefficients are interpreted as signed representatives before reduction into each data-basis or target-basis RNS prime';
+    'coefficients are interpreted as signed representatives before reduction into each Q_share RNS prime';
 const vssPublicCommitmentBinaryFormat =
     'sealed-lattice-vss-public-commitment-binary';
-const sameSecretBridgeTargetBasisLimbOrder =
-    'target constant roots are ordered by contiguous target-basis rnsLimbIndex values starting at zero and bind the listed target-basis prime';
+const sameSecretBridgeQShareLimbOrder =
+    'target constant roots are ordered by contiguous Q_share rnsLimbIndex values starting at zero and bind the listed Q_share prime';
 export const sameSecretBridgeProofFamily = 'same-secret-bridge';
 
 export type VssSameSecretBridgeTargetConstantRoot = {
@@ -683,7 +678,6 @@ export type VssSameSecretBridgeStatement = {
     readonly rosterHash: ProtocolHash;
     readonly setupParametersHash: ProtocolHash;
     readonly setupEpoch: string;
-    readonly targetBasisHash: ProtocolHash;
     readonly publicMatrixSeedHash: ProtocolHash;
     readonly ringDegree: number;
     readonly trusteeIdentity: string;
@@ -692,7 +686,7 @@ export type VssSameSecretBridgeStatement = {
     readonly integerSupport: string;
     readonly signedRepresentativeConvention: string;
     readonly vssPublicCommitmentEncoding: string;
-    readonly targetBasisLimbOrder: string;
+    readonly qShareLimbOrder: string;
     readonly sourceConstantCoefficientCommitments: readonly VssSameSecretBridgeSourceConstantCommitment[];
     readonly targetConstantCoefficientCommitmentRoots: readonly VssSameSecretBridgeTargetConstantRoot[];
     readonly targetConstantCoefficientCommitments: readonly VssSameSecretBridgeTargetConstantCommitment[];
@@ -708,29 +702,28 @@ export type VssSameSecretBridgeStatementSet = {
     readonly rosterHash: ProtocolHash;
     readonly setupParametersHash: ProtocolHash;
     readonly setupEpoch: string;
-    readonly targetBasisHash: ProtocolHash;
     readonly publicMatrixSeedHash: ProtocolHash;
     readonly ringDegree: number;
     readonly participantCount: number;
-    readonly targetRnsLimbCount: number;
+    readonly qShareRnsLimbCount: number;
     readonly thresholdDegree: number;
     readonly coefficientCommitmentRoot: ProtocolHash;
     readonly vssCoefficientCommitmentRoot: ProtocolHash;
     readonly integerSupport: string;
     readonly signedRepresentativeConvention: string;
     readonly vssPublicCommitmentEncoding: string;
-    readonly targetBasisLimbOrder: string;
+    readonly qShareLimbOrder: string;
     readonly statementRecords: readonly VssSameSecretBridgeStatement[];
     readonly sameSecretBridgeStatementSetRoot: ProtocolHash;
 };
 
-// The same-secret bridge statement set ties each trustee's target-basis
-// constant commitments to the canonical source VSS commitment set. The proof
-// material then proves both bases use one signed ternary secret.
+// The same-secret bridge statement set ties each trustee's public constant
+// commitments to the canonical source VSS commitment set across all Q_share
+// limbs. The proof material then proves both commitment forms use one signed
+// ternary secret.
 export const createVssSameSecretBridgeStatementSet = (input: {
     readonly setupContext: CollectiveBgvSetupContext;
     readonly publicMatrixSeedHash: ProtocolHash;
-    readonly targetBasisHash: ProtocolHash;
     readonly coefficientCommitmentSet: VssPublicCoefficientCommitmentSet;
     readonly sourceCoefficientCommitmentSet: VssCoefficientCommitmentSet;
     readonly sourceCoefficientCommitmentMaterialSet: VssCoefficientCommitmentMaterialSet;
@@ -916,7 +909,6 @@ export const createVssSameSecretBridgeStatementSet = (input: {
                 objectType: 'VssSameSecretBridgeStatement',
                 proofFamily: sameSecretBridgeProofFamily,
                 ...setupContextFields(input.setupContext),
-                targetBasisHash: input.targetBasisHash,
                 publicMatrixSeedHash: input.publicMatrixSeedHash,
                 ringDegree,
                 trusteeIdentity: coefficientSourceRecord.sourceTrusteeIdentity,
@@ -926,7 +918,7 @@ export const createVssSameSecretBridgeStatementSet = (input: {
                 signedRepresentativeConvention:
                     sameSecretBridgeSignedRepresentativeConvention,
                 vssPublicCommitmentEncoding: vssPublicCommitmentBinaryFormat,
-                targetBasisLimbOrder: sameSecretBridgeTargetBasisLimbOrder,
+                qShareLimbOrder: sameSecretBridgeQShareLimbOrder,
                 sourceConstantCoefficientCommitments,
                 targetConstantCoefficientCommitmentRoots,
                 targetConstantCoefficientCommitments,
@@ -945,11 +937,10 @@ export const createVssSameSecretBridgeStatementSet = (input: {
         objectType: 'VssSameSecretBridgeStatementSet',
         proofFamily: sameSecretBridgeProofFamily,
         ...setupContextFields(input.setupContext),
-        targetBasisHash: input.targetBasisHash,
         publicMatrixSeedHash: input.publicMatrixSeedHash,
         ringDegree,
         participantCount,
-        targetRnsLimbCount: rnsLimbCount,
+        qShareRnsLimbCount: rnsLimbCount,
         thresholdDegree,
         coefficientCommitmentRoot:
             coefficientCommitmentSet.coefficientCommitmentRoot,
@@ -959,7 +950,7 @@ export const createVssSameSecretBridgeStatementSet = (input: {
         signedRepresentativeConvention:
             sameSecretBridgeSignedRepresentativeConvention,
         vssPublicCommitmentEncoding: vssPublicCommitmentBinaryFormat,
-        targetBasisLimbOrder: sameSecretBridgeTargetBasisLimbOrder,
+        qShareLimbOrder: sameSecretBridgeQShareLimbOrder,
         statementRecords,
     } as const;
 
@@ -1045,11 +1036,10 @@ export type VssSameSecretBridgeProofMaterialSet = {
     readonly rosterHash: ProtocolHash;
     readonly setupParametersHash: ProtocolHash;
     readonly setupEpoch: string;
-    readonly targetBasisHash: ProtocolHash;
     readonly publicMatrixSeedHash: ProtocolHash;
     readonly ringDegree: number;
     readonly participantCount: number;
-    readonly targetRnsLimbCount: number;
+    readonly qShareRnsLimbCount: number;
     readonly thresholdDegree: number;
     readonly coefficientCommitmentRoot: ProtocolHash;
     readonly vssCoefficientCommitmentRoot: ProtocolHash;
@@ -1189,10 +1179,10 @@ export async function createVssSameSecretBridgeProofMaterialSet(
             );
         const sameSecretBridge = {
             publicMatrixSeedHash: statementRecord.publicMatrixSeedHash,
+            setupParametersHash: statementRecord.setupParametersHash,
             sourceTrusteeIdentity: statementRecord.trusteeIdentity,
             sourceTrusteeRosterPosition,
-            targetBasisHash: statementRecord.targetBasisHash,
-            targetRnsPrimes:
+            bridgeRnsPrimes:
                 statementRecord.targetConstantCoefficientCommitmentRoots.map(
                     (targetConstantRoot) => targetConstantRoot.rnsPrime,
                 ),
@@ -1265,11 +1255,10 @@ export async function createVssSameSecretBridgeProofMaterialSet(
         rosterHash: statementSet.rosterHash,
         setupParametersHash: statementSet.setupParametersHash,
         setupEpoch: statementSet.setupEpoch,
-        targetBasisHash: statementSet.targetBasisHash,
         publicMatrixSeedHash: statementSet.publicMatrixSeedHash,
         ringDegree: statementSet.ringDegree,
         participantCount: statementSet.participantCount,
-        targetRnsLimbCount: statementSet.targetRnsLimbCount,
+        qShareRnsLimbCount: statementSet.qShareRnsLimbCount,
         thresholdDegree: statementSet.thresholdDegree,
         coefficientCommitmentRoot: statementSet.coefficientCommitmentRoot,
         vssCoefficientCommitmentRoot: statementSet.vssCoefficientCommitmentRoot,

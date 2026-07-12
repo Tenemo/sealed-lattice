@@ -1,4 +1,3 @@
-import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
     copyFile,
@@ -11,14 +10,24 @@ import {
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path, { join } from 'node:path';
+import { performance } from 'node:perf_hooks';
 import { fileURLToPath } from 'node:url';
 
+import { runWithLocalRunLog, type ActiveLocalRunLog } from './local-run-log.js';
 import {
     resolvePackageManagerRunner,
     resolvePackageManagerRunnerForPackageManager,
     type PackageManager,
+    type PackageManagerRunner,
 } from './package-manager-runner.js';
-import { runPackageManagerAndCaptureOutput } from './run-command.js';
+import {
+    createPackageManagerCommand,
+    runCommandAndCaptureOutput,
+    runCommandsInSeries,
+    type CapturedCommandResult,
+    type CommandInvocation,
+} from './run-command.js';
+import { serializeErrorDiagnostic } from './run-log-diagnostics.js';
 import {
     getRootPackageJsonPath,
     getRootReadmePath,
@@ -285,10 +294,66 @@ export const validatePublishedKernelIntegrity = (
     return [];
 };
 
-const runPublint = (packageDirectory: string): void => {
-    runPackageManagerAndCaptureOutput(
-        resolvePackageManagerRunner(),
-        [
+const formatCapturedCommandFailure = (
+    description: string,
+    result: CapturedCommandResult,
+): Error => {
+    const output = [result.stdout.trim(), result.stderr.trim()]
+        .filter((entry) => entry.length > 0)
+        .join('\n');
+    const termination =
+        result.terminationSignal === null
+            ? `exit code ${String(result.exitCode)}`
+            : `signal ${result.terminationSignal}`;
+
+    return new Error(
+        `${description} failed with ${termination}${
+            output.length === 0 ? '.' : `:\n${output}`
+        }`,
+    );
+};
+
+const runCapturedCommand = async (
+    runLog: ActiveLocalRunLog,
+    invocation: CommandInvocation,
+): Promise<string> => {
+    const result = await runCommandAndCaptureOutput(invocation, { runLog });
+    if (result.exitCode !== 0 || result.terminationSignal !== null) {
+        throw formatCapturedCommandFailure(invocation.description, result);
+    }
+
+    return result.stdout;
+};
+
+const runCapturedPackageManagerCommand = async (
+    runLog: ActiveLocalRunLog,
+    input: {
+        readonly arguments: readonly string[];
+        readonly description: string;
+        readonly environment?: NodeJS.ProcessEnv;
+        readonly logFileSlug: string;
+        readonly packageManagerRunner: PackageManagerRunner;
+        readonly workingDirectoryPath: string;
+    },
+): Promise<string> =>
+    runCapturedCommand(runLog, {
+        args: [
+            ...input.packageManagerRunner.commandArgumentsPrefix,
+            ...input.arguments,
+        ],
+        command: input.packageManagerRunner.command,
+        description: input.description,
+        env: input.environment,
+        logFileSlug: input.logFileSlug,
+        workingDirectoryPath: input.workingDirectoryPath,
+    });
+
+const runPublint = async (
+    runLog: ActiveLocalRunLog,
+    packageDirectory: string,
+): Promise<void> => {
+    await runCapturedPackageManagerCommand(runLog, {
+        arguments: [
             'exec',
             'publint',
             'run',
@@ -297,39 +362,30 @@ const runPublint = (packageDirectory: string): void => {
             'false',
             '--strict',
         ],
-        repoRoot,
-    );
-};
-
-const runSmokeEntryPoint = (consumerDirectory: string): void => {
-    const commandArguments = ['smoke.mjs'];
-    const result = spawnSync(process.execPath, commandArguments, {
-        cwd: consumerDirectory,
-        env: process.env,
-        encoding: 'utf8',
-        maxBuffer: 100 * 1024 * 1024,
+        description: 'Run Publint against the staged package',
+        logFileSlug: 'publint',
+        packageManagerRunner: resolvePackageManagerRunner(),
+        workingDirectoryPath: repoRoot,
     });
-
-    if (result.error !== undefined) {
-        throw new Error(
-            `Failed to start smoke entry point: ${result.error.message}`,
-        );
-    }
-    if (result.signal !== null) {
-        throw new Error(
-            `Smoke entry point terminated by signal ${result.signal}`,
-        );
-    }
-    if (result.status !== 0) {
-        throw new Error(
-            `Smoke entry point failed:\n${[result.stdout, result.stderr]
-                .filter(Boolean)
-                .join('\n')}`,
-        );
-    }
 };
 
-const runSmokeTypeEntryPoint = (consumerDirectory: string): void => {
+const runSmokeEntryPoint = async (
+    runLog: ActiveLocalRunLog,
+    consumerDirectory: string,
+): Promise<void> => {
+    await runCapturedCommand(runLog, {
+        args: ['smoke.mjs'],
+        command: process.execPath,
+        description: 'Run the packed-package runtime smoke entry point',
+        logFileSlug: 'runtime-smoke',
+        workingDirectoryPath: consumerDirectory,
+    });
+};
+
+const runSmokeTypeEntryPoint = async (
+    runLog: ActiveLocalRunLog,
+    consumerDirectory: string,
+): Promise<void> => {
     const typeScriptEntryPointPath = path.resolve(
         repoRoot,
         'node_modules',
@@ -337,9 +393,8 @@ const runSmokeTypeEntryPoint = (consumerDirectory: string): void => {
         'bin',
         'tsc',
     );
-    const result = spawnSync(
-        process.execPath,
-        [
+    await runCapturedCommand(runLog, {
+        args: [
             typeScriptEntryPointPath,
             '--module',
             'NodeNext',
@@ -351,37 +406,79 @@ const runSmokeTypeEntryPoint = (consumerDirectory: string): void => {
             'ES2020',
             'smoke.ts',
         ],
-        {
-            cwd: consumerDirectory,
-            env: process.env,
-            encoding: 'utf8',
-            maxBuffer: 100 * 1024 * 1024,
-        },
-    );
+        command: process.execPath,
+        description: 'Type-check the packed-package consumer entry point',
+        logFileSlug: 'type-smoke',
+        workingDirectoryPath: consumerDirectory,
+    });
+};
 
-    if (result.error !== undefined) {
-        throw new Error(
-            `Failed to start packed-package type smoke test: ${result.error.message}`,
-        );
+type PackedPackageSmokeOptions = {
+    readonly buildWorkspace: boolean;
+};
+
+export const parsePackedPackageSmokeArguments = (
+    commandArguments: readonly string[],
+): PackedPackageSmokeOptions => {
+    const argumentsWithoutSeparators = commandArguments.filter(
+        (argument) => argument !== '--',
+    );
+    if (argumentsWithoutSeparators.length === 0) {
+        return { buildWorkspace: false };
     }
-    if (result.signal !== null) {
-        throw new Error(
-            `Packed-package type smoke test terminated by signal ${result.signal}`,
-        );
+    if (
+        argumentsWithoutSeparators.length === 1 &&
+        argumentsWithoutSeparators[0] === '--build'
+    ) {
+        return { buildWorkspace: true };
     }
-    if (result.status !== 0) {
-        throw new Error(
-            `Packed-package type smoke test failed:\n${[
-                result.stdout,
-                result.stderr,
-            ]
-                .filter(Boolean)
-                .join('\n')}`,
-        );
+
+    throw new Error(
+        'Packed-package smoke verification accepts only the optional --build flag.',
+    );
+};
+
+const runPackedPackagePhase = async <Result>(
+    runLog: ActiveLocalRunLog,
+    phase: string,
+    action: () => Result | Promise<Result>,
+): Promise<Result> => {
+    const startedAtMilliseconds = performance.now();
+    runLog.writeEvent({
+        details: { phase },
+        eventType: 'package-smoke-phase-started',
+    });
+    try {
+        const result = await action();
+        runLog.writeEvent({
+            details: {
+                durationMilliseconds: Math.round(
+                    performance.now() - startedAtMilliseconds,
+                ),
+                phase,
+            },
+            eventType: 'package-smoke-phase-finished',
+        });
+
+        return result;
+    } catch (error) {
+        runLog.writeEvent({
+            details: {
+                durationMilliseconds: Math.round(
+                    performance.now() - startedAtMilliseconds,
+                ),
+                error: serializeErrorDiagnostic(error),
+                phase,
+            },
+            eventType: 'package-smoke-phase-failed',
+        });
+        throw error;
     }
 };
 
-const main = async (): Promise<void> => {
+const runPackedPackageSmoke = async (
+    runLog: ActiveLocalRunLog,
+): Promise<void> => {
     const packageManagerRunner =
         resolvePackageManagerRunnerForPackageManager('npm');
     const tempRoot = await mkdtemp(join(tmpdir(), 'sealed-lattice-packed-'));
@@ -393,136 +490,231 @@ const main = async (): Promise<void> => {
     );
 
     try {
-        await mkdir(packDirectory, { recursive: true });
-        await mkdir(consumerDirectory, { recursive: true });
-        const stagedPackage = await stagePublicPackage({
-            destinationPath: packageDirectory,
-        });
+        const stagedPackage = await runPackedPackagePhase(
+            runLog,
+            'stage public package',
+            async () => {
+                await mkdir(packDirectory, { recursive: true });
+                await mkdir(consumerDirectory, { recursive: true });
 
-        const [rootReadmeText, stagedReadmeText] = await Promise.all([
-            readFile(getRootReadmePath(repoRoot), 'utf8'),
-            readFile(stagedPackage.readmePath, 'utf8'),
-        ]);
-        if (stagedReadmeText !== rootReadmeText) {
-            throw new Error(
-                'Staged public package README must be copied from the repository root README',
-            );
-        }
-
-        const publishedPackageJson = JSON.parse(
-            await readFile(join(packageDirectory, 'package.json'), 'utf8'),
-        ) as Record<string, unknown>;
-        const rootPackageJson = JSON.parse(
-            await readFile(getRootPackageJsonPath(repoRoot), 'utf8'),
-        ) as Record<string, unknown>;
-        if (
-            typeof rootPackageJson.description !== 'string' ||
-            rootPackageJson.description.length === 0
-        ) {
-            throw new Error(
-                'Root package.json must define package description.',
-            );
-        }
-
-        const metadataFailures = validatePublishedPackageMetadata(
-            publishedPackageJson,
-            rootPackageJson.description,
+                return stagePublicPackage({
+                    destinationPath: packageDirectory,
+                });
+            },
         );
-        if (metadataFailures.length > 0) {
-            throw new Error(metadataFailures.join('\n'));
-        }
 
-        runPublint(packageDirectory);
+        const publishedPackageJson = await runPackedPackagePhase(
+            runLog,
+            'validate staged package metadata',
+            async () => {
+                const [rootReadmeText, stagedReadmeText] = await Promise.all([
+                    readFile(getRootReadmePath(repoRoot), 'utf8'),
+                    readFile(stagedPackage.readmePath, 'utf8'),
+                ]);
+                if (stagedReadmeText !== rootReadmeText) {
+                    throw new Error(
+                        'Staged public package README must be copied from the repository root README',
+                    );
+                }
 
-        const publishedPackageFilePaths = parsePackDryRunFilePaths(
-            runPackageManagerAndCaptureOutput(
+                const stagedManifest = JSON.parse(
+                    await readFile(
+                        join(packageDirectory, 'package.json'),
+                        'utf8',
+                    ),
+                ) as Record<string, unknown>;
+                const rootPackageJson = JSON.parse(
+                    await readFile(getRootPackageJsonPath(repoRoot), 'utf8'),
+                ) as Record<string, unknown>;
+                if (
+                    typeof rootPackageJson.description !== 'string' ||
+                    rootPackageJson.description.length === 0
+                ) {
+                    throw new Error(
+                        'Root package.json must define package description.',
+                    );
+                }
+
+                const metadataFailures = validatePublishedPackageMetadata(
+                    stagedManifest,
+                    rootPackageJson.description,
+                );
+                if (metadataFailures.length > 0) {
+                    throw new Error(metadataFailures.join('\n'));
+                }
+
+                return stagedManifest;
+            },
+        );
+
+        await runPackedPackagePhase(runLog, 'run Publint', () =>
+            runPublint(runLog, packageDirectory),
+        );
+
+        const publishedPackageFilePaths = await runPackedPackagePhase(
+            runLog,
+            'validate packed file manifest',
+            async () => {
+                const filePaths = parsePackDryRunFilePaths(
+                    await runCapturedPackageManagerCommand(runLog, {
+                        arguments: createDryRunPackArguments(),
+                        description: 'Inspect the staged package file manifest',
+                        environment: packageManagerEnvironment,
+                        logFileSlug: 'pack-dry-run',
+                        packageManagerRunner,
+                        workingDirectoryPath: packageDirectory,
+                    }),
+                );
+                const pathFailures =
+                    validatePublishedPackageFilePaths(filePaths);
+                if (pathFailures.length > 0) {
+                    throw new Error(pathFailures.join('\n'));
+                }
+
+                return filePaths;
+            },
+        );
+
+        await runPackedPackagePhase(
+            runLog,
+            'validate packaged kernel integrity',
+            async () => {
+                const kernelIntegrityFailures =
+                    validatePublishedKernelIntegrity(
+                        await readFile(
+                            join(packageDirectory, 'dist', 'index.js'),
+                            'utf8',
+                        ),
+                        await readFile(
+                            join(
+                                packageDirectory,
+                                'dist',
+                                'sealed-lattice-kernel.wasm',
+                            ),
+                        ),
+                    );
+                if (kernelIntegrityFailures.length > 0) {
+                    throw new Error(kernelIntegrityFailures.join('\n'));
+                }
+            },
+        );
+
+        const tarballPath = await runPackedPackagePhase(
+            runLog,
+            'create package tarball',
+            async () => {
+                await runCapturedPackageManagerCommand(runLog, {
+                    arguments: createPackArguments(packDirectory),
+                    description: 'Create the packed-package tarball',
+                    environment: packageManagerEnvironment,
+                    logFileSlug: 'pack-tarball',
+                    packageManagerRunner,
+                    workingDirectoryPath: packageDirectory,
+                });
+
+                const tarballs = (await readdir(packDirectory)).filter(
+                    (entry) => entry.endsWith('.tgz'),
+                );
+                if (tarballs.length !== 1) {
+                    throw new Error(
+                        `Expected exactly one packed tarball, received ${tarballs.length}`,
+                    );
+                }
+
+                return join(packDirectory, tarballs[0] ?? '');
+            },
+        );
+
+        await runPackedPackagePhase(
+            runLog,
+            'prepare packed-package consumer',
+            async () => {
+                await writeFile(
+                    join(consumerDirectory, 'package.json'),
+                    `${JSON.stringify(
+                        {
+                            name: 'sealed-lattice-smoke-consumer',
+                            private: true,
+                            type: 'module',
+                        },
+                        null,
+                        2,
+                    )}\n`,
+                    'utf8',
+                );
+                await copyFile(
+                    path.join(
+                        repoRoot,
+                        'tools',
+                        'ci',
+                        'packed-package-smoke.mjs',
+                    ),
+                    join(consumerDirectory, 'smoke.mjs'),
+                );
+                await writeFile(
+                    join(consumerDirectory, 'smoke.ts'),
+                    [
+                        "import { deriveThresholdParameters, validatePollSpec, type PollSpecInput, type ThresholdParameters } from 'sealed-lattice';",
+                        '',
+                        'const pollSpecInput: PollSpecInput = {',
+                        "    pollId: 'packed-package-types',",
+                        "    question: 'Which option?',",
+                        "    options: ['A', 'B'],",
+                        '    topOptionCount: 1,',
+                        '};',
+                        'const pollValidation = validatePollSpec(pollSpecInput);',
+                        "if (!pollValidation.isValid) throw new Error('Packed poll validation failed.');",
+                        'const parameters: ThresholdParameters = deriveThresholdParameters({ rosterSize: 10 });',
+                        'void pollValidation.normalized;',
+                        'void parameters;',
+                        '',
+                    ].join('\n'),
+                    'utf8',
+                );
+            },
+        );
+
+        await runPackedPackagePhase(runLog, 'install packed package', () =>
+            runCapturedPackageManagerCommand(runLog, {
+                arguments: createInstallArguments(
+                    packageManagerRunner.kind,
+                    tarballPath,
+                ),
+                description: 'Install the tarball into the smoke consumer',
+                environment: packageManagerEnvironment,
+                logFileSlug: 'install-tarball',
                 packageManagerRunner,
-                createDryRunPackArguments(),
-                packageDirectory,
-                { environment: packageManagerEnvironment },
-            ),
+                workingDirectoryPath: consumerDirectory,
+            }),
         );
-        const pathFailures = validatePublishedPackageFilePaths(
-            publishedPackageFilePaths,
+        await runPackedPackagePhase(runLog, 'run package runtime smoke', () =>
+            runSmokeEntryPoint(runLog, consumerDirectory),
         );
-        if (pathFailures.length > 0) {
-            throw new Error(pathFailures.join('\n'));
-        }
-
-        const kernelIntegrityFailures = validatePublishedKernelIntegrity(
-            await readFile(join(packageDirectory, 'dist', 'index.js'), 'utf8'),
-            await readFile(
-                join(packageDirectory, 'dist', 'sealed-lattice-kernel.wasm'),
-            ),
-        );
-        if (kernelIntegrityFailures.length > 0) {
-            throw new Error(kernelIntegrityFailures.join('\n'));
-        }
-
-        runPackageManagerAndCaptureOutput(
-            packageManagerRunner,
-            createPackArguments(packDirectory),
-            packageDirectory,
-            { environment: packageManagerEnvironment },
+        await runPackedPackagePhase(runLog, 'run package type smoke', () =>
+            runSmokeTypeEntryPoint(runLog, consumerDirectory),
         );
 
-        const tarballs = (await readdir(packDirectory)).filter((entry) =>
-            entry.endsWith('.tgz'),
-        );
-        if (tarballs.length !== 1) {
-            throw new Error(
-                `Expected exactly one packed tarball, received ${tarballs.length}`,
-            );
-        }
-
-        const tarballPath = join(packDirectory, tarballs[0]);
-
+        const tarballBytes = await readFile(tarballPath);
+        const packageEvidence = {
+            objectVersion: 'sealed-lattice-package-smoke-evidence-v1',
+            packageName: publishedPackageJson.name,
+            packageVersion: publishedPackageJson.version,
+            publishedFilePaths: publishedPackageFilePaths,
+            tarballByteLength: tarballBytes.byteLength,
+            tarballFileName: path.basename(tarballPath),
+            tarballSha256Hex: createHash('sha256')
+                .update(tarballBytes)
+                .digest('hex'),
+        };
         await writeFile(
-            join(consumerDirectory, 'package.json'),
-            `${JSON.stringify(
-                {
-                    name: 'sealed-lattice-smoke-consumer',
-                    private: true,
-                    type: 'module',
-                },
-                null,
-                2,
-            )}\n`,
+            path.join(runLog.runDirectoryPath, 'package-smoke-evidence.json'),
+            `${JSON.stringify(packageEvidence, null, 2)}\n`,
             'utf8',
         );
-        await copyFile(
-            path.join(repoRoot, 'tools', 'ci', 'packed-package-smoke.mjs'),
-            join(consumerDirectory, 'smoke.mjs'),
-        );
-        await writeFile(
-            join(consumerDirectory, 'smoke.ts'),
-            [
-                "import { deriveThresholdParameters, validatePollSpec, type PollSpecInput, type ThresholdParameters } from 'sealed-lattice';",
-                '',
-                'const pollSpecInput: PollSpecInput = {',
-                "    pollId: 'packed-package-types',",
-                "    question: 'Which option?',",
-                "    options: ['A', 'B'],",
-                '    topOptionCount: 1,',
-                '};',
-                'const pollValidation = validatePollSpec(pollSpecInput);',
-                "if (!pollValidation.isValid) throw new Error('Packed poll validation failed.');",
-                'const parameters: ThresholdParameters = deriveThresholdParameters({ rosterSize: 10 });',
-                'void pollValidation.normalized;',
-                'void parameters;',
-                '',
-            ].join('\n'),
-            'utf8',
-        );
-
-        runPackageManagerAndCaptureOutput(
-            packageManagerRunner,
-            createInstallArguments(packageManagerRunner.kind, tarballPath),
-            consumerDirectory,
-            { environment: packageManagerEnvironment },
-        );
-        runSmokeEntryPoint(consumerDirectory);
-        runSmokeTypeEntryPoint(consumerDirectory);
+        runLog.writeEvent({
+            details: packageEvidence,
+            eventType: 'package-smoke-evidence-recorded',
+        });
 
         console.log(
             `Packed package smoke test passed with ${packageManagerRunner.kind}.`,
@@ -530,6 +722,44 @@ const main = async (): Promise<void> => {
     } finally {
         await rm(tempRoot, { recursive: true, force: true });
     }
+};
+
+const main = async (): Promise<void> => {
+    const rawArguments = process.argv.slice(2);
+    await runWithLocalRunLog(
+        {
+            commandLineArguments: rawArguments,
+            lanes: ['Packed package smoke'],
+            scriptName: 'smoke:pack:npm',
+        },
+        async (runLog) => {
+            const options = parsePackedPackageSmokeArguments(rawArguments);
+            if (options.buildWorkspace) {
+                const exitCode = await runCommandsInSeries(
+                    [
+                        createPackageManagerCommand(
+                            'Build workspace packages for packed-package smoke',
+                            ['run', 'build'],
+                            {
+                                logFileSlug: 'build',
+                                packageManagerRunner:
+                                    resolvePackageManagerRunner(),
+                            },
+                        ),
+                    ],
+                    { runLog },
+                );
+                if (exitCode !== 0) {
+                    process.exitCode = exitCode;
+                    throw new Error(
+                        `Packed-package smoke build failed with exit code ${exitCode}.`,
+                    );
+                }
+            }
+
+            await runPackedPackageSmoke(runLog);
+        },
+    );
 };
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

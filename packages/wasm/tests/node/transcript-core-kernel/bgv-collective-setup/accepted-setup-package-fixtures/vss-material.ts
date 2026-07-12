@@ -313,7 +313,6 @@ export async function acceptedVssPublicMaterial(
     const shareLinkageStatement = createVssShareLinkageStatement({
         setupContext,
         publicMatrixSeedHash,
-        targetBasisHash: parameters.canonicalTargetBasisHash,
         coefficientCommitmentSet:
             coefficientCommitmentBundle.coefficientCommitmentSet,
         recipientShareCommitmentSet:
@@ -490,7 +489,6 @@ export async function acceptedSameSecretBridge(
     const bridgeStatementSet = createVssSameSecretBridgeStatementSet({
         setupContext,
         publicMatrixSeedHash,
-        targetBasisHash: parameters.canonicalTargetBasisHash,
         coefficientCommitmentSet: vssPublicMaterial.coefficientCommitmentSet,
         sourceCoefficientCommitmentSet: sourceCommitmentBundle.commitmentSet,
         sourceCoefficientCommitmentMaterialSet:

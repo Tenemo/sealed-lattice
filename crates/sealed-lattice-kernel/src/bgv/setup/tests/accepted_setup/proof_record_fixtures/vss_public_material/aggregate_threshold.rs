@@ -10,8 +10,14 @@ struct VssAggregateThresholdProofMaterialReference {
     proof_material_root: String,
 }
 
+#[derive(Default)]
+struct VssAggregateThresholdProofCheckpointCache {
+    checkpoint_key_by_proof_material_root: std::collections::BTreeMap<String, String>,
+    proof_bytes_by_checkpoint_key: std::collections::BTreeMap<String, Vec<u8>>,
+}
+
 static VSS_AGGREGATE_THRESHOLD_PROOF_CHECKPOINT_CACHE: std::sync::OnceLock<
-    std::sync::Mutex<std::collections::BTreeMap<String, Vec<u8>>>,
+    std::sync::Mutex<VssAggregateThresholdProofCheckpointCache>,
 > = std::sync::OnceLock::new();
 
 // The proven threshold-share aggregate binding for every recipient and target
@@ -316,6 +322,7 @@ fn vss_aggregate_threshold_proof_material_reference(
     )
     .expect("VSS aggregate threshold proof material root");
     retain_vss_aggregate_threshold_proof_material(
+        &checkpoint_key,
         &proof_material_root,
         &proof_bytes_hash,
         proof_bytes,
@@ -332,11 +339,13 @@ fn checkpointed_vss_aggregate_threshold_proof_bytes(
     verify_resumed_proof_bytes: impl FnOnce(&[u8]) -> crate::encoding::CanonicalResult<()>,
     generate_proof_bytes: impl FnOnce() -> Vec<u8>,
 ) -> Vec<u8> {
-    let proof_cache = VSS_AGGREGATE_THRESHOLD_PROOF_CHECKPOINT_CACHE
-        .get_or_init(|| std::sync::Mutex::new(std::collections::BTreeMap::new()));
+    let proof_cache = VSS_AGGREGATE_THRESHOLD_PROOF_CHECKPOINT_CACHE.get_or_init(|| {
+        std::sync::Mutex::new(VssAggregateThresholdProofCheckpointCache::default())
+    });
     if let Some(proof_bytes) = proof_cache
         .lock()
         .expect("VSS aggregate threshold proof cache")
+        .proof_bytes_by_checkpoint_key
         .get(checkpoint_key)
         .cloned()
     {
@@ -352,6 +361,7 @@ fn checkpointed_vss_aggregate_threshold_proof_bytes(
     proof_cache
         .lock()
         .expect("VSS aggregate threshold proof cache")
+        .proof_bytes_by_checkpoint_key
         .insert(checkpoint_key.to_string(), proof_bytes.clone());
     proof_bytes
 }
@@ -386,10 +396,26 @@ fn generated_vss_aggregate_threshold_proof_bytes(request: &serde_json::Value) ->
 }
 
 fn retain_vss_aggregate_threshold_proof_material(
+    checkpoint_key: &str,
     proof_material_root: &str,
     proof_bytes_hash: &str,
     proof_bytes: Vec<u8>,
 ) {
+    let proof_cache = VSS_AGGREGATE_THRESHOLD_PROOF_CHECKPOINT_CACHE.get_or_init(|| {
+        std::sync::Mutex::new(VssAggregateThresholdProofCheckpointCache::default())
+    });
+    let previous_checkpoint_key = proof_cache
+        .lock()
+        .expect("VSS aggregate threshold proof cache")
+        .checkpoint_key_by_proof_material_root
+        .insert(proof_material_root.to_string(), checkpoint_key.to_string());
+    assert!(
+        previous_checkpoint_key
+            .as_deref()
+            .is_none_or(|previous| previous == checkpoint_key),
+        "one VSS aggregate threshold proof material root must identify one checkpoint",
+    );
+
     if let Some(existing_material) =
         crate::bgv::setup::verified_canonical_setup_proof_material_bytes(
             VSS_SHARE_LINKAGE_PROOF_FAMILY,
@@ -413,6 +439,31 @@ fn retain_vss_aggregate_threshold_proof_material(
         &proof_bytes,
     )
     .expect("authenticate VSS aggregate threshold proof material stream");
+}
+
+pub(super) fn cached_vss_aggregate_threshold_proof_bytes(
+    proof_material_root: &str,
+    proof_bytes_hash: &str,
+) -> Vec<u8> {
+    let proof_cache = VSS_AGGREGATE_THRESHOLD_PROOF_CHECKPOINT_CACHE
+        .get()
+        .expect("VSS aggregate threshold proof cache")
+        .lock()
+        .expect("VSS aggregate threshold proof cache");
+    let checkpoint_key = proof_cache
+        .checkpoint_key_by_proof_material_root
+        .get(proof_material_root)
+        .expect("VSS aggregate threshold proof material checkpoint key");
+    let proof_bytes = proof_cache
+        .proof_bytes_by_checkpoint_key
+        .get(checkpoint_key)
+        .expect("VSS aggregate threshold proof checkpoint bytes");
+    assert_eq!(
+        hash512_hex(VSS_SHARE_LINKAGE_PROOF_BYTES_HASH_DOMAIN, &[proof_bytes]),
+        proof_bytes_hash,
+        "cached VSS aggregate threshold proof material must match its descriptor",
+    );
+    proof_bytes.clone()
 }
 
 #[allow(clippy::too_many_arguments)]

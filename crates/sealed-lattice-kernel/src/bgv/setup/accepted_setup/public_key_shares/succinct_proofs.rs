@@ -449,7 +449,7 @@ fn verify_public_key_share_succinct_proof_record(
             "public-key share succinct proof ringDegree does not fit usize",
         )
     })?;
-    if bridge_binding.statement.target_rns_primes.is_empty()
+    if bridge_binding.statement.bridge_rns_primes.is_empty()
         || bridge_binding
             .statement
             .target_constant_commitment_roots

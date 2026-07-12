@@ -432,10 +432,10 @@ export type BgvTrusteeEvaluationKeySameSecretLinkage = {
 
 export type BgvTrusteeEvaluationKeySameSecretBridge = {
     readonly publicMatrixSeedHash: ProtocolHash;
-    readonly targetBasisHash: ProtocolHash;
+    readonly setupParametersHash: ProtocolHash;
     readonly sourceTrusteeIdentity: string;
     readonly sourceTrusteeRosterPosition: number;
-    readonly targetRnsPrimes: readonly number[];
+    readonly bridgeRnsPrimes: readonly number[];
     readonly targetConstantCommitmentRoots: readonly ProtocolHash[];
     readonly targetConstantCommitments: readonly unknown[];
 };
@@ -521,7 +521,7 @@ export type BgvSameSecretBridgeProofGeneration = {
     readonly proofFamily: 'same-secret-bridge';
     readonly statementHash: ProtocolHash;
     readonly limbCount: number;
-    readonly targetRnsLimbCount: number;
+    readonly bridgeRnsLimbCount: number;
     readonly proofBytesEncoding: 'binary-chunked-proof-bytes';
     readonly proofBytesHash: ProtocolHash;
     readonly proofMaterialRoot: ProtocolHash;

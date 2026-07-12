@@ -9,7 +9,7 @@ pub(super) struct VssShareLinkageMaterialRecordStatementInput<'a> {
     pub(super) coefficient_commitment_set: &'a Value,
     pub(super) recipient_share_commitment_set: &'a Value,
     pub(super) participant_count: usize,
-    pub(super) target_rns_limb_count: usize,
+    pub(super) q_share_rns_limb_count: usize,
     pub(super) threshold_degree: usize,
 }
 
@@ -19,7 +19,7 @@ pub(super) struct VssShareLinkagePublicRecordInput<'a> {
     pub(super) coefficient_commitment_set: &'a Value,
     pub(super) recipient_share_commitment_set: &'a Value,
     pub(super) participant_count: usize,
-    pub(super) target_rns_limb_count: usize,
+    pub(super) q_share_rns_limb_count: usize,
     pub(super) threshold_degree: usize,
     pub(super) item_index: usize,
 }
@@ -111,7 +111,7 @@ pub(super) fn verify_vss_share_linkage_material_record_statement(
                 coefficient_commitment_set: input.coefficient_commitment_set,
                 recipient_share_commitment_set: input.recipient_share_commitment_set,
                 participant_count: input.participant_count,
-                target_rns_limb_count: input.target_rns_limb_count,
+                q_share_rns_limb_count: input.q_share_rns_limb_count,
                 threshold_degree: input.threshold_degree,
                 item_index,
             },
@@ -129,7 +129,7 @@ pub(super) fn verify_vss_share_linkage_item_against_public_records(
     let coefficient_commitment_set = input.coefficient_commitment_set;
     let recipient_share_commitment_set = input.recipient_share_commitment_set;
     let participant_count = input.participant_count;
-    let target_rns_limb_count = input.target_rns_limb_count;
+    let q_share_rns_limb_count = input.q_share_rns_limb_count;
     let threshold_degree = input.threshold_degree;
     let item_index = input.item_index;
     let source_roster_position = usize::try_from(read_u64(item, "sourceTrusteeRosterPosition")?)
@@ -149,7 +149,7 @@ pub(super) fn verify_vss_share_linkage_item_against_public_records(
             invalid_succinct_setup_proof("share-linkage item sourceRnsLimbIndex does not fit usize")
         })?;
     if recipient_roster_position >= participant_count
-        || source_rns_limb_index >= target_rns_limb_count
+        || source_rns_limb_index >= q_share_rns_limb_count
     {
         return Err(invalid_succinct_setup_proof(
             "share-linkage item coverage is outside the source statement dimensions",
@@ -293,7 +293,7 @@ pub(super) fn verify_vss_share_linkage_item_against_public_records(
 
     let recipient_records = array_field(recipient_source_record, "recipientShareCommitments")?;
     let recipient_record_index = recipient_roster_position
-        .checked_mul(target_rns_limb_count)
+        .checked_mul(q_share_rns_limb_count)
         .and_then(|offset| offset.checked_add(source_rns_limb_index))
         .ok_or_else(|| {
             invalid_succinct_setup_proof("share-linkage recipient record index overflowed")
@@ -371,9 +371,9 @@ pub(crate) fn verify_vss_share_linkage_proof_material_set_from_request(
     let statement_root = read_string(&statement_verification, "statementRoot")?;
     let participant_count = usize::try_from(read_u64(&statement_verification, "participantCount")?)
         .map_err(|_| invalid_succinct_setup_proof("participantCount does not fit usize"))?;
-    let target_rns_limb_count =
-        usize::try_from(read_u64(&statement_verification, "targetRnsLimbCount")?)
-            .map_err(|_| invalid_succinct_setup_proof("targetRnsLimbCount does not fit usize"))?;
+    let q_share_rns_limb_count =
+        usize::try_from(read_u64(&statement_verification, "qShareRnsLimbCount")?)
+            .map_err(|_| invalid_succinct_setup_proof("qShareRnsLimbCount does not fit usize"))?;
     let threshold_degree =
         usize::try_from(read_u64(&statement_verification, "thresholdDegree")?)
             .map_err(|_| invalid_succinct_setup_proof("thresholdDegree does not fit usize"))?;
@@ -415,7 +415,6 @@ pub(crate) fn verify_vss_share_linkage_proof_material_set_from_request(
         "rosterHash",
         "setupParametersHash",
         "publicMatrixSeedHash",
-        "targetBasisHash",
         "coefficientCommitmentRoot",
         "recipientShareCommitmentRoot",
         "aggregateThresholdCommitmentRoot",
@@ -437,9 +436,9 @@ pub(crate) fn verify_vss_share_linkage_proof_material_set_from_request(
         "share-linkage proof material set participantCount",
     )?;
     compare_u64_value(
-        read_u64(proof_material_set, "targetRnsLimbCount")?,
-        target_rns_limb_count as u64,
-        "share-linkage proof material set targetRnsLimbCount",
+        read_u64(proof_material_set, "qShareRnsLimbCount")?,
+        q_share_rns_limb_count as u64,
+        "share-linkage proof material set qShareRnsLimbCount",
     )?;
     compare_u64_value(
         read_u64(proof_material_set, "thresholdDegree")?,
@@ -493,7 +492,7 @@ pub(crate) fn verify_vss_share_linkage_proof_material_set_from_request(
                 coefficient_commitment_set,
                 recipient_share_commitment_set,
                 participant_count,
-                target_rns_limb_count,
+                q_share_rns_limb_count,
                 threshold_degree,
             },
         )?;
@@ -590,16 +589,16 @@ pub(crate) fn verify_vss_share_linkage_proof_material_set_from_request(
 
     let expected_coverage_count = participant_count
         .checked_mul(participant_count)
-        .and_then(|count| count.checked_mul(target_rns_limb_count))
+        .and_then(|count| count.checked_mul(q_share_rns_limb_count))
         .ok_or_else(|| invalid_succinct_setup_proof("share-linkage coverage count overflowed"))?;
     if covered_items.len() != expected_coverage_count {
         return Err(invalid_succinct_setup_proof(
-            "share-linkage proof material set must cover every source, recipient, and target limb exactly once",
+            "share-linkage proof material set must cover every source, recipient, and Q_share limb exactly once",
         ));
     }
     for source_roster_position in 0..participant_count {
         for recipient_roster_position in 0..participant_count {
-            for source_rns_limb_index in 0..target_rns_limb_count {
+            for source_rns_limb_index in 0..q_share_rns_limb_count {
                 if !covered_items.contains(&(
                     source_roster_position,
                     recipient_roster_position,
@@ -622,10 +621,9 @@ pub(crate) fn verify_vss_share_linkage_proof_material_set_from_request(
         "setupParametersHash": read_string(statement, "setupParametersHash")?,
         "setupEpoch": read_string(statement, "setupEpoch")?,
         "publicMatrixSeedHash": read_string(statement, "publicMatrixSeedHash")?,
-        "targetBasisHash": read_string(statement, "targetBasisHash")?,
         "ringDegree": ring_degree,
         "participantCount": participant_count,
-        "targetRnsLimbCount": target_rns_limb_count,
+        "qShareRnsLimbCount": q_share_rns_limb_count,
         "thresholdDegree": threshold_degree,
         "coefficientCommitmentRoot": read_string(statement, "coefficientCommitmentRoot")?,
         "recipientShareCommitmentRoot": read_string(statement, "recipientShareCommitmentRoot")?,
@@ -646,7 +644,7 @@ pub(crate) fn verify_vss_share_linkage_proof_material_set_from_request(
         "statementRoot": statement_root,
         "proofMaterialSetRoot": expected_material_root,
         "participantCount": participant_count,
-        "targetRnsLimbCount": target_rns_limb_count,
+        "qShareRnsLimbCount": q_share_rns_limb_count,
         "ringDegree": ring_degree,
     }))
 }

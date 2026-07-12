@@ -119,7 +119,9 @@ jobs:
                   SOURCE_SHA: ${{ steps.source.outputs.sha }}
               run: pnpm exec tsx ./tools/ci/release-gates.ts targets
 
-            - run: pnpm run smoke:pack:npm
+            - name: Run release package smoke tests
+              timeout-minutes: 40
+              run: pnpm run smoke:pack:npm
 
             - name: Dry-run npm publication
               run: |
@@ -127,6 +129,14 @@ jobs:
                   node ./tools/ci/stage-public-package.mjs --out "${PUBLIC_PACKAGE_DIR}"
                   cd "${PUBLIC_PACKAGE_DIR}"
                   npm publish --dry-run --ignore-scripts --tag latest
+
+            - name: Upload release-preparation diagnostics
+              if: ${{ always() }}
+              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+              with:
+                  if-no-files-found: warn
+                  name: prepare-release-logs-${{ github.run_id }}-${{ github.run_attempt }}
+                  path: logs
 
     push-release:
         name: push release
@@ -203,6 +213,14 @@ jobs:
                     exit 1
                   fi
 
+            - name: Upload release-push diagnostics
+              if: ${{ always() }}
+              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+              with:
+                  if-no-files-found: warn
+                  name: push-release-logs-${{ github.run_id }}-${{ github.run_attempt }}
+                  path: logs
+
     dispatch-release-ci:
         name: dispatch release CI
         needs:
@@ -247,7 +265,9 @@ jobs:
                   toolchain: 1.90.0
                   targets: wasm32-unknown-unknown
             - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
-            - run: pnpm run smoke:pack:npm
+            - name: Run tag-built package smoke tests
+              timeout-minutes: 40
+              run: pnpm run smoke:pack:npm
 
             - name: Stage the tag-built package
               id: public-package
@@ -268,6 +288,14 @@ jobs:
               env:
                   PUBLIC_PACKAGE_DIR: ${{ steps.public-package.outputs.directory }}
               run: npm publish "${PUBLIC_PACKAGE_DIR}" --access public --ignore-scripts --provenance --tag latest
+
+            - name: Upload publication diagnostics
+              if: ${{ always() }}
+              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+              with:
+                  if-no-files-found: warn
+                  name: publish-npm-logs-${{ github.run_id }}-${{ github.run_attempt }}
+                  path: logs
 
     create-github-release:
         name: create GitHub release
@@ -316,3 +344,11 @@ jobs:
               env:
                   RELEASE_TAG: ${{ needs.prepare-release.outputs.tag }}
               run: echo "GitHub release ${RELEASE_TAG} already exists."
+
+            - name: Upload GitHub-release diagnostics
+              if: ${{ always() }}
+              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+              with:
+                  if-no-files-found: warn
+                  name: create-github-release-logs-${{ github.run_id }}-${{ github.run_attempt }}
+                  path: logs

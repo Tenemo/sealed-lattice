@@ -2,7 +2,7 @@ use super::decoding::*;
 use super::target_decryption_parsing::*;
 use super::*;
 
-// The same-secret bridge target statement fields shared by the bridge proof
+// The same-secret bridge statement fields shared by the bridge proof
 // parser and the optional key-bearing linkage. Every commitment body is
 // validated against its expected canonical root, and every parsed field enters
 // the statement hash, so the target material cannot be swapped after proving.
@@ -14,8 +14,8 @@ fn same_secret_bridge_fields_from_value(
         read_string(statement_value, "sourceTrusteeIdentity")?.to_string();
     let source_trustee_roster_position = read_u64(statement_value, "sourceTrusteeRosterPosition")?;
     let public_matrix_seed_hash = read_string(statement_value, "publicMatrixSeedHash")?.to_string();
-    let target_basis_hash = read_string(statement_value, "targetBasisHash")?.to_string();
-    let target_rns_primes = read_u64_array(statement_value, "targetRnsPrimes")?;
+    let setup_parameters_hash = read_string(statement_value, "setupParametersHash")?.to_string();
+    let bridge_rns_primes = read_u64_array(statement_value, "bridgeRnsPrimes")?;
     let target_constant_commitment_roots =
         read_string_array(statement_value, "targetConstantCommitmentRoots")?;
     let target_constant_commitment_values = statement_value
@@ -26,17 +26,17 @@ fn same_secret_bridge_fields_from_value(
                 "sameSecretBridge.targetConstantCommitments must be an array",
             )
         })?;
-    if target_constant_commitment_roots.len() != target_rns_primes.len()
-        || target_constant_commitment_values.len() != target_rns_primes.len()
+    if target_constant_commitment_roots.len() != bridge_rns_primes.len()
+        || target_constant_commitment_values.len() != bridge_rns_primes.len()
     {
         return Err(invalid_succinct_setup_proof(
-            "sameSecretBridge target primes, roots, and commitments must be aligned",
+            "sameSecretBridge primes, roots, and commitments must be aligned",
         ));
     }
     let target_constant_commitments = target_constant_commitment_values
         .iter()
         .zip(target_constant_commitment_roots.iter())
-        .zip(target_rns_primes.iter())
+        .zip(bridge_rns_primes.iter())
         .enumerate()
         .map(
             |(target_rns_limb_index, ((value, expected_commitment_root), target_rns_prime))| {
@@ -58,8 +58,8 @@ fn same_secret_bridge_fields_from_value(
         public_matrix_seed_hash,
         source_trustee_identity,
         source_trustee_roster_position,
-        target_basis_hash,
-        target_rns_primes,
+        setup_parameters_hash,
+        bridge_rns_primes,
         target_constant_commitment_roots,
         target_constant_commitments,
     })

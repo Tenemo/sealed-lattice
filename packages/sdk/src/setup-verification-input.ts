@@ -1092,12 +1092,3 @@ export const prepareSnapshottedPrivateVssShareVerificationInputForKernel =
             },
         };
     };
-
-export const preparePrivateVssShareVerificationInputForKernel = (
-    kernel: TranscriptCoreKernel,
-    input: VerifyPrivateVssShareInput,
-): Promise<VerifyPrivateVssShareInput> =>
-    prepareSnapshottedPrivateVssShareVerificationInputForKernel(
-        kernel,
-        snapshotPrivateVssShareVerificationInput(input),
-    );

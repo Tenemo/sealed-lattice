@@ -99,10 +99,10 @@ const SAME_SECRET_BRIDGE_PROOF_BYTES_HASH_DOMAIN: &str =
     "sealed-lattice/setup/same-secret-bridge/proof-bytes";
 const SAME_SECRET_RELATION: &str =
     "vss-constant-commitments-open-to-one-short-secret-across-q-share-limbs";
-const SAME_SECRET_BRIDGE_RELATION: &str = "target-basis constant coefficient commitments bind to the same signed ternary trustee secret as the source data-basis VSS constant commitments";
-const SAME_SECRET_BRIDGE_INTEGER_SUPPORT: &str = "the bridge proof must show one centered ternary integer coefficient vector whose signed coefficients reduce into every bound data-basis and target-basis limb";
-const SAME_SECRET_BRIDGE_SIGNED_REPRESENTATIVE_CONVENTION: &str = "coefficients are interpreted as signed representatives before reduction into each data-basis or target-basis RNS prime";
-const SAME_SECRET_BRIDGE_TARGET_BASIS_LIMB_ORDER: &str = "target constant roots are ordered by contiguous target-basis rnsLimbIndex values starting at zero and bind the listed target-basis prime";
+const SAME_SECRET_BRIDGE_RELATION: &str = "public constant coefficient commitments bind to the same signed ternary trustee secret as the source VSS constant commitments across Q_share";
+const SAME_SECRET_BRIDGE_INTEGER_SUPPORT: &str = "the bridge proof must show one centered ternary integer coefficient vector whose signed coefficients reduce into every bound source and public commitment over Q_share";
+const SAME_SECRET_BRIDGE_SIGNED_REPRESENTATIVE_CONVENTION: &str = "coefficients are interpreted as signed representatives before reduction into each Q_share RNS prime";
+const SAME_SECRET_BRIDGE_Q_SHARE_LIMB_ORDER: &str = "target constant roots are ordered by contiguous Q_share rnsLimbIndex values starting at zero and bind the listed Q_share prime";
 pub(in super::super) const VSS_SHARE_LINKAGE_PROOF_CHECKPOINT_DIRECTORY: &str =
     "vss-share-linkage-proof-material";
 

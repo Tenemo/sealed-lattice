@@ -1,7 +1,7 @@
 use super::super::evaluation_domain::EvaluationDomainPlan;
 use super::super::relation::{
     LimbColumnLayout, TrusteeEvaluationKeyStatement, TrusteeEvaluationKeyWitness,
-    private_vss_share_lifted_carry_bound,
+    private_vss_share_lifted_carry_bound, vss_share_linkage_lincheck_roster_position,
 };
 use super::super::*;
 use super::claim_masking::{mask_digit_columns, masked_half_coefficients};
@@ -256,7 +256,7 @@ pub(super) fn build_limb_witness_commitment(
         let negative_indicator_vector =
             signed_residue_vector(&witness.negative_indicator_coefficients, modulus);
         append_logical_vector(&negative_indicator_vector);
-        for target_rns_prime in &bridge.target_rns_primes {
+        for target_rns_prime in &bridge.bridge_rns_primes {
             let target_message_coefficients = witness
                 .secret_coefficients
                 .iter()
@@ -342,7 +342,7 @@ pub(super) fn build_limb_witness_commitment(
                 signed_residue_vector(&witness.negative_indicator_coefficients, modulus);
             append_logical_vector(&negative_indicator_vector);
             if let Some(bridge) = &statement.same_secret_bridge {
-                for target_rns_prime in &bridge.target_rns_primes {
+                for target_rns_prime in &bridge.bridge_rns_primes {
                     let target_message_coefficients = witness
                         .secret_coefficients
                         .iter()
@@ -935,14 +935,12 @@ fn validate_vss_public_witness(
                 "VSS recipient share witness has the wrong shape",
             ));
         }
-        let carry_bound = private_vss_share_lifted_carry_bound(
-            if statement.is_threshold_aggregate {
-                0
-            } else {
-                recipient_roster_position
-            },
-            item_coefficient_count,
-        )?;
+        let lincheck_roster_position = vss_share_linkage_lincheck_roster_position(
+            statement.is_threshold_aggregate,
+            recipient_roster_position,
+        );
+        let carry_bound =
+            private_vss_share_lifted_carry_bound(lincheck_roster_position, item_coefficient_count)?;
         for carry in carry_witnesses {
             let carry_i128 = i128::from(*carry);
             if carry_i128 < 0 || carry_i128 > carry_bound {
@@ -951,16 +949,12 @@ fn validate_vss_public_witness(
                 ));
             }
         }
-        let trustee_point = if statement.is_threshold_aggregate {
-            1_i128
-        } else {
-            i128::from(crate::bgv::setup::sharing::canonical_trustee_point(
-                usize::try_from(recipient_roster_position).map_err(|_| {
-                    invalid_succinct_setup_proof("VSS recipient roster position does not fit usize")
-                })?,
-                source_message_modulus,
-            )?)
-        };
+        let trustee_point = i128::from(crate::bgv::setup::sharing::canonical_trustee_point(
+            usize::try_from(lincheck_roster_position).map_err(|_| {
+                invalid_succinct_setup_proof("VSS recipient roster position does not fit usize")
+            })?,
+            source_message_modulus,
+        )?);
         let mut powers = Vec::with_capacity(item_coefficient_count);
         let mut power = 1_i128;
         for _ in 0..item_coefficient_count {

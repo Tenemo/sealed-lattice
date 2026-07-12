@@ -8,9 +8,12 @@ import {
 } from '#tools/ci/package-manager-runner';
 import {
     createAbortableCommandSpawnOptions,
+    describeProcessTerminationAttempt,
     installProcessSignalChildCleanup,
     killProcessTree,
+    runCommandAndCaptureOutput,
 } from '#tools/ci/run-command';
+import { normalizeProcessStatus } from '#tools/ci/run-log-diagnostics';
 
 describe('package manager runner resolution', () => {
     it('resolves a requested package manager through the shared runner helper', () => {
@@ -44,6 +47,35 @@ describe('package manager runner resolution', () => {
             command: nodeExecutablePath,
             commandArgumentsPrefix: [expectedNpmEntryPoint],
             kind: 'npm',
+        });
+    });
+});
+
+describe('asynchronous command output capture', () => {
+    it('retains separate streamed output and the nonzero process status', async () => {
+        const result = await runCommandAndCaptureOutput({
+            args: [
+                '--input-type=module',
+                '--eval',
+                [
+                    "process.stdout.write('first-out\\n');",
+                    "process.stderr.write('first-error\\n');",
+                    "setTimeout(() => { process.stdout.write('last-out\\n'); process.exitCode = 7; }, 20);",
+                ].join(' '),
+            ],
+            command: process.execPath,
+            description: 'Exercise asynchronous captured command output',
+        });
+
+        expect(result).toMatchObject({
+            exitCode: 7,
+            stderr: 'first-error\n',
+            stdout: 'first-out\nlast-out\n',
+            terminationSignal: null,
+        });
+        expect(result.processStatus).toMatchObject({
+            rawExitCode: 7,
+            terminationSignal: null,
         });
     });
 });
@@ -128,7 +160,7 @@ describe('abortable command process cleanup', () => {
             pid: 32_101,
         };
 
-        killProcessTree(childProcess, {
+        const result = killProcessTree(childProcess, {
             platform: 'linux',
             processGroupKiller: () => {
                 throw new Error('process group is unavailable');
@@ -136,6 +168,14 @@ describe('abortable command process cleanup', () => {
         });
 
         expect(childProcess.kill).toHaveBeenCalledWith('SIGTERM');
+        expect(result).toMatchObject({
+            fallbackReason: {
+                message: 'process group is unavailable',
+                name: 'Error',
+            },
+            method: 'direct-child',
+            succeeded: true,
+        });
     });
 
     it('can force-kill a non-Windows process group after graceful shutdown fails', () => {
@@ -178,7 +218,7 @@ describe('abortable command process cleanup', () => {
             ) => ({ command, commandArguments, options }),
         );
 
-        killProcessTree(childProcess, {
+        const result = killProcessTree(childProcess, {
             platform: 'win32',
             windowsTaskKiller,
         });
@@ -189,6 +229,28 @@ describe('abortable command process cleanup', () => {
             { stdio: 'ignore' },
         );
         expect(childProcess.kill).not.toHaveBeenCalled();
+        expect(result).toMatchObject({
+            actualMechanism: 'taskkill-tree-force',
+            forced: true,
+            method: 'windows-taskkill',
+            processIdentifier: 32_102,
+            requestedSignal: 'SIGTERM',
+            succeeded: true,
+        });
+        expect(
+            describeProcessTerminationAttempt({
+                requestedSignal: 'SIGTERM',
+                requestedStage: 'requested',
+                result,
+            }),
+        ).toMatchObject({
+            actualMechanism: 'taskkill-tree-force',
+            actualSignal: null,
+            forced: true,
+            requestedSignal: 'SIGTERM',
+            requestedStage: 'requested',
+            stage: 'forced',
+        });
     });
 
     it('kills active child processes on terminal signals and unregisters handlers', () => {
@@ -264,5 +326,52 @@ describe('abortable command process cleanup', () => {
         } finally {
             process.exitCode = originalExitCode;
         }
+    });
+});
+
+describe('process status normalization', () => {
+    it('normalizes signed Windows statuses without losing their raw form', () => {
+        expect(normalizeProcessStatus(-1_073_741_502, null)).toEqual({
+            hexadecimalExitCode: '0xC0000142',
+            rawExitCode: -1_073_741_502,
+            signedExitCode: -1_073_741_502,
+            symbolicStatus: 'STATUS_DLL_INIT_FAILED',
+            terminationSignal: null,
+            unsignedExitCode: 3_221_225_794,
+        });
+    });
+
+    it.each([
+        [0xc000_0005, 'STATUS_ACCESS_VIOLATION'],
+        [0xc000_0017, 'STATUS_NO_MEMORY'],
+        [0xc000_00fd, 'STATUS_STACK_OVERFLOW'],
+        [0xc000_0374, 'STATUS_HEAP_CORRUPTION'],
+        [0xc000_0602, 'STATUS_FAIL_FAST_EXCEPTION'],
+    ] as const)(
+        'names common Windows crash status 0x%s as %s',
+        (unsignedStatus, symbolicStatus) => {
+            expect(
+                normalizeProcessStatus(unsignedStatus | 0, null),
+            ).toMatchObject({
+                hexadecimalExitCode: `0x${unsignedStatus
+                    .toString(16)
+                    .toUpperCase()
+                    .padStart(8, '0')}`,
+                symbolicStatus,
+                unsignedExitCode: unsignedStatus,
+            });
+        },
+    );
+
+    it('keeps conventional shell signal decoding explicitly inferential', () => {
+        expect(normalizeProcessStatus(143, null)).toMatchObject({
+            conventionalShellSignal: {
+                evidence: 'inferred-from-shell-convention',
+                signalName: 'SIGTERM',
+                signalNumber: 15,
+            },
+            rawExitCode: 143,
+            terminationSignal: null,
+        });
     });
 });

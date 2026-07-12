@@ -1,14 +1,31 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 
+mod diagnostics;
+mod platform;
+
 use std::ffi::OsString;
-use std::process::Command;
+use std::path::PathBuf;
+use std::process::{Command, ExitStatus};
+use std::thread;
+use std::time::{Duration, Instant};
+
+use diagnostics::{
+    DiagnosticsWriter, GuardStartedDetails, MemoryEvidence, ResourcePeaks,
+    expected_diagnostic_label,
+};
 
 const MEMORY_LIMIT_ARGUMENT: &str = "--memory-limit-bytes";
+const DIAGNOSTICS_PATH_ARGUMENT: &str = "--diagnostics-path";
+const VIRTUAL_ADDRESS_SPACE_ALLOWANCE_ARGUMENT: &str = "--virtual-address-space-allowance-bytes";
 const COMMAND_SEPARATOR: &str = "--";
+const RESOURCE_SAMPLE_INTERVAL: Duration = Duration::from_secs(5);
+const CHILD_STATUS_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 #[derive(Debug, Eq, PartialEq)]
 struct GuardedCommand {
     memory_limit_bytes: u64,
+    virtual_address_space_allowance_bytes: u64,
+    diagnostics_path: Option<PathBuf>,
     program: OsString,
     arguments: Vec<OsString>,
 }
@@ -39,12 +56,51 @@ fn parse_arguments(
         return Err(usage("memory-limit value must be greater than zero"));
     }
 
-    let separator = arguments
-        .next()
-        .ok_or_else(|| usage("missing command separator"))?;
-    if separator != COMMAND_SEPARATOR {
+    let mut diagnostics_path = None;
+    let mut virtual_address_space_allowance_bytes = 0;
+    let mut virtual_address_space_allowance_was_set = false;
+    loop {
+        let option = arguments
+            .next()
+            .ok_or_else(|| usage("missing command separator"))?;
+        if option == COMMAND_SEPARATOR {
+            break;
+        }
+        if option == DIAGNOSTICS_PATH_ARGUMENT {
+            if diagnostics_path.is_some() {
+                return Err(usage("diagnostics path was supplied more than once"));
+            }
+            let path = arguments
+                .next()
+                .ok_or_else(|| usage("missing diagnostics path"))?;
+            if path.is_empty() {
+                return Err(usage("diagnostics path must not be empty"));
+            }
+            diagnostics_path = Some(PathBuf::from(path));
+            continue;
+        }
+        if option == VIRTUAL_ADDRESS_SPACE_ALLOWANCE_ARGUMENT {
+            if virtual_address_space_allowance_was_set {
+                return Err(usage(
+                    "virtual address-space allowance was supplied more than once",
+                ));
+            }
+            let value = arguments
+                .next()
+                .ok_or_else(|| usage("missing virtual address-space allowance value"))?;
+            virtual_address_space_allowance_bytes = value
+                .to_str()
+                .ok_or_else(|| usage("virtual address-space allowance must be UTF-8"))?
+                .parse::<u64>()
+                .map_err(|_| {
+                    usage("virtual address-space allowance must be a non-negative integer")
+                })?;
+            virtual_address_space_allowance_was_set = true;
+            continue;
+        }
         return Err(usage(&format!(
-            "expected {COMMAND_SEPARATOR} before the guarded command"
+            "unexpected process-memory guard option {}",
+            option.to_string_lossy()
         )));
     }
 
@@ -54,6 +110,8 @@ fn parse_arguments(
 
     Ok(GuardedCommand {
         memory_limit_bytes,
+        virtual_address_space_allowance_bytes,
+        diagnostics_path,
         program,
         arguments: arguments.collect(),
     })
@@ -61,23 +119,148 @@ fn parse_arguments(
 
 fn usage(reason: &str) -> String {
     format!(
-        "{reason}. Usage: sealed-lattice-process-memory-guard {MEMORY_LIMIT_ARGUMENT} <bytes> {COMMAND_SEPARATOR} <command> [arguments...]"
+        "{reason}. Usage: sealed-lattice-process-memory-guard {MEMORY_LIMIT_ARGUMENT} <bytes> [{VIRTUAL_ADDRESS_SPACE_ALLOWANCE_ARGUMENT} <bytes>] [{DIAGNOSTICS_PATH_ARGUMENT} <path>] {COMMAND_SEPARATOR} <command> [arguments...]"
     )
 }
 
-fn run_guarded_command(command: GuardedCommand) -> Result<i32, String> {
-    platform::apply_memory_limit(command.memory_limit_bytes)?;
-    let status = Command::new(&command.program)
+struct GuardRunResult {
+    _containment: platform::MemoryContainment,
+    diagnostics_error: Option<String>,
+    exit_status: ExitStatus,
+}
+
+fn run_guarded_command(command: GuardedCommand) -> Result<GuardRunResult, String> {
+    let mut diagnostics = command
+        .diagnostics_path
+        .as_deref()
+        .map(DiagnosticsWriter::create)
+        .transpose()?;
+    let guard_started_at = Instant::now();
+    let expected_diagnostic = expected_diagnostic_label();
+
+    if let Some(writer) = diagnostics.as_mut() {
+        writer.write_guard_started(GuardStartedDetails {
+            aggregate_process_tree_limit: platform::AGGREGATE_PROCESS_TREE_LIMIT,
+            containment_backend: platform::CONTAINMENT_BACKEND,
+            containment_scope: platform::CONTAINMENT_SCOPE,
+            expected_diagnostic,
+            memory_limit_bytes: command.memory_limit_bytes,
+            sample_interval: RESOURCE_SAMPLE_INTERVAL,
+            virtual_address_space_allowance_bytes: command.virtual_address_space_allowance_bytes,
+        })?;
+    }
+
+    let containment = match platform::MemoryContainment::apply(
+        command.memory_limit_bytes,
+        command.virtual_address_space_allowance_bytes,
+    ) {
+        Ok(containment) => containment,
+        Err(error) => {
+            if let Some(writer) = diagnostics.as_mut() {
+                writer.write_guard_error("containment-setup", &error)?;
+            }
+            return Err(error);
+        }
+    };
+
+    let mut child = match Command::new(&command.program)
         .args(&command.arguments)
-        .status()
-        .map_err(|error| {
-            format!(
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(error) => {
+            let message = format!(
                 "failed to start guarded command {}: {error}",
                 command.program.to_string_lossy()
-            )
-        })?;
+            );
+            if let Some(writer) = diagnostics.as_mut() {
+                writer.write_guard_error("child-spawn", &message)?;
+            }
+            return Err(message);
+        }
+    };
 
-    Ok(status.code().unwrap_or(1))
+    if let Some(writer) = diagnostics.as_mut() {
+        writer.write_child_started(child.id())?;
+    }
+
+    let mut peaks = ResourcePeaks::default();
+    let mut confirmed_limit_violation = false;
+    let mut diagnostics_error = None;
+    let exit_status = if diagnostics.is_some() {
+        let mut next_sample_at = Instant::now();
+        loop {
+            match child.try_wait() {
+                Ok(Some(status)) => break status,
+                Ok(None) => {}
+                Err(error) => {
+                    let message = format!("failed to wait for guarded command: {error}");
+                    if let Some(writer) = diagnostics.as_mut() {
+                        writer.write_guard_error("child-wait", &message)?;
+                    }
+                    return Err(message);
+                }
+            }
+
+            let now = Instant::now();
+            if now >= next_sample_at {
+                let snapshot = containment.sample(std::process::id());
+                peaks.observe(&snapshot);
+                confirmed_limit_violation |= snapshot.confirmed_memory_limit_violation;
+                if let Some(writer) = diagnostics.as_mut()
+                    && let Err(error) = writer.write_resource_sample(&snapshot, &peaks)
+                {
+                    eprintln!("Process memory guard diagnostics failed: {error}");
+                    diagnostics_error = Some(error);
+                    diagnostics = None;
+                }
+                next_sample_at = now + RESOURCE_SAMPLE_INTERVAL;
+            }
+            thread::sleep(CHILD_STATUS_POLL_INTERVAL);
+        }
+    } else {
+        child
+            .wait()
+            .map_err(|error| format!("failed to wait for guarded command: {error}"))?
+    };
+
+    if let Some(writer) = diagnostics.as_mut() {
+        let final_snapshot = containment.sample(std::process::id());
+        peaks.observe(&final_snapshot);
+        confirmed_limit_violation |= final_snapshot.confirmed_memory_limit_violation;
+        if let Err(error) = writer.write_resource_sample(&final_snapshot, &peaks) {
+            eprintln!("Process memory guard diagnostics failed: {error}");
+            diagnostics_error = Some(error);
+            diagnostics = None;
+        }
+    }
+
+    let termination = platform::termination_details(exit_status);
+    let memory_evidence = MemoryEvidence::from_observations(
+        command.memory_limit_bytes,
+        command.virtual_address_space_allowance_bytes,
+        &peaks,
+        confirmed_limit_violation,
+        termination.was_successful(),
+    );
+    if let Some(writer) = diagnostics.as_mut()
+        && let Err(error) = writer.write_child_exited(
+            guard_started_at.elapsed(),
+            &termination,
+            &peaks,
+            memory_evidence,
+            expected_diagnostic,
+        )
+    {
+        eprintln!("Process memory guard diagnostics failed: {error}");
+        diagnostics_error = Some(error);
+    }
+
+    Ok(GuardRunResult {
+        _containment: containment,
+        diagnostics_error,
+        exit_status,
+    })
 }
 
 fn main() {
@@ -90,202 +273,19 @@ fn main() {
     };
 
     match run_guarded_command(guarded_command) {
-        Ok(exit_code) => std::process::exit(exit_code),
+        Ok(result) => {
+            if let Some(error) = result.diagnostics_error {
+                eprintln!(
+                    "Process memory guard failed because requested diagnostics could not be completed: {error}"
+                );
+                std::process::exit(1);
+            }
+            platform::exit_like_child(result.exit_status);
+        }
         Err(error) => {
             eprintln!("Process memory guard failed: {error}");
             std::process::exit(1);
         }
-    }
-}
-
-#[cfg(target_os = "windows")]
-mod platform {
-    use std::ffi::c_void;
-    use std::io;
-    use std::mem::{forget, size_of};
-    use std::ptr;
-
-    type Handle = *mut c_void;
-
-    const JOB_OBJECT_EXTENDED_LIMIT_INFORMATION_CLASS: i32 = 9;
-    const JOB_OBJECT_LIMIT_JOB_MEMORY: u32 = 0x0000_0200;
-    const JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE: u32 = 0x0000_2000;
-
-    #[repr(C)]
-    #[derive(Default)]
-    struct JobObjectBasicLimitInformation {
-        per_process_user_time_limit: i64,
-        per_job_user_time_limit: i64,
-        limit_flags: u32,
-        minimum_working_set_size: usize,
-        maximum_working_set_size: usize,
-        active_process_limit: u32,
-        affinity: usize,
-        priority_class: u32,
-        scheduling_class: u32,
-    }
-
-    #[repr(C)]
-    #[derive(Default)]
-    struct IoCounters {
-        read_operation_count: u64,
-        write_operation_count: u64,
-        other_operation_count: u64,
-        read_transfer_count: u64,
-        write_transfer_count: u64,
-        other_transfer_count: u64,
-    }
-
-    #[repr(C)]
-    #[derive(Default)]
-    struct JobObjectExtendedLimitInformation {
-        basic_limit_information: JobObjectBasicLimitInformation,
-        io_information: IoCounters,
-        process_memory_limit: usize,
-        job_memory_limit: usize,
-        peak_process_memory_used: usize,
-        peak_job_memory_used: usize,
-    }
-
-    unsafe extern "system" {
-        fn AssignProcessToJobObject(job: Handle, process: Handle) -> i32;
-        fn CloseHandle(object: Handle) -> i32;
-        fn CreateJobObjectW(job_attributes: *const c_void, name: *const u16) -> Handle;
-        fn GetCurrentProcess() -> Handle;
-        fn SetInformationJobObject(
-            job: Handle,
-            information_class: i32,
-            information: *const c_void,
-            information_length: u32,
-        ) -> i32;
-    }
-
-    struct OwnedJobHandle(Handle);
-
-    impl Drop for OwnedJobHandle {
-        fn drop(&mut self) {
-            // SAFETY: CreateJobObjectW returned this non-null owned handle and
-            // this wrapper closes it at most once before it is deliberately
-            // transferred to process-lifetime ownership.
-            unsafe {
-                CloseHandle(self.0);
-            }
-        }
-    }
-
-    pub(super) fn apply_memory_limit(memory_limit_bytes: u64) -> Result<(), String> {
-        let job_memory_limit = usize::try_from(memory_limit_bytes).map_err(|_| {
-            format!(
-                "memory limit {memory_limit_bytes} cannot be represented on this Windows target"
-            )
-        })?;
-        let information_length = u32::try_from(size_of::<JobObjectExtendedLimitInformation>())
-            .map_err(|_| "Windows job information structure is unexpectedly large".to_owned())?;
-
-        // SAFETY: Null attributes and name request an unnamed job with the
-        // current process's default security descriptor. The returned handle
-        // is checked before it is wrapped as owned.
-        let raw_job_handle = unsafe { CreateJobObjectW(ptr::null(), ptr::null()) };
-        if raw_job_handle.is_null() {
-            return Err(format!(
-                "CreateJobObjectW failed: {}",
-                io::Error::last_os_error()
-            ));
-        }
-        let job_handle = OwnedJobHandle(raw_job_handle);
-
-        let mut limit_information = JobObjectExtendedLimitInformation::default();
-        limit_information.basic_limit_information.limit_flags =
-            JOB_OBJECT_LIMIT_JOB_MEMORY | JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-        limit_information.job_memory_limit = job_memory_limit;
-
-        // SAFETY: The information pointer addresses a repr(C) structure of the
-        // exact size supplied for JobObjectExtendedLimitInformation, and the
-        // job handle remains valid for the call.
-        let limit_was_set = unsafe {
-            SetInformationJobObject(
-                job_handle.0,
-                JOB_OBJECT_EXTENDED_LIMIT_INFORMATION_CLASS,
-                ptr::from_ref(&limit_information).cast(),
-                information_length,
-            )
-        };
-        if limit_was_set == 0 {
-            return Err(format!(
-                "SetInformationJobObject failed: {}",
-                io::Error::last_os_error()
-            ));
-        }
-
-        // Assign the launcher before it creates the guarded command. Windows
-        // associates every child with the same job by default, eliminating the
-        // race in which cargo could create a test process before assignment.
-        // SAFETY: GetCurrentProcess returns a valid pseudo-handle with the
-        // access required to assign the current process to this valid job.
-        let process_was_assigned =
-            unsafe { AssignProcessToJobObject(job_handle.0, GetCurrentProcess()) };
-        if process_was_assigned == 0 {
-            return Err(format!(
-                "AssignProcessToJobObject failed: {}",
-                io::Error::last_os_error()
-            ));
-        }
-
-        // Keep the only job handle open for the launcher's lifetime. Windows
-        // closes it if the launcher exits for any reason; KILL_ON_JOB_CLOSE then
-        // terminates cargo and every remaining descendant in the job.
-        forget(job_handle);
-        Ok(())
-    }
-}
-
-#[cfg(target_os = "linux")]
-mod platform {
-    use std::ffi::c_int;
-    use std::io;
-
-    const RESOURCE_LIMIT_ADDRESS_SPACE: c_int = 9;
-
-    #[repr(C)]
-    struct ResourceLimit {
-        current: usize,
-        maximum: usize,
-    }
-
-    unsafe extern "C" {
-        fn setrlimit(resource: c_int, limits: *const ResourceLimit) -> c_int;
-    }
-
-    pub(super) fn apply_memory_limit(memory_limit_bytes: u64) -> Result<(), String> {
-        let memory_limit = usize::try_from(memory_limit_bytes).map_err(|_| {
-            format!("memory limit {memory_limit_bytes} cannot be represented on this Linux target")
-        })?;
-        let limits = ResourceLimit {
-            current: memory_limit,
-            maximum: memory_limit,
-        };
-
-        // SAFETY: The pointer addresses a repr(C) rlimit-compatible structure
-        // for Linux, and it remains valid for the duration of setrlimit.
-        let result = unsafe { setrlimit(RESOURCE_LIMIT_ADDRESS_SPACE, &limits) };
-        if result != 0 {
-            return Err(format!(
-                "setrlimit(RLIMIT_AS) failed: {}",
-                io::Error::last_os_error()
-            ));
-        }
-
-        Ok(())
-    }
-}
-
-#[cfg(not(any(target_os = "linux", target_os = "windows")))]
-mod platform {
-    pub(super) fn apply_memory_limit(_memory_limit_bytes: u64) -> Result<(), String> {
-        Err(format!(
-            "hard memory containment is unsupported on {}",
-            std::env::consts::OS
-        ))
     }
 }
 
@@ -315,10 +315,64 @@ mod tests {
             parsed,
             GuardedCommand {
                 memory_limit_bytes: 34_359_738_368,
+                virtual_address_space_allowance_bytes: 0,
+                diagnostics_path: None,
                 program: OsString::from("cargo"),
                 arguments: owned_arguments(&["test", COMMAND_SEPARATOR, "--test-threads", "1"]),
             }
         );
+    }
+
+    #[test]
+    fn parses_an_optional_diagnostics_path_before_the_command_separator() {
+        let parsed = parse_arguments(owned_arguments(&[
+            MEMORY_LIMIT_ARGUMENT,
+            "4096",
+            DIAGNOSTICS_PATH_ARGUMENT,
+            "logs/run/resources/guard.jsonl",
+            COMMAND_SEPARATOR,
+            "node",
+            "test.js",
+        ]))
+        .expect("guarded command with diagnostics");
+
+        assert_eq!(
+            parsed,
+            GuardedCommand {
+                memory_limit_bytes: 4096,
+                virtual_address_space_allowance_bytes: 0,
+                diagnostics_path: Some(PathBuf::from("logs/run/resources/guard.jsonl")),
+                program: OsString::from("node"),
+                arguments: owned_arguments(&["test.js"]),
+            }
+        );
+    }
+
+    #[test]
+    fn parses_virtual_address_space_allowance_and_diagnostics_in_either_order() {
+        for optional_arguments in [
+            [
+                VIRTUAL_ADDRESS_SPACE_ALLOWANCE_ARGUMENT,
+                "8589934592",
+                DIAGNOSTICS_PATH_ARGUMENT,
+                "guard.jsonl",
+            ],
+            [
+                DIAGNOSTICS_PATH_ARGUMENT,
+                "guard.jsonl",
+                VIRTUAL_ADDRESS_SPACE_ALLOWANCE_ARGUMENT,
+                "8589934592",
+            ],
+        ] {
+            let mut arguments = owned_arguments(&[MEMORY_LIMIT_ARGUMENT, "1073741824"]);
+            arguments.extend(owned_arguments(&optional_arguments));
+            arguments.extend(owned_arguments(&[COMMAND_SEPARATOR, "node"]));
+            let parsed = parse_arguments(arguments).expect("optional guard arguments");
+
+            assert_eq!(parsed.memory_limit_bytes, 1_073_741_824);
+            assert_eq!(parsed.virtual_address_space_allowance_bytes, 8_589_934_592);
+            assert_eq!(parsed.diagnostics_path, Some(PathBuf::from("guard.jsonl")));
+        }
     }
 
     #[test]
@@ -339,7 +393,7 @@ mod tests {
     }
 
     #[test]
-    fn refuses_a_missing_separator_or_command() {
+    fn refuses_a_missing_separator_command_or_diagnostics_path() {
         assert!(
             parse_arguments(owned_arguments(&[MEMORY_LIMIT_ARGUMENT, "1024", "cargo"])).is_err()
         );
@@ -348,6 +402,14 @@ mod tests {
                 MEMORY_LIMIT_ARGUMENT,
                 "1024",
                 COMMAND_SEPARATOR,
+            ]))
+            .is_err()
+        );
+        assert!(
+            parse_arguments(owned_arguments(&[
+                MEMORY_LIMIT_ARGUMENT,
+                "1024",
+                DIAGNOSTICS_PATH_ARGUMENT,
             ]))
             .is_err()
         );

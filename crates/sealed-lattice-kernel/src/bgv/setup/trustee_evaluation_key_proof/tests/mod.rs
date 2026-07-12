@@ -497,11 +497,11 @@ fn same_secret_statement_hash_vector_request() -> serde_json::Value {
         },
         "sameSecretBridge": {
             "publicMatrixSeedHash": repeated_hash("40"),
-            "targetBasisHash": crate::bgv::evaluator::top_k::canonical_target_basis_hash()
-                .expect("canonical target basis hash"),
+            "setupParametersHash": crate::bgv::setup::accepted_setup::setup_parameters_hash()
+                .expect("setup parameters hash"),
             "sourceTrusteeIdentity": "statement-vector-trustee",
             "sourceTrusteeRosterPosition": 0,
-            "targetRnsPrimes": [DATA_PRIMES[0]],
+            "bridgeRnsPrimes": [DATA_PRIMES[0]],
             "targetConstantCommitmentRoots": [target_material.commitment_root],
             "targetConstantCommitments": [target_material.commitment_value],
         },
@@ -545,11 +545,11 @@ fn public_key_share_statement_hash_vector_request() -> serde_json::Value {
         }],
         "sameSecretBridge": {
             "publicMatrixSeedHash": repeated_hash("41"),
-            "targetBasisHash": crate::bgv::evaluator::top_k::canonical_target_basis_hash()
-                .expect("canonical target basis hash"),
+            "setupParametersHash": crate::bgv::setup::accepted_setup::setup_parameters_hash()
+                .expect("setup parameters hash"),
             "sourceTrusteeIdentity": "statement-vector-trustee",
             "sourceTrusteeRosterPosition": 0,
-            "targetRnsPrimes": [DATA_PRIMES[0]],
+            "bridgeRnsPrimes": [DATA_PRIMES[0]],
             "targetConstantCommitmentRoots": [target_material.commitment_root],
             "targetConstantCommitments": [target_material.commitment_value],
         },

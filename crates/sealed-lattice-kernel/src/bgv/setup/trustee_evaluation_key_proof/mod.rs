@@ -219,10 +219,13 @@ pub(in crate::bgv::setup) const CLAIM_MASK_DIGIT_COUNT: usize = 58;
 // trit (witness bound two) and its leakage is in the standard ~2^-68 class.
 pub(in crate::bgv::setup) const VSS_PUBLIC_CARRY_CLAIM_MASK_DIGIT_COUNT: usize = 58;
 pub(in crate::bgv::setup) const VSS_PUBLIC_SHARE_LINKAGE_TRIT_CLAIM_MASK_DIGIT_COUNT: usize = 58;
-// Same-secret-bridge digit consistency claims lift over up to seven target
-// fields, so the wider eighty-seven-digit mask stays inside that CRT window
-// while keeping a generous leakage margin; this constant serves the bridge
-// family only (share-linkage trit claims use the 58-digit mask above).
+// Same-secret-bridge target-message digit claims use all three setup
+// commitment fields, so the wider eighty-seven-digit mask stays inside that
+// CRT window. This leaves no independent check field for those message claims;
+// their cross-field value is instead fixed by the bridge relation to the
+// separately consistency-checked ternary secret and negative indicator. This
+// constant serves the bridge family only (share-linkage trit claims use the
+// 58-digit mask above).
 pub(in crate::bgv::setup) const VSS_PUBLIC_DIGIT_CLAIM_MASK_DIGIT_COUNT: usize = 87;
 // Target-decryption message claims need wider masks than the setup families
 // because lifted aggregate-message openings have a much larger clear range. That

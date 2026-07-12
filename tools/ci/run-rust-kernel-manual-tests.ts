@@ -1,5 +1,6 @@
 import path from 'node:path';
 
+import { runWithLocalRunLog } from './local-run-log.js';
 import {
     buildFocusedCommand,
     normalizeFocusedTestFilter,
@@ -69,43 +70,67 @@ const parseArguments = (
 
 export const runRustKernelManualTests = async (): Promise<void> => {
     const rawArguments = process.argv.slice(2);
-    const parsed = parseArguments(rawArguments);
-    const label = laneLabels[parsed.lane];
-    const testFilters =
-        parsed.focusedFilter === undefined
-            ? rustKernelManualTestLanes[parsed.lane]
-            : [parsed.focusedFilter];
-    const targetDirectoryPath = path.resolve(
-        process.cwd(),
-        'target',
-        `${parsed.lane}-${parsed.focusedFilter === undefined ? 'accelerated' : 'focused'}`,
+    const requestedLane = rawArguments.find(
+        (argument) => argument !== '--' && argument !== undefined,
     );
-    const commands = testFilters.map((testFilter) => ({
-        builtCommand: buildFocusedCommand(testFilter, parsed.mode, {
-            logFileSlug: `cargo-test-${parsed.lane}`,
-            progressLabel: parsed.lane,
-            runName: label,
-            targetDirectoryPath,
-        }),
-        expectedTestFilter: testFilter,
-    }));
+    const diagnosticLane =
+        requestedLane !== undefined &&
+        requestedLane in rustKernelManualTestLanes
+            ? (requestedLane as ManualRustKernelLane)
+            : undefined;
+    await runWithLocalRunLog(
+        {
+            commandLineArguments: rawArguments,
+            lanes: [
+                diagnosticLane === undefined
+                    ? 'Guarded manual Rust kernel'
+                    : laneLabels[diagnosticLane],
+            ],
+            scriptName:
+                diagnosticLane === undefined
+                    ? 'test:rust:kernel:manual'
+                    : canonicalTestLaneDefinitions[diagnosticLane].rootScript,
+        },
+        async (runLog) => {
+            const parsed = parseArguments(rawArguments);
+            const label = laneLabels[parsed.lane];
+            const testFilters =
+                parsed.focusedFilter === undefined
+                    ? rustKernelManualTestLanes[parsed.lane]
+                    : [parsed.focusedFilter];
+            const targetDirectoryPath = path.resolve(
+                process.cwd(),
+                'target',
+                `${parsed.lane}-${parsed.focusedFilter === undefined ? 'accelerated' : 'focused'}`,
+            );
+            const commands = testFilters.map((testFilter) => ({
+                builtCommand: buildFocusedCommand(testFilter, parsed.mode, {
+                    logFileSlug: `cargo-test-${parsed.lane}`,
+                    progressLabel: parsed.lane,
+                    runName: label,
+                    targetDirectoryPath,
+                }),
+                expectedTestFilter: testFilter,
+            }));
 
-    if (parsed.focusedFilter !== undefined) {
-        verifyFocusedRustLaneSelection({
-            environment: commands[0]?.builtCommand.command.env,
-            lane: parsed.lane,
-            testFilter: parsed.focusedFilter,
-        });
-    }
+            if (parsed.focusedFilter !== undefined) {
+                await verifyFocusedRustLaneSelection({
+                    environment: commands[0]?.builtCommand.command.env,
+                    lane: parsed.lane,
+                    runLog,
+                    testFilter: parsed.focusedFilter,
+                });
+            }
 
-    await runGuardedRustKernelCommands({
-        commands,
-        laneLabel: `${label}${
-            parsed.focusedFilter === undefined ? '' : ' focused'
-        } (${parsed.mode})`,
-        rawArguments: rawArguments.slice(1),
-        scriptName: canonicalTestLaneDefinitions[parsed.lane].rootScript,
-    });
+            await runGuardedRustKernelCommands({
+                commands,
+                laneLabel: `${label}${
+                    parsed.focusedFilter === undefined ? '' : ' focused'
+                } (${parsed.mode})`,
+                runLog,
+            });
+        },
+    );
 };
 
 if (isDirectlyInvokedModule(import.meta.url)) {

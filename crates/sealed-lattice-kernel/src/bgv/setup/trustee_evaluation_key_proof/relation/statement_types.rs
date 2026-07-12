@@ -127,6 +127,23 @@ pub(crate) struct VssShareLinkageStatement {
     pub(crate) is_threshold_aggregate: bool,
 }
 
+// The single home for the threshold-aggregate evaluation-point rule: a proven
+// aggregate runs the share-linkage lincheck at the unit evaluation point, so
+// its effective roster position is 0 (canonical trustee point 1), which also
+// drives the lifted carry bounds. The vector builder, the prover witness
+// validation, and the masked-claim bounds all derive from this instead of
+// re-branching on the flag.
+pub(crate) fn vss_share_linkage_lincheck_roster_position(
+    is_threshold_aggregate: bool,
+    recipient_roster_position: u64,
+) -> u64 {
+    if is_threshold_aggregate {
+        0
+    } else {
+        recipient_roster_position
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct VssShareLinkageItem {
     pub(crate) source_trustee_identity: String,
@@ -160,8 +177,8 @@ pub(crate) struct SameSecretBridgeStatement {
     pub(crate) public_matrix_seed_hash: String,
     pub(crate) source_trustee_identity: String,
     pub(crate) source_trustee_roster_position: u64,
-    pub(crate) target_basis_hash: String,
-    pub(crate) target_rns_primes: Vec<u64>,
+    pub(crate) setup_parameters_hash: String,
+    pub(crate) bridge_rns_primes: Vec<u64>,
     pub(crate) target_constant_commitment_roots: Vec<String>,
     pub(crate) target_constant_commitments: Vec<VssShareLinkageCommitment>,
 }
@@ -731,7 +748,7 @@ impl TrusteeEvaluationKeyStatement {
     pub(crate) fn same_secret_bridge_message_bounds(&self, limb_index: usize) -> Vec<u64> {
         match &self.same_secret_bridge {
             Some(statement) if limb_index < SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len() => {
-                statement.target_rns_primes.clone()
+                statement.bridge_rns_primes.clone()
             }
             _ => Vec::new(),
         }

@@ -1,6 +1,6 @@
-import { spawnSync } from 'node:child_process';
 import {
     appendFile,
+    cp,
     mkdir,
     mkdtemp,
     readFile,
@@ -11,6 +11,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import type { ActiveLocalRunLog } from './local-run-log.js';
+import { runWithLocalRunLog } from './local-run-log.js';
 import {
     resolvePackageManagerRunner,
     resolvePackageManagerRunnerForPackageManager,
@@ -32,6 +34,11 @@ import {
     type ReleaseIncrement,
     type ReleaseVersionResult,
 } from './release-version.js';
+import {
+    runCommandAndCaptureOutput,
+    type CommandInvocation,
+} from './run-command.js';
+import { serializeErrorDiagnostic } from './run-log-diagnostics.js';
 import { stagePublicPackage } from './stage-public-package.mjs';
 
 import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
@@ -39,13 +46,15 @@ import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
 export type ReleaseCommandInvocation = {
     readonly arguments: readonly string[];
     readonly command: string;
+    readonly description?: string;
     readonly environment?: NodeJS.ProcessEnv;
+    readonly logFileSlug?: string;
     readonly workingDirectoryPath: string;
 };
 
 export type ReleaseCommandExecutor = (
     invocation: ReleaseCommandInvocation,
-) => ReleaseCommandProbe;
+) => Promise<ReleaseCommandProbe> | ReleaseCommandProbe;
 
 type StagedReleasePackage = {
     readonly packageDirectory: string;
@@ -79,31 +88,34 @@ const publicPackageManifestPath = path.resolve(
     'package.json',
 );
 
-const executeReleaseCommand: ReleaseCommandExecutor = (invocation) => {
-    const result = spawnSync(invocation.command, invocation.arguments, {
-        cwd: invocation.workingDirectoryPath,
-        encoding: 'utf8',
-        env: invocation.environment ?? process.env,
-        maxBuffer: 100 * 1024 * 1024,
-    });
+const createReleaseCommandExecutor =
+    (runLog?: ActiveLocalRunLog): ReleaseCommandExecutor =>
+    async (invocation) => {
+        const commandInvocation: CommandInvocation = {
+            args: invocation.arguments,
+            command: invocation.command,
+            description:
+                invocation.description ??
+                [invocation.command, ...invocation.arguments].join(' '),
+            env: invocation.environment,
+            logFileSlug: invocation.logFileSlug,
+            workingDirectoryPath: invocation.workingDirectoryPath,
+        };
+        const result = await runCommandAndCaptureOutput(commandInvocation, {
+            runLog,
+        });
+        if (result.terminationSignal !== null) {
+            throw new Error(
+                `${invocation.command} terminated by signal ${result.terminationSignal}.`,
+            );
+        }
 
-    if (result.error !== undefined) {
-        throw new Error(
-            `Failed to start ${invocation.command}: ${result.error.message}`,
-        );
-    }
-    if (result.signal !== null) {
-        throw new Error(
-            `${invocation.command} terminated by signal ${result.signal}.`,
-        );
-    }
-
-    return {
-        exitCode: result.status ?? 1,
-        stderr: result.stderr ?? '',
-        stdout: result.stdout ?? '',
+        return {
+            exitCode: result.exitCode,
+            stderr: result.stderr,
+            stdout: result.stdout,
+        };
     };
-};
 
 const formatCommandFailure = (
     description: string,
@@ -129,26 +141,30 @@ const requireSuccessfulCommand = (
     return probe.stdout;
 };
 
-const runPackageManagerCommand = (
+const runPackageManagerCommand = async (
     executor: ReleaseCommandExecutor,
     runner: PackageManagerRunner,
     commandArguments: readonly string[],
     workingDirectoryPath: string,
-): ReleaseCommandProbe =>
-    executor({
+): Promise<ReleaseCommandProbe> =>
+    await executor({
         arguments: [...runner.commandArgumentsPrefix, ...commandArguments],
         command: runner.command,
+        description: `${runner.kind} ${commandArguments.join(' ')}`,
+        logFileSlug: `${runner.kind}-${commandArguments[0] ?? 'command'}`,
         workingDirectoryPath,
     });
 
-const runGitCommand = (
+const runGitCommand = async (
     executor: ReleaseCommandExecutor,
     commandArguments: readonly string[],
     workingDirectoryPath = repositoryRoot,
-): ReleaseCommandProbe =>
-    executor({
+): Promise<ReleaseCommandProbe> =>
+    await executor({
         arguments: commandArguments,
         command: 'git',
+        description: `git ${commandArguments.join(' ')}`,
+        logFileSlug: `git-${commandArguments[0] ?? 'command'}`,
         workingDirectoryPath,
     });
 
@@ -180,17 +196,19 @@ const appendGitHubOutput = async (
     }
 };
 
-export const verifyReleaseTargets = (input: {
+export const verifyReleaseTargets = async (input: {
     readonly defaultBranch: string;
     readonly executor?: ReleaseCommandExecutor;
     readonly releaseTag: string;
     readonly releaseVersion: string;
     readonly sourceRevision: string;
+    readonly runLog?: ActiveLocalRunLog;
     readonly workingDirectoryPath?: string;
-}): void => {
-    const executor = input.executor ?? executeReleaseCommand;
+}): Promise<void> => {
+    const executor =
+        input.executor ?? createReleaseCommandExecutor(input.runLog);
     const workingDirectoryPath = input.workingDirectoryPath ?? repositoryRoot;
-    const remoteBranchLookup = runGitCommand(
+    const remoteBranchLookup = await runGitCommand(
         executor,
         ['ls-remote', 'origin', `refs/heads/${input.defaultBranch}`],
         workingDirectoryPath,
@@ -209,7 +227,7 @@ export const verifyReleaseTargets = (input: {
 
     requireUnusedReleaseTag(
         input.releaseTag,
-        runGitCommand(
+        await runGitCommand(
             executor,
             [
                 'ls-remote',
@@ -225,7 +243,7 @@ export const verifyReleaseTargets = (input: {
     const npmRunner = resolvePackageManagerRunnerForPackageManager('npm');
     requireUnpublishedNpmVersion(
         input.releaseVersion,
-        runPackageManagerCommand(
+        await runPackageManagerCommand(
             executor,
             npmRunner,
             [
@@ -239,18 +257,20 @@ export const verifyReleaseTargets = (input: {
     );
 };
 
-export const verifyReleaseMetadata = (
+export const verifyReleaseMetadata = async (
     input: {
         readonly executor?: ReleaseCommandExecutor;
+        readonly runLog?: ActiveLocalRunLog;
         readonly workingDirectoryPath?: string;
     } = {},
-): void => {
-    const executor = input.executor ?? executeReleaseCommand;
+): Promise<void> => {
+    const executor =
+        input.executor ?? createReleaseCommandExecutor(input.runLog);
     const workingDirectoryPath = input.workingDirectoryPath ?? repositoryRoot;
     const changedPaths = parseNullDelimitedPaths(
         requireSuccessfulCommand(
             'The release metadata diff',
-            runGitCommand(
+            await runGitCommand(
                 executor,
                 ['diff', '--name-only', '-z'],
                 workingDirectoryPath,
@@ -260,7 +280,7 @@ export const verifyReleaseMetadata = (
     const untrackedPaths = parseNullDelimitedPaths(
         requireSuccessfulCommand(
             'The untracked-file inventory',
-            runGitCommand(
+            await runGitCommand(
                 executor,
                 ['ls-files', '--others', '--exclude-standard', '-z'],
                 workingDirectoryPath,
@@ -319,13 +339,15 @@ export const determineNpmPublication = async (input: {
     readonly executor?: ReleaseCommandExecutor;
     readonly packageDirectory: string;
     readonly releaseVersion: string;
+    readonly runLog?: ActiveLocalRunLog;
 }): Promise<'already-identical' | 'publish'> => {
-    const executor = input.executor ?? executeReleaseCommand;
+    const executor =
+        input.executor ?? createReleaseCommandExecutor(input.runLog);
     const npmRunner = resolvePackageManagerRunnerForPackageManager('npm');
     const packMetadata = parseNpmPackMetadata(
         requireSuccessfulCommand(
             'npm pack',
-            runPackageManagerCommand(
+            await runPackageManagerCommand(
                 executor,
                 npmRunner,
                 ['pack', '--json', '--ignore-scripts'],
@@ -355,7 +377,7 @@ export const determineNpmPublication = async (input: {
     }
     await rm(packageArchivePath, { force: true });
 
-    const registryLookup = runPackageManagerCommand(
+    const registryLookup = await runPackageManagerCommand(
         executor,
         npmRunner,
         [
@@ -368,7 +390,7 @@ export const determineNpmPublication = async (input: {
     );
     const latestTagLookup =
         registryLookup.exitCode === 0
-            ? runPackageManagerCommand(
+            ? await runPackageManagerCommand(
                   executor,
                   npmRunner,
                   ['view', 'sealed-lattice', 'dist-tags.latest', '--json'],
@@ -384,14 +406,16 @@ export const determineNpmPublication = async (input: {
     return publicationDisposition.action;
 };
 
-export const determineGitHubRelease = (input: {
+export const determineGitHubRelease = async (input: {
     readonly executor?: ReleaseCommandExecutor;
     readonly repository: string;
+    readonly runLog?: ActiveLocalRunLog;
     readonly tag: string;
-}): 'already-exists' | 'create' => {
-    const executor = input.executor ?? executeReleaseCommand;
+}): Promise<'already-exists' | 'create'> => {
+    const executor =
+        input.executor ?? createReleaseCommandExecutor(input.runLog);
     return resolveGitHubRelease({
-        releaseLookup: executor({
+        releaseLookup: await executor({
             arguments: [
                 'api',
                 `repos/${input.repository}/releases/tags/${input.tag}`,
@@ -403,17 +427,19 @@ export const determineGitHubRelease = (input: {
     }).action;
 };
 
-export const verifyCheckedOutReleaseTag = (input: {
+export const verifyCheckedOutReleaseTag = async (input: {
     readonly executor?: ReleaseCommandExecutor;
     readonly releaseRevision: string;
+    readonly runLog?: ActiveLocalRunLog;
     readonly tag: string;
     readonly workingDirectoryPath?: string;
-}): void => {
-    const executor = input.executor ?? executeReleaseCommand;
+}): Promise<void> => {
+    const executor =
+        input.executor ?? createReleaseCommandExecutor(input.runLog);
     const workingDirectoryPath = input.workingDirectoryPath ?? repositoryRoot;
     const headRevision = requireSuccessfulCommand(
         'The checked-out release commit lookup',
-        runGitCommand(
+        await runGitCommand(
             executor,
             ['rev-parse', '--verify', 'HEAD^{commit}'],
             workingDirectoryPath,
@@ -426,7 +452,7 @@ export const verifyCheckedOutReleaseTag = (input: {
     });
     const checkedOutRevision = requireSuccessfulCommand(
         `The ${input.tag} commit lookup`,
-        runGitCommand(
+        await runGitCommand(
             executor,
             ['rev-parse', '--verify', `refs/tags/${input.tag}^{commit}`],
             workingDirectoryPath,
@@ -495,6 +521,7 @@ export const verifyReleaseWithoutMutation = async (input: {
     }
 
     let temporaryDirectoryPath: string | undefined;
+    let cleanupFailure: unknown;
     let verificationFailure: unknown;
     try {
         await input.dependencies.verifyTargets(releaseVersion);
@@ -516,9 +543,13 @@ export const verifyReleaseWithoutMutation = async (input: {
         verificationFailure = error;
     } finally {
         if (temporaryDirectoryPath !== undefined) {
-            await input.dependencies.removeTemporaryDirectory(
-                temporaryDirectoryPath,
-            );
+            try {
+                await input.dependencies.removeTemporaryDirectory(
+                    temporaryDirectoryPath,
+                );
+            } catch (error) {
+                cleanupFailure = error;
+            }
         }
     }
 
@@ -527,12 +558,34 @@ export const verifyReleaseWithoutMutation = async (input: {
         throw new Error('Release verification changed the working tree.');
     }
     if (verificationFailure !== undefined) {
+        if (cleanupFailure !== undefined) {
+            const cleanupFailureDescription =
+                cleanupFailure instanceof Error
+                    ? (cleanupFailure.stack ?? cleanupFailure.message)
+                    : JSON.stringify(serializeErrorDiagnostic(cleanupFailure));
+            throw Object.assign(
+                new Error(
+                    `Release verification and temporary-workspace cleanup both failed. Cleanup failure:\n${cleanupFailureDescription}`,
+                ),
+                { cause: verificationFailure },
+            );
+        }
         throw verificationFailure instanceof Error
             ? verificationFailure
             : new Error(
                   typeof verificationFailure === 'string'
                       ? verificationFailure
                       : 'Release verification failed with a non-Error value.',
+              );
+    }
+    if (cleanupFailure !== undefined) {
+        throw cleanupFailure instanceof Error
+            ? cleanupFailure
+            : Object.assign(
+                  new Error(
+                      'Release verification cleanup failed with a non-Error value.',
+                  ),
+                  { cause: cleanupFailure },
               );
     }
     if ((await readFile(manifestPath, 'utf8')) !== sourceManifestText) {
@@ -546,10 +599,12 @@ export const verifyReleaseWithoutMutation = async (input: {
 
 const makeDefaultMutationFreeDependencies = (input: {
     readonly defaultBranch: string;
+    readonly runLog: ActiveLocalRunLog;
     readonly sourceRevision: string;
 }): MutationFreeReleaseVerificationDependencies => {
     const pnpmRunner = resolvePackageManagerRunner();
     const npmRunner = resolvePackageManagerRunnerForPackageManager('npm');
+    const executor = createReleaseCommandExecutor(input.runLog);
 
     return {
         buildAndSmoke: async (temporaryDirectoryPath, releaseVersion) => {
@@ -564,7 +619,7 @@ const makeDefaultMutationFreeDependencies = (input: {
             );
             requireSuccessfulCommand(
                 'The isolated source copy',
-                runGitCommand(executeReleaseCommand, [
+                await runGitCommand(executor, [
                     'checkout-index',
                     '--all',
                     '--force',
@@ -580,14 +635,16 @@ const makeDefaultMutationFreeDependencies = (input: {
                 ),
                 releaseVersion.version,
             );
-            const installProbe = executeReleaseCommand({
+            const installProbe = await executor({
                 arguments: [
                     ...pnpmRunner.commandArgumentsPrefix,
                     'install',
                     '--frozen-lockfile',
                 ],
                 command: pnpmRunner.command,
+                description: 'Install the isolated release workspace',
                 environment: { ...process.env, HUSKY: '0' },
+                logFileSlug: 'isolated-install',
                 workingDirectoryPath: isolatedSourcePath,
             });
             requireSuccessfulCommand(
@@ -596,8 +653,8 @@ const makeDefaultMutationFreeDependencies = (input: {
             );
             requireSuccessfulCommand(
                 'The packed-package smoke test',
-                runPackageManagerCommand(
-                    executeReleaseCommand,
+                await runPackageManagerCommand(
+                    executor,
                     pnpmRunner,
                     ['run', 'smoke:pack:npm'],
                     isolatedSourcePath,
@@ -606,20 +663,18 @@ const makeDefaultMutationFreeDependencies = (input: {
         },
         createTemporaryDirectory: async () =>
             mkdtemp(path.join(tmpdir(), 'sealed-lattice-release-verify-')),
-        inspectWorkingTree: () =>
-            Promise.resolve(
-                requireSuccessfulCommand(
-                    'The working-tree inspection',
-                    runGitCommand(executeReleaseCommand, [
-                        'status',
-                        '--porcelain=v1',
-                        '--untracked-files=all',
-                    ]),
-                ),
+        inspectWorkingTree: async () =>
+            requireSuccessfulCommand(
+                'The working-tree inspection',
+                await runGitCommand(executor, [
+                    'status',
+                    '--porcelain=v1',
+                    '--untracked-files=all',
+                ]),
             ),
-        publishDryRun: (packageDirectory) => {
-            const publishProbe = runPackageManagerCommand(
-                executeReleaseCommand,
+        publishDryRun: async (packageDirectory) => {
+            const publishProbe = await runPackageManagerCommand(
+                executor,
                 npmRunner,
                 ['publish', '--dry-run', '--ignore-scripts', '--tag', 'latest'],
                 packageDirectory,
@@ -631,10 +686,48 @@ const makeDefaultMutationFreeDependencies = (input: {
             if (output.length > 0) {
                 console.log(output);
             }
-            return Promise.resolve();
         },
         removeTemporaryDirectory: async (temporaryDirectoryPath) => {
+            let diagnosticCopyFailure: unknown;
+            try {
+                const diagnosticDestinationPath = path.join(
+                    input.runLog.runDirectoryPath,
+                    'attachments',
+                    'isolated-release-verification-logs',
+                );
+                await mkdir(path.dirname(diagnosticDestinationPath), {
+                    recursive: true,
+                });
+                await cp(
+                    path.join(temporaryDirectoryPath, 'source', 'logs'),
+                    diagnosticDestinationPath,
+                    {
+                        errorOnExist: true,
+                        force: false,
+                        recursive: true,
+                    },
+                );
+            } catch (error) {
+                if (
+                    !(
+                        typeof error === 'object' &&
+                        error !== null &&
+                        'code' in error &&
+                        error.code === 'ENOENT'
+                    )
+                ) {
+                    diagnosticCopyFailure = error;
+                }
+            }
             await rm(temporaryDirectoryPath, { force: true, recursive: true });
+            if (diagnosticCopyFailure !== undefined) {
+                throw Object.assign(
+                    new Error(
+                        'Failed to preserve isolated release-verification logs.',
+                    ),
+                    { cause: diagnosticCopyFailure },
+                );
+            }
         },
         stagePackage: async (temporaryDirectoryPath) =>
             stagePublicPackage({
@@ -644,19 +737,21 @@ const makeDefaultMutationFreeDependencies = (input: {
                 ),
                 projectRoot: path.join(temporaryDirectoryPath, 'source'),
             }),
-        verifyTargets: (releaseVersion) => {
-            verifyReleaseTargets({
+        verifyTargets: async (releaseVersion) => {
+            await verifyReleaseTargets({
                 defaultBranch: input.defaultBranch,
+                executor,
                 releaseTag: releaseVersion.tag,
                 releaseVersion: releaseVersion.version,
                 sourceRevision: input.sourceRevision,
             });
-            return Promise.resolve();
         },
     };
 };
 
-const resolveDefaultBranch = (): string => {
+const resolveDefaultBranch = async (
+    runLog: ActiveLocalRunLog,
+): Promise<string> => {
     const configuredDefaultBranch = process.env.DEFAULT_BRANCH;
     if (
         configuredDefaultBranch !== undefined &&
@@ -667,7 +762,7 @@ const resolveDefaultBranch = (): string => {
 
     const symbolicRemoteBranch = requireSuccessfulCommand(
         'The default-branch lookup',
-        runGitCommand(executeReleaseCommand, [
+        await runGitCommand(createReleaseCommandExecutor(runLog), [
             'symbolic-ref',
             '--quiet',
             '--short',
@@ -683,20 +778,24 @@ const resolveDefaultBranch = (): string => {
     return symbolicRemoteBranch.slice(remotePrefix.length);
 };
 
-const runTargetsCommand = (): void => {
-    verifyReleaseTargets({
+const runTargetsCommand = async (runLog: ActiveLocalRunLog): Promise<void> => {
+    await verifyReleaseTargets({
         defaultBranch: readRequiredEnvironment('DEFAULT_BRANCH'),
         releaseTag: readRequiredEnvironment('RELEASE_TAG'),
         releaseVersion: readRequiredEnvironment('RELEASE_VERSION'),
+        runLog,
         sourceRevision: readRequiredEnvironment('SOURCE_SHA'),
     });
 };
 
-const runNpmDispositionCommand = async (): Promise<void> => {
+const runNpmDispositionCommand = async (
+    runLog: ActiveLocalRunLog,
+): Promise<void> => {
     const packageVersion = readRequiredEnvironment('RELEASE_VERSION');
     const action = await determineNpmPublication({
         packageDirectory: readRequiredEnvironment('PUBLIC_PACKAGE_DIR'),
         releaseVersion: packageVersion,
+        runLog,
     });
     await appendGitHubOutput('publish', String(action === 'publish'));
     console.log(
@@ -706,10 +805,13 @@ const runNpmDispositionCommand = async (): Promise<void> => {
     );
 };
 
-const runGitHubReleaseDispositionCommand = async (): Promise<void> => {
+const runGitHubReleaseDispositionCommand = async (
+    runLog: ActiveLocalRunLog,
+): Promise<void> => {
     const tag = readRequiredEnvironment('RELEASE_TAG');
-    const action = determineGitHubRelease({
+    const action = await determineGitHubRelease({
         repository: readRequiredEnvironment('GITHUB_REPOSITORY'),
+        runLog,
         tag,
     });
     await appendGitHubOutput('create', String(action === 'create'));
@@ -720,24 +822,32 @@ const runGitHubReleaseDispositionCommand = async (): Promise<void> => {
     );
 };
 
-const runCheckedOutTagCommand = (): void => {
-    verifyCheckedOutReleaseTag({
+const runCheckedOutTagCommand = async (
+    runLog: ActiveLocalRunLog,
+): Promise<void> => {
+    await verifyCheckedOutReleaseTag({
         releaseRevision: readRequiredEnvironment('RELEASE_SHA'),
+        runLog,
         tag: readRequiredEnvironment('RELEASE_TAG'),
     });
 };
 
 const runDryRunCommand = async (
     commandArguments: readonly string[],
+    runLog: ActiveLocalRunLog,
 ): Promise<void> => {
     const increment = parseReleaseIncrement(commandArguments);
     const sourceRevision = requireSuccessfulCommand(
         'The source revision lookup',
-        runGitCommand(executeReleaseCommand, ['rev-parse', 'HEAD']),
+        await runGitCommand(createReleaseCommandExecutor(runLog), [
+            'rev-parse',
+            'HEAD',
+        ]),
     ).trim();
     const releaseVersion = await verifyReleaseWithoutMutation({
         dependencies: makeDefaultMutationFreeDependencies({
-            defaultBranch: resolveDefaultBranch(),
+            defaultBranch: await resolveDefaultBranch(runLog),
+            runLog,
             sourceRevision,
         }),
         increment,
@@ -748,31 +858,49 @@ const runDryRunCommand = async (
 };
 
 const main = async (): Promise<void> => {
-    const [command, ...commandArguments] = process.argv.slice(2);
-    switch (command) {
-        case 'targets':
-            runTargetsCommand();
-            break;
-        case 'metadata':
-            verifyReleaseMetadata();
-            break;
-        case 'npm-disposition':
-            await runNpmDispositionCommand();
-            break;
-        case 'github-release-disposition':
-            await runGitHubReleaseDispositionCommand();
-            break;
-        case 'checked-out-tag':
-            runCheckedOutTagCommand();
-            break;
-        case 'dry-run':
-            await runDryRunCommand(commandArguments);
-            break;
-        default:
-            throw new Error(
-                'Usage: release-gates.ts targets|metadata|npm-disposition|github-release-disposition|checked-out-tag|dry-run [patch|minor].',
-            );
-    }
+    const rawArguments = process.argv.slice(2);
+    await runWithLocalRunLog(
+        {
+            commandLineArguments: rawArguments,
+            lanes: ['Release verification'],
+            scriptName: 'release-gates',
+        },
+        async (runLog) => {
+            const [command, ...commandArguments] = rawArguments;
+            runLog.writeEvent({
+                details: { command: command ?? null },
+                eventType: 'release-gate-started',
+            });
+            switch (command) {
+                case 'targets':
+                    await runTargetsCommand(runLog);
+                    break;
+                case 'metadata':
+                    await verifyReleaseMetadata({ runLog });
+                    break;
+                case 'npm-disposition':
+                    await runNpmDispositionCommand(runLog);
+                    break;
+                case 'github-release-disposition':
+                    await runGitHubReleaseDispositionCommand(runLog);
+                    break;
+                case 'checked-out-tag':
+                    await runCheckedOutTagCommand(runLog);
+                    break;
+                case 'dry-run':
+                    await runDryRunCommand(commandArguments, runLog);
+                    break;
+                default:
+                    throw new Error(
+                        'Usage: release-gates.ts targets|metadata|npm-disposition|github-release-disposition|checked-out-tag|dry-run [patch|minor].',
+                    );
+            }
+            runLog.writeEvent({
+                details: { command },
+                eventType: 'release-gate-finished',
+            });
+        },
+    );
 };
 
 if (isDirectlyInvokedModule(import.meta.url)) {

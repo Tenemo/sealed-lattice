@@ -79,6 +79,10 @@ describe('Rust kernel heavy runner arguments', () => {
             'sealed-lattice-process-memory-guard',
             '--target-dir',
             expect.stringContaining('process-memory-guard'),
+            '--',
+            '--test-threads',
+            '1',
+            '--show-output',
         ]);
         expect(verificationCommand.env?.CARGO_TARGET_DIR).toBeUndefined();
     });
@@ -104,6 +108,7 @@ describe('Rust kernel heavy runner arguments', () => {
         expect(command.env?.CARGO_BUILD_JOBS).toBe('1');
         expect(command.env?.CARGO_INCREMENTAL).toBe('0');
         expect(command.env?.RAYON_NUM_THREADS).toBe('1');
+        expect(command.env?.RUST_BACKTRACE).toBe('full');
         expect(command.env?.SEALED_LATTICE_TRUSTEE_PROOF_BATCH_SIZE).toBe('1');
         expect(command.env?.SEALED_LATTICE_TRUSTEE_PROOF_LIMB_BATCH_SIZE).toBe(
             '1',

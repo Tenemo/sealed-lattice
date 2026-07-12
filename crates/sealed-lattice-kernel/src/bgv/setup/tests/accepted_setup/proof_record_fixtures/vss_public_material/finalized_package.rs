@@ -30,7 +30,7 @@ pub(in super::super::super) fn finalize_collective_setup_package(
         "publicMatrixSeedHash": coefficient_set["publicMatrixSeedHash"],
         "participantCount": coefficient_set["participantCount"],
         "thresholdDegree": coefficient_set["thresholdDegree"],
-        "targetRnsLimbCount": statement["targetRnsLimbCount"],
+        "qShareRnsLimbCount": statement["qShareRnsLimbCount"],
         "ringDegree": coefficient_set["ringDegree"],
         "aggregateThresholdCommitmentRoot":
             package["vssPublicAggregateThresholdCommitmentSet"]["aggregateThresholdCommitmentRoot"],

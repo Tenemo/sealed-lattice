@@ -10,8 +10,8 @@ mod vss_material;
 
 use self::package_fixtures::{
     CollectiveSetupVerificationFixture, PUBLIC_KEY_SHARE_PROOF_TRANSPORT_CERTIFICATE_FIELDS,
-    accepted_vss_coefficient_message_fixture, accepted_vss_randomness_fixture,
-    accepted_vss_secret_coefficient_fixture,
+    VSS_SHARE_LINKAGE_PROOF_TRANSPORT_CERTIFICATE_FIELDS, accepted_vss_coefficient_message_fixture,
+    accepted_vss_randomness_fixture, accepted_vss_secret_coefficient_fixture,
     collective_public_key_bearing_collective_setup_fixture, collective_setup_phase_package,
     descriptor_backed_vss_collective_setup_fixture, minimal_collective_setup_package,
     minimal_collective_setup_package_for_participant_count,

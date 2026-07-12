@@ -4,6 +4,7 @@ import {
     acceptedSetupTestModulePattern,
     buildAcceptedSetupEnvironment,
     buildFocusedCommand,
+    buildGuardedRustKernelDiagnosticFileNames,
     cargoTestArgumentsForAcceptedSetupTests,
     cargoTestArgumentsForFocusedFilter,
     deriveAcceptedSetupMemoryLimitGigabytes,
@@ -16,6 +17,35 @@ import {
 } from '#tools/ci/run-rust-kernel-accepted-setup-tests';
 
 describe('Rust accepted setup runner arguments', () => {
+    it('uses a distinct test journal and memory journal for every guarded command', () => {
+        expect(
+            buildGuardedRustKernelDiagnosticFileNames({
+                commandIndex: 0,
+                progressLabel: 'rust measurements',
+            }),
+        ).toEqual({
+            processMemoryGuard:
+                'process-memory-guard-01-rust-measurements.jsonl',
+            testEvents: '01-rust-measurements.jsonl',
+        });
+        expect(
+            buildGuardedRustKernelDiagnosticFileNames({
+                commandIndex: 1,
+                progressLabel: 'rust measurements',
+            }),
+        ).toEqual({
+            processMemoryGuard:
+                'process-memory-guard-02-rust-measurements.jsonl',
+            testEvents: '02-rust-measurements.jsonl',
+        });
+        expect(() =>
+            buildGuardedRustKernelDiagnosticFileNames({
+                commandIndex: -1,
+                progressLabel: 'rust measurements',
+            }),
+        ).toThrow('non-negative safe integer');
+    });
+
     it('runs the complete accepted setup module by default', () => {
         expect(parseRustKernelAcceptedSetupArguments([])).toEqual({
             focused: false,
@@ -207,6 +237,7 @@ describe('Rust accepted setup runner arguments', () => {
 
         expect(environment.CARGO_INCREMENTAL).toBe('0');
         expect(environment.CARGO_BUILD_JOBS).toBe('1');
+        expect(environment.RUST_BACKTRACE).toBe('full');
         expect(environment.CARGO_TARGET_DIR).toBeUndefined();
         expect(
             environment.SEALED_LATTICE_RESUME_TEST_CHECKPOINTS,

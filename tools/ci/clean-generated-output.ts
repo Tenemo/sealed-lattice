@@ -29,12 +29,6 @@ const completeGeneratedDirectoryDefinitions = [
 
 const retentionDirectoryDefinitions = [
     {
-        description: 'Local run log older than 14 days',
-        groupingDepth: 1,
-        maximumAgeDays: 14,
-        relativePath: 'logs',
-    },
-    {
         description: 'Test checkpoint older than 60 days',
         groupingDepth: undefined,
         maximumAgeDays: 60,

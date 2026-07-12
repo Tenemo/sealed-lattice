@@ -374,7 +374,7 @@ pub(crate) fn claim_mask_digit_count_for_global_claim(
             .map(|key| key.digit_count())
             .sum::<usize>();
         let bridge_digit_start = 1 + total_error_vectors + 1;
-        let bridge_digit_vector_count = same_secret_bridge.target_rns_primes.len()
+        let bridge_digit_vector_count = same_secret_bridge.bridge_rns_primes.len()
             * crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT;
         if (bridge_digit_start..bridge_digit_start + bridge_digit_vector_count)
             .contains(&global_vector_index)
@@ -427,27 +427,22 @@ pub(crate) fn masked_claim_bounds_for_global_claim(
             Some(vss_share_linkage) => {
                 let global_vector_index = global_claim_id as usize / consistency_repetitions;
                 if global_vector_index < vss_share_linkage.item_count() {
-                    // The threshold-aggregate mode uses a unit evaluation point,
-                    // so its lifted wrap is bounded by the summand count, not by
-                    // powers of a recipient trustee point.
                     let carry_bound = if global_vector_index == 0 {
                         private_vss_share_lifted_carry_bound(
-                            if vss_share_linkage.is_threshold_aggregate {
-                                0
-                            } else {
-                                vss_share_linkage.recipient_roster_position
-                            },
+                            vss_share_linkage_lincheck_roster_position(
+                                vss_share_linkage.is_threshold_aggregate,
+                                vss_share_linkage.recipient_roster_position,
+                            ),
                             vss_share_linkage.coefficient_commitments.len(),
                         )?
                     } else {
                         let item =
                             &vss_share_linkage.additional_linkage_items[global_vector_index - 1];
                         private_vss_share_lifted_carry_bound(
-                            if vss_share_linkage.is_threshold_aggregate {
-                                0
-                            } else {
-                                item.recipient_roster_position
-                            },
+                            vss_share_linkage_lincheck_roster_position(
+                                vss_share_linkage.is_threshold_aggregate,
+                                item.recipient_roster_position,
+                            ),
                             item.coefficient_commitments.len(),
                         )?
                     };
@@ -470,7 +465,7 @@ pub(crate) fn masked_claim_bounds_for_global_claim(
                         .map(|key| key.digit_count())
                         .sum::<usize>();
                     let bridge_digit_start = 1 + total_error_vectors + 1;
-                    let bridge_digit_vector_count = same_secret_bridge.target_rns_primes.len()
+                    let bridge_digit_vector_count = same_secret_bridge.bridge_rns_primes.len()
                         * crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT;
                     if (bridge_digit_start..bridge_digit_start + bridge_digit_vector_count)
                         .contains(&global_vector_index)

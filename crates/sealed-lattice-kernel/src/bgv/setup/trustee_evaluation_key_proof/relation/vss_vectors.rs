@@ -28,9 +28,9 @@ pub(crate) struct VssShareLinkagePublicVectorInput<'a> {
     pub(crate) coefficient_commitments: &'a [VssShareLinkageCommitment],
     pub(crate) relation_alpha: &'a [ChallengeExtensionElement],
     pub(crate) u_power_vectors: &'a [Vec<ChallengeExtensionElement>],
-    // Unit evaluation point (point = 1) instead of the recipient trustee point,
-    // turning the lifted evaluation into a plain sum for the threshold-aggregate
-    // relation.
+    // Selects the evaluation point through
+    // `vss_share_linkage_lincheck_roster_position`, the single home for the
+    // unit-point rule.
     pub(crate) is_threshold_aggregate: bool,
 }
 
@@ -90,7 +90,7 @@ fn vss_public_decoder_digit_count(layout: VssPublicMessageEncodingLayout) -> usi
 pub(crate) struct SameSecretBridgePublicVectorInput<'a> {
     pub(crate) modulus: u64,
     pub(crate) ring_degree: usize,
-    pub(crate) target_rns_primes: &'a [u64],
+    pub(crate) bridge_rns_primes: &'a [u64],
     pub(crate) target_constant_commitments: &'a [VssShareLinkageCommitment],
     pub(crate) relation_alpha: &'a [ChallengeExtensionElement],
     pub(crate) u_power_vectors: &'a [Vec<ChallengeExtensionElement>],
@@ -182,16 +182,16 @@ pub(crate) fn build_vss_share_linkage_public_vectors(
         vec![extension_zero_vector(); vss_public_message_encoding_total(&message_encoding_offsets)];
     let mut recipient_share_carry_vector = extension_zero_vector();
 
-    let trustee_point = if input.is_threshold_aggregate {
-        1
-    } else {
-        canonical_trustee_point(
-            usize::try_from(input.recipient_roster_position).map_err(|_| {
-                invalid_succinct_setup_proof("VSS recipient roster position does not fit usize")
-            })?,
-            input.source_message_modulus,
-        )?
-    };
+    let trustee_point = canonical_trustee_point(
+        usize::try_from(vss_share_linkage_lincheck_roster_position(
+            input.is_threshold_aggregate,
+            input.recipient_roster_position,
+        ))
+        .map_err(|_| {
+            invalid_succinct_setup_proof("VSS recipient roster position does not fit usize")
+        })?,
+        input.source_message_modulus,
+    )?;
     let source_modulus_residue = input.source_message_modulus % input.modulus;
     let negated_source_modulus = if source_modulus_residue == 0 {
         0
@@ -588,8 +588,8 @@ pub(crate) fn build_same_secret_bridge_public_vectors(
             "same-secret bridge tower modulus does not match the commitment field",
         ));
     }
-    if input.target_rns_primes.is_empty()
-        || input.target_rns_primes.len() != input.target_constant_commitments.len()
+    if input.bridge_rns_primes.is_empty()
+        || input.bridge_rns_primes.len() != input.target_constant_commitments.len()
     {
         return Err(invalid_succinct_setup_proof(
             "same-secret bridge target primes and commitments must be aligned",
@@ -616,7 +616,7 @@ pub(crate) fn build_same_secret_bridge_public_vectors(
     let mut secret_vector = extension_zero_vector();
     let mut negative_indicator_vector = extension_zero_vector();
     let message_encoding_layouts = input
-        .target_rns_primes
+        .bridge_rns_primes
         .iter()
         .map(|target_rns_prime| vss_public_message_encoding_layout(*target_rns_prime))
         .collect::<CanonicalResult<Vec<_>>>()?;
@@ -639,7 +639,7 @@ pub(crate) fn build_same_secret_bridge_public_vectors(
     let mut message_encoding_vectors =
         vec![extension_zero_vector(); vss_public_message_encoding_total(&message_encoding_offsets)];
 
-    for (target_rns_limb_index, target_rns_prime) in input.target_rns_primes.iter().enumerate() {
+    for (target_rns_limb_index, target_rns_prime) in input.bridge_rns_primes.iter().enumerate() {
         let message_encoding_layout = message_encoding_layouts[target_rns_limb_index];
         let bridge_relation_offset = target_rns_limb_index * LINCHECK_REPETITIONS;
         let target_prime_residue = *target_rns_prime % input.modulus;

@@ -94,7 +94,7 @@ pub(in super::super) fn global_claim_id(
         .sum::<usize>();
     let linkage_position = remaining;
     if let Some(bridge) = &statement.same_secret_bridge {
-        let bridge_digit_vector_count = bridge.target_rns_primes.len()
+        let bridge_digit_vector_count = bridge.bridge_rns_primes.len()
             * crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT;
         debug_assert!(
             linkage_position < 1 + bridge_digit_vector_count + layout.linkage_randomness_columns
@@ -406,7 +406,7 @@ pub(super) fn global_claim_integers(
         if statement.same_secret_linkage.is_some() || statement.same_secret_bridge.is_some() {
             signed_vectors.push(&witness.negative_indicator_coefficients);
             if let Some(bridge) = &statement.same_secret_bridge {
-                for target_rns_prime in &bridge.target_rns_primes {
+                for target_rns_prime in &bridge.bridge_rns_primes {
                     let target_messages = witness
                         .secret_coefficients
                         .iter()

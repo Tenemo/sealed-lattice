@@ -10,7 +10,7 @@ use crate::bgv::setup_helpers::{
 };
 const SAME_SECRET_RELATION: &str =
     "vss-constant-commitments-open-to-one-short-secret-across-q-share-limbs";
-const VSS_SAME_SECRET_BRIDGE_RELATION: &str = "target-basis constant coefficient commitments bind to the same signed ternary trustee secret as the source data-basis VSS constant commitments";
+const VSS_SAME_SECRET_BRIDGE_RELATION: &str = "public constant coefficient commitments bind to the same signed ternary trustee secret as the source VSS constant commitments across Q_share";
 const SAME_SECRET_BRIDGE_PROOF_FAMILY: &str = "same-secret-bridge";
 const SAME_SECRET_BRIDGE_PROOF_BYTES_HASH_DOMAIN: &str =
     "sealed-lattice/setup/same-secret-bridge/proof-bytes";
@@ -18,9 +18,9 @@ const SAME_SECRET_BRIDGE_TRANSPORT_SET_OBJECT_TYPE: &str =
     "SetupTransportedSameSecretBridgeProofMaterialSet";
 const SAME_SECRET_BRIDGE_TRANSPORT_OBJECT_TYPE: &str =
     "SetupTransportedSameSecretBridgeProofMaterial";
-const VSS_SAME_SECRET_BRIDGE_INTEGER_SUPPORT: &str = "the bridge proof must show one centered ternary integer coefficient vector whose signed coefficients reduce into every bound data-basis and target-basis limb";
-const VSS_SAME_SECRET_BRIDGE_SIGNED_REPRESENTATIVE_CONVENTION: &str = "coefficients are interpreted as signed representatives before reduction into each data-basis or target-basis RNS prime";
-const VSS_SAME_SECRET_BRIDGE_TARGET_BASIS_LIMB_ORDER: &str = "target constant roots are ordered by contiguous target-basis rnsLimbIndex values starting at zero and bind the listed target-basis prime";
+const VSS_SAME_SECRET_BRIDGE_INTEGER_SUPPORT: &str = "the bridge proof must show one centered ternary integer coefficient vector whose signed coefficients reduce into every bound source and public commitment over Q_share";
+const VSS_SAME_SECRET_BRIDGE_SIGNED_REPRESENTATIVE_CONVENTION: &str = "coefficients are interpreted as signed representatives before reduction into each Q_share RNS prime";
+const VSS_SAME_SECRET_BRIDGE_Q_SHARE_LIMB_ORDER: &str = "target constant roots are ordered by contiguous Q_share rnsLimbIndex values starting at zero and bind the listed Q_share prime";
 const SETUP_CONTEXT_FIELD_NAMES: [&str; 5] = [
     "ceremonyId",
     "manifestHash",
@@ -51,12 +51,6 @@ pub(crate) fn verify_vss_same_secret_bridge_statement_set_request(
     let manifest_hash = hash_at_path(statement_set, &["manifestHash"])?;
     let roster_hash = hash_at_path(statement_set, &["rosterHash"])?;
     let setup_parameters_hash = hash_at_path(statement_set, &["setupParametersHash"])?;
-    let target_basis_hash = hash_at_path(statement_set, &["targetBasisHash"])?;
-    compare_required_string(
-        target_basis_hash,
-        &crate::bgv::evaluator::top_k::canonical_target_basis_hash()?,
-        "VSS same-secret bridge statement set targetBasisHash",
-    )?;
     let public_matrix_seed_hash = hash_at_path(statement_set, &["publicMatrixSeedHash"])?;
     let ring_degree = read_positive_usize_at_path(
         statement_set,
@@ -71,10 +65,10 @@ pub(crate) fn verify_vss_same_secret_bridge_statement_set_request(
         &["participantCount"],
         "VSS same-secret bridge statement set participantCount",
     )?;
-    let target_rns_limb_count = read_positive_usize_at_path(
+    let q_share_rns_limb_count = read_positive_usize_at_path(
         statement_set,
-        &["targetRnsLimbCount"],
-        "VSS same-secret bridge statement set targetRnsLimbCount",
+        &["qShareRnsLimbCount"],
+        "VSS same-secret bridge statement set qShareRnsLimbCount",
     )?;
     let threshold_degree = read_positive_usize_at_path(
         statement_set,
@@ -103,7 +97,7 @@ pub(crate) fn verify_vss_same_secret_bridge_statement_set_request(
     )?;
     for (field_name, expected_value) in [
         ("participantCount", participant_count),
-        ("rnsLimbCount", target_rns_limb_count),
+        ("rnsLimbCount", q_share_rns_limb_count),
         ("thresholdDegree", threshold_degree),
         ("ringDegree", ring_degree),
     ] {
@@ -129,9 +123,9 @@ pub(crate) fn verify_vss_same_secret_bridge_statement_set_request(
         "VSS same-secret bridge statement set vssPublicCommitmentEncoding",
     )?;
     compare_required_string(
-        string_at_path(statement_set, &["targetBasisLimbOrder"])?,
-        VSS_SAME_SECRET_BRIDGE_TARGET_BASIS_LIMB_ORDER,
-        "VSS same-secret bridge statement set targetBasisLimbOrder",
+        string_at_path(statement_set, &["qShareLimbOrder"])?,
+        VSS_SAME_SECRET_BRIDGE_Q_SHARE_LIMB_ORDER,
+        "VSS same-secret bridge statement set qShareLimbOrder",
     )?;
 
     let statement_records = array_at_path(statement_set, &["statementRecords"])?;
@@ -150,7 +144,7 @@ pub(crate) fn verify_vss_same_secret_bridge_statement_set_request(
                 coefficient_commitment_set,
                 vss_coefficient_commitments,
                 expected_position,
-                target_rns_limb_count,
+                q_share_rns_limb_count,
                 threshold_degree,
                 ring_degree,
                 statement_set: StatementSetBinding {
@@ -159,7 +153,6 @@ pub(crate) fn verify_vss_same_secret_bridge_statement_set_request(
                     roster_hash,
                     setup_parameters_hash,
                     setup_epoch,
-                    target_basis_hash,
                     public_matrix_seed_hash,
                 },
             },
@@ -174,18 +167,17 @@ pub(crate) fn verify_vss_same_secret_bridge_statement_set_request(
         "rosterHash": roster_hash,
         "setupParametersHash": setup_parameters_hash,
         "setupEpoch": setup_epoch,
-        "targetBasisHash": target_basis_hash,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "ringDegree": ring_degree,
         "participantCount": participant_count,
-        "targetRnsLimbCount": target_rns_limb_count,
+        "qShareRnsLimbCount": q_share_rns_limb_count,
         "thresholdDegree": threshold_degree,
         "coefficientCommitmentRoot": coefficient_commitment_root,
         "vssCoefficientCommitmentRoot": vss_coefficient_commitment_root,
         "integerSupport": VSS_SAME_SECRET_BRIDGE_INTEGER_SUPPORT,
         "signedRepresentativeConvention": VSS_SAME_SECRET_BRIDGE_SIGNED_REPRESENTATIVE_CONVENTION,
         "vssPublicCommitmentEncoding": VSS_PUBLIC_COMMITMENT_BINARY_FORMAT,
-        "targetBasisLimbOrder": VSS_SAME_SECRET_BRIDGE_TARGET_BASIS_LIMB_ORDER,
+        "qShareLimbOrder": VSS_SAME_SECRET_BRIDGE_Q_SHARE_LIMB_ORDER,
         "statementRecords": verified_statement_records,
     }))?;
     let statement_set_root = hash_at_path(statement_set, &["sameSecretBridgeStatementSetRoot"])?;
@@ -199,9 +191,8 @@ pub(crate) fn verify_vss_same_secret_bridge_statement_set_request(
         "operation": "verifyVssSameSecretBridgeStatementSet",
         "sameSecretBridgeStatementSetRoot": statement_set_root,
         "participantCount": participant_count,
-        "targetRnsLimbCount": target_rns_limb_count,
+        "qShareRnsLimbCount": q_share_rns_limb_count,
         "thresholdDegree": threshold_degree,
-        "targetBasisHash": target_basis_hash,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "ringDegree": ring_degree,
         "coefficientCommitmentRoot": coefficient_commitment_root,
@@ -209,7 +200,7 @@ pub(crate) fn verify_vss_same_secret_bridge_statement_set_request(
         "integerSupport": VSS_SAME_SECRET_BRIDGE_INTEGER_SUPPORT,
         "signedRepresentativeConvention": VSS_SAME_SECRET_BRIDGE_SIGNED_REPRESENTATIVE_CONVENTION,
         "vssPublicCommitmentEncoding": VSS_PUBLIC_COMMITMENT_BINARY_FORMAT,
-        "targetBasisLimbOrder": VSS_SAME_SECRET_BRIDGE_TARGET_BASIS_LIMB_ORDER,
+        "qShareLimbOrder": VSS_SAME_SECRET_BRIDGE_Q_SHARE_LIMB_ORDER,
     }))
 }
 
@@ -227,10 +218,10 @@ pub(crate) fn verify_vss_same_secret_bridge_proof_material_set_request(
         &["participantCount"],
         "same-secret bridge proof material statement participantCount",
     )?;
-    let target_rns_limb_count = read_positive_usize_at_path(
+    let q_share_rns_limb_count = read_positive_usize_at_path(
         &statement_verification,
-        &["targetRnsLimbCount"],
-        "same-secret bridge proof material statement targetRnsLimbCount",
+        &["qShareRnsLimbCount"],
+        "same-secret bridge proof material statement qShareRnsLimbCount",
     )?;
     let ring_degree = read_positive_usize_at_path(
         &statement_verification,
@@ -254,7 +245,6 @@ pub(crate) fn verify_vss_same_secret_bridge_proof_material_set_request(
     let manifest_hash = hash_at_path(statement_set, &["manifestHash"])?;
     let roster_hash = hash_at_path(statement_set, &["rosterHash"])?;
     let setup_parameters_hash = hash_at_path(statement_set, &["setupParametersHash"])?;
-    let target_basis_hash = hash_at_path(statement_set, &["targetBasisHash"])?;
     let public_matrix_seed_hash = hash_at_path(statement_set, &["publicMatrixSeedHash"])?;
     let coefficient_commitment_root = hash_at_path(statement_set, &["coefficientCommitmentRoot"])?;
     let vss_coefficient_commitment_root =
@@ -276,7 +266,6 @@ pub(crate) fn verify_vss_same_secret_bridge_proof_material_set_request(
         ("manifestHash", manifest_hash),
         ("rosterHash", roster_hash),
         ("setupParametersHash", setup_parameters_hash),
-        ("targetBasisHash", target_basis_hash),
         ("publicMatrixSeedHash", public_matrix_seed_hash),
         ("coefficientCommitmentRoot", coefficient_commitment_root),
         (
@@ -297,9 +286,9 @@ pub(crate) fn verify_vss_same_secret_bridge_proof_material_set_request(
         "same-secret bridge proof material set participantCount",
     )?;
     compare_required_u64(
-        unsigned_at_path(proof_material_set, &["targetRnsLimbCount"])?,
-        target_rns_limb_count as u64,
-        "same-secret bridge proof material set targetRnsLimbCount",
+        unsigned_at_path(proof_material_set, &["qShareRnsLimbCount"])?,
+        q_share_rns_limb_count as u64,
+        "same-secret bridge proof material set qShareRnsLimbCount",
     )?;
     compare_required_u64(
         unsigned_at_path(proof_material_set, &["ringDegree"])?,
@@ -374,7 +363,6 @@ pub(crate) fn verify_vss_same_secret_bridge_proof_material_set_request(
                     roster_hash,
                     setup_parameters_hash,
                     setup_epoch,
-                    target_basis_hash,
                     public_matrix_seed_hash,
                 },
                 expected_position,
@@ -394,11 +382,10 @@ pub(crate) fn verify_vss_same_secret_bridge_proof_material_set_request(
         "rosterHash": roster_hash,
         "setupParametersHash": setup_parameters_hash,
         "setupEpoch": setup_epoch,
-        "targetBasisHash": target_basis_hash,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "ringDegree": ring_degree,
         "participantCount": participant_count,
-        "targetRnsLimbCount": target_rns_limb_count,
+        "qShareRnsLimbCount": q_share_rns_limb_count,
         "thresholdDegree": threshold_degree,
         "coefficientCommitmentRoot": coefficient_commitment_root,
         "vssCoefficientCommitmentRoot": vss_coefficient_commitment_root,

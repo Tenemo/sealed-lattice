@@ -4,8 +4,6 @@ pub(in super::super::super) fn vss_share_linkage_statement_object(
     package: &serde_json::Value,
 ) -> serde_json::Value {
     let setup_context = &package["setupContext"];
-    let target_basis_hash =
-        crate::bgv::evaluator::top_k::canonical_target_basis_hash().expect("target basis hash");
     let public_matrix_seed_hash = package["commonRandomness"]["publicMatrixSeedHash"]
         .as_str()
         .expect("public matrix seed hash");
@@ -20,7 +18,6 @@ pub(in super::super::super) fn vss_share_linkage_statement_object(
         .map(|source_trustee_roster_position| {
             vss_share_linkage_source_statement_record(
                 package,
-                &target_basis_hash,
                 public_matrix_seed_hash,
                 source_trustee_roster_position,
             )
@@ -34,10 +31,9 @@ pub(in super::super::super) fn vss_share_linkage_statement_object(
         "setupParametersHash": setup_context["setupParametersHash"],
         "setupEpoch": setup_context["setupEpoch"],
         "publicMatrixSeedHash": public_matrix_seed_hash,
-        "targetBasisHash": target_basis_hash,
         "ringDegree": ring_degree,
         "participantCount": participant_count,
-        "targetRnsLimbCount": DATA_PRIMES.len(),
+        "qShareRnsLimbCount": DATA_PRIMES.len(),
         "thresholdDegree": threshold_degree,
         "coefficientCommitmentRoot": package["vssPublicCoefficientCommitmentSet"]["coefficientCommitmentRoot"],
         "recipientShareCommitmentRoot": package["vssPublicRecipientShareCommitmentSet"]["recipientShareCommitmentRoot"],
@@ -53,7 +49,6 @@ pub(in super::super::super) fn vss_share_linkage_statement_object(
 
 pub(super) fn vss_share_linkage_source_statement_record(
     package: &serde_json::Value,
-    target_basis_hash: &str,
     public_matrix_seed_hash: &str,
     source_trustee_roster_position: u64,
 ) -> serde_json::Value {
@@ -89,12 +84,11 @@ pub(super) fn vss_share_linkage_source_statement_record(
         "setupParametersHash": setup_context["setupParametersHash"],
         "setupEpoch": setup_context["setupEpoch"],
         "publicMatrixSeedHash": public_matrix_seed_hash,
-        "targetBasisHash": target_basis_hash,
         "sourceTrusteeIdentity": source_trustee_identity,
         "sourceTrusteeRosterPosition": source_trustee_roster_position,
         "ringDegree": package["vssPublicCoefficientCommitmentSet"]["ringDegree"],
         "participantCount": package["vssPublicCoefficientCommitmentSet"]["participantCount"],
-        "targetRnsLimbCount": DATA_PRIMES.len(),
+        "qShareRnsLimbCount": DATA_PRIMES.len(),
         "thresholdDegree": package["vssPublicCoefficientCommitmentSet"]["thresholdDegree"],
         "coefficientCommitmentRoot": package["vssPublicCoefficientCommitmentSet"]["coefficientCommitmentRoot"],
         "sourceCoefficientCommitmentRoot": coefficient_source_record["sourceCoefficientCommitmentRoot"],
@@ -130,10 +124,9 @@ pub(in super::super::super) fn vss_share_linkage_proof_material_set_object(
         "setupParametersHash": statement["setupParametersHash"],
         "setupEpoch": statement["setupEpoch"],
         "publicMatrixSeedHash": statement["publicMatrixSeedHash"],
-        "targetBasisHash": statement["targetBasisHash"],
         "ringDegree": statement["ringDegree"],
         "participantCount": statement["participantCount"],
-        "targetRnsLimbCount": statement["targetRnsLimbCount"],
+        "qShareRnsLimbCount": statement["qShareRnsLimbCount"],
         "thresholdDegree": statement["thresholdDegree"],
         "coefficientCommitmentRoot": statement["coefficientCommitmentRoot"],
         "recipientShareCommitmentRoot": statement["recipientShareCommitmentRoot"],

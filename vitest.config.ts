@@ -1,3 +1,4 @@
+import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -7,11 +8,13 @@ import type { PluginOption } from 'vite';
 import { defineConfig, type UserWorkspaceConfig } from 'vitest/config';
 import type { BrowserInstanceOption } from 'vitest/node';
 
+import { resolveTestDiagnosticPaths } from './tools/ci/test-diagnostic-environment.js';
 import {
     browserTestLaneDefinitions,
     nodeHookTimeoutMs,
     nodeTestProjectDefinitions,
 } from './tools/ci/test-lanes.js';
+import { VitestDiagnosticReporter } from './tools/ci/vitest-diagnostic-reporter.js';
 
 const repoRoot = path.dirname(fileURLToPath(import.meta.url));
 const resolveFromRepoRoot = (...segments: string[]): string =>
@@ -26,6 +29,32 @@ const browserServerHost = '127.0.0.1';
 // 49152+ ephemeral port range Windows reserves; strictPort: false still increments it
 // for concurrent browser lanes and clones.
 const browserServerBasePort = 41000;
+
+const testDiagnosticPaths = resolveTestDiagnosticPaths();
+const testAttachmentDirectoryPath = testDiagnosticPaths.attachmentDirectoryPath;
+const testResultFilePath = testDiagnosticPaths.resultFilePath;
+const nodeDiagnosticReportArguments =
+    testDiagnosticPaths.diagnosticReportDirectoryPath === undefined
+        ? []
+        : [
+              '--report-on-fatalerror',
+              '--report-uncaught-exception',
+              '--report-exclude-env',
+              '--report-exclude-network',
+              `--report-directory=${testDiagnosticPaths.diagnosticReportDirectoryPath}`,
+              `--report-filename=node-report-${testDiagnosticPaths.projectLabel}-%p-%t.json`,
+          ];
+for (const diagnosticDirectoryPath of [
+    testAttachmentDirectoryPath,
+    testDiagnosticPaths.diagnosticReportDirectoryPath,
+    testResultFilePath === undefined
+        ? undefined
+        : path.dirname(testResultFilePath),
+]) {
+    if (diagnosticDirectoryPath !== undefined) {
+        mkdirSync(diagnosticDirectoryPath, { recursive: true });
+    }
+}
 
 const browserOptimizedDependencies = [
     '@noble/hashes/hkdf.js',
@@ -128,6 +157,9 @@ const makeNodeProject = ({
         include: copyGlobs(include),
         ...(exclude === undefined ? {} : { exclude: copyGlobs(exclude) }),
         environment: 'node',
+        ...(nodeDiagnosticReportArguments.length === 0
+            ? {}
+            : { execArgv: nodeDiagnosticReportArguments }),
         ...(fileParallelism === undefined ? {} : { fileParallelism }),
         ...(disableConsoleIntercept === undefined
             ? {}
@@ -155,6 +187,14 @@ const makeBrowserProject = ({
     test: {
         name: projectName,
         include: copyGlobs(include),
+        // Each real-WASM browser file can instantiate a large kernel and
+        // create workers. Running every file concurrently has exhausted the
+        // Firefox WebAssembly compiler and left its test process unable to
+        // shut down under otherwise valid multi-browser runs.
+        fileParallelism: false,
+        ...(nodeDiagnosticReportArguments.length === 0
+            ? {}
+            : { execArgv: nodeDiagnosticReportArguments }),
         browser: {
             enabled: true,
             api: {
@@ -165,6 +205,22 @@ const makeBrowserProject = ({
             provider,
             headless: true,
             instances,
+            ...(testAttachmentDirectoryPath === undefined
+                ? {}
+                : {
+                      screenshotDirectory: path.join(
+                          testAttachmentDirectoryPath,
+                          'screenshots',
+                      ),
+                      screenshotFailures: true,
+                      trace: {
+                          mode: 'retain-on-failure' as const,
+                          tracesDir: path.join(
+                              testAttachmentDirectoryPath,
+                              'traces',
+                          ),
+                      },
+                  }),
         },
     },
 });
@@ -177,6 +233,27 @@ export default defineConfig({
     resolve: publicPackageTestResolve,
     test: {
         alias: [publicPackageAlias, ...rootPrivateAliases],
+        ...(testResultFilePath === undefined
+            ? {
+                  reporters: [
+                      'default' as const,
+                      ...(process.env.GITHUB_ACTIONS === 'true'
+                          ? (['github-actions'] as const)
+                          : []),
+                      new VitestDiagnosticReporter(),
+                  ],
+              }
+            : {
+                  outputFile: { json: testResultFilePath },
+                  reporters: [
+                      'default' as const,
+                      ...(process.env.GITHUB_ACTIONS === 'true'
+                          ? (['github-actions'] as const)
+                          : []),
+                      'json' as const,
+                      new VitestDiagnosticReporter(),
+                  ],
+              }),
         projects: [
             ...nodeTestProjectDefinitions.map((projectDefinition) =>
                 makeNodeProject(projectDefinition),

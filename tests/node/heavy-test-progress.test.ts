@@ -1,6 +1,13 @@
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
-import { createHeavyTestProgressReporter } from '#tools/ci/heavy-test-progress';
+import {
+    createHeavyTestProgressReporter,
+    parseRustTestTimingLine,
+} from '#tools/ci/heavy-test-progress';
 
 const invocation = {
     args: [] as const,
@@ -11,11 +18,12 @@ const invocation = {
 const feedOutput = (
     reporter: ReturnType<typeof createHeavyTestProgressReporter>,
     chunk: string,
+    streamName: 'stderr' | 'stdout' = 'stdout',
 ): void => {
     reporter.observer.onCommandOutput?.({
         chunk,
         invocation,
-        streamName: 'stdout',
+        streamName,
     });
 };
 
@@ -29,6 +37,203 @@ const startRun = (
 };
 
 describe('createHeavyTestProgressReporter', () => {
+    it('parses exact instrumented Rust test timing embedded in libtest output', () => {
+        expect(
+            parseRustTestTimingLine(
+                'test module::proof ... sealed-lattice-rust-test-timing ' +
+                    '{"suite":"module","test":"proof","durationMilliseconds":123,"durationMicroseconds":123456}',
+            ),
+        ).toEqual({
+            durationMicroseconds: 123_456,
+            durationMilliseconds: 123,
+            suite: 'module',
+            test: 'proof',
+        });
+        expect(
+            parseRustTestTimingLine(
+                'sealed-lattice-rust-test-timing {"durationMilliseconds":"wrong"}',
+            ),
+        ).toBeUndefined();
+    });
+
+    it('persists exact instrumented runtime separately from observed libtest timing', async () => {
+        const temporaryDirectoryPath = await mkdtemp(
+            path.join(os.tmpdir(), 'sealed-lattice-libtest-events-'),
+        );
+        try {
+            const eventFilePath = path.join(
+                temporaryDirectoryPath,
+                'rust.jsonl',
+            );
+            const reporter = createHeavyTestProgressReporter({
+                eventFilePath,
+                label: 'rust-test',
+                now: () => 0,
+                threadCount: 1,
+                write: () => undefined,
+            });
+            startRun(reporter);
+            feedOutput(reporter, 'running 1 test\n');
+            feedOutput(reporter, 'test module::proof ... ');
+            feedOutput(
+                reporter,
+                'sealed-lattice-rust-test-timing ' +
+                    '{"suite":"module","test":"proof","durationMilliseconds":321,"durationMicroseconds":321987}\n',
+            );
+            feedOutput(reporter, 'ok\n');
+            reporter.observer.onCommandExit?.({
+                durationMilliseconds: 400,
+                exitCode: 0,
+                invocation,
+                terminationSignal: null,
+            });
+
+            const events = (await readFile(eventFilePath, 'utf8'))
+                .trim()
+                .split(/\r?\n/u)
+                .map((line) => JSON.parse(line) as Record<string, unknown>);
+            expect(events).toContainEqual(
+                expect.objectContaining({
+                    durationBasis: 'exact-instrumented',
+                    durationMicroseconds: 321_987,
+                    durationMilliseconds: 321,
+                    event: 'test-finished',
+                    fullName: 'module::proof',
+                    result: 'ok',
+                }),
+            );
+        } finally {
+            await rm(temporaryDirectoryPath, {
+                force: true,
+                recursive: true,
+            });
+        }
+    });
+
+    it('records approximate wall runtimes between serialized completion boundaries', async () => {
+        const temporaryDirectoryPath = await mkdtemp(
+            path.join(os.tmpdir(), 'sealed-lattice-libtest-events-'),
+        );
+        try {
+            const eventFilePath = path.join(
+                temporaryDirectoryPath,
+                'serialized-rust.jsonl',
+            );
+            let currentTimeMilliseconds = 100;
+            const reporter = createHeavyTestProgressReporter({
+                eventFilePath,
+                label: 'serialized-rust',
+                now: () => currentTimeMilliseconds,
+                threadCount: 1,
+                write: () => undefined,
+            });
+            startRun(reporter);
+            feedOutput(reporter, 'running 2 tests\n');
+            currentTimeMilliseconds = 375;
+            feedOutput(reporter, 'test module::first ... ok\n');
+            currentTimeMilliseconds = 500;
+            feedOutput(reporter, 'test module::second ... FAILED\n');
+            reporter.observer.onCommandExit?.({
+                durationMilliseconds: 400,
+                exitCode: 1,
+                invocation,
+                terminationSignal: null,
+            });
+
+            const finishedEvents = (await readFile(eventFilePath, 'utf8'))
+                .trim()
+                .split(/\r?\n/u)
+                .map((line) => JSON.parse(line) as Record<string, unknown>)
+                .filter((event) => event.event === 'test-finished');
+            expect(finishedEvents).toEqual([
+                expect.objectContaining({
+                    durationBasis: 'approximate-observed-serialized-wall-clock',
+                    durationMilliseconds: 275,
+                    fullName: 'module::first',
+                    result: 'ok',
+                }),
+                expect.objectContaining({
+                    durationBasis: 'approximate-observed-serialized-wall-clock',
+                    durationMilliseconds: 125,
+                    fullName: 'module::second',
+                    result: 'FAILED',
+                }),
+            ]);
+        } finally {
+            await rm(temporaryDirectoryPath, {
+                force: true,
+                recursive: true,
+            });
+        }
+    });
+
+    it('leaves runtime unavailable when concurrency or output boundaries make inference unsound', async () => {
+        const temporaryDirectoryPath = await mkdtemp(
+            path.join(os.tmpdir(), 'sealed-lattice-libtest-events-'),
+        );
+        try {
+            const scenarios = [
+                {
+                    eventFileName: 'concurrent.jsonl',
+                    output: [
+                        'running 2 tests\n',
+                        'test module::first ... ok\n',
+                    ],
+                    threadCount: 2,
+                },
+                {
+                    eventFileName: 'missing-boundary.jsonl',
+                    output: ['test module::first ... ok\n'],
+                    threadCount: 1,
+                },
+            ] as const;
+
+            for (const scenario of scenarios) {
+                const eventFilePath = path.join(
+                    temporaryDirectoryPath,
+                    scenario.eventFileName,
+                );
+                const reporter = createHeavyTestProgressReporter({
+                    eventFilePath,
+                    label: scenario.eventFileName,
+                    now: () => 100,
+                    threadCount: scenario.threadCount,
+                    write: () => undefined,
+                });
+                startRun(reporter);
+                for (const output of scenario.output) {
+                    feedOutput(reporter, output);
+                }
+                reporter.observer.onCommandExit?.({
+                    durationMilliseconds: 100,
+                    exitCode: 0,
+                    invocation,
+                    terminationSignal: null,
+                });
+
+                const finishedEvent = (await readFile(eventFilePath, 'utf8'))
+                    .trim()
+                    .split(/\r?\n/u)
+                    .map((line) => JSON.parse(line) as Record<string, unknown>)
+                    .find((event) => event.event === 'test-finished');
+                expect(finishedEvent).toEqual(
+                    expect.objectContaining({
+                        durationBasis: 'unavailable',
+                        fullName: 'module::first',
+                    }),
+                );
+                expect(finishedEvent).not.toHaveProperty(
+                    'durationMilliseconds',
+                );
+            }
+        } finally {
+            await rm(temporaryDirectoryPath, {
+                force: true,
+                recursive: true,
+            });
+        }
+    });
+
     it('reports each finished test with cumulative counts and a thread estimate', () => {
         const lines: string[] = [];
         const reporter = createHeavyTestProgressReporter({
@@ -71,6 +276,74 @@ describe('createHeavyTestProgressReporter', () => {
         expect(lines).toHaveLength(1);
         expect(lines[0]).toContain('accepted_setup::split_across_chunks (ok)');
         expect(lines[0]).toContain('1/1 done');
+    });
+
+    it('keeps stream fragments independent and flushes both on command exit', async () => {
+        const temporaryDirectoryPath = await mkdtemp(
+            path.join(os.tmpdir(), 'sealed-lattice-libtest-events-'),
+        );
+        try {
+            const eventFilePath = path.join(
+                temporaryDirectoryPath,
+                'rust.jsonl',
+            );
+            const lines: string[] = [];
+            const reporter = createHeavyTestProgressReporter({
+                eventFilePath,
+                label: 'heavy',
+                threadCount: 2,
+                now: () => 0,
+                write: (line) => lines.push(line),
+            });
+            startRun(reporter);
+            feedOutput(reporter, 'running 2 tests\n');
+            feedOutput(reporter, 'test accepted_setup::stdout_partial ... ok');
+            feedOutput(
+                reporter,
+                'test accepted_setup::stderr_partial ... FAILED',
+                'stderr',
+            );
+            reporter.observer.onCommandExit?.({
+                durationMilliseconds: 500,
+                exitCode: 1,
+                invocation,
+                terminationSignal: null,
+            });
+
+            expect(lines).toHaveLength(2);
+            expect(lines.join('\n')).toContain(
+                'accepted_setup::stdout_partial (ok)',
+            );
+            expect(lines.join('\n')).toContain(
+                'accepted_setup::stderr_partial (FAILED)',
+            );
+            const events = (await readFile(eventFilePath, 'utf8'))
+                .trim()
+                .split(/\r?\n/u)
+                .map((line) => JSON.parse(line) as Record<string, unknown>);
+            expect(
+                events
+                    .filter((event) => event.event === 'test-finished')
+                    .map((event) => ({
+                        fullName: event.fullName,
+                        result: event.result,
+                    })),
+            ).toEqual([
+                {
+                    fullName: 'accepted_setup::stdout_partial',
+                    result: 'ok',
+                },
+                {
+                    fullName: 'accepted_setup::stderr_partial',
+                    result: 'FAILED',
+                },
+            ]);
+        } finally {
+            await rm(temporaryDirectoryPath, {
+                force: true,
+                recursive: true,
+            });
+        }
     });
 
     it('counts nocapture completions when the result is printed after test output', () => {

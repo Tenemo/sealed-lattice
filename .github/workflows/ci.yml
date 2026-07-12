@@ -10,13 +10,12 @@ on:
 permissions:
     contents: read
 
-concurrency:
-    group: ci-${{ github.ref }}
-    cancel-in-progress: true
-
 jobs:
     changes:
         name: changes
+        concurrency:
+            group: ci-${{ github.ref }}-changes
+            cancel-in-progress: true
         runs-on: ubuntu-24.04
         timeout-minutes: 10
         outputs:
@@ -63,6 +62,9 @@ jobs:
 
     static-build:
         name: static and build
+        concurrency:
+            group: ci-${{ github.ref }}-static-build
+            cancel-in-progress: true
         runs-on: ubuntu-24.04
         timeout-minutes: 30
         steps:
@@ -83,11 +85,21 @@ jobs:
             - run: pnpm run test:lanes:verify -- --static
             - run: pnpm exec tsx ./tools/ci/check-package-boundaries.ts
             - run: pnpm exec knip
+            - name: Upload static verification diagnostics
+              if: ${{ always() }}
+              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+              with:
+                  if-no-files-found: warn
+                  name: static-verification-logs-${{ github.run_id }}-${{ github.run_attempt }}
+                  path: logs
 
     rust-fast:
         name: rust fast
+        concurrency:
+            group: ci-${{ github.ref }}-rust-fast
+            cancel-in-progress: true
         runs-on: ubuntu-24.04
-        timeout-minutes: 120
+        timeout-minutes: 135
         steps:
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
               with:
@@ -102,12 +114,24 @@ jobs:
             - run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
             - run: pnpm run test:lanes:verify -- --rust
             - run: pnpm run test:rust:process-memory-guard
-            - run: pnpm run test:rust:kernel
+            - name: Run fast Rust kernel tests
+              timeout-minutes: 110
+              run: pnpm run test:rust:kernel
+            - name: Upload Rust fast diagnostics
+              if: ${{ always() }}
+              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+              with:
+                  if-no-files-found: warn
+                  name: rust-fast-logs-${{ github.run_id }}-${{ github.run_attempt }}
+                  path: logs
 
     node:
         name: node
+        concurrency:
+            group: ci-${{ github.ref }}-node
+            cancel-in-progress: true
         runs-on: ubuntu-24.04
-        timeout-minutes: 120
+        timeout-minutes: 135
         steps:
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
               with:
@@ -118,15 +142,27 @@ jobs:
                   toolchain: 1.90.0
                   targets: wasm32-unknown-unknown
             - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
-            - run: pnpm run test:node
+            - name: Run ordinary Node tests
+              timeout-minutes: 110
+              run: pnpm run test:node
+            - name: Upload Node diagnostics
+              if: ${{ always() }}
+              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+              with:
+                  if-no-files-found: warn
+                  name: node-logs-${{ github.run_id }}-${{ github.run_attempt }}
+                  path: logs
 
     rust-heavy:
         name: rust heavy
+        concurrency:
+            group: ci-${{ github.ref }}-rust-heavy
+            cancel-in-progress: false
         needs:
             - changes
         if: ${{ needs.changes.outputs.run_heavy == 'true' }}
         runs-on: ubuntu-24.04
-        timeout-minutes: 120
+        timeout-minutes: 130
         steps:
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
               with:
@@ -141,21 +177,23 @@ jobs:
               timeout-minutes: 110
               run: pnpm run test:rust:kernel:heavy
             - name: Upload measured-heavy Rust kernel logs
-              if: ${{ failure() && steps['rust-heavy'].outcome == 'failure' }}
+              if: ${{ always() }}
               uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
               with:
-                  if-no-files-found: error
-                  name: rust-heavy-logs
-                  retention-days: 7
+                  if-no-files-found: warn
+                  name: rust-heavy-logs-${{ github.run_id }}-${{ github.run_attempt }}
                   path: logs
 
     rust-accepted-setup:
         name: rust accepted setup
+        concurrency:
+            group: ci-${{ github.ref }}-rust-accepted-setup
+            cancel-in-progress: false
         needs:
             - changes
         if: ${{ needs.changes.outputs.run_heavy == 'true' }}
         runs-on: ubuntu-24.04
-        timeout-minutes: 360
+        timeout-minutes: 370
         steps:
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
               with:
@@ -170,21 +208,23 @@ jobs:
               timeout-minutes: 350
               run: pnpm run test:rust:kernel:accepted-setup -- --ci
             - name: Upload Rust accepted setup logs
-              if: ${{ failure() && steps['rust-accepted-setup'].outcome == 'failure' }}
+              if: ${{ always() }}
               uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
               with:
-                  if-no-files-found: error
-                  name: rust-accepted-setup-logs
-                  retention-days: 7
+                  if-no-files-found: warn
+                  name: rust-accepted-setup-logs-${{ github.run_id }}-${{ github.run_attempt }}
                   path: logs
 
     node-kernel-heavy:
         name: node kernel heavy
+        concurrency:
+            group: ci-${{ github.ref }}-node-kernel-heavy
+            cancel-in-progress: false
         needs:
             - changes
         if: ${{ needs.changes.outputs.run_heavy == 'true' }}
         runs-on: ubuntu-24.04
-        timeout-minutes: 90
+        timeout-minutes: 105
         steps:
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
               with:
@@ -195,12 +235,24 @@ jobs:
                   toolchain: 1.90.0
                   targets: wasm32-unknown-unknown
             - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
-            - run: pnpm run test:node:kernel:heavy
+            - name: Run heavy Node kernel tests
+              timeout-minutes: 90
+              run: pnpm run test:node:kernel:heavy
+            - name: Upload Node heavy diagnostics
+              if: ${{ always() }}
+              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+              with:
+                  if-no-files-found: warn
+                  name: node-heavy-logs-${{ github.run_id }}-${{ github.run_attempt }}
+                  path: logs
 
     browser:
         name: browser
+        concurrency:
+            group: ci-${{ github.ref }}-browser
+            cancel-in-progress: true
         runs-on: ubuntu-24.04
-        timeout-minutes: 60
+        timeout-minutes: 75
         steps:
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
               with:
@@ -212,13 +264,25 @@ jobs:
                   targets: wasm32-unknown-unknown
             - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
             - run: pnpm exec playwright install --with-deps chromium firefox webkit
-            - run: pnpm run test:browser
+            - name: Run browser matrix
+              timeout-minutes: 55
+              run: pnpm run test:browser
+            - name: Upload browser diagnostics
+              if: ${{ always() }}
+              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+              with:
+                  if-no-files-found: warn
+                  name: browser-logs-${{ github.run_id }}-${{ github.run_attempt }}
+                  path: logs
 
     release-smoke:
         name: release smoke
+        concurrency:
+            group: ci-${{ github.ref }}-release-smoke
+            cancel-in-progress: true
         if: ${{ github.event_name == 'pull_request' }}
         runs-on: ubuntu-24.04
-        timeout-minutes: 60
+        timeout-minutes: 75
         steps:
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
               with:
@@ -229,10 +293,22 @@ jobs:
                   toolchain: 1.90.0
                   targets: wasm32-unknown-unknown
             - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
-            - run: pnpm run smoke:pack:npm
+            - name: Run packed-package smoke tests
+              timeout-minutes: 55
+              run: pnpm run smoke:pack:npm
+            - name: Upload packed-package diagnostics
+              if: ${{ always() }}
+              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+              with:
+                  if-no-files-found: warn
+                  name: release-smoke-logs-${{ github.run_id }}-${{ github.run_attempt }}
+                  path: logs
 
     verify:
         name: verify
+        concurrency:
+            group: ci-${{ github.ref }}-verify
+            cancel-in-progress: true
         runs-on: ubuntu-24.04
         timeout-minutes: 5
         needs:

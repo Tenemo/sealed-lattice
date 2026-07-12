@@ -255,8 +255,8 @@ fn bound_message_coefficients(
         return Ok(messages);
     }
     if let Some(bridge) = &statement.same_secret_bridge {
-        let mut messages = Vec::with_capacity(bridge.target_rns_primes.len());
-        for target_rns_prime in &bridge.target_rns_primes {
+        let mut messages = Vec::with_capacity(bridge.bridge_rns_primes.len());
+        for target_rns_prime in &bridge.bridge_rns_primes {
             let target_message_coefficients = witness
                 .secret_coefficients
                 .iter()

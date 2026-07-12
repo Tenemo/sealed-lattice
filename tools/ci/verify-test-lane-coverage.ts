@@ -24,6 +24,10 @@ import {
 } from 'typescript';
 
 import {
+    runWithLocalRunLog,
+    type ActiveLocalRunLog,
+} from '#tools/ci/local-run-log.js';
+import {
     collectRustTestInventory,
     type RustTestInventoryEntry,
 } from '#tools/ci/rust-test-inventory.js';
@@ -852,6 +856,7 @@ const parsePhases = (
 
 export const verifyTestLaneCoverage = async (
     commandArguments: readonly string[] = process.argv.slice(2),
+    runLog?: ActiveLocalRunLog,
 ): Promise<void> => {
     const phases = parsePhases(commandArguments);
     const failures: string[] = [];
@@ -859,7 +864,11 @@ export const verifyTestLaneCoverage = async (
         failures.push(...(await verifyStaticOwnership()));
     }
     if (phases.rust) {
-        failures.push(...validateRustTestInventory(collectRustTestInventory()));
+        failures.push(
+            ...validateRustTestInventory(
+                await collectRustTestInventory(runLog),
+            ),
+        );
     }
     if (failures.length > 0) {
         throw new Error([...new Set(failures)].sort().join('\n'));
@@ -875,5 +884,23 @@ export const verifyTestLaneCoverage = async (
 };
 
 if (isDirectlyInvokedModule(import.meta.url)) {
-    void verifyTestLaneCoverage();
+    const commandArguments = process.argv.slice(2);
+    void runWithLocalRunLog(
+        {
+            commandLineArguments: commandArguments,
+            lanes: ['Test lane ownership verification'],
+            scriptName: 'test:lanes:verify',
+        },
+        async (runLog) => {
+            runLog.writeEvent({
+                details: { commandArguments },
+                eventType: 'test-lane-verification-started',
+            });
+            await verifyTestLaneCoverage(commandArguments, runLog);
+            runLog.writeEvent({
+                details: { commandArguments },
+                eventType: 'test-lane-verification-finished',
+            });
+        },
+    );
 }

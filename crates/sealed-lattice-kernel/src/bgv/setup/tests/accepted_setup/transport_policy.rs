@@ -90,45 +90,23 @@ fn terminal_transport_policy_accepts_binary_key_material_references() {
 }
 
 #[test]
-fn terminal_transport_policy_refuses_raw_key_switch_component_chunk_sidecar() {
-    let package = terminal_transport_policy_package_with_material_encodings(
+fn terminal_transport_policy_refuses_embedded_key_switch_component_vectors() {
+    let mut package = terminal_transport_policy_package_with_material_encodings(
         PUBLIC_KEY_SHARE_MATERIAL_TRANSPORT_ENCODING,
         SETUP_PROOF_MATERIAL_ENCODING,
         EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
     );
-    let request = serde_json::json!({
-        "transportedEvaluationKeyShareComponentMaterial": {
-            "objectType": "SetupTransportedEvaluationKeyShareComponentMaterialSet",
-            "componentMaterials": [
-                {
-                    "objectType": "SetupTransportedEvaluationKeyShareComponentMaterial",
-                    "proofFamily": "relinearization-key-share",
-                    "keySwitchMaterialEncoding": EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
-                    "keySwitchComponentMaterialRoot": valid_hash('8'),
-                    "chunkCount": 1,
-                    "totalByteLength": 64,
-                    "fullObjectHash": valid_hash('9'),
-                    "chunkRoot": valid_hash('a'),
-                    "chunkHashes": [valid_hash('b')],
-                    "chunks": [
-                        {
-                            "chunkIndex": 0,
-                            "bytesHex": "00",
-                        }
-                    ],
-                }
-            ],
-        },
-    });
+    package["relinearizationKeyShareRounds"]["roundOneRecords"][0]["keySwitchComponentVectors"] =
+        serde_json::json!([]);
 
-    let response = verify_terminal_setup_transport_policy(&package, &request)
+    let response = verify_terminal_setup_transport_policy(&package, &serde_json::json!({}))
         .expect("terminal transport policy")
-        .expect("raw key-switch component chunk sidecar refusal");
+        .expect("embedded key-switch component vector refusal");
 
     assert_eq!(response["isValid"], false);
     assert_eq!(
         response["refusedObjects"][0]["reasonCode"],
-        "terminalKeySwitchMaterialHandleRequired"
+        "terminalKeySwitchMaterialTransportRequired"
     );
 }
 
@@ -194,17 +172,17 @@ fn collective_setup_verifier_refuses_non_binary_setup_transport() {
 }
 
 #[test]
-fn collective_setup_verifier_refuses_public_key_share_transport_missing_certificate_object() {
+fn collective_setup_verifier_refuses_vss_transport_missing_certificate_object() {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "collective_setup_verifier_refuses_public_key_share_transport_missing_certificate_object",
+        "collective_setup_verifier_refuses_vss_transport_missing_certificate_object",
     );
     let mut fixture = descriptor_backed_vss_collective_setup_fixture();
-    fixture.verification_request["transportedPublicKeyShareMaterial"] = serde_json::json!({
-        "totalByteLength": 1_u64,
-        "fullObjectHash": valid_hash('1'),
-        "chunkRoot": valid_hash('2'),
-        "chunkHashes": [valid_hash('3')],
-    });
+    replace_setup_proof_material_transport_certificate_objects(
+        &mut fixture.package,
+        &serde_json::json!({ "proofMaterials": [] }),
+        VSS_SHARE_LINKAGE_PROOF_TRANSPORT_CERTIFICATE_FIELDS,
+    );
+    rebind_collective_setup_package_hash(&mut fixture.package);
 
     let result =
         verify_collective_bgv_setup_package(&fixture.package, &fixture.verification_request)

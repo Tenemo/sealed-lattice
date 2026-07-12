@@ -1,5 +1,7 @@
-import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+
+import type { ActiveLocalRunLog } from './local-run-log.js';
+import { runCommandAndCaptureOutput } from './run-command.js';
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 
@@ -45,24 +47,30 @@ export const parseLibtestListOutput = (output: string): readonly string[] => {
     return [...new Set(names)].sort((left, right) => left.localeCompare(right));
 };
 
-const runCargoAndCapture = (
+const runCargoAndCaptureAsynchronously = async (
     arguments_: readonly string[],
-    environment: NodeJS.ProcessEnv = process.env,
-): string => {
-    const result = spawnSync('cargo', arguments_, {
-        cwd: repoRoot,
-        encoding: 'utf8',
-        env: environment,
-        maxBuffer: 100 * 1024 * 1024,
-    });
-    if (result.error !== undefined) {
-        throw new Error(`Failed to start cargo: ${result.error.message}`);
-    }
-    if (result.status !== 0) {
+    input: {
+        readonly environment?: NodeJS.ProcessEnv;
+        readonly runLog?: ActiveLocalRunLog;
+    } = {},
+): Promise<string> => {
+    const result = await runCommandAndCaptureOutput(
+        {
+            args: arguments_,
+            command: 'cargo',
+            description: `inventory Cargo tests: cargo ${arguments_.join(' ')}`,
+            env: input.environment,
+            logFileSlug: 'cargo-test-inventory',
+            workingDirectoryPath: repoRoot,
+        },
+        { runLog: input.runLog },
+    );
+    if (result.exitCode !== 0 || result.terminationSignal !== null) {
         throw new Error(
-            `cargo ${arguments_.join(' ')} failed:\n${result.stderr}${result.stdout}`,
+            `cargo ${arguments_.join(' ')} failed with exit code ${result.exitCode}, signal ${result.terminationSignal ?? 'none'}:\n${result.stderr}${result.stdout}`,
         );
     }
+
     return result.stdout;
 };
 
@@ -79,12 +87,13 @@ export const inventoryEntriesFromListedTests = (input: {
         testName,
     }));
 
-const listCargoTargetTests = (input: {
+const listCargoTargetTestsAsynchronously = async (input: {
     readonly environment?: NodeJS.ProcessEnv;
     readonly packageName: string;
+    readonly runLog?: ActiveLocalRunLog;
     readonly selector: readonly string[];
     readonly targetName: string;
-}): readonly RustTestInventoryEntry[] => {
+}): Promise<readonly RustTestInventoryEntry[]> => {
     const cargoPrefix = [
         'test',
         '--locked',
@@ -93,14 +102,14 @@ const listCargoTargetTests = (input: {
         ...input.selector,
     ];
     const allTests = parseLibtestListOutput(
-        runCargoAndCapture(
+        await runCargoAndCaptureAsynchronously(
             [...cargoPrefix, '--', '--list', '--format', 'terse'],
-            input.environment,
+            input,
         ),
     );
     const ignoredTests = new Set(
         parseLibtestListOutput(
-            runCargoAndCapture(
+            await runCargoAndCaptureAsynchronously(
                 [
                     ...cargoPrefix,
                     '--',
@@ -109,7 +118,7 @@ const listCargoTargetTests = (input: {
                     '--format',
                     'terse',
                 ],
-                input.environment,
+                input,
             ),
         ),
     );
@@ -148,15 +157,14 @@ const selectorForCargoTarget = (
     return undefined;
 };
 
-export const collectRustTestInventory = (): RustTestInventory => {
+export const collectRustTestInventory = async (
+    runLog?: ActiveLocalRunLog,
+): Promise<RustTestInventory> => {
     const metadata = JSON.parse(
-        runCargoAndCapture([
-            'metadata',
-            '--locked',
-            '--no-deps',
-            '--format-version',
-            '1',
-        ]),
+        await runCargoAndCaptureAsynchronously(
+            ['metadata', '--locked', '--no-deps', '--format-version', '1'],
+            { runLog },
+        ),
     ) as CargoMetadata;
     const workspaceMembers = new Set(metadata.workspace_members);
     const inventory: RustTestInventoryEntry[] = [];
@@ -174,20 +182,22 @@ export const collectRustTestInventory = (): RustTestInventory => {
                     );
                 }
                 inventory.push(
-                    ...listCargoTargetTests({
+                    ...(await listCargoTargetTestsAsynchronously({
                         packageName: cargoPackage.name,
+                        runLog,
                         selector,
                         targetName: target.name,
-                    }),
+                    })),
                 );
             }
             if (target.doctest) {
                 inventory.push(
-                    ...listCargoTargetTests({
+                    ...(await listCargoTargetTestsAsynchronously({
                         packageName: cargoPackage.name,
+                        runLog,
                         selector: ['--doc'],
                         targetName: `${target.name}:doctest`,
-                    }),
+                    })),
                 );
             }
         }
@@ -196,10 +206,11 @@ export const collectRustTestInventory = (): RustTestInventory => {
     return inventory;
 };
 
-export const collectFocusedRustKernelTestInventory = (input: {
+export const collectFocusedRustKernelTestInventory = async (input: {
     readonly environment?: NodeJS.ProcessEnv;
+    readonly runLog?: ActiveLocalRunLog;
     readonly testFilter: string;
-}): readonly RustTestInventoryEntry[] => {
+}): Promise<readonly RustTestInventoryEntry[]> => {
     const packageName = 'sealed-lattice-kernel';
     const cargoPrefix = [
         'test',
@@ -209,7 +220,7 @@ export const collectFocusedRustKernelTestInventory = (input: {
         input.testFilter,
     ];
     const allTests = parseLibtestListOutput(
-        runCargoAndCapture(
+        await runCargoAndCaptureAsynchronously(
             [
                 ...cargoPrefix,
                 '--',
@@ -218,12 +229,12 @@ export const collectFocusedRustKernelTestInventory = (input: {
                 '--format',
                 'terse',
             ],
-            input.environment,
+            input,
         ),
     );
     const ignoredTests = new Set(
         parseLibtestListOutput(
-            runCargoAndCapture(
+            await runCargoAndCaptureAsynchronously(
                 [
                     ...cargoPrefix,
                     '--',
@@ -232,7 +243,7 @@ export const collectFocusedRustKernelTestInventory = (input: {
                     '--format',
                     'terse',
                 ],
-                input.environment,
+                input,
             ),
         ),
     );

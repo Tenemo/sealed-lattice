@@ -5,7 +5,11 @@ import {
     resolveFocusedRustTestRunResult,
 } from './focused-rust-test-match.js';
 import { createHeavyTestProgressReporter } from './heavy-test-progress.js';
-import { createLocalRunLog, currentProcessExitCode } from './local-run-log.js';
+import {
+    runWithLocalRunLog,
+    safeLogSlug,
+    type ActiveLocalRunLog,
+} from './local-run-log.js';
 import {
     createProcessMemoryGuard,
     deriveProcessMemoryLimitGigabytes,
@@ -201,6 +205,7 @@ export const buildAcceptedSetupEnvironment = (input: {
               }
             : {}),
         RAYON_NUM_THREADS: input.knobs.rayonThreadCount.value,
+        RUST_BACKTRACE: 'full',
         SEALED_LATTICE_TRUSTEE_PROOF_BATCH_SIZE:
             input.knobs.trusteeProofBatchSize.value,
         SEALED_LATTICE_TRUSTEE_PROOF_LIMB_BATCH_SIZE:
@@ -352,7 +357,7 @@ export const buildFocusedCommand = (
 };
 
 const writeRunnerSetupMessages = (
-    runLog: Awaited<ReturnType<typeof createLocalRunLog>>,
+    runLog: ActiveLocalRunLog,
     setupMessages: readonly string[],
 ): void => {
     for (const message of setupMessages) {
@@ -381,91 +386,111 @@ const combineCommandRunObservers = (
     },
 });
 
+export const buildGuardedRustKernelDiagnosticFileNames = (input: {
+    readonly commandIndex: number;
+    readonly progressLabel: string;
+}): Readonly<{
+    processMemoryGuard: string;
+    testEvents: string;
+}> => {
+    if (!Number.isSafeInteger(input.commandIndex) || input.commandIndex < 0) {
+        throw new Error(
+            'Guarded Rust kernel diagnostic command index must be a non-negative safe integer.',
+        );
+    }
+    const commandOrdinal = String(input.commandIndex + 1).padStart(2, '0');
+    const diagnosticSlug = safeLogSlug(input.progressLabel);
+
+    return {
+        processMemoryGuard: `process-memory-guard-${commandOrdinal}-${diagnosticSlug}.jsonl`,
+        testEvents: `${commandOrdinal}-${diagnosticSlug}.jsonl`,
+    };
+};
+
 export const runGuardedRustKernelCommands = async (input: {
     readonly commands: readonly GuardedRustKernelCommand[];
     readonly laneLabel: string;
-    readonly rawArguments: readonly string[];
-    readonly scriptName: string;
+    readonly runLog: ActiveLocalRunLog;
 }): Promise<void> => {
-    const runLog = await createLocalRunLog({
-        commandLineArguments: input.rawArguments,
-        lanes: [input.laneLabel],
-        scriptName: input.scriptName,
-    });
-    let exitCode: number | undefined;
-    try {
-        for (const command of input.commands) {
-            writeRunnerSetupMessages(
-                runLog,
-                command.builtCommand.setupMessages,
-            );
-        }
-        exitCode = await runCommandsInSeries(
-            [verifyProcessMemoryGuardCommand()],
-            { outputMode: 'inherit', runLog },
-        );
-        if (exitCode !== 0) {
-            process.exitCode = exitCode;
-            return;
-        }
-
-        for (const command of input.commands) {
-            const testMatchTracker =
-                command.expectedTestFilter === undefined
-                    ? undefined
-                    : createFocusedRustTestMatchTracker();
-            const progressReporter = createHeavyTestProgressReporter({
-                label: command.builtCommand.progressLabel,
-                threadCount: command.builtCommand.testThreadCount,
-            });
-            try {
-                exitCode = await runCommandsInSeries(
-                    [command.builtCommand.command],
-                    {
-                        observer:
-                            testMatchTracker === undefined
-                                ? progressReporter.observer
-                                : combineCommandRunObservers([
-                                      progressReporter.observer,
-                                      testMatchTracker.observer,
-                                  ]),
-                        outputMode: 'inherit',
-                        runLog,
-                        terminalOutputFilter:
-                            progressReporter.terminalOutputFilter,
-                    },
-                );
-            } finally {
-                progressReporter.stop();
-            }
-            if (
-                testMatchTracker !== undefined &&
-                command.expectedTestFilter !== undefined
-            ) {
-                const focusedRunResult = resolveFocusedRustTestRunResult({
-                    commandExitCode: exitCode,
-                    matchedTestCount: testMatchTracker.matchedTestCount(),
-                    runnerName: input.laneLabel,
-                    testFilter: command.expectedTestFilter,
-                });
-                exitCode = focusedRunResult.exitCode;
-                if (focusedRunResult.failureMessage !== undefined) {
-                    console.error(focusedRunResult.failureMessage);
-                    runLog.writeCombinedOutput(
-                        `${focusedRunResult.failureMessage}\n`,
-                    );
-                }
-            }
-            if (exitCode !== 0) {
-                break;
-            }
-        }
-        process.exitCode = exitCode;
-    } finally {
-        await runLog.finish({
-            exitCode: exitCode ?? currentProcessExitCode(),
-        });
+    const { runLog } = input;
+    for (const command of input.commands) {
+        writeRunnerSetupMessages(runLog, command.builtCommand.setupMessages);
     }
+    let exitCode = await runCommandsInSeries(
+        [verifyProcessMemoryGuardCommand()],
+        { outputMode: 'inherit', runLog },
+    );
+    if (exitCode !== 0) {
+        process.exitCode = exitCode;
+        return;
+    }
+
+    for (const [commandIndex, command] of input.commands.entries()) {
+        const testMatchTracker =
+            command.expectedTestFilter === undefined
+                ? undefined
+                : createFocusedRustTestMatchTracker();
+        const diagnosticFileNames = buildGuardedRustKernelDiagnosticFileNames({
+            commandIndex,
+            progressLabel: command.builtCommand.progressLabel,
+        });
+        const guardedCommand =
+            getAcceptedSetupProcessMemoryGuard().addDiagnostics(
+                command.builtCommand.command,
+                path.join(
+                    runLog.runDirectoryPath,
+                    'resources',
+                    diagnosticFileNames.processMemoryGuard,
+                ),
+            );
+        const progressReporter = createHeavyTestProgressReporter({
+            eventFilePath: path.join(
+                runLog.runDirectoryPath,
+                'tests',
+                diagnosticFileNames.testEvents,
+            ),
+            label: command.builtCommand.progressLabel,
+            threadCount: command.builtCommand.testThreadCount,
+        });
+        try {
+            exitCode = await runCommandsInSeries([guardedCommand], {
+                observer:
+                    testMatchTracker === undefined
+                        ? progressReporter.observer
+                        : combineCommandRunObservers([
+                              progressReporter.observer,
+                              testMatchTracker.observer,
+                          ]),
+                outputMode: 'inherit',
+                runLog,
+                terminalOutputFilter: progressReporter.terminalOutputFilter,
+            });
+        } finally {
+            progressReporter.stop();
+        }
+        if (
+            testMatchTracker !== undefined &&
+            command.expectedTestFilter !== undefined
+        ) {
+            const focusedRunResult = resolveFocusedRustTestRunResult({
+                commandExitCode: exitCode,
+                matchedTestCount: testMatchTracker.matchedTestCount(),
+                runnerName: input.laneLabel,
+                testFilter: command.expectedTestFilter,
+            });
+            exitCode = focusedRunResult.exitCode;
+            if (focusedRunResult.failureMessage !== undefined) {
+                console.error(focusedRunResult.failureMessage);
+                runLog.writeCombinedOutput(
+                    `${focusedRunResult.failureMessage}\n`,
+                );
+            }
+        }
+        if (exitCode !== 0) {
+            break;
+        }
+    }
+    process.exitCode = exitCode;
 };
 
 const usage =
@@ -527,33 +552,44 @@ export const runRustKernelAcceptedSetupTests = async (input: {
     readonly scriptName?: string;
 }): Promise<void> => {
     const rawArguments = input.rawArguments ?? process.argv.slice(2);
-    const parsedArguments = parseRustKernelAcceptedSetupArguments(rawArguments);
+    await runWithLocalRunLog(
+        {
+            commandLineArguments: rawArguments,
+            lanes: [acceptedSetupRunName],
+            scriptName: input.scriptName ?? acceptedSetupScriptName,
+        },
+        async (runLog) => {
+            const parsedArguments =
+                parseRustKernelAcceptedSetupArguments(rawArguments);
+            const builtCommand = parsedArguments.focused
+                ? buildFocusedCommand(
+                      parsedArguments.testFilters[0] ?? '',
+                      parsedArguments.mode,
+                  )
+                : buildAcceptedSetupCommand(parsedArguments.mode);
+            const focusedTestFilter = parsedArguments.focused
+                ? parsedArguments.testFilters[0]
+                : undefined;
+            if (focusedTestFilter !== undefined) {
+                await verifyFocusedRustLaneSelection({
+                    environment: builtCommand.command.env,
+                    lane: 'rust-accepted-setup',
+                    runLog,
+                    testFilter: focusedTestFilter,
+                });
+            }
 
-    const builtCommand = parsedArguments.focused
-        ? buildFocusedCommand(
-              parsedArguments.testFilters[0] ?? '',
-              parsedArguments.mode,
-          )
-        : buildAcceptedSetupCommand(parsedArguments.mode);
-    const focusedTestFilter = parsedArguments.focused
-        ? parsedArguments.testFilters[0]
-        : undefined;
-    if (focusedTestFilter !== undefined) {
-        verifyFocusedRustLaneSelection({
-            environment: builtCommand.command.env,
-            lane: 'rust-accepted-setup',
-            testFilter: focusedTestFilter,
-        });
-    }
-
-    await runGuardedRustKernelCommands({
-        commands: [{ builtCommand, expectedTestFilter: focusedTestFilter }],
-        laneLabel: parsedArguments.focused
-            ? `Rust accepted setup focused (${parsedArguments.mode})`
-            : `${acceptedSetupRunName} (${parsedArguments.mode})`,
-        rawArguments,
-        scriptName: input.scriptName ?? acceptedSetupScriptName,
-    });
+            await runGuardedRustKernelCommands({
+                commands: [
+                    { builtCommand, expectedTestFilter: focusedTestFilter },
+                ],
+                laneLabel: parsedArguments.focused
+                    ? `Rust accepted setup focused (${parsedArguments.mode})`
+                    : `${acceptedSetupRunName} (${parsedArguments.mode})`,
+                runLog,
+            });
+        },
+    );
 };
 
 if (isDirectlyInvokedModule(import.meta.url)) {

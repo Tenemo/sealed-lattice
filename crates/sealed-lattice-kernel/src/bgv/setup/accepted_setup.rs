@@ -102,7 +102,7 @@ use self::vss_public_material_verification::{
     VssPublicMaterialVerification, verify_optional_vss_public_material,
 };
 
-use crate::bgv::setup_helpers::compare_required_string;
+use crate::bgv::setup_helpers::{compare_required_string, compare_required_u64};
 
 #[cfg(test)]
 use serde_json::{Value, json};
@@ -458,6 +458,7 @@ pub(crate) fn verify_collective_bgv_setup_package_from_request(
     verify_collective_bgv_setup_package_inner(setup_package, request)
 }
 
+#[cfg(test)]
 pub(crate) fn verify_collective_bgv_setup_package(
     setup_package: &Value,
     request: &Value,

@@ -77,12 +77,14 @@ describe('Node test runner arguments', () => {
         expect(heavyCommand?.command).toContain(
             'sealed-lattice-process-memory-guard',
         );
-        expect(heavyCommand?.args.slice(0, 3)).toEqual([
+        expect(heavyCommand?.args.slice(0, 5)).toEqual([
             '--memory-limit-bytes',
             expect.stringMatching(/^[1-9][0-9]*$/u),
+            '--virtual-address-space-allowance-bytes',
+            String(8 * 1024 ** 3),
             '--',
         ]);
-        expect(heavyCommand?.args.slice(3)).toEqual([
+        expect(heavyCommand?.args.slice(5)).toEqual([
             'node',
             'pnpm-entry.js',
             'exec',

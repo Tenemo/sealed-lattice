@@ -5,7 +5,6 @@ use super::super::relation::{
     TrusteeEvaluationKeyWitness,
 };
 use super::*;
-use crate::bgv::evaluator::top_k::canonical_target_basis_hash;
 use crate::bgv::setup::commitment::compute_setup_commitment_for_tests;
 use crate::bgv::setup::vss_commitment::VSS_PUBLIC_MESSAGE_DIGIT_COUNT;
 use serde_json::json;
@@ -206,10 +205,10 @@ fn same_secret_bridge_proof_round_trips_and_rejects_tampering() {
             .same_secret_bridge
             .as_ref()
             .expect("bridge statement")
-            .target_rns_primes
+            .bridge_rns_primes
             .len(),
         7,
-        "bridge fixture should exercise the current target-basis limb count"
+        "bridge fixture should exercise a nontrivial Q_share prefix"
     );
     let layout = LimbColumnLayout::new(&statement, 0).expect("bridge layout");
     let bridge_digit_count = layout.same_secret_bridge_target_count()
@@ -350,15 +349,18 @@ fn same_secret_bridge_proof_round_trips_and_rejects_tampering() {
         "the standalone bridge context must carry exactly zero binding roots"
     );
 
-    let (mut wrong_target_basis_statement, _unused_witness) = same_secret_bridge_instance();
-    wrong_target_basis_statement
+    let (mut changed_setup_statement, _unused_witness) = same_secret_bridge_instance();
+    changed_setup_statement
         .same_secret_bridge
         .as_mut()
         .expect("bridge statement")
-        .target_basis_hash = repeated_hash("c1");
+        .setup_parameters_hash = repeated_hash("c1");
+    changed_setup_statement
+        .validate_shape()
+        .expect("a different well-formed setup hash remains structurally valid");
     assert!(
-        wrong_target_basis_statement.validate_shape().is_err(),
-        "same-secret bridge statements must bind the canonical target basis hash"
+        verify_evaluation_key_share(&changed_setup_statement, &proof).is_err(),
+        "the same-secret bridge proof must bind setupParametersHash"
     );
 }
 
@@ -440,9 +442,9 @@ pub(super) fn same_secret_bridge_instance() -> (
 ) {
     let ring_degree = SMALL_RING_DEGREE;
     let public_matrix_seed_hash = repeated_hash("cd");
-    let target_basis_hash = canonical_target_basis_hash().expect("canonical target basis hash");
-    let target_rns_limb_count = 7_usize;
-    let target_rns_primes = DATA_PRIMES[..target_rns_limb_count].to_vec();
+    let setup_parameters_hash = repeated_hash("bc");
+    let bridge_rns_limb_count = 7_usize;
+    let bridge_rns_primes = DATA_PRIMES[..bridge_rns_limb_count].to_vec();
     let secret_coefficients = (0..ring_degree)
         .map(|coefficient_index| match coefficient_index % 3 {
             0 => -1,
@@ -455,7 +457,7 @@ pub(super) fn same_secret_bridge_instance() -> (
         .map(|coefficient| i64::from(*coefficient < 0))
         .collect::<Vec<_>>();
 
-    let target_constant_material = target_rns_primes
+    let target_constant_material = bridge_rns_primes
         .iter()
         .enumerate()
         .map(|(target_rns_limb_index, target_rns_prime)| {
@@ -535,9 +537,9 @@ pub(super) fn same_secret_bridge_instance() -> (
             public_matrix_seed_hash,
             source_trustee_identity: "trustee-0".to_string(),
             source_trustee_roster_position: 0,
-            target_basis_hash,
-            target_rns_primes,
-            target_constant_commitment_roots: (0..target_rns_limb_count)
+            setup_parameters_hash,
+            bridge_rns_primes,
+            target_constant_commitment_roots: (0..bridge_rns_limb_count)
                 .map(|target_rns_limb_index| {
                     repeated_hash(&format!("{:02x}", 0xd0 + target_rns_limb_index))
                 })
@@ -608,17 +610,17 @@ fn source_opening_randomness_by_limb(ring_degree: usize) -> Vec<Vec<Vec<i64>>> {
 fn attach_same_secret_bridge_to_key_statement(
     mut statement: TrusteeEvaluationKeyStatement,
     mut witness: TrusteeEvaluationKeyWitness,
-    target_rns_limb_count: usize,
+    bridge_rns_limb_count: usize,
 ) -> (TrusteeEvaluationKeyStatement, TrusteeEvaluationKeyWitness) {
-    assert!((1..=DATA_PRIMES.len()).contains(&target_rns_limb_count));
+    assert!((1..=DATA_PRIMES.len()).contains(&bridge_rns_limb_count));
     let public_matrix_seed_hash = statement
         .same_secret_linkage
         .as_ref()
         .map(|linkage| linkage.public_matrix_seed_hash.clone())
         .unwrap_or_else(|| repeated_hash("cd"));
-    let target_basis_hash = canonical_target_basis_hash().expect("canonical target basis hash");
-    let target_rns_primes = DATA_PRIMES[..target_rns_limb_count].to_vec();
-    let target_constant_material = target_rns_primes
+    let setup_parameters_hash = repeated_hash("bc");
+    let bridge_rns_primes = DATA_PRIMES[..bridge_rns_limb_count].to_vec();
+    let target_constant_material = bridge_rns_primes
         .iter()
         .enumerate()
         .map(|(target_rns_limb_index, target_rns_prime)| {
@@ -651,9 +653,9 @@ fn attach_same_secret_bridge_to_key_statement(
         public_matrix_seed_hash,
         source_trustee_identity: statement.context.trustee_identity.clone(),
         source_trustee_roster_position: statement.context.trustee_roster_position,
-        target_basis_hash,
-        target_rns_primes,
-        target_constant_commitment_roots: (0..target_rns_limb_count)
+        setup_parameters_hash,
+        bridge_rns_primes,
+        target_constant_commitment_roots: (0..bridge_rns_limb_count)
             .map(|target_rns_limb_index| {
                 repeated_hash(&format!("{:02x}", 0xe0 + target_rns_limb_index))
             })

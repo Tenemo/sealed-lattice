@@ -220,12 +220,18 @@ type BrowserTestLane = 'desktop' | 'mobile';
 
 type BrowserTestLaneDefinition = {
     readonly include: readonly string[];
+    readonly instanceProjectNames: readonly string[];
     readonly projectName: string;
 };
 
 export const browserTestLaneDefinitions = {
     desktop: {
         include: ['packages/*/tests/browser/**/*.browser.test.ts'],
+        instanceProjectNames: [
+            'chromium-desktop',
+            'firefox-desktop',
+            'webkit-desktop',
+        ],
         projectName: 'browser-desktop',
     },
     mobile: {
@@ -234,6 +240,7 @@ export const browserTestLaneDefinitions = {
             'packages/wasm/tests/browser/owned-kernel-worker-channel.browser.test.ts',
             'packages/protocol/tests/browser/browser-action-storage-custody.browser.test.ts',
         ],
+        instanceProjectNames: ['pixel-5-chromium', 'iphone-12-webkit'],
         projectName: 'browser-mobile',
     },
 } as const satisfies Record<BrowserTestLane, BrowserTestLaneDefinition>;

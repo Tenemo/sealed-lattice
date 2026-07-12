@@ -675,11 +675,6 @@ pub(in crate::bgv::setup) fn share_linkage_statement_from_evidence(
     recipient_set: &serde_json::Value,
     aggregate_set: &serde_json::Value,
 ) -> serde_json::Value {
-    // The primitive statement verifier binds targetBasisHash as data; the
-    // canonical-basis check lives in the same-secret bridge, so any
-    // well-formed deterministic hash serves the fixture here.
-    let target_basis_hash =
-        crate::hashing::hash512_hex("sealed-lattice-vss-test/target-basis", &[b"target-basis"]);
     let source_statement_records = (0..2_usize)
             .map(|source_trustee_roster_position| {
                 let coefficient_source_record =
@@ -711,12 +706,11 @@ pub(in crate::bgv::setup) fn share_linkage_statement_from_evidence(
                     "setupParametersHash": "3".repeat(128),
                     "setupEpoch": "setup-epoch",
                     "publicMatrixSeedHash": "7".repeat(128),
-                    "targetBasisHash": target_basis_hash.clone(),
                     "sourceTrusteeIdentity": format!("source-{source_trustee_roster_position}"),
                     "sourceTrusteeRosterPosition": source_trustee_roster_position,
                     "ringDegree": test_ring_degree(),
                     "participantCount": 2,
-                    "targetRnsLimbCount": 2,
+                    "qShareRnsLimbCount": 2,
                     "thresholdDegree": 2,
                     "coefficientCommitmentRoot": coefficient_set["coefficientCommitmentRoot"].clone(),
                     "sourceCoefficientCommitmentRoot": coefficient_source_record["sourceCoefficientCommitmentRoot"].clone(),
@@ -742,10 +736,9 @@ pub(in crate::bgv::setup) fn share_linkage_statement_from_evidence(
         "setupParametersHash": "3".repeat(128),
         "setupEpoch": "setup-epoch",
         "publicMatrixSeedHash": "7".repeat(128),
-        "targetBasisHash": target_basis_hash,
         "ringDegree": test_ring_degree(),
         "participantCount": 2,
-        "targetRnsLimbCount": 2,
+        "qShareRnsLimbCount": 2,
         "thresholdDegree": 2,
         "coefficientCommitmentRoot": coefficient_set["coefficientCommitmentRoot"].clone(),
         "recipientShareCommitmentRoot": recipient_set["recipientShareCommitmentRoot"].clone(),

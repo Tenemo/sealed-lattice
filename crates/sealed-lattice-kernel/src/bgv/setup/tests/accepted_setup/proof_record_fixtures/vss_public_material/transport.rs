@@ -184,23 +184,11 @@ fn retained_aggregate_threshold_proof_materials(
                 .as_str()
                 .expect("VSS aggregate threshold proof bytes hash")
                 .to_string();
-            let proof_material = crate::bgv::setup::verified_canonical_setup_proof_material_bytes(
-                VSS_SHARE_LINKAGE_PROOF_FAMILY,
-                &proof_material_root,
-            )
-            .expect("VSS aggregate threshold proof material lookup")
-            .expect("VSS aggregate threshold proof material remains retained");
-            assert_eq!(
-                proof_material
-                    .hash512_hex(VSS_SHARE_LINKAGE_PROOF_BYTES_HASH_DOMAIN)
-                    .expect("VSS aggregate threshold proof bytes hash"),
-                proof_bytes_hash,
-                "retained VSS aggregate threshold proof material must match its descriptor",
-            );
-            let proof_bytes = proof_material
-                .chunks()
-                .flat_map(|chunk| chunk.iter().copied())
-                .collect();
+            let proof_bytes =
+                super::aggregate_threshold::cached_vss_aggregate_threshold_proof_bytes(
+                    &proof_material_root,
+                    &proof_bytes_hash,
+                );
 
             RetainedVssProofMaterial {
                 proof_family: VSS_SHARE_LINKAGE_PROOF_FAMILY,

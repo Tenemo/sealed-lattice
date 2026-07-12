@@ -245,10 +245,10 @@ describe('succinct setup statement hash vectors', () => {
             },
             sameSecretBridge: {
                 publicMatrixSeedHash,
-                targetBasisHash: parameters.canonicalTargetBasisHash,
+                setupParametersHash: parameters.setupParametersHash,
                 sourceTrusteeIdentity: 'statement-vector-trustee',
                 sourceTrusteeRosterPosition: 0,
-                targetRnsPrimes: [firstQSharePrime],
+                bridgeRnsPrimes: [firstQSharePrime],
                 targetConstantCommitmentRoots: [
                     sameSecretBridgeTarget.commitmentRoot,
                 ],
@@ -307,10 +307,10 @@ describe('succinct setup statement hash vectors', () => {
             ],
             sameSecretBridge: {
                 publicMatrixSeedHash: repeatedHash('41'),
-                targetBasisHash: parameters.canonicalTargetBasisHash,
+                setupParametersHash: parameters.setupParametersHash,
                 sourceTrusteeIdentity: 'statement-vector-trustee',
                 sourceTrusteeRosterPosition: 0,
-                targetRnsPrimes: [firstQSharePrime],
+                bridgeRnsPrimes: [firstQSharePrime],
                 targetConstantCommitmentRoots: [
                     publicKeyBridgeTarget.commitmentRoot,
                 ],

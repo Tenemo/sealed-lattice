@@ -5,6 +5,7 @@ import {
     extractPublishedKernelHash,
     hashPublishedKernelBytesSha256Hex,
     parsePackDryRunFilePaths,
+    parsePackedPackageSmokeArguments,
     resolvePackedPackageNpmCacheDirectory,
     validatePublishedKernelIntegrity,
     validatePublishedPackageFilePaths,
@@ -12,6 +13,21 @@ import {
 } from '#tools/ci/verify-packed-package';
 
 describe('packed package policy checks', () => {
+    it('accepts only the optional workspace-build flag', () => {
+        expect(parsePackedPackageSmokeArguments([])).toEqual({
+            buildWorkspace: false,
+        });
+        expect(parsePackedPackageSmokeArguments(['--build'])).toEqual({
+            buildWorkspace: true,
+        });
+        expect(parsePackedPackageSmokeArguments(['--', '--build'])).toEqual({
+            buildWorkspace: true,
+        });
+        expect(() =>
+            parsePackedPackageSmokeArguments(['--build', '--unexpected']),
+        ).toThrow('accepts only the optional --build flag');
+    });
+
     it('isolates npm cache writes inside the package-smoke temporary directory', () => {
         expect(
             createIsolatedNpmEnvironment('isolated-cache', {

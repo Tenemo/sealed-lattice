@@ -1,3 +1,4 @@
+import type { ActiveLocalRunLog } from './local-run-log.js';
 import {
     collectFocusedRustKernelTestInventory,
     type RustTestInventoryEntry,
@@ -42,16 +43,18 @@ export const validateFocusedRustLaneSelection = (input: {
     }
 };
 
-export const verifyFocusedRustLaneSelection = (input: {
+export const verifyFocusedRustLaneSelection = async (input: {
     readonly environment?: NodeJS.ProcessEnv;
     readonly lane: CanonicalTestLane;
+    readonly runLog?: ActiveLocalRunLog;
     readonly testFilter: string;
-}): void => {
+}): Promise<void> => {
     validateFocusedRustLaneSelection({
         lane: input.lane,
         testFilter: input.testFilter,
-        tests: collectFocusedRustKernelTestInventory({
+        tests: await collectFocusedRustKernelTestInventory({
             environment: input.environment,
+            runLog: input.runLog,
             testFilter: input.testFilter,
         }),
     });

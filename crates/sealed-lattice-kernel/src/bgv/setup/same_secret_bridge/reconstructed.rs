@@ -7,7 +7,6 @@ pub(super) struct StatementSetBinding<'a> {
     pub(super) roster_hash: &'a str,
     pub(super) setup_parameters_hash: &'a str,
     pub(super) setup_epoch: &'a str,
-    pub(super) target_basis_hash: &'a str,
     pub(super) public_matrix_seed_hash: &'a str,
 }
 
@@ -16,7 +15,7 @@ pub(super) struct StatementRecordVerificationInput<'a> {
     pub(super) coefficient_commitment_set: &'a Value,
     pub(super) vss_coefficient_commitments: &'a Value,
     pub(super) expected_position: usize,
-    pub(super) target_rns_limb_count: usize,
+    pub(super) q_share_rns_limb_count: usize,
     pub(super) threshold_degree: usize,
     pub(super) ring_degree: usize,
     pub(super) statement_set: StatementSetBinding<'a>,
@@ -54,7 +53,7 @@ pub(super) fn verify_reconstructed_same_secret_bridge_proof(
             "same-secret bridge proof target commitments must match the bridge statement target roots",
         ));
     }
-    let mut target_rns_primes = Vec::with_capacity(bridge_target_constant_roots.len());
+    let mut bridge_rns_primes = Vec::with_capacity(bridge_target_constant_roots.len());
     let mut target_constant_commitment_roots =
         Vec::with_capacity(bridge_target_constant_roots.len());
     let mut target_constant_commitments = Vec::with_capacity(bridge_target_constant_roots.len());
@@ -85,20 +84,18 @@ pub(super) fn verify_reconstructed_same_secret_bridge_proof(
             unsigned_at_path(bridge_target_commitment, &["rnsPrime"])?,
             "same-secret bridge target commitment rnsPrime",
         )?;
-        let canonical_target_prime =
-            DATA_PRIMES
-                .get(target_rns_limb_index)
-                .copied()
-                .ok_or_else(|| {
-                    CanonicalError::new(
-                        CanonicalErrorCode::MalformedLength,
-                        "same-secret bridge targetRnsLimbCount exceeds the available target primes",
-                    )
-                })?;
+        let canonical_target_prime = DATA_PRIMES.get(target_rns_limb_index).copied().ok_or_else(
+            || {
+                CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    "same-secret bridge qShareRnsLimbCount exceeds the available Q_share primes",
+                )
+            },
+        )?;
         compare_required_u64(
             target_rns_prime,
             canonical_target_prime,
-            "same-secret bridge proof canonical target prime",
+            "same-secret bridge proof canonical Q_share prime",
         )?;
         compare_required_u64(
             unsigned_at_path(bridge_target_root, &["shamirCoefficientIndex"])?,
@@ -118,7 +115,7 @@ pub(super) fn verify_reconstructed_same_secret_bridge_proof(
             coefficient_commitment_root,
             "same-secret bridge target commitment body root",
         )?;
-        target_rns_primes.push(target_rns_prime);
+        bridge_rns_primes.push(target_rns_prime);
         target_constant_commitment_roots.push(coefficient_commitment_root.to_string());
         target_constant_commitments.push(target_commitment_body.clone());
     }
@@ -139,10 +136,10 @@ pub(super) fn verify_reconstructed_same_secret_bridge_proof(
         },
         "sameSecretBridge": {
             "publicMatrixSeedHash": input.statement_set.public_matrix_seed_hash,
+            "setupParametersHash": input.statement_set.setup_parameters_hash,
             "sourceTrusteeIdentity": trustee_identity,
             "sourceTrusteeRosterPosition": input.expected_position,
-            "targetBasisHash": input.statement_set.target_basis_hash,
-            "targetRnsPrimes": target_rns_primes,
+            "bridgeRnsPrimes": bridge_rns_primes,
             "targetConstantCommitmentRoots": target_constant_commitment_roots,
             "targetConstantCommitments": target_constant_commitments,
         },

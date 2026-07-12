@@ -55,7 +55,7 @@ fn build_combined_same_secret_bridge_public_vectors(
         SameSecretBridgePublicVectorInput {
             modulus,
             ring_degree: layout.ring_degree,
-            target_rns_primes: &same_secret_bridge.target_rns_primes,
+            bridge_rns_primes: &same_secret_bridge.bridge_rns_primes,
             target_constant_commitments: &same_secret_bridge.target_constant_commitments,
             relation_alpha: &challenges.same_secret_bridge_alpha,
             u_power_vectors,

@@ -1,5 +1,12 @@
 use super::*;
 
+// Verifies the statement's structural bindings only: canonical roots,
+// commitment bodies, and cross-set consistency of the published commitment
+// sets. Acceptance here verifies no share-linkage proof, and for a
+// threshold-aggregate statement it does not establish that the committed
+// threshold share is the sum of the committed source shares; the proven
+// aggregate binding is verified by `verify_vss_public_aggregate_threshold_proofs`
+// on the accepted-setup material path.
 pub(crate) fn verify_vss_share_linkage_bindings_request(request: &Value) -> CanonicalResult<Value> {
     let statement = value_at_path(request, &["statement"])?;
     compare_required_string(
@@ -13,7 +20,6 @@ pub(crate) fn verify_vss_share_linkage_bindings_request(request: &Value) -> Cano
     let roster_hash = hash_at_path(statement, &["rosterHash"])?;
     let setup_parameters_hash = hash_at_path(statement, &["setupParametersHash"])?;
     let public_matrix_seed_hash = hash_at_path(statement, &["publicMatrixSeedHash"])?;
-    let target_basis_hash = hash_at_path(statement, &["targetBasisHash"])?;
     let ring_degree = read_positive_usize_at_path(
         statement,
         &["ringDegree"],
@@ -29,10 +35,10 @@ pub(crate) fn verify_vss_share_linkage_bindings_request(request: &Value) -> Cano
         &["participantCount"],
         "VSS share linkage statement participantCount",
     )?;
-    let target_rns_limb_count = read_positive_usize_at_path(
+    let q_share_rns_limb_count = read_positive_usize_at_path(
         statement,
-        &["targetRnsLimbCount"],
-        "VSS share linkage statement targetRnsLimbCount",
+        &["qShareRnsLimbCount"],
+        "VSS share linkage statement qShareRnsLimbCount",
     )?;
     let threshold_degree = read_positive_usize_at_path(
         statement,
@@ -61,10 +67,9 @@ pub(crate) fn verify_vss_share_linkage_bindings_request(request: &Value) -> Cano
                     setup_parameters_hash,
                     setup_epoch,
                     public_matrix_seed_hash,
-                    target_basis_hash,
                     ring_degree,
                     participant_count,
-                    target_rns_limb_count,
+                    q_share_rns_limb_count,
                     threshold_degree,
                     coefficient_commitment_root,
                     aggregate_threshold_commitment_root,
@@ -81,10 +86,9 @@ pub(crate) fn verify_vss_share_linkage_bindings_request(request: &Value) -> Cano
         "setupParametersHash": setup_parameters_hash,
         "setupEpoch": setup_epoch,
         "publicMatrixSeedHash": public_matrix_seed_hash,
-        "targetBasisHash": target_basis_hash,
         "ringDegree": ring_degree,
         "participantCount": participant_count,
-        "targetRnsLimbCount": target_rns_limb_count,
+        "qShareRnsLimbCount": q_share_rns_limb_count,
         "thresholdDegree": threshold_degree,
         "coefficientCommitmentRoot": coefficient_commitment_root,
         "recipientShareCommitmentRoot": recipient_share_commitment_root,
@@ -107,10 +111,9 @@ pub(crate) fn verify_vss_share_linkage_bindings_request(request: &Value) -> Cano
             setup_parameters_hash,
             setup_epoch,
             public_matrix_seed_hash,
-            target_basis_hash,
             ring_degree,
             participant_count,
-            target_rns_limb_count,
+            q_share_rns_limb_count,
             threshold_degree,
             coefficient_commitment_root,
             aggregate_threshold_commitment_root,
@@ -123,10 +126,9 @@ pub(crate) fn verify_vss_share_linkage_bindings_request(request: &Value) -> Cano
         "operation": "verifyVssShareLinkageBindings",
         "statementRoot": statement_root,
         "publicMatrixSeedHash": public_matrix_seed_hash,
-        "targetBasisHash": target_basis_hash,
         "ringDegree": ring_degree,
         "participantCount": participant_count,
-        "targetRnsLimbCount": target_rns_limb_count,
+        "qShareRnsLimbCount": q_share_rns_limb_count,
         "thresholdDegree": threshold_degree,
         "coefficientCommitmentRoot": coefficient_commitment_root,
         "recipientShareCommitmentRoot": recipient_share_commitment_root,
@@ -141,10 +143,9 @@ pub(super) struct VssShareLinkageStatementBinding<'a> {
     setup_parameters_hash: &'a str,
     setup_epoch: &'a str,
     public_matrix_seed_hash: &'a str,
-    target_basis_hash: &'a str,
     ring_degree: usize,
     participant_count: usize,
-    target_rns_limb_count: usize,
+    q_share_rns_limb_count: usize,
     threshold_degree: usize,
     coefficient_commitment_root: &'a str,
     aggregate_threshold_commitment_root: &'a str,
@@ -247,7 +248,7 @@ pub(super) fn verify_vss_share_linkage_evidence_sets(
         )?;
         compare_required_u64(
             unsigned_at_path(verification, &["rnsLimbCount"])?,
-            input.statement.target_rns_limb_count as u64,
+            input.statement.q_share_rns_limb_count as u64,
             &format!("VSS share linkage evidence {description} rnsLimbCount"),
         )?;
     }
@@ -267,10 +268,10 @@ pub(super) fn verify_vss_share_linkage_evidence_sets(
         "VSS share linkage evidence coefficient ringDegree",
     )?;
     let coefficient_rns_limb_count = usize_at_path(&coefficient_verification, &["rnsLimbCount"])?;
-    if coefficient_rns_limb_count < input.statement.target_rns_limb_count {
+    if coefficient_rns_limb_count < input.statement.q_share_rns_limb_count {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "VSS share linkage coefficient evidence must cover the target basis",
+            "VSS share linkage coefficient evidence must cover Q_share",
         ));
     }
     compare_required_u64(
@@ -341,7 +342,7 @@ pub(super) fn verify_vss_share_linkage_evidence_sets(
             array_at_path(source_statement, &["coefficientOpeningRoots"])?;
         let target_coefficient_record_count = input
             .statement
-            .target_rns_limb_count
+            .q_share_rns_limb_count
             .checked_mul(input.statement.threshold_degree)
             .ok_or_else(|| {
                 CanonicalError::new(
@@ -854,11 +855,6 @@ pub(super) fn verify_vss_share_linkage_source_statement(
         input.statement.public_matrix_seed_hash,
         "VSS share linkage source statement publicMatrixSeedHash",
     )?;
-    compare_required_string(
-        hash_at_path(input.source_statement_record, &["targetBasisHash"])?,
-        input.statement.target_basis_hash,
-        "VSS share linkage source statement targetBasisHash",
-    )?;
     let source_trustee_identity =
         read_non_empty_string(input.source_statement_record, "sourceTrusteeIdentity")?;
     compare_required_u64(
@@ -880,9 +876,9 @@ pub(super) fn verify_vss_share_linkage_source_statement(
         "VSS share linkage source statement ringDegree",
     )?;
     compare_required_u64(
-        unsigned_at_path(input.source_statement_record, &["targetRnsLimbCount"])?,
-        input.statement.target_rns_limb_count as u64,
-        "VSS share linkage source statement targetRnsLimbCount",
+        unsigned_at_path(input.source_statement_record, &["qShareRnsLimbCount"])?,
+        input.statement.q_share_rns_limb_count as u64,
+        "VSS share linkage source statement qShareRnsLimbCount",
     )?;
     compare_required_u64(
         unsigned_at_path(input.source_statement_record, &["thresholdDegree"])?,
@@ -907,7 +903,7 @@ pub(super) fn verify_vss_share_linkage_source_statement(
     )?;
     let expected_coefficient_opening_root_count = input
         .statement
-        .target_rns_limb_count
+        .q_share_rns_limb_count
         .checked_mul(input.statement.threshold_degree)
         .ok_or_else(|| {
             CanonicalError::new(
@@ -920,7 +916,7 @@ pub(super) fn verify_vss_share_linkage_source_statement(
     if coefficient_opening_roots.len() != expected_coefficient_opening_root_count {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "VSS share linkage source statement coefficientOpeningRoots must cover every target limb and coefficient",
+            "VSS share linkage source statement coefficientOpeningRoots must cover every Q_share limb and coefficient",
         ));
     }
     let verified_coefficient_opening_roots = coefficient_opening_roots
@@ -948,7 +944,7 @@ pub(super) fn verify_vss_share_linkage_source_statement(
     let expected_recipient_share_opening_root_count = input
         .statement
         .participant_count
-        .checked_mul(input.statement.target_rns_limb_count)
+        .checked_mul(input.statement.q_share_rns_limb_count)
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
@@ -962,7 +958,7 @@ pub(super) fn verify_vss_share_linkage_source_statement(
     if recipient_share_opening_roots.len() != expected_recipient_share_opening_root_count {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "VSS share linkage source statement recipientShareOpeningRoots must cover every recipient and target limb",
+            "VSS share linkage source statement recipientShareOpeningRoots must cover every recipient and Q_share limb",
         ));
     }
     let verified_recipient_share_opening_roots = recipient_share_opening_roots
@@ -1003,12 +999,11 @@ pub(super) fn verify_vss_share_linkage_source_statement(
         "setupParametersHash": input.statement.setup_parameters_hash,
         "setupEpoch": input.statement.setup_epoch,
         "publicMatrixSeedHash": input.statement.public_matrix_seed_hash,
-        "targetBasisHash": input.statement.target_basis_hash,
         "sourceTrusteeIdentity": source_trustee_identity,
         "sourceTrusteeRosterPosition": input.expected_source_position,
         "ringDegree": input.statement.ring_degree,
         "participantCount": input.statement.participant_count,
-        "targetRnsLimbCount": input.statement.target_rns_limb_count,
+        "qShareRnsLimbCount": input.statement.q_share_rns_limb_count,
         "thresholdDegree": input.statement.threshold_degree,
         "coefficientCommitmentRoot": input.statement.coefficient_commitment_root,
         "sourceCoefficientCommitmentRoot": source_coefficient_commitment_root,

@@ -116,5 +116,6 @@ describe('Rust kernel runner arguments', () => {
         );
         expect(command.logFileSlug).toBe('cargo-test-rust-kernel-fast');
         expect(command.env?.CARGO_INCREMENTAL).toBe('0');
+        expect(command.env?.RUST_BACKTRACE).toBe('1');
     });
 });

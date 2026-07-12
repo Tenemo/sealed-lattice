@@ -1,3 +1,5 @@
+import path from 'node:path';
+
 import {
     resolvePackageManagerRunner,
     type PackageManagerRunner,
@@ -22,6 +24,7 @@ import {
 import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
 
 const kernelNodeTestLanes = ['kernel-fast', 'kernel-heavy'] as const;
+const wasm32GuardAddressSpaceReservationBytes = 8 * 1024 ** 3;
 const internalWasmKernelNodeTestLanes = new Set<NodeTestLane>(
     kernelNodeTestLanes,
 );
@@ -31,6 +34,11 @@ let nodeKernelHeavyProcessMemoryGuard: ProcessMemoryGuard | undefined;
 const getNodeKernelHeavyProcessMemoryGuard = (): ProcessMemoryGuard => {
     nodeKernelHeavyProcessMemoryGuard ??= createProcessMemoryGuard({
         insufficientFreeMemoryRunDescription: 'Node kernel heavy tests',
+        // V8 reserves an inaccessible 8 GiB guard mapping for wasm32 linear
+        // memory. Linux RLIMIT_AS counts that nonresident mapping, so the guard
+        // admits it separately while RLIMIT_DATA retains the allocation limit.
+        virtualAddressSpaceAllowanceBytes:
+            wasm32GuardAddressSpaceReservationBytes,
     });
 
     return nodeKernelHeavyProcessMemoryGuard;
@@ -91,6 +99,7 @@ export const buildNodeTestCommands = (
     input: {
         readonly lanes?: readonly NodeTestLane[];
         readonly packageManagerRunner?: PackageManagerRunner;
+        readonly runDirectoryPath?: string;
     } = {},
 ): readonly CommandInvocation[] => {
     const packageManagerRunner =
@@ -102,10 +111,24 @@ export const buildNodeTestCommands = (
     const guardCommandWhenHeavyLaneIsIncluded = (
         command: CommandInvocation,
         commandLanes: readonly NodeTestLane[],
-    ): CommandInvocation =>
-        commandLanes.includes('kernel-heavy')
-            ? getNodeKernelHeavyProcessMemoryGuard().guardCommand(command)
-            : command;
+    ): CommandInvocation => {
+        if (!commandLanes.includes('kernel-heavy')) {
+            return command;
+        }
+        const processMemoryGuard = getNodeKernelHeavyProcessMemoryGuard();
+        const guardedCommand = processMemoryGuard.guardCommand(command);
+
+        return input.runDirectoryPath === undefined
+            ? guardedCommand
+            : processMemoryGuard.addDiagnostics(
+                  guardedCommand,
+                  path.join(
+                      input.runDirectoryPath,
+                      'resources',
+                      `process-memory-guard-${commandLanes.join('-')}.jsonl`,
+                  ),
+              );
+    };
     const buildCommand = (lane: NodeTestLane): CommandInvocation => {
         const laneDefinition = nodeTestLaneDefinitions[lane];
 
@@ -114,6 +137,7 @@ export const buildNodeTestCommands = (
                 commandDescription: laneDefinition.commandDescription,
                 packageManagerRunner,
                 projectName: laneDefinition.projectName,
+                runDirectoryPath: input.runDirectoryPath,
             }),
             [lane],
         );
@@ -135,6 +159,7 @@ export const buildNodeTestCommands = (
                     projectNames: kernelNodeTestLanes.map(
                         (lane) => nodeTestLaneDefinitions[lane].projectName,
                     ),
+                    runDirectoryPath: input.runDirectoryPath,
                 }),
                 requestedKernelLanes,
             ),
@@ -167,17 +192,47 @@ const nodeTestScriptName = (lanes: readonly NodeTestLane[]): string => {
 
 const main = async (): Promise<void> => {
     const rawArguments = process.argv.slice(2);
-    const lanes = parseRequestedNodeTestLanes(rawArguments);
+    let resolvedLanes: readonly NodeTestLane[] | undefined;
+    let laneParsingError: Error | undefined;
+    try {
+        resolvedLanes = parseRequestedNodeTestLanes(rawArguments);
+    } catch (error) {
+        laneParsingError =
+            error instanceof Error
+                ? error
+                : Object.assign(
+                      new Error(
+                          'Node test lane parsing threw a non-Error value.',
+                      ),
+                      { cause: error },
+                  );
+    }
+    const resolveLanes = (): readonly NodeTestLane[] => {
+        if (laneParsingError !== undefined) {
+            throw laneParsingError;
+        }
+        if (resolvedLanes === undefined) {
+            throw new Error('Node test lane parsing produced no result.');
+        }
+        return resolvedLanes;
+    };
     await runWorkspaceBuildThenParallelCommands({
-        buildCommands: (packageManagerRunner) =>
-            buildNodeTestCommands({ lanes, packageManagerRunner }),
+        buildCommands: (packageManagerRunner, runDirectoryPath) =>
+            buildNodeTestCommands({
+                lanes: resolveLanes(),
+                packageManagerRunner,
+                runDirectoryPath,
+            }),
         commandLineArguments: rawArguments,
         extraGateCommands: () =>
             buildNodeTestExtraGateCommands({
-                lanes,
+                lanes: resolveLanes(),
             }),
-        lanes,
-        scriptName: nodeTestScriptName(lanes),
+        lanes: resolvedLanes ?? ['Node tests'],
+        scriptName:
+            resolvedLanes === undefined
+                ? 'test:node'
+                : nodeTestScriptName(resolvedLanes),
     });
 };
 

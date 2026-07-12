@@ -15,7 +15,7 @@ pub(super) struct VerifiedVssPublicMaterial {
     pub(super) statement_root: String,
     pub(super) proof_material_set_root: String,
     pub(super) participant_count: u64,
-    pub(super) target_rns_limb_count: u64,
+    pub(super) q_share_rns_limb_count: u64,
     pub(super) threshold_degree: u64,
     pub(super) ring_degree: u64,
 }
@@ -178,11 +178,7 @@ fn verify_vss_public_material_binding(
         accepted_public_matrix_seed_hash,
         "VSS share-linkage statement publicMatrixSeedHash",
     )?;
-    compare_required_string(
-        hash_at_path(&statement_verification, &["targetBasisHash"])?,
-        &crate::bgv::evaluator::top_k::canonical_target_basis_hash()?,
-        "VSS share-linkage statement targetBasisHash",
-    )?;
+    compare_complete_q_share_limb_count(&statement_verification, "VSS share-linkage statement")?;
     compare_required_string(
         hash_at_path(&statement_verification, &["coefficientCommitmentRoot"])?,
         hash_at_path(&coefficient_verification, &["coefficientCommitmentRoot"])?,
@@ -290,7 +286,7 @@ fn verify_vss_public_material_binding(
             &aggregate_threshold_verification,
             &["participantCount"],
         )?,
-        target_rns_limb_count: unsigned_at_path(&statement_verification, &["targetRnsLimbCount"])?,
+        q_share_rns_limb_count: unsigned_at_path(&statement_verification, &["qShareRnsLimbCount"])?,
         threshold_degree: unsigned_at_path(&statement_verification, &["thresholdDegree"])?,
         ring_degree: unsigned_at_path(&aggregate_threshold_verification, &["ringDegree"])?,
     })

@@ -5,8 +5,6 @@ pub(in super::super::super) fn same_secret_bridge_statement_set_object(
 ) -> serde_json::Value {
     let setup_context = &package["setupContext"];
     let coefficient_set = &package["vssPublicCoefficientCommitmentSet"];
-    let target_basis_hash =
-        crate::bgv::evaluator::top_k::canonical_target_basis_hash().expect("target basis hash");
     let public_matrix_seed_hash = package["commonRandomness"]["publicMatrixSeedHash"]
         .as_str()
         .expect("public matrix seed hash");
@@ -19,7 +17,6 @@ pub(in super::super::super) fn same_secret_bridge_statement_set_object(
             same_secret_bridge_statement_record(
                 package,
                 source_record,
-                &target_basis_hash,
                 source_trustee_roster_position,
             )
         })
@@ -32,18 +29,17 @@ pub(in super::super::super) fn same_secret_bridge_statement_set_object(
         "rosterHash": setup_context["rosterHash"],
         "setupParametersHash": setup_context["setupParametersHash"],
         "setupEpoch": setup_context["setupEpoch"],
-        "targetBasisHash": target_basis_hash,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "ringDegree": coefficient_set["ringDegree"],
         "participantCount": coefficient_set["participantCount"],
-        "targetRnsLimbCount": coefficient_set["rnsLimbCount"],
+        "qShareRnsLimbCount": coefficient_set["rnsLimbCount"],
         "thresholdDegree": coefficient_set["thresholdDegree"],
         "coefficientCommitmentRoot": coefficient_set["coefficientCommitmentRoot"],
         "vssCoefficientCommitmentRoot": package["vssCoefficientCommitments"]["vssCoefficientCommitmentRoot"],
         "integerSupport": SAME_SECRET_BRIDGE_INTEGER_SUPPORT,
         "signedRepresentativeConvention": SAME_SECRET_BRIDGE_SIGNED_REPRESENTATIVE_CONVENTION,
         "vssPublicCommitmentEncoding": VSS_PUBLIC_COMMITMENT_BINARY_FORMAT,
-        "targetBasisLimbOrder": SAME_SECRET_BRIDGE_TARGET_BASIS_LIMB_ORDER,
+        "qShareLimbOrder": SAME_SECRET_BRIDGE_Q_SHARE_LIMB_ORDER,
         "statementRecords": statement_records,
     });
     statement_set["sameSecretBridgeStatementSetRoot"] = serde_json::json!(
@@ -57,7 +53,6 @@ pub(in super::super::super) fn same_secret_bridge_statement_set_object(
 pub(super) fn same_secret_bridge_statement_record(
     package: &serde_json::Value,
     source_coefficient_record: &serde_json::Value,
-    target_basis_hash: &str,
     source_trustee_roster_position: usize,
 ) -> serde_json::Value {
     let setup_context = &package["setupContext"];
@@ -118,7 +113,6 @@ pub(super) fn same_secret_bridge_statement_record(
         "rosterHash": setup_context["rosterHash"],
         "setupParametersHash": setup_context["setupParametersHash"],
         "setupEpoch": setup_context["setupEpoch"],
-        "targetBasisHash": target_basis_hash,
         "publicMatrixSeedHash": package["commonRandomness"]["publicMatrixSeedHash"],
         "ringDegree": package["vssPublicCoefficientCommitmentSet"]["ringDegree"],
         "trusteeIdentity": source_trustee_identity,
@@ -127,7 +121,7 @@ pub(super) fn same_secret_bridge_statement_record(
         "integerSupport": SAME_SECRET_BRIDGE_INTEGER_SUPPORT,
         "signedRepresentativeConvention": SAME_SECRET_BRIDGE_SIGNED_REPRESENTATIVE_CONVENTION,
         "vssPublicCommitmentEncoding": VSS_PUBLIC_COMMITMENT_BINARY_FORMAT,
-        "targetBasisLimbOrder": SAME_SECRET_BRIDGE_TARGET_BASIS_LIMB_ORDER,
+        "qShareLimbOrder": SAME_SECRET_BRIDGE_Q_SHARE_LIMB_ORDER,
         "sourceConstantCoefficientCommitments": source_constant_commitments,
         "targetConstantCoefficientCommitmentRoots": target_constant_roots,
         "targetConstantCoefficientCommitments": target_constant_commitments,
@@ -161,11 +155,10 @@ pub(in super::super::super) fn same_secret_bridge_proof_material_set_object(
         "rosterHash": statement_set["rosterHash"],
         "setupParametersHash": statement_set["setupParametersHash"],
         "setupEpoch": statement_set["setupEpoch"],
-        "targetBasisHash": statement_set["targetBasisHash"],
         "publicMatrixSeedHash": statement_set["publicMatrixSeedHash"],
         "ringDegree": statement_set["ringDegree"],
         "participantCount": statement_set["participantCount"],
-        "targetRnsLimbCount": statement_set["targetRnsLimbCount"],
+        "qShareRnsLimbCount": statement_set["qShareRnsLimbCount"],
         "thresholdDegree": statement_set["thresholdDegree"],
         "coefficientCommitmentRoot": statement_set["coefficientCommitmentRoot"],
         "vssCoefficientCommitmentRoot": statement_set["vssCoefficientCommitmentRoot"],
@@ -273,7 +266,7 @@ pub(super) fn same_secret_bridge_proof_generation_request(
     let target_commitments = statement_record["targetConstantCoefficientCommitments"]
         .as_array()
         .expect("bridge target commitments");
-    let target_rns_primes = target_roots
+    let bridge_rns_primes = target_roots
         .iter()
         .map(|root_record| root_record["rnsPrime"].clone())
         .collect::<Vec<_>>();
@@ -354,10 +347,10 @@ pub(super) fn same_secret_bridge_proof_generation_request(
         },
         "sameSecretBridge": {
             "publicMatrixSeedHash": statement_record["publicMatrixSeedHash"],
+            "setupParametersHash": statement_record["setupParametersHash"],
             "sourceTrusteeIdentity": statement_record["trusteeIdentity"],
             "sourceTrusteeRosterPosition": statement_record["trusteeRosterPosition"],
-            "targetBasisHash": statement_record["targetBasisHash"],
-            "targetRnsPrimes": target_rns_primes,
+            "bridgeRnsPrimes": bridge_rns_primes,
             "targetConstantCommitmentRoots": target_constant_commitment_roots,
             "targetConstantCommitments": target_constant_commitments,
         },

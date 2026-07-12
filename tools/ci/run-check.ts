@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { performance } from 'node:perf_hooks';
 
 import {
@@ -10,6 +11,7 @@ import {
     type CheckRunTimingDetails,
     type CheckTimingHistory,
 } from './check-progress-reporter.js';
+import { createHeavyTestProgressReporter } from './heavy-test-progress.js';
 import {
     createLocalRunLog,
     currentProcessExitCode,
@@ -23,6 +25,7 @@ import {
     createPackageManagerCommand,
     runCommandsInSeries,
     type CommandInvocation,
+    type CommandRunObserver,
 } from './run-command.js';
 import { buildVitestProjectCommand } from './run-vitest-lanes.js';
 import { cargoTestArgumentsForRustKernelFast } from './rust-kernel-test-arguments.js';
@@ -64,8 +67,56 @@ export type ParsedCheckArguments = {
     readonly progressMode: CheckProgressMode;
 };
 
+const combineCommandRunObservers = (
+    observers: readonly CommandRunObserver[],
+): CommandRunObserver => ({
+    onCommandExit: (event): void => {
+        for (const observer of observers) observer.onCommandExit?.(event);
+    },
+    onCommandOutput: (event): void => {
+        for (const observer of observers) observer.onCommandOutput?.(event);
+    },
+    onCommandStart: (event): void => {
+        for (const observer of observers) observer.onCommandStart?.(event);
+    },
+});
+
+const scopeCommandRunObserver = (
+    commandDescription: string,
+    observer: CommandRunObserver,
+): CommandRunObserver => ({
+    onCommandExit: (event): void => {
+        if (event.invocation.description === commandDescription) {
+            observer.onCommandExit?.(event);
+        }
+    },
+    onCommandOutput: (event): void => {
+        if (event.invocation.description === commandDescription) {
+            observer.onCommandOutput?.(event);
+        }
+    },
+    onCommandStart: (event): void => {
+        if (event.invocation.description === commandDescription) {
+            observer.onCommandStart?.(event);
+        }
+    },
+});
+
 const checkUsage = 'Usage: run-check.ts [--progress=auto|always|never].';
 const rustKernelLaneName = 'Rust kernel (fmt, clippy, fast test)';
+const checkRunLaneNames = [
+    'Build workspace packages',
+    'Type-check workspace',
+    'Smoke npm package',
+    'Lint',
+    rustKernelLaneName,
+    'Verify public package policy',
+    'Verify test lane coverage',
+    'Check package boundaries',
+    'Knip unused-code scan',
+    'Node tests (fast)',
+    'Node tests (kernel fast)',
+] as const;
 const checkLaneBaselineDurationMilliseconds = {
     'Build workspace packages': 20_000,
     'Check package boundaries': 1_000,
@@ -150,6 +201,7 @@ const createCargoCommand = (
     env: {
         ...process.env,
         CARGO_INCREMENTAL: '0',
+        RUST_BACKTRACE: '1',
     },
     logFileSlug,
 });
@@ -423,10 +475,17 @@ const runParallelLane = async (
     runLog: ActiveLocalRunLog | undefined,
     abortController: AbortController,
     reporter: CheckProgressReporter,
+    additionalObserver?: CommandRunObserver,
 ): Promise<ValidationLaneResult> => {
     const startedAtMilliseconds = performance.now();
     const exitCode = await runCommandsInSeries(lane.commands, {
-        observer: reporter.createCommandObserver(lane.name),
+        observer:
+            additionalObserver === undefined
+                ? reporter.createCommandObserver(lane.name)
+                : combineCommandRunObservers([
+                      reporter.createCommandObserver(lane.name),
+                      additionalObserver,
+                  ]),
         outputMode: 'capture',
         runLog,
         signal: abortController.signal,
@@ -458,7 +517,11 @@ const runParallelLane = async (
 
     // This lane failed on its own. Abort so every other still-running lane is
     // killed instead of grinding to completion behind a known failure.
-    abortController.abort();
+    abortController.abort({
+        classification: 'sibling-abort',
+        initiator: lane.name,
+        objectVersion: 'sealed-lattice-command-abort-reason-v1',
+    });
     reporter.recordLaneResult(lane.name, 'failed');
 
     return {
@@ -573,27 +636,42 @@ const overallExitCode = (results: readonly ValidationLaneResult[]): number => {
 
 const main = async (): Promise<void> => {
     const rawArguments = process.argv.slice(2);
-    const parsedArguments = parseCheckArguments(rawArguments);
-    const packageManagerRunner = resolvePackageManagerRunner();
-    const gatingLanes = buildCheckGatingLanes(packageManagerRunner);
-    const parallelLanes = buildCheckParallelLanes(packageManagerRunner);
-    const validationLanes = [...gatingLanes, ...parallelLanes];
-    const timingHistory = await readPreviousCheckTimingHistory();
-    const reporter = new CheckProgressReporter({
-        history: timingHistory,
-        lanes: buildProgressLanePlans(validationLanes, timingHistory),
-        redrawEnabled: redrawEnabledForProgressMode(
-            parsedArguments.progressMode,
-        ),
-    });
     const runLog = await createLocalRunLog({
         commandLineArguments: rawArguments,
-        lanes: validationLanes.map((lane) => lane.name),
+        lanes: checkRunLaneNames,
         scriptName: 'check',
     });
     let timingDetails: CheckRunTimingDetails | undefined;
+    let reporter: CheckProgressReporter | undefined;
+    let rustTestProgressReporter:
+        | ReturnType<typeof createHeavyTestProgressReporter>
+        | undefined;
+    let executionError: unknown;
+    let logFinishingError: unknown;
 
     try {
+        const parsedArguments = parseCheckArguments(rawArguments);
+        const packageManagerRunner = resolvePackageManagerRunner();
+        const gatingLanes = buildCheckGatingLanes(packageManagerRunner);
+        const parallelLanes = buildCheckParallelLanes(packageManagerRunner);
+        const validationLanes = [...gatingLanes, ...parallelLanes];
+        const timingHistory = await readPreviousCheckTimingHistory();
+        reporter = new CheckProgressReporter({
+            history: timingHistory,
+            lanes: buildProgressLanePlans(validationLanes, timingHistory),
+            redrawEnabled: redrawEnabledForProgressMode(
+                parsedArguments.progressMode,
+            ),
+        });
+        rustTestProgressReporter = createHeavyTestProgressReporter({
+            eventFilePath: path.join(
+                runLog.runDirectoryPath,
+                'tests',
+                'rust-kernel-fast.jsonl',
+            ),
+            label: 'rust-kernel-fast',
+            threadCount: 1,
+        });
         const results: ValidationLaneResult[] = [];
         reporter.start();
 
@@ -616,9 +694,22 @@ const main = async (): Promise<void> => {
         }
 
         const abortController = new AbortController();
+        const activeReporter = reporter;
+        const rustTestObserver = scopeCommandRunObserver(
+            'cargo test (optimized test profile, fast)',
+            rustTestProgressReporter.observer,
+        );
         const parallelResults = await Promise.all(
             parallelLanes.map((lane) =>
-                runParallelLane(lane, runLog, abortController, reporter),
+                runParallelLane(
+                    lane,
+                    runLog,
+                    abortController,
+                    activeReporter,
+                    lane.name === rustKernelLaneName
+                        ? rustTestObserver
+                        : undefined,
+                ),
             ),
         );
         results.push(
@@ -650,12 +741,40 @@ const main = async (): Promise<void> => {
             reporter.failureDetails(),
         );
         process.exitCode = overallExitCode(results);
+    } catch (error) {
+        executionError = error;
+        process.exitCode = currentProcessExitCode() || 1;
     } finally {
-        reporter.stop();
-        await runLog?.finish({
-            details: timingDetails,
-            exitCode: currentProcessExitCode(),
-        });
+        reporter?.stop();
+        rustTestProgressReporter?.stop();
+        try {
+            await runLog.finish({
+                details: timingDetails,
+                ...(executionError === undefined
+                    ? {}
+                    : { error: executionError }),
+                exitCode: currentProcessExitCode(),
+            });
+        } catch (loggingError) {
+            logFinishingError = loggingError;
+            if (executionError !== undefined) {
+                process.stderr.write(
+                    `Failed to finish check diagnostics: ${String(loggingError)}\n`,
+                );
+            }
+        }
+    }
+
+    const finalError = executionError ?? logFinishingError;
+    if (finalError !== undefined) {
+        throw finalError instanceof Error
+            ? finalError
+            : Object.assign(
+                  new Error('Check runner threw a non-Error value.'),
+                  {
+                      cause: finalError,
+                  },
+              );
     }
 };
 

@@ -18,22 +18,31 @@ const parseBrowserTestArguments = (
 
 const buildBrowserTestCommands = (
     packageManagerRunner: PackageManagerRunner,
+    runDirectoryPath?: string,
 ): readonly CommandInvocation[] =>
-    (['desktop', 'mobile'] as const).map((lane) => {
+    (['desktop', 'mobile'] as const).flatMap((lane) => {
         const laneDefinition = browserTestLaneDefinitions[lane];
 
-        return buildVitestProjectCommand({
-            commandDescription: `Run ${lane} browser tests`,
-            packageManagerRunner,
-            projectName: laneDefinition.projectName,
-        });
+        return laneDefinition.instanceProjectNames.map((instanceProjectName) =>
+            buildVitestProjectCommand({
+                commandDescription: `Run ${lane} browser tests (${instanceProjectName})`,
+                packageManagerRunner,
+                projectName: instanceProjectName,
+                runDirectoryPath,
+            }),
+        );
     });
 
 const main = async (): Promise<void> => {
     const rawArguments = process.argv.slice(2);
-    parseBrowserTestArguments(rawArguments);
     await runWorkspaceBuildThenParallelCommands({
-        buildCommands: buildBrowserTestCommands,
+        buildCommands: (packageManagerRunner, runDirectoryPath) => {
+            parseBrowserTestArguments(rawArguments);
+            return buildBrowserTestCommands(
+                packageManagerRunner,
+                runDirectoryPath,
+            );
+        },
         commandLineArguments: rawArguments,
         lanes: ['desktop', 'mobile'],
         scriptName: 'test:browser',

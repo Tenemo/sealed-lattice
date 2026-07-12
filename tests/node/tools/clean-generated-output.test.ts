@@ -65,6 +65,11 @@ describe('generated-output cleanup', () => {
             workspaceRootPath,
             path.resolve(workspaceRootPath, '..', 'outside'),
             path.resolve(workspaceRootPath, '.turbo', '..', 'README.md'),
+            path.join(
+                workspaceRootPath,
+                'logs',
+                '2026-07-12T12-00-00.000Z-run',
+            ),
             path.join(workspaceRootPath, 'unlisted-generated-output'),
         ]) {
             expect(() =>
@@ -78,7 +83,6 @@ describe('generated-output cleanup', () => {
             path.join(workspaceRootPath, '.turbo'),
             path.join(workspaceRootPath, 'target'),
             path.join(workspaceRootPath, 'fuzz', 'target'),
-            path.join(workspaceRootPath, 'logs', '2026-07-12'),
             path.join(
                 workspaceRootPath,
                 'temp',
@@ -95,7 +99,7 @@ describe('generated-output cleanup', () => {
         }
     });
 
-    it('selects complete build roots and only expired logs and checkpoints', async () => {
+    it('selects complete build roots and only expired checkpoints', async () => {
         const workspaceRootPath = await createTemporaryWorkspace();
         const rustBuildFilePath = path.join(
             workspaceRootPath,
@@ -103,18 +107,7 @@ describe('generated-output cleanup', () => {
             'debug',
             'kernel.bin',
         );
-        const oldLogRunPath = path.join(
-            workspaceRootPath,
-            'logs',
-            '2025-01-01',
-            'old-run',
-        );
-        const freshLogRunPath = path.join(
-            workspaceRootPath,
-            'logs',
-            '2026-07-12',
-            'fresh-run',
-        );
+        const oldLogRunPath = path.join(workspaceRootPath, 'logs', 'old-run');
         const oldCheckpointPath = path.join(
             workspaceRootPath,
             'temp',
@@ -132,13 +125,11 @@ describe('generated-output cleanup', () => {
         await Promise.all([
             mkdir(path.dirname(rustBuildFilePath), { recursive: true }),
             mkdir(oldLogRunPath, { recursive: true }),
-            mkdir(freshLogRunPath, { recursive: true }),
             mkdir(path.dirname(oldCheckpointPath), { recursive: true }),
         ]);
         await Promise.all([
             writeFile(rustBuildFilePath, 'build'),
             writeFile(path.join(oldLogRunPath, 'combined.log'), 'old'),
-            writeFile(path.join(freshLogRunPath, 'combined.log'), 'fresh'),
             writeFile(oldCheckpointPath, 'old'),
             writeFile(freshCheckpointPath, 'fresh'),
         ]);
@@ -153,7 +144,6 @@ describe('generated-output cleanup', () => {
             workspaceRootPath,
         });
         expect(candidates.map((candidate) => candidate.relativePath)).toEqual([
-            'logs/2025-01-01',
             'target',
             'temp/test-checkpoints/proofs/old.bin',
         ]);
@@ -173,9 +163,8 @@ describe('generated-output cleanup', () => {
         await expect(
             access(path.join(workspaceRootPath, 'target')),
         ).rejects.toThrow();
-        await expect(access(oldLogRunPath)).rejects.toThrow();
+        await expect(access(oldLogRunPath)).resolves.toBeUndefined();
         await expect(access(oldCheckpointPath)).rejects.toThrow();
-        await expect(access(freshLogRunPath)).resolves.toBeUndefined();
         await expect(access(freshCheckpointPath)).resolves.toBeUndefined();
     });
 

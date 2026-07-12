@@ -50,9 +50,8 @@ describe('check progress reporter state', () => {
                 description: 'First command',
             },
             logFiles: {
+                commandId: 'first-command',
                 combinedPath: 'first.log',
-                stderrPath: 'first.stderr.log',
-                stdoutPath: 'first.stdout.log',
             },
             startedAtMilliseconds: nowMilliseconds,
         });
@@ -366,9 +365,8 @@ describe('check progress reporter state', () => {
         observer.onCommandStart?.({
             invocation: fmtInvocation,
             logFiles: {
+                commandId: 'cargo-fmt',
                 combinedPath: 'cargo-fmt.log',
-                stderrPath: 'cargo-fmt.stderr.log',
-                stdoutPath: 'cargo-fmt.stdout.log',
             },
             startedAtMilliseconds: nowMilliseconds,
         });
