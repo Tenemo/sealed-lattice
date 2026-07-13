@@ -10,11 +10,11 @@ use crate::{
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
 };
 
-const LOGICAL_SLOT_GENERATOR: usize = 3;
+pub(crate) const LOGICAL_SLOT_GENERATOR: usize = 3;
+
 static LOGICAL_TO_NATURAL_TRANSFORM_INDEX: OnceLock<Vec<usize>> = OnceLock::new();
 
 pub(crate) struct EncodedBatchPlaintext {
-    pub(crate) slots: Vec<u64>,
     pub(crate) coefficients_mod_plaintext: Vec<u64>,
     pub(crate) polynomial: RnsPolynomial,
 }
@@ -26,7 +26,7 @@ pub(crate) fn encode_batch_plaintext_slots(
     supplied_slots: &[u64],
     target_level: usize,
 ) -> CanonicalResult<EncodedBatchPlaintext> {
-    let (padded_slots, coefficients_mod_plaintext) =
+    let coefficients_mod_plaintext =
         encode_logical_slots_to_plaintext_coefficients(supplied_slots)?;
     let polynomial = lift_plaintext_coefficients_to_basis(
         &coefficients_mod_plaintext,
@@ -36,7 +36,6 @@ pub(crate) fn encode_batch_plaintext_slots(
     )?;
 
     Ok(EncodedBatchPlaintext {
-        slots: padded_slots,
         coefficients_mod_plaintext,
         polynomial,
     })
@@ -44,7 +43,7 @@ pub(crate) fn encode_batch_plaintext_slots(
 
 pub(super) fn encode_logical_slots_to_plaintext_coefficients(
     supplied_slots: &[u64],
-) -> CanonicalResult<(Vec<u64>, Vec<u64>)> {
+) -> CanonicalResult<Vec<u64>> {
     if supplied_slots.len() > POLYNOMIAL_DEGREE {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
@@ -62,7 +61,7 @@ pub(super) fn encode_logical_slots_to_plaintext_coefficients(
     let mut coefficients_mod_plaintext = logical_slots_to_natural_transform_order(&padded_slots)?;
     inverse_negacyclic_ntt_in_place(&mut coefficients_mod_plaintext, PLAINTEXT_MODULUS)?;
 
-    Ok((padded_slots, coefficients_mod_plaintext))
+    Ok(coefficients_mod_plaintext)
 }
 
 pub(super) fn decode_plaintext_coefficients_to_logical_slots(
@@ -104,11 +103,12 @@ fn logical_to_natural_transform_indexes() -> &'static [usize] {
     LOGICAL_TO_NATURAL_TRANSFORM_INDEX.get_or_init(|| {
         let ring_order = 2 * POLYNOMIAL_DEGREE;
         let positive_slot_count = POLYNOMIAL_DEGREE / 2;
+        let logical_slot_generator = LOGICAL_SLOT_GENERATOR;
         let mut positive_exponents = Vec::with_capacity(positive_slot_count);
         let mut exponent = 1_usize;
         for _ in 0..positive_slot_count {
             positive_exponents.push(exponent);
-            exponent = exponent * LOGICAL_SLOT_GENERATOR % ring_order;
+            exponent = exponent * logical_slot_generator % ring_order;
         }
 
         positive_exponents
@@ -166,16 +166,15 @@ pub(crate) fn decode_batch_plaintext_polynomial(
 mod tests {
     use super::{
         decode_batch_plaintext_polynomial, decode_plaintext_coefficients_to_logical_slots,
-        encode_batch_plaintext_slots, logical_slot_exponent,
-        logical_to_natural_transform_indexes,
+        encode_batch_plaintext_slots, logical_slot_exponent, logical_to_natural_transform_indexes,
     };
     use crate::{
         bgv::{
             base_conversion::lift_plaintext_coefficients_to_basis,
             ntt::{forward_negacyclic_ntt, inverse_negacyclic_ntt},
             parameters::{
-                BgvBasisKind, DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE,
-                ROOT_PARAMETERS, bgv_parameters_hash,
+                BgvBasisKind, DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, ROOT_PARAMETERS,
+                bgv_parameters_hash,
             },
         },
         encoding::CanonicalErrorCode,
@@ -264,8 +263,7 @@ mod tests {
     fn encoder_rejects_the_previous_natural_index_slot_assumption() {
         let logical_slot_index = 2;
         let slot_exponent = logical_slot_exponent(logical_slot_index);
-        let natural_transform_index =
-            logical_to_natural_transform_indexes()[logical_slot_index];
+        let natural_transform_index = logical_to_natural_transform_indexes()[logical_slot_index];
         assert_eq!(slot_exponent, 9);
         assert_eq!(natural_transform_index, 4);
         let evaluation_point = modular_power(
@@ -286,10 +284,7 @@ mod tests {
             previous_natural_order_coefficients,
         );
         assert_eq!(
-            evaluate_polynomial(
-                &encoded.coefficients_mod_plaintext,
-                evaluation_point,
-            ),
+            evaluate_polynomial(&encoded.coefficients_mod_plaintext, evaluation_point,),
             42_424,
         );
 
@@ -308,10 +303,7 @@ mod tests {
             42_424,
         );
         assert_eq!(
-            evaluate_polynomial(
-                &previous_natural_order_coefficients,
-                evaluation_point,
-            ),
+            evaluate_polynomial(&previous_natural_order_coefficients, evaluation_point,),
             0,
         );
     }

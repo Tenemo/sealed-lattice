@@ -1,5 +1,3 @@
-import type { ProtocolHash } from '@sealed-lattice/types';
-
 export { decodeFixedHex } from '../web-crypto.js';
 
 import { protocolHashPattern, type JsonRecord } from './constants-and-types.js';
@@ -69,36 +67,4 @@ export const stringField = (
     }
 
     return fieldValue;
-};
-
-export const numberField = (value: JsonRecord, fieldName: string): number => {
-    const fieldValue = value[fieldName];
-    if (typeof fieldValue !== 'number') {
-        throw new TypeError(`${fieldName} must be a number.`);
-    }
-
-    return fieldValue;
-};
-
-export const protocolHashArrayField = (
-    value: JsonRecord,
-    fieldName: string,
-): ProtocolHash[] => {
-    const fieldValue = value[fieldName];
-    if (!Array.isArray(fieldValue)) {
-        throw new TypeError(
-            `${fieldName} must be an array of protocol hashes.`,
-        );
-    }
-
-    return fieldValue.map((item, itemIndex) => {
-        if (typeof item !== 'string') {
-            throw new TypeError(
-                `${fieldName}.${String(itemIndex)} must be a protocol hash.`,
-            );
-        }
-        assertProtocolHash(item, `${fieldName}.${String(itemIndex)}`);
-
-        return item;
-    });
 };

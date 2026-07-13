@@ -20,7 +20,7 @@ const deviceWrappingNonceByteLength = 12;
 const deviceWrappingTagByteLength = 16;
 const foundationHashByteLength = 64;
 const handleByteLength = 4;
-const maximumCommandByteLength = 2_048;
+const maximumCommandByteLength = 1_572_864;
 const maximumWrappedStorageRootByteLength = 492;
 const mutationIdentifierByteLength = 32;
 const recoveryChecksumByteLength = 16;
@@ -74,6 +74,19 @@ type CommandFailureContext =
     | 'recoveryConfirmation'
     | 'recoveryImport'
     | 'runtime';
+
+type TerminalSetupCheckpointKernelCommandRunner = Readonly<{
+    run(command: number, input: Uint8Array): Promise<Uint8Array<ArrayBuffer>>;
+    sampleEntropy(
+        byteLength: number,
+        label: string,
+    ): Promise<Uint8Array<ArrayBuffer>>;
+}>;
+
+const terminalSetupCheckpointKernelCommandRunners = new WeakMap<
+    BrowserActionStorageWorkerKernel,
+    TerminalSetupCheckpointKernelCommandRunner
+>();
 
 const bytesEqual = (left: Uint8Array, right: Uint8Array): boolean => {
     if (left.byteLength !== right.byteLength) {
@@ -262,6 +275,44 @@ class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorker
         confirmedChecksum: Uint8Array;
     }): Promise<void> {
         return this.#enqueue(() => this.#confirmRecovery(input));
+    }
+
+    public runTerminalSetupCheckpointCommand(
+        command: number,
+        input: Uint8Array,
+    ): Promise<Uint8Array<ArrayBuffer>> {
+        return this.#enqueue(() => {
+            if (!(input instanceof Uint8Array)) {
+                throw new BrowserActionStorageCustodyError(
+                    'InvalidInput',
+                    'Checkpoint command input must be bytes.',
+                );
+            }
+            const activeLease = this.#requireActiveLease();
+
+            return this.#runCommand(
+                command,
+                this.#leaseCommandInput(activeLease, input),
+                'run an authenticated checkpoint command',
+                'runtime',
+            );
+        });
+    }
+
+    public sampleTerminalSetupCheckpointEntropy(
+        byteLength: number,
+        label: string,
+    ): Promise<Uint8Array<ArrayBuffer>> {
+        return this.#enqueue(() => {
+            if (!Number.isSafeInteger(byteLength) || byteLength <= 0) {
+                throw new BrowserActionStorageCustodyError(
+                    'InvalidInput',
+                    'Checkpoint entropy byte length must be a positive safe integer.',
+                );
+            }
+
+            return this.#randomBytes(byteLength, label);
+        });
     }
 
     async #createAndStage(
@@ -1233,10 +1284,24 @@ const createWorkerKernelFromLoadedKernel = (input: {
         );
     }
 
-    return new WasmBrowserActionStorageWorkerKernel({
+    const workerKernel = new WasmBrowserActionStorageWorkerKernel({
         context,
         cryptoProvider: resolveWorkerCryptoProvider(input.cryptoProvider),
     });
+    terminalSetupCheckpointKernelCommandRunners.set(workerKernel, {
+        run: (command, commandInput) =>
+            workerKernel.runTerminalSetupCheckpointCommand(
+                command,
+                commandInput,
+            ),
+        sampleEntropy: (byteLength, label) =>
+            workerKernel.sampleTerminalSetupCheckpointEntropy(
+                byteLength,
+                label,
+            ),
+    });
+
+    return workerKernel;
 };
 
 const isKernelPromise = (
@@ -1264,9 +1329,59 @@ export const createWasmBrowserActionStorageWorkerKernel = (input: {
         });
     }
 
-    return new DeferredWasmBrowserActionStorageWorkerKernel(
-        Promise.resolve(input.kernel).then((kernel) =>
-            createWorkerKernelFromLoadedKernel({ cryptoProvider, kernel }),
-        ),
+    const resolvedWorkerKernel = Promise.resolve(input.kernel).then((kernel) =>
+        createWorkerKernelFromLoadedKernel({ cryptoProvider, kernel }),
     );
+    const deferredWorkerKernel =
+        new DeferredWasmBrowserActionStorageWorkerKernel(resolvedWorkerKernel);
+    terminalSetupCheckpointKernelCommandRunners.set(deferredWorkerKernel, {
+        run: async (command, commandInput) =>
+            runTerminalSetupCheckpointKernelCommand(
+                await resolvedWorkerKernel,
+                command,
+                commandInput,
+            ),
+        sampleEntropy: async (byteLength, label) =>
+            sampleTerminalSetupCheckpointEntropy(
+                await resolvedWorkerKernel,
+                byteLength,
+                label,
+            ),
+    });
+
+    return deferredWorkerKernel;
+};
+
+const runTerminalSetupCheckpointKernelCommand = async (
+    workerKernel: BrowserActionStorageWorkerKernel,
+    command: number,
+    input: Uint8Array,
+): Promise<Uint8Array<ArrayBuffer>> => {
+    const runner =
+        terminalSetupCheckpointKernelCommandRunners.get(workerKernel);
+    if (runner === undefined) {
+        throw new BrowserActionStorageCustodyError(
+            'InvalidInput',
+            'The action storage worker does not belong to this WASM runtime.',
+        );
+    }
+
+    return runner.run(command, input);
+};
+
+const sampleTerminalSetupCheckpointEntropy = async (
+    workerKernel: BrowserActionStorageWorkerKernel,
+    byteLength: number,
+    label: string,
+): Promise<Uint8Array<ArrayBuffer>> => {
+    const runner =
+        terminalSetupCheckpointKernelCommandRunners.get(workerKernel);
+    if (runner === undefined) {
+        throw new BrowserActionStorageCustodyError(
+            'InvalidInput',
+            'The action storage worker does not belong to this WASM runtime.',
+        );
+    }
+
+    return runner.sampleEntropy(byteLength, label);
 };

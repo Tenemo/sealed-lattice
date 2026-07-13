@@ -9,7 +9,7 @@ const SAME_SECRET_BRIDGE_PROOF_MATERIAL_SET_FIELD: &str = "sameSecretBridgeProof
 
 pub(super) enum SameSecretBridgeVerification {
     Verified(VerifiedSameSecretBridgeMaterial),
-    Refused(Value),
+    Refused(Refusals),
 }
 
 #[derive(Clone)]
@@ -198,7 +198,6 @@ pub(in crate::bgv::setup) fn verified_same_secret_bridge_material_from_package(
             )
         })?;
     let public_matrix_seed_hash = value_string(statement_set, "publicMatrixSeedHash")?;
-    let setup_parameters_hash = value_string(statement_set, "setupParametersHash")?;
     let statement_records = array_value(statement_set, "statementRecords")?;
     let proof_records = array_value(proof_material_set, "proofRecords")?;
     if proof_records.len() != statement_records.len() {
@@ -227,7 +226,6 @@ pub(in crate::bgv::setup) fn verified_same_secret_bridge_material_from_package(
                 coefficient_commitment_set,
                 &trustee_identity,
                 trustee_roster_position as usize,
-                public_matrix_seed_hash,
                 q_share_rns_limb_count,
                 threshold_degree,
                 ring_degree,
@@ -284,7 +282,6 @@ pub(in crate::bgv::setup) fn verified_same_secret_bridge_material_from_package(
                 public_matrix_seed_hash: public_matrix_seed_hash.to_string(),
                 source_trustee_identity: trustee_identity,
                 source_trustee_roster_position: trustee_roster_position,
-                setup_parameters_hash: setup_parameters_hash.to_string(),
                 bridge_rns_primes,
                 target_constant_commitment_roots,
                 target_constant_commitments,
@@ -345,11 +342,11 @@ fn same_secret_bridge_refusal(
     reason_code: &'static str,
     message: impl Into<String>,
     object_path: impl Into<String>,
-) -> CanonicalResult<Value> {
-    verification_response(
+) -> CanonicalResult<Refusals> {
+    Ok(setup_refusals(
         Vec::new(),
         vec![Refusal::new(reason_code, message, object_path)],
-    )
+    ))
 }
 
 #[cfg(test)]
@@ -371,20 +368,19 @@ mod tests {
         .expect("complete bridge refusal")
         .refusal_for_test("complete bridge evidence must refuse");
 
-        assert_eq!(response["isValid"], json!(false));
         assert_eq!(
-            response["refusedObjects"][0]["reasonCode"],
-            json!("sameSecretBridgeMalformed")
+            response.first().map(|refusal| refusal.reason_code),
+            Some("sameSecretBridgeMalformed")
         );
         Ok(())
     }
 
     trait SameSecretBridgeVerificationTestExt {
-        fn refusal_for_test(self, message: &str) -> Value;
+        fn refusal_for_test(self, message: &str) -> Refusals;
     }
 
     impl SameSecretBridgeVerificationTestExt for SameSecretBridgeVerification {
-        fn refusal_for_test(self, message: &str) -> Value {
+        fn refusal_for_test(self, message: &str) -> Refusals {
             match self {
                 SameSecretBridgeVerification::Refused(response) => response,
                 SameSecretBridgeVerification::Verified(_) => {

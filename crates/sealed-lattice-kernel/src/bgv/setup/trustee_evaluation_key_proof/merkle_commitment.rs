@@ -226,13 +226,7 @@ pub(super) fn verify_merkle_batch(
     sorted_unique_leaves: &[(usize, MerkleDigest)],
     opening: &BatchedMerkleOpening,
 ) -> bool {
-    verify_merkle_batch_with_node_domain(
-        root,
-        depth,
-        sorted_unique_leaves,
-        opening,
-        NODE_DOMAIN,
-    )
+    verify_merkle_batch_with_node_domain(root, depth, sorted_unique_leaves, opening, NODE_DOMAIN)
 }
 
 pub(in crate::bgv::setup) fn verify_merkle_batch_with_node_domain(

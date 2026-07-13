@@ -4,11 +4,11 @@ fn chunk_leaf(index: u64, chunk: &[u8]) -> [u8; 64] {
     let mut index_bytes = Vec::new();
     append_varuint(&mut index_bytes, index);
 
-    hash512("transcript-core/chunk-leaf", &[&index_bytes, chunk])
+    hash_framed_parts_512("transcript-core/chunk-leaf", &[&index_bytes, chunk])
 }
 
 fn chunk_node(left: &[u8], right: &[u8]) -> [u8; 64] {
-    hash512("transcript-core/chunk-node", &[left, right])
+    hash_framed_parts_512("transcript-core/chunk-node", &[left, right])
 }
 
 pub fn chunk_root(input: &[u8], chunk_size: usize) -> CanonicalResult<String> {
@@ -26,7 +26,10 @@ pub fn chunk_root(input: &[u8], chunk_size: usize) -> CanonicalResult<String> {
         .collect();
 
     if leaves.is_empty() {
-        leaves.push(hash512("transcript-core/chunk-empty", &[]));
+        leaves.push(hash_framed_parts_512(
+            "transcript-core/chunk-empty",
+            &[],
+        ));
     }
 
     while leaves.len() > 1 {

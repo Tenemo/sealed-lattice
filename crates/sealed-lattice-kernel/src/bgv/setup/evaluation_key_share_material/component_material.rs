@@ -1,6 +1,4 @@
 use super::*;
-#[cfg(test)]
-use std::collections::BTreeSet;
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::io::{BufWriter, Write};
@@ -30,39 +28,21 @@ pub(in crate::bgv::setup) fn evaluation_key_share_component_vector_root(
     }))
 }
 
-fn verified_evaluation_key_share_component_material_chunks()
--> &'static Mutex<BTreeMap<String, VerifiedEvaluationKeyShareComponentMaterialChunkStoreEntry>> {
-    VERIFIED_EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_CHUNKS
-        .get_or_init(|| Mutex::new(BTreeMap::new()))
-}
-
 fn stored_verified_evaluation_key_share_component_material_chunks(
+    accepted_setup_session: &crate::bgv::setup::AcceptedSetupProofBindingSession,
     material_root: &str,
     proof_family: &str,
 ) -> CanonicalResult<Vec<Vec<u8>>> {
-    let stored_chunks = verified_evaluation_key_share_component_material_chunks()
-        .lock()
-        .map_err(|_| {
-            invalid_evaluation_key_share_material(
-                "verified evaluation-key component material store is unavailable",
-            )
-        })?;
-    let store_entry = stored_chunks.get(material_root).cloned().ok_or_else(|| {
+    let store_entry = crate::bgv::setup::accepted_setup_component_material(
+        accepted_setup_session.session_handle,
+        proof_family,
+        material_root,
+    )?
+    .ok_or_else(|| {
         invalid_evaluation_key_share_material(
-            "transported evaluation-key component material requires chunks or a live verified material handle",
+            "transported evaluation-key component material is not owned by the accepted-setup session",
         )
     })?;
-    if store_entry.proof_family != proof_family {
-        return Err(invalid_evaluation_key_share_material(
-            "transported evaluation-key component material belongs to a different proof family",
-        ));
-    }
-    // The entry is cloned once so the read (a native file read) never holds the
-    // store lock; it is then consumed by value below, so the chunk bytes are moved
-    // out rather than cloned a second time. The original stays in the store for the
-    // verifier's repeated reads and is dropped by the eviction guard after verify.
-    drop(stored_chunks);
-
     read_verified_evaluation_key_share_component_material_chunks(store_entry)
 }
 
@@ -139,40 +119,6 @@ fn read_verified_evaluation_key_share_component_material_chunks(
     }
 }
 
-// Collect the evaluation-key component material roots a verification request
-// references, so the eviction guard drops exactly those store entries and leaves a
-// concurrent verification's entries untouched.
-#[cfg(test)]
-fn request_component_material_roots(request: &Value) -> Vec<String> {
-    let Some(material_sidecar) = request.get("transportedEvaluationKeyShareComponentMaterial")
-    else {
-        return Vec::new();
-    };
-    let mut material_roots = BTreeSet::new();
-    collect_component_material_roots(material_sidecar, &mut material_roots);
-    material_roots.into_iter().collect()
-}
-
-#[cfg(test)]
-fn collect_component_material_roots(value: &Value, material_roots: &mut BTreeSet<String>) {
-    let mut pending_values = vec![value];
-    while let Some(current_value) = pending_values.pop() {
-        match current_value {
-            Value::Object(fields) => {
-                if let Some(root) = fields
-                    .get("keySwitchComponentMaterialRoot")
-                    .and_then(Value::as_str)
-                {
-                    material_roots.insert(root.to_string());
-                }
-                pending_values.extend(fields.values());
-            }
-            Value::Array(items) => pending_values.extend(items),
-            _ => {}
-        }
-    }
-}
-
 // Drop the staged backing of an evicted store entry: on native this removes the
 // temp file; on the browser wasm runtime the in-memory chunk bytes are freed when
 // `backing` drops. Mirrors `discard_component_material_stream_sink`.
@@ -194,63 +140,18 @@ fn discard_verified_component_material_backing(
     Ok(())
 }
 
-// Drop the verified component material entries a completed verification consumed,
-// so the process-global store does not retain them. The verifier reads each entry
-// several times (public-key reconstruction and evaluation-key proof checks), so
-// eviction happens once, after verify returns, rather than on first read. Without
-// it the store would grow with every verified package on the wasm runtime, whose
-// linear memory never returns to the OS.
-#[cfg(test)]
-pub(in crate::bgv::setup) fn evict_verified_evaluation_key_share_component_material(
-    material_roots: &[String],
-) {
-    let _ = drain_verified_evaluation_key_share_component_material(material_roots);
-}
-
-pub(in crate::bgv::setup) fn drain_verified_evaluation_key_share_component_material(
-    material_roots: &[String],
+pub(in crate::bgv::setup) fn discard_session_component_material(
+    materials: BTreeMap<String, VerifiedEvaluationKeyShareComponentMaterialChunkStoreEntry>,
 ) -> CanonicalResult<()> {
-    let mut stored_chunks = verified_evaluation_key_share_component_material_chunks()
-        .lock()
-        .map_err(|_| {
-            invalid_evaluation_key_share_material(
-                "verified evaluation-key component material store is unavailable",
-            )
-        })?;
     let mut first_cleanup_error = None;
-    for material_root in material_roots {
-        if let Some(entry) = stored_chunks.remove(material_root)
-            && let Err(error) = discard_verified_component_material_backing(entry.backing)
+    for material in materials.into_values() {
+        if let Err(error) = discard_verified_component_material_backing(material.backing)
             && first_cleanup_error.is_none()
         {
             first_cleanup_error = Some(error);
         }
     }
     first_cleanup_error.map_or(Ok(()), Err)
-}
-
-// RAII guard that evicts a verification's streamed component material from the
-// process-global store when verify returns by any path (acceptance, refusal, or
-// error), scoped to the request's own material roots.
-#[cfg(test)]
-pub(in crate::bgv::setup) struct VerifiedComponentMaterialEvictionGuard {
-    material_roots: Vec<String>,
-}
-
-#[cfg(test)]
-impl VerifiedComponentMaterialEvictionGuard {
-    pub(in crate::bgv::setup) fn for_request(request: &Value) -> Self {
-        Self {
-            material_roots: request_component_material_roots(request),
-        }
-    }
-}
-
-#[cfg(test)]
-impl Drop for VerifiedComponentMaterialEvictionGuard {
-    fn drop(&mut self) {
-        evict_verified_evaluation_key_share_component_material(&self.material_roots);
-    }
 }
 
 #[derive(Clone, Copy)]
@@ -293,64 +194,23 @@ pub(in crate::bgv::setup) fn component_b_vectors_from_record(
     proof_family: EvaluationKeyShareProofFamily,
     record: &Value,
     derived_binding: EvaluationKeyShareDerivedMaterialBinding<'_>,
-    transported_key_switch_component_material: Option<&Value>,
+    accepted_setup_session: &crate::bgv::setup::AcceptedSetupProofBindingSession,
 ) -> CanonicalResult<DecodedEvaluationKeyShareComponentMaterial> {
-    if record.get("keySwitchComponentVectors").is_some()
-        || record.get("keySwitchComponentMaterialRoot").is_none()
-    {
-        return Err(invalid_evaluation_key_share_material(
-            "evaluation-key component vectors require canonical streamed material",
-        ));
-    }
-    let transported_material_set = transported_key_switch_component_material.ok_or_else(|| {
-        invalid_evaluation_key_share_material(
-            "transported evaluation-key component material is required",
-        )
-    })?;
-    component_b_vectors_from_transported_material(
-        proof_family,
-        record,
-        derived_binding,
-        transported_material_set,
-    )
-}
-
-fn component_b_vectors_from_transported_material(
-    proof_family: EvaluationKeyShareProofFamily,
-    record: &Value,
-    derived_binding: EvaluationKeyShareDerivedMaterialBinding<'_>,
-    material_set: &Value,
-) -> CanonicalResult<DecodedEvaluationKeyShareComponentMaterial> {
-    if material_set.get("objectType").and_then(Value::as_str)
-        != Some(EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_TRANSPORT_SET_OBJECT_TYPE)
-    {
-        return Err(invalid_evaluation_key_share_material(
-            "transported evaluation-key component material set header is invalid",
-        ));
-    }
     let expected_material_root = string_field(record, "keySwitchComponentMaterialRoot")?;
-    let component_materials = array_field(material_set, "componentMaterials")?;
-    let mut matching_component_material = None;
-    for component_material in component_materials {
-        if string_field(component_material, "keySwitchComponentMaterialRoot")?
-            != expected_material_root
-        {
-            continue;
-        }
-        if matching_component_material.is_some() {
-            return Err(invalid_evaluation_key_share_material(
-                "transported evaluation-key component material contains duplicate keySwitchComponentMaterialRoot entries",
-            ));
-        }
-        matching_component_material = Some(component_material);
-    }
-    let component_material = matching_component_material.ok_or_else(|| {
+    validate_hash_string(
+        expected_material_root,
+        "evaluationKeyShareRecord.keySwitchComponentMaterialRoot",
+    )?;
+    let chunks = stored_verified_evaluation_key_share_component_material_chunks(
+        accepted_setup_session,
+        expected_material_root,
+        proof_family.proof_family(),
+    )
+    .map_err(|_| {
         invalid_evaluation_key_share_material(
-            "transported evaluation-key component material is missing the requested keySwitchComponentMaterialRoot",
+            "evaluation-key component material was not authenticated by the canonical binary stream",
         )
     })?;
-    verify_evaluation_key_share_component_material_header(proof_family, component_material)?;
-    let chunks = evaluation_key_share_component_material_chunks(component_material)?;
     let decoded_material = decode_evaluation_key_share_component_vectors(
         proof_family,
         record,
@@ -365,39 +225,10 @@ fn component_b_vectors_from_transported_material(
     )?;
     if expected_material_root != canonical_material_root {
         return Err(invalid_evaluation_key_share_material(
-            "evaluation-key component material root must match the canonical transported material reference",
+            "evaluation-key component material root must match the canonical material reference",
         ));
     }
     Ok(decoded_material)
-}
-
-fn verify_evaluation_key_share_component_material_header(
-    proof_family: EvaluationKeyShareProofFamily,
-    component_material: &Value,
-) -> CanonicalResult<()> {
-    if component_material.get("objectType").and_then(Value::as_str)
-        != Some(EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_TRANSPORT_OBJECT_TYPE)
-        || component_material
-            .get("proofFamily")
-            .and_then(Value::as_str)
-            != Some(proof_family.proof_family())
-    {
-        return Err(invalid_evaluation_key_share_material(
-            "transported evaluation-key component material header is invalid",
-        ));
-    }
-    Ok(())
-}
-
-fn evaluation_key_share_component_material_chunks(value: &Value) -> CanonicalResult<Vec<Vec<u8>>> {
-    let material_root = string_field(value, "keySwitchComponentMaterialRoot")?;
-    let proof_family = string_field(value, "proofFamily")?;
-    stored_verified_evaluation_key_share_component_material_chunks(material_root, proof_family)
-        .map_err(|_| {
-            invalid_evaluation_key_share_material(
-                "evaluation-key component material was not authenticated by the canonical binary stream",
-            )
-        })
 }
 
 // Canonical decode: fixed record order, in-range residues, and zero trailing
@@ -555,69 +386,18 @@ fn decode_evaluation_key_share_component_vectors(
     })
 }
 
-static VERIFIED_EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_CHUNKS: OnceLock<
-    Mutex<BTreeMap<String, VerifiedEvaluationKeyShareComponentMaterialChunkStoreEntry>>,
-> = OnceLock::new();
-
 #[derive(Debug, Clone)]
-struct VerifiedEvaluationKeyShareComponentMaterialChunkStoreEntry {
-    backing: VerifiedComponentMaterialBacking,
-    proof_family: &'static str,
-    stream_summary: Arc<VerifiedCanonicalStreamSummary>,
-    total_byte_length: u64,
-}
-
-#[cfg(test)]
-pub(in crate::bgv::setup) fn authenticated_evaluation_key_component_stream_summary(
-    proof_family: &str,
-    material_root: &str,
-) -> CanonicalResult<Option<Arc<VerifiedCanonicalStreamSummary>>> {
-    authenticated_evaluation_key_component_stream_summary_in_session(
-        None,
-        proof_family,
-        material_root,
-    )
-}
-
-pub(in crate::bgv::setup) fn authenticated_evaluation_key_component_stream_summary_in_session(
-    accepted_setup_session: Option<&crate::bgv::setup::AcceptedSetupProofBindingSession>,
-    proof_family: &str,
-    material_root: &str,
-) -> CanonicalResult<Option<Arc<VerifiedCanonicalStreamSummary>>> {
-    if let Some(accepted_setup_session) = accepted_setup_session
-        && !crate::bgv::setup::accepted_setup_session_owns_material_root(
-            accepted_setup_session.session_handle,
-            &accepted_setup_session.capability,
-            crate::bgv::setup::AcceptedSetupMaterialStore::Component,
-            material_root,
-        )?
-    {
-        return Ok(None);
-    }
-    let store = verified_evaluation_key_share_component_material_chunks()
-        .lock()
-        .map_err(|_| {
-            invalid_evaluation_key_share_material(
-                "verified evaluation-key component material store is unavailable",
-            )
-        })?;
-    let Some(entry) = store.get(material_root) else {
-        return Ok(None);
-    };
-    if entry.proof_family != proof_family {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ComponentMismatch,
-            "canonical evaluation-key component material root belongs to a different proof family",
-        ));
-    }
-    Ok(Some(Arc::clone(&entry.stream_summary)))
+pub(in crate::bgv::setup) struct VerifiedEvaluationKeyShareComponentMaterialChunkStoreEntry {
+    pub(in crate::bgv::setup) backing: VerifiedComponentMaterialBacking,
+    pub(in crate::bgv::setup) proof_family: &'static str,
+    pub(in crate::bgv::setup) total_byte_length: u64,
 }
 
 // Native builds stage verified component material in temporary files. Browser
 // WASM has no filesystem and retains the chunks in memory; tests compile that
 // backing on native targets to exercise it without a browser.
 #[derive(Debug, Clone)]
-enum VerifiedComponentMaterialBacking {
+pub(in crate::bgv::setup) enum VerifiedComponentMaterialBacking {
     #[cfg(not(target_arch = "wasm32"))]
     TempFile(PathBuf),
     #[cfg(target_arch = "wasm32")]
@@ -656,7 +436,6 @@ mod component_material_stream {
     }
 
     pub(crate) struct CanonicalComponentMaterialStream {
-        material_root: String,
         proof_family: &'static str,
         sink: Option<ComponentMaterialStreamSink>,
         total_byte_length: u64,
@@ -739,34 +518,18 @@ mod component_material_stream {
 
     pub(crate) fn begin_verified_canonical_component_material_stream(
         stream_handle: u32,
-        material_root: String,
         proof_family: &'static str,
         total_byte_length: u64,
     ) -> CanonicalResult<CanonicalComponentMaterialStream> {
-        validate_hex_string(&material_root, "keySwitchComponentMaterialRoot")?;
         if total_byte_length == 0 {
             return Err(invalid_evaluation_key_share_material(
                 "canonical evaluation-key component material stream must be nonempty",
-            ));
-        }
-        if verified_evaluation_key_share_component_material_chunks()
-            .lock()
-            .map_err(|_| {
-                invalid_evaluation_key_share_material(
-                    "verified evaluation-key component material store is unavailable",
-                )
-            })?
-            .contains_key(&material_root)
-        {
-            return Err(invalid_evaluation_key_share_material(
-                "canonical evaluation-key component material root is already staged",
             ));
         }
         let sink = open_component_material_stream_sink(&format!(
             "canonical-component-material-{stream_handle}"
         ))?;
         Ok(CanonicalComponentMaterialStream {
-            material_root,
             proof_family,
             sink: Some(sink),
             total_byte_length,
@@ -788,7 +551,7 @@ mod component_material_stream {
     pub(crate) fn finish_verified_canonical_component_material_stream(
         mut stream: CanonicalComponentMaterialStream,
         stream_summary: Arc<VerifiedCanonicalStreamSummary>,
-    ) -> CanonicalResult<()> {
+    ) -> CanonicalResult<VerifiedEvaluationKeyShareComponentMaterialChunkStoreEntry> {
         if stream_summary.stream_domain()
             != crate::foundation::CanonicalStreamDomain::EvaluatorKeyStore
             || stream_summary.total_byte_length() != stream.total_byte_length
@@ -803,30 +566,11 @@ mod component_material_stream {
             )
         })?;
         let backing = component_material_stream_sink_into_backing(sink);
-        let store = verified_evaluation_key_share_component_material_chunks();
-        let mut store = store.lock().map_err(|_| {
-            invalid_evaluation_key_share_material(
-                "verified evaluation-key component material store is unavailable",
-            )
-        })?;
-        let material_root = std::mem::take(&mut stream.material_root);
-        match store.entry(material_root) {
-            std::collections::btree_map::Entry::Vacant(entry) => {
-                entry.insert(VerifiedEvaluationKeyShareComponentMaterialChunkStoreEntry {
-                    backing,
-                    proof_family: stream.proof_family,
-                    stream_summary,
-                    total_byte_length: stream.total_byte_length,
-                });
-            }
-            std::collections::btree_map::Entry::Occupied(_) => {
-                discard_verified_component_material_backing(backing)?;
-                return Err(invalid_evaluation_key_share_material(
-                    "canonical evaluation-key component material root was staged concurrently",
-                ));
-            }
-        }
-        Ok(())
+        Ok(VerifiedEvaluationKeyShareComponentMaterialChunkStoreEntry {
+            backing,
+            proof_family: stream.proof_family,
+            total_byte_length: stream.total_byte_length,
+        })
     }
 
     pub(crate) fn cancel_verified_canonical_component_material_stream(
@@ -900,11 +644,9 @@ mod component_material_stream {
 
         #[test]
         fn component_material_stream_rejects_a_mismatched_authenticated_summary() {
-            let material_root = "d1".repeat(64);
             let material_bytes = [0x5a; 17];
             let mut stream = begin_verified_canonical_component_material_stream(
                 0xd100_0001,
-                material_root.clone(),
                 "relinearization-key-share",
                 material_bytes.len() as u64,
             )
@@ -927,54 +669,6 @@ mod component_material_stream {
                     .message
                     .contains("does not match its authenticated stream summary")
             );
-            assert!(
-                super::super::authenticated_evaluation_key_component_stream_summary(
-                    "relinearization-key-share",
-                    &material_root,
-                )
-                .expect("component material store lookup")
-                .is_none()
-            );
-        }
-
-        #[test]
-        fn component_material_stream_rejects_a_duplicate_material_root() {
-            let material_root = "d2".repeat(64);
-            let material_bytes = [0x6b; 19];
-            super::super::evict_verified_evaluation_key_share_component_material(
-                std::slice::from_ref(&material_root),
-            );
-            let mut stream = begin_verified_canonical_component_material_stream(
-                0xd200_0001,
-                material_root.clone(),
-                "galois-key-share",
-                material_bytes.len() as u64,
-            )
-            .expect("first component material stream begins");
-            absorb_verified_canonical_component_material_chunk(&mut stream, &material_bytes)
-                .expect("first component material chunk stages");
-            finish_verified_canonical_component_material_stream(
-                stream,
-                verified_stream_summary(CanonicalStreamDomain::EvaluatorKeyStore, &material_bytes),
-            )
-            .expect("first component material stream authenticates");
-
-            let error = match begin_verified_canonical_component_material_stream(
-                0xd200_0002,
-                material_root.clone(),
-                "galois-key-share",
-                material_bytes.len() as u64,
-            ) {
-                Ok(stream) => {
-                    cancel_verified_canonical_component_material_stream(stream);
-                    panic!("the same component material root must not be staged twice");
-                }
-                Err(error) => error,
-            };
-
-            assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
-            assert!(error.message.contains("root is already staged"));
-            super::super::evict_verified_evaluation_key_share_component_material(&[material_root]);
         }
 
         #[cfg(not(target_arch = "wasm32"))]

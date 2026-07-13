@@ -6,7 +6,6 @@ export type {
     BgvLocalTrusteeSetupStateVerification,
     BgvPrivateVssShareEnvelopeVerification,
     BgvRnsParametersDescription,
-    BgvTargetDecryptionReleaseSetupContext,
     BgvTargetDecryptionResultReleaseShareEvidence,
     BgvTargetDecryptionResultReleaseCompletion,
     TranscriptCoreKernel,

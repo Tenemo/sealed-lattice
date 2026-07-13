@@ -10,9 +10,8 @@
 //! supplied node so short and padded node lists are both rejected.
 
 use crate::bgv::setup::trustee_evaluation_key_proof::{
-    SetupBatchedMerkleOpening, SetupMerkleDigest, SetupMerkleTree,
-    consistent_setup_merkle_leaves, sorted_unique_setup_merkle_indices,
-    verify_merkle_batch_with_node_domain,
+    SetupBatchedMerkleOpening, SetupMerkleDigest, SetupMerkleTree, consistent_setup_merkle_leaves,
+    sorted_unique_setup_merkle_indices, verify_merkle_batch_with_node_domain,
 };
 use crate::encoding::CanonicalResult;
 use crate::hashing::{StreamingHash256, hash256};
@@ -78,10 +77,7 @@ impl MerkleTree {
         self.0.root()
     }
 
-    pub(super) fn open_batch(
-        &self,
-        sorted_unique_indices: &[usize],
-    ) -> BatchedMerkleOpening {
+    pub(super) fn open_batch(&self, sorted_unique_indices: &[usize]) -> BatchedMerkleOpening {
         self.0.open_batch(sorted_unique_indices)
     }
 }
@@ -108,13 +104,7 @@ pub(super) fn verify_merkle_batch(
     sorted_unique_leaves: &[(usize, MerkleDigest)],
     opening: &BatchedMerkleOpening,
 ) -> bool {
-    verify_merkle_batch_with_node_domain(
-        root,
-        depth,
-        sorted_unique_leaves,
-        opening,
-        NODE_DOMAIN,
-    )
+    verify_merkle_batch_with_node_domain(root, depth, sorted_unique_leaves, opening, NODE_DOMAIN)
 }
 
 #[cfg(test)]

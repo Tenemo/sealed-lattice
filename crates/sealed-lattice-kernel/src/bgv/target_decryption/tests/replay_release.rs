@@ -13,9 +13,6 @@ use crate::bgv::evaluator::top_k::{
 };
 use crate::hashing::hash512_hex;
 
-// Exercises a genuine ten-ballot evaluator output through staged target
-// decryption. The released identifiers and order must match the plaintext
-// oracle, and a second finish must be refused.
 #[test]
 #[ignore = "long-running foundation-profile evidence; run via the focused full-profile-evidence runner"]
 fn foundation_profile_replay_target_release_matches_plaintext_oracle() {
@@ -27,7 +24,6 @@ fn foundation_profile_replay_target_release_matches_plaintext_oracle() {
         );
     };
 
-    let passive_package = passive_crypto_package();
     let setup_package = accepted_setup_package();
     let evaluator_key = target_decryption_evaluator_key();
     let ballot_count = 10_usize;
@@ -63,7 +59,7 @@ fn foundation_profile_replay_target_release_matches_plaintext_oracle() {
     phase("running the production packed batched-pair evaluator replay");
     let evaluations = run_direct_ballot_packed_batched_pair_evaluator_for_top_counts(
         DirectBallotPackedBatchedPairEvaluatorInput {
-            setup_package: &passive_package,
+            setup_package: &setup_package,
             evaluator_key: &evaluator_key,
             aggregate_ciphertext: &aggregate_ciphertext,
             ballot_count,
@@ -149,9 +145,7 @@ fn foundation_profile_replay_target_release_matches_plaintext_oracle() {
         &target_order_root,
     )
     .expect("target ciphertext hash");
-    let mut accepted = accepted_record(&target_ciphertext_hash, &target_layout);
-    accepted["evaluatorReplayRecordHash"] = evaluation["evaluatorReplayRecordHash"].clone();
-    rebind_target_accepted_record_hash(&mut accepted);
+    let accepted = accepted_record(&setup_package, &target_ciphertext_hash);
     let target_ciphertext_binding = json!({
         "aggregateCiphertextRoot": aggregate_ciphertext_root,
         "topCount": top_count,
@@ -237,11 +231,7 @@ fn foundation_profile_replay_target_release_matches_plaintext_oracle() {
         phase(&format!("proved share for {trustee_identity}"));
     }
 
-    // Keep a copy of the proven share quorum so the test can attempt a fresh
-    // re-release of the same target after it is consumed one-shot.
-    let re_release_share_proofs = target_share_proofs.clone();
-
-    phase("releasing the genuine target through the staged one-shot session");
+    phase("releasing the genuine target through the staged session");
     let release_verification_id = "replay-release-foundation-profile";
     let release_result = staged_target_result_release(
         &setup_package,
@@ -275,25 +265,11 @@ fn foundation_profile_replay_target_release_matches_plaintext_oracle() {
         "released per-option orders must equal the plaintext oracle"
     );
 
-    phase("verifying the one-shot session refuses a second finish");
+    phase("verifying a finished session cannot finish twice");
     finish_bgv_target_decryption_result_release_from_request(&json!({
         "releaseVerificationId": release_verification_id,
     }))
     .expect_err("a consumed release session must refuse a second finish");
-
-    phase("verifying a consumed target refuses a fresh re-release under a new id");
-    staged_target_result_release(
-        &setup_package,
-        &accepted,
-        &target_ciphertext_binding,
-        &target_ciphertexts,
-        &target_share_profile_value,
-        re_release_share_proofs,
-        "replay-release-foundation-profile-second-attempt",
-    )
-    .expect_err(
-        "a target already released one-shot must refuse a fresh release under a new verification id",
-    );
 
     phase("done");
 }

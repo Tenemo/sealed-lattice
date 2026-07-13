@@ -179,7 +179,6 @@ const verifyCastReceiptShellUnchecked = (
             publicKeyHash: input.expectedVoterPublicKeyHash,
             manifestHash: input.expectedElectionManifestHash,
             objectRoot: input.receipt.castReceiptHash,
-            chunkMerkleRoot: null,
             boardHeadHash: input.receiptInclusionProof.boardHeadHash,
             contextHash: input.receipt.contextHash,
             recoveryEpoch: input.receipt.recoveryEpoch,
@@ -371,7 +370,6 @@ const verifyCloseRecordShellUnchecked = (
             publicKeyHash: input.expectedOrganizerPublicKeyHash,
             manifestHash: input.expectedElectionManifestHash,
             objectRoot: input.closeRecord.closeRecordHash,
-            chunkMerkleRoot: null,
             boardHeadHash: input.closeRecordInclusionProof.boardHeadHash,
             contextHash:
                 input.closeRecord.postVotingClosedContextHash ??

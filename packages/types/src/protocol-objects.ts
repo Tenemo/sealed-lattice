@@ -51,10 +51,10 @@ export type SignerRole =
 export type CanonicalSignedRootObject = {
     readonly objectType: SignedObjectType;
     readonly ceremonyId: string;
-    readonly manifestHash: ProtocolHash | null;
-    readonly boardHeadHash: ProtocolHash | null;
-    readonly objectRoot: ProtocolHash | null;
-    readonly chunkMerkleRoot: ProtocolHash | null;
+    readonly manifestHash?: ProtocolHash;
+    readonly boardHeadHash?: ProtocolHash;
+    readonly objectRoot?: ProtocolHash;
+    readonly chunkMerkleRoot?: ProtocolHash;
     readonly signerRole: SignerRole;
     readonly signerIdentity: string;
     readonly recoveryEpoch: number;

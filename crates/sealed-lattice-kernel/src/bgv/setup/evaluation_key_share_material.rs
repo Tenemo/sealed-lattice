@@ -5,28 +5,24 @@
 
 mod component_material;
 
-pub(crate) use self::component_material::{
-    CanonicalComponentMaterialStream, absorb_verified_canonical_component_material_chunk,
+pub(in crate::bgv::setup) use self::component_material::{
+    CanonicalComponentMaterialStream, VerifiedEvaluationKeyShareComponentMaterialChunkStoreEntry,
+    absorb_verified_canonical_component_material_chunk,
     begin_verified_canonical_component_material_stream,
-    cancel_verified_canonical_component_material_stream,
+    cancel_verified_canonical_component_material_stream, discard_session_component_material,
     finish_verified_canonical_component_material_stream,
 };
 pub(super) use self::component_material::{
     DecodedEvaluationKeyShareComponentMaterial, EvaluationKeyShareDerivedMaterialBinding,
-    authenticated_evaluation_key_component_stream_summary_in_session,
-    component_b_vectors_from_record, drain_verified_evaluation_key_share_component_material,
+    component_b_vectors_from_record,
 };
 #[cfg(test)]
 pub(in crate::bgv::setup) use self::component_material::{
-    VerifiedComponentMaterialEvictionGuard, authenticated_evaluation_key_component_stream_summary,
     evaluation_key_share_component_material_reference_root,
     evaluation_key_share_component_vector_root,
 };
 
-use std::{
-    collections::BTreeMap,
-    sync::{Arc, Mutex, OnceLock},
-};
+use std::{collections::BTreeMap, sync::Arc};
 // The component-material stream only touches the filesystem on native; the
 // browser wasm runtime stages in memory and never opens a file.
 #[cfg(not(target_arch = "wasm32"))]

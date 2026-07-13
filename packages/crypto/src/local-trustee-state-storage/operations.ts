@@ -70,11 +70,7 @@ export const deriveLocalTrusteeSetupStateCommitmentRoot = (
 ): ProtocolHash =>
     deriveCanonicalObjectHash({
         objectType: commitment.objectType,
-        ceremonyId: commitment.ceremonyId,
-        manifestHash: commitment.manifestHash,
-        rosterHash: commitment.rosterHash,
-        setupParametersHash: commitment.setupParametersHash,
-        setupEpoch: commitment.setupEpoch,
+        setupContextHash: commitment.setupContextHash,
         trusteeIdentity: commitment.trusteeIdentity,
         trusteeRosterPosition: commitment.trusteeRosterPosition,
         thresholdShareCommitmentRecipientRoot:
@@ -115,7 +111,7 @@ export const encryptLocalTrusteeSetupSealedMaterial = async (
     const materialPlaintextBytes = textEncoder.encode(materialPlaintextJson);
     const materialRoot = deriveCanonicalObjectHash(input.materialPlaintext);
     const associatedData = sealedMaterialAad(
-        input.setupContext,
+        input.setupContextHash,
         materialRoot,
         input,
     );
@@ -158,6 +154,7 @@ export const decryptLocalTrusteeSetupSealedMaterial = async (
 ): Promise<unknown> => {
     assertProtocolHash(input.expectedMaterialRoot, 'expectedMaterialRoot');
     assertCommitmentHeader(input.localStateCommitment);
+    assertLocalStateCommitmentRoot(input.localStateCommitment);
     const storageKeyBytes = decodeFixedHex(
         input.storageKeyBytesHex,
         aesGcmKeyByteLength,
@@ -166,7 +163,7 @@ export const decryptLocalTrusteeSetupSealedMaterial = async (
     const sealedMaterial = validateSealedMaterial(
         input.sealedMaterial,
         input.expectedMaterialRoot,
-        input.setupContext,
+        input.setupContextHash,
         input.localStateCommitment,
         'sealedMaterial',
     );
@@ -231,11 +228,11 @@ export const encryptLocalTrusteeState = async (
     const localStatePlaintext = validateLocalStatePlaintext(
         input.localStatePlaintext,
         input.localStateCommitment,
-        input.setupContext,
+        input.setupContextHash,
     );
     const nonceBytes = randomBytes(aesGcmNonceByteLength);
     const associatedData = storageAad(
-        input.setupContext,
+        input.setupContextHash,
         input.localStateCommitment,
     );
     const associatedDataJson = canonicalJson(associatedData);
@@ -300,7 +297,7 @@ export const decryptLocalTrusteeState = async (
         );
     }
     const expectedAssociatedData = storageAad(
-        input.setupContext,
+        input.setupContextHash,
         localStateCommitment,
     );
     if (
@@ -308,7 +305,7 @@ export const decryptLocalTrusteeState = async (
         canonicalJson(expectedAssociatedData)
     ) {
         throw new Error(
-            'encryptedLocalState.storageAad does not match setupContext and localStateCommitment.',
+            'encryptedLocalState.storageAad does not match setupContextHash and localStateCommitment.',
         );
     }
     const associatedDataBytes = textEncoder.encode(
@@ -356,7 +353,7 @@ export const decryptLocalTrusteeState = async (
     const localStatePlaintext = validateLocalStatePlaintext(
         parsedLocalStatePlaintext,
         localStateCommitment,
-        input.setupContext,
+        input.setupContextHash,
     );
 
     return localStatePlaintext;

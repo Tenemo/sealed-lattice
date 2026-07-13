@@ -51,26 +51,16 @@ pub(super) fn value_u64(value: &Value, field_name: &str) -> CanonicalResult<u64>
         })
 }
 
-// Ceremony-identifying setup-context fields a bound object must carry
-// identically so a bound artifact cannot be transplanted across ceremonies,
-// rosters, parameter sets, or epochs. Used by the VSS public-material
-// binding checks.
-const SETUP_CONTEXT_BINDING_FIELDS: [&str; 5] = [
-    "ceremonyId",
-    "manifestHash",
-    "rosterHash",
-    "setupParametersHash",
-    "setupEpoch",
-];
-
-pub(super) fn setup_context_binding_value<'a>(
-    value: &'a Value,
-    field_name: &str,
-) -> CanonicalResult<&'a str> {
-    match field_name {
-        "ceremonyId" | "setupEpoch" => value_string(value, field_name),
-        _ => hash_at_path(value, &[field_name]),
-    }
+pub(in super::super) fn setup_context_hash(setup_context: &Value) -> CanonicalResult<String> {
+    derive_canonical_object_hash(&json!({
+        "objectType": "CollectiveBgvSetupContext",
+        "ceremonyId": value_string(setup_context, "ceremonyId")?,
+        "manifestHash": value_string(setup_context, "manifestHash")?,
+        "rosterHash": value_string(setup_context, "rosterHash")?,
+        "setupParametersHash": value_string(setup_context, "setupParametersHash")?,
+        "setupEpoch": value_string(setup_context, "setupEpoch")?,
+        "participantCount": value_u64(setup_context, "participantCount")?,
+    }))
 }
 
 pub(super) fn compare_required_u64_binding(
@@ -93,17 +83,11 @@ pub(super) fn compare_setup_context_binding(
     bound_value: &Value,
     bound_object_description: &str,
 ) -> CanonicalResult<()> {
-    for field_name in SETUP_CONTEXT_BINDING_FIELDS {
-        let actual = setup_context_binding_value(bound_value, field_name)?;
-        let expected = setup_context_binding_value(setup_context, field_name)?;
-        compare_required_string(
-            actual,
-            expected,
-            &format!("{bound_object_description} {field_name}"),
-        )?;
-    }
-
-    Ok(())
+    compare_required_string(
+        value_string(bound_value, "setupContextHash")?,
+        &setup_context_hash(setup_context)?,
+        &format!("{bound_object_description} setupContextHash"),
+    )
 }
 
 pub(super) fn compare_setup_context_participant_count(

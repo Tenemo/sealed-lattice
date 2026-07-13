@@ -2,18 +2,15 @@ use super::*;
 use crate::bgv::{
     evaluator::engine::encode_slots_to_coefficients,
     evaluator::records::target_layout_hash,
-    evaluator::top_k::{
-        CANONICAL_TARGET_CIPHERTEXT_LEVEL, canonical_target_basis_hash,
-    },
+    evaluator::top_k::CANONICAL_TARGET_CIPHERTEXT_LEVEL,
     modular_arithmetic::{add_mod, inverse_mod, sub_mod},
-    setup::{
-        accepted_setup_target_decryption_setup_parameters_hash,
-        generate_passive_setup_package_from_request,
-    },
+    setup::accepted_setup_target_decryption_setup_parameters_hash,
 };
 use crate::foundation::{
-    CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH, CanonicalStreamDomain, FOUNDATION_PROFILE,
-    derive_canonical_stream_descriptor,
+    CanonicalStreamDomain, FOUNDATION_PROFILE, derive_canonical_stream_descriptor,
+};
+use crate::protocol_signatures::{
+    create_ml_dsa_public_key_hash_fixture, create_protocol_signature_fixture,
 };
 use std::{
     collections::BTreeMap,
@@ -39,12 +36,6 @@ struct AggregateThresholdCommitmentSetupOutput {
     aggregate_opening_material_by_root: BTreeMap<String, Vec<u8>>,
 }
 
-// The three fixture trustees, listed in roster order. Roster position is the
-// array index; the Shamir abscissa is roster_position + 1, matching
-// read_setup_binding. Both the passive crypto package (which supplies the
-// collective secret and encrypts the target ciphertexts) and the accepted
-// SetupPackage bind these identities in the same roster order, so the shares
-// derived from the crypto key interpolate against the accepted-package roster.
 const TARGET_DECRYPTION_FIXTURE_TRUSTEES: [&str; 3] = ["trustee-1", "trustee-2", "trustee-3"];
 
 fn target_decryption_fixture_manifest_hash() -> String {
@@ -69,53 +60,14 @@ fn target_decryption_fixture_public_matrix_seed_hash() -> String {
     .expect("public matrix seed hash")
 }
 
-fn target_decryption_fixture_signing_public_key_hash(trustee_identity: &str) -> String {
-    derive_canonical_object_hash(&json!({
-        "objectType": "MlDsaSigningPublicKey",
-        "keyPurpose": "collective-bgv-setup-signing",
-        "trusteeIdentity": trustee_identity,
-    }))
-    .expect("signing public key hash")
-}
-
-// The passive development package that supplies the collective secret / evaluator
-// key and encrypts the target ciphertexts. It shares the fixture roster and setup
-// seed with the accepted SetupPackage but is NEVER fed to the target-decryption
-// trust boundary: read_setup_binding refuses it (objectType is not SetupPackage).
-// It exists only to carry the secret material the accepted package cannot.
-fn passive_crypto_package() -> Value {
-    generate_passive_setup_package_from_request(&json!({
-        "ceremonyId": TARGET_DECRYPTION_FIXTURE_CEREMONY_ID,
-        "manifestHash": target_decryption_fixture_manifest_hash(),
-        "rosterHash": target_decryption_fixture_roster_hash(),
-        "thresholdParametersHash": derive_canonical_object_hash(
-            &json!({ "objectType": "ThresholdParametersHash", "threshold": "target-decryption-test" }),
-        ).expect("threshold hash"),
-        "participants": TARGET_DECRYPTION_FIXTURE_TRUSTEES
-            .iter()
-            .enumerate()
-            .map(|(roster_position, trustee_identity)| json!({
-                "trusteeIdentity": trustee_identity,
-                "rosterPosition": roster_position,
-            }))
-            .collect::<Vec<_>>(),
-        "setupSeed": TARGET_DECRYPTION_FIXTURE_SETUP_SEED,
-    }))
-    .expect("passive crypto package")
+fn target_decryption_fixture_signature_seed_label(trustee_identity: &str) -> String {
+    format!("{trustee_identity}-target-decryption-setup-signing")
 }
 
 fn target_decryption_evaluator_key() -> DevelopmentBgvKey {
-    development_evaluator_key_from_passive_setup_package(
-        &passive_crypto_package(),
-        TARGET_DECRYPTION_FIXTURE_SETUP_SEED,
-    )
-    .expect("evaluator key")
+    DevelopmentBgvKey::generate(TARGET_DECRYPTION_FIXTURE_SETUP_SEED).expect("evaluator key")
 }
 
-// SetupPackage-shaped target-decryption fixture with the bound roster, common
-// randomness, VSS aggregate commitment, and share-linkage root. The commitments
-// use the same Shamir shares opened by the local witness, so share generation
-// exercises the aggregate-opening binding.
 fn accepted_setup_package() -> Value {
     accepted_setup_fixture().setup_package.clone()
 }
@@ -132,17 +84,70 @@ fn accepted_setup_package_base() -> Value {
         TARGET_DECRYPTION_FIXTURE_PARTICIPANT_COUNT,
     )
     .expect("roster-derived setup parameters hash");
-    let setup_intent_participants = TARGET_DECRYPTION_FIXTURE_TRUSTEES
+    let setup_intent_registrations = TARGET_DECRYPTION_FIXTURE_TRUSTEES
         .iter()
         .enumerate()
-        .map(|(roster_position, trustee_identity)| json!({
-            "objectType": "SetupPhaseParticipantObject",
-            "phaseId": "setupIntent",
-            "ceremonyId": TARGET_DECRYPTION_FIXTURE_CEREMONY_ID,
-            "rosterPosition": roster_position,
-            "trusteeIdentity": trustee_identity,
-            "signingPublicKeyHash": target_decryption_fixture_signing_public_key_hash(trustee_identity),
-        }))
+        .map(|(roster_position, trustee_identity)| {
+            let signature_seed_label =
+                target_decryption_fixture_signature_seed_label(trustee_identity);
+            let signing_public_key_hash =
+                create_ml_dsa_public_key_hash_fixture(&signature_seed_label)
+                    .expect("target-decryption setup signing public-key hash");
+            let private_vss_mailbox_public_key_hash = derive_canonical_object_hash(&json!({
+                "objectType": "TargetDecryptionFixtureMailboxPublicKey",
+                "rosterPosition": roster_position,
+            }))
+            .expect("target-decryption fixture mailbox public-key hash");
+            let registration_payload = json!({
+                "objectType": "CollectiveBgvSetupIntentTrusteeRegistration",
+                "ceremonyId": TARGET_DECRYPTION_FIXTURE_CEREMONY_ID,
+                "manifestHash": manifest_hash,
+                "rosterHash": roster_hash,
+                "setupParametersHash": setup_parameters_hash,
+                "setupEpoch": TARGET_DECRYPTION_FIXTURE_SETUP_EPOCH,
+                "rosterPosition": roster_position,
+                "trusteeIdentity": trustee_identity,
+                "recoveryEpoch": 0,
+                "deviceEpoch": 0,
+                "signingPublicKeyHash": signing_public_key_hash,
+                "privateVssMailboxPublicKeyHash": private_vss_mailbox_public_key_hash,
+            });
+            let registration_root = derive_canonical_object_hash(&registration_payload)
+                .expect("target-decryption setup registration root");
+            let signature_context_hash = derive_canonical_object_hash(&json!({
+                "objectType": "CollectiveBgvSetupIntentSignatureContext",
+                "ceremonyId": TARGET_DECRYPTION_FIXTURE_CEREMONY_ID,
+                "manifestHash": manifest_hash,
+                "rosterHash": roster_hash,
+                "setupParametersHash": setup_parameters_hash,
+                "setupEpoch": TARGET_DECRYPTION_FIXTURE_SETUP_EPOCH,
+                "trusteeIdentity": trustee_identity,
+                "rosterPosition": roster_position,
+                "setupIntentRegistrationRoot": registration_root,
+            }))
+            .expect("target-decryption setup signature context hash");
+            let signature_envelope = create_protocol_signature_fixture(
+                &signature_seed_label,
+                json!({
+                    "objectType": "CollectiveBgvSetupIntentTrusteeRegistration",
+                    "ceremonyId": TARGET_DECRYPTION_FIXTURE_CEREMONY_ID,
+                    "manifestHash": manifest_hash,
+                    "objectRoot": registration_root,
+                    "signerRole": "Trustee",
+                    "signerIdentity": trustee_identity,
+                    "recoveryEpoch": 0,
+                    "deviceEpoch": 0,
+                    "contextHash": signature_context_hash,
+                }),
+            )
+            .expect("target-decryption setup signature fixture")
+            .envelope;
+            json!({
+                "objectType": "CollectiveBgvSetupIntentTrusteeRegistration",
+                "privateVssMailboxPublicKeyHash": private_vss_mailbox_public_key_hash,
+                "signatureEnvelope": signature_envelope,
+            })
+        })
         .collect::<Vec<_>>();
 
     json!({
@@ -159,25 +164,22 @@ fn accepted_setup_package_base() -> Value {
             "objectType": "CollectiveBgvCommonRandomness",
             "publicMatrixSeedHash": target_decryption_fixture_public_matrix_seed_hash(),
         },
-        "phaseTranscript": [
-            {
-                "objectType": "SetupPhaseRecord",
-                "phaseId": "setupIntent",
-                "participantPhaseObjects": setup_intent_participants,
-            }
-        ],
+        "setupIntent": {
+            "objectType": "CollectiveBgvSetupIntent",
+            "trusteeRegistrations": setup_intent_registrations,
+        },
     })
 }
 
 fn build_accepted_setup_fixture() -> AcceptedSetupFixture {
     let mut accepted_setup_package = accepted_setup_package_base();
-    let target_share_profile = target_share_profile(&accepted_setup_package);
     let aggregate_threshold_commitment_setup_output =
-        aggregate_threshold_commitment_set(&accepted_setup_package, &target_share_profile);
+        aggregate_threshold_commitment_set(&accepted_setup_package);
     accepted_setup_package["vssPublicAggregateThresholdCommitmentSet"] =
         aggregate_threshold_commitment_setup_output.public_commitment_set;
     accepted_setup_package["vssShareLinkageStatement"] = json!({
         "objectType": "VssShareLinkageStatement",
+        "qShareRnsLimbCount": CANONICAL_TARGET_CIPHERTEXT_LEVEL + 1,
         "statementRoot": "4".repeat(128),
     });
     accepted_setup_package["setupPackageHash"] = json!(
@@ -194,23 +196,12 @@ fn build_accepted_setup_fixture() -> AcceptedSetupFixture {
     }
 }
 
-// The reader re-derives the canonical level-6, K_top = 20 profile hashes from
-// the bound BGV parameters, independently of the setup package. The quorum
-// values match the n = 3 roster-derived threshold of two.
 fn target_share_profile(_setup_package: &Value) -> Value {
-    let target_decryption_profile_hash =
-        canonical_target_decryption_parameters_hash().expect("target decryption profile hash");
-    let profile = json!({
+    json!({
         "objectType": "TargetDecryptionShareProfile",
-        "targetDecryptionProfileHash": target_decryption_profile_hash,
-        "decryptionThreshold": 2,
         "minimumSharesForInterpolation": 2,
         "decryptionShareQuorum": 2,
-    });
-    let mut with_hash = profile;
-    with_hash["targetShareProfileHash"] =
-        json!(derive_canonical_object_hash(&with_hash).expect("target share profile hash"));
-    with_hash
+    })
 }
 
 fn level_zero_ciphertext(key: &DevelopmentBgvKey, slots: &[u64], seed: &str) -> Ciphertext {
@@ -253,41 +244,20 @@ fn sparse_target_slots(ids: &[u64], orders: &[u64]) -> (Vec<u64>, Vec<u64>) {
     (target_ids, target_orders)
 }
 
-fn accepted_record(target_ciphertext_hash: &str, target_layout_hash: &str) -> Value {
-    let target_decryption_parameters_hash =
-        canonical_target_decryption_parameters_hash().expect("target decryption parameters hash");
+fn accepted_record(setup_package: &Value, target_ciphertext_hash: &str) -> Value {
     let mut record = json!({
         "objectType": "TargetAcceptedRecord",
-        "ceremonyId": TARGET_DECRYPTION_FIXTURE_CEREMONY_ID,
-        "electionManifestHash": target_decryption_fixture_manifest_hash(),
-        "targetProposalHash": derive_canonical_object_hash(
-            &json!({ "objectType": "TargetProposalHash", "target": "accepted" }),
-        ).expect("proposal hash"),
-        "evaluatorReplayRecordHash": derive_canonical_object_hash(
-            &json!({ "objectType": "EvaluatorReplayRecordHash", "replay": "accepted" }),
-        ).expect("replay hash"),
-        "targetContextHash": derive_canonical_object_hash(
-            &json!({ "objectType": "TargetContextHash", "context": "accepted target" }),
-        ).expect("context hash"),
-        "targetFinalityRecordHash": derive_canonical_object_hash(
-            &json!({ "objectType": "TargetFinalityRecordHash", "finality": "record" }),
-        ).expect("record hash"),
-        "targetFinalityCheckpointHash": derive_canonical_object_hash(
-            &json!({ "objectType": "TargetFinalityCheckpointHash", "finality": "checkpoint" }),
-        ).expect("checkpoint hash"),
-        "targetPreimageHash": derive_canonical_object_hash(
-            &json!({ "objectType": "TargetPreimageHash", "preimage": "accepted" }),
-        ).expect("preimage hash"),
+        "setupPackageHash": derive_collective_setup_package_hash(setup_package)
+            .expect("setup package hash"),
         "targetCiphertextHash": target_ciphertext_hash,
-        "targetLayoutHash": target_layout_hash,
-        "targetDecryptionParametersHash": target_decryption_parameters_hash,
-        "targetBasisHash": canonical_target_basis_hash().expect("target basis hash"),
-        "boardSequence": 0,
-        "boardPosition": 0,
-        "organizerIdentity": "organizer",
     });
-    record["targetAcceptedRecordHash"] =
-        json!(derive_canonical_object_hash(&record).expect("target accepted record hash"));
+    record["targetAcceptedRecordHash"] = json!(
+        derive_canonical_object_hash(
+            &target_accepted_record_hash_preimage(&record)
+                .expect("target accepted record preimage")
+        )
+        .expect("target accepted record hash")
+    );
     record
 }
 
@@ -320,7 +290,7 @@ fn target_fixture() -> (Value, Value, Value, Value) {
         &target_order_root,
     )
     .expect("target ciphertext hash");
-    let accepted_record = accepted_record(&target_ciphertext_hash, &target_layout_hash);
+    let accepted_record = accepted_record(&setup_package, &target_ciphertext_hash);
     let target_ciphertext_binding = json!({
         "aggregateCiphertextRoot": aggregate_ciphertext_root,
         "topCount": 2,
@@ -343,7 +313,6 @@ fn target_fixture() -> (Value, Value, Value, Value) {
 
 fn aggregate_threshold_commitment_set(
     setup_package: &Value,
-    _target_share_profile: &Value,
 ) -> AggregateThresholdCommitmentSetupOutput {
     let setup_context_hashes =
         collective_bgv_setup_context_hashes_from_package(setup_package).expect("setup context");
@@ -364,11 +333,7 @@ fn aggregate_threshold_commitment_set(
             roster_position,
         })
         .collect::<Vec<_>>();
-    let target_share_profile_hash = hash_at_path(target_share_profile, &["targetShareProfileHash"])
-        .expect("target share profile hash");
-    let minimum_shares_for_interpolation =
-        usize_at_path(target_share_profile, &["minimumSharesForInterpolation"])
-            .expect("minimum shares for interpolation");
+    let decryption_threshold = participants.len() / 3 + 1;
     let evaluator_key = target_decryption_evaluator_key();
     let rns_limb_count = CANONICAL_TARGET_CIPHERTEXT_LEVEL + 1;
     let mut recipient_records = Vec::with_capacity(participants.len() * rns_limb_count);
@@ -380,10 +345,10 @@ fn aggregate_threshold_commitment_set(
             .expect("participant interpolation point");
         let share_by_limb = derive_threshold_secret_share_by_limb(
             &evaluator_key,
-            target_share_profile_hash,
+            &setup_context_hashes.setup_parameters_hash,
             TARGET_DECRYPTION_FIXTURE_SETUP_SEED,
             interpolation_point,
-            minimum_shares_for_interpolation,
+            decryption_threshold,
             CANONICAL_TARGET_CIPHERTEXT_LEVEL,
         )
         .expect("target share limbs");
@@ -430,9 +395,6 @@ fn aggregate_threshold_commitment_set(
             recipient_records.push(json!({
                 "objectType": "VssPublicAggregateThresholdCommitment",
                 "recipientIdentity": participant.trustee_identity.as_str(),
-                "recipientRosterPosition": participant.roster_position,
-                "rnsLimbIndex": rns_limb_index,
-                "rnsPrime": rns_prime,
                 "aggregateCommitmentRoot": computation.commitment_root,
                 "aggregateOpeningRoot": computation.opening_root,
                 "commitment": computation.commitment,
@@ -448,9 +410,6 @@ fn aggregate_threshold_commitment_set(
     let mut set = json!({
         "objectType": "VssPublicAggregateThresholdCommitmentSet",
         "publicMatrixSeedHash": public_matrix_seed_hash,
-        "participantCount": participants.len(),
-        "rnsLimbCount": rns_limb_count,
-        "ringDegree": POLYNOMIAL_DEGREE,
         "recipientRecords": recipient_records,
     });
     set["aggregateThresholdCommitmentRoot"] =
@@ -512,12 +471,10 @@ fn authenticate_aggregate_opening_material_stream(aggregate_opening_root: &str, 
         .expect("encode aggregate opening stream descriptor");
     let aggregate_opening_root_bytes = crate::transcript_core::decode_hex(aggregate_opening_root)
         .expect("decode aggregate opening root");
-    let capability = [0x74; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH];
     let stream = crate::bgv::setup::begin_bgv_canonical_stream(
         crate::bgv::setup::BGV_CANONICAL_STREAM_FAMILY_TARGET_DECRYPTION_AGGREGATE_OPENING,
         &aggregate_opening_root_bytes,
         &descriptor_bytes,
-        capability,
     )
     .expect("begin aggregate opening material stream");
     for (chunk_index, chunk) in material
@@ -526,19 +483,15 @@ fn authenticate_aggregate_opening_material_stream(aggregate_opening_root: &str, 
     {
         crate::bgv::setup::absorb_bgv_canonical_stream_chunk(
             stream.handle,
-            &capability,
             u32::try_from(chunk_index).expect("aggregate opening chunk index fits u32"),
             chunk,
         )
         .expect("absorb aggregate opening material chunk");
     }
-    crate::bgv::setup::finish_bgv_canonical_stream(stream.handle, &capability)
+    crate::bgv::setup::finish_bgv_canonical_stream(stream.handle)
         .expect("finish aggregate opening material stream");
 }
 
-// A deterministic valid 128-hex private material seed per fixture aggregate
-// commitment, so distinct participants and limbs hide with distinct trees while
-// the fixture regenerates them byte-identically.
 fn fixture_aggregate_material_seed_hex(roster_position: usize, rns_limb_index: usize) -> String {
     crate::hashing::hash512_hex(
         "sealed-lattice-bgv-rns/target-decryption-fixture-aggregate-material-seed",
@@ -657,33 +610,18 @@ fn verify_share_proof_statement_binding(
 }
 
 fn rebind_share_proof_statement_root(statement: &mut Value) {
-    let statement_object = statement
-        .as_object_mut()
-        .expect("target share proof statement object");
-    statement_object.remove("proofStatementRoot");
-    statement["proofStatementRoot"] =
-        json!(derive_canonical_object_hash(statement).expect("target share proof statement root"));
+    let root_preimage = target_decryption_share_proof_statement_root_preimage(statement)
+        .expect("target share proof statement root preimage");
+    statement["proofStatementRoot"] = json!(
+        derive_canonical_object_hash(&root_preimage).expect("target share proof statement root")
+    );
 }
 
 fn rebind_target_accepted_record_hash(accepted_record: &mut Value) {
-    accepted_record
-        .as_object_mut()
-        .expect("target accepted record object")
-        .remove("targetAcceptedRecordHash");
+    let root_preimage = target_accepted_record_hash_preimage(accepted_record)
+        .expect("target accepted record preimage");
     accepted_record["targetAcceptedRecordHash"] =
-        json!(derive_canonical_object_hash(accepted_record).expect("target accepted record hash"));
-}
-
-fn rebind_active_credential_binding_root(statement: &mut Value) {
-    let active_credential_bindings =
-        statement["aggregateOpeningBinding"]["activeCredentialBindings"].clone();
-    statement["aggregateOpeningBinding"]["activeCredentialBindingRoot"] = json!(
-        derive_canonical_object_hash(&json!({
-            "objectType": "TargetDecryptionAggregateOpeningCredentialBindingSet",
-            "activeCredentialBindings": active_credential_bindings,
-        }))
-        .expect("active credential binding root")
-    );
+        json!(derive_canonical_object_hash(&root_preimage).expect("target accepted record hash"));
 }
 
 fn rebind_target_decryption_share_hashes(
@@ -696,6 +634,7 @@ fn rebind_target_decryption_share_hashes(
     trustee_identity: &str,
 ) {
     let setup_binding = read_setup_binding(setup_package).expect("setup binding");
+    read_target_share_profile(target_share_profile, &setup_binding).expect("share profile");
     let target_accepted =
         read_target_accepted_binding(accepted_record, &setup_binding).expect("target accepted");
     let target_ciphertext_pair = read_target_ciphertext_pair(
@@ -717,7 +656,6 @@ fn rebind_target_decryption_share_hashes(
             &setup_binding,
             &target_accepted,
             &target_ciphertext_pair,
-            &target_share_profile,
             participant,
             target_decryption_share["shareRoot"]
                 .as_str()
@@ -746,14 +684,10 @@ fn local_target_share_witness(
     accepted_record: &Value,
     target_ciphertext_binding: &Value,
     target_ciphertexts: &Value,
-    target_share_profile: &Value,
+    _target_share_profile: &Value,
     trustee_identity: &str,
 ) -> Value {
     let setup_binding = read_setup_binding(setup_package).expect("setup binding");
-    let setup_context_hashes =
-        collective_bgv_setup_context_hashes_from_package(setup_package).expect("context hashes");
-    let target_share_profile =
-        read_target_share_profile(target_share_profile, &setup_binding).expect("share profile");
     let target_accepted =
         read_target_accepted_binding(accepted_record, &setup_binding).expect("target accepted");
     read_target_ciphertext_pair(
@@ -767,19 +701,6 @@ fn local_target_share_witness(
         .iter()
         .find(|candidate| candidate.trustee_identity == trustee_identity)
         .expect("participant");
-    let setup_epoch = TARGET_DECRYPTION_FIXTURE_SETUP_EPOCH;
-    let public_matrix_seed_hash = setup_binding.public_matrix_seed_hash.clone();
-    let share_linkage_statement_root = hash_at_path(
-        setup_package,
-        &["vssShareLinkageStatement", "statementRoot"],
-    )
-    .expect("share-linkage statement root");
-    let aggregate_threshold_commitment_root = setup_package
-        .get("vssPublicAggregateThresholdCommitmentSet")
-        .and_then(|aggregate_set| aggregate_set.get("aggregateThresholdCommitmentRoot"))
-        .and_then(Value::as_str)
-        .expect("aggregate threshold commitment set root")
-        .to_string();
     let aggregate_opening_handoff = accepted_setup_fixture()
         .local_aggregate_opening_handoffs
         .iter()
@@ -793,19 +714,8 @@ fn local_target_share_witness(
         aggregate_opening_handoff["aggregateOpeningCredentials"].clone();
     json!({
         "objectType": "LocalTrusteeTargetDecryptionProofWitnessMaterial",
-        "ceremonyId": setup_binding.ceremony_id.as_str(),
-        "manifestHash": setup_binding.election_manifest_hash.as_str(),
-        "rosterHash": setup_context_hashes.roster_hash,
-        "setupParametersHash": setup_context_hashes.setup_parameters_hash,
-        "setupEpoch": setup_epoch,
-        "trusteeIdentity": participant.trustee_identity.as_str(),
-        "trusteeRosterPosition": participant.roster_position,
         "aggregateOpening": {
             "objectType": "LocalTrusteeVssPublicAggregateOpeningWitness",
-            "publicMatrixSeedHash": public_matrix_seed_hash,
-            "targetBasisHash": canonical_target_basis_hash().expect("target basis hash"),
-            "shareLinkageStatementRoot": share_linkage_statement_root,
-            "aggregateThresholdCommitmentRoot": aggregate_threshold_commitment_root,
             "aggregateOpeningCredentials": aggregate_opening_credentials,
         },
     })
@@ -939,13 +849,10 @@ fn staged_target_result_release(
     target_share_proofs: Vec<Value>,
     release_verification_id: &str,
 ) -> CanonicalResult<Value> {
-    let release_setup_context =
-        derive_bgv_target_decryption_result_release_setup_context_from_request(&json!({
-            "setupPackage": setup_package,
-        }))?;
+    let accepted_setup_handle = register_verified_target_release_setup(setup_package)?;
     begin_bgv_target_decryption_result_release_from_request(&json!({
         "releaseVerificationId": release_verification_id,
-        "releaseSetupContext": release_setup_context,
+        "acceptedSetupHandle": accepted_setup_handle,
         "targetAcceptedRecord": accepted_record,
         "targetCiphertextBinding": target_ciphertext_binding,
         "targetCiphertexts": target_ciphertexts,
@@ -977,13 +884,12 @@ fn target_setup_binding_uses_the_accepted_package_hash_boundary() {
 }
 
 #[test]
-fn target_release_setup_context_round_trips_and_rejects_a_type_mismatched_roster_position() {
+fn target_release_requires_a_verifier_issued_setup_handle() {
     let setup_package = accepted_setup_package();
-    let release_setup_context =
-        target_result_release_setup_context_from_setup_package(&setup_package)
-            .expect("release setup context");
-    let setup_binding = read_target_result_release_setup_context(&release_setup_context)
-        .expect("round-tripped release setup context");
+    let handle =
+        register_verified_target_release_setup(&setup_package).expect("accepted setup handle");
+    let setup_binding =
+        verified_target_release_setup_binding(handle).expect("registered setup binding");
     assert_eq!(
         setup_binding
             .participants
@@ -993,17 +899,7 @@ fn target_release_setup_context_round_trips_and_rejects_a_type_mismatched_roster
         TARGET_DECRYPTION_FIXTURE_TRUSTEES,
     );
 
-    let mut type_mismatched_context = release_setup_context;
-    type_mismatched_context["participants"][1]["rosterPosition"] = json!("1");
-    let error = read_target_result_release_setup_context(&type_mismatched_context)
-        .err()
-        .expect("a string roster position must be refused");
-    assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
-    assert!(
-        error.message.contains("rosterPosition"),
-        "{}",
-        error.message
-    );
+    assert!(verified_target_release_setup_binding(u32::MAX).is_err());
 }
 
 mod behavior_proof;

@@ -134,20 +134,6 @@ export type VssCoefficientCommitmentSet = Readonly<
     }
 >;
 
-export type VssCoefficientCommitmentMaterialSet = Readonly<
-    JsonRecord & {
-        readonly objectType: 'VssCoefficientCommitmentMaterialSet';
-        readonly publicMatrixSeedHash: ProtocolHash;
-        readonly vssCoefficientCommitmentRoot: ProtocolHash;
-        readonly participantCount: number;
-        readonly thresholdDegree: number;
-        readonly rnsLimbCount: number;
-        readonly ringDegree: number;
-        readonly coefficientCommitments: readonly VssCoefficientCommitmentMaterialRecord[];
-        readonly vssCoefficientCommitmentMaterialRoot: ProtocolHash;
-    }
->;
-
 export type VssSourceTrusteeOpeningMaterial = Readonly<{
     readonly sourceTrusteeIdentity: string;
     readonly sourceTrusteeRosterPosition: number;
@@ -157,15 +143,8 @@ export type VssSourceTrusteeOpeningMaterial = Readonly<{
     readonly coefficientOpenings: readonly VssCoefficientOpeningMaterial[];
 }>;
 
-export type VssSourceTrusteeCoefficientCommitmentContribution = Readonly<{
-    readonly sourceTrusteeRecord: VssSourceTrusteeCoefficientCommitmentRecord;
-    readonly materialRecords: readonly VssCoefficientCommitmentMaterialRecord[];
-    readonly privateOpeningMaterial: VssSourceTrusteeOpeningMaterial;
-}>;
-
 export type VssCoefficientCommitmentBundle = Readonly<{
     readonly commitmentSet: VssCoefficientCommitmentSet;
-    readonly materialSet: VssCoefficientCommitmentMaterialSet;
     readonly privateOpeningMaterialBySourceTrustee: readonly VssSourceTrusteeOpeningMaterial[];
 }>;
 
@@ -187,7 +166,6 @@ export type VssSourceTrusteeCoefficientCommitmentContributionInput = Omit<
 > & {
     readonly sourceTrusteeOpeningState: VssSourceTrusteeCoefficientOpeningState;
 };
-
 
 export type SetupCommitmentOpeningComputation = Readonly<{
     readonly commitment: SetupCommitmentValue;

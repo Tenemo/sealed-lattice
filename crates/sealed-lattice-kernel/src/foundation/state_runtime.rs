@@ -7,7 +7,7 @@ use subtle::ConstantTimeEq;
 use zeroize::Zeroizing;
 
 use super::{
-    CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH, CanonicalDecodeLimits, FOUNDATION_PROFILE, Hash512,
+    CanonicalDecodeLimits, FOUNDATION_PROFILE, Hash512,
     ParticipantIdentity, PreservedStateIntent, RefusalReason, Roster, StateCapabilityKind,
     StateDurableBinding, StateRecoveryIntentVerificationInput, StateRecoveryVerificationInput,
     StateReservationIntentVerificationInput, StateReservationVerificationInput, StateVerifier,
@@ -666,7 +666,6 @@ pub(crate) fn finish_state_output_verification(
     session_handle: u32,
     capability: &[u8],
     stream_handle: u32,
-    stream_capability: &[u8; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH],
     verified_reservation_handle: u32,
     canonical_output_intent_carrier: &[u8],
     canonical_state_certificate: &[u8],
@@ -676,8 +675,7 @@ pub(crate) fn finish_state_output_verification(
     with_runtime_registry(|registry| {
         registry.preflight_output(session_handle, capability, verified_reservation_handle)
     })?;
-    let verified_stream =
-        finish_canonical_stream_verifier_with_summary(stream_handle, stream_capability)?;
+    let verified_stream = finish_canonical_stream_verifier_with_summary(stream_handle)?;
     with_runtime_registry(|registry| {
         registry.verify_output(
             session_handle,
@@ -695,7 +693,6 @@ pub(crate) fn finish_state_output_intent_verification(
     session_handle: u32,
     capability: &[u8],
     stream_handle: u32,
-    stream_capability: &[u8; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH],
     verified_reservation_handle: u32,
     canonical_output_intent_carrier: &[u8],
 ) -> RuntimeResult<u32> {
@@ -703,8 +700,7 @@ pub(crate) fn finish_state_output_intent_verification(
     with_runtime_registry(|registry| {
         registry.preflight_output(session_handle, capability, verified_reservation_handle)
     })?;
-    let verified_stream =
-        finish_canonical_stream_verifier_with_summary(stream_handle, stream_capability)?;
+    let verified_stream = finish_canonical_stream_verifier_with_summary(stream_handle)?;
     with_runtime_registry(|registry| {
         registry.verify_output_intent(
             session_handle,
@@ -973,13 +969,9 @@ mod tests {
                     u8::try_from(FOUNDATION_PROFILE.participant_count - roster_position)
                         .expect("test reverse roster position fits u8");
                 let (verification_key, _) = ml_dsa_65::KG::keygen_from_seed(&signing_seed);
-                let mut mailbox_encapsulation_key = [0_u8; 1_184];
-                mailbox_encapsulation_key[1_152] =
-                    u8::try_from(roster_position + 1).expect("test roster position fits u8");
                 RosterEntry {
                     roster_position,
                     signing_verification_key: verification_key.into_bytes(),
-                    mailbox_encapsulation_key,
                 }
             })
             .collect();

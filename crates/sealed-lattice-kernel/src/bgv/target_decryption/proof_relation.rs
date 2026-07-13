@@ -14,7 +14,6 @@ pub(super) fn verify_target_decryption_relation_from_local_witness(
         setup_binding,
         target_accepted,
         target_ciphertexts,
-        target_share_profile,
     )?;
     let local_witness = read_local_target_decryption_share_witness(
         local_target_share_witness,

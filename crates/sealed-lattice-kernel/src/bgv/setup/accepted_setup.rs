@@ -7,9 +7,8 @@ mod private_vss_envelopes;
 mod public_key_share_material;
 mod public_key_shares;
 mod same_secret_bridge_verification;
-mod setup_intent;
 mod setup_context;
-mod transport_policy;
+mod setup_intent;
 mod vss_complaints_and_acceptances;
 mod vss_public_material_verification;
 
@@ -40,28 +39,18 @@ use self::evaluator_key_schedule::{
     verify_context_fields_match, verify_evaluator_key_schedule,
     verify_pending_evaluation_key_material_boundary,
 };
-pub(crate) use self::setup_intent::accepted_setup_participant_roster_from_package;
-use self::setup_intent::{
-    SetupIntentVerification, expected_trustees_from_setup_intent, setup_context_string,
-    verify_setup_intent, verify_setup_intent_roster_hash,
-};
 use self::private_vss_envelopes::{
     PrivateVssEnvelopeBindingMap, private_vss_envelope_bindings_from_package,
     verify_private_vss_envelope_commitments,
 };
 #[cfg(test)]
-pub(in crate::bgv::setup) use self::public_key_share_material::authenticated_public_key_share_material_stream_summary;
-#[cfg(test)]
-pub(in crate::bgv::setup) use self::public_key_share_material::evict_verified_canonical_public_key_share_materials;
-#[cfg(test)]
 pub(in crate::bgv::setup) use self::public_key_share_material::public_key_share_coefficient_vector_hash;
 pub(in crate::bgv::setup) use self::public_key_share_material::{
-    CanonicalPublicKeyShareMaterialStream,
+    CanonicalPublicKeyShareMaterialStream, VerifiedCanonicalPublicKeyShareMaterialHandle,
+    VerifiedCanonicalPublicKeyShareMaterialStoreEntry,
     absorb_verified_canonical_public_key_share_material_chunk,
-    authenticated_public_key_share_material_stream_summary_in_session,
     begin_verified_canonical_public_key_share_material_stream,
     cancel_verified_canonical_public_key_share_material_stream,
-    drain_verified_canonical_public_key_share_materials,
     finish_verified_canonical_public_key_share_material_stream,
 };
 use self::public_key_share_material::{
@@ -81,7 +70,11 @@ pub(in crate::bgv::setup) use self::public_key_shares::{
 #[cfg(test)]
 pub(in crate::bgv::setup) use self::same_secret_bridge_verification::verified_same_secret_bridge_material_from_package;
 use self::setup_context::verify_context;
-use self::transport_policy::verify_transport_request_bindings;
+pub(crate) use self::setup_intent::accepted_setup_participant_roster_from_package;
+use self::setup_intent::{
+    SetupIntentVerification, expected_trustees_from_setup_intent, setup_context_string,
+    verify_setup_intent, verify_setup_intent_roster_hash,
+};
 use self::vss_complaints_and_acceptances::{
     source_trustee_commitment_roots_from_vss_commitments, verify_vss_complaints,
     verify_vss_share_acceptances,
@@ -97,22 +90,17 @@ use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 use unicode_normalization::UnicodeNormalization;
 
-#[cfg(test)]
-use super::evaluation_key_share_material::VerifiedComponentMaterialEvictionGuard;
-#[cfg(test)]
-use super::evaluation_key_share_material::authenticated_evaluation_key_component_stream_summary;
-#[cfg(test)]
-use super::setup_proof::VerifiedSetupProofMaterialEvictionGuard;
 use super::*;
 use super::{
     evaluation_key_share_material::{
         DecodedEvaluationKeyShareComponentMaterial,
         EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_TRANSPORT_SET_OBJECT_TYPE,
         EvaluationKeyShareDerivedMaterialBinding, EvaluationKeyShareProofFamily,
-        authenticated_evaluation_key_component_stream_summary_in_session,
         component_b_vectors_from_record,
     },
-    setup_proof::{SetupProofMaterialBytes, verified_setup_proof_material_bytes_from_request},
+    setup_proof::{
+        SetupProofMaterialBytes, SetupProofMaterialMap, SetupProofMaterialTransportFamily,
+    },
 };
 use crate::bgv::coefficient_codec::{coefficient_vector_from_le_hex, coefficient_vector_le_hex};
 use crate::bgv::evaluator::top_k::{
@@ -154,10 +142,7 @@ const GALOIS_KEY_SHARE_BATCH_OBJECT_TYPE: &str = "GaloisKeyShareBatch";
 const GALOIS_KEY_SHARE_MATERIAL_OBJECT_TYPE: &str = "GaloisKeyShareMaterial";
 const TRUSTEE_EVALUATION_KEY_PROOF_SET_OBJECT_TYPE: &str = "TrusteeEvaluationKeyProofSet";
 const TRUSTEE_EVALUATION_KEY_PROOF_OBJECT_TYPE: &str = "TrusteeEvaluationKeyProof";
-use super::trustee_evaluation_key_proof::{
-    PUBLIC_KEY_SHARE_PROOF_FAMILY, SAME_SECRET_BRIDGE_PROOF_FAMILY,
-    TRUSTEE_EVALUATION_KEY_PROOF_FAMILY, VSS_SHARE_LINKAGE_PROOF_FAMILY,
-};
+use super::trustee_evaluation_key_proof::TRUSTEE_EVALUATION_KEY_PROOF_FAMILY;
 const PRIVATE_VSS_ENVELOPE_COMMITMENT_SET_OBJECT_TYPE: &str = "PrivateVssEnvelopeCommitmentSet";
 const PRIVATE_VSS_ENVELOPE_COMMITMENT_OBJECT_TYPE: &str = "PrivateVssEnvelopeCommitment";
 const PRIVATE_VSS_ENVELOPE_AAD_OBJECT_TYPE: &str = "PrivateVssEnvelopeAad";
@@ -226,24 +211,23 @@ pub(super) fn accepted_roster_from_setup_context(
 pub(super) fn accepted_roster_from_package(
     setup_package: &Value,
 ) -> CanonicalResult<AcceptedRosterParameters> {
-    let setup_context = setup_package
-        .get("setupContext")
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidProtocolObject,
-                "setupPackage.setupContext is required",
-            )
-        })?;
+    let setup_context = setup_package.get("setupContext").ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidProtocolObject,
+            "setupPackage.setupContext is required",
+        )
+    })?;
     accepted_roster_from_setup_context(setup_context)
 }
-struct Refusal {
+#[derive(Debug, Clone)]
+pub(super) struct Refusal {
     reason_code: &'static str,
     message: String,
     object_path: String,
 }
 
 impl Refusal {
-    fn new(
+    pub(super) fn new(
         reason_code: &'static str,
         message: impl Into<String>,
         object_path: impl Into<String>,
@@ -254,19 +238,13 @@ impl Refusal {
             object_path: object_path.into(),
         }
     }
-
-    fn to_value(&self) -> Value {
-        json!({
-            "reasonCode": self.reason_code,
-            "message": self.message,
-            "objectPath": self.object_path,
-        })
-    }
 }
 
-enum VerificationFlow {
-    Continue,
-    Stop(Value),
+pub(super) type Refusals = Vec<Refusal>;
+
+enum SetupPackageVerification {
+    Verified,
+    Refused(Refusals),
 }
 
 pub(crate) fn describe_collective_bgv_setup_parameters() -> CanonicalResult<Value> {
@@ -285,7 +263,6 @@ pub(crate) fn describe_collective_bgv_setup_parameters_for_roster(
 ) -> CanonicalResult<Value> {
     Ok(json!({
         "setupParametersHash": setup_parameters_hash_for_roster(roster)?,
-        "canonicalTargetBasisHash": crate::bgv::evaluator::top_k::canonical_target_basis_hash()?,
         "participantCount": roster.participant_count,
         "qShare": q_share_description_value(),
         "evaluatorKeySchedule": evaluator_key_schedule_value()?,
@@ -328,18 +305,6 @@ pub(crate) fn verify_collective_bgv_setup_package(
     setup_package: &Value,
     request: &Value,
 ) -> CanonicalResult<Value> {
-    // Evict this request's streamed evaluation-key component material from the
-    // process-global store when verify returns by any path, so the browser wasm
-    // runtime does not retain every verified package's material.
-    let _component_material_eviction_guard =
-        VerifiedComponentMaterialEvictionGuard::for_request(request);
-    // Same lifecycle for this request's stream-verified setup proof material: the
-    // SDK streams fresh sequence-numbered handles on every verify, so without
-    // eviction the process-global store retains a full copy of every verified
-    // package's share-linkage, same-secret bridge, public-key share, and
-    // evaluation-key proof material.
-    let _setup_proof_material_eviction_guard =
-        VerifiedSetupProofMaterialEvictionGuard::for_request(request);
     verify_collective_bgv_setup_package_inner(setup_package, request, &[])
 }
 
@@ -347,18 +312,20 @@ pub(crate) fn verify_collective_bgv_setup_package(
 pub(in crate::bgv::setup) fn verify_collective_bgv_setup_intent_for_test(
     setup_package: &Value,
 ) -> CanonicalResult<Value> {
-    if let Some(response) = verify_context(setup_package, &json!({}))? {
-        return Ok(response);
+    if let Some(refusals) = verify_context(setup_package, &json!({}))? {
+        return Ok(verification_response(refusals));
     }
     let registrations = match verify_setup_intent(setup_package)? {
         SetupIntentVerification::Verified(registrations) => registrations,
-        SetupIntentVerification::Refused(response) => return Ok(response),
+        SetupIntentVerification::Refused(refusals) => {
+            return Ok(verification_response(refusals));
+        }
     };
-    if let Some(response) = verify_setup_intent_roster_hash(setup_package, &registrations)? {
-        return Ok(response);
+    if let Some(refusals) = verify_setup_intent_roster_hash(setup_package, &registrations)? {
+        return Ok(verification_response(refusals));
     }
 
-    accepted_setup_verification_response()
+    Ok(accepted_setup_verification_response())
 }
 
 #[cfg(test)]
@@ -367,10 +334,6 @@ pub(in crate::bgv::setup) fn verify_collective_bgv_setup_package_with_proof_bind
     request: &Value,
     proof_binding_leases: &[crate::bgv::setup::CanonicalSetupProofBindingLease],
 ) -> CanonicalResult<Value> {
-    let _component_material_eviction_guard =
-        VerifiedComponentMaterialEvictionGuard::for_request(request);
-    let _setup_proof_material_eviction_guard =
-        VerifiedSetupProofMaterialEvictionGuard::for_request(request);
     verify_collective_bgv_setup_package_inner(setup_package, request, proof_binding_leases)
 }
 
@@ -380,10 +343,6 @@ pub(in crate::bgv::setup) fn verify_collective_bgv_setup_package_in_proof_bindin
     request: &Value,
     proof_binding_session: crate::bgv::setup::AcceptedSetupProofBindingSession,
 ) -> CanonicalResult<Value> {
-    let _component_material_eviction_guard =
-        VerifiedComponentMaterialEvictionGuard::for_request(request);
-    let _setup_proof_material_eviction_guard =
-        VerifiedSetupProofMaterialEvictionGuard::for_request(request);
     verify_collective_bgv_setup_package_in_owned_session(
         setup_package,
         request,
@@ -418,51 +377,45 @@ fn verify_collective_bgv_setup_package_in_owned_session(
     for proof_binding_lease in proof_binding_leases {
         if let Err(error) = crate::bgv::setup::restore_accepted_setup_proof_binding_lease(
             proof_binding_session.session_handle,
-            &proof_binding_session.capability,
             proof_binding_lease,
         ) {
             let _ = crate::bgv::setup::cancel_accepted_setup_proof_binding_session(
                 proof_binding_session.session_handle,
-                &proof_binding_session.capability,
             );
             return Err(error);
         }
     }
 
     if !setup_package.is_object() {
-        let response = verification_response(
+        let refusals = setup_refusals(
             Vec::new(),
             vec![Refusal::new(
                 "setupPackageNotObject",
                 "setupPackage must be a JSON object",
                 "setupPackage".to_string(),
             )],
-        )?;
+        );
         crate::bgv::setup::cancel_accepted_setup_proof_binding_session(
             proof_binding_session.session_handle,
-            &proof_binding_session.capability,
         )?;
-        return Ok(response);
+        return Ok(verification_response(refusals));
     }
     match verify_collective_setup_package(setup_package, request, &proof_binding_session) {
-        Ok(VerificationFlow::Continue) => {
+        Ok(SetupPackageVerification::Verified) => {
             crate::bgv::setup::finish_accepted_setup_proof_binding_session(
                 proof_binding_session.session_handle,
-                &proof_binding_session.capability,
             )?;
-            accepted_setup_verification_response()
+            Ok(accepted_setup_verification_response())
         }
-        Ok(VerificationFlow::Stop(response)) => {
+        Ok(SetupPackageVerification::Refused(refusals)) => {
             crate::bgv::setup::cancel_accepted_setup_proof_binding_session(
                 proof_binding_session.session_handle,
-                &proof_binding_session.capability,
             )?;
-            Ok(response)
+            Ok(verification_response(refusals))
         }
         Err(error) => {
             let _ = crate::bgv::setup::cancel_accepted_setup_proof_binding_session(
                 proof_binding_session.session_handle,
-                &proof_binding_session.capability,
             );
             Err(error)
         }
@@ -473,64 +426,58 @@ fn verify_collective_setup_package(
     setup_package: &Value,
     request: &Value,
     proof_binding_session: &crate::bgv::setup::AcceptedSetupProofBindingSession,
-) -> CanonicalResult<VerificationFlow> {
+) -> CanonicalResult<SetupPackageVerification> {
     let Some(object_type) = setup_package.get("objectType").and_then(Value::as_str) else {
-        return outside_accepted_parameters(
+        return Ok(outside_accepted_parameters(
             "setupPackage.objectType is required",
             "setupPackage.objectType",
-        );
+        ));
     };
     if object_type != SETUP_PACKAGE_OBJECT_TYPE {
-        return outside_accepted_parameters(
+        return Ok(outside_accepted_parameters(
             format!(
                 "setupPackage.objectType must be {SETUP_PACKAGE_OBJECT_TYPE}, not {object_type}"
             ),
             "setupPackage.objectType",
-        );
+        ));
     }
-    if let Some(response) = verify_context(setup_package, request)? {
-        return Ok(VerificationFlow::Stop(response));
+    if let Some(refusals) = verify_context(setup_package, request)? {
+        return Ok(SetupPackageVerification::Refused(refusals));
     }
     let setup_intent_registrations = match verify_setup_intent(setup_package)? {
         SetupIntentVerification::Verified(registrations) => registrations,
-        SetupIntentVerification::Refused(response) => {
-            return Ok(VerificationFlow::Stop(response));
+        SetupIntentVerification::Refused(refusals) => {
+            return Ok(SetupPackageVerification::Refused(refusals));
         }
     };
-    if let Some(response) =
+    if let Some(refusals) =
         verify_setup_intent_roster_hash(setup_package, &setup_intent_registrations)?
     {
-        return Ok(VerificationFlow::Stop(response));
+        return Ok(SetupPackageVerification::Refused(refusals));
     }
-    if let Some(response) = verify_common_randomness(setup_package, &setup_intent_registrations)? {
-        return Ok(VerificationFlow::Stop(response));
+    if let Some(refusals) = verify_common_randomness(setup_package, &setup_intent_registrations)? {
+        return Ok(SetupPackageVerification::Refused(refusals));
     }
-    if let Some(response) = verify_setup_package_hash(setup_package, request)? {
-        return Ok(VerificationFlow::Stop(response));
+    if let Some(refusals) = verify_setup_package_hash(setup_package, request)? {
+        return Ok(SetupPackageVerification::Refused(refusals));
     }
-    if let Some(response) = verify_private_vss_envelope_commitments(
-        setup_package,
-        &setup_intent_registrations,
-    )? {
-        return Ok(VerificationFlow::Stop(response));
+    if let Some(refusals) =
+        verify_private_vss_envelope_commitments(setup_package, &setup_intent_registrations)?
+    {
+        return Ok(SetupPackageVerification::Refused(refusals));
     }
-    if let Some(response) = verify_vss_complaints(setup_package, &setup_intent_registrations)? {
-        return Ok(VerificationFlow::Stop(response));
+    if let Some(refusals) = verify_vss_complaints(setup_package, &setup_intent_registrations)? {
+        return Ok(SetupPackageVerification::Refused(refusals));
     }
-    if let Some(response) =
+    if let Some(refusals) =
         verify_vss_share_acceptances(setup_package, &setup_intent_registrations)?
     {
-        return Ok(VerificationFlow::Stop(response));
-    }
-    if let Some(response) =
-        verify_transport_request_bindings(setup_package, request, Some(proof_binding_session))?
-    {
-        return Ok(VerificationFlow::Stop(response));
+        return Ok(SetupPackageVerification::Refused(refusals));
     }
     match verify_vss_public_material(setup_package, request, Some(proof_binding_session))? {
         VssPublicMaterialVerification::Verified => {}
-        VssPublicMaterialVerification::Refused(response) => {
-            return Ok(VerificationFlow::Stop(response));
+        VssPublicMaterialVerification::Refused(refusals) => {
+            return Ok(SetupPackageVerification::Refused(refusals));
         }
     }
     let verified_same_secret_bridge = match verify_same_secret_bridge_statement_set(
@@ -539,69 +486,73 @@ fn verify_collective_setup_package(
         Some(proof_binding_session),
     )? {
         SameSecretBridgeVerification::Verified(verified_material) => verified_material,
-        SameSecretBridgeVerification::Refused(response) => {
-            return Ok(VerificationFlow::Stop(response));
+        SameSecretBridgeVerification::Refused(refusals) => {
+            return Ok(SetupPackageVerification::Refused(refusals));
         }
     };
-    if let Some(response) = verify_public_key_shares(setup_package, &setup_intent_registrations)? {
-        return Ok(VerificationFlow::Stop(response));
+    if let Some(refusals) = verify_public_key_shares(setup_package, &setup_intent_registrations)? {
+        return Ok(SetupPackageVerification::Refused(refusals));
     }
-    if let Some(response) = verify_public_key_share_succinct_proofs(
+    if let Some(refusals) = verify_public_key_share_succinct_proofs(
         setup_package,
         request,
         Some(&verified_same_secret_bridge),
         proof_binding_session,
     )? {
-        return Ok(VerificationFlow::Stop(response));
+        return Ok(SetupPackageVerification::Refused(refusals));
     }
-    if let Some(response) = verify_collective_public_key_material(setup_package, request)? {
-        return Ok(VerificationFlow::Stop(response));
+    if let Some(refusals) =
+        verify_collective_public_key_material(setup_package, request, proof_binding_session)?
+    {
+        return Ok(SetupPackageVerification::Refused(refusals));
     }
-    if let Some(response) = verify_evaluator_key_schedule(setup_package)? {
-        return Ok(VerificationFlow::Stop(response));
+    if let Some(refusals) = verify_evaluator_key_schedule(setup_package)? {
+        return Ok(SetupPackageVerification::Refused(refusals));
     }
-    if let Some(response) = verify_pending_evaluation_key_material_boundary(
+    if let Some(refusals) = verify_pending_evaluation_key_material_boundary(
         setup_package,
         request,
         Some(&verified_same_secret_bridge),
         proof_binding_session,
         &setup_intent_registrations,
     )? {
-        return Ok(VerificationFlow::Stop(response));
+        return Ok(SetupPackageVerification::Refused(refusals));
     }
-    if let Some(response) =
-        verify_evaluation_key_share_component_material_transport(setup_package, request)?
-    {
-        return Ok(VerificationFlow::Stop(response));
+    if let Some(refusals) = verify_evaluation_key_share_component_material_transport(
+        setup_package,
+        request,
+        proof_binding_session,
+    )? {
+        return Ok(SetupPackageVerification::Refused(refusals));
     }
-    Ok(VerificationFlow::Continue)
+    Ok(SetupPackageVerification::Verified)
 }
 
 fn verify_setup_package_hash(
     setup_package: &Value,
     request: &Value,
-) -> CanonicalResult<Option<Value>> {
+) -> CanonicalResult<Option<Refusals>> {
     let Some(setup_package_hash) = setup_package
         .get("setupPackageHash")
         .and_then(Value::as_str)
     else {
-        return Ok(Some(verification_response(
+        return Ok(Some(setup_refusals(
             vec!["setupPackageHash".to_string()],
             Vec::new(),
-        )?));
+        )));
     };
     validate_hash_string(setup_package_hash, "setupPackage.setupPackageHash")?;
 
     let expected_hash = derive_collective_setup_package_hash(setup_package)?;
     if setup_package_hash != expected_hash {
-        return Ok(Some(verification_response(
+        return Ok(Some(setup_refusals(
             Vec::new(),
             vec![Refusal::new(
                 "setupPackageHashMismatch",
                 "SetupPackageHash does not match the canonical setup package payload",
                 "setupPackage.setupPackageHash".to_string(),
             )],
-        )?));
+        )));
     }
     if let Some(expected_hash_from_request) = request
         .get("expectedSetupPackageHash")
@@ -609,14 +560,14 @@ fn verify_setup_package_hash(
     {
         validate_hash_string(expected_hash_from_request, "expectedSetupPackageHash")?;
         if expected_hash_from_request != setup_package_hash {
-            return Ok(Some(verification_response(
+            return Ok(Some(setup_refusals(
                 Vec::new(),
                 vec![Refusal::new(
                     "expectedSetupPackageHashMismatch",
                     "setup package hash does not match expectedSetupPackageHash",
                     "expectedSetupPackageHash".to_string(),
                 )],
-            )?));
+            )));
         }
     }
 
@@ -640,28 +591,28 @@ pub(in crate::bgv) fn derive_collective_setup_package_hash(
     )
 }
 
-fn accepted_setup_verification_response() -> CanonicalResult<Value> {
-    verification_response(Vec::new(), Vec::new())
+fn accepted_setup_verification_response() -> Value {
+    verification_response(Vec::new())
 }
 
 fn outside_accepted_parameters(
     message: impl Into<String>,
     object_path: impl Into<String>,
-) -> CanonicalResult<VerificationFlow> {
-    Ok(VerificationFlow::Stop(verification_response(
+) -> SetupPackageVerification {
+    SetupPackageVerification::Refused(setup_refusals(
         Vec::new(),
         vec![Refusal::new(
             "outsideCollectiveBgvSetupParameters",
             message,
             object_path.into(),
         )],
-    )?))
+    ))
 }
 
-fn verification_response(
+pub(super) fn setup_refusals(
     missing_objects: Vec<String>,
     mut refused_objects: Vec<Refusal>,
-) -> CanonicalResult<Value> {
+) -> Refusals {
     refused_objects.extend(missing_objects.into_iter().map(|missing_object| {
         Refusal::new(
             "setupObjectMissing",
@@ -669,15 +620,23 @@ fn verification_response(
             format!("setupPackage.{missing_object}"),
         )
     }));
+    refused_objects
+}
+
+fn verification_response(refused_objects: Refusals) -> Value {
     let accepted = refused_objects.is_empty();
 
-    Ok(json!({
+    json!({
         "isValid": accepted,
         "refusedObjects": refused_objects
             .into_iter()
-            .map(|refusal| refusal.to_value())
+            .map(|refusal| json!({
+                "reasonCode": refusal.reason_code,
+                "message": refusal.message,
+                "objectPath": refusal.object_path,
+            }))
             .collect::<Vec<_>>(),
-    }))
+    })
 }
 
 mod binding_checks;
@@ -686,7 +645,7 @@ mod setup_parameters;
 use binding_checks::*;
 use setup_parameters::*;
 
-pub(super) use binding_checks::accepted_vss_coefficient_commitment_root;
+pub(super) use binding_checks::{accepted_vss_coefficient_commitment_root, setup_context_hash};
 pub(super) use setup_parameters::setup_parameters_hash_for_roster;
 
 #[cfg(test)]

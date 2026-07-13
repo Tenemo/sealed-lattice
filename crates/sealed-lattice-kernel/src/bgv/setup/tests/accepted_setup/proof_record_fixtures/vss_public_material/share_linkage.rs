@@ -1,13 +1,18 @@
 use super::*;
 
-struct VssShareLinkageProofMaterialReference {
+struct VssShareLinkageProofMaterialIdentity {
     proof_bytes_hash: String,
     proof_material_root: String,
 }
 
-fn vss_share_linkage_proof_material_reference_from_bytes(
+struct VssShareLinkageProofMaterialReference {
+    identity: VssShareLinkageProofMaterialIdentity,
+    proof_binding_lease: crate::bgv::setup::CanonicalSetupProofBindingLease,
+}
+
+fn vss_share_linkage_proof_material_identity_from_bytes(
     proof_bytes: &[u8],
-) -> VssShareLinkageProofMaterialReference {
+) -> VssShareLinkageProofMaterialIdentity {
     let proof_bytes_hash = hash512_hex(VSS_SHARE_LINKAGE_PROOF_BYTES_HASH_DOMAIN, &[proof_bytes]);
     let proof_material_root = crate::bgv::setup::setup_proof::setup_proof_material_reference_root(
         VSS_SHARE_LINKAGE_PROOF_FAMILY,
@@ -15,16 +20,16 @@ fn vss_share_linkage_proof_material_reference_from_bytes(
     )
     .expect("VSS share-linkage proof material root");
 
-    VssShareLinkageProofMaterialReference {
+    VssShareLinkageProofMaterialIdentity {
         proof_bytes_hash,
         proof_material_root,
     }
 }
 
-fn verify_and_cache_vss_share_linkage_proof_binding(
+fn verify_and_retain_vss_share_linkage_proof_binding(
     proof_material_root: &str,
     request: &serde_json::Value,
-) -> crate::encoding::CanonicalResult<()> {
+) -> crate::encoding::CanonicalResult<crate::bgv::setup::CanonicalSetupProofBindingLease> {
     let proof_binding_session =
         match crate::bgv::setup::begin_accepted_setup_fixture_proof_binding_session() {
             Ok(proof_binding_session) => proof_binding_session,
@@ -42,28 +47,24 @@ fn verify_and_cache_vss_share_linkage_proof_binding(
     ) {
         let _ = crate::bgv::setup::cancel_accepted_setup_proof_binding_session(
             proof_binding_session.session_handle,
-            &proof_binding_session.capability,
         );
         crate::bgv::setup::evict_verified_canonical_setup_proof_materials(&[
             proof_material_root.to_string(),
         ]);
         return Err(error);
     }
-    if let Err(error) = crate::bgv::setup::cache_accepted_setup_fixture_proof_binding_lease(
+    match crate::bgv::setup::finish_accepted_setup_fixture_proof_binding_session(
         proof_binding_session,
         proof_material_root,
     ) {
-        let _ = crate::bgv::setup::cancel_accepted_setup_proof_binding_session(
-            proof_binding_session.session_handle,
-            &proof_binding_session.capability,
-        );
-        crate::bgv::setup::evict_verified_canonical_setup_proof_materials(&[
-            proof_material_root.to_string()
-        ]);
-        return Err(error);
+        Ok(proof_binding_lease) => Ok(proof_binding_lease),
+        Err(error) => {
+            crate::bgv::setup::evict_verified_canonical_setup_proof_materials(&[
+                proof_material_root.to_string(),
+            ]);
+            Err(error)
+        }
     }
-
-    Ok(())
 }
 
 // One share-linkage statement already supports a conjunction of independent
@@ -84,19 +85,13 @@ pub(in super::super::super) fn vss_share_linkage_statement_object(
         .as_str()
         .expect("public matrix seed hash");
     let participant_count = participant_count_from_package(package);
-    let threshold_degree = package["vssPublicCoefficientCommitmentSet"]["thresholdDegree"]
-        .as_u64()
-        .expect("threshold degree");
-    let ring_degree = package["vssPublicCoefficientCommitmentSet"]["ringDegree"]
-        .as_u64()
-        .expect("ring degree");
+    let threshold_degree = vss_fixture_threshold_degree(package);
+    let ring_degree = vss_commitment_ring_degree_from_fixture_package(package);
+    let setup_context_hash = crate::bgv::setup::accepted_setup::setup_context_hash(setup_context)
+        .expect("setup context hash");
     let mut statement = serde_json::json!({
         "objectType": "VssShareLinkageStatement",
-        "ceremonyId": setup_context["ceremonyId"],
-        "manifestHash": setup_context["manifestHash"],
-        "rosterHash": setup_context["rosterHash"],
-        "setupParametersHash": setup_context["setupParametersHash"],
-        "setupEpoch": setup_context["setupEpoch"],
+        "setupContextHash": setup_context_hash,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "ringDegree": ring_degree,
         "participantCount": participant_count,
@@ -115,29 +110,32 @@ pub(in super::super::super) fn vss_share_linkage_statement_object(
 
 pub(in super::super::super) fn vss_share_linkage_proof_material_set_object(
     package: &serde_json::Value,
-) -> serde_json::Value {
+) -> VssProofMaterialSetFixture {
     let participant_count = participant_count_from_package(package);
-    let proof_records = (0..participant_count)
+    let proof_record_fixtures = (0..participant_count)
         .flat_map(|source_trustee_roster_position| {
             vss_share_linkage_proof_records(package, source_trustee_roster_position)
         })
         .collect::<Vec<_>>();
-    let mut proof_material_set = serde_json::json!({
-        "objectType": "VssShareLinkageProofMaterialSet",
-        "proofRecords": proof_records,
-    });
-    proof_material_set["proofMaterialSetRoot"] = serde_json::json!(
-        derive_canonical_object_hash(&proof_material_set)
-            .expect("VSS share-linkage proof material set root")
-    );
-
-    proof_material_set
+    VssProofMaterialSetFixture {
+        value: serde_json::json!({
+            "objectType": "VssShareLinkageProofMaterialSet",
+            "proofRecords": proof_record_fixtures
+                .iter()
+                .map(|fixture| fixture.record.clone())
+                .collect::<Vec<_>>(),
+        }),
+        proof_binding_leases: proof_record_fixtures
+            .into_iter()
+            .map(|fixture| fixture.proof_binding_lease)
+            .collect(),
+    }
 }
 
 pub(super) fn vss_share_linkage_proof_records(
     package: &serde_json::Value,
     source_trustee_roster_position: u64,
-) -> Vec<serde_json::Value> {
+) -> Vec<VssProofRecordFixture> {
     let item_records = vss_share_linkage_item_records(package, source_trustee_roster_position);
     let participant_count: usize = participant_count_from_package(package)
         .try_into()
@@ -164,7 +162,7 @@ pub(super) fn vss_share_linkage_proof_record(
     source_trustee_roster_position: u64,
     proof_record_index: usize,
     item_records: &[serde_json::Value],
-) -> serde_json::Value {
+) -> VssProofRecordFixture {
     let vss_share_linkage = vss_share_linkage_proof_statement(package, item_records);
     let proof_material = vss_share_linkage_proof_material_reference(
         package,
@@ -172,17 +170,17 @@ pub(super) fn vss_share_linkage_proof_record(
         source_trustee_roster_position,
         proof_record_index,
     );
-    let mut proof_record = serde_json::json!({
+    let proof_record = serde_json::json!({
         "objectType": "VssShareLinkageProofRecord",
         "vssShareLinkage": vss_share_linkage,
-        "proofBytesHash": proof_material.proof_bytes_hash,
-        "proofMaterialRoot": proof_material.proof_material_root,
+        "proofBytesHash": proof_material.identity.proof_bytes_hash,
+        "proofMaterialRoot": proof_material.identity.proof_material_root,
     });
-    proof_record["proofRecordRoot"] = serde_json::json!(
-        derive_canonical_object_hash(&proof_record).expect("VSS share-linkage proof record root")
-    );
 
-    proof_record
+    VssProofRecordFixture {
+        record: proof_record,
+        proof_binding_lease: proof_material.proof_binding_lease,
+    }
 }
 
 pub(super) fn vss_share_linkage_proof_statement(
@@ -228,9 +226,7 @@ pub(super) fn vss_share_linkage_item_record(
     recipient_roster_position: u64,
     rns_limb_index: usize,
 ) -> serde_json::Value {
-    let threshold_degree = package["vssPublicCoefficientCommitmentSet"]["thresholdDegree"]
-        .as_u64()
-        .expect("threshold degree") as usize;
+    let threshold_degree = vss_fixture_threshold_degree(package) as usize;
     let coefficient_source_record =
         vss_public_coefficient_source_record_from_package(package, source_trustee_roster_position);
     let recipient_source_record =
@@ -299,7 +295,7 @@ fn vss_share_linkage_proof_material_reference(
     if !final_package_checkpoint_resume_enabled() {
         let generated = generate_vss_share_linkage_proof_from_request(&request)
             .expect("VSS share-linkage proof");
-        let proof_material_reference = VssShareLinkageProofMaterialReference {
+        let proof_material_identity = VssShareLinkageProofMaterialIdentity {
             proof_bytes_hash: generated["proofBytesHash"]
                 .as_str()
                 .expect("VSS share-linkage proof bytes hash")
@@ -312,19 +308,22 @@ fn vss_share_linkage_proof_material_reference(
         assert_eq!(
             crate::bgv::setup::setup_proof::setup_proof_material_reference_root(
                 VSS_SHARE_LINKAGE_PROOF_FAMILY,
-                &proof_material_reference.proof_bytes_hash,
+                &proof_material_identity.proof_bytes_hash,
             )
             .expect("VSS share-linkage generated proof material root"),
-            proof_material_reference.proof_material_root,
+            proof_material_identity.proof_material_root,
             "generated VSS share-linkage metadata must bind its retained bytes",
         );
-        verify_and_cache_vss_share_linkage_proof_binding(
-            &proof_material_reference.proof_material_root,
+        let proof_binding_lease = verify_and_retain_vss_share_linkage_proof_binding(
+            &proof_material_identity.proof_material_root,
             &request,
         )
         .expect("verify VSS share-linkage proof before releasing its bytes");
 
-        return proof_material_reference;
+        return VssShareLinkageProofMaterialReference {
+            identity: proof_material_identity,
+            proof_binding_lease,
+        };
     }
 
     let mut resumed_proof_material_reference = None;
@@ -332,18 +331,21 @@ fn vss_share_linkage_proof_material_reference(
         VSS_SHARE_LINKAGE_PROOF_CHECKPOINT_DIRECTORY,
         &checkpoint_key,
         |proof_bytes| {
-            let proof_material_reference =
-                vss_share_linkage_proof_material_reference_from_bytes(proof_bytes);
+            let proof_material_identity =
+                vss_share_linkage_proof_material_identity_from_bytes(proof_bytes);
             authenticate_setup_proof_material_stream_for_test(
                 VSS_SHARE_LINKAGE_PROOF_FAMILY,
-                &proof_material_reference.proof_material_root,
+                &proof_material_identity.proof_material_root,
                 proof_bytes,
             )?;
-            verify_and_cache_vss_share_linkage_proof_binding(
-                &proof_material_reference.proof_material_root,
+            let proof_binding_lease = verify_and_retain_vss_share_linkage_proof_binding(
+                &proof_material_identity.proof_material_root,
                 &request,
             )?;
-            resumed_proof_material_reference = Some(proof_material_reference);
+            resumed_proof_material_reference = Some(VssShareLinkageProofMaterialReference {
+                identity: proof_material_identity,
+                proof_binding_lease,
+            });
             Ok(())
         },
         || {
@@ -379,39 +381,31 @@ fn vss_share_linkage_proof_material_reference(
     if let Some(proof_material_reference) = resumed_proof_material_reference {
         return proof_material_reference;
     }
-    let VssShareLinkageProofMaterialReference {
-        proof_bytes_hash,
-        proof_material_root,
-    } = vss_share_linkage_proof_material_reference_from_bytes(&proof_bytes);
-    if crate::bgv::setup::accepted_setup_fixture_proof_binding_lease(&proof_material_root)
-        .expect("VSS share-linkage proof binding lookup")
-        .is_some()
-    {
-        return VssShareLinkageProofMaterialReference {
-            proof_bytes_hash,
-            proof_material_root,
-        };
-    }
+    let proof_material_identity =
+        vss_share_linkage_proof_material_identity_from_bytes(&proof_bytes);
     if crate::bgv::setup::verified_canonical_setup_proof_material_bytes(
         VSS_SHARE_LINKAGE_PROOF_FAMILY,
-        &proof_material_root,
+        &proof_material_identity.proof_material_root,
     )
     .expect("VSS share-linkage generated proof material lookup")
     .is_none()
     {
         authenticate_setup_proof_material_stream_for_test(
             VSS_SHARE_LINKAGE_PROOF_FAMILY,
-            &proof_material_root,
+            &proof_material_identity.proof_material_root,
             &proof_bytes,
         )
         .expect("authenticate VSS share-linkage proof material stream");
     }
-    verify_and_cache_vss_share_linkage_proof_binding(&proof_material_root, &request)
-        .expect("verify VSS share-linkage proof before releasing its bytes");
+    let proof_binding_lease = verify_and_retain_vss_share_linkage_proof_binding(
+        &proof_material_identity.proof_material_root,
+        &request,
+    )
+    .expect("verify VSS share-linkage proof before releasing its bytes");
 
     VssShareLinkageProofMaterialReference {
-        proof_bytes_hash,
-        proof_material_root,
+        identity: proof_material_identity,
+        proof_binding_lease,
     }
 }
 
@@ -619,9 +613,7 @@ pub(super) fn vss_public_recipient_share_commitment_record_from_package(
     recipient_roster_position: u64,
     rns_limb_index: usize,
 ) -> serde_json::Value {
-    let rns_limb_count = package["vssPublicRecipientShareCommitmentSet"]["rnsLimbCount"]
-        .as_u64()
-        .expect("recipient-share limb count") as usize;
+    let rns_limb_count = DATA_PRIMES.len();
     let record_index = (recipient_roster_position as usize)
         .checked_mul(rns_limb_count)
         .and_then(|offset| offset.checked_add(rns_limb_index))

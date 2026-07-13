@@ -5,12 +5,12 @@ use crate::hashing::derive_canonical_object_hash;
 
 pub(super) fn verify_evaluator_key_schedule(
     setup_package: &Value,
-) -> CanonicalResult<Option<Value>> {
+) -> CanonicalResult<Option<Refusals>> {
     let Some(schedule) = setup_package.get("evaluatorKeySchedule") else {
-        return Ok(Some(verification_response(
+        return Ok(Some(setup_refusals(
             vec!["evaluatorKeySchedule".to_string()],
             Vec::new(),
-        )?));
+        )));
     };
     if !schedule.is_object() {
         return Ok(Some(evaluator_key_schedule_refusal(
@@ -103,10 +103,10 @@ pub(super) fn verify_evaluator_key_schedule(
         .get("evaluatorKeyScheduleRoot")
         .and_then(Value::as_str)
     else {
-        return Ok(Some(verification_response(
+        return Ok(Some(setup_refusals(
             vec!["evaluatorKeySchedule.evaluatorKeyScheduleRoot".to_string()],
             Vec::new(),
-        )?));
+        )));
     };
     validate_hash_string(
         evaluator_key_schedule_root,
@@ -134,19 +134,11 @@ pub(super) fn verify_context_fields_match(
     setup_context: &Value,
     value_name: &str,
 ) -> CanonicalResult<()> {
-    for field_name in [
-        "ceremonyId",
-        "manifestHash",
-        "rosterHash",
-        "setupParametersHash",
-        "setupEpoch",
-    ] {
-        if value.get(field_name) != setup_context.get(field_name) {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::ComponentMismatch,
-                format!("{value_name}.{field_name} must match setupContext"),
-            ));
-        }
+    if value_string(value, "setupContextHash")? != setup_context_hash(setup_context)? {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ComponentMismatch,
+            format!("{value_name}.setupContextHash must match setupContext"),
+        ));
     }
 
     Ok(())
@@ -156,11 +148,11 @@ fn evaluator_key_schedule_refusal(
     reason_code: &'static str,
     message: impl Into<String>,
     object_path: impl Into<String>,
-) -> CanonicalResult<Value> {
-    verification_response(
+) -> CanonicalResult<Refusals> {
+    Ok(setup_refusals(
         Vec::new(),
         vec![Refusal::new(reason_code, message, object_path)],
-    )
+    ))
 }
 
 pub(super) fn verify_pending_evaluation_key_material_boundary(
@@ -169,7 +161,7 @@ pub(super) fn verify_pending_evaluation_key_material_boundary(
     verified_same_secret_bridge: Option<&VerifiedSameSecretBridgeMaterial>,
     proof_binding_session: &crate::bgv::setup::AcceptedSetupProofBindingSession,
     trustee_registrations: &setup_intent::SetupIntentTrusteeRegistrationMap,
-) -> CanonicalResult<Option<Value>> {
+) -> CanonicalResult<Option<Refusals>> {
     if let Some(response) =
         verify_relinearization_key_share_rounds(setup_package, trustee_registrations)?
     {

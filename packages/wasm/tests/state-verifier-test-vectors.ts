@@ -5,9 +5,9 @@ import {
 } from '@sealed-lattice/types';
 
 import {
-    createFoundationBoardSigningKeyPairFixtures,
-    signFoundationBoardFixtureMessage,
-} from '#packages/crypto/tests/support/foundation-board-cryptographic-fixtures';
+    createCanonicalCarrierSigningKeyPairFixtures,
+    signCanonicalCarrierFixtureMessage,
+} from '#packages/crypto/tests/support/canonical-carrier-signature-fixtures';
 import {
     asciiItem,
     canonicalItem,
@@ -25,7 +25,7 @@ import {
     unsigned64Item,
     variableBytesItem,
     variableValue,
-} from '#packages/wasm/tests/foundation-board-test-vectors';
+} from '#packages/wasm/tests/canonical-tuple-test-helpers';
 
 const stateReservationObjectType = 0x0051;
 const stateOutputIntentObjectType = 0x0052;
@@ -93,7 +93,7 @@ const stateExactOutputHash = (
     );
 
 export const createStateVerifierTestVector = (): StateVerifierTestVector => {
-    const signingKeyPairs = createFoundationBoardSigningKeyPairFixtures(
+    const signingKeyPairs = createCanonicalCarrierSigningKeyPairFixtures(
         foundationProfile.participantCount,
     );
     try {
@@ -156,7 +156,7 @@ export const createStateVerifierTestVector = (): StateVerifierTestVector => {
                 hashItem(rosterHash),
                 asciiItem(input.signaturePurpose),
             );
-            const signature = signFoundationBoardFixtureMessage(
+            const signature = signCanonicalCarrierFixtureMessage(
                 signatureMessage,
                 signingKeyPairs[input.producerRosterPosition].secretKey,
             );

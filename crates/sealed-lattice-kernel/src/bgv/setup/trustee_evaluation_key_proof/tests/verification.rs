@@ -68,14 +68,14 @@ fn honest_public_key_share_proof_round_trips() {
     let (statement, witness) =
         generate_development_public_key_share_instance("a1b2c3d401", SMALL_RING_DEGREE)
             .expect("public-key share instance");
-    assert_eq!(statement.keys.len(), 1);
+    assert_eq!(statement.keys().len(), 1);
     assert_eq!(
-        statement.keys[0].kind,
+        statement.keys()[0].kind,
         EvaluationKeyShareKind::PublicKeyShare
     );
     // The share spans every Q_share limb.
     assert_eq!(statement.limb_count(), DATA_PRIMES.len());
-    assert_eq!(statement.context.proof_family, "public-key-share");
+    assert_eq!(statement.family_shape().proof_family(), "public-key-share");
     let proof =
         prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
     assert_eq!(proof.limb_proofs.len(), DATA_PRIMES.len());
@@ -97,7 +97,7 @@ fn public_key_share_rejects_tampered_share_component() {
     // Flip one published share coefficient: the share relation no longer holds
     // in that limb field, so the verifier rebuilds a different statement.
     let mut tampered = statement;
-    tampered.keys[0].component_b_by_digit[0][0][0] ^= 1;
+    tampered.keys_mut()[0].component_b_by_digit[0][0][0] ^= 1;
     let result = verify_evaluation_key_share(&tampered, &proof);
     assert!(result.is_err(), "a tampered share component must reject");
 }
@@ -114,7 +114,12 @@ fn public_key_share_rejects_a_secret_outside_the_committed_one() {
         generate_development_public_key_share_instance("ff66aa77", SMALL_RING_DEGREE)
             .expect("second instance");
     let mut forged = statement;
-    forged.same_secret_bridge = other_statement.same_secret_bridge;
+    *forged
+        .same_secret_bridge_mut()
+        .expect("first bridge statement") = other_statement
+        .same_secret_bridge()
+        .expect("second bridge statement")
+        .clone();
     assert!(
         prove_evaluation_key_share(&forged, &witness, PROOF_RANDOMNESS_SEED).is_err(),
         "a share secret that does not open the committed value must not prove"
@@ -132,7 +137,7 @@ fn public_key_share_rejects_a_foreign_common_reference_polynomial() {
     let proof =
         prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
     let mut forged = statement;
-    forged.keys[0].key_switch_seed_hex = "00".repeat(64);
+    forged.keys_mut()[0].key_switch_seed_hex = "00".repeat(64);
     let result = verify_evaluation_key_share(&forged, &proof);
     assert!(
         result.is_err(),
@@ -147,7 +152,7 @@ fn succinct_setup_statement_hash_vectors_cover_current_families() {
     )
     .expect("same-secret statement vector");
     let same_secret = serde_json::json!({
-        "proofFamily": same_secret_statement.context.proof_family,
+        "proofFamily": same_secret_statement.family_shape().proof_family(),
         "statementHash": crate::hashing::to_hex(&same_secret_statement.statement_hash()),
     });
     let public_key_statement = super::super::commands::statement_from_request(
@@ -155,7 +160,7 @@ fn succinct_setup_statement_hash_vectors_cover_current_families() {
     )
     .expect("public-key statement vector");
     let public_key = serde_json::json!({
-        "proofFamily": public_key_statement.context.proof_family,
+        "proofFamily": public_key_statement.family_shape().proof_family(),
         "statementHash": crate::hashing::to_hex(&public_key_statement.statement_hash()),
     });
     let private_vss =
@@ -171,7 +176,7 @@ fn succinct_setup_statement_hash_vectors_cover_current_families() {
     )
     .expect("trustee evaluation-key statement vector");
     let trustee_evaluation_key = serde_json::json!({
-        "proofFamily": trustee_evaluation_key_statement.context.proof_family,
+        "proofFamily": trustee_evaluation_key_statement.family_shape().proof_family(),
         "statementHash":
             crate::hashing::to_hex(&trustee_evaluation_key_statement.statement_hash()),
     });

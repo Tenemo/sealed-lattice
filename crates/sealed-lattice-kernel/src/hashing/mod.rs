@@ -37,7 +37,7 @@ pub fn to_hex(bytes: &[u8]) -> String {
 /// protocol step domain, and each supplied part. Canonical protocol objects
 /// must pass the frozen ceremony, statement, and encoded object material as
 /// explicit framed parts rather than using an informal parallel convention.
-pub fn hash512(domain: &str, parts: &[&[u8]]) -> [u8; 64] {
+pub fn hash_framed_parts_512(domain: &str, parts: &[&[u8]]) -> [u8; 64] {
     // Length-framed, domain-separated preimage: fixed prefix, then the length-
     // framed domain, then a varuint part count, then each part length-prefixed.
     // This unambiguous framing is security-critical (no concatenation
@@ -61,7 +61,7 @@ pub fn hash512(domain: &str, parts: &[&[u8]]) -> [u8; 64] {
 }
 
 pub fn hash512_hex(domain: &str, parts: &[&[u8]]) -> String {
-    to_hex(&hash512(domain, parts))
+    to_hex(&hash_framed_parts_512(domain, parts))
 }
 
 /// Computes the protocol's domain-separated 32-byte SHAKE256 hash output with

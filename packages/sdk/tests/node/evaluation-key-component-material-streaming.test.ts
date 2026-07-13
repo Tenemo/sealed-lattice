@@ -39,21 +39,101 @@ vi.mock('@sealed-lattice/wasm/published-sdk', async (importOriginal) => ({
 
 const componentMaterialRoot = '4'.repeat(128);
 const secondComponentMaterialRoot = '5'.repeat(128);
+const publicKeyShareMaterialRoot = '6'.repeat(128);
 const expectedManifestHash = '1'.repeat(128);
 const expectedRosterHash = '2'.repeat(128);
+
+const publicKeyShareMaterialSource = {
+    publicKeyShareMaterialSetRoot: publicKeyShareMaterialRoot,
+    pullChunk: vi.fn(({ chunkIndex, expectedByteLength }: ChunkPullRequest) => {
+        if (chunkIndex === 0) {
+            const chunk = Uint8Array.of(0xaa, 0xbb, 0xcc, 0xdd).buffer;
+            if (chunk.byteLength !== expectedByteLength) {
+                throw new Error('Unexpected public-key material chunk length.');
+            }
+            return Promise.resolve(chunk);
+        }
+        if (expectedByteLength !== 0) {
+            throw new Error(
+                'Unexpected terminal public-key material chunk length.',
+            );
+        }
+        return Promise.resolve(undefined);
+    }),
+} as const;
 
 const setupVerificationBindings = {
     expectedManifestHash,
     expectedRosterHash,
+    transportedPublicKeyShareMaterial: {
+        objectType: 'SetupTransportedPublicKeyShareMaterial',
+        publicKeyShareMaterialSetRoot: publicKeyShareMaterialRoot,
+        descriptorBytes: canonicalStreamDescriptorFixture(4, 8, 9),
+    },
+    publicKeyShareMaterialChunkSource: publicKeyShareMaterialSource,
+    transportedPublicKeyShareProofMaterial: {
+        objectType: 'SetupTransportedPublicKeyShareProofMaterialSet',
+        proofMaterials: [],
+    },
+    transportedVssShareLinkageProofMaterial: {
+        objectType: 'SetupTransportedVssShareLinkageProofMaterialSet',
+        proofMaterials: [],
+    },
+    transportedSameSecretBridgeProofMaterial: {
+        objectType: 'SetupTransportedSameSecretBridgeProofMaterialSet',
+        proofMaterials: [],
+    },
+    transportedEvaluationKeyShareProofMaterial: {
+        objectType: 'SetupTransportedEvaluationKeyShareProofMaterialSet',
+        proofMaterials: [],
+    },
 } as const;
 
 const componentMaterial = (keySwitchComponentMaterialRoot: string) =>
     ({
         objectType: 'SetupTransportedEvaluationKeyShareComponentMaterial',
-        proofFamily: 'relinearization-key-share',
         keySwitchComponentMaterialRoot,
         descriptorBytes: canonicalStreamDescriptorFixture(4, 0x53, 0x4c),
     }) as const;
+
+const setupPackageWithComponentReferences = (
+    input: Readonly<{
+        readonly roundOneRoots?: readonly string[];
+        readonly roundTwoRoots?: readonly string[];
+        readonly galoisRoots?: readonly string[];
+    }>,
+): JsonRecord => ({
+    objectType: 'SetupPackage',
+    relinearizationKeyShareRounds: {
+        objectType: 'RelinearizationKeyShareRounds',
+        roundOneRecords: (input.roundOneRoots ?? []).map(
+            (keySwitchComponentMaterialRoot) => ({
+                objectType: 'RelinearizationKeyShareRoundOne',
+                keySwitchComponentMaterialRoot,
+            }),
+        ),
+        roundTwoRecords: (input.roundTwoRoots ?? []).map(
+            (keySwitchComponentMaterialRoot) => ({
+                objectType: 'RelinearizationKeyShareRoundTwo',
+                keySwitchComponentMaterialRoot,
+            }),
+        ),
+    },
+    galoisKeyShareBatches:
+        (input.galoisRoots?.length ?? 0) === 0
+            ? []
+            : [
+                  {
+                      objectType: 'GaloisKeyShareBatch',
+                      galoisKeyShareMaterialRecords: (
+                          input.galoisRoots ?? []
+                      ).map((keySwitchComponentMaterialRoot) => ({
+                          objectType: 'GaloisKeyShareMaterial',
+                          keySwitchComponentMaterialRoot,
+                      })),
+                  },
+              ],
+});
 
 const componentMaterialSource = (
     keySwitchComponentMaterialRoot: string,
@@ -82,6 +162,8 @@ const {
     prepareSnapshottedSetupPackageVerificationInputForKernel,
     snapshotSetupPackageVerificationInput,
 } = await import('#packages/sdk/src/setup-verification-input.js');
+const { bgvCanonicalStreamFamilies } =
+    await import('@sealed-lattice/wasm/published-sdk');
 
 const prepare = (input: JsonRecord): Promise<JsonRecord> =>
     prepareSnapshottedSetupPackageVerificationInputForKernel(
@@ -92,6 +174,7 @@ const prepare = (input: JsonRecord): Promise<JsonRecord> =>
 
 describe('evaluation-key component material streaming before terminal verification', () => {
     beforeEach(() => {
+        publicKeyShareMaterialSource.pullChunk.mockClear();
         runtimeMocks.readMaterial.mockReset();
         runtimeMocks.readMaterial.mockImplementation(
             async (input: CanonicalReadInput): Promise<void> => {
@@ -111,7 +194,10 @@ describe('evaluation-key component material streaming before terminal verificati
             [0xcc, 0xdd],
         );
         const verificationInput = await prepare({
-            setupPackage: { objectType: 'SetupPackage' },
+            setupPackage: setupPackageWithComponentReferences({
+                roundOneRoots: [componentMaterialRoot],
+                galoisRoots: [secondComponentMaterialRoot],
+            }),
             ...setupVerificationBindings,
             transportedEvaluationKeyShareComponentMaterial: {
                 objectType:
@@ -127,16 +213,18 @@ describe('evaluation-key component material streaming before terminal verificati
             ],
         });
 
-        expect(runtimeMocks.readMaterial).toHaveBeenCalledTimes(2);
+        expect(runtimeMocks.readMaterial).toHaveBeenCalledTimes(3);
         expect(runtimeMocks.readMaterial).toHaveBeenCalledWith(
             expect.objectContaining({
                 materialRoot: componentMaterialRoot,
+                family: bgvCanonicalStreamFamilies.relinearizationComponent,
                 pullChunk: firstSource.pullChunk,
             }),
         );
         expect(runtimeMocks.readMaterial).toHaveBeenCalledWith(
             expect.objectContaining({
                 materialRoot: secondComponentMaterialRoot,
+                family: bgvCanonicalStreamFamilies.galoisComponent,
                 pullChunk: secondSource.pullChunk,
             }),
         );
@@ -173,7 +261,9 @@ describe('evaluation-key component material streaming before terminal verificati
             },
         );
         const verificationInput = await prepare({
-            setupPackage: { objectType: 'SetupPackage' },
+            setupPackage: setupPackageWithComponentReferences({
+                roundOneRoots: [componentMaterialRoot],
+            }),
             ...setupVerificationBindings,
             transportedEvaluationKeyShareComponentMaterial: {
                 objectType:
@@ -193,14 +283,15 @@ describe('evaluation-key component material streaming before terminal verificati
                 0xff,
             ),
         );
-        expect(runtimeMocks.readMaterial).toHaveBeenCalledExactlyOnceWith(
+        expect(runtimeMocks.readMaterial).toHaveBeenNthCalledWith(
+            2,
             expect.objectContaining({
                 descriptorBytes: authenticatedDescriptor,
                 materialRoot: componentMaterialRoot,
                 pullChunk: mutatingPullChunk,
             }),
         );
-        const streamedInput = runtimeMocks.readMaterial.mock.calls[0]?.[0] as
+        const streamedInput = runtimeMocks.readMaterial.mock.calls[1]?.[0] as
             | Readonly<{ readonly descriptorBytes: Uint8Array }>
             | undefined;
         expect(streamedInput?.descriptorBytes).not.toBe(
@@ -215,13 +306,26 @@ describe('evaluation-key component material streaming before terminal verificati
     });
 
     it('surfaces a canonical stream rejection instead of swallowing it', async () => {
-        runtimeMocks.readMaterial.mockRejectedValueOnce(
-            new Error('canonical component stream rejected'),
-        );
+        runtimeMocks.readMaterial
+            .mockImplementationOnce(async (input: CanonicalReadInput) => {
+                await input.pullChunk({
+                    chunkIndex: 0,
+                    expectedByteLength: 4,
+                });
+                await input.pullChunk({
+                    chunkIndex: 1,
+                    expectedByteLength: 0,
+                });
+            })
+            .mockRejectedValueOnce(
+                new Error('canonical component stream rejected'),
+            );
 
         await expect(
             prepare({
-                setupPackage: { objectType: 'SetupPackage' },
+                setupPackage: setupPackageWithComponentReferences({
+                    roundOneRoots: [componentMaterialRoot],
+                }),
                 ...setupVerificationBindings,
                 transportedEvaluationKeyShareComponentMaterial: {
                     objectType:
@@ -243,7 +347,9 @@ describe('evaluation-key component material streaming before terminal verificati
     it('rejects a source for an unknown component material root', async () => {
         await expect(
             prepare({
-                setupPackage: { objectType: 'SetupPackage' },
+                setupPackage: setupPackageWithComponentReferences({
+                    roundOneRoots: [componentMaterialRoot],
+                }),
                 ...setupVerificationBindings,
                 transportedEvaluationKeyShareComponentMaterial: {
                     objectType:
@@ -260,5 +366,130 @@ describe('evaluation-key component material streaming before terminal verificati
                 ],
             }),
         ).rejects.toThrow(/must match exactly one transported reference/u);
+    });
+
+    it('rejects a material root referenced by conflicting component families', async () => {
+        await expect(
+            prepare({
+                setupPackage: setupPackageWithComponentReferences({
+                    roundOneRoots: [componentMaterialRoot],
+                    galoisRoots: [componentMaterialRoot],
+                }),
+                ...setupVerificationBindings,
+                transportedEvaluationKeyShareComponentMaterial: {
+                    objectType:
+                        'SetupTransportedEvaluationKeyShareComponentMaterialSet',
+                    componentMaterials: [
+                        componentMaterial(componentMaterialRoot),
+                    ],
+                },
+                evaluationKeyShareComponentMaterialChunkSources: [
+                    componentMaterialSource(
+                        componentMaterialRoot,
+                        [0xaa, 0xbb],
+                    ),
+                ],
+            }),
+        ).rejects.toThrow(/conflicting material root/u);
+    });
+
+    it('rejects duplicate authoritative component references', async () => {
+        await expect(
+            prepare({
+                setupPackage: setupPackageWithComponentReferences({
+                    roundOneRoots: [componentMaterialRoot],
+                    roundTwoRoots: [componentMaterialRoot],
+                }),
+                ...setupVerificationBindings,
+                transportedEvaluationKeyShareComponentMaterial: {
+                    objectType:
+                        'SetupTransportedEvaluationKeyShareComponentMaterialSet',
+                    componentMaterials: [
+                        componentMaterial(componentMaterialRoot),
+                    ],
+                },
+                evaluationKeyShareComponentMaterialChunkSources: [
+                    componentMaterialSource(
+                        componentMaterialRoot,
+                        [0xaa, 0xbb],
+                    ),
+                ],
+            }),
+        ).rejects.toThrow(/duplicate material root/u);
+    });
+
+    it('rejects malformed authoritative component references', async () => {
+        await expect(
+            prepare({
+                setupPackage: setupPackageWithComponentReferences({
+                    roundOneRoots: ['not-a-protocol-hash'],
+                }),
+                ...setupVerificationBindings,
+                transportedEvaluationKeyShareComponentMaterial: {
+                    objectType:
+                        'SetupTransportedEvaluationKeyShareComponentMaterialSet',
+                    componentMaterials: [
+                        componentMaterial(componentMaterialRoot),
+                    ],
+                },
+                evaluationKeyShareComponentMaterialChunkSources: [
+                    componentMaterialSource(
+                        componentMaterialRoot,
+                        [0xaa, 0xbb],
+                    ),
+                ],
+            }),
+        ).rejects.toThrow(/must be a protocol hash/u);
+    });
+
+    it('rejects a sidecar that is not referenced by the setup package', async () => {
+        await expect(
+            prepare({
+                setupPackage: setupPackageWithComponentReferences({
+                    roundOneRoots: [componentMaterialRoot],
+                }),
+                ...setupVerificationBindings,
+                transportedEvaluationKeyShareComponentMaterial: {
+                    objectType:
+                        'SetupTransportedEvaluationKeyShareComponentMaterialSet',
+                    componentMaterials: [
+                        componentMaterial(secondComponentMaterialRoot),
+                    ],
+                },
+                evaluationKeyShareComponentMaterialChunkSources: [
+                    componentMaterialSource(
+                        secondComponentMaterialRoot,
+                        [0xaa, 0xbb],
+                    ),
+                ],
+            }),
+        ).rejects.toThrow(/sidecar is not referenced/u);
+    });
+
+    it('rejects an authoritative reference without a transported sidecar', async () => {
+        await expect(
+            prepare({
+                setupPackage: setupPackageWithComponentReferences({
+                    roundOneRoots: [
+                        componentMaterialRoot,
+                        secondComponentMaterialRoot,
+                    ],
+                }),
+                ...setupVerificationBindings,
+                transportedEvaluationKeyShareComponentMaterial: {
+                    objectType:
+                        'SetupTransportedEvaluationKeyShareComponentMaterialSet',
+                    componentMaterials: [
+                        componentMaterial(componentMaterialRoot),
+                    ],
+                },
+                evaluationKeyShareComponentMaterialChunkSources: [
+                    componentMaterialSource(
+                        componentMaterialRoot,
+                        [0xaa, 0xbb],
+                    ),
+                ],
+            }),
+        ).rejects.toThrow(/without a transported sidecar/u);
     });
 });

@@ -6,12 +6,12 @@ pub(in super::super) fn collective_public_key_object(
     package: &serde_json::Value,
 ) -> serde_json::Value {
     let setup_context = &package["setupContext"];
+    let setup_context_hash = crate::bgv::setup::accepted_setup::setup_context_hash(setup_context)
+        .expect("setup context hash");
     let material_records = package["publicKeyShareMaterial"]["shareMaterialRecords"]
         .as_array()
         .expect("public-key material records");
-    let ring_degree = package["publicKeyShareMaterial"]["ringDegree"]
-        .as_u64()
-        .expect("ring degree") as usize;
+    let ring_degree = vss_commitment_ring_degree_from_fixture_package(package);
     let mut aggregate_coefficients_by_limb = (0..DATA_PRIMES.len())
         .map(|_| vec![0_u64; ring_degree])
         .collect::<Vec<_>>();
@@ -46,24 +46,25 @@ pub(in super::super) fn collective_public_key_object(
             })
         })
         .collect::<Vec<_>>();
-    let mut collective_public_key = serde_json::json!({
+    let collective_public_key_root_input = serde_json::json!({
         "objectType": "CollectivePublicKey",
-        "ceremonyId": setup_context["ceremonyId"],
-        "manifestHash": setup_context["manifestHash"],
-        "rosterHash": setup_context["rosterHash"],
-        "setupParametersHash": setup_context["setupParametersHash"],
-        "setupEpoch": setup_context["setupEpoch"],
+        "setupContextHash": setup_context_hash,
         "publicMatrixSeedHash": package["commonRandomness"]["publicMatrixSeedHash"],
         "publicKeyShareSetRoot": package["publicKeyShares"]["publicKeyShareSetRoot"],
         "publicKeyShareMaterialSetRoot": package["publicKeyShareMaterial"]["publicKeyShareMaterialSetRoot"],
         "publicKeyShareSuccinctProofSetRoot": package["publicKeyShareSuccinctProofs"]["publicKeyShareSuccinctProofSetRoot"],
         "aggregateCoefficientVectorsByLimb": aggregate_limbs,
     });
-    collective_public_key["collectivePublicKeyRoot"] = serde_json::json!(
-        derive_canonical_object_hash(&collective_public_key).expect("collective public-key root")
-    );
+    let collective_public_key_root =
+        derive_canonical_object_hash(&collective_public_key_root_input)
+            .expect("collective public-key root");
 
-    collective_public_key
+    serde_json::json!({
+        "objectType": "CollectivePublicKey",
+        "aggregateCoefficientVectorsByLimb":
+            collective_public_key_root_input["aggregateCoefficientVectorsByLimb"],
+        "collectivePublicKeyRoot": collective_public_key_root,
+    })
 }
 
 pub(in super::super) fn replace_public_key_share_hashes_with_material_hashes(
@@ -73,7 +74,7 @@ pub(in super::super) fn replace_public_key_share_hashes_with_material_hashes(
         .as_str()
         .expect("public matrix seed hash")
         .to_string();
-    let ring_degree = public_coefficient_commitment_ring_degree_from_fixture_package(package);
+    let ring_degree = vss_commitment_ring_degree_from_fixture_package(package);
     let participant_count = participant_count_from_package(package);
     for trustee_roster_position in 0..participant_count {
         let (coefficients_by_limb, _) = public_key_share_coefficients_and_errors_for_fixture(
@@ -102,10 +103,12 @@ pub(in super::super) fn public_key_share_material_object(
     package: &serde_json::Value,
 ) -> serde_json::Value {
     let setup_context = &package["setupContext"];
+    let setup_context_hash = crate::bgv::setup::accepted_setup::setup_context_hash(setup_context)
+        .expect("setup context hash");
     let public_matrix_seed_hash = package["commonRandomness"]["publicMatrixSeedHash"]
         .as_str()
         .expect("public matrix seed hash");
-    let ring_degree = public_coefficient_commitment_ring_degree_from_fixture_package(package);
+    let ring_degree = vss_commitment_ring_degree_from_fixture_package(package);
     let participant_count = participant_count_from_package(package);
     let mut material_records = Vec::new();
     for trustee_roster_position in 0..participant_count {
@@ -123,41 +126,43 @@ pub(in super::super) fn public_key_share_material_object(
                 })
             })
             .collect::<Vec<_>>();
-        let mut material_record = serde_json::json!({
+        let material_root_input = serde_json::json!({
             "objectType": "PublicKeyShareMaterial",
-            "ceremonyId": setup_context["ceremonyId"],
-            "manifestHash": setup_context["manifestHash"],
-            "rosterHash": setup_context["rosterHash"],
-            "setupParametersHash": setup_context["setupParametersHash"],
-            "setupEpoch": setup_context["setupEpoch"],
+            "setupContextHash": setup_context_hash,
             "trusteeIdentity": trustee_identity.as_str(),
             "trusteeRosterPosition": trustee_roster_position,
             "publicMatrixSeedHash": public_matrix_seed_hash,
             "publicKeyShareRoot": package["publicKeyShares"]["shareRecords"][trustee_roster_position as usize]["publicKeyShareRoot"],
             "shareCoefficientVectorsByLimb": limbs,
         });
-        material_record["publicKeyShareMaterialRoot"] = serde_json::json!(
-            derive_canonical_object_hash(&material_record).expect("public-key share material root")
-        );
+        let public_key_share_material_root = derive_canonical_object_hash(&material_root_input)
+            .expect("public-key share material root");
+        let material_record = serde_json::json!({
+            "objectType": "PublicKeyShareMaterial",
+            "trusteeIdentity": trustee_identity,
+            "trusteeRosterPosition": trustee_roster_position,
+            "publicKeyShareRoot": material_root_input["publicKeyShareRoot"],
+            "shareCoefficientVectorsByLimb":
+                material_root_input["shareCoefficientVectorsByLimb"],
+            "publicKeyShareMaterialRoot": public_key_share_material_root,
+        });
         material_records.push(material_record);
     }
-    let mut material_set = serde_json::json!({
+    let public_key_share_material_set_root = derive_canonical_object_hash(&serde_json::json!({
         "objectType": "PublicKeyShareMaterialSet",
-        "ceremonyId": setup_context["ceremonyId"],
-        "manifestHash": setup_context["manifestHash"],
-        "rosterHash": setup_context["rosterHash"],
-        "setupParametersHash": setup_context["setupParametersHash"],
-        "setupEpoch": setup_context["setupEpoch"],
+        "setupContextHash": setup_context_hash,
         "ringDegree": ring_degree,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "publicKeyShareSetRoot": package["publicKeyShares"]["publicKeyShareSetRoot"],
-        "shareMaterialRecords": material_records,
-    });
-    material_set["publicKeyShareMaterialSetRoot"] = serde_json::json!(
-        derive_canonical_object_hash(&material_set).expect("public-key share material set root")
-    );
+        "shareMaterialRecords": &material_records,
+    }))
+    .expect("public-key share material set root");
 
-    material_set
+    serde_json::json!({
+        "objectType": "PublicKeyShareMaterialSet",
+        "shareMaterialRecords": material_records,
+        "publicKeyShareMaterialSetRoot": public_key_share_material_set_root,
+    })
 }
 
 pub(in super::super) fn public_key_share_coefficients_and_errors_for_fixture(
@@ -238,6 +243,7 @@ pub(in super::super) struct PublicKeyShareSuccinctProofFixture {
 
 struct PublicKeyShareSuccinctProofRecordFixture {
     proof_record: serde_json::Value,
+    logical_proof_record: serde_json::Value,
     transported_proof_material: serde_json::Value,
     proof_binding_lease: crate::bgv::setup::CanonicalSetupProofBindingLease,
 }
@@ -248,8 +254,9 @@ pub(in super::super) fn public_key_share_succinct_proofs_fixture(
     proof_binding_session: &crate::bgv::setup::AcceptedSetupProofBindingSession,
 ) -> PublicKeyShareSuccinctProofFixture {
     use crate::bgv::setup::trustee_evaluation_key_proof::{
-        EvaluationKeyShareDescriptor, PUBLIC_KEY_SHARE_COMMON_REFERENCE_LABEL,
-        PUBLIC_KEY_SHARE_PROOF_FAMILY, SuccinctSetupProofContext, TrusteeEvaluationKeyStatement,
+        EvaluationKeyShareDescriptor, KeyBearingWitness, PUBLIC_KEY_SHARE_COMMON_REFERENCE_LABEL,
+        PUBLIC_KEY_SHARE_PROOF_FAMILY, SetupProofStatement, SuccinctSetupProofContext,
+        TrusteeEvaluationKeyStatement, VssCommittedMaterialWitness,
         public_key_share_succinct_proof_bytes_hash, verify_trustee_evaluation_key_proof_bytes,
     };
     let setup_context = &package["setupContext"];
@@ -284,9 +291,6 @@ pub(in super::super) fn public_key_share_succinct_proofs_fixture(
         let ring_degree = package["sameSecretBridgeStatementSet"]["ringDegree"]
             .as_u64()
             .expect("same-secret bridge ring degree") as usize;
-        let same_secret_bridge = Some(bridge_binding.statement.clone());
-        let same_secret_linkage = None;
-        let opening_randomness_by_limb = Vec::new();
         let (coefficients_by_limb, error_coefficients) =
             public_key_share_coefficients_and_errors_for_fixture(
                 public_matrix_seed_hash,
@@ -304,7 +308,7 @@ pub(in super::super) fn public_key_share_succinct_proofs_fixture(
         let negative_indicator_coefficients = secret_coefficients
             .iter()
             .map(|coefficient| i64::from(*coefficient < 0))
-            .collect::<Vec<_>>();
+            .collect();
         let committed_material_regeneration_inputs =
             vss_public_material::same_secret_bridge_committed_material_regeneration_inputs_from_fixture_package(
                 package,
@@ -312,68 +316,41 @@ pub(in super::super) fn public_key_share_succinct_proofs_fixture(
             );
         let statement = TrusteeEvaluationKeyStatement {
             context: SuccinctSetupProofContext {
-                proof_family: PUBLIC_KEY_SHARE_PROOF_FAMILY.to_string(),
-                ceremony_id: setup_context["ceremonyId"]
-                    .as_str()
-                    .expect("ceremony id")
-                    .to_string(),
-                manifest_hash: setup_context["manifestHash"]
-                    .as_str()
-                    .expect("manifest hash")
-                    .to_string(),
-                roster_hash: setup_context["rosterHash"]
-                    .as_str()
-                    .expect("roster hash")
-                    .to_string(),
+                setup_context_hash:
+                    crate::bgv::setup::accepted_setup::setup_context_hash(setup_context)
+                        .expect("setup context hash"),
                 trustee_identity: trustee_identity.clone(),
                 trustee_roster_position,
-                setup_epoch: setup_context["setupEpoch"]
-                    .as_str()
-                    .expect("setup epoch")
-                    .to_string(),
                 binding_roots: vec![
-                    (
-                        "sameSecretBridgeStatementRoot".to_string(),
-                        bridge_binding.same_secret_bridge_statement_root.clone(),
-                    ),
-                    (
-                        "sameSecretBridgeProofRecordRoot".to_string(),
-                        bridge_binding.same_secret_bridge_proof_record_root.clone(),
-                    ),
+                    bridge_binding.same_secret_bridge_statement_root.clone(),
+                    bridge_binding.same_secret_bridge_proof_record_root.clone(),
                 ],
             },
             ring_degree,
-            keys: vec![EvaluationKeyShareDescriptor {
-                kind: EvaluationKeyShareKind::PublicKeyShare,
-                level: DATA_PRIMES.len() - 1,
-                key_switch_domain: PUBLIC_KEY_SHARE_COMMON_REFERENCE_LABEL.to_string(),
-                key_switch_seed_hex: public_matrix_seed_hash.to_string(),
-                component_b_by_digit: vec![coefficients_by_limb],
-                round_one_aggregate_diagonal: Vec::new(),
-            }],
-            vss_share_linkage: None,
-            same_secret_bridge,
-            same_secret_linkage,
-            private_vss_share: None,
-            target_decryption_share: None,
+            proof: SetupProofStatement::PublicKeyShare {
+                key: EvaluationKeyShareDescriptor {
+                    kind: EvaluationKeyShareKind::PublicKeyShare,
+                    level: DATA_PRIMES.len() - 1,
+                    key_switch_domain: PUBLIC_KEY_SHARE_COMMON_REFERENCE_LABEL.to_string(),
+                    key_switch_seed_hex: public_matrix_seed_hash.to_string(),
+                    component_b_by_digit: vec![coefficients_by_limb],
+                    round_one_aggregate_diagonal: Vec::new(),
+                },
+                same_secret_bridge: bridge_binding.statement.clone(),
+            },
         };
-        let witness = TrusteeEvaluationKeyWitness {
-            secret_coefficients,
-            error_coefficients_by_key: vec![vec![error_coefficients]],
+        let witness = TrusteeEvaluationKeyWitness::PublicKeyShare {
+            key: KeyBearingWitness {
+                secret_coefficients,
+                error_coefficients_by_key: vec![vec![error_coefficients]],
+            },
             negative_indicator_coefficients,
-            opening_randomness_by_limb,
-            private_vss_coefficient_messages_by_shamir_index: Vec::new(),
-            private_vss_opening_randomness_by_shamir_index: Vec::new(),
-            private_vss_carry_witnesses: Vec::new(),
-            vss_public_coefficient_messages_by_shamir_index: Vec::new(),
-            vss_public_recipient_share_messages_by_item: Vec::new(),
-            vss_public_carry_witnesses_by_item: Vec::new(),
-            target_decryption_message_vectors: Vec::new(),
-            target_decryption_opening_randomness_by_commitment: Vec::new(),
-            vss_committed_material_seeds_by_bound_message: committed_material_regeneration_inputs
-                .seeds_by_bound_message,
-            vss_committed_material_context_hashes_by_bound_message:
-                committed_material_regeneration_inputs.context_hashes_by_bound_message,
+            committed_material: VssCommittedMaterialWitness {
+                vss_committed_material_seeds_by_bound_message:
+                    committed_material_regeneration_inputs.seeds_by_bound_message,
+                vss_committed_material_context_hashes_by_bound_message:
+                    committed_material_regeneration_inputs.context_hashes_by_bound_message,
+            },
         };
         let proof_randomness_seed_hex = derive_canonical_object_hash(&serde_json::json!({
             "objectType": "PublicKeyShareProofRoot",
@@ -400,6 +377,17 @@ pub(in super::super) fn public_key_share_succinct_proofs_fixture(
         let proof_bytes_hash = public_key_share_succinct_proof_bytes_hash(&proof_bytes);
         let mut proof_record = serde_json::json!({
             "objectType": "PublicKeyShareSuccinctProof",
+            "trusteeRosterPosition": trustee_roster_position,
+            "statementHash": statement_hash_hex,
+            "proofBytesHash": proof_bytes_hash,
+        });
+        let proof_material_root = crate::bgv::setup::accepted_setup::public_key_share_succinct_proof_material_root(
+            &proof_record,
+        )
+        .expect("public-key share proof material root");
+        proof_record["proofMaterialRoot"] = serde_json::json!(&proof_material_root);
+        let logical_proof_record = serde_json::json!({
+            "objectType": "PublicKeyShareSuccinctProof",
             "ceremonyId": setup_context["ceremonyId"],
             "manifestHash": setup_context["manifestHash"],
             "rosterHash": setup_context["rosterHash"],
@@ -411,14 +399,10 @@ pub(in super::super) fn public_key_share_succinct_proofs_fixture(
             "publicKeyShareMaterialRoot": material_record["publicKeyShareMaterialRoot"],
             "sameSecretBridgeStatementRoot": bridge_binding.same_secret_bridge_statement_root,
             "sameSecretBridgeProofRecordRoot": bridge_binding.same_secret_bridge_proof_record_root,
-            "statementHash": statement_hash_hex,
-            "proofBytesHash": proof_bytes_hash,
+            "statementHash": proof_record["statementHash"],
+            "proofBytesHash": proof_record["proofBytesHash"],
+            "proofMaterialRoot": proof_record["proofMaterialRoot"],
         });
-        let proof_material_root = crate::bgv::setup::accepted_setup::public_key_share_succinct_proof_material_root(
-            &proof_record,
-        )
-        .expect("public-key share proof material root");
-        proof_record["proofMaterialRoot"] = serde_json::json!(&proof_material_root);
         authenticate_setup_proof_material_stream_for_test(
             PUBLIC_KEY_SHARE_PROOF_FAMILY,
             &proof_material_root,
@@ -438,11 +422,13 @@ pub(in super::super) fn public_key_share_succinct_proofs_fixture(
                 .expect("verify generated public-key share proof bytes");
         }
         let verification_binding_hash = crate::bgv::setup::accepted_setup::
-            public_key_share_succinct_proof_verification_binding_hash(&proof_record, &statement)
+            public_key_share_succinct_proof_verification_binding_hash(
+                &logical_proof_record,
+                &statement,
+            )
             .expect("public-key share proof verification binding");
         crate::bgv::setup::retain_accepted_setup_proof_binding(
             proof_binding_session.session_handle,
-            &proof_binding_session.capability,
             PUBLIC_KEY_SHARE_PROOF_FAMILY,
             &proof_material_root,
             verification_binding_hash,
@@ -450,7 +436,6 @@ pub(in super::super) fn public_key_share_succinct_proofs_fixture(
         .expect("retain public-key share proof binding");
         let proof_binding_lease = crate::bgv::setup::accepted_setup_proof_binding_lease(
             proof_binding_session.session_handle,
-            &proof_binding_session.capability,
             &proof_material_root,
         )
         .expect("public-key share proof binding lease lookup")
@@ -458,26 +443,33 @@ pub(in super::super) fn public_key_share_succinct_proofs_fixture(
 
         PublicKeyShareSuccinctProofRecordFixture {
             proof_record,
+            logical_proof_record,
             transported_proof_material,
             proof_binding_lease,
         }
         })
         .collect::<Vec<_>>();
     let mut proof_records = Vec::new();
+    let mut logical_proof_records = Vec::new();
     let mut transported_proof_materials = Vec::new();
     let mut proof_binding_leases = Vec::new();
     for fixture in per_trustee_records {
         proof_records.push(fixture.proof_record);
+        logical_proof_records.push(fixture.logical_proof_record);
         transported_proof_materials.push(fixture.transported_proof_material);
         proof_binding_leases.push(fixture.proof_binding_lease);
     }
-    let mut proof_set = serde_json::json!({
+    let public_key_share_succinct_proof_set_root =
+        derive_canonical_object_hash(&serde_json::json!({
+            "objectType": "PublicKeyShareSuccinctProofSet",
+            "proofRecords": logical_proof_records,
+        }))
+        .expect("public-key share succinct proof set root");
+    let proof_set = serde_json::json!({
         "objectType": "PublicKeyShareSuccinctProofSet",
         "proofRecords": proof_records,
+        "publicKeyShareSuccinctProofSetRoot": public_key_share_succinct_proof_set_root,
     });
-    proof_set["publicKeyShareSuccinctProofSetRoot"] = serde_json::json!(
-        derive_canonical_object_hash(&proof_set).expect("public-key share succinct proof set root")
-    );
 
     PublicKeyShareSuccinctProofFixture {
         proof_set,

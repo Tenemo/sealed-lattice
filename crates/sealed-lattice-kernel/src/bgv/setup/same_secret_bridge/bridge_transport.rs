@@ -1,19 +1,13 @@
 use super::*;
 
-// Resolved same-secret bridge proof bytes plus the canonical proof record whose
-// root binds the canonical stream reference.
 pub(super) struct ResolvedSameSecretBridgeProofBytes {
     pub(super) proof_bytes: SetupProofMaterialBytes,
-    pub(super) proof_record_without_root: Value,
-    pub(super) proof_record_root: String,
 }
 
 #[derive(Debug)]
 pub(super) struct ValidatedSameSecretBridgeProofReference {
     pub(super) proof_bytes_hash: String,
     pub(super) proof_material_root: String,
-    pub(super) proof_record_without_root: Value,
-    pub(super) proof_record_root: String,
 }
 
 pub(super) fn validate_same_secret_bridge_proof_reference(
@@ -49,163 +43,40 @@ pub(super) fn validate_same_secret_bridge_proof_reference(
     Ok(ValidatedSameSecretBridgeProofReference {
         proof_bytes_hash,
         proof_material_root,
-        proof_record_without_root,
-        proof_record_root,
     })
 }
 
 pub(super) fn resolve_same_secret_bridge_proof_bytes(
     reference: ValidatedSameSecretBridgeProofReference,
-    request: &Value,
+    proof_binding_session: Option<&crate::bgv::setup::AcceptedSetupProofBindingSession>,
 ) -> CanonicalResult<ResolvedSameSecretBridgeProofBytes> {
-    let transported_binding = transported_same_secret_bridge_proof_material_binding(
-        request,
+    let proof_bytes = take_verified_setup_proof_material_bytes(
+        SAME_SECRET_BRIDGE_PROOF_FAMILY,
         &reference.proof_material_root,
-    )?;
-    compare_required_string(
-        &reference.proof_bytes_hash,
-        &transported_binding.proof_bytes_hash,
-        "same-secret bridge proof record proofBytesHash",
-    )?;
-
-    Ok(ResolvedSameSecretBridgeProofBytes {
-        proof_bytes: transported_binding.proof_bytes,
-        proof_record_without_root: reference.proof_record_without_root,
-        proof_record_root: reference.proof_record_root,
-    })
-}
-
-pub(super) struct SameSecretBridgeProofTransportBinding {
-    pub(super) proof_bytes: SetupProofMaterialBytes,
-    pub(super) proof_bytes_hash: String,
-}
-
-const SAME_SECRET_BRIDGE_TRANSPORT_FAMILY: SetupProofMaterialTransportFamily =
-    SetupProofMaterialTransportFamily {
-        proof_family: SAME_SECRET_BRIDGE_PROOF_FAMILY,
-        transport_field: "transportedSameSecretBridgeProofMaterial",
-        set_object_type: SAME_SECRET_BRIDGE_TRANSPORT_SET_OBJECT_TYPE,
-        material_object_type: SAME_SECRET_BRIDGE_TRANSPORT_OBJECT_TYPE,
-        family_description: "same-secret bridge",
-    };
-
-pub(super) fn validate_transported_same_secret_bridge_proof_material_reference(
-    request: &Value,
-    expected_proof_material_root: &str,
-) -> CanonicalResult<()> {
-    let material_set = value_at_path(request, &[SAME_SECRET_BRIDGE_TRANSPORT_FAMILY.transport_field])
-        .map_err(|_| {
-            CanonicalError::new(
-                CanonicalErrorCode::ComponentMismatch,
-                "transportedSameSecretBridgeProofMaterial is required by transported same-secret bridge proof records",
-            )
-        })?;
-    compare_required_string(
-        string_at_path(material_set, &["objectType"])?,
-        SAME_SECRET_BRIDGE_TRANSPORT_FAMILY.set_object_type,
-        "transportedSameSecretBridgeProofMaterial.objectType",
-    )?;
-
-    let mut matching_material_count = 0_usize;
-    for proof_material in array_at_path(material_set, &["proofMaterials"])? {
-        compare_required_string(
-            string_at_path(proof_material, &["objectType"])?,
-            SAME_SECRET_BRIDGE_TRANSPORT_FAMILY.material_object_type,
-            "transported same-secret bridge proof material objectType",
-        )?;
-        if hash_at_path(proof_material, &["proofMaterialRoot"])? == expected_proof_material_root {
-            matching_material_count += 1;
-        }
-    }
-    match matching_material_count {
-        1 => Ok(()),
-        0 => Err(CanonicalError::new(
-            CanonicalErrorCode::ComponentMismatch,
-            "transportedSameSecretBridgeProofMaterial is missing the requested proofMaterialRoot",
-        )),
-        _ => Err(CanonicalError::new(
-            CanonicalErrorCode::ComponentMismatch,
-            "transportedSameSecretBridgeProofMaterial contains duplicate proofMaterialRoot entries",
-        )),
-    }
-}
-
-pub(super) fn transported_same_secret_bridge_proof_material_binding(
-    request: &Value,
-    expected_proof_material_root: &str,
-) -> CanonicalResult<SameSecretBridgeProofTransportBinding> {
-    let proof_bytes = resolve_transported_setup_proof_material(
-        request,
-        expected_proof_material_root,
-        &SAME_SECRET_BRIDGE_TRANSPORT_FAMILY,
+        "sameSecretBridgeProofRecord.proofMaterialRoot",
+        proof_binding_session,
     )?;
     let proof_bytes_hash = proof_bytes.hash512_hex(SAME_SECRET_BRIDGE_PROOF_BYTES_HASH_DOMAIN)?;
     compare_required_string(
-        expected_proof_material_root,
+        &reference.proof_bytes_hash,
+        &proof_bytes_hash,
+        "same-secret bridge proof record proofBytesHash",
+    )?;
+    compare_required_string(
+        &reference.proof_material_root,
         &crate::bgv::setup::setup_proof::setup_proof_material_reference_root(
             SAME_SECRET_BRIDGE_PROOF_FAMILY,
             &proof_bytes_hash,
         )?,
         "same-secret bridge proof material root",
     )?;
-    Ok(SameSecretBridgeProofTransportBinding {
-        proof_bytes,
-        proof_bytes_hash,
-    })
+
+    Ok(ResolvedSameSecretBridgeProofBytes { proof_bytes })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn transported_material(proof_material_root: &str) -> Value {
-        json!({
-            "objectType": SAME_SECRET_BRIDGE_TRANSPORT_OBJECT_TYPE,
-            "proofMaterialRoot": proof_material_root,
-        })
-    }
-
-    fn transport_request(proof_materials: Vec<Value>) -> Value {
-        json!({
-            "transportedSameSecretBridgeProofMaterial": {
-                "objectType": SAME_SECRET_BRIDGE_TRANSPORT_SET_OBJECT_TYPE,
-                "proofMaterials": proof_materials,
-            },
-        })
-    }
-
-    #[test]
-    fn transported_bridge_reference_requires_one_exact_material_root() {
-        let requested_root = "1".repeat(128);
-        let other_root = "2".repeat(128);
-        validate_transported_same_secret_bridge_proof_material_reference(
-            &transport_request(vec![
-                transported_material(&other_root),
-                transported_material(&requested_root),
-            ]),
-            &requested_root,
-        )
-        .expect("one exact transported bridge proof reference is accepted");
-
-        let missing_error = validate_transported_same_secret_bridge_proof_material_reference(
-            &transport_request(vec![transported_material(&other_root)]),
-            &requested_root,
-        )
-        .expect_err("a missing bridge proof reference must be rejected");
-        assert_eq!(missing_error.code, CanonicalErrorCode::ComponentMismatch);
-        assert!(missing_error.message.contains("missing"));
-
-        let duplicate_error = validate_transported_same_secret_bridge_proof_material_reference(
-            &transport_request(vec![
-                transported_material(&requested_root),
-                transported_material(&requested_root),
-            ]),
-            &requested_root,
-        )
-        .expect_err("duplicate bridge proof references must be rejected");
-        assert_eq!(duplicate_error.code, CanonicalErrorCode::ComponentMismatch);
-        assert!(duplicate_error.message.contains("duplicate"));
-    }
 
     #[test]
     fn bridge_proof_record_binds_hash_material_root_and_statement() {

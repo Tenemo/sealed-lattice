@@ -23,9 +23,16 @@ use super::relation::{
     batched_sumcheck_value, masked_claim_bounds_for_global_claim,
     masked_claim_lift_residue_count_for_moduli,
 };
-use super::*;
+use super::{
+    COMMITMENT_BOUND_FACTOR, DEEP_EVALUATION_POINT_COUNT, LOW_DEGREE_QUERY_COUNT,
+    MAIN_LOW_DEGREE_TRANSCRIPT_PURPOSE, MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
+    SUMCHECK_RESIDUAL_LOW_DEGREE_TRANSCRIPT_PURPOSE, TRACE_SPLIT,
+    invalid_succinct_setup_proof,
+};
 use crate::bgv::modular_arithmetic::inverse_mod;
 use crate::bgv::parameters::DATA_PRIMES;
+use crate::bgv::setup::commitment::SETUP_COMMITMENT_MODULUS_LIMB_INDICES;
+use crate::encoding::CanonicalResult;
 use num_bigint::BigInt;
 use num_traits::ToPrimitive;
 
@@ -658,7 +665,7 @@ pub(crate) fn verify_evaluation_key_share(
 ) -> CanonicalResult<()> {
     statement.validate_shape()?;
     if statement
-        .keys
+        .keys()
         .iter()
         .any(|key| key.kind.has_diagonal_source())
     {
@@ -667,8 +674,7 @@ pub(crate) fn verify_evaluation_key_share(
         ));
     }
     let proof_trace_ring_degree = statement
-        .vss_share_linkage
-        .as_ref()
+        .vss_share_linkage()
         .map(|share_linkage| share_linkage.packed_ring_degree(statement.ring_degree))
         .transpose()?
         .unwrap_or(statement.ring_degree);
@@ -690,7 +696,7 @@ pub(crate) fn verify_evaluation_key_share(
     for limb_proof in &proof.limb_proofs {
         transcript.absorb("witness-tree-root", &limb_proof.witness_tree_root);
     }
-    let family_shape = statement.family_shape()?;
+    let family_shape = statement.family_shape();
     let consistency_vectors = (0..family_shape.consistency_repetitions())
         .map(|_| {
             transcript.challenge_bounded_integers(

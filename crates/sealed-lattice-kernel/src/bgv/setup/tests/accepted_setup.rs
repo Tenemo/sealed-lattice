@@ -11,28 +11,26 @@ use self::package_fixtures::{
     CollectiveSetupVerificationFixture, accepted_vss_coefficient_message_fixture,
     accepted_vss_randomness_fixture, accepted_vss_secret_coefficient_fixture,
     collective_public_key_bearing_collective_setup_fixture, collective_setup_intent_package,
-    descriptor_backed_vss_collective_setup_fixture, minimal_collective_setup_package,
+    descriptor_backed_vss_collective_setup_fixture, minimal_collective_setup_package_fixture,
     minimal_collective_setup_package_for_participant_count,
     public_key_share_succinct_proof_bearing_collective_setup_fixture,
     ten_participant_descriptor_backed_vss_collective_setup_fixture,
 };
 use self::proof_record_fixtures::{
-    collective_public_key_object, compact_aggregate_threshold_proof_fixture,
-    galois_key_share_batches_object,
-    public_coefficient_commitment_ring_degree_from_fixture_package,
+    CompactAggregateThresholdProofFixture, collective_public_key_object,
+    compact_aggregate_threshold_proof_fixture, galois_key_share_batches_object,
     public_key_share_material_object, public_key_share_succinct_proofs_fixture,
     relinearization_key_share_rounds_fixture, replace_public_key_share_hashes_with_material_hashes,
-    trustee_evaluation_key_proofs_object,
+    trustee_evaluation_key_proofs_object, vss_commitment_ring_degree_from_fixture_package,
 };
 use self::record_rebinding::{
-    private_vss_envelope_commitment_record_root_input,
     private_vss_envelope_commitment_set_root_input, rebind_collective_evaluator_key_schedule_root,
-    rebind_collective_private_vss_envelope_commitment_root,
-    rebind_collective_public_key_root, rebind_collective_public_key_share_roots,
-    rebind_collective_public_key_succinct_proof_roots, rebind_collective_setup_package_hash,
-    rebind_collective_setup_intent_registration, rebind_collective_setup_intent_signatures,
+    rebind_collective_private_vss_envelope_commitment_root, rebind_collective_public_key_root,
+    rebind_collective_public_key_share_roots, rebind_collective_public_key_succinct_proof_roots,
+    rebind_collective_setup_intent_registration,
+    rebind_collective_setup_intent_registration_with_signature_seed,
+    rebind_collective_setup_intent_signatures, rebind_collective_setup_package_hash,
     rebind_first_private_vss_encrypted_envelope_hash,
-    rebind_first_private_vss_envelope_commitment_record_root,
 };
 
 use super::super::accepted_setup::{

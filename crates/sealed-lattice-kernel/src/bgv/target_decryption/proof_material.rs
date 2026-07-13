@@ -2,8 +2,6 @@ use super::*;
 
 const TARGET_DECRYPTION_SHARE_PROOF_MATERIAL_OBJECT_TYPE: &str =
     "BgvTargetDecryptionShareProofMaterial";
-const TARGET_DECRYPTION_SHARE_PROOF_RECORD_OBJECT_TYPE: &str =
-    "BgvTargetDecryptionShareProofRecord";
 const TARGET_DECRYPTION_SHARE_PROOF_BYTES_HASH_DOMAIN: &str =
     "sealed-lattice/target-decryption/share-proof/proof-bytes";
 
@@ -31,19 +29,8 @@ pub(super) struct TargetDecryptionShareProofMaterialVerificationInput<'a> {
     pub(super) proof_material: &'a Value,
 }
 
-struct TargetDecryptionShareProofRecordVerificationInput<'a> {
-    proof_record: &'a Value,
-    proof_bytes: &'a crate::bgv::setup::BgvProofMaterialBytes,
-    setup_binding: &'a SetupBinding,
-    target_accepted: &'a TargetAcceptedBinding,
-    target_ciphertexts: &'a TargetCiphertextPair,
-    participant: &'a ParticipantBinding,
-    target_decryption_share: &'a Value,
-    target_share_proof_statement: &'a Value,
-}
-
 pub(super) struct TargetProofMaterialEvictionGuard {
-    proof_material_root: String,
+    proof_bytes_hash: String,
 }
 
 pub(super) fn target_proof_material_eviction_guard_for_request(
@@ -51,17 +38,17 @@ pub(super) fn target_proof_material_eviction_guard_for_request(
 ) -> Option<TargetProofMaterialEvictionGuard> {
     request
         .get("proofMaterial")
-        .and_then(|proof_material| proof_material.get("proofMaterialRoot"))
+        .and_then(|proof_material| proof_material.get("proofBytesHash"))
         .and_then(Value::as_str)
-        .map(|proof_material_root| TargetProofMaterialEvictionGuard {
-            proof_material_root: proof_material_root.to_string(),
+        .map(|proof_bytes_hash| TargetProofMaterialEvictionGuard {
+            proof_bytes_hash: proof_bytes_hash.to_string(),
         })
 }
 
 impl Drop for TargetProofMaterialEvictionGuard {
     fn drop(&mut self) {
         crate::bgv::setup::evict_verified_canonical_proof_materials(std::slice::from_ref(
-            &self.proof_material_root,
+            &self.proof_bytes_hash,
         ));
     }
 }
@@ -100,22 +87,13 @@ pub(super) fn generate_target_decryption_share_proof_material_from_local_witness
         TARGET_DECRYPTION_SHARE_PROOF_BYTES_HASH_DOMAIN,
         &[&proof_bytes],
     );
-    let proof_record = json!({
-        "objectType": TARGET_DECRYPTION_SHARE_PROOF_RECORD_OBJECT_TYPE,
-        "proofBytesHash": proof_bytes_hash,
-    });
-
-    let mut proof_material = json!({
+    let proof_material = json!({
         "objectType": TARGET_DECRYPTION_SHARE_PROOF_MATERIAL_OBJECT_TYPE,
-        "proofRecords": [proof_record],
+        "proofBytesHash": &proof_bytes_hash,
     });
-    let proof_material_root = derive_canonical_object_hash(
-        &target_decryption_share_proof_material_root_preimage(&proof_material)?,
-    )?;
-    proof_material["proofMaterialRoot"] = json!(&proof_material_root);
     crate::bgv::setup::retain_generated_canonical_proof_material(
         TARGET_DECRYPTION_SHARE_PROOF_FAMILY,
-        proof_material_root,
+        proof_bytes_hash,
         proof_bytes,
     )?;
 
@@ -124,11 +102,8 @@ pub(super) fn generate_target_decryption_share_proof_material_from_local_witness
 
 pub(super) fn verify_target_decryption_share_proof_material(
     input: TargetDecryptionShareProofMaterialVerificationInput<'_>,
-) -> CanonicalResult<Value> {
-    let supplied_material_root = hash_at_path(input.proof_material, &["proofMaterialRoot"])?;
-    let _material_eviction_guard = TargetProofMaterialEvictionGuard {
-        proof_material_root: supplied_material_root.to_string(),
-    };
+) -> CanonicalResult<()> {
+    let supplied_proof_bytes_hash = hash_at_path(input.proof_material, &["proofBytesHash"])?;
     validate_target_decryption_share_proof_statement_shape(
         input.proof_statement,
         input.setup_binding,
@@ -146,26 +121,9 @@ pub(super) fn verify_target_decryption_share_proof_material(
             "target-decryption proof material must use the current target proof-material layout",
         ));
     }
-    let expected_material_root = derive_canonical_object_hash(
-        &target_decryption_share_proof_material_root_preimage(input.proof_material)?,
-    )?;
-    compare_hash_field(
-        input.proof_material,
-        "proofMaterialRoot",
-        &expected_material_root,
-        "target-decryption proof material root",
-    )?;
-
-    let proof_records = array_at_path(input.proof_material, &["proofRecords"])?;
-    if proof_records.len() != 1 {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "target-decryption proof material must include one all-active-limb proof record",
-        ));
-    }
     let proof_bytes = crate::bgv::setup::take_verified_canonical_proof_material_bytes(
         TARGET_DECRYPTION_SHARE_PROOF_FAMILY,
-        &expected_material_root,
+        supplied_proof_bytes_hash,
     )?
     .ok_or_else(|| {
         CanonicalError::new(
@@ -174,45 +132,12 @@ pub(super) fn verify_target_decryption_share_proof_material(
         )
     })?;
 
-    for proof_record in proof_records {
-        verify_target_decryption_share_proof_record(
-            TargetDecryptionShareProofRecordVerificationInput {
-                proof_record,
-                proof_bytes: &proof_bytes,
-                setup_binding: input.setup_binding,
-                target_accepted: input.target_accepted,
-                target_ciphertexts: input.target_ciphertexts,
-                participant: input.participant,
-                target_decryption_share: input.target_decryption_share,
-                target_share_proof_statement: input.proof_statement,
-            },
-        )?;
-    }
-
-    Ok(json!({
-        "proofMaterialRoot": expected_material_root,
-    }))
-}
-
-fn verify_target_decryption_share_proof_record(
-    input: TargetDecryptionShareProofRecordVerificationInput<'_>,
-) -> CanonicalResult<()> {
-    let proof_record = input.proof_record;
-    if string_at_path(proof_record, &["objectType"])?
-        != TARGET_DECRYPTION_SHARE_PROOF_RECORD_OBJECT_TYPE
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "target-decryption proof record must use the current target proof-record layout",
-        ));
-    }
-    let proof_bytes_hash = hash_at_path(proof_record, &["proofBytesHash"])?;
     let recomputed_proof_bytes_hash = crate::hashing::hash512_hex_streamed_part(
         TARGET_DECRYPTION_SHARE_PROOF_BYTES_HASH_DOMAIN,
-        input.proof_bytes.len(),
-        input.proof_bytes.chunks(),
+        proof_bytes.len(),
+        proof_bytes.chunks(),
     )?;
-    if proof_bytes_hash != recomputed_proof_bytes_hash {
+    if supplied_proof_bytes_hash != recomputed_proof_bytes_hash {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             "target-decryption proofBytesHash does not match the authenticated proof bytes",
@@ -222,31 +147,16 @@ fn verify_target_decryption_share_proof_record(
         target_decryption_share_all_active_limbs_proof_statement_from_public_inputs(
             TargetDecryptionShareAllActiveLimbsProofStatementInput {
                 setup_binding: input.setup_binding,
-                target_accepted: input.target_accepted,
                 target_ciphertexts: input.target_ciphertexts,
                 participant: input.participant,
                 target_decryption_share: input.target_decryption_share,
-                proof_statement: input.target_share_proof_statement,
+                proof_statement: input.proof_statement,
             },
         )?;
     crate::bgv::setup::verify_target_decryption_share_proof_source_from_request(
         &proof_verification_request,
-        input.proof_bytes.as_ref(),
+        proof_bytes.as_ref(),
     )?;
 
     Ok(())
-}
-
-fn target_decryption_share_proof_material_root_preimage(
-    proof_material: &Value,
-) -> CanonicalResult<Value> {
-    let mut root_preimage = proof_material.clone();
-    let root_preimage_object = root_preimage.as_object_mut().ok_or_else(|| {
-        CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "target-decryption proof material root preimage must be an object",
-        )
-    })?;
-    root_preimage_object.remove("proofMaterialRoot");
-    Ok(root_preimage)
 }

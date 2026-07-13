@@ -8,6 +8,7 @@ import {
     createMlDsaKeyPairFixture,
     createProtocolSignatureFixture,
 } from '#packages/crypto/tests/support/protocol-signature-fixtures';
+import { deriveCollectiveBgvSetupContextHash } from '#packages/protocol/src/setup/common-fields';
 import {
     createVssShareAcceptanceRecord,
     createVssShareAcceptanceSet,
@@ -25,7 +26,7 @@ import {
 const fixtureHash = makeSetupFixtureHash(
     'setup-vss-share-verification-records',
 );
-const setupContext = makeSetupContext(fixtureHash);
+const setupContext = makeSetupContext(fixtureHash, 2);
 const privateVssEnvelopeCommitmentRoot = fixtureHash('private-envelope-set');
 
 const envelopeReference = (
@@ -40,7 +41,6 @@ const envelopeReference = (
 
     return {
         objectType: 'PrivateVssEnvelopeCommitment',
-        ...setupContext,
         sourceTrusteeIdentity,
         sourceTrusteeRosterPosition,
         recipientIdentity,
@@ -54,21 +54,10 @@ const envelopeReference = (
         encryptedEnvelopeHash: fixtureHash(
             `encrypted-envelope-${trusteePairLabel}`,
         ),
-        privateEnvelopeAad: {},
-        privateEnvelopeAadHash: fixtureHash(
-            `private-envelope-aad-${trusteePairLabel}`,
-        ),
-        encryptedEnvelope: {},
-        recipientMailboxPublicKeyHash: fixtureHash(
-            `recipient-mailbox-${String(recipientRosterPosition)}`,
-        ),
         localVerificationRoot: fixtureHash(
             `local-verification-${trusteePairLabel}`,
         ),
-        privateEnvelopeCommitmentRoot: fixtureHash(
-            `private-envelope-commitment-${trusteePairLabel}`,
-        ),
-    } as unknown as PrivateVssEnvelopeVerificationReference;
+    } satisfies PrivateVssEnvelopeVerificationReference;
 };
 
 type FixtureSigner = Readonly<{
@@ -117,7 +106,6 @@ const acceptanceRecordInput = (
     ),
     recoveryEpoch,
     deviceEpoch,
-    signingPublicKeyHash: signer.publicKeyHash,
     signRoot: signer.signRoot,
 });
 
@@ -167,44 +155,46 @@ const localComplaintRecordInput = (
     };
 };
 
-const signatureContextFields = (record: VerificationRecord) => ({
-    ceremonyId: record.ceremonyId,
-    manifestHash: record.manifestHash,
-    rosterHash: record.rosterHash,
-    setupParametersHash: record.setupParametersHash,
-    setupEpoch: record.setupEpoch,
-    sourceTrusteeIdentity: record.sourceTrusteeIdentity,
-    sourceTrusteeRosterPosition: record.sourceTrusteeRosterPosition,
-    recipientIdentity: record.recipientIdentity,
-    recipientRosterPosition: record.recipientRosterPosition,
-    sourceTrusteeCommitmentRoot: record.sourceTrusteeCommitmentRoot,
-    privateVssEnvelopeCommitmentRoot: record.privateVssEnvelopeCommitmentRoot,
-    privateEnvelopeHash: record.privateEnvelopeHash,
+const shareVerificationPayloadFields = (input: AcceptanceRecordInput) => ({
+    setupContextHash: deriveCollectiveBgvSetupContextHash(input.setupContext),
+    sourceTrusteeIdentity: input.envelopeReference.sourceTrusteeIdentity,
+    sourceTrusteeRosterPosition:
+        input.envelopeReference.sourceTrusteeRosterPosition,
+    recipientIdentity: input.envelopeReference.recipientIdentity,
+    recipientRosterPosition: input.envelopeReference.recipientRosterPosition,
+    sourceTrusteeCommitmentRoot:
+        input.envelopeReference.sourceTrusteeCommitmentRoot,
+    privateVssEnvelopeCommitmentRoot: input.privateVssEnvelopeCommitmentRoot,
+    privateEnvelopeHash: input.envelopeReference.privateEnvelopeHash,
 });
 
 const expectValidTrusteeSignature = (
     record: VerificationRecord,
     signer: FixtureSigner,
-    contextHash: string,
+    expectedObjectRoot: string,
+    expectedRecipientIdentity: string,
+    recoveryEpoch: number,
+    deviceEpoch: number,
 ): void => {
-    const objectRoot =
-        record.objectType === 'VssShareAcceptance'
-            ? record.acceptanceRoot
-            : record.complaintRoot;
+    const contextHash = deriveCanonicalObjectHash({
+        objectType: `${record.objectType}SignatureContext`,
+        payloadRoot: expectedObjectRoot,
+    });
+    expect(record.signatureEnvelope.signedRoot.objectRoot).toBe(
+        expectedObjectRoot,
+    );
     expect(
         verifySignedObjectSignature(record.signatureEnvelope, {
             objectType: record.objectType,
             signerRole: 'Trustee',
-            signerIdentity: record.recipientIdentity,
-            ceremonyId: record.ceremonyId,
+            signerIdentity: expectedRecipientIdentity,
+            ceremonyId: setupContext.ceremonyId,
             publicKeyHash: signer.publicKeyHash,
-            manifestHash: record.manifestHash,
-            objectRoot,
-            chunkMerkleRoot: null,
-            boardHeadHash: null,
+            manifestHash: setupContext.manifestHash,
+            objectRoot: expectedObjectRoot,
             contextHash,
-            recoveryEpoch: record.recoveryEpoch,
-            deviceEpoch: record.deviceEpoch,
+            recoveryEpoch,
+            deviceEpoch,
         }).isValid,
     ).toBe(true);
 };
@@ -217,18 +207,13 @@ type AsyncRejectionCase = Readonly<{
 
 const rejectionCases = [
     {
-        label: 'an envelope with a mismatched setup context',
-        expectedMessage: /must match setupContext/u,
-        run: (signer) => {
-            const input = acceptanceRecordInput(signer);
-            return createVssShareAcceptanceRecord({
-                ...input,
-                envelopeReference: {
-                    ...input.envelopeReference,
-                    rosterHash: fixtureHash('wrong-roster'),
-                },
-            });
-        },
+        label: 'a negative recovery epoch',
+        expectedMessage: /recoveryEpoch must be a non-negative safe integer/u,
+        run: (signer) =>
+            createVssShareAcceptanceRecord({
+                ...acceptanceRecordInput(signer),
+                recoveryEpoch: -1,
+            }),
     },
     {
         label: 'an acceptance signature forged over the wrong root',
@@ -285,20 +270,28 @@ const rejectionCases = [
 describe('VSS share verification record builders', () => {
     it('creates a signed acceptance record and deterministic acceptance set', async () => {
         const signer = createSigner('recipient-acceptance-positive');
-        const firstRecord = await createVssShareAcceptanceRecord(
-            acceptanceRecordInput(signer, 1, 0, 2, 3),
-        );
+        const firstInput = acceptanceRecordInput(signer, 1, 0, 2, 3);
+        const firstRecord = await createVssShareAcceptanceRecord(firstInput);
         const secondRecord = await createVssShareAcceptanceRecord(
             acceptanceRecordInput(signer, 0, 0, 2, 3),
         );
-        const expectedContextHash = deriveCanonicalObjectHash({
-            objectType: 'VssShareAcceptanceSignatureContext',
-            ...signatureContextFields(firstRecord),
-            localVerificationRoot: firstRecord.localVerificationRoot,
-            acceptanceRoot: firstRecord.acceptanceRoot,
+        const expectedAcceptanceRoot = deriveCanonicalObjectHash({
+            objectType: 'VssShareAcceptance',
+            ...shareVerificationPayloadFields(firstInput),
+            localVerificationRoot:
+                firstInput.envelopeReference.localVerificationRoot,
+            recoveryEpoch: firstInput.recoveryEpoch,
+            deviceEpoch: firstInput.deviceEpoch,
         });
 
-        expectValidTrusteeSignature(firstRecord, signer, expectedContextHash);
+        expectValidTrusteeSignature(
+            firstRecord,
+            signer,
+            expectedAcceptanceRoot,
+            firstInput.envelopeReference.recipientIdentity,
+            firstInput.recoveryEpoch,
+            firstInput.deviceEpoch,
+        );
 
         const acceptanceSet = createVssShareAcceptanceSet({
             acceptanceRecords: [firstRecord, secondRecord],
@@ -325,21 +318,24 @@ describe('VSS share verification record builders', () => {
 
     it('creates signed complaint records with the complaint root type', async () => {
         const signer = createSigner('recipient-complaint-positive');
-        const complaintRecord = await createVssShareComplaintRecord(
-            complaintRecordInput(signer, 0, 1, 4, 5),
-        );
-        const expectedContextHash = deriveCanonicalObjectHash({
-            objectType: 'VssShareComplaintSignatureContext',
-            ...signatureContextFields(complaintRecord),
-            complaintEvidenceRoot: complaintRecord.complaintEvidenceRoot,
-            complaintReasonCode: complaintRecord.complaintReasonCode,
-            complaintRoot: complaintRecord.complaintRoot,
+        const input = complaintRecordInput(signer, 0, 1, 4, 5);
+        const complaintRecord = await createVssShareComplaintRecord(input);
+        const expectedComplaintRoot = deriveCanonicalObjectHash({
+            objectType: 'VssShareComplaint',
+            ...shareVerificationPayloadFields(input),
+            complaintEvidenceRoot: input.complaintEvidenceRoot,
+            complaintReasonCode: input.complaintReasonCode,
+            recoveryEpoch: input.recoveryEpoch,
+            deviceEpoch: input.deviceEpoch,
         });
 
         expectValidTrusteeSignature(
             complaintRecord,
             signer,
-            expectedContextHash,
+            expectedComplaintRoot,
+            input.envelopeReference.recipientIdentity,
+            input.recoveryEpoch,
+            input.deviceEpoch,
         );
     });
 
@@ -355,7 +351,7 @@ describe('VSS share verification record builders', () => {
         expect(complaintRecord.complaintEvidenceRoot).toBe(
             deriveCanonicalObjectHash({
                 objectType: 'VssShareComplaintEvidence',
-                ...signatureContextFields(complaintRecord),
+                ...shareVerificationPayloadFields(input),
                 privateEnvelopeHashFromLocalVerification:
                     input.localVerification.privateEnvelopeHash,
                 localVerificationRoot:

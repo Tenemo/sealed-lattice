@@ -10,8 +10,6 @@ enum TranscriptCoreCommand {
     DeriveCanonicalObjectHash,
     DescribeBgvRnsParameters,
     DescribeCollectiveBgvSetupParameters,
-    GenerateBgvPassiveSetup,
-    VerifyBgvPassiveSetup,
     VerifyCollectiveBgvSetup,
     VerifyPrivateVssShareEnvelope,
     GeneratePrivateVssShareProof,
@@ -19,14 +17,12 @@ enum TranscriptCoreCommand {
     DescribeTrusteeEvaluationKeyStatement,
     ComputeSetupCommitmentFromOpening,
     VerifyLocalTrusteeSetupState,
-    RunDirectEncryptedBallot,
     // Participant-side target-share and proof generation consume local witness
     // material inside the caller's own browser. The staged result-release path
     // still verifies every proof before recombination; exposing local generation
     // does not make an unproved share acceptable.
     GenerateBgvTargetDecryptionShareFromLocalShare,
     GenerateBgvTargetDecryptionShareProofMaterialFromLocalWitness,
-    DeriveBgvTargetDecryptionResultReleaseSetupContext,
     BeginBgvTargetDecryptionResultRelease,
     AbsorbBgvTargetDecryptionResultReleaseShare,
     FinishBgvTargetDecryptionResultRelease,
@@ -76,15 +72,11 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
         )),
         TranscriptCoreCommand::DescribeBgvRnsParameters
         | TranscriptCoreCommand::DescribeCollectiveBgvSetupParameters
-        | TranscriptCoreCommand::GenerateBgvPassiveSetup
-        | TranscriptCoreCommand::VerifyBgvPassiveSetup
         | TranscriptCoreCommand::VerifyPrivateVssShareEnvelope
         | TranscriptCoreCommand::GeneratePrivateVssShareProof
         | TranscriptCoreCommand::GenerateTrusteeEvaluationKeyProof
         | TranscriptCoreCommand::ComputeSetupCommitmentFromOpening
         | TranscriptCoreCommand::VerifyLocalTrusteeSetupState
-        | TranscriptCoreCommand::RunDirectEncryptedBallot
-        | TranscriptCoreCommand::DeriveBgvTargetDecryptionResultReleaseSetupContext
         | TranscriptCoreCommand::BeginBgvTargetDecryptionResultRelease
         | TranscriptCoreCommand::AbsorbBgvTargetDecryptionResultReleaseShare
         | TranscriptCoreCommand::FinishBgvTargetDecryptionResultRelease
@@ -102,7 +94,6 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
 pub(super) fn run_accepted_setup_command_inner(
     input: &[u8],
     session_handle: u32,
-    capability: &[u8; crate::foundation::CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH],
 ) -> CanonicalResult<Value> {
     let request = parse_transcript_core_request(input)?;
     let command = request
@@ -123,7 +114,6 @@ pub(super) fn run_accepted_setup_command_inner(
     crate::bgv::verify_collective_bgv_setup_package_with_session_from_request(
         &request,
         session_handle,
-        capability,
     )
 }
 
@@ -134,12 +124,6 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
         }
         TranscriptCoreCommand::DescribeCollectiveBgvSetupParameters => {
             crate::bgv::commands::describe_collective_bgv_setup_parameters_from_request(request)
-        }
-        TranscriptCoreCommand::GenerateBgvPassiveSetup => {
-            crate::bgv::setup::generate_passive_setup_package_from_request(request)
-        }
-        TranscriptCoreCommand::VerifyBgvPassiveSetup => {
-            crate::bgv::setup::verify_passive_setup_package_from_request(request)
         }
         TranscriptCoreCommand::VerifyPrivateVssShareEnvelope => {
             crate::bgv::setup::verify_private_vss_share_envelope_from_request(request)
@@ -159,9 +143,6 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
         TranscriptCoreCommand::VerifyLocalTrusteeSetupState => {
             crate::bgv::setup::verify_local_trustee_setup_state_from_request(request)
         }
-        TranscriptCoreCommand::RunDirectEncryptedBallot => {
-            crate::bgv::direct_ballots::run_direct_encrypted_ballot(request)
-        }
         TranscriptCoreCommand::GenerateBgvTargetDecryptionShareFromLocalShare => {
             crate::bgv::target_decryption::generate_bgv_target_decryption_share_from_local_share_request(
                 request,
@@ -169,11 +150,6 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
         }
         TranscriptCoreCommand::GenerateBgvTargetDecryptionShareProofMaterialFromLocalWitness => {
             crate::bgv::target_decryption::generate_bgv_target_decryption_share_proof_material_from_local_witness_request(
-                request,
-            )
-        }
-        TranscriptCoreCommand::DeriveBgvTargetDecryptionResultReleaseSetupContext => {
-            crate::bgv::target_decryption::derive_bgv_target_decryption_result_release_setup_context_from_request(
                 request,
             )
         }

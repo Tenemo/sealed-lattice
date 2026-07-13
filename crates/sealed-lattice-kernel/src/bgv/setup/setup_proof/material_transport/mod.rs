@@ -1,13 +1,6 @@
 use super::*;
 
 use std::sync::Arc;
-
-#[cfg(test)]
-use std::collections::BTreeSet;
-
-use crate::bgv::setup_helpers::{
-    array_at_path, compare_required_string, hash_at_path, string_at_path, value_at_path,
-};
 use crate::foundation::FOUNDATION_PROFILE;
 
 enum CanonicalProofMaterialBacking {
@@ -216,184 +209,38 @@ impl ProofByteSource for CanonicalProofMaterialBytes {
 pub(crate) type BgvProofMaterialBytes = Arc<CanonicalProofMaterialBytes>;
 pub(in crate::bgv::setup) type SetupProofMaterialBytes = BgvProofMaterialBytes;
 
-pub(in crate::bgv::setup) struct SetupProofMaterialTransportFamily {
-    pub(in crate::bgv::setup) proof_family: &'static str,
-    pub(in crate::bgv::setup) transport_field: &'static str,
-    pub(in crate::bgv::setup) set_object_type: &'static str,
-    pub(in crate::bgv::setup) material_object_type: &'static str,
-    pub(in crate::bgv::setup) family_description: &'static str,
-}
-
-// Resolve proof bytes already authenticated by the canonical binary stream.
-// The JSON sidecar is only a semantic reference and never carries proof bytes.
-pub(in crate::bgv::setup) fn resolve_transported_setup_proof_material(
-    request: &Value,
-    expected_proof_material_root: &str,
-    family: &SetupProofMaterialTransportFamily,
-) -> CanonicalResult<SetupProofMaterialBytes> {
-    let material_set = value_at_path(request, &[family.transport_field]).map_err(|_| {
-        CanonicalError::new(
-            CanonicalErrorCode::ComponentMismatch,
-            format!(
-                "{} is required by transported {} proof records",
-                family.transport_field, family.family_description
-            ),
-        )
-    })?;
-    compare_required_string(
-        string_at_path(material_set, &["objectType"])?,
-        family.set_object_type,
-        &format!("{}.objectType", family.transport_field),
-    )?;
-
-    let proof_materials = array_at_path(material_set, &["proofMaterials"])?;
-    let mut matching_material = None;
-    for proof_material in proof_materials {
-        compare_required_string(
-            string_at_path(proof_material, &["objectType"])?,
-            family.material_object_type,
-            &format!(
-                "transported {} proof material objectType",
-                family.family_description
-            ),
-        )?;
-        let proof_material_root = hash_at_path(proof_material, &["proofMaterialRoot"])?;
-        if proof_material_root != expected_proof_material_root {
-            continue;
-        }
-        if matching_material.is_some() {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::ComponentMismatch,
-                format!(
-                    "{} contains duplicate proofMaterialRoot entries",
-                    family.transport_field
-                ),
-            ));
-        }
-        matching_material = Some(verified_setup_proof_material_bytes_from_request(
-            family.proof_family,
-            expected_proof_material_root,
-            &format!("{}.proofMaterials", family.transport_field),
-        )?);
-    }
-
-    matching_material.ok_or_else(|| {
-        CanonicalError::new(
-            CanonicalErrorCode::ComponentMismatch,
-            format!(
-                "{} is missing the requested proofMaterialRoot",
-                family.transport_field
-            ),
-        )
-    })
-}
-
-pub(in crate::bgv::setup) fn verified_setup_proof_material_bytes_from_request(
+pub(in crate::bgv::setup) fn take_verified_setup_proof_material_bytes(
     proof_family: &str,
     expected_proof_material_root: &str,
-    transported_material_path: &str,
+    proof_material_path: &str,
+    proof_binding_session: Option<&crate::bgv::setup::AcceptedSetupProofBindingSession>,
 ) -> CanonicalResult<SetupProofMaterialBytes> {
-    validate_hash_string(
-        expected_proof_material_root,
-        &format!("{transported_material_path}.proofMaterialRoot"),
-    )?;
+    validate_hash_string(expected_proof_material_root, proof_material_path)?;
     // A proof-material root is an owned, single-use lease for one setup
     // verification call. Remove it from the canonical store before decoding so
     // the store cannot retain the complete corpus while the verifier advances
     // through later records. The returned Arc keeps only the proof currently
     // being checked alive. A retry must authenticate the source again, matching
     // the disposable-kernel setup verification boundary.
-    crate::bgv::setup::take_verified_canonical_proof_material_bytes(
-        proof_family,
-        expected_proof_material_root,
-    )?
+    match proof_binding_session {
+        Some(proof_binding_session) => crate::bgv::setup::take_accepted_setup_proof_material_bytes(
+            proof_binding_session.session_handle,
+            proof_family,
+            expected_proof_material_root,
+        ),
+        None => crate::bgv::setup::take_verified_canonical_proof_material_bytes(
+            proof_family,
+            expected_proof_material_root,
+        ),
+    }?
     .ok_or_else(|| {
         CanonicalError::new(
             CanonicalErrorCode::InvalidProtocolObject,
             format!(
-                "{transported_material_path} is missing canonical stream-authenticated proof material"
+                "{proof_material_path} has no canonical stream-authenticated proof material"
             ),
         )
     })
-}
-
-#[cfg(test)]
-fn request_verified_canonical_setup_proof_material_roots(request: &Value) -> Vec<String> {
-    let mut material_roots = BTreeSet::new();
-    for field_name in [
-        "transportedPrivateVssShareProofMaterial",
-        "transportedPublicKeyShareProofMaterial",
-        "transportedVssShareLinkageProofMaterial",
-        "transportedSameSecretBridgeProofMaterial",
-        "transportedEvaluationKeyShareProofMaterial",
-    ] {
-        if let Some(sidecar) = request.get(field_name) {
-            collect_request_material_roots(sidecar, "proofMaterialRoot", &mut material_roots);
-        }
-    }
-    material_roots.into_iter().collect()
-}
-
-#[cfg(test)]
-fn collect_request_material_roots(
-    value: &Value,
-    root_field_name: &str,
-    material_roots: &mut BTreeSet<String>,
-) {
-    let mut pending_values = vec![value];
-    while let Some(current_value) = pending_values.pop() {
-        match current_value {
-            Value::Object(fields) => {
-                if let Some(root) = fields.get(root_field_name).and_then(Value::as_str) {
-                    material_roots.insert(root.to_string());
-                }
-                pending_values.extend(fields.values());
-            }
-            Value::Array(items) => pending_values.extend(items),
-            _ => {}
-        }
-    }
-}
-
-#[cfg(test)]
-pub(in crate::bgv::setup) struct VerifiedSetupProofMaterialEvictionGuard {
-    canonical_proof_material_roots: Vec<String>,
-    canonical_public_key_share_material_roots: Vec<String>,
-}
-
-#[cfg(test)]
-impl VerifiedSetupProofMaterialEvictionGuard {
-    pub(in crate::bgv::setup) fn for_request(request: &Value) -> Self {
-        Self {
-            canonical_proof_material_roots: request_verified_canonical_setup_proof_material_roots(
-                request,
-            ),
-            canonical_public_key_share_material_roots: request
-                .get("transportedPublicKeyShareMaterial")
-                .map(|material| {
-                    let mut roots = BTreeSet::new();
-                    collect_request_material_roots(
-                        material,
-                        "publicKeyShareMaterialSetRoot",
-                        &mut roots,
-                    );
-                    roots.into_iter().collect()
-                })
-                .unwrap_or_default(),
-        }
-    }
-}
-
-#[cfg(test)]
-impl Drop for VerifiedSetupProofMaterialEvictionGuard {
-    fn drop(&mut self) {
-        crate::bgv::setup::evict_verified_canonical_setup_proof_materials(
-            &self.canonical_proof_material_roots,
-        );
-        crate::bgv::setup::evict_verified_canonical_public_key_share_materials(
-            &self.canonical_public_key_share_material_roots,
-        );
-    }
 }
 
 #[cfg(test)]

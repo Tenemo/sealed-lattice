@@ -75,11 +75,11 @@ export type SetupPackageVerificationInputSource = Readonly<{
     readonly expectedManifestHash: ProtocolHash;
     readonly expectedRosterHash: ProtocolHash;
     readonly transportedPublicKeyShareMaterial: SetupTransportedPublicKeyShareMaterial;
-    readonly transportedPublicKeyShareProofMaterial?: TransportedPublicKeyShareProofMaterialSet;
-    readonly transportedEvaluationKeyShareProofMaterial?: TransportedEvaluationKeyShareProofMaterialSet;
-    readonly transportedVssShareLinkageProofMaterial?: TransportedVssShareLinkageProofMaterialSet;
-    readonly transportedSameSecretBridgeProofMaterial?: TransportedSameSecretBridgeProofMaterialSet;
-    readonly transportedEvaluationKeyShareComponentMaterial?: TransportedEvaluationKeyShareComponentMaterialSet;
+    readonly transportedPublicKeyShareProofMaterial: TransportedPublicKeyShareProofMaterialSet;
+    readonly transportedEvaluationKeyShareProofMaterial: TransportedEvaluationKeyShareProofMaterialSet;
+    readonly transportedVssShareLinkageProofMaterial: TransportedVssShareLinkageProofMaterialSet;
+    readonly transportedSameSecretBridgeProofMaterial: TransportedSameSecretBridgeProofMaterialSet;
+    readonly transportedEvaluationKeyShareComponentMaterial: TransportedEvaluationKeyShareComponentMaterialSet;
 }>;
 
 export type SetupPackageVerificationInput = Readonly<
@@ -93,10 +93,10 @@ export type SetupPackageVerificationInput = Readonly<
         | 'transportedEvaluationKeyShareComponentMaterial'
     > & {
         readonly transportedPublicKeyShareMaterial: JsonRecord;
-        readonly transportedPublicKeyShareProofMaterial?: JsonRecord;
-        readonly transportedEvaluationKeyShareProofMaterial?: JsonRecord;
-        readonly transportedVssShareLinkageProofMaterial?: JsonRecord;
-        readonly transportedSameSecretBridgeProofMaterial?: JsonRecord;
-        readonly transportedEvaluationKeyShareComponentMaterial?: JsonRecord;
+        readonly transportedPublicKeyShareProofMaterial: JsonRecord;
+        readonly transportedEvaluationKeyShareProofMaterial: JsonRecord;
+        readonly transportedVssShareLinkageProofMaterial: JsonRecord;
+        readonly transportedSameSecretBridgeProofMaterial: JsonRecord;
+        readonly transportedEvaluationKeyShareComponentMaterial: JsonRecord;
     }
 >;

@@ -7,20 +7,28 @@ pub(super) fn compare_context_fields(
     setup_context: &Value,
     object_path: &str,
 ) -> Result<(), PrivateVssRefusal> {
-    for field_name in setup_context_field_names() {
-        if value.get(field_name) != setup_context.get(field_name) {
-            return Err(PrivateVssRefusal::new(
+    let expected_setup_context_hash =
+        accepted_setup::setup_context_hash(setup_context).map_err(|_| {
+            PrivateVssRefusal::new(
                 "privateVssContextMismatch",
-                format!("{object_path}.{field_name} must match setupContext"),
-                format!("{object_path}.{field_name}"),
-            ));
-        }
+                "setupContext must be canonical before comparing private VSS records",
+                "setupContext",
+            )
+        })?;
+    if value.get("setupContextHash").and_then(Value::as_str)
+        != Some(expected_setup_context_hash.as_str())
+    {
+        return Err(PrivateVssRefusal::new(
+            "privateVssContextMismatch",
+            format!("{object_path}.setupContextHash must match setupContext"),
+            format!("{object_path}.setupContextHash"),
+        ));
     }
 
     Ok(())
 }
 
-pub(super) fn setup_context_field_names() -> [&'static str; 5] {
+pub(super) fn authoritative_setup_context_field_names() -> [&'static str; 5] {
     [
         "ceremonyId",
         "manifestHash",

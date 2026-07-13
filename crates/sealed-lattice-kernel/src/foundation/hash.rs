@@ -55,7 +55,10 @@ impl fmt::Display for Hash512 {
 }
 
 /// Hashes typed items through the sole foundation SHAKE256 framing.
-pub fn hash512(domain: &str, items: &[CanonicalItem]) -> Result<Hash512, CanonicalCodecError> {
+pub fn hash_foundation_tuple_512(
+    domain: &str,
+    items: &[CanonicalItem],
+) -> Result<Hash512, CanonicalCodecError> {
     let mut framed_items = Vec::with_capacity(items.len().saturating_add(1));
     framed_items.push(CanonicalItem::nonempty_ascii(domain)?);
     framed_items.extend_from_slice(items);
@@ -89,7 +92,8 @@ mod tests {
             CanonicalItem::unsigned16(0x0201),
             CanonicalItem::variable_bytes([7, 8, 9]).expect("raw bytes fit u32"),
         ];
-        let actual = hash512("sealed-lattice/test/hash/v1", &items).expect("hash input is valid");
+        let actual = hash_foundation_tuple_512("sealed-lattice/test/hash/v1", &items)
+            .expect("hash input is valid");
 
         let mut expected_frame = Vec::new();
         expected_frame.extend_from_slice(&0x0001_u16.to_le_bytes());
@@ -119,17 +123,17 @@ mod tests {
 
     #[test]
     fn domain_and_item_boundaries_cannot_alias() {
-        let first = hash512(
+        let first = hash_foundation_tuple_512(
             "sealed-lattice/test/a",
             &[CanonicalItem::variable_bytes(b"bc").expect("raw bytes")],
         )
         .expect("hash");
-        let second = hash512(
+        let second = hash_foundation_tuple_512(
             "sealed-lattice/test/ab",
             &[CanonicalItem::variable_bytes(b"c").expect("raw bytes")],
         )
         .expect("hash");
-        let split = hash512(
+        let split = hash_foundation_tuple_512(
             "sealed-lattice/test/a",
             &[
                 CanonicalItem::variable_bytes(b"b").expect("raw bytes"),
@@ -144,7 +148,7 @@ mod tests {
 
     #[test]
     fn empty_or_non_printable_domains_refuse() {
-        assert!(hash512("", &[]).is_err());
-        assert!(hash512("sealed-lattice/test\n", &[]).is_err());
+        assert!(hash_foundation_tuple_512("", &[]).is_err());
+        assert!(hash_foundation_tuple_512("sealed-lattice/test\n", &[]).is_err());
     }
 }

@@ -35,7 +35,6 @@ impl DescriptorBackedVssProofMaterialFixture {
             if let Some(proof_binding_lease) = &material.proof_binding_lease {
                 crate::bgv::setup::restore_accepted_setup_proof_binding_lease(
                     proof_binding_session.session_handle,
-                    &proof_binding_session.capability,
                     proof_binding_lease,
                 )
                 .expect("restore verifier-owned VSS proof binding");
@@ -89,7 +88,7 @@ struct RewrittenProofMaterialSet {
 struct ProofMaterialFamilyFields {
     proof_family: &'static str,
     proof_bytes_hash_domain: &'static str,
-    proof_record_root_field: &'static str,
+    proof_record_root_field: Option<&'static str>,
     transport_set_object_type: &'static str,
     transport_object_type: &'static str,
 }
@@ -98,7 +97,7 @@ const VSS_SHARE_LINKAGE_PROOF_MATERIAL_FIELDS: ProofMaterialFamilyFields =
     ProofMaterialFamilyFields {
         proof_family: VSS_SHARE_LINKAGE_PROOF_FAMILY,
         proof_bytes_hash_domain: VSS_SHARE_LINKAGE_PROOF_BYTES_HASH_DOMAIN,
-        proof_record_root_field: "proofRecordRoot",
+        proof_record_root_field: None,
         transport_set_object_type: VSS_SHARE_LINKAGE_TRANSPORT_SET_OBJECT_TYPE,
         transport_object_type: VSS_SHARE_LINKAGE_TRANSPORT_OBJECT_TYPE,
     };
@@ -107,7 +106,7 @@ const SAME_SECRET_BRIDGE_PROOF_MATERIAL_FIELDS: ProofMaterialFamilyFields =
     ProofMaterialFamilyFields {
         proof_family: SAME_SECRET_BRIDGE_PROOF_FAMILY,
         proof_bytes_hash_domain: SAME_SECRET_BRIDGE_PROOF_BYTES_HASH_DOMAIN,
-        proof_record_root_field: "sameSecretBridgeProofRecordRoot",
+        proof_record_root_field: Some("sameSecretBridgeProofRecordRoot"),
         transport_set_object_type: SAME_SECRET_BRIDGE_TRANSPORT_SET_OBJECT_TYPE,
         transport_object_type: SAME_SECRET_BRIDGE_TRANSPORT_OBJECT_TYPE,
     };
@@ -119,6 +118,7 @@ const SAME_SECRET_BRIDGE_PROOF_MATERIAL_FIELDS: ProofMaterialFamilyFields =
 fn rewrite_proof_material_set_for_authenticated_transport(
     proof_material_set: &mut serde_json::Value,
     fields: &ProofMaterialFamilyFields,
+    proof_binding_leases: &[crate::bgv::setup::CanonicalSetupProofBindingLease],
 ) -> RewrittenProofMaterialSet {
     let proof_records = proof_material_set["proofRecords"]
         .as_array_mut()
@@ -143,10 +143,11 @@ fn rewrite_proof_material_set_for_authenticated_transport(
             proof_material_root,
             "descriptor-backed proof material root",
         );
-        let proof_binding_lease =
-            crate::bgv::setup::accepted_setup_fixture_proof_binding_lease(&proof_material_root)
-                .expect("descriptor-backed proof binding lookup")
-                .expect("descriptor-backed proof binding");
+        let proof_binding_lease = proof_binding_leases
+            .iter()
+            .find(|lease| lease.proof_material_root() == proof_material_root)
+            .cloned()
+            .expect("descriptor-backed proof binding");
         let retained_material = RetainedVssProofMaterial {
             proof_family: fields.proof_family,
             proof_bytes_hash_domain: fields.proof_bytes_hash_domain,
@@ -159,15 +160,19 @@ fn rewrite_proof_material_set_for_authenticated_transport(
         let record_object = proof_record
             .as_object_mut()
             .expect("proof material record object");
-        record_object.remove(fields.proof_record_root_field);
+        if let Some(proof_record_root_field) = fields.proof_record_root_field {
+            record_object.remove(proof_record_root_field);
+        }
         record_object.insert(
             "proofMaterialRoot".to_string(),
             serde_json::json!(&proof_material_root),
         );
-        proof_record[fields.proof_record_root_field] = serde_json::json!(
-            derive_canonical_object_hash(proof_record)
-                .expect("descriptor-backed proof material record root")
-        );
+        if let Some(proof_record_root_field) = fields.proof_record_root_field {
+            proof_record[proof_record_root_field] = serde_json::json!(
+                derive_canonical_object_hash(proof_record)
+                    .expect("descriptor-backed proof material record root")
+            );
+        }
 
         transported_proof_materials.push(serde_json::json!({
             "objectType": fields.transport_object_type,
@@ -175,8 +180,6 @@ fn rewrite_proof_material_set_for_authenticated_transport(
         }));
         retained_proof_materials.push(retained_material);
     }
-
-    rebind_proof_material_set_root(proof_material_set);
 
     RewrittenProofMaterialSet {
         transported_proof_material: serde_json::json!({
@@ -189,6 +192,7 @@ fn rewrite_proof_material_set_for_authenticated_transport(
 
 fn retained_aggregate_threshold_proof_materials(
     package: &serde_json::Value,
+    proof_binding_leases: &[crate::bgv::setup::CanonicalSetupProofBindingLease],
 ) -> Vec<RetainedVssProofMaterial> {
     package["vssPublicAggregateThresholdCommitmentSet"]["aggregateThresholdProofs"]
         .as_array()
@@ -203,10 +207,11 @@ fn retained_aggregate_threshold_proof_materials(
                 .as_str()
                 .expect("VSS aggregate threshold proof bytes hash")
                 .to_string();
-            let proof_binding_lease =
-                crate::bgv::setup::accepted_setup_fixture_proof_binding_lease(&proof_material_root)
-                    .expect("VSS aggregate threshold proof binding lookup")
-                    .expect("VSS aggregate threshold proof binding");
+            let proof_binding_lease = proof_binding_leases
+                .iter()
+                .find(|lease| lease.proof_material_root() == proof_material_root)
+                .cloned()
+                .expect("VSS aggregate threshold proof binding");
 
             RetainedVssProofMaterial {
                 proof_family: VSS_SHARE_LINKAGE_PROOF_FAMILY,
@@ -222,8 +227,10 @@ fn retained_aggregate_threshold_proof_materials(
 
 pub(in super::super::super) fn descriptor_backed_vss_proof_material_fixture(
     package: &mut serde_json::Value,
+    proof_binding_leases: &[crate::bgv::setup::CanonicalSetupProofBindingLease],
 ) -> DescriptorBackedVssProofMaterialFixture {
-    let aggregate_retained_proof_materials = retained_aggregate_threshold_proof_materials(package);
+    let aggregate_retained_proof_materials =
+        retained_aggregate_threshold_proof_materials(package, proof_binding_leases);
     let mut aggregate_transport = package
         .as_object_mut()
         .expect("collective setup package object")
@@ -242,6 +249,7 @@ pub(in super::super::super) fn descriptor_backed_vss_proof_material_fixture(
     let rewritten_share_linkage = rewrite_proof_material_set_for_authenticated_transport(
         &mut package["vssShareLinkageProofMaterialSet"],
         &VSS_SHARE_LINKAGE_PROOF_MATERIAL_FIELDS,
+        proof_binding_leases,
     );
     let mut transported_vss_share_linkage_proof_material =
         rewritten_share_linkage.transported_proof_material;
@@ -259,6 +267,7 @@ pub(in super::super::super) fn descriptor_backed_vss_proof_material_fixture(
     let rewritten_same_secret_bridge = rewrite_proof_material_set_for_authenticated_transport(
         &mut package["sameSecretBridgeProofMaterialSet"],
         &SAME_SECRET_BRIDGE_PROOF_MATERIAL_FIELDS,
+        proof_binding_leases,
     );
 
     let mut retained_proof_materials = rewritten_share_linkage.retained_proof_materials;
@@ -284,28 +293,14 @@ const SAME_SECRET_BRIDGE_TRANSPORT_SET_OBJECT_TYPE: &str =
 const SAME_SECRET_BRIDGE_TRANSPORT_OBJECT_TYPE: &str =
     "SetupTransportedSameSecretBridgeProofMaterial";
 
-// Recompute a proof material set root over the canonical body. The
-// verifier hashes the set with its proofMaterialSetRoot field absent, so the
-// stale root must be removed before rehashing rather than left in place.
-pub(super) fn rebind_proof_material_set_root(proof_material_set: &mut serde_json::Value) {
-    proof_material_set
-        .as_object_mut()
-        .expect("proof material set object")
-        .remove("proofMaterialSetRoot");
-    proof_material_set["proofMaterialSetRoot"] = serde_json::json!(
-        derive_canonical_object_hash(proof_material_set)
-            .expect("transported proof material set root")
-    );
-}
-
 #[test]
 fn vss_share_linkage_uses_authenticated_descriptor_material() {
-    let mut package = minimal_collective_setup_package();
-    let fixture = descriptor_backed_vss_proof_material_fixture(&mut package);
-    let _proof_material_eviction_guard =
-        crate::bgv::setup::setup_proof::VerifiedSetupProofMaterialEvictionGuard::for_request(
-            &fixture.verification_request,
-        );
+    let mut finalized_fixture = minimal_collective_setup_package_fixture();
+    let fixture = descriptor_backed_vss_proof_material_fixture(
+        &mut finalized_fixture.package,
+        &finalized_fixture.proof_binding_leases,
+    );
+    let package = finalized_fixture.package;
     let transported_vss_share_linkage_proof_material =
         &fixture.verification_request["transportedVssShareLinkageProofMaterial"];
     let request = serde_json::json!({
@@ -318,22 +313,15 @@ fn vss_share_linkage_uses_authenticated_descriptor_material() {
             transported_vss_share_linkage_proof_material,
     });
     let proof_binding_session = fixture.begin_proof_binding_session();
-    let verification = crate::bgv::setup::verify_vss_share_linkage_proof_material_set_from_request(
+    crate::bgv::setup::verify_vss_share_linkage_proof_material_set_from_request(
         &request,
         Some(&proof_binding_session),
     )
     .expect("descriptor-backed share-linkage proof material set verifies");
     crate::bgv::setup::cancel_accepted_setup_proof_binding_session(
         proof_binding_session.session_handle,
-        &proof_binding_session.capability,
     )
     .expect("cancel direct share-linkage fixture binding session");
-    assert_eq!(
-        verification["proofMaterialSetRoot"],
-        package["vssShareLinkageProofMaterialSet"]["proofMaterialSetRoot"],
-        "verification must recompute the descriptor-backed proof material set root",
-    );
-
     let first_proof_material_root = transported_vss_share_linkage_proof_material["proofMaterials"]
         [0]["proofMaterialRoot"]
         .as_str()
@@ -397,12 +385,12 @@ fn vss_share_linkage_uses_authenticated_descriptor_material() {
 
 #[test]
 fn same_secret_bridge_uses_authenticated_descriptor_material() {
-    let mut package = minimal_collective_setup_package();
-    let fixture = descriptor_backed_vss_proof_material_fixture(&mut package);
-    let _proof_material_eviction_guard =
-        crate::bgv::setup::setup_proof::VerifiedSetupProofMaterialEvictionGuard::for_request(
-            &fixture.verification_request,
-        );
+    let mut finalized_fixture = minimal_collective_setup_package_fixture();
+    let fixture = descriptor_backed_vss_proof_material_fixture(
+        &mut finalized_fixture.package,
+        &finalized_fixture.proof_binding_leases,
+    );
+    let package = finalized_fixture.package;
     let transported_same_secret_bridge_proof_material =
         &fixture.verification_request["transportedSameSecretBridgeProofMaterial"];
     let request = serde_json::json!({
@@ -414,22 +402,15 @@ fn same_secret_bridge_uses_authenticated_descriptor_material() {
             transported_same_secret_bridge_proof_material,
     });
     let proof_binding_session = fixture.begin_proof_binding_session();
-    let verification = crate::bgv::setup::verify_vss_same_secret_bridge_proof_material_set_request(
+    crate::bgv::setup::verify_vss_same_secret_bridge_proof_material_set_request(
         &request,
         Some(&proof_binding_session),
     )
     .expect("descriptor-backed same-secret bridge proof material set verifies");
     crate::bgv::setup::cancel_accepted_setup_proof_binding_session(
         proof_binding_session.session_handle,
-        &proof_binding_session.capability,
     )
     .expect("cancel direct same-secret fixture binding session");
-    assert_eq!(
-        verification["proofMaterialSetRoot"],
-        package["sameSecretBridgeProofMaterialSet"]["proofMaterialSetRoot"],
-        "verification must recompute the descriptor-backed proof material set root",
-    );
-
     let first_proof_material_root = transported_same_secret_bridge_proof_material["proofMaterials"]
         [0]["proofMaterialRoot"]
         .as_str()

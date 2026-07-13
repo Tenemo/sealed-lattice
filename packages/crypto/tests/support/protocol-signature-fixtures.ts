@@ -1,6 +1,7 @@
 import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
 import { ml_dsa65 } from '@noble/post-quantum/ml-dsa.js';
 import type {
+    CanonicalSignedRootObject,
     ProtocolHash,
     ProtocolSignatureEnvelope,
 } from '@sealed-lattice/types';
@@ -13,11 +14,6 @@ import {
 
 const textEncoder = new TextEncoder();
 const supportedMlDsaContextString = 'sealed-lattice:v1';
-const protocolSignatureProfile = {
-    algorithm: 'ML-DSA-65',
-    mode: 'PureMLDSA',
-    contextString: supportedMlDsaContextString,
-} as const;
 const mlDsa65SecretKeyByteLength = ml_dsa65.lengths.secretKey!;
 
 type MlDsaKeyPairFixture = {
@@ -47,15 +43,38 @@ const decodeHexField = (
     return bytes;
 };
 
+const canonicalSignedRootValue = (
+    signedRoot: CanonicalSignedRootObject,
+): CanonicalSignedRootObject => ({
+    objectType: signedRoot.objectType,
+    ceremonyId: signedRoot.ceremonyId,
+    ...(signedRoot.manifestHash === undefined
+        ? {}
+        : { manifestHash: signedRoot.manifestHash }),
+    ...(signedRoot.objectRoot === undefined
+        ? {}
+        : { objectRoot: signedRoot.objectRoot }),
+    ...(signedRoot.chunkMerkleRoot === undefined
+        ? {}
+        : { chunkMerkleRoot: signedRoot.chunkMerkleRoot }),
+    ...(signedRoot.boardHeadHash === undefined
+        ? {}
+        : { boardHeadHash: signedRoot.boardHeadHash }),
+    signerRole: signedRoot.signerRole,
+    signerIdentity: signedRoot.signerIdentity,
+    recoveryEpoch: signedRoot.recoveryEpoch,
+    deviceEpoch: signedRoot.deviceEpoch,
+    contextHash: signedRoot.contextHash,
+});
+
 const canonicalProtocolSignatureMessage = (
     signature: Pick<ProtocolSignatureEnvelope, 'publicKeyHash' | 'signedRoot'>,
 ): Uint8Array =>
     textEncoder.encode(
         canonicalJson({
             messageDomain: 'sealed-lattice/protocol-signature',
-            profile: protocolSignatureProfile,
             publicKeyHash: signature.publicKeyHash,
-            signedRoot: signature.signedRoot,
+            signedRoot: canonicalSignedRootValue(signature.signedRoot),
         }),
     );
 

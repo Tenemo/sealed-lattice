@@ -12,16 +12,16 @@ import {
 } from './constants-and-types.js';
 
 export const storageAad = (
-    setupContext: unknown,
+    setupContextHash: ProtocolHash,
     localStateCommitment: LocalTrusteeStateStorageEncryptionInput['localStateCommitment'],
 ): Readonly<Record<string, unknown>> => ({
     objectType: 'LocalTrusteeStateStorageAad',
-    setupContext,
+    setupContextHash,
     localStateCommitment,
 });
 
 export const sealedMaterialAad = (
-    setupContext: unknown,
+    setupContextHash: ProtocolHash,
     materialRoot: ProtocolHash,
     localStateBinding: Readonly<{
         readonly trusteeIdentity: string;
@@ -31,7 +31,7 @@ export const sealedMaterialAad = (
 ): Readonly<Record<string, unknown>> => ({
     objectType: 'LocalTrusteeSetupSealedMaterialAad',
     materialRoot,
-    setupContext,
+    setupContextHash,
     trusteeIdentity: localStateBinding.trusteeIdentity,
     trusteeRosterPosition: localStateBinding.trusteeRosterPosition,
     thresholdShareCommitmentRecipientRoot:

@@ -14,7 +14,4 @@ export {
     createVssSourceTrusteeCoefficientOpeningState,
     createVssSourceTrusteeCoefficientOpeningStateProvider,
 } from './vss-coefficient-commitments/opening-state.js';
-export {
-    createVssCoefficientCommitmentBundle,
-    createVssSourceTrusteeCoefficientCommitmentContribution,
-} from './vss-coefficient-commitments/commitment-bundles.js';
+export { createVssCoefficientCommitmentBundle } from './vss-coefficient-commitments/commitment-bundles.js';

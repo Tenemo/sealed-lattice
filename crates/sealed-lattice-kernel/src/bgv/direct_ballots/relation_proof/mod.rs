@@ -1,5 +1,4 @@
 use std::mem::size_of;
-mod accounting;
 mod bgv_relation;
 mod challenge;
 mod codec;
@@ -10,7 +9,6 @@ mod statement;
 mod support_relation;
 mod verification;
 mod witness;
-pub(super) use accounting::*;
 use bgv_relation::*;
 use challenge::*;
 use codec::*;
@@ -31,10 +29,10 @@ use crate::{
     bgv::{
         evaluator::engine::{DevelopmentBgvKey, encode_slots_to_coefficients, negacyclic_mul},
         modular_arithmetic::{add_mod, mul_mod, sub_mod},
-        parameters::{DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, bgv_parameters_hash},
+        parameters::{DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE},
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
-    hashing::{canonical_json, hash512, hash512_hex, to_hex},
+    hashing::{canonical_json, hash_framed_parts_512 as hash512, to_hex},
 };
 
 const RELATION_PROOF_MAGIC: &[u8; 8] = b"SLDBP001";
@@ -47,14 +45,32 @@ const RELATION_MASK_COEFFICIENT_BITS: usize = 360;
 const RELATION_RESPONSE_COEFFICIENT_BYTES: usize = 48;
 const RELATION_STATEMENT_HASH_DOMAIN: &str =
     "sealed-lattice/direct-encrypted-ballot/relation-statement";
-const RELATION_PROOF_BYTES_HASH_DOMAIN: &str =
-    "sealed-lattice/direct-encrypted-ballot/relation-proof-bytes";
+
+pub(super) const fn direct_ballot_relation_response_scalar_count() -> usize {
+    RELATION_WITNESS_POLYNOMIALS * POLYNOMIAL_DEGREE
+        + OPTION_COUNT
+        + OPTION_COUNT * SCORE_BUCKET_COUNT
+}
+
+pub(super) const fn direct_ballot_relation_response_bytes() -> usize {
+    direct_ballot_relation_response_scalar_count() * RELATION_RESPONSE_COEFFICIENT_BYTES
+}
+
+pub(super) const fn direct_ballot_relation_commitment_bytes() -> usize {
+    let bgv_commitment_scalars = DATA_PRIMES.len() * 2 * POLYNOMIAL_DEGREE;
+    let score_commitment_scalars = 2 * OPTION_COUNT;
+    let support_commitment_scalars =
+        OPTION_COUNT * SCORE_BUCKET_COUNT * ONE_HOT_SUPPORT_EXPANSION_COEFFICIENTS
+            + POLYNOMIAL_DEGREE * RANDOMIZER_SUPPORT_EXPANSION_COEFFICIENTS
+            + 2 * POLYNOMIAL_DEGREE * ERROR_SUPPORT_EXPANSION_COEFFICIENTS;
+
+    (bgv_commitment_scalars + score_commitment_scalars + support_commitment_scalars)
+        * size_of::<u64>()
+}
 
 #[derive(Clone)]
 pub(super) struct DirectBallotRelationProofGeneration {
     pub(super) proof_bytes: Vec<u8>,
-    pub(super) proof_bytes_hash: String,
-    pub(super) statement_hash_hex: String,
 }
 
 #[derive(Clone)]

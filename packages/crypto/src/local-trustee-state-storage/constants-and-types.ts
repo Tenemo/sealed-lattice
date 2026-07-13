@@ -31,11 +31,7 @@ export type LocalTrusteeSetupStateSealedPayload = Readonly<
 export type LocalTrusteeSetupStateCommitment = Readonly<
     Record<string, unknown> & {
         readonly objectType: 'LocalTrusteeSetupStateCommitment';
-        readonly ceremonyId: string;
-        readonly manifestHash: ProtocolHash;
-        readonly rosterHash: ProtocolHash;
-        readonly setupParametersHash: ProtocolHash;
-        readonly setupEpoch: string;
+        readonly setupContextHash: ProtocolHash;
         readonly trusteeIdentity: string;
         readonly trusteeRosterPosition: number;
         readonly thresholdShareCommitmentRecipientRoot: ProtocolHash;
@@ -47,14 +43,14 @@ export type LocalTrusteeSetupStateCommitment = Readonly<
 export type LocalTrusteeStateStorageEncryptionInput = {
     readonly localStatePlaintext: LocalTrusteeSetupStateSealedPayload;
     readonly localStateCommitment: LocalTrusteeSetupStateCommitment;
-    readonly setupContext: unknown;
+    readonly setupContextHash: ProtocolHash;
     readonly storageKeyBytesHex: string;
 };
 
 export type LocalTrusteeStateStorageDecryptionInput = {
     readonly encryptedLocalState: EncryptedLocalTrusteeSetupState;
     readonly expectedLocalStateRoot: ProtocolHash;
-    readonly setupContext: unknown;
+    readonly setupContextHash: ProtocolHash;
     readonly storageKeyBytesHex: string;
 };
 
@@ -69,7 +65,7 @@ export type EncryptedLocalTrusteeSetupState = Readonly<
 
 export type LocalTrusteeSetupSealedMaterialEncryptionInput = {
     readonly materialPlaintext: unknown;
-    readonly setupContext: unknown;
+    readonly setupContextHash: ProtocolHash;
     readonly trusteeIdentity: string;
     readonly trusteeRosterPosition: number;
     readonly thresholdShareCommitmentRecipientRoot: ProtocolHash;
@@ -80,19 +76,11 @@ export type LocalTrusteeSetupSealedMaterialDecryptionInput = {
     readonly sealedMaterial: LocalTrusteeSetupStateSealedMaterial;
     readonly expectedMaterialRoot: ProtocolHash;
     readonly localStateCommitment: LocalTrusteeStateStorageEncryptionInput['localStateCommitment'];
-    readonly setupContext: unknown;
+    readonly setupContextHash: ProtocolHash;
     readonly storageKeyBytesHex: string;
 };
 
 export const protocolHashPattern = /^[0-9a-f]{128}$/u;
-
-export const setupContextFieldNames = [
-    'ceremonyId',
-    'manifestHash',
-    'rosterHash',
-    'setupParametersHash',
-    'setupEpoch',
-] as const;
 
 export const localTrusteeSealedPayloadFieldNames = [
     'objectType',

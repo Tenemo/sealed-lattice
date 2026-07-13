@@ -4,7 +4,7 @@ use crate::bgv::setup::transcript_order_audit::{
     TranscriptOrderAuditRecorder, active_transcript_order_audit_recorder,
 };
 use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
-use crate::hashing::hash512;
+use crate::hashing::hash_framed_parts_512 as hash512;
 
 const TRANSCRIPT_DOMAIN: &str = "sealed-lattice/setup/trustee-evaluation-key/transcript";
 
@@ -76,10 +76,7 @@ impl HashChainTranscriptCore {
         }
     }
 
-    pub(in crate::bgv::setup) fn try_squeeze_block(
-        &mut self,
-        label: &str,
-    ) -> Option<[u8; 64]> {
+    pub(in crate::bgv::setup) fn try_squeeze_block(&mut self, label: &str) -> Option<[u8; 64]> {
         let squeeze_counter = self.squeeze_counter;
         self.squeeze_counter = squeeze_counter.checked_add(1)?;
         #[cfg(test)]

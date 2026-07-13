@@ -141,10 +141,14 @@ const writeManifestAtomically = async (
             try {
                 await fs.rm(temporaryManifestPath, { force: true });
             } catch (cleanupError) {
-                throw new Error(
+                const replacementError = new Error(
                     `Release manifest replacement failed (${String(error)}) and temporary-file cleanup also failed.`,
-                    { cause: cleanupError },
                 );
+                Object.defineProperty(replacementError, 'cause', {
+                    configurable: true,
+                    value: cleanupError,
+                });
+                throw replacementError;
             }
             const errorCode = (error as NodeJS.ErrnoException).code;
             if (

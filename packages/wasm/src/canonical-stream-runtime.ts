@@ -4,7 +4,6 @@ import { foundationProfile } from '@sealed-lattice/types';
 import { refusalReasonByCode } from './transcript-core-bridge/kernel-errors.js';
 import type { TranscriptCoreKernelContextOwner } from './transcript-core-bridge/kernel-types.js';
 
-const canonicalStreamCapabilityByteLength = 32;
 const maximumCanonicalStreamByteLength = 2_147_483_648;
 const maximumCanonicalStreamChunkCount =
     maximumCanonicalStreamByteLength / foundationProfile.streamChunkByteLength;
@@ -15,33 +14,17 @@ const runtimeInvalidSessionStatus = 0xffff_fffe;
 const wasm32WordByteLength = 4;
 
 export const canonicalStreamDomains = Object.freeze({
-    privateMailboxCiphertext: 1,
     dealerVssShareLinkageProof: 2,
     recipientAggregateThresholdShareProof: 3,
     sameSecretProof: 4,
     publicKeyShareProof: 5,
-    collectivePublicKeyAggregateProof: 6,
-    relinearizationRoundOneProof: 7,
-    relinearizationRoundOneAggregateProof: 8,
-    relinearizationRoundTwoProof: 9,
-    galoisShareProof: 10,
     evaluatorKeyAggregateProof: 11,
-    collectivePublicKey: 12,
     evaluatorKeyStore: 13,
-    ballotCiphertext: 14,
-    ballotValidityProof: 15,
-    aggregateCiphertext: 16,
-    replayTargetIdentifierCiphertext: 17,
-    replayTargetOrderCiphertext: 18,
-    targetIdentifierPartialDecryption: 19,
-    targetOrderPartialDecryption: 20,
     maliciousTargetShareProof: 21,
-    checkpointState: 22,
     stateBallotCandidateListExactOutput: 23,
     stateFinalitySignatureExactOutput: 24,
     stateTargetReleaseExactOutput: 25,
     publicKeyShareMaterial: 26,
-    publicEvaluationKeyMaterial: 27,
 } as const);
 
 export type CanonicalStreamDomain =
@@ -180,8 +163,6 @@ type CanonicalStreamKernelContext = Readonly<{
         streamDomain: number,
         descriptorPointer: number,
         descriptorLength: number,
-        capabilityPointer: number,
-        capabilityLength: number,
         statusPointer: number,
         totalByteLengthPointer: number,
         chunkCountPointer: number,
@@ -189,15 +170,11 @@ type CanonicalStreamKernelContext = Readonly<{
     beginWriter(
         streamDomain: number,
         totalByteLength: number,
-        capabilityPointer: number,
-        capabilityLength: number,
         statusPointer: number,
         chunkCountPointer: number,
     ): number;
     bgvAbsorbChunk?: (
         handle: number,
-        capabilityPointer: number,
-        capabilityLength: number,
         chunkIndex: number,
         chunkPointer: number,
         chunkLength: number,
@@ -208,73 +185,39 @@ type CanonicalStreamKernelContext = Readonly<{
         materialRootLength: number,
         descriptorPointer: number,
         descriptorLength: number,
-        capabilityPointer: number,
-        capabilityLength: number,
         statusPointer: number,
         totalByteLengthPointer: number,
         chunkCountPointer: number,
     ) => number;
-    bgvCancel?: (
-        handle: number,
-        capabilityPointer: number,
-        capabilityLength: number,
-    ) => number;
-    bgvFinish?: (
-        handle: number,
-        capabilityPointer: number,
-        capabilityLength: number,
-    ) => number;
+    bgvCancel?: (handle: number) => number;
+    bgvFinish?: (handle: number) => number;
     bgvMaterialReaderBegin?: (
         familyCode: number,
         materialRootPointer: number,
         materialRootLength: number,
-        capabilityPointer: number,
-        capabilityLength: number,
         statusPointer: number,
         totalByteLengthPointer: number,
         chunkCountPointer: number,
     ) => number;
-    bgvMaterialReaderCancel?: (
-        handle: number,
-        capabilityPointer: number,
-        capabilityLength: number,
-    ) => number;
-    bgvMaterialReaderFinish?: (
-        handle: number,
-        capabilityPointer: number,
-        capabilityLength: number,
-    ) => number;
+    bgvMaterialReaderCancel?: (handle: number) => number;
+    bgvMaterialReaderFinish?: (handle: number) => number;
     bgvMaterialReaderReadChunk?: (
         handle: number,
-        capabilityPointer: number,
-        capabilityLength: number,
         chunkIndex: number,
         outputPointer: number,
         outputLength: number,
     ) => number;
-    cancel(
-        handle: number,
-        capabilityPointer: number,
-        capabilityLength: number,
-    ): number;
+    cancel(handle: number): number;
     deallocate(pointer: number, length: number): void;
     absorbChunk(
         handle: number,
-        capabilityPointer: number,
-        capabilityLength: number,
         chunkIndex: number,
         chunkPointer: number,
         chunkLength: number,
     ): number;
-    finishVerifier(
-        handle: number,
-        capabilityPointer: number,
-        capabilityLength: number,
-    ): number;
+    finishVerifier(handle: number): number;
     finishWriter(
         handle: number,
-        capabilityPointer: number,
-        capabilityLength: number,
         statusPointer: number,
         outputLengthPointer: number,
     ): number;
@@ -285,11 +228,8 @@ type CanonicalStreamKernelContext = Readonly<{
     ): Result;
 }>;
 
-type FillRandomValues = (destination: Uint8Array<ArrayBuffer>) => void;
 
 type CanonicalStreamAtomicVerifierFinish = (input: {
-    readonly streamCapabilityLength: number;
-    readonly streamCapabilityPointer: number;
     readonly streamHandle: number;
 }) => void;
 
@@ -315,7 +255,6 @@ type MutableCounters = {
 
 type ActiveLease = {
     atomicVerifierFinish?: CanonicalStreamAtomicVerifierFinish;
-    capabilityPointer: number;
     chunkCount: number;
     handle: number;
     kind: 'verifier' | 'writer';
@@ -346,28 +285,13 @@ const assertSafeNonNegativeInteger = (value: number, label: string): void => {
     }
 };
 
-const defaultFillRandomValues: FillRandomValues = (destination): void => {
-    const cryptoProvider = globalThis.crypto;
-    if (cryptoProvider === undefined) {
-        throw new CanonicalStreamInternalError(
-            'Web Crypto getRandomValues is required for stream capabilities.',
-        );
-    }
-    cryptoProvider.getRandomValues(destination);
-};
-
 class CanonicalStreamWorkerRuntimeImplementation implements CanonicalStreamWorkerRuntime {
     readonly #context: CanonicalStreamKernelContext;
-    readonly #fillRandomValues: FillRandomValues;
     readonly #counters: MutableCounters;
     #activeLease: ActiveLease | undefined;
 
-    public constructor(
-        context: CanonicalStreamKernelContext,
-        fillRandomValues: FillRandomValues,
-    ) {
+    public constructor(context: CanonicalStreamKernelContext) {
         this.#context = context;
-        this.#fillRandomValues = fillRandomValues;
         this.#counters = {
             absorbedPayloadByteLength: 0,
             absorbedPayloadChunkCount: 0,
@@ -402,18 +326,14 @@ class CanonicalStreamWorkerRuntimeImplementation implements CanonicalStreamWorke
         if (input.totalByteLength > maximumCanonicalStreamByteLength) {
             throw new CanonicalStreamResourceError();
         }
-        const capabilityPointer = this.#createCapability();
         let handle = 0;
         let metadataPointer = 0;
-        let sessionActivated = false;
         try {
             metadataPointer = this.#allocateMetadata(2);
             handle = this.#context.runExclusive('canonical stream begin', () =>
                 this.#context.beginWriter(
                     input.streamDomain,
                     input.totalByteLength,
-                    capabilityPointer,
-                    canonicalStreamCapabilityByteLength,
                     metadataPointer,
                     metadataPointer + wasm32WordByteLength,
                 ),
@@ -426,7 +346,6 @@ class CanonicalStreamWorkerRuntimeImplementation implements CanonicalStreamWorke
                 );
             }
             const lease: ActiveLease = {
-                capabilityPointer,
                 chunkCount: metadata[1],
                 handle,
                 kind: 'writer',
@@ -434,21 +353,10 @@ class CanonicalStreamWorkerRuntimeImplementation implements CanonicalStreamWorke
                 totalByteLength: input.totalByteLength,
             };
             this.#activate(lease);
-            sessionActivated = true;
             return this.#writerLease(lease);
         } catch (error) {
-            return this.#throwAfterUnactivatedBeginFailure(
-                handle,
-                capabilityPointer,
-                error,
-            );
+            return this.#throwAfterUnactivatedBeginFailure(handle, error);
         } finally {
-            if (!sessionActivated) {
-                this.#context.deallocate(
-                    capabilityPointer,
-                    canonicalStreamCapabilityByteLength,
-                );
-            }
             if (metadataPointer !== 0) {
                 this.#context.deallocate(
                     metadataPointer,
@@ -482,11 +390,9 @@ class CanonicalStreamWorkerRuntimeImplementation implements CanonicalStreamWorke
                 'The canonical stream descriptor exceeds its binary metadata bound.',
             );
         }
-        const capabilityPointer = this.#createCapability();
         let descriptorPointer = 0;
         let handle = 0;
         let metadataPointer = 0;
-        let sessionActivated = false;
         try {
             metadataPointer = this.#allocateMetadata(3);
             descriptorPointer = this.#copyMetadataIntoWasm(
@@ -497,8 +403,6 @@ class CanonicalStreamWorkerRuntimeImplementation implements CanonicalStreamWorke
                     input.streamDomain,
                     descriptorPointer,
                     input.descriptorBytes.byteLength,
-                    capabilityPointer,
-                    canonicalStreamCapabilityByteLength,
                     metadataPointer,
                     metadataPointer + wasm32WordByteLength,
                     metadataPointer + 2 * wasm32WordByteLength,
@@ -515,7 +419,6 @@ class CanonicalStreamWorkerRuntimeImplementation implements CanonicalStreamWorke
                 ...(atomicVerifierFinish === undefined
                     ? {}
                     : { atomicVerifierFinish }),
-                capabilityPointer,
                 chunkCount: metadata[2],
                 handle,
                 kind: 'verifier',
@@ -523,21 +426,10 @@ class CanonicalStreamWorkerRuntimeImplementation implements CanonicalStreamWorke
                 totalByteLength: metadata[1],
             };
             this.#activate(lease);
-            sessionActivated = true;
             return this.#verifierLease(lease);
         } catch (error) {
-            return this.#throwAfterUnactivatedBeginFailure(
-                handle,
-                capabilityPointer,
-                error,
-            );
+            return this.#throwAfterUnactivatedBeginFailure(handle, error);
         } finally {
-            if (!sessionActivated) {
-                this.#context.deallocate(
-                    capabilityPointer,
-                    canonicalStreamCapabilityByteLength,
-                );
-            }
             if (descriptorPointer !== 0) {
                 this.#context.deallocate(
                     descriptorPointer,
@@ -707,31 +599,6 @@ class CanonicalStreamWorkerRuntimeImplementation implements CanonicalStreamWorke
         }
     }
 
-    #createCapability(): number {
-        const capability = new Uint8Array(
-            new ArrayBuffer(canonicalStreamCapabilityByteLength),
-        );
-        try {
-            this.#fillRandomValues(capability);
-            if (capability.every((byte) => byte === 0)) {
-                throw new CanonicalStreamInternalError(
-                    'The stream capability entropy source returned an invalid value.',
-                );
-            }
-            return this.#copyMetadataIntoWasm(capability);
-        } catch (error) {
-            if (error instanceof CanonicalStreamInternalError) {
-                throw error;
-            }
-            throw new CanonicalStreamInternalError(
-                'The stream capability entropy source failed.',
-                error,
-            );
-        } finally {
-            capability.fill(0);
-        }
-    }
-
     #writerLease(lease: ActiveLease): CanonicalStreamWriterLease {
         return Object.freeze({
             absorbChunk: (chunkIndex: number, bytes: ArrayBuffer): void =>
@@ -791,8 +658,6 @@ class CanonicalStreamWorkerRuntimeImplementation implements CanonicalStreamWorke
                     () =>
                         this.#context.absorbChunk(
                             lease.handle,
-                            lease.capabilityPointer,
-                            canonicalStreamCapabilityByteLength,
                             chunkIndex,
                             chunkPointer,
                             bytes.byteLength,
@@ -834,8 +699,6 @@ class CanonicalStreamWorkerRuntimeImplementation implements CanonicalStreamWorke
                 () =>
                     this.#context.finishWriter(
                         lease.handle,
-                        lease.capabilityPointer,
-                        canonicalStreamCapabilityByteLength,
                         metadataPointer,
                         metadataPointer + wasm32WordByteLength,
                     ),
@@ -895,18 +758,11 @@ class CanonicalStreamWorkerRuntimeImplementation implements CanonicalStreamWorke
             if (lease.atomicVerifierFinish === undefined) {
                 const status = this.#context.runExclusive(
                     'canonical stream verifier finish',
-                    () =>
-                        this.#context.finishVerifier(
-                            lease.handle,
-                            lease.capabilityPointer,
-                            canonicalStreamCapabilityByteLength,
-                        ),
+                    () => this.#context.finishVerifier(lease.handle),
                 );
                 this.#throwStatus(status);
             } else {
                 lease.atomicVerifierFinish({
-                    streamCapabilityLength: canonicalStreamCapabilityByteLength,
-                    streamCapabilityPointer: lease.capabilityPointer,
                     streamHandle: lease.handle,
                 });
             }
@@ -923,12 +779,7 @@ class CanonicalStreamWorkerRuntimeImplementation implements CanonicalStreamWorke
         try {
             const status = this.#context.runExclusive(
                 'canonical stream cancellation',
-                () =>
-                    this.#context.cancel(
-                        lease.handle,
-                        lease.capabilityPointer,
-                        canonicalStreamCapabilityByteLength,
-                    ),
+                () => this.#context.cancel(lease.handle),
             );
             this.#throwStatus(status);
             lease.state = 'cancelled';
@@ -964,12 +815,7 @@ class CanonicalStreamWorkerRuntimeImplementation implements CanonicalStreamWorke
             try {
                 const status = this.#context.runExclusive(
                     'canonical stream failure cleanup',
-                    () =>
-                        this.#context.cancel(
-                            lease.handle,
-                            lease.capabilityPointer,
-                            canonicalStreamCapabilityByteLength,
-                        ),
+                    () => this.#context.cancel(lease.handle),
                 );
                 this.#throwStatus(status);
             } catch (error) {
@@ -988,7 +834,6 @@ class CanonicalStreamWorkerRuntimeImplementation implements CanonicalStreamWorke
 
     #throwAfterUnactivatedBeginFailure(
         handle: number,
-        capabilityPointer: number,
         operationFailure: unknown,
     ): never {
         let cleanupFailure: unknown;
@@ -996,12 +841,7 @@ class CanonicalStreamWorkerRuntimeImplementation implements CanonicalStreamWorke
             try {
                 const status = this.#context.runExclusive(
                     'canonical stream begin failure cleanup',
-                    () =>
-                        this.#context.cancel(
-                            handle,
-                            capabilityPointer,
-                            canonicalStreamCapabilityByteLength,
-                        ),
+                    () => this.#context.cancel(handle),
                 );
                 this.#throwStatus(status);
             } catch (error) {
@@ -1021,13 +861,6 @@ class CanonicalStreamWorkerRuntimeImplementation implements CanonicalStreamWorke
         if (this.#activeLease === lease) {
             this.#activeLease = undefined;
             this.#counters.activeSessionCount = 0;
-        }
-        if (lease.capabilityPointer !== 0) {
-            this.#context.deallocate(
-                lease.capabilityPointer,
-                canonicalStreamCapabilityByteLength,
-            );
-            lease.capabilityPointer = 0;
         }
     }
 
@@ -1228,7 +1061,6 @@ class CanonicalStreamWorkerRuntimeImplementation implements CanonicalStreamWorke
 }
 
 export const openCanonicalStreamWorkerRuntime = (input: {
-    readonly fillRandomValues?: FillRandomValues;
     readonly kernel: TranscriptCoreKernelContextOwner;
 }): CanonicalStreamWorkerRuntime => {
     const context = contexts.get(input.kernel);
@@ -1238,21 +1070,17 @@ export const openCanonicalStreamWorkerRuntime = (input: {
         );
     }
     return Object.freeze(
-        new CanonicalStreamWorkerRuntimeImplementation(
-            context,
-            input.fillRandomValues ?? defaultFillRandomValues,
-        ),
+        new CanonicalStreamWorkerRuntimeImplementation(context),
     );
 };
 
 /** Internal composition hook for consumers that must atomically consume a
- * generic verifier lease in another kernel verifier. The stream handle and
- * capability never leave the callback invoked by `finish()`.
+ * generic verifier lease in another kernel verifier. The stream handle never
+ * leaves the callback invoked by `finish()`.
  */
 export const openCanonicalStreamVerifierForAtomicFinish = (input: {
     readonly atomicFinish: CanonicalStreamAtomicVerifierFinish;
     readonly descriptorBytes: Uint8Array;
-    readonly fillRandomValues?: FillRandomValues;
     readonly kernel: TranscriptCoreKernelContextOwner;
     readonly streamDomain: CanonicalStreamDomain;
 }): CanonicalStreamVerifierLease => {
@@ -1262,10 +1090,7 @@ export const openCanonicalStreamVerifierForAtomicFinish = (input: {
             'The transcript-core kernel has no registered stream boundary.',
         );
     }
-    const runtime = new CanonicalStreamWorkerRuntimeImplementation(
-        context,
-        input.fillRandomValues ?? defaultFillRandomValues,
-    );
+    const runtime = new CanonicalStreamWorkerRuntimeImplementation(context);
     return runtime.openVerifier(
         {
             descriptorBytes: input.descriptorBytes,
@@ -1275,4 +1100,4 @@ export const openCanonicalStreamVerifierForAtomicFinish = (input: {
     );
 };
 
-export type { CanonicalStreamKernelContext, FillRandomValues };
+export type { CanonicalStreamKernelContext };

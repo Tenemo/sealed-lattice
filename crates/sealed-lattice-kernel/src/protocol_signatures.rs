@@ -4,7 +4,7 @@ use fips204::{
     ml_dsa_65,
     traits::{SerDes, Verifier},
 };
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 
 use crate::{
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
@@ -12,8 +12,6 @@ use crate::{
     transcript_core::decode_hex,
 };
 
-const ML_DSA_65_ALGORITHM: &str = "ML-DSA-65";
-const PURE_ML_DSA_MODE: &str = "PureMLDSA";
 const PROTOCOL_SIGNATURE_MESSAGE_DOMAIN: &str = "sealed-lattice/protocol-signature";
 const SUPPORTED_ML_DSA_CONTEXT_STRING: &str = "sealed-lattice:v1";
 const MAX_SAFE_JSON_INTEGER: u64 = 9_007_199_254_740_991;
@@ -49,67 +47,106 @@ impl ProtocolSignatureFailure {
     }
 }
 
+#[derive(Debug)]
+struct ParsedProtocolSignature<'a> {
+    public_key_bytes: [u8; ml_dsa_65::PK_LEN],
+    public_key_hash: &'a str,
+    signature_bytes: [u8; ml_dsa_65::SIG_LEN],
+    signed_root: ParsedSignedRoot<'a>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ParsedSignedRoot<'a> {
+    object_type: &'a str,
+    ceremony_id: &'a str,
+    manifest_hash: Option<&'a str>,
+    object_root: Option<&'a str>,
+    chunk_merkle_root: Option<&'a str>,
+    board_head_hash: Option<&'a str>,
+    signer_role: &'a str,
+    signer_identity: &'a str,
+    recovery_epoch: u64,
+    device_epoch: u64,
+    context_hash: &'a str,
+}
+
+impl ParsedSignedRoot<'_> {
+    fn canonical_value(&self) -> Value {
+        let mut signed_root = Map::new();
+        signed_root.insert("objectType".into(), self.object_type.into());
+        signed_root.insert("ceremonyId".into(), self.ceremony_id.into());
+        insert_optional_hash(&mut signed_root, "manifestHash", self.manifest_hash);
+        insert_optional_hash(&mut signed_root, "objectRoot", self.object_root);
+        insert_optional_hash(&mut signed_root, "chunkMerkleRoot", self.chunk_merkle_root);
+        insert_optional_hash(&mut signed_root, "boardHeadHash", self.board_head_hash);
+        signed_root.insert("signerRole".into(), self.signer_role.into());
+        signed_root.insert("signerIdentity".into(), self.signer_identity.into());
+        signed_root.insert("recoveryEpoch".into(), self.recovery_epoch.into());
+        signed_root.insert("deviceEpoch".into(), self.device_epoch.into());
+        signed_root.insert("contextHash".into(), self.context_hash.into());
+        Value::Object(signed_root)
+    }
+}
+
 pub(crate) fn verify_protocol_signature_envelope(
     signature: &Value,
     expectation: &ProtocolSignatureExpectation<'_>,
 ) -> CanonicalResult<Result<(), ProtocolSignatureFailure>> {
-    if !signature.is_object() {
-        return Ok(Err(ProtocolSignatureFailure::new(
-            "InvalidSignature",
-            "Signature envelope must be a JSON object.",
-        )));
-    }
-
-    if let Some(failure) = validate_signature_material(signature)? {
+    let parsed_signature = match parse_protocol_signature(signature)? {
+        Ok(parsed_signature) => parsed_signature,
+        Err(failure) => return Ok(Err(failure)),
+    };
+    if let Some(failure) = validate_expectation(&parsed_signature, expectation) {
         return Ok(Err(failure));
     }
-    if let Some(failure) = validate_signed_root_shape(signature) {
-        return Ok(Err(failure));
-    }
-    if let Some(failure) = validate_expectation(signature, expectation) {
-        return Ok(Err(failure));
-    }
-    if let Some(failure) = verify_ml_dsa_signature(signature)? {
+    if let Some(failure) = verify_ml_dsa_signature(&parsed_signature)? {
         return Ok(Err(failure));
     }
 
     Ok(Ok(()))
 }
 
-fn validate_signature_material(
+fn parse_protocol_signature(
     signature: &Value,
-) -> CanonicalResult<Option<ProtocolSignatureFailure>> {
+) -> CanonicalResult<Result<ParsedProtocolSignature<'_>, ProtocolSignatureFailure>> {
+    if !signature.is_object() {
+        return Ok(Err(ProtocolSignatureFailure::new(
+            "InvalidSignature",
+            "Signature envelope must be a JSON object.",
+        )));
+    }
     let Some(public_key_bytes_hex) = signature.get("publicKeyBytesHex").and_then(Value::as_str)
     else {
-        return Ok(Some(ProtocolSignatureFailure::new(
+        return Ok(Err(ProtocolSignatureFailure::new(
             "InvalidSignature",
             "Signature envelope must bind publicKeyBytesHex.",
         )));
     };
     let Some(public_key_hash) = signature.get("publicKeyHash").and_then(Value::as_str) else {
-        return Ok(Some(ProtocolSignatureFailure::new(
+        return Ok(Err(ProtocolSignatureFailure::new(
             "WrongPublicKey",
             "Signature envelope must bind publicKeyHash.",
         )));
     };
     let Some(signature_bytes_hex) = signature.get("signatureBytesHex").and_then(Value::as_str)
     else {
-        return Ok(Some(ProtocolSignatureFailure::new(
+        return Ok(Err(ProtocolSignatureFailure::new(
             "InvalidSignature",
             "Signature envelope must bind signatureBytesHex.",
         )));
     };
 
-    if decode_hex_field(public_key_bytes_hex, ml_dsa_65::PK_LEN).is_err()
-        || decode_hex_field(signature_bytes_hex, ml_dsa_65::SIG_LEN).is_err()
-    {
-        return Ok(Some(ProtocolSignatureFailure::new(
+    let (Ok(public_key_bytes), Ok(signature_bytes)) = (
+        decode_hex_array(public_key_bytes_hex),
+        decode_hex_array(signature_bytes_hex),
+    ) else {
+        return Ok(Err(ProtocolSignatureFailure::new(
             "InvalidSignature",
             "Signature envelope contains malformed ML-DSA key or signature bytes.",
         )));
-    }
+    };
     if !is_protocol_hash_string(public_key_hash) {
-        return Ok(Some(ProtocolSignatureFailure::new(
+        return Ok(Err(ProtocolSignatureFailure::new(
             "WrongPublicKey",
             "Signature public key hash must be a canonical protocol hash.",
         )));
@@ -117,179 +154,149 @@ fn validate_signature_material(
 
     let expected_public_key_hash = derive_ml_dsa_public_key_hash(public_key_bytes_hex)?;
     if public_key_hash != expected_public_key_hash {
-        return Ok(Some(ProtocolSignatureFailure::new(
+        return Ok(Err(ProtocolSignatureFailure::new(
             "WrongPublicKey",
             "Signature public key hash does not match the ML-DSA public key bytes.",
         )));
     }
 
-    Ok(None)
+    let signed_root = match parse_signed_root(signature.get("signedRoot")) {
+        Ok(signed_root) => signed_root,
+        Err(failure) => return Ok(Err(failure)),
+    };
+
+    Ok(Ok(ParsedProtocolSignature {
+        public_key_bytes,
+        public_key_hash,
+        signature_bytes,
+        signed_root,
+    }))
 }
 
-fn validate_signed_root_shape(signature: &Value) -> Option<ProtocolSignatureFailure> {
-    let Some(signed_root) = signature.get("signedRoot").and_then(Value::as_object) else {
-        return Some(ProtocolSignatureFailure::new(
+fn parse_signed_root(
+    signed_root: Option<&Value>,
+) -> Result<ParsedSignedRoot<'_>, ProtocolSignatureFailure> {
+    let Some(signed_root) = signed_root.and_then(Value::as_object) else {
+        return Err(ProtocolSignatureFailure::new(
             "InvalidSignedRoot",
             "Signature envelope must include a signedRoot object.",
         ));
     };
 
-    for field_name in [
-        "objectType",
-        "ceremonyId",
-        "manifestHash",
-        "boardHeadHash",
-        "objectRoot",
-        "chunkMerkleRoot",
-        "signerRole",
-        "signerIdentity",
-        "recoveryEpoch",
-        "deviceEpoch",
-        "contextHash",
-    ] {
-        if !signed_root.contains_key(field_name) {
-            return Some(ProtocolSignatureFailure::new(
-                "InvalidSignedRoot",
-                format!("Signed roots must bind {field_name}."),
-            ));
-        }
-    }
+    let object_type = required_nonempty_string(signed_root, "objectType")?;
+    let ceremony_id = required_nonempty_string(signed_root, "ceremonyId")?;
+    let signer_role = required_nonempty_string(signed_root, "signerRole")?;
+    let signer_identity = required_nonempty_string(signed_root, "signerIdentity")?;
+    let context_hash = required_hash(signed_root, "contextHash")?;
+    let recovery_epoch = required_epoch(signed_root, "recoveryEpoch")?;
+    let device_epoch = required_epoch(signed_root, "deviceEpoch")?;
+    let manifest_hash = optional_hash(signed_root, "manifestHash")?;
+    let object_root = optional_hash(signed_root, "objectRoot")?;
+    let chunk_merkle_root = optional_hash(signed_root, "chunkMerkleRoot")?;
+    let board_head_hash = optional_hash(signed_root, "boardHeadHash")?;
 
-    let object_root_present = signed_root
-        .get("objectRoot")
-        .and_then(Value::as_str)
-        .is_some();
-    let chunk_root_present = signed_root
-        .get("chunkMerkleRoot")
-        .and_then(Value::as_str)
-        .is_some();
-    if !object_root_present && !chunk_root_present {
-        return Some(ProtocolSignatureFailure::new(
+    if object_root.is_none() && chunk_merkle_root.is_none() {
+        return Err(ProtocolSignatureFailure::new(
             "InvalidSignedRoot",
             "Signed roots must bind an object root or chunk Merkle root.",
         ));
     }
-    if object_root_present && chunk_root_present {
-        return Some(ProtocolSignatureFailure::new(
+    if object_root.is_some() && chunk_merkle_root.is_some() {
+        return Err(ProtocolSignatureFailure::new(
             "InvalidSignedRoot",
             "Signed roots must bind exactly one object root or chunk Merkle root.",
         ));
     }
 
-    for field_name in [
-        "objectRoot",
-        "chunkMerkleRoot",
-        "manifestHash",
-        "boardHeadHash",
-    ] {
-        if !is_protocol_hash_or_null(signed_root.get(field_name)) {
-            return Some(ProtocolSignatureFailure::new(
-                "InvalidSignedRoot",
-                "Signed-root hash bindings must be canonical hash strings or null.",
-            ));
-        }
-    }
-    if !signed_root
-        .get("contextHash")
-        .and_then(Value::as_str)
-        .is_some_and(is_protocol_hash_string)
-    {
-        return Some(ProtocolSignatureFailure::new(
-            "InvalidSignedRoot",
-            "Signed-root context hash must be a canonical hash string.",
-        ));
-    }
-
-    for field_name in ["recoveryEpoch", "deviceEpoch"] {
-        if signed_root
-            .get(field_name)
-            .and_then(Value::as_u64)
-            .is_none_or(|value| value > MAX_SAFE_JSON_INTEGER)
-        {
-            return Some(ProtocolSignatureFailure::new(
-                "InvalidSignedRoot",
-                "Signed root epochs must be safe non-negative integers.",
-            ));
-        }
-    }
-    for field_name in ["objectType", "ceremonyId", "signerRole", "signerIdentity"] {
-        if signed_root
-            .get(field_name)
-            .and_then(Value::as_str)
-            .is_none_or(str::is_empty)
-        {
-            return Some(ProtocolSignatureFailure::new(
-                "InvalidSignedRoot",
-                "Signed roots must bind non-empty object, ceremony, role, and signer identity strings.",
-            ));
-        }
-    }
-
-    None
+    Ok(ParsedSignedRoot {
+        object_type,
+        ceremony_id,
+        manifest_hash,
+        object_root,
+        chunk_merkle_root,
+        board_head_hash,
+        signer_role,
+        signer_identity,
+        recovery_epoch,
+        device_epoch,
+        context_hash,
+    })
 }
 
 fn validate_expectation(
-    signature: &Value,
+    signature: &ParsedProtocolSignature<'_>,
     expectation: &ProtocolSignatureExpectation<'_>,
 ) -> Option<ProtocolSignatureFailure> {
-    let signed_root = signature
-        .get("signedRoot")
-        .expect("signed root was checked before expectation validation");
+    let signed_root = &signature.signed_root;
 
-    if signed_root.get("objectType").and_then(Value::as_str) != Some(expectation.object_type) {
+    if signed_root.object_type != expectation.object_type {
         return Some(ProtocolSignatureFailure::new(
             "WrongObjectType",
             "Signature root object type does not match the expected object.",
         ));
     }
-    if signed_root.get("signerRole").and_then(Value::as_str) != Some(expectation.signer_role) {
+    if signed_root.signer_role != expectation.signer_role {
         return Some(ProtocolSignatureFailure::new(
             "WrongSignerRole",
             "Signature root signer role does not match the expected role.",
         ));
     }
-    if signed_root.get("signerIdentity").and_then(Value::as_str)
-        != Some(expectation.signer_identity)
-    {
+    if signed_root.signer_identity != expectation.signer_identity {
         return Some(ProtocolSignatureFailure::new(
             "InvalidSignedRoot",
             "Signature root signer identity does not match the expected identity.",
         ));
     }
-    if signed_root.get("ceremonyId").and_then(Value::as_str) != Some(expectation.ceremony_id) {
+    if signed_root.ceremony_id != expectation.ceremony_id {
         return Some(ProtocolSignatureFailure::new(
             "WrongCeremony",
             "Signature root ceremony does not match the expected ceremony.",
         ));
     }
-    if signature.get("publicKeyHash").and_then(Value::as_str) != Some(expectation.public_key_hash) {
+    if signature.public_key_hash != expectation.public_key_hash {
         return Some(ProtocolSignatureFailure::new(
             "WrongPublicKey",
             "Signature public key hash does not match the expected key.",
         ));
     }
 
-    for (field_name, expected_hash) in [
-        ("manifestHash", expectation.manifest_hash),
-        ("objectRoot", expectation.object_root),
-        ("chunkMerkleRoot", expectation.chunk_merkle_root),
-        ("boardHeadHash", expectation.board_head_hash),
+    for (field_name, actual_hash, expected_hash) in [
+        (
+            "manifestHash",
+            signed_root.manifest_hash,
+            expectation.manifest_hash,
+        ),
+        (
+            "objectRoot",
+            signed_root.object_root,
+            expectation.object_root,
+        ),
+        (
+            "chunkMerkleRoot",
+            signed_root.chunk_merkle_root,
+            expectation.chunk_merkle_root,
+        ),
+        (
+            "boardHeadHash",
+            signed_root.board_head_hash,
+            expectation.board_head_hash,
+        ),
     ] {
-        if !hash_or_null_equals(signed_root.get(field_name), expected_hash) {
+        if actual_hash != expected_hash {
             return Some(ProtocolSignatureFailure::new(
                 "InvalidSignedRoot",
                 format!("Signature root {field_name} does not match the expected binding."),
             ));
         }
     }
-    if signed_root.get("contextHash").and_then(Value::as_str) != Some(expectation.context_hash) {
+    if signed_root.context_hash != expectation.context_hash {
         return Some(ProtocolSignatureFailure::new(
             "InvalidSignedRoot",
             "Signature root context hash does not match the expected context.",
         ));
     }
-    if signed_root.get("recoveryEpoch").and_then(Value::as_u64) != Some(expectation.recovery_epoch)
-        || signed_root.get("deviceEpoch").and_then(Value::as_u64) != Some(expectation.device_epoch)
+    if signed_root.recovery_epoch != expectation.recovery_epoch
+        || signed_root.device_epoch != expectation.device_epoch
     {
         return Some(ProtocolSignatureFailure::new(
             "InvalidSignedRoot",
@@ -300,36 +307,20 @@ fn validate_expectation(
     None
 }
 
-fn verify_ml_dsa_signature(signature: &Value) -> CanonicalResult<Option<ProtocolSignatureFailure>> {
-    let public_key_bytes_hex = signature
-        .get("publicKeyBytesHex")
-        .and_then(Value::as_str)
-        .expect("public key bytes were validated");
-    let signature_bytes_hex = signature
-        .get("signatureBytesHex")
-        .and_then(Value::as_str)
-        .expect("signature bytes were validated");
-
-    let public_key_bytes = decode_hex_field(public_key_bytes_hex, ml_dsa_65::PK_LEN)
-        .expect("public key byte length was validated");
-    let signature_bytes = decode_hex_field(signature_bytes_hex, ml_dsa_65::SIG_LEN)
-        .expect("signature byte length was validated");
-    let public_key_array: [u8; ml_dsa_65::PK_LEN] = public_key_bytes
-        .try_into()
-        .expect("public key byte length was checked");
-    let signature_array: [u8; ml_dsa_65::SIG_LEN] = signature_bytes
-        .try_into()
-        .expect("signature byte length was checked");
-    let Ok(public_key) = ml_dsa_65::PublicKey::try_from_bytes(public_key_array) else {
+fn verify_ml_dsa_signature(
+    signature: &ParsedProtocolSignature<'_>,
+) -> CanonicalResult<Option<ProtocolSignatureFailure>> {
+    let Ok(public_key) = ml_dsa_65::PublicKey::try_from_bytes(signature.public_key_bytes) else {
         return Ok(Some(ProtocolSignatureFailure::new(
             "InvalidSignature",
             "ML-DSA public key bytes are not accepted by the verifier.",
         )));
     };
-    let message = canonical_protocol_signature_message(signature)?;
+    let message =
+        canonical_protocol_signature_message(signature.public_key_hash, &signature.signed_root)?;
     if !public_key.verify(
         message.as_bytes(),
-        &signature_array,
+        &signature.signature_bytes,
         SUPPORTED_ML_DSA_CONTEXT_STRING.as_bytes(),
     ) {
         return Ok(Some(ProtocolSignatureFailure::new(
@@ -341,47 +332,27 @@ fn verify_ml_dsa_signature(signature: &Value) -> CanonicalResult<Option<Protocol
     Ok(None)
 }
 
-fn canonical_protocol_signature_message(signature: &Value) -> CanonicalResult<String> {
-    let public_key_hash = signature.get("publicKeyHash").ok_or_else(|| {
-        CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "signature publicKeyHash was not available for message encoding",
-        )
-    })?;
-    let signed_root = signature.get("signedRoot").ok_or_else(|| {
-        CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "signature signedRoot was not available for message encoding",
-        )
-    })?;
-
+fn canonical_protocol_signature_message(
+    public_key_hash: &str,
+    signed_root: &ParsedSignedRoot<'_>,
+) -> CanonicalResult<String> {
     canonical_json(&json!({
         "messageDomain": PROTOCOL_SIGNATURE_MESSAGE_DOMAIN,
-        "profile": {
-            "algorithm": ML_DSA_65_ALGORITHM,
-            "mode": PURE_ML_DSA_MODE,
-            "contextString": SUPPORTED_ML_DSA_CONTEXT_STRING,
-        },
         "publicKeyHash": public_key_hash,
-        "signedRoot": signed_root,
+        "signedRoot": signed_root.canonical_value(),
     }))
 }
 
 fn derive_ml_dsa_public_key_hash(public_key_bytes_hex: &str) -> CanonicalResult<String> {
     derive_canonical_object_hash(&json!({
-        "objectType": "MlDsaPublicKeyHash",
-        "algorithm": ML_DSA_65_ALGORITHM,
+        "objectType": "MlDsa65PublicKeyHash",
         "publicKeyBytesHex": public_key_bytes_hex,
     }))
 }
 
-fn decode_hex_field(value: &str, expected_byte_length: usize) -> Result<Vec<u8>, ()> {
+fn decode_hex_array<const BYTE_LENGTH: usize>(value: &str) -> Result<[u8; BYTE_LENGTH], ()> {
     let bytes = decode_hex(value).map_err(|_| ())?;
-    if bytes.len() != expected_byte_length {
-        return Err(());
-    }
-
-    Ok(bytes)
+    bytes.try_into().map_err(|_| ())
 }
 
 fn is_protocol_hash_string(value: &str) -> bool {
@@ -391,19 +362,75 @@ fn is_protocol_hash_string(value: &str) -> bool {
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
-fn is_protocol_hash_or_null(value: Option<&Value>) -> bool {
-    match value {
-        Some(Value::Null) => true,
-        Some(Value::String(hash)) => is_protocol_hash_string(hash),
-        _ => false,
+fn required_nonempty_string<'a>(
+    signed_root: &'a Map<String, Value>,
+    field_name: &str,
+) -> Result<&'a str, ProtocolSignatureFailure> {
+    signed_root
+        .get(field_name)
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            ProtocolSignatureFailure::new(
+                "InvalidSignedRoot",
+                format!("Signed roots must bind non-empty {field_name}."),
+            )
+        })
+}
+
+fn required_hash<'a>(
+    signed_root: &'a Map<String, Value>,
+    field_name: &str,
+) -> Result<&'a str, ProtocolSignatureFailure> {
+    signed_root
+        .get(field_name)
+        .and_then(Value::as_str)
+        .filter(|value| is_protocol_hash_string(value))
+        .ok_or_else(|| {
+            ProtocolSignatureFailure::new(
+                "InvalidSignedRoot",
+                format!("Signed-root {field_name} must be a canonical hash string."),
+            )
+        })
+}
+
+fn optional_hash<'a>(
+    signed_root: &'a Map<String, Value>,
+    field_name: &str,
+) -> Result<Option<&'a str>, ProtocolSignatureFailure> {
+    match signed_root.get(field_name) {
+        None => Ok(None),
+        Some(Value::String(value)) if is_protocol_hash_string(value) => Ok(Some(value)),
+        Some(_) => Err(ProtocolSignatureFailure::new(
+            "InvalidSignedRoot",
+            format!("Signed-root {field_name} must be omitted or contain a canonical hash string."),
+        )),
     }
 }
 
-fn hash_or_null_equals(value: Option<&Value>, expected_hash: Option<&str>) -> bool {
-    match (value, expected_hash) {
-        (Some(Value::Null), None) => true,
-        (Some(Value::String(actual_hash)), Some(expected_hash)) => actual_hash == expected_hash,
-        _ => false,
+fn required_epoch(
+    signed_root: &Map<String, Value>,
+    field_name: &str,
+) -> Result<u64, ProtocolSignatureFailure> {
+    signed_root
+        .get(field_name)
+        .and_then(Value::as_u64)
+        .filter(|value| *value <= MAX_SAFE_JSON_INTEGER)
+        .ok_or_else(|| {
+            ProtocolSignatureFailure::new(
+                "InvalidSignedRoot",
+                format!("Signed-root {field_name} must be a safe non-negative integer."),
+            )
+        })
+}
+
+fn insert_optional_hash(
+    signed_root: &mut Map<String, Value>,
+    field_name: &'static str,
+    value: Option<&str>,
+) {
+    if let Some(value) = value {
+        signed_root.insert(field_name.into(), value.into());
     }
 }
 
@@ -419,16 +446,20 @@ pub(crate) fn create_protocol_signature_fixture(
     seed_label: &str,
     signed_root: Value,
 ) -> CanonicalResult<ProtocolSignatureFixture> {
+    let parsed_signed_root = parse_signed_root(Some(&signed_root)).map_err(|failure| {
+        CanonicalError::new(CanonicalErrorCode::InvalidFixture, failure.message)
+    })?;
+    let canonical_signed_root = parsed_signed_root.canonical_value();
     let seed = key_fixture_seed(seed_label)?;
     let (public_key, private_key) = ml_dsa_65::KG::keygen_from_seed(&seed);
     let public_key_bytes_hex = crate::hashing::to_hex(&public_key.into_bytes());
     let public_key_hash = derive_ml_dsa_public_key_hash(&public_key_bytes_hex)?;
-    let message_input = json!({
-        "publicKeyHash": public_key_hash,
-        "signedRoot": signed_root,
-    });
-    let message = canonical_protocol_signature_message(&message_input)?;
-    let signature_seed = fixture_seed("ml-dsa-signature-fixture-seed", seed_label, &signed_root)?;
+    let message = canonical_protocol_signature_message(&public_key_hash, &parsed_signed_root)?;
+    let signature_seed = fixture_seed(
+        "ml-dsa-signature-fixture-seed",
+        seed_label,
+        &canonical_signed_root,
+    )?;
     let signature_bytes = private_key
         .try_sign_with_seed(
             &signature_seed,
@@ -445,7 +476,7 @@ pub(crate) fn create_protocol_signature_fixture(
         "publicKeyBytesHex": public_key_bytes_hex,
         "publicKeyHash": public_key_hash,
         "signatureBytesHex": crate::hashing::to_hex(&signature_bytes),
-        "signedRoot": signed_root,
+        "signedRoot": canonical_signed_root,
     });
 
     Ok(ProtocolSignatureFixture {
@@ -517,9 +548,7 @@ mod tests {
             "objectType": "CollectiveBgvSetupIntentTrusteeRegistration",
             "ceremonyId": "ceremony-main",
             "manifestHash": object_root,
-            "boardHeadHash": null,
             "objectRoot": object_root,
-            "chunkMerkleRoot": null,
             "signerRole": "Trustee",
             "signerIdentity": "trustee-0",
             "recoveryEpoch": 0,
@@ -564,9 +593,7 @@ mod tests {
             "objectType": "CollectiveBgvSetupIntentTrusteeRegistration",
             "ceremonyId": "ceremony-main",
             "manifestHash": object_root,
-            "boardHeadHash": null,
             "objectRoot": object_root,
-            "chunkMerkleRoot": null,
             "signerRole": "Trustee",
             "signerIdentity": "trustee-0",
             "recoveryEpoch": 0,

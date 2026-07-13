@@ -8,39 +8,38 @@ use crate::hashing::derive_canonical_object_hash;
 
 use crate::bgv::setup::trustee_evaluation_key_proof::{
     EvaluationKeyShareDescriptor, EvaluationKeyShareKind, PUBLIC_KEY_SHARE_COMMON_REFERENCE_LABEL,
-    PUBLIC_KEY_SHARE_PROOF_FAMILY, SameSecretLinkageStatement, SuccinctSetupProofContext,
+    PUBLIC_KEY_SHARE_PROOF_FAMILY, SetupProofStatement, SuccinctSetupProofContext,
     TrusteeEvaluationKeyStatement, decode_trustee_evaluation_key_proof_from_source,
     public_key_share_succinct_proof_material_bytes_hash, verify_evaluation_key_share,
 };
 
 pub(in super::super) fn verify_public_key_share_succinct_proofs(
     setup_package: &Value,
-    request: &Value,
     verified_same_secret_bridge: Option<&VerifiedSameSecretBridgeMaterial>,
     proof_binding_session: &crate::bgv::setup::AcceptedSetupProofBindingSession,
-) -> CanonicalResult<Option<Value>> {
+) -> CanonicalResult<Option<Refusals>> {
     let material_set = setup_package.get("publicKeyShareMaterial");
     let proof_set = setup_package.get("publicKeyShareSuccinctProofs");
     if material_set.is_none() && proof_set.is_none() {
-        return Ok(Some(verification_response(
+        return Ok(Some(setup_refusals(
             vec![
                 "publicKeyShareMaterial".to_string(),
                 "publicKeyShareSuccinctProofs".to_string(),
             ],
             Vec::new(),
-        )?));
+        )));
     }
     let Some(material_set) = material_set else {
-        return Ok(Some(verification_response(
+        return Ok(Some(setup_refusals(
             vec!["publicKeyShareMaterial".to_string()],
             Vec::new(),
-        )?));
+        )));
     };
     let Some(proof_set) = proof_set else {
-        return Ok(Some(verification_response(
+        return Ok(Some(setup_refusals(
             vec!["publicKeyShareSuccinctProofs".to_string()],
             Vec::new(),
-        )?));
+        )));
     };
     let setup_context = setup_package.get("setupContext").ok_or_else(|| {
         CanonicalError::new(
@@ -70,19 +69,13 @@ pub(in super::super) fn verify_public_key_share_succinct_proofs(
             )
         })?;
     let share_records = public_key_share_records_by_roster_position(setup_package)?;
-    if request.get("transportedPublicKeyShareMaterial").is_none() {
-        return Ok(Some(verification_response(
-            vec!["transportedPublicKeyShareMaterial".to_string()],
-            Vec::new(),
-        )?));
-    }
     let material_bindings = match verify_public_key_share_material_set(
         material_set,
         setup_context,
         &common_binding,
         public_key_share_set_root,
         &share_records,
-        request,
+        proof_binding_session,
     ) {
         Ok(bindings) => bindings,
         Err(error) => {
@@ -93,12 +86,7 @@ pub(in super::super) fn verify_public_key_share_succinct_proofs(
             )?));
         }
     };
-    let ring_degree = usize::try_from(value_u64(material_set, "ringDegree")?).map_err(|_| {
-        CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "publicKeyShareMaterial.ringDegree does not fit usize",
-        )
-    })?;
+    let ring_degree = POLYNOMIAL_DEGREE;
     if !proof_set.is_object() {
         return Ok(Some(public_key_refusal(
             "publicKeyShareSuccinctProofSetNotObject",
@@ -131,7 +119,6 @@ pub(in super::super) fn verify_public_key_share_succinct_proofs(
         )?));
     }
     let verification_context = PublicKeyShareSuccinctProofVerificationContext {
-        request,
         setup_context,
         public_matrix_seed_hash,
         ring_degree,
@@ -149,17 +136,21 @@ pub(in super::super) fn verify_public_key_share_succinct_proofs(
     // Resolve or consume one proof before advancing to the next record. This is
     // the same bounded lifecycle on native and browser targets and prevents a
     // native verifier from retaining one multi-megabyte proof per worker.
+    let mut logical_proof_records = Vec::with_capacity(proof_records_array.len());
     for succinct_proof_record in proof_records_array {
-        if let Err(error) = verify_public_key_share_succinct_proof_record(
+        match verify_public_key_share_succinct_proof_record(
             &verification_context,
             succinct_proof_record,
             &roster_position_counts,
         ) {
-            return Ok(Some(public_key_refusal(
-                "publicKeyShareSuccinctProofVerificationFailed",
-                error.message,
-                "setupPackage.publicKeyShareSuccinctProofs.proofRecords",
-            )?));
+            Ok(logical_proof_record) => logical_proof_records.push(logical_proof_record),
+            Err(error) => {
+                return Ok(Some(public_key_refusal(
+                    "publicKeyShareSuccinctProofVerificationFailed",
+                    error.message,
+                    "setupPackage.publicKeyShareSuccinctProofs.proofRecords",
+                )?));
+            }
         }
     }
     let Some(succinct_proof_set_root) = proof_set
@@ -178,7 +169,7 @@ pub(in super::super) fn verify_public_key_share_succinct_proofs(
     )?;
     let expected_root = derive_canonical_object_hash(&json!({
         "objectType": PUBLIC_KEY_SHARE_SUCCINCT_PROOF_SET_OBJECT_TYPE,
-        "proofRecords": proof_records_array,
+        "proofRecords": logical_proof_records,
     }))?;
     if succinct_proof_set_root != expected_root {
         return Ok(Some(public_key_refusal(
@@ -192,7 +183,6 @@ pub(in super::super) fn verify_public_key_share_succinct_proofs(
 }
 
 struct PublicKeyShareSuccinctProofVerificationContext<'a> {
-    request: &'a Value,
     setup_context: &'a Value,
     public_matrix_seed_hash: &'a str,
     ring_degree: usize,
@@ -206,7 +196,7 @@ fn verify_public_key_share_succinct_proof_record(
     context: &PublicKeyShareSuccinctProofVerificationContext<'_>,
     proof_record: &Value,
     roster_position_counts: &BTreeMap<u64, usize>,
-) -> CanonicalResult<()> {
+) -> CanonicalResult<Value> {
     if !proof_record.is_object() {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -221,11 +211,6 @@ fn verify_public_key_share_succinct_proof_record(
             "public-key share succinct proof objectType must be PublicKeyShareSuccinctProof",
         ));
     }
-    verify_context_fields_match(
-        proof_record,
-        context.setup_context,
-        "publicKeyShareSuccinctProofs.proofRecords",
-    )?;
     let trustee_roster_position = value_u64(proof_record, "trusteeRosterPosition")?;
     if roster_position_counts
         .get(&trustee_roster_position)
@@ -256,19 +241,12 @@ fn verify_public_key_share_succinct_proof_record(
                 "public-key share succinct proof must reference accepted public-key share material",
             )
         })?;
-    if proof_record
-        .get("publicKeyShareRoot")
-        .and_then(Value::as_str)
-        != Some(material_binding.public_key_share_root.as_str())
-        || proof_record
-            .get("publicKeyShareMaterialRoot")
-            .and_then(Value::as_str)
-            != Some(material_binding.public_key_share_material_root.as_str())
-        || proof_record.get("trusteeIdentity") != share_record.get("trusteeIdentity")
+    if value_string(share_record, "publicKeyShareRoot")?
+        != material_binding.public_key_share_root.as_str()
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ComponentMismatch,
-            "public-key share succinct proof must bind the accepted share and material",
+            "verified public-key share material must bind the accepted share",
         ));
     }
     // The public-key relation opens the constant commitment bound by the
@@ -283,20 +261,11 @@ fn verify_public_key_share_succinct_proof_record(
         })?;
     let bridge_binding =
         verified_same_secret_bridge.statement_for_roster_position(trustee_roster_position)?;
-    if proof_record.get("trusteeIdentity").and_then(Value::as_str)
-        != Some(bridge_binding.trustee_identity.as_str())
-        || proof_record
-            .get("sameSecretBridgeStatementRoot")
-            .and_then(Value::as_str)
-            != Some(bridge_binding.same_secret_bridge_statement_root.as_str())
-        || proof_record
-            .get("sameSecretBridgeProofRecordRoot")
-            .and_then(Value::as_str)
-            != Some(bridge_binding.same_secret_bridge_proof_record_root.as_str())
-    {
+    let trustee_identity = value_string(share_record, "trusteeIdentity")?;
+    if trustee_identity != bridge_binding.trustee_identity.as_str() {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ComponentMismatch,
-            "public-key share succinct proof must bind the verified same-secret bridge statement and proof record",
+            "verified same-secret bridge material must bind the accepted public-key trustee",
         ));
     }
     if bridge_binding.statement.bridge_rns_primes.is_empty()
@@ -314,43 +283,29 @@ fn verify_public_key_share_succinct_proof_record(
             "same-secret bridge statement must carry the limb-zero target commitment",
         ));
     }
-    let same_secret_linkage: Option<SameSecretLinkageStatement> = None;
-    let same_secret_bridge = Some(bridge_binding.statement.clone());
     let statement = TrusteeEvaluationKeyStatement {
         context: SuccinctSetupProofContext {
-            proof_family: PUBLIC_KEY_SHARE_PROOF_FAMILY.to_string(),
-            ceremony_id: value_string(context.setup_context, "ceremonyId")?.to_string(),
-            manifest_hash: value_string(context.setup_context, "manifestHash")?.to_string(),
-            roster_hash: value_string(context.setup_context, "rosterHash")?.to_string(),
-            trustee_identity: value_string(proof_record, "trusteeIdentity")?.to_string(),
+            setup_context_hash: setup_context_hash(context.setup_context)?,
+            trustee_identity: trustee_identity.to_string(),
             trustee_roster_position,
-            setup_epoch: value_string(context.setup_context, "setupEpoch")?.to_string(),
             binding_roots: vec![
-                (
-                    "sameSecretBridgeStatementRoot".to_string(),
-                    bridge_binding.same_secret_bridge_statement_root.clone(),
-                ),
-                (
-                    "sameSecretBridgeProofRecordRoot".to_string(),
-                    bridge_binding.same_secret_bridge_proof_record_root.clone(),
-                ),
+                bridge_binding.same_secret_bridge_statement_root.clone(),
+                bridge_binding.same_secret_bridge_proof_record_root.clone(),
             ],
         },
         ring_degree: context.ring_degree,
-        // A public-key share is one digit spanning all Q_share limbs with no diagonal source; key_switch_seed_hex carries the public matrix seed because the relation's public sample is the shared reference polynomial a.
-        keys: vec![EvaluationKeyShareDescriptor {
-            kind: EvaluationKeyShareKind::PublicKeyShare,
-            level: DATA_PRIMES.len() - 1,
-            key_switch_domain: PUBLIC_KEY_SHARE_COMMON_REFERENCE_LABEL.to_string(),
-            key_switch_seed_hex: context.public_matrix_seed_hash.to_string(),
-            component_b_by_digit: vec![material_binding.coefficients_by_limb.clone()],
-            round_one_aggregate_diagonal: Vec::new(),
-        }],
-        vss_share_linkage: None,
-        same_secret_bridge,
-        same_secret_linkage,
-        private_vss_share: None,
-        target_decryption_share: None,
+        proof: SetupProofStatement::PublicKeyShare {
+            // A public-key share is one digit spanning all Q_share limbs with no diagonal source; key_switch_seed_hex carries the public matrix seed because the relation's public sample is the shared reference polynomial a.
+            key: EvaluationKeyShareDescriptor {
+                kind: EvaluationKeyShareKind::PublicKeyShare,
+                level: DATA_PRIMES.len() - 1,
+                key_switch_domain: PUBLIC_KEY_SHARE_COMMON_REFERENCE_LABEL.to_string(),
+                key_switch_seed_hex: context.public_matrix_seed_hash.to_string(),
+                component_b_by_digit: vec![material_binding.coefficients_by_limb.clone()],
+                round_one_aggregate_diagonal: Vec::new(),
+            },
+            same_secret_bridge: bridge_binding.statement.clone(),
+        },
     };
     let statement_hash_hex = statement
         .statement_hash()
@@ -365,12 +320,26 @@ fn verify_public_key_share_succinct_proof_record(
             "public-key share succinct proof statementHash must match the rebuilt statement",
         ));
     }
+    let logical_proof_record = json!({
+        "objectType": PUBLIC_KEY_SHARE_SUCCINCT_PROOF_OBJECT_TYPE,
+        "setupContextHash": setup_context_hash(context.setup_context)?,
+        "trusteeIdentity": trustee_identity,
+        "trusteeRosterPosition": trustee_roster_position,
+        "publicKeyShareRoot": material_binding.public_key_share_root.as_str(),
+        "publicKeyShareMaterialRoot": material_binding.public_key_share_material_root.as_str(),
+        "sameSecretBridgeStatementRoot": bridge_binding.same_secret_bridge_statement_root.as_str(),
+        "sameSecretBridgeProofRecordRoot": bridge_binding.same_secret_bridge_proof_record_root.as_str(),
+        "statementHash": value_string(proof_record, "statementHash")?,
+        "proofBytesHash": value_string(proof_record, "proofBytesHash")?,
+        "proofMaterialRoot": value_string(proof_record, "proofMaterialRoot")?,
+    });
     let proof_material_root = value_string(proof_record, "proofMaterialRoot")?;
-    let verification_binding_hash =
-        public_key_share_succinct_proof_verification_binding_hash(proof_record, &statement)?;
+    let verification_binding_hash = public_key_share_succinct_proof_verification_binding_hash(
+        &logical_proof_record,
+        &statement,
+    )?;
     if !crate::bgv::setup::consume_accepted_setup_proof_binding(
         context.proof_binding_session.session_handle,
-        &context.proof_binding_session.capability,
         PUBLIC_KEY_SHARE_PROOF_FAMILY,
         proof_material_root,
         &verification_binding_hash,
@@ -378,8 +347,10 @@ fn verify_public_key_share_succinct_proof_record(
         // Production verification receives authenticated raw stream bytes. Test
         // fixtures instead restore the exact verifier-derived binding above, so
         // no proof corpus survives between fixture construction and this pass.
-        let proof_bytes =
-            public_key_share_succinct_proof_bytes_from_record(proof_record, context.request)?;
+        let proof_bytes = public_key_share_succinct_proof_bytes_from_record(
+            proof_record,
+            context.proof_binding_session,
+        )?;
         let proof_bytes_hash = value_string(proof_record, "proofBytesHash")?;
         if proof_bytes_hash
             != public_key_share_succinct_proof_material_bytes_hash(proof_bytes.as_ref())?
@@ -394,17 +365,17 @@ fn verify_public_key_share_succinct_proof_record(
         verify_evaluation_key_share(&statement, &proof)?;
     }
 
-    Ok(())
+    Ok(logical_proof_record)
 }
 
 pub(in crate::bgv::setup) fn public_key_share_succinct_proof_verification_binding_hash(
-    proof_record: &Value,
+    logical_proof_record: &Value,
     statement: &TrusteeEvaluationKeyStatement,
 ) -> CanonicalResult<String> {
     derive_canonical_object_hash(&json!({
         "objectType": "AcceptedSetupPublicKeyShareSuccinctProofVerificationBinding",
-        "proofMaterialRoot": public_key_share_succinct_proof_material_root(proof_record)?,
+        "proofMaterialRoot": public_key_share_succinct_proof_material_root(logical_proof_record)?,
         "statementHash": crate::hashing::to_hex(&statement.statement_hash()),
-        "proofRecordRoot": derive_canonical_object_hash(proof_record)?,
+        "proofRecordRoot": derive_canonical_object_hash(logical_proof_record)?,
     }))
 }

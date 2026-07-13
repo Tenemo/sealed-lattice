@@ -11,6 +11,25 @@ use crate::hashing::{derive_canonical_object_hash, hash512_hex};
 
 const VSS_MATERIAL_SEED_DOMAIN: &str = "sealed-lattice/accepted-setup/vss-material-seed";
 
+struct VssProofRecordFixture {
+    record: serde_json::Value,
+    proof_binding_lease: crate::bgv::setup::CanonicalSetupProofBindingLease,
+}
+
+struct VssProofRecordSetFixture {
+    records: Vec<serde_json::Value>,
+    proof_binding_leases: Vec<crate::bgv::setup::CanonicalSetupProofBindingLease>,
+}
+
+struct VssProofMaterialSetFixture {
+    value: serde_json::Value,
+    proof_binding_leases: Vec<crate::bgv::setup::CanonicalSetupProofBindingLease>,
+}
+
+pub(super) fn vss_fixture_threshold_degree(package: &serde_json::Value) -> u64 {
+    participant_count_from_package(package) / 3 + 1
+}
+
 // The canonical committed-material commitment-context hash for a role and
 // context, identical to the hash `compute_vss_committed_material_commitment`
 // derives internally, so a record builder can compute it before committing.
@@ -49,12 +68,8 @@ pub(super) fn same_secret_bridge_target_constant_records_from_fixture_package(
     trustee_roster_position: u64,
 ) -> Vec<&serde_json::Value> {
     let coefficient_set = &package["vssPublicCoefficientCommitmentSet"];
-    let threshold_degree = coefficient_set["thresholdDegree"]
-        .as_u64()
-        .expect("target coefficient threshold degree") as usize;
-    let q_share_rns_limb_count = coefficient_set["rnsLimbCount"]
-        .as_u64()
-        .expect("target coefficient RNS limb count") as usize;
+    let threshold_degree = vss_fixture_threshold_degree(package) as usize;
+    let q_share_rns_limb_count = DATA_PRIMES.len();
     let source_record = &coefficient_set["sourceTrusteeRecords"]
         .as_array()
         .expect("target coefficient source records")[trustee_roster_position as usize];
@@ -110,14 +125,16 @@ mod transport;
 // Builds only the two aggregate coordinates needed by the direct-verifier
 // mutation test. The aggregate proofs still use the content-addressed proof
 // checkpoint store; unrelated accepted-setup proof families are not generated.
-pub(in super::super) fn compact_aggregate_threshold_proof_fixture() -> serde_json::Value {
+pub(in super::super) struct CompactAggregateThresholdProofFixture {
+    pub(in super::super) package: serde_json::Value,
+    pub(in super::super) proof_binding_leases:
+        Vec<crate::bgv::setup::CanonicalSetupProofBindingLease>,
+}
+
+pub(in super::super) fn compact_aggregate_threshold_proof_fixture()
+-> CompactAggregateThresholdProofFixture {
     let mut package = minimal_collective_setup_package_for_participant_count(3);
-    let ring_degree = usize::try_from(
-        package["vssCoefficientCommitmentMaterial"]["ringDegree"]
-            .as_u64()
-            .expect("VSS coefficient commitment material ring degree"),
-    )
-    .expect("VSS coefficient commitment material ring degree fits usize");
+    let ring_degree = vss_commitment_ring_degree_from_fixture_package(&package);
     package["vssPublicCoefficientCommitmentSet"] =
         commitment_sets::vss_public_coefficient_commitment_set_object(&package, ring_degree);
     package["vssPublicRecipientShareCommitmentSet"] =
@@ -127,16 +144,23 @@ pub(in super::super) fn compact_aggregate_threshold_proof_fixture() -> serde_jso
             &package,
             &[(0, 0), (1, 0)],
         );
+    let aggregate_threshold_proofs = aggregate_threshold::vss_aggregate_threshold_proofs(
+        &package,
+        &aggregate_threshold_commitment_set,
+        &[(0, 0), (1, 0)],
+    );
     aggregate_threshold_commitment_set["aggregateThresholdProofs"] =
-        serde_json::json!(aggregate_threshold::vss_aggregate_threshold_proofs(
-            &package,
-            &aggregate_threshold_commitment_set,
-        ));
+        serde_json::json!(aggregate_threshold_proofs.records);
     package["vssPublicAggregateThresholdCommitmentSet"] = aggregate_threshold_commitment_set;
     aggregate_threshold::append_vss_aggregate_threshold_proof_material_transport(&mut package);
 
-    package
+    CompactAggregateThresholdProofFixture {
+        package,
+        proof_binding_leases: aggregate_threshold_proofs.proof_binding_leases,
+    }
 }
 
-pub(in super::super) use finalized_package::finalize_collective_setup_package;
+pub(in super::super) use finalized_package::{
+    FinalizedCollectiveSetupPackageFixture, finalize_collective_setup_package,
+};
 pub(in super::super) use transport::descriptor_backed_vss_proof_material_fixture;

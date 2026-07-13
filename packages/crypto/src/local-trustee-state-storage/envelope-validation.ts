@@ -1,7 +1,6 @@
 import type { ProtocolHash } from '@sealed-lattice/types';
 
 import { canonicalJson } from '../canonical-json.js';
-
 import { decodeCanonicalHex } from '../web-crypto.js';
 
 import { sealedMaterialAad } from './aes-gcm.js';
@@ -9,7 +8,6 @@ import {
     aesGcmNonceByteLength,
     encryptedSealedMaterialFieldNames,
     localTrusteeSealedPayloadFieldNames,
-    setupContextFieldNames,
     type EncryptedLocalTrusteeSetupMaterial,
     type LocalTrusteeSetupStateSealedMaterial,
     type LocalTrusteeSetupStateSealedPayload,
@@ -39,25 +37,9 @@ export const assertCommitmentHeader = (
         localStateCommitment.localStateRoot,
         'localStateCommitment.localStateRoot',
     );
-    assertNonEmptyString(
-        localStateCommitment.ceremonyId,
-        'localStateCommitment.ceremonyId',
-    );
     assertProtocolHash(
-        localStateCommitment.manifestHash,
-        'localStateCommitment.manifestHash',
-    );
-    assertProtocolHash(
-        localStateCommitment.rosterHash,
-        'localStateCommitment.rosterHash',
-    );
-    assertProtocolHash(
-        localStateCommitment.setupParametersHash,
-        'localStateCommitment.setupParametersHash',
-    );
-    assertNonEmptyString(
-        localStateCommitment.setupEpoch,
-        'localStateCommitment.setupEpoch',
+        localStateCommitment.setupContextHash,
+        'localStateCommitment.setupContextHash',
     );
     assertNonEmptyString(
         localStateCommitment.trusteeIdentity,
@@ -78,27 +60,25 @@ export const assertCommitmentHeader = (
 };
 
 const assertSetupContextBinding = (
-    setupContext: unknown,
+    setupContextHash: ProtocolHash,
     localStateCommitment: LocalTrusteeStateStorageEncryptionInput['localStateCommitment'],
 ): void => {
-    const setupContextRecord = assertJsonRecord(setupContext, 'setupContext');
-    for (const fieldName of setupContextFieldNames) {
-        if (setupContextRecord[fieldName] !== localStateCommitment[fieldName]) {
-            throw new Error(
-                `setupContext.${fieldName} must match localStateCommitment.${fieldName}.`,
-            );
-        }
+    assertProtocolHash(setupContextHash, 'setupContextHash');
+    if (setupContextHash !== localStateCommitment.setupContextHash) {
+        throw new Error(
+            'setupContextHash must match localStateCommitment.setupContextHash.',
+        );
     }
 };
 
 export const validateSealedMaterial = (
     value: unknown,
     expectedMaterialRoot: ProtocolHash,
-    setupContext: unknown,
+    setupContextHash: ProtocolHash,
     localStateCommitment: LocalTrusteeStateStorageEncryptionInput['localStateCommitment'],
     objectPath: string,
 ): LocalTrusteeSetupStateSealedMaterial => {
-    assertSetupContextBinding(setupContext, localStateCommitment);
+    assertSetupContextBinding(setupContextHash, localStateCommitment);
     const encryptedMaterial = assertJsonRecord(value, objectPath);
     assertRequiredFields(
         encryptedMaterial,
@@ -122,7 +102,7 @@ export const validateSealedMaterial = (
         );
     }
     const expectedMaterialAad = sealedMaterialAad(
-        setupContext,
+        setupContextHash,
         expectedMaterialRoot,
         localStateCommitment,
     );
@@ -156,9 +136,9 @@ export const validateSealedMaterial = (
 export const validateLocalStatePlaintext = (
     localStatePlaintext: unknown,
     localStateCommitment: LocalTrusteeStateStorageEncryptionInput['localStateCommitment'],
-    setupContext: unknown,
+    setupContextHash: ProtocolHash,
 ): LocalTrusteeSetupStateSealedPayload => {
-    assertSetupContextBinding(setupContext, localStateCommitment);
+    assertSetupContextBinding(setupContextHash, localStateCommitment);
     const plaintext = assertJsonRecord(
         localStatePlaintext,
         'localStatePlaintext',
@@ -176,7 +156,7 @@ export const validateLocalStatePlaintext = (
     validateSealedMaterial(
         plaintext.sealedAggregateThresholdShare,
         localStateCommitment.aggregateThresholdShareRoot,
-        setupContext,
+        setupContextHash,
         localStateCommitment,
         'localStatePlaintext.sealedAggregateThresholdShare',
     );

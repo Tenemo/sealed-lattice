@@ -4,9 +4,7 @@ export {
     verifyCloseRecordShell,
 } from './closing/index.js';
 export { deriveValidatedFirstValidOrder } from './ordering/index.js';
-export {
-    restoreAndPrepareLocalTargetDecryptionShareWitness,
-} from './target-decryption/local-target-share-witness.js';
+export { restoreAndPrepareLocalTargetDecryptionShareWitness } from './target-decryption/local-target-share-witness.js';
 export type {
     PreparedLocalTargetDecryptionShareWitness,
     RestoredLocalTargetDecryptionShareWitnessInput,
@@ -24,6 +22,21 @@ export {
     verifyRecoveryEpochUpdate,
 } from './recovery/index.js';
 export {
+    openUntrustedStorageTransactionStore,
+    UntrustedStorageTransactionStore,
+} from './runtime/untrusted-storage-transaction-store.js';
+export type {
+    UntrustedStorageAdapter,
+    UntrustedStorageAtomicMutation,
+    UntrustedStorageAuthenticationInput,
+    UntrustedStorageAuthenticator,
+    UntrustedStorageExpectedValue,
+    UntrustedStorageRecoveryReport,
+    UntrustedStorageTransactionErrorCode,
+    UntrustedStorageTransactionLimits,
+    UntrustedStorageWrite,
+} from './runtime/untrusted-storage-transaction-store.js';
+export {
     deriveCollectiveBgvSetupRosterHash,
     verifyRosterExternalAcceptance,
     verifyRosterManifestTranscript,
@@ -37,9 +50,7 @@ export type {
 } from './setup/setup-proof-material-transport.js';
 export {
     createBinaryChunkedPublicKeyShareMaterialBundle,
-    createBinaryChunkedPublicKeyShareMaterialTransport,
     createPublicKeyShareSuccinctProofSet,
-    createPublicKeyShareMaterialSet,
     createPublicKeyShareSet,
     publicKeyShareCoefficientVectorHashDomain,
 } from './setup/public-key-share-records.js';
@@ -55,7 +66,6 @@ export {
     acceptedBgvSetupQSharePrimes,
     createVssSourceTrusteeCoefficientOpeningState,
     createVssSourceTrusteeCoefficientOpeningStateProvider,
-    createVssSourceTrusteeCoefficientCommitmentContribution,
     createVssCoefficientCommitmentBundle,
     setupCommitmentRandomnessWidth,
 } from './setup/vss-coefficient-commitments.js';

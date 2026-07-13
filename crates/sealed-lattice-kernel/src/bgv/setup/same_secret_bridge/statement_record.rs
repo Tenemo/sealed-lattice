@@ -51,7 +51,6 @@ pub(super) fn verify_statement_record(
         input.coefficient_commitment_set,
         trustee_identity,
         input.expected_position,
-        input.statement_set.public_matrix_seed_hash,
         input.q_share_rns_limb_count,
         input.threshold_degree,
         input.ring_degree,
@@ -59,11 +58,7 @@ pub(super) fn verify_statement_record(
 
     let expected_statement_root = derive_canonical_object_hash(&json!({
         "objectType": "VssSameSecretBridgeStatement",
-        "ceremonyId": input.statement_set.ceremony_id,
-        "manifestHash": input.statement_set.manifest_hash,
-        "rosterHash": input.statement_set.roster_hash,
-        "setupParametersHash": input.statement_set.setup_parameters_hash,
-        "setupEpoch": input.statement_set.setup_epoch,
+        "setupContextHash": input.statement_set.setup_context_hash,
         "publicMatrixSeedHash": input.statement_set.public_matrix_seed_hash,
         "ringDegree": input.ring_degree,
         "trusteeIdentity": trustee_identity,
@@ -82,11 +77,7 @@ pub(super) fn verify_statement_record(
 
     Ok(json!({
         "objectType": "VssSameSecretBridgeStatement",
-        "ceremonyId": input.statement_set.ceremony_id,
-        "manifestHash": input.statement_set.manifest_hash,
-        "rosterHash": input.statement_set.roster_hash,
-        "setupParametersHash": input.statement_set.setup_parameters_hash,
-        "setupEpoch": input.statement_set.setup_epoch,
+        "setupContextHash": input.statement_set.setup_context_hash,
         "publicMatrixSeedHash": input.statement_set.public_matrix_seed_hash,
         "ringDegree": input.ring_degree,
         "trusteeIdentity": trustee_identity,
@@ -100,26 +91,9 @@ pub(super) fn compare_setup_context(
     statement_record: &Value,
     statement_set: StatementSetBinding<'_>,
 ) -> CanonicalResult<()> {
-    for field_name in SETUP_CONTEXT_FIELD_NAMES {
-        let expected = match field_name {
-            "ceremonyId" => statement_set.ceremony_id,
-            "manifestHash" => statement_set.manifest_hash,
-            "rosterHash" => statement_set.roster_hash,
-            "setupParametersHash" => statement_set.setup_parameters_hash,
-            "setupEpoch" => statement_set.setup_epoch,
-            _ => unreachable!("unknown same-secret setup context field"),
-        };
-        let actual = if field_name == "ceremonyId" || field_name == "setupEpoch" {
-            string_at_path(statement_record, &[field_name])?
-        } else {
-            hash_at_path(statement_record, &[field_name])?
-        };
-        compare_required_string(
-            actual,
-            expected,
-            "VSS same-secret bridge statement setup context",
-        )?;
-    }
-
-    Ok(())
+    compare_required_string(
+        hash_at_path(statement_record, &["setupContextHash"])?,
+        statement_set.setup_context_hash,
+        "VSS same-secret bridge statement setup context",
+    )
 }

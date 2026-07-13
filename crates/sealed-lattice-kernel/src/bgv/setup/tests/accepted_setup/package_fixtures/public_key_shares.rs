@@ -12,6 +12,16 @@ pub(in super::super) fn public_key_shares_object(
     common_randomness: &serde_json::Value,
     participant_count: u64,
 ) -> serde_json::Value {
+    let setup_context_hash =
+        crate::bgv::setup::accepted_setup::setup_context_hash(&serde_json::json!({
+            "ceremonyId": ceremony_id,
+            "manifestHash": manifest_hash,
+            "rosterHash": roster_hash,
+            "setupParametersHash": setup_parameters_hash,
+            "setupEpoch": setup_epoch,
+            "participantCount": participant_count,
+        }))
+        .expect("setup context hash");
     let public_matrix_seed_hash = common_randomness["publicMatrixSeedHash"]
         .as_str()
         .expect("public matrix seed hash");
@@ -33,38 +43,40 @@ pub(in super::super) fn public_key_shares_object(
                 })
             })
             .collect::<Vec<_>>();
-        let mut share_record = serde_json::json!({
+        let share_root_input = serde_json::json!({
             "objectType": "PublicKeyShare",
-            "ceremonyId": ceremony_id,
-            "manifestHash": manifest_hash,
-            "rosterHash": roster_hash,
-            "setupParametersHash": setup_parameters_hash,
-            "setupEpoch": setup_epoch,
+            "setupContextHash": setup_context_hash,
             "trusteeIdentity": trustee_identity.as_str(),
             "trusteeRosterPosition": trustee_roster_position,
             "publicMatrixSeedHash": public_matrix_seed_hash,
             "shareCoefficientVectorHash512ByLimb": share_coefficient_hashes,
         });
-        share_record["publicKeyShareRoot"] = serde_json::json!(
-            derive_canonical_object_hash(&share_record).expect("public-key share root")
-        );
+        let public_key_share_root =
+            derive_canonical_object_hash(&share_root_input).expect("public-key share root");
+        let share_record = serde_json::json!({
+            "objectType": "PublicKeyShare",
+            "trusteeIdentity": trustee_identity,
+            "trusteeRosterPosition": trustee_roster_position,
+            "shareCoefficientVectorHash512ByLimb":
+                share_root_input["shareCoefficientVectorHash512ByLimb"],
+            "publicKeyShareRoot": public_key_share_root,
+        });
         share_records.push(share_record);
     }
-    let mut share_set = serde_json::json!({
+    let share_set_root_input = serde_json::json!({
         "objectType": "PublicKeyShareSet",
-        "ceremonyId": ceremony_id,
-        "manifestHash": manifest_hash,
-        "rosterHash": roster_hash,
-        "setupParametersHash": setup_parameters_hash,
-        "setupEpoch": setup_epoch,
+        "setupContextHash": setup_context_hash,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "shareRecords": share_records,
     });
-    share_set["publicKeyShareSetRoot"] = serde_json::json!(
-        derive_canonical_object_hash(&share_set).expect("public-key share set root")
-    );
+    let public_key_share_set_root =
+        derive_canonical_object_hash(&share_set_root_input).expect("public-key share set root");
 
-    share_set
+    serde_json::json!({
+        "objectType": "PublicKeyShareSet",
+        "shareRecords": share_set_root_input["shareRecords"],
+        "publicKeyShareSetRoot": public_key_share_set_root,
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -79,14 +91,20 @@ pub(in super::super) fn evaluator_key_schedule_object(
     public_key_shares: &serde_json::Value,
     participant_count: u64,
 ) -> serde_json::Value {
+    let setup_context_hash =
+        crate::bgv::setup::accepted_setup::setup_context_hash(&serde_json::json!({
+            "ceremonyId": ceremony_id,
+            "manifestHash": manifest_hash,
+            "rosterHash": roster_hash,
+            "setupParametersHash": setup_parameters_hash,
+            "setupEpoch": setup_epoch,
+            "participantCount": participant_count,
+        }))
+        .expect("setup context hash");
     let schedule_parameters = &parameters["evaluatorKeySchedule"];
     let mut schedule = serde_json::json!({
         "objectType": "EvaluatorKeySchedule",
-        "ceremonyId": ceremony_id,
-        "manifestHash": manifest_hash,
-        "rosterHash": roster_hash,
-        "setupParametersHash": setup_parameters_hash,
-        "setupEpoch": setup_epoch,
+        "setupContextHash": setup_context_hash,
         "participantCount": participant_count,
         "rnsLimbCount": DATA_PRIMES.len(),
         "publicMatrixSeedHash": common_randomness["publicMatrixSeedHash"],

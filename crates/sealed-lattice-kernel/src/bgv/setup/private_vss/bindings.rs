@@ -43,7 +43,7 @@ pub(super) struct LimbVerification {
 pub(super) fn verify_setup_context(
     setup_context: &Value,
 ) -> CanonicalResult<Result<(), PrivateVssRefusal>> {
-    for field_name in setup_context_field_names() {
+    for field_name in authoritative_setup_context_field_names() {
         if setup_context.get(field_name).is_none() {
             return Ok(Err(PrivateVssRefusal::new(
                 "setupContextFieldMissing",

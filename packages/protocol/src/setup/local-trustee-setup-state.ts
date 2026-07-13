@@ -10,15 +10,15 @@ import {
 import type { ProtocolHash } from '@sealed-lattice/types';
 
 import {
-    assertContextMatches,
     assertJsonRecord,
     assertJsonRecordArray,
     assertNonEmptyString,
     assertNonNegativeSafeInteger,
+    assertPositiveSafeInteger,
     assertProtocolHash,
+    assertSetupContextHashMatches,
     bytesFromHex,
-    contextFields,
-    setupContextFieldNames,
+    deriveCollectiveBgvSetupContextHash,
     type JsonRecord,
 } from './common-fields.js';
 import type { PrivateVssEnvelopeCommitment } from './private-vss-mailbox-delivery.js';
@@ -119,14 +119,22 @@ const validateInput = (input: LocalTrusteeSetupStateCommitmentInput): void => {
         input.setupContext.setupEpoch,
         'setupContext.setupEpoch',
     );
-    for (const fieldName of setupContextFieldNames) {
-        if (fieldName !== 'ceremonyId' && fieldName !== 'setupEpoch') {
-            assertProtocolHash(
-                input.setupContext[fieldName],
-                `setupContext.${fieldName}`,
-            );
-        }
-    }
+    assertProtocolHash(
+        input.setupContext.manifestHash,
+        'setupContext.manifestHash',
+    );
+    assertProtocolHash(
+        input.setupContext.rosterHash,
+        'setupContext.rosterHash',
+    );
+    assertProtocolHash(
+        input.setupContext.setupParametersHash,
+        'setupContext.setupParametersHash',
+    );
+    assertPositiveSafeInteger(
+        input.setupContext.participantCount,
+        'setupContext.participantCount',
+    );
     assertNonEmptyString(input.trusteeIdentity, 'trusteeIdentity');
     assertNonNegativeSafeInteger(
         input.trusteeRosterPosition,
@@ -149,7 +157,9 @@ export const createLocalTrusteeSetupStateCommitment = (
 
     const localStateWithoutRoot = {
         objectType: 'LocalTrusteeSetupStateCommitment',
-        ...contextFields(input.setupContext),
+        setupContextHash: deriveCollectiveBgvSetupContextHash(
+            input.setupContext,
+        ),
         trusteeIdentity: input.trusteeIdentity,
         trusteeRosterPosition: input.trusteeRosterPosition,
         thresholdShareCommitmentRecipientRoot:
@@ -159,8 +169,9 @@ export const createLocalTrusteeSetupStateCommitment = (
 
     return {
         ...localStateWithoutRoot,
-        localStateRoot:
-            deriveLocalTrusteeSetupStateCommitmentRoot(localStateWithoutRoot),
+        localStateRoot: deriveLocalTrusteeSetupStateCommitmentRoot(
+            localStateWithoutRoot,
+        ),
     } satisfies LocalTrusteeSetupStateCommitment;
 };
 
@@ -171,7 +182,7 @@ const thresholdShareCommitmentRecipientRoot = (
         input.thresholdShareCommitments,
         'thresholdShareCommitments',
     );
-    assertContextMatches(
+    assertSetupContextHashMatches(
         input.setupContext,
         thresholdShareCommitments,
         'thresholdShareCommitments',
@@ -207,11 +218,6 @@ const recipientEnvelopeReferences = (
 ): readonly PrivateVssEnvelopeCommitment[] => {
     const privateVssEnvelopeCommitments = assertJsonRecord(
         input.privateVssEnvelopeCommitments,
-        'privateVssEnvelopeCommitments',
-    );
-    assertContextMatches(
-        input.setupContext,
-        privateVssEnvelopeCommitments,
         'privateVssEnvelopeCommitments',
     );
     const participantCount = input.participantCount;
@@ -289,7 +295,11 @@ const assertPrivateEnvelopeMatchesReference = (
     privateEnvelopeHash: ProtocolHash,
     envelopeReference: PrivateVssEnvelopeCommitment,
 ): void => {
-    assertContextMatches(setupContext, privateEnvelope, 'privateEnvelope');
+    assertSetupContextHashMatches(
+        setupContext,
+        privateEnvelope,
+        'privateEnvelope',
+    );
     if (privateEnvelopeHash !== envelopeReference.privateEnvelopeHash) {
         throw new Error(
             'verified private VSS envelope hash must match the public envelope reference.',
@@ -311,7 +321,6 @@ const assertPrivateEnvelopeMatchesReference = (
 
 const aggregateVerifiedPrivateVssMaterial = (
     input: GeneratedLocalTrusteeSetupStateInput,
-    thresholdShareCommitmentRecipientRootValue: ProtocolHash,
     envelopeReferences: readonly PrivateVssEnvelopeCommitment[],
 ): Readonly<{
     readonly aggregateThresholdShareMaterial: JsonRecord;
@@ -332,7 +341,6 @@ const aggregateVerifiedPrivateVssMaterial = (
     }
 
     const aggregateByLimb = new Map<number, AggregateLimbAccumulator>();
-    const localEnvelopeReferences: JsonRecord[] = [];
     for (const envelopeReference of envelopeReferences) {
         const privateEnvelope = privateEnvelopeByHash.get(
             envelopeReference.privateEnvelopeHash,
@@ -348,19 +356,6 @@ const aggregateVerifiedPrivateVssMaterial = (
             envelopeReference.privateEnvelopeHash,
             envelopeReference,
         );
-        localEnvelopeReferences.push({
-            objectType: 'LocalTrusteePrivateVssEnvelopeReference',
-            sourceTrusteeIdentity: envelopeReference.sourceTrusteeIdentity,
-            sourceTrusteeRosterPosition:
-                envelopeReference.sourceTrusteeRosterPosition,
-            sourceTrusteeCommitmentRoot: protocolHashField(
-                privateEnvelope,
-                'sourceTrusteeCommitmentRoot',
-                'privateEnvelope',
-            ),
-            privateEnvelopeHash: envelopeReference.privateEnvelopeHash,
-            localVerificationRoot: envelopeReference.localVerificationRoot,
-        });
         const rnsShareOpenings = assertJsonRecordArray(
             privateEnvelope.rnsShareOpenings,
             'privateEnvelope.rnsShareOpenings',
@@ -505,29 +500,11 @@ const aggregateVerifiedPrivateVssMaterial = (
             }
         });
     });
-    const materialCommonFields = {
-        ...contextFields(input.setupContext),
-        trusteeIdentity: input.trusteeIdentity,
-        trusteeRosterPosition: input.trusteeRosterPosition,
-        thresholdShareCommitmentRecipientRoot:
-            thresholdShareCommitmentRecipientRootValue,
-        sourcePrivateEnvelopeReferences: localEnvelopeReferences,
-    } as const satisfies JsonRecord;
-
     return {
         aggregateThresholdShareMaterial: {
             objectType: 'LocalTrusteeAggregateThresholdShareMaterial',
-            ...materialCommonFields,
             aggregateOpeningCredentialHandoff:
                 input.localTrusteeAggregateOpeningCredentialHandoff,
-            aggregateShareByRnsLimb: orderedAggregates.map((aggregate) => ({
-                objectType: 'LocalTrusteeAggregateThresholdShareLimb',
-                rnsLimbIndex: aggregate.rnsLimbIndex,
-                rnsPrime: aggregate.rnsPrime,
-                shareValues: aggregate.shareValues.map((shareValue) =>
-                    Number(shareValue),
-                ),
-            })),
         },
     };
 };
@@ -539,7 +516,9 @@ async function encryptLocalTrusteeSetupState(
     const encryptedLocalState = await encryptLocalTrusteeState({
         localStatePlaintext: input.localStatePlaintext,
         localStateCommitment,
-        setupContext: input.setupContext,
+        setupContextHash: deriveCollectiveBgvSetupContextHash(
+            input.setupContext,
+        ),
         storageKeyBytesHex: input.storageKeyBytesHex,
     });
 
@@ -566,14 +545,15 @@ export const createEncryptedLocalTrusteeSetupStateFromVerifiedShares = async (
     const envelopeReferences = recipientEnvelopeReferences(input);
     const materialPlaintexts = aggregateVerifiedPrivateVssMaterial(
         input,
-        thresholdShareCommitmentRecipientRootValue,
         envelopeReferences,
     );
     const sealedAggregateThresholdShare =
         await encryptLocalTrusteeSetupSealedMaterial({
             materialPlaintext:
                 materialPlaintexts.aggregateThresholdShareMaterial,
-            setupContext: input.setupContext,
+            setupContextHash: deriveCollectiveBgvSetupContextHash(
+                input.setupContext,
+            ),
             trusteeIdentity: input.trusteeIdentity,
             trusteeRosterPosition: input.trusteeRosterPosition,
             thresholdShareCommitmentRecipientRoot:

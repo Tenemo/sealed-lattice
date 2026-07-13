@@ -3,6 +3,27 @@ use crate::hashing::derive_canonical_object_hash;
 
 use super::*;
 
+fn usize_to_u64(value: usize, name: &str) -> CanonicalResult<u64> {
+    u64::try_from(value).map_err(|_| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            format!("{name} does not fit u64"),
+        )
+    })
+}
+
+fn setup_package_hash(setup_package: &Value) -> CanonicalResult<&str> {
+    setup_package
+        .get("setupPackageHash")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "setup package must include setupPackageHash",
+            )
+        })
+}
+
 pub(crate) struct DirectBallotPackedBatchedPairEvaluatorInput<'a> {
     pub(crate) setup_package: &'a Value,
     pub(crate) evaluator_key: &'a DevelopmentBgvKey,
@@ -32,8 +53,6 @@ pub(crate) fn run_direct_ballot_packed_batched_pair_evaluator_for_top_counts(
     }
     let score_domain_max = direct_ballot_comparison_domain_max(ballot_count)?;
     let aggregate_ciphertext_root = ciphertext_object_root(aggregate_ciphertext)?;
-    let aggregate_ciphertext_canonical_byte_length =
-        ciphertext_canonical_bytes_hex(aggregate_ciphertext)?.len() / 2;
     let top_count_seed = top_counts
         .iter()
         .map(|top_count| top_count.to_string())
@@ -79,32 +98,20 @@ pub(crate) fn run_direct_ballot_packed_batched_pair_evaluator_for_top_counts(
             &target_id_root,
             &target_order_root,
         )?;
-        let evaluator_replay_context_hash = direct_ballot_evaluator_replay_context_hash(
-            DirectBallotEvaluatorReplayContextHashInput {
+        let evaluator_replay_record_hash = direct_ballot_evaluator_replay_record_hash(
+            DirectBallotEvaluatorReplayRecordHashInput {
                 setup_package,
                 aggregate_ciphertext_root: &aggregate_ciphertext_root,
-                aggregate_ciphertext_canonical_byte_length,
                 ballot_count,
                 top_count: *top_count,
                 score_domain_max,
                 working_level: context.working_level(),
                 target_layout_hash: &target_layout_root,
+                target_ciphertext_hash: &target_ciphertext_hash,
             },
         )?;
-        let evaluator_replay_record_hash = direct_ballot_evaluator_replay_record_hash(
-            setup_package,
-            &aggregate_ciphertext_root,
-            &evaluator_replay_context_hash,
-            &target_ciphertext_hash,
-            &target_layout_root,
-        )?;
         let target_proposal = direct_ballot_target_proposal(
-            setup_package,
-            &aggregate_ciphertext_root,
-            &evaluator_replay_context_hash,
             &evaluator_replay_record_hash,
-            &target_ciphertext_hash,
-            &target_layout_root,
             target_finality_policy_hash,
         )?;
 
@@ -114,7 +121,6 @@ pub(crate) fn run_direct_ballot_packed_batched_pair_evaluator_for_top_counts(
             "targetIdRoot": target_id_root,
             "targetOrderRoot": target_order_root,
             "targetCiphertextHash": target_ciphertext_hash,
-            "evaluatorReplayContextHash": evaluator_replay_context_hash,
             "evaluatorReplayRecordHash": evaluator_replay_record_hash,
             "targetProposal": target_proposal
         });
@@ -187,52 +193,29 @@ pub(crate) fn direct_ballot_plaintext_target_slots(
     Ok((target_ids, target_orders))
 }
 
-pub(super) struct DirectBallotEvaluatorReplayContextHashInput<'a> {
+pub(super) struct DirectBallotEvaluatorReplayRecordHashInput<'a> {
     setup_package: &'a Value,
     aggregate_ciphertext_root: &'a str,
-    aggregate_ciphertext_canonical_byte_length: usize,
     ballot_count: usize,
     top_count: usize,
     score_domain_max: u64,
     working_level: usize,
     target_layout_hash: &'a str,
+    target_ciphertext_hash: &'a str,
 }
 
-pub(super) fn direct_ballot_evaluator_replay_context_hash(
-    input: DirectBallotEvaluatorReplayContextHashInput<'_>,
+pub(super) fn direct_ballot_evaluator_replay_record_hash(
+    input: DirectBallotEvaluatorReplayRecordHashInput<'_>,
 ) -> CanonicalResult<String> {
     derive_canonical_object_hash(&json!({
-        "objectType": "DirectEncryptedBallotEvaluatorReplayContext",
+        "objectType": "EvaluatorReplayRecord",
         "setupPackageHash": setup_package_hash(input.setup_package)?,
-        "ceremonyId": required_string_path(input.setup_package, &["setupInputs", "ceremonyId"])?,
-        "manifestHash": required_string_path(input.setup_package, &["setupInputs", "manifestHash"])?,
-        "thresholdParametersHash": required_string_path(input.setup_package, &["setupInputs", "thresholdParametersHash"])?,
         "aggregateCiphertextRoot": input.aggregate_ciphertext_root,
-        "aggregateCiphertextCanonicalByteLength": input.aggregate_ciphertext_canonical_byte_length,
         "ballotCount": input.ballot_count,
         "topCount": input.top_count,
         "scoreDomainMax": input.score_domain_max,
         "workingLevel": input.working_level,
-        "bgvParametersHash": bgv_parameters_hash()?,
         "targetLayoutHash": input.target_layout_hash,
-    }))
-}
-
-pub(super) fn direct_ballot_evaluator_replay_record_hash(
-    setup_package: &Value,
-    aggregate_ciphertext_root: &str,
-    evaluator_replay_context_hash: &str,
-    target_ciphertext_hash: &str,
-    target_layout_hash: &str,
-) -> CanonicalResult<String> {
-    derive_canonical_object_hash(&json!({
-        "objectType": "EvaluatorReplayRecord",
-        "ceremonyId": required_string_path(setup_package, &["setupInputs", "ceremonyId"])?,
-        "electionManifestHash": required_string_path(setup_package, &["setupInputs", "manifestHash"])?,
-        "encryptedBallotAggregateHash": aggregate_ciphertext_root,
-        "bgvParametersHash": bgv_parameters_hash()?,
-        "evaluatorReplayContextHash": evaluator_replay_context_hash,
-        "targetCiphertextHash": target_ciphertext_hash,
-        "targetLayoutHash": target_layout_hash,
+        "targetCiphertextHash": input.target_ciphertext_hash,
     }))
 }

@@ -69,21 +69,6 @@ fn collective_setup_parameters_expose_operative_foundation_parameters() {
 }
 
 #[test]
-fn collective_setup_verifier_refuses_passive_setup_packages() {
-    let _accepted_setup_test_timing =
-        accepted_setup_test_timing("collective_setup_verifier_refuses_passive_setup_packages");
-    let package = setup_package();
-    let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
-        .expect("verification response");
-
-    assert_eq!(result["isValid"], false);
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "outsideCollectiveBgvSetupParameters"
-    );
-}
-
-#[test]
 fn collective_setup_intent_accepts_signed_canonical_registrations() {
     let package = collective_setup_intent_package();
     let result = verify_collective_bgv_setup_intent_for_test(&package)
@@ -115,41 +100,36 @@ fn collective_setup_intent_refuses_missing_and_wrong_object_types() {
 }
 
 #[test]
-fn collective_setup_intent_refuses_wrong_context_duplicate_and_out_of_range_positions() {
-    let mut wrong_context = collective_setup_intent_package();
-    wrong_context["setupIntent"]["trusteeRegistrations"][0]["setupEpoch"] =
-        serde_json::json!("wrong-epoch");
-    assert_setup_intent_refused(
-        &wrong_context,
-        "setupIntentTrusteeRegistrationContextMismatch",
-    );
-
+fn collective_setup_intent_refuses_duplicate_trustee_identities() {
     let mut duplicate = collective_setup_intent_package();
-    duplicate["setupIntent"]["trusteeRegistrations"][1] =
-        duplicate["setupIntent"]["trusteeRegistrations"][0].clone();
-    assert_setup_intent_refused(&duplicate, "setupIntentRosterPositionDuplicate");
-
-    let mut out_of_range = collective_setup_intent_package();
-    out_of_range["setupIntent"]["trusteeRegistrations"][0]["rosterPosition"] =
-        serde_json::json!(10);
-    assert_setup_intent_refused(
-        &out_of_range,
-        "setupIntentRosterPositionOutsideParameters",
+    duplicate["setupIntent"]["trusteeRegistrations"][1]["signatureEnvelope"]["signedRoot"]["signerIdentity"] =
+        serde_json::json!("trustee-0");
+    rebind_collective_setup_intent_registration_with_signature_seed(
+        &mut duplicate,
+        1,
+        "trustee-1-setup-signing",
     );
+    assert_setup_intent_refused(&duplicate, "setupIntentTrusteeIdentityDuplicate");
 }
 
 #[test]
-fn collective_setup_intent_refuses_noncanonical_registration_order() {
-    let mut package = collective_setup_intent_package();
-    package["setupIntent"]["trusteeRegistrations"]
-        .as_array_mut()
-        .expect("setup-intent trustee registrations")
-        .swap(0, 1);
-
-    assert_setup_intent_refused(
-        &package,
-        "setupIntentTrusteeRegistrationOrderMismatch",
+fn collective_setup_intent_refuses_reused_signing_and_mailbox_keys() {
+    let mut duplicate_signing_key = collective_setup_intent_package();
+    rebind_collective_setup_intent_registration_with_signature_seed(
+        &mut duplicate_signing_key,
+        1,
+        "trustee-0-setup-signing",
     );
+    assert_setup_intent_refused(&duplicate_signing_key, "setupIntentSigningKeyDuplicate");
+
+    let mut duplicate_mailbox_key = collective_setup_intent_package();
+    let first_mailbox_public_key_hash = duplicate_mailbox_key["setupIntent"]
+        ["trusteeRegistrations"][0]["privateVssMailboxPublicKeyHash"]
+        .clone();
+    duplicate_mailbox_key["setupIntent"]["trusteeRegistrations"][1]["privateVssMailboxPublicKeyHash"] =
+        first_mailbox_public_key_hash;
+    rebind_collective_setup_intent_registration(&mut duplicate_mailbox_key, 1);
+    assert_setup_intent_refused(&duplicate_mailbox_key, "setupIntentMailboxKeyDuplicate");
 }
 
 #[test]
@@ -157,12 +137,6 @@ fn collective_setup_intent_refuses_a_rebound_wrong_roster() {
     let mut package = collective_setup_intent_package();
     let wrong_roster_hash = valid_hash('7');
     package["setupContext"]["rosterHash"] = serde_json::json!(wrong_roster_hash);
-    for registration in package["setupIntent"]["trusteeRegistrations"]
-        .as_array_mut()
-        .expect("setup-intent trustee registrations")
-    {
-        registration["rosterHash"] = serde_json::json!(wrong_roster_hash);
-    }
     rebind_collective_setup_intent_signatures(&mut package);
 
     assert_setup_intent_refused(&package, "setupRosterHashMismatch");
@@ -171,11 +145,11 @@ fn collective_setup_intent_refuses_a_rebound_wrong_roster() {
 #[test]
 fn collective_setup_intent_refuses_tampered_signature_bytes() {
     let mut package = collective_setup_intent_package();
-    let signature_bytes = package["setupIntent"]["trusteeRegistrations"][0]
-        ["signatureEnvelope"]["signatureBytesHex"]
-        .as_str()
-        .expect("signature bytes")
-        .to_string();
+    let signature_bytes =
+        package["setupIntent"]["trusteeRegistrations"][0]["signatureEnvelope"]["signatureBytesHex"]
+            .as_str()
+            .expect("signature bytes")
+            .to_string();
     let replacement_prefix = if signature_bytes.starts_with("00") {
         "01"
     } else {
@@ -183,8 +157,8 @@ fn collective_setup_intent_refuses_tampered_signature_bytes() {
     };
     let mut tampered_signature_bytes = signature_bytes;
     tampered_signature_bytes.replace_range(0..2, replacement_prefix);
-    package["setupIntent"]["trusteeRegistrations"][0]["signatureEnvelope"]
-        ["signatureBytesHex"] = serde_json::json!(tampered_signature_bytes);
+    package["setupIntent"]["trusteeRegistrations"][0]["signatureEnvelope"]["signatureBytesHex"] =
+        serde_json::json!(tampered_signature_bytes);
 
     assert_setup_intent_refused(&package, "InvalidSignature");
 }
@@ -201,8 +175,7 @@ fn collective_setup_verifier_binds_private_vss_envelopes_to_registered_mailbox_k
         .expect("verification response");
     assert_eq!(result["isValid"], false, "unexpected result: {result}");
     assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "privateVssEncryptedEnvelopeBindingMismatch",
+        result["refusedObjects"][0]["reasonCode"], "privateVssEncryptedEnvelopeBindingMismatch",
         "unexpected refusal: {result}"
     );
 }
@@ -250,8 +223,7 @@ fn collective_setup_verifier_refuses_bad_common_randomness() {
     );
 
     let mut wrong_seed = collective_setup_intent_package();
-    wrong_seed["commonRandomness"]["publicMatrixSeedHash"] =
-        serde_json::json!(valid_hash('9'));
+    wrong_seed["commonRandomness"]["publicMatrixSeedHash"] = serde_json::json!(valid_hash('9'));
     rebind_collective_setup_package_hash(&mut wrong_seed);
     let wrong_seed_result =
         verify_collective_bgv_setup_package(&wrong_seed, &serde_json::json!({}))

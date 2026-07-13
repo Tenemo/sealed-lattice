@@ -2,13 +2,13 @@ import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
 import {
-    assertContextMatches,
     assertNonNegativeSafeInteger,
     assertPositiveSafeInteger,
     assertProtocolHash,
-    contextFields,
+    deriveCollectiveBgvSetupContextHash,
     type JsonRecord,
 } from './common-fields.js';
+import { publicKeyShareRecordsByRosterPosition } from './public-key-share-records/share-statement-records.js';
 import type { PublicKeyShareSet } from './public-key-share-records.js';
 import type { CollectiveBgvSetupContext } from './vss-share-verification-records.js';
 
@@ -21,24 +21,13 @@ export type RequiredGaloisKeyScheduleEntry = Readonly<{
     readonly level: number;
 }>;
 
-type RequiredGaloisSet = Readonly<
-    JsonRecord & {
-        readonly objectType: 'RequiredGaloisSet';
-        readonly rnsLimbCount: number;
-        readonly entries: readonly RequiredGaloisKeyScheduleEntry[];
-    }
->;
-
 export type EvaluatorKeySchedule = Readonly<
     JsonRecord & {
         readonly objectType: 'EvaluatorKeySchedule';
         readonly publicMatrixSeedHash: ProtocolHash;
-        readonly relinearizationCrpRoot: ProtocolHash;
-        readonly galoisKeyCrpRoot: ProtocolHash;
         readonly publicKeyShareSetRoot: ProtocolHash;
         readonly relinearizationLevelSchedule: readonly RelinearizationLevelScheduleEntry[];
         readonly requiredGaloisKeySchedule: readonly RequiredGaloisKeyScheduleEntry[];
-        readonly requiredGaloisSetHash: ProtocolHash;
         readonly evaluatorKeyScheduleRoot: ProtocolHash;
     }
 >;
@@ -48,8 +37,6 @@ type EvaluatorKeyScheduleInput = {
     readonly qSharePrimes: readonly number[];
     readonly participantCount: number;
     readonly publicMatrixSeedHash: ProtocolHash;
-    readonly relinearizationCrpRoot: ProtocolHash;
-    readonly galoisKeyCrpRoot: ProtocolHash;
     readonly publicKeyShares: PublicKeyShareSet;
     readonly requiredGaloisKeySchedule: readonly RequiredGaloisKeyScheduleEntry[];
 };
@@ -78,19 +65,6 @@ const validateRequiredGaloisSchedule = (
     });
 
     return sortedEntries;
-};
-
-const createRequiredGaloisSet = (
-    rnsLimbCount: number,
-    entries: readonly RequiredGaloisKeyScheduleEntry[],
-): RequiredGaloisSet => {
-    assertPositiveSafeInteger(rnsLimbCount, 'rnsLimbCount');
-
-    return {
-        objectType: 'RequiredGaloisSet',
-        rnsLimbCount,
-        entries: validateRequiredGaloisSchedule(entries),
-    };
 };
 
 // The selected evaluator working level: every evaluation key is generated at
@@ -125,35 +99,22 @@ export const createEvaluatorKeySchedule = (
             `qSharePrimes.${String(rnsLimbIndex)}`,
         );
     });
-    for (const [fieldName, hashValue] of [
-        ['publicMatrixSeedHash', input.publicMatrixSeedHash],
-        ['relinearizationCrpRoot', input.relinearizationCrpRoot],
-        ['galoisKeyCrpRoot', input.galoisKeyCrpRoot],
-    ] as const) {
-        assertProtocolHash(hashValue, fieldName);
-    }
-    assertContextMatches(
-        input.setupContext,
-        input.publicKeyShares,
-        'publicKeyShares',
-    );
+    assertProtocolHash(input.publicMatrixSeedHash, 'publicMatrixSeedHash');
+    publicKeyShareRecordsByRosterPosition(input);
     const rnsLimbCount = input.qSharePrimes.length;
-    const requiredGaloisSet = createRequiredGaloisSet(
-        rnsLimbCount,
+    const requiredGaloisKeySchedule = validateRequiredGaloisSchedule(
         input.requiredGaloisKeySchedule,
     );
-    const requiredGaloisSetHash = deriveCanonicalObjectHash(requiredGaloisSet);
     const scheduleWithoutRoot = {
         objectType: 'EvaluatorKeySchedule',
-        ...contextFields(input.setupContext),
+        setupContextHash: deriveCollectiveBgvSetupContextHash(
+            input.setupContext,
+        ),
         publicMatrixSeedHash: input.publicMatrixSeedHash,
-        relinearizationCrpRoot: input.relinearizationCrpRoot,
-        galoisKeyCrpRoot: input.galoisKeyCrpRoot,
         publicKeyShareSetRoot: input.publicKeyShares.publicKeyShareSetRoot,
         relinearizationLevelSchedule:
             createRelinearizationLevelSchedule(rnsLimbCount),
-        requiredGaloisKeySchedule: requiredGaloisSet.entries,
-        requiredGaloisSetHash,
+        requiredGaloisKeySchedule,
     } as const satisfies Omit<EvaluatorKeySchedule, 'evaluatorKeyScheduleRoot'>;
 
     return {

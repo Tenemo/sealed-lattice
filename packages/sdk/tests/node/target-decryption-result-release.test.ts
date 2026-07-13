@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { deriveCanonicalObjectHash } from '#packages/crypto/src/index';
 import type {
     generateTargetDecryptionShareProofMaterial,
     TargetDecryptionShareProofMaterialGenerationInput,
@@ -42,9 +41,6 @@ let mockKernel: {
         typeof vi.fn
     >;
     readonly beginBgvTargetDecryptionResultRelease: ReturnType<typeof vi.fn>;
-    readonly deriveBgvTargetDecryptionResultReleaseSetupContext: ReturnType<
-        typeof vi.fn
-    >;
     readonly finishBgvTargetDecryptionResultRelease: ReturnType<typeof vi.fn>;
     readonly generateBgvTargetDecryptionShareProofMaterialFromLocalWitness: ReturnType<
         typeof vi.fn
@@ -77,17 +73,9 @@ const shareProof = (
     proofIndex: number,
     pullProofMaterialChunk: ProofMaterialChunkPull,
 ): TargetDecryptionResultReleaseInput['shareProofs'][number] => {
-    const proofRecord = {
-        objectType: 'BgvTargetDecryptionShareProofRecord',
-        proofBytesHash: protocolHash(String(proofIndex + 1)),
-    };
-    const proofMaterialWithoutRoot = {
-        objectType: 'BgvTargetDecryptionShareProofMaterial',
-        proofRecords: [proofRecord],
-    } as const;
     const proofMaterial = {
-        ...proofMaterialWithoutRoot,
-        proofMaterialRoot: deriveCanonicalObjectHash(proofMaterialWithoutRoot),
+        objectType: 'BgvTargetDecryptionShareProofMaterial',
+        proofBytesHash: protocolHash(String(proofIndex + 1)),
     } as const;
 
     return {
@@ -95,7 +83,7 @@ const shareProof = (
         proofMaterialTransport: {
             objectType:
                 'BgvTargetDecryptionShareCanonicalProofMaterialTransport',
-            proofMaterialRoot: proofMaterial.proofMaterialRoot,
+            proofBytesHash: proofMaterial.proofBytesHash,
             descriptorBytes: canonicalStreamDescriptorFixture(
                 1,
                 0x41 + proofIndex,
@@ -113,8 +101,8 @@ const releaseInput = (
     abortSignal?: AbortSignal,
 ): TargetDecryptionResultReleaseInput => ({
     ...(abortSignal === undefined ? {} : { abortSignal }),
+    acceptedSetupHandle: 7,
     releaseVerificationId: 'release-verification-1',
-    setupPackage: {},
     shareProofs: pulls.map((pull, proofIndex) => shareProof(proofIndex, pull)),
     targetAcceptedRecord: {},
     targetCiphertextBinding: {},
@@ -183,9 +171,6 @@ describe('target-decryption result release session cleanup', () => {
             },
         );
         mockKernel = {
-            deriveBgvTargetDecryptionResultReleaseSetupContext: vi.fn(
-                () => ({}),
-            ),
             beginBgvTargetDecryptionResultRelease: vi.fn(() => {
                 absorbedShareCount = 0;
                 return {
@@ -336,7 +321,7 @@ describe('target-decryption result release session cleanup', () => {
         expect(writeMaterial).toHaveBeenCalledWith(
             expect.objectContaining({
                 emitChunk: originalEmitProofMaterialChunk,
-                materialRoot: generatedProofMaterial.proofMaterialRoot,
+                materialRoot: generatedProofMaterial.proofBytesHash,
             }),
         );
     });
@@ -376,25 +361,16 @@ describe('target-decryption result release session cleanup', () => {
             const mutableShareProof = callerShareProof as unknown as JsonRecord;
             const callerProofMaterial =
                 callerShareProof.proofMaterial as unknown as JsonRecord;
-            const callerProofRecords = callerProofMaterial.proofRecords as
-                | JsonRecord[]
-                | undefined;
-            const callerProofRecord = callerProofRecords?.[0];
             const callerTransport =
                 callerShareProof.proofMaterialTransport as unknown as JsonRecord;
             const callerDescriptor =
                 callerTransport.descriptorBytes as Uint8Array;
-            if (callerProofRecord === undefined) {
-                throw new Error('Missing target proof record fixture.');
-            }
-
             mutableShareProof.proofStatement = { proofIndex: 99 };
             mutableShareProof.targetDecryptionShare = { proofIndex: 99 };
             callerProofMaterial.objectType = 'MutatedTargetProofMaterial';
-            callerProofMaterial.proofMaterialRoot = protocolHash('8');
-            callerProofRecord.proofBytesHash = protocolHash('9');
+            callerProofMaterial.proofBytesHash = protocolHash('9');
             callerTransport.objectType = 'MutatedTargetProofTransport';
-            callerTransport.proofMaterialRoot = protocolHash('8');
+            callerTransport.proofBytesHash = protocolHash('8');
             callerDescriptor.fill(0xff);
 
             return successfulPull();
@@ -403,9 +379,7 @@ describe('target-decryption result release session cleanup', () => {
         verificationInputReference.current = verificationInput;
         const mutableVerificationInput =
             verificationInput as unknown as JsonRecord;
-        mutableVerificationInput.setupPackage = {
-            setupContext: { generation: 1 },
-        };
+        mutableVerificationInput.acceptedSetupHandle = 41;
         mutableVerificationInput.targetAcceptedRecord = {
             acceptedTarget: { targetIndex: 2 },
         };
@@ -422,16 +396,12 @@ describe('target-decryption result release session cleanup', () => {
         if (callerShareProof === undefined) {
             throw new Error('Missing target share proof fixture.');
         }
-        const expectedProofMaterialRoot =
-            callerShareProof.proofMaterial.proofMaterialRoot;
-        const expectedProofBytesHash = (
-            callerShareProof.proofMaterial.proofRecords[0] as JsonRecord
-        ).proofBytesHash;
+        const expectedProofBytesHash =
+            callerShareProof.proofMaterial.proofBytesHash;
         const callerDescriptor =
             callerShareProof.proofMaterialTransport.descriptorBytes;
         const authenticatedDescriptor = callerDescriptor.slice();
         sharedKernelLoadMutation = () => {
-            const setupPackage = verificationInput.setupPackage as JsonRecord;
             const targetAcceptedRecord =
                 verificationInput.targetAcceptedRecord as JsonRecord;
             const targetCiphertexts =
@@ -440,7 +410,7 @@ describe('target-decryption result release session cleanup', () => {
                 verificationInput.targetCiphertextBinding as JsonRecord;
             const targetShareProfile =
                 verificationInput.targetShareProfile as JsonRecord;
-            (setupPackage.setupContext as JsonRecord).generation = 91;
+            mutableVerificationInput.acceptedSetupHandle = 91;
             (targetAcceptedRecord.acceptedTarget as JsonRecord).targetIndex =
                 92;
             (targetCiphertexts.ciphertextSet as JsonRecord).ciphertextCount =
@@ -455,7 +425,7 @@ describe('target-decryption result release session cleanup', () => {
                 96;
             (callerShareProof.proofStatement as JsonRecord).proofIndex = 97;
             (
-                callerShareProof.proofMaterial.proofRecords[0] as JsonRecord
+                callerShareProof.proofMaterial as unknown as JsonRecord
             ).proofBytesHash = protocolHash('6');
         };
 
@@ -464,15 +434,10 @@ describe('target-decryption result release session cleanup', () => {
 
         expect(result.targetResultHash).toBe(protocolHash('7'));
         expect(
-            mockKernel.deriveBgvTargetDecryptionResultReleaseSetupContext,
-        ).toHaveBeenCalledWith({
-            setupPackage: { setupContext: { generation: 1 } },
-        });
-        expect(
             mockKernel.beginBgvTargetDecryptionResultRelease,
         ).toHaveBeenCalledWith({
             releaseVerificationId: 'release-verification-1',
-            releaseSetupContext: {},
+            acceptedSetupHandle: 41,
             targetAcceptedRecord: {
                 acceptedTarget: { targetIndex: 2 },
             },
@@ -492,7 +457,7 @@ describe('target-decryption result release session cleanup', () => {
         expect(firstStreamInput).toMatchObject({
             descriptorBytes: authenticatedDescriptor,
             family: 8,
-            materialRoot: expectedProofMaterialRoot,
+            materialRoot: expectedProofBytesHash,
         });
         expect(firstStreamInput?.descriptorBytes).not.toBe(callerDescriptor);
         const firstAbsorptionInput = mockKernel
@@ -505,18 +470,12 @@ describe('target-decryption result release session cleanup', () => {
         const absorbedProofMaterial = absorbedShareProof?.proofMaterial as
             | JsonRecord
             | undefined;
-        const absorbedProofRecords = absorbedProofMaterial?.proofRecords as
-            | JsonRecord[]
-            | undefined;
         expect(absorbedShareProof).toMatchObject({
             proofStatement: { proofIndex: 0 },
             targetDecryptionShare: { proofIndex: 0 },
         });
         expect(absorbedProofMaterial).toMatchObject({
             objectType: 'BgvTargetDecryptionShareProofMaterial',
-            proofMaterialRoot: expectedProofMaterialRoot,
-        });
-        expect(absorbedProofRecords?.[0]).toMatchObject({
             proofBytesHash: expectedProofBytesHash,
         });
         expect(firstAbsorptionInput?.releaseVerificationId).toBe(

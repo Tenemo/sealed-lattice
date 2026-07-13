@@ -151,10 +151,7 @@ export const createSignature = (
         signedRoot: {
             objectType,
             ceremonyId,
-            manifestHash: null,
-            boardHeadHash: null,
             objectRoot,
-            chunkMerkleRoot: null,
             signerRole,
             signerIdentity,
             recoveryEpoch: 0,

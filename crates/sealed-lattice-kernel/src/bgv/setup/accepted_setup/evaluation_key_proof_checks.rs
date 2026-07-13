@@ -6,7 +6,7 @@ use crate::hashing::derive_canonical_object_hash;
 
 use crate::bgv::setup::trustee_evaluation_key_proof::{
     EvaluationKeyShareDescriptor, EvaluationKeyShareKind, SameSecretLinkageStatement,
-    SuccinctSetupProofContext, TrusteeEvaluationKeyStatement,
+    SetupProofStatement, SuccinctSetupProofContext, TrusteeEvaluationKeyStatement,
     decode_trustee_evaluation_key_proof_from_source,
     trustee_evaluation_key_proof_material_bytes_hash, verify_evaluation_key_share,
 };
@@ -31,10 +31,9 @@ fn trustee_evaluation_key_verify_progress(_message: impl FnOnce() -> String) {}
 
 pub(super) fn verify_trustee_evaluation_key_proofs(
     setup_package: &Value,
-    request: &Value,
     verified_same_secret_bridge: Option<&VerifiedSameSecretBridgeMaterial>,
     proof_binding_session: &crate::bgv::setup::AcceptedSetupProofBindingSession,
-) -> CanonicalResult<Option<Value>> {
+) -> CanonicalResult<Option<Refusals>> {
     let rounds_present = setup_package
         .get("relinearizationKeyShareRounds")
         .and_then(Value::as_object)
@@ -58,10 +57,10 @@ pub(super) fn verify_trustee_evaluation_key_proofs(
         };
     }
     let Some(proof_set) = proof_set else {
-        return Ok(Some(verification_response(
+        return Ok(Some(setup_refusals(
             vec!["trusteeEvaluationKeyProofs".to_string()],
             Vec::new(),
-        )?));
+        )));
     };
     if !proof_set.is_object() {
         return Ok(Some(evaluation_key_material_refusal(
@@ -72,7 +71,6 @@ pub(super) fn verify_trustee_evaluation_key_proofs(
     }
     if let Err(error) = verify_trustee_evaluation_key_proof_set(
         setup_package,
-        request,
         proof_set,
         verified_same_secret_bridge,
         proof_binding_session,
@@ -89,7 +87,6 @@ pub(super) fn verify_trustee_evaluation_key_proofs(
 
 fn verify_trustee_evaluation_key_proof_set(
     setup_package: &Value,
-    request: &Value,
     proof_set: &Value,
     verified_same_secret_bridge: Option<&VerifiedSameSecretBridgeMaterial>,
     proof_binding_session: &crate::bgv::setup::AcceptedSetupProofBindingSession,
@@ -129,11 +126,9 @@ fn verify_trustee_evaluation_key_proof_set(
         }
     }
     trustee_evaluation_key_verify_progress(|| "shared-inputs-start".to_string());
-    let transported_key_switch_component_material =
-        request.get("transportedEvaluationKeyShareComponentMaterial");
     let round_one_aggregate_diagonals_by_level = round_one_public_aggregate_diagonals_from_package(
         setup_package,
-        transported_key_switch_component_material,
+        proof_binding_session,
     )?;
     trustee_evaluation_key_verify_progress(|| "shared-inputs-finish".to_string());
 
@@ -145,10 +140,10 @@ fn verify_trustee_evaluation_key_proof_set(
         let statement =
             trustee_evaluation_key_statement_from_package(&TrusteeEvaluationKeyStatementInputs {
                 setup_package,
-                transported_key_switch_component_material,
                 verified_same_secret_bridge,
                 round_one_aggregate_diagonals_by_level: &round_one_aggregate_diagonals_by_level,
                 trustee_roster_position,
+                accepted_setup_session: proof_binding_session,
             })?;
         trustee_evaluation_key_verify_progress(|| {
             format!("trustee={trustee_roster_position} statement-finish")
@@ -157,7 +152,6 @@ fn verify_trustee_evaluation_key_proof_set(
             proof_record,
             setup_context,
             &statement,
-            request,
             proof_binding_session,
         )
     };
@@ -174,7 +168,6 @@ fn verify_trustee_evaluation_key_proof_record(
     proof_record: &Value,
     setup_context: &Value,
     statement: &TrusteeEvaluationKeyStatement,
-    request: &Value,
     proof_binding_session: &crate::bgv::setup::AcceptedSetupProofBindingSession,
 ) -> CanonicalResult<()> {
     if !proof_record.is_object() {
@@ -215,12 +208,14 @@ fn verify_trustee_evaluation_key_proof_record(
         trustee_evaluation_key_proof_verification_binding_hash(proof_record, statement)?;
     if !crate::bgv::setup::consume_accepted_setup_proof_binding(
         proof_binding_session.session_handle,
-        &proof_binding_session.capability,
         TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
         proof_material_root,
         &verification_binding_hash,
     )? {
-        let proof_bytes = trustee_evaluation_key_proof_bytes_from_record(proof_record, request)?;
+        let proof_bytes = trustee_evaluation_key_proof_bytes_from_record(
+            proof_record,
+            proof_binding_session,
+        )?;
         if value_string(proof_record, "proofBytesHash")?
             != trustee_evaluation_key_proof_material_bytes_hash(proof_bytes.as_ref())?
         {
@@ -268,12 +263,13 @@ pub(in crate::bgv::setup) fn trustee_evaluation_key_proof_verification_binding_h
 
 pub(in crate::bgv::setup) struct TrusteeEvaluationKeyStatementInputs<'a> {
     pub(in crate::bgv::setup) setup_package: &'a Value,
-    pub(in crate::bgv::setup) transported_key_switch_component_material: Option<&'a Value>,
     pub(in crate::bgv::setup) verified_same_secret_bridge:
         Option<&'a VerifiedSameSecretBridgeMaterial>,
     pub(in crate::bgv::setup) round_one_aggregate_diagonals_by_level:
         &'a BTreeMap<u64, Vec<Vec<u64>>>,
     pub(in crate::bgv::setup) trustee_roster_position: u64,
+    pub(in crate::bgv::setup) accepted_setup_session:
+        &'a crate::bgv::setup::AcceptedSetupProofBindingSession,
 }
 
 // Rebuild one trustee's batched evaluation-key statement from the package
@@ -318,7 +314,7 @@ pub(in crate::bgv::setup) fn trustee_evaluation_key_statement_from_package(
             &binding,
             "round-one",
             *level,
-            inputs.transported_key_switch_component_material,
+            inputs.accepted_setup_session,
         )?;
         keys.push(evaluation_key_descriptor_from_verified_sample(
             EvaluationKeyShareKind::RelinearizationRoundOne,
@@ -354,7 +350,7 @@ pub(in crate::bgv::setup) fn trustee_evaluation_key_statement_from_package(
             &binding,
             "round-two",
             *level,
-            inputs.transported_key_switch_component_material,
+            inputs.accepted_setup_session,
         )?;
         keys.push(evaluation_key_descriptor_from_verified_sample(
             EvaluationKeyShareKind::RelinearizationRoundTwo,
@@ -409,7 +405,7 @@ pub(in crate::bgv::setup) fn trustee_evaluation_key_statement_from_package(
             &binding,
             rotation,
             level,
-            inputs.transported_key_switch_component_material,
+            inputs.accepted_setup_session,
         )?;
         keys.push(evaluation_key_descriptor_from_verified_sample(
             EvaluationKeyShareKind::GaloisRotation { galois_element },
@@ -459,38 +455,26 @@ pub(in crate::bgv::setup) fn trustee_evaluation_key_statement_from_package(
             )
         })?;
     let source_constant_commitment_root = setup_commitment_root(&source_constant_commitment)?;
-    let same_secret_linkage = Some(SameSecretLinkageStatement {
+    let same_secret_linkage = SameSecretLinkageStatement {
         public_matrix_seed_hash,
         commitments: vec![source_constant_commitment],
-    });
+    };
     let context = SuccinctSetupProofContext {
-        proof_family: TRUSTEE_EVALUATION_KEY_PROOF_FAMILY.to_string(),
-        ceremony_id: value_string(setup_context, "ceremonyId")?.to_string(),
-        manifest_hash: value_string(setup_context, "manifestHash")?.to_string(),
-        roster_hash: value_string(setup_context, "rosterHash")?.to_string(),
+        setup_context_hash: setup_context_hash(setup_context)?,
         trustee_identity: bridge_binding.trustee_identity.clone(),
         trustee_roster_position: inputs.trustee_roster_position,
-        setup_epoch: value_string(setup_context, "setupEpoch")?.to_string(),
         binding_roots: vec![
-            (
-                "evaluatorKeyScheduleRoot".to_string(),
-                binding.evaluator_key_schedule_root.clone(),
-            ),
-            (
-                "sourceConstantCoefficientCommitmentRoot".to_string(),
-                source_constant_commitment_root,
-            ),
+            binding.evaluator_key_schedule_root.clone(),
+            source_constant_commitment_root,
         ],
     };
     let statement = TrusteeEvaluationKeyStatement {
         context,
         ring_degree,
-        keys,
-        vss_share_linkage: None,
-        same_secret_bridge: None,
-        same_secret_linkage,
-        private_vss_share: None,
-        target_decryption_share: None,
+        proof: SetupProofStatement::TrusteeEvaluationKey {
+            keys,
+            same_secret_linkage,
+        },
     };
     statement.validate_shape()?;
 
@@ -564,7 +548,7 @@ fn relinearization_record_for_trustee_and_level<'a>(
 // are rebuilt from, so a substituted aggregate cannot verify.
 pub(in crate::bgv::setup) fn round_one_public_aggregate_diagonals_from_package(
     setup_package: &Value,
-    transported_key_switch_component_material: Option<&Value>,
+    accepted_setup_session: &crate::bgv::setup::AcceptedSetupProofBindingSession,
 ) -> CanonicalResult<BTreeMap<u64, Vec<Vec<u64>>>> {
     let roster = super::accepted_roster_from_package(setup_package)?;
     let rounds = setup_package
@@ -591,7 +575,7 @@ pub(in crate::bgv::setup) fn round_one_public_aggregate_diagonals_from_package(
             &binding,
             "round-one",
             level,
-            transported_key_switch_component_material,
+            accepted_setup_session,
         )?;
         let ring_degree = decoded_material.ring_degree;
         let components = decoded_material.component_b_by_digit;
@@ -633,20 +617,24 @@ pub(in crate::bgv::setup) fn round_one_public_aggregate_diagonals_from_package(
 
 fn trustee_evaluation_key_proof_bytes_from_record(
     proof_record: &Value,
-    request: &Value,
+    proof_binding_session: &crate::bgv::setup::AcceptedSetupProofBindingSession,
 ) -> CanonicalResult<SetupProofMaterialBytes> {
     let proof_material_root = value_string(proof_record, "proofMaterialRoot")?;
     validate_hash_string(
         proof_material_root,
         "trusteeEvaluationKeyProof.proofMaterialRoot",
     )?;
-    let proof_bytes =
-        transported_trustee_evaluation_key_proof_material_bytes(request, proof_material_root)?;
+    let proof_bytes = take_verified_setup_proof_material_bytes(
+        TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
+        proof_material_root,
+        "trusteeEvaluationKeyProof.proofMaterialRoot",
+        Some(proof_binding_session),
+    )?;
     let expected_material_root = trustee_evaluation_key_proof_material_root(proof_record)?;
     if proof_material_root != expected_material_root {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "trustee evaluation-key proofMaterialRoot must match the canonical transported proof material reference",
+            "trustee evaluation-key proofMaterialRoot must match the canonical proof material reference",
         ));
     }
 
@@ -656,75 +644,8 @@ fn trustee_evaluation_key_proof_bytes_from_record(
 pub(in crate::bgv::setup) fn trustee_evaluation_key_proof_material_root(
     proof_record: &Value,
 ) -> CanonicalResult<String> {
-    derive_canonical_object_hash(&json!({
-        "objectType": "TrusteeEvaluationKeyProofMaterialReference",
-        "trusteeIdentity": value_string(proof_record, "trusteeIdentity")?,
-        "trusteeRosterPosition": value_u64(proof_record, "trusteeRosterPosition")?,
-        "statementHash": value_string(proof_record, "statementHash")?,
-        "proofBytesHash": value_string(proof_record, "proofBytesHash")?,
-    }))
-}
-
-fn transported_trustee_evaluation_key_proof_material_bytes(
-    request: &Value,
-    expected_proof_material_root: &str,
-) -> CanonicalResult<SetupProofMaterialBytes> {
-    let material_set = request
-        .get("transportedEvaluationKeyShareProofMaterial")
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "transportedEvaluationKeyShareProofMaterial was required by transported trustee evaluation-key proof records",
-            )
-        })?;
-    if material_set.get("objectType").and_then(Value::as_str)
-        != Some(EVALUATION_KEY_SHARE_PROOF_TRANSPORT_SET_OBJECT_TYPE)
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "transportedEvaluationKeyShareProofMaterial header does not match the trustee evaluation-key proof family",
-        ));
-    }
-    let proof_materials = material_set
-        .get("proofMaterials")
-        .and_then(Value::as_array)
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "transportedEvaluationKeyShareProofMaterial.proofMaterials must list proof material objects",
-            )
-        })?;
-    let mut matching_bytes = None;
-    for proof_material in proof_materials {
-        if proof_material.get("objectType").and_then(Value::as_str)
-            != Some(EVALUATION_KEY_SHARE_PROOF_TRANSPORT_OBJECT_TYPE)
-        {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "transported trustee evaluation-key proof material header is invalid",
-            ));
-        }
-        if value_string(proof_material, "proofMaterialRoot")? != expected_proof_material_root {
-            continue;
-        }
-        if matching_bytes.is_some() {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "transportedEvaluationKeyShareProofMaterial contains duplicate proofMaterialRoot entries",
-            ));
-        }
-        let proof_bytes = verified_setup_proof_material_bytes_from_request(
-            TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
-            expected_proof_material_root,
-            "transportedEvaluationKeyShareProofMaterial.proofMaterials",
-        )?;
-        matching_bytes = Some(proof_bytes);
-    }
-
-    matching_bytes.ok_or_else(|| {
-        CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "transportedEvaluationKeyShareProofMaterial is missing the requested proofMaterialRoot",
-        )
-    })
+    crate::bgv::setup::setup_proof::setup_proof_material_reference_root(
+        TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
+        value_string(proof_record, "proofBytesHash")?,
+    )
 }

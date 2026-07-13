@@ -24,7 +24,7 @@ pub(super) fn decode_public_key_share_material_bindings(
     }
 
     let mut bindings = BTreeMap::new();
-    let mut material_roots = Vec::new();
+    let mut material_root_references = Vec::new();
     for expected_roster_position in 0..roster.participant_count {
         let transported_record = material
             .records
@@ -94,29 +94,24 @@ pub(super) fn decode_public_key_share_material_bindings(
             }));
             coefficients_by_limb.push(transported_limb.coefficients.clone());
         }
-        let material_record = json!({
+        let material_root_input = json!({
             "objectType": PUBLIC_KEY_SHARE_MATERIAL_OBJECT_TYPE,
-            "ceremonyId": value_string(setup_context, "ceremonyId")?,
-            "manifestHash": value_string(setup_context, "manifestHash")?,
-            "rosterHash": value_string(setup_context, "rosterHash")?,
-            "setupParametersHash": value_string(setup_context, "setupParametersHash")?,
-            "setupEpoch": value_string(setup_context, "setupEpoch")?,
-            "trusteeIdentity": trustee_identity,
+            "setupContextHash": setup_context_hash(setup_context)?,
+            "trusteeIdentity": trustee_identity.as_str(),
             "trusteeRosterPosition": expected_roster_position,
-            "publicMatrixSeedHash": common_binding.public_matrix_seed_hash,
-            "publicKeyShareRoot": public_key_share_root,
+            "publicMatrixSeedHash": common_binding.public_matrix_seed_hash.as_str(),
+            "publicKeyShareRoot": public_key_share_root.as_str(),
             "shareCoefficientVectorsByLimb": limb_records,
         });
-        let public_key_share_material_root = derive_canonical_object_hash(&material_record)?;
+        let public_key_share_material_root = derive_canonical_object_hash(&material_root_input)?;
         let binding = PublicKeyShareMaterialBinding {
-            trustee_identity: value_string(&material_record, "trusteeIdentity")?.to_string(),
+            trustee_identity,
             trustee_roster_position: expected_roster_position,
-            public_key_share_root: value_string(&material_record, "publicKeyShareRoot")?
-                .to_string(),
+            public_key_share_root,
             public_key_share_material_root,
             coefficients_by_limb,
         };
-        material_roots.push(public_key_share_material_root_reference(&binding));
+        material_root_references.push(public_key_share_material_root_reference(&binding));
         if bindings
             .insert(binding.trustee_roster_position, binding)
             .is_some()
@@ -127,7 +122,7 @@ pub(super) fn decode_public_key_share_material_bindings(
             ));
         }
     }
-    Ok((bindings, material_roots))
+    Ok((bindings, material_root_references))
 }
 
 pub(in super::super) fn verify_public_key_share_material_set(
@@ -137,6 +132,7 @@ pub(in super::super) fn verify_public_key_share_material_set(
     public_key_share_set_root: &str,
     share_records: &BTreeMap<u64, Value>,
     request: &Value,
+    proof_binding_session: &crate::bgv::setup::AcceptedSetupProofBindingSession,
 ) -> CanonicalResult<BTreeMap<u64, PublicKeyShareMaterialBinding>> {
     if !material_set.is_object() {
         return Err(CanonicalError::new(
@@ -152,57 +148,67 @@ pub(in super::super) fn verify_public_key_share_material_set(
             "publicKeyShareMaterial.objectType must be PublicKeyShareMaterialSet",
         ));
     }
-    verify_context_fields_match(material_set, setup_context, "publicKeyShareMaterial")?;
-    let ring_degree = usize::try_from(value_u64(material_set, "ringDegree")?).map_err(|_| {
-        CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "publicKeyShareMaterial.ringDegree does not fit usize",
-        )
-    })?;
-    if ring_degree != POLYNOMIAL_DEGREE {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ComponentMismatch,
-            "publicKeyShareMaterial.ringDegree must match the accepted setup parameters",
-        ));
-    }
-    if material_set
-        .get("publicMatrixSeedHash")
-        .and_then(Value::as_str)
-        != Some(common_binding.public_matrix_seed_hash.as_str())
-        || material_set
-            .get("publicKeyShareSetRoot")
-            .and_then(Value::as_str)
-            != Some(public_key_share_set_root)
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ComponentMismatch,
-            "publicKeyShareMaterial must bind accepted public randomness and public-key share set root",
-        ));
-    }
-    let (bindings, material_roots) = verify_transport_public_key_share_material_set(
+    let ring_degree = POLYNOMIAL_DEGREE;
+    let (bindings, material_root_references) = verify_transport_public_key_share_material_set(
         material_set,
         setup_context,
         common_binding,
         ring_degree,
         share_records,
         request,
+        proof_binding_session,
     )?;
-    if material_set.get("publicKeyShareMaterialRoots") != Some(&Value::Array(material_roots)) {
+    let serialized_material_roots = material_set
+        .get("publicKeyShareMaterialRoots")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "publicKeyShareMaterial.publicKeyShareMaterialRoots must be an ordered array",
+            )
+        })?;
+    if serialized_material_roots.len() != material_root_references.len() {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ComponentMismatch,
             "publicKeyShareMaterial.publicKeyShareMaterialRoots must match the ordered material records",
         ));
+    }
+    for (serialized_material_root, material_root_reference) in serialized_material_roots
+        .iter()
+        .zip(&material_root_references)
+    {
+        let serialized_material_root = serialized_material_root.as_str().ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "publicKeyShareMaterial.publicKeyShareMaterialRoots entries must be protocol hashes",
+            )
+        })?;
+        validate_hash_string(
+            serialized_material_root,
+            "publicKeyShareMaterial.publicKeyShareMaterialRoots",
+        )?;
+        if serialized_material_root
+            != value_string(material_root_reference, "publicKeyShareMaterialRoot")?
+        {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::ComponentMismatch,
+                "publicKeyShareMaterial.publicKeyShareMaterialRoots must match the ordered material records",
+            ));
+        }
     }
     let material_set_root = value_string(material_set, "publicKeyShareMaterialSetRoot")?;
     validate_hash_string(
         material_set_root,
         "publicKeyShareMaterial.publicKeyShareMaterialSetRoot",
     )?;
-    let mut root_input = material_set.clone();
-    root_input
-        .as_object_mut()
-        .expect("public-key share material set object was checked")
-        .remove("publicKeyShareMaterialSetRoot");
+    let root_input = json!({
+        "objectType": PUBLIC_KEY_SHARE_MATERIAL_SET_OBJECT_TYPE,
+        "setupContextHash": setup_context_hash(setup_context)?,
+        "ringDegree": ring_degree,
+        "publicMatrixSeedHash": common_binding.public_matrix_seed_hash.as_str(),
+        "publicKeyShareSetRoot": public_key_share_set_root,
+        "publicKeyShareMaterialRoots": material_root_references,
+    });
     let expected_root = derive_canonical_object_hash(&root_input)?;
     if material_set_root != expected_root {
         return Err(CanonicalError::new(
@@ -212,144 +218,4 @@ pub(in super::super) fn verify_public_key_share_material_set(
     }
 
     Ok(bindings)
-}
-
-pub(super) fn verify_public_key_share_material_record(
-    material_record: &Value,
-    setup_context: &Value,
-    common_binding: &PublicKeyCommonBinding,
-    ring_degree: usize,
-    share_records: &BTreeMap<u64, Value>,
-) -> CanonicalResult<PublicKeyShareMaterialBinding> {
-    if !material_record.is_object() {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "public-key share material records must be objects",
-        ));
-    }
-    if material_record.get("objectType").and_then(Value::as_str)
-        != Some(PUBLIC_KEY_SHARE_MATERIAL_OBJECT_TYPE)
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "public-key share material objectType must be PublicKeyShareMaterial",
-        ));
-    }
-    verify_context_fields_match(
-        material_record,
-        setup_context,
-        "publicKeyShareMaterial.materialRecords",
-    )?;
-    if material_record
-        .get("publicMatrixSeedHash")
-        .and_then(Value::as_str)
-        != Some(common_binding.public_matrix_seed_hash.as_str())
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ComponentMismatch,
-            "public-key share material must bind accepted public randomness",
-        ));
-    }
-    let trustee_roster_position = value_u64(material_record, "trusteeRosterPosition")?;
-    let trustee_identity = value_string(material_record, "trusteeIdentity")?.to_string();
-    let share_record = share_records.get(&trustee_roster_position).ok_or_else(|| {
-        CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "public-key share material must reference an accepted share record",
-        )
-    })?;
-    if share_record.get("trusteeIdentity").and_then(Value::as_str)
-        != Some(trustee_identity.as_str())
-        || material_record
-            .get("publicKeyShareRoot")
-            .and_then(Value::as_str)
-            != share_record
-                .get("publicKeyShareRoot")
-                .and_then(Value::as_str)
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ComponentMismatch,
-            "public-key share material trustee and share root must match the accepted share record",
-        ));
-    }
-    let limbs = material_record
-        .get("shareCoefficientVectorsByLimb")
-        .and_then(Value::as_array)
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "public-key share material coefficients are required",
-            )
-        })?;
-    if limbs.len() != DATA_PRIMES.len() {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "public-key share material must contain one coefficient vector per Q_share limb",
-        ));
-    }
-    let share_hashes = share_record
-        .get("shareCoefficientVectorHash512ByLimb")
-        .and_then(Value::as_array)
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "accepted public-key share hashes are required",
-            )
-        })?;
-    let mut coefficients_by_limb = Vec::with_capacity(DATA_PRIMES.len());
-    for (rns_limb_index, limb) in limbs.iter().enumerate() {
-        let coefficients = coefficient_vector_from_le_hex(
-            value_string(limb, "coefficientsLeHex")?,
-            ring_degree,
-            "public-key share coefficient vector width does not match the material ring degree",
-        )?;
-        if coefficients
-            .iter()
-            .any(|coefficient| *coefficient >= DATA_PRIMES[rns_limb_index])
-        {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::ComponentMismatch,
-                "public-key share coefficient vector contains a non-canonical residue",
-            ));
-        }
-        let coefficient_hash = public_key_share_coefficient_vector_hash(&coefficients);
-        if share_hashes
-            .get(rns_limb_index)
-            .and_then(|share_hash| share_hash.get("coefficientVectorHash512"))
-            .and_then(Value::as_str)
-            != Some(coefficient_hash.as_str())
-        {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::ComponentMismatch,
-                "public-key share material coefficient hash must match the accepted share record",
-            ));
-        }
-        coefficients_by_limb.push(coefficients);
-    }
-    let public_key_share_material_root =
-        value_string(material_record, "publicKeyShareMaterialRoot")?.to_string();
-    validate_hash_string(
-        &public_key_share_material_root,
-        "publicKeyShareMaterial.shareMaterialRecords.publicKeyShareMaterialRoot",
-    )?;
-    let mut root_input = material_record.clone();
-    root_input
-        .as_object_mut()
-        .expect("public-key share material record object was checked")
-        .remove("publicKeyShareMaterialRoot");
-    let expected_root = derive_canonical_object_hash(&root_input)?;
-    if public_key_share_material_root != expected_root {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "publicKeyShareMaterialRoot does not match the canonical public-key share material",
-        ));
-    }
-
-    Ok(PublicKeyShareMaterialBinding {
-        trustee_identity,
-        trustee_roster_position,
-        public_key_share_root: value_string(material_record, "publicKeyShareRoot")?.to_string(),
-        public_key_share_material_root,
-        coefficients_by_limb,
-    })
 }

@@ -397,11 +397,8 @@ fn key_switch_component_digit(
         let digit_ntt = forward_negacyclic_ntt(&digit_in_limb, *modulus)?;
         let product_b =
             multiply_ntt_by_ntt(&digit_ntt, &component.component_b_ntt[limb_index], *modulus)?;
-        let product_a = multiply_ntt_by_ntt(
-            &digit_ntt,
-            &component.component_a_ntt[limb_index],
-            *modulus,
-        )?;
+        let product_a =
+            multiply_ntt_by_ntt(&digit_ntt, &component.component_a_ntt[limb_index], *modulus)?;
         switched_zero[limb_index] = product_b;
         switched_one[limb_index] = product_a;
     }
@@ -423,11 +420,7 @@ fn multiply_ntt_by_ntt(
     inverse_negacyclic_ntt(&product_ntt, modulus)
 }
 
-fn add_component_in_place(
-    target: &mut [Vec<u64>],
-    addend: &[Vec<u64>],
-    level: usize,
-) {
+fn add_component_in_place(target: &mut [Vec<u64>], addend: &[Vec<u64>], level: usize) {
     for (limb_index, modulus) in DATA_PRIMES[..=level].iter().enumerate() {
         for coefficient_index in 0..POLYNOMIAL_DEGREE {
             target[limb_index][coefficient_index] = add_mod_fast(

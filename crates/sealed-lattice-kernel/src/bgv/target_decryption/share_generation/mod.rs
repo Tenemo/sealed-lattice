@@ -9,16 +9,6 @@ pub(super) struct LocalTargetDecryptionShareWitness {
     pub(super) secret_share_by_limb: Vec<Vec<u64>>,
     pub(super) smudging_seed_hex: String,
     pub(super) smudging_polynomial_openings: Vec<TargetDecryptionSmudgingPolynomialOpening>,
-    pub(super) opening: AggregateOpeningWitnessBinding,
-}
-
-pub(super) struct AggregateOpeningWitnessBinding {
-    #[cfg(test)]
-    pub(super) public_matrix_seed_hash: String,
-    #[cfg(test)]
-    pub(super) share_linkage_statement_root: String,
-    #[cfg(test)]
-    pub(super) aggregate_threshold_commitment_root: String,
     pub(super) active_credential_bindings: Vec<AggregateOpeningCredentialBinding>,
 }
 
@@ -32,12 +22,6 @@ pub(super) struct AggregateOpeningCredentialBinding {
     pub(super) aggregate_material_seed_hex: String,
 }
 
-#[cfg(test)]
-pub(super) struct TargetDecryptionSmudgingCommitmentSet {
-    pub(super) value: Value,
-    pub(super) root: String,
-}
-
 pub(super) struct TargetDecryptionSmudgingPolynomialOpening {
     pub(super) role: String,
     pub(super) rns_limb_index: usize,
@@ -48,13 +32,9 @@ pub(super) struct TargetDecryptionSmudgingPolynomialOpening {
 
 struct TargetDecryptionSmudgingCommitmentOpening {
     #[cfg(test)]
-    role: String,
-    #[cfg(test)]
     rns_limb_index: usize,
     #[cfg(test)]
     rns_prime: u64,
-    #[cfg(test)]
-    polynomial_degree: usize,
     message_coefficients: Vec<u64>,
     material_seed_hex: String,
     commitment_context: Value,
@@ -99,7 +79,6 @@ pub(super) fn generate_target_decryption_share_from_secret_share(
         setup_binding,
         target_accepted,
         target_ciphertexts,
-        target_share_profile,
         participant,
         &share_root,
     );
@@ -111,8 +90,7 @@ pub(super) fn generate_target_decryption_share_from_secret_share(
         "setupPackageHash": setup_binding.setup_package_hash,
         "trusteeIdentity": participant.trustee_identity,
         "targetAcceptedRecordHash": target_accepted.target_accepted_record_hash,
-        "targetCiphertextBindingHash": target_ciphertexts.target_ciphertext_binding_hash,
-        "targetShareProfileHash": target_share_profile.hash,
+        "targetCiphertextHash": target_ciphertexts.target_ciphertext_hash,
         "shareRoot": share_root,
         "sharePayload": payload,
     }))
@@ -121,7 +99,7 @@ pub(super) fn generate_target_decryption_share_from_secret_share(
 #[cfg(test)]
 pub(super) fn derive_threshold_secret_share_by_limb(
     evaluator_key: &DevelopmentBgvKey,
-    target_share_profile_hash: &str,
+    setup_context_hash: &str,
     private_setup_seed: &str,
     interpolation_point: u64,
     minimum_shares_for_interpolation: usize,
@@ -137,7 +115,7 @@ pub(super) fn derive_threshold_secret_share_by_limb(
             .map(|(limb_index, modulus)| {
                 derive_threshold_secret_share_limb(
                     secret,
-                    target_share_profile_hash,
+                    setup_context_hash,
                     private_setup_seed,
                     interpolation_point,
                     minimum_shares_for_interpolation,
@@ -155,7 +133,7 @@ pub(super) fn derive_threshold_secret_share_by_limb(
             .map(|(limb_index, modulus)| {
                 derive_threshold_secret_share_limb(
                     secret,
-                    target_share_profile_hash,
+                    setup_context_hash,
                     private_setup_seed,
                     interpolation_point,
                     minimum_shares_for_interpolation,
@@ -168,21 +146,10 @@ pub(super) fn derive_threshold_secret_share_by_limb(
 }
 
 #[allow(clippy::too_many_arguments)]
-// Development-only dealer: this reshares the actual secret coefficient (Shamir
-// constant term) with a per-prime degree-(t-1) polynomial derived
-// deterministically from private_setup_seed, so reconstruction at x=0 returns s.
-// This is a centralized dealer simulating a DKG, not a real distributed key
-// generation; the shares are only as private as the seed. The random
-// coefficients are domain-separated by the private seed, the target-share
-// profile hash, and the limb, but NOT by the setup-package hash: that package
-// embeds the aggregate-threshold commitments derived
-// from these very shares, so folding the package hash into the polynomial would
-// be circular (the shares would depend on a hash that depends on the shares).
-// The constant term is still the secret, so recombination at x=0 is unchanged.
 #[cfg(test)]
 pub(super) fn derive_threshold_secret_share_limb(
     secret: &[i64],
-    target_share_profile_hash: &str,
+    setup_context_hash: &str,
     private_setup_seed: &str,
     interpolation_point: u64,
     minimum_shares_for_interpolation: usize,
@@ -203,7 +170,7 @@ pub(super) fn derive_threshold_secret_share_limb(
             "sealed-lattice-bgv-rns/target-decryption-shamir-polynomial",
             &[
                 private_setup_seed.as_bytes(),
-                target_share_profile_hash.as_bytes(),
+                setup_context_hash.as_bytes(),
                 &limb_index_bytes,
                 &modulus_bytes,
                 &degree_bytes,

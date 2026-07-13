@@ -7,7 +7,8 @@ use crate::bgv::setup::accepted_setup::{
 use crate::bgv::setup::evaluation_key_share_material::EvaluationKeyShareProofFamily;
 use crate::bgv::setup::setup_proof::authenticate_setup_proof_material_stream_for_test;
 use crate::bgv::setup::trustee_evaluation_key_proof::{
-    EvaluationKeyShareKind, TRUSTEE_EVALUATION_KEY_PROOF_FAMILY, TrusteeEvaluationKeyStatement,
+    EvaluationKeyShareKind, KeyBearingWitness, SameSecretLinkageWitness,
+    TRUSTEE_EVALUATION_KEY_PROOF_FAMILY, TrusteeEvaluationKeyStatement,
     TrusteeEvaluationKeyWitness, prove_trustee_evaluation_key_proof_bytes,
     trustee_evaluation_key_proof_bytes_hash, verify_trustee_evaluation_key_proof_bytes,
 };
@@ -21,13 +22,12 @@ pub(in super::super) struct TrusteeEvaluationKeyProofFixture {
 pub(in super::super) fn trustee_evaluation_key_proof_material_root_from_fixture_record(
     proof_record: &serde_json::Value,
 ) -> String {
-    derive_canonical_object_hash(&serde_json::json!({
-        "objectType": "TrusteeEvaluationKeyProofMaterialReference",
-        "trusteeIdentity": proof_record["trusteeIdentity"],
-        "trusteeRosterPosition": proof_record["trusteeRosterPosition"],
-        "statementHash": proof_record["statementHash"],
-        "proofBytesHash": proof_record["proofBytesHash"],
-    }))
+    crate::bgv::setup::setup_proof::setup_proof_material_reference_root(
+        TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
+        proof_record["proofBytesHash"]
+            .as_str()
+            .expect("trustee evaluation-key proofBytesHash"),
+    )
     .expect("trustee evaluation-key proof material root")
 }
 
@@ -75,10 +75,12 @@ pub(in super::super) fn trustee_evaluation_key_proofs_object(
             trustee_evaluation_key_statement_from_package(&TrusteeEvaluationKeyStatementInputs {
                 setup_package: package,
                 transported_key_switch_component_material: proof_material_request
-                    .get("transportedEvaluationKeyShareComponentMaterial"),
+                    .get("transportedEvaluationKeyShareComponentMaterial")
+                    .expect("transported evaluation-key share component material"),
                 verified_same_secret_bridge: verified_same_secret_bridge.as_ref(),
                 round_one_aggregate_diagonals_by_level,
                 trustee_roster_position,
+                accepted_setup_session: proof_binding_session,
             })
             .expect("trustee evaluation-key statement");
         let witness = trustee_evaluation_key_witness_for_fixture(
@@ -154,7 +156,6 @@ pub(in super::super) fn trustee_evaluation_key_proofs_object(
             .expect("trustee evaluation-key proof verification binding");
         crate::bgv::setup::retain_accepted_setup_proof_binding(
             proof_binding_session.session_handle,
-            &proof_binding_session.capability,
             TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
             &proof_material_root,
             verification_binding_hash,
@@ -190,7 +191,7 @@ pub(in super::super) fn trustee_evaluation_key_witness_for_fixture(
     let secret_coefficients =
         evaluation_key_secret_coefficients_for_fixture(trustee_roster_position, ring_degree);
     let error_coefficients_by_key = statement
-        .keys
+        .keys()
         .iter()
         .map(|key| {
             let (proof_family, rotation) = match key.kind {
@@ -230,8 +231,7 @@ pub(in super::super) fn trustee_evaluation_key_witness_for_fixture(
     // ternary randomness columns are the exact opening used to construct the
     // accepted VSS coefficient commitment at source limb zero.
     let opening_randomness_by_limb = statement
-        .same_secret_linkage
-        .as_ref()
+        .same_secret_linkage()
         .map(|_| {
             vec![
                 accepted_vss_randomness_fixture(trustee_roster_position, 0, 0, ring_degree)
@@ -247,20 +247,14 @@ pub(in super::super) fn trustee_evaluation_key_witness_for_fixture(
         })
         .unwrap_or_default();
 
-    TrusteeEvaluationKeyWitness {
-        secret_coefficients,
-        error_coefficients_by_key,
-        negative_indicator_coefficients,
-        opening_randomness_by_limb,
-        private_vss_coefficient_messages_by_shamir_index: Vec::new(),
-        private_vss_opening_randomness_by_shamir_index: Vec::new(),
-        private_vss_carry_witnesses: Vec::new(),
-        vss_public_coefficient_messages_by_shamir_index: Vec::new(),
-        vss_public_recipient_share_messages_by_item: Vec::new(),
-        vss_public_carry_witnesses_by_item: Vec::new(),
-        target_decryption_message_vectors: Vec::new(),
-        target_decryption_opening_randomness_by_commitment: Vec::new(),
-        vss_committed_material_seeds_by_bound_message: Vec::new(),
-        vss_committed_material_context_hashes_by_bound_message: Vec::new(),
+    TrusteeEvaluationKeyWitness::TrusteeEvaluationKey {
+        key: KeyBearingWitness {
+            secret_coefficients,
+            error_coefficients_by_key,
+        },
+        linkage: Some(SameSecretLinkageWitness {
+            negative_indicator_coefficients,
+            opening_randomness_by_limb,
+        }),
     }
 }

@@ -314,9 +314,8 @@ pub fn run_transcript_core_command(input: &[u8]) -> Vec<u8> {
 pub(crate) fn run_accepted_setup_command(
     input: &[u8],
     session_handle: u32,
-    capability: &[u8; crate::foundation::CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH],
 ) -> Vec<u8> {
-    match command::run_accepted_setup_command_inner(input, session_handle, capability) {
+    match command::run_accepted_setup_command_inner(input, session_handle) {
         Ok(value) => encode_success(value),
         Err(error) => encode_error(error),
     }

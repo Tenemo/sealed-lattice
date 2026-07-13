@@ -58,15 +58,15 @@ pub(super) fn participant_count_from_package(package: &serde_json::Value) -> u64
         .expect("participant count")
 }
 
-pub(in super::super) fn public_coefficient_commitment_ring_degree_from_fixture_package(
+pub(in super::super) fn vss_commitment_ring_degree_from_fixture_package(
     package: &serde_json::Value,
 ) -> usize {
     usize::try_from(
-        package["vssPublicCoefficientCommitmentSet"]["ringDegree"]
+        package["vssCoefficientCommitmentMaterial"]["ringDegree"]
             .as_u64()
-            .expect("public VSS coefficient commitment ring degree"),
+            .expect("VSS coefficient commitment material ring degree"),
     )
-    .expect("public VSS coefficient commitment ring degree fits usize")
+    .expect("VSS coefficient commitment material ring degree fits usize")
 }
 
 mod evaluation_key_share_component_material;
@@ -84,6 +84,7 @@ pub(super) use public_key_share_proofs::*;
 pub(super) use relinearization_key_share_rounds::*;
 pub(super) use trustee_evaluation_key_proofs::*;
 pub(super) use vss_public_material::{
+    CompactAggregateThresholdProofFixture, FinalizedCollectiveSetupPackageFixture,
     compact_aggregate_threshold_proof_fixture, descriptor_backed_vss_proof_material_fixture,
     finalize_collective_setup_package,
 };

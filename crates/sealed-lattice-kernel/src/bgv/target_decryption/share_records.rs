@@ -5,7 +5,6 @@ pub(super) fn read_partial_decryption_share(
     setup_binding: &SetupBinding,
     target_accepted: &TargetAcceptedBinding,
     target_ciphertexts: &TargetCiphertextPair,
-    target_share_profile: &TargetShareProfile,
 ) -> CanonicalResult<()> {
     if string_at_path(share, &["objectType"])? != "BgvTargetDecryptionShare" {
         return Err(CanonicalError::new(
@@ -29,7 +28,6 @@ pub(super) fn read_partial_decryption_share(
         setup_binding,
         target_accepted,
         target_ciphertexts,
-        target_share_profile,
         participant,
     )?;
     let payload = value_at_path(share, &["sharePayload"])?;
@@ -39,7 +37,6 @@ pub(super) fn read_partial_decryption_share(
         setup_binding,
         target_accepted,
         target_ciphertexts,
-        target_share_profile,
         participant,
         &share_root,
     ))?;
@@ -64,7 +61,6 @@ pub(super) fn compare_share_record_fields(
     setup_binding: &SetupBinding,
     target_accepted: &TargetAcceptedBinding,
     target_ciphertexts: &TargetCiphertextPair,
-    target_share_profile: &TargetShareProfile,
     participant: &ParticipantBinding,
 ) -> CanonicalResult<()> {
     compare_string_field(
@@ -83,10 +79,9 @@ pub(super) fn compare_share_record_fields(
             target_accepted.target_accepted_record_hash.as_str(),
         ),
         (
-            "targetCiphertextBindingHash",
-            target_ciphertexts.target_ciphertext_binding_hash.as_str(),
+            "targetCiphertextHash",
+            target_ciphertexts.target_ciphertext_hash.as_str(),
         ),
-        ("targetShareProfileHash", target_share_profile.hash.as_str()),
     ] {
         compare_hash_field(share, field_name, expected, field_name)?;
     }
@@ -166,7 +161,6 @@ pub(super) fn share_record_hash_input(
     setup_binding: &SetupBinding,
     target_accepted: &TargetAcceptedBinding,
     target_ciphertexts: &TargetCiphertextPair,
-    target_share_profile: &TargetShareProfile,
     participant: &ParticipantBinding,
     share_root: &str,
 ) -> Value {
@@ -175,8 +169,7 @@ pub(super) fn share_record_hash_input(
         "setupPackageHash": setup_binding.setup_package_hash,
         "trusteeIdentity": participant.trustee_identity,
         "targetAcceptedRecordHash": target_accepted.target_accepted_record_hash,
-        "targetCiphertextBindingHash": target_ciphertexts.target_ciphertext_binding_hash,
-        "targetShareProfileHash": target_share_profile.hash,
+        "targetCiphertextHash": target_ciphertexts.target_ciphertext_hash,
         "shareRoot": share_root,
     })
 }

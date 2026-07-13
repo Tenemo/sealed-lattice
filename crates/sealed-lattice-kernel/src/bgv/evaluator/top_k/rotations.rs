@@ -1,12 +1,16 @@
 use super::*;
+use crate::bgv::encoding::LOGICAL_SLOT_GENERATOR;
 use std::sync::OnceLock;
 
-const LOGICAL_SLOT_GENERATOR: usize = 3;
 static GALOIS_ELEMENT_POSITIONS: OnceLock<Vec<Option<(bool, usize)>>> = OnceLock::new();
+
+fn logical_slot_generator() -> usize {
+    LOGICAL_SLOT_GENERATOR
+}
 
 pub(crate) fn galois_power(exponent: usize) -> CanonicalResult<usize> {
     Ok(modular_power(
-        LOGICAL_SLOT_GENERATOR,
+        logical_slot_generator(),
         exponent % GENERATOR_SUBGROUP_ORDER,
         2 * POLYNOMIAL_DEGREE,
     ))
@@ -20,7 +24,7 @@ pub(crate) fn logical_slot_galois_element(logical_slot_index: usize) -> Canonica
         ));
     }
     let positive_element = modular_power(
-        LOGICAL_SLOT_GENERATOR,
+        logical_slot_generator(),
         logical_slot_index % GENERATOR_SUBGROUP_ORDER,
         2 * POLYNOMIAL_DEGREE,
     );
@@ -85,7 +89,7 @@ fn galois_element_positions() -> &'static [Option<(bool, usize)>] {
         for exponent in 0..GENERATOR_SUBGROUP_ORDER {
             positions[positive_element] = Some((false, exponent));
             positions[ring_order - positive_element] = Some((true, exponent));
-            positive_element = positive_element * LOGICAL_SLOT_GENERATOR % ring_order;
+            positive_element = positive_element * logical_slot_generator() % ring_order;
         }
         positions
     })

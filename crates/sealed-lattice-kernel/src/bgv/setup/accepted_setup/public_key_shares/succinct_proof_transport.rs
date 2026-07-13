@@ -1,25 +1,27 @@
 use super::*;
 
-use crate::hashing::derive_canonical_object_hash;
-
 use crate::bgv::setup::trustee_evaluation_key_proof::PUBLIC_KEY_SHARE_PROOF_FAMILY;
 
 pub(super) fn public_key_share_succinct_proof_bytes_from_record(
     proof_record: &Value,
-    request: &Value,
+    proof_binding_session: &crate::bgv::setup::AcceptedSetupProofBindingSession,
 ) -> CanonicalResult<SetupProofMaterialBytes> {
     let proof_material_root = value_string(proof_record, "proofMaterialRoot")?;
     validate_hash_string(
         proof_material_root,
         "publicKeyShareSuccinctProof.proofMaterialRoot",
     )?;
-    let proof_bytes =
-        transported_public_key_share_proof_material_bytes(request, proof_material_root)?;
+    let proof_bytes = take_verified_setup_proof_material_bytes(
+        PUBLIC_KEY_SHARE_PROOF_FAMILY,
+        proof_material_root,
+        "publicKeyShareSuccinctProof.proofMaterialRoot",
+        Some(proof_binding_session),
+    )?;
     let expected_material_root = public_key_share_succinct_proof_material_root(proof_record)?;
     if proof_material_root != expected_material_root {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "public-key share proofMaterialRoot must match the canonical transported proof material reference",
+            "public-key share proofMaterialRoot must match the canonical proof material reference",
         ));
     }
 
@@ -31,95 +33,8 @@ pub(super) fn public_key_share_succinct_proof_bytes_from_record(
 pub(in crate::bgv::setup) fn public_key_share_succinct_proof_material_root(
     proof_record: &Value,
 ) -> CanonicalResult<String> {
-    derive_canonical_object_hash(&json!({
-        "objectType": "PublicKeyShareSuccinctProofMaterialReference",
-        "trusteeIdentity": value_string(proof_record, "trusteeIdentity")?,
-        "trusteeRosterPosition": value_u64(proof_record, "trusteeRosterPosition")?,
-        "statementHash": value_string(proof_record, "statementHash")?,
-        "proofBytesHash": value_string(proof_record, "proofBytesHash")?,
-    }))
-}
-
-fn transported_public_key_share_proof_material_bytes(
-    request: &Value,
-    expected_proof_material_root: &str,
-) -> CanonicalResult<SetupProofMaterialBytes> {
-    let material_set = request
-        .get("transportedPublicKeyShareProofMaterial")
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "transportedPublicKeyShareProofMaterial was required by transported public-key share succinct proof records",
-            )
-        })?;
-    verify_transported_public_key_share_proof_material_set_header(material_set)?;
-    let Some(proof_materials) = material_set.get("proofMaterials").and_then(Value::as_array) else {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "transportedPublicKeyShareProofMaterial.proofMaterials must list transported proof material objects",
-        ));
-    };
-    let mut matching_bytes = None;
-    for proof_material in proof_materials {
-        verify_transported_public_key_share_proof_material_header(proof_material)?;
-        let proof_material_root = value_string(proof_material, "proofMaterialRoot")?;
-        if proof_material_root != expected_proof_material_root {
-            continue;
-        }
-        if matching_bytes.is_some() {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "transportedPublicKeyShareProofMaterial contains duplicate proofMaterialRoot entries",
-            ));
-        }
-        let proof_bytes = verified_setup_proof_material_bytes_from_request(
-            PUBLIC_KEY_SHARE_PROOF_FAMILY,
-            expected_proof_material_root,
-            "transportedPublicKeyShareProofMaterial.proofMaterials",
-        )?;
-        matching_bytes = Some(proof_bytes);
-    }
-
-    matching_bytes.ok_or_else(|| {
-        CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "transportedPublicKeyShareProofMaterial is missing the requested proofMaterialRoot",
-        )
-    })
-}
-
-fn verify_transported_public_key_share_proof_material_set_header(
-    value: &Value,
-) -> CanonicalResult<()> {
-    if value.get("objectType").and_then(Value::as_str)
-        != Some(PUBLIC_KEY_SHARE_PROOF_TRANSPORT_SET_OBJECT_TYPE)
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            format!(
-                "transportedPublicKeyShareProofMaterial.objectType must be {PUBLIC_KEY_SHARE_PROOF_TRANSPORT_SET_OBJECT_TYPE}"
-            ),
-        ));
-    }
-
-    Ok(())
-}
-
-fn verify_transported_public_key_share_proof_material_header(value: &Value) -> CanonicalResult<()> {
-    if value.get("objectType").and_then(Value::as_str)
-        != Some(PUBLIC_KEY_SHARE_PROOF_TRANSPORT_OBJECT_TYPE)
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            format!(
-                "transported public-key share succinct proof material objectType must be {PUBLIC_KEY_SHARE_PROOF_TRANSPORT_OBJECT_TYPE}"
-            ),
-        ));
-    }
-    validate_hash_string(
-        value_string(value, "proofMaterialRoot")?,
-        "transportedPublicKeyShareProofMaterial.proofMaterialRoot",
-    )?;
-
-    Ok(())
+    crate::bgv::setup::setup_proof::setup_proof_material_reference_root(
+        PUBLIC_KEY_SHARE_PROOF_FAMILY,
+        value_string(proof_record, "proofBytesHash")?,
+    )
 }

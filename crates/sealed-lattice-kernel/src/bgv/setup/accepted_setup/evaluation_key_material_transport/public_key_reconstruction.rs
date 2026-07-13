@@ -2,12 +2,10 @@ use super::*;
 
 pub(super) fn accepted_setup_public_relinearization_keys_from_transport(
     setup_package: &Value,
-    request: &Value,
+    accepted_setup_session: &crate::bgv::setup::AcceptedSetupProofBindingSession,
 ) -> CanonicalResult<BTreeMap<usize, KeySwitchKey>> {
     let roster = super::super::accepted_roster_from_package(setup_package)?;
     let binding = evaluation_key_proof_common_binding(setup_package)?;
-    let transported_key_switch_component_material =
-        request.get("transportedEvaluationKeyShareComponentMaterial");
     let rounds = setup_package
         .get("relinearizationKeyShareRounds")
         .ok_or_else(|| {
@@ -80,7 +78,7 @@ pub(super) fn accepted_setup_public_relinearization_keys_from_transport(
                 &binding,
                 "round-two",
                 level,
-                transported_key_switch_component_material,
+                accepted_setup_session,
             )?;
             if decoded_material.ring_degree != POLYNOMIAL_DEGREE {
                 return Err(CanonicalError::new(
@@ -114,12 +112,10 @@ pub(super) fn accepted_setup_public_relinearization_keys_from_transport(
 
 pub(super) fn accepted_setup_public_galois_keys_from_transport(
     setup_package: &Value,
-    request: &Value,
+    accepted_setup_session: &crate::bgv::setup::AcceptedSetupProofBindingSession,
 ) -> CanonicalResult<BTreeMap<(usize, usize), KeySwitchKey>> {
     let roster = super::super::accepted_roster_from_package(setup_package)?;
     let binding = evaluation_key_proof_common_binding(setup_package)?;
-    let transported_key_switch_component_material =
-        request.get("transportedEvaluationKeyShareComponentMaterial");
     let batches = setup_package
         .get("galoisKeyShareBatches")
         .and_then(Value::as_array)
@@ -183,7 +179,7 @@ pub(super) fn accepted_setup_public_galois_keys_from_transport(
                 &binding,
                 rotation,
                 level,
-                transported_key_switch_component_material,
+                accepted_setup_session,
             )?;
             if decoded_material.ring_degree != POLYNOMIAL_DEGREE {
                 return Err(CanonicalError::new(

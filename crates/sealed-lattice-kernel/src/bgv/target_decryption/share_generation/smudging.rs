@@ -7,15 +7,19 @@ pub(in super::super) fn target_decryption_smudging_seed_hex(
     target_accepted: &TargetAcceptedBinding,
     target_share_profile: &TargetShareProfile,
 ) -> String {
+    let decryption_threshold = (target_share_profile.decryption_threshold as u64).to_le_bytes();
+    let minimum_shares =
+        (target_share_profile.minimum_shares_for_interpolation as u64).to_le_bytes();
+    let share_quorum = (target_share_profile.decryption_share_quorum as u64).to_le_bytes();
     hash512_hex(
         TARGET_DECRYPTION_SMUDGING_SEED_HASH_DOMAIN,
         &[
             setup_binding.setup_package_hash.as_bytes(),
             target_accepted.target_accepted_record_hash.as_bytes(),
-            target_accepted.target_context_hash.as_bytes(),
             target_accepted.target_ciphertext_hash.as_bytes(),
-            target_share_profile.hash.as_bytes(),
-            target_accepted.target_basis_hash.as_bytes(),
+            &decryption_threshold,
+            &minimum_shares,
+            &share_quorum,
         ],
     )
 }
@@ -132,10 +136,8 @@ pub(in super::super) fn target_decryption_smudging_polynomial_coefficients(
                     &smudging_seed_bytes,
                     setup_binding.setup_package_hash.as_bytes(),
                     target_accepted.target_accepted_record_hash.as_bytes(),
-                    target_accepted.target_context_hash.as_bytes(),
                     target_accepted.target_ciphertext_hash.as_bytes(),
                     target_ciphertexts.target_ciphertext_hash.as_bytes(),
-                    target_share_profile.hash.as_bytes(),
                     role.as_bytes(),
                     &rns_limb_index_bytes,
                     &rns_prime_bytes,
@@ -148,12 +150,14 @@ pub(in super::super) fn target_decryption_smudging_polynomial_coefficients(
                 .uniform_residues(coefficient_span, POLYNOMIAL_DEGREE)
                 .into_iter()
                 .map(|sampled_coefficient| {
-                    i64::try_from(sampled_coefficient).map_err(|_| {
-                        CanonicalError::new(
-                            CanonicalErrorCode::ComponentMismatch,
-                            "target-decryption smudging coefficient does not fit a signed integer",
-                        )
-                    }).map(|value| value - TARGET_DECRYPTION_SMUDGING_COEFFICIENT_BOUND)
+                    i64::try_from(sampled_coefficient)
+                        .map_err(|_| {
+                            CanonicalError::new(
+                                CanonicalErrorCode::ComponentMismatch,
+                                "target-decryption smudging coefficient does not fit a signed integer",
+                            )
+                        })
+                        .map(|value| value - TARGET_DECRYPTION_SMUDGING_COEFFICIENT_BOUND)
                 })
                 .collect::<CanonicalResult<Vec<_>>>()
         })
@@ -264,7 +268,7 @@ pub(in super::super) fn target_decryption_smudging_commitment_set_from_polynomia
     target_share_profile: &TargetShareProfile,
     smudging_seed_hex: &str,
     smudging_polynomial_openings: &[TargetDecryptionSmudgingPolynomialOpening],
-) -> CanonicalResult<TargetDecryptionSmudgingCommitmentSet> {
+) -> CanonicalResult<Value> {
     let active_limb_count = target_ciphertexts.target_id.level + 1;
     let smudging_polynomial_degree = target_share_profile
         .minimum_shares_for_interpolation
@@ -311,26 +315,12 @@ pub(in super::super) fn target_decryption_smudging_commitment_set_from_polynomia
 
     let mut value = json!({
         "objectType": "TargetDecryptionSmudgingCommitmentSet",
-        "setupPackageHash": setup_binding.setup_package_hash,
-        "targetAcceptedRecordHash": target_accepted.target_accepted_record_hash,
-        "targetContextHash": target_accepted.target_context_hash,
-        "targetCiphertextHash": target_accepted.target_ciphertext_hash,
-        "targetShareProfileHash": target_share_profile.hash,
-        "targetBasisHash": target_accepted.target_basis_hash,
-        "publicMatrixSeedHash": setup_binding.public_matrix_seed_hash,
-        "activeRnsLimbCount": active_limb_count,
-        "ringDegree": POLYNOMIAL_DEGREE,
-        "smudgingCoefficientBound": TARGET_DECRYPTION_SMUDGING_COEFFICIENT_BOUND,
-        "signedCoefficientOffset": TARGET_DECRYPTION_SMUDGING_COEFFICIENT_BOUND,
-        "messageCoefficientBound": (TARGET_DECRYPTION_SMUDGING_COEFFICIENT_BOUND as u64) * 2 + 1,
-        "smudgingPolynomialDegree": smudging_polynomial_degree,
-        "commitmentRole": TARGET_DECRYPTION_SMUDGING_COMMITMENT_ROLE,
         "commitmentRecords": records,
     });
     let root = derive_canonical_object_hash(&value)?;
     value["smudgingCommitmentSetRoot"] = json!(root);
 
-    Ok(TargetDecryptionSmudgingCommitmentSet { value, root })
+    Ok(value)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -423,13 +413,9 @@ fn target_decryption_smudging_commitment_opening(
 
     Ok(TargetDecryptionSmudgingCommitmentOpening {
         #[cfg(test)]
-        role: polynomial_opening.role.clone(),
-        #[cfg(test)]
         rns_limb_index: polynomial_opening.rns_limb_index,
         #[cfg(test)]
         rns_prime: polynomial_opening.rns_prime,
-        #[cfg(test)]
-        polynomial_degree: polynomial_opening.polynomial_degree,
         message_coefficients,
         material_seed_hex,
         commitment_context,
@@ -456,20 +442,12 @@ fn target_decryption_smudging_commitment_record(
 
     Ok(json!({
         "objectType": "TargetDecryptionSmudgingCommitment",
-        "role": opening.role.as_str(),
-        "rnsLimbIndex": opening.rns_limb_index,
-        "rnsPrime": opening.rns_prime,
-        "polynomialDegree": opening.polynomial_degree,
         "commitmentRoot": computation.commitment_root,
         "commitment": computation.commitment,
     }))
 }
 
-// The private deterministic material seed for one smudging committed-material
-// commitment, derived from the trustee's private smudging seed and the full
-// target context so distinct roles, limbs, and degrees hide with distinct mask
-// and salt streams while the same inputs regenerate byte-identical trees at
-// proof time.
+// Separate the deterministic commitment stream by target, role, limb, and degree.
 #[allow(clippy::too_many_arguments)]
 fn target_decryption_smudging_commitment_material_seed_hex(
     setup_binding: &SetupBinding,
@@ -491,6 +469,8 @@ fn target_decryption_smudging_commitment_material_seed_hex(
     let rns_limb_index_bytes = (rns_limb_index as u64).to_le_bytes();
     let rns_prime_bytes = rns_prime.to_le_bytes();
     let polynomial_degree_bytes = (polynomial_degree as u64).to_le_bytes();
+    let minimum_shares_bytes =
+        (target_share_profile.minimum_shares_for_interpolation as u64).to_le_bytes();
 
     Ok(hash512_hex(
         TARGET_DECRYPTION_SMUDGING_COMMITMENT_MATERIAL_SEED_DOMAIN,
@@ -498,13 +478,12 @@ fn target_decryption_smudging_commitment_material_seed_hex(
             &smudging_seed_bytes,
             setup_binding.setup_package_hash.as_bytes(),
             target_accepted.target_accepted_record_hash.as_bytes(),
-            target_accepted.target_context_hash.as_bytes(),
             target_accepted.target_ciphertext_hash.as_bytes(),
-            target_share_profile.hash.as_bytes(),
             role.as_bytes(),
             &rns_limb_index_bytes,
             &rns_prime_bytes,
             &polynomial_degree_bytes,
+            &minimum_shares_bytes,
         ],
     ))
 }
@@ -523,10 +502,8 @@ fn target_decryption_smudging_commitment_context(
         "objectType": "TargetDecryptionSmudgingPolynomialCoefficientCommitmentContext",
         "setupPackageHash": setup_binding.setup_package_hash,
         "targetAcceptedRecordHash": target_accepted.target_accepted_record_hash,
-        "targetContextHash": target_accepted.target_context_hash,
         "targetCiphertextHash": target_accepted.target_ciphertext_hash,
-        "targetShareProfileHash": target_share_profile.hash,
-        "targetBasisHash": target_accepted.target_basis_hash,
+        "minimumSharesForInterpolation": target_share_profile.minimum_shares_for_interpolation,
         "role": role,
         "rnsLimbIndex": rns_limb_index,
         "rnsPrime": rns_prime,

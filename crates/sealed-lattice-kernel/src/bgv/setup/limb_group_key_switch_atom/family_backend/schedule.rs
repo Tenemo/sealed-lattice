@@ -32,7 +32,7 @@ use crate::bgv::setup::trustee_evaluation_key_proof::{
     TrusteeEvaluationKeyWitness, public_key_switch_sample,
 };
 use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
-use crate::hashing::hash512;
+use crate::hashing::hash_framed_parts_512 as hash512;
 
 const SCHEDULE_MAGIC: &[u8; 8] = b"SLKSATS2";
 const SCHEDULE_SALT_DOMAIN: &str = "sealed-lattice/setup/key-switch-atom/schedule-salt";
@@ -60,7 +60,7 @@ fn linkage_statement(
     statement: &TrusteeEvaluationKeyStatement,
 ) -> CanonicalResult<LinkageStatement<'_>> {
     validate_key_bearing_statement(statement)?;
-    let same_secret_linkage = statement.same_secret_linkage.as_ref().ok_or_else(|| {
+    let same_secret_linkage = statement.same_secret_linkage().ok_or_else(|| {
         invalid_schedule(
             "a key-bearing trustee evaluation-key statement requires one accepted BDLOP source constant commitment",
         )
@@ -71,7 +71,7 @@ fn linkage_statement(
         ));
     }
     Ok(LinkageStatement {
-        same_secret_linkage,
+        linkage: same_secret_linkage,
     })
 }
 
@@ -80,13 +80,13 @@ fn linkage_statement(
 fn validate_key_bearing_statement(
     statement: &TrusteeEvaluationKeyStatement,
 ) -> CanonicalResult<()> {
-    if statement.keys.is_empty() {
+    if statement.keys().is_empty() {
         return Err(invalid_schedule(
             "a key-bearing trustee evaluation-key statement lists at least one key",
         ));
     }
     if statement
-        .keys
+        .keys()
         .iter()
         .any(|key| !key.kind.has_diagonal_source())
     {
@@ -101,7 +101,7 @@ fn validate_key_bearing_statement(
 // key) rather than the shared succinct engine.
 pub(crate) fn statement_is_key_bearing(statement: &TrusteeEvaluationKeyStatement) -> bool {
     statement
-        .keys
+        .keys()
         .iter()
         .any(|key| key.kind.has_diagonal_source())
 }
@@ -129,7 +129,7 @@ fn scheduled_proofs(
     statement: &TrusteeEvaluationKeyStatement,
 ) -> CanonicalResult<Vec<ScheduledProof>> {
     let mut proofs = Vec::new();
-    for (key_index, key) in statement.keys.iter().enumerate() {
+    for (key_index, key) in statement.keys().iter().enumerate() {
         let limb_count = key
             .level
             .checked_add(1)
@@ -220,16 +220,19 @@ pub(crate) fn prove_key_bearing_trustee_evaluation_keys(
     witness: &TrusteeEvaluationKeyWitness,
 ) -> CanonicalResult<Vec<u8>> {
     let linkage_statement = linkage_statement(statement)?;
-    if witness.error_coefficients_by_key.len() != statement.keys.len() {
+    if witness.error_coefficients_by_key().len() != statement.keys().len() {
         return Err(invalid_schedule(
             "witness error vectors must cover every scheduled key",
         ));
     }
-    let linkage_randomness = witness.opening_randomness_by_limb.first().ok_or_else(|| {
-        invalid_schedule("the linkage witness requires the first target's opening randomness")
-    })?;
+    let linkage_randomness = witness
+        .opening_randomness_by_limb()
+        .first()
+        .ok_or_else(|| {
+            invalid_schedule("the linkage witness requires the first target's opening randomness")
+        })?;
     let linkage_witness = LinkageWitness {
-        negative_indicator: &witness.negative_indicator_coefficients,
+        negative_indicator: witness.negative_indicator_coefficients(),
         randomness_by_column: linkage_randomness,
     };
     let parameters = sixteen_limb_group_field_parameters();
@@ -253,11 +256,11 @@ pub(crate) fn prove_key_bearing_trustee_evaluation_keys(
                 parameters: &parameters,
                 statement_hash: &statement_hash,
                 ring_degree,
-                key: &statement.keys[scheduled_proof.key_index],
+                key: &statement.keys()[scheduled_proof.key_index],
                 scheduled: scheduled_proof,
                 proof_index,
-                secret: &witness.secret_coefficients,
-                errors: &witness.error_coefficients_by_key[scheduled_proof.key_index],
+                secret: witness.secret_coefficients(),
+                errors: &witness.error_coefficients_by_key()[scheduled_proof.key_index],
                 linkage_statement: &linkage_statement,
                 linkage_witness: &linkage_witness,
                 proof_parameters: &proof_parameters,
@@ -439,7 +442,7 @@ pub(crate) fn verify_key_bearing_trustee_evaluation_keys(
         let verify_at = |offset: usize, bytes: &[u8]| -> CanonicalResult<()> {
             let proof_index = chunk_start + offset;
             let scheduled_proof = &scheduled[proof_index];
-            let key = &statement.keys[scheduled_proof.key_index];
+            let key = &statement.keys()[scheduled_proof.key_index];
             let group_primes = &DATA_PRIMES[scheduled_proof.group_start_limb
                 ..scheduled_proof.group_start_limb + scheduled_proof.group_limb_count];
             let limb_group = LimbGroupContext::new(&parameters, group_primes)?;

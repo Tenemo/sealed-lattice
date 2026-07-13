@@ -1,7 +1,8 @@
 use super::super::merkle_commitment::MerkleDigest;
 use super::super::relation::{
-    VssShareLinkageCommitment, VssShareLinkageItem, VssShareLinkageStatement,
-    masked_claim_bounds_for_global_claim, masked_claim_lift_residue_count_for_moduli,
+    SetupProofStatement, VssCommittedMaterialWitness, VssShareLinkageCommitment,
+    VssShareLinkageItem, VssShareLinkageStatement, masked_claim_bounds_for_global_claim,
+    masked_claim_lift_residue_count_for_moduli,
 };
 use super::super::{
     VSS_PUBLIC_CARRY_CLAIM_MASK_DIGIT_COUNT, VSS_PUBLIC_SHARE_LINKAGE_TRIT_CLAIM_MASK_DIGIT_COUNT,
@@ -23,9 +24,10 @@ fn vss_share_linkage_proof_round_trips_and_rejects_tampering() {
     verify_evaluation_key_share(&statement, &proof).expect("verify share-linkage proof");
 
     let (invalid_share_statement, mut invalid_share_witness) = vss_share_linkage_instance();
-    invalid_share_witness.vss_public_recipient_share_messages_by_item[0][0] =
-        (invalid_share_witness.vss_public_recipient_share_messages_by_item[0][0] + 1)
-            % i64::try_from(DATA_PRIMES[0]).expect("modulus fits i64");
+    let recipient_messages =
+        invalid_share_witness.vss_public_recipient_share_messages_by_item_mut();
+    recipient_messages[0][0] =
+        (recipient_messages[0][0] + 1) % i64::try_from(DATA_PRIMES[0]).expect("modulus fits i64");
     assert!(
         prove_evaluation_key_share(
             &invalid_share_statement,
@@ -41,9 +43,10 @@ fn vss_share_linkage_proof_round_trips_and_rejects_tampering() {
     // the prover refuses fail-closed before any proof is produced.
     let (mismatched_material_statement, mut mismatched_material_witness) =
         vss_share_linkage_instance();
-    mismatched_material_witness.vss_public_coefficient_messages_by_shamir_index[0][0] =
-        (mismatched_material_witness.vss_public_coefficient_messages_by_shamir_index[0][0] + 1)
-            % i64::try_from(DATA_PRIMES[0]).expect("modulus fits i64");
+    let coefficient_messages =
+        mismatched_material_witness.vss_public_coefficient_messages_by_shamir_index_mut();
+    coefficient_messages[0][0] =
+        (coefficient_messages[0][0] + 1) % i64::try_from(DATA_PRIMES[0]).expect("modulus fits i64");
     assert!(
         prove_evaluation_key_share(
             &mismatched_material_statement,
@@ -56,8 +59,7 @@ fn vss_share_linkage_proof_round_trips_and_rejects_tampering() {
 
     let (mut tampered_statement, _unused_witness) = vss_share_linkage_instance();
     tampered_statement
-        .vss_share_linkage
-        .as_mut()
+        .vss_share_linkage_mut()
         .expect("statement")
         .recipient_share_commitment
         .material_roots_by_commitment_field[0][0] ^= 0x01;
@@ -69,8 +71,7 @@ fn vss_share_linkage_proof_round_trips_and_rejects_tampering() {
 
     let (mut tampered_additional_statement, _unused_witness) = vss_share_linkage_instance();
     tampered_additional_statement
-        .vss_share_linkage
-        .as_mut()
+        .vss_share_linkage_mut()
         .expect("statement")
         .additional_linkage_items[0]
         .recipient_share_commitment
@@ -134,9 +135,10 @@ fn vss_threshold_aggregate_proof_round_trips_and_rejects_tampering() {
     // regenerated recipient-share material root differ from the published one,
     // so the prover refuses fail-closed before producing a proof.
     let (mismatched_statement, mut mismatched_witness) = vss_threshold_aggregate_instance();
-    mismatched_witness.vss_public_coefficient_messages_by_shamir_index[0][0] =
-        (mismatched_witness.vss_public_coefficient_messages_by_shamir_index[0][0] + 1)
-            % i64::try_from(DATA_PRIMES[0]).expect("modulus fits i64");
+    let coefficient_messages =
+        mismatched_witness.vss_public_coefficient_messages_by_shamir_index_mut();
+    coefficient_messages[0][0] =
+        (coefficient_messages[0][0] + 1) % i64::try_from(DATA_PRIMES[0]).expect("modulus fits i64");
     assert!(
         prove_evaluation_key_share(
             &mismatched_statement,
@@ -150,9 +152,9 @@ fn vss_threshold_aggregate_proof_round_trips_and_rejects_tampering() {
     // An aggregate witness that is not the modular sum of the summands breaks the
     // unit-point lincheck, so proving refuses.
     let (bad_sum_statement, mut bad_sum_witness) = vss_threshold_aggregate_instance();
-    bad_sum_witness.vss_public_recipient_share_messages_by_item[0][0] =
-        (bad_sum_witness.vss_public_recipient_share_messages_by_item[0][0] + 1)
-            % i64::try_from(DATA_PRIMES[0]).expect("modulus fits i64");
+    let recipient_messages = bad_sum_witness.vss_public_recipient_share_messages_by_item_mut();
+    recipient_messages[0][0] =
+        (recipient_messages[0][0] + 1) % i64::try_from(DATA_PRIMES[0]).expect("modulus fits i64");
     assert!(
         prove_evaluation_key_share(&bad_sum_statement, &bad_sum_witness, PROOF_RANDOMNESS_SEED)
             .is_err(),
@@ -162,8 +164,7 @@ fn vss_threshold_aggregate_proof_round_trips_and_rejects_tampering() {
     // Tampering with the published aggregate (recipient) material root rejects.
     let (mut tampered_aggregate_statement, _unused_witness) = vss_threshold_aggregate_instance();
     tampered_aggregate_statement
-        .vss_share_linkage
-        .as_mut()
+        .vss_share_linkage_mut()
         .expect("statement")
         .recipient_share_commitment
         .material_roots_by_commitment_field[0][0] ^= 0x01;
@@ -175,8 +176,7 @@ fn vss_threshold_aggregate_proof_round_trips_and_rejects_tampering() {
     // Tampering with a summand (coefficient) material root rejects.
     let (mut tampered_summand_statement, _unused_witness) = vss_threshold_aggregate_instance();
     tampered_summand_statement
-        .vss_share_linkage
-        .as_mut()
+        .vss_share_linkage_mut()
         .expect("statement")
         .coefficient_commitments[0]
         .material_roots_by_commitment_field[0][0] ^= 0x01;
@@ -190,8 +190,7 @@ fn vss_threshold_aggregate_proof_round_trips_and_rejects_tampering() {
     // verifies against the mutated statement.
     let (mut flipped_flag_statement, _unused_witness) = vss_threshold_aggregate_instance();
     flipped_flag_statement
-        .vss_share_linkage
-        .as_mut()
+        .vss_share_linkage_mut()
         .expect("statement")
         .is_threshold_aggregate = false;
     assert!(
@@ -273,20 +272,13 @@ fn vss_threshold_aggregate_instance() -> (
 
     let statement = TrusteeEvaluationKeyStatement {
         context: SuccinctSetupProofContext {
-            proof_family: super::super::VSS_SHARE_LINKAGE_PROOF_FAMILY.to_string(),
-            ceremony_id: "vss-aggregate-test".to_string(),
-            manifest_hash: repeated_hash("11"),
-            roster_hash: repeated_hash("22"),
+            setup_context_hash: repeated_hash("11"),
             trustee_identity: "vss-threshold-aggregate".to_string(),
             trustee_roster_position: 0,
-            setup_epoch: "setup-epoch-1".to_string(),
-            binding_roots: vec![("shareLinkageStatementRoot".to_string(), repeated_hash("a3"))],
+            binding_roots: vec![repeated_hash("a3")],
         },
         ring_degree,
-        keys: Vec::new(),
-        same_secret_linkage: None,
-        private_vss_share: None,
-        vss_share_linkage: Some(VssShareLinkageStatement {
+        proof: SetupProofStatement::VssShareLinkage(VssShareLinkageStatement {
             public_matrix_seed_hash: repeated_hash("bc"),
             source_trustee_identity: "trustee-0".to_string(),
             source_trustee_roster_position: 0,
@@ -311,8 +303,6 @@ fn vss_threshold_aggregate_instance() -> (
             additional_linkage_items: Vec::new(),
             is_threshold_aggregate: true,
         }),
-        same_secret_bridge: None,
-        target_decryption_share: None,
     };
     statement
         .validate_shape()
@@ -325,15 +315,8 @@ fn vss_threshold_aggregate_instance() -> (
             .chain(std::iter::once(&aggregate_commitment_computation))
             .collect();
 
-    let witness = super::super::relation::TrusteeEvaluationKeyWitness {
-        secret_coefficients: Vec::new(),
-        error_coefficients_by_key: Vec::new(),
-        negative_indicator_coefficients: Vec::new(),
-        opening_randomness_by_limb: Vec::new(),
-        private_vss_coefficient_messages_by_shamir_index: Vec::new(),
-        private_vss_opening_randomness_by_shamir_index: Vec::new(),
-        private_vss_carry_witnesses: Vec::new(),
-        vss_public_coefficient_messages_by_shamir_index: summand_messages
+    let witness = super::super::relation::TrusteeEvaluationKeyWitness::VssShareLinkage {
+        coefficient_messages_by_shamir_index: summand_messages
             .iter()
             .map(|messages| {
                 messages
@@ -342,23 +325,23 @@ fn vss_threshold_aggregate_instance() -> (
                     .collect()
             })
             .collect(),
-        vss_public_recipient_share_messages_by_item: vec![
+        recipient_share_messages_by_item: vec![
             aggregate_values
                 .iter()
                 .map(|value| i64::try_from(*value).expect("aggregate fits i64"))
                 .collect(),
         ],
-        vss_public_carry_witnesses_by_item: vec![wrap_values],
-        target_decryption_message_vectors: Vec::new(),
-        target_decryption_opening_randomness_by_commitment: Vec::new(),
-        vss_committed_material_seeds_by_bound_message: bound_commitment_computations
-            .iter()
-            .map(|computation| computation.material_seed_hex.clone())
-            .collect(),
-        vss_committed_material_context_hashes_by_bound_message: bound_commitment_computations
-            .iter()
-            .map(|computation| computation.context_hash.clone())
-            .collect(),
+        carry_witnesses_by_item: vec![wrap_values],
+        committed_material: VssCommittedMaterialWitness {
+            vss_committed_material_seeds_by_bound_message: bound_commitment_computations
+                .iter()
+                .map(|computation| computation.material_seed_hex.clone())
+                .collect(),
+            vss_committed_material_context_hashes_by_bound_message: bound_commitment_computations
+                .iter()
+                .map(|computation| computation.context_hash.clone())
+                .collect(),
+        },
     };
 
     (statement, witness)
@@ -420,23 +403,13 @@ fn vss_share_linkage_instance() -> (
     let share_linkage_statement_root = repeated_hash("93");
     let statement = TrusteeEvaluationKeyStatement {
         context: SuccinctSetupProofContext {
-            proof_family: super::super::VSS_SHARE_LINKAGE_PROOF_FAMILY.to_string(),
-            ceremony_id: "vss-proof-test".to_string(),
-            manifest_hash: repeated_hash("11"),
-            roster_hash: repeated_hash("22"),
+            setup_context_hash: repeated_hash("11"),
             trustee_identity: "vss-share-linkage".to_string(),
             trustee_roster_position: 0,
-            setup_epoch: "setup-epoch-1".to_string(),
-            binding_roots: vec![(
-                "shareLinkageStatementRoot".to_string(),
-                share_linkage_statement_root,
-            )],
+            binding_roots: vec![share_linkage_statement_root],
         },
         ring_degree,
-        keys: Vec::new(),
-        same_secret_linkage: None,
-        private_vss_share: None,
-        vss_share_linkage: Some(VssShareLinkageStatement {
+        proof: SetupProofStatement::VssShareLinkage(VssShareLinkageStatement {
             public_matrix_seed_hash,
             source_trustee_identity: "trustee-0".to_string(),
             source_trustee_roster_position: 0,
@@ -470,8 +443,6 @@ fn vss_share_linkage_instance() -> (
             ],
             is_threshold_aggregate: false,
         }),
-        same_secret_bridge: None,
-        target_decryption_share: None,
     };
     statement.validate_shape().expect("share-linkage statement");
     let layout = LimbColumnLayout::new(&statement, 0).expect("share-linkage layout");
@@ -577,15 +548,8 @@ fn vss_share_linkage_instance() -> (
         ])
         .collect();
 
-    let witness = super::super::relation::TrusteeEvaluationKeyWitness {
-        secret_coefficients: Vec::new(),
-        error_coefficients_by_key: Vec::new(),
-        negative_indicator_coefficients: Vec::new(),
-        opening_randomness_by_limb: Vec::new(),
-        private_vss_coefficient_messages_by_shamir_index: Vec::new(),
-        private_vss_opening_randomness_by_shamir_index: Vec::new(),
-        private_vss_carry_witnesses: Vec::new(),
-        vss_public_coefficient_messages_by_shamir_index: primary_item
+    let witness = super::super::relation::TrusteeEvaluationKeyWitness::VssShareLinkage {
+        coefficient_messages_by_shamir_index: primary_item
             .coefficient_messages
             .iter()
             .chain(additional_item.coefficient_messages.iter())
@@ -596,7 +560,7 @@ fn vss_share_linkage_instance() -> (
                     .collect()
             })
             .collect(),
-        vss_public_recipient_share_messages_by_item: vec![
+        recipient_share_messages_by_item: vec![
             primary_item
                 .recipient_share_values
                 .iter()
@@ -613,21 +577,21 @@ fn vss_share_linkage_instance() -> (
                 .map(|value| i64::try_from(*value).expect("share fits i64"))
                 .collect(),
         ],
-        vss_public_carry_witnesses_by_item: vec![
+        carry_witnesses_by_item: vec![
             primary_item.recipient_share_carry_values,
             same_source_additional_item.recipient_share_carry_values,
             additional_item.recipient_share_carry_values,
         ],
-        target_decryption_message_vectors: Vec::new(),
-        target_decryption_opening_randomness_by_commitment: Vec::new(),
-        vss_committed_material_seeds_by_bound_message: bound_commitment_computations
-            .iter()
-            .map(|computation| computation.material_seed_hex.clone())
-            .collect(),
-        vss_committed_material_context_hashes_by_bound_message: bound_commitment_computations
-            .iter()
-            .map(|computation| computation.context_hash.clone())
-            .collect(),
+        committed_material: VssCommittedMaterialWitness {
+            vss_committed_material_seeds_by_bound_message: bound_commitment_computations
+                .iter()
+                .map(|computation| computation.material_seed_hex.clone())
+                .collect(),
+            vss_committed_material_context_hashes_by_bound_message: bound_commitment_computations
+                .iter()
+                .map(|computation| computation.context_hash.clone())
+                .collect(),
+        },
     };
 
     (statement, witness)
@@ -776,7 +740,6 @@ fn share_linkage_item_for_test(
 struct CommitmentComputationForTest {
     commitment: VssShareLinkageCommitment,
     commitment_root: String,
-    opening_root: String,
     // The holder's regeneration inputs, threaded into the witness so the
     // prover rebuilds byte-identical material trees and the binding rows hold.
     material_seed_hex: String,
@@ -835,10 +798,6 @@ fn commitment_computation_for_test(
             .as_str()
             .expect("commitment root")
             .to_string(),
-        opening_root: response["openingRoot"]
-            .as_str()
-            .expect("opening root")
-            .to_string(),
         material_seed_hex,
         context_hash: response["commitmentContextHash"]
             .as_str()
@@ -864,11 +823,10 @@ fn vss_share_linkage_consistency_lift_geometry_is_pinned() {
         .iter()
         .map(|limb_index| DATA_PRIMES[*limb_index])
         .collect::<Vec<_>>();
-    let family_shape = statement.family_shape().expect("family shape");
+    let family_shape = statement.family_shape();
     let consistency_repetitions = family_shape.consistency_repetitions();
     let item_count = statement
-        .vss_share_linkage
-        .as_ref()
+        .vss_share_linkage()
         .expect("share linkage statement")
         .item_count();
 
@@ -907,8 +865,7 @@ fn vss_share_linkage_consistency_lift_geometry_is_pinned() {
     // The negated lower claim bound recovers its clear span and pins that witness
     // bound independently of the residue-count check above.
     let share_linkage = statement
-        .vss_share_linkage
-        .as_ref()
+        .vss_share_linkage()
         .expect("share linkage statement");
     let coefficient_bound = (1_i128 << family_shape.consistency_coefficient_bits()) - 1;
     let packed_ring_degree = share_linkage

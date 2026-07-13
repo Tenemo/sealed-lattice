@@ -35,11 +35,5 @@ pub(in crate::bgv::direct_ballots) fn generate_direct_ballot_relation_proof(
         &encoded_commitments,
         &response_vector,
     )?;
-    let proof_bytes_hash = direct_ballot_relation_proof_bytes_hash(&proof_bytes);
-
-    Ok(DirectBallotRelationProofGeneration {
-        proof_bytes,
-        proof_bytes_hash,
-        statement_hash_hex: to_hex(&statement_hash),
-    })
+    Ok(DirectBallotRelationProofGeneration { proof_bytes })
 }

@@ -17,13 +17,7 @@ use crate::bgv::{
     },
     parameters::DATA_PRIMES,
 };
-use crate::hashing::hash512;
-
-use super::{
-    PRIVATE_VSS_SHARE_PROOF_FAMILY, PUBLIC_KEY_SHARE_PROOF_FAMILY, SAME_SECRET_BRIDGE_PROOF_FAMILY,
-    TARGET_DECRYPTION_SHARE_PROOF_FAMILY, TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
-    VSS_SHARE_LINKAGE_PROOF_FAMILY,
-};
+use crate::hashing::hash_framed_parts_512 as hash512;
 
 mod column_layout;
 mod constraint_kernels;

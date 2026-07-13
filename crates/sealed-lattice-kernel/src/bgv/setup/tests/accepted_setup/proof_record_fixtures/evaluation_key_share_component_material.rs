@@ -159,7 +159,6 @@ pub(in super::super) fn authenticate_evaluation_key_share_component_material_fix
         material_root: material_root.clone(),
         transported_material: serde_json::json!({
             "objectType": "SetupTransportedEvaluationKeyShareComponentMaterial",
-            "proofFamily": proof_family.proof_family(),
             "keySwitchComponentMaterialRoot": material_root,
         }),
     }
@@ -215,25 +214,22 @@ fn authenticate_evaluation_key_share_component_material_stream(
     };
     let material_root_bytes =
         crate::transcript_core::decode_hex(material_root).expect("component material root bytes");
-    let capability = [0x63; crate::foundation::CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH];
     let stream = crate::bgv::setup::begin_accepted_setup_canonical_stream(
         family_code,
         &material_root_bytes,
         descriptor_bytes,
-        capability,
         accepted_setup_session,
     )
     .expect("begin authenticated component material stream");
     for (chunk_index, chunk) in material_bytes.chunks(chunk_size).enumerate() {
         crate::bgv::setup::absorb_bgv_canonical_stream_chunk(
             stream.handle,
-            &capability,
             u32::try_from(chunk_index).expect("component material chunk index fits u32"),
             chunk,
         )
         .expect("authenticate component material chunk");
     }
-    crate::bgv::setup::finish_bgv_canonical_stream(stream.handle, &capability)
+    crate::bgv::setup::finish_bgv_canonical_stream(stream.handle)
         .expect("finish authenticated component material stream");
 }
 
@@ -660,7 +656,8 @@ mod tests {
             proof_family,
             &record,
             correct_binding,
-            Some(&transported_material_set),
+            &transported_material_set,
+            &accepted_setup_session,
         )
         .expect("correctly derived binding must decode authenticated material");
         assert_eq!(decoded_material.ring_degree, ring_degree);
@@ -705,7 +702,8 @@ mod tests {
                 proof_family,
                 &record,
                 substituted_binding,
-                Some(&transported_material_set),
+                &transported_material_set,
+                &accepted_setup_session,
             )
             .err()
             .unwrap_or_else(|| panic!("substituted {substituted_field} must be rejected"));
@@ -718,7 +716,6 @@ mod tests {
 
         crate::bgv::setup::cancel_accepted_setup_proof_binding_session(
             accepted_setup_session.session_handle,
-            &accepted_setup_session.capability,
         )
         .expect("cancel accepted-setup session after hostile binding checks");
     }

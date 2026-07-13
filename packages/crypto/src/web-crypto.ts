@@ -26,7 +26,7 @@ export const decodeFixedHex = (
         );
     }
 
-    return Uint8Array.from(bytes);
+    return bytes;
 };
 
 export const arrayBufferFromBytes = (bytes: Uint8Array): ArrayBuffer => {

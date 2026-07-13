@@ -42,9 +42,6 @@ export type PublicKeyShareRecord = Readonly<
         readonly objectType: 'PublicKeyShare';
         readonly trusteeIdentity: string;
         readonly trusteeRosterPosition: number;
-        readonly publicMatrixSeedHash: ProtocolHash;
-        readonly publicKeyCrpRoot: ProtocolHash;
-        readonly publicAPolynomialRoot: ProtocolHash;
         readonly shareCoefficientVectorHash512ByLimb: readonly PublicKeyShareCoefficientVectorHash[];
         readonly publicKeyShareRoot: ProtocolHash;
     }
@@ -53,9 +50,6 @@ export type PublicKeyShareRecord = Readonly<
 export type PublicKeyShareSet = Readonly<
     JsonRecord & {
         readonly objectType: 'PublicKeyShareSet';
-        readonly publicMatrixSeedHash: ProtocolHash;
-        readonly publicKeyCrpRoot: ProtocolHash;
-        readonly publicAPolynomialRoot: ProtocolHash;
         readonly shareRecords: readonly PublicKeyShareRecord[];
         readonly publicKeyShareSetRoot: ProtocolHash;
     }
@@ -66,43 +60,16 @@ export type PublicKeyShareMaterialRecord = Readonly<
         readonly objectType: 'PublicKeyShareMaterial';
         readonly trusteeIdentity: string;
         readonly trusteeRosterPosition: number;
-        readonly publicMatrixSeedHash: ProtocolHash;
-        readonly publicKeyCrpRoot: ProtocolHash;
-        readonly publicAPolynomialRoot: ProtocolHash;
         readonly publicKeyShareRoot: ProtocolHash;
         readonly shareCoefficientVectorsByLimb: readonly PublicKeyShareCoefficientVectorMaterial[];
         readonly publicKeyShareMaterialRoot: ProtocolHash;
     }
 >;
 
-export type PublicKeyShareMaterialRootReference = Readonly<{
-    readonly trusteeIdentity: string;
-    readonly trusteeRosterPosition: number;
-    readonly publicKeyShareMaterialRoot: ProtocolHash;
-}>;
-
-export type PublicKeyShareMaterialSet = Readonly<
-    JsonRecord & {
-        readonly objectType: 'PublicKeyShareMaterialSet';
-        readonly ringDegree: number;
-        readonly publicMatrixSeedHash: ProtocolHash;
-        readonly publicKeyCrpRoot: ProtocolHash;
-        readonly publicAPolynomialRoot: ProtocolHash;
-        readonly publicKeyShareSetRoot: ProtocolHash;
-        readonly shareMaterialRecords: readonly PublicKeyShareMaterialRecord[];
-        readonly publicKeyShareMaterialSetRoot: ProtocolHash;
-    }
->;
-
 export type BinaryChunkedPublicKeyShareMaterialSet = Readonly<
     JsonRecord & {
         readonly objectType: 'PublicKeyShareMaterialSet';
-        readonly ringDegree: number;
-        readonly publicMatrixSeedHash: ProtocolHash;
-        readonly publicKeyCrpRoot: ProtocolHash;
-        readonly publicAPolynomialRoot: ProtocolHash;
-        readonly publicKeyShareSetRoot: ProtocolHash;
-        readonly publicKeyShareMaterialRoots: readonly PublicKeyShareMaterialRootReference[];
+        readonly publicKeyShareMaterialRoots: readonly ProtocolHash[];
         readonly publicKeyShareMaterialSetRoot: ProtocolHash;
     }
 >;
@@ -126,23 +93,11 @@ export type PublicKeyShareMaterialWriter = (input: {
     readonly totalByteLength: number;
 }) => Promise<Uint8Array>;
 
-export type BinaryChunkedPublicKeyShareMaterialTransportInput = Readonly<{
-    readonly materialSet: PublicKeyShareMaterialSet;
-    readonly qSharePrimes: readonly number[];
-    readonly writePublicKeyShareMaterial: PublicKeyShareMaterialWriter;
-}>;
-
 export type BinaryChunkedPublicKeyShareMaterialBundleInput = Readonly<
     PublicKeyShareMaterialSetInput & {
         readonly writePublicKeyShareMaterial: PublicKeyShareMaterialWriter;
     }
 >;
-
-export type BinaryChunkedPublicKeyShareMaterialTransport = Readonly<{
-    readonly materialSet: BinaryChunkedPublicKeyShareMaterialSet;
-    readonly transportedPublicKeyShareMaterial: SetupTransportedPublicKeyShareMaterial;
-    readonly publicKeyShareMaterialChunkSource: PublicKeyShareMaterialChunkSource;
-}>;
 
 export type BinaryChunkedPublicKeyShareMaterialBundle = Readonly<{
     readonly materialSet: BinaryChunkedPublicKeyShareMaterialSet;
@@ -151,8 +106,7 @@ export type BinaryChunkedPublicKeyShareMaterialBundle = Readonly<{
 }>;
 
 export type SetupPackagePublicKeyShareMaterialSet =
-    | PublicKeyShareMaterialSet
-    | BinaryChunkedPublicKeyShareMaterialSet;
+    BinaryChunkedPublicKeyShareMaterialSet;
 
 export type PublicKeyShareSuccinctProofByteMaterial = Readonly<{
     readonly proofMaterialRoot: ProtocolHash;
@@ -171,12 +125,7 @@ export type PublicKeyShareSuccinctProofRecord = Readonly<
     JsonRecord &
         PublicKeyShareSuccinctProofByteMaterial & {
             readonly objectType: 'PublicKeyShareSuccinctProof';
-            readonly trusteeIdentity: string;
             readonly trusteeRosterPosition: number;
-            readonly publicKeyShareRoot: ProtocolHash;
-            readonly publicKeyShareMaterialRoot: ProtocolHash;
-            readonly sameSecretBridgeStatementRoot: ProtocolHash;
-            readonly sameSecretBridgeProofRecordRoot: ProtocolHash;
             readonly statementHash: ProtocolHash;
             readonly proofBytesHash: ProtocolHash;
         }
@@ -199,12 +148,6 @@ type CollectivePublicKeyCoefficientVectorMaterial = Readonly<
 export type CollectivePublicKey = Readonly<
     JsonRecord & {
         readonly objectType: 'CollectivePublicKey';
-        readonly publicMatrixSeedHash: ProtocolHash;
-        readonly publicKeyCrpRoot: ProtocolHash;
-        readonly publicAPolynomialRoot: ProtocolHash;
-        readonly publicKeyShareSetRoot: ProtocolHash;
-        readonly publicKeyShareMaterialSetRoot: ProtocolHash;
-        readonly publicKeyShareSuccinctProofSetRoot: ProtocolHash;
         readonly aggregateCoefficientVectorsByLimb: readonly CollectivePublicKeyCoefficientVectorMaterial[];
         readonly collectivePublicKeyRoot: ProtocolHash;
     }
@@ -215,8 +158,6 @@ export type PublicKeyShareSetInput = {
     readonly qSharePrimes: readonly number[];
     readonly participantCount: number;
     readonly publicMatrixSeedHash: ProtocolHash;
-    readonly publicKeyCrpRoot: ProtocolHash;
-    readonly publicAPolynomialRoot: ProtocolHash;
     readonly shareContributions: readonly PublicKeyShareContributionInput[];
 };
 

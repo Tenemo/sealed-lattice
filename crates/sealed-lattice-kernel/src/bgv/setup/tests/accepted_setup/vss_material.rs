@@ -36,95 +36,140 @@ fn ten_participant_vss_proof_bearing_collective_setup_package_passes_preterminal
     );
 }
 
+fn install_signed_vss_complaint(package: &mut serde_json::Value) {
+    let setup_context = package["setupContext"].clone();
+    let accepted_pair = &package["vssShareAcceptances"]["acceptanceRecords"][0];
+    let source_trustee_roster_position = accepted_pair["sourceTrusteeRosterPosition"]
+        .as_u64()
+        .expect("accepted source trustee roster position");
+    let recipient_roster_position = accepted_pair["recipientRosterPosition"]
+        .as_u64()
+        .expect("accepted recipient roster position");
+    let envelope_reference = package["privateVssEnvelopeCommitments"]["envelopeReferences"]
+        .as_array()
+        .expect("private VSS envelope references")
+        .iter()
+        .find(|envelope_reference| {
+            envelope_reference["sourceTrusteeRosterPosition"] == source_trustee_roster_position
+                && envelope_reference["recipientRosterPosition"] == recipient_roster_position
+        })
+        .expect("accepted pair private VSS envelope reference");
+    let source_trustee_identity = envelope_reference["sourceTrusteeIdentity"]
+        .as_str()
+        .expect("source trustee identity");
+    let recipient_identity = envelope_reference["recipientIdentity"]
+        .as_str()
+        .expect("recipient identity");
+    let source_trustee_record = &package["vssPublicCoefficientCommitmentSet"]["sourceTrusteeRecords"]
+        [source_trustee_roster_position as usize];
+    let source_trustee_commitment_root = source_trustee_record
+        .get("sourceCoefficientCommitmentRoot")
+        .or_else(|| source_trustee_record.get("sourceTrusteeCommitmentRoot"))
+        .and_then(serde_json::Value::as_str)
+        .expect("source trustee commitment root");
+    let private_envelope_hash = envelope_reference["privateEnvelopeHash"]
+        .as_str()
+        .expect("private envelope hash");
+    let complaint_evidence_root = derive_canonical_object_hash(&serde_json::json!({
+        "objectType": "VssComplaintEvidence",
+        "privateEnvelopeHash": private_envelope_hash,
+        "failure": "share-opening-mismatch",
+    }))
+    .expect("complaint evidence root");
+    let complaint_payload = serde_json::json!({
+        "objectType": "VssShareComplaint",
+        "setupContextHash": crate::bgv::setup::accepted_setup::setup_context_hash(&setup_context)
+            .expect("setup context hash"),
+        "sourceTrusteeIdentity": source_trustee_identity,
+        "sourceTrusteeRosterPosition": source_trustee_roster_position,
+        "recipientIdentity": recipient_identity,
+        "recipientRosterPosition": recipient_roster_position,
+        "sourceTrusteeCommitmentRoot": source_trustee_commitment_root,
+        "privateVssEnvelopeCommitmentRoot": package["privateVssEnvelopeCommitments"]["privateVssEnvelopeCommitmentRoot"],
+        "privateEnvelopeHash": private_envelope_hash,
+        "complaintEvidenceRoot": complaint_evidence_root,
+        "complaintReasonCode": "shareOpeningMismatch",
+        "recoveryEpoch": 0,
+        "deviceEpoch": 0,
+    });
+    let complaint_root =
+        derive_canonical_object_hash(&complaint_payload).expect("VSS complaint root");
+    let complaint_context_hash = derive_canonical_object_hash(&serde_json::json!({
+        "objectType": "VssShareComplaintSignatureContext",
+        "payloadRoot": complaint_root,
+    }))
+    .expect("VSS complaint signature context hash");
+    let signature_fixture = create_protocol_signature_fixture(
+        &format!("{recipient_identity}-setup-signing"),
+        serde_json::json!({
+            "objectType": "VssShareComplaint",
+            "ceremonyId": setup_context["ceremonyId"],
+            "manifestHash": setup_context["manifestHash"],
+            "objectRoot": complaint_root,
+            "signerRole": "Trustee",
+            "signerIdentity": recipient_identity,
+            "recoveryEpoch": 0,
+            "deviceEpoch": 0,
+            "contextHash": complaint_context_hash,
+        }),
+    )
+    .expect("VSS complaint signature fixture");
+    assert_eq!(
+        signature_fixture.public_key_hash,
+        package["setupIntent"]["trusteeRegistrations"][recipient_roster_position as usize]["signatureEnvelope"]
+            ["publicKeyHash"]
+    );
+
+    package["vssComplaints"] = serde_json::json!({
+        "objectType": "VssComplaintSet",
+        "complaintRecords": [{
+            "objectType": "VssShareComplaint",
+            "sourceTrusteeRosterPosition": source_trustee_roster_position,
+            "recipientRosterPosition": recipient_roster_position,
+            "complaintEvidenceRoot": complaint_evidence_root,
+            "complaintReasonCode": "shareOpeningMismatch",
+            "signatureEnvelope": signature_fixture.envelope,
+        }],
+    });
+}
+
 #[test]
 fn valid_vss_complaint_aborts_accepted_setup() {
     let _accepted_setup_test_timing =
         accepted_setup_test_timing("valid_vss_complaint_aborts_accepted_setup");
     assert_minimal_collective_setup_package_refused(
         "valid signed VSS complaint",
-        |package| {
-            let setup_context = package["setupContext"].clone();
-            let accepted_pair = package["vssShareAcceptances"]["acceptanceRecords"][0].clone();
-            let complaint_evidence_root = derive_canonical_object_hash(&serde_json::json!({
-                "objectType": "VssComplaintEvidence",
-                "privateEnvelopeHash": accepted_pair["privateEnvelopeHash"],
-                "failure": "share-opening-mismatch",
-            }))
-            .expect("complaint evidence root");
-            let complaint_payload = serde_json::json!({
-                "objectType": "VssShareComplaint",
-                "ceremonyId": setup_context["ceremonyId"],
-                "manifestHash": setup_context["manifestHash"],
-                "rosterHash": setup_context["rosterHash"],
-                "setupParametersHash": setup_context["setupParametersHash"],
-                "setupEpoch": setup_context["setupEpoch"],
-                "sourceTrusteeIdentity": accepted_pair["sourceTrusteeIdentity"],
-                "sourceTrusteeRosterPosition": accepted_pair["sourceTrusteeRosterPosition"],
-                "recipientIdentity": accepted_pair["recipientIdentity"],
-                "recipientRosterPosition": accepted_pair["recipientRosterPosition"],
-                "sourceTrusteeCommitmentRoot": accepted_pair["sourceTrusteeCommitmentRoot"],
-                "privateVssEnvelopeCommitmentRoot": package["privateVssEnvelopeCommitments"]["privateVssEnvelopeCommitmentRoot"],
-                "privateEnvelopeHash": accepted_pair["privateEnvelopeHash"],
-                "complaintEvidenceRoot": complaint_evidence_root,
-                "complaintReasonCode": "shareOpeningMismatch",
-                "recoveryEpoch": 0,
-                "deviceEpoch": 0,
-                "signingPublicKeyHash": accepted_pair["signingPublicKeyHash"],
-            });
-            let complaint_root =
-                derive_canonical_object_hash(&complaint_payload).expect("VSS complaint root");
-            let complaint_context_hash = derive_canonical_object_hash(&serde_json::json!({
-                "objectType": "VssShareComplaintSignatureContext",
-                "ceremonyId": setup_context["ceremonyId"],
-                "manifestHash": setup_context["manifestHash"],
-                "rosterHash": setup_context["rosterHash"],
-                "setupParametersHash": setup_context["setupParametersHash"],
-                "setupEpoch": setup_context["setupEpoch"],
-                "sourceTrusteeIdentity": accepted_pair["sourceTrusteeIdentity"],
-                "sourceTrusteeRosterPosition": accepted_pair["sourceTrusteeRosterPosition"],
-                "recipientIdentity": accepted_pair["recipientIdentity"],
-                "recipientRosterPosition": accepted_pair["recipientRosterPosition"],
-                "sourceTrusteeCommitmentRoot": accepted_pair["sourceTrusteeCommitmentRoot"],
-                "privateVssEnvelopeCommitmentRoot": package["privateVssEnvelopeCommitments"]["privateVssEnvelopeCommitmentRoot"],
-                "privateEnvelopeHash": accepted_pair["privateEnvelopeHash"],
-                "complaintEvidenceRoot": complaint_evidence_root,
-                "complaintReasonCode": "shareOpeningMismatch",
-                "complaintRoot": complaint_root,
-            }))
-            .expect("VSS complaint signature context hash");
-            let signature_fixture = create_protocol_signature_fixture(
-                "trustee-0-setup-signing",
-                serde_json::json!({
-                    "objectType": "VssShareComplaint",
-                    "ceremonyId": setup_context["ceremonyId"],
-                    "manifestHash": setup_context["manifestHash"],
-                    "boardHeadHash": null,
-                    "objectRoot": complaint_root,
-                    "chunkMerkleRoot": null,
-                    "signerRole": "Trustee",
-                    "signerIdentity": accepted_pair["recipientIdentity"],
-                    "recoveryEpoch": 0,
-                    "deviceEpoch": 0,
-                    "contextHash": complaint_context_hash,
-                }),
-            )
-            .expect("VSS complaint signature fixture");
-            assert_eq!(
-                signature_fixture.public_key_hash,
-                accepted_pair["signingPublicKeyHash"]
-            );
-
-            let mut complaint_record = complaint_payload;
-            complaint_record["complaintRoot"] = serde_json::json!(complaint_root);
-            complaint_record["signatureEnvelope"] = signature_fixture.envelope;
-            let complaint_set = serde_json::json!({
-                "objectType": "VssComplaintSet",
-                "complaintRecords": [complaint_record],
-            });
-            package["vssComplaints"] = complaint_set;
-        },
+        install_signed_vss_complaint,
         "vssComplaintAcceptedAbort",
     );
+}
+
+#[test]
+fn collective_setup_verifier_refuses_tampered_vss_complaint_payloads() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_tampered_vss_complaint_payloads",
+    );
+    type ComplaintMutation = fn(&mut serde_json::Value);
+    let mutation_cases: &[(&str, ComplaintMutation)] = &[
+        ("tampered VSS complaint evidence root", |package| {
+            install_signed_vss_complaint(package);
+            package["vssComplaints"]["complaintRecords"][0]["complaintEvidenceRoot"] =
+                serde_json::json!(valid_hash('8'));
+        }),
+        ("tampered VSS complaint reason code", |package| {
+            install_signed_vss_complaint(package);
+            package["vssComplaints"]["complaintRecords"][0]["complaintReasonCode"] =
+                serde_json::json!("differentComplaintReason");
+        }),
+    ];
+
+    for (case_label, mutate) in mutation_cases {
+        assert_minimal_collective_setup_package_refused(
+            case_label,
+            *mutate,
+            "vssComplaintRootMismatch",
+        );
+    }
 }
 
 #[test]
@@ -146,7 +191,6 @@ fn collective_setup_verifier_refuses_malformed_private_vss_envelope_commitments(
             package["privateVssEnvelopeCommitments"]["envelopeReferences"][0]["encryptedEnvelope"]
                 ["privateEnvelopeAad"]["recipientIdentity"] = serde_json::json!("trustee-9");
             rebind_first_private_vss_encrypted_envelope_hash(package);
-            rebind_first_private_vss_envelope_commitment_record_root(package);
             rebind_collective_private_vss_envelope_commitment_root(package);
         },
         "privateVssEncryptedEnvelopeAadMismatch",
@@ -168,7 +212,6 @@ fn collective_setup_verifier_refuses_malformed_private_vss_envelope_commitments(
             package["privateVssEnvelopeCommitments"]["envelopeReferences"][0]["encryptedEnvelope"]
                 ["recipientMailboxPublicKeyHash"] = serde_json::json!(valid_hash('7'));
             rebind_first_private_vss_encrypted_envelope_hash(package);
-            rebind_first_private_vss_envelope_commitment_record_root(package);
             rebind_collective_private_vss_envelope_commitment_root(package);
         },
         "privateVssEncryptedEnvelopeBindingMismatch",
@@ -189,75 +232,92 @@ fn collective_setup_verifier_refuses_malformed_vss_share_acceptance_records() {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "collective_setup_verifier_refuses_malformed_vss_share_acceptance_records",
     );
-    assert_minimal_collective_setup_package_refused(
-        "VSS share acceptances replaced with an array",
-        |package| {
-            package["vssShareAcceptances"] = serde_json::json!([]);
-        },
-        "vssShareAcceptancesNotObject",
-    );
+    type AcceptanceMutation = fn(&mut serde_json::Value);
+    let mutation_cases: &[(&str, AcceptanceMutation, &str)] = &[
+        (
+            "VSS share acceptances replaced with an array",
+            |package| package["vssShareAcceptances"] = serde_json::json!([]),
+            "vssShareAcceptancesNotObject",
+        ),
+        (
+            "wrong VSS share acceptance object type",
+            |package| {
+                package["vssShareAcceptances"]["acceptanceRecords"][0]["objectType"] =
+                    serde_json::json!("VssShareComplaint");
+            },
+            "vssShareAcceptanceTypeMismatch",
+        ),
+        (
+            "non-integer VSS share acceptance source position",
+            |package| {
+                package["vssShareAcceptances"]["acceptanceRecords"][0]["sourceTrusteeRosterPosition"] =
+                    serde_json::json!("0");
+            },
+            "vssShareAcceptanceSourceTrusteePositionMissing",
+        ),
+        (
+            "duplicate VSS share acceptance pair",
+            |package| {
+                package["vssShareAcceptances"]["acceptanceRecords"][1] =
+                    package["vssShareAcceptances"]["acceptanceRecords"][0].clone();
+            },
+            "vssShareAcceptanceDuplicate",
+        ),
+        (
+            "VSS share acceptance rebound to another recipient",
+            |package| {
+                package["vssShareAcceptances"]["acceptanceRecords"][0]["recipientRosterPosition"] =
+                    serde_json::json!(1);
+            },
+            "vssShareAcceptanceRootMismatch",
+        ),
+        (
+            "drifted private VSS envelope local verification root",
+            |package| {
+                package["privateVssEnvelopeCommitments"]["envelopeReferences"][0]["localVerificationRoot"] =
+                    serde_json::json!(valid_hash('9'));
+                rebind_collective_private_vss_envelope_commitment_root(package);
+            },
+            "vssShareAcceptanceRootMismatch",
+        ),
+        (
+            "wrong signed VSS share acceptance object root",
+            |package| {
+                package["vssShareAcceptances"]["acceptanceRecords"][0]["signatureEnvelope"]["signedRoot"]
+                    ["objectRoot"] = serde_json::json!(valid_hash('4'));
+            },
+            "vssShareAcceptanceRootMismatch",
+        ),
+        (
+            "tampered VSS share acceptance signature",
+            |package| {
+                let signature_envelope =
+                    package["vssShareAcceptances"]["acceptanceRecords"][0]["signatureEnvelope"]
+                        .as_object_mut()
+                        .expect("signature envelope");
+                let signature_bytes_hex = signature_envelope["signatureBytesHex"]
+                    .as_str()
+                    .expect("signature bytes")
+                    .to_string();
+                let replacement_prefix = if signature_bytes_hex.starts_with("00") {
+                    "01"
+                } else {
+                    "00"
+                };
+                let mut tampered_signature_bytes_hex = signature_bytes_hex;
+                tampered_signature_bytes_hex.replace_range(0..2, replacement_prefix);
+                signature_envelope.insert(
+                    "signatureBytesHex".to_string(),
+                    serde_json::json!(tampered_signature_bytes_hex),
+                );
+            },
+            "InvalidSignature",
+        ),
+    ];
 
-    assert_minimal_collective_setup_package_refused(
-        "wrong VSS share acceptance source trustee commitment root",
-        |package| {
-            package["vssShareAcceptances"]["acceptanceRecords"][0]["sourceTrusteeCommitmentRoot"] =
-                serde_json::json!(valid_hash('3'));
-        },
-        "vssShareAcceptanceSourceTrusteeCommitmentRootMismatch",
-    );
-
-    assert_minimal_collective_setup_package_refused(
-        "drifted private VSS envelope local verification root",
-        |package| {
-            package["privateVssEnvelopeCommitments"]["envelopeReferences"][0]["localVerificationRoot"] =
-                serde_json::json!(valid_hash('9'));
-            rebind_first_private_vss_envelope_commitment_record_root(package);
-            rebind_collective_private_vss_envelope_commitment_root(package);
-        },
-        "vssShareAcceptancePrivateEnvelopeRootMismatch",
-    );
-
-    assert_minimal_collective_setup_package_refused(
-        "wrong VSS share acceptance local verification root",
-        |package| {
-            package["vssShareAcceptances"]["acceptanceRecords"][0]["localVerificationRoot"] =
-                serde_json::json!(valid_hash('4'));
-        },
-        "vssShareAcceptanceLocalVerificationRootMismatch",
-    );
-
-    assert_minimal_collective_setup_package_refused(
-        "wrong VSS share acceptance private envelope hash",
-        |package| {
-            package["vssShareAcceptances"]["acceptanceRecords"][0]["privateEnvelopeHash"] =
-                serde_json::json!(valid_hash('8'));
-        },
-        "vssShareAcceptancePrivateEnvelopeHashMismatch",
-    );
-
-    assert_minimal_collective_setup_package_refused(
-        "tampered VSS share acceptance signature",
-        |package| {
-            let acceptance_record = &mut package["vssShareAcceptances"]["acceptanceRecords"][0];
-            let signature_envelope = acceptance_record
-                .get_mut("signatureEnvelope")
-                .expect("signature envelope");
-            let signature_bytes_hex = signature_envelope["signatureBytesHex"]
-                .as_str()
-                .expect("signature bytes")
-                .to_string();
-            let replacement_prefix = if signature_bytes_hex.starts_with("00") {
-                "01"
-            } else {
-                "00"
-            };
-            let mut tampered_signature_bytes_hex = signature_bytes_hex;
-            tampered_signature_bytes_hex.replace_range(0..2, replacement_prefix);
-            signature_envelope["signatureBytesHex"] =
-                serde_json::json!(tampered_signature_bytes_hex);
-        },
-        "InvalidSignature",
-    );
+    for (case_label, mutate, expected_reason_code) in mutation_cases {
+        assert_minimal_collective_setup_package_refused(case_label, *mutate, expected_reason_code);
+    }
 }
 
 fn compact_aggregate_threshold_proof_context(
@@ -267,12 +327,8 @@ fn compact_aggregate_threshold_proof_context(
     let aggregate_threshold_commitment_set = &fixture["vssPublicAggregateThresholdCommitmentSet"];
 
     crate::bgv::setup::VssAggregateThresholdProofContext {
-        ceremony_id: setup_context["ceremonyId"].as_str().expect("ceremony id"),
-        manifest_hash: setup_context["manifestHash"]
-            .as_str()
-            .expect("manifest hash"),
-        roster_hash: setup_context["rosterHash"].as_str().expect("roster hash"),
-        setup_epoch: setup_context["setupEpoch"].as_str().expect("setup epoch"),
+        setup_context_hash: crate::bgv::setup::accepted_setup::setup_context_hash(setup_context)
+            .expect("setup context hash"),
         public_matrix_seed_hash: aggregate_threshold_commitment_set["publicMatrixSeedHash"]
             .as_str()
             .expect("public matrix seed hash"),
@@ -298,71 +354,46 @@ fn compact_aggregate_threshold_proof_context(
 }
 
 fn verify_compact_aggregate_threshold_proofs(
-    fixture: &serde_json::Value,
+    fixture: &CompactAggregateThresholdProofFixture,
     aggregate_threshold_commitment_set: &serde_json::Value,
 ) -> crate::encoding::CanonicalResult<()> {
     let proof_binding_session = crate::bgv::setup::AcceptedSetupProofBindingSession::begin_fresh()?;
-    for proof_record in
-        fixture["vssPublicAggregateThresholdCommitmentSet"]["aggregateThresholdProofs"]
-            .as_array()
-            .expect("compact aggregate threshold proof records")
-    {
-        let proof_material_root = proof_record["proofMaterialRoot"]
-            .as_str()
-            .expect("compact aggregate threshold proof material root");
-        let proof_binding_lease =
-            crate::bgv::setup::accepted_setup_fixture_proof_binding_lease(proof_material_root)?
-                .expect("compact aggregate threshold proof binding lease");
+    for proof_binding_lease in &fixture.proof_binding_leases {
         crate::bgv::setup::restore_accepted_setup_proof_binding_lease(
             proof_binding_session.session_handle,
-            &proof_binding_session.capability,
-            &proof_binding_lease,
+            proof_binding_lease,
         )?;
     }
+    let package = &fixture.package;
     let verification = crate::bgv::setup::verify_vss_public_aggregate_threshold_proofs(
         Some(&proof_binding_session),
-        fixture,
-        &fixture["vssPublicCoefficientCommitmentSet"],
-        &fixture["vssPublicRecipientShareCommitmentSet"],
+        &package["vssPublicCoefficientCommitmentSet"],
+        &package["vssPublicRecipientShareCommitmentSet"],
         aggregate_threshold_commitment_set,
-        &compact_aggregate_threshold_proof_context(fixture),
+        &compact_aggregate_threshold_proof_context(package),
     );
     match verification {
         Ok(()) => crate::bgv::setup::finish_accepted_setup_proof_binding_session(
             proof_binding_session.session_handle,
-            &proof_binding_session.capability,
         ),
         Err(error) => {
             crate::bgv::setup::cancel_accepted_setup_proof_binding_session(
                 proof_binding_session.session_handle,
-                &proof_binding_session.capability,
             )?;
             Err(error)
         }
     }
 }
 
-fn rebind_aggregate_threshold_statement_root(statement: &mut serde_json::Value) {
-    let mut statement_root_input = statement.clone();
-    statement_root_input
-        .as_object_mut()
-        .expect("aggregate threshold proof statement")
-        .remove("shareLinkageStatementRoot");
-    statement["shareLinkageStatementRoot"] = serde_json::json!(
-        derive_canonical_object_hash(&statement_root_input)
-            .expect("aggregate threshold proof statement root")
-    );
-}
-
 fn assert_compact_aggregate_threshold_proofs_refused(
-    fixture: &serde_json::Value,
+    fixture: &CompactAggregateThresholdProofFixture,
     case_label: &str,
     mutate: impl FnOnce(&mut serde_json::Value),
     expected_error_code: CanonicalErrorCode,
     expected_message_fragment: Option<&str>,
 ) {
     let mut aggregate_threshold_commitment_set =
-        fixture["vssPublicAggregateThresholdCommitmentSet"].clone();
+        fixture.package["vssPublicAggregateThresholdCommitmentSet"].clone();
     mutate(&mut aggregate_threshold_commitment_set);
     let error =
         verify_compact_aggregate_threshold_proofs(fixture, &aggregate_threshold_commitment_set)
@@ -390,13 +421,10 @@ fn collective_setup_verifier_refuses_malformed_aggregate_threshold_proofs() {
         "collective_setup_verifier_refuses_malformed_aggregate_threshold_proofs",
     );
     let fixture = compact_aggregate_threshold_proof_fixture();
-    let _proof_material_eviction_guard =
-        crate::bgv::setup::setup_proof::VerifiedSetupProofMaterialEvictionGuard::for_request(
-            &fixture,
-        );
+    let package = &fixture.package;
     verify_compact_aggregate_threshold_proofs(
         &fixture,
-        &fixture["vssPublicAggregateThresholdCommitmentSet"],
+        &package["vssPublicAggregateThresholdCommitmentSet"],
     )
     .expect("compact aggregate threshold proof fixture must verify");
 
@@ -415,7 +443,7 @@ fn collective_setup_verifier_refuses_malformed_aggregate_threshold_proofs() {
 
     assert_compact_aggregate_threshold_proofs_refused(
         &fixture,
-        "duplicate aggregate threshold proof coordinate",
+        "duplicate aggregate threshold proof reference",
         |aggregate_threshold_commitment_set| {
             let proofs = aggregate_threshold_commitment_set["aggregateThresholdProofs"]
                 .as_array_mut()
@@ -423,164 +451,20 @@ fn collective_setup_verifier_refuses_malformed_aggregate_threshold_proofs() {
             proofs[1] = proofs[0].clone();
         },
         CanonicalErrorCode::MalformedLength,
-        Some("one proof per recipient limb"),
+        Some("unique proof material"),
     );
 
     assert_compact_aggregate_threshold_proofs_refused(
         &fixture,
-        "cross-wired aggregate threshold proof statement",
+        "cross-wired aggregate threshold proof references",
         |aggregate_threshold_commitment_set| {
             let proofs = aggregate_threshold_commitment_set["aggregateThresholdProofs"]
                 .as_array_mut()
                 .expect("aggregate threshold proofs");
-            let first_statement = proofs[0]["vssShareLinkage"].clone();
-            proofs[0]["vssShareLinkage"] = proofs[1]["vssShareLinkage"].clone();
-            proofs[1]["vssShareLinkage"] = first_statement;
+            proofs.swap(0, 1);
         },
-        CanonicalErrorCode::ComponentMismatch,
-        Some("VSS aggregate proof source trustee identity"),
-    );
-
-    assert_compact_aggregate_threshold_proofs_refused(
-        &fixture,
-        "aggregate threshold proof without aggregate mode",
-        |aggregate_threshold_commitment_set| {
-            aggregate_threshold_commitment_set["aggregateThresholdProofs"][0]["vssShareLinkage"]
-                ["isThresholdAggregate"] = serde_json::json!(false);
-        },
-        CanonicalErrorCode::ComponentMismatch,
-        Some("must set isThresholdAggregate"),
-    );
-
-    assert_compact_aggregate_threshold_proofs_refused(
-        &fixture,
-        "aggregate threshold proof missing aggregate mode",
-        |aggregate_threshold_commitment_set| {
-            aggregate_threshold_commitment_set["aggregateThresholdProofs"][0]["vssShareLinkage"]
-                .as_object_mut()
-                .expect("aggregate threshold proof statement")
-                .remove("isThresholdAggregate");
-        },
-        CanonicalErrorCode::ComponentMismatch,
-        Some("must set isThresholdAggregate"),
-    );
-
-    assert_compact_aggregate_threshold_proofs_refused(
-        &fixture,
-        "aggregate threshold proof with a non-canonical statement root",
-        |aggregate_threshold_commitment_set| {
-            aggregate_threshold_commitment_set["aggregateThresholdProofs"][0]["vssShareLinkage"]
-                ["shareLinkageStatementRoot"] = serde_json::json!(valid_hash('c'));
-        },
-        CanonicalErrorCode::ComponentMismatch,
-        Some("VSS aggregate proof share-linkage statement root"),
-    );
-
-    assert_compact_aggregate_threshold_proofs_refused(
-        &fixture,
-        "wrong aggregate threshold source commitment root",
-        |aggregate_threshold_commitment_set| {
-            let statement = &mut aggregate_threshold_commitment_set["aggregateThresholdProofs"][0]
-                ["vssShareLinkage"];
-            statement["coefficientCommitmentRoots"][0] = serde_json::json!(valid_hash('0'));
-            rebind_aggregate_threshold_statement_root(statement);
-        },
-        CanonicalErrorCode::ComponentMismatch,
-        Some("VSS aggregate proof source share commitment root"),
-    );
-
-    assert_compact_aggregate_threshold_proofs_refused(
-        &fixture,
-        "wrong aggregate threshold commitment root",
-        |aggregate_threshold_commitment_set| {
-            let statement = &mut aggregate_threshold_commitment_set["aggregateThresholdProofs"][0]
-                ["vssShareLinkage"];
-            statement["recipientShareCommitmentRoot"] = serde_json::json!(valid_hash('f'));
-            rebind_aggregate_threshold_statement_root(statement);
-        },
-        CanonicalErrorCode::ComponentMismatch,
-        Some("VSS aggregate proof threshold-share commitment root"),
-    );
-
-    assert_compact_aggregate_threshold_proofs_refused(
-        &fixture,
-        "wrong aggregate threshold opening root",
-        |aggregate_threshold_commitment_set| {
-            let statement = &mut aggregate_threshold_commitment_set["aggregateThresholdProofs"][0]
-                ["vssShareLinkage"];
-            statement["recipientShareOpeningRoot"] = serde_json::json!(valid_hash('e'));
-            rebind_aggregate_threshold_statement_root(statement);
-        },
-        CanonicalErrorCode::ComponentMismatch,
-        Some("VSS aggregate proof threshold-share opening root"),
-    );
-
-    assert_compact_aggregate_threshold_proofs_refused(
-        &fixture,
-        "wrong aggregate threshold recipient identity",
-        |aggregate_threshold_commitment_set| {
-            let statement = &mut aggregate_threshold_commitment_set["aggregateThresholdProofs"][0]
-                ["vssShareLinkage"];
-            statement["recipientIdentity"] = serde_json::json!("wrong aggregate recipient");
-            rebind_aggregate_threshold_statement_root(statement);
-        },
-        CanonicalErrorCode::ComponentMismatch,
-        Some("VSS aggregate proof recipient identity"),
-    );
-
-    assert_compact_aggregate_threshold_proofs_refused(
-        &fixture,
-        "wrong aggregate threshold source identity",
-        |aggregate_threshold_commitment_set| {
-            let statement = &mut aggregate_threshold_commitment_set["aggregateThresholdProofs"][0]
-                ["vssShareLinkage"];
-            statement["sourceTrusteeIdentity"] = serde_json::json!("wrong aggregate source");
-            rebind_aggregate_threshold_statement_root(statement);
-        },
-        CanonicalErrorCode::ComponentMismatch,
-        Some("VSS aggregate proof source trustee identity"),
-    );
-
-    assert_compact_aggregate_threshold_proofs_refused(
-        &fixture,
-        "wrong aggregate threshold recipient position",
-        |aggregate_threshold_commitment_set| {
-            let statement = &mut aggregate_threshold_commitment_set["aggregateThresholdProofs"][0]
-                ["vssShareLinkage"];
-            statement["recipientRosterPosition"] = serde_json::json!(1);
-            rebind_aggregate_threshold_statement_root(statement);
-        },
-        CanonicalErrorCode::ComponentMismatch,
-        Some("VSS aggregate proof recipient roster position"),
-    );
-
-    assert_compact_aggregate_threshold_proofs_refused(
-        &fixture,
-        "wrong aggregate threshold source position",
-        |aggregate_threshold_commitment_set| {
-            let statement = &mut aggregate_threshold_commitment_set["aggregateThresholdProofs"][0]
-                ["vssShareLinkage"];
-            statement["sourceTrusteeRosterPosition"] = serde_json::json!(1);
-            rebind_aggregate_threshold_statement_root(statement);
-        },
-        CanonicalErrorCode::ComponentMismatch,
-        Some("VSS aggregate proof source trustee roster position"),
-    );
-
-    assert_compact_aggregate_threshold_proofs_refused(
-        &fixture,
-        "wrong aggregate threshold summand count",
-        |aggregate_threshold_commitment_set| {
-            let statement = &mut aggregate_threshold_commitment_set["aggregateThresholdProofs"][0]
-                ["vssShareLinkage"];
-            statement["coefficientCommitmentRoots"]
-                .as_array_mut()
-                .expect("aggregate threshold summand roots")
-                .pop();
-            rebind_aggregate_threshold_statement_root(statement);
-        },
-        CanonicalErrorCode::MalformedLength,
-        Some("must sum one source share per participant"),
+        CanonicalErrorCode::InvalidProtocolObject,
+        None,
     );
 
     assert_compact_aggregate_threshold_proofs_refused(
@@ -592,5 +476,27 @@ fn collective_setup_verifier_refuses_malformed_aggregate_threshold_proofs() {
         },
         CanonicalErrorCode::ComponentMismatch,
         Some("proof material root"),
+    );
+
+    assert_compact_aggregate_threshold_proofs_refused(
+        &fixture,
+        "tampered aggregate threshold proof material root",
+        |aggregate_threshold_commitment_set| {
+            aggregate_threshold_commitment_set["aggregateThresholdProofs"][0]["proofMaterialRoot"] =
+                serde_json::json!(valid_hash('b'));
+        },
+        CanonicalErrorCode::ComponentMismatch,
+        Some("proof material root"),
+    );
+
+    assert_compact_aggregate_threshold_proofs_refused(
+        &fixture,
+        "aggregate threshold proof hash type mismatch",
+        |aggregate_threshold_commitment_set| {
+            aggregate_threshold_commitment_set["aggregateThresholdProofs"][0]["proofBytesHash"] =
+                serde_json::json!(17);
+        },
+        CanonicalErrorCode::InvalidFixture,
+        None,
     );
 }

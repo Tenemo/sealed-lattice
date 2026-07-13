@@ -14,14 +14,15 @@ fn packed_score_slots_follow_generator_order_without_collisions() {
     assert_eq!(slot_elements[1], 3);
     assert_eq!(slot_elements[2], 9);
     assert_eq!(slot_elements[GENERATOR_SUBGROUP_ORDER], ring_order - 1);
-    assert_eq!(slot_elements.iter().copied().collect::<BTreeSet<_>>().len(), POLYNOMIAL_DEGREE);
+    assert_eq!(
+        slot_elements.iter().copied().collect::<BTreeSet<_>>().len(),
+        POLYNOMIAL_DEGREE
+    );
     assert!(slot_elements.iter().all(|element| element % 2 == 1));
     assert!(
         slot_elements[..GENERATOR_SUBGROUP_ORDER]
             .windows(2)
-            .all(|adjacent_slots| {
-                adjacent_slots[1] == adjacent_slots[0] * 3 % ring_order
-            })
+            .all(|adjacent_slots| { adjacent_slots[1] == adjacent_slots[0] * 3 % ring_order })
     );
 }
 

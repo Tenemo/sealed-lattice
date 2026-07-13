@@ -1,6 +1,7 @@
 use super::*;
 use crate::foundation::{
-    ACTION_STORAGE_ROOT_BYTE_LENGTH, LOCAL_RECORD_NONCE_BYTE_LENGTH, LOCAL_RECORD_TAG_BYTE_LENGTH,
+    ACTION_STORAGE_ROOT_BYTE_LENGTH, DEVICE_WRAPPED_STORAGE_ROOT_NONCE_BYTE_LENGTH,
+    DEVICE_WRAPPED_STORAGE_ROOT_TAG_BYTE_LENGTH,
 };
 
 fn test_binding(offset: u8) -> [u8; BINDING_BYTE_LENGTH] {
@@ -83,9 +84,9 @@ fn root_registry_runs_wrapping_recovery_and_cleanup_without_exporting_an_unbound
         root
     );
 
-    let nonce = [0x31_u8; LOCAL_RECORD_NONCE_BYTE_LENGTH];
+    let nonce = [0x31_u8; DEVICE_WRAPPED_STORAGE_ROOT_NONCE_BYTE_LENGTH];
     let ciphertext = [0x52_u8; ACTION_STORAGE_ROOT_BYTE_LENGTH];
-    let tag = [0x73_u8; LOCAL_RECORD_TAG_BYTE_LENGTH];
+    let tag = [0x73_u8; DEVICE_WRAPPED_STORAGE_ROOT_TAG_BYTE_LENGTH];
     let envelope_input = [
         handle.to_le_bytes().as_slice(),
         capability.as_slice(),
@@ -267,9 +268,9 @@ fn root_registry_refuses_wrong_binding_commitment_capability_and_resource_exhaus
         run_local_storage_root_command(LOCAL_STORAGE_ROOT_COMMAND_STAGE_OPENED, &valid_open_input)
             .expect("stage opened");
     let (opened_handle, _) = stage_output(&opened);
-    let nonce = [0_u8; LOCAL_RECORD_NONCE_BYTE_LENGTH];
+    let nonce = [0_u8; DEVICE_WRAPPED_STORAGE_ROOT_NONCE_BYTE_LENGTH];
     let ciphertext = [0_u8; ACTION_STORAGE_ROOT_BYTE_LENGTH];
-    let tag = [0_u8; LOCAL_RECORD_TAG_BYTE_LENGTH];
+    let tag = [0_u8; DEVICE_WRAPPED_STORAGE_ROOT_TAG_BYTE_LENGTH];
     let envelope = run_local_storage_root_command(
         LOCAL_STORAGE_ROOT_COMMAND_ENCODE_DEVICE_ENVELOPE,
         &[

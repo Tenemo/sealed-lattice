@@ -39,22 +39,22 @@ fn validate_setup_context_token(field_name: &str, value: &str) -> Option<Refusal
 pub(super) fn verify_context(
     setup_package: &Value,
     request: &Value,
-) -> CanonicalResult<Option<Value>> {
+) -> CanonicalResult<Option<Refusals>> {
     let Some(setup_context) = setup_package.get("setupContext") else {
-        return Ok(Some(verification_response(
+        return Ok(Some(setup_refusals(
             vec!["setupContext".to_string()],
             Vec::new(),
-        )?));
+        )));
     };
     if !setup_context.is_object() {
-        return Ok(Some(verification_response(
+        return Ok(Some(setup_refusals(
             Vec::new(),
             vec![Refusal::new(
                 "setupContextNotObject",
                 "setupContext must be a JSON object",
                 "setupPackage.setupContext".to_string(),
             )],
-        )?));
+        )));
     }
     for field_name in [
         "ceremonyId",
@@ -64,38 +64,38 @@ pub(super) fn verify_context(
         "setupEpoch",
     ] {
         if setup_context.get(field_name).is_none() {
-            return Ok(Some(verification_response(
+            return Ok(Some(setup_refusals(
                 vec![format!("setupContext.{field_name}")],
                 Vec::new(),
-            )?));
+            )));
         }
     }
     for field_name in ["manifestHash", "rosterHash", "setupParametersHash"] {
         let Some(field_value) = setup_context.get(field_name).and_then(Value::as_str) else {
-            return Ok(Some(verification_response(
+            return Ok(Some(setup_refusals(
                 Vec::new(),
                 vec![Refusal::new(
                     "setupContextHashMalformed",
                     format!("setupContext.{field_name} must be a protocol hash"),
                     format!("setupPackage.setupContext.{field_name}"),
                 )],
-            )?));
+            )));
         };
         validate_hash_string(field_value, &format!("setupContext.{field_name}"))?;
     }
     for field_name in ["ceremonyId", "setupEpoch"] {
         let Some(field_value) = setup_context.get(field_name).and_then(Value::as_str) else {
-            return Ok(Some(verification_response(
+            return Ok(Some(setup_refusals(
                 Vec::new(),
                 vec![Refusal::new(
                     "setupContextTokenMalformed",
                     format!("setupContext.{field_name} must be a setup context token"),
                     format!("setupPackage.setupContext.{field_name}"),
                 )],
-            )?));
+            )));
         };
         if let Some(refusal) = validate_setup_context_token(field_name, field_value) {
-            return Ok(Some(verification_response(Vec::new(), vec![refusal])?));
+            return Ok(Some(setup_refusals(Vec::new(), vec![refusal])));
         }
     }
 
@@ -103,20 +103,20 @@ pub(super) fn verify_context(
         .get("participantCount")
         .and_then(Value::as_u64)
     else {
-        return Ok(Some(verification_response(
+        return Ok(Some(setup_refusals(
             vec!["setupContext.participantCount".to_string()],
             Vec::new(),
-        )?));
+        )));
     };
     if !participant_count_is_supported(participant_count) {
-        return Ok(Some(verification_response(
+        return Ok(Some(setup_refusals(
             Vec::new(),
             vec![Refusal::new(
                 "participantCountOutsideSupportedRange",
                 "setupContext.participantCount must be a supported roster size in 3..=20",
                 "setupPackage.setupContext.participantCount".to_string(),
             )],
-        )?));
+        )));
     }
     let roster = roster_parameters_from_participant_count(participant_count);
     // The setup parameters hash is a roster family (distinct per participant
@@ -129,14 +129,14 @@ pub(super) fn verify_context(
         .and_then(Value::as_str)
         != Some(expected_setup_parameters_hash.as_str())
     {
-        return Ok(Some(verification_response(
+        return Ok(Some(setup_refusals(
             Vec::new(),
             vec![Refusal::new(
                 "setupParametersHashMismatch",
                 "setupContext.setupParametersHash does not match the roster-derived CollectiveBgvSetup-v1 setup parameters",
                 "setupPackage.setupContext.setupParametersHash".to_string(),
             )],
-        )?));
+        )));
     }
 
     compare_expected_hash(

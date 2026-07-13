@@ -74,8 +74,6 @@ const createMockKernelExports = ({
                         pointer: number,
                         length: number,
                         _sessionHandle: number,
-                        _capabilityPointer: number,
-                        _capabilityLength: number,
                         outputLengthPointer: number,
                     ) => {
                         const encodedCommand = new Uint8Array(

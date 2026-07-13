@@ -8,24 +8,45 @@ import {
     type PublicKeyShareCoefficientVectorMaterial,
     type PublicKeyShareMaterialContributionInput,
     type PublicKeyShareMaterialRecord,
-    type PublicKeyShareMaterialRootReference,
-    type PublicKeyShareMaterialSet,
     type PublicKeyShareMaterialSetInput,
     type PublicKeyShareRecord,
 } from './constants-and-types.js';
 import {
-    assertContextMatches,
     assertNonEmptyString,
     assertNonNegativeSafeInteger,
     assertPositiveSafeInteger,
     coefficientVectorFromLittleEndianHex,
     coefficientVectorHash512,
-    contextFields,
+    deriveCollectiveBgvSetupContextHash,
     publicKeyShareMaterialBinaryMagic,
     sortedByRosterPosition,
     validateCommonInput,
 } from './encoding.js';
 import { publicKeyShareRecordsByRosterPosition } from './share-statement-records.js';
+
+type PublicKeyShareMaterialRootFields = Pick<
+    PublicKeyShareMaterialRecord,
+    | 'trusteeIdentity'
+    | 'trusteeRosterPosition'
+    | 'publicKeyShareRoot'
+    | 'shareCoefficientVectorsByLimb'
+>;
+
+const publicKeyShareMaterialRootInput = (
+    input: Pick<
+        PublicKeyShareMaterialSetInput,
+        'setupContext' | 'publicMatrixSeedHash'
+    >,
+    materialRecord: PublicKeyShareMaterialRootFields,
+) => ({
+    objectType: 'PublicKeyShareMaterial',
+    setupContextHash: deriveCollectiveBgvSetupContextHash(input.setupContext),
+    trusteeIdentity: materialRecord.trusteeIdentity,
+    trusteeRosterPosition: materialRecord.trusteeRosterPosition,
+    publicMatrixSeedHash: input.publicMatrixSeedHash,
+    publicKeyShareRoot: materialRecord.publicKeyShareRoot,
+    shareCoefficientVectorsByLimb: materialRecord.shareCoefficientVectorsByLimb,
+});
 
 const validatePublicKeyShareMaterialContribution = (
     contribution: PublicKeyShareMaterialContributionInput,
@@ -122,12 +143,8 @@ export const publicKeyShareMaterialRecordsFromContributions = (
                 );
             const materialRecordWithoutRoot = {
                 objectType: 'PublicKeyShareMaterial',
-                ...contextFields(input.setupContext),
                 trusteeIdentity: shareRecord.trusteeIdentity,
                 trusteeRosterPosition: shareRecord.trusteeRosterPosition,
-                publicMatrixSeedHash: input.publicMatrixSeedHash,
-                publicKeyCrpRoot: input.publicKeyCrpRoot,
-                publicAPolynomialRoot: input.publicAPolynomialRoot,
                 publicKeyShareRoot: shareRecord.publicKeyShareRoot,
                 shareCoefficientVectorsByLimb,
             } as const satisfies Omit<
@@ -138,7 +155,10 @@ export const publicKeyShareMaterialRecordsFromContributions = (
             return {
                 ...materialRecordWithoutRoot,
                 publicKeyShareMaterialRoot: deriveCanonicalObjectHash(
-                    materialRecordWithoutRoot,
+                    publicKeyShareMaterialRootInput(
+                        input,
+                        materialRecordWithoutRoot,
+                    ),
                 ),
             } satisfies PublicKeyShareMaterialRecord;
         },
@@ -152,59 +172,6 @@ export const assertPublicKeyShareMaterialInput = (
 ): void => {
     validateCommonInput(input);
     assertPositiveSafeInteger(input.ringDegree, 'ringDegree');
-    assertContextMatches(
-        input.setupContext,
-        input.publicKeyShares,
-        'publicKeyShares',
-    );
-    if (
-        input.publicKeyShares.publicMatrixSeedHash !==
-            input.publicMatrixSeedHash ||
-        input.publicKeyShares.publicKeyCrpRoot !== input.publicKeyCrpRoot ||
-        input.publicKeyShares.publicAPolynomialRoot !==
-            input.publicAPolynomialRoot
-    ) {
-        throw new Error(
-            'publicKeyShares must bind the same public-key material input.',
-        );
-    }
-};
-
-export const publicKeyShareMaterialRootReferences = (
-    shareMaterialRecords: readonly PublicKeyShareMaterialRecord[],
-): readonly PublicKeyShareMaterialRootReference[] =>
-    shareMaterialRecords.map((materialRecord) => ({
-        trusteeIdentity: materialRecord.trusteeIdentity,
-        trusteeRosterPosition: materialRecord.trusteeRosterPosition,
-        publicKeyShareMaterialRoot: materialRecord.publicKeyShareMaterialRoot,
-    }));
-
-export const createPublicKeyShareMaterialSet = (
-    input: PublicKeyShareMaterialSetInput,
-): PublicKeyShareMaterialSet => {
-    assertPublicKeyShareMaterialInput(input);
-    const shareMaterialRecords =
-        publicKeyShareMaterialRecordsFromContributions(input);
-    const materialSetWithoutRoot = {
-        objectType: 'PublicKeyShareMaterialSet',
-        ...contextFields(input.setupContext),
-        ringDegree: input.ringDegree,
-        publicMatrixSeedHash: input.publicMatrixSeedHash,
-        publicKeyCrpRoot: input.publicKeyCrpRoot,
-        publicAPolynomialRoot: input.publicAPolynomialRoot,
-        publicKeyShareSetRoot: input.publicKeyShares.publicKeyShareSetRoot,
-        shareMaterialRecords,
-    } as const satisfies Omit<
-        PublicKeyShareMaterialSet,
-        'publicKeyShareMaterialSetRoot'
-    >;
-
-    return {
-        ...materialSetWithoutRoot,
-        publicKeyShareMaterialSetRoot: deriveCanonicalObjectHash(
-            materialSetWithoutRoot,
-        ),
-    } satisfies PublicKeyShareMaterialSet;
 };
 
 const sortedPublicKeyShareMaterialRecords = (
@@ -448,13 +415,3 @@ export const createPublicKeyShareMaterialEncodingSource = (
 
     return { pullChunk, totalByteLength };
 };
-
-export const createPublicKeyShareMaterialSetEncodingSource = (
-    materialSet: PublicKeyShareMaterialSet,
-    qSharePrimes: readonly number[],
-): PublicKeyShareMaterialEncodingSource =>
-    createPublicKeyShareMaterialEncodingSource({
-        qSharePrimes,
-        ringDegree: materialSet.ringDegree,
-        shareMaterialRecords: materialSet.shareMaterialRecords,
-    });

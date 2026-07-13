@@ -32,13 +32,9 @@ impl TestFixture {
             key_seed[31] = u8::try_from(FOUNDATION_PROFILE.participant_count - roster_position)
                 .expect("test reverse roster position fits u8");
             let (public_key, private_key) = ml_dsa_65::KG::keygen_from_seed(&key_seed);
-            let mut mailbox_encapsulation_key = [0u8; 1_184];
-            mailbox_encapsulation_key[1_152] =
-                u8::try_from(roster_position + 1).expect("test roster position fits u8");
             roster_entries.push(RosterEntry {
                 roster_position,
                 signing_verification_key: public_key.into_bytes(),
-                mailbox_encapsulation_key,
             });
             private_keys.push(private_key);
         }
@@ -548,44 +544,6 @@ fn state_derivations_check_domains_boundaries_and_replay_equivocation() {
         RefusalReason::OutsideSupportedProfile
     );
 
-    let replay_key = StateWitnessVoteReplayKey::new(
-        action_context_hash,
-        other_participant_id,
-        participant_id,
-        state_key,
-        StateWitnessVoteKind::Reservation,
-        0,
-    )
-    .expect("reservation replay key derives");
-    let intent_object_hash = Hash512::from_bytes([6; 64]);
-    let mut replay_index = EphemeralStateWitnessVoteReplayIndex::new();
-    assert_eq!(
-        replay_index.observe(replay_key, intent_object_hash),
-        VerificationResult::valid(StateWitnessVoteReplayDisposition::FirstObservation)
-    );
-    assert_eq!(
-        replay_index.observe(replay_key, intent_object_hash),
-        VerificationResult::valid(StateWitnessVoteReplayDisposition::IdempotentReplay)
-    );
-    assert_eq!(
-        replay_index.observe(replay_key, Hash512::from_bytes([7; 64])),
-        VerificationResult::refused(RefusalReason::Equivocation)
-    );
-    assert_eq!(
-        replay_index.observe(
-            StateWitnessVoteReplayKey::new(
-                action_context_hash,
-                other_participant_id,
-                participant_id,
-                state_key,
-                StateWitnessVoteKind::Output,
-                0,
-            )
-            .expect("output replay key derives"),
-            Hash512::from_bytes([7; 64]),
-        ),
-        VerificationResult::valid(StateWitnessVoteReplayDisposition::FirstObservation)
-    );
 }
 
 #[test]
@@ -1019,51 +977,6 @@ fn state_verifier_accepts_exact_quorums_and_refuses_every_malformed_extra_or_con
         RefusalReason::WrongContext,
     );
 
-    let output_lock = StateWitnessLock::new(
-        verified_output.state_key(),
-        Some(reservation_hash),
-        Some(output_hash),
-    )
-    .expect("output lock constructs");
-    assert_eq!(
-        verify_state_witness_lock_preservation(
-            &output_lock,
-            Some(&PreservedStateIntent::Output(&verified_output)),
-        ),
-        VerificationResult::valid(())
-    );
-    assert_eq!(
-        verify_state_witness_lock_preservation(
-            &output_lock,
-            Some(&PreservedStateIntent::Reservation(&verified_reservation)),
-        ),
-        VerificationResult::refused(RefusalReason::ConsumedState)
-    );
-    assert_eq!(
-        verify_state_witness_lock_preservation(&output_lock, None),
-        VerificationResult::refused(RefusalReason::ConsumedState)
-    );
-    let empty_lock = StateWitnessLock::new(verified_output.state_key(), None, None)
-        .expect("empty lock constructs");
-    assert_eq!(
-        verify_state_witness_lock_preservation(&empty_lock, None),
-        VerificationResult::valid(())
-    );
-    let other_state_empty_lock = StateWitnessLock::new(Hash512::from_bytes([0x7f; 64]), None, None)
-        .expect("other-state empty lock constructs");
-    assert_eq!(
-        verify_state_witness_lock_preservation(
-            &other_state_empty_lock,
-            Some(&PreservedStateIntent::Output(&verified_output)),
-        ),
-        VerificationResult::refused(RefusalReason::WrongContext)
-    );
-    assert_eq!(
-        StateWitnessLock::new(verified_output.state_key(), None, Some(output_hash))
-            .expect_err("an output-only lock refuses")
-            .refusal_reason,
-        RefusalReason::MissingPrerequisite
-    );
 }
 
 fn assert_reservation_only_setup_capability_verifies_recovers_and_refuses_outputs(

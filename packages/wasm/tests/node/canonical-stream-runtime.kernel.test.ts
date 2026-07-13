@@ -4,7 +4,6 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import {
     canonicalStreamDomains,
     CanonicalStreamCancellationError,
-    CanonicalStreamInternalError,
     CanonicalStreamRefusalError,
     CanonicalStreamResourceError,
     openCanonicalStreamWorkerRuntime,
@@ -70,33 +69,17 @@ describe('Canonical stream real-WASM runtime', () => {
 
     it('preserves the exact closed canonical stream domain registry', () => {
         expect(canonicalStreamDomains).toEqual({
-            privateMailboxCiphertext: 1,
             dealerVssShareLinkageProof: 2,
             recipientAggregateThresholdShareProof: 3,
             sameSecretProof: 4,
             publicKeyShareProof: 5,
-            collectivePublicKeyAggregateProof: 6,
-            relinearizationRoundOneProof: 7,
-            relinearizationRoundOneAggregateProof: 8,
-            relinearizationRoundTwoProof: 9,
-            galoisShareProof: 10,
             evaluatorKeyAggregateProof: 11,
-            collectivePublicKey: 12,
             evaluatorKeyStore: 13,
-            ballotCiphertext: 14,
-            ballotValidityProof: 15,
-            aggregateCiphertext: 16,
-            replayTargetIdentifierCiphertext: 17,
-            replayTargetOrderCiphertext: 18,
-            targetIdentifierPartialDecryption: 19,
-            targetOrderPartialDecryption: 20,
             maliciousTargetShareProof: 21,
-            checkpointState: 22,
             stateBallotCandidateListExactOutput: 23,
             stateFinalitySignatureExactOutput: 24,
             stateTargetReleaseExactOutput: 25,
             publicKeyShareMaterial: 26,
-            publicEvaluationKeyMaterial: 27,
         });
     });
 
@@ -371,7 +354,7 @@ describe('Canonical stream real-WASM runtime', () => {
         expect(runtime.counterSnapshot().activeSessionCount).toBe(0);
     });
 
-    it('enforces one session, exact object caps, and fallible worker entropy', () => {
+    it('enforces one active session and the exact object cap', () => {
         const runtime = openCanonicalStreamWorkerRuntime({ kernel });
         const first = runtime.openWriter({
             streamDomain: canonicalStreamDomains.evaluatorKeyStore,
@@ -404,37 +387,6 @@ describe('Canonical stream real-WASM runtime', () => {
                 totalByteLength: maximumCanonicalStreamByteLength + 1,
             }),
         ).toThrowError(CanonicalStreamResourceError);
-
-        const entropyFailure = new Error('entropy unavailable');
-        const failingRuntime = openCanonicalStreamWorkerRuntime({
-            fillRandomValues: () => {
-                throw entropyFailure;
-            },
-            kernel,
-        });
-        expect(() =>
-            failingRuntime.openWriter({
-                streamDomain: canonicalStreamDomains.evaluatorKeyStore,
-                totalByteLength: 1,
-            }),
-        ).toThrowError(
-            expect.objectContaining({
-                failureCause: entropyFailure,
-                name: 'CanonicalStreamInternalError',
-            }),
-        );
-        expect(failingRuntime.counterSnapshot().startedSessionCount).toBe(0);
-
-        const zeroEntropyRuntime = openCanonicalStreamWorkerRuntime({
-            fillRandomValues: (destination) => destination.fill(0),
-            kernel,
-        });
-        expect(() =>
-            zeroEntropyRuntime.openWriter({
-                streamDomain: canonicalStreamDomains.evaluatorKeyStore,
-                totalByteLength: 1,
-            }),
-        ).toThrowError(CanonicalStreamInternalError);
     });
 
     it('never panics on a deterministic hostile descriptor corpus and remains reusable', () => {

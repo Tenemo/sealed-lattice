@@ -46,35 +46,11 @@ pub(crate) const SELECTED_EVALUATOR_WORKING_LEVEL: usize = 16;
 // Two post-packing modulus switches followed by the depth-eight comparison take
 // the selected level-16 pipeline to the level-6 output.
 pub(crate) const DIRECT_COMPARISON_OUTPUT_LEVEL: usize = 6;
-// The canonical target ciphertext basis: the direct-comparison output level and
-// its data-prime prefix. Setup-time statements (the same-secret bridge) pin their
-// target-basis binding to this one canonical object.
+// Target ciphertexts leave the direct-comparison pipeline at this level.
 pub(crate) const CANONICAL_TARGET_CIPHERTEXT_LEVEL: usize = DIRECT_COMPARISON_OUTPUT_LEVEL;
 // Five is near the square root of the degree-19 rank lookup.
 pub(crate) const RANK_LOOKUP_BABY_STEP_COUNT: usize = 5;
 
-pub(crate) fn canonical_target_basis_primes() -> &'static [u64] {
-    &crate::bgv::parameters::DATA_PRIMES[..=CANONICAL_TARGET_CIPHERTEXT_LEVEL]
-}
-
-pub(crate) fn canonical_target_basis_value() -> CanonicalResult<serde_json::Value> {
-    if CANONICAL_TARGET_CIPHERTEXT_LEVEL >= crate::bgv::parameters::DATA_PRIMES.len() {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ComponentMismatch,
-            "canonical target ciphertext level is outside the selected data basis",
-        ));
-    }
-
-    Ok(serde_json::json!({
-        "objectType": "CanonicalTargetBasis",
-        "targetLevel": CANONICAL_TARGET_CIPHERTEXT_LEVEL,
-        "targetPrimes": canonical_target_basis_primes(),
-    }))
-}
-
-pub(crate) fn canonical_target_basis_hash() -> CanonicalResult<String> {
-    crate::hashing::derive_canonical_object_hash(&canonical_target_basis_value()?)
-}
 const GENERATOR_SUBGROUP_ORDER: usize = POLYNOMIAL_DEGREE / 2;
 
 pub(crate) struct PackedRankEvaluation {

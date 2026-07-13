@@ -14,15 +14,19 @@ import {
 
 const fixtureHash = makeSetupFixtureHash('setup-private-vss-mailbox-delivery');
 
-const setupContext = makeSetupContext(fixtureHash);
+const setupContext = makeSetupContext(fixtureHash, 1);
+const setupContextHash = deriveCanonicalObjectHash({
+    objectType: 'CollectiveBgvSetupContext',
+    ...setupContext,
+});
 
 describe('private VSS mailbox delivery', () => {
     it('transports private VSS proof material under its canonical descriptor and semantic root', async () => {
         const proofBytesHash = fixtureHash('proof-bytes');
         const descriptorBytes = canonicalStreamDescriptorFixture(4, 9, 8);
         const expectedTransportedMaterialRoot = deriveCanonicalObjectHash({
-            objectType: 'PrivateVssShareTransportedSuccinctProofMaterial',
-            statementHash: fixtureHash('statement-hash'),
+            objectType: 'SetupProofMaterialReference',
+            proofFamily: 'vss-opening-carry',
             proofBytesHash,
         });
         let observedPrivateEnvelope: Record<string, unknown> | undefined;
@@ -121,6 +125,9 @@ describe('private VSS mailbox delivery', () => {
         );
 
         expect(observedPrivateEnvelope).toBeDefined();
+        expect(observedPrivateEnvelope?.setupContextHash).toBe(
+            setupContextHash,
+        );
         const limbOpening = (
             observedPrivateEnvelope?.rnsShareOpenings as Record<
                 string,

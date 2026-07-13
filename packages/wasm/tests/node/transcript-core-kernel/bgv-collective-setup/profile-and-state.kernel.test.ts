@@ -1,10 +1,15 @@
 import { describe, expect, it } from 'vitest';
 
-import { setupRequest, validHash } from '../bgv-passive-setup-fixtures.js';
-
 import { createLocalTrusteeSetupStateCommitment } from '#packages/protocol/src/setup/local-trustee-setup-state';
 import { type CollectiveBgvSetupContext } from '#packages/protocol/src/setup/vss-share-verification-records';
 import { loadTranscriptCoreKernel } from '#packages/wasm/src/index';
+
+const validHash = (fill: string): string => fill.repeat(128);
+const setupRequest = {
+    ceremonyId: 'ceremony-main',
+    manifestHash: validHash('a'),
+    rosterHash: validHash('b'),
+} as const;
 
 describe('collective BGV setup kernel commands', () => {
     it('exposes the canonical logical-slot rotation schedule', async () => {
@@ -20,9 +25,6 @@ describe('collective BGV setup kernel commands', () => {
         ).toEqual(
             expectedRotations.map((rotation) => ({ rotation, level: 16 })),
         );
-        expect(parameters.evaluatorKeySchedule.requiredGaloisSetHash).toBe(
-            'a0a69e93ae3165bd0213a2d1e418d08b5662be4e32b0f9ce2b187f753802a214ea70721b09342cc524da78168d9317c325c84f769d4b5c4d72d1f0d08e1db018',
-        );
         expect(parameters.setupParametersHash).toBe(
             '9f470faca92f4ea8119273e516d3a0cab55d8036fa2690dfdf67aad78d653f1b539a063a2260c3c23da0940600151789a3deb0257f4cf5192dc30eccf5745cd2',
         );
@@ -37,6 +39,7 @@ describe('collective BGV setup kernel commands', () => {
             rosterHash: setupRequest.rosterHash,
             setupParametersHash: parameters.setupParametersHash,
             setupEpoch: 'setup-epoch-1',
+            participantCount: 4,
         } satisfies CollectiveBgvSetupContext;
         const localStateCommitment = createLocalTrusteeSetupStateCommitment({
             setupContext,

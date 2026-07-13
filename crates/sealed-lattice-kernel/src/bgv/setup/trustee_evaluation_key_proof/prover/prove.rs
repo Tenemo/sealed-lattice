@@ -12,7 +12,11 @@ use super::super::relation::{
     SumcheckPublicEvaluations, TrusteeEvaluationKeyStatement, TrusteeEvaluationKeyWitness,
     batched_row_check_value, batched_sumcheck_value,
 };
-use super::super::*;
+use super::super::{
+    COMMITMENT_BOUND_FACTOR, DEEP_EVALUATION_POINT_COUNT, LOW_DEGREE_QUERY_COUNT,
+    MAIN_LOW_DEGREE_TRANSCRIPT_PURPOSE, MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
+    SUMCHECK_RESIDUAL_LOW_DEGREE_TRANSCRIPT_PURPOSE, invalid_succinct_setup_proof,
+};
 use super::challenges::{build_limb_public_vectors, draw_limb_challenges};
 use super::claim_masking::{global_claim_id, global_claim_integers};
 use super::polynomial::{
@@ -26,11 +30,15 @@ use super::vss_committed_material::{
 use super::witness::{
     LimbWitnessCommitment, build_limb_witness_commitment, validate_witness_support,
 };
-use super::*;
+use super::{
+    LEAF_SALT_DOMAIN, LimbProof, MaterialTreeQueryOpening, PhaseQueryOpening,
+    SuccinctEvaluationKeyProof,
+};
 use crate::bgv::evaluator::prg::DeterministicSampler;
 use crate::bgv::modular_arithmetic::inverse_mod;
 use crate::bgv::parameters::DATA_PRIMES;
 use crate::bgv::setup::commitment::SETUP_COMMITMENT_MODULUS_LIMB_INDICES;
+use crate::encoding::CanonicalResult;
 use num_bigint::BigInt;
 use num_traits::ToPrimitive;
 
@@ -684,7 +692,7 @@ fn prove_evaluation_key_share_with_limb_batch_size(
 ) -> CanonicalResult<SuccinctEvaluationKeyProof> {
     statement.validate_shape()?;
     if statement
-        .keys
+        .keys()
         .iter()
         .any(|key| key.kind.has_diagonal_source())
     {
@@ -752,10 +760,9 @@ fn prove_evaluation_key_share_with_limb_batch_size(
     for witness_tree_root in &witness_tree_roots {
         transcript.absorb("witness-tree-root", witness_tree_root);
     }
-    let family_shape = statement.family_shape()?;
+    let family_shape = statement.family_shape();
     let consistency_vector_length = statement
-        .vss_share_linkage
-        .as_ref()
+        .vss_share_linkage()
         .map(|share_linkage| share_linkage.packed_ring_degree(statement.ring_degree))
         .transpose()?
         .unwrap_or(statement.ring_degree);

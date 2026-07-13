@@ -16,12 +16,12 @@ pub(super) type PrivateVssEnvelopeBindingMap = BTreeMap<(u64, u64), PrivateVssEn
 pub(super) fn verify_private_vss_envelope_commitments(
     setup_package: &Value,
     trustee_registrations: &setup_intent::SetupIntentTrusteeRegistrationMap,
-) -> CanonicalResult<Option<Value>> {
+) -> CanonicalResult<Option<Refusals>> {
     let Some(commitment_set) = setup_package.get("privateVssEnvelopeCommitments") else {
-        return Ok(Some(verification_response(
+        return Ok(Some(setup_refusals(
             vec!["privateVssEnvelopeCommitments".to_string()],
             Vec::new(),
-        )?));
+        )));
     };
     if !commitment_set.is_object() {
         return Ok(Some(private_vss_envelope_refusal(
@@ -46,26 +46,14 @@ pub(super) fn verify_private_vss_envelope_commitments(
             "setupContext was required before private VSS envelope verification",
         )
     })?;
-    if let Err(refusal) = verify_private_vss_envelope_context(
-        commitment_set,
-        setup_context,
-        "setupPackage.privateVssEnvelopeCommitments",
-    ) {
-        return Ok(Some(private_vss_envelope_refusal(
-            refusal.reason_code,
-            refusal.message,
-            refusal.object_path,
-        )?));
-    }
-
     let Some(set_root) = commitment_set
         .get("privateVssEnvelopeCommitmentRoot")
         .and_then(Value::as_str)
     else {
-        return Ok(Some(verification_response(
+        return Ok(Some(setup_refusals(
             vec!["privateVssEnvelopeCommitments.privateVssEnvelopeCommitmentRoot".to_string()],
             Vec::new(),
-        )?));
+        )));
     };
     validate_hash_string(
         set_root,
@@ -84,17 +72,6 @@ pub(super) fn verify_private_vss_envelope_commitments(
                 "commonRandomness.publicMatrixSeedHash was required before private VSS envelope verification",
             )
         })?;
-    if commitment_set
-        .get("publicMatrixSeedHash")
-        .and_then(Value::as_str)
-        != Some(public_matrix_seed_hash)
-    {
-        return Ok(Some(private_vss_envelope_refusal(
-            "privateVssEnvelopePublicMatrixSeedMismatch",
-            "privateVssEnvelopeCommitments.publicMatrixSeedHash must match commonRandomness.publicMatrixSeedHash",
-            "setupPackage.privateVssEnvelopeCommitments.publicMatrixSeedHash",
-        )?));
-    }
     let vss_coefficient_commitment_root = accepted_vss_coefficient_commitment_root(setup_package)
         .ok_or_else(|| {
             CanonicalError::new(
@@ -102,18 +79,6 @@ pub(super) fn verify_private_vss_envelope_commitments(
                 "an accepted VSS coefficient commitment root was required before private VSS envelope verification",
             )
         })?;
-    if commitment_set
-        .get("vssCoefficientCommitmentRoot")
-        .and_then(Value::as_str)
-        != Some(vss_coefficient_commitment_root)
-    {
-        return Ok(Some(private_vss_envelope_refusal(
-            "privateVssEnvelopeVssCommitmentRootMismatch",
-            "privateVssEnvelopeCommitments.vssCoefficientCommitmentRoot must match the accepted VSS coefficient commitments",
-            "setupPackage.privateVssEnvelopeCommitments.vssCoefficientCommitmentRoot",
-        )?));
-    }
-
     let expected_trustees = expected_trustees_from_setup_intent(trustee_registrations);
     let source_trustee_commitment_roots =
         source_trustee_commitment_roots_from_vss_commitments(setup_package)?;
@@ -144,11 +109,13 @@ pub(super) fn verify_private_vss_envelope_commitments(
         }
     }
 
-    let mut root_input = commitment_set.clone();
-    root_input
-        .as_object_mut()
-        .expect("private VSS envelope commitment set object was checked")
-        .remove("privateVssEnvelopeCommitmentRoot");
+    let mut root_input = json!({
+        "objectType": PRIVATE_VSS_ENVELOPE_COMMITMENT_SET_OBJECT_TYPE,
+        "setupContextHash": setup_context_hash(setup_context)?,
+        "publicMatrixSeedHash": public_matrix_seed_hash,
+        "vssCoefficientCommitmentRoot": vss_coefficient_commitment_root,
+        "envelopeReferences": commitment_set.get("envelopeReferences").cloned().unwrap_or(Value::Null),
+    });
     let root_input_object = root_input
         .as_object_mut()
         .expect("private VSS envelope commitment set object was checked");
@@ -172,30 +139,6 @@ pub(super) fn verify_private_vss_envelope_commitments(
     }
 
     Ok(None)
-}
-
-fn verify_private_vss_envelope_context(
-    value: &Value,
-    setup_context: &Value,
-    object_path: &str,
-) -> Result<(), Refusal> {
-    for field_name in [
-        "ceremonyId",
-        "manifestHash",
-        "rosterHash",
-        "setupParametersHash",
-        "setupEpoch",
-    ] {
-        if value.get(field_name) != setup_context.get(field_name) {
-            return Err(Refusal::new(
-                "privateVssEnvelopeContextMismatch",
-                format!("{object_path}.{field_name} must match setupContext"),
-                format!("{object_path}.{field_name}"),
-            ));
-        }
-    }
-
-    Ok(())
 }
 
 pub(super) fn private_vss_envelope_bindings_from_package(
@@ -475,40 +418,6 @@ fn private_vss_envelope_binding_from_reference(
         return Ok(Err(refusal));
     }
 
-    let Some(private_envelope_commitment_root) = envelope_reference
-        .get("privateEnvelopeCommitmentRoot")
-        .and_then(Value::as_str)
-    else {
-        return Ok(Err(Refusal::new(
-            "privateVssEnvelopeCommitmentRecordRootMissing",
-            "private VSS envelope commitment must bind privateEnvelopeCommitmentRoot",
-            "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.privateEnvelopeCommitmentRoot",
-        )));
-    };
-    validate_hash_string(
-        private_envelope_commitment_root,
-        "privateVssEnvelopeCommitments.envelopeReferences.privateEnvelopeCommitmentRoot",
-    )?;
-    let mut record_root_input = envelope_reference.clone();
-    record_root_input
-        .as_object_mut()
-        .expect("private VSS envelope commitment reference object was checked")
-        .remove("privateEnvelopeCommitmentRoot");
-    // The commitment root excludes the transported encrypted envelope bytes because
-    // their canonical hash is already bound by encryptedEnvelopeHash.
-    record_root_input
-        .as_object_mut()
-        .expect("private VSS envelope commitment reference object was checked")
-        .remove("encryptedEnvelope");
-    let expected_record_root = derive_canonical_object_hash(&record_root_input)?;
-    if private_envelope_commitment_root != expected_record_root {
-        return Ok(Err(Refusal::new(
-            "privateVssEnvelopeCommitmentRecordRootMismatch",
-            "privateEnvelopeCommitmentRoot does not match the canonical private VSS envelope commitment record",
-            "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.privateEnvelopeCommitmentRoot",
-        )));
-    }
-
     Ok(Ok(PrivateVssEnvelopeBinding {
         source_trustee_identity: source_trustee_identity.to_string(),
         recipient_identity: recipient_identity.to_string(),
@@ -623,11 +532,7 @@ fn private_vss_envelope_aad_value(
 ) -> CanonicalResult<Value> {
     Ok(json!({
         "objectType": PRIVATE_VSS_ENVELOPE_AAD_OBJECT_TYPE,
-        "ceremonyId": setup_context_string(setup_context, "ceremonyId")?,
-        "manifestHash": setup_context_string(setup_context, "manifestHash")?,
-        "rosterHash": setup_context_string(setup_context, "rosterHash")?,
-        "setupParametersHash": setup_context_string(setup_context, "setupParametersHash")?,
-        "setupEpoch": setup_context_string(setup_context, "setupEpoch")?,
+        "setupContextHash": setup_context_hash(setup_context)?,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "vssCoefficientCommitmentRoot": vss_coefficient_commitment_root,
         "sourceTrusteeIdentity": source_trustee_identity,
@@ -642,9 +547,9 @@ fn private_vss_envelope_refusal(
     reason_code: &'static str,
     message: impl Into<String>,
     object_path: impl Into<String>,
-) -> CanonicalResult<Value> {
-    verification_response(
+) -> CanonicalResult<Refusals> {
+    Ok(setup_refusals(
         Vec::new(),
         vec![Refusal::new(reason_code, message, object_path)],
-    )
+    ))
 }

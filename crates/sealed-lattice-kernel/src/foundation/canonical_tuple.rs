@@ -668,30 +668,6 @@ impl CanonicalTuple {
         Self::decode_with_budget(bytes, limits, &mut budget)
     }
 
-    pub(super) fn decode_schema_header(
-        bytes: &[u8],
-        limits: &CanonicalDecodeLimits,
-    ) -> Result<(u16, u16), CanonicalCodecError> {
-        if bytes.len() > limits.maximum_tuple_byte_length {
-            return Err(CanonicalCodecError::new(
-                CanonicalCodecErrorKind::LimitExceeded,
-                0,
-                "tuple byte length exceeds the configured limit",
-            ));
-        }
-        if bytes.len() < 8 {
-            return Err(CanonicalCodecError::new(
-                CanonicalCodecErrorKind::Truncated,
-                bytes.len(),
-                "tuple header is truncated",
-            ));
-        }
-        Ok((
-            u16::from_le_bytes([bytes[0], bytes[1]]),
-            u16::from_le_bytes([bytes[2], bytes[3]]),
-        ))
-    }
-
     pub(super) fn decode_with_budget(
         bytes: &[u8],
         limits: &CanonicalDecodeLimits,

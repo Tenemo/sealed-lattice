@@ -30,12 +30,13 @@ pub(super) struct PublicKeyShareMaterialBinding {
 pub(super) fn verify_collective_public_key_material(
     setup_package: &Value,
     request: &Value,
-) -> CanonicalResult<Option<Value>> {
+    proof_binding_session: &crate::bgv::setup::AcceptedSetupProofBindingSession,
+) -> CanonicalResult<Option<Refusals>> {
     let Some(aggregate_object) = setup_package.get("collectivePublicKey") else {
-        return Ok(Some(verification_response(
+        return Ok(Some(setup_refusals(
             vec!["collectivePublicKey".to_string()],
             Vec::new(),
-        )?));
+        )));
     };
     if !aggregate_object.is_object() {
         return Ok(Some(public_key_refusal(
@@ -59,15 +60,6 @@ pub(super) fn verify_collective_public_key_material(
             "setupContext was required before collective public-key verification",
         )
     })?;
-    if let Err(error) =
-        verify_context_fields_match(aggregate_object, setup_context, "collectivePublicKey")
-    {
-        return Ok(Some(public_key_refusal(
-            "collectivePublicKeyContextMismatch",
-            error.message,
-            "setupPackage.collectivePublicKey",
-        )?));
-    }
     let material_set = setup_package.get("publicKeyShareMaterial").ok_or_else(|| {
         CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -83,28 +75,30 @@ pub(super) fn verify_collective_public_key_material(
             )
         })?;
     if request.get("transportedPublicKeyShareMaterial").is_none() {
-        return Ok(Some(verification_response(
+        return Ok(Some(setup_refusals(
             vec!["transportedPublicKeyShareMaterial".to_string()],
             Vec::new(),
-        )?));
+        )));
     }
     let common_binding = public_key_common_binding(setup_package)?;
     let share_records = public_key_share_records_by_roster_position(setup_package)?;
+    let public_key_share_set_root = value_string(
+        setup_package.get("publicKeyShares").ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "publicKeyShares was required before collective public-key verification",
+            )
+        })?,
+        "publicKeyShareSetRoot",
+    )?;
     let material_bindings = match verify_public_key_share_material_set(
         material_set,
         setup_context,
         &common_binding,
-        value_string(
-            setup_package.get("publicKeyShares").ok_or_else(|| {
-                CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
-                    "publicKeyShares was required before collective public-key verification",
-                )
-            })?,
-            "publicKeyShareSetRoot",
-        )?,
+        public_key_share_set_root,
         &share_records,
         request,
+        proof_binding_session,
     ) {
         Ok(bindings) => bindings,
         Err(error) => {
@@ -116,46 +110,7 @@ pub(super) fn verify_collective_public_key_material(
         }
     };
     let roster = super::accepted_roster_from_package(setup_package)?;
-    let ring_degree = usize::try_from(value_u64(material_set, "ringDegree")?).map_err(|_| {
-        CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "publicKeyShareMaterial.ringDegree does not fit usize",
-        )
-    })?;
-    let expected_source_bindings = [
-        (
-            "publicMatrixSeedHash",
-            Some(common_binding.public_matrix_seed_hash.as_str()),
-        ),
-        (
-            "publicKeyShareSetRoot",
-            setup_package
-                .get("publicKeyShares")
-                .and_then(|share_set| share_set.get("publicKeyShareSetRoot"))
-                .and_then(Value::as_str),
-        ),
-        (
-            "publicKeyShareMaterialSetRoot",
-            material_set
-                .get("publicKeyShareMaterialSetRoot")
-                .and_then(Value::as_str),
-        ),
-        (
-            "publicKeyShareSuccinctProofSetRoot",
-            succinct_proof_set
-                .get("publicKeyShareSuccinctProofSetRoot")
-                .and_then(Value::as_str),
-        ),
-    ];
-    for (field_name, expected_value) in expected_source_bindings {
-        if aggregate_object.get(field_name).and_then(Value::as_str) != expected_value {
-            return Ok(Some(public_key_refusal(
-                "collectivePublicKeySourceRootMismatch",
-                format!("collectivePublicKey.{field_name} must bind the verified source root"),
-                format!("setupPackage.collectivePublicKey.{field_name}"),
-            )?));
-        }
-    }
+    let ring_degree = POLYNOMIAL_DEGREE;
     if let Err(error) = verify_collective_public_key_coefficients(
         aggregate_object,
         &material_bindings,
@@ -172,20 +127,35 @@ pub(super) fn verify_collective_public_key_material(
         .get("collectivePublicKeyRoot")
         .and_then(Value::as_str)
     else {
-        return Ok(Some(verification_response(
+        return Ok(Some(setup_refusals(
             vec!["collectivePublicKey.collectivePublicKeyRoot".to_string()],
             Vec::new(),
-        )?));
+        )));
     };
     validate_hash_string(
         collective_public_key_root,
         "collectivePublicKey.collectivePublicKeyRoot",
     )?;
-    let mut root_input = aggregate_object.clone();
-    root_input
-        .as_object_mut()
-        .expect("collective public-key object was checked")
-        .remove("collectivePublicKeyRoot");
+    let root_input = json!({
+        "objectType": COLLECTIVE_PUBLIC_KEY_OBJECT_TYPE,
+        "setupContextHash": setup_context_hash(setup_context)?,
+        "publicMatrixSeedHash": common_binding.public_matrix_seed_hash.as_str(),
+        "publicKeyShareSetRoot": public_key_share_set_root,
+        "publicKeyShareMaterialSetRoot": value_string(
+            material_set,
+            "publicKeyShareMaterialSetRoot",
+        )?,
+        "publicKeyShareSuccinctProofSetRoot": value_string(
+            succinct_proof_set,
+            "publicKeyShareSuccinctProofSetRoot",
+        )?,
+        "aggregateCoefficientVectorsByLimb": aggregate_object
+            .get("aggregateCoefficientVectorsByLimb")
+            .ok_or_else(|| CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "collectivePublicKey.aggregateCoefficientVectorsByLimb is required",
+            ))?,
+    });
     let expected_root = derive_canonical_object_hash(&root_input)?;
     if collective_public_key_root != expected_root {
         return Ok(Some(public_key_refusal(
@@ -194,9 +164,7 @@ pub(super) fn verify_collective_public_key_material(
             "setupPackage.collectivePublicKey.collectivePublicKeyRoot",
         )?));
     }
-    if ring_degree == POLYNOMIAL_DEGREE
-        && let Err(error) = accepted_setup_collective_public_key_from_package(setup_package)
-    {
+    if let Err(error) = accepted_setup_collective_public_key_from_package(setup_package) {
         return Ok(Some(public_key_refusal(
             "collectivePublicKeyRuntimeMaterialInvalid",
             error.message,
@@ -216,16 +184,11 @@ use collective_public_key::*;
 
 pub(in crate::bgv::setup) use collective_public_key::accepted_setup_collective_public_key_from_package;
 pub(super) use material_records::verify_public_key_share_material_set;
-#[cfg(test)]
-pub(in crate::bgv::setup) use transport::authenticated_public_key_share_material_stream_summary;
-#[cfg(test)]
-pub(in crate::bgv::setup) use transport::evict_verified_canonical_public_key_share_materials;
 pub(in crate::bgv::setup) use transport::{
-    CanonicalPublicKeyShareMaterialStream,
+    CanonicalPublicKeyShareMaterialStream, VerifiedCanonicalPublicKeyShareMaterialHandle,
+    VerifiedCanonicalPublicKeyShareMaterialStoreEntry,
     absorb_verified_canonical_public_key_share_material_chunk,
-    authenticated_public_key_share_material_stream_summary_in_session,
     begin_verified_canonical_public_key_share_material_stream,
     cancel_verified_canonical_public_key_share_material_stream,
-    drain_verified_canonical_public_key_share_materials,
     finish_verified_canonical_public_key_share_material_stream,
 };

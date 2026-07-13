@@ -3,25 +3,34 @@ use super::same_secret_bridge::*;
 use super::share_linkage::*;
 use super::*;
 
+#[derive(Clone)]
+pub(in super::super::super) struct FinalizedCollectiveSetupPackageFixture {
+    pub(in super::super::super) package: serde_json::Value,
+    pub(in super::super::super) proof_binding_leases:
+        Vec<crate::bgv::setup::CanonicalSetupProofBindingLease>,
+}
+
 pub(in super::super::super) fn finalize_collective_setup_package(
     mut package: serde_json::Value,
-) -> serde_json::Value {
+) -> FinalizedCollectiveSetupPackageFixture {
     let participant_count = participant_count_from_package(&package);
     package["vssPublicCoefficientCommitmentSet"] =
         vss_public_coefficient_commitment_set_object(&package, 128);
     package["vssPublicRecipientShareCommitmentSet"] =
         vss_public_recipient_share_commitment_set_object(&package);
-    package["vssPublicAggregateThresholdCommitmentSet"] =
+    let aggregate_threshold_commitment_set =
         vss_public_aggregate_threshold_commitment_set_object(&package);
+    package["vssPublicAggregateThresholdCommitmentSet"] = aggregate_threshold_commitment_set.value;
     super::aggregate_threshold::append_vss_aggregate_threshold_proof_material_transport(
         &mut package,
     );
     package["vssShareLinkageStatement"] = vss_share_linkage_statement_object(&package);
-    package["vssShareLinkageProofMaterialSet"] =
-        vss_share_linkage_proof_material_set_object(&package);
+    let share_linkage_proof_material_set = vss_share_linkage_proof_material_set_object(&package);
+    package["vssShareLinkageProofMaterialSet"] = share_linkage_proof_material_set.value;
     package["sameSecretBridgeStatementSet"] = same_secret_bridge_statement_set_object(&package);
-    package["sameSecretBridgeProofMaterialSet"] =
+    let same_secret_bridge_proof_material_set =
         same_secret_bridge_proof_material_set_object(&package);
+    package["sameSecretBridgeProofMaterialSet"] = same_secret_bridge_proof_material_set.value;
 
     // The small canonical BDLOP commitment-root set remains public. Bridge
     // construction above consumes the full opening material and carries only
@@ -59,9 +68,10 @@ pub(in super::super::super) fn finalize_collective_setup_package(
         .as_array()
         .expect("source trustee records")
         .iter()
-        .map(|source_record| {
+        .enumerate()
+        .map(|(source_trustee_roster_position, source_record)| {
             serde_json::json!({
-                "sourceTrusteeRosterPosition": source_record["sourceTrusteeRosterPosition"],
+                "sourceTrusteeRosterPosition": source_trustee_roster_position,
                 "sourceTrusteeCommitmentRoot": source_record["sourceCoefficientCommitmentRoot"],
             })
         })
@@ -101,7 +111,13 @@ pub(in super::super::super) fn finalize_collective_setup_package(
         .remove("vssCoefficientCommitmentMaterial");
 
     rebind_collective_setup_package_hash(&mut package);
-    package
+    let mut proof_binding_leases = aggregate_threshold_commitment_set.proof_binding_leases;
+    proof_binding_leases.extend(share_linkage_proof_material_set.proof_binding_leases);
+    proof_binding_leases.extend(same_secret_bridge_proof_material_set.proof_binding_leases);
+    FinalizedCollectiveSetupPackageFixture {
+        package,
+        proof_binding_leases,
+    }
 }
 
 // The reference finalized fixture carries the descriptor-backed package and
@@ -112,23 +128,23 @@ fn minimal_finalized_collective_setup_fixture() -> CollectiveSetupVerificationFi
     descriptor_backed_vss_collective_setup_fixture()
 }
 
-// The finalized setup package flows through every accepted-setup phase: the
-// canonical BDLOP commitment roots and bridge-carried constant bodies remain
+// The finalized setup package flows through the accepted-setup verification
+// path: the canonical BDLOP commitment roots and bridge-carried constant bodies remain
 // alongside the committed-material sets, while the prover-only full opening
-// material is omitted. Every downstream phase
+// material is omitted. Every downstream verifier
 // (private VSS envelopes, share acceptances, public key shares and proofs,
 // evaluator schedule and final objects) binds the relevant
 // roots.
 // Like the full-VSS minimal package this reduced-ring package is pre-terminal (no
 // collective public key runtime material), so it is not fully valid; the check is
-// that it passes every phase and object requirement, leaving only the terminal
+// that it passes every object requirement, leaving only the terminal
 // runtime objects missing.
 #[test]
 fn minimal_finalized_collective_setup_package_passes_accepted_setup() {
     let fixture = minimal_finalized_collective_setup_fixture();
     let package = &fixture.package;
     assert_eq!(
-        public_coefficient_commitment_ring_degree_from_fixture_package(package),
+        vss_commitment_ring_degree_from_fixture_package(package),
         128,
         "finalized fixtures must retain the accepted public commitment ring degree",
     );

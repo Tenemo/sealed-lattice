@@ -16,24 +16,6 @@ pub(in crate::bgv::setup) fn accepted_setup_collective_public_key_from_package(
         )
     })?;
     let public_matrix_seed_hash = value_string(common_randomness, "publicMatrixSeedHash")?;
-    if value_string(aggregate_object, "publicMatrixSeedHash")? != public_matrix_seed_hash {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ComponentMismatch,
-            "collective public key must bind the accepted public matrix seed",
-        ));
-    }
-    let material_set = setup_package.get("publicKeyShareMaterial").ok_or_else(|| {
-        CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "publicKeyShareMaterial was required before accepted public-key runtime loading",
-        )
-    })?;
-    if value_u64(material_set, "ringDegree")? != POLYNOMIAL_DEGREE as u64 {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "accepted collective public-key runtime material requires full-ring aggregate coefficients",
-        ));
-    }
     let public_b = collective_public_key_component_b_from_aggregate_object(aggregate_object)?;
     let public_a = DATA_PRIMES
         .iter()

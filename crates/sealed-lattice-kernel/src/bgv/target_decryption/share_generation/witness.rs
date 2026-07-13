@@ -13,45 +13,9 @@ pub(in super::super) fn read_local_target_decryption_share_witness(
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "local target-decryption share witness must be LocalTrusteeTargetDecryptionProofWitnessMaterial version 1",
+            "local target-decryption share witness must be LocalTrusteeTargetDecryptionProofWitnessMaterial",
         ));
     }
-    compare_string_field(
-        witness,
-        "ceremonyId",
-        &setup_binding.ceremony_id,
-        "local target-decryption share witness ceremony",
-    )?;
-    compare_hash_field(
-        witness,
-        "manifestHash",
-        &setup_binding.election_manifest_hash,
-        "local target-decryption share witness manifest hash",
-    )?;
-    compare_hash_field(
-        witness,
-        "rosterHash",
-        &setup_binding.roster_hash,
-        "local target-decryption share witness roster hash",
-    )?;
-    compare_hash_field(
-        witness,
-        "setupParametersHash",
-        &setup_binding.setup_parameters_hash,
-        "local target-decryption share witness setup parameters hash",
-    )?;
-    compare_string_field(
-        witness,
-        "trusteeIdentity",
-        &participant.trustee_identity,
-        "local target-decryption share witness trustee identity",
-    )?;
-    compare_unsigned_field(
-        witness,
-        "trusteeRosterPosition",
-        participant.roster_position as u64,
-        "local target-decryption share witness roster position",
-    )?;
     let smudging_seed_hex =
         target_decryption_smudging_seed_hex(setup_binding, target_accepted, target_share_profile);
     let smudging_polynomial_openings = target_decryption_smudging_polynomial_openings(
@@ -61,8 +25,6 @@ pub(in super::super) fn read_local_target_decryption_share_witness(
         target_share_profile,
         &smudging_seed_hex,
     )?;
-    let setup_epoch = required_string_field(witness, "setupEpoch")?;
-
     let opening = value_at_path(witness, &["aggregateOpening"])?;
     if string_at_path(opening, &["objectType"])? != "LocalTrusteeVssPublicAggregateOpeningWitness" {
         return Err(CanonicalError::new(
@@ -70,39 +32,7 @@ pub(in super::super) fn read_local_target_decryption_share_witness(
             "local target-decryption share witness must include aggregate opening material",
         ));
     }
-    compare_hash_field(
-        opening,
-        "targetBasisHash",
-        &target_accepted.target_basis_hash,
-        "local target-decryption share witness target basis hash",
-    )?;
-    compare_hash_field(
-        opening,
-        "publicMatrixSeedHash",
-        &setup_binding.public_matrix_seed_hash,
-        "local target-decryption share witness public matrix seed hash",
-    )?;
-    #[cfg(test)]
-    let public_matrix_seed_hash = setup_binding.public_matrix_seed_hash.clone();
-    let share_linkage_statement_root =
-        hash_at_path(opening, &["shareLinkageStatementRoot"])?.to_string();
-    let aggregate_threshold_commitment_root =
-        hash_at_path(opening, &["aggregateThresholdCommitmentRoot"])?.to_string();
-    if share_linkage_statement_root != setup_binding.share_linkage_statement_root {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ComponentMismatch,
-            "local target-decryption share-linkage statement root does not match the accepted setup statement",
-        ));
-    }
     let aggregate_threshold_commitment_set = &setup_binding.aggregate_threshold_commitment_set;
-    if aggregate_threshold_commitment_root
-        != aggregate_threshold_commitment_set.aggregate_threshold_commitment_root
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ComponentMismatch,
-            "local target-decryption aggregate opening root does not match the accepted aggregate commitment set",
-        ));
-    }
 
     let active_limb_count = target_ciphertexts.target_id.level + 1;
     if active_limb_count > aggregate_threshold_commitment_set.rns_limb_count {
@@ -162,7 +92,7 @@ pub(in super::super) fn read_local_target_decryption_share_witness(
             verify_aggregate_opening_credential(AggregateOpeningCheckInput {
                 setup_binding,
                 participant,
-                setup_epoch,
+                setup_epoch: &setup_binding.setup_epoch,
                 credential,
                 rns_limb_index: limb_index,
                 rns_prime: expected_modulus,
@@ -241,14 +171,6 @@ pub(in super::super) fn read_local_target_decryption_share_witness(
         secret_share_by_limb,
         smudging_seed_hex,
         smudging_polynomial_openings,
-        opening: AggregateOpeningWitnessBinding {
-            #[cfg(test)]
-            public_matrix_seed_hash,
-            #[cfg(test)]
-            share_linkage_statement_root,
-            #[cfg(test)]
-            aggregate_threshold_commitment_root,
-            active_credential_bindings,
-        },
+        active_credential_bindings,
     })
 }

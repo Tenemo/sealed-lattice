@@ -33,26 +33,50 @@ impl Drop for AggregateOpeningMaterialEvictionGuard {
     }
 }
 
+struct TargetDecryptionRequestContext {
+    setup_binding: SetupBinding,
+    target_accepted: TargetAcceptedBinding,
+    target_ciphertexts: TargetCiphertextPair,
+    target_share_profile: TargetShareProfile,
+}
+
+impl TargetDecryptionRequestContext {
+    fn parse(request: &Value) -> CanonicalResult<Self> {
+        let setup_binding = read_setup_binding(value_at_path(request, &["setupPackage"])?)?;
+        let target_accepted = read_target_accepted_binding(
+            value_at_path(request, &["targetAcceptedRecord"])?,
+            &setup_binding,
+        )?;
+        let target_ciphertexts = read_target_ciphertext_pair(
+            value_at_path(request, &["targetCiphertexts"])?,
+            value_at_path(request, &["targetCiphertextBinding"])?,
+            &target_accepted,
+        )?;
+        let target_share_profile = read_target_share_profile(
+            value_at_path(request, &["targetShareProfile"])?,
+            &setup_binding,
+        )?;
+
+        Ok(Self {
+            setup_binding,
+            target_accepted,
+            target_ciphertexts,
+            target_share_profile,
+        })
+    }
+}
+
 pub(crate) fn generate_bgv_target_decryption_share_from_local_share_request(
     request: &Value,
 ) -> CanonicalResult<Value> {
     let _aggregate_opening_material_guard =
         AggregateOpeningMaterialEvictionGuard::for_request(request);
-    let setup_package = value_at_path(request, &["setupPackage"])?;
-    let setup_binding = read_setup_binding(setup_package)?;
-    let target_accepted = read_target_accepted_binding(
-        value_at_path(request, &["targetAcceptedRecord"])?,
-        &setup_binding,
-    )?;
-    let target_ciphertexts = read_target_ciphertext_pair(
-        value_at_path(request, &["targetCiphertexts"])?,
-        value_at_path(request, &["targetCiphertextBinding"])?,
-        &target_accepted,
-    )?;
-    let target_share_profile = read_target_share_profile(
-        value_at_path(request, &["targetShareProfile"])?,
-        &setup_binding,
-    )?;
+    let TargetDecryptionRequestContext {
+        setup_binding,
+        target_accepted,
+        target_ciphertexts,
+        target_share_profile,
+    } = TargetDecryptionRequestContext::parse(request)?;
     let trustee_identity = required_string_field(request, "trusteeIdentity")?;
     let participant = read_target_decryption_participant(&setup_binding, trustee_identity)?;
     let local_witness = read_local_target_decryption_share_witness(
@@ -81,21 +105,12 @@ pub(crate) fn derive_bgv_target_decryption_share_proof_statement_from_request(
 ) -> CanonicalResult<Value> {
     let _aggregate_opening_material_guard =
         AggregateOpeningMaterialEvictionGuard::for_request(request);
-    let setup_package = value_at_path(request, &["setupPackage"])?;
-    let setup_binding = read_setup_binding(setup_package)?;
-    let target_accepted = read_target_accepted_binding(
-        value_at_path(request, &["targetAcceptedRecord"])?,
-        &setup_binding,
-    )?;
-    let target_ciphertexts = read_target_ciphertext_pair(
-        value_at_path(request, &["targetCiphertexts"])?,
-        value_at_path(request, &["targetCiphertextBinding"])?,
-        &target_accepted,
-    )?;
-    let target_share_profile = read_target_share_profile(
-        value_at_path(request, &["targetShareProfile"])?,
-        &setup_binding,
-    )?;
+    let TargetDecryptionRequestContext {
+        setup_binding,
+        target_accepted,
+        target_ciphertexts,
+        target_share_profile,
+    } = TargetDecryptionRequestContext::parse(request)?;
     let trustee_identity = required_string_field(request, "trusteeIdentity")?;
     let participant = read_target_decryption_participant(&setup_binding, trustee_identity)?;
 
@@ -114,21 +129,12 @@ pub(crate) fn derive_bgv_target_decryption_share_proof_statement_from_request(
 pub(crate) fn verify_bgv_target_decryption_share_proof_statement_binding_from_request(
     request: &Value,
 ) -> CanonicalResult<Value> {
-    let setup_package = value_at_path(request, &["setupPackage"])?;
-    let setup_binding = read_setup_binding(setup_package)?;
-    let target_accepted = read_target_accepted_binding(
-        value_at_path(request, &["targetAcceptedRecord"])?,
-        &setup_binding,
-    )?;
-    let target_ciphertexts = read_target_ciphertext_pair(
-        value_at_path(request, &["targetCiphertexts"])?,
-        value_at_path(request, &["targetCiphertextBinding"])?,
-        &target_accepted,
-    )?;
-    let target_share_profile = read_target_share_profile(
-        value_at_path(request, &["targetShareProfile"])?,
-        &setup_binding,
-    )?;
+    let TargetDecryptionRequestContext {
+        setup_binding,
+        target_accepted,
+        target_ciphertexts,
+        target_share_profile,
+    } = TargetDecryptionRequestContext::parse(request)?;
     let proof_statement = value_at_path(request, &["proofStatement"])?;
     let trustee_identity = string_at_path(proof_statement, &["trusteeIdentity"])?;
     let participant = read_target_decryption_participant(&setup_binding, trustee_identity)?;
@@ -149,21 +155,12 @@ pub(crate) fn generate_bgv_target_decryption_share_proof_material_from_local_wit
 ) -> CanonicalResult<Value> {
     let _aggregate_opening_material_guard =
         AggregateOpeningMaterialEvictionGuard::for_request(request);
-    let setup_package = value_at_path(request, &["setupPackage"])?;
-    let setup_binding = read_setup_binding(setup_package)?;
-    let target_accepted = read_target_accepted_binding(
-        value_at_path(request, &["targetAcceptedRecord"])?,
-        &setup_binding,
-    )?;
-    let target_ciphertexts = read_target_ciphertext_pair(
-        value_at_path(request, &["targetCiphertexts"])?,
-        value_at_path(request, &["targetCiphertextBinding"])?,
-        &target_accepted,
-    )?;
-    let target_share_profile = read_target_share_profile(
-        value_at_path(request, &["targetShareProfile"])?,
-        &setup_binding,
-    )?;
+    let TargetDecryptionRequestContext {
+        setup_binding,
+        target_accepted,
+        target_ciphertexts,
+        target_share_profile,
+    } = TargetDecryptionRequestContext::parse(request)?;
     let trustee_identity = required_string_field(request, "trusteeIdentity")?;
     let participant = read_target_decryption_participant(&setup_binding, trustee_identity)?;
 
@@ -183,22 +180,19 @@ pub(crate) fn generate_bgv_target_decryption_share_proof_material_from_local_wit
     )
 }
 
-pub(crate) fn derive_bgv_target_decryption_result_release_setup_context_from_request(
-    request: &Value,
-) -> CanonicalResult<Value> {
-    target_result_release_setup_context_from_setup_package(value_at_path(
-        request,
-        &["setupPackage"],
-    )?)
-}
-
 pub(crate) fn begin_bgv_target_decryption_result_release_from_request(
     request: &Value,
 ) -> CanonicalResult<Value> {
-    let setup_binding = read_target_result_release_setup_context(value_at_path(
-        request,
-        &["releaseSetupContext"],
-    )?)?;
+    let accepted_setup_handle =
+        unsigned_at_path(request, &["acceptedSetupHandle"]).and_then(|value| {
+            u32::try_from(value).map_err(|_| {
+                CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    "acceptedSetupHandle must fit an unsigned 32-bit integer",
+                )
+            })
+        })?;
+    let setup_binding = verified_target_release_setup_binding(accepted_setup_handle)?;
     let target_accepted = read_target_accepted_binding(
         value_at_path(request, &["targetAcceptedRecord"])?,
         &setup_binding,

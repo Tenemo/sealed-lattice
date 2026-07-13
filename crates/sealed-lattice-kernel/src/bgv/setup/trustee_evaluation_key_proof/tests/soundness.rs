@@ -45,7 +45,7 @@ fn tampered_component_material_is_rejected() {
             .expect("public-key share instance");
     let proof =
         prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
-    statement.keys[0].component_b_by_digit[0][0][0] ^= 1;
+    statement.keys_mut()[0].component_b_by_digit[0][0][0] ^= 1;
     let result = verify_evaluation_key_share(&statement, &proof);
     assert!(result.is_err(), "tampered component material must reject");
 }
@@ -154,7 +154,7 @@ fn round_one_aggregate_recomputation_rejects_malformed_components() {
     let (statement, _) =
         generate_development_trustee_instance("aggcheck", &[round_one(2)], SMALL_RING_DEGREE)
             .expect("instance");
-    let components = vec![&statement.keys[0].component_b_by_digit];
+    let components = vec![&statement.keys()[0].component_b_by_digit];
     let aggregate = round_one_aggregate_diagonal_from_components(&components, 2, SMALL_RING_DEGREE)
         .expect("aggregate");
     assert_eq!(aggregate.len(), 3);
@@ -167,7 +167,7 @@ fn round_one_aggregate_recomputation_rejects_malformed_components() {
     for (digit_index, diagonal) in aggregate.iter().enumerate() {
         assert_eq!(
             diagonal,
-            &statement.keys[0].component_b_by_digit[digit_index][digit_index]
+            &statement.keys()[0].component_b_by_digit[digit_index][digit_index]
         );
     }
     assert!(
@@ -186,77 +186,50 @@ fn trustee_proof_statements_reject_noncanonical_context_and_hash_fields() {
         "ctxbad01",
         &[round_one(2)],
         SMALL_RING_DEGREE,
-        Some(3),
+        3,
     )
     .expect("development instance");
-    statement.context.setup_epoch = "setup epoch 1".to_string();
+    statement.context.setup_context_hash = "00".repeat(63);
     assert!(
         statement.validate_shape().is_err(),
-        "setupEpoch with whitespace must be rejected before statement hashing"
+        "setupContextHash must be a complete lowercase 512-bit protocol hash"
     );
 
     let (mut statement, _) = generate_development_trustee_instance_with_linkage(
         "ctxbad02",
         &[round_one(2)],
         SMALL_RING_DEGREE,
-        Some(3),
+        3,
     )
     .expect("development instance");
-    statement.context.setup_epoch = "setup-epoch-\0-1".to_string();
-    assert!(
-        statement.validate_shape().is_err(),
-        "setupEpoch with a control character must be rejected before statement hashing"
-    );
-
-    let (mut statement, _) = generate_development_trustee_instance_with_linkage(
-        "ctxbad03",
-        &[round_one(2)],
-        SMALL_RING_DEGREE,
-        Some(3),
-    )
-    .expect("development instance");
-    statement.context.manifest_hash = "00".repeat(63);
-    assert!(
-        statement.validate_shape().is_err(),
-        "manifestHash must be a complete lowercase 512-bit protocol hash"
-    );
-
-    let (mut statement, _) = generate_development_trustee_instance_with_linkage(
-        "ctxbad04",
-        &[round_one(2)],
-        SMALL_RING_DEGREE,
-        Some(3),
-    )
-    .expect("development instance");
-    statement.context.binding_roots[0].1 = "aa".repeat(63);
+    statement.context.binding_roots[0] = "aa".repeat(63);
     assert!(
         statement.validate_shape().is_err(),
         "binding roots must be complete lowercase 512-bit protocol hashes"
     );
 
     let (mut statement, _) = generate_development_trustee_instance_with_linkage(
-        "ctxbad05",
+        "ctxbad03",
         &[round_one(2)],
         SMALL_RING_DEGREE,
-        Some(3),
+        3,
     )
     .expect("development instance");
-    statement.keys[0].key_switch_domain = "relinearization round one".to_string();
+    statement.keys_mut()[0].key_switch_domain = "relinearization round one".to_string();
     assert!(
         statement.validate_shape().is_err(),
         "key-switch context tokens must reject whitespace"
     );
 
     let (mut statement, _) = generate_development_trustee_instance_with_linkage(
-        "ctxbad06",
+        "ctxbad04",
         &[round_one(2)],
         SMALL_RING_DEGREE,
-        Some(3),
+        3,
     )
     .expect("development instance");
     statement
-        .same_secret_linkage
-        .as_mut()
+        .same_secret_linkage_mut()
         .expect("same-secret linkage")
         .public_matrix_seed_hash = "bb".repeat(63);
     assert!(
@@ -273,16 +246,15 @@ fn private_vss_statement_rejects_noncanonical_context_and_hash_fields() {
         .expect("canonical private VSS statement");
 
     let mut statement = private_vss_statement_for_context_tests();
-    statement.context.setup_epoch = "setup epoch 1".to_string();
+    statement.context.setup_context_hash = "11".repeat(63);
     assert!(
         statement.validate_shape().is_err(),
-        "private VSS setupEpoch with whitespace must be rejected before statement hashing"
+        "private VSS setupContextHash must be canonical"
     );
 
     let mut statement = private_vss_statement_for_context_tests();
     statement
-        .private_vss_share
-        .as_mut()
+        .private_vss_share_mut()
         .expect("private VSS statement")
         .public_matrix_seed_hash = "66".repeat(63);
     assert!(
@@ -292,8 +264,7 @@ fn private_vss_statement_rejects_noncanonical_context_and_hash_fields() {
 
     let mut statement = private_vss_statement_for_context_tests();
     statement
-        .private_vss_share
-        .as_mut()
+        .private_vss_share_mut()
         .expect("private VSS statement")
         .coefficient_commitment_roots[0] = "77".repeat(63);
     assert!(
@@ -361,36 +332,35 @@ fn private_vss_consistency_set_excludes_committed_message_columns() {
 }
 
 #[test]
-fn statement_hash_length_delimits_setup_epoch_and_linkage_seed() {
+fn statement_hash_binds_setup_context_and_linkage_seed() {
     let (mut first_statement, _) = generate_development_trustee_instance_with_linkage(
         "hashctx01",
         &[round_one(2)],
         SMALL_RING_DEGREE,
-        Some(1),
+        1,
     )
     .expect("first development instance");
     let (mut second_statement, _) = generate_development_trustee_instance_with_linkage(
         "hashctx01",
         &[round_one(2)],
         SMALL_RING_DEGREE,
-        Some(1),
+        1,
     )
     .expect("second development instance");
 
-    first_statement.context.setup_epoch = "epoch-a".to_string();
-    second_statement.context.setup_epoch = "epoch-aa".to_string();
+    first_statement.context.setup_context_hash = repeated_hash("a1");
+    second_statement.context.setup_context_hash = repeated_hash("a2");
     first_statement.validate_shape().expect("first statement");
     second_statement.validate_shape().expect("second statement");
-    let first_epoch_hash = first_statement.statement_hash();
+    let first_context_hash = first_statement.statement_hash();
     assert_ne!(
-        first_epoch_hash,
+        first_context_hash,
         second_statement.statement_hash(),
-        "setupEpoch changes must rebind the canonical statement hash"
+        "setupContextHash changes must rebind the canonical statement hash"
     );
 
     let first_linkage = first_statement
-        .same_secret_linkage
-        .as_mut()
+        .same_secret_linkage_mut()
         .expect("first same-secret linkage");
     let mut seed_bytes = first_linkage.public_matrix_seed_hash.clone().into_bytes();
     seed_bytes[0] = if seed_bytes[0] == b'a' { b'b' } else { b'a' };
@@ -400,7 +370,7 @@ fn statement_hash_length_delimits_setup_epoch_and_linkage_seed() {
         .validate_shape()
         .expect("mutated statement stays canonical");
     assert_ne!(
-        first_epoch_hash,
+        first_context_hash,
         first_statement.statement_hash(),
         "same-secret public matrix seed changes must rebind the canonical statement hash"
     );

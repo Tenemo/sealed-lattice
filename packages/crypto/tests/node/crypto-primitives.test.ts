@@ -40,10 +40,7 @@ const createSignedRoot = (
 ): CanonicalSignedRootObject => ({
     objectType: 'BoardHead',
     ceremonyId: 'ceremony',
-    manifestHash: null,
-    boardHeadHash: null,
     objectRoot,
-    chunkMerkleRoot: null,
     signerRole: 'Board',
     signerIdentity: 'board',
     recoveryEpoch: 0,
@@ -108,6 +105,12 @@ describe('crypto primitive boundary', () => {
 
         expect(deriveMlDsaPublicKeyHash(keyPair.publicKeyBytesHex)).toBe(
             keyPair.publicKeyHash,
+        );
+        expect(keyPair.publicKeyHash).toBe(
+            deriveCanonicalObjectHash({
+                objectType: 'MlDsa65PublicKeyHash',
+                publicKeyBytesHex: keyPair.publicKeyBytesHex,
+            }),
         );
         expect(
             createProtocolSignatureFixture({
@@ -291,7 +294,12 @@ describe('crypto primitive boundary', () => {
                 parameters: 'local-state-storage-test',
             }),
             setupEpoch: 'setup-epoch-1',
+            participantCount: 5,
         };
+        const setupContextHash = deriveCanonicalObjectHash({
+            objectType: 'CollectiveBgvSetupContext',
+            ...setupContext,
+        });
         const thresholdShareCommitmentRecipientRoot = deriveCanonicalObjectHash(
             {
                 objectType: 'ActionContextHash',
@@ -311,7 +319,7 @@ describe('crypto primitive boundary', () => {
                         thresholdShareCommitmentRecipientRoot,
                         shareValues: [1, 2, 3],
                     },
-                    setupContext,
+                    setupContextHash,
                     trusteeIdentity: 'trustee-3',
                     trusteeRosterPosition: 3,
                     thresholdShareCommitmentRecipientRoot,
@@ -322,11 +330,7 @@ describe('crypto primitive boundary', () => {
             sealedAggregateThresholdShare.materialRoot;
         const localStateCommitmentWithoutRoot = {
             objectType: 'LocalTrusteeSetupStateCommitment',
-            ceremonyId: setupContext.ceremonyId,
-            manifestHash: setupContext.manifestHash,
-            rosterHash: setupContext.rosterHash,
-            setupParametersHash: setupContext.setupParametersHash,
-            setupEpoch: setupContext.setupEpoch,
+            setupContextHash,
             trusteeIdentity: 'trustee-3',
             trusteeRosterPosition: 3,
             thresholdShareCommitmentRecipientRoot,
@@ -349,7 +353,7 @@ describe('crypto primitive boundary', () => {
                 encryptLocalTrusteeState({
                     localStatePlaintext,
                     localStateCommitment,
-                    setupContext,
+                    setupContextHash,
                     storageKeyBytesHex,
                 }),
         );
@@ -362,7 +366,7 @@ describe('crypto primitive boundary', () => {
             decryptLocalTrusteeState({
                 encryptedLocalState: encrypted,
                 expectedLocalStateRoot: localStateCommitment.localStateRoot,
-                setupContext,
+                setupContextHash,
                 storageKeyBytesHex,
             }),
         ).resolves.toEqual(localStatePlaintext);
@@ -371,13 +375,26 @@ describe('crypto primitive boundary', () => {
                 sealedMaterial: sealedAggregateThresholdShare,
                 expectedMaterialRoot: aggregateThresholdShareRoot,
                 localStateCommitment,
-                setupContext,
+                setupContextHash,
                 storageKeyBytesHex,
             }),
         ).resolves.toMatchObject({
             objectType: 'LocalTrusteeAggregateThresholdShareMaterial',
             shareValues: [1, 2, 3],
         });
+        await expect(
+            decryptLocalTrusteeSetupSealedMaterial({
+                sealedMaterial: sealedAggregateThresholdShare,
+                expectedMaterialRoot: aggregateThresholdShareRoot,
+                localStateCommitment: {
+                    ...localStateCommitment,
+                    aggregateThresholdShareRoot:
+                        thresholdShareCommitmentRecipientRoot,
+                },
+                setupContextHash,
+                storageKeyBytesHex,
+            }),
+        ).rejects.toThrow(/canonical local state commitment/u);
 
         const tamperedSealedCiphertextBytesHex = changeLastHexByte(
             sealedAggregateThresholdShare.ciphertextBytesHex,
@@ -391,7 +408,7 @@ describe('crypto primitive boundary', () => {
                 sealedMaterial: tamperedSealedMaterial,
                 expectedMaterialRoot: aggregateThresholdShareRoot,
                 localStateCommitment,
-                setupContext,
+                setupContextHash,
                 storageKeyBytesHex,
             }),
         ).rejects.toThrow();
@@ -407,7 +424,7 @@ describe('crypto primitive boundary', () => {
             decryptLocalTrusteeState({
                 encryptedLocalState: tamperedLocalState,
                 expectedLocalStateRoot: localStateCommitment.localStateRoot,
-                setupContext,
+                setupContextHash,
                 storageKeyBytesHex,
             }),
         ).rejects.toThrow();
@@ -416,7 +433,7 @@ describe('crypto primitive boundary', () => {
             decryptLocalTrusteeState({
                 encryptedLocalState: encrypted,
                 expectedLocalStateRoot: localStateCommitment.localStateRoot,
-                setupContext,
+                setupContextHash,
                 storageKeyBytesHex: '44'.repeat(32),
             }),
         ).rejects.toThrow();
@@ -428,7 +445,7 @@ describe('crypto primitive boundary', () => {
                     objectType: 'LocalTrusteeSetupStateRoot',
                     trustee: 'wrong',
                 }),
-                setupContext,
+                setupContextHash,
                 storageKeyBytesHex,
             }),
         ).rejects.toThrow(/expectedLocalStateRoot/u);
@@ -446,7 +463,25 @@ describe('crypto primitive boundary', () => {
                     },
                 },
                 expectedLocalStateRoot: localStateCommitment.localStateRoot,
-                setupContext,
+                setupContextHash,
+                storageKeyBytesHex,
+            }),
+        ).rejects.toThrow(/canonical local state commitment/u);
+        await expect(
+            decryptLocalTrusteeState({
+                encryptedLocalState: {
+                    ...encrypted,
+                    storageAad: {
+                        ...encrypted.storageAad,
+                        localStateCommitment: {
+                            ...localStateCommitment,
+                            setupContextHash:
+                                thresholdShareCommitmentRecipientRoot,
+                        },
+                    },
+                },
+                expectedLocalStateRoot: localStateCommitment.localStateRoot,
+                setupContextHash,
                 storageKeyBytesHex,
             }),
         ).rejects.toThrow(/canonical local state commitment/u);
@@ -454,10 +489,11 @@ describe('crypto primitive boundary', () => {
             decryptLocalTrusteeState({
                 encryptedLocalState: encrypted,
                 expectedLocalStateRoot: localStateCommitment.localStateRoot,
-                setupContext: {
+                setupContextHash: deriveCanonicalObjectHash({
+                    objectType: 'CollectiveBgvSetupContext',
                     ...setupContext,
                     setupEpoch: 'setup-epoch-2',
-                },
+                }),
                 storageKeyBytesHex,
             }),
         ).rejects.toThrow(/storageAad/u);
@@ -510,14 +546,18 @@ describe('crypto primitive boundary', () => {
 
     it('rejects signatures over malformed signed-root hash bindings', () => {
         const keyPair = createMlDsaKeyPairFixture('crypto-test-bad-root');
+        const {
+            objectRoot: omittedObjectRoot,
+            ...signedRootWithoutObjectRoot
+        } = createSignedRoot();
+        void omittedObjectRoot;
         const malformedRoots: CanonicalSignedRootObject[] = [
             {
                 ...createSignedRoot(),
                 objectRoot: 'not-a-hash',
             },
             {
-                ...createSignedRoot(),
-                objectRoot: null,
+                ...signedRootWithoutObjectRoot,
                 chunkMerkleRoot: 'A'.repeat(128),
             },
             {

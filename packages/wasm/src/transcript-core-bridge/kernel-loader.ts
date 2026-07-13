@@ -7,7 +7,6 @@ import type {
     BgvTrusteeEvaluationKeyProofGeneration,
     BgvTrusteeEvaluationKeyStatementDescription,
     BgvLocalTrusteeSetupStateVerification,
-    BgvPassiveSetupPackage,
     BgvPrivateVssShareProofGeneration,
     BgvRnsParametersDescription,
     BgvSameSecretBridgeProofGeneration,
@@ -127,30 +126,6 @@ export const createTranscriptCoreKernelLoader = (
                             ? {}
                             : { participantCount: input.participantCount }),
                     }),
-                generateBgvPassiveSetup: (input): BgvPassiveSetupPackage =>
-                    executeCommand<BgvPassiveSetupPackage>({
-                        command: 'GenerateBgvPassiveSetup',
-                        ceremonyId: input.ceremonyId,
-                        manifestHash: input.manifestHash,
-                        rosterHash: input.rosterHash,
-                        thresholdParametersHash: input.thresholdParametersHash,
-                        participants: input.participants,
-                        setupSeed: input.setupSeed,
-                    }),
-                verifyBgvPassiveSetup: (input): void =>
-                    executeCommand<void>({
-                        command: 'VerifyBgvPassiveSetup',
-                        setupPackage: input.setupPackage,
-                        expectedSetupPackageHash:
-                            input.expectedSetupPackageHash,
-                        expectedManifestHash: input.expectedManifestHash,
-                        expectedRosterHash: input.expectedRosterHash,
-                        expectedCollectivePublicKeyRoot:
-                            input.expectedCollectivePublicKeyRoot,
-                        expectedRotSetHash: input.expectedRotSetHash,
-                        expectedEvaluationKeyRoot:
-                            input.expectedEvaluationKeyRoot,
-                    }),
                 generatePrivateVssShareProof: (
                     input,
                 ): BgvPrivateVssShareProofGeneration =>
@@ -180,39 +155,76 @@ export const createTranscriptCoreKernelLoader = (
                     }),
                 generateTrusteeEvaluationKeyProof: (
                     input,
-                ): BgvTrusteeEvaluationKeyProofGeneration =>
-                    executeCommand<BgvTrusteeEvaluationKeyProofGeneration>({
-                        command: 'GenerateTrusteeEvaluationKeyProof',
-                        context: input.context,
-                        ringDegree: input.ringDegree,
-                        keys: input.keys,
-                        sameSecretLinkage: input.sameSecretLinkage,
-                        sameSecretBridge: input.sameSecretBridge,
-                        secretCoefficients: input.secretCoefficients,
-                        errorCoefficientsByKey: input.errorCoefficientsByKey,
-                        negativeIndicatorCoefficients:
-                            input.negativeIndicatorCoefficients,
-                        openingRandomnessByLimb: input.openingRandomnessByLimb,
-                        vssCommittedMaterialSeedsByBoundMessage:
-                            input.vssCommittedMaterialSeedsByBoundMessage,
-                        vssCommittedMaterialContextHashesByBoundMessage:
-                            input.vssCommittedMaterialContextHashesByBoundMessage,
-                        proofRandomnessSeedHex: input.proofRandomnessSeedHex,
-                        proofRandomnessNonceHex: input.proofRandomnessNonceHex,
-                    }),
+                ): BgvTrusteeEvaluationKeyProofGeneration => {
+                    if (input.statementFamily === 'public-key-share') {
+                        return executeCommand<BgvTrusteeEvaluationKeyProofGeneration>(
+                            {
+                                command: 'GenerateTrusteeEvaluationKeyProof',
+                                context: input.context,
+                                ringDegree: input.ringDegree,
+                                keys: input.keys,
+                                sameSecretBridge: input.sameSecretBridge,
+                                secretCoefficients: input.secretCoefficients,
+                                errorCoefficientsByKey:
+                                    input.errorCoefficientsByKey,
+                                negativeIndicatorCoefficients:
+                                    input.negativeIndicatorCoefficients,
+                                vssCommittedMaterialSeedsByBoundMessage:
+                                    input.vssCommittedMaterialSeedsByBoundMessage,
+                                vssCommittedMaterialContextHashesByBoundMessage:
+                                    input.vssCommittedMaterialContextHashesByBoundMessage,
+                                proofRandomnessSeedHex:
+                                    input.proofRandomnessSeedHex,
+                                proofRandomnessNonceHex:
+                                    input.proofRandomnessNonceHex,
+                            },
+                        );
+                    }
+                    return executeCommand<BgvTrusteeEvaluationKeyProofGeneration>(
+                        {
+                            command: 'GenerateTrusteeEvaluationKeyProof',
+                            context: input.context,
+                            ringDegree: input.ringDegree,
+                            keys: input.keys,
+                            sameSecretLinkage: input.sameSecretLinkage,
+                            secretCoefficients: input.secretCoefficients,
+                            errorCoefficientsByKey:
+                                input.errorCoefficientsByKey,
+                            negativeIndicatorCoefficients:
+                                input.negativeIndicatorCoefficients,
+                            openingRandomnessByLimb:
+                                input.openingRandomnessByLimb,
+                            proofRandomnessSeedHex:
+                                input.proofRandomnessSeedHex,
+                            proofRandomnessNonceHex:
+                                input.proofRandomnessNonceHex,
+                        },
+                    );
+                },
                 describeTrusteeEvaluationKeyStatement: (
                     input,
-                ): BgvTrusteeEvaluationKeyStatementDescription =>
-                    executeCommand<BgvTrusteeEvaluationKeyStatementDescription>(
+                ): BgvTrusteeEvaluationKeyStatementDescription => {
+                    if (input.statementFamily === 'public-key-share') {
+                        return executeCommand<BgvTrusteeEvaluationKeyStatementDescription>(
+                            {
+                                command: 'DescribeTrusteeEvaluationKeyStatement',
+                                context: input.context,
+                                ringDegree: input.ringDegree,
+                                keys: input.keys,
+                                sameSecretBridge: input.sameSecretBridge,
+                            },
+                        );
+                    }
+                    return executeCommand<BgvTrusteeEvaluationKeyStatementDescription>(
                         {
                             command: 'DescribeTrusteeEvaluationKeyStatement',
                             context: input.context,
                             ringDegree: input.ringDegree,
                             keys: input.keys,
                             sameSecretLinkage: input.sameSecretLinkage,
-                            sameSecretBridge: input.sameSecretBridge,
                         },
-                    ),
+                    );
+                },
                 computeSetupCommitmentFromOpening: (
                     input,
                 ): BgvSetupCommitmentOpeningComputation =>

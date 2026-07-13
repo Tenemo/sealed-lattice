@@ -1,7 +1,4 @@
-import type {
-    CanonicalError,
-    ProtocolHash,
-} from '@sealed-lattice/types';
+import type { CanonicalError, ProtocolHash } from '@sealed-lattice/types';
 
 import type {
     BgvCollectiveSetupTransportCompanions,
@@ -14,8 +11,6 @@ import type {
     BgvTrusteeEvaluationKeyStatementContext,
     BgvTrusteeEvaluationKeyStatementKey,
     BgvLocalTrusteeSetupStateVerification,
-    BgvPassiveSetupPackage,
-    BgvPassiveSetupParticipantInput,
     BgvPrivateVssShareEnvelopeVerification,
     BgvPrivateVssShareProofGeneration,
     BgvRnsParametersDescription,
@@ -25,7 +20,6 @@ import type {
     BgvVssShareLinkageProofContext,
     BgvVssShareLinkageProofGeneration,
     BgvSetupCommitmentOpeningComputation,
-    BgvTargetDecryptionReleaseSetupContext,
     BgvTargetDecryptionShare,
     BgvTargetDecryptionShareProofMaterial,
     BgvTargetDecryptionResultReleaseBegin,
@@ -42,8 +36,6 @@ export type {
     BgvTrusteeEvaluationKeyStatementContext,
     BgvTrusteeEvaluationKeyStatementKey,
     BgvLocalTrusteeSetupStateVerification,
-    BgvPassiveSetupPackage,
-    BgvPassiveSetupParticipantInput,
     BgvPrivateVssShareEnvelopeVerification,
     BgvPrivateVssShareProofGeneration,
     BgvRnsParametersDescription,
@@ -53,7 +45,6 @@ export type {
     BgvVssShareLinkageProofContext,
     BgvVssShareLinkageProofGeneration,
     BgvSetupCommitmentOpeningComputation,
-    BgvTargetDecryptionReleaseSetupContext,
     BgvTargetDecryptionShare,
     BgvTargetDecryptionShareProofMaterial,
     BgvTargetDecryptionResultReleaseBegin,
@@ -84,6 +75,56 @@ export type AcceptedSetupSession = Readonly<{
     ): BgvCollectiveSetupVerification;
 }>;
 
+type BgvTrusteeEvaluationKeyStatementCommonInput = Readonly<{
+    readonly context: BgvTrusteeEvaluationKeyStatementContext;
+    readonly ringDegree: number;
+    readonly keys: readonly BgvTrusteeEvaluationKeyStatementKey[];
+}>;
+
+export type BgvTrusteeEvaluationKeyStatementInput =
+    | Readonly<
+          BgvTrusteeEvaluationKeyStatementCommonInput & {
+              readonly statementFamily: 'trustee-evaluation-key';
+              readonly sameSecretLinkage: BgvTrusteeEvaluationKeySameSecretLinkage;
+          }
+      >
+    | Readonly<
+          Omit<BgvTrusteeEvaluationKeyStatementCommonInput, 'keys'> & {
+              readonly statementFamily: 'public-key-share';
+              readonly keys: readonly [BgvTrusteeEvaluationKeyStatementKey];
+              readonly sameSecretBridge: BgvTrusteeEvaluationKeySameSecretBridge;
+          }
+      >;
+
+type BgvTrusteeEvaluationKeyProofCommonInput = Readonly<{
+    readonly secretCoefficients: readonly number[];
+    readonly errorCoefficientsByKey: readonly (readonly (readonly number[])[])[];
+    readonly negativeIndicatorCoefficients: readonly number[];
+    readonly proofRandomnessSeedHex: string;
+    readonly proofRandomnessNonceHex: string;
+}>;
+
+export type BgvTrusteeEvaluationKeyProofInput =
+    | Readonly<
+          Extract<
+              BgvTrusteeEvaluationKeyStatementInput,
+              { readonly statementFamily: 'trustee-evaluation-key' }
+          > &
+              BgvTrusteeEvaluationKeyProofCommonInput & {
+                  readonly openingRandomnessByLimb: readonly (readonly (readonly number[])[])[];
+              }
+      >
+    | Readonly<
+          Extract<
+              BgvTrusteeEvaluationKeyStatementInput,
+              { readonly statementFamily: 'public-key-share' }
+          > &
+              BgvTrusteeEvaluationKeyProofCommonInput & {
+                  readonly vssCommittedMaterialSeedsByBoundMessage: readonly string[];
+                  readonly vssCommittedMaterialContextHashesByBoundMessage: readonly string[];
+              }
+      >;
+
 export type TranscriptCoreKernel = {
     readonly exportedFunctionNames: readonly string[];
     beginAcceptedSetupSession(): AcceptedSetupSession;
@@ -108,23 +149,6 @@ export type TranscriptCoreKernel = {
     describeCollectiveBgvSetupParameters(input?: {
         readonly participantCount?: number;
     }): BgvCollectiveSetupParametersDescription;
-    generateBgvPassiveSetup(input: {
-        readonly ceremonyId: string;
-        readonly manifestHash: ProtocolHash;
-        readonly rosterHash: ProtocolHash;
-        readonly thresholdParametersHash: ProtocolHash;
-        readonly participants: readonly BgvPassiveSetupParticipantInput[];
-        readonly setupSeed: string;
-    }): BgvPassiveSetupPackage;
-    verifyBgvPassiveSetup(input: {
-        readonly setupPackage: BgvPassiveSetupPackage;
-        readonly expectedSetupPackageHash?: ProtocolHash;
-        readonly expectedManifestHash?: ProtocolHash;
-        readonly expectedRosterHash?: ProtocolHash;
-        readonly expectedCollectivePublicKeyRoot?: ProtocolHash;
-        readonly expectedRotSetHash?: ProtocolHash;
-        readonly expectedEvaluationKeyRoot?: ProtocolHash;
-    }): void;
     verifyPrivateVssShareEnvelope(input: {
         readonly setupContext: unknown;
         readonly publicMatrixSeedHash: ProtocolHash;
@@ -153,28 +177,12 @@ export type TranscriptCoreKernel = {
         readonly proofRandomnessSeedHex: string;
         readonly proofRandomnessNonceHex: string;
     }): BgvPrivateVssShareProofGeneration;
-    generateTrusteeEvaluationKeyProof(input: {
-        readonly context: BgvTrusteeEvaluationKeyStatementContext;
-        readonly ringDegree: number;
-        readonly keys: readonly BgvTrusteeEvaluationKeyStatementKey[];
-        readonly sameSecretLinkage?: BgvTrusteeEvaluationKeySameSecretLinkage;
-        readonly sameSecretBridge?: BgvTrusteeEvaluationKeySameSecretBridge;
-        readonly secretCoefficients: readonly number[];
-        readonly errorCoefficientsByKey: readonly (readonly (readonly number[])[])[];
-        readonly negativeIndicatorCoefficients?: readonly number[];
-        readonly openingRandomnessByLimb?: readonly (readonly (readonly number[])[])[];
-        readonly vssCommittedMaterialSeedsByBoundMessage?: readonly string[];
-        readonly vssCommittedMaterialContextHashesByBoundMessage?: readonly string[];
-        readonly proofRandomnessSeedHex: string;
-        readonly proofRandomnessNonceHex: string;
-    }): BgvTrusteeEvaluationKeyProofGeneration;
-    describeTrusteeEvaluationKeyStatement(input: {
-        readonly context: BgvTrusteeEvaluationKeyStatementContext;
-        readonly ringDegree: number;
-        readonly keys: readonly BgvTrusteeEvaluationKeyStatementKey[];
-        readonly sameSecretLinkage?: BgvTrusteeEvaluationKeySameSecretLinkage;
-        readonly sameSecretBridge?: BgvTrusteeEvaluationKeySameSecretBridge;
-    }): BgvTrusteeEvaluationKeyStatementDescription;
+    generateTrusteeEvaluationKeyProof(
+        input: BgvTrusteeEvaluationKeyProofInput,
+    ): BgvTrusteeEvaluationKeyProofGeneration;
+    describeTrusteeEvaluationKeyStatement(
+        input: BgvTrusteeEvaluationKeyStatementInput,
+    ): BgvTrusteeEvaluationKeyStatementDescription;
     computeSetupCommitmentFromOpening(input: {
         readonly publicMatrixSeedHash: ProtocolHash;
         readonly sourceRnsLimbIndex: number;
@@ -219,12 +227,9 @@ export type TranscriptCoreKernel = {
         readonly proofRandomnessSeedHex: string;
         readonly proofRandomnessNonceHex: string;
     }): BgvSameSecretBridgeProofGeneration;
-    deriveBgvTargetDecryptionResultReleaseSetupContext(input: {
-        readonly setupPackage: unknown;
-    }): BgvTargetDecryptionReleaseSetupContext;
     beginBgvTargetDecryptionResultRelease(input: {
         readonly releaseVerificationId: string;
-        readonly releaseSetupContext: unknown;
+        readonly acceptedSetupHandle: number;
         readonly targetAcceptedRecord: unknown;
         readonly targetCiphertexts: unknown;
         readonly targetCiphertextBinding: unknown;
@@ -254,7 +259,6 @@ export type PublishedSdkKernel = Pick<
     | 'exportedFunctionNames'
     | 'generateBgvTargetDecryptionShareProofMaterialFromLocalWitness'
     | 'verifyPrivateVssShareEnvelope'
-    | 'deriveBgvTargetDecryptionResultReleaseSetupContext'
     | 'beginBgvTargetDecryptionResultRelease'
     | 'absorbBgvTargetDecryptionResultReleaseShare'
     | 'finishBgvTargetDecryptionResultRelease'
@@ -265,13 +269,17 @@ type KernelMethodInput<MethodName extends keyof TranscriptCoreKernel> =
         ? NonNullable<Input>
         : never;
 
+type KernelWireInput<Input> = Input extends unknown
+    ? Omit<Input, 'statementFamily'>
+    : never;
+
 type KernelCommandFromMethod<
     CommandName extends string,
     MethodName extends keyof TranscriptCoreKernel,
 > = Readonly<
     {
         readonly command: CommandName;
-    } & KernelMethodInput<MethodName>
+    } & KernelWireInput<KernelMethodInput<MethodName>>
 >;
 
 type TranscriptCoreKernelCommand =
@@ -294,11 +302,6 @@ type TranscriptCoreKernelCommand =
           'DescribeCollectiveBgvSetupParameters',
           'describeCollectiveBgvSetupParameters'
       >
-    | KernelCommandFromMethod<
-          'GenerateBgvPassiveSetup',
-          'generateBgvPassiveSetup'
-      >
-    | KernelCommandFromMethod<'VerifyBgvPassiveSetup', 'verifyBgvPassiveSetup'>
     | Readonly<
           {
               readonly command: 'VerifyCollectiveBgvSetup';
@@ -337,10 +340,6 @@ type TranscriptCoreKernelCommand =
           'generateSameSecretBridgeProof'
       >
     | KernelCommandFromMethod<
-          'DeriveBgvTargetDecryptionResultReleaseSetupContext',
-          'deriveBgvTargetDecryptionResultReleaseSetupContext'
-      >
-    | KernelCommandFromMethod<
           'BeginBgvTargetDecryptionResultRelease',
           'beginBgvTargetDecryptionResultRelease'
       >
@@ -355,44 +354,18 @@ type TranscriptCoreKernelCommand =
     | KernelCommandFromMethod<
           'VerifyLocalTrusteeSetupState',
           'verifyLocalTrusteeSetupState'
-      >
-    | {
-          readonly command: 'RunDirectEncryptedBallot';
-          readonly setupPackage: BgvPassiveSetupPackage;
-          readonly setupPrivateWitness: {
-              readonly setupSeed: string;
-          };
-          readonly ballotEncryptionRandomness: {
-              readonly encryptionSeedHexes: readonly string[];
-          };
-          readonly proofMaskRandomness: {
-              readonly ballotProofRandomnessHexes: readonly string[];
-          };
-          readonly ballots: readonly {
-              readonly voterIdentity: string;
-              readonly actionContextHash: string;
-              readonly scores: readonly number[];
-              readonly oneHotWitnesses?: readonly (readonly number[])[];
-          }[];
-          readonly topCount?: number;
-          readonly topCounts?: readonly number[];
-          readonly targetFinalityPolicyHash?: string;
-      };
+      >;
 
 type TranscriptCoreKernelExports = WebAssembly.Exports & {
     memory?: WebAssembly.Memory;
     sealed_lattice_allocate?: (length: number) => number;
     sealed_lattice_accepted_setup_canonical_stream_begin?: (
         setupSessionHandle: number,
-        setupCapabilityPointer: number,
-        setupCapabilityLength: number,
         familyCode: number,
         materialRootPointer: number,
         materialRootLength: number,
         descriptorPointer: number,
         descriptorLength: number,
-        streamCapabilityPointer: number,
-        streamCapabilityLength: number,
         statusPointer: number,
         totalByteLengthPointer: number,
         chunkCountPointer: number,
@@ -401,24 +374,12 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         pointer: number,
         length: number,
         sessionHandle: number,
-        capabilityPointer: number,
-        capabilityLength: number,
         outputLengthPointer: number,
     ) => number;
-    sealed_lattice_accepted_setup_session_begin?: (
-        capabilityPointer: number,
-        capabilityLength: number,
-        statusPointer: number,
-    ) => number;
-    sealed_lattice_accepted_setup_session_cancel?: (
-        sessionHandle: number,
-        capabilityPointer: number,
-        capabilityLength: number,
-    ) => number;
+    sealed_lattice_accepted_setup_session_begin?: (statusPointer: number) => number;
+    sealed_lattice_accepted_setup_session_cancel?: (sessionHandle: number) => number;
     sealed_lattice_bgv_canonical_stream_absorb_chunk?: (
         handle: number,
-        capabilityPointer: number,
-        capabilityLength: number,
         chunkIndex: number,
         chunkPointer: number,
         chunkLength: number,
@@ -429,54 +390,30 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         materialRootLength: number,
         descriptorPointer: number,
         descriptorLength: number,
-        capabilityPointer: number,
-        capabilityLength: number,
         statusPointer: number,
         totalByteLengthPointer: number,
         chunkCountPointer: number,
     ) => number;
-    sealed_lattice_bgv_canonical_stream_cancel?: (
-        handle: number,
-        capabilityPointer: number,
-        capabilityLength: number,
-    ) => number;
-    sealed_lattice_bgv_canonical_stream_finish?: (
-        handle: number,
-        capabilityPointer: number,
-        capabilityLength: number,
-    ) => number;
+    sealed_lattice_bgv_canonical_stream_cancel?: (handle: number) => number;
+    sealed_lattice_bgv_canonical_stream_finish?: (handle: number) => number;
     sealed_lattice_bgv_canonical_material_reader_begin?: (
         familyCode: number,
         materialRootPointer: number,
         materialRootLength: number,
-        capabilityPointer: number,
-        capabilityLength: number,
         statusPointer: number,
         totalByteLengthPointer: number,
         chunkCountPointer: number,
     ) => number;
-    sealed_lattice_bgv_canonical_material_reader_cancel?: (
-        handle: number,
-        capabilityPointer: number,
-        capabilityLength: number,
-    ) => number;
-    sealed_lattice_bgv_canonical_material_reader_finish?: (
-        handle: number,
-        capabilityPointer: number,
-        capabilityLength: number,
-    ) => number;
+    sealed_lattice_bgv_canonical_material_reader_cancel?: (handle: number) => number;
+    sealed_lattice_bgv_canonical_material_reader_finish?: (handle: number) => number;
     sealed_lattice_bgv_canonical_material_reader_read_chunk?: (
         handle: number,
-        capabilityPointer: number,
-        capabilityLength: number,
         chunkIndex: number,
         outputPointer: number,
         outputLength: number,
     ) => number;
     sealed_lattice_canonical_stream_absorb_chunk?: (
         handle: number,
-        capabilityPointer: number,
-        capabilityLength: number,
         chunkIndex: number,
         chunkPointer: number,
         chunkLength: number,
@@ -485,8 +422,6 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         streamDomain: number,
         descriptorPointer: number,
         descriptorLength: number,
-        capabilityPointer: number,
-        capabilityLength: number,
         statusPointer: number,
         totalByteLengthPointer: number,
         chunkCountPointer: number,
@@ -494,25 +429,15 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
     sealed_lattice_canonical_stream_begin_writer?: (
         streamDomain: number,
         totalByteLength: number,
-        capabilityPointer: number,
-        capabilityLength: number,
         statusPointer: number,
         chunkCountPointer: number,
     ) => number;
-    sealed_lattice_canonical_stream_cancel?: (
-        handle: number,
-        capabilityPointer: number,
-        capabilityLength: number,
-    ) => number;
+    sealed_lattice_canonical_stream_cancel?: (handle: number) => number;
     sealed_lattice_canonical_stream_finish_verifier?: (
         handle: number,
-        capabilityPointer: number,
-        capabilityLength: number,
     ) => number;
     sealed_lattice_canonical_stream_finish_writer?: (
         handle: number,
-        capabilityPointer: number,
-        capabilityLength: number,
         statusPointer: number,
         outputLengthPointer: number,
     ) => number;
@@ -564,8 +489,6 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         capabilityPointer: number,
         capabilityLength: number,
         streamHandle: number,
-        streamCapabilityPointer: number,
-        streamCapabilityLength: number,
         verifiedReservationHandle: number,
         canonicalOutputIntentCarrierPointer: number,
         canonicalOutputIntentCarrierLength: number,
@@ -578,8 +501,6 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         capabilityPointer: number,
         capabilityLength: number,
         streamHandle: number,
-        streamCapabilityPointer: number,
-        streamCapabilityLength: number,
         verifiedReservationHandle: number,
         canonicalOutputIntentCarrierPointer: number,
         canonicalOutputIntentCarrierLength: number,

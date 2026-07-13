@@ -26,4 +26,6 @@ pub(crate) mod polynomial;
 pub(crate) mod proof_codec;
 pub(crate) mod schedule;
 pub(crate) mod statement_bridge;
+#[cfg(test)]
+mod test_support;
 pub(crate) mod transcript;

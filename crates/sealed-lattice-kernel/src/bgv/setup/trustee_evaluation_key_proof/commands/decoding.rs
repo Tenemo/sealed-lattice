@@ -152,15 +152,6 @@ pub(super) fn read_i64_array(value: &Value, field_name: &str) -> CanonicalResult
         .collect()
 }
 
-pub(super) fn read_i64(value: &Value, field_name: &str) -> CanonicalResult<i64> {
-    value
-        .get(field_name)
-        .and_then(Value::as_i64)
-        .ok_or_else(|| {
-            invalid_succinct_setup_proof(format!("{field_name} must be a signed integer"))
-        })
-}
-
 pub(super) fn read_string_array(value: &Value, field_name: &str) -> CanonicalResult<Vec<String>> {
     value
         .get(field_name)

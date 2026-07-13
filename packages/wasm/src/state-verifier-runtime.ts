@@ -61,8 +61,6 @@ type StateVerifierKernelContext = Readonly<{
         capabilityPointer: number,
         capabilityLength: number,
         streamHandle: number,
-        streamCapabilityPointer: number,
-        streamCapabilityLength: number,
         verifiedReservationHandle: number,
         canonicalOutputIntentCarrierPointer: number,
         canonicalOutputIntentCarrierLength: number,
@@ -75,8 +73,6 @@ type StateVerifierKernelContext = Readonly<{
         capabilityPointer: number,
         capabilityLength: number,
         streamHandle: number,
-        streamCapabilityPointer: number,
-        streamCapabilityLength: number,
         verifiedReservationHandle: number,
         canonicalOutputIntentCarrierPointer: number,
         canonicalOutputIntentCarrierLength: number,
@@ -1363,8 +1359,6 @@ class StateVerifierSessionImplementation implements StateVerifierSession {
         reservationRecord: VerifiedObjectRecord,
         outputIntentCarrier: Uint8Array,
         stream: Readonly<{
-            streamCapabilityLength: number;
-            streamCapabilityPointer: number;
             streamHandle: number;
         }>,
     ): VerificationResult<VerifiedStateOutputIntent> {
@@ -1387,8 +1381,6 @@ class StateVerifierSessionImplementation implements StateVerifierSession {
                     this.#capabilityPointer,
                     stateVerifierCapabilityByteLength,
                     stream.streamHandle,
-                    stream.streamCapabilityPointer,
-                    stream.streamCapabilityLength,
                     reservationRecord.handle,
                     pointers[0],
                     outputIntentCarrier.byteLength,
@@ -1408,8 +1400,6 @@ class StateVerifierSessionImplementation implements StateVerifierSession {
         outputIntentCarrier: Uint8Array,
         stateCertificate: Uint8Array,
         stream: Readonly<{
-            streamCapabilityLength: number;
-            streamCapabilityPointer: number;
             streamHandle: number;
         }>,
     ): VerificationResult<VerifiedStateOutput> {
@@ -1432,8 +1422,6 @@ class StateVerifierSessionImplementation implements StateVerifierSession {
                     this.#capabilityPointer,
                     stateVerifierCapabilityByteLength,
                     stream.streamHandle,
-                    stream.streamCapabilityPointer,
-                    stream.streamCapabilityLength,
                     reservationRecord.handle,
                     pointers[0],
                     outputIntentCarrier.byteLength,

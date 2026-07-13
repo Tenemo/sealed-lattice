@@ -1,3 +1,4 @@
+mod accepted_setup_registry;
 mod bindings;
 mod ciphertext_codec;
 mod command;
@@ -17,7 +18,6 @@ use ciphertext_codec::*;
 pub(crate) use command::{
     absorb_bgv_target_decryption_result_release_share_from_request,
     begin_bgv_target_decryption_result_release_from_request,
-    derive_bgv_target_decryption_result_release_setup_context_from_request,
     finish_bgv_target_decryption_result_release_from_request,
 };
 #[cfg(test)]
@@ -50,20 +50,21 @@ use crate::{
         evaluator::{
             engine::{Ciphertext, decryption_accumulator_to_coefficients},
             records::MAXIMUM_OPTION_COUNT,
-            top_k::canonical_target_basis_hash,
+            top_k::CANONICAL_TARGET_CIPHERTEXT_LEVEL,
         },
         modular_arithmetic::{add_mod_fast, inverse_mod, mul_mod, mul_mod_fast, sub_mod},
         parameters::{BgvBasisKind, DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE},
         serialization::{BgvObjectKind, ciphertext_root, parse_bgv_object},
         setup::{
-            TARGET_DECRYPTION_SHARE_PROOF_FAMILY, accepted_setup_participant_roster_from_package,
-            canonical_target_decryption_parameters_hash,
+            TARGET_DECRYPTION_SHARE_PROOF_FAMILY, TARGET_DECRYPTION_SMUDGING_COEFFICIENT_BOUND,
+            VssPublicAggregateThresholdCommitmentSetContext,
+            accepted_setup_participant_roster_from_package,
             collective_bgv_setup_context_hashes_from_package, derive_collective_setup_package_hash,
-            verify_vss_public_aggregate_threshold_commitment_set_request,
+            verify_vss_public_aggregate_threshold_commitment_set,
         },
         setup_helpers::{
-            array_at_path, hash_at_path, integer_at_path, string_at_path, unsigned_at_path,
-            usize_at_path, value_at_path,
+            array_at_path, hash_at_path, read_non_empty_string as required_string_field,
+            string_at_path, unsigned_at_path, usize_at_path, usize_field, value_at_path,
         },
     },
     encoding::{CanonicalError, CanonicalErrorCode},
@@ -72,8 +73,6 @@ use crate::{
 
 #[cfg(test)]
 use crate::bgv::evaluator::engine::DevelopmentBgvKey;
-#[cfg(test)]
-use crate::bgv::setup::development_evaluator_key_from_passive_setup_package;
 use crate::bgv::{
     coefficient_codec::coefficient_vector_le_hex,
     evaluator::{
@@ -91,7 +90,6 @@ const TARGET_DECRYPTION_SMUDGING_ZERO_SHARE_DOMAIN: &str =
     "sealed-lattice-bgv-rns/target-decryption-smudging-zero-share";
 const TARGET_DECRYPTION_SMUDGING_COMMITMENT_MATERIAL_SEED_DOMAIN: &str =
     "sealed-lattice-bgv-rns/target-decryption-smudging-commitment-material-seed";
-pub(super) const TARGET_DECRYPTION_SMUDGING_COEFFICIENT_BOUND: i64 = 16;
 const TARGET_DECRYPTION_SMUDGING_COMMITMENT_ROLE: &str =
     "target-decryption-smudging-polynomial-coefficient";
 const TARGET_DECRYPTION_SMUDGING_ROLES: [&str; 2] = ["targetId", "targetOrder"];
@@ -101,7 +99,6 @@ struct TargetShareProfile {
     decryption_threshold: usize,
     minimum_shares_for_interpolation: usize,
     decryption_share_quorum: usize,
-    hash: String,
 }
 
 #[derive(Clone)]
@@ -132,16 +129,13 @@ struct SetupBinding {
     election_manifest_hash: String,
     roster_hash: String,
     setup_parameters_hash: String,
-    target_decryption_profile_hash: String,
     public_matrix_seed_hash: String,
-    share_linkage_statement_root: String,
     participants: Vec<ParticipantBinding>,
     aggregate_threshold_commitment_set: AggregateThresholdCommitmentSetBinding,
 }
 
 #[derive(Clone)]
 struct AggregateThresholdCommitmentSetBinding {
-    aggregate_threshold_commitment_root: String,
     rns_limb_count: usize,
     recipient_records: Vec<Vec<AggregateThresholdCommitmentRecordBinding>>,
 }
@@ -151,22 +145,14 @@ struct AggregateThresholdCommitmentRecordBinding {
     rns_prime: u64,
     aggregate_commitment_root: String,
     aggregate_opening_root: String,
+    #[cfg(test)]
     aggregate_commitment: Value,
 }
 
 #[derive(Clone)]
 struct TargetAcceptedBinding {
     target_accepted_record_hash: String,
-    target_proposal_hash: String,
-    target_preimage_hash: String,
-    target_finality_record_hash: String,
-    target_finality_checkpoint_hash: String,
-    evaluator_replay_record_hash: String,
-    target_context_hash: String,
     target_ciphertext_hash: String,
-    target_layout_hash: String,
-    target_decryption_profile_hash: String,
-    target_basis_hash: String,
 }
 
 #[derive(Clone)]
@@ -176,9 +162,10 @@ struct TargetCiphertextPair {
     target_id_root: String,
     target_order_root: String,
     target_ciphertext_hash: String,
-    target_ciphertext_binding_hash: String,
     top_count: usize,
 }
 
 #[cfg(test)]
 mod tests;
+pub(crate) use accepted_setup_registry::register_verified_target_release_setup;
+use accepted_setup_registry::verified_target_release_setup_binding;

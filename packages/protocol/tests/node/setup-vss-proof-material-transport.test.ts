@@ -33,8 +33,8 @@ type ProofMaterialCase = Readonly<{
         | 'SetupTransportedSameSecretBridgeProofMaterial';
     readonly proofBytesHashDomain: string;
     readonly proofRecordRootField:
-        | 'proofRecordRoot'
-        | 'sameSecretBridgeProofRecordRoot';
+        | 'sameSecretBridgeProofRecordRoot'
+        | undefined;
     readonly identityFields: (recordIndex: number) => JsonRecord;
     readonly createTransport: (build: CanonicalProofMaterialBuild) => Readonly<{
         readonly proofMaterialSet: JsonRecord;
@@ -53,7 +53,7 @@ const proofMaterialCases = [
             'SetupTransportedVssShareLinkageProofMaterial',
         proofBytesHashDomain:
             'sealed-lattice/setup/vss-share-linkage/proof-bytes',
-        proofRecordRootField: 'proofRecordRoot',
+        proofRecordRootField: undefined,
         identityFields: (recordIndex: number): JsonRecord => ({
             vssShareLinkage: {
                 sourceTrusteeRosterPosition: 0,
@@ -137,23 +137,18 @@ const canonicalProofMaterialBuild = (
             descriptorBytes,
         });
 
-        return {
-            ...recordWithoutRoot,
-            [proofMaterialCase.proofRecordRootField]:
-                deriveCanonicalObjectHash(recordWithoutRoot),
-        };
+        return proofMaterialCase.proofRecordRootField === undefined
+            ? recordWithoutRoot
+            : {
+                  ...recordWithoutRoot,
+                  [proofMaterialCase.proofRecordRootField]:
+                      deriveCanonicalObjectHash(recordWithoutRoot),
+              };
     });
-    const proofMaterialSetWithoutRoot = {
-        objectType: proofMaterialCase.proofMaterialSetObjectType,
-        proofRecords,
-    };
-
     return {
         proofMaterialSet: {
-            ...proofMaterialSetWithoutRoot,
-            proofMaterialSetRoot: deriveCanonicalObjectHash(
-                proofMaterialSetWithoutRoot,
-            ),
+            objectType: proofMaterialCase.proofMaterialSetObjectType,
+            proofRecords,
         },
         canonicalProofMaterials,
     };

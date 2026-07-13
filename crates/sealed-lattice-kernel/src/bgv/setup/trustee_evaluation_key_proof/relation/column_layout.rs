@@ -1,5 +1,19 @@
-use super::super::*;
-use super::*;
+use super::super::{
+    LINCHECK_REPETITIONS, TARGET_DECRYPTION_AGGREGATE_MESSAGE_CLAIM_MASK_DIGIT_COUNT,
+    TARGET_DECRYPTION_SMUDGING_MESSAGE_CLAIM_MASK_DIGIT_COUNT, TRACE_SPLIT,
+    VSS_PUBLIC_CARRY_CLAIM_MASK_DIGIT_COUNT, VSS_PUBLIC_DIGIT_CLAIM_MASK_DIGIT_COUNT,
+    VSS_PUBLIC_SHARE_LINKAGE_TRIT_CLAIM_MASK_DIGIT_COUNT, invalid_succinct_setup_proof,
+};
+use super::family_shape_and_validation::SuccinctSetupProofFamilyShape;
+use super::statement_types::{
+    TargetDecryptionMessageClaimKind, TrusteeEvaluationKeyStatement,
+};
+use super::super::extension_field::{ChallengeExtensionElement, ChallengeExtensionTower};
+use crate::bgv::setup::commitment::{
+    SETUP_COMMITMENT_MODULUS_LIMB_INDICES, SETUP_COMMITMENT_RANDOMNESS_WIDTH,
+    SETUP_COMMITMENT_ROW_COUNT,
+};
+use crate::encoding::CanonicalResult;
 
 type VssPublicMessageEncodingLayout =
     crate::bgv::setup::vss_commitment::VssPublicMessageEncodingLayout;
@@ -46,9 +60,9 @@ pub(crate) fn vss_public_message_vector_index(
     let end = offsets.get(message_index + 1).copied().ok_or_else(|| {
         invalid_succinct_setup_proof("VSS message index is outside the vector layout")
     })?;
-    let vector_index = start.checked_add(encoding_column).ok_or_else(|| {
-        invalid_succinct_setup_proof("VSS message vector index overflowed")
-    })?;
+    let vector_index = start
+        .checked_add(encoding_column)
+        .ok_or_else(|| invalid_succinct_setup_proof("VSS message vector index overflowed"))?;
     if vector_index >= end {
         return Err(invalid_succinct_setup_proof(
             "VSS message encoding column is outside the vector layout",
@@ -144,15 +158,14 @@ impl LimbColumnLayout {
         statement: &TrusteeEvaluationKeyStatement,
         limb_index: usize,
     ) -> CanonicalResult<Self> {
-        let family_shape = statement.family_shape()?;
+        let family_shape = statement.family_shape();
         let active_keys = statement
             .active_key_indices(limb_index)
             .into_iter()
-            .map(|key_index| (key_index, statement.keys[key_index].digit_count()))
+            .map(|key_index| (key_index, statement.keys()[key_index].digit_count()))
             .collect::<Vec<_>>();
         let private_vss_coefficient_columns = statement
-            .private_vss_share
-            .as_ref()
+            .private_vss_share()
             .filter(|_| limb_index < SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len())
             .map(|statement| statement.coefficient_commitments.len())
             .unwrap_or(0);
@@ -174,8 +187,7 @@ impl LimbColumnLayout {
         // optimization and drops the source decoder claims that otherwise
         // dominate the aggregate proof.
         let vss_public_is_threshold_aggregate = statement
-            .vss_share_linkage
-            .as_ref()
+            .vss_share_linkage()
             .is_some_and(|share_linkage| share_linkage.is_threshold_aggregate);
         let vss_public_message_bounds = statement.vss_public_message_bounds(limb_index);
         let vss_public_message_encoding_layouts = vss_public_message_bounds
@@ -204,9 +216,7 @@ impl LimbColumnLayout {
                 statement.same_secret_bridge_message_bounds(limb_index),
             )?;
         let same_secret_bridge_message_encoding_offsets =
-            vss_public_message_encoding_offsets(
-                &same_secret_bridge_message_encoding_layouts,
-            )?;
+            vss_public_message_encoding_offsets(&same_secret_bridge_message_encoding_layouts)?;
         let target_decryption_message_encoding_layouts =
             statement.target_decryption_message_encoding_layouts(limb_index)?;
         if target_decryption_message_encoding_layouts.len() != target_decryption_message_columns {
@@ -215,9 +225,7 @@ impl LimbColumnLayout {
             ));
         }
         let target_decryption_message_encoding_offsets =
-            vss_public_message_encoding_offsets(
-                &target_decryption_message_encoding_layouts,
-            )?;
+            vss_public_message_encoding_offsets(&target_decryption_message_encoding_layouts)?;
         if active_keys.is_empty()
             && statement.linkage_randomness_count(limb_index) == 0
             && same_secret_bridge_message_encoding_layouts.is_empty()

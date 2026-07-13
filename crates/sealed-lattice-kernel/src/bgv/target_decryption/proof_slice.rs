@@ -15,7 +15,6 @@ pub(super) struct TargetDecryptionShareAllActiveLimbsProofRequestInput<'a> {
 
 pub(super) struct TargetDecryptionShareAllActiveLimbsProofStatementInput<'a> {
     pub(super) setup_binding: &'a SetupBinding,
-    pub(super) target_accepted: &'a TargetAcceptedBinding,
     pub(super) target_ciphertexts: &'a TargetCiphertextPair,
     pub(super) participant: &'a ParticipantBinding,
     pub(super) target_decryption_share: &'a Value,
@@ -75,7 +74,6 @@ pub(super) fn target_decryption_share_all_active_limbs_proof_request_from_local_
             ));
         };
         let aggregate_opening = local_witness
-            .opening
             .active_credential_bindings
             .get(target_rns_limb_index)
             .ok_or_else(|| {
@@ -139,7 +137,6 @@ pub(super) fn target_decryption_share_all_active_limbs_proof_request_from_local_
         target_decryption_share_all_active_limbs_proof_statement_from_public_inputs(
             TargetDecryptionShareAllActiveLimbsProofStatementInput {
                 setup_binding: input.setup_binding,
-                target_accepted: input.target_accepted,
                 target_ciphertexts: input.target_ciphertexts,
                 participant: input.participant,
                 target_decryption_share: input.target_decryption_share,
@@ -170,32 +167,22 @@ pub(super) fn target_decryption_share_all_active_limbs_proof_statement_from_publ
             ));
         }
     }
-    let statement_aggregate_bindings = array_at_path(
-        value_at_path(input.proof_statement, &["aggregateOpeningBinding"])?,
-        &["activeCredentialBindings"],
-    )?;
+    let statement_aggregate_bindings =
+        array_at_path(input.proof_statement, &["aggregateOpeningCredentials"])?;
     if statement_aggregate_bindings.len() != active_limb_count {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
             "target proof statement aggregate bindings must cover every active target limb",
         ));
     }
-    let active_credential_binding_root = hash_at_path(
-        input.proof_statement,
-        &["aggregateOpeningBinding", "activeCredentialBindingRoot"],
-    )?
-    .to_string();
+    let active_credential_binding_root =
+        aggregate_opening_credential_binding_root(statement_aggregate_bindings)?;
     let proof_statement_root =
         hash_at_path(input.proof_statement, &["proofStatementRoot"])?.to_string();
-    let smudging_commitment_set = value_at_path(
-        input.proof_statement,
-        &["smudgingCommitmentBinding", "smudgingCommitmentSet"],
-    )?
-    .clone();
-    let smudging_commitment_set_root = hash_at_path(
-        input.proof_statement,
-        &["smudgingCommitmentBinding", "smudgingCommitmentSetRoot"],
-    )?;
+    let smudging_commitment_set =
+        value_at_path(input.proof_statement, &["smudgingCommitmentSet"])?.clone();
+    let smudging_commitment_set_root =
+        hash_at_path(&smudging_commitment_set, &["smudgingCommitmentSetRoot"])?;
     let aggregate_message_coefficient_bound = (0..active_limb_count)
         .map(|target_rns_limb_index| DATA_PRIMES[target_rns_limb_index])
         .max()
@@ -277,7 +264,7 @@ pub(super) fn target_decryption_share_all_active_limbs_proof_statement_from_publ
             "rosterHash": input.setup_binding.roster_hash,
             "trusteeIdentity": input.participant.trustee_identity,
             "trusteeRosterPosition": input.participant.roster_position,
-            "setupEpoch": string_at_path(input.proof_statement, &["setupEpoch"])?,
+            "setupEpoch": input.setup_binding.setup_epoch,
             "targetShareProofStatementRoot": proof_statement_root,
             "activeCredentialBindingRoot": active_credential_binding_root,
             "smudgingCommitmentSetRoot": smudging_commitment_set_root,
@@ -286,7 +273,6 @@ pub(super) fn target_decryption_share_all_active_limbs_proof_statement_from_publ
         "targetDecryptionShare": {
             "targetShareProofStatementRoot": proof_statement_root,
             "publicMatrixSeedHash": input.setup_binding.public_matrix_seed_hash,
-            "targetBasisHash": input.target_accepted.target_basis_hash,
             "trusteeIdentity": input.participant.trustee_identity,
             "trusteeRosterPosition": input.participant.roster_position,
             "activeCredentialBindingRoot": active_credential_binding_root,
@@ -319,10 +305,7 @@ fn target_statement_aggregate_binding<'a>(
     aggregate_commitment_root: &str,
     aggregate_opening_root: &str,
 ) -> CanonicalResult<&'a Value> {
-    let bindings = array_at_path(
-        value_at_path(proof_statement, &["aggregateOpeningBinding"])?,
-        &["activeCredentialBindings"],
-    )?;
+    let bindings = array_at_path(proof_statement, &["aggregateOpeningCredentials"])?;
     let binding = bindings.get(target_rns_limb_index).ok_or_else(|| {
         CanonicalError::new(
             CanonicalErrorCode::MalformedLength,

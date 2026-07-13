@@ -152,10 +152,7 @@ const descriptorBackedMaterialSetSnapshot = (
     materialSetPath: string,
     materialArrayFieldName: string,
     state: KernelJsonSnapshotState,
-): JsonRecord | undefined => {
-    if (materialSetValue === undefined) {
-        return undefined;
-    }
+): JsonRecord => {
     const materialSetDescriptors = plainRecordDescriptors(
         materialSetValue,
         materialSetPath,
@@ -206,6 +203,21 @@ const descriptorBackedMaterialSetSnapshot = (
         [materialArrayFieldName]: materialSnapshots,
     };
 };
+
+const optionalDescriptorBackedMaterialSetSnapshot = (
+    materialSetValue: unknown,
+    materialSetPath: string,
+    materialArrayFieldName: string,
+    state: KernelJsonSnapshotState,
+): JsonRecord | undefined =>
+    materialSetValue === undefined
+        ? undefined
+        : descriptorBackedMaterialSetSnapshot(
+              materialSetValue,
+              materialSetPath,
+              materialArrayFieldName,
+              state,
+          );
 
 const chunkSourceSnapshot = <ChunkSource extends object>(
     chunkSourceValue: unknown,
@@ -428,21 +440,11 @@ export const snapshotSetupPackageVerificationInput = (
             ? {}
             : { expectedSetupPackageHash }),
         transportedPublicKeyShareMaterial,
-        ...(transportedPublicKeyShareProofMaterial === undefined
-            ? {}
-            : { transportedPublicKeyShareProofMaterial }),
-        ...(transportedVssShareLinkageProofMaterial === undefined
-            ? {}
-            : { transportedVssShareLinkageProofMaterial }),
-        ...(transportedSameSecretBridgeProofMaterial === undefined
-            ? {}
-            : { transportedSameSecretBridgeProofMaterial }),
-        ...(transportedEvaluationKeyShareProofMaterial === undefined
-            ? {}
-            : { transportedEvaluationKeyShareProofMaterial }),
-        ...(transportedEvaluationKeyShareComponentMaterial === undefined
-            ? {}
-            : { transportedEvaluationKeyShareComponentMaterial }),
+        transportedPublicKeyShareProofMaterial,
+        transportedVssShareLinkageProofMaterial,
+        transportedSameSecretBridgeProofMaterial,
+        transportedEvaluationKeyShareProofMaterial,
+        transportedEvaluationKeyShareComponentMaterial,
         publicKeyShareMaterialChunkSource,
         ...(setupProofMaterialChunkSources === undefined
             ? {}
@@ -595,7 +597,13 @@ const streamSetupProofMaterialSet = async (
     }
 };
 
-const componentFamily = (proofFamily: string): BgvCanonicalStreamFamily => {
+type EvaluationKeyComponentReferenceFamily =
+    | 'relinearization-key-share'
+    | 'galois-key-share';
+
+const componentFamily = (
+    proofFamily: EvaluationKeyComponentReferenceFamily,
+): BgvCanonicalStreamFamily => {
     if (proofFamily === 'relinearization-key-share') {
         return bgvCanonicalStreamFamilies.relinearizationComponent;
     }
@@ -607,8 +615,136 @@ const componentFamily = (proofFamily: string): BgvCanonicalStreamFamily => {
     );
 };
 
+const evaluationKeyComponentRecord = (
+    value: unknown,
+    fieldPath: string,
+    expectedObjectType: string,
+): JsonRecord => {
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+        throw new TypeError(`${fieldPath} must be an object.`);
+    }
+    const record = value as JsonRecord;
+    if (record.objectType !== expectedObjectType) {
+        throw new TypeError(
+            `${fieldPath} must have objectType ${expectedObjectType}.`,
+        );
+    }
+
+    return record;
+};
+
+const evaluationKeyComponentRecordArray = (
+    record: JsonRecord,
+    fieldName: string,
+    fieldPath: string,
+): readonly unknown[] => {
+    const value = record[fieldName];
+    if (!Array.isArray(value)) {
+        throw new TypeError(`${fieldPath} must be an array.`);
+    }
+
+    return value;
+};
+
+const evaluationKeyComponentReferenceFamiliesByRoot = (
+    setupPackage: VerifySetupPackageInput['setupPackage'],
+): Map<string, EvaluationKeyComponentReferenceFamily> => {
+    const setupPackageRecord = evaluationKeyComponentRecord(
+        setupPackage,
+        'setupPackage',
+        'SetupPackage',
+    );
+    const referencesByRoot = new Map<
+        string,
+        EvaluationKeyComponentReferenceFamily
+    >();
+    const addReferences = (
+        records: readonly unknown[],
+        fieldPath: string,
+        expectedObjectType: string,
+        referenceFamily: EvaluationKeyComponentReferenceFamily,
+    ): void => {
+        records.forEach((recordValue, recordIndex) => {
+            const recordPath = `${fieldPath}.${String(recordIndex)}`;
+            const record = evaluationKeyComponentRecord(
+                recordValue,
+                recordPath,
+                expectedObjectType,
+            );
+            const root = protocolHash(
+                record.keySwitchComponentMaterialRoot,
+                `${recordPath}.keySwitchComponentMaterialRoot`,
+            );
+            const existingFamily = referencesByRoot.get(root);
+            if (existingFamily !== undefined) {
+                const duplicateKind =
+                    existingFamily === referenceFamily
+                        ? 'duplicate'
+                        : 'conflicting';
+                throw new TypeError(
+                    `Setup-package evaluation-key component references contain a ${duplicateKind} material root.`,
+                );
+            }
+            referencesByRoot.set(root, referenceFamily);
+        });
+    };
+
+    const relinearizationRounds = evaluationKeyComponentRecord(
+        setupPackageRecord.relinearizationKeyShareRounds,
+        'setupPackage.relinearizationKeyShareRounds',
+        'RelinearizationKeyShareRounds',
+    );
+    addReferences(
+        evaluationKeyComponentRecordArray(
+            relinearizationRounds,
+            'roundOneRecords',
+            'setupPackage.relinearizationKeyShareRounds.roundOneRecords',
+        ),
+        'setupPackage.relinearizationKeyShareRounds.roundOneRecords',
+        'RelinearizationKeyShareRoundOne',
+        'relinearization-key-share',
+    );
+    addReferences(
+        evaluationKeyComponentRecordArray(
+            relinearizationRounds,
+            'roundTwoRecords',
+            'setupPackage.relinearizationKeyShareRounds.roundTwoRecords',
+        ),
+        'setupPackage.relinearizationKeyShareRounds.roundTwoRecords',
+        'RelinearizationKeyShareRoundTwo',
+        'relinearization-key-share',
+    );
+
+    const galoisBatches = evaluationKeyComponentRecordArray(
+        setupPackageRecord,
+        'galoisKeyShareBatches',
+        'setupPackage.galoisKeyShareBatches',
+    );
+    galoisBatches.forEach((batchValue, batchIndex) => {
+        const batchPath = `setupPackage.galoisKeyShareBatches.${String(batchIndex)}`;
+        const batch = evaluationKeyComponentRecord(
+            batchValue,
+            batchPath,
+            'GaloisKeyShareBatch',
+        );
+        addReferences(
+            evaluationKeyComponentRecordArray(
+                batch,
+                'galoisKeyShareMaterialRecords',
+                `${batchPath}.galoisKeyShareMaterialRecords`,
+            ),
+            `${batchPath}.galoisKeyShareMaterialRecords`,
+            'GaloisKeyShareMaterial',
+            'galois-key-share',
+        );
+    });
+
+    return referencesByRoot;
+};
+
 const streamEvaluationKeyShareComponentMaterial = async (
     runtime: BgvCanonicalStreamRuntime,
+    setupPackage: VerifySetupPackageInput['setupPackage'],
     transportedMaterialSet:
         | TransportedEvaluationKeyShareComponentMaterialSet
         | undefined,
@@ -624,6 +760,14 @@ const streamEvaluationKeyShareComponentMaterial = async (
         }
         return;
     }
+    if (
+        transportedMaterialSet.objectType !==
+        'SetupTransportedEvaluationKeyShareComponentMaterialSet'
+    ) {
+        throw new TypeError(
+            'transportedEvaluationKeyShareComponentMaterial must be an evaluation-key component material set.',
+        );
+    }
     if (!Array.isArray(transportedMaterialSet.componentMaterials)) {
         throw new TypeError(
             'transportedEvaluationKeyShareComponentMaterial.componentMaterials must be an array.',
@@ -631,10 +775,13 @@ const streamEvaluationKeyShareComponentMaterial = async (
     }
     const componentMaterials: readonly unknown[] =
         transportedMaterialSet.componentMaterials;
+    const referenceFamiliesByRoot =
+        evaluationKeyComponentReferenceFamiliesByRoot(setupPackage);
     const sourcesByRoot = new Map<
         string,
         EvaluationKeyShareComponentMaterialChunkSource
     >();
+    const streamedRoots = new Set<string>();
     for (const [sourceIndex, source] of (chunkSources ?? []).entries()) {
         const root = protocolHash(
             source.keySwitchComponentMaterialRoot,
@@ -654,14 +801,25 @@ const streamEvaluationKeyShareComponentMaterial = async (
     ) {
         const componentMaterialValue: unknown =
             componentMaterials[componentIndex];
-        const componentMaterial = componentMaterialValue as JsonRecord;
+        const componentPath = `transportedEvaluationKeyShareComponentMaterial.componentMaterials.${String(componentIndex)}`;
+        const componentMaterial = evaluationKeyComponentRecord(
+            componentMaterialValue,
+            componentPath,
+            'SetupTransportedEvaluationKeyShareComponentMaterial',
+        );
         const root = protocolHash(
             componentMaterial.keySwitchComponentMaterialRoot,
-            `transportedEvaluationKeyShareComponentMaterial.componentMaterials.${String(componentIndex)}.keySwitchComponentMaterialRoot`,
+            `${componentPath}.keySwitchComponentMaterialRoot`,
         );
-        if (typeof componentMaterial.proofFamily !== 'string') {
+        if (streamedRoots.has(root)) {
             throw new TypeError(
-                'An evaluation-key component material reference must carry its proof family.',
+                'Transported evaluation-key component material must not repeat a material root.',
+            );
+        }
+        const referenceFamily = referenceFamiliesByRoot.get(root);
+        if (referenceFamily === undefined) {
+            throw new TypeError(
+                'A transported evaluation-key component material sidecar is not referenced by the setup package.',
             );
         }
         const source = sourcesByRoot.get(root);
@@ -673,13 +831,20 @@ const streamEvaluationKeyShareComponentMaterial = async (
         await runtime.readMaterial({
             descriptorBytes: ownedCanonicalDescriptorBytes(
                 componentMaterial.descriptorBytes,
-                `transportedEvaluationKeyShareComponentMaterial.componentMaterials.${String(componentIndex)}.descriptorBytes`,
+                `${componentPath}.descriptorBytes`,
             ),
-            family: componentFamily(componentMaterial.proofFamily),
+            family: componentFamily(referenceFamily),
             materialRoot: root,
             pullChunk: source.pullChunk,
         });
+        streamedRoots.add(root);
+        referenceFamiliesByRoot.delete(root);
         sourcesByRoot.delete(root);
+    }
+    if (referenceFamiliesByRoot.size !== 0) {
+        throw new TypeError(
+            'The setup package references evaluation-key component material without a transported sidecar.',
+        );
     }
     if (sourcesByRoot.size !== 0) {
         throw new TypeError(
@@ -727,6 +892,7 @@ export const prepareSnapshottedSetupPackageVerificationInputForKernel = async (
     );
     await streamEvaluationKeyShareComponentMaterial(
         runtime,
+        descriptorSnapshotInput.setupPackage,
         descriptorSnapshotInput.transportedEvaluationKeyShareComponentMaterial,
         descriptorSnapshotInput.evaluationKeyShareComponentMaterialChunkSources,
     );
@@ -799,7 +965,7 @@ export const snapshotPrivateVssShareVerificationInput = (
         state,
     );
     const transportedPrivateVssShareProofMaterial =
-        descriptorBackedMaterialSetSnapshot(
+        optionalDescriptorBackedMaterialSetSnapshot(
             dataPropertyValue(
                 inputDescriptors,
                 'transportedPrivateVssShareProofMaterial',

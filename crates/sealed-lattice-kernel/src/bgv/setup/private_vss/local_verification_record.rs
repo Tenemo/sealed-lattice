@@ -10,41 +10,7 @@ pub(super) fn local_verification_record(
 ) -> CanonicalResult<Value> {
     Ok(json!({
         "objectType": "PrivateVssLocalVerification",
-        "ceremonyId": string_field(
-            setup_context,
-            "ceremonyId",
-            "setupContext.ceremonyId",
-            "setupContextCeremonyMissing",
-            "setupContext.ceremonyId is required",
-        ).map_err(refusal_to_error)?,
-        "manifestHash": string_field(
-            setup_context,
-            "manifestHash",
-            "setupContext.manifestHash",
-            "setupContextHashMissing",
-            "setupContext.manifestHash is required",
-        ).map_err(refusal_to_error)?,
-        "rosterHash": string_field(
-            setup_context,
-            "rosterHash",
-            "setupContext.rosterHash",
-            "setupContextHashMissing",
-            "setupContext.rosterHash is required",
-        ).map_err(refusal_to_error)?,
-        "setupParametersHash": string_field(
-            setup_context,
-            "setupParametersHash",
-            "setupContext.setupParametersHash",
-            "setupContextHashMissing",
-            "setupContext.setupParametersHash is required",
-        ).map_err(refusal_to_error)?,
-        "setupEpoch": string_field(
-            setup_context,
-            "setupEpoch",
-            "setupContext.setupEpoch",
-            "setupContextEpochMissing",
-            "setupContext.setupEpoch is required",
-        ).map_err(refusal_to_error)?,
+        "setupContextHash": accepted_setup::setup_context_hash(setup_context)?,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "privateEnvelopeHash": envelope_binding.private_envelope_hash,
         "privateEnvelopeAadHash": envelope_binding.private_envelope_aad_hash,

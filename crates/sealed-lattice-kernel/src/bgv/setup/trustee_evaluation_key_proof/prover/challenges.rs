@@ -7,9 +7,10 @@ use super::super::relation::{
     build_same_secret_bridge_public_vectors, build_target_decryption_share_public_vectors,
     build_vss_share_linkage_batch_public_vectors,
 };
-use super::super::*;
+use super::super::{CLAIM_MASK_RADIX, LINCHECK_REPETITIONS, invalid_succinct_setup_proof};
 use super::polynomial::{extension_powers, negacyclic_transpose_product_extension_matrix};
 use crate::bgv::modular_arithmetic::pow_mod;
+use crate::encoding::CanonicalResult;
 
 // Public per-limb sumcheck vectors, shared by prover and verifier: per
 // repetition the combined secret factor and power vector, the consistency
@@ -48,7 +49,7 @@ fn build_combined_same_secret_bridge_public_vectors(
     ChallengeExtensionElement,
     Vec<Vec<ChallengeExtensionElement>>,
 )> {
-    let same_secret_bridge = statement.same_secret_bridge.as_ref().ok_or_else(|| {
+    let same_secret_bridge = statement.same_secret_bridge().ok_or_else(|| {
         invalid_succinct_setup_proof("limb layout expects a same-secret bridge statement")
     })?;
     let (bridge_claim, mut combined_vectors) = build_same_secret_bridge_public_vectors(
@@ -66,7 +67,7 @@ fn build_combined_same_secret_bridge_public_vectors(
         return Ok((bridge_claim, combined_vectors));
     }
 
-    let linkage = statement.same_secret_linkage.as_ref().ok_or_else(|| {
+    let linkage = statement.same_secret_linkage().ok_or_else(|| {
         invalid_succinct_setup_proof(
             "same-secret bridge layout expects the source commitment linkage",
         )
@@ -206,7 +207,7 @@ pub(in super::super) fn build_limb_public_vectors(
         .collect::<Vec<_>>();
     let extension_zero_vector = || vec![ChallengeExtensionTower::zero(); ring_degree];
     if layout.private_vss_active() {
-        let private_vss_share = statement.private_vss_share.as_ref().ok_or_else(|| {
+        let private_vss_share = statement.private_vss_share().ok_or_else(|| {
             invalid_succinct_setup_proof("private VSS layout requires a private VSS statement")
         })?;
         let mut combined_claim = ChallengeExtensionTower::zero();
@@ -245,7 +246,7 @@ pub(in super::super) fn build_limb_public_vectors(
         });
     }
     if layout.vss_public_active() {
-        let vss_share_linkage = statement.vss_share_linkage.as_ref().ok_or_else(|| {
+        let vss_share_linkage = statement.vss_share_linkage().ok_or_else(|| {
             invalid_succinct_setup_proof("VSS layout requires a share-linkage statement")
         })?;
         let mut combined_claim = ChallengeExtensionTower::zero();
@@ -318,7 +319,7 @@ pub(in super::super) fn build_limb_public_vectors(
     }
     if layout.target_decryption_active() {
         let target_decryption_share =
-            statement.target_decryption_share.as_ref().ok_or_else(|| {
+            statement.target_decryption_share().ok_or_else(|| {
                 invalid_succinct_setup_proof(
                     "target-decryption layout requires a target share statement",
                 )
@@ -371,7 +372,7 @@ pub(in super::super) fn build_limb_public_vectors(
     let mut lincheck_claim = ChallengeExtensionTower::zero();
     let mut error_cursor = 0_usize;
     for (key_position, (key_index, digit_count)) in layout.active_keys.iter().enumerate() {
-        let key = &statement.keys[*key_index];
+        let key = &statement.keys()[*key_index];
         let gamma = &challenges.gamma_by_key[key_position];
         let gamma_powers = extension_powers(&tower, gamma, *digit_count);
         // Combined public sample and component vector for this key at this
@@ -449,7 +450,7 @@ pub(in super::super) fn build_limb_public_vectors(
         combined_claim = tower.add(&combined_claim, &bridge_claim);
         linkage_vectors = vectors;
     } else if layout.linkage_active() {
-        let linkage = statement.same_secret_linkage.as_ref().ok_or_else(|| {
+        let linkage = statement.same_secret_linkage().ok_or_else(|| {
             invalid_succinct_setup_proof(
                 "limb layout expects a same-secret linkage on the statement",
             )

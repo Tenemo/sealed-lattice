@@ -1,5 +1,4 @@
 use core::fmt;
-use std::collections::HashMap;
 
 use sha3::{
     Shake256,
@@ -12,7 +11,7 @@ use super::{
     CanonicalCodecErrorKind, CanonicalDecodeLimits, CanonicalItem, CanonicalItemType,
     CanonicalTuple, FOUNDATION_PROFILE, FoundationObjectType, FoundationSchemaError, Hash512,
     ObjectEnvelope, ParticipantIdentity, RefusalReason, Roster, SignedCarrier, VerificationResult,
-    hash512,
+    hash_foundation_tuple_512 as hash512,
 };
 
 pub const STATE_RESERVATION_INTENT_SCHEMA_IDENTIFIER: u16 = 0x1610;
@@ -692,111 +691,6 @@ pub fn derive_state_recovery_producer_sequence(old_recovery_epoch: u64) -> State
     })
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct StateWitnessVoteReplayKey {
-    action_context_hash: Hash512,
-    witness_participant_id: ParticipantIdentity,
-    subject_participant_id: ParticipantIdentity,
-    state_key: Hash512,
-    producer_sequence: u64,
-}
-
-impl StateWitnessVoteReplayKey {
-    pub fn new(
-        action_context_hash: Hash512,
-        witness_participant_id: ParticipantIdentity,
-        subject_participant_id: ParticipantIdentity,
-        state_key: Hash512,
-        vote_kind: StateWitnessVoteKind,
-        subject_epoch: u64,
-    ) -> StateResult<Self> {
-        Ok(Self {
-            action_context_hash,
-            witness_participant_id,
-            subject_participant_id,
-            state_key,
-            producer_sequence: derive_state_witness_vote_sequence(vote_kind, subject_epoch)?,
-        })
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StateWitnessVoteReplayDisposition {
-    FirstObservation,
-    IdempotentReplay,
-}
-
-/// Process-local replay classification only. This is not durable witness locking.
-#[derive(Debug, Default)]
-pub struct EphemeralStateWitnessVoteReplayIndex {
-    observed_intent_hashes: HashMap<StateWitnessVoteReplayKey, Hash512>,
-}
-
-impl EphemeralStateWitnessVoteReplayIndex {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn observe(
-        &mut self,
-        replay_key: StateWitnessVoteReplayKey,
-        intent_object_hash: Hash512,
-    ) -> VerificationResult<StateWitnessVoteReplayDisposition> {
-        match self.observed_intent_hashes.get(&replay_key) {
-            None => {
-                self.observed_intent_hashes
-                    .insert(replay_key, intent_object_hash);
-                VerificationResult::valid(StateWitnessVoteReplayDisposition::FirstObservation)
-            }
-            Some(previous_intent_object_hash)
-                if *previous_intent_object_hash == intent_object_hash =>
-            {
-                VerificationResult::valid(StateWitnessVoteReplayDisposition::IdempotentReplay)
-            }
-            Some(_) => VerificationResult::refused(RefusalReason::Equivocation),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct StateWitnessLock {
-    state_key: Hash512,
-    reservation_intent_object_hash: Option<Hash512>,
-    output_intent_object_hash: Option<Hash512>,
-}
-
-impl StateWitnessLock {
-    pub fn new(
-        state_key: Hash512,
-        reservation_intent_object_hash: Option<Hash512>,
-        output_intent_object_hash: Option<Hash512>,
-    ) -> StateResult<Self> {
-        if output_intent_object_hash.is_some() && reservation_intent_object_hash.is_none() {
-            return Err(StateError::new(
-                RefusalReason::MissingPrerequisite,
-                "a state output lock requires its reservation lock",
-            ));
-        }
-        Ok(Self {
-            state_key,
-            reservation_intent_object_hash,
-            output_intent_object_hash,
-        })
-    }
-
-    pub const fn state_key(&self) -> Hash512 {
-        self.state_key
-    }
-
-    pub const fn reservation_intent_object_hash(&self) -> Option<Hash512> {
-        self.reservation_intent_object_hash
-    }
-
-    pub const fn output_intent_object_hash(&self) -> Option<Hash512> {
-        self.output_intent_object_hash
-    }
-}
-
 #[derive(Clone, Copy)]
 struct StateReservationBinding {
     intent_object_hash: Hash512,
@@ -917,13 +811,6 @@ impl StateDurableBinding {
         derive_state_witness_vote_sequence(self.vote_kind, self.subject_epoch)
     }
 
-    pub fn witness_lock(self) -> StateResult<StateWitnessLock> {
-        StateWitnessLock::new(
-            self.state_key,
-            self.reservation_intent_object_hash,
-            self.output_intent_object_hash,
-        )
-    }
 }
 
 pub struct VerifiedStateReservationIntent {
@@ -1227,32 +1114,6 @@ impl PreservedStateIntent<'_> {
             Self::Output(output) => output.predecessor_transition_hash(),
         }
     }
-}
-
-pub fn verify_state_witness_lock_preservation(
-    local_lock: &StateWitnessLock,
-    preserved_state_intent: Option<&PreservedStateIntent<'_>>,
-) -> VerificationResult<()> {
-    if preserved_state_intent.is_some_and(|preserved_state_intent| {
-        preserved_state_intent.state_key() != local_lock.state_key
-    }) {
-        return VerificationResult::refused(RefusalReason::WrongContext);
-    }
-    if local_lock.reservation_intent_object_hash.is_none() {
-        return VerificationResult::valid(());
-    }
-    let Some(preserved_state_intent) = preserved_state_intent else {
-        return VerificationResult::refused(RefusalReason::ConsumedState);
-    };
-    if Some(preserved_state_intent.reservation_intent_object_hash())
-        != local_lock.reservation_intent_object_hash
-        || (local_lock.output_intent_object_hash.is_some()
-            && preserved_state_intent.output_intent_object_hash()
-                != local_lock.output_intent_object_hash)
-    {
-        return VerificationResult::refused(RefusalReason::ConsumedState);
-    }
-    VerificationResult::valid(())
 }
 
 pub struct StateReservationVerificationInput<'input, 'recovery> {

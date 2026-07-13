@@ -6,11 +6,10 @@ use std::{
 use crate::{
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
     foundation::{
-        CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH, CANONICAL_STREAM_RUNTIME_INTERNAL_FAILURE,
-        CANONICAL_STREAM_RUNTIME_INVALID_SESSION, CanonicalStreamDomain,
-        CanonicalStreamRuntimeBegin, CanonicalStreamVerifier, FOUNDATION_PROFILE, RefusalReason,
-        VerifiedCanonicalStreamSummary, absorb_canonical_stream_chunk,
-        begin_canonical_stream_verifier, cancel_canonical_stream,
+        CANONICAL_STREAM_RUNTIME_INTERNAL_FAILURE, CANONICAL_STREAM_RUNTIME_INVALID_SESSION,
+        CanonicalStreamDomain, CanonicalStreamRuntimeBegin, CanonicalStreamVerifier,
+        FOUNDATION_PROFILE, RefusalReason, VerifiedCanonicalStreamSummary,
+        absorb_canonical_stream_chunk, begin_canonical_stream_verifier, cancel_canonical_stream,
         derive_canonical_stream_descriptor, finish_canonical_stream_verifier_with_summary,
     },
     hashing::to_hex,
@@ -18,33 +17,35 @@ use crate::{
 
 use super::{
     accepted_setup::{
-        CanonicalPublicKeyShareMaterialStream,
+        CanonicalPublicKeyShareMaterialStream, VerifiedCanonicalPublicKeyShareMaterialStoreEntry,
         absorb_verified_canonical_public_key_share_material_chunk,
         begin_verified_canonical_public_key_share_material_stream,
         cancel_verified_canonical_public_key_share_material_stream,
         finish_verified_canonical_public_key_share_material_stream,
     },
     evaluation_key_share_material::{
-        CanonicalComponentMaterialStream, absorb_verified_canonical_component_material_chunk,
+        CanonicalComponentMaterialStream,
+        VerifiedEvaluationKeyShareComponentMaterialChunkStoreEntry,
+        absorb_verified_canonical_component_material_chunk,
         begin_verified_canonical_component_material_stream,
         cancel_verified_canonical_component_material_stream,
         finish_verified_canonical_component_material_stream,
     },
-    setup_proof::{BgvProofMaterialBytes, CanonicalProofMaterialBytes, SetupProofMaterialBytes},
+    setup_proof::{
+        BgvProofMaterialBytes, CanonicalProofMaterialBytes, SetupProofFamily,
+        SetupProofMaterialBytes,
+    },
 };
 
-pub(crate) const BGV_CANONICAL_STREAM_FAMILY_VSS_OPENING_CARRY: u32 = 1;
-pub(crate) const BGV_CANONICAL_STREAM_FAMILY_VSS_SHARE_LINKAGE: u32 = 2;
-pub(crate) const BGV_CANONICAL_STREAM_FAMILY_SAME_SECRET: u32 = 3;
-pub(crate) const BGV_CANONICAL_STREAM_FAMILY_PUBLIC_KEY_SHARE: u32 = 4;
-pub(crate) const BGV_CANONICAL_STREAM_FAMILY_TRUSTEE_EVALUATION_KEY: u32 = 5;
+pub(crate) const BGV_CANONICAL_STREAM_FAMILY_PUBLIC_KEY_SHARE: u32 =
+    SetupProofFamily::PublicKeyShare.stream_code();
 pub(crate) const BGV_CANONICAL_STREAM_FAMILY_RELINEARIZATION_COMPONENT: u32 = 6;
 pub(crate) const BGV_CANONICAL_STREAM_FAMILY_GALOIS_COMPONENT: u32 = 7;
-pub(crate) const BGV_CANONICAL_STREAM_FAMILY_TARGET_DECRYPTION_SHARE: u32 = 8;
 pub(crate) const BGV_CANONICAL_STREAM_FAMILY_PUBLIC_KEY_SHARE_MATERIAL: u32 = 9;
-pub(crate) const BGV_CANONICAL_STREAM_FAMILY_TARGET_DECRYPTION_AGGREGATE_OPENING: u32 = 11;
+pub(crate) const BGV_CANONICAL_STREAM_FAMILY_TARGET_DECRYPTION_AGGREGATE_OPENING: u32 =
+    SetupProofFamily::TargetDecryptionAggregateOpening.stream_code();
 pub(crate) const TARGET_DECRYPTION_AGGREGATE_OPENING_MATERIAL_FAMILY: &str =
-    "target-decryption-aggregate-opening";
+    SetupProofFamily::TargetDecryptionAggregateOpening.wire_label();
 
 const MATERIAL_ROOT_BYTE_LENGTH: usize = 64;
 
@@ -52,7 +53,6 @@ const MATERIAL_ROOT_BYTE_LENGTH: usize = 64;
 struct VerifiedCanonicalProofMaterial {
     proof_bytes: BgvProofMaterialBytes,
     proof_family: &'static str,
-    stream_summary: Arc<VerifiedCanonicalStreamSummary>,
 }
 
 static VERIFIED_CANONICAL_PROOF_MATERIALS: OnceLock<
@@ -63,7 +63,6 @@ static VERIFIED_CANONICAL_PROOF_MATERIALS: OnceLock<
 struct VerifiedCanonicalSetupProofBinding {
     proof_family: &'static str,
     verification_binding_hash: String,
-    stream_summary: Arc<VerifiedCanonicalStreamSummary>,
 }
 
 #[derive(Clone)]
@@ -73,55 +72,40 @@ pub(in crate::bgv::setup) struct CanonicalSetupProofBindingLease {
     binding: VerifiedCanonicalSetupProofBinding,
 }
 
+#[cfg(test)]
+impl CanonicalSetupProofBindingLease {
+    pub(in crate::bgv::setup) fn proof_material_root(&self) -> &str {
+        &self.proof_material_root
+    }
+}
+
 #[derive(Clone, Copy)]
 pub(crate) struct AcceptedSetupProofBindingSession {
     pub(in crate::bgv::setup) session_handle: u32,
-    pub(in crate::bgv::setup) capability: [u8; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH],
 }
 
 impl AcceptedSetupProofBindingSession {
-    /// Opens a process-local verifier scope without serializing any capability
-    /// into the protocol request. The capability is an internal correlation
-    /// token derived from the registry's non-reused handle, not a secret or a
-    /// protocol authentication claim.
-    #[cfg(test)]
+    /// Opens a process-local verifier scope identified by a non-reused opaque
+    /// handle. The handle is runtime state, never protocol input.
     pub(in crate::bgv::setup) fn begin_fresh() -> CanonicalResult<Self> {
         let mut registry = accepted_setup_proof_binding_session_registry()
             .lock()
             .map_err(|_| canonical_proof_store_error())?;
         let session_handle = registry.take_session_handle()?;
-        let digest = crate::hashing::hash512(
-            "sealed-lattice/accepted-setup/proof-binding-session-capability",
-            &[&session_handle.to_le_bytes()],
-        );
-        let mut capability = [0_u8; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH];
-        capability.copy_from_slice(&digest[..CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH]);
         registry.sessions.insert(
             session_handle,
             AcceptedSetupProofBindingSessionState {
-                capability,
                 bindings: BTreeMap::new(),
+                component_materials: BTreeMap::new(),
                 component_material_roots: BTreeSet::new(),
+                proof_materials: BTreeMap::new(),
                 proof_material_roots: BTreeSet::new(),
+                public_key_share_materials: BTreeMap::new(),
                 public_key_share_material_roots: BTreeSet::new(),
             },
         );
-        Ok(Self {
-            session_handle,
-            capability,
-        })
+        Ok(Self { session_handle })
     }
-}
-
-#[cfg(test)]
-static ACCEPTED_SETUP_FIXTURE_PROOF_BINDING_LEASES: OnceLock<
-    Mutex<BTreeMap<String, CanonicalSetupProofBindingLease>>,
-> = OnceLock::new();
-
-#[cfg(test)]
-fn accepted_setup_fixture_proof_binding_leases()
--> &'static Mutex<BTreeMap<String, CanonicalSetupProofBindingLease>> {
-    ACCEPTED_SETUP_FIXTURE_PROOF_BINDING_LEASES.get_or_init(|| Mutex::new(BTreeMap::new()))
 }
 
 #[cfg(test)]
@@ -131,45 +115,29 @@ pub(in crate::bgv::setup) fn begin_accepted_setup_fixture_proof_binding_session(
 }
 
 #[cfg(test)]
-pub(in crate::bgv::setup) fn cache_accepted_setup_fixture_proof_binding_lease(
+pub(in crate::bgv::setup) fn finish_accepted_setup_fixture_proof_binding_session(
     session: AcceptedSetupProofBindingSession,
     proof_material_root: &str,
-) -> CanonicalResult<()> {
-    let lease = accepted_setup_proof_binding_lease(
-        session.session_handle,
-        &session.capability,
-        proof_material_root,
-    )?
-    .ok_or_else(|| {
-        CanonicalError::new(
-            CanonicalErrorCode::InvalidProtocolObject,
-            "accepted-setup fixture proof binding was not retained",
-        )
-    })?;
-    cancel_accepted_setup_proof_binding_session(session.session_handle, &session.capability)?;
-    accepted_setup_fixture_proof_binding_leases()
-        .lock()
-        .map_err(|_| canonical_proof_store_error())?
-        .insert(proof_material_root.to_string(), lease);
-    Ok(())
-}
-
-#[cfg(test)]
-pub(in crate::bgv::setup) fn accepted_setup_fixture_proof_binding_lease(
-    proof_material_root: &str,
-) -> CanonicalResult<Option<CanonicalSetupProofBindingLease>> {
-    Ok(accepted_setup_fixture_proof_binding_leases()
-        .lock()
-        .map_err(|_| canonical_proof_store_error())?
-        .get(proof_material_root)
-        .cloned())
+) -> CanonicalResult<CanonicalSetupProofBindingLease> {
+    let lease = accepted_setup_proof_binding_lease(session.session_handle, proof_material_root)?
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidProtocolObject,
+                "accepted-setup fixture proof binding was not retained",
+            )
+        })?;
+    cancel_accepted_setup_proof_binding_session(session.session_handle)?;
+    Ok(lease)
 }
 
 struct AcceptedSetupProofBindingSessionState {
-    capability: [u8; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH],
     bindings: BTreeMap<String, VerifiedCanonicalSetupProofBinding>,
+    component_materials:
+        BTreeMap<String, VerifiedEvaluationKeyShareComponentMaterialChunkStoreEntry>,
     component_material_roots: BTreeSet<String>,
+    proof_materials: BTreeMap<String, VerifiedCanonicalProofMaterial>,
     proof_material_roots: BTreeSet<String>,
+    public_key_share_materials: BTreeMap<String, VerifiedCanonicalPublicKeyShareMaterialStoreEntry>,
     public_key_share_material_roots: BTreeSet<String>,
 }
 
@@ -178,6 +146,22 @@ pub(crate) enum AcceptedSetupMaterialStore {
     Component,
     Proof,
     PublicKeyShare,
+}
+
+enum AcceptedSetupMaterial {
+    Component(VerifiedEvaluationKeyShareComponentMaterialChunkStoreEntry),
+    Proof(VerifiedCanonicalProofMaterial),
+    PublicKeyShare(VerifiedCanonicalPublicKeyShareMaterialStoreEntry),
+}
+
+impl AcceptedSetupMaterial {
+    fn store(&self) -> AcceptedSetupMaterialStore {
+        match self {
+            Self::Component(_) => AcceptedSetupMaterialStore::Component,
+            Self::Proof(_) => AcceptedSetupMaterialStore::Proof,
+            Self::PublicKeyShare(_) => AcceptedSetupMaterialStore::PublicKeyShare,
+        }
+    }
 }
 
 impl AcceptedSetupProofBindingSessionState {
@@ -195,6 +179,41 @@ impl AcceptedSetupProofBindingSessionState {
             AcceptedSetupMaterialStore::Proof => &mut self.proof_material_roots,
             AcceptedSetupMaterialStore::PublicKeyShare => &mut self.public_key_share_material_roots,
         }
+    }
+
+    fn retain_material(
+        &mut self,
+        material_root: String,
+        material: AcceptedSetupMaterial,
+    ) -> CanonicalResult<()> {
+        let store = material.store();
+        if !self.material_roots_mut(store).remove(&material_root) {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::ComponentMismatch,
+                "accepted-setup material root is not reserved by this session",
+            ));
+        }
+        let was_vacant = match material {
+            AcceptedSetupMaterial::Component(material) => self
+                .component_materials
+                .insert(material_root, material)
+                .is_none(),
+            AcceptedSetupMaterial::Proof(material) => self
+                .proof_materials
+                .insert(material_root, material)
+                .is_none(),
+            AcceptedSetupMaterial::PublicKeyShare(material) => self
+                .public_key_share_materials
+                .insert(material_root, material)
+                .is_none(),
+        };
+        if !was_vacant {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::ComponentMismatch,
+                "accepted-setup material root is already retained by this session",
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -216,45 +235,30 @@ impl AcceptedSetupProofBindingSessionRegistry {
     fn session(
         &self,
         session_handle: u32,
-        capability: &[u8; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH],
     ) -> CanonicalResult<&AcceptedSetupProofBindingSessionState> {
-        let session = self.sessions.get(&session_handle).ok_or_else(|| {
+        self.sessions.get(&session_handle).ok_or_else(|| {
             invalid_setup_proof_binding_session("accepted-setup proof binding session is invalid")
-        })?;
-        if !constant_time_equal(&session.capability, capability) {
-            return Err(invalid_setup_proof_binding_session(
-                "accepted-setup proof binding session is invalid",
-            ));
-        }
-        Ok(session)
+        })
     }
 
     fn session_mut(
         &mut self,
         session_handle: u32,
-        capability: &[u8; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH],
     ) -> CanonicalResult<&mut AcceptedSetupProofBindingSessionState> {
-        let session = self.sessions.get_mut(&session_handle).ok_or_else(|| {
+        self.sessions.get_mut(&session_handle).ok_or_else(|| {
             invalid_setup_proof_binding_session("accepted-setup proof binding session is invalid")
-        })?;
-        if !constant_time_equal(&session.capability, capability) {
-            return Err(invalid_setup_proof_binding_session(
-                "accepted-setup proof binding session is invalid",
-            ));
-        }
-        Ok(session)
+        })
     }
 
     fn take_owned_session(
         &mut self,
         session_handle: u32,
-        capability: &[u8; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH],
     ) -> CanonicalResult<AcceptedSetupProofBindingSessionState> {
-        self.session(session_handle, capability)?;
+        self.session(session_handle)?;
         Ok(self
             .sessions
             .remove(&session_handle)
-            .expect("authenticated accepted-setup proof binding session remains present"))
+            .expect("active accepted-setup proof binding session remains present"))
     }
 
     fn take_session_handle(&mut self) -> CanonicalResult<u32> {
@@ -278,59 +282,31 @@ fn accepted_setup_proof_binding_session_registry()
         .get_or_init(|| Mutex::new(AcceptedSetupProofBindingSessionRegistry::default()))
 }
 
-/// Opens a verifier-owned scope for semantic proof bindings accumulated while
-/// one accepted-setup package is verified. The caller-generated capability is
-/// never serialized into a protocol object and every subsequent operation must
-/// authenticate it.
-pub(crate) fn begin_accepted_setup_proof_binding_session(
-    capability: [u8; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH],
-) -> CanonicalResult<u32> {
-    if capability.iter().all(|byte| *byte == 0) {
-        return Err(invalid_setup_proof_binding_session(
-            "accepted-setup proof binding session capability must not be all zeroes",
-        ));
-    }
-    let mut registry = accepted_setup_proof_binding_session_registry()
-        .lock()
-        .map_err(|_| canonical_proof_store_error())?;
-    let session_handle = registry.take_session_handle()?;
-    registry.sessions.insert(
-        session_handle,
-        AcceptedSetupProofBindingSessionState {
-            capability,
-            bindings: BTreeMap::new(),
-            component_material_roots: BTreeSet::new(),
-            proof_material_roots: BTreeSet::new(),
-            public_key_share_material_roots: BTreeSet::new(),
-        },
-    );
-    Ok(session_handle)
+/// Opens a verifier-owned scope for all material consumed while one
+/// accepted-setup package is verified.
+pub(crate) fn begin_accepted_setup_proof_binding_session() -> CanonicalResult<u32> {
+    Ok(AcceptedSetupProofBindingSession::begin_fresh()?.session_handle)
 }
 
-pub(crate) fn authenticated_accepted_setup_proof_binding_session(
+pub(crate) fn active_accepted_setup_proof_binding_session(
     session_handle: u32,
-    capability: &[u8; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH],
 ) -> CanonicalResult<AcceptedSetupProofBindingSession> {
     accepted_setup_proof_binding_session_registry()
         .lock()
         .map_err(|_| canonical_proof_store_error())?
-        .session(session_handle, capability)?;
-    Ok(AcceptedSetupProofBindingSession {
-        session_handle,
-        capability: *capability,
-    })
+        .session(session_handle)?;
+    Ok(AcceptedSetupProofBindingSession { session_handle })
 }
 
 pub(in crate::bgv::setup) fn reserve_accepted_setup_material_root(
     session_handle: u32,
-    capability: &[u8; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH],
     store: AcceptedSetupMaterialStore,
     material_root: &str,
 ) -> CanonicalResult<()> {
     let mut registry = accepted_setup_proof_binding_session_registry()
         .lock()
         .map_err(|_| canonical_proof_store_error())?;
-    registry.session(session_handle, capability)?;
+    registry.session(session_handle)?;
     if registry.sessions.iter().any(|(other_handle, session)| {
         *other_handle != session_handle && session.material_roots(store).contains(material_root)
     }) {
@@ -339,7 +315,7 @@ pub(in crate::bgv::setup) fn reserve_accepted_setup_material_root(
             "accepted-setup material root is already owned by another session",
         ));
     }
-    let session = registry.session_mut(session_handle, capability)?;
+    let session = registry.session_mut(session_handle)?;
     if !session
         .material_roots_mut(store)
         .insert(material_root.to_string())
@@ -354,14 +330,13 @@ pub(in crate::bgv::setup) fn reserve_accepted_setup_material_root(
 
 pub(in crate::bgv::setup) fn release_accepted_setup_material_root(
     session_handle: u32,
-    capability: &[u8; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH],
     store: AcceptedSetupMaterialStore,
     material_root: &str,
 ) -> CanonicalResult<()> {
     let mut registry = accepted_setup_proof_binding_session_registry()
         .lock()
         .map_err(|_| canonical_proof_store_error())?;
-    let session = registry.session_mut(session_handle, capability)?;
+    let session = registry.session_mut(session_handle)?;
     if !session.material_roots_mut(store).remove(material_root) {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ComponentMismatch,
@@ -371,27 +346,105 @@ pub(in crate::bgv::setup) fn release_accepted_setup_material_root(
     Ok(())
 }
 
+fn retain_accepted_setup_material(
+    session_handle: u32,
+    material_root: String,
+    material: AcceptedSetupMaterial,
+) -> CanonicalResult<()> {
+    accepted_setup_proof_binding_session_registry()
+        .lock()
+        .map_err(|_| canonical_proof_store_error())?
+        .session_mut(session_handle)?
+        .retain_material(material_root, material)
+}
+
 pub(in crate::bgv::setup) fn accepted_setup_session_owns_material_root(
     session_handle: u32,
-    capability: &[u8; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH],
     store: AcceptedSetupMaterialStore,
     material_root: &str,
 ) -> CanonicalResult<bool> {
     let registry = accepted_setup_proof_binding_session_registry()
         .lock()
         .map_err(|_| canonical_proof_store_error())?;
-    Ok(registry
-        .session(session_handle, capability)?
-        .material_roots(store)
-        .contains(material_root))
+    let session = registry.session(session_handle)?;
+    Ok(session.material_roots(store).contains(material_root)
+        || match store {
+            AcceptedSetupMaterialStore::Component => {
+                session.component_materials.contains_key(material_root)
+            }
+            AcceptedSetupMaterialStore::Proof => {
+                session.proof_materials.contains_key(material_root)
+            }
+            AcceptedSetupMaterialStore::PublicKeyShare => session
+                .public_key_share_materials
+                .contains_key(material_root),
+        })
+}
+
+pub(in crate::bgv::setup) fn accepted_setup_public_key_share_material(
+    session_handle: u32,
+    material_root: &str,
+) -> CanonicalResult<Option<super::accepted_setup::VerifiedCanonicalPublicKeyShareMaterialHandle>> {
+    let registry = accepted_setup_proof_binding_session_registry()
+        .lock()
+        .map_err(|_| canonical_proof_store_error())?;
+    let session = registry.session(session_handle)?;
+    Ok(session
+        .public_key_share_materials
+        .get(material_root)
+        .map(|entry| Arc::clone(&entry.material)))
+}
+
+pub(in crate::bgv::setup) fn take_accepted_setup_proof_material_bytes(
+    session_handle: u32,
+    proof_family: &str,
+    proof_material_root: &str,
+) -> CanonicalResult<Option<SetupProofMaterialBytes>> {
+    let mut registry = accepted_setup_proof_binding_session_registry()
+        .lock()
+        .map_err(|_| canonical_proof_store_error())?;
+    let session = registry.session_mut(session_handle)?;
+    let Some(material) = session.proof_materials.get(proof_material_root) else {
+        return Ok(None);
+    };
+    if material.proof_family != proof_family {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ComponentMismatch,
+            "accepted-setup proof material root belongs to a different proof family",
+        ));
+    }
+    Ok(session
+        .proof_materials
+        .remove(proof_material_root)
+        .map(|material| material.proof_bytes))
+}
+
+pub(in crate::bgv::setup) fn accepted_setup_component_material(
+    session_handle: u32,
+    proof_family: &str,
+    material_root: &str,
+) -> CanonicalResult<Option<VerifiedEvaluationKeyShareComponentMaterialChunkStoreEntry>> {
+    let registry = accepted_setup_proof_binding_session_registry()
+        .lock()
+        .map_err(|_| canonical_proof_store_error())?;
+    let session = registry.session(session_handle)?;
+    let Some(material) = session.component_materials.get(material_root) else {
+        return Ok(None);
+    };
+    if material.proof_family != proof_family {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ComponentMismatch,
+            "accepted-setup component material root belongs to a different proof family",
+        ));
+    }
+    Ok(Some(material.clone()))
 }
 
 /// Replaces authenticated proof bytes with the semantic binding recomputed by
-/// the verifier inside one capability-owned accepted-setup session.
+/// the verifier inside one accepted-setup session.
 #[cfg(test)]
 pub(in crate::bgv::setup) fn retain_accepted_setup_proof_binding(
     session_handle: u32,
-    capability: &[u8; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH],
     proof_family: &'static str,
     proof_material_root: &str,
     verification_binding_hash: String,
@@ -399,7 +452,7 @@ pub(in crate::bgv::setup) fn retain_accepted_setup_proof_binding(
     let mut session_registry = accepted_setup_proof_binding_session_registry()
         .lock()
         .map_err(|_| canonical_proof_store_error())?;
-    let session = session_registry.session_mut(session_handle, capability)?;
+    let session = session_registry.session_mut(session_handle)?;
     if session.bindings.contains_key(proof_material_root) {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ComponentMismatch,
@@ -407,7 +460,7 @@ pub(in crate::bgv::setup) fn retain_accepted_setup_proof_binding(
         ));
     }
 
-    let material = {
+    {
         let mut materials = verified_canonical_proof_materials()
             .lock()
             .map_err(|_| canonical_proof_store_error())?;
@@ -425,15 +478,14 @@ pub(in crate::bgv::setup) fn retain_accepted_setup_proof_binding(
         }
         materials
             .remove(proof_material_root)
-            .expect("authenticated setup proof material remains present")
-    };
+            .expect("authenticated setup proof material remains present");
+    }
 
     session.bindings.insert(
         proof_material_root.to_string(),
         VerifiedCanonicalSetupProofBinding {
             proof_family,
             verification_binding_hash,
-            stream_summary: material.stream_summary,
         },
     );
     Ok(())
@@ -444,7 +496,6 @@ pub(in crate::bgv::setup) fn retain_accepted_setup_proof_binding(
 /// caller cannot destroy valid state by guessing roots.
 pub(in crate::bgv::setup) fn consume_accepted_setup_proof_binding(
     session_handle: u32,
-    capability: &[u8; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH],
     proof_family: &str,
     proof_material_root: &str,
     verification_binding_hash: &str,
@@ -452,7 +503,7 @@ pub(in crate::bgv::setup) fn consume_accepted_setup_proof_binding(
     let mut registry = accepted_setup_proof_binding_session_registry()
         .lock()
         .map_err(|_| canonical_proof_store_error())?;
-    let session = registry.session_mut(session_handle, capability)?;
+    let session = registry.session_mut(session_handle)?;
     let Some(binding) = session.bindings.get(proof_material_root) else {
         return Ok(false);
     };
@@ -469,41 +520,18 @@ pub(in crate::bgv::setup) fn consume_accepted_setup_proof_binding(
     Ok(true)
 }
 
-pub(in crate::bgv::setup) fn accepted_setup_proof_binding_stream_summary(
-    session_handle: u32,
-    capability: &[u8; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH],
-    proof_family: &str,
-    proof_material_root: &str,
-) -> CanonicalResult<Option<Arc<VerifiedCanonicalStreamSummary>>> {
-    let registry = accepted_setup_proof_binding_session_registry()
-        .lock()
-        .map_err(|_| canonical_proof_store_error())?;
-    let session = registry.session(session_handle, capability)?;
-    let Some(binding) = session.bindings.get(proof_material_root) else {
-        return Ok(None);
-    };
-    if binding.proof_family != proof_family {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ComponentMismatch,
-            "accepted-setup proof binding root belongs to a different proof family",
-        ));
-    }
-    Ok(Some(Arc::clone(&binding.stream_summary)))
-}
-
 /// Captures verifier-owned state for deterministic test fixtures without
 /// publishing a serialized acceptance receipt. Production callers must stream
 /// and verify proof bytes afresh inside their own session.
 #[cfg(test)]
 pub(in crate::bgv::setup) fn accepted_setup_proof_binding_lease(
     session_handle: u32,
-    capability: &[u8; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH],
     proof_material_root: &str,
 ) -> CanonicalResult<Option<CanonicalSetupProofBindingLease>> {
     let registry = accepted_setup_proof_binding_session_registry()
         .lock()
         .map_err(|_| canonical_proof_store_error())?;
-    let session = registry.session(session_handle, capability)?;
+    let session = registry.session(session_handle)?;
     Ok(session
         .bindings
         .get(proof_material_root)
@@ -515,17 +543,16 @@ pub(in crate::bgv::setup) fn accepted_setup_proof_binding_lease(
 }
 
 /// Restores a deterministic test fixture's opaque verifier state into the
-/// fresh capability scope for the current verification flow.
+/// fresh verifier scope for the current verification flow.
 #[cfg(test)]
 pub(in crate::bgv::setup) fn restore_accepted_setup_proof_binding_lease(
     session_handle: u32,
-    capability: &[u8; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH],
     lease: &CanonicalSetupProofBindingLease,
 ) -> CanonicalResult<()> {
     let mut registry = accepted_setup_proof_binding_session_registry()
         .lock()
         .map_err(|_| canonical_proof_store_error())?;
-    let session = registry.session_mut(session_handle, capability)?;
+    let session = registry.session_mut(session_handle)?;
     match session.bindings.entry(lease.proof_material_root.clone()) {
         Entry::Vacant(entry) => {
             entry.insert(lease.binding.clone());
@@ -549,67 +576,43 @@ pub(in crate::bgv::setup) fn restore_accepted_setup_proof_binding_lease(
 /// binding. Incomplete completion still destroys the session and its state.
 pub(in crate::bgv::setup) fn finish_accepted_setup_proof_binding_session(
     session_handle: u32,
-    capability: &[u8; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH],
 ) -> CanonicalResult<()> {
     let mut registry = accepted_setup_proof_binding_session_registry()
         .lock()
         .map_err(|_| canonical_proof_store_error())?;
-    let session = registry.take_owned_session(session_handle, capability)?;
+    let session = registry.take_owned_session(session_handle)?;
     drop(registry);
-    let drain_result = drain_accepted_setup_material_roots(&session);
-    if !session.bindings.is_empty() {
-        drain_result?;
+    let has_unconsumed_bindings = !session.bindings.is_empty();
+    let discard_result = discard_accepted_setup_session_material(session);
+    if has_unconsumed_bindings {
+        discard_result?;
         return Err(CanonicalError::new(
             CanonicalErrorCode::ComponentMismatch,
             "accepted-setup proof binding session finished with unconsumed proofs",
         ));
     }
-    drain_result
+    discard_result
 }
 
-/// Cancels a session on every refusal or caller abort. Cancellation is
-/// capability-authenticated and discards all retained semantic state.
+/// Cancels a session on every refusal or caller abort and discards all retained
+/// semantic state.
 pub(crate) fn cancel_accepted_setup_proof_binding_session(
     session_handle: u32,
-    capability: &[u8; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH],
 ) -> CanonicalResult<()> {
     let mut registry = accepted_setup_proof_binding_session_registry()
         .lock()
         .map_err(|_| canonical_proof_store_error())?;
-    let session = registry.take_owned_session(session_handle, capability)?;
+    let session = registry.take_owned_session(session_handle)?;
     drop(registry);
-    drain_accepted_setup_material_roots(&session)
+    discard_accepted_setup_session_material(session)
 }
 
-fn drain_accepted_setup_material_roots(
-    session: &AcceptedSetupProofBindingSessionState,
+fn discard_accepted_setup_session_material(
+    session: AcceptedSetupProofBindingSessionState,
 ) -> CanonicalResult<()> {
-    let proof_result = drain_verified_canonical_proof_materials(
-        &session
-            .proof_material_roots
-            .iter()
-            .cloned()
-            .collect::<Vec<_>>(),
-    );
-    let component_result =
-        crate::bgv::setup::drain_verified_evaluation_key_share_component_material(
-            &session
-                .component_material_roots
-                .iter()
-                .cloned()
-                .collect::<Vec<_>>(),
-        );
-    let public_key_share_result =
-        crate::bgv::setup::drain_verified_canonical_public_key_share_materials(
-            &session
-                .public_key_share_material_roots
-                .iter()
-                .cloned()
-                .collect::<Vec<_>>(),
-        );
-    proof_result?;
-    component_result?;
-    public_key_share_result
+    crate::bgv::setup::evaluation_key_share_material::discard_session_component_material(
+        session.component_materials,
+    )
 }
 
 fn invalid_setup_proof_binding_session(message: &'static str) -> CanonicalError {
@@ -645,46 +648,6 @@ pub(crate) fn verified_canonical_proof_material_bytes(
         ));
     }
     Ok(Some(Arc::clone(&material.proof_bytes)))
-}
-
-pub(in crate::bgv::setup) fn authenticated_setup_proof_material_stream_summary_in_session(
-    proof_binding_session: Option<&AcceptedSetupProofBindingSession>,
-    proof_family: &str,
-    proof_material_root: &str,
-) -> CanonicalResult<Option<Arc<VerifiedCanonicalStreamSummary>>> {
-    if let Some(proof_binding_session) = proof_binding_session {
-        if let Some(stream_summary) = accepted_setup_proof_binding_stream_summary(
-            proof_binding_session.session_handle,
-            &proof_binding_session.capability,
-            proof_family,
-            proof_material_root,
-        )? {
-            return Ok(Some(stream_summary));
-        }
-        if !accepted_setup_session_owns_material_root(
-            proof_binding_session.session_handle,
-            &proof_binding_session.capability,
-            AcceptedSetupMaterialStore::Proof,
-            proof_material_root,
-        )? {
-            return Ok(None);
-        }
-    }
-    let materials = verified_canonical_proof_materials()
-        .lock()
-        .map_err(|_| canonical_proof_store_error())?;
-    if let Some(material) = materials.get(proof_material_root) {
-        if material.proof_family != proof_family {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::ComponentMismatch,
-                "canonical setup proof material root belongs to a different proof family",
-            ));
-        }
-        return Ok(Some(Arc::clone(&material.stream_summary)));
-    }
-    drop(materials);
-
-    Ok(None)
 }
 
 pub(crate) fn take_verified_canonical_proof_material_bytes(
@@ -723,24 +686,12 @@ pub(crate) fn evict_verified_canonical_proof_materials(proof_material_roots: &[S
     }
 }
 
-fn drain_verified_canonical_proof_materials(
-    proof_material_roots: &[String],
-) -> CanonicalResult<()> {
-    let mut materials = verified_canonical_proof_materials()
-        .lock()
-        .map_err(|_| canonical_proof_store_error())?;
-    for proof_material_root in proof_material_roots {
-        materials.remove(proof_material_root);
-    }
-    Ok(())
-}
-
 pub(crate) fn retain_generated_canonical_proof_material(
     proof_family: &'static str,
     proof_material_root: String,
     proof_bytes: Vec<u8>,
 ) -> CanonicalResult<BgvProofMaterialBytes> {
-    let stream_summary = verifier_owned_generated_proof_stream_summary(proof_family, &proof_bytes)?;
+    validate_generated_proof_stream(proof_family, &proof_bytes)?;
     let proof_bytes = Arc::new(CanonicalProofMaterialBytes::from_contiguous(proof_bytes)?);
     let mut materials = verified_canonical_proof_materials()
         .lock()
@@ -750,7 +701,6 @@ pub(crate) fn retain_generated_canonical_proof_material(
             entry.insert(VerifiedCanonicalProofMaterial {
                 proof_bytes: Arc::clone(&proof_bytes),
                 proof_family,
-                stream_summary,
             });
             Ok(proof_bytes)
         }
@@ -761,10 +711,7 @@ pub(crate) fn retain_generated_canonical_proof_material(
     }
 }
 
-fn verifier_owned_generated_proof_stream_summary(
-    proof_family: &str,
-    proof_bytes: &[u8],
-) -> CanonicalResult<Arc<VerifiedCanonicalStreamSummary>> {
+fn validate_generated_proof_stream(proof_family: &str, proof_bytes: &[u8]) -> CanonicalResult<()> {
     let stream_domain = proof_material_stream_domain(proof_family)?;
     let descriptor =
         derive_canonical_stream_descriptor(stream_domain, proof_bytes).map_err(|error| {
@@ -783,30 +730,22 @@ fn verifier_owned_generated_proof_stream_summary(
             .into_result()
             .map_err(|_| canonical_stream_summary_error("generated proof chunk was refused"))?;
     }
-    let stream_summary = verifier.finish_with_summary().into_result().map_err(|_| {
+    verifier.finish_with_summary().into_result().map_err(|_| {
         canonical_stream_summary_error("generated proof stream did not finish completely")
     })?;
 
-    Ok(Arc::new(stream_summary))
+    Ok(())
 }
 
 fn proof_material_stream_domain(proof_family: &str) -> CanonicalResult<CanonicalStreamDomain> {
-    match proof_family {
-        "vss-opening-carry" | "vss-share-linkage" => {
-            Ok(CanonicalStreamDomain::DealerVssShareLinkageProof)
-        }
-        "same-secret-bridge" => Ok(CanonicalStreamDomain::SameSecretProof),
-        "public-key-share" => Ok(CanonicalStreamDomain::PublicKeyShareProof),
-        "trustee-evaluation-key" => Ok(CanonicalStreamDomain::EvaluatorKeyAggregateProof),
-        "target-decryption-share" => Ok(CanonicalStreamDomain::MaliciousTargetShareProof),
-        TARGET_DECRYPTION_AGGREGATE_OPENING_MATERIAL_FAMILY => {
-            Ok(CanonicalStreamDomain::RecipientAggregateThresholdShareProof)
-        }
-        _ => Err(CanonicalError::new(
-            CanonicalErrorCode::ComponentMismatch,
-            "canonical proof material family has no stream domain",
-        )),
-    }
+    SetupProofFamily::from_wire_label(proof_family)
+        .map(SetupProofFamily::stream_domain)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::ComponentMismatch,
+                "canonical proof material family has no stream domain",
+            )
+        })
 }
 
 fn canonical_stream_summary_error(message: impl Into<String>) -> CanonicalError {
@@ -817,7 +756,6 @@ enum BgvCanonicalStreamSink {
     ProofMaterial {
         chunks: Vec<Vec<u8>>,
         proof_family: &'static str,
-        proof_material_root: String,
     },
     EvaluationKeyComponent(CanonicalComponentMaterialStream),
     PublicKeyShareMaterial(CanonicalPublicKeyShareMaterialStream),
@@ -839,12 +777,14 @@ impl BgvCanonicalStreamSink {
         }
     }
 
-    fn finish(self, stream_summary: Arc<VerifiedCanonicalStreamSummary>) -> CanonicalResult<()> {
+    fn finish(
+        self,
+        stream_summary: Arc<VerifiedCanonicalStreamSummary>,
+    ) -> CanonicalResult<AcceptedSetupMaterial> {
         match self {
             Self::ProofMaterial {
                 chunks,
                 proof_family,
-                proof_material_root,
             } => {
                 let proof_bytes =
                     Arc::new(CanonicalProofMaterialBytes::from_stream_chunks(chunks)?);
@@ -862,31 +802,19 @@ impl BgvCanonicalStreamSink {
                         "canonical proof material does not match its authenticated stream summary",
                     ));
                 }
-                let materials = verified_canonical_proof_materials();
-                let mut materials = materials
-                    .lock()
-                    .map_err(|_| canonical_proof_store_error())?;
-                match materials.entry(proof_material_root) {
-                    Entry::Vacant(entry) => {
-                        entry.insert(VerifiedCanonicalProofMaterial {
-                            proof_bytes,
-                            proof_family,
-                            stream_summary,
-                        });
-                        Ok(())
-                    }
-                    Entry::Occupied(_) => Err(CanonicalError::new(
-                        CanonicalErrorCode::ComponentMismatch,
-                        "canonical setup proof material root was already consumed",
-                    )),
-                }
+                Ok(AcceptedSetupMaterial::Proof(
+                    VerifiedCanonicalProofMaterial {
+                        proof_bytes,
+                        proof_family,
+                    },
+                ))
             }
-            Self::EvaluationKeyComponent(stream) => {
-                finish_verified_canonical_component_material_stream(stream, stream_summary)
-            }
-            Self::PublicKeyShareMaterial(stream) => {
-                finish_verified_canonical_public_key_share_material_stream(stream, stream_summary)
-            }
+            Self::EvaluationKeyComponent(stream) => Ok(AcceptedSetupMaterial::Component(
+                finish_verified_canonical_component_material_stream(stream, stream_summary)?,
+            )),
+            Self::PublicKeyShareMaterial(stream) => Ok(AcceptedSetupMaterial::PublicKeyShare(
+                finish_verified_canonical_public_key_share_material_stream(stream, stream_summary)?,
+            )),
         }
     }
 
@@ -904,8 +832,8 @@ impl BgvCanonicalStreamSink {
 }
 
 struct BgvCanonicalStreamSession {
-    capability: [u8; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH],
     handle: u32,
+    material_root: String,
     owner: Option<AcceptedSetupStreamOwner>,
     sink: BgvCanonicalStreamSink,
 }
@@ -921,7 +849,6 @@ impl AcceptedSetupStreamOwner {
     fn release(self) -> CanonicalResult<()> {
         release_accepted_setup_material_root(
             self.session.session_handle,
-            &self.session.capability,
             self.store,
             &self.material_root,
         )
@@ -929,7 +856,6 @@ impl AcceptedSetupStreamOwner {
 }
 
 struct BgvCanonicalMaterialReaderSession {
-    capability: [u8; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH],
     handle: u32,
     material: BgvProofMaterialBytes,
     material_root: String,
@@ -962,17 +888,11 @@ impl BgvCanonicalStreamRegistry {
         }
     }
 
-    fn take_owned_stream_session(
-        &mut self,
-        handle: u32,
-        capability: &[u8; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH],
-    ) -> Result<BgvCanonicalStreamSession, u32> {
+    fn take_owned_stream_session(&mut self, handle: u32) -> Result<BgvCanonicalStreamSession, u32> {
         let Some(active_session) = self.active_session.as_ref() else {
             return Err(CANONICAL_STREAM_RUNTIME_INVALID_SESSION);
         };
-        if active_session.handle != handle
-            || !constant_time_equal(&active_session.capability, capability)
-        {
+        if active_session.handle != handle {
             return Err(CANONICAL_STREAM_RUNTIME_INVALID_SESSION);
         }
         Ok(self
@@ -984,12 +904,11 @@ impl BgvCanonicalStreamRegistry {
     fn take_owned_material_reader(
         &mut self,
         handle: u32,
-        capability: &[u8; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH],
     ) -> Result<BgvCanonicalMaterialReaderSession, u32> {
         let Some(reader) = self.active_material_reader.as_ref() else {
             return Err(CANONICAL_STREAM_RUNTIME_INVALID_SESSION);
         };
-        if reader.handle != handle || !constant_time_equal(&reader.capability, capability) {
+        if reader.handle != handle {
             return Err(CANONICAL_STREAM_RUNTIME_INVALID_SESSION);
         }
         Ok(self
@@ -1017,22 +936,14 @@ pub(crate) fn begin_bgv_canonical_stream(
     family_code: u32,
     material_root: &[u8],
     descriptor_bytes: &[u8],
-    capability: [u8; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH],
 ) -> Result<CanonicalStreamRuntimeBegin, u32> {
-    begin_bgv_canonical_stream_inner(
-        family_code,
-        material_root,
-        descriptor_bytes,
-        capability,
-        None,
-    )
+    begin_bgv_canonical_stream_inner(family_code, material_root, descriptor_bytes, None)
 }
 
 pub(crate) fn begin_accepted_setup_canonical_stream(
     family_code: u32,
     material_root: &[u8],
     descriptor_bytes: &[u8],
-    capability: [u8; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH],
     accepted_setup_session: AcceptedSetupProofBindingSession,
 ) -> Result<CanonicalStreamRuntimeBegin, u32> {
     if material_root.len() != MATERIAL_ROOT_BYTE_LENGTH {
@@ -1043,7 +954,6 @@ pub(crate) fn begin_accepted_setup_canonical_stream(
     let material_root_hex = to_hex(material_root);
     reserve_accepted_setup_material_root(
         accepted_setup_session.session_handle,
-        &accepted_setup_session.capability,
         store,
         &material_root_hex,
     )
@@ -1057,7 +967,6 @@ pub(crate) fn begin_accepted_setup_canonical_stream(
         family_code,
         material_root,
         descriptor_bytes,
-        capability,
         Some(owner.clone()),
     ) {
         Ok(begin) => Ok(begin),
@@ -1071,21 +980,14 @@ pub(crate) fn begin_accepted_setup_canonical_stream(
 }
 
 fn accepted_setup_material_store(family_code: u32) -> Option<AcceptedSetupMaterialStore> {
-    match family_code {
-        BGV_CANONICAL_STREAM_FAMILY_VSS_SHARE_LINKAGE
-        | BGV_CANONICAL_STREAM_FAMILY_SAME_SECRET
-        | BGV_CANONICAL_STREAM_FAMILY_PUBLIC_KEY_SHARE
-        | BGV_CANONICAL_STREAM_FAMILY_TRUSTEE_EVALUATION_KEY => {
-            Some(AcceptedSetupMaterialStore::Proof)
-        }
-        BGV_CANONICAL_STREAM_FAMILY_RELINEARIZATION_COMPONENT
-        | BGV_CANONICAL_STREAM_FAMILY_GALOIS_COMPONENT => {
+    match stream_family(family_code).ok()?.kind {
+        StreamFamilyKind::ProofMaterial { .. } => Some(AcceptedSetupMaterialStore::Proof),
+        StreamFamilyKind::EvaluationKeyComponent { .. } => {
             Some(AcceptedSetupMaterialStore::Component)
         }
-        BGV_CANONICAL_STREAM_FAMILY_PUBLIC_KEY_SHARE_MATERIAL => {
+        StreamFamilyKind::PublicKeyShareMaterial => {
             Some(AcceptedSetupMaterialStore::PublicKeyShare)
         }
-        _ => None,
     }
 }
 
@@ -1093,7 +995,6 @@ fn begin_bgv_canonical_stream_inner(
     family_code: u32,
     material_root: &[u8],
     descriptor_bytes: &[u8],
-    capability: [u8; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH],
     owner: Option<AcceptedSetupStreamOwner>,
 ) -> Result<CanonicalStreamRuntimeBegin, u32> {
     if material_root.len() != MATERIAL_ROOT_BYTE_LENGTH {
@@ -1103,11 +1004,8 @@ fn begin_bgv_canonical_stream_inner(
     let mut registry = lock_registry()?;
     registry.refuse_overlapping_transaction()?;
 
-    let begin = begin_canonical_stream_verifier(
-        family.stream_domain.canonical_code(),
-        descriptor_bytes,
-        capability,
-    )?;
+    let begin =
+        begin_canonical_stream_verifier(family.stream_domain.canonical_code(), descriptor_bytes)?;
     if matches!(
         &family.kind,
         StreamFamilyKind::ProofMaterial { proof_family }
@@ -1115,30 +1013,29 @@ fn begin_bgv_canonical_stream_inner(
     ) && usize::try_from(begin.total_byte_length).ok()
         != Some(crate::bgv::parameters::POLYNOMIAL_DEGREE * std::mem::size_of::<u64>())
     {
-        let _ = cancel_canonical_stream(begin.handle, &capability);
+        let _ = cancel_canonical_stream(begin.handle);
         return Err(refusal_status(RefusalReason::WrongTypeOrLength));
     }
     let material_root = to_hex(material_root);
     let sink = match family.kind {
         StreamFamilyKind::ProofMaterial { proof_family } => {
-            if verified_canonical_proof_materials()
-                .lock()
-                .map_err(|_| CANONICAL_STREAM_RUNTIME_INTERNAL_FAILURE)?
-                .contains_key(&material_root)
+            if owner.is_none()
+                && verified_canonical_proof_materials()
+                    .lock()
+                    .map_err(|_| CANONICAL_STREAM_RUNTIME_INTERNAL_FAILURE)?
+                    .contains_key(&material_root)
             {
-                let _ = cancel_canonical_stream(begin.handle, &capability);
+                let _ = cancel_canonical_stream(begin.handle);
                 return Err(refusal_status(RefusalReason::ConsumedState));
             }
             BgvCanonicalStreamSink::ProofMaterial {
                 chunks: Vec::new(),
                 proof_family,
-                proof_material_root: material_root,
             }
         }
         StreamFamilyKind::EvaluationKeyComponent { proof_family } => {
             let component_stream = begin_verified_canonical_component_material_stream(
                 begin.handle,
-                material_root,
                 proof_family,
                 u64::from(begin.total_byte_length),
             )
@@ -1148,14 +1045,13 @@ fn begin_bgv_canonical_stream_inner(
                     BgvCanonicalStreamSink::EvaluationKeyComponent(component_stream)
                 }
                 Err(error) => {
-                    let _ = cancel_canonical_stream(begin.handle, &capability);
+                    let _ = cancel_canonical_stream(begin.handle);
                     return Err(error);
                 }
             }
         }
         StreamFamilyKind::PublicKeyShareMaterial => {
             let material_stream = begin_verified_canonical_public_key_share_material_stream(
-                material_root,
                 u64::from(begin.total_byte_length),
             )
             .map_err(|_| CANONICAL_STREAM_RUNTIME_INTERNAL_FAILURE);
@@ -1164,15 +1060,15 @@ fn begin_bgv_canonical_stream_inner(
                     BgvCanonicalStreamSink::PublicKeyShareMaterial(material_stream)
                 }
                 Err(error) => {
-                    let _ = cancel_canonical_stream(begin.handle, &capability);
+                    let _ = cancel_canonical_stream(begin.handle);
                     return Err(error);
                 }
             }
         }
     };
     registry.active_session = Some(BgvCanonicalStreamSession {
-        capability,
         handle: begin.handle,
+        material_root,
         owner,
         sink,
     });
@@ -1181,14 +1077,12 @@ fn begin_bgv_canonical_stream_inner(
 
 pub(crate) fn absorb_bgv_canonical_stream_chunk(
     handle: u32,
-    capability: &[u8; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH],
     chunk_index: u32,
     chunk_bytes: &[u8],
 ) -> Result<(), u32> {
     let mut registry = lock_registry()?;
-    let mut session = registry.take_owned_stream_session(handle, capability)?;
-    let canonical_result =
-        absorb_canonical_stream_chunk(handle, capability, chunk_index, chunk_bytes);
+    let mut session = registry.take_owned_stream_session(handle)?;
+    let canonical_result = absorb_canonical_stream_chunk(handle, chunk_index, chunk_bytes);
     if let Err(error) = canonical_result {
         session.sink.cancel();
         if let Some(owner) = session.owner {
@@ -1199,7 +1093,7 @@ pub(crate) fn absorb_bgv_canonical_stream_chunk(
         return Err(error);
     }
     if session.sink.absorb(chunk_bytes).is_err() {
-        let _ = cancel_canonical_stream(handle, capability);
+        let _ = cancel_canonical_stream(handle);
         session.sink.cancel();
         if let Some(owner) = session.owner {
             owner
@@ -1212,13 +1106,10 @@ pub(crate) fn absorb_bgv_canonical_stream_chunk(
     Ok(())
 }
 
-pub(crate) fn finish_bgv_canonical_stream(
-    handle: u32,
-    capability: &[u8; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH],
-) -> Result<(), u32> {
+pub(crate) fn finish_bgv_canonical_stream(handle: u32) -> Result<(), u32> {
     let mut registry = lock_registry()?;
-    let session = registry.take_owned_stream_session(handle, capability)?;
-    let stream_summary = match finish_canonical_stream_verifier_with_summary(handle, capability) {
+    let session = registry.take_owned_stream_session(handle)?;
+    let stream_summary = match finish_canonical_stream_verifier_with_summary(handle) {
         Ok(stream_summary) => Arc::new(stream_summary),
         Err(error) => {
             session.sink.cancel();
@@ -1230,10 +1121,21 @@ pub(crate) fn finish_bgv_canonical_stream(
             return Err(error);
         }
     };
+    let material_root = session.material_root;
+    let owner = session.owner;
     match session.sink.finish(stream_summary) {
-        Ok(()) => Ok(()),
+        Ok(material) => match owner {
+            Some(owner) => retain_accepted_setup_material(
+                owner.session.session_handle,
+                material_root,
+                material,
+            )
+            .map_err(|_| CANONICAL_STREAM_RUNTIME_INTERNAL_FAILURE),
+            None => retain_standalone_stream_material(material_root, material)
+                .map_err(|_| CANONICAL_STREAM_RUNTIME_INTERNAL_FAILURE),
+        },
         Err(_) => {
-            if let Some(owner) = session.owner {
+            if let Some(owner) = owner {
                 owner
                     .release()
                     .map_err(|_| CANONICAL_STREAM_RUNTIME_INTERNAL_FAILURE)?;
@@ -1243,13 +1145,35 @@ pub(crate) fn finish_bgv_canonical_stream(
     }
 }
 
-pub(crate) fn cancel_bgv_canonical_stream(
-    handle: u32,
-    capability: &[u8; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH],
-) -> Result<(), u32> {
+fn retain_standalone_stream_material(
+    material_root: String,
+    material: AcceptedSetupMaterial,
+) -> CanonicalResult<()> {
+    let AcceptedSetupMaterial::Proof(material) = material else {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidProtocolObject,
+            "evaluation-key and public-key share material require an accepted-setup session",
+        ));
+    };
+    let mut materials = verified_canonical_proof_materials()
+        .lock()
+        .map_err(|_| canonical_proof_store_error())?;
+    match materials.entry(material_root) {
+        Entry::Vacant(entry) => {
+            entry.insert(material);
+            Ok(())
+        }
+        Entry::Occupied(_) => Err(CanonicalError::new(
+            CanonicalErrorCode::ComponentMismatch,
+            "canonical proof material root is already retained",
+        )),
+    }
+}
+
+pub(crate) fn cancel_bgv_canonical_stream(handle: u32) -> Result<(), u32> {
     let mut registry = lock_registry()?;
-    let active_session = registry.take_owned_stream_session(handle, capability)?;
-    let canonical_result = cancel_canonical_stream(handle, capability);
+    let active_session = registry.take_owned_stream_session(handle)?;
+    let canonical_result = cancel_canonical_stream(handle);
     active_session.sink.cancel();
     if let Some(owner) = active_session.owner {
         owner
@@ -1262,13 +1186,9 @@ pub(crate) fn cancel_bgv_canonical_stream(
 pub(crate) fn begin_bgv_canonical_material_reader(
     family_code: u32,
     material_root: &[u8],
-    capability: [u8; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH],
 ) -> Result<CanonicalStreamRuntimeBegin, u32> {
     if material_root.len() != MATERIAL_ROOT_BYTE_LENGTH {
         return Err(refusal_status(RefusalReason::WrongTypeOrLength));
-    }
-    if capability.iter().all(|byte| *byte == 0) {
-        return Err(CANONICAL_STREAM_RUNTIME_INTERNAL_FAILURE);
     }
     let family = stream_family(family_code)?;
     let StreamFamilyKind::ProofMaterial { proof_family } = family.kind else {
@@ -1287,7 +1207,6 @@ pub(crate) fn begin_bgv_canonical_material_reader(
     registry.refuse_overlapping_transaction()?;
     let handle = registry.take_material_reader_handle()?;
     registry.active_material_reader = Some(BgvCanonicalMaterialReaderSession {
-        capability,
         handle,
         material,
         material_root,
@@ -1304,12 +1223,11 @@ pub(crate) fn begin_bgv_canonical_material_reader(
 
 pub(crate) fn read_bgv_canonical_material_chunk(
     handle: u32,
-    capability: &[u8; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH],
     chunk_index: u32,
     output: &mut [u8],
 ) -> Result<(), u32> {
     let mut registry = lock_registry()?;
-    let mut reader = registry.take_owned_material_reader(handle, capability)?;
+    let mut reader = registry.take_owned_material_reader(handle)?;
     let chunk_index = match usize::try_from(chunk_index) {
         Ok(chunk_index) => chunk_index,
         Err(_) => {
@@ -1343,12 +1261,9 @@ fn terminate_material_reader_with_refusal(
     Err(refusal_status(refusal_reason))
 }
 
-pub(crate) fn finish_bgv_canonical_material_reader(
-    handle: u32,
-    capability: &[u8; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH],
-) -> Result<(), u32> {
+pub(crate) fn finish_bgv_canonical_material_reader(handle: u32) -> Result<(), u32> {
     let mut registry = lock_registry()?;
-    let reader = registry.take_owned_material_reader(handle, capability)?;
+    let reader = registry.take_owned_material_reader(handle)?;
     let material_was_complete = reader.next_chunk_index == reader.material.chunk_count();
     evict_material_reader_source(&reader)?;
     if !material_was_complete {
@@ -1358,12 +1273,9 @@ pub(crate) fn finish_bgv_canonical_material_reader(
     Ok(())
 }
 
-pub(crate) fn cancel_bgv_canonical_material_reader(
-    handle: u32,
-    capability: &[u8; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH],
-) -> Result<(), u32> {
+pub(crate) fn cancel_bgv_canonical_material_reader(handle: u32) -> Result<(), u32> {
     let mut registry = lock_registry()?;
-    let reader = registry.take_owned_material_reader(handle, capability)?;
+    let reader = registry.take_owned_material_reader(handle)?;
     evict_material_reader_source(&reader)?;
 
     Ok(())
@@ -1389,7 +1301,7 @@ fn lock_registry() -> Result<std::sync::MutexGuard<'static, BgvCanonicalStreamRe
             let mut registry = poisoned.into_inner();
             registry.active_material_reader = None;
             if let Some(active_session) = registry.active_session.take() {
-                let _ = cancel_canonical_stream(active_session.handle, &active_session.capability);
+                let _ = cancel_canonical_stream(active_session.handle);
                 active_session.sink.cancel();
             }
             Err(CANONICAL_STREAM_RUNTIME_INTERNAL_FAILURE)
@@ -1409,37 +1321,16 @@ enum StreamFamilyKind {
 }
 
 fn stream_family(family_code: u32) -> Result<StreamFamily, u32> {
+    if let Some(proof_family) = SetupProofFamily::from_stream_code(family_code) {
+        return Ok(StreamFamily {
+            kind: StreamFamilyKind::ProofMaterial {
+                proof_family: proof_family.wire_label(),
+            },
+            stream_domain: proof_family.stream_domain(),
+        });
+    }
+
     let family = match family_code {
-        BGV_CANONICAL_STREAM_FAMILY_VSS_OPENING_CARRY => StreamFamily {
-            kind: StreamFamilyKind::ProofMaterial {
-                proof_family: "vss-opening-carry",
-            },
-            stream_domain: CanonicalStreamDomain::DealerVssShareLinkageProof,
-        },
-        BGV_CANONICAL_STREAM_FAMILY_VSS_SHARE_LINKAGE => StreamFamily {
-            kind: StreamFamilyKind::ProofMaterial {
-                proof_family: "vss-share-linkage",
-            },
-            stream_domain: CanonicalStreamDomain::DealerVssShareLinkageProof,
-        },
-        BGV_CANONICAL_STREAM_FAMILY_SAME_SECRET => StreamFamily {
-            kind: StreamFamilyKind::ProofMaterial {
-                proof_family: "same-secret-bridge",
-            },
-            stream_domain: CanonicalStreamDomain::SameSecretProof,
-        },
-        BGV_CANONICAL_STREAM_FAMILY_PUBLIC_KEY_SHARE => StreamFamily {
-            kind: StreamFamilyKind::ProofMaterial {
-                proof_family: "public-key-share",
-            },
-            stream_domain: CanonicalStreamDomain::PublicKeyShareProof,
-        },
-        BGV_CANONICAL_STREAM_FAMILY_TRUSTEE_EVALUATION_KEY => StreamFamily {
-            kind: StreamFamilyKind::ProofMaterial {
-                proof_family: "trustee-evaluation-key",
-            },
-            stream_domain: CanonicalStreamDomain::EvaluatorKeyAggregateProof,
-        },
         BGV_CANONICAL_STREAM_FAMILY_RELINEARIZATION_COMPONENT => StreamFamily {
             kind: StreamFamilyKind::EvaluationKeyComponent {
                 proof_family: "relinearization-key-share",
@@ -1452,21 +1343,9 @@ fn stream_family(family_code: u32) -> Result<StreamFamily, u32> {
             },
             stream_domain: CanonicalStreamDomain::EvaluatorKeyStore,
         },
-        BGV_CANONICAL_STREAM_FAMILY_TARGET_DECRYPTION_SHARE => StreamFamily {
-            kind: StreamFamilyKind::ProofMaterial {
-                proof_family: "target-decryption-share",
-            },
-            stream_domain: CanonicalStreamDomain::MaliciousTargetShareProof,
-        },
         BGV_CANONICAL_STREAM_FAMILY_PUBLIC_KEY_SHARE_MATERIAL => StreamFamily {
             kind: StreamFamilyKind::PublicKeyShareMaterial,
             stream_domain: CanonicalStreamDomain::PublicKeyShareMaterial,
-        },
-        BGV_CANONICAL_STREAM_FAMILY_TARGET_DECRYPTION_AGGREGATE_OPENING => StreamFamily {
-            kind: StreamFamilyKind::ProofMaterial {
-                proof_family: TARGET_DECRYPTION_AGGREGATE_OPENING_MATERIAL_FAMILY,
-            },
-            stream_domain: CanonicalStreamDomain::RecipientAggregateThresholdShareProof,
         },
         _ => return Err(refusal_status(RefusalReason::MalformedEncoding)),
     };
@@ -1484,17 +1363,6 @@ fn refusal_status(refusal_reason: RefusalReason) -> u32 {
     u32::from(refusal_reason.canonical_code())
 }
 
-fn constant_time_equal(
-    left: &[u8; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH],
-    right: &[u8; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH],
-) -> bool {
-    let mut difference = 0_u8;
-    for byte_index in 0..CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH {
-        difference |= left[byte_index] ^ right[byte_index];
-    }
-    difference == 0
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1510,7 +1378,6 @@ mod tests {
         session: AcceptedSetupProofBindingSession,
         material_root_bytes: &[u8; MATERIAL_ROOT_BYTE_LENGTH],
         proof_bytes: &[u8],
-        stream_capability: [u8; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH],
     ) -> Result<(), u32> {
         let descriptor = derive_canonical_stream_descriptor(
             CanonicalStreamDomain::PublicKeyShareProof,
@@ -1523,7 +1390,6 @@ mod tests {
             BGV_CANONICAL_STREAM_FAMILY_PUBLIC_KEY_SHARE,
             material_root_bytes,
             &descriptor,
-            stream_capability,
             session,
         )?;
         for (chunk_index, chunk) in proof_bytes
@@ -1532,12 +1398,11 @@ mod tests {
         {
             absorb_bgv_canonical_stream_chunk(
                 stream.handle,
-                &stream_capability,
                 u32::try_from(chunk_index).expect("test chunk index fits u32"),
                 chunk,
             )?;
         }
-        finish_bgv_canonical_stream(stream.handle, &stream_capability)
+        finish_bgv_canonical_stream(stream.handle)
     }
 
     #[test]
@@ -1547,55 +1412,40 @@ mod tests {
         let proof_bytes = vec![0xd2; FOUNDATION_PROFILE.stream_chunk_byte_length + 17];
         evict_verified_canonical_proof_materials(std::slice::from_ref(&material_root));
 
-        let first_capability = [0xd3; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH];
-        let second_capability = [0xd4; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH];
-        let first_handle = begin_accepted_setup_proof_binding_session(first_capability)
+        let first_handle = begin_accepted_setup_proof_binding_session()
             .expect("first accepted-setup material session");
-        let second_handle = begin_accepted_setup_proof_binding_session(second_capability)
+        let second_handle = begin_accepted_setup_proof_binding_session()
             .expect("second accepted-setup material session");
-        let first_session =
-            authenticated_accepted_setup_proof_binding_session(first_handle, &first_capability)
-                .expect("authenticate first session");
-        let second_session =
-            authenticated_accepted_setup_proof_binding_session(second_handle, &second_capability)
-                .expect("authenticate second session");
+        let first_session = active_accepted_setup_proof_binding_session(first_handle)
+            .expect("load first active session");
+        let second_session = active_accepted_setup_proof_binding_session(second_handle)
+            .expect("load second active session");
 
         finish_owned_public_key_share_proof_stream(
             first_session,
             &material_root_bytes,
             &proof_bytes,
-            [0xd5; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH],
         )
         .expect("first session finishes its owned proof stream");
         assert!(
             accepted_setup_session_owns_material_root(
                 first_handle,
-                &first_capability,
                 AcceptedSetupMaterialStore::Proof,
                 &material_root,
             )
             .expect("first session ownership lookup")
-        );
-        assert!(
-            authenticated_accepted_setup_proof_binding_session(
-                first_handle,
-                &[0x3d; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH],
-            )
-            .is_err(),
-            "a wrong capability cannot authenticate the owning session",
         );
         assert_eq!(
             finish_owned_public_key_share_proof_stream(
                 second_session,
                 &material_root_bytes,
                 &proof_bytes,
-                [0xd6; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH],
             ),
             Err(CANONICAL_STREAM_RUNTIME_INVALID_SESSION),
             "another session cannot reserve the owned root",
         );
 
-        cancel_accepted_setup_proof_binding_session(first_handle, &first_capability)
+        cancel_accepted_setup_proof_binding_session(first_handle)
             .expect("owning session cancellation drains material");
         assert!(
             verified_canonical_proof_material_bytes("public-key-share", &material_root)
@@ -1607,10 +1457,9 @@ mod tests {
             second_session,
             &material_root_bytes,
             &proof_bytes,
-            [0xd7; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH],
         )
         .expect("same root is reusable after owner cancellation");
-        finish_accepted_setup_proof_binding_session(second_handle, &second_capability)
+        finish_accepted_setup_proof_binding_session(second_handle)
             .expect("terminal completion drains owned raw material");
         assert!(
             verified_canonical_proof_material_bytes("public-key-share", &material_root)
@@ -1621,16 +1470,7 @@ mod tests {
 
     #[test]
     fn accepted_setup_proof_bindings_are_one_shot_and_session_scoped() {
-        assert!(
-            crate::bgv::setup::begin_accepted_setup_proof_binding_session(
-                [0_u8; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH],
-            )
-            .is_err(),
-            "an all-zero capability must never open a verifier session",
-        );
         let proof_material_root = "c1".repeat(MATERIAL_ROOT_BYTE_LENGTH);
-        let first_capability = [0xc1; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH];
-        let second_capability = [0xc2; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH];
         evict_verified_canonical_proof_materials(std::slice::from_ref(&proof_material_root));
         retain_generated_canonical_proof_material(
             "public-key-share",
@@ -1639,15 +1479,12 @@ mod tests {
         )
         .expect("authenticated proof material fixture");
 
-        let first_session =
-            crate::bgv::setup::begin_accepted_setup_proof_binding_session(first_capability)
-                .expect("first accepted-setup proof binding session");
-        let second_session =
-            crate::bgv::setup::begin_accepted_setup_proof_binding_session(second_capability)
-                .expect("second accepted-setup proof binding session");
+        let first_session = crate::bgv::setup::begin_accepted_setup_proof_binding_session()
+            .expect("first accepted-setup proof binding session");
+        let second_session = crate::bgv::setup::begin_accepted_setup_proof_binding_session()
+            .expect("second accepted-setup proof binding session");
         crate::bgv::setup::retain_accepted_setup_proof_binding(
             first_session,
-            &first_capability,
             "public-key-share",
             &proof_material_root,
             "binding-c1".to_string(),
@@ -1655,7 +1492,6 @@ mod tests {
         .expect("retain verifier-derived binding in first session");
         let fixture_lease = crate::bgv::setup::accepted_setup_proof_binding_lease(
             first_session,
-            &first_capability,
             &proof_material_root,
         )
         .expect("test fixture binding lookup")
@@ -1664,7 +1500,6 @@ mod tests {
         assert!(
             !crate::bgv::setup::consume_accepted_setup_proof_binding(
                 second_session,
-                &second_capability,
                 "public-key-share",
                 &proof_material_root,
                 "binding-c1",
@@ -1674,18 +1509,6 @@ mod tests {
         assert!(
             crate::bgv::setup::consume_accepted_setup_proof_binding(
                 first_session,
-                &second_capability,
-                "public-key-share",
-                &proof_material_root,
-                "binding-c1",
-            )
-            .is_err(),
-            "a wrong capability must not access an otherwise matching session handle",
-        );
-        assert!(
-            crate::bgv::setup::consume_accepted_setup_proof_binding(
-                first_session,
-                &first_capability,
                 "same-secret-bridge",
                 &proof_material_root,
                 "binding-c1",
@@ -1696,7 +1519,6 @@ mod tests {
         assert!(
             !crate::bgv::setup::consume_accepted_setup_proof_binding(
                 first_session,
-                &first_capability,
                 "public-key-share",
                 &proof_material_root,
                 "wrong-binding",
@@ -1706,7 +1528,6 @@ mod tests {
         assert!(
             crate::bgv::setup::consume_accepted_setup_proof_binding(
                 first_session,
-                &first_capability,
                 "public-key-share",
                 &proof_material_root,
                 "binding-c1",
@@ -1716,49 +1537,35 @@ mod tests {
         assert!(
             !crate::bgv::setup::consume_accepted_setup_proof_binding(
                 first_session,
-                &first_capability,
                 "public-key-share",
                 &proof_material_root,
                 "binding-c1",
             )
             .expect("consumed binding is not reusable")
         );
-        crate::bgv::setup::finish_accepted_setup_proof_binding_session(
-            first_session,
-            &first_capability,
-        )
-        .expect("fully consumed first session finishes");
-        crate::bgv::setup::finish_accepted_setup_proof_binding_session(
-            second_session,
-            &second_capability,
-        )
-        .expect("empty second session finishes");
+        crate::bgv::setup::finish_accepted_setup_proof_binding_session(first_session)
+            .expect("fully consumed first session finishes");
+        crate::bgv::setup::finish_accepted_setup_proof_binding_session(second_session)
+            .expect("empty second session finishes");
 
-        let restored_capability = [0xc5; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH];
-        let restored_session =
-            crate::bgv::setup::begin_accepted_setup_proof_binding_session(restored_capability)
-                .expect("fresh test fixture restoration session");
+        let restored_session = crate::bgv::setup::begin_accepted_setup_proof_binding_session()
+            .expect("fresh test fixture restoration session");
         crate::bgv::setup::restore_accepted_setup_proof_binding_lease(
             restored_session,
-            &restored_capability,
             &fixture_lease,
         )
         .expect("restore opaque verifier state into a fresh test-only session");
         assert!(
             crate::bgv::setup::consume_accepted_setup_proof_binding(
                 restored_session,
-                &restored_capability,
                 "public-key-share",
                 &proof_material_root,
                 "binding-c1",
             )
             .expect("restored test fixture binding is owned by its fresh session")
         );
-        crate::bgv::setup::finish_accepted_setup_proof_binding_session(
-            restored_session,
-            &restored_capability,
-        )
-        .expect("restored test fixture session finishes");
+        crate::bgv::setup::finish_accepted_setup_proof_binding_session(restored_session)
+            .expect("restored test fixture session finishes");
     }
 
     #[test]
@@ -1780,26 +1587,22 @@ mod tests {
         )
         .expect("cancel-path proof material fixture");
 
-        let finish_capability = [0xc3; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH];
-        let finish_session = begin_accepted_setup_proof_binding_session(finish_capability)
-            .expect("finish-path session");
+        let finish_session =
+            begin_accepted_setup_proof_binding_session().expect("finish-path session");
         retain_accepted_setup_proof_binding(
             finish_session,
-            &finish_capability,
             "public-key-share",
             &finish_root,
             "finish-binding".to_string(),
         )
         .expect("retain finish-path binding");
         assert!(
-            finish_accepted_setup_proof_binding_session(finish_session, &finish_capability)
-                .is_err(),
+            finish_accepted_setup_proof_binding_session(finish_session).is_err(),
             "finishing with unconsumed verifier state must fail closed",
         );
         assert!(
             consume_accepted_setup_proof_binding(
                 finish_session,
-                &finish_capability,
                 "public-key-share",
                 &finish_root,
                 "finish-binding",
@@ -1808,46 +1611,23 @@ mod tests {
             "failed completion must still destroy the session",
         );
 
-        let cancel_capability = [0xc4; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH];
-        let cancel_session = begin_accepted_setup_proof_binding_session(cancel_capability)
-            .expect("cancel-path session");
+        let cancel_session =
+            begin_accepted_setup_proof_binding_session().expect("cancel-path session");
         retain_accepted_setup_proof_binding(
             cancel_session,
-            &cancel_capability,
             "public-key-share",
             &cancel_root,
             "cancel-binding".to_string(),
         )
         .expect("retain cancel-path binding");
+        crate::bgv::setup::cancel_accepted_setup_proof_binding_session(cancel_session)
+            .expect("owning session cancellation");
         assert!(
-            cancel_accepted_setup_proof_binding_session(
+            consume_accepted_setup_proof_binding(
                 cancel_session,
-                &[0x4c; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH],
-            )
-            .is_err(),
-            "wrong-owner cancellation must preserve the valid session",
-        );
-        assert!(
-            crate::bgv::setup::accepted_setup_proof_binding_stream_summary(
-                cancel_session,
-                &cancel_capability,
                 "public-key-share",
                 &cancel_root,
-            )
-            .expect("owning session summary lookup")
-            .is_some(),
-        );
-        crate::bgv::setup::cancel_accepted_setup_proof_binding_session(
-            cancel_session,
-            &cancel_capability,
-        )
-        .expect("owning session cancellation");
-        assert!(
-            accepted_setup_proof_binding_stream_summary(
-                cancel_session,
-                &cancel_capability,
-                "public-key-share",
-                &cancel_root,
+                "cancel-binding",
             )
             .is_err(),
             "cancelled verifier state must not remain addressable",
@@ -1855,22 +1635,18 @@ mod tests {
     }
 
     #[test]
-    fn wrong_owner_cannot_consume_bgv_stream_or_material_reader_sessions() {
-        let stream_capability = [0x11; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH];
-        let reader_capability = [0x22; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH];
+    fn wrong_handle_cannot_consume_bgv_stream_or_material_reader_sessions() {
         let mut registry = BgvCanonicalStreamRegistry {
             active_session: Some(BgvCanonicalStreamSession {
-                capability: stream_capability,
                 handle: 41,
+                material_root: "00".repeat(MATERIAL_ROOT_BYTE_LENGTH),
                 owner: None,
                 sink: BgvCanonicalStreamSink::ProofMaterial {
                     chunks: Vec::new(),
                     proof_family: "public-key-share",
-                    proof_material_root: "00".repeat(MATERIAL_ROOT_BYTE_LENGTH),
                 },
             }),
             active_material_reader: Some(BgvCanonicalMaterialReaderSession {
-                capability: reader_capability,
                 handle: 57,
                 material: retained_material(),
                 material_root: "11".repeat(MATERIAL_ROOT_BYTE_LENGTH),
@@ -1881,24 +1657,12 @@ mod tests {
         };
 
         assert!(matches!(
-            registry.take_owned_stream_session(42, &stream_capability),
+            registry.take_owned_stream_session(42),
             Err(CANONICAL_STREAM_RUNTIME_INVALID_SESSION),
         ));
         assert!(registry.active_session.is_some());
         assert!(matches!(
-            registry
-                .take_owned_stream_session(41, &[0x33; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH],),
-            Err(CANONICAL_STREAM_RUNTIME_INVALID_SESSION),
-        ));
-        assert!(registry.active_session.is_some());
-        assert!(matches!(
-            registry.take_owned_material_reader(58, &reader_capability),
-            Err(CANONICAL_STREAM_RUNTIME_INVALID_SESSION),
-        ));
-        assert!(registry.active_material_reader.is_some());
-        assert!(matches!(
-            registry
-                .take_owned_material_reader(57, &[0x44; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH],),
+            registry.take_owned_material_reader(58),
             Err(CANONICAL_STREAM_RUNTIME_INVALID_SESSION),
         ));
         assert!(registry.active_material_reader.is_some());
@@ -1908,7 +1672,6 @@ mod tests {
     fn refused_overlap_preserves_the_active_bgv_transaction() {
         let registry = BgvCanonicalStreamRegistry {
             active_material_reader: Some(BgvCanonicalMaterialReaderSession {
-                capability: [0x51; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH],
                 handle: 3,
                 material: retained_material(),
                 material_root: "22".repeat(MATERIAL_ROOT_BYTE_LENGTH),
@@ -1937,12 +1700,10 @@ mod tests {
             vec![0x61; 17],
         )
         .expect("finished material fixture");
-        let finished_capability = [0x61; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH];
         {
             let mut registry = lock_registry().expect("BGV stream registry");
             assert!(registry.active_material_reader.is_none());
             registry.active_material_reader = Some(BgvCanonicalMaterialReaderSession {
-                capability: finished_capability,
                 handle: 61,
                 material: Arc::clone(&finished_material),
                 material_root: finished_root.clone(),
@@ -1950,8 +1711,7 @@ mod tests {
                 proof_family: "public-key-share",
             });
         }
-        finish_bgv_canonical_material_reader(61, &finished_capability)
-            .expect("complete material reader finish");
+        finish_bgv_canonical_material_reader(61).expect("complete material reader finish");
         assert!(
             verified_canonical_proof_material_bytes("public-key-share", &finished_root)
                 .expect("finished material store lookup")
@@ -1964,12 +1724,10 @@ mod tests {
             vec![0x62; 17],
         )
         .expect("cancelled material fixture");
-        let cancelled_capability = [0x62; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH];
         {
             let mut registry = lock_registry().expect("BGV stream registry");
             assert!(registry.active_material_reader.is_none());
             registry.active_material_reader = Some(BgvCanonicalMaterialReaderSession {
-                capability: cancelled_capability,
                 handle: 62,
                 material: cancelled_material,
                 material_root: cancelled_root.clone(),
@@ -1977,8 +1735,7 @@ mod tests {
                 proof_family: "public-key-share",
             });
         }
-        cancel_bgv_canonical_material_reader(62, &cancelled_capability)
-            .expect("incomplete material reader cancellation");
+        cancel_bgv_canonical_material_reader(62).expect("incomplete material reader cancellation");
         assert!(
             verified_canonical_proof_material_bytes("public-key-share", &cancelled_root)
                 .expect("cancelled material store lookup")
@@ -2012,18 +1769,15 @@ mod tests {
         };
 
         retain_material(&wrong_index_root, 0x71);
-        let wrong_index_capability = [0x71; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH];
         let wrong_index_reader = begin_bgv_canonical_material_reader(
             BGV_CANONICAL_STREAM_FAMILY_PUBLIC_KEY_SHARE,
             &material_root_bytes(&wrong_index_root),
-            wrong_index_capability,
         )
         .expect("wrong-index reader begins");
         let mut correct_length_output = [0_u8; 17];
         assert_eq!(
             read_bgv_canonical_material_chunk(
                 wrong_index_reader.handle,
-                &wrong_index_capability,
                 1,
                 &mut correct_length_output,
             ),
@@ -2036,18 +1790,15 @@ mod tests {
         );
 
         retain_material(&wrong_output_length_root, 0x72);
-        let wrong_output_length_capability = [0x72; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH];
         let wrong_output_length_reader = begin_bgv_canonical_material_reader(
             BGV_CANONICAL_STREAM_FAMILY_PUBLIC_KEY_SHARE,
             &material_root_bytes(&wrong_output_length_root),
-            wrong_output_length_capability,
         )
         .expect("wrong-output-length reader begins after wrong-index termination");
         let mut short_output = [0_u8; 16];
         assert_eq!(
             read_bgv_canonical_material_chunk(
                 wrong_output_length_reader.handle,
-                &wrong_output_length_capability,
                 0,
                 &mut short_output,
             ),
@@ -2060,23 +1811,16 @@ mod tests {
         );
 
         retain_material(&retry_root, 0x73);
-        let retry_capability = [0x73; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH];
         let retry_reader = begin_bgv_canonical_material_reader(
             BGV_CANONICAL_STREAM_FAMILY_PUBLIC_KEY_SHARE,
             &material_root_bytes(&retry_root),
-            retry_capability,
         )
         .expect("clean retry reader begins");
         let mut retry_output = [0_u8; 17];
-        read_bgv_canonical_material_chunk(
-            retry_reader.handle,
-            &retry_capability,
-            0,
-            &mut retry_output,
-        )
-        .expect("clean retry chunk reads");
+        read_bgv_canonical_material_chunk(retry_reader.handle, 0, &mut retry_output)
+            .expect("clean retry chunk reads");
         assert_eq!(retry_output, [0x73; 17]);
-        finish_bgv_canonical_material_reader(retry_reader.handle, &retry_capability)
+        finish_bgv_canonical_material_reader(retry_reader.handle)
             .expect("clean retry reader finishes");
         assert!(
             verified_canonical_proof_material_bytes("public-key-share", &retry_root)

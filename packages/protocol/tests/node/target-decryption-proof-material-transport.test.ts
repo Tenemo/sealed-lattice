@@ -1,4 +1,3 @@
-import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -9,25 +8,13 @@ import { canonicalStreamDescriptorFixture } from '#tests/support/canonical-strea
 
 const proofBytesHash = '11'.repeat(64);
 
-const proofMaterial = (): BgvTargetDecryptionShareProofMaterial => {
-    const preimage = {
-        objectType: 'BgvTargetDecryptionShareProofMaterial' as const,
-        proofRecords: [
-            {
-                objectType: 'BgvTargetDecryptionShareProofRecord',
-                proofBytesHash,
-            },
-        ],
-    };
-
-    return {
-        ...preimage,
-        proofMaterialRoot: deriveCanonicalObjectHash(preimage),
-    };
-};
+const proofMaterial = (): BgvTargetDecryptionShareProofMaterial => ({
+    objectType: 'BgvTargetDecryptionShareProofMaterial',
+    proofBytesHash,
+});
 
 describe('target-decryption canonical proof material transport', () => {
-    it('copies the canonical descriptor and binds the semantic root', () => {
+    it('copies the canonical descriptor and carries the proof bytes hash', () => {
         const descriptorBytes = canonicalStreamDescriptorFixture(4);
         const transport =
             createBgvTargetDecryptionShareCanonicalProofMaterialTransport(
@@ -40,23 +27,24 @@ describe('target-decryption canonical proof material transport', () => {
         expect(transport.objectType).toBe(
             'BgvTargetDecryptionShareCanonicalProofMaterialTransport',
         );
+        expect(transport.proofBytesHash).toBe(proofBytesHash);
         expect(transport.descriptorBytes).not.toBe(descriptorBytes);
         expect(transport.descriptorBytes).toEqual(descriptorBytes);
     });
 
-    it('refuses a wrong semantic root and malformed descriptor', () => {
-        const wrongRootMaterial = {
+    it('refuses a malformed proof hash and descriptor', () => {
+        const malformedProofMaterial = {
             ...proofMaterial(),
-            proofMaterialRoot: '22'.repeat(64),
+            proofBytesHash: 'not-a-protocol-hash',
         };
         expect(() =>
             createBgvTargetDecryptionShareCanonicalProofMaterialTransport(
-                wrongRootMaterial,
+                malformedProofMaterial,
                 {
                     descriptorBytes: Uint8Array.of(1),
                 },
             ),
-        ).toThrow(/root does not match/u);
+        ).toThrow(/proofBytesHash must be a protocol hash/u);
 
         expect(() =>
             createBgvTargetDecryptionShareCanonicalProofMaterialTransport(

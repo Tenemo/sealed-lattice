@@ -20,7 +20,11 @@ const participantCount = 2;
 
 const fixtureHash = makeSetupFixtureHash('setup-evaluator-key-schedule');
 
-const setupContext = makeSetupContext(fixtureHash);
+const setupContext = makeSetupContext(fixtureHash, participantCount);
+const setupContextHash = deriveCanonicalObjectHash({
+    objectType: 'CollectiveBgvSetupContext',
+    ...setupContext,
+});
 
 const shareContribution = (
     trusteeRosterPosition: number,
@@ -44,8 +48,6 @@ const publicKeySharesFixture = (): PublicKeyShareSet =>
         qSharePrimes,
         participantCount,
         publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
-        publicKeyCrpRoot: fixtureHash('public-key-crp'),
-        publicAPolynomialRoot: fixtureHash('public-a-polynomial'),
         shareContributions: [shareContribution(0), shareContribution(1)],
     });
 
@@ -68,8 +70,6 @@ describe('evaluator key schedule builder', () => {
             qSharePrimes,
             participantCount,
             publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
-            relinearizationCrpRoot: fixtureHash('relinearization-crp'),
-            galoisKeyCrpRoot: fixtureHash('galois-key-crp'),
             publicKeyShares,
             requiredGaloisKeySchedule,
         });
@@ -84,13 +84,7 @@ describe('evaluator key schedule builder', () => {
         expect(evaluatorKeySchedule.relinearizationLevelSchedule).toEqual([
             { level: 16 },
         ]);
-        expect(evaluatorKeySchedule.requiredGaloisSetHash).toBe(
-            deriveCanonicalObjectHash({
-                objectType: 'RequiredGaloisSet',
-                rnsLimbCount: qSharePrimes.length,
-                entries: evaluatorKeySchedule.requiredGaloisKeySchedule,
-            }),
-        );
+        expect(evaluatorKeySchedule.setupContextHash).toBe(setupContextHash);
         expect(evaluatorKeyScheduleRoot).toBe(
             deriveCanonicalObjectHash(scheduleWithoutRoot),
         );
@@ -103,8 +97,6 @@ describe('evaluator key schedule builder', () => {
             qSharePrimes,
             participantCount,
             publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
-            relinearizationCrpRoot: fixtureHash('relinearization-crp'),
-            galoisKeyCrpRoot: fixtureHash('galois-key-crp'),
             publicKeyShares,
             requiredGaloisKeySchedule,
         } as const;

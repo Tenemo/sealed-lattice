@@ -44,8 +44,6 @@ pub(in crate::bgv::setup) use commands::{
     verify_vss_share_linkage_statement_and_proof_material_set_from_request,
     vss_share_linkage_commitment_from_value, vss_share_linkage_proof_verification_binding_hash,
 };
-pub(in crate::bgv::setup) use proof_codec::decode_trustee_evaluation_key_proof_from_source;
-pub(in crate::bgv::setup) use proof_codec::encode_trustee_evaluation_key_proof;
 pub(in crate::bgv::setup) use fiat_shamir_transcript::HashChainTranscriptCore;
 pub(in crate::bgv::setup) use merkle_commitment::{
     BatchedMerkleOpening as SetupBatchedMerkleOpening, MerkleDigest as SetupMerkleDigest,
@@ -53,6 +51,8 @@ pub(in crate::bgv::setup) use merkle_commitment::{
     sorted_unique_indices as sorted_unique_setup_merkle_indices,
     verify_merkle_batch_with_node_domain,
 };
+pub(in crate::bgv::setup) use proof_codec::decode_trustee_evaluation_key_proof_from_source;
+pub(in crate::bgv::setup) use proof_codec::encode_trustee_evaluation_key_proof;
 pub(in crate::bgv::setup) use prover::prove_evaluation_key_share;
 pub(in crate::bgv::setup) use prover::{
     VssCommittedMaterialTreeInput, vss_committed_material_roots_by_commitment_field,
@@ -60,11 +60,13 @@ pub(in crate::bgv::setup) use prover::{
 pub(in crate::bgv::setup) use relation::TrusteeEvaluationKeyWitness;
 pub(in crate::bgv::setup) use relation::public_key_switch_sample;
 pub(in crate::bgv::setup) use relation::{
-    EvaluationKeyShareDescriptor, EvaluationKeyShareKind, PUBLIC_KEY_SHARE_COMMON_REFERENCE_LABEL,
-    PrivateVssShareStatement, SAME_SECRET_LINKAGE_ATOM_EXTENSION_DEGREE,
-    SAME_SECRET_LINKAGE_ATOM_LINCHECK_REPETITIONS, SameSecretBridgeStatement,
-    SameSecretLinkageAtomFieldForms, SameSecretLinkageStatement, SuccinctSetupProofContext,
-    TrusteeEvaluationKeyStatement, build_same_secret_linkage_atom_field_forms,
+    EvaluationKeyShareDescriptor, EvaluationKeyShareKind, KeyBearingWitness,
+    PUBLIC_KEY_SHARE_COMMON_REFERENCE_LABEL, PrivateVssShareStatement,
+    SAME_SECRET_LINKAGE_ATOM_EXTENSION_DEGREE, SAME_SECRET_LINKAGE_ATOM_LINCHECK_REPETITIONS,
+    SameSecretBridgeStatement, SameSecretLinkageAtomFieldForms, SameSecretLinkageStatement,
+    SameSecretLinkageWitness, SetupProofStatement, SuccinctSetupProofContext,
+    TrusteeEvaluationKeyStatement, VssCommittedMaterialWitness,
+    build_same_secret_linkage_atom_field_forms,
 };
 pub(in crate::bgv::setup) use verifier::verify_evaluation_key_share;
 
@@ -73,24 +75,19 @@ mod tests;
 
 use crate::{
     bgv::modular_arithmetic::{add_mod_fast, mul_mod_fast, sub_mod_fast},
-    bgv::setup::setup_proof::CanonicalProofMaterialBytes,
+    bgv::setup::setup_proof::{CanonicalProofMaterialBytes, SetupProofFamily},
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
     hashing::hash512_hex,
 };
-
-const TRUSTEE_EVALUATION_KEY_PROOF_BYTES_HASH_DOMAIN: &str =
-    "sealed-lattice/setup/trustee-evaluation-key/proof-bytes";
-const PUBLIC_KEY_SHARE_PROOF_BYTES_HASH_DOMAIN: &str =
-    "sealed-lattice/setup/public-key-share/succinct-proof-bytes";
-const PRIVATE_VSS_SHARE_PROOF_BYTES_HASH_DOMAIN: &str =
-    "sealed-lattice/setup/private-vss-share/succinct-proof-bytes";
 
 // Canonical hash of transported trustee evaluation-key proof bytes, bound into
 // the package proof records and the chunked proof transport reference.
 #[cfg(test)]
 pub(in crate::bgv::setup) fn trustee_evaluation_key_proof_bytes_hash(proof_bytes: &[u8]) -> String {
     hash512_hex(
-        TRUSTEE_EVALUATION_KEY_PROOF_BYTES_HASH_DOMAIN,
+        SetupProofFamily::TrusteeEvaluationKey
+            .proof_bytes_hash_domain()
+            .expect("trustee evaluation-key proofs have a byte-hash domain"),
         &[proof_bytes],
     )
 }
@@ -98,38 +95,67 @@ pub(in crate::bgv::setup) fn trustee_evaluation_key_proof_bytes_hash(proof_bytes
 pub(in crate::bgv::setup) fn trustee_evaluation_key_proof_material_bytes_hash(
     proof_bytes: &CanonicalProofMaterialBytes,
 ) -> CanonicalResult<String> {
-    proof_bytes.hash512_hex(TRUSTEE_EVALUATION_KEY_PROOF_BYTES_HASH_DOMAIN)
+    proof_bytes.hash512_hex(
+        SetupProofFamily::TrusteeEvaluationKey
+            .proof_bytes_hash_domain()
+            .expect("trustee evaluation-key proofs have a byte-hash domain"),
+    )
 }
 
-pub(crate) const TRUSTEE_EVALUATION_KEY_PROOF_FAMILY: &str = "trustee-evaluation-key";
-pub(crate) const PUBLIC_KEY_SHARE_PROOF_FAMILY: &str = "public-key-share";
-pub(crate) const PRIVATE_VSS_SHARE_PROOF_FAMILY: &str = "vss-opening-carry";
-pub(crate) const VSS_SHARE_LINKAGE_PROOF_FAMILY: &str = "vss-share-linkage";
-pub(crate) const SAME_SECRET_BRIDGE_PROOF_FAMILY: &str = "same-secret-bridge";
-pub(crate) const TARGET_DECRYPTION_SHARE_PROOF_FAMILY: &str = "target-decryption-share";
+pub(crate) const TRUSTEE_EVALUATION_KEY_PROOF_FAMILY: &str =
+    SetupProofFamily::TrusteeEvaluationKey.wire_label();
+pub(crate) const PUBLIC_KEY_SHARE_PROOF_FAMILY: &str =
+    SetupProofFamily::PublicKeyShare.wire_label();
+pub(crate) const PRIVATE_VSS_SHARE_PROOF_FAMILY: &str =
+    SetupProofFamily::PrivateVssShare.wire_label();
+pub(crate) const VSS_SHARE_LINKAGE_PROOF_FAMILY: &str =
+    SetupProofFamily::VssShareLinkage.wire_label();
+pub(crate) const SAME_SECRET_BRIDGE_PROOF_FAMILY: &str =
+    SetupProofFamily::SameSecretBridge.wire_label();
+pub(crate) const TARGET_DECRYPTION_SHARE_PROOF_FAMILY: &str =
+    SetupProofFamily::TargetDecryptionShare.wire_label();
+pub(crate) const TARGET_DECRYPTION_SMUDGING_COEFFICIENT_BOUND: i64 = 16;
 #[cfg(test)]
 pub(in crate::bgv::setup) fn public_key_share_succinct_proof_bytes_hash(
     proof_bytes: &[u8],
 ) -> String {
-    hash512_hex(PUBLIC_KEY_SHARE_PROOF_BYTES_HASH_DOMAIN, &[proof_bytes])
+    hash512_hex(
+        SetupProofFamily::PublicKeyShare
+            .proof_bytes_hash_domain()
+            .expect("public-key share proofs have a byte-hash domain"),
+        &[proof_bytes],
+    )
 }
 
 pub(in crate::bgv::setup) fn public_key_share_succinct_proof_material_bytes_hash(
     proof_bytes: &CanonicalProofMaterialBytes,
 ) -> CanonicalResult<String> {
-    proof_bytes.hash512_hex(PUBLIC_KEY_SHARE_PROOF_BYTES_HASH_DOMAIN)
+    proof_bytes.hash512_hex(
+        SetupProofFamily::PublicKeyShare
+            .proof_bytes_hash_domain()
+            .expect("public-key share proofs have a byte-hash domain"),
+    )
 }
 
 pub(in crate::bgv::setup) fn private_vss_share_succinct_proof_bytes_hash(
     proof_bytes: &[u8],
 ) -> String {
-    hash512_hex(PRIVATE_VSS_SHARE_PROOF_BYTES_HASH_DOMAIN, &[proof_bytes])
+    hash512_hex(
+        SetupProofFamily::PrivateVssShare
+            .proof_bytes_hash_domain()
+            .expect("private VSS share proofs have a byte-hash domain"),
+        &[proof_bytes],
+    )
 }
 
 pub(in crate::bgv::setup) fn private_vss_share_succinct_proof_material_bytes_hash(
     proof_bytes: &CanonicalProofMaterialBytes,
 ) -> CanonicalResult<String> {
-    proof_bytes.hash512_hex(PRIVATE_VSS_SHARE_PROOF_BYTES_HASH_DOMAIN)
+    proof_bytes.hash512_hex(
+        SetupProofFamily::PrivateVssShare
+            .proof_bytes_hash_domain()
+            .expect("private VSS share proofs have a byte-hash domain"),
+    )
 }
 
 // Split each length-N witness vector into two half-columns because the BGV

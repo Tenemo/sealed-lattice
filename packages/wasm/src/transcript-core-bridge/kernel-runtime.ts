@@ -838,8 +838,6 @@ export const instantiateTranscriptCoreKernelCommandRuntime = async (
 };
 
 export {
-    resolveKernelBytes,
-    resolveMemory,
     resolveNumberExport,
     resolveOptionalNumberExport,
     copyIntoKernelMemory,

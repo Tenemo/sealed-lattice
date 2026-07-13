@@ -8,7 +8,8 @@ use super::schemas::{
 };
 use super::{
     CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple, FoundationSchemaError,
-    Hash512, ParticipantIdentity, RefusalReason, VerificationResult, hash512,
+    Hash512, ParticipantIdentity, RefusalReason, VerificationResult,
+    hash_foundation_tuple_512 as hash512,
 };
 
 pub const DEVICE_WRAPPING_ASSOCIATED_DATA_SCHEMA_IDENTIFIER: u16 = 0x0300;

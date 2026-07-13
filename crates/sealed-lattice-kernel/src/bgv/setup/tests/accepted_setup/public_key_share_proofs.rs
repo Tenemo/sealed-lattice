@@ -225,7 +225,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_collective_pu
             .expect("aggregate coefficients");
     let mut coefficients = coefficient_vector_from_le_hex(
         coefficients_hex,
-        public_coefficient_commitment_ring_degree_from_fixture_package(&package),
+        vss_commitment_ring_degree_from_fixture_package(&package),
         "aggregate coefficient width",
     )
     .expect("aggregate coefficients decode");

@@ -15,9 +15,9 @@ import {
 } from './constants-and-types.js';
 
 export {
-    assertContextMatches,
+    assertSetupContextHashMatches,
     assertProtocolHash,
-    contextFields,
+    deriveCollectiveBgvSetupContextHash,
 } from '../common-fields.js';
 
 export { assertNonNegativeSafeInteger, assertPositiveSafeInteger };
@@ -47,11 +47,7 @@ export const sortedByRosterPosition = <
 export const validateCommonInput = (
     input: Pick<
         PublicKeyShareSetInput,
-        | 'participantCount'
-        | 'qSharePrimes'
-        | 'publicMatrixSeedHash'
-        | 'publicKeyCrpRoot'
-        | 'publicAPolynomialRoot'
+        'participantCount' | 'qSharePrimes' | 'publicMatrixSeedHash'
     >,
 ): void => {
     assertPositiveSafeInteger(input.participantCount, 'participantCount');
@@ -65,6 +61,4 @@ export const validateCommonInput = (
         );
     });
     assertProtocolHash(input.publicMatrixSeedHash, 'publicMatrixSeedHash');
-    assertProtocolHash(input.publicKeyCrpRoot, 'publicKeyCrpRoot');
-    assertProtocolHash(input.publicAPolynomialRoot, 'publicAPolynomialRoot');
 };

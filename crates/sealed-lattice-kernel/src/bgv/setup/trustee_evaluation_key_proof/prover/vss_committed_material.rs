@@ -176,6 +176,31 @@ impl BoundCommittedMaterial {
 // statement's bound-commitment order, assembled from the witness the same way
 // the witness columns are built (so the binding rows hold exactly when the
 // commitment matches the proven witness).
+pub(super) fn same_secret_bridge_target_message_coefficients(
+    bridge_rns_primes: &[u64],
+    secret_coefficients: &[i64],
+    negative_indicator_coefficients: &[i64],
+) -> CanonicalResult<Vec<Vec<u64>>> {
+    bridge_rns_primes
+        .iter()
+        .map(|target_rns_prime| {
+            secret_coefficients
+                .iter()
+                .zip(negative_indicator_coefficients)
+                .map(|(secret_coefficient, negative_indicator)| {
+                    let target_message = i128::from(*secret_coefficient)
+                        + i128::from(*target_rns_prime) * i128::from(*negative_indicator);
+                    u64::try_from(target_message).map_err(|_| {
+                        invalid_succinct_setup_proof(
+                            "same-secret bridge target message coefficient is negative",
+                        )
+                    })
+                })
+                .collect()
+        })
+        .collect()
+}
+
 fn bound_message_coefficients(
     statement: &TrusteeEvaluationKeyStatement,
     witness: &TrusteeEvaluationKeyWitness,
@@ -193,10 +218,10 @@ fn bound_message_coefficients(
             .collect()
     };
 
-    if let Some(share_linkage) = &statement.vss_share_linkage {
+    if let Some(share_linkage) = statement.vss_share_linkage() {
         let slot_count = share_linkage.unique_coefficient_witness_slot_count();
         if witness
-            .vss_public_coefficient_messages_by_shamir_index
+            .vss_public_coefficient_messages_by_shamir_index()
             .len()
             != slot_count
         {
@@ -205,14 +230,14 @@ fn bound_message_coefficients(
             ));
         }
         let mut messages = Vec::with_capacity(slot_count + share_linkage.item_count());
-        for coefficient_messages in &witness.vss_public_coefficient_messages_by_shamir_index {
+        for coefficient_messages in witness.vss_public_coefficient_messages_by_shamir_index() {
             messages.push(to_unsigned(
                 coefficient_messages,
                 "VSS coefficient message coefficient",
             )?);
         }
         let recipient_messages_by_item: Vec<&[i64]> = witness
-            .vss_public_recipient_share_messages_by_item
+            .vss_public_recipient_share_messages_by_item()
             .iter()
             .map(Vec::as_slice)
             .collect();
@@ -230,31 +255,16 @@ fn bound_message_coefficients(
 
         return Ok(messages);
     }
-    if let Some(bridge) = &statement.same_secret_bridge {
-        let mut messages = Vec::with_capacity(bridge.bridge_rns_primes.len());
-        for target_rns_prime in &bridge.bridge_rns_primes {
-            let target_message_coefficients = witness
-                .secret_coefficients
-                .iter()
-                .zip(witness.negative_indicator_coefficients.iter())
-                .map(|(secret_coefficient, negative_indicator)| {
-                    let target_message = i128::from(*secret_coefficient)
-                        + i128::from(*target_rns_prime) * i128::from(*negative_indicator);
-                    u64::try_from(target_message).map_err(|_| {
-                        invalid_succinct_setup_proof(
-                            "same-secret bridge target message coefficient is negative",
-                        )
-                    })
-                })
-                .collect::<CanonicalResult<Vec<_>>>()?;
-            messages.push(target_message_coefficients);
-        }
-
-        return Ok(messages);
+    if let Some(bridge) = statement.same_secret_bridge() {
+        return same_secret_bridge_target_message_coefficients(
+            &bridge.bridge_rns_primes,
+            witness.secret_coefficients(),
+            witness.negative_indicator_coefficients(),
+        );
     }
-    if statement.target_decryption_share.is_some() {
+    if statement.target_decryption_share().is_some() {
         return witness
-            .target_decryption_message_vectors
+            .target_decryption_message_vectors()
             .iter()
             .map(|message_vector| {
                 to_unsigned(message_vector, "target-decryption message coefficient")
@@ -280,9 +290,12 @@ pub(super) fn regenerate_bound_committed_material(
             message_coefficients: Vec::new(),
         });
     }
-    if witness.vss_committed_material_seeds_by_bound_message.len() != bound_commitments.len()
+    if witness
+        .vss_committed_material_seeds_by_bound_message()
+        .len()
+        != bound_commitments.len()
         || witness
-            .vss_committed_material_context_hashes_by_bound_message
+            .vss_committed_material_context_hashes_by_bound_message()
             .len()
             != bound_commitments.len()
     {
@@ -309,10 +322,10 @@ pub(super) fn regenerate_bound_committed_material(
             vss_committed_material_trees_by_commitment_field(&VssCommittedMaterialTreeInput {
                 message_digit_columns: &message_digit_columns,
                 ring_degree: statement.ring_degree,
-                material_seed_hex: &witness.vss_committed_material_seeds_by_bound_message
+                material_seed_hex: &witness.vss_committed_material_seeds_by_bound_message()
                     [bound_message_index],
                 commitment_context_hash: &witness
-                    .vss_committed_material_context_hashes_by_bound_message[bound_message_index],
+                    .vss_committed_material_context_hashes_by_bound_message()[bound_message_index],
             })?;
         for (commitment_field_position, field_tree) in field_trees.iter().enumerate() {
             let expected_root = bound_commitment

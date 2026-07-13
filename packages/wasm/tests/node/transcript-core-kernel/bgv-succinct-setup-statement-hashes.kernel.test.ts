@@ -37,14 +37,42 @@ const zeroI64Vector = (): number[] =>
 const zeroOpeningRandomness = (): readonly number[][] =>
     Array.from({ length: 5 }, () => zeroI64Vector());
 
-const statementContext = (bindingRoots: JsonRecord): TrusteeStatementContext =>
+const zeroComponentMaterialBytesHex = (level: number): string => {
+    const componentMaterialMagic = new Uint8Array([
+        0x53, 0x4c, 0x45, 0x4b, 0x43, 0x4d, 0x56, 0x31,
+    ]);
+    const digitCount = level + 1;
+    const componentMaterialBytes = new Uint8Array(
+        componentMaterialMagic.byteLength +
+            2 * 8 +
+            digitCount ** 2 * ringDegree * 8,
+    );
+    componentMaterialBytes.set(componentMaterialMagic);
+    const componentMaterialView = new DataView(componentMaterialBytes.buffer);
+    componentMaterialView.setBigUint64(
+        componentMaterialMagic.byteLength,
+        BigInt(level),
+        true,
+    );
+    componentMaterialView.setBigUint64(
+        componentMaterialMagic.byteLength + 8,
+        BigInt(ringDegree),
+        true,
+    );
+
+    return Array.from(componentMaterialBytes, (byte) =>
+        byte.toString(16).padStart(2, '0'),
+    ).join('');
+};
+
+const statementContext = (
+    setupContextHash: string,
+    bindingRoots: JsonRecord,
+): TrusteeStatementContext =>
     ({
-        ceremonyId: 'statement-vector-ceremony',
-        manifestHash: repeatedHash('10'),
-        rosterHash: repeatedHash('20'),
+        setupContextHash,
         trusteeIdentity: 'statement-vector-trustee',
         trusteeRosterPosition: 0,
-        setupEpoch: 'statement-vector-epoch',
         ...bindingRoots,
     }) as TrusteeStatementContext;
 
@@ -89,13 +117,26 @@ const setupContext = (
     rosterHash: repeatedHash('20'),
     setupParametersHash: parameters.setupParametersHash,
     setupEpoch: 'statement-vector-epoch',
+    participantCount: 10,
 });
+
+const setupContextHash = (
+    kernel: TranscriptCoreKernel,
+    parameters: BgvCollectiveSetupParametersDescription,
+): string =>
+    kernel.deriveCanonicalObjectHash({
+        value: {
+            objectType: 'CollectiveBgvSetupContext',
+            ...setupContext(parameters),
+        },
+    });
 
 const privateVssRequest = (
     kernel: TranscriptCoreKernel,
     parameters: BgvCollectiveSetupParametersDescription,
 ): PrivateVssProofInput => {
     const currentSetupContext = setupContext(parameters);
+    const currentSetupContextHash = setupContextHash(kernel, parameters);
     const publicMatrixSeedHash = repeatedHash('40');
     const coefficientCommitments: JsonRecord[] = [];
     const materialRecords: JsonRecord[] = [];
@@ -120,11 +161,7 @@ const privateVssRequest = (
             }
             coefficientCommitments.push({
                 objectType: 'VssCoefficientCommitment',
-                ceremonyId: 'statement-vector-ceremony',
-                manifestHash: repeatedHash('10'),
-                rosterHash: repeatedHash('20'),
-                setupParametersHash: currentSetupContext.setupParametersHash,
-                setupEpoch: 'statement-vector-epoch',
+                setupContextHash: currentSetupContextHash,
                 sourceTrusteeIdentity: 'statement-vector-trustee',
                 sourceTrusteeRosterPosition: 0,
                 publicMatrixSeedHash,
@@ -135,11 +172,7 @@ const privateVssRequest = (
             });
             materialRecords.push({
                 objectType: 'VssCoefficientCommitmentMaterial',
-                ceremonyId: 'statement-vector-ceremony',
-                manifestHash: repeatedHash('10'),
-                rosterHash: repeatedHash('20'),
-                setupParametersHash: currentSetupContext.setupParametersHash,
-                setupEpoch: 'statement-vector-epoch',
+                setupContextHash: currentSetupContextHash,
                 sourceTrusteeIdentity: 'statement-vector-trustee',
                 sourceTrusteeRosterPosition: 0,
                 publicMatrixSeedHash,
@@ -154,11 +187,7 @@ const privateVssRequest = (
 
     const sourceTrusteeRecord: JsonRecord = {
         objectType: 'VssSourceTrusteeCoefficientCommitments',
-        ceremonyId: 'statement-vector-ceremony',
-        manifestHash: repeatedHash('10'),
-        rosterHash: repeatedHash('20'),
-        setupParametersHash: currentSetupContext.setupParametersHash,
-        setupEpoch: 'statement-vector-epoch',
+        setupContextHash: currentSetupContextHash,
         sourceTrusteeIdentity: 'statement-vector-trustee',
         sourceTrusteeRosterPosition: 0,
         publicMatrixSeedHash,
@@ -197,6 +226,7 @@ describe('succinct setup statement hash vectors', () => {
         const kernel = await loadTranscriptCoreKernel();
         const parameters = kernel.describeCollectiveBgvSetupParameters();
         const publicMatrixSeedHash = repeatedHash('40');
+        const currentSetupContextHash = setupContextHash(kernel, parameters);
         const qSharePrimes = parameters.qShare.primes;
         const firstQSharePrime = qSharePrimes[0];
         if (firstQSharePrime === undefined) {
@@ -231,12 +261,9 @@ describe('succinct setup statement hash vectors', () => {
             });
         const sameSecret = kernel.generateSameSecretBridgeProof({
             context: {
-                ceremonyId: 'statement-vector-ceremony',
-                manifestHash: repeatedHash('10'),
-                rosterHash: repeatedHash('20'),
+                setupContextHash: currentSetupContextHash,
                 trusteeIdentity: 'statement-vector-trustee',
                 trusteeRosterPosition: 0,
-                setupEpoch: 'statement-vector-epoch',
             },
             ringDegree,
             sameSecretLinkage: {
@@ -245,7 +272,7 @@ describe('succinct setup statement hash vectors', () => {
             },
             sameSecretBridge: {
                 publicMatrixSeedHash,
-                setupParametersHash: parameters.setupParametersHash,
+                setupContextHash: currentSetupContextHash,
                 sourceTrusteeIdentity: 'statement-vector-trustee',
                 sourceTrusteeRosterPosition: 0,
                 bridgeRnsPrimes: [firstQSharePrime],
@@ -288,7 +315,8 @@ describe('succinct setup statement hash vectors', () => {
                 materialSeedHex: publicKeyBridgeMaterialSeedHex,
             });
         const publicKeyShare = kernel.generateTrusteeEvaluationKeyProof({
-            context: statementContext({
+            statementFamily: 'public-key-share',
+            context: statementContext(currentSetupContextHash, {
                 sameSecretBridgeStatementRoot: repeatedHash('31'),
                 sameSecretBridgeProofRecordRoot: repeatedHash('32'),
             }),
@@ -299,14 +327,14 @@ describe('succinct setup statement hash vectors', () => {
                     level: qSharePrimes.length - 1,
                     keySwitchDomain: 'accepted-bgv-public-a',
                     keySwitchSeedHex: repeatedHash('41'),
-                    componentBByDigit: [
-                        qSharePrimes.map(() => zeroU64Vector()),
-                    ],
+                    componentMaterialBytesHex: zeroComponentMaterialBytesHex(
+                        qSharePrimes.length - 1,
+                    ),
                 },
             ],
             sameSecretBridge: {
                 publicMatrixSeedHash: repeatedHash('41'),
-                setupParametersHash: parameters.setupParametersHash,
+                setupContextHash: currentSetupContextHash,
                 sourceTrusteeIdentity: 'statement-vector-trustee',
                 sourceTrusteeRosterPosition: 0,
                 bridgeRnsPrimes: [firstQSharePrime],
@@ -353,8 +381,8 @@ describe('succinct setup statement hash vectors', () => {
         ).commitment;
         const trusteeEvaluationKey =
             kernel.describeTrusteeEvaluationKeyStatement({
-                context: statementContext({
-                    requiredGaloisSetHash: repeatedHash('33'),
+                statementFamily: 'trustee-evaluation-key',
+                context: statementContext(currentSetupContextHash, {
                     evaluatorKeyScheduleRoot: repeatedHash('34'),
                     sourceConstantCoefficientCommitmentRoot: repeatedHash('36'),
                 }),
@@ -365,11 +393,8 @@ describe('succinct setup statement hash vectors', () => {
                         level: 2,
                         keySwitchDomain: 'relinearization-round-one',
                         keySwitchSeedHex: repeatedHash('42'),
-                        componentBByDigit: [
-                            [zeroU64Vector(), zeroU64Vector(), zeroU64Vector()],
-                            [zeroU64Vector(), zeroU64Vector(), zeroU64Vector()],
-                            [zeroU64Vector(), zeroU64Vector(), zeroU64Vector()],
-                        ],
+                        componentMaterialBytesHex:
+                            zeroComponentMaterialBytesHex(2),
                     },
                 ],
                 sameSecretLinkage: {

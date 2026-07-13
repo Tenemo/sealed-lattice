@@ -62,10 +62,12 @@ export const makeVssOpeningRandomBytes =
 
 export const makeSetupContext = (
     fixtureHash: SetupFixtureHash,
+    participantCount: number,
 ): CollectiveBgvSetupContext => ({
     ceremonyId: 'ceremony-1',
     manifestHash: fixtureHash('manifest'),
     rosterHash: fixtureHash('roster'),
     setupParametersHash: fixtureHash('setup-parameters'),
     setupEpoch: 'setup-epoch-1',
+    participantCount,
 });

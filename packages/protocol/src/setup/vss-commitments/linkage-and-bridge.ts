@@ -4,11 +4,7 @@ import type { SetupCommitmentValue } from '../vss-coefficient-commitments.js';
 
 export type VssShareLinkageStatement = {
     readonly objectType: string;
-    readonly ceremonyId: string;
-    readonly manifestHash: ProtocolHash;
-    readonly rosterHash: ProtocolHash;
-    readonly setupParametersHash: ProtocolHash;
-    readonly setupEpoch: string;
+    readonly setupContextHash: ProtocolHash;
     readonly publicMatrixSeedHash: ProtocolHash;
     readonly ringDegree: number;
     readonly participantCount: number;
@@ -40,11 +36,7 @@ type VssSameSecretBridgeSourceConstantCommitment = {
 
 type VssSameSecretBridgeStatement = {
     readonly objectType: 'VssSameSecretBridgeStatement';
-    readonly ceremonyId: string;
-    readonly manifestHash: ProtocolHash;
-    readonly rosterHash: ProtocolHash;
-    readonly setupParametersHash: ProtocolHash;
-    readonly setupEpoch: string;
+    readonly setupContextHash: ProtocolHash;
     readonly publicMatrixSeedHash: ProtocolHash;
     readonly ringDegree: number;
     readonly trusteeIdentity: string;
@@ -55,11 +47,7 @@ type VssSameSecretBridgeStatement = {
 
 export type VssSameSecretBridgeStatementSet = {
     readonly objectType: 'VssSameSecretBridgeStatementSet';
-    readonly ceremonyId: string;
-    readonly manifestHash: ProtocolHash;
-    readonly rosterHash: ProtocolHash;
-    readonly setupParametersHash: ProtocolHash;
-    readonly setupEpoch: string;
+    readonly setupContextHash: ProtocolHash;
     readonly publicMatrixSeedHash: ProtocolHash;
     readonly ringDegree: number;
     readonly participantCount: number;
@@ -68,7 +56,6 @@ export type VssSameSecretBridgeStatementSet = {
     readonly coefficientCommitmentRoot: ProtocolHash;
     readonly vssCoefficientCommitmentRoot: ProtocolHash;
     readonly statementRecords: readonly VssSameSecretBridgeStatement[];
-    readonly sameSecretBridgeStatementSetRoot: ProtocolHash;
 };
 
 type VssSameSecretBridgeProofRecord = {
@@ -82,7 +69,6 @@ type VssSameSecretBridgeProofRecord = {
 export type VssSameSecretBridgeProofMaterialSet = {
     readonly objectType: 'VssSameSecretBridgeProofMaterialSet';
     readonly proofRecords: readonly VssSameSecretBridgeProofRecord[];
-    readonly proofMaterialSetRoot: ProtocolHash;
 };
 
 export type VssSameSecretBridgeProofMaterialBuild<

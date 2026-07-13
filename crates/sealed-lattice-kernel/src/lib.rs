@@ -17,7 +17,7 @@ use core::{ptr, slice};
 use std::vec::Vec;
 
 use bgv::{
-    absorb_bgv_canonical_stream_chunk, authenticated_accepted_setup_proof_binding_session,
+    absorb_bgv_canonical_stream_chunk, active_accepted_setup_proof_binding_session,
     begin_accepted_setup_canonical_stream, begin_accepted_setup_proof_binding_session,
     begin_bgv_canonical_material_reader, begin_bgv_canonical_stream,
     cancel_accepted_setup_proof_binding_session, cancel_bgv_canonical_material_reader,
@@ -25,14 +25,15 @@ use bgv::{
     read_bgv_canonical_material_chunk,
 };
 use foundation::{
-    CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH, CanonicalStreamRuntimeBegin,
+    CanonicalStreamRuntimeBegin,
     STATE_DURABLE_BINDING_BYTE_LENGTH, STATE_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH,
     absorb_canonical_stream_chunk, begin_canonical_stream_verifier, begin_canonical_stream_writer,
     begin_state_verifier_session, cancel_canonical_stream, cancel_state_verifier_session,
     certify_verified_state_intent,
     describe_verified_state_object, finish_canonical_stream_verifier,
     finish_canonical_stream_writer, finish_state_output_intent_verification,
-    finish_state_output_verification, release_verified_state_object, run_local_storage_root_command,
+    finish_state_output_verification,
+    release_verified_state_object, run_local_storage_root_command,
     verify_state_recovery, verify_state_recovery_intent, verify_state_reservation,
     verify_state_reservation_intent,
 };
@@ -117,13 +118,6 @@ unsafe fn fixed_bytes<const BYTE_LENGTH: usize>(
     bytes
 }
 
-unsafe fn canonical_stream_capability(
-    pointer: *const u8,
-    length: usize,
-) -> [u8; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH] {
-    unsafe { fixed_bytes(pointer, length) }
-}
-
 unsafe fn state_verifier_capability(
     pointer: *const u8,
     length: usize,
@@ -185,19 +179,18 @@ unsafe fn write_canonical_stream_begin(
 ///
 /// # Safety
 ///
-/// `capability_pointer` must point to `capability_length` readable bytes. Every
-/// non-null output pointer must point to one writable `u32` in WASM memory.
+/// Every non-null output pointer must point to one writable `u32` in WASM memory.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sealed_lattice_canonical_stream_begin_writer(
     stream_domain_code: u32,
     total_byte_length: u32,
-    capability_pointer: *const u8,
-    capability_length: usize,
     status_pointer: *mut u32,
     chunk_count_pointer: *mut u32,
 ) -> u32 {
-    let capability = unsafe { canonical_stream_capability(capability_pointer, capability_length) };
-    let result = begin_canonical_stream_writer(stream_domain_code, total_byte_length, capability);
+    let result = begin_canonical_stream_writer(
+        stream_domain_code,
+        total_byte_length,
+    );
     unsafe {
         write_canonical_stream_begin(result, status_pointer, ptr::null_mut(), chunk_count_pointer)
     }
@@ -214,15 +207,15 @@ pub unsafe extern "C" fn sealed_lattice_canonical_stream_begin_verifier(
     stream_domain_code: u32,
     descriptor_pointer: *const u8,
     descriptor_length: usize,
-    capability_pointer: *const u8,
-    capability_length: usize,
     status_pointer: *mut u32,
     total_byte_length_pointer: *mut u32,
     chunk_count_pointer: *mut u32,
 ) -> u32 {
     let descriptor = unsafe { canonical_stream_input(descriptor_pointer, descriptor_length) };
-    let capability = unsafe { canonical_stream_capability(capability_pointer, capability_length) };
-    let result = begin_canonical_stream_verifier(stream_domain_code, descriptor, capability);
+    let result = begin_canonical_stream_verifier(
+        stream_domain_code,
+        descriptor,
+    );
     unsafe {
         write_canonical_stream_begin(
             result,
@@ -241,15 +234,16 @@ pub unsafe extern "C" fn sealed_lattice_canonical_stream_begin_verifier(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sealed_lattice_canonical_stream_absorb_chunk(
     handle: u32,
-    capability_pointer: *const u8,
-    capability_length: usize,
     chunk_index: u32,
     chunk_pointer: *const u8,
     chunk_length: usize,
 ) -> u32 {
-    let capability = unsafe { canonical_stream_capability(capability_pointer, capability_length) };
     let chunk = unsafe { canonical_stream_input(chunk_pointer, chunk_length) };
-    absorb_canonical_stream_chunk(handle, &capability, chunk_index, chunk)
+    absorb_canonical_stream_chunk(
+        handle,
+        chunk_index,
+        chunk,
+    )
         .map_or_else(|status| status, |()| 0)
 }
 
@@ -257,20 +251,16 @@ pub unsafe extern "C" fn sealed_lattice_canonical_stream_absorb_chunk(
 ///
 /// # Safety
 ///
-/// `capability_pointer` must name its declared readable range. Every non-null
-/// output pointer must point to the corresponding writable value in WASM
+/// Every non-null output pointer must point to the corresponding writable value in WASM
 /// memory. The returned allocation must be released with
 /// `sealed_lattice_deallocate` and the reported length.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sealed_lattice_canonical_stream_finish_writer(
     handle: u32,
-    capability_pointer: *const u8,
-    capability_length: usize,
     status_pointer: *mut u32,
     output_length_pointer: *mut usize,
 ) -> *mut u8 {
-    let capability = unsafe { canonical_stream_capability(capability_pointer, capability_length) };
-    match finish_canonical_stream_writer(handle, &capability) {
+    match finish_canonical_stream_writer(handle) {
         Ok(descriptor_bytes) => {
             let descriptor_byte_length = descriptor_bytes.len();
             unsafe {
@@ -291,33 +281,19 @@ pub unsafe extern "C" fn sealed_lattice_canonical_stream_finish_writer(
 
 /// Finishes and removes the active canonical-stream verifier.
 ///
-/// # Safety
-///
-/// `capability_pointer` must name its declared readable byte range.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn sealed_lattice_canonical_stream_finish_verifier(
-    handle: u32,
-    capability_pointer: *const u8,
-    capability_length: usize,
-) -> u32 {
-    let capability = unsafe { canonical_stream_capability(capability_pointer, capability_length) };
-    finish_canonical_stream_verifier(handle, &capability).map_or_else(|status| status, |()| 0)
+pub extern "C" fn sealed_lattice_canonical_stream_finish_verifier(handle: u32) -> u32 {
+    finish_canonical_stream_verifier(handle)
+        .map_or_else(|status| status, |()| 0)
 }
 
 /// Removes the active canonical-stream session. Repeated cancellation after a
 /// successful removal is a no-op.
 ///
-/// # Safety
-///
-/// `capability_pointer` must name its declared readable byte range.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn sealed_lattice_canonical_stream_cancel(
-    handle: u32,
-    capability_pointer: *const u8,
-    capability_length: usize,
-) -> u32 {
-    let capability = unsafe { canonical_stream_capability(capability_pointer, capability_length) };
-    cancel_canonical_stream(handle, &capability).map_or_else(|status| status, |()| 0)
+pub extern "C" fn sealed_lattice_canonical_stream_cancel(handle: u32) -> u32 {
+    cancel_canonical_stream(handle)
+        .map_or_else(|status| status, |()| 0)
 }
 
 /// Begins a BGV large-object sink whose framing and integrity are owned by the
@@ -334,8 +310,6 @@ pub unsafe extern "C" fn sealed_lattice_bgv_canonical_stream_begin(
     material_root_length: usize,
     descriptor_pointer: *const u8,
     descriptor_length: usize,
-    capability_pointer: *const u8,
-    capability_length: usize,
     status_pointer: *mut u32,
     total_byte_length_pointer: *mut u32,
     chunk_count_pointer: *mut u32,
@@ -343,8 +317,7 @@ pub unsafe extern "C" fn sealed_lattice_bgv_canonical_stream_begin(
     let material_root =
         unsafe { canonical_stream_input(material_root_pointer, material_root_length) };
     let descriptor = unsafe { canonical_stream_input(descriptor_pointer, descriptor_length) };
-    let capability = unsafe { canonical_stream_capability(capability_pointer, capability_length) };
-    let result = begin_bgv_canonical_stream(family_code, material_root, descriptor, capability);
+    let result = begin_bgv_canonical_stream(family_code, material_root, descriptor);
     unsafe {
         write_canonical_stream_begin(
             result,
@@ -356,20 +329,16 @@ pub unsafe extern "C" fn sealed_lattice_bgv_canonical_stream_begin(
 }
 
 /// Opens an opaque accepted-setup material-ownership session before any setup
-/// source is streamed. The capability remains outside protocol JSON.
+/// source is streamed.
 ///
 /// # Safety
 ///
-/// `capability_pointer` must name its declared readable range and
 /// `status_pointer` must be null or point to one writable `u32`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sealed_lattice_accepted_setup_session_begin(
-    capability_pointer: *const u8,
-    capability_length: usize,
     status_pointer: *mut u32,
 ) -> u32 {
-    let capability = unsafe { canonical_stream_capability(capability_pointer, capability_length) };
-    match begin_accepted_setup_proof_binding_session(capability) {
+    match begin_accepted_setup_proof_binding_session() {
         Ok(session_handle) => {
             unsafe { write_u32_if_present(status_pointer, 0) };
             session_handle
@@ -387,7 +356,7 @@ pub unsafe extern "C" fn sealed_lattice_accepted_setup_session_begin(
 }
 
 /// Begins an accepted-setup stream whose finished material remains owned by
-/// the authenticated setup session until terminal verification or cancellation.
+/// the owning setup session until terminal verification or cancellation.
 ///
 /// # Safety
 ///
@@ -396,24 +365,17 @@ pub unsafe extern "C" fn sealed_lattice_accepted_setup_session_begin(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sealed_lattice_accepted_setup_canonical_stream_begin(
     setup_session_handle: u32,
-    setup_capability_pointer: *const u8,
-    setup_capability_length: usize,
     family_code: u32,
     material_root_pointer: *const u8,
     material_root_length: usize,
     descriptor_pointer: *const u8,
     descriptor_length: usize,
-    stream_capability_pointer: *const u8,
-    stream_capability_length: usize,
     status_pointer: *mut u32,
     total_byte_length_pointer: *mut u32,
     chunk_count_pointer: *mut u32,
 ) -> u32 {
-    let setup_capability =
-        unsafe { canonical_stream_capability(setup_capability_pointer, setup_capability_length) };
-    let accepted_setup_session = match authenticated_accepted_setup_proof_binding_session(
+    let accepted_setup_session = match active_accepted_setup_proof_binding_session(
         setup_session_handle,
-        &setup_capability,
     ) {
         Ok(session) => session,
         Err(_) => {
@@ -431,13 +393,10 @@ pub unsafe extern "C" fn sealed_lattice_accepted_setup_canonical_stream_begin(
     let material_root =
         unsafe { canonical_stream_input(material_root_pointer, material_root_length) };
     let descriptor = unsafe { canonical_stream_input(descriptor_pointer, descriptor_length) };
-    let stream_capability =
-        unsafe { canonical_stream_capability(stream_capability_pointer, stream_capability_length) };
     let result = begin_accepted_setup_canonical_stream(
         family_code,
         material_root,
         descriptor,
-        stream_capability,
         accepted_setup_session,
     );
     unsafe {
@@ -451,26 +410,17 @@ pub unsafe extern "C" fn sealed_lattice_accepted_setup_canonical_stream_begin(
 }
 
 /// Cancels an accepted-setup session and drains every material root it owns.
-///
-/// # Safety
-///
-/// `capability_pointer` must name its declared readable range.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn sealed_lattice_accepted_setup_session_cancel(
-    session_handle: u32,
-    capability_pointer: *const u8,
-    capability_length: usize,
-) -> u32 {
-    let capability = unsafe { canonical_stream_capability(capability_pointer, capability_length) };
-    cancel_accepted_setup_proof_binding_session(session_handle, &capability).map_or_else(
+pub extern "C" fn sealed_lattice_accepted_setup_session_cancel(session_handle: u32) -> u32 {
+    cancel_accepted_setup_proof_binding_session(session_handle).map_or_else(
         |_| foundation::CANONICAL_STREAM_RUNTIME_INVALID_SESSION,
         |()| 0,
     )
 }
 
 /// Executes terminal accepted-setup verification under the already-open opaque
-/// material session. The session handle and capability are direct ABI values,
-/// not fields of the protocol request.
+/// material session. The session handle is a direct ABI value, not a field of
+/// the protocol request.
 ///
 /// # Safety
 ///
@@ -481,17 +431,14 @@ pub unsafe extern "C" fn sealed_lattice_accepted_setup_command_with_length(
     pointer: *const u8,
     length: usize,
     session_handle: u32,
-    capability_pointer: *const u8,
-    capability_length: usize,
     output_length_pointer: *mut usize,
 ) -> *mut u8 {
-    let capability = unsafe { canonical_stream_capability(capability_pointer, capability_length) };
     let input = unsafe { canonical_stream_input(pointer, length) };
-    let output = run_accepted_setup_command(input, session_handle, &capability);
+    let output = run_accepted_setup_command(input, session_handle);
     // Terminal verification consumes the session on every ordinary outcome. If
     // parsing or command selection failed before dispatch, cancel the still-live
     // session so its reserved and finished roots are drained.
-    let _ = cancel_accepted_setup_proof_binding_session(session_handle, &capability);
+    let _ = cancel_accepted_setup_proof_binding_session(session_handle);
     let output_length = output.len();
     if !output_length_pointer.is_null() {
         unsafe { output_length_pointer.write(output_length) };
@@ -505,42 +452,23 @@ pub unsafe extern "C" fn sealed_lattice_accepted_setup_command_with_length(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sealed_lattice_bgv_canonical_stream_absorb_chunk(
     handle: u32,
-    capability_pointer: *const u8,
-    capability_length: usize,
     chunk_index: u32,
     chunk_pointer: *const u8,
     chunk_length: usize,
 ) -> u32 {
-    let capability = unsafe { canonical_stream_capability(capability_pointer, capability_length) };
     let chunk = unsafe { canonical_stream_input(chunk_pointer, chunk_length) };
-    absorb_bgv_canonical_stream_chunk(handle, &capability, chunk_index, chunk)
+    absorb_bgv_canonical_stream_chunk(handle, chunk_index, chunk)
         .map_or_else(|status| status, |()| 0)
 }
 
-/// # Safety
-///
-/// The capability pointer must name its declared readable range.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn sealed_lattice_bgv_canonical_stream_finish(
-    handle: u32,
-    capability_pointer: *const u8,
-    capability_length: usize,
-) -> u32 {
-    let capability = unsafe { canonical_stream_capability(capability_pointer, capability_length) };
-    finish_bgv_canonical_stream(handle, &capability).map_or_else(|status| status, |()| 0)
+pub extern "C" fn sealed_lattice_bgv_canonical_stream_finish(handle: u32) -> u32 {
+    finish_bgv_canonical_stream(handle).map_or_else(|status| status, |()| 0)
 }
 
-/// # Safety
-///
-/// The capability pointer must name its declared readable range.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn sealed_lattice_bgv_canonical_stream_cancel(
-    handle: u32,
-    capability_pointer: *const u8,
-    capability_length: usize,
-) -> u32 {
-    let capability = unsafe { canonical_stream_capability(capability_pointer, capability_length) };
-    cancel_bgv_canonical_stream(handle, &capability).map_or_else(|status| status, |()| 0)
+pub extern "C" fn sealed_lattice_bgv_canonical_stream_cancel(handle: u32) -> u32 {
+    cancel_bgv_canonical_stream(handle).map_or_else(|status| status, |()| 0)
 }
 
 /// # Safety
@@ -553,16 +481,13 @@ pub unsafe extern "C" fn sealed_lattice_bgv_canonical_material_reader_begin(
     family_code: u32,
     material_root_pointer: *const u8,
     material_root_length: usize,
-    capability_pointer: *const u8,
-    capability_length: usize,
     status_pointer: *mut u32,
     total_byte_length_pointer: *mut u32,
     chunk_count_pointer: *mut u32,
 ) -> u32 {
     let material_root =
         unsafe { canonical_stream_input(material_root_pointer, material_root_length) };
-    let capability = unsafe { canonical_stream_capability(capability_pointer, capability_length) };
-    let result = begin_bgv_canonical_material_reader(family_code, material_root, capability);
+    let result = begin_bgv_canonical_material_reader(family_code, material_root);
     unsafe {
         write_canonical_stream_begin(
             result,
@@ -575,13 +500,11 @@ pub unsafe extern "C" fn sealed_lattice_bgv_canonical_material_reader_begin(
 
 /// # Safety
 ///
-/// The capability pointer and output pointer must name their declared ranges.
+/// The output pointer must name its declared writable range.
 #[unsafe(no_mangle)]
 #[allow(clippy::too_many_arguments)]
 pub unsafe extern "C" fn sealed_lattice_bgv_canonical_material_reader_read_chunk(
     handle: u32,
-    capability_pointer: *const u8,
-    capability_length: usize,
     chunk_index: u32,
     output_pointer: *mut u8,
     output_length: usize,
@@ -589,37 +512,20 @@ pub unsafe extern "C" fn sealed_lattice_bgv_canonical_material_reader_read_chunk
     if output_pointer.is_null() {
         return foundation::RefusalReason::WrongTypeOrLength.canonical_code() as u32;
     }
-    let capability = unsafe { canonical_stream_capability(capability_pointer, capability_length) };
     let output = unsafe { slice::from_raw_parts_mut(output_pointer, output_length) };
-    read_bgv_canonical_material_chunk(handle, &capability, chunk_index, output)
+    read_bgv_canonical_material_chunk(handle, chunk_index, output)
         .map_or_else(|status| status, |()| 0)
 }
 
-/// # Safety
-///
-/// The capability pointer must name its declared readable range.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn sealed_lattice_bgv_canonical_material_reader_finish(
-    handle: u32,
-    capability_pointer: *const u8,
-    capability_length: usize,
-) -> u32 {
-    let capability = unsafe { canonical_stream_capability(capability_pointer, capability_length) };
-    finish_bgv_canonical_material_reader(handle, &capability)
+pub extern "C" fn sealed_lattice_bgv_canonical_material_reader_finish(handle: u32) -> u32 {
+    finish_bgv_canonical_material_reader(handle)
         .map_or_else(|status| status, |()| 0)
 }
 
-/// # Safety
-///
-/// The capability pointer must name its declared readable range.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn sealed_lattice_bgv_canonical_material_reader_cancel(
-    handle: u32,
-    capability_pointer: *const u8,
-    capability_length: usize,
-) -> u32 {
-    let capability = unsafe { canonical_stream_capability(capability_pointer, capability_length) };
-    cancel_bgv_canonical_material_reader(handle, &capability)
+pub extern "C" fn sealed_lattice_bgv_canonical_material_reader_cancel(handle: u32) -> u32 {
+    cancel_bgv_canonical_material_reader(handle)
         .map_or_else(|status| status, |()| 0)
 }
 
@@ -810,8 +716,6 @@ pub unsafe extern "C" fn sealed_lattice_state_verifier_finish_output(
     capability_pointer: *const u8,
     capability_length: usize,
     stream_handle: u32,
-    stream_capability_pointer: *const u8,
-    stream_capability_length: usize,
     verified_reservation_handle: u32,
     canonical_output_intent_carrier_pointer: *const u8,
     canonical_output_intent_carrier_length: usize,
@@ -820,8 +724,6 @@ pub unsafe extern "C" fn sealed_lattice_state_verifier_finish_output(
     status_pointer: *mut u32,
 ) -> u32 {
     let capability = unsafe { canonical_stream_input(capability_pointer, capability_length) };
-    let stream_capability =
-        unsafe { canonical_stream_capability(stream_capability_pointer, stream_capability_length) };
     let canonical_output_intent_carrier = unsafe {
         canonical_stream_input(
             canonical_output_intent_carrier_pointer,
@@ -838,7 +740,6 @@ pub unsafe extern "C" fn sealed_lattice_state_verifier_finish_output(
         session_handle,
         capability,
         stream_handle,
-        &stream_capability,
         verified_reservation_handle,
         canonical_output_intent_carrier,
         canonical_state_certificate,
@@ -873,16 +774,12 @@ pub unsafe extern "C" fn sealed_lattice_state_verifier_prepare_output(
     capability_pointer: *const u8,
     capability_length: usize,
     stream_handle: u32,
-    stream_capability_pointer: *const u8,
-    stream_capability_length: usize,
     verified_reservation_handle: u32,
     canonical_output_intent_carrier_pointer: *const u8,
     canonical_output_intent_carrier_length: usize,
     status_pointer: *mut u32,
 ) -> u32 {
     let capability = unsafe { canonical_stream_input(capability_pointer, capability_length) };
-    let stream_capability =
-        unsafe { canonical_stream_capability(stream_capability_pointer, stream_capability_length) };
     let canonical_output_intent_carrier = unsafe {
         canonical_stream_input(
             canonical_output_intent_carrier_pointer,
@@ -893,7 +790,6 @@ pub unsafe extern "C" fn sealed_lattice_state_verifier_prepare_output(
         session_handle,
         capability,
         stream_handle,
-        &stream_capability,
         verified_reservation_handle,
         canonical_output_intent_carrier,
     ) {

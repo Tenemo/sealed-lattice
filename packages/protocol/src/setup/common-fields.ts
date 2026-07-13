@@ -1,3 +1,4 @@
+import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
 import { protocolHashPattern } from '../common/verification-helpers.js';
@@ -5,16 +6,6 @@ import { protocolHashPattern } from '../common/verification-helpers.js';
 import type { CollectiveBgvSetupContext } from './vss-share-verification-records.js';
 
 export type JsonRecord = Record<string, unknown>;
-
-export const setupContextFieldNames = [
-    'ceremonyId',
-    'manifestHash',
-    'rosterHash',
-    'setupParametersHash',
-    'setupEpoch',
-] as const;
-
-type SetupContextFieldName = (typeof setupContextFieldNames)[number];
 
 export const assertProtocolHash = (
     value: unknown,
@@ -118,26 +109,30 @@ export const bytesFromHex = (hex: string, fieldName: string): Uint8Array => {
 export const bytesToHex = (bytes: Uint8Array): string =>
     Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 
-export const contextFields = (
+export const deriveCollectiveBgvSetupContextHash = (
     setupContext: CollectiveBgvSetupContext,
-): Pick<CollectiveBgvSetupContext, SetupContextFieldName> => ({
-    ceremonyId: setupContext.ceremonyId,
-    manifestHash: setupContext.manifestHash,
-    rosterHash: setupContext.rosterHash,
-    setupParametersHash: setupContext.setupParametersHash,
-    setupEpoch: setupContext.setupEpoch,
-});
+): ProtocolHash =>
+    deriveCanonicalObjectHash({
+        objectType: 'CollectiveBgvSetupContext',
+        ceremonyId: setupContext.ceremonyId,
+        manifestHash: setupContext.manifestHash,
+        rosterHash: setupContext.rosterHash,
+        setupParametersHash: setupContext.setupParametersHash,
+        setupEpoch: setupContext.setupEpoch,
+        participantCount: setupContext.participantCount,
+    });
 
-export const assertContextMatches = (
+export const assertSetupContextHashMatches = (
     setupContext: CollectiveBgvSetupContext,
     value: Readonly<Record<string, unknown>>,
     objectPath: string,
 ): void => {
-    for (const fieldName of setupContextFieldNames) {
-        if (value[fieldName] !== setupContext[fieldName]) {
-            throw new Error(
-                `${objectPath}.${fieldName} must match setupContext.${fieldName}.`,
-            );
-        }
+    if (
+        value.setupContextHash !==
+        deriveCollectiveBgvSetupContextHash(setupContext)
+    ) {
+        throw new Error(
+            `${objectPath}.setupContextHash must match the authoritative setup context.`,
+        );
     }
 };

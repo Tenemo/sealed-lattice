@@ -3,27 +3,23 @@ use serde_json::{Value, json};
 use crate::{
     bgv::parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE},
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
-    hashing::{derive_canonical_object_hash, to_hex},
+    hashing::to_hex,
 };
 
 use super::{
+    accepted_setup::setup_context_hash,
     commitment::{SETUP_COMMITMENT_RANDOMNESS_WIDTH, SetupCommitmentValue, setup_commitment_root},
-    setup_proof::SetupProofMaterialBytes,
+    setup_proof::{SetupProofMaterialBytes, take_verified_setup_proof_material_bytes},
     sharing::canonical_trustee_point,
     trustee_evaluation_key_proof::{
-        PRIVATE_VSS_SHARE_PROOF_FAMILY, PrivateVssShareStatement, SuccinctSetupProofContext,
-        TrusteeEvaluationKeyStatement, TrusteeEvaluationKeyWitness,
+        PRIVATE_VSS_SHARE_PROOF_FAMILY, PrivateVssShareStatement, SetupProofStatement,
+        SuccinctSetupProofContext, TrusteeEvaluationKeyStatement, TrusteeEvaluationKeyWitness,
         decode_trustee_evaluation_key_proof_from_source, encode_trustee_evaluation_key_proof,
         private_vss_share_succinct_proof_bytes_hash,
         private_vss_share_succinct_proof_material_bytes_hash, prove_evaluation_key_share,
         verify_evaluation_key_share,
     },
 };
-
-const PRIVATE_VSS_SHARE_PROOF_TRANSPORT_SET_OBJECT_TYPE: &str =
-    "SetupTransportedPrivateVssShareProofMaterialSet";
-const PRIVATE_VSS_SHARE_PROOF_TRANSPORT_OBJECT_TYPE: &str =
-    "SetupTransportedPrivateVssShareProofMaterial";
 
 pub(super) struct PrivateVssShareSuccinctProofVerificationInput<'a> {
     pub(super) setup_context: &'a Value,
@@ -42,7 +38,6 @@ pub(super) struct PrivateVssShareSuccinctProofVerificationInput<'a> {
     pub(super) share_values_hash: &'a str,
     pub(super) coefficient_commitments: &'a [SetupCommitmentValue],
     pub(super) proof_record: &'a Value,
-    pub(super) transported_proof_material: Option<&'a Value>,
 }
 
 pub(super) struct PrivateVssShareSuccinctProofVerification {
@@ -104,13 +99,10 @@ pub(super) fn verify_private_vss_share_succinct_relation_proof(
     let decoded_proof =
         decode_trustee_evaluation_key_proof_from_source(&statement, proof_bytes.as_ref())?;
     verify_evaluation_key_share(&statement, &decoded_proof)?;
-    let proof_material_root = private_vss_share_succinct_transported_proof_material_root(
-        &statement_hash_hex,
-        &proof_bytes_hash,
-    )?;
+    let proof_material_root = private_vss_share_succinct_proof_material_root(&proof_bytes_hash)?;
     if value_string(input.proof_record, "proofMaterialRoot")? != proof_material_root {
         return Err(invalid_private_vss_share_proof(
-            "private VSS share proofMaterialRoot must match the canonical transported proof material reference",
+            "private VSS share proofMaterialRoot must match the canonical proof material reference",
         ));
     }
     Ok(PrivateVssShareSuccinctProofVerification {
@@ -195,145 +187,47 @@ fn validate_private_vss_share_proof_record(proof_record: &Value) -> CanonicalRes
 fn private_vss_share_succinct_proof_bytes_from_record(
     input: &PrivateVssShareSuccinctProofVerificationInput<'_>,
 ) -> CanonicalResult<SetupProofMaterialBytes> {
-    private_vss_share_succinct_transported_proof_bytes_from_record(input)
-}
-
-fn private_vss_share_succinct_transported_proof_bytes_from_record(
-    input: &PrivateVssShareSuccinctProofVerificationInput<'_>,
-) -> CanonicalResult<SetupProofMaterialBytes> {
     let proof_record = input.proof_record;
-    let Some(material_set) = input.transported_proof_material else {
-        return Err(invalid_private_vss_share_proof(
-            "transportedPrivateVssShareProofMaterial was required by transported private VSS proof records",
-        ));
-    };
     let proof_material_root = value_string(proof_record, "proofMaterialRoot")?;
     validate_hash(
         proof_material_root,
         "privateVssShareProof.proofMaterialRoot",
     )?;
-    let proof_bytes =
-        transported_private_vss_share_proof_material_bytes(material_set, proof_material_root)?;
-    let expected_material_root = private_vss_share_succinct_transported_proof_material_root(
-        value_string(proof_record, "statementHash")?,
+    let proof_bytes = take_verified_setup_proof_material_bytes(
+        PRIVATE_VSS_SHARE_PROOF_FAMILY,
+        proof_material_root,
+        "privateVssShareProof.proofMaterialRoot",
+        None,
+    )?;
+    let expected_material_root = private_vss_share_succinct_proof_material_root(
         value_string(proof_record, "proofBytesHash")?,
     )?;
     if proof_material_root != expected_material_root {
         return Err(invalid_private_vss_share_proof(
-            "private VSS share proofMaterialRoot must match the canonical transported proof material reference",
+            "private VSS share proofMaterialRoot must match the canonical proof material reference",
         ));
     }
 
     Ok(proof_bytes)
-}
-
-fn transported_private_vss_share_proof_material_bytes(
-    material_set: &Value,
-    expected_proof_material_root: &str,
-) -> CanonicalResult<SetupProofMaterialBytes> {
-    verify_transported_private_vss_share_proof_material_set_header(material_set)?;
-    let Some(proof_materials) = material_set.get("proofMaterials").and_then(Value::as_array) else {
-        return Err(invalid_private_vss_share_proof(
-            "transportedPrivateVssShareProofMaterial.proofMaterials must list transported proof material objects",
-        ));
-    };
-    let mut matching_reference = None;
-    for proof_material in proof_materials {
-        verify_transported_private_vss_share_proof_material_header(proof_material)?;
-        let proof_material_root = value_string(proof_material, "proofMaterialRoot")?;
-        if proof_material_root != expected_proof_material_root {
-            continue;
-        }
-        if matching_reference.is_some() {
-            return Err(invalid_private_vss_share_proof(
-                "transportedPrivateVssShareProofMaterial contains duplicate proofMaterialRoot entries",
-            ));
-        }
-        matching_reference = Some(proof_material);
-    }
-    matching_reference.ok_or_else(|| {
-        invalid_private_vss_share_proof(
-            "transportedPrivateVssShareProofMaterial is missing the requested proofMaterialRoot",
-        )
-    })?;
-    let proof_bytes = crate::bgv::setup::verified_canonical_setup_proof_material_bytes(
-        PRIVATE_VSS_SHARE_PROOF_FAMILY,
-        expected_proof_material_root,
-    )?
-    .ok_or_else(|| {
-        invalid_private_vss_share_proof(
-            "private VSS share proof material was not authenticated by the canonical binary stream",
-        )
-    })?;
-    Ok(proof_bytes)
-}
-
-fn verify_transported_private_vss_share_proof_material_set_header(
-    value: &Value,
-) -> CanonicalResult<()> {
-    if value.get("objectType").and_then(Value::as_str)
-        != Some(PRIVATE_VSS_SHARE_PROOF_TRANSPORT_SET_OBJECT_TYPE)
-    {
-        return Err(invalid_private_vss_share_proof(format!(
-            "transportedPrivateVssShareProofMaterial.objectType must be {PRIVATE_VSS_SHARE_PROOF_TRANSPORT_SET_OBJECT_TYPE}"
-        )));
-    }
-
-    Ok(())
-}
-
-fn verify_transported_private_vss_share_proof_material_header(
-    value: &Value,
-) -> CanonicalResult<()> {
-    if value.get("objectType").and_then(Value::as_str)
-        != Some(PRIVATE_VSS_SHARE_PROOF_TRANSPORT_OBJECT_TYPE)
-    {
-        return Err(invalid_private_vss_share_proof(format!(
-            "transported private VSS share proof material objectType must be {PRIVATE_VSS_SHARE_PROOF_TRANSPORT_OBJECT_TYPE}"
-        )));
-    }
-    validate_hash(
-        value_string(value, "proofMaterialRoot")?,
-        "transportedPrivateVssShareProofMaterial.proofMaterialRoot",
-    )?;
-
-    Ok(())
 }
 
 fn private_vss_share_succinct_statement(
     input: &PrivateVssShareSuccinctProofVerificationInput<'_>,
 ) -> CanonicalResult<TrusteeEvaluationKeyStatement> {
     let context = SuccinctSetupProofContext {
-        proof_family: PRIVATE_VSS_SHARE_PROOF_FAMILY.to_string(),
-        ceremony_id: value_string(input.setup_context, "ceremonyId")?.to_string(),
-        manifest_hash: value_string(input.setup_context, "manifestHash")?.to_string(),
-        roster_hash: value_string(input.setup_context, "rosterHash")?.to_string(),
+        setup_context_hash: setup_context_hash(input.setup_context)?,
         trustee_identity: input.source_trustee_identity.to_string(),
         trustee_roster_position: input.source_trustee_roster_position,
-        setup_epoch: value_string(input.setup_context, "setupEpoch")?.to_string(),
         binding_roots: vec![
-            (
-                "sourceTrusteeCommitmentRoot".to_string(),
-                input.source_trustee_commitment_root.to_string(),
-            ),
-            (
-                "privateEnvelopeAadHash".to_string(),
-                input.private_envelope_aad_hash.to_string(),
-            ),
-            (
-                "shareValuesHash".to_string(),
-                input.share_values_hash.to_string(),
-            ),
+            input.source_trustee_commitment_root.to_string(),
+            input.private_envelope_aad_hash.to_string(),
+            input.share_values_hash.to_string(),
         ],
     };
     let statement = TrusteeEvaluationKeyStatement {
         context,
         ring_degree: input.ring_degree,
-        keys: Vec::new(),
-        same_secret_linkage: None,
-        vss_share_linkage: None,
-        same_secret_bridge: None,
-        private_vss_share: Some(PrivateVssShareStatement {
+        proof: SetupProofStatement::PrivateVssShare(PrivateVssShareStatement {
             public_matrix_seed_hash: input.public_matrix_seed_hash.to_string(),
             private_envelope_aad_hash: input.private_envelope_aad_hash.to_string(),
             source_trustee_identity: input.source_trustee_identity.to_string(),
@@ -348,22 +242,19 @@ fn private_vss_share_succinct_statement(
             coefficient_commitment_roots: input.coefficient_commitment_roots.to_vec(),
             coefficient_commitments: input.coefficient_commitments.to_vec(),
         }),
-        target_decryption_share: None,
     };
     statement.validate_shape()?;
 
     Ok(statement)
 }
 
-fn private_vss_share_succinct_transported_proof_material_root(
-    statement_hash_hex: &str,
+fn private_vss_share_succinct_proof_material_root(
     proof_bytes_hash: &str,
 ) -> CanonicalResult<String> {
-    derive_canonical_object_hash(&json!({
-        "objectType": "PrivateVssShareTransportedSuccinctProofMaterial",
-        "statementHash": statement_hash_hex,
-        "proofBytesHash": proof_bytes_hash,
-    }))
+    crate::bgv::setup::setup_proof::setup_proof_material_reference_root(
+        PRIVATE_VSS_SHARE_PROOF_FAMILY,
+        proof_bytes_hash,
+    )
 }
 
 fn trustee_point_powers_i128(
@@ -451,19 +342,14 @@ pub(super) fn private_vss_share_succinct_proof_record(
         share_values_hash: input.share_values_hash,
         coefficient_commitments: input.coefficient_commitments,
         proof_record: &empty_proof_record,
-        transported_proof_material: None,
     };
     validate_private_vss_share_statement_material(&verification_input)?;
     validate_private_vss_share_witness(&input)?;
     validate_private_vss_share_proof_randomness_seed(input.proof_randomness_seed_hex)?;
     let statement = private_vss_share_succinct_statement(&verification_input)?;
     let statement_hash_hex = to_hex(&statement.statement_hash());
-    let witness = TrusteeEvaluationKeyWitness {
-        secret_coefficients: Vec::new(),
-        error_coefficients_by_key: Vec::new(),
-        negative_indicator_coefficients: Vec::new(),
-        opening_randomness_by_limb: Vec::new(),
-        private_vss_coefficient_messages_by_shamir_index: input
+    let witness = TrusteeEvaluationKeyWitness::PrivateVssShare {
+        coefficient_messages_by_shamir_index: input
             .witness
             .coefficient_messages_by_shamir_index
             .iter()
@@ -480,7 +366,7 @@ pub(super) fn private_vss_share_succinct_proof_record(
                     .collect()
             })
             .collect::<CanonicalResult<Vec<Vec<i64>>>>()?,
-        private_vss_opening_randomness_by_shamir_index: input
+        opening_randomness_by_shamir_index: input
             .witness
             .opening_randomness_by_shamir_index
             .iter()
@@ -502,7 +388,7 @@ pub(super) fn private_vss_share_succinct_proof_record(
                     .collect()
             })
             .collect::<CanonicalResult<Vec<Vec<Vec<i64>>>>>()?,
-        private_vss_carry_witnesses: input
+        carry_witnesses: input
             .witness
             .carry_witnesses
             .iter()
@@ -512,21 +398,12 @@ pub(super) fn private_vss_share_succinct_proof_record(
                 })
             })
             .collect::<CanonicalResult<Vec<i64>>>()?,
-        vss_public_coefficient_messages_by_shamir_index: Vec::new(),
-        vss_public_recipient_share_messages_by_item: Vec::new(),
-        vss_public_carry_witnesses_by_item: Vec::new(),
-        target_decryption_message_vectors: Vec::new(),
-        target_decryption_opening_randomness_by_commitment: Vec::new(),
-        vss_committed_material_seeds_by_bound_message: Vec::new(),
-        vss_committed_material_context_hashes_by_bound_message: Vec::new(),
     };
     let proof = prove_evaluation_key_share(&statement, &witness, input.proof_randomness_seed_hex)?;
     let proof_bytes = encode_trustee_evaluation_key_proof(&proof);
     let proof_bytes_hash = private_vss_share_succinct_proof_bytes_hash(&proof_bytes);
-    let proof_material_root = private_vss_share_succinct_transported_proof_material_root(
-        &statement_hash_hex,
-        &proof_bytes_hash,
-    )?;
+    let proof_material_root =
+        private_vss_share_succinct_proof_material_root(&proof_bytes_hash)?;
     crate::bgv::setup::retain_generated_canonical_proof_material(
         PRIVATE_VSS_SHARE_PROOF_FAMILY,
         proof_material_root.clone(),

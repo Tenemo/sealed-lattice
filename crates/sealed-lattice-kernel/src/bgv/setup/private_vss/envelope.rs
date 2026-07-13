@@ -1,5 +1,6 @@
 use super::*;
 
+use crate::bgv::setup::setup_proof::SetupProofMaterialMap;
 use crate::hashing::derive_canonical_object_hash;
 
 const PRIVATE_VSS_ENVELOPE_OBJECT_TYPE: &str = "PrivateVssShareEnvelope";
@@ -135,7 +136,6 @@ pub(super) fn verify_private_envelope_header(
 
 pub(super) fn verify_private_envelope_limbs(
     private_envelope: &Value,
-    transported_proof_material: Option<&Value>,
     setup_context: &Value,
     public_matrix_seed_hash: &str,
     source_trustee_binding: &SourceTrusteeCommitmentBinding,
@@ -166,7 +166,6 @@ pub(super) fn verify_private_envelope_limbs(
     for limb_opening in rns_share_openings {
         let limb_verification = match verify_private_envelope_limb(
             limb_opening,
-            transported_proof_material,
             setup_context,
             public_matrix_seed_hash,
             source_trustee_binding,
@@ -203,7 +202,6 @@ pub(super) fn verify_private_envelope_limbs(
 
 fn verify_private_envelope_limb(
     limb_opening: &Value,
-    transported_proof_material: Option<&Value>,
     setup_context: &Value,
     public_matrix_seed_hash: &str,
     source_trustee_binding: &SourceTrusteeCommitmentBinding,
@@ -357,7 +355,6 @@ fn verify_private_envelope_limb(
             share_values_hash: &share_values_hash,
             coefficient_commitments: &coefficient_commitment_values,
             proof_record: private_vss_share_proof,
-            transported_proof_material,
         },
     ) {
         Ok(verification) => verification,

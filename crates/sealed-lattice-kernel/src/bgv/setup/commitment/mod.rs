@@ -13,7 +13,7 @@ use crate::{
         parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE},
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
-    hashing::{derive_canonical_object_hash, hash512},
+    hashing::{derive_canonical_object_hash, hash_framed_parts_512 as hash512},
 };
 
 use super::sampling::reduce_unbiased_u64;

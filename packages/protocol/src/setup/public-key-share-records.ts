@@ -12,9 +12,5 @@ export {
     type TransportedPublicKeyShareProofMaterialSet,
 } from './public-key-share-records/constants-and-types.js';
 export { createPublicKeyShareSet } from './public-key-share-records/share-statement-records.js';
-export { createPublicKeyShareMaterialSet } from './public-key-share-records/embedded-material-records.js';
-export {
-    createBinaryChunkedPublicKeyShareMaterialBundle,
-    createBinaryChunkedPublicKeyShareMaterialTransport,
-} from './public-key-share-records/binary-material-transport.js';
+export { createBinaryChunkedPublicKeyShareMaterialBundle } from './public-key-share-records/binary-material-transport.js';
 export { createPublicKeyShareSuccinctProofSet } from './public-key-share-records/succinct-proofs.js';

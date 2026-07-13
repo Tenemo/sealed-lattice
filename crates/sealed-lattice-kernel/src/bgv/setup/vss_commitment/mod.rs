@@ -92,73 +92,74 @@ impl VssPublicMessageEncodingLayout {
     }
 }
 
-pub(crate) fn verify_vss_public_coefficient_commitment_set_request(
-    request: &Value,
-) -> CanonicalResult<Value> {
-    let coefficient_set = value_at_path(request, &["coefficientCommitmentSet"])?;
+pub(crate) struct VssPublicCoefficientCommitmentSetContext<'a> {
+    pub(crate) public_matrix_seed_hash: &'a str,
+    pub(crate) participant_count: usize,
+    pub(crate) rns_limb_count: usize,
+    pub(crate) threshold_degree: usize,
+    pub(crate) ring_degree: usize,
+}
+
+pub(crate) struct VssPublicRecipientShareCommitmentSetContext<'a> {
+    pub(crate) public_matrix_seed_hash: &'a str,
+    pub(crate) participant_count: usize,
+    pub(crate) rns_limb_count: usize,
+    pub(crate) ring_degree: usize,
+}
+
+pub(crate) struct VssPublicAggregateThresholdCommitmentSetContext<'a> {
+    pub(crate) public_matrix_seed_hash: &'a str,
+    pub(crate) participant_count: usize,
+    pub(crate) rns_limb_count: usize,
+    pub(crate) ring_degree: usize,
+}
+
+pub(crate) fn verify_vss_public_coefficient_commitment_set(
+    coefficient_set: &Value,
+    context: &VssPublicCoefficientCommitmentSetContext<'_>,
+) -> CanonicalResult<String> {
     compare_required_string(
         string_at_path(coefficient_set, &["objectType"])?,
         "VssPublicCoefficientCommitmentSet",
         "VSS coefficient commitment set objectType",
     )?;
-    let public_matrix_seed_hash = hash_at_path(coefficient_set, &["publicMatrixSeedHash"])?;
-    let participant_count = read_positive_usize_at_path(
-        coefficient_set,
-        &["participantCount"],
-        "VSS coefficient commitment set participantCount",
-    )?;
-    let rns_limb_count = read_positive_usize_at_path(
-        coefficient_set,
-        &["rnsLimbCount"],
-        "VSS coefficient commitment set rnsLimbCount",
-    )?;
-    let threshold_degree = read_positive_usize_at_path(
-        coefficient_set,
-        &["thresholdDegree"],
-        "VSS coefficient commitment set thresholdDegree",
-    )?;
-    let ring_degree = read_positive_usize_at_path(
-        coefficient_set,
-        &["ringDegree"],
-        "VSS coefficient commitment set ringDegree",
+    compare_required_string(
+        hash_at_path(coefficient_set, &["publicMatrixSeedHash"])?,
+        context.public_matrix_seed_hash,
+        "VSS coefficient commitment set publicMatrixSeedHash",
     )?;
     let source_trustee_records = array_at_path(coefficient_set, &["sourceTrusteeRecords"])?;
-    if source_trustee_records.len() != participant_count {
+    if source_trustee_records.len() != context.participant_count {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
             "VSS coefficient commitment set must contain one source record per participant",
         ));
     }
-    let expected_coefficient_count =
-        rns_limb_count
-            .checked_mul(threshold_degree)
-            .ok_or_else(|| {
-                CanonicalError::new(
-                    CanonicalErrorCode::MalformedLength,
-                    "VSS coefficient commitment coordinate count overflowed",
-                )
-            })?;
+    let expected_coefficient_count = context
+        .rns_limb_count
+        .checked_mul(context.threshold_degree)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "VSS coefficient commitment coordinate count overflowed",
+            )
+        })?;
 
     let mut verified_source_trustee_records = Vec::with_capacity(source_trustee_records.len());
-    for (expected_roster_position, source_record) in source_trustee_records.iter().enumerate() {
+    for source_record in source_trustee_records {
         verified_source_trustee_records.push(verify_vss_public_source_coefficient_record(
             VssPublicSourceCoefficientRecordInput {
                 source_record,
-                expected_roster_position,
                 expected_coefficient_count,
-                threshold_degree,
-                public_matrix_seed_hash,
+                threshold_degree: context.threshold_degree,
+                ring_degree: context.ring_degree,
             },
         )?);
     }
 
     let expected_set_root = derive_canonical_object_hash(&json!({
         "objectType": "VssPublicCoefficientCommitmentSet",
-        "publicMatrixSeedHash": public_matrix_seed_hash,
-        "participantCount": participant_count,
-        "rnsLimbCount": rns_limb_count,
-        "thresholdDegree": threshold_degree,
-        "ringDegree": ring_degree,
+        "publicMatrixSeedHash": context.public_matrix_seed_hash,
         "sourceTrusteeRecords": verified_source_trustee_records,
     }))?;
     let coefficient_commitment_root =
@@ -170,76 +171,55 @@ pub(crate) fn verify_vss_public_coefficient_commitment_set_request(
         ));
     }
 
-    Ok(json!({
-        "coefficientCommitmentRoot": coefficient_commitment_root,
-        "publicMatrixSeedHash": public_matrix_seed_hash,
-        "participantCount": participant_count,
-        "rnsLimbCount": rns_limb_count,
-        "thresholdDegree": threshold_degree,
-        "ringDegree": ring_degree,
-    }))
+    Ok(coefficient_commitment_root.to_string())
 }
 
-pub(crate) fn verify_vss_public_recipient_share_commitment_set_request(
-    request: &Value,
-) -> CanonicalResult<Value> {
-    let recipient_set = value_at_path(request, &["recipientShareCommitmentSet"])?;
+pub(crate) fn verify_vss_public_recipient_share_commitment_set(
+    recipient_set: &Value,
+    context: &VssPublicRecipientShareCommitmentSetContext<'_>,
+) -> CanonicalResult<String> {
     compare_required_string(
         string_at_path(recipient_set, &["objectType"])?,
         "VssPublicRecipientShareCommitmentSet",
         "VSS recipient-share commitment set objectType",
     )?;
-    let public_matrix_seed_hash = hash_at_path(recipient_set, &["publicMatrixSeedHash"])?;
-    let participant_count = read_positive_usize_at_path(
-        recipient_set,
-        &["participantCount"],
-        "VSS recipient-share commitment set participantCount",
-    )?;
-    let rns_limb_count = read_positive_usize_at_path(
-        recipient_set,
-        &["rnsLimbCount"],
-        "VSS recipient-share commitment set rnsLimbCount",
-    )?;
-    let ring_degree = read_positive_usize_at_path(
-        recipient_set,
-        &["ringDegree"],
-        "VSS recipient-share commitment set ringDegree",
+    compare_required_string(
+        hash_at_path(recipient_set, &["publicMatrixSeedHash"])?,
+        context.public_matrix_seed_hash,
+        "VSS recipient-share commitment set publicMatrixSeedHash",
     )?;
     let source_trustee_records = array_at_path(recipient_set, &["sourceTrusteeRecords"])?;
-    if source_trustee_records.len() != participant_count {
+    if source_trustee_records.len() != context.participant_count {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
             "VSS recipient-share commitment set must contain one source record per participant",
         ));
     }
-    let expected_recipient_share_count =
-        participant_count
-            .checked_mul(rns_limb_count)
-            .ok_or_else(|| {
-                CanonicalError::new(
-                    CanonicalErrorCode::MalformedLength,
-                    "VSS recipient-share commitment coordinate count overflowed",
-                )
-            })?;
+    let expected_recipient_share_count = context
+        .participant_count
+        .checked_mul(context.rns_limb_count)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "VSS recipient-share commitment coordinate count overflowed",
+            )
+        })?;
 
     let mut verified_source_trustee_records = Vec::with_capacity(source_trustee_records.len());
-    for (expected_roster_position, source_record) in source_trustee_records.iter().enumerate() {
+    for source_record in source_trustee_records {
         verified_source_trustee_records.push(verify_vss_public_source_recipient_share_record(
             VssPublicSourceRecipientShareRecordInput {
                 source_record,
-                expected_source_roster_position: expected_roster_position,
                 expected_recipient_share_count,
-                rns_limb_count,
+                rns_limb_count: context.rns_limb_count,
+                ring_degree: context.ring_degree,
             },
         )?);
     }
 
     let expected_set_root = derive_canonical_object_hash(&json!({
         "objectType": "VssPublicRecipientShareCommitmentSet",
-        "publicMatrixSeedHash": public_matrix_seed_hash,
-        "participantCount": participant_count,
-        "rnsLimbCount": rns_limb_count,
-        "ringDegree": ring_degree,
+        "publicMatrixSeedHash": context.public_matrix_seed_hash,
         "sourceTrusteeRecords": verified_source_trustee_records,
     }))?;
     let recipient_share_commitment_root =
@@ -251,43 +231,27 @@ pub(crate) fn verify_vss_public_recipient_share_commitment_set_request(
         ));
     }
 
-    Ok(json!({
-        "recipientShareCommitmentRoot": recipient_share_commitment_root,
-        "publicMatrixSeedHash": public_matrix_seed_hash,
-        "participantCount": participant_count,
-        "rnsLimbCount": rns_limb_count,
-        "ringDegree": ring_degree,
-    }))
+    Ok(recipient_share_commitment_root.to_string())
 }
 
-pub(crate) fn verify_vss_public_aggregate_threshold_commitment_set_request(
-    request: &Value,
-) -> CanonicalResult<Value> {
-    let aggregate_set = value_at_path(request, &["aggregateThresholdCommitmentSet"])?;
+pub(crate) fn verify_vss_public_aggregate_threshold_commitment_set(
+    aggregate_set: &Value,
+    context: &VssPublicAggregateThresholdCommitmentSetContext<'_>,
+) -> CanonicalResult<String> {
     compare_required_string(
         string_at_path(aggregate_set, &["objectType"])?,
         "VssPublicAggregateThresholdCommitmentSet",
         "VSS aggregate threshold commitment set objectType",
     )?;
-    let public_matrix_seed_hash = hash_at_path(aggregate_set, &["publicMatrixSeedHash"])?;
-    let participant_count = read_positive_usize_at_path(
-        aggregate_set,
-        &["participantCount"],
-        "VSS aggregate threshold commitment set participantCount",
-    )?;
-    let rns_limb_count = read_positive_usize_at_path(
-        aggregate_set,
-        &["rnsLimbCount"],
-        "VSS aggregate threshold commitment set rnsLimbCount",
-    )?;
-    let ring_degree = read_positive_usize_at_path(
-        aggregate_set,
-        &["ringDegree"],
-        "VSS aggregate threshold commitment set ringDegree",
+    compare_required_string(
+        hash_at_path(aggregate_set, &["publicMatrixSeedHash"])?,
+        context.public_matrix_seed_hash,
+        "VSS aggregate threshold commitment set publicMatrixSeedHash",
     )?;
     let recipient_records = array_at_path(aggregate_set, &["recipientRecords"])?;
-    let expected_recipient_record_count = participant_count
-        .checked_mul(rns_limb_count)
+    let expected_recipient_record_count = context
+        .participant_count
+        .checked_mul(context.rns_limb_count)
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
@@ -306,18 +270,15 @@ pub(crate) fn verify_vss_public_aggregate_threshold_commitment_set_request(
         verified_recipient_records.push(verify_vss_public_aggregate_threshold_record(
             VssPublicAggregateThresholdRecordInput {
                 recipient_record,
-                expected_recipient_roster_position: recipient_record_index / rns_limb_count,
-                expected_rns_limb_index: recipient_record_index % rns_limb_count,
+                expected_rns_limb_index: recipient_record_index % context.rns_limb_count,
+                ring_degree: context.ring_degree,
             },
         )?);
     }
 
     let expected_set_root = derive_canonical_object_hash(&json!({
         "objectType": "VssPublicAggregateThresholdCommitmentSet",
-        "publicMatrixSeedHash": public_matrix_seed_hash,
-        "participantCount": participant_count,
-        "rnsLimbCount": rns_limb_count,
-        "ringDegree": ring_degree,
+        "publicMatrixSeedHash": context.public_matrix_seed_hash,
         "recipientRecords": verified_recipient_records,
     }))?;
     let aggregate_threshold_commitment_root =
@@ -329,13 +290,7 @@ pub(crate) fn verify_vss_public_aggregate_threshold_commitment_set_request(
         ));
     }
 
-    Ok(json!({
-        "aggregateThresholdCommitmentRoot": aggregate_threshold_commitment_root,
-        "publicMatrixSeedHash": public_matrix_seed_hash,
-        "participantCount": participant_count,
-        "rnsLimbCount": rns_limb_count,
-        "ringDegree": ring_degree,
-    }))
+    Ok(aggregate_threshold_commitment_root.to_string())
 }
 
 fn invalid_vss_public_input(message: impl Into<String>) -> CanonicalError {
@@ -366,6 +321,8 @@ pub(in crate::bgv::setup) use message_encoding::{
 };
 pub(crate) use record_verification::validate_standalone_vss_committed_material_commitment;
 pub(crate) use share_linkage::verify_vss_share_linkage_bindings_request;
+#[cfg(test)]
+pub(in crate::bgv::setup) use share_linkage::vss_aggregate_threshold_statement_from_commitment_records;
 pub(crate) use share_linkage::{
     VssAggregateThresholdProofContext, verify_vss_public_aggregate_threshold_proofs,
 };

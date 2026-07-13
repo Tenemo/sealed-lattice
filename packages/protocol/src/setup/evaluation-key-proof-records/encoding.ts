@@ -113,7 +113,13 @@ export const evaluationKeyShareComponentVectorRoot = (
 
 export const evaluationKeyShareComponentMaterialReferenceRoot = (
     proofFamily: EvaluationKeyShareProofFamily,
-    shareMaterial: EvaluationKeyShareMaterial,
+    shareMaterial: Pick<
+        EvaluationKeyShareMaterial,
+        | 'keySwitchDomain'
+        | 'keySwitchSeedHex'
+        | 'ringDegree'
+        | 'keySwitchComponentVectorRoot'
+    >,
     trusteeIdentity: string,
     trusteeRosterPosition: number,
     level: number,

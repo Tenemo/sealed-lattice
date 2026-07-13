@@ -1,7 +1,5 @@
-import {
-    assertJsonRecord,
-    assertProtocolHash,
-} from '../common-fields.js';
+import { assertJsonRecord, assertProtocolHash } from '../common-fields.js';
+
 import type {
     JsonRecord,
     SetupPackageVerificationInput,
@@ -24,10 +22,7 @@ const descriptorBackedMaterialSetForVerificationInput = (
     materialSetValue: unknown,
     materialSetPath: string,
     materialArrayFieldName: string,
-): JsonRecord | undefined => {
-    if (materialSetValue === undefined) {
-        return undefined;
-    }
+): JsonRecord => {
     const materialSet = assertJsonRecord(materialSetValue, materialSetPath);
     const materials = materialSet[materialArrayFieldName];
     if (!Array.isArray(materials)) {
@@ -94,35 +89,10 @@ export const createSetupPackageVerificationInput = (
         expectedManifestHash: input.expectedManifestHash,
         expectedRosterHash: input.expectedRosterHash,
         transportedPublicKeyShareMaterial,
-        ...(transportedPublicKeyShareProofMaterial === undefined
-            ? {}
-            : {
-                  transportedPublicKeyShareProofMaterial:
-                      transportedPublicKeyShareProofMaterial,
-              }),
-        ...(transportedEvaluationKeyShareProofMaterial === undefined
-            ? {}
-            : {
-                  transportedEvaluationKeyShareProofMaterial:
-                      transportedEvaluationKeyShareProofMaterial,
-              }),
-        ...(transportedVssShareLinkageProofMaterial === undefined
-            ? {}
-            : {
-                  transportedVssShareLinkageProofMaterial:
-                      transportedVssShareLinkageProofMaterial,
-              }),
-        ...(transportedSameSecretBridgeProofMaterial === undefined
-            ? {}
-            : {
-                  transportedSameSecretBridgeProofMaterial:
-                      transportedSameSecretBridgeProofMaterial,
-              }),
-        ...(transportedEvaluationKeyShareComponentMaterial === undefined
-            ? {}
-            : {
-                  transportedEvaluationKeyShareComponentMaterial:
-                      transportedEvaluationKeyShareComponentMaterial,
-              }),
+        transportedPublicKeyShareProofMaterial,
+        transportedEvaluationKeyShareProofMaterial,
+        transportedVssShareLinkageProofMaterial,
+        transportedSameSecretBridgeProofMaterial,
+        transportedEvaluationKeyShareComponentMaterial,
     };
 };

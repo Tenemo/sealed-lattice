@@ -1,14 +1,14 @@
-use std::collections::BTreeSet;
+#[cfg(test)]
 mod aggregation;
-mod command;
+#[cfg(test)]
 mod encryption;
 mod evaluator_replay;
-mod proof_transport;
-mod randomness;
+#[cfg(test)]
 mod request;
 mod target_proposal;
+#[cfg(test)]
 use aggregation::*;
-pub(crate) use command::run_direct_encrypted_ballot;
+#[cfg(test)]
 use encryption::*;
 pub(crate) use evaluator_replay::{
     DirectBallotPackedBatchedPairEvaluatorInput,
@@ -19,21 +19,19 @@ pub(crate) use evaluator_replay::{
     direct_ballot_comparison_domain_max, direct_ballot_evaluator_working_level,
     direct_ballot_plaintext_target_slots,
 };
-use proof_transport::*;
-use randomness::*;
+#[cfg(test)]
 use request::*;
 use target_proposal::*;
 
 use serde_json::{Value, json};
 
+#[cfg(test)]
 mod relation_proof;
 
 #[cfg(test)]
 use relation_proof::DirectBallotRelationProofGeneration;
-use relation_proof::{
-    direct_ballot_relation_proof_bytes_hash, generate_direct_ballot_relation_proof,
-    verify_direct_ballot_relation_proof,
-};
+#[cfg(test)]
+use relation_proof::{generate_direct_ballot_relation_proof, verify_direct_ballot_relation_proof};
 
 use crate::{
     bgv::{
@@ -41,8 +39,8 @@ use crate::{
             circuit::{EvaluatorContext, modulus_switch_to},
             engine::{
                 Ciphertext, DevelopmentBgvKey, EncryptionWitness, ciphertext_add,
-                ciphertext_canonical_bytes_hex, ciphertext_object_root,
-                encode_slots_to_coefficients, negacyclic_mul, signed_residue,
+                ciphertext_object_root, encode_slots_to_coefficients, negacyclic_mul,
+                signed_residue,
             },
             records::target_layout_hash,
             top_k::{
@@ -52,15 +50,10 @@ use crate::{
             },
         },
         modular_arithmetic::add_mod,
-        parameters::{DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, bgv_parameters_hash},
-        setup::{
-            development_evaluator_key_from_passive_setup_package,
-            validate_passive_setup_package_for_encrypted_evaluation,
-            validate_private_setup_seed_from_passive_setup_package,
-        },
+        parameters::{DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE},
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
-    hashing::{canonical_json, chunk_root, hash512_hex},
+    hashing::hash512_hex,
 };
 
 const OPTION_COUNT: usize = 20;
@@ -69,11 +62,10 @@ const OPTION_COUNT: usize = 20;
 pub(crate) const MINIMUM_SCORE: u64 = 1;
 pub(crate) const MAXIMUM_SCORE: u64 = 10;
 const SCORE_BUCKET_COUNT: usize = (MAXIMUM_SCORE - MINIMUM_SCORE + 1) as usize;
-const MAXIMUM_PROTOTYPE_BALLOTS: usize = 20;
 const DEFAULT_EVALUATOR_WORKING_LEVEL: usize = SELECTED_EVALUATOR_WORKING_LEVEL;
 const SINGLE_BALLOT_TARGET_WORKING_LEVEL: usize = 8;
-const PROTOTYPE_PROOF_CHUNK_BYTES: usize = 1024 * 1024;
 
+#[cfg(test)]
 #[derive(Clone)]
 struct DirectBallotInput {
     voter_identity: String,
@@ -83,28 +75,19 @@ struct DirectBallotInput {
     encryption_seed_hex: String,
 }
 
+#[cfg(test)]
 #[derive(Clone)]
 struct DirectEncryptedBallot {
     input: DirectBallotInput,
-    slots: Vec<u64>,
     plaintext_coefficients: Vec<u64>,
     ciphertext: Ciphertext,
     encryption_witness: EncryptionWitness,
-    encrypted_ballot_hash: String,
     ciphertext_root: String,
-    ciphertext_canonical_byte_length: usize,
 }
 
+#[cfg(test)]
 struct DirectBallotAggregationResult {
     aggregate_ciphertext: Ciphertext,
-    aggregate_ciphertext_root: String,
-}
-
-#[derive(Debug)]
-struct DirectBallotTopCountRequest {
-    top_counts: Vec<usize>,
-    report_single_result: bool,
-    target_finality_policy_hash: Option<String>,
 }
 
 #[cfg(test)]

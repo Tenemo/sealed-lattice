@@ -13,6 +13,16 @@ pub(super) fn vss_coefficient_commitments_object(
     ring_degree: usize,
     participant_count: u64,
 ) -> (serde_json::Value, serde_json::Value) {
+    let setup_context_hash =
+        crate::bgv::setup::accepted_setup::setup_context_hash(&serde_json::json!({
+            "ceremonyId": ceremony_id,
+            "manifestHash": manifest_hash,
+            "rosterHash": roster_hash,
+            "setupParametersHash": setup_parameters_hash,
+            "setupEpoch": setup_epoch,
+            "participantCount": participant_count,
+        }))
+        .expect("setup context hash");
     let decryption_threshold = participant_count / 3 + 1;
     let mut source_trustee_records = Vec::new();
     let mut coefficient_commitment_material = Vec::new();
@@ -52,11 +62,7 @@ pub(super) fn vss_coefficient_commitments_object(
                 let commitment_root = setup_commitment_root(&commitment).expect("commitment root");
                 coefficient_commitments.push(serde_json::json!({
                     "objectType": "VssCoefficientCommitment",
-                    "ceremonyId": ceremony_id,
-                    "manifestHash": manifest_hash,
-                    "rosterHash": roster_hash,
-                    "setupParametersHash": setup_parameters_hash,
-                    "setupEpoch": setup_epoch,
+                    "setupContextHash": setup_context_hash,
                     "sourceTrusteeIdentity": source_trustee_identity.as_str(),
                     "sourceTrusteeRosterPosition": source_trustee_roster_position,
                     "publicMatrixSeedHash": public_matrix_seed_hash,
@@ -67,11 +73,7 @@ pub(super) fn vss_coefficient_commitments_object(
                 }));
                 coefficient_commitment_material.push(serde_json::json!({
                     "objectType": "VssCoefficientCommitmentMaterial",
-                    "ceremonyId": ceremony_id,
-                    "manifestHash": manifest_hash,
-                    "rosterHash": roster_hash,
-                    "setupParametersHash": setup_parameters_hash,
-                    "setupEpoch": setup_epoch,
+                    "setupContextHash": setup_context_hash,
                     "sourceTrusteeIdentity": source_trustee_identity.as_str(),
                     "sourceTrusteeRosterPosition": source_trustee_roster_position,
                     "publicMatrixSeedHash": public_matrix_seed_hash,
@@ -86,11 +88,7 @@ pub(super) fn vss_coefficient_commitments_object(
 
         let mut source_trustee_record = serde_json::json!({
             "objectType": "VssSourceTrusteeCoefficientCommitments",
-            "ceremonyId": ceremony_id,
-            "manifestHash": manifest_hash,
-            "rosterHash": roster_hash,
-            "setupParametersHash": setup_parameters_hash,
-            "setupEpoch": setup_epoch,
+            "setupContextHash": setup_context_hash,
             "sourceTrusteeIdentity": source_trustee_identity,
             "sourceTrusteeRosterPosition": source_trustee_roster_position,
             "publicMatrixSeedHash": public_matrix_seed_hash,
@@ -105,11 +103,7 @@ pub(super) fn vss_coefficient_commitments_object(
 
     let mut commitment_set = serde_json::json!({
         "objectType": "VssCoefficientCommitmentSet",
-        "ceremonyId": ceremony_id,
-        "manifestHash": manifest_hash,
-        "rosterHash": roster_hash,
-        "setupParametersHash": setup_parameters_hash,
-        "setupEpoch": setup_epoch,
+        "setupContextHash": setup_context_hash,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "sourceTrusteeRecords": source_trustee_records,
     });
@@ -119,11 +113,7 @@ pub(super) fn vss_coefficient_commitments_object(
 
     let mut material_set = serde_json::json!({
         "objectType": "VssCoefficientCommitmentMaterialSet",
-        "ceremonyId": ceremony_id,
-        "manifestHash": manifest_hash,
-        "rosterHash": roster_hash,
-        "setupParametersHash": setup_parameters_hash,
-        "setupEpoch": setup_epoch,
+        "setupContextHash": setup_context_hash,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "vssCoefficientCommitmentRoot": commitment_set["vssCoefficientCommitmentRoot"].clone(),
         "participantCount": participant_count,

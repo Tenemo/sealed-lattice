@@ -73,24 +73,19 @@ fn target_decryption_rejects_noncanonical_target_ciphertext_level() {
         "trusteeIdentity": "trustee-1",
     }));
 
-    // A non-canonical target ciphertext level is rejected because the accepted
-    // target record binds the canonical-level (level 6) ciphertext roots through
-    // targetCiphertextHash: level-zero ciphertexts hash to different roots, so the
-    // pair no longer matches the accepted ciphertext hash. The level is enforced
-    // by that binding, not by a standalone level assertion.
     let error = result.expect_err("noncanonical target ciphertext level must be refused");
     assert_eq!(error.code, CanonicalErrorCode::ComponentMismatch);
     assert!(
         error
             .message
-            .contains("target ciphertext pair does not match the accepted target ciphertext hash"),
+            .contains("target ciphertexts must use the canonical target BGV level"),
         "{}",
         error.message
     );
 }
 
 #[test]
-fn target_share_profile_rejects_threshold_downgrade() {
+fn target_share_profile_rejects_interpolation_below_the_setup_threshold() {
     let (setup_package, accepted_record, target_ciphertext_binding, target_ciphertexts) =
         target_fixture();
     let target_share_profile = target_share_profile(&setup_package);
@@ -103,16 +98,8 @@ fn target_share_profile_rejects_threshold_downgrade() {
         "trustee-1",
     );
     let mut downgraded_profile = target_share_profile;
-    downgraded_profile["decryptionThreshold"] = json!(1);
     downgraded_profile["minimumSharesForInterpolation"] = json!(1);
     downgraded_profile["decryptionShareQuorum"] = json!(1);
-    let mut hash_input = downgraded_profile.clone();
-    hash_input
-        .as_object_mut()
-        .expect("target share profile object")
-        .remove("targetShareProfileHash");
-    downgraded_profile["targetShareProfileHash"] =
-        json!(derive_canonical_object_hash(&hash_input).expect("downgraded profile hash"));
 
     let result = generate_bgv_target_decryption_share_from_local_share_request(&json!({
         "setupPackage": setup_package,
@@ -125,12 +112,8 @@ fn target_share_profile_rejects_threshold_downgrade() {
     }));
 
     let error = result.expect_err("downgraded target share profile must be refused");
-    assert_eq!(error.code, CanonicalErrorCode::ComponentMismatch);
-    assert!(
-        error
-            .message
-            .contains("decryptionThreshold must match the setup roster-derived threshold")
-    );
+    assert_eq!(error.code, CanonicalErrorCode::MalformedLength);
+    assert!(error.message.contains("quorum values are inconsistent"));
 }
 
 #[test]
@@ -264,9 +247,7 @@ fn target_share_generation_rejects_tampered_aggregate_opening_credentials() {
         derive_canonical_object_hash(&Value::Object(aggregate_set_without_root))
             .expect("tampered aggregate threshold commitment root")
     );
-    let mut merkle_root_tampered_witness = local_witness;
-    merkle_root_tampered_witness["aggregateOpening"]["aggregateThresholdCommitmentRoot"] =
-        aggregate_set["aggregateThresholdCommitmentRoot"].clone();
+    let merkle_root_tampered_witness = local_witness;
     let merkle_root_error =
         with_staged_aggregate_opening_material(&merkle_root_tampered_witness, || {
             generate_bgv_target_decryption_share_from_local_share_request(&json!({

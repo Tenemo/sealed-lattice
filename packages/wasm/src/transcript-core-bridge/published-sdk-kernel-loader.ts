@@ -70,15 +70,6 @@ export const createPublishedSdkKernelBindings = (
                 expectedLocalVerificationRoot:
                     input.expectedLocalVerificationRoot,
             }),
-        deriveBgvTargetDecryptionResultReleaseSetupContext: (input) =>
-            runtime.executeCommand<
-                ReturnType<
-                    PublishedSdkKernel['deriveBgvTargetDecryptionResultReleaseSetupContext']
-                >
-            >({
-                command: 'DeriveBgvTargetDecryptionResultReleaseSetupContext',
-                setupPackage: input.setupPackage,
-            }),
         beginBgvTargetDecryptionResultRelease: (input) =>
             runtime.executeCommand<
                 ReturnType<
@@ -87,7 +78,7 @@ export const createPublishedSdkKernelBindings = (
             >({
                 command: 'BeginBgvTargetDecryptionResultRelease',
                 releaseVerificationId: input.releaseVerificationId,
-                releaseSetupContext: input.releaseSetupContext,
+                acceptedSetupHandle: input.acceptedSetupHandle,
                 targetAcceptedRecord: input.targetAcceptedRecord,
                 targetCiphertexts: input.targetCiphertexts,
                 targetCiphertextBinding: input.targetCiphertextBinding,

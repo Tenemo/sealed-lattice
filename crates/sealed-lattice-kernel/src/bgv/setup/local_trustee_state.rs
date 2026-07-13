@@ -8,7 +8,9 @@ use crate::{
     hashing::derive_canonical_object_hash,
 };
 
-use super::accepted_setup::{accepted_roster_from_setup_context, setup_parameters_hash_for_roster};
+use super::accepted_setup::{
+    accepted_roster_from_setup_context, setup_context_hash, setup_parameters_hash_for_roster,
+};
 
 const LOCAL_STATE_OBJECT_TYPE: &str = "LocalTrusteeSetupStateCommitment";
 pub(crate) fn verify_local_trustee_setup_state_from_request(
@@ -70,7 +72,7 @@ fn verify_setup_context(setup_context: &Value) -> CanonicalResult<()> {
         != Some(setup_parameters_hash_for_roster(&roster)?.as_str())
     {
         return Err(invalid_local_state_input(
-            "setupContext.setupParametersHash does not match the roster-derived CollectiveBgvSetup-v1 setup parameters",
+            "setupContext.setupParametersHash does not match the roster-derived setup parameters",
         ));
     }
 
@@ -89,14 +91,10 @@ fn verify_local_state_header(local_state: &Value, setup_context: &Value) -> Cano
     Ok(())
 }
 
-fn local_state_commitment_root(local_state: &Value) -> CanonicalResult<String> {
+pub(super) fn local_state_commitment_root(local_state: &Value) -> CanonicalResult<String> {
     derive_canonical_object_hash(&json!({
         "objectType": string_field(local_state, "objectType")?,
-        "ceremonyId": string_field(local_state, "ceremonyId")?,
-        "manifestHash": hash_string_field(local_state, "manifestHash")?,
-        "rosterHash": hash_string_field(local_state, "rosterHash")?,
-        "setupParametersHash": hash_string_field(local_state, "setupParametersHash")?,
-        "setupEpoch": string_field(local_state, "setupEpoch")?,
+        "setupContextHash": hash_string_field(local_state, "setupContextHash")?,
         "trusteeIdentity": string_field(local_state, "trusteeIdentity")?,
         "trusteeRosterPosition": usize_field(local_state, "trusteeRosterPosition")?,
         "thresholdShareCommitmentRecipientRoot": hash_string_field(
@@ -115,12 +113,10 @@ fn compare_context_fields(
     setup_context: &Value,
     object_path: &str,
 ) -> CanonicalResult<()> {
-    for field_name in setup_context_field_names() {
-        if value.get(field_name) != setup_context.get(field_name) {
-            return Err(invalid_local_state_input(format!(
-                "{object_path}.{field_name} must match setupContext"
-            )));
-        }
+    if hash_string_field(value, "setupContextHash")? != setup_context_hash(setup_context)? {
+        return Err(invalid_local_state_input(format!(
+            "{object_path}.setupContextHash must match setupContext"
+        )));
     }
 
     Ok(())

@@ -1,11 +1,11 @@
 use serde_json::json;
 
-use super::share_linkage::verify_vss_aggregate_threshold_statement_root;
 use super::{
     VSS_PUBLIC_MESSAGE_BASE_DIGIT_TRIT_COUNT, VSS_PUBLIC_MESSAGE_DIGIT_BASE,
-    verify_vss_public_aggregate_threshold_commitment_set_request,
-    verify_vss_public_coefficient_commitment_set_request,
-    verify_vss_public_recipient_share_commitment_set_request,
+    VssPublicAggregateThresholdCommitmentSetContext, VssPublicCoefficientCommitmentSetContext,
+    VssPublicRecipientShareCommitmentSetContext,
+    verify_vss_public_aggregate_threshold_commitment_set,
+    verify_vss_public_coefficient_commitment_set, verify_vss_public_recipient_share_commitment_set,
     verify_vss_share_linkage_bindings_request, vss_public_message_encoding_layout,
     vss_public_share_linkage_packed_message_encoding_layout,
 };
@@ -72,29 +72,28 @@ fn threshold_aggregate_layout_uses_digit_only_source_messages() -> CanonicalResu
 }
 
 #[test]
-fn coefficient_commitment_set_command_verifies_bound_roots() -> CanonicalResult<()> {
+fn coefficient_commitment_set_verifies_bound_roots() -> CanonicalResult<()> {
     let coefficient_set = coefficient_commitment_set()?;
-    let verification = verify_vss_public_coefficient_commitment_set_request(&json!({
-        "command": "VerifyVssPublicCoefficientCommitmentSet",
-        "coefficientCommitmentSet": coefficient_set,
-    }))?;
+    let verification = verify_vss_public_coefficient_commitment_set(
+        &coefficient_set,
+        &coefficient_commitment_set_context(&coefficient_set),
+    )?;
 
     assert_eq!(
-        verification["coefficientCommitmentRoot"],
+        verification,
         coefficient_set["coefficientCommitmentRoot"]
+            .as_str()
+            .expect("coefficient commitment root")
     );
-    assert_eq!(verification["participantCount"], json!(2_u64));
-    assert_eq!(verification["rnsLimbCount"], json!(2_u64));
-    assert_eq!(verification["thresholdDegree"], json!(2_u64));
 
     let mut tampered_set = coefficient_set;
     tampered_set["sourceTrusteeRecords"][1]["coefficientCommitments"][2]["coefficientCommitmentRoot"] =
         json!("0".repeat(128));
     assert!(
-        verify_vss_public_coefficient_commitment_set_request(&json!({
-            "command": "VerifyVssPublicCoefficientCommitmentSet",
-            "coefficientCommitmentSet": tampered_set,
-        }))
+        verify_vss_public_coefficient_commitment_set(
+            &tampered_set,
+            &coefficient_commitment_set_context(&tampered_set),
+        )
         .is_err(),
         "tampered coefficient commitment root must reject"
     );
@@ -108,7 +107,6 @@ fn coefficient_commitment_set_rejects_a_rebound_noncanonical_rns_prime() -> Cano
     let noncanonical_prime = DATA_PRIMES[1];
     let coefficient_record =
         &mut coefficient_set["sourceTrusteeRecords"][0]["coefficientCommitments"][0];
-    coefficient_record["rnsPrime"] = json!(noncanonical_prime);
     coefficient_record["commitment"]["rnsPrime"] = json!(noncanonical_prime);
     coefficient_record["coefficientCommitmentRoot"] = json!(
         crate::hashing::derive_canonical_object_hash(&coefficient_record["commitment"])?
@@ -119,41 +117,66 @@ fn coefficient_commitment_set_rejects_a_rebound_noncanonical_rns_prime() -> Cano
     )?;
     rebind_canonical_object_root(&mut coefficient_set, "coefficientCommitmentRoot")?;
 
-    let error = verify_vss_public_coefficient_commitment_set_request(&json!({
-        "command": "VerifyVssPublicCoefficientCommitmentSet",
-        "coefficientCommitmentSet": coefficient_set,
-    }))
+    let error = verify_vss_public_coefficient_commitment_set(
+        &coefficient_set,
+        &coefficient_commitment_set_context(&coefficient_set),
+    )
     .expect_err("a rebound coefficient record using another limb's prime must reject");
 
     assert_eq!(error.code, CanonicalErrorCode::ComponentMismatch);
-    assert!(error.message.contains("canonical Q_share basis"));
+    assert!(error.message.contains("rnsPrime"));
     Ok(())
 }
 
 #[test]
-fn recipient_share_commitment_set_command_verifies_bound_roots() -> CanonicalResult<()> {
+fn coefficient_commitment_set_rejects_a_rebound_wrong_ring_degree() -> CanonicalResult<()> {
+    let mut coefficient_set = coefficient_commitment_set()?;
+    let coefficient_record =
+        &mut coefficient_set["sourceTrusteeRecords"][0]["coefficientCommitments"][0];
+    coefficient_record["commitment"]["ringDegree"] = json!(test_ring_degree() * 2);
+    coefficient_record["coefficientCommitmentRoot"] = json!(
+        crate::hashing::derive_canonical_object_hash(&coefficient_record["commitment"])?
+    );
+    rebind_canonical_object_root(
+        &mut coefficient_set["sourceTrusteeRecords"][0],
+        "sourceCoefficientCommitmentRoot",
+    )?;
+    rebind_canonical_object_root(&mut coefficient_set, "coefficientCommitmentRoot")?;
+
+    let error = verify_vss_public_coefficient_commitment_set(
+        &coefficient_set,
+        &coefficient_commitment_set_context(&coefficient_set),
+    )
+    .expect_err("a rebound commitment using a different ring degree must reject");
+
+    assert_eq!(error.code, CanonicalErrorCode::ComponentMismatch);
+    assert!(error.message.contains("ringDegree"));
+    Ok(())
+}
+
+#[test]
+fn recipient_share_commitment_set_verifies_bound_roots() -> CanonicalResult<()> {
     let recipient_set = recipient_share_commitment_set()?;
-    let verification = verify_vss_public_recipient_share_commitment_set_request(&json!({
-        "command": "VerifyVssPublicRecipientShareCommitmentSet",
-        "recipientShareCommitmentSet": recipient_set,
-    }))?;
+    let verification = verify_vss_public_recipient_share_commitment_set(
+        &recipient_set,
+        &recipient_share_commitment_set_context(&recipient_set),
+    )?;
 
     assert_eq!(
-        verification["recipientShareCommitmentRoot"],
+        verification,
         recipient_set["recipientShareCommitmentRoot"]
+            .as_str()
+            .expect("recipient-share commitment root")
     );
-    assert_eq!(verification["participantCount"], json!(2_u64));
-    assert_eq!(verification["rnsLimbCount"], json!(2_u64));
-    assert_eq!(verification["ringDegree"], json!(128_u64));
 
     let mut tampered_set = recipient_set;
     tampered_set["sourceTrusteeRecords"][0]["recipientShareCommitments"][1]["shareCommitmentRoot"] =
         json!("f".repeat(128));
     assert!(
-        verify_vss_public_recipient_share_commitment_set_request(&json!({
-            "command": "VerifyVssPublicRecipientShareCommitmentSet",
-            "recipientShareCommitmentSet": tampered_set,
-        }))
+        verify_vss_public_recipient_share_commitment_set(
+            &tampered_set,
+            &recipient_share_commitment_set_context(&tampered_set),
+        )
         .is_err(),
         "tampered recipient-share commitment root must reject"
     );
@@ -168,7 +191,6 @@ fn recipient_share_commitment_set_rejects_a_rebound_noncanonical_rns_prime() -> 
     let noncanonical_prime = DATA_PRIMES[1];
     let recipient_share_record =
         &mut recipient_set["sourceTrusteeRecords"][0]["recipientShareCommitments"][0];
-    recipient_share_record["rnsPrime"] = json!(noncanonical_prime);
     recipient_share_record["commitment"]["rnsPrime"] = json!(noncanonical_prime);
     recipient_share_record["shareCommitmentRoot"] = json!(
         crate::hashing::derive_canonical_object_hash(&recipient_share_record["commitment"])?
@@ -179,40 +201,39 @@ fn recipient_share_commitment_set_rejects_a_rebound_noncanonical_rns_prime() -> 
     )?;
     rebind_canonical_object_root(&mut recipient_set, "recipientShareCommitmentRoot")?;
 
-    let error = verify_vss_public_recipient_share_commitment_set_request(&json!({
-        "command": "VerifyVssPublicRecipientShareCommitmentSet",
-        "recipientShareCommitmentSet": recipient_set,
-    }))
+    let error = verify_vss_public_recipient_share_commitment_set(
+        &recipient_set,
+        &recipient_share_commitment_set_context(&recipient_set),
+    )
     .expect_err("a rebound recipient-share record using another limb's prime must reject");
 
     assert_eq!(error.code, CanonicalErrorCode::ComponentMismatch);
-    assert!(error.message.contains("canonical Q_share basis"));
+    assert!(error.message.contains("rnsPrime"));
     Ok(())
 }
 
 #[test]
-fn aggregate_threshold_commitment_set_command_verifies_bound_roots() -> CanonicalResult<()> {
+fn aggregate_threshold_commitment_set_verifies_bound_roots() -> CanonicalResult<()> {
     let aggregate_set = aggregate_threshold_commitment_set()?;
-    let verification = verify_vss_public_aggregate_threshold_commitment_set_request(&json!({
-        "command": "VerifyVssPublicAggregateThresholdCommitmentSet",
-        "aggregateThresholdCommitmentSet": aggregate_set,
-    }))?;
+    let verification = verify_vss_public_aggregate_threshold_commitment_set(
+        &aggregate_set,
+        &aggregate_threshold_commitment_set_context(&aggregate_set),
+    )?;
 
     assert_eq!(
-        verification["aggregateThresholdCommitmentRoot"],
+        verification,
         aggregate_set["aggregateThresholdCommitmentRoot"]
+            .as_str()
+            .expect("aggregate threshold commitment root")
     );
-    assert_eq!(verification["participantCount"], json!(2_u64));
-    assert_eq!(verification["rnsLimbCount"], json!(2_u64));
-    assert_eq!(verification["ringDegree"], json!(128_u64));
 
     let mut tampered_set = aggregate_set;
     tampered_set["recipientRecords"][0]["aggregateCommitmentRoot"] = json!("f".repeat(128));
     assert!(
-        verify_vss_public_aggregate_threshold_commitment_set_request(&json!({
-            "command": "VerifyVssPublicAggregateThresholdCommitmentSet",
-            "aggregateThresholdCommitmentSet": tampered_set,
-        }))
+        verify_vss_public_aggregate_threshold_commitment_set(
+            &tampered_set,
+            &aggregate_threshold_commitment_set_context(&tampered_set),
+        )
         .is_err(),
         "tampered aggregate threshold commitment root must reject"
     );
@@ -226,71 +247,71 @@ fn aggregate_threshold_commitment_set_rejects_a_rebound_noncanonical_rns_prime()
     let mut aggregate_set = aggregate_threshold_commitment_set()?;
     let noncanonical_prime = DATA_PRIMES[1];
     let aggregate_record = &mut aggregate_set["recipientRecords"][0];
-    aggregate_record["rnsPrime"] = json!(noncanonical_prime);
     aggregate_record["commitment"]["rnsPrime"] = json!(noncanonical_prime);
     aggregate_record["aggregateCommitmentRoot"] = json!(
         crate::hashing::derive_canonical_object_hash(&aggregate_record["commitment"])?
     );
     rebind_canonical_object_root(&mut aggregate_set, "aggregateThresholdCommitmentRoot")?;
 
-    let error = verify_vss_public_aggregate_threshold_commitment_set_request(&json!({
-        "command": "VerifyVssPublicAggregateThresholdCommitmentSet",
-        "aggregateThresholdCommitmentSet": aggregate_set,
-    }))
+    let error = verify_vss_public_aggregate_threshold_commitment_set(
+        &aggregate_set,
+        &aggregate_threshold_commitment_set_context(&aggregate_set),
+    )
     .expect_err("a rebound aggregate-threshold record using another limb's prime must reject");
 
     assert_eq!(error.code, CanonicalErrorCode::ComponentMismatch);
-    assert!(error.message.contains("canonical Q_share basis"));
+    assert!(error.message.contains("rnsPrime"));
     Ok(())
 }
 
 #[test]
-fn aggregate_threshold_statement_root_rejects_changed_bound_fields() -> CanonicalResult<()> {
-    let statement_without_root = json!({
-        "objectType": "VssShareLinkageStatement",
-        "isThresholdAggregate": true,
-        "publicMatrixSeedHash": "1".repeat(128),
-        "sourceTrusteeIdentity": "trustee-1",
-        "sourceTrusteeRosterPosition": 0,
-        "sourceCoefficientCommitmentRoot": "2".repeat(128),
-        "sourceRecipientShareCommitmentRoot": "3".repeat(128),
-        "recipientIdentity": "trustee-1",
-        "recipientRosterPosition": 0,
-        "sourceRnsLimbIndex": 0,
-        "sourceMessageModulus": 17,
-        "coefficientCommitmentRoots": ["4".repeat(128), "5".repeat(128)],
-        "coefficientCommitments": [
-            { "objectType": "VssCommittedMaterialCommitment", "slot": 0 },
-            { "objectType": "VssCommittedMaterialCommitment", "slot": 1 },
-        ],
-        "recipientShareCommitmentRoot": "8".repeat(128),
-        "recipientShareCommitment": {
-            "objectType": "VssCommittedMaterialCommitment",
-            "slot": 2,
-        },
-        "additionalLinkageItems": [],
-    });
-    let expected_statement_root =
-        crate::hashing::derive_canonical_object_hash(&statement_without_root)?;
-    let mut statement = statement_without_root;
-    statement["shareLinkageStatementRoot"] = json!(expected_statement_root.clone());
+fn commitment_sets_reject_rebound_noncanonical_record_order() -> CanonicalResult<()> {
+    let mut coefficient_set = coefficient_commitment_set()?;
+    coefficient_set["sourceTrusteeRecords"][0]["coefficientCommitments"]
+        .as_array_mut()
+        .expect("coefficient records")
+        .swap(0, test_threshold_degree());
+    rebind_canonical_object_root(
+        &mut coefficient_set["sourceTrusteeRecords"][0],
+        "sourceCoefficientCommitmentRoot",
+    )?;
+    rebind_canonical_object_root(&mut coefficient_set, "coefficientCommitmentRoot")?;
+    let coefficient_error = verify_vss_public_coefficient_commitment_set(
+        &coefficient_set,
+        &coefficient_commitment_set_context(&coefficient_set),
+    )
+    .expect_err("reordered coefficient records must reject");
+    assert!(coefficient_error.message.contains("rnsLimbIndex"));
 
-    assert_eq!(
-        verify_vss_aggregate_threshold_statement_root(&statement)?,
-        expected_statement_root,
-        "the canonical aggregate statement must round-trip through root verification"
-    );
+    let mut recipient_set = recipient_share_commitment_set()?;
+    recipient_set["sourceTrusteeRecords"][0]["recipientShareCommitments"]
+        .as_array_mut()
+        .expect("recipient-share records")
+        .swap(0, 1);
+    rebind_canonical_object_root(
+        &mut recipient_set["sourceTrusteeRecords"][0],
+        "sourceRecipientShareCommitmentRoot",
+    )?;
+    rebind_canonical_object_root(&mut recipient_set, "recipientShareCommitmentRoot")?;
+    let recipient_error = verify_vss_public_recipient_share_commitment_set(
+        &recipient_set,
+        &recipient_share_commitment_set_context(&recipient_set),
+    )
+    .expect_err("reordered recipient-share records must reject");
+    assert!(recipient_error.message.contains("rnsLimbIndex"));
 
-    statement["recipientIdentity"] = json!("trustee-2");
-    let error = verify_vss_aggregate_threshold_statement_root(&statement)
-        .expect_err("a changed recognized field with a stale root must reject");
-    assert_eq!(error.code, CanonicalErrorCode::ComponentMismatch);
-    assert!(
-        error
-            .message
-            .contains("share-linkage statement root does not match its canonical binding"),
-        "root mismatch should identify the canonical aggregate statement binding: {error}"
-    );
+    let mut aggregate_set = aggregate_threshold_commitment_set()?;
+    aggregate_set["recipientRecords"]
+        .as_array_mut()
+        .expect("aggregate records")
+        .swap(0, 1);
+    rebind_canonical_object_root(&mut aggregate_set, "aggregateThresholdCommitmentRoot")?;
+    let aggregate_error = verify_vss_public_aggregate_threshold_commitment_set(
+        &aggregate_set,
+        &aggregate_threshold_commitment_set_context(&aggregate_set),
+    )
+    .expect_err("reordered aggregate records must reject");
+    assert!(aggregate_error.message.contains("rnsLimbIndex"));
 
     Ok(())
 }
@@ -356,10 +377,6 @@ pub(in crate::bgv::setup) fn coefficient_commitment_set() -> CanonicalResult<ser
     let set_without_root = json!({
         "objectType": "VssPublicCoefficientCommitmentSet",
         "publicMatrixSeedHash": "7".repeat(128),
-        "participantCount": 2,
-        "rnsLimbCount": 2,
-        "thresholdDegree": 2,
-        "ringDegree": test_ring_degree(),
         "sourceTrusteeRecords": source_trustee_records,
     });
     let mut coefficient_set = set_without_root;
@@ -391,12 +408,6 @@ fn source_coefficient_record(
             )?;
             coefficient_commitments.push(json!({
                 "objectType": "VssPublicCoefficientCommitment",
-                "sourceTrusteeIdentity": format!("source-{source_trustee_roster_position}"),
-                "sourceTrusteeRosterPosition": source_trustee_roster_position,
-                "publicMatrixSeedHash": "7".repeat(128),
-                "rnsLimbIndex": rns_limb_index,
-                "rnsPrime": rns_prime,
-                "shamirCoefficientIndex": shamir_coefficient_index,
                 "coefficientCommitmentRoot": computation.commitment_root,
                 "commitment": computation.commitment,
             }));
@@ -405,8 +416,6 @@ fn source_coefficient_record(
     let source_without_root = json!({
         "objectType": "VssPublicSourceCoefficientCommitments",
         "sourceTrusteeIdentity": format!("source-{source_trustee_roster_position}"),
-        "sourceTrusteeRosterPosition": source_trustee_roster_position,
-        "publicMatrixSeedHash": "7".repeat(128),
         "coefficientCommitments": coefficient_commitments,
     });
     let mut source_record = source_without_root;
@@ -439,6 +448,46 @@ fn test_ring_degree() -> usize {
 
 fn test_public_matrix_seed_hash() -> String {
     "7".repeat(128)
+}
+
+fn coefficient_commitment_set_context(
+    coefficient_set: &serde_json::Value,
+) -> VssPublicCoefficientCommitmentSetContext<'_> {
+    VssPublicCoefficientCommitmentSetContext {
+        public_matrix_seed_hash: coefficient_set["publicMatrixSeedHash"]
+            .as_str()
+            .expect("coefficient public matrix seed hash"),
+        participant_count: test_participant_count(),
+        rns_limb_count: test_rns_limb_count(),
+        threshold_degree: test_threshold_degree(),
+        ring_degree: test_ring_degree(),
+    }
+}
+
+fn recipient_share_commitment_set_context(
+    recipient_set: &serde_json::Value,
+) -> VssPublicRecipientShareCommitmentSetContext<'_> {
+    VssPublicRecipientShareCommitmentSetContext {
+        public_matrix_seed_hash: recipient_set["publicMatrixSeedHash"]
+            .as_str()
+            .expect("recipient-share public matrix seed hash"),
+        participant_count: test_participant_count(),
+        rns_limb_count: test_rns_limb_count(),
+        ring_degree: test_ring_degree(),
+    }
+}
+
+fn aggregate_threshold_commitment_set_context(
+    aggregate_set: &serde_json::Value,
+) -> VssPublicAggregateThresholdCommitmentSetContext<'_> {
+    VssPublicAggregateThresholdCommitmentSetContext {
+        public_matrix_seed_hash: aggregate_set["publicMatrixSeedHash"]
+            .as_str()
+            .expect("aggregate public matrix seed hash"),
+        participant_count: test_participant_count(),
+        rns_limb_count: test_rns_limb_count(),
+        ring_degree: test_ring_degree(),
+    }
 }
 
 fn test_rns_prime(rns_limb_index: usize) -> u64 {
@@ -554,9 +603,6 @@ pub(in crate::bgv::setup) fn recipient_share_commitment_set() -> CanonicalResult
     let set_without_root = json!({
         "objectType": "VssPublicRecipientShareCommitmentSet",
         "publicMatrixSeedHash": test_public_matrix_seed_hash(),
-        "participantCount": test_participant_count(),
-        "rnsLimbCount": test_rns_limb_count(),
-        "ringDegree": test_ring_degree(),
         "sourceTrusteeRecords": source_trustee_records,
     });
     let mut recipient_set = set_without_root;
@@ -584,7 +630,6 @@ fn source_recipient_share_record(
     let source_without_root = json!({
         "objectType": "VssPublicSourceRecipientShareCommitments",
         "sourceTrusteeIdentity": format!("source-{source_trustee_roster_position}"),
-        "sourceTrusteeRosterPosition": source_trustee_roster_position,
         "recipientShareCommitments": recipient_share_commitments,
     });
     let mut source_record = source_without_root;
@@ -615,12 +660,7 @@ fn recipient_share_commitment_record(
     )?;
     Ok(json!({
         "objectType": "VssPublicRecipientShareCommitment",
-        "sourceTrusteeIdentity": format!("source-{source_trustee_roster_position}"),
-        "sourceTrusteeRosterPosition": source_trustee_roster_position,
         "recipientIdentity": format!("recipient-{recipient_roster_position}"),
-        "recipientRosterPosition": recipient_roster_position,
-        "rnsLimbIndex": rns_limb_index,
-        "rnsPrime": rns_prime,
         "shareCommitmentRoot": computation.commitment_root,
         "commitment": computation.commitment,
     }))
@@ -646,9 +686,6 @@ pub(in crate::bgv::setup) fn aggregate_threshold_commitment_set_from_recipient_s
     let set_without_root = json!({
         "objectType": "VssPublicAggregateThresholdCommitmentSet",
         "publicMatrixSeedHash": test_public_matrix_seed_hash(),
-        "participantCount": test_participant_count(),
-        "rnsLimbCount": test_rns_limb_count(),
-        "ringDegree": test_ring_degree(),
         "recipientRecords": recipient_records,
     });
     let mut aggregate_set = set_without_root;
@@ -696,9 +733,6 @@ fn aggregate_threshold_commitment_record(
     Ok(json!({
         "objectType": "VssPublicAggregateThresholdCommitment",
         "recipientIdentity": format!("recipient-{recipient_roster_position}"),
-        "recipientRosterPosition": recipient_roster_position,
-        "rnsLimbIndex": rns_limb_index,
-        "rnsPrime": rns_prime,
         "aggregateCommitmentRoot": computation.commitment_root,
         "aggregateOpeningRoot": computation.opening_root,
         "commitment": computation.commitment,

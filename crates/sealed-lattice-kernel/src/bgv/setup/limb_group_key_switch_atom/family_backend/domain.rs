@@ -15,8 +15,8 @@
 //! order-2^16 root are computed on demand, allowing N = 32768 to run without a
 //! trace-column split.
 
-use super::super::proof_field::ProofFieldParameters;
 use super::super::negacyclic_transform::radix_two_cyclic_transform_in_place;
+use super::super::proof_field::ProofFieldParameters;
 use super::super::wide_unsigned::{shift_right_one_in_place, subtract_in_place};
 use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 
@@ -104,11 +104,7 @@ impl<'a, const LIMB_COUNT: usize> CyclicDomain<'a, LIMB_COUNT> {
         debug_assert!(coefficients.len() <= self.size);
         let mut values = vec![self.parameters.zero(); self.size];
         values[..coefficients.len()].copy_from_slice(coefficients);
-        radix_two_cyclic_transform_in_place(
-            self.parameters,
-            &mut values,
-            &self.forward_twiddles,
-        );
+        radix_two_cyclic_transform_in_place(self.parameters, &mut values, &self.forward_twiddles);
         values
     }
 }

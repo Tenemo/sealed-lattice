@@ -14,10 +14,7 @@ export const fullProfileEvidenceRustTests = [
 ] as const;
 
 export const measurementRustTests = [
-    'bgv::evaluator::top_k::tests::level_budget_probe::lagrange_cleared_l1_worst_case',
-    'bgv::evaluator::top_k::tests::level_budget_probe::level_budget_rank_lookup_noise_probe',
-    'bgv::evaluator::top_k::tests::level_budget_probe::natural_exit_headroom_by_handoff_level',
-    'bgv::evaluator::top_k::tests::level_budget_probe::rank_lookup_terminal_by_k',
+    'bgv::evaluator::top_k::tests::level_budget_probe::production_rank_lookup_level_budget_measurement',
     'bgv::setup::limb_group_key_switch_atom::family_backend::bench::round_one_key_prover_cost',
 ] as const;
 

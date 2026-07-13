@@ -4,9 +4,10 @@ use super::proof_codec::{
 };
 use super::prover::prove_evaluation_key_share;
 use super::relation::{
-    EvaluationKeyShareKind, PrivateVssShareStatement, SuccinctSetupProofContext,
-    TrusteeEvaluationKeyStatement, generate_development_public_key_share_instance,
-    generate_development_trustee_instance, generate_development_trustee_instance_with_linkage,
+    EvaluationKeyShareKind, PrivateVssShareStatement, SetupProofStatement,
+    SuccinctSetupProofContext, TrusteeEvaluationKeyStatement,
+    generate_development_public_key_share_instance, generate_development_trustee_instance,
+    generate_development_trustee_instance_with_linkage,
     round_one_aggregate_diagonal_from_components,
 };
 use super::verifier::verify_evaluation_key_share;
@@ -141,15 +142,6 @@ fn repeated_hash(byte_pair: &str) -> String {
     byte_pair.repeat(64)
 }
 
-fn foundation_setup_parameters_hash() -> String {
-    describe_collective_bgv_setup_parameters()
-        .expect("setup parameters")
-        .get("setupParametersHash")
-        .and_then(serde_json::Value::as_str)
-        .expect("setup parameters hash")
-        .to_owned()
-}
-
 // A committed-material VSS commitment plus its holder regeneration inputs, for
 // the material-binding families' fixtures (share-linkage, same-secret bridge,
 // target-decryption). The seed and context hash are threaded into the witness
@@ -249,32 +241,17 @@ fn private_vss_statement_for_context_tests() -> TrusteeEvaluationKeyStatement {
     let share_values_hash = repeated_hash("55");
     TrusteeEvaluationKeyStatement {
         context: SuccinctSetupProofContext {
-            proof_family: super::PRIVATE_VSS_SHARE_PROOF_FAMILY.to_string(),
-            ceremony_id: "ceremony-1".to_string(),
-            manifest_hash: repeated_hash("11"),
-            roster_hash: repeated_hash("22"),
+            setup_context_hash: repeated_hash("11"),
             trustee_identity: "trustee-0".to_string(),
             trustee_roster_position: 0,
-            setup_epoch: "setup-epoch-1".to_string(),
             binding_roots: vec![
-                (
-                    "sourceTrusteeCommitmentRoot".to_string(),
-                    source_trustee_commitment_root.clone(),
-                ),
-                (
-                    "privateEnvelopeAadHash".to_string(),
-                    private_envelope_aad_hash.clone(),
-                ),
-                ("shareValuesHash".to_string(), share_values_hash.clone()),
+                source_trustee_commitment_root.clone(),
+                private_envelope_aad_hash.clone(),
+                share_values_hash.clone(),
             ],
         },
         ring_degree: SMALL_RING_DEGREE,
-        keys: Vec::new(),
-        vss_share_linkage: None,
-        same_secret_bridge: None,
-        same_secret_linkage: None,
-        target_decryption_share: None,
-        private_vss_share: Some(PrivateVssShareStatement {
+        proof: SetupProofStatement::PrivateVssShare(PrivateVssShareStatement {
             public_matrix_seed_hash: repeated_hash("66"),
             private_envelope_aad_hash,
             source_trustee_identity: "trustee-0".to_string(),
@@ -305,7 +282,7 @@ fn statement_request_value(
     statement: &super::relation::TrusteeEvaluationKeyStatement,
 ) -> serde_json::Value {
     let keys = statement
-        .keys
+        .keys()
         .iter()
         .map(|key| {
             let mut entry = serde_json::json!({
@@ -331,14 +308,16 @@ fn statement_request_value(
         })
         .collect::<Vec<_>>();
     let mut context_value = serde_json::json!({
-        "ceremonyId": statement.context.ceremony_id,
-        "manifestHash": statement.context.manifest_hash,
-        "rosterHash": statement.context.roster_hash,
+        "setupContextHash": statement.context.setup_context_hash,
         "trusteeIdentity": statement.context.trustee_identity,
         "trusteeRosterPosition": statement.context.trustee_roster_position,
-        "setupEpoch": statement.context.setup_epoch,
     });
-    for (binding_label, binding_root) in &statement.context.binding_roots {
+    for (binding_label, binding_root) in statement
+        .family_shape()
+        .binding_labels()
+        .iter()
+        .zip(&statement.context.binding_roots)
+    {
         context_value[binding_label] = serde_json::json!(binding_root);
     }
     let mut request = serde_json::json!({
@@ -346,7 +325,7 @@ fn statement_request_value(
         "ringDegree": statement.ring_degree,
         "keys": keys,
     });
-    if let Some(linkage) = &statement.same_secret_linkage {
+    if let Some(linkage) = statement.same_secret_linkage() {
         request["sameSecretLinkage"] = serde_json::json!({
             "publicMatrixSeedHash": linkage.public_matrix_seed_hash,
             "commitments": linkage
@@ -386,12 +365,9 @@ fn zero_setup_commitment_value(
 
 fn vector_context_base(binding_roots: serde_json::Value) -> serde_json::Value {
     let mut context = serde_json::json!({
-        "ceremonyId": "statement-vector-ceremony",
-        "manifestHash": repeated_hash("10"),
-        "rosterHash": repeated_hash("20"),
+        "setupContextHash": repeated_hash("10"),
         "trusteeIdentity": "statement-vector-trustee",
         "trusteeRosterPosition": 0,
-        "setupEpoch": "statement-vector-epoch",
     });
     for (key, value) in binding_roots
         .as_object()
@@ -412,7 +388,7 @@ fn generated_proof_bytes(
     statement: &TrusteeEvaluationKeyStatement,
     generated: &serde_json::Value,
 ) -> Vec<u8> {
-    let proof_family = statement.context.proof_family.as_str();
+    let proof_family = statement.family_shape().proof_family();
     let proof_material_root = generated["proofMaterialRoot"]
         .as_str()
         .expect("generated proof material root");
@@ -497,7 +473,6 @@ fn same_secret_statement_hash_vector_request() -> serde_json::Value {
         },
         "sameSecretBridge": {
             "publicMatrixSeedHash": repeated_hash("40"),
-            "setupParametersHash": foundation_setup_parameters_hash(),
             "sourceTrusteeIdentity": "statement-vector-trustee",
             "sourceTrusteeRosterPosition": 0,
             "bridgeRnsPrimes": [DATA_PRIMES[0]],
@@ -544,7 +519,6 @@ fn public_key_share_statement_hash_vector_request() -> serde_json::Value {
         }],
         "sameSecretBridge": {
             "publicMatrixSeedHash": repeated_hash("41"),
-            "setupParametersHash": foundation_setup_parameters_hash(),
             "sourceTrusteeIdentity": "statement-vector-trustee",
             "sourceTrusteeRosterPosition": 0,
             "bridgeRnsPrimes": [DATA_PRIMES[0]],
@@ -604,12 +578,15 @@ fn private_vss_setup_context_vector() -> serde_json::Value {
         "manifestHash": repeated_hash("10"),
         "rosterHash": repeated_hash("20"),
         "setupParametersHash": setup_parameters["setupParametersHash"],
+        "participantCount": 10,
         "setupEpoch": "statement-vector-epoch",
     })
 }
 
 fn private_vss_statement_hash_vector_request() -> serde_json::Value {
     let setup_context = private_vss_setup_context_vector();
+    let setup_context_hash = crate::bgv::setup::accepted_setup::setup_context_hash(&setup_context)
+        .expect("setup context hash");
     let public_matrix_seed_hash = repeated_hash("40");
     let private_envelope_aad_hash = repeated_hash("44");
     let mut coefficient_commitments = Vec::new();
@@ -625,11 +602,7 @@ fn private_vss_statement_hash_vector_request() -> serde_json::Value {
             }
             coefficient_commitments.push(serde_json::json!({
                 "objectType": "VssCoefficientCommitment",
-                "ceremonyId": "statement-vector-ceremony",
-                "manifestHash": repeated_hash("10"),
-                "rosterHash": repeated_hash("20"),
-                "setupParametersHash": setup_context["setupParametersHash"],
-                "setupEpoch": "statement-vector-epoch",
+                "setupContextHash": setup_context_hash,
                 "sourceTrusteeIdentity": "statement-vector-trustee",
                 "sourceTrusteeRosterPosition": 0,
                 "publicMatrixSeedHash": public_matrix_seed_hash,
@@ -640,11 +613,7 @@ fn private_vss_statement_hash_vector_request() -> serde_json::Value {
             }));
             material_records.push(serde_json::json!({
                 "objectType": "VssCoefficientCommitmentMaterial",
-                "ceremonyId": "statement-vector-ceremony",
-                "manifestHash": repeated_hash("10"),
-                "rosterHash": repeated_hash("20"),
-                "setupParametersHash": setup_context["setupParametersHash"],
-                "setupEpoch": "statement-vector-epoch",
+                "setupContextHash": setup_context_hash,
                 "sourceTrusteeIdentity": "statement-vector-trustee",
                 "sourceTrusteeRosterPosition": 0,
                 "publicMatrixSeedHash": public_matrix_seed_hash,
@@ -658,11 +627,7 @@ fn private_vss_statement_hash_vector_request() -> serde_json::Value {
     }
     let mut source_record = serde_json::json!({
         "objectType": "VssSourceTrusteeCoefficientCommitments",
-        "ceremonyId": "statement-vector-ceremony",
-        "manifestHash": repeated_hash("10"),
-        "rosterHash": repeated_hash("20"),
-        "setupParametersHash": setup_context["setupParametersHash"],
-        "setupEpoch": "statement-vector-epoch",
+        "setupContextHash": setup_context_hash,
         "sourceTrusteeIdentity": "statement-vector-trustee",
         "sourceTrusteeRosterPosition": 0,
         "publicMatrixSeedHash": public_matrix_seed_hash,

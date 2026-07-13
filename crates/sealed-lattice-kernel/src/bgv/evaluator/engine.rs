@@ -177,27 +177,6 @@ pub(crate) struct DevelopmentBgvKey {
 }
 
 impl DevelopmentBgvKey {
-    pub(crate) fn from_collective_components(
-        secret: Vec<i64>,
-        public_b: Vec<Vec<u64>>,
-        public_a: Vec<Vec<u64>>,
-    ) -> CanonicalResult<Self> {
-        if secret.len() != POLYNOMIAL_DEGREE {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "BGV evaluator collective secret width must match the polynomial degree",
-            ));
-        }
-        let BgvPublicKey { public_b, public_a } =
-            BgvPublicKey::from_components(public_b, public_a)?;
-
-        Ok(Self {
-            secret,
-            public_b,
-            public_a,
-        })
-    }
-
     #[cfg(test)]
     pub(crate) fn generate(seed_hex: &str) -> CanonicalResult<Self> {
         let secret = DeterministicSampler::new(
@@ -476,8 +455,7 @@ fn validate_public_key_component_shape(component: &[Vec<u64>], label: &str) -> C
 // coefficient representation via the inverse batch NTT, matching the BGV batch
 // encoder.
 pub(crate) fn encode_slots_to_coefficients(slots: &[u64]) -> CanonicalResult<Vec<u64>> {
-    let (_, coefficients) = encode_logical_slots_to_plaintext_coefficients(slots)?;
-    Ok(coefficients)
+    encode_logical_slots_to_plaintext_coefficients(slots)
 }
 
 #[cfg(test)]

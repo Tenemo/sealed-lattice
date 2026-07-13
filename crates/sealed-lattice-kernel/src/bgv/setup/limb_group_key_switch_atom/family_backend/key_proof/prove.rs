@@ -104,7 +104,6 @@ pub(in super::super) fn prove_key_fri_with_component_b<const LIMB_COUNT: usize>(
     )
 }
 
-
 // The streamed prover: commit, sumcheck/support, combination, and opening
 // passes each regenerate exactly the columns they consume from the
 // deterministic `KeyColumnPlan`, so peak memory is bounded by one coset
@@ -168,8 +167,7 @@ fn prove_key_fri_streamed<const LIMB_COUNT: usize>(
     let mut material_builder =
         StreamedColumnCommitmentBuilder::begin(layout.coset_size, material_count, salt_seed)?;
     for digit in 0..material_count {
-        let coefficients =
-            plan.material_column_coefficients(parameters, &trace_domain, digit);
+        let coefficients = plan.material_column_coefficients(parameters, &trace_domain, digit);
         let codeword = coset_evaluate_coefficients(&coset_domain, &offset, &coefficients);
         material_builder.absorb_column(&codeword)?;
     }

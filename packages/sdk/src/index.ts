@@ -37,7 +37,6 @@ import type {
     PollSpecInput,
     PollSpecValidation,
     ProtocolHash,
-    VerificationResult,
 } from '@sealed-lattice/types';
 import { ThresholdParameterDerivationError } from '@sealed-lattice/types';
 import {
@@ -152,6 +151,7 @@ export type CollectiveBgvSetupContext = Readonly<{
     readonly rosterHash: ProtocolHash;
     readonly setupParametersHash: ProtocolHash;
     readonly setupEpoch: string;
+    readonly participantCount: number;
 }>;
 
 export type VerifyPrivateVssShareInput = Readonly<{
@@ -182,7 +182,7 @@ export type PrivateVssShareVerification = Readonly<{
     readonly refusedObjects: readonly Readonly<{
         readonly reasonCode: string;
         readonly message: string;
-        readonly objectPath?: string;
+        readonly objectPath: string;
     }>[];
 }>;
 
@@ -219,35 +219,41 @@ export type VerifySetupPackageInput = Readonly<{
     readonly expectedRosterHash: ProtocolHash;
     readonly transportedPublicKeyShareMaterial: SetupTransportedPublicKeyShareMaterial;
     readonly publicKeyShareMaterialChunkSource: PublicKeyShareMaterialChunkSource;
-    readonly transportedPublicKeyShareProofMaterial?: TransportedPublicKeyShareProofMaterialSet;
-    readonly transportedVssShareLinkageProofMaterial?: TransportedVssShareLinkageProofMaterialSet;
-    readonly transportedSameSecretBridgeProofMaterial?: TransportedSameSecretBridgeProofMaterialSet;
-    readonly transportedEvaluationKeyShareProofMaterial?: TransportedEvaluationKeyShareProofMaterialSet;
+    readonly transportedPublicKeyShareProofMaterial: TransportedPublicKeyShareProofMaterialSet;
+    readonly transportedVssShareLinkageProofMaterial: TransportedVssShareLinkageProofMaterialSet;
+    readonly transportedSameSecretBridgeProofMaterial: TransportedSameSecretBridgeProofMaterialSet;
+    readonly transportedEvaluationKeyShareProofMaterial: TransportedEvaluationKeyShareProofMaterialSet;
     readonly setupProofMaterialChunkSources?: readonly SetupProofMaterialChunkSource[];
-    readonly transportedEvaluationKeyShareComponentMaterial?: TransportedEvaluationKeyShareComponentMaterialSet;
+    readonly transportedEvaluationKeyShareComponentMaterial: TransportedEvaluationKeyShareComponentMaterialSet;
     // Bounded evaluation-key component sources are supplied out of band. Each
     // source is authenticated against the descriptor on its transported
     // component reference before terminal setup verification.
     readonly evaluationKeyShareComponentMaterialChunkSources?: readonly EvaluationKeyShareComponentMaterialChunkSource[];
 }>;
 
-export type SetupPackageVerification = Readonly<{
-    readonly isValid: boolean;
-    readonly refusedObjects: readonly Readonly<{
-        readonly reasonCode: string;
-        readonly message: string;
-        readonly objectPath?: string;
-    }>[];
-}>;
+export type SetupPackageVerification = Readonly<
+    {
+        readonly refusedObjects: readonly Readonly<{
+            readonly reasonCode: string;
+            readonly message: string;
+            readonly objectPath: string;
+        }>[];
+    } & (
+        | {
+              readonly isValid: true;
+              readonly acceptedSetupHandle: number;
+          }
+        | {
+              readonly isValid: false;
+          }
+    )
+>;
 
-// These target-decryption records are opaque at the SDK boundary. In
-// particular, targetAcceptedRecord is a caller-supplied target binding whose
-// internal context and hashes are structurally checked by the kernel; this
-// function does not authenticate board inclusion, evaluator replay, finality,
-// or state authorization for that binding.
+// These target-decryption records are opaque at the SDK boundary. The accepted
+// setup handle comes only from successful setup verification in this kernel.
 export type TargetDecryptionResultReleaseInput = Readonly<{
     readonly abortSignal?: AbortSignal;
-    readonly setupPackage: unknown;
+    readonly acceptedSetupHandle: number;
     readonly targetAcceptedRecord: unknown;
     readonly targetCiphertexts: unknown;
     readonly targetCiphertextBinding: unknown;
@@ -386,14 +392,22 @@ const targetDecryptionResultReleaseInputSnapshot = (
     if (typeof releaseVerificationId !== 'string') {
         throw new TypeError('releaseVerificationId must be a string.');
     }
+    const acceptedSetupHandle = dataPropertyValue(
+        descriptors,
+        'acceptedSetupHandle',
+        'acceptedSetupHandle',
+    );
+    if (
+        !Number.isInteger(acceptedSetupHandle) ||
+        (acceptedSetupHandle as number) <= 0 ||
+        (acceptedSetupHandle as number) > 0xffff_ffff
+    ) {
+        throw new TypeError('acceptedSetupHandle must be a positive u32.');
+    }
 
     return {
         ...(abortSignal === undefined ? {} : { abortSignal }),
-        setupPackage: snapshotKernelJsonValue(
-            dataPropertyValue(descriptors, 'setupPackage', 'setupPackage'),
-            'setupPackage',
-            state,
-        ),
+        acceptedSetupHandle: acceptedSetupHandle as number,
         targetAcceptedRecord: snapshotKernelJsonValue(
             dataPropertyValue(
                 descriptors,
@@ -865,7 +879,7 @@ export const generateTargetDecryptionShareProofMaterial = async (
         ...(abortSignal === undefined ? {} : { abortSignal }),
         emitChunk: emitProofMaterialChunk,
         family: bgvCanonicalStreamFamilies.targetDecryptionShare,
-        materialRoot: proofMaterial.proofMaterialRoot,
+        materialRoot: proofMaterial.proofBytesHash,
     });
 
     return {
@@ -878,15 +892,7 @@ export const generateTargetDecryptionShareProofMaterial = async (
     };
 };
 
-/**
- * Drives the development-evidence staged target-decryption result release with
- * the packaged Rust/WASM kernel: derive the release setup context from a
- * structurally checked caller-supplied setup package, begin the staged session,
- * absorb each trustee share proof, then finish and return the released target
- * result. Neither the setup package nor the caller-supplied target binding is a
- * verifier-issued authority capability for this call. Board inclusion,
- * evaluator replay, finality, and state authorization remain outside this path.
- */
+/** Verifies and releases one target result under a verifier-issued setup handle. */
 export const verifyTargetDecryptionResult = async (
     input: TargetDecryptionResultReleaseInput,
 ): Promise<TargetDecryptionResultRelease> => {
@@ -895,13 +901,9 @@ export const verifyTargetDecryptionResult = async (
     const releaseVerificationId = inputSnapshot.releaseVerificationId;
     const targetShareProofs = inputSnapshot.shareProofs;
     const kernel = await loadTranscriptCoreKernel();
-    const releaseSetupContext =
-        kernel.deriveBgvTargetDecryptionResultReleaseSetupContext({
-            setupPackage: inputSnapshot.setupPackage,
-        });
     const releaseBegin = kernel.beginBgvTargetDecryptionResultRelease({
         releaseVerificationId,
-        releaseSetupContext,
+        acceptedSetupHandle: inputSnapshot.acceptedSetupHandle,
         targetAcceptedRecord: inputSnapshot.targetAcceptedRecord,
         targetCiphertexts: inputSnapshot.targetCiphertexts,
         targetCiphertextBinding: inputSnapshot.targetCiphertextBinding,
@@ -922,7 +924,7 @@ export const verifyTargetDecryptionResult = async (
                 ...(abortSignal === undefined ? {} : { abortSignal }),
                 descriptorBytes: normalizedTransport.descriptorBytes,
                 family: bgvCanonicalStreamFamilies.targetDecryptionShare,
-                materialRoot: normalizedTransport.proofMaterialRoot,
+                materialRoot: normalizedTransport.proofBytesHash,
                 pullChunk: targetShareProof.pullProofMaterialChunk,
             });
             kernel.absorbBgvTargetDecryptionResultReleaseShare({

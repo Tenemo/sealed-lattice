@@ -2,7 +2,6 @@ import {
     CanonicalStreamCleanupError,
     CanonicalStreamInternalError,
 } from './canonical-stream-runtime.js';
-import { copyIntoKernelMemory } from './transcript-core-bridge/kernel-runtime.js';
 import type {
     AcceptedSetupSession,
     BgvCollectiveSetupVerification,
@@ -11,7 +10,6 @@ import type {
     TranscriptCoreKernelContextOwner,
 } from './transcript-core-bridge/kernel-types.js';
 
-const capabilityByteLength = 32;
 const wasm32WordByteLength = 4;
 
 type AcceptedSetupCanonicalStreamBeginInput = Readonly<{
@@ -22,44 +20,28 @@ type AcceptedSetupCanonicalStreamBeginInput = Readonly<{
     readonly materialRootLength: number;
     readonly materialRootPointer: number;
     readonly statusPointer: number;
-    readonly streamCapabilityLength: number;
-    readonly streamCapabilityPointer: number;
     readonly totalByteLengthPointer: number;
 }>;
 
 type AcceptedSetupSessionKernelContext = Readonly<{
     allocate(length: number): number;
-    begin(
-        capabilityPointer: number,
-        capabilityLength: number,
-        statusPointer: number,
-    ): number;
+    begin(statusPointer: number): number;
     beginCanonicalStream(
         sessionHandle: number,
-        setupCapabilityPointer: number,
-        setupCapabilityLength: number,
         familyCode: number,
         materialRootPointer: number,
         materialRootLength: number,
         descriptorPointer: number,
         descriptorLength: number,
-        streamCapabilityPointer: number,
-        streamCapabilityLength: number,
         statusPointer: number,
         totalByteLengthPointer: number,
         chunkCountPointer: number,
     ): number;
-    cancel(
-        sessionHandle: number,
-        capabilityPointer: number,
-        capabilityLength: number,
-    ): number;
+    cancel(sessionHandle: number): number;
     deallocate(pointer: number, length: number): void;
     executeCommand(
         request: TranscriptCoreKernelCommand,
         sessionHandle: number,
-        capabilityPointer: number,
-        capabilityLength: number,
         beforeKernelInvocation: () => void,
     ): BgvCollectiveSetupVerification;
     readonly memory: WebAssembly.Memory;
@@ -79,20 +61,7 @@ const sessionImplementations = new WeakMap<
     AcceptedSetupSessionImplementation
 >();
 
-const defaultFillRandomValues = (
-    destination: Uint8Array<ArrayBuffer>,
-): void => {
-    const cryptoProvider = globalThis.crypto;
-    if (cryptoProvider === undefined) {
-        throw new CanonicalStreamInternalError(
-            'Web Crypto getRandomValues is required for accepted-setup session capabilities.',
-        );
-    }
-    cryptoProvider.getRandomValues(destination);
-};
-
 class AcceptedSetupSessionImplementation implements AcceptedSetupSession {
-    readonly #capabilityPointer: number;
     readonly #context: AcceptedSetupSessionKernelContext;
     readonly #sessionHandle: number;
     #active = true;
@@ -100,11 +69,9 @@ class AcceptedSetupSessionImplementation implements AcceptedSetupSession {
     public constructor(
         context: AcceptedSetupSessionKernelContext,
         sessionHandle: number,
-        capabilityPointer: number,
     ) {
         this.#context = context;
         this.#sessionHandle = sessionHandle;
-        this.#capabilityPointer = capabilityPointer;
     }
 
     public beginCanonicalStream(
@@ -113,15 +80,11 @@ class AcceptedSetupSessionImplementation implements AcceptedSetupSession {
         this.#requireActive();
         return this.#context.beginCanonicalStream(
             this.#sessionHandle,
-            this.#capabilityPointer,
-            capabilityByteLength,
             input.familyCode,
             input.materialRootPointer,
             input.materialRootLength,
             input.descriptorPointer,
             input.descriptorLength,
-            input.streamCapabilityPointer,
-            input.streamCapabilityLength,
             input.statusPointer,
             input.totalByteLengthPointer,
             input.chunkCountPointer,
@@ -133,23 +96,14 @@ class AcceptedSetupSessionImplementation implements AcceptedSetupSession {
             return;
         }
         this.#active = false;
-        try {
-            const status = this.#context.runExclusive(
-                'accepted-setup session cancellation',
-                () =>
-                    this.#context.cancel(
-                        this.#sessionHandle,
-                        this.#capabilityPointer,
-                        capabilityByteLength,
-                    ),
+        const status = this.#context.runExclusive(
+            'accepted-setup session cancellation',
+            () => this.#context.cancel(this.#sessionHandle),
+        );
+        if (status >>> 0 !== 0) {
+            throw new CanonicalStreamInternalError(
+                'The WASM kernel refused an active accepted-setup session cancellation.',
             );
-            if (status >>> 0 !== 0) {
-                throw new CanonicalStreamInternalError(
-                    'The WASM kernel refused an active accepted-setup session cancellation.',
-                );
-            }
-        } finally {
-            this.#releaseCapability();
         }
     }
 
@@ -180,8 +134,6 @@ class AcceptedSetupSessionImplementation implements AcceptedSetupSession {
                         input.transportedEvaluationKeyShareComponentMaterial,
                 },
                 this.#sessionHandle,
-                this.#capabilityPointer,
-                capabilityByteLength,
                 () => {
                     terminalKernelInvoked = true;
                 },
@@ -201,18 +153,8 @@ class AcceptedSetupSessionImplementation implements AcceptedSetupSession {
         } finally {
             if (terminalKernelInvoked) {
                 this.#active = false;
-                this.#releaseCapability();
             }
         }
-    }
-
-    #releaseCapability(): void {
-        new Uint8Array(
-            this.#context.memory.buffer,
-            this.#capabilityPointer,
-            capabilityByteLength,
-        ).fill(0);
-        this.#context.deallocate(this.#capabilityPointer, capabilityByteLength);
     }
 
     #requireActive(): void {
@@ -240,17 +182,9 @@ export const openAcceptedSetupSession = (
             'The transcript-core kernel has no accepted-setup session boundary.',
         );
     }
-    const capability = new Uint8Array(capabilityByteLength);
-    defaultFillRandomValues(capability);
-    let capabilityPointer = 0;
     let sessionHandle = 0;
     let statusPointer = 0;
     try {
-        capabilityPointer = copyIntoKernelMemory(
-            context.memory,
-            context.allocate,
-            capability,
-        );
         statusPointer = context.allocate(wasm32WordByteLength) >>> 0;
         if (statusPointer === 0) {
             throw new CanonicalStreamInternalError(
@@ -259,12 +193,7 @@ export const openAcceptedSetupSession = (
         }
         sessionHandle = context.runExclusive(
             'accepted-setup session begin',
-            () =>
-                context.begin(
-                    capabilityPointer,
-                    capabilityByteLength,
-                    statusPointer,
-                ),
+            () => context.begin(statusPointer),
         );
         const status = new DataView(
             context.memory.buffer,
@@ -279,23 +208,16 @@ export const openAcceptedSetupSession = (
         const session = new AcceptedSetupSessionImplementation(
             context,
             sessionHandle,
-            capabilityPointer,
         );
         sessionImplementations.set(session, session);
-        capabilityPointer = 0;
         sessionHandle = 0;
         return session;
     } catch (operationFailure) {
-        if (sessionHandle !== 0 && capabilityPointer !== 0) {
+        if (sessionHandle !== 0) {
             try {
                 context.runExclusive(
                     'accepted-setup failed begin cleanup',
-                    () =>
-                        context.cancel(
-                            sessionHandle,
-                            capabilityPointer,
-                            capabilityByteLength,
-                        ),
+                    () => context.cancel(sessionHandle),
                 );
             } catch (cleanupFailure) {
                 throw new CanonicalStreamCleanupError(
@@ -306,17 +228,8 @@ export const openAcceptedSetupSession = (
         }
         throw operationFailure;
     } finally {
-        capability.fill(0);
         if (statusPointer !== 0) {
             context.deallocate(statusPointer, wasm32WordByteLength);
-        }
-        if (capabilityPointer !== 0) {
-            new Uint8Array(
-                context.memory.buffer,
-                capabilityPointer,
-                capabilityByteLength,
-            ).fill(0);
-            context.deallocate(capabilityPointer, capabilityByteLength);
         }
     }
 };

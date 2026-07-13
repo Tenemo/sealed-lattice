@@ -140,8 +140,6 @@ export const registerKernelContexts = (
         executeCommand: (
             request,
             sessionHandle,
-            capabilityPointer,
-            capabilityLength,
             beforeKernelInvocation,
         ) =>
             translateAcceptedSetupCommandFailure(() =>
@@ -156,8 +154,6 @@ export const registerKernelContexts = (
                                 pointer,
                                 length,
                                 sessionHandle,
-                                capabilityPointer,
-                                capabilityLength,
                                 outputLengthPointer,
                             );
                         },

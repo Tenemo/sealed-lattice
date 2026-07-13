@@ -11,11 +11,31 @@ import {
     assertNonEmptyString,
     assertNonNegativeSafeInteger,
     assertProtocolHash,
-    assertContextMatches,
-    contextFields,
+    deriveCollectiveBgvSetupContextHash,
     sortedByRosterPosition,
     validateCommonInput,
 } from './encoding.js';
+
+type PublicKeyShareRootFields = Pick<
+    PublicKeyShareRecord,
+    | 'trusteeIdentity'
+    | 'trusteeRosterPosition'
+    | 'shareCoefficientVectorHash512ByLimb'
+>;
+
+const publicKeyShareRootInput = (
+    setupContext: PublicKeyShareSetInput['setupContext'],
+    publicMatrixSeedHash: PublicKeyShareSetInput['publicMatrixSeedHash'],
+    shareRecord: PublicKeyShareRootFields,
+) => ({
+    objectType: 'PublicKeyShare',
+    setupContextHash: deriveCollectiveBgvSetupContextHash(setupContext),
+    trusteeIdentity: shareRecord.trusteeIdentity,
+    trusteeRosterPosition: shareRecord.trusteeRosterPosition,
+    publicMatrixSeedHash,
+    shareCoefficientVectorHash512ByLimb:
+        shareRecord.shareCoefficientVectorHash512ByLimb,
+});
 
 const validateShareContribution = (
     contribution: PublicKeyShareContributionInput,
@@ -69,12 +89,8 @@ export const createPublicKeyShareSet = (
             );
             const shareRecordWithoutRoot = {
                 objectType: 'PublicKeyShare',
-                ...contextFields(input.setupContext),
                 trusteeIdentity: contribution.trusteeIdentity,
                 trusteeRosterPosition: contribution.trusteeRosterPosition,
-                publicMatrixSeedHash: input.publicMatrixSeedHash,
-                publicKeyCrpRoot: input.publicKeyCrpRoot,
-                publicAPolynomialRoot: input.publicAPolynomialRoot,
                 shareCoefficientVectorHash512ByLimb:
                     contribution.shareCoefficientVectorHash512ByLimb,
             } as const satisfies Omit<
@@ -85,41 +101,62 @@ export const createPublicKeyShareSet = (
             return {
                 ...shareRecordWithoutRoot,
                 publicKeyShareRoot: deriveCanonicalObjectHash(
-                    shareRecordWithoutRoot,
+                    publicKeyShareRootInput(
+                        input.setupContext,
+                        input.publicMatrixSeedHash,
+                        shareRecordWithoutRoot,
+                    ),
                 ),
             } satisfies PublicKeyShareRecord;
         },
     );
     const shareSetWithoutRoot = {
         objectType: 'PublicKeyShareSet',
-        ...contextFields(input.setupContext),
-        publicMatrixSeedHash: input.publicMatrixSeedHash,
-        publicKeyCrpRoot: input.publicKeyCrpRoot,
-        publicAPolynomialRoot: input.publicAPolynomialRoot,
         shareRecords,
     } as const satisfies Omit<PublicKeyShareSet, 'publicKeyShareSetRoot'>;
 
     return {
         ...shareSetWithoutRoot,
-        publicKeyShareSetRoot: deriveCanonicalObjectHash(shareSetWithoutRoot),
+        publicKeyShareSetRoot: deriveCanonicalObjectHash({
+            objectType: shareSetWithoutRoot.objectType,
+            setupContextHash: deriveCollectiveBgvSetupContextHash(
+                input.setupContext,
+            ),
+            publicMatrixSeedHash: input.publicMatrixSeedHash,
+            shareRecords,
+        }),
     } satisfies PublicKeyShareSet;
 };
 
 export const publicKeyShareRecordsByRosterPosition = (
     input: Pick<
         PublicKeyShareMaterialSetInput,
-        'setupContext' | 'participantCount' | 'publicKeyShares'
+        | 'setupContext'
+        | 'qSharePrimes'
+        | 'participantCount'
+        | 'publicMatrixSeedHash'
+        | 'publicKeyShares'
     >,
 ): ReadonlyMap<number, PublicKeyShareRecord> => {
-    assertContextMatches(
-        input.setupContext,
-        input.publicKeyShares,
-        'publicKeyShares',
-    );
     assertProtocolHash(
         input.publicKeyShares.publicKeyShareSetRoot,
         'publicKeyShares.publicKeyShareSetRoot',
     );
+    if (
+        input.publicKeyShares.publicKeyShareSetRoot !==
+        deriveCanonicalObjectHash({
+            objectType: input.publicKeyShares.objectType,
+            setupContextHash: deriveCollectiveBgvSetupContextHash(
+                input.setupContext,
+            ),
+            publicMatrixSeedHash: input.publicMatrixSeedHash,
+            shareRecords: input.publicKeyShares.shareRecords,
+        })
+    ) {
+        throw new Error(
+            'publicKeyShares.publicKeyShareSetRoot must bind the authoritative setup context, publicMatrixSeedHash, and share records.',
+        );
+    }
     const shareRecords = sortedByRosterPosition(
         input.publicKeyShares.shareRecords,
     );
@@ -130,19 +167,29 @@ export const publicKeyShareRecordsByRosterPosition = (
     }
     const recordsByRosterPosition = new Map<number, PublicKeyShareRecord>();
     shareRecords.forEach((shareRecord, expectedRosterPosition) => {
-        if (shareRecord.trusteeRosterPosition !== expectedRosterPosition) {
-            throw new Error(
-                'publicKeyShares.shareRecords roster positions must be contiguous from zero.',
-            );
-        }
-        assertNonEmptyString(
-            shareRecord.trusteeIdentity,
-            'publicKeyShares.shareRecords.trusteeIdentity',
+        validateShareContribution(
+            shareRecord,
+            expectedRosterPosition,
+            input.qSharePrimes,
         );
         assertProtocolHash(
             shareRecord.publicKeyShareRoot,
             'publicKeyShares.shareRecords.publicKeyShareRoot',
         );
+        if (
+            shareRecord.publicKeyShareRoot !==
+            deriveCanonicalObjectHash(
+                publicKeyShareRootInput(
+                    input.setupContext,
+                    input.publicMatrixSeedHash,
+                    shareRecord,
+                ),
+            )
+        ) {
+            throw new Error(
+                'publicKeyShares.shareRecords.publicKeyShareRoot must bind the parent setup context and publicMatrixSeedHash.',
+            );
+        }
         recordsByRosterPosition.set(
             shareRecord.trusteeRosterPosition,
             shareRecord,

@@ -18,6 +18,31 @@ fn local_trustee_setup_state_verifier_accepts_bound_commitment() {
     );
 }
 
+#[test]
+fn local_trustee_setup_state_verifier_rejects_a_tampered_commitment_root() {
+    let mut request = local_trustee_setup_state_request();
+    request["localStateCommitment"]["aggregateThresholdShareRoot"] =
+        serde_json::json!(valid_hash('3'));
+
+    let error = verify_local_trustee_setup_state_from_request(&request)
+        .expect_err("tampered local state commitment must be rejected");
+
+    assert!(error.to_string().contains("localStateRoot"));
+}
+
+#[test]
+fn local_trustee_setup_state_verifier_rejects_noncanonical_setup_parameters() {
+    let mut request = local_trustee_setup_state_request();
+    let wrong_setup_parameters_hash = valid_hash('4');
+    request["setupContext"]["setupParametersHash"] =
+        serde_json::json!(&wrong_setup_parameters_hash);
+
+    let error = verify_local_trustee_setup_state_from_request(&request)
+        .expect_err("noncanonical setup parameters must be rejected");
+
+    assert!(error.to_string().contains("setupParametersHash"));
+}
+
 fn local_trustee_setup_state_request() -> serde_json::Value {
     let ceremony_id = "ceremony-main";
     let manifest_hash = derive_canonical_object_hash(&serde_json::json!({
@@ -43,16 +68,15 @@ fn local_trustee_setup_state_request() -> serde_json::Value {
         "rosterHash": roster_hash,
         "setupParametersHash": setup_parameters_hash,
         "setupEpoch": setup_epoch,
+        "participantCount": 10,
     });
+    let setup_context_hash = crate::bgv::setup::accepted_setup::setup_context_hash(&setup_context)
+        .expect("setup context hash");
     let trustee_identity = "trustee-3";
     let trustee_roster_position = 3_u64;
     let mut local_state = serde_json::json!({
         "objectType": "LocalTrusteeSetupStateCommitment",
-        "ceremonyId": ceremony_id,
-        "manifestHash": manifest_hash,
-        "rosterHash": roster_hash,
-        "setupParametersHash": setup_parameters_hash,
-        "setupEpoch": setup_epoch,
+        "setupContextHash": setup_context_hash,
         "trusteeIdentity": trustee_identity,
         "trusteeRosterPosition": trustee_roster_position,
         "thresholdShareCommitmentRecipientRoot": valid_hash('1'),

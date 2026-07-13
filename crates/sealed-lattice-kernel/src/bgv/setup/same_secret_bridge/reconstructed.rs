@@ -2,11 +2,7 @@ use super::*;
 
 #[derive(Clone, Copy)]
 pub(super) struct StatementSetBinding<'a> {
-    pub(super) ceremony_id: &'a str,
-    pub(super) manifest_hash: &'a str,
-    pub(super) roster_hash: &'a str,
-    pub(super) setup_parameters_hash: &'a str,
-    pub(super) setup_epoch: &'a str,
+    pub(super) setup_context_hash: &'a str,
     pub(super) public_matrix_seed_hash: &'a str,
 }
 
@@ -42,7 +38,6 @@ pub(in crate::bgv::setup) fn authoritative_same_secret_bridge_targets<'a>(
     coefficient_commitment_set: &'a Value,
     trustee_identity: &str,
     expected_position: usize,
-    public_matrix_seed_hash: &str,
     q_share_rns_limb_count: usize,
     threshold_degree: usize,
     ring_degree: usize,
@@ -63,16 +58,6 @@ pub(in crate::bgv::setup) fn authoritative_same_secret_bridge_targets<'a>(
         string_at_path(source_record, &["sourceTrusteeIdentity"])?,
         trustee_identity,
         "authoritative bridge target source trustee identity",
-    )?;
-    compare_required_u64(
-        unsigned_at_path(source_record, &["sourceTrusteeRosterPosition"])?,
-        expected_position as u64,
-        "authoritative bridge target source trustee roster position",
-    )?;
-    compare_required_string(
-        hash_at_path(source_record, &["publicMatrixSeedHash"])?,
-        public_matrix_seed_hash,
-        "authoritative bridge target source publicMatrixSeedHash",
     )?;
     let coefficient_records = array_at_path(source_record, &["coefficientCommitments"])?;
     let expected_record_count = q_share_rns_limb_count
@@ -111,42 +96,12 @@ pub(in crate::bgv::setup) fn authoritative_same_secret_bridge_targets<'a>(
                 "VssPublicCoefficientCommitment",
                 "authoritative bridge target commitment objectType",
             )?;
-            compare_required_string(
-                string_at_path(record, &["sourceTrusteeIdentity"])?,
-                trustee_identity,
-                "authoritative bridge target commitment trustee identity",
-            )?;
-            compare_required_u64(
-                unsigned_at_path(record, &["sourceTrusteeRosterPosition"])?,
-                expected_position as u64,
-                "authoritative bridge target commitment trustee roster position",
-            )?;
-            compare_required_string(
-                hash_at_path(record, &["publicMatrixSeedHash"])?,
-                public_matrix_seed_hash,
-                "authoritative bridge target commitment publicMatrixSeedHash",
-            )?;
-            compare_required_u64(
-                unsigned_at_path(record, &["rnsLimbIndex"])?,
-                rns_limb_index as u64,
-                "authoritative bridge target commitment rnsLimbIndex",
-            )?;
             let canonical_prime = DATA_PRIMES.get(rns_limb_index).copied().ok_or_else(|| {
                 CanonicalError::new(
                     CanonicalErrorCode::MalformedLength,
                     "same-secret bridge qShareRnsLimbCount exceeds the available Q_share primes",
                 )
             })?;
-            compare_required_u64(
-                unsigned_at_path(record, &["rnsPrime"])?,
-                canonical_prime,
-                "authoritative bridge target commitment rnsPrime",
-            )?;
-            compare_required_u64(
-                unsigned_at_path(record, &["shamirCoefficientIndex"])?,
-                0,
-                "authoritative bridge target commitment shamirCoefficientIndex",
-            )?;
             let coefficient_commitment_root = hash_at_path(record, &["coefficientCommitmentRoot"])?;
             let commitment_body = value_at_path(record, &["commitment"])?;
             compare_required_string(
@@ -228,11 +183,7 @@ pub(in crate::bgv::setup) fn same_secret_bridge_proof_verification_request_from_
             bridge_statement,
             coefficient_commitment_set,
             statement_set: StatementSetBinding {
-                ceremony_id: read_non_empty_string(statement_set, "ceremonyId")?,
-                manifest_hash: hash_at_path(statement_set, &["manifestHash"])?,
-                roster_hash: hash_at_path(statement_set, &["rosterHash"])?,
-                setup_parameters_hash: hash_at_path(statement_set, &["setupParametersHash"])?,
-                setup_epoch: read_non_empty_string(statement_set, "setupEpoch")?,
+                setup_context_hash: hash_at_path(statement_set, &["setupContextHash"])?,
                 public_matrix_seed_hash,
             },
             expected_position,
@@ -263,7 +214,6 @@ pub(super) fn reconstructed_same_secret_bridge_proof_verification_request(
         input.coefficient_commitment_set,
         trustee_identity,
         input.expected_position,
-        input.statement_set.public_matrix_seed_hash,
         input.q_share_rns_limb_count,
         input.threshold_degree,
         input.ring_degree,
@@ -283,12 +233,9 @@ pub(super) fn reconstructed_same_secret_bridge_proof_verification_request(
 
     Ok(json!({
         "context": {
-            "ceremonyId": input.statement_set.ceremony_id,
-            "manifestHash": input.statement_set.manifest_hash,
-            "rosterHash": input.statement_set.roster_hash,
+            "setupContextHash": input.statement_set.setup_context_hash,
             "trusteeIdentity": trustee_identity,
             "trusteeRosterPosition": input.expected_position,
-            "setupEpoch": input.statement_set.setup_epoch,
         },
         "ringDegree": input.ring_degree,
         "sameSecretLinkage": {
@@ -297,7 +244,6 @@ pub(super) fn reconstructed_same_secret_bridge_proof_verification_request(
         },
         "sameSecretBridge": {
             "publicMatrixSeedHash": input.statement_set.public_matrix_seed_hash,
-            "setupParametersHash": input.statement_set.setup_parameters_hash,
             "sourceTrusteeIdentity": trustee_identity,
             "sourceTrusteeRosterPosition": input.expected_position,
             "bridgeRnsPrimes": bridge_rns_primes,
@@ -357,7 +303,6 @@ pub(in crate::bgv::setup) fn verify_and_retain_same_secret_bridge_proof_binding(
     drop(proof_bytes);
     crate::bgv::setup::retain_accepted_setup_proof_binding(
         proof_binding_session.session_handle,
-        &proof_binding_session.capability,
         SAME_SECRET_BRIDGE_PROOF_FAMILY,
         proof_material_root,
         same_secret_bridge_proof_verification_binding_hash(

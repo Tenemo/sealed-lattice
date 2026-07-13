@@ -7,6 +7,7 @@ pub(in super::super) const VSS_AGGREGATE_THRESHOLD_PROOF_CHECKPOINT_DIRECTORY: &
 struct VssAggregateThresholdProofMaterialReference {
     proof_bytes_hash: String,
     proof_material_root: String,
+    proof_binding_lease: crate::bgv::setup::CanonicalSetupProofBindingLease,
 }
 
 // The proven threshold-share aggregate binding for every recipient and target
@@ -18,33 +19,44 @@ struct VssAggregateThresholdProofMaterialReference {
 pub(in super::super) fn vss_aggregate_threshold_proofs(
     package: &serde_json::Value,
     aggregate_set: &serde_json::Value,
-) -> Vec<serde_json::Value> {
+    recipient_coordinates: &[(u64, usize)],
+) -> VssProofRecordSetFixture {
     let participant_count = participant_count_from_package(package);
-    let ring_degree = package["vssPublicCoefficientCommitmentSet"]["ringDegree"]
-        .as_u64()
-        .expect("ring degree") as usize;
+    let ring_degree = vss_commitment_ring_degree_from_fixture_package(package);
     let recipient_records = aggregate_set["recipientRecords"]
         .as_array()
         .expect("aggregate recipient records");
-    recipient_records
+    assert_eq!(
+        recipient_records.len(),
+        recipient_coordinates.len(),
+        "aggregate recipient records and canonical coordinates",
+    );
+    let proof_record_fixtures = recipient_records
         .iter()
-        .map(|aggregate_record| {
-            let recipient_roster_position = aggregate_record["recipientRosterPosition"]
-                .as_u64()
-                .expect("aggregate recipient roster position");
-            let rns_limb_index = aggregate_record["rnsLimbIndex"]
-                .as_u64()
-                .expect("aggregate rns limb index") as usize;
-            vss_aggregate_threshold_proof_record(
-                package,
-                aggregate_record,
-                participant_count,
-                ring_degree,
-                recipient_roster_position,
-                rns_limb_index,
-            )
-        })
-        .collect()
+        .zip(recipient_coordinates.iter().copied())
+        .map(
+            |(aggregate_record, (recipient_roster_position, rns_limb_index))| {
+                vss_aggregate_threshold_proof_record(
+                    package,
+                    aggregate_record,
+                    participant_count,
+                    ring_degree,
+                    recipient_roster_position,
+                    rns_limb_index,
+                )
+            },
+        )
+        .collect::<Vec<_>>();
+    VssProofRecordSetFixture {
+        records: proof_record_fixtures
+            .iter()
+            .map(|fixture| fixture.record.clone())
+            .collect(),
+        proof_binding_leases: proof_record_fixtures
+            .into_iter()
+            .map(|fixture| fixture.proof_binding_lease)
+            .collect(),
+    }
 }
 
 pub(super) fn append_vss_aggregate_threshold_proof_material_transport(
@@ -109,17 +121,12 @@ fn vss_aggregate_threshold_proof_record(
     ring_degree: usize,
     recipient_roster_position: u64,
     rns_limb_index: usize,
-) -> serde_json::Value {
-    let threshold_degree = package["vssPublicCoefficientCommitmentSet"]["thresholdDegree"]
-        .as_u64()
-        .expect("threshold degree");
+) -> VssProofRecordFixture {
+    let threshold_degree = vss_fixture_threshold_degree(package);
     let rns_prime = DATA_PRIMES[rns_limb_index];
     let public_matrix_seed_hash = package["commonRandomness"]["publicMatrixSeedHash"]
         .as_str()
         .expect("public matrix seed hash");
-    let recipient_identity = aggregate_record["recipientIdentity"]
-        .as_str()
-        .expect("aggregate recipient identity");
 
     // The n source recipient-share commitments for this recipient and limb are
     // the summands; the aggregate record's committed material is the sum.
@@ -162,32 +169,30 @@ fn vss_aggregate_threshold_proof_record(
             i64::try_from(summed / u128::from(rns_prime)).expect("wrap fits i64");
     }
 
-    let source_source_record =
-        vss_public_recipient_source_record_from_package(package, recipient_roster_position);
-    let source_recipient_share_commitment_root =
-        source_source_record["sourceRecipientShareCommitmentRoot"]
-            .as_str()
-            .expect("source recipient-share commitment root")
-            .to_string();
-    let source_coefficient_source_record =
-        vss_public_coefficient_source_record_from_package(package, recipient_roster_position);
-    let source_coefficient_commitment_root =
-        source_coefficient_source_record["sourceCoefficientCommitmentRoot"]
-            .as_str()
-            .expect("source coefficient commitment root")
-            .to_string();
-
-    let vss_aggregate = vss_aggregate_threshold_statement_object(
+    let coefficient_source_records =
+        package["vssPublicCoefficientCommitmentSet"]["sourceTrusteeRecords"]
+            .as_array()
+            .expect("VSS coefficient source records");
+    let recipient_source_records =
+        package["vssPublicRecipientShareCommitmentSet"]["sourceTrusteeRecords"]
+            .as_array()
+            .expect("VSS recipient-share source records");
+    let aggregate_record_index = usize::try_from(recipient_roster_position)
+        .expect("recipient roster position fits usize")
+        .checked_mul(DATA_PRIMES.len())
+        .and_then(|offset| offset.checked_add(rns_limb_index))
+        .expect("aggregate record index fits usize");
+    let vss_aggregate =
+        crate::bgv::setup::vss_commitment::vss_aggregate_threshold_statement_from_commitment_records(
         public_matrix_seed_hash,
-        recipient_identity,
-        recipient_roster_position,
-        rns_limb_index,
-        rns_prime,
-        &source_coefficient_commitment_root,
-        &source_recipient_share_commitment_root,
-        &source_share_records,
+        usize::try_from(participant_count).expect("participant count fits usize"),
+        DATA_PRIMES.len(),
+        coefficient_source_records,
+        recipient_source_records,
         aggregate_record,
-    );
+        aggregate_record_index,
+    )
+    .expect("canonical VSS aggregate threshold statement");
     let proof_material = vss_aggregate_threshold_proof_material_reference(
         package,
         &vss_aggregate,
@@ -198,62 +203,14 @@ fn vss_aggregate_threshold_proof_record(
         rns_limb_index,
     );
 
-    serde_json::json!({
-        "objectType": "VssAggregateThresholdProofRecord",
-        "recipientRosterPosition": recipient_roster_position,
-        "rnsLimbIndex": rns_limb_index,
-        "vssShareLinkage": vss_aggregate,
-        "proofBytesHash": proof_material.proof_bytes_hash,
-        "proofMaterialRoot": proof_material.proof_material_root,
-    })
-}
-
-// The unit-evaluation-point share-linkage statement for one aggregate record:
-// the source recipient shares stand in for the coefficients, the aggregate
-// threshold share for the recipient share.
-#[allow(clippy::too_many_arguments)]
-fn vss_aggregate_threshold_statement_object(
-    public_matrix_seed_hash: &str,
-    recipient_identity: &str,
-    recipient_roster_position: u64,
-    rns_limb_index: usize,
-    rns_prime: u64,
-    source_coefficient_commitment_root: &str,
-    source_recipient_share_commitment_root: &str,
-    source_share_records: &[serde_json::Value],
-    aggregate_record: &serde_json::Value,
-) -> serde_json::Value {
-    let coefficient_commitment_roots = source_share_records
-        .iter()
-        .map(|record| record["shareCommitmentRoot"].clone())
-        .collect::<Vec<_>>();
-    let coefficient_commitments = source_share_records
-        .iter()
-        .map(|record| record["commitment"].clone())
-        .collect::<Vec<_>>();
-    let mut statement = serde_json::json!({
-        "objectType": "VssShareLinkageStatement",
-        "isThresholdAggregate": true,
-        "publicMatrixSeedHash": public_matrix_seed_hash,
-        "sourceTrusteeIdentity": recipient_identity,
-        "sourceTrusteeRosterPosition": recipient_roster_position,
-        "sourceCoefficientCommitmentRoot": source_coefficient_commitment_root,
-        "sourceRecipientShareCommitmentRoot": source_recipient_share_commitment_root,
-        "recipientIdentity": recipient_identity,
-        "recipientRosterPosition": recipient_roster_position,
-        "sourceRnsLimbIndex": rns_limb_index,
-        "sourceMessageModulus": rns_prime,
-        "coefficientCommitmentRoots": coefficient_commitment_roots,
-        "coefficientCommitments": coefficient_commitments,
-        "recipientShareCommitmentRoot": aggregate_record["aggregateCommitmentRoot"],
-        "recipientShareCommitment": aggregate_record["commitment"],
-        "additionalLinkageItems": [],
-    });
-    let statement_root =
-        derive_canonical_object_hash(&statement).expect("VSS aggregate threshold statement root");
-    statement["shareLinkageStatementRoot"] = serde_json::json!(statement_root);
-
-    statement
+    VssProofRecordFixture {
+        record: serde_json::json!({
+            "objectType": "VssAggregateThresholdProofRecord",
+            "proofBytesHash": proof_material.proof_bytes_hash,
+            "proofMaterialRoot": proof_material.proof_material_root,
+        }),
+        proof_binding_lease: proof_material.proof_binding_lease,
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -296,43 +253,40 @@ fn vss_aggregate_threshold_proof_material_reference(
         &proof_bytes_hash,
     )
     .expect("VSS aggregate threshold proof material root");
-    if crate::bgv::setup::accepted_setup_fixture_proof_binding_lease(&proof_material_root)
-        .expect("VSS aggregate threshold proof binding lookup")
-        .is_none()
+    if crate::bgv::setup::verified_canonical_setup_proof_material_bytes(
+        VSS_SHARE_LINKAGE_PROOF_FAMILY,
+        &proof_material_root,
+    )
+    .expect("VSS aggregate threshold generated proof material lookup")
+    .is_none()
     {
-        if crate::bgv::setup::verified_canonical_setup_proof_material_bytes(
+        authenticate_setup_proof_material_stream_for_test(
             VSS_SHARE_LINKAGE_PROOF_FAMILY,
             &proof_material_root,
+            &proof_bytes,
         )
-        .expect("VSS aggregate threshold generated proof material lookup")
-        .is_none()
-        {
-            authenticate_setup_proof_material_stream_for_test(
-                VSS_SHARE_LINKAGE_PROOF_FAMILY,
-                &proof_material_root,
-                &proof_bytes,
-            )
-            .expect("authenticate VSS aggregate threshold proof material stream");
-        }
-        let proof_binding_session =
-            crate::bgv::setup::begin_accepted_setup_fixture_proof_binding_session()
-                .expect("begin VSS aggregate threshold proof binding session");
-        crate::bgv::setup::trustee_evaluation_key_proof::verify_and_retain_vss_share_linkage_proof_binding(
-            &proof_binding_session,
-            &proof_material_root,
-            &request,
-        )
-        .expect("verify VSS aggregate threshold proof before releasing its bytes");
-        crate::bgv::setup::cache_accepted_setup_fixture_proof_binding_lease(
+        .expect("authenticate VSS aggregate threshold proof material stream");
+    }
+    let proof_binding_session =
+        crate::bgv::setup::begin_accepted_setup_fixture_proof_binding_session()
+            .expect("begin VSS aggregate threshold proof binding session");
+    crate::bgv::setup::trustee_evaluation_key_proof::verify_and_retain_vss_share_linkage_proof_binding(
+        &proof_binding_session,
+        &proof_material_root,
+        &request,
+    )
+    .expect("verify VSS aggregate threshold proof before releasing its bytes");
+    let proof_binding_lease =
+        crate::bgv::setup::finish_accepted_setup_fixture_proof_binding_session(
             proof_binding_session,
             &proof_material_root,
         )
-        .expect("cache VSS aggregate threshold verifier-owned binding lease");
-    }
+        .expect("retain VSS aggregate threshold verifier-owned binding lease");
 
     VssAggregateThresholdProofMaterialReference {
         proof_bytes_hash,
         proof_material_root,
+        proof_binding_lease,
     }
 }
 
@@ -391,9 +345,7 @@ fn vss_aggregate_threshold_proof_generation_request(
     rns_limb_index: usize,
 ) -> serde_json::Value {
     let setup_context = &package["setupContext"];
-    let ring_degree = package["vssPublicCoefficientCommitmentSet"]["ringDegree"]
-        .as_u64()
-        .expect("ring degree") as usize;
+    let ring_degree = vss_commitment_ring_degree_from_fixture_package(package);
     // Bound-commitment order: the summand slots (coefficient commitments) then
     // the single aggregate recipient share. Context hashes read off the
     // published commitments; seeds derive from them.

@@ -11,6 +11,16 @@ pub(super) fn common_randomness_object(
     setup_epoch: &str,
     participant_count: u64,
 ) -> serde_json::Value {
+    let setup_context_hash =
+        crate::bgv::setup::accepted_setup::setup_context_hash(&serde_json::json!({
+            "ceremonyId": ceremony_id,
+            "manifestHash": manifest_hash,
+            "rosterHash": roster_hash,
+            "setupParametersHash": setup_parameters_hash,
+            "setupEpoch": setup_epoch,
+            "participantCount": participant_count,
+        }))
+        .expect("setup context hash");
     let mut commit_records = Vec::new();
     let mut reveal_records = Vec::new();
     let mut ordered_reveal_hashes = Vec::new();
@@ -23,30 +33,19 @@ pub(super) fn common_randomness_object(
         }))
         .expect("reveal source hash");
         let reveal_hex = reveal_source_hash[..64].to_string();
-        let mut reveal_record = serde_json::json!({
+        let reveal_payload = serde_json::json!({
             "objectType": "CommonRandomnessReveal",
-            "ceremonyId": ceremony_id,
-            "manifestHash": manifest_hash,
-            "rosterHash": roster_hash,
-            "setupParametersHash": setup_parameters_hash,
-            "setupEpoch": setup_epoch,
+            "setupContextHash": &setup_context_hash,
             "trusteeIdentity": trustee_identity.clone(),
             "rosterPosition": roster_position,
             "recoveryEpoch": 0,
             "deviceEpoch": 0,
             "revealHex": reveal_hex,
         });
-        let reveal_hash = derive_canonical_object_hash(&reveal_record).expect("reveal hash");
+        let reveal_hash = derive_canonical_object_hash(&reveal_payload).expect("reveal hash");
         let reveal_context_hash = derive_canonical_object_hash(&serde_json::json!({
             "objectType": "CommonRandomnessRevealSignatureContext",
-            "ceremonyId": ceremony_id,
-            "manifestHash": manifest_hash,
-            "rosterHash": roster_hash,
-            "setupParametersHash": setup_parameters_hash,
-            "setupEpoch": setup_epoch,
-            "trusteeIdentity": trustee_identity.as_str(),
-            "rosterPosition": roster_position,
-            "objectRoot": reveal_hash.as_str(),
+            "payloadRoot": reveal_hash.as_str(),
         }))
         .expect("reveal signature context hash");
         let signature_seed_label = setup_trustee_signature_seed_label(&trustee_identity);
@@ -56,9 +55,7 @@ pub(super) fn common_randomness_object(
                 "objectType": "CommonRandomnessReveal",
                 "ceremonyId": ceremony_id,
                 "manifestHash": manifest_hash,
-                "boardHeadHash": null,
                 "objectRoot": reveal_hash.as_str(),
-                "chunkMerkleRoot": null,
                 "signerRole": "Trustee",
                 "signerIdentity": trustee_identity.as_str(),
                 "recoveryEpoch": 0,
@@ -67,34 +64,27 @@ pub(super) fn common_randomness_object(
             }),
         )
         .expect("reveal signature fixture");
-        reveal_record["signatureEnvelope"] = reveal_signature_fixture.envelope;
         ordered_reveal_hashes.push(reveal_hash.clone());
-        reveal_records.push(reveal_record);
+        reveal_records.push(serde_json::json!({
+            "objectType": "CommonRandomnessReveal",
+            "rosterPosition": roster_position,
+            "revealHex": reveal_hex,
+            "signatureEnvelope": reveal_signature_fixture.envelope,
+        }));
 
-        let mut commit_record = serde_json::json!({
+        let commit_payload = serde_json::json!({
             "objectType": "CommonRandomnessCommit",
-            "ceremonyId": ceremony_id,
-            "manifestHash": manifest_hash,
-            "rosterHash": roster_hash,
-            "setupParametersHash": setup_parameters_hash,
-            "setupEpoch": setup_epoch,
+            "setupContextHash": &setup_context_hash,
             "trusteeIdentity": trustee_identity.as_str(),
             "rosterPosition": roster_position,
             "recoveryEpoch": 0,
             "deviceEpoch": 0,
             "revealHash": reveal_hash.as_str(),
         });
-        let commit_hash = derive_canonical_object_hash(&commit_record).expect("commit hash");
+        let commit_hash = derive_canonical_object_hash(&commit_payload).expect("commit hash");
         let commit_context_hash = derive_canonical_object_hash(&serde_json::json!({
             "objectType": "CommonRandomnessCommitSignatureContext",
-            "ceremonyId": ceremony_id,
-            "manifestHash": manifest_hash,
-            "rosterHash": roster_hash,
-            "setupParametersHash": setup_parameters_hash,
-            "setupEpoch": setup_epoch,
-            "trusteeIdentity": trustee_identity.as_str(),
-            "rosterPosition": roster_position,
-            "objectRoot": commit_hash.as_str(),
+            "payloadRoot": commit_hash.as_str(),
         }))
         .expect("commit signature context hash");
         let commit_signature_fixture = create_protocol_signature_fixture(
@@ -103,9 +93,7 @@ pub(super) fn common_randomness_object(
                 "objectType": "CommonRandomnessCommit",
                 "ceremonyId": ceremony_id,
                 "manifestHash": manifest_hash,
-                "boardHeadHash": null,
                 "objectRoot": commit_hash.as_str(),
-                "chunkMerkleRoot": null,
                 "signerRole": "Trustee",
                 "signerIdentity": trustee_identity.as_str(),
                 "recoveryEpoch": 0,
@@ -114,17 +102,17 @@ pub(super) fn common_randomness_object(
             }),
         )
         .expect("commit signature fixture");
-        commit_record["signatureEnvelope"] = commit_signature_fixture.envelope;
-        commit_records.push(commit_record);
+        commit_records.push(serde_json::json!({
+            "objectType": "CommonRandomnessCommit",
+            "rosterPosition": roster_position,
+            "revealHash": reveal_hash,
+            "signatureEnvelope": commit_signature_fixture.envelope,
+        }));
     }
 
     let public_matrix_seed_hash = derive_canonical_object_hash(&serde_json::json!({
         "objectType": "SetupPublicMatrixSeed",
-        "ceremonyId": ceremony_id,
-        "manifestHash": manifest_hash,
-        "rosterHash": roster_hash,
-        "setupParametersHash": setup_parameters_hash,
-        "setupEpoch": setup_epoch,
+        "setupContextHash": setup_context_hash,
         "orderedRevealHashes": ordered_reveal_hashes,
     }))
     .expect("public matrix seed hash");

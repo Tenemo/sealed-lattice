@@ -1,6 +1,6 @@
 use core::{fmt, str::FromStr};
 
-use super::{CanonicalCodecError, CanonicalItem, hash512};
+use super::{CanonicalCodecError, CanonicalItem, hash_foundation_tuple_512 as hash512};
 
 pub const ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH: usize = 1_952;
 const PARTICIPANT_IDENTITY_BYTE_LENGTH: usize = 64;

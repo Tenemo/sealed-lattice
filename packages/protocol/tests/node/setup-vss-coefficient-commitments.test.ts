@@ -4,7 +4,6 @@ import { describe, expect, it } from 'vitest';
 import {
     createVssSourceTrusteeCoefficientOpeningState,
     createVssSourceTrusteeCoefficientOpeningStateProvider,
-    createVssSourceTrusteeCoefficientCommitmentContribution,
     createVssCoefficientCommitmentBundle,
     setupCommitmentRandomnessWidth,
     type VssCoefficientOpeningInput,
@@ -34,7 +33,11 @@ const deterministicRandomBytes = makeVssOpeningRandomBytes(
     'setup-vss-coefficient-commitments',
 );
 
-const setupContext = makeSetupContext(fixtureHash);
+const setupContext = makeSetupContext(fixtureHash, participantCount);
+const setupContextHash = deriveCanonicalObjectHash({
+    objectType: 'CollectiveBgvSetupContext',
+    ...setupContext,
+});
 const publicMatrixSeedHash = fixtureHash('public-matrix-seed');
 const setupParameters = {
     participantCount,
@@ -268,14 +271,6 @@ const sourceTrusteeOpeningStateProviderInput = (
         ),
 });
 
-const createCoefficientCommitmentContribution = (
-    openingState: VssSourceTrusteeCoefficientOpeningState,
-): ReturnType<typeof createVssSourceTrusteeCoefficientCommitmentContribution> =>
-    createVssSourceTrusteeCoefficientCommitmentContribution({
-        ...coefficientCommitmentInput,
-        sourceTrusteeOpeningState: openingState,
-    });
-
 const invalidOpeningStateGenerationCases = [
     {
         name: 'source trustee outside the roster',
@@ -326,9 +321,6 @@ describe('VSS coefficient commitment builders', () => {
             requiredOpeningByCoordinate(generatedSourceTrusteeState, 0, 0),
             0,
         );
-        const contribution = createCoefficientCommitmentContribution(
-            generatedSourceTrusteeState,
-        );
 
         expect(generatedSourceTrusteeState.coefficientOpenings).toHaveLength(
             qSharePrimes.length * thresholdDegree,
@@ -353,10 +345,6 @@ describe('VSS coefficient commitment builders', () => {
                     coefficient === 1,
             ),
         ).toBe(true);
-        expect(
-            contribution.privateOpeningMaterial.coefficientOpenings[0]
-                ?.commitmentRoot,
-        ).toMatch(/^[0-9a-f]{128}$/u);
     });
 
     it('loads deterministic source openings through a provider and rejects non-contiguous rosters', () => {
@@ -385,7 +373,7 @@ describe('VSS coefficient commitment builders', () => {
         ).toThrow(/contiguous from zero/u);
     });
 
-    it('creates deterministic root-bound commitment material from local openings', () => {
+    it('creates deterministic commitment records from local openings', () => {
         const bundle = createVssCoefficientCommitmentBundle(
             coefficientCommitmentBundleInput([
                 sourceTrusteeOpeningState(1),
@@ -394,31 +382,19 @@ describe('VSS coefficient commitment builders', () => {
         );
         const { vssCoefficientCommitmentRoot, ...commitmentSetWithoutRoot } =
             bundle.commitmentSet;
-        const {
-            vssCoefficientCommitmentMaterialRoot,
-            ...materialSetWithoutRoot
-        } = bundle.materialSet;
         const firstMaterialRecord =
-            bundle.materialSet.coefficientCommitments[0];
+            bundle.privateOpeningMaterialBySourceTrustee[0]
+                ?.sourceTrusteeCoefficientCommitmentMaterialRecords[0];
         const firstOpening = requiredOpening(sourceTrusteeOpeningState(0), 0);
-        const firstSourceTrusteeContribution =
-            createCoefficientCommitmentContribution(
-                sourceTrusteeOpeningState(0),
-            );
 
         expect(
             bundle.commitmentSet.sourceTrusteeRecords.map(
                 (record) => record.sourceTrusteeRosterPosition,
             ),
         ).toEqual([0, 1]);
-        expect(bundle.materialSet.coefficientCommitments).toHaveLength(
-            participantCount * qSharePrimes.length * thresholdDegree,
-        );
+        expect(bundle.commitmentSet.setupContextHash).toBe(setupContextHash);
         expect(vssCoefficientCommitmentRoot).toBe(
             deriveCanonicalObjectHash(commitmentSetWithoutRoot),
-        );
-        expect(vssCoefficientCommitmentMaterialRoot).toBe(
-            deriveCanonicalObjectHash(materialSetWithoutRoot),
         );
         expect(firstMaterialRecord?.commitmentRoot).toBe(
             setupCommitmentComputer({
@@ -435,15 +411,6 @@ describe('VSS coefficient commitment builders', () => {
             bundle.privateOpeningMaterialBySourceTrustee[0]
                 ?.coefficientOpenings[0]?.commitmentRoot,
         ).toBe(firstMaterialRecord?.commitmentRoot);
-        expect(firstSourceTrusteeContribution.sourceTrusteeRecord).toEqual(
-            bundle.commitmentSet.sourceTrusteeRecords[0],
-        );
-        expect(firstSourceTrusteeContribution.materialRecords).toEqual(
-            bundle.materialSet.coefficientCommitments.slice(
-                0,
-                qSharePrimes.length * thresholdDegree,
-            ),
-        );
     });
 
     it.each(malformedCoefficientCommitmentBundleCases)(

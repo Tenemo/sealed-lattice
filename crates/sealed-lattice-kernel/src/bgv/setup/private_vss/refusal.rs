@@ -35,7 +35,3 @@ pub(super) fn private_vss_refusal_to_error(refusal: PrivateVssRefusal) -> Canoni
         format!("{}: {}", refusal.reason_code, refusal.message),
     )
 }
-
-pub(super) fn refusal_to_error(refusal: PrivateVssRefusal) -> CanonicalError {
-    CanonicalError::new(CanonicalErrorCode::InvalidFixture, refusal.message)
-}

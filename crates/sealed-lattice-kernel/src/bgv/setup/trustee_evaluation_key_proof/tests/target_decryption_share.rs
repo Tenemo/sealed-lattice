@@ -1,12 +1,11 @@
 use super::super::relation::{
-    TargetDecryptionShareLimbStatement, TargetDecryptionShareRoleStatement,
-    TargetDecryptionShareStatement, VssShareLinkageCommitment,
+    SetupProofStatement, TargetDecryptionShareLimbStatement, TargetDecryptionShareRoleStatement,
+    TargetDecryptionShareStatement, VssCommittedMaterialWitness, VssShareLinkageCommitment,
     masked_claim_bounds_for_global_claim,
 };
 use super::super::{
     CLAIM_MASK_RADIX, CONSISTENCY_COEFFICIENT_BITS, LINCHECK_REPETITIONS,
     TARGET_DECRYPTION_AGGREGATE_MESSAGE_CLAIM_MASK_DIGIT_COUNT,
-    TARGET_DECRYPTION_SHARE_PROOF_FAMILY,
     TARGET_DECRYPTION_SMUDGING_MESSAGE_CLAIM_MASK_DIGIT_COUNT,
 };
 use super::*;
@@ -28,8 +27,7 @@ fn target_decryption_share_proof_round_trips_and_rejects_tampering() {
 
     let (mut tampered_partial_statement, _unused_witness) = target_decryption_share_instance();
     let target_decryption_share = tampered_partial_statement
-        .target_decryption_share
-        .as_mut()
+        .target_decryption_share_mut()
         .expect("target statement");
     target_decryption_share.limb_statements[0].role_statements[0].released_partial_decryption[0] =
         (target_decryption_share.limb_statements[0].role_statements[0].released_partial_decryption
@@ -43,8 +41,7 @@ fn target_decryption_share_proof_round_trips_and_rejects_tampering() {
 
     let (mut tampered_commitment_statement, _unused_witness) = target_decryption_share_instance();
     tampered_commitment_statement
-        .target_decryption_share
-        .as_mut()
+        .target_decryption_share_mut()
         .expect("target statement")
         .limb_statements[0]
         .aggregate_commitment
@@ -57,14 +54,13 @@ fn target_decryption_share_proof_round_trips_and_rejects_tampering() {
     let (invalid_aggregate_statement, mut invalid_aggregate_witness) =
         target_decryption_share_instance();
     let target_prime = invalid_aggregate_statement
-        .target_decryption_share
-        .as_ref()
+        .target_decryption_share()
         .expect("target statement")
         .limb_statements[0]
         .target_rns_prime;
-    invalid_aggregate_witness.target_decryption_message_vectors[0][5] =
-        (invalid_aggregate_witness.target_decryption_message_vectors[0][5] + 1)
-            % i64::try_from(target_prime).expect("target prime fits i64");
+    let target_messages = invalid_aggregate_witness.target_decryption_message_vectors_mut();
+    target_messages[0][5] =
+        (target_messages[0][5] + 1) % i64::try_from(target_prime).expect("target prime fits i64");
     assert!(
         prove_evaluation_key_share(
             &invalid_aggregate_statement,
@@ -77,11 +73,10 @@ fn target_decryption_share_proof_round_trips_and_rejects_tampering() {
 
     let (invalid_bound_statement, mut invalid_bound_witness) = target_decryption_share_instance();
     let aggregate_message_coefficient_bound = invalid_bound_statement
-        .target_decryption_share
-        .as_ref()
+        .target_decryption_share()
         .expect("target statement")
         .aggregate_message_coefficient_bound;
-    invalid_bound_witness.target_decryption_message_vectors[0][0] =
+    invalid_bound_witness.target_decryption_message_vectors_mut()[0][0] =
         i64::try_from(aggregate_message_coefficient_bound).expect("aggregate bound fits i64");
     assert!(
         prove_evaluation_key_share(
@@ -95,7 +90,7 @@ fn target_decryption_share_proof_round_trips_and_rejects_tampering() {
 
     let (invalid_smudging_statement, mut invalid_smudging_witness) =
         target_decryption_share_instance();
-    invalid_smudging_witness.target_decryption_message_vectors[2][7] += 1;
+    invalid_smudging_witness.target_decryption_message_vectors_mut()[2][7] += 1;
     assert!(
         prove_evaluation_key_share(
             &invalid_smudging_statement,
@@ -111,7 +106,7 @@ fn target_decryption_share_proof_round_trips_and_rejects_tampering() {
     // prover refuses fail-closed.
     let (mismatched_material_statement, mut mismatched_material_witness) =
         target_decryption_share_instance();
-    mismatched_material_witness.target_decryption_message_vectors[1][3] += 1;
+    mismatched_material_witness.target_decryption_message_vectors_mut()[1][3] += 1;
     assert!(
         prove_evaluation_key_share(
             &mismatched_material_statement,
@@ -120,17 +115,6 @@ fn target_decryption_share_proof_round_trips_and_rejects_tampering() {
         )
         .is_err(),
         "proving must reject a target-decryption message that does not open its committed material"
-    );
-
-    let (mut wrong_target_basis_statement, _unused_witness) = target_decryption_share_instance();
-    wrong_target_basis_statement
-        .target_decryption_share
-        .as_mut()
-        .expect("target statement")
-        .target_basis_hash = repeated_hash("df");
-    assert!(
-        wrong_target_basis_statement.validate_shape().is_err(),
-        "target-decryption share statements must bind the canonical target basis hash"
     );
 }
 
@@ -216,8 +200,7 @@ fn target_decryption_share_proof_requires_enough_lift_fields() {
     );
     let target_statement = instance
         .statement
-        .target_decryption_share
-        .as_ref()
+        .target_decryption_share()
         .expect("target statement");
     let aggregate_layout =
         vss_public_message_encoding_layout(target_statement.aggregate_message_coefficient_bound)
@@ -253,8 +236,7 @@ fn target_decryption_share_proof_requires_enough_lift_fields() {
     );
     let target_only_relation_count = instance
         .statement
-        .target_decryption_share
-        .as_ref()
+        .target_decryption_share()
         .and_then(|target_statement| {
             target_statement
                 .limb_statements
@@ -301,8 +283,7 @@ fn target_decryption_share_mask_bound_uses_lifted_aggregate_bound() {
     let instance = target_decryption_share_instance_parts();
     let target_statement = instance
         .statement
-        .target_decryption_share
-        .as_ref()
+        .target_decryption_share()
         .expect("target statement");
     let aggregate_message_coefficient_bound =
         i128::from(target_statement.aggregate_message_coefficient_bound);
@@ -425,8 +406,6 @@ fn target_decryption_share_instance_parts_for_active_limb_count(
 ) -> TargetDecryptionShareInstanceParts {
     let ring_degree = SMALL_RING_DEGREE;
     let public_matrix_seed_hash = repeated_hash("de");
-    let target_basis_hash =
-        crate::bgv::evaluator::top_k::canonical_target_basis_hash().expect("target basis hash");
     let largest_target_prime = DATA_PRIMES[..active_limb_count]
         .iter()
         .copied()
@@ -456,7 +435,7 @@ fn target_decryption_share_instance_parts_for_active_limb_count(
         Vec::with_capacity(active_limb_count * target_message_count_per_limb);
     let mut material_context_hashes_by_bound_message =
         Vec::with_capacity(active_limb_count * target_message_count_per_limb);
-    let mut smudging_commitment_records = Vec::with_capacity(
+    let mut smudging_commitment_records_by_position = Vec::with_capacity(
         active_limb_count * target_decryption_roles.len() * smudging_polynomial_degree,
     );
 
@@ -581,19 +560,23 @@ fn target_decryption_share_instance_parts_for_active_limb_count(
                 .iter()
                 .map(|commitment| commitment.commitment_root.clone())
                 .collect::<Vec<_>>();
-            smudging_commitment_records.extend(smudging_commitments.iter().enumerate().map(
-                |(polynomial_index, commitment)| {
-                    json!({
-                        "objectType": "TargetDecryptionSmudgingCommitment",
-                        "role": target_role,
-                        "rnsLimbIndex": target_rns_limb_index,
-                        "rnsPrime": target_rns_prime,
-                        "polynomialDegree": polynomial_index + 1,
-                        "commitmentRoot": commitment.commitment_root.clone(),
-                        "commitment": commitment.commitment_value.clone(),
-                    })
-                },
-            ));
+            smudging_commitment_records_by_position.extend(
+                smudging_commitments
+                    .iter()
+                    .enumerate()
+                    .map(|(polynomial_index, commitment)| {
+                        (
+                            target_role_index,
+                            target_rns_limb_index,
+                            polynomial_index,
+                            json!({
+                                "objectType": "TargetDecryptionSmudgingCommitment",
+                                "commitmentRoot": commitment.commitment_root.clone(),
+                                "commitment": commitment.commitment_value.clone(),
+                            }),
+                        )
+                    }),
+            );
             command_role_statements.push(json!({
                 "targetRole": target_role,
                 "targetCiphertextComponentOne": target_ciphertext_component_one.clone(),
@@ -649,17 +632,21 @@ fn target_decryption_share_instance_parts_for_active_limb_count(
         });
     }
 
+    smudging_commitment_records_by_position.sort_by_key(
+        |(target_role_index, target_rns_limb_index, polynomial_index, _)| {
+            (
+                *target_role_index,
+                *target_rns_limb_index,
+                *polynomial_index,
+            )
+        },
+    );
+    let smudging_commitment_records = smudging_commitment_records_by_position
+        .into_iter()
+        .map(|(_, _, _, record)| record)
+        .collect::<Vec<_>>();
     let mut smudging_commitment_set = json!({
         "objectType": "TargetDecryptionSmudgingCommitmentSet",
-        "targetBasisHash": target_basis_hash.clone(),
-        "publicMatrixSeedHash": public_matrix_seed_hash.clone(),
-        "activeRnsLimbCount": active_limb_count,
-        "ringDegree": ring_degree,
-        "smudgingCoefficientBound": smudging_coefficient_bound,
-        "signedCoefficientOffset": smudging_signed_coefficient_offset,
-        "messageCoefficientBound": smudging_message_coefficient_bound,
-        "smudgingPolynomialDegree": smudging_polynomial_degree,
-        "commitmentRole": "target-decryption-smudging-polynomial-coefficient",
         "commitmentRecords": smudging_commitment_records,
     });
     let smudging_commitment_set_root = derive_canonical_object_hash(&smudging_commitment_set)
@@ -670,37 +657,18 @@ fn target_decryption_share_instance_parts_for_active_limb_count(
 
     let statement = TrusteeEvaluationKeyStatement {
         context: SuccinctSetupProofContext {
-            proof_family: TARGET_DECRYPTION_SHARE_PROOF_FAMILY.to_string(),
-            ceremony_id: "target-decryption-share-proof-test".to_string(),
-            manifest_hash: repeated_hash("11"),
-            roster_hash: repeated_hash("22"),
+            setup_context_hash: repeated_hash("11"),
             trustee_identity: "trustee-0".to_string(),
             trustee_roster_position: 0,
-            setup_epoch: "setup-epoch-1".to_string(),
             binding_roots: vec![
-                (
-                    "targetShareProofStatementRoot".to_string(),
-                    target_share_proof_statement_root.clone(),
-                ),
-                (
-                    "activeCredentialBindingRoot".to_string(),
-                    active_credential_binding_root.clone(),
-                ),
-                (
-                    "smudgingCommitmentSetRoot".to_string(),
-                    smudging_commitment_set_root.clone(),
-                ),
+                target_share_proof_statement_root.clone(),
+                active_credential_binding_root.clone(),
+                smudging_commitment_set_root.clone(),
             ],
         },
         ring_degree,
-        keys: Vec::new(),
-        same_secret_linkage: None,
-        private_vss_share: None,
-        vss_share_linkage: None,
-        same_secret_bridge: None,
-        target_decryption_share: Some(TargetDecryptionShareStatement {
+        proof: SetupProofStatement::TargetDecryptionShare(TargetDecryptionShareStatement {
             public_matrix_seed_hash: public_matrix_seed_hash.clone(),
-            target_basis_hash: target_basis_hash.clone(),
             trustee_identity: "trustee-0".to_string(),
             trustee_roster_position: 0,
             active_credential_binding_root: active_credential_binding_root.clone(),
@@ -719,32 +687,20 @@ fn target_decryption_share_instance_parts_for_active_limb_count(
         .validate_shape()
         .expect("target-decryption share statement");
 
-    let witness = super::super::relation::TrusteeEvaluationKeyWitness {
-        secret_coefficients: Vec::new(),
-        error_coefficients_by_key: Vec::new(),
-        negative_indicator_coefficients: Vec::new(),
-        opening_randomness_by_limb: Vec::new(),
-        private_vss_coefficient_messages_by_shamir_index: Vec::new(),
-        private_vss_opening_randomness_by_shamir_index: Vec::new(),
-        private_vss_carry_witnesses: Vec::new(),
-        vss_public_coefficient_messages_by_shamir_index: Vec::new(),
-        vss_public_recipient_share_messages_by_item: Vec::new(),
-        vss_public_carry_witnesses_by_item: Vec::new(),
-        target_decryption_message_vectors,
-        target_decryption_opening_randomness_by_commitment: Vec::new(),
-        vss_committed_material_seeds_by_bound_message: material_seeds_by_bound_message,
-        vss_committed_material_context_hashes_by_bound_message:
-            material_context_hashes_by_bound_message,
+    let witness = super::super::relation::TrusteeEvaluationKeyWitness::TargetDecryptionShare {
+        message_vectors: target_decryption_message_vectors,
+        committed_material: VssCommittedMaterialWitness {
+            vss_committed_material_seeds_by_bound_message: material_seeds_by_bound_message,
+            vss_committed_material_context_hashes_by_bound_message:
+                material_context_hashes_by_bound_message,
+        },
     };
 
     let command_request = json!({
         "context": {
-            "ceremonyId": "target-decryption-share-proof-test",
-            "manifestHash": repeated_hash("11"),
-            "rosterHash": repeated_hash("22"),
+            "setupContextHash": repeated_hash("11"),
             "trusteeIdentity": "trustee-0",
             "trusteeRosterPosition": 0,
-            "setupEpoch": "setup-epoch-1",
             "targetShareProofStatementRoot": target_share_proof_statement_root.clone(),
             "activeCredentialBindingRoot": active_credential_binding_root.clone(),
             "smudgingCommitmentSetRoot": smudging_commitment_set["smudgingCommitmentSetRoot"].clone(),
@@ -753,7 +709,6 @@ fn target_decryption_share_instance_parts_for_active_limb_count(
         "targetDecryptionShare": {
             "targetShareProofStatementRoot": target_share_proof_statement_root,
             "publicMatrixSeedHash": public_matrix_seed_hash,
-            "targetBasisHash": target_basis_hash,
             "trusteeIdentity": "trustee-0",
             "trusteeRosterPosition": 0,
             "activeCredentialBindingRoot": active_credential_binding_root,
@@ -763,9 +718,9 @@ fn target_decryption_share_instance_parts_for_active_limb_count(
             "smudgingCommitmentSet": smudging_commitment_set,
             "plaintextMultiple": PLAINTEXT_MODULUS,
         },
-        "targetDecryptionMessageVectors": witness.target_decryption_message_vectors.clone(),
-        "vssCommittedMaterialSeedsByBoundMessage": witness.vss_committed_material_seeds_by_bound_message.clone(),
-        "vssCommittedMaterialContextHashesByBoundMessage": witness.vss_committed_material_context_hashes_by_bound_message.clone(),
+        "targetDecryptionMessageVectors": witness.target_decryption_message_vectors(),
+        "vssCommittedMaterialSeedsByBoundMessage": witness.vss_committed_material_seeds_by_bound_message(),
+        "vssCommittedMaterialContextHashesByBoundMessage": witness.vss_committed_material_context_hashes_by_bound_message(),
         "proofRandomnessSeedHex": PROOF_RANDOMNESS_SEED,
         "proofRandomnessNonceHex": PROOF_RANDOMNESS_NONCE,
     });

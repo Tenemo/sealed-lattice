@@ -20,12 +20,6 @@ type VssCommittedMaterialCommitmentValue = {
 
 type VssPublicCoefficientCommitment = {
     readonly objectType: 'VssPublicCoefficientCommitment';
-    readonly sourceTrusteeIdentity: string;
-    readonly sourceTrusteeRosterPosition: number;
-    readonly publicMatrixSeedHash: ProtocolHash;
-    readonly rnsLimbIndex: number;
-    readonly rnsPrime: number;
-    readonly shamirCoefficientIndex: number;
     readonly coefficientCommitmentRoot: ProtocolHash;
     readonly commitment: VssCommittedMaterialCommitmentValue;
 };
@@ -33,8 +27,6 @@ type VssPublicCoefficientCommitment = {
 type VssPublicSourceCoefficientCommitments = {
     readonly objectType: string;
     readonly sourceTrusteeIdentity: string;
-    readonly sourceTrusteeRosterPosition: number;
-    readonly publicMatrixSeedHash: ProtocolHash;
     readonly coefficientCommitments: readonly VssPublicCoefficientCommitment[];
     readonly sourceCoefficientCommitmentRoot: ProtocolHash;
 };
@@ -42,22 +34,13 @@ type VssPublicSourceCoefficientCommitments = {
 export type VssPublicCoefficientCommitmentSet = {
     readonly objectType: string;
     readonly publicMatrixSeedHash: ProtocolHash;
-    readonly participantCount: number;
-    readonly rnsLimbCount: number;
-    readonly thresholdDegree: number;
-    readonly ringDegree: number;
     readonly sourceTrusteeRecords: readonly VssPublicSourceCoefficientCommitments[];
     readonly coefficientCommitmentRoot: ProtocolHash;
 };
 
 type VssPublicRecipientShareCommitment = {
     readonly objectType: 'VssPublicRecipientShareCommitment';
-    readonly sourceTrusteeIdentity: string;
-    readonly sourceTrusteeRosterPosition: number;
     readonly recipientIdentity: string;
-    readonly recipientRosterPosition: number;
-    readonly rnsLimbIndex: number;
-    readonly rnsPrime: number;
     readonly shareCommitmentRoot: ProtocolHash;
     readonly commitment: VssCommittedMaterialCommitmentValue;
 };
@@ -65,7 +48,6 @@ type VssPublicRecipientShareCommitment = {
 type VssPublicSourceRecipientShareCommitments = {
     readonly objectType: string;
     readonly sourceTrusteeIdentity: string;
-    readonly sourceTrusteeRosterPosition: number;
     readonly recipientShareCommitments: readonly VssPublicRecipientShareCommitment[];
     readonly sourceRecipientShareCommitmentRoot: ProtocolHash;
 };
@@ -73,9 +55,6 @@ type VssPublicSourceRecipientShareCommitments = {
 export type VssPublicRecipientShareCommitmentSet = {
     readonly objectType: string;
     readonly publicMatrixSeedHash: ProtocolHash;
-    readonly participantCount: number;
-    readonly rnsLimbCount: number;
-    readonly ringDegree: number;
     readonly sourceTrusteeRecords: readonly VssPublicSourceRecipientShareCommitments[];
     readonly recipientShareCommitmentRoot: ProtocolHash;
 };
@@ -83,9 +62,6 @@ export type VssPublicRecipientShareCommitmentSet = {
 type VssPublicAggregateThresholdCommitment = {
     readonly objectType: 'VssPublicAggregateThresholdCommitment';
     readonly recipientIdentity: string;
-    readonly recipientRosterPosition: number;
-    readonly rnsLimbIndex: number;
-    readonly rnsPrime: number;
     readonly aggregateCommitmentRoot: ProtocolHash;
     readonly aggregateOpeningRoot: ProtocolHash;
     readonly commitment: VssCommittedMaterialCommitmentValue;
@@ -93,9 +69,6 @@ type VssPublicAggregateThresholdCommitment = {
 
 type VssAggregateThresholdProofRecord = {
     readonly objectType: 'VssAggregateThresholdProofRecord';
-    readonly recipientRosterPosition: number;
-    readonly rnsLimbIndex: number;
-    readonly vssShareLinkage: Record<string, unknown>;
     readonly proofBytesHash: ProtocolHash;
     readonly proofMaterialRoot: ProtocolHash;
 };
@@ -103,9 +76,6 @@ type VssAggregateThresholdProofRecord = {
 export type VssPublicAggregateThresholdCommitmentSet = {
     readonly objectType: string;
     readonly publicMatrixSeedHash: ProtocolHash;
-    readonly participantCount: number;
-    readonly rnsLimbCount: number;
-    readonly ringDegree: number;
     readonly recipientRecords: readonly VssPublicAggregateThresholdCommitment[];
     readonly aggregateThresholdCommitmentRoot: ProtocolHash;
     readonly aggregateThresholdProofs: readonly VssAggregateThresholdProofRecord[];

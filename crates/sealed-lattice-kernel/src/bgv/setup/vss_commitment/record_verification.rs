@@ -1,27 +1,11 @@
 use super::readers::*;
 use super::*;
 
-fn verify_canonical_q_share_prime(
-    rns_prime: u64,
-    rns_limb_index: usize,
-    field_name: &str,
-) -> CanonicalResult<()> {
-    if DATA_PRIMES.get(rns_limb_index).copied() == Some(rns_prime) {
-        return Ok(());
-    }
-
-    Err(CanonicalError::new(
-        CanonicalErrorCode::ComponentMismatch,
-        format!("{field_name} must match the canonical Q_share basis"),
-    ))
-}
-
 pub(super) struct VssPublicSourceCoefficientRecordInput<'a> {
     pub(super) source_record: &'a Value,
-    pub(super) expected_roster_position: usize,
     pub(super) expected_coefficient_count: usize,
     pub(super) threshold_degree: usize,
-    pub(super) public_matrix_seed_hash: &'a str,
+    pub(super) ring_degree: usize,
 }
 
 pub(super) fn verify_vss_public_source_coefficient_record(
@@ -34,16 +18,6 @@ pub(super) fn verify_vss_public_source_coefficient_record(
     )?;
     let source_trustee_identity =
         read_non_empty_string(input.source_record, "sourceTrusteeIdentity")?;
-    compare_required_u64(
-        unsigned_at_path(input.source_record, &["sourceTrusteeRosterPosition"])?,
-        input.expected_roster_position as u64,
-        "VSS source coefficient commitments sourceTrusteeRosterPosition",
-    )?;
-    compare_required_string(
-        hash_at_path(input.source_record, &["publicMatrixSeedHash"])?,
-        input.public_matrix_seed_hash,
-        "VSS source coefficient commitments publicMatrixSeedHash",
-    )?;
     let coefficient_commitments = array_at_path(input.source_record, &["coefficientCommitments"])?;
     if coefficient_commitments.len() != input.expected_coefficient_count {
         return Err(CanonicalError::new(
@@ -58,12 +32,8 @@ pub(super) fn verify_vss_public_source_coefficient_record(
         verified_coefficient_commitments.push(verify_vss_public_coefficient_record(
             VssPublicCoefficientRecordInput {
                 coefficient_record,
-                source_trustee_identity,
-                source_trustee_roster_position: input.expected_roster_position,
                 expected_rns_limb_index: coefficient_record_index / input.threshold_degree,
-                expected_shamir_coefficient_index: coefficient_record_index
-                    % input.threshold_degree,
-                public_matrix_seed_hash: input.public_matrix_seed_hash,
+                ring_degree: input.ring_degree,
             },
         )?);
     }
@@ -71,8 +41,6 @@ pub(super) fn verify_vss_public_source_coefficient_record(
     let expected_source_root = derive_canonical_object_hash(&json!({
         "objectType": "VssPublicSourceCoefficientCommitments",
         "sourceTrusteeIdentity": source_trustee_identity,
-        "sourceTrusteeRosterPosition": input.expected_roster_position,
-        "publicMatrixSeedHash": input.public_matrix_seed_hash,
         "coefficientCommitments": verified_coefficient_commitments,
     }))?;
     let source_coefficient_commitment_root =
@@ -87,8 +55,6 @@ pub(super) fn verify_vss_public_source_coefficient_record(
     Ok(json!({
         "objectType": "VssPublicSourceCoefficientCommitments",
         "sourceTrusteeIdentity": source_trustee_identity,
-        "sourceTrusteeRosterPosition": input.expected_roster_position,
-        "publicMatrixSeedHash": input.public_matrix_seed_hash,
         "coefficientCommitments": verified_coefficient_commitments,
         "sourceCoefficientCommitmentRoot": source_coefficient_commitment_root,
     }))
@@ -96,11 +62,8 @@ pub(super) fn verify_vss_public_source_coefficient_record(
 
 pub(super) struct VssPublicCoefficientRecordInput<'a> {
     coefficient_record: &'a Value,
-    source_trustee_identity: &'a str,
-    source_trustee_roster_position: usize,
     expected_rns_limb_index: usize,
-    expected_shamir_coefficient_index: usize,
-    public_matrix_seed_hash: &'a str,
+    ring_degree: usize,
 }
 
 pub(super) struct VssCommittedMaterialRecordCommitmentInput<'a> {
@@ -109,6 +72,7 @@ pub(super) struct VssCommittedMaterialRecordCommitmentInput<'a> {
     expected_commitment_root: &'a str,
     expected_rns_limb_index: usize,
     expected_rns_prime: u64,
+    expected_ring_degree: usize,
     field_name: &'a str,
 }
 
@@ -193,6 +157,11 @@ pub(super) fn verify_vss_committed_material_record_commitment(
         input.expected_rns_prime,
         &format!("{} rnsPrime", input.field_name),
     )?;
+    compare_required_u64(
+        unsigned_at_path(&commitment, &["ringDegree"])?,
+        input.expected_ring_degree as u64,
+        &format!("{} ringDegree", input.field_name),
+    )?;
     let commitment_root = derive_canonical_object_hash(&commitment)?;
     if commitment_root != input.expected_commitment_root {
         return Err(CanonicalError::new(
@@ -215,41 +184,15 @@ pub(super) fn verify_vss_public_coefficient_record(
         "VssPublicCoefficientCommitment",
         "VSS coefficient commitment objectType",
     )?;
-    compare_required_string(
-        string_at_path(input.coefficient_record, &["sourceTrusteeIdentity"])?,
-        input.source_trustee_identity,
-        "VSS coefficient commitment sourceTrusteeIdentity",
-    )?;
-    compare_required_u64(
-        unsigned_at_path(input.coefficient_record, &["sourceTrusteeRosterPosition"])?,
-        input.source_trustee_roster_position as u64,
-        "VSS coefficient commitment sourceTrusteeRosterPosition",
-    )?;
-    compare_required_string(
-        hash_at_path(input.coefficient_record, &["publicMatrixSeedHash"])?,
-        input.public_matrix_seed_hash,
-        "VSS coefficient commitment publicMatrixSeedHash",
-    )?;
-    compare_required_u64(
-        unsigned_at_path(input.coefficient_record, &["rnsLimbIndex"])?,
-        input.expected_rns_limb_index as u64,
-        "VSS coefficient commitment rnsLimbIndex",
-    )?;
-    let rns_prime = read_positive_u64_at_path(
-        input.coefficient_record,
-        &["rnsPrime"],
-        "VSS coefficient commitment rnsPrime",
-    )?;
-    verify_canonical_q_share_prime(
-        rns_prime,
-        input.expected_rns_limb_index,
-        "VSS coefficient commitment rnsPrime",
-    )?;
-    compare_required_u64(
-        unsigned_at_path(input.coefficient_record, &["shamirCoefficientIndex"])?,
-        input.expected_shamir_coefficient_index as u64,
-        "VSS coefficient commitment shamirCoefficientIndex",
-    )?;
+    let rns_prime = DATA_PRIMES
+        .get(input.expected_rns_limb_index)
+        .copied()
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "VSS coefficient commitment coordinate exceeds the canonical Q_share basis",
+            )
+        })?;
     let coefficient_commitment_root =
         hash_at_path(input.coefficient_record, &["coefficientCommitmentRoot"])?;
     let commitment = verify_vss_committed_material_record_commitment(
@@ -259,18 +202,13 @@ pub(super) fn verify_vss_public_coefficient_record(
             expected_commitment_root: coefficient_commitment_root,
             expected_rns_limb_index: input.expected_rns_limb_index,
             expected_rns_prime: rns_prime,
+            expected_ring_degree: input.ring_degree,
             field_name: "VSS coefficient commitment commitment",
         },
     )?;
 
     Ok(json!({
         "objectType": "VssPublicCoefficientCommitment",
-        "sourceTrusteeIdentity": input.source_trustee_identity,
-        "sourceTrusteeRosterPosition": input.source_trustee_roster_position,
-        "publicMatrixSeedHash": input.public_matrix_seed_hash,
-        "rnsLimbIndex": input.expected_rns_limb_index,
-        "rnsPrime": rns_prime,
-        "shamirCoefficientIndex": input.expected_shamir_coefficient_index,
         "coefficientCommitmentRoot": coefficient_commitment_root,
         "commitment": commitment,
     }))
@@ -278,9 +216,9 @@ pub(super) fn verify_vss_public_coefficient_record(
 
 pub(super) struct VssPublicSourceRecipientShareRecordInput<'a> {
     pub(super) source_record: &'a Value,
-    pub(super) expected_source_roster_position: usize,
     pub(super) expected_recipient_share_count: usize,
     pub(super) rns_limb_count: usize,
+    pub(super) ring_degree: usize,
 }
 
 pub(super) fn verify_vss_public_source_recipient_share_record(
@@ -293,11 +231,6 @@ pub(super) fn verify_vss_public_source_recipient_share_record(
     )?;
     let source_trustee_identity =
         read_non_empty_string(input.source_record, "sourceTrusteeIdentity")?;
-    compare_required_u64(
-        unsigned_at_path(input.source_record, &["sourceTrusteeRosterPosition"])?,
-        input.expected_source_roster_position as u64,
-        "VSS source recipient-share commitments sourceTrusteeRosterPosition",
-    )?;
     let recipient_share_commitments =
         array_at_path(input.source_record, &["recipientShareCommitments"])?;
     if recipient_share_commitments.len() != input.expected_recipient_share_count {
@@ -315,11 +248,8 @@ pub(super) fn verify_vss_public_source_recipient_share_record(
         verified_recipient_share_commitments.push(verify_vss_public_recipient_share_record(
             VssPublicRecipientShareRecordInput {
                 recipient_share_record,
-                source_trustee_identity,
-                source_trustee_roster_position: input.expected_source_roster_position,
-                expected_recipient_roster_position: recipient_share_record_index
-                    / input.rns_limb_count,
                 expected_rns_limb_index: recipient_share_record_index % input.rns_limb_count,
+                ring_degree: input.ring_degree,
             },
         )?);
     }
@@ -327,7 +257,6 @@ pub(super) fn verify_vss_public_source_recipient_share_record(
     let expected_source_root = derive_canonical_object_hash(&json!({
         "objectType": "VssPublicSourceRecipientShareCommitments",
         "sourceTrusteeIdentity": source_trustee_identity,
-        "sourceTrusteeRosterPosition": input.expected_source_roster_position,
         "recipientShareCommitments": verified_recipient_share_commitments,
     }))?;
     let source_recipient_share_commitment_root =
@@ -342,7 +271,6 @@ pub(super) fn verify_vss_public_source_recipient_share_record(
     Ok(json!({
         "objectType": "VssPublicSourceRecipientShareCommitments",
         "sourceTrusteeIdentity": source_trustee_identity,
-        "sourceTrusteeRosterPosition": input.expected_source_roster_position,
         "recipientShareCommitments": verified_recipient_share_commitments,
         "sourceRecipientShareCommitmentRoot": source_recipient_share_commitment_root,
     }))
@@ -350,10 +278,8 @@ pub(super) fn verify_vss_public_source_recipient_share_record(
 
 pub(super) struct VssPublicRecipientShareRecordInput<'a> {
     recipient_share_record: &'a Value,
-    source_trustee_identity: &'a str,
-    source_trustee_roster_position: usize,
-    expected_recipient_roster_position: usize,
     expected_rns_limb_index: usize,
+    ring_degree: usize,
 }
 
 pub(super) fn verify_vss_public_recipient_share_record(
@@ -364,41 +290,17 @@ pub(super) fn verify_vss_public_recipient_share_record(
         "VssPublicRecipientShareCommitment",
         "VSS recipient-share commitment objectType",
     )?;
-    compare_required_string(
-        string_at_path(input.recipient_share_record, &["sourceTrusteeIdentity"])?,
-        input.source_trustee_identity,
-        "VSS recipient-share commitment sourceTrusteeIdentity",
-    )?;
-    compare_required_u64(
-        unsigned_at_path(
-            input.recipient_share_record,
-            &["sourceTrusteeRosterPosition"],
-        )?,
-        input.source_trustee_roster_position as u64,
-        "VSS recipient-share commitment sourceTrusteeRosterPosition",
-    )?;
     let recipient_identity =
         read_non_empty_string(input.recipient_share_record, "recipientIdentity")?;
-    compare_required_u64(
-        unsigned_at_path(input.recipient_share_record, &["recipientRosterPosition"])?,
-        input.expected_recipient_roster_position as u64,
-        "VSS recipient-share commitment recipientRosterPosition",
-    )?;
-    compare_required_u64(
-        unsigned_at_path(input.recipient_share_record, &["rnsLimbIndex"])?,
-        input.expected_rns_limb_index as u64,
-        "VSS recipient-share commitment rnsLimbIndex",
-    )?;
-    let rns_prime = read_positive_u64_at_path(
-        input.recipient_share_record,
-        &["rnsPrime"],
-        "VSS recipient-share commitment rnsPrime",
-    )?;
-    verify_canonical_q_share_prime(
-        rns_prime,
-        input.expected_rns_limb_index,
-        "VSS recipient-share commitment rnsPrime",
-    )?;
+    let rns_prime = DATA_PRIMES
+        .get(input.expected_rns_limb_index)
+        .copied()
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "VSS recipient-share commitment coordinate exceeds the canonical Q_share basis",
+            )
+        })?;
     let share_commitment_root =
         hash_at_path(input.recipient_share_record, &["shareCommitmentRoot"])?;
     let commitment = verify_vss_committed_material_record_commitment(
@@ -408,18 +310,14 @@ pub(super) fn verify_vss_public_recipient_share_record(
             expected_commitment_root: share_commitment_root,
             expected_rns_limb_index: input.expected_rns_limb_index,
             expected_rns_prime: rns_prime,
+            expected_ring_degree: input.ring_degree,
             field_name: "VSS recipient-share commitment commitment",
         },
     )?;
 
     Ok(json!({
         "objectType": "VssPublicRecipientShareCommitment",
-        "sourceTrusteeIdentity": input.source_trustee_identity,
-        "sourceTrusteeRosterPosition": input.source_trustee_roster_position,
         "recipientIdentity": recipient_identity,
-        "recipientRosterPosition": input.expected_recipient_roster_position,
-        "rnsLimbIndex": input.expected_rns_limb_index,
-        "rnsPrime": rns_prime,
         "shareCommitmentRoot": share_commitment_root,
         "commitment": commitment,
     }))
@@ -427,8 +325,8 @@ pub(super) fn verify_vss_public_recipient_share_record(
 
 pub(super) struct VssPublicAggregateThresholdRecordInput<'a> {
     pub(super) recipient_record: &'a Value,
-    pub(super) expected_recipient_roster_position: usize,
     pub(super) expected_rns_limb_index: usize,
+    pub(super) ring_degree: usize,
 }
 
 pub(super) fn verify_vss_public_aggregate_threshold_record(
@@ -440,26 +338,15 @@ pub(super) fn verify_vss_public_aggregate_threshold_record(
         "VSS aggregate threshold commitment objectType",
     )?;
     let recipient_identity = read_non_empty_string(input.recipient_record, "recipientIdentity")?;
-    compare_required_u64(
-        unsigned_at_path(input.recipient_record, &["recipientRosterPosition"])?,
-        input.expected_recipient_roster_position as u64,
-        "VSS aggregate threshold commitment recipientRosterPosition",
-    )?;
-    compare_required_u64(
-        unsigned_at_path(input.recipient_record, &["rnsLimbIndex"])?,
-        input.expected_rns_limb_index as u64,
-        "VSS aggregate threshold commitment rnsLimbIndex",
-    )?;
-    let rns_prime = read_positive_u64_at_path(
-        input.recipient_record,
-        &["rnsPrime"],
-        "VSS aggregate threshold commitment rnsPrime",
-    )?;
-    verify_canonical_q_share_prime(
-        rns_prime,
-        input.expected_rns_limb_index,
-        "VSS aggregate threshold commitment rnsPrime",
-    )?;
+    let rns_prime = DATA_PRIMES
+        .get(input.expected_rns_limb_index)
+        .copied()
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "VSS aggregate threshold commitment coordinate exceeds the canonical Q_share basis",
+            )
+        })?;
     let aggregate_commitment_root =
         hash_at_path(input.recipient_record, &["aggregateCommitmentRoot"])?;
     let aggregate_opening_root = hash_at_path(input.recipient_record, &["aggregateOpeningRoot"])?;
@@ -470,6 +357,7 @@ pub(super) fn verify_vss_public_aggregate_threshold_record(
             expected_commitment_root: aggregate_commitment_root,
             expected_rns_limb_index: input.expected_rns_limb_index,
             expected_rns_prime: rns_prime,
+            expected_ring_degree: input.ring_degree,
             field_name: "VSS aggregate threshold commitment commitment",
         },
     )?;
@@ -477,9 +365,6 @@ pub(super) fn verify_vss_public_aggregate_threshold_record(
     Ok(json!({
         "objectType": "VssPublicAggregateThresholdCommitment",
         "recipientIdentity": recipient_identity,
-        "recipientRosterPosition": input.expected_recipient_roster_position,
-        "rnsLimbIndex": input.expected_rns_limb_index,
-        "rnsPrime": rns_prime,
         "aggregateCommitmentRoot": aggregate_commitment_root,
         "aggregateOpeningRoot": aggregate_opening_root,
         "commitment": commitment,

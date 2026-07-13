@@ -6,12 +6,12 @@ use crate::hashing::derive_canonical_object_hash;
 pub(in super::super) fn verify_public_key_shares(
     setup_package: &Value,
     trustee_registrations: &setup_intent::SetupIntentTrusteeRegistrationMap,
-) -> CanonicalResult<Option<Value>> {
+) -> CanonicalResult<Option<Refusals>> {
     let Some(share_set) = setup_package.get("publicKeyShares") else {
-        return Ok(Some(verification_response(
+        return Ok(Some(setup_refusals(
             vec!["publicKeyShares".to_string()],
             Vec::new(),
-        )?));
+        )));
     };
     if !share_set.is_object() {
         return Ok(Some(public_key_refusal(
@@ -35,26 +35,14 @@ pub(in super::super) fn verify_public_key_shares(
             "setupContext was required before public-key share verification",
         )
     })?;
-    if let Err(error) = verify_context_fields_match(share_set, setup_context, "publicKeyShares") {
-        return Ok(Some(public_key_refusal(
-            "publicKeyShareSetContextMismatch",
-            error.message,
-            "setupPackage.publicKeyShares",
-        )?));
-    }
     let roster = super::accepted_roster_from_package(setup_package)?;
     let common_binding = public_key_common_binding(setup_package)?;
-    if let Some(response) =
-        verify_public_key_common_fields(share_set, &common_binding, "publicKeyShares")?
-    {
-        return Ok(Some(response));
-    }
     let expected_trustees = expected_trustees_from_setup_intent(trustee_registrations);
     let Some(share_records) = share_set.get("shareRecords").and_then(Value::as_array) else {
-        return Ok(Some(verification_response(
+        return Ok(Some(setup_refusals(
             vec!["publicKeyShares.shareRecords".to_string()],
             Vec::new(),
-        )?));
+        )));
     };
     if share_records.len() != roster.participant_count as usize {
         return Ok(Some(public_key_refusal(
@@ -80,20 +68,21 @@ pub(in super::super) fn verify_public_key_shares(
         .get("publicKeyShareSetRoot")
         .and_then(Value::as_str)
     else {
-        return Ok(Some(verification_response(
+        return Ok(Some(setup_refusals(
             vec!["publicKeyShares.publicKeyShareSetRoot".to_string()],
             Vec::new(),
-        )?));
+        )));
     };
     validate_hash_string(
         public_key_share_set_root,
         "publicKeyShares.publicKeyShareSetRoot",
     )?;
-    let mut root_input = share_set.clone();
-    root_input
-        .as_object_mut()
-        .expect("public-key share set object was checked")
-        .remove("publicKeyShareSetRoot");
+    let root_input = json!({
+        "objectType": PUBLIC_KEY_SHARE_SET_OBJECT_TYPE,
+        "setupContextHash": setup_context_hash(setup_context)?,
+        "publicMatrixSeedHash": common_binding.public_matrix_seed_hash.as_str(),
+        "shareRecords": share_records,
+    });
     let expected_root = derive_canonical_object_hash(&root_input)?;
     if public_key_share_set_root != expected_root {
         return Ok(Some(public_key_refusal(
@@ -112,7 +101,7 @@ fn verify_public_key_share_record(
     expected_trustees: &BTreeMap<u64, String>,
     common_binding: &PublicKeyCommonBinding,
     seen_roster_positions: &mut BTreeSet<u64>,
-) -> CanonicalResult<Option<Value>> {
+) -> CanonicalResult<Option<Refusals>> {
     if !share_record.is_object() {
         return Ok(Some(public_key_refusal(
             "publicKeyShareNotObject",
@@ -128,23 +117,6 @@ fn verify_public_key_share_record(
             "setupPackage.publicKeyShares.shareRecords.objectType",
         )?));
     }
-    if let Err(error) =
-        verify_context_fields_match(share_record, setup_context, "publicKeyShares.shareRecords")
-    {
-        return Ok(Some(public_key_refusal(
-            "publicKeyShareContextMismatch",
-            error.message,
-            "setupPackage.publicKeyShares.shareRecords",
-        )?));
-    }
-    if let Some(response) = verify_public_key_common_fields(
-        share_record,
-        common_binding,
-        "publicKeyShares.shareRecords",
-    )? {
-        return Ok(Some(response));
-    }
-
     let trustee_identity = value_string(share_record, "trusteeIdentity")?;
     let trustee_roster_position = value_u64(share_record, "trusteeRosterPosition")?;
     if !seen_roster_positions.insert(trustee_roster_position) {
@@ -165,11 +137,10 @@ fn verify_public_key_share_record(
             "setupPackage.publicKeyShares.shareRecords.trusteeIdentity",
         )?));
     }
-    if let Some(response) = verify_public_key_share_limb_hashes(
-        share_record
-            .get("shareCoefficientVectorHash512ByLimb")
-            .and_then(Value::as_array),
-    )? {
+    let share_coefficient_hashes = share_record
+        .get("shareCoefficientVectorHash512ByLimb")
+        .and_then(Value::as_array);
+    if let Some(response) = verify_public_key_share_limb_hashes(share_coefficient_hashes)? {
         return Ok(Some(response));
     }
 
@@ -177,20 +148,24 @@ fn verify_public_key_share_record(
         .get("publicKeyShareRoot")
         .and_then(Value::as_str)
     else {
-        return Ok(Some(verification_response(
+        return Ok(Some(setup_refusals(
             vec!["publicKeyShares.shareRecords.publicKeyShareRoot".to_string()],
             Vec::new(),
-        )?));
+        )));
     };
     validate_hash_string(
         public_key_share_root,
         "publicKeyShares.shareRecords.publicKeyShareRoot",
     )?;
-    let mut root_input = share_record.clone();
-    root_input
-        .as_object_mut()
-        .expect("public-key share object was checked")
-        .remove("publicKeyShareRoot");
+    let root_input = json!({
+        "objectType": PUBLIC_KEY_SHARE_OBJECT_TYPE,
+        "setupContextHash": setup_context_hash(setup_context)?,
+        "trusteeIdentity": trustee_identity,
+        "trusteeRosterPosition": trustee_roster_position,
+        "publicMatrixSeedHash": common_binding.public_matrix_seed_hash.as_str(),
+        "shareCoefficientVectorHash512ByLimb": share_coefficient_hashes
+            .expect("public-key share limb hashes were checked"),
+    });
     let expected_root = derive_canonical_object_hash(&root_input)?;
     if public_key_share_root != expected_root {
         return Ok(Some(public_key_refusal(
@@ -205,17 +180,17 @@ fn verify_public_key_share_record(
 
 fn verify_public_key_share_limb_hashes(
     limb_hashes: Option<&Vec<Value>>,
-) -> CanonicalResult<Option<Value>> {
+) -> CanonicalResult<Option<Refusals>> {
     const LIMB_HASHES_PATH: &str =
         "publicKeyShares.shareRecords.shareCoefficientVectorHash512ByLimb";
     const LIMB_HASHES_OBJECT_PATH: &str =
         "setupPackage.publicKeyShares.shareRecords.shareCoefficientVectorHash512ByLimb";
 
     let Some(limb_hashes) = limb_hashes else {
-        return Ok(Some(verification_response(
+        return Ok(Some(setup_refusals(
             vec![LIMB_HASHES_PATH.to_string()],
             Vec::new(),
-        )?));
+        )));
     };
     if limb_hashes.len() != DATA_PRIMES.len() {
         return Ok(Some(public_key_refusal(
@@ -280,14 +255,11 @@ mod tests {
             .collect()
     }
 
-    fn refusal_reason(response: Option<Value>) -> String {
-        response
+    fn refusal_reason(refusals: Option<Refusals>) -> String {
+        refusals
             .expect("malformed limb hashes must be refused")
-            .get("refusedObjects")
-            .and_then(Value::as_array)
-            .and_then(|refusals| refusals.first())
-            .and_then(|refusal| refusal.get("reasonCode"))
-            .and_then(Value::as_str)
+            .first()
+            .map(|refusal| refusal.reason_code)
             .expect("typed refusal reason")
             .to_string()
     }

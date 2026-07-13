@@ -16,7 +16,6 @@ import {
     type CanonicalStreamKernelContext,
     type CanonicalStreamLeaseState,
     type CanonicalStreamWriterLease,
-    type FillRandomValues,
 } from './canonical-stream-runtime.js';
 import { refusalReasonByCode } from './transcript-core-bridge/kernel-errors.js';
 import type {
@@ -24,7 +23,6 @@ import type {
     AcceptedSetupSession,
 } from './transcript-core-bridge/kernel-types.js';
 
-const capabilityByteLength = 32;
 const materialRootByteLength = 64;
 const wasm32WordByteLength = 4;
 const runtimeInternalFailureStatus = 0xffff_ffff;
@@ -98,7 +96,6 @@ export type BgvTargetDecryptionAggregateOpeningMaterialSource = Readonly<{
 }>;
 
 type ActiveLease = {
-    capabilityPointer: number;
     chunkCount: number;
     handle: number;
     kind: 'material-reader' | 'verifier';
@@ -170,32 +167,19 @@ const materialRootBytes = (materialRoot: string): Uint8Array => {
     return bytes;
 };
 
-const defaultFillRandomValues: FillRandomValues = (destination): void => {
-    const cryptoProvider = globalThis.crypto;
-    if (cryptoProvider === undefined) {
-        throw new CanonicalStreamInternalError(
-            'Web Crypto getRandomValues is required for stream capabilities.',
-        );
-    }
-    cryptoProvider.getRandomValues(destination);
-};
-
 class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRuntime {
     readonly #acceptedSetupSession: AcceptedSetupSession | undefined;
     readonly #context: CanonicalStreamKernelContext;
-    readonly #fillRandomValues: FillRandomValues;
     readonly #kernel: TranscriptCoreKernelContextOwner;
     #activeLease: ActiveLease | undefined;
 
     public constructor(
         kernel: TranscriptCoreKernelContextOwner,
         context: CanonicalStreamKernelContext,
-        fillRandomValues: FillRandomValues,
         acceptedSetupSession: AcceptedSetupSession | undefined,
     ) {
         this.#kernel = kernel;
         this.#context = context;
-        this.#fillRandomValues = fillRandomValues;
         this.#acceptedSetupSession = acceptedSetupSession;
         this.#requireBoundary();
     }
@@ -219,12 +203,10 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
             );
         }
         const rootBytes = materialRootBytes(input.materialRoot);
-        const capabilityPointer = this.#createCapability();
         let descriptorPointer = 0;
         let handle = 0;
         let metadataPointer = 0;
         let rootPointer = 0;
-        let sessionActivated = false;
         try {
             rootPointer = this.#copyMetadataIntoWasm(rootBytes);
             descriptorPointer = this.#copyMetadataIntoWasm(
@@ -241,8 +223,6 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
                               rootBytes.byteLength,
                               descriptorPointer,
                               input.descriptorBytes.byteLength,
-                              capabilityPointer,
-                              capabilityByteLength,
                               metadataPointer,
                               metadataPointer + wasm32WordByteLength,
                               metadataPointer + 2 * wasm32WordByteLength,
@@ -260,8 +240,6 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
                                   materialRootLength: rootBytes.byteLength,
                                   materialRootPointer: rootPointer,
                                   statusPointer: metadataPointer,
-                                  streamCapabilityLength: capabilityByteLength,
-                                  streamCapabilityPointer: capabilityPointer,
                                   totalByteLengthPointer:
                                       metadataPointer + wasm32WordByteLength,
                               },
@@ -286,7 +264,6 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
                 );
             }
             const lease: ActiveLease = {
-                capabilityPointer,
                 chunkCount,
                 handle,
                 kind: 'verifier',
@@ -294,11 +271,10 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
                 totalByteLength,
             };
             this.#activeLease = lease;
-            sessionActivated = true;
             return this.#lease(lease);
         } catch (error) {
             if (handle !== 0) {
-                this.#cancelUnactivated(handle, capabilityPointer, error);
+                this.#cancelUnactivated(handle, error);
             }
             throw error;
         } finally {
@@ -312,12 +288,6 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
                 this.#context.deallocate(
                     metadataPointer,
                     3 * wasm32WordByteLength,
-                );
-            }
-            if (!sessionActivated) {
-                this.#zeroAndDeallocate(
-                    capabilityPointer,
-                    capabilityByteLength,
                 );
             }
         }
@@ -336,8 +306,6 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
             throw new CanonicalStreamRefusalError('malformedEncoding');
         }
         const rootBytes = materialRootBytes(input.materialRoot);
-        const capabilityPointer = this.#createCapability();
-        let capabilityReleased = false;
         let handle = 0;
         let metadataPointer = 0;
         let rootPointer = 0;
@@ -353,8 +321,6 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
                         input.family,
                         rootPointer,
                         rootBytes.byteLength,
-                        capabilityPointer,
-                        capabilityByteLength,
                         metadataPointer,
                         metadataPointer + wasm32WordByteLength,
                         metadataPointer + 2 * wasm32WordByteLength,
@@ -380,7 +346,6 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
                 );
             }
             readerLease = {
-                capabilityPointer,
                 chunkCount,
                 handle,
                 kind: 'material-reader',
@@ -390,7 +355,6 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
             this.#activeLease = readerLease;
 
             writer = openCanonicalStreamWorkerRuntime({
-                fillRandomValues: this.#fillRandomValues,
                 kernel: this.#kernel,
             }).openWriter({ streamDomain, totalByteLength });
             if (writer.chunkCount !== chunkCount) {
@@ -414,8 +378,6 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
                         () =>
                             this.#context.bgvMaterialReaderReadChunk!(
                                 handle,
-                                capabilityPointer,
-                                capabilityByteLength,
                                 chunkIndex,
                                 outputPointer,
                                 chunkByteLength,
@@ -447,17 +409,11 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
             this.#throwIfCancelled(input.abortSignal);
             const finishStatus = this.#context.runExclusive(
                 'BGV canonical material reader finish',
-                () =>
-                    this.#context.bgvMaterialReaderFinish!(
-                        handle,
-                        capabilityPointer,
-                        capabilityByteLength,
-                    ),
+                () => this.#context.bgvMaterialReaderFinish!(handle),
             );
             this.#throwStatus(finishStatus);
             readerLease.state = 'completed';
             this.#release(readerLease);
-            capabilityReleased = true;
             readerLease = undefined;
             const descriptorBytes = writer.finish();
             writer = undefined;
@@ -479,8 +435,6 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
                         () =>
                             this.#context.bgvMaterialReaderCancel!(
                                 readerLease!.handle,
-                                readerLease!.capabilityPointer,
-                                capabilityByteLength,
                             ),
                     );
                     if (cancelStatus >>> 0 !== runtimeInvalidSessionStatus) {
@@ -491,10 +445,8 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
                 }
                 readerLease.state = 'failed';
                 this.#release(readerLease);
-                capabilityReleased = true;
                 readerLease = undefined;
             } else if (
-                !capabilityReleased &&
                 handle !== 0 &&
                 this.#activeLease === undefined
             ) {
@@ -502,11 +454,7 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
                     const cancelStatus = this.#context.runExclusive(
                         'BGV canonical material reader begin cleanup',
                         () =>
-                            this.#context.bgvMaterialReaderCancel!(
-                                handle,
-                                capabilityPointer,
-                                capabilityByteLength,
-                            ),
+                            this.#context.bgvMaterialReaderCancel!(handle),
                     );
                     if (cancelStatus >>> 0 !== runtimeInvalidSessionStatus) {
                         this.#throwStatus(cancelStatus);
@@ -531,12 +479,6 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
                     3 * wasm32WordByteLength,
                 );
             }
-            if (!capabilityReleased) {
-                this.#zeroAndDeallocate(
-                    capabilityPointer,
-                    capabilityByteLength,
-                );
-            }
         }
     }
 
@@ -556,7 +498,6 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
         const rootBytes = materialRootBytes(input.materialRoot);
         try {
             return await openCanonicalStreamWorkerRuntime({
-                fillRandomValues: this.#fillRandomValues,
                 kernel: this.#kernel,
             }).write({
                 ...(input.abortSignal === undefined
@@ -736,8 +677,6 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
                     () =>
                         this.#context.bgvAbsorbChunk!(
                             lease.handle,
-                            lease.capabilityPointer,
-                            capabilityByteLength,
                             chunkIndex,
                             chunkPointer,
                             bytes.byteLength,
@@ -762,12 +701,7 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
             }
             const status = this.#context.runExclusive(
                 'BGV canonical stream finish',
-                () =>
-                    this.#context.bgvFinish!(
-                        lease.handle,
-                        lease.capabilityPointer,
-                        capabilityByteLength,
-                    ),
+                () => this.#context.bgvFinish!(lease.handle),
             );
             this.#throwStatus(status);
             lease.state = 'completed';
@@ -786,16 +720,8 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
                 'BGV canonical stream cancellation',
                 () =>
                     lease.kind === 'material-reader'
-                        ? this.#context.bgvMaterialReaderCancel!(
-                              lease.handle,
-                              lease.capabilityPointer,
-                              capabilityByteLength,
-                          )
-                        : this.#context.bgvCancel!(
-                              lease.handle,
-                              lease.capabilityPointer,
-                              capabilityByteLength,
-                          ),
+                        ? this.#context.bgvMaterialReaderCancel!(lease.handle)
+                        : this.#context.bgvCancel!(lease.handle),
             );
             this.#throwStatus(status);
             lease.state = 'cancelled';
@@ -813,12 +739,7 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
             try {
                 const status = this.#context.runExclusive(
                     'BGV canonical stream failure cleanup',
-                    () =>
-                        this.#context.bgvCancel!(
-                            lease.handle,
-                            lease.capabilityPointer,
-                            capabilityByteLength,
-                        ),
+                    () => this.#context.bgvCancel!(lease.handle),
                 );
                 if (status >>> 0 !== runtimeInvalidSessionStatus) {
                     this.#throwStatus(status);
@@ -840,18 +761,12 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
 
     #cancelUnactivated(
         handle: number,
-        capabilityPointer: number,
         operationFailure: unknown,
     ): never {
         try {
             const status = this.#context.runExclusive(
                 'BGV canonical stream begin failure cleanup',
-                () =>
-                    this.#context.bgvCancel!(
-                        handle,
-                        capabilityPointer,
-                        capabilityByteLength,
-                    ),
+                () => this.#context.bgvCancel!(handle),
             );
             this.#throwStatus(status);
         } catch (cleanupFailure) {
@@ -936,31 +851,6 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
     #release(lease: ActiveLease): void {
         if (this.#activeLease === lease) {
             this.#activeLease = undefined;
-        }
-        this.#zeroAndDeallocate(lease.capabilityPointer, capabilityByteLength);
-        lease.capabilityPointer = 0;
-    }
-
-    #createCapability(): number {
-        const capability = new Uint8Array(capabilityByteLength);
-        try {
-            this.#fillRandomValues(capability);
-            if (capability.every((byte) => byte === 0)) {
-                throw new CanonicalStreamInternalError(
-                    'The stream capability entropy source returned an invalid value.',
-                );
-            }
-            return this.#copyMetadataIntoWasm(capability);
-        } catch (error) {
-            if (error instanceof CanonicalStreamInternalError) {
-                throw error;
-            }
-            throw new CanonicalStreamInternalError(
-                'The stream capability entropy source failed.',
-                error,
-            );
-        } finally {
-            capability.fill(0);
         }
     }
 
@@ -1070,7 +960,6 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
 
 export const openBgvCanonicalStreamRuntime = (input: {
     readonly acceptedSetupSession?: AcceptedSetupSession;
-    readonly fillRandomValues?: FillRandomValues;
     readonly kernel: TranscriptCoreKernelContextOwner;
 }): BgvCanonicalStreamRuntime => {
     const context = canonicalStreamKernelContext(input.kernel);
@@ -1083,7 +972,6 @@ export const openBgvCanonicalStreamRuntime = (input: {
         new BgvCanonicalStreamRuntimeImplementation(
             input.kernel,
             context,
-            input.fillRandomValues ?? defaultFillRandomValues,
             input.acceptedSetupSession,
         ),
     );

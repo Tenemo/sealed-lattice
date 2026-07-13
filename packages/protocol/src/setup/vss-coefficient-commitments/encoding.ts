@@ -3,8 +3,7 @@ export {
     assertNonNegativeSafeInteger,
     assertPositiveSafeInteger,
     assertProtocolHash,
-    contextFields,
-    setupContextFieldNames,
+    deriveCollectiveBgvSetupContextHash,
 } from '../common-fields.js';
 
 import {

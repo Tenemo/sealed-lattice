@@ -21,9 +21,9 @@ Transcript and mailbox services only relay bytes. Correctness and acceptance mus
 
 The repository contains development implementations of these building blocks:
 
-- canonical poll, roster, transcript-object, and protocol-object validation;
+- canonical poll, roster, and protocol-object encoding and validation;
 - collective BGV setup, verifiable secret sharing, public-key construction, and evaluation-key material;
-- bounded encrypted ballots, homomorphic aggregation, and deterministic top-k evaluation; and
+- internal bounded encrypted-ballot relations, homomorphic aggregation, and deterministic top-k evaluation; and
 - target-bound threshold result release.
 
 They are not yet composed into one complete participant workflow. The public package does not provide accepted canonical-board finality and state authorization, target release has no persistent non-forking one-shot authority, and the current setup and ballot proofs do not have the required end-to-end security arguments. The intended participant-facing verification path is a mobile browser, but the complete ceremony has not been demonstrated on supported physical phones. Native, Node.js, desktop-browser, fixture, and emulated-mobile results are development evidence only. The authoritative limitations are maintained in [SECURITY.md](SECURITY.md).

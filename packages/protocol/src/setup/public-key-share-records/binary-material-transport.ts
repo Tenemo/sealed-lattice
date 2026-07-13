@@ -8,40 +8,31 @@ import {
     type BinaryChunkedPublicKeyShareMaterialBundle,
     type BinaryChunkedPublicKeyShareMaterialBundleInput,
     type BinaryChunkedPublicKeyShareMaterialSet,
-    type BinaryChunkedPublicKeyShareMaterialTransport,
-    type BinaryChunkedPublicKeyShareMaterialTransportInput,
     type PublicKeyShareMaterialChunkSource,
-    type PublicKeyShareMaterialRootReference,
+    type PublicKeyShareMaterialRecord,
 } from './constants-and-types.js';
 import {
     assertPublicKeyShareMaterialInput,
     createPublicKeyShareMaterialEncodingSource,
-    createPublicKeyShareMaterialSetEncodingSource,
     publicKeyShareMaterialRecordsFromContributions,
-    publicKeyShareMaterialRootReferences,
 } from './embedded-material-records.js';
-import { contextFields } from './encoding.js';
+import { deriveCollectiveBgvSetupContextHash } from './encoding.js';
 
 const binaryChunkedPublicKeyShareMaterialSet = (
     input: Readonly<{
         readonly setupContext: CollectiveBgvSetupContext;
         readonly ringDegree: number;
         readonly publicMatrixSeedHash: ProtocolHash;
-        readonly publicKeyCrpRoot: ProtocolHash;
-        readonly publicAPolynomialRoot: ProtocolHash;
         readonly publicKeyShareSetRoot: ProtocolHash;
-        readonly publicKeyShareMaterialRoots: readonly PublicKeyShareMaterialRootReference[];
+        readonly publicKeyShareMaterialRecords: readonly PublicKeyShareMaterialRecord[];
     }>,
 ): BinaryChunkedPublicKeyShareMaterialSet => {
+    const publicKeyShareMaterialRoots = input.publicKeyShareMaterialRecords.map(
+        (materialRecord) => materialRecord.publicKeyShareMaterialRoot,
+    );
     const materialSetWithoutRoot = {
         objectType: 'PublicKeyShareMaterialSet',
-        ...contextFields(input.setupContext),
-        ringDegree: input.ringDegree,
-        publicMatrixSeedHash: input.publicMatrixSeedHash,
-        publicKeyCrpRoot: input.publicKeyCrpRoot,
-        publicAPolynomialRoot: input.publicAPolynomialRoot,
-        publicKeyShareSetRoot: input.publicKeyShareSetRoot,
-        publicKeyShareMaterialRoots: input.publicKeyShareMaterialRoots,
+        publicKeyShareMaterialRoots,
     } as const satisfies Omit<
         BinaryChunkedPublicKeyShareMaterialSet,
         'publicKeyShareMaterialSetRoot'
@@ -49,9 +40,22 @@ const binaryChunkedPublicKeyShareMaterialSet = (
 
     return {
         ...materialSetWithoutRoot,
-        publicKeyShareMaterialSetRoot: deriveCanonicalObjectHash(
-            materialSetWithoutRoot,
-        ),
+        publicKeyShareMaterialSetRoot: deriveCanonicalObjectHash({
+            objectType: materialSetWithoutRoot.objectType,
+            setupContextHash: deriveCollectiveBgvSetupContextHash(
+                input.setupContext,
+            ),
+            ringDegree: input.ringDegree,
+            publicMatrixSeedHash: input.publicMatrixSeedHash,
+            publicKeyShareSetRoot: input.publicKeyShareSetRoot,
+            publicKeyShareMaterialRoots:
+                input.publicKeyShareMaterialRecords.map((materialRecord) => ({
+                    trusteeIdentity: materialRecord.trusteeIdentity,
+                    trusteeRosterPosition: materialRecord.trusteeRosterPosition,
+                    publicKeyShareMaterialRoot:
+                        materialRecord.publicKeyShareMaterialRoot,
+                })),
+        }),
     } satisfies BinaryChunkedPublicKeyShareMaterialSet;
 };
 
@@ -61,8 +65,8 @@ const finishPublicKeyShareMaterialTransport = async (
         readonly pullChunk: PublicKeyShareMaterialChunkSource['pullChunk'];
         readonly totalByteLength: number;
     }>,
-    writePublicKeyShareMaterial: BinaryChunkedPublicKeyShareMaterialTransportInput['writePublicKeyShareMaterial'],
-): Promise<BinaryChunkedPublicKeyShareMaterialTransport> => {
+    writePublicKeyShareMaterial: BinaryChunkedPublicKeyShareMaterialBundleInput['writePublicKeyShareMaterial'],
+): Promise<BinaryChunkedPublicKeyShareMaterialBundle> => {
     const descriptorBytes = copyCanonicalStreamDescriptor(
         await writePublicKeyShareMaterial({
             publicKeyShareMaterialSetRoot:
@@ -90,31 +94,6 @@ const finishPublicKeyShareMaterialTransport = async (
     };
 };
 
-export const createBinaryChunkedPublicKeyShareMaterialTransport = async (
-    input: BinaryChunkedPublicKeyShareMaterialTransportInput,
-): Promise<BinaryChunkedPublicKeyShareMaterialTransport> => {
-    const materialSet = binaryChunkedPublicKeyShareMaterialSet({
-        setupContext: input.materialSet as unknown as CollectiveBgvSetupContext,
-        ringDegree: input.materialSet.ringDegree,
-        publicMatrixSeedHash: input.materialSet.publicMatrixSeedHash,
-        publicKeyCrpRoot: input.materialSet.publicKeyCrpRoot,
-        publicAPolynomialRoot: input.materialSet.publicAPolynomialRoot,
-        publicKeyShareSetRoot: input.materialSet.publicKeyShareSetRoot,
-        publicKeyShareMaterialRoots: publicKeyShareMaterialRootReferences(
-            input.materialSet.shareMaterialRecords,
-        ),
-    });
-
-    return finishPublicKeyShareMaterialTransport(
-        materialSet,
-        createPublicKeyShareMaterialSetEncodingSource(
-            input.materialSet,
-            input.qSharePrimes,
-        ),
-        input.writePublicKeyShareMaterial,
-    );
-};
-
 export const createBinaryChunkedPublicKeyShareMaterialBundle = async (
     input: BinaryChunkedPublicKeyShareMaterialBundleInput,
 ): Promise<BinaryChunkedPublicKeyShareMaterialBundle> => {
@@ -125,11 +104,8 @@ export const createBinaryChunkedPublicKeyShareMaterialBundle = async (
         setupContext: input.setupContext,
         ringDegree: input.ringDegree,
         publicMatrixSeedHash: input.publicMatrixSeedHash,
-        publicKeyCrpRoot: input.publicKeyCrpRoot,
-        publicAPolynomialRoot: input.publicAPolynomialRoot,
         publicKeyShareSetRoot: input.publicKeyShares.publicKeyShareSetRoot,
-        publicKeyShareMaterialRoots:
-            publicKeyShareMaterialRootReferences(shareMaterialRecords),
+        publicKeyShareMaterialRecords: shareMaterialRecords,
     });
 
     return finishPublicKeyShareMaterialTransport(

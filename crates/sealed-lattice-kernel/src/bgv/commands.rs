@@ -39,8 +39,8 @@ mod tests {
 
     #[test]
     fn canonical_bgv_serialization_produces_stable_roots() {
-        let encoded = encode_batch_plaintext_slots(&[0, 1, 65_536, 17, 99], 0)
-            .expect("encoded plaintext");
+        let encoded =
+            encode_batch_plaintext_slots(&[0, 1, 65_536, 17, 99], 0).expect("encoded plaintext");
         let encoded_bytes = serialize_bgv_object(
             BgvObjectKind::Plaintext,
             std::slice::from_ref(&encoded.polynomial),

@@ -12,14 +12,7 @@ import { canonicalJson } from './canonical-json.js';
 import { deriveCanonicalObjectHash } from './hashes.js';
 
 const textEncoder = new TextEncoder();
-const mlDsa65Algorithm = 'ML-DSA-65';
-const pureMlDsaMode = 'PureMLDSA';
 const supportedMlDsaContextString = 'sealed-lattice:v1';
-const protocolSignatureProfile = {
-    algorithm: mlDsa65Algorithm,
-    mode: pureMlDsaMode,
-    contextString: supportedMlDsaContextString,
-} as const;
 const mlDsa65PublicKeyByteLength = ml_dsa65.lengths.publicKey!;
 const mlDsa65SignatureByteLength = ml_dsa65.lengths.signature!;
 
@@ -59,9 +52,35 @@ const isLowercaseHex = (value: string): boolean =>
 const isProtocolHashString = (value: string): boolean =>
     /^[0-9a-f]{128}$/u.test(value);
 
-const isProtocolHashOrNull = (value: unknown): value is ProtocolHash | null =>
-    value === null ||
+const isOptionalProtocolHash = (
+    value: unknown,
+): value is ProtocolHash | undefined =>
+    value === undefined ||
     (typeof value === 'string' && isProtocolHashString(value));
+
+const canonicalSignedRootValue = (
+    signedRoot: CanonicalSignedRootObject,
+): CanonicalSignedRootObject => ({
+    objectType: signedRoot.objectType,
+    ceremonyId: signedRoot.ceremonyId,
+    ...(signedRoot.manifestHash === undefined
+        ? {}
+        : { manifestHash: signedRoot.manifestHash }),
+    ...(signedRoot.objectRoot === undefined
+        ? {}
+        : { objectRoot: signedRoot.objectRoot }),
+    ...(signedRoot.chunkMerkleRoot === undefined
+        ? {}
+        : { chunkMerkleRoot: signedRoot.chunkMerkleRoot }),
+    ...(signedRoot.boardHeadHash === undefined
+        ? {}
+        : { boardHeadHash: signedRoot.boardHeadHash }),
+    signerRole: signedRoot.signerRole,
+    signerIdentity: signedRoot.signerIdentity,
+    recoveryEpoch: signedRoot.recoveryEpoch,
+    deviceEpoch: signedRoot.deviceEpoch,
+    contextHash: signedRoot.contextHash,
+});
 
 const canonicalProtocolSignatureMessage = (
     signature: Pick<ProtocolSignatureEnvelope, 'publicKeyHash' | 'signedRoot'>,
@@ -69,9 +88,8 @@ const canonicalProtocolSignatureMessage = (
     textEncoder.encode(
         canonicalJson({
             messageDomain: 'sealed-lattice/protocol-signature',
-            profile: protocolSignatureProfile,
             publicKeyHash: signature.publicKeyHash,
-            signedRoot: signature.signedRoot,
+            signedRoot: canonicalSignedRootValue(signature.signedRoot),
         }),
     );
 
@@ -103,8 +121,7 @@ export const deriveMlDsaPublicKeyHash = (
     );
 
     return deriveCanonicalObjectHash({
-        objectType: 'MlDsaPublicKeyHash',
-        algorithm: mlDsa65Algorithm,
+        objectType: 'MlDsa65PublicKeyHash',
         publicKeyBytesHex,
     });
 };
@@ -150,10 +167,6 @@ const validateSignedRootShape = (
     const requiredFields = [
         'objectType',
         'ceremonyId',
-        'manifestHash',
-        'boardHeadHash',
-        'objectRoot',
-        'chunkMerkleRoot',
         'signerRole',
         'signerIdentity',
         'recoveryEpoch',
@@ -188,15 +201,15 @@ const validateSignedRootShape = (
         );
     }
     if (
-        !isProtocolHashOrNull(signedRoot.objectRoot) ||
-        !isProtocolHashOrNull(signedRoot.chunkMerkleRoot) ||
-        !isProtocolHashOrNull(signedRoot.manifestHash) ||
-        !isProtocolHashOrNull(signedRoot.boardHeadHash) ||
+        !isOptionalProtocolHash(signedRoot.objectRoot) ||
+        !isOptionalProtocolHash(signedRoot.chunkMerkleRoot) ||
+        !isOptionalProtocolHash(signedRoot.manifestHash) ||
+        !isOptionalProtocolHash(signedRoot.boardHeadHash) ||
         !isProtocolHashString(signedRoot.contextHash)
     ) {
         return emptySignatureVerificationResult(
             'InvalidSignedRoot',
-            'Signed-root hash bindings must be canonical hash strings or null.',
+            'Signed-root hash bindings must be canonical hash strings when present.',
         );
     }
     if (

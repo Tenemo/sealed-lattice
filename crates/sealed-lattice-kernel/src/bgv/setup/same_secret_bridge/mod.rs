@@ -1,7 +1,4 @@
 use super::setup_proof::SetupProofMaterialBytes;
-use super::setup_proof::material_transport::{
-    SetupProofMaterialTransportFamily, resolve_transported_setup_proof_material,
-};
 use super::*;
 use crate::bgv::setup_helpers::{
     compare_required_string, compare_required_u64, read_positive_usize_at_path,
@@ -9,21 +6,9 @@ use crate::bgv::setup_helpers::{
 const SAME_SECRET_BRIDGE_PROOF_FAMILY: &str = "same-secret-bridge";
 pub(in crate::bgv::setup) const SAME_SECRET_BRIDGE_PROOF_BYTES_HASH_DOMAIN: &str =
     "sealed-lattice/setup/same-secret-bridge/proof-bytes";
-const SAME_SECRET_BRIDGE_TRANSPORT_SET_OBJECT_TYPE: &str =
-    "SetupTransportedSameSecretBridgeProofMaterialSet";
-const SAME_SECRET_BRIDGE_TRANSPORT_OBJECT_TYPE: &str =
-    "SetupTransportedSameSecretBridgeProofMaterial";
-const SETUP_CONTEXT_FIELD_NAMES: [&str; 5] = [
-    "ceremonyId",
-    "manifestHash",
-    "rosterHash",
-    "setupParametersHash",
-    "setupEpoch",
-];
-
 pub(crate) fn verify_vss_same_secret_bridge_statement_set_request(
     request: &Value,
-) -> CanonicalResult<Value> {
+) -> CanonicalResult<()> {
     let statement_set = value_at_path(request, &["statementSet"])?;
     let coefficient_commitment_set = value_at_path(request, &["coefficientCommitmentSet"])?;
     let vss_coefficient_commitments = value_at_path(request, &["vssCoefficientCommitments"])?;
@@ -32,11 +17,7 @@ pub(crate) fn verify_vss_same_secret_bridge_statement_set_request(
         "VssSameSecretBridgeStatementSet",
         "VSS same-secret bridge statement set objectType",
     )?;
-    let ceremony_id = read_non_empty_string(statement_set, "ceremonyId")?;
-    let setup_epoch = read_non_empty_string(statement_set, "setupEpoch")?;
-    let manifest_hash = hash_at_path(statement_set, &["manifestHash"])?;
-    let roster_hash = hash_at_path(statement_set, &["rosterHash"])?;
-    let setup_parameters_hash = hash_at_path(statement_set, &["setupParametersHash"])?;
+    let setup_context_hash = hash_at_path(statement_set, &["setupContextHash"])?;
     let public_matrix_seed_hash = hash_at_path(statement_set, &["publicMatrixSeedHash"])?;
     let ring_degree = read_positive_usize_at_path(
         statement_set,
@@ -44,8 +25,7 @@ pub(crate) fn verify_vss_same_secret_bridge_statement_set_request(
         "VSS same-secret bridge statement set ringDegree",
     )?;
     let coefficient_commitment_root = hash_at_path(statement_set, &["coefficientCommitmentRoot"])?;
-    let vss_coefficient_commitment_root =
-        hash_at_path(statement_set, &["vssCoefficientCommitmentRoot"])?;
+    hash_at_path(statement_set, &["vssCoefficientCommitmentRoot"])?;
     let participant_count = read_positive_usize_at_path(
         statement_set,
         &["participantCount"],
@@ -61,38 +41,22 @@ pub(crate) fn verify_vss_same_secret_bridge_statement_set_request(
         &["thresholdDegree"],
         "VSS same-secret bridge statement set thresholdDegree",
     )?;
-    let coefficient_commitment_verification =
-        super::vss_commitment::verify_vss_public_coefficient_commitment_set_request(&json!({
-            "coefficientCommitmentSet": coefficient_commitment_set,
-        }))?;
+    let verified_coefficient_commitment_root =
+        super::vss_commitment::verify_vss_public_coefficient_commitment_set(
+            coefficient_commitment_set,
+            &super::vss_commitment::VssPublicCoefficientCommitmentSetContext {
+                public_matrix_seed_hash,
+                participant_count,
+                rns_limb_count: q_share_rns_limb_count,
+                threshold_degree,
+                ring_degree,
+            },
+        )?;
     compare_required_string(
-        hash_at_path(
-            &coefficient_commitment_verification,
-            &["coefficientCommitmentRoot"],
-        )?,
+        &verified_coefficient_commitment_root,
         coefficient_commitment_root,
         "VSS same-secret bridge authoritative coefficientCommitmentRoot",
     )?;
-    compare_required_string(
-        hash_at_path(
-            &coefficient_commitment_verification,
-            &["publicMatrixSeedHash"],
-        )?,
-        public_matrix_seed_hash,
-        "VSS same-secret bridge authoritative publicMatrixSeedHash",
-    )?;
-    for (field_name, expected_value) in [
-        ("participantCount", participant_count),
-        ("rnsLimbCount", q_share_rns_limb_count),
-        ("thresholdDegree", threshold_degree),
-        ("ringDegree", ring_degree),
-    ] {
-        compare_required_u64(
-            unsigned_at_path(&coefficient_commitment_verification, &[field_name])?,
-            expected_value as u64,
-            &format!("VSS same-secret bridge authoritative {field_name}"),
-        )?;
-    }
     let statement_records = array_at_path(statement_set, &["statementRecords"])?;
     if statement_records.len() != participant_count {
         return Err(CanonicalError::new(
@@ -101,61 +65,29 @@ pub(crate) fn verify_vss_same_secret_bridge_statement_set_request(
         ));
     }
 
-    let mut verified_statement_records = Vec::with_capacity(statement_records.len());
     for (expected_position, statement_record) in statement_records.iter().enumerate() {
-        verified_statement_records.push(verify_statement_record(
-            StatementRecordVerificationInput {
-                statement_record,
-                coefficient_commitment_set,
-                vss_coefficient_commitments,
-                expected_position,
-                q_share_rns_limb_count,
-                threshold_degree,
-                ring_degree,
-                statement_set: StatementSetBinding {
-                    ceremony_id,
-                    manifest_hash,
-                    roster_hash,
-                    setup_parameters_hash,
-                    setup_epoch,
-                    public_matrix_seed_hash,
-                },
+        verify_statement_record(StatementRecordVerificationInput {
+            statement_record,
+            coefficient_commitment_set,
+            vss_coefficient_commitments,
+            expected_position,
+            q_share_rns_limb_count,
+            threshold_degree,
+            ring_degree,
+            statement_set: StatementSetBinding {
+                setup_context_hash,
+                public_matrix_seed_hash,
             },
-        )?);
+        })?;
     }
 
-    let expected_statement_set_root = derive_canonical_object_hash(&json!({
-        "objectType": "VssSameSecretBridgeStatementSet",
-        "ceremonyId": ceremony_id,
-        "manifestHash": manifest_hash,
-        "rosterHash": roster_hash,
-        "setupParametersHash": setup_parameters_hash,
-        "setupEpoch": setup_epoch,
-        "publicMatrixSeedHash": public_matrix_seed_hash,
-        "ringDegree": ring_degree,
-        "participantCount": participant_count,
-        "qShareRnsLimbCount": q_share_rns_limb_count,
-        "thresholdDegree": threshold_degree,
-        "coefficientCommitmentRoot": coefficient_commitment_root,
-        "vssCoefficientCommitmentRoot": vss_coefficient_commitment_root,
-        "statementRecords": verified_statement_records,
-    }))?;
-    let statement_set_root = hash_at_path(statement_set, &["sameSecretBridgeStatementSetRoot"])?;
-    if expected_statement_set_root != statement_set_root {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ComponentMismatch,
-            "VSS same-secret bridge statement set root does not match its bound statements",
-        ));
-    }
-    Ok(json!({
-        "sameSecretBridgeStatementSetRoot": statement_set_root,
-    }))
+    Ok(())
 }
 
 pub(crate) fn verify_vss_same_secret_bridge_proof_material_set_request(
     request: &Value,
     proof_binding_session: Option<&crate::bgv::setup::AcceptedSetupProofBindingSession>,
-) -> CanonicalResult<Value> {
+) -> CanonicalResult<()> {
     let statement_set = value_at_path(request, &["statementSet"])?;
     verify_vss_same_secret_bridge_statement_set_request(request)?;
     let participant_count = read_positive_usize_at_path(
@@ -181,8 +113,6 @@ pub(crate) fn verify_vss_same_secret_bridge_proof_material_set_request(
             "same-secret bridge proof material set must contain one proof record per bridge statement",
         ));
     }
-
-    let mut verified_proof_records = Vec::with_capacity(proof_records.len());
     for (expected_position, proof_record) in proof_records.iter().enumerate() {
         let bridge_statement =
             bridge_statement_records
@@ -207,10 +137,6 @@ pub(crate) fn verify_vss_same_secret_bridge_proof_material_set_request(
         )?;
         let validated_proof_reference =
             validate_same_secret_bridge_proof_reference(proof_record, bridge_statement_root)?;
-        validate_transported_same_secret_bridge_proof_material_reference(
-            request,
-            &validated_proof_reference.proof_material_root,
-        )?;
         let proof_verification_request =
             same_secret_bridge_proof_verification_request_from_public_records(
                 statement_set,
@@ -223,52 +149,28 @@ pub(crate) fn verify_vss_same_secret_bridge_proof_material_set_request(
             &validated_proof_reference.proof_material_root,
             &proof_verification_request,
         )?;
-        let (proof_record_without_root, proof_record_root) = if let Some(proof_binding_session) =
-            proof_binding_session
-            && crate::bgv::setup::consume_accepted_setup_proof_binding(
+        let proof_binding_was_consumed = match proof_binding_session {
+            Some(proof_binding_session) => crate::bgv::setup::consume_accepted_setup_proof_binding(
                 proof_binding_session.session_handle,
-                &proof_binding_session.capability,
                 SAME_SECRET_BRIDGE_PROOF_FAMILY,
                 &validated_proof_reference.proof_material_root,
                 &verification_binding_hash,
-            )? {
-            (
-                validated_proof_reference.proof_record_without_root,
-                validated_proof_reference.proof_record_root,
-            )
-        } else {
-            let resolved_proof_bytes =
-                resolve_same_secret_bridge_proof_bytes(validated_proof_reference, request)?;
+            )?,
+            None => false,
+        };
+        if !proof_binding_was_consumed {
+            let resolved_proof_bytes = resolve_same_secret_bridge_proof_bytes(
+                validated_proof_reference,
+                proof_binding_session,
+            )?;
             verify_reconstructed_same_secret_bridge_proof(
                 &proof_verification_request,
                 &resolved_proof_bytes.proof_bytes,
             )?;
-            (
-                resolved_proof_bytes.proof_record_without_root,
-                resolved_proof_bytes.proof_record_root,
-            )
-        };
-        let mut verified_proof_record = proof_record_without_root;
-        verified_proof_record["sameSecretBridgeProofRecordRoot"] = json!(proof_record_root);
-        verified_proof_records.push(verified_proof_record);
-    }
-    let proof_material_set_without_root = json!({
-        "objectType": "VssSameSecretBridgeProofMaterialSet",
-        "proofRecords": verified_proof_records,
-    });
-    let proof_material_set_root = hash_at_path(proof_material_set, &["proofMaterialSetRoot"])?;
-    let expected_proof_material_set_root =
-        derive_canonical_object_hash(&proof_material_set_without_root)?;
-    if expected_proof_material_set_root != proof_material_set_root {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ComponentMismatch,
-            "same-secret bridge proof material set root does not match its bound proof records",
-        ));
+        }
     }
 
-    Ok(json!({
-        "proofMaterialSetRoot": proof_material_set_root,
-    }))
+    Ok(())
 }
 
 mod bridge_transport;

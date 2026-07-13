@@ -11,7 +11,7 @@ const VSS_SHARE_LINKAGE_PROOF_MATERIAL_SET_FIELD: &str = "vssShareLinkageProofMa
 #[derive(Debug, Clone)]
 pub(super) enum VssPublicMaterialVerification {
     Verified,
-    Refused(Value),
+    Refused(Refusals),
 }
 
 pub(super) fn verify_vss_public_material(
@@ -101,7 +101,7 @@ fn verify_vss_public_material_binding(
             proof_material_request.insert(field_name.to_string(), value.clone());
         }
     }
-    let (statement_verification, proof_material_verification) =
+    let statement_verification =
         crate::bgv::setup::trustee_evaluation_key_proof::verify_vss_share_linkage_statement_and_proof_material_set_from_request(
             &Value::Object(proof_material_request),
             proof_binding_session,
@@ -137,27 +137,18 @@ fn verify_vss_public_material_binding(
         "VSS share-linkage statement publicMatrixSeedHash",
     )?;
     compare_complete_q_share_limb_count(&statement_verification, "VSS share-linkage statement")?;
-    compare_required_string(
-        hash_at_path(&proof_material_verification, &["proofMaterialSetRoot"])?,
-        hash_at_path(proof_material_set, &["proofMaterialSetRoot"])?,
-        "VSS share-linkage proof material set root",
-    )?;
 
     // The proven threshold-share aggregate binding: every aggregate record's
     // committed T_{j,l} is shown to be the modular sum of the committed source
     // recipient shares by a unit-point share-linkage proof.
     crate::bgv::setup::verify_vss_public_aggregate_threshold_proofs(
         proof_binding_session,
-        request,
         coefficient_set,
         recipient_share_set,
         aggregate_threshold_set,
         &crate::bgv::setup::VssAggregateThresholdProofContext {
             public_matrix_seed_hash: accepted_public_matrix_seed_hash,
-            ceremony_id: string_at_path(setup_context, &["ceremonyId"])?,
-            manifest_hash: hash_at_path(setup_context, &["manifestHash"])?,
-            roster_hash: hash_at_path(setup_context, &["rosterHash"])?,
-            setup_epoch: string_at_path(setup_context, &["setupEpoch"])?,
+            setup_context_hash: setup_context_hash(setup_context)?,
             ring_degree: unsigned_at_path(&statement_verification, &["ringDegree"])?
                 .try_into()
                 .map_err(|_| public_material_error("aggregate ring degree does not fit usize"))?,
@@ -185,11 +176,11 @@ fn vss_public_material_refusal(
     reason_code: &'static str,
     message: impl Into<String>,
     object_path: impl Into<String>,
-) -> CanonicalResult<Value> {
-    verification_response(
+) -> CanonicalResult<Refusals> {
+    Ok(setup_refusals(
         Vec::new(),
         vec![Refusal::new(reason_code, message, object_path)],
-    )
+    ))
 }
 
 #[cfg(test)]
@@ -213,10 +204,9 @@ mod tests {
             panic!("complete VSS public material must refuse");
         };
 
-        assert_eq!(response["isValid"], json!(false));
         assert_eq!(
-            response["refusedObjects"][0]["reasonCode"],
-            json!("vssPublicMaterialMalformed")
+            response.first().map(|refusal| refusal.reason_code),
+            Some("vssPublicMaterialMalformed")
         );
         Ok(())
     }

@@ -1,5 +1,26 @@
-use super::super::*;
-use super::*;
+use super::super::{
+    CLAIM_MASK_RADIX, LINCHECK_REPETITIONS,
+    TARGET_DECRYPTION_AGGREGATE_MESSAGE_CLAIM_MASK_DIGIT_COUNT,
+    TARGET_DECRYPTION_SMUDGING_MESSAGE_CLAIM_MASK_DIGIT_COUNT,
+    VSS_PUBLIC_CARRY_CLAIM_MASK_DIGIT_COUNT, VSS_PUBLIC_DIGIT_CLAIM_MASK_DIGIT_COUNT,
+    VSS_PUBLIC_SHARE_LINKAGE_TRIT_CLAIM_MASK_DIGIT_COUNT, invalid_succinct_setup_proof,
+};
+use super::super::extension_field::{
+    CHALLENGE_EXTENSION_DEGREE, ChallengeExtensionElement, ChallengeExtensionTower,
+};
+use super::constraint_kernels::SumcheckPublicEvaluations;
+use super::key_relation_algebra::negacyclic_transpose_product_extension;
+use super::statement_types::{
+    PrivateVssShareStatement, SameSecretLinkageStatement, TargetDecryptionMessageClaimKind,
+    TrusteeEvaluationKeyStatement, vss_share_linkage_lincheck_roster_position,
+};
+use crate::bgv::setup::commitment::{
+    SETUP_COMMITMENT_MODULE_RANK, SETUP_COMMITMENT_RANDOMNESS_WIDTH,
+    SETUP_COMMITMENT_ROW_COUNT, StructuralMatrixPolynomial,
+    setup_commitment_matrix_coefficients_cached, structural_matrix_polynomial_kind,
+};
+use crate::bgv::setup::sharing::canonical_trustee_point;
+use crate::encoding::CanonicalResult;
 use num_bigint::BigInt;
 
 pub(crate) const SAME_SECRET_LINKAGE_ATOM_EXTENSION_DEGREE: usize = CHALLENGE_EXTENSION_DEGREE;
@@ -322,11 +343,9 @@ pub(crate) fn claim_mask_digit_count_for_global_claim(
     statement: &TrusteeEvaluationKeyStatement,
     global_claim_id: u64,
 ) -> usize {
-    let family_shape = statement
-        .family_shape()
-        .expect("statement shape validated before claim masking");
+    let family_shape = statement.family_shape();
     let consistency_repetitions = family_shape.consistency_repetitions();
-    if statement.target_decryption_share.is_some() {
+    if statement.target_decryption_share().is_some() {
         let global_vector_index = global_claim_id as usize / consistency_repetitions;
         let target_message_digit_vector_count =
             statement.target_decryption_total_message_digit_count();
@@ -347,7 +366,7 @@ pub(crate) fn claim_mask_digit_count_for_global_claim(
         } else {
             unreachable!("target-decryption global claims only carry message digits")
         }
-    } else if let Some(vss_share_linkage) = &statement.vss_share_linkage {
+    } else if let Some(vss_share_linkage) = statement.vss_share_linkage() {
         // Carry vectors occupy the first item_count vector slots; the message
         // trit vectors follow. Mask selection must pair with the same
         // carry-versus-trit split the claim bounds use, so multi-item
@@ -358,10 +377,10 @@ pub(crate) fn claim_mask_digit_count_for_global_claim(
         } else {
             VSS_PUBLIC_SHARE_LINKAGE_TRIT_CLAIM_MASK_DIGIT_COUNT
         }
-    } else if let Some(same_secret_bridge) = &statement.same_secret_bridge {
+    } else if let Some(same_secret_bridge) = statement.same_secret_bridge() {
         let global_vector_index = global_claim_id as usize / consistency_repetitions;
         let total_error_vectors = statement
-            .keys
+            .keys()
             .iter()
             .map(|key| key.digit_count())
             .sum::<usize>();
@@ -391,16 +410,15 @@ pub(crate) fn masked_claim_bounds_for_global_claim(
     statement: &TrusteeEvaluationKeyStatement,
     global_claim_id: u64,
 ) -> CanonicalResult<(BigInt, BigInt)> {
-    let family_shape = statement.family_shape()?;
+    let family_shape = statement.family_shape();
     let ring_degree = statement
-        .vss_share_linkage
-        .as_ref()
+        .vss_share_linkage()
         .map(|share_linkage| share_linkage.packed_ring_degree(statement.ring_degree))
         .transpose()?
         .unwrap_or(statement.ring_degree);
     let consistency_repetitions = family_shape.consistency_repetitions();
     let coefficient_bound = (1_i128 << family_shape.consistency_coefficient_bits()) - 1;
-    let witness_bound = match &statement.private_vss_share {
+    let witness_bound = match statement.private_vss_share() {
         Some(private_vss_share) => {
             // The message (Shamir coefficient) columns carry no masked
             // consistency claim (their cross-field consistency is argued globally
@@ -415,7 +433,7 @@ pub(crate) fn masked_claim_bounds_for_global_claim(
             )?;
             carry_bound.max(1)
         }
-        None => match &statement.vss_share_linkage {
+        None => match statement.vss_share_linkage() {
             Some(vss_share_linkage) => {
                 let global_vector_index = global_claim_id as usize / consistency_repetitions;
                 if global_vector_index < vss_share_linkage.item_count() {
@@ -449,10 +467,10 @@ pub(crate) fn masked_claim_bounds_for_global_claim(
                 }
             }
             None => {
-                if let Some(same_secret_bridge) = &statement.same_secret_bridge {
+                if let Some(same_secret_bridge) = statement.same_secret_bridge() {
                     let global_vector_index = global_claim_id as usize / consistency_repetitions;
                     let total_error_vectors = statement
-                        .keys
+                        .keys()
                         .iter()
                         .map(|key| key.digit_count())
                         .sum::<usize>();
@@ -468,7 +486,7 @@ pub(crate) fn masked_claim_bounds_for_global_claim(
                     } else {
                         2
                     }
-                } else if statement.target_decryption_share.is_some() {
+                } else if statement.target_decryption_share().is_some() {
                     let global_vector_index = global_claim_id as usize / consistency_repetitions;
                     let target_message_digit_vector_count =
                         statement.target_decryption_total_message_digit_count();

@@ -16,10 +16,7 @@ pub(super) fn verify_direct_ballot_aggregation(
         aggregate_ciphertext = ciphertext_add(&aggregate_ciphertext, &encrypted_ballot.ciphertext)?;
     }
 
-    let aggregate_ciphertext_root = ciphertext_object_root(&aggregate_ciphertext)?;
-
     Ok(DirectBallotAggregationResult {
         aggregate_ciphertext,
-        aggregate_ciphertext_root,
     })
 }

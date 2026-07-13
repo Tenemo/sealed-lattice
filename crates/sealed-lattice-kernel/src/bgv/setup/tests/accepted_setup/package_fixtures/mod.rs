@@ -1,11 +1,13 @@
 use super::proof_record_fixtures::{
-    descriptor_backed_vss_proof_material_fixture, finalize_collective_setup_package,
+    FinalizedCollectiveSetupPackageFixture, descriptor_backed_vss_proof_material_fixture,
+    finalize_collective_setup_package,
 };
 use super::*;
 
 use crate::hashing::derive_canonical_object_hash;
 
-static MINIMAL_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<serde_json::Value> = OnceLock::new();
+static MINIMAL_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<FinalizedCollectiveSetupPackageFixture> =
+    OnceLock::new();
 static COLLECTIVE_SETUP_INTENT_PACKAGE_CACHE: OnceLock<serde_json::Value> = OnceLock::new();
 static DESCRIPTOR_BACKED_VSS_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<
     CachedDescriptorBackedVssCollectiveSetupFixture,
@@ -51,7 +53,6 @@ impl CollectiveSetupVerificationFixture {
         for proof_binding_lease in &self.proof_binding_leases {
             crate::bgv::setup::restore_accepted_setup_proof_binding_lease(
                 proof_binding_session.session_handle,
-                &proof_binding_session.capability,
                 proof_binding_lease,
             )
             .expect("restore accepted-setup fixture proof binding lease");
@@ -154,24 +155,19 @@ const PARAMETER_PROFILE_PARTICIPANT_COUNT: u64 = 10;
 /// refusal behavior, not to benchmark proof material growth with roster size.
 const MINIMUM_SUPPORTED_PARTICIPANT_COUNT: u64 = 3;
 
-pub(super) fn minimal_collective_setup_package() -> serde_json::Value {
-    // This cached package is the fixture-builder intermediate with raw VSS
-    // proof bytes. Accepted-setup verification must use
-    // descriptor_backed_vss_collective_setup_fixture(), which rewrites those
-    // bytes into authenticated material references and rehydrates them before
-    // each consuming call. The reduced development ring must stay provable by
-    // the trustee evaluation-key argument: the trace splits each vector in two
-    // and the smallest supported trace is sixty-four, so the development ring
-    // is one hundred twenty-eight.
-    MINIMAL_COLLECTIVE_SETUP_PACKAGE_CACHE
-        .get_or_init(|| {
-            super::proof_record_fixtures::finalize_collective_setup_package(
-                minimal_collective_setup_package_for_participant_count(
-                    MINIMUM_SUPPORTED_PARTICIPANT_COUNT,
-                ),
-            )
-        })
-        .clone()
+pub(super) fn minimal_collective_setup_package_fixture() -> FinalizedCollectiveSetupPackageFixture {
+    cached_minimal_collective_setup_package_fixture().clone()
+}
+
+fn cached_minimal_collective_setup_package_fixture()
+-> &'static FinalizedCollectiveSetupPackageFixture {
+    MINIMAL_COLLECTIVE_SETUP_PACKAGE_CACHE.get_or_init(|| {
+        super::proof_record_fixtures::finalize_collective_setup_package(
+            minimal_collective_setup_package_for_participant_count(
+                MINIMUM_SUPPORTED_PARTICIPANT_COUNT,
+            ),
+        )
+    })
 }
 
 /// Setup package with signed trustee registrations, before proof-bearing setup
@@ -261,6 +257,8 @@ fn build_collective_setup_package_fixture_parts(
         setup_epoch,
         participant_count,
     );
+    let setup_context_hash = crate::bgv::setup::accepted_setup::setup_context_hash(&setup_context)
+        .expect("setup context hash");
     let trustee_registrations = (0..participant_count)
         .map(|roster_position| {
             let trustee_identity = format!("trustee-{roster_position}");
@@ -268,44 +266,32 @@ fn build_collective_setup_package_fixture_parts(
             let signing_public_key_hash =
                 create_ml_dsa_public_key_hash_fixture(&signature_seed_label)
                     .expect("signature key fixture");
-            let mut registration = serde_json::json!({
+            let private_vss_mailbox_public_key_hash =
+                private_vss_mailbox_public_key_hash(roster_position);
+            let registration_payload = serde_json::json!({
                 "objectType": "CollectiveBgvSetupIntentTrusteeRegistration",
-                "ceremonyId": ceremony_id,
-                "manifestHash": manifest_hash,
-                "rosterHash": roster_hash,
-                "setupParametersHash": setup_parameters_hash,
-                "setupEpoch": setup_epoch,
+                "setupContextHash": setup_context_hash,
                 "trusteeIdentity": trustee_identity,
                 "rosterPosition": roster_position,
                 "recoveryEpoch": 0,
                 "deviceEpoch": 0,
                 "signingPublicKeyHash": signing_public_key_hash,
-                "privateVssMailboxPublicKeyHash": private_vss_mailbox_public_key_hash(roster_position),
+                "privateVssMailboxPublicKeyHash": private_vss_mailbox_public_key_hash,
             });
-            let registration_root =
-                derive_canonical_object_hash(&registration).expect("setup-intent registration root");
-            let signature_context_hash =
-                derive_canonical_object_hash(&serde_json::json!({
-                    "objectType": "CollectiveBgvSetupIntentSignatureContext",
-                    "ceremonyId": ceremony_id,
-                    "manifestHash": manifest_hash,
-                    "rosterHash": roster_hash,
-                    "setupParametersHash": setup_parameters_hash,
-                    "setupEpoch": setup_epoch,
-                    "trusteeIdentity": trustee_identity,
-                    "rosterPosition": roster_position,
-                    "setupIntentRegistrationRoot": registration_root,
-                }))
-                .expect("setup-intent signature context hash");
-            registration["signatureEnvelope"] = create_protocol_signature_fixture(
+            let registration_root = derive_canonical_object_hash(&registration_payload)
+                .expect("setup-intent registration root");
+            let signature_context_hash = derive_canonical_object_hash(&serde_json::json!({
+                "objectType": "CollectiveBgvSetupIntentSignatureContext",
+                "setupIntentRegistrationRoot": registration_root,
+            }))
+            .expect("setup-intent signature context hash");
+            let signature_envelope = create_protocol_signature_fixture(
                 &signature_seed_label,
                 serde_json::json!({
                     "objectType": "CollectiveBgvSetupIntentTrusteeRegistration",
                     "ceremonyId": ceremony_id,
                     "manifestHash": manifest_hash,
-                    "boardHeadHash": null,
                     "objectRoot": registration_root,
-                    "chunkMerkleRoot": null,
                     "signerRole": "Trustee",
                     "signerIdentity": trustee_identity,
                     "recoveryEpoch": 0,
@@ -316,7 +302,11 @@ fn build_collective_setup_package_fixture_parts(
             .expect("setup-intent signature fixture")
             .envelope;
 
-            registration
+            serde_json::json!({
+                "objectType": "CollectiveBgvSetupIntentTrusteeRegistration",
+                "privateVssMailboxPublicKeyHash": private_vss_mailbox_public_key_hash,
+                "signatureEnvelope": signature_envelope,
+            })
         })
         .collect::<Vec<_>>();
     let setup_intent = serde_json::json!({
@@ -439,7 +429,6 @@ fn build_public_key_share_succinct_proof_bearing_collective_setup_package()
     proof_binding_leases.extend(succinct_proof_fixture.proof_binding_leases.iter().cloned());
     crate::bgv::setup::cancel_accepted_setup_proof_binding_session(
         proof_binding_session.session_handle,
-        &proof_binding_session.capability,
     )
     .expect("cancel public-key share fixture proof binding session");
     package["publicKeyShareSuccinctProofs"] = succinct_proof_fixture.proof_set.clone();
@@ -466,14 +455,18 @@ pub(super) fn descriptor_backed_vss_collective_setup_fixture() -> CollectiveSetu
 fn build_descriptor_backed_vss_collective_setup_fixture()
 -> CachedDescriptorBackedVssCollectiveSetupFixture {
     build_descriptor_backed_vss_collective_setup_fixture_from_package(
-        minimal_collective_setup_package(),
+        minimal_collective_setup_package_fixture(),
     )
 }
 
 fn build_descriptor_backed_vss_collective_setup_fixture_from_package(
-    mut package: serde_json::Value,
+    mut finalized_fixture: FinalizedCollectiveSetupPackageFixture,
 ) -> CachedDescriptorBackedVssCollectiveSetupFixture {
-    let proof_material_fixture = descriptor_backed_vss_proof_material_fixture(&mut package);
+    let proof_material_fixture = descriptor_backed_vss_proof_material_fixture(
+        &mut finalized_fixture.package,
+        &finalized_fixture.proof_binding_leases,
+    );
+    let mut package = finalized_fixture.package;
     rebind_collective_setup_package_hash(&mut package);
 
     CachedDescriptorBackedVssCollectiveSetupFixture {

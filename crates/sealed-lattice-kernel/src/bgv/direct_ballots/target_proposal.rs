@@ -2,46 +2,39 @@ use super::*;
 
 use crate::hashing::derive_canonical_object_hash;
 
+fn validate_hash(value: &str) -> CanonicalResult<()> {
+    if value.len() == 128
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Ok(());
+    }
+    Err(CanonicalError::new(
+        CanonicalErrorCode::InvalidFixture,
+        "targetFinalityPolicyHash must be a 64-byte lowercase hexadecimal hash",
+    ))
+}
+
 pub(super) fn direct_ballot_target_proposal(
-    setup_package: &Value,
-    aggregate_ciphertext_root: &str,
-    evaluator_replay_context_hash: &str,
     evaluator_replay_record_hash: &str,
-    target_ciphertext_hash: &str,
-    target_layout_hash: &str,
     target_finality_policy_hash: Option<&str>,
 ) -> CanonicalResult<Value> {
     let Some(target_finality_policy_hash) = target_finality_policy_hash else {
         return Ok(json!({}));
     };
 
-    validate_direct_ballot_hash_hex(target_finality_policy_hash, "targetFinalityPolicyHash")?;
+    validate_hash(target_finality_policy_hash)?;
     let proposal_without_hash = json!({
         "objectType": "DirectEncryptedBallotTargetProposal",
-        "ceremonyId": required_string_path(setup_package, &["setupInputs", "ceremonyId"])?,
-        "electionManifestHash": required_string_path(setup_package, &["setupInputs", "manifestHash"])?,
-        "thresholdParametersHash": required_string_path(setup_package, &["setupInputs", "thresholdParametersHash"])?,
-        "evaluatorReplayContextHash": evaluator_replay_context_hash,
         "evaluatorReplayRecordHash": evaluator_replay_record_hash,
-        "encryptedBallotAggregateHash": aggregate_ciphertext_root,
-        "targetCiphertextHash": target_ciphertext_hash,
-        "targetLayoutHash": target_layout_hash,
-        "bgvParametersHash": bgv_parameters_hash()?,
         "targetFinalityPolicyHash": target_finality_policy_hash,
     });
     let target_proposal_hash = derive_canonical_object_hash(&proposal_without_hash)?;
 
     Ok(json!({
         "targetProposalHash": target_proposal_hash,
-        "ceremonyId": proposal_without_hash["ceremonyId"],
-        "electionManifestHash": proposal_without_hash["electionManifestHash"],
-        "thresholdParametersHash": proposal_without_hash["thresholdParametersHash"],
-        "evaluatorReplayContextHash": proposal_without_hash["evaluatorReplayContextHash"],
         "evaluatorReplayRecordHash": proposal_without_hash["evaluatorReplayRecordHash"],
-        "encryptedBallotAggregateHash": proposal_without_hash["encryptedBallotAggregateHash"],
-        "targetCiphertextHash": proposal_without_hash["targetCiphertextHash"],
-        "targetLayoutHash": proposal_without_hash["targetLayoutHash"],
-        "bgvParametersHash": proposal_without_hash["bgvParametersHash"],
         "targetFinalityPolicyHash": proposal_without_hash["targetFinalityPolicyHash"],
     }))
 }

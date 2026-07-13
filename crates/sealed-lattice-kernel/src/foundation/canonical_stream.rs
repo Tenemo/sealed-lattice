@@ -11,7 +11,7 @@ use super::{
 };
 
 #[cfg(test)]
-use super::{CanonicalItem, hash512};
+use super::{CanonicalItem, hash_foundation_tuple_512 as hash512};
 
 const CHUNK_DIGEST_DOMAIN: &str = "sealed-lattice/transport/chunk/v1";
 const FULL_OBJECT_DIGEST_DOMAIN: &str = "sealed-lattice/transport/full-object/v1";
@@ -23,39 +23,22 @@ pub const MAXIMUM_CANONICAL_STREAM_BYTE_LENGTH: u64 = 2_147_483_648;
 /// domain string. The consuming protocol position selects one of these values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CanonicalStreamDomain {
-    PrivateMailboxCiphertext,
     DealerVssShareLinkageProof,
     RecipientAggregateThresholdShareProof,
     SameSecretProof,
     PublicKeyShareProof,
-    CollectivePublicKeyAggregateProof,
-    RelinearizationRoundOneProof,
-    RelinearizationRoundOneAggregateProof,
-    RelinearizationRoundTwoProof,
-    GaloisShareProof,
     EvaluatorKeyAggregateProof,
-    CollectivePublicKey,
     EvaluatorKeyStore,
-    BallotCiphertext,
-    BallotValidityProof,
-    AggregateCiphertext,
-    ReplayTargetIdentifierCiphertext,
-    ReplayTargetOrderCiphertext,
-    TargetIdentifierPartialDecryption,
-    TargetOrderPartialDecryption,
     MaliciousTargetShareProof,
-    CheckpointState,
     StateBallotCandidateListExactOutput,
     StateFinalitySignatureExactOutput,
     StateTargetReleaseExactOutput,
     PublicKeyShareMaterial,
-    PublicEvaluationKeyMaterial,
 }
 
 impl CanonicalStreamDomain {
     pub const fn canonical_domain(self) -> &'static str {
         match self {
-            Self::PrivateMailboxCiphertext => "sealed-lattice/stream/mailbox/ciphertext/v1",
             Self::DealerVssShareLinkageProof => {
                 "sealed-lattice/stream/setup/vss-share-linkage-proof/v1"
             }
@@ -64,43 +47,13 @@ impl CanonicalStreamDomain {
             }
             Self::SameSecretProof => "sealed-lattice/stream/setup/same-secret-proof/v1",
             Self::PublicKeyShareProof => "sealed-lattice/stream/setup/public-key-share-proof/v1",
-            Self::CollectivePublicKeyAggregateProof => {
-                "sealed-lattice/stream/setup/collective-public-key-aggregate-proof/v1"
-            }
-            Self::RelinearizationRoundOneProof => {
-                "sealed-lattice/stream/setup/rkg-round-one-proof/v1"
-            }
-            Self::RelinearizationRoundOneAggregateProof => {
-                "sealed-lattice/stream/setup/rkg-round-one-aggregate-proof/v1"
-            }
-            Self::RelinearizationRoundTwoProof => {
-                "sealed-lattice/stream/setup/rkg-round-two-proof/v1"
-            }
-            Self::GaloisShareProof => "sealed-lattice/stream/setup/galois-share-proof/v1",
             Self::EvaluatorKeyAggregateProof => {
                 "sealed-lattice/stream/setup/evaluator-key-aggregate-proof/v1"
             }
-            Self::CollectivePublicKey => "sealed-lattice/stream/setup/collective-public-key/v1",
             Self::EvaluatorKeyStore => "sealed-lattice/stream/setup/evaluator-key-store/v1",
-            Self::BallotCiphertext => "sealed-lattice/stream/ballot/ciphertext/v1",
-            Self::BallotValidityProof => "sealed-lattice/stream/ballot/validity-proof/v1",
-            Self::AggregateCiphertext => "sealed-lattice/stream/aggregation/ciphertext/v1",
-            Self::ReplayTargetIdentifierCiphertext => {
-                "sealed-lattice/stream/evaluator/target-id-ciphertext/v1"
-            }
-            Self::ReplayTargetOrderCiphertext => {
-                "sealed-lattice/stream/evaluator/target-order-ciphertext/v1"
-            }
-            Self::TargetIdentifierPartialDecryption => {
-                "sealed-lattice/stream/target-release/target-id-partial-decryption/v1"
-            }
-            Self::TargetOrderPartialDecryption => {
-                "sealed-lattice/stream/target-release/target-order-partial-decryption/v1"
-            }
             Self::MaliciousTargetShareProof => {
                 "sealed-lattice/stream/target-release/malicious-share-proof/v1"
             }
-            Self::CheckpointState => "sealed-lattice/stream/checkpoint/state/v1",
             Self::StateBallotCandidateListExactOutput => {
                 "sealed-lattice/stream/state/ballot-candidate-list-exact-output/v1"
             }
@@ -113,73 +66,38 @@ impl CanonicalStreamDomain {
             Self::PublicKeyShareMaterial => {
                 "sealed-lattice/stream/setup/public-key-share-material/v1"
             }
-            Self::PublicEvaluationKeyMaterial => {
-                "sealed-lattice/stream/setup/public-evaluation-key-material/v1"
-            }
         }
     }
 
     pub const fn canonical_code(self) -> u32 {
         match self {
-            Self::PrivateMailboxCiphertext => 1,
             Self::DealerVssShareLinkageProof => 2,
             Self::RecipientAggregateThresholdShareProof => 3,
             Self::SameSecretProof => 4,
             Self::PublicKeyShareProof => 5,
-            Self::CollectivePublicKeyAggregateProof => 6,
-            Self::RelinearizationRoundOneProof => 7,
-            Self::RelinearizationRoundOneAggregateProof => 8,
-            Self::RelinearizationRoundTwoProof => 9,
-            Self::GaloisShareProof => 10,
             Self::EvaluatorKeyAggregateProof => 11,
-            Self::CollectivePublicKey => 12,
             Self::EvaluatorKeyStore => 13,
-            Self::BallotCiphertext => 14,
-            Self::BallotValidityProof => 15,
-            Self::AggregateCiphertext => 16,
-            Self::ReplayTargetIdentifierCiphertext => 17,
-            Self::ReplayTargetOrderCiphertext => 18,
-            Self::TargetIdentifierPartialDecryption => 19,
-            Self::TargetOrderPartialDecryption => 20,
             Self::MaliciousTargetShareProof => 21,
-            Self::CheckpointState => 22,
             Self::StateBallotCandidateListExactOutput => 23,
             Self::StateFinalitySignatureExactOutput => 24,
             Self::StateTargetReleaseExactOutput => 25,
             Self::PublicKeyShareMaterial => 26,
-            Self::PublicEvaluationKeyMaterial => 27,
         }
     }
 
     pub const fn from_canonical_code(code: u32) -> Option<Self> {
         match code {
-            1 => Some(Self::PrivateMailboxCiphertext),
             2 => Some(Self::DealerVssShareLinkageProof),
             3 => Some(Self::RecipientAggregateThresholdShareProof),
             4 => Some(Self::SameSecretProof),
             5 => Some(Self::PublicKeyShareProof),
-            6 => Some(Self::CollectivePublicKeyAggregateProof),
-            7 => Some(Self::RelinearizationRoundOneProof),
-            8 => Some(Self::RelinearizationRoundOneAggregateProof),
-            9 => Some(Self::RelinearizationRoundTwoProof),
-            10 => Some(Self::GaloisShareProof),
             11 => Some(Self::EvaluatorKeyAggregateProof),
-            12 => Some(Self::CollectivePublicKey),
             13 => Some(Self::EvaluatorKeyStore),
-            14 => Some(Self::BallotCiphertext),
-            15 => Some(Self::BallotValidityProof),
-            16 => Some(Self::AggregateCiphertext),
-            17 => Some(Self::ReplayTargetIdentifierCiphertext),
-            18 => Some(Self::ReplayTargetOrderCiphertext),
-            19 => Some(Self::TargetIdentifierPartialDecryption),
-            20 => Some(Self::TargetOrderPartialDecryption),
             21 => Some(Self::MaliciousTargetShareProof),
-            22 => Some(Self::CheckpointState),
             23 => Some(Self::StateBallotCandidateListExactOutput),
             24 => Some(Self::StateFinalitySignatureExactOutput),
             25 => Some(Self::StateTargetReleaseExactOutput),
             26 => Some(Self::PublicKeyShareMaterial),
-            27 => Some(Self::PublicEvaluationKeyMaterial),
             _ => None,
         }
     }
@@ -648,15 +566,21 @@ mod tests {
 
     #[test]
     fn stream_domains_have_unique_labels_and_codes() {
-        let assigned_domains = (1..=27)
-            .map(|canonical_code| {
-                CanonicalStreamDomain::from_canonical_code(canonical_code)
-                    .expect("assigned canonical stream domain decodes")
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(assigned_domains.len(), 27);
-        for (canonical_code, stream_domain) in (1..=27).zip(assigned_domains.iter().copied()) {
-            assert_eq!(stream_domain.canonical_code(), canonical_code);
+        let assigned_domains = [
+            CanonicalStreamDomain::DealerVssShareLinkageProof,
+            CanonicalStreamDomain::RecipientAggregateThresholdShareProof,
+            CanonicalStreamDomain::SameSecretProof,
+            CanonicalStreamDomain::PublicKeyShareProof,
+            CanonicalStreamDomain::EvaluatorKeyAggregateProof,
+            CanonicalStreamDomain::EvaluatorKeyStore,
+            CanonicalStreamDomain::MaliciousTargetShareProof,
+            CanonicalStreamDomain::StateBallotCandidateListExactOutput,
+            CanonicalStreamDomain::StateFinalitySignatureExactOutput,
+            CanonicalStreamDomain::StateTargetReleaseExactOutput,
+            CanonicalStreamDomain::PublicKeyShareMaterial,
+        ];
+        for stream_domain in assigned_domains {
+            let canonical_code = stream_domain.canonical_code();
             assert_eq!(
                 CanonicalStreamDomain::from_canonical_code(canonical_code),
                 Some(stream_domain)
@@ -664,8 +588,7 @@ mod tests {
         }
 
         let domains = assigned_domains
-            .iter()
-            .copied()
+            .into_iter()
             .map(CanonicalStreamDomain::canonical_domain)
             .collect::<BTreeSet<_>>();
         assert_eq!(domains.len(), assigned_domains.len());
@@ -675,12 +598,13 @@ mod tests {
                 .all(|domain| domain.starts_with("sealed-lattice/stream/"))
         );
         let codes = assigned_domains
-            .iter()
-            .copied()
+            .into_iter()
             .map(CanonicalStreamDomain::canonical_code)
             .collect::<BTreeSet<_>>();
         assert_eq!(codes.len(), assigned_domains.len());
         assert_eq!(CanonicalStreamDomain::from_canonical_code(0), None);
+        assert_eq!(CanonicalStreamDomain::from_canonical_code(6), None);
+        assert_eq!(CanonicalStreamDomain::from_canonical_code(27), None);
         assert_eq!(CanonicalStreamDomain::from_canonical_code(28), None);
         assert_eq!(CanonicalStreamDomain::from_canonical_code(u32::MAX), None);
     }

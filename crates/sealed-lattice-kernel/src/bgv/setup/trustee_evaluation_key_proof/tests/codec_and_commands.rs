@@ -6,18 +6,18 @@ fn key_bearing_atom_command_round_trips_with_bdlop_source_linkage() {
         "cdcdabab",
         &[round_one(2), round_two(2), rotation(3, 1)],
         SMALL_RING_DEGREE,
-        Some(1),
+        1,
     )
     .expect("development instance");
 
     let mut generate_request = statement_request_value(&statement);
-    generate_request["secretCoefficients"] = serde_json::json!(witness.secret_coefficients);
+    generate_request["secretCoefficients"] = serde_json::json!(witness.secret_coefficients());
     generate_request["errorCoefficientsByKey"] =
-        serde_json::json!(witness.error_coefficients_by_key);
+        serde_json::json!(witness.error_coefficients_by_key());
     generate_request["negativeIndicatorCoefficients"] =
-        serde_json::json!(witness.negative_indicator_coefficients);
+        serde_json::json!(witness.negative_indicator_coefficients());
     generate_request["openingRandomnessByLimb"] =
-        serde_json::json!(witness.opening_randomness_by_limb);
+        serde_json::json!(witness.opening_randomness_by_limb());
     generate_request["proofRandomnessSeedHex"] = serde_json::json!(PROOF_RANDOMNESS_SEED);
     generate_request["proofRandomnessNonceHex"] = serde_json::json!(PROOF_RANDOMNESS_NONCE);
 
@@ -36,12 +36,11 @@ fn key_bearing_atom_command_round_trips_with_bdlop_source_linkage() {
         "cdcdabab",
         &[round_one(2), round_two(2), rotation(3, 1)],
         SMALL_RING_DEGREE,
-        Some(1),
+        1,
     )
     .expect("second development instance");
     let commitment = &mut wrong_commitment_statement
-        .same_secret_linkage
-        .as_mut()
+        .same_secret_linkage_mut()
         .expect("source linkage")
         .commitments[0];
     commitment.limbs[0].rows[0][0] =
@@ -55,16 +54,16 @@ fn key_bearing_atom_command_round_trips_with_bdlop_source_linkage() {
         "cdcdabab",
         &[round_one(2), round_two(2), rotation(3, 1)],
         SMALL_RING_DEGREE,
-        Some(1),
+        1,
     )
     .expect("third development instance");
-    wrong_context_statement
-        .context
-        .binding_roots
-        .iter_mut()
-        .find(|(label, _)| label == "sourceConstantCoefficientCommitmentRoot")
-        .expect("source constant binding root")
-        .1 = "f".repeat(128);
+    let source_constant_root_index = wrong_context_statement
+        .family_shape()
+        .binding_labels()
+        .iter()
+        .position(|label| *label == "sourceConstantCoefficientCommitmentRoot")
+        .expect("source constant binding root");
+    wrong_context_statement.context.binding_roots[source_constant_root_index] = "f".repeat(128);
     assert!(
         verify_proof_bytes(&wrong_context_statement, &proof_bytes).is_err(),
         "a key proof must not replay under a different exact source-constant root"
@@ -72,7 +71,7 @@ fn key_bearing_atom_command_round_trips_with_bdlop_source_linkage() {
 
     let mut wrong_secret_request = generate_request.clone();
     wrong_secret_request["secretCoefficients"][0] =
-        serde_json::json!(if witness.secret_coefficients[0] == 1 {
+        serde_json::json!(if witness.secret_coefficients()[0] == 1 {
             0
         } else {
             1
@@ -84,7 +83,7 @@ fn key_bearing_atom_command_round_trips_with_bdlop_source_linkage() {
 
     let mut wrong_randomness_request = generate_request.clone();
     wrong_randomness_request["openingRandomnessByLimb"][0][0][0] =
-        serde_json::json!(if witness.opening_randomness_by_limb[0][0][0] == 1 {
+        serde_json::json!(if witness.opening_randomness_by_limb()[0][0][0] == 1 {
             0
         } else {
             1
@@ -102,8 +101,8 @@ fn key_bearing_atom_command_requires_source_linkage() {
         generate_development_trustee_instance("cdcdabac", &[round_one(1)], SMALL_RING_DEGREE)
             .expect("development instance without source linkage");
     let mut request = statement_request_value(&statement);
-    request["secretCoefficients"] = serde_json::json!(witness.secret_coefficients);
-    request["errorCoefficientsByKey"] = serde_json::json!(witness.error_coefficients_by_key);
+    request["secretCoefficients"] = serde_json::json!(witness.secret_coefficients());
+    request["errorCoefficientsByKey"] = serde_json::json!(witness.error_coefficients_by_key());
     request["proofRandomnessSeedHex"] = serde_json::json!(PROOF_RANDOMNESS_SEED);
     request["proofRandomnessNonceHex"] = serde_json::json!(PROOF_RANDOMNESS_NONCE);
     assert!(
@@ -120,9 +119,9 @@ fn trustee_proof_commands_reject_noncanonical_public_statement_material() {
     let mut component_request = statement_request_value(&round_two_statement);
     component_request["keys"][0]["componentBByDigit"][0][0][0] = serde_json::json!(DATA_PRIMES[0]);
     component_request["secretCoefficients"] =
-        serde_json::json!(round_two_witness.secret_coefficients);
+        serde_json::json!(round_two_witness.secret_coefficients());
     component_request["errorCoefficientsByKey"] =
-        serde_json::json!(round_two_witness.error_coefficients_by_key);
+        serde_json::json!(round_two_witness.error_coefficients_by_key());
     component_request["proofRandomnessSeedHex"] = serde_json::json!(PROOF_RANDOMNESS_SEED);
     component_request["proofRandomnessNonceHex"] = serde_json::json!(PROOF_RANDOMNESS_NONCE);
     assert!(
@@ -134,9 +133,9 @@ fn trustee_proof_commands_reject_noncanonical_public_statement_material() {
     aggregate_request["keys"][0]["roundOneAggregateDiagonal"][0][0] =
         serde_json::json!(DATA_PRIMES[0]);
     aggregate_request["secretCoefficients"] =
-        serde_json::json!(round_two_witness.secret_coefficients);
+        serde_json::json!(round_two_witness.secret_coefficients());
     aggregate_request["errorCoefficientsByKey"] =
-        serde_json::json!(round_two_witness.error_coefficients_by_key);
+        serde_json::json!(round_two_witness.error_coefficients_by_key());
     aggregate_request["proofRandomnessSeedHex"] = serde_json::json!(PROOF_RANDOMNESS_SEED);
     aggregate_request["proofRandomnessNonceHex"] = serde_json::json!(PROOF_RANDOMNESS_NONCE);
     assert!(
@@ -148,7 +147,7 @@ fn trustee_proof_commands_reject_noncanonical_public_statement_material() {
         generate_development_trustee_instance("feed0304", &[round_one(2)], SMALL_RING_DEGREE)
             .expect("round-one instance");
     let mut material_bytes =
-        component_material_bytes_for_request_key(&statement.keys[0], SMALL_RING_DEGREE);
+        component_material_bytes_for_request_key(&statement.keys()[0], SMALL_RING_DEGREE);
     let coefficient_offset = 8 + (4 * 8);
     material_bytes[coefficient_offset..coefficient_offset + 8]
         .copy_from_slice(&DATA_PRIMES[0].to_le_bytes());
@@ -159,9 +158,9 @@ fn trustee_proof_commands_reject_noncanonical_public_statement_material() {
         .remove("componentBByDigit");
     material_request["keys"][0]["componentMaterialBytesHex"] =
         serde_json::json!(crate::hashing::to_hex(&material_bytes));
-    material_request["secretCoefficients"] = serde_json::json!(witness.secret_coefficients);
+    material_request["secretCoefficients"] = serde_json::json!(witness.secret_coefficients());
     material_request["errorCoefficientsByKey"] =
-        serde_json::json!(witness.error_coefficients_by_key);
+        serde_json::json!(witness.error_coefficients_by_key());
     material_request["proofRandomnessSeedHex"] = serde_json::json!(PROOF_RANDOMNESS_SEED);
     material_request["proofRandomnessNonceHex"] = serde_json::json!(PROOF_RANDOMNESS_NONCE);
     assert!(
@@ -495,7 +494,7 @@ fn proof_codec_rejects_noncanonical_values_for_each_succinct_family_shape() {
         assert!(
             decode_trustee_evaluation_key_proof(&statement, &encoded).is_err(),
             "noncanonical proof bytes must reject for {}",
-            statement.context.proof_family
+            statement.family_shape().proof_family()
         );
     }
 }

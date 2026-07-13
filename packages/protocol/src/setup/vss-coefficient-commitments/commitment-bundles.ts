@@ -4,21 +4,19 @@ import {
     type VssCoefficientCommitmentBundle,
     type VssCoefficientCommitmentBundleInput,
     type VssCoefficientCommitmentMaterialRecord,
-    type VssCoefficientCommitmentMaterialSet,
     type VssCoefficientCommitmentRecord,
     type VssCoefficientCommitmentSet,
     type VssCoefficientOpeningMaterial,
-    type VssSourceTrusteeCoefficientCommitmentContribution,
     type VssSourceTrusteeCoefficientCommitmentContributionInput,
     type VssSourceTrusteeCoefficientCommitmentRecord,
+    type VssSourceTrusteeOpeningMaterial,
 } from './constants-and-types.js';
 import {
     assertNonEmptyString,
     assertNonNegativeSafeInteger,
     assertPositiveSafeInteger,
     assertProtocolHash,
-    contextFields,
-    setupContextFieldNames,
+    deriveCollectiveBgvSetupContextHash,
 } from './encoding.js';
 import {
     assertFullSourceTrusteeReferenceCoverage,
@@ -45,19 +43,15 @@ const validateCommitmentCommonInput = (
             `qSharePrimes.${String(rnsLimbIndex)}`,
         );
     });
-    for (const fieldName of setupContextFieldNames) {
-        const value = input.setupContext[fieldName];
-        if (typeof value !== 'string' || value.length === 0) {
-            throw new TypeError(`setupContext.${fieldName} must be non-empty.`);
-        }
-    }
 };
 
-export const createVssSourceTrusteeCoefficientCommitmentContribution = (
+const createVssSourceTrusteeCoefficientCommitmentContribution = (
     input: VssSourceTrusteeCoefficientCommitmentContributionInput,
-): VssSourceTrusteeCoefficientCommitmentContribution => {
+): VssSourceTrusteeOpeningMaterial => {
     validateCommitmentCommonInput(input);
-    const context = contextFields(input.setupContext);
+    const setupContextHash = deriveCollectiveBgvSetupContextHash(
+        input.setupContext,
+    );
     const sourceTrusteeState = input.sourceTrusteeOpeningState;
     assertNonEmptyString(
         sourceTrusteeState.sourceTrusteeIdentity,
@@ -112,7 +106,7 @@ export const createVssSourceTrusteeCoefficientCommitmentContribution = (
             });
             coefficientCommitments.push({
                 objectType: 'VssCoefficientCommitment',
-                ...context,
+                setupContextHash,
                 sourceTrusteeIdentity: sourceTrusteeState.sourceTrusteeIdentity,
                 sourceTrusteeRosterPosition:
                     sourceTrusteeState.sourceTrusteeRosterPosition,
@@ -124,7 +118,7 @@ export const createVssSourceTrusteeCoefficientCommitmentContribution = (
             });
             const materialRecord = {
                 objectType: 'VssCoefficientCommitmentMaterial',
-                ...context,
+                setupContextHash,
                 sourceTrusteeIdentity: sourceTrusteeState.sourceTrusteeIdentity,
                 sourceTrusteeRosterPosition:
                     sourceTrusteeState.sourceTrusteeRosterPosition,
@@ -140,7 +134,7 @@ export const createVssSourceTrusteeCoefficientCommitmentContribution = (
     });
     const sourceTrusteeRecordWithoutRoot = {
         objectType: 'VssSourceTrusteeCoefficientCommitments',
-        ...context,
+        setupContextHash,
         sourceTrusteeIdentity: sourceTrusteeState.sourceTrusteeIdentity,
         sourceTrusteeRosterPosition:
             sourceTrusteeState.sourceTrusteeRosterPosition,
@@ -158,18 +152,14 @@ export const createVssSourceTrusteeCoefficientCommitmentContribution = (
     } satisfies VssSourceTrusteeCoefficientCommitmentRecord;
 
     return {
-        sourceTrusteeRecord,
-        materialRecords,
-        privateOpeningMaterial: {
-            sourceTrusteeIdentity: sourceTrusteeState.sourceTrusteeIdentity,
-            sourceTrusteeRosterPosition:
-                sourceTrusteeState.sourceTrusteeRosterPosition,
-            sourceTrusteeCommitmentRoot:
-                sourceTrusteeRecord.sourceTrusteeCommitmentRoot,
-            sourceTrusteeCoefficientCommitmentRecord: sourceTrusteeRecord,
-            sourceTrusteeCoefficientCommitmentMaterialRecords: materialRecords,
-            coefficientOpenings: sourceTrusteePrivateOpenings,
-        },
+        sourceTrusteeIdentity: sourceTrusteeState.sourceTrusteeIdentity,
+        sourceTrusteeRosterPosition:
+            sourceTrusteeState.sourceTrusteeRosterPosition,
+        sourceTrusteeCommitmentRoot:
+            sourceTrusteeRecord.sourceTrusteeCommitmentRoot,
+        sourceTrusteeCoefficientCommitmentRecord: sourceTrusteeRecord,
+        sourceTrusteeCoefficientCommitmentMaterialRecords: materialRecords,
+        coefficientOpenings: sourceTrusteePrivateOpenings,
     };
 };
 
@@ -177,7 +167,9 @@ export const createVssCoefficientCommitmentBundle = (
     input: VssCoefficientCommitmentBundleInput,
 ): VssCoefficientCommitmentBundle => {
     validateCommitmentCommonInput(input);
-    const context = contextFields(input.setupContext);
+    const setupContextHash = deriveCollectiveBgvSetupContextHash(
+        input.setupContext,
+    );
     const sourceTrusteeOpeningStateProvider =
         sourceTrusteeOpeningStateProviderFromInput(input);
     const sortedReferences = sortedSourceTrusteeReferences(
@@ -205,19 +197,13 @@ export const createVssCoefficientCommitmentBundle = (
             }),
     );
     const sourceTrusteeRecords = sourceTrusteeContributions.map(
-        (contribution) => contribution.sourceTrusteeRecord,
+        (contribution) => contribution.sourceTrusteeCoefficientCommitmentRecord,
     );
-    const coefficientCommitmentMaterial = sourceTrusteeContributions.flatMap(
-        (contribution) => contribution.materialRecords,
-    );
-    const privateOpeningMaterialBySourceTrustee =
-        sourceTrusteeContributions.map(
-            (contribution) => contribution.privateOpeningMaterial,
-        );
+    const privateOpeningMaterialBySourceTrustee = sourceTrusteeContributions;
 
     const commitmentSetWithoutRoot = {
         objectType: 'VssCoefficientCommitmentSet',
-        ...context,
+        setupContextHash,
         publicMatrixSeedHash: input.publicMatrixSeedHash,
         sourceTrusteeRecords,
     } as const satisfies Omit<
@@ -230,31 +216,8 @@ export const createVssCoefficientCommitmentBundle = (
             commitmentSetWithoutRoot,
         ),
     } satisfies VssCoefficientCommitmentSet;
-    const materialSetWithoutRoot = {
-        objectType: 'VssCoefficientCommitmentMaterialSet',
-        ...context,
-        publicMatrixSeedHash: input.publicMatrixSeedHash,
-        vssCoefficientCommitmentRoot:
-            commitmentSet.vssCoefficientCommitmentRoot,
-        participantCount: input.participantCount,
-        thresholdDegree: input.thresholdDegree,
-        rnsLimbCount: input.qSharePrimes.length,
-        ringDegree: input.ringDegree,
-        coefficientCommitments: coefficientCommitmentMaterial,
-    } as const satisfies Omit<
-        VssCoefficientCommitmentMaterialSet,
-        'vssCoefficientCommitmentMaterialRoot'
-    >;
-    const materialSet = {
-        ...materialSetWithoutRoot,
-        vssCoefficientCommitmentMaterialRoot: deriveCanonicalObjectHash(
-            materialSetWithoutRoot,
-        ),
-    } satisfies VssCoefficientCommitmentMaterialSet;
-
     return {
         commitmentSet,
-        materialSet,
         privateOpeningMaterialBySourceTrustee,
     };
 };
