@@ -114,8 +114,25 @@ type BgvTargetDecryptionLocalCommandContext = Readonly<{
     readonly targetShareProfile: unknown;
 }>;
 
+export type BgvCollectiveSetupVerificationInput = Readonly<
+    {
+        readonly setupPackage: unknown;
+        readonly expectedSetupPackageHash?: ProtocolHash;
+        readonly expectedManifestHash?: ProtocolHash;
+        readonly expectedRosterHash?: ProtocolHash;
+    } & BgvCollectiveSetupTransportCompanions
+>;
+
+export type AcceptedSetupSession = Readonly<{
+    cancel(): void;
+    verifyCollectiveBgvSetup(
+        input: BgvCollectiveSetupVerificationInput,
+    ): BgvCollectiveSetupVerification;
+}>;
+
 export type TranscriptCoreKernel = {
     readonly exportedFunctionNames: readonly string[];
+    beginAcceptedSetupSession(): AcceptedSetupSession;
     computeChunkRoot(input: {
         readonly inputHex: string;
         readonly chunkSize: number;
@@ -207,16 +224,6 @@ export type TranscriptCoreKernel = {
         readonly expectedRotSetHash?: ProtocolHash;
         readonly expectedEvaluationKeyRoot?: ProtocolHash;
     }): void;
-    verifyCollectiveBgvSetup(
-        input: Readonly<
-            {
-                readonly setupPackage: unknown;
-                readonly expectedSetupPackageHash?: ProtocolHash;
-                readonly expectedManifestHash?: ProtocolHash;
-                readonly expectedRosterHash?: ProtocolHash;
-            } & BgvCollectiveSetupTransportCompanions
-        >,
-    ): BgvCollectiveSetupVerification;
     verifyPrivateVssShareEnvelope(input: {
         readonly setupContext: unknown;
         readonly publicMatrixSeedHash: ProtocolHash;
@@ -356,6 +363,23 @@ export type TranscriptCoreKernel = {
     }): BgvEvaluatorOperationValidation;
 };
 
+export type TranscriptCoreKernelContextOwner = Pick<
+    TranscriptCoreKernel,
+    'exportedFunctionNames'
+>;
+
+export type PublishedSdkKernel = Pick<
+    TranscriptCoreKernel,
+    | 'beginAcceptedSetupSession'
+    | 'exportedFunctionNames'
+    | 'generateBgvTargetDecryptionShareProofMaterialFromLocalWitness'
+    | 'verifyPrivateVssShareEnvelope'
+    | 'deriveBgvTargetDecryptionResultReleaseSetupContext'
+    | 'beginBgvTargetDecryptionResultRelease'
+    | 'absorbBgvTargetDecryptionResultReleaseShare'
+    | 'finishBgvTargetDecryptionResultRelease'
+>;
+
 type KernelMethodInput<MethodName extends keyof TranscriptCoreKernel> =
     TranscriptCoreKernel[MethodName] extends (input: infer Input) => unknown
         ? NonNullable<Input>
@@ -450,9 +474,10 @@ type TranscriptCoreKernelCommand =
           'generateBgvPassiveSetup'
       >
     | KernelCommandFromMethod<'VerifyBgvPassiveSetup', 'verifyBgvPassiveSetup'>
-    | KernelCommandFromMethod<
-          'VerifyCollectiveBgvSetup',
-          'verifyCollectiveBgvSetup'
+    | Readonly<
+          {
+              readonly command: 'VerifyCollectiveBgvSetup';
+          } & BgvCollectiveSetupVerificationInput
       >
     | KernelCommandFromMethod<
           'VerifyPrivateVssShareEnvelope',
@@ -548,6 +573,39 @@ type TranscriptCoreKernelCommand =
 type TranscriptCoreKernelExports = WebAssembly.Exports & {
     memory?: WebAssembly.Memory;
     sealed_lattice_allocate?: (length: number) => number;
+    sealed_lattice_accepted_setup_canonical_stream_begin?: (
+        setupSessionHandle: number,
+        setupCapabilityPointer: number,
+        setupCapabilityLength: number,
+        familyCode: number,
+        materialRootPointer: number,
+        materialRootLength: number,
+        descriptorPointer: number,
+        descriptorLength: number,
+        streamCapabilityPointer: number,
+        streamCapabilityLength: number,
+        statusPointer: number,
+        totalByteLengthPointer: number,
+        chunkCountPointer: number,
+    ) => number;
+    sealed_lattice_accepted_setup_command_with_length?: (
+        pointer: number,
+        length: number,
+        sessionHandle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        outputLengthPointer: number,
+    ) => number;
+    sealed_lattice_accepted_setup_session_begin?: (
+        capabilityPointer: number,
+        capabilityLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_accepted_setup_session_cancel?: (
+        sessionHandle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+    ) => number;
     sealed_lattice_bgv_canonical_stream_absorb_chunk?: (
         handle: number,
         capabilityPointer: number,

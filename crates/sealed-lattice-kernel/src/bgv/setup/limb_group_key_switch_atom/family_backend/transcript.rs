@@ -10,6 +10,10 @@
 
 use super::super::proof_field::ProofFieldParameters;
 use super::merkle::MerkleDigest;
+#[cfg(test)]
+use crate::bgv::setup::transcript_order_audit::{
+    TranscriptOrderAuditRecorder, active_transcript_order_audit_recorder,
+};
 use crate::hashing::hash512;
 
 const TRANSCRIPT_DOMAIN: &str = "sealed-lattice/setup/key-switch-atom/transcript";
@@ -23,17 +27,35 @@ const CHALLENGE_WORDS: usize = 15;
 pub(super) struct Transcript {
     state: [u8; 64],
     squeeze_counter: u64,
+    #[cfg(test)]
+    audit: Option<TranscriptOrderAuditRecorder>,
 }
 
 impl Transcript {
     pub(super) fn new(protocol_label: &str) -> Self {
-        Self {
+        let transcript = Self {
             state: hash512(TRANSCRIPT_DOMAIN, &[b"init", protocol_label.as_bytes()]),
             squeeze_counter: 0,
+            #[cfg(test)]
+            audit: active_transcript_order_audit_recorder(
+                "limb-group-key-switch-atom",
+                protocol_label,
+            ),
+        };
+        #[cfg(test)]
+        let mut transcript = transcript;
+        #[cfg(test)]
+        if let Some(audit) = transcript.audit.as_mut() {
+            audit.record_initialize(protocol_label, protocol_label.len());
         }
+        transcript
     }
 
     pub(super) fn absorb(&mut self, label: &str, bytes: &[u8]) {
+        #[cfg(test)]
+        if let Some(audit) = self.audit.as_mut() {
+            audit.record_absorb(label, bytes.len());
+        }
         self.state = hash512(
             TRANSCRIPT_DOMAIN,
             &[b"absorb", &self.state, label.as_bytes(), bytes],
@@ -65,6 +87,10 @@ impl Transcript {
     }
 
     fn squeeze_block(&mut self, label: &str) -> [u8; 64] {
+        #[cfg(test)]
+        if let Some(audit) = self.audit.as_mut() {
+            audit.record_squeeze(label, self.squeeze_counter);
+        }
         let block = hash512(
             TRANSCRIPT_DOMAIN,
             &[

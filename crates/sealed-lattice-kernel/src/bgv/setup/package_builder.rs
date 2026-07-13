@@ -99,7 +99,6 @@ pub(super) fn build_passive_setup_package(input: &PassiveSetupInput) -> Canonica
         "setupSeedHash": input.setup_seed_hash,
     });
     let certificates = setup_certificates(
-        input.participants.len(),
         &key_switch_decomposition,
         &key_switch_decomposition_hash,
         &evaluation_keys,

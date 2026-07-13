@@ -1,6 +1,9 @@
 use super::*;
 
-use std::{collections::BTreeSet, sync::Arc};
+use std::sync::Arc;
+
+#[cfg(test)]
+use std::collections::BTreeSet;
 
 use crate::bgv::setup_helpers::{
     array_at_path, compare_required_string, hash_at_path, string_at_path, value_at_path,
@@ -185,6 +188,20 @@ impl CanonicalProofMaterialBytes {
         })
     }
 
+    #[cfg(test)]
+    pub(crate) fn into_contiguous(self) -> Vec<u8> {
+        match self.backing {
+            CanonicalProofMaterialBacking::Contiguous(bytes) => bytes,
+            CanonicalProofMaterialBacking::StreamChunks(chunks) => {
+                let mut bytes = Vec::with_capacity(self.total_byte_length);
+                for chunk in chunks {
+                    bytes.extend_from_slice(&chunk);
+                }
+                bytes
+            }
+        }
+    }
+
     pub(crate) fn hash512_hex(&self, domain: &str) -> CanonicalResult<String> {
         crate::hashing::hash512_hex_streamed_part(domain, self.len(), self.chunks())
     }
@@ -319,7 +336,13 @@ pub(in crate::bgv::setup) fn verified_setup_proof_material_bytes_from_request(
         expected_proof_material_root,
         &format!("{transported_material_path}.proofMaterialRoot"),
     )?;
-    crate::bgv::setup::verified_canonical_setup_proof_material_bytes(
+    // A proof-material root is an owned, single-use lease for one setup
+    // verification call. Remove it from the canonical store before decoding so
+    // the store cannot retain the complete corpus while the verifier advances
+    // through later records. The returned Arc keeps only the proof currently
+    // being checked alive. A retry must authenticate the source again, matching
+    // the disposable-kernel setup verification boundary.
+    crate::bgv::setup::take_verified_canonical_proof_material_bytes(
         proof_family,
         expected_proof_material_root,
     )?
@@ -333,6 +356,7 @@ pub(in crate::bgv::setup) fn verified_setup_proof_material_bytes_from_request(
     })
 }
 
+#[cfg(test)]
 fn request_verified_canonical_setup_proof_material_roots(request: &Value) -> Vec<String> {
     let mut material_roots = BTreeSet::new();
     for field_name in [
@@ -357,6 +381,7 @@ fn request_verified_canonical_setup_proof_material_roots(request: &Value) -> Vec
     material_roots.into_iter().collect()
 }
 
+#[cfg(test)]
 fn collect_request_material_roots(
     value: &Value,
     root_field_name: &str,
@@ -377,11 +402,13 @@ fn collect_request_material_roots(
     }
 }
 
+#[cfg(test)]
 pub(in crate::bgv::setup) struct VerifiedSetupProofMaterialEvictionGuard {
     canonical_proof_material_roots: Vec<String>,
     canonical_public_key_share_material_roots: Vec<String>,
 }
 
+#[cfg(test)]
 impl VerifiedSetupProofMaterialEvictionGuard {
     pub(in crate::bgv::setup) fn for_request(request: &Value) -> Self {
         Self {
@@ -404,6 +431,7 @@ impl VerifiedSetupProofMaterialEvictionGuard {
     }
 }
 
+#[cfg(test)]
 impl Drop for VerifiedSetupProofMaterialEvictionGuard {
     fn drop(&mut self) {
         crate::bgv::setup::evict_verified_canonical_setup_proof_materials(

@@ -13,7 +13,7 @@ use super::{
 pub const SUITE_RECORD_MAXIMUM_BYTE_LENGTH: usize = 65_536;
 
 const SUITE_RECORD_VERSION: u16 = 1;
-const SUITE_RECORD_ITEM_COUNT: usize = 28;
+const SUITE_RECORD_ITEM_COUNT: usize = 30;
 const KEY_SWITCH_METHOD_HYBRID_QP_RNS: u16 = 1;
 const KEY_SWITCH_BASIS_CONVERTER_CENTERED_INTEGER_RNS: u16 = 1;
 const REQUIRED_DISTRIBUTION_COUNT: usize = 12;
@@ -45,6 +45,8 @@ pub struct SuiteRecord {
     pub maximum_ballot_attempts_per_participant: u16,
     pub maximum_recovery_transitions_per_state_key: u16,
     pub maximum_target_share_submissions: u16,
+    pub maximum_private_sampler_candidate_draws_per_output: u32,
+    pub maximum_public_sampler_candidate_draws_per_output: u32,
     pub maximum_candidate_packages_per_action: u32,
     pub maximum_proof_objects_per_action: u32,
     pub maximum_candidate_bytes_per_participant: u64,
@@ -111,6 +113,8 @@ impl SuiteRecord {
                 CanonicalItem::unsigned16(self.maximum_ballot_attempts_per_participant),
                 CanonicalItem::unsigned16(self.maximum_recovery_transitions_per_state_key),
                 CanonicalItem::unsigned16(self.maximum_target_share_submissions),
+                CanonicalItem::unsigned32(self.maximum_private_sampler_candidate_draws_per_output),
+                CanonicalItem::unsigned32(self.maximum_public_sampler_candidate_draws_per_output),
                 CanonicalItem::unsigned32(self.maximum_candidate_packages_per_action),
                 CanonicalItem::unsigned32(self.maximum_proof_objects_per_action),
                 CanonicalItem::unsigned64(self.maximum_candidate_bytes_per_participant),
@@ -149,20 +153,20 @@ impl SuiteRecord {
         )?;
 
         require_exact_nested_tuple_count(
-            &tuple.items[26],
+            &tuple.items[28],
             REQUIRED_DISTRIBUTION_COUNT,
             "suite record must contain exactly twelve distribution records",
         )?;
         require_exact_nested_tuple_count(
-            &tuple.items[27],
+            &tuple.items[29],
             REQUIRED_ARTIFACT_COUNT,
             "suite record must contain exactly six artifact references",
         )?;
-        let distributions = read_nested_tuple_list(&tuple.items[26], &bounded_limits)?
+        let distributions = read_nested_tuple_list(&tuple.items[28], &bounded_limits)?
             .iter()
             .map(DistributionRecord::from_tuple)
             .collect::<SchemaResult<Vec<_>>>()?;
-        let artifacts = read_nested_tuple_list(&tuple.items[27], &bounded_limits)?
+        let artifacts = read_nested_tuple_list(&tuple.items[29], &bounded_limits)?
             .iter()
             .map(ArtifactReference::from_tuple)
             .collect::<SchemaResult<Vec<_>>>()?;
@@ -185,15 +189,17 @@ impl SuiteRecord {
             maximum_ballot_attempts_per_participant: read_u16(&tuple.items[14])?,
             maximum_recovery_transitions_per_state_key: read_u16(&tuple.items[15])?,
             maximum_target_share_submissions: read_u16(&tuple.items[16])?,
-            maximum_candidate_packages_per_action: read_u32(&tuple.items[17])?,
-            maximum_proof_objects_per_action: read_u32(&tuple.items[18])?,
-            maximum_candidate_bytes_per_participant: read_u64(&tuple.items[19])?,
-            maximum_candidate_bytes_per_action: read_u64(&tuple.items[20])?,
-            maximum_setup_bytes_per_participant: read_u64(&tuple.items[21])?,
-            maximum_proof_bytes_per_action: read_u64(&tuple.items[22])?,
-            maximum_public_corpus_bytes: read_u64(&tuple.items[23])?,
-            maximum_participant_upload_bytes: read_u64(&tuple.items[24])?,
-            maximum_ceremony_upload_bytes: read_u64(&tuple.items[25])?,
+            maximum_private_sampler_candidate_draws_per_output: read_u32(&tuple.items[17])?,
+            maximum_public_sampler_candidate_draws_per_output: read_u32(&tuple.items[18])?,
+            maximum_candidate_packages_per_action: read_u32(&tuple.items[19])?,
+            maximum_proof_objects_per_action: read_u32(&tuple.items[20])?,
+            maximum_candidate_bytes_per_participant: read_u64(&tuple.items[21])?,
+            maximum_candidate_bytes_per_action: read_u64(&tuple.items[22])?,
+            maximum_setup_bytes_per_participant: read_u64(&tuple.items[23])?,
+            maximum_proof_bytes_per_action: read_u64(&tuple.items[24])?,
+            maximum_public_corpus_bytes: read_u64(&tuple.items[25])?,
+            maximum_participant_upload_bytes: read_u64(&tuple.items[26])?,
+            maximum_ceremony_upload_bytes: read_u64(&tuple.items[27])?,
             distributions,
             artifacts,
         };
@@ -365,6 +371,8 @@ impl SuiteRecord {
         ]
         .contains(&0)
             || [
+                self.maximum_private_sampler_candidate_draws_per_output,
+                self.maximum_public_sampler_candidate_draws_per_output,
                 self.maximum_candidate_packages_per_action,
                 self.maximum_proof_objects_per_action,
             ]
@@ -532,7 +540,7 @@ fn intrinsic_suite_record_encoded_byte_length(record: &SuiteRecord) -> SchemaRes
     const TUPLE_HEADER_BYTE_LENGTH: usize = 8;
     const ITEM_HEADER_BYTE_LENGTH: usize = 6;
     const FIXED_U16_PAYLOAD_BYTE_LENGTH: usize = 11 * 2;
-    const FIXED_U32_PAYLOAD_BYTE_LENGTH: usize = 3 * 4;
+    const FIXED_U32_PAYLOAD_BYTE_LENGTH: usize = 5 * 4;
     const FIXED_U64_PAYLOAD_BYTE_LENGTH: usize = 8 * 8;
     const HOMOGENEOUS_LIST_HEADER_BYTE_LENGTH: usize = 6;
     const DISTRIBUTION_RECORD_TUPLE_BYTE_LENGTH: usize = 38;

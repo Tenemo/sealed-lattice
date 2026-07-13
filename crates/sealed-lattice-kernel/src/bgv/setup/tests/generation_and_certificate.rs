@@ -48,21 +48,6 @@ fn passive_setup_collective_key_uses_evaluator_decryptable_contract() {
 }
 
 #[test]
-fn passive_setup_keeps_special_prime_out_of_public_exposure() {
-    let package = setup_package_ref();
-    let public_samples = &package["certificates"]["publicRlweSamplesByBasis"];
-
-    assert_eq!(
-        public_samples["QPPublic"]["relinearizationKeys"],
-        serde_json::json!(0)
-    );
-    assert_eq!(
-        public_samples["QPPublic"]["rotationKeys"],
-        serde_json::json!(0)
-    );
-}
-
-#[test]
 fn passive_setup_private_witness_is_required_for_test_decryption_key() {
     let package = setup_package();
 
@@ -111,13 +96,16 @@ fn passive_setup_uses_rejection_sampled_setup_distributions() {
     assert_eq!(reduce_unbiased_u64(7, 0), None);
 
     let secret_samples =
-        sample_small_distribution(&"1".repeat(128), "trustee-1", "local-secret-share", -1, 1);
+        sample_small_distribution(&"1".repeat(128), "trustee-1", "local-secret-share", -1, 1)
+            .expect("the fixed private sampler derives within its candidate-draw limit");
     for sample in secret_samples {
         let value = sample["value"].as_i64().expect("secret sample");
         assert!((-1..=1).contains(&value));
     }
     for modulus in DATA_PRIMES {
         let sample = sample_residue(&"1".repeat(128), "public-sample", 17, modulus);
+        let sample =
+            sample.expect("the fixed public sampler derives within its candidate-draw limit");
         assert!(sample < modulus);
     }
 }
@@ -139,7 +127,7 @@ fn public_common_random_polynomial_root_matches_canonical_object_hash() {
             setup_seed_hash,
             "public-common-random-polynomial",
             DATA_PRIMES[0],
-        ),
+        ).expect("the fixed public sampler derives within its candidate-draw limit"),
     });
     let actual_root = package["collectivePublicKey"]["record"]["publicCommonRandomPolynomialRoot"]
         .as_str()

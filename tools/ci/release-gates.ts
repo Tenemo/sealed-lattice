@@ -1,4 +1,5 @@
-import { appendFile, rm } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { appendFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -22,8 +23,6 @@ import {
     runCommandAndCaptureOutput,
     type CommandInvocation,
 } from './run-command.js';
-
-import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
 
 export type ReleaseCommandInvocation = {
     readonly arguments: readonly string[];
@@ -99,7 +98,7 @@ const runPackageManagerCommand = async (
     commandArguments: readonly string[],
     workingDirectoryPath: string,
 ): Promise<ReleaseCommandProbe> =>
-    await executor({
+    executor({
         arguments: [...runner.commandArgumentsPrefix, ...commandArguments],
         command: runner.command,
         description: `${runner.kind} ${commandArguments.join(' ')}`,
@@ -112,7 +111,7 @@ const runGitCommand = async (
     commandArguments: readonly string[],
     workingDirectoryPath = repositoryRoot,
 ): Promise<ReleaseCommandProbe> =>
-    await executor({
+    executor({
         arguments: commandArguments,
         command: 'git',
         description: `git ${commandArguments.join(' ')}`,
@@ -243,91 +242,26 @@ export const verifyReleaseMetadata = async (
     validateReleaseMetadataPaths({ changedPaths, untrackedPaths });
 };
 
-type NpmPackMetadata = {
-    readonly filename: string;
-    readonly integrity: string;
-    readonly name: string;
-    readonly version: string;
-};
-
-const parseNpmPackMetadata = (packOutput: string): NpmPackMetadata => {
-    let parsedOutput: unknown;
-    try {
-        parsedOutput = JSON.parse(packOutput) as unknown;
-    } catch {
-        throw new Error('npm pack returned malformed JSON.');
-    }
-
-    if (!Array.isArray(parsedOutput) || parsedOutput.length !== 1) {
-        throw new Error('npm pack must describe exactly one package.');
-    }
-    const packageMetadata: unknown = parsedOutput[0];
-    if (
-        typeof packageMetadata !== 'object' ||
-        packageMetadata === null ||
-        !('filename' in packageMetadata) ||
-        typeof packageMetadata.filename !== 'string' ||
-        !('integrity' in packageMetadata) ||
-        typeof packageMetadata.integrity !== 'string' ||
-        !('name' in packageMetadata) ||
-        typeof packageMetadata.name !== 'string' ||
-        !('version' in packageMetadata) ||
-        typeof packageMetadata.version !== 'string'
-    ) {
-        throw new Error(
-            'npm pack did not return a filename, integrity, package name, and package version.',
-        );
-    }
-
-    return {
-        filename: packageMetadata.filename,
-        integrity: packageMetadata.integrity,
-        name: packageMetadata.name,
-        version: packageMetadata.version,
-    };
-};
-
 export const determineNpmPublication = async (input: {
     readonly executor?: ReleaseCommandExecutor;
-    readonly packageDirectory: string;
+    readonly packageIntegrity: string;
+    readonly packageTarballPath: string;
     readonly releaseVersion: string;
     readonly runLog?: ActiveLocalRunLog;
 }): Promise<'already-identical' | 'publish'> => {
     const executor =
         input.executor ?? createReleaseCommandExecutor(input.runLog);
     const npmRunner = resolvePackageManagerRunnerForPackageManager('npm');
-    const packMetadata = parseNpmPackMetadata(
-        requireSuccessfulCommand(
-            'npm pack',
-            await runPackageManagerCommand(
-                executor,
-                npmRunner,
-                ['pack', '--json', '--ignore-scripts'],
-                input.packageDirectory,
-            ),
-        ),
-    );
-    if (
-        packMetadata.name !== 'sealed-lattice' ||
-        packMetadata.version !== input.releaseVersion
-    ) {
+    const packageTarballPath = path.resolve(input.packageTarballPath);
+    const actualPackageIntegrity = `sha512-${createHash('sha512')
+        .update(await readFile(packageTarballPath))
+        .digest('base64')}`;
+    if (actualPackageIntegrity !== input.packageIntegrity) {
         throw new Error(
-            `npm pack produced ${packMetadata.name}@${packMetadata.version}; expected sealed-lattice@${input.releaseVersion}.`,
+            'The retained package tarball no longer matches the package smoke integrity.',
         );
     }
-    const packageArchivePath = path.resolve(
-        input.packageDirectory,
-        packMetadata.filename,
-    );
-    if (
-        path.dirname(packageArchivePath) !==
-        path.resolve(input.packageDirectory)
-    ) {
-        throw new Error(
-            'npm pack returned a filename outside the package directory.',
-        );
-    }
-    await rm(packageArchivePath, { force: true });
+    const workingDirectoryPath = path.dirname(packageTarballPath);
 
     const registryLookup = await runPackageManagerCommand(
         executor,
@@ -338,7 +272,7 @@ export const determineNpmPublication = async (input: {
             'dist.integrity',
             '--json',
         ],
-        input.packageDirectory,
+        workingDirectoryPath,
     );
     const latestTagLookup =
         registryLookup.exitCode === 0
@@ -346,12 +280,12 @@ export const determineNpmPublication = async (input: {
                   executor,
                   npmRunner,
                   ['view', 'sealed-lattice', 'dist-tags.latest', '--json'],
-                  input.packageDirectory,
+                  workingDirectoryPath,
               )
             : undefined;
     const publicationDisposition = resolveNpmPublication({
         latestTagLookup,
-        localIntegrity: packMetadata.integrity,
+        localIntegrity: input.packageIntegrity,
         packageVersion: input.releaseVersion,
         registryLookup,
     });
@@ -432,7 +366,8 @@ const runNpmDispositionCommand = async (
 ): Promise<void> => {
     const packageVersion = readRequiredEnvironment('RELEASE_VERSION');
     const action = await determineNpmPublication({
-        packageDirectory: readRequiredEnvironment('PUBLIC_PACKAGE_DIR'),
+        packageIntegrity: readRequiredEnvironment('PACKAGE_INTEGRITY'),
+        packageTarballPath: readRequiredEnvironment('PACKAGE_TARBALL_PATH'),
         releaseVersion: packageVersion,
         runLog,
     });
@@ -514,6 +449,6 @@ const main = async (): Promise<void> => {
     );
 };
 
-if (isDirectlyInvokedModule(import.meta.url)) {
+if (import.meta.main) {
     void main();
 }

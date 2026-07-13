@@ -12,10 +12,12 @@ const SQUEEZE_TRANSCRIPT_DOMAIN: &str = "sealed-lattice/proof/transcript/squeeze
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProofTranscriptError {
+    CandidateDrawLimitExhausted,
     CanonicalCodec(CanonicalCodecError),
     CounterExhausted,
     EmptyRoundMessage,
     InvalidApplicationStatement,
+    InvalidCandidateDrawLimit,
     InvalidExcludedPoint,
     InvalidModulus,
     InvalidCoordinateCount,
@@ -26,6 +28,9 @@ pub enum ProofTranscriptError {
 impl fmt::Display for ProofTranscriptError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::CandidateDrawLimitExhausted => formatter.write_str(
+                "the proof challenge candidate-draw limit was exhausted before deriving an output",
+            ),
             Self::CanonicalCodec(error) => write!(formatter, "{error}"),
             Self::CounterExhausted => {
                 formatter.write_str("the proof challenge stream counter is exhausted")
@@ -35,6 +40,9 @@ impl fmt::Display for ProofTranscriptError {
             }
             Self::InvalidApplicationStatement => formatter
                 .write_str("the proof header does not contain the declared application statement"),
+            Self::InvalidCandidateDrawLimit => {
+                formatter.write_str("the proof challenge candidate-draw limit must be positive")
+            }
             Self::InvalidExcludedPoint => {
                 formatter.write_str("the proof challenge exclusion set contains an invalid point")
             }
@@ -243,11 +251,16 @@ impl CanonicalProofTranscript {
         &self,
         challenge_tag: ProofChallengeTag,
         modulus: u64,
+        maximum_candidate_draws_per_output: u32,
     ) -> Result<u64, ProofTranscriptError> {
         let canonical_tag =
             challenge_tag.canonical_tag(self.application_statement_schema_identifier);
         let mut challenge_stream = ChallengeByteStream::new(self.state, canonical_tag);
-        sample_modulo_from_stream(&mut challenge_stream, modulus)
+        sample_modulo_from_stream(
+            &mut challenge_stream,
+            modulus,
+            maximum_candidate_draws_per_output,
+        )
     }
 
     pub fn sample_extension_coordinates(
@@ -255,16 +268,22 @@ impl CanonicalProofTranscript {
         challenge_tag: ProofChallengeTag,
         modulus: u64,
         coordinate_count: u16,
+        maximum_candidate_draws_per_output: u32,
     ) -> Result<Vec<u64>, ProofTranscriptError> {
         if coordinate_count == 0 {
             return Err(ProofTranscriptError::InvalidCoordinateCount);
         }
+        validate_candidate_draw_limit(maximum_candidate_draws_per_output)?;
         let canonical_tag =
             challenge_tag.canonical_tag(self.application_statement_schema_identifier);
         let mut challenge_stream = ChallengeByteStream::new(self.state, canonical_tag);
         let mut coordinates = Vec::with_capacity(usize::from(coordinate_count));
         for _ in 0..coordinate_count {
-            coordinates.push(sample_modulo_from_stream(&mut challenge_stream, modulus)?);
+            coordinates.push(sample_modulo_from_stream(
+                &mut challenge_stream,
+                modulus,
+                maximum_candidate_draws_per_output,
+            )?);
         }
         Ok(coordinates)
     }
@@ -275,6 +294,7 @@ impl CanonicalProofTranscript {
         modulus: u64,
         coordinate_count: u16,
         excluded_points: &[Vec<u64>],
+        maximum_candidate_draws_per_output: u32,
     ) -> Result<Vec<Vec<u64>>, ProofTranscriptError> {
         if modulus == 0 {
             return Err(ProofTranscriptError::InvalidModulus);
@@ -282,6 +302,7 @@ impl CanonicalProofTranscript {
         if coordinate_count == 0 {
             return Err(ProofTranscriptError::InvalidCoordinateCount);
         }
+        validate_candidate_draw_limit(maximum_candidate_draws_per_output)?;
 
         let mut occupied_points = BTreeSet::new();
         for point in excluded_points {
@@ -306,15 +327,24 @@ impl CanonicalProofTranscript {
             let canonical_tag = ProofChallengeTag::DeepPoint { point_ordinal }
                 .canonical_tag(self.application_statement_schema_identifier);
             let mut challenge_stream = ChallengeByteStream::new(self.state, canonical_tag);
-            loop {
+            let mut point_accepted = false;
+            for _ in 0..maximum_candidate_draws_per_output {
                 let mut point = Vec::with_capacity(usize::from(coordinate_count));
                 for _ in 0..coordinate_count {
-                    point.push(sample_modulo_from_stream(&mut challenge_stream, modulus)?);
+                    point.push(sample_modulo_from_stream(
+                        &mut challenge_stream,
+                        modulus,
+                        maximum_candidate_draws_per_output,
+                    )?);
                 }
                 if occupied_points.insert(point.clone()) {
                     points.push(point);
+                    point_accepted = true;
                     break;
                 }
+            }
+            if !point_accepted {
+                return Err(ProofTranscriptError::CandidateDrawLimitExhausted);
             }
         }
         Ok(points)
@@ -324,6 +354,7 @@ impl CanonicalProofTranscript {
         &self,
         unique_query_count: u32,
         representative_set_cardinality: u64,
+        maximum_candidate_draws_per_output: u32,
     ) -> Result<Vec<u64>, ProofTranscriptError> {
         if representative_set_cardinality == 0 {
             return Err(ProofTranscriptError::InvalidModulus);
@@ -331,20 +362,27 @@ impl CanonicalProofTranscript {
         if u64::from(unique_query_count) > representative_set_cardinality {
             return Err(ProofTranscriptError::QueryCardinalityExceeded);
         }
+        validate_candidate_draw_limit(maximum_candidate_draws_per_output)?;
 
         let mut representatives = BTreeSet::new();
         for query_ordinal in 0..unique_query_count {
             let canonical_tag = ProofChallengeTag::QueryRepresentative { query_ordinal }
                 .canonical_tag(self.application_statement_schema_identifier);
             let mut challenge_stream = ChallengeByteStream::new(self.state, canonical_tag);
-            loop {
+            let mut representative_accepted = false;
+            for _ in 0..maximum_candidate_draws_per_output {
                 let representative = sample_modulo_from_stream(
                     &mut challenge_stream,
                     representative_set_cardinality,
+                    maximum_candidate_draws_per_output,
                 )?;
                 if representatives.insert(representative) {
+                    representative_accepted = true;
                     break;
                 }
+            }
+            if !representative_accepted {
+                return Err(ProofTranscriptError::CandidateDrawLimitExhausted);
             }
         }
         Ok(representatives.into_iter().collect())
@@ -357,6 +395,15 @@ fn extension_field_cardinality(modulus: u64, coordinate_count: u16) -> Option<u1
         cardinality = cardinality.checked_mul(u128::from(modulus))?;
     }
     Some(cardinality)
+}
+
+fn validate_candidate_draw_limit(
+    maximum_candidate_draws_per_output: u32,
+) -> Result<(), ProofTranscriptError> {
+    if maximum_candidate_draws_per_output == 0 {
+        return Err(ProofTranscriptError::InvalidCandidateDrawLimit);
+    }
+    Ok(())
 }
 
 struct ChallengeByteStream {
@@ -424,10 +471,12 @@ impl ChallengeByteStream {
 fn sample_modulo_from_stream(
     challenge_stream: &mut ChallengeByteStream,
     modulus: u64,
+    maximum_candidate_draws_per_output: u32,
 ) -> Result<u64, ProofTranscriptError> {
     if modulus == 0 {
         return Err(ProofTranscriptError::InvalidModulus);
     }
+    validate_candidate_draw_limit(maximum_candidate_draws_per_output)?;
     let bit_length = u64::BITS - modulus.leading_zeros();
     let candidate_byte_length =
         usize::try_from(bit_length.div_ceil(8)).expect("a u64 challenge width always fits usize");
@@ -435,18 +484,21 @@ fn sample_modulo_from_stream(
     let modulus_u128 = u128::from(modulus);
     let acceptance_limit = candidate_space_size / modulus_u128 * modulus_u128;
 
-    loop {
+    for _ in 0..maximum_candidate_draws_per_output {
         let candidate = challenge_stream.read_candidate(candidate_byte_length)?;
         if u128::from(candidate) < acceptance_limit {
             return Ok(candidate % modulus);
         }
     }
+    Err(ProofTranscriptError::CandidateDrawLimitExhausted)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::foundation::PROOF_OBJECT_HEADER_SCHEMA_IDENTIFIER;
+
+    const TEST_MAXIMUM_CANDIDATE_DRAWS_PER_OUTPUT: u32 = 4_096;
 
     fn proof_header(statement_schema_identifier: u16) -> Vec<u8> {
         let statement = CanonicalTuple::new(
@@ -560,17 +612,44 @@ mod tests {
         let modulus = (1u64 << 63) + 1;
         let mut reference_stream =
             ChallengeByteStream::new(transcript.state(), canonical_tag.to_owned());
-        let expected = sample_modulo_from_stream(&mut reference_stream, modulus)
-            .expect("reference sampling succeeds");
+        let expected = sample_modulo_from_stream(
+            &mut reference_stream,
+            modulus,
+            TEST_MAXIMUM_CANDIDATE_DRAWS_PER_OUTPUT,
+        )
+        .expect("reference sampling succeeds");
         assert_eq!(
             transcript
-                .sample_modulo(challenge_tag, modulus)
+                .sample_modulo(
+                    challenge_tag,
+                    modulus,
+                    TEST_MAXIMUM_CANDIDATE_DRAWS_PER_OUTPUT,
+                )
                 .expect("sampling succeeds"),
             expected
         );
         assert_eq!(
-            transcript.sample_modulo(challenge_tag, 0),
+            transcript.sample_modulo(challenge_tag, 0, TEST_MAXIMUM_CANDIDATE_DRAWS_PER_OUTPUT,),
             Err(ProofTranscriptError::InvalidModulus)
+        );
+        assert_eq!(
+            transcript.sample_modulo(challenge_tag, modulus, 0),
+            Err(ProofTranscriptError::InvalidCandidateDrawLimit)
+        );
+    }
+
+    #[test]
+    fn rejection_sampling_fails_closed_at_the_candidate_draw_limit() {
+        let mut stream = ChallengeByteStream::new(
+            Hash512::from_bytes([0u8; Hash512::BYTE_LENGTH]),
+            "proof/1302/theta/0000/0000".to_owned(),
+        );
+        stream.block = [0xff; Hash512::BYTE_LENGTH];
+        stream.block_byte_offset = 0;
+
+        assert_eq!(
+            sample_modulo_from_stream(&mut stream, (1u64 << 63) + 1, 1),
+            Err(ProofTranscriptError::CandidateDrawLimitExhausted)
         );
     }
 
@@ -579,7 +658,7 @@ mod tests {
         let transcript = transcript();
         let tag = ProofChallengeTag::OpeningBatch { claim_ordinal: 19 };
         let actual = transcript
-            .sample_extension_coordinates(tag, 65_537, 40)
+            .sample_extension_coordinates(tag, 65_537, 40, TEST_MAXIMUM_CANDIDATE_DRAWS_PER_OUTPUT)
             .expect("extension coordinates sample");
         assert_eq!(actual.len(), 40);
         assert!(actual.iter().all(|coordinate| *coordinate < 65_537));
@@ -589,13 +668,24 @@ mod tests {
             "proof/1302/opening-batch/0013".to_owned(),
         );
         let expected = (0..40)
-            .map(|_| sample_modulo_from_stream(&mut reference_stream, 65_537))
+            .map(|_| {
+                sample_modulo_from_stream(
+                    &mut reference_stream,
+                    65_537,
+                    TEST_MAXIMUM_CANDIDATE_DRAWS_PER_OUTPUT,
+                )
+            })
             .collect::<Result<Vec<_>, _>>()
             .expect("reference coordinates sample");
         assert_eq!(actual, expected);
         assert!(reference_stream.next_squeeze_counter >= 2);
         assert_eq!(
-            transcript.sample_extension_coordinates(tag, 65_537, 0),
+            transcript.sample_extension_coordinates(
+                tag,
+                65_537,
+                0,
+                TEST_MAXIMUM_CANDIDATE_DRAWS_PER_OUTPUT,
+            ),
             Err(ProofTranscriptError::InvalidCoordinateCount)
         );
     }
@@ -604,17 +694,29 @@ mod tests {
     fn query_representatives_are_distinct_sorted_and_reject_oversubscription() {
         let transcript = transcript();
         let representatives = transcript
-            .sample_distinct_query_representatives(127, 129)
+            .sample_distinct_query_representatives(
+                127,
+                129,
+                TEST_MAXIMUM_CANDIDATE_DRAWS_PER_OUTPUT,
+            )
             .expect("representatives sample");
         assert_eq!(representatives.len(), 127);
         assert!(representatives.windows(2).all(|pair| pair[0] < pair[1]));
         assert!(representatives.iter().all(|value| *value < 129));
         assert_eq!(
-            transcript.sample_distinct_query_representatives(130, 129),
+            transcript.sample_distinct_query_representatives(
+                130,
+                129,
+                TEST_MAXIMUM_CANDIDATE_DRAWS_PER_OUTPUT,
+            ),
             Err(ProofTranscriptError::QueryCardinalityExceeded)
         );
         assert_eq!(
-            transcript.sample_distinct_query_representatives(0, 0),
+            transcript.sample_distinct_query_representatives(
+                0,
+                0,
+                TEST_MAXIMUM_CANDIDATE_DRAWS_PER_OUTPUT,
+            ),
             Err(ProofTranscriptError::InvalidModulus)
         );
     }
@@ -625,14 +727,26 @@ mod tests {
         let all_but_one_point = vec![vec![0, 0], vec![0, 1], vec![1, 0]];
         assert_eq!(
             transcript
-                .sample_distinct_deep_points(1, 2, 2, &all_but_one_point)
+                .sample_distinct_deep_points(
+                    1,
+                    2,
+                    2,
+                    &all_but_one_point,
+                    TEST_MAXIMUM_CANDIDATE_DRAWS_PER_OUTPUT,
+                )
                 .expect("the sole available point samples"),
             vec![vec![1, 1]]
         );
 
         let excluded = vec![vec![0, 0]];
         let points = transcript
-            .sample_distinct_deep_points(3, 3, 2, &excluded)
+            .sample_distinct_deep_points(
+                3,
+                3,
+                2,
+                &excluded,
+                TEST_MAXIMUM_CANDIDATE_DRAWS_PER_OUTPUT,
+            )
             .expect("deep points sample");
         assert_eq!(points.len(), 3);
         assert!(points.iter().all(|point| {
@@ -644,22 +758,72 @@ mod tests {
     }
 
     #[test]
+    fn distinct_point_sampling_bounds_colliding_candidates() {
+        let transcript = transcript();
+        let first_point = transcript
+            .sample_extension_coordinates(
+                ProofChallengeTag::DeepPoint { point_ordinal: 0 },
+                256,
+                2,
+                TEST_MAXIMUM_CANDIDATE_DRAWS_PER_OUTPUT,
+            )
+            .expect("the first point derives without rejection");
+
+        assert_eq!(
+            transcript.sample_distinct_deep_points(1, 256, 2, &[first_point], 1),
+            Err(ProofTranscriptError::CandidateDrawLimitExhausted)
+        );
+        assert_eq!(
+            transcript.sample_distinct_deep_points(1, 256, 2, &[], 0),
+            Err(ProofTranscriptError::InvalidCandidateDrawLimit)
+        );
+        assert_eq!(
+            transcript.sample_distinct_query_representatives(1, 2, 0),
+            Err(ProofTranscriptError::InvalidCandidateDrawLimit)
+        );
+    }
+
+    #[test]
     fn deep_point_sampling_rejects_invalid_sets_and_exhausted_domains() {
         let transcript = transcript();
         assert_eq!(
-            transcript.sample_distinct_deep_points(1, 0, 2, &[]),
+            transcript.sample_distinct_deep_points(
+                1,
+                0,
+                2,
+                &[],
+                TEST_MAXIMUM_CANDIDATE_DRAWS_PER_OUTPUT,
+            ),
             Err(ProofTranscriptError::InvalidModulus)
         );
         assert_eq!(
-            transcript.sample_distinct_deep_points(1, 2, 0, &[]),
+            transcript.sample_distinct_deep_points(
+                1,
+                2,
+                0,
+                &[],
+                TEST_MAXIMUM_CANDIDATE_DRAWS_PER_OUTPUT,
+            ),
             Err(ProofTranscriptError::InvalidCoordinateCount)
         );
         assert_eq!(
-            transcript.sample_distinct_deep_points(1, 2, 2, &[vec![2, 0]]),
+            transcript.sample_distinct_deep_points(
+                1,
+                2,
+                2,
+                &[vec![2, 0]],
+                TEST_MAXIMUM_CANDIDATE_DRAWS_PER_OUTPUT,
+            ),
             Err(ProofTranscriptError::InvalidExcludedPoint)
         );
         assert_eq!(
-            transcript.sample_distinct_deep_points(1, 2, 2, &[vec![0, 0], vec![0, 0]]),
+            transcript.sample_distinct_deep_points(
+                1,
+                2,
+                2,
+                &[vec![0, 0], vec![0, 0]],
+                TEST_MAXIMUM_CANDIDATE_DRAWS_PER_OUTPUT,
+            ),
             Err(ProofTranscriptError::InvalidExcludedPoint)
         );
         assert_eq!(
@@ -668,11 +832,18 @@ mod tests {
                 2,
                 2,
                 &[vec![0, 0], vec![0, 1], vec![1, 0], vec![1, 1]],
+                TEST_MAXIMUM_CANDIDATE_DRAWS_PER_OUTPUT,
             ),
             Err(ProofTranscriptError::PointCardinalityExceeded)
         );
         assert_eq!(
-            transcript.sample_distinct_deep_points(5, 2, 2, &[]),
+            transcript.sample_distinct_deep_points(
+                5,
+                2,
+                2,
+                &[],
+                TEST_MAXIMUM_CANDIDATE_DRAWS_PER_OUTPUT,
+            ),
             Err(ProofTranscriptError::PointCardinalityExceeded)
         );
     }

@@ -143,6 +143,4 @@ pub(in super::super) fn compact_aggregate_threshold_proof_fixture() -> serde_jso
 }
 
 pub(in super::super) use finalized_package::finalize_collective_setup_package;
-pub(in super::super) use transport::{
-    DescriptorBackedVssProofMaterialFixture, descriptor_backed_vss_proof_material_fixture,
-};
+pub(in super::super) use transport::descriptor_backed_vss_proof_material_fixture;

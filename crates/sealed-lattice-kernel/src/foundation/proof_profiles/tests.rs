@@ -1,5 +1,71 @@
 use super::*;
-use crate::foundation::FoundationSchemaIdentifier;
+use crate::foundation::{
+    ArtifactKind, DistributionKind, DistributionRecord, FOUNDATION_PROFILE,
+    FoundationSchemaIdentifier, Hash512,
+};
+
+fn valid_suite_record() -> SuiteRecord {
+    let distributions = (1..=12)
+        .map(|purpose| {
+            let kind = match purpose {
+                1 | 3 | 8 | 11 => DistributionKind::Ternary,
+                _ => DistributionKind::CenteredBinomial,
+            };
+            DistributionRecord::new(
+                purpose,
+                kind,
+                if kind == DistributionKind::Ternary {
+                    0
+                } else {
+                    2
+                },
+            )
+            .expect("test distribution")
+        })
+        .collect();
+    let artifacts = (1..=6)
+        .map(|artifact_code| {
+            ArtifactReference::new(
+                ArtifactKind::from_canonical_code(artifact_code).expect("artifact kind"),
+                100 + u64::from(artifact_code),
+                Hash512::from_bytes([u8::try_from(artifact_code).expect("artifact byte"); 64]),
+            )
+            .expect("artifact reference")
+        })
+        .collect();
+    SuiteRecord {
+        suite_record_version: 1,
+        roster_size: FOUNDATION_PROFILE.participant_count,
+        byzantine_bound: FOUNDATION_PROFILE.active_fault_bound,
+        reconstruction_threshold: FOUNDATION_PROFILE.reconstruction_threshold,
+        finality_quorum: FOUNDATION_PROFILE.finality_quorum,
+        polynomial_degree: 2,
+        plaintext_modulus: 5,
+        ordered_data_primes: vec![41, 61, 13],
+        ordered_special_primes: vec![17, 29],
+        ordered_target_data_prime_indexes: vec![0, 1],
+        ordered_sharing_data_prime_indexes: vec![0, 1, 2],
+        key_switch_method: 1,
+        key_switch_data_primes_per_block: 2,
+        key_switch_basis_converter: 1,
+        maximum_ballot_attempts_per_participant: 3,
+        maximum_recovery_transitions_per_state_key: 4,
+        maximum_target_share_submissions: FOUNDATION_PROFILE.participant_count,
+        maximum_private_sampler_candidate_draws_per_output: 5,
+        maximum_public_sampler_candidate_draws_per_output: 7,
+        maximum_candidate_packages_per_action: 20,
+        maximum_proof_objects_per_action: 100,
+        maximum_candidate_bytes_per_participant: 3_000,
+        maximum_candidate_bytes_per_action: 20_000,
+        maximum_setup_bytes_per_participant: 4_000,
+        maximum_proof_bytes_per_action: 25_000,
+        maximum_public_corpus_bytes: 50_000,
+        maximum_participant_upload_bytes: 5_000,
+        maximum_ceremony_upload_bytes: 100_000,
+        distributions,
+        artifacts,
+    }
+}
 
 fn proof_field_97() -> ProofFieldProfile {
     ProofFieldProfile::new(97, 28, vec![5, 0])
@@ -22,8 +88,18 @@ fn proof_field_193() -> ProofFieldProfile {
         .expect("derived second test field is valid")
 }
 
+fn proof_field_769() -> ProofFieldProfile {
+    ProofFieldProfile::new(769, 7, vec![0])
+        .expect("769, its order-256 generator, and a linear extension polynomial are valid")
+}
+
+fn proof_field_1153() -> ProofFieldProfile {
+    ProofFieldProfile::new(1_153, 38, vec![0])
+        .expect("1153, its order-128 generator, and a linear extension polynomial are valid")
+}
+
 fn schedule(proof_field_index: u16) -> ProofFieldSchedule {
-    ProofFieldSchedule::new(proof_field_index, 4, 3, 2, 8, 4, 2)
+    ProofFieldSchedule::new(proof_field_index, 4, 3, 2, 8, 4, 3, 6)
         .expect("test schedule is intrinsically valid")
 }
 
@@ -38,8 +114,28 @@ fn ordered_family_profiles(proof_field_index: u16) -> Vec<ProofFamilyProfile> {
 }
 
 fn valid_profile_set() -> ProofProfileSet {
-    ProofProfileSet::new(vec![proof_field_97()], ordered_family_profiles(0))
-        .expect("test profile set is intrinsically valid")
+    ProofProfileSet::new(
+        vec![proof_field_769()],
+        ordered_family_profiles(0),
+        &valid_suite_record(),
+    )
+    .expect("test profile set is intrinsically valid")
+}
+
+#[test]
+fn generated_profile_artifact_matches_the_independent_typescript_vector_identity() {
+    let canonical_bytes = valid_profile_set()
+        .encode()
+        .expect("valid proof profile set encodes");
+    let artifact_reference =
+        ArtifactReference::from_artifact_bytes(ArtifactKind::ProofProfileSet, &canonical_bytes)
+            .expect("proof profile artifact reference");
+
+    assert_eq!(canonical_bytes.len(), 26_727);
+    assert_eq!(
+        artifact_reference.artifact_hash.to_lowercase_hex(),
+        "f91152852e2fa0406a65a9b99eebb6afb44358e8b93dd3b8865e424e2543039fc0eea85ed687c2fd35a703797f3d4b6b8a961b6b38bb7222911df832d4ae4339"
+    );
 }
 
 fn expect_validation_and_encoding_refusal(
@@ -155,6 +251,14 @@ fn all_four_schema_identifiers_and_canonical_item_orders_are_exact() {
     let schedule_tuple = schedule(0).canonical_tuple().expect("schedule tuple");
     assert_eq!(schedule_tuple.schema_identifier, 0x2203);
     assert_eq!(schedule_tuple.schema_version, 1);
+    assert_eq!(schedule_tuple.items.len(), 8);
+    assert_eq!(
+        schedule_tuple
+            .encode()
+            .expect("schedule tuple encodes")
+            .len(),
+        PROOF_FIELD_SCHEDULE_MAXIMUM_BYTE_LENGTH
+    );
     assert_eq!(
         schedule_tuple
             .items
@@ -169,6 +273,7 @@ fn all_four_schema_identifiers_and_canonical_item_orders_are_exact() {
             CanonicalItemType::Unsigned32,
             CanonicalItemType::Unsigned32,
             CanonicalItemType::Unsigned16,
+            CanonicalItemType::Unsigned32,
         ]
     );
 
@@ -179,6 +284,10 @@ fn all_four_schema_identifiers_and_canonical_item_orders_are_exact() {
     assert_eq!(family_tuple.schema_identifier, 0x2202);
     assert_eq!(family_tuple.schema_version, 1);
     assert_eq!(family_tuple.items.len(), 2);
+    assert_eq!(
+        family_tuple.encode().expect("family tuple encodes").len(),
+        PROOF_FAMILY_PROFILE_MAXIMUM_BYTE_LENGTH
+    );
     assert_eq!(
         family_tuple.items[0].item_type(),
         CanonicalItemType::Unsigned16
@@ -193,7 +302,7 @@ fn all_four_schema_identifiers_and_canonical_item_orders_are_exact() {
         .expect("profile-set tuple");
     assert_eq!(set_tuple.schema_identifier, 0x2200);
     assert_eq!(set_tuple.schema_version, 1);
-    assert_eq!(set_tuple.items.len(), 2);
+    assert_eq!(set_tuple.items.len(), 4);
     assert!(
         set_tuple
             .items
@@ -393,6 +502,10 @@ fn standalone_schedule_requires_canonical_positive_counts_and_power_of_two_blowu
             non_native_modular_identity_challenge_count: 0,
             ..valid
         },
+        ProofFieldSchedule {
+            maximum_fiat_shamir_candidate_draws_per_output: 0,
+            ..valid
+        },
     ];
     for invalid in invalid_schedules {
         assert_eq!(
@@ -454,7 +567,7 @@ fn proof_field_catalog_is_bounded_increasing_referenced_and_index_checked() {
     expect_validation_and_encoding_refusal(&too_many, RefusalReason::OutsideSupportedProfile);
 
     let mut duplicate = valid.clone();
-    duplicate.proof_fields.push(proof_field_97());
+    duplicate.proof_fields.push(proof_field_769());
     expect_validation_and_encoding_refusal(&duplicate, RefusalReason::DuplicateIdentity);
 
     let mut decreasing = valid.clone();
@@ -468,11 +581,11 @@ fn proof_field_catalog_is_bounded_increasing_referenced_and_index_checked() {
     expect_validation_and_encoding_refusal(&missing_index, RefusalReason::WrongTypeOrLength);
 
     let mut unreferenced = valid.clone();
-    unreferenced.proof_fields.push(proof_field_193());
+    unreferenced.proof_fields.push(proof_field_1153());
     expect_validation_and_encoding_refusal(&unreferenced, RefusalReason::OutsideSupportedProfile);
 
     let mut two_fields = valid;
-    two_fields.proof_fields.push(proof_field_193());
+    two_fields.proof_fields.push(proof_field_1153());
     two_fields
         .proof_families
         .last_mut()
@@ -500,19 +613,19 @@ fn cross_field_validation_checks_only_intrinsic_field_capacity_constraints() {
     let mut noncanonical_coset = valid.clone();
     noncanonical_coset.proof_families[0]
         .field_schedule
-        .evaluation_coset_offset = 97;
+        .evaluation_coset_offset = 769;
     invalid_cases.push((noncanonical_coset, RefusalReason::MalformedEncoding));
 
     let mut excessive_blowup = valid.clone();
     excessive_blowup.proof_families[0]
         .field_schedule
-        .evaluation_blowup_factor = 64;
+        .evaluation_blowup_factor = 512;
     invalid_cases.push((excessive_blowup, RefusalReason::OutsideSupportedProfile));
 
     let mut excessive_terminal_capacity = valid.clone();
     excessive_terminal_capacity.proof_families[0]
         .field_schedule
-        .final_polynomial_degree_bound_exclusive = 33;
+        .final_polynomial_degree_bound_exclusive = 257;
     invalid_cases.push((
         excessive_terminal_capacity,
         RefusalReason::OutsideSupportedProfile,
@@ -521,7 +634,7 @@ fn cross_field_validation_checks_only_intrinsic_field_capacity_constraints() {
     let mut excessive_queries = valid;
     excessive_queries.proof_families[0]
         .field_schedule
-        .unique_query_count = 33;
+        .unique_query_count = 257;
     invalid_cases.push((excessive_queries, RefusalReason::OutsideSupportedProfile));
 
     for (invalid, expected_refusal_reason) in invalid_cases {
@@ -529,7 +642,7 @@ fn cross_field_validation_checks_only_intrinsic_field_capacity_constraints() {
     }
 
     let tiny_field = ProofFieldProfile::new(3, 2, vec![0]).expect("linear extension over F_3");
-    let excessive_deep_schedule = ProofFieldSchedule::new(0, 1, 2, 4, 1, 1, 1)
+    let excessive_deep_schedule = ProofFieldSchedule::new(0, 1, 2, 4, 1, 1, 1, 1)
         .expect("DEEP count is not a standalone schedule property");
     let tiny_field_families = ORDERED_PROOF_PROFILE_FAMILIES
         .into_iter()
@@ -538,7 +651,7 @@ fn cross_field_validation_checks_only_intrinsic_field_capacity_constraints() {
                 .expect("closed family accepts standalone schedule")
         })
         .collect();
-    let error = ProofProfileSet::new(vec![tiny_field], tiny_field_families)
+    let error = ProofProfileSet::new(vec![tiny_field], tiny_field_families, &valid_suite_record())
         .expect_err("DEEP count cannot exceed extension-field cardinality");
     assert_eq!(error.refusal_reason, RefusalReason::OutsideSupportedProfile);
 }
@@ -550,7 +663,7 @@ fn family_lookup_derives_the_suite_selected_field_without_proof_selected_algorit
         let (field, selected_schedule) = profile_set
             .field_and_schedule_for_family(family)
             .expect("every closed family has one suite-selected schedule");
-        assert_eq!(field, &proof_field_97());
+        assert_eq!(field, &proof_field_769());
         assert_eq!(selected_schedule, &schedule(0));
     }
 
@@ -719,6 +832,7 @@ fn standalone_schema_bounds_apply_before_canonical_allocation() {
 
 #[test]
 fn profile_set_artifact_reference_checks_kind_length_hash_and_schema() {
+    let suite_record = valid_suite_record();
     let profile_set = valid_profile_set();
     let encoded = profile_set.encode().expect("profile set encodes");
     let reference = profile_set
@@ -731,6 +845,7 @@ fn profile_set_artifact_reference_checks_kind_length_hash_and_schema() {
             &reference,
             &encoded,
             &CanonicalDecodeLimits::default(),
+            &suite_record,
         )
         .expect("bound profile-set artifact decodes"),
         profile_set
@@ -744,6 +859,7 @@ fn profile_set_artifact_reference_checks_kind_length_hash_and_schema() {
             &wrong_kind,
             &encoded,
             &CanonicalDecodeLimits::default(),
+            &suite_record,
         )
         .expect_err("wrong artifact kind must refuse")
         .refusal_reason,
@@ -756,6 +872,7 @@ fn profile_set_artifact_reference_checks_kind_length_hash_and_schema() {
             &reference,
             shorter,
             &CanonicalDecodeLimits::default(),
+            &suite_record,
         )
         .expect_err("artifact length mismatch must refuse")
         .refusal_reason,
@@ -772,10 +889,62 @@ fn profile_set_artifact_reference_checks_kind_length_hash_and_schema() {
             &reference,
             &same_length_tampering,
             &CanonicalDecodeLimits::default(),
+            &suite_record,
         )
         .expect_err("artifact hash mismatch must refuse before schema acceptance")
         .refusal_reason,
         RefusalReason::WrongHashOrRoot
+    );
+}
+
+#[test]
+fn relation_plan_mutation_changes_the_profile_artifact_and_suite_identifier() {
+    let suite_record = valid_suite_record();
+    let profile_set = valid_profile_set();
+    let mut mutated_profile_set = profile_set.clone();
+    let mut variants = read_nested_tuple_list(
+        &mutated_profile_set.relation_plans[0].items[1],
+        &CanonicalDecodeLimits::default(),
+    )
+    .expect("relation-plan variants decode");
+    variants[0].items[3] = CanonicalItem::unsigned64(4);
+    let variant_items = variants
+        .iter()
+        .map(|variant| CanonicalItem::nested_tuple(variant).expect("variant nests"))
+        .collect::<Vec<_>>();
+    mutated_profile_set.relation_plans[0].items[1] =
+        CanonicalItem::homogeneous_list(CanonicalItemType::NestedTuple, &variant_items)
+            .expect("variant list encodes");
+
+    let canonical_profile = profile_set.encode().expect("profile set encodes");
+    let mutated_profile = mutated_profile_set
+        .encode()
+        .expect("structurally canonical mutation encodes");
+    assert_ne!(canonical_profile, mutated_profile);
+    assert_eq!(
+        ProofProfileSet::decode_for_suite(
+            &mutated_profile,
+            &CanonicalDecodeLimits::default(),
+            &suite_record,
+        )
+        .expect_err("suite-aware validation must reject changed relation bytes")
+        .refusal_reason,
+        RefusalReason::WrongContext
+    );
+
+    let mut canonical_suite = suite_record.clone();
+    canonical_suite.artifacts[3] = profile_set
+        .artifact_reference()
+        .expect("canonical profile reference");
+    let mut mutated_suite = suite_record;
+    mutated_suite.artifacts[3] = mutated_profile_set
+        .artifact_reference()
+        .expect("mutated profile reference");
+    assert_ne!(
+        canonical_suite
+            .suite_id()
+            .expect("canonical suite identifier"),
+        mutated_suite.suite_id().expect("mutated suite identifier")
     );
 }
 

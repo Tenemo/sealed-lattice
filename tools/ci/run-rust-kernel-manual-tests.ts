@@ -3,9 +3,7 @@ import path from 'node:path';
 import { runWithLocalRunLog } from './local-run-log.js';
 import {
     buildFocusedCommand,
-    normalizeFocusedTestFilter,
     runGuardedRustKernelCommands,
-    type RustKernelAcceptedSetupRunMode,
 } from './run-rust-kernel-accepted-setup-tests.js';
 import {
     focusedRustLaneScripts,
@@ -13,8 +11,7 @@ import {
     measurementRustTests,
     verifyFocusedRustLaneSelection,
 } from './rust-focused-lane-selection.js';
-
-import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
+import { normalizeRustTestFilter } from './rust-kernel-test-arguments.js';
 
 const manualRustKernelTests = {
     'rust-full-profile-evidence': fullProfileEvidenceRustTests,
@@ -33,7 +30,6 @@ const parseArguments = (
 ): {
     readonly focusedFilter?: string;
     readonly lane: ManualRustKernelLane;
-    readonly mode: RustKernelAcceptedSetupRunMode;
 } => {
     const [rawLane, ...remainingArguments] = commandArguments.filter(
         (argument) => argument !== '--' && argument !== undefined,
@@ -44,13 +40,8 @@ const parseArguments = (
         );
     }
     const lane = rawLane as ManualRustKernelLane;
-    let mode: RustKernelAcceptedSetupRunMode = 'accelerated';
     const positionalArguments: string[] = [];
     for (const argument of remainingArguments) {
-        if (argument === '--ci') {
-            mode = 'ci';
-            continue;
-        }
         if (argument.startsWith('-')) {
             throw new Error(`Unknown argument ${argument}.`);
         }
@@ -64,14 +55,14 @@ const parseArguments = (
     const focusedFilter =
         positionalArguments.length === 0
             ? undefined
-            : normalizeFocusedTestFilter(positionalArguments[0] ?? '');
+            : normalizeRustTestFilter(positionalArguments[0] ?? '');
     if (focusedFilter === '') {
         throw new Error(
             `${focusedRustLaneScripts[lane]} requires a non-empty filter.`,
         );
     }
 
-    return { focusedFilter, lane, mode };
+    return { focusedFilter, lane };
 };
 
 export const runRustKernelManualTests = async (): Promise<void> => {
@@ -109,7 +100,7 @@ export const runRustKernelManualTests = async (): Promise<void> => {
                 `${parsed.lane}-${parsed.focusedFilter === undefined ? 'accelerated' : 'focused'}`,
             );
             const commands = testFilters.map((testFilter) => ({
-                builtCommand: buildFocusedCommand(testFilter, parsed.mode, {
+                builtCommand: buildFocusedCommand(testFilter, 'accelerated', {
                     logFileSlug: `cargo-test-${parsed.lane}`,
                     progressLabel: parsed.lane,
                     runName: label,
@@ -131,13 +122,13 @@ export const runRustKernelManualTests = async (): Promise<void> => {
                 commands,
                 laneLabel: `${label}${
                     parsed.focusedFilter === undefined ? '' : ' focused'
-                } (${parsed.mode})`,
+                } (accelerated)`,
                 runLog,
             });
         },
     );
 };
 
-if (isDirectlyInvokedModule(import.meta.url)) {
+if (import.meta.main) {
     void runRustKernelManualTests();
 }

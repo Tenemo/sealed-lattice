@@ -20,8 +20,6 @@ import {
 } from './run-command.js';
 import { cargoTestArgumentsForRustKernelFast } from './rust-kernel-test-arguments.js';
 
-import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
-
 type LaneStatus = 'failed' | 'passed' | 'stopped';
 
 type ValidationLane = {
@@ -39,12 +37,6 @@ export type ValidationLaneResult = {
 type ValidationSummaryContext = {
     readonly failureDetails: readonly CheckFailureDetail[];
     readonly runLogDirectoryPath?: string;
-};
-
-export type CheckProgressMode = 'always' | 'auto' | 'never';
-
-export type ParsedCheckArguments = {
-    readonly progressMode: CheckProgressMode;
 };
 
 const combineCommandRunObservers = (
@@ -82,7 +74,6 @@ const scopeCommandRunObserver = (
     },
 });
 
-const checkUsage = 'Usage: run-check.ts [--progress=auto|always|never].';
 const rustKernelLaneName = 'Rust kernel (fmt, clippy, fast test)';
 const checkRunLaneNames = [
     'Build workspace packages',
@@ -95,44 +86,6 @@ const checkRunLaneNames = [
     'Node tests (protocol)',
     'Node tests (kernel fast)',
 ] as const;
-
-const isCheckProgressMode = (value: string): value is CheckProgressMode =>
-    value === 'always' || value === 'auto' || value === 'never';
-
-// Husky still passes this option. The plain reporter intentionally renders the
-// same line-oriented output in every environment, but validating the option
-// preserves the hook and direct command interface.
-export const parseCheckArguments = (
-    commandArguments: readonly string[],
-): ParsedCheckArguments => {
-    let progressMode: CheckProgressMode = 'auto';
-    for (let index = 0; index < commandArguments.length; index += 1) {
-        const argument = commandArguments[index];
-        if (argument === undefined || argument === '--') {
-            continue;
-        }
-        if (argument === '--progress') {
-            const value = commandArguments[index + 1];
-            if (value === undefined || !isCheckProgressMode(value)) {
-                throw new Error(checkUsage);
-            }
-            progressMode = value;
-            index += 1;
-            continue;
-        }
-        if (argument.startsWith('--progress=')) {
-            const value = argument.slice('--progress='.length);
-            if (!isCheckProgressMode(value)) {
-                throw new Error(checkUsage);
-            }
-            progressMode = value;
-            continue;
-        }
-        throw new Error(checkUsage);
-    }
-
-    return { progressMode };
-};
 
 const createCargoCommand = (
     description: string,
@@ -335,7 +288,6 @@ const runParallelLane = async (
     abortController.abort({
         classification: 'sibling-abort',
         initiator: lane.name,
-        objectVersion: 'sealed-lattice-command-abort-reason-v1',
     });
     return {
         durationMilliseconds,
@@ -446,7 +398,6 @@ const main = async (): Promise<void> => {
     let logFinishingError: unknown;
 
     try {
-        parseCheckArguments(rawArguments);
         const packageManagerRunner = resolvePackageManagerRunner();
         const gatingLanes = buildCheckGatingLanes(packageManagerRunner);
         const parallelLanes = buildCheckParallelLanes(packageManagerRunner);
@@ -534,6 +485,6 @@ const main = async (): Promise<void> => {
     }
 };
 
-if (isDirectlyInvokedModule(import.meta.url)) {
+if (import.meta.main) {
     void main();
 }

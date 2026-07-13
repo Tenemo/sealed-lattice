@@ -397,6 +397,21 @@ export type TranscriptCoreKernelLoaderOptions = {
     readonly expectedKernelSha256Hex?: string;
 };
 
+export type TranscriptCoreKernelCommandRuntime = Readonly<{
+    readonly allocate: (length: number) => number;
+    readonly deallocate: (pointer: number, length: number) => void;
+    readonly executeCommand: <Result>(
+        request: TranscriptCoreKernelCommand,
+    ) => Result;
+    readonly exportedFunctionNames: readonly string[];
+    readonly memory: WebAssembly.Memory;
+    readonly runExclusive: <Result>(
+        operationName: string,
+        operation: () => Result,
+    ) => Result;
+    readonly wasmExports: TranscriptCoreKernelExports;
+}>;
+
 const requireKernelIntegrityExpectation = (
     options: TranscriptCoreKernelLoaderOptions,
 ): string | undefined => {
@@ -536,6 +551,10 @@ const resolveNumberExport = (
     exports: TranscriptCoreKernelExports,
     exportName:
         | 'sealed_lattice_allocate'
+        | 'sealed_lattice_accepted_setup_canonical_stream_begin'
+        | 'sealed_lattice_accepted_setup_command_with_length'
+        | 'sealed_lattice_accepted_setup_session_begin'
+        | 'sealed_lattice_accepted_setup_session_cancel'
         | 'sealed_lattice_bgv_canonical_stream_absorb_chunk'
         | 'sealed_lattice_bgv_canonical_stream_begin'
         | 'sealed_lattice_bgv_canonical_stream_cancel'
@@ -735,6 +754,79 @@ const runKernelCommand = <T>(
             deallocate(outputLengthPointer, wasm32UsizeByteLength);
         }
     }
+};
+
+export const instantiateTranscriptCoreKernelCommandRuntime = async (
+    transcriptCoreKernelUrl: URL,
+    options: TranscriptCoreKernelLoaderOptions = {},
+): Promise<TranscriptCoreKernelCommandRuntime> => {
+    const expectedKernelSha256Hex = requireKernelIntegrityExpectation(options);
+    const bytes = await resolveKernelBytes(transcriptCoreKernelUrl);
+    if (expectedKernelSha256Hex !== undefined) {
+        await verifyKernelIntegrity(bytes, expectedKernelSha256Hex);
+    }
+    const instantiatedSource = await WebAssembly.instantiate(bytes, {});
+    const wasmExports = instantiatedSource.instance
+        .exports as TranscriptCoreKernelExports;
+    const memory = resolveMemory(wasmExports);
+    const allocate = resolveNumberExport(
+        wasmExports,
+        'sealed_lattice_allocate',
+    ) as (length: number) => number;
+    const deallocate = resolveNumberExport(
+        wasmExports,
+        'sealed_lattice_deallocate',
+    );
+    const commandWithLength = resolveNumberExport(
+        wasmExports,
+        'sealed_lattice_transcript_core_command_with_length',
+    ) as NonNullable<
+        TranscriptCoreKernelExports['sealed_lattice_transcript_core_command_with_length']
+    >;
+    const exportedFunctionNames = WebAssembly.Module.exports(
+        instantiatedSource.module,
+    )
+        .map((entry) => entry.name)
+        .sort();
+    let kernelOperationInProgress = false;
+    const runExclusive = <Result>(
+        operationName: string,
+        operation: () => Result,
+    ): Result => {
+        if (kernelOperationInProgress) {
+            throw new Error(
+                `The transcript-core kernel cannot run overlapping ${operationName} operations on one instance.`,
+            );
+        }
+        kernelOperationInProgress = true;
+        try {
+            return operation();
+        } finally {
+            kernelOperationInProgress = false;
+        }
+    };
+    const executeCommand = <Result>(
+        request: TranscriptCoreKernelCommand,
+    ): Result =>
+        runExclusive('command', () =>
+            runKernelCommand<Result>(
+                memory,
+                allocate,
+                deallocate,
+                commandWithLength,
+                request,
+            ),
+        );
+
+    return {
+        allocate,
+        deallocate,
+        executeCommand,
+        exportedFunctionNames,
+        memory,
+        runExclusive,
+        wasmExports,
+    };
 };
 
 export {

@@ -109,7 +109,6 @@ describe('Rust kernel heavy runner arguments', () => {
         expect(command.env?.CARGO_INCREMENTAL).toBe('0');
         expect(command.env?.RAYON_NUM_THREADS).toBe('1');
         expect(command.env?.RUST_BACKTRACE).toBe('full');
-        expect(command.env?.SEALED_LATTICE_TRUSTEE_PROOF_BATCH_SIZE).toBe('1');
         expect(command.env?.SEALED_LATTICE_TRUSTEE_PROOF_LIMB_BATCH_SIZE).toBe(
             '1',
         );

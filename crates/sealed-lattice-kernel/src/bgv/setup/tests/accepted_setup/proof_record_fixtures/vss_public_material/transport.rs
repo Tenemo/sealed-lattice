@@ -1,4 +1,5 @@
 use super::*;
+use crate::bgv::setup::setup_proof::material_transport::SetupProofMaterialTransportHashes;
 
 #[derive(Clone)]
 pub(in super::super::super) struct DescriptorBackedVssProofMaterialFixture {
@@ -12,12 +13,69 @@ struct RetainedVssProofMaterial {
     proof_bytes_hash_domain: &'static str,
     proof_material_root: String,
     proof_bytes_hash: String,
-    proof_bytes: Vec<u8>,
+    proof_bytes: Option<Vec<u8>>,
+    proof_binding_lease: Option<crate::bgv::setup::CanonicalSetupProofBindingLease>,
+}
+
+impl RetainedVssProofMaterial {
+    fn transport_accounting(&self) -> SetupProofMaterialTransportHashes {
+        if let Some(proof_bytes) = self.proof_bytes.as_deref() {
+            return canonical_setup_proof_material_transport_accounting(
+                self.proof_family,
+                proof_bytes,
+            )
+            .expect("canonical setup proof material transport accounting");
+        }
+        let stream_summary =
+            crate::bgv::setup::accepted_setup_fixture_proof_binding_stream_summary(
+                self.proof_binding_lease
+                    .as_ref()
+                    .expect("descriptor-backed proof binding lease"),
+                self.proof_family,
+                &self.proof_material_root,
+            )
+            .expect("descriptor-backed proof stream summary lookup");
+        let accounting =
+            crate::bgv::setup::authenticated_setup_transport_accounting(&stream_summary)
+                .expect("descriptor-backed proof transport accounting");
+        SetupProofMaterialTransportHashes {
+            full_object_hash: accounting.full_object_hash,
+            chunk_hashes: accounting.chunk_hashes,
+            chunk_root: accounting.chunk_root,
+            total_byte_length: accounting.total_byte_length,
+        }
+    }
 }
 
 impl DescriptorBackedVssProofMaterialFixture {
-    pub(in super::super::super) fn retain_proof_materials(&self) {
+    pub(super) fn begin_proof_binding_session(
+        &self,
+    ) -> crate::bgv::setup::AcceptedSetupProofBindingSession {
+        let proof_binding_session =
+            crate::bgv::setup::AcceptedSetupProofBindingSession::begin_fresh()
+                .expect("begin descriptor-backed VSS proof binding session");
+        self.retain_proof_materials(&proof_binding_session);
+        proof_binding_session
+    }
+
+    pub(in super::super::super) fn retain_proof_materials(
+        &self,
+        proof_binding_session: &crate::bgv::setup::AcceptedSetupProofBindingSession,
+    ) {
         for material in &self.retained_proof_materials {
+            if let Some(proof_binding_lease) = &material.proof_binding_lease {
+                crate::bgv::setup::restore_accepted_setup_proof_binding_lease(
+                    proof_binding_session.session_handle,
+                    &proof_binding_session.capability,
+                    proof_binding_lease,
+                )
+                .expect("restore verifier-owned VSS proof binding");
+                continue;
+            }
+            let proof_bytes = material
+                .proof_bytes
+                .as_deref()
+                .expect("retained VSS proof material has bytes or a verifier-owned binding");
             if let Some(existing_material) =
                 crate::bgv::setup::verified_canonical_setup_proof_material_bytes(
                     material.proof_family,
@@ -38,10 +96,19 @@ impl DescriptorBackedVssProofMaterialFixture {
             authenticate_setup_proof_material_stream_for_test(
                 material.proof_family,
                 &material.proof_material_root,
-                &material.proof_bytes,
+                proof_bytes,
             )
             .expect("authenticate VSS proof material stream");
         }
+    }
+
+    pub(in super::super::super) fn proof_binding_leases(
+        &self,
+    ) -> Vec<crate::bgv::setup::CanonicalSetupProofBindingLease> {
+        self.retained_proof_materials
+            .iter()
+            .filter_map(|material| material.proof_binding_lease.clone())
+            .collect()
     }
 }
 
@@ -93,31 +160,94 @@ fn rewrite_proof_material_set_for_authenticated_transport(
     let mut transported_proof_materials = Vec::with_capacity(proof_records.len());
     let mut retained_proof_materials = Vec::with_capacity(proof_records.len());
     for proof_record in proof_records.iter_mut() {
-        let proof_bytes = crate::transcript_core::decode_standard_base64(
-            proof_record["proofBytesBase64"]
-                .as_str()
-                .expect("embedded proof bytes fixture intermediate"),
-            fields.proof_bytes_path,
-        )
-        .expect("decode proof bytes fixture intermediate");
         let proof_bytes_hash = proof_record["proofBytesHash"]
             .as_str()
             .expect("proof bytes hash")
             .to_string();
-        assert_eq!(
-            hash512_hex(fields.proof_bytes_hash_domain, &[&proof_bytes]),
-            proof_bytes_hash,
-            "fixture proof bytes must match their published hash",
-        );
         let proof_material_root =
             crate::bgv::setup::setup_proof::setup_proof_material_reference_root(
                 fields.proof_family,
                 &proof_bytes_hash,
             )
             .expect("setup proof material reference root");
-        let transport_accounting =
-            canonical_setup_proof_material_transport_accounting(fields.proof_family, &proof_bytes)
-                .expect("canonical setup proof material transport accounting");
+        let (transport_accounting, retained_material) = if let Some(proof_bytes_base64) =
+            proof_record.get("proofBytesBase64")
+        {
+            let proof_bytes = crate::transcript_core::decode_standard_base64(
+                proof_bytes_base64
+                    .as_str()
+                    .expect("embedded proof bytes fixture intermediate"),
+                fields.proof_bytes_path,
+            )
+            .expect("decode proof bytes fixture intermediate");
+            assert_eq!(
+                hash512_hex(fields.proof_bytes_hash_domain, &[&proof_bytes]),
+                proof_bytes_hash,
+                "fixture proof bytes must match their published hash",
+            );
+            let transport_accounting = canonical_setup_proof_material_transport_accounting(
+                fields.proof_family,
+                &proof_bytes,
+            )
+            .expect("canonical setup proof material transport accounting");
+            (
+                transport_accounting,
+                RetainedVssProofMaterial {
+                    proof_family: fields.proof_family,
+                    proof_bytes_hash_domain: fields.proof_bytes_hash_domain,
+                    proof_material_root: proof_material_root.clone(),
+                    proof_bytes_hash: proof_bytes_hash.clone(),
+                    proof_bytes: Some(proof_bytes),
+                    proof_binding_lease: None,
+                },
+            )
+        } else {
+            assert_eq!(
+                proof_record["proofBytesEncoding"]
+                    .as_str()
+                    .expect("descriptor-backed proof bytes encoding"),
+                SETUP_PROOF_MATERIAL_ENCODING,
+                "descriptor-backed proof bytes encoding",
+            );
+            assert_eq!(
+                proof_record["proofMaterialRoot"]
+                    .as_str()
+                    .expect("descriptor-backed proof material root"),
+                proof_material_root,
+                "descriptor-backed proof material root",
+            );
+            let proof_binding_lease =
+                crate::bgv::setup::accepted_setup_fixture_proof_binding_lease(&proof_material_root)
+                    .expect("descriptor-backed proof binding lookup")
+                    .expect("descriptor-backed proof binding");
+            let stream_summary =
+                crate::bgv::setup::accepted_setup_fixture_proof_binding_stream_summary(
+                    &proof_binding_lease,
+                    fields.proof_family,
+                    &proof_material_root,
+                )
+                .expect("descriptor-backed proof stream summary lookup");
+            let authenticated_accounting =
+                crate::bgv::setup::authenticated_setup_transport_accounting(&stream_summary)
+                    .expect("descriptor-backed proof transport accounting");
+            let transport_accounting = SetupProofMaterialTransportHashes {
+                full_object_hash: authenticated_accounting.full_object_hash,
+                chunk_hashes: authenticated_accounting.chunk_hashes,
+                chunk_root: authenticated_accounting.chunk_root,
+                total_byte_length: authenticated_accounting.total_byte_length,
+            };
+            (
+                transport_accounting,
+                RetainedVssProofMaterial {
+                    proof_family: fields.proof_family,
+                    proof_bytes_hash_domain: fields.proof_bytes_hash_domain,
+                    proof_material_root: proof_material_root.clone(),
+                    proof_bytes_hash: proof_bytes_hash.clone(),
+                    proof_bytes: None,
+                    proof_binding_lease: Some(proof_binding_lease),
+                },
+            )
+        };
 
         let record_object = proof_record
             .as_object_mut()
@@ -147,13 +277,7 @@ fn rewrite_proof_material_set_for_authenticated_transport(
             "chunkRoot": transport_accounting.chunk_root,
             "chunkHashes": transport_accounting.chunk_hashes,
         }));
-        retained_proof_materials.push(RetainedVssProofMaterial {
-            proof_family: fields.proof_family,
-            proof_bytes_hash_domain: fields.proof_bytes_hash_domain,
-            proof_material_root,
-            proof_bytes_hash,
-            proof_bytes,
-        });
+        retained_proof_materials.push(retained_material);
     }
 
     rebind_proof_material_set_root(proof_material_set);
@@ -184,18 +308,18 @@ fn retained_aggregate_threshold_proof_materials(
                 .as_str()
                 .expect("VSS aggregate threshold proof bytes hash")
                 .to_string();
-            let proof_bytes =
-                super::aggregate_threshold::cached_vss_aggregate_threshold_proof_bytes(
-                    &proof_material_root,
-                    &proof_bytes_hash,
-                );
+            let proof_binding_lease =
+                crate::bgv::setup::accepted_setup_fixture_proof_binding_lease(&proof_material_root)
+                    .expect("VSS aggregate threshold proof binding lookup")
+                    .expect("VSS aggregate threshold proof binding");
 
             RetainedVssProofMaterial {
                 proof_family: VSS_SHARE_LINKAGE_PROOF_FAMILY,
                 proof_bytes_hash_domain: VSS_SHARE_LINKAGE_PROOF_BYTES_HASH_DOMAIN,
                 proof_material_root,
                 proof_bytes_hash,
-                proof_bytes,
+                proof_bytes: None,
+                proof_binding_lease: Some(proof_binding_lease),
             }
         })
         .collect()
@@ -221,11 +345,7 @@ pub(in super::super::super) fn descriptor_backed_vss_proof_material_fixture(
             .iter()
             .find(|material| material.proof_material_root == proof_material_root)
             .expect("retained VSS aggregate threshold proof material");
-        let transport_accounting = canonical_setup_proof_material_transport_accounting(
-            retained_material.proof_family,
-            &retained_material.proof_bytes,
-        )
-        .expect("canonical aggregate threshold proof material transport accounting");
+        let transport_accounting = retained_material.transport_accounting();
         transported_material["chunkCount"] =
             serde_json::json!(transport_accounting.chunk_hashes.len());
         transported_material["totalByteLength"] =
@@ -272,7 +392,7 @@ pub(in super::super::super) fn descriptor_backed_vss_proof_material_fixture(
     let mut retained_proof_materials = rewritten_share_linkage.retained_proof_materials;
     retained_proof_materials.extend(aggregate_retained_proof_materials);
     retained_proof_materials.extend(rewritten_same_secret_bridge.retained_proof_materials);
-    let fixture = DescriptorBackedVssProofMaterialFixture {
+    DescriptorBackedVssProofMaterialFixture {
         verification_request: serde_json::json!({
             "transportedVssShareLinkageProofMaterial":
                 transported_vss_share_linkage_proof_material,
@@ -280,9 +400,7 @@ pub(in super::super::super) fn descriptor_backed_vss_proof_material_fixture(
                 rewritten_same_secret_bridge.transported_proof_material,
         }),
         retained_proof_materials,
-    };
-    fixture.retain_proof_materials();
-    fixture
+    }
 }
 
 const VSS_SHARE_LINKAGE_TRANSPORT_SET_OBJECT_TYPE: &str =
@@ -327,9 +445,17 @@ fn vss_share_linkage_uses_authenticated_descriptor_material() {
         "transportedVssShareLinkageProofMaterial":
             transported_vss_share_linkage_proof_material,
     });
-    let verification =
-        crate::bgv::setup::verify_vss_share_linkage_proof_material_set_from_request(&request)
-            .expect("descriptor-backed share-linkage proof material set verifies");
+    let proof_binding_session = fixture.begin_proof_binding_session();
+    let verification = crate::bgv::setup::verify_vss_share_linkage_proof_material_set_from_request(
+        &request,
+        Some(&proof_binding_session),
+    )
+    .expect("descriptor-backed share-linkage proof material set verifies");
+    crate::bgv::setup::cancel_accepted_setup_proof_binding_session(
+        proof_binding_session.session_handle,
+        &proof_binding_session.capability,
+    )
+    .expect("cancel direct share-linkage fixture binding session");
     assert_eq!(
         verification["proofMaterialSetRoot"],
         package["vssShareLinkageProofMaterialSet"]["proofMaterialSetRoot"],
@@ -341,22 +467,27 @@ fn vss_share_linkage_uses_authenticated_descriptor_material() {
         .as_str()
         .expect("first VSS share-linkage proof material root");
     assert!(
-        crate::bgv::setup::take_verified_canonical_proof_material_bytes(
+        crate::bgv::setup::verified_canonical_setup_proof_material_bytes(
             VSS_SHARE_LINKAGE_PROOF_FAMILY,
             first_proof_material_root,
         )
-        .expect("take retained VSS share-linkage proof material")
-        .is_some(),
-        "the missing-material case must remove an authenticated source",
+        .expect("lookup consumed VSS share-linkage proof material")
+        .is_none(),
+        "verification must release each authenticated VSS proof source as it advances",
     );
+    crate::bgv::setup::evict_verified_canonical_setup_proof_materials(&[
+        first_proof_material_root.to_string()
+    ]);
     let missing_material_error =
-        crate::bgv::setup::verify_vss_share_linkage_proof_material_set_from_request(&request)
+        crate::bgv::setup::verify_vss_share_linkage_proof_material_set_from_request(&request, None)
             .expect_err(
                 "descriptor-backed share-linkage records must require authenticated material",
             );
     assert_eq!(
         missing_material_error.code,
         crate::encoding::CanonicalErrorCode::InvalidProtocolObject,
+        "unexpected missing-material diagnostic: {}",
+        missing_material_error.message,
     );
     assert!(
         missing_material_error
@@ -365,19 +496,18 @@ fn vss_share_linkage_uses_authenticated_descriptor_material() {
         "unexpected missing-material diagnostic: {}",
         missing_material_error.message,
     );
-    fixture.retain_proof_materials();
-
     let mut wrong_root_request = request.clone();
     wrong_root_request["transportedVssShareLinkageProofMaterial"]["proofMaterials"][0]["proofMaterialRoot"] =
         serde_json::json!("0".repeat(128));
     let wrong_root_error =
         crate::bgv::setup::verify_vss_share_linkage_proof_material_set_from_request(
             &wrong_root_request,
+            None,
         )
         .expect_err("a wrong share-linkage proof material root must be rejected");
     assert_eq!(
         wrong_root_error.code,
-        crate::encoding::CanonicalErrorCode::InvalidProtocolObject,
+        crate::encoding::CanonicalErrorCode::ComponentMismatch,
     );
     assert!(
         wrong_root_error
@@ -389,7 +519,7 @@ fn vss_share_linkage_uses_authenticated_descriptor_material() {
 
     assert_tampered_canonical_stream_chunk_is_refused(
         crate::foundation::CanonicalStreamDomain::DealerVssShareLinkageProof,
-        &fixture.retained_proof_materials[0].proof_bytes,
+        &vec![0x5a; crate::foundation::FOUNDATION_PROFILE.stream_chunk_byte_length + 1],
     );
 }
 
@@ -411,9 +541,17 @@ fn same_secret_bridge_uses_authenticated_descriptor_material() {
         "transportedSameSecretBridgeProofMaterial":
             transported_same_secret_bridge_proof_material,
     });
-    let verification =
-        crate::bgv::setup::verify_vss_same_secret_bridge_proof_material_set_request(&request)
-            .expect("descriptor-backed same-secret bridge proof material set verifies");
+    let proof_binding_session = fixture.begin_proof_binding_session();
+    let verification = crate::bgv::setup::verify_vss_same_secret_bridge_proof_material_set_request(
+        &request,
+        Some(&proof_binding_session),
+    )
+    .expect("descriptor-backed same-secret bridge proof material set verifies");
+    crate::bgv::setup::cancel_accepted_setup_proof_binding_session(
+        proof_binding_session.session_handle,
+        &proof_binding_session.capability,
+    )
+    .expect("cancel direct same-secret fixture binding session");
     assert_eq!(
         verification["proofMaterialSetRoot"],
         package["sameSecretBridgeProofMaterialSet"]["proofMaterialSetRoot"],
@@ -425,16 +563,19 @@ fn same_secret_bridge_uses_authenticated_descriptor_material() {
         .as_str()
         .expect("first same-secret bridge proof material root");
     assert!(
-        crate::bgv::setup::take_verified_canonical_proof_material_bytes(
+        crate::bgv::setup::verified_canonical_setup_proof_material_bytes(
             SAME_SECRET_BRIDGE_PROOF_FAMILY,
             first_proof_material_root,
         )
-        .expect("take retained same-secret bridge proof material")
-        .is_some(),
-        "the missing-material case must remove an authenticated source",
+        .expect("lookup consumed same-secret bridge proof material")
+        .is_none(),
+        "verification must release each authenticated bridge proof source as it advances",
     );
+    crate::bgv::setup::evict_verified_canonical_setup_proof_materials(&[
+        first_proof_material_root.to_string()
+    ]);
     let missing_material_error =
-        crate::bgv::setup::verify_vss_same_secret_bridge_proof_material_set_request(&request)
+        crate::bgv::setup::verify_vss_same_secret_bridge_proof_material_set_request(&request, None)
             .expect_err(
                 "descriptor-backed same-secret bridge records must require authenticated material",
             );
@@ -449,14 +590,13 @@ fn same_secret_bridge_uses_authenticated_descriptor_material() {
         "unexpected missing-material diagnostic: {}",
         missing_material_error.message,
     );
-    fixture.retain_proof_materials();
-
     let mut wrong_root_request = request;
     wrong_root_request["transportedSameSecretBridgeProofMaterial"]["proofMaterials"][0]["proofMaterialRoot"] =
         serde_json::json!("0".repeat(128));
     let wrong_root_error =
         crate::bgv::setup::verify_vss_same_secret_bridge_proof_material_set_request(
             &wrong_root_request,
+            None,
         )
         .expect_err("a wrong same-secret bridge proof material root must be rejected");
     assert_eq!(
@@ -471,14 +611,9 @@ fn same_secret_bridge_uses_authenticated_descriptor_material() {
         wrong_root_error.message,
     );
 
-    let same_secret_material = fixture
-        .retained_proof_materials
-        .iter()
-        .find(|material| material.proof_family == SAME_SECRET_BRIDGE_PROOF_FAMILY)
-        .expect("same-secret bridge retained proof material");
     assert_tampered_canonical_stream_chunk_is_refused(
         crate::foundation::CanonicalStreamDomain::SameSecretProof,
-        &same_secret_material.proof_bytes,
+        &vec![0xa5; crate::foundation::FOUNDATION_PROFILE.stream_chunk_byte_length + 1],
     );
 }
 

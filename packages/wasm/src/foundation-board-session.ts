@@ -1,7 +1,7 @@
 import type { RefusalReason, VerificationResult } from '@sealed-lattice/types';
 import { foundationProfile, refusalReasonCodes } from '@sealed-lattice/types';
 
-import type { TranscriptCoreKernel } from './transcript-core-bridge/kernel-types.js';
+import type { TranscriptCoreKernelContextOwner } from './transcript-core-bridge/kernel-types.js';
 
 const foundationBoardConfigurationVersion = 1;
 const foundationBoardCapabilityByteLength = 32;
@@ -105,12 +105,12 @@ type FoundationBoardKernelContext = Readonly<{
 }>;
 
 const contexts = new WeakMap<
-    TranscriptCoreKernel,
+    TranscriptCoreKernelContextOwner,
     FoundationBoardKernelContext
 >();
 
 export const registerFoundationBoardKernelContext = (
-    kernel: TranscriptCoreKernel,
+    kernel: TranscriptCoreKernelContextOwner,
     context: FoundationBoardKernelContext,
 ): void => {
     contexts.set(kernel, context);
@@ -554,7 +554,7 @@ const createCapability = (context: FoundationBoardKernelContext): number => {
 
 export const openFoundationBoardSession = (input: {
     readonly configuration: FoundationBoardSessionInput;
-    readonly kernel: TranscriptCoreKernel;
+    readonly kernel: TranscriptCoreKernelContextOwner;
 }): VerificationResult<FoundationBoardSession> => {
     const context = contexts.get(input.kernel);
     if (context === undefined) {

@@ -20,17 +20,6 @@ describe('BGV passive setup kernel commands', () => {
         const kernel = await loadTranscriptCoreKernel();
         const setup = kernel.generateBgvPassiveSetup(setupRequest);
         const repeated = kernel.generateBgvPassiveSetup(setupRequest);
-        const certificates = setup.certificates as {
-            readonly publicRlweSamplesByBasis: {
-                readonly QData: {
-                    readonly publicKeyShares: number;
-                    readonly rotationKeys: number;
-                };
-                readonly QPPublic: {
-                    readonly rotationKeys: number;
-                };
-            };
-        };
 
         expect(setup.setupPackageHash).toMatch(/^[a-f0-9]{128}$/u);
         expect(repeated.setupPackageHash).toBe(setup.setupPackageHash);
@@ -41,15 +30,6 @@ describe('BGV passive setup kernel commands', () => {
             setup.targetDecryptionParameters
                 .targetDecryptionParametersBindingHash,
         ).toMatch(/^[a-f0-9]{128}$/u);
-        expect(certificates.publicRlweSamplesByBasis.QData).toMatchObject({
-            publicKeyShares: 3,
-        });
-        expect(
-            certificates.publicRlweSamplesByBasis.QData.rotationKeys,
-        ).toBeGreaterThan(0);
-        expect(certificates.publicRlweSamplesByBasis.QPPublic).toMatchObject({
-            rotationKeys: 0,
-        });
         expect(
             setup.collectivePublicKey.collectivePublicKeyCoefficientRoot,
         ).toHaveLength(128);

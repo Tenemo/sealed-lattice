@@ -2,7 +2,6 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
 import { withTransientFilesystemRetries } from '#tools/internal/files.js';
 
 export type ReleaseIncrement = 'minor' | 'patch';
@@ -162,20 +161,15 @@ export const prepareReleaseVersion = async (input: {
         `${JSON.stringify(manifest, null, 4)}\n`,
     );
 
-    return {
-        ...releaseVersion,
-    };
+    return releaseVersion;
 };
 
 export const formatReleaseGitHubOutput = (
     releaseVersion: ReleaseVersionResult,
 ): string =>
-    [
-        `previous_version=${releaseVersion.previousVersion}`,
-        `version=${releaseVersion.version}`,
-        `tag=${releaseVersion.tag}`,
-        '',
-    ].join('\n');
+    [`version=${releaseVersion.version}`, `tag=${releaseVersion.tag}`, ''].join(
+        '\n',
+    );
 
 const main = async (): Promise<void> => {
     const increment = parseReleaseIncrement(process.argv.slice(2));
@@ -194,6 +188,6 @@ const main = async (): Promise<void> => {
     );
 };
 
-if (isDirectlyInvokedModule(import.meta.url)) {
+if (import.meta.main) {
     void main();
 }

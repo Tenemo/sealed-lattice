@@ -4,6 +4,7 @@ import {
     createFocusedRustTestMatchTracker,
     resolveFocusedRustTestRunResult,
 } from './focused-rust-test-match.js';
+import { withLocalHeavyLaneLease } from './heavy-lane-lease.js';
 import { createHeavyTestProgressReporter } from './heavy-test-progress.js';
 import { runWithLocalRunLog } from './local-run-log.js';
 import {
@@ -21,8 +22,6 @@ import {
     heavyRustKernelTestNamePrefix,
     normalizeRustTestFilter,
 } from './rust-kernel-test-arguments.js';
-
-import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
 
 export type ParsedRustKernelHeavyArguments = Readonly<{
     testFilter: string;
@@ -92,7 +91,6 @@ export const buildRustKernelHeavyTestCommand = (
             CARGO_INCREMENTAL: '0',
             RAYON_NUM_THREADS: '1',
             RUST_BACKTRACE: 'full',
-            SEALED_LATTICE_TRUSTEE_PROOF_BATCH_SIZE: '1',
             SEALED_LATTICE_TRUSTEE_PROOF_LIMB_BATCH_SIZE: '1',
         },
         logFileSlug: 'cargo-test-rust-kernel-heavy',
@@ -142,41 +140,47 @@ export const runRustKernelHeavyTests = async (
             });
 
             try {
-                let exitCode = await runCommandsInSeries(
-                    [
-                        buildRustKernelHeavyProcessMemoryGuardVerificationCommand(),
-                    ],
-                    {
-                        outputMode: 'inherit',
-                        runLog,
-                    },
-                );
-                if (exitCode !== 0) {
-                    process.exitCode = exitCode;
-                    return;
-                }
+                process.exitCode = await withLocalHeavyLaneLease({
+                    action: async () => {
+                        let exitCode = await runCommandsInSeries(
+                            [
+                                buildRustKernelHeavyProcessMemoryGuardVerificationCommand(),
+                            ],
+                            {
+                                outputMode: 'inherit',
+                                runLog,
+                            },
+                        );
+                        if (exitCode !== 0) return exitCode;
 
-                exitCode = await runCommandsInSeries([command], {
-                    observer: combineObservers([
-                        progressReporter.observer,
-                        testMatchTracker.observer,
-                    ]),
-                    outputMode: 'inherit',
+                        exitCode = await runCommandsInSeries([command], {
+                            observer: combineObservers([
+                                progressReporter.observer,
+                                testMatchTracker.observer,
+                            ]),
+                            outputMode: 'inherit',
+                            runLog,
+                            terminalOutputFilter:
+                                progressReporter.terminalOutputFilter,
+                        });
+                        const runResult = resolveFocusedRustTestRunResult({
+                            commandExitCode: exitCode,
+                            matchedTestCount:
+                                testMatchTracker.matchedTestCount(),
+                            runnerName: 'Rust kernel heavy',
+                            testFilter: parsedArguments.testFilter,
+                        });
+                        if (runResult.failureMessage !== undefined) {
+                            console.error(runResult.failureMessage);
+                            runLog.writeCombinedOutput(
+                                `${runResult.failureMessage}\n`,
+                            );
+                        }
+                        return runResult.exitCode;
+                    },
+                    laneLabel: 'Rust kernel heavy',
                     runLog,
-                    terminalOutputFilter: progressReporter.terminalOutputFilter,
                 });
-                const runResult = resolveFocusedRustTestRunResult({
-                    commandExitCode: exitCode,
-                    matchedTestCount: testMatchTracker.matchedTestCount(),
-                    runnerName: 'Rust kernel heavy',
-                    testFilter: parsedArguments.testFilter,
-                });
-                exitCode = runResult.exitCode;
-                if (runResult.failureMessage !== undefined) {
-                    console.error(runResult.failureMessage);
-                    runLog.writeCombinedOutput(`${runResult.failureMessage}\n`);
-                }
-                process.exitCode = exitCode;
             } finally {
                 progressReporter.stop();
             }
@@ -184,6 +188,6 @@ export const runRustKernelHeavyTests = async (
     );
 };
 
-if (isDirectlyInvokedModule(import.meta.url)) {
+if (import.meta.main) {
     void runRustKernelHeavyTests();
 }

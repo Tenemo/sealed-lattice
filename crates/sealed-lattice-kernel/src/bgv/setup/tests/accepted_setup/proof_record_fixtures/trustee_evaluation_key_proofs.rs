@@ -1,7 +1,5 @@
 use super::super::*;
 use super::*;
-use rayon::prelude::*;
-
 use crate::bgv::setup::accepted_setup::{
     TrusteeEvaluationKeyStatementInputs, accepted_key_switch_decomposition_hash,
     trustee_evaluation_key_statement_from_package,
@@ -10,7 +8,6 @@ use crate::bgv::setup::accepted_setup::{
 use crate::bgv::setup::evaluation_key_share_material::EvaluationKeyShareProofFamily;
 use crate::bgv::setup::setup_proof::{
     SETUP_PROOF_MATERIAL_ENCODING, authenticate_setup_proof_material_stream_for_test,
-    canonical_setup_proof_material_transport_accounting,
 };
 use crate::bgv::setup::trustee_evaluation_key_proof::{
     EvaluationKeyShareKind, TRUSTEE_EVALUATION_KEY_PROOF_FAMILY, TrusteeEvaluationKeyStatement,
@@ -22,6 +19,8 @@ use crate::hashing::{derive_canonical_object_hash, to_hex};
 pub(in super::super) struct TrusteeEvaluationKeyProofFixture {
     pub(in super::super) proof_set: serde_json::Value,
     pub(in super::super) transported_proof_material: serde_json::Value,
+    pub(in super::super) proof_binding_leases:
+        Vec<crate::bgv::setup::CanonicalSetupProofBindingLease>,
 }
 
 pub(in super::super) fn trustee_evaluation_key_proof_material_root_from_fixture_record(
@@ -43,25 +42,14 @@ pub(in super::super) fn trustee_evaluation_key_proof_material_root_from_fixture_
 // the same-secret bridge. Each statement is rebuilt through the same
 // `trustee_evaluation_key_statement_from_package` the accepted-setup verifier
 // calls, so a proof verifies against the exact records, aggregates, and bridge
-// the verifier reconstructs. Generated proof bytes are retained in the same
-// authenticated material store used by the production generator; package
-// records and the verification request carry only canonical material references.
-fn trustee_proof_batch_size(value: Option<&str>, proof_count: usize) -> Result<usize, String> {
-    match value {
-        None => Ok(proof_count.max(1)),
-        Some(value) => value
-            .parse::<usize>()
-            .ok()
-            .filter(|batch_size| *batch_size > 0)
-            .ok_or_else(|| {
-                "SEALED_LATTICE_TRUSTEE_PROOF_BATCH_SIZE must be a positive integer".to_string()
-            }),
-    }
-}
+// the verifier reconstructs. Each generated proof is stream-authenticated and
+// semantically verified, then replaced by an opaque verifier binding before the
+// next trustee; package records and the request carry only canonical references.
 
 pub(in super::super) fn trustee_evaluation_key_proofs_object(
     package: &serde_json::Value,
     proof_material_request: &serde_json::Value,
+    proof_binding_session: &crate::bgv::setup::AcceptedSetupProofBindingSession,
     round_one_aggregate_diagonals_by_level: &BTreeMap<u64, Vec<Vec<u64>>>,
 ) -> TrusteeEvaluationKeyProofFixture {
     let setup_context = &package["setupContext"];
@@ -71,8 +59,12 @@ pub(in super::super) fn trustee_evaluation_key_proofs_object(
     // The bridge material the verifier reconstructs from the package records
     // and their authenticated proof-material request.
     let verified_same_secret_bridge = package.get("sameSecretBridgeStatementSet").map(|_| {
-        verified_same_secret_bridge_material_from_package(package, proof_material_request)
-            .expect("same-secret bridge material")
+        verified_same_secret_bridge_material_from_package(
+            package,
+            proof_material_request,
+            Some(proof_binding_session),
+        )
+        .expect("same-secret bridge material")
     });
     assert!(
         verified_same_secret_bridge.is_some(),
@@ -82,139 +74,130 @@ pub(in super::super) fn trustee_evaluation_key_proofs_object(
         .as_u64()
         .expect("same-secret bridge ring degree") as usize;
 
-    let batch_size = trustee_proof_batch_size(
-        std::env::var("SEALED_LATTICE_TRUSTEE_PROOF_BATCH_SIZE")
-            .ok()
-            .as_deref(),
-        trustee_roster_positions.len(),
-    )
-    .expect("valid trustee proof batch size");
-    let mut per_trustee_records = Vec::with_capacity(trustee_roster_positions.len());
-    for proof_batch in trustee_roster_positions.chunks(batch_size) {
-        let mut batch_records = proof_batch
-            .par_iter()
-            .map(|trustee_roster_position| {
-                let trustee_roster_position = *trustee_roster_position;
-                let trustee_identity = format!("trustee-{trustee_roster_position}");
-                let statement = trustee_evaluation_key_statement_from_package(
-                    &TrusteeEvaluationKeyStatementInputs {
-                        setup_package: package,
-                        transported_key_switch_component_material: proof_material_request
-                            .get("transportedEvaluationKeyShareComponentMaterial"),
-                        verified_same_secret_bridge: verified_same_secret_bridge.as_ref(),
-                        round_one_aggregate_diagonals_by_level,
-                        trustee_roster_position,
-                    },
-                )
-                .expect("trustee evaluation-key statement");
-                let witness = trustee_evaluation_key_witness_for_fixture(
-                    trustee_roster_position,
-                    ring_degree,
-                    &statement,
-                );
-                let proof_randomness_seed_hex = derive_canonical_object_hash(&serde_json::json!({
-                    "objectType": "TrusteeEvaluationKeyProofRandomness",
-                    "fixture": "trustee-evaluation-key-proof-randomness",
-                    "trusteeRosterPosition": trustee_roster_position,
-                }))
-                .expect("trustee proof randomness seed");
-                let statement_hash_hex = to_hex(&statement.statement_hash());
-                let source_constant_coefficient_commitment_root = statement
-                    .context
-                    .binding_roots
-                    .iter()
-                    .find_map(|(field_name, root)| {
-                        (field_name == "sourceConstantCoefficientCommitmentRoot")
-                            .then_some(root.as_str())
-                    })
-                    .expect("source constant coefficient commitment root");
-                // The checkpoint key carries the schedule container tag plus a
-                // prover-revision suffix so stale bytes (same statement hash) never
-                // collide across format or prover changes. Bump the revision when
-                // the atom prover's transcript changes; slksats4 binds the combined
-                // source-constant relation directly.
-                let checkpoint_key = format!("{statement_hash_hex}-slksats4");
-                let proof_bytes = checkpointed_proof_bytes(
-                    TRUSTEE_EVALUATION_KEY_PROOF_CHECKPOINT_DIRECTORY,
-                    &checkpoint_key,
-                    |proof_bytes| {
-                        verify_trustee_evaluation_key_proof_bytes(&statement, proof_bytes)
-                    },
-                    || {
-                        prove_trustee_evaluation_key_proof_bytes(
-                            &statement,
-                            &witness,
-                            &proof_randomness_seed_hex,
-                        )
-                        .expect("trustee evaluation-key proof bytes")
-                    },
-                );
-                let proof_bytes_hash = trustee_evaluation_key_proof_bytes_hash(&proof_bytes);
-                let mut record = serde_json::json!({
-                    "objectType": "TrusteeEvaluationKeyProof",
-                    "proofFamily": TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
-                    "ceremonyId": setup_context["ceremonyId"],
-                    "manifestHash": setup_context["manifestHash"],
-                    "rosterHash": setup_context["rosterHash"],
-                    "setupParametersHash": setup_context["setupParametersHash"],
-                    "setupEpoch": setup_context["setupEpoch"],
-                    "trusteeIdentity": trustee_identity.as_str(),
-                    "trusteeRosterPosition": trustee_roster_position,
-                    "sourceConstantCoefficientCommitmentRoot": source_constant_coefficient_commitment_root,
-                    "statementHash": statement_hash_hex,
-                    "proofBytesEncoding": SETUP_PROOF_MATERIAL_ENCODING,
-                    "proofBytesHash": proof_bytes_hash,
-                });
-                let proof_material_root =
-                    trustee_evaluation_key_proof_material_root_from_fixture_record(&record);
-                let transport_hashes = canonical_setup_proof_material_transport_accounting(
-                    TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
-                    &proof_bytes,
-                )
-                .expect("trustee evaluation-key proof transport hashes");
-                record["proofMaterialRoot"] = serde_json::json!(proof_material_root);
-                record["trusteeEvaluationKeyProofRoot"] = serde_json::json!(
-                    derive_canonical_object_hash(&record)
-                        .expect("trustee evaluation-key proof root")
-                );
-                let transported_proof_material = serde_json::json!({
-                    "objectType": "SetupTransportedEvaluationKeyShareProofMaterial",
-                    "proofFamily": TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
-                    "proofBytesEncoding": SETUP_PROOF_MATERIAL_ENCODING,
-                    "proofMaterialRoot": proof_material_root,
-                    "proofChunkCount": transport_hashes.chunk_hashes.len(),
-                    "proofTotalByteLength": transport_hashes.total_byte_length,
-                    "proofFullObjectHash": transport_hashes.full_object_hash,
-                    "proofChunkRoot": transport_hashes.chunk_root,
-                    "proofChunkHashes": transport_hashes.chunk_hashes,
-                });
-                final_package_phase(&format!(
-                    "generated trustee evaluation-key proof trustee {trustee_roster_position}"
-                ));
-
-                (
-                    trustee_roster_position,
-                    record,
-                    transported_proof_material,
-                    proof_material_root,
-                    proof_bytes,
-                )
+    let mut proof_records = Vec::with_capacity(trustee_roster_positions.len());
+    let mut transported_proof_materials = Vec::with_capacity(trustee_roster_positions.len());
+    let mut proof_binding_leases = Vec::with_capacity(trustee_roster_positions.len());
+    for trustee_roster_position in trustee_roster_positions {
+        let trustee_identity = format!("trustee-{trustee_roster_position}");
+        let statement =
+            trustee_evaluation_key_statement_from_package(&TrusteeEvaluationKeyStatementInputs {
+                setup_package: package,
+                transported_key_switch_component_material: proof_material_request
+                    .get("transportedEvaluationKeyShareComponentMaterial"),
+                verified_same_secret_bridge: verified_same_secret_bridge.as_ref(),
+                round_one_aggregate_diagonals_by_level,
+                trustee_roster_position,
             })
-            .collect::<Vec<_>>();
-        per_trustee_records.append(&mut batch_records);
-    }
-    let mut ordered_records = per_trustee_records;
-    ordered_records.sort_by_key(|(trustee_roster_position, _, _, _, _)| *trustee_roster_position);
-    let mut proof_records = Vec::with_capacity(ordered_records.len());
-    let mut transported_proof_materials = Vec::with_capacity(ordered_records.len());
-    for (_, record, transported_proof_material, proof_material_root, proof_bytes) in ordered_records
-    {
-        authenticate_setup_proof_material_stream_for_test(
+            .expect("trustee evaluation-key statement");
+        let witness = trustee_evaluation_key_witness_for_fixture(
+            trustee_roster_position,
+            ring_degree,
+            &statement,
+        );
+        let proof_randomness_seed_hex = derive_canonical_object_hash(&serde_json::json!({
+            "objectType": "TrusteeEvaluationKeyProofRandomness",
+            "fixture": "trustee-evaluation-key-proof-randomness",
+            "trusteeRosterPosition": trustee_roster_position,
+        }))
+        .expect("trustee proof randomness seed");
+        let statement_hash_hex = to_hex(&statement.statement_hash());
+        let source_constant_coefficient_commitment_root = statement
+            .context
+            .binding_roots
+            .iter()
+            .find_map(|(field_name, root)| {
+                (field_name == "sourceConstantCoefficientCommitmentRoot").then_some(root.as_str())
+            })
+            .expect("source constant coefficient commitment root");
+        // The checkpoint key carries the schedule container tag plus a
+        // prover-revision suffix so stale bytes (same statement hash) never
+        // collide across format or prover changes. Bump the revision when
+        // the atom prover's transcript changes; slksats4 binds the combined
+        // source-constant relation directly.
+        let checkpoint_key = format!("{statement_hash_hex}-slksats4");
+        let CheckpointedProofBytes {
+            proof_bytes,
+            was_semantically_verified,
+        } = checkpointed_proof_bytes_with_verification_state(
+            TRUSTEE_EVALUATION_KEY_PROOF_CHECKPOINT_DIRECTORY,
+            &checkpoint_key,
+            |proof_bytes| verify_trustee_evaluation_key_proof_bytes(&statement, proof_bytes),
+            || {
+                prove_trustee_evaluation_key_proof_bytes(
+                    &statement,
+                    &witness,
+                    &proof_randomness_seed_hex,
+                )
+                .expect("trustee evaluation-key proof bytes")
+            },
+        );
+        let proof_bytes_hash = trustee_evaluation_key_proof_bytes_hash(&proof_bytes);
+        let mut record = serde_json::json!({
+            "objectType": "TrusteeEvaluationKeyProof",
+            "proofFamily": TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
+            "ceremonyId": setup_context["ceremonyId"],
+            "manifestHash": setup_context["manifestHash"],
+            "rosterHash": setup_context["rosterHash"],
+            "setupParametersHash": setup_context["setupParametersHash"],
+            "setupEpoch": setup_context["setupEpoch"],
+            "trusteeIdentity": trustee_identity.as_str(),
+            "trusteeRosterPosition": trustee_roster_position,
+            "sourceConstantCoefficientCommitmentRoot": source_constant_coefficient_commitment_root,
+            "statementHash": statement_hash_hex,
+            "proofBytesEncoding": SETUP_PROOF_MATERIAL_ENCODING,
+            "proofBytesHash": proof_bytes_hash,
+        });
+        let proof_material_root =
+            trustee_evaluation_key_proof_material_root_from_fixture_record(&record);
+        let transport_hashes = authenticate_setup_proof_material_stream_for_test(
             TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
             &proof_material_root,
             &proof_bytes,
         )
         .expect("authenticate trustee evaluation-key proof material stream");
+        record["proofMaterialRoot"] = serde_json::json!(&proof_material_root);
+        record["trusteeEvaluationKeyProofRoot"] = serde_json::json!(
+            derive_canonical_object_hash(&record).expect("trustee evaluation-key proof root")
+        );
+        let transported_proof_material = serde_json::json!({
+            "objectType": "SetupTransportedEvaluationKeyShareProofMaterial",
+            "proofFamily": TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
+            "proofBytesEncoding": SETUP_PROOF_MATERIAL_ENCODING,
+            "proofMaterialRoot": proof_material_root,
+            "proofChunkCount": transport_hashes.chunk_hashes.len(),
+            "proofTotalByteLength": transport_hashes.total_byte_length,
+            "proofFullObjectHash": transport_hashes.full_object_hash,
+            "proofChunkRoot": transport_hashes.chunk_root,
+            "proofChunkHashes": transport_hashes.chunk_hashes,
+        });
+        final_package_phase(&format!(
+            "generated trustee evaluation-key proof trustee {trustee_roster_position}"
+        ));
+
+        if !was_semantically_verified {
+            verify_trustee_evaluation_key_proof_bytes(&statement, &proof_bytes)
+                .expect("verify generated trustee evaluation-key proof bytes");
+        }
+        let verification_binding_hash = crate::bgv::setup::accepted_setup::
+            trustee_evaluation_key_proof_verification_binding_hash(&record, &statement)
+            .expect("trustee evaluation-key proof verification binding");
+        crate::bgv::setup::retain_accepted_setup_proof_binding(
+            proof_binding_session.session_handle,
+            &proof_binding_session.capability,
+            TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
+            &proof_material_root,
+            verification_binding_hash,
+        )
+        .expect("retain trustee evaluation-key proof binding");
+        proof_binding_leases.push(
+            crate::bgv::setup::accepted_setup_proof_binding_lease(
+                proof_binding_session.session_handle,
+                &proof_binding_session.capability,
+                &proof_material_root,
+            )
+            .expect("trustee evaluation-key proof binding lease lookup")
+            .expect("trustee evaluation-key proof binding must be retained"),
+        );
         proof_records.push(record);
         transported_proof_materials.push(transported_proof_material);
     }
@@ -274,6 +257,7 @@ pub(in super::super) fn trustee_evaluation_key_proofs_object(
             "proofFamily": TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
             "proofMaterials": transported_proof_materials,
         }),
+        proof_binding_leases,
     }
 }
 
@@ -365,12 +349,4 @@ pub(in super::super) fn trustee_evaluation_key_witness_for_fixture(
         vss_committed_material_seeds_by_bound_message: Vec::new(),
         vss_committed_material_context_hashes_by_bound_message: Vec::new(),
     }
-}
-
-#[test]
-fn trustee_proof_batch_size_requires_a_positive_integer() {
-    assert_eq!(trustee_proof_batch_size(None, 10), Ok(10));
-    assert_eq!(trustee_proof_batch_size(Some("3"), 10), Ok(3));
-    assert!(trustee_proof_batch_size(Some("0"), 10).is_err());
-    assert!(trustee_proof_batch_size(Some("not-a-number"), 10).is_err());
 }

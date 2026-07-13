@@ -1,5 +1,6 @@
 import path from 'node:path';
 
+import { withLocalHeavyLaneLease } from './heavy-lane-lease.js';
 import { runWithLocalRunLog } from './local-run-log.js';
 import {
     resolvePackageManagerRunner,
@@ -15,8 +16,6 @@ import {
     type CommandInvocation,
 } from './run-command.js';
 import { buildTestDiagnosticEnvironment } from './test-diagnostic-environment.js';
-
-import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
 
 const nodeWasmVirtualAddressSpaceAllowanceBytes = 32 * 1024 ** 3;
 let processMemoryGuard: ProcessMemoryGuard | undefined;
@@ -84,20 +83,25 @@ export const runNodeKernelHeavyTests = async (
         async (runLog) => {
             parseArguments(commandArguments);
             const packageManagerRunner = resolvePackageManagerRunner();
-            process.exitCode = await runCommandsInSeries(
-                [
-                    buildNodeKernelHeavyGuardVerificationCommand(),
-                    buildNodeKernelHeavyTestCommand({
-                        packageManagerRunner,
-                        runDirectoryPath: runLog.runDirectoryPath,
-                    }),
-                ],
-                { outputMode: 'inherit', runLog },
-            );
+            process.exitCode = await withLocalHeavyLaneLease({
+                action: () =>
+                    runCommandsInSeries(
+                        [
+                            buildNodeKernelHeavyGuardVerificationCommand(),
+                            buildNodeKernelHeavyTestCommand({
+                                packageManagerRunner,
+                                runDirectoryPath: runLog.runDirectoryPath,
+                            }),
+                        ],
+                        { outputMode: 'inherit', runLog },
+                    ),
+                laneLabel: 'Node kernel heavy',
+                runLog,
+            });
         },
     );
 };
 
-if (isDirectlyInvokedModule(import.meta.url)) {
+if (import.meta.main) {
     void runNodeKernelHeavyTests();
 }

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import { deriveCanonicalObjectHash } from '#packages/crypto/src/index';
 import {
     bgvCanonicalStreamFamilies,
+    type AcceptedSetupSession,
     type TranscriptCoreKernel,
 } from '#packages/wasm/src/index';
 import { canonicalStreamDescriptorFixture } from '#tests/support/canonical-stream-descriptor-fixture';
@@ -36,8 +37,10 @@ const runtimeMocks = vi.hoisted(() => ({
     readMaterial: vi.fn(),
 }));
 
-vi.mock('@sealed-lattice/wasm', async (importOriginal) => ({
-    ...(await importOriginal<typeof import('@sealed-lattice/wasm')>()),
+vi.mock('@sealed-lattice/wasm/published-sdk', async (importOriginal) => ({
+    ...(await importOriginal<
+        typeof import('@sealed-lattice/wasm/published-sdk')
+    >()),
     openBgvCanonicalStreamRuntime: () => ({
         readMaterial: runtimeMocks.readMaterial,
     }),
@@ -136,6 +139,7 @@ const { prepareSetupPackageVerificationInputForKernel } =
 const prepare = (input: JsonRecord): Promise<JsonRecord> =>
     prepareSetupPackageVerificationInputForKernel(
         {} as TranscriptCoreKernel,
+        {} as AcceptedSetupSession,
         input as never,
     );
 

@@ -1,3 +1,5 @@
+import path from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -13,19 +15,17 @@ import {
 } from '#tools/ci/verify-packed-package';
 
 describe('packed package policy checks', () => {
-    it('accepts only the optional workspace-build flag', () => {
-        expect(parsePackedPackageSmokeArguments([])).toEqual({
-            buildWorkspace: false,
-        });
-        expect(parsePackedPackageSmokeArguments(['--build'])).toEqual({
-            buildWorkspace: true,
-        });
-        expect(parsePackedPackageSmokeArguments(['--', '--build'])).toEqual({
-            buildWorkspace: true,
-        });
-        expect(() =>
-            parsePackedPackageSmokeArguments(['--build', '--unexpected']),
-        ).toThrow('accepts only the optional --build flag');
+    it('accepts only an optional retained-tarball path', () => {
+        expect(parsePackedPackageSmokeArguments([])).toEqual({});
+        expect(
+            parsePackedPackageSmokeArguments(['--out', 'package.tgz']),
+        ).toEqual({ retainedTarballPath: path.resolve('package.tgz') });
+        expect(
+            parsePackedPackageSmokeArguments(['--', '--out', 'package.tgz']),
+        ).toEqual({ retainedTarballPath: path.resolve('package.tgz') });
+        expect(() => parsePackedPackageSmokeArguments(['--out'])).toThrow(
+            'Usage: verify-packed-package.ts',
+        );
     });
 
     it('isolates npm cache writes inside the package-smoke temporary directory', () => {
@@ -59,12 +59,18 @@ describe('packed package policy checks', () => {
                             { path: 'LICENSE' },
                             { path: 'README.md' },
                         ],
+                        integrity: 'sha512-package',
+                        name: 'sealed-lattice',
+                        version: '0.0.19',
                     },
                 ]),
             ),
         ).toEqual({
             filename: 'sealed-lattice-0.0.19.tgz',
             filePaths: ['dist/index.js', 'LICENSE', 'README.md'],
+            integrity: 'sha512-package',
+            name: 'sealed-lattice',
+            version: '0.0.19',
         });
         expect(() => parsePackMetadata('{}')).toThrow(
             'npm pack --json returned an unexpected shape',

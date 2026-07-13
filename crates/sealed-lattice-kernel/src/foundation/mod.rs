@@ -22,6 +22,7 @@ mod proof_commitments;
 mod proof_profiles;
 mod proof_transcript;
 mod refusal;
+mod relation_plans;
 mod runtime_schemas;
 mod schema_object;
 mod schemas;
@@ -129,6 +130,11 @@ pub use proof_transcript::{
     CanonicalProofTranscript, ProofChallengeTag, ProofRoundTag, ProofTranscriptError,
 };
 pub use refusal::{RefusalReason, VerificationResult};
+pub use relation_plans::{
+    COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+    CollectivePublicKeyAggregateStatement, CollectivePublicKeyAggregationRelationPlan,
+    RELATION_PLAN_SCHEMA_IDENTIFIER, RELATION_PLAN_VARIANT_SCHEMA_IDENTIFIER,
+};
 pub use runtime_schemas::{
     CHECKPOINT_BOUNDARY_PROFILE_SCHEMA_IDENTIFIER, CHECKPOINT_MANIFEST_SCHEMA_IDENTIFIER,
     CHECKPOINT_RANDOM_USE_PROFILE_SCHEMA_IDENTIFIER, CheckpointBoundaryProfile, CheckpointManifest,

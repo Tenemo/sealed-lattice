@@ -30,6 +30,7 @@ pub(super) enum VssPublicMaterialVerification {
 pub(super) fn verify_optional_vss_public_material(
     setup_package: &Value,
     request: &Value,
+    proof_binding_session: Option<&crate::bgv::setup::AcceptedSetupProofBindingSession>,
 ) -> CanonicalResult<VssPublicMaterialVerification> {
     let public_material_fields = [
         VSS_PUBLIC_COEFFICIENT_COMMITMENT_SET_FIELD,
@@ -65,7 +66,7 @@ pub(super) fn verify_optional_vss_public_material(
         ));
     }
 
-    match verify_vss_public_material_binding(setup_package, request) {
+    match verify_vss_public_material_binding(setup_package, request, proof_binding_session) {
         Ok(verified_material) => Ok(VssPublicMaterialVerification::Verified(verified_material)),
         Err(error) => Ok(VssPublicMaterialVerification::Refused(
             vss_public_material_refusal(
@@ -80,6 +81,7 @@ pub(super) fn verify_optional_vss_public_material(
 fn verify_vss_public_material_binding(
     setup_package: &Value,
     request: &Value,
+    proof_binding_session: Option<&crate::bgv::setup::AcceptedSetupProofBindingSession>,
 ) -> CanonicalResult<VerifiedVssPublicMaterial> {
     let coefficient_set = setup_package
         .get(VSS_PUBLIC_COEFFICIENT_COMMITMENT_SET_FIELD)
@@ -124,6 +126,7 @@ fn verify_vss_public_material_binding(
     let (statement_verification, proof_material_verification) =
         crate::bgv::setup::trustee_evaluation_key_proof::verify_vss_share_linkage_statement_and_proof_material_set_from_request(
             &Value::Object(proof_material_request),
+            proof_binding_session,
         )?;
     let setup_context = setup_package
         .get("setupContext")
@@ -161,6 +164,7 @@ fn verify_vss_public_material_binding(
     // committed T_{j,l} is shown to be the modular sum of the committed source
     // recipient shares by a unit-point share-linkage proof.
     crate::bgv::setup::verify_vss_public_aggregate_threshold_proofs(
+        proof_binding_session,
         request,
         coefficient_set,
         recipient_share_set,
@@ -230,7 +234,7 @@ mod tests {
 
     #[test]
     fn optional_vss_public_material_is_absent_by_default() -> CanonicalResult<()> {
-        let response = verify_optional_vss_public_material(&json!({}), &json!({}))?;
+        let response = verify_optional_vss_public_material(&json!({}), &json!({}), None)?;
 
         assert!(matches!(response, VssPublicMaterialVerification::Absent));
         Ok(())
@@ -243,6 +247,7 @@ mod tests {
                 "vssPublicCoefficientCommitmentSet": {},
             }),
             &json!({}),
+            None,
         )?
         else {
             panic!("partial VSS public material must refuse");
@@ -266,6 +271,7 @@ mod tests {
                 "vssShareLinkageStatement": {},
             }),
             &json!({}),
+            None,
         )?
         else {
             panic!("complete VSS public material must refuse");
@@ -297,6 +303,7 @@ mod tests {
                 "vssShareLinkageProofMaterialSet": {},
             }),
             &json!({}),
+            None,
         )
         .expect("complete VSS public material refusal") else {
             panic!("complete VSS public material must refuse");

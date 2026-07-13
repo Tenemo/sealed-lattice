@@ -6,16 +6,23 @@ on:
             - master
     pull_request:
     workflow_dispatch:
+        inputs:
+            ten_participant_accepted_setup_evidence:
+                description: Run ten-participant proof-bearing accepted-setup evidence
+                required: false
+                default: false
+                type: boolean
 
 permissions:
     contents: read
 
+concurrency:
+    group: ${{ github.event_name == 'workflow_dispatch' && inputs.ten_participant_accepted_setup_evidence && format('ci-ten-participant-accepted-setup-evidence-{0}', github.ref) || format('ci-{0}-{1}', github.workflow, github.ref) }}
+    cancel-in-progress: ${{ !(github.event_name == 'workflow_dispatch' && inputs.ten_participant_accepted_setup_evidence) }}
+
 jobs:
     changes:
         name: changes
-        concurrency:
-            group: ci-${{ github.ref }}-changes
-            cancel-in-progress: true
         runs-on: ubuntu-24.04
         timeout-minutes: 10
         outputs:
@@ -25,7 +32,9 @@ jobs:
               with:
                   fetch-depth: 0
                   persist-credentials: false
-            - uses: ./.github/actions/bootstrap-pnpm
+            - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f
+              with:
+                  node-version-file: .nvmrc
             - name: Classify expensive proof lanes
               id: classify
               env:
@@ -39,14 +48,14 @@ jobs:
                     HEAD_SHA="${PULL_REQUEST_HEAD_SHA}"
                   elif [[ "${EVENT_NAME}" == "push" ]]; then
                     if [[ "${PUSH_BASE_SHA}" =~ ^0+$ ]]; then
-                      printf '' | pnpm exec tsx ./tools/ci/classify-ci-changes.ts
+                      printf '' | node ./tools/ci/classify-ci-changes.mjs
                       exit 0
                     fi
                     BASE_SHA="${PUSH_BASE_SHA}"
                     HEAD_SHA="${GITHUB_SHA}"
                   else
                     if ! BASE_SHA="$(git rev-parse "${GITHUB_SHA}^")"; then
-                      printf '' | pnpm exec tsx ./tools/ci/classify-ci-changes.ts
+                      printf '' | node ./tools/ci/classify-ci-changes.mjs
                       exit 0
                     fi
                     HEAD_SHA="${GITHUB_SHA}"
@@ -55,16 +64,13 @@ jobs:
                   CHANGED_PATHS_FILE="$(mktemp)"
                   if ! git diff --name-status -z "${BASE_SHA}" "${HEAD_SHA}" > "${CHANGED_PATHS_FILE}"; then
                     echo "Could not compare ${BASE_SHA} with ${HEAD_SHA}; running expensive proof lanes." >&2
-                    printf '' | pnpm exec tsx ./tools/ci/classify-ci-changes.ts
+                    printf '' | node ./tools/ci/classify-ci-changes.mjs
                     exit 0
                   fi
-                  pnpm exec tsx ./tools/ci/classify-ci-changes.ts < "${CHANGED_PATHS_FILE}"
+                  node ./tools/ci/classify-ci-changes.mjs --base "${BASE_SHA}" --head "${HEAD_SHA}" < "${CHANGED_PATHS_FILE}"
 
     static-build:
         name: static and build
-        concurrency:
-            group: ci-${{ github.ref }}-static-build
-            cancel-in-progress: true
         runs-on: ubuntu-24.04
         timeout-minutes: 30
         steps:
@@ -82,19 +88,9 @@ jobs:
             - run: pnpm run lint
             - run: pnpm run tsc
             - run: pnpm exec knip
-            - name: Upload static verification diagnostics
-              if: ${{ always() }}
-              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-              with:
-                  if-no-files-found: warn
-                  name: static-verification-logs-${{ github.run_id }}-${{ github.run_attempt }}
-                  path: logs
 
     rust-fast:
         name: rust fast
-        concurrency:
-            group: ci-${{ github.ref }}-rust-fast
-            cancel-in-progress: true
         runs-on: ubuntu-24.04
         timeout-minutes: 135
         steps:
@@ -114,7 +110,7 @@ jobs:
               timeout-minutes: 110
               run: pnpm run test:rust:kernel
             - name: Upload Rust fast diagnostics
-              if: ${{ always() }}
+              if: ${{ failure() }}
               uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
               with:
                   if-no-files-found: warn
@@ -123,9 +119,6 @@ jobs:
 
     node:
         name: node
-        concurrency:
-            group: ci-${{ github.ref }}-node
-            cancel-in-progress: true
         runs-on: ubuntu-24.04
         timeout-minutes: 135
         steps:
@@ -141,19 +134,9 @@ jobs:
             - name: Run ordinary Node tests
               timeout-minutes: 110
               run: pnpm run test:node
-            - name: Upload Node diagnostics
-              if: ${{ always() }}
-              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-              with:
-                  if-no-files-found: warn
-                  name: node-logs-${{ github.run_id }}-${{ github.run_attempt }}
-                  path: logs
 
     rust-heavy:
         name: rust heavy
-        concurrency:
-            group: ci-${{ github.ref }}-rust-heavy
-            cancel-in-progress: false
         needs:
             - changes
         if: ${{ needs.changes.outputs.run_heavy == 'true' }}
@@ -182,9 +165,6 @@ jobs:
 
     rust-accepted-setup:
         name: rust accepted setup
-        concurrency:
-            group: ci-${{ github.ref }}-rust-accepted-setup
-            cancel-in-progress: false
         needs:
             - changes
         if: ${{ needs.changes.outputs.run_heavy == 'true' }}
@@ -211,11 +191,34 @@ jobs:
                   name: rust-accepted-setup-logs-${{ github.run_id }}-${{ github.run_attempt }}
                   path: logs
 
+    rust-ten-participant-accepted-setup-evidence:
+        name: rust ten-participant accepted setup evidence
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.ten_participant_accepted_setup_evidence }}
+        runs-on: ubuntu-24.04
+        timeout-minutes: 370
+        steps:
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+              with:
+                  persist-credentials: false
+            - uses: ./.github/actions/bootstrap-pnpm
+            - uses: dtolnay/rust-toolchain@b18f7037bce1ea84c086f4d5e9493f853c0ce412
+              with:
+                  toolchain: 1.90.0
+            - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
+            - name: Run ten-participant proof-bearing accepted-setup evidence
+              id: rust-ten-participant-accepted-setup-evidence
+              timeout-minutes: 350
+              run: pnpm run test:rust:kernel:accepted-setup:ten-participant-evidence
+            - name: Upload ten-participant accepted-setup evidence logs
+              if: ${{ always() }}
+              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+              with:
+                  if-no-files-found: warn
+                  name: rust-ten-participant-accepted-setup-evidence-logs-${{ github.run_id }}-${{ github.run_attempt }}
+                  path: logs
+
     node-kernel-heavy:
         name: node kernel heavy
-        concurrency:
-            group: ci-${{ github.ref }}-node-kernel-heavy
-            cancel-in-progress: false
         needs:
             - changes
         if: ${{ needs.changes.outputs.run_heavy == 'true' }}
@@ -244,9 +247,6 @@ jobs:
 
     browser:
         name: browser
-        concurrency:
-            group: ci-${{ github.ref }}-browser
-            cancel-in-progress: true
         runs-on: ubuntu-24.04
         timeout-minutes: 75
         steps:
@@ -263,19 +263,9 @@ jobs:
             - name: Run browser matrix
               timeout-minutes: 55
               run: pnpm run test:browser
-            - name: Upload browser diagnostics
-              if: ${{ always() }}
-              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-              with:
-                  if-no-files-found: warn
-                  name: browser-logs-${{ github.run_id }}-${{ github.run_attempt }}
-                  path: logs
 
     verify:
         name: verify
-        concurrency:
-            group: ci-${{ github.ref }}-verify
-            cancel-in-progress: true
         runs-on: ubuntu-24.04
         timeout-minutes: 5
         needs:
@@ -285,6 +275,7 @@ jobs:
             - node
             - rust-heavy
             - rust-accepted-setup
+            - rust-ten-participant-accepted-setup-evidence
             - node-kernel-heavy
             - browser
         if: ${{ always() }}
@@ -292,6 +283,7 @@ jobs:
             - name: Check verify jobs
               env:
                   RUN_HEAVY: ${{ needs.changes.outputs.run_heavy }}
+                  RUN_TEN_PARTICIPANT_ACCEPTED_SETUP_EVIDENCE: ${{ github.event_name == 'workflow_dispatch' && inputs.ten_participant_accepted_setup_evidence }}
               run: |
                   node --input-type=module <<'NODE'
                   const needs = ${{ toJSON(needs) }};
@@ -300,6 +292,9 @@ jobs:
                     process.exit(1);
                   }
                   const allowedSkippedJobs = new Set();
+                  if (process.env.RUN_TEN_PARTICIPANT_ACCEPTED_SETUP_EVIDENCE !== 'true') {
+                    allowedSkippedJobs.add('rust-ten-participant-accepted-setup-evidence');
+                  }
                   if (process.env.RUN_HEAVY === 'false') {
                     allowedSkippedJobs.add('rust-heavy');
                     allowedSkippedJobs.add('rust-accepted-setup');

@@ -12,6 +12,7 @@ import {
     isProtocolHashString,
     isRecord,
 } from '../common/verification-helpers.js';
+import { bytesFromHex } from '../setup/common-fields.js';
 import type { CollectiveBgvSetupContext } from '../setup/vss-share-verification-records.js';
 
 type JsonRecord = Record<string, unknown>;
@@ -21,6 +22,8 @@ const targetDecryptionSmudgingProfileId =
 const targetDecryptionSmudgingSeedHashDomain =
     'sealed-lattice-bgv-rns/target-decryption-smudging-seed';
 const targetDecryptionPlaintextMultiple = 65_537;
+const maximumAggregateOpeningCredentialCount = 17;
+const maximumAggregateOpeningRingDegree = 32_768;
 
 const textEncoder = new TextEncoder();
 
@@ -58,11 +61,24 @@ type LocalTargetDecryptionShareWitnessPreparationInput = Readonly<{
     readonly trusteeIdentity: string;
 }>;
 
-type PreparedLocalTargetDecryptionShareWitness = Readonly<
-    JsonRecord & {
-        readonly targetDecryptionSmudging: LocalTrusteeTargetDecryptionSmudgingWitness;
-    }
->;
+export type TargetDecryptionAggregateOpeningMaterialSource = Readonly<{
+    readonly aggregateOpeningRoot: ProtocolHash;
+    readonly totalByteLength: number;
+    readonly pullChunk: (input: {
+        readonly abortSignal?: AbortSignal;
+        readonly chunkIndex: number;
+        readonly expectedByteLength: number;
+    }) => Promise<ArrayBuffer | undefined>;
+}>;
+
+export type PreparedLocalTargetDecryptionShareWitness = Readonly<{
+    readonly aggregateOpeningMaterialSources: readonly TargetDecryptionAggregateOpeningMaterialSource[];
+    readonly localTargetShareWitness: Readonly<
+        JsonRecord & {
+            readonly targetDecryptionSmudging: LocalTrusteeTargetDecryptionSmudgingWitness;
+        }
+    >;
+}>;
 
 export type RestoredLocalTargetDecryptionShareWitnessInput = Readonly<{
     readonly encryptedLocalState: EncryptedLocalTrusteeSetupState;
@@ -349,7 +365,7 @@ const assertRestoredAggregateOpeningBinding = (input: {
     readonly targetAcceptedRecord: JsonRecord;
     readonly trusteeIdentity: string;
     readonly rosterPosition: number;
-}): void => {
+}): number => {
     const aggregateOpening = jsonRecord(
         input.restoredLocalTargetShareWitness.aggregateOpening,
         'restoredLocalTargetShareWitness.aggregateOpening',
@@ -428,6 +444,24 @@ const assertRestoredAggregateOpeningBinding = (input: {
     ) {
         throw new Error(
             'restoredLocalTargetShareWitness.aggregateOpening.aggregateOpeningCredentials must be a non-empty array.',
+        );
+    }
+    if (
+        aggregateOpeningCredentials.length >
+        maximumAggregateOpeningCredentialCount
+    ) {
+        throw new Error(
+            'restoredLocalTargetShareWitness aggregate opening credential count exceeds the supported RNS basis.',
+        );
+    }
+    const ringDegree = nonNegativeIntegerField(
+        aggregateThresholdCommitmentSet,
+        'ringDegree',
+        'setupPackage.vssPublicAggregateThresholdCommitmentSet',
+    );
+    if (ringDegree === 0 || ringDegree > maximumAggregateOpeningRingDegree) {
+        throw new Error(
+            'setupPackage.vssPublicAggregateThresholdCommitmentSet.ringDegree must be inside the supported target-decryption ring bound.',
         );
     }
     const acceptedRecordsByRecipientLimb = aggregateRecordsByRecipientLimb(
@@ -536,6 +570,85 @@ const assertRestoredAggregateOpeningBinding = (input: {
             'the accepted aggregate commitment record',
         );
     });
+
+    return ringDegree;
+};
+
+const prepareAggregateOpeningMaterial = (input: {
+    readonly credential: JsonRecord;
+    readonly credentialIndex: number;
+    readonly ringDegree: number;
+}): Readonly<{
+    readonly credential: JsonRecord;
+    readonly source: TargetDecryptionAggregateOpeningMaterialSource;
+}> => {
+    const objectPath = `restoredLocalTargetShareWitness.aggregateOpening.aggregateOpeningCredentials.${String(input.credentialIndex)}`;
+    const aggregateOpeningRoot = protocolHashField(
+        input.credential,
+        'aggregateOpeningRoot',
+        objectPath,
+    );
+    const messageHex = nonEmptyStringField(
+        input.credential,
+        'aggregateCommitmentMessageValuesLeHex',
+        objectPath,
+    );
+    const expectedByteLength = input.ringDegree * 8;
+    if (
+        !Number.isSafeInteger(expectedByteLength) ||
+        expectedByteLength > maximumAggregateOpeningRingDegree * 8 ||
+        messageHex.length !== expectedByteLength * 2
+    ) {
+        throw new Error(
+            `${objectPath}.aggregateCommitmentMessageValuesLeHex must encode exactly ringDegree little-endian u64 values.`,
+        );
+    }
+    const messageBytes = bytesFromHex(
+        messageHex,
+        `${objectPath}.aggregateCommitmentMessageValuesLeHex`,
+    );
+
+    const {
+        aggregateCommitmentMessageValuesLeHex: _removedInlineMessage,
+        ...credential
+    } = input.credential;
+    const source: TargetDecryptionAggregateOpeningMaterialSource = {
+        aggregateOpeningRoot,
+        totalByteLength: messageBytes.byteLength,
+        pullChunk: ({
+            abortSignal,
+            chunkIndex,
+            expectedByteLength: requestedByteLength,
+        }): Promise<ArrayBuffer | undefined> => {
+            if (abortSignal?.aborted === true) {
+                return Promise.reject(
+                    new Error(
+                        'Aggregate opening material transport was cancelled.',
+                    ),
+                );
+            }
+            if (chunkIndex === 0) {
+                if (requestedByteLength !== messageBytes.byteLength) {
+                    return Promise.reject(
+                        new Error(
+                            'Aggregate opening material transport requested a non-canonical chunk length.',
+                        ),
+                    );
+                }
+                return Promise.resolve(messageBytes.slice().buffer);
+            }
+            if (chunkIndex === 1 && requestedByteLength === 0) {
+                return Promise.resolve(undefined);
+            }
+            return Promise.reject(
+                new Error(
+                    'Aggregate opening material transport requested a non-canonical chunk index.',
+                ),
+            );
+        },
+    };
+
+    return { credential, source };
 };
 
 export const deriveTargetDecryptionSmudgingSeedHex = (
@@ -634,7 +747,7 @@ export const prepareLocalTargetDecryptionShareWitness = (
             'restoredLocalTargetShareWitness roster position must match the setup package trustee.',
         );
     }
-    assertRestoredAggregateOpeningBinding({
+    const ringDegree = assertRestoredAggregateOpeningBinding({
         restoredLocalTargetShareWitness,
         setupPackage: jsonRecord(input.setupPackage, 'setupPackage'),
         targetAcceptedRecord: jsonRecord(
@@ -644,11 +757,39 @@ export const prepareLocalTargetDecryptionShareWitness = (
         trusteeIdentity: input.trusteeIdentity,
         rosterPosition: participant.rosterPosition,
     });
-
-    return {
+    const restoredAggregateOpening = jsonRecord(
+        restoredLocalTargetShareWitness.aggregateOpening,
+        'restoredLocalTargetShareWitness.aggregateOpening',
+    );
+    const preparedAggregateOpeningMaterials = (
+        restoredAggregateOpening.aggregateOpeningCredentials as readonly unknown[]
+    ).map((credentialValue, credentialIndex) =>
+        prepareAggregateOpeningMaterial({
+            credential: jsonRecord(
+                credentialValue,
+                `restoredLocalTargetShareWitness.aggregateOpening.aggregateOpeningCredentials.${String(credentialIndex)}`,
+            ),
+            credentialIndex,
+            ringDegree,
+        }),
+    );
+    const localTargetShareWitness = {
         ...restoredLocalTargetShareWitness,
+        aggregateOpening: {
+            ...restoredAggregateOpening,
+            aggregateOpeningCredentials: preparedAggregateOpeningMaterials.map(
+                (prepared) => prepared.credential,
+            ),
+        },
         targetDecryptionSmudging:
             createLocalTrusteeTargetDecryptionSmudgingWitness(input),
+    };
+
+    return {
+        aggregateOpeningMaterialSources: preparedAggregateOpeningMaterials.map(
+            (prepared) => prepared.source,
+        ),
+        localTargetShareWitness,
     };
 };
 

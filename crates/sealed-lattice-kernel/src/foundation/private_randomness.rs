@@ -41,10 +41,12 @@ impl std::error::Error for EntropySourceError {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PrivateRandomnessError {
+    CandidateDrawLimitExhausted,
     EntropyUnavailable,
     RepeatedAttemptIdentifier,
     UnassignedDomain,
     InvalidModulus,
+    InvalidCandidateDrawLimit,
     CounterExhausted,
     ResumeBindingMismatch,
     ResumeAttemptMismatch,
@@ -59,6 +61,9 @@ pub enum PrivateRandomnessError {
 impl fmt::Display for PrivateRandomnessError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::CandidateDrawLimitExhausted => formatter.write_str(
+                "the private-randomness candidate-draw limit was exhausted before deriving an output",
+            ),
             Self::EntropyUnavailable => {
                 formatter.write_str("the cryptographic entropy source is unavailable")
             }
@@ -71,6 +76,8 @@ impl fmt::Display for PrivateRandomnessError {
             Self::InvalidModulus => {
                 formatter.write_str("the sampling modulus must be greater than one")
             }
+            Self::InvalidCandidateDrawLimit => formatter
+                .write_str("the private-randomness candidate-draw limit must be positive"),
             Self::CounterExhausted => {
                 formatter.write_str("the private-randomness block counter is exhausted")
             }
@@ -598,9 +605,13 @@ impl PrivateRandomAttempt<'_> {
         domain: PrivateRandomDomain,
         derivation_context_hash: Hash512,
         modulus: u64,
+        maximum_candidate_draws_per_output: u32,
     ) -> Result<u64, PrivateRandomnessError> {
         if modulus <= 1 {
             return Err(PrivateRandomnessError::InvalidModulus);
+        }
+        if maximum_candidate_draws_per_output == 0 {
+            return Err(PrivateRandomnessError::InvalidCandidateDrawLimit);
         }
 
         let modulus_bit_length = u64::BITS - modulus.leading_zeros();
@@ -609,7 +620,7 @@ impl PrivateRandomAttempt<'_> {
         let sample_space = 1u128 << (sample_byte_length * 8);
         let acceptance_limit = (sample_space / u128::from(modulus)) * u128::from(modulus);
 
-        loop {
+        for _ in 0..maximum_candidate_draws_per_output {
             let mut candidate_bytes = Zeroizing::new([0u8; size_of::<u64>()]);
             self.try_fill_bytes(
                 domain,
@@ -626,6 +637,7 @@ impl PrivateRandomAttempt<'_> {
                 return Ok(candidate % modulus);
             }
         }
+        Err(PrivateRandomnessError::CandidateDrawLimitExhausted)
     }
 }
 
@@ -1295,7 +1307,7 @@ mod tests {
 
         assert_eq!(
             attempt
-                .try_sample_uniform(domain, derivation_context_hash, 10)
+                .try_sample_uniform(domain, derivation_context_hash, 10, 3)
                 .expect("the third candidate is below the acceptance limit"),
             7
         );
@@ -1323,7 +1335,7 @@ mod tests {
         );
         assert_eq!(
             attempt
-                .try_sample_uniform(domain, second_context, 257)
+                .try_sample_uniform(domain, second_context, 257, 1)
                 .expect("two-byte candidate samples modulo 257"),
             0x1234 % 257
         );
@@ -1361,7 +1373,7 @@ mod tests {
 
         assert_eq!(
             attempt
-                .try_sample_uniform(domain, derivation_context_hash, u64::MAX)
+                .try_sample_uniform(domain, derivation_context_hash, u64::MAX, 2)
                 .expect("the rejected maximum is followed by an accepted candidate"),
             5
         );
@@ -1386,11 +1398,50 @@ mod tests {
 
         for invalid_modulus in [0, 1] {
             assert_eq!(
-                attempt.try_sample_uniform(domain, context, invalid_modulus),
+                attempt.try_sample_uniform(domain, context, invalid_modulus, 1),
                 Err(PrivateRandomnessError::InvalidModulus)
             );
         }
+        assert_eq!(
+            attempt.try_sample_uniform(domain, context, 2, 0),
+            Err(PrivateRandomnessError::InvalidCandidateDrawLimit)
+        );
         assert!(attempt.streams.is_empty());
+    }
+
+    #[test]
+    fn sampling_fails_closed_after_the_private_candidate_draw_limit() {
+        let (mut action, mut entropy) = deterministic_action_and_attempt();
+        let mut attempt = action
+            .try_start_attempt(&mut entropy)
+            .expect("test attempt identifier is available");
+        let domain = PrivateRandomDomain::suite_sampling(SuiteSamplingPurpose::PublicKeyError);
+        let derivation_context_hash = Hash512::from_bytes([0xb2; 64]);
+        let stream_key = PrivateRandomStreamKey::new(domain, derivation_context_hash);
+        let mut scripted_block = [0u8; RANDOM_BLOCK_BYTE_LENGTH];
+        scripted_block[..2].copy_from_slice(&[250, 251]);
+        attempt.streams.insert(
+            stream_key,
+            PrivateRandomStreamCursor {
+                next_counter: 1,
+                unread_block: Zeroizing::new(scripted_block),
+                unread_block_offset: 0,
+            },
+        );
+
+        assert_eq!(
+            attempt.try_sample_uniform(domain, derivation_context_hash, 10, 2),
+            Err(PrivateRandomnessError::CandidateDrawLimitExhausted)
+        );
+        assert_eq!(
+            attempt
+                .streams
+                .get(&stream_key)
+                .expect("scripted stream remains open")
+                .unread_block_offset,
+            2,
+            "every rejected candidate is permanently consumed"
+        );
     }
 
     #[test]

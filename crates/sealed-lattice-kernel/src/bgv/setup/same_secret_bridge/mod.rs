@@ -205,6 +205,7 @@ pub(crate) fn verify_vss_same_secret_bridge_statement_set_request(
 
 pub(crate) fn verify_vss_same_secret_bridge_proof_material_set_request(
     request: &Value,
+    proof_binding_session: Option<&crate::bgv::setup::AcceptedSetupProofBindingSession>,
 ) -> CanonicalResult<Value> {
     let statement_set = value_at_path(request, &["statementSet"])?;
     let statement_verification = verify_vss_same_secret_bridge_statement_set_request(request)?;
@@ -337,38 +338,48 @@ pub(crate) fn verify_vss_same_secret_bridge_proof_material_set_request(
             bridge_statement_root,
             "same-secret bridge proof record statement root",
         )?;
-        let resolved_proof_bytes =
-            resolve_same_secret_bridge_proof_bytes(proof_record, request, bridge_statement_root)?;
-        let proof_bytes = resolved_proof_bytes.proof_bytes;
-        let proof_record_without_root = resolved_proof_bytes.proof_record_without_root;
-        let proof_record_root = resolved_proof_bytes.proof_record_root;
-        let trustee_identity = string_at_path(bridge_statement, &["trusteeIdentity"])?;
-        let source_constant_commitments =
-            super::source_constant_commitments::canonical_source_constant_commitments_from_bridge_statement(
-                vss_coefficient_commitments,
-                bridge_statement,
-                trustee_identity,
-                expected_position as u64,
-                public_matrix_seed_hash,
-                ring_degree,
-            )?;
-
-        verify_reconstructed_same_secret_bridge_proof(
-            ReconstructedSameSecretBridgeProofVerification {
-                bridge_statement,
-                statement_set: StatementSetBinding {
-                    ceremony_id,
-                    manifest_hash,
-                    roster_hash,
-                    setup_parameters_hash,
-                    setup_epoch,
-                    public_matrix_seed_hash,
-                },
-                expected_position,
-                proof_bytes: &proof_bytes,
-                source_constant_commitment_values: &source_constant_commitments.commitment_values,
-            },
+        let validated_proof_reference =
+            validate_same_secret_bridge_proof_reference(proof_record, bridge_statement_root)?;
+        validate_transported_same_secret_bridge_proof_material_reference(
+            request,
+            &validated_proof_reference.proof_material_root,
         )?;
+        let proof_verification_request =
+            same_secret_bridge_proof_verification_request_from_public_records(
+                statement_set,
+                bridge_statement,
+                vss_coefficient_commitments,
+                expected_position,
+            )?;
+        let verification_binding_hash = same_secret_bridge_proof_verification_binding_hash(
+            &validated_proof_reference.proof_material_root,
+            &proof_verification_request,
+        )?;
+        let (proof_record_without_root, proof_record_root) = if let Some(proof_binding_session) =
+            proof_binding_session
+            && crate::bgv::setup::consume_accepted_setup_proof_binding(
+                proof_binding_session.session_handle,
+                &proof_binding_session.capability,
+                SAME_SECRET_BRIDGE_PROOF_FAMILY,
+                &validated_proof_reference.proof_material_root,
+                &verification_binding_hash,
+            )? {
+            (
+                validated_proof_reference.proof_record_without_root,
+                validated_proof_reference.proof_record_root,
+            )
+        } else {
+            let resolved_proof_bytes =
+                resolve_same_secret_bridge_proof_bytes(validated_proof_reference, request)?;
+            verify_reconstructed_same_secret_bridge_proof(
+                &proof_verification_request,
+                &resolved_proof_bytes.proof_bytes,
+            )?;
+            (
+                resolved_proof_bytes.proof_record_without_root,
+                resolved_proof_bytes.proof_record_root,
+            )
+        };
         let mut verified_proof_record = proof_record_without_root;
         verified_proof_record["sameSecretBridgeProofRecordRoot"] = json!(proof_record_root);
         verified_proof_records.push(verified_proof_record);
@@ -414,5 +425,14 @@ mod reconstructed;
 mod statement_record;
 
 use bridge_transport::*;
-use reconstructed::*;
+#[cfg(test)]
+pub(in crate::bgv::setup) use reconstructed::verify_and_retain_same_secret_bridge_proof_binding;
+use reconstructed::{
+    StatementRecordVerificationInput, StatementSetBinding,
+    verify_reconstructed_same_secret_bridge_proof,
+};
+pub(in crate::bgv::setup) use reconstructed::{
+    same_secret_bridge_proof_verification_binding_hash,
+    same_secret_bridge_proof_verification_request_from_public_records,
+};
 use statement_record::*;

@@ -92,6 +92,6 @@ pub(super) use public_key_share_proofs::*;
 pub(super) use relinearization_key_share_rounds::*;
 pub(super) use trustee_evaluation_key_proofs::*;
 pub(super) use vss_public_material::{
-    DescriptorBackedVssProofMaterialFixture, compact_aggregate_threshold_proof_fixture,
-    descriptor_backed_vss_proof_material_fixture, finalize_collective_setup_package,
+    compact_aggregate_threshold_proof_fixture, descriptor_backed_vss_proof_material_fixture,
+    finalize_collective_setup_package,
 };

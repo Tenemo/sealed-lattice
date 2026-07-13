@@ -11,35 +11,42 @@ pub(super) struct ResolvedVssShareLinkageProofBytes {
     pub(super) proof_record_root: String,
 }
 
-pub(super) fn resolve_vss_share_linkage_proof_bytes(
+pub(super) struct ValidatedVssShareLinkageProofReference {
+    pub(super) proof_bytes_hash: String,
+    pub(super) proof_material_root: String,
+    pub(super) proof_record_without_root: Value,
+    pub(super) proof_record_root: String,
+}
+
+pub(super) fn validate_vss_share_linkage_proof_reference(
     proof_record: &Value,
-    request: &Value,
     coverage: &[Value],
     vss_share_linkage: &Value,
-) -> CanonicalResult<ResolvedVssShareLinkageProofBytes> {
-    let proof_bytes_hash = read_string(proof_record, "proofBytesHash")?;
+) -> CanonicalResult<ValidatedVssShareLinkageProofReference> {
+    let proof_bytes_hash = read_string(proof_record, "proofBytesHash")?.to_string();
     let proof_record_root = read_string(proof_record, "proofRecordRoot")?.to_string();
     compare_string_value(
         read_string(proof_record, "proofBytesEncoding")?,
         SETUP_PROOF_MATERIAL_ENCODING,
         "share-linkage proof record proofBytesEncoding",
     )?;
-    let proof_material_root = read_string(proof_record, "proofMaterialRoot")?;
-    let transported_binding =
-        transported_vss_share_linkage_proof_material_binding(request, proof_material_root)?;
+    let proof_material_root = read_string(proof_record, "proofMaterialRoot")?.to_string();
     compare_string_value(
-        proof_bytes_hash,
-        &transported_binding.proof_bytes_hash,
-        "share-linkage proof record proofBytesHash",
+        &proof_material_root,
+        &crate::bgv::setup::setup_proof::setup_proof_material_reference_root(
+            VSS_SHARE_LINKAGE_PROOF_FAMILY,
+            &proof_bytes_hash,
+        )?,
+        "share-linkage proof material root",
     )?;
     let proof_record_without_root = json!({
         "objectType": "VssShareLinkageProofRecord",
         "proofFamily": VSS_SHARE_LINKAGE_PROOF_FAMILY,
         "linkageItems": coverage,
         "vssShareLinkage": vss_share_linkage,
-        "proofBytesHash": proof_bytes_hash,
+        "proofBytesHash": &proof_bytes_hash,
         "proofBytesEncoding": SETUP_PROOF_MATERIAL_ENCODING,
-        "proofMaterialRoot": proof_material_root,
+        "proofMaterialRoot": &proof_material_root,
     });
     let expected_record_root = derive_canonical_object_hash(&proof_record_without_root)?;
     compare_string_value(
@@ -48,10 +55,32 @@ pub(super) fn resolve_vss_share_linkage_proof_bytes(
         "share-linkage proof record proofRecordRoot",
     )?;
 
-    Ok(ResolvedVssShareLinkageProofBytes {
-        proof_bytes: transported_binding.proof_bytes,
+    Ok(ValidatedVssShareLinkageProofReference {
+        proof_bytes_hash,
+        proof_material_root,
         proof_record_without_root,
         proof_record_root,
+    })
+}
+
+pub(super) fn resolve_vss_share_linkage_proof_bytes(
+    reference: ValidatedVssShareLinkageProofReference,
+    request: &Value,
+) -> CanonicalResult<ResolvedVssShareLinkageProofBytes> {
+    let transported_binding = transported_vss_share_linkage_proof_material_binding(
+        request,
+        &reference.proof_material_root,
+    )?;
+    compare_string_value(
+        &reference.proof_bytes_hash,
+        &transported_binding.proof_bytes_hash,
+        "share-linkage proof record proofBytesHash",
+    )?;
+
+    Ok(ResolvedVssShareLinkageProofBytes {
+        proof_bytes: transported_binding.proof_bytes,
+        proof_record_without_root: reference.proof_record_without_root,
+        proof_record_root: reference.proof_record_root,
     })
 }
 

@@ -4,7 +4,6 @@ import { fileURLToPath } from 'node:url';
 
 import { playwright } from '@vitest/browser-playwright';
 import { devices } from 'playwright';
-import type { PluginOption } from 'vite';
 import { defineConfig, type UserWorkspaceConfig } from 'vitest/config';
 import type { BrowserInstanceOption } from 'vitest/node';
 
@@ -116,18 +115,6 @@ const browserOptimizedDependencies = [
     '@noble/post-quantum/ml-kem.js',
 ] as const;
 
-const publicPackageEntryPoint = resolveFromRepoRoot(
-    'packages',
-    'sdk',
-    'dist',
-    'index.js',
-);
-
-const publicPackageAlias = {
-    find: 'sealed-lattice',
-    replacement: publicPackageEntryPoint,
-} as const;
-
 const rootPrivateAliases = [
     {
         find: '#tests',
@@ -139,22 +126,10 @@ const rootPrivateAliases = [
     },
 ] as const;
 
-const publicPackageTestResolve = {
-    alias: [publicPackageAlias, ...rootPrivateAliases],
+const testResolve = {
+    alias: rootPrivateAliases,
     tsconfigPaths: true,
 } as const;
-
-const createPublicPackageResolutionPlugin = (): PluginOption => ({
-    name: 'sealed-lattice-public-package-resolution',
-    enforce: 'pre' as const,
-    resolveId(source: string): string | null {
-        return source === publicPackageAlias.find
-            ? publicPackageEntryPoint
-            : null;
-    },
-});
-
-const copyGlobs = (globs: readonly string[]): string[] => [...globs];
 
 const { defaultBrowserType: _pixelDefaultBrowserType, ...pixelContextOptions } =
     devices['Pixel 5'];
@@ -203,12 +178,11 @@ const makeNodeProject = ({
     projectName,
     testTimeout,
 }: NodeProjectInput): UserWorkspaceConfig => ({
-    plugins: [createPublicPackageResolutionPlugin()],
-    resolve: publicPackageTestResolve,
+    resolve: testResolve,
     test: {
         name: projectName,
-        include: copyGlobs(include),
-        ...(exclude === undefined ? {} : { exclude: copyGlobs(exclude) }),
+        include: [...include],
+        ...(exclude === undefined ? {} : { exclude: [...exclude] }),
         environment: 'node',
         ...(nodeDiagnosticReportArguments.length === 0
             ? {}
@@ -235,11 +209,10 @@ const makeBrowserProject = ({
     projectName,
     provider = playwright(),
 }: BrowserProjectInput): UserWorkspaceConfig => ({
-    plugins: [createPublicPackageResolutionPlugin()],
-    resolve: publicPackageTestResolve,
+    resolve: testResolve,
     test: {
         name: projectName,
-        include: copyGlobs(include),
+        include: [...include],
         // Each real-WASM browser file can instantiate a large kernel and
         // create workers. Running every file concurrently has exhausted the
         // Firefox WebAssembly compiler and left its test process unable to
@@ -279,13 +252,12 @@ const makeBrowserProject = ({
 });
 
 export default defineConfig({
-    plugins: [createPublicPackageResolutionPlugin()],
     optimizeDeps: {
         include: [...browserOptimizedDependencies],
     },
-    resolve: publicPackageTestResolve,
+    resolve: testResolve,
     test: {
-        alias: [publicPackageAlias, ...rootPrivateAliases],
+        alias: rootPrivateAliases,
         ...(testResultFilePath === undefined
             ? {
                   reporters: [

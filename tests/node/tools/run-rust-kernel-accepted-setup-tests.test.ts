@@ -9,10 +9,9 @@ import {
     cargoTestArgumentsForFocusedFilter,
     deriveAcceptedSetupMemoryLimitGigabytes,
     guardAcceptedSetupCommand,
-    normalizeFocusedTestFilter,
     parseRustKernelAcceptedSetupArguments,
     resolveAcceptedSetupMemoryLimitGigabytes,
-    resolveRunKnobs,
+    tenParticipantAcceptedSetupEvidenceTest,
     verifyProcessMemoryGuardCommand,
 } from '#tools/ci/run-rust-kernel-accepted-setup-tests';
 
@@ -77,22 +76,6 @@ describe('Rust accepted setup runner arguments', () => {
         });
     });
 
-    it('normalizes Rust file paths into focused module filters', () => {
-        expect(
-            normalizeFocusedTestFilter('terminal_evaluation_key_proofs.rs'),
-        ).toBe('terminal_evaluation_key_proofs');
-        expect(
-            normalizeFocusedTestFilter(
-                'crates/sealed-lattice-kernel/src/bgv/setup/tests/accepted_setup/terminal_evaluation_key_proofs.rs',
-            ),
-        ).toBe('terminal_evaluation_key_proofs');
-        expect(
-            normalizeFocusedTestFilter(
-                'crates\\sealed-lattice-kernel\\src\\bgv\\setup\\tests\\accepted_setup\\terminal_evaluation_key_proofs.rs',
-            ),
-        ).toBe('terminal_evaluation_key_proofs');
-    });
-
     it('ignores the package-manager argument separator', () => {
         expect(parseRustKernelAcceptedSetupArguments(['--'])).toEqual({
             focused: false,
@@ -113,8 +96,8 @@ describe('Rust accepted setup runner arguments', () => {
         ).toThrow('Unknown argument: --lane');
     });
 
-    it('includes ordinary and ignored tests from the accepted setup module', () => {
-        expect(cargoTestArgumentsForAcceptedSetupTests('4')).toEqual([
+    it('includes routine ordinary and ignored tests but excludes dedicated ten-participant evidence', () => {
+        expect(cargoTestArgumentsForAcceptedSetupTests()).toEqual([
             'test',
             '--locked',
             '-p',
@@ -122,17 +105,34 @@ describe('Rust accepted setup runner arguments', () => {
             acceptedSetupTestModulePattern,
             '--',
             '--include-ignored',
+            '--skip',
+            tenParticipantAcceptedSetupEvidenceTest,
             '--nocapture',
             '--test-threads',
-            '4',
+            '1',
         ]);
+    });
+
+    it('builds the ten-participant evidence lane as one exact prove-fresh focused command', () => {
+        const command = buildFocusedCommand(
+            tenParticipantAcceptedSetupEvidenceTest,
+            'ci',
+        );
+        expect(command.command.args).toContain(
+            tenParticipantAcceptedSetupEvidenceTest,
+        );
+        expect(command.command.args).not.toContain('--skip');
+        expect(command.command.env?.CARGO_INCREMENTAL).toBe('0');
+        expect(
+            command.command.env?.SEALED_LATTICE_RESUME_TEST_CHECKPOINTS,
+        ).toBeUndefined();
+        expect(command.testThreadCount).toBe(1);
     });
 
     it('builds focused cargo arguments from one normalized filter', () => {
         expect(
             cargoTestArgumentsForFocusedFilter(
                 'terminal_evaluation_key_proofs',
-                '3',
             ),
         ).toEqual([
             'test',
@@ -144,12 +144,12 @@ describe('Rust accepted setup runner arguments', () => {
             '--include-ignored',
             '--nocapture',
             '--test-threads',
-            '3',
+            '1',
         ]);
 
-        expect(
-            cargoTestArgumentsForFocusedFilter('ceremony_phases', '1'),
-        ).toContain('--include-ignored');
+        expect(cargoTestArgumentsForFocusedFilter('ceremony_phases')).toContain(
+            '--include-ignored',
+        );
     });
 
     it('uses a 32 GiB ceiling on large hosts and reserves memory on smaller hosts', () => {
@@ -206,18 +206,6 @@ describe('Rust accepted setup runner arguments', () => {
         ).toThrow('positive integer');
     });
 
-    it('serializes every accepted setup concurrency layer', () => {
-        expect(resolveRunKnobs()).toEqual({
-            rayonThreadCount: { source: 'serialized', value: '1' },
-            testThreads: { source: 'serialized', value: '1' },
-            trusteeProofBatchSize: { source: 'serialized', value: '1' },
-            trusteeProofLimbBatchSize: {
-                source: 'serialized',
-                value: '1',
-            },
-        });
-    });
-
     it('removes inherited checkpoint state from prove-fresh environments', () => {
         const environment = buildAcceptedSetupEnvironment({
             baseEnvironment: {
@@ -226,18 +214,16 @@ describe('Rust accepted setup runner arguments', () => {
                 SEALED_LATTICE_TEST_CHECKPOINT_ROOT: 'inherited-checkpoints',
             },
             cargoIncremental: '0',
-            knobs: {
-                rayonThreadCount: { source: 'test', value: '1' },
-                testThreads: { source: 'test', value: '1' },
-                trusteeProofBatchSize: { source: 'test', value: '1' },
-                trusteeProofLimbBatchSize: { source: 'test', value: '1' },
-            },
             resumeCheckpoints: false,
         });
 
         expect(environment.CARGO_INCREMENTAL).toBe('0');
         expect(environment.CARGO_BUILD_JOBS).toBe('1');
+        expect(environment.RAYON_NUM_THREADS).toBe('1');
         expect(environment.RUST_BACKTRACE).toBe('full');
+        expect(environment.SEALED_LATTICE_TRUSTEE_PROOF_LIMB_BATCH_SIZE).toBe(
+            '1',
+        );
         expect(environment.CARGO_TARGET_DIR).toBeUndefined();
         expect(
             environment.SEALED_LATTICE_RESUME_TEST_CHECKPOINTS,

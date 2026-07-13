@@ -342,15 +342,23 @@ describe('local setup-to-target-share witness lifecycle', () => {
         expect(
             JSON.stringify(encryptedState.localStatePlaintext),
         ).not.toContain(aggregateMaterialSeedHex);
-        expect(preparedWitness).toMatchObject({
+        const [originalCredential] =
+            artifacts.aggregateOpeningCredentialHandoff
+                .aggregateOpeningCredentials;
+        if (originalCredential === undefined) {
+            throw new Error('fixture must contain an aggregate credential.');
+        }
+        const {
+            aggregateCommitmentMessageValuesLeHex: originalMessageHex,
+            ...credentialSidecar
+        } = originalCredential;
+        expect(preparedWitness.localTargetShareWitness).toMatchObject({
             objectType: 'LocalTrusteeTargetDecryptionProofWitnessMaterial',
             trusteeIdentity,
             trusteeRosterPosition,
             aggregateOpening: {
                 objectType: 'LocalTrusteeVssPublicAggregateOpeningWitness',
-                aggregateOpeningCredentials:
-                    artifacts.aggregateOpeningCredentialHandoff
-                        .aggregateOpeningCredentials,
+                aggregateOpeningCredentials: [credentialSidecar],
             },
             targetDecryptionSmudging: {
                 trusteeIdentity,
@@ -359,6 +367,38 @@ describe('local setup-to-target-share witness lifecycle', () => {
                 targetBasisHash: fixtureHash('target-basis'),
             },
         });
+        expect(
+            JSON.stringify(preparedWitness.localTargetShareWitness),
+        ).not.toContain('aggregateCommitmentMessageValuesLeHex');
+        const [materialSource] =
+            preparedWitness.aggregateOpeningMaterialSources;
+        expect(materialSource).toMatchObject({
+            aggregateOpeningRoot: originalCredential.aggregateOpeningRoot,
+            totalByteLength: ringDegree * 8,
+        });
+        if (materialSource === undefined) {
+            throw new Error('prepared witness must expose a material source.');
+        }
+        const materialBytes = await materialSource.pullChunk({
+            chunkIndex: 0,
+            expectedByteLength: ringDegree * 8,
+        });
+        expect(materialBytes).toBeInstanceOf(ArrayBuffer);
+        expect(
+            Buffer.from(materialBytes ?? new ArrayBuffer(0)).toString('hex'),
+        ).toBe(originalMessageHex);
+        await expect(
+            materialSource.pullChunk({
+                chunkIndex: 1,
+                expectedByteLength: 0,
+            }),
+        ).resolves.toBeUndefined();
+        await expect(
+            materialSource.pullChunk({
+                chunkIndex: 0,
+                expectedByteLength: ringDegree * 8 - 1,
+            }),
+        ).rejects.toThrow(/non-canonical chunk length/u);
     });
 
     it('rejects changed trustee, aggregate message, accepted root, and setup context', async () => {

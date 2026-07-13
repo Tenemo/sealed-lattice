@@ -3,6 +3,42 @@ use super::*;
 use crate::hashing::derive_canonical_object_hash;
 
 #[test]
+#[ignore = "ten-participant proof-bearing accepted-setup evidence; run via its dedicated guarded lane"]
+fn ten_participant_vss_proof_bearing_collective_setup_package_passes_preterminal_accepted_setup() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "ten_participant_vss_proof_bearing_collective_setup_package_passes_preterminal_accepted_setup",
+    );
+    let fixture = ten_participant_descriptor_backed_vss_collective_setup_fixture();
+    assert_eq!(
+        fixture.package["setupContext"]["participantCount"],
+        serde_json::json!(10),
+        "the dedicated evidence lane must exercise the ten-participant profile",
+    );
+
+    let result = fixture
+        .verify()
+        .expect("ten-participant accepted-setup verification response");
+    let refused_objects = result["refusedObjects"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    assert!(
+        !refused_objects.is_empty()
+            && refused_objects.iter().all(|refusal| {
+                refusal["reasonCode"] == "setupObjectMissing"
+                    && matches!(
+                        refusal["objectPath"].as_str(),
+                        Some("setupPackage.publicKeyShareMaterial")
+                            | Some("setupPackage.publicKeyShareSuccinctProofs")
+                            | Some("setupPackage.collectivePublicKey")
+                            | Some("setupPackage.collectivePublicKeyRoot")
+                    )
+            }),
+        "the ten-participant proof-bearing package must pass every preterminal accepted-setup check: {result}",
+    );
+}
+
+#[test]
 fn collective_setup_verifier_refuses_malformed_private_vss_envelope_commitments() {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "collective_setup_verifier_refuses_malformed_private_vss_envelope_commitments",
@@ -231,13 +267,45 @@ fn verify_compact_aggregate_threshold_proofs(
     fixture: &serde_json::Value,
     aggregate_threshold_commitment_set: &serde_json::Value,
 ) -> crate::encoding::CanonicalResult<()> {
-    crate::bgv::setup::verify_vss_public_aggregate_threshold_proofs(
+    let proof_binding_session = crate::bgv::setup::AcceptedSetupProofBindingSession::begin_fresh()?;
+    for proof_record in
+        fixture["vssPublicAggregateThresholdCommitmentSet"]["aggregateThresholdProofs"]
+            .as_array()
+            .expect("compact aggregate threshold proof records")
+    {
+        let proof_material_root = proof_record["proofMaterialRoot"]
+            .as_str()
+            .expect("compact aggregate threshold proof material root");
+        let proof_binding_lease =
+            crate::bgv::setup::accepted_setup_fixture_proof_binding_lease(proof_material_root)?
+                .expect("compact aggregate threshold proof binding lease");
+        crate::bgv::setup::restore_accepted_setup_proof_binding_lease(
+            proof_binding_session.session_handle,
+            &proof_binding_session.capability,
+            &proof_binding_lease,
+        )?;
+    }
+    let verification = crate::bgv::setup::verify_vss_public_aggregate_threshold_proofs(
+        Some(&proof_binding_session),
         fixture,
         &fixture["vssPublicCoefficientCommitmentSet"],
         &fixture["vssPublicRecipientShareCommitmentSet"],
         aggregate_threshold_commitment_set,
         &compact_aggregate_threshold_proof_context(fixture),
-    )
+    );
+    match verification {
+        Ok(()) => crate::bgv::setup::finish_accepted_setup_proof_binding_session(
+            proof_binding_session.session_handle,
+            &proof_binding_session.capability,
+        ),
+        Err(error) => {
+            crate::bgv::setup::cancel_accepted_setup_proof_binding_session(
+                proof_binding_session.session_handle,
+                &proof_binding_session.capability,
+            )?;
+            Err(error)
+        }
+    }
 }
 
 fn rebind_aggregate_threshold_statement_root(statement: &mut serde_json::Value) {

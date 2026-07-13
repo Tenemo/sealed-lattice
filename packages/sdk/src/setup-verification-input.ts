@@ -18,10 +18,11 @@ import type {
 import {
     bgvCanonicalStreamFamilies,
     openBgvCanonicalStreamRuntime,
+    type AcceptedSetupSession,
     type BgvCanonicalStreamFamily,
     type BgvCanonicalStreamRuntime,
-    type TranscriptCoreKernel,
-} from '@sealed-lattice/wasm';
+    type PublishedSdkKernel,
+} from '@sealed-lattice/wasm/published-sdk';
 
 import {
     chargeKernelJsonSnapshotValues,
@@ -41,7 +42,7 @@ import type {
 type JsonRecord = Record<string, unknown>;
 
 type KernelSetupPackageVerificationInput = Parameters<
-    TranscriptCoreKernel['verifyCollectiveBgvSetup']
+    AcceptedSetupSession['verifyCollectiveBgvSetup']
 >[0];
 
 type SetupProofMaterialTransportFieldName =
@@ -835,11 +836,15 @@ const setupPackageVerificationInput = (
 };
 
 export const prepareSnapshottedSetupPackageVerificationInputForKernel = async (
-    kernel: TranscriptCoreKernel,
+    kernel: PublishedSdkKernel,
     input: VerifySetupPackageInput,
+    acceptedSetupSession: AcceptedSetupSession,
 ): Promise<KernelSetupPackageVerificationInput> => {
     const descriptorSnapshotInput = input;
-    const runtime = openBgvCanonicalStreamRuntime({ kernel });
+    const runtime = openBgvCanonicalStreamRuntime({
+        acceptedSetupSession,
+        kernel,
+    });
     await streamPublicKeyShareMaterial(
         runtime,
         descriptorSnapshotInput.transportedPublicKeyShareMaterial,
@@ -877,12 +882,14 @@ export const prepareSnapshottedSetupPackageVerificationInputForKernel = async (
 };
 
 export const prepareSetupPackageVerificationInputForKernel = (
-    kernel: TranscriptCoreKernel,
+    kernel: PublishedSdkKernel,
+    acceptedSetupSession: AcceptedSetupSession,
     input: VerifySetupPackageInput,
 ): Promise<KernelSetupPackageVerificationInput> =>
     prepareSnapshottedSetupPackageVerificationInputForKernel(
         kernel,
         snapshotSetupPackageVerificationInput(input),
+        acceptedSetupSession,
     );
 
 export const snapshotPrivateVssShareVerificationInput = (
@@ -996,7 +1003,7 @@ export const snapshotPrivateVssShareVerificationInput = (
 
 export const prepareSnapshottedPrivateVssShareVerificationInputForKernel =
     async (
-        kernel: TranscriptCoreKernel,
+        kernel: PublishedSdkKernel,
         input: VerifyPrivateVssShareInput,
     ): Promise<VerifyPrivateVssShareInput> => {
         const transportedMaterial =

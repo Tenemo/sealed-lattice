@@ -4,9 +4,6 @@ use super::same_secret_bridge_verification::VerifiedSameSecretBridgeMaterial;
 use crate::bgv::setup::commitment::setup_commitment_root;
 use crate::hashing::derive_canonical_object_hash;
 
-#[cfg(not(target_arch = "wasm32"))]
-use rayon::prelude::*;
-
 use crate::bgv::setup::trustee_evaluation_key_proof::{
     EvaluationKeyShareDescriptor, EvaluationKeyShareKind, SameSecretLinkageStatement,
     SuccinctSetupProofContext, TrusteeEvaluationKeyStatement,
@@ -36,6 +33,7 @@ pub(super) fn verify_trustee_evaluation_key_proofs(
     setup_package: &Value,
     request: &Value,
     verified_same_secret_bridge: Option<&VerifiedSameSecretBridgeMaterial>,
+    proof_binding_session: &crate::bgv::setup::AcceptedSetupProofBindingSession,
 ) -> CanonicalResult<Option<Value>> {
     let rounds_present = setup_package
         .get("relinearizationKeyShareRounds")
@@ -87,6 +85,7 @@ pub(super) fn verify_trustee_evaluation_key_proofs(
         request,
         proof_set,
         verified_same_secret_bridge,
+        proof_binding_session,
     ) {
         return Ok(Some(evaluation_key_material_refusal(
             "trusteeEvaluationKeyProofVerificationFailed",
@@ -107,6 +106,7 @@ fn verify_trustee_evaluation_key_proof_set(
     request: &Value,
     proof_set: &Value,
     verified_same_secret_bridge: Option<&VerifiedSameSecretBridgeMaterial>,
+    proof_binding_session: &crate::bgv::setup::AcceptedSetupProofBindingSession,
 ) -> CanonicalResult<()> {
     if proof_set.get("objectType").and_then(Value::as_str)
         != Some(TRUSTEE_EVALUATION_KEY_PROOF_SET_OBJECT_TYPE)
@@ -317,33 +317,18 @@ fn verify_trustee_evaluation_key_proof_set(
         trustee_evaluation_key_verify_progress(|| {
             format!("trustee={trustee_roster_position} statement-finish")
         });
-        verify_trustee_evaluation_key_proof_record(proof_record, setup_context, &statement, request)
+        verify_trustee_evaluation_key_proof_record(
+            proof_record,
+            setup_context,
+            &statement,
+            request,
+            proof_binding_session,
+        )
     };
-    if let Some((first_proof_record, remaining_proof_records)) = proof_records.split_first() {
-        verify_record(0, first_proof_record)?;
-
-        // After the first record has passed, the remaining trustee proofs are
-        // independent given the read-only shared inputs already rebuilt, and
-        // each verifies a multi-megabyte succinct argument, so they run
-        // concurrently on native targets. Outcomes are collected in roster
-        // order, so the first reported failure inside this suffix is identical
-        // to sequential verification. wasm32 has no shared-memory threads and
-        // stays sequential.
-        #[cfg(not(target_arch = "wasm32"))]
-        let record_verifications: Vec<CanonicalResult<()>> = remaining_proof_records
-            .par_iter()
-            .enumerate()
-            .map(|(record_offset, proof_record)| verify_record(record_offset + 1, proof_record))
-            .collect();
-        #[cfg(target_arch = "wasm32")]
-        let record_verifications: Vec<CanonicalResult<()>> = remaining_proof_records
-            .iter()
-            .enumerate()
-            .map(|(record_offset, proof_record)| verify_record(record_offset + 1, proof_record))
-            .collect();
-        record_verifications
-            .into_iter()
-            .collect::<CanonicalResult<Vec<()>>>()?;
+    // Resolve or consume each proof completely before the next record so the
+    // accepted-setup verifier has a hard one-proof byte bound on every target.
+    for (record_position, proof_record) in proof_records.iter().enumerate() {
+        verify_record(record_position, proof_record)?;
     }
 
     Ok(())
@@ -354,6 +339,7 @@ fn verify_trustee_evaluation_key_proof_record(
     setup_context: &Value,
     statement: &TrusteeEvaluationKeyStatement,
     request: &Value,
+    proof_binding_session: &crate::bgv::setup::AcceptedSetupProofBindingSession,
 ) -> CanonicalResult<()> {
     if !proof_record.is_object() {
         return Err(CanonicalError::new(
@@ -419,35 +405,6 @@ fn verify_trustee_evaluation_key_proof_record(
             "trustee evaluation-key proof statementHash must match the statement rebuilt from the verified share records",
         ));
     }
-    let proof_bytes = trustee_evaluation_key_proof_bytes_from_record(proof_record, request)?;
-    if value_string(proof_record, "proofBytesHash")?
-        != trustee_evaluation_key_proof_material_bytes_hash(proof_bytes.as_ref())?
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "trustee evaluation-key proofBytesHash must match supplied proof bytes",
-        ));
-    }
-    trustee_evaluation_key_verify_progress(|| {
-        format!("trustee={trustee_roster_position} proof-verify-start")
-    });
-    if crate::bgv::setup::limb_group_key_switch_atom::family_backend::schedule::statement_is_key_bearing(
-        statement,
-    ) {
-        // Key-bearing statements verify only against the key-switch atom
-        // schedule container; every other proof format fails its magic check.
-        crate::bgv::setup::limb_group_key_switch_atom::family_backend::schedule::verify_key_bearing_trustee_evaluation_keys(
-            statement,
-            proof_bytes.as_ref(),
-        )?;
-    } else {
-        let proof =
-            decode_trustee_evaluation_key_proof_from_source(statement, proof_bytes.as_ref())?;
-        verify_evaluation_key_share(statement, &proof)?;
-    }
-    trustee_evaluation_key_verify_progress(|| {
-        format!("trustee={trustee_roster_position} proof-verify-finish")
-    });
     let supplied_root = value_string(proof_record, "trusteeEvaluationKeyProofRoot")?;
     let mut root_input = proof_record.clone();
     root_input
@@ -468,7 +425,71 @@ fn verify_trustee_evaluation_key_proof_record(
         ));
     }
 
+    let proof_material_root = value_string(proof_record, "proofMaterialRoot")?;
+    let verification_binding_hash =
+        trustee_evaluation_key_proof_verification_binding_hash(proof_record, statement)?;
+    if !crate::bgv::setup::consume_accepted_setup_proof_binding(
+        proof_binding_session.session_handle,
+        &proof_binding_session.capability,
+        TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
+        proof_material_root,
+        &verification_binding_hash,
+    )? {
+        let proof_bytes = trustee_evaluation_key_proof_bytes_from_record(proof_record, request)?;
+        if value_string(proof_record, "proofBytesHash")?
+            != trustee_evaluation_key_proof_material_bytes_hash(proof_bytes.as_ref())?
+        {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "trustee evaluation-key proofBytesHash must match supplied proof bytes",
+            ));
+        }
+        trustee_evaluation_key_verify_progress(|| {
+            format!("trustee={trustee_roster_position} proof-verify-start")
+        });
+        if crate::bgv::setup::limb_group_key_switch_atom::family_backend::schedule::statement_is_key_bearing(
+            statement,
+        ) {
+            // Key-bearing statements verify only against the key-switch atom
+            // schedule container; every other proof format fails its magic check.
+            crate::bgv::setup::limb_group_key_switch_atom::family_backend::schedule::verify_key_bearing_trustee_evaluation_keys(
+                statement,
+                proof_bytes.as_ref(),
+            )?;
+        } else {
+            let proof =
+                decode_trustee_evaluation_key_proof_from_source(statement, proof_bytes.as_ref())?;
+            verify_evaluation_key_share(statement, &proof)?;
+        }
+        trustee_evaluation_key_verify_progress(|| {
+            format!("trustee={trustee_roster_position} proof-verify-finish")
+        });
+    }
+
     Ok(())
+}
+
+pub(in crate::bgv::setup) fn trustee_evaluation_key_proof_verification_binding_hash(
+    proof_record: &Value,
+    statement: &TrusteeEvaluationKeyStatement,
+) -> CanonicalResult<String> {
+    let mut proof_record_root_input = proof_record.clone();
+    proof_record_root_input
+        .as_object_mut()
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "trustee evaluation-key proof record must be an object",
+            )
+        })?
+        .remove("trusteeEvaluationKeyProofRoot");
+    derive_canonical_object_hash(&json!({
+        "objectType": "AcceptedSetupTrusteeEvaluationKeyProofVerificationBinding",
+        "proofFamily": TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
+        "proofMaterialRoot": trustee_evaluation_key_proof_material_root(proof_record)?,
+        "statementHash": to_hex(&statement.statement_hash()),
+        "proofRecordRoot": derive_canonical_object_hash(&proof_record_root_input)?,
+    }))
 }
 
 // The accepted key-switch decomposition hash the proof context binds:

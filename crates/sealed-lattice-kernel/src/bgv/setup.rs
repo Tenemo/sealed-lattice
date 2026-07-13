@@ -25,6 +25,8 @@ mod sampling;
 mod setup_proof;
 mod sharing;
 mod source_constant_commitments;
+#[cfg(test)]
+mod transcript_order_audit;
 mod trustee_evaluation_key_proof;
 mod vss_commitment;
 pub(crate) use trustee_evaluation_key_proof::generate_trustee_evaluation_key_proof_from_request;
@@ -36,29 +38,53 @@ pub(super) const SETUP_TRANSPORT_CHUNK_SIZE_BYTES: u64 = 1_048_576;
 #[cfg(test)]
 mod tests;
 
-pub(in crate::bgv::setup) use accepted_setup::evict_verified_canonical_public_key_share_materials;
 pub(crate) use accepted_setup::{
     accepted_setup_participant_roster_from_package,
     derive_collective_bgv_setup_public_derivations_from_request,
     describe_collective_bgv_setup_parameters,
     describe_collective_bgv_setup_parameters_for_participant_count,
-    verify_collective_bgv_setup_package_from_request,
+    verify_collective_bgv_setup_package_in_session_from_request,
+};
+pub(in crate::bgv::setup) use accepted_setup::drain_verified_canonical_public_key_share_materials;
+#[cfg(test)]
+pub(in crate::bgv::setup) use accepted_setup::evict_verified_canonical_public_key_share_materials;
+pub(in crate::bgv::setup) use canonical_stream_transport::{
+    AcceptedSetupMaterialStore, AcceptedSetupProofBindingSession,
+    accepted_setup_session_owns_material_root,
+    authenticated_setup_proof_material_stream_summary_in_session,
+    authenticated_setup_transport_accounting, consume_accepted_setup_proof_binding,
+    evict_verified_canonical_setup_proof_materials, finish_accepted_setup_proof_binding_session,
+    verified_canonical_setup_proof_material_bytes,
+};
+#[cfg(test)]
+pub(in crate::bgv::setup) use canonical_stream_transport::{
+    CanonicalSetupProofBindingLease, accepted_setup_fixture_proof_binding_lease,
+    accepted_setup_fixture_proof_binding_stream_summary, accepted_setup_proof_binding_lease,
+    accepted_setup_proof_binding_stream_summary, authenticated_setup_proof_material_stream_summary,
+    begin_accepted_setup_fixture_proof_binding_session,
+    cache_accepted_setup_fixture_proof_binding_lease, restore_accepted_setup_proof_binding_lease,
+    retain_accepted_setup_proof_binding,
 };
 pub(crate) use canonical_stream_transport::{
-    absorb_bgv_canonical_stream_chunk, begin_bgv_canonical_material_reader,
-    begin_bgv_canonical_stream, cancel_bgv_canonical_material_reader, cancel_bgv_canonical_stream,
+    TARGET_DECRYPTION_AGGREGATE_OPENING_MATERIAL_FAMILY, absorb_bgv_canonical_stream_chunk,
+    authenticated_accepted_setup_proof_binding_session, begin_accepted_setup_canonical_stream,
+    begin_accepted_setup_proof_binding_session, begin_bgv_canonical_material_reader,
+    begin_bgv_canonical_stream, cancel_accepted_setup_proof_binding_session,
+    cancel_bgv_canonical_material_reader, cancel_bgv_canonical_stream,
     evict_verified_canonical_proof_materials, finish_bgv_canonical_material_reader,
     finish_bgv_canonical_stream, read_bgv_canonical_material_chunk,
     retain_generated_canonical_proof_material, take_verified_canonical_proof_material_bytes,
 };
-pub(in crate::bgv::setup) use canonical_stream_transport::{
-    authenticated_setup_proof_material_stream_summary, authenticated_setup_transport_accounting,
-    evict_verified_canonical_setup_proof_materials, verified_canonical_setup_proof_material_bytes,
-};
 pub(crate) use commitment::compute_setup_commitment_from_opening_request;
+pub(in crate::bgv::setup) use evaluation_key_share_material::drain_verified_evaluation_key_share_component_material;
 pub(crate) use local_trustee_state::verify_local_trustee_setup_state_from_request;
 pub(crate) use private_vss::{
     generate_private_vss_share_proof_from_request, verify_private_vss_share_envelope_from_request,
+};
+#[cfg(test)]
+pub(in crate::bgv::setup) use same_secret_bridge::{
+    same_secret_bridge_proof_verification_request_from_public_records,
+    verify_and_retain_same_secret_bridge_proof_binding,
 };
 pub(crate) use same_secret_bridge::{
     verify_vss_same_secret_bridge_proof_material_set_request,
@@ -69,6 +95,15 @@ pub(crate) use trustee_evaluation_key_proof::TARGET_DECRYPTION_SHARE_PROOF_FAMIL
 pub(crate) use trustee_evaluation_key_proof::describe_trustee_evaluation_key_statement_from_request;
 pub(crate) use trustee_evaluation_key_proof::generate_target_decryption_share_proof_bytes_from_request;
 pub(crate) use trustee_evaluation_key_proof::verify_target_decryption_share_proof_source_from_request;
+
+pub(crate) fn verify_collective_bgv_setup_package_with_session_from_request(
+    request: &Value,
+    session_handle: u32,
+    capability: &[u8; crate::foundation::CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH],
+) -> crate::encoding::CanonicalResult<Value> {
+    let session = authenticated_accepted_setup_proof_binding_session(session_handle, capability)?;
+    verify_collective_bgv_setup_package_in_session_from_request(request, session)
+}
 #[cfg(test)]
 pub(crate) use trustee_evaluation_key_proof::verify_vss_share_linkage_proof_material_set_from_request;
 pub(crate) use trustee_evaluation_key_proof::{
@@ -126,7 +161,6 @@ use crate::{
         ntt::{forward_negacyclic_ntt_in_place, inverse_negacyclic_ntt_in_place},
         parameters::{
             BgvBasisKind, DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, bgv_parameters_hash,
-            data_basis_modulus_bits, extended_basis_modulus_bits,
         },
         setup_helpers::{
             array_at_path, compare_derived_hash, compare_expected_string, compare_hash_at_path,
@@ -303,7 +337,7 @@ pub(crate) fn development_evaluator_key_from_passive_setup_package(
         key_material::collective_signed_secret_and_error_coefficients(
             &private_setup_seed_hash,
             &participant_identities,
-        );
+        )?;
     let collective_public_key_coefficients =
         key_material::collective_public_key_coefficients_by_modulus_from_setup_package(
             setup_package,

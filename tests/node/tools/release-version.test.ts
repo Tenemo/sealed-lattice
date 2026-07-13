@@ -90,7 +90,7 @@ describe('release version preparation', () => {
                 version: '0.5.0',
             });
             expect(formatReleaseGitHubOutput(result)).toBe(
-                'previous_version=0.4.9\nversion=0.5.0\ntag=v0.5.0\n',
+                'version=0.5.0\ntag=v0.5.0\n',
             );
         } finally {
             await rm(temporaryDirectoryPath, { recursive: true, force: true });

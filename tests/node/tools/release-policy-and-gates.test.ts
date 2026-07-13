@@ -1,4 +1,5 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -206,53 +207,38 @@ describe('release policy', () => {
         ).toThrow('Could not verify');
     });
 
-    it('binds npm and tag rerun decisions to the expected package identity and release commit', async () => {
+    it('binds npm rerun decisions to the verified tarball and tag decisions to the release commit', async () => {
         const packageDirectory = await mkdtemp(
             path.join(tmpdir(), 'sealed-lattice-release-package-'),
         );
-        const packageExecutor: ReleaseCommandExecutor = (invocation) => {
-            if (invocation.arguments.includes('pack')) {
-                return Promise.resolve(
-                    successfulProbe(
-                        JSON.stringify([
-                            {
-                                filename: 'sealed-lattice-0.2.1.tgz',
-                                integrity: 'sha512-local',
-                                name: 'sealed-lattice',
-                                version: '0.2.1',
-                            },
-                        ]),
-                    ),
-                );
-            }
-            return Promise.resolve(failedProbe(1, 'npm error code E404'));
-        };
+        const packageTarballPath = path.join(
+            packageDirectory,
+            'sealed-lattice-0.2.1.tgz',
+        );
+        const packageBytes = Buffer.from('verified package tarball');
+        const packageIntegrity = `sha512-${createHash('sha512')
+            .update(packageBytes)
+            .digest('base64')}`;
+        const packageExecutor: ReleaseCommandExecutor = () =>
+            Promise.resolve(failedProbe(1, 'npm error code E404'));
 
         try {
+            await writeFile(packageTarballPath, packageBytes);
             await expect(
                 determineNpmPublication({
                     executor: packageExecutor,
-                    packageDirectory,
+                    packageIntegrity,
+                    packageTarballPath,
                     releaseVersion: '0.2.1',
                 }),
             ).resolves.toBe('publish');
 
             const existingPackageExecutor = vi.fn<ReleaseCommandExecutor>(
                 (invocation) => {
-                    if (invocation.arguments.includes('pack')) {
-                        return successfulProbe(
-                            JSON.stringify([
-                                {
-                                    filename: 'sealed-lattice-0.2.1.tgz',
-                                    integrity: 'sha512-local',
-                                    name: 'sealed-lattice',
-                                    version: '0.2.1',
-                                },
-                            ]),
-                        );
-                    }
                     if (invocation.arguments.includes('dist.integrity')) {
-                        return successfulProbe('"sha512-local"');
+                        return successfulProbe(
+                            JSON.stringify(packageIntegrity),
+                        );
                     }
                     if (invocation.arguments.includes('dist-tags.latest')) {
                         return successfulProbe('"0.2.1"');
@@ -263,34 +249,21 @@ describe('release policy', () => {
             await expect(
                 determineNpmPublication({
                     executor: existingPackageExecutor,
-                    packageDirectory,
+                    packageIntegrity,
+                    packageTarballPath,
                     releaseVersion: '0.2.1',
                 }),
             ).resolves.toBe('already-identical');
-            expect(existingPackageExecutor).toHaveBeenCalledTimes(3);
+            expect(existingPackageExecutor).toHaveBeenCalledTimes(2);
 
-            const wrongVersionExecutor: ReleaseCommandExecutor = (
-                invocation,
-            ) =>
-                invocation.arguments.includes('pack')
-                    ? successfulProbe(
-                          JSON.stringify([
-                              {
-                                  filename: 'sealed-lattice-0.2.0.tgz',
-                                  integrity: 'sha512-local',
-                                  name: 'sealed-lattice',
-                                  version: '0.2.0',
-                              },
-                          ]),
-                      )
-                    : failedProbe(1, 'npm error code E404');
             await expect(
                 determineNpmPublication({
-                    executor: wrongVersionExecutor,
-                    packageDirectory,
+                    executor: packageExecutor,
+                    packageIntegrity: 'sha512-wrong',
+                    packageTarballPath,
                     releaseVersion: '0.2.1',
                 }),
-            ).rejects.toThrow('expected sealed-lattice@0.2.1');
+            ).rejects.toThrow('no longer matches');
 
             await expect(
                 verifyCheckedOutReleaseTag({

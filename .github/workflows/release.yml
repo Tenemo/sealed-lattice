@@ -107,13 +107,6 @@ jobs:
               timeout-minutes: 40
               run: pnpm run smoke:pack:npm
 
-            - name: Dry-run npm publication
-              run: |
-                  PUBLIC_PACKAGE_DIR="$(mktemp -d)"
-                  node ./tools/ci/stage-public-package.mjs --out "${PUBLIC_PACKAGE_DIR}"
-                  cd "${PUBLIC_PACKAGE_DIR}"
-                  npm publish --dry-run --ignore-scripts --tag latest
-
             - name: Upload release-preparation diagnostics
               if: ${{ always() }}
               uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
@@ -223,6 +216,7 @@ jobs:
     publish-npm:
         name: publish npm
         needs:
+            - dispatch-release-ci
             - prepare-release
             - push-release
         runs-on: ubuntu-24.04
@@ -247,29 +241,26 @@ jobs:
                   toolchain: 1.90.0
                   targets: wasm32-unknown-unknown
             - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
-            - name: Run tag-built package smoke tests
-              timeout-minutes: 40
-              run: pnpm run smoke:pack:npm
-
-            - name: Stage the tag-built package
+            - name: Run and retain tag-built package smoke tests
               id: public-package
-              run: |
-                  PUBLIC_PACKAGE_DIR="${RUNNER_TEMP}/public-package"
-                  node ./tools/ci/stage-public-package.mjs --out "${PUBLIC_PACKAGE_DIR}"
-                  echo "directory=${PUBLIC_PACKAGE_DIR}" >> "${GITHUB_OUTPUT}"
+              timeout-minutes: 40
+              env:
+                  RELEASE_VERSION: ${{ needs.prepare-release.outputs.version }}
+              run: pnpm run smoke:pack:npm -- --out "${RUNNER_TEMP}/sealed-lattice-${RELEASE_VERSION}.tgz"
 
             - name: Determine npm publication
               id: npm-disposition
               env:
-                  PUBLIC_PACKAGE_DIR: ${{ steps.public-package.outputs.directory }}
+                  PACKAGE_INTEGRITY: ${{ steps.public-package.outputs.integrity }}
+                  PACKAGE_TARBALL_PATH: ${{ steps.public-package.outputs.tarball }}
                   RELEASE_VERSION: ${{ needs.prepare-release.outputs.version }}
               run: pnpm exec tsx ./tools/ci/release-gates.ts npm-disposition
 
             - name: Publish the tag-built package to npm
               if: steps.npm-disposition.outputs.publish == 'true'
               env:
-                  PUBLIC_PACKAGE_DIR: ${{ steps.public-package.outputs.directory }}
-              run: npm publish "${PUBLIC_PACKAGE_DIR}" --access public --ignore-scripts --provenance --tag latest
+                  PACKAGE_TARBALL_PATH: ${{ steps.public-package.outputs.tarball }}
+              run: npm publish "${PACKAGE_TARBALL_PATH}" --access public --ignore-scripts --provenance --tag latest
 
             - name: Upload publication diagnostics
               if: ${{ always() }}

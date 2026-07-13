@@ -1,27 +1,20 @@
 mod evaluation_keys;
 
-use self::evaluation_keys::{evaluation_key_streaming_commitment, public_rlwe_samples_by_basis};
+use self::evaluation_keys::evaluation_key_streaming_commitment;
 use super::*;
 use crate::bgv::evaluator::records::target_layout_hash;
 use crate::hashing::derive_canonical_object_hash;
 
 pub(super) fn setup_certificates(
-    participant_count: usize,
     key_switch_decomposition: &Value,
     key_switch_decomposition_hash: &str,
     evaluation_keys: &Value,
 ) -> CanonicalResult<Value> {
-    let rotation_key_roots = evaluation_keys["rotationKeyRoots"]
-        .as_array()
-        .expect("rotation key roots use array");
-    let rotation_key_count = rotation_key_roots.len();
-    let public_samples = public_rlwe_samples_by_basis(participant_count, rotation_key_count);
     let evaluation_key_streaming_commitment = evaluation_key_streaming_commitment(evaluation_keys)?;
 
     Ok(json!({
         "keySwitchDecomposition": key_switch_decomposition,
         "keySwitchDecompositionHash": key_switch_decomposition_hash,
-        "publicRlweSamplesByBasis": public_samples,
         "evaluationKeyStreamingCommitment": evaluation_key_streaming_commitment,
     }))
 }
@@ -126,6 +119,6 @@ pub(super) fn public_common_random_polynomial_root(
             &input.setup_seed_hash,
             "public-common-random-polynomial",
             DATA_PRIMES[0],
-        ),
+        )?,
     }))
 }

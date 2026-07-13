@@ -1,4 +1,5 @@
 import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
+import { ThresholdParameterDerivationError } from '@sealed-lattice/types';
 import type {
     FrozenRosterParameters,
     PollSpec,
@@ -25,13 +26,22 @@ export const deriveThresholdParameters = (
 ): ThresholdParameters => {
     const { rosterSize } = input;
     if (!Number.isInteger(rosterSize)) {
-        throw new RangeError('Roster size must be an integer.');
+        throw new ThresholdParameterDerivationError(
+            'RosterSizeNotInteger',
+            'Roster size must be an integer.',
+        );
     }
     if (rosterSize < minimumSupportedRosterSize) {
-        throw new RangeError('Roster size must be at least 3.');
+        throw new ThresholdParameterDerivationError(
+            'RosterSizeBelowSupportedMinimum',
+            'Roster size must be at least 3.',
+        );
     }
     if (rosterSize > maximumSupportedRosterSize) {
-        throw new RangeError('Roster size must be at most 20.');
+        throw new ThresholdParameterDerivationError(
+            'RosterSizeAboveSupportedMaximum',
+            'Roster size must be at most 20.',
+        );
     }
 
     const structuralCorruptionBound = Math.floor(rosterSize / 3);
@@ -111,7 +121,8 @@ export const deriveFrozenRosterParameters = (input: {
         rosterSize < pollSpec.minRosterSize ||
         rosterSize > pollSpec.maxRosterSize
     ) {
-        throw new RangeError(
+        throw new ThresholdParameterDerivationError(
+            'FrozenRosterOutsidePollBounds',
             'Frozen roster size must be inside the poll roster bounds.',
         );
     }
@@ -119,7 +130,10 @@ export const deriveFrozenRosterParameters = (input: {
         rosterSize < minimumNonMicroRosterSize &&
         pollSpec.smallRosterPolicy === 'ForbidMicroRoster'
     ) {
-        throw new Error('Poll policy forbids freezing a micro-roster.');
+        throw new ThresholdParameterDerivationError(
+            'MicroRosterForbidden',
+            'Poll policy forbids freezing a micro-roster.',
+        );
     }
 
     const thresholdParameters = deriveThresholdParameters({ rosterSize });

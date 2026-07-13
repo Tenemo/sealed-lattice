@@ -294,6 +294,74 @@ pub(crate) fn verify_vss_share_linkage_proof_source_from_request(
     }))
 }
 
+pub(in crate::bgv::setup) fn vss_share_linkage_proof_verification_binding_hash(
+    proof_material_root: &str,
+    verification_request: &Value,
+) -> CanonicalResult<String> {
+    let context = verification_request
+        .get("context")
+        .ok_or_else(|| invalid_succinct_setup_proof("context must be present"))?;
+    let ring_degree = read_u64(verification_request, "ringDegree")?;
+    let vss_share_linkage = verification_request
+        .get("vssShareLinkage")
+        .ok_or_else(|| invalid_succinct_setup_proof("vssShareLinkage must be present"))?;
+    derive_canonical_object_hash(&json!({
+        "objectType": "VssShareLinkageProofVerificationBinding",
+        "proofFamily": VSS_SHARE_LINKAGE_PROOF_FAMILY,
+        "proofMaterialRoot": proof_material_root,
+        // Bind only the public relation consumed by the verifier. Prover-only
+        // witnesses and randomness may be present in a generation request, but
+        // they cannot change the semantic verification lease.
+        "verificationRequest": {
+            "context": context,
+            "ringDegree": ring_degree,
+            "vssShareLinkage": vss_share_linkage,
+        },
+    }))
+}
+
+#[cfg(test)]
+pub(in crate::bgv::setup) fn verify_and_retain_vss_share_linkage_proof_binding(
+    proof_binding_session: &crate::bgv::setup::AcceptedSetupProofBindingSession,
+    proof_material_root: &str,
+    verification_request: &Value,
+) -> CanonicalResult<Value> {
+    let proof_bytes = crate::bgv::setup::verified_canonical_setup_proof_material_bytes(
+        VSS_SHARE_LINKAGE_PROOF_FAMILY,
+        proof_material_root,
+    )?
+    .ok_or_else(|| {
+        invalid_succinct_setup_proof(
+            "VSS share-linkage proof binding requires authenticated proof bytes",
+        )
+    })?;
+    let proof_bytes_hash = proof_bytes.hash512_hex(VSS_SHARE_LINKAGE_PROOF_BYTES_HASH_DOMAIN)?;
+    compare_string_value(
+        proof_material_root,
+        &crate::bgv::setup::setup_proof::setup_proof_material_reference_root(
+            VSS_SHARE_LINKAGE_PROOF_FAMILY,
+            &proof_bytes_hash,
+        )?,
+        "VSS share-linkage proof material root",
+    )?;
+    let verification = verify_vss_share_linkage_proof_source_from_request(
+        verification_request,
+        proof_bytes.as_ref(),
+    )?;
+    drop(proof_bytes);
+    crate::bgv::setup::retain_accepted_setup_proof_binding(
+        proof_binding_session.session_handle,
+        &proof_binding_session.capability,
+        VSS_SHARE_LINKAGE_PROOF_FAMILY,
+        proof_material_root,
+        vss_share_linkage_proof_verification_binding_hash(
+            proof_material_root,
+            verification_request,
+        )?,
+    )?;
+    Ok(verification)
+}
+
 mod bridge_target_commands;
 mod decoding;
 mod request_parsing;
@@ -306,6 +374,8 @@ use decoding::*;
 pub(in crate::bgv::setup::trustee_evaluation_key_proof) use request_parsing::same_secret_bridge_statement_from_request;
 pub(in crate::bgv::setup::trustee_evaluation_key_proof) use request_parsing::statement_from_request;
 use request_parsing::*;
+#[cfg(test)]
+use share_linkage_verification::compare_string_value;
 
 pub(in crate::bgv::setup) use share_linkage_transport::verified_vss_share_linkage_proof_material_bytes;
 
@@ -323,3 +393,59 @@ pub(in crate::bgv::setup) use share_linkage_verification::verify_vss_share_linka
 #[cfg(test)]
 pub(crate) use target_decryption_parsing::describe_target_decryption_share_proof_layout_from_request;
 pub(in crate::bgv::setup) use target_decryption_parsing::vss_share_linkage_commitment_from_value;
+
+#[cfg(test)]
+mod verification_binding_tests {
+    use super::*;
+
+    #[test]
+    fn share_linkage_binding_ignores_prover_inputs_but_binds_public_relation_fields() {
+        let proof_material_root = "a".repeat(128);
+        let public_request = json!({
+            "context": {
+                "ceremonyId": "ceremony",
+                "manifestHash": "b".repeat(128),
+                "rosterHash": "c".repeat(128),
+                "trusteeIdentity": "vss-share-linkage",
+                "trusteeRosterPosition": 0,
+                "setupEpoch": "setup-epoch",
+                "shareLinkageStatementRoot": "d".repeat(128),
+            },
+            "ringDegree": 32_768,
+            "vssShareLinkage": {
+                "shareLinkageStatementRoot": "d".repeat(128),
+                "sourceTrusteeRosterPosition": 0,
+            },
+        });
+        let expected_binding = vss_share_linkage_proof_verification_binding_hash(
+            &proof_material_root,
+            &public_request,
+        )
+        .expect("public share-linkage verification binding");
+
+        let mut prover_request = public_request.clone();
+        prover_request["coefficientMessagesByShamirIndex"] = json!([[1, -1, 0]]);
+        prover_request["proofRandomnessSeedHex"] = json!("e".repeat(128));
+        assert_eq!(
+            vss_share_linkage_proof_verification_binding_hash(
+                &proof_material_root,
+                &prover_request,
+            )
+            .expect("prover request share-linkage verification binding"),
+            expected_binding,
+            "prover-only inputs must not alter a verifier-owned semantic binding",
+        );
+
+        let mut changed_public_request = public_request;
+        changed_public_request["ringDegree"] = json!(16_384);
+        assert_ne!(
+            vss_share_linkage_proof_verification_binding_hash(
+                &proof_material_root,
+                &changed_public_request,
+            )
+            .expect("changed public share-linkage verification binding"),
+            expected_binding,
+            "an operative public relation field must alter the semantic binding",
+        );
+    }
+}

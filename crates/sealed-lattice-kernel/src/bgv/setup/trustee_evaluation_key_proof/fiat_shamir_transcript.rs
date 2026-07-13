@@ -1,7 +1,16 @@
 use super::extension_field::{CHALLENGE_EXTENSION_DEGREE, ChallengeExtensionElement};
+#[cfg(test)]
+use crate::bgv::setup::transcript_order_audit::{
+    TranscriptOrderAuditRecorder, active_transcript_order_audit_recorder,
+};
+use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 use crate::hashing::hash512;
 
 const TRANSCRIPT_DOMAIN: &str = "sealed-lattice/setup/trustee-evaluation-key/transcript";
+
+fn transcript_error(message: &'static str) -> CanonicalError {
+    CanonicalError::new(CanonicalErrorCode::InvalidProtocolObject, message)
+}
 
 // Hash-chained Fiat-Shamir transcript over the kernel hash. Challenges are
 // derived from labelled squeeze blocks with a counter, so prover and verifier
@@ -10,17 +19,46 @@ const TRANSCRIPT_DOMAIN: &str = "sealed-lattice/setup/trustee-evaluation-key/tra
 pub(super) struct FiatShamirTranscript {
     state: [u8; 64],
     squeeze_counter: u64,
+    maximum_candidate_draws_per_output: u32,
+    #[cfg(test)]
+    audit: Option<TranscriptOrderAuditRecorder>,
 }
 
 impl FiatShamirTranscript {
-    pub(super) fn new(protocol_label: &str) -> Self {
-        Self {
+    pub(super) fn new(
+        protocol_label: &str,
+        maximum_candidate_draws_per_output: u32,
+    ) -> CanonicalResult<Self> {
+        if maximum_candidate_draws_per_output == 0 {
+            return Err(transcript_error(
+                "the trustee proof candidate-draw limit must be positive",
+            ));
+        }
+        let transcript = Self {
             state: hash512(TRANSCRIPT_DOMAIN, &[b"init", protocol_label.as_bytes()]),
             squeeze_counter: 0,
+            maximum_candidate_draws_per_output,
+            #[cfg(test)]
+            audit: active_transcript_order_audit_recorder("trustee-evaluation-key", protocol_label),
+        };
+        #[cfg(test)]
+        let mut transcript = transcript;
+        #[cfg(test)]
+        if let Some(audit) = transcript.audit.as_mut() {
+            audit.record_initialize(protocol_label, protocol_label.len());
         }
+        Ok(transcript)
+    }
+
+    pub(super) fn maximum_candidate_draws_per_output(&self) -> u32 {
+        self.maximum_candidate_draws_per_output
     }
 
     pub(super) fn absorb(&mut self, label: &str, bytes: &[u8]) {
+        #[cfg(test)]
+        if let Some(audit) = self.audit.as_mut() {
+            audit.record_absorb(label, bytes.len());
+        }
         self.state = hash512(
             TRANSCRIPT_DOMAIN,
             &[b"absorb", &self.state, label.as_bytes(), bytes],
@@ -43,6 +81,10 @@ impl FiatShamirTranscript {
     // Deterministic fork for per-limb sub-transcripts.
     pub(super) fn fork(&self, label: &str, index: u64) -> Self {
         let mut forked = self.clone();
+        #[cfg(test)]
+        {
+            forked.audit = self.audit.as_ref().map(|audit| audit.fork(label, index));
+        }
         forked.absorb("fork", label.as_bytes());
         forked.absorb_u64("fork-index", index);
 
@@ -53,24 +95,33 @@ impl FiatShamirTranscript {
     // operations so a squeeze output can never be replayed as an absorbed
     // message, and the per-round counter (reset on absorb) keeps same-round
     // challenges distinct.
-    fn squeeze_block(&mut self, label: &str) -> [u8; 64] {
+    fn squeeze_block(&mut self, label: &str) -> CanonicalResult<[u8; 64]> {
+        let squeeze_counter = self.squeeze_counter;
+        self.squeeze_counter = squeeze_counter.checked_add(1).ok_or_else(|| {
+            transcript_error("the trustee proof transcript squeeze counter was exhausted")
+        })?;
+        #[cfg(test)]
+        if let Some(audit) = self.audit.as_mut() {
+            audit.record_squeeze(label, squeeze_counter);
+        }
         let block = hash512(
             TRANSCRIPT_DOMAIN,
             &[
                 b"squeeze",
                 &self.state,
                 label.as_bytes(),
-                &self.squeeze_counter.to_le_bytes(),
+                &squeeze_counter.to_le_bytes(),
             ],
         );
-        self.squeeze_counter += 1;
 
-        block
+        Ok(block)
     }
 
-    fn squeeze_u64(&mut self, label: &str) -> u64 {
-        let block = self.squeeze_block(label);
-        u64::from_le_bytes(block[..8].try_into().expect("block prefix is eight bytes"))
+    fn squeeze_u64(&mut self, label: &str) -> CanonicalResult<u64> {
+        let block = self.squeeze_block(label)?;
+        Ok(u64::from_le_bytes(
+            block[..8].try_into().expect("block prefix is eight bytes"),
+        ))
     }
 
     // Unbiased uniform residues below the modulus via rejection sampling.
@@ -79,23 +130,37 @@ impl FiatShamirTranscript {
         label: &str,
         modulus: u64,
         count: usize,
-    ) -> Vec<u64> {
-        let rejection_zone = (u64::MAX / modulus) * modulus;
+    ) -> CanonicalResult<Vec<u64>> {
+        if modulus <= 1 {
+            return Err(transcript_error(
+                "the trustee proof challenge modulus must exceed one",
+            ));
+        }
+        let modulus_u128 = u128::from(modulus);
+        let accepted_candidate_count = ((1_u128 << 64) / modulus_u128) * modulus_u128;
         let mut elements = Vec::with_capacity(count);
+        let mut candidate_draws_for_next_output = 0_u32;
         while elements.len() < count {
-            let block = self.squeeze_block(label);
+            let block = self.squeeze_block(label)?;
             for chunk in block.chunks_exact(8) {
                 if elements.len() == count {
                     break;
                 }
+                if candidate_draws_for_next_output == self.maximum_candidate_draws_per_output {
+                    return Err(transcript_error(
+                        "the trustee proof candidate-draw limit was exhausted before deriving an output",
+                    ));
+                }
+                candidate_draws_for_next_output += 1;
                 let candidate = u64::from_le_bytes(chunk.try_into().expect("eight-byte chunk"));
-                if candidate < rejection_zone {
+                if u128::from(candidate) < accepted_candidate_count {
                     elements.push(candidate % modulus);
+                    candidate_draws_for_next_output = 0;
                 }
             }
         }
 
-        elements
+        Ok(elements)
     }
 
     // Uniform degree-four challenge extension elements: four base-field
@@ -105,15 +170,23 @@ impl FiatShamirTranscript {
         label: &str,
         modulus: u64,
         count: usize,
-    ) -> Vec<ChallengeExtensionElement> {
-        self.challenge_field_elements(label, modulus, count * CHALLENGE_EXTENSION_DEGREE)
+    ) -> CanonicalResult<Vec<ChallengeExtensionElement>> {
+        let coordinate_count = count
+            .checked_mul(CHALLENGE_EXTENSION_DEGREE)
+            .ok_or_else(|| {
+                transcript_error(
+                    "the trustee proof challenge output count exceeds the supported range",
+                )
+            })?;
+        Ok(self
+            .challenge_field_elements(label, modulus, coordinate_count)?
             .chunks_exact(CHALLENGE_EXTENSION_DEGREE)
             .map(|coordinates| {
                 coordinates
                     .try_into()
                     .expect("chunks are extension-degree wide")
             })
-            .collect()
+            .collect())
     }
 
     // A nonzero uniform challenge extension element.
@@ -121,13 +194,17 @@ impl FiatShamirTranscript {
         &mut self,
         label: &str,
         modulus: u64,
-    ) -> ChallengeExtensionElement {
-        loop {
-            let element = self.challenge_extension_elements(label, modulus, 1)[0];
+    ) -> CanonicalResult<ChallengeExtensionElement> {
+        for _ in 0..self.maximum_candidate_draws_per_output {
+            let element = self.challenge_extension_elements(label, modulus, 1)?[0];
             if element.iter().any(|coordinate| *coordinate != 0) {
-                return element;
+                return Ok(element);
             }
         }
+
+        Err(transcript_error(
+            "the trustee proof candidate-draw limit was exhausted before deriving an output",
+        ))
     }
 
     // Fixed-width unsigned integers below 2^bit_count, shared across limb
@@ -137,16 +214,20 @@ impl FiatShamirTranscript {
         label: &str,
         bit_count: u32,
         count: usize,
-    ) -> Vec<u64> {
+    ) -> CanonicalResult<Vec<u64>> {
         // Bounded-integer combination: the collision probability over the
         // integers is at most 2^-bit_count per repetition independent of the
         // field, so masking (not rejection) yields the exact uniform target
         // [0, 2^bits).
-        debug_assert!(bit_count <= 63);
+        if bit_count == 0 || bit_count > 63 {
+            return Err(transcript_error(
+                "the trustee proof bounded-integer challenge width must be in 1..=63",
+            ));
+        }
         let mask = (1_u64 << bit_count) - 1;
         let mut integers = Vec::with_capacity(count);
         while integers.len() < count {
-            let block = self.squeeze_block(label);
+            let block = self.squeeze_block(label)?;
             for chunk in block.chunks_exact(8) {
                 if integers.len() == count {
                     break;
@@ -156,7 +237,7 @@ impl FiatShamirTranscript {
             }
         }
 
-        integers
+        Ok(integers)
     }
 
     // Query positions in [0, range).
@@ -165,18 +246,109 @@ impl FiatShamirTranscript {
         label: &str,
         range: usize,
         count: usize,
-    ) -> Vec<usize> {
+    ) -> CanonicalResult<Vec<usize>> {
         // Masking is unbiased only because FRI domain sizes are powers of two
         // (debug-asserted); base-field challenges differ and must
         // rejection-sample against the non-power-of-two modulus.
-        debug_assert!(range.is_power_of_two());
+        if !range.is_power_of_two() {
+            return Err(transcript_error(
+                "the trustee proof challenge-position range must be a nonzero power of two",
+            ));
+        }
         let mask = (range - 1) as u64;
         let mut positions = Vec::with_capacity(count);
         while positions.len() < count {
-            let value = self.squeeze_u64(label);
+            let value = self.squeeze_u64(label)?;
             positions.push((value & mask) as usize);
         }
 
-        positions
+        Ok(positions)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn candidate_draw_limit_exhaustion_is_deterministic_and_typed() {
+        let modulus = (1_u64 << 63) + 1;
+        let exhausted_label = (0_u64..256)
+            .find_map(|label_index| {
+                let label = format!("candidate-{label_index}");
+                let mut transcript = FiatShamirTranscript::new("candidate-limit", 1)
+                    .expect("positive candidate-draw limit is valid");
+                matches!(
+                    transcript.challenge_field_elements(&label, modulus, 1),
+                    Err(error) if error.message.contains("candidate-draw limit was exhausted")
+                )
+                .then_some(label)
+            })
+            .expect("the fixed transcript corpus contains a first-draw rejection");
+        let mut transcript = FiatShamirTranscript::new("candidate-limit", 1)
+            .expect("positive candidate-draw limit is valid");
+
+        let error = transcript
+            .challenge_field_elements(&exhausted_label, modulus, 1)
+            .expect_err("the fixed first candidate exceeds the acceptance range");
+        assert_eq!(error.code, CanonicalErrorCode::InvalidProtocolObject);
+        assert!(error.message.contains("candidate-draw limit was exhausted"));
+    }
+
+    #[test]
+    fn nonzero_extension_challenge_exhaustion_is_deterministic() {
+        let exhausted_label = (0_u64..256)
+            .find_map(|label_index| {
+                let label = format!("nonzero-{label_index}");
+                let mut transcript = FiatShamirTranscript::new("nonzero-limit", 1)
+                    .expect("positive candidate-draw limit is valid");
+                matches!(
+                    transcript.challenge_nonzero_extension_element(&label, 2),
+                    Err(error) if error.message.contains("candidate-draw limit was exhausted")
+                )
+                .then_some(label)
+            })
+            .expect("the fixed transcript corpus contains an all-zero extension draw");
+        let mut transcript = FiatShamirTranscript::new("nonzero-limit", 1)
+            .expect("positive candidate-draw limit is valid");
+
+        let error = transcript
+            .challenge_nonzero_extension_element(&exhausted_label, 2)
+            .expect_err("the fixed first extension challenge is zero");
+        assert_eq!(error.code, CanonicalErrorCode::InvalidProtocolObject);
+        assert!(error.message.contains("candidate-draw limit was exhausted"));
+    }
+
+    #[test]
+    fn invalid_limits_and_domains_fail_without_panicking() {
+        let invalid_limit_error = FiatShamirTranscript::new("invalid-limit", 0)
+            .err()
+            .expect("zero candidate-draw limit must be rejected");
+        assert_eq!(
+            invalid_limit_error.code,
+            CanonicalErrorCode::InvalidProtocolObject
+        );
+        let mut transcript = FiatShamirTranscript::new("invalid-domain", 1)
+            .expect("positive candidate-draw limit is valid");
+        assert!(transcript.challenge_field_elements("field", 1, 1).is_err());
+        assert!(
+            transcript
+                .challenge_bounded_integers("integer", 64, 1)
+                .is_err()
+        );
+        assert!(transcript.challenge_positions("position", 3, 1).is_err());
+    }
+
+    #[test]
+    fn squeeze_counter_exhaustion_is_typed() {
+        let mut transcript = FiatShamirTranscript::new("counter-limit", 1)
+            .expect("positive candidate-draw limit is valid");
+        transcript.squeeze_counter = u64::MAX;
+
+        let error = transcript
+            .challenge_positions("position", 2, 1)
+            .expect_err("an exhausted squeeze counter must fail closed");
+        assert_eq!(error.code, CanonicalErrorCode::InvalidProtocolObject);
+        assert!(error.message.contains("squeeze counter was exhausted"));
     }
 }

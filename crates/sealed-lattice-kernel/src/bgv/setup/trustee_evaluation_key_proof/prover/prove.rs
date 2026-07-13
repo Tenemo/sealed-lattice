@@ -89,7 +89,7 @@ fn prove_limb(
     let trace_size = plan.trace_size;
     let extension_size = plan.extension_size;
     let mut transcript = global_transcript.fork("limb", limb_index as u64);
-    let challenges = draw_limb_challenges(&mut transcript, layout, modulus);
+    let challenges = draw_limb_challenges(&mut transcript, layout, modulus)?;
 
     // The bound committed-material trees this limb opens: its commitment
     // field's tree of every bound message. The regenerated roots were already
@@ -409,7 +409,7 @@ fn prove_limb(
         "lambda",
         modulus,
         total_column_count * DEEP_EVALUATION_POINT_COUNT,
-    );
+    )?;
     let mut extension_points = Vec::with_capacity(extension_size);
     let mut point = plan.coset_offset;
     for _ in 0..extension_size {
@@ -545,7 +545,7 @@ fn prove_limb(
         "shared-query-position",
         extension_size / 2,
         LOW_DEGREE_QUERY_COUNT,
-    );
+    )?;
     let low_degree = open_low_degree_at_positions(low_degree_state, &query_positions)?;
     let sumcheck_residual_low_degree =
         open_low_degree_at_positions(sumcheck_residual_low_degree_state, &query_positions)?;
@@ -701,7 +701,10 @@ fn prove_evaluation_key_share_with_limb_batch_size(
     let proof_limb_indices = statement.proof_limb_indices();
     let limb_batch_size =
         normalize_limb_batch_size(requested_limb_batch_size, proof_limb_indices.len());
-    let mut transcript = FiatShamirTranscript::new("trustee-evaluation-key-share");
+    let mut transcript = FiatShamirTranscript::new(
+        "trustee-evaluation-key-share",
+        MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
+    )?;
     transcript.absorb("statement", &statement.statement_hash());
 
     let mut witness_tree_roots = Vec::with_capacity(proof_limb_indices.len());
@@ -762,7 +765,7 @@ fn prove_evaluation_key_share_with_limb_batch_size(
                 consistency_vector_length,
             )
         })
-        .collect::<Vec<_>>();
+        .collect::<Result<Vec<_>, _>>()?;
     let claim_integers = global_claim_integers(
         statement,
         witness,

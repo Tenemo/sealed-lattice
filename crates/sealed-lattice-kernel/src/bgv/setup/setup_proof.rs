@@ -5,12 +5,11 @@ pub(crate) use self::material_transport::{
     BgvProofMaterialBytes, CanonicalProofMaterialBytes, ProofByteSource,
 };
 pub(in crate::bgv::setup) use self::material_transport::{
-    SetupProofMaterialBytes, VerifiedSetupProofMaterialEvictionGuard,
-    verified_setup_proof_material_bytes_from_request,
+    SetupProofMaterialBytes, verified_setup_proof_material_bytes_from_request,
 };
 #[cfg(test)]
-pub(crate) use self::material_transport::{
-    authenticate_setup_proof_material_stream_for_test,
+pub(in crate::bgv::setup) use self::material_transport::{
+    VerifiedSetupProofMaterialEvictionGuard, authenticate_setup_proof_material_stream_for_test,
     canonical_setup_proof_material_transport_accounting,
 };
 

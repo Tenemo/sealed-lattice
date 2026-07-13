@@ -18,8 +18,6 @@ import {
     normalizeRustTestFilter,
 } from './rust-kernel-test-arguments.js';
 
-import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
-
 export type ParsedRustKernelArguments = {
     readonly testFilter?: string;
 };
@@ -173,6 +171,6 @@ export const runRustKernelTests = async (
     );
 };
 
-if (isDirectlyInvokedModule(import.meta.url)) {
+if (import.meta.main) {
     void runRustKernelTests();
 }

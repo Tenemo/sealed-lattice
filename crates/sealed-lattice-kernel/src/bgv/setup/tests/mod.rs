@@ -127,7 +127,8 @@ fn setup_derived_evaluator_key_from_package(package: &serde_json::Value) -> Deve
         super::key_material::collective_signed_secret_and_error_coefficients(
             &private_setup_seed_hash,
             &participant_identities,
-        );
+        )
+        .expect("the fixed deterministic samplers derive within their candidate-draw limits");
     let public_key_coefficients =
         super::key_material::collective_public_key_coefficients_by_modulus_from_setup_package(
             package,

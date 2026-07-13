@@ -6,7 +6,9 @@ import { pathToFileURL } from 'node:url';
 import { afterEach, vi } from 'vitest';
 
 import {
+    createPublishedSdkKernelLoader,
     createTranscriptCoreKernelLoader,
+    type PublishedSdkKernel,
     type TranscriptCoreKernel,
 } from '#packages/wasm/src/transcript-core-bridge';
 
@@ -51,6 +53,7 @@ const createMockKernelExports = ({
     readonly encodedCommandResponseLength: number;
     readonly getInstantiateCallCount: () => number;
     readonly loadMockKernel: () => Promise<TranscriptCoreKernel>;
+    readonly loadPublishedSdkKernel: () => Promise<PublishedSdkKernel>;
     readonly rejectNextInstantiation: (error: Error) => void;
 } => {
     const encodedCommandResponse = new TextEncoder().encode(
@@ -73,6 +76,40 @@ const createMockKernelExports = ({
         instance: {
             exports: {
                 memory,
+                sealed_lattice_accepted_setup_canonical_stream_begin: vi.fn(
+                    () => 1,
+                ),
+                sealed_lattice_accepted_setup_command_with_length: vi.fn(
+                    (
+                        pointer: number,
+                        length: number,
+                        _sessionHandle: number,
+                        _capabilityPointer: number,
+                        _capabilityLength: number,
+                        outputLengthPointer: number,
+                    ) => {
+                        const encodedCommand = new Uint8Array(
+                            memory.buffer,
+                            pointer,
+                            length,
+                        );
+                        onCommand?.(
+                            JSON.parse(textDecoder.decode(encodedCommand)),
+                        );
+                        new Uint8Array(memory.buffer).set(
+                            encodedCommandResponse,
+                            commandPointer,
+                        );
+                        new DataView(memory.buffer).setUint32(
+                            outputLengthPointer,
+                            encodedCommandResponse.length,
+                            true,
+                        );
+                        return commandPointer;
+                    },
+                ),
+                sealed_lattice_accepted_setup_session_begin: vi.fn(() => 1),
+                sealed_lattice_accepted_setup_session_cancel: vi.fn(() => 0),
                 sealed_lattice_allocate: vi.fn(
                     () => allocationPointers.shift() ?? allocationPointer,
                 ),
@@ -116,6 +153,22 @@ const createMockKernelExports = ({
         .mockResolvedValue(instantiatedSource);
     vi.spyOn(WebAssembly.Module, 'exports').mockReturnValue([
         { kind: 'memory', name: 'memory' },
+        {
+            kind: 'function',
+            name: 'sealed_lattice_accepted_setup_canonical_stream_begin',
+        },
+        {
+            kind: 'function',
+            name: 'sealed_lattice_accepted_setup_command_with_length',
+        },
+        {
+            kind: 'function',
+            name: 'sealed_lattice_accepted_setup_session_begin',
+        },
+        {
+            kind: 'function',
+            name: 'sealed_lattice_accepted_setup_session_cancel',
+        },
         { kind: 'function', name: 'sealed_lattice_allocate' },
         { kind: 'function', name: 'sealed_lattice_deallocate' },
         {
@@ -130,6 +183,12 @@ const createMockKernelExports = ({
         encodedCommandResponseLength: encodedCommandResponse.length,
         getInstantiateCallCount: () => instantiate.mock.calls.length,
         loadMockKernel: createTranscriptCoreKernelLoader(
+            pathToFileURL(path.resolve('mock-sealed-lattice-kernel.wasm')),
+            allowUnpinnedKernel
+                ? { allowUnpinnedKernel: true }
+                : { expectedKernelSha256Hex },
+        ),
+        loadPublishedSdkKernel: createPublishedSdkKernelLoader(
             pathToFileURL(path.resolve('mock-sealed-lattice-kernel.wasm')),
             allowUnpinnedKernel
                 ? { allowUnpinnedKernel: true }

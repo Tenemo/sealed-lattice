@@ -244,6 +244,7 @@ pub(super) fn verify_pending_evaluation_key_material_boundary(
     setup_package: &Value,
     request: &Value,
     verified_same_secret_bridge: Option<&VerifiedSameSecretBridgeMaterial>,
+    proof_binding_session: &crate::bgv::setup::AcceptedSetupProofBindingSession,
 ) -> CanonicalResult<Option<Value>> {
     if let Some(response) = verify_relinearization_key_share_rounds(setup_package, request)? {
         return Ok(Some(response));
@@ -251,9 +252,12 @@ pub(super) fn verify_pending_evaluation_key_material_boundary(
     if let Some(response) = verify_galois_key_share_batches(setup_package, request)? {
         return Ok(Some(response));
     }
-    if let Some(response) =
-        verify_trustee_evaluation_key_proofs(setup_package, request, verified_same_secret_bridge)?
-    {
+    if let Some(response) = verify_trustee_evaluation_key_proofs(
+        setup_package,
+        request,
+        verified_same_secret_bridge,
+        proof_binding_session,
+    )? {
         return Ok(Some(response));
     }
 

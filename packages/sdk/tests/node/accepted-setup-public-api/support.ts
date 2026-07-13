@@ -1,7 +1,6 @@
 import { loadTranscriptCoreKernel } from '@sealed-lattice/wasm';
 
 import {
-    createSetupPackageVerificationInput,
     verifyPrivateVssShare,
     verifySetupPackage,
 } from '../../../dist/index.js';
@@ -396,7 +395,6 @@ const setupApiImplementation = {
     createSetupContribution: createSetupContributionAssembly,
     createSetupIntent,
     createSetupPackage,
-    createSetupPackageVerificationInput,
     createSetupPhaseRecord,
     createVssComplaint,
     createVssShareAcceptance,

@@ -240,7 +240,7 @@ pub(super) fn commit_low_degree(
     let mut root = parameters.initial_root;
     for fold_index in 0..total_folds {
         let challenge =
-            transcript.challenge_nonzero_extension_element("fold-challenge", parameters.modulus);
+            transcript.challenge_nonzero_extension_element("fold-challenge", parameters.modulus)?;
         let folded = fold_layer(
             &tower,
             layers.last().expect("layers are non-empty"),
@@ -358,7 +358,7 @@ pub(super) fn bind_low_degree_commitment(
     let mut fold_challenges = Vec::with_capacity(total_folds);
     for fold_index in 0..total_folds {
         fold_challenges.push(
-            transcript.challenge_nonzero_extension_element("fold-challenge", parameters.modulus),
+            transcript.challenge_nonzero_extension_element("fold-challenge", parameters.modulus)?,
         );
         if fold_index + 1 < total_folds {
             transcript.absorb("fold-layer-root", &proof.folded_layer_roots[fold_index]);

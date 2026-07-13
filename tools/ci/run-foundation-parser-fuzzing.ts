@@ -20,8 +20,6 @@ import {
 import { serializeErrorDiagnostic } from './run-log-diagnostics.js';
 import { createTestEventWriter } from './test-event-journal.js';
 
-import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
-
 const defaultDurationSeconds = 60;
 const fuzzArtifactFilePattern = /^(?:crash|leak|oom|slow-unit|timeout)-/u;
 export const foundationParserFuzzToolchain = {
@@ -418,6 +416,6 @@ export const runFoundationParserFuzzing = async (): Promise<void> => {
     }
 };
 
-if (isDirectlyInvokedModule(import.meta.url)) {
+if (import.meta.main) {
     void runFoundationParserFuzzing();
 }

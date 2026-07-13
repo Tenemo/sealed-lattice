@@ -10,6 +10,7 @@ export {
     openFoundationBoardSession,
 } from './foundation-board-session.js';
 export type {
+    AcceptedSetupSession,
     TranscriptCoreKernelSharePoint,
     TranscriptCorePlaintextComparison,
     BgvCollectiveSetupParametersDescription,
@@ -22,6 +23,7 @@ export type {
     BgvTargetDecryptionResultReleaseCompletion,
     FoundationCanonicalTupleValidation,
     FoundationSchemaObjectValidation,
+    PublishedSdkKernel,
     TranscriptCoreKernel,
 } from './transcript-core-bridge/kernel-contracts.js';
 export {
@@ -30,3 +32,4 @@ export {
 } from './transcript-core-bridge/kernel-runtime.js';
 export type { TranscriptCoreKernelLoaderOptions } from './transcript-core-bridge/kernel-runtime.js';
 export { createTranscriptCoreKernelLoader } from './transcript-core-bridge/kernel-loader.js';
+export { createPublishedSdkKernelLoader } from './transcript-core-bridge/published-sdk-kernel-loader.js';

@@ -140,6 +140,24 @@ describe('transcript-core kernel in Node', () => {
         expect(getInstantiateCallCount()).toBe(1);
     });
 
+    it('limits the published SDK kernel facade to packaged operations', async () => {
+        const { loadPublishedSdkKernel } = createMockKernelExports();
+
+        const kernel = await loadPublishedSdkKernel();
+
+        expect(Object.keys(kernel).sort()).toEqual([
+            'absorbBgvTargetDecryptionResultReleaseShare',
+            'beginAcceptedSetupSession',
+            'beginBgvTargetDecryptionResultRelease',
+            'deriveBgvTargetDecryptionResultReleaseSetupContext',
+            'exportedFunctionNames',
+            'finishBgvTargetDecryptionResultRelease',
+            'generateBgvTargetDecryptionShareProofMaterialFromLocalWitness',
+            'verifyCollectiveBgvSetup',
+            'verifyPrivateVssShareEnvelope',
+        ]);
+    });
+
     it('rejects invalid command response shapes', async () => {
         const { loadMockKernel } = createMockKernelExports({
             commandResponse: {

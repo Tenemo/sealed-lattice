@@ -57,11 +57,8 @@ export type BoardConsistencyInput = {
     readonly conflictingHeadEvidence?: readonly ConflictingHeadEvidence[];
 };
 
-/** Bulletin-board consistency result with verified head hashes. */
-export type BoardConsistencyVerification =
-    StructuredProtocolVerificationResult & {
-        readonly verifiedHeadHashes: readonly ProtocolHash[];
-    };
+/** Bulletin-board consistency verification result. */
+export type BoardConsistencyVerification = StructuredProtocolVerificationResult;
 
 /** Signed receipt proving that one voter encrypted ballot was accepted. */
 export type CastReceipt = {

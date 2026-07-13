@@ -9,7 +9,11 @@ export {
     prepareLocalTargetDecryptionShareWitness,
     restoreAndPrepareLocalTargetDecryptionShareWitness,
 } from './target-decryption/local-target-share-witness.js';
-export type { RestoredLocalTargetDecryptionShareWitnessInput } from './target-decryption/local-target-share-witness.js';
+export type {
+    PreparedLocalTargetDecryptionShareWitness,
+    RestoredLocalTargetDecryptionShareWitnessInput,
+    TargetDecryptionAggregateOpeningMaterialSource,
+} from './target-decryption/local-target-share-witness.js';
 export {
     createBgvTargetDecryptionShareCanonicalProofMaterialTransport,
     targetDecryptionShareProofBytesEncoding,

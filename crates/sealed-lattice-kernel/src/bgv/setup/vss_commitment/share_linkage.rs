@@ -521,6 +521,7 @@ pub(super) fn verify_vss_aggregate_threshold_statement_root(
 }
 
 pub(crate) fn verify_vss_public_aggregate_threshold_proofs(
+    proof_binding_session: Option<&crate::bgv::setup::AcceptedSetupProofBindingSession>,
     proof_material_request: &Value,
     coefficient_commitment_set: &Value,
     recipient_share_commitment_set: &Value,
@@ -791,14 +792,11 @@ pub(crate) fn verify_vss_public_aggregate_threshold_proofs(
             }
         }
         // Verify the unit-point share-linkage proof that T_{j,l} is the modular
-        // sum of the bound source shares. The source-aware decoder reads the
-        // authenticated canonical stream chunks directly.
-        let proof_bytes = crate::bgv::setup::trustee_evaluation_key_proof::verified_vss_share_linkage_proof_material_bytes(
-            proof_material_request,
-            hash_at_path(proof, &["proofMaterialRoot"])?,
-            hash_at_path(proof, &["proofBytesHash"])?,
-        )?;
-        crate::bgv::setup::trustee_evaluation_key_proof::verify_vss_share_linkage_proof_source_from_request(&json!({
+        // sum of the bound source shares. An incremental setup session may have
+        // already checked these bytes against this exact request and released
+        // them; otherwise the source-aware decoder consumes the authenticated
+        // canonical stream chunks now.
+        let proof_request = json!({
             "context": {
                 "ceremonyId": context.ceremony_id,
                 "manifestHash": context.manifest_hash,
@@ -810,7 +808,35 @@ pub(crate) fn verify_vss_public_aggregate_threshold_proofs(
             },
             "ringDegree": context.ring_degree,
             "vssShareLinkage": vss_aggregate,
-        }), proof_bytes.as_ref())?;
+        });
+        let proof_material_root = hash_at_path(proof, &["proofMaterialRoot"])?;
+        let verification_binding_hash = crate::bgv::setup::trustee_evaluation_key_proof::vss_share_linkage_proof_verification_binding_hash(
+            proof_material_root,
+            &proof_request,
+        )?;
+        let consumed_preverified_binding =
+            if let Some(proof_binding_session) = proof_binding_session {
+                crate::bgv::setup::consume_accepted_setup_proof_binding(
+                    proof_binding_session.session_handle,
+                    &proof_binding_session.capability,
+                    crate::bgv::setup::trustee_evaluation_key_proof::VSS_SHARE_LINKAGE_PROOF_FAMILY,
+                    proof_material_root,
+                    &verification_binding_hash,
+                )?
+            } else {
+                false
+            };
+        if !consumed_preverified_binding {
+            let proof_bytes = crate::bgv::setup::trustee_evaluation_key_proof::verified_vss_share_linkage_proof_material_bytes(
+                proof_material_request,
+                proof_material_root,
+                hash_at_path(proof, &["proofBytesHash"] )?,
+            )?;
+            crate::bgv::setup::trustee_evaluation_key_proof::verify_vss_share_linkage_proof_source_from_request(
+                &proof_request,
+                proof_bytes.as_ref(),
+            )?;
+        }
     }
 
     Ok(())

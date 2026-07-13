@@ -153,9 +153,13 @@ fn same_secret_bridge_and_source_linkage_use_independent_alpha_domains() {
     let (statement, _witness) = same_secret_bridge_instance();
     let layout = LimbColumnLayout::new(&statement, 0).expect("bridge layout");
     let modulus = DATA_PRIMES[0];
-    let mut transcript =
-        super::super::fiat_shamir_transcript::FiatShamirTranscript::new("bridge-alpha-test");
-    let challenges = super::super::prover::draw_limb_challenges(&mut transcript, &layout, modulus);
+    let mut transcript = super::super::fiat_shamir_transcript::FiatShamirTranscript::new(
+        "bridge-alpha-test",
+        super::super::MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
+    )
+    .expect("the fixed Fiat-Shamir candidate-draw limit is positive");
+    let challenges = super::super::prover::draw_limb_challenges(&mut transcript, &layout, modulus)
+        .expect("the fixed challenge schedule derives within its candidate-draw limit");
     assert_eq!(
         challenges.same_secret_bridge_alpha.len(),
         layout.same_secret_bridge_relation_count(),
@@ -178,19 +182,27 @@ fn same_secret_bridge_and_source_linkage_use_independent_alpha_domains() {
     );
 
     let mut target_domain_transcript =
-        super::super::fiat_shamir_transcript::FiatShamirTranscript::new("alpha-domain-test");
-    let target_domain = target_domain_transcript.challenge_extension_elements(
-        "same-secret-bridge-alpha",
-        modulus,
-        comparison_count,
-    );
+        super::super::fiat_shamir_transcript::FiatShamirTranscript::new(
+            "alpha-domain-test",
+            super::super::MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
+        )
+        .expect("the fixed Fiat-Shamir candidate-draw limit is positive");
+    let target_domain = target_domain_transcript
+        .challenge_extension_elements("same-secret-bridge-alpha", modulus, comparison_count)
+        .expect("target-domain challenges derive within the fixed limit");
     let mut source_domain_transcript =
-        super::super::fiat_shamir_transcript::FiatShamirTranscript::new("alpha-domain-test");
-    let source_domain = source_domain_transcript.challenge_extension_elements(
-        "same-secret-source-linkage-alpha",
-        modulus,
-        comparison_count,
-    );
+        super::super::fiat_shamir_transcript::FiatShamirTranscript::new(
+            "alpha-domain-test",
+            super::super::MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
+        )
+        .expect("the fixed Fiat-Shamir candidate-draw limit is positive");
+    let source_domain = source_domain_transcript
+        .challenge_extension_elements(
+            "same-secret-source-linkage-alpha",
+            modulus,
+            comparison_count,
+        )
+        .expect("source-domain challenges derive within the fixed limit");
     assert_ne!(
         target_domain, source_domain,
         "the Fiat-Shamir labels must domain-separate source and target alpha challenges"

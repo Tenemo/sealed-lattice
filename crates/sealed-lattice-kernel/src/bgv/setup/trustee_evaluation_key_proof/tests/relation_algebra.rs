@@ -86,7 +86,11 @@ fn full_ring_low_degree_proof_accepts_degree_below_main_bound() {
         initial_root: plan.extension_root,
         initial_degree_bound: degree_bound,
     };
-    let mut transcript = FiatShamirTranscript::new("full-ring-low-degree-test");
+    let mut transcript = FiatShamirTranscript::new(
+        "full-ring-low-degree-test",
+        super::super::MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
+    )
+    .expect("the fixed Fiat-Shamir candidate-draw limit is positive");
     transcript.absorb(
         "low-degree-purpose",
         super::super::MAIN_LOW_DEGREE_TRANSCRIPT_PURPOSE,
@@ -94,11 +98,13 @@ fn full_ring_low_degree_proof_accepts_degree_below_main_bound() {
 
     let state = commit_low_degree(&mut transcript, &parameters, &initial_layer)
         .expect("full-ring degree-below-bound polynomial must commit");
-    let query_positions = transcript.challenge_positions(
-        "shared-query-position",
-        plan.extension_size / 2,
-        super::super::LOW_DEGREE_QUERY_COUNT,
-    );
+    let query_positions = transcript
+        .challenge_positions(
+            "shared-query-position",
+            plan.extension_size / 2,
+            super::super::LOW_DEGREE_QUERY_COUNT,
+        )
+        .expect("query challenges derive within the fixed candidate-draw limit");
     open_low_degree_at_positions(state, &query_positions)
         .expect("full-ring degree-below-bound polynomial must open");
 }

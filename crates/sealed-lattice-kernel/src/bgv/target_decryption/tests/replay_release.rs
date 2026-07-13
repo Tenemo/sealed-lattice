@@ -225,27 +225,29 @@ fn foundation_profile_replay_target_release_matches_plaintext_oracle() {
         })
         .expect("target share proof statement");
         let proof_material =
-            generate_bgv_target_decryption_share_proof_material_from_local_witness_request(
-                &json!({
-                    "setupPackage": setup_package,
-                    "localTargetShareWitness": local_target_share_witness_value,
-                    "targetAcceptedRecord": accepted,
-                    "targetCiphertextBinding": target_ciphertext_binding,
-                    "targetCiphertexts": target_ciphertexts,
-                    "targetShareProfile": target_share_profile_value,
-                    "trusteeIdentity": trustee_identity,
-                    "targetDecryptionShare": target_decryption_share,
-                    "proofStatement": proof_statement,
-                    "proofRandomnessSeedHex": hash512_hex(
-                        "sealed-lattice/tests/replay-release-proof-randomness-seed",
-                        &[trustee_identity.as_bytes()],
-                    ),
-                    "proofRandomnessNonceHex": hash512_hex(
-                        "sealed-lattice/tests/replay-release-proof-randomness-nonce",
-                        &[trustee_identity.as_bytes()],
-                    ),
-                }),
-            )
+            with_staged_aggregate_opening_material(&local_target_share_witness_value, || {
+                generate_bgv_target_decryption_share_proof_material_from_local_witness_request(
+                    &json!({
+                        "setupPackage": setup_package,
+                        "localTargetShareWitness": local_target_share_witness_value,
+                        "targetAcceptedRecord": accepted,
+                        "targetCiphertextBinding": target_ciphertext_binding,
+                        "targetCiphertexts": target_ciphertexts,
+                        "targetShareProfile": target_share_profile_value,
+                        "trusteeIdentity": trustee_identity,
+                        "targetDecryptionShare": target_decryption_share,
+                        "proofStatement": proof_statement,
+                        "proofRandomnessSeedHex": hash512_hex(
+                            "sealed-lattice/tests/replay-release-proof-randomness-seed",
+                            &[trustee_identity.as_bytes()],
+                        ),
+                        "proofRandomnessNonceHex": hash512_hex(
+                            "sealed-lattice/tests/replay-release-proof-randomness-nonce",
+                            &[trustee_identity.as_bytes()],
+                        ),
+                    }),
+                )
+            })
             .expect("target share proof material");
         target_share_proofs.push(json!({
             "targetDecryptionShare": target_decryption_share,

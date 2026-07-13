@@ -14,7 +14,6 @@ import { fileURLToPath } from 'node:url';
 
 import { foundationProfile } from '#packages/types/src/foundation-contract.js';
 import { normalizeTranscriptCoreKernelBytesForHash } from '#packages/wasm/src/transcript-core-bridge.js';
-import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
 
 const repoRoot = path.resolve(
     fileURLToPath(new URL('../../', import.meta.url)),
@@ -207,6 +206,6 @@ export const buildWasmKernel = async (): Promise<void> => {
     }
 };
 
-if (isDirectlyInvokedModule(import.meta.url)) {
+if (import.meta.main) {
     await buildWasmKernel();
 }

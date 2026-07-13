@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 
 import { deriveCanonicalObjectHash } from '#packages/crypto/src/index.js';
 import type {
-    createSetupPackageVerificationInput,
     verifyPrivateVssShare,
     verifySetupPackage,
 } from '#packages/sdk/src/index.js';
@@ -32,15 +31,21 @@ const expectedRosterHash = '4'.repeat(128);
 const publicKeyShareMaterialRoot = '5'.repeat(128);
 
 const mockedReadMaterial = vi.hoisted(() => vi.fn());
+const mockedOpenBgvCanonicalStreamRuntime = vi.hoisted(() => vi.fn());
 
-vi.mock('@sealed-lattice/wasm', async (importOriginal) => ({
+vi.mock('@sealed-lattice/wasm/published-sdk', async (importOriginal) => ({
     ...(await importOriginal<Record<string, unknown>>()),
-    openBgvCanonicalStreamRuntime: () => ({
-        readMaterial: mockedReadMaterial,
-    }),
+    openBgvCanonicalStreamRuntime: mockedOpenBgvCanonicalStreamRuntime,
 }));
 
+type MockAcceptedSetupSession = {
+    readonly cancel: ReturnType<typeof vi.fn>;
+    readonly verifyCollectiveBgvSetup: ReturnType<typeof vi.fn>;
+};
+
 type MockKernel = {
+    readonly acceptedSetupSession: MockAcceptedSetupSession;
+    readonly beginAcceptedSetupSession: ReturnType<typeof vi.fn>;
     readonly verifyCollectiveBgvSetup: ReturnType<typeof vi.fn>;
     readonly verifyPrivateVssShareEnvelope: ReturnType<typeof vi.fn>;
 };
@@ -48,6 +53,7 @@ type MockKernel = {
 let mockKernel: MockKernel;
 let createFreshMockKernel: () => MockKernel;
 let loadedFreshMockKernels: MockKernel[];
+let setupLifecycleEvents: string[];
 
 vi.mock('../../src/kernel.js', () => ({
     loadFreshTranscriptCoreKernel: () =>
@@ -56,7 +62,6 @@ vi.mock('../../src/kernel.js', () => ({
 }));
 
 const publicPackage = (await import('../../src/index.js')) as Readonly<{
-    readonly createSetupPackageVerificationInput: typeof createSetupPackageVerificationInput;
     readonly verifyPrivateVssShare: typeof verifyPrivateVssShare;
     readonly verifySetupPackage: typeof verifySetupPackage;
 }>;
@@ -215,23 +220,48 @@ const descriptorAccounting = (
 
 describe('canonical setup material streaming in the public package', () => {
     beforeEach(() => {
+        setupLifecycleEvents = [];
         mockedReadMaterial.mockReset();
+        mockedOpenBgvCanonicalStreamRuntime.mockReset();
+        mockedOpenBgvCanonicalStreamRuntime.mockImplementation(() => {
+            setupLifecycleEvents.push('runtime-open');
+            return {
+                readMaterial: mockedReadMaterial,
+            };
+        });
         mockedReadMaterial.mockImplementation(
             async (input: CanonicalReadInput): Promise<void> => {
+                setupLifecycleEvents.push('source-pull');
                 await input.pullChunk({ chunkIndex: 0, expectedByteLength: 3 });
                 await input.pullChunk({ chunkIndex: 1, expectedByteLength: 0 });
             },
         );
-        const newMockKernel = (): MockKernel => ({
-            verifyCollectiveBgvSetup: vi.fn((input: JsonRecord) => ({
-                isValid: false,
-                observedInput: input,
-            })),
-            verifyPrivateVssShareEnvelope: vi.fn((input: JsonRecord) => ({
-                isValid: false,
-                observedInput: input,
-            })),
-        });
+        const newMockKernel = (): MockKernel => {
+            const acceptedSetupSession: MockAcceptedSetupSession = {
+                cancel: vi.fn(() => {
+                    setupLifecycleEvents.push('cancel');
+                }),
+                verifyCollectiveBgvSetup: vi.fn((input: JsonRecord) => {
+                    setupLifecycleEvents.push('terminal');
+                    return {
+                        isValid: false,
+                        observedInput: input,
+                    };
+                }),
+            };
+            return {
+                acceptedSetupSession,
+                beginAcceptedSetupSession: vi.fn(() => {
+                    setupLifecycleEvents.push('begin');
+                    return acceptedSetupSession;
+                }),
+                verifyCollectiveBgvSetup: vi.fn(),
+                verifyPrivateVssShareEnvelope: vi.fn((input: JsonRecord) => ({
+                    isValid: false,
+                    observedInput: input,
+                })),
+            };
+        };
         loadedFreshMockKernels = [];
         createFreshMockKernel = () => {
             mockKernel = newMockKernel();
@@ -269,9 +299,11 @@ describe('canonical setup material streaming in the public package', () => {
                 { chunkIndex: 0, expectedByteLength: 3 },
                 { chunkIndex: 1, expectedByteLength: 0 },
             ]);
-            expect(mockKernel.verifyCollectiveBgvSetup).toHaveBeenCalledOnce();
-            const kernelInput = mockKernel.verifyCollectiveBgvSetup.mock
-                .calls[0]?.[0] as JsonRecord;
+            expect(
+                mockKernel.acceptedSetupSession.verifyCollectiveBgvSetup,
+            ).toHaveBeenCalledOnce();
+            const kernelInput = mockKernel.acceptedSetupSession
+                .verifyCollectiveBgvSetup.mock.calls[0]?.[0] as JsonRecord;
             const normalizedMaterials = (
                 kernelInput[transportCase.fieldName] as JsonRecord
             ).proofMaterials as readonly JsonRecord[];
@@ -293,6 +325,28 @@ describe('canonical setup material streaming in the public package', () => {
             );
         },
     );
+
+    it('opens the accepted-setup session before the first source pull and uses its terminal command', async () => {
+        const transportCase = setupProofMaterialTransportCases[0];
+        await publicPackage.verifySetupPackage({
+            setupPackage: { objectType: 'SetupPackage' },
+            ...setupVerificationBindings,
+            transportedPublicKeyShareProofMaterial:
+                transportedSetupProofMaterialSet(transportCase),
+            setupProofMaterialChunkSources: [
+                proofMaterialSource(proofMaterialRoot, 18),
+            ],
+        } as unknown as Parameters<typeof publicPackage.verifySetupPackage>[0]);
+
+        expect(setupLifecycleEvents).toEqual([
+            'begin',
+            'runtime-open',
+            'source-pull',
+            'terminal',
+        ]);
+        expect(mockKernel.beginAcceptedSetupSession).toHaveBeenCalledOnce();
+        expect(mockKernel.verifyCollectiveBgvSetup).not.toHaveBeenCalled();
+    });
 
     it('authenticates public-key share material and forwards descriptor-derived accounting', async () => {
         const source = proofMaterialSource(publicKeyShareMaterialRoot, 19);
@@ -316,8 +370,8 @@ describe('canonical setup material streaming in the public package', () => {
             materialRoot: publicKeyShareMaterialRoot,
             pullChunk: source.pullChunk,
         });
-        const kernelInput = mockKernel.verifyCollectiveBgvSetup.mock
-            .calls[0]?.[0] as JsonRecord;
+        const kernelInput = mockKernel.acceptedSetupSession
+            .verifyCollectiveBgvSetup.mock.calls[0]?.[0] as JsonRecord;
         const normalizedMaterial =
             kernelInput.transportedPublicKeyShareMaterial as JsonRecord;
         expect(normalizedMaterial.descriptorBytes).toBeUndefined();
@@ -355,10 +409,19 @@ describe('canonical setup material streaming in the public package', () => {
         expect(mockedReadMaterial).toHaveBeenCalledTimes(
             setupProofMaterialTransportCases.length,
         );
-        expect(mockKernel.verifyCollectiveBgvSetup).toHaveBeenCalledOnce();
+        expect(
+            mockedOpenBgvCanonicalStreamRuntime,
+        ).toHaveBeenCalledExactlyOnceWith({
+            acceptedSetupSession: mockKernel.acceptedSetupSession,
+            kernel: mockKernel,
+        });
+        expect(mockKernel.beginAcceptedSetupSession).toHaveBeenCalledOnce();
+        expect(
+            mockKernel.acceptedSetupSession.verifyCollectiveBgvSetup,
+        ).toHaveBeenCalledOnce();
     });
 
-    it('verifies the public helper output with all seven descriptor classes and one call-time snapshot', async () => {
+    it('verifies all seven descriptor classes from one call-time snapshot', async () => {
         const setupProofMaterialChunkSources =
             setupProofMaterialTransportCases.map(
                 (_transportCase, sourceIndex) =>
@@ -413,59 +476,52 @@ describe('canonical setup material streaming in the public package', () => {
             ?.descriptorBytes as Uint8Array;
         const authenticatedProofDescriptor = proofDescriptor.slice();
 
-        const verificationInput =
-            publicPackage.createSetupPackageVerificationInput({
-                setupPackage: {
-                    objectType: 'SetupPackage',
-                },
-                ...setupVerificationBindings,
-                ...transportedProofMaterialSets,
-                transportedPublicKeyShareMaterial: {
-                    objectType: 'SetupTransportedPublicKeyShareMaterial',
-                    publicKeyShareMaterialSetRoot: publicKeyShareMaterialRoot,
-                    descriptorBytes: canonicalStreamDescriptorFixture(3, 9),
-                },
-                publicKeyShareMaterialChunkSource,
-                setupProofMaterialChunkSources,
-                transportedEvaluationKeyShareComponentMaterial: {
-                    objectType:
-                        'SetupTransportedEvaluationKeyShareComponentMaterialSet',
-                    componentMaterials: [
-                        {
-                            objectType:
-                                'SetupTransportedEvaluationKeyShareComponentMaterial',
-                            proofFamily: 'relinearization-key-share',
-                            keySwitchComponentMaterialRoot:
-                                evaluationKeyComponentMaterialRoot,
-                            descriptorBytes: canonicalStreamDescriptorFixture(
-                                3,
-                                6,
-                            ),
-                        },
-                    ],
-                },
-                evaluationKeyShareComponentMaterialChunkSources,
-                transportedPublicEvaluationKeyMaterial: {
-                    objectType:
-                        'SetupTransportedPublicEvaluationKeyMaterialSet',
-                    materialEncoding:
-                        'binary-chunked-public-evaluation-key-material',
-                    publicEvaluationKeyMaterials: [
-                        {
-                            objectType:
-                                'SetupTransportedPublicEvaluationKeyMaterial',
-                            publicEvaluationKeyMaterialRoot,
-                            descriptorBytes: canonicalStreamDescriptorFixture(
-                                3,
-                                10,
-                            ),
-                        },
-                    ],
-                },
-                publicEvaluationKeyMaterialChunkSources,
-            } as unknown as Parameters<
-                typeof publicPackage.createSetupPackageVerificationInput
-            >[0]);
+        const verificationInput = {
+            setupPackage: {
+                objectType: 'SetupPackage',
+            },
+            ...setupVerificationBindings,
+            ...transportedProofMaterialSets,
+            transportedPublicKeyShareMaterial: {
+                objectType: 'SetupTransportedPublicKeyShareMaterial',
+                publicKeyShareMaterialSetRoot: publicKeyShareMaterialRoot,
+                descriptorBytes: canonicalStreamDescriptorFixture(3, 9),
+            },
+            publicKeyShareMaterialChunkSource,
+            setupProofMaterialChunkSources,
+            transportedEvaluationKeyShareComponentMaterial: {
+                objectType:
+                    'SetupTransportedEvaluationKeyShareComponentMaterialSet',
+                componentMaterials: [
+                    {
+                        objectType:
+                            'SetupTransportedEvaluationKeyShareComponentMaterial',
+                        proofFamily: 'relinearization-key-share',
+                        keySwitchComponentMaterialRoot:
+                            evaluationKeyComponentMaterialRoot,
+                        descriptorBytes: canonicalStreamDescriptorFixture(3, 6),
+                    },
+                ],
+            },
+            evaluationKeyShareComponentMaterialChunkSources,
+            transportedPublicEvaluationKeyMaterial: {
+                objectType: 'SetupTransportedPublicEvaluationKeyMaterialSet',
+                materialEncoding:
+                    'binary-chunked-public-evaluation-key-material',
+                publicEvaluationKeyMaterials: [
+                    {
+                        objectType:
+                            'SetupTransportedPublicEvaluationKeyMaterial',
+                        publicEvaluationKeyMaterialRoot,
+                        descriptorBytes: canonicalStreamDescriptorFixture(
+                            3,
+                            10,
+                        ),
+                    },
+                ],
+            },
+            publicEvaluationKeyMaterialChunkSources,
+        } as unknown as Parameters<typeof publicPackage.verifySetupPackage>[0];
 
         const verificationPromise =
             publicPackage.verifySetupPackage(verificationInput);
@@ -502,7 +558,9 @@ describe('canonical setup material streaming in the public package', () => {
                 ([streamInput]) => (streamInput as JsonRecord).descriptorBytes,
             ),
         ).toContainEqual(authenticatedProofDescriptor);
-        expect(mockKernel.verifyCollectiveBgvSetup).toHaveBeenCalledOnce();
+        expect(
+            mockKernel.acceptedSetupSession.verifyCollectiveBgvSetup,
+        ).toHaveBeenCalledOnce();
     });
 
     it('keeps the complete setup terminal input immutable across kernel loading and chunk callbacks', async () => {
@@ -545,8 +603,8 @@ describe('canonical setup material streaming in the public package', () => {
 
         await verificationPromise;
 
-        const kernelInput = mockKernel.verifyCollectiveBgvSetup.mock
-            .calls[0]?.[0] as JsonRecord;
+        const kernelInput = mockKernel.acceptedSetupSession
+            .verifyCollectiveBgvSetup.mock.calls[0]?.[0] as JsonRecord;
         expect(kernelInput.setupPackage).toEqual({
             objectType: 'SetupPackage',
             nestedContext: {
@@ -885,7 +943,9 @@ describe('canonical setup material streaming in the public package', () => {
             }),
         ).rejects.toThrow(/must match exactly one transported reference/u);
         expect(mockedReadMaterial).not.toHaveBeenCalled();
-        expect(mockKernel.verifyCollectiveBgvSetup).not.toHaveBeenCalled();
+        expect(
+            mockKernel.acceptedSetupSession.verifyCollectiveBgvSetup,
+        ).not.toHaveBeenCalled();
     });
 
     it('refuses terminal accessors without invoking them or loading a kernel', async () => {
@@ -1079,12 +1139,25 @@ describe('canonical setup material streaming in the public package', () => {
             publicPackage.verifySetupPackage(verificationInput),
         ).rejects.toThrow('simulated material source failure');
         const failedKernel = loadedFreshMockKernels[0];
+        expect(
+            failedKernel?.acceptedSetupSession.verifyCollectiveBgvSetup,
+        ).not.toHaveBeenCalled();
+        expect(
+            failedKernel?.acceptedSetupSession.cancel,
+        ).toHaveBeenCalledOnce();
         expect(failedKernel?.verifyCollectiveBgvSetup).not.toHaveBeenCalled();
+        expect(setupLifecycleEvents).toEqual([
+            'begin',
+            'runtime-open',
+            'cancel',
+        ]);
 
         await publicPackage.verifySetupPackage(verificationInput);
         const recoveryKernel = loadedFreshMockKernels[1];
         expect(recoveryKernel).not.toBe(failedKernel);
-        expect(recoveryKernel?.verifyCollectiveBgvSetup).toHaveBeenCalledOnce();
+        expect(
+            recoveryKernel?.acceptedSetupSession.verifyCollectiveBgvSetup,
+        ).toHaveBeenCalledOnce();
     });
 
     it('discards a private VSS verification kernel after material staging fails', async () => {

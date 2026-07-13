@@ -22,10 +22,13 @@ type CanonicalReadInput = Readonly<{
 
 const readCanonicalMaterial = vi.hoisted(() => vi.fn());
 const openCanonicalRuntime = vi.hoisted(() => vi.fn());
+const stageAggregateOpeningMaterials = vi.hoisted(() => vi.fn());
 
-vi.mock('@sealed-lattice/wasm', async (importOriginal) => ({
+vi.mock('@sealed-lattice/wasm/published-sdk', async (importOriginal) => ({
     ...(await importOriginal<Record<string, unknown>>()),
     openBgvCanonicalStreamRuntime: openCanonicalRuntime,
+    stageBgvTargetDecryptionAggregateOpeningMaterials:
+        stageAggregateOpeningMaterials,
 }));
 
 let absorbedShareCount: number;
@@ -124,10 +127,25 @@ const releaseInput = (
 const successfulPull = (): Promise<ArrayBuffer | undefined> =>
     Promise.resolve(Uint8Array.of(1).buffer);
 
+const aggregateOpeningRoot = protocolHash('a');
+const aggregateOpeningPullChunk = (): Promise<ArrayBuffer | undefined> =>
+    Promise.resolve(new ArrayBuffer(32_768 * 8));
+
 const proofMaterialGenerationInput =
     (): TargetDecryptionShareProofMaterialGenerationInput => ({
+        aggregateOpeningMaterialSources: [
+            {
+                aggregateOpeningRoot,
+                pullChunk: aggregateOpeningPullChunk,
+                totalByteLength: 32_768 * 8,
+            },
+        ],
         emitProofMaterialChunk: () => Promise.resolve(),
-        localTargetShareWitness: {},
+        localTargetShareWitness: {
+            aggregateOpening: {
+                aggregateOpeningCredentials: [{ aggregateOpeningRoot }],
+            },
+        },
         proofRandomnessNonceHex: '22'.repeat(32),
         proofRandomnessSeedHex: '11'.repeat(32),
         proofStatement: {},
@@ -149,6 +167,8 @@ describe('target-decryption result release session cleanup', () => {
         sharedKernelLoadCount = 0;
         sharedKernelLoadMutation = undefined;
         readCanonicalMaterial.mockReset();
+        stageAggregateOpeningMaterials.mockReset();
+        stageAggregateOpeningMaterials.mockResolvedValue(undefined);
         openCanonicalRuntime.mockReset();
         openCanonicalRuntime.mockReturnValue({
             readMaterial: readCanonicalMaterial,
@@ -221,7 +241,12 @@ describe('target-decryption result release session cleanup', () => {
             {
                 ...proofMaterialGenerationInput(),
                 emitProofMaterialChunk: originalEmitProofMaterialChunk,
-                localTargetShareWitness: { witness: { generation: 1 } },
+                localTargetShareWitness: {
+                    aggregateOpening: {
+                        aggregateOpeningCredentials: [{ aggregateOpeningRoot }],
+                    },
+                    witness: { generation: 1 },
+                },
                 proofStatement: { statement: { generation: 1 } },
                 setupPackage: { setup: { generation: 1 } },
                 targetAcceptedRecord: { accepted: { generation: 1 } },
@@ -232,6 +257,13 @@ describe('target-decryption result release session cleanup', () => {
             };
         const mutableGenerationInput = generationInput as unknown as JsonRecord;
         freshKernelLoadMutation = () => {
+            mutableGenerationInput.aggregateOpeningMaterialSources = [
+                {
+                    aggregateOpeningRoot: '99'.repeat(64),
+                    pullChunk: vi.fn(),
+                    totalByteLength: 1,
+                },
+            ];
             mutableGenerationInput.emitProofMaterialChunk = vi.fn();
             mutableGenerationInput.localTargetShareWitness = {
                 witness: { generation: 99 },
@@ -280,8 +312,12 @@ describe('target-decryption result release session cleanup', () => {
         expect(
             mockKernel.generateBgvTargetDecryptionShareProofMaterialFromLocalWitness,
         ).toHaveBeenCalledWith({
-            emitProofMaterialChunk: originalEmitProofMaterialChunk,
-            localTargetShareWitness: { witness: { generation: 1 } },
+            localTargetShareWitness: {
+                aggregateOpening: {
+                    aggregateOpeningCredentials: [{ aggregateOpeningRoot }],
+                },
+                witness: { generation: 1 },
+            },
             proofRandomnessNonceHex: '22'.repeat(32),
             proofRandomnessSeedHex: '11'.repeat(32),
             proofStatement: { statement: { generation: 1 } },
@@ -292,6 +328,16 @@ describe('target-decryption result release session cleanup', () => {
             targetDecryptionShare: { share: { generation: 1 } },
             targetShareProfile: { profile: { generation: 1 } },
             trusteeIdentity: 'trustee-1',
+        });
+        expect(stageAggregateOpeningMaterials).toHaveBeenCalledWith({
+            kernel: mockKernel,
+            sources: [
+                {
+                    aggregateOpeningRoot,
+                    pullChunk: aggregateOpeningPullChunk,
+                    totalByteLength: 32_768 * 8,
+                },
+            ],
         });
         expect(writeMaterial).toHaveBeenCalledWith(
             expect.objectContaining({
@@ -319,6 +365,28 @@ describe('target-decryption result release session cleanup', () => {
         ).rejects.toThrow('setupPackage cannot be an accessor property.');
         expect(accessorReadCount).toBe(0);
         expect(freshKernelLoadCount).toBe(0);
+    });
+
+    it('rejects aggregate-opening source and witness root mismatches before staging', async () => {
+        const generationInput = proofMaterialGenerationInput();
+        const mismatchedInput = {
+            ...generationInput,
+            localTargetShareWitness: {
+                aggregateOpening: {
+                    aggregateOpeningCredentials: [
+                        { aggregateOpeningRoot: protocolHash('b') },
+                    ],
+                },
+            },
+        } satisfies TargetDecryptionShareProofMaterialGenerationInput;
+
+        await expect(
+            publicPackage.generateTargetDecryptionShareProofMaterial(
+                mismatchedInput,
+            ),
+        ).rejects.toThrow(/canonical credential order/u);
+        expect(freshKernelLoadCount).toBe(0);
+        expect(stageAggregateOpeningMaterials).not.toHaveBeenCalled();
     });
 
     it('uses one deep target release snapshot across kernel loading and chunk callbacks', async () => {

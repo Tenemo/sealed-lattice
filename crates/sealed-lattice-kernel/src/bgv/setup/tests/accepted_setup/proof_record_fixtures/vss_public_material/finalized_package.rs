@@ -155,11 +155,9 @@ fn minimal_finalized_collective_setup_package_passes_accepted_setup() {
         128,
         "finalized fixtures must retain the accepted public commitment ring degree",
     );
-    let result = crate::bgv::setup::accepted_setup::verify_collective_bgv_setup_package(
-        package,
-        &fixture.verification_request,
-    )
-    .expect("finalized collective setup package verification result");
+    let result = fixture
+        .verify()
+        .expect("finalized collective setup package verification result");
     let context = || serde_json::to_string_pretty(&result).unwrap();
     // The embedded commitment sets satisfy the coefficient-commitment requirement;
     // only the terminal runtime objects a pre-terminal setup package lacks may

@@ -55,10 +55,6 @@ export const verificationExceptionMessage = (
     return detail.length === 0 ? summary : `${summary} Diagnostic: ${detail}`;
 };
 
-export const uniqueStrings = <StringValue extends string>(
-    values: readonly StringValue[],
-): StringValue[] => [...new Set(values)];
-
 export const compareCanonicalStrings = (left: string, right: string): number =>
     left < right ? -1 : left > right ? 1 : 0;
 

@@ -290,7 +290,7 @@ pub(super) fn derive_bgv_public_a_polynomial(
             public_matrix_seed_hash,
             "accepted-bgv-public-a",
             DATA_PRIMES[0],
-        ),
+        )?,
     });
     let public_polynomial_root = derive_canonical_object_hash(&public_a)?;
     public_a["publicPolynomialRoot"] = Value::String(public_polynomial_root);

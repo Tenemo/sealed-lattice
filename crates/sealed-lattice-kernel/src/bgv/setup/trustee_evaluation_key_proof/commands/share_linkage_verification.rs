@@ -363,17 +363,20 @@ pub(super) fn verify_vss_share_linkage_item_against_public_records(
 #[cfg(test)]
 pub(crate) fn verify_vss_share_linkage_proof_material_set_from_request(
     request: &Value,
+    proof_binding_session: Option<&crate::bgv::setup::AcceptedSetupProofBindingSession>,
 ) -> CanonicalResult<Value> {
     let statement_verification =
         crate::bgv::setup::vss_commitment::verify_vss_share_linkage_bindings_request(request)?;
     verify_vss_share_linkage_proof_material_set_with_statement_verification(
         request,
         &statement_verification,
+        proof_binding_session,
     )
 }
 
 pub(in crate::bgv::setup) fn verify_vss_share_linkage_statement_and_proof_material_set_from_request(
     request: &Value,
+    proof_binding_session: Option<&crate::bgv::setup::AcceptedSetupProofBindingSession>,
 ) -> CanonicalResult<(Value, Value)> {
     let statement_verification =
         crate::bgv::setup::vss_commitment::verify_vss_share_linkage_bindings_request(request)?;
@@ -381,6 +384,7 @@ pub(in crate::bgv::setup) fn verify_vss_share_linkage_statement_and_proof_materi
         verify_vss_share_linkage_proof_material_set_with_statement_verification(
             request,
             &statement_verification,
+            proof_binding_session,
         )?;
     Ok((statement_verification, proof_material_verification))
 }
@@ -388,6 +392,7 @@ pub(in crate::bgv::setup) fn verify_vss_share_linkage_statement_and_proof_materi
 fn verify_vss_share_linkage_proof_material_set_with_statement_verification(
     request: &Value,
     statement_verification: &Value,
+    proof_binding_session: Option<&crate::bgv::setup::AcceptedSetupProofBindingSession>,
 ) -> CanonicalResult<Value> {
     let statement = request.get("statement").ok_or_else(|| {
         invalid_succinct_setup_proof("share-linkage material statement must be present")
@@ -571,16 +576,8 @@ fn verify_vss_share_linkage_proof_material_set_with_statement_verification(
             }
         }
 
-        let resolved_proof_bytes = resolve_vss_share_linkage_proof_bytes(
-            proof_record,
-            request,
-            &coverage,
-            vss_share_linkage,
-        )?;
-        let proof_bytes = resolved_proof_bytes.proof_bytes;
-        let proof_record_without_root = resolved_proof_bytes.proof_record_without_root;
-        let expected_record_root = resolved_proof_bytes.proof_record_root;
-
+        let validated_proof_reference =
+            validate_vss_share_linkage_proof_reference(proof_record, &coverage, vss_share_linkage)?;
         let proof_request = json!({
             "context": {
                 "ceremonyId": read_string(statement, "ceremonyId")?,
@@ -594,7 +591,31 @@ fn verify_vss_share_linkage_proof_material_set_with_statement_verification(
             "ringDegree": ring_degree,
             "vssShareLinkage": vss_share_linkage,
         });
-        verify_vss_share_linkage_proof_source_from_request(&proof_request, proof_bytes.as_ref())
+        let verification_binding_hash = vss_share_linkage_proof_verification_binding_hash(
+            &validated_proof_reference.proof_material_root,
+            &proof_request,
+        )?;
+        let proof_material_root = validated_proof_reference.proof_material_root.clone();
+        let (proof_record_without_root, expected_record_root) = if let Some(proof_binding_session) =
+            proof_binding_session
+            && crate::bgv::setup::consume_accepted_setup_proof_binding(
+                proof_binding_session.session_handle,
+                &proof_binding_session.capability,
+                VSS_SHARE_LINKAGE_PROOF_FAMILY,
+                &proof_material_root,
+                &verification_binding_hash,
+            )? {
+            (
+                validated_proof_reference.proof_record_without_root,
+                validated_proof_reference.proof_record_root,
+            )
+        } else {
+            let resolved_proof_bytes =
+                resolve_vss_share_linkage_proof_bytes(validated_proof_reference, request)?;
+            verify_vss_share_linkage_proof_source_from_request(
+                &proof_request,
+                resolved_proof_bytes.proof_bytes.as_ref(),
+            )
             .map_err(|error| {
                 CanonicalError::new(
                     error.code,
@@ -604,6 +625,11 @@ fn verify_vss_share_linkage_proof_material_set_with_statement_verification(
                     ),
                 )
             })?;
+            (
+                resolved_proof_bytes.proof_record_without_root,
+                resolved_proof_bytes.proof_record_root,
+            )
+        };
 
         let mut verified_record = proof_record_without_root;
         verified_record["proofRecordRoot"] = json!(expected_record_root);

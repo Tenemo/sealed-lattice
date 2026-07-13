@@ -3,15 +3,57 @@ use super::*;
 #[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::*;
 
-pub(super) fn sample_public_residues(seed_hash: &str, label: &str, modulus: u64) -> Vec<Value> {
+// These fixed JSON setup paths predate canonical suite selection and do not
+// yet receive a suite record. Keep their deterministic rejection work finite
+// with a transitional execution ceiling; this is not a security acceptance
+// claim.
+const MAXIMUM_DETERMINISTIC_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT: u32 = 64;
+
+fn candidate_draw_limit_exhausted_error() -> CanonicalError {
+    CanonicalError::new(
+        CanonicalErrorCode::InvalidProtocolObject,
+        "the BGV deterministic sampler candidate-draw limit was exhausted before deriving an output",
+    )
+}
+
+fn first_accepted_candidate_from_block(
+    output: &[u8; 64],
+    modulus: u64,
+    candidate_draw_count: &mut u32,
+    maximum_candidate_draws_per_output: u32,
+) -> CanonicalResult<Option<u64>> {
+    for chunk in output.chunks_exact(8) {
+        if *candidate_draw_count == maximum_candidate_draws_per_output {
+            return Err(candidate_draw_limit_exhausted_error());
+        }
+        *candidate_draw_count += 1;
+        let mut word = [0_u8; 8];
+        word.copy_from_slice(chunk);
+        if let Some(reduced_value) = reduce_unbiased_u64(u64::from_le_bytes(word), modulus) {
+            return Ok(Some(reduced_value));
+        }
+    }
+
+    if *candidate_draw_count == maximum_candidate_draws_per_output {
+        Err(candidate_draw_limit_exhausted_error())
+    } else {
+        Ok(None)
+    }
+}
+
+pub(super) fn sample_public_residues(
+    seed_hash: &str,
+    label: &str,
+    modulus: u64,
+) -> CanonicalResult<Vec<Value>> {
     sample_positions()
         .into_iter()
         .map(|position| {
-            json!({
+            Ok(json!({
                 "position": position,
                 "modulus": modulus,
-                "value": sample_residue(seed_hash, label, position, modulus),
-            })
+                "value": sample_residue(seed_hash, label, position, modulus)?,
+            }))
         })
         .collect()
 }
@@ -23,7 +65,7 @@ pub(super) fn sample_small_distribution(
     label: &str,
     minimum: i64,
     maximum: i64,
-) -> Vec<Value> {
+) -> CanonicalResult<Vec<Value>> {
     let width = u64::try_from(maximum - minimum + 1).expect("small distribution width fits u64");
     sample_positions()
         .into_iter()
@@ -31,12 +73,12 @@ pub(super) fn sample_small_distribution(
             let value = minimum
                 + i64::try_from(sample_small_distribution_offset(
                     seed_hash, identity, label, position, width,
-                ))
+                )?)
                 .expect("small distribution offset fits i64");
-            json!({
+            Ok(json!({
                 "position": position,
                 "value": value,
-            })
+            }))
         })
         .collect()
 }
@@ -89,10 +131,17 @@ pub(super) fn sample_small_distribution_offset(
     label: &str,
     position: usize,
     width: u64,
-) -> u64 {
+) -> CanonicalResult<u64> {
+    if width == 0 {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidProtocolObject,
+            "small-distribution sampling width must be positive",
+        ));
+    }
     let position_text = position.to_string();
     let mut block_index = 0_u64;
-    loop {
+    let mut candidate_draw_count = 0_u32;
+    while candidate_draw_count < MAXIMUM_DETERMINISTIC_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT {
         let block_index_text = block_index.to_string();
         let output = hash512(
             "sealed-lattice-bgv-rns/sample-small-distribution",
@@ -104,17 +153,20 @@ pub(super) fn sample_small_distribution_offset(
                 block_index_text.as_bytes(),
             ],
         );
-        for chunk in output.chunks_exact(8) {
-            let mut word = [0_u8; 8];
-            word.copy_from_slice(chunk);
-            if let Some(reduced_value) = reduce_unbiased_u64(u64::from_le_bytes(word), width) {
-                return reduced_value;
-            }
+        if let Some(reduced_value) = first_accepted_candidate_from_block(
+            &output,
+            width,
+            &mut candidate_draw_count,
+            MAXIMUM_DETERMINISTIC_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
+        )? {
+            return Ok(reduced_value);
         }
         block_index = block_index
             .checked_add(1)
-            .expect("small distribution rejection block index overflowed");
+            .ok_or_else(candidate_draw_limit_exhausted_error)?;
     }
+
+    Err(candidate_draw_limit_exhausted_error())
 }
 
 // Each coefficient position has a single hash-elected owner, so the collective
@@ -142,7 +194,7 @@ pub(super) fn bounded_collective_secret_share_coefficient(
         "local-secret-share",
         position,
         3,
-    ) {
+    )? {
         0 => Ok(-1),
         1 => Ok(0),
         2 => Ok(1),
@@ -212,7 +264,8 @@ fn collective_share_owner_index(
         u64::try_from(participant_count).expect("participant count fits u64");
     let position_text = position.to_string();
     let mut block_index = 0_u64;
-    loop {
+    let mut candidate_draw_count = 0_u32;
+    while candidate_draw_count < MAXIMUM_DETERMINISTIC_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT {
         let block_index_text = block_index.to_string();
         let output = hash512(
             "sealed-lattice-bgv-rns/bounded-collective-share-owner",
@@ -223,19 +276,20 @@ fn collective_share_owner_index(
                 block_index_text.as_bytes(),
             ],
         );
-        for chunk in output.chunks_exact(8) {
-            let mut word = [0_u8; 8];
-            word.copy_from_slice(chunk);
-            if let Some(reduced_value) =
-                reduce_unbiased_u64(u64::from_le_bytes(word), participant_count_u64)
-            {
-                return Ok(usize::try_from(reduced_value).expect("owner index fits usize"));
-            }
+        if let Some(reduced_value) = first_accepted_candidate_from_block(
+            &output,
+            participant_count_u64,
+            &mut candidate_draw_count,
+            MAXIMUM_DETERMINISTIC_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
+        )? {
+            return Ok(usize::try_from(reduced_value).expect("owner index fits usize"));
         }
         block_index = block_index
             .checked_add(1)
-            .expect("collective share owner rejection block index overflowed");
+            .ok_or_else(candidate_draw_limit_exhausted_error)?;
     }
+
+    Err(candidate_draw_limit_exhausted_error())
 }
 
 #[cfg(test)]
@@ -256,7 +310,11 @@ pub(super) fn sample_centered_binomial_eta2(
         .collect()
 }
 
-pub(super) fn dense_public_residues(seed_hash: &str, label: &str, modulus: u64) -> Vec<u64> {
+pub(super) fn dense_public_residues(
+    seed_hash: &str,
+    label: &str,
+    modulus: u64,
+) -> CanonicalResult<Vec<u64>> {
     dense_public_residues_with_degree(seed_hash, label, modulus, POLYNOMIAL_DEGREE)
 }
 
@@ -268,7 +326,7 @@ pub(super) fn dense_public_residues_with_degree(
     label: &str,
     modulus: u64,
     ring_degree: usize,
-) -> Vec<u64> {
+) -> CanonicalResult<Vec<u64>> {
     #[cfg(not(target_arch = "wasm32"))]
     {
         (0..ring_degree)
@@ -355,11 +413,23 @@ pub(super) fn negacyclic_product_mod(
     Ok(left_ntt)
 }
 
-pub(super) fn sample_residue(seed_hash: &str, label: &str, position: usize, modulus: u64) -> u64 {
+pub(super) fn sample_residue(
+    seed_hash: &str,
+    label: &str,
+    position: usize,
+    modulus: u64,
+) -> CanonicalResult<u64> {
+    if modulus == 0 {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidProtocolObject,
+            "public-residue sampling modulus must be positive",
+        ));
+    }
     let position_text = position.to_string();
     let modulus_text = modulus.to_string();
     let mut block_index = 0_u64;
-    loop {
+    let mut candidate_draw_count = 0_u32;
+    while candidate_draw_count < MAXIMUM_DETERMINISTIC_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT {
         let block_index_text = block_index.to_string();
         let output = hash512(
             "sealed-lattice-bgv-rns/sample-residue",
@@ -371,17 +441,20 @@ pub(super) fn sample_residue(seed_hash: &str, label: &str, position: usize, modu
                 block_index_text.as_bytes(),
             ],
         );
-        for chunk in output.chunks_exact(8) {
-            let mut word = [0_u8; 8];
-            word.copy_from_slice(chunk);
-            if let Some(reduced_value) = reduce_unbiased_u64(u64::from_le_bytes(word), modulus) {
-                return reduced_value;
-            }
+        if let Some(reduced_value) = first_accepted_candidate_from_block(
+            &output,
+            modulus,
+            &mut candidate_draw_count,
+            MAXIMUM_DETERMINISTIC_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
+        )? {
+            return Ok(reduced_value);
         }
         block_index = block_index
             .checked_add(1)
-            .expect("public residue rejection block index overflowed");
+            .ok_or_else(candidate_draw_limit_exhausted_error)?;
     }
+
+    Err(candidate_draw_limit_exhausted_error())
 }
 
 pub(super) fn reduce_unbiased_u64(candidate: u64, modulus: u64) -> Option<u64> {
@@ -413,4 +486,35 @@ pub(super) fn sample_positions() -> Vec<usize> {
     positions.dedup();
 
     positions
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn public_sampler_candidate_draw_exhaustion_is_typed_and_deterministic() {
+        let rejected_candidates = [u8::MAX; 64];
+        let mut candidate_draw_count = 0;
+        let error = first_accepted_candidate_from_block(
+            &rejected_candidates,
+            (1_u64 << 63) + 1,
+            &mut candidate_draw_count,
+            8,
+        )
+        .expect_err("all eight fixed candidates are in the rejection zone");
+
+        assert_eq!(candidate_draw_count, 8);
+        assert_eq!(error.code, CanonicalErrorCode::InvalidProtocolObject);
+        assert!(error.message.contains("candidate-draw limit was exhausted"));
+    }
+
+    #[test]
+    fn zero_public_sampler_modulus_is_rejected_without_looping() {
+        let error = sample_residue(&"0".repeat(128), "invalid-modulus", 0, 0)
+            .expect_err("a zero modulus cannot define a residue distribution");
+
+        assert_eq!(error.code, CanonicalErrorCode::InvalidProtocolObject);
+        assert!(error.message.contains("modulus must be positive"));
+    }
 }

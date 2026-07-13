@@ -19,7 +19,7 @@ describe('collective BGV setup kernel commands', () => {
         const kernel = await loadTranscriptCoreKernel();
         const passiveSetup = kernel.generateBgvPassiveSetup(setupRequest);
 
-        const result = kernel.verifyCollectiveBgvSetup({
+        const result = kernel.beginAcceptedSetupSession().verifyCollectiveBgvSetup({
             setupPackage: passiveSetup,
         });
 
@@ -35,14 +35,14 @@ describe('collective BGV setup kernel commands', () => {
         const kernel = await loadTranscriptCoreKernel();
 
         expect(() => {
-            kernel.verifyCollectiveBgvSetup({
+            kernel.beginAcceptedSetupSession().verifyCollectiveBgvSetup({
                 setupPackage: undefined,
             });
         }).toThrow(TranscriptCoreKernelCommandError);
 
         let thrownError: unknown;
         try {
-            kernel.verifyCollectiveBgvSetup({
+            kernel.beginAcceptedSetupSession().verifyCollectiveBgvSetup({
                 setupPackage: undefined,
             });
             throw new Error('verifyCollectiveBgvSetup should have failed.');
@@ -54,6 +54,32 @@ describe('collective BGV setup kernel commands', () => {
         expect(commandError.code).toBe('InvalidProtocolObject');
         expect(commandError.message).not.toContain('InvalidFixture');
         expect(commandError.message).toContain('setupPackage is required');
+    });
+
+    it('accepts the protocol-built transport certificate before later package checks', async () => {
+        const kernel = await loadTranscriptCoreKernel();
+        const parameters = kernel.describeCollectiveBgvSetupParameters({
+            participantCount: 3,
+        });
+        const setupPackage = await acceptedShapedSetupPackage(
+            kernel,
+            parameters,
+        );
+
+        const result = kernel.beginAcceptedSetupSession().verifyCollectiveBgvSetup({
+            setupPackage,
+            expectedManifestHash: setupRequest.manifestHash,
+            expectedRosterHash: String(
+                (setupPackage.setupContext as JsonRecord).rosterHash,
+            ),
+        });
+
+        expect(result.isValid).toBe(false);
+        expect(result.refusedObjects[0]).toMatchObject({
+            reasonCode: 'relinearizationRoundOneLevelMissing',
+            objectPath:
+                'setupPackage.relinearizationKeyShareRounds.roundOneRecords',
+        });
     });
 
     it('refuses malformed setup context before reporting missing prerequisites', async () => {
@@ -75,7 +101,7 @@ describe('collective BGV setup kernel commands', () => {
             delete setupPackage.phaseTranscript;
             rebindCollectiveSetupPackageHash(kernel, setupPackage);
 
-            const result = kernel.verifyCollectiveBgvSetup({
+            const result = kernel.beginAcceptedSetupSession().verifyCollectiveBgvSetup({
                 setupPackage,
                 expectedManifestHash: setupRequest.manifestHash,
                 expectedRosterHash: String(
@@ -106,7 +132,7 @@ describe('collective BGV setup kernel commands', () => {
         );
         rebindCollectiveSetupPackageHash(kernel, setupPackage);
 
-        const result = kernel.verifyCollectiveBgvSetup({
+        const result = kernel.beginAcceptedSetupSession().verifyCollectiveBgvSetup({
             setupPackage,
             expectedManifestHash: setupRequest.manifestHash,
             expectedRosterHash: String(

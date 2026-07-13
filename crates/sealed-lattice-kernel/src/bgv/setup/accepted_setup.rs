@@ -40,6 +40,7 @@ use self::evaluation_key_proof_checks::verify_trustee_evaluation_key_proofs;
 #[cfg(test)]
 pub(in crate::bgv::setup) use self::evaluation_key_proof_checks::{
     TrusteeEvaluationKeyStatementInputs, accepted_key_switch_decomposition_hash,
+    trustee_evaluation_key_proof_verification_binding_hash,
     trustee_evaluation_key_statement_from_package,
 };
 use self::evaluation_key_share_rounds::{
@@ -66,27 +67,34 @@ use self::private_vss_envelopes::{
 #[cfg(test)]
 pub(in crate::bgv::setup) use self::public_key_share_material::accepted_setup_collective_public_key_from_package;
 #[cfg(test)]
+pub(in crate::bgv::setup) use self::public_key_share_material::authenticated_public_key_share_material_stream_summary;
+#[cfg(test)]
 pub(in crate::bgv::setup) use self::public_key_share_material::public_key_share_coefficient_vector_hash;
 pub(in crate::bgv::setup) use self::public_key_share_material::{
     CanonicalPublicKeyShareMaterialStream,
     absorb_verified_canonical_public_key_share_material_chunk,
-    authenticated_public_key_share_material_stream_summary,
+    authenticated_public_key_share_material_stream_summary_in_session,
     begin_verified_canonical_public_key_share_material_stream,
     cancel_verified_canonical_public_key_share_material_stream,
-    evict_verified_canonical_public_key_share_materials,
+    drain_verified_canonical_public_key_share_materials,
     finish_verified_canonical_public_key_share_material_stream,
 };
+#[cfg(test)]
+pub(in crate::bgv::setup) use self::public_key_share_material::evict_verified_canonical_public_key_share_materials;
 use self::public_key_share_material::{
     PublicKeyShareMaterialBinding, public_key_share_material_uses_transport,
     verify_collective_public_key_material, verify_collective_public_key_pair_consistency,
     verify_public_key_share_material_set,
 };
-#[cfg(test)]
-pub(in crate::bgv::setup) use self::public_key_shares::public_key_share_succinct_proof_material_root;
 use self::public_key_shares::{
     PublicKeyCommonBinding, public_key_common_binding, public_key_refusal,
     public_key_share_records_by_roster_position, verify_optional_public_key_share_succinct_proofs,
     verify_public_key_share_proofs, verify_public_key_shares,
+};
+#[cfg(test)]
+pub(in crate::bgv::setup) use self::public_key_shares::{
+    public_key_share_succinct_proof_material_root,
+    public_key_share_succinct_proof_verification_binding_hash,
 };
 #[cfg(test)]
 pub(in crate::bgv::setup) use self::same_secret_bridge_verification::verified_same_secret_bridge_material_from_package;
@@ -109,6 +117,12 @@ use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 use unicode_normalization::UnicodeNormalization;
 
+#[cfg(test)]
+use super::evaluation_key_share_material::VerifiedComponentMaterialEvictionGuard;
+#[cfg(test)]
+use super::evaluation_key_share_material::authenticated_evaluation_key_component_stream_summary;
+#[cfg(test)]
+use super::setup_proof::VerifiedSetupProofMaterialEvictionGuard;
 use super::*;
 use super::{
     commitment::{
@@ -119,13 +133,13 @@ use super::{
     evaluation_key_share_material::{
         EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
         EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_TRANSPORT_SET_OBJECT_TYPE,
-        EvaluationKeyShareProofFamily, VerifiedComponentMaterialEvictionGuard,
-        authenticated_evaluation_key_component_stream_summary, component_b_vectors_from_record,
+        EvaluationKeyShareProofFamily,
+        authenticated_evaluation_key_component_stream_summary_in_session,
+        component_b_vectors_from_record,
     },
     setup_proof::{
         SETUP_PROOF_BYTES_DOMAIN, SETUP_PROOF_MATERIAL_ENCODING, SETUP_PROOF_SERIALIZATION,
-        SetupProofMaterialBytes, VerifiedSetupProofMaterialEvictionGuard,
-        verified_setup_proof_material_bytes_from_request,
+        SetupProofMaterialBytes, verified_setup_proof_material_bytes_from_request,
     },
     vss::carry_aware_vss_share_relation_value,
 };
@@ -416,6 +430,7 @@ pub(crate) fn describe_collective_bgv_setup_parameters_for_roster(
         "setupProof": setup_proof_parameters_value()?,
         "setupTransport": setup_transport_parameters_value_for_roster(roster)?,
         "evaluatorKeySchedule": evaluator_key_schedule_value_for_roster(roster)?,
+        "boundedDomainEvaluator": bounded_domain_evaluator_value_for_roster(roster)?,
         "phaseOrder": phase_order_value(),
         "phaseOrderHash": phase_order_hash()?,
         "requiredFinalObjects": REQUIRED_FINAL_OBJECTS,
@@ -435,20 +450,22 @@ pub(crate) fn describe_collective_bgv_setup_parameters_for_participant_count(
     ))
 }
 
-pub(crate) fn verify_collective_bgv_setup_package_from_request(
+pub(crate) fn verify_collective_bgv_setup_package_in_session_from_request(
     request: &Value,
+    proof_binding_session: crate::bgv::setup::AcceptedSetupProofBindingSession,
 ) -> CanonicalResult<Value> {
-    let _component_material_eviction_guard =
-        VerifiedComponentMaterialEvictionGuard::for_request(request);
-    let _setup_proof_material_eviction_guard =
-        VerifiedSetupProofMaterialEvictionGuard::for_request(request);
     let setup_package = request.get("setupPackage").ok_or_else(|| {
         CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             "setupPackage is required",
         )
     })?;
-    verify_collective_bgv_setup_package_inner(setup_package, request)
+    verify_collective_bgv_setup_package_in_owned_session(
+        setup_package,
+        request,
+        proof_binding_session,
+        &[],
+    )
 }
 
 #[cfg(test)]
@@ -468,15 +485,61 @@ pub(crate) fn verify_collective_bgv_setup_package(
     // evaluation-key proof material.
     let _setup_proof_material_eviction_guard =
         VerifiedSetupProofMaterialEvictionGuard::for_request(request);
-    verify_collective_bgv_setup_package_inner(setup_package, request)
+    verify_collective_bgv_setup_package_inner(setup_package, request, &[])
 }
 
+#[cfg(test)]
+pub(in crate::bgv::setup) fn verify_collective_bgv_setup_package_with_proof_binding_leases(
+    setup_package: &Value,
+    request: &Value,
+    proof_binding_leases: &[crate::bgv::setup::CanonicalSetupProofBindingLease],
+) -> CanonicalResult<Value> {
+    let _component_material_eviction_guard =
+        VerifiedComponentMaterialEvictionGuard::for_request(request);
+    let _setup_proof_material_eviction_guard =
+        VerifiedSetupProofMaterialEvictionGuard::for_request(request);
+    verify_collective_bgv_setup_package_inner(setup_package, request, proof_binding_leases)
+}
+
+#[cfg(test)]
 fn verify_collective_bgv_setup_package_inner(
     setup_package: &Value,
     request: &Value,
+    proof_binding_leases: &[crate::bgv::setup::CanonicalSetupProofBindingLease],
 ) -> CanonicalResult<Value> {
+    let proof_binding_session = crate::bgv::setup::AcceptedSetupProofBindingSession::begin_fresh()?;
+    verify_collective_bgv_setup_package_in_owned_session(
+        setup_package,
+        request,
+        proof_binding_session,
+        proof_binding_leases,
+    )
+}
+
+fn verify_collective_bgv_setup_package_in_owned_session(
+    setup_package: &Value,
+    request: &Value,
+    proof_binding_session: crate::bgv::setup::AcceptedSetupProofBindingSession,
+    #[cfg(test)] proof_binding_leases: &[crate::bgv::setup::CanonicalSetupProofBindingLease],
+    #[cfg(not(test))] _proof_binding_leases: &[()],
+) -> CanonicalResult<Value> {
+    #[cfg(test)]
+    for proof_binding_lease in proof_binding_leases {
+        if let Err(error) = crate::bgv::setup::restore_accepted_setup_proof_binding_lease(
+            proof_binding_session.session_handle,
+            &proof_binding_session.capability,
+            proof_binding_lease,
+        ) {
+            let _ = crate::bgv::setup::cancel_accepted_setup_proof_binding_session(
+                proof_binding_session.session_handle,
+                &proof_binding_session.capability,
+            );
+            return Err(error);
+        }
+    }
+
     if !setup_package.is_object() {
-        return verification_response(
+        let response = verification_response(
             None,
             Vec::new(),
             vec![Refusal::new(
@@ -485,11 +548,35 @@ fn verify_collective_bgv_setup_package_inner(
                 "setupPackage".to_string(),
             )],
             Vec::new(),
-        );
+        )?;
+        crate::bgv::setup::cancel_accepted_setup_proof_binding_session(
+            proof_binding_session.session_handle,
+            &proof_binding_session.capability,
+        )?;
+        return Ok(response);
     }
-    match verify_collective_setup_package(setup_package, request)? {
-        VerificationFlow::Continue => accepted_setup_verification_response(),
-        VerificationFlow::Stop(response) => Ok(response),
+    match verify_collective_setup_package(setup_package, request, &proof_binding_session) {
+        Ok(VerificationFlow::Continue) => {
+            crate::bgv::setup::finish_accepted_setup_proof_binding_session(
+                proof_binding_session.session_handle,
+                &proof_binding_session.capability,
+            )?;
+            accepted_setup_verification_response()
+        }
+        Ok(VerificationFlow::Stop(response)) => {
+            crate::bgv::setup::cancel_accepted_setup_proof_binding_session(
+                proof_binding_session.session_handle,
+                &proof_binding_session.capability,
+            )?;
+            Ok(response)
+        }
+        Err(error) => {
+            let _ = crate::bgv::setup::cancel_accepted_setup_proof_binding_session(
+                proof_binding_session.session_handle,
+                &proof_binding_session.capability,
+            );
+            Err(error)
+        }
     }
 }
 
@@ -521,6 +608,7 @@ pub(crate) fn derive_collective_bgv_setup_public_derivations_from_request(
 fn verify_collective_setup_package(
     setup_package: &Value,
     request: &Value,
+    proof_binding_session: &crate::bgv::setup::AcceptedSetupProofBindingSession,
 ) -> CanonicalResult<VerificationFlow> {
     let Some(object_type) = setup_package.get("objectType").and_then(Value::as_str) else {
         return outside_accepted_parameters(
@@ -575,30 +663,38 @@ fn verify_collective_setup_package(
     if let Some(response) = verify_generic_key_switch_policy(setup_package)? {
         return Ok(VerificationFlow::Stop(response));
     }
-    if let Some(response) = verify_transport_certificate(setup_package, request)? {
+    if let Some(response) =
+        verify_transport_certificate(setup_package, request, Some(proof_binding_session))?
+    {
         return Ok(VerificationFlow::Stop(response));
     }
-    let verified_vss_public_material =
-        match verify_optional_vss_public_material(setup_package, request)? {
-            VssPublicMaterialVerification::Absent => None,
-            VssPublicMaterialVerification::Verified(verified_material) => Some(verified_material),
-            VssPublicMaterialVerification::Refused(response) => {
-                return Ok(VerificationFlow::Stop(response));
-            }
-        };
+    let verified_vss_public_material = match verify_optional_vss_public_material(
+        setup_package,
+        request,
+        Some(proof_binding_session),
+    )? {
+        VssPublicMaterialVerification::Absent => None,
+        VssPublicMaterialVerification::Verified(verified_material) => Some(verified_material),
+        VssPublicMaterialVerification::Refused(response) => {
+            return Ok(VerificationFlow::Stop(response));
+        }
+    };
     if let Some(response) =
         verify_threshold_share_commitments(setup_package, verified_vss_public_material.as_ref())?
     {
         return Ok(VerificationFlow::Stop(response));
     }
-    let verified_same_secret_bridge =
-        match verify_optional_same_secret_bridge_statement_set(setup_package, request)? {
-            SameSecretBridgeVerification::Absent => None,
-            SameSecretBridgeVerification::Verified(verified_material) => Some(verified_material),
-            SameSecretBridgeVerification::Refused(response) => {
-                return Ok(VerificationFlow::Stop(response));
-            }
-        };
+    let verified_same_secret_bridge = match verify_optional_same_secret_bridge_statement_set(
+        setup_package,
+        request,
+        Some(proof_binding_session),
+    )? {
+        SameSecretBridgeVerification::Absent => None,
+        SameSecretBridgeVerification::Verified(verified_material) => Some(verified_material),
+        SameSecretBridgeVerification::Refused(response) => {
+            return Ok(VerificationFlow::Stop(response));
+        }
+    };
     if let Some(response) = verify_public_key_shares(setup_package)? {
         return Ok(VerificationFlow::Stop(response));
     }
@@ -609,6 +705,7 @@ fn verify_collective_setup_package(
         setup_package,
         request,
         verified_same_secret_bridge.as_ref(),
+        proof_binding_session,
     )? {
         return Ok(VerificationFlow::Stop(response));
     }
@@ -622,6 +719,7 @@ fn verify_collective_setup_package(
         setup_package,
         request,
         verified_same_secret_bridge.as_ref(),
+        proof_binding_session,
     )? {
         return Ok(VerificationFlow::Stop(response));
     }

@@ -1,5 +1,31 @@
 import type { ProtocolHash } from './protocol-hash.js';
 
+export const thresholdParameterDerivationErrorCodes = Object.freeze([
+    'RosterSizeNotInteger',
+    'RosterSizeBelowSupportedMinimum',
+    'RosterSizeAboveSupportedMaximum',
+    'FrozenRosterOutsidePollBounds',
+    'MicroRosterForbidden',
+] as const);
+
+/** Stable failure code for threshold and frozen-roster parameter derivation. */
+export type ThresholdParameterDerivationErrorCode =
+    (typeof thresholdParameterDerivationErrorCodes)[number];
+
+/** Machine-readable threshold and frozen-roster parameter derivation failure. */
+export class ThresholdParameterDerivationError extends Error {
+    public readonly code: ThresholdParameterDerivationErrorCode;
+
+    public constructor(
+        code: ThresholdParameterDerivationErrorCode,
+        message: string,
+    ) {
+        super(message);
+        this.name = 'ThresholdParameterDerivationError';
+        this.code = code;
+    }
+}
+
 /** Input used to derive structural threshold counts from a roster size. */
 export type ThresholdParametersInput = {
     readonly rosterSize: number;

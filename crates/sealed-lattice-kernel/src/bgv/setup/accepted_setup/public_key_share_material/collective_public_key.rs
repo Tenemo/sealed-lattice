@@ -55,7 +55,7 @@ pub(in crate::bgv::setup) fn accepted_setup_collective_public_key_from_package(
         .map(|modulus| {
             dense_public_residues(public_matrix_seed_hash, "accepted-bgv-public-a", modulus)
         })
-        .collect::<Vec<_>>();
+        .collect::<CanonicalResult<Vec<_>>>()?;
 
     BgvPublicKey::from_components(public_b, public_a)
 }

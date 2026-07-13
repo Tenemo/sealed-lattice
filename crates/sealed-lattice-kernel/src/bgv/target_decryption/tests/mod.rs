@@ -11,7 +11,10 @@ use crate::bgv::{
         generate_passive_setup_package_from_request,
     },
 };
-use std::sync::OnceLock;
+use std::{
+    collections::BTreeMap,
+    sync::{Mutex, OnceLock},
+};
 
 mod share_generation;
 
@@ -23,11 +26,13 @@ const TARGET_DECRYPTION_FIXTURE_SETUP_EPOCH: &str = "setup-epoch-1";
 struct AcceptedSetupFixture {
     setup_package: Value,
     local_aggregate_opening_handoffs: Vec<Value>,
+    aggregate_opening_material_by_root: BTreeMap<String, Vec<u8>>,
 }
 
 struct AggregateThresholdCommitmentSetupOutput {
     public_commitment_set: Value,
     local_aggregate_opening_handoffs: Vec<Value>,
+    aggregate_opening_material_by_root: BTreeMap<String, Vec<u8>>,
 }
 
 // The three fixture trustees, listed in roster order. Roster position is the
@@ -184,6 +189,8 @@ fn build_accepted_setup_fixture() -> AcceptedSetupFixture {
         setup_package: accepted_setup_package,
         local_aggregate_opening_handoffs: aggregate_threshold_commitment_setup_output
             .local_aggregate_opening_handoffs,
+        aggregate_opening_material_by_root: aggregate_threshold_commitment_setup_output
+            .aggregate_opening_material_by_root,
     }
 }
 
@@ -350,6 +357,7 @@ fn aggregate_threshold_commitment_set(
     let mut recipient_records =
         Vec::with_capacity(setup_binding.participants.len() * rns_limb_count);
     let mut local_aggregate_opening_handoffs = Vec::with_capacity(setup_binding.participants.len());
+    let mut aggregate_opening_material_by_root = BTreeMap::new();
     for participant in &setup_binding.participants {
         let share_by_limb = derive_threshold_secret_share_by_limb(
             &evaluator_key,
@@ -377,6 +385,16 @@ fn aggregate_threshold_commitment_set(
                 aggregate_material_seed_hex: &aggregate_material_seed_hex,
             })
             .expect("aggregate opening computation");
+            let aggregate_opening_bytes = aggregate_commitment_message_values
+                .iter()
+                .flat_map(|value| value.to_le_bytes())
+                .collect::<Vec<_>>();
+            assert!(
+                aggregate_opening_material_by_root
+                    .insert(computation.opening_root.clone(), aggregate_opening_bytes)
+                    .is_none(),
+                "aggregate opening roots must be unique"
+            );
             aggregate_opening_credentials.push(json!({
                 "objectType": "LocalTrusteeVssPublicAggregateOpeningCredential",
                 "recipientIdentity": participant.trustee_identity.as_str(),
@@ -386,9 +404,6 @@ fn aggregate_threshold_commitment_set(
                 "rnsPrime": rns_prime,
                 "aggregateCommitmentRoot": computation.commitment_root.clone(),
                 "aggregateOpeningRoot": computation.opening_root.clone(),
-                "aggregateCommitmentMessageValuesLeHex": coefficient_vector_le_hex(
-                    &aggregate_commitment_message_values,
-                ),
                 "aggregateMaterialSeedHex": aggregate_material_seed_hex,
             }));
             recipient_records.push(json!({
@@ -423,7 +438,52 @@ fn aggregate_threshold_commitment_set(
     AggregateThresholdCommitmentSetupOutput {
         public_commitment_set: set,
         local_aggregate_opening_handoffs,
+        aggregate_opening_material_by_root,
     }
+}
+
+fn with_staged_aggregate_opening_material<T>(
+    local_target_share_witness: &Value,
+    operation: impl FnOnce() -> T,
+) -> T {
+    with_staged_aggregate_opening_material_transform(
+        local_target_share_witness,
+        |_aggregate_opening_root, _material| {},
+        operation,
+    )
+}
+
+fn with_staged_aggregate_opening_material_transform<T>(
+    local_target_share_witness: &Value,
+    transform: impl Fn(&str, &mut Vec<u8>),
+    operation: impl FnOnce() -> T,
+) -> T {
+    static MATERIAL_USE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    let _material_use_guard = MATERIAL_USE_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .expect("target-decryption aggregate opening test lock");
+    let credentials = local_target_share_witness["aggregateOpening"]["aggregateOpeningCredentials"]
+        .as_array()
+        .expect("aggregate opening credentials");
+    for credential in credentials {
+        let aggregate_opening_root = credential["aggregateOpeningRoot"]
+            .as_str()
+            .expect("aggregate opening root");
+        let mut material = accepted_setup_fixture()
+            .aggregate_opening_material_by_root
+            .get(aggregate_opening_root)
+            .expect("fixture aggregate opening material")
+            .clone();
+        transform(aggregate_opening_root, &mut material);
+        crate::bgv::setup::retain_generated_canonical_proof_material(
+            crate::bgv::setup::TARGET_DECRYPTION_AGGREGATE_OPENING_MATERIAL_FAMILY,
+            aggregate_opening_root.to_string(),
+            material,
+        )
+        .expect("stage aggregate opening material");
+    }
+    operation()
 }
 
 // A deterministic valid 128-hex private material seed per fixture aggregate
@@ -480,16 +540,18 @@ fn generate_local_share(
     local_target_share_witness_value: &Value,
     trustee_identity: &str,
 ) -> Value {
-    generate_bgv_target_decryption_share_from_local_share_request(&json!({
-        "setupPackage": setup_package,
-        "localTargetShareWitness": local_target_share_witness_value,
-        "targetAcceptedRecord": accepted_record,
-        "targetCiphertextBinding": target_ciphertext_binding,
-        "targetCiphertexts": target_ciphertexts,
-        "targetShareProfile": target_share_profile,
-        "trusteeIdentity": trustee_identity,
-    }))
-    .expect("local witness share")
+    with_staged_aggregate_opening_material(local_target_share_witness_value, || {
+        generate_bgv_target_decryption_share_from_local_share_request(&json!({
+            "setupPackage": setup_package,
+            "localTargetShareWitness": local_target_share_witness_value,
+            "targetAcceptedRecord": accepted_record,
+            "targetCiphertextBinding": target_ciphertext_binding,
+            "targetCiphertexts": target_ciphertexts,
+            "targetShareProfile": target_share_profile,
+            "trusteeIdentity": trustee_identity,
+        }))
+        .expect("local witness share")
+    })
 }
 
 struct TargetShareProofStatementInput<'a> {
@@ -506,16 +568,18 @@ struct TargetShareProofStatementInput<'a> {
 fn derive_share_proof_statement(
     input: TargetShareProofStatementInput<'_>,
 ) -> CanonicalResult<Value> {
-    derive_bgv_target_decryption_share_proof_statement_from_request(&json!({
-        "setupPackage": input.setup_package,
-        "localTargetShareWitness": input.local_target_share_witness_value,
-        "targetAcceptedRecord": input.accepted_record,
-        "targetCiphertextBinding": input.target_ciphertext_binding,
-        "targetCiphertexts": input.target_ciphertexts,
-        "targetShareProfile": input.target_share_profile,
-        "trusteeIdentity": input.trustee_identity,
-        "targetDecryptionShare": input.target_decryption_share,
-    }))
+    with_staged_aggregate_opening_material(input.local_target_share_witness_value, || {
+        derive_bgv_target_decryption_share_proof_statement_from_request(&json!({
+            "setupPackage": input.setup_package,
+            "localTargetShareWitness": input.local_target_share_witness_value,
+            "targetAcceptedRecord": input.accepted_record,
+            "targetCiphertextBinding": input.target_ciphertext_binding,
+            "targetCiphertexts": input.target_ciphertexts,
+            "targetShareProfile": input.target_share_profile,
+            "trusteeIdentity": input.trustee_identity,
+            "targetDecryptionShare": input.target_decryption_share,
+        }))
+    })
 }
 
 struct TargetShareProofStatementBindingInput<'a> {

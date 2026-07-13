@@ -5,7 +5,6 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
-    parseStagePublicPackageArguments,
     sanitizePublicPackageJson,
     stagePublicPackage,
 } from '#tools/ci/stage-public-package.mjs';
@@ -70,20 +69,6 @@ afterEach(async () => {
 });
 
 describe('public package staging', () => {
-    it('parses staging CLI arguments', () => {
-        expect(
-            parseStagePublicPackageArguments(['--out', 'package-dir']),
-        ).toEqual({
-            destinationPath: 'package-dir',
-        });
-        expect(() => parseStagePublicPackageArguments([])).toThrow(
-            'Usage: node ./tools/ci/stage-public-package.mjs --out <directory>',
-        );
-        expect(() => parseStagePublicPackageArguments(['--out'])).toThrow(
-            '--out requires a value.',
-        );
-    });
-
     it('stages SDK output with the canonical root README and license', async () => {
         const projectRoot = await createTemporaryRoot();
         await writeFixtureProject(projectRoot);

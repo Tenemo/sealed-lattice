@@ -412,7 +412,7 @@ impl EvaluationKeyShareDescriptor {
         digit_index: usize,
         modulus: u64,
         ring_degree: usize,
-    ) -> Vec<u64> {
+    ) -> CanonicalResult<Vec<u64>> {
         match self.kind {
             EvaluationKeyShareKind::PublicKeyShare => dense_public_residues_with_degree(
                 &self.key_switch_seed_hex,
@@ -420,13 +420,13 @@ impl EvaluationKeyShareDescriptor {
                 modulus,
                 ring_degree,
             ),
-            _ => public_key_switch_sample(
+            _ => Ok(public_key_switch_sample(
                 &self.key_switch_domain,
                 &self.key_switch_seed_hex,
                 digit_index,
                 modulus,
                 ring_degree,
-            ),
+            )),
         }
     }
 }

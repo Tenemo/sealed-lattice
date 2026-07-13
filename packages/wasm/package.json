@@ -10,6 +10,10 @@
         ".": {
             "types": "./dist/index.d.ts",
             "import": "./dist/index.js"
+        },
+        "./published-sdk": {
+            "types": "./dist/published-sdk.d.ts",
+            "import": "./dist/published-sdk.js"
         }
     },
     "dependencies": {

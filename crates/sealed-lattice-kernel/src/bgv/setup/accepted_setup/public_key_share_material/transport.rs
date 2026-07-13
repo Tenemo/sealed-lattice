@@ -55,9 +55,27 @@ pub(in crate::bgv::setup) fn verified_canonical_public_key_share_material(
         .map(|entry| Arc::clone(&entry.material)))
 }
 
+#[cfg(test)]
 pub(in crate::bgv::setup) fn authenticated_public_key_share_material_stream_summary(
     material_root: &str,
 ) -> CanonicalResult<Option<Arc<VerifiedCanonicalStreamSummary>>> {
+    authenticated_public_key_share_material_stream_summary_in_session(None, material_root)
+}
+
+pub(in crate::bgv::setup) fn authenticated_public_key_share_material_stream_summary_in_session(
+    accepted_setup_session: Option<&crate::bgv::setup::AcceptedSetupProofBindingSession>,
+    material_root: &str,
+) -> CanonicalResult<Option<Arc<VerifiedCanonicalStreamSummary>>> {
+    if let Some(accepted_setup_session) = accepted_setup_session
+        && !crate::bgv::setup::accepted_setup_session_owns_material_root(
+            accepted_setup_session.session_handle,
+            &accepted_setup_session.capability,
+            crate::bgv::setup::AcceptedSetupMaterialStore::PublicKeyShare,
+            material_root,
+        )?
+    {
+        return Ok(None);
+    }
     let materials = verified_canonical_public_key_share_materials()
         .lock()
         .map_err(|_| public_key_share_material_store_error())?;
@@ -66,15 +84,23 @@ pub(in crate::bgv::setup) fn authenticated_public_key_share_material_stream_summ
         .map(|entry| Arc::clone(&entry.stream_summary)))
 }
 
+#[cfg(test)]
 pub(in crate::bgv::setup) fn evict_verified_canonical_public_key_share_materials(
     material_roots: &[String],
 ) {
-    let Ok(mut materials) = verified_canonical_public_key_share_materials().lock() else {
-        return;
-    };
+    let _ = drain_verified_canonical_public_key_share_materials(material_roots);
+}
+
+pub(in crate::bgv::setup) fn drain_verified_canonical_public_key_share_materials(
+    material_roots: &[String],
+) -> CanonicalResult<()> {
+    let mut materials = verified_canonical_public_key_share_materials()
+        .lock()
+        .map_err(|_| public_key_share_material_store_error())?;
     for material_root in material_roots {
         materials.remove(material_root);
     }
+    Ok(())
 }
 
 pub(in crate::bgv::setup) struct CanonicalPublicKeyShareMaterialStream {

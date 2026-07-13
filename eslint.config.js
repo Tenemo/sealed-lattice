@@ -50,7 +50,11 @@ const packageSourceImportPatterns = [
             'Published package source must not depend on repository-private aliases.',
     },
     {
-        group: ['@sealed-lattice/*/*', 'sealed-lattice/*'],
+        group: [
+            '@sealed-lattice/*/*',
+            '!@sealed-lattice/wasm/published-sdk',
+            'sealed-lattice/*',
+        ],
         message:
             'Workspace packages must import another package through its public entry point.',
     },
@@ -316,14 +320,6 @@ export default defineConfig(
                     assertFunctionNames: ['expect', 'assert', 'expect*'],
                 },
             ],
-            'import-x/no-extraneous-dependencies': [
-                ERROR,
-                {
-                    devDependencies: true,
-                    // Vitest resolves this package name to the built public SDK entry point for public-package tests.
-                    whitelist: ['sealed-lattice'],
-                },
-            ],
             'vitest/valid-expect': [ERROR, { minArgs: 1, maxArgs: 2 }],
             'vitest/no-focused-tests': ERROR,
             'vitest/no-disabled-tests': ERROR,
@@ -341,6 +337,14 @@ export default defineConfig(
             '@typescript-eslint/explicit-module-boundary-types': OFF,
             '@typescript-eslint/explicit-function-return-type': OFF,
             '@typescript-eslint/no-unsafe-argument': OFF,
+        },
+    },
+    {
+        files: ['tools/ci/packed-package-smoke.mjs'],
+        rules: {
+            // This script is copied into a temporary consumer and runs only
+            // after the packed SDK has been installed there.
+            'import-x/no-unresolved': OFF,
         },
     },
 );

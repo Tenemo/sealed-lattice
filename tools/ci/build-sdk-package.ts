@@ -1,5 +1,12 @@
 import { createHash } from 'node:crypto';
-import { copyFile, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import {
+    copyFile,
+    mkdir,
+    mkdtemp,
+    readFile,
+    rm,
+    writeFile,
+} from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -7,7 +14,6 @@ import { resolvePackageManagerRunner } from './package-manager-runner.js';
 import { runPackageManagerAndCaptureOutput } from './run-command.js';
 
 import { normalizeTranscriptCoreKernelBytesForHash } from '#packages/wasm/src/transcript-core-bridge.js';
-import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const wasmKernelSourcePath = path.resolve(
@@ -116,6 +122,41 @@ const bundleSdkOutput = (
     }
 };
 
+export const normalizeSdkDeclarationEntryMarker = (input: {
+    readonly declarationBundlePath: string;
+    readonly declarationEntryPath: string;
+    readonly declarationSourceText: string;
+}): string => {
+    const declarationEntryMarkerPath = path
+        .relative(
+            path.dirname(path.dirname(input.declarationBundlePath)),
+            input.declarationEntryPath,
+        )
+        .split(path.sep)
+        .join('/');
+
+    return input.declarationSourceText.replace(
+        `//#region ${declarationEntryMarkerPath}`,
+        '//#region src/index.ts',
+    );
+};
+
+const normalizeSdkDeclarationBundle = async (
+    declarationEntryPath: string,
+): Promise<void> => {
+    const declarationBundlePath = path.join(sdkDistDirectoryPath, 'index.d.ts');
+    const declarationSourceText = await readFile(declarationBundlePath, 'utf8');
+    await writeFile(
+        declarationBundlePath,
+        normalizeSdkDeclarationEntryMarker({
+            declarationBundlePath,
+            declarationEntryPath,
+            declarationSourceText,
+        }),
+        'utf8',
+    );
+};
+
 export const buildSdkPackage = async (): Promise<void> => {
     let kernelBytes: Buffer;
     try {
@@ -136,10 +177,12 @@ export const buildSdkPackage = async (): Promise<void> => {
 
     try {
         emitSdkDeclarationEntry(sdkDeclarationScratchDirectoryPath);
-        bundleSdkOutput(
-            kernelHash,
-            path.join(sdkDeclarationScratchDirectoryPath, 'index.d.ts'),
+        const declarationEntryPath = path.join(
+            sdkDeclarationScratchDirectoryPath,
+            'index.d.ts',
         );
+        bundleSdkOutput(kernelHash, declarationEntryPath);
+        await normalizeSdkDeclarationBundle(declarationEntryPath);
     } finally {
         await rm(sdkDeclarationScratchDirectoryPath, {
             force: true,
@@ -158,6 +201,6 @@ export const buildSdkPackage = async (): Promise<void> => {
     );
 };
 
-if (isDirectlyInvokedModule(import.meta.url)) {
+if (import.meta.main) {
     await buildSdkPackage();
 }

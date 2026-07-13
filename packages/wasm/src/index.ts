@@ -1,12 +1,15 @@
 import {
     bgvCanonicalStreamFamilies,
     openBgvCanonicalStreamRuntime,
+    stageBgvTargetDecryptionAggregateOpeningMaterials,
 } from './bgv-canonical-stream-runtime.js';
 import { createWasmBrowserActionStorageWorkerKernel } from './local-storage-root-worker-kernel.js';
 import {
     canonicalErrorCodes,
+    createPublishedSdkKernelLoader,
     createTranscriptCoreKernelLoader,
     TranscriptCoreKernelCommandError,
+    type AcceptedSetupSession,
     type BgvCollectiveSetupParametersDescription,
     type BgvCollectiveSetupVerification,
     type BgvLocalTrusteeSetupStateVerification,
@@ -17,6 +20,7 @@ import {
     type BgvTargetDecryptionResultReleaseCompletion,
     type FoundationCanonicalTupleValidation,
     type FoundationSchemaObjectValidation,
+    type PublishedSdkKernel,
     type TranscriptCoreKernelLoaderOptions,
     type TranscriptCoreKernelSharePoint,
     type TranscriptCorePlaintextComparison,
@@ -32,11 +36,14 @@ export {
     canonicalErrorCodes,
     bgvCanonicalStreamFamilies,
     createWasmBrowserActionStorageWorkerKernel,
+    createPublishedSdkKernelLoader,
     createTranscriptCoreKernelLoader,
     openBgvCanonicalStreamRuntime,
+    stageBgvTargetDecryptionAggregateOpeningMaterials,
     TranscriptCoreKernelCommandError,
 };
 export type {
+    AcceptedSetupSession,
     TranscriptCoreKernel,
     BgvCollectiveSetupParametersDescription,
     BgvCollectiveSetupVerification,
@@ -48,6 +55,7 @@ export type {
     BgvTargetDecryptionResultReleaseCompletion,
     FoundationCanonicalTupleValidation,
     FoundationSchemaObjectValidation,
+    PublishedSdkKernel,
     TranscriptCoreKernelLoaderOptions,
     TranscriptCoreKernelSharePoint,
     TranscriptCorePlaintextComparison,
@@ -56,6 +64,7 @@ export type {
     BgvCanonicalStreamFamily,
     BgvCanonicalStreamRuntime,
     BgvCanonicalStreamVerifierLease,
+    BgvTargetDecryptionAggregateOpeningMaterialSource,
 } from './bgv-canonical-stream-runtime.js';
 export {
     FoundationBoardInternalError,

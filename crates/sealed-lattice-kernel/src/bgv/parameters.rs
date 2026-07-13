@@ -15,8 +15,7 @@ mod root_parameters;
 
 pub(crate) use root_parameters::{
     BgvBasisKind, DATA_PRIMES, ROOT_PARAMETERS, RootParameters, SPECIAL_PRIME,
-    data_basis_modulus_bits, data_prime_bit_length, extended_basis_modulus_bits,
-    root_parameters_for_modulus,
+    data_prime_bit_length, root_parameters_for_modulus,
 };
 // The single canonical identity for the fixed BGV parameter set, in the style of
 // a SEAL parms_id: one object that unions the full BGV configuration. It binds
@@ -79,10 +78,9 @@ pub(crate) fn allowed_operation_registry_value() -> CanonicalResult<Value> {
 
 #[cfg(test)]
 mod tests {
-    use super::root_parameters::moduli_bit_length_sum;
     use super::{
         BgvBasisKind, DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, SPECIAL_PRIME,
-        data_basis_modulus_bits, extended_basis_modulus_bits, root_parameters_for_modulus,
+        root_parameters_for_modulus,
     };
     use crate::bgv::modular_arithmetic::is_prime_for_tests;
 
@@ -262,26 +260,5 @@ mod tests {
         );
         assert!(BgvBasisKind::Special.moduli_for_level(1).is_none());
         assert!(BgvBasisKind::Special.moduli_for_level(99).is_none());
-    }
-
-    #[test]
-    fn modulus_bit_accounting_sums_actual_modulus_widths() {
-        assert_eq!(moduli_bit_length_sum([0, 1, 255, 256]), 18);
-        assert_eq!(
-            data_basis_modulus_bits(),
-            DATA_PRIMES
-                .iter()
-                .map(
-                    |modulus| usize::try_from(u64::BITS - modulus.leading_zeros())
-                        .expect("bit length fits usize")
-                )
-                .sum::<usize>()
-        );
-        assert_eq!(
-            extended_basis_modulus_bits(),
-            data_basis_modulus_bits()
-                + usize::try_from(u64::BITS - SPECIAL_PRIME.leading_zeros())
-                    .expect("bit length fits usize")
-        );
     }
 }

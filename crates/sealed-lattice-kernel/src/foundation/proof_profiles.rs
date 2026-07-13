@@ -5,7 +5,9 @@ use super::schemas::{
 use super::suite_record::{is_prime_u64, modular_power, modular_product};
 use super::{
     ArtifactKind, ArtifactReference, CanonicalDecodeLimits, CanonicalItem, CanonicalItemType,
-    CanonicalTuple, FoundationSchemaError, ProofFamily, RefusalReason,
+    CanonicalTuple, CollectivePublicKeyAggregationRelationPlan, FoundationSchemaError, ProofFamily,
+    RELATION_PLAN_SCHEMA_IDENTIFIER, RELATION_PLAN_VARIANT_SCHEMA_IDENTIFIER, RefusalReason,
+    SuiteRecord,
 };
 
 pub const PROOF_PROFILE_SET_SCHEMA_IDENTIFIER: u16 = 0x2200;
@@ -19,8 +21,8 @@ const PROOF_PROFILE_SCHEMA_VERSION: u16 = 1;
 const REQUIRED_PROOF_FAMILY_COUNT: usize = 12;
 const MAXIMUM_PROOF_FIELD_COUNT: usize = REQUIRED_PROOF_FAMILY_COUNT;
 const PROOF_FIELD_PROFILE_MAXIMUM_BYTE_LENGTH: usize = 560;
-const PROOF_FIELD_SCHEDULE_MAXIMUM_BYTE_LENGTH: usize = 76;
-const PROOF_FAMILY_PROFILE_MAXIMUM_BYTE_LENGTH: usize = 98;
+const PROOF_FIELD_SCHEDULE_MAXIMUM_BYTE_LENGTH: usize = 86;
+const PROOF_FAMILY_PROFILE_MAXIMUM_BYTE_LENGTH: usize = 108;
 const ORDERED_PROOF_PROFILE_FAMILIES: [ProofFamily; REQUIRED_PROOF_FAMILY_COUNT] = [
     ProofFamily::SameSecretLinkage,
     ProofFamily::PublicKeyShare,
@@ -174,6 +176,7 @@ pub struct ProofFieldSchedule {
     pub final_polynomial_degree_bound_exclusive: u32,
     pub unique_query_count: u32,
     pub non_native_modular_identity_challenge_count: u16,
+    pub maximum_fiat_shamir_candidate_draws_per_output: u32,
 }
 
 impl ProofFieldSchedule {
@@ -186,6 +189,7 @@ impl ProofFieldSchedule {
         final_polynomial_degree_bound_exclusive: u32,
         unique_query_count: u32,
         non_native_modular_identity_challenge_count: u16,
+        maximum_fiat_shamir_candidate_draws_per_output: u32,
     ) -> SchemaResult<Self> {
         if evaluation_blowup_factor == 0 || !evaluation_blowup_factor.is_power_of_two() {
             return Err(schema_error(
@@ -203,10 +207,11 @@ impl ProofFieldSchedule {
             || final_polynomial_degree_bound_exclusive == 0
             || unique_query_count == 0
             || non_native_modular_identity_challenge_count == 0
+            || maximum_fiat_shamir_candidate_draws_per_output == 0
         {
             return Err(schema_error(
                 RefusalReason::OutsideSupportedProfile,
-                "proof DEEP, terminal-degree, query, and non-native challenge counts must be positive",
+                "proof DEEP, terminal-degree, query, non-native challenge, and Fiat-Shamir candidate-draw counts must be positive",
             ));
         }
         Ok(Self {
@@ -217,6 +222,7 @@ impl ProofFieldSchedule {
             final_polynomial_degree_bound_exclusive,
             unique_query_count,
             non_native_modular_identity_challenge_count,
+            maximum_fiat_shamir_candidate_draws_per_output,
         })
     }
 
@@ -229,6 +235,7 @@ impl ProofFieldSchedule {
             self.final_polynomial_degree_bound_exclusive,
             self.unique_query_count,
             self.non_native_modular_identity_challenge_count,
+            self.maximum_fiat_shamir_candidate_draws_per_output,
         )?;
         Ok(())
     }
@@ -246,12 +253,13 @@ impl ProofFieldSchedule {
                 CanonicalItem::unsigned32(self.final_polynomial_degree_bound_exclusive),
                 CanonicalItem::unsigned32(self.unique_query_count),
                 CanonicalItem::unsigned16(self.non_native_modular_identity_challenge_count),
+                CanonicalItem::unsigned32(self.maximum_fiat_shamir_candidate_draws_per_output),
             ],
         ))
     }
 
     fn from_tuple(tuple: &CanonicalTuple) -> SchemaResult<Self> {
-        require_header(tuple, PROOF_FIELD_SCHEDULE_SCHEMA_IDENTIFIER, 7)?;
+        require_header(tuple, PROOF_FIELD_SCHEDULE_SCHEMA_IDENTIFIER, 8)?;
         Self::new(
             read_u16(&tuple.items[0])?,
             read_u32(&tuple.items[1])?,
@@ -260,6 +268,7 @@ impl ProofFieldSchedule {
             read_u32(&tuple.items[4])?,
             read_u32(&tuple.items[5])?,
             read_u16(&tuple.items[6])?,
+            read_u32(&tuple.items[7])?,
         )
     }
 
@@ -351,32 +360,48 @@ impl ProofFamilyProfile {
 /// The canonical suite artifact that maps every version-one proof family to an
 /// immutable field schedule.
 ///
-/// Intrinsic validation deliberately does not claim relation-plan correctness,
-/// a security level, FRI soundness, coset disjointness from a relation-specific
-/// trace subgroup, or that a terminal bound is below a relation-specific
-/// initial degree bound. Those require the generated relation plans and the
-/// external assurance evidence rather than fields present in schemas 0x2200
-/// through 0x2203.
+/// The current artifact embeds the exact deterministic public-only collective
+/// public-key aggregation plan. It deliberately does not claim coverage for
+/// the other proof families, common-proof acceptance, witness extraction, a
+/// security level, or complete FRI soundness. Those remain separate work from
+/// this first relation-plan slice.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProofProfileSet {
     pub proof_fields: Vec<ProofFieldProfile>,
     pub proof_families: Vec<ProofFamilyProfile>,
+    relation_plans: Vec<CanonicalTuple>,
+    root_compatibility_edges: Vec<CanonicalTuple>,
 }
 
 impl ProofProfileSet {
     pub fn new(
         proof_fields: Vec<ProofFieldProfile>,
         proof_families: Vec<ProofFamilyProfile>,
+        suite_record: &SuiteRecord,
     ) -> SchemaResult<Self> {
-        let profile_set = Self {
+        let mut profile_set = Self {
             proof_fields,
             proof_families,
+            relation_plans: Vec::new(),
+            root_compatibility_edges: Vec::new(),
         };
+        profile_set.validate_profile_catalog()?;
+        let relation_plan =
+            CollectivePublicKeyAggregationRelationPlan::for_suite(suite_record, &profile_set)?;
+        profile_set.relation_plans.push(CanonicalTuple::decode(
+            &relation_plan.encode(),
+            &CanonicalDecodeLimits::default(),
+        )?);
         profile_set.validate_intrinsic()?;
         Ok(profile_set)
     }
 
     pub fn validate_intrinsic(&self) -> SchemaResult<()> {
+        self.validate_profile_catalog()?;
+        validate_relation_plan_catalog(&self.relation_plans, &self.root_compatibility_edges)
+    }
+
+    fn validate_profile_catalog(&self) -> SchemaResult<()> {
         if self.proof_fields.is_empty() || self.proof_fields.len() > MAXIMUM_PROOF_FIELD_COUNT {
             return Err(schema_error(
                 RefusalReason::OutsideSupportedProfile,
@@ -429,11 +454,29 @@ impl ProofProfileSet {
         Ok(())
     }
 
+    pub fn validate_for_suite(&self, suite_record: &SuiteRecord) -> SchemaResult<()> {
+        self.validate_intrinsic()?;
+        let expected_relation_plan =
+            CollectivePublicKeyAggregationRelationPlan::for_suite(suite_record, self)?.encode();
+        if self.relation_plans[0].encode()? != expected_relation_plan {
+            return Err(schema_error(
+                RefusalReason::WrongContext,
+                "collective public-key aggregation relation plan does not match the suite",
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn collective_public_key_aggregation_relation_plan_bytes(&self) -> SchemaResult<Vec<u8>> {
+        self.validate_intrinsic()?;
+        Ok(self.relation_plans[0].encode()?)
+    }
+
     pub fn field_and_schedule_for_family(
         &self,
         proof_family: ProofFamily,
     ) -> SchemaResult<(&ProofFieldProfile, &ProofFieldSchedule)> {
-        self.validate_intrinsic()?;
+        self.validate_profile_catalog()?;
         let statement_schema_identifier = proof_family.statement_schema_identifier();
         let family_index = self
             .proof_families
@@ -467,12 +510,30 @@ impl ProofProfileSet {
                 CanonicalItem::nested_tuple(&family.canonical_tuple()?).map_err(Into::into)
             })
             .collect::<SchemaResult<Vec<_>>>()?;
+        let relation_plan_items = self
+            .relation_plans
+            .iter()
+            .map(|relation_plan| CanonicalItem::nested_tuple(relation_plan).map_err(Into::into))
+            .collect::<SchemaResult<Vec<_>>>()?;
+        let root_compatibility_edge_items = self
+            .root_compatibility_edges
+            .iter()
+            .map(|edge| CanonicalItem::nested_tuple(edge).map_err(Into::into))
+            .collect::<SchemaResult<Vec<_>>>()?;
         Ok(CanonicalTuple::new(
             PROOF_PROFILE_SET_SCHEMA_IDENTIFIER,
             PROOF_PROFILE_SCHEMA_VERSION,
             vec![
                 CanonicalItem::homogeneous_list(CanonicalItemType::NestedTuple, &field_items)?,
                 CanonicalItem::homogeneous_list(CanonicalItemType::NestedTuple, &family_items)?,
+                CanonicalItem::homogeneous_list(
+                    CanonicalItemType::NestedTuple,
+                    &relation_plan_items,
+                )?,
+                CanonicalItem::homogeneous_list(
+                    CanonicalItemType::NestedTuple,
+                    &root_compatibility_edge_items,
+                )?,
             ],
         ))
     }
@@ -493,7 +554,7 @@ impl ProofProfileSet {
             .maximum_item_byte_length
             .min(PROOF_PROFILE_SET_MAXIMUM_BYTE_LENGTH);
         let tuple = CanonicalTuple::decode(bytes, &bounded_limits)?;
-        require_header(&tuple, PROOF_PROFILE_SET_SCHEMA_IDENTIFIER, 2)?;
+        require_header(&tuple, PROOF_PROFILE_SET_SCHEMA_IDENTIFIER, 4)?;
         require_nested_tuple_count(
             &tuple.items[0],
             1,
@@ -506,6 +567,18 @@ impl ProofProfileSet {
             REQUIRED_PROOF_FAMILY_COUNT,
             "proof profile family count must be exactly twelve",
         )?;
+        require_nested_tuple_count(
+            &tuple.items[2],
+            1,
+            1,
+            "proof profile relation-plan count must be exactly one in the implemented slice",
+        )?;
+        require_nested_tuple_count(
+            &tuple.items[3],
+            0,
+            0,
+            "proof profile root compatibility edges require producer relation plans",
+        )?;
         let proof_fields = read_nested_tuple_list(&tuple.items[0], &bounded_limits)?
             .iter()
             .map(ProofFieldProfile::from_tuple)
@@ -514,7 +587,24 @@ impl ProofProfileSet {
             .iter()
             .map(|family| ProofFamilyProfile::from_tuple(family, &bounded_limits))
             .collect::<SchemaResult<Vec<_>>>()?;
-        Self::new(proof_fields, proof_families)
+        let profile_set = Self {
+            proof_fields,
+            proof_families,
+            relation_plans: read_nested_tuple_list(&tuple.items[2], &bounded_limits)?,
+            root_compatibility_edges: read_nested_tuple_list(&tuple.items[3], &bounded_limits)?,
+        };
+        profile_set.validate_intrinsic()?;
+        Ok(profile_set)
+    }
+
+    pub fn decode_for_suite(
+        bytes: &[u8],
+        limits: &CanonicalDecodeLimits,
+        suite_record: &SuiteRecord,
+    ) -> SchemaResult<Self> {
+        let profile_set = Self::decode(bytes, limits)?;
+        profile_set.validate_for_suite(suite_record)?;
+        Ok(profile_set)
     }
 
     pub fn artifact_reference(&self) -> SchemaResult<ArtifactReference> {
@@ -525,6 +615,7 @@ impl ProofProfileSet {
         reference: &ArtifactReference,
         canonical_artifact_bytes: &[u8],
         limits: &CanonicalDecodeLimits,
+        suite_record: &SuiteRecord,
     ) -> SchemaResult<Self> {
         if reference.artifact_kind != ArtifactKind::ProofProfileSet {
             return Err(schema_error(
@@ -533,8 +624,46 @@ impl ProofProfileSet {
             ));
         }
         reference.verify_artifact_bytes(canonical_artifact_bytes)?;
-        Self::decode(canonical_artifact_bytes, limits)
+        Self::decode_for_suite(canonical_artifact_bytes, limits, suite_record)
     }
+}
+
+fn validate_relation_plan_catalog(
+    relation_plans: &[CanonicalTuple],
+    root_compatibility_edges: &[CanonicalTuple],
+) -> SchemaResult<()> {
+    if relation_plans.len() != 1 {
+        return Err(schema_error(
+            RefusalReason::OutsideSupportedProfile,
+            "proof profile set must contain the collective public-key aggregation relation plan",
+        ));
+    }
+    let relation_plan = &relation_plans[0];
+    require_header(relation_plan, RELATION_PLAN_SCHEMA_IDENTIFIER, 2)?;
+    if read_u16(&relation_plan.items[0])?
+        != ProofFamily::CollectivePublicKeyAggregate.statement_schema_identifier()
+    {
+        return Err(schema_error(
+            RefusalReason::WrongTypeOrLength,
+            "proof profile relation plan has the wrong application statement",
+        ));
+    }
+    let variants =
+        read_nested_tuple_list(&relation_plan.items[1], &CanonicalDecodeLimits::default())?;
+    if variants.len() != 1 {
+        return Err(schema_error(
+            RefusalReason::OutsideSupportedProfile,
+            "collective public-key aggregation relation plan must contain one variant",
+        ));
+    }
+    require_header(&variants[0], RELATION_PLAN_VARIANT_SCHEMA_IDENTIFIER, 15)?;
+    if !root_compatibility_edges.is_empty() {
+        return Err(schema_error(
+            RefusalReason::OutsideSupportedProfile,
+            "root compatibility edges require their producer relation plans",
+        ));
+    }
+    Ok(())
 }
 
 fn validate_schedule_against_field(

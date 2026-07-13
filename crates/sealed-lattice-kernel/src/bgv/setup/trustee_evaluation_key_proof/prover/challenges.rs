@@ -111,27 +111,27 @@ pub(in super::super) fn draw_limb_challenges(
     transcript: &mut FiatShamirTranscript,
     layout: &LimbColumnLayout,
     modulus: u64,
-) -> LimbChallenges {
+) -> CanonicalResult<LimbChallenges> {
     let mut gamma_by_key = Vec::with_capacity(layout.active_keys.len());
     for _ in 0..layout.active_keys.len() {
-        gamma_by_key.push(transcript.challenge_nonzero_extension_element("gamma", modulus));
+        gamma_by_key.push(transcript.challenge_nonzero_extension_element("gamma", modulus)?);
     }
     let mut lincheck_challenges = Vec::with_capacity(LINCHECK_REPETITIONS);
     for _ in 0..LINCHECK_REPETITIONS {
         lincheck_challenges
-            .push(transcript.challenge_nonzero_extension_element("lincheck-u", modulus));
+            .push(transcript.challenge_nonzero_extension_element("lincheck-u", modulus)?);
     }
     let lincheck_alpha = transcript.challenge_extension_elements(
         "lincheck-alpha",
         modulus,
         layout.active_keys.len() * LINCHECK_REPETITIONS,
-    );
+    )?;
     let same_secret_bridge_alpha = if layout.same_secret_bridge_material_active() {
         transcript.challenge_extension_elements(
             "same-secret-bridge-alpha",
             modulus,
             layout.same_secret_bridge_relation_count(),
-        )
+        )?
     } else {
         Vec::new()
     };
@@ -140,19 +140,19 @@ pub(in super::super) fn draw_limb_challenges(
             "private-vss-relation-alpha",
             modulus,
             layout.private_vss_relation_count() * LINCHECK_REPETITIONS,
-        )
+        )?
     } else if layout.vss_public_active() {
         transcript.challenge_extension_elements(
             "vss-share-linkage-alpha",
             modulus,
             layout.vss_public_relation_count(),
-        )
+        )?
     } else if layout.target_decryption_active() {
         transcript.challenge_extension_elements(
             "target-decryption-share-alpha",
             modulus,
             layout.target_decryption_relation_count,
-        )
+        )?
     } else if layout.linkage_active() {
         let challenge_label = if layout.same_secret_bridge_material_active() {
             "same-secret-source-linkage-alpha"
@@ -163,19 +163,22 @@ pub(in super::super) fn draw_limb_challenges(
             challenge_label,
             modulus,
             layout.linkage_relation_count(),
-        )
+        )?
     } else {
         Vec::new()
     };
-    let consistency_alpha =
-        transcript.challenge_extension_elements("consistency-alpha", modulus, layout.claim_count());
+    let consistency_alpha = transcript.challenge_extension_elements(
+        "consistency-alpha",
+        modulus,
+        layout.claim_count(),
+    )?;
     let beta = transcript.challenge_extension_elements(
         "beta",
         modulus,
         layout.row_check_constraint_count(),
-    );
+    )?;
 
-    LimbChallenges {
+    Ok(LimbChallenges {
         gamma_by_key,
         lincheck_challenges,
         lincheck_alpha,
@@ -183,7 +186,7 @@ pub(in super::super) fn draw_limb_challenges(
         same_secret_bridge_alpha,
         consistency_alpha,
         beta,
-    }
+    })
 }
 
 pub(in super::super) fn build_limb_public_vectors(
@@ -376,7 +379,7 @@ pub(in super::super) fn build_limb_public_vectors(
         let mut combined_public_sample = extension_zero_vector();
         let mut combined_component = extension_zero_vector();
         for (digit_index, gamma_power) in gamma_powers.iter().enumerate() {
-            let public_sample = key.public_sample(digit_index, modulus, ring_degree);
+            let public_sample = key.public_sample(digit_index, modulus, ring_degree)?;
             let component = &key.component_b_by_digit[digit_index][limb_index];
             for coefficient_index in 0..ring_degree {
                 combined_public_sample[coefficient_index] = tower.add(

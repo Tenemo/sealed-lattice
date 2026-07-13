@@ -12,6 +12,7 @@ import {
 } from '#packages/protocol/src/setup/vss-commitments';
 import {
     loadTranscriptCoreKernel,
+    stageBgvTargetDecryptionAggregateOpeningMaterials,
     type TranscriptCoreKernel,
 } from '#packages/wasm/src/index';
 import { canonicalStreamDescriptorFixture } from '#tests/support/canonical-stream-descriptor-fixture';
@@ -769,7 +770,7 @@ describe('local setup-to-target-share WASM lifecycle', () => {
             await createEncryptedLocalTrusteeSetupStateFromVerifiedShares(
                 setup.localStateInput,
             );
-        const localTargetShareWitness =
+        const preparedWitness =
             await restoreAndPrepareLocalTargetDecryptionShareWitness({
                 encryptedLocalState: encryptedState.encryptedLocalState,
                 expectedLocalStateRoot:
@@ -782,6 +783,10 @@ describe('local setup-to-target-share WASM lifecycle', () => {
                     target.targetDecryptionCiphertextHash,
                 targetShareProfile: target.targetShareProfile,
             });
+        await stageBgvTargetDecryptionAggregateOpeningMaterials({
+            kernel,
+            sources: preparedWitness.aggregateOpeningMaterialSources,
+        });
         const targetDecryptionShare =
             kernel.generateBgvTargetDecryptionShareFromLocalShare({
                 setupPackage: setup.setupPackage,
@@ -790,7 +795,8 @@ describe('local setup-to-target-share WASM lifecycle', () => {
                 targetCiphertextBinding: target.targetCiphertextBinding,
                 targetShareProfile: target.targetShareProfile,
                 trusteeIdentity: localTrusteeIdentity,
-                localTargetShareWitness,
+                localTargetShareWitness:
+                    preparedWitness.localTargetShareWitness,
             });
 
         expect(targetDecryptionShare).toMatchObject({
@@ -820,8 +826,8 @@ describe('local setup-to-target-share WASM lifecycle', () => {
             await createEncryptedLocalTrusteeSetupStateFromVerifiedShares(
                 setup.localStateInput,
             );
-        const localTargetShareWitness =
-            (await restoreAndPrepareLocalTargetDecryptionShareWitness({
+        const preparedWitness =
+            await restoreAndPrepareLocalTargetDecryptionShareWitness({
                 encryptedLocalState: encryptedState.encryptedLocalState,
                 expectedLocalStateRoot:
                     encryptedState.localStateCommitment.localStateRoot,
@@ -832,11 +838,19 @@ describe('local setup-to-target-share WASM lifecycle', () => {
                 targetDecryptionCiphertextHash:
                     target.targetDecryptionCiphertextHash,
                 targetShareProfile: target.targetShareProfile,
-            })) as JsonRecord;
+            });
+        const localTargetShareWitness =
+            preparedWitness.localTargetShareWitness as JsonRecord;
+        const stageAggregateOpeningMaterial = async (): Promise<void> =>
+            stageBgvTargetDecryptionAggregateOpeningMaterials({
+                kernel,
+                sources: preparedWitness.aggregateOpeningMaterialSources,
+            });
         const alteredWitness = structuredClone(localTargetShareWitness);
         const credential = firstAggregateOpeningCredential(alteredWitness);
         credential.aggregateMaterialSeedHex = '00'.repeat(64);
 
+        await stageAggregateOpeningMaterial();
         expect(() =>
             kernel.generateBgvTargetDecryptionShareFromLocalShare({
                 setupPackage: setup.setupPackage,
@@ -849,17 +863,34 @@ describe('local setup-to-target-share WASM lifecycle', () => {
             }),
         ).toThrow(/credential commitment root/u);
 
-        const messageAlteredWitness = structuredClone(localTargetShareWitness);
-        const messageAlteredCredential = firstAggregateOpeningCredential(
-            messageAlteredWitness,
-        );
-        const aggregateMessageHex = String(
-            messageAlteredCredential.aggregateCommitmentMessageValuesLeHex,
-        );
-        messageAlteredCredential.aggregateCommitmentMessageValuesLeHex = `${
-            aggregateMessageHex.startsWith('00') ? '01' : '00'
-        }${aggregateMessageHex.slice(2)}`;
+        const messageAlteredSources =
+            preparedWitness.aggregateOpeningMaterialSources.map(
+                (source, sourceIndex) => ({
+                    ...source,
+                    pullChunk: async (request: {
+                        readonly abortSignal?: AbortSignal;
+                        readonly chunkIndex: number;
+                        readonly expectedByteLength: number;
+                    }): Promise<ArrayBuffer | undefined> => {
+                        const chunk = await source.pullChunk(request);
+                        if (
+                            chunk === undefined ||
+                            sourceIndex !== 0 ||
+                            request.chunkIndex !== 0
+                        ) {
+                            return chunk;
+                        }
+                        const alteredChunk = chunk.slice(0);
+                        new Uint8Array(alteredChunk)[0] ^= 1;
+                        return alteredChunk;
+                    },
+                }),
+            );
 
+        await stageBgvTargetDecryptionAggregateOpeningMaterials({
+            kernel,
+            sources: messageAlteredSources,
+        });
         expect(() =>
             kernel.generateBgvTargetDecryptionShareFromLocalShare({
                 setupPackage: setup.setupPackage,
@@ -868,13 +899,14 @@ describe('local setup-to-target-share WASM lifecycle', () => {
                 targetCiphertextBinding: target.targetCiphertextBinding,
                 targetShareProfile: target.targetShareProfile,
                 trusteeIdentity: localTrusteeIdentity,
-                localTargetShareWitness: messageAlteredWitness,
+                localTargetShareWitness,
             }),
         ).toThrow(/credential commitment root/u);
 
         const contextAlteredWitness = structuredClone(localTargetShareWitness);
         contextAlteredWitness.setupEpoch = 'changed-setup-epoch';
 
+        await stageAggregateOpeningMaterial();
         expect(() =>
             kernel.generateBgvTargetDecryptionShareFromLocalShare({
                 setupPackage: setup.setupPackage,
@@ -894,6 +926,7 @@ describe('local setup-to-target-share WASM lifecycle', () => {
         identityAlteredCredential.recipientIdentity =
             'changed-trustee-identity';
 
+        await stageAggregateOpeningMaterial();
         expect(() =>
             kernel.generateBgvTargetDecryptionShareFromLocalShare({
                 setupPackage: setup.setupPackage,
@@ -914,6 +947,7 @@ describe('local setup-to-target-share WASM lifecycle', () => {
             'changed-aggregate-commitment-root',
         );
 
+        await stageAggregateOpeningMaterial();
         expect(() =>
             kernel.generateBgvTargetDecryptionShareFromLocalShare({
                 setupPackage: setup.setupPackage,
@@ -926,6 +960,7 @@ describe('local setup-to-target-share WASM lifecycle', () => {
             }),
         ).toThrow(/aggregate opening credential commitment root/u);
 
+        await stageAggregateOpeningMaterial();
         expect(() =>
             kernel.generateBgvTargetDecryptionShareFromLocalShare({
                 setupPackage: setup.setupPackage,

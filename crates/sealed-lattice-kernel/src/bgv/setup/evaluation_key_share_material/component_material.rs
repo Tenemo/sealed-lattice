@@ -1,4 +1,5 @@
 use super::*;
+#[cfg(test)]
 use std::collections::BTreeSet;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -153,6 +154,7 @@ fn read_verified_evaluation_key_share_component_material_chunks(
 // Collect the evaluation-key component material roots a verification request
 // references, so the eviction guard drops exactly those store entries and leaves a
 // concurrent verification's entries untouched.
+#[cfg(test)]
 fn request_component_material_roots(request: &Value) -> Vec<String> {
     let Some(material_sidecar) = request.get("transportedEvaluationKeyShareComponentMaterial")
     else {
@@ -163,6 +165,7 @@ fn request_component_material_roots(request: &Value) -> Vec<String> {
     material_roots.into_iter().collect()
 }
 
+#[cfg(test)]
 fn collect_component_material_roots(value: &Value, material_roots: &mut BTreeSet<String>) {
     let mut pending_values = vec![value];
     while let Some(current_value) = pending_values.pop() {
@@ -185,15 +188,22 @@ fn collect_component_material_roots(value: &Value, material_roots: &mut BTreeSet
 // Drop the staged backing of an evicted store entry: on native this removes the
 // temp file; on the browser wasm runtime the in-memory chunk bytes are freed when
 // `backing` drops. Mirrors `discard_component_material_stream_sink`.
-fn discard_verified_component_material_backing(backing: VerifiedComponentMaterialBacking) {
+fn discard_verified_component_material_backing(
+    backing: VerifiedComponentMaterialBacking,
+) -> CanonicalResult<()> {
     match backing {
         #[cfg(not(target_arch = "wasm32"))]
         VerifiedComponentMaterialBacking::TempFile(path) => {
-            let _ = std::fs::remove_file(path);
+            std::fs::remove_file(path).map_err(|_| {
+                invalid_evaluation_key_share_material(
+                    "verified evaluation-key component material backing could not be removed",
+                )
+            })?;
         }
         #[cfg(target_arch = "wasm32")]
         VerifiedComponentMaterialBacking::Memory(_) => {}
     }
+    Ok(())
 }
 
 // Drop the verified component material entries a completed verification consumed,
@@ -202,25 +212,44 @@ fn discard_verified_component_material_backing(backing: VerifiedComponentMateria
 // eviction happens once, after verify returns, rather than on first read. Without
 // it the store would grow with every verified package on the wasm runtime, whose
 // linear memory never returns to the OS.
-fn evict_verified_evaluation_key_share_component_material(material_roots: &[String]) {
-    let Ok(mut stored_chunks) = verified_evaluation_key_share_component_material_chunks().lock()
-    else {
-        return;
-    };
+pub(in crate::bgv::setup) fn evict_verified_evaluation_key_share_component_material(
+    material_roots: &[String],
+) {
+    let _ = drain_verified_evaluation_key_share_component_material(material_roots);
+}
+
+pub(in crate::bgv::setup) fn drain_verified_evaluation_key_share_component_material(
+    material_roots: &[String],
+) -> CanonicalResult<()> {
+    let mut stored_chunks = verified_evaluation_key_share_component_material_chunks()
+        .lock()
+        .map_err(|_| {
+            invalid_evaluation_key_share_material(
+                "verified evaluation-key component material store is unavailable",
+            )
+        })?;
+    let mut first_cleanup_error = None;
     for material_root in material_roots {
         if let Some(entry) = stored_chunks.remove(material_root) {
-            discard_verified_component_material_backing(entry.backing);
+            if let Err(error) = discard_verified_component_material_backing(entry.backing)
+                && first_cleanup_error.is_none()
+            {
+                first_cleanup_error = Some(error);
+            }
         }
     }
+    first_cleanup_error.map_or(Ok(()), Err)
 }
 
 // RAII guard that evicts a verification's streamed component material from the
 // process-global store when verify returns by any path (acceptance, refusal, or
 // error), scoped to the request's own material roots.
+#[cfg(test)]
 pub(in crate::bgv::setup) struct VerifiedComponentMaterialEvictionGuard {
     material_roots: Vec<String>,
 }
 
+#[cfg(test)]
 impl VerifiedComponentMaterialEvictionGuard {
     pub(in crate::bgv::setup) fn for_request(request: &Value) -> Self {
         Self {
@@ -229,6 +258,7 @@ impl VerifiedComponentMaterialEvictionGuard {
     }
 }
 
+#[cfg(test)]
 impl Drop for VerifiedComponentMaterialEvictionGuard {
     fn drop(&mut self) {
         evict_verified_evaluation_key_share_component_material(&self.material_roots);
@@ -606,10 +636,33 @@ struct VerifiedEvaluationKeyShareComponentMaterialChunkStoreEntry {
     total_byte_length: u64,
 }
 
+#[cfg(test)]
 pub(in crate::bgv::setup) fn authenticated_evaluation_key_component_stream_summary(
     proof_family: &str,
     material_root: &str,
 ) -> CanonicalResult<Option<Arc<VerifiedCanonicalStreamSummary>>> {
+    authenticated_evaluation_key_component_stream_summary_in_session(
+        None,
+        proof_family,
+        material_root,
+    )
+}
+
+pub(in crate::bgv::setup) fn authenticated_evaluation_key_component_stream_summary_in_session(
+    accepted_setup_session: Option<&crate::bgv::setup::AcceptedSetupProofBindingSession>,
+    proof_family: &str,
+    material_root: &str,
+) -> CanonicalResult<Option<Arc<VerifiedCanonicalStreamSummary>>> {
+    if let Some(accepted_setup_session) = accepted_setup_session
+        && !crate::bgv::setup::accepted_setup_session_owns_material_root(
+            accepted_setup_session.session_handle,
+            &accepted_setup_session.capability,
+            crate::bgv::setup::AcceptedSetupMaterialStore::Component,
+            material_root,
+        )?
+    {
+        return Ok(None);
+    }
     let store = verified_evaluation_key_share_component_material_chunks()
         .lock()
         .map_err(|_| {
@@ -854,7 +907,7 @@ mod component_material_stream {
                 });
             }
             std::collections::btree_map::Entry::Occupied(_) => {
-                discard_verified_component_material_backing(backing);
+                discard_verified_component_material_backing(backing)?;
                 return Err(invalid_evaluation_key_share_material(
                     "canonical evaluation-key component material root was staged concurrently",
                 ));

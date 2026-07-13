@@ -13,14 +13,11 @@ import { performance } from 'node:perf_hooks';
 import type { TestCase, TestModule } from 'vitest/node';
 import type { Reporter } from 'vitest/reporters';
 
+import {
+    redactDiagnosticText,
+    serializeErrorDiagnostic,
+} from './run-log-diagnostics.js';
 import { resolveTestDiagnosticPaths } from './test-diagnostic-environment.js';
-
-type SerializedTestError = {
-    readonly cause?: SerializedTestError;
-    readonly message: string;
-    readonly name?: string;
-    readonly stack?: string;
-};
 
 type TestDiagnosticEvent = Readonly<{
     elapsedMilliseconds: number;
@@ -32,37 +29,6 @@ type TestDiagnosticEvent = Readonly<{
     timestampIso: string;
 }> &
     Readonly<Record<string, unknown>>;
-
-const serializeTestError = (
-    error: unknown,
-    seen: Set<unknown> = new Set(),
-): SerializedTestError => {
-    if (typeof error !== 'object' || error === null) {
-        return { message: String(error) };
-    }
-    if (seen.has(error)) {
-        return { message: '[Circular error cause]' };
-    }
-    seen.add(error);
-    const errorRecord = error as Readonly<Record<string, unknown>>;
-    const cause = errorRecord.cause;
-
-    return {
-        message:
-            typeof errorRecord.message === 'string'
-                ? errorRecord.message
-                : 'Non-Error object thrown',
-        ...(typeof errorRecord.name === 'string'
-            ? { name: errorRecord.name }
-            : {}),
-        ...(typeof errorRecord.stack === 'string'
-            ? { stack: errorRecord.stack }
-            : {}),
-        ...(cause === undefined
-            ? {}
-            : { cause: serializeTestError(cause, seen) }),
-    };
-};
 
 const testIdentity = (
     testCase: TestCase,
@@ -196,7 +162,9 @@ export class VitestDiagnosticReporter implements Reporter {
         this.#writeEvent('test-finished', {
             ...testIdentity(testCase),
             durationMilliseconds: diagnostic?.duration,
-            errors: result.errors?.map((error) => serializeTestError(error)),
+            errors: result.errors?.map((error) =>
+                serializeErrorDiagnostic(error),
+            ),
             heapBytes: diagnostic?.heap,
             result: result.state,
             retryCount: diagnostic?.retryCount,
@@ -225,7 +193,7 @@ export class VitestDiagnosticReporter implements Reporter {
         this.#writeEvent('test-run-finished', {
             reason,
             unhandledErrors: unhandledErrors.map((error) =>
-                serializeTestError(error),
+                serializeErrorDiagnostic(error),
             ),
         });
         this.#writeAttachmentManifest();
@@ -247,7 +215,7 @@ export class VitestDiagnosticReporter implements Reporter {
         }
         this.#writeEvent('test-stderr', {
             browser: log.browser,
-            content: log.content,
+            content: redactDiagnosticText(log.content),
             origin: log.origin,
             testIdentifier: log.taskId,
         });

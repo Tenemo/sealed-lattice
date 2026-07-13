@@ -383,6 +383,44 @@ fn vss_threshold_aggregate_instance() -> (
     (statement, witness)
 }
 
+#[test]
+fn prover_and_verifier_transcript_order_matches_for_share_linkage() {
+    use crate::bgv::setup::transcript_order_audit::{
+        capture_transcript_order_audit, run_length_encode_transcript_order_audit,
+    };
+
+    let (statement, witness) = vss_threshold_aggregate_instance();
+    let (proof_result, prover_events) = capture_transcript_order_audit(|| {
+        prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED)
+    });
+    let proof = proof_result.expect("audit proof generation");
+    let (verification_result, verifier_events) =
+        capture_transcript_order_audit(|| verify_evaluation_key_share(&statement, &proof));
+
+    verification_result.expect("audit proof verification");
+    assert_eq!(prover_events, verifier_events);
+    let event_count = prover_events.len();
+    let transcripts = run_length_encode_transcript_order_audit(&prover_events);
+    let audit_artifact = serde_json::json!({
+        "formatVersion": 1,
+        "proofFamily": "trustee-evaluation-key",
+        "fixture": {
+            "proofRelation": "threshold-aggregate-share-linkage",
+            "ringDegree": statement.ring_degree,
+            "sourceRnsLimbIndex": 0,
+            "summandCount": 3,
+        },
+        "eventCount": event_count,
+        "transcripts": transcripts,
+    });
+    let expected_artifact: serde_json::Value = serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../test-vectors/fiat-shamir-trustee-evaluation-key-transcript-order.json"
+    )))
+    .expect("parse transcript-order audit artifact");
+    assert_eq!(audit_artifact, expected_artifact);
+}
+
 fn vss_share_linkage_instance() -> (
     TrusteeEvaluationKeyStatement,
     super::super::relation::TrusteeEvaluationKeyWitness,

@@ -150,7 +150,7 @@ fn run_guarded_command(command: GuardedCommand) -> Result<GuardRunResult, String
         })?;
     }
 
-    let containment = match platform::MemoryContainment::apply(
+    let mut containment = match platform::MemoryContainment::apply(
         command.memory_limit_bytes,
         command.virtual_address_space_allowance_bytes,
     ) {
@@ -254,6 +254,13 @@ fn run_guarded_command(command: GuardedCommand) -> Result<GuardRunResult, String
     {
         eprintln!("Process memory guard diagnostics failed: {error}");
         diagnostics_error = Some(error);
+    }
+
+    if let Err(error) = containment.cleanup() {
+        if let Some(writer) = diagnostics.as_mut() {
+            writer.write_guard_error("containment-cleanup", &error)?;
+        }
+        return Err(error);
     }
 
     Ok(GuardRunResult {

@@ -11,14 +11,15 @@ pub(crate) use self::component_material::{
     cancel_verified_canonical_component_material_stream,
     finish_verified_canonical_component_material_stream,
 };
-pub(super) use self::component_material::{
-    VerifiedComponentMaterialEvictionGuard, authenticated_evaluation_key_component_stream_summary,
-    component_b_vectors_from_record,
-};
 #[cfg(test)]
 pub(in crate::bgv::setup) use self::component_material::{
+    VerifiedComponentMaterialEvictionGuard, authenticated_evaluation_key_component_stream_summary,
     evaluation_key_share_component_material_reference_root,
     evaluation_key_share_component_vector_hash, evaluation_key_share_component_vector_root,
+};
+pub(super) use self::component_material::{
+    authenticated_evaluation_key_component_stream_summary_in_session,
+    component_b_vectors_from_record, drain_verified_evaluation_key_share_component_material,
 };
 
 use std::{

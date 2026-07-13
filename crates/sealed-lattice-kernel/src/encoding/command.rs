@@ -269,6 +269,10 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
                 "scoreDifference": comparison.score_difference,
             }))
         }
+        TranscriptCoreCommand::VerifyCollectiveBgvSetup => Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidProtocolObject,
+            "accepted setup verification requires an opaque material-ownership session",
+        )),
         TranscriptCoreCommand::DescribeBgvRnsParameters
         | TranscriptCoreCommand::DescribeBgvOperationRegistry
         | TranscriptCoreCommand::ValidateBgvEvaluatorOperation
@@ -276,7 +280,6 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
         | TranscriptCoreCommand::DeriveCollectiveBgvSetupPublicDerivations
         | TranscriptCoreCommand::GenerateBgvPassiveSetup
         | TranscriptCoreCommand::VerifyBgvPassiveSetup
-        | TranscriptCoreCommand::VerifyCollectiveBgvSetup
         | TranscriptCoreCommand::VerifyPrivateVssShareEnvelope
         | TranscriptCoreCommand::GeneratePrivateVssShareProof
         | TranscriptCoreCommand::GenerateTrusteeEvaluationKeyProof
@@ -305,6 +308,34 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
             run_bgv_command(command, &request)
         }
     }
+}
+
+pub(super) fn run_accepted_setup_command_inner(
+    input: &[u8],
+    session_handle: u32,
+    capability: &[u8; crate::foundation::CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH],
+) -> CanonicalResult<Value> {
+    let request = parse_transcript_core_request(input)?;
+    let command = request
+        .get("command")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "command must be a string",
+            )
+        })?;
+    if parse_transcript_core_command(command)? != TranscriptCoreCommand::VerifyCollectiveBgvSetup {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "accepted-setup session can execute only VerifyCollectiveBgvSetup",
+        ));
+    }
+    crate::bgv::verify_collective_bgv_setup_package_with_session_from_request(
+        &request,
+        session_handle,
+        capability,
+    )
 }
 
 fn read_bounded_hex_field(
@@ -406,9 +437,6 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
         }
         TranscriptCoreCommand::VerifyBgvPassiveSetup => {
             crate::bgv::commands::verify_bgv_passive_setup_from_request(request)
-        }
-        TranscriptCoreCommand::VerifyCollectiveBgvSetup => {
-            crate::bgv::commands::verify_collective_bgv_setup_from_request(request)
         }
         TranscriptCoreCommand::VerifyPrivateVssShareEnvelope => {
             crate::bgv::commands::verify_private_vss_share_envelope(request)

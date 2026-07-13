@@ -215,6 +215,8 @@ const suiteRecord = canonicalTuple(
     unsigned16(3),
     unsigned16(4),
     unsigned16(10),
+    unsigned32(5),
+    unsigned32(7),
     unsigned32(20),
     unsigned32(100),
     unsigned64(3_000n),
@@ -269,7 +271,8 @@ const proofFieldSchedule = canonicalTuple(
     unsigned16(2),
     unsigned32(8),
     unsigned32(4),
-    unsigned16(2),
+    unsigned16(3),
+    unsigned32(6),
 );
 const proofFamilyStatementIdentifiers = [
     0x1211, 0x1212, 0x1213, 0x1214, 0x1215, 0x1216, 0x1217, 0x1218, 0x1302,
@@ -283,14 +286,223 @@ const proofFamilyProfile = (statementSchemaIdentifier: number): Uint8Array =>
     );
 const proofFieldProfile = canonicalTuple(
     0x2201,
-    unsigned64(97n),
-    unsigned64(28n),
-    homogeneousList(0x05, [5n, 0n].map(unsigned64LittleEndian)),
+    unsigned64(769n),
+    unsigned64(7n),
+    homogeneousList(0x05, [0n].map(unsigned64LittleEndian)),
+);
+const relationSelectorPathStep = (
+    stepKind: number,
+    argument: number,
+): Uint8Array =>
+    canonicalTuple(0x2225, unsigned16(stepKind), unsigned64(BigInt(argument)));
+const relationHashValueLayout = canonicalTuple(
+    0x2226,
+    unsigned16(1),
+    optional(0x09),
+    homogeneousList(0x05, []),
+    unsigned16(0),
+);
+const relationApplicationStatementHashSource = (
+    fieldIndex: number,
+    listIndex?: number,
+): Uint8Array =>
+    canonicalTuple(
+        0x2220,
+        nestedTupleList([
+            relationSelectorPathStep(1, fieldIndex),
+            ...(listIndex === undefined
+                ? []
+                : [relationSelectorPathStep(2, listIndex)]),
+        ]),
+        nestedTuple(relationHashValueLayout),
+    );
+const relationColumnValue = (columnOrdinal: number): Uint8Array =>
+    canonicalTuple(
+        0x2212,
+        unsigned32(columnOrdinal),
+        canonicalItem(0x0a, Uint8Array.of(0)),
+        unsigned64(0n),
+    );
+const relationEmptyInstruction = (schemaIdentifier: number): Uint8Array =>
+    canonicalTuple(schemaIdentifier);
+const relationBaseFieldConstant = (value: number): Uint8Array =>
+    canonicalTuple(0x2210, canonicalItem(0x08, unsigned16LittleEndian(value)));
+const collectivePublicKeyRosterSize = 10;
+const collectivePublicKeyDataModuli = [41, 61, 13] as const;
+const collectivePublicKeyModulusCount = collectivePublicKeyDataModuli.length;
+const collectivePublicKeyTreeCount = collectivePublicKeyRosterSize + 1;
+const aggregateDifferenceExpression = (
+    modulusIndex: number,
+): readonly Uint8Array[] => [
+    ...Array.from(
+        { length: collectivePublicKeyRosterSize },
+        (_, rosterPosition) => [
+            relationColumnValue(
+                rosterPosition * collectivePublicKeyModulusCount + modulusIndex,
+            ),
+            ...(rosterPosition === 0 ? [] : [relationEmptyInstruction(0x2214)]),
+        ],
+    ).flat(),
+    relationColumnValue(
+        collectivePublicKeyRosterSize * collectivePublicKeyModulusCount +
+            modulusIndex,
+    ),
+    relationEmptyInstruction(0x2216),
+    relationEmptyInstruction(0x2214),
+];
+const aggregateConstraintExpression = (
+    modulusIndex: number,
+    modulus: number,
+): readonly Uint8Array[] =>
+    Array.from({ length: collectivePublicKeyRosterSize }, (_, multiple) => [
+        ...aggregateDifferenceExpression(modulusIndex),
+        ...(multiple === 0
+            ? []
+            : [
+                  relationBaseFieldConstant(multiple * modulus),
+                  relationEmptyInstruction(0x2216),
+                  relationEmptyInstruction(0x2214),
+                  relationEmptyInstruction(0x2215),
+              ]),
+    ]).flat();
+const traceZeroifierExpression = [
+    relationEmptyInstruction(0x2211),
+    canonicalTuple(0x2217, unsigned64(2n)),
+    relationBaseFieldConstant(1),
+    relationEmptyInstruction(0x2216),
+    relationEmptyInstruction(0x2214),
+] as const;
+const collectivePublicKeyRelationSources = [
+    ...Array.from(
+        { length: collectivePublicKeyRosterSize },
+        (_, rosterPosition) =>
+            relationApplicationStatementHashSource(1, rosterPosition),
+    ),
+    relationApplicationStatementHashSource(2),
+];
+const collectivePublicKeyRelationColumns = Array.from(
+    { length: collectivePublicKeyTreeCount },
+    (_treeArrayIndex, sourceOrdinal) =>
+        Array.from({ length: collectivePublicKeyModulusCount }, () =>
+            canonicalTuple(
+                0x2206,
+                nestedTuple(canonicalTuple(0x2228, unsigned32(sourceOrdinal))),
+                unsigned16(1),
+                unsigned64(2n),
+            ),
+        ),
+).flat();
+const collectivePublicKeyRelationTrees = Array.from(
+    { length: collectivePublicKeyTreeCount },
+    (_, sourceOrdinal) =>
+        canonicalTuple(
+            0x2208,
+            unsigned16(2),
+            unsigned32(sourceOrdinal),
+            unsigned16(sourceOrdinal < collectivePublicKeyRosterSize ? 1 : 2),
+            homogeneousList(
+                0x04,
+                Array.from(
+                    { length: collectivePublicKeyModulusCount },
+                    (_modulusArrayIndex, modulusIndex) =>
+                        unsigned32LittleEndian(
+                            sourceOrdinal * collectivePublicKeyModulusCount +
+                                modulusIndex,
+                        ),
+                ),
+            ),
+        ),
+);
+const collectivePublicKeyRelationConstraints =
+    collectivePublicKeyDataModuli.map((modulus, modulusIndex) =>
+        canonicalTuple(
+            0x2209,
+            unsigned16(1),
+            homogeneousList(0x05, [
+                unsigned64LittleEndian(BigInt(modulusIndex)),
+            ]),
+            nestedTupleList(
+                aggregateConstraintExpression(modulusIndex, modulus),
+            ),
+            nestedTupleList(traceZeroifierExpression),
+        ),
+    );
+const collectivePublicKeyRelationOpeningPoints = Array.from(
+    { length: 2 },
+    (_pointArrayIndex, deepPointOrdinal) =>
+        canonicalTuple(
+            0x220a,
+            unsigned16(deepPointOrdinal),
+            canonicalItem(0x0a, Uint8Array.of(0)),
+            unsigned64(0n),
+            unsigned16(0),
+        ),
+);
+const collectivePublicKeyRelationOpeningClaims = Array.from(
+    { length: collectivePublicKeyTreeCount },
+    (_treeArrayIndex, treeOrdinal) =>
+        Array.from(
+            { length: collectivePublicKeyModulusCount },
+            (_modulusArrayIndex, modulusIndex) =>
+                Array.from(
+                    { length: 2 },
+                    (_pointArrayIndex, openingPointOrdinal) => {
+                        const columnOrdinal =
+                            treeOrdinal * collectivePublicKeyModulusCount +
+                            modulusIndex;
+                        return canonicalTuple(
+                            0x220b,
+                            unsigned16(1),
+                            unsigned32(treeOrdinal),
+                            optional(
+                                0x04,
+                                unsigned32LittleEndian(columnOrdinal),
+                            ),
+                            unsigned32(openingPointOrdinal),
+                            unsigned64(2n),
+                        );
+                    },
+                ),
+        ).flat(),
+).flat();
+const collectivePublicKeyAggregationRelationPlan = canonicalTuple(
+    0x2204,
+    unsigned16(0x1213),
+    nestedTupleList([
+        canonicalTuple(
+            0x2205,
+            optional(0x04),
+            optional(0x03),
+            unsigned16(1),
+            unsigned64(2n),
+            unsigned64(8n),
+            unsigned64(2n),
+            nestedTupleList(
+                collectivePublicKeyDataModuli.map((_, modulusIndex) =>
+                    canonicalTuple(
+                        0x220e,
+                        unsigned16(1),
+                        unsigned16(modulusIndex),
+                    ),
+                ),
+            ),
+            nestedTupleList(collectivePublicKeyRelationSources),
+            nestedTupleList([]),
+            nestedTupleList(collectivePublicKeyRelationColumns),
+            nestedTupleList(collectivePublicKeyRelationTrees),
+            nestedTupleList(collectivePublicKeyRelationConstraints),
+            nestedTupleList(collectivePublicKeyRelationOpeningPoints),
+            nestedTupleList(collectivePublicKeyRelationOpeningClaims),
+            nestedTupleList([]),
+        ),
+    ]),
 );
 const proofProfileSet = canonicalTuple(
     0x2200,
     nestedTupleList([proofFieldProfile]),
     nestedTupleList(proofFamilyStatementIdentifiers.map(proofFamilyProfile)),
+    nestedTupleList([collectivePublicKeyAggregationRelationPlan]),
+    nestedTupleList([]),
 );
 
 const mailboxKemCiphertext = new Uint8Array(1_088);
@@ -452,6 +664,17 @@ export const validFoundationSchemaObjectVectors = [
         'proof object header',
         0x0102,
         canonicalTuple(0x0102, variableRawBytes(canonicalTuple(0x1211))),
+    ),
+    schemaObject(
+        'collective public-key aggregate statement',
+        0x1213,
+        canonicalTuple(
+            0x1213,
+            hash(0x91),
+            hashList(Array.from({ length: 10 }, (_, index) => 0xa0 + index)),
+            hash(0xb1),
+            hash(0xb2),
+        ),
     ),
     schemaObject(
         'proof Merkle tree context',

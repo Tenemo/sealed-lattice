@@ -108,20 +108,29 @@ pub(in super::super) fn sample_deep_points(
     )?);
     let mut points = Vec::with_capacity(DEEP_POINT_COUNT);
     while points.len() < DEEP_POINT_COUNT {
-        let candidate = transcript.challenge_extension_elements("deep-point", modulus, 1)[0];
-        if ChallengeExtensionTower::is_zero(&candidate) {
-            continue;
+        let mut accepted_point = None;
+        for _ in 0..transcript.maximum_candidate_draws_per_output() {
+            let candidate = transcript.challenge_extension_elements("deep-point", modulus, 1)?[0];
+            if ChallengeExtensionTower::is_zero(&candidate)
+                || points.contains(&candidate)
+                || tower.pow(&candidate, plan.trace_size as u64) == ChallengeExtensionTower::one()
+            {
+                continue;
+            }
+            // Every element of the coset raises to g^extension_size, so this
+            // single equality rejects the whole coset at once; likewise
+            // candidate^trace_size == 1 rejects all of H.
+            if tower.pow(&candidate, plan.extension_size as u64) == coset_marker {
+                continue;
+            }
+            accepted_point = Some(candidate);
+            break;
         }
-        if tower.pow(&candidate, plan.trace_size as u64) == ChallengeExtensionTower::one() {
-            continue;
-        }
-        // Every element of the coset raises to g^extension_size, so this single
-        // equality rejects the whole coset at once; likewise
-        // candidate^trace_size == 1 rejects all of H.
-        if tower.pow(&candidate, plan.extension_size as u64) == coset_marker {
-            continue;
-        }
-        points.push(candidate);
+        points.push(accepted_point.ok_or_else(|| {
+            invalid_succinct_setup_proof(
+                "the DEEP-point candidate-draw limit was exhausted before deriving an out-of-domain point",
+            )
+        })?);
     }
 
     Ok(points)

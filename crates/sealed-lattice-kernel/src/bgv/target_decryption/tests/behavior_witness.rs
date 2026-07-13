@@ -85,15 +85,18 @@ fn target_decryption_smudging_zero_shares_cancel_for_interpolation_quorum() {
             &target_share_profile_value,
             &participant.trustee_identity,
         );
-        let local_witness = read_local_target_decryption_share_witness(
-            &local_target_share_witness_value,
-            &setup_binding,
-            &target_accepted,
-            &target_ciphertext_pair,
-            &target_share_profile_binding,
-            participant,
-        )
-        .expect("local target-share witness");
+        let local_witness =
+            with_staged_aggregate_opening_material(&local_target_share_witness_value, || {
+                read_local_target_decryption_share_witness(
+                    &local_target_share_witness_value,
+                    &setup_binding,
+                    &target_accepted,
+                    &target_ciphertext_pair,
+                    &target_share_profile_binding,
+                    participant,
+                )
+                .expect("local target-share witness")
+            });
         let local_share = generate_local_share(
             &setup_package,
             &accepted_record,

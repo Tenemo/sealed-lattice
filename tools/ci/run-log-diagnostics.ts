@@ -49,7 +49,6 @@ const allowedEnvironmentVariableNames = [
     'SEALED_LATTICE_TEST_EVENT_FILE',
     'SEALED_LATTICE_TEST_PROJECT_LABEL',
     'SEALED_LATTICE_TEST_RESULT_FILE',
-    'SEALED_LATTICE_TRUSTEE_PROOF_BATCH_SIZE',
     'SEALED_LATTICE_TRUSTEE_PROOF_LIMB_BATCH_SIZE',
     'VITEST_MAX_THREADS',
     'VITEST_MIN_THREADS',
@@ -101,7 +100,7 @@ const sensitiveTextAssignmentPattern =
     /\b(auth|authorization|cookie|credential|password|private[-_]?key|secret|token)\s*[:=]\s*([^\s,;]+)/giu;
 const urlCredentialsPattern = /([a-z][a-z0-9+.-]*:\/\/)[^/@\s]+@/giu;
 
-const redactSensitiveText = (value: string): string =>
+export const redactDiagnosticText = (value: string): string =>
     value
         .replace(urlCredentialsPattern, '$1[redacted]@')
         .replace(bearerTokenPattern, 'Bearer [redacted]')
@@ -134,7 +133,7 @@ export const redactCommandLineArguments = (
             return argument;
         }
 
-        return redactSensitiveText(argument);
+        return redactDiagnosticText(argument);
     });
 };
 
@@ -147,7 +146,7 @@ export const selectDiagnosticEnvironment = (
 
             return value === undefined
                 ? []
-                : [[name, redactSensitiveText(value)]];
+                : [[name, redactDiagnosticText(value)]];
         }),
     );
 
@@ -155,35 +154,46 @@ export const serializeErrorDiagnostic = (
     error: unknown,
     depth = 0,
 ): ErrorDiagnostic => {
-    if (!(error instanceof Error)) {
+    if (typeof error !== 'object' || error === null) {
         return {
-            message: redactSensitiveText(String(error)),
+            message: redactDiagnosticText(String(error)),
             name: 'NonErrorThrown',
         };
     }
 
-    const errorWithCode = error as Error & {
+    const errorRecord = error as Readonly<{
         readonly cause?: unknown;
         readonly code?: unknown;
-    };
+        readonly message?: unknown;
+        readonly name?: unknown;
+        readonly stack?: unknown;
+    }>;
     const code =
-        typeof errorWithCode.code === 'string' ||
-        typeof errorWithCode.code === 'number'
-            ? errorWithCode.code
+        typeof errorRecord.code === 'string' ||
+        typeof errorRecord.code === 'number'
+            ? errorRecord.code
             : undefined;
     const cause =
-        depth < 5 && errorWithCode.cause !== undefined
-            ? serializeErrorDiagnostic(errorWithCode.cause, depth + 1)
+        depth < 5 && errorRecord.cause !== undefined
+            ? serializeErrorDiagnostic(errorRecord.cause, depth + 1)
             : undefined;
+    const message =
+        typeof errorRecord.message === 'string'
+            ? errorRecord.message
+            : 'Non-Error object thrown';
+    const name =
+        typeof errorRecord.name === 'string'
+            ? errorRecord.name
+            : 'NonErrorThrown';
+    const stack =
+        typeof errorRecord.stack === 'string' ? errorRecord.stack : undefined;
 
     return {
         ...(cause === undefined ? {} : { cause }),
         ...(code === undefined ? {} : { code }),
-        message: redactSensitiveText(error.message),
-        name: error.name,
-        ...(error.stack === undefined
-            ? {}
-            : { stack: redactSensitiveText(error.stack) }),
+        message: redactDiagnosticText(message),
+        name,
+        ...(stack === undefined ? {} : { stack: redactDiagnosticText(stack) }),
     };
 };
 

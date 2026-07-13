@@ -109,10 +109,10 @@ describe('Vitest diagnostics', () => {
             result: () => ({
                 errors: [
                     {
-                        cause: new Error('underlying cause'),
-                        message: 'assertion failed',
+                        cause: new Error('token=underlying-secret'),
+                        message: 'assertion failed password=hunter2',
                         name: 'AssertionError',
-                        stack: 'AssertionError: assertion failed\n at test',
+                        stack: 'Authorization: Bearer stack-secret\n at test',
                     },
                 ],
                 state: 'failed',
@@ -121,6 +121,11 @@ describe('Vitest diagnostics', () => {
 
         reporter.onTestCaseReady?.(testCase);
         reporter.onTestCaseResult?.(testCase);
+        reporter.onUserConsoleLog?.({
+            content: 'stderr credential=console-secret',
+            taskId: 'test-id',
+            type: 'stderr',
+        });
         reporter.onTestRunEnd?.([], [], 'failed');
 
         const events = (await readFile(eventFilePath, 'utf8'))
@@ -130,6 +135,7 @@ describe('Vitest diagnostics', () => {
         expect(events.map((event) => event.event)).toEqual([
             'test-started',
             'test-finished',
+            'test-stderr',
             'test-run-finished',
         ]);
         expect(events[1]).toMatchObject({
@@ -143,12 +149,20 @@ describe('Vitest diagnostics', () => {
         if (!Array.isArray(errors) || !isRecord(errors[0])) {
             throw new Error('Expected one serialized test error.');
         }
-        expect(errors[0].message).toBe('assertion failed');
+        expect(errors[0].message).toBe('assertion failed password=[redacted]');
+        expect(errors[0].stack).toContain('Authorization=[redacted]');
         expect(errors[0].stack).toContain('at test');
         if (!isRecord(errors[0].cause)) {
             throw new Error('Expected a serialized test error cause.');
         }
-        expect(errors[0].cause.message).toBe('underlying cause');
+        expect(errors[0].cause.message).toBe('token=[redacted]');
+        expect(events[2]).toMatchObject({
+            content: 'stderr credential=[redacted]',
+            event: 'test-stderr',
+        });
+        expect(await readFile(eventFilePath, 'utf8')).not.toMatch(
+            /underlying-secret|hunter2|stack-secret|console-secret/u,
+        );
 
         const manifest = JSON.parse(
             await readFile(

@@ -171,6 +171,60 @@ fn honest_multi_digit_key_verifies() {
 }
 
 #[test]
+fn prover_and_verifier_transcript_order_matches() {
+    use crate::bgv::setup::transcript_order_audit::{
+        capture_transcript_order_audit, run_length_encode_transcript_order_audit,
+    };
+
+    let parameters = sixteen_limb_group_field_parameters();
+    let ring_degree = 64;
+    let (secret, digits, public) = synthetic_key(ring_degree, 3);
+    let proof_parameters = KeyFriProofParameters {
+        query_count: 40,
+        mask_degree: 16,
+    };
+    let mut salt_seed = 0x5a17_u64;
+    let (proof_result, prover_events) = capture_transcript_order_audit(|| {
+        prove_round_one_key_fri(
+            &parameters,
+            ring_degree,
+            &public,
+            &secret,
+            &digits,
+            &proof_parameters,
+            &mut salt_seed,
+        )
+    });
+    let proof = proof_result.expect("audit proof generation");
+    let (verification_result, verifier_events) = capture_transcript_order_audit(|| {
+        verify_round_one_key_fri(&parameters, ring_degree, &public, &proof, &proof_parameters)
+    });
+
+    assert!(verification_result.expect("audit proof verification"));
+    assert_eq!(prover_events, verifier_events);
+    let event_count = prover_events.len();
+    let transcripts = run_length_encode_transcript_order_audit(&prover_events);
+    let audit_artifact = serde_json::json!({
+        "formatVersion": 1,
+        "proofFamily": "limb-group-key-switch-atom",
+        "fixture": {
+            "digitCount": 3,
+            "maskDegree": 16,
+            "queryCount": 40,
+            "ringDegree": ring_degree,
+        },
+        "eventCount": event_count,
+        "transcripts": transcripts,
+    });
+    let expected_artifact: serde_json::Value = serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../test-vectors/fiat-shamir-limb-group-key-switch-atom-transcript-order.json"
+    )))
+    .expect("parse transcript-order audit artifact");
+    assert_eq!(audit_artifact, expected_artifact);
+}
+
+#[test]
 fn masked_multi_digit_key_verifies() {
     let parameters = sixteen_limb_group_field_parameters();
     let ring_degree = 64;

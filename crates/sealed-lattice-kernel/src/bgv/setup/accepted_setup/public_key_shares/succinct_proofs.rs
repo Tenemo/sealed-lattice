@@ -6,9 +6,6 @@ use super::succinct_proof_transport::*;
 use super::*;
 use crate::hashing::derive_canonical_object_hash;
 
-#[cfg(not(target_arch = "wasm32"))]
-use rayon::prelude::*;
-
 use crate::bgv::setup::trustee_evaluation_key_proof::{
     EvaluationKeyShareDescriptor, EvaluationKeyShareKind, PUBLIC_KEY_SHARE_COMMON_REFERENCE_LABEL,
     PUBLIC_KEY_SHARE_PROOF_FAMILY, SameSecretLinkageStatement, SuccinctSetupProofContext,
@@ -34,6 +31,7 @@ pub(in super::super) fn verify_optional_public_key_share_succinct_proofs(
     setup_package: &Value,
     request: &Value,
     verified_same_secret_bridge: Option<&VerifiedSameSecretBridgeMaterial>,
+    proof_binding_session: &crate::bgv::setup::AcceptedSetupProofBindingSession,
 ) -> CanonicalResult<Option<Value>> {
     let material_set = setup_package.get("publicKeyShareMaterial");
     let proof_set = setup_package.get("publicKeyShareSuccinctProofs");
@@ -230,6 +228,7 @@ pub(in super::super) fn verify_optional_public_key_share_succinct_proofs(
         public_key_share_proof_records: &proof_records,
         material_bindings: &material_bindings,
         verified_same_secret_bridge,
+        proof_binding_session,
     };
     let mut roster_position_counts: BTreeMap<u64, usize> = BTreeMap::new();
     for succinct_proof_record in proof_records_array {
@@ -237,33 +236,21 @@ pub(in super::super) fn verify_optional_public_key_share_succinct_proofs(
             .entry(value_u64(succinct_proof_record, "trusteeRosterPosition")?)
             .or_insert(0) += 1;
     }
-    // Each succinct proof is independent given the read-only context, so the ten
-    // verify concurrently on native targets; outcomes are collected in record
-    // order so the first refusal matches sequential verification. wasm32 stays
-    // sequential.
-    let verify_record = |succinct_proof_record: &Value| -> CanonicalResult<()> {
-        verify_public_key_share_succinct_proof_record(
+    // Resolve or consume one proof before advancing to the next record. This is
+    // the same bounded lifecycle on native and browser targets and prevents a
+    // native verifier from retaining one multi-megabyte proof per worker.
+    for succinct_proof_record in proof_records_array {
+        if let Err(error) = verify_public_key_share_succinct_proof_record(
             &verification_context,
             succinct_proof_record,
             &roster_position_counts,
-        )
-    };
-    #[cfg(not(target_arch = "wasm32"))]
-    let record_verifications: Vec<CanonicalResult<()>> =
-        proof_records_array.par_iter().map(verify_record).collect();
-    #[cfg(target_arch = "wasm32")]
-    let record_verifications: Vec<CanonicalResult<()>> =
-        proof_records_array.iter().map(verify_record).collect();
-    if let Some(error) = record_verifications
-        .into_iter()
-        .filter_map(Result::err)
-        .next()
-    {
-        return Ok(Some(public_key_refusal(
-            "publicKeyShareSuccinctProofVerificationFailed",
-            error.message,
-            "setupPackage.publicKeyShareSuccinctProofs.proofRecords",
-        )?));
+        ) {
+            return Ok(Some(public_key_refusal(
+                "publicKeyShareSuccinctProofVerificationFailed",
+                error.message,
+                "setupPackage.publicKeyShareSuccinctProofs.proofRecords",
+            )?));
+        }
     }
     let Some(succinct_proof_set_root) = proof_set
         .get("publicKeyShareSuccinctProofSetRoot")
@@ -304,6 +291,7 @@ struct PublicKeyShareSuccinctProofVerificationContext<'a> {
     public_key_share_proof_records: &'a BTreeMap<u64, Value>,
     material_bindings: &'a BTreeMap<u64, PublicKeyShareMaterialBinding>,
     verified_same_secret_bridge: Option<&'a VerifiedSameSecretBridgeMaterial>,
+    proof_binding_session: &'a crate::bgv::setup::AcceptedSetupProofBindingSession,
 }
 
 fn verify_public_key_share_succinct_proof_record(
@@ -402,17 +390,6 @@ fn verify_public_key_share_succinct_proof_record(
         return Err(CanonicalError::new(
             CanonicalErrorCode::ComponentMismatch,
             "public-key share succinct proof must bind the accepted share, proof statement, and material",
-        ));
-    }
-    let proof_bytes =
-        public_key_share_succinct_proof_bytes_from_record(proof_record, context.request)?;
-    let proof_bytes_hash = value_string(proof_record, "proofBytesHash")?;
-    if proof_bytes_hash
-        != public_key_share_succinct_proof_material_bytes_hash(proof_bytes.as_ref())?
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "public-key share succinct proofBytesHash must match supplied proof bytes",
         ));
     }
     // The public-key relation opens the constant commitment bound by the
@@ -515,8 +492,6 @@ fn verify_public_key_share_succinct_proof_record(
             "public-key share succinct proof statementHash must match the rebuilt statement",
         ));
     }
-    let proof = decode_trustee_evaluation_key_proof_from_source(&statement, proof_bytes.as_ref())?;
-    verify_evaluation_key_share(&statement, &proof)?;
     let proof_root = value_string(proof_record, "publicKeyShareSuccinctProofRoot")?;
     let mut root_input = proof_record.clone();
     root_input
@@ -531,7 +506,59 @@ fn verify_public_key_share_succinct_proof_record(
         ));
     }
 
+    let proof_material_root = value_string(proof_record, "proofMaterialRoot")?;
+    let verification_binding_hash =
+        public_key_share_succinct_proof_verification_binding_hash(proof_record, &statement)?;
+    if !crate::bgv::setup::consume_accepted_setup_proof_binding(
+        context.proof_binding_session.session_handle,
+        &context.proof_binding_session.capability,
+        PUBLIC_KEY_SHARE_PROOF_FAMILY,
+        proof_material_root,
+        &verification_binding_hash,
+    )? {
+        // Production verification receives authenticated raw stream bytes. Test
+        // fixtures instead restore the exact verifier-derived binding above, so
+        // no proof corpus survives between fixture construction and this pass.
+        let proof_bytes =
+            public_key_share_succinct_proof_bytes_from_record(proof_record, context.request)?;
+        let proof_bytes_hash = value_string(proof_record, "proofBytesHash")?;
+        if proof_bytes_hash
+            != public_key_share_succinct_proof_material_bytes_hash(proof_bytes.as_ref())?
+        {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "public-key share succinct proofBytesHash must match supplied proof bytes",
+            ));
+        }
+        let proof =
+            decode_trustee_evaluation_key_proof_from_source(&statement, proof_bytes.as_ref())?;
+        verify_evaluation_key_share(&statement, &proof)?;
+    }
+
     Ok(())
+}
+
+pub(in crate::bgv::setup) fn public_key_share_succinct_proof_verification_binding_hash(
+    proof_record: &Value,
+    statement: &TrusteeEvaluationKeyStatement,
+) -> CanonicalResult<String> {
+    let mut proof_record_root_input = proof_record.clone();
+    proof_record_root_input
+        .as_object_mut()
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "public-key share succinct proof record must be an object",
+            )
+        })?
+        .remove("publicKeyShareSuccinctProofRoot");
+    derive_canonical_object_hash(&json!({
+        "objectType": "AcceptedSetupPublicKeyShareSuccinctProofVerificationBinding",
+        "proofFamily": PUBLIC_KEY_SHARE_PROOF_FAMILY,
+        "proofMaterialRoot": public_key_share_succinct_proof_material_root(proof_record)?,
+        "statementHash": crate::hashing::to_hex(&statement.statement_hash()),
+        "proofRecordRoot": derive_canonical_object_hash(&proof_record_root_input)?,
+    }))
 }
 
 fn public_key_share_proof_records_by_roster_position(

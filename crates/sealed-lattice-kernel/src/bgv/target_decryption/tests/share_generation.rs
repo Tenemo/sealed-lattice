@@ -186,42 +186,49 @@ fn target_share_generation_rejects_tampered_aggregate_opening_credentials() {
     let mut seed_tampered_witness = local_witness.clone();
     seed_tampered_witness["aggregateOpening"]["aggregateOpeningCredentials"][0]["aggregateMaterialSeedHex"] =
         json!("0".repeat(128));
-    let seed_error = generate_bgv_target_decryption_share_from_local_share_request(&json!({
-        "setupPackage": setup_package.clone(),
-        "localTargetShareWitness": seed_tampered_witness,
-        "targetAcceptedRecord": accepted_record.clone(),
-        "targetCiphertextBinding": target_ciphertext_binding.clone(),
-        "targetCiphertexts": target_ciphertexts.clone(),
-        "targetShareProfile": target_share_profile.clone(),
-        "trusteeIdentity": "trustee-1",
-    }))
+    let seed_error = with_staged_aggregate_opening_material(&seed_tampered_witness, || {
+        generate_bgv_target_decryption_share_from_local_share_request(&json!({
+            "setupPackage": setup_package.clone(),
+            "localTargetShareWitness": seed_tampered_witness,
+            "targetAcceptedRecord": accepted_record.clone(),
+            "targetCiphertextBinding": target_ciphertext_binding.clone(),
+            "targetCiphertexts": target_ciphertexts.clone(),
+            "targetShareProfile": target_share_profile.clone(),
+            "trusteeIdentity": "trustee-1",
+        }))
+    })
     .expect_err("a changed aggregate material seed must be refused");
     assert_eq!(seed_error.code, CanonicalErrorCode::ComponentMismatch);
     assert!(seed_error.message.contains("credential commitment root"));
 
-    let mut message_tampered_witness = local_witness.clone();
-    let credential =
-        &mut message_tampered_witness["aggregateOpening"]["aggregateOpeningCredentials"][0];
-    let mut message_coefficients = coefficient_vector_from_le_hex(
-        credential["aggregateCommitmentMessageValuesLeHex"]
-            .as_str()
-            .expect("aggregate commitment message"),
-        POLYNOMIAL_DEGREE,
-        "aggregate opening credential message byte length must match ringDegree",
+    let message_error = with_staged_aggregate_opening_material_transform(
+        &local_witness,
+        |aggregate_opening_root, material| {
+            if aggregate_opening_root
+                == local_witness["aggregateOpening"]["aggregateOpeningCredentials"][0]
+                    ["aggregateOpeningRoot"]
+                    .as_str()
+                    .expect("first aggregate opening root")
+            {
+                let mut first_value = u64::from_le_bytes(
+                    material[..8].try_into().expect("first aggregate value"),
+                );
+                first_value = add_mod_fast(first_value, 1, DATA_PRIMES[0]);
+                material[..8].copy_from_slice(&first_value.to_le_bytes());
+            }
+        },
+        || {
+            generate_bgv_target_decryption_share_from_local_share_request(&json!({
+                "setupPackage": setup_package.clone(),
+                "localTargetShareWitness": local_witness.clone(),
+                "targetAcceptedRecord": accepted_record.clone(),
+                "targetCiphertextBinding": target_ciphertext_binding.clone(),
+                "targetCiphertexts": target_ciphertexts.clone(),
+                "targetShareProfile": target_share_profile.clone(),
+                "trusteeIdentity": "trustee-1",
+            }))
+        },
     )
-    .expect("aggregate commitment message coefficients");
-    message_coefficients[0] = add_mod_fast(message_coefficients[0], 1, DATA_PRIMES[0]);
-    credential["aggregateCommitmentMessageValuesLeHex"] =
-        json!(coefficient_vector_le_hex(&message_coefficients));
-    let message_error = generate_bgv_target_decryption_share_from_local_share_request(&json!({
-        "setupPackage": setup_package.clone(),
-        "localTargetShareWitness": message_tampered_witness,
-        "targetAcceptedRecord": accepted_record.clone(),
-        "targetCiphertextBinding": target_ciphertext_binding.clone(),
-        "targetCiphertexts": target_ciphertexts.clone(),
-        "targetShareProfile": target_share_profile.clone(),
-        "trusteeIdentity": "trustee-1",
-    }))
     .expect_err("a changed aggregate material column must be refused");
     assert_eq!(message_error.code, CanonicalErrorCode::ComponentMismatch);
     assert!(message_error.message.contains("credential commitment root"));
@@ -266,16 +273,19 @@ fn target_share_generation_rejects_tampered_aggregate_opening_credentials() {
             .expect("tampered setup package binding")
             .setup_package_hash
     );
-    let merkle_root_error = generate_bgv_target_decryption_share_from_local_share_request(&json!({
-        "setupPackage": merkle_root_tampered_setup_package,
-        "localTargetShareWitness": merkle_root_tampered_witness,
-        "targetAcceptedRecord": accepted_record,
-        "targetCiphertextBinding": target_ciphertext_binding,
-        "targetCiphertexts": target_ciphertexts,
-        "targetShareProfile": target_share_profile,
-        "trusteeIdentity": "trustee-1",
-    }))
-    .expect_err("a changed aggregate Merkle root must be refused");
+    let merkle_root_error =
+        with_staged_aggregate_opening_material(&merkle_root_tampered_witness, || {
+            generate_bgv_target_decryption_share_from_local_share_request(&json!({
+                "setupPackage": merkle_root_tampered_setup_package,
+                "localTargetShareWitness": merkle_root_tampered_witness,
+                "targetAcceptedRecord": accepted_record,
+                "targetCiphertextBinding": target_ciphertext_binding,
+                "targetCiphertexts": target_ciphertexts,
+                "targetShareProfile": target_share_profile,
+                "trusteeIdentity": "trustee-1",
+            }))
+        })
+        .expect_err("a changed aggregate Merkle root must be refused");
     assert_eq!(
         merkle_root_error.code,
         CanonicalErrorCode::ComponentMismatch

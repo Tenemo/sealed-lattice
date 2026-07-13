@@ -1,5 +1,10 @@
 use super::*;
 
+struct SameSecretBridgeProofMaterialReference {
+    proof_bytes_hash: String,
+    proof_material_root: String,
+}
+
 pub(in super::super::super) fn same_secret_bridge_statement_set_object(
     package: &serde_json::Value,
 ) -> serde_json::Value {
@@ -178,19 +183,18 @@ pub(super) fn same_secret_bridge_proof_record(
     statement_record: &serde_json::Value,
     trustee_roster_position: usize,
 ) -> serde_json::Value {
-    let proof_bytes_hex =
-        same_secret_bridge_proof_bytes_hex(package, statement_record, trustee_roster_position);
-    let proof_bytes = crate::transcript_core::decode_hex(&proof_bytes_hex)
-        .expect("same-secret bridge proof bytes");
+    let proof_material = same_secret_bridge_proof_material_reference(
+        package,
+        statement_record,
+        trustee_roster_position,
+    );
     let mut proof_record = serde_json::json!({
         "objectType": "VssSameSecretBridgeProofRecord",
         "proofFamily": SAME_SECRET_BRIDGE_PROOF_FAMILY,
         "sameSecretBridgeStatementRoot": statement_record["sameSecretBridgeStatementRoot"],
-        "proofBytesHash": hash512_hex(
-            SAME_SECRET_BRIDGE_PROOF_BYTES_HASH_DOMAIN,
-            &[&proof_bytes],
-        ),
-        "proofBytesBase64": crate::transcript_core::encode_standard_base64(&proof_bytes),
+        "proofBytesHash": proof_material.proof_bytes_hash,
+        "proofBytesEncoding": SETUP_PROOF_MATERIAL_ENCODING,
+        "proofMaterialRoot": proof_material.proof_material_root,
     });
     proof_record["sameSecretBridgeProofRecordRoot"] = serde_json::json!(
         derive_canonical_object_hash(&proof_record).expect("same-secret bridge proof record root")
@@ -199,11 +203,11 @@ pub(super) fn same_secret_bridge_proof_record(
     proof_record
 }
 
-pub(super) fn same_secret_bridge_proof_bytes_hex(
+fn same_secret_bridge_proof_material_reference(
     package: &serde_json::Value,
     statement_record: &serde_json::Value,
     trustee_roster_position: usize,
-) -> String {
+) -> SameSecretBridgeProofMaterialReference {
     let request = same_secret_bridge_proof_generation_request(
         package,
         statement_record,
@@ -231,7 +235,7 @@ pub(super) fn same_secret_bridge_proof_bytes_hex(
             let proof_bytes_hash = generated["proofBytesHash"]
                 .as_str()
                 .expect("same-secret bridge proof bytes hash");
-            let proof_material = crate::bgv::setup::verified_canonical_setup_proof_material_bytes(
+            let proof_material = crate::bgv::setup::take_verified_canonical_proof_material_bytes(
                 SAME_SECRET_BRIDGE_PROOF_FAMILY,
                 proof_material_root,
             )
@@ -244,14 +248,70 @@ pub(super) fn same_secret_bridge_proof_bytes_hex(
                 proof_bytes_hash,
                 "generated same-secret bridge metadata must bind its retained bytes",
             );
-            proof_material
-                .chunks()
-                .flat_map(|chunk| chunk.iter().copied())
-                .collect()
+            match std::sync::Arc::try_unwrap(proof_material) {
+                Ok(proof_material) => proof_material.into_contiguous(),
+                Err(_) => panic!(
+                    "generated same-secret bridge proof bytes must have one store owner before checkpoint persistence"
+                ),
+            }
         },
     );
+    let proof_bytes_hash = hash512_hex(SAME_SECRET_BRIDGE_PROOF_BYTES_HASH_DOMAIN, &[&proof_bytes]);
+    let proof_material_root = crate::bgv::setup::setup_proof::setup_proof_material_reference_root(
+        SAME_SECRET_BRIDGE_PROOF_FAMILY,
+        &proof_bytes_hash,
+    )
+    .expect("same-secret bridge proof material root");
+    let proof_verification_request =
+        crate::bgv::setup::same_secret_bridge_proof_verification_request_from_public_records(
+            &package["sameSecretBridgeStatementSet"],
+            statement_record,
+            &package["vssCoefficientCommitments"],
+            trustee_roster_position,
+        )
+        .expect("same-secret bridge proof verification request");
+    if crate::bgv::setup::accepted_setup_fixture_proof_binding_lease(&proof_material_root)
+        .expect("same-secret bridge proof binding lookup")
+        .is_some()
+    {
+        return SameSecretBridgeProofMaterialReference {
+            proof_bytes_hash,
+            proof_material_root,
+        };
+    }
+    if crate::bgv::setup::verified_canonical_setup_proof_material_bytes(
+        SAME_SECRET_BRIDGE_PROOF_FAMILY,
+        &proof_material_root,
+    )
+    .expect("same-secret bridge proof material lookup")
+    .is_none()
+    {
+        authenticate_setup_proof_material_stream_for_test(
+            SAME_SECRET_BRIDGE_PROOF_FAMILY,
+            &proof_material_root,
+            &proof_bytes,
+        )
+        .expect("authenticate same-secret bridge proof material stream");
+    }
+    let proof_binding_session =
+        crate::bgv::setup::begin_accepted_setup_fixture_proof_binding_session()
+            .expect("begin same-secret bridge proof binding session");
+    crate::bgv::setup::verify_and_retain_same_secret_bridge_proof_binding(
+        &proof_binding_session,
+        &proof_material_root,
+        &proof_verification_request,
+    )
+    .expect("verify same-secret bridge proof before releasing its bytes");
+    crate::bgv::setup::cache_accepted_setup_fixture_proof_binding_lease(
+        proof_binding_session,
+        &proof_material_root,
+    )
+    .expect("cache same-secret bridge verifier-owned binding lease");
 
-    to_hex(&proof_bytes)
+    SameSecretBridgeProofMaterialReference {
+        proof_bytes_hash,
+        proof_material_root,
+    }
 }
 
 pub(super) fn same_secret_bridge_proof_generation_request(
@@ -411,6 +471,7 @@ fn vss_public_material_fixture_verifies_generated_fields() {
             &proof_material_fixture.verification_request,
         );
 
+    let proof_binding_session = proof_material_fixture.begin_proof_binding_session();
     let verification = crate::bgv::setup::verify_vss_share_linkage_proof_material_set_from_request(
         &serde_json::json!({
             "statement": package["vssShareLinkageStatement"],
@@ -421,6 +482,7 @@ fn vss_public_material_fixture_verifies_generated_fields() {
             "transportedVssShareLinkageProofMaterial":
                 proof_material_fixture.verification_request["transportedVssShareLinkageProofMaterial"],
         }),
+        Some(&proof_binding_session),
     )
     .expect("generated VSS public material verifies");
 
@@ -453,8 +515,14 @@ fn vss_public_material_fixture_verifies_generated_fields() {
     let bridge_proof_verification =
         crate::bgv::setup::verify_vss_same_secret_bridge_proof_material_set_request(
             &bridge_request,
+            Some(&proof_binding_session),
         )
         .expect("generated same-secret bridge proof material set verifies");
+    crate::bgv::setup::cancel_accepted_setup_proof_binding_session(
+        proof_binding_session.session_handle,
+        &proof_binding_session.capability,
+    )
+    .expect("cancel generated VSS public material proof binding session");
     assert_eq!(
         bridge_proof_verification["proofMaterialSetRoot"],
         package["sameSecretBridgeProofMaterialSet"]["proofMaterialSetRoot"],
@@ -520,6 +588,7 @@ fn vss_public_material_fixture_verifies_generated_fields() {
     let alternate_proof_error =
         crate::bgv::setup::verify_vss_same_secret_bridge_proof_material_set_request(
             &alternate_target_request,
+            None,
         )
         .expect_err("alternate target proof package must not replace the authoritative commitment");
     assert_eq!(
@@ -541,6 +610,7 @@ fn vss_public_material_fixture_verifies_generated_fields() {
     assert!(
         crate::bgv::setup::verify_vss_same_secret_bridge_proof_material_set_request(
             &wrong_source_body_request,
+            None,
         )
         .is_err(),
         "accepted reconstruction must recompute and reject a wrong source commitment body"
@@ -577,6 +647,7 @@ fn vss_public_material_fixture_verifies_generated_fields() {
     assert!(
         crate::bgv::setup::verify_vss_same_secret_bridge_proof_material_set_request(
             &wrong_source_root_request,
+            None,
         )
         .is_err(),
         "accepted reconstruction must reject a source root that no longer matches its body"

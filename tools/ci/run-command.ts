@@ -189,13 +189,8 @@ type ProcessSignalEscalationScheduler = (
 const forceKillDelayMilliseconds = 5_000;
 
 type CommandAbortReason = {
-    readonly classification:
-        | 'external-request'
-        | 'internal-timeout'
-        | 'sibling-abort'
-        | 'workflow-cancellation';
+    readonly classification: string;
     readonly initiator?: string;
-    readonly objectVersion: 'sealed-lattice-command-abort-reason-v1';
 };
 
 type ProcessTreeKillResult = {
@@ -222,13 +217,11 @@ type ProcessTreeKillResult = {
 const isCommandAbortReason = (value: unknown): value is CommandAbortReason =>
     typeof value === 'object' &&
     value !== null &&
-    'objectVersion' in value &&
-    value.objectVersion === 'sealed-lattice-command-abort-reason-v1' &&
     'classification' in value &&
-    (value.classification === 'external-request' ||
-        value.classification === 'internal-timeout' ||
-        value.classification === 'sibling-abort' ||
-        value.classification === 'workflow-cancellation');
+    typeof value.classification === 'string' &&
+    (!('initiator' in value) ||
+        value.initiator === undefined ||
+        typeof value.initiator === 'string');
 
 export const createAbortableCommandSpawnOptions = (
     env: NodeJS.ProcessEnv,
@@ -532,84 +525,6 @@ const trackChildProcessForSignalCleanup = (
     };
 };
 
-const runCommandWithInheritedOutput = (
-    invocation: CommandInvocation,
-    signal?: AbortSignal,
-    observer?: CommandRunObserver,
-): Promise<number> =>
-    new Promise((resolve, reject) => {
-        if (signal?.aborted === true) {
-            resolve(1);
-            return;
-        }
-        console.log(`\n${invocation.description}`);
-        const startedAtMilliseconds = performance.now();
-        observer?.onCommandStart?.({
-            invocation,
-            startedAtMilliseconds,
-        });
-        const childProcess = spawn(
-            invocation.command,
-            invocation.args,
-            createAbortableCommandSpawnOptions(
-                invocation.env ?? process.env,
-                'inherit',
-                process.platform,
-                invocation.workingDirectoryPath,
-            ),
-        );
-        const untrackChildProcess =
-            trackChildProcessForSignalCleanup(childProcess);
-        const onAbort = (): void => {
-            killProcessTree(childProcess);
-        };
-        signal?.addEventListener('abort', onAbort, { once: true });
-        let settled = false;
-        childProcess.once('error', (error) => {
-            if (settled) {
-                return;
-            }
-            settled = true;
-            untrackChildProcess();
-            signal?.removeEventListener('abort', onAbort);
-            observer?.onCommandExit?.({
-                durationMilliseconds: Math.round(
-                    performance.now() - startedAtMilliseconds,
-                ),
-                error,
-                exitCode: 1,
-                invocation,
-                terminationSignal: null,
-            });
-            reject(error);
-        });
-        childProcess.once('close', (exitCode, terminationSignal) => {
-            if (settled) {
-                return;
-            }
-            settled = true;
-            untrackChildProcess();
-            signal?.removeEventListener('abort', onAbort);
-            const resolvedExitCode =
-                terminationSignal === null ? (exitCode ?? 1) : 1;
-            if (terminationSignal !== null) {
-                console.error(
-                    `${invocation.description} terminated by signal ${terminationSignal}.`,
-                );
-            }
-
-            observer?.onCommandExit?.({
-                durationMilliseconds: Math.round(
-                    performance.now() - startedAtMilliseconds,
-                ),
-                exitCode: resolvedExitCode,
-                invocation,
-                terminationSignal,
-            });
-            resolve(resolvedExitCode);
-        });
-    });
-
 const commandEnvironment = (
     invocation: CommandInvocation,
     runLog: ActiveLocalRunLog | undefined,
@@ -646,17 +561,6 @@ const runCommandWithOptionalLog = async (
     } = {},
 ): Promise<number> => {
     const outputMode = input.outputMode ?? 'inherit';
-    if (
-        input.runLog === undefined &&
-        outputMode === 'inherit' &&
-        input.terminalOutputFilter === undefined
-    ) {
-        return runCommandWithInheritedOutput(
-            invocation,
-            input.signal,
-            input.observer,
-        );
-    }
     if (input.signal?.aborted === true) {
         return 1;
     }

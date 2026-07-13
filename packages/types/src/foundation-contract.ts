@@ -167,7 +167,18 @@ export const foundationSchemaIdentifiers = Object.freeze({
     proofFieldProfile: 0x2201,
     proofFamilyProfile: 0x2202,
     proofFieldSchedule: 0x2203,
+    collectivePublicKeyAggregateStatement: 0x1213,
+    relationPlan: 0x2204,
+    relationPlanVariant: 0x2205,
 } as const);
+
+/** Public inputs bound by the collective public-key aggregation proof header. */
+export type CollectivePublicKeyAggregateStatement = Readonly<{
+    setupProofContextHash: ProtocolHash;
+    orderedPublicKeyShareRoots: readonly ProtocolHash[];
+    collectivePublicKeyRoot: ProtocolHash;
+    collectivePublicKeyFullObjectDigest: ProtocolHash;
+}>;
 
 /** Fixed capability-kind assignments for non-forking state authorization. */
 export const stateCapabilityKinds = Object.freeze({

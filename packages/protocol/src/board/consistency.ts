@@ -8,7 +8,6 @@ import type {
 import {
     buildBoardHeadMap,
     createRefusal,
-    uniqueStrings,
     verificationExceptionMessage,
 } from '../common/verification-helpers.js';
 
@@ -181,9 +180,6 @@ const verifyBoardConsistencyUnchecked = (
                       ),
                   ],
         forkEvidence: discoveredForkEvidence,
-        verifiedHeadHashes: uniqueStrings(
-            input.signedBoardHeads.map((head) => head.headHash),
-        ),
     };
 };
 
@@ -204,7 +200,6 @@ export const verifyBoardConsistency = (
                     ),
                 ),
             ],
-            verifiedHeadHashes: [],
         };
     }
 };

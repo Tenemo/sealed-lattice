@@ -1,7 +1,7 @@
 import type { RefusalReason } from '@sealed-lattice/types';
 import { foundationProfile, refusalReasonCodes } from '@sealed-lattice/types';
 
-import type { TranscriptCoreKernel } from './transcript-core-bridge/kernel-types.js';
+import type { TranscriptCoreKernelContextOwner } from './transcript-core-bridge/kernel-types.js';
 
 const canonicalStreamCapabilityByteLength = 32;
 const maximumCanonicalStreamByteLength = 2_147_483_648;
@@ -293,19 +293,19 @@ type CanonicalStreamAtomicVerifierFinish = (input: {
 }) => void;
 
 const contexts = new WeakMap<
-    TranscriptCoreKernel,
+    TranscriptCoreKernelContextOwner,
     CanonicalStreamKernelContext
 >();
 
 export const registerCanonicalStreamKernelContext = (
-    kernel: TranscriptCoreKernel,
+    kernel: TranscriptCoreKernelContextOwner,
     context: CanonicalStreamKernelContext,
 ): void => {
     contexts.set(kernel, context);
 };
 
 export const canonicalStreamKernelContext = (
-    kernel: TranscriptCoreKernel,
+    kernel: TranscriptCoreKernelContextOwner,
 ): CanonicalStreamKernelContext | undefined => contexts.get(kernel);
 
 type MutableCounters = {
@@ -1231,7 +1231,7 @@ class CanonicalStreamWorkerRuntimeImplementation implements CanonicalStreamWorke
 
 export const openCanonicalStreamWorkerRuntime = (input: {
     readonly fillRandomValues?: FillRandomValues;
-    readonly kernel: TranscriptCoreKernel;
+    readonly kernel: TranscriptCoreKernelContextOwner;
 }): CanonicalStreamWorkerRuntime => {
     const context = contexts.get(input.kernel);
     if (context === undefined) {
@@ -1255,7 +1255,7 @@ export const openCanonicalStreamVerifierForAtomicFinish = (input: {
     readonly atomicFinish: CanonicalStreamAtomicVerifierFinish;
     readonly descriptorBytes: Uint8Array;
     readonly fillRandomValues?: FillRandomValues;
-    readonly kernel: TranscriptCoreKernel;
+    readonly kernel: TranscriptCoreKernelContextOwner;
     readonly streamDomain: CanonicalStreamDomain;
 }): CanonicalStreamVerifierLease => {
     const context = contexts.get(input.kernel);

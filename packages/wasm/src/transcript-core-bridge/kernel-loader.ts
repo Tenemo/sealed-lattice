@@ -8,6 +8,10 @@ import {
     parseParticipantIdentity,
 } from '@sealed-lattice/types';
 
+import {
+    openAcceptedSetupSession,
+    registerAcceptedSetupSessionKernelContext,
+} from '../accepted-setup-session-runtime.js';
 import { registerCanonicalStreamKernelContext } from '../canonical-stream-runtime.js';
 import { registerFoundationBoardKernelContext } from '../foundation-board-session.js';
 import { registerStateVerifierKernelContext } from '../state-verifier-runtime.js';
@@ -100,6 +104,30 @@ export const createTranscriptCoreKernelLoader = (
                 exports,
                 'sealed_lattice_deallocate',
             );
+            const acceptedSetupSessionBegin = resolveNumberExport(
+                exports,
+                'sealed_lattice_accepted_setup_session_begin',
+            ) as NonNullable<
+                TranscriptCoreKernelExports['sealed_lattice_accepted_setup_session_begin']
+            >;
+            const acceptedSetupSessionCancel = resolveNumberExport(
+                exports,
+                'sealed_lattice_accepted_setup_session_cancel',
+            ) as NonNullable<
+                TranscriptCoreKernelExports['sealed_lattice_accepted_setup_session_cancel']
+            >;
+            const acceptedSetupCanonicalStreamBegin = resolveNumberExport(
+                exports,
+                'sealed_lattice_accepted_setup_canonical_stream_begin',
+            ) as NonNullable<
+                TranscriptCoreKernelExports['sealed_lattice_accepted_setup_canonical_stream_begin']
+            >;
+            const acceptedSetupCommandWithLength = resolveNumberExport(
+                exports,
+                'sealed_lattice_accepted_setup_command_with_length',
+            ) as NonNullable<
+                TranscriptCoreKernelExports['sealed_lattice_accepted_setup_command_with_length']
+            >;
             const hasCanonicalStreamBoundary =
                 typeof exports.sealed_lattice_canonical_stream_absorb_chunk ===
                 'function';
@@ -392,13 +420,11 @@ export const createTranscriptCoreKernelLoader = (
                     ),
                 );
             // Accepted setup is real protocol input, not a fixture, so a fixture-shaped rejection is surfaced as a rejected protocol object rather than leaking the kernel fixture error code.
-            const executeAcceptedSetupCommand = <
-                Result extends BgvCollectiveSetupVerification,
-            >(
-                request: TranscriptCoreKernelCommand,
+            const translateAcceptedSetupCommandFailure = <Result>(
+                operation: () => Result,
             ): Result => {
                 try {
-                    return executeCommand<Result>(request);
+                    return operation();
                 } catch (error) {
                     if (
                         error instanceof TranscriptCoreKernelCommandError &&
@@ -417,8 +443,38 @@ export const createTranscriptCoreKernelLoader = (
                     throw error;
                 }
             };
+            const executeAcceptedSetupCommandDirect = (
+                request: TranscriptCoreKernelCommand,
+                sessionHandle: number,
+                capabilityPointer: number,
+                capabilityLength: number,
+                beforeKernelInvocation: () => void,
+            ): BgvCollectiveSetupVerification =>
+                translateAcceptedSetupCommandFailure(() =>
+                    runExclusiveKernelOperation('accepted-setup command', () =>
+                        runKernelCommand<BgvCollectiveSetupVerification>(
+                            memory,
+                            allocate,
+                            deallocate,
+                            (pointer, length, outputLengthPointer) => {
+                                beforeKernelInvocation();
+                                return acceptedSetupCommandWithLength(
+                                    pointer,
+                                    length,
+                                    sessionHandle,
+                                    capabilityPointer,
+                                    capabilityLength,
+                                    outputLengthPointer,
+                                );
+                            },
+                            request,
+                        ),
+                    ),
+                );
 
             const kernel: TranscriptCoreKernel = {
+                beginAcceptedSetupSession: () =>
+                    openAcceptedSetupSession(kernel),
                 exportedFunctionNames,
                 computeChunkRoot: (input): string =>
                     executeCommand<{ readonly chunkRoot: string }>({
@@ -696,33 +752,6 @@ export const createTranscriptCoreKernelLoader = (
                         expectedEvaluationKeyRoot:
                             input.expectedEvaluationKeyRoot,
                     }),
-                verifyCollectiveBgvSetup: (
-                    input,
-                ): BgvCollectiveSetupVerification =>
-                    executeAcceptedSetupCommand<BgvCollectiveSetupVerification>(
-                        {
-                            command: 'VerifyCollectiveBgvSetup',
-                            setupPackage: input.setupPackage,
-                            expectedSetupPackageHash:
-                                input.expectedSetupPackageHash,
-                            expectedManifestHash: input.expectedManifestHash,
-                            expectedRosterHash: input.expectedRosterHash,
-                            transportedPublicKeyShareMaterial:
-                                input.transportedPublicKeyShareMaterial,
-                            transportedPublicKeyShareProofMaterial:
-                                input.transportedPublicKeyShareProofMaterial,
-                            transportedEvaluationKeyShareProofMaterial:
-                                input.transportedEvaluationKeyShareProofMaterial,
-                            transportedVssShareLinkageProofMaterial:
-                                input.transportedVssShareLinkageProofMaterial,
-                            transportedSameSecretBridgeProofMaterial:
-                                input.transportedSameSecretBridgeProofMaterial,
-                            transportedEvaluationKeyShareComponentMaterial:
-                                input.transportedEvaluationKeyShareComponentMaterial,
-                            transportedPublicEvaluationKeyMaterial:
-                                input.transportedPublicEvaluationKeyMaterial,
-                        },
-                    ),
                 verifyPrivateVssShareEnvelope: (
                     input,
                 ): BgvPrivateVssShareEnvelopeVerification =>
@@ -1001,6 +1030,29 @@ export const createTranscriptCoreKernelLoader = (
                     runExclusive: runExclusiveKernelOperation,
                 });
             }
+            registerAcceptedSetupSessionKernelContext(kernel, {
+                allocate,
+                begin: acceptedSetupSessionBegin,
+                beginCanonicalStream: acceptedSetupCanonicalStreamBegin,
+                cancel: acceptedSetupSessionCancel,
+                deallocate,
+                executeCommand: (
+                    request,
+                    sessionHandle,
+                    capabilityPointer,
+                    capabilityLength,
+                    beforeKernelInvocation,
+                ) =>
+                    executeAcceptedSetupCommandDirect(
+                        request,
+                        sessionHandle,
+                        capabilityPointer,
+                        capabilityLength,
+                        beforeKernelInvocation,
+                    ),
+                memory,
+                runExclusive: runExclusiveKernelOperation,
+            });
             if (localStorageRootCommand !== undefined) {
                 registerLocalStorageRootKernelContext(kernel, {
                     allocate,

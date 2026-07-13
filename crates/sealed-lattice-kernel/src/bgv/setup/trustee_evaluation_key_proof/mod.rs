@@ -63,14 +63,15 @@ pub(crate) use commands::{
 };
 #[cfg(test)]
 pub(in crate::bgv::setup) use commands::{
-    prove_trustee_evaluation_key_proof_bytes, verify_trustee_evaluation_key_proof_bytes,
+    prove_trustee_evaluation_key_proof_bytes, verify_and_retain_vss_share_linkage_proof_binding,
+    verify_trustee_evaluation_key_proof_bytes,
 };
 
 pub(in crate::bgv::setup) use commands::{
     VssPublicCommandCommitmentExpectation, verified_vss_share_linkage_proof_material_bytes,
     verify_vss_share_linkage_proof_source_from_request,
     verify_vss_share_linkage_statement_and_proof_material_set_from_request,
-    vss_share_linkage_commitment_from_value,
+    vss_share_linkage_commitment_from_value, vss_share_linkage_proof_verification_binding_hash,
 };
 pub(in crate::bgv::setup) use proof_codec::decode_trustee_evaluation_key_proof_from_source;
 pub(in crate::bgv::setup) use proof_codec::encode_trustee_evaluation_key_proof;
@@ -249,6 +250,11 @@ pub(in crate::bgv::setup) const TARGET_DECRYPTION_SMUDGING_MESSAGE_CLAIM_MASK_DI
 // while their Merkle openings may be deduplicated for transport. No accepted
 // end-to-end soundness claim is derived from this count.
 pub(super) const LOW_DEGREE_QUERY_COUNT: usize = 168;
+// This fixed experimental proof path predates suite-selected proof schedules.
+// Keep its rejection work finite until the path consumes the canonical
+// per-family schedule directly; this is an execution ceiling, not a security
+// acceptance claim.
+pub(super) const MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT: u32 = 64;
 pub(super) const MAIN_LOW_DEGREE_TRANSCRIPT_PURPOSE: &[u8] = b"batched-column-degree";
 pub(super) const SUMCHECK_RESIDUAL_LOW_DEGREE_TRANSCRIPT_PURPOSE: &[u8] =
     b"sumcheck-residual-degree";

@@ -6,8 +6,6 @@ import { fileURLToPath } from 'node:url';
 import { resolvePackageManagerRunner } from './package-manager-runner.js';
 import { runPackageManagerAndCaptureOutput } from './run-command.js';
 
-import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
-
 const repositoryRoot = fileURLToPath(new URL('../../', import.meta.url));
 const generatedArtifactRelativePaths = [
     'packages/wasm/dist/sealed-lattice-kernel.wasm',
@@ -99,6 +97,6 @@ export const verifyBuildReproducibility = async (): Promise<void> => {
     console.log('Repeated WASM and SDK builds reproduced every package byte.');
 };
 
-if (isDirectlyInvokedModule(import.meta.url)) {
+if (import.meta.main) {
     await verifyBuildReproducibility();
 }

@@ -271,6 +271,10 @@ mod implementation {
             }
             snapshot
         }
+
+        pub(crate) fn cleanup(&mut self) -> Result<(), String> {
+            Ok(())
+        }
     }
 
     fn structure_length<T>() -> Result<u32, String> {
@@ -342,21 +346,28 @@ mod implementation {
 
 #[cfg(target_os = "linux")]
 mod implementation {
-    use std::collections::{HashMap, HashSet};
+    use std::collections::HashMap;
     use std::ffi::c_int;
     use std::fs;
+    use std::io::{self, Write};
     use std::os::unix::process::ExitStatusExt;
-    use std::path::Path;
+    use std::path::{Component, Path, PathBuf};
+    use std::process::{Command, Stdio};
+    use std::thread;
+    use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
     use super::*;
 
+    const CONTROL_GROUP_CLEANUP_TIMEOUT: Duration = Duration::from_secs(2);
+    const CONTROL_GROUP_EMPTY_POLL_INTERVAL: Duration = Duration::from_millis(10);
     const RESOURCE_LIMIT_DATA: c_int = 2;
     const RESOURCE_LIMIT_ADDRESS_SPACE: c_int = 9;
     const SYSTEM_CONFIGURATION_PAGE_SIZE: c_int = 30;
 
-    pub(crate) const CONTAINMENT_BACKEND: &str = "linux-rlimit-data-and-as";
-    pub(crate) const CONTAINMENT_SCOPE: &str = "inherited-per-process-data-and-virtual-address-space-limits; RLIMIT_DATA uses the memory limit and RLIMIT_AS adds the configured inaccessible-reservation allowance";
-    pub(crate) const AGGREGATE_PROCESS_TREE_LIMIT: bool = false;
+    pub(crate) const CONTAINMENT_BACKEND: &str =
+        "linux-cgroup-v2-memory-max-plus-rlimit-data-and-as";
+    pub(crate) const CONTAINMENT_SCOPE: &str = "cgroup-v2 aggregate guard-and-descendant memory.max with swap disabled; inherited RLIMIT_DATA uses the memory limit and RLIMIT_AS adds the configured inaccessible-reservation allowance";
+    pub(crate) const AGGREGATE_PROCESS_TREE_LIMIT: bool = true;
 
     #[repr(C)]
     struct ResourceLimit {
@@ -375,6 +386,7 @@ mod implementation {
     }
 
     pub(crate) struct MemoryContainment {
+        control_group: LinuxControlGroup,
         page_size_bytes: Option<u64>,
     }
 
@@ -383,6 +395,7 @@ mod implementation {
             memory_limit_bytes: u64,
             virtual_address_space_allowance_bytes: u64,
         ) -> Result<Self, String> {
+            let control_group = LinuxControlGroup::create(memory_limit_bytes)?;
             let data_memory_limit = usize::try_from(memory_limit_bytes).map_err(|_| {
                 format!(
                     "memory limit {memory_limit_bytes} cannot be represented on this Linux target"
@@ -436,14 +449,17 @@ mod implementation {
             // a valid Linux configuration selector.
             let page_size = unsafe { sysconf(SYSTEM_CONFIGURATION_PAGE_SIZE) };
             let page_size_bytes = u64::try_from(page_size).ok().filter(|size| *size > 0);
-            Ok(Self { page_size_bytes })
+            Ok(Self {
+                control_group,
+                page_size_bytes,
+            })
         }
 
-        pub(crate) fn sample(&self, guard_process_id: u32) -> ResourceSnapshot {
+        pub(crate) fn sample(&self, _guard_process_id: u32) -> ResourceSnapshot {
             let mut snapshot = ResourceSnapshot::default();
             let mut errors = Vec::new();
 
-            match sample_descendants(guard_process_id, self.page_size_bytes) {
+            match sample_control_group_processes(&self.control_group.path, self.page_size_bytes) {
                 Ok(process_sample) => {
                     snapshot.active_process_count = Some(process_sample.process_count);
                     snapshot.process_tree_resident_memory_bytes =
@@ -457,6 +473,30 @@ mod implementation {
                     snapshot.cpu_time_unit = Some("clock-ticks");
                     snapshot.io_read_bytes = Some(process_sample.io_read_bytes);
                     snapshot.io_write_bytes = Some(process_sample.io_write_bytes);
+                }
+                Err(error) => errors.push(error),
+            }
+
+            match read_control_group_unsigned(&self.control_group.path.join("memory.current")) {
+                Ok(current_memory_bytes) => {
+                    snapshot.backend_current_memory_bytes = Some(current_memory_bytes);
+                }
+                Err(error) => errors.push(error),
+            }
+            let peak_memory_path = self.control_group.path.join("memory.peak");
+            if peak_memory_path.exists() {
+                match read_control_group_unsigned(&peak_memory_path) {
+                    Ok(peak_memory_bytes) => {
+                        snapshot.backend_peak_job_memory_bytes = Some(peak_memory_bytes);
+                    }
+                    Err(error) => errors.push(error),
+                }
+            }
+            match read_control_group_events(&self.control_group.path.join("memory.events")) {
+                Ok(events) => {
+                    snapshot.confirmed_memory_limit_violation = events.maximum > 0
+                        || events.out_of_memory > 0
+                        || events.out_of_memory_kill > 0;
                 }
                 Err(error) => errors.push(error),
             }
@@ -478,13 +518,368 @@ mod implementation {
             }
             snapshot
         }
+
+        pub(crate) fn cleanup(&mut self) -> Result<(), String> {
+            self.control_group.cleanup_inner()
+        }
+    }
+
+    struct LinuxControlGroup {
+        cleaned: bool,
+        original_path: PathBuf,
+        path: PathBuf,
+    }
+
+    impl LinuxControlGroup {
+        fn create(memory_limit_bytes: u64) -> Result<Self, String> {
+            let mount_information = fs::read_to_string("/proc/self/mountinfo")
+                .map_err(|error| format!("failed to read /proc/self/mountinfo: {error}"))?;
+            let mount_path = find_cgroup_v2_mount_path(&mount_information)?;
+            let original_path = current_cgroup_path(&mount_path)?;
+            require_memory_controller_for_children(&mount_path)?;
+
+            let unique_time = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or(Duration::ZERO)
+                .as_nanos();
+            let path = mount_path.join(format!(
+                "sealed-lattice-memory-guard-{}-{unique_time}",
+                std::process::id()
+            ));
+            create_control_group_directory(&path)?;
+            let mut control_group = Self {
+                cleaned: false,
+                original_path,
+                path,
+            };
+
+            let setup_result = (|| {
+                write_control_group_value(
+                    &control_group.path.join("memory.max"),
+                    &memory_limit_bytes.to_string(),
+                )?;
+                write_control_group_value(&control_group.path.join("memory.swap.max"), "0")?;
+                write_control_group_value(
+                    &control_group.path.join("cgroup.procs"),
+                    &std::process::id().to_string(),
+                )?;
+                Ok(())
+            })();
+            if let Err(setup_error) = setup_result {
+                return match control_group.cleanup_inner() {
+                    Ok(()) => Err(setup_error),
+                    Err(cleanup_error) => Err(format!(
+                        "{setup_error}; additionally failed to clean up the incomplete cgroup: {cleanup_error}"
+                    )),
+                };
+            }
+            Ok(control_group)
+        }
+
+        fn cleanup_inner(&mut self) -> Result<(), String> {
+            if self.cleaned {
+                return Ok(());
+            }
+
+            write_control_group_value(
+                &self.original_path.join("cgroup.procs"),
+                &std::process::id().to_string(),
+            )?;
+            self.terminate_remaining_processes()?;
+            wait_for_empty_control_group(&self.path)?;
+            remove_control_group_directory(&self.path)?;
+            self.cleaned = true;
+            Ok(())
+        }
+
+        fn terminate_remaining_processes(&self) -> Result<(), String> {
+            if read_control_group_process_ids(&self.path)?.is_empty() {
+                return Ok(());
+            }
+            let kill_path = self.path.join("cgroup.kill");
+            if !kill_path.exists() {
+                return Err(format!(
+                    "{} still contains processes but this cgroup-v2 kernel does not expose cgroup.kill",
+                    self.path.display()
+                ));
+            }
+            write_control_group_value(&kill_path, "1")
+        }
+    }
+
+    impl Drop for LinuxControlGroup {
+        fn drop(&mut self) {
+            if !self.cleaned {
+                let _ = self.cleanup_inner();
+            }
+        }
+    }
+
+    fn find_cgroup_v2_mount_path(mount_information: &str) -> Result<PathBuf, String> {
+        for line in mount_information.lines() {
+            let Some((mount_fields, filesystem_fields)) = line.split_once(" - ") else {
+                continue;
+            };
+            if filesystem_fields.split_whitespace().next() != Some("cgroup2") {
+                continue;
+            }
+            let encoded_mount_path = mount_fields
+                .split_whitespace()
+                .nth(4)
+                .ok_or_else(|| "cgroup-v2 mount information omitted its mount path".to_owned())?;
+            return Ok(PathBuf::from(decode_mount_information_path(
+                encoded_mount_path,
+            )));
+        }
+        Err("Linux cgroup v2 is not mounted; an aggregate process-tree memory limit cannot be enforced".to_owned())
+    }
+
+    fn decode_mount_information_path(encoded_path: &str) -> String {
+        encoded_path
+            .replace("\\040", " ")
+            .replace("\\011", "\t")
+            .replace("\\012", "\n")
+            .replace("\\134", "\\")
+    }
+
+    fn current_cgroup_path(mount_path: &Path) -> Result<PathBuf, String> {
+        let membership = fs::read_to_string("/proc/self/cgroup")
+            .map_err(|error| format!("failed to read /proc/self/cgroup: {error}"))?;
+        let relative_path = membership
+            .lines()
+            .find_map(|line| line.strip_prefix("0::"))
+            .ok_or_else(|| {
+                "/proc/self/cgroup did not contain the unified cgroup-v2 membership".to_owned()
+            })?;
+        append_kernel_absolute_path(mount_path, relative_path)
+    }
+
+    fn append_kernel_absolute_path(base: &Path, kernel_path: &str) -> Result<PathBuf, String> {
+        let mut resolved = base.to_path_buf();
+        for component in Path::new(kernel_path).components() {
+            match component {
+                Component::RootDir => {}
+                Component::Normal(name) => resolved.push(name),
+                _ => {
+                    return Err(format!(
+                        "kernel cgroup path contained an unsupported component: {kernel_path}"
+                    ));
+                }
+            }
+        }
+        Ok(resolved)
+    }
+
+    fn require_memory_controller_for_children(parent_path: &Path) -> Result<(), String> {
+        let subtree_control_path = parent_path.join("cgroup.subtree_control");
+        let enabled_controllers = fs::read_to_string(&subtree_control_path).map_err(|error| {
+            format!("failed to read {}: {error}", subtree_control_path.display())
+        })?;
+        if enabled_controllers
+            .split_whitespace()
+            .any(|controller| controller == "memory")
+        {
+            return Ok(());
+        }
+        Err(format!(
+            "the cgroup-v2 memory controller is not enabled for child cgroups at {}; refusing to claim an aggregate process-tree memory limit",
+            parent_path.display()
+        ))
+    }
+
+    fn create_control_group_directory(path: &Path) -> Result<(), String> {
+        match fs::create_dir(path) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == io::ErrorKind::PermissionDenied => {
+                run_sudo_path_command("mkdir", path)
+            }
+            Err(error) => Err(format!(
+                "failed to create cgroup {}: {error}",
+                path.display()
+            )),
+        }
+    }
+
+    fn remove_control_group_directory(path: &Path) -> Result<(), String> {
+        match fs::remove_dir(path) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == io::ErrorKind::PermissionDenied => {
+                run_sudo_path_command("rmdir", path)
+            }
+            Err(error) => Err(format!(
+                "failed to remove cgroup {}: {error}",
+                path.display()
+            )),
+        }
+    }
+
+    fn run_sudo_path_command(program: &str, path: &Path) -> Result<(), String> {
+        let output = Command::new("sudo")
+            .args(["--non-interactive", program, "--"])
+            .arg(path)
+            .output()
+            .map_err(|error| {
+                format!(
+                    "failed to start sudo {program} for cgroup {}: {error}",
+                    path.display()
+                )
+            })?;
+        if output.status.success() {
+            return Ok(());
+        }
+        Err(format!(
+            "sudo {program} failed for cgroup {} with {}: {}",
+            path.display(),
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        ))
+    }
+
+    fn write_control_group_value(path: &Path, value: &str) -> Result<(), String> {
+        match fs::write(path, value) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == io::ErrorKind::PermissionDenied => {
+                write_control_group_value_with_sudo(path, value)
+            }
+            Err(error) => Err(format!(
+                "failed to write cgroup control {}: {error}",
+                path.display()
+            )),
+        }
+    }
+
+    fn write_control_group_value_with_sudo(path: &Path, value: &str) -> Result<(), String> {
+        let mut child = Command::new("sudo")
+            .args(["--non-interactive", "tee", "--"])
+            .arg(path)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|error| {
+                format!(
+                    "failed to start sudo tee for cgroup control {}: {error}",
+                    path.display()
+                )
+            })?;
+        let write_result = child
+            .stdin
+            .take()
+            .ok_or_else(|| "sudo tee did not provide a standard-input pipe".to_owned())
+            .and_then(|mut input| {
+                input.write_all(value.as_bytes()).map_err(|error| {
+                    format!(
+                        "failed to pass a value to sudo tee for {}: {error}",
+                        path.display()
+                    )
+                })
+            });
+        let output = child.wait_with_output().map_err(|error| {
+            format!(
+                "failed to wait for sudo tee writing {}: {error}",
+                path.display()
+            )
+        })?;
+        write_result?;
+        if output.status.success() {
+            return Ok(());
+        }
+        Err(format!(
+            "sudo tee failed for cgroup control {} with {}: {}",
+            path.display(),
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        ))
+    }
+
+    fn wait_for_empty_control_group(path: &Path) -> Result<(), String> {
+        let deadline = Instant::now() + CONTROL_GROUP_CLEANUP_TIMEOUT;
+        loop {
+            if read_control_group_process_ids(path)?.is_empty() {
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                return Err(format!(
+                    "cgroup {} still contained processes after {} milliseconds",
+                    path.display(),
+                    CONTROL_GROUP_CLEANUP_TIMEOUT.as_millis()
+                ));
+            }
+            thread::sleep(CONTROL_GROUP_EMPTY_POLL_INTERVAL);
+        }
+    }
+
+    fn read_control_group_process_ids(path: &Path) -> Result<Vec<u32>, String> {
+        let process_path = path.join("cgroup.procs");
+        let text = fs::read_to_string(&process_path)
+            .map_err(|error| format!("failed to read {}: {error}", process_path.display()))?;
+        text.lines()
+            .map(|line| {
+                line.parse::<u32>().map_err(|error| {
+                    format!(
+                        "failed to parse process identifier in {}: {error}",
+                        process_path.display()
+                    )
+                })
+            })
+            .collect()
+    }
+
+    #[derive(Debug, Default, Eq, PartialEq)]
+    struct ControlGroupMemoryEvents {
+        maximum: u64,
+        out_of_memory: u64,
+        out_of_memory_kill: u64,
+    }
+
+    fn read_control_group_events(path: &Path) -> Result<ControlGroupMemoryEvents, String> {
+        let text = fs::read_to_string(path)
+            .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+        parse_control_group_events(&text, path)
+    }
+
+    fn parse_control_group_events(
+        text: &str,
+        path: &Path,
+    ) -> Result<ControlGroupMemoryEvents, String> {
+        let mut values = HashMap::new();
+        for line in text.lines() {
+            let mut fields = line.split_whitespace();
+            let Some(name) = fields.next() else {
+                continue;
+            };
+            let Some(value) = fields.next() else {
+                continue;
+            };
+            let value = value.parse::<u64>().map_err(|error| {
+                format!(
+                    "failed to parse {name} in cgroup event file {}: {error}",
+                    path.display()
+                )
+            })?;
+            values.insert(name, value);
+        }
+        Ok(ControlGroupMemoryEvents {
+            maximum: values.get("max").copied().unwrap_or(0),
+            out_of_memory: values.get("oom").copied().unwrap_or(0),
+            out_of_memory_kill: values.get("oom_kill").copied().unwrap_or(0),
+        })
+    }
+
+    fn read_control_group_unsigned(path: &Path) -> Result<u64, String> {
+        let text = fs::read_to_string(path)
+            .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+        text.trim().parse::<u64>().map_err(|error| {
+            format!(
+                "failed to parse the unsigned value in {}: {error}",
+                path.display()
+            )
+        })
     }
 
     #[derive(Debug)]
     struct ProcessInformation {
         kernel_cpu_clock_ticks: u64,
-        parent_process_id: u32,
-        process_id: u32,
         resident_memory_pages: u64,
         user_cpu_clock_ticks: u64,
         virtual_memory_bytes: u64,
@@ -502,42 +897,14 @@ mod implementation {
         virtual_memory_bytes: u64,
     }
 
-    fn sample_descendants(
-        guard_process_id: u32,
+    fn sample_control_group_processes(
+        control_group_path: &Path,
         page_size_bytes: Option<u64>,
     ) -> Result<ProcessTreeSample, String> {
-        let directory_entries =
-            fs::read_dir("/proc").map_err(|error| format!("failed to enumerate /proc: {error}"))?;
-        let mut processes = HashMap::new();
-        for entry in directory_entries.flatten() {
-            let Some(process_id) = entry
-                .file_name()
-                .to_str()
-                .and_then(|name| name.parse::<u32>().ok())
-            else {
-                continue;
-            };
-            if let Ok(information) = read_process_information(process_id) {
-                processes.insert(process_id, information);
-            }
-        }
-
-        let mut selected_process_ids = HashSet::from([guard_process_id]);
-        loop {
-            let previous_count = selected_process_ids.len();
-            for process in processes.values() {
-                if selected_process_ids.contains(&process.parent_process_id) {
-                    selected_process_ids.insert(process.process_id);
-                }
-            }
-            if selected_process_ids.len() == previous_count {
-                break;
-            }
-        }
-
+        let process_ids = read_control_group_process_ids(control_group_path)?;
         let mut sample = ProcessTreeSample::default();
-        for process_id in selected_process_ids {
-            let Some(process) = processes.get(&process_id) else {
+        for process_id in process_ids {
+            let Ok(process) = read_process_information(process_id) else {
                 continue;
             };
             sample.process_count = sample.process_count.saturating_add(1);
@@ -589,9 +956,6 @@ mod implementation {
 
         Ok(ProcessInformation {
             kernel_cpu_clock_ticks: parse_field(12, "kernel CPU time")?,
-            parent_process_id: u32::try_from(parse_field(1, "parent process identifier")?)
-                .map_err(|_| format!("parent process identifier in {path} exceeded u32"))?,
-            process_id,
             resident_memory_pages: parse_field(21, "resident memory")?,
             user_cpu_clock_ticks: parse_field(11, "user CPU time")?,
             virtual_memory_bytes: parse_field(20, "virtual memory")?,
@@ -691,6 +1055,59 @@ mod implementation {
             _ => "unknown-signal",
         }
     }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn finds_and_decodes_the_cgroup_v2_mount_path() {
+            let mount_information = "29 23 0:26 / /sys/fs/cgroup\\040root rw - cgroup2 cgroup rw\n";
+
+            assert_eq!(
+                find_cgroup_v2_mount_path(mount_information),
+                Ok(PathBuf::from("/sys/fs/cgroup root"))
+            );
+        }
+
+        #[test]
+        fn rejects_mount_information_without_cgroup_v2() {
+            assert!(
+                find_cgroup_v2_mount_path("29 23 0:26 / /sys/fs/cgroup rw - tmpfs tmpfs rw")
+                    .is_err()
+            );
+        }
+
+        #[test]
+        fn parses_the_memory_limit_event_counters() {
+            let events = parse_control_group_events(
+                "low 0\nhigh 2\nmax 3\noom 1\noom_kill 1\noom_group_kill 0\n",
+                Path::new("memory.events"),
+            )
+            .expect("cgroup memory events");
+
+            assert_eq!(
+                events,
+                ControlGroupMemoryEvents {
+                    maximum: 3,
+                    out_of_memory: 1,
+                    out_of_memory_kill: 1,
+                }
+            );
+        }
+
+        #[test]
+        fn confines_kernel_membership_paths_below_the_mount() {
+            assert_eq!(
+                append_kernel_absolute_path(Path::new("/sys/fs/cgroup"), "/runner/job"),
+                Ok(PathBuf::from("/sys/fs/cgroup/runner/job"))
+            );
+            assert!(
+                append_kernel_absolute_path(Path::new("/sys/fs/cgroup"), "/runner/../escape")
+                    .is_err()
+            );
+        }
+    }
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "windows")))]
@@ -719,6 +1136,10 @@ mod implementation {
                 sample_error: Some("hard memory containment is unsupported".to_owned()),
                 ..ResourceSnapshot::default()
             }
+        }
+
+        pub(crate) fn cleanup(&mut self) -> Result<(), String> {
+            Ok(())
         }
     }
 

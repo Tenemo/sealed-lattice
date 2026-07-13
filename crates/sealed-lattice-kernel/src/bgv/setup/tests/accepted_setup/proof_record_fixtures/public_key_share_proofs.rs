@@ -1,7 +1,5 @@
 use super::super::*;
 use super::*;
-use rayon::prelude::*;
-
 use crate::hashing::derive_canonical_object_hash;
 
 pub(in super::super) fn collective_public_key_object(
@@ -265,6 +263,7 @@ pub(in super::super) fn public_key_share_coefficients_and_errors_for_fixture(
             .collect::<Vec<_>>();
         let public_a =
             dense_public_residues(public_matrix_seed_hash, "accepted-bgv-public-a", modulus)
+                .expect("the fixed public sampler derives within its candidate-draw limit")
                 .into_iter()
                 .take(ring_degree)
                 .collect::<Vec<_>>();
@@ -305,59 +304,20 @@ fn accepted_public_key_error_coefficient_fixture(
 pub(in super::super) struct PublicKeyShareSuccinctProofFixture {
     pub(in super::super) proof_set: serde_json::Value,
     pub(in super::super) transported_proof_material: serde_json::Value,
-    retained_proof_materials: Vec<RetainedPublicKeyShareProofMaterial>,
-}
-
-struct RetainedPublicKeyShareProofMaterial {
-    proof_material_root: String,
-    proof_bytes_hash: String,
-    proof_bytes: Vec<u8>,
-}
-
-impl PublicKeyShareSuccinctProofFixture {
-    pub(in super::super) fn retain_proof_materials(&self) {
-        use crate::bgv::setup::trustee_evaluation_key_proof::{
-            PUBLIC_KEY_SHARE_PROOF_FAMILY, public_key_share_succinct_proof_material_bytes_hash,
-        };
-
-        for material in &self.retained_proof_materials {
-            if let Some(existing_material) =
-                crate::bgv::setup::verified_canonical_setup_proof_material_bytes(
-                    PUBLIC_KEY_SHARE_PROOF_FAMILY,
-                    &material.proof_material_root,
-                )
-                .expect("public-key share proof material lookup")
-            {
-                assert_eq!(
-                    public_key_share_succinct_proof_material_bytes_hash(
-                        existing_material.as_ref(),
-                    )
-                    .expect("retained public-key share proof bytes hash"),
-                    material.proof_bytes_hash,
-                    "retained public-key share proof material must match its descriptor",
-                );
-                continue;
-            }
-
-            authenticate_setup_proof_material_stream_for_test(
-                PUBLIC_KEY_SHARE_PROOF_FAMILY,
-                &material.proof_material_root,
-                &material.proof_bytes,
-            )
-            .expect("authenticate public-key share proof material stream");
-        }
-    }
+    pub(in super::super) proof_binding_leases:
+        Vec<crate::bgv::setup::CanonicalSetupProofBindingLease>,
 }
 
 struct PublicKeyShareSuccinctProofRecordFixture {
     proof_record: serde_json::Value,
     transported_proof_material: serde_json::Value,
-    retained_proof_material: RetainedPublicKeyShareProofMaterial,
+    proof_binding_lease: crate::bgv::setup::CanonicalSetupProofBindingLease,
 }
 
 pub(in super::super) fn public_key_share_succinct_proofs_fixture(
     package: &serde_json::Value,
     proof_material_request: &serde_json::Value,
+    proof_binding_session: &crate::bgv::setup::AcceptedSetupProofBindingSession,
 ) -> PublicKeyShareSuccinctProofFixture {
     use crate::bgv::setup::trustee_evaluation_key_proof::{
         EvaluationKeyShareDescriptor, PUBLIC_KEY_SHARE_COMMON_REFERENCE_LABEL,
@@ -392,10 +352,10 @@ pub(in super::super) fn public_key_share_succinct_proofs_fixture(
         crate::bgv::setup::accepted_setup::verified_same_secret_bridge_material_from_package(
             package,
             proof_material_request,
+            Some(proof_binding_session),
         )
         .expect("same-secret bridge material");
     let per_trustee_records = (0..participant_count)
-        .into_par_iter()
         .map(|trustee_roster_position| {
         let trustee_identity = format!("trustee-{trustee_roster_position}");
         let share_record = &share_records[trustee_roster_position as usize];
@@ -508,7 +468,7 @@ pub(in super::super) fn public_key_share_succinct_proofs_fixture(
         }))
         .expect("public-key share succinct proof randomness seed");
         let statement_hash_hex = to_hex(&statement.statement_hash());
-        let proof_bytes = checkpointed_proof_bytes(
+        let checkpointed_proof = checkpointed_proof_bytes_with_verification_state(
             PUBLIC_KEY_SHARE_PROOF_CHECKPOINT_DIRECTORY,
             &statement_hash_hex,
             |proof_bytes| verify_trustee_evaluation_key_proof_bytes(&statement, proof_bytes),
@@ -519,6 +479,10 @@ pub(in super::super) fn public_key_share_succinct_proofs_fixture(
                 encode_trustee_evaluation_key_proof(&proof)
             },
         );
+        let CheckpointedProofBytes {
+            proof_bytes,
+            was_semantically_verified,
+        } = checkpointed_proof;
         let proof_bytes_hash = public_key_share_succinct_proof_bytes_hash(&proof_bytes);
         let mut proof_record = serde_json::json!({
             "objectType": "PublicKeyShareSuccinctProof",
@@ -549,11 +513,12 @@ pub(in super::super) fn public_key_share_succinct_proofs_fixture(
             derive_canonical_object_hash(&proof_record)
                 .expect("public-key share succinct proof root")
         );
-        let transport_hashes = canonical_setup_proof_material_transport_accounting(
+        let transport_hashes = authenticate_setup_proof_material_stream_for_test(
             PUBLIC_KEY_SHARE_PROOF_FAMILY,
+            &proof_material_root,
             &proof_bytes,
         )
-        .expect("public-key share proof transport hashes");
+        .expect("authenticate public-key share proof material stream");
         let transported_proof_material = serde_json::json!({
             "objectType": "SetupTransportedPublicKeyShareProofMaterial",
             "proofFamily": PUBLIC_KEY_SHARE_PROOF_FAMILY,
@@ -568,24 +533,43 @@ pub(in super::super) fn public_key_share_succinct_proofs_fixture(
             "generated public-key share succinct proof trustee {trustee_roster_position}"
         ));
 
+        if !was_semantically_verified {
+            verify_trustee_evaluation_key_proof_bytes(&statement, &proof_bytes)
+                .expect("verify generated public-key share proof bytes");
+        }
+        let verification_binding_hash = crate::bgv::setup::accepted_setup::
+            public_key_share_succinct_proof_verification_binding_hash(&proof_record, &statement)
+            .expect("public-key share proof verification binding");
+        crate::bgv::setup::retain_accepted_setup_proof_binding(
+            proof_binding_session.session_handle,
+            &proof_binding_session.capability,
+            PUBLIC_KEY_SHARE_PROOF_FAMILY,
+            &proof_material_root,
+            verification_binding_hash,
+        )
+        .expect("retain public-key share proof binding");
+        let proof_binding_lease = crate::bgv::setup::accepted_setup_proof_binding_lease(
+            proof_binding_session.session_handle,
+            &proof_binding_session.capability,
+            &proof_material_root,
+        )
+        .expect("public-key share proof binding lease lookup")
+        .expect("public-key share proof binding must be retained");
+
         PublicKeyShareSuccinctProofRecordFixture {
             proof_record,
             transported_proof_material,
-            retained_proof_material: RetainedPublicKeyShareProofMaterial {
-                proof_material_root,
-                proof_bytes_hash,
-                proof_bytes,
-            },
+            proof_binding_lease,
         }
         })
         .collect::<Vec<_>>();
     let mut proof_records = Vec::new();
     let mut transported_proof_materials = Vec::new();
-    let mut retained_proof_materials = Vec::new();
+    let mut proof_binding_leases = Vec::new();
     for fixture in per_trustee_records {
         proof_records.push(fixture.proof_record);
         transported_proof_materials.push(fixture.transported_proof_material);
-        retained_proof_materials.push(fixture.retained_proof_material);
+        proof_binding_leases.push(fixture.proof_binding_lease);
     }
     let mut proof_set = serde_json::json!({
         "objectType": "PublicKeyShareSuccinctProofSet",
@@ -609,17 +593,15 @@ pub(in super::super) fn public_key_share_succinct_proofs_fixture(
         derive_canonical_object_hash(&proof_set).expect("public-key share succinct proof set root")
     );
 
-    let fixture = PublicKeyShareSuccinctProofFixture {
+    PublicKeyShareSuccinctProofFixture {
         proof_set,
         transported_proof_material: serde_json::json!({
             "objectType": "SetupTransportedPublicKeyShareProofMaterialSet",
             "proofFamily": PUBLIC_KEY_SHARE_PROOF_FAMILY,
             "proofMaterials": transported_proof_materials,
         }),
-        retained_proof_materials,
-    };
-    fixture.retain_proof_materials();
-    fixture
+        proof_binding_leases,
+    }
 }
 
 pub(in super::super) fn signed_i64_residue_for_fixture(value: i64, modulus: u64) -> u64 {

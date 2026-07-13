@@ -51,11 +51,9 @@ pub(super) fn verify_aggregate_opening_credential(
 ) -> CanonicalResult<VerifiedAggregateOpeningCredential> {
     let aggregate_material_seed_hex =
         string_at_path(input.credential, &["aggregateMaterialSeedHex"])?.to_string();
-    let aggregate_commitment_message_values = read_aggregate_u64_vector_le_hex(
-        input.credential,
-        "aggregateCommitmentMessageValuesLeHex",
-        "aggregate opening credential message byte length must match ringDegree",
-    )?;
+    let aggregate_opening_root = string_at_path(input.credential, &["aggregateOpeningRoot"])?;
+    let aggregate_commitment_message_values =
+        take_aggregate_opening_message_values(aggregate_opening_root)?;
     let aggregate_share_values =
         derive_aggregate_share_values(&aggregate_commitment_message_values, input.rns_prime)?;
     let computation = compute_aggregate_opening(AggregateOpeningRootsInput {
@@ -122,16 +120,53 @@ pub(super) fn compute_aggregate_opening(
     })
 }
 
-pub(super) fn read_aggregate_u64_vector_le_hex(
-    credential: &Value,
-    field_name: &str,
-    length_error_message: &'static str,
+fn take_aggregate_opening_message_values(
+    aggregate_opening_root: &str,
 ) -> CanonicalResult<Vec<u64>> {
-    coefficient_vector_from_le_hex(
-        string_at_path(credential, &[field_name])?,
-        POLYNOMIAL_DEGREE,
-        length_error_message,
-    )
+    let material = crate::bgv::setup::take_verified_canonical_proof_material_bytes(
+        crate::bgv::setup::TARGET_DECRYPTION_AGGREGATE_OPENING_MATERIAL_FAMILY,
+        aggregate_opening_root,
+    )?
+    .ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidProtocolObject,
+            "aggregate opening credential is missing canonical stream-authenticated message material",
+        )
+    })?;
+    let expected_byte_length = POLYNOMIAL_DEGREE
+        .checked_mul(std::mem::size_of::<u64>())
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "aggregate opening message byte length overflowed usize",
+            )
+        })?;
+    if material.len() != expected_byte_length {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "aggregate opening message byte length must match ringDegree",
+        ));
+    }
+
+    let mut values = Vec::new();
+    values.try_reserve_exact(POLYNOMIAL_DEGREE).map_err(|_| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "aggregate opening message allocation failed within the fixed ring bound",
+        )
+    })?;
+    let mut encoded_value = [0_u8; std::mem::size_of::<u64>()];
+    for coefficient_index in 0..POLYNOMIAL_DEGREE {
+        let byte_offset = coefficient_index * encoded_value.len();
+        if !material.copy_range(byte_offset, &mut encoded_value) {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "aggregate opening message ended before ringDegree values",
+            ));
+        }
+        values.push(u64::from_le_bytes(encoded_value));
+    }
+    Ok(values)
 }
 
 fn derive_aggregate_share_values(

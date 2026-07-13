@@ -17,10 +17,11 @@ use self::package_fixtures::{
     minimal_collective_setup_package_for_participant_count,
     public_key_share_succinct_proof_bearing_collective_setup_fixture,
     replace_setup_proof_material_transport_certificate_objects,
+    ten_participant_descriptor_backed_vss_collective_setup_fixture,
 };
 use self::proof_record_fixtures::{
-    PublicKeyShareSuccinctProofFixture, collective_public_key_object,
-    compact_aggregate_threshold_proof_fixture, galois_key_share_batches_object,
+    collective_public_key_object, compact_aggregate_threshold_proof_fixture,
+    galois_key_share_batches_object,
     public_coefficient_commitment_ring_degree_from_fixture_package,
     public_evaluation_key_set_object, public_key_share_material_object,
     public_key_share_succinct_proofs_fixture, relinearization_key_share_rounds_fixture,
@@ -97,59 +98,9 @@ fn accepted_setup_test_timing(test_name: &'static str) -> AcceptedSetupTestTimin
     }
 }
 
-// Mirrors FIELD_RESIDUE_BYTE_WIDTH in the trustee proof codec: every data prime
-// is below 2^48, so each committed base-field residue occupies six bytes. The
-// fold-count offset self-check below guards against this drifting from the codec.
-const PROOF_CODEC_FIELD_RESIDUE_BYTES: usize = 6;
-
-fn set_first_masked_consistency_claim_to_noncanonical_modulus(proof_bytes: &mut [u8]) {
-    // Header (magic plus limb count) and the two commitment roots precede the
-    // first masked consistency claim, which is a six-byte base-field residue.
-    const FIRST_MASKED_CONSISTENCY_CLAIM_OFFSET: usize = 8 + 8 + 64 + 64;
-    let end = FIRST_MASKED_CONSISTENCY_CLAIM_OFFSET + PROOF_CODEC_FIELD_RESIDUE_BYTES;
-    assert!(
-        proof_bytes.len() >= end,
-        "proof bytes must include the first masked consistency claim"
-    );
-    // Limb zero's claims live mod DATA_PRIMES[0]; writing that modulus as the
-    // residue is noncanonical, since a residue must be strictly below it.
-    proof_bytes[FIRST_MASKED_CONSISTENCY_CLAIM_OFFSET..end].copy_from_slice(
-        &crate::bgv::parameters::DATA_PRIMES[0].to_le_bytes()[..PROOF_CODEC_FIELD_RESIDUE_BYTES],
-    );
-}
-
 // Runs the collective BGV setup verifier over a setup package and its
 // authenticated material references. Wraps the infallible-response expectation
 // that every accepted-setup rejection test repeats verbatim.
-fn verify_collective_setup_package(
-    package: &serde_json::Value,
-    verification_request: &serde_json::Value,
-) -> serde_json::Value {
-    verify_collective_bgv_setup_package(package, verification_request)
-        .expect("verification response")
-}
-
-// Asserts that the verifier refuses a setup package with the expected first
-// refused-object reason code. The case label is carried into every assertion
-// message so a table-driven caller still pinpoints which mutation failed, and
-// the full response is printed on mismatch to keep failures diagnosable.
-fn assert_collective_setup_package_refused(
-    case_label: &str,
-    package: serde_json::Value,
-    verification_request: serde_json::Value,
-    expected_reason_code: &str,
-) {
-    let result = verify_collective_setup_package(&package, &verification_request);
-    assert_eq!(
-        result["isValid"], false,
-        "{case_label}: unexpected verifier result: {result}"
-    );
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"], expected_reason_code,
-        "{case_label}: unexpected refusal reason code: {result}"
-    );
-}
-
 // Builds the minimal descriptor-backed collective setup fixture, applies a
 // single labeled mutation (which performs any record-level rebinds it needs),
 // rebinds the outer package hash, and asserts the verifier refuses with the
@@ -164,11 +115,14 @@ fn assert_minimal_collective_setup_package_refused(
     let mut fixture = descriptor_backed_vss_collective_setup_fixture();
     mutate(&mut fixture.package);
     rebind_collective_setup_package_hash(&mut fixture.package);
-    assert_collective_setup_package_refused(
-        case_label,
-        fixture.package,
-        fixture.verification_request,
-        expected_reason_code,
+    let result = fixture.verify().expect("verification response");
+    assert_eq!(
+        result["isValid"], false,
+        "{case_label}: unexpected verifier result: {result}"
+    );
+    assert_eq!(
+        result["refusedObjects"][0]["reasonCode"], expected_reason_code,
+        "{case_label}: unexpected refusal reason code: {result}"
     );
 }
 

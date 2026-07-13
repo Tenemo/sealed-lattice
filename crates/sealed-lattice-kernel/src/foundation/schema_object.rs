@@ -3,8 +3,10 @@ use super::{
     ACTION_DEFINITION_SCHEMA_IDENTIFIER, ARTIFACT_REFERENCE_SCHEMA_IDENTIFIER, ActionDefinition,
     ArtifactReference, BOARD_POLICY_SCHEMA_IDENTIFIER, BoardPolicy,
     CHECKPOINT_BOUNDARY_PROFILE_SCHEMA_IDENTIFIER, CHECKPOINT_MANIFEST_SCHEMA_IDENTIFIER,
-    CHECKPOINT_RANDOM_USE_PROFILE_SCHEMA_IDENTIFIER, CanonicalCodecError, CanonicalDecodeLimits,
-    CanonicalTuple, CheckpointBoundaryProfile, CheckpointManifest, CheckpointRandomUseProfile,
+    CHECKPOINT_RANDOM_USE_PROFILE_SCHEMA_IDENTIFIER,
+    COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER, CanonicalCodecError,
+    CanonicalDecodeLimits, CanonicalTuple, CheckpointBoundaryProfile, CheckpointManifest,
+    CheckpointRandomUseProfile, CollectivePublicKeyAggregateStatement,
     DEVICE_WRAPPED_STORAGE_ROOT_SCHEMA_IDENTIFIER,
     DEVICE_WRAPPING_ASSOCIATED_DATA_SCHEMA_IDENTIFIER, DISTRIBUTION_RECORD_SCHEMA_IDENTIFIER,
     DeviceWrappedStorageRoot, DeviceWrappingAssociatedData, DistributionRecord,
@@ -168,6 +170,9 @@ pub(crate) fn validate_foundation_schema_object(
         PROOF_FIELD_PROFILE_SCHEMA_IDENTIFIER => reencode_schema!(ProofFieldProfile),
         PROOF_FAMILY_PROFILE_SCHEMA_IDENTIFIER => reencode_schema!(ProofFamilyProfile),
         PROOF_FIELD_SCHEDULE_SCHEMA_IDENTIFIER => reencode_schema!(ProofFieldSchedule),
+        COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER => {
+            reencode_schema!(CollectivePublicKeyAggregateStatement)
+        }
         _ => {
             return Err(
                 FoundationSchemaObjectValidationError::UnsupportedSchemaIdentifier(
@@ -222,10 +227,19 @@ mod tests {
             ProofAuthenticationNode::new(3, 4, Hash512::from_bytes([5; 64]))
                 .encode()
                 .expect("authentication node encodes"),
-            ProofFieldSchedule::new(0, 4, 3, 2, 8, 4, 2)
+            ProofFieldSchedule::new(0, 4, 3, 2, 8, 4, 2, 6)
                 .expect("proof field schedule")
                 .encode()
                 .expect("proof field schedule encodes"),
+            CollectivePublicKeyAggregateStatement::new(
+                Hash512::from_bytes([6; 64]),
+                vec![Hash512::from_bytes([7; 64])],
+                Hash512::from_bytes([8; 64]),
+                Hash512::from_bytes([9; 64]),
+            )
+            .expect("collective public-key aggregate statement")
+            .encode()
+            .expect("collective public-key aggregate statement encodes"),
         ];
 
         for value in values {
@@ -349,10 +363,19 @@ mod tests {
             ProofAuthenticationNode::new(3, 4, Hash512::from_bytes([0x33; 64]))
                 .encode()
                 .expect("authentication node encodes"),
-            ProofFieldSchedule::new(0, 4, 3, 2, 8, 4, 2)
+            ProofFieldSchedule::new(0, 4, 3, 2, 8, 4, 2, 6)
                 .expect("proof field schedule")
                 .encode()
                 .expect("proof field schedule encodes"),
+            CollectivePublicKeyAggregateStatement::new(
+                Hash512::from_bytes([0x44; 64]),
+                vec![Hash512::from_bytes([0x45; 64])],
+                Hash512::from_bytes([0x46; 64]),
+                Hash512::from_bytes([0x47; 64]),
+            )
+            .expect("collective public-key aggregate statement")
+            .encode()
+            .expect("collective public-key aggregate statement encodes"),
         ];
         let mut mutation_state = 0x9e37_79b9_7f4a_7c15_u64;
 

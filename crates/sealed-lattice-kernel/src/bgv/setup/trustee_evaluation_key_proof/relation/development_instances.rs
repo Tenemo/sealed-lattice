@@ -396,7 +396,7 @@ pub(crate) fn generate_development_public_key_share_instance(
             PUBLIC_KEY_SHARE_COMMON_REFERENCE_LABEL,
             modulus,
             ring_degree,
-        );
+        )?;
         let secret_residues = secret_coefficients
             .iter()
             .map(|coefficient| signed_value_residue(*coefficient, modulus))

@@ -22,7 +22,6 @@ use crate::{
             generate_same_secret_bridge_proof_from_request,
             generate_trustee_evaluation_key_proof_from_request,
             generate_vss_share_linkage_proof_from_request,
-            verify_collective_bgv_setup_package_from_request,
             verify_local_trustee_setup_state_from_request,
             verify_passive_setup_package_from_request,
             verify_private_vss_share_envelope_from_request,
@@ -105,10 +104,6 @@ pub(crate) fn generate_bgv_passive_setup_from_request(request: &Value) -> Canoni
 
 pub(crate) fn verify_bgv_passive_setup_from_request(request: &Value) -> CanonicalResult<Value> {
     verify_passive_setup_package_from_request(request)
-}
-
-pub(crate) fn verify_collective_bgv_setup_from_request(request: &Value) -> CanonicalResult<Value> {
-    verify_collective_bgv_setup_package_from_request(request)
 }
 
 pub(crate) fn verify_private_vss_share_envelope(request: &Value) -> CanonicalResult<Value> {

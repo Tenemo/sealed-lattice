@@ -8,6 +8,7 @@ use crate::hashing::derive_canonical_object_hash;
 pub(in super::super) fn verify_transport_certificate(
     setup_package: &Value,
     request: &Value,
+    proof_binding_session: Option<&crate::bgv::setup::AcceptedSetupProofBindingSession>,
 ) -> CanonicalResult<Option<Value>> {
     let Some(transport_certificate) = setup_package.get("setupTransportCertificate") else {
         return Ok(Some(verification_response(
@@ -17,7 +18,12 @@ pub(in super::super) fn verify_transport_certificate(
             Vec::new(),
         )?));
     };
-    match verify_transport_certificate_body(setup_package, request, transport_certificate)? {
+    match verify_transport_certificate_body(
+        setup_package,
+        request,
+        transport_certificate,
+        proof_binding_session,
+    )? {
         Ok(()) => {}
         Err(refusal) => {
             return Ok(Some(setup_transport_refusal(
@@ -37,6 +43,7 @@ fn verify_transport_certificate_body(
     setup_package: &Value,
     request: &Value,
     transport_certificate: &Value,
+    proof_binding_session: Option<&crate::bgv::setup::AcceptedSetupProofBindingSession>,
 ) -> CanonicalResult<Result<(), Refusal>> {
     macro_rules! transport_try {
         ($expression:expr) => {
@@ -117,6 +124,7 @@ fn verify_transport_certificate_body(
         setup_package,
         request,
         transport_certificate,
+        proof_binding_session,
     ));
     transport_try!(expect_transport_u64(
         transport_certificate,
@@ -159,6 +167,7 @@ fn verify_setup_transported_objects(
     setup_package: &Value,
     request: &Value,
     transport_certificate: &Value,
+    proof_binding_session: Option<&crate::bgv::setup::AcceptedSetupProofBindingSession>,
 ) -> CanonicalResult<Result<SetupTransportAggregate, Refusal>> {
     macro_rules! transport_canonical_try {
         ($expression:expr) => {
@@ -231,10 +240,11 @@ fn verify_setup_transported_objects(
                         )
                     })
             })?;
-    transport_canonical_try!(verify_setup_transport_request_bindings(
+    transport_canonical_try!(verify_setup_transport_request_bindings_in_session(
         setup_package,
         request,
         &transported_objects,
+        proof_binding_session,
     ));
 
     Ok(Ok(SetupTransportAggregate {

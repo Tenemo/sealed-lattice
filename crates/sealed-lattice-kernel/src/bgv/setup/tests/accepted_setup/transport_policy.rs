@@ -184,9 +184,7 @@ fn collective_setup_verifier_refuses_vss_transport_missing_certificate_object() 
     );
     rebind_collective_setup_package_hash(&mut fixture.package);
 
-    let result =
-        verify_collective_bgv_setup_package(&fixture.package, &fixture.verification_request)
-            .expect("verification response");
+    let result = fixture.verify().expect("verification response");
 
     assert_eq!(result["isValid"], false);
     assert_eq!(

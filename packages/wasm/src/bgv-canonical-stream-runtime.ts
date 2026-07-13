@@ -1,6 +1,7 @@
 import type { RefusalReason } from '@sealed-lattice/types';
 import { foundationProfile, refusalReasonCodes } from '@sealed-lattice/types';
 
+import { beginAcceptedSetupCanonicalStream } from './accepted-setup-session-runtime.js';
 import {
     canonicalStreamDomains,
     canonicalStreamKernelContext,
@@ -18,7 +19,10 @@ import {
     type CanonicalStreamWriterLease,
     type FillRandomValues,
 } from './canonical-stream-runtime.js';
-import type { TranscriptCoreKernel } from './transcript-core-bridge/kernel-types.js';
+import type {
+    TranscriptCoreKernelContextOwner,
+    AcceptedSetupSession,
+} from './transcript-core-bridge/kernel-types.js';
 
 const capabilityByteLength = 32;
 const materialRootByteLength = 64;
@@ -37,6 +41,7 @@ export const bgvCanonicalStreamFamilies = Object.freeze({
     targetDecryptionShare: 8,
     publicKeyShareMaterial: 9,
     publicEvaluationKeyMaterial: 10,
+    targetDecryptionAggregateOpening: 11,
 } as const);
 
 export type BgvCanonicalStreamFamily =
@@ -73,11 +78,24 @@ export type BgvCanonicalStreamRuntime = Readonly<{
         readonly materialRoot: string;
         readonly pullChunk: CanonicalStreamChunkPull;
     }): Promise<void>;
+    stageSourceMaterial(input: {
+        readonly abortSignal?: AbortSignal;
+        readonly family: BgvCanonicalStreamFamily;
+        readonly materialRoot: string;
+        readonly pullChunk: CanonicalStreamChunkPull;
+        readonly totalByteLength: number;
+    }): Promise<void>;
     openVerifier(input: {
         readonly descriptorBytes: Uint8Array;
         readonly family: BgvCanonicalStreamFamily;
         readonly materialRoot: string;
     }): BgvCanonicalStreamVerifierLease;
+}>;
+
+export type BgvTargetDecryptionAggregateOpeningMaterialSource = Readonly<{
+    readonly aggregateOpeningRoot: string;
+    readonly pullChunk: CanonicalStreamChunkPull;
+    readonly totalByteLength: number;
 }>;
 
 type ActiveLease = {
@@ -137,6 +155,10 @@ const familyDomain = new Map<BgvCanonicalStreamFamily, CanonicalStreamDomain>([
         bgvCanonicalStreamFamilies.publicEvaluationKeyMaterial,
         canonicalStreamDomains.publicEvaluationKeyMaterial,
     ],
+    [
+        bgvCanonicalStreamFamilies.targetDecryptionAggregateOpening,
+        canonicalStreamDomains.recipientAggregateThresholdShareProof,
+    ],
 ]);
 
 const isArrayBuffer = (value: unknown): value is ArrayBuffer =>
@@ -171,19 +193,22 @@ const defaultFillRandomValues: FillRandomValues = (destination): void => {
 };
 
 class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRuntime {
+    readonly #acceptedSetupSession: AcceptedSetupSession | undefined;
     readonly #context: CanonicalStreamKernelContext;
     readonly #fillRandomValues: FillRandomValues;
-    readonly #kernel: TranscriptCoreKernel;
+    readonly #kernel: TranscriptCoreKernelContextOwner;
     #activeLease: ActiveLease | undefined;
 
     public constructor(
-        kernel: TranscriptCoreKernel,
+        kernel: TranscriptCoreKernelContextOwner,
         context: CanonicalStreamKernelContext,
         fillRandomValues: FillRandomValues,
+        acceptedSetupSession: AcceptedSetupSession | undefined,
     ) {
         this.#kernel = kernel;
         this.#context = context;
         this.#fillRandomValues = fillRandomValues;
+        this.#acceptedSetupSession = acceptedSetupSession;
         this.#requireBoundary();
     }
 
@@ -221,18 +246,38 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
             handle = this.#context.runExclusive(
                 'BGV canonical stream begin',
                 () =>
-                    this.#context.bgvBegin!(
-                        input.family,
-                        rootPointer,
-                        rootBytes.byteLength,
-                        descriptorPointer,
-                        input.descriptorBytes.byteLength,
-                        capabilityPointer,
-                        capabilityByteLength,
-                        metadataPointer,
-                        metadataPointer + wasm32WordByteLength,
-                        metadataPointer + 2 * wasm32WordByteLength,
-                    ),
+                    this.#acceptedSetupSession === undefined
+                        ? this.#context.bgvBegin!(
+                              input.family,
+                              rootPointer,
+                              rootBytes.byteLength,
+                              descriptorPointer,
+                              input.descriptorBytes.byteLength,
+                              capabilityPointer,
+                              capabilityByteLength,
+                              metadataPointer,
+                              metadataPointer + wasm32WordByteLength,
+                              metadataPointer + 2 * wasm32WordByteLength,
+                          )
+                        : beginAcceptedSetupCanonicalStream(
+                              this.#acceptedSetupSession,
+                              {
+                                  chunkCountPointer:
+                                      metadataPointer +
+                                      2 * wasm32WordByteLength,
+                                  descriptorLength:
+                                      input.descriptorBytes.byteLength,
+                                  descriptorPointer,
+                                  familyCode: input.family,
+                                  materialRootLength: rootBytes.byteLength,
+                                  materialRootPointer: rootPointer,
+                                  statusPointer: metadataPointer,
+                                  streamCapabilityLength: capabilityByteLength,
+                                  streamCapabilityPointer: capabilityPointer,
+                                  totalByteLengthPointer:
+                                      metadataPointer + wasm32WordByteLength,
+                              },
+                          ),
             );
             const [status, totalByteLength, chunkCount] = this.#readWords(
                 metadataPointer,
@@ -630,6 +675,34 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
         }
     }
 
+    public async stageSourceMaterial(input: {
+        readonly abortSignal?: AbortSignal;
+        readonly family: BgvCanonicalStreamFamily;
+        readonly materialRoot: string;
+        readonly pullChunk: CanonicalStreamChunkPull;
+        readonly totalByteLength: number;
+    }): Promise<void> {
+        const descriptorBytes = await this.writeSourceMaterial({
+            ...(input.abortSignal === undefined
+                ? {}
+                : { abortSignal: input.abortSignal }),
+            emitChunk: (): Promise<void> => Promise.resolve(),
+            family: input.family,
+            materialRoot: input.materialRoot,
+            pullChunk: input.pullChunk,
+            totalByteLength: input.totalByteLength,
+        });
+        await this.readMaterial({
+            ...(input.abortSignal === undefined
+                ? {}
+                : { abortSignal: input.abortSignal }),
+            descriptorBytes,
+            family: input.family,
+            materialRoot: input.materialRoot,
+            pullChunk: input.pullChunk,
+        });
+    }
+
     #lease(lease: ActiveLease): BgvCanonicalStreamVerifierLease {
         return Object.freeze({
             absorbChunk: (chunkIndex: number, bytes: ArrayBuffer): void =>
@@ -1008,8 +1081,9 @@ class BgvCanonicalStreamRuntimeImplementation implements BgvCanonicalStreamRunti
 }
 
 export const openBgvCanonicalStreamRuntime = (input: {
+    readonly acceptedSetupSession?: AcceptedSetupSession;
     readonly fillRandomValues?: FillRandomValues;
-    readonly kernel: TranscriptCoreKernel;
+    readonly kernel: TranscriptCoreKernelContextOwner;
 }): BgvCanonicalStreamRuntime => {
     const context = canonicalStreamKernelContext(input.kernel);
     if (context === undefined) {
@@ -1022,6 +1096,59 @@ export const openBgvCanonicalStreamRuntime = (input: {
             input.kernel,
             context,
             input.fillRandomValues ?? defaultFillRandomValues,
+            input.acceptedSetupSession,
         ),
     );
+};
+
+export const stageBgvTargetDecryptionAggregateOpeningMaterials = async (input: {
+    readonly abortSignal?: AbortSignal;
+    readonly kernel: TranscriptCoreKernelContextOwner;
+    readonly sources: readonly BgvTargetDecryptionAggregateOpeningMaterialSource[];
+}): Promise<void> => {
+    if (input.sources.length === 0 || input.sources.length > 17) {
+        throw new CanonicalStreamResourceError(
+            'Aggregate opening material sources must cover between one and 17 RNS limbs.',
+        );
+    }
+    const runtime = openBgvCanonicalStreamRuntime({ kernel: input.kernel });
+    const stagedSources: BgvTargetDecryptionAggregateOpeningMaterialSource[] =
+        [];
+    try {
+        for (const source of input.sources) {
+            if (source.totalByteLength !== 32_768 * 8) {
+                throw new CanonicalStreamRefusalError('wrongTypeOrLength');
+            }
+            await runtime.stageSourceMaterial({
+                ...(input.abortSignal === undefined
+                    ? {}
+                    : { abortSignal: input.abortSignal }),
+                family: bgvCanonicalStreamFamilies.targetDecryptionAggregateOpening,
+                materialRoot: source.aggregateOpeningRoot,
+                pullChunk: source.pullChunk,
+                totalByteLength: source.totalByteLength,
+            });
+            stagedSources.push(source);
+        }
+    } catch (operationFailure) {
+        let cleanupFailure: unknown;
+        for (const source of stagedSources) {
+            try {
+                await runtime.writeMaterial({
+                    emitChunk: (): Promise<void> => Promise.resolve(),
+                    family: bgvCanonicalStreamFamilies.targetDecryptionAggregateOpening,
+                    materialRoot: source.aggregateOpeningRoot,
+                });
+            } catch (error) {
+                cleanupFailure ??= error;
+            }
+        }
+        if (cleanupFailure !== undefined) {
+            throw new CanonicalStreamCleanupError(
+                operationFailure,
+                cleanupFailure,
+            );
+        }
+        throw operationFailure;
+    }
 };

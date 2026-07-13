@@ -7,7 +7,6 @@ import {
     buildCheckGatingLanes,
     buildCheckParallelLanes,
     formatValidationSummary,
-    parseCheckArguments,
 } from '#tools/ci/run-check';
 
 const packageManagerRunner: PackageManagerRunner = {
@@ -16,34 +15,7 @@ const packageManagerRunner: PackageManagerRunner = {
     kind: 'pnpm',
 };
 
-describe('check runner arguments', () => {
-    it('uses automatic progress rendering by default', () => {
-        expect(parseCheckArguments([])).toEqual({
-            progressMode: 'auto',
-        });
-    });
-
-    it('accepts explicit progress rendering modes', () => {
-        expect(parseCheckArguments(['--progress=always'])).toEqual({
-            progressMode: 'always',
-        });
-        expect(parseCheckArguments(['--progress', 'never'])).toEqual({
-            progressMode: 'never',
-        });
-        expect(parseCheckArguments(['--', '--progress=always'])).toEqual({
-            progressMode: 'always',
-        });
-    });
-
-    it('rejects unknown check arguments and progress modes', () => {
-        expect(() => parseCheckArguments(['--progress=sometimes'])).toThrow(
-            'Usage: run-check.ts [--progress=auto|always|never].',
-        );
-        expect(() => parseCheckArguments(['--unknown'])).toThrow(
-            'Usage: run-check.ts [--progress=auto|always|never].',
-        );
-    });
-
+describe('check runner', () => {
     it('runs prebuilt Vitest projects without rebuilding the workspace', () => {
         const nodeLanes = buildCheckParallelLanes(packageManagerRunner).filter(
             (lane) => lane.name.startsWith('Node tests'),
@@ -82,27 +54,15 @@ describe('check runner arguments', () => {
         );
     });
 
-    it('keeps visible pre-commit progress with a terminal and its controlling-terminal fallback', () => {
-        const hookLines = readFileSync(
+    it('runs the complete check from pre-commit', () => {
+        const hook = readFileSync(
             new URL('../../../.husky/pre-commit', import.meta.url),
             'utf8',
         )
             .replace(/\r/g, '')
-            .trim()
-            .split('\n');
+            .trim();
 
-        expect(hookLines).toEqual([
-            'if [ -t 1 ]; then',
-            '    pnpm run check -- --progress=always',
-            'elif { exec 3>/dev/tty; } 2>/dev/null; then',
-            '    pnpm run check -- --progress=always >&3 2>&1',
-            '    hook_status=$?',
-            '    exec 3>&-',
-            '    exit "$hook_status"',
-            'else',
-            '    pnpm run check -- --progress=never',
-            'fi',
-        ]);
+        expect(hook).toBe('pnpm run check');
     });
 });
 

@@ -1,5 +1,5 @@
 use super::proof_record_fixtures::{
-    DescriptorBackedVssProofMaterialFixture, descriptor_backed_vss_proof_material_fixture,
+    descriptor_backed_vss_proof_material_fixture, finalize_collective_setup_package,
 };
 use super::*;
 
@@ -30,16 +30,57 @@ struct CollectiveSetupPackageFixture {
 pub(super) struct CollectiveSetupVerificationFixture {
     pub(super) package: serde_json::Value,
     pub(super) verification_request: serde_json::Value,
+    proof_binding_leases: Vec<crate::bgv::setup::CanonicalSetupProofBindingLease>,
+}
+
+impl CollectiveSetupVerificationFixture {
+    pub(super) fn extend_proof_binding_leases(
+        &mut self,
+        proof_binding_leases: Vec<crate::bgv::setup::CanonicalSetupProofBindingLease>,
+    ) {
+        self.proof_binding_leases.extend(proof_binding_leases);
+    }
+
+    pub(super) fn begin_proof_binding_session(
+        &self,
+    ) -> crate::bgv::setup::AcceptedSetupProofBindingSession {
+        let proof_binding_session =
+            crate::bgv::setup::AcceptedSetupProofBindingSession::begin_fresh()
+                .expect("begin accepted-setup fixture proof binding session");
+        for proof_binding_lease in &self.proof_binding_leases {
+            crate::bgv::setup::restore_accepted_setup_proof_binding_lease(
+                proof_binding_session.session_handle,
+                &proof_binding_session.capability,
+                proof_binding_lease,
+            )
+            .expect("restore accepted-setup fixture proof binding lease");
+        }
+        proof_binding_session
+    }
+
+    pub(super) fn verify(&self) -> crate::encoding::CanonicalResult<serde_json::Value> {
+        self.verify_values(&self.package, &self.verification_request)
+    }
+
+    pub(super) fn verify_values(
+        &self,
+        package: &serde_json::Value,
+        verification_request: &serde_json::Value,
+    ) -> crate::encoding::CanonicalResult<serde_json::Value> {
+        crate::bgv::setup::accepted_setup::verify_collective_bgv_setup_package_with_proof_binding_leases(
+            package,
+            verification_request,
+            &self.proof_binding_leases,
+        )
+    }
 }
 
 struct CachedPublicKeyShareCollectiveSetupFixture {
     verification_fixture: CollectiveSetupVerificationFixture,
-    succinct_proof_fixture: PublicKeyShareSuccinctProofFixture,
 }
 
 struct CachedDescriptorBackedVssCollectiveSetupFixture {
     verification_fixture: CollectiveSetupVerificationFixture,
-    proof_material_fixture: DescriptorBackedVssProofMaterialFixture,
 }
 
 fn private_vss_mailbox_public_key_hash(roster_position: u64) -> String {
@@ -467,21 +508,29 @@ pub(super) fn public_key_share_succinct_proof_bearing_collective_setup_fixture()
     let _ = descriptor_backed_vss_collective_setup_fixture();
     let cached_fixture = PUBLIC_KEY_SHARE_SUCCINCT_PROOF_BEARING_COLLECTIVE_SETUP_PACKAGE_CACHE
         .get_or_init(build_public_key_share_succinct_proof_bearing_collective_setup_package);
-    cached_fixture
-        .succinct_proof_fixture
-        .retain_proof_materials();
     cached_fixture.verification_fixture.clone()
 }
 
 fn build_public_key_share_succinct_proof_bearing_collective_setup_package()
 -> CachedPublicKeyShareCollectiveSetupFixture {
     let descriptor_backed_vss_fixture = descriptor_backed_vss_collective_setup_fixture();
+    let proof_binding_session = descriptor_backed_vss_fixture.begin_proof_binding_session();
+    let mut proof_binding_leases = descriptor_backed_vss_fixture.proof_binding_leases;
     let mut package = descriptor_backed_vss_fixture.package;
     let mut verification_request = descriptor_backed_vss_fixture.verification_request;
     replace_public_key_share_hashes_with_material_hashes(&mut package);
     package["publicKeyShareMaterial"] = public_key_share_material_object(&package);
-    let succinct_proof_fixture =
-        public_key_share_succinct_proofs_fixture(&package, &verification_request);
+    let succinct_proof_fixture = public_key_share_succinct_proofs_fixture(
+        &package,
+        &verification_request,
+        &proof_binding_session,
+    );
+    proof_binding_leases.extend(succinct_proof_fixture.proof_binding_leases.iter().cloned());
+    crate::bgv::setup::cancel_accepted_setup_proof_binding_session(
+        proof_binding_session.session_handle,
+        &proof_binding_session.capability,
+    )
+    .expect("cancel public-key share fixture proof binding session");
     package["publicKeyShareSuccinctProofs"] = succinct_proof_fixture.proof_set.clone();
     replace_setup_proof_material_transport_certificate_objects(
         &mut package,
@@ -496,8 +545,8 @@ fn build_public_key_share_succinct_proof_bearing_collective_setup_package()
         verification_fixture: CollectiveSetupVerificationFixture {
             package,
             verification_request,
+            proof_binding_leases,
         },
-        succinct_proof_fixture,
     }
 }
 
@@ -505,15 +554,19 @@ pub(super) fn descriptor_backed_vss_collective_setup_fixture() -> CollectiveSetu
 {
     let cached_fixture = DESCRIPTOR_BACKED_VSS_COLLECTIVE_SETUP_PACKAGE_CACHE
         .get_or_init(build_descriptor_backed_vss_collective_setup_fixture);
-    cached_fixture
-        .proof_material_fixture
-        .retain_proof_materials();
     cached_fixture.verification_fixture.clone()
 }
 
 fn build_descriptor_backed_vss_collective_setup_fixture()
 -> CachedDescriptorBackedVssCollectiveSetupFixture {
-    let mut package = minimal_collective_setup_package();
+    build_descriptor_backed_vss_collective_setup_fixture_from_package(
+        minimal_collective_setup_package(),
+    )
+}
+
+fn build_descriptor_backed_vss_collective_setup_fixture_from_package(
+    mut package: serde_json::Value,
+) -> CachedDescriptorBackedVssCollectiveSetupFixture {
     let proof_material_fixture = descriptor_backed_vss_proof_material_fixture(&mut package);
     replace_setup_proof_material_transport_certificate_objects(
         &mut package,
@@ -531,9 +584,23 @@ fn build_descriptor_backed_vss_collective_setup_fixture()
         verification_fixture: CollectiveSetupVerificationFixture {
             package,
             verification_request: proof_material_fixture.verification_request.clone(),
+            proof_binding_leases: proof_material_fixture.proof_binding_leases(),
         },
-        proof_material_fixture,
     }
+}
+
+/// The explicit ten-participant proof-bearing fixture used only by its
+/// dedicated guarded evidence lane. Routine accepted-setup tests retain the
+/// minimum supported roster because their rejection assertions do not gain
+/// coverage by regenerating the same proof relations for a larger roster.
+pub(super) fn ten_participant_descriptor_backed_vss_collective_setup_fixture()
+-> CollectiveSetupVerificationFixture {
+    let fixture = build_descriptor_backed_vss_collective_setup_fixture_from_package(
+        finalize_collective_setup_package(minimal_collective_setup_package_for_participant_count(
+            PARAMETER_PROFILE_PARTICIPANT_COUNT,
+        )),
+    );
+    fixture.verification_fixture
 }
 
 pub(super) fn collective_public_key_bearing_collective_setup_fixture()
@@ -548,6 +615,7 @@ fn build_collective_public_key_bearing_collective_setup_package()
 -> CollectiveSetupVerificationFixture {
     let public_key_share_fixture =
         public_key_share_succinct_proof_bearing_collective_setup_fixture();
+    let proof_binding_leases = public_key_share_fixture.proof_binding_leases;
     let mut package = public_key_share_fixture.package;
     package["collectivePublicKey"] = collective_public_key_object(&package);
     package["collectivePublicKeyRoot"] =
@@ -557,6 +625,7 @@ fn build_collective_public_key_bearing_collective_setup_package()
     CollectiveSetupVerificationFixture {
         package,
         verification_request: public_key_share_fixture.verification_request,
+        proof_binding_leases,
     }
 }
 

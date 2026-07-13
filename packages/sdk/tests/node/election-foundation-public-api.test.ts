@@ -40,8 +40,8 @@ const foundationBoardCandidateObjectHash =
     publicApiRuntimeRecord.foundationBoardCandidateObjectHash as FoundationBoardCandidateObjectHash;
 
 const expectedPublicRuntimeExportNames = [
+    'ThresholdParameterDerivationError',
     'createFoundationBoardSession',
-    'createSetupPackageVerificationInput',
     'deriveCollectiveBgvSetupRosterHash',
     'deriveFrozenRosterParameters',
     'derivePollSpecHash',

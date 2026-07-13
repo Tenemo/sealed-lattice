@@ -5,8 +5,6 @@ import { runWithLocalRunLog } from './local-run-log.js';
 import { buildProcessMemoryGuardVerificationCommand } from './process-memory-guard.js';
 import { runCommandsInSeries } from './run-command.js';
 
-import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
-
 export const runProcessMemoryGuardTests = async (): Promise<void> => {
     const commandLineArguments = process.argv.slice(2);
     await runWithLocalRunLog(
@@ -52,6 +50,6 @@ export const runProcessMemoryGuardTests = async (): Promise<void> => {
     );
 };
 
-if (isDirectlyInvokedModule(import.meta.url)) {
+if (import.meta.main) {
     void runProcessMemoryGuardTests();
 }

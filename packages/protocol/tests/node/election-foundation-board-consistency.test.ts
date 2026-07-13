@@ -74,11 +74,6 @@ describe('board consistency', () => {
         expect(result.isValid).toBe(true);
         expect(inclusionProof.boardEntryCount).toBe(3);
         expect(inclusionProof.boardEntryMerklePath).toHaveLength(1);
-        expect(result.verifiedHeadHashes).toEqual([
-            head0.headHash,
-            head1.headHash,
-            head2.headHash,
-        ]);
     });
 
     it('rejects board evidence without a trusted expected board key', () => {

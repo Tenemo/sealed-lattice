@@ -48,6 +48,8 @@ fn valid_suite_record() -> SuiteRecord {
         maximum_ballot_attempts_per_participant: 3,
         maximum_recovery_transitions_per_state_key: 4,
         maximum_target_share_submissions: FOUNDATION_PROFILE.participant_count,
+        maximum_private_sampler_candidate_draws_per_output: 5,
+        maximum_public_sampler_candidate_draws_per_output: 7,
         maximum_candidate_packages_per_action: 20,
         maximum_proof_objects_per_action: 100,
         maximum_candidate_bytes_per_participant: 3_000,
@@ -306,21 +308,23 @@ fn suite_basis_indexes_and_key_switch_profile_refuse_every_invalid_shape() {
 
 #[test]
 fn suite_caps_enforce_positive_exact_multiples_overflow_and_containment() {
-    for cap_index in 0..12 {
+    for cap_index in 0..14 {
         let mut record = valid_suite_record();
         match cap_index {
             0 => record.maximum_ballot_attempts_per_participant = 0,
             1 => record.maximum_recovery_transitions_per_state_key = 0,
             2 => record.maximum_target_share_submissions = 0,
-            3 => record.maximum_candidate_packages_per_action = 0,
-            4 => record.maximum_proof_objects_per_action = 0,
-            5 => record.maximum_candidate_bytes_per_participant = 0,
-            6 => record.maximum_candidate_bytes_per_action = 0,
-            7 => record.maximum_setup_bytes_per_participant = 0,
-            8 => record.maximum_proof_bytes_per_action = 0,
-            9 => record.maximum_public_corpus_bytes = 0,
-            10 => record.maximum_participant_upload_bytes = 0,
-            11 => record.maximum_ceremony_upload_bytes = 0,
+            3 => record.maximum_private_sampler_candidate_draws_per_output = 0,
+            4 => record.maximum_public_sampler_candidate_draws_per_output = 0,
+            5 => record.maximum_candidate_packages_per_action = 0,
+            6 => record.maximum_proof_objects_per_action = 0,
+            7 => record.maximum_candidate_bytes_per_participant = 0,
+            8 => record.maximum_candidate_bytes_per_action = 0,
+            9 => record.maximum_setup_bytes_per_participant = 0,
+            10 => record.maximum_proof_bytes_per_action = 0,
+            11 => record.maximum_public_corpus_bytes = 0,
+            12 => record.maximum_participant_upload_bytes = 0,
+            13 => record.maximum_ceremony_upload_bytes = 0,
             _ => unreachable!("test cap index is bounded"),
         }
         expect_intrinsic_refusal(record, RefusalReason::OutsideSupportedProfile);
@@ -474,7 +478,7 @@ fn suite_decode_refuses_hostile_bounds_types_versions_counts_and_nested_substitu
         RefusalReason::WrongTypeOrLength
     );
 
-    let distribution_payload_offset = outer_item_header_offset(&encoded, 26) + 6;
+    let distribution_payload_offset = outer_item_header_offset(&encoded, 28) + 6;
     let mut hostile_distribution_count = encoded.clone();
     hostile_distribution_count[distribution_payload_offset + 2..distribution_payload_offset + 6]
         .copy_from_slice(&u32::MAX.to_le_bytes());
@@ -500,7 +504,7 @@ fn suite_decode_refuses_hostile_bounds_types_versions_counts_and_nested_substitu
         RefusalReason::OutsideSupportedProfile
     );
 
-    let artifact_payload_offset = outer_item_header_offset(&encoded, 27) + 6;
+    let artifact_payload_offset = outer_item_header_offset(&encoded, 29) + 6;
     let mut substituted_artifact_kind = encoded.clone();
     let first_artifact_kind_offset = artifact_payload_offset + 6 + 8 + 6;
     substituted_artifact_kind[first_artifact_kind_offset..first_artifact_kind_offset + 2]

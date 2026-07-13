@@ -1,7 +1,7 @@
 import {
-    createTranscriptCoreKernelLoader,
-    type TranscriptCoreKernel,
-} from '@sealed-lattice/wasm';
+    createPublishedSdkKernelLoader,
+    type PublishedSdkKernel,
+} from '@sealed-lattice/wasm/published-sdk';
 
 const transcriptCoreKernelUrl = new URL(
     './sealed-lattice-kernel.wasm',
@@ -22,8 +22,8 @@ const transcriptCoreKernelLoaderOptions = {
     expectedKernelSha256Hex: packagedTranscriptCoreKernelNormalizedSha256Hex,
 } as const;
 
-export const loadTranscriptCoreKernel: () => Promise<TranscriptCoreKernel> =
-    createTranscriptCoreKernelLoader(
+export const loadTranscriptCoreKernel: () => Promise<PublishedSdkKernel> =
+    createPublishedSdkKernelLoader(
         transcriptCoreKernelUrl,
         transcriptCoreKernelLoaderOptions,
     );
@@ -32,9 +32,8 @@ export const loadTranscriptCoreKernel: () => Promise<TranscriptCoreKernel> =
 // staging or generated-material export fails, discarding that instance also
 // discards authenticated or generated one-shot roots and its linear-memory
 // high-water mark.
-export const loadFreshTranscriptCoreKernel =
-    (): Promise<TranscriptCoreKernel> =>
-        createTranscriptCoreKernelLoader(
-            transcriptCoreKernelUrl,
-            transcriptCoreKernelLoaderOptions,
-        )();
+export const loadFreshTranscriptCoreKernel = (): Promise<PublishedSdkKernel> =>
+    createPublishedSdkKernelLoader(
+        transcriptCoreKernelUrl,
+        transcriptCoreKernelLoaderOptions,
+    )();

@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import {
     copyWasmKernelByteIdentically,
     hashNormalizedWasmKernel,
+    normalizeSdkDeclarationEntryMarker,
 } from '#tools/ci/build-sdk-package';
 
 const wasmHeader = [0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00] as const;
@@ -78,6 +79,51 @@ describe('SDK package build', () => {
         } finally {
             await rm(temporaryDirectoryPath, { force: true, recursive: true });
         }
+    });
+
+    it('removes the random declaration scratch path from bundled output', () => {
+        const declarationBundlePath = path.resolve(
+            'packages',
+            'sdk',
+            'dist',
+            'index.d.ts',
+        );
+        const declarationEntryPath = path.resolve(
+            'temp',
+            'build-scratch',
+            'sdk-package-declarations',
+            'build-random',
+            'index.d.ts',
+        );
+        const declarationEntryMarkerPath = path
+            .relative(
+                path.dirname(path.dirname(declarationBundlePath)),
+                declarationEntryPath,
+            )
+            .split(path.sep)
+            .join('/');
+        const declarationSourceText = [
+            '//#region ../types/dist/index.d.ts',
+            'type ProtocolHash = string;',
+            '//#endregion',
+            `//#region ${declarationEntryMarkerPath}`,
+            'export { ProtocolHash };',
+            '//#endregion',
+            '',
+        ].join('\n');
+
+        expect(
+            normalizeSdkDeclarationEntryMarker({
+                declarationBundlePath,
+                declarationEntryPath,
+                declarationSourceText,
+            }),
+        ).toBe(
+            declarationSourceText.replace(
+                `//#region ${declarationEntryMarkerPath}`,
+                '//#region src/index.ts',
+            ),
+        );
     });
 
     it('keeps Cargo and wasm-opt production in the internal WASM package only', async () => {

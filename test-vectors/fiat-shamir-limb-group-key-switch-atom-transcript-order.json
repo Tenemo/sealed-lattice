@@ -1,0 +1,61 @@
+{
+  "eventCount": 283,
+  "fixture": {
+    "digitCount": 3,
+    "maskDegree": 16,
+    "queryCount": 40,
+    "ringDegree": 64
+  },
+  "formatVersion": 1,
+  "proofFamily": "limb-group-key-switch-atom",
+  "transcripts": [
+    {
+      "eventCount": 283,
+      "segments": [
+        {"byteLength": 40, "eventCount": 1, "label": "sealed-lattice/setup/key-switch-atom/key", "operation": "initialize", "squeezeCounterStart": null},
+        {"byteLength": 64, "eventCount": 1, "label": "key-statement-binding", "operation": "absorb", "squeezeCounterStart": null},
+        {"byteLength": 8, "eventCount": 1, "label": "key-schedule-index", "operation": "absorb", "squeezeCounterStart": null},
+        {"byteLength": 8, "eventCount": 1, "label": "ring-degree", "operation": "absorb", "squeezeCounterStart": null},
+        {"byteLength": 8, "eventCount": 1, "label": "digit-count", "operation": "absorb", "squeezeCounterStart": null},
+        {"byteLength": 104, "eventCount": 1, "label": "group-modulus", "operation": "absorb", "squeezeCounterStart": null},
+        {"byteLength": 104, "eventCount": 1, "label": "plaintext-modulus", "operation": "absorb", "squeezeCounterStart": null},
+        {"byteLength": 6656, "eventCount": 1, "label": "digit-sample", "operation": "absorb", "squeezeCounterStart": null},
+        {"byteLength": 104, "eventCount": 1, "label": "digit-gadget", "operation": "absorb", "squeezeCounterStart": null},
+        {"byteLength": 6656, "eventCount": 1, "label": "digit-sample", "operation": "absorb", "squeezeCounterStart": null},
+        {"byteLength": 104, "eventCount": 1, "label": "digit-gadget", "operation": "absorb", "squeezeCounterStart": null},
+        {"byteLength": 6656, "eventCount": 1, "label": "digit-sample", "operation": "absorb", "squeezeCounterStart": null},
+        {"byteLength": 104, "eventCount": 1, "label": "digit-gadget", "operation": "absorb", "squeezeCounterStart": null},
+        {"byteLength": 8, "eventCount": 1, "label": "key-source", "operation": "absorb", "squeezeCounterStart": null},
+        {"byteLength": 8, "eventCount": 1, "label": "key-linkage-present", "operation": "absorb", "squeezeCounterStart": null},
+        {"byteLength": 32, "eventCount": 1, "label": "key-base-root", "operation": "absorb", "squeezeCounterStart": null},
+        {"byteLength": 32, "eventCount": 1, "label": "key-material-root", "operation": "absorb", "squeezeCounterStart": null},
+        {"byteLength": null, "eventCount": 128, "label": "key-gamma", "operation": "squeeze", "squeezeCounterStart": 0},
+        {"byteLength": null, "eventCount": 6, "label": "key-delta", "operation": "squeeze", "squeezeCounterStart": 128},
+        {"byteLength": null, "eventCount": 2, "label": "key-lookup-mu", "operation": "squeeze", "squeezeCounterStart": 134},
+        {"byteLength": 32, "eventCount": 1, "label": "key-aux-root", "operation": "absorb", "squeezeCounterStart": null},
+        {"byteLength": 104, "eventCount": 1, "label": "key-lookup-terminal", "operation": "absorb", "squeezeCounterStart": null},
+        {"byteLength": 312, "eventCount": 1, "label": "key-table-terminals", "operation": "absorb", "squeezeCounterStart": null},
+        {"byteLength": null, "eventCount": 8, "label": "key-sum-batch", "operation": "squeeze", "squeezeCounterStart": 0},
+        {"byteLength": null, "eventCount": 34, "label": "key-support-alpha", "operation": "squeeze", "squeezeCounterStart": 8},
+        {"byteLength": 32, "eventCount": 1, "label": "key-quotient-root", "operation": "absorb", "squeezeCounterStart": null},
+        {"byteLength": null, "eventCount": 60, "label": "key-combination", "operation": "squeeze", "squeezeCounterStart": 0},
+        {"byteLength": 32, "eventCount": 1, "label": "fri-layer-root", "operation": "absorb", "squeezeCounterStart": null},
+        {"byteLength": null, "eventCount": 2, "label": "fri-fold", "operation": "squeeze", "squeezeCounterStart": 0},
+        {"byteLength": 32, "eventCount": 1, "label": "fri-layer-root", "operation": "absorb", "squeezeCounterStart": null},
+        {"byteLength": null, "eventCount": 2, "label": "fri-fold", "operation": "squeeze", "squeezeCounterStart": 0},
+        {"byteLength": 32, "eventCount": 1, "label": "fri-layer-root", "operation": "absorb", "squeezeCounterStart": null},
+        {"byteLength": null, "eventCount": 2, "label": "fri-fold", "operation": "squeeze", "squeezeCounterStart": 0},
+        {"byteLength": 32, "eventCount": 1, "label": "fri-layer-root", "operation": "absorb", "squeezeCounterStart": null},
+        {"byteLength": null, "eventCount": 2, "label": "fri-fold", "operation": "squeeze", "squeezeCounterStart": 0},
+        {"byteLength": 32, "eventCount": 1, "label": "fri-layer-root", "operation": "absorb", "squeezeCounterStart": null},
+        {"byteLength": null, "eventCount": 2, "label": "fri-fold", "operation": "squeeze", "squeezeCounterStart": 0},
+        {"byteLength": 32, "eventCount": 1, "label": "fri-layer-root", "operation": "absorb", "squeezeCounterStart": null},
+        {"byteLength": null, "eventCount": 2, "label": "fri-fold", "operation": "squeeze", "squeezeCounterStart": 0},
+        {"byteLength": 832, "eventCount": 1, "label": "fri-final", "operation": "absorb", "squeezeCounterStart": null},
+        {"byteLength": null, "eventCount": 5, "label": "key-query", "operation": "squeeze", "squeezeCounterStart": 0}
+      ],
+      "transcriptFamily": "limb-group-key-switch-atom",
+      "transcriptPath": "sealed-lattice/setup/key-switch-atom/key"
+    }
+  ]
+}

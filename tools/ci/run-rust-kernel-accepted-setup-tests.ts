@@ -4,6 +4,7 @@ import {
     createFocusedRustTestMatchTracker,
     resolveFocusedRustTestRunResult,
 } from './focused-rust-test-match.js';
+import { withLocalHeavyLaneLease } from './heavy-lane-lease.js';
 import { createHeavyTestProgressReporter } from './heavy-test-progress.js';
 import {
     runWithLocalRunLog,
@@ -27,11 +28,12 @@ import {
     normalizeRustTestFilter,
 } from './rust-kernel-test-arguments.js';
 
-import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
-
 // One implementation for the Rust accepted-setup proof-test runs. The heavy
-// accepted-setup suite contains every test in the accepted-setup test module,
-// including ignored proof tests, and shares one memoized package fixture. The
+// accepted-setup suite contains the routine tests in the accepted-setup test
+// module, including its ignored proof tests, and shares one memoized package
+// fixture. The ten-participant proof-bearing evidence test is deliberately
+// excluded: it has a dedicated exact-filter command so routine proof changes
+// do not regenerate the maximum-roster corpus. The
 // entrypoint also accepts a single positional test or file-stem filter for a
 // focused local run. The default mode is
 // accelerated local execution. GitHub CI passes `--ci` to request the
@@ -124,18 +126,6 @@ const acceptedSetupCheckpointDirectory = path.join(
     'accepted-setup-final-package-material-store',
 );
 
-export type ResolvedKnob = {
-    readonly value: string;
-    readonly source: string;
-};
-
-export type ResolvedRunKnobs = {
-    readonly rayonThreadCount: ResolvedKnob;
-    readonly testThreads: ResolvedKnob;
-    readonly trusteeProofBatchSize: ResolvedKnob;
-    readonly trusteeProofLimbBatchSize: ResolvedKnob;
-};
-
 export type BuiltRustKernelAcceptedSetupCommand = {
     readonly command: CommandInvocation;
     readonly progressLabel: string;
@@ -148,20 +138,26 @@ export type GuardedRustKernelCommand = {
     readonly expectedTestFilter?: string;
 };
 
-export const cargoTestArgumentsForAcceptedSetupTests = (
-    testThreadCount: string,
-): readonly string[] => [
-    'test',
-    '--locked',
-    '-p',
-    'sealed-lattice-kernel',
-    acceptedSetupTestModulePattern,
-    '--',
-    '--include-ignored',
-    '--nocapture',
-    '--test-threads',
-    testThreadCount,
-];
+const serializedThreadCount = '1';
+
+export const tenParticipantAcceptedSetupEvidenceTest =
+    'bgv::setup::tests::accepted_setup::vss_material::ten_participant_vss_proof_bearing_collective_setup_package_passes_preterminal_accepted_setup';
+
+export const cargoTestArgumentsForAcceptedSetupTests =
+    (): readonly string[] => [
+        'test',
+        '--locked',
+        '-p',
+        'sealed-lattice-kernel',
+        acceptedSetupTestModulePattern,
+        '--',
+        '--include-ignored',
+        '--skip',
+        tenParticipantAcceptedSetupEvidenceTest,
+        '--nocapture',
+        '--test-threads',
+        serializedThreadCount,
+    ];
 
 const acceptedSetupRunName = 'Rust accepted setup';
 const acceptedSetupScriptName = 'test:rust:kernel:accepted-setup';
@@ -169,17 +165,9 @@ const acceptedSetupScriptName = 'test:rust:kernel:accepted-setup';
 // Keep every nested scheduling layer serial until its peak memory has been
 // measured inside the hard ceiling. Environment overrides cannot weaken this
 // containment policy.
-export const resolveRunKnobs = (): ResolvedRunKnobs => ({
-    testThreads: { value: '1', source: 'serialized' },
-    trusteeProofBatchSize: { value: '1', source: 'serialized' },
-    trusteeProofLimbBatchSize: { value: '1', source: 'serialized' },
-    rayonThreadCount: { value: '1', source: 'serialized' },
-});
-
 export const buildAcceptedSetupEnvironment = (input: {
     readonly baseEnvironment?: NodeJS.ProcessEnv;
     readonly cargoIncremental: '0' | '1';
-    readonly knobs: ResolvedRunKnobs;
     readonly resumeCheckpoints: boolean;
     readonly targetDirectoryPath?: string;
 }): NodeJS.ProcessEnv => {
@@ -204,12 +192,9 @@ export const buildAcceptedSetupEnvironment = (input: {
                   SEALED_LATTICE_RESUME_TEST_CHECKPOINTS: '1',
               }
             : {}),
-        RAYON_NUM_THREADS: input.knobs.rayonThreadCount.value,
+        RAYON_NUM_THREADS: serializedThreadCount,
         RUST_BACKTRACE: 'full',
-        SEALED_LATTICE_TRUSTEE_PROOF_BATCH_SIZE:
-            input.knobs.trusteeProofBatchSize.value,
-        SEALED_LATTICE_TRUSTEE_PROOF_LIMB_BATCH_SIZE:
-            input.knobs.trusteeProofLimbBatchSize.value,
+        SEALED_LATTICE_TRUSTEE_PROOF_LIMB_BATCH_SIZE: serializedThreadCount,
     };
 };
 
@@ -232,7 +217,6 @@ const buildAcceptedSetupCommand = (
 ): BuiltRustKernelAcceptedSetupCommand => {
     const memoryLimitGigabytes =
         getAcceptedSetupProcessMemoryGuard().memoryLimitGigabytes;
-    const knobs = resolveRunKnobs();
     const modeLabel =
         mode === 'accelerated' ? 'accelerated local' : 'CI prove-fresh';
     const setupMessages = [
@@ -248,16 +232,13 @@ const buildAcceptedSetupCommand = (
 
     return {
         command: guardAcceptedSetupCommand({
-            args: cargoTestArgumentsForAcceptedSetupTests(
-                knobs.testThreads.value,
-            ),
+            args: cargoTestArgumentsForAcceptedSetupTests(),
             command: 'cargo',
             description: `cargo test Rust accepted setup${
                 mode === 'accelerated' ? ' (accelerated local)' : ''
             }`,
             env: buildAcceptedSetupEnvironment({
                 cargoIncremental: mode === 'accelerated' ? '1' : '0',
-                knobs,
                 resumeCheckpoints: mode === 'accelerated',
                 targetDirectoryPath:
                     mode === 'accelerated'
@@ -271,17 +252,12 @@ const buildAcceptedSetupCommand = (
         }),
         progressLabel: 'accepted-setup',
         setupMessages,
-        testThreadCount: Number.parseInt(knobs.testThreads.value, 10),
+        testThreadCount: 1,
     };
-};
-
-export const normalizeFocusedTestFilter = (filter: string): string => {
-    return normalizeRustTestFilter(filter);
 };
 
 export const cargoTestArgumentsForFocusedFilter = (
     testFilter: string,
-    testThreadCount: string,
 ): readonly string[] => [
     'test',
     '--locked',
@@ -292,7 +268,7 @@ export const cargoTestArgumentsForFocusedFilter = (
     '--include-ignored',
     '--nocapture',
     '--test-threads',
-    testThreadCount,
+    serializedThreadCount,
 ];
 
 export const buildFocusedCommand = (
@@ -307,7 +283,6 @@ export const buildFocusedCommand = (
 ): BuiltRustKernelAcceptedSetupCommand => {
     const memoryLimitGigabytes =
         getAcceptedSetupProcessMemoryGuard().memoryLimitGigabytes;
-    const knobs = resolveRunKnobs();
     const isAccelerated = mode === 'accelerated';
     const modeLabel = isAccelerated ? 'accelerated local' : 'CI prove-fresh';
     const runName = customization.runName ?? 'Rust accepted setup focused';
@@ -316,7 +291,7 @@ export const buildFocusedCommand = (
         acceptedSetupFocusedTargetDirectory;
     const setupMessages = [
         `${runName} (${modeLabel}): filter [${testFilter}], ` +
-            `${knobs.testThreads.value} serialized test thread; hard inherited process-memory ceiling ` +
+            '1 serialized test thread; hard inherited process-memory ceiling ' +
             `${memoryLimitGigabytes} GiB.`,
         ...(isAccelerated
             ? [
@@ -330,15 +305,11 @@ export const buildFocusedCommand = (
 
     return {
         command: guardAcceptedSetupCommand({
-            args: cargoTestArgumentsForFocusedFilter(
-                testFilter,
-                knobs.testThreads.value,
-            ),
+            args: cargoTestArgumentsForFocusedFilter(testFilter),
             command: 'cargo',
             description: `cargo test ${testFilter} (${modeLabel} focused)`,
             env: buildAcceptedSetupEnvironment({
                 cargoIncremental: isAccelerated ? '1' : '0',
-                knobs,
                 resumeCheckpoints: isAccelerated,
                 targetDirectoryPath: isAccelerated
                     ? targetDirectoryPath
@@ -352,7 +323,7 @@ export const buildFocusedCommand = (
         }),
         progressLabel: customization.progressLabel ?? 'accepted-setup:focused',
         setupMessages,
-        testThreadCount: Number.parseInt(knobs.testThreads.value, 10),
+        testThreadCount: 1,
     };
 };
 
@@ -416,81 +387,84 @@ export const runGuardedRustKernelCommands = async (input: {
     for (const command of input.commands) {
         writeRunnerSetupMessages(runLog, command.builtCommand.setupMessages);
     }
-    let exitCode = await runCommandsInSeries(
-        [verifyProcessMemoryGuardCommand()],
-        { outputMode: 'inherit', runLog },
-    );
-    if (exitCode !== 0) {
-        process.exitCode = exitCode;
-        return;
-    }
-
-    for (const [commandIndex, command] of input.commands.entries()) {
-        const testMatchTracker =
-            command.expectedTestFilter === undefined
-                ? undefined
-                : createFocusedRustTestMatchTracker();
-        const diagnosticFileNames = buildGuardedRustKernelDiagnosticFileNames({
-            commandIndex,
-            progressLabel: command.builtCommand.progressLabel,
-        });
-        const guardedCommand =
-            getAcceptedSetupProcessMemoryGuard().addDiagnostics(
-                command.builtCommand.command,
-                path.join(
-                    runLog.runDirectoryPath,
-                    'resources',
-                    diagnosticFileNames.processMemoryGuard,
-                ),
+    process.exitCode = await withLocalHeavyLaneLease({
+        action: async () => {
+            let exitCode = await runCommandsInSeries(
+                [verifyProcessMemoryGuardCommand()],
+                { outputMode: 'inherit', runLog },
             );
-        const progressReporter = createHeavyTestProgressReporter({
-            eventFilePath: path.join(
-                runLog.runDirectoryPath,
-                'tests',
-                diagnosticFileNames.testEvents,
-            ),
-            label: command.builtCommand.progressLabel,
-            threadCount: command.builtCommand.testThreadCount,
-        });
-        try {
-            exitCode = await runCommandsInSeries([guardedCommand], {
-                observer:
-                    testMatchTracker === undefined
-                        ? progressReporter.observer
-                        : combineCommandRunObservers([
-                              progressReporter.observer,
-                              testMatchTracker.observer,
-                          ]),
-                outputMode: 'inherit',
-                runLog,
-                terminalOutputFilter: progressReporter.terminalOutputFilter,
-            });
-        } finally {
-            progressReporter.stop();
-        }
-        if (
-            testMatchTracker !== undefined &&
-            command.expectedTestFilter !== undefined
-        ) {
-            const focusedRunResult = resolveFocusedRustTestRunResult({
-                commandExitCode: exitCode,
-                matchedTestCount: testMatchTracker.matchedTestCount(),
-                runnerName: input.laneLabel,
-                testFilter: command.expectedTestFilter,
-            });
-            exitCode = focusedRunResult.exitCode;
-            if (focusedRunResult.failureMessage !== undefined) {
-                console.error(focusedRunResult.failureMessage);
-                runLog.writeCombinedOutput(
-                    `${focusedRunResult.failureMessage}\n`,
-                );
+            if (exitCode !== 0) return exitCode;
+
+            for (const [commandIndex, command] of input.commands.entries()) {
+                const testMatchTracker =
+                    command.expectedTestFilter === undefined
+                        ? undefined
+                        : createFocusedRustTestMatchTracker();
+                const diagnosticFileNames =
+                    buildGuardedRustKernelDiagnosticFileNames({
+                        commandIndex,
+                        progressLabel: command.builtCommand.progressLabel,
+                    });
+                const guardedCommand =
+                    getAcceptedSetupProcessMemoryGuard().addDiagnostics(
+                        command.builtCommand.command,
+                        path.join(
+                            runLog.runDirectoryPath,
+                            'resources',
+                            diagnosticFileNames.processMemoryGuard,
+                        ),
+                    );
+                const progressReporter = createHeavyTestProgressReporter({
+                    eventFilePath: path.join(
+                        runLog.runDirectoryPath,
+                        'tests',
+                        diagnosticFileNames.testEvents,
+                    ),
+                    label: command.builtCommand.progressLabel,
+                    threadCount: command.builtCommand.testThreadCount,
+                });
+                try {
+                    exitCode = await runCommandsInSeries([guardedCommand], {
+                        observer:
+                            testMatchTracker === undefined
+                                ? progressReporter.observer
+                                : combineCommandRunObservers([
+                                      progressReporter.observer,
+                                      testMatchTracker.observer,
+                                  ]),
+                        outputMode: 'inherit',
+                        runLog,
+                        terminalOutputFilter:
+                            progressReporter.terminalOutputFilter,
+                    });
+                } finally {
+                    progressReporter.stop();
+                }
+                if (
+                    testMatchTracker !== undefined &&
+                    command.expectedTestFilter !== undefined
+                ) {
+                    const focusedRunResult = resolveFocusedRustTestRunResult({
+                        commandExitCode: exitCode,
+                        matchedTestCount: testMatchTracker.matchedTestCount(),
+                        runnerName: input.laneLabel,
+                        testFilter: command.expectedTestFilter,
+                    });
+                    exitCode = focusedRunResult.exitCode;
+                    if (focusedRunResult.failureMessage !== undefined) {
+                        console.error(focusedRunResult.failureMessage);
+                        runLog.writeCombinedOutput(
+                            `${focusedRunResult.failureMessage}\n`,
+                        );
+                    }
+                }
+                if (exitCode !== 0) break;
             }
-        }
-        if (exitCode !== 0) {
-            break;
-        }
-    }
-    process.exitCode = exitCode;
+            return exitCode;
+        },
+        laneLabel: input.laneLabel,
+        runLog,
+    });
 };
 
 const usage =
@@ -529,7 +503,7 @@ export const parseRustKernelAcceptedSetupArguments = (
 
     const focused = positionalArguments.length === 1;
     const normalizedFocusedFilter = focused
-        ? normalizeFocusedTestFilter(positionalArguments[0] ?? '')
+        ? normalizeRustTestFilter(positionalArguments[0] ?? '')
         : undefined;
     if (normalizedFocusedFilter === '') {
         throw new Error(
@@ -570,7 +544,18 @@ export const runRustKernelAcceptedSetupTests = async (input: {
             const focusedTestFilter = parsedArguments.focused
                 ? parsedArguments.testFilters[0]
                 : undefined;
-            if (focusedTestFilter !== undefined) {
+            if (focusedTestFilter === undefined) {
+                // Keep the routine-suite exclusion fail-closed. If the Rust
+                // evidence test is renamed or removed, stop during inventory
+                // collection instead of letting a stale --skip silently run
+                // the ten-participant corpus in the routine suite.
+                await verifyFocusedRustLaneSelection({
+                    environment: builtCommand.command.env,
+                    lane: 'rust-accepted-setup',
+                    runLog,
+                    testFilter: tenParticipantAcceptedSetupEvidenceTest,
+                });
+            } else {
                 await verifyFocusedRustLaneSelection({
                     environment: builtCommand.command.env,
                     lane: 'rust-accepted-setup',
@@ -592,6 +577,6 @@ export const runRustKernelAcceptedSetupTests = async (input: {
     );
 };
 
-if (isDirectlyInvokedModule(import.meta.url)) {
+if (import.meta.main) {
     void runRustKernelAcceptedSetupTests({});
 }

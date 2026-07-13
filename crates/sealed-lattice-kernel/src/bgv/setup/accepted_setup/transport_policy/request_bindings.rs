@@ -2,10 +2,25 @@ use super::binary_material::*;
 use super::certificate::*;
 use super::*;
 
+#[cfg(test)]
 pub(super) fn verify_setup_transport_request_bindings(
     setup_package: &Value,
     request: &Value,
     transported_objects: &[SetupTransportedObjectBinding],
+) -> CanonicalResult<Result<(), Refusal>> {
+    verify_setup_transport_request_bindings_in_session(
+        setup_package,
+        request,
+        transported_objects,
+        None,
+    )
+}
+
+pub(super) fn verify_setup_transport_request_bindings_in_session(
+    setup_package: &Value,
+    request: &Value,
+    transported_objects: &[SetupTransportedObjectBinding],
+    proof_binding_session: Option<&crate::bgv::setup::AcceptedSetupProofBindingSession>,
 ) -> CanonicalResult<Result<(), Refusal>> {
     macro_rules! transport_canonical_try {
         ($expression:expr) => {
@@ -32,6 +47,7 @@ pub(super) fn verify_setup_transport_request_bindings(
         },
         &referenced_public_key_material_roots,
         AuthenticatedSetupTransportMaterialSource::PublicKeyShareMaterial,
+        proof_binding_session,
     ));
 
     let referenced_public_key_proof_roots = setup_transport_referenced_proof_material_roots(
@@ -53,6 +69,7 @@ pub(super) fn verify_setup_transport_request_bindings(
         },
         &referenced_public_key_proof_roots,
         AuthenticatedSetupTransportMaterialSource::SetupProof(PUBLIC_KEY_SHARE_PROOF_FAMILY),
+        proof_binding_session,
     ));
 
     let mut referenced_vss_share_linkage_roots = setup_transport_referenced_proof_material_roots(
@@ -80,6 +97,7 @@ pub(super) fn verify_setup_transport_request_bindings(
         },
         &referenced_vss_share_linkage_roots,
         AuthenticatedSetupTransportMaterialSource::SetupProof(VSS_SHARE_LINKAGE_PROOF_FAMILY),
+        proof_binding_session,
     ));
 
     let referenced_same_secret_bridge_roots = setup_transport_referenced_proof_material_roots(
@@ -101,6 +119,7 @@ pub(super) fn verify_setup_transport_request_bindings(
         },
         &referenced_same_secret_bridge_roots,
         AuthenticatedSetupTransportMaterialSource::SetupProof(SAME_SECRET_BRIDGE_PROOF_FAMILY),
+        proof_binding_session,
     ));
 
     let referenced_evaluation_key_proof_roots = setup_transport_referenced_proof_material_roots(
@@ -122,6 +141,7 @@ pub(super) fn verify_setup_transport_request_bindings(
         },
         &referenced_evaluation_key_proof_roots,
         AuthenticatedSetupTransportMaterialSource::SetupProof(TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,),
+        proof_binding_session,
     ));
 
     let referenced_evaluation_key_component_roots =
@@ -134,8 +154,10 @@ pub(super) fn verify_setup_transport_request_bindings(
     transport_canonical_try!(require_setup_transport_material_entries(
         transported_objects,
         request.get("transportedEvaluationKeyShareComponentMaterial"),
-        "transportedEvaluationKeyShareComponentMaterial",
-        "componentMaterials",
+        SetupTransportMaterialSetLocation {
+            material_set_path: "transportedEvaluationKeyShareComponentMaterial",
+            material_array_field_name: "componentMaterials",
+        },
         SetupTransportMaterialDescriptor {
             object_name: SETUP_TRANSPORTED_EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_NAME,
             object_role: SETUP_TRANSPORTED_EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ROLE,
@@ -144,6 +166,7 @@ pub(super) fn verify_setup_transport_request_bindings(
         },
         &referenced_evaluation_key_component_roots,
         AuthenticatedSetupTransportMaterialSource::EvaluationKeyComponent,
+        proof_binding_session,
     ));
 
     let referenced_public_evaluation_key_material_roots =
@@ -156,8 +179,10 @@ pub(super) fn verify_setup_transport_request_bindings(
     transport_canonical_try!(require_setup_transport_material_entries(
         transported_objects,
         request.get("transportedPublicEvaluationKeyMaterial"),
-        "transportedPublicEvaluationKeyMaterial",
-        "publicEvaluationKeyMaterials",
+        SetupTransportMaterialSetLocation {
+            material_set_path: "transportedPublicEvaluationKeyMaterial",
+            material_array_field_name: "publicEvaluationKeyMaterials",
+        },
         SetupTransportMaterialDescriptor {
             object_name: SETUP_TRANSPORTED_PUBLIC_EVALUATION_KEY_MATERIAL_NAME,
             object_role: SETUP_TRANSPORTED_PUBLIC_EVALUATION_KEY_MATERIAL_ROLE,
@@ -168,6 +193,7 @@ pub(super) fn verify_setup_transport_request_bindings(
         AuthenticatedSetupTransportMaterialSource::SetupProof(
             PUBLIC_EVALUATION_KEY_MATERIAL_STREAM_FAMILY,
         ),
+        proof_binding_session,
     ));
 
     transport_canonical_try!(require_exact_setup_transport_object_set(
@@ -351,6 +377,7 @@ fn require_setup_transport_proof_material_entries(
     descriptor: SetupTransportMaterialDescriptor,
     referenced_material_roots: &BTreeSet<String>,
     authenticated_source: AuthenticatedSetupTransportMaterialSource,
+    proof_binding_session: Option<&crate::bgv::setup::AcceptedSetupProofBindingSession>,
 ) -> CanonicalResult<Result<(), Refusal>> {
     let Some(material_set) = material_set else {
         return Ok(if referenced_material_roots.is_empty() {
@@ -406,6 +433,7 @@ fn require_setup_transport_proof_material_entries(
             proof_material,
             &expected_material,
             authenticated_source,
+            proof_binding_session,
         )? {
             return Ok(Err(refusal));
         }
@@ -420,15 +448,24 @@ fn require_setup_transport_proof_material_entries(
     Ok(Ok(()))
 }
 
+struct SetupTransportMaterialSetLocation {
+    material_set_path: &'static str,
+    material_array_field_name: &'static str,
+}
+
 fn require_setup_transport_material_entries(
     transported_objects: &[SetupTransportedObjectBinding],
     material_set: Option<&Value>,
-    material_set_path: &'static str,
-    material_array_field_name: &'static str,
+    material_set_location: SetupTransportMaterialSetLocation,
     descriptor: SetupTransportMaterialDescriptor,
     referenced_material_roots: &BTreeSet<String>,
     authenticated_source: AuthenticatedSetupTransportMaterialSource,
+    proof_binding_session: Option<&crate::bgv::setup::AcceptedSetupProofBindingSession>,
 ) -> CanonicalResult<Result<(), Refusal>> {
+    let SetupTransportMaterialSetLocation {
+        material_set_path,
+        material_array_field_name,
+    } = material_set_location;
     let Some(material_set) = material_set else {
         return Ok(if referenced_material_roots.is_empty() {
             Ok(())
@@ -489,6 +526,7 @@ fn require_setup_transport_material_entries(
             material,
             &expected_material,
             authenticated_source,
+            proof_binding_session,
         )? {
             return Ok(Err(refusal));
         }
@@ -510,6 +548,7 @@ fn require_setup_transport_single_material_entry(
     descriptor: SetupTransportMaterialDescriptor,
     referenced_material_roots: &BTreeSet<String>,
     authenticated_source: AuthenticatedSetupTransportMaterialSource,
+    proof_binding_session: Option<&crate::bgv::setup::AcceptedSetupProofBindingSession>,
 ) -> CanonicalResult<Result<(), Refusal>> {
     if referenced_material_roots.is_empty() {
         return Ok(Ok(()));
@@ -545,7 +584,12 @@ fn require_setup_transport_single_material_entry(
     if let Err(refusal) = require_setup_transport_entry(transported_objects, &expected_material) {
         return Ok(Err(refusal));
     }
-    require_authenticated_setup_transport_entry(material, &expected_material, authenticated_source)
+    require_authenticated_setup_transport_entry(
+        material,
+        &expected_material,
+        authenticated_source,
+        proof_binding_session,
+    )
 }
 
 fn missing_referenced_transport_material_refusal(
@@ -577,10 +621,15 @@ fn require_authenticated_setup_transport_entry(
     material: &Value,
     expected: &SetupTransportExpectedObject,
     source: AuthenticatedSetupTransportMaterialSource,
+    proof_binding_session: Option<&crate::bgv::setup::AcceptedSetupProofBindingSession>,
 ) -> CanonicalResult<Result<(), Refusal>> {
     let stream_summary = match source {
         AuthenticatedSetupTransportMaterialSource::SetupProof(proof_family) => {
-            authenticated_setup_proof_material_stream_summary(proof_family, &expected.object_root)
+            authenticated_setup_proof_material_stream_summary_in_session(
+                proof_binding_session,
+                proof_family,
+                &expected.object_root,
+            )
         }
         AuthenticatedSetupTransportMaterialSource::EvaluationKeyComponent => {
             let Some(proof_family) = material.get("proofFamily").and_then(Value::as_str) else {
@@ -590,13 +639,17 @@ fn require_authenticated_setup_transport_entry(
                     format!("{}.proofFamily", expected.object_path),
                 )));
             };
-            authenticated_evaluation_key_component_stream_summary(
+            authenticated_evaluation_key_component_stream_summary_in_session(
+                proof_binding_session,
                 proof_family,
                 &expected.object_root,
             )
         }
         AuthenticatedSetupTransportMaterialSource::PublicKeyShareMaterial => {
-            authenticated_public_key_share_material_stream_summary(&expected.object_root)
+            authenticated_public_key_share_material_stream_summary_in_session(
+                proof_binding_session,
+                &expected.object_root,
+            )
         }
     };
     let stream_summary = match stream_summary {
@@ -1294,123 +1347,6 @@ mod tests {
         assert!(
             authenticated_public_key_share_material_stream_summary(&public_key_material_root)
                 .expect("post-refusal public-key material lookup")
-                .is_none()
-        );
-    }
-
-    #[test]
-    fn malformed_verification_requests_evict_every_finished_material_store_before_retry() {
-        let proof_material_root = protocol_hash('6');
-        let component_material_root = protocol_hash('7');
-        let public_key_material_root = protocol_hash('8');
-        let proof_bytes = [0x61_u8; 48];
-        let component_bytes = [0x62_u8; 48];
-        let public_key_bytes = public_key_share_material_bytes();
-        let mut deeply_nested_proof_sidecar = json!({
-            "publicEvaluationKeyMaterialRoot": proof_material_root,
-        });
-        for _ in 0..512 {
-            deeply_nested_proof_sidecar = json!({
-                "malformedNestedMaterial": deeply_nested_proof_sidecar,
-            });
-        }
-
-        let stage_all_materials = |capability_offset: u8| {
-            authenticate_bgv_material_stream(
-                crate::bgv::setup::canonical_stream_transport::BGV_CANONICAL_STREAM_FAMILY_PUBLIC_EVALUATION_KEY_MATERIAL,
-                CanonicalStreamDomain::PublicEvaluationKeyMaterial,
-                &proof_material_root,
-                &proof_bytes,
-                capability_offset,
-            );
-            authenticate_bgv_material_stream(
-                crate::bgv::setup::canonical_stream_transport::BGV_CANONICAL_STREAM_FAMILY_RELINEARIZATION_COMPONENT,
-                CanonicalStreamDomain::EvaluatorKeyStore,
-                &component_material_root,
-                &component_bytes,
-                capability_offset + 1,
-            );
-            authenticate_bgv_material_stream(
-                crate::bgv::setup::canonical_stream_transport::BGV_CANONICAL_STREAM_FAMILY_PUBLIC_KEY_SHARE_MATERIAL,
-                CanonicalStreamDomain::PublicKeyShareMaterial,
-                &public_key_material_root,
-                &public_key_bytes,
-                capability_offset + 2,
-            );
-        };
-        let malformed_request = json!({
-            "transportedPublicEvaluationKeyMaterial": {
-                "publicEvaluationKeyMaterials": deeply_nested_proof_sidecar,
-            },
-            "transportedEvaluationKeyShareComponentMaterial": {
-                "componentMaterials": [
-                    "malformed item",
-                    {
-                        "malformedNestedMaterial": {
-                            "keySwitchComponentMaterialRoot": component_material_root,
-                        },
-                    },
-                ],
-            },
-            "transportedPublicKeyShareMaterial": {
-                "malformedNestedMaterial": {
-                    "publicKeyShareMaterialSetRoot": public_key_material_root,
-                },
-            },
-        });
-
-        stage_all_materials(0xc1);
-        let error = verify_collective_bgv_setup_package_from_request(&malformed_request)
-            .expect_err("a request without setupPackage must fail");
-        assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
-        assert!(
-            authenticated_setup_proof_material_stream_summary(
-                PUBLIC_EVALUATION_KEY_MATERIAL_STREAM_FAMILY,
-                &proof_material_root,
-            )
-            .expect("malformed-request proof material lookup")
-            .is_none()
-        );
-        assert!(
-            authenticated_evaluation_key_component_stream_summary(
-                "relinearization-key-share",
-                &component_material_root,
-            )
-            .expect("malformed-request component material lookup")
-            .is_none()
-        );
-        assert!(
-            authenticated_public_key_share_material_stream_summary(&public_key_material_root)
-                .expect("malformed-request public-key material lookup")
-                .is_none()
-        );
-
-        stage_all_materials(0xd1);
-        let proof_eviction_guard =
-            VerifiedSetupProofMaterialEvictionGuard::for_request(&malformed_request);
-        let component_eviction_guard =
-            VerifiedComponentMaterialEvictionGuard::for_request(&malformed_request);
-        drop(component_eviction_guard);
-        drop(proof_eviction_guard);
-        assert!(
-            authenticated_setup_proof_material_stream_summary(
-                PUBLIC_EVALUATION_KEY_MATERIAL_STREAM_FAMILY,
-                &proof_material_root,
-            )
-            .expect("retry proof material cleanup lookup")
-            .is_none()
-        );
-        assert!(
-            authenticated_evaluation_key_component_stream_summary(
-                "relinearization-key-share",
-                &component_material_root,
-            )
-            .expect("retry component material cleanup lookup")
-            .is_none()
-        );
-        assert!(
-            authenticated_public_key_share_material_stream_summary(&public_key_material_root)
-                .expect("retry public-key material cleanup lookup")
                 .is_none()
         );
     }

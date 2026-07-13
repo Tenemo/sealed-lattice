@@ -38,7 +38,7 @@ describe('collective BGV setup kernel commands', () => {
         };
         rebindCollectiveSetupPackageHash(kernel, genericKeySwitchPackage);
 
-        const genericKeySwitchResult = kernel.verifyCollectiveBgvSetup({
+        const genericKeySwitchResult = kernel.beginAcceptedSetupSession().verifyCollectiveBgvSetup({
             setupPackage: genericKeySwitchPackage,
         });
 
@@ -63,7 +63,7 @@ describe('collective BGV setup kernel commands', () => {
         ).largeObjectEncoding = 'json';
         rebindCollectiveSetupPackageHash(kernel, jsonTransportPackage);
 
-        const jsonTransportResult = kernel.verifyCollectiveBgvSetup({
+        const jsonTransportResult = kernel.beginAcceptedSetupSession().verifyCollectiveBgvSetup({
             setupPackage: jsonTransportPackage,
         });
 

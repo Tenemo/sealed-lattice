@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
+import { constants as fileSystemConstants } from 'node:fs';
 import {
+    appendFile,
     copyFile,
     mkdtemp,
     mkdir,
@@ -20,9 +22,7 @@ import {
     type PackageManagerRunner,
 } from './package-manager-runner.js';
 import {
-    createPackageManagerCommand,
     runCommandAndCaptureOutput,
-    runCommandsInSeries,
     type CapturedCommandResult,
     type CommandInvocation,
 } from './run-command.js';
@@ -39,6 +39,9 @@ type PackedFileMetadata = {
 type PackMetadataEntry = {
     readonly filename: string;
     readonly files: readonly PackedFileMetadata[];
+    readonly integrity: string;
+    readonly name: string;
+    readonly version: string;
 };
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
@@ -114,18 +117,30 @@ const isPackMetadataEntry = (value: unknown): value is PackMetadataEntry => {
     const metadataEntry = value as {
         readonly filename?: unknown;
         readonly files?: unknown;
+        readonly integrity?: unknown;
+        readonly name?: unknown;
+        readonly version?: unknown;
     };
 
     return (
         typeof metadataEntry.filename === 'string' &&
         Array.isArray(metadataEntry.files) &&
-        metadataEntry.files.every(isPackedFileMetadata)
+        metadataEntry.files.every(isPackedFileMetadata) &&
+        typeof metadataEntry.integrity === 'string' &&
+        typeof metadataEntry.name === 'string' &&
+        typeof metadataEntry.version === 'string'
     );
 };
 
 export const parsePackMetadata = (
     packOutput: string,
-): { readonly filename: string; readonly filePaths: readonly string[] } => {
+): {
+    readonly filename: string;
+    readonly filePaths: readonly string[];
+    readonly integrity: string;
+    readonly name: string;
+    readonly version: string;
+} => {
     const parsedMetadata = JSON.parse(packOutput) as unknown;
 
     if (!Array.isArray(parsedMetadata) || parsedMetadata.length !== 1) {
@@ -143,6 +158,9 @@ export const parsePackMetadata = (
         filePaths: metadataEntry.files
             .map((fileMetadata) => fileMetadata.path)
             .sort((left, right) => left.localeCompare(right)),
+        integrity: metadataEntry.integrity,
+        name: metadataEntry.name,
+        version: metadataEntry.version,
     };
 };
 
@@ -345,28 +363,31 @@ const runSmokeTypeEntryPoint = async (
 };
 
 type PackedPackageSmokeOptions = {
-    readonly buildWorkspace: boolean;
+    readonly retainedTarballPath?: string;
 };
 
 export const parsePackedPackageSmokeArguments = (
     commandArguments: readonly string[],
 ): PackedPackageSmokeOptions => {
-    const argumentsWithoutSeparators = commandArguments.filter(
-        (argument) => argument !== '--',
-    );
-    if (argumentsWithoutSeparators.length === 0) {
-        return { buildWorkspace: false };
+    const argumentsWithoutSeparator =
+        commandArguments[0] === '--'
+            ? commandArguments.slice(1)
+            : commandArguments;
+    if (argumentsWithoutSeparator.length === 0) {
+        return {};
     }
     if (
-        argumentsWithoutSeparators.length === 1 &&
-        argumentsWithoutSeparators[0] === '--build'
+        argumentsWithoutSeparator.length === 2 &&
+        argumentsWithoutSeparator[0] === '--out' &&
+        argumentsWithoutSeparator[1] !== undefined &&
+        argumentsWithoutSeparator[1].length > 0
     ) {
-        return { buildWorkspace: true };
+        return {
+            retainedTarballPath: path.resolve(argumentsWithoutSeparator[1]),
+        };
     }
 
-    throw new Error(
-        'Packed-package smoke verification accepts only the optional --build flag.',
-    );
+    throw new Error('Usage: verify-packed-package.ts [--out <tarball-path>].');
 };
 
 const runPackedPackagePhase = async <Result>(
@@ -409,7 +430,8 @@ const runPackedPackagePhase = async <Result>(
 
 const runPackedPackageSmoke = async (
     runLog: ActiveLocalRunLog,
-): Promise<void> => {
+    retainedTarballPath?: string,
+): Promise<{ readonly integrity: string; readonly tarballPath?: string }> => {
     const packageManagerRunner =
         resolvePackageManagerRunnerForPackageManager('npm');
     const tempRoot = await mkdtemp(join(tmpdir(), 'sealed-lattice-packed-'));
@@ -512,9 +534,18 @@ const runPackedPackageSmoke = async (
                         'npm pack returned a filename outside the package directory.',
                     );
                 }
+                if (
+                    packMetadata.name !== publishedPackageJson.name ||
+                    packMetadata.version !== publishedPackageJson.version
+                ) {
+                    throw new Error(
+                        `npm pack produced ${packMetadata.name}@${packMetadata.version}; expected ${String(publishedPackageJson.name)}@${String(publishedPackageJson.version)}.`,
+                    );
+                }
 
                 return {
                     filePaths: packMetadata.filePaths,
+                    integrity: packMetadata.integrity,
                     tarballPath,
                 };
             },
@@ -582,10 +613,19 @@ const runPackedPackageSmoke = async (
         );
 
         const tarballBytes = await readFile(packedPackage.tarballPath);
+        const actualPackageIntegrity = `sha512-${createHash('sha512')
+            .update(tarballBytes)
+            .digest('base64')}`;
+        if (actualPackageIntegrity !== packedPackage.integrity) {
+            throw new Error(
+                'The packed tarball bytes do not match the integrity reported by npm pack.',
+            );
+        }
         const packageEvidence = {
             objectVersion: 'sealed-lattice-package-smoke-evidence-v1',
             packageName: publishedPackageJson.name,
             packageVersion: publishedPackageJson.version,
+            npmIntegrity: actualPackageIntegrity,
             publishedFilePaths: packedPackage.filePaths,
             tarballByteLength: tarballBytes.byteLength,
             tarballFileName: path.basename(packedPackage.tarballPath),
@@ -603,9 +643,22 @@ const runPackedPackageSmoke = async (
             eventType: 'package-smoke-evidence-recorded',
         });
 
+        if (retainedTarballPath !== undefined) {
+            await mkdir(path.dirname(retainedTarballPath), { recursive: true });
+            await copyFile(
+                packedPackage.tarballPath,
+                retainedTarballPath,
+                fileSystemConstants.COPYFILE_EXCL,
+            );
+        }
+
         console.log(
             `Packed package smoke test passed with ${packageManagerRunner.kind}.`,
         );
+        return {
+            integrity: actualPackageIntegrity,
+            tarballPath: retainedTarballPath,
+        };
     } finally {
         await rm(tempRoot, { recursive: true, force: true });
     }
@@ -621,34 +674,28 @@ const main = async (): Promise<void> => {
         },
         async (runLog) => {
             const options = parsePackedPackageSmokeArguments(rawArguments);
-            if (options.buildWorkspace) {
-                const exitCode = await runCommandsInSeries(
-                    [
-                        createPackageManagerCommand(
-                            'Build workspace packages for packed-package smoke',
-                            ['run', 'build'],
-                            {
-                                logFileSlug: 'build',
-                                packageManagerRunner:
-                                    resolvePackageManagerRunner(),
-                            },
-                        ),
-                    ],
-                    { runLog },
-                );
-                if (exitCode !== 0) {
-                    process.exitCode = exitCode;
-                    throw new Error(
-                        `Packed-package smoke build failed with exit code ${exitCode}.`,
+            const result = await runPackedPackageSmoke(
+                runLog,
+                options.retainedTarballPath,
+            );
+            if (result.tarballPath !== undefined) {
+                const githubOutputPath = process.env.GITHUB_OUTPUT;
+                if (
+                    githubOutputPath !== undefined &&
+                    githubOutputPath.length > 0
+                ) {
+                    await appendFile(
+                        githubOutputPath,
+                        `tarball=${result.tarballPath}\nintegrity=${result.integrity}\n`,
+                        'utf8',
                     );
                 }
+                console.log(`Retained verified tarball: ${result.tarballPath}`);
             }
-
-            await runPackedPackageSmoke(runLog);
         },
     );
 };
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (import.meta.main) {
     void main();
 }

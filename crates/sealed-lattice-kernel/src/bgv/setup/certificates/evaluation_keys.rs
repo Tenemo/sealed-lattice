@@ -2,34 +2,6 @@ use super::*;
 
 use crate::hashing::derive_canonical_object_hash;
 
-pub(super) fn public_rlwe_samples_by_basis(
-    participant_count: usize,
-    rotation_key_count: usize,
-) -> Value {
-    let q_data_bits = data_basis_modulus_bits();
-    let q_extended_utility_bits = extended_basis_modulus_bits();
-
-    json!({
-        "QData": {
-            "modulusBits": q_data_bits,
-            "publicKeyShares": participant_count,
-            "collectivePublicKey": 1,
-            "relinearizationKeys": DATA_PRIMES.len() - 1,
-            "rotationKeys": rotation_key_count,
-            "keySwitchKeys": 1,
-        },
-        "QPPublic": {
-            "modulusBits": q_extended_utility_bits,
-            "relinearizationKeys": 0,
-            "rotationKeys": 0,
-            "keySwitchKeys": 0,
-        },
-        "QTarget": {
-            "modulusBits": null,
-        },
-    })
-}
-
 pub(super) fn evaluation_key_streaming_commitment(
     evaluation_keys: &Value,
 ) -> CanonicalResult<Value> {

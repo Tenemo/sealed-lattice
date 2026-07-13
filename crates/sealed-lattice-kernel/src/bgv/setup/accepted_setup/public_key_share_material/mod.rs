@@ -292,12 +292,16 @@ use collective_public_key::*;
 pub(in crate::bgv::setup) use collective_public_key::accepted_setup_collective_public_key_from_package;
 pub(super) use material_records::verify_public_key_share_material_set;
 pub(super) use material_set::public_key_share_material_uses_transport;
+#[cfg(test)]
+pub(in crate::bgv::setup) use transport::authenticated_public_key_share_material_stream_summary;
 pub(in crate::bgv::setup) use transport::{
     CanonicalPublicKeyShareMaterialStream,
     absorb_verified_canonical_public_key_share_material_chunk,
-    authenticated_public_key_share_material_stream_summary,
+    authenticated_public_key_share_material_stream_summary_in_session,
     begin_verified_canonical_public_key_share_material_stream,
     cancel_verified_canonical_public_key_share_material_stream,
-    evict_verified_canonical_public_key_share_materials,
+    drain_verified_canonical_public_key_share_materials,
     finish_verified_canonical_public_key_share_material_stream,
 };
+#[cfg(test)]
+pub(in crate::bgv::setup) use transport::evict_verified_canonical_public_key_share_materials;

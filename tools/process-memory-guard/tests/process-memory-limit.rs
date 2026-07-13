@@ -1,12 +1,19 @@
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
+use std::thread;
+use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const CHILD_ALLOCATION_BYTES: &str = "SEALED_LATTICE_PROCESS_GUARD_TEST_ALLOCATION_BYTES";
 const CHILD_EXIT_CODE: &str = "SEALED_LATTICE_PROCESS_GUARD_TEST_EXIT_CODE";
 const EXPECTED_ALLOCATION_REFUSAL: &str =
     "SEALED_LATTICE_PROCESS_MEMORY_GUARD_EXPECTED_ALLOCATION_REFUSAL";
+const HOLD_ALLOCATION_MILLISECONDS: &str =
+    "SEALED_LATTICE_PROCESS_GUARD_TEST_HOLD_ALLOCATION_MILLISECONDS";
+#[cfg(target_os = "linux")]
+const SPAWN_AGGREGATE_ALLOCATION_CHILDREN: &str =
+    "SEALED_LATTICE_PROCESS_GUARD_TEST_SPAWN_AGGREGATE_ALLOCATION_CHILDREN";
 const GUARD_EXECUTABLE: &str = env!("CARGO_BIN_EXE_sealed-lattice-process-memory-guard");
 
 struct TemporaryDiagnostics {
@@ -56,7 +63,42 @@ fn guarded_child_attempts_requested_allocation() {
     };
 
     let allocated_bytes = vec![1_u8; allocation_bytes];
+    if let Some(milliseconds) = std::env::var(HOLD_ALLOCATION_MILLISECONDS)
+        .ok()
+        .map(|value| value.parse::<u64>().expect("allocation hold duration"))
+    {
+        thread::sleep(Duration::from_millis(milliseconds));
+    }
     std::hint::black_box(allocated_bytes);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn guarded_child_spawns_allocations_that_only_exceed_the_aggregate_limit() {
+    if std::env::var_os(SPAWN_AGGREGATE_ALLOCATION_CHILDREN).is_none() {
+        return;
+    }
+
+    let current_test_executable = std::env::current_exe().expect("current test executable");
+    let mut allocation_children = (0..2)
+        .map(|_| {
+            Command::new(&current_test_executable)
+                .args(["--exact", "guarded_child_attempts_requested_allocation"])
+                .env(CHILD_ALLOCATION_BYTES, "201326592")
+                .env(HOLD_ALLOCATION_MILLISECONDS, "2000")
+                .spawn()
+                .expect("aggregate allocation child")
+        })
+        .collect::<Vec<_>>();
+    let statuses = allocation_children
+        .iter_mut()
+        .map(|child| child.wait().expect("aggregate allocation child status"))
+        .collect::<Vec<_>>();
+
+    if statuses.iter().any(|status| !status.success()) {
+        std::process::exit(86);
+    }
+    panic!("two individually allowed allocations exceeded the aggregate limit without refusal");
 }
 
 #[test]
@@ -161,6 +203,47 @@ fn refuses_a_child_allocation_above_the_memory_limit() {
     assert!(diagnostic_text.contains("\"expectedDiagnostic\":\"controlled-allocation-refusal\""));
     assert!(diagnostic_text.contains("\"eventType\":\"child-exited\""));
     assert!(diagnostic_text.contains("\"memoryEvidence\":"));
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn refuses_individually_allowed_allocations_above_the_aggregate_limit() {
+    let current_test_executable = std::env::current_exe().expect("current test executable");
+    let diagnostics = TemporaryDiagnostics::new("aggregate-allocation-refusal");
+    let status = Command::new(GUARD_EXECUTABLE)
+        .args([
+            "--memory-limit-bytes",
+            "268435456",
+            "--virtual-address-space-allowance-bytes",
+            "8589934592",
+            "--diagnostics-path",
+            diagnostics
+                .file_path
+                .to_str()
+                .expect("UTF-8 diagnostics path"),
+            "--",
+            current_test_executable
+                .to_str()
+                .expect("UTF-8 test executable path"),
+            "--exact",
+            "guarded_child_spawns_allocations_that_only_exceed_the_aggregate_limit",
+        ])
+        .env(SPAWN_AGGREGATE_ALLOCATION_CHILDREN, "1")
+        .env(EXPECTED_ALLOCATION_REFUSAL, "1")
+        .status()
+        .expect("guarded aggregate allocation command");
+
+    assert_eq!(status.code(), Some(86));
+    let diagnostic_text = diagnostics.read();
+    assert!(
+        diagnostic_text.contains(
+            "\"containmentBackend\":\"linux-cgroup-v2-memory-max-plus-rlimit-data-and-as\""
+        )
+    );
+    assert!(diagnostic_text.contains("\"aggregateProcessTreeMemoryLimit\":true"));
+    assert!(diagnostic_text.contains("\"confirmedMemoryLimitViolation\":true"));
+    assert!(diagnostic_text.contains("\"memoryEvidence\":\"confirmed\""));
+    assert!(diagnostic_text.contains("\"terminationClassification\":\"memory-limit-confirmed\""));
 }
 
 #[cfg(any(target_os = "linux", target_os = "windows"))]

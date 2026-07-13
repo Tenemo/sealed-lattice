@@ -1,8 +1,43 @@
 use super::*;
 
+struct AggregateOpeningMaterialEvictionGuard {
+    material_roots: Vec<String>,
+}
+
+impl AggregateOpeningMaterialEvictionGuard {
+    fn for_request(request: &Value) -> Self {
+        let material_roots = request
+            .get("localTargetShareWitness")
+            .and_then(|witness| witness.get("aggregateOpening"))
+            .and_then(|opening| opening.get("aggregateOpeningCredentials"))
+            .and_then(Value::as_array)
+            .map(|credentials| {
+                credentials
+                    .iter()
+                    .filter_map(|credential| {
+                        credential
+                            .get("aggregateOpeningRoot")
+                            .and_then(Value::as_str)
+                            .map(str::to_string)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        Self { material_roots }
+    }
+}
+
+impl Drop for AggregateOpeningMaterialEvictionGuard {
+    fn drop(&mut self) {
+        crate::bgv::setup::evict_verified_canonical_proof_materials(&self.material_roots);
+    }
+}
+
 pub(crate) fn generate_bgv_target_decryption_share_from_local_share_request(
     request: &Value,
 ) -> CanonicalResult<Value> {
+    let _aggregate_opening_material_guard =
+        AggregateOpeningMaterialEvictionGuard::for_request(request);
     let setup_package = value_at_path(request, &["setupPackage"])?;
     let setup_binding = read_setup_binding(setup_package)?;
     let target_accepted = read_target_accepted_binding(
@@ -43,6 +78,8 @@ pub(crate) fn generate_bgv_target_decryption_share_from_local_share_request(
 pub(crate) fn derive_bgv_target_decryption_share_proof_statement_from_request(
     request: &Value,
 ) -> CanonicalResult<Value> {
+    let _aggregate_opening_material_guard =
+        AggregateOpeningMaterialEvictionGuard::for_request(request);
     let setup_package = value_at_path(request, &["setupPackage"])?;
     let setup_binding = read_setup_binding(setup_package)?;
     let target_accepted = read_target_accepted_binding(
@@ -108,6 +145,8 @@ pub(crate) fn verify_bgv_target_decryption_share_proof_statement_binding_from_re
 pub(crate) fn generate_bgv_target_decryption_share_proof_material_from_local_witness_request(
     request: &Value,
 ) -> CanonicalResult<Value> {
+    let _aggregate_opening_material_guard =
+        AggregateOpeningMaterialEvictionGuard::for_request(request);
     let setup_package = value_at_path(request, &["setupPackage"])?;
     let setup_binding = read_setup_binding(setup_package)?;
     let target_accepted = read_target_accepted_binding(

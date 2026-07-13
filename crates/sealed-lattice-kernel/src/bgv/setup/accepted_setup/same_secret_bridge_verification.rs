@@ -46,6 +46,7 @@ pub(in crate::bgv::setup) struct SameSecretBridgeStatementBinding {
 pub(super) fn verify_optional_same_secret_bridge_statement_set(
     setup_package: &Value,
     request: &Value,
+    proof_binding_session: Option<&crate::bgv::setup::AcceptedSetupProofBindingSession>,
 ) -> CanonicalResult<SameSecretBridgeVerification> {
     let bridge_material_fields = [
         SAME_SECRET_BRIDGE_STATEMENT_SET_FIELD,
@@ -89,7 +90,11 @@ pub(super) fn verify_optional_same_secret_bridge_statement_set(
         ));
     }
 
-    match verified_same_secret_bridge_material_from_package(setup_package, request) {
+    match verified_same_secret_bridge_material_from_package(
+        setup_package,
+        request,
+        proof_binding_session,
+    ) {
         Ok(verified_material) => Ok(SameSecretBridgeVerification::Verified(verified_material)),
         Err(error) => Ok(SameSecretBridgeVerification::Refused(
             same_secret_bridge_refusal(
@@ -173,6 +178,7 @@ fn verify_same_secret_bridge_setup_binding(
 pub(in crate::bgv::setup) fn verified_same_secret_bridge_material_from_package(
     setup_package: &Value,
     request: &Value,
+    proof_binding_session: Option<&crate::bgv::setup::AcceptedSetupProofBindingSession>,
 ) -> CanonicalResult<VerifiedSameSecretBridgeMaterial> {
     let statement_set = setup_package
         .get(SAME_SECRET_BRIDGE_STATEMENT_SET_FIELD)
@@ -192,6 +198,7 @@ pub(in crate::bgv::setup) fn verified_same_secret_bridge_material_from_package(
             setup_package,
             request,
         ),
+        proof_binding_session,
     )?;
 
     let ring_degree = usize::try_from(value_u64(statement_set, "ringDegree")?).map_err(|_| {
@@ -433,7 +440,8 @@ mod tests {
 
     #[test]
     fn optional_same_secret_bridge_is_absent_by_default() -> CanonicalResult<()> {
-        let response = verify_optional_same_secret_bridge_statement_set(&json!({}), &json!({}))?;
+        let response =
+            verify_optional_same_secret_bridge_statement_set(&json!({}), &json!({}), None)?;
 
         assert!(matches!(response, SameSecretBridgeVerification::Absent));
         Ok(())
@@ -447,6 +455,7 @@ mod tests {
                 "sameSecretBridgeProofMaterialSet": {},
             }),
             &json!({}),
+            None,
         )?
         .refusal_for_test("bridge proof material without statement set must refuse");
 
@@ -471,6 +480,7 @@ mod tests {
                 "sameSecretBridgeStatementSet": {},
             }),
             &json!({}),
+            None,
         )?
         .refusal_for_test("bridge statement set must refuse");
 
@@ -492,6 +502,7 @@ mod tests {
                 "vssCoefficientCommitments": {},
             }),
             &json!({}),
+            None,
         )
         .expect("complete bridge refusal")
         .refusal_for_test("complete bridge evidence must refuse");

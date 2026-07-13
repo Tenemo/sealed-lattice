@@ -1,5 +1,4 @@
 import {
-    createSetupPackageVerificationInput as createSetupPackageVerificationInputInternal,
     deriveCollectiveBgvSetupRosterHash as deriveCollectiveBgvSetupRosterHashInternal,
     deriveValidatedFirstValidOrder as deriveValidatedFirstValidOrderInternal,
     deriveFrozenRosterParameters as deriveFrozenRosterParametersInternal,
@@ -33,8 +32,8 @@ import type {
     TransportedEvaluationKeyShareProofMaterialSet as ProtocolTransportedEvaluationKeyShareProofMaterialSet,
     TransportedPublicEvaluationKeyMaterialSet as ProtocolTransportedPublicEvaluationKeyMaterialSet,
     SetupPackage as ProtocolSetupPackage,
-    SetupPackageVerificationInputSource as ProtocolSetupPackageVerificationInputSource,
     CollectiveBgvSetupRosterEntryInput as ProtocolCollectiveBgvSetupRosterEntryInput,
+    TargetDecryptionAggregateOpeningMaterialSource as ProtocolTargetDecryptionAggregateOpeningMaterialSource,
 } from '@sealed-lattice/protocol';
 import type {
     PollSpecInput,
@@ -42,13 +41,15 @@ import type {
     ProtocolHash,
     VerificationResult,
 } from '@sealed-lattice/types';
+import { ThresholdParameterDerivationError } from '@sealed-lattice/types';
 import {
     foundationBoardCandidateObjectHash as foundationBoardCandidateObjectHashInternal,
     bgvCanonicalStreamFamilies,
     openBgvCanonicalStreamRuntime,
     openFoundationBoardSession as openFoundationBoardSessionInternal,
+    stageBgvTargetDecryptionAggregateOpeningMaterials,
     type BgvTargetDecryptionResultReleaseCompletion,
-} from '@sealed-lattice/wasm';
+} from '@sealed-lattice/wasm/published-sdk';
 
 import {
     chargeKernelJsonSnapshotValues,
@@ -144,9 +145,14 @@ export type {
     StructuredProtocolVerificationResult,
     ThresholdParameters,
     ThresholdParametersInput,
+    ThresholdParameterDerivationErrorCode,
     TrusteeSetupEntry,
     ValidatedFirstValidObject,
 } from '@sealed-lattice/types';
+
+export type { TargetDecryptionAggregateOpeningMaterialSource } from '@sealed-lattice/protocol';
+
+export { ThresholdParameterDerivationError };
 
 declare const foundationBoardCandidateBrand: unique symbol;
 
@@ -348,16 +354,6 @@ export type VerifySetupPackageInput = Readonly<{
     readonly publicEvaluationKeyMaterialChunkSources?: readonly PublicEvaluationKeyMaterialChunkSource[];
     readonly transportedPublicEvaluationKeyMaterial?: TransportedPublicEvaluationKeyMaterialSet;
 }>;
-
-export type SetupPackageVerificationInputSource = Readonly<
-    Omit<ProtocolSetupPackageVerificationInputSource, 'setupPackage'> & {
-        readonly setupPackage: SetupPackage;
-        readonly publicKeyShareMaterialChunkSource?: PublicKeyShareMaterialChunkSource;
-        readonly setupProofMaterialChunkSources?: readonly SetupProofMaterialChunkSource[];
-        readonly evaluationKeyShareComponentMaterialChunkSources?: readonly EvaluationKeyShareComponentMaterialChunkSource[];
-        readonly publicEvaluationKeyMaterialChunkSources?: readonly PublicEvaluationKeyMaterialChunkSource[];
-    }
->;
 
 export type SetupPackageVerification = Readonly<{
     readonly isValid: boolean;
@@ -576,11 +572,160 @@ export type TargetDecryptionShareProofMaterialGenerationInput = Readonly<{
     readonly targetShareProfile: unknown;
     readonly trusteeIdentity: string;
     readonly localTargetShareWitness: unknown;
+    readonly aggregateOpeningMaterialSources: readonly ProtocolTargetDecryptionAggregateOpeningMaterialSource[];
     readonly targetDecryptionShare: unknown;
     readonly proofStatement: unknown;
     readonly proofRandomnessSeedHex: string;
     readonly proofRandomnessNonceHex: string;
 }>;
+
+const targetDecryptionAggregateOpeningByteLength = 32_768 * 8;
+const maximumTargetDecryptionAggregateOpeningSourceCount = 17;
+
+const aggregateOpeningMaterialSourcesSnapshot = (
+    value: unknown,
+): readonly ProtocolTargetDecryptionAggregateOpeningMaterialSource[] => {
+    const { descriptors, length } = ordinaryArrayDescriptors(
+        value,
+        'aggregateOpeningMaterialSources',
+    );
+    if (
+        length === 0 ||
+        length > maximumTargetDecryptionAggregateOpeningSourceCount
+    ) {
+        throw new RangeError(
+            'aggregateOpeningMaterialSources must cover between one and 17 RNS limbs.',
+        );
+    }
+    const seenRoots = new Set<string>();
+    const sources: ProtocolTargetDecryptionAggregateOpeningMaterialSource[] =
+        [];
+    for (let sourceIndex = 0; sourceIndex < length; sourceIndex += 1) {
+        const elementDescriptor = descriptors[String(sourceIndex)];
+        const sourcePath = `aggregateOpeningMaterialSources.${String(sourceIndex)}`;
+        if (elementDescriptor === undefined) {
+            throw new TypeError(
+                'aggregateOpeningMaterialSources cannot contain array holes.',
+            );
+        }
+        if ('get' in elementDescriptor || 'set' in elementDescriptor) {
+            throw new TypeError(
+                `${sourcePath} cannot be an accessor property.`,
+            );
+        }
+        const sourceDescriptors = plainRecordDescriptors(
+            elementDescriptor.value,
+            sourcePath,
+        );
+        const aggregateOpeningRoot = dataPropertyValue(
+            sourceDescriptors,
+            'aggregateOpeningRoot',
+            `${sourcePath}.aggregateOpeningRoot`,
+        );
+        assertProtocolHash(
+            aggregateOpeningRoot,
+            `${sourcePath}.aggregateOpeningRoot`,
+        );
+        if (seenRoots.has(aggregateOpeningRoot)) {
+            throw new TypeError(
+                'aggregateOpeningMaterialSources cannot contain duplicate opening roots.',
+            );
+        }
+        seenRoots.add(aggregateOpeningRoot);
+        const totalByteLength = dataPropertyValue(
+            sourceDescriptors,
+            'totalByteLength',
+            `${sourcePath}.totalByteLength`,
+        );
+        if (totalByteLength !== targetDecryptionAggregateOpeningByteLength) {
+            throw new RangeError(
+                `${sourcePath}.totalByteLength must equal the fixed ring byte length.`,
+            );
+        }
+        const pullChunk = dataPropertyValue(
+            sourceDescriptors,
+            'pullChunk',
+            `${sourcePath}.pullChunk`,
+        );
+        if (typeof pullChunk !== 'function') {
+            throw new TypeError(`${sourcePath}.pullChunk must be a function.`);
+        }
+        sources.push({
+            aggregateOpeningRoot,
+            pullChunk:
+                pullChunk as ProtocolTargetDecryptionAggregateOpeningMaterialSource['pullChunk'],
+            totalByteLength,
+        });
+    }
+    return sources;
+};
+
+const assertAggregateOpeningSourcesMatchWitness = (
+    sources: readonly ProtocolTargetDecryptionAggregateOpeningMaterialSource[],
+    localTargetShareWitness: unknown,
+): void => {
+    const witnessDescriptors = plainRecordDescriptors(
+        localTargetShareWitness,
+        'localTargetShareWitness',
+    );
+    const aggregateOpeningPath = 'localTargetShareWitness.aggregateOpening';
+    const aggregateOpeningDescriptors = plainRecordDescriptors(
+        dataPropertyValue(
+            witnessDescriptors,
+            'aggregateOpening',
+            aggregateOpeningPath,
+        ),
+        aggregateOpeningPath,
+    );
+    const credentialsPath = `${aggregateOpeningPath}.aggregateOpeningCredentials`;
+    const { descriptors, length } = ordinaryArrayDescriptors(
+        dataPropertyValue(
+            aggregateOpeningDescriptors,
+            'aggregateOpeningCredentials',
+            credentialsPath,
+        ),
+        credentialsPath,
+    );
+    if (length !== sources.length) {
+        throw new TypeError(
+            'aggregateOpeningMaterialSources must match the witness aggregate opening credential count.',
+        );
+    }
+    for (
+        let credentialIndex = 0;
+        credentialIndex < length;
+        credentialIndex += 1
+    ) {
+        const credentialPath = `${credentialsPath}.${String(credentialIndex)}`;
+        const credentialDescriptor = descriptors[String(credentialIndex)];
+        if (credentialDescriptor === undefined) {
+            throw new TypeError(
+                `${credentialsPath} cannot contain array holes.`,
+            );
+        }
+        const credentialDescriptors = plainRecordDescriptors(
+            credentialDescriptor.value,
+            credentialPath,
+        );
+        const aggregateOpeningRoot = dataPropertyValue(
+            credentialDescriptors,
+            'aggregateOpeningRoot',
+            `${credentialPath}.aggregateOpeningRoot`,
+        );
+        assertProtocolHash(
+            aggregateOpeningRoot,
+            `${credentialPath}.aggregateOpeningRoot`,
+        );
+        if (
+            aggregateOpeningRoot !==
+            sources[credentialIndex]?.aggregateOpeningRoot
+        ) {
+            throw new TypeError(
+                'aggregateOpeningMaterialSources must match the witness aggregate opening roots in canonical credential order.',
+            );
+        }
+    }
+};
 
 const targetDecryptionShareProofMaterialGenerationInputSnapshot = (
     input: TargetDecryptionShareProofMaterialGenerationInput,
@@ -625,10 +770,33 @@ const targetDecryptionShareProofMaterialGenerationInputSnapshot = (
         throw new TypeError('proofRandomnessNonceHex must be a string.');
     }
 
+    const aggregateOpeningMaterialSources =
+        aggregateOpeningMaterialSourcesSnapshot(
+            dataPropertyValue(
+                descriptors,
+                'aggregateOpeningMaterialSources',
+                'aggregateOpeningMaterialSources',
+            ),
+        );
+    const localTargetShareWitness = snapshotKernelJsonValue(
+        dataPropertyValue(
+            descriptors,
+            'localTargetShareWitness',
+            'localTargetShareWitness',
+        ),
+        'localTargetShareWitness',
+        state,
+    );
+    assertAggregateOpeningSourcesMatchWitness(
+        aggregateOpeningMaterialSources,
+        localTargetShareWitness,
+    );
+
     return {
         ...(abortSignal === undefined ? {} : { abortSignal }),
         emitProofMaterialChunk:
             emitProofMaterialChunk as CanonicalProofMaterialChunkSink,
+        aggregateOpeningMaterialSources,
         setupPackage: snapshotKernelJsonValue(
             dataPropertyValue(descriptors, 'setupPackage', 'setupPackage'),
             'setupPackage',
@@ -671,15 +839,7 @@ const targetDecryptionShareProofMaterialGenerationInputSnapshot = (
             state,
         ),
         trusteeIdentity,
-        localTargetShareWitness: snapshotKernelJsonValue(
-            dataPropertyValue(
-                descriptors,
-                'localTargetShareWitness',
-                'localTargetShareWitness',
-            ),
-            'localTargetShareWitness',
-            state,
-        ),
+        localTargetShareWitness,
         targetDecryptionShare: snapshotKernelJsonValue(
             dataPropertyValue(
                 descriptors,
@@ -775,84 +935,6 @@ export const verifyPrivateVssShare = async (
     );
 };
 
-export const createSetupPackageVerificationInput = (
-    input: SetupPackageVerificationInputSource,
-): VerifySetupPackageInput => {
-    const validatedInput = createSetupPackageVerificationInputInternal(input);
-
-    return {
-        setupPackage: validatedInput.setupPackage,
-        expectedManifestHash: validatedInput.expectedManifestHash,
-        expectedRosterHash: validatedInput.expectedRosterHash,
-        ...(input.transportedPublicKeyShareMaterial === undefined
-            ? {}
-            : {
-                  transportedPublicKeyShareMaterial:
-                      input.transportedPublicKeyShareMaterial,
-              }),
-        ...(input.publicKeyShareMaterialChunkSource === undefined
-            ? {}
-            : {
-                  publicKeyShareMaterialChunkSource:
-                      input.publicKeyShareMaterialChunkSource,
-              }),
-        ...(input.setupProofMaterialChunkSources === undefined
-            ? {}
-            : {
-                  setupProofMaterialChunkSources:
-                      input.setupProofMaterialChunkSources,
-              }),
-        ...(input.evaluationKeyShareComponentMaterialChunkSources === undefined
-            ? {}
-            : {
-                  evaluationKeyShareComponentMaterialChunkSources:
-                      input.evaluationKeyShareComponentMaterialChunkSources,
-              }),
-        ...(input.publicEvaluationKeyMaterialChunkSources === undefined
-            ? {}
-            : {
-                  publicEvaluationKeyMaterialChunkSources:
-                      input.publicEvaluationKeyMaterialChunkSources,
-              }),
-        ...(input.transportedPublicKeyShareProofMaterial === undefined
-            ? {}
-            : {
-                  transportedPublicKeyShareProofMaterial:
-                      input.transportedPublicKeyShareProofMaterial,
-              }),
-        ...(input.transportedVssShareLinkageProofMaterial === undefined
-            ? {}
-            : {
-                  transportedVssShareLinkageProofMaterial:
-                      input.transportedVssShareLinkageProofMaterial,
-              }),
-        ...(input.transportedSameSecretBridgeProofMaterial === undefined
-            ? {}
-            : {
-                  transportedSameSecretBridgeProofMaterial:
-                      input.transportedSameSecretBridgeProofMaterial,
-              }),
-        ...(input.transportedEvaluationKeyShareProofMaterial === undefined
-            ? {}
-            : {
-                  transportedEvaluationKeyShareProofMaterial:
-                      input.transportedEvaluationKeyShareProofMaterial,
-              }),
-        ...(input.transportedEvaluationKeyShareComponentMaterial === undefined
-            ? {}
-            : {
-                  transportedEvaluationKeyShareComponentMaterial:
-                      input.transportedEvaluationKeyShareComponentMaterial,
-              }),
-        ...(input.transportedPublicEvaluationKeyMaterial === undefined
-            ? {}
-            : {
-                  transportedPublicEvaluationKeyMaterial:
-                      input.transportedPublicEvaluationKeyMaterial,
-              }),
-    };
-};
-
 export const verifySetupPackage = async (
     input: VerifySetupPackageInput,
 ): Promise<SetupPackageVerification> => {
@@ -861,13 +943,20 @@ export const verifySetupPackage = async (
     assertSetupPackageVerificationBindings(verificationInputSnapshot);
 
     const kernel = await loadFreshTranscriptCoreKernel();
-    const verificationInput =
-        await prepareSnapshottedSetupPackageVerificationInputForKernel(
-            kernel,
-            verificationInputSnapshot,
-        );
+    const acceptedSetupSession = kernel.beginAcceptedSetupSession();
+    try {
+        const verificationInput =
+            await prepareSnapshottedSetupPackageVerificationInputForKernel(
+                kernel,
+                verificationInputSnapshot,
+                acceptedSetupSession,
+            );
 
-    return kernel.verifyCollectiveBgvSetup(verificationInput);
+        return acceptedSetupSession.verifyCollectiveBgvSetup(verificationInput);
+    } catch (error) {
+        acceptedSetupSession.cancel();
+        throw error;
+    }
 };
 
 export const generateTargetDecryptionShareProofMaterial = async (
@@ -875,21 +964,30 @@ export const generateTargetDecryptionShareProofMaterial = async (
 ): Promise<TargetDecryptionShareProofMaterialGeneration> => {
     const inputSnapshot =
         targetDecryptionShareProofMaterialGenerationInputSnapshot(input);
+    const {
+        abortSignal,
+        aggregateOpeningMaterialSources,
+        emitProofMaterialChunk,
+        ...kernelInputSnapshot
+    } = inputSnapshot;
     const kernel = await loadFreshTranscriptCoreKernel();
     // Construct the reader runtime before the kernel retains generated proof
     // material. This prevents a runtime-construction failure from stranding a
     // newly generated proof; after reader acquisition, writeMaterial owns
     // cancellation and eviction on completion or failure.
     const proofMaterialRuntime = openBgvCanonicalStreamRuntime({ kernel });
+    await stageBgvTargetDecryptionAggregateOpeningMaterials({
+        ...(abortSignal === undefined ? {} : { abortSignal }),
+        kernel,
+        sources: aggregateOpeningMaterialSources,
+    });
     const proofMaterial =
         kernel.generateBgvTargetDecryptionShareProofMaterialFromLocalWitness(
-            inputSnapshot,
+            kernelInputSnapshot,
         );
     const descriptorBytes = await proofMaterialRuntime.writeMaterial({
-        ...(inputSnapshot.abortSignal === undefined
-            ? {}
-            : { abortSignal: inputSnapshot.abortSignal }),
-        emitChunk: inputSnapshot.emitProofMaterialChunk,
+        ...(abortSignal === undefined ? {} : { abortSignal }),
+        emitChunk: emitProofMaterialChunk,
         family: bgvCanonicalStreamFamilies.targetDecryptionShare,
         materialRoot: proofMaterial.proofMaterialRoot,
     });

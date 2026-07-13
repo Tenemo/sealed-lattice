@@ -165,7 +165,7 @@ fn verify_limb(
     };
 
     let mut transcript = global_transcript.fork("limb", limb_index as u64);
-    let challenges = draw_limb_challenges(&mut transcript, &layout, modulus);
+    let challenges = draw_limb_challenges(&mut transcript, &layout, modulus)?;
     let publics = build_limb_public_vectors(
         statement,
         &layout,
@@ -282,7 +282,7 @@ fn verify_limb(
         "lambda",
         modulus,
         total_columns * DEEP_EVALUATION_POINT_COUNT,
-    );
+    )?;
 
     let low_degree_parameters = LowDegreeParameters {
         modulus,
@@ -383,7 +383,7 @@ fn verify_limb(
         "shared-query-position",
         extension_size / 2,
         LOW_DEGREE_QUERY_COUNT,
-    );
+    )?;
     verify_low_degree_openings(
         &low_degree_verification_state,
         &limb_proof.low_degree,
@@ -678,7 +678,10 @@ pub(crate) fn verify_evaluation_key_share(
             "proof limb count does not match the statement",
         ));
     }
-    let mut transcript = FiatShamirTranscript::new("trustee-evaluation-key-share");
+    let mut transcript = FiatShamirTranscript::new(
+        "trustee-evaluation-key-share",
+        MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
+    )?;
     transcript.absorb("statement", &statement.statement_hash());
     // All witness roots are absorbed before the consistency challenges so each
     // limb's quotient root (which depends on those challenges) is committed
@@ -696,7 +699,7 @@ pub(crate) fn verify_evaluation_key_share(
                 proof_trace_ring_degree,
             )
         })
-        .collect::<Vec<_>>();
+        .collect::<Result<Vec<_>, _>>()?;
 
     verify_cross_limb_consistency(statement, proof)?;
     #[cfg(not(target_arch = "wasm32"))]

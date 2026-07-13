@@ -22,8 +22,6 @@ import {
 import { serializeErrorDiagnostic } from '../ci/run-log-diagnostics.js';
 import { createTestEventWriter } from '../ci/test-event-journal.js';
 
-import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
-
 export const lattigoOracleDirectoryPath = fileURLToPath(
     new URL('./', import.meta.url),
 );
@@ -303,6 +301,6 @@ export const runLattigoOracle = async (): Promise<void> => {
     }
 };
 
-if (isDirectlyInvokedModule(import.meta.url)) {
+if (import.meta.main) {
     void runLattigoOracle();
 }

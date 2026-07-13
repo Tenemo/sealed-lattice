@@ -169,7 +169,7 @@ pub(in crate::bgv::setup) fn collective_public_key_coefficient_material(
         collective_signed_secret_and_error_coefficients(
             private_setup_seed_hash,
             participant_identities,
-        );
+        )?;
     #[cfg(not(target_arch = "wasm32"))]
     let coefficient_tables = DATA_PRIMES
         .par_iter()
@@ -302,12 +302,12 @@ pub(in crate::bgv::setup) fn collective_public_key_coefficient_derivation_summar
         ],
     );
     let sampled_component_one_coefficients =
-        sample_public_residues(setup_seed_hash, "public-common-random-polynomial", modulus);
+        sample_public_residues(setup_seed_hash, "public-common-random-polynomial", modulus)?;
     let sampled_component_zero_derivation_residues = sample_public_residues(
         setup_seed_hash,
         "collective-public-key-component-zero-derivation-diagnostic",
         modulus,
-    );
+    )?;
 
     Ok(json!({
         "modulus": modulus,
@@ -350,7 +350,7 @@ pub(super) fn read_public_key_coefficient_vector(
 pub(in crate::bgv::setup) fn collective_signed_secret_and_error_coefficients(
     private_setup_seed_hash: &str,
     participant_identities: &[String],
-) -> (Vec<i64>, Vec<i64>) {
+) -> CanonicalResult<(Vec<i64>, Vec<i64>)> {
     #[cfg(not(target_arch = "wasm32"))]
     {
         let coefficient_pairs = (0..POLYNOMIAL_DEGREE)
@@ -362,9 +362,9 @@ pub(in crate::bgv::setup) fn collective_signed_secret_and_error_coefficients(
                     coefficient_index,
                 )
             })
-            .collect::<Vec<_>>();
+            .collect::<CanonicalResult<Vec<_>>>()?;
 
-        coefficient_pairs.into_iter().unzip()
+        Ok(coefficient_pairs.into_iter().unzip())
     }
     #[cfg(target_arch = "wasm32")]
     {
@@ -378,23 +378,21 @@ pub(in crate::bgv::setup) fn collective_signed_secret_and_error_coefficients(
                         participant_identities,
                         participant_identity,
                         coefficient_index,
-                    )
-                    .expect("participant identity is drawn from the owner schedule");
+                    )?;
                 collective_error_coefficients[coefficient_index] +=
                     bounded_collective_error_share_coefficient(
                         private_setup_seed_hash,
                         participant_identities,
                         participant_identity,
                         coefficient_index,
-                    )
-                    .expect("participant identity is drawn from the owner schedule");
+                    )?;
             }
         }
 
-        (
+        Ok((
             collective_secret_coefficients,
             collective_error_coefficients,
-        )
+        ))
     }
 }
 
@@ -403,7 +401,7 @@ pub(super) fn collective_signed_secret_and_error_coefficient_pair(
     private_setup_seed_hash: &str,
     participant_identities: &[String],
     coefficient_index: usize,
-) -> (i64, i64) {
+) -> CanonicalResult<(i64, i64)> {
     let mut collective_secret_coefficient = 0_i64;
     let mut collective_error_coefficient = 0_i64;
     for participant_identity in participant_identities {
@@ -412,18 +410,16 @@ pub(super) fn collective_signed_secret_and_error_coefficient_pair(
             participant_identities,
             participant_identity,
             coefficient_index,
-        )
-        .expect("participant identity is drawn from the owner schedule");
+        )?;
         collective_error_coefficient += bounded_collective_error_share_coefficient(
             private_setup_seed_hash,
             participant_identities,
             participant_identity,
             coefficient_index,
-        )
-        .expect("participant identity is drawn from the owner schedule");
+        )?;
     }
 
-    (collective_secret_coefficient, collective_error_coefficient)
+    Ok((collective_secret_coefficient, collective_error_coefficient))
 }
 
 pub(in crate::bgv::setup) fn collective_public_key_coefficients_from_signed(
@@ -449,7 +445,7 @@ pub(in crate::bgv::setup) fn collective_public_key_coefficients_from_signed(
         .map(|coefficient| signed_to_plaintext_scaled_residue(*coefficient, modulus))
         .collect::<CanonicalResult<Vec<_>>>()?;
     let component_one_coefficients =
-        dense_public_residues(setup_seed_hash, "public-common-random-polynomial", modulus);
+        dense_public_residues(setup_seed_hash, "public-common-random-polynomial", modulus)?;
     let public_sample_secret_product = negacyclic_product_mod(
         &component_one_coefficients,
         &collective_secret_residues,

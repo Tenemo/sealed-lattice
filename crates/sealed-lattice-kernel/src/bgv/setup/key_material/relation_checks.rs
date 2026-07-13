@@ -10,7 +10,7 @@ pub(super) fn sampled_evaluation_key_relation_checks(
     let (collective_secret_coefficients, _) = collective_signed_secret_and_error_coefficients(
         private_setup_seed_hash,
         participant_identities,
-    );
+    )?;
     let mut checks = Vec::new();
     // One relinearization key per schedule level (the consumed schedule holds
     // a single working-level entry); the sampled digit and limb windows below

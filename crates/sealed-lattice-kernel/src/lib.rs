@@ -19,9 +19,11 @@ use std::vec::Vec;
 
 use bgv::{
     absorb_bgv_canonical_stream_chunk, begin_bgv_canonical_material_reader,
-    begin_bgv_canonical_stream, cancel_bgv_canonical_material_reader, cancel_bgv_canonical_stream,
+    begin_accepted_setup_canonical_stream, begin_accepted_setup_proof_binding_session,
+    begin_bgv_canonical_stream, cancel_accepted_setup_proof_binding_session,
+    cancel_bgv_canonical_material_reader, cancel_bgv_canonical_stream,
     finish_bgv_canonical_material_reader, finish_bgv_canonical_stream,
-    read_bgv_canonical_material_chunk,
+    read_bgv_canonical_material_chunk, authenticated_accepted_setup_proof_binding_session,
 };
 use foundation::{
     CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH, CanonicalStreamRuntimeBegin,
@@ -36,6 +38,7 @@ use foundation::{
     verify_state_recovery, verify_state_reservation,
 };
 
+use encoding::run_accepted_setup_command;
 pub use encoding::{roundtrip_bytes, run_transcript_core_command};
 
 fn leak_bytes(bytes: Vec<u8>) -> *mut u8 {
@@ -380,6 +383,149 @@ pub unsafe extern "C" fn sealed_lattice_bgv_canonical_stream_begin(
             chunk_count_pointer,
         )
     }
+}
+
+/// Opens an opaque accepted-setup material-ownership session before any setup
+/// source is streamed. The capability remains outside protocol JSON.
+///
+/// # Safety
+///
+/// `capability_pointer` must name its declared readable range and
+/// `status_pointer` must be null or point to one writable `u32`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_accepted_setup_session_begin(
+    capability_pointer: *const u8,
+    capability_length: usize,
+    status_pointer: *mut u32,
+) -> u32 {
+    let capability = unsafe { canonical_stream_capability(capability_pointer, capability_length) };
+    match begin_accepted_setup_proof_binding_session(capability) {
+        Ok(session_handle) => {
+            unsafe { write_u32_if_present(status_pointer, 0) };
+            session_handle
+        }
+        Err(_) => {
+            unsafe {
+                write_u32_if_present(
+                    status_pointer,
+                    foundation::CANONICAL_STREAM_RUNTIME_INVALID_SESSION,
+                )
+            };
+            0
+        }
+    }
+}
+
+/// Begins an accepted-setup stream whose finished material remains owned by
+/// the authenticated setup session until terminal verification or cancellation.
+///
+/// # Safety
+///
+/// Every input pointer must name its declared readable range. Every non-null
+/// output pointer must point to one writable `u32` in WASM memory.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_accepted_setup_canonical_stream_begin(
+    setup_session_handle: u32,
+    setup_capability_pointer: *const u8,
+    setup_capability_length: usize,
+    family_code: u32,
+    material_root_pointer: *const u8,
+    material_root_length: usize,
+    descriptor_pointer: *const u8,
+    descriptor_length: usize,
+    stream_capability_pointer: *const u8,
+    stream_capability_length: usize,
+    status_pointer: *mut u32,
+    total_byte_length_pointer: *mut u32,
+    chunk_count_pointer: *mut u32,
+) -> u32 {
+    let setup_capability =
+        unsafe { canonical_stream_capability(setup_capability_pointer, setup_capability_length) };
+    let accepted_setup_session = match authenticated_accepted_setup_proof_binding_session(
+        setup_session_handle,
+        &setup_capability,
+    ) {
+        Ok(session) => session,
+        Err(_) => {
+            unsafe {
+                write_canonical_stream_begin(
+                    Err(foundation::CANONICAL_STREAM_RUNTIME_INVALID_SESSION),
+                    status_pointer,
+                    total_byte_length_pointer,
+                    chunk_count_pointer,
+                )
+            };
+            return 0;
+        }
+    };
+    let material_root =
+        unsafe { canonical_stream_input(material_root_pointer, material_root_length) };
+    let descriptor = unsafe { canonical_stream_input(descriptor_pointer, descriptor_length) };
+    let stream_capability = unsafe {
+        canonical_stream_capability(stream_capability_pointer, stream_capability_length)
+    };
+    let result = begin_accepted_setup_canonical_stream(
+        family_code,
+        material_root,
+        descriptor,
+        stream_capability,
+        accepted_setup_session,
+    );
+    unsafe {
+        write_canonical_stream_begin(
+            result,
+            status_pointer,
+            total_byte_length_pointer,
+            chunk_count_pointer,
+        )
+    }
+}
+
+/// Cancels an accepted-setup session and drains every material root it owns.
+///
+/// # Safety
+///
+/// `capability_pointer` must name its declared readable range.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_accepted_setup_session_cancel(
+    session_handle: u32,
+    capability_pointer: *const u8,
+    capability_length: usize,
+) -> u32 {
+    let capability = unsafe { canonical_stream_capability(capability_pointer, capability_length) };
+    cancel_accepted_setup_proof_binding_session(session_handle, &capability).map_or_else(
+        |_| foundation::CANONICAL_STREAM_RUNTIME_INVALID_SESSION,
+        |()| 0,
+    )
+}
+
+/// Executes terminal accepted-setup verification under the already-open opaque
+/// material session. The session handle and capability are direct ABI values,
+/// not fields of the protocol request.
+///
+/// # Safety
+///
+/// Input pointers must name their declared readable ranges.
+/// `output_length_pointer` must be null or point to one writable `usize`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_accepted_setup_command_with_length(
+    pointer: *const u8,
+    length: usize,
+    session_handle: u32,
+    capability_pointer: *const u8,
+    capability_length: usize,
+    output_length_pointer: *mut usize,
+) -> *mut u8 {
+    let capability = unsafe { canonical_stream_capability(capability_pointer, capability_length) };
+    let input = unsafe { canonical_stream_input(pointer, length) };
+    let output = run_accepted_setup_command(input, session_handle, &capability);
+    // Terminal verification consumes the session on every ordinary outcome. If
+    // parsing or command selection failed before dispatch, cancel the still-live
+    // session so its reserved and finished roots are drained.
+    let _ = cancel_accepted_setup_proof_binding_session(session_handle, &capability);
+    let output_length = output.len();
+    unsafe { write_usize_if_present(output_length_pointer, output_length) };
+    leak_bytes(output)
 }
 
 /// Authenticates one exact canonical chunk before staging it in the selected
