@@ -63,13 +63,6 @@ fn private_vss_share_envelope_verifier_accepts_succinct_private_share_proofs() {
                 .len()
                 == 128
         );
-        assert!(
-            limb_verification["proofStatementRoot"]
-                .as_str()
-                .expect("proof statement root")
-                .len()
-                == 128
-        );
     }
 }
 
@@ -213,7 +206,6 @@ fn private_vss_succinct_proof_verifier_accepts_canonical_record() {
             proof_randomness_seed_hex: &proof_randomness_seed_hex,
         })
         .expect("private VSS proof record");
-    assert_eq!(proof_record["proofFamily"], "vss-opening-carry");
     assert_eq!(
         proof_record["proofMaterialRoot"]
             .as_str()
@@ -597,21 +589,6 @@ fn private_vss_share_envelope_verifier_refuses_transported_private_share_proof_m
         &request,
         "missing the requested proofMaterialRoot",
     );
-}
-
-#[test]
-fn private_vss_share_envelope_verifier_refuses_private_share_proof_statement_root_drift() {
-    let mut request = proof_shaped_private_vss_share_envelope_request(
-        PRIVATE_VSS_SUCCINCT_TEST_RING_DEGREE,
-        "refuses-private-share-proof-statement-root-drift",
-    );
-    replace_first_private_vss_proof_hash(
-        &mut request,
-        "proofStatementRoot",
-        "private-vss-proof-statement-root-drift",
-    );
-
-    assert_private_vss_share_proof_refusal_contains(&request, "proofStatementRoot");
 }
 
 #[test]
@@ -1070,7 +1047,6 @@ fn private_vss_proof_material_reference_set(
         .map(|proof_record| {
             serde_json::json!({
                 "objectType": "SetupTransportedPrivateVssShareProofMaterial",
-                "proofFamily": "vss-opening-carry",
                 "proofMaterialRoot": proof_record["proofMaterialRoot"],
             })
         })
@@ -1078,7 +1054,6 @@ fn private_vss_proof_material_reference_set(
 
     serde_json::json!({
         "objectType": "SetupTransportedPrivateVssShareProofMaterialSet",
-        "proofFamily": "vss-opening-carry",
         "proofMaterials": proof_materials,
     })
 }

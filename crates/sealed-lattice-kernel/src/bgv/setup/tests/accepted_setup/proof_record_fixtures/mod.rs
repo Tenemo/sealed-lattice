@@ -72,7 +72,6 @@ pub(in super::super) fn public_coefficient_commitment_ring_degree_from_fixture_p
 mod evaluation_key_share_component_material;
 mod galois_key_share_batches;
 mod proof_checkpointing;
-mod public_evaluation_key_assembly;
 mod public_key_share_proofs;
 mod relinearization_key_share_rounds;
 mod trustee_evaluation_key_proofs;
@@ -81,7 +80,6 @@ mod vss_public_material;
 pub(super) use evaluation_key_share_component_material::*;
 pub(super) use galois_key_share_batches::*;
 pub(super) use proof_checkpointing::*;
-pub(super) use public_evaluation_key_assembly::*;
 pub(super) use public_key_share_proofs::*;
 pub(super) use relinearization_key_share_rounds::*;
 pub(super) use trustee_evaluation_key_proofs::*;

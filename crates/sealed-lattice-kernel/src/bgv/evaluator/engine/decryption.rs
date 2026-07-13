@@ -1,4 +1,5 @@
 use super::*;
+use crate::bgv::parameters::PLAINTEXT_MODULUS;
 
 pub(crate) fn decryption_accumulator_to_coefficients(
     ciphertext: &Ciphertext,

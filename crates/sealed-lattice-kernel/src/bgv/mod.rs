@@ -11,9 +11,8 @@ mod modular_arithmetic;
 mod ntt;
 mod rns;
 mod serialization;
-mod setup;
+pub(crate) mod setup;
 mod setup_helpers;
-mod validation;
 
 pub(crate) use setup::{
     absorb_bgv_canonical_stream_chunk, authenticated_accepted_setup_proof_binding_session,

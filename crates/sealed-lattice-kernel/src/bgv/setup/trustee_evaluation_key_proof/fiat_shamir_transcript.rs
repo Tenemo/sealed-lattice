@@ -12,16 +12,104 @@ fn transcript_error(message: &'static str) -> CanonicalError {
     CanonicalError::new(CanonicalErrorCode::InvalidProtocolObject, message)
 }
 
+#[derive(Clone)]
+pub(in crate::bgv::setup) struct HashChainTranscriptCore {
+    domain: &'static str,
+    state: [u8; 64],
+    squeeze_counter: u64,
+    #[cfg(test)]
+    audit: Option<TranscriptOrderAuditRecorder>,
+}
+
+impl HashChainTranscriptCore {
+    pub(in crate::bgv::setup) fn new(
+        domain: &'static str,
+        audit_label: &'static str,
+        protocol_label: &str,
+    ) -> Self {
+        let core = Self {
+            domain,
+            state: hash512(domain, &[b"init", protocol_label.as_bytes()]),
+            squeeze_counter: 0,
+            #[cfg(test)]
+            audit: active_transcript_order_audit_recorder(audit_label, protocol_label),
+        };
+        #[cfg(test)]
+        {
+            let mut core = core;
+            if let Some(audit) = core.audit.as_mut() {
+                audit.record_initialize(protocol_label, protocol_label.len());
+            }
+            core
+        }
+        #[cfg(not(test))]
+        {
+            let _ = audit_label;
+            core
+        }
+    }
+
+    pub(in crate::bgv::setup) fn absorb(&mut self, label: &str, bytes: &[u8]) {
+        #[cfg(test)]
+        if let Some(audit) = self.audit.as_mut() {
+            audit.record_absorb(label, bytes.len());
+        }
+        self.state = hash512(
+            self.domain,
+            &[b"absorb", &self.state, label.as_bytes(), bytes],
+        );
+        self.squeeze_counter = 0;
+    }
+
+    pub(in crate::bgv::setup) fn fork(&self, label: &str, index: u64) -> Self {
+        let forked = self.clone();
+        #[cfg(test)]
+        {
+            let mut forked = forked;
+            forked.audit = self.audit.as_ref().map(|audit| audit.fork(label, index));
+            forked
+        }
+        #[cfg(not(test))]
+        {
+            let _ = (label, index);
+            forked
+        }
+    }
+
+    pub(in crate::bgv::setup) fn try_squeeze_block(
+        &mut self,
+        label: &str,
+    ) -> Option<[u8; 64]> {
+        let squeeze_counter = self.squeeze_counter;
+        self.squeeze_counter = squeeze_counter.checked_add(1)?;
+        #[cfg(test)]
+        if let Some(audit) = self.audit.as_mut() {
+            audit.record_squeeze(label, squeeze_counter);
+        }
+        Some(hash512(
+            self.domain,
+            &[
+                b"squeeze",
+                &self.state,
+                label.as_bytes(),
+                &squeeze_counter.to_le_bytes(),
+            ],
+        ))
+    }
+
+    #[cfg(test)]
+    fn exhaust_squeeze_counter(&mut self) {
+        self.squeeze_counter = u64::MAX;
+    }
+}
+
 // Hash-chained Fiat-Shamir transcript over the kernel hash. Challenges are
 // derived from labelled squeeze blocks with a counter, so prover and verifier
 // stay in lockstep as long as they absorb the same byte sequences.
 #[derive(Clone)]
 pub(super) struct FiatShamirTranscript {
-    state: [u8; 64],
-    squeeze_counter: u64,
+    core: HashChainTranscriptCore,
     maximum_candidate_draws_per_output: u32,
-    #[cfg(test)]
-    audit: Option<TranscriptOrderAuditRecorder>,
 }
 
 impl FiatShamirTranscript {
@@ -34,20 +122,14 @@ impl FiatShamirTranscript {
                 "the trustee proof candidate-draw limit must be positive",
             ));
         }
-        let transcript = Self {
-            state: hash512(TRANSCRIPT_DOMAIN, &[b"init", protocol_label.as_bytes()]),
-            squeeze_counter: 0,
+        Ok(Self {
+            core: HashChainTranscriptCore::new(
+                TRANSCRIPT_DOMAIN,
+                "trustee-evaluation-key",
+                protocol_label,
+            ),
             maximum_candidate_draws_per_output,
-            #[cfg(test)]
-            audit: active_transcript_order_audit_recorder("trustee-evaluation-key", protocol_label),
-        };
-        #[cfg(test)]
-        let mut transcript = transcript;
-        #[cfg(test)]
-        if let Some(audit) = transcript.audit.as_mut() {
-            audit.record_initialize(protocol_label, protocol_label.len());
-        }
-        Ok(transcript)
+        })
     }
 
     pub(super) fn maximum_candidate_draws_per_output(&self) -> u32 {
@@ -55,15 +137,7 @@ impl FiatShamirTranscript {
     }
 
     pub(super) fn absorb(&mut self, label: &str, bytes: &[u8]) {
-        #[cfg(test)]
-        if let Some(audit) = self.audit.as_mut() {
-            audit.record_absorb(label, bytes.len());
-        }
-        self.state = hash512(
-            TRANSCRIPT_DOMAIN,
-            &[b"absorb", &self.state, label.as_bytes(), bytes],
-        );
-        self.squeeze_counter = 0;
+        self.core.absorb(label, bytes);
     }
 
     pub(super) fn absorb_u64(&mut self, label: &str, value: u64) {
@@ -81,10 +155,7 @@ impl FiatShamirTranscript {
     // Deterministic fork for per-limb sub-transcripts.
     pub(super) fn fork(&self, label: &str, index: u64) -> Self {
         let mut forked = self.clone();
-        #[cfg(test)]
-        {
-            forked.audit = self.audit.as_ref().map(|audit| audit.fork(label, index));
-        }
+        forked.core = self.core.fork(label, index);
         forked.absorb("fork", label.as_bytes());
         forked.absorb_u64("fork-index", index);
 
@@ -96,25 +167,9 @@ impl FiatShamirTranscript {
     // message, and the per-round counter (reset on absorb) keeps same-round
     // challenges distinct.
     fn squeeze_block(&mut self, label: &str) -> CanonicalResult<[u8; 64]> {
-        let squeeze_counter = self.squeeze_counter;
-        self.squeeze_counter = squeeze_counter.checked_add(1).ok_or_else(|| {
+        self.core.try_squeeze_block(label).ok_or_else(|| {
             transcript_error("the trustee proof transcript squeeze counter was exhausted")
-        })?;
-        #[cfg(test)]
-        if let Some(audit) = self.audit.as_mut() {
-            audit.record_squeeze(label, squeeze_counter);
-        }
-        let block = hash512(
-            TRANSCRIPT_DOMAIN,
-            &[
-                b"squeeze",
-                &self.state,
-                label.as_bytes(),
-                &squeeze_counter.to_le_bytes(),
-            ],
-        );
-
-        Ok(block)
+        })
     }
 
     fn squeeze_u64(&mut self, label: &str) -> CanonicalResult<u64> {
@@ -343,7 +398,7 @@ mod tests {
     fn squeeze_counter_exhaustion_is_typed() {
         let mut transcript = FiatShamirTranscript::new("counter-limit", 1)
             .expect("positive candidate-draw limit is valid");
-        transcript.squeeze_counter = u64::MAX;
+        transcript.core.exhaust_squeeze_counter();
 
         let error = transcript
             .challenge_positions("position", 2, 1)

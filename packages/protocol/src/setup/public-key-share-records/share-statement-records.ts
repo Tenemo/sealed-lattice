@@ -3,9 +3,6 @@ import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 import {
     type PublicKeyShareContributionInput,
     type PublicKeyShareMaterialSetInput,
-    type PublicKeyShareProofRecord,
-    type PublicKeyShareProofSet,
-    type PublicKeyShareProofSetInput,
     type PublicKeyShareRecord,
     type PublicKeyShareSet,
     type PublicKeyShareSetInput,
@@ -44,15 +41,7 @@ const validateShareContribution = (
         );
     }
     contribution.shareCoefficientVectorHash512ByLimb.forEach(
-        (coefficientHash, rnsLimbIndex) => {
-            if (
-                coefficientHash.rnsLimbIndex !== rnsLimbIndex ||
-                coefficientHash.rnsPrime !== qSharePrimes[rnsLimbIndex]
-            ) {
-                throw new Error(
-                    'shareCoefficientVectorHash512ByLimb entries must follow Q_share order.',
-                );
-            }
+        (coefficientHash) => {
             assertProtocolHash(
                 coefficientHash.coefficientVectorHash512,
                 'shareCoefficientVectorHash512ByLimb.coefficientVectorHash512',
@@ -86,7 +75,6 @@ export const createPublicKeyShareSet = (
                 publicMatrixSeedHash: input.publicMatrixSeedHash,
                 publicKeyCrpRoot: input.publicKeyCrpRoot,
                 publicAPolynomialRoot: input.publicAPolynomialRoot,
-                rnsLimbCount: input.qSharePrimes.length,
                 shareCoefficientVectorHash512ByLimb:
                     contribution.shareCoefficientVectorHash512ByLimb,
             } as const satisfies Omit<
@@ -105,8 +93,6 @@ export const createPublicKeyShareSet = (
     const shareSetWithoutRoot = {
         objectType: 'PublicKeyShareSet',
         ...contextFields(input.setupContext),
-        participantCount: input.participantCount,
-        rnsLimbCount: input.qSharePrimes.length,
         publicMatrixSeedHash: input.publicMatrixSeedHash,
         publicKeyCrpRoot: input.publicKeyCrpRoot,
         publicAPolynomialRoot: input.publicAPolynomialRoot,
@@ -117,86 +103,6 @@ export const createPublicKeyShareSet = (
         ...shareSetWithoutRoot,
         publicKeyShareSetRoot: deriveCanonicalObjectHash(shareSetWithoutRoot),
     } satisfies PublicKeyShareSet;
-};
-
-export const createPublicKeyShareProofSet = (
-    input: PublicKeyShareProofSetInput,
-): PublicKeyShareProofSet => {
-    validateCommonInput(input);
-    assertContextMatches(
-        input.setupContext,
-        input.publicKeyShares,
-        'publicKeyShares',
-    );
-    if (
-        input.publicKeyShares.publicMatrixSeedHash !==
-            input.publicMatrixSeedHash ||
-        input.publicKeyShares.publicKeyCrpRoot !== input.publicKeyCrpRoot ||
-        input.publicKeyShares.publicAPolynomialRoot !==
-            input.publicAPolynomialRoot
-    ) {
-        throw new Error(
-            'publicKeyShares must bind the same common randomness.',
-        );
-    }
-    const shareRecords = sortedByRosterPosition(
-        input.publicKeyShares.shareRecords,
-    );
-    if (shareRecords.length !== input.participantCount) {
-        throw new Error(
-            'publicKeyShares.shareRecords must contain one share per participant.',
-        );
-    }
-    const proofRecords = shareRecords.map(
-        (shareRecord, expectedRosterPosition) => {
-            if (shareRecord.trusteeRosterPosition !== expectedRosterPosition) {
-                throw new Error(
-                    'publicKeyShares.shareRecords roster positions must be contiguous from zero.',
-                );
-            }
-            const proofRecordWithoutRoot = {
-                objectType: 'PublicKeyShareProof',
-                ...contextFields(input.setupContext),
-                trusteeIdentity: shareRecord.trusteeIdentity,
-                trusteeRosterPosition: shareRecord.trusteeRosterPosition,
-                publicMatrixSeedHash: input.publicMatrixSeedHash,
-                publicKeyCrpRoot: input.publicKeyCrpRoot,
-                publicAPolynomialRoot: input.publicAPolynomialRoot,
-                publicKeyShareRoot: shareRecord.publicKeyShareRoot,
-                rnsLimbCount: input.qSharePrimes.length,
-            } as const satisfies Omit<
-                PublicKeyShareProofRecord,
-                'publicKeyShareProofRoot'
-            >;
-
-            return {
-                ...proofRecordWithoutRoot,
-                publicKeyShareProofRoot: deriveCanonicalObjectHash(
-                    proofRecordWithoutRoot,
-                ),
-            } satisfies PublicKeyShareProofRecord;
-        },
-    );
-    const proofSetWithoutRoot = {
-        objectType: 'PublicKeyShareProofSet',
-        ...contextFields(input.setupContext),
-        participantCount: input.participantCount,
-        rnsLimbCount: input.qSharePrimes.length,
-        publicMatrixSeedHash: input.publicMatrixSeedHash,
-        publicKeyCrpRoot: input.publicKeyCrpRoot,
-        publicAPolynomialRoot: input.publicAPolynomialRoot,
-        publicKeyShareSetRoot: input.publicKeyShares.publicKeyShareSetRoot,
-        proofRecords,
-    } as const satisfies Omit<
-        PublicKeyShareProofSet,
-        'publicKeyShareProofSetRoot'
-    >;
-
-    return {
-        ...proofSetWithoutRoot,
-        publicKeyShareProofSetRoot:
-            deriveCanonicalObjectHash(proofSetWithoutRoot),
-    } satisfies PublicKeyShareProofSet;
 };
 
 export const publicKeyShareRecordsByRosterPosition = (

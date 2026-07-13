@@ -44,15 +44,41 @@ pub(super) struct SameSecretBridgeCommittedMaterialRegenerationInputs {
     pub(super) context_hashes_by_bound_message: Vec<String>,
 }
 
-fn same_secret_bridge_committed_material_regeneration_inputs_from_statement_record(
-    statement_record: &serde_json::Value,
-) -> SameSecretBridgeCommittedMaterialRegenerationInputs {
-    let context_hashes_by_bound_message = statement_record["targetConstantCoefficientCommitments"]
+pub(super) fn same_secret_bridge_target_constant_records_from_fixture_package(
+    package: &serde_json::Value,
+    trustee_roster_position: u64,
+) -> Vec<&serde_json::Value> {
+    let coefficient_set = &package["vssPublicCoefficientCommitmentSet"];
+    let threshold_degree = coefficient_set["thresholdDegree"]
+        .as_u64()
+        .expect("target coefficient threshold degree") as usize;
+    let q_share_rns_limb_count = coefficient_set["rnsLimbCount"]
+        .as_u64()
+        .expect("target coefficient RNS limb count") as usize;
+    let source_record = &coefficient_set["sourceTrusteeRecords"]
         .as_array()
-        .expect("bridge target commitments")
+        .expect("target coefficient source records")[trustee_roster_position as usize];
+    let coefficient_records = source_record["coefficientCommitments"]
+        .as_array()
+        .expect("target coefficient records");
+
+    (0..q_share_rns_limb_count)
+        .map(|rns_limb_index| &coefficient_records[rns_limb_index * threshold_degree])
+        .collect()
+}
+
+pub(super) fn same_secret_bridge_committed_material_regeneration_inputs_from_fixture_package(
+    package: &serde_json::Value,
+    trustee_roster_position: u64,
+) -> SameSecretBridgeCommittedMaterialRegenerationInputs {
+    let context_hashes_by_bound_message =
+        same_secret_bridge_target_constant_records_from_fixture_package(
+            package,
+            trustee_roster_position,
+        )
         .iter()
-        .map(|commitment_record| {
-            commitment_record["commitment"]["commitmentContextHash"]
+        .map(|coefficient_record| {
+            coefficient_record["commitment"]["commitmentContextHash"]
                 .as_str()
                 .expect("bridge target commitment context hash")
                 .to_string()
@@ -67,29 +93,6 @@ fn same_secret_bridge_committed_material_regeneration_inputs_from_statement_reco
         seeds_by_bound_message,
         context_hashes_by_bound_message,
     }
-}
-
-pub(super) fn same_secret_bridge_committed_material_regeneration_inputs_from_fixture_package(
-    package: &serde_json::Value,
-    trustee_roster_position: u64,
-) -> SameSecretBridgeCommittedMaterialRegenerationInputs {
-    let matching_statement_records = package["sameSecretBridgeStatementSet"]["statementRecords"]
-        .as_array()
-        .expect("same-secret bridge statement records")
-        .iter()
-        .filter(|statement_record| {
-            statement_record["trusteeRosterPosition"].as_u64() == Some(trustee_roster_position)
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(
-        matching_statement_records.len(),
-        1,
-        "one same-secret bridge statement must bind each trustee"
-    );
-
-    same_secret_bridge_committed_material_regeneration_inputs_from_statement_record(
-        matching_statement_records[0],
-    )
 }
 
 const VSS_SHARE_LINKAGE_PROOF_FAMILY: &str = "vss-share-linkage";

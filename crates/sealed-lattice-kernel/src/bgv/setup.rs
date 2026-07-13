@@ -33,8 +33,6 @@ pub(crate) use trustee_evaluation_key_proof::generate_trustee_evaluation_key_pro
 mod validation;
 mod vss;
 
-pub(super) const SETUP_TRANSPORT_CHUNK_SIZE_BYTES: u64 = 1_048_576;
-
 #[cfg(test)]
 mod tests;
 
@@ -60,7 +58,6 @@ pub(in crate::bgv::setup) use canonical_stream_transport::{
 pub(in crate::bgv::setup) use canonical_stream_transport::{
     CanonicalSetupProofBindingLease, accepted_setup_fixture_proof_binding_lease,
     accepted_setup_proof_binding_lease, accepted_setup_proof_binding_stream_summary,
-    authenticated_setup_proof_material_stream_summary,
     begin_accepted_setup_fixture_proof_binding_session,
     cache_accepted_setup_fixture_proof_binding_lease, restore_accepted_setup_proof_binding_lease,
     retain_accepted_setup_proof_binding,
@@ -161,7 +158,7 @@ use crate::{
         parameters::{BgvBasisKind, DATA_PRIMES, POLYNOMIAL_DEGREE, bgv_parameters_hash},
         setup_helpers::{
             array_at_path, compare_derived_hash, compare_hash_at_path, compare_string_at_path,
-            hash_at_path, integer_at_path, read_non_empty_string, read_optional_u64,
+            hash_at_path, read_non_empty_string, read_optional_u64,
             string_at_path, unsigned_at_path, usize_at_path, validate_hash_string, value_at_path,
         },
     },
@@ -378,7 +375,7 @@ pub(crate) fn collective_bgv_setup_context_hashes_from_package(
     } else {
         hash_at_path(setup_package, &["setupInputs", "rosterHash"])?.to_string()
     };
-    let roster = accepted_setup::accepted_roster_from_package(setup_package);
+    let roster = accepted_setup::accepted_roster_from_package(setup_package)?;
 
     Ok(CollectiveBgvSetupContextHashes {
         roster_hash,

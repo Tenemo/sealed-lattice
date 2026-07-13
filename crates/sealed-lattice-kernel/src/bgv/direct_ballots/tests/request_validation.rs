@@ -39,7 +39,7 @@ fn direct_encrypted_ballot_command_rejects_more_than_twenty_ballots() {
 }
 
 #[test]
-fn direct_encrypted_ballot_command_enforces_the_randomness_input_boundary() {
+fn direct_encrypted_ballot_command_requires_encryption_randomness() {
     let setup_package = setup_package_not_reached();
     let error = run_direct_encrypted_ballot(&json!({
         "setupPackage": setup_package,
@@ -67,40 +67,6 @@ fn direct_encrypted_ballot_command_enforces_the_randomness_input_boundary() {
 
     assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
     assert!(error.message.contains("ballotEncryptionRandomness"));
-
-    let setup_package = setup_package_not_reached();
-    let error = run_direct_encrypted_ballot(&json!({
-        "setupPackage": setup_package,
-        "setupPrivateWitness": {
-            "setupSeed": TEST_SETUP_SEED
-        },
-        "ballotEncryptionRandomness": direct_ballot_test_ballot_encryption_randomness(1),
-        "proofMaskRandomness": direct_ballot_test_proof_mask_randomness(1),
-        "ballots": [
-            {
-                "voterIdentity": "voter-embedded-encryption-seed",
-                "actionContextHash": derive_canonical_object_hash(
-                    &json!({
-                        "objectType": "ActionContextHash", "action": "direct encrypted ballot embedded encryption seed test" }),
-                ).expect("action hash"),
-                "encryptionSeedHex": direct_ballot_test_randomness_hex("embedded-ballot-seed", 0),
-                "scores": [
-                    10, 9, 8, 7, 6,
-                    5, 4, 3, 2, 1,
-                    1, 2, 3, 4, 5,
-                    6, 7, 8, 9, 10
-                ]
-            }
-        ]
-    }))
-    .expect_err("ballot-embedded encryption seed must reject");
-
-    assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
-    assert!(
-        error
-            .message
-            .contains("must be supplied through ballotEncryptionRandomness")
-    );
 }
 
 #[test]

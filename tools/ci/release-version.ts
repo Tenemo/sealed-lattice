@@ -2,8 +2,6 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { withTransientFilesystemRetries } from '#tools/internal/files.js';
-
 export type ReleaseIncrement = 'minor' | 'patch';
 
 export type ReleaseVersionResult = {
@@ -127,18 +125,40 @@ const writeManifestAtomically = async (
     manifestText: string,
 ): Promise<void> => {
     const temporaryManifestPath = `${manifestPath}.${String(process.pid)}.tmp`;
+    const transientReplacementErrorCodes = new Set([
+        'EACCES',
+        'EBUSY',
+        'EPERM',
+    ]);
+    const maximumReplacementAttempts = 12;
 
-    await withTransientFilesystemRetries(async () => {
+    for (let attempt = 1; ; attempt += 1) {
         try {
             await fs.writeFile(temporaryManifestPath, manifestText, 'utf8');
             await fs.rename(temporaryManifestPath, manifestPath);
+            return;
         } catch (error) {
-            await fs.rm(temporaryManifestPath, { force: true }).catch(() => {
-                // Preserve the original write or rename failure.
+            try {
+                await fs.rm(temporaryManifestPath, { force: true });
+            } catch (cleanupError) {
+                throw new Error(
+                    `Release manifest replacement failed (${String(error)}) and temporary-file cleanup also failed.`,
+                    { cause: cleanupError },
+                );
+            }
+            const errorCode = (error as NodeJS.ErrnoException).code;
+            if (
+                attempt >= maximumReplacementAttempts ||
+                errorCode === undefined ||
+                !transientReplacementErrorCodes.has(errorCode)
+            ) {
+                throw error;
+            }
+            await new Promise((resolve) => {
+                setTimeout(resolve, 50 * attempt);
             });
-            throw error;
         }
-    });
+    }
 };
 
 export const prepareReleaseVersion = async (input: {

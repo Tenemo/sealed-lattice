@@ -1,7 +1,9 @@
-import { deriveCanonicalObjectHash, hash512Hex } from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
 import {
+    assertJsonRecord,
+    assertNonEmptyString,
     assertNonNegativeSafeInteger,
     assertPositiveSafeInteger,
     assertProtocolHash,
@@ -14,43 +16,23 @@ import {
     type EvaluationKeyShareMaterial,
     type EvaluationKeyShareProofFamily,
     type JsonRecord,
-    evaluationKeyShareComponentMaterialEncoding,
-    evaluationKeyShareComponentVectorHashDomain,
 } from './constants-and-types.js';
 
 const lowercaseHexPattern = /^[0-9a-f]+$/u;
 
 export {
+    assertJsonRecord,
+    assertNonEmptyString,
     assertNonNegativeSafeInteger,
     assertPositiveSafeInteger,
     assertProtocolHash,
     bytesFromHex,
 };
 
-export const assertNonEmptyString = (
-    value: string,
-    fieldName: string,
-): void => {
-    if (value.length === 0) {
-        throw new TypeError(`${fieldName} must be non-empty.`);
-    }
-};
-
 export const assertLowercaseHex = (value: string, fieldName: string): void => {
     if (!lowercaseHexPattern.test(value)) {
         throw new TypeError(`${fieldName} must be lowercase hex.`);
     }
-};
-
-export const assertJsonRecord = (
-    value: unknown,
-    fieldName: string,
-): JsonRecord => {
-    if (value === null || Array.isArray(value) || typeof value !== 'object') {
-        throw new TypeError(`${fieldName} must be a JSON object.`);
-    }
-
-    return value as JsonRecord;
 };
 
 export const stringRecordField = (
@@ -111,50 +93,6 @@ export const freshProofRandomnessHex = (): string => {
     return bytesToHex(bytes);
 };
 
-const coefficientVectorBytes = (
-    coefficients: readonly number[],
-): Uint8Array => {
-    const bytes = new Uint8Array(coefficients.length * 8);
-    coefficients.forEach((coefficient, coefficientIndex) => {
-        if (!Number.isSafeInteger(coefficient) || coefficient < 0) {
-            throw new TypeError(
-                'evaluation-key component coefficient must be a non-negative safe integer.',
-            );
-        }
-        let remainingValue = BigInt(coefficient);
-        for (let byteIndex = 0; byteIndex < 8; byteIndex += 1) {
-            bytes[coefficientIndex * 8 + byteIndex] = Number(
-                remainingValue & 0xffn,
-            );
-            remainingValue >>= 8n;
-        }
-    });
-
-    return bytes;
-};
-
-export const evaluationKeyShareComponentVectorHash = (
-    coefficients: readonly number[],
-): ProtocolHash =>
-    hash512Hex(evaluationKeyShareComponentVectorHashDomain, [
-        coefficientVectorBytes(coefficients),
-    ]);
-
-export const u64LittleEndianBytes = (
-    value: number,
-    fieldName: string,
-): Uint8Array => {
-    if (!Number.isSafeInteger(value) || value < 0) {
-        throw new TypeError(
-            `${fieldName} must be a non-negative safe integer.`,
-        );
-    }
-    const bytes = new Uint8Array(8);
-    new DataView(bytes.buffer).setBigUint64(0, BigInt(value), true);
-
-    return bytes;
-};
-
 export const evaluationKeyShareComponentVectorRoot = (
     proofFamily: EvaluationKeyShareProofFamily,
     keySwitchDomain: string,
@@ -183,7 +121,6 @@ export const evaluationKeyShareComponentMaterialReferenceRoot = (
     deriveCanonicalObjectHash({
         objectType: 'EvaluationKeyShareComponentMaterialReference',
         proofFamily,
-        keySwitchMaterialEncoding: evaluationKeyShareComponentMaterialEncoding,
         trusteeIdentity,
         trusteeRosterPosition,
         keySwitchDomain: shareMaterial.keySwitchDomain,

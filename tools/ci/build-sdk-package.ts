@@ -122,7 +122,7 @@ const bundleSdkOutput = (
     }
 };
 
-export const normalizeSdkDeclarationEntryMarker = (input: {
+const normalizeSdkDeclarationEntryMarker = (input: {
     readonly declarationBundlePath: string;
     readonly declarationEntryPath: string;
     readonly declarationSourceText: string;

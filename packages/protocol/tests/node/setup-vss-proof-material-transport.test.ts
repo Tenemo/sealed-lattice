@@ -55,14 +55,6 @@ const proofMaterialCases = [
             'sealed-lattice/setup/vss-share-linkage/proof-bytes',
         proofRecordRootField: 'proofRecordRoot',
         identityFields: (recordIndex: number): JsonRecord => ({
-            linkageItems: [
-                {
-                    sourceTrusteeRosterPosition: 0,
-                    recipientRosterPosition: recordIndex,
-                    sourceRnsLimbIndex: 0,
-                    itemIndex: 0,
-                },
-            ],
             vssShareLinkage: {
                 sourceTrusteeRosterPosition: 0,
                 recipientRosterPosition: recordIndex,
@@ -136,7 +128,6 @@ const canonicalProofMaterialBuild = (
         });
         const recordWithoutRoot = {
             objectType: proofMaterialCase.proofRecordObjectType,
-            proofFamily: proofMaterialCase.proofFamily,
             ...proofMaterialCase.identityFields(recordIndex),
             proofBytesHash,
             proofMaterialRoot,
@@ -154,7 +145,6 @@ const canonicalProofMaterialBuild = (
     });
     const proofMaterialSetWithoutRoot = {
         objectType: proofMaterialCase.proofMaterialSetObjectType,
-        proofFamily: proofMaterialCase.proofFamily,
         proofRecords,
     };
 

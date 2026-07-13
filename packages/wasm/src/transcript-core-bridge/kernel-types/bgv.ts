@@ -14,7 +14,6 @@ type BgvTransportedMaterialObject<ObjectType extends string> = Readonly<
 type BgvTransportedSetupProofMaterialSet<ObjectType extends string = string> =
     BgvTransportedMaterialObject<ObjectType> &
         Readonly<{
-            readonly proofFamily: string;
             readonly proofMaterials: readonly BgvJsonRecord[];
         }>;
 
@@ -30,21 +29,13 @@ type BgvTransportedEvaluationKeyShareComponentMaterialSet =
             readonly componentMaterials: readonly BgvJsonRecord[];
         }>;
 
-type BgvTransportedPublicEvaluationKeyMaterialSet =
-    BgvTransportedMaterialObject<'SetupTransportedPublicEvaluationKeyMaterialSet'> &
-        Readonly<{
-            readonly publicEvaluationKeyMaterials: readonly BgvJsonRecord[];
-            readonly componentMaterials?: readonly BgvJsonRecord[];
-        }>;
-
 export type BgvCollectiveSetupTransportCompanions = Readonly<{
-    readonly transportedPublicKeyShareMaterial?: BgvTransportedPublicKeyShareMaterial;
+    readonly transportedPublicKeyShareMaterial: BgvTransportedPublicKeyShareMaterial;
     readonly transportedPublicKeyShareProofMaterial?: BgvTransportedSetupProofMaterialSet<'SetupTransportedPublicKeyShareProofMaterialSet'>;
     readonly transportedEvaluationKeyShareProofMaterial?: BgvTransportedSetupProofMaterialSet<'SetupTransportedEvaluationKeyShareProofMaterialSet'>;
     readonly transportedVssShareLinkageProofMaterial?: BgvTransportedSetupProofMaterialSet<'SetupTransportedVssShareLinkageProofMaterialSet'>;
     readonly transportedSameSecretBridgeProofMaterial?: BgvTransportedSetupProofMaterialSet<'SetupTransportedSameSecretBridgeProofMaterialSet'>;
     readonly transportedEvaluationKeyShareComponentMaterial?: BgvTransportedEvaluationKeyShareComponentMaterialSet;
-    readonly transportedPublicEvaluationKeyMaterial?: BgvTransportedPublicEvaluationKeyMaterialSet;
 }>;
 
 export type BgvRnsParametersDescription = {
@@ -61,37 +52,6 @@ export type BgvRnsParametersDescription = {
         readonly coordinatesPerOption: number;
     };
     readonly bgvParametersHash: ProtocolHash;
-};
-
-export type BgvObjectValidation = {
-    readonly isValid: boolean;
-    readonly objectKind: 'plaintext' | 'ciphertext';
-    readonly componentCount: number;
-    readonly bgvParametersHash: ProtocolHash;
-    readonly basisId: string;
-    readonly level: number;
-    readonly coefficientCount: number;
-    readonly plaintextRoot?: ProtocolHash;
-    readonly ciphertextRoot?: ProtocolHash;
-};
-
-export type BgvBatchPlaintextEncoding = {
-    readonly bgvParametersHash: ProtocolHash;
-    readonly basisId: string;
-    readonly level: number;
-    readonly coefficientCount: number;
-    readonly suppliedSlotCount: number;
-    readonly slotCount: number;
-    readonly plaintextRoot: ProtocolHash;
-    readonly sampledSlots: readonly {
-        readonly position: number;
-        readonly value: number;
-    }[];
-    readonly sampledCoefficientsModPlaintext: readonly {
-        readonly position: number;
-        readonly value: number;
-    }[];
-    readonly canonicalBytesHex?: string;
 };
 
 export type BgvPassiveSetupParticipantInput =
@@ -137,10 +97,6 @@ export type BgvCollectiveSetupParametersDescription = {
     readonly setupParametersHash: ProtocolHash;
     readonly canonicalTargetBasisHash: ProtocolHash;
     readonly participantCount: number;
-    readonly qSetupComplete: number;
-    readonly qBallotRelease: number;
-    readonly qFinal: number;
-    readonly qDec: number;
     readonly qShare: {
         readonly objectType: 'QSharePrimeList';
         readonly primes: readonly number[];
@@ -160,10 +116,7 @@ export type BgvCollectiveSetupParametersDescription = {
         readonly objectType: 'BoundedDomainEvaluatorParameters';
         readonly scoreDifferenceBound: number;
         readonly directComparisonOutputLevel: number;
-        readonly tiePolicy: string;
     };
-    readonly phaseOrder: readonly string[];
-    readonly phaseOrderHash: ProtocolHash;
 };
 
 export type BgvCollectiveSetupVerification = {
@@ -179,7 +132,6 @@ export type BgvPrivateVssShareEnvelopeVerification = {
     readonly isValid: boolean;
     readonly privateEnvelopeHash: ProtocolHash | null;
     readonly localVerificationRoot: ProtocolHash | null;
-    readonly ringDegree?: number;
     readonly limbVerifications: readonly {
         readonly rnsLimbIndex: number;
         readonly rnsPrime: number;
@@ -187,7 +139,6 @@ export type BgvPrivateVssShareEnvelopeVerification = {
         readonly coefficientCommitmentRoots: readonly ProtocolHash[];
         readonly shareValuesHash: ProtocolHash;
         readonly privateVssShareProofHash: ProtocolHash;
-        readonly proofStatementRoot: ProtocolHash;
         readonly limbVerificationRoot: ProtocolHash;
     }[];
     readonly refusedObjects: readonly {
@@ -338,7 +289,6 @@ export type BgvSameSecretBridgeProofGeneration = {
 export type BgvLocalTrusteeSetupStateVerification = {
     readonly trusteeIdentity: string;
     readonly trusteeRosterPosition: number;
-    readonly trusteePoint: number;
     readonly localStateRoot: ProtocolHash;
 };
 
@@ -354,27 +304,15 @@ export type { BgvTargetDecryptionShareProofMaterial };
 
 // Release context derived from a caller-supplied setup package. This record is
 // not an authority capability. It is round-tripped byte-for-byte as the begin
-// command's releaseSetupContext input; only objectType and
-// releaseSetupContextHash are consumed on the TypeScript side, while the
-// remaining context fields are recomputed by the kernel.
+// command's releaseSetupContext input and parsed again by the kernel.
 export type BgvTargetDecryptionReleaseSetupContext = Readonly<
     BgvJsonRecord & {
         readonly objectType: 'BgvTargetDecryptionReleaseSetupContext';
-        readonly releaseSetupContextHash: ProtocolHash;
     }
 >;
 
 export type BgvTargetDecryptionResultReleaseBegin = {
-    readonly releaseVerificationId: string;
     readonly requiredShareCount: number;
-};
-
-export type BgvTargetDecryptionResultReleaseShareAbsorption = {
-    readonly absorbedShareCount: number;
-    readonly requiredShareCount: number;
-    readonly rosterPosition: number;
-    readonly targetDecryptionShareHash: ProtocolHash;
-    readonly proofMaterialRoot: ProtocolHash;
 };
 
 export type BgvTargetDecryptionResultReleaseShareEvidence = {

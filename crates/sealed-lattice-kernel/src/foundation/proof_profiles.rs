@@ -66,7 +66,8 @@ impl ProofFieldProfile {
     }
 
     pub fn challenge_extension_degree(&self) -> usize {
-        self.monic_challenge_extension_polynomial_coefficients.len()
+        self.monic_challenge_extension_polynomial_coefficients
+            .len()
     }
 
     pub fn maximum_two_adic_subgroup_order(&self) -> u64 {
@@ -294,10 +295,7 @@ pub struct ProofFamilyProfile {
 }
 
 impl ProofFamilyProfile {
-    pub fn new(
-        proof_family: ProofFamily,
-        field_schedule: ProofFieldSchedule,
-    ) -> SchemaResult<Self> {
+    pub fn new(proof_family: ProofFamily, field_schedule: ProofFieldSchedule) -> SchemaResult<Self> {
         field_schedule.validate_intrinsic()?;
         Ok(Self {
             proof_family,
@@ -324,20 +322,15 @@ impl ProofFamilyProfile {
     fn from_tuple(tuple: &CanonicalTuple, limits: &CanonicalDecodeLimits) -> SchemaResult<Self> {
         require_header(tuple, PROOF_FAMILY_PROFILE_SCHEMA_IDENTIFIER, 2)?;
         let statement_schema_identifier = read_u16(&tuple.items[0])?;
-        let proof_family = ProofFamily::from_statement_schema_identifier(
-            statement_schema_identifier,
-        )
-        .ok_or_else(|| {
-            schema_error(
-                RefusalReason::WrongTypeOrLength,
-                "proof family application-statement schema identifier is unassigned",
-            )
-        })?;
+        let proof_family = ProofFamily::from_statement_schema_identifier(statement_schema_identifier)
+            .ok_or_else(|| {
+                schema_error(
+                    RefusalReason::WrongTypeOrLength,
+                    "proof family application-statement schema identifier is unassigned",
+                )
+            })?;
         let schedule_tuple = read_nested_tuple(&tuple.items[1], limits)?;
-        Self::new(
-            proof_family,
-            ProofFieldSchedule::from_tuple(&schedule_tuple)?,
-        )
+        Self::new(proof_family, ProofFieldSchedule::from_tuple(&schedule_tuple)?)
     }
 
     pub fn encode(&self) -> SchemaResult<Vec<u8>> {
@@ -364,6 +357,7 @@ pub struct ProofProfileSet {
     pub proof_fields: Vec<ProofFieldProfile>,
     pub proof_families: Vec<ProofFamilyProfile>,
     relation_plans: Vec<CanonicalTuple>,
+    root_compatibility_edges: Vec<CanonicalTuple>,
 }
 
 impl ProofProfileSet {
@@ -376,10 +370,13 @@ impl ProofProfileSet {
             proof_fields,
             proof_families,
             relation_plans: Vec::new(),
+            root_compatibility_edges: Vec::new(),
         };
         profile_set.validate_profile_catalog()?;
-        let relation_plan =
-            CollectivePublicKeyAggregationRelationPlan::for_suite(suite_record, &profile_set)?;
+        let relation_plan = CollectivePublicKeyAggregationRelationPlan::for_suite(
+            suite_record,
+            &profile_set,
+        )?;
         profile_set.relation_plans.push(CanonicalTuple::decode(
             &relation_plan.encode(),
             &CanonicalDecodeLimits::default(),
@@ -390,7 +387,7 @@ impl ProofProfileSet {
 
     pub fn validate_intrinsic(&self) -> SchemaResult<()> {
         self.validate_profile_catalog()?;
-        validate_relation_plan_catalog(&self.relation_plans)
+        validate_relation_plan_catalog(&self.relation_plans, &self.root_compatibility_edges)
     }
 
     fn validate_profile_catalog(&self) -> SchemaResult<()> {
@@ -448,8 +445,11 @@ impl ProofProfileSet {
 
     pub fn validate_for_suite(&self, suite_record: &SuiteRecord) -> SchemaResult<()> {
         self.validate_intrinsic()?;
-        let expected_relation_plan =
-            CollectivePublicKeyAggregationRelationPlan::for_suite(suite_record, self)?.encode();
+        let expected_relation_plan = CollectivePublicKeyAggregationRelationPlan::for_suite(
+            suite_record,
+            self,
+        )?
+        .encode();
         if self.relation_plans[0].encode()? != expected_relation_plan {
             return Err(schema_error(
                 RefusalReason::WrongContext,
@@ -457,6 +457,13 @@ impl ProofProfileSet {
             ));
         }
         Ok(())
+    }
+
+    pub fn collective_public_key_aggregation_relation_plan_bytes(
+        &self,
+    ) -> SchemaResult<Vec<u8>> {
+        self.validate_intrinsic()?;
+        Ok(self.relation_plans[0].encode()?)
     }
 
     pub fn field_and_schedule_for_family(
@@ -477,10 +484,7 @@ impl ProofProfileSet {
                 )
             })?;
         let schedule = &self.proof_families[family_index].field_schedule;
-        Ok((
-            &self.proof_fields[usize::from(schedule.proof_field_index)],
-            schedule,
-        ))
+        Ok((&self.proof_fields[usize::from(schedule.proof_field_index)], schedule))
     }
 
     fn canonical_tuple(&self) -> SchemaResult<CanonicalTuple> {
@@ -502,6 +506,11 @@ impl ProofProfileSet {
             .iter()
             .map(|relation_plan| CanonicalItem::nested_tuple(relation_plan).map_err(Into::into))
             .collect::<SchemaResult<Vec<_>>>()?;
+        let root_compatibility_edge_items = self
+            .root_compatibility_edges
+            .iter()
+            .map(|edge| CanonicalItem::nested_tuple(edge).map_err(Into::into))
+            .collect::<SchemaResult<Vec<_>>>()?;
         Ok(CanonicalTuple::new(
             PROOF_PROFILE_SET_SCHEMA_IDENTIFIER,
             PROOF_PROFILE_SCHEMA_VERSION,
@@ -511,6 +520,10 @@ impl ProofProfileSet {
                 CanonicalItem::homogeneous_list(
                     CanonicalItemType::NestedTuple,
                     &relation_plan_items,
+                )?,
+                CanonicalItem::homogeneous_list(
+                    CanonicalItemType::NestedTuple,
+                    &root_compatibility_edge_items,
                 )?,
             ],
         ))
@@ -532,7 +545,7 @@ impl ProofProfileSet {
             .maximum_item_byte_length
             .min(PROOF_PROFILE_SET_MAXIMUM_BYTE_LENGTH);
         let tuple = CanonicalTuple::decode(bytes, &bounded_limits)?;
-        require_header(&tuple, PROOF_PROFILE_SET_SCHEMA_IDENTIFIER, 3)?;
+        require_header(&tuple, PROOF_PROFILE_SET_SCHEMA_IDENTIFIER, 4)?;
         require_nested_tuple_count(
             &tuple.items[0],
             1,
@@ -551,6 +564,12 @@ impl ProofProfileSet {
             1,
             "proof profile relation-plan count must be exactly one in the implemented slice",
         )?;
+        require_nested_tuple_count(
+            &tuple.items[3],
+            0,
+            0,
+            "proof profile root compatibility edges require producer relation plans",
+        )?;
         let proof_fields = read_nested_tuple_list(&tuple.items[0], &bounded_limits)?
             .iter()
             .map(ProofFieldProfile::from_tuple)
@@ -563,6 +582,10 @@ impl ProofProfileSet {
             proof_fields,
             proof_families,
             relation_plans: read_nested_tuple_list(&tuple.items[2], &bounded_limits)?,
+            root_compatibility_edges: read_nested_tuple_list(
+                &tuple.items[3],
+                &bounded_limits,
+            )?,
         };
         profile_set.validate_intrinsic()?;
         Ok(profile_set)
@@ -599,7 +622,10 @@ impl ProofProfileSet {
     }
 }
 
-fn validate_relation_plan_catalog(relation_plans: &[CanonicalTuple]) -> SchemaResult<()> {
+fn validate_relation_plan_catalog(
+    relation_plans: &[CanonicalTuple],
+    root_compatibility_edges: &[CanonicalTuple],
+) -> SchemaResult<()> {
     if relation_plans.len() != 1 {
         return Err(schema_error(
             RefusalReason::OutsideSupportedProfile,
@@ -616,8 +642,10 @@ fn validate_relation_plan_catalog(relation_plans: &[CanonicalTuple]) -> SchemaRe
             "proof profile relation plan has the wrong application statement",
         ));
     }
-    let variants =
-        read_nested_tuple_list(&relation_plan.items[1], &CanonicalDecodeLimits::default())?;
+    let variants = read_nested_tuple_list(
+        &relation_plan.items[1],
+        &CanonicalDecodeLimits::default(),
+    )?;
     if variants.len() != 1 {
         return Err(schema_error(
             RefusalReason::OutsideSupportedProfile,
@@ -625,6 +653,12 @@ fn validate_relation_plan_catalog(relation_plans: &[CanonicalTuple]) -> SchemaRe
         ));
     }
     require_header(&variants[0], RELATION_PLAN_VARIANT_SCHEMA_IDENTIFIER, 15)?;
+    if !root_compatibility_edges.is_empty() {
+        return Err(schema_error(
+            RefusalReason::OutsideSupportedProfile,
+            "root compatibility edges require their producer relation plans",
+        ));
+    }
     Ok(())
 }
 
@@ -711,11 +745,19 @@ fn is_monic_polynomial_irreducible(coefficients: &[u64], modulus: u64) -> bool {
         .collect::<Vec<_>>();
     let mut frobenius_power = indeterminate.clone();
     for iteration in 1..=degree {
-        frobenius_power =
-            polynomial_power_remainder(&frobenius_power, modulus, &monic_polynomial, modulus);
+        frobenius_power = polynomial_power_remainder(
+            &frobenius_power,
+            modulus,
+            &monic_polynomial,
+            modulus,
+        );
         if required_greatest_common_divisor_iterations.contains(&iteration) {
             let difference = polynomial_difference(&frobenius_power, &indeterminate, modulus);
-            if !polynomial_greatest_common_divisor_is_one(&monic_polynomial, &difference, modulus) {
+            if !polynomial_greatest_common_divisor_is_one(
+                &monic_polynomial,
+                &difference,
+                modulus,
+            ) {
                 return false;
             }
         }
@@ -796,7 +838,11 @@ fn polynomial_difference(left: &[u64], right: &[u64], modulus: u64) -> Vec<u64> 
     normalized_polynomial(difference)
 }
 
-fn polynomial_greatest_common_divisor_is_one(left: &[u64], right: &[u64], modulus: u64) -> bool {
+fn polynomial_greatest_common_divisor_is_one(
+    left: &[u64],
+    right: &[u64],
+    modulus: u64,
+) -> bool {
     let mut left = normalized_polynomial(left.to_vec());
     let mut right = normalized_polynomial(right.to_vec());
     while !polynomial_is_zero(&right) {
@@ -812,9 +858,7 @@ fn polynomial_remainder(numerator: &[u64], denominator: &[u64], modulus: u64) ->
     let denominator = normalized_polynomial(denominator.to_vec());
     debug_assert!(!polynomial_is_zero(&denominator));
     let denominator_leading_inverse = modular_power(
-        *denominator
-            .last()
-            .expect("a normalized polynomial is nonempty"),
+        *denominator.last().expect("a normalized polynomial is nonempty"),
         modulus - 2,
         modulus,
     );
@@ -827,7 +871,8 @@ fn polynomial_remainder(numerator: &[u64], denominator: &[u64], modulus: u64) ->
             denominator_leading_inverse,
             modulus,
         );
-        for (denominator_index, denominator_coefficient) in denominator.iter().copied().enumerate()
+        for (denominator_index, denominator_coefficient) in
+            denominator.iter().copied().enumerate()
         {
             let remainder_index = shift + denominator_index;
             remainder[remainder_index] = modular_difference(
@@ -921,10 +966,7 @@ fn require_nested_tuple_count(
 ) -> SchemaResult<()> {
     let (count, _) = read_list_header(item, CanonicalItemType::NestedTuple)?;
     if !(minimum_count..=maximum_count).contains(&count) {
-        return Err(schema_error(
-            RefusalReason::OutsideSupportedProfile,
-            message,
-        ));
+        return Err(schema_error(RefusalReason::OutsideSupportedProfile, message));
     }
     Ok(())
 }

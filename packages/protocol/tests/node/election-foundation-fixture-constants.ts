@@ -28,7 +28,7 @@ export const ceremonyId = 'ceremony-main';
 // describeBgvRnsParameters().bgvParametersHash. The manifest binds it opaquely
 // and the trustee setup entry cross-binds the same value, so the fixture pins the
 // kernel-computed object hash rather than re-deriving the parameter object here.
-export const bgvParametersHash =
+const bgvParametersHash =
     '48309604b3590d164a517d03139bb2d98eae62faeb043599402db3961bc0770bc5dd632ae09f03b0464597190c38d4e0159af40d1278f0490a7c9da966688825';
 export const boardPolicyHash = deriveFixtureHash('fixture-board-policy', {
     policy: 'signed-head-chain',
@@ -37,7 +37,7 @@ export const contextHash = deriveCanonicalObjectHash({
     objectType: 'ActionContext',
     context: 'default',
 });
-export const keyFixturesByHash = new Map<
+const keyFixturesByHash = new Map<
     string,
     ReturnType<typeof createMlDsaKeyPairFixture>
 >();
@@ -49,12 +49,12 @@ export const createKeyFixture = (
 
     return keyFixture;
 };
-export const boardKeyFixture = createKeyFixture('board');
-export const organizerKeyFixture = createKeyFixture('organizer');
+const boardKeyFixture = createKeyFixture('board');
+const organizerKeyFixture = createKeyFixture('organizer');
 export const recoveryRootKeyFixture = createKeyFixture(
     'recovery-root:participant-1',
 );
-export const getParticipantKeyFixture = (
+const getParticipantKeyFixture = (
     participantIdentity: string,
 ): ReturnType<typeof createMlDsaKeyPairFixture> =>
     createKeyFixture(`participant:${participantIdentity}`);

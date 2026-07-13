@@ -2,12 +2,13 @@ use super::*;
 
 use crate::hashing::derive_canonical_object_hash;
 
-pub(super) fn verify_common_randomness(setup_package: &Value) -> CanonicalResult<Option<Value>> {
+pub(super) fn verify_common_randomness(
+    setup_package: &Value,
+    trustee_registrations: &setup_intent::SetupIntentTrusteeRegistrationMap,
+) -> CanonicalResult<Option<Value>> {
     let Some(common_randomness) = setup_package.get("commonRandomness") else {
         return Ok(Some(verification_response(
-            Some("commonRandomnessCommit"),
             vec!["commonRandomness".to_string()],
-            Vec::new(),
             Vec::new(),
         )?));
     };
@@ -33,23 +34,14 @@ pub(super) fn verify_common_randomness(setup_package: &Value) -> CanonicalResult
             "setupContext was required before common randomness verification",
         )
     })?;
-    if let Some(response) = verify_common_randomness_context(common_randomness, setup_context)? {
-        return Ok(Some(response));
-    }
-    let roster = super::accepted_roster_from_package(setup_package);
-    let trustee_registrations =
-        super::phase_transcript::setup_intent_trustee_registrations_from_phase_transcript(
-            setup_package,
-        )?;
+    let roster = super::accepted_roster_from_package(setup_package)?;
 
     let Some(commit_records) = common_randomness
         .get("commitRecords")
         .and_then(Value::as_array)
     else {
         return Ok(Some(verification_response(
-            Some("commonRandomnessCommit"),
             vec!["commonRandomness.commitRecords".to_string()],
-            Vec::new(),
             Vec::new(),
         )?));
     };
@@ -58,9 +50,7 @@ pub(super) fn verify_common_randomness(setup_package: &Value) -> CanonicalResult
         .and_then(Value::as_array)
     else {
         return Ok(Some(verification_response(
-            Some("commonRandomnessReveal"),
             vec!["commonRandomness.revealRecords".to_string()],
-            Vec::new(),
             Vec::new(),
         )?));
     };
@@ -84,7 +74,7 @@ pub(super) fn verify_common_randomness(setup_package: &Value) -> CanonicalResult
         let (roster_position, reveal_hash) = verify_common_randomness_commit_record(
             commit_record,
             setup_context,
-            &trustee_registrations,
+            trustee_registrations,
         )?;
         if commit_reveal_hashes_by_position
             .insert(roster_position, reveal_hash)
@@ -103,7 +93,7 @@ pub(super) fn verify_common_randomness(setup_package: &Value) -> CanonicalResult
         let (roster_position, reveal_hash) = verify_common_randomness_reveal_record(
             reveal_record,
             setup_context,
-            &trustee_registrations,
+            trustee_registrations,
         )?;
         let Some(committed_reveal_hash) = commit_reveal_hashes_by_position.get(&roster_position)
         else {
@@ -166,164 +156,13 @@ pub(super) fn verify_common_randomness(setup_package: &Value) -> CanonicalResult
             "setupPackage.commonRandomness.publicMatrixSeedHash",
         )?));
     }
-    if let Some(response) =
-        verify_public_derivations(common_randomness, &expected_public_matrix_seed_hash)?
-    {
-        return Ok(Some(response));
-    }
-
-    let Some(common_randomness_root) = common_randomness
-        .get("commonRandomnessRoot")
-        .and_then(Value::as_str)
-    else {
-        return Ok(Some(verification_response(
-            Some("commonRandomnessReveal"),
-            vec!["commonRandomness.commonRandomnessRoot".to_string()],
-            Vec::new(),
-            Vec::new(),
-        )?));
-    };
-    validate_hash_string(
-        common_randomness_root,
-        "commonRandomness.commonRandomnessRoot",
-    )?;
-    let mut root_input = common_randomness.clone();
-    root_input
-        .as_object_mut()
-        .expect("commonRandomness object was checked")
-        .remove("commonRandomnessRoot");
-    let expected_common_randomness_root = derive_canonical_object_hash(&root_input)?;
-    if common_randomness_root != expected_common_randomness_root {
-        return Ok(Some(common_randomness_refusal(
-            "commonRandomnessRootMismatch",
-            "commonRandomness.commonRandomnessRoot does not match the canonical payload",
-            "setupPackage.commonRandomness.commonRandomnessRoot",
-        )?));
-    }
-
-    Ok(None)
-}
-
-// The whole CRS is a deterministic function of the verified seed, so the verifier recomputes it and refuses any supplied derivation; this prevents a trapdoored public a or commitment matrix.
-fn verify_public_derivations(
-    common_randomness: &Value,
-    public_matrix_seed_hash: &str,
-) -> CanonicalResult<Option<Value>> {
-    let Some(public_derivations) = common_randomness.get("publicDerivations") else {
-        return Ok(Some(verification_response(
-            Some("commonRandomnessReveal"),
-            vec!["commonRandomness.publicDerivations".to_string()],
-            Vec::new(),
-            Vec::new(),
-        )?));
-    };
-    let expected_public_derivations =
-        derive_collective_bgv_setup_public_derivations(public_matrix_seed_hash)?;
-    if public_derivations != &expected_public_derivations {
-        return Ok(Some(common_randomness_refusal(
-            "setupPublicDerivationsMismatch",
-            "commonRandomness.publicDerivations does not match the accepted public matrix derivation recipe",
-            "setupPackage.commonRandomness.publicDerivations",
-        )?));
-    }
-
-    Ok(None)
-}
-
-pub(in crate::bgv::setup) fn derive_collective_bgv_setup_public_derivations(
-    public_matrix_seed_hash: &str,
-) -> CanonicalResult<Value> {
-    let bgv_public_a = derive_bgv_public_a_polynomial(public_matrix_seed_hash)?;
-    Ok(json!({
-        "objectType": "SetupPublicDerivations",
-        "publicMatrixSeedHash": public_matrix_seed_hash,
-        "bgvPublicA": bgv_public_a,
-        "crpRoots": {
-            "publicKeyCrpRoot": setup_public_derivation_root(public_matrix_seed_hash, "public-key-crp")?,
-            "relinearizationCrpRoot": setup_public_derivation_root(public_matrix_seed_hash, "relinearization-crp")?,
-            "galoisKeyCrpRoot": setup_public_derivation_root(public_matrix_seed_hash, "galois-key-crp")?,
-        },
-    }))
-}
-
-pub(super) fn derive_bgv_public_a_polynomial(
-    public_matrix_seed_hash: &str,
-) -> CanonicalResult<Value> {
-    let modulus_derivations = DATA_PRIMES
-        .iter()
-        .map(|modulus| {
-            json!({
-                "modulus": modulus,
-                "coefficientDerivationHash": hash512_hex(
-                    "sealed-lattice-bgv-rns/accepted-public-a-derivation",
-                    &[
-                        public_matrix_seed_hash.as_bytes(),
-                        "accepted-bgv-public-a".as_bytes(),
-                        modulus.to_string().as_bytes(),
-                    ],
-                ),
-            })
-        })
-        .collect::<Vec<_>>();
-    let mut public_a = json!({
-        "objectType": "BgvPublicAPolynomial",
-        "publicMatrixSeedHash": public_matrix_seed_hash,
-        "derivationLabel": "accepted-bgv-public-a",
-        "basisId": BgvBasisKind::Data.basis_id(),
-        "level": DATA_PRIMES.len() - 1,
-        "coefficientCount": POLYNOMIAL_DEGREE,
-        "modulusDerivations": modulus_derivations,
-        "sampledResidues": sample_public_residues(
-            public_matrix_seed_hash,
-            "accepted-bgv-public-a",
-            DATA_PRIMES[0],
-        )?,
-    });
-    let public_polynomial_root = derive_canonical_object_hash(&public_a)?;
-    public_a["publicPolynomialRoot"] = Value::String(public_polynomial_root);
-
-    Ok(public_a)
-}
-
-// The CRP root is a seed-bound label tag, not a commitment to coefficients; the actual relinearization/Galois a is bound downstream through keySwitchSeedHex, which folds this root in.
-fn setup_public_derivation_root(
-    public_matrix_seed_hash: &str,
-    component_name: &str,
-) -> CanonicalResult<String> {
-    derive_canonical_object_hash(&json!({
-        "objectType": "SetupPublicDerivation",
-        "publicMatrixSeedHash": public_matrix_seed_hash,
-        "componentName": component_name,
-    }))
-}
-
-fn verify_common_randomness_context(
-    value: &Value,
-    setup_context: &Value,
-) -> CanonicalResult<Option<Value>> {
-    for field_name in [
-        "ceremonyId",
-        "manifestHash",
-        "rosterHash",
-        "setupParametersHash",
-        "setupEpoch",
-    ] {
-        if value.get(field_name) != setup_context.get(field_name) {
-            return Ok(Some(common_randomness_refusal(
-                "commonRandomnessContextMismatch",
-                format!("commonRandomness.{field_name} does not match setupContext"),
-                format!("setupPackage.commonRandomness.{field_name}"),
-            )?));
-        }
-    }
-
     Ok(None)
 }
 
 fn verify_common_randomness_commit_record(
     commit_record: &Value,
     setup_context: &Value,
-    trustee_registrations: &BTreeMap<u64, super::phase_transcript::SetupIntentTrusteeRegistration>,
+    trustee_registrations: &setup_intent::SetupIntentTrusteeRegistrationMap,
 ) -> CanonicalResult<(u64, String)> {
     verify_common_randomness_participant_record_shape(
         commit_record,
@@ -339,27 +178,14 @@ fn verify_common_randomness_commit_record(
         ));
     };
     validate_hash_string(reveal_hash, "CommonRandomnessCommit.revealHash")?;
-    let Some(commit_hash) = commit_record.get("commitHash").and_then(Value::as_str) else {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "CommonRandomnessCommit.commitHash is required",
-        ));
-    };
-    validate_hash_string(commit_hash, "CommonRandomnessCommit.commitHash")?;
     let commit_payload = common_randomness_commit_payload_value(commit_record)?;
-    let expected_commit_hash = derive_canonical_object_hash(&commit_payload)?;
-    if commit_hash != expected_commit_hash {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "CommonRandomnessCommit.commitHash does not match its canonical payload",
-        ));
-    }
+    let commit_hash = derive_canonical_object_hash(&commit_payload)?;
     verify_common_randomness_signature(
         commit_record,
         setup_context,
         &CommonRandomnessSignatureExpectation {
             object_type: "CommonRandomnessCommit",
-            object_root: commit_hash,
+            object_root: &commit_hash,
             trustee_registrations,
         },
     )?;
@@ -375,7 +201,7 @@ fn verify_common_randomness_commit_record(
 fn verify_common_randomness_reveal_record(
     reveal_record: &Value,
     setup_context: &Value,
-    trustee_registrations: &BTreeMap<u64, super::phase_transcript::SetupIntentTrusteeRegistration>,
+    trustee_registrations: &setup_intent::SetupIntentTrusteeRegistrationMap,
 ) -> CanonicalResult<(u64, String)> {
     verify_common_randomness_participant_record_shape(
         reveal_record,
@@ -391,27 +217,14 @@ fn verify_common_randomness_reveal_record(
         ));
     };
     validate_common_randomness_reveal_hex(reveal_hex)?;
-    let Some(reveal_hash) = reveal_record.get("revealHash").and_then(Value::as_str) else {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "CommonRandomnessReveal.revealHash is required",
-        ));
-    };
-    validate_hash_string(reveal_hash, "CommonRandomnessReveal.revealHash")?;
     let reveal_payload = common_randomness_reveal_payload_value(reveal_record)?;
-    let expected_reveal_hash = derive_canonical_object_hash(&reveal_payload)?;
-    if reveal_hash != expected_reveal_hash {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "CommonRandomnessReveal.revealHash does not match its canonical payload",
-        ));
-    }
+    let reveal_hash = derive_canonical_object_hash(&reveal_payload)?;
     verify_common_randomness_signature(
         reveal_record,
         setup_context,
         &CommonRandomnessSignatureExpectation {
             object_type: "CommonRandomnessReveal",
-            object_root: reveal_hash,
+            object_root: &reveal_hash,
             trustee_registrations,
         },
     )?;
@@ -420,7 +233,7 @@ fn verify_common_randomness_reveal_record(
         reveal_record["rosterPosition"]
             .as_u64()
             .expect("roster position was checked"),
-        reveal_hash.to_string(),
+        reveal_hash,
     ))
 }
 
@@ -429,9 +242,9 @@ fn verify_common_randomness_participant_record_shape(
     setup_context: &Value,
     object_type: &str,
     object_path: &str,
-    trustee_registrations: &BTreeMap<u64, super::phase_transcript::SetupIntentTrusteeRegistration>,
+    trustee_registrations: &setup_intent::SetupIntentTrusteeRegistrationMap,
 ) -> CanonicalResult<()> {
-    let roster = super::accepted_roster_from_setup_context(setup_context);
+    let roster = super::accepted_roster_from_setup_context(setup_context)?;
     if !record.is_object() {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -541,8 +354,7 @@ fn common_randomness_reveal_payload_value(record: &Value) -> CanonicalResult<Val
 struct CommonRandomnessSignatureExpectation<'a> {
     object_type: &'static str,
     object_root: &'a str,
-    trustee_registrations:
-        &'a BTreeMap<u64, super::phase_transcript::SetupIntentTrusteeRegistration>,
+    trustee_registrations: &'a setup_intent::SetupIntentTrusteeRegistrationMap,
 }
 
 fn verify_common_randomness_signature(
@@ -635,9 +447,7 @@ fn common_randomness_refusal(
     object_path: impl Into<String>,
 ) -> CanonicalResult<Value> {
     verification_response(
-        Some("commonRandomnessReveal"),
         Vec::new(),
         vec![Refusal::new(reason_code, message, object_path)],
-        Vec::new(),
     )
 }

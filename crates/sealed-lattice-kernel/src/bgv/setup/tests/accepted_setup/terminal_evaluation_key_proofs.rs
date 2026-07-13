@@ -32,7 +32,6 @@ fn terminal_evaluation_key_bearing_collective_setup_fixture() -> (
         package["trusteeEvaluationKeyProofs"] = trustee_proof_fixture.proof_set;
         fixture.verification_request["transportedEvaluationKeyShareProofMaterial"] =
             trustee_proof_fixture.transported_proof_material;
-        package["evaluationKeys"] = public_evaluation_key_set_object(package);
         rebind_collective_setup_package_hash(package);
     }
 
@@ -62,8 +61,7 @@ fn evaluation_key_phase_refused(result: &serde_json::Value) -> Option<String> {
                 || reason.contains("evaluationKey")
                 || path.contains("relinearizationKeyShareRounds")
                 || path.contains("galoisKeyShareBatches")
-                || path.contains("trusteeEvaluationKeyProofs")
-                || path.contains("evaluationKeys");
+                || path.contains("trusteeEvaluationKeyProofs");
             is_evaluation_key.then(|| format!("{reason} ({path})"))
         })
 }
@@ -82,9 +80,6 @@ fn heavy_accepted_setup_terminal_trustee_evaluation_key_proofs_pass_the_evaluati
         .expect("verification response");
     let context = || serde_json::to_string_pretty(&result).expect("verification result JSON");
 
-    // The same-secret-bridge-bound relinearization rounds, Galois batches, trustee
-    // evaluation-key proofs, and evaluation-key set must all pass their phase:
-    // no refusal references any evaluation-key object.
     assert_eq!(
         evaluation_key_phase_refused(&result),
         None,
@@ -116,10 +111,6 @@ fn heavy_accepted_setup_terminal_tampered_trustee_evaluation_key_proof_is_refuse
     let (mut fixture, proof_binding_session) =
         terminal_evaluation_key_bearing_collective_setup_fixture();
 
-    // Replace the first trustee's authenticated proof material and rebind the
-    // record, stream descriptor, and package roots so the only
-    // inconsistency is the proof content itself. The succinct verifier rejects
-    // the malformed proof against the unchanged recomputed statement.
     replace_first_trustee_evaluation_key_proof_with_tampered_material(
         &mut fixture,
         proof_binding_session,
@@ -130,10 +121,6 @@ fn heavy_accepted_setup_terminal_tampered_trustee_evaluation_key_proof_is_refuse
         .expect("verification response");
     let context = || serde_json::to_string_pretty(&result).expect("verification result JSON");
 
-    // The malformed proof cannot verify against the statement the verifier
-    // rebuilds, so the succinct evaluation-key verifier rejects it during the
-    // relinearization round-one phase, before the reduced-ring boundary is
-    // reached. The refusal is reported through isValid/refusedObjects.
     assert_eq!(result["isValid"], false, "{}", context());
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
@@ -161,9 +148,6 @@ fn replace_first_trustee_evaluation_key_proof_with_tampered_material(
     fixture: &mut super::package_fixtures::CollectiveSetupVerificationFixture,
     proof_binding_session: crate::bgv::setup::AcceptedSetupProofBindingSession,
 ) {
-    // Rebind a fresh authenticated descriptor around malformed bytes so the
-    // rejection reaches the semantic proof decoder. The normal fixture keeps
-    // only opaque verification leases and never retains its raw proof corpus.
     let proof_bytes = vec![0x53, 0x4c, 0x45, 0x4b, 0x01, 0xff, 0x00];
     let proof_bytes_hash =
         crate::bgv::setup::trustee_evaluation_key_proof::trustee_evaluation_key_proof_bytes_hash(
@@ -187,37 +171,5 @@ fn replace_first_trustee_evaluation_key_proof_with_tampered_material(
         ["proofMaterials"][0];
     transported_proof_material["proofMaterialRoot"] = serde_json::json!(proof_material_root);
 
-    rebind_trustee_evaluation_key_proof_record_root_for_test(&mut fixture.package, 0);
-    rebind_trustee_evaluation_key_proof_set_root_for_test(&mut fixture.package);
     rebind_collective_setup_package_hash(&mut fixture.package);
-}
-
-// Recomputes one trustee evaluation-key proof record's canonical root after a
-// mutation, matching the verifier's own recompute (the whole record minus its
-// root field).
-fn rebind_trustee_evaluation_key_proof_record_root_for_test(
-    package: &mut serde_json::Value,
-    record_index: usize,
-) {
-    let record = &mut package["trusteeEvaluationKeyProofs"]["proofRecords"][record_index];
-    record
-        .as_object_mut()
-        .expect("trustee evaluation-key proof record object")
-        .remove("trusteeEvaluationKeyProofRoot");
-    record["trusteeEvaluationKeyProofRoot"] = serde_json::json!(
-        crate::hashing::derive_canonical_object_hash(record)
-            .expect("trustee evaluation-key proof record root")
-    );
-}
-
-fn rebind_trustee_evaluation_key_proof_set_root_for_test(package: &mut serde_json::Value) {
-    let proof_set = &mut package["trusteeEvaluationKeyProofs"];
-    proof_set
-        .as_object_mut()
-        .expect("trustee evaluation-key proof set object")
-        .remove("trusteeEvaluationKeyProofSetRoot");
-    proof_set["trusteeEvaluationKeyProofSetRoot"] = serde_json::json!(
-        crate::hashing::derive_canonical_object_hash(proof_set)
-            .expect("trustee evaluation-key proof set root")
-    );
 }

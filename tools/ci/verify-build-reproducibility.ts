@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { readFile, stat } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -15,51 +15,16 @@ const generatedArtifactRelativePaths = [
     'packages/sdk/dist/sealed-lattice-kernel.wasm',
 ] as const;
 
-export type GeneratedArtifactFingerprint = {
-    readonly byteLength: number;
-    readonly sha256: string;
-};
-
-export const collectGeneratedArtifactFingerprints = async (
-    rootDirectoryPath: string,
-    relativePaths: readonly string[] = generatedArtifactRelativePaths,
-): Promise<ReadonlyMap<string, GeneratedArtifactFingerprint>> => {
-    const fingerprints = new Map<string, GeneratedArtifactFingerprint>();
-
-    for (const relativePath of [...relativePaths].sort()) {
-        const absolutePath = path.resolve(rootDirectoryPath, relativePath);
-        const fileStatistics = await stat(absolutePath);
-        if (!fileStatistics.isFile()) {
-            throw new Error(
-                `Generated build artifact is not a file: ${relativePath}`,
-            );
-        }
-        const bytes = await readFile(absolutePath);
-        fingerprints.set(relativePath, {
-            byteLength: bytes.byteLength,
-            sha256: createHash('sha256').update(bytes).digest('hex'),
-        });
-    }
-
-    return fingerprints;
-};
-
-export const compareGeneratedArtifactFingerprints = (
-    before: ReadonlyMap<string, GeneratedArtifactFingerprint>,
-    after: ReadonlyMap<string, GeneratedArtifactFingerprint>,
-): readonly string[] => {
-    const relativePaths = new Set([...before.keys(), ...after.keys()]);
-
-    return [...relativePaths].sort().filter((relativePath) => {
-        const first = before.get(relativePath);
-        const second = after.get(relativePath);
-        return (
-            first === undefined ||
-            first.byteLength !== second?.byteLength ||
-            first.sha256 !== second.sha256
-        );
-    });
-};
+const collectGeneratedArtifactHashes = async (): Promise<readonly string[]> =>
+    Promise.all(
+        generatedArtifactRelativePaths.map(async (relativePath) =>
+            createHash('sha256')
+                .update(
+                    await readFile(path.resolve(repositoryRoot, relativePath)),
+                )
+                .digest('hex'),
+        ),
+    );
 
 const runPackageCommand = (argumentsList: readonly string[]): void => {
     const output = runPackageManagerAndCaptureOutput(
@@ -73,7 +38,7 @@ const runPackageCommand = (argumentsList: readonly string[]): void => {
 };
 
 export const verifyBuildReproducibility = async (): Promise<void> => {
-    const before = await collectGeneratedArtifactFingerprints(repositoryRoot);
+    const before = await collectGeneratedArtifactHashes();
 
     runPackageCommand([
         '--filter',
@@ -83,10 +48,9 @@ export const verifyBuildReproducibility = async (): Promise<void> => {
     ]);
     runPackageCommand(['--filter', 'sealed-lattice', 'run', 'build']);
 
-    const after = await collectGeneratedArtifactFingerprints(repositoryRoot);
-    const changedRelativePaths = compareGeneratedArtifactFingerprints(
-        before,
-        after,
+    const after = await collectGeneratedArtifactHashes();
+    const changedRelativePaths = generatedArtifactRelativePaths.filter(
+        (_, index) => before[index] !== after[index],
     );
     if (changedRelativePaths.length > 0) {
         throw new Error(

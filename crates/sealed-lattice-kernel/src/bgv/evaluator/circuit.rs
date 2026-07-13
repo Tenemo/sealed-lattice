@@ -1,3 +1,4 @@
+#[cfg(not(target_arch = "wasm32"))]
 use std::collections::BTreeMap;
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::RwLock;
@@ -27,10 +28,9 @@ use crate::{
 // path slices the active window from the ciphertext level. Rotation keys are
 // held per Galois element at their schedule level and truncate the same way.
 pub(crate) struct EvaluatorContext {
-    key: Option<DevelopmentBgvKey>,
+    key: DevelopmentBgvKey,
     working_level: usize,
-    relinearization_key: Option<KeySwitchKey>,
-    rotation_keys: BTreeMap<usize, KeySwitchKey>,
+    relinearization_key: KeySwitchKey,
     #[cfg(not(target_arch = "wasm32"))]
     generated_rotation_keys: RwLock<BTreeMap<(usize, usize, String), KeySwitchKey>>,
 }
@@ -54,10 +54,9 @@ impl EvaluatorContext {
         )?;
 
         Ok(Self {
-            key: Some(key),
+            key,
             working_level,
-            relinearization_key: Some(relinearization_key),
-            rotation_keys: BTreeMap::new(),
+            relinearization_key,
             #[cfg(not(target_arch = "wasm32"))]
             generated_rotation_keys: RwLock::new(BTreeMap::new()),
         })
@@ -65,9 +64,7 @@ impl EvaluatorContext {
 
     #[cfg(test)]
     pub(crate) fn key(&self) -> &DevelopmentBgvKey {
-        self.key.as_ref().expect(
-            "development evaluator key is unavailable in a public evaluation-key material context",
-        )
+        &self.key
     }
 
     pub(crate) fn working_level(&self) -> usize {
@@ -75,20 +72,14 @@ impl EvaluatorContext {
     }
 
     fn relinearization_key(&self, level: usize) -> CanonicalResult<&KeySwitchKey> {
-        let key = self.relinearization_key.as_ref().ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "no relinearization key is loaded",
-            )
-        })?;
-        if key.level < level {
+        if self.relinearization_key.level < level {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
                 "no relinearization key for the requested level",
             ));
         }
 
-        Ok(key)
+        Ok(&self.relinearization_key)
     }
 
     pub(crate) fn resolve_galois_key(
@@ -97,27 +88,11 @@ impl EvaluatorContext {
         level: usize,
         fallback_seed_hex: &str,
     ) -> CanonicalResult<KeySwitchKey> {
-        if let Some(rotation_key) = self.rotation_keys.get(&galois_element) {
-            if rotation_key.level < level {
-                return Err(CanonicalError::new(
-                    CanonicalErrorCode::ComponentMismatch,
-                    "loaded rotation key level is below the requested evaluator level",
-                ));
-            }
-            return Ok(rotation_key.clone());
-        }
         let seed = fallback_seed_hex;
-
-        let key = self.key.as_ref().ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::ComponentMismatch,
-                "public evaluation-key material is missing the requested rotation key",
-            )
-        })?;
 
         #[cfg(target_arch = "wasm32")]
         {
-            return generate_galois_key(key, galois_element, level, seed);
+            return generate_galois_key(&self.key, galois_element, level, seed);
         }
 
         #[cfg(not(target_arch = "wasm32"))]
@@ -138,7 +113,7 @@ impl EvaluatorContext {
                 }
             }
 
-            let generated_key = generate_galois_key(key, galois_element, level, seed)?;
+            let generated_key = generate_galois_key(&self.key, galois_element, level, seed)?;
             self.generated_rotation_keys
                 .write()
                 .map_err(|_| {
@@ -160,16 +135,6 @@ impl EvaluatorContext {
         level: usize,
         fallback_seed_hex: &str,
     ) -> CanonicalResult<Ciphertext> {
-        if let Some(rotation_key) = self.rotation_keys.get(&galois_element) {
-            if rotation_key.level < level {
-                return Err(CanonicalError::new(
-                    CanonicalErrorCode::ComponentMismatch,
-                    "loaded rotation key level is below the requested evaluator level",
-                ));
-            }
-            return rotate(ciphertext, galois_element, rotation_key);
-        }
-
         let generated_rotation_key =
             self.resolve_galois_key(galois_element, level, fallback_seed_hex)?;
 
@@ -256,15 +221,6 @@ pub(crate) fn broadcast_constant_coefficients(value: u64) -> Vec<u64> {
 // computed with a balanced multiplication tree so the multiplicative depth is
 // logarithmic in the degree; the terms are then brought to a common level and
 // scaling before the linear combination.
-#[cfg(test)]
-pub(crate) fn evaluate_polynomial(
-    context: &EvaluatorContext,
-    input: &Ciphertext,
-    coefficients: &[u64],
-) -> CanonicalResult<Ciphertext> {
-    evaluate_polynomial_by_power_table(context, input, coefficients)
-}
-
 pub(crate) fn evaluate_polynomial_with_fixed_baby_step_count_and_deferred_terminal_switch(
     context: &EvaluatorContext,
     input: &Ciphertext,
@@ -524,92 +480,4 @@ fn missing_power() -> CanonicalError {
         CanonicalErrorCode::InvalidFixture,
         "polynomial evaluation reached a power that was not built",
     )
-}
-
-#[cfg(test)]
-mod tests {
-    use std::sync::OnceLock;
-
-    use super::{EvaluatorContext, evaluate_polynomial};
-    use crate::bgv::parameters::PLAINTEXT_MODULUS;
-
-    fn context() -> &'static EvaluatorContext {
-        static CONTEXT: OnceLock<EvaluatorContext> = OnceLock::new();
-        CONTEXT.get_or_init(|| EvaluatorContext::new("circuit-seed", 4).expect("evaluator context"))
-    }
-
-    #[test]
-    fn polynomial_evaluation_matches_plaintext_per_slot() {
-        let context = context();
-        // p(x) = 2x^2 + 3x + 1
-        let coefficients = [1_u64, 3, 2];
-        let input = context
-            .key()
-            .encrypt_slots(&[3, 5, 2], "poly01")
-            .expect("encrypt");
-        let evaluated = evaluate_polynomial(context, &input, &coefficients).expect("evaluate");
-        let decrypted = context.key().decrypt_to_slots(&evaluated).expect("decrypt");
-        assert_eq!(&decrypted[..3], &[28, 66, 15]);
-    }
-
-    #[test]
-    fn higher_degree_polynomial_evaluation_is_correct() {
-        let context = context();
-        // p(x) = x^4 + x + 5 evaluated at small inputs
-        let coefficients = [5_u64, 1, 0, 0, 1];
-        let input = context
-            .key()
-            .encrypt_slots(&[2, 3, 1], "poly02")
-            .expect("encrypt");
-        let evaluated = evaluate_polynomial(context, &input, &coefficients).expect("evaluate");
-        let decrypted = context.key().decrypt_to_slots(&evaluated).expect("decrypt");
-        // 2^4+2+5=23, 3^4+3+5=89, 1+1+5=7
-        assert_eq!(&decrypted[..3], &[23, 89, 7]);
-    }
-
-    #[test]
-    fn small_polynomial_evaluation_preserves_logarithmic_depth() {
-        let context = context();
-        let mut coefficients = vec![0_u64; 10];
-        coefficients[0] = 7;
-        coefficients[1] = 3;
-        coefficients[8] = 5;
-        coefficients[9] = 11;
-        let input = context
-            .key()
-            .encrypt_slots(&[0, 1, 2], "poly-small-log-depth")
-            .expect("encrypt");
-        let evaluated = evaluate_polynomial(context, &input, &coefficients).expect("evaluate");
-        let decrypted = context.key().decrypt_to_slots(&evaluated).expect("decrypt");
-        let expected = [0_u64, 1, 2]
-            .iter()
-            .map(|point| {
-                coefficients
-                    .iter()
-                    .enumerate()
-                    .fold(0_u64, |total, (degree, coefficient)| {
-                        let power = crate::bgv::modular_arithmetic::pow_mod(
-                            *point,
-                            degree as u64,
-                            PLAINTEXT_MODULUS,
-                        )
-                        .expect("power");
-                        crate::bgv::modular_arithmetic::add_mod(
-                            total,
-                            crate::bgv::modular_arithmetic::mul_mod(
-                                *coefficient,
-                                power,
-                                PLAINTEXT_MODULUS,
-                            )
-                            .expect("mul"),
-                            PLAINTEXT_MODULUS,
-                        )
-                        .expect("add")
-                    })
-            })
-            .collect::<Vec<_>>();
-
-        assert_eq!(&decrypted[..3], expected.as_slice());
-        assert_eq!(evaluated.level, context.working_level() - 4);
-    }
 }

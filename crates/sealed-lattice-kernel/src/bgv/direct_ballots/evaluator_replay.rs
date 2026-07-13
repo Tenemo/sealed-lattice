@@ -212,7 +212,6 @@ pub(super) fn direct_ballot_evaluator_replay_context_hash(
         "ballotCount": input.ballot_count,
         "topCount": input.top_count,
         "scoreDomainMax": input.score_domain_max,
-        "tiePolicy": TIE_POLICY,
         "workingLevel": input.working_level,
         "bgvParametersHash": bgv_parameters_hash()?,
         "targetLayoutHash": input.target_layout_hash,

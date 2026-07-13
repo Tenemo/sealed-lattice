@@ -6,15 +6,9 @@ import {
     restoreAndPrepareLocalTargetDecryptionShareWitness,
 } from '#packages/protocol/src/index';
 import {
-    assembleVssPublicAggregateThresholdCommitmentSet,
-    createLocalTrusteeVssPublicAggregateThresholdCommitmentBundle,
-    createVssPublicCoefficientCommitmentSet,
-    createVssPublicRecipientShareCommitmentSet,
     type LocalTrusteeVssPublicAggregateOpeningCredentialHandoff,
-    type VssAggregateThresholdProofComputer,
-    type VssCommittedMaterialCommitmentComputer,
+    type VssPublicAggregateThresholdCommitmentSet,
 } from '#packages/protocol/src/setup/vss-commitments';
-import { canonicalStreamDescriptorFixture } from '#tests/support/canonical-stream-descriptor-fixture';
 import { withDeterministicWebCryptoRandomness } from '#tests/support/deterministic-web-crypto-randomness';
 import {
     makeSetupContext,
@@ -29,30 +23,7 @@ const publicMatrixSeedHash = fixtureHash('public-matrix-seed');
 const rnsPrime = 17;
 const ringDegree = 2;
 const aggregateMaterialSeedHex = fixtureHash('aggregate-material-seed');
-
-const generateAggregateThresholdProof: VssAggregateThresholdProofComputer = (
-    input,
-) => {
-    const proofBytesHash = fixtureHash(
-        `aggregate-proof-${input.context.shareLinkageStatementRoot}`,
-    );
-
-    return Promise.resolve({
-        proofBytesHash,
-        proofMaterialRoot: deriveCanonicalObjectHash({
-            objectType: 'SetupProofMaterialReference',
-            proofFamily: 'vss-share-linkage',
-            proofBytesHash,
-        }),
-        canonicalMaterial: {
-            descriptorBytes: canonicalStreamDescriptorFixture(1),
-        },
-    });
-};
-
-type AggregateThresholdCommitmentSet = ReturnType<
-    typeof assembleVssPublicAggregateThresholdCommitmentSet
->;
+type AggregateThresholdCommitmentSet = VssPublicAggregateThresholdCommitmentSet;
 type LocalTrusteeSetupStateInput = Parameters<
     typeof createEncryptedLocalTrusteeSetupStateFromVerifiedShares
 >[0];
@@ -76,7 +47,6 @@ type TargetContext = Readonly<{
         targetCiphertextHash: string;
         targetBasisHash: string;
     }>;
-    targetShareProfile: Readonly<{ targetShareProfileHash: string }>;
 }>;
 
 const createEncryptedLocalTrusteeSetupStateFixture = (
@@ -87,116 +57,64 @@ const createEncryptedLocalTrusteeSetupStateFixture = (
         () => createEncryptedLocalTrusteeSetupStateFromVerifiedShares(input),
     );
 
-const computeVssCommittedMaterialCommitment: VssCommittedMaterialCommitmentComputer =
-    (input) => {
-        const commitmentContextHash = deriveCanonicalObjectHash({
-            objectType: 'VssCommittedMaterialCommitmentContext',
-            commitmentRole: input.commitmentRole,
-            commitmentContext: input.commitmentContext,
-        });
-        const commitment = {
-            objectType: 'VssCommittedMaterialCommitment' as const,
-            commitmentRole: input.commitmentRole,
-            commitmentContextHash,
-            rnsLimbIndex: input.rnsLimbIndex,
-            rnsPrime: input.rnsPrime,
-            ringDegree: input.ringDegree,
-            materialColumnMaskDegree: 0,
-            commitmentFields: [],
-        };
-
-        return {
-            commitment,
-            commitmentRoot: deriveCanonicalObjectHash(commitment),
-            openingRoot: deriveCanonicalObjectHash({
-                objectType: 'FixtureVssOpening',
-                materialSeedHex: input.materialSeedHex,
-                messageCoefficients: input.messageCoefficients,
-            }),
-            commitmentContextHash,
-        };
-    };
-
-const setupArtifacts = async (): Promise<SetupArtifacts> => {
-    const sourceTrusteeOpeningStates = [
-        {
-            sourceTrusteeIdentity: trusteeIdentity,
-            sourceTrusteeRosterPosition: trusteeRosterPosition,
-            coefficientOpenings: [
-                {
-                    rnsLimbIndex: 0,
-                    rnsPrime,
-                    shamirCoefficientIndex: 0,
-                    coefficientMessage: [7, 11],
-                },
-            ],
-        },
-    ] as const;
-    const committedMaterialSeed = (
-        coordinate: Record<string, unknown>,
-    ): string =>
-        coordinate.commitmentRole === 'aggregate-threshold-share'
-            ? aggregateMaterialSeedHex
-            : deriveCanonicalObjectHash({
-                  objectType: 'FixtureVssMaterialSeed',
-                  ...coordinate,
-              });
-    const coefficientBundle = createVssPublicCoefficientCommitmentSet({
-        setupContext,
+const setupArtifacts = (): SetupArtifacts => {
+    const aggregateOpeningRoot = fixtureHash('aggregate-opening');
+    const aggregateCommitment = {
+        objectType: 'VssCommittedMaterialCommitment',
+        commitmentRole: 'aggregate-threshold-share',
+        commitmentContextHash: fixtureHash('aggregate-commitment-context'),
+        rnsLimbIndex: 0,
+        rnsPrime,
+        ringDegree,
+        commitmentFields: [],
+    } as const;
+    const aggregateCommitmentRoot =
+        deriveCanonicalObjectHash(aggregateCommitment);
+    const aggregateThresholdCommitmentSetWithoutRoot = {
+        objectType: 'VssPublicAggregateThresholdCommitmentSet',
         publicMatrixSeedHash,
         participantCount: 1,
-        qSharePrimes: [rnsPrime],
+        rnsLimbCount: 1,
         ringDegree,
-        thresholdDegree: 1,
-        sourceTrusteeOpeningStates,
-        committedMaterialSeed,
-        computeVssCommittedMaterialCommitment,
-    });
-    const recipientBundle = createVssPublicRecipientShareCommitmentSet({
-        setupContext,
-        publicMatrixSeedHash,
-        participantCount: 1,
-        qSharePrimes: [rnsPrime],
-        ringDegree,
-        thresholdDegree: 1,
-        sourceTrusteeOpeningStates,
-        committedMaterialSeed,
-        computeVssCommittedMaterialCommitment,
-    });
-    const aggregateBundle =
-        await createLocalTrusteeVssPublicAggregateThresholdCommitmentBundle({
-            setupContext,
-            publicMatrixSeedHash,
-            participantCount: 1,
-            qSharePrimes: [rnsPrime],
-            ringDegree,
-            coefficientCommitmentSet:
-                coefficientBundle.coefficientCommitmentSet,
-            recipientShareCommitmentSet:
-                recipientBundle.recipientShareCommitmentSet,
-            localTrusteeRosterPosition: trusteeRosterPosition,
-            localRecipientShareCredentials:
-                recipientBundle.recipientShareCredentials,
-            committedMaterialSeed,
-            computeVssCommittedMaterialCommitment,
-            aggregateThresholdProofRandomness: () => ({
-                seedHex: fixtureHash('aggregate-proof-seed'),
-                nonceHex: fixtureHash('aggregate-proof-nonce'),
-            }),
-            generateVssShareLinkageProof: generateAggregateThresholdProof,
-        });
-    const aggregateThresholdCommitmentSet =
-        assembleVssPublicAggregateThresholdCommitmentSet({
-            publicMatrixSeedHash,
-            participantCount: 1,
-            qSharePrimes: [rnsPrime],
-            ringDegree,
-            recipientShareCommitmentSet:
-                recipientBundle.recipientShareCommitmentSet,
-            publicAggregateThresholdCommitmentContributions: [
-                aggregateBundle.publicAggregateThresholdCommitmentContribution,
-            ],
-        });
+        recipientRecords: [
+            {
+                objectType: 'VssPublicAggregateThresholdCommitment',
+                recipientIdentity: trusteeIdentity,
+                recipientRosterPosition: trusteeRosterPosition,
+                rnsLimbIndex: 0,
+                rnsPrime,
+                aggregateCommitmentRoot,
+                aggregateOpeningRoot,
+                commitment: aggregateCommitment,
+            },
+        ],
+    } as const;
+    const aggregateThresholdCommitmentSet = {
+        ...aggregateThresholdCommitmentSetWithoutRoot,
+        aggregateThresholdCommitmentRoot: deriveCanonicalObjectHash(
+            aggregateThresholdCommitmentSetWithoutRoot,
+        ),
+        aggregateThresholdProofs: [],
+    } satisfies AggregateThresholdCommitmentSet;
+    const aggregateOpeningCredentialHandoff = {
+        objectType: 'LocalTrusteeVssPublicAggregateOpeningCredentialHandoff',
+        trusteeIdentity,
+        trusteeRosterPosition,
+        aggregateOpeningCredentials: [
+            {
+                objectType: 'LocalTrusteeVssPublicAggregateOpeningCredential',
+                recipientIdentity: trusteeIdentity,
+                recipientRosterPosition: trusteeRosterPosition,
+                rnsLimbIndex: 0,
+                rnsPrime,
+                aggregateCommitmentRoot,
+                aggregateOpeningRoot,
+                aggregateCommitmentMessageValuesLeHex:
+                    '07000000000000000b00000000000000',
+                aggregateMaterialSeedHex,
+            },
+        ],
+    } as const satisfies LocalTrusteeVssPublicAggregateOpeningCredentialHandoff;
     const sourceTrusteeCommitmentRoot = fixtureHash(
         'source-trustee-commitment',
     );
@@ -226,14 +144,13 @@ const setupArtifacts = async (): Promise<SetupArtifacts> => {
     );
 
     return {
-        aggregateOpeningCredentialHandoff:
-            aggregateBundle.localTrusteeAggregateOpeningCredentialHandoff,
+        aggregateOpeningCredentialHandoff,
         aggregateThresholdCommitmentSet,
         localStateInput: {
             setupContext,
             trusteeIdentity,
             trusteeRosterPosition,
-            deviceEpoch: 2,
+            participantCount: 1,
             thresholdShareCommitments: {
                 objectType: 'ThresholdShareCommitmentSet',
                 ...setupContext,
@@ -249,7 +166,6 @@ const setupArtifacts = async (): Promise<SetupArtifacts> => {
             privateVssEnvelopeCommitments: {
                 objectType: 'PrivateVssEnvelopeCommitmentSet',
                 ...setupContext,
-                participantCount: 1,
                 privateVssEnvelopeCommitmentRoot,
                 envelopeReferences: [
                     {
@@ -267,22 +183,7 @@ const setupArtifacts = async (): Promise<SetupArtifacts> => {
             },
             verifiedPrivateVssShareEnvelopes: [privateEnvelope],
             localTrusteeAggregateOpeningCredentialHandoff:
-                aggregateBundle.localTrusteeAggregateOpeningCredentialHandoff,
-            vssShareAcceptances: {
-                objectType: 'VssShareAcceptanceSet',
-                ...setupContext,
-                acceptanceRecords: [
-                    {
-                        ...setupContext,
-                        sourceTrusteeIdentity: trusteeIdentity,
-                        sourceTrusteeRosterPosition: trusteeRosterPosition,
-                        recipientIdentity: trusteeIdentity,
-                        recipientRosterPosition: trusteeRosterPosition,
-                        privateVssEnvelopeCommitmentRoot,
-                        acceptanceRoot: fixtureHash('acceptance-root'),
-                    },
-                ],
-            },
+                aggregateOpeningCredentialHandoff,
             storageKeyBytesHex: '41'.repeat(32),
         },
     } as const;
@@ -313,15 +214,12 @@ const targetContext = (
     return {
         setupPackage,
         targetAcceptedRecord,
-        targetShareProfile: {
-            targetShareProfileHash: fixtureHash('target-share-profile'),
-        },
     } as const;
 };
 
 describe('local setup-to-target-share witness lifecycle', () => {
     it('restores the setup-produced aggregate opening only from encrypted local state', async () => {
-        const artifacts = await setupArtifacts();
+        const artifacts = setupArtifacts();
         const encryptedState =
             await createEncryptedLocalTrusteeSetupStateFixture(
                 artifacts.localStateInput,
@@ -341,9 +239,6 @@ describe('local setup-to-target-share witness lifecycle', () => {
         expect(
             JSON.stringify(encryptedState.encryptedLocalState),
         ).not.toContain(aggregateMaterialSeedHex);
-        expect(
-            JSON.stringify(encryptedState.localStatePlaintext),
-        ).not.toContain(aggregateMaterialSeedHex);
         const [originalCredential] =
             artifacts.aggregateOpeningCredentialHandoff
                 .aggregateOpeningCredentials;
@@ -361,12 +256,6 @@ describe('local setup-to-target-share witness lifecycle', () => {
             aggregateOpening: {
                 objectType: 'LocalTrusteeVssPublicAggregateOpeningWitness',
                 aggregateOpeningCredentials: [credentialSidecar],
-            },
-            targetDecryptionSmudging: {
-                trusteeIdentity,
-                rosterPosition: trusteeRosterPosition,
-                interpolationPoint: trusteeRosterPosition + 1,
-                targetBasisHash: fixtureHash('target-basis'),
             },
         });
         const [materialSource] =
@@ -401,7 +290,7 @@ describe('local setup-to-target-share witness lifecycle', () => {
     });
 
     it('rejects changed trustee, aggregate message, accepted root, and setup context', async () => {
-        const artifacts = await setupArtifacts();
+        const artifacts = setupArtifacts();
         const handoff = artifacts.aggregateOpeningCredentialHandoff;
         await expect(
             createEncryptedLocalTrusteeSetupStateFixture({

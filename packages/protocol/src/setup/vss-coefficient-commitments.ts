@@ -4,7 +4,6 @@ export {
     acceptedBgvSetupQSharePrimes,
     setupCommitmentRandomnessWidth,
     type SetupCommitmentValue,
-    type VssCoefficientCommitmentMaterialSet,
     type VssCoefficientCommitmentSet,
     type VssCoefficientOpeningInput,
     type VssOpeningRandomByteSource,

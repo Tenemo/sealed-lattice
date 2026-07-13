@@ -1,7 +1,7 @@
 import {
-    assertObjectRecord,
+    assertJsonRecord,
     assertProtocolHash,
-} from './constants-and-assertions.js';
+} from '../common-fields.js';
 import type {
     JsonRecord,
     SetupPackageVerificationInput,
@@ -12,7 +12,7 @@ const descriptorBackedMaterialReferenceForVerificationInput = (
     materialValue: unknown,
     materialPath: string,
 ): JsonRecord => {
-    const material = assertObjectRecord(materialValue, materialPath);
+    const material = assertJsonRecord(materialValue, materialPath);
     const { descriptorBytes: omittedDescriptorBytes, ...materialReference } =
         material;
     void omittedDescriptorBytes;
@@ -28,7 +28,7 @@ const descriptorBackedMaterialSetForVerificationInput = (
     if (materialSetValue === undefined) {
         return undefined;
     }
-    const materialSet = assertObjectRecord(materialSetValue, materialSetPath);
+    const materialSet = assertJsonRecord(materialSetValue, materialSetPath);
     const materials = materialSet[materialArrayFieldName];
     if (!Array.isArray(materials)) {
         throw new TypeError(
@@ -79,35 +79,21 @@ export const createSetupPackageVerificationInput = (
             'proofMaterials',
         );
     const transportedPublicKeyShareMaterial =
-        input.transportedPublicKeyShareMaterial === undefined
-            ? undefined
-            : descriptorBackedMaterialReferenceForVerificationInput(
-                  input.transportedPublicKeyShareMaterial,
-                  'transportedPublicKeyShareMaterial',
-              );
+        descriptorBackedMaterialReferenceForVerificationInput(
+            input.transportedPublicKeyShareMaterial,
+            'transportedPublicKeyShareMaterial',
+        );
     const transportedEvaluationKeyShareComponentMaterial =
         descriptorBackedMaterialSetForVerificationInput(
             input.transportedEvaluationKeyShareComponentMaterial,
             'transportedEvaluationKeyShareComponentMaterial',
             'componentMaterials',
         );
-    const transportedPublicEvaluationKeyMaterial =
-        descriptorBackedMaterialSetForVerificationInput(
-            input.transportedPublicEvaluationKeyMaterial,
-            'transportedPublicEvaluationKeyMaterial',
-            'publicEvaluationKeyMaterials',
-        );
-
     return {
         setupPackage: input.setupPackage,
         expectedManifestHash: input.expectedManifestHash,
         expectedRosterHash: input.expectedRosterHash,
-        ...(transportedPublicKeyShareMaterial === undefined
-            ? {}
-            : {
-                  transportedPublicKeyShareMaterial:
-                      transportedPublicKeyShareMaterial,
-              }),
+        transportedPublicKeyShareMaterial,
         ...(transportedPublicKeyShareProofMaterial === undefined
             ? {}
             : {
@@ -137,12 +123,6 @@ export const createSetupPackageVerificationInput = (
             : {
                   transportedEvaluationKeyShareComponentMaterial:
                       transportedEvaluationKeyShareComponentMaterial,
-              }),
-        ...(transportedPublicEvaluationKeyMaterial === undefined
-            ? {}
-            : {
-                  transportedPublicEvaluationKeyMaterial:
-                      transportedPublicEvaluationKeyMaterial,
               }),
     };
 };

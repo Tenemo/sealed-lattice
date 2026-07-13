@@ -163,6 +163,7 @@ pub(crate) fn vss_committed_material_roots_by_commitment_field(
 // by every commitment-field limb proof.
 pub(super) struct BoundCommittedMaterial {
     pub(super) trees_by_bound_message: Vec<Vec<VssCommittedMaterialFieldTrees>>,
+    pub(super) message_coefficients: Vec<Vec<u64>>,
 }
 
 impl BoundCommittedMaterial {
@@ -276,6 +277,7 @@ pub(super) fn regenerate_bound_committed_material(
     if bound_commitments.is_empty() {
         return Ok(BoundCommittedMaterial {
             trees_by_bound_message: Vec::new(),
+            message_coefficients: Vec::new(),
         });
     }
     if witness.vss_committed_material_seeds_by_bound_message.len() != bound_commitments.len()
@@ -332,6 +334,7 @@ pub(super) fn regenerate_bound_committed_material(
 
     Ok(BoundCommittedMaterial {
         trees_by_bound_message,
+        message_coefficients: messages,
     })
 }
 

@@ -1,16 +1,12 @@
 import type { ProtocolHash } from './protocol-hash.js';
 
-export const thresholdParameterDerivationErrorCodes = Object.freeze([
-    'RosterSizeNotInteger',
-    'RosterSizeBelowSupportedMinimum',
-    'RosterSizeAboveSupportedMaximum',
-    'FrozenRosterOutsidePollBounds',
-    'MicroRosterForbidden',
-] as const);
-
 /** Stable failure code for threshold and frozen-roster parameter derivation. */
 export type ThresholdParameterDerivationErrorCode =
-    (typeof thresholdParameterDerivationErrorCodes)[number];
+    | 'RosterSizeNotInteger'
+    | 'RosterSizeBelowSupportedMinimum'
+    | 'RosterSizeAboveSupportedMaximum'
+    | 'FrozenRosterOutsidePollBounds'
+    | 'MicroRosterForbidden';
 
 /** Machine-readable threshold and frozen-roster parameter derivation failure. */
 export class ThresholdParameterDerivationError extends Error {

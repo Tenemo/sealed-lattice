@@ -1,11 +1,10 @@
 use super::{
-    GENERATOR_SUBGROUP_ORDER, PACKED_SCORE_GALOIS_GENERATOR, SELECTED_EVALUATOR_WORKING_LEVEL,
+    GENERATOR_SUBGROUP_ORDER, SELECTED_EVALUATOR_WORKING_LEVEL,
     direct_score_packing_basis_galois_elements, direct_score_packing_galois_elements,
     evaluate_packed_rank_evaluation_from_packed_scores_with_batched_pairs,
-    galois_element_moving_slot_to_target, generator_exponent_or_conjugated,
-    generator_power_basis_for_exponent, interpolate_coefficients, pack_direct_score_slots,
+    galois_element_moving_slot_to_target, interpolate_coefficients, pack_direct_score_slots,
     packed_rank_forward_basis_galois_elements, packed_rank_return_basis_galois_elements,
-    packed_score_slot, project_packed_sparse_target_from_rank_evaluation,
+    project_packed_sparse_target_from_rank_evaluation,
     selected_evaluator_rotation_key_schedule, top_k_order_value,
 };
 use crate::bgv::evaluator::circuit::EvaluatorContext;

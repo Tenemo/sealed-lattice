@@ -1,18 +1,21 @@
 import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
+import type { ProtocolHash } from '@sealed-lattice/types';
 
 import { canonicalJson, hash512Hex } from '../canonical-json.js';
 import { deriveCanonicalObjectHash } from '../hashes.js';
-
 import {
     arrayBufferFromBytes,
     decodeCanonicalHex,
+    importAesGcmKey as importWebCryptoAesGcmKey,
+    requireSubtleCrypto,
+    webCryptoRandomBytes,
+} from '../web-crypto.js';
+
+import {
     deriveAesGcmKeyBytes,
     deriveSealedMaterialAesGcmKeyBytes,
-    importAesGcmKey,
-    randomBytes,
     sealedMaterialAad,
     storageAad,
-    subtleCrypto,
 } from './aes-gcm.js';
 import {
     aesGcmKeyByteLength,
@@ -21,14 +24,12 @@ import {
     textDecoder,
     textEncoder,
     type EncryptedLocalTrusteeSetupMaterial,
+    type EncryptedLocalTrusteeSetupState,
     type LocalTrusteeSetupSealedMaterialDecryptionInput,
-    type LocalTrusteeSetupSealedMaterialDecryptionResult,
     type LocalTrusteeSetupSealedMaterialEncryptionInput,
-    type LocalTrusteeSetupSealedMaterialEncryptionResult,
+    type LocalTrusteeSetupStateSealedPayload,
     type LocalTrusteeStateStorageDecryptionInput,
-    type LocalTrusteeStateStorageDecryptionResult,
     type LocalTrusteeStateStorageEncryptionInput,
-    type LocalTrusteeStateStorageEncryptionResult,
 } from './constants-and-types.js';
 import {
     assertCommitmentHeader,
@@ -43,9 +44,58 @@ import {
     decodeFixedHex,
 } from './validation.js';
 
+const webCryptoRandomnessUnavailableMessage =
+    'Local trustee state storage encryption requires Web Crypto getRandomValues.';
+const webCryptoAesGcmUnavailableMessage =
+    'Local trustee state storage encryption requires Web Crypto AES-GCM.';
+const randomBytes = (byteLength: number): Uint8Array =>
+    webCryptoRandomBytes(byteLength, webCryptoRandomnessUnavailableMessage);
+const subtleCrypto = (): SubtleCrypto =>
+    requireSubtleCrypto(webCryptoAesGcmUnavailableMessage);
+const importAesGcmKey = (
+    keyBytes: Uint8Array,
+    keyUsages: readonly KeyUsage[],
+): Promise<CryptoKey> =>
+    importWebCryptoAesGcmKey(
+        keyBytes,
+        keyUsages,
+        webCryptoAesGcmUnavailableMessage,
+    );
+
+export const deriveLocalTrusteeSetupStateCommitmentRoot = (
+    commitment: Omit<
+        LocalTrusteeStateStorageEncryptionInput['localStateCommitment'],
+        'localStateRoot'
+    >,
+): ProtocolHash =>
+    deriveCanonicalObjectHash({
+        objectType: commitment.objectType,
+        ceremonyId: commitment.ceremonyId,
+        manifestHash: commitment.manifestHash,
+        rosterHash: commitment.rosterHash,
+        setupParametersHash: commitment.setupParametersHash,
+        setupEpoch: commitment.setupEpoch,
+        trusteeIdentity: commitment.trusteeIdentity,
+        trusteeRosterPosition: commitment.trusteeRosterPosition,
+        thresholdShareCommitmentRecipientRoot:
+            commitment.thresholdShareCommitmentRecipientRoot,
+        aggregateThresholdShareRoot: commitment.aggregateThresholdShareRoot,
+    });
+
+const assertLocalStateCommitmentRoot = (
+    commitment: LocalTrusteeStateStorageEncryptionInput['localStateCommitment'],
+): void => {
+    const expectedRoot = deriveLocalTrusteeSetupStateCommitmentRoot(commitment);
+    if (commitment.localStateRoot !== expectedRoot) {
+        throw new Error(
+            'localStateCommitment.localStateRoot does not match the canonical local state commitment.',
+        );
+    }
+};
+
 export const encryptLocalTrusteeSetupSealedMaterial = async (
     input: LocalTrusteeSetupSealedMaterialEncryptionInput,
-): Promise<LocalTrusteeSetupSealedMaterialEncryptionResult> => {
+): Promise<EncryptedLocalTrusteeSetupMaterial> => {
     assertNonEmptyString(input.trusteeIdentity, 'trusteeIdentity');
     assertNonNegativeSafeInteger(
         input.trusteeRosterPosition,
@@ -94,23 +144,18 @@ export const encryptLocalTrusteeSetupSealedMaterial = async (
             arrayBufferFromBytes(materialPlaintextBytes),
         ),
     );
-    const sealedMaterial = {
+    return {
         objectType: 'EncryptedLocalTrusteeSetupMaterial',
         materialRoot,
         materialAad: associatedData,
         aeadNonceHex: bytesToHex(nonceBytes),
         ciphertextBytesHex: bytesToHex(ciphertextBytes),
     } as const satisfies EncryptedLocalTrusteeSetupMaterial;
-
-    return {
-        sealedMaterial,
-        materialRoot,
-    };
 };
 
 export const decryptLocalTrusteeSetupSealedMaterial = async (
     input: LocalTrusteeSetupSealedMaterialDecryptionInput,
-): Promise<LocalTrusteeSetupSealedMaterialDecryptionResult> => {
+): Promise<unknown> => {
     assertProtocolHash(input.expectedMaterialRoot, 'expectedMaterialRoot');
     assertCommitmentHeader(input.localStateCommitment);
     const storageKeyBytes = decodeFixedHex(
@@ -170,13 +215,14 @@ export const decryptLocalTrusteeSetupSealedMaterial = async (
         );
     }
 
-    return { materialPlaintext };
+    return materialPlaintext;
 };
 
 export const encryptLocalTrusteeState = async (
     input: LocalTrusteeStateStorageEncryptionInput,
-): Promise<LocalTrusteeStateStorageEncryptionResult> => {
+): Promise<EncryptedLocalTrusteeSetupState> => {
     assertCommitmentHeader(input.localStateCommitment);
+    assertLocalStateCommitmentRoot(input.localStateCommitment);
     const storageKeyBytes = decodeFixedHex(
         input.storageKeyBytesHex,
         aesGcmKeyByteLength,
@@ -218,19 +264,17 @@ export const encryptLocalTrusteeState = async (
             arrayBufferFromBytes(plaintextBytes),
         ),
     );
-    const encryptedLocalState = {
+    return {
         objectType: 'EncryptedLocalTrusteeSetupState',
         storageAad: associatedData,
         aeadNonceHex: bytesToHex(nonceBytes),
         ciphertextBytesHex: bytesToHex(ciphertextBytes),
-    } as const;
-
-    return { encryptedLocalState };
+    } as const satisfies EncryptedLocalTrusteeSetupState;
 };
 
 export const decryptLocalTrusteeState = async (
     input: LocalTrusteeStateStorageDecryptionInput,
-): Promise<LocalTrusteeStateStorageDecryptionResult> => {
+): Promise<LocalTrusteeSetupStateSealedPayload> => {
     assertProtocolHash(input.expectedLocalStateRoot, 'expectedLocalStateRoot');
     if (
         input.encryptedLocalState.objectType !==
@@ -249,6 +293,7 @@ export const decryptLocalTrusteeState = async (
         'encryptedLocalState.storageAad.localStateCommitment',
     ) as LocalTrusteeStateStorageEncryptionInput['localStateCommitment'];
     assertCommitmentHeader(localStateCommitment);
+    assertLocalStateCommitmentRoot(localStateCommitment);
     if (localStateCommitment.localStateRoot !== input.expectedLocalStateRoot) {
         throw new Error(
             'encryptedLocalState.storageAad.localStateCommitment.localStateRoot does not match expectedLocalStateRoot.',
@@ -314,5 +359,5 @@ export const decryptLocalTrusteeState = async (
         input.setupContext,
     );
 
-    return { localStatePlaintext };
+    return localStatePlaintext;
 };

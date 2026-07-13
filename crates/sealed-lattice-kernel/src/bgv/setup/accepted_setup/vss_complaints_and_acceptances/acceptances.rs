@@ -2,19 +2,18 @@ use super::*;
 
 pub(in super::super) fn verify_vss_share_acceptances(
     setup_package: &Value,
+    trustee_registrations: &setup_intent::SetupIntentTrusteeRegistrationMap,
 ) -> CanonicalResult<Option<Value>> {
     let Some(acceptance_set) = setup_package.get("vssShareAcceptances") else {
         return Ok(Some(verification_response(
-            Some("vssAcceptanceOrComplaint"),
             vec!["vssShareAcceptances".to_string()],
-            Vec::new(),
             Vec::new(),
         )?));
     };
     if !acceptance_set.is_object() {
         return Ok(Some(vss_share_acceptance_refusal(
             "vssShareAcceptancesNotObject",
-            "vssShareAcceptances must be a root-bound object, not an array or scalar",
+            "vssShareAcceptances must be an object, not an array or scalar",
             "setupPackage.vssShareAcceptances",
         )?));
     }
@@ -32,13 +31,6 @@ pub(in super::super) fn verify_vss_share_acceptances(
             "setupContext was required before VSS share acceptance verification",
         )
     })?;
-    if let Err(error) = verify_vss_share_acceptance_context(acceptance_set, setup_context) {
-        return Ok(Some(vss_share_acceptance_refusal(
-            "vssShareAcceptanceContextMismatch",
-            error.message,
-            "setupPackage.vssShareAcceptances",
-        )?));
-    }
 
     let private_vss_envelope_commitment_root = setup_package
         .get("privateVssEnvelopeCommitments")
@@ -54,30 +46,16 @@ pub(in super::super) fn verify_vss_share_acceptances(
         private_vss_envelope_commitment_root,
         "privateVssEnvelopeCommitments.privateVssEnvelopeCommitmentRoot",
     )?;
-    if acceptance_set
-        .get("privateVssEnvelopeCommitmentRoot")
-        .and_then(Value::as_str)
-        != Some(private_vss_envelope_commitment_root)
-    {
-        return Ok(Some(vss_share_acceptance_refusal(
-            "vssShareAcceptancePrivateEnvelopeRootMismatch",
-            "vssShareAcceptances.privateVssEnvelopeCommitmentRoot must match privateVssEnvelopeCommitments.privateVssEnvelopeCommitmentRoot",
-            "setupPackage.vssShareAcceptances.privateVssEnvelopeCommitmentRoot",
-        )?));
-    }
 
-    let expected_trustees = expected_trustees_from_phase_transcript(setup_package)?;
-    let trustee_registrations =
-        super::phase_transcript::setup_intent_trustee_registrations_from_phase_transcript(
-            setup_package,
-        )?;
+    let expected_trustees = expected_trustees_from_setup_intent(trustee_registrations);
     let source_trustee_commitment_roots =
         source_trustee_commitment_roots_from_vss_commitments(setup_package)?;
-    let private_vss_envelope_bindings = private_vss_envelope_bindings_from_package(setup_package)?;
+    let private_vss_envelope_bindings =
+        private_vss_envelope_bindings_from_package(setup_package, trustee_registrations)?;
     let verification_context = VssRecordVerificationContext {
         setup_context,
         expected_trustees: &expected_trustees,
-        trustee_registrations: &trustee_registrations,
+        trustee_registrations,
         source_trustee_commitment_roots: &source_trustee_commitment_roots,
         private_vss_envelope_commitment_root,
         private_vss_envelope_bindings: &private_vss_envelope_bindings,
@@ -87,13 +65,11 @@ pub(in super::super) fn verify_vss_share_acceptances(
         .and_then(Value::as_array)
     else {
         return Ok(Some(verification_response(
-            Some("vssAcceptanceOrComplaint"),
             vec!["vssShareAcceptances.acceptanceRecords".to_string()],
-            Vec::new(),
             Vec::new(),
         )?));
     };
-    let roster = super::accepted_roster_from_package(setup_package);
+    let roster = super::accepted_roster_from_package(setup_package)?;
     let expected_acceptance_count = (roster.participant_count * roster.participant_count) as usize;
     if acceptance_records.len() != expected_acceptance_count {
         return Ok(Some(vss_share_acceptance_refusal(
@@ -114,58 +90,7 @@ pub(in super::super) fn verify_vss_share_acceptances(
         }
     }
 
-    let Some(acceptance_root) = acceptance_set
-        .get("vssShareAcceptanceRoot")
-        .and_then(Value::as_str)
-    else {
-        return Ok(Some(verification_response(
-            Some("vssAcceptanceOrComplaint"),
-            vec!["vssShareAcceptances.vssShareAcceptanceRoot".to_string()],
-            Vec::new(),
-            Vec::new(),
-        )?));
-    };
-    validate_hash_string(
-        acceptance_root,
-        "vssShareAcceptances.vssShareAcceptanceRoot",
-    )?;
-    let mut root_input = acceptance_set.clone();
-    root_input
-        .as_object_mut()
-        .expect("VSS share acceptance set object was checked")
-        .remove("vssShareAcceptanceRoot");
-    let expected_root = derive_canonical_object_hash(&root_input)?;
-    if acceptance_root != expected_root {
-        return Ok(Some(vss_share_acceptance_refusal(
-            "vssShareAcceptanceRootMismatch",
-            "vssShareAcceptanceRoot does not match the canonical VSS share acceptance set",
-            "setupPackage.vssShareAcceptances.vssShareAcceptanceRoot",
-        )?));
-    }
-
     Ok(None)
-}
-
-fn verify_vss_share_acceptance_context(
-    acceptance_set: &Value,
-    setup_context: &Value,
-) -> CanonicalResult<()> {
-    for field_name in [
-        "ceremonyId",
-        "manifestHash",
-        "rosterHash",
-        "setupParametersHash",
-        "setupEpoch",
-    ] {
-        if acceptance_set.get(field_name) != setup_context.get(field_name) {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::ComponentMismatch,
-                format!("vssShareAcceptances.{field_name} must match setupContext"),
-            ));
-        }
-    }
-
-    Ok(())
 }
 
 fn verify_vss_share_acceptance_record(
@@ -338,11 +263,9 @@ fn verify_vss_share_acceptance_record(
     for field_name in ["privateEnvelopeHash", "localVerificationRoot"] {
         let Some(hash) = acceptance_record.get(field_name).and_then(Value::as_str) else {
             return Ok(Some(verification_response(
-                Some("vssAcceptanceOrComplaint"),
                 vec![format!(
                     "vssShareAcceptances.acceptanceRecords.{field_name}"
                 )],
-                Vec::new(),
                 Vec::new(),
             )?));
         };
@@ -435,9 +358,7 @@ fn verify_vss_share_acceptance_record(
         .and_then(Value::as_str)
     else {
         return Ok(Some(verification_response(
-            Some("vssAcceptanceOrComplaint"),
             vec!["vssShareAcceptances.acceptanceRecords.acceptanceRoot".to_string()],
-            Vec::new(),
             Vec::new(),
         )?));
     };
@@ -548,9 +469,7 @@ fn vss_share_acceptance_refusal(
     object_path: impl Into<String>,
 ) -> CanonicalResult<Value> {
     verification_response(
-        Some("vssAcceptanceOrComplaint"),
         Vec::new(),
         vec![Refusal::new(reason_code, message, object_path)],
-        Vec::new(),
     )
 }

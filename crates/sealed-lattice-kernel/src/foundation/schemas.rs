@@ -6,7 +6,6 @@ use fips204::{
     traits::{SerDes, Verifier},
 };
 
-use super::board_ingestion::foundation_envelope_policy;
 use super::canonical_tuple::CanonicalDecodeBudget;
 use super::{
     CanonicalCodecError, CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple,
@@ -76,66 +75,6 @@ pub const FOUNDATION_PROFILE: FoundationProfile = FoundationProfile {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u16)]
-pub enum FoundationSchemaIdentifier {
-    HashInput = 0x0001,
-    ObjectEnvelope = OBJECT_ENVELOPE_SCHEMA_IDENTIFIER,
-    SignedCarrier = SIGNED_CARRIER_SCHEMA_IDENTIFIER,
-    ProofObjectHeader = PROOF_OBJECT_HEADER_SCHEMA_IDENTIFIER,
-    ProofMerkleTreeContext = 0x0103,
-    ProofOraclePhasePairLeaf = 0x0104,
-    ProofMerkleNode = 0x0105,
-    ProofAuthenticationNode = 0x0106,
-    ProofQueryOpeningRecord = 0x0107,
-    ProofAuthenticationFrontier = 0x0108,
-    ProofApplicationSlot = 0x0109,
-    ProofApplicationBinding = 0x010a,
-    Manifest = MANIFEST_SCHEMA_IDENTIFIER,
-    OptionDefinition = OPTION_DEFINITION_SCHEMA_IDENTIFIER,
-    ActionDefinition = ACTION_DEFINITION_SCHEMA_IDENTIFIER,
-    BoardPolicy = BOARD_POLICY_SCHEMA_IDENTIFIER,
-    RosterEntry = ROSTER_ENTRY_SCHEMA_IDENTIFIER,
-    Roster = ROSTER_SCHEMA_IDENTIFIER,
-    DistributionRecord = DISTRIBUTION_RECORD_SCHEMA_IDENTIFIER,
-    ArtifactReference = ARTIFACT_REFERENCE_SCHEMA_IDENTIFIER,
-    SuiteRecord = SUITE_RECORD_SCHEMA_IDENTIFIER,
-    StreamDescriptor = STREAM_DESCRIPTOR_SCHEMA_IDENTIFIER,
-    MailboxKeyScheduleInput = MAILBOX_KEY_SCHEDULE_INPUT_SCHEMA_IDENTIFIER,
-    MailboxAssociatedData = MAILBOX_ASSOCIATED_DATA_SCHEMA_IDENTIFIER,
-    SignedMailboxEnvelope = SIGNED_MAILBOX_ENVELOPE_SCHEMA_IDENTIFIER,
-    DeviceWrappingAssociatedData = 0x0300,
-    LocalRecordAssociatedData = 0x0301,
-    StorageRootRecoveryValue = 0x0302,
-    StorageRootCommitmentPayload = 0x0303,
-    LocalRecordKeyInput = 0x0304,
-    DeviceWrappedStorageRoot = 0x0305,
-    LocalRecordEnvelope = 0x0306,
-    LocalRecordAuthenticatorInput = 0x0307,
-    ActionStorageDerivationInput = 0x0308,
-    PrivateRandomBlockInput = PRIVATE_RANDOM_BLOCK_INPUT_SCHEMA_IDENTIFIER,
-    PersistentProofCoinInput = 0x0401,
-    ActionRandomnessDerivationInput = 0x0402,
-    OrdinaryProofCoinInput = 0x0403,
-    StateReservationIntent = 0x1610,
-    StateOutputIntent = 0x1611,
-    StateWitnessVote = 0x1612,
-    StateCertificate = 0x1613,
-    StateRecoveryTransition = 0x1614,
-    RuntimeAssetReference = 0x1801,
-    RuntimeBuildManifest = 0x1802,
-    RandomCursor = 0x1804,
-    CheckpointManifest = 0x1805,
-    CheckpointRandomUseProfile = 0x1806,
-    CheckpointBoundaryProfile = 0x1807,
-    RuntimeOperationProfile = 0x1808,
-    MobileRuntimeProfile = 0x1809,
-    ProofProfileSet = 0x2200,
-    ProofFieldProfile = 0x2201,
-    ProofFamilyProfile = 0x2202,
-    ProofFieldSchedule = 0x2203,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[repr(u16)]
 pub enum FoundationObjectType {
     PublicRandomnessCommitment = 0x0001,
     PublicRandomnessReveal = 0x0002,
@@ -157,26 +96,6 @@ pub enum FoundationObjectType {
 }
 
 impl FoundationObjectType {
-    pub const ALL: [Self; 17] = [
-        Self::PublicRandomnessCommitment,
-        Self::PublicRandomnessReveal,
-        Self::SetupIntent,
-        Self::PrivateShareAcceptance,
-        Self::Complaint,
-        Self::PublicSetupRecord,
-        Self::BallotPackage,
-        Self::BallotCandidateList,
-        Self::Aggregate,
-        Self::EvaluatorReplay,
-        Self::FinalitySignature,
-        Self::StateReservation,
-        Self::StateOutputIntent,
-        Self::StateWitnessVote,
-        Self::RecoveryTransition,
-        Self::TargetDecryptionShare,
-        Self::StorageRootCommitment,
-    ];
-
     pub const fn canonical_code(self) -> u16 {
         self as u16
     }
@@ -364,7 +283,6 @@ impl Manifest {
             MANIFEST_SCHEMA_IDENTIFIER,
             FOUNDATION_SCHEMA_VERSION,
             vec![
-                CanonicalItem::unsigned16(1),
                 CanonicalItem::display_text(&self.display_title)?,
                 CanonicalItem::homogeneous_list(CanonicalItemType::NestedTuple, &option_items)?,
             ],
@@ -384,13 +302,9 @@ impl Manifest {
     ) -> SchemaResult<Self> {
         preflight_manifest_option_count(bytes, limits)?;
         let tuple = CanonicalTuple::decode_with_budget(bytes, limits, budget)?;
-        require_header(&tuple, MANIFEST_SCHEMA_IDENTIFIER, 3)?;
-        require_version_one(
-            read_u16(&tuple.items[0])?,
-            "manifest version is unsupported",
-        )?;
-        let display_title = read_display_text(&tuple.items[1])?;
-        let option_tuples = read_nested_tuple_list_with_budget(&tuple.items[2], limits, budget)?;
+        require_header(&tuple, MANIFEST_SCHEMA_IDENTIFIER, 2)?;
+        let display_title = read_display_text(&tuple.items[0])?;
+        let option_tuples = read_nested_tuple_list_with_budget(&tuple.items[1], limits, budget)?;
         let options = option_tuples
             .iter()
             .map(OptionDefinition::from_tuple)
@@ -432,11 +346,6 @@ impl ActionDefinition {
             ACTION_DEFINITION_SCHEMA_IDENTIFIER,
             FOUNDATION_SCHEMA_VERSION,
             vec![
-                CanonicalItem::unsigned16(1),
-                CanonicalItem::unsigned16(1),
-                CanonicalItem::unsigned16(FOUNDATION_PROFILE.option_count),
-                CanonicalItem::unsigned16(FOUNDATION_PROFILE.minimum_score),
-                CanonicalItem::unsigned16(FOUNDATION_PROFILE.maximum_score),
                 CanonicalItem::unsigned16(self.top_count),
                 CanonicalItem::unsigned64(self.submission_cutoff_unix_milliseconds),
             ],
@@ -446,28 +355,8 @@ impl ActionDefinition {
 
     pub fn decode(bytes: &[u8], limits: &CanonicalDecodeLimits) -> SchemaResult<Self> {
         let tuple = CanonicalTuple::decode(bytes, limits)?;
-        require_header(&tuple, ACTION_DEFINITION_SCHEMA_IDENTIFIER, 7)?;
-        require_version_one(
-            read_u16(&tuple.items[0])?,
-            "action definition version is unsupported",
-        )?;
-        for (item_index, expected) in [
-            1,
-            FOUNDATION_PROFILE.option_count,
-            FOUNDATION_PROFILE.minimum_score,
-            FOUNDATION_PROFILE.maximum_score,
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            if read_u16(&tuple.items[item_index + 1])? != expected {
-                return Err(FoundationSchemaError::new(
-                    RefusalReason::OutsideSupportedProfile,
-                    "action definition constants do not match the supported profile",
-                ));
-            }
-        }
-        Self::new(read_u16(&tuple.items[5])?, read_u64(&tuple.items[6])?)
+        require_header(&tuple, ACTION_DEFINITION_SCHEMA_IDENTIFIER, 2)?;
+        Self::new(read_u16(&tuple.items[0])?, read_u64(&tuple.items[1])?)
     }
 
     pub fn action_definition_hash(&self) -> SchemaResult<Hash512> {
@@ -507,27 +396,15 @@ impl BoardPolicy {
         Ok(CanonicalTuple::new(
             BOARD_POLICY_SCHEMA_IDENTIFIER,
             FOUNDATION_SCHEMA_VERSION,
-            vec![
-                CanonicalItem::unsigned16(1),
-                CanonicalItem::ascii(&self.board_origin_identifier)?,
-                CanonicalItem::unsigned16(1),
-            ],
+            vec![CanonicalItem::ascii(&self.board_origin_identifier)?],
         )
         .encode()?)
     }
 
     pub fn decode(bytes: &[u8], limits: &CanonicalDecodeLimits) -> SchemaResult<Self> {
         let tuple = CanonicalTuple::decode(bytes, limits)?;
-        require_header(&tuple, BOARD_POLICY_SCHEMA_IDENTIFIER, 3)?;
-        require_version_one(
-            read_u16(&tuple.items[0])?,
-            "board policy version is unsupported",
-        )?;
-        require_supported_profile_one(
-            read_u16(&tuple.items[2])?,
-            "candidate-list policy is unsupported",
-        )?;
-        Self::new(read_ascii(&tuple.items[1])?.to_owned())
+        require_header(&tuple, BOARD_POLICY_SCHEMA_IDENTIFIER, 1)?;
+        Self::new(read_ascii(&tuple.items[0])?.to_owned())
     }
 
     pub fn board_policy_hash(&self) -> SchemaResult<Hash512> {
@@ -563,7 +440,6 @@ impl RosterEntry {
             FOUNDATION_SCHEMA_VERSION,
             vec![
                 CanonicalItem::unsigned16(self.roster_position),
-                CanonicalItem::unsigned16(1),
                 CanonicalItem::fixed_bytes(self.signing_verification_key)?,
                 CanonicalItem::fixed_bytes(self.mailbox_encapsulation_key)?,
             ],
@@ -571,17 +447,11 @@ impl RosterEntry {
     }
 
     fn from_tuple(tuple: &CanonicalTuple) -> SchemaResult<Self> {
-        require_header(tuple, ROSTER_ENTRY_SCHEMA_IDENTIFIER, 4)?;
-        if read_u16(&tuple.items[1])? != 1 {
-            return Err(FoundationSchemaError::new(
-                RefusalReason::WrongTypeOrLength,
-                "roster role is not the assigned role-one value",
-            ));
-        }
+        require_header(tuple, ROSTER_ENTRY_SCHEMA_IDENTIFIER, 3)?;
         let entry = Self {
             roster_position: read_u16(&tuple.items[0])?,
-            signing_verification_key: read_fixed_bytes(&tuple.items[2])?,
-            mailbox_encapsulation_key: read_fixed_bytes(&tuple.items[3])?,
+            signing_verification_key: read_fixed_bytes(&tuple.items[1])?,
+            mailbox_encapsulation_key: read_fixed_bytes(&tuple.items[2])?,
         };
         entry.validate()?;
         Ok(entry)
@@ -649,10 +519,10 @@ impl Roster {
         Ok(CanonicalTuple::new(
             ROSTER_SCHEMA_IDENTIFIER,
             FOUNDATION_SCHEMA_VERSION,
-            vec![
-                CanonicalItem::unsigned16(1),
-                CanonicalItem::homogeneous_list(CanonicalItemType::NestedTuple, &entries)?,
-            ],
+            vec![CanonicalItem::homogeneous_list(
+                CanonicalItemType::NestedTuple,
+                &entries,
+            )?],
         )
         .encode()?)
     }
@@ -669,9 +539,8 @@ impl Roster {
     ) -> SchemaResult<Self> {
         preflight_roster_entry_count(bytes, limits)?;
         let tuple = CanonicalTuple::decode_with_budget(bytes, limits, budget)?;
-        require_header(&tuple, ROSTER_SCHEMA_IDENTIFIER, 2)?;
-        require_version_one(read_u16(&tuple.items[0])?, "roster version is unsupported")?;
-        let entries = read_nested_tuple_list_with_budget(&tuple.items[1], limits, budget)?
+        require_header(&tuple, ROSTER_SCHEMA_IDENTIFIER, 1)?;
+        let entries = read_nested_tuple_list_with_budget(&tuple.items[0], limits, budget)?
             .iter()
             .map(RosterEntry::from_tuple)
             .collect::<SchemaResult<Vec<_>>>()?;
@@ -1261,8 +1130,6 @@ pub fn ceremony_context_hash(
     Ok(hash512(
         "sealed-lattice/foundation/ceremony-context/v1",
         &[
-            CanonicalItem::ascii(FOUNDATION_PROFILE.protocol_name)?,
-            CanonicalItem::unsigned16(FOUNDATION_PROFILE.protocol_version),
             CanonicalItem::hash512(suite_id.into_bytes()),
             CanonicalItem::hash512(manifest_hash.into_bytes()),
             CanonicalItem::hash512(roster_hash.into_bytes()),
@@ -1294,14 +1161,29 @@ pub fn action_context_hash(
 /// The producer cannot select or serialize a signature purpose. Deterministic
 /// aggregate and evaluator objects are unsigned.
 pub fn signature_message(envelope: &ObjectEnvelope, roster_hash: Hash512) -> SchemaResult<Hash512> {
-    let signature_purpose = foundation_envelope_policy(envelope.object_type)
-        .signature_purpose
-        .ok_or_else(|| {
-            FoundationSchemaError::new(
+    let signature_purpose = match envelope.object_type {
+        FoundationObjectType::PublicRandomnessCommitment => "public-randomness-commitment",
+        FoundationObjectType::PublicRandomnessReveal => "public-randomness-reveal",
+        FoundationObjectType::SetupIntent => "setup-intent",
+        FoundationObjectType::PrivateShareAcceptance => "private-share-acceptance",
+        FoundationObjectType::Complaint => "setup-complaint",
+        FoundationObjectType::PublicSetupRecord => "dealer-public-setup",
+        FoundationObjectType::BallotPackage => "direct-ballot",
+        FoundationObjectType::BallotCandidateList => "ballot-candidate-list",
+        FoundationObjectType::FinalitySignature => "target-finality",
+        FoundationObjectType::StateReservation => "state-reservation-intent",
+        FoundationObjectType::StateOutputIntent => "state-output-intent",
+        FoundationObjectType::StateWitnessVote => "state-witness-vote",
+        FoundationObjectType::RecoveryTransition => "state-recovery-transition",
+        FoundationObjectType::TargetDecryptionShare => "target-release-output",
+        FoundationObjectType::StorageRootCommitment => "storage-root-commitment",
+        FoundationObjectType::Aggregate | FoundationObjectType::EvaluatorReplay => {
+            return Err(FoundationSchemaError::new(
                 RefusalReason::WrongTypeOrLength,
                 "deterministic aggregate and evaluator objects are unsigned",
-            )
-        })?;
+            ));
+        }
+    };
     Ok(hash512(
         "sealed-lattice/foundation/signature-message/v1",
         &[
@@ -1397,46 +1279,17 @@ pub(super) fn require_header(
     Ok(())
 }
 
-fn require_version_one(value: u16, message: &'static str) -> SchemaResult<()> {
-    if value != 1 {
-        return Err(FoundationSchemaError::new(
-            RefusalReason::UnsupportedVersionOrSuite,
-            message,
-        ));
-    }
-    Ok(())
-}
-
-fn require_supported_profile_one(value: u16, message: &'static str) -> SchemaResult<()> {
-    if value != 1 {
-        return Err(FoundationSchemaError::new(
-            RefusalReason::OutsideSupportedProfile,
-            message,
-        ));
-    }
-    Ok(())
-}
-
 fn preflight_manifest_option_count(
     bytes: &[u8],
     limits: &CanonicalDecodeLimits,
 ) -> SchemaResult<()> {
-    const ITEM_TYPES: [CanonicalItemType; 3] = [
-        CanonicalItemType::Unsigned16,
+    const ITEM_TYPES: [CanonicalItemType; 2] = [
         CanonicalItemType::DisplayText,
         CanonicalItemType::HomogeneousList,
     ];
 
-    let Some(version_bytes) =
-        raw_schema_item(bytes, limits, MANIFEST_SCHEMA_IDENTIFIER, &ITEM_TYPES, 0)
-    else {
-        return Ok(());
-    };
-    if read_exact_raw_u16(version_bytes) != Some(1) {
-        return Ok(());
-    }
     let Some(option_list_bytes) =
-        raw_schema_item(bytes, limits, MANIFEST_SCHEMA_IDENTIFIER, &ITEM_TYPES, 2)
+        raw_schema_item(bytes, limits, MANIFEST_SCHEMA_IDENTIFIER, &ITEM_TYPES, 1)
     else {
         return Ok(());
     };
@@ -1455,21 +1308,9 @@ fn preflight_manifest_option_count(
 }
 
 fn preflight_roster_entry_count(bytes: &[u8], limits: &CanonicalDecodeLimits) -> SchemaResult<()> {
-    const ITEM_TYPES: [CanonicalItemType; 2] = [
-        CanonicalItemType::Unsigned16,
-        CanonicalItemType::HomogeneousList,
-    ];
-
-    let Some(version_bytes) =
-        raw_schema_item(bytes, limits, ROSTER_SCHEMA_IDENTIFIER, &ITEM_TYPES, 0)
-    else {
-        return Ok(());
-    };
-    if read_exact_raw_u16(version_bytes) != Some(1) {
-        return Ok(());
-    }
+    const ITEM_TYPES: [CanonicalItemType; 1] = [CanonicalItemType::HomogeneousList];
     let Some(entry_list_bytes) =
-        raw_schema_item(bytes, limits, ROSTER_SCHEMA_IDENTIFIER, &ITEM_TYPES, 1)
+        raw_schema_item(bytes, limits, ROSTER_SCHEMA_IDENTIFIER, &ITEM_TYPES, 0)
     else {
         return Ok(());
     };
@@ -1612,11 +1453,6 @@ fn raw_homogeneous_list_count(
         return None;
     }
     Some(declared_count)
-}
-
-fn read_exact_raw_u16(bytes: &[u8]) -> Option<u16> {
-    let bytes: [u8; 2] = bytes.try_into().ok()?;
-    Some(u16::from_le_bytes(bytes))
 }
 
 fn read_exact_raw_u64(bytes: &[u8]) -> Option<u64> {
@@ -2126,7 +1962,6 @@ mod tests {
                 ROSTER_ENTRY_SCHEMA_IDENTIFIER,
                 vec![
                     (CanonicalItemType::Unsigned16, 0u16.to_le_bytes().to_vec()),
-                    (CanonicalItemType::Unsigned16, 1u16.to_le_bytes().to_vec()),
                     (CanonicalItemType::RawBytes, noncanonical_key_bytes),
                     (
                         CanonicalItemType::RawBytes,
@@ -2270,7 +2105,6 @@ mod tests {
             let encoded = encode_raw_tuple_with_items(
                 MANIFEST_SCHEMA_IDENTIFIER,
                 vec![
-                    (CanonicalItemType::Unsigned16, 1_u16.to_le_bytes().to_vec()),
                     (
                         CanonicalItemType::DisplayText,
                         display_title.canonical_bytes().to_vec(),
@@ -2299,16 +2133,13 @@ mod tests {
         for declared_entry_count in [9_u32, 11] {
             let encoded = encode_raw_tuple_with_items(
                 ROSTER_SCHEMA_IDENTIFIER,
-                vec![
-                    (CanonicalItemType::Unsigned16, 1_u16.to_le_bytes().to_vec()),
-                    (
-                        CanonicalItemType::HomogeneousList,
-                        raw_homogeneous_list_header(
-                            CanonicalItemType::NestedTuple,
-                            declared_entry_count,
-                        ),
+                vec![(
+                    CanonicalItemType::HomogeneousList,
+                    raw_homogeneous_list_header(
+                        CanonicalItemType::NestedTuple,
+                        declared_entry_count,
                     ),
-                ],
+                )],
             );
 
             assert_eq!(

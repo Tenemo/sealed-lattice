@@ -45,38 +45,6 @@ pub(crate) fn verify_vss_share_linkage_bindings_request(request: &Value) -> Cano
         &["thresholdDegree"],
         "VSS share linkage statement thresholdDegree",
     )?;
-    let source_statement_records = array_at_path(statement, &["sourceStatementRecords"])?;
-    if source_statement_records.len() != participant_count {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "VSS share linkage statement must contain one source statement per participant",
-        ));
-    }
-    let mut verified_source_statement_records = Vec::with_capacity(source_statement_records.len());
-    for (expected_source_position, source_statement_record) in
-        source_statement_records.iter().enumerate()
-    {
-        verified_source_statement_records.push(verify_vss_share_linkage_source_statement(
-            VssShareLinkageSourceStatementInput {
-                source_statement_record,
-                expected_source_position,
-                statement: VssShareLinkageStatementBinding {
-                    ceremony_id,
-                    manifest_hash,
-                    roster_hash,
-                    setup_parameters_hash,
-                    setup_epoch,
-                    public_matrix_seed_hash,
-                    ring_degree,
-                    participant_count,
-                    q_share_rns_limb_count,
-                    threshold_degree,
-                    coefficient_commitment_root,
-                    aggregate_threshold_commitment_root,
-                },
-            },
-        )?);
-    }
     let statement_root = hash_at_path(statement, &["statementRoot"])?;
     let statement_without_root = json!({
         "objectType": "VssShareLinkageStatement",
@@ -93,7 +61,6 @@ pub(crate) fn verify_vss_share_linkage_bindings_request(request: &Value) -> Cano
         "coefficientCommitmentRoot": coefficient_commitment_root,
         "recipientShareCommitmentRoot": recipient_share_commitment_root,
         "aggregateThresholdCommitmentRoot": aggregate_threshold_commitment_root,
-        "sourceStatementRecords": verified_source_statement_records,
     });
     let expected_statement_root = derive_canonical_object_hash(&statement_without_root)?;
     if expected_statement_root != statement_root {
@@ -105,11 +72,6 @@ pub(crate) fn verify_vss_share_linkage_bindings_request(request: &Value) -> Cano
     verify_vss_share_linkage_evidence(VssShareLinkageEvidenceInput {
         request,
         statement: VssShareLinkageStatementBinding {
-            ceremony_id,
-            manifest_hash,
-            roster_hash,
-            setup_parameters_hash,
-            setup_epoch,
             public_matrix_seed_hash,
             ring_degree,
             participant_count,
@@ -119,7 +81,6 @@ pub(crate) fn verify_vss_share_linkage_bindings_request(request: &Value) -> Cano
             aggregate_threshold_commitment_root,
         },
         recipient_share_commitment_root,
-        verified_source_statement_records: &verified_source_statement_records,
     })?;
 
     Ok(json!({
@@ -136,11 +97,6 @@ pub(crate) fn verify_vss_share_linkage_bindings_request(request: &Value) -> Cano
 }
 
 pub(super) struct VssShareLinkageStatementBinding<'a> {
-    ceremony_id: &'a str,
-    manifest_hash: &'a str,
-    roster_hash: &'a str,
-    setup_parameters_hash: &'a str,
-    setup_epoch: &'a str,
     public_matrix_seed_hash: &'a str,
     ring_degree: usize,
     participant_count: usize,
@@ -150,17 +106,10 @@ pub(super) struct VssShareLinkageStatementBinding<'a> {
     aggregate_threshold_commitment_root: &'a str,
 }
 
-pub(super) struct VssShareLinkageSourceStatementInput<'a> {
-    source_statement_record: &'a Value,
-    expected_source_position: usize,
-    statement: VssShareLinkageStatementBinding<'a>,
-}
-
 pub(super) struct VssShareLinkageEvidenceInput<'a> {
     request: &'a Value,
     statement: VssShareLinkageStatementBinding<'a>,
     recipient_share_commitment_root: &'a str,
-    verified_source_statement_records: &'a [Value],
 }
 
 pub(super) fn verify_vss_share_linkage_evidence(
@@ -287,7 +236,6 @@ pub(super) fn verify_vss_share_linkage_evidence_sets(
         array_at_path(recipient_share_commitment_set, &["sourceTrusteeRecords"])?;
     if coefficient_source_records.len() != input.statement.participant_count
         || recipient_source_records.len() != input.statement.participant_count
-        || input.verified_source_statement_records.len() != input.statement.participant_count
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
@@ -295,19 +243,12 @@ pub(super) fn verify_vss_share_linkage_evidence_sets(
         ));
     }
     for expected_source_position in 0..input.statement.participant_count {
-        let source_statement = &input.verified_source_statement_records[expected_source_position];
         let coefficient_source_record = &coefficient_source_records[expected_source_position];
         let recipient_source_record = &recipient_source_records[expected_source_position];
-        let source_trustee_identity = string_at_path(source_statement, &["sourceTrusteeIdentity"])?;
         compare_required_string(
             string_at_path(coefficient_source_record, &["sourceTrusteeIdentity"])?,
-            source_trustee_identity,
-            "VSS share linkage evidence coefficient sourceTrusteeIdentity",
-        )?;
-        compare_required_string(
             string_at_path(recipient_source_record, &["sourceTrusteeIdentity"])?,
-            source_trustee_identity,
-            "VSS share linkage evidence recipient sourceTrusteeIdentity",
+            "VSS share linkage evidence sourceTrusteeIdentity",
         )?;
         compare_required_u64(
             unsigned_at_path(coefficient_source_record, &["sourceTrusteeRosterPosition"])?,
@@ -319,94 +260,6 @@ pub(super) fn verify_vss_share_linkage_evidence_sets(
             expected_source_position as u64,
             "VSS share linkage evidence recipient sourceTrusteeRosterPosition",
         )?;
-        compare_required_string(
-            hash_at_path(
-                coefficient_source_record,
-                &["sourceCoefficientCommitmentRoot"],
-            )?,
-            hash_at_path(source_statement, &["sourceCoefficientCommitmentRoot"])?,
-            "VSS share linkage evidence sourceCoefficientCommitmentRoot",
-        )?;
-        compare_required_string(
-            hash_at_path(
-                recipient_source_record,
-                &["sourceRecipientShareCommitmentRoot"],
-            )?,
-            hash_at_path(source_statement, &["sourceRecipientShareCommitmentRoot"])?,
-            "VSS share linkage evidence sourceRecipientShareCommitmentRoot",
-        )?;
-        let coefficient_records =
-            array_at_path(coefficient_source_record, &["coefficientCommitments"])?;
-        let source_statement_coefficient_opening_roots =
-            array_at_path(source_statement, &["coefficientOpeningRoots"])?;
-        let target_coefficient_record_count = input
-            .statement
-            .q_share_rns_limb_count
-            .checked_mul(input.statement.threshold_degree)
-            .ok_or_else(|| {
-                CanonicalError::new(
-                    CanonicalErrorCode::MalformedLength,
-                    "VSS share linkage target coefficient count overflowed",
-                )
-            })?;
-        if source_statement_coefficient_opening_roots.len() != target_coefficient_record_count {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "VSS share linkage evidence coefficient opening roots must cover the source statement",
-            ));
-        }
-        for (opening_root_index, coefficient_record) in coefficient_records
-            .iter()
-            .take(target_coefficient_record_count)
-            .enumerate()
-        {
-            let expected_opening_root =
-                hash_at_path(coefficient_record, &["coefficientOpeningRoot"])?;
-            let source_statement_opening_root = source_statement_coefficient_opening_roots
-                .get(opening_root_index)
-                .and_then(Value::as_str)
-                .ok_or_else(|| {
-                    CanonicalError::new(
-                        CanonicalErrorCode::InvalidFixture,
-                        "VSS share linkage source coefficient opening root must be a string",
-                    )
-                })?;
-            compare_required_string(
-                source_statement_opening_root,
-                expected_opening_root,
-                "VSS share linkage evidence coefficientOpeningRoots",
-            )?;
-        }
-        let recipient_share_records =
-            array_at_path(recipient_source_record, &["recipientShareCommitments"])?;
-        let source_statement_recipient_share_opening_roots =
-            array_at_path(source_statement, &["recipientShareOpeningRoots"])?;
-        if recipient_share_records.len() != source_statement_recipient_share_opening_roots.len() {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "VSS share linkage evidence recipient-share opening roots must cover the source statement",
-            ));
-        }
-        for (opening_root_index, recipient_share_record) in
-            recipient_share_records.iter().enumerate()
-        {
-            let expected_opening_root =
-                hash_at_path(recipient_share_record, &["shareOpeningRoot"])?;
-            let source_statement_opening_root = source_statement_recipient_share_opening_roots
-                .get(opening_root_index)
-                .and_then(Value::as_str)
-                .ok_or_else(|| {
-                    CanonicalError::new(
-                        CanonicalErrorCode::InvalidFixture,
-                        "VSS share linkage source recipient-share opening root must be a string",
-                    )
-                })?;
-            compare_required_string(
-                source_statement_opening_root,
-                expected_opening_root,
-                "VSS share linkage evidence recipientShareOpeningRoots",
-            )?;
-        }
     }
 
     Ok(())
@@ -483,10 +336,6 @@ pub(super) fn verify_vss_aggregate_threshold_statement_root(
             vss_aggregate,
             &["coefficientCommitmentRoots"],
         )?,
-        "coefficientOpeningRoots": array_at_path(
-            vss_aggregate,
-            &["coefficientOpeningRoots"],
-        )?,
         "coefficientCommitments": array_at_path(
             vss_aggregate,
             &["coefficientCommitments"],
@@ -494,10 +343,6 @@ pub(super) fn verify_vss_aggregate_threshold_statement_root(
         "recipientShareCommitmentRoot": hash_at_path(
             vss_aggregate,
             &["recipientShareCommitmentRoot"],
-        )?,
-        "recipientShareOpeningRoot": hash_at_path(
-            vss_aggregate,
-            &["recipientShareOpeningRoot"],
         )?,
         "recipientShareCommitment": value_at_path(
             vss_aggregate,
@@ -547,11 +392,6 @@ pub(crate) fn verify_vss_public_aggregate_threshold_proofs(
             string_at_path(proof, &["objectType"])?,
             "VssAggregateThresholdProofRecord",
             "VSS aggregate threshold proof objectType",
-        )?;
-        compare_required_string(
-            string_at_path(proof, &["proofFamily"])?,
-            "vss-share-linkage",
-            "VSS aggregate threshold proof family",
         )?;
         let proof_bytes_hash = hash_at_path(proof, &["proofBytesHash"])?;
         let proof_material_root = hash_at_path(proof, &["proofMaterialRoot"])?;
@@ -710,7 +550,6 @@ pub(crate) fn verify_vss_public_aggregate_threshold_proofs(
         // sigma_{i->j,l}, in source order, matching the recipient-share set.
         let coefficient_commitment_roots =
             array_at_path(vss_aggregate, &["coefficientCommitmentRoots"])?;
-        let coefficient_opening_roots = array_at_path(vss_aggregate, &["coefficientOpeningRoots"])?;
         let coefficient_commitments = array_at_path(vss_aggregate, &["coefficientCommitments"])?;
         if coefficient_commitment_roots.len() != participant_count {
             return Err(CanonicalError::new(
@@ -718,12 +557,10 @@ pub(crate) fn verify_vss_public_aggregate_threshold_proofs(
                 "VSS aggregate proof must sum one source share per participant",
             ));
         }
-        if coefficient_opening_roots.len() != participant_count
-            || coefficient_commitments.len() != participant_count
-        {
+        if coefficient_commitments.len() != participant_count {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
-                "VSS aggregate proof source share openings and commitments must cover every participant",
+                "VSS aggregate proof source share commitments must cover every participant",
             ));
         }
         for (source_roster_position, coefficient_commitment_root) in
@@ -758,19 +595,6 @@ pub(crate) fn verify_vss_public_aggregate_threshold_proofs(
                 bound_root,
                 expected_root,
                 "VSS aggregate proof source share commitment root",
-            )?;
-            let bound_opening_root = coefficient_opening_roots[source_roster_position]
-                .as_str()
-                .ok_or_else(|| {
-                    CanonicalError::new(
-                        CanonicalErrorCode::InvalidFixture,
-                        "VSS aggregate proof source share opening root must be a string",
-                    )
-                })?;
-            compare_required_string(
-                bound_opening_root,
-                hash_at_path(recipient_share_record, &["shareOpeningRoot"])?,
-                "VSS aggregate proof source share opening root",
             )?;
             if &coefficient_commitments[source_roster_position]
                 != value_at_path(recipient_share_record, &["commitment"])?
@@ -830,215 +654,4 @@ pub(crate) fn verify_vss_public_aggregate_threshold_proofs(
     }
 
     Ok(())
-}
-
-pub(super) fn verify_vss_share_linkage_source_statement(
-    input: VssShareLinkageSourceStatementInput<'_>,
-) -> CanonicalResult<Value> {
-    compare_required_string(
-        string_at_path(input.source_statement_record, &["objectType"])?,
-        "VssShareLinkageSourceStatement",
-        "VSS share linkage source statement objectType",
-    )?;
-    compare_required_string(
-        string_at_path(input.source_statement_record, &["ceremonyId"])?,
-        input.statement.ceremony_id,
-        "VSS share linkage source statement ceremonyId",
-    )?;
-    compare_required_string(
-        hash_at_path(input.source_statement_record, &["manifestHash"])?,
-        input.statement.manifest_hash,
-        "VSS share linkage source statement manifestHash",
-    )?;
-    compare_required_string(
-        hash_at_path(input.source_statement_record, &["rosterHash"])?,
-        input.statement.roster_hash,
-        "VSS share linkage source statement rosterHash",
-    )?;
-    compare_required_string(
-        hash_at_path(input.source_statement_record, &["setupParametersHash"])?,
-        input.statement.setup_parameters_hash,
-        "VSS share linkage source statement setupParametersHash",
-    )?;
-    compare_required_string(
-        string_at_path(input.source_statement_record, &["setupEpoch"])?,
-        input.statement.setup_epoch,
-        "VSS share linkage source statement setupEpoch",
-    )?;
-    compare_required_string(
-        hash_at_path(input.source_statement_record, &["publicMatrixSeedHash"])?,
-        input.statement.public_matrix_seed_hash,
-        "VSS share linkage source statement publicMatrixSeedHash",
-    )?;
-    let source_trustee_identity =
-        read_non_empty_string(input.source_statement_record, "sourceTrusteeIdentity")?;
-    compare_required_u64(
-        unsigned_at_path(
-            input.source_statement_record,
-            &["sourceTrusteeRosterPosition"],
-        )?,
-        input.expected_source_position as u64,
-        "VSS share linkage source statement sourceTrusteeRosterPosition",
-    )?;
-    compare_required_u64(
-        unsigned_at_path(input.source_statement_record, &["participantCount"])?,
-        input.statement.participant_count as u64,
-        "VSS share linkage source statement participantCount",
-    )?;
-    compare_required_u64(
-        unsigned_at_path(input.source_statement_record, &["ringDegree"])?,
-        input.statement.ring_degree as u64,
-        "VSS share linkage source statement ringDegree",
-    )?;
-    compare_required_u64(
-        unsigned_at_path(input.source_statement_record, &["qShareRnsLimbCount"])?,
-        input.statement.q_share_rns_limb_count as u64,
-        "VSS share linkage source statement qShareRnsLimbCount",
-    )?;
-    compare_required_u64(
-        unsigned_at_path(input.source_statement_record, &["thresholdDegree"])?,
-        input.statement.threshold_degree as u64,
-        "VSS share linkage source statement thresholdDegree",
-    )?;
-    compare_required_string(
-        hash_at_path(
-            input.source_statement_record,
-            &["coefficientCommitmentRoot"],
-        )?,
-        input.statement.coefficient_commitment_root,
-        "VSS share linkage source statement coefficientCommitmentRoot",
-    )?;
-    let source_coefficient_commitment_root = hash_at_path(
-        input.source_statement_record,
-        &["sourceCoefficientCommitmentRoot"],
-    )?;
-    let source_recipient_share_commitment_root = hash_at_path(
-        input.source_statement_record,
-        &["sourceRecipientShareCommitmentRoot"],
-    )?;
-    let expected_coefficient_opening_root_count = input
-        .statement
-        .q_share_rns_limb_count
-        .checked_mul(input.statement.threshold_degree)
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "VSS source statement coefficient opening root count overflowed",
-            )
-        })?;
-    let coefficient_opening_roots =
-        array_at_path(input.source_statement_record, &["coefficientOpeningRoots"])?;
-    if coefficient_opening_roots.len() != expected_coefficient_opening_root_count {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "VSS share linkage source statement coefficientOpeningRoots must cover every Q_share limb and coefficient",
-        ));
-    }
-    let verified_coefficient_opening_roots = coefficient_opening_roots
-        .iter()
-        .enumerate()
-        .map(|(opening_root_index, opening_root)| {
-            let root = opening_root.as_str().ok_or_else(|| {
-                CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
-                    format!(
-                        "VSS share linkage source statement coefficientOpeningRoots.{opening_root_index} must be a string"
-                    ),
-                )
-            })?;
-            validate_hash_string(
-                root,
-                &format!(
-                    "VSS share linkage source statement coefficientOpeningRoots.{opening_root_index}"
-                ),
-            )?;
-
-            Ok(Value::String(root.to_string()))
-        })
-        .collect::<CanonicalResult<Vec<_>>>()?;
-    let expected_recipient_share_opening_root_count = input
-        .statement
-        .participant_count
-        .checked_mul(input.statement.q_share_rns_limb_count)
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "VSS source statement recipient-share opening root count overflowed",
-            )
-        })?;
-    let recipient_share_opening_roots = array_at_path(
-        input.source_statement_record,
-        &["recipientShareOpeningRoots"],
-    )?;
-    if recipient_share_opening_roots.len() != expected_recipient_share_opening_root_count {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "VSS share linkage source statement recipientShareOpeningRoots must cover every recipient and Q_share limb",
-        ));
-    }
-    let verified_recipient_share_opening_roots = recipient_share_opening_roots
-        .iter()
-        .enumerate()
-        .map(|(opening_root_index, opening_root)| {
-            let root = opening_root.as_str().ok_or_else(|| {
-                CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
-                    format!(
-                        "VSS share linkage source statement recipientShareOpeningRoots.{opening_root_index} must be a string"
-                    ),
-                )
-            })?;
-            validate_hash_string(
-                root,
-                &format!(
-                    "VSS share linkage source statement recipientShareOpeningRoots.{opening_root_index}"
-                ),
-            )?;
-
-            Ok(Value::String(root.to_string()))
-        })
-        .collect::<CanonicalResult<Vec<_>>>()?;
-    compare_required_string(
-        hash_at_path(
-            input.source_statement_record,
-            &["aggregateThresholdCommitmentRoot"],
-        )?,
-        input.statement.aggregate_threshold_commitment_root,
-        "VSS share linkage source statement aggregateThresholdCommitmentRoot",
-    )?;
-    let expected_source_statement = json!({
-        "objectType": "VssShareLinkageSourceStatement",
-        "ceremonyId": input.statement.ceremony_id,
-        "manifestHash": input.statement.manifest_hash,
-        "rosterHash": input.statement.roster_hash,
-        "setupParametersHash": input.statement.setup_parameters_hash,
-        "setupEpoch": input.statement.setup_epoch,
-        "publicMatrixSeedHash": input.statement.public_matrix_seed_hash,
-        "sourceTrusteeIdentity": source_trustee_identity,
-        "sourceTrusteeRosterPosition": input.expected_source_position,
-        "ringDegree": input.statement.ring_degree,
-        "participantCount": input.statement.participant_count,
-        "qShareRnsLimbCount": input.statement.q_share_rns_limb_count,
-        "thresholdDegree": input.statement.threshold_degree,
-        "coefficientCommitmentRoot": input.statement.coefficient_commitment_root,
-        "sourceCoefficientCommitmentRoot": source_coefficient_commitment_root,
-        "sourceRecipientShareCommitmentRoot": source_recipient_share_commitment_root,
-        "coefficientOpeningRoots": verified_coefficient_opening_roots,
-        "recipientShareOpeningRoots": verified_recipient_share_opening_roots,
-        "aggregateThresholdCommitmentRoot": input.statement.aggregate_threshold_commitment_root,
-    });
-    let source_statement_root =
-        hash_at_path(input.source_statement_record, &["sourceStatementRoot"])?;
-    let expected_source_statement_root = derive_canonical_object_hash(&expected_source_statement)?;
-    if expected_source_statement_root != source_statement_root {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ComponentMismatch,
-            "VSS share linkage source statement root does not match its bound roots",
-        ));
-    }
-
-    let mut verified_source_statement = expected_source_statement;
-    verified_source_statement["sourceStatementRoot"] = json!(source_statement_root);
-
-    Ok(verified_source_statement)
 }

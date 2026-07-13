@@ -308,10 +308,6 @@ pub(in crate::bgv::setup) fn canonical_source_constant_commitments_from_bridge_s
         if source_record.get("rnsLimbIndex").and_then(Value::as_u64)
             != Some(source_rns_limb_index as u64)
             || source_record.get("rnsPrime").and_then(Value::as_u64) != Some(source_message_modulus)
-            || source_record
-                .get("shamirCoefficientIndex")
-                .and_then(Value::as_u64)
-                != Some(0)
         {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::ComponentMismatch,

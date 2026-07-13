@@ -10,9 +10,8 @@ use super::vss::{evaluate_unreduced_shamir_polynomial, verify_carry_aware_vss_sh
 use super::{
     DATA_PRIMES, POLYNOMIAL_DEGREE, describe_collective_bgv_setup_parameters,
     development_evaluator_key_from_passive_setup_package,
-    generate_passive_setup_package_from_request, sample_public_residues,
-    verify_local_trustee_setup_state_from_request, verify_passive_setup_package_from_request,
-    verify_private_vss_share_envelope_from_request,
+    generate_passive_setup_package_from_request, verify_local_trustee_setup_state_from_request,
+    verify_passive_setup_package_from_request, verify_private_vss_share_envelope_from_request,
 };
 use super::{
     commitment::{

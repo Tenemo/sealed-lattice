@@ -2,7 +2,9 @@ import type { ProtocolHash } from '@sealed-lattice/types';
 
 import { canonicalJson } from '../canonical-json.js';
 
-import { decodeCanonicalHex, sealedMaterialAad } from './aes-gcm.js';
+import { decodeCanonicalHex } from '../web-crypto.js';
+
+import { sealedMaterialAad } from './aes-gcm.js';
 import {
     aesGcmNonceByteLength,
     encryptedSealedMaterialFieldNames,
@@ -20,8 +22,6 @@ import {
     assertProtocolHash,
     assertRequiredFields,
     decodeFixedHex,
-    numberField,
-    protocolHashArrayField,
     stringField,
 } from './validation.js';
 
@@ -51,6 +51,10 @@ export const assertCommitmentHeader = (
         localStateCommitment.rosterHash,
         'localStateCommitment.rosterHash',
     );
+    assertProtocolHash(
+        localStateCommitment.setupParametersHash,
+        'localStateCommitment.setupParametersHash',
+    );
     assertNonEmptyString(
         localStateCommitment.setupEpoch,
         'localStateCommitment.setupEpoch',
@@ -70,28 +74,6 @@ export const assertCommitmentHeader = (
     assertProtocolHash(
         localStateCommitment.aggregateThresholdShareRoot,
         'localStateCommitment.aggregateThresholdShareRoot',
-    );
-    assertProtocolHash(
-        localStateCommitment.issuedVssAcceptanceRoot,
-        'localStateCommitment.issuedVssAcceptanceRoot',
-    );
-    if (!Array.isArray(localStateCommitment.issuedVssComplaintRoots)) {
-        throw new TypeError(
-            'localStateCommitment.issuedVssComplaintRoots must be an array of protocol hashes.',
-        );
-    }
-    localStateCommitment.issuedVssComplaintRoots.forEach(
-        (complaintRoot, complaintRootIndex) => {
-            if (typeof complaintRoot !== 'string') {
-                throw new TypeError(
-                    `localStateCommitment.issuedVssComplaintRoots.${String(complaintRootIndex)} must be a protocol hash.`,
-                );
-            }
-            assertProtocolHash(
-                complaintRoot,
-                `localStateCommitment.issuedVssComplaintRoots.${String(complaintRootIndex)}`,
-            );
-        },
     );
 };
 
@@ -191,56 +173,6 @@ export const validateLocalStatePlaintext = (
             'localStatePlaintext.objectType must be LocalTrusteeSetupStateSealedPayload.',
         );
     }
-    for (const fieldName of setupContextFieldNames) {
-        if (plaintext[fieldName] !== localStateCommitment[fieldName]) {
-            throw new Error(
-                `localStatePlaintext.${fieldName} must match the local state commitment.`,
-            );
-        }
-    }
-    const trusteeIdentity = stringField(plaintext, 'trusteeIdentity');
-    assertNonEmptyString(
-        trusteeIdentity,
-        'localStatePlaintext.trusteeIdentity',
-    );
-    if (trusteeIdentity !== localStateCommitment.trusteeIdentity) {
-        throw new Error(
-            'localStatePlaintext.trusteeIdentity must match the local state commitment.',
-        );
-    }
-    const trusteeRosterPosition = numberField(
-        plaintext,
-        'trusteeRosterPosition',
-    );
-    assertNonNegativeSafeInteger(
-        trusteeRosterPosition,
-        'localStatePlaintext.trusteeRosterPosition',
-    );
-    if (trusteeRosterPosition !== localStateCommitment.trusteeRosterPosition) {
-        throw new Error(
-            'localStatePlaintext.trusteeRosterPosition must match the local state commitment.',
-        );
-    }
-    assertNonNegativeSafeInteger(
-        numberField(plaintext, 'deviceEpoch'),
-        'localStatePlaintext.deviceEpoch',
-    );
-    const thresholdShareCommitmentRecipientRoot = stringField(
-        plaintext,
-        'thresholdShareCommitmentRecipientRoot',
-    );
-    assertProtocolHash(
-        thresholdShareCommitmentRecipientRoot,
-        'localStatePlaintext.thresholdShareCommitmentRecipientRoot',
-    );
-    if (
-        thresholdShareCommitmentRecipientRoot !==
-        localStateCommitment.thresholdShareCommitmentRecipientRoot
-    ) {
-        throw new Error(
-            'localStatePlaintext.thresholdShareCommitmentRecipientRoot must match the local state commitment.',
-        );
-    }
     validateSealedMaterial(
         plaintext.sealedAggregateThresholdShare,
         localStateCommitment.aggregateThresholdShareRoot,
@@ -248,31 +180,5 @@ export const validateLocalStatePlaintext = (
         localStateCommitment,
         'localStatePlaintext.sealedAggregateThresholdShare',
     );
-    const issuedVssAcceptanceRoots = protocolHashArrayField(
-        plaintext,
-        'issuedVssAcceptanceRoots',
-    );
-    if (
-        issuedVssAcceptanceRoots.length !== 1 ||
-        issuedVssAcceptanceRoots[0] !==
-            localStateCommitment.issuedVssAcceptanceRoot
-    ) {
-        throw new Error(
-            'localStatePlaintext.issuedVssAcceptanceRoots must bind the issued VSS acceptance root from the local state commitment.',
-        );
-    }
-    const issuedVssComplaintRoots = protocolHashArrayField(
-        plaintext,
-        'issuedVssComplaintRoots',
-    );
-    if (
-        canonicalJson(issuedVssComplaintRoots) !==
-        canonicalJson(localStateCommitment.issuedVssComplaintRoots)
-    ) {
-        throw new Error(
-            'localStatePlaintext.issuedVssComplaintRoots must match the local state commitment.',
-        );
-    }
-
     return plaintext as LocalTrusteeSetupStateSealedPayload;
 };

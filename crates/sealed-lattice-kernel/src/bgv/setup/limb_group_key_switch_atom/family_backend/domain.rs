@@ -16,6 +16,7 @@
 //! trace-column split.
 
 use super::super::proof_field::ProofFieldParameters;
+use super::super::negacyclic_transform::radix_two_cyclic_transform_in_place;
 use super::super::wide_unsigned::{shift_right_one_in_place, subtract_in_place};
 use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 
@@ -86,7 +87,11 @@ impl<'a, const LIMB_COUNT: usize> CyclicDomain<'a, LIMB_COUNT> {
     pub(super) fn interpolate(&self, values: &[[u64; LIMB_COUNT]]) -> Vec<[u64; LIMB_COUNT]> {
         debug_assert_eq!(values.len(), self.size);
         let mut coefficients = values.to_vec();
-        self.cyclic_transform(&mut coefficients, &self.inverse_twiddles);
+        radix_two_cyclic_transform_in_place(
+            self.parameters,
+            &mut coefficients,
+            &self.inverse_twiddles,
+        );
         for coefficient in &mut coefficients {
             *coefficient = self.parameters.multiply(coefficient, &self.size_inverse);
         }
@@ -99,29 +104,12 @@ impl<'a, const LIMB_COUNT: usize> CyclicDomain<'a, LIMB_COUNT> {
         debug_assert!(coefficients.len() <= self.size);
         let mut values = vec![self.parameters.zero(); self.size];
         values[..coefficients.len()].copy_from_slice(coefficients);
-        self.cyclic_transform(&mut values, &self.forward_twiddles);
+        radix_two_cyclic_transform_in_place(
+            self.parameters,
+            &mut values,
+            &self.forward_twiddles,
+        );
         values
-    }
-
-    fn cyclic_transform(&self, values: &mut [[u64; LIMB_COUNT]], twiddles: &[[u64; LIMB_COUNT]]) {
-        bit_reverse_permute(values);
-        let mut half_block = 1;
-        while half_block < self.size {
-            let block = half_block * 2;
-            let twiddle_stride = self.size / block;
-            for block_start in (0..self.size).step_by(block) {
-                for offset in 0..half_block {
-                    let twiddle = &twiddles[offset * twiddle_stride];
-                    let even_index = block_start + offset;
-                    let odd_index = even_index + half_block;
-                    let twisted = self.parameters.multiply(&values[odd_index], twiddle);
-                    let even = values[even_index];
-                    values[even_index] = self.parameters.add(&even, &twisted);
-                    values[odd_index] = self.parameters.subtract(&even, &twisted);
-                }
-            }
-            half_block = block;
-        }
     }
 }
 
@@ -248,20 +236,6 @@ fn compute_primitive_two_adic_root<const LIMB_COUNT: usize>(
     // The 2-adic order is 64 for these fields; a primitive root is found well
     // within the tried candidates.
     unreachable!("no primitive two-adic root found among small candidates");
-}
-
-fn bit_reverse_permute<const LIMB_COUNT: usize>(values: &mut [[u64; LIMB_COUNT]]) {
-    let size = values.len();
-    if size <= 1 {
-        return;
-    }
-    let shift = size.leading_zeros() + 1;
-    for index in 0..size {
-        let reversed = index.reverse_bits() >> shift;
-        if index < reversed {
-            values.swap(index, reversed);
-        }
-    }
 }
 
 fn invalid_domain(message: &str) -> CanonicalError {

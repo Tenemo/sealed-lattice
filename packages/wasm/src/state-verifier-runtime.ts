@@ -1,12 +1,13 @@
 import type {
     RefusalReason,
     StateCapabilityKind,
+    StateIntentKind,
     VerificationResult,
 } from '@sealed-lattice/types';
 import {
     foundationProfile,
-    refusalReasonCodes,
     stateCapabilityKinds,
+    stateIntentKinds,
 } from '@sealed-lattice/types';
 
 import {
@@ -17,6 +18,7 @@ import {
     type CanonicalStreamDomain,
     type CanonicalStreamVerifierLease,
 } from './canonical-stream-runtime.js';
+import { refusalReasonByCode } from './transcript-core-bridge/kernel-errors.js';
 import type { TranscriptCoreKernel } from './transcript-core-bridge/kernel-types.js';
 
 type StateVerifierKernelContext = Readonly<{
@@ -32,6 +34,15 @@ type StateVerifierKernelContext = Readonly<{
         sessionHandle: number,
         capabilityPointer: number,
         capabilityLength: number,
+    ): number;
+    certifyIntent(
+        sessionHandle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        verifiedIntentHandle: number,
+        canonicalStateCertificatePointer: number,
+        canonicalStateCertificateLength: number,
+        statusPointer: number,
     ): number;
     deallocate(pointer: number, length: number): void;
     memory: WebAssembly.Memory;
@@ -57,6 +68,45 @@ type StateVerifierKernelContext = Readonly<{
         canonicalOutputIntentCarrierLength: number,
         canonicalStateCertificatePointer: number,
         canonicalStateCertificateLength: number,
+        statusPointer: number,
+    ): number;
+    prepareOutput(
+        sessionHandle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        streamHandle: number,
+        streamCapabilityPointer: number,
+        streamCapabilityLength: number,
+        verifiedReservationHandle: number,
+        canonicalOutputIntentCarrierPointer: number,
+        canonicalOutputIntentCarrierLength: number,
+        statusPointer: number,
+    ): number;
+    prepareRecovery(
+        sessionHandle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        subjectParticipantIdentityPointer: number,
+        subjectParticipantIdentityLength: number,
+        capabilityKindCode: number,
+        predecessorRecoveryHandle: number,
+        preservedIntentHandle: number,
+        canonicalRecoveryTransitionCarrierPointer: number,
+        canonicalRecoveryTransitionCarrierLength: number,
+        statusPointer: number,
+    ): number;
+    prepareReservation(
+        sessionHandle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        subjectParticipantIdentityPointer: number,
+        subjectParticipantIdentityLength: number,
+        capabilityKindCode: number,
+        predecessorRecoveryHandle: number,
+        expectedAuthorizationHashPointer: number,
+        expectedAuthorizationHashLength: number,
+        canonicalReservationIntentCarrierPointer: number,
+        canonicalReservationIntentCarrierLength: number,
         statusPointer: number,
     ): number;
     verifyRecovery(
@@ -112,8 +162,8 @@ const wasm32WordByteLength = 4;
 const maximumWasm32UnsignedInteger = 0xffff_ffff;
 const fixedConfigurationByteLength = 2 + 3 * stateHashByteLength + 2 + 4;
 
-export { stateCapabilityKinds };
-export type { StateCapabilityKind };
+export { stateCapabilityKinds, stateIntentKinds };
+export type { StateCapabilityKind, StateIntentKind };
 
 type StateOutputCapabilityKind =
     | typeof stateCapabilityKinds.ballotCandidateList
@@ -123,6 +173,26 @@ type StateOutputCapabilityKind =
 declare const verifiedStateReservationBrand: unique symbol;
 declare const verifiedStateOutputBrand: unique symbol;
 declare const verifiedStateRecoveryBrand: unique symbol;
+declare const verifiedStateReservationIntentBrand: unique symbol;
+declare const verifiedStateOutputIntentBrand: unique symbol;
+declare const verifiedStateRecoveryIntentBrand: unique symbol;
+
+export type VerifiedStateReservationIntent = Readonly<{
+    readonly [verifiedStateReservationIntentBrand]: true;
+}>;
+
+export type VerifiedStateOutputIntent = Readonly<{
+    readonly [verifiedStateOutputIntentBrand]: true;
+}>;
+
+export type VerifiedStateRecoveryIntent = Readonly<{
+    readonly [verifiedStateRecoveryIntentBrand]: true;
+}>;
+
+export type VerifiedStateIntent =
+    | VerifiedStateOutputIntent
+    | VerifiedStateRecoveryIntent
+    | VerifiedStateReservationIntent;
 
 export type VerifiedStateReservation = Readonly<{
     readonly [verifiedStateReservationBrand]: true;
@@ -153,12 +223,22 @@ export type StateReservationVerification = Readonly<{
     verifiedPredecessorRecovery?: VerifiedStateRecovery;
 }>;
 
+export type StateReservationIntentVerification = Omit<
+    StateReservationVerification,
+    'canonicalStateCertificate'
+>;
+
 export type StateOutputVerification = Readonly<{
     canonicalOutputIntentCarrier: Uint8Array;
     canonicalStateCertificate: Uint8Array;
     exactOutputDescriptorBytes: Uint8Array;
     verifiedReservation: VerifiedStateReservation;
 }>;
+
+export type StateOutputIntentVerification = Omit<
+    StateOutputVerification,
+    'canonicalStateCertificate'
+>;
 
 export type StateRecoveryVerification = Readonly<{
     canonicalRecoveryTransitionCarrier: Uint8Array;
@@ -168,6 +248,11 @@ export type StateRecoveryVerification = Readonly<{
     subjectParticipantIdentity: Uint8Array;
     verifiedPredecessorRecovery?: VerifiedStateRecovery;
 }>;
+
+export type StateRecoveryIntentVerification = Omit<
+    StateRecoveryVerification,
+    'canonicalStateCertificate'
+>;
 
 export type StateOutputVerificationLeaseState =
     | 'active'
@@ -187,26 +272,56 @@ export type StateOutputVerificationLease = Readonly<{
     state(): StateOutputVerificationLeaseState;
 }>;
 
+export type StateOutputIntentVerificationLease = Readonly<{
+    readonly chunkCount: number;
+    readonly totalByteLength: number;
+    absorbChunk(
+        chunkIndex: number,
+        bytes: ArrayBuffer,
+    ): VerificationResult<undefined>;
+    cancel(): void;
+    finish(): VerificationResult<VerifiedStateOutputIntent>;
+    state(): StateOutputVerificationLeaseState;
+}>;
+
 export type StateVerifierSessionState = 'active' | 'cancelled';
 
 export type StateVerifierSession = Readonly<{
     cancel(): void;
+    certifyIntent(input: {
+        canonicalStateCertificate: Uint8Array;
+        verifiedIntent: VerifiedStateIntent;
+    }): VerificationResult<
+        VerifiedStateOutput | VerifiedStateRecovery | VerifiedStateReservation
+    >;
+    openOutputIntentVerification(
+        input: StateOutputIntentVerification,
+    ): VerificationResult<StateOutputIntentVerificationLease>;
     openOutputVerification(
         input: StateOutputVerification,
     ): VerificationResult<StateOutputVerificationLease>;
     releaseVerifiedObject(
         verifiedObject:
             | VerifiedStateOutput
+            | VerifiedStateOutputIntent
             | VerifiedStateRecovery
-            | VerifiedStateReservation,
+            | VerifiedStateRecoveryIntent
+            | VerifiedStateReservation
+            | VerifiedStateReservationIntent,
     ): VerificationResult<undefined>;
     state(): StateVerifierSessionState;
     verifyRecovery(
         input: StateRecoveryVerification,
     ): VerificationResult<VerifiedStateRecovery>;
+    verifyRecoveryIntent(
+        input: StateRecoveryIntentVerification,
+    ): VerificationResult<VerifiedStateRecoveryIntent>;
     verifyReservation(
         input: StateReservationVerification,
     ): VerificationResult<VerifiedStateReservation>;
+    verifyReservationIntent(
+        input: StateReservationIntentVerification,
+    ): VerificationResult<VerifiedStateReservationIntent>;
 }>;
 
 class StateVerifierInternalError extends Error {
@@ -229,7 +344,13 @@ class StateVerifierRefusalError extends Error {
     }
 }
 
-type VerifiedObjectKind = 'output' | 'recovery' | 'reservation';
+type VerifiedObjectKind =
+    | 'output'
+    | 'output-intent'
+    | 'recovery'
+    | 'recovery-intent'
+    | 'reservation'
+    | 'reservation-intent';
 
 type VerifiedObjectRecord = {
     active: boolean;
@@ -241,13 +362,6 @@ type VerifiedObjectRecord = {
 };
 
 const verifiedObjectRecords = new WeakMap<object, VerifiedObjectRecord>();
-
-const refusalReasonByCode = new Map<number, RefusalReason>(
-    Object.entries(refusalReasonCodes).map(([reason, code]) => [
-        code,
-        reason as RefusalReason,
-    ]),
-);
 
 const refused = <Value>(
     refusalReason: RefusalReason,
@@ -268,7 +382,7 @@ const isStateCapabilityKind = (value: unknown): value is StateCapabilityKind =>
     value === stateCapabilityKinds.setupActionRandomnessRoot ||
     value === stateCapabilityKinds.setupPublicSeedBranch ||
     value === stateCapabilityKinds.setupDealerSetBranch ||
-    value === stateCapabilityKinds.setupRelinearizationRoundOneBranch ||
+    value === stateCapabilityKinds.setupRkgRoundOneBranch ||
     value === stateCapabilityKinds.setupTerminalPackage;
 
 const isStateOutputCapabilityKind = (
@@ -516,17 +630,15 @@ const canonicalStreamRefusalReason = (
     return undefined;
 };
 
-class StateOutputVerificationLeaseImplementation implements StateOutputVerificationLease {
+class StateOutputVerificationLeaseImplementation<Value> {
     readonly #streamLease: CanonicalStreamVerifierLease;
-    readonly #finishResult: () =>
-        | VerificationResult<VerifiedStateOutput>
-        | undefined;
+    readonly #finishResult: () => VerificationResult<Value> | undefined;
     readonly #onTerminal: () => void;
     #state: StateOutputVerificationLeaseState = 'active';
 
     public constructor(
         streamLease: CanonicalStreamVerifierLease,
-        finishResult: () => VerificationResult<VerifiedStateOutput> | undefined,
+        finishResult: () => VerificationResult<Value> | undefined,
         onTerminal: () => void,
     ) {
         this.#streamLease = streamLease;
@@ -572,7 +684,7 @@ class StateOutputVerificationLeaseImplementation implements StateOutputVerificat
         this.#onTerminal();
     }
 
-    public finish(): VerificationResult<VerifiedStateOutput> {
+    public finish(): VerificationResult<Value> {
         if (this.#state !== 'active') {
             return refused('consumedState');
         }
@@ -608,8 +720,9 @@ class StateVerifierSessionImplementation implements StateVerifierSession {
     readonly #kernel: TranscriptCoreKernel;
     readonly #handle: number;
     readonly #verifiedObjectRecords = new Set<VerifiedObjectRecord>();
-    readonly #outputLeases =
-        new Set<StateOutputVerificationLeaseImplementation>();
+    readonly #outputLeases = new Set<
+        StateOutputVerificationLeaseImplementation<unknown>
+    >();
     #capabilityPointer: number;
     #state: StateVerifierSessionState = 'active';
 
@@ -697,6 +810,222 @@ class StateVerifierSessionImplementation implements StateVerifierSession {
         );
     }
 
+    public verifyReservationIntent(
+        input: StateReservationIntentVerification,
+    ): VerificationResult<VerifiedStateReservationIntent> {
+        if (this.#state !== 'active') {
+            return refused('consumedState');
+        }
+        if (
+            typeof input !== 'object' ||
+            input === null ||
+            Array.isArray(input) ||
+            !isStateCapabilityKind(input.capabilityKind)
+        ) {
+            return refused('wrongTypeOrLength');
+        }
+        for (const [bytes, expectedByteLength] of [
+            [input.subjectParticipantIdentity, stateIdentityByteLength],
+            [input.expectedAuthorizationHash, stateHashByteLength],
+            [input.canonicalReservationIntentCarrier, undefined],
+        ] as const) {
+            const refusalReason = requireCopiedBytes(bytes, expectedByteLength);
+            if (refusalReason !== undefined) {
+                return refused(refusalReason);
+            }
+        }
+        let predecessorHandle = 0;
+        if (input.verifiedPredecessorRecovery !== undefined) {
+            const resolved = resolveVerifiedObject(
+                input.verifiedPredecessorRecovery,
+                this,
+                ['recovery'],
+            );
+            if ('refusalReason' in resolved) {
+                return refused(resolved.refusalReason);
+            }
+            predecessorHandle = resolved.record.handle;
+        }
+
+        return this.#runHandleVerification(
+            'state reservation-intent verification',
+            [
+                input.subjectParticipantIdentity,
+                input.expectedAuthorizationHash,
+                input.canonicalReservationIntentCarrier,
+            ],
+            (pointers, statusPointer) =>
+                this.#context.prepareReservation(
+                    this.#handle,
+                    this.#capabilityPointer,
+                    stateVerifierCapabilityByteLength,
+                    pointers[0],
+                    input.subjectParticipantIdentity.byteLength,
+                    input.capabilityKind,
+                    predecessorHandle,
+                    pointers[1],
+                    input.expectedAuthorizationHash.byteLength,
+                    pointers[2],
+                    input.canonicalReservationIntentCarrier.byteLength,
+                    statusPointer,
+                ),
+            (handle) =>
+                this.#issueVerifiedObject<VerifiedStateReservationIntent>(
+                    handle,
+                    'reservation-intent',
+                    input.capabilityKind,
+                ),
+        );
+    }
+
+    public certifyIntent(input: {
+        canonicalStateCertificate: Uint8Array;
+        verifiedIntent: VerifiedStateIntent;
+    }): VerificationResult<
+        VerifiedStateOutput | VerifiedStateRecovery | VerifiedStateReservation
+    > {
+        if (this.#state !== 'active') {
+            return refused('consumedState');
+        }
+        if (
+            typeof input !== 'object' ||
+            input === null ||
+            Array.isArray(input)
+        ) {
+            return refused('wrongTypeOrLength');
+        }
+        const certificateRefusal = requireCopiedBytes(
+            input.canonicalStateCertificate,
+        );
+        if (certificateRefusal !== undefined) {
+            return refused(certificateRefusal);
+        }
+        const resolved = resolveVerifiedObject(input.verifiedIntent, this, [
+            'output-intent',
+            'recovery-intent',
+            'reservation-intent',
+        ]);
+        if ('refusalReason' in resolved) {
+            return refused(resolved.refusalReason);
+        }
+        const certifiedKind: Extract<
+            VerifiedObjectKind,
+            'output' | 'recovery' | 'reservation'
+        > =
+            resolved.record.kind === 'output-intent'
+                ? 'output'
+                : resolved.record.kind === 'recovery-intent'
+                  ? 'recovery'
+                  : 'reservation';
+
+        return this.#runHandleVerification(
+            'state intent certification',
+            [input.canonicalStateCertificate],
+            (pointers, statusPointer) =>
+                this.#context.certifyIntent(
+                    this.#handle,
+                    this.#capabilityPointer,
+                    stateVerifierCapabilityByteLength,
+                    resolved.record.handle,
+                    pointers[0],
+                    input.canonicalStateCertificate.byteLength,
+                    statusPointer,
+                ),
+            (handle) =>
+                this.#issueVerifiedObject<
+                    | VerifiedStateOutput
+                    | VerifiedStateRecovery
+                    | VerifiedStateReservation
+                >(handle, certifiedKind, resolved.record.capabilityKind),
+        );
+    }
+
+    public openOutputIntentVerification(
+        input: StateOutputIntentVerification,
+    ): VerificationResult<StateOutputIntentVerificationLease> {
+        if (this.#state !== 'active') {
+            return refused('consumedState');
+        }
+        if (
+            typeof input !== 'object' ||
+            input === null ||
+            Array.isArray(input)
+        ) {
+            return refused('wrongTypeOrLength');
+        }
+        const resolvedReservation = resolveVerifiedObject(
+            input.verifiedReservation,
+            this,
+            ['reservation'],
+        );
+        if ('refusalReason' in resolvedReservation) {
+            return refused(resolvedReservation.refusalReason);
+        }
+        const capabilityKind = resolvedReservation.record.capabilityKind;
+        if (!isStateOutputCapabilityKind(capabilityKind)) {
+            return refused('wrongTypeOrLength');
+        }
+        for (const bytes of [
+            input.canonicalOutputIntentCarrier,
+            input.exactOutputDescriptorBytes,
+        ]) {
+            const refusalReason = requireCopiedBytes(bytes);
+            if (refusalReason !== undefined) {
+                return refused(refusalReason);
+            }
+        }
+
+        const outputIntentCarrier = Uint8Array.from(
+            input.canonicalOutputIntentCarrier,
+        );
+        let finishResult:
+            | VerificationResult<VerifiedStateOutputIntent>
+            | undefined;
+        let outputLease:
+            | StateOutputVerificationLeaseImplementation<VerifiedStateOutputIntent>
+            | undefined;
+        try {
+            const streamLease = openCanonicalStreamVerifierForAtomicFinish({
+                atomicFinish: (stream) => {
+                    finishResult = this.#finishOutputIntent(
+                        resolvedReservation.record,
+                        outputIntentCarrier,
+                        stream,
+                    );
+                },
+                descriptorBytes: input.exactOutputDescriptorBytes,
+                kernel: this.#kernel,
+                streamDomain: stateExactOutputDomain(capabilityKind),
+            });
+            outputLease = new StateOutputVerificationLeaseImplementation(
+                streamLease,
+                () => finishResult,
+                () => {
+                    if (
+                        resolvedReservation.record.activeOutputLeaseCount === 0
+                    ) {
+                        throw new StateVerifierInternalError(
+                            'A state output-intent lease released an unpinned reservation.',
+                        );
+                    }
+                    resolvedReservation.record.activeOutputLeaseCount -= 1;
+                    if (outputLease !== undefined) {
+                        this.#outputLeases.delete(outputLease);
+                    }
+                },
+            );
+            resolvedReservation.record.activeOutputLeaseCount += 1;
+            this.#outputLeases.add(outputLease);
+            return valid(outputLease);
+        } catch (error) {
+            const refusalReason = canonicalStreamRefusalReason(error);
+            if (refusalReason !== undefined) {
+                return refused(refusalReason);
+            }
+            throw error;
+        }
+    }
+
     public openOutputVerification(
         input: StateOutputVerification,
     ): VerificationResult<StateOutputVerificationLease> {
@@ -740,7 +1069,9 @@ class StateVerifierSessionImplementation implements StateVerifierSession {
             input.canonicalStateCertificate,
         );
         let finishResult: VerificationResult<VerifiedStateOutput> | undefined;
-        let outputLease: StateOutputVerificationLeaseImplementation | undefined;
+        let outputLease:
+            | StateOutputVerificationLeaseImplementation<VerifiedStateOutput>
+            | undefined;
         try {
             const streamLease = openCanonicalStreamVerifierForAtomicFinish({
                 atomicFinish: (stream) => {
@@ -865,19 +1196,102 @@ class StateVerifierSessionImplementation implements StateVerifierSession {
         );
     }
 
+    public verifyRecoveryIntent(
+        input: StateRecoveryIntentVerification,
+    ): VerificationResult<VerifiedStateRecoveryIntent> {
+        if (this.#state !== 'active') {
+            return refused('consumedState');
+        }
+        if (
+            typeof input !== 'object' ||
+            input === null ||
+            Array.isArray(input) ||
+            !isStateCapabilityKind(input.capabilityKind)
+        ) {
+            return refused('wrongTypeOrLength');
+        }
+        for (const [bytes, expectedByteLength] of [
+            [input.subjectParticipantIdentity, stateIdentityByteLength],
+            [input.canonicalRecoveryTransitionCarrier, undefined],
+        ] as const) {
+            const refusalReason = requireCopiedBytes(bytes, expectedByteLength);
+            if (refusalReason !== undefined) {
+                return refused(refusalReason);
+            }
+        }
+        let predecessorHandle = 0;
+        if (input.verifiedPredecessorRecovery !== undefined) {
+            const resolved = resolveVerifiedObject(
+                input.verifiedPredecessorRecovery,
+                this,
+                ['recovery'],
+            );
+            if ('refusalReason' in resolved) {
+                return refused(resolved.refusalReason);
+            }
+            predecessorHandle = resolved.record.handle;
+        }
+        let preservedIntentHandle = 0;
+        if (input.preservedStateIntent !== undefined) {
+            const resolved = resolveVerifiedObject(
+                input.preservedStateIntent,
+                this,
+                ['reservation', 'output'],
+            );
+            if ('refusalReason' in resolved) {
+                return refused(resolved.refusalReason);
+            }
+            preservedIntentHandle = resolved.record.handle;
+        }
+
+        return this.#runHandleVerification(
+            'state recovery-intent verification',
+            [
+                input.subjectParticipantIdentity,
+                input.canonicalRecoveryTransitionCarrier,
+            ],
+            (pointers, statusPointer) =>
+                this.#context.prepareRecovery(
+                    this.#handle,
+                    this.#capabilityPointer,
+                    stateVerifierCapabilityByteLength,
+                    pointers[0],
+                    input.subjectParticipantIdentity.byteLength,
+                    input.capabilityKind,
+                    predecessorHandle,
+                    preservedIntentHandle,
+                    pointers[1],
+                    input.canonicalRecoveryTransitionCarrier.byteLength,
+                    statusPointer,
+                ),
+            (handle) =>
+                this.#issueVerifiedObject<VerifiedStateRecoveryIntent>(
+                    handle,
+                    'recovery-intent',
+                    input.capabilityKind,
+                ),
+        );
+    }
+
     public releaseVerifiedObject(
         verifiedObject:
             | VerifiedStateOutput
+            | VerifiedStateOutputIntent
             | VerifiedStateRecovery
-            | VerifiedStateReservation,
+            | VerifiedStateRecoveryIntent
+            | VerifiedStateReservation
+            | VerifiedStateReservationIntent,
     ): VerificationResult<undefined> {
         if (this.#state !== 'active') {
             return refused('consumedState');
         }
         const resolved = resolveVerifiedObject(verifiedObject, this, [
             'reservation',
+            'reservation-intent',
             'output',
+            'output-intent',
             'recovery',
+            'recovery-intent',
         ]);
         if ('refusalReason' in resolved) {
             return refused(resolved.refusalReason);
@@ -943,6 +1357,50 @@ class StateVerifierSessionImplementation implements StateVerifierSession {
             stateVerifierCapabilityByteLength,
         );
         this.#capabilityPointer = 0;
+    }
+
+    #finishOutputIntent(
+        reservationRecord: VerifiedObjectRecord,
+        outputIntentCarrier: Uint8Array,
+        stream: Readonly<{
+            streamCapabilityLength: number;
+            streamCapabilityPointer: number;
+            streamHandle: number;
+        }>,
+    ): VerificationResult<VerifiedStateOutputIntent> {
+        if (this.#state !== 'active' || !reservationRecord.active) {
+            throw new StateVerifierInternalError(
+                'A state output-intent transaction lost its pinned reservation.',
+            );
+        }
+        if (reservationRecord.session !== this) {
+            throw new StateVerifierInternalError(
+                'A state output-intent transaction crossed verifier sessions.',
+            );
+        }
+        return this.#runHandleVerification(
+            'state output-intent verification',
+            [outputIntentCarrier],
+            (pointers, statusPointer) =>
+                this.#context.prepareOutput(
+                    this.#handle,
+                    this.#capabilityPointer,
+                    stateVerifierCapabilityByteLength,
+                    stream.streamHandle,
+                    stream.streamCapabilityPointer,
+                    stream.streamCapabilityLength,
+                    reservationRecord.handle,
+                    pointers[0],
+                    outputIntentCarrier.byteLength,
+                    statusPointer,
+                ),
+            (handle) =>
+                this.#issueVerifiedObject<VerifiedStateOutputIntent>(
+                    handle,
+                    'output-intent',
+                    reservationRecord.capabilityKind,
+                ),
+        );
     }
 
     #finishOutput(

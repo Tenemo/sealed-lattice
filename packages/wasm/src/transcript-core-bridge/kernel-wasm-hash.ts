@@ -1,10 +1,7 @@
-// wasm32 `usize` is 4 bytes; used to read/allocate the LE u32 output-length cell.
 export const wasm32UsizeByteLength = 4;
 
-// 8 bytes = the `\0asm` magic (4) plus the version word (4) at the module start.
 export const wasmHeaderByteLength = 8;
 
-// Section id 0 is the WASM custom-section id (debug / producers / name sections).
 export const wasmCustomSectionId = 0;
 
 export const sha256HexPattern = /^[a-f0-9]{64}$/u;

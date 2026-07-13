@@ -1,6 +1,4 @@
 mod codec;
-#[cfg(test)]
-pub use codec::decode_standard_base64;
 pub use codec::{decode_hex, encode_hex};
 
 #[cfg(test)]

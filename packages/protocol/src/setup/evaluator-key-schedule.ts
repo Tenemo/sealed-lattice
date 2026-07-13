@@ -9,10 +9,7 @@ import {
     contextFields,
     type JsonRecord,
 } from './common-fields.js';
-import type {
-    PublicKeyShareProofSet,
-    PublicKeyShareSet,
-} from './public-key-share-records.js';
+import type { PublicKeyShareSet } from './public-key-share-records.js';
 import type { CollectiveBgvSetupContext } from './vss-share-verification-records.js';
 
 export type RelinearizationLevelScheduleEntry = Readonly<{
@@ -39,7 +36,6 @@ export type EvaluatorKeySchedule = Readonly<
         readonly relinearizationCrpRoot: ProtocolHash;
         readonly galoisKeyCrpRoot: ProtocolHash;
         readonly publicKeyShareSetRoot: ProtocolHash;
-        readonly publicKeyShareProofSetRoot: ProtocolHash;
         readonly relinearizationLevelSchedule: readonly RelinearizationLevelScheduleEntry[];
         readonly requiredGaloisKeySchedule: readonly RequiredGaloisKeyScheduleEntry[];
         readonly requiredGaloisSetHash: ProtocolHash;
@@ -55,7 +51,6 @@ type EvaluatorKeyScheduleInput = {
     readonly relinearizationCrpRoot: ProtocolHash;
     readonly galoisKeyCrpRoot: ProtocolHash;
     readonly publicKeyShares: PublicKeyShareSet;
-    readonly publicKeyShareProofs: PublicKeyShareProofSet;
     readonly requiredGaloisKeySchedule: readonly RequiredGaloisKeyScheduleEntry[];
 };
 
@@ -85,7 +80,7 @@ const validateRequiredGaloisSchedule = (
     return sortedEntries;
 };
 
-export const createRequiredGaloisSet = (
+const createRequiredGaloisSet = (
     rnsLimbCount: number,
     entries: readonly RequiredGaloisKeyScheduleEntry[],
 ): RequiredGaloisSet => {
@@ -102,7 +97,7 @@ export const createRequiredGaloisSet = (
 // this level and lower-level uses reuse the same key through CRT-idempotent
 // truncation, so the frozen schedule carries one relinearization entry per
 // round and no per-level entries. This must match the kernel evaluator constant.
-export const selectedEvaluatorWorkingLevel = 16;
+const selectedEvaluatorWorkingLevel = 16;
 
 const createRelinearizationLevelSchedule = (
     rnsLimbCount: number,
@@ -142,20 +137,6 @@ export const createEvaluatorKeySchedule = (
         input.publicKeyShares,
         'publicKeyShares',
     );
-    assertContextMatches(
-        input.setupContext,
-        input.publicKeyShareProofs,
-        'publicKeyShareProofs',
-    );
-    if (
-        input.publicKeyShareProofs.publicKeyShareSetRoot !==
-        input.publicKeyShares.publicKeyShareSetRoot
-    ) {
-        throw new Error(
-            'public-key share records must bind the accepted share-set root.',
-        );
-    }
-
     const rnsLimbCount = input.qSharePrimes.length;
     const requiredGaloisSet = createRequiredGaloisSet(
         rnsLimbCount,
@@ -169,8 +150,6 @@ export const createEvaluatorKeySchedule = (
         relinearizationCrpRoot: input.relinearizationCrpRoot,
         galoisKeyCrpRoot: input.galoisKeyCrpRoot,
         publicKeyShareSetRoot: input.publicKeyShares.publicKeyShareSetRoot,
-        publicKeyShareProofSetRoot:
-            input.publicKeyShareProofs.publicKeyShareProofSetRoot,
         relinearizationLevelSchedule:
             createRelinearizationLevelSchedule(rnsLimbCount),
         requiredGaloisKeySchedule: requiredGaloisSet.entries,

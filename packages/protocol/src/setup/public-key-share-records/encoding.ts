@@ -1,6 +1,8 @@
 import { hash512Hex } from '@sealed-lattice/crypto';
 
+import { coefficientVectorToLittleEndianBytes } from '../coefficient-vector-encoding.js';
 import {
+    assertNonEmptyString,
     assertProtocolHash,
     assertNonNegativeSafeInteger,
     assertPositiveSafeInteger,
@@ -19,35 +21,7 @@ export {
 } from '../common-fields.js';
 
 export { assertNonNegativeSafeInteger, assertPositiveSafeInteger };
-
-export const assertNonEmptyString = (
-    value: string,
-    fieldName: string,
-): void => {
-    if (value.length === 0) {
-        throw new TypeError(`${fieldName} must be non-empty.`);
-    }
-};
-
-const coefficientVectorBytes = (
-    coefficients: readonly number[],
-): Uint8Array => {
-    const bytes = new Uint8Array(coefficients.length * 8);
-    coefficients.forEach((coefficient, coefficientIndex) => {
-        if (!Number.isSafeInteger(coefficient) || coefficient < 0) {
-            throw new TypeError(
-                'coefficient vector entries must be non-negative safe integers.',
-            );
-        }
-        let value = BigInt(coefficient);
-        for (let byteIndex = 0; byteIndex < 8; byteIndex += 1) {
-            bytes[coefficientIndex * 8 + byteIndex] = Number(value & 0xffn);
-            value >>= 8n;
-        }
-    });
-
-    return bytes;
-};
+export { assertNonEmptyString };
 
 export const publicKeyShareMaterialBinaryMagic = new Uint8Array([
     0x53, 0x4c, 0x50, 0x4b, 0x53, 0x4d, 0x56, 0x31,
@@ -57,7 +31,7 @@ export const coefficientVectorHash512 = (
     coefficients: readonly number[],
 ): string =>
     hash512Hex(publicKeyShareCoefficientVectorHashDomain, [
-        coefficientVectorBytes(coefficients),
+        coefficientVectorToLittleEndianBytes(coefficients),
     ]);
 
 export const sortedByRosterPosition = <

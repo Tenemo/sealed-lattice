@@ -1,6 +1,7 @@
 import type { RefusalReason } from '@sealed-lattice/types';
-import { foundationProfile, refusalReasonCodes } from '@sealed-lattice/types';
+import { foundationProfile } from '@sealed-lattice/types';
 
+import { refusalReasonByCode } from './transcript-core-bridge/kernel-errors.js';
 import type { TranscriptCoreKernelContextOwner } from './transcript-core-bridge/kernel-types.js';
 
 const canonicalStreamCapabilityByteLength = 32;
@@ -322,17 +323,14 @@ type ActiveLease = {
     totalByteLength: number;
 };
 
-const refusalReasonByCode = new Map<number, RefusalReason>(
-    Object.entries(refusalReasonCodes).map(([reason, code]) => [
-        code,
-        reason as RefusalReason,
-    ]),
+const canonicalStreamDomainCodes = new Set<number>(
+    Object.values(canonicalStreamDomains),
 );
 
 const isCanonicalStreamDomain = (
     value: number,
 ): value is CanonicalStreamDomain =>
-    Number.isSafeInteger(value) && value >= 1 && value <= 27;
+    Number.isSafeInteger(value) && canonicalStreamDomainCodes.has(value);
 
 const isArrayBuffer = (value: unknown): value is ArrayBuffer =>
     Object.prototype.toString.call(value) === '[object ArrayBuffer]';

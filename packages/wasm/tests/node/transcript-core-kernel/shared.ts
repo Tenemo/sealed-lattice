@@ -9,9 +9,6 @@ import {
     type TranscriptCoreKernel,
 } from '#packages/wasm/src/transcript-core-bridge';
 
-const cloneJsonValue = <JsonValue>(value: JsonValue): JsonValue =>
-    JSON.parse(JSON.stringify(value)) as JsonValue;
-
 const singleZeroByteSha256Hex =
     '6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d';
 
@@ -199,7 +196,6 @@ afterEach(() => {
 });
 
 export {
-    cloneJsonValue,
     textEncoder,
     textDecoder,
     wasmHeader,

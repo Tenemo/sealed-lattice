@@ -1,6 +1,7 @@
 import { stripVTControlCharacters } from 'node:util';
 
 import type { CommandOutputEvent, CommandRunObserver } from './run-command.js';
+import { createStreamingLineAccumulator } from './streaming-lines.js';
 
 export type CheckFailureDetail = {
     readonly commandDescription?: string;
@@ -24,28 +25,25 @@ const formatDuration = (durationMilliseconds: number): string =>
 
 class RecentLineBuffer {
     readonly #lines: string[] = [];
-    #remainder = '';
+    readonly #streamingLines = createStreamingLineAccumulator((line) => {
+        this.#push(stripVTControlCharacters(line));
+    });
 
     append(chunk: string): void {
-        const text = stripVTControlCharacters(`${this.#remainder}${chunk}`);
-        const lines = text.split(/\r\n|\n|\r/u);
-        this.#remainder = lines.pop() ?? '';
-        for (const line of lines) {
-            this.#push(line);
-        }
+        this.#streamingLines.push(chunk);
     }
 
     finish(): void {
-        if (this.#remainder.length > 0) {
-            this.#push(this.#remainder);
-            this.#remainder = '';
-        }
+        this.#streamingLines.flush();
     }
 
     snapshot(): readonly string[] {
+        const remainder = stripVTControlCharacters(
+            this.#streamingLines.pending(),
+        );
         return [
             ...this.#lines,
-            ...(this.#remainder.length === 0 ? [] : [this.#remainder]),
+            ...(remainder.length === 0 ? [] : [remainder]),
         ].slice(-recentOutputLineLimit);
     }
 

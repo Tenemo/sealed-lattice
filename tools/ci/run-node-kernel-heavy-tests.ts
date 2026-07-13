@@ -52,14 +52,13 @@ export const buildNodeKernelHeavyTestCommand = (input: {
     );
     const guard = getProcessMemoryGuard();
 
-    return guard.addDiagnostics(
-        guard.guardCommand(unguardedCommand),
-        path.join(
+    return guard.guardCommand(unguardedCommand, {
+        diagnosticsPath: path.join(
             input.runDirectoryPath,
             'resources',
             'process-memory-guard-node-kernel-heavy.jsonl',
         ),
-    );
+    });
 };
 
 export const buildNodeKernelHeavyGuardVerificationCommand =

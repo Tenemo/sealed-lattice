@@ -53,36 +53,6 @@ pub enum CanonicalStreamDomain {
 }
 
 impl CanonicalStreamDomain {
-    pub const ALL: [Self; 27] = [
-        Self::PrivateMailboxCiphertext,
-        Self::DealerVssShareLinkageProof,
-        Self::RecipientAggregateThresholdShareProof,
-        Self::SameSecretProof,
-        Self::PublicKeyShareProof,
-        Self::CollectivePublicKeyAggregateProof,
-        Self::RelinearizationRoundOneProof,
-        Self::RelinearizationRoundOneAggregateProof,
-        Self::RelinearizationRoundTwoProof,
-        Self::GaloisShareProof,
-        Self::EvaluatorKeyAggregateProof,
-        Self::CollectivePublicKey,
-        Self::EvaluatorKeyStore,
-        Self::BallotCiphertext,
-        Self::BallotValidityProof,
-        Self::AggregateCiphertext,
-        Self::ReplayTargetIdentifierCiphertext,
-        Self::ReplayTargetOrderCiphertext,
-        Self::TargetIdentifierPartialDecryption,
-        Self::TargetOrderPartialDecryption,
-        Self::MaliciousTargetShareProof,
-        Self::CheckpointState,
-        Self::StateBallotCandidateListExactOutput,
-        Self::StateFinalitySignatureExactOutput,
-        Self::StateTargetReleaseExactOutput,
-        Self::PublicKeyShareMaterial,
-        Self::PublicEvaluationKeyMaterial,
-    ];
-
     pub const fn canonical_domain(self) -> &'static str {
         match self {
             Self::PrivateMailboxCiphertext => "sealed-lattice/stream/mailbox/ciphertext/v1",
@@ -98,13 +68,13 @@ impl CanonicalStreamDomain {
                 "sealed-lattice/stream/setup/collective-public-key-aggregate-proof/v1"
             }
             Self::RelinearizationRoundOneProof => {
-                "sealed-lattice/stream/setup/relinearization-round-one-proof/v1"
+                "sealed-lattice/stream/setup/rkg-round-one-proof/v1"
             }
             Self::RelinearizationRoundOneAggregateProof => {
-                "sealed-lattice/stream/setup/relinearization-round-one-aggregate-proof/v1"
+                "sealed-lattice/stream/setup/rkg-round-one-aggregate-proof/v1"
             }
             Self::RelinearizationRoundTwoProof => {
-                "sealed-lattice/stream/setup/relinearization-round-two-proof/v1"
+                "sealed-lattice/stream/setup/rkg-round-two-proof/v1"
             }
             Self::GaloisShareProof => "sealed-lattice/stream/setup/galois-share-proof/v1",
             Self::EvaluatorKeyAggregateProof => {
@@ -299,14 +269,6 @@ impl CanonicalStreamWriter {
         })
     }
 
-    pub const fn next_chunk_index(&self) -> usize {
-        self.next_chunk_index
-    }
-
-    pub const fn observed_byte_length(&self) -> u64 {
-        self.observed_byte_length
-    }
-
     pub fn absorb_chunk(
         &mut self,
         chunk_index: usize,
@@ -402,14 +364,6 @@ impl CanonicalStreamVerifier {
             state_exact_output_hasher,
             refusal_reason: None,
         })
-    }
-
-    pub const fn next_chunk_index(&self) -> usize {
-        self.next_chunk_index
-    }
-
-    pub const fn observed_byte_length(&self) -> u64 {
-        self.observed_byte_length
     }
 
     pub fn absorb_chunk(
@@ -693,25 +647,42 @@ mod tests {
     }
 
     #[test]
-    fn stream_domain_registry_is_closed_and_duplicate_free() {
-        let domains = CanonicalStreamDomain::ALL
-            .into_iter()
+    fn stream_domains_have_unique_labels_and_codes() {
+        let assigned_domains = (1..=27)
+            .map(|canonical_code| {
+                CanonicalStreamDomain::from_canonical_code(canonical_code)
+                    .expect("assigned canonical stream domain decodes")
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(assigned_domains.len(), 27);
+        for (canonical_code, stream_domain) in (1..=27).zip(assigned_domains.iter().copied()) {
+            assert_eq!(stream_domain.canonical_code(), canonical_code);
+            assert_eq!(
+                CanonicalStreamDomain::from_canonical_code(canonical_code),
+                Some(stream_domain)
+            );
+        }
+
+        let domains = assigned_domains
+            .iter()
+            .copied()
             .map(CanonicalStreamDomain::canonical_domain)
             .collect::<BTreeSet<_>>();
-        assert_eq!(domains.len(), CanonicalStreamDomain::ALL.len());
+        assert_eq!(domains.len(), assigned_domains.len());
         assert!(
             domains
                 .iter()
                 .all(|domain| domain.starts_with("sealed-lattice/stream/"))
         );
-        for stream_domain in CanonicalStreamDomain::ALL {
-            assert_eq!(
-                CanonicalStreamDomain::from_canonical_code(stream_domain.canonical_code()),
-                Some(stream_domain)
-            );
-        }
+        let codes = assigned_domains
+            .iter()
+            .copied()
+            .map(CanonicalStreamDomain::canonical_code)
+            .collect::<BTreeSet<_>>();
+        assert_eq!(codes.len(), assigned_domains.len());
         assert_eq!(CanonicalStreamDomain::from_canonical_code(0), None);
         assert_eq!(CanonicalStreamDomain::from_canonical_code(28), None);
+        assert_eq!(CanonicalStreamDomain::from_canonical_code(u32::MAX), None);
     }
 
     #[test]
@@ -777,7 +748,7 @@ mod tests {
                 CHUNK_DIGEST_DOMAIN,
                 &[
                     CanonicalItem::nonempty_ascii(
-                        CanonicalStreamDomain::BallotValidityProof.canonical_domain(),
+                        CanonicalStreamDomain::PublicKeyShareProof.canonical_domain(),
                     )
                     .expect("stream domain"),
                     CanonicalItem::unsigned32(u32::try_from(chunk_index).expect("chunk index")),
@@ -790,7 +761,7 @@ mod tests {
             .expect("canonical chunk digest");
             assert_eq!(
                 chunk_digest(
-                    CanonicalStreamDomain::BallotValidityProof,
+                    CanonicalStreamDomain::PublicKeyShareProof,
                     chunk_index,
                     &bytes,
                 )
@@ -806,10 +777,12 @@ mod tests {
             let bytes = (0..byte_length)
                 .map(|index| (index.wrapping_mul(131) & 0xff) as u8)
                 .collect::<Vec<_>>();
-            let descriptor = descriptor_for(CanonicalStreamDomain::BallotCiphertext, &bytes);
-            let mut verifier =
-                CanonicalStreamVerifier::new(CanonicalStreamDomain::BallotCiphertext, descriptor)
-                    .expect("descriptor begins a verifier");
+            let descriptor = descriptor_for(CanonicalStreamDomain::PublicKeyShareMaterial, &bytes);
+            let mut verifier = CanonicalStreamVerifier::new(
+                CanonicalStreamDomain::PublicKeyShareMaterial,
+                descriptor,
+            )
+            .expect("descriptor begins a verifier");
             for (chunk_index, chunk) in bytes
                 .chunks(FOUNDATION_PROFILE.stream_chunk_byte_length)
                 .enumerate()
@@ -876,10 +849,10 @@ mod tests {
             .expect("first chunk is complete");
         assert_eq!(truncated.finish(), Err(RefusalReason::WrongTypeOrLength));
 
-        assert!(CanonicalStreamWriter::new(CanonicalStreamDomain::CheckpointState, 0).is_err());
+        assert!(CanonicalStreamWriter::new(CanonicalStreamDomain::EvaluatorKeyStore, 0).is_err());
         assert!(
             CanonicalStreamWriter::new(
-                CanonicalStreamDomain::CheckpointState,
+                CanonicalStreamDomain::EvaluatorKeyStore,
                 u64::from(u32::MAX),
             )
             .is_err()
@@ -967,7 +940,7 @@ mod tests {
         );
 
         let mut wrong_domain = CanonicalStreamVerifier::new(
-            CanonicalStreamDomain::BallotCiphertext,
+            CanonicalStreamDomain::PublicKeyShareProof,
             descriptor_for(CanonicalStreamDomain::EvaluatorKeyStore, &bytes),
         )
         .expect("descriptor is structurally valid across domains");
@@ -978,8 +951,8 @@ mod tests {
 
         let one_chunk_bytes = [0x77; 32];
         let mut overlong = CanonicalStreamVerifier::new(
-            CanonicalStreamDomain::CheckpointState,
-            descriptor_for(CanonicalStreamDomain::CheckpointState, &one_chunk_bytes),
+            CanonicalStreamDomain::EvaluatorKeyStore,
+            descriptor_for(CanonicalStreamDomain::EvaluatorKeyStore, &one_chunk_bytes),
         )
         .expect("one-chunk descriptor");
         assert_eq!(
@@ -1016,7 +989,7 @@ mod tests {
             },
         ] {
             assert!(
-                CanonicalStreamVerifier::new(CanonicalStreamDomain::CheckpointState, descriptor)
+                CanonicalStreamVerifier::new(CanonicalStreamDomain::EvaluatorKeyStore, descriptor)
                     .is_err()
             );
         }

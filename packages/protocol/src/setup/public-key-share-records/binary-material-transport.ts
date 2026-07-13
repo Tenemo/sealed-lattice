@@ -5,8 +5,6 @@ import { copyCanonicalStreamDescriptor } from '../canonical-stream-descriptor.js
 import type { CollectiveBgvSetupContext } from '../vss-share-verification-records.js';
 
 import {
-    publicKeyShareMaterialEncoding,
-    publicKeyShareMaterialTransportEncoding,
     type BinaryChunkedPublicKeyShareMaterialBundle,
     type BinaryChunkedPublicKeyShareMaterialBundleInput,
     type BinaryChunkedPublicKeyShareMaterialSet,
@@ -27,8 +25,6 @@ import { contextFields } from './encoding.js';
 const binaryChunkedPublicKeyShareMaterialSet = (
     input: Readonly<{
         readonly setupContext: CollectiveBgvSetupContext;
-        readonly participantCount: number;
-        readonly rnsLimbCount: number;
         readonly ringDegree: number;
         readonly publicMatrixSeedHash: ProtocolHash;
         readonly publicKeyCrpRoot: ProtocolHash;
@@ -39,10 +35,7 @@ const binaryChunkedPublicKeyShareMaterialSet = (
 ): BinaryChunkedPublicKeyShareMaterialSet => {
     const materialSetWithoutRoot = {
         objectType: 'PublicKeyShareMaterialSet',
-        materialEncoding: publicKeyShareMaterialTransportEncoding,
         ...contextFields(input.setupContext),
-        participantCount: input.participantCount,
-        rnsLimbCount: input.rnsLimbCount,
         ringDegree: input.ringDegree,
         publicMatrixSeedHash: input.publicMatrixSeedHash,
         publicKeyCrpRoot: input.publicKeyCrpRoot,
@@ -100,27 +93,24 @@ const finishPublicKeyShareMaterialTransport = async (
 export const createBinaryChunkedPublicKeyShareMaterialTransport = async (
     input: BinaryChunkedPublicKeyShareMaterialTransportInput,
 ): Promise<BinaryChunkedPublicKeyShareMaterialTransport> => {
-    if (input.materialSet.materialEncoding !== publicKeyShareMaterialEncoding) {
-        throw new Error(
-            'binary public-key share material transport must be built from embedded full public values.',
-        );
-    }
     const materialSet = binaryChunkedPublicKeyShareMaterialSet({
         setupContext: input.materialSet as unknown as CollectiveBgvSetupContext,
-        participantCount: input.materialSet.participantCount,
-        rnsLimbCount: input.materialSet.rnsLimbCount,
         ringDegree: input.materialSet.ringDegree,
         publicMatrixSeedHash: input.materialSet.publicMatrixSeedHash,
         publicKeyCrpRoot: input.materialSet.publicKeyCrpRoot,
         publicAPolynomialRoot: input.materialSet.publicAPolynomialRoot,
         publicKeyShareSetRoot: input.materialSet.publicKeyShareSetRoot,
-        publicKeyShareMaterialRoots:
-            input.materialSet.publicKeyShareMaterialRoots,
+        publicKeyShareMaterialRoots: publicKeyShareMaterialRootReferences(
+            input.materialSet.shareMaterialRecords,
+        ),
     });
 
     return finishPublicKeyShareMaterialTransport(
         materialSet,
-        createPublicKeyShareMaterialSetEncodingSource(input.materialSet),
+        createPublicKeyShareMaterialSetEncodingSource(
+            input.materialSet,
+            input.qSharePrimes,
+        ),
         input.writePublicKeyShareMaterial,
     );
 };
@@ -133,8 +123,6 @@ export const createBinaryChunkedPublicKeyShareMaterialBundle = async (
         publicKeyShareMaterialRecordsFromContributions(input);
     const materialSet = binaryChunkedPublicKeyShareMaterialSet({
         setupContext: input.setupContext,
-        participantCount: input.participantCount,
-        rnsLimbCount: input.qSharePrimes.length,
         ringDegree: input.ringDegree,
         publicMatrixSeedHash: input.publicMatrixSeedHash,
         publicKeyCrpRoot: input.publicKeyCrpRoot,
@@ -147,8 +135,7 @@ export const createBinaryChunkedPublicKeyShareMaterialBundle = async (
     return finishPublicKeyShareMaterialTransport(
         materialSet,
         createPublicKeyShareMaterialEncodingSource({
-            participantCount: input.participantCount,
-            rnsLimbCount: input.qSharePrimes.length,
+            qSharePrimes: input.qSharePrimes,
             ringDegree: input.ringDegree,
             shareMaterialRecords,
         }),

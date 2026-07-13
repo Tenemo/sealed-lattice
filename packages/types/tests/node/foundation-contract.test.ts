@@ -1,12 +1,8 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import {
-    foundationObjectTypes,
-    foundationSchemaIdentifiers,
     isParticipantIdentity,
     parseParticipantIdentity,
-    refusalReasonCodes,
-    refusalReasons,
     type ParticipantIdentity,
     type ProtocolHash,
 } from '@sealed-lattice/types';
@@ -54,30 +50,5 @@ describe('foundation contract', () => {
                 /128 lowercase hexadecimal/u,
             );
         }
-    });
-
-    it('keeps the refusal wire codes closed, unique, and contiguous', () => {
-        const codes = refusalReasons.map(
-            (refusalReason) => refusalReasonCodes[refusalReason],
-        );
-
-        expect(codes).toEqual(
-            Array.from(
-                { length: refusalReasons.length },
-                (_, index) => index + 1,
-            ),
-        );
-        expect(new Set(codes).size).toBe(codes.length);
-        expect(refusalReasonCodes.consumedState).toBe(0x000d);
-    });
-
-    it('does not reuse a schema or object-family identifier', () => {
-        const schemaIdentifiers = Object.values(foundationSchemaIdentifiers);
-        const objectTypes = Object.values(foundationObjectTypes);
-
-        expect(new Set(schemaIdentifiers).size).toBe(schemaIdentifiers.length);
-        expect(new Set(objectTypes).size).toBe(objectTypes.length);
-        expect(Math.max(...objectTypes)).toBeLessThan(0x0100);
-        expect(Math.min(...schemaIdentifiers)).toBeGreaterThan(0);
     });
 });

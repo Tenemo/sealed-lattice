@@ -10,38 +10,6 @@ import {
     textEncoder,
     type LocalTrusteeStateStorageEncryptionInput,
 } from './constants-and-types.js';
-import { isLowercaseHex } from './validation.js';
-
-export const randomBytes = (byteLength: number): Uint8Array => {
-    const cryptoProvider = globalThis.crypto;
-    if (cryptoProvider === undefined) {
-        throw new Error(
-            'Local trustee state storage encryption requires Web Crypto getRandomValues.',
-        );
-    }
-    const bytes = new Uint8Array(byteLength);
-    cryptoProvider.getRandomValues(bytes);
-
-    return bytes;
-};
-
-export const subtleCrypto = (): SubtleCrypto => {
-    const subtle = globalThis.crypto?.subtle;
-    if (subtle === undefined) {
-        throw new Error(
-            'Local trustee state storage encryption requires Web Crypto AES-GCM.',
-        );
-    }
-
-    return subtle;
-};
-
-export const arrayBufferFromBytes = (bytes: Uint8Array): ArrayBuffer => {
-    const copy = new Uint8Array(bytes.byteLength);
-    copy.set(bytes);
-
-    return copy.buffer;
-};
 
 export const storageAad = (
     setupContext: unknown,
@@ -108,27 +76,4 @@ export const deriveSealedMaterialAesGcmKeyBytes = (
             }),
         ),
         aesGcmKeyByteLength,
-    );
-
-export const decodeCanonicalHex = (
-    value: string,
-    fieldName: string,
-): Uint8Array => {
-    if (!isLowercaseHex(value)) {
-        throw new TypeError(`${fieldName} must be lowercase canonical hex.`);
-    }
-
-    return hexToBytes(value);
-};
-
-export const importAesGcmKey = async (
-    keyBytes: Uint8Array,
-    keyUsages: readonly KeyUsage[],
-): Promise<CryptoKey> =>
-    subtleCrypto().importKey(
-        'raw',
-        arrayBufferFromBytes(keyBytes),
-        'AES-GCM',
-        false,
-        keyUsages,
     );

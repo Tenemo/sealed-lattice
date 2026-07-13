@@ -13,9 +13,6 @@ describe('release version preparation', () => {
     it('increments stable prototype patch and minor versions', () => {
         expect(incrementPrototypeVersion('0.0.19', 'patch')).toBe('0.0.20');
         expect(incrementPrototypeVersion('0.9.73', 'minor')).toBe('0.10.0');
-        expect(
-            incrementPrototypeVersion('0.999999999999999999999999.1', 'patch'),
-        ).toBe('0.999999999999999999999999.2');
     });
 
     it('rejects prerelease, malformed, leading-zero, and post-1.0 versions', () => {

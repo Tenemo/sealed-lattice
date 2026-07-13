@@ -1,6 +1,7 @@
 use super::*;
 use crate::foundation::{
-    ArtifactKind, DistributionKind, DistributionRecord, FOUNDATION_PROFILE, Hash512,
+    ArtifactKind, DistributionKind, DistributionRecord, FOUNDATION_PROFILE,
+    FoundationSchemaIdentifier, Hash512,
 };
 
 fn valid_suite_record() -> SuiteRecord {
@@ -13,11 +14,7 @@ fn valid_suite_record() -> SuiteRecord {
             DistributionRecord::new(
                 purpose,
                 kind,
-                if kind == DistributionKind::Ternary {
-                    0
-                } else {
-                    2
-                },
+                if kind == DistributionKind::Ternary { 0 } else { 2 },
             )
             .expect("test distribution")
         })
@@ -27,13 +24,15 @@ fn valid_suite_record() -> SuiteRecord {
             ArtifactReference::new(
                 ArtifactKind::from_canonical_code(artifact_code).expect("artifact kind"),
                 100 + u64::from(artifact_code),
-                Hash512::from_bytes([u8::try_from(artifact_code).expect("artifact byte"); 64]),
+                Hash512::from_bytes([
+                    u8::try_from(artifact_code).expect("artifact byte");
+                    64
+                ]),
             )
             .expect("artifact reference")
         })
         .collect();
     SuiteRecord {
-        suite_record_version: 1,
         roster_size: FOUNDATION_PROFILE.participant_count,
         byzantine_bound: FOUNDATION_PROFILE.active_fault_bound,
         reconstruction_threshold: FOUNDATION_PROFILE.reconstruction_threshold,
@@ -98,7 +97,7 @@ fn proof_field_1153() -> ProofFieldProfile {
 }
 
 fn schedule(proof_field_index: u16) -> ProofFieldSchedule {
-    ProofFieldSchedule::new(proof_field_index, 4, 3, 2, 1, 4, 3, 6)
+    ProofFieldSchedule::new(proof_field_index, 4, 3, 2, 8, 4, 3, 6)
         .expect("test schedule is intrinsically valid")
 }
 
@@ -126,9 +125,11 @@ fn generated_profile_artifact_matches_the_independent_typescript_vector_identity
     let canonical_bytes = valid_profile_set()
         .encode()
         .expect("valid proof profile set encodes");
-    let artifact_reference =
-        ArtifactReference::from_artifact_bytes(ArtifactKind::ProofProfileSet, &canonical_bytes)
-            .expect("proof profile artifact reference");
+    let artifact_reference = ArtifactReference::from_artifact_bytes(
+        ArtifactKind::ProofProfileSet,
+        &canonical_bytes,
+    )
+    .expect("proof profile artifact reference");
 
     assert_eq!(canonical_bytes.len(), 26_715);
     assert_eq!(
@@ -206,16 +207,92 @@ fn is_irreducible_by_exhaustive_monic_division(coefficients: &[u64], modulus: u6
 }
 
 #[test]
+fn all_four_schema_identifiers_and_canonical_item_orders_are_exact() {
+    assert_eq!(PROOF_PROFILE_SET_SCHEMA_IDENTIFIER, 0x2200);
+    assert_eq!(PROOF_FIELD_PROFILE_SCHEMA_IDENTIFIER, 0x2201);
+    assert_eq!(PROOF_FAMILY_PROFILE_SCHEMA_IDENTIFIER, 0x2202);
+    assert_eq!(PROOF_FIELD_SCHEDULE_SCHEMA_IDENTIFIER, 0x2203);
+    assert_eq!(FoundationSchemaIdentifier::ProofProfileSet as u16, 0x2200);
+    assert_eq!(FoundationSchemaIdentifier::ProofFieldProfile as u16, 0x2201);
+    assert_eq!(FoundationSchemaIdentifier::ProofFamilyProfile as u16, 0x2202);
+    assert_eq!(FoundationSchemaIdentifier::ProofFieldSchedule as u16, 0x2203);
+
+    let field_tuple = proof_field_97().canonical_tuple().expect("field tuple");
+    assert_eq!(field_tuple.schema_identifier, 0x2201);
+    assert_eq!(field_tuple.schema_version, 1);
+    assert_eq!(field_tuple.items.len(), 3);
+    assert_eq!(field_tuple.items[0].item_type(), CanonicalItemType::Unsigned64);
+    assert_eq!(field_tuple.items[1].item_type(), CanonicalItemType::Unsigned64);
+    assert_eq!(field_tuple.items[2].item_type(), CanonicalItemType::HomogeneousList);
+    let (coefficient_count, coefficient_bytes) =
+        read_list_header(&field_tuple.items[2], CanonicalItemType::Unsigned64)
+            .expect("coefficient list header");
+    assert_eq!(coefficient_count, 2);
+    assert_eq!(coefficient_bytes, &[5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+
+    let schedule_tuple = schedule(0).canonical_tuple().expect("schedule tuple");
+    assert_eq!(schedule_tuple.schema_identifier, 0x2203);
+    assert_eq!(schedule_tuple.schema_version, 1);
+    assert_eq!(schedule_tuple.items.len(), 8);
+    assert_eq!(
+        schedule_tuple
+            .encode()
+            .expect("schedule tuple encodes")
+            .len(),
+        PROOF_FIELD_SCHEDULE_MAXIMUM_BYTE_LENGTH
+    );
+    assert_eq!(
+        schedule_tuple
+            .items
+            .iter()
+            .map(CanonicalItem::item_type)
+            .collect::<Vec<_>>(),
+        vec![
+            CanonicalItemType::Unsigned16,
+            CanonicalItemType::Unsigned32,
+            CanonicalItemType::Unsigned64,
+            CanonicalItemType::Unsigned16,
+            CanonicalItemType::Unsigned32,
+            CanonicalItemType::Unsigned32,
+            CanonicalItemType::Unsigned16,
+            CanonicalItemType::Unsigned32,
+        ]
+    );
+
+    let family_tuple = ProofFamilyProfile::new(ProofFamily::BallotValidity, schedule(0))
+        .expect("family profile")
+        .canonical_tuple()
+        .expect("family tuple");
+    assert_eq!(family_tuple.schema_identifier, 0x2202);
+    assert_eq!(family_tuple.schema_version, 1);
+    assert_eq!(family_tuple.items.len(), 2);
+    assert_eq!(
+        family_tuple.encode().expect("family tuple encodes").len(),
+        PROOF_FAMILY_PROFILE_MAXIMUM_BYTE_LENGTH
+    );
+    assert_eq!(family_tuple.items[0].item_type(), CanonicalItemType::Unsigned16);
+    assert_eq!(family_tuple.items[1].item_type(), CanonicalItemType::NestedTuple);
+
+    let set_tuple = valid_profile_set().canonical_tuple().expect("profile-set tuple");
+    assert_eq!(set_tuple.schema_identifier, 0x2200);
+    assert_eq!(set_tuple.schema_version, 1);
+    assert_eq!(set_tuple.items.len(), 4);
+    assert!(
+        set_tuple
+            .items
+            .iter()
+            .all(|item| item.item_type() == CanonicalItemType::HomogeneousList)
+    );
+}
+
+#[test]
 fn every_schema_round_trips_to_identical_canonical_bytes() {
     let limits = CanonicalDecodeLimits::default();
     let field = proof_field_97();
     let field_bytes = field.encode().expect("field encodes");
     let decoded_field = ProofFieldProfile::decode(&field_bytes, &limits).expect("field decodes");
     assert_eq!(decoded_field, field);
-    assert_eq!(
-        decoded_field.encode().expect("decoded field re-encodes"),
-        field_bytes
-    );
+    assert_eq!(decoded_field.encode().expect("decoded field re-encodes"), field_bytes);
 
     let field_schedule = schedule(0);
     let schedule_bytes = field_schedule.encode().expect("schedule encodes");
@@ -223,9 +300,7 @@ fn every_schema_round_trips_to_identical_canonical_bytes() {
         ProofFieldSchedule::decode(&schedule_bytes, &limits).expect("schedule decodes");
     assert_eq!(decoded_schedule, field_schedule);
     assert_eq!(
-        decoded_schedule
-            .encode()
-            .expect("decoded schedule re-encodes"),
+        decoded_schedule.encode().expect("decoded schedule re-encodes"),
         schedule_bytes
     );
 
@@ -235,10 +310,7 @@ fn every_schema_round_trips_to_identical_canonical_bytes() {
     let decoded_family =
         ProofFamilyProfile::decode(&family_bytes, &limits).expect("family decodes");
     assert_eq!(decoded_family, family);
-    assert_eq!(
-        decoded_family.encode().expect("decoded family re-encodes"),
-        family_bytes
-    );
+    assert_eq!(decoded_family.encode().expect("decoded family re-encodes"), family_bytes);
 
     let profile_set = valid_profile_set();
     let profile_set_bytes = profile_set.encode().expect("profile set encodes");
@@ -333,11 +405,22 @@ fn proof_field_validation_reproduces_prime_generator_and_irreducibility_requirem
 }
 
 #[test]
+fn irreducibility_test_handles_linear_quadratic_cubic_and_repeated_factor_boundaries() {
+    assert!(is_monic_polynomial_irreducible(&[0], 3));
+    assert!(is_monic_polynomial_irreducible(&[1, 0], 3));
+    assert!(!is_monic_polynomial_irreducible(&[2, 0], 3));
+    assert!(is_monic_polynomial_irreducible(&[1, 2, 0], 3));
+    assert!(!is_monic_polynomial_irreducible(&[1, 0, 2, 0], 3));
+    assert!(!is_monic_polynomial_irreducible(&[0, 1], 97));
+}
+
+#[test]
 fn rabin_irreducibility_matches_exhaustive_factor_search_over_small_fields() {
     for modulus in [3u64, 5] {
         for degree in 1..=5usize {
-            let polynomial_count = modulus
-                .pow(u32::try_from(degree).expect("small exhaustive degree fits a u32 exponent"));
+            let polynomial_count = modulus.pow(
+                u32::try_from(degree).expect("small exhaustive degree fits a u32 exponent"),
+            );
             for encoded_polynomial in 0..polynomial_count {
                 let coefficients = base_field_digits(encoded_polynomial, degree, modulus);
                 assert_eq!(
@@ -432,8 +515,8 @@ fn profile_set_requires_exact_family_membership_and_increasing_statement_order()
             .map(ProofFamilyProfile::application_statement_schema_identifier)
             .collect::<Vec<_>>(),
         vec![
-            0x1211, 0x1212, 0x1213, 0x1214, 0x1215, 0x1216, 0x1217, 0x1218, 0x1302, 0x1621, 0x2110,
-            0x2111,
+            0x1211, 0x1212, 0x1213, 0x1214, 0x1215, 0x1216, 0x1217, 0x1218, 0x1302,
+            0x1621, 0x2110, 0x2111,
         ]
     );
 }
@@ -459,9 +542,7 @@ fn proof_field_catalog_is_bounded_increasing_referenced_and_index_checked() {
     expect_validation_and_encoding_refusal(&decreasing, RefusalReason::DuplicateIdentity);
 
     let mut missing_index = valid.clone();
-    missing_index.proof_families[0]
-        .field_schedule
-        .proof_field_index = 1;
+    missing_index.proof_families[0].field_schedule.proof_field_index = 1;
     expect_validation_and_encoding_refusal(&missing_index, RefusalReason::WrongTypeOrLength);
 
     let mut unreferenced = valid.clone();
@@ -535,7 +616,11 @@ fn cross_field_validation_checks_only_intrinsic_field_capacity_constraints() {
                 .expect("closed family accepts standalone schedule")
         })
         .collect();
-    let error = ProofProfileSet::new(vec![tiny_field], tiny_field_families, &valid_suite_record())
+    let error = ProofProfileSet::new(
+        vec![tiny_field],
+        tiny_field_families,
+        &valid_suite_record(),
+    )
         .expect_err("DEEP count cannot exceed extension-field cardinality");
     assert_eq!(error.refusal_reason, RefusalReason::OutsideSupportedProfile);
 }
@@ -561,9 +646,7 @@ fn family_lookup_derives_the_suite_selected_field_without_proof_selected_algorit
         ],
     );
     let error = ProofFamilyProfile::decode(
-        &unknown_family_tuple
-            .encode()
-            .expect("hostile family tuple encodes canonically"),
+        &unknown_family_tuple.encode().expect("hostile family tuple encodes canonically"),
         &CanonicalDecodeLimits::default(),
     )
     .expect_err("proof bytes cannot select an unassigned statement family");
@@ -646,7 +729,7 @@ fn wrong_headers_types_nested_schema_lengths_and_trailing_bytes_refuse() {
 }
 
 #[test]
-fn schema_bounds_apply_before_allocation_and_preserve_caller_decode_limits() {
+fn profile_set_bounds_apply_before_allocation_and_preserve_caller_decode_limits() {
     let encoded = valid_profile_set().encode().expect("profile set encodes");
     assert!(encoded.len() <= PROOF_PROFILE_SET_MAXIMUM_BYTE_LENGTH);
 
@@ -668,7 +751,10 @@ fn schema_bounds_apply_before_allocation_and_preserve_caller_decode_limits() {
             .refusal_reason,
         RefusalReason::OutsideSupportedProfile
     );
+}
 
+#[test]
+fn standalone_schema_bounds_apply_before_canonical_allocation() {
     let limits = CanonicalDecodeLimits::default();
     assert_eq!(
         ProofFieldProfile::decode(
@@ -716,9 +802,7 @@ fn profile_set_artifact_reference_checks_kind_length_hash_and_schema() {
     let suite_record = valid_suite_record();
     let profile_set = valid_profile_set();
     let encoded = profile_set.encode().expect("profile set encodes");
-    let reference = profile_set
-        .artifact_reference()
-        .expect("artifact reference derives");
+    let reference = profile_set.artifact_reference().expect("artifact reference derives");
     assert_eq!(reference.artifact_kind, ArtifactKind::ProofProfileSet);
     assert_eq!(reference.byte_length, encoded.len() as u64);
     assert_eq!(
@@ -732,9 +816,11 @@ fn profile_set_artifact_reference_checks_kind_length_hash_and_schema() {
         profile_set
     );
 
-    let wrong_kind =
-        ArtifactReference::from_artifact_bytes(ArtifactKind::EvaluatorProgramSet, &encoded)
-            .expect("wrong-kind reference is otherwise canonical");
+    let wrong_kind = ArtifactReference::from_artifact_bytes(
+        ArtifactKind::EvaluatorProgramSet,
+        &encoded,
+    )
+    .expect("wrong-kind reference is otherwise canonical");
     assert_eq!(
         ProofProfileSet::decode_verified_artifact(
             &wrong_kind,
@@ -793,9 +879,11 @@ fn relation_plan_mutation_changes_the_profile_artifact_and_suite_identifier() {
         .iter()
         .map(|variant| CanonicalItem::nested_tuple(variant).expect("variant nests"))
         .collect::<Vec<_>>();
-    mutated_profile_set.relation_plans[0].items[1] =
-        CanonicalItem::homogeneous_list(CanonicalItemType::NestedTuple, &variant_items)
-            .expect("variant list encodes");
+    mutated_profile_set.relation_plans[0].items[1] = CanonicalItem::homogeneous_list(
+        CanonicalItemType::NestedTuple,
+        &variant_items,
+    )
+    .expect("variant list encodes");
 
     let canonical_profile = profile_set.encode().expect("profile set encodes");
     let mutated_profile = mutated_profile_set
@@ -822,9 +910,7 @@ fn relation_plan_mutation_changes_the_profile_artifact_and_suite_identifier() {
         .artifact_reference()
         .expect("mutated profile reference");
     assert_ne!(
-        canonical_suite
-            .suite_id()
-            .expect("canonical suite identifier"),
+        canonical_suite.suite_id().expect("canonical suite identifier"),
         mutated_suite.suite_id().expect("mutated suite identifier")
     );
 }
@@ -845,9 +931,7 @@ fn malformed_coefficient_list_length_and_wrong_scalar_types_refuse_without_panic
     );
     assert_eq!(
         ProofFieldProfile::decode(
-            &wrong_scalar_type
-                .encode()
-                .expect("wrong-type tuple encodes"),
+            &wrong_scalar_type.encode().expect("wrong-type tuple encodes"),
             &limits,
         )
         .expect_err("wrong scalar item type must refuse")

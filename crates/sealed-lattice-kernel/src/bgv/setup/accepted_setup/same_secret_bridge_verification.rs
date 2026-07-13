@@ -47,52 +47,24 @@ pub(super) fn verify_same_secret_bridge_statement_set(
     request: &Value,
     proof_binding_session: Option<&crate::bgv::setup::AcceptedSetupProofBindingSession>,
 ) -> CanonicalResult<SameSecretBridgeVerification> {
-    let bridge_material_fields = [
-        SAME_SECRET_BRIDGE_STATEMENT_SET_FIELD,
-        SAME_SECRET_BRIDGE_PROOF_MATERIAL_SET_FIELD,
-    ];
-    let present_bridge_field_count = bridge_material_fields
-        .iter()
-        .filter(|field_name| setup_package.get(**field_name).is_some())
-        .count();
-    if present_bridge_field_count == 0 {
-        return Ok(SameSecretBridgeVerification::Refused(
-            verification_response(
-                Some("publicKeyShareProofs"),
-                bridge_material_fields
-                    .iter()
-                    .map(|field_name| (*field_name).to_string())
-                    .collect(),
-                Vec::new(),
-                Vec::new(),
-            )?,
-        ));
-    }
-
     let required_bridge_material_fields = [
         SAME_SECRET_BRIDGE_STATEMENT_SET_FIELD,
         SAME_SECRET_BRIDGE_PROOF_MATERIAL_SET_FIELD,
         "vssPublicCoefficientCommitmentSet",
         "vssCoefficientCommitments",
     ];
-    let present_field_count = required_bridge_material_fields
-        .iter()
-        .filter(|field_name| setup_package.get(**field_name).is_some())
-        .count();
-
-    if present_field_count != required_bridge_material_fields.len() {
-        let missing_fields = required_bridge_material_fields
-            .into_iter()
-            .filter(|field_name| setup_package.get(*field_name).is_none())
-            .map(|field_name| format!("setupPackage.{field_name}"))
-            .collect::<Vec<_>>()
-            .join(", ");
-
+    let missing_fields = required_bridge_material_fields
+        .into_iter()
+        .filter(|field_name| setup_package.get(*field_name).is_none())
+        .map(|field_name| format!("setupPackage.{field_name}"))
+        .collect::<Vec<_>>();
+    if !missing_fields.is_empty() {
         return Ok(SameSecretBridgeVerification::Refused(
             same_secret_bridge_refusal(
                 "sameSecretBridgeEvidenceIncomplete",
                 format!(
-                    "same-secret bridge material requires the statement set, proof material set, authoritative public coefficient commitments, and canonical source VSS commitments; missing {missing_fields}"
+                    "same-secret bridge material is required; missing {}",
+                    missing_fields.join(", ")
                 ),
                 "setupPackage",
             )?,
@@ -121,7 +93,6 @@ pub(super) fn verify_same_secret_bridge_statement_set(
 fn verify_same_secret_bridge_setup_binding(
     setup_package: &Value,
     statement_set: &Value,
-    statement_verification: &Value,
 ) -> CanonicalResult<()> {
     let setup_context = setup_package
         .get("setupContext")
@@ -150,30 +121,27 @@ fn verify_same_secret_bridge_setup_binding(
     )?;
     compare_setup_context_participant_count(
         setup_context,
-        statement_verification,
+        statement_set,
         "same-secret bridge statement set",
     )?;
     compare_setup_context_threshold_degree(
         setup_context,
-        statement_verification,
+        statement_set,
         "same-secret bridge statement set",
     )?;
-    compare_complete_q_share_limb_count(
-        statement_verification,
-        "same-secret bridge statement set",
-    )?;
+    compare_complete_q_share_limb_count(statement_set, "same-secret bridge statement set")?;
     compare_required_string(
-        hash_at_path(statement_verification, &["publicMatrixSeedHash"])?,
+        hash_at_path(statement_set, &["publicMatrixSeedHash"])?,
         hash_at_path(common_randomness, &["publicMatrixSeedHash"])?,
         "same-secret bridge statement set publicMatrixSeedHash",
     )?;
     compare_required_string(
-        hash_at_path(statement_verification, &["coefficientCommitmentRoot"])?,
+        hash_at_path(statement_set, &["coefficientCommitmentRoot"])?,
         hash_at_path(coefficient_commitment_set, &["coefficientCommitmentRoot"])?,
         "same-secret bridge statement set coefficientCommitmentRoot",
     )?;
     compare_required_string(
-        hash_at_path(statement_verification, &["vssCoefficientCommitmentRoot"])?,
+        hash_at_path(statement_set, &["vssCoefficientCommitmentRoot"])?,
         hash_at_path(
             vss_coefficient_commitments,
             &["vssCoefficientCommitmentRoot"],
@@ -192,11 +160,10 @@ pub(in crate::bgv::setup) fn verified_same_secret_bridge_material_from_package(
     let statement_set = setup_package
         .get(SAME_SECRET_BRIDGE_STATEMENT_SET_FIELD)
         .ok_or_else(|| same_secret_bridge_error("same-secret bridge statement set"))?;
-    let statement_verification =
-        crate::bgv::setup::verify_vss_same_secret_bridge_statement_set_request(
-            &same_secret_bridge_verification_request(statement_set, None, setup_package, request),
-        )?;
-    verify_same_secret_bridge_setup_binding(setup_package, statement_set, &statement_verification)?;
+    crate::bgv::setup::verify_vss_same_secret_bridge_statement_set_request(
+        &same_secret_bridge_verification_request(statement_set, None, setup_package, request),
+    )?;
+    verify_same_secret_bridge_setup_binding(setup_package, statement_set)?;
     let proof_material_set = setup_package
         .get(SAME_SECRET_BRIDGE_PROOF_MATERIAL_SET_FIELD)
         .ok_or_else(|| same_secret_bridge_error("same-secret bridge proof material set"))?;
@@ -216,12 +183,21 @@ pub(in crate::bgv::setup) fn verified_same_secret_bridge_material_from_package(
             "same-secret bridge ringDegree does not fit usize",
         )
     })?;
+    let q_share_rns_limb_count = usize::try_from(value_u64(statement_set, "qShareRnsLimbCount")?)
+        .map_err(|_| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "same-secret bridge qShareRnsLimbCount does not fit usize",
+        )
+    })?;
+    let threshold_degree =
+        usize::try_from(value_u64(statement_set, "thresholdDegree")?).map_err(|_| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "same-secret bridge thresholdDegree does not fit usize",
+            )
+        })?;
     let public_matrix_seed_hash = value_string(statement_set, "publicMatrixSeedHash")?;
-    compare_required_string(
-        public_matrix_seed_hash,
-        hash_at_path(&statement_verification, &["publicMatrixSeedHash"])?,
-        "same-secret bridge publicMatrixSeedHash",
-    )?;
     let setup_parameters_hash = value_string(statement_set, "setupParametersHash")?;
     let statement_records = array_value(statement_set, "statementRecords")?;
     let proof_records = array_value(proof_material_set, "proofRecords")?;
@@ -237,79 +213,48 @@ pub(in crate::bgv::setup) fn verified_same_secret_bridge_material_from_package(
             .ok_or_else(|| {
                 same_secret_bridge_error("same-secret bridge VSS coefficient commitments")
             })?;
+    let coefficient_commitment_set = setup_package
+        .get("vssPublicCoefficientCommitmentSet")
+        .ok_or_else(|| {
+            same_secret_bridge_error("same-secret bridge public coefficient commitments")
+        })?;
     let mut statements_by_roster_position = BTreeMap::new();
     for statement_record in statement_records {
         let trustee_roster_position = value_u64(statement_record, "trusteeRosterPosition")?;
-        let target_constant_root_records =
-            array_value(statement_record, "targetConstantCoefficientCommitmentRoots")?;
-        let target_constant_commitment_records =
-            array_value(statement_record, "targetConstantCoefficientCommitments")?;
-        if target_constant_root_records.len() != target_constant_commitment_records.len() {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "same-secret bridge target roots and commitments must be aligned",
-            ));
-        }
-        let mut bridge_rns_primes = Vec::with_capacity(target_constant_root_records.len());
-        let mut target_constant_commitment_roots =
-            Vec::with_capacity(target_constant_root_records.len());
-        let mut target_constant_commitments =
-            Vec::with_capacity(target_constant_root_records.len());
-        for (target_rns_limb_index, (target_root_record, target_commitment_record)) in
-            target_constant_root_records
-                .iter()
-                .zip(target_constant_commitment_records.iter())
-                .enumerate()
-        {
-            if value_u64(target_root_record, "rnsLimbIndex")? != target_rns_limb_index as u64
-                || value_u64(target_commitment_record, "rnsLimbIndex")?
-                    != target_rns_limb_index as u64
-            {
-                return Err(CanonicalError::new(
-                    CanonicalErrorCode::MalformedLength,
-                    "same-secret bridge target commitments must be ordered by limb",
-                ));
-            }
-            let target_rns_prime = verified_same_secret_bridge_target_rns_prime(
-                target_root_record,
-                target_commitment_record,
-                target_rns_limb_index,
+        let trustee_identity = value_string(statement_record, "trusteeIdentity")?.to_string();
+        let authoritative_targets =
+            crate::bgv::setup::same_secret_bridge::authoritative_same_secret_bridge_targets(
+                coefficient_commitment_set,
+                &trustee_identity,
+                trustee_roster_position as usize,
+                public_matrix_seed_hash,
+                q_share_rns_limb_count,
+                threshold_degree,
+                ring_degree,
             )?;
-            if value_u64(target_root_record, "shamirCoefficientIndex")? != 0
-                || value_u64(target_commitment_record, "shamirCoefficientIndex")? != 0
-            {
-                return Err(CanonicalError::new(
-                    CanonicalErrorCode::ComponentMismatch,
-                    "same-secret bridge target commitment must bind the constant coefficient",
-                ));
-            }
-            let target_commitment_root =
-                value_string(target_root_record, "coefficientCommitmentRoot")?;
-            let commitment_value = target_commitment_record.get("commitment").ok_or_else(|| {
-                CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
-                    "same-secret bridge target commitment body is missing",
-                )
-            })?;
+        let mut bridge_rns_primes = Vec::with_capacity(authoritative_targets.len());
+        let mut target_constant_commitment_roots = Vec::with_capacity(authoritative_targets.len());
+        let mut target_constant_commitments = Vec::with_capacity(authoritative_targets.len());
+        for (target_rns_limb_index, target) in authoritative_targets.iter().enumerate() {
             let commitment = vss_share_linkage_commitment_from_value(
-                commitment_value,
+                target.commitment_body,
                 VssPublicCommandCommitmentExpectation {
                     field_name: format!(
-                        "sameSecretBridgeStatementSet.statementRecords.{trustee_roster_position}.targetConstantCoefficientCommitments.{target_rns_limb_index}"
+                        "vssPublicCoefficientCommitmentSet.sourceTrusteeRecords.{trustee_roster_position}.coefficientCommitments.{}",
+                        target_rns_limb_index * threshold_degree,
                     ),
-                    root: target_commitment_root,
+                    root: target.coefficient_commitment_root,
                     role: "coefficient",
                     rns_limb_index: target_rns_limb_index,
-                    rns_prime: target_rns_prime,
+                    rns_prime: target.rns_prime,
                     ring_degree,
                 },
             )?;
-            bridge_rns_primes.push(target_rns_prime);
-            target_constant_commitment_roots.push(target_commitment_root.to_string());
+            bridge_rns_primes.push(target.rns_prime);
+            target_constant_commitment_roots.push(target.coefficient_commitment_root.to_string());
             target_constant_commitments.push(commitment);
         }
 
-        let trustee_identity = value_string(statement_record, "trusteeIdentity")?.to_string();
         let source_constant_commitments = super::super::source_constant_commitments::canonical_source_constant_commitments_from_bridge_statement(
             vss_coefficient_commitments,
             statement_record,
@@ -361,23 +306,6 @@ pub(in crate::bgv::setup) fn verified_same_secret_bridge_material_from_package(
     })
 }
 
-fn verified_same_secret_bridge_target_rns_prime(
-    target_root_record: &Value,
-    target_commitment_record: &Value,
-    target_rns_limb_index: usize,
-) -> CanonicalResult<u64> {
-    let target_rns_prime = value_u64(target_root_record, "rnsPrime")?;
-    if value_u64(target_commitment_record, "rnsPrime")? != target_rns_prime
-        || DATA_PRIMES.get(target_rns_limb_index).copied() != Some(target_rns_prime)
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ComponentMismatch,
-            "same-secret bridge prime must match the canonical Q_share basis",
-        ));
-    }
-    Ok(target_rns_prime)
-}
-
 fn same_secret_bridge_verification_request(
     statement_set: &Value,
     proof_material_set: Option<&Value>,
@@ -419,10 +347,8 @@ fn same_secret_bridge_refusal(
     object_path: impl Into<String>,
 ) -> CanonicalResult<Value> {
     verification_response(
-        Some("proofVerification"),
         Vec::new(),
         vec![Refusal::new(reason_code, message, object_path)],
-        Vec::new(),
     )
 }
 
@@ -431,69 +357,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn accepted_same_secret_bridge_rejects_a_noncanonical_target_prime() {
-        let noncanonical_prime = DATA_PRIMES[1];
-        let error = verified_same_secret_bridge_target_rns_prime(
-            &json!({ "rnsPrime": noncanonical_prime }),
-            &json!({ "rnsPrime": noncanonical_prime }),
-            0,
-        )
-        .expect_err("a valid-shaped prime from the wrong Q_share limb must be rejected");
-
-        assert_eq!(error.code, CanonicalErrorCode::ComponentMismatch);
-        assert_eq!(
-            error.message,
-            "same-secret bridge prime must match the canonical Q_share basis"
-        );
-    }
-
-    #[test]
-    fn optional_same_secret_bridge_refuses_proof_material_without_statement_set()
-    -> CanonicalResult<()> {
-        let response = verify_same_secret_bridge_statement_set(
-            &json!({
-                "sameSecretBridgeProofMaterialSet": {},
-            }),
-            &json!({}),
-            None,
-        )?
-        .refusal_for_test("bridge proof material without statement set must refuse");
-
-        assert_eq!(response["isValid"], json!(false));
-        assert_eq!(
-            response["refusedObjects"][0]["reasonCode"],
-            json!("sameSecretBridgeEvidenceIncomplete")
-        );
-        let refusal_message = response["refusedObjects"][0]["message"]
-            .as_str()
-            .expect("incomplete bridge refusal message");
-        assert!(refusal_message.contains("vssPublicCoefficientCommitmentSet"));
-        assert!(refusal_message.contains("vssCoefficientCommitments"));
-        Ok(())
-    }
-
-    #[test]
-    fn optional_same_secret_bridge_refuses_statement_set_without_proof_material()
-    -> CanonicalResult<()> {
-        let response = verify_same_secret_bridge_statement_set(
-            &json!({
-                "sameSecretBridgeStatementSet": {},
-            }),
-            &json!({}),
-            None,
-        )?
-        .refusal_for_test("bridge statement set must refuse");
-
-        assert_eq!(response["isValid"], json!(false));
-        assert_eq!(
-            response["refusedObjects"][0]["reasonCode"],
-            json!("sameSecretBridgeEvidenceIncomplete")
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn optional_same_secret_bridge_rejects_malformed_complete_field_group() -> CanonicalResult<()> {
+    fn required_same_secret_bridge_rejects_malformed_records() -> CanonicalResult<()> {
         let response = verify_same_secret_bridge_statement_set(
             &json!({
                 "sameSecretBridgeStatementSet": {},

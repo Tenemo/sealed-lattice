@@ -6,7 +6,7 @@ use super::*;
 use crate::hashing::derive_canonical_object_hash;
 
 static MINIMAL_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<serde_json::Value> = OnceLock::new();
-static COLLECTIVE_SETUP_PHASE_PACKAGE_CACHE: OnceLock<serde_json::Value> = OnceLock::new();
+static COLLECTIVE_SETUP_INTENT_PACKAGE_CACHE: OnceLock<serde_json::Value> = OnceLock::new();
 static DESCRIPTOR_BACKED_VSS_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<
     CachedDescriptorBackedVssCollectiveSetupFixture,
 > = OnceLock::new();
@@ -146,7 +146,7 @@ fn collective_setup_roster_hash_fixture(participant_count: u64) -> String {
     .expect("collective setup roster hash")
 }
 
-/// The ten-participant parameter profile used by the lightweight phase fixture.
+/// The ten-participant parameter profile used by the lightweight setup-intent fixture.
 const PARAMETER_PROFILE_PARTICIPANT_COUNT: u64 = 10;
 
 /// The minimum roster accepted by the setup verifier. Proof-bearing rejection
@@ -174,11 +174,11 @@ pub(super) fn minimal_collective_setup_package() -> serde_json::Value {
         .clone()
 }
 
-/// Setup package through the phase transcript, before proof-bearing setup
-/// material is attached. Phase-order and phase-binding tests use this fixture
-/// so the ordinary Rust lane does not generate unrelated succinct proofs.
-pub(super) fn collective_setup_phase_package() -> serde_json::Value {
-    COLLECTIVE_SETUP_PHASE_PACKAGE_CACHE
+/// Setup package with signed trustee registrations, before proof-bearing setup
+/// material is attached. Setup-intent tests use this fixture so the ordinary
+/// Rust lane does not generate unrelated succinct proofs.
+pub(super) fn collective_setup_intent_package() -> serde_json::Value {
+    COLLECTIVE_SETUP_INTENT_PACKAGE_CACHE
         .get_or_init(|| {
             minimal_collective_setup_package_for_participant_count(
                 PARAMETER_PROFILE_PARTICIPANT_COUNT,
@@ -190,7 +190,7 @@ pub(super) fn collective_setup_phase_package() -> serde_json::Value {
 /// Reduced development-ring (128) collective setup package for an arbitrary
 /// supported roster size, built through the non-streamed VSS path. Drives the
 /// same per-trustee material and roster-derived bindings as the ten-participant
-/// phase-package path. The finalized fixture adds proof-bearing setup material
+/// setup-intent package path. The finalized fixture adds proof-bearing setup material
 /// on top of this package.
 pub(super) fn minimal_collective_setup_package_for_participant_count(
     participant_count: u64,
@@ -261,115 +261,68 @@ fn build_collective_setup_package_fixture_parts(
         setup_epoch,
         participant_count,
     );
-    let mut previous_phase_root = serde_json::Value::Null;
-    let phase_transcript = setup_parameters["phaseOrder"]
-        .as_array()
-        .expect("phase order")
-        .iter()
-        .map(|phase| {
-            let phase_identifier = phase.as_str().expect("phase id");
-            let participant_phase_objects = (0..participant_count)
-                .map(|roster_position| {
-                    let trustee_identity = format!("trustee-{roster_position}");
-                    let signature_seed_label =
-                        setup_trustee_signature_seed_label(&trustee_identity);
-                    let signing_public_key_hash =
-                        create_ml_dsa_public_key_hash_fixture(&signature_seed_label)
-                            .expect("signature key fixture");
-                    let mut phase_payload = serde_json::json!({
-                        "objectType": "SetupPhaseParticipantObject",
-                        "phaseId": phase_identifier,
-                        "ceremonyId": ceremony_id,
-                        "manifestHash": manifest_hash,
-                        "rosterHash": roster_hash,
-                        "setupParametersHash": setup_parameters_hash,
-                        "setupEpoch": setup_epoch,
-                        "trusteeIdentity": trustee_identity,
-                        "rosterPosition": roster_position,
-                        "recoveryEpoch": 0,
-                        "deviceEpoch": 0,
-                        "signingPublicKeyHash": signing_public_key_hash,
-                    });
-                    if phase_identifier == "setupIntent" {
-                        phase_payload["privateVssMailboxPublicKeyHash"] =
-                            serde_json::json!(private_vss_mailbox_public_key_hash(roster_position));
-                    }
-                    let phase_object_root =
-                        derive_canonical_object_hash(&phase_payload).expect("phase object root");
-                    let phase_signature_context_hash =
-                        derive_canonical_object_hash(&serde_json::json!({
-                            "objectType": "SetupPhaseSignatureContext",
-                            "phaseId": phase_identifier,
-                            "ceremonyId": ceremony_id,
-                            "manifestHash": manifest_hash,
-                            "rosterHash": roster_hash,
-                            "setupParametersHash": setup_parameters_hash,
-                            "setupEpoch": setup_epoch,
-                            "trusteeIdentity": trustee_identity,
-                            "rosterPosition": roster_position,
-                            "phaseObjectRoot": phase_object_root,
-                        }))
-                        .expect("phase signature context hash");
-                    let signature_fixture = create_protocol_signature_fixture(
-                        &signature_seed_label,
-                        serde_json::json!({
-                            "objectType": "SetupPhaseParticipantObject",
-                            "ceremonyId": ceremony_id,
-                            "manifestHash": manifest_hash,
-                            "boardHeadHash": null,
-                            "objectRoot": phase_object_root,
-                            "chunkMerkleRoot": null,
-                            "signerRole": "Trustee",
-                            "signerIdentity": trustee_identity,
-                            "recoveryEpoch": 0,
-                            "deviceEpoch": 0,
-                            "contextHash": phase_signature_context_hash,
-                        }),
-                    )
-                    .expect("phase signature fixture");
-                    let signature_envelope = signature_fixture.envelope;
-                    let mut participant_phase_object = serde_json::json!({
-                        "objectType": "SetupPhaseParticipantObject",
-                        "phaseId": phase_identifier,
-                        "ceremonyId": ceremony_id,
-                        "manifestHash": manifest_hash,
-                        "rosterHash": roster_hash,
-                        "setupParametersHash": setup_parameters_hash,
-                        "setupEpoch": setup_epoch,
-                        "trusteeIdentity": trustee_identity,
-                        "rosterPosition": roster_position,
-                        "recoveryEpoch": 0,
-                        "deviceEpoch": 0,
-                        "signingPublicKeyHash": signing_public_key_hash,
-                        "phaseObjectRoot": phase_object_root,
-                        "signatureEnvelope": signature_envelope,
-                    });
-                    if phase_identifier == "setupIntent" {
-                        participant_phase_object["privateVssMailboxPublicKeyHash"] =
-                            serde_json::json!(private_vss_mailbox_public_key_hash(roster_position));
-                    }
-
-                    participant_phase_object
-                })
-                .collect::<Vec<_>>();
-            let mut phase_record = serde_json::json!({
-                "objectType": "SetupPhaseRecord",
-                "phaseId": phase_identifier,
+    let trustee_registrations = (0..participant_count)
+        .map(|roster_position| {
+            let trustee_identity = format!("trustee-{roster_position}");
+            let signature_seed_label = setup_trustee_signature_seed_label(&trustee_identity);
+            let signing_public_key_hash =
+                create_ml_dsa_public_key_hash_fixture(&signature_seed_label)
+                    .expect("signature key fixture");
+            let mut registration = serde_json::json!({
+                "objectType": "CollectiveBgvSetupIntentTrusteeRegistration",
                 "ceremonyId": ceremony_id,
                 "manifestHash": manifest_hash,
                 "rosterHash": roster_hash,
                 "setupParametersHash": setup_parameters_hash,
                 "setupEpoch": setup_epoch,
-                "previousPhaseRoot": previous_phase_root.clone(),
-                "participantPhaseObjects": participant_phase_objects,
+                "trusteeIdentity": trustee_identity,
+                "rosterPosition": roster_position,
+                "recoveryEpoch": 0,
+                "deviceEpoch": 0,
+                "signingPublicKeyHash": signing_public_key_hash,
+                "privateVssMailboxPublicKeyHash": private_vss_mailbox_public_key_hash(roster_position),
             });
-            let phase_root = derive_canonical_object_hash(&phase_record).expect("phase root");
-            phase_record["phaseRoot"] = serde_json::json!(phase_root.clone());
-            previous_phase_root = serde_json::json!(phase_root);
+            let registration_root =
+                derive_canonical_object_hash(&registration).expect("setup-intent registration root");
+            let signature_context_hash =
+                derive_canonical_object_hash(&serde_json::json!({
+                    "objectType": "CollectiveBgvSetupIntentSignatureContext",
+                    "ceremonyId": ceremony_id,
+                    "manifestHash": manifest_hash,
+                    "rosterHash": roster_hash,
+                    "setupParametersHash": setup_parameters_hash,
+                    "setupEpoch": setup_epoch,
+                    "trusteeIdentity": trustee_identity,
+                    "rosterPosition": roster_position,
+                    "setupIntentRegistrationRoot": registration_root,
+                }))
+                .expect("setup-intent signature context hash");
+            registration["signatureEnvelope"] = create_protocol_signature_fixture(
+                &signature_seed_label,
+                serde_json::json!({
+                    "objectType": "CollectiveBgvSetupIntentTrusteeRegistration",
+                    "ceremonyId": ceremony_id,
+                    "manifestHash": manifest_hash,
+                    "boardHeadHash": null,
+                    "objectRoot": registration_root,
+                    "chunkMerkleRoot": null,
+                    "signerRole": "Trustee",
+                    "signerIdentity": trustee_identity,
+                    "recoveryEpoch": 0,
+                    "deviceEpoch": 0,
+                    "contextHash": signature_context_hash,
+                }),
+            )
+            .expect("setup-intent signature fixture")
+            .envelope;
 
-            phase_record
+            registration
         })
         .collect::<Vec<_>>();
+    let setup_intent = serde_json::json!({
+        "objectType": "CollectiveBgvSetupIntent",
+        "trusteeRegistrations": trustee_registrations,
+    });
     let common_randomness = common_randomness_object(
         ceremony_id,
         &manifest_hash,
@@ -430,16 +383,6 @@ fn build_collective_setup_package_fixture_parts(
         &common_randomness,
         participant_count,
     );
-    let public_key_share_proofs = public_key_share_proofs_object(
-        ceremony_id,
-        &manifest_hash,
-        &roster_hash,
-        setup_parameters_hash,
-        setup_epoch,
-        &common_randomness,
-        &public_key_shares,
-        participant_count,
-    );
     let evaluator_key_schedule = evaluator_key_schedule_object(
         ceremony_id,
         &manifest_hash,
@@ -449,25 +392,22 @@ fn build_collective_setup_package_fixture_parts(
         &setup_parameters,
         &common_randomness,
         &public_key_shares,
-        &public_key_share_proofs,
         participant_count,
     );
     let mut package = serde_json::json!({
         "objectType": "SetupPackage",
         "setupContext": setup_context,
-        "phaseTranscript": phase_transcript,
+        "setupIntent": setup_intent,
         "commonRandomness": common_randomness,
         "vssCoefficientCommitments": vss_coefficient_commitments,
         "vssCoefficientCommitmentMaterial": vss_coefficient_commitment_material,
         "privateVssEnvelopeCommitments": private_vss_envelope_commitments,
         "vssShareAcceptances": vss_share_acceptances,
         "publicKeyShares": public_key_shares,
-        "publicKeyShareProofs": public_key_share_proofs,
         "evaluatorKeySchedule": evaluator_key_schedule,
         "relinearizationKeyShareRounds": {},
         "galoisKeyShareBatches": [],
         "trusteeEvaluationKeyProofs": {},
-        "evaluationKeys": {},
     });
     rebind_collective_setup_package_hash(&mut package);
 

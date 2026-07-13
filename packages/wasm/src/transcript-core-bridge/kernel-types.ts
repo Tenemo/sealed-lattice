@@ -1,11 +1,9 @@
 import type {
     CanonicalError,
-    ParticipantIdentity,
     ProtocolHash,
 } from '@sealed-lattice/types';
 
 import type {
-    BgvBatchPlaintextEncoding,
     BgvCollectiveSetupTransportCompanions,
     BgvCollectiveSetupParametersDescription,
     BgvCollectiveSetupVerification,
@@ -16,7 +14,6 @@ import type {
     BgvTrusteeEvaluationKeyStatementContext,
     BgvTrusteeEvaluationKeyStatementKey,
     BgvLocalTrusteeSetupStateVerification,
-    BgvObjectValidation,
     BgvPassiveSetupPackage,
     BgvPassiveSetupParticipantInput,
     BgvPrivateVssShareEnvelopeVerification,
@@ -32,12 +29,10 @@ import type {
     BgvTargetDecryptionShare,
     BgvTargetDecryptionShareProofMaterial,
     BgvTargetDecryptionResultReleaseBegin,
-    BgvTargetDecryptionResultReleaseShareAbsorption,
     BgvTargetDecryptionResultReleaseCompletion,
 } from './kernel-types/bgv.js';
 
 export type {
-    BgvBatchPlaintextEncoding,
     BgvCollectiveSetupParametersDescription,
     BgvCollectiveSetupVerification,
     BgvTrusteeEvaluationKeyProofGeneration,
@@ -47,7 +42,6 @@ export type {
     BgvTrusteeEvaluationKeyStatementContext,
     BgvTrusteeEvaluationKeyStatementKey,
     BgvLocalTrusteeSetupStateVerification,
-    BgvObjectValidation,
     BgvPassiveSetupPackage,
     BgvPassiveSetupParticipantInput,
     BgvPrivateVssShareEnvelopeVerification,
@@ -63,23 +57,9 @@ export type {
     BgvTargetDecryptionShare,
     BgvTargetDecryptionShareProofMaterial,
     BgvTargetDecryptionResultReleaseBegin,
-    BgvTargetDecryptionResultReleaseShareAbsorption,
     BgvTargetDecryptionResultReleaseShareEvidence,
     BgvTargetDecryptionResultReleaseCompletion,
 } from './kernel-types/bgv.js';
-export type FoundationCanonicalTupleValidation = {
-    readonly canonicalTupleHex: string;
-    readonly schemaIdentifier: number;
-    readonly schemaVersion: number;
-    readonly itemCount: number;
-};
-
-export type FoundationSchemaObjectValidation = {
-    readonly schemaIdentifier: number;
-    readonly schemaVersion: number;
-    readonly canonicalByteLength: number;
-};
-
 type BgvTargetDecryptionLocalCommandContext = Readonly<{
     readonly setupPackage: unknown;
     readonly targetAcceptedRecord: unknown;
@@ -107,20 +87,7 @@ export type AcceptedSetupSession = Readonly<{
 export type TranscriptCoreKernel = {
     readonly exportedFunctionNames: readonly string[];
     beginAcceptedSetupSession(): AcceptedSetupSession;
-    computeFoundationHash512(input: {
-        readonly domain: string;
-        readonly canonicalItemsTupleHex: string;
-    }): ProtocolHash;
-    deriveFoundationParticipantIdentity(input: {
-        readonly signingVerificationKeyHex: string;
-    }): ParticipantIdentity;
     deriveCanonicalObjectHash(input: { readonly value: unknown }): ProtocolHash;
-    validateFoundationCanonicalTuple(input: {
-        readonly canonicalTupleHex: string;
-    }): FoundationCanonicalTupleValidation;
-    validateFoundationSchemaObject(input: {
-        readonly canonicalBytes: Uint8Array;
-    }): FoundationSchemaObjectValidation;
     generateBgvTargetDecryptionShareFromLocalShare(
         input: BgvTargetDecryptionLocalCommandContext & {
             readonly trusteeIdentity: string;
@@ -266,7 +233,7 @@ export type TranscriptCoreKernel = {
     absorbBgvTargetDecryptionResultReleaseShare(input: {
         readonly releaseVerificationId: string;
         readonly targetShareProof: unknown;
-    }): BgvTargetDecryptionResultReleaseShareAbsorption;
+    }): void;
     finishBgvTargetDecryptionResultRelease(input: {
         readonly releaseVerificationId: string;
     }): BgvTargetDecryptionResultReleaseCompletion;
@@ -274,19 +241,6 @@ export type TranscriptCoreKernel = {
         readonly setupContext: unknown;
         readonly localStateCommitment: unknown;
     }): BgvLocalTrusteeSetupStateVerification;
-    encodeBgvBatchPlaintext(input: {
-        readonly slots: readonly number[];
-        readonly level?: number;
-        readonly includeCanonicalBytesHex?: boolean;
-    }): BgvBatchPlaintextEncoding;
-    validateBgvPlaintextObject(input: {
-        readonly canonicalBytesHex: string;
-        readonly expectedPlaintextRoot?: string;
-    }): BgvObjectValidation;
-    validateBgvCiphertextObject(input: {
-        readonly canonicalBytesHex: string;
-        readonly expectedCiphertextRoot?: string;
-    }): BgvObjectValidation;
 };
 
 export type TranscriptCoreKernelContextOwner = Pick<
@@ -322,25 +276,9 @@ type KernelCommandFromMethod<
 
 type TranscriptCoreKernelCommand =
     | KernelCommandFromMethod<
-          'ComputeFoundationHash512',
-          'computeFoundationHash512'
-      >
-    | KernelCommandFromMethod<
-          'DeriveFoundationParticipantIdentity',
-          'deriveFoundationParticipantIdentity'
-      >
-    | KernelCommandFromMethod<
           'DeriveCanonicalObjectHash',
           'deriveCanonicalObjectHash'
       >
-    | KernelCommandFromMethod<
-          'ValidateFoundationCanonicalTuple',
-          'validateFoundationCanonicalTuple'
-      >
-    | {
-          readonly command: 'ValidateFoundationSchemaObject';
-          readonly canonicalObjectHex: string;
-      }
     | KernelCommandFromMethod<
           'GenerateBgvTargetDecryptionShareFromLocalShare',
           'generateBgvTargetDecryptionShareFromLocalShare'
@@ -417,18 +355,6 @@ type TranscriptCoreKernelCommand =
     | KernelCommandFromMethod<
           'VerifyLocalTrusteeSetupState',
           'verifyLocalTrusteeSetupState'
-      >
-    | KernelCommandFromMethod<
-          'EncodeBgvBatchPlaintext',
-          'encodeBgvBatchPlaintext'
-      >
-    | KernelCommandFromMethod<
-          'ValidateBgvPlaintextObject',
-          'validateBgvPlaintextObject'
-      >
-    | KernelCommandFromMethod<
-          'ValidateBgvCiphertextObject',
-          'validateBgvCiphertextObject'
       >
     | {
           readonly command: 'RunDirectEncryptedBallot';
@@ -590,32 +516,6 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         statusPointer: number,
         outputLengthPointer: number,
     ) => number;
-    sealed_lattice_foundation_board_begin?: (
-        configurationPointer: number,
-        configurationLength: number,
-        capabilityPointer: number,
-        capabilityLength: number,
-        statusPointer: number,
-    ) => number;
-    sealed_lattice_foundation_board_cancel?: (
-        handle: number,
-        capabilityPointer: number,
-        capabilityLength: number,
-    ) => number;
-    sealed_lattice_foundation_board_ingest?: (
-        handle: number,
-        capabilityPointer: number,
-        capabilityLength: number,
-        canonicalCarrierPointer: number,
-        canonicalCarrierLength: number,
-        candidateHashPointer: number,
-        candidateHashLength: number,
-    ) => number;
-    sealed_lattice_foundation_board_require_complete_carrier_graph?: (
-        handle: number,
-        capabilityPointer: number,
-        capabilityLength: number,
-    ) => number;
     sealed_lattice_deallocate?: (pointer: number, length: number) => void;
     sealed_lattice_local_storage_root_command?: (
         command: number,
@@ -636,6 +536,23 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         capabilityPointer: number,
         capabilityLength: number,
     ) => number;
+    sealed_lattice_state_verifier_certify_intent?: (
+        sessionHandle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        verifiedIntentHandle: number,
+        canonicalStateCertificatePointer: number,
+        canonicalStateCertificateLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_state_verifier_describe?: (
+        sessionHandle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        verifiedObjectHandle: number,
+        outputPointer: number,
+        outputLength: number,
+    ) => number;
     sealed_lattice_state_verifier_release?: (
         sessionHandle: number,
         capabilityPointer: number,
@@ -654,6 +571,45 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         canonicalOutputIntentCarrierLength: number,
         canonicalStateCertificatePointer: number,
         canonicalStateCertificateLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_state_verifier_prepare_output?: (
+        sessionHandle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        streamHandle: number,
+        streamCapabilityPointer: number,
+        streamCapabilityLength: number,
+        verifiedReservationHandle: number,
+        canonicalOutputIntentCarrierPointer: number,
+        canonicalOutputIntentCarrierLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_state_verifier_prepare_recovery?: (
+        sessionHandle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        subjectParticipantIdentityPointer: number,
+        subjectParticipantIdentityLength: number,
+        capabilityKindCode: number,
+        predecessorRecoveryHandle: number,
+        preservedIntentHandle: number,
+        canonicalRecoveryTransitionCarrierPointer: number,
+        canonicalRecoveryTransitionCarrierLength: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_state_verifier_prepare_reservation?: (
+        sessionHandle: number,
+        capabilityPointer: number,
+        capabilityLength: number,
+        subjectParticipantIdentityPointer: number,
+        subjectParticipantIdentityLength: number,
+        capabilityKindCode: number,
+        predecessorRecoveryHandle: number,
+        expectedAuthorizationHashPointer: number,
+        expectedAuthorizationHashLength: number,
+        canonicalReservationIntentCarrierPointer: number,
+        canonicalReservationIntentCarrierLength: number,
         statusPointer: number,
     ) => number;
     sealed_lattice_state_verifier_verify_recovery?: (

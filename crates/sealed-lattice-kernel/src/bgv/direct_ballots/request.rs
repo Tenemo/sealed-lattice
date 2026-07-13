@@ -184,12 +184,6 @@ pub(super) fn read_ballots(
         .iter()
         .enumerate()
         .map(|(ballot_index, ballot)| {
-            if ballot.get("encryptionSeedHex").is_some() {
-                return Err(CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
-                    "direct encrypted ballot encryption seed material must be supplied through ballotEncryptionRandomness",
-                ));
-            }
             Ok(DirectBallotInput {
                 voter_identity: required_string_field(ballot, "voterIdentity")?.to_string(),
                 action_context_hash: required_string_field(ballot, "actionContextHash")?

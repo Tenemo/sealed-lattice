@@ -48,7 +48,7 @@ describe('command process cleanup', () => {
         expect(processGroupKiller).toHaveBeenCalledWith(-32_100, 'SIGTERM');
         expect(childProcess.kill).not.toHaveBeenCalled();
         expect(result).toMatchObject({
-            method: 'process-group',
+            mechanism: 'process-group-signal',
             succeeded: true,
         });
     });
@@ -69,7 +69,7 @@ describe('command process cleanup', () => {
         expect(childProcess.kill).toHaveBeenCalledWith('SIGTERM');
         expect(result).toMatchObject({
             fallbackReason: { message: 'process group is unavailable' },
-            method: 'direct-child',
+            mechanism: 'direct-signal',
             succeeded: true,
         });
     });
@@ -93,8 +93,7 @@ describe('command process cleanup', () => {
         );
         expect(childProcess.kill).not.toHaveBeenCalled();
         expect(result).toMatchObject({
-            forced: true,
-            method: 'windows-taskkill',
+            mechanism: 'taskkill-tree-force',
             succeeded: true,
         });
     });
@@ -118,8 +117,14 @@ describe('command process cleanup', () => {
                 return processEvents;
             }),
         };
-        const gracefulKill = vi.fn();
-        const forceKill = vi.fn();
+        const gracefulKill = vi.fn(() => ({
+            mechanism: 'direct-signal' as const,
+            succeeded: true,
+        }));
+        const forceKill = vi.fn(() => ({
+            mechanism: 'direct-signal' as const,
+            succeeded: true,
+        }));
         let scheduledForceKill: (() => void) | undefined;
 
         try {

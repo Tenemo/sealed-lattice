@@ -3,7 +3,6 @@ use super::*;
 const VSS_PUBLIC_AGGREGATE_THRESHOLD_COMMITMENT_SET_FIELD: &str =
     "vssPublicAggregateThresholdCommitmentSet";
 const VSS_SHARE_LINKAGE_STATEMENT_FIELD: &str = "vssShareLinkageStatement";
-const TARGET_RESULT_RELEASE_SETUP_CONTEXT_HASH_FIELD: &str = "releaseSetupContextHash";
 
 // This is an object-shape check, not setup verification. The public SDK must
 // obtain setup authority from the setup verifier; a caller-selected package
@@ -93,14 +92,6 @@ pub(super) fn read_target_result_release_setup_context(
             "release setup context must be a BgvTargetDecryptionReleaseSetupContext version 1 object",
         ));
     }
-    let expected_context_hash = target_result_release_setup_context_hash(context)?;
-    compare_hash_field(
-        context,
-        TARGET_RESULT_RELEASE_SETUP_CONTEXT_HASH_FIELD,
-        &expected_context_hash,
-        "target result release setup context hash",
-    )?;
-
     let public_matrix_seed_hash = hash_at_path(context, &["publicMatrixSeedHash"])?.to_string();
     let participants = array_at_path(context, &["participants"])?
         .iter()
@@ -141,7 +132,7 @@ pub(super) fn read_target_result_release_setup_context(
 fn target_result_release_setup_context_from_binding(
     setup_binding: &SetupBinding,
 ) -> CanonicalResult<Value> {
-    let mut context = json!({
+    Ok(json!({
         "objectType": "BgvTargetDecryptionReleaseSetupContext",
         "setupPackageHash": setup_binding.setup_package_hash,
         "ceremonyId": setup_binding.ceremony_id,
@@ -157,17 +148,7 @@ fn target_result_release_setup_context_from_binding(
             "rosterPosition": participant.roster_position,
         })).collect::<Vec<_>>(),
         VSS_PUBLIC_AGGREGATE_THRESHOLD_COMMITMENT_SET_FIELD: aggregate_threshold_commitment_set_value(setup_binding)?,
-    });
-    let context_hash = target_result_release_setup_context_hash(&context)?;
-    context
-        .as_object_mut()
-        .expect("target result release setup context is a JSON object")
-        .insert(
-            TARGET_RESULT_RELEASE_SETUP_CONTEXT_HASH_FIELD.to_string(),
-            json!(context_hash),
-        );
-
-    Ok(context)
+    }))
 }
 
 fn aggregate_threshold_commitment_set_value(
@@ -190,7 +171,6 @@ fn aggregate_threshold_commitment_set_value(
                 "objectType": "VssPublicAggregateThresholdCommitment",
                 "recipientIdentity": participant.trustee_identity,
                 "recipientRosterPosition": participant.roster_position,
-                "recipientTrusteePoint": participant.interpolation_point()?,
                 "rnsLimbIndex": rns_limb_index,
                 "rnsPrime": record.rns_prime,
                 "aggregateCommitmentRoot": record.aggregate_commitment_root,
@@ -209,16 +189,6 @@ fn aggregate_threshold_commitment_set_value(
         "aggregateThresholdCommitmentRoot": aggregate_set.aggregate_threshold_commitment_root,
         "recipientRecords": records,
     }))
-}
-
-pub(super) fn target_result_release_setup_context_hash(
-    context: &Value,
-) -> CanonicalResult<String> {
-    let mut hash_input = context.clone();
-    if let Some(object) = hash_input.as_object_mut() {
-        object.remove(TARGET_RESULT_RELEASE_SETUP_CONTEXT_HASH_FIELD);
-    }
-    derive_canonical_object_hash(&hash_input)
 }
 
 fn read_aggregate_threshold_commitment_set_binding(
@@ -292,12 +262,6 @@ fn read_aggregate_threshold_commitment_set_binding(
                 "recipientRosterPosition",
                 participant.roster_position as u64,
                 "aggregate threshold commitment recipient roster position",
-            )?;
-            compare_unsigned_field(
-                record,
-                "recipientTrusteePoint",
-                participant.interpolation_point()?,
-                "aggregate threshold commitment recipient trustee point",
             )?;
             compare_unsigned_field(
                 record,

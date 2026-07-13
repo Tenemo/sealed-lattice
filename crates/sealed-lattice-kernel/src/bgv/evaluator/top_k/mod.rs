@@ -14,6 +14,7 @@ pub(crate) use rank_lookup::*;
 pub(crate) use rotations::*;
 pub(crate) use score_packing::*;
 pub(crate) use sparse_target::*;
+#[cfg(test)]
 use std::collections::BTreeSet;
 
 use crate::{
@@ -36,9 +37,6 @@ use crate::{
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
 };
 
-// The deterministic tie policy: a higher aggregate score ranks first, and equal
-// scores are broken by the lower option index.
-pub(crate) const TIE_POLICY: &str = "higher-sum-first-then-lower-option-index";
 // The frozen evaluator working level for the selected multi-ballot parameters:
 // the aggregate is mod-switched to this level before packing, every rotation
 // and multiplication happens at or below it, and one relinearization key plus
@@ -77,7 +75,6 @@ pub(crate) fn canonical_target_basis_value() -> CanonicalResult<serde_json::Valu
 pub(crate) fn canonical_target_basis_hash() -> CanonicalResult<String> {
     crate::hashing::derive_canonical_object_hash(&canonical_target_basis_value()?)
 }
-const PACKED_SCORE_GALOIS_GENERATOR: usize = 3;
 const GENERATOR_SUBGROUP_ORDER: usize = POLYNOMIAL_DEGREE / 2;
 
 pub(crate) struct PackedRankEvaluation {

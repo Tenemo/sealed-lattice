@@ -58,18 +58,8 @@ pub(super) fn verify_trustee_evaluation_key_proofs(
         };
     }
     let Some(proof_set) = proof_set else {
-        if trustee_evaluation_key_proofs_have_terminal_dependents(setup_package) {
-            return Ok(Some(evaluation_key_material_refusal(
-                "trusteeEvaluationKeyProofsMissing",
-                "trusteeEvaluationKeyProofs must be present before terminal evaluation-key material can be accepted",
-                "setupPackage.trusteeEvaluationKeyProofs",
-            )?));
-        }
-
         return Ok(Some(verification_response(
-            Some("trusteeEvaluationKeyProofs"),
             vec!["trusteeEvaluationKeyProofs".to_string()],
-            Vec::new(),
             Vec::new(),
         )?));
     };
@@ -97,10 +87,6 @@ pub(super) fn verify_trustee_evaluation_key_proofs(
     Ok(None)
 }
 
-fn trustee_evaluation_key_proofs_have_terminal_dependents(setup_package: &Value) -> bool {
-    setup_package.get("evaluationKeys").is_some()
-}
-
 fn verify_trustee_evaluation_key_proof_set(
     setup_package: &Value,
     request: &Value,
@@ -122,125 +108,7 @@ fn verify_trustee_evaluation_key_proof_set(
             "setupContext was required before trustee evaluation-key proof verification",
         )
     })?;
-    let roster = super::accepted_roster_from_package(setup_package);
-    verify_context_fields_match(proof_set, setup_context, "trusteeEvaluationKeyProofs")?;
-    for (field_name, expected_value) in [
-        ("participantCount", roster.participant_count),
-        ("rnsLimbCount", DATA_PRIMES.len() as u64),
-    ] {
-        if proof_set.get(field_name).and_then(Value::as_u64) != Some(expected_value) {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::ComponentMismatch,
-                format!("trusteeEvaluationKeyProofs.{field_name} must be {expected_value}"),
-            ));
-        }
-    }
-    let binding = evaluation_key_proof_common_binding(setup_package)?;
-    let public_matrix_seed_hash = setup_package
-        .get("commonRandomness")
-        .and_then(|common_randomness| common_randomness.get("publicMatrixSeedHash"))
-        .and_then(Value::as_str)
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "commonRandomness.publicMatrixSeedHash was required before trustee evaluation-key proof verification",
-            )
-        })?;
-    let vss_coefficient_commitment_root = setup_package
-        .get("vssCoefficientCommitments")
-        .and_then(|commitments| commitments.get("vssCoefficientCommitmentRoot"))
-        .and_then(Value::as_str)
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "the verified VSS coefficient commitment root was required before trustee evaluation-key proof verification",
-            )
-        })?;
-    for (field_name, expected_value) in [
-        (
-            "evaluatorKeyScheduleRoot",
-            binding.evaluator_key_schedule_root.as_str(),
-        ),
-        (
-            "requiredGaloisSetHash",
-            binding.required_galois_set_hash.as_str(),
-        ),
-        (
-            "vssCoefficientCommitmentRoot",
-            vss_coefficient_commitment_root,
-        ),
-        (
-            "publicKeyShareSetRoot",
-            binding.public_key_share_set_root.as_str(),
-        ),
-        (
-            "publicKeyShareSuccinctProofSetRoot",
-            binding.public_key_share_succinct_proof_set_root.as_str(),
-        ),
-        (
-            "relinearizationCrpRoot",
-            binding.relinearization_crp_root.as_str(),
-        ),
-        ("galoisKeyCrpRoot", binding.galois_key_crp_root.as_str()),
-        ("publicMatrixSeedHash", public_matrix_seed_hash),
-    ] {
-        if proof_set.get(field_name).and_then(Value::as_str) != Some(expected_value) {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::ComponentMismatch,
-                format!(
-                    "trusteeEvaluationKeyProofs.{field_name} must match the accepted setup binding"
-                ),
-            ));
-        }
-    }
-    let rounds = setup_package
-        .get("relinearizationKeyShareRounds")
-        .expect("relinearization rounds were checked before trustee proof verification");
-    if proof_set
-        .get("relinearizationKeyShareRoundsRoot")
-        .and_then(Value::as_str)
-        != rounds
-            .get("relinearizationKeyShareRoundsRoot")
-            .and_then(Value::as_str)
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ComponentMismatch,
-            "trusteeEvaluationKeyProofs.relinearizationKeyShareRoundsRoot must bind the verified share-record container",
-        ));
-    }
-    let batches = setup_package
-        .get("galoisKeyShareBatches")
-        .and_then(Value::as_array)
-        .expect("Galois batches were checked before trustee proof verification");
-    let supplied_batch_roots = array_value(proof_set, "galoisKeyShareBatchRoots")?;
-    if supplied_batch_roots.len() != batches.len() {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "trusteeEvaluationKeyProofs.galoisKeyShareBatchRoots must list every verified Galois batch",
-        ));
-    }
-    let mut batch_roots_by_roster_position = BTreeMap::new();
-    for batch in batches {
-        batch_roots_by_roster_position.insert(
-            value_u64(batch, "trusteeRosterPosition")?,
-            value_string(batch, "galoisKeyShareBatchRoot")?,
-        );
-    }
-    for supplied_batch_root in supplied_batch_roots {
-        let trustee_roster_position = value_u64(supplied_batch_root, "trusteeRosterPosition")?;
-        if batch_roots_by_roster_position.get(&trustee_roster_position)
-            != Some(&value_string(
-                supplied_batch_root,
-                "galoisKeyShareBatchRoot",
-            )?)
-        {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::ComponentMismatch,
-                "trusteeEvaluationKeyProofs.galoisKeyShareBatchRoots must match the verified Galois batches",
-            ));
-        }
-    }
-
+    let roster = super::accepted_roster_from_package(setup_package)?;
     let proof_records = array_value(proof_set, "proofRecords")?;
     if proof_records.len() != roster.participant_count as usize {
         return Err(CanonicalError::new(
@@ -260,28 +128,9 @@ fn verify_trustee_evaluation_key_proof_set(
             ));
         }
     }
-    let supplied_root = value_string(proof_set, "trusteeEvaluationKeyProofSetRoot")?;
-    let mut root_input = proof_set.clone();
-    root_input
-        .as_object_mut()
-        .expect("trustee evaluation-key proof set object was checked")
-        .remove("trusteeEvaluationKeyProofSetRoot");
-    trustee_evaluation_key_verify_progress(|| "proof-set-root-start".to_string());
-    let expected_root = derive_canonical_object_hash(&root_input)?;
-    trustee_evaluation_key_verify_progress(|| "proof-set-root-finish".to_string());
-    if supplied_root != expected_root {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "trusteeEvaluationKeyProofSetRoot does not match the canonical trustee proof container",
-        ));
-    }
-
     trustee_evaluation_key_verify_progress(|| "shared-inputs-start".to_string());
     let transported_key_switch_component_material =
-        transported_evaluation_key_share_component_material_from_request(request)?;
-    let transported_key_switch_component_material = request
-        .get("transportedEvaluationKeyShareComponentMaterial")
-        .or(transported_key_switch_component_material.as_ref());
+        request.get("transportedEvaluationKeyShareComponentMaterial");
     let round_one_aggregate_diagonals_by_level = round_one_public_aggregate_diagonals_from_package(
         setup_package,
         transported_key_switch_component_material,
@@ -344,36 +193,13 @@ fn verify_trustee_evaluation_key_proof_record(
     }
     verify_context_fields_match(proof_record, setup_context, "trusteeEvaluationKeyProof")?;
     let trustee_roster_position = value_u64(proof_record, "trusteeRosterPosition")?;
-    let source_constant_commitment_root = statement
-        .context
-        .binding_roots
-        .iter()
-        .find(|(label, _)| label == "sourceConstantCoefficientCommitmentRoot")
-        .map(|(_, root)| root.as_str())
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "trustee evaluation-key statement is missing its source constant commitment root",
-            )
-        })?;
-    for (field_name, expected_value) in [
-        (
-            "trusteeIdentity",
-            statement.context.trustee_identity.as_str(),
-        ),
-        (
-            "sourceConstantCoefficientCommitmentRoot",
-            source_constant_commitment_root,
-        ),
-    ] {
-        if proof_record.get(field_name).and_then(Value::as_str) != Some(expected_value) {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::ComponentMismatch,
-                format!(
-                    "trustee evaluation-key proof {field_name} must match the accepted trustee secret binding"
-                ),
-            ));
-        }
+    if proof_record.get("trusteeIdentity").and_then(Value::as_str)
+        != Some(statement.context.trustee_identity.as_str())
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ComponentMismatch,
+            "trustee evaluation-key proof trusteeIdentity must match the accepted trustee secret binding",
+        ));
     }
     let expected_statement_hash = to_hex(&statement.statement_hash());
     if proof_record.get("statementHash").and_then(Value::as_str)
@@ -384,26 +210,6 @@ fn verify_trustee_evaluation_key_proof_record(
             "trustee evaluation-key proof statementHash must match the statement rebuilt from the verified share records",
         ));
     }
-    let supplied_root = value_string(proof_record, "trusteeEvaluationKeyProofRoot")?;
-    let mut root_input = proof_record.clone();
-    root_input
-        .as_object_mut()
-        .expect("trustee evaluation-key proof record object was checked")
-        .remove("trusteeEvaluationKeyProofRoot");
-    trustee_evaluation_key_verify_progress(|| {
-        format!("trustee={trustee_roster_position} record-root-start")
-    });
-    let expected_root = derive_canonical_object_hash(&root_input)?;
-    trustee_evaluation_key_verify_progress(|| {
-        format!("trustee={trustee_roster_position} record-root-finish")
-    });
-    if supplied_root != expected_root {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "trusteeEvaluationKeyProofRoot does not match the canonical trustee proof record",
-        ));
-    }
-
     let proof_material_root = value_string(proof_record, "proofMaterialRoot")?;
     let verification_binding_hash =
         trustee_evaluation_key_proof_verification_binding_hash(proof_record, statement)?;
@@ -452,22 +258,11 @@ pub(in crate::bgv::setup) fn trustee_evaluation_key_proof_verification_binding_h
     proof_record: &Value,
     statement: &TrusteeEvaluationKeyStatement,
 ) -> CanonicalResult<String> {
-    let mut proof_record_root_input = proof_record.clone();
-    proof_record_root_input
-        .as_object_mut()
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "trustee evaluation-key proof record must be an object",
-            )
-        })?
-        .remove("trusteeEvaluationKeyProofRoot");
     derive_canonical_object_hash(&json!({
         "objectType": "AcceptedSetupTrusteeEvaluationKeyProofVerificationBinding",
-        "proofFamily": TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
         "proofMaterialRoot": trustee_evaluation_key_proof_material_root(proof_record)?,
         "statementHash": to_hex(&statement.statement_hash()),
-        "proofRecordRoot": derive_canonical_object_hash(&proof_record_root_input)?,
+        "proofRecordRoot": derive_canonical_object_hash(proof_record)?,
     }))
 }
 
@@ -516,11 +311,21 @@ pub(in crate::bgv::setup) fn trustee_evaluation_key_statement_from_package(
             inputs.trustee_roster_position,
             *level,
         )?;
-        keys.push(evaluation_key_descriptor_from_record(
-            EvaluationKeyShareKind::RelinearizationRoundOne,
-            EvaluationKeyShareProofFamily::Relinearization,
+        let key_switch_seed_hex =
+            expected_relinearization_key_switch_seed(&binding, "round-one", *level)?;
+        let decoded_material = verify_relinearization_key_switch_sample_binding(
             record,
+            &binding,
+            "round-one",
+            *level,
             inputs.transported_key_switch_component_material,
+        )?;
+        keys.push(evaluation_key_descriptor_from_verified_sample(
+            EvaluationKeyShareKind::RelinearizationRoundOne,
+            *level,
+            "relinearization".to_string(),
+            key_switch_seed_hex,
+            decoded_material,
             Vec::new(),
             &mut ring_degree,
         )?);
@@ -542,11 +347,21 @@ pub(in crate::bgv::setup) fn trustee_evaluation_key_statement_from_package(
                 )
             })?
             .clone();
-        keys.push(evaluation_key_descriptor_from_record(
-            EvaluationKeyShareKind::RelinearizationRoundTwo,
-            EvaluationKeyShareProofFamily::Relinearization,
+        let key_switch_seed_hex =
+            expected_relinearization_key_switch_seed(&binding, "round-two", *level)?;
+        let decoded_material = verify_relinearization_key_switch_sample_binding(
             record,
+            &binding,
+            "round-two",
+            *level,
             inputs.transported_key_switch_component_material,
+        )?;
+        keys.push(evaluation_key_descriptor_from_verified_sample(
+            EvaluationKeyShareKind::RelinearizationRoundTwo,
+            *level,
+            "relinearization".to_string(),
+            key_switch_seed_hex,
+            decoded_material,
             aggregate_diagonal,
             &mut ring_degree,
         )?);
@@ -586,11 +401,22 @@ pub(in crate::bgv::setup) fn trustee_evaluation_key_statement_from_package(
                 "Galois rotation does not fit usize",
             )
         })?;
-        keys.push(evaluation_key_descriptor_from_record(
-            EvaluationKeyShareKind::GaloisRotation { galois_element },
-            EvaluationKeyShareProofFamily::Galois,
+        let key_switch_domain = format!("galois-{rotation}");
+        let key_switch_seed_hex = expected_galois_key_switch_seed(&binding, rotation, level)?;
+        let decoded_material = verify_galois_key_switch_sample_binding(
+            batch,
             material_record,
+            &binding,
+            rotation,
+            level,
             inputs.transported_key_switch_component_material,
+        )?;
+        keys.push(evaluation_key_descriptor_from_verified_sample(
+            EvaluationKeyShareKind::GaloisRotation { galois_element },
+            level,
+            key_switch_domain,
+            key_switch_seed_hex,
+            decoded_material,
             Vec::new(),
             &mut ring_degree,
         )?);
@@ -647,10 +473,6 @@ pub(in crate::bgv::setup) fn trustee_evaluation_key_statement_from_package(
         setup_epoch: value_string(setup_context, "setupEpoch")?.to_string(),
         binding_roots: vec![
             (
-                "requiredGaloisSetHash".to_string(),
-                binding.required_galois_set_hash.clone(),
-            ),
-            (
                 "evaluatorKeyScheduleRoot".to_string(),
                 binding.evaluator_key_schedule_root.clone(),
             ),
@@ -675,48 +497,38 @@ pub(in crate::bgv::setup) fn trustee_evaluation_key_statement_from_package(
     Ok(statement)
 }
 
-fn evaluation_key_descriptor_from_record(
+fn evaluation_key_descriptor_from_verified_sample(
     kind: EvaluationKeyShareKind,
-    proof_family: EvaluationKeyShareProofFamily,
-    record: &Value,
-    transported_key_switch_component_material: Option<&Value>,
+    level: u64,
+    key_switch_domain: String,
+    key_switch_seed_hex: String,
+    decoded_material: DecodedEvaluationKeyShareComponentMaterial,
     round_one_aggregate_diagonal: Vec<Vec<u64>>,
     ring_degree: &mut Option<usize>,
 ) -> CanonicalResult<EvaluationKeyShareDescriptor> {
-    let level = usize::try_from(value_u64(record, "level")?).map_err(|_| {
+    let level = usize::try_from(level).map_err(|_| {
         CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
             "evaluation-key share level does not fit usize",
         )
     })?;
-    let record_ring_degree = usize::try_from(value_u64(record, "ringDegree")?).map_err(|_| {
-        CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "evaluation-key share ring degree does not fit usize",
-        )
-    })?;
     match ring_degree {
-        Some(existing_ring_degree) if *existing_ring_degree != record_ring_degree => {
+        Some(existing_ring_degree) if *existing_ring_degree != decoded_material.ring_degree => {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::ComponentMismatch,
-                "evaluation-key share records must agree on one ring degree",
+                "evaluation-key share component material must agree on one ring degree",
             ));
         }
         Some(_) => {}
-        None => *ring_degree = Some(record_ring_degree),
+        None => *ring_degree = Some(decoded_material.ring_degree),
     }
-    let component_b_by_digit = component_b_vectors_from_record(
-        proof_family,
-        record,
-        transported_key_switch_component_material,
-    )?;
 
     Ok(EvaluationKeyShareDescriptor {
         kind,
         level,
-        key_switch_domain: value_string(record, "keySwitchDomain")?.to_string(),
-        key_switch_seed_hex: value_string(record, "keySwitchSeedHex")?.to_string(),
-        component_b_by_digit,
+        key_switch_domain,
+        key_switch_seed_hex,
+        component_b_by_digit: decoded_material.component_b_by_digit,
         round_one_aggregate_diagonal,
     })
 }
@@ -754,7 +566,7 @@ pub(in crate::bgv::setup) fn round_one_public_aggregate_diagonals_from_package(
     setup_package: &Value,
     transported_key_switch_component_material: Option<&Value>,
 ) -> CanonicalResult<BTreeMap<u64, Vec<Vec<u64>>>> {
-    let roster = super::accepted_roster_from_package(setup_package);
+    let roster = super::accepted_roster_from_package(setup_package)?;
     let rounds = setup_package
         .get("relinearizationKeyShareRounds")
         .ok_or_else(|| {
@@ -764,6 +576,7 @@ pub(in crate::bgv::setup) fn round_one_public_aggregate_diagonals_from_package(
             )
         })?;
     let round_one_records = array_value(rounds, "roundOneRecords")?;
+    let binding = evaluation_key_proof_common_binding(setup_package)?;
     let mut aggregates_by_level = BTreeMap::<u64, (Vec<Vec<u64>>, u64)>::new();
     for record in round_one_records {
         let level = value_u64(record, "level")?;
@@ -773,21 +586,15 @@ pub(in crate::bgv::setup) fn round_one_public_aggregate_diagonals_from_package(
                 "relinearization level does not fit usize",
             )
         })? + 1;
-        let components = component_b_vectors_from_record(
-            EvaluationKeyShareProofFamily::Relinearization,
+        let decoded_material = verify_relinearization_key_switch_sample_binding(
             record,
+            &binding,
+            "round-one",
+            level,
             transported_key_switch_component_material,
         )?;
-        let ring_degree = components
-            .first()
-            .and_then(|by_limb| by_limb.first())
-            .map(Vec::len)
-            .ok_or_else(|| {
-                CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
-                    "round-one component material does not cover the aggregate diagonal",
-                )
-            })?;
+        let ring_degree = decoded_material.ring_degree;
+        let components = decoded_material.component_b_by_digit;
         let (aggregate, contribution_count) = aggregates_by_level
             .entry(level)
             .or_insert_with(|| (vec![vec![0_u64; ring_degree]; digit_count], 0));
@@ -851,7 +658,6 @@ pub(in crate::bgv::setup) fn trustee_evaluation_key_proof_material_root(
 ) -> CanonicalResult<String> {
     derive_canonical_object_hash(&json!({
         "objectType": "TrusteeEvaluationKeyProofMaterialReference",
-        "proofFamily": TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
         "trusteeIdentity": value_string(proof_record, "trusteeIdentity")?,
         "trusteeRosterPosition": value_u64(proof_record, "trusteeRosterPosition")?,
         "statementHash": value_string(proof_record, "statementHash")?,
@@ -871,12 +677,8 @@ fn transported_trustee_evaluation_key_proof_material_bytes(
                 "transportedEvaluationKeyShareProofMaterial was required by transported trustee evaluation-key proof records",
             )
         })?;
-    let material_set_proof_family = material_set.get("proofFamily").and_then(Value::as_str);
-    let material_set_family_matches = material_set_proof_family == Some("evaluation-key-share")
-        || material_set_proof_family == Some(TRUSTEE_EVALUATION_KEY_PROOF_FAMILY);
     if material_set.get("objectType").and_then(Value::as_str)
         != Some(EVALUATION_KEY_SHARE_PROOF_TRANSPORT_SET_OBJECT_TYPE)
-        || !material_set_family_matches
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -896,8 +698,6 @@ fn transported_trustee_evaluation_key_proof_material_bytes(
     for proof_material in proof_materials {
         if proof_material.get("objectType").and_then(Value::as_str)
             != Some(EVALUATION_KEY_SHARE_PROOF_TRANSPORT_OBJECT_TYPE)
-            || proof_material.get("proofFamily").and_then(Value::as_str)
-                != Some(TRUSTEE_EVALUATION_KEY_PROOF_FAMILY)
         {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,

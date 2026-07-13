@@ -24,38 +24,29 @@ export type LocalTrusteeSetupStateSealedMaterial =
 export type LocalTrusteeSetupStateSealedPayload = Readonly<
     JsonRecord & {
         readonly objectType: 'LocalTrusteeSetupStateSealedPayload';
+        readonly sealedAggregateThresholdShare: LocalTrusteeSetupStateSealedMaterial;
+    }
+>;
+
+export type LocalTrusteeSetupStateCommitment = Readonly<
+    Record<string, unknown> & {
+        readonly objectType: 'LocalTrusteeSetupStateCommitment';
         readonly ceremonyId: string;
         readonly manifestHash: ProtocolHash;
         readonly rosterHash: ProtocolHash;
+        readonly setupParametersHash: ProtocolHash;
         readonly setupEpoch: string;
         readonly trusteeIdentity: string;
         readonly trusteeRosterPosition: number;
-        readonly deviceEpoch: number;
         readonly thresholdShareCommitmentRecipientRoot: ProtocolHash;
-        readonly sealedAggregateThresholdShare: LocalTrusteeSetupStateSealedMaterial;
-        readonly issuedVssAcceptanceRoots: readonly ProtocolHash[];
-        readonly issuedVssComplaintRoots: readonly ProtocolHash[];
+        readonly aggregateThresholdShareRoot: ProtocolHash;
+        readonly localStateRoot: ProtocolHash;
     }
 >;
 
 export type LocalTrusteeStateStorageEncryptionInput = {
     readonly localStatePlaintext: LocalTrusteeSetupStateSealedPayload;
-    readonly localStateCommitment: Readonly<
-        Record<string, unknown> & {
-            readonly objectType: 'LocalTrusteeSetupStateCommitment';
-            readonly ceremonyId: string;
-            readonly manifestHash: ProtocolHash;
-            readonly rosterHash: ProtocolHash;
-            readonly setupEpoch: string;
-            readonly trusteeIdentity: string;
-            readonly trusteeRosterPosition: number;
-            readonly thresholdShareCommitmentRecipientRoot: ProtocolHash;
-            readonly aggregateThresholdShareRoot: ProtocolHash;
-            readonly issuedVssAcceptanceRoot: ProtocolHash;
-            readonly issuedVssComplaintRoots: readonly ProtocolHash[];
-            readonly localStateRoot: ProtocolHash;
-        }
-    >;
+    readonly localStateCommitment: LocalTrusteeSetupStateCommitment;
     readonly setupContext: unknown;
     readonly storageKeyBytesHex: string;
 };
@@ -76,14 +67,6 @@ export type EncryptedLocalTrusteeSetupState = Readonly<
     }
 >;
 
-export type LocalTrusteeStateStorageEncryptionResult = {
-    readonly encryptedLocalState: EncryptedLocalTrusteeSetupState;
-};
-
-export type LocalTrusteeStateStorageDecryptionResult = {
-    readonly localStatePlaintext: LocalTrusteeSetupStateSealedPayload;
-};
-
 export type LocalTrusteeSetupSealedMaterialEncryptionInput = {
     readonly materialPlaintext: unknown;
     readonly setupContext: unknown;
@@ -91,11 +74,6 @@ export type LocalTrusteeSetupSealedMaterialEncryptionInput = {
     readonly trusteeRosterPosition: number;
     readonly thresholdShareCommitmentRecipientRoot: ProtocolHash;
     readonly storageKeyBytesHex: string;
-};
-
-export type LocalTrusteeSetupSealedMaterialEncryptionResult = {
-    readonly sealedMaterial: LocalTrusteeSetupStateSealedMaterial;
-    readonly materialRoot: ProtocolHash;
 };
 
 export type LocalTrusteeSetupSealedMaterialDecryptionInput = {
@@ -106,32 +84,19 @@ export type LocalTrusteeSetupSealedMaterialDecryptionInput = {
     readonly storageKeyBytesHex: string;
 };
 
-export type LocalTrusteeSetupSealedMaterialDecryptionResult = {
-    readonly materialPlaintext: unknown;
-};
-
 export const protocolHashPattern = /^[0-9a-f]{128}$/u;
 
 export const setupContextFieldNames = [
     'ceremonyId',
     'manifestHash',
     'rosterHash',
+    'setupParametersHash',
     'setupEpoch',
 ] as const;
 
 export const localTrusteeSealedPayloadFieldNames = [
     'objectType',
-    'ceremonyId',
-    'manifestHash',
-    'rosterHash',
-    'setupEpoch',
-    'trusteeIdentity',
-    'trusteeRosterPosition',
-    'deviceEpoch',
-    'thresholdShareCommitmentRecipientRoot',
     'sealedAggregateThresholdShare',
-    'issuedVssAcceptanceRoots',
-    'issuedVssComplaintRoots',
 ] as const;
 
 export const encryptedSealedMaterialFieldNames = [

@@ -514,7 +514,7 @@ mod tests {
         }))
         .expect("context hash");
         let signed_root = json!({
-            "objectType": "SetupPhaseParticipantObject",
+            "objectType": "CollectiveBgvSetupIntentTrusteeRegistration",
             "ceremonyId": "ceremony-main",
             "manifestHash": object_root,
             "boardHeadHash": null,
@@ -529,7 +529,7 @@ mod tests {
         let fixture =
             create_protocol_signature_fixture("trustee-0", signed_root).expect("signature fixture");
         let expectation = ProtocolSignatureExpectation {
-            object_type: "SetupPhaseParticipantObject",
+            object_type: "CollectiveBgvSetupIntentTrusteeRegistration",
             signer_role: "Trustee",
             signer_identity: "trustee-0",
             ceremony_id: "ceremony-main",
@@ -561,7 +561,7 @@ mod tests {
         }))
         .expect("context hash");
         let signed_root = json!({
-            "objectType": "SetupPhaseParticipantObject",
+            "objectType": "CollectiveBgvSetupIntentTrusteeRegistration",
             "ceremonyId": "ceremony-main",
             "manifestHash": object_root,
             "boardHeadHash": null,
@@ -578,7 +578,7 @@ mod tests {
         let mut tampered_envelope = fixture.envelope.clone();
         tampered_envelope["signedRoot"]["recoveryEpoch"] = json!(1);
         let expectation = ProtocolSignatureExpectation {
-            object_type: "SetupPhaseParticipantObject",
+            object_type: "CollectiveBgvSetupIntentTrusteeRegistration",
             signer_role: "Trustee",
             signer_identity: "trustee-0",
             ceremony_id: "ceremony-main",

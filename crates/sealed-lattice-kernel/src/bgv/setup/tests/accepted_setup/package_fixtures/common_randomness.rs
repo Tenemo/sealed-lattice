@@ -67,7 +67,6 @@ pub(super) fn common_randomness_object(
             }),
         )
         .expect("reveal signature fixture");
-        reveal_record["revealHash"] = serde_json::json!(reveal_hash.clone());
         reveal_record["signatureEnvelope"] = reveal_signature_fixture.envelope;
         ordered_reveal_hashes.push(reveal_hash.clone());
         reveal_records.push(reveal_record);
@@ -115,14 +114,13 @@ pub(super) fn common_randomness_object(
             }),
         )
         .expect("commit signature fixture");
-        commit_record["commitHash"] = serde_json::json!(commit_hash);
         commit_record["signatureEnvelope"] = commit_signature_fixture.envelope;
         commit_records.push(commit_record);
     }
 
     let public_matrix_seed_hash = derive_canonical_object_hash(&serde_json::json!({
-    "objectType": "SetupPublicMatrixSeed",
-    "ceremonyId": ceremony_id,
+        "objectType": "SetupPublicMatrixSeed",
+        "ceremonyId": ceremony_id,
         "manifestHash": manifest_hash,
         "rosterHash": roster_hash,
         "setupParametersHash": setup_parameters_hash,
@@ -130,25 +128,10 @@ pub(super) fn common_randomness_object(
         "orderedRevealHashes": ordered_reveal_hashes,
     }))
     .expect("public matrix seed hash");
-    let public_derivations = crate::bgv::setup::accepted_setup::derive_collective_bgv_setup_public_derivations_for_roster(
-        &public_matrix_seed_hash,
-    )
-    .expect("public derivations");
-    let mut common_randomness = serde_json::json!({
+    serde_json::json!({
         "objectType": "SetupCommonRandomness",
-        "ceremonyId": ceremony_id,
-        "manifestHash": manifest_hash,
-        "rosterHash": roster_hash,
-        "setupParametersHash": setup_parameters_hash,
-        "setupEpoch": setup_epoch,
         "commitRecords": commit_records,
         "revealRecords": reveal_records,
         "publicMatrixSeedHash": public_matrix_seed_hash,
-        "publicDerivations": public_derivations,
-    });
-    let common_randomness_root =
-        derive_canonical_object_hash(&common_randomness).expect("common randomness root");
-    common_randomness["commonRandomnessRoot"] = serde_json::json!(common_randomness_root);
-
-    common_randomness
+    })
 }

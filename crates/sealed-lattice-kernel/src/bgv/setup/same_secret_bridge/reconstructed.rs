@@ -23,14 +23,176 @@ pub(super) struct StatementRecordVerificationInput<'a> {
 
 pub(super) struct ReconstructedSameSecretBridgeProofVerification<'a> {
     pub(super) bridge_statement: &'a Value,
+    pub(super) coefficient_commitment_set: &'a Value,
     pub(super) statement_set: StatementSetBinding<'a>,
     pub(super) expected_position: usize,
+    pub(super) q_share_rns_limb_count: usize,
+    pub(super) threshold_degree: usize,
+    pub(super) ring_degree: usize,
     pub(super) source_constant_commitment_values: &'a [Value],
+}
+
+pub(in crate::bgv::setup) struct AuthoritativeSameSecretBridgeTarget<'a> {
+    pub(in crate::bgv::setup) rns_prime: u64,
+    pub(in crate::bgv::setup) coefficient_commitment_root: &'a str,
+    pub(in crate::bgv::setup) commitment_body: &'a Value,
+}
+
+pub(in crate::bgv::setup) fn authoritative_same_secret_bridge_targets<'a>(
+    coefficient_commitment_set: &'a Value,
+    trustee_identity: &str,
+    expected_position: usize,
+    public_matrix_seed_hash: &str,
+    q_share_rns_limb_count: usize,
+    threshold_degree: usize,
+    ring_degree: usize,
+) -> CanonicalResult<Vec<AuthoritativeSameSecretBridgeTarget<'a>>> {
+    let source_records = array_at_path(coefficient_commitment_set, &["sourceTrusteeRecords"])?;
+    let source_record = source_records.get(expected_position).ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "authoritative VSS coefficient commitments do not cover the bridge trustee",
+        )
+    })?;
+    compare_required_string(
+        string_at_path(source_record, &["objectType"])?,
+        "VssPublicSourceCoefficientCommitments",
+        "authoritative bridge target source record objectType",
+    )?;
+    compare_required_string(
+        string_at_path(source_record, &["sourceTrusteeIdentity"])?,
+        trustee_identity,
+        "authoritative bridge target source trustee identity",
+    )?;
+    compare_required_u64(
+        unsigned_at_path(source_record, &["sourceTrusteeRosterPosition"])?,
+        expected_position as u64,
+        "authoritative bridge target source trustee roster position",
+    )?;
+    compare_required_string(
+        hash_at_path(source_record, &["publicMatrixSeedHash"])?,
+        public_matrix_seed_hash,
+        "authoritative bridge target source publicMatrixSeedHash",
+    )?;
+    let coefficient_records = array_at_path(source_record, &["coefficientCommitments"])?;
+    let expected_record_count = q_share_rns_limb_count
+        .checked_mul(threshold_degree)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "authoritative bridge target coordinate count overflowed",
+            )
+        })?;
+    if coefficient_records.len() != expected_record_count {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "authoritative VSS coefficient commitments must cover every bridge target coordinate",
+        ));
+    }
+
+    (0..q_share_rns_limb_count)
+        .map(|rns_limb_index| {
+            let record_index = rns_limb_index
+                .checked_mul(threshold_degree)
+                .ok_or_else(|| {
+                    CanonicalError::new(
+                        CanonicalErrorCode::MalformedLength,
+                        "authoritative bridge target record index overflowed",
+                    )
+                })?;
+            let record = coefficient_records.get(record_index).ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    "authoritative VSS coefficient commitment is missing for a bridge target limb",
+                )
+            })?;
+            compare_required_string(
+                string_at_path(record, &["objectType"])?,
+                "VssPublicCoefficientCommitment",
+                "authoritative bridge target commitment objectType",
+            )?;
+            compare_required_string(
+                string_at_path(record, &["sourceTrusteeIdentity"])?,
+                trustee_identity,
+                "authoritative bridge target commitment trustee identity",
+            )?;
+            compare_required_u64(
+                unsigned_at_path(record, &["sourceTrusteeRosterPosition"])?,
+                expected_position as u64,
+                "authoritative bridge target commitment trustee roster position",
+            )?;
+            compare_required_string(
+                hash_at_path(record, &["publicMatrixSeedHash"])?,
+                public_matrix_seed_hash,
+                "authoritative bridge target commitment publicMatrixSeedHash",
+            )?;
+            compare_required_u64(
+                unsigned_at_path(record, &["rnsLimbIndex"])?,
+                rns_limb_index as u64,
+                "authoritative bridge target commitment rnsLimbIndex",
+            )?;
+            let canonical_prime = DATA_PRIMES.get(rns_limb_index).copied().ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    "same-secret bridge qShareRnsLimbCount exceeds the available Q_share primes",
+                )
+            })?;
+            compare_required_u64(
+                unsigned_at_path(record, &["rnsPrime"])?,
+                canonical_prime,
+                "authoritative bridge target commitment rnsPrime",
+            )?;
+            compare_required_u64(
+                unsigned_at_path(record, &["shamirCoefficientIndex"])?,
+                0,
+                "authoritative bridge target commitment shamirCoefficientIndex",
+            )?;
+            let coefficient_commitment_root = hash_at_path(record, &["coefficientCommitmentRoot"])?;
+            let commitment_body = value_at_path(record, &["commitment"])?;
+            compare_required_string(
+                string_at_path(commitment_body, &["objectType"])?,
+                "VssCommittedMaterialCommitment",
+                "authoritative bridge target commitment body objectType",
+            )?;
+            compare_required_string(
+                string_at_path(commitment_body, &["commitmentRole"])?,
+                "coefficient",
+                "authoritative bridge target commitment role",
+            )?;
+            compare_required_u64(
+                unsigned_at_path(commitment_body, &["rnsLimbIndex"])?,
+                rns_limb_index as u64,
+                "authoritative bridge target commitment body rnsLimbIndex",
+            )?;
+            compare_required_u64(
+                unsigned_at_path(commitment_body, &["rnsPrime"])?,
+                canonical_prime,
+                "authoritative bridge target commitment body rnsPrime",
+            )?;
+            compare_required_u64(
+                unsigned_at_path(commitment_body, &["ringDegree"])?,
+                ring_degree as u64,
+                "authoritative bridge target commitment ringDegree",
+            )?;
+            compare_required_string(
+                &derive_canonical_object_hash(commitment_body)?,
+                coefficient_commitment_root,
+                "authoritative bridge target commitment body root",
+            )?;
+
+            Ok(AuthoritativeSameSecretBridgeTarget {
+                rns_prime: canonical_prime,
+                coefficient_commitment_root,
+                commitment_body,
+            })
+        })
+        .collect()
 }
 
 pub(in crate::bgv::setup) fn same_secret_bridge_proof_verification_request_from_public_records(
     statement_set: &Value,
     bridge_statement: &Value,
+    coefficient_commitment_set: &Value,
     vss_coefficient_commitments: &Value,
     expected_position: usize,
 ) -> CanonicalResult<Value> {
@@ -40,6 +202,16 @@ pub(in crate::bgv::setup) fn same_secret_bridge_proof_verification_request_from_
         statement_set,
         &["ringDegree"],
         "same-secret bridge proof verification ringDegree",
+    )?;
+    let q_share_rns_limb_count = read_positive_usize_at_path(
+        statement_set,
+        &["qShareRnsLimbCount"],
+        "same-secret bridge proof verification qShareRnsLimbCount",
+    )?;
+    let threshold_degree = read_positive_usize_at_path(
+        statement_set,
+        &["thresholdDegree"],
+        "same-secret bridge proof verification thresholdDegree",
     )?;
     let source_constant_commitments =
         super::super::source_constant_commitments::canonical_source_constant_commitments_from_bridge_statement(
@@ -54,6 +226,7 @@ pub(in crate::bgv::setup) fn same_secret_bridge_proof_verification_request_from_
     reconstructed_same_secret_bridge_proof_verification_request(
         ReconstructedSameSecretBridgeProofVerification {
             bridge_statement,
+            coefficient_commitment_set,
             statement_set: StatementSetBinding {
                 ceremony_id: read_non_empty_string(statement_set, "ceremonyId")?,
                 manifest_hash: hash_at_path(statement_set, &["manifestHash"])?,
@@ -63,6 +236,9 @@ pub(in crate::bgv::setup) fn same_secret_bridge_proof_verification_request_from_
                 public_matrix_seed_hash,
             },
             expected_position,
+            q_share_rns_limb_count,
+            threshold_degree,
+            ring_degree,
             source_constant_commitment_values: &source_constant_commitments.commitment_values,
         },
     )
@@ -78,86 +254,32 @@ pub(super) fn reconstructed_same_secret_bridge_proof_verification_request(
         "same-secret bridge statement trusteeRosterPosition",
     )?;
 
-    let bridge_target_constant_roots = array_at_path(
-        input.bridge_statement,
-        &["targetConstantCoefficientCommitmentRoots"],
+    compare_required_u64(
+        unsigned_at_path(input.bridge_statement, &["ringDegree"])?,
+        input.ring_degree as u64,
+        "same-secret bridge statement ringDegree",
     )?;
-    let bridge_target_constant_commitments = array_at_path(
-        input.bridge_statement,
-        &["targetConstantCoefficientCommitments"],
+    let authoritative_targets = authoritative_same_secret_bridge_targets(
+        input.coefficient_commitment_set,
+        trustee_identity,
+        input.expected_position,
+        input.statement_set.public_matrix_seed_hash,
+        input.q_share_rns_limb_count,
+        input.threshold_degree,
+        input.ring_degree,
     )?;
-    if bridge_target_constant_commitments.len() != bridge_target_constant_roots.len() {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "same-secret bridge proof target commitments must match the bridge statement target roots",
-        ));
-    }
-    let mut bridge_rns_primes = Vec::with_capacity(bridge_target_constant_roots.len());
-    let mut target_constant_commitment_roots =
-        Vec::with_capacity(bridge_target_constant_roots.len());
-    let mut target_constant_commitments = Vec::with_capacity(bridge_target_constant_roots.len());
-    for (target_rns_limb_index, bridge_target_root) in
-        bridge_target_constant_roots.iter().enumerate()
-    {
-        let bridge_target_commitment = bridge_target_constant_commitments
-            .get(target_rns_limb_index)
-            .ok_or_else(|| {
-                CanonicalError::new(
-                    CanonicalErrorCode::MalformedLength,
-                    "same-secret bridge proof target commitment is missing",
-                )
-            })?;
-        compare_required_u64(
-            unsigned_at_path(bridge_target_root, &["rnsLimbIndex"])?,
-            target_rns_limb_index as u64,
-            "same-secret bridge target root rnsLimbIndex",
-        )?;
-        compare_required_u64(
-            unsigned_at_path(bridge_target_commitment, &["rnsLimbIndex"])?,
-            target_rns_limb_index as u64,
-            "same-secret bridge target commitment rnsLimbIndex",
-        )?;
-        let target_rns_prime = unsigned_at_path(bridge_target_root, &["rnsPrime"])?;
-        compare_required_u64(
-            target_rns_prime,
-            unsigned_at_path(bridge_target_commitment, &["rnsPrime"])?,
-            "same-secret bridge target commitment rnsPrime",
-        )?;
-        let canonical_target_prime = DATA_PRIMES.get(target_rns_limb_index).copied().ok_or_else(
-            || {
-                CanonicalError::new(
-                    CanonicalErrorCode::MalformedLength,
-                    "same-secret bridge qShareRnsLimbCount exceeds the available Q_share primes",
-                )
-            },
-        )?;
-        compare_required_u64(
-            target_rns_prime,
-            canonical_target_prime,
-            "same-secret bridge proof canonical Q_share prime",
-        )?;
-        compare_required_u64(
-            unsigned_at_path(bridge_target_root, &["shamirCoefficientIndex"])?,
-            0,
-            "same-secret bridge target root shamirCoefficientIndex",
-        )?;
-        compare_required_u64(
-            unsigned_at_path(bridge_target_commitment, &["shamirCoefficientIndex"])?,
-            0,
-            "same-secret bridge target commitment shamirCoefficientIndex",
-        )?;
-        let coefficient_commitment_root =
-            hash_at_path(bridge_target_root, &["coefficientCommitmentRoot"])?;
-        let target_commitment_body = value_at_path(bridge_target_commitment, &["commitment"])?;
-        compare_required_string(
-            &derive_canonical_object_hash(target_commitment_body)?,
-            coefficient_commitment_root,
-            "same-secret bridge target commitment body root",
-        )?;
-        bridge_rns_primes.push(target_rns_prime);
-        target_constant_commitment_roots.push(coefficient_commitment_root.to_string());
-        target_constant_commitments.push(target_commitment_body.clone());
-    }
+    let bridge_rns_primes = authoritative_targets
+        .iter()
+        .map(|target| target.rns_prime)
+        .collect::<Vec<_>>();
+    let target_constant_commitment_roots = authoritative_targets
+        .iter()
+        .map(|target| target.coefficient_commitment_root.to_string())
+        .collect::<Vec<_>>();
+    let target_constant_commitments = authoritative_targets
+        .iter()
+        .map(|target| target.commitment_body.clone())
+        .collect::<Vec<_>>();
 
     Ok(json!({
         "context": {
@@ -168,7 +290,7 @@ pub(super) fn reconstructed_same_secret_bridge_proof_verification_request(
             "trusteeRosterPosition": input.expected_position,
             "setupEpoch": input.statement_set.setup_epoch,
         },
-        "ringDegree": unsigned_at_path(input.bridge_statement, &["ringDegree"])?,
+        "ringDegree": input.ring_degree,
         "sameSecretLinkage": {
             "publicMatrixSeedHash": input.statement_set.public_matrix_seed_hash,
             "commitments": input.source_constant_commitment_values,
@@ -201,7 +323,6 @@ pub(in crate::bgv::setup) fn same_secret_bridge_proof_verification_binding_hash(
 ) -> CanonicalResult<String> {
     derive_canonical_object_hash(&json!({
         "objectType": "SameSecretBridgeProofVerificationBinding",
-        "proofFamily": SAME_SECRET_BRIDGE_PROOF_FAMILY,
         "proofMaterialRoot": proof_material_root,
         "verificationRequest": proof_verification_request,
     }))

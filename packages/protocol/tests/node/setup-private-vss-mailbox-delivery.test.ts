@@ -17,67 +17,11 @@ const fixtureHash = makeSetupFixtureHash('setup-private-vss-mailbox-delivery');
 const setupContext = makeSetupContext(fixtureHash);
 
 describe('private VSS mailbox delivery', () => {
-    it('refuses to build delivery envelopes without private share proof generation', async () => {
-        await expect(
-            createPrivateVssMailboxDeliverySet({
-                kernel: {
-                    deriveCanonicalObjectHash: ({ value }) =>
-                        deriveCanonicalObjectHash(value),
-                    verifyPrivateVssShareEnvelope: () => {
-                        throw new Error(
-                            'local verifier must not be reached without proof generation.',
-                        );
-                    },
-                },
-                setupContext,
-                phaseOrderHash: fixtureHash('phase-order'),
-                publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
-                vssCoefficientCommitmentRoot: fixtureHash(
-                    'vss-coefficient-commitment',
-                ),
-                qSharePrimes: [65_537],
-                ringDegree: 2,
-                participantCount: 1,
-                sourceTrusteeContributionStates: [
-                    {
-                        sourceTrusteeIdentity: 'trustee-0',
-                        sourceTrusteeRosterPosition: 0,
-                        sourceTrusteeCommitmentRoot: fixtureHash(
-                            'source-trustee-root',
-                        ),
-                        sourceTrusteeCoefficientCommitmentRecord: {},
-                        sourceTrusteeCoefficientCommitmentMaterialRecords: [],
-                        coefficientOpenings: [
-                            {
-                                rnsLimbIndex: 0,
-                                rnsPrime: 65_537,
-                                shamirCoefficientIndex: 0,
-                                commitmentRoot: fixtureHash('coefficient-root'),
-                                coefficientMessage: [1, 2],
-                                randomnessByColumn: [[0, 1]],
-                            },
-                        ],
-                    },
-                ],
-                recipients: [
-                    {
-                        recipientIdentity: 'trustee-0',
-                        recipientRosterPosition: 0,
-                        mailboxPublicKeyBytesHex: '00',
-                    },
-                ],
-            }),
-        ).rejects.toThrow(
-            /proof generation and canonical proof-material export/u,
-        );
-    });
-
     it('transports private VSS proof material under its canonical descriptor and semantic root', async () => {
         const proofBytesHash = fixtureHash('proof-bytes');
         const descriptorBytes = canonicalStreamDescriptorFixture(4, 9, 8);
         const expectedTransportedMaterialRoot = deriveCanonicalObjectHash({
             objectType: 'PrivateVssShareTransportedSuccinctProofMaterial',
-            proofFamily: 'vss-opening-carry',
             statementHash: fixtureHash('statement-hash'),
             proofBytesHash,
         });
@@ -91,6 +35,8 @@ describe('private VSS mailbox delivery', () => {
 
         const deliverySet = await withDeterministicWebCryptoRandomness(
             [
+                fixtureHash('proof-randomness-seed'),
+                fixtureHash('proof-randomness-nonce'),
                 fixtureHash('mailbox-encapsulation-randomness').slice(0, 64),
                 fixtureHash('mailbox-aead-nonce').slice(0, 24),
             ],
@@ -99,6 +45,17 @@ describe('private VSS mailbox delivery', () => {
                     kernel: {
                         deriveCanonicalObjectHash: ({ value }) =>
                             deriveCanonicalObjectHash(value),
+                        generatePrivateVssShareProof: () => ({
+                            privateVssShareProof: {
+                                objectType: 'PrivateVssShareProof',
+                                statementHash: fixtureHash('statement-hash'),
+                                proofBytesHash,
+                                proofMaterialRoot:
+                                    expectedTransportedMaterialRoot,
+                            },
+                        }),
+                        exportCanonicalProofMaterial: () =>
+                            Promise.resolve({ descriptorBytes }),
                         verifyPrivateVssShareEnvelope: (input) => {
                             observedPrivateEnvelope =
                                 input.privateEnvelope as Record<
@@ -122,7 +79,6 @@ describe('private VSS mailbox delivery', () => {
                         },
                     },
                     setupContext,
-                    phaseOrderHash: fixtureHash('phase-order'),
                     publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
                     vssCoefficientCommitmentRoot: fixtureHash(
                         'vss-coefficient-commitment',
@@ -130,24 +86,6 @@ describe('private VSS mailbox delivery', () => {
                     qSharePrimes: [65_537],
                     ringDegree: 2,
                     participantCount: 1,
-                    privateVssShareProofFactory: () =>
-                        Promise.resolve({
-                            proofRecord: {
-                                objectType: 'PrivateVssShareProof',
-                                proofId:
-                                    'sealed-lattice-private-vss-share-proof-succinct',
-                                proofFamily: 'vss-opening-carry',
-                                proofStatementRoot:
-                                    fixtureHash('statement-root'),
-                                statementHash: fixtureHash('statement-hash'),
-                                proofBytesHash,
-                                proofMaterialRoot:
-                                    expectedTransportedMaterialRoot,
-                            },
-                            canonicalMaterial: {
-                                descriptorBytes,
-                            },
-                        }),
                     sourceTrusteeContributionStates: [
                         {
                             sourceTrusteeIdentity: 'trustee-0',
@@ -206,7 +144,6 @@ describe('private VSS mailbox delivery', () => {
         expect(proofMaterials).toHaveLength(1);
         expect(proofMaterials[0]).toMatchObject({
             objectType: 'SetupTransportedPrivateVssShareProofMaterial',
-            proofFamily: 'vss-opening-carry',
             proofMaterialRoot: transportedProofRecord.proofMaterialRoot,
         });
         const returnedProofMaterial =
@@ -214,7 +151,6 @@ describe('private VSS mailbox delivery', () => {
                 .transportedPrivateVssShareProofMaterial?.proofMaterials[0];
         expect(returnedProofMaterial).toMatchObject({
             objectType: 'SetupTransportedPrivateVssShareProofMaterial',
-            proofFamily: 'vss-opening-carry',
             proofMaterialRoot: transportedProofRecord.proofMaterialRoot,
             descriptorBytes,
         });

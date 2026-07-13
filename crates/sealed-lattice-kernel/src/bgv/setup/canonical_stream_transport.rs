@@ -42,7 +42,6 @@ pub(crate) const BGV_CANONICAL_STREAM_FAMILY_RELINEARIZATION_COMPONENT: u32 = 6;
 pub(crate) const BGV_CANONICAL_STREAM_FAMILY_GALOIS_COMPONENT: u32 = 7;
 pub(crate) const BGV_CANONICAL_STREAM_FAMILY_TARGET_DECRYPTION_SHARE: u32 = 8;
 pub(crate) const BGV_CANONICAL_STREAM_FAMILY_PUBLIC_KEY_SHARE_MATERIAL: u32 = 9;
-pub(crate) const BGV_CANONICAL_STREAM_FAMILY_PUBLIC_EVALUATION_KEY_MATERIAL: u32 = 10;
 pub(crate) const BGV_CANONICAL_STREAM_FAMILY_TARGET_DECRYPTION_AGGREGATE_OPENING: u32 = 11;
 pub(crate) const TARGET_DECRYPTION_AGGREGATE_OPENING_MATERIAL_FAMILY: &str =
     "target-decryption-aggregate-opening";
@@ -648,18 +647,6 @@ pub(crate) fn verified_canonical_proof_material_bytes(
     Ok(Some(Arc::clone(&material.proof_bytes)))
 }
 
-#[cfg(test)]
-pub(in crate::bgv::setup) fn authenticated_setup_proof_material_stream_summary(
-    proof_family: &str,
-    proof_material_root: &str,
-) -> CanonicalResult<Option<Arc<VerifiedCanonicalStreamSummary>>> {
-    authenticated_setup_proof_material_stream_summary_in_session(
-        None,
-        proof_family,
-        proof_material_root,
-    )
-}
-
 pub(in crate::bgv::setup) fn authenticated_setup_proof_material_stream_summary_in_session(
     proof_binding_session: Option<&AcceptedSetupProofBindingSession>,
     proof_family: &str,
@@ -812,7 +799,6 @@ fn proof_material_stream_domain(proof_family: &str) -> CanonicalResult<Canonical
         "public-key-share" => Ok(CanonicalStreamDomain::PublicKeyShareProof),
         "trustee-evaluation-key" => Ok(CanonicalStreamDomain::EvaluatorKeyAggregateProof),
         "target-decryption-share" => Ok(CanonicalStreamDomain::MaliciousTargetShareProof),
-        "public-evaluation-key-material" => Ok(CanonicalStreamDomain::PublicEvaluationKeyMaterial),
         TARGET_DECRYPTION_AGGREGATE_OPENING_MATERIAL_FAMILY => {
             Ok(CanonicalStreamDomain::RecipientAggregateThresholdShareProof)
         }
@@ -1089,8 +1075,7 @@ fn accepted_setup_material_store(family_code: u32) -> Option<AcceptedSetupMateri
         BGV_CANONICAL_STREAM_FAMILY_VSS_SHARE_LINKAGE
         | BGV_CANONICAL_STREAM_FAMILY_SAME_SECRET
         | BGV_CANONICAL_STREAM_FAMILY_PUBLIC_KEY_SHARE
-        | BGV_CANONICAL_STREAM_FAMILY_TRUSTEE_EVALUATION_KEY
-        | BGV_CANONICAL_STREAM_FAMILY_PUBLIC_EVALUATION_KEY_MATERIAL => {
+        | BGV_CANONICAL_STREAM_FAMILY_TRUSTEE_EVALUATION_KEY => {
             Some(AcceptedSetupMaterialStore::Proof)
         }
         BGV_CANONICAL_STREAM_FAMILY_RELINEARIZATION_COMPONENT
@@ -1476,12 +1461,6 @@ fn stream_family(family_code: u32) -> Result<StreamFamily, u32> {
         BGV_CANONICAL_STREAM_FAMILY_PUBLIC_KEY_SHARE_MATERIAL => StreamFamily {
             kind: StreamFamilyKind::PublicKeyShareMaterial,
             stream_domain: CanonicalStreamDomain::PublicKeyShareMaterial,
-        },
-        BGV_CANONICAL_STREAM_FAMILY_PUBLIC_EVALUATION_KEY_MATERIAL => StreamFamily {
-            kind: StreamFamilyKind::ProofMaterial {
-                proof_family: "public-evaluation-key-material",
-            },
-            stream_domain: CanonicalStreamDomain::PublicEvaluationKeyMaterial,
         },
         BGV_CANONICAL_STREAM_FAMILY_TARGET_DECRYPTION_AGGREGATE_OPENING => StreamFamily {
             kind: StreamFamilyKind::ProofMaterial {

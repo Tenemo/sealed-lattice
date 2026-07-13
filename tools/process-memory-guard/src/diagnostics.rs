@@ -88,8 +88,8 @@ fn update_maximum(target: &mut Option<u64>, value: Option<u64>) {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum MemoryEvidence {
+    Completed,
     Confirmed,
-    NotIndicated,
     Suspected,
     Unknown,
 }
@@ -103,7 +103,7 @@ impl MemoryEvidence {
         child_was_successful: bool,
     ) -> Self {
         if child_was_successful {
-            return Self::NotIndicated;
+            return Self::Completed;
         }
         if confirmed_limit_violation {
             return Self::Confirmed;
@@ -129,8 +129,8 @@ impl MemoryEvidence {
 
     fn label(self) -> &'static str {
         match self {
+            Self::Completed => "completed",
             Self::Confirmed => "confirmed",
-            Self::NotIndicated => "not-indicated",
             Self::Suspected => "suspected",
             Self::Unknown => "unknown",
         }
@@ -154,10 +154,9 @@ impl TerminationDetails {
 
     fn classification(&self, memory_evidence: MemoryEvidence) -> &'static str {
         match memory_evidence {
+            MemoryEvidence::Completed => "completed",
             MemoryEvidence::Confirmed => "memory-limit-confirmed",
             MemoryEvidence::Suspected => "memory-exhaustion-suspected",
-            MemoryEvidence::NotIndicated if self.was_successful() => "completed",
-            MemoryEvidence::NotIndicated => "abnormal-termination-unknown",
             MemoryEvidence::Unknown if self.signal_number.is_some() => "external-signal",
             MemoryEvidence::Unknown if self.exit_code.is_some() => "nonzero-exit",
             MemoryEvidence::Unknown => "abnormal-termination-unknown",
@@ -603,7 +602,7 @@ mod tests {
         );
         assert_eq!(
             MemoryEvidence::from_observations(1_000, 0, &peaks, true, true),
-            MemoryEvidence::NotIndicated
+            MemoryEvidence::Completed
         );
     }
 

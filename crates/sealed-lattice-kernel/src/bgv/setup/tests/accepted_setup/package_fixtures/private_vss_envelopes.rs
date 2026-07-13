@@ -18,27 +18,6 @@ pub(in super::super) fn private_vss_envelope_commitments_object(
         vss_coefficient_commitments["vssCoefficientCommitmentRoot"]
             .as_str()
             .expect("VSS coefficient commitment root");
-    let phase_order_hash = derive_canonical_object_hash(&serde_json::json!({
-        "objectType": "CollectiveBgvSetupPhaseOrder",
-        "phaseOrder": [
-        "rosterFreeze",
-        "setupIntent",
-        "commonRandomnessCommit",
-        "commonRandomnessReveal",
-        "vssCoefficientCommitments",
-        "privateVssEnvelopeDelivery",
-        "recipientVssVerification",
-        "vssAcceptanceOrComplaint",
-        "publicKeyShareProofs",
-        "relinearizationRoundOne",
-        "relinearizationRoundTwo",
-        "galoisKeyShareBatches",
-        "trusteeEvaluationKeyProofs",
-        "setupPackageAssembly",
-        "setupPackageVerification",
-        ],
-    }))
-    .expect("phase order hash");
     let envelope_references = (0..participant_count)
         .flat_map(|source_trustee_roster_position| {
             let source_trustee_identity = format!("trustee-{source_trustee_roster_position}");
@@ -48,11 +27,8 @@ pub(in super::super) fn private_vss_envelope_commitments_object(
                     .as_str()
                     .expect("source trustee commitment root")
                     .to_string();
-            let phase_order_hash = phase_order_hash.clone();
             (0..participant_count).map(move |recipient_roster_position| {
                 let recipient_identity = format!("trustee-{recipient_roster_position}");
-                let envelope_sequence_number =
-                    source_trustee_roster_position * participant_count + recipient_roster_position;
                 let private_envelope_hash = derive_canonical_object_hash(&serde_json::json!({
                     "objectType": "PrivateVssShareEnvelopeHash",
                     "fixture": "private-vss-share-envelope",
@@ -71,13 +47,11 @@ pub(in super::super) fn private_vss_envelope_commitments_object(
                 .expect("local verification root");
                 let private_envelope_aad = serde_json::json!({
                     "objectType": "PrivateVssEnvelopeAad",
-                    "privateEnvelopeObjectType": "PrivateVssShareEnvelope",
                     "ceremonyId": ceremony_id,
                     "manifestHash": manifest_hash,
                     "rosterHash": roster_hash,
                     "setupParametersHash": setup_parameters_hash,
                     "setupEpoch": setup_epoch,
-                    "phaseOrderHash": phase_order_hash.as_str(),
                     "publicMatrixSeedHash": public_matrix_seed_hash,
                     "vssCoefficientCommitmentRoot": vss_coefficient_commitment_root,
                     "sourceTrusteeIdentity": source_trustee_identity.as_str(),
@@ -85,7 +59,6 @@ pub(in super::super) fn private_vss_envelope_commitments_object(
                     "recipientIdentity": recipient_identity.as_str(),
                     "recipientRosterPosition": recipient_roster_position,
                     "sourceTrusteeCommitmentRoot": source_trustee_commitment_root.as_str(),
-                    "envelopeSequenceNumber": envelope_sequence_number,
                 });
                 let recipient_mailbox_public_key_hash =
                     private_vss_mailbox_public_key_hash(recipient_roster_position);
@@ -130,7 +103,6 @@ pub(in super::super) fn private_vss_envelope_commitments_object(
         "setupEpoch": setup_epoch,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "vssCoefficientCommitmentRoot": vss_coefficient_commitment_root,
-        "participantCount": participant_count,
         "envelopeReferences": envelope_references,
     });
     commitment_set["privateVssEnvelopeCommitmentRoot"] = serde_json::json!(
@@ -251,19 +223,10 @@ pub(in super::super) fn vss_share_acceptances_object(
             })
         })
         .collect::<Vec<_>>();
-    let mut acceptance_set = serde_json::json!({
+    let acceptance_set = serde_json::json!({
         "objectType": "VssShareAcceptanceSet",
-        "ceremonyId": ceremony_id,
-        "manifestHash": manifest_hash,
-        "rosterHash": roster_hash,
-        "setupParametersHash": setup_parameters_hash,
-        "setupEpoch": setup_epoch,
-        "privateVssEnvelopeCommitmentRoot": private_vss_envelope_commitment_root,
         "acceptanceRecords": acceptance_records,
     });
-    acceptance_set["vssShareAcceptanceRoot"] = serde_json::json!(
-        derive_canonical_object_hash(&acceptance_set).expect("VSS share acceptance set root")
-    );
 
     acceptance_set
 }

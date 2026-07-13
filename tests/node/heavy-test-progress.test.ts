@@ -71,11 +71,10 @@ describe('createHeavyTestProgressReporter', () => {
         expect(
             parseRustTestTimingLine(
                 'test module::proof ... sealed-lattice-rust-test-timing ' +
-                    '{"suite":"module","test":"proof","durationMilliseconds":123,"durationMicroseconds":123456}',
+                    '{"suite":"module","test":"proof","durationMicroseconds":123456}',
             ),
         ).toEqual({
             durationMicroseconds: 123_456,
-            durationMilliseconds: 123,
             suite: 'module',
             test: 'proof',
         });
@@ -83,7 +82,7 @@ describe('createHeavyTestProgressReporter', () => {
         for (const malformedLine of [
             'ordinary libtest output',
             'sealed-lattice-rust-test-timing {',
-            'sealed-lattice-rust-test-timing {"durationMilliseconds":"wrong"}',
+            'sealed-lattice-rust-test-timing {"durationMicroseconds":"wrong"}',
         ]) {
             expect(parseRustTestTimingLine(malformedLine)).toBeUndefined();
         }
@@ -104,7 +103,7 @@ describe('createHeavyTestProgressReporter', () => {
             feedOutput(
                 exactReporter,
                 'test module::proof ... sealed-lattice-rust-test-timing ' +
-                    '{"suite":"module","test":"proof","durationMilliseconds":321,"durationMicroseconds":321987}\n',
+                    '{"suite":"module","test":"proof","durationMicroseconds":321987}\n',
             );
             feedOutput(exactReporter, 'ok\n');
             currentTimeMilliseconds = 500;
@@ -118,7 +117,7 @@ describe('createHeavyTestProgressReporter', () => {
                 expect.objectContaining({
                     durationBasis: 'exact-instrumented',
                     durationMicroseconds: 321_987,
-                    durationMilliseconds: 321,
+                    durationMilliseconds: 321.987,
                     fullName: 'module::proof',
                     result: 'ok',
                 }),

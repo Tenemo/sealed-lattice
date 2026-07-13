@@ -8,6 +8,7 @@ use std::collections::BTreeSet;
 use crate::bgv::setup_helpers::{
     array_at_path, compare_required_string, hash_at_path, string_at_path, value_at_path,
 };
+use crate::foundation::FOUNDATION_PROFILE;
 
 enum CanonicalProofMaterialBacking {
     Contiguous(Vec<u8>),
@@ -83,7 +84,7 @@ impl CanonicalProofMaterialBytes {
                 "canonical proof material must contain at least one stream chunk",
             ));
         }
-        let canonical_chunk_byte_length = SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES as usize;
+        let canonical_chunk_byte_length = FOUNDATION_PROFILE.stream_chunk_byte_length;
         let mut total_byte_length = 0_usize;
         for (chunk_index, chunk) in chunks.iter().enumerate() {
             let is_final_chunk = chunk_index + 1 == chunks.len();
@@ -114,13 +115,13 @@ impl CanonicalProofMaterialBytes {
 
     pub(crate) fn chunk_count(&self) -> usize {
         self.total_byte_length
-            .div_ceil(SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES as usize)
+            .div_ceil(FOUNDATION_PROFILE.stream_chunk_byte_length)
     }
 
     pub(crate) fn chunk(&self, chunk_index: usize) -> Option<&[u8]> {
         match &self.backing {
             CanonicalProofMaterialBacking::Contiguous(bytes) => bytes
-                .chunks(SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES as usize)
+                .chunks(FOUNDATION_PROFILE.stream_chunk_byte_length)
                 .nth(chunk_index),
             CanonicalProofMaterialBacking::StreamChunks(chunks) => {
                 chunks.get(chunk_index).map(Vec::as_slice)
@@ -139,7 +140,7 @@ impl CanonicalProofMaterialBytes {
             return true;
         }
 
-        let chunk_byte_length = SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES as usize;
+        let chunk_byte_length = FOUNDATION_PROFILE.stream_chunk_byte_length;
         let mut source_offset = offset;
         let mut destination_offset = 0_usize;
         while destination_offset < destination.len() {
@@ -166,7 +167,7 @@ impl CanonicalProofMaterialBytes {
         if offset >= self.total_byte_length {
             return None;
         }
-        let chunk_byte_length = SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES as usize;
+        let chunk_byte_length = FOUNDATION_PROFILE.stream_chunk_byte_length;
         self.chunk(offset / chunk_byte_length)
             .and_then(|chunk| chunk.get(offset % chunk_byte_length))
             .copied()
@@ -239,33 +240,23 @@ pub(in crate::bgv::setup) fn resolve_transported_setup_proof_material(
             ),
         )
     })?;
-    for (field_name, expected_value) in [
-        ("objectType", family.set_object_type),
-        ("proofFamily", family.proof_family),
-    ] {
-        compare_required_string(
-            string_at_path(material_set, &[field_name])?,
-            expected_value,
-            &format!("{}.{field_name}", family.transport_field),
-        )?;
-    }
+    compare_required_string(
+        string_at_path(material_set, &["objectType"])?,
+        family.set_object_type,
+        &format!("{}.objectType", family.transport_field),
+    )?;
 
     let proof_materials = array_at_path(material_set, &["proofMaterials"])?;
     let mut matching_material = None;
     for proof_material in proof_materials {
-        for (field_name, expected_value) in [
-            ("objectType", family.material_object_type),
-            ("proofFamily", family.proof_family),
-        ] {
-            compare_required_string(
-                string_at_path(proof_material, &[field_name])?,
-                expected_value,
-                &format!(
-                    "transported {} proof material {field_name}",
-                    family.family_description
-                ),
-            )?;
-        }
+        compare_required_string(
+            string_at_path(proof_material, &["objectType"])?,
+            family.material_object_type,
+            &format!(
+                "transported {} proof material objectType",
+                family.family_description
+            ),
+        )?;
         let proof_material_root = hash_at_path(proof_material, &["proofMaterialRoot"])?;
         if proof_material_root != expected_proof_material_root {
             continue;
@@ -340,14 +331,6 @@ fn request_verified_canonical_setup_proof_material_roots(request: &Value) -> Vec
             collect_request_material_roots(sidecar, "proofMaterialRoot", &mut material_roots);
         }
     }
-    if let Some(sidecar) = request.get("transportedPublicEvaluationKeyMaterial") {
-        collect_request_material_roots(
-            sidecar,
-            "publicEvaluationKeyMaterialRoot",
-            &mut material_roots,
-        );
-    }
-
     material_roots.into_iter().collect()
 }
 

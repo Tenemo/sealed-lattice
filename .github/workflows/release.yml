@@ -196,27 +196,9 @@ jobs:
                   name: push-release-logs-${{ github.run_id }}-${{ github.run_attempt }}
                   path: logs
 
-    dispatch-release-ci:
-        name: dispatch release CI
-        needs:
-            - prepare-release
-            - push-release
-        runs-on: ubuntu-24.04
-        timeout-minutes: 5
-        permissions:
-            actions: write
-            contents: read
-        steps:
-            - name: Dispatch CI for the release commit
-              env:
-                  GH_TOKEN: ${{ github.token }}
-                  RELEASE_TAG: ${{ needs.prepare-release.outputs.tag }}
-              run: gh workflow run ci.yml --repo "${GITHUB_REPOSITORY}" --ref "${RELEASE_TAG}"
-
     publish-npm:
         name: publish npm
         needs:
-            - dispatch-release-ci
             - prepare-release
             - push-release
         runs-on: ubuntu-24.04

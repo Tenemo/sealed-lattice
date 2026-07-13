@@ -168,7 +168,6 @@ pub(crate) fn generate_trustee_evaluation_key_proof_from_request(
     };
     let proof_material_root = derive_canonical_object_hash(&json!({
         "objectType": proof_material_object_type,
-        "proofFamily": proof_family,
         "trusteeIdentity": statement.context.trustee_identity,
         "trusteeRosterPosition": statement.context.trustee_roster_position,
         "statementHash": statement_hash,
@@ -285,7 +284,6 @@ pub(in crate::bgv::setup) fn vss_share_linkage_proof_verification_binding_hash(
         .ok_or_else(|| invalid_succinct_setup_proof("vssShareLinkage must be present"))?;
     derive_canonical_object_hash(&json!({
         "objectType": "VssShareLinkageProofVerificationBinding",
-        "proofFamily": VSS_SHARE_LINKAGE_PROOF_FAMILY,
         "proofMaterialRoot": proof_material_root,
         // Bind only the public relation consumed by the verifier. Prover-only
         // witnesses and randomness may be present in a generation request, but

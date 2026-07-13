@@ -6,7 +6,6 @@ pub(super) fn participant_setup_material(
     input: &PassiveSetupInput,
     participant: &SetupParticipant,
     bgv_parameters_hash: &str,
-    public_common_random_polynomial_root: &str,
     target_decryption_parameters_hash: &str,
 ) -> CanonicalResult<ParticipantSetupMaterial> {
     let participant_identities = input
@@ -29,7 +28,6 @@ pub(super) fn participant_setup_material(
             input.private_setup_seed_hash.as_bytes(),
             participant.trustee_identity.as_bytes(),
             participant.roster_position.to_string().as_bytes(),
-            public_common_random_polynomial_root.as_bytes(),
         ],
     );
     let public_key_share_record = json!({
@@ -42,7 +40,6 @@ pub(super) fn participant_setup_material(
         "recoveryEpoch": participant.recovery_epoch,
         "deviceEpoch": participant.device_epoch,
         "bgvParametersHash": bgv_parameters_hash,
-        "publicCommonRandomPolynomialRoot": public_common_random_polynomial_root,
         "localSecretShareCommitmentHash": local_secret_share_commitment_hash,
         "localErrorCommitmentHash": local_error_commitment_hash,
         "sampledLocalSecretCoefficients": sample_bounded_collective_secret_share_distribution(

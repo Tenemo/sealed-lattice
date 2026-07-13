@@ -1,5 +1,27 @@
 import { bytesFromHex } from './common-fields.js';
 
+export const coefficientVectorToLittleEndianBytes = (
+    coefficients: readonly number[],
+): Uint8Array => {
+    const bytes = new Uint8Array(coefficients.length * 8);
+    coefficients.forEach((coefficient, coefficientIndex) => {
+        if (!Number.isSafeInteger(coefficient) || coefficient < 0) {
+            throw new TypeError(
+                'coefficient vector entries must be non-negative safe integers.',
+            );
+        }
+        let remainingValue = BigInt(coefficient);
+        for (let byteIndex = 0; byteIndex < 8; byteIndex += 1) {
+            bytes[coefficientIndex * 8 + byteIndex] = Number(
+                remainingValue & 0xffn,
+            );
+            remainingValue >>= 8n;
+        }
+    });
+
+    return bytes;
+};
+
 export const coefficientVectorFromLittleEndianHex = (
     coefficientsLeHex: string,
     expectedCoefficientCount: number,

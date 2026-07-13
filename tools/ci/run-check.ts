@@ -75,17 +75,6 @@ const scopeCommandRunObserver = (
 });
 
 const rustKernelLaneName = 'Rust kernel (fmt, clippy, fast test)';
-const checkRunLaneNames = [
-    'Build workspace packages',
-    'Type-check workspace',
-    'Smoke npm package',
-    'Lint',
-    rustKernelLaneName,
-    'Knip unused-code scan',
-    'Node tests (fast)',
-    'Node tests (protocol)',
-    'Node tests (kernel fast)',
-] as const;
 
 const createCargoCommand = (
     description: string,
@@ -384,9 +373,12 @@ const overallExitCode = (results: readonly ValidationLaneResult[]): number => {
 
 const main = async (): Promise<void> => {
     const rawArguments = process.argv.slice(2);
+    const packageManagerRunner = resolvePackageManagerRunner();
+    const gatingLanes = buildCheckGatingLanes(packageManagerRunner);
+    const parallelLanes = buildCheckParallelLanes(packageManagerRunner);
     const runLog = await createLocalRunLog({
         commandLineArguments: rawArguments,
-        lanes: checkRunLaneNames,
+        lanes: [...gatingLanes, ...parallelLanes].map((lane) => lane.name),
         scriptName: 'check',
     });
     const results: ValidationLaneResult[] = [];
@@ -398,9 +390,6 @@ const main = async (): Promise<void> => {
     let logFinishingError: unknown;
 
     try {
-        const packageManagerRunner = resolvePackageManagerRunner();
-        const gatingLanes = buildCheckGatingLanes(packageManagerRunner);
-        const parallelLanes = buildCheckParallelLanes(packageManagerRunner);
         rustTestProgressReporter = createHeavyTestProgressReporter({
             eventFilePath: path.join(
                 runLog.runDirectoryPath,

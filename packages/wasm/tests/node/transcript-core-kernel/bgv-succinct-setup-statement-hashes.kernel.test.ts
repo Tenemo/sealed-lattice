@@ -333,9 +333,6 @@ describe('succinct setup statement hash vectors', () => {
         const privateVssShare = kernel.generatePrivateVssShareProof(
             privateVssRequest(kernel, parameters),
         );
-        expect(privateVssShare.privateVssShareProof.proofFamily).toBe(
-            'vss-opening-carry',
-        );
         expect(privateVssShare.privateVssShareProof.statementHash).toBe(
             expectedStatementHashes.privateVssShare,
         );

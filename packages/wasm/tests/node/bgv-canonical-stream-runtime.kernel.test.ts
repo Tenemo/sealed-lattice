@@ -119,7 +119,7 @@ describe('BGV canonical stream runtime with the real WASM kernel', () => {
 
         const wrongDomainDescriptor = descriptorFor(
             kernel,
-            canonicalStreamDomains.checkpointState,
+            canonicalStreamDomains.evaluatorKeyStore,
             chunks,
         );
         const wrongDomain = runtime.openVerifier({

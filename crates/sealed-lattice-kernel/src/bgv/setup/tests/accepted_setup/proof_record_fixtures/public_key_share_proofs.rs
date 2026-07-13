@@ -12,18 +12,10 @@ pub(in super::super) fn collective_public_key_object(
     let ring_degree = package["publicKeyShareMaterial"]["ringDegree"]
         .as_u64()
         .expect("ring degree") as usize;
-    let participant_count = participant_count_from_package(package);
-    let mut source_roots = Vec::new();
     let mut aggregate_coefficients_by_limb = (0..DATA_PRIMES.len())
         .map(|_| vec![0_u64; ring_degree])
         .collect::<Vec<_>>();
     for material_record in material_records {
-        source_roots.push(serde_json::json!({
-            "trusteeIdentity": material_record["trusteeIdentity"],
-            "trusteeRosterPosition": material_record["trusteeRosterPosition"],
-            "publicKeyShareRoot": material_record["publicKeyShareRoot"],
-            "publicKeyShareMaterialRoot": material_record["publicKeyShareMaterialRoot"],
-        }));
         for (rns_limb_index, limb) in material_record["shareCoefficientVectorsByLimb"]
             .as_array()
             .expect("share limbs")
@@ -48,12 +40,8 @@ pub(in super::super) fn collective_public_key_object(
     }
     let aggregate_limbs = aggregate_coefficients_by_limb
         .iter()
-        .enumerate()
-        .map(|(rns_limb_index, coefficients)| {
+        .map(|coefficients| {
             serde_json::json!({
-                "rnsLimbIndex": rns_limb_index,
-                "rnsPrime": DATA_PRIMES[rns_limb_index],
-                "coefficientVectorHash512": public_key_share_coefficient_vector_hash(coefficients),
                 "coefficientsLeHex": coefficient_vector_le_hex(coefficients),
             })
         })
@@ -65,17 +53,10 @@ pub(in super::super) fn collective_public_key_object(
         "rosterHash": setup_context["rosterHash"],
         "setupParametersHash": setup_context["setupParametersHash"],
         "setupEpoch": setup_context["setupEpoch"],
-        "participantCount": participant_count,
-        "rnsLimbCount": DATA_PRIMES.len(),
-        "ringDegree": ring_degree,
         "publicMatrixSeedHash": package["commonRandomness"]["publicMatrixSeedHash"],
-        "publicKeyCrpRoot": package["commonRandomness"]["publicDerivations"]["crpRoots"]["publicKeyCrpRoot"],
-        "publicAPolynomialRoot": package["commonRandomness"]["publicDerivations"]["bgvPublicA"]["publicPolynomialRoot"],
         "publicKeyShareSetRoot": package["publicKeyShares"]["publicKeyShareSetRoot"],
-        "publicKeyShareProofSetRoot": package["publicKeyShareProofs"]["publicKeyShareProofSetRoot"],
         "publicKeyShareMaterialSetRoot": package["publicKeyShareMaterial"]["publicKeyShareMaterialSetRoot"],
         "publicKeyShareSuccinctProofSetRoot": package["publicKeyShareSuccinctProofs"]["publicKeyShareSuccinctProofSetRoot"],
-        "sourceShareMaterialRoots": source_roots,
         "aggregateCoefficientVectorsByLimb": aggregate_limbs,
     });
     collective_public_key["collectivePublicKeyRoot"] = serde_json::json!(
@@ -102,11 +83,8 @@ pub(in super::super) fn replace_public_key_share_hashes_with_material_hashes(
         );
         let share_hashes = coefficients_by_limb
             .iter()
-            .enumerate()
-            .map(|(rns_limb_index, coefficients)| {
+            .map(|coefficients| {
                 serde_json::json!({
-                    "rnsLimbIndex": rns_limb_index,
-                    "rnsPrime": DATA_PRIMES[rns_limb_index],
                     "coefficientVectorHash512": public_key_share_coefficient_vector_hash(coefficients),
                 })
             })
@@ -115,19 +93,8 @@ pub(in super::super) fn replace_public_key_share_hashes_with_material_hashes(
             serde_json::json!(share_hashes);
     }
     rebind_collective_public_key_share_roots(package);
-    for trustee_roster_position in 0..participant_count as usize {
-        package["publicKeyShareProofs"]["proofRecords"][trustee_roster_position]
-            ["publicKeyShareRoot"] = package["publicKeyShares"]["shareRecords"]
-            [trustee_roster_position]["publicKeyShareRoot"]
-            .clone();
-    }
-    package["publicKeyShareProofs"]["publicKeyShareSetRoot"] =
-        package["publicKeyShares"]["publicKeyShareSetRoot"].clone();
-    rebind_collective_public_key_share_proof_roots(package);
     package["evaluatorKeySchedule"]["publicKeyShareSetRoot"] =
         package["publicKeyShares"]["publicKeyShareSetRoot"].clone();
-    package["evaluatorKeySchedule"]["publicKeyShareProofSetRoot"] =
-        package["publicKeyShareProofs"]["publicKeyShareProofSetRoot"].clone();
     rebind_collective_evaluator_key_schedule_root(package);
 }
 
@@ -138,18 +105,9 @@ pub(in super::super) fn public_key_share_material_object(
     let public_matrix_seed_hash = package["commonRandomness"]["publicMatrixSeedHash"]
         .as_str()
         .expect("public matrix seed hash");
-    let public_key_crp_root =
-        package["commonRandomness"]["publicDerivations"]["crpRoots"]["publicKeyCrpRoot"]
-            .as_str()
-            .expect("public-key CRP root");
-    let public_a_polynomial_root =
-        package["commonRandomness"]["publicDerivations"]["bgvPublicA"]["publicPolynomialRoot"]
-            .as_str()
-            .expect("public a root");
     let ring_degree = public_coefficient_commitment_ring_degree_from_fixture_package(package);
     let participant_count = participant_count_from_package(package);
     let mut material_records = Vec::new();
-    let mut material_roots = Vec::new();
     for trustee_roster_position in 0..participant_count {
         let trustee_identity = format!("trustee-{trustee_roster_position}");
         let (coefficients_by_limb, _) = public_key_share_coefficients_and_errors_for_fixture(
@@ -159,19 +117,14 @@ pub(in super::super) fn public_key_share_material_object(
         );
         let limbs = coefficients_by_limb
             .iter()
-            .enumerate()
-            .map(|(rns_limb_index, coefficients)| {
+            .map(|coefficients| {
                 serde_json::json!({
-                    "rnsLimbIndex": rns_limb_index,
-                    "rnsPrime": DATA_PRIMES[rns_limb_index],
-                    "coefficientVectorHash512": public_key_share_coefficient_vector_hash(coefficients),
                     "coefficientsLeHex": coefficient_vector_le_hex(coefficients),
                 })
             })
             .collect::<Vec<_>>();
         let mut material_record = serde_json::json!({
             "objectType": "PublicKeyShareMaterial",
-            "materialEncoding": "embedded-full-public-key-share-coefficients",
             "ceremonyId": setup_context["ceremonyId"],
             "manifestHash": setup_context["manifestHash"],
             "rosterHash": setup_context["rosterHash"],
@@ -179,40 +132,25 @@ pub(in super::super) fn public_key_share_material_object(
             "setupEpoch": setup_context["setupEpoch"],
             "trusteeIdentity": trustee_identity.as_str(),
             "trusteeRosterPosition": trustee_roster_position,
-            "rnsLimbCount": DATA_PRIMES.len(),
-            "ringDegree": ring_degree,
             "publicMatrixSeedHash": public_matrix_seed_hash,
-            "publicKeyCrpRoot": public_key_crp_root,
-            "publicAPolynomialRoot": public_a_polynomial_root,
             "publicKeyShareRoot": package["publicKeyShares"]["shareRecords"][trustee_roster_position as usize]["publicKeyShareRoot"],
             "shareCoefficientVectorsByLimb": limbs,
         });
         material_record["publicKeyShareMaterialRoot"] = serde_json::json!(
             derive_canonical_object_hash(&material_record).expect("public-key share material root")
         );
-        material_roots.push(serde_json::json!({
-            "trusteeIdentity": trustee_identity,
-            "trusteeRosterPosition": trustee_roster_position,
-            "publicKeyShareMaterialRoot": material_record["publicKeyShareMaterialRoot"],
-        }));
         material_records.push(material_record);
     }
     let mut material_set = serde_json::json!({
         "objectType": "PublicKeyShareMaterialSet",
-        "materialEncoding": "embedded-full-public-key-share-coefficients",
         "ceremonyId": setup_context["ceremonyId"],
         "manifestHash": setup_context["manifestHash"],
         "rosterHash": setup_context["rosterHash"],
         "setupParametersHash": setup_context["setupParametersHash"],
         "setupEpoch": setup_context["setupEpoch"],
-        "participantCount": participant_count,
-        "rnsLimbCount": DATA_PRIMES.len(),
         "ringDegree": ring_degree,
         "publicMatrixSeedHash": public_matrix_seed_hash,
-        "publicKeyCrpRoot": public_key_crp_root,
-        "publicAPolynomialRoot": public_a_polynomial_root,
         "publicKeyShareSetRoot": package["publicKeyShares"]["publicKeyShareSetRoot"],
-        "publicKeyShareMaterialRoots": material_roots,
         "shareMaterialRecords": material_records,
     });
     material_set["publicKeyShareMaterialSetRoot"] = serde_json::json!(
@@ -318,20 +256,9 @@ pub(in super::super) fn public_key_share_succinct_proofs_fixture(
     let public_matrix_seed_hash = package["commonRandomness"]["publicMatrixSeedHash"]
         .as_str()
         .expect("public matrix seed hash");
-    let public_key_crp_root =
-        package["commonRandomness"]["publicDerivations"]["crpRoots"]["publicKeyCrpRoot"]
-            .as_str()
-            .expect("public-key CRP root");
-    let public_a_polynomial_root =
-        package["commonRandomness"]["publicDerivations"]["bgvPublicA"]["publicPolynomialRoot"]
-            .as_str()
-            .expect("public a root");
     let share_records = package["publicKeyShares"]["shareRecords"]
         .as_array()
         .expect("public-key share records");
-    let proof_statement_records = package["publicKeyShareProofs"]["proofRecords"]
-        .as_array()
-        .expect("public-key proof statement records");
     let material_records = package["publicKeyShareMaterial"]["shareMaterialRecords"]
         .as_array()
         .expect("public-key material records");
@@ -349,7 +276,6 @@ pub(in super::super) fn public_key_share_succinct_proofs_fixture(
         .map(|trustee_roster_position| {
         let trustee_identity = format!("trustee-{trustee_roster_position}");
         let share_record = &share_records[trustee_roster_position as usize];
-        let proof_statement_record = &proof_statement_records[trustee_roster_position as usize];
         let material_record = &material_records[trustee_roster_position as usize];
         let bridge_binding = verified_same_secret_bridge
             .statement_for_roster_position(trustee_roster_position)
@@ -481,9 +407,7 @@ pub(in super::super) fn public_key_share_succinct_proofs_fixture(
             "setupEpoch": setup_context["setupEpoch"],
             "trusteeIdentity": trustee_identity.as_str(),
             "trusteeRosterPosition": trustee_roster_position,
-            "ringDegree": ring_degree,
             "publicKeyShareRoot": share_record["publicKeyShareRoot"],
-            "publicKeyShareProofRoot": proof_statement_record["publicKeyShareProofRoot"],
             "publicKeyShareMaterialRoot": material_record["publicKeyShareMaterialRoot"],
             "sameSecretBridgeStatementRoot": bridge_binding.same_secret_bridge_statement_root,
             "sameSecretBridgeProofRecordRoot": bridge_binding.same_secret_bridge_proof_record_root,
@@ -495,10 +419,6 @@ pub(in super::super) fn public_key_share_succinct_proofs_fixture(
         )
         .expect("public-key share proof material root");
         proof_record["proofMaterialRoot"] = serde_json::json!(&proof_material_root);
-        proof_record["publicKeyShareSuccinctProofRoot"] = serde_json::json!(
-            derive_canonical_object_hash(&proof_record)
-                .expect("public-key share succinct proof root")
-        );
         authenticate_setup_proof_material_stream_for_test(
             PUBLIC_KEY_SHARE_PROOF_FAMILY,
             &proof_material_root,
@@ -507,7 +427,6 @@ pub(in super::super) fn public_key_share_succinct_proofs_fixture(
         .expect("authenticate public-key share proof material stream");
         let transported_proof_material = serde_json::json!({
             "objectType": "SetupTransportedPublicKeyShareProofMaterial",
-            "proofFamily": PUBLIC_KEY_SHARE_PROOF_FAMILY,
             "proofMaterialRoot": proof_material_root,
         });
         final_package_phase(&format!(
@@ -554,19 +473,6 @@ pub(in super::super) fn public_key_share_succinct_proofs_fixture(
     }
     let mut proof_set = serde_json::json!({
         "objectType": "PublicKeyShareSuccinctProofSet",
-        "ceremonyId": setup_context["ceremonyId"],
-        "manifestHash": setup_context["manifestHash"],
-        "rosterHash": setup_context["rosterHash"],
-        "setupParametersHash": setup_context["setupParametersHash"],
-        "setupEpoch": setup_context["setupEpoch"],
-        "participantCount": participant_count,
-        "rnsLimbCount": DATA_PRIMES.len(),
-        "publicMatrixSeedHash": public_matrix_seed_hash,
-        "publicKeyCrpRoot": public_key_crp_root,
-        "publicAPolynomialRoot": public_a_polynomial_root,
-        "publicKeyShareSetRoot": package["publicKeyShares"]["publicKeyShareSetRoot"],
-        "publicKeyShareProofSetRoot": package["publicKeyShareProofs"]["publicKeyShareProofSetRoot"],
-        "publicKeyShareMaterialSetRoot": package["publicKeyShareMaterial"]["publicKeyShareMaterialSetRoot"],
         "proofRecords": proof_records,
     });
     proof_set["publicKeyShareSuccinctProofSetRoot"] = serde_json::json!(
@@ -577,7 +483,6 @@ pub(in super::super) fn public_key_share_succinct_proofs_fixture(
         proof_set,
         transported_proof_material: serde_json::json!({
             "objectType": "SetupTransportedPublicKeyShareProofMaterialSet",
-            "proofFamily": PUBLIC_KEY_SHARE_PROOF_FAMILY,
             "proofMaterials": transported_proof_materials,
         }),
         proof_binding_leases,

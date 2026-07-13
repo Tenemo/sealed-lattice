@@ -37,7 +37,6 @@ pub(super) struct LimbVerification {
     pub(super) coefficient_commitment_roots: Vec<String>,
     pub(super) share_values_hash: String,
     pub(super) private_vss_share_proof_hash: String,
-    pub(super) proof_statement_root: String,
     pub(super) limb_verification_root: String,
 }
 
@@ -101,7 +100,7 @@ pub(super) fn verify_setup_context(
     // derived from this setup context's roster. It binds the thresholds,
     // Q_share, evaluator key schedule, and BGV parameters.
     let setup_parameters_roster =
-        super::accepted_setup::accepted_roster_from_setup_context(setup_context);
+        super::accepted_setup::accepted_roster_from_setup_context(setup_context)?;
     if setup_context
         .get("setupParametersHash")
         .and_then(Value::as_str)
@@ -184,7 +183,7 @@ pub(super) fn verify_source_trustee_commitment_record(
         Ok(coefficient_commitments) => coefficient_commitments,
         Err(refusal) => return Ok(Err(refusal)),
     };
-    let roster = super::accepted_setup::accepted_roster_from_setup_context(setup_context);
+    let roster = super::accepted_setup::accepted_roster_from_setup_context(setup_context)?;
     let expected_coefficient_count = DATA_PRIMES.len() * roster.decryption_threshold as usize;
     if coefficient_commitments.len() != expected_coefficient_count {
         return Ok(Err(PrivateVssRefusal::new(
@@ -300,7 +299,7 @@ pub(super) fn verify_coefficient_commitment_material_records(
     public_matrix_seed_hash: &str,
     source_trustee_binding: &SourceTrusteeCommitmentBinding,
 ) -> CanonicalResult<CoefficientCommitmentMaterialRecordsVerification> {
-    let roster = super::accepted_setup::accepted_roster_from_setup_context(setup_context);
+    let roster = super::accepted_setup::accepted_roster_from_setup_context(setup_context)?;
     let expected_coefficient_count = DATA_PRIMES.len() * roster.decryption_threshold as usize;
     if material_records.len() != expected_coefficient_count {
         return Ok(Err(PrivateVssRefusal::new(
@@ -435,7 +434,7 @@ fn verify_coefficient_commitment_material_record(
         Ok(shamir_coefficient_index) => shamir_coefficient_index,
         Err(refusal) => return Ok(Err(refusal)),
     };
-    let roster = super::accepted_setup::accepted_roster_from_setup_context(setup_context);
+    let roster = super::accepted_setup::accepted_roster_from_setup_context(setup_context)?;
     if shamir_coefficient_index >= roster.decryption_threshold {
         return Ok(Err(PrivateVssRefusal::new(
             "sourceTrusteeCommitmentMaterialShamirIndexInvalid",

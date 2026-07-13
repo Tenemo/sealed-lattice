@@ -1,26 +1,9 @@
 use super::*;
 
-use crate::hashing::derive_canonical_object_hash;
-
 pub(in crate::bgv::direct_ballots) fn direct_ballot_relation_proof_bytes_hash(
     proof_bytes: &[u8],
 ) -> String {
     hash512_hex(RELATION_PROOF_BYTES_HASH_DOMAIN, &[proof_bytes])
-}
-
-// Binds the operative identity of the internal direct-ballot validity relation proof: statement
-// hash domain, challenge size and domain, proof-bytes domain, ring degree, and data prime count.
-pub(in crate::bgv::direct_ballots) fn direct_ballot_relation_proof_parameters_hash()
--> CanonicalResult<String> {
-    derive_canonical_object_hash(&json!({
-        "objectType": "BallotValidityProofParameters",
-        "statementHashDomain": RELATION_STATEMENT_HASH_DOMAIN,
-        "challengeBits": RELATION_PROOF_CHALLENGE_BITS,
-        "challengeDomain": "sealed-lattice/direct-encrypted-ballot/relation-challenge",
-        "proofBytesDomain": RELATION_PROOF_BYTES_HASH_DOMAIN,
-        "sourceRingDegree": POLYNOMIAL_DEGREE,
-        "dataPrimeCount": DATA_PRIMES.len(),
-    }))
 }
 
 pub(in crate::bgv::direct_ballots) fn direct_ballot_relation_response_bytes() -> usize {

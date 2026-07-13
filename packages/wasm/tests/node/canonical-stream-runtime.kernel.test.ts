@@ -68,10 +68,42 @@ describe('Canonical stream real-WASM runtime', () => {
         kernel = await loadFreshTranscriptCoreKernel();
     });
 
+    it('preserves the exact closed canonical stream domain registry', () => {
+        expect(canonicalStreamDomains).toEqual({
+            privateMailboxCiphertext: 1,
+            dealerVssShareLinkageProof: 2,
+            recipientAggregateThresholdShareProof: 3,
+            sameSecretProof: 4,
+            publicKeyShareProof: 5,
+            collectivePublicKeyAggregateProof: 6,
+            relinearizationRoundOneProof: 7,
+            relinearizationRoundOneAggregateProof: 8,
+            relinearizationRoundTwoProof: 9,
+            galoisShareProof: 10,
+            evaluatorKeyAggregateProof: 11,
+            collectivePublicKey: 12,
+            evaluatorKeyStore: 13,
+            ballotCiphertext: 14,
+            ballotValidityProof: 15,
+            aggregateCiphertext: 16,
+            replayTargetIdentifierCiphertext: 17,
+            replayTargetOrderCiphertext: 18,
+            targetIdentifierPartialDecryption: 19,
+            targetOrderPartialDecryption: 20,
+            maliciousTargetShareProof: 21,
+            checkpointState: 22,
+            stateBallotCandidateListExactOutput: 23,
+            stateFinalitySignatureExactOutput: 24,
+            stateTargetReleaseExactOutput: 25,
+            publicKeyShareMaterial: 26,
+            publicEvaluationKeyMaterial: 27,
+        });
+    });
+
     it('round-trips exact chunk boundaries in every verifier-owned domain', () => {
         const runtime = openCanonicalStreamWorkerRuntime({ kernel });
         const domains = Object.values(canonicalStreamDomains);
-        expect(domains).toHaveLength(27);
+        expect(new Set(domains).size).toBe(domains.length);
 
         for (const [domainIndex, streamDomain] of domains.entries()) {
             const byteLength =
@@ -94,7 +126,7 @@ describe('Canonical stream real-WASM runtime', () => {
 
         const counters = runtime.counterSnapshot();
         expect(counters.activeSessionCount).toBe(0);
-        expect(counters.completedSessionCount).toBe(54);
+        expect(counters.completedSessionCount).toBe(domains.length * 2);
         expect(counters.maximumObservedCopiedPayloadByteLength).toBe(
             foundationProfile.streamChunkByteLength,
         );
@@ -106,6 +138,34 @@ describe('Canonical stream real-WASM runtime', () => {
         expect(
             counters.maximumObservedWasmMemoryByteLength,
         ).toBeLessThanOrEqual(foundationProfile.maximumWasmMemoryByteLength);
+    });
+
+    it('refuses numeric codes without an implemented stream domain', () => {
+        const runtime = openCanonicalStreamWorkerRuntime({ kernel });
+        const supportedCodes = new Set<number>(
+            Object.values(canonicalStreamDomains),
+        );
+        const largestSupportedCode = Math.max(...supportedCodes);
+
+        for (
+            let unsupportedCode = 0;
+            unsupportedCode <= largestSupportedCode + 1;
+            unsupportedCode += 1
+        ) {
+            if (supportedCodes.has(unsupportedCode)) {
+                continue;
+            }
+            expect(() =>
+                runtime.openWriter({
+                    streamDomain: unsupportedCode as CanonicalStreamDomain,
+                    totalByteLength: 1,
+                }),
+            ).toThrowError(
+                expect.objectContaining({
+                    refusalReason: 'malformedEncoding',
+                }),
+            );
+        }
     });
 
     it('poisons reordered, duplicate, short, overlong, and trailing sessions', () => {
@@ -159,12 +219,12 @@ describe('Canonical stream real-WASM runtime', () => {
         const trailingBytes = createBytes(17, 73);
         const trailingDescriptor = writeDescriptor(
             runtime,
-            canonicalStreamDomains.checkpointState,
+            canonicalStreamDomains.evaluatorKeyStore,
             trailingBytes,
         );
         const trailing = runtime.openVerifier({
             descriptorBytes: trailingDescriptor,
-            streamDomain: canonicalStreamDomains.checkpointState,
+            streamDomain: canonicalStreamDomains.evaluatorKeyStore,
         });
         trailing.absorbChunk(0, trailingBytes.buffer.slice(0));
         expect(() => trailing.absorbChunk(1, new ArrayBuffer(1))).toThrowError(
@@ -181,14 +241,14 @@ describe('Canonical stream real-WASM runtime', () => {
         );
         const descriptor = writeDescriptor(
             runtime,
-            canonicalStreamDomains.ballotValidityProof,
+            canonicalStreamDomains.publicKeyShareProof,
             bytes,
         );
         const chunks = chunkBuffers(bytes);
 
         const substituted = runtime.openVerifier({
             descriptorBytes: descriptor,
-            streamDomain: canonicalStreamDomains.ballotValidityProof,
+            streamDomain: canonicalStreamDomains.publicKeyShareProof,
         });
         const changed = chunks[0].slice(0);
         new Uint8Array(changed)[0] ^= 1;
@@ -198,7 +258,7 @@ describe('Canonical stream real-WASM runtime', () => {
 
         const truncated = runtime.openVerifier({
             descriptorBytes: descriptor,
-            streamDomain: canonicalStreamDomains.ballotValidityProof,
+            streamDomain: canonicalStreamDomains.publicKeyShareProof,
         });
         truncated.absorbChunk(0, chunks[0].slice(0));
         expect(() => truncated.finish()).toThrowError(
@@ -207,7 +267,7 @@ describe('Canonical stream real-WASM runtime', () => {
 
         const wrongDomain = runtime.openVerifier({
             descriptorBytes: descriptor,
-            streamDomain: canonicalStreamDomains.aggregateCiphertext,
+            streamDomain: canonicalStreamDomains.evaluatorKeyStore,
         });
         expect(() =>
             wrongDomain.absorbChunk(0, chunks[0].slice(0)),
@@ -219,7 +279,7 @@ describe('Canonical stream real-WASM runtime', () => {
         wrongTerminalDescriptor[wrongTerminalDescriptor.byteLength - 1] ^= 1;
         const wrongTerminal = runtime.openVerifier({
             descriptorBytes: wrongTerminalDescriptor,
-            streamDomain: canonicalStreamDomains.ballotValidityProof,
+            streamDomain: canonicalStreamDomains.publicKeyShareProof,
         });
         for (const [chunkIndex, chunk] of chunks.entries()) {
             wrongTerminal.absorbChunk(chunkIndex, chunk.slice(0));
@@ -263,7 +323,7 @@ describe('Canonical stream real-WASM runtime', () => {
                 );
                 return writeChunks[chunkIndex].slice(0);
             },
-            streamDomain: canonicalStreamDomains.aggregateCiphertext,
+            streamDomain: canonicalStreamDomains.evaluatorKeyStore,
             totalByteLength: bytes.byteLength,
         });
         expect(writePulls).toEqual([0, 1, 2]);
@@ -286,7 +346,7 @@ describe('Canonical stream real-WASM runtime', () => {
                         ? undefined
                         : readChunks[chunkIndex].slice(0),
                 ),
-            streamDomain: canonicalStreamDomains.aggregateCiphertext,
+            streamDomain: canonicalStreamDomains.evaluatorKeyStore,
         });
         expect(consumedIndices).toEqual([0, 1]);
 
@@ -304,7 +364,7 @@ describe('Canonical stream real-WASM runtime', () => {
                             ? writeChunks[chunkIndex].slice(0)
                             : undefined,
                     ),
-                streamDomain: canonicalStreamDomains.aggregateCiphertext,
+                streamDomain: canonicalStreamDomains.evaluatorKeyStore,
                 totalByteLength: bytes.byteLength,
             }),
         ).rejects.toBeInstanceOf(CanonicalStreamCancellationError);
@@ -314,12 +374,12 @@ describe('Canonical stream real-WASM runtime', () => {
     it('enforces one session, exact object caps, and fallible worker entropy', () => {
         const runtime = openCanonicalStreamWorkerRuntime({ kernel });
         const first = runtime.openWriter({
-            streamDomain: canonicalStreamDomains.checkpointState,
+            streamDomain: canonicalStreamDomains.evaluatorKeyStore,
             totalByteLength: 1,
         });
         expect(() =>
             runtime.openWriter({
-                streamDomain: canonicalStreamDomains.checkpointState,
+                streamDomain: canonicalStreamDomains.evaluatorKeyStore,
                 totalByteLength: 1,
             }),
         ).toThrowError(CanonicalStreamResourceError);
@@ -354,7 +414,7 @@ describe('Canonical stream real-WASM runtime', () => {
         });
         expect(() =>
             failingRuntime.openWriter({
-                streamDomain: canonicalStreamDomains.checkpointState,
+                streamDomain: canonicalStreamDomains.evaluatorKeyStore,
                 totalByteLength: 1,
             }),
         ).toThrowError(
@@ -371,7 +431,7 @@ describe('Canonical stream real-WASM runtime', () => {
         });
         expect(() =>
             zeroEntropyRuntime.openWriter({
-                streamDomain: canonicalStreamDomains.checkpointState,
+                streamDomain: canonicalStreamDomains.evaluatorKeyStore,
                 totalByteLength: 1,
             }),
         ).toThrowError(CanonicalStreamInternalError);
@@ -395,14 +455,14 @@ describe('Canonical stream real-WASM runtime', () => {
             expect(() =>
                 runtime.openVerifier({
                     descriptorBytes: descriptor,
-                    streamDomain: canonicalStreamDomains.checkpointState,
+                    streamDomain: canonicalStreamDomains.evaluatorKeyStore,
                 }),
             ).toThrow();
             expect(runtime.counterSnapshot().activeSessionCount).toBe(0);
         }
 
         const finalLease = runtime.openWriter({
-            streamDomain: canonicalStreamDomains.checkpointState,
+            streamDomain: canonicalStreamDomains.evaluatorKeyStore,
             totalByteLength: 1,
         });
         finalLease.absorbChunk(0, Uint8Array.of(7).buffer);

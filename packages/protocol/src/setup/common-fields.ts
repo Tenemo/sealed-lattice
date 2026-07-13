@@ -6,8 +6,6 @@ import type { CollectiveBgvSetupContext } from './vss-share-verification-records
 
 export type JsonRecord = Record<string, unknown>;
 
-export { protocolHashPattern };
-
 export const setupContextFieldNames = [
     'ceremonyId',
     'manifestHash',

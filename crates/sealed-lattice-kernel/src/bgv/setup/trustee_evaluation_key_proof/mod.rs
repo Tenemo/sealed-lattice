@@ -46,10 +46,16 @@ pub(in crate::bgv::setup) use commands::{
 };
 pub(in crate::bgv::setup) use proof_codec::decode_trustee_evaluation_key_proof_from_source;
 pub(in crate::bgv::setup) use proof_codec::encode_trustee_evaluation_key_proof;
+pub(in crate::bgv::setup) use fiat_shamir_transcript::HashChainTranscriptCore;
+pub(in crate::bgv::setup) use merkle_commitment::{
+    BatchedMerkleOpening as SetupBatchedMerkleOpening, MerkleDigest as SetupMerkleDigest,
+    MerkleTree as SetupMerkleTree, consistent_sorted_leaves as consistent_setup_merkle_leaves,
+    sorted_unique_indices as sorted_unique_setup_merkle_indices,
+    verify_merkle_batch_with_node_domain,
+};
 pub(in crate::bgv::setup) use prover::prove_evaluation_key_share;
 pub(in crate::bgv::setup) use prover::{
-    VssCommittedMaterialTreeInput, vss_committed_material_column_mask_degree,
-    vss_committed_material_roots_by_commitment_field,
+    VssCommittedMaterialTreeInput, vss_committed_material_roots_by_commitment_field,
 };
 pub(in crate::bgv::setup) use relation::TrusteeEvaluationKeyWitness;
 pub(in crate::bgv::setup) use relation::public_key_switch_sample;

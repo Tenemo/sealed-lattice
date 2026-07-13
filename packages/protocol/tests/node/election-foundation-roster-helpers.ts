@@ -34,7 +34,7 @@ import {
     deriveTrusteeSetupEntryHash,
 } from '#packages/protocol/src/roster/index';
 
-export const createRosterPollSpec = (): PollSpec => {
+const createRosterPollSpec = (): PollSpec => {
     const validation = validatePollSpec({
         maxRosterSize: 20,
         minRosterSize: 3,
@@ -101,7 +101,7 @@ export const createRegistrationEntry = (
     };
 };
 
-export const createTrusteeSetupEntry = (
+const createTrusteeSetupEntry = (
     trusteeIdentity: string,
     boardSequence: number,
     boardPosition: number,

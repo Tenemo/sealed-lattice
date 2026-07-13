@@ -10,6 +10,45 @@
 use super::proof_field::ProofFieldParameters;
 use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 
+pub(super) fn radix_two_cyclic_transform_in_place<const LIMB_COUNT: usize>(
+    parameters: &ProofFieldParameters<LIMB_COUNT>,
+    values: &mut [[u64; LIMB_COUNT]],
+    twiddles: &[[u64; LIMB_COUNT]],
+) {
+    let size = values.len();
+    debug_assert!(size.is_power_of_two());
+    debug_assert!(twiddles.len() >= size / 2);
+    if size <= 1 {
+        return;
+    }
+
+    let shift = size.leading_zeros() + 1;
+    for index in 0..size {
+        let reversed = index.reverse_bits() >> shift;
+        if index < reversed {
+            values.swap(index, reversed);
+        }
+    }
+
+    let mut half_block = 1;
+    while half_block < size {
+        let block = half_block * 2;
+        let twiddle_stride = size / block;
+        for block_start in (0..size).step_by(block) {
+            for offset in 0..half_block {
+                let twiddle = &twiddles[offset * twiddle_stride];
+                let even_index = block_start + offset;
+                let odd_index = even_index + half_block;
+                let twisted = parameters.multiply(&values[odd_index], twiddle);
+                let even = values[even_index];
+                values[even_index] = parameters.add(&even, &twisted);
+                values[odd_index] = parameters.subtract(&even, &twisted);
+            }
+        }
+        half_block = block;
+    }
+}
+
 pub(crate) struct NegacyclicDomain<'a, const LIMB_COUNT: usize> {
     pub(crate) parameters: &'a ProofFieldParameters<LIMB_COUNT>,
     pub(crate) size: usize,
@@ -83,12 +122,12 @@ impl<'a, const LIMB_COUNT: usize> NegacyclicDomain<'a, LIMB_COUNT> {
         for (value, psi_power) in values.iter_mut().zip(self.psi_powers.iter()) {
             *value = self.parameters.multiply(value, psi_power);
         }
-        self.cyclic_transform_in_place(values, &self.omega_powers);
+        radix_two_cyclic_transform_in_place(self.parameters, values, &self.omega_powers);
     }
 
     pub(crate) fn inverse_in_place(&self, values: &mut [[u64; LIMB_COUNT]]) {
         debug_assert_eq!(values.len(), self.size);
-        self.cyclic_transform_in_place(values, &self.inverse_omega_powers);
+        radix_two_cyclic_transform_in_place(self.parameters, values, &self.inverse_omega_powers);
         for (value, scaled_inverse_psi) in
             values.iter_mut().zip(self.inverse_psi_powers_scaled.iter())
         {
@@ -119,42 +158,6 @@ impl<'a, const LIMB_COUNT: usize> NegacyclicDomain<'a, LIMB_COUNT> {
         self.pointwise_multiply_in_place(&mut left_transformed, &right_transformed);
         self.inverse_in_place(&mut left_transformed);
         left_transformed
-    }
-
-    fn cyclic_transform_in_place(
-        &self,
-        values: &mut [[u64; LIMB_COUNT]],
-        twiddles: &[[u64; LIMB_COUNT]],
-    ) {
-        bit_reverse_permute(values);
-        let mut half_block = 1;
-        while half_block < self.size {
-            let block = half_block * 2;
-            let twiddle_stride = self.size / block;
-            for block_start in (0..self.size).step_by(block) {
-                for offset in 0..half_block {
-                    let twiddle = &twiddles[offset * twiddle_stride];
-                    let even_index = block_start + offset;
-                    let odd_index = even_index + half_block;
-                    let twisted = self.parameters.multiply(&values[odd_index], twiddle);
-                    let even = values[even_index];
-                    values[even_index] = self.parameters.add(&even, &twisted);
-                    values[odd_index] = self.parameters.subtract(&even, &twisted);
-                }
-            }
-            half_block = block;
-        }
-    }
-}
-
-fn bit_reverse_permute<const LIMB_COUNT: usize>(values: &mut [[u64; LIMB_COUNT]]) {
-    let size = values.len();
-    let shift = size.leading_zeros() + 1;
-    for index in 0..size {
-        let reversed = index.reverse_bits() >> shift;
-        if index < reversed {
-            values.swap(index, reversed);
-        }
     }
 }
 

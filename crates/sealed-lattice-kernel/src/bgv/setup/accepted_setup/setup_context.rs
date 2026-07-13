@@ -42,22 +42,18 @@ pub(super) fn verify_context(
 ) -> CanonicalResult<Option<Value>> {
     let Some(setup_context) = setup_package.get("setupContext") else {
         return Ok(Some(verification_response(
-            Some("setupIntent"),
             vec!["setupContext".to_string()],
-            Vec::new(),
             Vec::new(),
         )?));
     };
     if !setup_context.is_object() {
         return Ok(Some(verification_response(
-            Some("setupIntent"),
             Vec::new(),
             vec![Refusal::new(
                 "setupContextNotObject",
                 "setupContext must be a JSON object",
                 "setupPackage.setupContext".to_string(),
             )],
-            Vec::new(),
         )?));
     }
     for field_name in [
@@ -69,9 +65,7 @@ pub(super) fn verify_context(
     ] {
         if setup_context.get(field_name).is_none() {
             return Ok(Some(verification_response(
-                Some("setupIntent"),
                 vec![format!("setupContext.{field_name}")],
-                Vec::new(),
                 Vec::new(),
             )?));
         }
@@ -79,14 +73,12 @@ pub(super) fn verify_context(
     for field_name in ["manifestHash", "rosterHash", "setupParametersHash"] {
         let Some(field_value) = setup_context.get(field_name).and_then(Value::as_str) else {
             return Ok(Some(verification_response(
-                Some("setupIntent"),
                 Vec::new(),
                 vec![Refusal::new(
                     "setupContextHashMalformed",
                     format!("setupContext.{field_name} must be a protocol hash"),
                     format!("setupPackage.setupContext.{field_name}"),
                 )],
-                Vec::new(),
             )?));
         };
         validate_hash_string(field_value, &format!("setupContext.{field_name}"))?;
@@ -94,23 +86,16 @@ pub(super) fn verify_context(
     for field_name in ["ceremonyId", "setupEpoch"] {
         let Some(field_value) = setup_context.get(field_name).and_then(Value::as_str) else {
             return Ok(Some(verification_response(
-                Some("setupIntent"),
                 Vec::new(),
                 vec![Refusal::new(
                     "setupContextTokenMalformed",
                     format!("setupContext.{field_name} must be a setup context token"),
                     format!("setupPackage.setupContext.{field_name}"),
                 )],
-                Vec::new(),
             )?));
         };
         if let Some(refusal) = validate_setup_context_token(field_name, field_value) {
-            return Ok(Some(verification_response(
-                Some("setupIntent"),
-                Vec::new(),
-                vec![refusal],
-                Vec::new(),
-            )?));
+            return Ok(Some(verification_response(Vec::new(), vec![refusal])?));
         }
     }
 
@@ -119,22 +104,18 @@ pub(super) fn verify_context(
         .and_then(Value::as_u64)
     else {
         return Ok(Some(verification_response(
-            Some("setupIntent"),
             vec!["setupContext.participantCount".to_string()],
-            Vec::new(),
             Vec::new(),
         )?));
     };
     if !participant_count_is_supported(participant_count) {
         return Ok(Some(verification_response(
-            Some("setupIntent"),
             Vec::new(),
             vec![Refusal::new(
                 "participantCountOutsideSupportedRange",
                 "setupContext.participantCount must be a supported roster size in 3..=20",
                 "setupPackage.setupContext.participantCount".to_string(),
             )],
-            Vec::new(),
         )?));
     }
     let roster = roster_parameters_from_participant_count(participant_count);
@@ -149,14 +130,12 @@ pub(super) fn verify_context(
         != Some(expected_setup_parameters_hash.as_str())
     {
         return Ok(Some(verification_response(
-            Some("setupIntent"),
             Vec::new(),
             vec![Refusal::new(
                 "setupParametersHashMismatch",
                 "setupContext.setupParametersHash does not match the roster-derived CollectiveBgvSetup-v1 setup parameters",
                 "setupPackage.setupContext.setupParametersHash".to_string(),
             )],
-            Vec::new(),
         )?));
     }
 

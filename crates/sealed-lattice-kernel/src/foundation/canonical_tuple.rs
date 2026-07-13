@@ -1,5 +1,7 @@
 use core::fmt;
 
+use zeroize::Zeroize;
+
 use super::StabilizedDisplayText;
 
 pub const CANONICAL_TUPLE_SCHEMA_IDENTIFIER: u16 = 0x0001;
@@ -168,6 +170,12 @@ impl CanonicalItemType {
 pub struct CanonicalItem {
     item_type: CanonicalItemType,
     canonical_bytes: Vec<u8>,
+}
+
+impl Zeroize for CanonicalItem {
+    fn zeroize(&mut self) {
+        self.canonical_bytes.zeroize();
+    }
 }
 
 impl CanonicalItem {
@@ -554,6 +562,14 @@ pub struct CanonicalTuple {
     pub schema_identifier: u16,
     pub schema_version: u16,
     pub items: Vec<CanonicalItem>,
+}
+
+impl Zeroize for CanonicalTuple {
+    fn zeroize(&mut self) {
+        self.schema_identifier.zeroize();
+        self.schema_version.zeroize();
+        self.items.zeroize();
+    }
 }
 
 impl CanonicalTuple {

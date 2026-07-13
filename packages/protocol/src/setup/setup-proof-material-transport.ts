@@ -1,6 +1,5 @@
 import type { ProtocolHash } from '@sealed-lattice/types';
 
-import { copyCanonicalStreamDescriptor } from './canonical-stream-descriptor.js';
 import type { JsonRecord } from './common-fields.js';
 
 export type CanonicalProofMaterialChunkPull = (input: {
@@ -24,20 +23,11 @@ export type SetupProofMaterialChunkSource = Readonly<{
     readonly pullChunk: CanonicalProofMaterialChunkPull;
 }>;
 
-export const canonicalGeneratedSetupProofMaterialDescriptor = (
-    material: CanonicalGeneratedSetupProofMaterial,
-): Uint8Array =>
-    copyCanonicalStreamDescriptor(
-        material.descriptorBytes,
-        'canonical generated proof material descriptorBytes',
-    );
-
 export type TransportedSetupProofMaterialSet<
     ObjectType extends string = string,
 > = Readonly<
     JsonRecord & {
         readonly objectType: ObjectType;
-        readonly proofFamily: string;
         readonly proofMaterials: readonly JsonRecord[];
     }
 >;

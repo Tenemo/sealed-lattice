@@ -92,7 +92,6 @@ struct ProofMaterialFamilyFields {
     proof_record_root_field: &'static str,
     transport_set_object_type: &'static str,
     transport_object_type: &'static str,
-    proof_bytes_path: &'static str,
 }
 
 const VSS_SHARE_LINKAGE_PROOF_MATERIAL_FIELDS: ProofMaterialFamilyFields =
@@ -102,7 +101,6 @@ const VSS_SHARE_LINKAGE_PROOF_MATERIAL_FIELDS: ProofMaterialFamilyFields =
         proof_record_root_field: "proofRecordRoot",
         transport_set_object_type: VSS_SHARE_LINKAGE_TRANSPORT_SET_OBJECT_TYPE,
         transport_object_type: VSS_SHARE_LINKAGE_TRANSPORT_OBJECT_TYPE,
-        proof_bytes_path: "share-linkage proofBytesBase64",
     };
 
 const SAME_SECRET_BRIDGE_PROOF_MATERIAL_FIELDS: ProofMaterialFamilyFields =
@@ -112,7 +110,6 @@ const SAME_SECRET_BRIDGE_PROOF_MATERIAL_FIELDS: ProofMaterialFamilyFields =
         proof_record_root_field: "sameSecretBridgeProofRecordRoot",
         transport_set_object_type: SAME_SECRET_BRIDGE_TRANSPORT_SET_OBJECT_TYPE,
         transport_object_type: SAME_SECRET_BRIDGE_TRANSPORT_OBJECT_TYPE,
-        proof_bytes_path: "same-secret bridge proofBytesBase64",
     };
 
 // The raw proof builders keep bytes only long enough to checkpoint prover work.
@@ -139,55 +136,29 @@ fn rewrite_proof_material_set_for_authenticated_transport(
                 &proof_bytes_hash,
             )
             .expect("setup proof material reference root");
-        let retained_material = if let Some(proof_bytes_base64) =
-            proof_record.get("proofBytesBase64")
-        {
-            let proof_bytes = crate::transcript_core::decode_standard_base64(
-                proof_bytes_base64
-                    .as_str()
-                    .expect("embedded proof bytes fixture intermediate"),
-                fields.proof_bytes_path,
-            )
-            .expect("decode proof bytes fixture intermediate");
-            assert_eq!(
-                hash512_hex(fields.proof_bytes_hash_domain, &[&proof_bytes]),
-                proof_bytes_hash,
-                "fixture proof bytes must match their published hash",
-            );
-            RetainedVssProofMaterial {
-                proof_family: fields.proof_family,
-                proof_bytes_hash_domain: fields.proof_bytes_hash_domain,
-                proof_material_root: proof_material_root.clone(),
-                proof_bytes_hash: proof_bytes_hash.clone(),
-                proof_bytes: Some(proof_bytes),
-                proof_binding_lease: None,
-            }
-        } else {
-            assert_eq!(
-                proof_record["proofMaterialRoot"]
-                    .as_str()
-                    .expect("descriptor-backed proof material root"),
-                proof_material_root,
-                "descriptor-backed proof material root",
-            );
-            let proof_binding_lease =
-                crate::bgv::setup::accepted_setup_fixture_proof_binding_lease(&proof_material_root)
-                    .expect("descriptor-backed proof binding lookup")
-                    .expect("descriptor-backed proof binding");
-            RetainedVssProofMaterial {
-                proof_family: fields.proof_family,
-                proof_bytes_hash_domain: fields.proof_bytes_hash_domain,
-                proof_material_root: proof_material_root.clone(),
-                proof_bytes_hash: proof_bytes_hash.clone(),
-                proof_bytes: None,
-                proof_binding_lease: Some(proof_binding_lease),
-            }
+        assert_eq!(
+            proof_record["proofMaterialRoot"]
+                .as_str()
+                .expect("descriptor-backed proof material root"),
+            proof_material_root,
+            "descriptor-backed proof material root",
+        );
+        let proof_binding_lease =
+            crate::bgv::setup::accepted_setup_fixture_proof_binding_lease(&proof_material_root)
+                .expect("descriptor-backed proof binding lookup")
+                .expect("descriptor-backed proof binding");
+        let retained_material = RetainedVssProofMaterial {
+            proof_family: fields.proof_family,
+            proof_bytes_hash_domain: fields.proof_bytes_hash_domain,
+            proof_material_root: proof_material_root.clone(),
+            proof_bytes_hash: proof_bytes_hash.clone(),
+            proof_bytes: None,
+            proof_binding_lease: Some(proof_binding_lease),
         };
 
         let record_object = proof_record
             .as_object_mut()
             .expect("proof material record object");
-        record_object.remove("proofBytesBase64");
         record_object.remove(fields.proof_record_root_field);
         record_object.insert(
             "proofMaterialRoot".to_string(),
@@ -200,7 +171,6 @@ fn rewrite_proof_material_set_for_authenticated_transport(
 
         transported_proof_materials.push(serde_json::json!({
             "objectType": fields.transport_object_type,
-            "proofFamily": fields.proof_family,
             "proofMaterialRoot": proof_material_root,
         }));
         retained_proof_materials.push(retained_material);
@@ -211,7 +181,6 @@ fn rewrite_proof_material_set_for_authenticated_transport(
     RewrittenProofMaterialSet {
         transported_proof_material: serde_json::json!({
             "objectType": fields.transport_set_object_type,
-            "proofFamily": fields.proof_family,
             "proofMaterials": transported_proof_materials,
         }),
         retained_proof_materials,
@@ -266,7 +235,6 @@ pub(in super::super::super) fn descriptor_backed_vss_proof_material_fixture(
     {
         *transported_material = serde_json::json!({
             "objectType": transported_material["objectType"],
-            "proofFamily": transported_material["proofFamily"],
             "proofMaterialRoot": transported_material["proofMaterialRoot"],
         });
     }
@@ -291,17 +259,6 @@ pub(in super::super::super) fn descriptor_backed_vss_proof_material_fixture(
     let rewritten_same_secret_bridge = rewrite_proof_material_set_for_authenticated_transport(
         &mut package["sameSecretBridgeProofMaterialSet"],
         &SAME_SECRET_BRIDGE_PROOF_MATERIAL_FIELDS,
-    );
-
-    package["thresholdShareCommitments"]["shareLinkageProofMaterialSetRoot"] =
-        package["vssShareLinkageProofMaterialSet"]["proofMaterialSetRoot"].clone();
-    package["thresholdShareCommitments"]
-        .as_object_mut()
-        .expect("threshold share commitment binding")
-        .remove("thresholdShareCommitmentRoot");
-    package["thresholdShareCommitments"]["thresholdShareCommitmentRoot"] = serde_json::json!(
-        derive_canonical_object_hash(&package["thresholdShareCommitments"])
-            .expect("threshold share commitment root")
     );
 
     let mut retained_proof_materials = rewritten_share_linkage.retained_proof_materials;

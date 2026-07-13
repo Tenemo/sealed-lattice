@@ -1,4 +1,8 @@
-import { foundationProfile } from '@sealed-lattice/types';
+import {
+    foundationProfile,
+    stateCapabilityKinds,
+    type StateCapabilityKind,
+} from '@sealed-lattice/types';
 
 import {
     createFoundationBoardSigningKeyPairFixtures,
@@ -29,7 +33,6 @@ const stateWitnessVoteObjectType = 0x0053;
 const stateRecoveryTransitionObjectType = 0x0054;
 const targetReleaseCapabilityKind = 3;
 const finalitySignatureCapabilityKind = 2;
-const setupActionRandomnessRootCapabilityKind = 4;
 
 type SignedCarrierVector = Readonly<{
     canonicalCarrierBytes: Uint8Array;
@@ -40,6 +43,11 @@ export type CertifiedStateIntentTestVector = Readonly<{
     canonicalIntentCarrier: Uint8Array;
     canonicalStateCertificate: Uint8Array;
     objectHash: Uint8Array;
+}>;
+
+export type ReservationOnlyStateIntentTestVector = Readonly<{
+    capabilityKind: StateCapabilityKind;
+    certifiedIntent: CertifiedStateIntentTestVector;
 }>;
 
 export type StateVerifierTestVector = Readonly<{
@@ -53,7 +61,7 @@ export type StateVerifierTestVector = Readonly<{
     recoveryFirst: CertifiedStateIntentTestVector;
     recoverySecond: CertifiedStateIntentTestVector;
     reservation: CertifiedStateIntentTestVector;
-    reservationOnly: CertifiedStateIntentTestVector;
+    reservationOnly: readonly ReservationOnlyStateIntentTestVector[];
     subjectParticipantIdentity: Uint8Array;
     suiteIdentifier: Uint8Array;
 }>;
@@ -213,28 +221,38 @@ export const createStateVerifierTestVector = (): StateVerifierTestVector => {
             ),
             objectHash: reservationCarrier.objectHash,
         };
-        const reservationOnlyCarrier = signedCarrier({
-            objectType: stateReservationObjectType,
-            payloadBytes: canonicalTuple(
-                0x1610,
-                unsigned16Item(setupActionRandomnessRootCapabilityKind),
-                hashItem(authorizationHash),
-            ),
-            producerRosterPosition: 0,
-            producerSequence: 0n,
-            recoveryEpoch: 0n,
-            signaturePurpose: 'state-reservation-intent',
+        const reservationOnly = [
+            stateCapabilityKinds.setupActionRandomnessRoot,
+            stateCapabilityKinds.setupPublicSeedBranch,
+            stateCapabilityKinds.setupDealerSetBranch,
+            stateCapabilityKinds.setupRkgRoundOneBranch,
+            stateCapabilityKinds.setupTerminalPackage,
+        ].map((capabilityKind): ReservationOnlyStateIntentTestVector => {
+            const carrier = signedCarrier({
+                objectType: stateReservationObjectType,
+                payloadBytes: canonicalTuple(
+                    0x1610,
+                    unsigned16Item(capabilityKind),
+                    hashItem(authorizationHash),
+                ),
+                producerRosterPosition: 0,
+                producerSequence: 0n,
+                recoveryEpoch: 0n,
+                signaturePurpose: 'state-reservation-intent',
+            });
+            return {
+                capabilityKind,
+                certifiedIntent: {
+                    canonicalIntentCarrier: carrier.canonicalCarrierBytes,
+                    canonicalStateCertificate: certificateFor(
+                        carrier.objectHash,
+                        1n,
+                        [1, 2, 3, 4, 5, 6, 7],
+                    ),
+                    objectHash: carrier.objectHash,
+                },
+            };
         });
-        const reservationOnly: CertifiedStateIntentTestVector = {
-            canonicalIntentCarrier:
-                reservationOnlyCarrier.canonicalCarrierBytes,
-            canonicalStateCertificate: certificateFor(
-                reservationOnlyCarrier.objectHash,
-                1n,
-                [1, 2, 3, 4, 5, 6, 7],
-            ),
-            objectHash: reservationOnlyCarrier.objectHash,
-        };
 
         const exactOutputBytes = new Uint8Array(
             foundationProfile.streamChunkByteLength + 17,

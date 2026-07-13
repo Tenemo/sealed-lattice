@@ -2,19 +2,17 @@ export type {
     EncryptedLocalTrusteeSetupMaterial,
     EncryptedLocalTrusteeSetupState,
     LocalTrusteeSetupSealedMaterialDecryptionInput,
-    LocalTrusteeSetupSealedMaterialDecryptionResult,
     LocalTrusteeSetupSealedMaterialEncryptionInput,
-    LocalTrusteeSetupSealedMaterialEncryptionResult,
     LocalTrusteeSetupStateSealedMaterial,
     LocalTrusteeSetupStateSealedPayload,
+    LocalTrusteeSetupStateCommitment,
     LocalTrusteeStateStorageDecryptionInput,
-    LocalTrusteeStateStorageDecryptionResult,
     LocalTrusteeStateStorageEncryptionInput,
-    LocalTrusteeStateStorageEncryptionResult,
 } from './local-trustee-state-storage/constants-and-types.js';
 export {
     decryptLocalTrusteeSetupSealedMaterial,
     decryptLocalTrusteeState,
+    deriveLocalTrusteeSetupStateCommitmentRoot,
     encryptLocalTrusteeSetupSealedMaterial,
     encryptLocalTrusteeState,
 } from './local-trustee-state-storage/operations.js';

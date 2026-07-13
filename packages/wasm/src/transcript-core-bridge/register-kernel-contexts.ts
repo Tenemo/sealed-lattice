@@ -1,6 +1,5 @@
 import { registerAcceptedSetupSessionKernelContext } from '../accepted-setup-session-runtime.js';
 import { registerCanonicalStreamKernelContext } from '../canonical-stream-runtime.js';
-import { registerFoundationBoardKernelContext } from '../foundation-board-session.js';
 
 import type {
     BgvCollectiveSetupVerification,
@@ -128,42 +127,6 @@ export const registerKernelContexts = (
             finishVerifier: canonicalStreamFinishVerifier,
             finishWriter: canonicalStreamFinishWriter,
             memory: runtime.memory,
-            runExclusive: runtime.runExclusive,
-        });
-    }
-
-    const foundationBoardBegin = resolveOptionalNumberExport(
-        wasmExports,
-        'sealed_lattice_foundation_board_begin',
-    );
-    const foundationBoardCancel = resolveOptionalNumberExport(
-        wasmExports,
-        'sealed_lattice_foundation_board_cancel',
-    );
-    const foundationBoardIngest = resolveOptionalNumberExport(
-        wasmExports,
-        'sealed_lattice_foundation_board_ingest',
-    );
-    const foundationBoardRequireCompleteCarrierGraph =
-        resolveOptionalNumberExport(
-            wasmExports,
-            'sealed_lattice_foundation_board_require_complete_carrier_graph',
-        );
-    if (
-        foundationBoardBegin !== undefined &&
-        foundationBoardCancel !== undefined &&
-        foundationBoardIngest !== undefined &&
-        foundationBoardRequireCompleteCarrierGraph !== undefined
-    ) {
-        registerFoundationBoardKernelContext(kernel, {
-            allocate: runtime.allocate,
-            begin: foundationBoardBegin,
-            cancel: foundationBoardCancel,
-            deallocate: runtime.deallocate,
-            ingest: foundationBoardIngest,
-            memory: runtime.memory,
-            requireCompleteCarrierGraph:
-                foundationBoardRequireCompleteCarrierGraph,
             runExclusive: runtime.runExclusive,
         });
     }

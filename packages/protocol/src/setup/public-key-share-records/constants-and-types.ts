@@ -12,17 +12,10 @@ import type { CollectiveBgvSetupContext } from '../vss-share-verification-record
 
 export type JsonRecord = Record<string, unknown>;
 
-export const publicKeyShareProofFamily = 'public-key-share';
-export const publicKeyShareMaterialEncoding =
-    'embedded-full-public-key-share-coefficients';
-export const publicKeyShareMaterialTransportEncoding =
-    'binary-chunked-full-public-key-share-coefficients';
 export const publicKeyShareCoefficientVectorHashDomain =
     'sealed-lattice-bgv-rns/public-key-share-coefficient-vector';
 
 export type PublicKeyShareCoefficientVectorHash = Readonly<{
-    readonly rnsLimbIndex: number;
-    readonly rnsPrime: number;
     readonly coefficientVectorHash512: ProtocolHash;
 }>;
 
@@ -34,9 +27,6 @@ export type PublicKeyShareContributionInput = Readonly<{
 
 export type PublicKeyShareCoefficientVectorMaterial = Readonly<
     JsonRecord & {
-        readonly rnsLimbIndex: number;
-        readonly rnsPrime: number;
-        readonly coefficientVectorHash512: ProtocolHash;
         readonly coefficientsLeHex: string;
     }
 >;
@@ -55,7 +45,6 @@ export type PublicKeyShareRecord = Readonly<
         readonly publicMatrixSeedHash: ProtocolHash;
         readonly publicKeyCrpRoot: ProtocolHash;
         readonly publicAPolynomialRoot: ProtocolHash;
-        readonly rnsLimbCount: number;
         readonly shareCoefficientVectorHash512ByLimb: readonly PublicKeyShareCoefficientVectorHash[];
         readonly publicKeyShareRoot: ProtocolHash;
     }
@@ -64,8 +53,6 @@ export type PublicKeyShareRecord = Readonly<
 export type PublicKeyShareSet = Readonly<
     JsonRecord & {
         readonly objectType: 'PublicKeyShareSet';
-        readonly participantCount: number;
-        readonly rnsLimbCount: number;
         readonly publicMatrixSeedHash: ProtocolHash;
         readonly publicKeyCrpRoot: ProtocolHash;
         readonly publicAPolynomialRoot: ProtocolHash;
@@ -74,42 +61,11 @@ export type PublicKeyShareSet = Readonly<
     }
 >;
 
-export type PublicKeyShareProofRecord = Readonly<
-    JsonRecord & {
-        readonly objectType: 'PublicKeyShareProof';
-        readonly trusteeIdentity: string;
-        readonly trusteeRosterPosition: number;
-        readonly publicMatrixSeedHash: ProtocolHash;
-        readonly publicKeyCrpRoot: ProtocolHash;
-        readonly publicAPolynomialRoot: ProtocolHash;
-        readonly publicKeyShareRoot: ProtocolHash;
-        readonly rnsLimbCount: number;
-        readonly publicKeyShareProofRoot: ProtocolHash;
-    }
->;
-
-export type PublicKeyShareProofSet = Readonly<
-    JsonRecord & {
-        readonly objectType: 'PublicKeyShareProofSet';
-        readonly participantCount: number;
-        readonly rnsLimbCount: number;
-        readonly publicMatrixSeedHash: ProtocolHash;
-        readonly publicKeyCrpRoot: ProtocolHash;
-        readonly publicAPolynomialRoot: ProtocolHash;
-        readonly publicKeyShareSetRoot: ProtocolHash;
-        readonly proofRecords: readonly PublicKeyShareProofRecord[];
-        readonly publicKeyShareProofSetRoot: ProtocolHash;
-    }
->;
-
 export type PublicKeyShareMaterialRecord = Readonly<
     JsonRecord & {
         readonly objectType: 'PublicKeyShareMaterial';
-        readonly materialEncoding: typeof publicKeyShareMaterialEncoding;
         readonly trusteeIdentity: string;
         readonly trusteeRosterPosition: number;
-        readonly rnsLimbCount: number;
-        readonly ringDegree: number;
         readonly publicMatrixSeedHash: ProtocolHash;
         readonly publicKeyCrpRoot: ProtocolHash;
         readonly publicAPolynomialRoot: ProtocolHash;
@@ -128,15 +84,11 @@ export type PublicKeyShareMaterialRootReference = Readonly<{
 export type PublicKeyShareMaterialSet = Readonly<
     JsonRecord & {
         readonly objectType: 'PublicKeyShareMaterialSet';
-        readonly materialEncoding: typeof publicKeyShareMaterialEncoding;
-        readonly participantCount: number;
-        readonly rnsLimbCount: number;
         readonly ringDegree: number;
         readonly publicMatrixSeedHash: ProtocolHash;
         readonly publicKeyCrpRoot: ProtocolHash;
         readonly publicAPolynomialRoot: ProtocolHash;
         readonly publicKeyShareSetRoot: ProtocolHash;
-        readonly publicKeyShareMaterialRoots: readonly PublicKeyShareMaterialRootReference[];
         readonly shareMaterialRecords: readonly PublicKeyShareMaterialRecord[];
         readonly publicKeyShareMaterialSetRoot: ProtocolHash;
     }
@@ -145,9 +97,6 @@ export type PublicKeyShareMaterialSet = Readonly<
 export type BinaryChunkedPublicKeyShareMaterialSet = Readonly<
     JsonRecord & {
         readonly objectType: 'PublicKeyShareMaterialSet';
-        readonly materialEncoding: typeof publicKeyShareMaterialTransportEncoding;
-        readonly participantCount: number;
-        readonly rnsLimbCount: number;
         readonly ringDegree: number;
         readonly publicMatrixSeedHash: ProtocolHash;
         readonly publicKeyCrpRoot: ProtocolHash;
@@ -179,6 +128,7 @@ export type PublicKeyShareMaterialWriter = (input: {
 
 export type BinaryChunkedPublicKeyShareMaterialTransportInput = Readonly<{
     readonly materialSet: PublicKeyShareMaterialSet;
+    readonly qSharePrimes: readonly number[];
     readonly writePublicKeyShareMaterial: PublicKeyShareMaterialWriter;
 }>;
 
@@ -223,46 +173,25 @@ export type PublicKeyShareSuccinctProofRecord = Readonly<
             readonly objectType: 'PublicKeyShareSuccinctProof';
             readonly trusteeIdentity: string;
             readonly trusteeRosterPosition: number;
-            readonly ringDegree: number;
             readonly publicKeyShareRoot: ProtocolHash;
-            readonly publicKeyShareProofRoot: ProtocolHash;
             readonly publicKeyShareMaterialRoot: ProtocolHash;
             readonly sameSecretBridgeStatementRoot: ProtocolHash;
             readonly sameSecretBridgeProofRecordRoot: ProtocolHash;
             readonly statementHash: ProtocolHash;
             readonly proofBytesHash: ProtocolHash;
-            readonly publicKeyShareSuccinctProofRoot: ProtocolHash;
         }
 >;
 
 export type PublicKeyShareSuccinctProofSet = Readonly<
     JsonRecord & {
         readonly objectType: 'PublicKeyShareSuccinctProofSet';
-        readonly participantCount: number;
-        readonly rnsLimbCount: number;
-        readonly publicMatrixSeedHash: ProtocolHash;
-        readonly publicKeyCrpRoot: ProtocolHash;
-        readonly publicAPolynomialRoot: ProtocolHash;
-        readonly publicKeyShareSetRoot: ProtocolHash;
-        readonly publicKeyShareProofSetRoot: ProtocolHash;
-        readonly publicKeyShareMaterialSetRoot: ProtocolHash;
         readonly proofRecords: readonly PublicKeyShareSuccinctProofRecord[];
         readonly publicKeyShareSuccinctProofSetRoot: ProtocolHash;
     }
 >;
 
-type CollectivePublicKeySourceShareMaterialRoot = Readonly<{
-    readonly trusteeIdentity: string;
-    readonly trusteeRosterPosition: number;
-    readonly publicKeyShareRoot: ProtocolHash;
-    readonly publicKeyShareMaterialRoot: ProtocolHash;
-}>;
-
 type CollectivePublicKeyCoefficientVectorMaterial = Readonly<
     JsonRecord & {
-        readonly rnsLimbIndex: number;
-        readonly rnsPrime: number;
-        readonly coefficientVectorHash512: ProtocolHash;
         readonly coefficientsLeHex: string;
     }
 >;
@@ -270,17 +199,12 @@ type CollectivePublicKeyCoefficientVectorMaterial = Readonly<
 export type CollectivePublicKey = Readonly<
     JsonRecord & {
         readonly objectType: 'CollectivePublicKey';
-        readonly participantCount: number;
-        readonly rnsLimbCount: number;
-        readonly ringDegree: number;
         readonly publicMatrixSeedHash: ProtocolHash;
         readonly publicKeyCrpRoot: ProtocolHash;
         readonly publicAPolynomialRoot: ProtocolHash;
         readonly publicKeyShareSetRoot: ProtocolHash;
-        readonly publicKeyShareProofSetRoot: ProtocolHash;
         readonly publicKeyShareMaterialSetRoot: ProtocolHash;
         readonly publicKeyShareSuccinctProofSetRoot: ProtocolHash;
-        readonly sourceShareMaterialRoots: readonly CollectivePublicKeySourceShareMaterialRoot[];
         readonly aggregateCoefficientVectorsByLimb: readonly CollectivePublicKeyCoefficientVectorMaterial[];
         readonly collectivePublicKeyRoot: ProtocolHash;
     }
@@ -296,13 +220,6 @@ export type PublicKeyShareSetInput = {
     readonly shareContributions: readonly PublicKeyShareContributionInput[];
 };
 
-export type PublicKeyShareProofSetInput = Omit<
-    PublicKeyShareSetInput,
-    'shareContributions'
-> & {
-    readonly publicKeyShares: PublicKeyShareSet;
-};
-
 export type PublicKeyShareMaterialSetInput = Omit<
     PublicKeyShareSetInput,
     'shareContributions'
@@ -312,18 +229,19 @@ export type PublicKeyShareMaterialSetInput = Omit<
     readonly materialContributions: readonly PublicKeyShareMaterialContributionInput[];
 };
 
-export type PublicKeyShareSuccinctProofSetInput =
-    PublicKeyShareProofSetInput & {
-        readonly publicKeyShareProofs: PublicKeyShareProofSet;
-        readonly publicKeyShareMaterial: SetupPackagePublicKeyShareMaterialSet;
-        readonly sameSecretBridgeStatementSet: VssSameSecretBridgeStatementSet;
-        readonly sameSecretBridgeProofMaterialSet: VssSameSecretBridgeProofMaterialSet;
-        readonly proofMaterials: readonly PublicKeyShareSuccinctProofMaterial[];
-    };
+export type PublicKeyShareSuccinctProofSetInput = Omit<
+    PublicKeyShareSetInput,
+    'shareContributions'
+> & {
+    readonly publicKeyShares: PublicKeyShareSet;
+    readonly publicKeyShareMaterial: SetupPackagePublicKeyShareMaterialSet;
+    readonly sameSecretBridgeStatementSet: VssSameSecretBridgeStatementSet;
+    readonly sameSecretBridgeProofMaterialSet: VssSameSecretBridgeProofMaterialSet;
+    readonly proofMaterials: readonly PublicKeyShareSuccinctProofMaterial[];
+};
 
 export type TransportedPublicKeyShareProofMaterialSet = Readonly<
     TransportedSetupProofMaterialSet & {
         readonly objectType: 'SetupTransportedPublicKeyShareProofMaterialSet';
-        readonly proofFamily: typeof publicKeyShareProofFamily;
     }
 >;

@@ -28,9 +28,8 @@ export { acceptedSetupTestModulePattern };
 export type RustKernelAcceptedSetupRunMode = 'accelerated' | 'ci';
 
 export type ParsedRustKernelAcceptedSetupArguments = {
-    readonly focused: boolean;
     readonly mode: RustKernelAcceptedSetupRunMode;
-    readonly testFilters: readonly string[];
+    readonly testFilter?: string;
 };
 
 const memoryLimitEnvironmentVariable =
@@ -92,7 +91,6 @@ export type BuiltRustKernelAcceptedSetupCommand = {
     readonly command: CommandInvocation;
     readonly progressLabel: string;
     readonly setupMessages: readonly string[];
-    readonly testThreadCount: number;
 };
 
 export type GuardedRustKernelCommand = {
@@ -166,12 +164,14 @@ export const verifyProcessMemoryGuardCommand = (): CommandInvocation =>
 export const guardAcceptedSetupCommand = (
     command: CommandInvocation,
     memoryLimitBytes?: number,
+    diagnosticsPath?: string,
 ): CommandInvocation => {
     const processMemoryGuard = getAcceptedSetupProcessMemoryGuard();
-    return processMemoryGuard.guardCommand(
-        command,
-        memoryLimitBytes ?? processMemoryGuard.memoryLimitBytes,
-    );
+    return processMemoryGuard.guardCommand(command, {
+        diagnosticsPath,
+        memoryLimitBytes:
+            memoryLimitBytes ?? processMemoryGuard.memoryLimitBytes,
+    });
 };
 
 const buildAcceptedSetupCommand = (
@@ -193,7 +193,7 @@ const buildAcceptedSetupCommand = (
     }
 
     return {
-        command: guardAcceptedSetupCommand({
+        command: {
             args: cargoTestArgumentsForAcceptedSetupTests(),
             command: 'cargo',
             description: `cargo test Rust accepted setup${
@@ -211,10 +211,9 @@ const buildAcceptedSetupCommand = (
                 mode === 'accelerated'
                     ? 'cargo-test-rust-accepted-setup-accelerated'
                     : 'cargo-test-rust-accepted-setup',
-        }),
+        },
         progressLabel: 'accepted-setup',
         setupMessages,
-        testThreadCount: 1,
     };
 };
 
@@ -266,7 +265,7 @@ export const buildFocusedCommand = (
     ];
 
     return {
-        command: guardAcceptedSetupCommand({
+        command: {
             args: cargoTestArgumentsForFocusedFilter(testFilter),
             command: 'cargo',
             description: `cargo test ${testFilter} (${modeLabel} focused)`,
@@ -282,10 +281,9 @@ export const buildFocusedCommand = (
                 (isAccelerated
                     ? 'cargo-test-rust-accepted-setup-focused'
                     : 'cargo-test-rust-accepted-setup-focused-ci'),
-        }),
+        },
         progressLabel: customization.progressLabel ?? 'accepted-setup:focused',
         setupMessages,
-        testThreadCount: 1,
     };
 };
 
@@ -306,11 +304,6 @@ export const buildGuardedRustKernelDiagnosticFileNames = (input: {
     processMemoryGuard: string;
     testEvents: string;
 }> => {
-    if (!Number.isSafeInteger(input.commandIndex) || input.commandIndex < 0) {
-        throw new Error(
-            'Guarded Rust kernel diagnostic command index must be a non-negative safe integer.',
-        );
-    }
     const commandOrdinal = String(input.commandIndex + 1).padStart(2, '0');
     const diagnosticSlug = safeLogSlug(input.progressLabel);
 
@@ -343,15 +336,15 @@ export const runGuardedRustKernelCommands = async (input: {
                         commandIndex,
                         progressLabel: command.builtCommand.progressLabel,
                     });
-                const guardedCommand =
-                    getAcceptedSetupProcessMemoryGuard().addDiagnostics(
-                        command.builtCommand.command,
-                        path.join(
-                            runLog.runDirectoryPath,
-                            'resources',
-                            diagnosticFileNames.processMemoryGuard,
-                        ),
-                    );
+                const guardedCommand = guardAcceptedSetupCommand(
+                    command.builtCommand.command,
+                    undefined,
+                    path.join(
+                        runLog.runDirectoryPath,
+                        'resources',
+                        diagnosticFileNames.processMemoryGuard,
+                    ),
+                );
                 const progressReporter = createHeavyTestProgressReporter({
                     eventFilePath: path.join(
                         runLog.runDirectoryPath,
@@ -359,7 +352,7 @@ export const runGuardedRustKernelCommands = async (input: {
                         diagnosticFileNames.testEvents,
                     ),
                     label: command.builtCommand.progressLabel,
-                    threadCount: command.builtCommand.testThreadCount,
+                    threadCount: 1,
                 });
                 try {
                     exitCode = await runCommandsInSeries([guardedCommand], {
@@ -407,9 +400,6 @@ export const parseRustKernelAcceptedSetupArguments = (
     let mode: RustKernelAcceptedSetupRunMode = 'accelerated';
 
     for (const argument of commandArguments) {
-        if (argument === undefined) {
-            continue;
-        }
         if (argument === '--') {
             continue;
         }
@@ -430,23 +420,14 @@ export const parseRustKernelAcceptedSetupArguments = (
         );
     }
 
-    const focused = positionalArguments.length === 1;
-    const normalizedFocusedFilter = focused
-        ? normalizeRustTestFilter(positionalArguments[0] ?? '')
-        : undefined;
-    if (normalizedFocusedFilter === '') {
-        throw new Error(
-            `Focused accepted-setup runs require a non-empty filter. ${usage}`,
-        );
-    }
+    const testFilter =
+        positionalArguments[0] === undefined
+            ? undefined
+            : normalizeRustTestFilter(positionalArguments[0]);
 
     return {
-        focused,
         mode,
-        testFilters:
-            normalizedFocusedFilter !== undefined
-                ? [normalizedFocusedFilter]
-                : [acceptedSetupTestModulePattern],
+        testFilter,
     };
 };
 
@@ -464,16 +445,14 @@ export const runRustKernelAcceptedSetupTests = async (input: {
         async (runLog) => {
             const parsedArguments =
                 parseRustKernelAcceptedSetupArguments(rawArguments);
-            const builtCommand = parsedArguments.focused
-                ? buildFocusedCommand(
-                      parsedArguments.testFilters[0] ?? '',
-                      parsedArguments.mode,
-                  )
-                : buildAcceptedSetupCommand(parsedArguments.mode);
-            const focusedTestFilter = parsedArguments.focused
-                ? parsedArguments.testFilters[0]
-                : undefined;
-            if (focusedTestFilter === undefined) {
+            const builtCommand =
+                parsedArguments.testFilter === undefined
+                    ? buildAcceptedSetupCommand(parsedArguments.mode)
+                    : buildFocusedCommand(
+                          parsedArguments.testFilter,
+                          parsedArguments.mode,
+                      );
+            if (parsedArguments.testFilter === undefined) {
                 // Keep the routine-suite exclusion fail-closed. If the Rust
                 // evidence test is renamed or removed, stop during inventory
                 // collection instead of letting a stale --skip silently run
@@ -489,17 +468,21 @@ export const runRustKernelAcceptedSetupTests = async (input: {
                     environment: builtCommand.command.env,
                     lane: 'rust-accepted-setup',
                     runLog,
-                    testFilter: focusedTestFilter,
+                    testFilter: parsedArguments.testFilter,
                 });
             }
 
             await runGuardedRustKernelCommands({
                 commands: [
-                    { builtCommand, expectedTestFilter: focusedTestFilter },
+                    {
+                        builtCommand,
+                        expectedTestFilter: parsedArguments.testFilter,
+                    },
                 ],
-                laneLabel: parsedArguments.focused
-                    ? `Rust accepted setup focused (${parsedArguments.mode})`
-                    : `${acceptedSetupRunName} (${parsedArguments.mode})`,
+                laneLabel:
+                    parsedArguments.testFilter === undefined
+                        ? `${acceptedSetupRunName} (${parsedArguments.mode})`
+                        : `Rust accepted setup focused (${parsedArguments.mode})`,
                 runLog,
             });
         },

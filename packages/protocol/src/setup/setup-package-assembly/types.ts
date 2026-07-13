@@ -3,24 +3,21 @@ import type { ProtocolHash } from '@sealed-lattice/types';
 import type { SetupCommonRandomness } from '../common-randomness-records.js';
 import type {
     GaloisKeyShareBatch,
-    PublicEvaluationKeySet,
     RelinearizationKeyShareRounds,
     TransportedEvaluationKeyShareComponentMaterialSet,
     TransportedEvaluationKeyShareProofMaterialSet,
-    TransportedPublicEvaluationKeyMaterialSet,
     TrusteeEvaluationKeyProofSet,
 } from '../evaluation-key-proof-records.js';
 import type { EvaluatorKeySchedule } from '../evaluator-key-schedule.js';
 import type {
     CollectivePublicKey,
-    PublicKeyShareProofSet,
     SetupPackagePublicKeyShareMaterialSet,
     SetupTransportedPublicKeyShareMaterial,
     PublicKeyShareSet,
     PublicKeyShareSuccinctProofSet,
     TransportedPublicKeyShareProofMaterialSet,
 } from '../public-key-share-records.js';
-import type { SetupPhaseRecord } from '../setup-phase-records.js';
+import type { CollectiveBgvSetupIntent } from '../setup-intent.js';
 import type { VssCoefficientCommitmentSet } from '../vss-coefficient-commitments.js';
 import type {
     VssPublicAggregateThresholdCommitmentSet,
@@ -44,8 +41,7 @@ export type SetupPackage = Readonly<
     JsonRecord & {
         readonly objectType: 'SetupPackage';
         readonly setupContext: CollectiveBgvSetupContext;
-        readonly qShare: JsonRecord;
-        readonly phaseTranscript: readonly SetupPhaseRecord[];
+        readonly setupIntent: CollectiveBgvSetupIntent;
         readonly commonRandomness: SetupCommonRandomness;
         readonly vssCoefficientCommitments: VssCoefficientCommitmentSet;
         readonly vssPublicCoefficientCommitmentSet: VssPublicCoefficientCommitmentSet;
@@ -58,9 +54,7 @@ export type SetupPackage = Readonly<
         readonly privateVssEnvelopeCommitments: JsonRecord;
         readonly vssShareAcceptances: VssShareAcceptanceSet;
         readonly vssComplaints?: VssComplaintSet | JsonRecord;
-        readonly thresholdShareCommitments: JsonRecord;
         readonly publicKeyShares: PublicKeyShareSet;
-        readonly publicKeyShareProofs: PublicKeyShareProofSet;
         readonly publicKeyShareMaterial:
             | SetupPackagePublicKeyShareMaterialSet
             | JsonRecord;
@@ -72,7 +66,6 @@ export type SetupPackage = Readonly<
         readonly relinearizationKeyShareRounds: RelinearizationKeyShareRounds;
         readonly galoisKeyShareBatches: readonly GaloisKeyShareBatch[];
         readonly trusteeEvaluationKeyProofs: TrusteeEvaluationKeyProofSet;
-        readonly evaluationKeys: PublicEvaluationKeySet;
         readonly setupPackageHash: ProtocolHash;
     }
 >;
@@ -81,13 +74,12 @@ export type SetupPackageVerificationInputSource = Readonly<{
     readonly setupPackage: SetupPackage;
     readonly expectedManifestHash: ProtocolHash;
     readonly expectedRosterHash: ProtocolHash;
-    readonly transportedPublicKeyShareMaterial?: SetupTransportedPublicKeyShareMaterial;
+    readonly transportedPublicKeyShareMaterial: SetupTransportedPublicKeyShareMaterial;
     readonly transportedPublicKeyShareProofMaterial?: TransportedPublicKeyShareProofMaterialSet;
     readonly transportedEvaluationKeyShareProofMaterial?: TransportedEvaluationKeyShareProofMaterialSet;
     readonly transportedVssShareLinkageProofMaterial?: TransportedVssShareLinkageProofMaterialSet;
     readonly transportedSameSecretBridgeProofMaterial?: TransportedSameSecretBridgeProofMaterialSet;
     readonly transportedEvaluationKeyShareComponentMaterial?: TransportedEvaluationKeyShareComponentMaterialSet;
-    readonly transportedPublicEvaluationKeyMaterial?: TransportedPublicEvaluationKeyMaterialSet;
 }>;
 
 export type SetupPackageVerificationInput = Readonly<
@@ -99,14 +91,12 @@ export type SetupPackageVerificationInput = Readonly<
         | 'transportedVssShareLinkageProofMaterial'
         | 'transportedSameSecretBridgeProofMaterial'
         | 'transportedEvaluationKeyShareComponentMaterial'
-        | 'transportedPublicEvaluationKeyMaterial'
     > & {
-        readonly transportedPublicKeyShareMaterial?: JsonRecord;
+        readonly transportedPublicKeyShareMaterial: JsonRecord;
         readonly transportedPublicKeyShareProofMaterial?: JsonRecord;
         readonly transportedEvaluationKeyShareProofMaterial?: JsonRecord;
         readonly transportedVssShareLinkageProofMaterial?: JsonRecord;
         readonly transportedSameSecretBridgeProofMaterial?: JsonRecord;
         readonly transportedEvaluationKeyShareComponentMaterial?: JsonRecord;
-        readonly transportedPublicEvaluationKeyMaterial?: JsonRecord;
     }
 >;

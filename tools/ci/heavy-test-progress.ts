@@ -12,6 +12,7 @@ import type {
     CommandOutputStreamName,
     CommandRunObserver,
 } from './run-command.js';
+import { createStreamingLineAccumulator } from './streaming-lines.js';
 import { createTestEventWriter } from './test-event-journal.js';
 
 // Libtest is silent between long-running test completions. Report periodic
@@ -43,7 +44,6 @@ type FocusedRustTestRunResult = {
 
 type RustTestTimingRecord = {
     readonly durationMicroseconds: number;
-    readonly durationMilliseconds: number;
     readonly suite: string;
     readonly test: string;
 };
@@ -78,10 +78,6 @@ export const parseRustTestTimingLine = (
         typeof parsed.suite !== 'string' ||
         !('test' in parsed) ||
         typeof parsed.test !== 'string' ||
-        !('durationMilliseconds' in parsed) ||
-        typeof parsed.durationMilliseconds !== 'number' ||
-        !Number.isFinite(parsed.durationMilliseconds) ||
-        parsed.durationMilliseconds < 0 ||
         !('durationMicroseconds' in parsed) ||
         typeof parsed.durationMicroseconds !== 'number' ||
         !Number.isFinite(parsed.durationMicroseconds) ||
@@ -92,7 +88,6 @@ export const parseRustTestTimingLine = (
 
     return {
         durationMicroseconds: parsed.durationMicroseconds,
-        durationMilliseconds: parsed.durationMilliseconds,
         suite: parsed.suite,
         test: parsed.test,
     };
@@ -124,10 +119,6 @@ export const createHeavyTestProgressReporter = (input: {
     let completedTestCount = 0;
     let executedTestCount = 0;
     let failedTestCount = 0;
-    const lineBuffers: Record<CommandOutputStreamName, string> = {
-        stderr: '',
-        stdout: '',
-    };
     let heartbeatTimer: NodeJS.Timeout | undefined;
     let pendingStartedTestName: string | undefined;
     let pendingTestStartedAtMilliseconds: number | undefined;
@@ -170,7 +161,6 @@ export const createHeavyTestProgressReporter = (input: {
         writeEvent('test-heartbeat', {
             activeTest: pendingStartedTestName,
             completedTestCount,
-            elapsedMilliseconds: Math.round(now() - startedAtMilliseconds),
             expectedTestCount,
             failedTestCount,
             runningTestCount: estimatedRunningCount(),
@@ -203,8 +193,9 @@ export const createHeavyTestProgressReporter = (input: {
                         )
                 : undefined;
         const durationMilliseconds =
-            exactTiming?.durationMilliseconds ??
-            approximateObservedDurationMilliseconds;
+            exactTiming === undefined
+                ? approximateObservedDurationMilliseconds
+                : exactTiming.durationMicroseconds / 1000;
         const durationBasis =
             exactTiming !== undefined
                 ? 'exact-instrumented'
@@ -281,27 +272,20 @@ export const createHeavyTestProgressReporter = (input: {
         streamName: CommandOutputStreamName,
         chunk: string,
     ): void => {
-        lineBuffers[streamName] += chunk;
-        let newlineIndex = lineBuffers[streamName].indexOf('\n');
-        while (newlineIndex !== -1) {
-            const line = lineBuffers[streamName]
-                .slice(0, newlineIndex)
-                .replace(/\r$/u, '');
-            lineBuffers[streamName] = lineBuffers[streamName].slice(
-                newlineIndex + 1,
-            );
-            consumeLine(line);
-            newlineIndex = lineBuffers[streamName].indexOf('\n');
-        }
+        streamingLines[streamName].push(chunk);
+    };
+
+    const streamingLines: Record<
+        CommandOutputStreamName,
+        ReturnType<typeof createStreamingLineAccumulator>
+    > = {
+        stderr: createStreamingLineAccumulator(consumeLine),
+        stdout: createStreamingLineAccumulator(consumeLine),
     };
 
     const flushOutputRemainders = (): void => {
         for (const streamName of ['stdout', 'stderr'] as const) {
-            const remainder = lineBuffers[streamName].replace(/\r$/u, '');
-            lineBuffers[streamName] = '';
-            if (remainder.length > 0) {
-                consumeLine(remainder);
-            }
+            streamingLines[streamName].flush();
         }
     };
 
@@ -319,8 +303,8 @@ export const createHeavyTestProgressReporter = (input: {
             completedTestCount = 0;
             executedTestCount = 0;
             failedTestCount = 0;
-            lineBuffers.stderr = '';
-            lineBuffers.stdout = '';
+            streamingLines.stderr.reset();
+            streamingLines.stdout.reset();
             pendingStartedTestName = undefined;
             pendingTestStartedAtMilliseconds = undefined;
             serializedCompletionBoundaryAtMilliseconds = undefined;

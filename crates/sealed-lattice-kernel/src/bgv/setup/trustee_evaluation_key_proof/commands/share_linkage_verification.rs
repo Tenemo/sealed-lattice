@@ -15,7 +15,6 @@ pub(super) struct VssShareLinkageMaterialRecordStatementInput<'a> {
 
 pub(super) struct VssShareLinkagePublicRecordInput<'a> {
     pub(super) item: &'a Value,
-    pub(super) statement: &'a Value,
     pub(super) coefficient_commitment_set: &'a Value,
     pub(super) recipient_share_commitment_set: &'a Value,
     pub(super) participant_count: usize,
@@ -107,7 +106,6 @@ pub(super) fn verify_vss_share_linkage_material_record_statement(
         coverage.push(verify_vss_share_linkage_item_against_public_records(
             VssShareLinkagePublicRecordInput {
                 item,
-                statement: input.statement,
                 coefficient_commitment_set: input.coefficient_commitment_set,
                 recipient_share_commitment_set: input.recipient_share_commitment_set,
                 participant_count: input.participant_count,
@@ -125,7 +123,6 @@ pub(super) fn verify_vss_share_linkage_item_against_public_records(
     input: VssShareLinkagePublicRecordInput<'_>,
 ) -> CanonicalResult<Value> {
     let item = input.item;
-    let statement = input.statement;
     let coefficient_commitment_set = input.coefficient_commitment_set;
     let recipient_share_commitment_set = input.recipient_share_commitment_set;
     let participant_count = input.participant_count;
@@ -155,28 +152,6 @@ pub(super) fn verify_vss_share_linkage_item_against_public_records(
             "share-linkage item coverage is outside the source statement dimensions",
         ));
     }
-    let source_statement_records = array_field(statement, "sourceStatementRecords")?;
-    let source_statement = source_statement_records
-        .get(source_roster_position)
-        .ok_or_else(|| {
-            invalid_succinct_setup_proof("share-linkage item source is outside the statement")
-        })?;
-    compare_string_value(
-        read_string(item, "sourceTrusteeIdentity")?,
-        read_string(source_statement, "sourceTrusteeIdentity")?,
-        "share-linkage proof item sourceTrusteeIdentity",
-    )?;
-    compare_string_value(
-        read_string(item, "sourceCoefficientCommitmentRoot")?,
-        read_string(source_statement, "sourceCoefficientCommitmentRoot")?,
-        "share-linkage proof item sourceCoefficientCommitmentRoot",
-    )?;
-    compare_string_value(
-        read_string(item, "sourceRecipientShareCommitmentRoot")?,
-        read_string(source_statement, "sourceRecipientShareCommitmentRoot")?,
-        "share-linkage proof item sourceRecipientShareCommitmentRoot",
-    )?;
-
     let coefficient_source_records =
         array_field(coefficient_commitment_set, "sourceTrusteeRecords")?;
     let recipient_source_records =
@@ -195,12 +170,18 @@ pub(super) fn verify_vss_share_linkage_item_against_public_records(
                 "share-linkage recipient-share set is missing the proof source",
             )
         })?;
+    let source_trustee_identity = read_string(coefficient_source_record, "sourceTrusteeIdentity")?;
+    compare_string_value(
+        read_string(item, "sourceTrusteeIdentity")?,
+        source_trustee_identity,
+        "share-linkage proof item sourceTrusteeIdentity",
+    )?;
+    compare_string_value(
+        read_string(recipient_source_record, "sourceTrusteeIdentity")?,
+        source_trustee_identity,
+        "share-linkage proof sourceTrusteeIdentity",
+    )?;
     for source_record in [coefficient_source_record, recipient_source_record] {
-        compare_string_value(
-            read_string(source_record, "sourceTrusteeIdentity")?,
-            read_string(source_statement, "sourceTrusteeIdentity")?,
-            "share-linkage proof sourceTrusteeIdentity",
-        )?;
         compare_u64_value(
             read_u64(source_record, "sourceTrusteeRosterPosition")?,
             source_roster_position as u64,
@@ -208,25 +189,23 @@ pub(super) fn verify_vss_share_linkage_item_against_public_records(
         )?;
     }
     compare_string_value(
+        read_string(item, "sourceCoefficientCommitmentRoot")?,
         read_string(coefficient_source_record, "sourceCoefficientCommitmentRoot")?,
-        read_string(source_statement, "sourceCoefficientCommitmentRoot")?,
-        "share-linkage proof sourceCoefficientCommitmentRoot",
+        "share-linkage proof item sourceCoefficientCommitmentRoot",
     )?;
     compare_string_value(
+        read_string(item, "sourceRecipientShareCommitmentRoot")?,
         read_string(
             recipient_source_record,
             "sourceRecipientShareCommitmentRoot",
         )?,
-        read_string(source_statement, "sourceRecipientShareCommitmentRoot")?,
-        "share-linkage proof sourceRecipientShareCommitmentRoot",
+        "share-linkage proof item sourceRecipientShareCommitmentRoot",
     )?;
 
     let source_message_modulus = read_u64(item, "sourceMessageModulus")?;
     let coefficient_commitment_roots = read_string_array(item, "coefficientCommitmentRoots")?;
-    let coefficient_opening_roots = read_string_array(item, "coefficientOpeningRoots")?;
     let coefficient_commitments = array_field(item, "coefficientCommitments")?;
     if coefficient_commitment_roots.len() != threshold_degree
-        || coefficient_opening_roots.len() != threshold_degree
         || coefficient_commitments.len() != threshold_degree
     {
         return Err(invalid_succinct_setup_proof(
@@ -234,8 +213,6 @@ pub(super) fn verify_vss_share_linkage_item_against_public_records(
         ));
     }
     let coefficient_records = array_field(coefficient_source_record, "coefficientCommitments")?;
-    let source_statement_coefficient_opening_roots =
-        array_field(source_statement, "coefficientOpeningRoots")?;
     for coefficient_index in 0..threshold_degree {
         let coefficient_record_index = source_rns_limb_index
             .checked_mul(threshold_degree)
@@ -270,20 +247,6 @@ pub(super) fn verify_vss_share_linkage_item_against_public_records(
             read_string(coefficient_record, "coefficientCommitmentRoot")?,
             "share-linkage proof coefficientCommitmentRoot",
         )?;
-        compare_string_value(
-            &coefficient_opening_roots[coefficient_index],
-            read_string(coefficient_record, "coefficientOpeningRoot")?,
-            "share-linkage proof coefficientOpeningRoot",
-        )?;
-        if source_statement_coefficient_opening_roots
-            .get(coefficient_record_index)
-            .and_then(Value::as_str)
-            != Some(coefficient_opening_roots[coefficient_index].as_str())
-        {
-            return Err(invalid_succinct_setup_proof(
-                "share-linkage proof coefficient opening root must match the source statement",
-            ));
-        }
         if coefficient_commitments.get(coefficient_index) != coefficient_record.get("commitment") {
             return Err(invalid_succinct_setup_proof(
                 "share-linkage proof coefficient commitment body must match the public coefficient record",
@@ -330,22 +293,6 @@ pub(super) fn verify_vss_share_linkage_item_against_public_records(
         read_string(recipient_record, "shareCommitmentRoot")?,
         "share-linkage proof recipientShareCommitmentRoot",
     )?;
-    compare_string_value(
-        read_string(item, "recipientShareOpeningRoot")?,
-        read_string(recipient_record, "shareOpeningRoot")?,
-        "share-linkage proof recipientShareOpeningRoot",
-    )?;
-    let source_statement_recipient_opening_roots =
-        array_field(source_statement, "recipientShareOpeningRoots")?;
-    if source_statement_recipient_opening_roots
-        .get(recipient_record_index)
-        .and_then(Value::as_str)
-        != Some(read_string(item, "recipientShareOpeningRoot")?)
-    {
-        return Err(invalid_succinct_setup_proof(
-            "share-linkage proof recipient opening root must match the source statement",
-        ));
-    }
     if item.get("recipientShareCommitment") != recipient_record.get("commitment") {
         return Err(invalid_succinct_setup_proof(
             "share-linkage proof recipient-share commitment body must match the public recipient-share record",
@@ -427,57 +374,6 @@ fn verify_vss_share_linkage_proof_material_set_with_statement_verification(
         "VssShareLinkageProofMaterialSet",
         "share-linkage proof material set objectType",
     )?;
-    for (field_name, expected_value) in [
-        ("proofFamily", VSS_SHARE_LINKAGE_PROOF_FAMILY),
-        ("ceremonyId", read_string(statement, "ceremonyId")?),
-        ("setupEpoch", read_string(statement, "setupEpoch")?),
-    ] {
-        compare_string_value(
-            read_string(proof_material_set, field_name)?,
-            expected_value,
-            &format!("share-linkage proof material set {field_name}"),
-        )?;
-    }
-    for field_name in [
-        "manifestHash",
-        "rosterHash",
-        "setupParametersHash",
-        "publicMatrixSeedHash",
-        "coefficientCommitmentRoot",
-        "recipientShareCommitmentRoot",
-        "aggregateThresholdCommitmentRoot",
-    ] {
-        compare_string_value(
-            read_string(proof_material_set, field_name)?,
-            read_string(statement, field_name)?,
-            &format!("share-linkage proof material set {field_name}"),
-        )?;
-    }
-    compare_string_value(
-        read_string(proof_material_set, "statementRoot")?,
-        statement_root,
-        "share-linkage proof material set statementRoot",
-    )?;
-    compare_u64_value(
-        read_u64(proof_material_set, "participantCount")?,
-        participant_count as u64,
-        "share-linkage proof material set participantCount",
-    )?;
-    compare_u64_value(
-        read_u64(proof_material_set, "qShareRnsLimbCount")?,
-        q_share_rns_limb_count as u64,
-        "share-linkage proof material set qShareRnsLimbCount",
-    )?;
-    compare_u64_value(
-        read_u64(proof_material_set, "thresholdDegree")?,
-        threshold_degree as u64,
-        "share-linkage proof material set thresholdDegree",
-    )?;
-    compare_u64_value(
-        read_u64(proof_material_set, "ringDegree")?,
-        ring_degree as u64,
-        "share-linkage proof material set ringDegree",
-    )?;
 
     let proof_records = proof_material_set
         .get("proofRecords")
@@ -501,12 +397,6 @@ fn verify_vss_share_linkage_proof_material_set_with_statement_verification(
             "VssShareLinkageProofRecord",
             "share-linkage proof record objectType",
         )?;
-        compare_string_value(
-            read_string(proof_record, "proofFamily")?,
-            VSS_SHARE_LINKAGE_PROOF_FAMILY,
-            "share-linkage proof record proofFamily",
-        )?;
-
         let vss_share_linkage = proof_record.get("vssShareLinkage").ok_or_else(|| {
             invalid_succinct_setup_proof(
                 "share-linkage proof record vssShareLinkage must be present",
@@ -524,25 +414,7 @@ fn verify_vss_share_linkage_proof_material_set_with_statement_verification(
                 threshold_degree,
             },
         )?;
-        let record_linkage_items = proof_record
-            .get("linkageItems")
-            .and_then(Value::as_array)
-            .ok_or_else(|| {
-                invalid_succinct_setup_proof(
-                    "share-linkage proof record linkageItems must be an array",
-                )
-            })?;
-        if record_linkage_items.len() != coverage.len() {
-            return Err(invalid_succinct_setup_proof(
-                "share-linkage proof record linkageItems must match the proof statement coverage",
-            ));
-        }
-        for (item_index, coverage_item) in coverage.iter().enumerate() {
-            if record_linkage_items.get(item_index) != Some(coverage_item) {
-                return Err(invalid_succinct_setup_proof(
-                    "share-linkage proof record linkageItems must be the canonical proof statement coverage",
-                ));
-            }
+        for coverage_item in &coverage {
             let source_roster_position =
                 usize::try_from(read_u64(coverage_item, "sourceTrusteeRosterPosition")?).map_err(
                     |_| {
@@ -577,7 +449,7 @@ fn verify_vss_share_linkage_proof_material_set_with_statement_verification(
         }
 
         let validated_proof_reference =
-            validate_vss_share_linkage_proof_reference(proof_record, &coverage, vss_share_linkage)?;
+            validate_vss_share_linkage_proof_reference(proof_record, vss_share_linkage)?;
         let proof_request = json!({
             "context": {
                 "ceremonyId": read_string(statement, "ceremonyId")?,
@@ -663,21 +535,6 @@ fn verify_vss_share_linkage_proof_material_set_with_statement_verification(
 
     let proof_material_set_without_root = json!({
         "objectType": "VssShareLinkageProofMaterialSet",
-        "proofFamily": VSS_SHARE_LINKAGE_PROOF_FAMILY,
-        "ceremonyId": read_string(statement, "ceremonyId")?,
-        "manifestHash": read_string(statement, "manifestHash")?,
-        "rosterHash": read_string(statement, "rosterHash")?,
-        "setupParametersHash": read_string(statement, "setupParametersHash")?,
-        "setupEpoch": read_string(statement, "setupEpoch")?,
-        "publicMatrixSeedHash": read_string(statement, "publicMatrixSeedHash")?,
-        "ringDegree": ring_degree,
-        "participantCount": participant_count,
-        "qShareRnsLimbCount": q_share_rns_limb_count,
-        "thresholdDegree": threshold_degree,
-        "coefficientCommitmentRoot": read_string(statement, "coefficientCommitmentRoot")?,
-        "recipientShareCommitmentRoot": read_string(statement, "recipientShareCommitmentRoot")?,
-        "aggregateThresholdCommitmentRoot": read_string(statement, "aggregateThresholdCommitmentRoot")?,
-        "statementRoot": statement_root,
         "proofRecords": verified_records,
     });
     let expected_material_root = derive_canonical_object_hash(&proof_material_set_without_root)?;
@@ -688,11 +545,6 @@ fn verify_vss_share_linkage_proof_material_set_with_statement_verification(
     )?;
 
     Ok(json!({
-        "proofFamily": VSS_SHARE_LINKAGE_PROOF_FAMILY,
-        "statementRoot": statement_root,
         "proofMaterialSetRoot": expected_material_root,
-        "participantCount": participant_count,
-        "qShareRnsLimbCount": q_share_rns_limb_count,
-        "ringDegree": ring_degree,
     }))
 }

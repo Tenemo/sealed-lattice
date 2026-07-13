@@ -1,20 +1,6 @@
 use super::*;
 
 #[test]
-fn collective_setup_verifier_refuses_evaluator_schedule_drift() {
-    let _accepted_setup_test_timing =
-        accepted_setup_test_timing("collective_setup_verifier_refuses_evaluator_schedule_drift");
-    assert_minimal_collective_setup_package_refused(
-        "drifted evaluator key schedule required Galois set hash",
-        |package| {
-            package["evaluatorKeySchedule"]["requiredGaloisSetHash"] =
-                serde_json::json!(valid_hash('8'));
-        },
-        "requiredGaloisSetHashMismatch",
-    );
-}
-
-#[test]
 fn collective_setup_verifier_refuses_malformed_evaluation_key_material() {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "collective_setup_verifier_refuses_malformed_evaluation_key_material",
@@ -29,16 +15,6 @@ fn collective_setup_verifier_refuses_malformed_evaluation_key_material() {
             });
         },
         "relinearizationKeyShareRoundsTypeMismatch",
-    );
-
-    assert_minimal_collective_setup_package_refused(
-        "evaluation keys replaced with a malformed object",
-        |package| {
-            package["evaluationKeys"] = serde_json::json!({
-                "evaluationKeyRoot": valid_hash('9'),
-            });
-        },
-        "evaluationKeysTypeMismatch",
     );
 }
 

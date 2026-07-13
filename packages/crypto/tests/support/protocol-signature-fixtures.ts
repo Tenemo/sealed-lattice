@@ -20,7 +20,7 @@ const protocolSignatureProfile = {
 } as const;
 const mlDsa65SecretKeyByteLength = ml_dsa65.lengths.secretKey!;
 
-export type MlDsaKeyPairFixture = {
+type MlDsaKeyPairFixture = {
     readonly publicKeyBytesHex: string;
     readonly publicKeyHash: ProtocolHash;
     readonly secretKeyBytesHex: string;

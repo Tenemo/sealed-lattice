@@ -106,6 +106,7 @@ pub(super) struct LimbWitnessCommitment {
 pub(super) fn build_limb_witness_commitment(
     statement: &TrusteeEvaluationKeyStatement,
     witness: &TrusteeEvaluationKeyWitness,
+    bound_message_coefficients: &[Vec<u64>],
     limb_index: usize,
     modulus: u64,
     proof_randomness_seed_hex: &str,
@@ -245,23 +246,18 @@ pub(super) fn build_limb_witness_commitment(
         let negative_indicator_vector =
             signed_residue_vector(&witness.negative_indicator_coefficients, modulus);
         append_logical_vector(&negative_indicator_vector);
-        for target_rns_prime in &bridge.bridge_rns_primes {
-            let target_message_coefficients = witness
-                .secret_coefficients
-                .iter()
-                .zip(witness.negative_indicator_coefficients.iter())
-                .map(|(secret_coefficient, negative_indicator)| {
-                    let target_message = i128::from(*secret_coefficient)
-                        + i128::from(*target_rns_prime) * i128::from(*negative_indicator);
-                    u64::try_from(target_message).map_err(|_| {
-                        invalid_succinct_setup_proof(
-                            "same-secret bridge target message coefficient is negative",
-                        )
-                    })
-                })
-                .collect::<CanonicalResult<Vec<_>>>()?;
+        if bound_message_coefficients.len() != bridge.bridge_rns_primes.len() {
+            return Err(invalid_succinct_setup_proof(
+                "same-secret bridge committed messages do not match its target primes",
+            ));
+        }
+        for (target_rns_prime, target_message_coefficients) in bridge
+            .bridge_rns_primes
+            .iter()
+            .zip(bound_message_coefficients)
+        {
             for logical_vector in vss_public_message_encoding_vectors_from_unsigned(
-                &target_message_coefficients,
+                target_message_coefficients,
                 *target_rns_prime,
                 modulus,
                 crate::bgv::setup::vss_commitment::vss_public_message_encoding_layout(
@@ -331,23 +327,18 @@ pub(super) fn build_limb_witness_commitment(
                 signed_residue_vector(&witness.negative_indicator_coefficients, modulus);
             append_logical_vector(&negative_indicator_vector);
             if let Some(bridge) = &statement.same_secret_bridge {
-                for target_rns_prime in &bridge.bridge_rns_primes {
-                    let target_message_coefficients = witness
-                        .secret_coefficients
-                        .iter()
-                        .zip(witness.negative_indicator_coefficients.iter())
-                        .map(|(secret_coefficient, negative_indicator)| {
-                            let target_message = i128::from(*secret_coefficient)
-                                + i128::from(*target_rns_prime) * i128::from(*negative_indicator);
-                            u64::try_from(target_message).map_err(|_| {
-                                invalid_succinct_setup_proof(
-                                    "same-secret bridge target message coefficient is negative",
-                                )
-                            })
-                        })
-                        .collect::<CanonicalResult<Vec<_>>>()?;
+                if bound_message_coefficients.len() != bridge.bridge_rns_primes.len() {
+                    return Err(invalid_succinct_setup_proof(
+                        "same-secret bridge committed messages do not match its target primes",
+                    ));
+                }
+                for (target_rns_prime, target_message_coefficients) in bridge
+                    .bridge_rns_primes
+                    .iter()
+                    .zip(bound_message_coefficients)
+                {
                     for logical_vector in vss_public_message_encoding_vectors_from_unsigned(
-                        &target_message_coefficients,
+                        target_message_coefficients,
                         *target_rns_prime,
                         modulus,
                         crate::bgv::setup::vss_commitment::vss_public_message_encoding_layout(

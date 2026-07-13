@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-    acceptedSetupTestModulePattern,
     buildAcceptedSetupEnvironment,
     buildFocusedCommand,
     cargoTestArgumentsForAcceptedSetupTests,
@@ -16,16 +15,13 @@ import {
 describe('Rust accepted setup runner', () => {
     it('distinguishes resumable local runs from prove-fresh CI runs', () => {
         expect(parseRustKernelAcceptedSetupArguments([])).toEqual({
-            focused: false,
             mode: 'accelerated',
-            testFilters: [acceptedSetupTestModulePattern],
         });
         expect(
             parseRustKernelAcceptedSetupArguments(['--ci', 'ceremony.rs']),
         ).toEqual({
-            focused: true,
             mode: 'ci',
-            testFilters: ['ceremony'],
+            testFilter: 'ceremony',
         });
 
         const localEnvironment = buildFocusedCommand('ceremony', 'accelerated')

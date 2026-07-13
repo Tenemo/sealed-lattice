@@ -1,7 +1,6 @@
 use super::share_linkage::*;
 use super::*;
 
-const VSS_AGGREGATE_THRESHOLD_PROOF_FAMILY: &str = "vss-share-linkage";
 pub(in super::super) const VSS_AGGREGATE_THRESHOLD_PROOF_CHECKPOINT_DIRECTORY: &str =
     "vss-aggregate-threshold-proof-material";
 
@@ -60,7 +59,6 @@ pub(super) fn append_vss_aggregate_threshold_proof_material_transport(
         .map(|proof_record| {
             serde_json::json!({
                 "objectType": "SetupTransportedVssShareLinkageProofMaterial",
-                "proofFamily": VSS_SHARE_LINKAGE_PROOF_FAMILY,
                 "proofMaterialRoot": proof_record["proofMaterialRoot"],
             })
         })
@@ -74,17 +72,12 @@ pub(super) fn append_vss_aggregate_threshold_proof_material_transport(
         .or_insert_with(|| {
             serde_json::json!({
                 "objectType": "SetupTransportedVssShareLinkageProofMaterialSet",
-                "proofFamily": VSS_SHARE_LINKAGE_PROOF_FAMILY,
                 "proofMaterials": [],
             })
         });
     assert_eq!(
         transported_material_set["objectType"], "SetupTransportedVssShareLinkageProofMaterialSet",
         "VSS share-linkage transport set object type",
-    );
-    assert_eq!(
-        transported_material_set["proofFamily"], VSS_SHARE_LINKAGE_PROOF_FAMILY,
-        "VSS share-linkage transport set proof family",
     );
     let transported_materials = transported_material_set["proofMaterials"]
         .as_array_mut()
@@ -207,7 +200,6 @@ fn vss_aggregate_threshold_proof_record(
 
     serde_json::json!({
         "objectType": "VssAggregateThresholdProofRecord",
-        "proofFamily": VSS_AGGREGATE_THRESHOLD_PROOF_FAMILY,
         "recipientRosterPosition": recipient_roster_position,
         "rnsLimbIndex": rns_limb_index,
         "vssShareLinkage": vss_aggregate,
@@ -235,10 +227,6 @@ fn vss_aggregate_threshold_statement_object(
         .iter()
         .map(|record| record["shareCommitmentRoot"].clone())
         .collect::<Vec<_>>();
-    let coefficient_opening_roots = source_share_records
-        .iter()
-        .map(|record| record["shareOpeningRoot"].clone())
-        .collect::<Vec<_>>();
     let coefficient_commitments = source_share_records
         .iter()
         .map(|record| record["commitment"].clone())
@@ -256,10 +244,8 @@ fn vss_aggregate_threshold_statement_object(
         "sourceRnsLimbIndex": rns_limb_index,
         "sourceMessageModulus": rns_prime,
         "coefficientCommitmentRoots": coefficient_commitment_roots,
-        "coefficientOpeningRoots": coefficient_opening_roots,
         "coefficientCommitments": coefficient_commitments,
         "recipientShareCommitmentRoot": aggregate_record["aggregateCommitmentRoot"],
-        "recipientShareOpeningRoot": aggregate_record["aggregateOpeningRoot"],
         "recipientShareCommitment": aggregate_record["commitment"],
         "additionalLinkageItems": [],
     });

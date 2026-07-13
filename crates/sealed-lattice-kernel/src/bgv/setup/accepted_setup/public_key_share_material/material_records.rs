@@ -9,19 +9,11 @@ pub(super) fn decode_public_key_share_material_bindings(
     share_records: &BTreeMap<u64, Value>,
     material: &VerifiedCanonicalPublicKeyShareMaterial,
 ) -> CanonicalResult<(BTreeMap<u64, PublicKeyShareMaterialBinding>, Vec<Value>)> {
-    let roster = super::accepted_roster_from_setup_context(setup_context);
-    if material.participant_count != roster.participant_count
-        || material.records.len() != roster.participant_count as usize
-    {
+    let roster = super::accepted_roster_from_setup_context(setup_context)?;
+    if material.records.len() != roster.participant_count as usize {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ComponentMismatch,
             "transported public-key share material participant count does not match the accepted roster",
-        ));
-    }
-    if material.rns_limb_count != DATA_PRIMES.len() {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ComponentMismatch,
-            "transported public-key share material RNS limb count does not match Q_share",
         ));
     }
     if material.ring_degree != ring_degree {
@@ -76,20 +68,8 @@ pub(super) fn decode_public_key_share_material_bindings(
                 "transported public-key share material must contain one coefficient vector per Q_share limb",
             ));
         }
-        for (rns_limb_index, modulus) in DATA_PRIMES.iter().copied().enumerate() {
+        for rns_limb_index in 0..DATA_PRIMES.len() {
             let transported_limb = &transported_record.limbs[rns_limb_index];
-            if transported_limb.rns_limb_index != rns_limb_index {
-                return Err(CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
-                    "transported public-key share material RNS limb order is not canonical",
-                ));
-            }
-            if transported_limb.rns_prime != modulus {
-                return Err(CanonicalError::new(
-                    CanonicalErrorCode::ComponentMismatch,
-                    "transported public-key share material RNS prime does not match Q_share",
-                ));
-            }
             if transported_limb.coefficients.len() != ring_degree {
                 return Err(CanonicalError::new(
                     CanonicalErrorCode::MalformedLength,
@@ -100,19 +80,9 @@ pub(super) fn decode_public_key_share_material_bindings(
                 public_key_share_coefficient_vector_hash(&transported_limb.coefficients);
             if share_hashes
                 .get(rns_limb_index)
-                .and_then(|share_hash| share_hash.get("rnsLimbIndex"))
-                .and_then(Value::as_u64)
-                != Some(rns_limb_index as u64)
-                || share_hashes
-                    .get(rns_limb_index)
-                    .and_then(|share_hash| share_hash.get("rnsPrime"))
-                    .and_then(Value::as_u64)
-                    != Some(modulus)
-                || share_hashes
-                    .get(rns_limb_index)
-                    .and_then(|share_hash| share_hash.get("coefficientVectorHash512"))
-                    .and_then(Value::as_str)
-                    != Some(coefficient_hash.as_str())
+                .and_then(|share_hash| share_hash.get("coefficientVectorHash512"))
+                .and_then(Value::as_str)
+                != Some(coefficient_hash.as_str())
             {
                 return Err(CanonicalError::new(
                     CanonicalErrorCode::ComponentMismatch,
@@ -120,16 +90,12 @@ pub(super) fn decode_public_key_share_material_bindings(
                 ));
             }
             limb_records.push(json!({
-                "rnsLimbIndex": rns_limb_index,
-                "rnsPrime": modulus,
-                "coefficientVectorHash512": coefficient_hash,
                 "coefficientsLeHex": coefficient_vector_le_hex(&transported_limb.coefficients),
             }));
             coefficients_by_limb.push(transported_limb.coefficients.clone());
         }
         let material_record = json!({
             "objectType": PUBLIC_KEY_SHARE_MATERIAL_OBJECT_TYPE,
-            "materialEncoding": PUBLIC_KEY_SHARE_MATERIAL_EMBEDDED_ENCODING,
             "ceremonyId": value_string(setup_context, "ceremonyId")?,
             "manifestHash": value_string(setup_context, "manifestHash")?,
             "rosterHash": value_string(setup_context, "rosterHash")?,
@@ -137,11 +103,7 @@ pub(super) fn decode_public_key_share_material_bindings(
             "setupEpoch": value_string(setup_context, "setupEpoch")?,
             "trusteeIdentity": trustee_identity,
             "trusteeRosterPosition": expected_roster_position,
-            "rnsLimbCount": DATA_PRIMES.len(),
-            "ringDegree": ring_degree,
             "publicMatrixSeedHash": common_binding.public_matrix_seed_hash,
-            "publicKeyCrpRoot": common_binding.public_key_crp_root,
-            "publicAPolynomialRoot": common_binding.public_a_polynomial_root,
             "publicKeyShareRoot": public_key_share_root,
             "shareCoefficientVectorsByLimb": limb_records,
         });
@@ -191,52 +153,22 @@ pub(in super::super) fn verify_public_key_share_material_set(
         ));
     }
     verify_context_fields_match(material_set, setup_context, "publicKeyShareMaterial")?;
-    let material_encoding = value_string(material_set, "materialEncoding")?;
-    if ![
-        PUBLIC_KEY_SHARE_MATERIAL_EMBEDDED_ENCODING,
-        PUBLIC_KEY_SHARE_MATERIAL_TRANSPORT_ENCODING,
-    ]
-    .contains(&material_encoding)
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "publicKeyShareMaterial.materialEncoding must be embedded full public-key share coefficients or binary-chunked full public-key share coefficients",
-        ));
-    }
-    let roster = super::accepted_roster_from_setup_context(setup_context);
-    for (field_name, expected_value) in [
-        ("participantCount", roster.participant_count),
-        ("rnsLimbCount", DATA_PRIMES.len() as u64),
-    ] {
-        if material_set.get(field_name).and_then(Value::as_u64) != Some(expected_value) {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                format!("publicKeyShareMaterial.{field_name} must be {expected_value}"),
-            ));
-        }
-    }
     let ring_degree = usize::try_from(value_u64(material_set, "ringDegree")?).map_err(|_| {
         CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
             "publicKeyShareMaterial.ringDegree does not fit usize",
         )
     })?;
-    if ring_degree == 0 || ring_degree > POLYNOMIAL_DEGREE {
+    if ring_degree != POLYNOMIAL_DEGREE {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ComponentMismatch,
-            "publicKeyShareMaterial.ringDegree is outside the selected parameters",
+            "publicKeyShareMaterial.ringDegree must match the accepted setup parameters",
         ));
     }
     if material_set
         .get("publicMatrixSeedHash")
         .and_then(Value::as_str)
         != Some(common_binding.public_matrix_seed_hash.as_str())
-        || material_set.get("publicKeyCrpRoot").and_then(Value::as_str)
-            != Some(common_binding.public_key_crp_root.as_str())
-        || material_set
-            .get("publicAPolynomialRoot")
-            .and_then(Value::as_str)
-            != Some(common_binding.public_a_polynomial_root.as_str())
         || material_set
             .get("publicKeyShareSetRoot")
             .and_then(Value::as_str)
@@ -247,25 +179,14 @@ pub(in super::super) fn verify_public_key_share_material_set(
             "publicKeyShareMaterial must bind accepted public randomness and public-key share set root",
         ));
     }
-    let (bindings, material_roots) =
-        if material_encoding == PUBLIC_KEY_SHARE_MATERIAL_EMBEDDED_ENCODING {
-            verify_embedded_public_key_share_material_set(
-                material_set,
-                setup_context,
-                common_binding,
-                ring_degree,
-                share_records,
-            )?
-        } else {
-            verify_transport_public_key_share_material_set(
-                material_set,
-                setup_context,
-                common_binding,
-                ring_degree,
-                share_records,
-                request,
-            )?
-        };
+    let (bindings, material_roots) = verify_transport_public_key_share_material_set(
+        material_set,
+        setup_context,
+        common_binding,
+        ring_degree,
+        share_records,
+        request,
+    )?;
     if material_set.get("publicKeyShareMaterialRoots") != Some(&Value::Array(material_roots)) {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ComponentMismatch,
@@ -320,36 +241,9 @@ pub(super) fn verify_public_key_share_material_record(
         "publicKeyShareMaterial.materialRecords",
     )?;
     if material_record
-        .get("materialEncoding")
-        .and_then(Value::as_str)
-        != Some("embedded-full-public-key-share-coefficients")
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "public-key share material materialEncoding must be embedded-full-public-key-share-coefficients",
-        ));
-    }
-    if material_record.get("ringDegree").and_then(Value::as_u64) != Some(ring_degree as u64)
-        || material_record.get("rnsLimbCount").and_then(Value::as_u64)
-            != Some(DATA_PRIMES.len() as u64)
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ComponentMismatch,
-            "public-key share material ring degree and limb count must match the material set",
-        ));
-    }
-    if material_record
         .get("publicMatrixSeedHash")
         .and_then(Value::as_str)
         != Some(common_binding.public_matrix_seed_hash.as_str())
-        || material_record
-            .get("publicKeyCrpRoot")
-            .and_then(Value::as_str)
-            != Some(common_binding.public_key_crp_root.as_str())
-        || material_record
-            .get("publicAPolynomialRoot")
-            .and_then(Value::as_str)
-            != Some(common_binding.public_a_polynomial_root.as_str())
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ComponentMismatch,
@@ -404,14 +298,6 @@ pub(super) fn verify_public_key_share_material_record(
         })?;
     let mut coefficients_by_limb = Vec::with_capacity(DATA_PRIMES.len());
     for (rns_limb_index, limb) in limbs.iter().enumerate() {
-        if limb.get("rnsLimbIndex").and_then(Value::as_u64) != Some(rns_limb_index as u64)
-            || limb.get("rnsPrime").and_then(Value::as_u64) != Some(DATA_PRIMES[rns_limb_index])
-        {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::ComponentMismatch,
-                "public-key share material limb metadata must follow Q_share order",
-            ));
-        }
         let coefficients = coefficient_vector_from_le_hex(
             value_string(limb, "coefficientsLeHex")?,
             ring_degree,
@@ -427,13 +313,11 @@ pub(super) fn verify_public_key_share_material_record(
             ));
         }
         let coefficient_hash = public_key_share_coefficient_vector_hash(&coefficients);
-        if limb.get("coefficientVectorHash512").and_then(Value::as_str)
+        if share_hashes
+            .get(rns_limb_index)
+            .and_then(|share_hash| share_hash.get("coefficientVectorHash512"))
+            .and_then(Value::as_str)
             != Some(coefficient_hash.as_str())
-            || share_hashes
-                .get(rns_limb_index)
-                .and_then(|share_hash| share_hash.get("coefficientVectorHash512"))
-                .and_then(Value::as_str)
-                != Some(coefficient_hash.as_str())
         {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::ComponentMismatch,

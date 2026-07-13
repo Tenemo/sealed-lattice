@@ -259,13 +259,11 @@ fn aggregate_threshold_statement_root_rejects_changed_bound_fields() -> Canonica
         "sourceRnsLimbIndex": 0,
         "sourceMessageModulus": 17,
         "coefficientCommitmentRoots": ["4".repeat(128), "5".repeat(128)],
-        "coefficientOpeningRoots": ["6".repeat(128), "7".repeat(128)],
         "coefficientCommitments": [
             { "objectType": "VssCommittedMaterialCommitment", "slot": 0 },
             { "objectType": "VssCommittedMaterialCommitment", "slot": 1 },
         ],
         "recipientShareCommitmentRoot": "8".repeat(128),
-        "recipientShareOpeningRoot": "9".repeat(128),
         "recipientShareCommitment": {
             "objectType": "VssCommittedMaterialCommitment",
             "slot": 2,
@@ -318,16 +316,9 @@ fn share_linkage_bindings_command_verifies_bound_roots() -> CanonicalResult<()> 
         statement["aggregateThresholdCommitmentRoot"]
     );
 
-    let mut forged_source_statement = statement.clone();
-    forged_source_statement["sourceStatementRecords"][0]["sourceRecipientShareCommitmentRoot"] =
-        json!("0".repeat(128));
-    rebind_share_linkage_source_statement_root(
-        &mut forged_source_statement["sourceStatementRecords"][0],
-    )?;
-    rebind_share_linkage_statement_root(&mut forged_source_statement)?;
     let missing_evidence_error = verify_vss_share_linkage_bindings_request(&json!({
         "command": "VerifyVssShareLinkageBindings",
-        "statement": forged_source_statement.clone(),
+        "statement": statement.clone(),
     }))
     .expect_err("share-linkage statement verification must require evidence sets");
     assert!(
@@ -335,17 +326,6 @@ fn share_linkage_bindings_command_verifies_bound_roots() -> CanonicalResult<()> 
             .to_string()
             .contains("requires coefficient, recipient-share, and aggregate-threshold"),
         "missing share-linkage evidence should report the required evidence sets: {missing_evidence_error}"
-    );
-    assert!(
-        verify_vss_share_linkage_bindings_request(&json!({
-            "command": "VerifyVssShareLinkageBindings",
-            "statement": forged_source_statement,
-            "coefficientCommitmentSet": coefficient_set.clone(),
-            "recipientShareCommitmentSet": recipient_set.clone(),
-            "aggregateThresholdCommitmentSet": aggregate_set.clone(),
-        }))
-        .is_err(),
-        "evidence-backed linkage verification must reject a source root absent from the recipient-share set"
     );
 
     // This check binds the committed roots across the sets. The accepted-setup
@@ -418,7 +398,6 @@ fn source_coefficient_record(
                 "rnsPrime": rns_prime,
                 "shamirCoefficientIndex": shamir_coefficient_index,
                 "coefficientCommitmentRoot": computation.commitment_root,
-                "coefficientOpeningRoot": computation.opening_root,
                 "commitment": computation.commitment,
             }));
         }
@@ -640,11 +619,9 @@ fn recipient_share_commitment_record(
         "sourceTrusteeRosterPosition": source_trustee_roster_position,
         "recipientIdentity": format!("recipient-{recipient_roster_position}"),
         "recipientRosterPosition": recipient_roster_position,
-        "recipientTrusteePoint": recipient_roster_position + 1,
         "rnsLimbIndex": rns_limb_index,
         "rnsPrime": rns_prime,
         "shareCommitmentRoot": computation.commitment_root,
-        "shareOpeningRoot": computation.opening_root,
         "commitment": computation.commitment,
     }))
 }
@@ -720,7 +697,6 @@ fn aggregate_threshold_commitment_record(
         "objectType": "VssPublicAggregateThresholdCommitment",
         "recipientIdentity": format!("recipient-{recipient_roster_position}"),
         "recipientRosterPosition": recipient_roster_position,
-        "recipientTrusteePoint": recipient_roster_position + 1,
         "rnsLimbIndex": rns_limb_index,
         "rnsPrime": rns_prime,
         "aggregateCommitmentRoot": computation.commitment_root,
@@ -734,59 +710,6 @@ pub(in crate::bgv::setup) fn share_linkage_statement_from_evidence(
     recipient_set: &serde_json::Value,
     aggregate_set: &serde_json::Value,
 ) -> serde_json::Value {
-    let source_statement_records = (0..2_usize)
-            .map(|source_trustee_roster_position| {
-                let coefficient_source_record =
-                    &coefficient_set["sourceTrusteeRecords"][source_trustee_roster_position];
-                let recipient_source_record =
-                    &recipient_set["sourceTrusteeRecords"][source_trustee_roster_position];
-                let coefficient_opening_roots = coefficient_source_record["coefficientCommitments"]
-                    .as_array()
-                    .expect("coefficient records")
-                    .iter()
-                    .map(|coefficient_record| {
-                        coefficient_record["coefficientOpeningRoot"].clone()
-                    })
-                    .collect::<Vec<_>>();
-                let recipient_share_opening_roots = recipient_source_record
-                    ["recipientShareCommitments"]
-                    .as_array()
-                    .expect("recipient-share records")
-                    .iter()
-                    .map(|recipient_share_record| {
-                        recipient_share_record["shareOpeningRoot"].clone()
-                    })
-                    .collect::<Vec<_>>();
-                let source_statement_without_root = json!({
-                    "objectType": "VssShareLinkageSourceStatement",
-                    "ceremonyId": "vss-test",
-                    "manifestHash": "1".repeat(128),
-                    "rosterHash": "2".repeat(128),
-                    "setupParametersHash": "3".repeat(128),
-                    "setupEpoch": "setup-epoch",
-                    "publicMatrixSeedHash": "7".repeat(128),
-                    "sourceTrusteeIdentity": format!("source-{source_trustee_roster_position}"),
-                    "sourceTrusteeRosterPosition": source_trustee_roster_position,
-                    "ringDegree": test_ring_degree(),
-                    "participantCount": 2,
-                    "qShareRnsLimbCount": 2,
-                    "thresholdDegree": 2,
-                    "coefficientCommitmentRoot": coefficient_set["coefficientCommitmentRoot"].clone(),
-                    "sourceCoefficientCommitmentRoot": coefficient_source_record["sourceCoefficientCommitmentRoot"].clone(),
-                    "sourceRecipientShareCommitmentRoot": recipient_source_record["sourceRecipientShareCommitmentRoot"].clone(),
-                    "coefficientOpeningRoots": coefficient_opening_roots,
-                    "recipientShareOpeningRoots": recipient_share_opening_roots,
-                    "aggregateThresholdCommitmentRoot": aggregate_set["aggregateThresholdCommitmentRoot"].clone(),
-                });
-                let mut source_statement = source_statement_without_root;
-                source_statement["sourceStatementRoot"] = json!(
-                    crate::hashing::derive_canonical_object_hash(&source_statement,
-                    )
-                    .expect("source statement root")
-                );
-                source_statement
-            })
-            .collect::<Vec<_>>();
     let statement_without_root = json!({
         "objectType": "VssShareLinkageStatement",
         "ceremonyId": "vss-test",
@@ -802,51 +725,12 @@ pub(in crate::bgv::setup) fn share_linkage_statement_from_evidence(
         "coefficientCommitmentRoot": coefficient_set["coefficientCommitmentRoot"].clone(),
         "recipientShareCommitmentRoot": recipient_set["recipientShareCommitmentRoot"].clone(),
         "aggregateThresholdCommitmentRoot": aggregate_set["aggregateThresholdCommitmentRoot"].clone(),
-        "sourceStatementRecords": source_statement_records,
     });
 
     let mut statement = statement_without_root;
     statement["statementRoot"] =
         json!(crate::hashing::derive_canonical_object_hash(&statement).expect("statement root"));
     statement
-}
-
-fn rebind_share_linkage_source_statement_root(
-    source_statement: &mut serde_json::Value,
-) -> CanonicalResult<()> {
-    let mut source_statement_without_root = source_statement
-        .as_object()
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "VSS share linkage source statement must be an object",
-            )
-        })?
-        .clone();
-    source_statement_without_root.remove("sourceStatementRoot");
-    source_statement["sourceStatementRoot"] = json!(crate::hashing::derive_canonical_object_hash(
-        &serde_json::Value::Object(source_statement_without_root),
-    )?);
-
-    Ok(())
-}
-
-fn rebind_share_linkage_statement_root(statement: &mut serde_json::Value) -> CanonicalResult<()> {
-    let mut statement_without_root = statement
-        .as_object()
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "VSS share linkage statement must be an object",
-            )
-        })?
-        .clone();
-    statement_without_root.remove("statementRoot");
-    statement["statementRoot"] = json!(crate::hashing::derive_canonical_object_hash(
-        &serde_json::Value::Object(statement_without_root),
-    )?);
-
-    Ok(())
 }
 
 fn rebind_canonical_object_root(

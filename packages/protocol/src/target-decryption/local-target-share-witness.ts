@@ -1,8 +1,6 @@
 import {
     decryptLocalTrusteeSetupSealedMaterial,
     decryptLocalTrusteeState,
-    deriveCanonicalObjectHash,
-    hash512Hex,
     type EncryptedLocalTrusteeSetupState,
     type LocalTrusteeSetupSealedMaterialDecryptionInput,
 } from '@sealed-lattice/crypto';
@@ -17,39 +15,13 @@ import type { CollectiveBgvSetupContext } from '../setup/vss-share-verification-
 
 type JsonRecord = Record<string, unknown>;
 
-const targetDecryptionSmudgingSeedHashDomain =
-    'sealed-lattice-bgv-rns/target-decryption-smudging-seed';
 const maximumAggregateOpeningCredentialCount = 17;
 const maximumAggregateOpeningRingDegree = 32_768;
-
-const textEncoder = new TextEncoder();
-
-type TargetDecryptionSmudgingSeedDerivationInput = Readonly<{
-    readonly setupPackage: unknown;
-    readonly targetAcceptedRecord: unknown;
-    readonly targetShareProfile: unknown;
-}>;
-
-type LocalTrusteeTargetDecryptionSmudgingWitness = Readonly<
-    JsonRecord & {
-        readonly objectType: 'LocalTrusteeTargetDecryptionSmudgingWitness';
-        readonly setupPackageHash: ProtocolHash;
-        readonly targetAcceptedRecordHash: ProtocolHash;
-        readonly targetContextHash: ProtocolHash;
-        readonly targetCiphertextHash: ProtocolHash;
-        readonly targetShareProfileHash: ProtocolHash;
-        readonly targetBasisHash: ProtocolHash;
-        readonly trusteeIdentity: string;
-        readonly rosterPosition: number;
-        readonly interpolationPoint: number;
-    }
->;
 
 type LocalTargetDecryptionShareWitnessPreparationInput = Readonly<{
     readonly restoredLocalTargetShareWitness: unknown;
     readonly setupPackage: unknown;
     readonly targetAcceptedRecord: unknown;
-    readonly targetShareProfile: unknown;
     readonly trusteeIdentity: string;
 }>;
 
@@ -65,11 +37,7 @@ export type TargetDecryptionAggregateOpeningMaterialSource = Readonly<{
 
 export type PreparedLocalTargetDecryptionShareWitness = Readonly<{
     readonly aggregateOpeningMaterialSources: readonly TargetDecryptionAggregateOpeningMaterialSource[];
-    readonly localTargetShareWitness: Readonly<
-        JsonRecord & {
-            readonly targetDecryptionSmudging: LocalTrusteeTargetDecryptionSmudgingWitness;
-        }
-    >;
+    readonly localTargetShareWitness: Readonly<JsonRecord>;
 }>;
 
 export type RestoredLocalTargetDecryptionShareWitnessInput = Readonly<{
@@ -79,7 +47,6 @@ export type RestoredLocalTargetDecryptionShareWitnessInput = Readonly<{
     readonly storageKeyBytesHex: string;
     readonly setupPackage: unknown;
     readonly targetAcceptedRecord: unknown;
-    readonly targetShareProfile: unknown;
 }>;
 
 const jsonRecord = (value: unknown, objectPath: string): JsonRecord => {
@@ -167,66 +134,12 @@ const compareProtocolHashField = (
     return fieldValue;
 };
 
-const encoded = (value: string): Uint8Array => textEncoder.encode(value);
-
-const targetBindingHashes = (
-    setupPackageValue: unknown,
-    targetAcceptedRecordValue: unknown,
-    targetShareProfileValue: unknown,
-): Readonly<{
-    readonly setupPackageHash: ProtocolHash;
-    readonly targetAcceptedRecordHash: ProtocolHash;
-    readonly targetContextHash: ProtocolHash;
-    readonly targetCiphertextHash: ProtocolHash;
-    readonly targetShareProfileHash: ProtocolHash;
-    readonly targetBasisHash: ProtocolHash;
-}> => {
-    const setupPackage = jsonRecord(setupPackageValue, 'setupPackage');
-    const targetAcceptedRecord = jsonRecord(
-        targetAcceptedRecordValue,
-        'targetAcceptedRecord',
-    );
-    const targetShareProfile = jsonRecord(
-        targetShareProfileValue,
-        'targetShareProfile',
-    );
-    return {
-        setupPackageHash: deriveCanonicalObjectHash(setupPackage),
-        targetAcceptedRecordHash: protocolHashField(
-            targetAcceptedRecord,
-            'targetAcceptedRecordHash',
-            'targetAcceptedRecord',
-        ),
-        targetContextHash: protocolHashField(
-            targetAcceptedRecord,
-            'targetContextHash',
-            'targetAcceptedRecord',
-        ),
-        targetCiphertextHash: protocolHashField(
-            targetAcceptedRecord,
-            'targetCiphertextHash',
-            'targetAcceptedRecord',
-        ),
-        targetShareProfileHash: protocolHashField(
-            targetShareProfile,
-            'targetShareProfileHash',
-            'targetShareProfile',
-        ),
-        targetBasisHash: protocolHashField(
-            targetAcceptedRecord,
-            'targetBasisHash',
-            'targetAcceptedRecord',
-        ),
-    };
-};
-
 const setupParticipant = (
     setupPackageValue: unknown,
     trusteeIdentity: string,
 ): Readonly<{
     readonly trusteeIdentity: string;
     readonly rosterPosition: number;
-    readonly interpolationPoint: number;
 }> => {
     const setupPackage = jsonRecord(setupPackageValue, 'setupPackage');
     const aggregateThresholdCommitmentSet = jsonRecord(
@@ -284,7 +197,6 @@ const setupParticipant = (
             participantObjectPath,
         ),
         rosterPosition,
-        interpolationPoint: rosterPosition + 1,
     };
 };
 
@@ -477,18 +389,6 @@ const assertRestoredAggregateOpeningBinding = (input: {
                 `${objectPath} must belong to the target-decryption trustee.`,
             );
         }
-        if (
-            nonNegativeIntegerField(
-                credential,
-                'recipientTrusteePoint',
-                objectPath,
-            ) !==
-            input.rosterPosition + 1
-        ) {
-            throw new Error(
-                `${objectPath}.recipientTrusteePoint must match the target-decryption trustee interpolation point.`,
-            );
-        }
         const rnsLimbIndex = nonNegativeIntegerField(
             credential,
             'rnsLimbIndex',
@@ -633,67 +533,13 @@ const prepareAggregateOpeningMaterial = (input: {
     return { credential, source };
 };
 
-export const deriveTargetDecryptionSmudgingSeedHex = (
-    input: TargetDecryptionSmudgingSeedDerivationInput,
-): string => {
-    const bindingHashes = targetBindingHashes(
-        input.setupPackage,
-        input.targetAcceptedRecord,
-        input.targetShareProfile,
-    );
-
-    return hash512Hex(targetDecryptionSmudgingSeedHashDomain, [
-        encoded(bindingHashes.setupPackageHash),
-        encoded(bindingHashes.targetAcceptedRecordHash),
-        encoded(bindingHashes.targetContextHash),
-        encoded(bindingHashes.targetCiphertextHash),
-        encoded(bindingHashes.targetShareProfileHash),
-        encoded(bindingHashes.targetBasisHash),
-    ]);
-};
-
-const createLocalTrusteeTargetDecryptionSmudgingWitness = (
-    input: LocalTargetDecryptionShareWitnessPreparationInput,
-): LocalTrusteeTargetDecryptionSmudgingWitness => {
-    const trusteeIdentity = input.trusteeIdentity;
-    if (trusteeIdentity.length === 0) {
-        throw new Error('trusteeIdentity must not be empty.');
-    }
-    const participant = setupParticipant(input.setupPackage, trusteeIdentity);
-    const bindingHashes = targetBindingHashes(
-        input.setupPackage,
-        input.targetAcceptedRecord,
-        input.targetShareProfile,
-    );
-
-    return {
-        objectType: 'LocalTrusteeTargetDecryptionSmudgingWitness',
-        setupPackageHash: bindingHashes.setupPackageHash,
-        targetAcceptedRecordHash: bindingHashes.targetAcceptedRecordHash,
-        targetContextHash: bindingHashes.targetContextHash,
-        targetCiphertextHash: bindingHashes.targetCiphertextHash,
-        targetShareProfileHash: bindingHashes.targetShareProfileHash,
-        targetBasisHash: bindingHashes.targetBasisHash,
-        trusteeIdentity: participant.trusteeIdentity,
-        rosterPosition: participant.rosterPosition,
-        interpolationPoint: participant.interpolationPoint,
-    };
-};
-
-export const prepareLocalTargetDecryptionShareWitness = (
+const prepareLocalTargetDecryptionShareWitness = (
     input: LocalTargetDecryptionShareWitnessPreparationInput,
 ): PreparedLocalTargetDecryptionShareWitness => {
     const restoredLocalTargetShareWitness = jsonRecord(
         input.restoredLocalTargetShareWitness,
         'restoredLocalTargetShareWitness',
     );
-    if (
-        restoredLocalTargetShareWitness.targetDecryptionSmudging !== undefined
-    ) {
-        throw new Error(
-            'restoredLocalTargetShareWitness already contains target-decryption smudging material.',
-        );
-    }
     jsonRecord(
         restoredLocalTargetShareWitness.aggregateOpening,
         'restoredLocalTargetShareWitness.aggregateOpening',
@@ -756,8 +602,6 @@ export const prepareLocalTargetDecryptionShareWitness = (
                 (prepared) => prepared.credential,
             ),
         },
-        targetDecryptionSmudging:
-            createLocalTrusteeTargetDecryptionSmudgingWitness(input),
     };
 
     return {
@@ -845,16 +689,14 @@ export const restoreAndPrepareLocalTargetDecryptionShareWitness = async (
     );
     const restoredAggregateThresholdShare =
         await decryptLocalTrusteeSetupSealedMaterial({
-            sealedMaterial:
-                restoredLocalState.localStatePlaintext
-                    .sealedAggregateThresholdShare,
+            sealedMaterial: restoredLocalState.sealedAggregateThresholdShare,
             expectedMaterialRoot: aggregateThresholdShareRoot,
             localStateCommitment,
             setupContext: input.setupContext,
             storageKeyBytesHex: input.storageKeyBytesHex,
         });
     const aggregateThresholdShareMaterial = jsonRecord(
-        restoredAggregateThresholdShare.materialPlaintext,
+        restoredAggregateThresholdShare,
         'aggregateThresholdShareMaterial',
     );
     exactStringField(
@@ -889,9 +731,9 @@ export const restoreAndPrepareLocalTargetDecryptionShareWitness = async (
         aggregateThresholdShareMaterial,
         'thresholdShareCommitmentRecipientRoot',
         protocolHashField(
-            restoredLocalState.localStatePlaintext,
+            localStateCommitment,
             'thresholdShareCommitmentRecipientRoot',
-            'localStatePlaintext',
+            'localStateCommitment',
         ),
         'aggregateThresholdShareMaterial',
         'the restored local state threshold-share commitment root',
@@ -979,7 +821,6 @@ export const restoreAndPrepareLocalTargetDecryptionShareWitness = async (
         restoredLocalTargetShareWitness,
         setupPackage,
         targetAcceptedRecord,
-        targetShareProfile: input.targetShareProfile,
         trusteeIdentity,
     });
 };

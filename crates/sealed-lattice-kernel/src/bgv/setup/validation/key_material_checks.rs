@@ -39,7 +39,6 @@ pub(super) fn validate_collective_public_key(
     let coefficient_material = value_at_path(collective_public_key, &["coefficientMaterial"])?;
     validate_collective_public_key_coefficient_material(
         coefficient_material,
-        collective_public_key_record,
         participant_bindings,
     )?;
     let expected_coefficient_root = collective_public_key_coefficient_root(coefficient_material)?;
@@ -79,7 +78,6 @@ pub(super) fn validate_collective_public_key(
 
 fn validate_collective_public_key_coefficient_material(
     coefficient_material: &Value,
-    collective_public_key_record: &Value,
     participant_bindings: &[VerifiedParticipantSetupBinding],
 ) -> CanonicalResult<()> {
     compare_string_at_path(
@@ -100,15 +98,6 @@ fn validate_collective_public_key_coefficient_material(
             "collective public key coefficient material share roots do not match participant records",
         ));
     }
-    compare_hash_at_path(
-        coefficient_material,
-        &["publicCommonRandomPolynomialRoot"],
-        string_at_path(
-            collective_public_key_record,
-            &["publicCommonRandomPolynomialRoot"],
-        )?,
-        "collective public key coefficient material CRP root",
-    )?;
     let expected_participants = participant_bindings
         .iter()
         .map(|participant| {
@@ -160,15 +149,9 @@ fn validate_coefficient_table(table: &Value, expected_modulus: u64) -> Canonical
             "collective public key coefficient table shape does not match the selected data basis",
         ));
     }
-    for (hex_field_name, hash_field_name) in [
-        (
-            "componentZeroCoefficientsLeHex",
-            "componentZeroCoefficientHash512",
-        ),
-        (
-            "componentOneCoefficientsLeHex",
-            "componentOneCoefficientHash512",
-        ),
+    for hex_field_name in [
+        "componentZeroCoefficientsLeHex",
+        "componentOneCoefficientsLeHex",
     ] {
         let bytes = crate::transcript_core::decode_hex(string_at_path(table, &[hex_field_name])?)?;
         if bytes.len() != POLYNOMIAL_DEGREE * 8 {
@@ -177,16 +160,6 @@ fn validate_coefficient_table(table: &Value, expected_modulus: u64) -> Canonical
                 "collective public key coefficient table byte length is invalid",
             ));
         }
-        let expected_hash = hash512_hex(
-            "sealed-lattice-bgv-rns/public-key-coefficient-vector",
-            &[&bytes],
-        );
-        compare_hash_at_path(
-            table,
-            &[hash_field_name],
-            &expected_hash,
-            "collective public key coefficient table hash",
-        )?;
     }
 
     Ok(())

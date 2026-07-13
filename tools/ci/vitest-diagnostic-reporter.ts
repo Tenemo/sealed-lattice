@@ -1,14 +1,4 @@
-import { createHash } from 'node:crypto';
-import {
-    appendFileSync,
-    mkdirSync,
-    readdirSync,
-    readFileSync,
-    statSync,
-    writeFileSync,
-} from 'node:fs';
-import path from 'node:path';
-import { performance } from 'node:perf_hooks';
+import { mkdirSync } from 'node:fs';
 
 import type { TestCase, TestModule } from 'vitest/node';
 import type { Reporter } from 'vitest/reporters';
@@ -18,17 +8,7 @@ import {
     serializeErrorDiagnostic,
 } from './run-log-diagnostics.js';
 import { resolveTestDiagnosticPaths } from './test-diagnostic-environment.js';
-
-type TestDiagnosticEvent = Readonly<{
-    elapsedMilliseconds: number;
-    event: string;
-    objectVersion: 'sealed-lattice-test-diagnostic-event-v1';
-    processIdentifier: number;
-    projectLabel: string;
-    sequence: number;
-    timestampIso: string;
-}> &
-    Readonly<Record<string, unknown>>;
+import { createTestEventWriter } from './test-event-journal.js';
 
 const testIdentity = (
     testCase: TestCase,
@@ -49,103 +29,22 @@ const moduleIdentity = (
     project: testModule.project.name,
 });
 
-const listFilesRecursively = (directoryPath: string): readonly string[] => {
-    const files: string[] = [];
-    for (const entry of readdirSync(directoryPath, { withFileTypes: true })) {
-        const entryPath = path.join(directoryPath, entry.name);
-        if (entry.isDirectory()) {
-            files.push(...listFilesRecursively(entryPath));
-        } else if (entry.isFile() && entry.name !== 'manifest.json') {
-            files.push(entryPath);
-        }
-    }
-
-    return files.sort((left, right) => left.localeCompare(right));
-};
-
 export class VitestDiagnosticReporter implements Reporter {
-    readonly #attachmentDirectoryPath: string | undefined;
-    readonly #eventFilePath: string | undefined;
-    readonly #projectLabel: string;
-    readonly #startedAtMilliseconds = performance.now();
-    #sequence = 0;
+    readonly #writeEvent: ReturnType<typeof createTestEventWriter>;
 
     constructor(
         environment: NodeJS.ProcessEnv = process.env,
-        private readonly now: () => Date = () => new Date(),
+        now: () => Date = () => new Date(),
     ) {
         const paths = resolveTestDiagnosticPaths(environment);
-        this.#attachmentDirectoryPath = paths.attachmentDirectoryPath;
-        this.#eventFilePath = paths.eventFilePath;
-        this.#projectLabel = paths.projectLabel;
-        if (this.#eventFilePath !== undefined) {
-            mkdirSync(path.dirname(this.#eventFilePath), { recursive: true });
+        this.#writeEvent = createTestEventWriter({
+            eventFilePath: paths.eventFilePath,
+            now,
+            projectLabel: paths.projectLabel,
+        });
+        if (paths.attachmentDirectoryPath !== undefined) {
+            mkdirSync(paths.attachmentDirectoryPath, { recursive: true });
         }
-        if (this.#attachmentDirectoryPath !== undefined) {
-            mkdirSync(this.#attachmentDirectoryPath, { recursive: true });
-        }
-    }
-
-    #writeEvent(
-        event: string,
-        details: Readonly<Record<string, unknown>>,
-    ): void {
-        if (this.#eventFilePath === undefined) {
-            return;
-        }
-        const value: TestDiagnosticEvent = {
-            ...details,
-            elapsedMilliseconds: Math.round(
-                performance.now() - this.#startedAtMilliseconds,
-            ),
-            event,
-            objectVersion: 'sealed-lattice-test-diagnostic-event-v1',
-            processIdentifier: process.pid,
-            projectLabel: this.#projectLabel,
-            sequence: ++this.#sequence,
-            timestampIso: this.now().toISOString(),
-        };
-        appendFileSync(
-            this.#eventFilePath,
-            `${JSON.stringify(value)}\n`,
-            'utf8',
-        );
-    }
-
-    #writeAttachmentManifest(): void {
-        if (this.#attachmentDirectoryPath === undefined) {
-            return;
-        }
-        const files = listFilesRecursively(this.#attachmentDirectoryPath).map(
-            (filePath) => {
-                const contents = readFileSync(filePath);
-                const statistics = statSync(filePath);
-
-                return {
-                    modifiedAtIso: statistics.mtime.toISOString(),
-                    path: path
-                        .relative(this.#attachmentDirectoryPath!, filePath)
-                        .split(path.sep)
-                        .join('/'),
-                    sha256: createHash('sha256').update(contents).digest('hex'),
-                    sizeBytes: statistics.size,
-                };
-            },
-        );
-        writeFileSync(
-            path.join(this.#attachmentDirectoryPath, 'manifest.json'),
-            `${JSON.stringify(
-                {
-                    files,
-                    generatedAtIso: this.now().toISOString(),
-                    objectVersion: 'sealed-lattice-test-attachment-manifest-v1',
-                    projectLabel: this.#projectLabel,
-                },
-                null,
-                2,
-            )}\n`,
-            'utf8',
-        );
     }
 
     onProcessTimeout(): void {
@@ -196,7 +95,6 @@ export class VitestDiagnosticReporter implements Reporter {
                 serializeErrorDiagnostic(error),
             ),
         });
-        this.#writeAttachmentManifest();
     }
 
     onTestRunStart(): void {

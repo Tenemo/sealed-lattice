@@ -108,7 +108,7 @@ pub(crate) fn rotate(
     let rotated = apply_automorphism(ciphertext, galois_element)?;
     let (switched_zero, switched_one) = key_switch_component(&rotated.components[1], galois_key)?;
     let mut component_zero = rotated.components[0].clone();
-    add_component_in_place(&mut component_zero, &switched_zero, ciphertext.level)?;
+    add_component_in_place(&mut component_zero, &switched_zero, ciphertext.level);
 
     Ok(Ciphertext {
         components: vec![component_zero, switched_one],

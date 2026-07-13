@@ -33,22 +33,11 @@ pub enum StateCapabilityKind {
     SetupActionRandomnessRoot = 4,
     SetupPublicSeedBranch = 5,
     SetupDealerSetBranch = 6,
-    SetupRelinearizationRoundOneBranch = 7,
+    SetupRkgRoundOneBranch = 7,
     SetupTerminalPackage = 8,
 }
 
 impl StateCapabilityKind {
-    pub const ALL: [Self; 8] = [
-        Self::BallotCandidateList,
-        Self::FinalitySignature,
-        Self::TargetRelease,
-        Self::SetupActionRandomnessRoot,
-        Self::SetupPublicSeedBranch,
-        Self::SetupDealerSetBranch,
-        Self::SetupRelinearizationRoundOneBranch,
-        Self::SetupTerminalPackage,
-    ];
-
     pub const fn canonical_code(self) -> u16 {
         self as u16
     }
@@ -61,7 +50,7 @@ impl StateCapabilityKind {
             4 => Some(Self::SetupActionRandomnessRoot),
             5 => Some(Self::SetupPublicSeedBranch),
             6 => Some(Self::SetupDealerSetBranch),
-            7 => Some(Self::SetupRelinearizationRoundOneBranch),
+            7 => Some(Self::SetupRkgRoundOneBranch),
             8 => Some(Self::SetupTerminalPackage),
             _ => None,
         }
@@ -655,6 +644,16 @@ pub enum StateWitnessVoteKind {
     Recovery,
 }
 
+impl StateWitnessVoteKind {
+    pub const fn canonical_code(self) -> u16 {
+        match self {
+            Self::Reservation => 1,
+            Self::Output => 2,
+            Self::Recovery => 3,
+        }
+    }
+}
+
 pub fn derive_state_witness_vote_sequence(
     vote_kind: StateWitnessVoteKind,
     subject_epoch: u64,
@@ -812,6 +811,131 @@ struct StateReservationBinding {
     authorization_hash: Hash512,
 }
 
+#[derive(Clone, Copy)]
+struct StateOutputBinding {
+    reservation_binding: StateReservationBinding,
+    output_intent_object_hash: Hash512,
+    exact_output_hash: Hash512,
+    exact_output_byte_length: u64,
+}
+
+#[derive(Clone, Copy)]
+struct StateRecoveryBinding {
+    transition_object_hash: Hash512,
+    subject_participant_id: ParticipantIdentity,
+    capability_kind: StateCapabilityKind,
+    suite_id: Hash512,
+    ceremony_context_hash: Hash512,
+    action_context_hash: Hash512,
+    state_key: Hash512,
+    old_recovery_epoch: u64,
+    new_recovery_epoch: u64,
+    predecessor_transition_hash: Option<Hash512>,
+    preserved_reservation_intent_object_hash: Option<Hash512>,
+    preserved_output_intent_object_hash: Option<Hash512>,
+}
+
+/// Verifier-derived durable lock metadata. This value is never decoded from a
+/// producer artifact; it is projected only from a successfully verified state
+/// intent or certified state capability.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StateDurableBinding {
+    vote_kind: StateWitnessVoteKind,
+    capability_kind: StateCapabilityKind,
+    suite_id: Hash512,
+    ceremony_context_hash: Hash512,
+    action_context_hash: Hash512,
+    subject_participant_id: ParticipantIdentity,
+    state_key: Hash512,
+    intent_object_hash: Hash512,
+    subject_epoch: u64,
+    predecessor_transition_hash: Option<Hash512>,
+    reservation_intent_object_hash: Option<Hash512>,
+    output_intent_object_hash: Option<Hash512>,
+    exact_output_hash: Option<Hash512>,
+    exact_output_byte_length: Option<u64>,
+}
+
+impl StateDurableBinding {
+    pub const fn vote_kind(self) -> StateWitnessVoteKind {
+        self.vote_kind
+    }
+
+    pub const fn capability_kind(self) -> StateCapabilityKind {
+        self.capability_kind
+    }
+
+    pub const fn suite_id(self) -> Hash512 {
+        self.suite_id
+    }
+
+    pub const fn ceremony_context_hash(self) -> Hash512 {
+        self.ceremony_context_hash
+    }
+
+    pub const fn action_context_hash(self) -> Hash512 {
+        self.action_context_hash
+    }
+
+    pub const fn subject_participant_id(self) -> ParticipantIdentity {
+        self.subject_participant_id
+    }
+
+    pub const fn state_key(self) -> Hash512 {
+        self.state_key
+    }
+
+    pub const fn intent_object_hash(self) -> Hash512 {
+        self.intent_object_hash
+    }
+
+    pub const fn subject_epoch(self) -> u64 {
+        self.subject_epoch
+    }
+
+    pub const fn predecessor_transition_hash(self) -> Option<Hash512> {
+        self.predecessor_transition_hash
+    }
+
+    pub const fn reservation_intent_object_hash(self) -> Option<Hash512> {
+        self.reservation_intent_object_hash
+    }
+
+    pub const fn output_intent_object_hash(self) -> Option<Hash512> {
+        self.output_intent_object_hash
+    }
+
+    pub const fn exact_output_hash(self) -> Option<Hash512> {
+        self.exact_output_hash
+    }
+
+    pub const fn exact_output_byte_length(self) -> Option<u64> {
+        self.exact_output_byte_length
+    }
+
+    pub fn witness_vote_sequence(self) -> StateResult<u64> {
+        derive_state_witness_vote_sequence(self.vote_kind, self.subject_epoch)
+    }
+
+    pub fn witness_lock(self) -> StateResult<StateWitnessLock> {
+        StateWitnessLock::new(
+            self.state_key,
+            self.reservation_intent_object_hash,
+            self.output_intent_object_hash,
+        )
+    }
+}
+
+pub struct VerifiedStateReservationIntent {
+    binding: StateReservationBinding,
+}
+
+impl VerifiedStateReservationIntent {
+    pub const fn durable_binding(&self) -> StateDurableBinding {
+        durable_reservation_binding(self.binding)
+    }
+}
+
 pub struct VerifiedStateReservation {
     binding: StateReservationBinding,
 }
@@ -856,126 +980,205 @@ impl VerifiedStateReservation {
     pub const fn authorization_hash(&self) -> Hash512 {
         self.binding.authorization_hash
     }
+
+    pub const fn durable_binding(&self) -> StateDurableBinding {
+        durable_reservation_binding(self.binding)
+    }
+}
+
+pub struct VerifiedStateOutputIntent {
+    binding: StateOutputBinding,
+}
+
+impl VerifiedStateOutputIntent {
+    pub const fn durable_binding(&self) -> StateDurableBinding {
+        durable_output_binding(self.binding)
+    }
 }
 
 pub struct VerifiedStateOutput {
-    reservation_binding: StateReservationBinding,
-    output_intent_object_hash: Hash512,
-    exact_output_hash: Hash512,
-    exact_output_byte_length: u64,
+    binding: StateOutputBinding,
 }
 
 impl VerifiedStateOutput {
     pub const fn reservation_intent_object_hash(&self) -> Hash512 {
-        self.reservation_binding.intent_object_hash
+        self.binding.reservation_binding.intent_object_hash
     }
 
     pub const fn output_intent_object_hash(&self) -> Hash512 {
-        self.output_intent_object_hash
+        self.binding.output_intent_object_hash
     }
 
     pub const fn subject_participant_id(&self) -> ParticipantIdentity {
-        self.reservation_binding.subject_participant_id
+        self.binding.reservation_binding.subject_participant_id
     }
 
     pub const fn capability_kind(&self) -> StateCapabilityKind {
-        self.reservation_binding.capability_kind
+        self.binding.reservation_binding.capability_kind
     }
 
     pub const fn suite_id(&self) -> Hash512 {
-        self.reservation_binding.suite_id
+        self.binding.reservation_binding.suite_id
     }
 
     pub const fn ceremony_context_hash(&self) -> Hash512 {
-        self.reservation_binding.ceremony_context_hash
+        self.binding.reservation_binding.ceremony_context_hash
     }
 
     pub const fn action_context_hash(&self) -> Hash512 {
-        self.reservation_binding.action_context_hash
+        self.binding.reservation_binding.action_context_hash
     }
 
     pub const fn state_key(&self) -> Hash512 {
-        self.reservation_binding.state_key
+        self.binding.reservation_binding.state_key
     }
 
     pub const fn recovery_epoch(&self) -> u64 {
-        self.reservation_binding.recovery_epoch
+        self.binding.reservation_binding.recovery_epoch
     }
 
     pub const fn predecessor_transition_hash(&self) -> Option<Hash512> {
-        self.reservation_binding.predecessor_transition_hash
+        self.binding.reservation_binding.predecessor_transition_hash
     }
 
     pub const fn authorization_hash(&self) -> Hash512 {
-        self.reservation_binding.authorization_hash
+        self.binding.reservation_binding.authorization_hash
     }
 
     pub const fn exact_output_hash(&self) -> Hash512 {
-        self.exact_output_hash
+        self.binding.exact_output_hash
     }
 
     pub const fn exact_output_byte_length(&self) -> u64 {
-        self.exact_output_byte_length
+        self.binding.exact_output_byte_length
+    }
+
+    pub const fn durable_binding(&self) -> StateDurableBinding {
+        durable_output_binding(self.binding)
+    }
+}
+
+pub struct VerifiedStateRecoveryIntent {
+    binding: StateRecoveryBinding,
+}
+
+impl VerifiedStateRecoveryIntent {
+    pub const fn durable_binding(&self) -> StateDurableBinding {
+        durable_recovery_binding(self.binding)
     }
 }
 
 pub struct VerifiedStateRecovery {
-    transition_object_hash: Hash512,
-    subject_participant_id: ParticipantIdentity,
-    capability_kind: StateCapabilityKind,
-    suite_id: Hash512,
-    ceremony_context_hash: Hash512,
-    action_context_hash: Hash512,
-    state_key: Hash512,
-    old_recovery_epoch: u64,
-    new_recovery_epoch: u64,
-    predecessor_transition_hash: Option<Hash512>,
-    preserved_latest_intent_object_hash: Option<Hash512>,
+    binding: StateRecoveryBinding,
 }
 
 impl VerifiedStateRecovery {
     pub const fn transition_object_hash(&self) -> Hash512 {
-        self.transition_object_hash
+        self.binding.transition_object_hash
     }
 
     pub const fn subject_participant_id(&self) -> ParticipantIdentity {
-        self.subject_participant_id
+        self.binding.subject_participant_id
     }
 
     pub const fn capability_kind(&self) -> StateCapabilityKind {
-        self.capability_kind
+        self.binding.capability_kind
     }
 
     pub const fn suite_id(&self) -> Hash512 {
-        self.suite_id
+        self.binding.suite_id
     }
 
     pub const fn ceremony_context_hash(&self) -> Hash512 {
-        self.ceremony_context_hash
+        self.binding.ceremony_context_hash
     }
 
     pub const fn action_context_hash(&self) -> Hash512 {
-        self.action_context_hash
+        self.binding.action_context_hash
     }
 
     pub const fn state_key(&self) -> Hash512 {
-        self.state_key
+        self.binding.state_key
     }
 
     pub const fn old_recovery_epoch(&self) -> u64 {
-        self.old_recovery_epoch
+        self.binding.old_recovery_epoch
     }
 
     pub const fn new_recovery_epoch(&self) -> u64 {
-        self.new_recovery_epoch
+        self.binding.new_recovery_epoch
     }
 
     pub const fn predecessor_transition_hash(&self) -> Option<Hash512> {
-        self.predecessor_transition_hash
+        self.binding.predecessor_transition_hash
     }
 
     pub const fn preserved_latest_intent_object_hash(&self) -> Option<Hash512> {
-        self.preserved_latest_intent_object_hash
+        match self.binding.preserved_output_intent_object_hash {
+            Some(output_intent_object_hash) => Some(output_intent_object_hash),
+            None => self.binding.preserved_reservation_intent_object_hash,
+        }
+    }
+
+    pub const fn durable_binding(&self) -> StateDurableBinding {
+        durable_recovery_binding(self.binding)
+    }
+}
+
+const fn durable_reservation_binding(binding: StateReservationBinding) -> StateDurableBinding {
+    StateDurableBinding {
+        vote_kind: StateWitnessVoteKind::Reservation,
+        capability_kind: binding.capability_kind,
+        suite_id: binding.suite_id,
+        ceremony_context_hash: binding.ceremony_context_hash,
+        action_context_hash: binding.action_context_hash,
+        subject_participant_id: binding.subject_participant_id,
+        state_key: binding.state_key,
+        intent_object_hash: binding.intent_object_hash,
+        subject_epoch: binding.recovery_epoch,
+        predecessor_transition_hash: binding.predecessor_transition_hash,
+        reservation_intent_object_hash: Some(binding.intent_object_hash),
+        output_intent_object_hash: None,
+        exact_output_hash: None,
+        exact_output_byte_length: None,
+    }
+}
+
+const fn durable_output_binding(binding: StateOutputBinding) -> StateDurableBinding {
+    StateDurableBinding {
+        vote_kind: StateWitnessVoteKind::Output,
+        capability_kind: binding.reservation_binding.capability_kind,
+        suite_id: binding.reservation_binding.suite_id,
+        ceremony_context_hash: binding.reservation_binding.ceremony_context_hash,
+        action_context_hash: binding.reservation_binding.action_context_hash,
+        subject_participant_id: binding.reservation_binding.subject_participant_id,
+        state_key: binding.reservation_binding.state_key,
+        intent_object_hash: binding.output_intent_object_hash,
+        subject_epoch: binding.reservation_binding.recovery_epoch,
+        predecessor_transition_hash: binding.reservation_binding.predecessor_transition_hash,
+        reservation_intent_object_hash: Some(binding.reservation_binding.intent_object_hash),
+        output_intent_object_hash: Some(binding.output_intent_object_hash),
+        exact_output_hash: Some(binding.exact_output_hash),
+        exact_output_byte_length: Some(binding.exact_output_byte_length),
+    }
+}
+
+const fn durable_recovery_binding(binding: StateRecoveryBinding) -> StateDurableBinding {
+    StateDurableBinding {
+        vote_kind: StateWitnessVoteKind::Recovery,
+        capability_kind: binding.capability_kind,
+        suite_id: binding.suite_id,
+        ceremony_context_hash: binding.ceremony_context_hash,
+        action_context_hash: binding.action_context_hash,
+        subject_participant_id: binding.subject_participant_id,
+        state_key: binding.state_key,
+        intent_object_hash: binding.transition_object_hash,
+        subject_epoch: binding.new_recovery_epoch,
+        predecessor_transition_hash: binding.predecessor_transition_hash,
+        reservation_intent_object_hash: binding.preserved_reservation_intent_object_hash,
+        output_intent_object_hash: binding.preserved_output_intent_object_hash,
+        exact_output_hash: None,
+        exact_output_byte_length: None,
     }
 }
 
@@ -1061,6 +1264,14 @@ pub struct StateReservationVerificationInput<'input, 'recovery> {
     pub canonical_state_certificate: &'input [u8],
 }
 
+pub struct StateReservationIntentVerificationInput<'input, 'recovery> {
+    pub subject_participant_id: ParticipantIdentity,
+    pub capability_kind: StateCapabilityKind,
+    pub verified_predecessor_recovery: Option<&'recovery VerifiedStateRecovery>,
+    pub expected_authorization_hash: Hash512,
+    pub canonical_reservation_intent_carrier: &'input [u8],
+}
+
 pub struct StateRecoveryVerificationInput<'input, 'state> {
     pub subject_participant_id: ParticipantIdentity,
     pub capability_kind: StateCapabilityKind,
@@ -1068,6 +1279,14 @@ pub struct StateRecoveryVerificationInput<'input, 'state> {
     pub preserved_state_intent: Option<PreservedStateIntent<'state>>,
     pub canonical_recovery_transition_carrier: &'input [u8],
     pub canonical_state_certificate: &'input [u8],
+}
+
+pub struct StateRecoveryIntentVerificationInput<'input, 'state> {
+    pub subject_participant_id: ParticipantIdentity,
+    pub capability_kind: StateCapabilityKind,
+    pub verified_predecessor_recovery: Option<&'state VerifiedStateRecovery>,
+    pub preserved_state_intent: Option<PreservedStateIntent<'state>>,
+    pub canonical_recovery_transition_carrier: &'input [u8],
 }
 
 pub struct StateVerifier {
@@ -1123,6 +1342,31 @@ impl StateVerifier {
         &self,
         input: StateReservationVerificationInput<'_, '_>,
     ) -> StateResult<VerifiedStateReservation> {
+        let verified_intent =
+            self.verify_reservation_intent_inner(StateReservationIntentVerificationInput {
+                subject_participant_id: input.subject_participant_id,
+                capability_kind: input.capability_kind,
+                verified_predecessor_recovery: input.verified_predecessor_recovery,
+                expected_authorization_hash: input.expected_authorization_hash,
+                canonical_reservation_intent_carrier: input.canonical_reservation_intent_carrier,
+            })?;
+        self.certify_reservation_inner(&verified_intent, input.canonical_state_certificate)
+    }
+
+    pub fn verify_reservation_intent(
+        &self,
+        input: StateReservationIntentVerificationInput<'_, '_>,
+    ) -> VerificationResult<VerifiedStateReservationIntent> {
+        match self.verify_reservation_intent_inner(input) {
+            Ok(value) => VerificationResult::valid(value),
+            Err(error) => VerificationResult::refused(error.refusal_reason),
+        }
+    }
+
+    fn verify_reservation_intent_inner(
+        &self,
+        input: StateReservationIntentVerificationInput<'_, '_>,
+    ) -> StateResult<VerifiedStateReservationIntent> {
         let (recovery_epoch, predecessor_transition_hash) = self.resolve_recovery_predecessor(
             input.subject_participant_id,
             input.capability_kind,
@@ -1172,16 +1416,7 @@ impl StateVerifier {
             .envelope
             .object_hash()
             .map_err(StateError::from_schema)?;
-        self.verify_certificate(
-            input.canonical_state_certificate,
-            &ResolvedStateIntent {
-                intent_object_hash,
-                subject_participant_id: input.subject_participant_id,
-                subject_epoch: recovery_epoch,
-                vote_kind: StateWitnessVoteKind::Reservation,
-            },
-        )?;
-        Ok(VerifiedStateReservation {
+        Ok(VerifiedStateReservationIntent {
             binding: StateReservationBinding {
                 intent_object_hash,
                 subject_participant_id: input.subject_participant_id,
@@ -1195,6 +1430,36 @@ impl StateVerifier {
                 authorization_hash: payload.authorization_hash,
             },
         })
+    }
+
+    pub fn certify_reservation_intent(
+        &self,
+        verified_intent: &VerifiedStateReservationIntent,
+        canonical_state_certificate: &[u8],
+    ) -> VerificationResult<VerifiedStateReservation> {
+        match self.certify_reservation_inner(verified_intent, canonical_state_certificate) {
+            Ok(value) => VerificationResult::valid(value),
+            Err(error) => VerificationResult::refused(error.refusal_reason),
+        }
+    }
+
+    fn certify_reservation_inner(
+        &self,
+        verified_intent: &VerifiedStateReservationIntent,
+        canonical_state_certificate: &[u8],
+    ) -> StateResult<VerifiedStateReservation> {
+        let binding = verified_intent.binding;
+        self.require_reservation_binding_context(binding)?;
+        self.verify_certificate(
+            canonical_state_certificate,
+            &ResolvedStateIntent {
+                intent_object_hash: binding.intent_object_hash,
+                subject_participant_id: binding.subject_participant_id,
+                subject_epoch: binding.recovery_epoch,
+                vote_kind: StateWitnessVoteKind::Reservation,
+            },
+        )?;
+        Ok(VerifiedStateReservation { binding })
     }
 
     pub(crate) fn verify_output_from_verified_stream(
@@ -1218,10 +1483,44 @@ impl StateVerifier {
         let Some(exact_output_hash) = verified_stream.state_exact_output_hash() else {
             return VerificationResult::refused(RefusalReason::WrongTypeOrLength);
         };
-        match self.verify_output_binding(
+        let verified_intent = match self.verify_output_intent_binding(
             verified_reservation,
             canonical_output_intent_carrier,
-            canonical_state_certificate,
+            exact_output_hash,
+            verified_stream.total_byte_length(),
+        ) {
+            Ok(value) => value,
+            Err(error) => return VerificationResult::refused(error.refusal_reason),
+        };
+        match self.certify_output_inner(&verified_intent, canonical_state_certificate) {
+            Ok(value) => VerificationResult::valid(value),
+            Err(error) => VerificationResult::refused(error.refusal_reason),
+        }
+    }
+
+    pub(crate) fn verify_output_intent_from_verified_stream(
+        &self,
+        verified_reservation: &VerifiedStateReservation,
+        canonical_output_intent_carrier: &[u8],
+        verified_stream: VerifiedCanonicalStreamSummary,
+    ) -> VerificationResult<VerifiedStateOutputIntent> {
+        let binding = verified_reservation.binding;
+        if !binding.capability_kind.supports_exact_output() {
+            return VerificationResult::refused(RefusalReason::WrongTypeOrLength);
+        }
+        if verified_stream
+            .stream_domain()
+            .state_exact_output_capability_kind()
+            != Some(binding.capability_kind)
+        {
+            return VerificationResult::refused(RefusalReason::WrongContext);
+        }
+        let Some(exact_output_hash) = verified_stream.state_exact_output_hash() else {
+            return VerificationResult::refused(RefusalReason::WrongTypeOrLength);
+        };
+        match self.verify_output_intent_binding(
+            verified_reservation,
+            canonical_output_intent_carrier,
             exact_output_hash,
             verified_stream.total_byte_length(),
         ) {
@@ -1230,14 +1529,13 @@ impl StateVerifier {
         }
     }
 
-    fn verify_output_binding(
+    fn verify_output_intent_binding(
         &self,
         verified_reservation: &VerifiedStateReservation,
         canonical_output_intent_carrier: &[u8],
-        canonical_state_certificate: &[u8],
         exact_output_hash: Hash512,
         exact_output_byte_length: u64,
-    ) -> StateResult<VerifiedStateOutput> {
+    ) -> StateResult<VerifiedStateOutputIntent> {
         self.require_reservation_context(verified_reservation)?;
         let binding = verified_reservation.binding;
         let carrier = self.decode_and_verify_subject_carrier(
@@ -1268,21 +1566,44 @@ impl StateVerifier {
             .envelope
             .object_hash()
             .map_err(StateError::from_schema)?;
+        Ok(VerifiedStateOutputIntent {
+            binding: StateOutputBinding {
+                reservation_binding: binding,
+                output_intent_object_hash,
+                exact_output_hash,
+                exact_output_byte_length,
+            },
+        })
+    }
+
+    pub fn certify_output_intent(
+        &self,
+        verified_intent: &VerifiedStateOutputIntent,
+        canonical_state_certificate: &[u8],
+    ) -> VerificationResult<VerifiedStateOutput> {
+        match self.certify_output_inner(verified_intent, canonical_state_certificate) {
+            Ok(value) => VerificationResult::valid(value),
+            Err(error) => VerificationResult::refused(error.refusal_reason),
+        }
+    }
+
+    fn certify_output_inner(
+        &self,
+        verified_intent: &VerifiedStateOutputIntent,
+        canonical_state_certificate: &[u8],
+    ) -> StateResult<VerifiedStateOutput> {
+        let binding = verified_intent.binding;
+        self.require_reservation_binding_context(binding.reservation_binding)?;
         self.verify_certificate(
             canonical_state_certificate,
             &ResolvedStateIntent {
-                intent_object_hash: output_intent_object_hash,
-                subject_participant_id: binding.subject_participant_id,
-                subject_epoch: binding.recovery_epoch,
+                intent_object_hash: binding.output_intent_object_hash,
+                subject_participant_id: binding.reservation_binding.subject_participant_id,
+                subject_epoch: binding.reservation_binding.recovery_epoch,
                 vote_kind: StateWitnessVoteKind::Output,
             },
         )?;
-        Ok(VerifiedStateOutput {
-            reservation_binding: binding,
-            output_intent_object_hash,
-            exact_output_hash,
-            exact_output_byte_length,
-        })
+        Ok(VerifiedStateOutput { binding })
     }
 
     pub fn verify_recovery(
@@ -1299,6 +1620,31 @@ impl StateVerifier {
         &self,
         input: StateRecoveryVerificationInput<'_, '_>,
     ) -> StateResult<VerifiedStateRecovery> {
+        let verified_intent =
+            self.verify_recovery_intent_inner(StateRecoveryIntentVerificationInput {
+                subject_participant_id: input.subject_participant_id,
+                capability_kind: input.capability_kind,
+                verified_predecessor_recovery: input.verified_predecessor_recovery,
+                preserved_state_intent: input.preserved_state_intent,
+                canonical_recovery_transition_carrier: input.canonical_recovery_transition_carrier,
+            })?;
+        self.certify_recovery_inner(&verified_intent, input.canonical_state_certificate)
+    }
+
+    pub fn verify_recovery_intent(
+        &self,
+        input: StateRecoveryIntentVerificationInput<'_, '_>,
+    ) -> VerificationResult<VerifiedStateRecoveryIntent> {
+        match self.verify_recovery_intent_inner(input) {
+            Ok(value) => VerificationResult::valid(value),
+            Err(error) => VerificationResult::refused(error.refusal_reason),
+        }
+    }
+
+    fn verify_recovery_intent_inner(
+        &self,
+        input: StateRecoveryIntentVerificationInput<'_, '_>,
+    ) -> StateResult<VerifiedStateRecoveryIntent> {
         let (old_recovery_epoch, predecessor_transition_hash) = self.resolve_recovery_predecessor(
             input.subject_participant_id,
             input.capability_kind,
@@ -1376,41 +1722,93 @@ impl StateVerifier {
             .envelope
             .object_hash()
             .map_err(StateError::from_schema)?;
-        self.verify_certificate(
-            input.canonical_state_certificate,
-            &ResolvedStateIntent {
-                intent_object_hash: transition_object_hash,
+        let preserved_reservation_intent_object_hash = input
+            .preserved_state_intent
+            .as_ref()
+            .map(PreservedStateIntent::reservation_intent_object_hash);
+        let preserved_output_intent_object_hash = input
+            .preserved_state_intent
+            .as_ref()
+            .and_then(PreservedStateIntent::output_intent_object_hash);
+        Ok(VerifiedStateRecoveryIntent {
+            binding: StateRecoveryBinding {
+                transition_object_hash,
                 subject_participant_id: input.subject_participant_id,
-                subject_epoch: new_recovery_epoch,
+                capability_kind: input.capability_kind,
+                suite_id: self.suite_id,
+                ceremony_context_hash: self.ceremony_context_hash,
+                action_context_hash: self.action_context_hash,
+                state_key,
+                old_recovery_epoch,
+                new_recovery_epoch,
+                predecessor_transition_hash,
+                preserved_reservation_intent_object_hash,
+                preserved_output_intent_object_hash,
+            },
+        })
+    }
+
+    pub fn certify_recovery_intent(
+        &self,
+        verified_intent: &VerifiedStateRecoveryIntent,
+        canonical_state_certificate: &[u8],
+    ) -> VerificationResult<VerifiedStateRecovery> {
+        match self.certify_recovery_inner(verified_intent, canonical_state_certificate) {
+            Ok(value) => VerificationResult::valid(value),
+            Err(error) => VerificationResult::refused(error.refusal_reason),
+        }
+    }
+
+    fn certify_recovery_inner(
+        &self,
+        verified_intent: &VerifiedStateRecoveryIntent,
+        canonical_state_certificate: &[u8],
+    ) -> StateResult<VerifiedStateRecovery> {
+        let binding = verified_intent.binding;
+        self.require_recovery_binding_context(binding)?;
+        self.verify_certificate(
+            canonical_state_certificate,
+            &ResolvedStateIntent {
+                intent_object_hash: binding.transition_object_hash,
+                subject_participant_id: binding.subject_participant_id,
+                subject_epoch: binding.new_recovery_epoch,
                 vote_kind: StateWitnessVoteKind::Recovery,
             },
         )?;
-        Ok(VerifiedStateRecovery {
-            transition_object_hash,
-            subject_participant_id: input.subject_participant_id,
-            capability_kind: input.capability_kind,
-            suite_id: self.suite_id,
-            ceremony_context_hash: self.ceremony_context_hash,
-            action_context_hash: self.action_context_hash,
-            state_key,
-            old_recovery_epoch,
-            new_recovery_epoch,
-            predecessor_transition_hash,
-            preserved_latest_intent_object_hash: payload.preserved_latest_intent_object_hash,
-        })
+        Ok(VerifiedStateRecovery { binding })
     }
 
     fn require_reservation_context(
         &self,
         reservation: &VerifiedStateReservation,
     ) -> StateResult<()> {
-        if reservation.suite_id() != self.suite_id
-            || reservation.ceremony_context_hash() != self.ceremony_context_hash
-            || reservation.action_context_hash() != self.action_context_hash
+        self.require_reservation_binding_context(reservation.binding)
+    }
+
+    fn require_reservation_binding_context(
+        &self,
+        binding: StateReservationBinding,
+    ) -> StateResult<()> {
+        if binding.suite_id != self.suite_id
+            || binding.ceremony_context_hash != self.ceremony_context_hash
+            || binding.action_context_hash != self.action_context_hash
         {
             return Err(StateError::new(
                 RefusalReason::WrongContext,
                 "verified reservation belongs to another state verifier context",
+            ));
+        }
+        Ok(())
+    }
+
+    fn require_recovery_binding_context(&self, binding: StateRecoveryBinding) -> StateResult<()> {
+        if binding.suite_id != self.suite_id
+            || binding.ceremony_context_hash != self.ceremony_context_hash
+            || binding.action_context_hash != self.action_context_hash
+        {
+            return Err(StateError::new(
+                RefusalReason::WrongContext,
+                "verified recovery intent belongs to another state verifier context",
             ));
         }
         Ok(())

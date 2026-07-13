@@ -23,7 +23,6 @@ pub(in super::super) fn trustee_evaluation_key_proof_material_root_from_fixture_
 ) -> String {
     derive_canonical_object_hash(&serde_json::json!({
         "objectType": "TrusteeEvaluationKeyProofMaterialReference",
-        "proofFamily": TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
         "trusteeIdentity": proof_record["trusteeIdentity"],
         "trusteeRosterPosition": proof_record["trusteeRosterPosition"],
         "statementHash": proof_record["statementHash"],
@@ -48,7 +47,6 @@ pub(in super::super) fn trustee_evaluation_key_proofs_object(
     round_one_aggregate_diagonals_by_level: &BTreeMap<u64, Vec<Vec<u64>>>,
 ) -> TrusteeEvaluationKeyProofFixture {
     let setup_context = &package["setupContext"];
-    let schedule = &package["evaluatorKeySchedule"];
     let participant_count = participant_count_from_package(package);
     let trustee_roster_positions = (0..participant_count).collect::<Vec<_>>();
     // The bridge material the verifier reconstructs from the package records
@@ -95,14 +93,6 @@ pub(in super::super) fn trustee_evaluation_key_proofs_object(
         }))
         .expect("trustee proof randomness seed");
         let statement_hash_hex = to_hex(&statement.statement_hash());
-        let source_constant_coefficient_commitment_root = statement
-            .context
-            .binding_roots
-            .iter()
-            .find_map(|(field_name, root)| {
-                (field_name == "sourceConstantCoefficientCommitmentRoot").then_some(root.as_str())
-            })
-            .expect("source constant coefficient commitment root");
         // The checkpoint key carries the schedule container tag plus a
         // prover-revision suffix so stale bytes (same statement hash) never
         // collide across format or prover changes. Bump the revision when
@@ -135,7 +125,6 @@ pub(in super::super) fn trustee_evaluation_key_proofs_object(
             "setupEpoch": setup_context["setupEpoch"],
             "trusteeIdentity": trustee_identity.as_str(),
             "trusteeRosterPosition": trustee_roster_position,
-            "sourceConstantCoefficientCommitmentRoot": source_constant_coefficient_commitment_root,
             "statementHash": statement_hash_hex,
             "proofBytesHash": proof_bytes_hash,
         });
@@ -148,12 +137,8 @@ pub(in super::super) fn trustee_evaluation_key_proofs_object(
         )
         .expect("authenticate trustee evaluation-key proof material stream");
         record["proofMaterialRoot"] = serde_json::json!(&proof_material_root);
-        record["trusteeEvaluationKeyProofRoot"] = serde_json::json!(
-            derive_canonical_object_hash(&record).expect("trustee evaluation-key proof root")
-        );
         let transported_proof_material = serde_json::json!({
             "objectType": "SetupTransportedEvaluationKeyShareProofMaterial",
-            "proofFamily": TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
             "proofMaterialRoot": proof_material_root,
         });
         final_package_phase(&format!(
@@ -179,56 +164,15 @@ pub(in super::super) fn trustee_evaluation_key_proofs_object(
         transported_proof_materials.push(transported_proof_material);
     }
 
-    let mut galois_batches = package["galoisKeyShareBatches"]
-        .as_array()
-        .expect("Galois key share batches")
-        .iter()
-        .collect::<Vec<_>>();
-    galois_batches.sort_by_key(|batch| {
-        batch["trusteeRosterPosition"]
-            .as_u64()
-            .expect("trustee roster position")
-    });
-    let galois_key_share_batch_roots = galois_batches
-        .iter()
-        .map(|batch| {
-            serde_json::json!({
-                "trusteeIdentity": batch["trusteeIdentity"],
-                "trusteeRosterPosition": batch["trusteeRosterPosition"],
-                "galoisKeyShareBatchRoot": batch["galoisKeyShareBatchRoot"],
-            })
-        })
-        .collect::<Vec<_>>();
-    let mut proof_set = serde_json::json!({
+    let proof_set = serde_json::json!({
         "objectType": "TrusteeEvaluationKeyProofSet",
-        "ceremonyId": setup_context["ceremonyId"],
-        "manifestHash": setup_context["manifestHash"],
-        "rosterHash": setup_context["rosterHash"],
-        "setupParametersHash": setup_context["setupParametersHash"],
-        "setupEpoch": setup_context["setupEpoch"],
-        "participantCount": participant_count,
-        "rnsLimbCount": DATA_PRIMES.len(),
-        "evaluatorKeyScheduleRoot": schedule["evaluatorKeyScheduleRoot"],
-        "requiredGaloisSetHash": schedule["requiredGaloisSetHash"],
-        "publicKeyShareSetRoot": package["publicKeyShares"]["publicKeyShareSetRoot"],
-        "publicKeyShareSuccinctProofSetRoot": package["publicKeyShareSuccinctProofs"]["publicKeyShareSuccinctProofSetRoot"],
-        "relinearizationCrpRoot": package["commonRandomness"]["publicDerivations"]["crpRoots"]["relinearizationCrpRoot"],
-        "galoisKeyCrpRoot": package["commonRandomness"]["publicDerivations"]["crpRoots"]["galoisKeyCrpRoot"],
-        "publicMatrixSeedHash": package["commonRandomness"]["publicMatrixSeedHash"],
-        "vssCoefficientCommitmentRoot": package["vssCoefficientCommitments"]["vssCoefficientCommitmentRoot"],
-        "relinearizationKeyShareRoundsRoot": package["relinearizationKeyShareRounds"]["relinearizationKeyShareRoundsRoot"],
-        "galoisKeyShareBatchRoots": galois_key_share_batch_roots,
         "proofRecords": proof_records,
     });
-    proof_set["trusteeEvaluationKeyProofSetRoot"] = serde_json::json!(
-        derive_canonical_object_hash(&proof_set).expect("trustee evaluation-key proof set root")
-    );
 
     TrusteeEvaluationKeyProofFixture {
         proof_set,
         transported_proof_material: serde_json::json!({
             "objectType": "SetupTransportedEvaluationKeyShareProofMaterialSet",
-            "proofFamily": TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
             "proofMaterials": transported_proof_materials,
         }),
     }

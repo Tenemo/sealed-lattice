@@ -69,7 +69,6 @@ pub(super) fn limb_verification_value(verification: LimbVerification) -> Value {
         "coefficientCommitmentRoots": verification.coefficient_commitment_roots,
         "shareValuesHash": verification.share_values_hash,
         "privateVssShareProofHash": verification.private_vss_share_proof_hash,
-        "proofStatementRoot": verification.proof_statement_root,
         "limbVerificationRoot": verification.limb_verification_root,
     })
 }

@@ -20,26 +20,6 @@ pub(in super::super) fn target_decryption_smudging_seed_hex(
     )
 }
 
-#[cfg(test)]
-pub(in super::super) fn target_decryption_smudging_witness_value(
-    setup_binding: &SetupBinding,
-    target_accepted: &TargetAcceptedBinding,
-    target_share_profile: &TargetShareProfile,
-    participant: &ParticipantBinding,
-) -> CanonicalResult<Value> {
-    Ok(json!({
-        "objectType": "LocalTrusteeTargetDecryptionSmudgingWitness",
-        "setupPackageHash": setup_binding.setup_package_hash,
-        "targetAcceptedRecordHash": target_accepted.target_accepted_record_hash,
-        "targetContextHash": target_accepted.target_context_hash,
-        "targetCiphertextHash": target_accepted.target_ciphertext_hash,
-        "targetShareProfileHash": target_share_profile.hash,
-        "targetBasisHash": target_accepted.target_basis_hash,
-        "trusteeIdentity": participant.trustee_identity,
-        "rosterPosition": participant.roster_position,
-    }))
-}
-
 pub(in super::super) fn apply_plaintext_multiple_zero_share_smudging(
     target_share_profile: &TargetShareProfile,
     participant: &ParticipantBinding,

@@ -13,79 +13,13 @@ pub(super) struct PrivateVssEnvelopeBinding {
 
 pub(super) type PrivateVssEnvelopeBindingMap = BTreeMap<(u64, u64), PrivateVssEnvelopeBinding>;
 
-struct MailboxPublicKeyBinding {
-    public_key_hash: String,
-}
-
-fn setup_intent_mailbox_public_key_bindings_from_phase_transcript(
-    setup_package: &Value,
-) -> CanonicalResult<BTreeMap<u64, MailboxPublicKeyBinding>> {
-    let phase_transcript = setup_package
-        .get("phaseTranscript")
-        .and_then(Value::as_array)
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "phaseTranscript was required before mailbox key binding verification",
-            )
-        })?;
-    let setup_intent_phase = phase_transcript
-        .iter()
-        .find(|phase| phase.get("phaseId").and_then(Value::as_str) == Some("setupIntent"))
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "setupIntent phase was required before mailbox key binding verification",
-            )
-        })?;
-    let participants = setup_intent_phase
-        .get("participantPhaseObjects")
-        .and_then(Value::as_array)
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "setupIntent participant objects were required before mailbox key binding verification",
-            )
-        })?;
-    let mut mailbox_public_key_bindings = BTreeMap::new();
-    for participant in participants {
-        let roster_position = participant
-            .get("rosterPosition")
-            .and_then(Value::as_u64)
-            .ok_or_else(|| {
-                CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
-                    "setupIntent participant object must bind rosterPosition",
-                )
-            })?;
-        let public_key_hash = participant
-            .get("privateVssMailboxPublicKeyHash")
-            .and_then(Value::as_str)
-            .ok_or_else(|| {
-                CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
-                    "setupIntent participant object must bind privateVssMailboxPublicKeyHash",
-                )
-            })?;
-        mailbox_public_key_bindings.insert(
-            roster_position,
-            MailboxPublicKeyBinding {
-                public_key_hash: public_key_hash.to_string(),
-            },
-        );
-    }
-
-    Ok(mailbox_public_key_bindings)
-}
-
 pub(super) fn verify_private_vss_envelope_commitments(
     setup_package: &Value,
+    trustee_registrations: &setup_intent::SetupIntentTrusteeRegistrationMap,
 ) -> CanonicalResult<Option<Value>> {
     let Some(commitment_set) = setup_package.get("privateVssEnvelopeCommitments") else {
         return Ok(Some(verification_response(
-            Some("privateVssEnvelopeDelivery"),
             vec!["privateVssEnvelopeCommitments".to_string()],
-            Vec::new(),
             Vec::new(),
         )?));
     };
@@ -120,9 +54,7 @@ pub(super) fn verify_private_vss_envelope_commitments(
         return Ok(Some(private_vss_envelope_refusal(
             refusal.reason_code,
             refusal.message,
-            refusal
-                .object_path
-                .unwrap_or_else(|| "setupPackage.privateVssEnvelopeCommitments".to_string()),
+            refusal.object_path,
         )?));
     }
 
@@ -131,9 +63,7 @@ pub(super) fn verify_private_vss_envelope_commitments(
         .and_then(Value::as_str)
     else {
         return Ok(Some(verification_response(
-            Some("privateVssEnvelopeDelivery"),
             vec!["privateVssEnvelopeCommitments.privateVssEnvelopeCommitmentRoot".to_string()],
-            Vec::new(),
             Vec::new(),
         )?));
     };
@@ -142,18 +72,7 @@ pub(super) fn verify_private_vss_envelope_commitments(
         "privateVssEnvelopeCommitments.privateVssEnvelopeCommitmentRoot",
     )?;
 
-    let roster = super::accepted_roster_from_package(setup_package);
-    if commitment_set
-        .get("participantCount")
-        .and_then(Value::as_u64)
-        != Some(roster.participant_count)
-    {
-        return Ok(Some(private_vss_envelope_refusal(
-            "privateVssEnvelopeParticipantCountMismatch",
-            "privateVssEnvelopeCommitments.participantCount must match the accepted setup parameters",
-            "setupPackage.privateVssEnvelopeCommitments.participantCount",
-        )?));
-    }
+    let roster = super::accepted_roster_from_package(setup_package)?;
     let expected_envelope_count = roster.participant_count * roster.participant_count;
     let public_matrix_seed_hash = setup_package
         .get("commonRandomness")
@@ -195,16 +114,14 @@ pub(super) fn verify_private_vss_envelope_commitments(
         )?));
     }
 
-    let expected_trustees = expected_trustees_from_phase_transcript(setup_package)?;
-    let setup_intent_mailbox_public_key_bindings =
-        setup_intent_mailbox_public_key_bindings_from_phase_transcript(setup_package)?;
+    let expected_trustees = expected_trustees_from_setup_intent(trustee_registrations);
     let source_trustee_commitment_roots =
         source_trustee_commitment_roots_from_vss_commitments(setup_package)?;
     match private_vss_envelope_bindings_from_set(
         commitment_set,
         setup_context,
         &expected_trustees,
-        &setup_intent_mailbox_public_key_bindings,
+        trustee_registrations,
         &source_trustee_commitment_roots,
         public_matrix_seed_hash,
         vss_coefficient_commitment_root,
@@ -222,9 +139,7 @@ pub(super) fn verify_private_vss_envelope_commitments(
             return Ok(Some(private_vss_envelope_refusal(
                 refusal.reason_code,
                 refusal.message,
-                refusal
-                    .object_path
-                    .unwrap_or_else(|| "setupPackage.privateVssEnvelopeCommitments".to_string()),
+                refusal.object_path,
             )?));
         }
     }
@@ -285,6 +200,7 @@ fn verify_private_vss_envelope_context(
 
 pub(super) fn private_vss_envelope_bindings_from_package(
     setup_package: &Value,
+    trustee_registrations: &setup_intent::SetupIntentTrusteeRegistrationMap,
 ) -> CanonicalResult<PrivateVssEnvelopeBindingMap> {
     let commitment_set = setup_package
         .get("privateVssEnvelopeCommitments")
@@ -300,9 +216,7 @@ pub(super) fn private_vss_envelope_bindings_from_package(
             "setupContext was required before private VSS binding extraction",
         )
     })?;
-    let expected_trustees = expected_trustees_from_phase_transcript(setup_package)?;
-    let setup_intent_mailbox_public_key_bindings =
-        setup_intent_mailbox_public_key_bindings_from_phase_transcript(setup_package)?;
+    let expected_trustees = expected_trustees_from_setup_intent(trustee_registrations);
     let source_trustee_commitment_roots =
         source_trustee_commitment_roots_from_vss_commitments(setup_package)?;
     let public_matrix_seed_hash = setup_package
@@ -327,7 +241,7 @@ pub(super) fn private_vss_envelope_bindings_from_package(
         commitment_set,
         setup_context,
         &expected_trustees,
-        &setup_intent_mailbox_public_key_bindings,
+        trustee_registrations,
         &source_trustee_commitment_roots,
         public_matrix_seed_hash,
         vss_coefficient_commitment_root,
@@ -344,7 +258,7 @@ fn private_vss_envelope_bindings_from_set(
     commitment_set: &Value,
     setup_context: &Value,
     expected_trustees: &BTreeMap<u64, String>,
-    setup_intent_mailbox_public_key_bindings: &BTreeMap<u64, MailboxPublicKeyBinding>,
+    trustee_registrations: &setup_intent::SetupIntentTrusteeRegistrationMap,
     source_trustee_commitment_roots: &BTreeMap<u64, String>,
     public_matrix_seed_hash: &str,
     vss_coefficient_commitment_root: &str,
@@ -359,7 +273,7 @@ fn private_vss_envelope_bindings_from_set(
             "setupPackage.privateVssEnvelopeCommitments.envelopeReferences",
         )));
     };
-    let roster = super::accepted_roster_from_setup_context(setup_context);
+    let roster = super::accepted_roster_from_setup_context(setup_context)?;
     let expected_envelope_count = (roster.participant_count * roster.participant_count) as usize;
     if envelope_references.len() != expected_envelope_count {
         return Ok(Err(Refusal::new(
@@ -375,7 +289,7 @@ fn private_vss_envelope_bindings_from_set(
             envelope_reference,
             setup_context,
             expected_trustees,
-            setup_intent_mailbox_public_key_bindings,
+            trustee_registrations,
             source_trustee_commitment_roots,
             public_matrix_seed_hash,
             vss_coefficient_commitment_root,
@@ -408,7 +322,7 @@ fn private_vss_envelope_binding_from_reference(
     envelope_reference: &Value,
     setup_context: &Value,
     expected_trustees: &BTreeMap<u64, String>,
-    setup_intent_mailbox_public_key_bindings: &BTreeMap<u64, MailboxPublicKeyBinding>,
+    trustee_registrations: &setup_intent::SetupIntentTrusteeRegistrationMap,
     source_trustee_commitment_roots: &BTreeMap<u64, String>,
     public_matrix_seed_hash: &str,
     vss_coefficient_commitment_root: &str,
@@ -455,7 +369,7 @@ fn private_vss_envelope_binding_from_reference(
     {
         return Ok(Err(Refusal::new(
             "privateVssEnvelopeSourceTrusteeMismatch",
-            "private VSS envelope commitment source trustee must match the phase transcript trustee identity",
+            "private VSS envelope commitment source trustee must match the setup-intent trustee identity",
             "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.sourceTrusteeIdentity",
         )));
     }
@@ -493,25 +407,21 @@ fn private_vss_envelope_binding_from_reference(
     {
         return Ok(Err(Refusal::new(
             "privateVssEnvelopeRecipientMismatch",
-            "private VSS envelope commitment recipient must match the phase transcript trustee identity",
+            "private VSS envelope commitment recipient must match the setup-intent trustee identity",
             "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.recipientIdentity",
         )));
     }
-    let Some(expected_recipient_mailbox_public_key_binding) =
-        setup_intent_mailbox_public_key_bindings.get(&recipient_roster_position)
+    let Some(expected_recipient_registration) =
+        trustee_registrations.get(&recipient_roster_position)
     else {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             "setupIntent mailbox public key binding missing for private VSS envelope recipient",
         ));
     };
-    let expected_recipient_mailbox_public_key_hash = expected_recipient_mailbox_public_key_binding
-        .public_key_hash
+    let expected_recipient_mailbox_public_key_hash = expected_recipient_registration
+        .private_vss_mailbox_public_key_hash
         .as_str();
-    let roster = super::accepted_roster_from_setup_context(setup_context);
-    let expected_sequence_number =
-        source_trustee_roster_position * roster.participant_count + recipient_roster_position;
-
     let expected_source_trustee_commitment_root = match source_trustee_commitment_roots
         .get(&source_trustee_roster_position)
         .map(String::as_str)
@@ -553,7 +463,6 @@ fn private_vss_envelope_binding_from_reference(
         recipient_identity,
         recipient_roster_position,
         expected_source_trustee_commitment_root,
-        expected_sequence_number,
     )?;
     if let Some(encrypted_envelope) = envelope_reference.get("encryptedEnvelope")
         && let Err(refusal) = verify_encrypted_private_vss_envelope(
@@ -711,17 +620,14 @@ fn private_vss_envelope_aad_value(
     recipient_identity: &str,
     recipient_roster_position: u64,
     source_trustee_commitment_root: &str,
-    envelope_sequence_number: u64,
 ) -> CanonicalResult<Value> {
     Ok(json!({
         "objectType": PRIVATE_VSS_ENVELOPE_AAD_OBJECT_TYPE,
-        "privateEnvelopeObjectType": "PrivateVssShareEnvelope",
         "ceremonyId": setup_context_string(setup_context, "ceremonyId")?,
         "manifestHash": setup_context_string(setup_context, "manifestHash")?,
         "rosterHash": setup_context_string(setup_context, "rosterHash")?,
         "setupParametersHash": setup_context_string(setup_context, "setupParametersHash")?,
         "setupEpoch": setup_context_string(setup_context, "setupEpoch")?,
-        "phaseOrderHash": phase_order_hash()?,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "vssCoefficientCommitmentRoot": vss_coefficient_commitment_root,
         "sourceTrusteeIdentity": source_trustee_identity,
@@ -729,7 +635,6 @@ fn private_vss_envelope_aad_value(
         "recipientIdentity": recipient_identity,
         "recipientRosterPosition": recipient_roster_position,
         "sourceTrusteeCommitmentRoot": source_trustee_commitment_root,
-        "envelopeSequenceNumber": envelope_sequence_number,
     }))
 }
 
@@ -739,9 +644,7 @@ fn private_vss_envelope_refusal(
     object_path: impl Into<String>,
 ) -> CanonicalResult<Value> {
     verification_response(
-        Some("privateVssEnvelopeDelivery"),
         Vec::new(),
         vec![Refusal::new(reason_code, message, object_path)],
-        Vec::new(),
     )
 }

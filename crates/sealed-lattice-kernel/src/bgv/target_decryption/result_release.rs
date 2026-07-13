@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::bgv::encoding::decode_plaintext_coefficients_to_logical_slots;
+
 use std::{
     collections::{BTreeMap, BTreeSet},
     sync::{Mutex, OnceLock},
@@ -494,7 +496,7 @@ pub(super) fn release_target_role_slots(
     }
 
     let coefficients = decryption_accumulator_to_coefficients(ciphertext, &accumulator)?;
-    forward_negacyclic_ntt(&coefficients, PLAINTEXT_MODULUS)
+    decode_plaintext_coefficients_to_logical_slots(&coefficients)
 }
 
 fn lagrange_weights_at_zero(
@@ -545,7 +547,7 @@ pub(super) fn packed_target_option_values(
     (0..MAXIMUM_OPTION_COUNT)
         .map(|option_index| {
             slots
-                .get(packed_score_slot(option_index))
+                .get(option_index)
                 .copied()
                 .ok_or_else(|| {
                     CanonicalError::new(

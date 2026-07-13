@@ -100,7 +100,6 @@ pub(crate) fn compute_vss_committed_material_commitment(
         })
         .collect::<Vec<_>>();
 
-    let trace_size = input.ring_degree / super::super::trustee_evaluation_key_proof::TRACE_SPLIT;
     let commitment = json!({
         "objectType": "VssCommittedMaterialCommitment",
         "commitmentRole": input.commitment_role,
@@ -108,8 +107,6 @@ pub(crate) fn compute_vss_committed_material_commitment(
         "rnsLimbIndex": input.rns_limb_index,
         "rnsPrime": input.rns_prime,
         "ringDegree": input.ring_degree,
-        "materialColumnMaskDegree":
-            super::super::trustee_evaluation_key_proof::vss_committed_material_column_mask_degree(trace_size),
         "commitmentFields": commitment_fields,
     });
     let commitment_root = derive_canonical_object_hash(&commitment)?;

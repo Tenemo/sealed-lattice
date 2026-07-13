@@ -141,7 +141,7 @@ const runWorker = (input: {
             cancelAfterFirstChunk: input.cancelAfterFirstChunk ?? false,
             command: 'start',
             requestIdentifier,
-            streamDomain: canonicalStreamDomains.ballotValidityProof,
+            streamDomain: canonicalStreamDomains.publicKeyShareProof,
             totalByteLength: input.totalByteLength,
         });
     }).finally(() => {

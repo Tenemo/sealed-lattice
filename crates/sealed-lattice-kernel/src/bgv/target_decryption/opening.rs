@@ -218,7 +218,6 @@ fn aggregate_commitment_context(
         "setupEpoch": setup_epoch,
         "recipientIdentity": participant.trustee_identity.as_str(),
         "recipientRosterPosition": participant.roster_position,
-        "recipientTrusteePoint": participant.interpolation_point()?,
         "rnsLimbIndex": rns_limb_index,
         "rnsPrime": rns_prime,
     }))

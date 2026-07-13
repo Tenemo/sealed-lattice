@@ -33,9 +33,7 @@ pub(super) fn verify_collective_public_key_material(
 ) -> CanonicalResult<Option<Value>> {
     let Some(aggregate_object) = setup_package.get("collectivePublicKey") else {
         return Ok(Some(verification_response(
-            Some("setupPackageAssembly"),
             vec!["collectivePublicKey".to_string()],
-            Vec::new(),
             Vec::new(),
         )?));
     };
@@ -84,13 +82,9 @@ pub(super) fn verify_collective_public_key_material(
                 "publicKeyShareSuccinctProofs was required before collective public-key verification",
             )
         })?;
-    if public_key_share_material_uses_transport(material_set)
-        && request.get("transportedPublicKeyShareMaterial").is_none()
-    {
+    if request.get("transportedPublicKeyShareMaterial").is_none() {
         return Ok(Some(verification_response(
-            Some("setupPackageAssembly"),
             vec!["transportedPublicKeyShareMaterial".to_string()],
-            Vec::new(),
             Vec::new(),
         )?));
     }
@@ -121,48 +115,23 @@ pub(super) fn verify_collective_public_key_material(
             )?));
         }
     };
-    let roster = super::accepted_roster_from_package(setup_package);
-    let ring_degree = value_u64(aggregate_object, "ringDegree")?;
-    if ring_degree == 0
-        || ring_degree > POLYNOMIAL_DEGREE as u64
-        || aggregate_object
-            .get("participantCount")
-            .and_then(Value::as_u64)
-            != Some(roster.participant_count)
-        || aggregate_object.get("rnsLimbCount").and_then(Value::as_u64)
-            != Some(DATA_PRIMES.len() as u64)
-    {
-        return Ok(Some(public_key_refusal(
-            "collectivePublicKeyParametersCountMismatch",
-            "collectivePublicKey participant count, limb count, and ring degree must match the selected setup parameters",
-            "setupPackage.collectivePublicKey",
-        )?));
-    }
+    let roster = super::accepted_roster_from_package(setup_package)?;
+    let ring_degree = usize::try_from(value_u64(material_set, "ringDegree")?).map_err(|_| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "publicKeyShareMaterial.ringDegree does not fit usize",
+        )
+    })?;
     let expected_source_bindings = [
         (
             "publicMatrixSeedHash",
             Some(common_binding.public_matrix_seed_hash.as_str()),
         ),
         (
-            "publicKeyCrpRoot",
-            Some(common_binding.public_key_crp_root.as_str()),
-        ),
-        (
-            "publicAPolynomialRoot",
-            Some(common_binding.public_a_polynomial_root.as_str()),
-        ),
-        (
             "publicKeyShareSetRoot",
             setup_package
                 .get("publicKeyShares")
                 .and_then(|share_set| share_set.get("publicKeyShareSetRoot"))
-                .and_then(Value::as_str),
-        ),
-        (
-            "publicKeyShareProofSetRoot",
-            setup_package
-                .get("publicKeyShareProofs")
-                .and_then(|proof_set| proof_set.get("publicKeyShareProofSetRoot"))
                 .and_then(Value::as_str),
         ),
         (
@@ -190,12 +159,7 @@ pub(super) fn verify_collective_public_key_material(
     if let Err(error) = verify_collective_public_key_coefficients(
         aggregate_object,
         &material_bindings,
-        usize::try_from(ring_degree).map_err(|_| {
-            CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "collective public-key ring degree does not fit usize",
-            )
-        })?,
+        ring_degree,
         roster.participant_count,
     ) {
         return Ok(Some(public_key_refusal(
@@ -209,9 +173,7 @@ pub(super) fn verify_collective_public_key_material(
         .and_then(Value::as_str)
     else {
         return Ok(Some(verification_response(
-            Some("setupPackageAssembly"),
             vec!["collectivePublicKey.collectivePublicKeyRoot".to_string()],
-            Vec::new(),
             Vec::new(),
         )?));
     };
@@ -232,7 +194,7 @@ pub(super) fn verify_collective_public_key_material(
             "setupPackage.collectivePublicKey.collectivePublicKeyRoot",
         )?));
     }
-    if ring_degree == POLYNOMIAL_DEGREE as u64
+    if ring_degree == POLYNOMIAL_DEGREE
         && let Err(error) = accepted_setup_collective_public_key_from_package(setup_package)
     {
         return Ok(Some(public_key_refusal(
@@ -254,7 +216,6 @@ use collective_public_key::*;
 
 pub(in crate::bgv::setup) use collective_public_key::accepted_setup_collective_public_key_from_package;
 pub(super) use material_records::verify_public_key_share_material_set;
-pub(super) use material_set::public_key_share_material_uses_transport;
 #[cfg(test)]
 pub(in crate::bgv::setup) use transport::authenticated_public_key_share_material_stream_summary;
 #[cfg(test)]

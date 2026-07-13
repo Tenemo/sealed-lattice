@@ -10,17 +10,13 @@ import {
     type VssCoefficientOpeningMaterial,
     type VssSourceTrusteeCoefficientCommitmentContribution,
     type VssSourceTrusteeCoefficientCommitmentContributionInput,
-    type VssSourceTrusteeCoefficientCommitmentContributionOptions,
     type VssSourceTrusteeCoefficientCommitmentRecord,
-    type VssSourceTrusteeOpeningMaterial,
-    type VssSourceTrusteeOpeningMaterialReference,
-    type VssSourceTrusteeOpeningMaterialSource,
 } from './constants-and-types.js';
 import {
-    assertHashLike,
     assertNonEmptyString,
     assertNonNegativeSafeInteger,
     assertPositiveSafeInteger,
+    assertProtocolHash,
     contextFields,
     setupContextFieldNames,
 } from './encoding.js';
@@ -39,7 +35,7 @@ const validateCommitmentCommonInput = (
         'sourceTrusteeOpeningStates'
     >,
 ): void => {
-    assertHashLike(input.publicMatrixSeedHash, 'publicMatrixSeedHash');
+    assertProtocolHash(input.publicMatrixSeedHash, 'publicMatrixSeedHash');
     assertPositiveSafeInteger(input.ringDegree, 'ringDegree');
     assertPositiveSafeInteger(input.participantCount, 'participantCount');
     assertPositiveSafeInteger(input.thresholdDegree, 'thresholdDegree');
@@ -57,9 +53,8 @@ const validateCommitmentCommonInput = (
     }
 };
 
-const createVssSourceTrusteeCoefficientCommitmentContributionWithOptions = (
+export const createVssSourceTrusteeCoefficientCommitmentContribution = (
     input: VssSourceTrusteeCoefficientCommitmentContributionInput,
-    options: VssSourceTrusteeCoefficientCommitmentContributionOptions,
 ): VssSourceTrusteeCoefficientCommitmentContribution => {
     validateCommitmentCommonInput(input);
     const context = contextFields(input.setupContext);
@@ -102,7 +97,7 @@ const createVssSourceTrusteeCoefficientCommitmentContributionWithOptions = (
                     'source trustee coefficientOpenings must cover every declared coordinate.',
                 );
             }
-            const commitmentComputation = options.setupCommitmentComputer({
+            const commitmentComputation = input.setupCommitmentComputer({
                 publicMatrixSeedHash: input.publicMatrixSeedHash,
                 sourceRnsLimbIndex: rnsLimbIndex,
                 sourceMessageModulus: rnsPrime,
@@ -140,10 +135,7 @@ const createVssSourceTrusteeCoefficientCommitmentContributionWithOptions = (
                 commitmentRoot: commitmentComputation.commitmentRoot,
                 commitment: commitmentComputation.commitment,
             } satisfies VssCoefficientCommitmentMaterialRecord;
-            options.consumeMaterialRecord?.(materialRecord);
-            if (options.retainMaterialRecords) {
-                materialRecords.push(materialRecord);
-            }
+            materialRecords.push(materialRecord);
         }
     });
     const sourceTrusteeRecordWithoutRoot = {
@@ -181,69 +173,6 @@ const createVssSourceTrusteeCoefficientCommitmentContributionWithOptions = (
     };
 };
 
-export const createVssSourceTrusteeCoefficientCommitmentContribution = (
-    input: VssSourceTrusteeCoefficientCommitmentContributionInput,
-): VssSourceTrusteeCoefficientCommitmentContribution =>
-    createVssSourceTrusteeCoefficientCommitmentContributionWithOptions(input, {
-        retainMaterialRecords: true,
-        setupCommitmentComputer: input.setupCommitmentComputer,
-    });
-
-const sourceTrusteeOpeningMaterialReferenceFromMaterial = (
-    sourceTrusteeOpeningMaterial: VssSourceTrusteeOpeningMaterial,
-): VssSourceTrusteeOpeningMaterialReference => ({
-    sourceTrusteeIdentity: sourceTrusteeOpeningMaterial.sourceTrusteeIdentity,
-    sourceTrusteeRosterPosition:
-        sourceTrusteeOpeningMaterial.sourceTrusteeRosterPosition,
-    sourceTrusteeCommitmentRoot:
-        sourceTrusteeOpeningMaterial.sourceTrusteeCommitmentRoot,
-});
-
-const retainedSourceTrusteeOpeningMaterialSource = (
-    privateOpeningMaterialBySourceTrustee: readonly VssSourceTrusteeOpeningMaterial[],
-): VssSourceTrusteeOpeningMaterialSource => {
-    const materialByRosterPosition = new Map<
-        number,
-        VssSourceTrusteeOpeningMaterial
-    >();
-    privateOpeningMaterialBySourceTrustee.forEach(
-        (sourceTrusteeOpeningMaterial) => {
-            materialByRosterPosition.set(
-                sourceTrusteeOpeningMaterial.sourceTrusteeRosterPosition,
-                sourceTrusteeOpeningMaterial,
-            );
-        },
-    );
-
-    return {
-        sourceTrusteeReferences: privateOpeningMaterialBySourceTrustee.map(
-            sourceTrusteeOpeningMaterialReferenceFromMaterial,
-        ),
-        loadSourceTrusteeOpeningMaterial: (sourceTrusteeReference) => {
-            const sourceTrusteeOpeningMaterial = materialByRosterPosition.get(
-                sourceTrusteeReference.sourceTrusteeRosterPosition,
-            );
-            if (sourceTrusteeOpeningMaterial === undefined) {
-                throw new Error(
-                    'source trustee opening material source is missing the requested roster position.',
-                );
-            }
-            if (
-                sourceTrusteeOpeningMaterial.sourceTrusteeIdentity !==
-                    sourceTrusteeReference.sourceTrusteeIdentity ||
-                sourceTrusteeOpeningMaterial.sourceTrusteeCommitmentRoot !==
-                    sourceTrusteeReference.sourceTrusteeCommitmentRoot
-            ) {
-                throw new Error(
-                    'loaded source trustee opening material must match the requested source trustee reference.',
-                );
-            }
-
-            return sourceTrusteeOpeningMaterial;
-        },
-    };
-};
-
 export const createVssCoefficientCommitmentBundle = (
     input: VssCoefficientCommitmentBundleInput,
 ): VssCoefficientCommitmentBundle => {
@@ -261,25 +190,19 @@ export const createVssCoefficientCommitmentBundle = (
 
     const sourceTrusteeContributions = sortedReferences.map(
         (sourceTrusteeReference) =>
-            createVssSourceTrusteeCoefficientCommitmentContributionWithOptions(
-                {
-                    setupContext: input.setupContext,
-                    publicMatrixSeedHash: input.publicMatrixSeedHash,
-                    setupCommitmentComputer: input.setupCommitmentComputer,
-                    qSharePrimes: input.qSharePrimes,
-                    ringDegree: input.ringDegree,
-                    participantCount: input.participantCount,
-                    thresholdDegree: input.thresholdDegree,
-                    sourceTrusteeOpeningState: loadSourceTrusteeOpeningState(
-                        sourceTrusteeOpeningStateProvider,
-                        sourceTrusteeReference,
-                    ),
-                },
-                {
-                    retainMaterialRecords: true,
-                    setupCommitmentComputer: input.setupCommitmentComputer,
-                },
-            ),
+            createVssSourceTrusteeCoefficientCommitmentContribution({
+                setupContext: input.setupContext,
+                publicMatrixSeedHash: input.publicMatrixSeedHash,
+                setupCommitmentComputer: input.setupCommitmentComputer,
+                qSharePrimes: input.qSharePrimes,
+                ringDegree: input.ringDegree,
+                participantCount: input.participantCount,
+                thresholdDegree: input.thresholdDegree,
+                sourceTrusteeOpeningState: loadSourceTrusteeOpeningState(
+                    sourceTrusteeOpeningStateProvider,
+                    sourceTrusteeReference,
+                ),
+            }),
     );
     const sourceTrusteeRecords = sourceTrusteeContributions.map(
         (contribution) => contribution.sourceTrusteeRecord,
@@ -333,9 +256,5 @@ export const createVssCoefficientCommitmentBundle = (
         commitmentSet,
         materialSet,
         privateOpeningMaterialBySourceTrustee,
-        sourceTrusteeOpeningMaterialSource:
-            retainedSourceTrusteeOpeningMaterialSource(
-                privateOpeningMaterialBySourceTrustee,
-            ),
     };
 };

@@ -6,6 +6,7 @@ import {
     isVersionOnlyReleaseManifestChange,
     parseNullDelimitedGitNameStatus,
     shouldRunHeavyCiLanes,
+    shouldRunRoutineCiLanes,
 } from '#tools/ci/classify-ci-changes.mjs';
 
 describe('CI heavy-lane change classification', () => {
@@ -26,7 +27,6 @@ describe('CI heavy-lane change classification', () => {
             'pnpm-lock.yaml',
             'crates/sealed-lattice-kernel/src/bgv/setup.rs',
             'unclassified/generated.txt',
-            '../outside.md',
         ]) {
             expect(shouldRunHeavyCiLanes([changedPath])).toBe(true);
         }
@@ -37,6 +37,13 @@ describe('CI heavy-lane change classification', () => {
                 'packages/protocol/src/index.ts',
             ]),
         ).toBe(true);
+        expect(
+            shouldRunRoutineCiLanes([
+                'README.md',
+                'reference-documents/paper.txt',
+            ]),
+        ).toBe(false);
+        expect(shouldRunRoutineCiLanes(['tools/ci/run-command.ts'])).toBe(true);
     });
 
     it('skips only an exact patch or minor public-package version change', () => {
@@ -61,6 +68,9 @@ describe('CI heavy-lane change classification', () => {
         expect(shouldRunHeavyCiLanes(['packages/sdk/package.json'], true)).toBe(
             false,
         );
+        expect(
+            shouldRunRoutineCiLanes(['packages/sdk/package.json'], true),
+        ).toBe(false);
 
         for (const nextManifest of [
             JSON.stringify({

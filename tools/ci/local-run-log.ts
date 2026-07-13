@@ -660,10 +660,6 @@ class LocalRunLog implements ActiveLocalRunLog {
         }
 
         const lines = [`Attachments: ${attachmentRootPath}`];
-        const rootManifestPath = path.join(attachmentRootPath, 'manifest.json');
-        if (existsSync(rootManifestPath)) {
-            lines.push(`Attachment manifest: ${rootManifestPath}`);
-        }
         const projectDirectories = readdirSync(attachmentRootPath, {
             withFileTypes: true,
         })
@@ -677,15 +673,6 @@ class LocalRunLog implements ActiveLocalRunLog {
             lines.push(
                 `Attachment files (${projectDirectory.name}): ${projectDirectoryPath}`,
             );
-            const manifestPath = path.join(
-                projectDirectoryPath,
-                'manifest.json',
-            );
-            if (existsSync(manifestPath)) {
-                lines.push(
-                    `Attachment manifest (${projectDirectory.name}): ${manifestPath}`,
-                );
-            }
         }
 
         return lines;

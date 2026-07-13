@@ -6,6 +6,14 @@ import type { ProtocolHash } from '@sealed-lattice/types';
 
 import { canonicalJson, hash512Hex } from './canonical-json.js';
 import { deriveCanonicalObjectHash } from './hashes.js';
+import {
+    arrayBufferFromBytes,
+    decodeCanonicalHex,
+    decodeFixedHex,
+    importAesGcmKey as importWebCryptoAesGcmKey,
+    requireSubtleCrypto,
+    webCryptoRandomBytes,
+} from './web-crypto.js';
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
@@ -53,61 +61,19 @@ export type PrivateVssMailboxEncryptionResult = {
     readonly encryptedEnvelopeHash: ProtocolHash;
 };
 
-export type PrivateVssMailboxDecryptionResult = {
-    readonly privateEnvelope: unknown;
-};
-
-const isLowercaseHex = (value: string): boolean =>
-    /^[0-9a-f]*$/u.test(value) && value.length % 2 === 0;
-
-const decodeFixedHex = (
-    value: string,
-    expectedByteLength: number,
-    fieldName: string,
-): Uint8Array => {
-    if (!isLowercaseHex(value)) {
-        throw new TypeError(`${fieldName} must be lowercase canonical hex.`);
-    }
-    const bytes = hexToBytes(value);
-    if (bytes.byteLength !== expectedByteLength) {
-        throw new TypeError(
-            `${fieldName} must be ${String(expectedByteLength)} bytes.`,
-        );
-    }
-
-    return Uint8Array.from(bytes);
-};
-
+const webCryptoRandomnessUnavailableMessage =
+    'Private VSS mailbox encryption requires Web Crypto getRandomValues.';
+const webCryptoAesGcmUnavailableMessage =
+    'Private VSS mailbox encryption requires Web Crypto AES-GCM.';
 const randomBytes = (byteLength: number): Uint8Array => {
-    const cryptoProvider = globalThis.crypto;
-    if (cryptoProvider === undefined) {
-        throw new Error(
-            'Private VSS mailbox encryption requires Web Crypto getRandomValues.',
-        );
-    }
-    const bytes = new Uint8Array(byteLength);
-    cryptoProvider.getRandomValues(bytes);
-
-    return bytes;
+    return webCryptoRandomBytes(
+        byteLength,
+        webCryptoRandomnessUnavailableMessage,
+    );
 };
 
-const subtleCrypto = (): SubtleCrypto => {
-    const subtle = globalThis.crypto?.subtle;
-    if (subtle === undefined) {
-        throw new Error(
-            'Private VSS mailbox encryption requires Web Crypto AES-GCM.',
-        );
-    }
-
-    return subtle;
-};
-
-const arrayBufferFromBytes = (bytes: Uint8Array): ArrayBuffer => {
-    const copy = new Uint8Array(bytes.byteLength);
-    copy.set(bytes);
-
-    return copy.buffer;
-};
+const subtleCrypto = (): SubtleCrypto =>
+    requireSubtleCrypto(webCryptoAesGcmUnavailableMessage);
 
 const deriveMailboxPublicKeyHash = (publicKeyBytesHex: string): ProtocolHash =>
     deriveCanonicalObjectHash({
@@ -145,12 +111,10 @@ const importAesGcmKey = async (
     keyBytes: Uint8Array,
     keyUsages: readonly KeyUsage[],
 ): Promise<CryptoKey> =>
-    subtleCrypto().importKey(
-        'raw',
-        arrayBufferFromBytes(keyBytes),
-        'AES-GCM',
-        false,
+    importWebCryptoAesGcmKey(
+        keyBytes,
         keyUsages,
+        webCryptoAesGcmUnavailableMessage,
     );
 
 export const createPrivateVssMailboxKeyPair = (
@@ -242,7 +206,7 @@ export const encryptPrivateVssMailboxEnvelope = async (
 
 export const decryptPrivateVssMailboxEnvelope = async (
     input: PrivateVssMailboxDecryptionInput,
-): Promise<PrivateVssMailboxDecryptionResult> => {
+): Promise<unknown> => {
     const secretKeyBytes = decodeFixedHex(
         input.recipientMailboxSecretKeyBytesHex,
         mlKem768SecretKeyByteLength,
@@ -258,13 +222,9 @@ export const decryptPrivateVssMailboxEnvelope = async (
         aesGcmNonceByteLength,
         'encryptedEnvelope.aeadNonceHex',
     );
-    if (!isLowercaseHex(input.encryptedEnvelope.ciphertextBytesHex)) {
-        throw new TypeError(
-            'encryptedEnvelope.ciphertextBytesHex must be lowercase canonical hex.',
-        );
-    }
-    const ciphertextBytes = hexToBytes(
+    const ciphertextBytes = decodeCanonicalHex(
         input.encryptedEnvelope.ciphertextBytesHex,
+        'encryptedEnvelope.ciphertextBytesHex',
     );
     const expectedKemCiphertextHash = hashBytes(
         'sealed-lattice-private-vss-mailbox/ml-kem-768-ciphertext',
@@ -322,5 +282,5 @@ export const decryptPrivateVssMailboxEnvelope = async (
         );
     }
 
-    return { privateEnvelope };
+    return privateEnvelope;
 };

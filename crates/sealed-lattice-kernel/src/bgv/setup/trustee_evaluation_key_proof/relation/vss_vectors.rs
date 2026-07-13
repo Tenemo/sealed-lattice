@@ -41,46 +41,6 @@ struct VssShareLinkageItemView<'a> {
     coefficient_slot_indices: Vec<usize>,
 }
 
-fn vss_public_message_encoding_offsets(
-    layouts: &[VssPublicMessageEncodingLayout],
-) -> CanonicalResult<Vec<usize>> {
-    let mut offsets = Vec::with_capacity(layouts.len() + 1);
-    let mut offset = 0_usize;
-    offsets.push(offset);
-    for layout in layouts {
-        offset = offset
-            .checked_add(layout.encoding_column_count())
-            .ok_or_else(|| invalid_succinct_setup_proof("VSS vector layout overflowed"))?;
-        offsets.push(offset);
-    }
-
-    Ok(offsets)
-}
-
-fn vss_public_message_vector_index(
-    offsets: &[usize],
-    message_index: usize,
-    encoding_column: usize,
-) -> CanonicalResult<usize> {
-    let start = offsets.get(message_index).copied().ok_or_else(|| {
-        invalid_succinct_setup_proof("VSS message index is outside the vector layout")
-    })?;
-    let end = offsets.get(message_index + 1).copied().ok_or_else(|| {
-        invalid_succinct_setup_proof("VSS message index is outside the vector layout")
-    })?;
-    if start + encoding_column >= end {
-        return Err(invalid_succinct_setup_proof(
-            "VSS message encoding column is outside the vector layout",
-        ));
-    }
-
-    Ok(start + encoding_column)
-}
-
-fn vss_public_message_encoding_total(offsets: &[usize]) -> usize {
-    offsets.last().copied().unwrap_or(0)
-}
-
 fn vss_public_decoder_digit_count(layout: VssPublicMessageEncodingLayout) -> usize {
     (0..VSS_PUBLIC_MESSAGE_DIGIT_COUNT)
         .filter(|digit_index| layout.digit_trit_count(*digit_index).unwrap_or(0) > 0)
@@ -736,17 +696,6 @@ pub(crate) fn build_same_secret_bridge_public_vectors(
     vectors.extend(message_encoding_vectors);
 
     Ok((relation_claim, vectors))
-}
-
-fn add_scaled_extension_basis_vector(
-    target: &mut [ChallengeExtensionElement],
-    source: &[ChallengeExtensionElement],
-    coefficient: u64,
-    tower: &ChallengeExtensionTower,
-) {
-    for (target_value, source_value) in target.iter_mut().zip(source.iter()) {
-        *target_value = tower.add(target_value, &tower.scale_base(source_value, coefficient));
-    }
 }
 
 fn add_extension_vector(

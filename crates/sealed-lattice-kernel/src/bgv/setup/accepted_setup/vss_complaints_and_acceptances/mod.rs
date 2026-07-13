@@ -5,8 +5,7 @@ use crate::hashing::derive_canonical_object_hash;
 pub(super) struct VssRecordVerificationContext<'a> {
     pub(super) setup_context: &'a Value,
     pub(super) expected_trustees: &'a BTreeMap<u64, String>,
-    pub(super) trustee_registrations:
-        &'a BTreeMap<u64, super::phase_transcript::SetupIntentTrusteeRegistration>,
+    pub(super) trustee_registrations: &'a setup_intent::SetupIntentTrusteeRegistrationMap,
     pub(super) source_trustee_commitment_roots: &'a BTreeMap<u64, String>,
     pub(super) private_vss_envelope_commitment_root: &'a str,
     pub(super) private_vss_envelope_bindings: &'a PrivateVssEnvelopeBindingMap,

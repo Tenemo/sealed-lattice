@@ -203,10 +203,6 @@ fn succinct_setup_statement_hash_vectors_cover_current_families() {
         expected_statement_hashes["publicKeyShare"]
     );
     assert_eq!(
-        private_vss["privateVssShareProof"]["proofFamily"],
-        "vss-opening-carry"
-    );
-    assert_eq!(
         private_vss["privateVssShareProof"]["statementHash"],
         expected_statement_hashes["privateVssShare"]
     );

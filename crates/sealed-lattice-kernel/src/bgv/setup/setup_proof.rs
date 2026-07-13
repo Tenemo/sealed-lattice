@@ -19,7 +19,6 @@ use crate::{
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
     hashing::derive_canonical_object_hash,
 };
-pub(crate) const SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES: u64 = 1_048_576;
 
 fn setup_proof_error(message: impl Into<String>) -> CanonicalError {
     CanonicalError::new(CanonicalErrorCode::ComponentMismatch, message)

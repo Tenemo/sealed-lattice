@@ -7,11 +7,11 @@ const PHASE_PAIR_LEAF_DOMAIN: &str =
 const NODE_DOMAIN: &str = "sealed-lattice/setup/trustee-evaluation-key/merkle-node";
 
 pub(super) const MERKLE_DIGEST_BYTES: usize = 32;
-pub(super) type MerkleDigest = [u8; MERKLE_DIGEST_BYTES];
+pub(in crate::bgv::setup) type MerkleDigest = [u8; MERKLE_DIGEST_BYTES];
 
 // Merkle commitment over a power-of-two leaf count. Leaves are rows of u64
 // values (one row per evaluation position across all committed columns).
-pub(super) struct MerkleTree {
+pub(in crate::bgv::setup) struct MerkleTree {
     levels: Vec<Vec<MerkleDigest>>,
 }
 
@@ -59,6 +59,13 @@ pub(super) fn phase_pair_leaf_hash(
 
 impl MerkleTree {
     pub(super) fn from_leaf_hashes(leaf_hashes: Vec<MerkleDigest>) -> CanonicalResult<Self> {
+        Self::from_leaf_hashes_with_node_domain(leaf_hashes, NODE_DOMAIN)
+    }
+
+    pub(in crate::bgv::setup) fn from_leaf_hashes_with_node_domain(
+        leaf_hashes: Vec<MerkleDigest>,
+        node_domain: &'static str,
+    ) -> CanonicalResult<Self> {
         if leaf_hashes.is_empty() || !leaf_hashes.len().is_power_of_two() {
             return Err(invalid_succinct_setup_proof(
                 "Merkle leaf count must be a non-empty power of two",
@@ -69,7 +76,7 @@ impl MerkleTree {
             let previous = levels.last().expect("levels are non-empty");
             let mut next = Vec::with_capacity(previous.len() / 2);
             for pair in previous.chunks_exact(2) {
-                next.push(merkle_digest(NODE_DOMAIN, &[&pair[0], &pair[1]]));
+                next.push(merkle_digest(node_domain, &[&pair[0], &pair[1]]));
             }
             levels.push(next);
         }
@@ -77,7 +84,7 @@ impl MerkleTree {
         Ok(Self { levels })
     }
 
-    pub(super) fn root(&self) -> MerkleDigest {
+    pub(in crate::bgv::setup) fn root(&self) -> MerkleDigest {
         self.levels.last().expect("levels are non-empty")[0]
     }
 
@@ -126,13 +133,15 @@ pub(super) fn verify_merkle_opening(
 // with a set of opened leaves, recompute the tree root. The verifier consumes
 // each required internal node once and still binds the opened leaves to the
 // same salted commitment root.
-pub(super) struct BatchedMerkleOpening {
-    pub(super) authentication_nodes: Vec<MerkleDigest>,
+pub(in crate::bgv::setup) struct BatchedMerkleOpening {
+    pub(in crate::bgv::setup) authentication_nodes: Vec<MerkleDigest>,
 }
 
 // Sorted, unique leaf indices from a possibly unsorted, repeating index list.
 // Prover and verifier both canonicalize the same way so the node order agrees.
-pub(super) fn sorted_unique_indices(indices: impl IntoIterator<Item = usize>) -> Vec<usize> {
+pub(in crate::bgv::setup) fn sorted_unique_indices(
+    indices: impl IntoIterator<Item = usize>,
+) -> Vec<usize> {
     indices
         .into_iter()
         .collect::<std::collections::BTreeSet<usize>>()
@@ -144,7 +153,7 @@ pub(super) fn sorted_unique_indices(indices: impl IntoIterator<Item = usize>) ->
 // two different leaf hashes. Without this check a prover could open one position
 // to two different values across queries and have only one of them bound to the
 // committed root; returning None forces the verifier to reject that.
-pub(super) fn consistent_sorted_leaves(
+pub(in crate::bgv::setup) fn consistent_sorted_leaves(
     leaves: impl IntoIterator<Item = (usize, MerkleDigest)>,
 ) -> Option<Vec<(usize, MerkleDigest)>> {
     let mut leaves_by_index = std::collections::BTreeMap::new();
@@ -170,7 +179,10 @@ impl MerkleTree {
     // The returned nodes are exactly the siblings that are not themselves
     // derivable from the opened leaves, emitted in ascending-index, leaf-to-root
     // order, which `verify_merkle_batch` consumes in the same order.
-    pub(super) fn open_batch(&self, sorted_unique_indices: &[usize]) -> BatchedMerkleOpening {
+    pub(in crate::bgv::setup) fn open_batch(
+        &self,
+        sorted_unique_indices: &[usize],
+    ) -> BatchedMerkleOpening {
         // Node emission and consumption must walk identically: sorted-unique
         // indices make a sibling pair adjacent, so the both-children-opened
         // branch skips a node on both sides. Any divergence between these two
@@ -214,6 +226,25 @@ pub(super) fn verify_merkle_batch(
     sorted_unique_leaves: &[(usize, MerkleDigest)],
     opening: &BatchedMerkleOpening,
 ) -> bool {
+    verify_merkle_batch_with_node_domain(
+        root,
+        depth,
+        sorted_unique_leaves,
+        opening,
+        NODE_DOMAIN,
+    )
+}
+
+pub(in crate::bgv::setup) fn verify_merkle_batch_with_node_domain(
+    root: &MerkleDigest,
+    depth: usize,
+    sorted_unique_leaves: &[(usize, MerkleDigest)],
+    opening: &BatchedMerkleOpening,
+    node_domain: &'static str,
+) -> bool {
+    if sorted_unique_leaves.is_empty() {
+        return false;
+    }
     let mut current = sorted_unique_leaves.to_vec();
     let mut node_cursor = 0;
     for _level in 0..depth {
@@ -241,7 +272,7 @@ pub(super) fn verify_merkle_batch(
                 (sibling_hash, node_hash)
             };
             let parent_index = node_index >> 1;
-            let parent_hash = merkle_digest(NODE_DOMAIN, &[&left, &right]);
+            let parent_hash = merkle_digest(node_domain, &[&left, &right]);
             if parents.last().map(|(index, _)| *index) != Some(parent_index) {
                 parents.push((parent_index, parent_hash));
             }

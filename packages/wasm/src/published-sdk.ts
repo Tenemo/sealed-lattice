@@ -8,16 +8,6 @@ export type {
     BgvCanonicalStreamRuntime,
     BgvTargetDecryptionAggregateOpeningMaterialSource,
 } from './bgv-canonical-stream-runtime.js';
-export {
-    foundationBoardCandidateObjectHash,
-    openFoundationBoardSession,
-} from './foundation-board-session.js';
-export type {
-    FoundationBoardCandidate,
-    FoundationBoardSession,
-    FoundationBoardSessionInput,
-    FoundationBoardSessionState,
-} from './foundation-board-session.js';
 export type {
     AcceptedSetupSession,
     BgvTargetDecryptionResultReleaseCompletion,

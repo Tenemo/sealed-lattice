@@ -157,19 +157,6 @@ export type VssSourceTrusteeOpeningMaterial = Readonly<{
     readonly coefficientOpenings: readonly VssCoefficientOpeningMaterial[];
 }>;
 
-export type VssSourceTrusteeOpeningMaterialReference = Readonly<{
-    readonly sourceTrusteeIdentity: string;
-    readonly sourceTrusteeRosterPosition: number;
-    readonly sourceTrusteeCommitmentRoot: ProtocolHash;
-}>;
-
-export type VssSourceTrusteeOpeningMaterialSource = Readonly<{
-    readonly sourceTrusteeReferences: readonly VssSourceTrusteeOpeningMaterialReference[];
-    readonly loadSourceTrusteeOpeningMaterial: (
-        sourceTrusteeReference: VssSourceTrusteeOpeningMaterialReference,
-    ) => VssSourceTrusteeOpeningMaterial;
-}>;
-
 export type VssSourceTrusteeCoefficientCommitmentContribution = Readonly<{
     readonly sourceTrusteeRecord: VssSourceTrusteeCoefficientCommitmentRecord;
     readonly materialRecords: readonly VssCoefficientCommitmentMaterialRecord[];
@@ -180,7 +167,6 @@ export type VssCoefficientCommitmentBundle = Readonly<{
     readonly commitmentSet: VssCoefficientCommitmentSet;
     readonly materialSet: VssCoefficientCommitmentMaterialSet;
     readonly privateOpeningMaterialBySourceTrustee: readonly VssSourceTrusteeOpeningMaterial[];
-    readonly sourceTrusteeOpeningMaterialSource: VssSourceTrusteeOpeningMaterialSource;
 }>;
 
 export type VssCoefficientCommitmentBundleInput = {
@@ -202,14 +188,6 @@ export type VssSourceTrusteeCoefficientCommitmentContributionInput = Omit<
     readonly sourceTrusteeOpeningState: VssSourceTrusteeCoefficientOpeningState;
 };
 
-export type VssSourceTrusteeCoefficientCommitmentContributionOptions =
-    Readonly<{
-        readonly retainMaterialRecords: boolean;
-        readonly consumeMaterialRecord?: (
-            materialRecord: VssCoefficientCommitmentMaterialRecord,
-        ) => void;
-        readonly setupCommitmentComputer: SetupCommitmentOpeningComputer;
-    }>;
 
 export type SetupCommitmentOpeningComputation = Readonly<{
     readonly commitment: SetupCommitmentValue;

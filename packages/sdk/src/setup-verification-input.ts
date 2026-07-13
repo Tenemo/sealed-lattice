@@ -5,7 +5,6 @@ import {
 import type {
     EvaluationKeyShareComponentMaterialChunkSource,
     PublicKeyShareMaterialChunkSource,
-    PublicEvaluationKeyMaterialChunkSource,
     SetupProofMaterialChunkSource,
     SetupPackageVerificationInput,
     SetupPackageVerificationInputSource,
@@ -321,22 +320,15 @@ export const snapshotSetupPackageVerificationInput = (
         'expectedRosterHash',
         state,
     ) as VerifySetupPackageInput['expectedRosterHash'];
-    const transportedPublicKeyShareMaterial =
+    const transportedPublicKeyShareMaterial = descriptorBackedMaterialSnapshot(
         dataPropertyValue(
             inputDescriptors,
             'transportedPublicKeyShareMaterial',
             'transportedPublicKeyShareMaterial',
-        ) === undefined
-            ? undefined
-            : descriptorBackedMaterialSnapshot(
-                  dataPropertyValue(
-                      inputDescriptors,
-                      'transportedPublicKeyShareMaterial',
-                      'transportedPublicKeyShareMaterial',
-                  ),
-                  'transportedPublicKeyShareMaterial',
-                  state,
-              );
+        ),
+        'transportedPublicKeyShareMaterial',
+        state,
+    );
     const transportedPublicKeyShareProofMaterial =
         descriptorBackedMaterialSetSnapshot(
             dataPropertyValue(
@@ -392,17 +384,6 @@ export const snapshotSetupPackageVerificationInput = (
             'componentMaterials',
             state,
         );
-    const transportedPublicEvaluationKeyMaterial =
-        descriptorBackedMaterialSetSnapshot(
-            dataPropertyValue(
-                inputDescriptors,
-                'transportedPublicEvaluationKeyMaterial',
-                'transportedPublicEvaluationKeyMaterial',
-            ),
-            'transportedPublicEvaluationKeyMaterial',
-            'publicEvaluationKeyMaterials',
-            state,
-        );
     const publicKeyShareMaterialChunkSource =
         chunkSourceSnapshot<PublicKeyShareMaterialChunkSource>(
             dataPropertyValue(
@@ -414,6 +395,9 @@ export const snapshotSetupPackageVerificationInput = (
             ['publicKeyShareMaterialSetRoot'],
             state,
         );
+    if (publicKeyShareMaterialChunkSource === undefined) {
+        throw new TypeError('publicKeyShareMaterialChunkSource is required.');
+    }
     const setupProofMaterialChunkSources =
         chunkSourceCollectionSnapshot<SetupProofMaterialChunkSource>(
             dataPropertyValue(
@@ -436,17 +420,6 @@ export const snapshotSetupPackageVerificationInput = (
             ['keySwitchComponentMaterialRoot'],
             state,
         );
-    const publicEvaluationKeyMaterialChunkSources =
-        chunkSourceCollectionSnapshot<PublicEvaluationKeyMaterialChunkSource>(
-            dataPropertyValue(
-                inputDescriptors,
-                'publicEvaluationKeyMaterialChunkSources',
-                'publicEvaluationKeyMaterialChunkSources',
-            ),
-            'publicEvaluationKeyMaterialChunkSources',
-            ['publicEvaluationKeyMaterialRoot'],
-            state,
-        );
     return {
         setupPackage,
         expectedManifestHash,
@@ -454,9 +427,7 @@ export const snapshotSetupPackageVerificationInput = (
         ...(expectedSetupPackageHash === undefined
             ? {}
             : { expectedSetupPackageHash }),
-        ...(transportedPublicKeyShareMaterial === undefined
-            ? {}
-            : { transportedPublicKeyShareMaterial }),
+        transportedPublicKeyShareMaterial,
         ...(transportedPublicKeyShareProofMaterial === undefined
             ? {}
             : { transportedPublicKeyShareProofMaterial }),
@@ -472,21 +443,13 @@ export const snapshotSetupPackageVerificationInput = (
         ...(transportedEvaluationKeyShareComponentMaterial === undefined
             ? {}
             : { transportedEvaluationKeyShareComponentMaterial }),
-        ...(transportedPublicEvaluationKeyMaterial === undefined
-            ? {}
-            : { transportedPublicEvaluationKeyMaterial }),
-        ...(publicKeyShareMaterialChunkSource === undefined
-            ? {}
-            : { publicKeyShareMaterialChunkSource }),
+        publicKeyShareMaterialChunkSource,
         ...(setupProofMaterialChunkSources === undefined
             ? {}
             : { setupProofMaterialChunkSources }),
         ...(evaluationKeyShareComponentMaterialChunkSources === undefined
             ? {}
             : { evaluationKeyShareComponentMaterialChunkSources }),
-        ...(publicEvaluationKeyMaterialChunkSources === undefined
-            ? {}
-            : { publicEvaluationKeyMaterialChunkSources }),
     } as unknown as VerifySetupPackageInput;
 };
 
@@ -556,24 +519,9 @@ const authenticateCanonicalProofMaterial = async (
 
 const streamPublicKeyShareMaterial = async (
     runtime: BgvCanonicalStreamRuntime,
-    transportedMaterial:
-        | VerifySetupPackageInput['transportedPublicKeyShareMaterial']
-        | undefined,
-    chunkSource: PublicKeyShareMaterialChunkSource | undefined,
+    transportedMaterial: VerifySetupPackageInput['transportedPublicKeyShareMaterial'],
+    chunkSource: PublicKeyShareMaterialChunkSource,
 ): Promise<void> => {
-    if (transportedMaterial === undefined) {
-        if (chunkSource !== undefined) {
-            throw new TypeError(
-                'publicKeyShareMaterialChunkSource requires a transported public-key share material descriptor.',
-            );
-        }
-        return;
-    }
-    if (chunkSource === undefined) {
-        throw new TypeError(
-            'transportedPublicKeyShareMaterial requires publicKeyShareMaterialChunkSource.',
-        );
-    }
     const materialRoot = protocolHash(
         transportedMaterial.publicKeyShareMaterialSetRoot,
         'transportedPublicKeyShareMaterial.publicKeyShareMaterialSetRoot',
@@ -740,79 +688,6 @@ const streamEvaluationKeyShareComponentMaterial = async (
     }
 };
 
-const streamPublicEvaluationKeyMaterial = async (
-    runtime: BgvCanonicalStreamRuntime,
-    transportedMaterialSet:
-        | VerifySetupPackageInput['transportedPublicEvaluationKeyMaterial']
-        | undefined,
-    chunkSources: readonly PublicEvaluationKeyMaterialChunkSource[] | undefined,
-): Promise<void> => {
-    if (transportedMaterialSet === undefined) {
-        if ((chunkSources?.length ?? 0) !== 0) {
-            throw new TypeError(
-                'publicEvaluationKeyMaterialChunkSources requires transported public evaluation-key material references.',
-            );
-        }
-        return;
-    }
-    if (!Array.isArray(transportedMaterialSet.publicEvaluationKeyMaterials)) {
-        throw new TypeError(
-            'transportedPublicEvaluationKeyMaterial.publicEvaluationKeyMaterials must be an array.',
-        );
-    }
-    const sourcesByRoot = new Map<
-        string,
-        PublicEvaluationKeyMaterialChunkSource['pullChunk']
-    >();
-    for (const [sourceIndex, source] of (chunkSources ?? []).entries()) {
-        const root = protocolHash(
-            source.publicEvaluationKeyMaterialRoot,
-            `publicEvaluationKeyMaterialChunkSources.${String(sourceIndex)}.publicEvaluationKeyMaterialRoot`,
-        );
-        if (typeof source.pullChunk !== 'function' || sourcesByRoot.has(root)) {
-            throw new TypeError(
-                'Public evaluation-key material sources must carry one unique pull function per root.',
-            );
-        }
-        sourcesByRoot.set(root, source.pullChunk);
-    }
-    for (
-        let materialIndex = 0;
-        materialIndex <
-        transportedMaterialSet.publicEvaluationKeyMaterials.length;
-        materialIndex += 1
-    ) {
-        const material = transportedMaterialSet.publicEvaluationKeyMaterials[
-            materialIndex
-        ] as JsonRecord;
-        const root = protocolHash(
-            material.publicEvaluationKeyMaterialRoot,
-            `transportedPublicEvaluationKeyMaterial.publicEvaluationKeyMaterials.${String(materialIndex)}.publicEvaluationKeyMaterialRoot`,
-        );
-        const pullChunk = sourcesByRoot.get(root);
-        if (pullChunk === undefined) {
-            throw new TypeError(
-                'A public evaluation-key material reference has no matching canonical chunk source.',
-            );
-        }
-        await runtime.readMaterial({
-            descriptorBytes: ownedCanonicalDescriptorBytes(
-                material.descriptorBytes,
-                `transportedPublicEvaluationKeyMaterial.publicEvaluationKeyMaterials.${String(materialIndex)}.descriptorBytes`,
-            ),
-            family: bgvCanonicalStreamFamilies.publicEvaluationKeyMaterial,
-            materialRoot: root,
-            pullChunk,
-        });
-        sourcesByRoot.delete(root);
-    }
-    if (sourcesByRoot.size !== 0) {
-        throw new TypeError(
-            'publicEvaluationKeyMaterialChunkSources must match transported public evaluation-key material references exactly.',
-        );
-    }
-};
-
 const setupPackageVerificationInput = (
     input: VerifySetupPackageInput,
 ): KernelSetupPackageVerificationInput => {
@@ -854,11 +729,6 @@ export const prepareSnapshottedSetupPackageVerificationInputForKernel = async (
         runtime,
         descriptorSnapshotInput.transportedEvaluationKeyShareComponentMaterial,
         descriptorSnapshotInput.evaluationKeyShareComponentMaterialChunkSources,
-    );
-    await streamPublicEvaluationKeyMaterial(
-        runtime,
-        descriptorSnapshotInput.transportedPublicEvaluationKeyMaterial,
-        descriptorSnapshotInput.publicEvaluationKeyMaterialChunkSources,
     );
     const chunkSourcesByRoot = proofMaterialChunkSourcesByRoot(
         descriptorSnapshotInput.setupProofMaterialChunkSources,

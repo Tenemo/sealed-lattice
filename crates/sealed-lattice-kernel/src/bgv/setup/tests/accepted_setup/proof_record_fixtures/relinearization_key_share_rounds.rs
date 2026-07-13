@@ -1,7 +1,9 @@
 use super::*;
 use rayon::prelude::*;
 
-use crate::bgv::setup::evaluation_key_share_material::EvaluationKeyShareProofFamily;
+use crate::bgv::setup::evaluation_key_share_material::{
+    EvaluationKeyShareDerivedMaterialBinding, EvaluationKeyShareProofFamily,
+};
 use crate::hashing::derive_canonical_object_hash;
 
 // Builds the relinearization key-share rounds container the accepted-setup
@@ -30,8 +32,6 @@ pub(in super::super) fn relinearization_key_share_rounds_fixture(
 
     let mut round_one_records = Vec::new();
     let mut round_one_roots_by_level = BTreeMap::<u64, Vec<serde_json::Value>>::new();
-    let mut round_one_share_roots = BTreeMap::<(u64, u64), String>::new();
-    let mut round_one_record_roots = BTreeMap::<(u64, u64), String>::new();
     let mut round_one_aggregate_diagonals_by_level = BTreeMap::<u64, Vec<Vec<u64>>>::new();
     let mut transported_component_materials = Vec::new();
     let ring_degree = public_coefficient_commitment_ring_degree_from_fixture_package(package);
@@ -86,7 +86,6 @@ pub(in super::super) fn relinearization_key_share_rounds_fixture(
                         .expect("round-one aggregate accumulation");
                 }
             }
-            let round_one_share_root = fixture_material.component_vector_root.clone();
             let mut record = serde_json::json!({
                 "objectType": "RelinearizationKeyShareRoundOne",
                 "ceremonyId": setup_context["ceremonyId"],
@@ -99,18 +98,19 @@ pub(in super::super) fn relinearization_key_share_rounds_fixture(
                 "level": level,
                 "evaluatorKeyScheduleRoot": schedule["evaluatorKeyScheduleRoot"],
                 "publicKeyShareSuccinctProofSetRoot": package["publicKeyShareSuccinctProofs"]["publicKeyShareSuccinctProofSetRoot"],
-                "relinearizationCrpRoot": package["commonRandomness"]["publicDerivations"]["crpRoots"]["relinearizationCrpRoot"],
-                "roundOneShareRoot": round_one_share_root,
-                "keySwitchMaterialEncoding": EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
-                "keySwitchDomain": "relinearization",
-                "keySwitchSeedHex": key_switch_seed_hex,
-                "ringDegree": ring_degree,
                 "keySwitchComponentVectorRoot": fixture_material.component_vector_root,
             });
             let authenticated_material =
                 authenticate_evaluation_key_share_component_material_fixture(
                     EvaluationKeyShareProofFamily::Relinearization,
                     &record,
+                    EvaluationKeyShareDerivedMaterialBinding {
+                        trustee_identity: &trustee_identity,
+                        trustee_roster_position,
+                        key_switch_domain: "relinearization",
+                        key_switch_seed_hex: &key_switch_seed_hex,
+                    },
+                    ring_degree,
                     &fixture_material,
                     accepted_setup_session,
                 );
@@ -132,8 +132,6 @@ pub(in super::super) fn relinearization_key_share_rounds_fixture(
                     "trusteeRosterPosition": trustee_roster_position,
                     "roundOneRecordRoot": record_root,
                 }));
-            round_one_share_roots.insert((level, trustee_roster_position), round_one_share_root);
-            round_one_record_roots.insert((level, trustee_roster_position), record_root);
             round_one_records.push(record);
         }
     }
@@ -192,7 +190,6 @@ pub(in super::super) fn relinearization_key_share_rounds_fixture(
             .zip(level_materials)
         {
             let trustee_identity = format!("trustee-{trustee_roster_position}");
-            let round_two_share_root = fixture_material.component_vector_root.clone();
             let mut record = serde_json::json!({
                 "objectType": "RelinearizationKeyShareRoundTwo",
                 "ceremonyId": setup_context["ceremonyId"],
@@ -205,27 +202,19 @@ pub(in super::super) fn relinearization_key_share_rounds_fixture(
                 "level": level,
                 "evaluatorKeyScheduleRoot": schedule["evaluatorKeyScheduleRoot"],
                 "publicKeyShareSuccinctProofSetRoot": package["publicKeyShareSuccinctProofs"]["publicKeyShareSuccinctProofSetRoot"],
-                "relinearizationCrpRoot": package["commonRandomness"]["publicDerivations"]["crpRoots"]["relinearizationCrpRoot"],
-                "roundOneShareRoot": round_one_share_roots
-                    .get(&(level, trustee_roster_position))
-                    .expect("round-one share root"),
-                "roundOneRecordRoot": round_one_record_roots
-                    .get(&(level, trustee_roster_position))
-                    .expect("round-one record root"),
-                "roundOneAggregateRoot": round_one_aggregate_root_by_level
-                    .get(&level)
-                    .expect("round-one aggregate root"),
-                "roundTwoShareRoot": round_two_share_root,
-                "keySwitchMaterialEncoding": EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
-                "keySwitchDomain": "relinearization",
-                "keySwitchSeedHex": key_switch_seed_hex,
-                "ringDegree": ring_degree,
                 "keySwitchComponentVectorRoot": fixture_material.component_vector_root,
             });
             let authenticated_material =
                 authenticate_evaluation_key_share_component_material_fixture(
                     EvaluationKeyShareProofFamily::Relinearization,
                     &record,
+                    EvaluationKeyShareDerivedMaterialBinding {
+                        trustee_identity: &trustee_identity,
+                        trustee_roster_position,
+                        key_switch_domain: "relinearization",
+                        key_switch_seed_hex: &key_switch_seed_hex,
+                    },
+                    ring_degree,
                     &fixture_material,
                     accepted_setup_session,
                 );
@@ -279,13 +268,9 @@ pub(in super::super) fn relinearization_key_share_rounds_fixture(
         "rosterHash": setup_context["rosterHash"],
         "setupParametersHash": setup_context["setupParametersHash"],
         "setupEpoch": setup_context["setupEpoch"],
-        "participantCount": participant_count_from_package(package),
-        "rnsLimbCount": DATA_PRIMES.len(),
         "evaluatorKeyScheduleRoot": schedule["evaluatorKeyScheduleRoot"],
         "publicKeyShareSetRoot": package["publicKeyShares"]["publicKeyShareSetRoot"],
         "publicKeyShareSuccinctProofSetRoot": package["publicKeyShareSuccinctProofs"]["publicKeyShareSuccinctProofSetRoot"],
-        "relinearizationCrpRoot": package["commonRandomness"]["publicDerivations"]["crpRoots"]["relinearizationCrpRoot"],
-        "relinearizationLevelSchedule": schedule["relinearizationLevelSchedule"],
         "roundOneAggregateRoots": round_one_aggregate_roots,
         "roundOneRecords": round_one_records,
         "roundTwoAggregateRoots": round_two_aggregate_roots,

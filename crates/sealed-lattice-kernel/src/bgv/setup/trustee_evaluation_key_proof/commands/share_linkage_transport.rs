@@ -20,7 +20,6 @@ pub(super) struct ValidatedVssShareLinkageProofReference {
 
 pub(super) fn validate_vss_share_linkage_proof_reference(
     proof_record: &Value,
-    coverage: &[Value],
     vss_share_linkage: &Value,
 ) -> CanonicalResult<ValidatedVssShareLinkageProofReference> {
     let proof_bytes_hash = read_string(proof_record, "proofBytesHash")?.to_string();
@@ -36,8 +35,6 @@ pub(super) fn validate_vss_share_linkage_proof_reference(
     )?;
     let proof_record_without_root = json!({
         "objectType": "VssShareLinkageProofRecord",
-        "proofFamily": VSS_SHARE_LINKAGE_PROOF_FAMILY,
-        "linkageItems": coverage,
         "vssShareLinkage": vss_share_linkage,
         "proofBytesHash": &proof_bytes_hash,
         "proofMaterialRoot": &proof_material_root,

@@ -5,7 +5,6 @@ import type { CanonicalProofMaterialChunkPull } from '../setup-proof-material-tr
 import { appendVaruint } from '../varuint-encoding.js';
 
 import {
-    publicKeyShareMaterialEncoding,
     type PublicKeyShareCoefficientVectorMaterial,
     type PublicKeyShareMaterialContributionInput,
     type PublicKeyShareMaterialRecord,
@@ -19,7 +18,6 @@ import {
     assertNonEmptyString,
     assertNonNegativeSafeInteger,
     assertPositiveSafeInteger,
-    assertProtocolHash,
     coefficientVectorFromLittleEndianHex,
     coefficientVectorHash512,
     contextFields,
@@ -60,19 +58,11 @@ const validatePublicKeyShareMaterialContribution = (
     return contribution.shareCoefficientVectorsByLimb.map(
         (coefficientVector, rnsLimbIndex) => {
             const rnsPrime = input.qSharePrimes[rnsLimbIndex];
-            if (
-                rnsPrime === undefined ||
-                coefficientVector.rnsLimbIndex !== rnsLimbIndex ||
-                coefficientVector.rnsPrime !== rnsPrime
-            ) {
+            if (rnsPrime === undefined) {
                 throw new Error(
-                    'publicKeyShareMaterialContributions limb metadata must follow Q_share order.',
+                    'publicKeyShareMaterialContributions must follow Q_share order.',
                 );
             }
-            assertProtocolHash(
-                coefficientVector.coefficientVectorHash512,
-                'publicKeyShareMaterialContributions.coefficientVectorHash512',
-            );
             const coefficients = coefficientVectorFromLittleEndianHex(
                 coefficientVector.coefficientsLeHex,
                 input.ringDegree,
@@ -88,12 +78,8 @@ const validatePublicKeyShareMaterialContribution = (
             const shareCoefficientHash =
                 shareRecord.shareCoefficientVectorHash512ByLimb[rnsLimbIndex];
             if (
-                coefficientVector.coefficientVectorHash512 !==
-                    coefficientVectorHash ||
                 shareCoefficientHash?.coefficientVectorHash512 !==
-                    coefficientVectorHash ||
-                shareCoefficientHash.rnsLimbIndex !== rnsLimbIndex ||
-                shareCoefficientHash.rnsPrime !== rnsPrime
+                coefficientVectorHash
             ) {
                 throw new Error(
                     'publicKeyShareMaterialContributions coefficient hash must match the accepted share record.',
@@ -101,9 +87,6 @@ const validatePublicKeyShareMaterialContribution = (
             }
 
             return {
-                rnsLimbIndex,
-                rnsPrime,
-                coefficientVectorHash512: coefficientVectorHash,
                 coefficientsLeHex: coefficientVector.coefficientsLeHex,
             };
         },
@@ -139,12 +122,9 @@ export const publicKeyShareMaterialRecordsFromContributions = (
                 );
             const materialRecordWithoutRoot = {
                 objectType: 'PublicKeyShareMaterial',
-                materialEncoding: publicKeyShareMaterialEncoding,
                 ...contextFields(input.setupContext),
                 trusteeIdentity: shareRecord.trusteeIdentity,
                 trusteeRosterPosition: shareRecord.trusteeRosterPosition,
-                rnsLimbCount: input.qSharePrimes.length,
-                ringDegree: input.ringDegree,
                 publicMatrixSeedHash: input.publicMatrixSeedHash,
                 publicKeyCrpRoot: input.publicKeyCrpRoot,
                 publicAPolynomialRoot: input.publicAPolynomialRoot,
@@ -178,8 +158,6 @@ export const assertPublicKeyShareMaterialInput = (
         'publicKeyShares',
     );
     if (
-        input.publicKeyShares.participantCount !== input.participantCount ||
-        input.publicKeyShares.rnsLimbCount !== input.qSharePrimes.length ||
         input.publicKeyShares.publicMatrixSeedHash !==
             input.publicMatrixSeedHash ||
         input.publicKeyShares.publicKeyCrpRoot !== input.publicKeyCrpRoot ||
@@ -209,17 +187,12 @@ export const createPublicKeyShareMaterialSet = (
         publicKeyShareMaterialRecordsFromContributions(input);
     const materialSetWithoutRoot = {
         objectType: 'PublicKeyShareMaterialSet',
-        materialEncoding: publicKeyShareMaterialEncoding,
         ...contextFields(input.setupContext),
-        participantCount: input.participantCount,
-        rnsLimbCount: input.qSharePrimes.length,
         ringDegree: input.ringDegree,
         publicMatrixSeedHash: input.publicMatrixSeedHash,
         publicKeyCrpRoot: input.publicKeyCrpRoot,
         publicAPolynomialRoot: input.publicAPolynomialRoot,
         publicKeyShareSetRoot: input.publicKeyShares.publicKeyShareSetRoot,
-        publicKeyShareMaterialRoots:
-            publicKeyShareMaterialRootReferences(shareMaterialRecords),
         shareMaterialRecords,
     } as const satisfies Omit<
         PublicKeyShareMaterialSet,
@@ -234,16 +207,10 @@ export const createPublicKeyShareMaterialSet = (
     } satisfies PublicKeyShareMaterialSet;
 };
 
-const sortedPublicKeyShareMaterialRecords = (input: {
-    readonly participantCount: number;
-    readonly shareMaterialRecords: readonly PublicKeyShareMaterialRecord[];
-}): readonly PublicKeyShareMaterialRecord[] => {
-    const materialRecords = sortedByRosterPosition(input.shareMaterialRecords);
-    if (materialRecords.length !== input.participantCount) {
-        throw new Error(
-            'publicKeyShareMaterial.shareMaterialRecords must contain one record per participant.',
-        );
-    }
+const sortedPublicKeyShareMaterialRecords = (
+    shareMaterialRecords: readonly PublicKeyShareMaterialRecord[],
+): readonly PublicKeyShareMaterialRecord[] => {
+    const materialRecords = sortedByRosterPosition(shareMaterialRecords);
     materialRecords.forEach((materialRecord, expectedRosterPosition) => {
         if (materialRecord.trusteeRosterPosition !== expectedRosterPosition) {
             throw new Error(
@@ -292,12 +259,26 @@ const encodedUnsigned64 = (value: number, fieldName: string): Uint8Array => {
 
 const publicKeyShareMaterialBinarySegments = (
     input: Readonly<{
-        readonly participantCount: number;
-        readonly rnsLimbCount: number;
+        readonly qSharePrimes: readonly number[];
         readonly ringDegree: number;
         readonly shareMaterialRecords: readonly PublicKeyShareMaterialRecord[];
     }>,
 ): readonly PublicKeyShareMaterialBinarySegment[] => {
+    assertPositiveSafeInteger(input.ringDegree, 'ringDegree');
+    if (input.shareMaterialRecords.length === 0) {
+        throw new Error(
+            'publicKeyShareMaterial.shareMaterialRecords must contain at least one record.',
+        );
+    }
+    if (input.qSharePrimes.length === 0) {
+        throw new Error('qSharePrimes must contain at least one RNS prime.');
+    }
+    input.qSharePrimes.forEach((rnsPrime, rnsLimbIndex) => {
+        assertPositiveSafeInteger(
+            rnsPrime,
+            `qSharePrimes.${String(rnsLimbIndex)}`,
+        );
+    });
     const segments: PublicKeyShareMaterialBinarySegment[] = [];
     let byteOffset = 0;
     const appendBytes = (bytes: Uint8Array): void => {
@@ -313,44 +294,46 @@ const publicKeyShareMaterialBinarySegments = (
     appendBytes(publicKeyShareMaterialBinaryMagic.slice());
     for (const headerValue of [
         1,
-        input.participantCount,
-        input.rnsLimbCount,
+        input.shareMaterialRecords.length,
+        input.qSharePrimes.length,
         input.ringDegree,
     ]) {
         appendBytes(encodedVaruint(headerValue));
     }
-    for (const materialRecord of sortedPublicKeyShareMaterialRecords(input)) {
+    for (const materialRecord of sortedPublicKeyShareMaterialRecords(
+        input.shareMaterialRecords,
+    )) {
         appendBytes(encodedVaruint(materialRecord.trusteeRosterPosition));
+        if (
+            materialRecord.shareCoefficientVectorsByLimb.length !==
+            input.qSharePrimes.length
+        ) {
+            throw new Error(
+                'publicKeyShareMaterial must contain one coefficient vector per Q_share limb.',
+            );
+        }
         for (const [
             expectedRnsLimbIndex,
             coefficientVector,
         ] of materialRecord.shareCoefficientVectorsByLimb.entries()) {
-            if (coefficientVector.rnsLimbIndex !== expectedRnsLimbIndex) {
+            const rnsPrime = input.qSharePrimes[expectedRnsLimbIndex];
+            if (rnsPrime === undefined) {
                 throw new Error(
                     'publicKeyShareMaterial coefficient vector limbs must follow Q_share order.',
                 );
             }
             appendBytes(encodedVaruint(expectedRnsLimbIndex));
             appendBytes(
-                encodedUnsigned64(
-                    coefficientVector.rnsPrime,
-                    'publicKeyShareMaterial.rnsPrime',
-                ),
+                encodedUnsigned64(rnsPrime, 'publicKeyShareMaterial.rnsPrime'),
             );
             const coefficients = coefficientVectorFromLittleEndianHex(
                 coefficientVector.coefficientsLeHex,
                 input.ringDegree,
                 'publicKeyShareMaterial.coefficientsLeHex',
             );
-            if (
-                coefficients.some(
-                    (coefficient) => coefficient >= coefficientVector.rnsPrime,
-                ) ||
-                coefficientVector.coefficientVectorHash512 !==
-                    coefficientVectorHash512(coefficients)
-            ) {
+            if (coefficients.some((coefficient) => coefficient >= rnsPrime)) {
                 throw new Error(
-                    'publicKeyShareMaterial coefficient vectors must be canonical and hash-bound before transport encoding.',
+                    'publicKeyShareMaterial coefficient vectors must contain canonical residues before transport encoding.',
                 );
             }
             appendHex(coefficientVector.coefficientsLeHex);
@@ -384,8 +367,7 @@ const copyHexBytes = (
 
 export const createPublicKeyShareMaterialEncodingSource = (
     input: Readonly<{
-        readonly participantCount: number;
-        readonly rnsLimbCount: number;
+        readonly qSharePrimes: readonly number[];
         readonly ringDegree: number;
         readonly shareMaterialRecords: readonly PublicKeyShareMaterialRecord[];
     }>,
@@ -469,5 +451,10 @@ export const createPublicKeyShareMaterialEncodingSource = (
 
 export const createPublicKeyShareMaterialSetEncodingSource = (
     materialSet: PublicKeyShareMaterialSet,
+    qSharePrimes: readonly number[],
 ): PublicKeyShareMaterialEncodingSource =>
-    createPublicKeyShareMaterialEncodingSource(materialSet);
+    createPublicKeyShareMaterialEncodingSource({
+        qSharePrimes,
+        ringDegree: materialSet.ringDegree,
+        shareMaterialRecords: materialSet.shareMaterialRecords,
+    });

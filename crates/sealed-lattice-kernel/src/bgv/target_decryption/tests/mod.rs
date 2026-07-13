@@ -3,7 +3,7 @@ use crate::bgv::{
     evaluator::engine::encode_slots_to_coefficients,
     evaluator::records::target_layout_hash,
     evaluator::top_k::{
-        CANONICAL_TARGET_CIPHERTEXT_LEVEL, canonical_target_basis_hash, packed_score_slot,
+        CANONICAL_TARGET_CIPHERTEXT_LEVEL, canonical_target_basis_hash,
     },
     modular_arithmetic::{add_mod, inverse_mod, sub_mod},
     setup::{
@@ -247,8 +247,8 @@ fn sparse_target_slots(ids: &[u64], orders: &[u64]) -> (Vec<u64>, Vec<u64>) {
     let mut target_ids = vec![0_u64; POLYNOMIAL_DEGREE];
     let mut target_orders = vec![0_u64; POLYNOMIAL_DEGREE];
     for option in 0..MAXIMUM_OPTION_COUNT {
-        target_ids[packed_score_slot(option)] = ids[option];
-        target_orders[packed_score_slot(option)] = orders[option];
+        target_ids[option] = ids[option];
+        target_orders[option] = orders[option];
     }
     (target_ids, target_orders)
 }
@@ -343,7 +343,7 @@ fn target_fixture() -> (Value, Value, Value, Value) {
 
 fn aggregate_threshold_commitment_set(
     setup_package: &Value,
-    target_share_profile: &Value,
+    _target_share_profile: &Value,
 ) -> AggregateThresholdCommitmentSetupOutput {
     let setup_context_hashes =
         collective_bgv_setup_context_hashes_from_package(setup_package).expect("setup context");
@@ -421,7 +421,6 @@ fn aggregate_threshold_commitment_set(
                 "objectType": "LocalTrusteeVssPublicAggregateOpeningCredential",
                 "recipientIdentity": participant.trustee_identity.as_str(),
                 "recipientRosterPosition": participant.roster_position,
-                "recipientTrusteePoint": interpolation_point,
                 "rnsLimbIndex": rns_limb_index,
                 "rnsPrime": rns_prime,
                 "aggregateCommitmentRoot": computation.commitment_root.clone(),
@@ -432,7 +431,6 @@ fn aggregate_threshold_commitment_set(
                 "objectType": "VssPublicAggregateThresholdCommitment",
                 "recipientIdentity": participant.trustee_identity.as_str(),
                 "recipientRosterPosition": participant.roster_position,
-                "recipientTrusteePoint": interpolation_point,
                 "rnsLimbIndex": rns_limb_index,
                 "rnsPrime": rns_prime,
                 "aggregateCommitmentRoot": computation.commitment_root,
@@ -698,8 +696,6 @@ fn rebind_target_decryption_share_hashes(
     trustee_identity: &str,
 ) {
     let setup_binding = read_setup_binding(setup_package).expect("setup binding");
-    let target_share_profile =
-        read_target_share_profile(target_share_profile, &setup_binding).expect("share profile");
     let target_accepted =
         read_target_accepted_binding(accepted_record, &setup_binding).expect("target accepted");
     let target_ciphertext_pair = read_target_ciphertext_pair(
@@ -804,12 +800,6 @@ fn local_target_share_witness(
         "setupEpoch": setup_epoch,
         "trusteeIdentity": participant.trustee_identity.as_str(),
         "trusteeRosterPosition": participant.roster_position,
-        "targetDecryptionSmudging": target_decryption_smudging_witness_value(
-            &setup_binding,
-            &target_accepted,
-            &target_share_profile,
-            participant,
-        ).expect("target-decryption smudging witness"),
         "aggregateOpening": {
             "objectType": "LocalTrusteeVssPublicAggregateOpeningWitness",
             "publicMatrixSeedHash": public_matrix_seed_hash,
@@ -1005,10 +995,6 @@ fn target_release_setup_context_round_trips_and_rejects_a_type_mismatched_roster
 
     let mut type_mismatched_context = release_setup_context;
     type_mismatched_context["participants"][1]["rosterPosition"] = json!("1");
-    type_mismatched_context["releaseSetupContextHash"] = json!(
-        target_result_release_setup_context_hash(&type_mismatched_context)
-            .expect("recomputed release setup context hash")
-    );
     let error = read_target_result_release_setup_context(&type_mismatched_context)
         .err()
         .expect("a string roster position must be refused");

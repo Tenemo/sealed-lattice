@@ -1,10 +1,10 @@
 import { execFileSync } from 'node:child_process';
-import { appendFileSync, readFileSync } from 'node:fs';
+import { appendFileSync } from 'node:fs';
 import { isDeepStrictEqual } from 'node:util';
 
 /**
  * @typedef {{ readonly paths: readonly string[], readonly status: string }} GitNameStatusEntry
- * @typedef {{ baseRevision?: string, headRevision?: string }} ParsedArguments
+ * @typedef {{ readonly baseRevision: string, readonly headRevision: string }} CiRevisions
  */
 
 const publicPackageManifestPath = 'packages/sdk/package.json';
@@ -15,7 +15,6 @@ const toolingDirectoryPrefixes = [
     'tests/node/tools/',
     'tools/ci/',
     'tools/internal/',
-    'tools/lattigo-oracle/',
 ];
 const toolingFiles = new Set([
     '.editorconfig',
@@ -32,7 +31,6 @@ const toolingFiles = new Set([
 ]);
 const heavyRuntimeDirectoryPrefixes = [
     'crates/',
-    'fuzz/',
     'packages/crypto/src/',
     'packages/protocol/src/',
     'packages/sdk/src/',
@@ -54,18 +52,8 @@ const normalizeChangedPath = (changedPath) =>
     changedPath.replace(/\\/gu, '/').replace(/^\.\//u, '');
 
 /** @param {string} changedPath */
-const isSafeRepositoryPath = (changedPath) =>
-    changedPath.length > 0 &&
-    !changedPath.startsWith('../') &&
-    !changedPath.includes('/../');
-
-/** @param {string} changedPath */
 export const isDocumentationOnlyCiPath = (changedPath) => {
     const normalizedPath = normalizeChangedPath(changedPath);
-    if (!isSafeRepositoryPath(normalizedPath)) {
-        return false;
-    }
-
     return (
         normalizedPath.endsWith('.md') ||
         licenseFilePattern.test(normalizedPath) ||
@@ -78,10 +66,6 @@ export const isDocumentationOnlyCiPath = (changedPath) => {
 /** @param {string} changedPath */
 export const isToolingOnlyCiPath = (changedPath) => {
     const normalizedPath = normalizeChangedPath(changedPath);
-    if (!isSafeRepositoryPath(normalizedPath)) {
-        return false;
-    }
-
     return (
         toolingFiles.has(normalizedPath) ||
         toolingDirectoryPrefixes.some((directoryPrefix) =>
@@ -89,6 +73,26 @@ export const isToolingOnlyCiPath = (changedPath) => {
         ) ||
         /^packages\/[^/]+\/tests\//u.test(normalizedPath)
     );
+};
+
+/**
+ * @param {readonly string[]} changedPaths
+ * @param {boolean} [versionOnlyReleaseChange]
+ */
+export const shouldRunRoutineCiLanes = (
+    changedPaths,
+    versionOnlyReleaseChange = false,
+) => {
+    if (changedPaths.length === 0) return true;
+    if (
+        versionOnlyReleaseChange &&
+        changedPaths.length === 1 &&
+        normalizeChangedPath(changedPaths[0]) === publicPackageManifestPath
+    ) {
+        return false;
+    }
+
+    return !changedPaths.every(isDocumentationOnlyCiPath);
 };
 
 /**
@@ -242,39 +246,63 @@ const readManifestAtRevision = (revision) =>
         stdio: ['ignore', 'pipe', 'pipe'],
     });
 
-/** @param {readonly string[]} rawArguments */
-const parseArguments = (rawArguments) => {
-    /** @type {ParsedArguments} */
-    const parsedArguments = {};
-    for (let argumentIndex = 0; argumentIndex < rawArguments.length; ) {
-        const option = rawArguments[argumentIndex];
-        const value = rawArguments[argumentIndex + 1];
-        if (
-            (option !== '--base' && option !== '--head') ||
-            value === undefined
-        ) {
-            throw new Error(
-                'Usage: classify-ci-changes.mjs [--base SHA --head SHA].',
-            );
+/** @param {NodeJS.ProcessEnv} environment */
+export const resolveCiRevisions = (environment) => {
+    const eventName = environment.EVENT_NAME;
+    const headRevision =
+        eventName === 'pull_request'
+            ? environment.PULL_REQUEST_HEAD_SHA
+            : environment.GITHUB_SHA;
+    let baseRevision;
+    if (eventName === 'pull_request') {
+        baseRevision = environment.PULL_REQUEST_BASE_SHA;
+    } else if (eventName === 'push') {
+        baseRevision = environment.PUSH_BASE_SHA;
+        if (/^0+$/u.test(baseRevision ?? '')) {
+            throw new Error('The first push has no comparison revision.');
         }
-        parsedArguments[option === '--base' ? 'baseRevision' : 'headRevision'] =
-            value;
-        argumentIndex += 2;
+    } else if (eventName === 'workflow_dispatch') {
+        if (headRevision === undefined) {
+            throw new Error('Workflow dispatch is missing GITHUB_SHA.');
+        }
+        baseRevision = execFileSync('git', ['rev-parse', `${headRevision}^`], {
+            encoding: 'utf8',
+            stdio: ['ignore', 'pipe', 'pipe'],
+        }).trim();
+    } else {
+        throw new Error(
+            `Unsupported GitHub event: ${eventName ?? '<missing>'}.`,
+        );
     }
-    if (
-        (parsedArguments.baseRevision === undefined) !==
-        (parsedArguments.headRevision === undefined)
-    ) {
-        throw new Error('Both --base and --head are required together.');
+    if (baseRevision === undefined || headRevision === undefined) {
+        throw new Error('The GitHub event is missing comparison revisions.');
     }
-    return parsedArguments;
+
+    return { baseRevision, headRevision };
 };
+
+/** @param {CiRevisions} revisions */
+const collectChangedEntries = (revisions) =>
+    parseNullDelimitedGitNameStatus(
+        execFileSync(
+            'git',
+            [
+                'diff',
+                '--name-status',
+                '-z',
+                revisions.baseRevision,
+                revisions.headRevision,
+            ],
+            { maxBuffer: 10 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] },
+        ),
+    );
 
 const main = () => {
     let runHeavyLanes = true;
+    let runRoutineLanes = true;
     try {
-        const parsedArguments = parseArguments(process.argv.slice(2));
-        const entries = parseNullDelimitedGitNameStatus(readFileSync(0));
+        const revisions = resolveCiRevisions(process.env);
+        const entries = collectChangedEntries(revisions);
         const changedPaths = entries.flatMap((entry) => entry.paths);
         let versionOnlyReleaseChange = false;
         if (
@@ -282,15 +310,17 @@ const main = () => {
             entries[0].status === 'M' &&
             entries[0].paths.length === 1 &&
             normalizeChangedPath(entries[0].paths[0]) ===
-                publicPackageManifestPath &&
-            parsedArguments.baseRevision !== undefined &&
-            parsedArguments.headRevision !== undefined
+                publicPackageManifestPath
         ) {
             versionOnlyReleaseChange = isVersionOnlyReleaseManifestChange(
-                readManifestAtRevision(parsedArguments.baseRevision),
-                readManifestAtRevision(parsedArguments.headRevision),
+                readManifestAtRevision(revisions.baseRevision),
+                readManifestAtRevision(revisions.headRevision),
             );
         }
+        runRoutineLanes = shouldRunRoutineCiLanes(
+            changedPaths,
+            versionOnlyReleaseChange,
+        );
         runHeavyLanes = shouldRunHeavyCiLanes(
             changedPaths,
             versionOnlyReleaseChange,
@@ -298,11 +328,13 @@ const main = () => {
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         process.stderr.write(
-            `Could not classify changed paths (${message}); running expensive proof lanes.\n`,
+            `Could not classify changed paths (${message}); running routine and expensive proof lanes.\n`,
         );
     }
 
-    const output = `run_heavy=${runHeavyLanes ? 'true' : 'false'}\n`;
+    const output =
+        `run_routine=${runRoutineLanes ? 'true' : 'false'}\n` +
+        `run_heavy=${runHeavyLanes ? 'true' : 'false'}\n`;
     const githubOutputPath = process.env.GITHUB_OUTPUT;
     if (githubOutputPath !== undefined && githubOutputPath.length > 0) {
         appendFileSync(githubOutputPath, output, 'utf8');

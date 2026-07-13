@@ -31,8 +31,8 @@ mod relation_proof;
 #[cfg(test)]
 use relation_proof::DirectBallotRelationProofGeneration;
 use relation_proof::{
-    direct_ballot_relation_proof_bytes_hash, direct_ballot_relation_proof_parameters_hash,
-    generate_direct_ballot_relation_proof, verify_direct_ballot_relation_proof,
+    direct_ballot_relation_proof_bytes_hash, generate_direct_ballot_relation_proof,
+    verify_direct_ballot_relation_proof,
 };
 
 use crate::{
@@ -46,7 +46,7 @@ use crate::{
             },
             records::target_layout_hash,
             top_k::{
-                SELECTED_EVALUATOR_WORKING_LEVEL, TIE_POLICY,
+                SELECTED_EVALUATOR_WORKING_LEVEL,
                 evaluate_packed_rank_evaluation_from_packed_scores_with_batched_pairs,
                 pack_direct_score_slots, project_packed_sparse_target_from_rank_evaluation,
             },

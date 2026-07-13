@@ -3,9 +3,6 @@ import type { ProtocolHash } from './protocol-hash.js';
 /** Canonical object type covered by protocol hash and verification helpers. */
 export type ProtocolObjectType =
     | 'ActionContext'
-    | 'EncryptedBallot'
-    | 'EncryptedBallotAggregate'
-    | 'BallotValidityProofRecord'
     | 'BoardHead'
     | 'CastReceipt'
     | 'CloseRecord'
@@ -21,14 +18,10 @@ export type ProtocolObjectType =
     | 'RosterExternalAcceptance'
     | 'TargetAcceptedRecord'
     | 'TargetFinalityRecord'
-    | 'TopKDecryptionShare'
     | 'TrusteeSetupEntry';
 
 /** Object type that is signed as a canonical signed root. */
 export type SignedObjectType =
-    | 'EncryptedBallot'
-    | 'EncryptedBallotAggregate'
-    | 'BallotValidityProofRecord'
     | 'BoardHead'
     | 'CastReceipt'
     | 'CloseRecord'
@@ -39,9 +32,8 @@ export type SignedObjectType =
     | 'RecoveryEpochUpdate'
     | 'RegistrationEntry'
     | 'RosterExternalAcceptance'
-    | 'SetupPhaseParticipantObject'
+    | 'CollectiveBgvSetupIntentTrusteeRegistration'
     | 'TargetFinalityRecord'
-    | 'TopKDecryptionShare'
     | 'TrusteeSetupEntry'
     | 'VssShareAcceptance'
     | 'VssShareComplaint';
@@ -80,23 +72,14 @@ export type ProtocolSignatureEnvelope = {
 
 /** Stable refusal code emitted by protocol verification helpers. */
 export type ProtocolRefusalCode =
-    | 'EncryptedBallotInvalid'
-    | 'EncryptedBallotAggregateInvalid'
-    | 'BallotSetInvalid'
-    | 'BallotValidityProofInvalid'
-    | 'BallotValidityProofParametersInvalid'
     | 'BoardConsistencyFailure'
     | 'BoardForkDetected'
     | 'CastReceiptInvalid'
     | 'CloseRecordInvalid'
     | 'ConflictingFirstValidObject'
-    | 'ConflictingEncryptedBallot'
     | 'ConflictingManifest'
-    | 'DecryptionShareInvalid'
-    | 'DuplicateEncryptedBallot'
     | 'DuplicateRegistration'
     | 'DuplicateTrusteeSetupEntry'
-    | 'EvaluatorReplayInvalid'
     | 'FirstValidContextMismatch'
     | 'FirstValidPolicyMismatch'
     | 'InclusionProofInvalid'
@@ -105,13 +88,11 @@ export type ProtocolRefusalCode =
     | 'LateRegistration'
     | 'ManifestHashMismatch'
     | 'MissingTrusteeSetupEntry'
-    | 'OperationUnavailable'
     | 'RecoveryUpdateConflict'
     | 'RecoveryUpdateInvalid'
     | 'RecoveryUpdateStale'
     | 'RosterHashMismatch'
     | 'RosterExternalAcceptanceInvalid'
-    | 'TargetAcceptedRecordInvalid'
     | 'StaleRecoveryEpoch'
     | 'UnknownBoardHead'
     | 'UnknownRecoveryEpoch'

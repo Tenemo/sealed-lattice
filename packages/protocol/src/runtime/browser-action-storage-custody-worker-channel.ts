@@ -1,3 +1,5 @@
+import { browserActionStorageCustodyErrorCodes } from '@sealed-lattice/types';
+
 import type { BrowserActionStorageWorkerKernel } from './browser-action-storage-custody-internal.js';
 import {
     BrowserActionStorageCustodyError,
@@ -24,21 +26,6 @@ const storageRootCommitmentByteLength = 64;
 const maximumDatabaseNameLength = 256;
 const maximumNamespaceLength = 64;
 const namespacePattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
-
-const custodyErrorCodes: readonly BrowserActionStorageCustodyErrorCode[] = [
-    'Closed',
-    'CommitmentMismatch',
-    'CommitmentRequired',
-    'Conflict',
-    'InvalidCanonicalMaterial',
-    'InvalidInput',
-    'InvalidState',
-    'OwnedWorkerFailure',
-    'RecoveryAlreadyExported',
-    'RecoveryConfirmationFailed',
-    'StorageFailure',
-    'Unavailable',
-];
 
 type BrowserActionStorageCustodyWorkerConfiguration = Readonly<{
     acquisitionDeadlineEpochMilliseconds?: number;
@@ -132,7 +119,10 @@ const isSafePositiveInteger = (value: unknown): value is number =>
 const isCustodyErrorCode = (
     value: unknown,
 ): value is BrowserActionStorageCustodyErrorCode =>
-    typeof value === 'string' && custodyErrorCodes.includes(value as never);
+    typeof value === 'string' &&
+    browserActionStorageCustodyErrorCodes.includes(
+        value as BrowserActionStorageCustodyErrorCode,
+    );
 
 const copyBytes = (
     value: unknown,

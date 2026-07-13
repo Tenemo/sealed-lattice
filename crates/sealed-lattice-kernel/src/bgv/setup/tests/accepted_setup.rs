@@ -1,17 +1,16 @@
-mod ceremony_phases;
 mod evaluation_key_share_proofs;
 mod package_fixtures;
 mod proof_record_fixtures;
 mod public_key_share_proofs;
 mod record_rebinding;
+mod setup_intent;
 mod terminal_evaluation_key_proofs;
-mod transport_policy;
 mod vss_material;
 
 use self::package_fixtures::{
     CollectiveSetupVerificationFixture, accepted_vss_coefficient_message_fixture,
     accepted_vss_randomness_fixture, accepted_vss_secret_coefficient_fixture,
-    collective_public_key_bearing_collective_setup_fixture, collective_setup_phase_package,
+    collective_public_key_bearing_collective_setup_fixture, collective_setup_intent_package,
     descriptor_backed_vss_collective_setup_fixture, minimal_collective_setup_package,
     minimal_collective_setup_package_for_participant_count,
     public_key_share_succinct_proof_bearing_collective_setup_fixture,
@@ -21,30 +20,28 @@ use self::proof_record_fixtures::{
     collective_public_key_object, compact_aggregate_threshold_proof_fixture,
     galois_key_share_batches_object,
     public_coefficient_commitment_ring_degree_from_fixture_package,
-    public_evaluation_key_set_object, public_key_share_material_object,
-    public_key_share_succinct_proofs_fixture, relinearization_key_share_rounds_fixture,
-    replace_public_key_share_hashes_with_material_hashes, trustee_evaluation_key_proofs_object,
+    public_key_share_material_object, public_key_share_succinct_proofs_fixture,
+    relinearization_key_share_rounds_fixture, replace_public_key_share_hashes_with_material_hashes,
+    trustee_evaluation_key_proofs_object,
 };
 use self::record_rebinding::{
     private_vss_envelope_commitment_record_root_input,
     private_vss_envelope_commitment_set_root_input, rebind_collective_evaluator_key_schedule_root,
-    rebind_collective_phase_roots, rebind_collective_private_vss_envelope_commitment_root,
-    rebind_collective_public_key_root, rebind_collective_public_key_share_proof_roots,
-    rebind_collective_public_key_share_roots, rebind_collective_public_key_succinct_proof_roots,
-    rebind_collective_setup_package_hash, rebind_collective_vss_acceptance_root,
+    rebind_collective_private_vss_envelope_commitment_root,
+    rebind_collective_public_key_root, rebind_collective_public_key_share_roots,
+    rebind_collective_public_key_succinct_proof_roots, rebind_collective_setup_package_hash,
+    rebind_collective_setup_intent_registration, rebind_collective_setup_intent_signatures,
     rebind_first_private_vss_encrypted_envelope_hash,
     rebind_first_private_vss_envelope_commitment_record_root,
 };
 
 use super::super::accepted_setup::{
-    PUBLIC_KEY_SHARE_MATERIAL_TRANSPORT_ENCODING, public_key_share_coefficient_vector_hash,
-    verify_collective_bgv_setup_package, verify_full_ring_material,
-    verify_terminal_setup_transport_policy,
+    public_key_share_coefficient_vector_hash, verify_collective_bgv_setup_intent_for_test,
+    verify_collective_bgv_setup_package,
 };
-use super::super::evaluation_key_share_material::EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING;
 use super::super::sampling::{dense_public_residues, negacyclic_product_mod};
 use super::super::setup_proof::{
-    SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES, authenticate_setup_proof_material_stream_for_test,
+    authenticate_setup_proof_material_stream_for_test,
     authenticate_setup_proof_material_stream_in_session_for_test,
 };
 use super::super::trustee_evaluation_key_proof::{
@@ -75,11 +72,9 @@ impl Drop for AcceptedSetupTestTiming {
                 "sealed-lattice-rust-test-timing ",
                 "{{\"suite\":\"bgv::setup::tests::accepted_setup\",",
                 "\"test\":\"{}\",",
-                "\"durationMilliseconds\":{},",
                 "\"durationMicroseconds\":{}}}"
             ),
             self.test_name,
-            duration.as_millis(),
             duration.as_micros()
         );
     }

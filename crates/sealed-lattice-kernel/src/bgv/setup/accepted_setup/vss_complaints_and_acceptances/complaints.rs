@@ -2,6 +2,7 @@ use super::*;
 
 pub(in super::super) fn verify_vss_complaints(
     setup_package: &Value,
+    trustee_registrations: &setup_intent::SetupIntentTrusteeRegistrationMap,
 ) -> CanonicalResult<Option<Value>> {
     let Some(complaint_set) = setup_package.get("vssComplaints") else {
         return Ok(None);
@@ -9,7 +10,7 @@ pub(in super::super) fn verify_vss_complaints(
     if !complaint_set.is_object() {
         return Ok(Some(vss_complaint_refusal(
             "vssComplaintsNotObject",
-            "vssComplaints must be a root-bound object, not an array or scalar",
+            "vssComplaints must be an object, not an array or scalar",
             "setupPackage.vssComplaints",
         )?));
     }
@@ -27,13 +28,6 @@ pub(in super::super) fn verify_vss_complaints(
             "setupContext was required before VSS complaint verification",
         )
     })?;
-    if let Err(error) = verify_vss_complaint_context(complaint_set, setup_context) {
-        return Ok(Some(vss_complaint_refusal(
-            "vssComplaintContextMismatch",
-            error.message,
-            "setupPackage.vssComplaints",
-        )?));
-    }
 
     let private_vss_envelope_commitment_root = setup_package
         .get("privateVssEnvelopeCommitments")
@@ -49,30 +43,16 @@ pub(in super::super) fn verify_vss_complaints(
         private_vss_envelope_commitment_root,
         "privateVssEnvelopeCommitments.privateVssEnvelopeCommitmentRoot",
     )?;
-    if complaint_set
-        .get("privateVssEnvelopeCommitmentRoot")
-        .and_then(Value::as_str)
-        != Some(private_vss_envelope_commitment_root)
-    {
-        return Ok(Some(vss_complaint_refusal(
-            "vssComplaintPrivateEnvelopeRootMismatch",
-            "vssComplaints.privateVssEnvelopeCommitmentRoot must match privateVssEnvelopeCommitments.privateVssEnvelopeCommitmentRoot",
-            "setupPackage.vssComplaints.privateVssEnvelopeCommitmentRoot",
-        )?));
-    }
 
-    let expected_trustees = expected_trustees_from_phase_transcript(setup_package)?;
-    let trustee_registrations =
-        super::phase_transcript::setup_intent_trustee_registrations_from_phase_transcript(
-            setup_package,
-        )?;
+    let expected_trustees = expected_trustees_from_setup_intent(trustee_registrations);
     let source_trustee_commitment_roots =
         source_trustee_commitment_roots_from_vss_commitments(setup_package)?;
-    let private_vss_envelope_bindings = private_vss_envelope_bindings_from_package(setup_package)?;
+    let private_vss_envelope_bindings =
+        private_vss_envelope_bindings_from_package(setup_package, trustee_registrations)?;
     let verification_context = VssRecordVerificationContext {
         setup_context,
         expected_trustees: &expected_trustees,
-        trustee_registrations: &trustee_registrations,
+        trustee_registrations,
         source_trustee_commitment_roots: &source_trustee_commitment_roots,
         private_vss_envelope_commitment_root,
         private_vss_envelope_bindings: &private_vss_envelope_bindings,
@@ -106,64 +86,15 @@ pub(in super::super) fn verify_vss_complaints(
         }
     }
 
-    let Some(complaint_root) = complaint_set
-        .get("vssComplaintRoot")
-        .and_then(Value::as_str)
-    else {
-        return Ok(Some(vss_complaint_refusal(
-            "vssComplaintRootMissing",
-            "vssComplaints.vssComplaintRoot must root-bind the complaint set",
-            "setupPackage.vssComplaints.vssComplaintRoot",
-        )?));
-    };
-    validate_hash_string(complaint_root, "vssComplaints.vssComplaintRoot")?;
-    let mut root_input = complaint_set.clone();
-    root_input
-        .as_object_mut()
-        .expect("VSS complaint set object was checked")
-        .remove("vssComplaintRoot");
-    let expected_root = derive_canonical_object_hash(&root_input)?;
-    if complaint_root != expected_root {
-        return Ok(Some(vss_complaint_refusal(
-            "vssComplaintRootMismatch",
-            "vssComplaintRoot does not match the canonical VSS complaint set",
-            "setupPackage.vssComplaints.vssComplaintRoot",
-        )?));
-    }
-
     // A single valid complaint aborts the ceremony because any provable dealer equivocation is disqualifying, whereas acceptance must be unanimous over all source-by-recipient pairs.
     Ok(Some(verification_response(
-        Some("vssAcceptanceOrComplaint"),
         Vec::new(),
         vec![Refusal::new(
             "vssComplaintAcceptedAbort",
             "a valid VSS complaint aborts the foundation-roster setup ceremony",
             "setupPackage.vssComplaints",
         )],
-        Vec::new(),
     )?))
-}
-
-fn verify_vss_complaint_context(
-    complaint_set: &Value,
-    setup_context: &Value,
-) -> CanonicalResult<()> {
-    for field_name in [
-        "ceremonyId",
-        "manifestHash",
-        "rosterHash",
-        "setupParametersHash",
-        "setupEpoch",
-    ] {
-        if complaint_set.get(field_name) != setup_context.get(field_name) {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::ComponentMismatch,
-                format!("vssComplaints.{field_name} must match setupContext"),
-            ));
-        }
-    }
-
-    Ok(())
 }
 
 fn verify_vss_complaint_record(
@@ -542,9 +473,7 @@ fn vss_complaint_refusal(
     object_path: impl Into<String>,
 ) -> CanonicalResult<Value> {
     verification_response(
-        Some("vssAcceptanceOrComplaint"),
         Vec::new(),
         vec![Refusal::new(reason_code, message, object_path)],
-        Vec::new(),
     )
 }

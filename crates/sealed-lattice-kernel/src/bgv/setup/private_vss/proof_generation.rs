@@ -85,7 +85,7 @@ pub(crate) fn generate_private_vss_share_proof_from_request(
         "recipientRosterPosition must be provided for private VSS proof generation",
     )
     .map_err(private_vss_refusal_to_error)?;
-    let roster = super::accepted_setup::accepted_roster_from_setup_context(setup_context);
+    let roster = super::accepted_setup::accepted_roster_from_setup_context(setup_context)?;
     if recipient_roster_position >= roster.participant_count {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -320,7 +320,6 @@ fn statement_bound_private_vss_proof_randomness_seed_hex(
 
     derive_canonical_object_hash(&json!({
         "objectType": "PrivateVssShareProofRandomnessBinding",
-        "proofFamily": "vss-opening-carry",
         "setupContext": setup_context,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "privateEnvelopeAadHash": private_envelope_aad_hash,

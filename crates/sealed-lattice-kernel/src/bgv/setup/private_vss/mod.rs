@@ -223,7 +223,7 @@ fn verify_private_vss_share_envelope_inner(
         }
     }
 
-    let mut response = verification_response(
+    let response = verification_response(
         true,
         Some(envelope_binding.private_envelope_hash),
         Some(local_verification_root),
@@ -233,7 +233,6 @@ fn verify_private_vss_share_envelope_inner(
             .collect(),
         Vec::new(),
     );
-    response["ringDegree"] = json!(ring_degree);
 
     Ok(Ok(response))
 }

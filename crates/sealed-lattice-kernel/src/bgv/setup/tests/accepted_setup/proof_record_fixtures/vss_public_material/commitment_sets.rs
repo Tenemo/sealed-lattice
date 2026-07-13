@@ -136,7 +136,6 @@ pub(super) fn vss_public_coefficient_commitment_record(
         "rnsPrime": rns_prime,
         "shamirCoefficientIndex": shamir_coefficient_index,
         "coefficientCommitmentRoot": computation["commitmentRoot"],
-        "coefficientOpeningRoot": computation["openingRoot"],
         "commitment": computation["commitment"],
     })
 }
@@ -249,7 +248,6 @@ pub(super) fn vss_public_recipient_share_commitment_record(
         "sourceTrusteeRosterPosition": source_trustee_roster_position,
         "recipientIdentity": recipient_identity,
         "recipientRosterPosition": recipient_roster_position,
-        "recipientTrusteePoint": recipient_roster_position + 1,
         "rnsLimbIndex": rns_limb_index,
         "rnsPrime": rns_prime,
     });
@@ -275,11 +273,9 @@ pub(super) fn vss_public_recipient_share_commitment_record(
         "sourceTrusteeRosterPosition": source_trustee_roster_position,
         "recipientIdentity": recipient_identity,
         "recipientRosterPosition": recipient_roster_position,
-        "recipientTrusteePoint": recipient_roster_position + 1,
         "rnsLimbIndex": rns_limb_index,
         "rnsPrime": rns_prime,
         "shareCommitmentRoot": computation["commitmentRoot"],
-        "shareOpeningRoot": computation["openingRoot"],
         "commitment": computation["commitment"],
     })
 }
@@ -391,7 +387,6 @@ pub(super) fn vss_public_aggregate_threshold_commitment_record(
         "setupEpoch": setup_context["setupEpoch"],
         "recipientIdentity": recipient_identity,
         "recipientRosterPosition": recipient_roster_position,
-        "recipientTrusteePoint": recipient_roster_position + 1,
         "rnsLimbIndex": rns_limb_index,
         "rnsPrime": rns_prime,
     });
@@ -415,7 +410,6 @@ pub(super) fn vss_public_aggregate_threshold_commitment_record(
         "objectType": "VssPublicAggregateThresholdCommitment",
         "recipientIdentity": recipient_identity,
         "recipientRosterPosition": recipient_roster_position,
-        "recipientTrusteePoint": recipient_roster_position + 1,
         "rnsLimbIndex": rns_limb_index,
         "rnsPrime": rns_prime,
         "aggregateCommitmentRoot": computation["commitmentRoot"],

@@ -224,7 +224,7 @@ fn verified_exact_output_stream(
         StateCapabilityKind::SetupActionRandomnessRoot
         | StateCapabilityKind::SetupPublicSeedBranch
         | StateCapabilityKind::SetupDealerSetBranch
-        | StateCapabilityKind::SetupRelinearizationRoundOneBranch
+        | StateCapabilityKind::SetupRkgRoundOneBranch
         | StateCapabilityKind::SetupTerminalPackage => {
             panic!("reservation-only state capability has no exact-output stream")
         }
@@ -336,7 +336,14 @@ fn state_payload_and_certificate_codecs_are_exact_and_bounded() {
         .expect("recovery decodes"),
         recovery
     );
-    for capability_kind in StateCapabilityKind::ALL {
+    for canonical_code in 1..=8 {
+        let capability_kind = StateCapabilityKind::from_canonical_code(canonical_code)
+            .expect("assigned state capability kind decodes");
+        assert_eq!(capability_kind.canonical_code(), canonical_code);
+        assert_eq!(
+            StateCapabilityKind::from_canonical_code(canonical_code),
+            Some(capability_kind)
+        );
         let payload = StateReservationIntentPayload {
             capability_kind,
             authorization_hash: Hash512::from_bytes(
@@ -473,20 +480,12 @@ fn state_derivations_check_domains_boundaries_and_replay_equivocation() {
         derive_state_exact_output_hash(StateCapabilityKind::FinalitySignature, b"abc")
             .expect("other capability output hash derives")
     );
-    for reservation_only_kind in [
-        StateCapabilityKind::SetupActionRandomnessRoot,
-        StateCapabilityKind::SetupPublicSeedBranch,
-        StateCapabilityKind::SetupDealerSetBranch,
-        StateCapabilityKind::SetupRelinearizationRoundOneBranch,
-        StateCapabilityKind::SetupTerminalPackage,
-    ] {
-        assert_eq!(
-            derive_state_exact_output_hash(reservation_only_kind, b"abc")
-                .expect_err("reservation-only capability has no exact output")
-                .refusal_reason,
-            RefusalReason::WrongTypeOrLength
-        );
-    }
+    assert_eq!(
+        derive_state_exact_output_hash(StateCapabilityKind::SetupPublicSeedBranch, b"abc")
+            .expect_err("reservation-only capability has no exact output")
+            .refusal_reason,
+        RefusalReason::WrongTypeOrLength
+    );
 
     assert_eq!(
         derive_state_witness_vote_sequence(StateWitnessVoteKind::Reservation, 0)
@@ -1067,101 +1066,103 @@ fn state_verifier_accepts_exact_quorums_and_refuses_every_malformed_extra_or_con
     );
 }
 
-#[test]
-fn reservation_only_setup_capabilities_verify_recover_and_refuse_outputs() {
+fn assert_reservation_only_setup_capability_verifies_recovers_and_refuses_outputs(
+    capability_kind: StateCapabilityKind,
+) {
     let fixture = TestFixture::new();
     let verifier = fixture.verifier();
     let subject_participant_id = fixture.subject_participant_id();
+    let authorization_hash = Hash512::from_bytes(
+        [u8::try_from(capability_kind.canonical_code()).expect("capability code fits u8"); 64],
+    );
+    let reservation_carrier = fixture.signed_subject_intent(
+        FoundationObjectType::StateReservation,
+        0,
+        None,
+        0,
+        StateReservationIntentPayload {
+            capability_kind,
+            authorization_hash,
+        }
+        .encode()
+        .expect("reservation-only payload encodes"),
+    );
+    let reservation_hash = object_hash(&reservation_carrier);
+    let reservation_certificate = fixture.certificate_for_positions(
+        reservation_hash,
+        derive_state_witness_vote_sequence(StateWitnessVoteKind::Reservation, 0)
+            .expect("reservation witness sequence derives"),
+        &[1, 2, 3, 4, 5, 6, 7],
+    );
+    let verified_reservation = verifier
+        .verify_reservation(StateReservationVerificationInput {
+            subject_participant_id,
+            capability_kind,
+            verified_predecessor_recovery: None,
+            expected_authorization_hash: authorization_hash,
+            canonical_reservation_intent_carrier: &reservation_carrier,
+            canonical_state_certificate: &reservation_certificate,
+        })
+        .into_result()
+        .expect("reservation-only state verifies");
 
+    expect_refusal(
+        verifier.verify_output_from_verified_stream(
+            &verified_reservation,
+            b"not an output intent",
+            b"not a certificate",
+            verified_exact_output_stream(StateCapabilityKind::TargetRelease, EXACT_OUTPUT_BYTES),
+        ),
+        RefusalReason::WrongTypeOrLength,
+    );
+
+    let recovery_carrier = fixture.signed_subject_intent(
+        FoundationObjectType::RecoveryTransition,
+        0,
+        None,
+        1,
+        StateRecoveryTransitionPayload {
+            capability_kind,
+            preserved_latest_intent_object_hash: Some(reservation_hash),
+        }
+        .encode()
+        .expect("reservation-only recovery payload encodes"),
+    );
+    let recovery_hash = object_hash(&recovery_carrier);
+    let recovery_certificate = fixture.certificate_for_positions(
+        recovery_hash,
+        derive_state_witness_vote_sequence(StateWitnessVoteKind::Recovery, 1)
+            .expect("recovery witness sequence derives"),
+        &[1, 2, 3, 4, 5, 6, 7],
+    );
+    let verified_recovery = verifier
+        .verify_recovery(StateRecoveryVerificationInput {
+            subject_participant_id,
+            capability_kind,
+            verified_predecessor_recovery: None,
+            preserved_state_intent: Some(PreservedStateIntent::Reservation(&verified_reservation)),
+            canonical_recovery_transition_carrier: &recovery_carrier,
+            canonical_state_certificate: &recovery_certificate,
+        })
+        .into_result()
+        .expect("reservation-only state recovery verifies");
+    assert_eq!(
+        verified_recovery.preserved_latest_intent_object_hash(),
+        Some(reservation_hash)
+    );
+}
+
+#[test]
+fn reservation_only_setup_capabilities_verify_recover_and_refuse_outputs() {
     for capability_kind in [
         StateCapabilityKind::SetupActionRandomnessRoot,
         StateCapabilityKind::SetupPublicSeedBranch,
         StateCapabilityKind::SetupDealerSetBranch,
-        StateCapabilityKind::SetupRelinearizationRoundOneBranch,
+        StateCapabilityKind::SetupRkgRoundOneBranch,
         StateCapabilityKind::SetupTerminalPackage,
     ] {
-        let capability_byte =
-            u8::try_from(capability_kind.canonical_code()).expect("state capability code fits u8");
-        let authorization_hash = Hash512::from_bytes([0xa0 | capability_byte; 64]);
-        let reservation_carrier = fixture.signed_subject_intent(
-            FoundationObjectType::StateReservation,
-            0,
-            None,
-            0,
-            StateReservationIntentPayload {
-                capability_kind,
-                authorization_hash,
-            }
-            .encode()
-            .expect("reservation-only payload encodes"),
-        );
-        let reservation_hash = object_hash(&reservation_carrier);
-        let reservation_certificate = fixture.certificate_for_positions(
-            reservation_hash,
-            derive_state_witness_vote_sequence(StateWitnessVoteKind::Reservation, 0)
-                .expect("reservation witness sequence derives"),
-            &[1, 2, 3, 4, 5, 6, 7],
-        );
-        let verified_reservation = verifier
-            .verify_reservation(StateReservationVerificationInput {
-                subject_participant_id,
-                capability_kind,
-                verified_predecessor_recovery: None,
-                expected_authorization_hash: authorization_hash,
-                canonical_reservation_intent_carrier: &reservation_carrier,
-                canonical_state_certificate: &reservation_certificate,
-            })
-            .into_result()
-            .expect("reservation-only state verifies");
-
-        expect_refusal(
-            verifier.verify_output_from_verified_stream(
-                &verified_reservation,
-                b"not an output intent",
-                b"not a certificate",
-                verified_exact_output_stream(
-                    StateCapabilityKind::TargetRelease,
-                    EXACT_OUTPUT_BYTES,
-                ),
-            ),
-            RefusalReason::WrongTypeOrLength,
-        );
-
-        let recovery_carrier = fixture.signed_subject_intent(
-            FoundationObjectType::RecoveryTransition,
-            0,
-            None,
-            1,
-            StateRecoveryTransitionPayload {
-                capability_kind,
-                preserved_latest_intent_object_hash: Some(reservation_hash),
-            }
-            .encode()
-            .expect("reservation-only recovery payload encodes"),
-        );
-        let recovery_hash = object_hash(&recovery_carrier);
-        let recovery_certificate = fixture.certificate_for_positions(
-            recovery_hash,
-            derive_state_witness_vote_sequence(StateWitnessVoteKind::Recovery, 1)
-                .expect("recovery witness sequence derives"),
-            &[1, 2, 3, 4, 5, 6, 7],
-        );
-        let verified_recovery = verifier
-            .verify_recovery(StateRecoveryVerificationInput {
-                subject_participant_id,
-                capability_kind,
-                verified_predecessor_recovery: None,
-                preserved_state_intent: Some(PreservedStateIntent::Reservation(
-                    &verified_reservation,
-                )),
-                canonical_recovery_transition_carrier: &recovery_carrier,
-                canonical_state_certificate: &recovery_certificate,
-            })
-            .into_result()
-            .expect("reservation-only state recovery verifies");
-        assert_eq!(
-            verified_recovery.preserved_latest_intent_object_hash(),
-            Some(reservation_hash)
+        assert_reservation_only_setup_capability_verifies_recovers_and_refuses_outputs(
+            capability_kind,
         );
     }
 }

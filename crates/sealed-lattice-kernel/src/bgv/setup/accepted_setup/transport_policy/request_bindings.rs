@@ -21,12 +21,7 @@ pub(in super::super) fn verify_transport_request_bindings(
         proof_binding_session,
     )? {
         Ok(()) => Ok(None),
-        Err(refusal) => Ok(Some(verification_response(
-            None,
-            Vec::new(),
-            vec![refusal],
-            Vec::new(),
-        )?)),
+        Err(refusal) => Ok(Some(verification_response(Vec::new(), vec![refusal])?)),
     }
 }
 
@@ -158,24 +153,6 @@ fn verify_setup_transport_request_bindings_in_session(
         proof_binding_session,
     ));
 
-    let referenced_public_evaluation_key_material_roots =
-        setup_transport_referenced_public_evaluation_key_material_roots(setup_package)?;
-    transport_canonical_try!(require_setup_transport_material_entries(
-        request.get("transportedPublicEvaluationKeyMaterial"),
-        SetupTransportMaterialSetLocation {
-            material_set_path: "transportedPublicEvaluationKeyMaterial",
-            material_array_field_name: "publicEvaluationKeyMaterials",
-        },
-        SetupTransportMaterialDescriptor {
-            object_root: "publicEvaluationKeyMaterialRoot",
-        },
-        &referenced_public_evaluation_key_material_roots,
-        AuthenticatedSetupTransportMaterialSource::SetupProof(
-            PUBLIC_EVALUATION_KEY_MATERIAL_STREAM_FAMILY,
-        ),
-        proof_binding_session,
-    ));
-
     Ok(Ok(()))
 }
 
@@ -213,11 +190,6 @@ fn setup_transport_referenced_public_key_share_material_roots(
     let Some(material) = setup_package.get("publicKeyShareMaterial") else {
         return Ok(referenced_roots);
     };
-    if material.get("materialEncoding").and_then(Value::as_str)
-        != Some(PUBLIC_KEY_SHARE_MATERIAL_TRANSPORT_ENCODING)
-    {
-        return Ok(referenced_roots);
-    }
     if let Some(root) = material
         .get("publicKeyShareMaterialSetRoot")
         .and_then(Value::as_str)
@@ -265,25 +237,6 @@ fn setup_transport_referenced_evaluation_key_material_roots(
                 &mut referenced_roots,
             )?;
         }
-    }
-
-    Ok(referenced_roots)
-}
-
-fn setup_transport_referenced_public_evaluation_key_material_roots(
-    setup_package: &Value,
-) -> CanonicalResult<BTreeSet<String>> {
-    let mut referenced_roots = BTreeSet::new();
-    if let Some(root) = setup_package
-        .get("evaluationKeys")
-        .and_then(|evaluation_keys| evaluation_keys.get("publicEvaluationKeyMaterialRoot"))
-        .and_then(Value::as_str)
-    {
-        validate_hash_string(
-            root,
-            "setupPackage.evaluationKeys.publicEvaluationKeyMaterialRoot",
-        )?;
-        referenced_roots.insert(root.to_string());
     }
 
     Ok(referenced_roots)
@@ -691,7 +644,7 @@ mod tests {
         let packages = [
             json!({
                 "publicKeyShareMaterial": {
-                    "materialEncoding": PUBLIC_KEY_SHARE_MATERIAL_TRANSPORT_ENCODING,
+                    "publicKeyShareMaterialRoots": [],
                     "publicKeyShareMaterialSetRoot": material_root,
                 },
             }),
@@ -732,11 +685,6 @@ mod tests {
                     }],
                 }],
             }),
-            json!({
-                "evaluationKeys": {
-                    "publicEvaluationKeyMaterialRoot": material_root,
-                },
-            }),
         ];
 
         for package in packages {
@@ -746,55 +694,6 @@ mod tests {
 
             assert_eq!(refusal.reason_code, "transportedMaterialReferenceMissing");
         }
-    }
-
-    #[test]
-    fn request_material_must_have_an_authenticated_canonical_stream() {
-        let authenticated_material_root = protocol_hash('a');
-        let authenticated_bytes = &[0x41_u8; 64];
-        authenticate_bgv_material_stream(
-            crate::bgv::setup::canonical_stream_transport::BGV_CANONICAL_STREAM_FAMILY_PUBLIC_EVALUATION_KEY_MATERIAL,
-            CanonicalStreamDomain::PublicEvaluationKeyMaterial,
-            &authenticated_material_root,
-            authenticated_bytes,
-            0x91,
-        );
-        let package = json!({
-            "evaluationKeys": {
-                "publicEvaluationKeyMaterialRoot": authenticated_material_root,
-            },
-        });
-        let authenticated_request = json!({
-            "transportedPublicEvaluationKeyMaterial": {
-                "publicEvaluationKeyMaterials": [{
-                    "publicEvaluationKeyMaterialRoot": authenticated_material_root,
-                }],
-            },
-        });
-        {
-            let _eviction_guard =
-                VerifiedSetupProofMaterialEvictionGuard::for_request(&authenticated_request);
-            let authenticated_result =
-                verify_setup_transport_request_bindings(&package, &authenticated_request)
-                    .expect("authenticated transport request binding verification");
-            assert!(authenticated_result.is_ok());
-        }
-        assert!(
-            authenticated_setup_proof_material_stream_summary(
-                PUBLIC_EVALUATION_KEY_MATERIAL_STREAM_FAMILY,
-                &authenticated_material_root,
-            )
-            .expect("post-accept material lookup")
-            .is_none()
-        );
-
-        let refusal = verify_setup_transport_request_bindings(&package, &authenticated_request)
-            .expect("missing stream verification")
-            .expect_err("an unauthenticated material reference must refuse");
-        assert_eq!(
-            refusal.reason_code,
-            "transportedObjectAuthenticatedMaterialMissing"
-        );
     }
 
     #[test]
@@ -917,7 +816,7 @@ mod tests {
         );
         let public_key_package = json!({
             "publicKeyShareMaterial": {
-                "materialEncoding": PUBLIC_KEY_SHARE_MATERIAL_TRANSPORT_ENCODING,
+                "publicKeyShareMaterialRoots": [],
                 "publicKeyShareMaterialSetRoot": public_key_material_root,
             },
         });

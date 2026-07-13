@@ -108,22 +108,18 @@ const transportedProofMaterialSet = <
     root = proofMaterialRoot,
 ): Readonly<{
     readonly objectType: TransportCase['materialSetObjectType'];
-    readonly proofFamily: TransportCase['proofFamily'];
     readonly proofMaterials: readonly [
         Readonly<{
             readonly objectType: TransportCase['materialObjectType'];
-            readonly proofFamily: TransportCase['proofFamily'];
             readonly proofMaterialRoot: string;
             readonly descriptorBytes: Uint8Array;
         }>,
     ];
 }> => ({
     objectType: transportCase.materialSetObjectType,
-    proofFamily: transportCase.proofFamily,
     proofMaterials: [
         {
             objectType: transportCase.materialObjectType,
-            proofFamily: transportCase.proofFamily,
             proofMaterialRoot: root,
             descriptorBytes: canonicalStreamDescriptorFixture(
                 3,
@@ -358,12 +354,10 @@ describe('canonical setup material streaming in the public package', () => {
                 transportedPublicKeyShareProofMaterial: {
                     objectType:
                         'SetupTransportedPublicKeyShareProofMaterialSet',
-                    proofFamily: 'public-key-share',
                     proofMaterials: [
                         {
                             objectType:
                                 'SetupTransportedPublicKeyShareProofMaterial',
-                            proofFamily: 'public-key-share',
                             proofMaterialRoot,
                             descriptorBytes: oversizedDescriptor,
                         },

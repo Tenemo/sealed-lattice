@@ -74,7 +74,7 @@ fn heavy_rust_kernel_foundation_profile_domain_multiballot_rank_evaluation_decry
         .decrypt_to_slots(&rank_evaluation.packed_ranks)
         .expect("rank slots");
     let decrypted_rank_values = (0..option_count)
-        .map(|logical_index| decrypted_slots[packed_score_slot(logical_index)])
+        .map(|logical_index| decrypted_slots[logical_index])
         .collect::<Vec<_>>();
 
     assert_eq!(
@@ -136,7 +136,7 @@ fn heavy_rust_kernel_packed_rank_evaluation_decrypts_expected_ranks_and_tie_poli
         .decrypt_to_slots(&rank_evaluation.packed_ranks)
         .expect("rank slots");
     let decrypted_rank_values = (0..score_values.len())
-        .map(|logical_index| decrypted_slots[packed_score_slot(logical_index)])
+        .map(|logical_index| decrypted_slots[logical_index])
         .collect::<Vec<_>>();
 
     assert_eq!(
@@ -193,10 +193,10 @@ fn heavy_rust_kernel_sparse_target_projection_decrypts_selected_ids_and_orders()
         .decrypt_to_slots(&sparse_target.target_order)
         .expect("target order slots");
     let decrypted_target_ids = (0..score_values.len())
-        .map(|logical_index| decrypted_target_id_slots[packed_score_slot(logical_index)])
+        .map(|logical_index| decrypted_target_id_slots[logical_index])
         .collect::<Vec<_>>();
     let decrypted_target_orders = (0..score_values.len())
-        .map(|logical_index| decrypted_target_order_slots[packed_score_slot(logical_index)])
+        .map(|logical_index| decrypted_target_order_slots[logical_index])
         .collect::<Vec<_>>();
 
     assert_eq!(

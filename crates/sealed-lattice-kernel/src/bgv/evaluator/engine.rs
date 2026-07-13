@@ -3,15 +3,11 @@ use num_traits::{ToPrimitive, Zero};
 
 use crate::{
     bgv::{
+        encoding::encode_logical_slots_to_plaintext_coefficients,
         evaluator::prg::DeterministicSampler,
         modular_arithmetic::{add_mod, add_mod_fast, inverse_mod, mul_mod, mul_mod_fast, sub_mod},
-        ntt::{
-            forward_negacyclic_ntt, forward_negacyclic_ntt_in_place, inverse_negacyclic_ntt,
-            inverse_negacyclic_ntt_in_place,
-        },
-        parameters::{
-            BgvBasisKind, DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, bgv_parameters_hash,
-        },
+        ntt::{forward_negacyclic_ntt_in_place, inverse_negacyclic_ntt_in_place},
+        parameters::{BgvBasisKind, DATA_PRIMES, POLYNOMIAL_DEGREE, bgv_parameters_hash},
         rns::RnsPolynomial,
         serialization::{
             BgvObjectKind, canonical_bytes_hex, ciphertext_root, serialize_bgv_object,
@@ -19,6 +15,9 @@ use crate::{
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
 };
+
+#[cfg(test)]
+use crate::bgv::encoding::decode_plaintext_coefficients_to_logical_slots;
 
 #[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::*;
@@ -352,7 +351,7 @@ impl DevelopmentBgvKey {
     pub(crate) fn decrypt_to_slots(&self, ciphertext: &Ciphertext) -> CanonicalResult<Vec<u64>> {
         let coefficients = self.decrypt_to_coefficients(ciphertext)?;
 
-        forward_negacyclic_ntt(&coefficients, PLAINTEXT_MODULUS)
+        decode_plaintext_coefficients_to_logical_slots(&coefficients)
     }
 }
 
@@ -477,22 +476,8 @@ fn validate_public_key_component_shape(component: &[Vec<u64>], label: &str) -> C
 // coefficient representation via the inverse batch NTT, matching the BGV batch
 // encoder.
 pub(crate) fn encode_slots_to_coefficients(slots: &[u64]) -> CanonicalResult<Vec<u64>> {
-    if slots.len() > POLYNOMIAL_DEGREE {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "BGV evaluator received more slots than the polynomial degree",
-        ));
-    }
-    if slots.iter().any(|slot| *slot >= PLAINTEXT_MODULUS) {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "BGV evaluator slot value is outside the plaintext field",
-        ));
-    }
-    let mut padded = vec![0_u64; POLYNOMIAL_DEGREE];
-    padded[..slots.len()].copy_from_slice(slots);
-
-    inverse_negacyclic_ntt(&padded, PLAINTEXT_MODULUS)
+    let (_, coefficients) = encode_logical_slots_to_plaintext_coefficients(slots)?;
+    Ok(coefficients)
 }
 
 #[cfg(test)]

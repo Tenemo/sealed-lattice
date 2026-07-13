@@ -1,11 +1,7 @@
 {
     "editor.formatOnSave": true,
-    "editor.linkedEditing": true,
-    "files.autoSave": "off",
     "javascript.updateImportsOnFileMove.enabled": "prompt",
     "typescript.tsdk": "node_modules/typescript/lib",
-    "editor.bracketPairColorization.enabled": true,
-    "editor.guides.bracketPairs": true,
 
     "javascript.validate.enable": false,
 
@@ -20,27 +16,8 @@
     "[json]": {
         "editor.defaultFormatter": "esbenp.prettier-vscode"
     },
-    "prettier.htmlWhitespaceSensitivity": "ignore",
     "eslint.validate": ["javascript", "typescript"],
     "editor.codeActionsOnSave": {
         "source.fixAll.eslint": "never"
-    },
-
-    "workbench.iconTheme": "vscode-icons",
-    "cSpell.ignorePaths": ["node_modules", ".git"],
-    "cSpell.words": [
-        "Bleichenbacher's",
-        "ciphertext",
-        "dbaeumer",
-        "esbenp",
-        "Homomorphically",
-        "isqrt",
-        "jsbn",
-        "Khadir's",
-        "Longname",
-        "Noordhuis",
-        "PRIMALITY",
-        "Shamir's",
-        "shamirs"
-    ]
+    }
 }

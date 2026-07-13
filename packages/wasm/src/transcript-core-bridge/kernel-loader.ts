@@ -1,66 +1,39 @@
-import type { ParticipantIdentity, ProtocolHash } from '@sealed-lattice/types';
-import {
-    foundationProfile,
-    parseParticipantIdentity,
-} from '@sealed-lattice/types';
+import type { ProtocolHash } from '@sealed-lattice/types';
 
-import { openAcceptedSetupSession } from '../accepted-setup-session-runtime.js';
 import { registerStateVerifierKernelContext } from '../state-verifier-runtime.js';
 
 import type {
-    BgvBatchPlaintextEncoding,
     BgvCollectiveSetupParametersDescription,
     BgvTrusteeEvaluationKeyProofGeneration,
     BgvTrusteeEvaluationKeyStatementDescription,
     BgvLocalTrusteeSetupStateVerification,
-    BgvObjectValidation,
     BgvPassiveSetupPackage,
-    BgvPrivateVssShareEnvelopeVerification,
     BgvPrivateVssShareProofGeneration,
     BgvRnsParametersDescription,
     BgvSameSecretBridgeProofGeneration,
     BgvVssCommittedMaterialCommitmentComputation,
     BgvVssShareLinkageProofGeneration,
     BgvSetupCommitmentOpeningComputation,
-    BgvTargetDecryptionReleaseSetupContext,
     BgvTargetDecryptionShare,
-    BgvTargetDecryptionShareProofMaterial,
-    BgvTargetDecryptionResultReleaseBegin,
-    BgvTargetDecryptionResultReleaseShareAbsorption,
-    BgvTargetDecryptionResultReleaseCompletion,
-    FoundationCanonicalTupleValidation,
-    FoundationSchemaObjectValidation,
     TranscriptCoreKernel,
 } from './kernel-contracts.js';
-import { bytesToHex } from './kernel-contracts.js';
 import type { TranscriptCoreKernelLoaderOptions } from './kernel-runtime.js';
 import {
-    TranscriptCoreKernelCommandError,
     instantiateTranscriptCoreKernelCommandRuntime,
     resolveOptionalNumberExport,
 } from './kernel-runtime.js';
 import { registerLocalStorageRootKernelContext } from './local-storage-root-kernel-context.js';
+import {
+    createCachedKernelLoader,
+    createPublishedSdkKernelBindings,
+} from './published-sdk-kernel-loader.js';
 import { registerKernelContexts } from './register-kernel-contexts.js';
-
-const maximumFoundationSchemaObjectByteLength =
-    foundationProfile.maximumCopiedBufferByteLength;
-
-const typedArrayPrototype = Reflect.getPrototypeOf(Uint8Array.prototype);
-
-const isUint8Array = (value: unknown): value is Uint8Array =>
-    ArrayBuffer.isView(value) &&
-    typedArrayPrototype !== null &&
-    Reflect.get(typedArrayPrototype, Symbol.toStringTag, value) ===
-        'Uint8Array';
 
 export const createTranscriptCoreKernelLoader = (
     transcriptCoreKernelUrl: URL,
     options: TranscriptCoreKernelLoaderOptions = {},
-): (() => Promise<TranscriptCoreKernel>) => {
-    let kernelPromise: Promise<TranscriptCoreKernel> | undefined;
-
-    return async (): Promise<TranscriptCoreKernel> => {
-        kernelPromise ??= (async (): Promise<TranscriptCoreKernel> => {
+): (() => Promise<TranscriptCoreKernel>) =>
+    createCachedKernelLoader(async (): Promise<TranscriptCoreKernel> => {
             const runtime = await instantiateTranscriptCoreKernelCommandRuntime(
                 transcriptCoreKernelUrl,
                 options,
@@ -69,7 +42,6 @@ export const createTranscriptCoreKernelLoader = (
                 allocate,
                 deallocate,
                 executeCommand,
-                exportedFunctionNames,
                 memory,
                 runExclusive: runExclusiveKernelOperation,
                 wasmExports: exports,
@@ -86,6 +58,10 @@ export const createTranscriptCoreKernelLoader = (
                 exports,
                 'sealed_lattice_state_verifier_cancel',
             );
+            const stateVerifierCertifyIntent = resolveOptionalNumberExport(
+                exports,
+                'sealed_lattice_state_verifier_certify_intent',
+            );
             const stateVerifierRelease = resolveOptionalNumberExport(
                 exports,
                 'sealed_lattice_state_verifier_release',
@@ -93,6 +69,18 @@ export const createTranscriptCoreKernelLoader = (
             const stateVerifierFinishOutput = resolveOptionalNumberExport(
                 exports,
                 'sealed_lattice_state_verifier_finish_output',
+            );
+            const stateVerifierPrepareOutput = resolveOptionalNumberExport(
+                exports,
+                'sealed_lattice_state_verifier_prepare_output',
+            );
+            const stateVerifierPrepareRecovery = resolveOptionalNumberExport(
+                exports,
+                'sealed_lattice_state_verifier_prepare_recovery',
+            );
+            const stateVerifierPrepareReservation = resolveOptionalNumberExport(
+                exports,
+                'sealed_lattice_state_verifier_prepare_reservation',
             );
             const stateVerifierVerifyRecovery = resolveOptionalNumberExport(
                 exports,
@@ -102,31 +90,9 @@ export const createTranscriptCoreKernelLoader = (
                 exports,
                 'sealed_lattice_state_verifier_verify_reservation',
             );
-            const kernel: TranscriptCoreKernel = {
-                beginAcceptedSetupSession: () =>
-                    openAcceptedSetupSession(kernel),
-                exportedFunctionNames,
-                computeFoundationHash512: (input): ProtocolHash =>
-                    executeCommand<{ readonly hash512: ProtocolHash }>({
-                        command: 'ComputeFoundationHash512',
-                        domain: input.domain,
-                        canonicalItemsTupleHex: input.canonicalItemsTupleHex,
-                    }).hash512,
-                deriveFoundationParticipantIdentity: (
-                    input,
-                ): ParticipantIdentity => {
-                    const response = executeCommand<{
-                        readonly participantIdentity: unknown;
-                    }>({
-                        command: 'DeriveFoundationParticipantIdentity',
-                        signingVerificationKeyHex:
-                            input.signingVerificationKeyHex,
-                    });
-
-                    return parseParticipantIdentity(
-                        response.participantIdentity,
-                    );
-                },
+            let kernel: TranscriptCoreKernel;
+            kernel = {
+                ...createPublishedSdkKernelBindings(runtime, () => kernel),
                 deriveCanonicalObjectHash: (input): ProtocolHash =>
                     executeCommand<{
                         readonly canonicalObjectHash: ProtocolHash;
@@ -134,42 +100,6 @@ export const createTranscriptCoreKernelLoader = (
                         command: 'DeriveCanonicalObjectHash',
                         value: input.value,
                     }).canonicalObjectHash,
-                validateFoundationCanonicalTuple: (
-                    input,
-                ): FoundationCanonicalTupleValidation =>
-                    executeCommand<FoundationCanonicalTupleValidation>({
-                        command: 'ValidateFoundationCanonicalTuple',
-                        canonicalTupleHex: input.canonicalTupleHex,
-                    }),
-                validateFoundationSchemaObject: (
-                    input,
-                ): FoundationSchemaObjectValidation => {
-                    if (!isUint8Array(input.canonicalBytes)) {
-                        throw new TranscriptCoreKernelCommandError({
-                            code: 'InvalidProtocolObject',
-                            message:
-                                'foundation schema object must be a Uint8Array',
-                        });
-                    }
-                    if (
-                        input.canonicalBytes.byteLength >
-                        maximumFoundationSchemaObjectByteLength
-                    ) {
-                        throw new TranscriptCoreKernelCommandError({
-                            code: 'MalformedLength',
-                            message:
-                                'foundation schema object exceeds the accepted byte length',
-                        });
-                    }
-                    const canonicalBytes = new Uint8Array(
-                        input.canonicalBytes.byteLength,
-                    );
-                    canonicalBytes.set(input.canonicalBytes);
-                    return executeCommand<FoundationSchemaObjectValidation>({
-                        command: 'ValidateFoundationSchemaObject',
-                        canonicalObjectHex: bytesToHex(canonicalBytes),
-                    });
-                },
                 generateBgvTargetDecryptionShareFromLocalShare: (
                     input,
                 ): BgvTargetDecryptionShare =>
@@ -183,24 +113,6 @@ export const createTranscriptCoreKernelLoader = (
                         targetShareProfile: input.targetShareProfile,
                         trusteeIdentity: input.trusteeIdentity,
                         localTargetShareWitness: input.localTargetShareWitness,
-                    }),
-                generateBgvTargetDecryptionShareProofMaterialFromLocalWitness: (
-                    input,
-                ): BgvTargetDecryptionShareProofMaterial =>
-                    executeCommand<BgvTargetDecryptionShareProofMaterial>({
-                        command:
-                            'GenerateBgvTargetDecryptionShareProofMaterialFromLocalWitness',
-                        setupPackage: input.setupPackage,
-                        targetAcceptedRecord: input.targetAcceptedRecord,
-                        targetCiphertexts: input.targetCiphertexts,
-                        targetCiphertextBinding: input.targetCiphertextBinding,
-                        targetShareProfile: input.targetShareProfile,
-                        trusteeIdentity: input.trusteeIdentity,
-                        localTargetShareWitness: input.localTargetShareWitness,
-                        targetDecryptionShare: input.targetDecryptionShare,
-                        proofStatement: input.proofStatement,
-                        proofRandomnessSeedHex: input.proofRandomnessSeedHex,
-                        proofRandomnessNonceHex: input.proofRandomnessNonceHex,
                     }),
                 describeBgvRnsParameters: (): BgvRnsParametersDescription =>
                     executeCommand<BgvRnsParametersDescription>({
@@ -238,25 +150,6 @@ export const createTranscriptCoreKernelLoader = (
                         expectedRotSetHash: input.expectedRotSetHash,
                         expectedEvaluationKeyRoot:
                             input.expectedEvaluationKeyRoot,
-                    }),
-                verifyPrivateVssShareEnvelope: (
-                    input,
-                ): BgvPrivateVssShareEnvelopeVerification =>
-                    executeCommand<BgvPrivateVssShareEnvelopeVerification>({
-                        command: 'VerifyPrivateVssShareEnvelope',
-                        setupContext: input.setupContext,
-                        publicMatrixSeedHash: input.publicMatrixSeedHash,
-                        sourceTrusteeCoefficientCommitmentRecord:
-                            input.sourceTrusteeCoefficientCommitmentRecord,
-                        sourceTrusteeCoefficientCommitmentMaterialRecords:
-                            input.sourceTrusteeCoefficientCommitmentMaterialRecords,
-                        privateEnvelope: input.privateEnvelope,
-                        transportedPrivateVssShareProofMaterial:
-                            input.transportedPrivateVssShareProofMaterial,
-                        expectedPrivateEnvelopeHash:
-                            input.expectedPrivateEnvelopeHash,
-                        expectedLocalVerificationRoot:
-                            input.expectedLocalVerificationRoot,
                     }),
                 generatePrivateVssShareProof: (
                     input,
@@ -394,44 +287,6 @@ export const createTranscriptCoreKernelLoader = (
                         proofRandomnessSeedHex: input.proofRandomnessSeedHex,
                         proofRandomnessNonceHex: input.proofRandomnessNonceHex,
                     }),
-                deriveBgvTargetDecryptionResultReleaseSetupContext: (
-                    input,
-                ): BgvTargetDecryptionReleaseSetupContext =>
-                    executeCommand<BgvTargetDecryptionReleaseSetupContext>({
-                        command:
-                            'DeriveBgvTargetDecryptionResultReleaseSetupContext',
-                        setupPackage: input.setupPackage,
-                    }),
-                beginBgvTargetDecryptionResultRelease: (
-                    input,
-                ): BgvTargetDecryptionResultReleaseBegin =>
-                    executeCommand<BgvTargetDecryptionResultReleaseBegin>({
-                        command: 'BeginBgvTargetDecryptionResultRelease',
-                        releaseVerificationId: input.releaseVerificationId,
-                        releaseSetupContext: input.releaseSetupContext,
-                        targetAcceptedRecord: input.targetAcceptedRecord,
-                        targetCiphertexts: input.targetCiphertexts,
-                        targetCiphertextBinding: input.targetCiphertextBinding,
-                        targetShareProfile: input.targetShareProfile,
-                    }),
-                absorbBgvTargetDecryptionResultReleaseShare: (
-                    input,
-                ): BgvTargetDecryptionResultReleaseShareAbsorption =>
-                    executeCommand<BgvTargetDecryptionResultReleaseShareAbsorption>(
-                        {
-                            command:
-                                'AbsorbBgvTargetDecryptionResultReleaseShare',
-                            releaseVerificationId: input.releaseVerificationId,
-                            targetShareProof: input.targetShareProof,
-                        },
-                    ),
-                finishBgvTargetDecryptionResultRelease: (
-                    input,
-                ): BgvTargetDecryptionResultReleaseCompletion =>
-                    executeCommand<BgvTargetDecryptionResultReleaseCompletion>({
-                        command: 'FinishBgvTargetDecryptionResultRelease',
-                        releaseVerificationId: input.releaseVerificationId,
-                    }),
                 verifyLocalTrusteeSetupState: (
                     input,
                 ): BgvLocalTrusteeSetupStateVerification =>
@@ -439,26 +294,6 @@ export const createTranscriptCoreKernelLoader = (
                         command: 'VerifyLocalTrusteeSetupState',
                         setupContext: input.setupContext,
                         localStateCommitment: input.localStateCommitment,
-                    }),
-                encodeBgvBatchPlaintext: (input): BgvBatchPlaintextEncoding =>
-                    executeCommand<BgvBatchPlaintextEncoding>({
-                        command: 'EncodeBgvBatchPlaintext',
-                        slots: input.slots,
-                        level: input.level,
-                        includeCanonicalBytesHex:
-                            input.includeCanonicalBytesHex,
-                    }),
-                validateBgvPlaintextObject: (input): BgvObjectValidation =>
-                    executeCommand<BgvObjectValidation>({
-                        command: 'ValidateBgvPlaintextObject',
-                        canonicalBytesHex: input.canonicalBytesHex,
-                        expectedPlaintextRoot: input.expectedPlaintextRoot,
-                    }),
-                validateBgvCiphertextObject: (input): BgvObjectValidation =>
-                    executeCommand<BgvObjectValidation>({
-                        command: 'ValidateBgvCiphertextObject',
-                        canonicalBytesHex: input.canonicalBytesHex,
-                        expectedCiphertextRoot: input.expectedCiphertextRoot,
                     }),
             };
             registerKernelContexts(kernel, runtime);
@@ -474,8 +309,12 @@ export const createTranscriptCoreKernelLoader = (
             if (
                 stateVerifierBegin !== undefined &&
                 stateVerifierCancel !== undefined &&
+                stateVerifierCertifyIntent !== undefined &&
                 stateVerifierRelease !== undefined &&
                 stateVerifierFinishOutput !== undefined &&
+                stateVerifierPrepareOutput !== undefined &&
+                stateVerifierPrepareRecovery !== undefined &&
+                stateVerifierPrepareReservation !== undefined &&
                 stateVerifierVerifyRecovery !== undefined &&
                 stateVerifierVerifyReservation !== undefined
             ) {
@@ -483,23 +322,18 @@ export const createTranscriptCoreKernelLoader = (
                     allocate,
                     begin: stateVerifierBegin,
                     cancel: stateVerifierCancel,
+                    certifyIntent: stateVerifierCertifyIntent,
                     deallocate,
                     memory,
                     release: stateVerifierRelease,
                     runExclusive: runExclusiveKernelOperation,
                     finishOutput: stateVerifierFinishOutput,
+                    prepareOutput: stateVerifierPrepareOutput,
+                    prepareRecovery: stateVerifierPrepareRecovery,
+                    prepareReservation: stateVerifierPrepareReservation,
                     verifyRecovery: stateVerifierVerifyRecovery,
                     verifyReservation: stateVerifierVerifyReservation,
                 });
             }
             return kernel;
-        })().catch((error: unknown) => {
-            // Clear the cached promise on failure so a later call can retry
-            // instantiation instead of permanently re-throwing the cached rejection.
-            kernelPromise = undefined;
-            throw error;
         });
-
-        return kernelPromise;
-    };
-};

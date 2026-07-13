@@ -1,28 +1,8 @@
-import { hexToBytes } from '@noble/hashes/utils.js';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
+export { decodeFixedHex } from '../web-crypto.js';
+
 import { protocolHashPattern, type JsonRecord } from './constants-and-types.js';
-
-export const isLowercaseHex = (value: string): boolean =>
-    /^[0-9a-f]*$/u.test(value) && value.length % 2 === 0;
-
-export const decodeFixedHex = (
-    value: string,
-    expectedByteLength: number,
-    fieldName: string,
-): Uint8Array => {
-    if (!isLowercaseHex(value)) {
-        throw new TypeError(`${fieldName} must be lowercase canonical hex.`);
-    }
-    const bytes = hexToBytes(value);
-    if (bytes.byteLength !== expectedByteLength) {
-        throw new TypeError(
-            `${fieldName} must be ${String(expectedByteLength)} bytes.`,
-        );
-    }
-
-    return Uint8Array.from(bytes);
-};
 
 export const assertProtocolHash = (value: string, fieldName: string): void => {
     if (!protocolHashPattern.test(value)) {

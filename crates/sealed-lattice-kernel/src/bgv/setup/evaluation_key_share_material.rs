@@ -11,15 +11,16 @@ pub(crate) use self::component_material::{
     cancel_verified_canonical_component_material_stream,
     finish_verified_canonical_component_material_stream,
 };
+pub(super) use self::component_material::{
+    DecodedEvaluationKeyShareComponentMaterial, EvaluationKeyShareDerivedMaterialBinding,
+    authenticated_evaluation_key_component_stream_summary_in_session,
+    component_b_vectors_from_record, drain_verified_evaluation_key_share_component_material,
+};
 #[cfg(test)]
 pub(in crate::bgv::setup) use self::component_material::{
     VerifiedComponentMaterialEvictionGuard, authenticated_evaluation_key_component_stream_summary,
     evaluation_key_share_component_material_reference_root,
-    evaluation_key_share_component_vector_hash, evaluation_key_share_component_vector_root,
-};
-pub(super) use self::component_material::{
-    authenticated_evaluation_key_component_stream_summary_in_session,
-    component_b_vectors_from_record, drain_verified_evaluation_key_share_component_material,
+    evaluation_key_share_component_vector_root,
 };
 
 use std::{
@@ -34,17 +35,13 @@ use std::{fs::File, io::Read, path::PathBuf};
 use serde_json::{Value, json};
 
 use crate::{
-    bgv::coefficient_codec::{coefficient_vector_hash512, coefficient_vector_le_hex},
+    bgv::coefficient_codec::coefficient_vector_le_hex,
     bgv::parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE},
     bgv::setup_helpers::{array_field, string_field},
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
     foundation::VerifiedCanonicalStreamSummary,
 };
 
-pub(super) const EVALUATION_KEY_SHARE_COMPONENT_VECTOR_HASH_DOMAIN: &str =
-    "sealed-lattice-bgv-rns/evaluation-key-share-component-vector";
-pub(super) const EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING: &str =
-    "binary-chunked-key-switch-component-vectors";
 pub(super) const EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_TRANSPORT_SET_OBJECT_TYPE: &str =
     "SetupTransportedEvaluationKeyShareComponentMaterialSet";
 pub(super) const EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_TRANSPORT_OBJECT_TYPE: &str =

@@ -84,31 +84,3 @@ fn passive_setup_uses_rejection_sampled_setup_distributions() {
         assert!(sample < modulus);
     }
 }
-
-#[test]
-fn public_common_random_polynomial_root_matches_canonical_object_hash() {
-    let package = setup_package();
-    let setup_seed_hash = package["setupInputs"]["setupSeedHash"]
-        .as_str()
-        .expect("setup seed hash");
-    let common_random_polynomial_record = serde_json::json!({
-        "objectType": "BgvPublicCommonRandomPolynomial",
-        "ceremonyId": package["setupInputs"]["ceremonyId"],
-        "rosterHash": package["setupInputs"]["rosterHash"],
-        "setupSeedHash": setup_seed_hash,
-        "level": DATA_PRIMES.len() - 1,
-        "coefficientCount": POLYNOMIAL_DEGREE,
-        "sampledResidues": sample_public_residues(
-            setup_seed_hash,
-            "public-common-random-polynomial",
-            DATA_PRIMES[0],
-        ).expect("the fixed public sampler derives within its candidate-draw limit"),
-    });
-    let actual_root = package["collectivePublicKey"]["record"]["publicCommonRandomPolynomialRoot"]
-        .as_str()
-        .expect("public common random polynomial root");
-    let expected_root = derive_canonical_object_hash(&common_random_polynomial_record)
-        .expect("common random polynomial root");
-
-    assert_eq!(actual_root, expected_root);
-}

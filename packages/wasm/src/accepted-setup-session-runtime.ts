@@ -178,8 +178,6 @@ class AcceptedSetupSessionImplementation implements AcceptedSetupSession {
                         input.transportedSameSecretBridgeProofMaterial,
                     transportedEvaluationKeyShareComponentMaterial:
                         input.transportedEvaluationKeyShareComponentMaterial,
-                    transportedPublicEvaluationKeyMaterial:
-                        input.transportedPublicEvaluationKeyMaterial,
                 },
                 this.#sessionHandle,
                 this.#capabilityPointer,

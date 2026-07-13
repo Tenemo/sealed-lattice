@@ -44,9 +44,6 @@ pub(crate) fn run_direct_encrypted_ballot(request: &Value) -> CanonicalResult<Va
             proof_randomness_hex,
         )?;
         let proof_transport = transport_direct_ballot_binary_proof(
-            setup_package,
-            encrypted_ballot,
-            &proof_generation.statement_hash_hex,
             &proof_generation.proof_bytes,
             &proof_generation.proof_bytes_hash,
             direct_ballot_relation_proof_bytes_hash,
@@ -64,7 +61,6 @@ pub(crate) fn run_direct_encrypted_ballot(request: &Value) -> CanonicalResult<Va
             "proofTransport": {
                 "chunkHashes": proof_transport.chunk_hashes,
                 "chunkMerkleRoot": proof_transport.chunk_merkle_root,
-                "publicTransportHash": proof_transport.public_transport_hash,
             }
         }));
     }

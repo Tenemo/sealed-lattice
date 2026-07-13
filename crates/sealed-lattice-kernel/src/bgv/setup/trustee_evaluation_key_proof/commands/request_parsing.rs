@@ -247,10 +247,8 @@ pub(super) fn vss_share_linkage_statement_from_request(
             source_rns_limb_index: primary_item.source_rns_limb_index,
             source_message_modulus: primary_item.source_message_modulus,
             coefficient_commitment_roots: primary_item.coefficient_commitment_roots,
-            coefficient_opening_roots: primary_item.coefficient_opening_roots,
             coefficient_commitments: primary_item.coefficient_commitments,
             recipient_share_commitment_root: primary_item.recipient_share_commitment_root,
-            recipient_share_opening_root: primary_item.recipient_share_opening_root,
             recipient_share_commitment: primary_item.recipient_share_commitment,
             additional_linkage_items,
             is_threshold_aggregate,
@@ -398,7 +396,6 @@ pub(super) fn vss_share_linkage_item_from_value(
         })?;
     let source_message_modulus = read_u64(value, "sourceMessageModulus")?;
     let coefficient_commitment_roots = read_string_array(value, "coefficientCommitmentRoots")?;
-    let coefficient_opening_roots = read_string_array(value, "coefficientOpeningRoots")?;
     let coefficient_commitment_values = value
         .get("coefficientCommitments")
         .and_then(Value::as_array)
@@ -410,11 +407,6 @@ pub(super) fn vss_share_linkage_item_from_value(
     if coefficient_commitment_values.len() != coefficient_commitment_roots.len() {
         return Err(invalid_succinct_setup_proof(format!(
             "{field_name} coefficient commitments and roots must be aligned"
-        )));
-    }
-    if coefficient_commitment_values.len() != coefficient_opening_roots.len() {
-        return Err(invalid_succinct_setup_proof(format!(
-            "{field_name} coefficient commitments and opening roots must be aligned"
         )));
     }
     let coefficient_commitments = coefficient_commitment_values
@@ -441,7 +433,6 @@ pub(super) fn vss_share_linkage_item_from_value(
         .collect::<CanonicalResult<Vec<_>>>()?;
     let recipient_share_commitment_root =
         read_string(value, "recipientShareCommitmentRoot")?.to_string();
-    let recipient_share_opening_root = read_string(value, "recipientShareOpeningRoot")?.to_string();
     let recipient_share_commitment = vss_share_linkage_commitment_from_value(
         value.get("recipientShareCommitment").ok_or_else(|| {
             invalid_succinct_setup_proof(format!(
@@ -473,10 +464,8 @@ pub(super) fn vss_share_linkage_item_from_value(
         source_rns_limb_index,
         source_message_modulus,
         coefficient_commitment_roots,
-        coefficient_opening_roots,
         coefficient_commitments,
         recipient_share_commitment_root,
-        recipient_share_opening_root,
         recipient_share_commitment,
     })
 }

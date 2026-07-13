@@ -67,18 +67,6 @@ fn vss_share_linkage_proof_round_trips_and_rejects_tampering() {
         "tampering with the published recipient-share material root must reject"
     );
 
-    let (mut tampered_opening_statement, _unused_witness) = vss_share_linkage_instance();
-    tampered_opening_statement
-        .vss_share_linkage
-        .as_mut()
-        .expect("statement")
-        .coefficient_opening_roots[0] = repeated_hash("fa");
-
-    assert!(
-        verify_evaluation_key_share(&tampered_opening_statement, &proof).is_err(),
-        "tampering with a coefficient opening root must reject"
-    );
-
     let (mut tampered_additional_statement, _unused_witness) = vss_share_linkage_instance();
     tampered_additional_statement
         .vss_share_linkage
@@ -312,10 +300,6 @@ fn vss_threshold_aggregate_instance() -> (
                 .iter()
                 .map(|computation| computation.commitment_root.clone())
                 .collect(),
-            coefficient_opening_roots: summand_commitment_computations
-                .iter()
-                .map(|computation| computation.opening_root.clone())
-                .collect(),
             coefficient_commitments: summand_commitment_computations
                 .iter()
                 .map(|computation| computation.commitment.clone())
@@ -323,7 +307,6 @@ fn vss_threshold_aggregate_instance() -> (
             recipient_share_commitment_root: aggregate_commitment_computation
                 .commitment_root
                 .clone(),
-            recipient_share_opening_root: aggregate_commitment_computation.opening_root.clone(),
             recipient_share_commitment: aggregate_commitment_computation.commitment.clone(),
             additional_linkage_items: Vec::new(),
             is_threshold_aggregate: true,
@@ -468,11 +451,6 @@ fn vss_share_linkage_instance() -> (
                 .iter()
                 .map(|computation| computation.commitment_root.clone())
                 .collect(),
-            coefficient_opening_roots: primary_item
-                .coefficient_commitment_computations
-                .iter()
-                .map(|computation| computation.opening_root.clone())
-                .collect(),
             coefficient_commitments: primary_item
                 .coefficient_commitment_computations
                 .iter()
@@ -481,10 +459,6 @@ fn vss_share_linkage_instance() -> (
             recipient_share_commitment_root: primary_item
                 .recipient_share_commitment_computation
                 .commitment_root
-                .clone(),
-            recipient_share_opening_root: primary_item
-                .recipient_share_commitment_computation
-                .opening_root
                 .clone(),
             recipient_share_commitment: primary_item
                 .recipient_share_commitment_computation
@@ -674,11 +648,6 @@ fn share_linkage_item_statement(item: &ShareLinkageItemForTest) -> VssShareLinka
             .iter()
             .map(|computation| computation.commitment_root.clone())
             .collect(),
-        coefficient_opening_roots: item
-            .coefficient_commitment_computations
-            .iter()
-            .map(|computation| computation.opening_root.clone())
-            .collect(),
         coefficient_commitments: item
             .coefficient_commitment_computations
             .iter()
@@ -687,10 +656,6 @@ fn share_linkage_item_statement(item: &ShareLinkageItemForTest) -> VssShareLinka
         recipient_share_commitment_root: item
             .recipient_share_commitment_computation
             .commitment_root
-            .clone(),
-        recipient_share_opening_root: item
-            .recipient_share_commitment_computation
-            .opening_root
             .clone(),
         recipient_share_commitment: item
             .recipient_share_commitment_computation

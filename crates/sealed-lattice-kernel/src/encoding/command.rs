@@ -2,24 +2,11 @@ use super::*;
 
 use super::json_ingress::parse_transcript_core_request;
 
-use crate::{
-    foundation::{
-        CANONICAL_TUPLE_SCHEMA_IDENTIFIER, CANONICAL_TUPLE_VERSION, CanonicalCodecError,
-        CanonicalCodecErrorKind, CanonicalDecodeLimits, CanonicalTuple, FOUNDATION_PROFILE,
-        FoundationSchemaObjectValidationError, ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH,
-        RefusalReason, derive_participant_identity, hash512 as foundation_hash512,
-        validate_foundation_schema_object,
-    },
-    hashing::derive_canonical_object_hash,
-};
+use crate::hashing::derive_canonical_object_hash;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(tag = "command")]
 enum TranscriptCoreCommand {
-    ValidateFoundationCanonicalTuple,
-    ValidateFoundationSchemaObject,
-    ComputeFoundationHash512,
-    DeriveFoundationParticipantIdentity,
     DeriveCanonicalObjectHash,
     DescribeBgvRnsParameters,
     DescribeCollectiveBgvSetupParameters,
@@ -32,9 +19,6 @@ enum TranscriptCoreCommand {
     DescribeTrusteeEvaluationKeyStatement,
     ComputeSetupCommitmentFromOpening,
     VerifyLocalTrusteeSetupState,
-    EncodeBgvBatchPlaintext,
-    ValidateBgvPlaintextObject,
-    ValidateBgvCiphertextObject,
     RunDirectEncryptedBallot,
     // Participant-side target-share and proof generation consume local witness
     // material inside the caller's own browser. The staged result-release path
@@ -74,101 +58,6 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
     let command = parse_transcript_core_command(command)?;
 
     match command {
-        TranscriptCoreCommand::ValidateFoundationCanonicalTuple => {
-            let limits = CanonicalDecodeLimits::default();
-            let canonical_tuple_bytes = read_bounded_hex_field(
-                &request,
-                "canonicalTupleHex",
-                limits.maximum_tuple_byte_length,
-            )?;
-            let tuple = CanonicalTuple::decode(&canonical_tuple_bytes, &limits)
-                .map_err(map_foundation_codec_error)?;
-            let reencoded_bytes = tuple.encode().map_err(map_foundation_codec_error)?;
-
-            Ok(json!({
-                "canonicalTupleHex": crate::transcript_core::encode_hex(&reencoded_bytes),
-                "schemaIdentifier": tuple.schema_identifier,
-                "schemaVersion": tuple.schema_version,
-                "itemCount": tuple.items.len(),
-            }))
-        }
-        TranscriptCoreCommand::ValidateFoundationSchemaObject => {
-            let limits = CanonicalDecodeLimits::default();
-            let canonical_object_bytes = read_bounded_hex_field(
-                &request,
-                "canonicalObjectHex",
-                FOUNDATION_PROFILE.maximum_copied_buffer_byte_length,
-            )?;
-            let validation = validate_foundation_schema_object(&canonical_object_bytes, &limits)
-                .map_err(map_foundation_schema_object_validation_error)?;
-
-            Ok(json!({
-                "schemaIdentifier": validation.schema_identifier,
-                "schemaVersion": validation.schema_version,
-                "canonicalByteLength": validation.canonical_byte_length,
-            }))
-        }
-        TranscriptCoreCommand::ComputeFoundationHash512 => {
-            let domain = request
-                .get("domain")
-                .and_then(Value::as_str)
-                .ok_or_else(|| {
-                    CanonicalError::new(
-                        CanonicalErrorCode::InvalidFixture,
-                        "domain must be a string",
-                    )
-                })?;
-            let limits = CanonicalDecodeLimits::default();
-            let item_tuple_bytes = read_bounded_hex_field(
-                &request,
-                "canonicalItemsTupleHex",
-                limits.maximum_tuple_byte_length,
-            )?;
-            let item_tuple = CanonicalTuple::decode(&item_tuple_bytes, &limits)
-                .map_err(map_foundation_codec_error)?;
-            if item_tuple.schema_identifier != CANONICAL_TUPLE_SCHEMA_IDENTIFIER
-                || item_tuple.schema_version != CANONICAL_TUPLE_VERSION
-            {
-                return Err(CanonicalError::new(
-                    CanonicalErrorCode::InvalidProtocolObject,
-                    "canonicalItemsTupleHex must use the foundation canonical-tuple schema and version",
-                ));
-            }
-            let hash = foundation_hash512(domain, &item_tuple.items)
-                .map_err(map_foundation_codec_error)?;
-
-            Ok(json!({
-                "hash512": hash.to_lowercase_hex(),
-            }))
-        }
-        TranscriptCoreCommand::DeriveFoundationParticipantIdentity => {
-            let signing_verification_key = read_bounded_hex_field(
-                &request,
-                "signingVerificationKeyHex",
-                ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH,
-            )?;
-            if signing_verification_key.len() != ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH {
-                return Err(CanonicalError::new(
-                    CanonicalErrorCode::MalformedLength,
-                    format!(
-                        "signingVerificationKeyHex must encode exactly {ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH} bytes",
-                    ),
-                ));
-            }
-            let signing_verification_key: [u8; ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH] =
-                signing_verification_key.try_into().map_err(|_| {
-                    CanonicalError::new(
-                        CanonicalErrorCode::MalformedLength,
-                        "signingVerificationKeyHex has the wrong decoded length",
-                    )
-                })?;
-            let participant_identity = derive_participant_identity(&signing_verification_key)
-                .map_err(map_foundation_codec_error)?;
-
-            Ok(json!({
-                "participantIdentity": participant_identity.to_lowercase_hex(),
-            }))
-        }
         TranscriptCoreCommand::DeriveCanonicalObjectHash => {
             let value = request.get("value").ok_or_else(|| {
                 CanonicalError::new(
@@ -194,9 +83,6 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
         | TranscriptCoreCommand::GenerateTrusteeEvaluationKeyProof
         | TranscriptCoreCommand::ComputeSetupCommitmentFromOpening
         | TranscriptCoreCommand::VerifyLocalTrusteeSetupState
-        | TranscriptCoreCommand::EncodeBgvBatchPlaintext
-        | TranscriptCoreCommand::ValidateBgvPlaintextObject
-        | TranscriptCoreCommand::ValidateBgvCiphertextObject
         | TranscriptCoreCommand::RunDirectEncryptedBallot
         | TranscriptCoreCommand::DeriveBgvTargetDecryptionResultReleaseSetupContext
         | TranscriptCoreCommand::BeginBgvTargetDecryptionResultRelease
@@ -241,83 +127,6 @@ pub(super) fn run_accepted_setup_command_inner(
     )
 }
 
-fn read_bounded_hex_field(
-    request: &Value,
-    field_name: &str,
-    maximum_byte_length: usize,
-) -> CanonicalResult<Vec<u8>> {
-    let hex = request
-        .get(field_name)
-        .and_then(Value::as_str)
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                format!("{field_name} must be a string"),
-            )
-        })?;
-    let maximum_hex_length = maximum_byte_length.checked_mul(2).ok_or_else(|| {
-        CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "maximum hex length does not fit usize",
-        )
-    })?;
-    if hex.len() > maximum_hex_length {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            format!("{field_name} exceeds the accepted byte length"),
-        ));
-    }
-
-    crate::transcript_core::decode_hex(hex)
-}
-
-fn map_foundation_codec_error(error: CanonicalCodecError) -> CanonicalError {
-    let code = match error.kind {
-        CanonicalCodecErrorKind::TrailingBytes => CanonicalErrorCode::TrailingBytes,
-        CanonicalCodecErrorKind::UnknownItemType => CanonicalErrorCode::InvalidEnum,
-        CanonicalCodecErrorKind::Truncated
-        | CanonicalCodecErrorKind::LimitExceeded
-        | CanonicalCodecErrorKind::LengthOverflow => CanonicalErrorCode::MalformedLength,
-        CanonicalCodecErrorKind::InvalidItem => CanonicalErrorCode::InvalidProtocolObject,
-    };
-    CanonicalError::new(code, format!("foundation canonical tuple: {error}"))
-}
-
-fn map_foundation_schema_object_validation_error(
-    error: FoundationSchemaObjectValidationError,
-) -> CanonicalError {
-    match error {
-        FoundationSchemaObjectValidationError::CanonicalCodec(error) => {
-            map_foundation_codec_error(error)
-        }
-        FoundationSchemaObjectValidationError::Schema {
-            refusal_reason: RefusalReason::UnsupportedVersionOrSuite,
-            message,
-        } => CanonicalError::new(CanonicalErrorCode::UnsupportedObjectVersion, message),
-        FoundationSchemaObjectValidationError::Schema { message, .. } => {
-            CanonicalError::new(CanonicalErrorCode::InvalidProtocolObject, message)
-        }
-        FoundationSchemaObjectValidationError::UnsupportedSchemaIdentifier(schema_identifier) => {
-            CanonicalError::new(
-                CanonicalErrorCode::UnsupportedObjectType,
-                format!(
-                    "foundation schema identifier 0x{schema_identifier:04x} is not exposed by this command"
-                ),
-            )
-        }
-        FoundationSchemaObjectValidationError::UnsupportedSchemaVersion(schema_version) => {
-            CanonicalError::new(
-                CanonicalErrorCode::UnsupportedObjectVersion,
-                format!("foundation schema version {schema_version} is unsupported"),
-            )
-        }
-        FoundationSchemaObjectValidationError::ReencodingMismatch => CanonicalError::new(
-            CanonicalErrorCode::InvalidProtocolObject,
-            "foundation schema object does not re-encode byte-identically",
-        ),
-    }
-}
-
 fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> CanonicalResult<Value> {
     match command {
         TranscriptCoreCommand::DescribeBgvRnsParameters => {
@@ -327,37 +136,28 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
             crate::bgv::commands::describe_collective_bgv_setup_parameters_from_request(request)
         }
         TranscriptCoreCommand::GenerateBgvPassiveSetup => {
-            crate::bgv::commands::generate_bgv_passive_setup(request)
+            crate::bgv::setup::generate_passive_setup_package_from_request(request)
         }
         TranscriptCoreCommand::VerifyBgvPassiveSetup => {
-            crate::bgv::commands::verify_bgv_passive_setup(request)
+            crate::bgv::setup::verify_passive_setup_package_from_request(request)
         }
         TranscriptCoreCommand::VerifyPrivateVssShareEnvelope => {
-            crate::bgv::commands::verify_private_vss_share_envelope(request)
+            crate::bgv::setup::verify_private_vss_share_envelope_from_request(request)
         }
         TranscriptCoreCommand::GeneratePrivateVssShareProof => {
-            crate::bgv::commands::generate_private_vss_share_proof(request)
+            crate::bgv::setup::generate_private_vss_share_proof_from_request(request)
         }
         TranscriptCoreCommand::GenerateTrusteeEvaluationKeyProof => {
-            crate::bgv::commands::generate_trustee_evaluation_key_proof(request)
+            crate::bgv::setup::generate_trustee_evaluation_key_proof_from_request(request)
         }
         TranscriptCoreCommand::DescribeTrusteeEvaluationKeyStatement => {
-            crate::bgv::commands::describe_trustee_evaluation_key_statement(request)
+            crate::bgv::setup::describe_trustee_evaluation_key_statement_from_request(request)
         }
         TranscriptCoreCommand::ComputeSetupCommitmentFromOpening => {
-            crate::bgv::commands::compute_setup_commitment_from_opening(request)
+            crate::bgv::setup::compute_setup_commitment_from_opening_request(request)
         }
         TranscriptCoreCommand::VerifyLocalTrusteeSetupState => {
-            crate::bgv::commands::verify_local_trustee_setup_state(request)
-        }
-        TranscriptCoreCommand::EncodeBgvBatchPlaintext => {
-            crate::bgv::commands::encode_bgv_batch_plaintext_from_request(request)
-        }
-        TranscriptCoreCommand::ValidateBgvPlaintextObject => {
-            crate::bgv::commands::validate_bgv_plaintext_from_request(request)
-        }
-        TranscriptCoreCommand::ValidateBgvCiphertextObject => {
-            crate::bgv::commands::validate_bgv_ciphertext_from_request(request)
+            crate::bgv::setup::verify_local_trustee_setup_state_from_request(request)
         }
         TranscriptCoreCommand::RunDirectEncryptedBallot => {
             crate::bgv::direct_ballots::run_direct_encrypted_ballot(request)
@@ -393,13 +193,13 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
             )
         }
         TranscriptCoreCommand::ComputeVssCommittedMaterialCommitment => {
-            crate::bgv::commands::compute_vss_committed_material_commitment(request)
+            crate::bgv::setup::compute_vss_committed_material_commitment_request(request)
         }
         TranscriptCoreCommand::GenerateVssShareLinkageProof => {
-            crate::bgv::commands::generate_vss_share_linkage_proof(request)
+            crate::bgv::setup::generate_vss_share_linkage_proof_from_request(request)
         }
         TranscriptCoreCommand::GenerateSameSecretBridgeProof => {
-            crate::bgv::commands::generate_same_secret_bridge_proof(request)
+            crate::bgv::setup::generate_same_secret_bridge_proof_from_request(request)
         }
         _ => unreachable!("non-BGV command dispatched to BGV handler"),
     }

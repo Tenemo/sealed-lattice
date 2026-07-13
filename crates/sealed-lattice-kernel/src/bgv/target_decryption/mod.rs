@@ -42,10 +42,7 @@ use share_statement::*;
 use serde_json::Value;
 use serde_json::json;
 
-use crate::{
-    bgv::evaluator::top_k::TIE_POLICY, encoding::CanonicalResult,
-    hashing::derive_canonical_object_hash,
-};
+use crate::{encoding::CanonicalResult, hashing::derive_canonical_object_hash};
 
 use crate::{
     bgv::{
@@ -53,10 +50,9 @@ use crate::{
         evaluator::{
             engine::{Ciphertext, decryption_accumulator_to_coefficients},
             records::MAXIMUM_OPTION_COUNT,
-            top_k::{canonical_target_basis_hash, packed_score_slot},
+            top_k::canonical_target_basis_hash,
         },
         modular_arithmetic::{add_mod_fast, inverse_mod, mul_mod, mul_mod_fast, sub_mod},
-        ntt::forward_negacyclic_ntt,
         parameters::{BgvBasisKind, DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE},
         serialization::{BgvObjectKind, ciphertext_root, parse_bgv_object},
         setup::{

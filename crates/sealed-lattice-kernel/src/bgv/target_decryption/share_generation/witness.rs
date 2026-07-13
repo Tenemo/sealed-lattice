@@ -52,57 +52,6 @@ pub(in super::super) fn read_local_target_decryption_share_witness(
         participant.roster_position as u64,
         "local target-decryption share witness roster position",
     )?;
-    let smudging_witness = value_at_path(witness, &["targetDecryptionSmudging"])?;
-    if string_at_path(smudging_witness, &["objectType"])?
-        != "LocalTrusteeTargetDecryptionSmudgingWitness"
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "local target-decryption share witness must include target-decryption smudging material",
-        ));
-    }
-    for (field_name, expected) in [
-        (
-            "setupPackageHash",
-            setup_binding.setup_package_hash.as_str(),
-        ),
-        (
-            "targetAcceptedRecordHash",
-            target_accepted.target_accepted_record_hash.as_str(),
-        ),
-        (
-            "targetContextHash",
-            target_accepted.target_context_hash.as_str(),
-        ),
-        (
-            "targetCiphertextHash",
-            target_accepted.target_ciphertext_hash.as_str(),
-        ),
-        ("targetShareProfileHash", target_share_profile.hash.as_str()),
-        (
-            "targetBasisHash",
-            target_accepted.target_basis_hash.as_str(),
-        ),
-    ] {
-        compare_hash_field(
-            smudging_witness,
-            field_name,
-            expected,
-            "local target-decryption smudging witness binding",
-        )?;
-    }
-    compare_string_field(
-        smudging_witness,
-        "trusteeIdentity",
-        &participant.trustee_identity,
-        "local target-decryption smudging witness trustee identity",
-    )?;
-    compare_unsigned_field(
-        smudging_witness,
-        "rosterPosition",
-        participant.roster_position as u64,
-        "local target-decryption smudging witness roster position",
-    )?;
     let smudging_seed_hex =
         target_decryption_smudging_seed_hex(setup_binding, target_accepted, target_share_profile);
     let smudging_polynomial_openings = target_decryption_smudging_polynomial_openings(
@@ -185,12 +134,6 @@ pub(in super::super) fn read_local_target_decryption_share_witness(
             "recipientRosterPosition",
             participant.roster_position as u64,
             "aggregate opening credential recipient roster position",
-        )?;
-        compare_unsigned_field(
-            credential,
-            "recipientTrusteePoint",
-            participant.interpolation_point()?,
-            "aggregate opening credential recipient trustee point",
         )?;
         let limb_index = usize_at_path(credential, &["rnsLimbIndex"])?;
         let Some(expected_modulus) = DATA_PRIMES.get(limb_index).copied() else {

@@ -569,7 +569,6 @@ fn trustee_evaluation_key_statement_hash_vector_request() -> serde_json::Value {
         setup_commitment_full_value(&zero_setup_commitment_value(0, DATA_PRIMES[0], 0));
     let mut request = serde_json::json!({
         "context": vector_context_base(serde_json::json!({
-            "requiredGaloisSetHash": repeated_hash("33"),
             "evaluatorKeyScheduleRoot": repeated_hash("34"),
             "sourceConstantCoefficientCommitmentRoot": repeated_hash("36"),
         })),

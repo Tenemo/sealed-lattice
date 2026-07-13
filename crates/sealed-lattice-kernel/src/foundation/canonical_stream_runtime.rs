@@ -424,14 +424,14 @@ mod tests {
         let owner = capability(0x63);
         let first = registry
             .begin_writer(
-                CanonicalStreamDomain::CheckpointState.canonical_code(),
+                CanonicalStreamDomain::EvaluatorKeyStore.canonical_code(),
                 17,
                 owner,
             )
             .expect("first writer begins");
         assert_eq!(
             registry.begin_writer(
-                CanonicalStreamDomain::CheckpointState.canonical_code(),
+                CanonicalStreamDomain::EvaluatorKeyStore.canonical_code(),
                 17,
                 capability(0x64),
             ),
@@ -448,7 +448,7 @@ mod tests {
 
         let second = registry
             .begin_writer(
-                CanonicalStreamDomain::CheckpointState.canonical_code(),
+                CanonicalStreamDomain::EvaluatorKeyStore.canonical_code(),
                 17,
                 owner,
             )
@@ -461,7 +461,7 @@ mod tests {
 
         let third = registry
             .begin_writer(
-                CanonicalStreamDomain::CheckpointState.canonical_code(),
+                CanonicalStreamDomain::EvaluatorKeyStore.canonical_code(),
                 17,
                 owner,
             )
@@ -488,7 +488,7 @@ mod tests {
         );
         assert_eq!(
             registry.begin_writer(
-                CanonicalStreamDomain::CheckpointState.canonical_code(),
+                CanonicalStreamDomain::EvaluatorKeyStore.canonical_code(),
                 0,
                 capability(1),
             ),
@@ -496,7 +496,7 @@ mod tests {
         );
         assert_eq!(
             registry.begin_writer(
-                CanonicalStreamDomain::CheckpointState.canonical_code(),
+                CanonicalStreamDomain::EvaluatorKeyStore.canonical_code(),
                 u32::try_from(MAXIMUM_CANONICAL_STREAM_BYTE_LENGTH + 1)
                     .expect("one over the maximum still fits u32"),
                 capability(1),
@@ -505,7 +505,7 @@ mod tests {
         );
         assert_eq!(
             registry.begin_writer(
-                CanonicalStreamDomain::CheckpointState.canonical_code(),
+                CanonicalStreamDomain::EvaluatorKeyStore.canonical_code(),
                 1,
                 capability(0),
             ),
@@ -515,7 +515,7 @@ mod tests {
         let owner = capability(0x75);
         let session = registry
             .begin_writer(
-                CanonicalStreamDomain::CheckpointState.canonical_code(),
+                CanonicalStreamDomain::EvaluatorKeyStore.canonical_code(),
                 1,
                 owner,
             )
@@ -540,7 +540,7 @@ mod tests {
 
         assert_eq!(
             registry.begin_verifier(
-                CanonicalStreamDomain::CheckpointState.canonical_code(),
+                CanonicalStreamDomain::EvaluatorKeyStore.canonical_code(),
                 &[0; 12],
                 capability(1),
             ),

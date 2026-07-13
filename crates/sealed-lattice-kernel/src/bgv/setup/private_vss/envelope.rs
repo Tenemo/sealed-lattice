@@ -101,7 +101,7 @@ pub(super) fn verify_private_envelope_header(
         Ok(recipient_roster_position) => recipient_roster_position,
         Err(refusal) => return Ok(Err(refusal)),
     };
-    let roster = super::accepted_setup::accepted_roster_from_setup_context(setup_context);
+    let roster = super::accepted_setup::accepted_roster_from_setup_context(setup_context)?;
     if recipient_roster_position >= roster.participant_count {
         return Ok(Err(PrivateVssRefusal::new(
             "privateEnvelopeRecipientPositionInvalid",
@@ -276,7 +276,7 @@ fn verify_private_envelope_limb(
         Ok(coefficient_commitment_roots) => coefficient_commitment_roots,
         Err(refusal) => return Ok(Err(refusal)),
     };
-    let roster = super::accepted_setup::accepted_roster_from_setup_context(setup_context);
+    let roster = super::accepted_setup::accepted_roster_from_setup_context(setup_context)?;
     if coefficient_commitment_roots.len() != roster.decryption_threshold as usize {
         return Ok(Err(PrivateVssRefusal::new(
             "privateVssCoefficientCommitmentRootCountMismatch",
@@ -377,7 +377,6 @@ fn verify_private_envelope_limb(
         "coefficientCommitmentRoots": coefficient_commitment_roots,
         "shareValuesHash": share_values_hash,
         "privateVssShareProofHash": proof_verification.proof_bytes_hash,
-        "proofStatementRoot": proof_verification.proof_statement_root,
         "proofMaterialRoot": proof_verification.proof_material_root,
         "statementHash": proof_verification.statement_hash_hex,
     });
@@ -390,7 +389,6 @@ fn verify_private_envelope_limb(
         coefficient_commitment_roots,
         share_values_hash,
         private_vss_share_proof_hash: proof_verification.proof_bytes_hash,
-        proof_statement_root: proof_verification.proof_statement_root,
         limb_verification_root,
     }))
 }

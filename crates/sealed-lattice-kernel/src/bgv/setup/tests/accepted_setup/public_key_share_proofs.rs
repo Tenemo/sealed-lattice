@@ -1,32 +1,6 @@
 use super::*;
 
 #[test]
-fn collective_setup_verifier_refuses_malformed_public_key_share_statements() {
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "collective_setup_verifier_refuses_malformed_public_key_share_statements",
-    );
-    assert_minimal_collective_setup_package_refused(
-        "wrong public-key share public-a polynomial root",
-        |package| {
-            package["publicKeyShares"]["shareRecords"][0]["publicAPolynomialRoot"] =
-                serde_json::json!(valid_hash('8'));
-            rebind_collective_public_key_share_roots(package);
-        },
-        "publicKeyShareCommonBindingMismatch",
-    );
-
-    assert_minimal_collective_setup_package_refused(
-        "wrong public-key share proof share-root binding",
-        |package| {
-            package["publicKeyShareProofs"]["proofRecords"][0]["publicKeyShareRoot"] =
-                serde_json::json!(valid_hash('9'));
-            rebind_collective_public_key_share_proof_roots(package);
-        },
-        "publicKeyShareProofBindingMismatch",
-    );
-}
-
-#[test]
 #[ignore = "heavy accepted setup test"]
 fn heavy_accepted_setup_collective_setup_verifier_checks_public_key_share_succinct_proofs_before_collective_key_material()
  {
@@ -50,31 +24,9 @@ fn heavy_accepted_setup_collective_setup_verifier_checks_public_key_share_succin
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_missing_dependent_public_key_proofs() {
+fn heavy_accepted_setup_collective_setup_verifier_refuses_missing_succinct_public_key_proofs() {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_refuses_missing_dependent_public_key_proofs",
-    );
-
-    let missing_statement_proofs_fixture =
-        public_key_share_succinct_proof_bearing_collective_setup_fixture();
-    let mut missing_statement_proofs_package = missing_statement_proofs_fixture.package.clone();
-    missing_statement_proofs_package
-        .as_object_mut()
-        .expect("setup package")
-        .remove("publicKeyShareProofs");
-    rebind_collective_setup_package_hash(&mut missing_statement_proofs_package);
-
-    let missing_statement_proofs_result = missing_statement_proofs_fixture
-        .verify_values(
-            &missing_statement_proofs_package,
-            &missing_statement_proofs_fixture.verification_request,
-        )
-        .expect("verification response");
-
-    assert_eq!(missing_statement_proofs_result["isValid"], false);
-    assert_eq!(
-        missing_statement_proofs_result["refusedObjects"][0]["reasonCode"],
-        "publicKeyShareProofsMissing"
+        "heavy_accepted_setup_collective_setup_verifier_refuses_missing_succinct_public_key_proofs",
     );
     let mut missing_succinct_proofs_fixture =
         collective_public_key_bearing_collective_setup_fixture();
@@ -110,16 +62,6 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_malformed_public_key_p
     );
 
     for (proof_set_name, field_name, reason_code) in [
-        (
-            "publicKeyShareProofs",
-            "proofRecords",
-            "publicKeyShareProofRecordsMissing",
-        ),
-        (
-            "publicKeyShareProofs",
-            "publicKeyShareProofSetRoot",
-            "publicKeyShareProofSetRootMissing",
-        ),
         (
             "publicKeyShareSuccinctProofs",
             "proofRecords",
@@ -290,8 +232,6 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_collective_pu
     coefficients[0] = add_mod(coefficients[0], 1, DATA_PRIMES[0]).expect("tamper coefficient");
     package["collectivePublicKey"]["aggregateCoefficientVectorsByLimb"][0]["coefficientsLeHex"] =
         serde_json::json!(coefficient_vector_le_hex(&coefficients));
-    package["collectivePublicKey"]["aggregateCoefficientVectorsByLimb"][0]["coefficientVectorHash512"] =
-        serde_json::json!(public_key_share_coefficient_vector_hash(&coefficients));
     rebind_collective_public_key_root(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 

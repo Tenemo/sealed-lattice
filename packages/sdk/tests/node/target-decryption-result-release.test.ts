@@ -194,10 +194,6 @@ describe('target-decryption result release session cleanup', () => {
             }),
             absorbBgvTargetDecryptionResultReleaseShare: vi.fn(() => {
                 absorbedShareCount += 1;
-                return {
-                    absorbedShareCount,
-                    requiredShareCount: 2,
-                };
             }),
             finishBgvTargetDecryptionResultRelease: vi.fn(() => {
                 if (absorbedShareCount < 2 && cleanupFailure !== undefined) {

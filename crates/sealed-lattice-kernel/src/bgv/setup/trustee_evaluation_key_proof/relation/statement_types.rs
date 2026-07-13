@@ -110,10 +110,8 @@ pub(crate) struct VssShareLinkageStatement {
     pub(crate) source_rns_limb_index: usize,
     pub(crate) source_message_modulus: u64,
     pub(crate) coefficient_commitment_roots: Vec<String>,
-    pub(crate) coefficient_opening_roots: Vec<String>,
     pub(crate) coefficient_commitments: Vec<VssShareLinkageCommitment>,
     pub(crate) recipient_share_commitment_root: String,
-    pub(crate) recipient_share_opening_root: String,
     pub(crate) recipient_share_commitment: VssShareLinkageCommitment,
     pub(crate) additional_linkage_items: Vec<VssShareLinkageItem>,
     // The threshold-aggregate mode reuses this same share-linkage relation with
@@ -155,10 +153,8 @@ pub(crate) struct VssShareLinkageItem {
     pub(crate) source_rns_limb_index: usize,
     pub(crate) source_message_modulus: u64,
     pub(crate) coefficient_commitment_roots: Vec<String>,
-    pub(crate) coefficient_opening_roots: Vec<String>,
     pub(crate) coefficient_commitments: Vec<VssShareLinkageCommitment>,
     pub(crate) recipient_share_commitment_root: String,
-    pub(crate) recipient_share_opening_root: String,
     pub(crate) recipient_share_commitment: VssShareLinkageCommitment,
 }
 
@@ -169,7 +165,6 @@ pub(crate) struct VssPublicCoefficientWitnessSlot {
     pub(crate) source_message_modulus: u64,
     pub(crate) shamir_coefficient_index: usize,
     pub(crate) commitment_root: String,
-    pub(crate) opening_root: String,
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -445,14 +440,10 @@ impl VssShareLinkageStatement {
         source_rns_limb_index: usize,
         source_message_modulus: u64,
         coefficient_commitment_roots: &[String],
-        coefficient_opening_roots: &[String],
     ) {
         let mut item_slot_indices = Vec::with_capacity(coefficient_commitment_roots.len());
-        for (shamir_coefficient_index, (commitment_root, opening_root)) in
-            coefficient_commitment_roots
-                .iter()
-                .zip(coefficient_opening_roots.iter())
-                .enumerate()
+        for (shamir_coefficient_index, commitment_root) in
+            coefficient_commitment_roots.iter().enumerate()
         {
             let slot = VssPublicCoefficientWitnessSlot {
                 source_trustee_roster_position,
@@ -460,7 +451,6 @@ impl VssShareLinkageStatement {
                 source_message_modulus,
                 shamir_coefficient_index,
                 commitment_root: commitment_root.clone(),
-                opening_root: opening_root.clone(),
             };
             let slot_index = if let Some(existing_index) = slots
                 .iter()
@@ -488,7 +478,6 @@ impl VssShareLinkageStatement {
             self.source_rns_limb_index,
             self.source_message_modulus,
             &self.coefficient_commitment_roots,
-            &self.coefficient_opening_roots,
         );
         for item in &self.additional_linkage_items {
             Self::append_coefficient_witness_slots(
@@ -498,7 +487,6 @@ impl VssShareLinkageStatement {
                 item.source_rns_limb_index,
                 item.source_message_modulus,
                 &item.coefficient_commitment_roots,
-                &item.coefficient_opening_roots,
             );
         }
 

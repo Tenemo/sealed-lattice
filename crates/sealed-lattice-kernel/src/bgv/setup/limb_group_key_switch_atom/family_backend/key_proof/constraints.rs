@@ -109,14 +109,10 @@ pub(super) fn support_value_at<const LIMB_COUNT: usize>(
     value
 }
 
-// One digit's delta-weighted linear forms, handed to the caller and dropped
-// immediately: neither the prover nor the verifier ever holds every digit's
-// forms at once (at the full profile that set alone is hundreds of megabytes).
-// `material_form` is the linear form paired with the committed material column
-// `B_col_j`: it is `delta_j * gamma`, so `<material_form_j, B_col_j> =
-// delta_j <gamma, B_col_j>`, which is exactly the term the sumcheck target used
-// to carry as `-delta_j <gamma, B_public_j>`, moved to the left-hand side with
-// the material committed instead of hashed as a public target scalar.
+// One digit's delta-weighted forms are consumed immediately so full-profile
+// memory does not scale with the digit count. Pairing `material_form =
+// delta_j * gamma` with the committed `B_col_j` contributes
+// `delta_j <gamma, B_col_j>` to the sumcheck's left-hand side.
 pub(super) struct WeightedDigitForms<const LIMB_COUNT: usize> {
     pub(super) error_form: Vec<[u64; LIMB_COUNT]>,
     pub(super) carry_form: Vec<[u64; LIMB_COUNT]>,
@@ -178,8 +174,8 @@ where
                     .iter()
                     .map(|c| parameters.multiply(&weight, c))
                     .collect(),
-                // The material form `delta_j * gamma`: the atom's component term
-                // moved to the left-hand side against the committed column.
+                // This form pairs with the committed material column on the
+                // sumcheck's left-hand side.
                 material_form: gamma
                     .iter()
                     .map(|value| parameters.multiply(&weight, value))
@@ -187,8 +183,7 @@ where
             },
         )?;
     }
-    // The atom target contribution is zero: the component term now rides the
-    // material forms on the left-hand side, not the target scalar.
+    // Material forms carry the component terms, so the target contribution is zero.
     Ok((secret_form, parameters.zero()))
 }
 

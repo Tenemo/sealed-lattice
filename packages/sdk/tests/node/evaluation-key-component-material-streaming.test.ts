@@ -1,9 +1,8 @@
 import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 
-import {
-    bgvCanonicalStreamFamilies,
-    type AcceptedSetupSession,
-    type TranscriptCoreKernel,
+import type {
+    AcceptedSetupSession,
+    TranscriptCoreKernel,
 } from '#packages/wasm/src/index';
 import { canonicalStreamDescriptorFixture } from '#tests/support/canonical-stream-descriptor-fixture';
 
@@ -14,12 +13,6 @@ type ChunkPullRequest = Readonly<{
 }>;
 type TestComponentMaterialSource = Readonly<{
     readonly keySwitchComponentMaterialRoot: string;
-    readonly pullChunk: Mock<
-        (input: ChunkPullRequest) => Promise<ArrayBuffer | undefined>
-    >;
-}>;
-type TestPublicEvaluationKeyMaterialSource = Readonly<{
-    readonly publicEvaluationKeyMaterialRoot: string;
     readonly pullChunk: Mock<
         (input: ChunkPullRequest) => Promise<ArrayBuffer | undefined>
     >;
@@ -46,8 +39,6 @@ vi.mock('@sealed-lattice/wasm/published-sdk', async (importOriginal) => ({
 
 const componentMaterialRoot = '4'.repeat(128);
 const secondComponentMaterialRoot = '5'.repeat(128);
-const publicEvaluationKeyMaterialRoot = '7'.repeat(128);
-const otherHash = '6'.repeat(128);
 const expectedManifestHash = '1'.repeat(128);
 const expectedRosterHash = '2'.repeat(128);
 
@@ -60,15 +51,6 @@ const componentMaterial = (keySwitchComponentMaterialRoot: string) =>
     ({
         objectType: 'SetupTransportedEvaluationKeyShareComponentMaterial',
         proofFamily: 'relinearization-key-share',
-        keySwitchMaterialEncoding:
-            'binary-chunked-key-switch-component-vectors',
-        trusteeIdentity: 'trustee-alpha',
-        trusteeRosterPosition: 0,
-        keySwitchDomain: 'relinearization',
-        keySwitchSeedHex: 'abcd',
-        level: 0,
-        ringDegree: 4,
-        keySwitchComponentVectorRoot: otherHash,
         keySwitchComponentMaterialRoot,
         descriptorBytes: canonicalStreamDescriptorFixture(4, 0x53, 0x4c),
     }) as const;
@@ -95,37 +77,6 @@ const componentMaterialSource = (
         ),
     } as const;
 };
-
-const publicEvaluationKeyMaterial = {
-    objectType: 'SetupTransportedPublicEvaluationKeyMaterial',
-    ceremonyId: 'ceremony-alpha',
-    manifestHash: expectedManifestHash,
-    rosterHash: expectedRosterHash,
-    setupParametersHash: otherHash,
-    setupEpoch: '0',
-    evaluationKeySetHash: otherHash,
-    publicEvaluationKeyMaterialRoot,
-    descriptorBytes: canonicalStreamDescriptorFixture(4, 0x45, 0x53),
-} as const;
-
-const publicEvaluationKeyMaterialSource =
-    (): TestPublicEvaluationKeyMaterialSource => {
-        const chunks = [Uint8Array.of(0xaa, 0xbb, 0xcc, 0xdd).buffer] as const;
-
-        return {
-            publicEvaluationKeyMaterialRoot,
-            pullChunk: vi.fn(
-                ({ chunkIndex, expectedByteLength }: ChunkPullRequest) => {
-                    const chunk = chunks[chunkIndex];
-                    if (chunk === undefined) {
-                        return Promise.resolve(undefined);
-                    }
-                    expect(chunk.byteLength).toBe(expectedByteLength);
-                    return Promise.resolve(chunk.slice(0));
-                },
-            ),
-        } as const;
-    };
 
 const {
     prepareSnapshottedSetupPackageVerificationInputForKernel,
@@ -309,48 +260,5 @@ describe('evaluation-key component material streaming before terminal verificati
                 ],
             }),
         ).rejects.toThrow(/must match exactly one transported reference/u);
-    });
-
-    it('authenticates public evaluation-key material from its separate bounded source', async () => {
-        const source = publicEvaluationKeyMaterialSource();
-        const verificationInput = await prepare({
-            setupPackage: { objectType: 'SetupPackage' },
-            ...setupVerificationBindings,
-            transportedPublicEvaluationKeyMaterial: {
-                objectType: 'SetupTransportedPublicEvaluationKeyMaterialSet',
-                publicEvaluationKeyMaterials: [publicEvaluationKeyMaterial],
-            },
-            publicEvaluationKeyMaterialChunkSources: [source],
-        });
-
-        expect(runtimeMocks.readMaterial).toHaveBeenCalledWith(
-            expect.objectContaining({
-                descriptorBytes: publicEvaluationKeyMaterial.descriptorBytes,
-                family: bgvCanonicalStreamFamilies.publicEvaluationKeyMaterial,
-                materialRoot: publicEvaluationKeyMaterialRoot,
-                pullChunk: source.pullChunk,
-            }),
-        );
-        expect(source.pullChunk).toHaveBeenCalledTimes(2);
-        const normalizedPublicEvaluationKeyMaterials = (
-            verificationInput.transportedPublicEvaluationKeyMaterial as JsonRecord
-        ).publicEvaluationKeyMaterials as readonly JsonRecord[];
-        expect(normalizedPublicEvaluationKeyMaterials[0]).toMatchObject({
-            publicEvaluationKeyMaterialRoot,
-        });
-    });
-
-    it('rejects public evaluation-key material without an exact source match', async () => {
-        await expect(
-            prepare({
-                setupPackage: { objectType: 'SetupPackage' },
-                ...setupVerificationBindings,
-                transportedPublicEvaluationKeyMaterial: {
-                    objectType:
-                        'SetupTransportedPublicEvaluationKeyMaterialSet',
-                    publicEvaluationKeyMaterials: [publicEvaluationKeyMaterial],
-                },
-            }),
-        ).rejects.toThrow(/has no matching canonical chunk source/u);
     });
 });

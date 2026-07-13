@@ -122,18 +122,14 @@ export type VssShareComplaintRecord = Readonly<
 export type VssShareAcceptanceSet = Readonly<
     JsonRecord & {
         readonly objectType: 'VssShareAcceptanceSet';
-        readonly privateVssEnvelopeCommitmentRoot: ProtocolHash;
         readonly acceptanceRecords: readonly VssShareAcceptanceRecord[];
-        readonly vssShareAcceptanceRoot: ProtocolHash;
     }
 >;
 
 export type VssComplaintSet = Readonly<
     JsonRecord & {
         readonly objectType: 'VssComplaintSet';
-        readonly privateVssEnvelopeCommitmentRoot: ProtocolHash;
         readonly complaintRecords: readonly VssShareComplaintRecord[];
-        readonly vssComplaintRoot: ProtocolHash;
     }
 >;
 
@@ -311,8 +307,6 @@ export const createVssShareAcceptanceRecord = async (
 };
 
 export const createVssShareAcceptanceSet = (input: {
-    readonly setupContext: CollectiveBgvSetupContext;
-    readonly privateVssEnvelopeCommitmentRoot: ProtocolHash;
     readonly acceptanceRecords: readonly VssShareAcceptanceRecord[];
 }): VssShareAcceptanceSet => {
     const acceptanceRecords = sortedBySourceTrusteeThenRecipient(
@@ -322,23 +316,9 @@ export const createVssShareAcceptanceSet = (input: {
         acceptanceRecords,
         'VSS share acceptance',
     );
-    const acceptanceSetWithoutRoot = {
-        objectType: 'VssShareAcceptanceSet',
-        ceremonyId: input.setupContext.ceremonyId,
-        manifestHash: input.setupContext.manifestHash,
-        rosterHash: input.setupContext.rosterHash,
-        setupParametersHash: input.setupContext.setupParametersHash,
-        setupEpoch: input.setupContext.setupEpoch,
-        privateVssEnvelopeCommitmentRoot:
-            input.privateVssEnvelopeCommitmentRoot,
-        acceptanceRecords,
-    } as const satisfies JsonRecord;
-
     return {
-        ...acceptanceSetWithoutRoot,
-        vssShareAcceptanceRoot: deriveCanonicalObjectHash(
-            acceptanceSetWithoutRoot,
-        ),
+        objectType: 'VssShareAcceptanceSet',
+        acceptanceRecords,
     } satisfies VssShareAcceptanceSet;
 };
 
@@ -462,34 +442,4 @@ export const createVssShareComplaintRecordFromLocalVerification = async (
         complaintEvidenceRoot: deriveCanonicalObjectHash(evidencePayload),
         complaintReasonCode: firstRefusal.reasonCode,
     });
-};
-
-export const createVssComplaintSet = (input: {
-    readonly setupContext: CollectiveBgvSetupContext;
-    readonly privateVssEnvelopeCommitmentRoot: ProtocolHash;
-    readonly complaintRecords: readonly VssShareComplaintRecord[];
-}): VssComplaintSet => {
-    const complaintRecords = sortedBySourceTrusteeThenRecipient(
-        input.complaintRecords,
-    );
-    assertDistinctSourceTrusteeRecipientPairs(
-        complaintRecords,
-        'VSS complaint',
-    );
-    const complaintSetWithoutRoot = {
-        objectType: 'VssComplaintSet',
-        ceremonyId: input.setupContext.ceremonyId,
-        manifestHash: input.setupContext.manifestHash,
-        rosterHash: input.setupContext.rosterHash,
-        setupParametersHash: input.setupContext.setupParametersHash,
-        setupEpoch: input.setupContext.setupEpoch,
-        privateVssEnvelopeCommitmentRoot:
-            input.privateVssEnvelopeCommitmentRoot,
-        complaintRecords,
-    } as const satisfies JsonRecord;
-
-    return {
-        ...complaintSetWithoutRoot,
-        vssComplaintRoot: deriveCanonicalObjectHash(complaintSetWithoutRoot),
-    } satisfies VssComplaintSet;
 };

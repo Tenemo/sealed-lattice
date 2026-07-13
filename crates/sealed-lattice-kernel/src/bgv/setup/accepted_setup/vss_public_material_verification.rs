@@ -9,20 +9,8 @@ const VSS_SHARE_LINKAGE_STATEMENT_FIELD: &str = "vssShareLinkageStatement";
 const VSS_SHARE_LINKAGE_PROOF_MATERIAL_SET_FIELD: &str = "vssShareLinkageProofMaterialSet";
 
 #[derive(Debug, Clone)]
-pub(super) struct VerifiedVssPublicMaterial {
-    pub(super) public_matrix_seed_hash: String,
-    pub(super) aggregate_threshold_commitment_root: String,
-    pub(super) statement_root: String,
-    pub(super) proof_material_set_root: String,
-    pub(super) participant_count: u64,
-    pub(super) q_share_rns_limb_count: u64,
-    pub(super) threshold_degree: u64,
-    pub(super) ring_degree: u64,
-}
-
-#[derive(Debug, Clone)]
 pub(super) enum VssPublicMaterialVerification {
-    Verified(VerifiedVssPublicMaterial),
+    Verified,
     Refused(Value),
 }
 
@@ -38,37 +26,18 @@ pub(super) fn verify_vss_public_material(
         VSS_SHARE_LINKAGE_STATEMENT_FIELD,
         VSS_SHARE_LINKAGE_PROOF_MATERIAL_SET_FIELD,
     ];
-    let present_field_count = public_material_fields
-        .iter()
-        .filter(|field_name| setup_package.get(**field_name).is_some())
-        .count();
-    if present_field_count == 0 {
-        return Ok(VssPublicMaterialVerification::Refused(
-            verification_response(
-                Some("vssCoefficientCommitments"),
-                public_material_fields
-                    .iter()
-                    .map(|field_name| (*field_name).to_string())
-                    .collect(),
-                Vec::new(),
-                Vec::new(),
-            )?,
-        ));
-    }
-
-    if present_field_count != public_material_fields.len() {
-        let missing_fields = public_material_fields
-            .into_iter()
-            .filter(|field_name| setup_package.get(*field_name).is_none())
-            .map(|field_name| format!("setupPackage.{field_name}"))
-            .collect::<Vec<_>>()
-            .join(", ");
-
+    let missing_fields = public_material_fields
+        .into_iter()
+        .filter(|field_name| setup_package.get(*field_name).is_none())
+        .map(|field_name| format!("setupPackage.{field_name}"))
+        .collect::<Vec<_>>();
+    if !missing_fields.is_empty() {
         return Ok(VssPublicMaterialVerification::Refused(
             vss_public_material_refusal(
                 "vssPublicMaterialIncomplete",
                 format!(
-                    "VSS public material requires all commitment sets, the share-linkage statement, and its proof material set; missing {missing_fields}"
+                    "VSS public material is required; missing {}",
+                    missing_fields.join(", ")
                 ),
                 "setupPackage",
             )?,
@@ -76,7 +45,7 @@ pub(super) fn verify_vss_public_material(
     }
 
     match verify_vss_public_material_binding(setup_package, request, proof_binding_session) {
-        Ok(verified_material) => Ok(VssPublicMaterialVerification::Verified(verified_material)),
+        Ok(()) => Ok(VssPublicMaterialVerification::Verified),
         Err(error) => Ok(VssPublicMaterialVerification::Refused(
             vss_public_material_refusal(
                 "vssPublicMaterialMalformed",
@@ -91,7 +60,7 @@ fn verify_vss_public_material_binding(
     setup_package: &Value,
     request: &Value,
     proof_binding_session: Option<&crate::bgv::setup::AcceptedSetupProofBindingSession>,
-) -> CanonicalResult<VerifiedVssPublicMaterial> {
+) -> CanonicalResult<()> {
     let coefficient_set = setup_package
         .get(VSS_PUBLIC_COEFFICIENT_COMMITMENT_SET_FIELD)
         .ok_or_else(|| public_material_error("coefficient commitment set"))?;
@@ -151,6 +120,11 @@ fn verify_vss_public_material_binding(
         &statement_verification,
         "VSS share-linkage statement",
     )?;
+    if unsigned_at_path(&statement_verification, &["ringDegree"])? != POLYNOMIAL_DEGREE as u64 {
+        return Err(public_material_error(
+            "VSS share-linkage statement ring degree must match the accepted setup parameters",
+        ));
+    }
 
     let common_randomness = setup_package
         .get("commonRandomness")
@@ -200,24 +174,7 @@ fn verify_vss_public_material_binding(
         },
     )?;
 
-    Ok(VerifiedVssPublicMaterial {
-        public_matrix_seed_hash: accepted_public_matrix_seed_hash.to_string(),
-        aggregate_threshold_commitment_root: hash_at_path(
-            &statement_verification,
-            &["aggregateThresholdCommitmentRoot"],
-        )?
-        .to_string(),
-        statement_root: hash_at_path(&statement_verification, &["statementRoot"])?.to_string(),
-        proof_material_set_root: hash_at_path(
-            &proof_material_verification,
-            &["proofMaterialSetRoot"],
-        )?
-        .to_string(),
-        participant_count: unsigned_at_path(&statement_verification, &["participantCount"])?,
-        q_share_rns_limb_count: unsigned_at_path(&statement_verification, &["qShareRnsLimbCount"])?,
-        threshold_degree: unsigned_at_path(&statement_verification, &["thresholdDegree"])?,
-        ring_degree: unsigned_at_path(&statement_verification, &["ringDegree"])?,
-    })
+    Ok(())
 }
 
 fn public_material_error(message: &'static str) -> CanonicalError {
@@ -230,10 +187,8 @@ fn vss_public_material_refusal(
     object_path: impl Into<String>,
 ) -> CanonicalResult<Value> {
     verification_response(
-        Some("proofVerification"),
         Vec::new(),
         vec![Refusal::new(reason_code, message, object_path)],
-        Vec::new(),
     )
 }
 
@@ -242,59 +197,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn optional_vss_public_material_requires_complete_field_group() -> CanonicalResult<()> {
-        let VssPublicMaterialVerification::Refused(response) = verify_vss_public_material(
-            &json!({
-                "vssPublicCoefficientCommitmentSet": {},
-            }),
-            &json!({}),
-            None,
-        )?
-        else {
-            panic!("partial VSS public material must refuse");
-        };
-
-        assert_eq!(response["isValid"], json!(false));
-        assert_eq!(
-            response["refusedObjects"][0]["reasonCode"],
-            json!("vssPublicMaterialIncomplete")
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn optional_vss_public_material_requires_proof_material() -> CanonicalResult<()> {
-        let VssPublicMaterialVerification::Refused(response) = verify_vss_public_material(
-            &json!({
-                "vssPublicCoefficientCommitmentSet": {},
-                "vssPublicRecipientShareCommitmentSet": {},
-                "vssPublicAggregateThresholdCommitmentSet": {},
-                "vssShareLinkageStatement": {},
-            }),
-            &json!({}),
-            None,
-        )?
-        else {
-            panic!("complete VSS public material must refuse");
-        };
-
-        assert_eq!(response["isValid"], json!(false));
-        assert_eq!(
-            response["refusedObjects"][0]["reasonCode"],
-            json!("vssPublicMaterialIncomplete")
-        );
-        assert!(
-            response["refusedObjects"][0]["message"]
-                .as_str()
-                .expect("refusal message")
-                .contains("vssShareLinkageProofMaterialSet")
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn optional_vss_public_material_rejects_malformed_complete_field_group() -> CanonicalResult<()>
-    {
+    fn required_vss_public_material_rejects_malformed_records() -> CanonicalResult<()> {
         let VssPublicMaterialVerification::Refused(response) = verify_vss_public_material(
             &json!({
                 "vssPublicCoefficientCommitmentSet": {},

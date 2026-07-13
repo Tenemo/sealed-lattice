@@ -119,7 +119,6 @@ pub(crate) fn direct_target_ciphertext_hash(
         "objectType": "EncryptedSparseTargetCiphertext",
         "aggregateCiphertextRoot": aggregate_ciphertext_root,
         "topCount": top_count,
-        "tiePolicy": TIE_POLICY,
         "targetLayoutHash": target_layout_hash,
         "targetIdRoot": target_id_root,
         "targetOrderRoot": target_order_root,

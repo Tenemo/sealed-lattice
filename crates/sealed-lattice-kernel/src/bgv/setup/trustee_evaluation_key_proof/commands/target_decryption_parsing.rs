@@ -448,18 +448,6 @@ pub(in crate::bgv::setup) fn vss_share_linkage_commitment_from_value(
             expected.field_name
         )));
     }
-    // The mask degree is layout-derived, not free: a record claiming another
-    // degree would desynchronize the opened column degree bound.
-    let expected_mask_degree = super::super::vss_committed_material_column_mask_degree(
-        expected.ring_degree / super::super::TRACE_SPLIT,
-    );
-    if read_u64(value, "materialColumnMaskDegree")? != expected_mask_degree as u64 {
-        return Err(invalid_succinct_setup_proof(format!(
-            "{} material column mask degree does not match the layout",
-            expected.field_name
-        )));
-    }
-
     let commitment_fields = value
         .get("commitmentFields")
         .and_then(Value::as_array)

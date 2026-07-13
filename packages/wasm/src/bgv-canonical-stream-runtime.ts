@@ -1,5 +1,4 @@
-import type { RefusalReason } from '@sealed-lattice/types';
-import { foundationProfile, refusalReasonCodes } from '@sealed-lattice/types';
+import { foundationProfile } from '@sealed-lattice/types';
 
 import { beginAcceptedSetupCanonicalStream } from './accepted-setup-session-runtime.js';
 import {
@@ -19,6 +18,7 @@ import {
     type CanonicalStreamWriterLease,
     type FillRandomValues,
 } from './canonical-stream-runtime.js';
+import { refusalReasonByCode } from './transcript-core-bridge/kernel-errors.js';
 import type {
     TranscriptCoreKernelContextOwner,
     AcceptedSetupSession,
@@ -40,7 +40,6 @@ export const bgvCanonicalStreamFamilies = Object.freeze({
     galoisComponent: 7,
     targetDecryptionShare: 8,
     publicKeyShareMaterial: 9,
-    publicEvaluationKeyMaterial: 10,
     targetDecryptionAggregateOpening: 11,
 } as const);
 
@@ -107,13 +106,6 @@ type ActiveLease = {
     totalByteLength: number;
 };
 
-const refusalReasonByCode = new Map<number, RefusalReason>(
-    Object.entries(refusalReasonCodes).map(([reason, code]) => [
-        code,
-        reason as RefusalReason,
-    ]),
-);
-
 const familyDomain = new Map<BgvCanonicalStreamFamily, CanonicalStreamDomain>([
     [
         bgvCanonicalStreamFamilies.vssOpeningCarry,
@@ -150,10 +142,6 @@ const familyDomain = new Map<BgvCanonicalStreamFamily, CanonicalStreamDomain>([
     [
         bgvCanonicalStreamFamilies.publicKeyShareMaterial,
         canonicalStreamDomains.publicKeyShareMaterial,
-    ],
-    [
-        bgvCanonicalStreamFamilies.publicEvaluationKeyMaterial,
-        canonicalStreamDomains.publicEvaluationKeyMaterial,
     ],
     [
         bgvCanonicalStreamFamilies.targetDecryptionAggregateOpening,

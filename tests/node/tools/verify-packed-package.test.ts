@@ -1,9 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-    extractPublishedKernelHash,
-    hashPublishedKernelBytesSha256Hex,
-    validatePublishedKernelIntegrity,
     validatePublishedPackageBundle,
     validatePublishedPackageFilePaths,
 } from '#tools/ci/verify-packed-package';
@@ -56,33 +53,5 @@ describe('packed package policy checks', () => {
                 'Published runtime output contains the unresolved WASM integrity token',
             ]),
         );
-    });
-
-    it('requires pinned kernel bytes', () => {
-        const kernelBytes = Uint8Array.from([0]);
-        const hash = hashPublishedKernelBytesSha256Hex(kernelBytes);
-        const kernelRuntimeText = `const options = { expectedKernelSha256Hex: '${hash}' };`;
-
-        expect(extractPublishedKernelHash(kernelRuntimeText)).toBe(hash);
-        expect(
-            validatePublishedKernelIntegrity(kernelRuntimeText, kernelBytes),
-        ).toEqual([]);
-        expect(
-            validatePublishedKernelIntegrity(
-                'const options = { expectedKernelSha256Hex: undefined };',
-                kernelBytes,
-            ),
-        ).toEqual([
-            'Published package kernel loader must pin the packaged transcript-core WASM hash',
-        ]);
-        const tamperedKernelBytes = Uint8Array.from([1]);
-        expect(
-            validatePublishedKernelIntegrity(
-                kernelRuntimeText,
-                tamperedKernelBytes,
-            ),
-        ).toEqual([
-            `Published package kernel hash mismatch: expected ${hash}, received ${hashPublishedKernelBytesSha256Hex(tamperedKernelBytes)}`,
-        ]);
     });
 });

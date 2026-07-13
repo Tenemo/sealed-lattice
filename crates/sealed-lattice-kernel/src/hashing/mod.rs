@@ -321,47 +321,6 @@ impl CanonicalJsonSink for HashingCanonicalJsonSink<'_> {
     }
 }
 
-#[cfg(test)]
-struct ByteComparisonCanonicalJsonSink<'expected> {
-    expected_bytes: &'expected [u8],
-    offset: usize,
-    matches: bool,
-}
-
-#[cfg(test)]
-impl<'expected> ByteComparisonCanonicalJsonSink<'expected> {
-    fn new(expected_bytes: &'expected [u8]) -> Self {
-        Self {
-            expected_bytes,
-            offset: 0,
-            matches: true,
-        }
-    }
-
-    fn complete(self) -> bool {
-        self.matches && self.offset == self.expected_bytes.len()
-    }
-}
-
-#[cfg(test)]
-impl CanonicalJsonSink for ByteComparisonCanonicalJsonSink<'_> {
-    fn write_str(&mut self, value: &str) -> CanonicalResult<()> {
-        if !self.matches {
-            return Ok(());
-        }
-
-        let value_bytes = value.as_bytes();
-        let end = self.offset.saturating_add(value_bytes.len());
-        if self.expected_bytes.get(self.offset..end) != Some(value_bytes) {
-            self.matches = false;
-            return Ok(());
-        }
-        self.offset = end;
-
-        Ok(())
-    }
-}
-
 fn checked_len_add(left: usize, right: usize) -> CanonicalResult<usize> {
     left.checked_add(right).ok_or_else(|| {
         CanonicalError::new(
@@ -574,17 +533,6 @@ pub fn canonical_json(value: &Value) -> CanonicalResult<String> {
     Ok(output)
 }
 
-#[cfg(test)]
-pub fn canonical_json_matches_bytes(value: &Value, expected_bytes: &[u8]) -> CanonicalResult<bool> {
-    if canonical_json_len(value)? != expected_bytes.len() {
-        return Ok(false);
-    }
-    let mut sink = ByteComparisonCanonicalJsonSink::new(expected_bytes);
-    write_canonical_json(value, &mut sink)?;
-
-    Ok(sink.complete())
-}
-
 /// Single structural domain for canonical typed protocol objects, records, and
 /// roots. Domain separation comes from the mandatory `objectType` discriminator
 /// already inside the canonical JSON, not from a per-type namespace string. The
@@ -657,7 +605,7 @@ pub(crate) fn derive_canonical_object_hash_omitting_field_paths(
 #[cfg(test)]
 mod tests {
     use super::{
-        CanonicalJsonPathSegment, canonical_json, canonical_json_matches_bytes, chunk_root,
+        CanonicalJsonPathSegment, canonical_json, chunk_root,
         derive_canonical_object_hash_omitting_field_paths, hash512_hex, hash512_hex_streamed_part,
     };
     use crate::encoding::CanonicalErrorCode;
@@ -769,24 +717,6 @@ mod tests {
             assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
             assert!(error.message.contains("only ASCII characters"));
         }
-    }
-
-    #[test]
-    fn canonical_json_byte_comparison_matches_streamed_encoding() {
-        let value = serde_json::json!({
-            "z": [true, null, "plain-ascii"],
-            "a": { "nested": 17 }
-        });
-        let canonical = canonical_json(&value).expect("canonical JSON should serialize");
-
-        assert!(
-            canonical_json_matches_bytes(&value, canonical.as_bytes())
-                .expect("byte comparison should run")
-        );
-        assert!(
-            !canonical_json_matches_bytes(&value, b"{\"a\":0}")
-                .expect("byte comparison should reject mismatched bytes")
-        );
     }
 
     #[test]

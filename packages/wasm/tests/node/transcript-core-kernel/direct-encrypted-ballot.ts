@@ -17,7 +17,7 @@ const wasmKernelUrl = new URL(
     import.meta.url,
 );
 
-export const directBallotSetupSeed = 'direct-encrypted-ballot-node-wasm-seed';
+const directBallotSetupSeed = 'direct-encrypted-ballot-node-wasm-seed';
 
 const createFreshRandomnessHex = (): string => {
     const cryptoProvider = globalThis.crypto;
@@ -37,11 +37,11 @@ const createFreshRandomnessHex = (): string => {
 const suppliedOrFreshRandomnessHex = (value: string | undefined): string =>
     value ?? createFreshRandomnessHex();
 
-export const directBallotScores = [
+const directBallotScores = [
     10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
 ] as const;
 
-export type DirectEncryptedBallotEvaluatorReplayResult = {
+type DirectEncryptedBallotEvaluatorReplayResult = {
     readonly topCount: number;
     readonly targetLayoutHash: string;
     readonly targetIdRoot: string;
@@ -66,7 +66,7 @@ export type DirectEncryptedBallotEvaluatorReplayResult = {
           };
 };
 
-export type DirectEncryptedBallotResult = {
+type DirectEncryptedBallotResult = {
     readonly encryptedBallots: {
         readonly encryptedBallotHashes: readonly string[];
         readonly ciphertextRoots: readonly string[];
@@ -77,7 +77,6 @@ export type DirectEncryptedBallotResult = {
         readonly proofTransport: {
             readonly chunkHashes: readonly string[];
             readonly chunkMerkleRoot: string;
-            readonly publicTransportHash: string;
         };
     }[];
     readonly aggregation: {
@@ -123,13 +122,13 @@ export const createDirectBallotSetupPackage = (
         setupSeed: directBallotSetupSeed,
     });
 
-export const directBallotActionContextHash = (): string =>
+const directBallotActionContextHash = (): string =>
     deriveCanonicalObjectHash({
         objectType: 'ActionContextHash',
         action: 'direct encrypted ballot node wasm smoke',
     });
 
-export type DirectEncryptedBallotInput = {
+type DirectEncryptedBallotInput = {
     readonly voterIdentity: string;
     readonly actionContextHash: string;
     readonly scores: readonly number[];
@@ -143,31 +142,6 @@ type DirectBallotProofMaskRandomnessInput = {
 type DirectBallotEncryptionRandomnessInput = {
     readonly ballotEncryptionSeedHexes?: readonly string[];
     readonly developmentRandomnessOverrideAcknowledged?: boolean;
-};
-
-export const createDirectBallotInputs = (
-    ballotCount: number,
-): readonly DirectEncryptedBallotInput[] => {
-    if (!Number.isInteger(ballotCount) || ballotCount < 1 || ballotCount > 20) {
-        throw new Error('ballotCount must be an integer from 1 through 20.');
-    }
-
-    return Array.from(
-        { length: ballotCount },
-        (_unusedBallot, ballotIndex) => ({
-            voterIdentity: `voter-node-wasm-${String(ballotIndex + 1).padStart(2, '0')}`,
-            actionContextHash: deriveCanonicalObjectHash({
-                objectType: 'ActionContextHash',
-                action: 'direct encrypted ballot node wasm smoke',
-                ballotIndex,
-            }),
-            scores: directBallotScores.map((_unusedScore, optionIndex) => {
-                const score = ((optionIndex + ballotIndex) % 10) + 1;
-
-                return score;
-            }),
-        }),
-    );
 };
 
 const defaultDirectBallotInputs = (): readonly DirectEncryptedBallotInput[] => [
@@ -240,7 +214,7 @@ const createProofMaskRandomness = (
     };
 };
 
-export const runInternalKernelCommand = async <Result>(
+const runInternalKernelCommand = async <Result>(
     request: Record<string, unknown>,
 ): Promise<Result> => {
     const bytes = await resolveKernelBytes(wasmKernelUrl);

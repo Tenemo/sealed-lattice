@@ -61,21 +61,27 @@ export const parseRustKernelHeavyArguments = (
 
 export const buildRustKernelHeavyTestCommand = (
     parsedArguments: ParsedRustKernelHeavyArguments,
+    diagnosticsPath?: string,
 ): CommandInvocation =>
-    getRustKernelHeavyProcessMemoryGuard().guardCommand({
-        args: cargoTestArgumentsForRustKernelHeavy(parsedArguments.testFilter),
-        command: 'cargo',
-        description: `cargo test Rust kernel heavy (${parsedArguments.testFilter})`,
-        env: {
-            ...process.env,
-            CARGO_BUILD_JOBS: '1',
-            CARGO_INCREMENTAL: '0',
-            RAYON_NUM_THREADS: '1',
-            RUST_BACKTRACE: 'full',
-            SEALED_LATTICE_TRUSTEE_PROOF_LIMB_BATCH_SIZE: '1',
+    getRustKernelHeavyProcessMemoryGuard().guardCommand(
+        {
+            args: cargoTestArgumentsForRustKernelHeavy(
+                parsedArguments.testFilter,
+            ),
+            command: 'cargo',
+            description: `cargo test Rust kernel heavy (${parsedArguments.testFilter})`,
+            env: {
+                ...process.env,
+                CARGO_BUILD_JOBS: '1',
+                CARGO_INCREMENTAL: '0',
+                RAYON_NUM_THREADS: '1',
+                RUST_BACKTRACE: 'full',
+                SEALED_LATTICE_TRUSTEE_PROOF_LIMB_BATCH_SIZE: '1',
+            },
+            logFileSlug: 'cargo-test-rust-kernel-heavy',
         },
-        logFileSlug: 'cargo-test-rust-kernel-heavy',
-    });
+        { diagnosticsPath },
+    );
 
 export const buildRustKernelHeavyProcessMemoryGuardVerificationCommand =
     (): CommandInvocation =>
@@ -92,9 +98,8 @@ export const runRustKernelHeavyTests = async (
         },
         async (runLog) => {
             const parsedArguments = parseRustKernelHeavyArguments(rawArguments);
-            const processMemoryGuard = getRustKernelHeavyProcessMemoryGuard();
-            const command = processMemoryGuard.addDiagnostics(
-                buildRustKernelHeavyTestCommand(parsedArguments),
+            const command = buildRustKernelHeavyTestCommand(
+                parsedArguments,
                 path.join(
                     runLog.runDirectoryPath,
                     'resources',

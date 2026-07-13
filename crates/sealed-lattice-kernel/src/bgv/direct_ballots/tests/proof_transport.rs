@@ -4,9 +4,6 @@ use super::*;
 fn direct_ballot_public_proof_transport_rejects_wrong_chunk_hash() {
     let fixture = direct_ballot_relation_proof_fixture();
     let transport = transport_direct_ballot_binary_proof(
-        &fixture.setup_package,
-        &fixture.encrypted_ballot,
-        &fixture.proof_generation.statement_hash_hex,
         &fixture.proof_generation.proof_bytes,
         &fixture.proof_generation.proof_bytes_hash,
         direct_ballot_relation_proof_bytes_hash,
@@ -33,9 +30,6 @@ fn direct_ballot_public_proof_transport_rejects_wrong_chunk_hash() {
 fn direct_ballot_public_proof_transport_rejects_duplicate_chunk_hash() {
     let fixture = direct_ballot_relation_proof_fixture();
     let transport = transport_direct_ballot_binary_proof(
-        &fixture.setup_package,
-        &fixture.encrypted_ballot,
-        &fixture.proof_generation.statement_hash_hex,
         &fixture.proof_generation.proof_bytes,
         &fixture.proof_generation.proof_bytes_hash,
         direct_ballot_relation_proof_bytes_hash,
@@ -62,9 +56,6 @@ fn direct_ballot_public_proof_transport_rejects_duplicate_chunk_hash() {
 fn direct_ballot_public_proof_transport_rejects_truncated_proof_bytes() {
     let fixture = direct_ballot_relation_proof_fixture();
     let transport = transport_direct_ballot_binary_proof(
-        &fixture.setup_package,
-        &fixture.encrypted_ballot,
-        &fixture.proof_generation.statement_hash_hex,
         &fixture.proof_generation.proof_bytes,
         &fixture.proof_generation.proof_bytes_hash,
         direct_ballot_relation_proof_bytes_hash,

@@ -11,9 +11,6 @@ import {
     parser as typescriptParser,
 } from 'typescript-eslint';
 
-const OFF = 0;
-const ERROR = 2;
-
 const sourceFiles = ['**/*.{js,mjs,ts}'];
 const javaScriptFiles = ['**/*.{js,mjs}'];
 const testFiles = ['packages/*/tests/**/*.ts', 'tests/**/*.ts'];
@@ -61,37 +58,12 @@ const packageSourceImportPatterns = [
 
 export default defineConfig(
     globalIgnores([
-        '.tmp',
-        '.tmp/**',
-        '.tmp-*',
-        '.tmp-*/**',
-        '.tmp_*',
-        '.tmp_*/**',
-        '.tmp.*',
-        '.tmp.*/**',
-        'temp',
-        'temp/**',
-        'temp-*',
-        'temp-*/**',
-        'temp.*',
-        'temp.*/**',
-        'tmp',
-        'tmp/**',
-        'tmp-*',
-        'tmp-*/**',
-        'tmp.*',
-        'tmp.*/**',
-        'node_modules',
+        '.tmp*/**',
+        'temp*/**',
+        'tmp*/**',
         'node_modules/**',
-        'reference-projects',
         'reference-projects/**',
-        'dist',
-        'dist/**',
-        '**/dist',
         '**/dist/**',
-        'target',
-        'target/**',
-        '**/target',
         '**/target/**',
     ]),
     {
@@ -103,7 +75,6 @@ export default defineConfig(
     importFlatConfigs.warnings,
     importFlatConfigs.typescript,
     ...typescriptEslintConfigs.recommendedTypeChecked,
-    ...typescriptEslintConfigs.stylisticTypeChecked,
     prettierPluginRecommended,
     {
         files: sourceFiles,
@@ -121,10 +92,10 @@ export default defineConfig(
         settings: importResolverSettings,
         rules: {
             ...eslintJs.configs.recommended.rules,
-            'no-redeclare': OFF,
-            'no-restricted-exports': OFF,
+            'no-redeclare': 'off',
+            'no-restricted-exports': 'off',
             'no-restricted-properties': [
-                ERROR,
+                'error',
                 {
                     object: 'Math',
                     property: 'random',
@@ -132,25 +103,15 @@ export default defineConfig(
                         'Use the project crypto-backed randomness helpers instead.',
                 },
             ],
-            'no-shadow': OFF,
-            'no-undef': OFF,
-            'no-unused-vars': OFF,
-            '@typescript-eslint/no-unused-vars': OFF,
-            '@typescript-eslint/no-use-before-define': ERROR,
-            '@typescript-eslint/no-shadow': ERROR,
-            '@typescript-eslint/explicit-module-boundary-types': ERROR,
-            '@typescript-eslint/unbound-method': ERROR,
-            '@typescript-eslint/explicit-function-return-type': [
-                ERROR,
-                {
-                    allowExpressions: true,
-                    allowTypedFunctionExpressions: true,
-                },
-            ],
-            '@typescript-eslint/consistent-type-definitions': ['error', 'type'],
-            'unused-imports/no-unused-imports': ERROR,
+            'no-shadow': 'off',
+            'no-undef': 'off',
+            'no-unused-vars': 'off',
+            '@typescript-eslint/no-unused-vars': 'off',
+            '@typescript-eslint/no-shadow': 'error',
+            '@typescript-eslint/unbound-method': 'error',
+            'unused-imports/no-unused-imports': 'error',
             'unused-imports/no-unused-vars': [
-                ERROR,
+                'error',
                 {
                     vars: 'all',
                     varsIgnorePattern: '^_',
@@ -159,7 +120,7 @@ export default defineConfig(
                 },
             ],
             'prettier/prettier': [
-                ERROR,
+                'error',
                 {
                     useTabs: false,
                     semi: true,
@@ -170,16 +131,13 @@ export default defineConfig(
                 },
             ],
             'import-x/no-extraneous-dependencies': [
-                ERROR,
+                'error',
                 { devDependencies: true },
             ],
-            'import-x/no-named-as-default': ERROR,
-            'import-x/no-named-as-default-member': ERROR,
-            'import-x/no-rename-default': ERROR,
-            'import-x/no-duplicates': ERROR,
-            'import-x/prefer-default-export': OFF,
+            'import-x/no-duplicates': 'error',
+            'import-x/prefer-default-export': 'off',
             'import-x/extensions': [
-                ERROR,
+                'error',
                 'ignorePackages',
                 {
                     js: 'never',
@@ -188,7 +146,7 @@ export default defineConfig(
                 },
             ],
             'import-x/order': [
-                ERROR,
+                'error',
                 {
                     'newlines-between': 'always',
                     alphabetize: { order: 'asc', caseInsensitive: true },
@@ -201,7 +159,7 @@ export default defineConfig(
         files: ['packages/*/src/**/*.ts'],
         rules: {
             'no-restricted-imports': [
-                ERROR,
+                'error',
                 { patterns: packageSourceImportPatterns },
             ],
         },
@@ -210,7 +168,7 @@ export default defineConfig(
         files: ['packages/types/src/**/*.ts'],
         rules: {
             'no-restricted-imports': [
-                ERROR,
+                'error',
                 {
                     paths: [
                         '@sealed-lattice/crypto',
@@ -227,7 +185,7 @@ export default defineConfig(
         files: ['packages/crypto/src/**/*.ts'],
         rules: {
             'no-restricted-imports': [
-                ERROR,
+                'error',
                 {
                     paths: [
                         '@sealed-lattice/protocol',
@@ -243,7 +201,7 @@ export default defineConfig(
         files: ['packages/wasm/src/**/*.ts'],
         rules: {
             'no-restricted-imports': [
-                ERROR,
+                'error',
                 {
                     paths: [
                         '@sealed-lattice/crypto',
@@ -259,7 +217,7 @@ export default defineConfig(
         files: ['packages/protocol/src/**/*.ts'],
         rules: {
             'no-restricted-imports': [
-                ERROR,
+                'error',
                 {
                     paths: ['@sealed-lattice/wasm', 'sealed-lattice'],
                     patterns: packageSourceImportPatterns,
@@ -281,9 +239,9 @@ export default defineConfig(
     {
         files: javaScriptFiles,
         rules: {
-            '@typescript-eslint/no-unsafe-assignment': OFF,
-            '@typescript-eslint/no-unsafe-member-access': OFF,
-            '@typescript-eslint/no-unsafe-call': OFF,
+            '@typescript-eslint/no-unsafe-assignment': 'off',
+            '@typescript-eslint/no-unsafe-member-access': 'off',
+            '@typescript-eslint/no-unsafe-call': 'off',
         },
     },
     {
@@ -307,15 +265,14 @@ export default defineConfig(
         rules: {
             ...vitestPlugin.configs.recommended.rules,
             'vitest/expect-expect': [
-                ERROR,
+                'error',
                 {
                     assertFunctionNames: ['expect', 'assert', 'expect*'],
                 },
             ],
-            'vitest/valid-expect': [ERROR, { minArgs: 1, maxArgs: 2 }],
-            'vitest/no-focused-tests': ERROR,
-            'vitest/no-disabled-tests': ERROR,
-            'vitest/max-nested-describe': [ERROR, { max: 4 }],
+            'vitest/valid-expect': ['error', { minArgs: 1, maxArgs: 2 }],
+            'vitest/no-focused-tests': 'error',
+            'vitest/no-disabled-tests': 'error',
         },
     },
     {
@@ -326,9 +283,7 @@ export default defineConfig(
             },
         },
         rules: {
-            '@typescript-eslint/explicit-module-boundary-types': OFF,
-            '@typescript-eslint/explicit-function-return-type': OFF,
-            '@typescript-eslint/no-unsafe-argument': OFF,
+            '@typescript-eslint/no-unsafe-argument': 'off',
         },
     },
     {
@@ -336,7 +291,7 @@ export default defineConfig(
         rules: {
             // This script is copied into a temporary consumer and runs only
             // after the packed SDK has been installed there.
-            'import-x/no-unresolved': OFF,
+            'import-x/no-unresolved': 'off',
         },
     },
 );

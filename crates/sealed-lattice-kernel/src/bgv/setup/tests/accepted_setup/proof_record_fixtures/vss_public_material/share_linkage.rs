@@ -90,15 +90,6 @@ pub(in super::super::super) fn vss_share_linkage_statement_object(
     let ring_degree = package["vssPublicCoefficientCommitmentSet"]["ringDegree"]
         .as_u64()
         .expect("ring degree");
-    let source_statement_records = (0..participant_count)
-        .map(|source_trustee_roster_position| {
-            vss_share_linkage_source_statement_record(
-                package,
-                public_matrix_seed_hash,
-                source_trustee_roster_position,
-            )
-        })
-        .collect::<Vec<_>>();
     let mut statement = serde_json::json!({
         "objectType": "VssShareLinkageStatement",
         "ceremonyId": setup_context["ceremonyId"],
@@ -114,7 +105,6 @@ pub(in super::super::super) fn vss_share_linkage_statement_object(
         "coefficientCommitmentRoot": package["vssPublicCoefficientCommitmentSet"]["coefficientCommitmentRoot"],
         "recipientShareCommitmentRoot": package["vssPublicRecipientShareCommitmentSet"]["recipientShareCommitmentRoot"],
         "aggregateThresholdCommitmentRoot": package["vssPublicAggregateThresholdCommitmentSet"]["aggregateThresholdCommitmentRoot"],
-        "sourceStatementRecords": source_statement_records,
     });
     statement["statementRoot"] = serde_json::json!(
         derive_canonical_object_hash(&statement).expect("VSS share-linkage statement root")
@@ -123,68 +113,9 @@ pub(in super::super::super) fn vss_share_linkage_statement_object(
     statement
 }
 
-pub(super) fn vss_share_linkage_source_statement_record(
-    package: &serde_json::Value,
-    public_matrix_seed_hash: &str,
-    source_trustee_roster_position: u64,
-) -> serde_json::Value {
-    let setup_context = &package["setupContext"];
-    let source_trustee_identity = format!("trustee-{source_trustee_roster_position}");
-    let coefficient_source_record =
-        vss_public_coefficient_source_record_from_package(package, source_trustee_roster_position);
-    let recipient_source_record =
-        vss_public_recipient_source_record_from_package(package, source_trustee_roster_position);
-    let coefficient_opening_roots = coefficient_source_record["coefficientCommitments"]
-        .as_array()
-        .expect("coefficient commitments")
-        .iter()
-        .take(
-            DATA_PRIMES.len()
-                * package["vssPublicCoefficientCommitmentSet"]["thresholdDegree"]
-                    .as_u64()
-                    .expect("threshold degree") as usize,
-        )
-        .map(|record| record["coefficientOpeningRoot"].clone())
-        .collect::<Vec<_>>();
-    let recipient_share_opening_roots = recipient_source_record["recipientShareCommitments"]
-        .as_array()
-        .expect("recipient-share commitments")
-        .iter()
-        .map(|record| record["shareOpeningRoot"].clone())
-        .collect::<Vec<_>>();
-    let mut source_statement = serde_json::json!({
-        "objectType": "VssShareLinkageSourceStatement",
-        "ceremonyId": setup_context["ceremonyId"],
-        "manifestHash": setup_context["manifestHash"],
-        "rosterHash": setup_context["rosterHash"],
-        "setupParametersHash": setup_context["setupParametersHash"],
-        "setupEpoch": setup_context["setupEpoch"],
-        "publicMatrixSeedHash": public_matrix_seed_hash,
-        "sourceTrusteeIdentity": source_trustee_identity,
-        "sourceTrusteeRosterPosition": source_trustee_roster_position,
-        "ringDegree": package["vssPublicCoefficientCommitmentSet"]["ringDegree"],
-        "participantCount": package["vssPublicCoefficientCommitmentSet"]["participantCount"],
-        "qShareRnsLimbCount": DATA_PRIMES.len(),
-        "thresholdDegree": package["vssPublicCoefficientCommitmentSet"]["thresholdDegree"],
-        "coefficientCommitmentRoot": package["vssPublicCoefficientCommitmentSet"]["coefficientCommitmentRoot"],
-        "sourceCoefficientCommitmentRoot": coefficient_source_record["sourceCoefficientCommitmentRoot"],
-        "sourceRecipientShareCommitmentRoot": recipient_source_record["sourceRecipientShareCommitmentRoot"],
-        "coefficientOpeningRoots": coefficient_opening_roots,
-        "recipientShareOpeningRoots": recipient_share_opening_roots,
-        "aggregateThresholdCommitmentRoot": package["vssPublicAggregateThresholdCommitmentSet"]["aggregateThresholdCommitmentRoot"],
-    });
-    source_statement["sourceStatementRoot"] = serde_json::json!(
-        derive_canonical_object_hash(&source_statement)
-            .expect("VSS share-linkage source statement root")
-    );
-
-    source_statement
-}
-
 pub(in super::super::super) fn vss_share_linkage_proof_material_set_object(
     package: &serde_json::Value,
 ) -> serde_json::Value {
-    let statement = &package["vssShareLinkageStatement"];
     let participant_count = participant_count_from_package(package);
     let proof_records = (0..participant_count)
         .flat_map(|source_trustee_roster_position| {
@@ -193,21 +124,6 @@ pub(in super::super::super) fn vss_share_linkage_proof_material_set_object(
         .collect::<Vec<_>>();
     let mut proof_material_set = serde_json::json!({
         "objectType": "VssShareLinkageProofMaterialSet",
-        "proofFamily": VSS_SHARE_LINKAGE_PROOF_FAMILY,
-        "ceremonyId": statement["ceremonyId"],
-        "manifestHash": statement["manifestHash"],
-        "rosterHash": statement["rosterHash"],
-        "setupParametersHash": statement["setupParametersHash"],
-        "setupEpoch": statement["setupEpoch"],
-        "publicMatrixSeedHash": statement["publicMatrixSeedHash"],
-        "ringDegree": statement["ringDegree"],
-        "participantCount": statement["participantCount"],
-        "qShareRnsLimbCount": statement["qShareRnsLimbCount"],
-        "thresholdDegree": statement["thresholdDegree"],
-        "coefficientCommitmentRoot": statement["coefficientCommitmentRoot"],
-        "recipientShareCommitmentRoot": statement["recipientShareCommitmentRoot"],
-        "aggregateThresholdCommitmentRoot": statement["aggregateThresholdCommitmentRoot"],
-        "statementRoot": statement["statementRoot"],
         "proofRecords": proof_records,
     });
     proof_material_set["proofMaterialSetRoot"] = serde_json::json!(
@@ -250,7 +166,6 @@ pub(super) fn vss_share_linkage_proof_record(
     item_records: &[serde_json::Value],
 ) -> serde_json::Value {
     let vss_share_linkage = vss_share_linkage_proof_statement(package, item_records);
-    let linkage_items = vss_share_linkage_coverage_items_from_records(item_records);
     let proof_material = vss_share_linkage_proof_material_reference(
         package,
         &vss_share_linkage,
@@ -259,8 +174,6 @@ pub(super) fn vss_share_linkage_proof_record(
     );
     let mut proof_record = serde_json::json!({
         "objectType": "VssShareLinkageProofRecord",
-        "proofFamily": VSS_SHARE_LINKAGE_PROOF_FAMILY,
-        "linkageItems": linkage_items,
         "vssShareLinkage": vss_share_linkage,
         "proofBytesHash": proof_material.proof_bytes_hash,
         "proofMaterialRoot": proof_material.proof_material_root,
@@ -350,35 +263,13 @@ pub(super) fn vss_share_linkage_item_record(
             .iter()
             .map(|record| record["coefficientCommitmentRoot"].clone())
             .collect::<Vec<_>>(),
-        "coefficientOpeningRoots": selected_coefficient_records
-            .iter()
-            .map(|record| record["coefficientOpeningRoot"].clone())
-            .collect::<Vec<_>>(),
         "coefficientCommitments": selected_coefficient_records
             .iter()
             .map(|record| record["commitment"].clone())
             .collect::<Vec<_>>(),
         "recipientShareCommitmentRoot": recipient_record["shareCommitmentRoot"],
-        "recipientShareOpeningRoot": recipient_record["shareOpeningRoot"],
         "recipientShareCommitment": recipient_record["commitment"],
     })
-}
-
-pub(super) fn vss_share_linkage_coverage_items_from_records(
-    item_records: &[serde_json::Value],
-) -> Vec<serde_json::Value> {
-    item_records
-        .iter()
-        .enumerate()
-        .map(|(item_index, item_record)| {
-            serde_json::json!({
-                "sourceTrusteeRosterPosition": item_record["sourceTrusteeRosterPosition"],
-                "recipientRosterPosition": item_record["recipientRosterPosition"],
-                "sourceRnsLimbIndex": item_record["sourceRnsLimbIndex"],
-                "itemIndex": item_index,
-            })
-        })
-        .collect()
 }
 
 fn vss_share_linkage_proof_material_reference(

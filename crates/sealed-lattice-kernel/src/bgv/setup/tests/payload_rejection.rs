@@ -255,7 +255,7 @@ fn passive_setup_verification_rejects_a_missing_rotation_key() {
     let rotations = package["evaluationKeys"]["rotSet"]["rotations"]
         .as_array()
         .expect("rotations");
-    assert_eq!(rotations.len(), 23);
+    assert_eq!(rotations.len(), 16);
     assert_eq!(rotations[0], serde_json::json!(3));
 
     let mut missing_packed_rank_key = package.clone();

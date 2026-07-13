@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -25,19 +25,6 @@ describe('Vitest diagnostics', () => {
                 runDirectoryPath,
                 'tests',
                 'node-fast.jsonl',
-            );
-            const attachmentDirectoryPath = path.join(
-                runDirectoryPath,
-                'attachments',
-                'node-fast',
-            );
-            await mkdir(path.join(attachmentDirectoryPath, 'traces'), {
-                recursive: true,
-            });
-            await writeFile(
-                path.join(attachmentDirectoryPath, 'traces', 'failure.zip'),
-                'trace bytes',
-                'utf8',
             );
             const reporter = new VitestDiagnosticReporter({
                 [testDiagnosticEnvironmentVariables.projectLabel]: 'node-fast',
@@ -110,19 +97,6 @@ describe('Vitest diagnostics', () => {
             expect(eventText).not.toMatch(
                 /underlying-secret|hunter2|stack-secret|console-secret/u,
             );
-
-            const manifest = JSON.parse(
-                await readFile(
-                    path.join(attachmentDirectoryPath, 'manifest.json'),
-                    'utf8',
-                ),
-            ) as { readonly files: readonly Record<string, unknown>[] };
-            expect(manifest.files).toHaveLength(1);
-            expect(manifest.files[0]).toMatchObject({
-                path: 'traces/failure.zip',
-                sizeBytes: 11,
-            });
-            expect(manifest.files[0]?.sha256).toMatch(/^[a-f0-9]{64}$/u);
         } finally {
             await rm(runDirectoryPath, { force: true, recursive: true });
         }

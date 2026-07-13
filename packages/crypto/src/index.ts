@@ -13,13 +13,13 @@ export {
 export {
     decryptLocalTrusteeSetupSealedMaterial,
     decryptLocalTrusteeState,
+    deriveLocalTrusteeSetupStateCommitmentRoot,
     encryptLocalTrusteeSetupSealedMaterial,
     encryptLocalTrusteeState,
 } from './local-trustee-state-storage.js';
 export type {
     PrivateVssEncryptedEnvelope,
     PrivateVssMailboxDecryptionInput,
-    PrivateVssMailboxDecryptionResult,
     PrivateVssMailboxEncryptionInput,
     PrivateVssMailboxEncryptionResult,
     PrivateVssMailboxKeyPair,
@@ -28,13 +28,10 @@ export type {
     EncryptedLocalTrusteeSetupMaterial,
     EncryptedLocalTrusteeSetupState,
     LocalTrusteeSetupSealedMaterialDecryptionInput,
-    LocalTrusteeSetupSealedMaterialDecryptionResult,
     LocalTrusteeSetupSealedMaterialEncryptionInput,
-    LocalTrusteeSetupSealedMaterialEncryptionResult,
     LocalTrusteeSetupStateSealedMaterial,
     LocalTrusteeSetupStateSealedPayload,
+    LocalTrusteeSetupStateCommitment,
     LocalTrusteeStateStorageDecryptionInput,
-    LocalTrusteeStateStorageDecryptionResult,
     LocalTrusteeStateStorageEncryptionInput,
-    LocalTrusteeStateStorageEncryptionResult,
 } from './local-trustee-state-storage.js';

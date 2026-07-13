@@ -41,20 +41,16 @@ pub(super) fn bounded_domain_evaluator_value_for_roster(
         "objectType": "BoundedDomainEvaluatorParameters",
         "scoreDifferenceBound": score_difference_bound,
         "directComparisonOutputLevel": crate::bgv::evaluator::top_k::DIRECT_COMPARISON_OUTPUT_LEVEL,
-        "tiePolicy": crate::bgv::evaluator::top_k::TIE_POLICY,
     }))
 }
 
 pub(super) fn evaluator_key_schedule_value() -> CanonicalResult<Value> {
     let required_galois_key_schedule = expected_required_galois_key_schedule()?;
-    let required_galois_set_hash =
-        expected_required_galois_set_hash(&required_galois_key_schedule)?;
 
     Ok(json!({
         "objectType": "EvaluatorKeySchedule",
         "relinearizationLevelSchedule": expected_relinearization_level_schedule(),
         "requiredGaloisKeySchedule": required_galois_key_schedule,
-        "requiredGaloisSetHash": required_galois_set_hash,
     }))
 }
 
@@ -90,20 +86,4 @@ pub(super) fn expected_required_galois_key_schedule() -> CanonicalResult<Value> 
             })
             .collect(),
     ))
-}
-
-pub(super) fn expected_required_galois_set_hash(
-    required_galois_key_schedule: &Value,
-) -> CanonicalResult<String> {
-    derive_canonical_object_hash(&required_galois_set_value(
-        required_galois_key_schedule.clone(),
-    ))
-}
-
-pub(super) fn required_galois_set_value(required_galois_key_schedule: Value) -> Value {
-    json!({
-        "objectType": REQUIRED_GALOIS_SET_OBJECT_TYPE,
-        "rnsLimbCount": DATA_PRIMES.len(),
-        "entries": required_galois_key_schedule,
-    })
 }

@@ -1,17 +1,15 @@
 use super::common::*;
 
-use super::proofs::*;
 use super::*;
 use crate::hashing::derive_canonical_object_hash;
 
 pub(in super::super) fn verify_public_key_shares(
     setup_package: &Value,
+    trustee_registrations: &setup_intent::SetupIntentTrusteeRegistrationMap,
 ) -> CanonicalResult<Option<Value>> {
     let Some(share_set) = setup_package.get("publicKeyShares") else {
         return Ok(Some(verification_response(
-            Some("publicKeyShareProofs"),
             vec!["publicKeyShares".to_string()],
-            Vec::new(),
             Vec::new(),
         )?));
     };
@@ -44,32 +42,17 @@ pub(in super::super) fn verify_public_key_shares(
             "setupPackage.publicKeyShares",
         )?));
     }
-    let roster = super::accepted_roster_from_package(setup_package);
-    for (field_name, expected_value) in [
-        ("participantCount", roster.participant_count),
-        ("rnsLimbCount", DATA_PRIMES.len() as u64),
-    ] {
-        if share_set.get(field_name).and_then(Value::as_u64) != Some(expected_value) {
-            return Ok(Some(public_key_refusal(
-                "publicKeyShareSetCountMismatch",
-                format!("publicKeyShares.{field_name} must be {expected_value}"),
-                format!("setupPackage.publicKeyShares.{field_name}"),
-            )?));
-        }
-    }
-
+    let roster = super::accepted_roster_from_package(setup_package)?;
     let common_binding = public_key_common_binding(setup_package)?;
     if let Some(response) =
         verify_public_key_common_fields(share_set, &common_binding, "publicKeyShares")?
     {
         return Ok(Some(response));
     }
-    let expected_trustees = expected_trustees_from_phase_transcript(setup_package)?;
+    let expected_trustees = expected_trustees_from_setup_intent(trustee_registrations);
     let Some(share_records) = share_set.get("shareRecords").and_then(Value::as_array) else {
         return Ok(Some(verification_response(
-            Some("publicKeyShareProofs"),
             vec!["publicKeyShares.shareRecords".to_string()],
-            Vec::new(),
             Vec::new(),
         )?));
     };
@@ -98,9 +81,7 @@ pub(in super::super) fn verify_public_key_shares(
         .and_then(Value::as_str)
     else {
         return Ok(Some(verification_response(
-            Some("publicKeyShareProofs"),
             vec!["publicKeyShares.publicKeyShareSetRoot".to_string()],
-            Vec::new(),
             Vec::new(),
         )?));
     };
@@ -156,13 +137,6 @@ fn verify_public_key_share_record(
             "setupPackage.publicKeyShares.shareRecords",
         )?));
     }
-    if share_record.get("rnsLimbCount").and_then(Value::as_u64) != Some(DATA_PRIMES.len() as u64) {
-        return Ok(Some(public_key_refusal(
-            "publicKeyShareRnsLimbCountMismatch",
-            "public-key share rnsLimbCount must match Q_share",
-            "setupPackage.publicKeyShares.shareRecords.rnsLimbCount",
-        )?));
-    }
     if let Some(response) = verify_public_key_common_fields(
         share_record,
         common_binding,
@@ -204,9 +178,7 @@ fn verify_public_key_share_record(
         .and_then(Value::as_str)
     else {
         return Ok(Some(verification_response(
-            Some("publicKeyShareProofs"),
             vec!["publicKeyShares.shareRecords.publicKeyShareRoot".to_string()],
-            Vec::new(),
             Vec::new(),
         )?));
     };
@@ -226,6 +198,38 @@ fn verify_public_key_share_record(
             "publicKeyShareRoot does not match the canonical public-key share",
             "setupPackage.publicKeyShares.shareRecords.publicKeyShareRoot",
         )?));
+    }
+
+    Ok(None)
+}
+
+fn verify_public_key_share_limb_hashes(
+    limb_hashes: Option<&Vec<Value>>,
+) -> CanonicalResult<Option<Value>> {
+    const LIMB_HASHES_PATH: &str =
+        "publicKeyShares.shareRecords.shareCoefficientVectorHash512ByLimb";
+    const LIMB_HASHES_OBJECT_PATH: &str =
+        "setupPackage.publicKeyShares.shareRecords.shareCoefficientVectorHash512ByLimb";
+
+    let Some(limb_hashes) = limb_hashes else {
+        return Ok(Some(verification_response(
+            vec![LIMB_HASHES_PATH.to_string()],
+            Vec::new(),
+        )?));
+    };
+    if limb_hashes.len() != DATA_PRIMES.len() {
+        return Ok(Some(public_key_refusal(
+            "publicKeyShareCoefficientLimbCountMismatch",
+            "public-key share must bind one coefficient hash for every Q_share limb",
+            LIMB_HASHES_OBJECT_PATH,
+        )?));
+    }
+
+    for limb_hash in limb_hashes {
+        validate_hash_string(
+            value_string(limb_hash, "coefficientVectorHash512")?,
+            &format!("{LIMB_HASHES_PATH}.coefficientVectorHash512"),
+        )?;
     }
 
     Ok(None)
@@ -259,4 +263,76 @@ pub(in super::super) fn public_key_share_records_by_roster_position(
     }
 
     Ok(records)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn valid_limb_hashes() -> Vec<Value> {
+        DATA_PRIMES
+            .iter()
+            .map(|_| {
+                serde_json::json!({
+                    "coefficientVectorHash512": "0".repeat(128),
+                })
+            })
+            .collect()
+    }
+
+    fn refusal_reason(response: Option<Value>) -> String {
+        response
+            .expect("malformed limb hashes must be refused")
+            .get("refusedObjects")
+            .and_then(Value::as_array)
+            .and_then(|refusals| refusals.first())
+            .and_then(|refusal| refusal.get("reasonCode"))
+            .and_then(Value::as_str)
+            .expect("typed refusal reason")
+            .to_string()
+    }
+
+    #[test]
+    fn public_key_share_limb_hashes_follow_the_selected_rns_catalog() {
+        let valid_hashes = valid_limb_hashes();
+        assert!(
+            verify_public_key_share_limb_hashes(Some(&valid_hashes))
+                .expect("valid limb hashes")
+                .is_none()
+        );
+
+        assert_eq!(
+            refusal_reason(
+                verify_public_key_share_limb_hashes(None).expect("missing limb hashes response")
+            ),
+            "setupObjectMissing"
+        );
+
+        let mut missing_last_limb = valid_hashes.clone();
+        missing_last_limb.pop();
+        assert_eq!(
+            refusal_reason(
+                verify_public_key_share_limb_hashes(Some(&missing_last_limb))
+                    .expect("limb count response")
+            ),
+            "publicKeyShareCoefficientLimbCountMismatch"
+        );
+    }
+
+    #[test]
+    fn public_key_share_limb_hashes_reject_malformed_protocol_hashes() {
+        for malformed_hash in [
+            "0".repeat(127),
+            "0".repeat(129),
+            format!("{}G", "0".repeat(127)),
+        ] {
+            let mut limb_hashes = valid_limb_hashes();
+            limb_hashes[DATA_PRIMES.len() - 1]["coefficientVectorHash512"] =
+                serde_json::json!(malformed_hash);
+            let error = verify_public_key_share_limb_hashes(Some(&limb_hashes))
+                .expect_err("malformed coefficient hash must fail closed");
+            assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
+            assert!(error.message.contains("coefficientVectorHash512"));
+        }
+    }
 }

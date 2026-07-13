@@ -9,14 +9,13 @@ const maximumHostMemoryFraction = 0.7;
 const reservedHostMemoryGigabytes = 2;
 
 export type ProcessMemoryGuard = Readonly<{
-    addDiagnostics: (
-        guardedCommand: CommandInvocation,
-        diagnosticsPath: string,
-    ) => CommandInvocation;
     buildVerificationCommand: () => CommandInvocation;
     guardCommand: (
         command: CommandInvocation,
-        memoryLimitBytes?: number,
+        options?: Readonly<{
+            diagnosticsPath?: string;
+            memoryLimitBytes?: number;
+        }>,
     ) => CommandInvocation;
     memoryLimitBytes: number;
     memoryLimitGigabytes: number;
@@ -114,54 +113,6 @@ export const resolveProcessMemoryLimitGigabytes = (input: {
     return overrideGigabytes;
 };
 
-export const addProcessMemoryGuardDiagnostics = (
-    guardedCommand: CommandInvocation,
-    diagnosticsPath: string,
-): CommandInvocation => {
-    if (!path.isAbsolute(diagnosticsPath)) {
-        throw new Error(
-            'Process-memory guard diagnostics path must be absolute.',
-        );
-    }
-    if (
-        guardedCommand.args[0] !== '--memory-limit-bytes' ||
-        !/^[1-9][0-9]*$/u.test(guardedCommand.args[1] ?? '')
-    ) {
-        throw new Error(
-            'Process-memory guard diagnostics can only be attached to a guarded command.',
-        );
-    }
-    let commandSeparatorIndex = 2;
-    while (guardedCommand.args[commandSeparatorIndex] !== '--') {
-        const option = guardedCommand.args[commandSeparatorIndex];
-        const value = guardedCommand.args[commandSeparatorIndex + 1];
-        if (
-            option !== '--virtual-address-space-allowance-bytes' ||
-            !/^[0-9]+$/u.test(value ?? '')
-        ) {
-            throw new Error(
-                'Process-memory guard diagnostics found an unrecognized guard option before the command.',
-            );
-        }
-        commandSeparatorIndex += 2;
-    }
-    if (commandSeparatorIndex >= guardedCommand.args.length - 1) {
-        throw new Error(
-            'Process-memory guard diagnostics require a guarded command after the separator.',
-        );
-    }
-
-    return {
-        ...guardedCommand,
-        args: [
-            ...guardedCommand.args.slice(0, commandSeparatorIndex),
-            '--diagnostics-path',
-            diagnosticsPath,
-            ...guardedCommand.args.slice(commandSeparatorIndex),
-        ],
-    };
-};
-
 export const createProcessMemoryGuard = (input: {
     readonly insufficientFreeMemoryRunDescription: string;
     readonly memoryLimitEnvironmentVariable?: string;
@@ -202,32 +153,38 @@ export const createProcessMemoryGuard = (input: {
     );
 
     return {
-        addDiagnostics: (
-            guardedCommand: CommandInvocation,
-            diagnosticsPath: string,
-        ): CommandInvocation =>
-            addProcessMemoryGuardDiagnostics(guardedCommand, diagnosticsPath),
         buildVerificationCommand: buildProcessMemoryGuardVerificationCommand,
-        guardCommand: (
-            command: CommandInvocation,
-            commandMemoryLimitBytes = memoryLimitBytes,
-        ): CommandInvocation => ({
-            ...command,
-            args: [
-                '--memory-limit-bytes',
-                String(commandMemoryLimitBytes),
-                ...(virtualAddressSpaceAllowanceBytes === 0
-                    ? []
-                    : [
-                          '--virtual-address-space-allowance-bytes',
-                          String(virtualAddressSpaceAllowanceBytes),
-                      ]),
-                '--',
-                command.command,
-                ...command.args,
-            ],
-            command: processMemoryGuardExecutablePath,
-        }),
+        guardCommand: (command, options = {}): CommandInvocation => {
+            if (
+                options.diagnosticsPath !== undefined &&
+                !path.isAbsolute(options.diagnosticsPath)
+            ) {
+                throw new Error(
+                    'Process-memory guard diagnostics path must be absolute.',
+                );
+            }
+
+            return {
+                ...command,
+                args: [
+                    '--memory-limit-bytes',
+                    String(options.memoryLimitBytes ?? memoryLimitBytes),
+                    ...(virtualAddressSpaceAllowanceBytes === 0
+                        ? []
+                        : [
+                              '--virtual-address-space-allowance-bytes',
+                              String(virtualAddressSpaceAllowanceBytes),
+                          ]),
+                    ...(options.diagnosticsPath === undefined
+                        ? []
+                        : ['--diagnostics-path', options.diagnosticsPath]),
+                    '--',
+                    command.command,
+                    ...command.args,
+                ],
+                command: processMemoryGuardExecutablePath,
+            };
+        },
         memoryLimitBytes,
         memoryLimitGigabytes,
     };

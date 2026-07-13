@@ -9,8 +9,6 @@ use crate::foundation::{CanonicalStreamDomain, VerifiedCanonicalStreamSummary};
 
 #[derive(Clone)]
 pub(in crate::bgv::setup) struct CanonicalPublicKeyShareMaterialLimb {
-    pub(in crate::bgv::setup) rns_limb_index: usize,
-    pub(in crate::bgv::setup) rns_prime: u64,
     pub(in crate::bgv::setup) coefficients: Vec<u64>,
 }
 
@@ -21,8 +19,6 @@ pub(in crate::bgv::setup) struct CanonicalPublicKeyShareMaterialRecord {
 }
 
 pub(in crate::bgv::setup) struct VerifiedCanonicalPublicKeyShareMaterial {
-    pub(in crate::bgv::setup) participant_count: u64,
-    pub(in crate::bgv::setup) rns_limb_count: usize,
     pub(in crate::bgv::setup) ring_degree: usize,
     pub(in crate::bgv::setup) records: Vec<CanonicalPublicKeyShareMaterialRecord>,
 }
@@ -414,8 +410,6 @@ impl CanonicalPublicKeyShareMaterialDecoder {
     fn finish_limb(&mut self) -> CanonicalResult<()> {
         self.current_limbs
             .push(CanonicalPublicKeyShareMaterialLimb {
-                rns_limb_index: self.expected_rns_limb_index,
-                rns_prime: self.current_rns_prime,
                 coefficients: mem::take(&mut self.current_coefficients),
             });
         self.expected_rns_limb_index += 1;
@@ -457,8 +451,6 @@ impl CanonicalPublicKeyShareMaterialDecoder {
         }
 
         Ok(VerifiedCanonicalPublicKeyShareMaterial {
-            participant_count: self.participant_count,
-            rns_limb_count: DATA_PRIMES.len(),
             ring_degree: self.ring_degree,
             records: self.records,
         })

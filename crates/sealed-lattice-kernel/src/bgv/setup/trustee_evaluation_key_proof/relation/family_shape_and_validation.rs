@@ -22,7 +22,6 @@ pub(crate) const TARGET_DECRYPTION_SHARE_BINDING_LABELS: [&str; 3] = [
     "smudgingCommitmentSetRoot",
 ];
 pub(crate) const TRUSTEE_EVALUATION_KEY_BINDING_LABELS: [&str; 3] = [
-    "requiredGaloisSetHash",
     "evaluatorKeyScheduleRoot",
     "sourceConstantCoefficientCommitmentRoot",
 ];
@@ -343,7 +342,6 @@ impl TrusteeEvaluationKeyStatement {
                     .source_recipient_share_commitment_root
                     .as_str(),
                 vss_share_linkage.recipient_share_commitment_root.as_str(),
-                vss_share_linkage.recipient_share_opening_root.as_str(),
             ] {
                 append_len_prefixed_str(&mut preimage, field);
             }
@@ -360,13 +358,6 @@ impl TrusteeEvaluationKeyStatement {
                 vss_share_linkage.coefficient_commitment_roots.len(),
             );
             for root in &vss_share_linkage.coefficient_commitment_roots {
-                append_len_prefixed_str(&mut preimage, root);
-            }
-            append_usize(
-                &mut preimage,
-                vss_share_linkage.coefficient_opening_roots.len(),
-            );
-            for root in &vss_share_linkage.coefficient_opening_roots {
                 append_len_prefixed_str(&mut preimage, root);
             }
             append_usize(
@@ -391,7 +382,6 @@ impl TrusteeEvaluationKeyStatement {
                     item.source_recipient_share_commitment_root.as_str(),
                     item.recipient_identity.as_str(),
                     item.recipient_share_commitment_root.as_str(),
-                    item.recipient_share_opening_root.as_str(),
                 ] {
                     append_len_prefixed_str(&mut preimage, field);
                 }
@@ -401,10 +391,6 @@ impl TrusteeEvaluationKeyStatement {
                 preimage.extend_from_slice(&item.source_message_modulus.to_le_bytes());
                 append_usize(&mut preimage, item.coefficient_commitment_roots.len());
                 for root in &item.coefficient_commitment_roots {
-                    append_len_prefixed_str(&mut preimage, root);
-                }
-                append_usize(&mut preimage, item.coefficient_opening_roots.len());
-                for root in &item.coefficient_opening_roots {
                     append_len_prefixed_str(&mut preimage, root);
                 }
                 append_usize(&mut preimage, item.coefficient_commitments.len());
@@ -1112,10 +1098,8 @@ fn validate_vss_share_linkage_item(
     source_rns_limb_index: usize,
     source_message_modulus: u64,
     coefficient_commitment_roots: &[String],
-    coefficient_opening_roots: &[String],
     coefficient_commitments: &[VssShareLinkageCommitment],
     recipient_share_commitment_root: &str,
-    recipient_share_opening_root: &str,
     recipient_share_commitment: &VssShareLinkageCommitment,
 ) -> CanonicalResult<()> {
     validate_context_token(
@@ -1126,10 +1110,6 @@ fn validate_vss_share_linkage_item(
         &format!("{field_prefix}.recipientShareCommitmentRoot"),
         recipient_share_commitment_root,
     )?;
-    validate_protocol_hash_hex(
-        &format!("{field_prefix}.recipientShareOpeningRoot"),
-        recipient_share_opening_root,
-    )?;
     if source_rns_limb_index >= DATA_PRIMES.len()
         || DATA_PRIMES[source_rns_limb_index] != source_message_modulus
     {
@@ -1139,7 +1119,6 @@ fn validate_vss_share_linkage_item(
     }
     if coefficient_commitments.is_empty()
         || coefficient_commitments.len() != coefficient_commitment_roots.len()
-        || coefficient_commitments.len() != coefficient_opening_roots.len()
     {
         return Err(invalid_succinct_setup_proof(
             "VSS coefficient commitments and roots must be non-empty and aligned",
@@ -1149,12 +1128,6 @@ fn validate_vss_share_linkage_item(
         validate_protocol_hash_hex(
             &format!("{field_prefix}.coefficientCommitmentRoot"),
             commitment_root,
-        )?;
-    }
-    for opening_root in coefficient_opening_roots {
-        validate_protocol_hash_hex(
-            &format!("{field_prefix}.coefficientOpeningRoot"),
-            opening_root,
         )?;
     }
     for commitment in coefficient_commitments
@@ -1197,10 +1170,8 @@ fn validate_vss_share_linkage_statement(
         statement.source_rns_limb_index,
         statement.source_message_modulus,
         &statement.coefficient_commitment_roots,
-        &statement.coefficient_opening_roots,
         &statement.coefficient_commitments,
         &statement.recipient_share_commitment_root,
-        &statement.recipient_share_opening_root,
         &statement.recipient_share_commitment,
     )?;
     for (item_index, item) in statement.additional_linkage_items.iter().enumerate() {
@@ -1226,10 +1197,8 @@ fn validate_vss_share_linkage_statement(
             item.source_rns_limb_index,
             item.source_message_modulus,
             &item.coefficient_commitment_roots,
-            &item.coefficient_opening_roots,
             &item.coefficient_commitments,
             &item.recipient_share_commitment_root,
-            &item.recipient_share_opening_root,
             &item.recipient_share_commitment,
         )?;
     }

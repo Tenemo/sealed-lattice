@@ -1,12 +1,9 @@
 use super::*;
 
-use crate::hashing::derive_canonical_object_hash;
-
 pub(super) struct DirectBallotBinaryProofTransport {
     pub(super) proof_bytes_hash: String,
     pub(super) chunk_merkle_root: String,
     pub(super) chunk_hashes: Vec<String>,
-    pub(super) public_transport_hash: String,
 }
 
 pub(super) fn chunk_count_for_bytes(
@@ -31,9 +28,6 @@ pub(super) fn chunk_count_for_bytes(
 }
 
 pub(super) fn transport_direct_ballot_binary_proof(
-    setup_package: &Value,
-    ballot: &DirectEncryptedBallot,
-    statement_hash: &str,
     proof_bytes: &[u8],
     expected_proof_bytes_hash: &str,
     proof_bytes_hash: fn(&[u8]) -> String,
@@ -94,23 +88,11 @@ pub(super) fn transport_direct_ballot_binary_proof(
         PROTOTYPE_PROOF_CHUNK_BYTES,
         &chunk_merkle_root,
     )?;
-    let public_transport_hash =
-        direct_ballot_public_proof_transport_hash(DirectBallotPublicProofTransportHashInput {
-            setup_package,
-            ballot,
-            statement_hash,
-            proof_bytes_hash: expected_proof_bytes_hash,
-            proof_byte_length: proof_bytes.len(),
-            chunk_count,
-            chunk_hashes: &chunk_hashes,
-            chunk_merkle_root: &chunk_merkle_root,
-        })?;
 
     Ok(DirectBallotBinaryProofTransport {
         proof_bytes_hash: transported_proof_bytes_hash,
         chunk_merkle_root,
         chunk_hashes,
-        public_transport_hash,
     })
 }
 
@@ -128,46 +110,6 @@ pub(super) fn direct_ballot_proof_chunk_hash(
             chunk,
         ],
     ))
-}
-
-pub(super) struct DirectBallotPublicProofTransportHashInput<'a> {
-    setup_package: &'a Value,
-    ballot: &'a DirectEncryptedBallot,
-    statement_hash: &'a str,
-    proof_bytes_hash: &'a str,
-    proof_byte_length: usize,
-    chunk_count: usize,
-    chunk_hashes: &'a [String],
-    chunk_merkle_root: &'a str,
-}
-
-pub(super) fn direct_ballot_public_proof_transport_hash(
-    input: DirectBallotPublicProofTransportHashInput<'_>,
-) -> CanonicalResult<String> {
-    validate_direct_ballot_hash_hex(input.statement_hash, "statementHash")?;
-    validate_direct_ballot_hash_hex(input.proof_bytes_hash, "proofBytesHash")?;
-    validate_direct_ballot_hash_hex(input.chunk_merkle_root, "proofChunkMerkleRoot")?;
-    let collective_public_key_root = required_string_path(
-        input.setup_package,
-        &["collectivePublicKey", "collectivePublicKeyRoot"],
-    )?;
-    let proof_parameters_hash = direct_ballot_relation_proof_parameters_hash()?;
-
-    derive_canonical_object_hash(&json!({
-        "objectType": "DirectEncryptedBallotProofTransport",
-        "proofByteLength": input.proof_byte_length,
-        "chunkCount": input.chunk_count,
-        "chunkHashes": input.chunk_hashes,
-        "chunkMerkleRoot": input.chunk_merkle_root,
-        "fullProofHash": input.proof_bytes_hash,
-        "statementHash": input.statement_hash,
-        "ciphertextRoot": input.ballot.ciphertext_root,
-        "voterIdentity": input.ballot.input.voter_identity,
-        "actionContextHash": input.ballot.input.action_context_hash,
-        "bgvParametersHash": bgv_parameters_hash()?,
-        "collectivePublicKeyRoot": collective_public_key_root,
-        "proofParametersHash": proof_parameters_hash,
-    }))
 }
 
 pub(super) fn verify_direct_ballot_public_proof_transport(

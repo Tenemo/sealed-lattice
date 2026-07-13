@@ -48,8 +48,6 @@ fn valid_suite_record() -> SuiteRecord {
         maximum_ballot_attempts_per_participant: 3,
         maximum_recovery_transitions_per_state_key: 4,
         maximum_target_share_submissions: FOUNDATION_PROFILE.participant_count,
-        maximum_private_sampler_candidate_draws_per_output: 5,
-        maximum_public_sampler_candidate_draws_per_output: 7,
         maximum_candidate_packages_per_action: 20,
         maximum_proof_objects_per_action: 100,
         maximum_candidate_bytes_per_participant: 3_000,
@@ -130,10 +128,7 @@ fn suite_record_round_trips_canonically_and_derives_its_only_identifier() {
         &[CanonicalItem::variable_bytes(&encoded).expect("suite bytes fit canonical item")],
     )
     .expect("expected suite identifier derives");
-    assert_eq!(
-        record.suite_id().expect("suite identifier derives"),
-        expected_suite_id
-    );
+    assert_eq!(record.suite_id().expect("suite identifier derives"), expected_suite_id);
     let mut different_record = record.clone();
     different_record.maximum_recovery_transitions_per_state_key += 1;
     assert_ne!(
@@ -178,18 +173,6 @@ fn deterministic_u64_primality_and_ring_validation_cover_adversarial_boundaries(
         .validate_intrinsic()
         .expect("degree-one algebraic boundary is intrinsically valid");
 
-    let mut deployed_algebra_record = valid_suite_record();
-    deployed_algebra_record.polynomial_degree = 32_768;
-    deployed_algebra_record.plaintext_modulus = 65_537;
-    deployed_algebra_record.ordered_data_primes = vec![140_737_487_306_753];
-    deployed_algebra_record.ordered_special_primes = vec![140_737_471_512_577];
-    deployed_algebra_record.ordered_target_data_prime_indexes = vec![0];
-    deployed_algebra_record.ordered_sharing_data_prime_indexes = vec![0];
-    deployed_algebra_record.key_switch_data_primes_per_block = 1;
-    deployed_algebra_record
-        .validate_intrinsic()
-        .expect("the deployed first data and special primes are intrinsically valid");
-
     let mut invalid_cases = Vec::new();
     let mut zero_degree = valid_suite_record();
     zero_degree.polynomial_degree = 0;
@@ -202,25 +185,16 @@ fn deterministic_u64_primality_and_ring_validation_cover_adversarial_boundaries(
     invalid_cases.push((composite_plaintext, RefusalReason::OutsideSupportedProfile));
     let mut wrong_plaintext_order = valid_suite_record();
     wrong_plaintext_order.plaintext_modulus = 7;
-    invalid_cases.push((
-        wrong_plaintext_order,
-        RefusalReason::OutsideSupportedProfile,
-    ));
+    invalid_cases.push((wrong_plaintext_order, RefusalReason::OutsideSupportedProfile));
     let mut composite_data_prime = valid_suite_record();
     composite_data_prime.ordered_data_primes[0] = 49;
     invalid_cases.push((composite_data_prime, RefusalReason::OutsideSupportedProfile));
     let mut incompatible_data_prime = valid_suite_record();
     incompatible_data_prime.ordered_data_primes[0] = 19;
-    invalid_cases.push((
-        incompatible_data_prime,
-        RefusalReason::OutsideSupportedProfile,
-    ));
+    invalid_cases.push((incompatible_data_prime, RefusalReason::OutsideSupportedProfile));
     let mut composite_special_prime = valid_suite_record();
     composite_special_prime.ordered_special_primes[0] = 25;
-    invalid_cases.push((
-        composite_special_prime,
-        RefusalReason::OutsideSupportedProfile,
-    ));
+    invalid_cases.push((composite_special_prime, RefusalReason::OutsideSupportedProfile));
     let mut duplicate_data_prime = valid_suite_record();
     duplicate_data_prime.ordered_data_primes[1] = duplicate_data_prime.ordered_data_primes[0];
     invalid_cases.push((duplicate_data_prime, RefusalReason::DuplicateIdentity));
@@ -240,25 +214,6 @@ fn deterministic_u64_primality_and_ring_validation_cover_adversarial_boundaries(
 
     for (record, refusal_reason) in invalid_cases {
         expect_intrinsic_refusal(record, refusal_reason);
-    }
-}
-
-#[test]
-fn suite_record_profile_constants_are_fixed_and_not_runtime_negotiated() {
-    let mut wrong_version = valid_suite_record();
-    wrong_version.suite_record_version = 2;
-    expect_intrinsic_refusal(wrong_version, RefusalReason::UnsupportedVersionOrSuite);
-
-    for profile_field_index in 0..4 {
-        let mut record = valid_suite_record();
-        match profile_field_index {
-            0 => record.roster_size += 1,
-            1 => record.byzantine_bound += 1,
-            2 => record.reconstruction_threshold += 1,
-            3 => record.finality_quorum += 1,
-            _ => unreachable!("test profile index is bounded"),
-        }
-        expect_intrinsic_refusal(record, RefusalReason::OutsideSupportedProfile);
     }
 }
 
@@ -287,11 +242,12 @@ fn suite_basis_indexes_and_key_switch_profile_refuse_every_invalid_shape() {
     let mut target_outside_sharing = valid_suite_record();
     target_outside_sharing.ordered_sharing_data_prime_indexes = vec![0, 2];
     expect_intrinsic_refusal(target_outside_sharing, RefusalReason::WrongTypeOrLength);
-    let mut target_prime_without_plaintext_congruence = valid_suite_record();
-    target_prime_without_plaintext_congruence.ordered_data_primes[0] = 37;
-    target_prime_without_plaintext_congruence
-        .validate_intrinsic()
-        .expect("target data primes need no invented congruence modulo plaintext");
+    let mut incompatible_target_prime = valid_suite_record();
+    incompatible_target_prime.ordered_data_primes[0] = 37;
+    expect_intrinsic_refusal(
+        incompatible_target_prime,
+        RefusalReason::OutsideSupportedProfile,
+    );
 
     for profile_mutation in 0..4 {
         let mut record = valid_suite_record();
@@ -308,23 +264,21 @@ fn suite_basis_indexes_and_key_switch_profile_refuse_every_invalid_shape() {
 
 #[test]
 fn suite_caps_enforce_positive_exact_multiples_overflow_and_containment() {
-    for cap_index in 0..14 {
+    for cap_index in 0..12 {
         let mut record = valid_suite_record();
         match cap_index {
             0 => record.maximum_ballot_attempts_per_participant = 0,
             1 => record.maximum_recovery_transitions_per_state_key = 0,
             2 => record.maximum_target_share_submissions = 0,
-            3 => record.maximum_private_sampler_candidate_draws_per_output = 0,
-            4 => record.maximum_public_sampler_candidate_draws_per_output = 0,
-            5 => record.maximum_candidate_packages_per_action = 0,
-            6 => record.maximum_proof_objects_per_action = 0,
-            7 => record.maximum_candidate_bytes_per_participant = 0,
-            8 => record.maximum_candidate_bytes_per_action = 0,
-            9 => record.maximum_setup_bytes_per_participant = 0,
-            10 => record.maximum_proof_bytes_per_action = 0,
-            11 => record.maximum_public_corpus_bytes = 0,
-            12 => record.maximum_participant_upload_bytes = 0,
-            13 => record.maximum_ceremony_upload_bytes = 0,
+            3 => record.maximum_candidate_packages_per_action = 0,
+            4 => record.maximum_proof_objects_per_action = 0,
+            5 => record.maximum_candidate_bytes_per_participant = 0,
+            6 => record.maximum_candidate_bytes_per_action = 0,
+            7 => record.maximum_setup_bytes_per_participant = 0,
+            8 => record.maximum_proof_bytes_per_action = 0,
+            9 => record.maximum_public_corpus_bytes = 0,
+            10 => record.maximum_participant_upload_bytes = 0,
+            11 => record.maximum_ceremony_upload_bytes = 0,
             _ => unreachable!("test cap index is bounded"),
         }
         expect_intrinsic_refusal(record, RefusalReason::OutsideSupportedProfile);
@@ -379,10 +333,7 @@ fn suite_caps_enforce_positive_exact_multiples_overflow_and_containment() {
     );
     let mut candidates_over_corpus = valid_suite_record();
     candidates_over_corpus.maximum_public_corpus_bytes = 19_999;
-    expect_intrinsic_refusal(
-        candidates_over_corpus,
-        RefusalReason::OutsideSupportedProfile,
-    );
+    expect_intrinsic_refusal(candidates_over_corpus, RefusalReason::OutsideSupportedProfile);
     let mut proof_over_corpus = valid_suite_record();
     proof_over_corpus.maximum_proof_bytes_per_action = 50_001;
     expect_intrinsic_refusal(proof_over_corpus, RefusalReason::OutsideSupportedProfile);
@@ -392,14 +343,20 @@ fn suite_caps_enforce_positive_exact_multiples_overflow_and_containment() {
 fn exact_distribution_and_artifact_registries_reject_missing_reordered_or_invalid_entries() {
     let mut missing_distribution = valid_suite_record();
     missing_distribution.distributions.pop();
-    expect_intrinsic_refusal(missing_distribution, RefusalReason::OutsideSupportedProfile);
+    expect_intrinsic_refusal(
+        missing_distribution,
+        RefusalReason::OutsideSupportedProfile,
+    );
     let mut reordered_distributions = valid_suite_record();
     reordered_distributions.distributions.swap(0, 1);
     expect_intrinsic_refusal(reordered_distributions, RefusalReason::WrongTypeOrLength);
     let mut wrong_distribution = valid_suite_record();
     wrong_distribution.distributions[0].kind = DistributionKind::CenteredBinomial;
     wrong_distribution.distributions[0].parameter = 2;
-    expect_intrinsic_refusal(wrong_distribution, RefusalReason::OutsideSupportedProfile);
+    expect_intrinsic_refusal(
+        wrong_distribution,
+        RefusalReason::OutsideSupportedProfile,
+    );
 
     let mut missing_artifact = valid_suite_record();
     missing_artifact.artifacts.pop();
@@ -429,10 +386,8 @@ fn suite_decode_refuses_hostile_bounds_types_versions_counts_and_nested_substitu
         intrinsically_oversized,
         RefusalReason::OutsideSupportedProfile,
     );
-    let smaller_limits = CanonicalDecodeLimits {
-        maximum_tuple_byte_length: encoded.len() - 1,
-        ..CanonicalDecodeLimits::default()
-    };
+    let mut smaller_limits = CanonicalDecodeLimits::default();
+    smaller_limits.maximum_tuple_byte_length = encoded.len() - 1;
     assert_eq!(
         SuiteRecord::decode(&encoded, &smaller_limits)
             .expect_err("caller decode bound remains operative")
@@ -478,9 +433,10 @@ fn suite_decode_refuses_hostile_bounds_types_versions_counts_and_nested_substitu
         RefusalReason::WrongTypeOrLength
     );
 
-    let distribution_payload_offset = outer_item_header_offset(&encoded, 28) + 6;
+    let distribution_payload_offset = outer_item_header_offset(&encoded, 26) + 6;
     let mut hostile_distribution_count = encoded.clone();
-    hostile_distribution_count[distribution_payload_offset + 2..distribution_payload_offset + 6]
+    hostile_distribution_count
+        [distribution_payload_offset + 2..distribution_payload_offset + 6]
         .copy_from_slice(&u32::MAX.to_le_bytes());
     assert_eq!(
         SuiteRecord::decode(
@@ -498,13 +454,16 @@ fn suite_decode_refuses_hostile_bounds_types_versions_counts_and_nested_substitu
         [first_distribution_purpose_offset..first_distribution_purpose_offset + 2]
         .copy_from_slice(&2_u16.to_le_bytes());
     assert_eq!(
-        SuiteRecord::decode(&substituted_distribution, &CanonicalDecodeLimits::default(),)
-            .expect_err("substituted distribution refuses")
-            .refusal_reason,
+        SuiteRecord::decode(
+            &substituted_distribution,
+            &CanonicalDecodeLimits::default(),
+        )
+        .expect_err("substituted distribution refuses")
+        .refusal_reason,
         RefusalReason::OutsideSupportedProfile
     );
 
-    let artifact_payload_offset = outer_item_header_offset(&encoded, 29) + 6;
+    let artifact_payload_offset = outer_item_header_offset(&encoded, 27) + 6;
     let mut substituted_artifact_kind = encoded.clone();
     let first_artifact_kind_offset = artifact_payload_offset + 6 + 8 + 6;
     substituted_artifact_kind[first_artifact_kind_offset..first_artifact_kind_offset + 2]
@@ -528,12 +487,9 @@ fn suite_decode_refuses_hostile_bounds_types_versions_counts_and_nested_substitu
         RefusalReason::MalformedEncoding
     );
     assert_eq!(
-        SuiteRecord::decode(
-            &encoded[..encoded.len() - 1],
-            &CanonicalDecodeLimits::default()
-        )
-        .expect_err("truncated suite bytes refuse")
-        .refusal_reason,
+        SuiteRecord::decode(&encoded[..encoded.len() - 1], &CanonicalDecodeLimits::default())
+            .expect_err("truncated suite bytes refuse")
+            .refusal_reason,
         RefusalReason::MalformedEncoding
     );
 }

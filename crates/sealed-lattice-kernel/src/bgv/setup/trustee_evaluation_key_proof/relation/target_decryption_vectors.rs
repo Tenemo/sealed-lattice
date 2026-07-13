@@ -4,48 +4,6 @@ use crate::bgv::setup::vss_commitment::{
     VSS_PUBLIC_MESSAGE_DIGIT_COUNT, VssPublicMessageEncodingLayout, vss_public_message_digit_weight,
 };
 
-fn vss_public_message_encoding_offsets(
-    layouts: &[VssPublicMessageEncodingLayout],
-) -> CanonicalResult<Vec<usize>> {
-    let mut offsets = Vec::with_capacity(layouts.len() + 1);
-    let mut offset = 0_usize;
-    offsets.push(offset);
-    for layout in layouts {
-        offset = offset
-            .checked_add(layout.encoding_column_count())
-            .ok_or_else(|| {
-                invalid_succinct_setup_proof("target-decryption vector layout overflowed")
-            })?;
-        offsets.push(offset);
-    }
-
-    Ok(offsets)
-}
-
-fn vss_public_message_encoding_total(offsets: &[usize]) -> usize {
-    offsets.last().copied().unwrap_or(0)
-}
-
-fn target_decryption_message_vector_index(
-    offsets: &[usize],
-    message_index: usize,
-    encoding_column: usize,
-) -> CanonicalResult<usize> {
-    let start = offsets.get(message_index).copied().ok_or_else(|| {
-        invalid_succinct_setup_proof("target-decryption message index is outside the vector layout")
-    })?;
-    let end = offsets.get(message_index + 1).copied().ok_or_else(|| {
-        invalid_succinct_setup_proof("target-decryption message index is outside the vector layout")
-    })?;
-    if start + encoding_column >= end {
-        return Err(invalid_succinct_setup_proof(
-            "target-decryption message encoding column is outside the vector layout",
-        ));
-    }
-
-    Ok(start + encoding_column)
-}
-
 fn target_decryption_decoder_digit_count(
     layout: VssPublicMessageEncodingLayout,
 ) -> CanonicalResult<usize> {
@@ -276,7 +234,7 @@ pub(crate) fn build_target_decryption_share_public_vectors(
                         .iter()
                         .map(|value| tower.mul(alpha_value, value))
                         .collect::<Vec<_>>();
-                    let digit_vector_index = target_decryption_message_vector_index(
+                    let digit_vector_index = vss_public_message_vector_index(
                         &message_encoding_offsets,
                         message_index,
                         message_encoding_layout.digit_encoding_column(digit_index)?,
@@ -289,7 +247,7 @@ pub(crate) fn build_target_decryption_share_public_vectors(
                     );
                     let mut trit_weight = 1_u64 % input.modulus;
                     for trit_index in 0..trit_count {
-                        let trit_vector_index = target_decryption_message_vector_index(
+                        let trit_vector_index = vss_public_message_vector_index(
                             &message_encoding_offsets,
                             message_index,
                             message_encoding_layout
@@ -322,17 +280,6 @@ struct AddScaledExtensionVectorToMessageDigitsInput<'a> {
     modulus: u64,
 }
 
-fn add_scaled_extension_basis_vector(
-    target: &mut [ChallengeExtensionElement],
-    source: &[ChallengeExtensionElement],
-    coefficient: u64,
-    tower: &ChallengeExtensionTower,
-) {
-    for (target_value, source_value) in target.iter_mut().zip(source.iter()) {
-        *target_value = tower.add(target_value, &tower.scale_base(source_value, coefficient));
-    }
-}
-
 fn add_scaled_extension_vector_to_message_digits(
     input: AddScaledExtensionVectorToMessageDigitsInput<'_>,
     tower: &ChallengeExtensionTower,
@@ -347,7 +294,7 @@ fn add_scaled_extension_vector_to_message_digits(
         })?;
     for digit_index in 0..VSS_PUBLIC_MESSAGE_DIGIT_COUNT {
         let digit_weight = vss_public_message_digit_weight(digit_index, input.modulus)?;
-        let vector_index = target_decryption_message_vector_index(
+        let vector_index = vss_public_message_vector_index(
             input.message_encoding_offsets,
             input.message_index,
             message_encoding_layout.digit_encoding_column(digit_index)?,

@@ -9,18 +9,19 @@
 //! ascending-index leaf-to-root order, and verification consumes every
 //! supplied node so short and padded node lists are both rejected.
 
-use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
+use crate::bgv::setup::trustee_evaluation_key_proof::{
+    SetupBatchedMerkleOpening, SetupMerkleDigest, SetupMerkleTree,
+    consistent_setup_merkle_leaves, sorted_unique_setup_merkle_indices,
+    verify_merkle_batch_with_node_domain,
+};
+use crate::encoding::CanonicalResult;
 use crate::hashing::{StreamingHash256, hash256};
 
 const LEAF_DOMAIN: &str = "sealed-lattice/setup/key-switch-atom/merkle-leaf";
 const NODE_DOMAIN: &str = "sealed-lattice/setup/key-switch-atom/merkle-node";
 
 pub(super) const MERKLE_DIGEST_BYTES: usize = 32;
-pub(super) type MerkleDigest = [u8; MERKLE_DIGEST_BYTES];
-
-fn invalid_atom_proof(message: impl Into<String>) -> CanonicalError {
-    CanonicalError::new(CanonicalErrorCode::InvalidProtocolObject, message)
-}
+pub(super) type MerkleDigest = SetupMerkleDigest;
 
 // Salted leaf over one evaluation row: the position index, the per-leaf salt,
 // and every committed column's word at that position, length-framed by the
@@ -66,64 +67,22 @@ impl StreamingLeafHasher {
     }
 }
 
-pub(super) struct MerkleTree {
-    levels: Vec<Vec<MerkleDigest>>,
-}
+pub(super) struct MerkleTree(SetupMerkleTree);
 
 impl MerkleTree {
     pub(super) fn from_leaf_hashes(leaf_hashes: Vec<MerkleDigest>) -> CanonicalResult<Self> {
-        if leaf_hashes.is_empty() || !leaf_hashes.len().is_power_of_two() {
-            return Err(invalid_atom_proof(
-                "Merkle leaf count must be a non-empty power of two",
-            ));
-        }
-        let mut levels = vec![leaf_hashes];
-        while levels.last().expect("levels are non-empty").len() > 1 {
-            let previous = levels.last().expect("levels are non-empty");
-            let mut next = Vec::with_capacity(previous.len() / 2);
-            for pair in previous.chunks_exact(2) {
-                next.push(merkle_digest(NODE_DOMAIN, &[&pair[0], &pair[1]]));
-            }
-            levels.push(next);
-        }
-
-        Ok(Self { levels })
+        SetupMerkleTree::from_leaf_hashes_with_node_domain(leaf_hashes, NODE_DOMAIN).map(Self)
     }
 
     pub(super) fn root(&self) -> MerkleDigest {
-        self.levels.last().expect("levels are non-empty")[0]
+        self.0.root()
     }
 
-    // Open a sorted, unique index set at once. The emitted nodes are exactly
-    // the siblings not derivable from the opened leaves, in ascending-index,
-    // leaf-to-root order; `verify_merkle_batch` walks identically. Any
-    // divergence between the two traversals breaks soundness.
-    pub(super) fn open_batch(&self, sorted_unique_indices: &[usize]) -> BatchedMerkleOpening {
-        let mut authentication_nodes = Vec::new();
-        let mut current = sorted_unique_indices.to_vec();
-        for level in &self.levels[..self.levels.len() - 1] {
-            let mut parents = Vec::new();
-            let mut index_cursor = 0;
-            while index_cursor < current.len() {
-                let node_index = current[index_cursor];
-                if index_cursor + 1 < current.len() && current[index_cursor + 1] == (node_index ^ 1)
-                {
-                    index_cursor += 2;
-                } else {
-                    authentication_nodes.push(level[node_index ^ 1]);
-                    index_cursor += 1;
-                }
-                let parent_index = node_index >> 1;
-                if parents.last() != Some(&parent_index) {
-                    parents.push(parent_index);
-                }
-            }
-            current = parents;
-        }
-
-        BatchedMerkleOpening {
-            authentication_nodes,
-        }
+    pub(super) fn open_batch(
+        &self,
+        sorted_unique_indices: &[usize],
+    ) -> BatchedMerkleOpening {
+        self.0.open_batch(sorted_unique_indices)
     }
 }
 
@@ -131,92 +90,31 @@ fn merkle_digest(domain: &str, parts: &[&[u8]]) -> MerkleDigest {
     hash256(domain, parts)
 }
 
-pub(super) struct BatchedMerkleOpening {
-    pub(super) authentication_nodes: Vec<MerkleDigest>,
-}
+pub(super) type BatchedMerkleOpening = SetupBatchedMerkleOpening;
 
 pub(super) fn sorted_unique_indices(indices: impl IntoIterator<Item = usize>) -> Vec<usize> {
-    indices
-        .into_iter()
-        .collect::<std::collections::BTreeSet<usize>>()
-        .into_iter()
-        .collect()
+    sorted_unique_setup_merkle_indices(indices)
 }
 
-// Sorted, unique (index, leaf hash) pairs, rejecting any index opened to two
-// different leaf hashes across queries; without this a prover could bind only
-// one of two conflicting openings to the committed root.
 pub(super) fn consistent_sorted_leaves(
     leaves: impl IntoIterator<Item = (usize, MerkleDigest)>,
 ) -> Option<Vec<(usize, MerkleDigest)>> {
-    let mut leaves_by_index = std::collections::BTreeMap::new();
-    for (index, leaf) in leaves {
-        match leaves_by_index.entry(index) {
-            std::collections::btree_map::Entry::Occupied(existing) => {
-                if *existing.get() != leaf {
-                    return None;
-                }
-            }
-            std::collections::btree_map::Entry::Vacant(slot) => {
-                slot.insert(leaf);
-            }
-        }
-    }
-
-    Some(leaves_by_index.into_iter().collect())
+    consistent_setup_merkle_leaves(leaves)
 }
 
-// Recompute the root from a batched opening and a sorted, unique, consistent
-// leaf set. True only when the recomputed root matches, every supplied node
-// was consumed, and the walk terminates at the root slot.
 pub(super) fn verify_merkle_batch(
     root: &MerkleDigest,
     depth: usize,
     sorted_unique_leaves: &[(usize, MerkleDigest)],
     opening: &BatchedMerkleOpening,
 ) -> bool {
-    if sorted_unique_leaves.is_empty() {
-        return false;
-    }
-    let mut current = sorted_unique_leaves.to_vec();
-    let mut node_cursor = 0;
-    for _level in 0..depth {
-        let mut parents: Vec<(usize, MerkleDigest)> = Vec::new();
-        let mut index_cursor = 0;
-        while index_cursor < current.len() {
-            let (node_index, node_hash) = current[index_cursor];
-            let sibling_hash = if index_cursor + 1 < current.len()
-                && current[index_cursor + 1].0 == (node_index ^ 1)
-            {
-                let sibling = current[index_cursor + 1].1;
-                index_cursor += 2;
-                sibling
-            } else {
-                let Some(supplied) = opening.authentication_nodes.get(node_cursor) else {
-                    return false;
-                };
-                node_cursor += 1;
-                index_cursor += 1;
-                *supplied
-            };
-            let (left, right) = if node_index & 1 == 0 {
-                (node_hash, sibling_hash)
-            } else {
-                (sibling_hash, node_hash)
-            };
-            let parent_index = node_index >> 1;
-            let parent_hash = merkle_digest(NODE_DOMAIN, &[&left, &right]);
-            if parents.last().map(|(index, _)| *index) != Some(parent_index) {
-                parents.push((parent_index, parent_hash));
-            }
-        }
-        current = parents;
-    }
-
-    node_cursor == opening.authentication_nodes.len()
-        && current.len() == 1
-        && current[0].0 == 0
-        && &current[0].1 == root
+    verify_merkle_batch_with_node_domain(
+        root,
+        depth,
+        sorted_unique_leaves,
+        opening,
+        NODE_DOMAIN,
+    )
 }
 
 #[cfg(test)]

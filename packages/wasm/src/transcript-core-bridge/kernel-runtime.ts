@@ -12,7 +12,6 @@ import type {
 } from './kernel-contracts.js';
 import {
     bytesToHex,
-    canonicalErrorCodes,
     concatenateByteChunks,
     hasWasmHeader,
     normalizeRustSourcePathsForHash,
@@ -24,6 +23,7 @@ import {
     wasmCustomSectionId,
     wasmHeaderByteLength,
 } from './kernel-contracts.js';
+import { canonicalErrorCodes } from './kernel-errors.js';
 
 export class TranscriptCoreKernelCommandError extends Error {
     readonly code: CanonicalErrorCode;
@@ -567,16 +567,17 @@ type NumberExportName =
     | 'sealed_lattice_canonical_stream_cancel'
     | 'sealed_lattice_canonical_stream_finish_verifier'
     | 'sealed_lattice_canonical_stream_finish_writer'
-    | 'sealed_lattice_foundation_board_begin'
-    | 'sealed_lattice_foundation_board_cancel'
-    | 'sealed_lattice_foundation_board_ingest'
-    | 'sealed_lattice_foundation_board_require_complete_carrier_graph'
     | 'sealed_lattice_deallocate'
     | 'sealed_lattice_local_storage_root_command'
     | 'sealed_lattice_state_verifier_begin'
     | 'sealed_lattice_state_verifier_cancel'
+    | 'sealed_lattice_state_verifier_certify_intent'
+    | 'sealed_lattice_state_verifier_describe'
     | 'sealed_lattice_state_verifier_release'
     | 'sealed_lattice_state_verifier_finish_output'
+    | 'sealed_lattice_state_verifier_prepare_output'
+    | 'sealed_lattice_state_verifier_prepare_recovery'
+    | 'sealed_lattice_state_verifier_prepare_reservation'
     | 'sealed_lattice_state_verifier_verify_recovery'
     | 'sealed_lattice_state_verifier_verify_reservation'
     | 'sealed_lattice_transcript_core_command_with_length';

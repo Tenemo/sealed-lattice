@@ -1,11 +1,5 @@
-export {
-    deriveCanonicalObjectHash,
-    verifySignedObjectSignature,
-} from '@sealed-lattice/crypto';
-export {
-    createMlDsaKeyPairFixture,
-    createProtocolSignatureFixture,
-} from '#packages/crypto/tests/support/protocol-signature-fixtures';
+export { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
+export { createProtocolSignatureFixture } from '#packages/crypto/tests/support/protocol-signature-fixtures';
 export {
     deriveActionContextHash,
     deriveRecoveryEpochUpdateHash,
@@ -13,52 +7,46 @@ export {
     verifyRecoveryEpochUpdate,
 } from '#packages/protocol/src/recovery/index';
 export {
-    deriveBoardEntryMerklePath,
-    deriveBoardEntryHash,
-    deriveBoardHeadHash,
-    deriveBoardRootHash,
     deriveConflictingHeadEvidenceHash,
     deriveInclusionProofHash,
     verifyBoardConsistency,
 } from '#packages/protocol/src/board/index';
 export {
-    deriveCastReceiptHash,
-    deriveCloseRecordHash,
-    derivePostVotingClosedContextHash,
-    verifyCastReceiptShell,
-    verifyCloseRecordShell,
-} from '#packages/protocol/src/closing/index';
-export {
     deriveCollectiveBgvSetupRosterHash,
-    deriveElectionManifestHash,
-    deriveRegistrationEntryHash,
     deriveRosterHash,
-    deriveTrusteeSetupEntryHash,
     verifyRosterManifestTranscript,
 } from '#packages/protocol/src/roster/index';
 export { deriveValidatedFirstValidOrder } from '#packages/protocol/src/ordering/index';
 export type {
     ActionContext,
     BoardConsistencyInput,
-    CanonicalSignedRootObject,
-    CastReceipt,
-    CloseRecord,
-    ElectionManifest,
     FirstValidOrderingInput,
-    InclusionProof,
-    ManifestOpaqueBindings,
-    ManifestPolicyHashes,
-    ProtocolSignatureEnvelope,
     RecoveryEpochMapEntry,
     RecoveryEpochUpdate,
-    RegistrationEntry,
-    RosterManifestTranscriptInput,
-    SignedBoardHead,
-    SignedObjectType,
-    SignerRole,
-    TrusteeSetupEntry,
     ValidatedFirstValidObject,
 } from '@sealed-lattice/types';
-export * from './election-foundation-board-helpers';
-export * from './election-foundation-fixture-constants';
-export * from './election-foundation-roster-helpers';
+export {
+    createBoardEvidence,
+    createBoardHead,
+    createBoardHeadWithObjects,
+    createInclusionProof,
+} from './election-foundation-board-helpers';
+export {
+    boardPolicyHash,
+    boardPublicKeyHash,
+    ceremonyId,
+    contextHash,
+    createKeyFixture,
+    createSignature,
+    deriveFixtureHash,
+    manifestOpaqueBindings,
+    manifestPolicyHashes,
+    recoveryRootKeyFixture,
+    replaceSignatureBytes,
+    replaceSignaturePublicKeyBytes,
+} from './election-foundation-fixture-constants';
+export {
+    createElectionManifest,
+    createRegistrationEntry,
+    createRosterManifestTranscriptInput,
+} from './election-foundation-roster-helpers';

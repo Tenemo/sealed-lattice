@@ -718,6 +718,7 @@ fn prove_evaluation_key_share_with_limb_batch_size(
                 let commitment = build_limb_witness_commitment(
                     statement,
                     witness,
+                    &bound_material.message_coefficients,
                     *limb_index,
                     modulus,
                     proof_randomness_seed_hex,
@@ -735,6 +736,7 @@ fn prove_evaluation_key_share_with_limb_batch_size(
                 let commitment = build_limb_witness_commitment(
                     statement,
                     witness,
+                    &bound_material.message_coefficients,
                     *limb_index,
                     modulus,
                     proof_randomness_seed_hex,
@@ -788,6 +790,7 @@ fn prove_evaluation_key_share_with_limb_batch_size(
                 let commitment = build_limb_witness_commitment(
                     statement,
                     witness,
+                    &bound_material.message_coefficients,
                     *limb_index,
                     modulus,
                     proof_randomness_seed_hex,
@@ -823,6 +826,7 @@ fn prove_evaluation_key_share_with_limb_batch_size(
                 let commitment = build_limb_witness_commitment(
                     statement,
                     witness,
+                    &bound_material.message_coefficients,
                     *limb_index,
                     modulus,
                     proof_randomness_seed_hex,

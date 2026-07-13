@@ -461,6 +461,7 @@ mod implementation {
 
             match sample_control_group_processes(&self.control_group.path, self.page_size_bytes) {
                 Ok(process_sample) => {
+                    errors.extend(process_sample.errors.iter().cloned());
                     snapshot.active_process_count = Some(process_sample.process_count);
                     snapshot.process_tree_resident_memory_bytes =
                         Some(process_sample.resident_memory_bytes);
@@ -887,6 +888,7 @@ mod implementation {
 
     #[derive(Debug, Default)]
     struct ProcessTreeSample {
+        errors: Vec<String>,
         io_read_bytes: u64,
         io_write_bytes: u64,
         kernel_cpu_clock_ticks: u64,
@@ -904,8 +906,13 @@ mod implementation {
         let process_ids = read_control_group_process_ids(control_group_path)?;
         let mut sample = ProcessTreeSample::default();
         for process_id in process_ids {
-            let Ok(process) = read_process_information(process_id) else {
-                continue;
+            let process = match read_process_information(process_id) {
+                Ok(process) => process,
+                Err(ProcessReadError::Exited) => continue,
+                Err(ProcessReadError::Failed(error)) => {
+                    sample.errors.push(error);
+                    continue;
+                }
             };
             sample.process_count = sample.process_count.saturating_add(1);
             sample.virtual_memory_bytes = sample
@@ -927,31 +934,55 @@ mod implementation {
                         .saturating_mul(page_size_bytes),
                 );
             }
-            if let Ok((read_bytes, write_bytes)) = read_process_io(process_id) {
-                sample.io_read_bytes = sample.io_read_bytes.saturating_add(read_bytes);
-                sample.io_write_bytes = sample.io_write_bytes.saturating_add(write_bytes);
+            match read_process_io(process_id) {
+                Ok((read_bytes, write_bytes)) => {
+                    sample.io_read_bytes = sample.io_read_bytes.saturating_add(read_bytes);
+                    sample.io_write_bytes = sample.io_write_bytes.saturating_add(write_bytes);
+                }
+                Err(ProcessReadError::Exited) => {}
+                Err(ProcessReadError::Failed(error)) => sample.errors.push(error),
             }
         }
         Ok(sample)
     }
 
-    fn read_process_information(process_id: u32) -> Result<ProcessInformation, String> {
+    enum ProcessReadError {
+        Exited,
+        Failed(String),
+    }
+
+    fn read_process_text(path: &str) -> Result<String, ProcessReadError> {
+        fs::read_to_string(path).map_err(|error| {
+            if error.kind() == io::ErrorKind::NotFound {
+                ProcessReadError::Exited
+            } else {
+                ProcessReadError::Failed(format!("failed to read {path}: {error}"))
+            }
+        })
+    }
+
+    fn read_process_information(process_id: u32) -> Result<ProcessInformation, ProcessReadError> {
         let path = format!("/proc/{process_id}/stat");
-        let text =
-            fs::read_to_string(&path).map_err(|error| format!("failed to read {path}: {error}"))?;
+        let text = read_process_text(&path)?;
         let closing_name_parenthesis = text
             .rfind(')')
-            .ok_or_else(|| format!("{path} omitted the process-name terminator"))?;
+            .ok_or_else(|| {
+                ProcessReadError::Failed(format!("{path} omitted the process-name terminator"))
+            })?;
         let fields = text[(closing_name_parenthesis + 1)..]
             .split_whitespace()
             .collect::<Vec<_>>();
         if fields.len() <= 21 {
-            return Err(format!("{path} contained too few fields"));
+            return Err(ProcessReadError::Failed(format!(
+                "{path} contained too few fields"
+            )));
         }
-        let parse_field = |field_index: usize, field_name: &str| -> Result<u64, String> {
-            fields[field_index]
-                .parse::<u64>()
-                .map_err(|error| format!("failed to parse {field_name} in {path}: {error}"))
+        let parse_field = |field_index: usize, field_name: &str| {
+            fields[field_index].parse::<u64>().map_err(|error| {
+                ProcessReadError::Failed(format!(
+                    "failed to parse {field_name} in {path}: {error}"
+                ))
+            })
         };
 
         Ok(ProcessInformation {
@@ -962,9 +993,16 @@ mod implementation {
         })
     }
 
-    fn read_process_io(process_id: u32) -> Result<(u64, u64), String> {
+    fn read_process_io(process_id: u32) -> Result<(u64, u64), ProcessReadError> {
         let path = format!("/proc/{process_id}/io");
-        let values = read_colon_separated_kib_or_byte_values(Path::new(&path), 1)?;
+        let text = read_process_text(&path)?;
+        let values = parse_selected_colon_separated_values(
+            &text,
+            Path::new(&path),
+            1,
+            &["read_bytes", "write_bytes"],
+        )
+        .map_err(ProcessReadError::Failed)?;
         Ok((
             values.get("read_bytes").copied().unwrap_or(0),
             values.get("write_bytes").copied().unwrap_or(0),
@@ -978,30 +1016,42 @@ mod implementation {
     }
 
     fn read_linux_host_memory() -> Result<LinuxHostMemory, String> {
-        let values = read_colon_separated_kib_or_byte_values(Path::new("/proc/meminfo"), 1024)?;
+        let path = Path::new("/proc/meminfo");
+        let text = fs::read_to_string(path)
+            .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+        let values = parse_selected_colon_separated_values(
+            &text,
+            path,
+            1024,
+            &["MemAvailable", "SwapFree"],
+        )?;
         Ok(LinuxHostMemory {
             available_physical_memory_bytes: values.get("MemAvailable").copied(),
             available_swap_bytes: values.get("SwapFree").copied(),
         })
     }
 
-    fn read_colon_separated_kib_or_byte_values(
+    fn parse_selected_colon_separated_values(
+        text: &str,
         path: &Path,
         multiplier: u64,
+        selected_names: &[&str],
     ) -> Result<HashMap<String, u64>, String> {
-        let text = fs::read_to_string(path)
-            .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
         let mut values = HashMap::new();
         for line in text.lines() {
             let Some((name, raw_value)) = line.split_once(':') else {
                 continue;
             };
-            let Some(value) = raw_value.split_whitespace().next() else {
+            if !selected_names.contains(&name) {
                 continue;
-            };
-            if let Ok(value) = value.parse::<u64>() {
-                values.insert(name.to_owned(), value.saturating_mul(multiplier));
             }
+            let value = raw_value.split_whitespace().next().ok_or_else(|| {
+                format!("{name} in {} omitted its value", path.display())
+            })?;
+            let value = value.parse::<u64>().map_err(|error| {
+                format!("failed to parse {name} in {}: {error}", path.display())
+            })?;
+            values.insert(name.to_owned(), value.saturating_mul(multiplier));
         }
         Ok(values)
     }

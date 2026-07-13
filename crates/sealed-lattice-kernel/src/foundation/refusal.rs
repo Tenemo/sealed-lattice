@@ -20,23 +20,6 @@ pub enum RefusalReason {
 }
 
 impl RefusalReason {
-    /// Every assigned reason in canonical numeric order.
-    pub const ALL: [Self; 13] = [
-        Self::MalformedEncoding,
-        Self::UnsupportedVersionOrSuite,
-        Self::OutsideSupportedProfile,
-        Self::WrongContext,
-        Self::WrongTypeOrLength,
-        Self::WrongHashOrRoot,
-        Self::InvalidSignature,
-        Self::DuplicateIdentity,
-        Self::Equivocation,
-        Self::MissingPrerequisite,
-        Self::InvalidProof,
-        Self::InvalidArithmeticRelation,
-        Self::ConsumedState,
-    ];
-
     pub const fn canonical_code(self) -> u16 {
         self as u16
     }
@@ -141,14 +124,11 @@ mod tests {
             (0x000d, "consumedState"),
         ];
 
-        for (reason, (expected_code, expected_name)) in RefusalReason::ALL.into_iter().zip(expected)
-        {
+        for (expected_code, expected_name) in expected {
+            let reason = RefusalReason::try_from_canonical_code(expected_code)
+                .expect("assigned refusal code decodes");
             assert_eq!(reason.canonical_code(), expected_code);
             assert_eq!(reason.name(), expected_name);
-            assert_eq!(
-                RefusalReason::try_from_canonical_code(expected_code),
-                Ok(reason)
-            );
         }
     }
 

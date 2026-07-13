@@ -34,7 +34,6 @@ pub(super) fn validate_same_secret_bridge_proof_reference(
     )?;
     let proof_record_without_root = json!({
         "objectType": "VssSameSecretBridgeProofRecord",
-        "proofFamily": SAME_SECRET_BRIDGE_PROOF_FAMILY,
         "sameSecretBridgeStatementRoot": bridge_statement_root,
         "proofBytesHash": &proof_bytes_hash,
         "proofMaterialRoot": &proof_material_root,
@@ -101,35 +100,19 @@ pub(super) fn validate_transported_same_secret_bridge_proof_material_reference(
                 "transportedSameSecretBridgeProofMaterial is required by transported same-secret bridge proof records",
             )
         })?;
-    for (field_name, expected_value) in [
-        (
-            "objectType",
-            SAME_SECRET_BRIDGE_TRANSPORT_FAMILY.set_object_type,
-        ),
-        ("proofFamily", SAME_SECRET_BRIDGE_PROOF_FAMILY),
-    ] {
-        compare_required_string(
-            string_at_path(material_set, &[field_name])?,
-            expected_value,
-            &format!("transportedSameSecretBridgeProofMaterial.{field_name}"),
-        )?;
-    }
+    compare_required_string(
+        string_at_path(material_set, &["objectType"])?,
+        SAME_SECRET_BRIDGE_TRANSPORT_FAMILY.set_object_type,
+        "transportedSameSecretBridgeProofMaterial.objectType",
+    )?;
 
     let mut matching_material_count = 0_usize;
     for proof_material in array_at_path(material_set, &["proofMaterials"])? {
-        for (field_name, expected_value) in [
-            (
-                "objectType",
-                SAME_SECRET_BRIDGE_TRANSPORT_FAMILY.material_object_type,
-            ),
-            ("proofFamily", SAME_SECRET_BRIDGE_PROOF_FAMILY),
-        ] {
-            compare_required_string(
-                string_at_path(proof_material, &[field_name])?,
-                expected_value,
-                &format!("transported same-secret bridge proof material {field_name}"),
-            )?;
-        }
+        compare_required_string(
+            string_at_path(proof_material, &["objectType"])?,
+            SAME_SECRET_BRIDGE_TRANSPORT_FAMILY.material_object_type,
+            "transported same-secret bridge proof material objectType",
+        )?;
         if hash_at_path(proof_material, &["proofMaterialRoot"])? == expected_proof_material_root {
             matching_material_count += 1;
         }
@@ -178,7 +161,6 @@ mod tests {
     fn transported_material(proof_material_root: &str) -> Value {
         json!({
             "objectType": SAME_SECRET_BRIDGE_TRANSPORT_OBJECT_TYPE,
-            "proofFamily": SAME_SECRET_BRIDGE_PROOF_FAMILY,
             "proofMaterialRoot": proof_material_root,
         })
     }
@@ -187,7 +169,6 @@ mod tests {
         json!({
             "transportedSameSecretBridgeProofMaterial": {
                 "objectType": SAME_SECRET_BRIDGE_TRANSPORT_SET_OBJECT_TYPE,
-                "proofFamily": SAME_SECRET_BRIDGE_PROOF_FAMILY,
                 "proofMaterials": proof_materials,
             },
         })
@@ -238,7 +219,6 @@ mod tests {
         let bridge_statement_root = "4".repeat(128);
         let mut proof_record = json!({
             "objectType": "VssSameSecretBridgeProofRecord",
-            "proofFamily": SAME_SECRET_BRIDGE_PROOF_FAMILY,
             "sameSecretBridgeStatementRoot": &bridge_statement_root,
             "proofBytesHash": &proof_bytes_hash,
             "proofMaterialRoot": &proof_material_root,

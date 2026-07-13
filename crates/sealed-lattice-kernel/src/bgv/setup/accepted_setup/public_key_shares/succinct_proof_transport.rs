@@ -33,7 +33,6 @@ pub(in crate::bgv::setup) fn public_key_share_succinct_proof_material_root(
 ) -> CanonicalResult<String> {
     derive_canonical_object_hash(&json!({
         "objectType": "PublicKeyShareSuccinctProofMaterialReference",
-        "proofFamily": "public-key-share",
         "trusteeIdentity": value_string(proof_record, "trusteeIdentity")?,
         "trusteeRosterPosition": value_u64(proof_record, "trusteeRosterPosition")?,
         "statementHash": value_string(proof_record, "statementHash")?,
@@ -92,39 +91,30 @@ fn transported_public_key_share_proof_material_bytes(
 fn verify_transported_public_key_share_proof_material_set_header(
     value: &Value,
 ) -> CanonicalResult<()> {
-    for (field_name, expected_value) in [
-        (
-            "objectType",
-            PUBLIC_KEY_SHARE_PROOF_TRANSPORT_SET_OBJECT_TYPE,
-        ),
-        ("proofFamily", "public-key-share"),
-    ] {
-        if value.get(field_name).and_then(Value::as_str) != Some(expected_value) {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                format!(
-                    "transportedPublicKeyShareProofMaterial.{field_name} must be {expected_value}"
-                ),
-            ));
-        }
+    if value.get("objectType").and_then(Value::as_str)
+        != Some(PUBLIC_KEY_SHARE_PROOF_TRANSPORT_SET_OBJECT_TYPE)
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            format!(
+                "transportedPublicKeyShareProofMaterial.objectType must be {PUBLIC_KEY_SHARE_PROOF_TRANSPORT_SET_OBJECT_TYPE}"
+            ),
+        ));
     }
 
     Ok(())
 }
 
 fn verify_transported_public_key_share_proof_material_header(value: &Value) -> CanonicalResult<()> {
-    for (field_name, expected_value) in [
-        ("objectType", PUBLIC_KEY_SHARE_PROOF_TRANSPORT_OBJECT_TYPE),
-        ("proofFamily", "public-key-share"),
-    ] {
-        if value.get(field_name).and_then(Value::as_str) != Some(expected_value) {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                format!(
-                    "transported public-key share succinct proof material {field_name} must be {expected_value}"
-                ),
-            ));
-        }
+    if value.get("objectType").and_then(Value::as_str)
+        != Some(PUBLIC_KEY_SHARE_PROOF_TRANSPORT_OBJECT_TYPE)
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            format!(
+                "transported public-key share succinct proof material objectType must be {PUBLIC_KEY_SHARE_PROOF_TRANSPORT_OBJECT_TYPE}"
+            ),
+        ));
     }
     validate_hash_string(
         value_string(value, "proofMaterialRoot")?,

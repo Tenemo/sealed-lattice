@@ -8,9 +8,7 @@ pub(super) fn verify_evaluator_key_schedule(
 ) -> CanonicalResult<Option<Value>> {
     let Some(schedule) = setup_package.get("evaluatorKeySchedule") else {
         return Ok(Some(verification_response(
-            Some("relinearizationRoundOne"),
             vec!["evaluatorKeySchedule".to_string()],
-            Vec::new(),
             Vec::new(),
         )?));
     };
@@ -50,32 +48,8 @@ pub(super) fn verify_evaluator_key_schedule(
             "commonRandomness was required before evaluator-key schedule verification",
         )
     })?;
-    let public_derivations = common_randomness.get("publicDerivations").ok_or_else(|| {
-        CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "commonRandomness.publicDerivations was required before evaluator-key schedule verification",
-        )
-    })?;
-    let crp_roots = public_derivations.get("crpRoots").ok_or_else(|| {
-        CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "commonRandomness.publicDerivations.crpRoots was required before evaluator-key schedule verification",
-        )
-    })?;
-    for (field_name, expected_value) in [
-        (
-            "publicMatrixSeedHash",
-            value_string(common_randomness, "publicMatrixSeedHash")?,
-        ),
-        (
-            "relinearizationCrpRoot",
-            value_string(crp_roots, "relinearizationCrpRoot")?,
-        ),
-        (
-            "galoisKeyCrpRoot",
-            value_string(crp_roots, "galoisKeyCrpRoot")?,
-        ),
-    ] {
+    let public_matrix_seed_hash = value_string(common_randomness, "publicMatrixSeedHash")?;
+    for (field_name, expected_value) in [("publicMatrixSeedHash", public_matrix_seed_hash)] {
         if schedule.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Ok(Some(evaluator_key_schedule_refusal(
                 "evaluatorKeySchedulePublicBindingMismatch",
@@ -85,45 +59,26 @@ pub(super) fn verify_evaluator_key_schedule(
         }
     }
 
-    for (field_name, expected_value, message) in [
-        (
-            "publicKeyShareSetRoot",
-            setup_package
-                .get("publicKeyShares")
-                .and_then(|share_set| share_set.get("publicKeyShareSetRoot"))
-                .and_then(Value::as_str)
-                .ok_or_else(|| {
-                    CanonicalError::new(
-                        CanonicalErrorCode::InvalidFixture,
-                        "publicKeyShareSetRoot was required before evaluator-key schedule verification",
-                    )
-                })?
-                .to_string(),
-            "public-key share set root",
-        ),
-        (
-            "publicKeyShareProofSetRoot",
-            setup_package
-                .get("publicKeyShareProofs")
-                .and_then(|proof_set| proof_set.get("publicKeyShareProofSetRoot"))
-                .and_then(Value::as_str)
-                .ok_or_else(|| {
-                    CanonicalError::new(
-                        CanonicalErrorCode::InvalidFixture,
-                        "publicKeyShareProofSetRoot was required before evaluator-key schedule verification",
-                    )
-                })?
-                .to_string(),
-            "public-key share proof set root",
-        ),
-    ] {
-        if schedule.get(field_name).and_then(Value::as_str) != Some(expected_value.as_str()) {
-            return Ok(Some(evaluator_key_schedule_refusal(
-                "evaluatorKeyScheduleSetupRootMismatch",
-                format!("evaluatorKeySchedule.{field_name} must match accepted {message}"),
-                format!("setupPackage.evaluatorKeySchedule.{field_name}"),
-            )?));
-        }
+    let public_key_share_set_root = setup_package
+        .get("publicKeyShares")
+        .and_then(|share_set| share_set.get("publicKeyShareSetRoot"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "publicKeyShareSetRoot was required before evaluator-key schedule verification",
+            )
+        })?;
+    if schedule
+        .get("publicKeyShareSetRoot")
+        .and_then(Value::as_str)
+        != Some(public_key_share_set_root)
+    {
+        return Ok(Some(evaluator_key_schedule_refusal(
+            "evaluatorKeyScheduleSetupRootMismatch",
+            "evaluatorKeySchedule.publicKeyShareSetRoot must match the accepted public-key share set root",
+            "setupPackage.evaluatorKeySchedule.publicKeyShareSetRoot",
+        )?));
     }
 
     let expected_relinearization_level_schedule = expected_relinearization_level_schedule();
@@ -144,28 +99,12 @@ pub(super) fn verify_evaluator_key_schedule(
             "setupPackage.evaluatorKeySchedule.requiredGaloisKeySchedule",
         )?));
     }
-    let expected_required_galois_set_hash =
-        expected_required_galois_set_hash(&expected_required_galois_key_schedule)?;
-    if schedule
-        .get("requiredGaloisSetHash")
-        .and_then(Value::as_str)
-        != Some(expected_required_galois_set_hash.as_str())
-    {
-        return Ok(Some(evaluator_key_schedule_refusal(
-            "requiredGaloisSetHashMismatch",
-            "evaluatorKeySchedule.requiredGaloisSetHash does not match the frozen foundation-roster Galois set",
-            "setupPackage.evaluatorKeySchedule.requiredGaloisSetHash",
-        )?));
-    }
-
     let Some(evaluator_key_schedule_root) = schedule
         .get("evaluatorKeyScheduleRoot")
         .and_then(Value::as_str)
     else {
         return Ok(Some(verification_response(
-            Some("relinearizationRoundOne"),
             vec!["evaluatorKeySchedule.evaluatorKeyScheduleRoot".to_string()],
-            Vec::new(),
             Vec::new(),
         )?));
     };
@@ -219,10 +158,8 @@ fn evaluator_key_schedule_refusal(
     object_path: impl Into<String>,
 ) -> CanonicalResult<Value> {
     verification_response(
-        Some("relinearizationRoundOne"),
         Vec::new(),
         vec![Refusal::new(reason_code, message, object_path)],
-        Vec::new(),
     )
 }
 
@@ -231,11 +168,14 @@ pub(super) fn verify_pending_evaluation_key_material_boundary(
     request: &Value,
     verified_same_secret_bridge: Option<&VerifiedSameSecretBridgeMaterial>,
     proof_binding_session: &crate::bgv::setup::AcceptedSetupProofBindingSession,
+    trustee_registrations: &setup_intent::SetupIntentTrusteeRegistrationMap,
 ) -> CanonicalResult<Option<Value>> {
-    if let Some(response) = verify_relinearization_key_share_rounds(setup_package)? {
+    if let Some(response) =
+        verify_relinearization_key_share_rounds(setup_package, trustee_registrations)?
+    {
         return Ok(Some(response));
     }
-    if let Some(response) = verify_galois_key_share_batches(setup_package)? {
+    if let Some(response) = verify_galois_key_share_batches(setup_package, trustee_registrations)? {
         return Ok(Some(response));
     }
     if let Some(response) = verify_trustee_evaluation_key_proofs(
@@ -244,10 +184,6 @@ pub(super) fn verify_pending_evaluation_key_material_boundary(
         verified_same_secret_bridge,
         proof_binding_session,
     )? {
-        return Ok(Some(response));
-    }
-
-    if let Some(response) = verify_public_evaluation_key_set(setup_package, request, false)? {
         return Ok(Some(response));
     }
 

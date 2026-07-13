@@ -32,7 +32,7 @@ const parseArguments = (
     readonly lane: ManualRustKernelLane;
 } => {
     const [rawLane, ...remainingArguments] = commandArguments.filter(
-        (argument) => argument !== '--' && argument !== undefined,
+        (argument) => argument !== '--',
     );
     if (!(rawLane !== undefined && rawLane in manualRustKernelTests)) {
         throw new Error(
@@ -67,9 +67,7 @@ const parseArguments = (
 
 export const runRustKernelManualTests = async (): Promise<void> => {
     const rawArguments = process.argv.slice(2);
-    const requestedLane = rawArguments.find(
-        (argument) => argument !== '--' && argument !== undefined,
-    );
+    const requestedLane = rawArguments.find((argument) => argument !== '--');
     const diagnosticLane =
         requestedLane !== undefined && requestedLane in manualRustKernelTests
             ? (requestedLane as ManualRustKernelLane)

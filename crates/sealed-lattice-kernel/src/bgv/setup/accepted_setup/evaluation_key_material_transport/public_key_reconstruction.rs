@@ -1,17 +1,13 @@
-use super::material_transport::*;
 use super::*;
 
 pub(super) fn accepted_setup_public_relinearization_keys_from_transport(
     setup_package: &Value,
     request: &Value,
 ) -> CanonicalResult<BTreeMap<usize, KeySwitchKey>> {
-    let roster = super::super::accepted_roster_from_package(setup_package);
+    let roster = super::super::accepted_roster_from_package(setup_package)?;
     let binding = evaluation_key_proof_common_binding(setup_package)?;
     let transported_key_switch_component_material =
-        transported_evaluation_key_share_component_material_from_request(request)?;
-    let transported_key_switch_component_material = request
-        .get("transportedEvaluationKeyShareComponentMaterial")
-        .or(transported_key_switch_component_material.as_ref());
+        request.get("transportedEvaluationKeyShareComponentMaterial");
     let rounds = setup_package
         .get("relinearizationKeyShareRounds")
         .ok_or_else(|| {
@@ -79,26 +75,22 @@ pub(super) fn accepted_setup_public_relinearization_keys_from_transport(
                         "accepted public relinearization key material is missing a trustee record for a scheduled level",
                     )
                 })?;
-            verify_relinearization_key_switch_sample_binding(
+            let decoded_material = verify_relinearization_key_switch_sample_binding(
                 proof_record,
                 &binding,
                 "round-two",
                 level,
+                transported_key_switch_component_material,
             )?;
-            if value_u64(proof_record, "ringDegree")? != POLYNOMIAL_DEGREE as u64 {
+            if decoded_material.ring_degree != POLYNOMIAL_DEGREE {
                 return Err(CanonicalError::new(
                     CanonicalErrorCode::InvalidFixture,
                     "accepted public relinearization key runtime material requires full-ring component vectors",
                 ));
             }
-            let component_b = component_b_vectors_from_record(
-                EvaluationKeyShareProofFamily::Relinearization,
-                proof_record,
-                transported_key_switch_component_material,
-            )?;
             add_accepted_key_switch_component_b(
                 &mut aggregate_component_b,
-                component_b,
+                decoded_material.component_b_by_digit,
                 level_usize,
             )?;
         }
@@ -124,13 +116,10 @@ pub(super) fn accepted_setup_public_galois_keys_from_transport(
     setup_package: &Value,
     request: &Value,
 ) -> CanonicalResult<BTreeMap<(usize, usize), KeySwitchKey>> {
-    let roster = super::super::accepted_roster_from_package(setup_package);
+    let roster = super::super::accepted_roster_from_package(setup_package)?;
     let binding = evaluation_key_proof_common_binding(setup_package)?;
     let transported_key_switch_component_material =
-        transported_evaluation_key_share_component_material_from_request(request)?;
-    let transported_key_switch_component_material = request
-        .get("transportedEvaluationKeyShareComponentMaterial")
-        .or(transported_key_switch_component_material.as_ref());
+        request.get("transportedEvaluationKeyShareComponentMaterial");
     let batches = setup_package
         .get("galoisKeyShareBatches")
         .and_then(Value::as_array)
@@ -188,21 +177,23 @@ pub(super) fn accepted_setup_public_galois_keys_from_transport(
         let mut aggregate_component_b = None;
         for (_, batch) in &sorted_batches {
             let proof_record = galois_key_share_material_for_schedule(batch, rotation, level)?;
-            verify_galois_key_switch_sample_binding(proof_record, &binding, rotation, level)?;
-            if value_u64(proof_record, "ringDegree")? != POLYNOMIAL_DEGREE as u64 {
+            let decoded_material = verify_galois_key_switch_sample_binding(
+                batch,
+                proof_record,
+                &binding,
+                rotation,
+                level,
+                transported_key_switch_component_material,
+            )?;
+            if decoded_material.ring_degree != POLYNOMIAL_DEGREE {
                 return Err(CanonicalError::new(
                     CanonicalErrorCode::InvalidFixture,
                     "accepted public Galois key runtime material requires full-ring component vectors",
                 ));
             }
-            let component_b = component_b_vectors_from_record(
-                EvaluationKeyShareProofFamily::Galois,
-                proof_record,
-                transported_key_switch_component_material,
-            )?;
             add_accepted_key_switch_component_b(
                 &mut aggregate_component_b,
-                component_b,
+                decoded_material.component_b_by_digit,
                 level_usize,
             )?;
         }

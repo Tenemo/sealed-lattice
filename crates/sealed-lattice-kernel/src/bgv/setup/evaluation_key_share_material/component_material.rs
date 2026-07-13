@@ -5,20 +5,11 @@ use std::collections::BTreeSet;
 #[cfg(not(target_arch = "wasm32"))]
 use std::io::{BufWriter, Write};
 
+#[cfg(not(target_arch = "wasm32"))]
+use crate::foundation::FOUNDATION_PROFILE;
 use crate::hashing::derive_canonical_object_hash;
 #[cfg(not(target_arch = "wasm32"))]
-use crate::{
-    bgv::setup::setup_proof::SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES, hashing::hash512_hex,
-};
-
-pub(in crate::bgv::setup) fn evaluation_key_share_component_vector_hash(
-    coefficients: &[u64],
-) -> String {
-    coefficient_vector_hash512(
-        coefficients,
-        EVALUATION_KEY_SHARE_COMPONENT_VECTOR_HASH_DOMAIN,
-    )
-}
+use crate::hashing::hash512_hex;
 
 pub(in crate::bgv::setup) fn evaluation_key_share_component_vector_root(
     proof_family: EvaluationKeyShareProofFamily,
@@ -109,12 +100,12 @@ fn read_verified_evaluation_key_share_component_material_chunks(
         }
         #[cfg(not(target_arch = "wasm32"))]
         VerifiedComponentMaterialBacking::TempFile(path) => {
-            let chunk_size =
-                usize::try_from(SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES).map_err(|_| {
-                    invalid_evaluation_key_share_material(
-                        "evaluation-key component material chunk size does not fit usize",
-                    )
-                })?;
+            let chunk_size = FOUNDATION_PROFILE.stream_chunk_byte_length;
+            let chunk_size_u64 = u64::try_from(chunk_size).map_err(|_| {
+                invalid_evaluation_key_share_material(
+                    "evaluation-key component material chunk size does not fit u64",
+                )
+            })?;
             let mut remaining_byte_length = total_byte_length;
             let mut file = std::fs::File::open(&path).map_err(|error| {
                 invalid_evaluation_key_share_material(format!(
@@ -123,14 +114,12 @@ fn read_verified_evaluation_key_share_component_material_chunks(
             })?;
             let mut chunks = Vec::new();
             while remaining_byte_length > 0 {
-                let next_chunk_length = usize::try_from(
-                    remaining_byte_length.min(SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES),
-                )
-                .map_err(|_| {
-                    invalid_evaluation_key_share_material(
-                        "evaluation-key component material chunk length does not fit usize",
-                    )
-                })?;
+                let next_chunk_length = usize::try_from(remaining_byte_length.min(chunk_size_u64))
+                    .map_err(|_| {
+                        invalid_evaluation_key_share_material(
+                            "evaluation-key component material chunk length does not fit usize",
+                        )
+                    })?;
                 let mut chunk = vec![0_u8; next_chunk_length.min(chunk_size)];
                 file.read_exact(&mut chunk).map_err(|error| {
                     invalid_evaluation_key_share_material(format!(
@@ -264,21 +253,35 @@ impl Drop for VerifiedComponentMaterialEvictionGuard {
     }
 }
 
+#[derive(Clone, Copy)]
+pub(in crate::bgv::setup) struct EvaluationKeyShareDerivedMaterialBinding<'a> {
+    pub(in crate::bgv::setup) trustee_identity: &'a str,
+    pub(in crate::bgv::setup) trustee_roster_position: u64,
+    pub(in crate::bgv::setup) key_switch_domain: &'a str,
+    pub(in crate::bgv::setup) key_switch_seed_hex: &'a str,
+}
+
+pub(in crate::bgv::setup) struct DecodedEvaluationKeyShareComponentMaterial {
+    pub(in crate::bgv::setup) component_b_by_digit: Vec<Vec<Vec<u64>>>,
+    pub(in crate::bgv::setup) ring_degree: usize,
+}
+
 pub(in crate::bgv::setup) fn evaluation_key_share_component_material_reference_root(
     proof_family: EvaluationKeyShareProofFamily,
     proof_record: &Value,
+    derived_binding: EvaluationKeyShareDerivedMaterialBinding<'_>,
+    ring_degree: usize,
 ) -> CanonicalResult<String> {
     let level = value_u64(proof_record, "level")?;
     derive_canonical_object_hash(&json!({
         "objectType": "EvaluationKeyShareComponentMaterialReference",
         "proofFamily": proof_family.proof_family(),
-        "keySwitchMaterialEncoding": EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
-        "trusteeIdentity": string_field(proof_record, "trusteeIdentity")?,
-        "trusteeRosterPosition": value_u64(proof_record, "trusteeRosterPosition")?,
-        "keySwitchDomain": string_field(proof_record, "keySwitchDomain")?,
-        "keySwitchSeedHex": string_field(proof_record, "keySwitchSeedHex")?,
+        "trusteeIdentity": derived_binding.trustee_identity,
+        "trusteeRosterPosition": derived_binding.trustee_roster_position,
+        "keySwitchDomain": derived_binding.key_switch_domain,
+        "keySwitchSeedHex": derived_binding.key_switch_seed_hex,
         "level": level,
-        "ringDegree": value_u64(proof_record, "ringDegree")?,
+        "ringDegree": ring_degree,
         "keySwitchComponentVectorRoot": string_field(
             proof_record,
             "keySwitchComponentVectorRoot",
@@ -289,11 +292,11 @@ pub(in crate::bgv::setup) fn evaluation_key_share_component_material_reference_r
 pub(in crate::bgv::setup) fn component_b_vectors_from_record(
     proof_family: EvaluationKeyShareProofFamily,
     record: &Value,
+    derived_binding: EvaluationKeyShareDerivedMaterialBinding<'_>,
     transported_key_switch_component_material: Option<&Value>,
-) -> CanonicalResult<Vec<Vec<Vec<u64>>>> {
-    if string_field(record, "keySwitchMaterialEncoding")?
-        != EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING
-        || record.get("keySwitchComponentVectors").is_some()
+) -> CanonicalResult<DecodedEvaluationKeyShareComponentMaterial> {
+    if record.get("keySwitchComponentVectors").is_some()
+        || record.get("keySwitchComponentMaterialRoot").is_none()
     {
         return Err(invalid_evaluation_key_share_material(
             "evaluation-key component vectors require canonical streamed material",
@@ -304,14 +307,20 @@ pub(in crate::bgv::setup) fn component_b_vectors_from_record(
             "transported evaluation-key component material is required",
         )
     })?;
-    component_b_vectors_from_transported_material(proof_family, record, transported_material_set)
+    component_b_vectors_from_transported_material(
+        proof_family,
+        record,
+        derived_binding,
+        transported_material_set,
+    )
 }
 
 fn component_b_vectors_from_transported_material(
     proof_family: EvaluationKeyShareProofFamily,
     record: &Value,
+    derived_binding: EvaluationKeyShareDerivedMaterialBinding<'_>,
     material_set: &Value,
-) -> CanonicalResult<Vec<Vec<Vec<u64>>>> {
+) -> CanonicalResult<DecodedEvaluationKeyShareComponentMaterial> {
     if material_set.get("objectType").and_then(Value::as_str)
         != Some(EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_TRANSPORT_SET_OBJECT_TYPE)
     {
@@ -340,25 +349,30 @@ fn component_b_vectors_from_transported_material(
             "transported evaluation-key component material is missing the requested keySwitchComponentMaterialRoot",
         )
     })?;
-    verify_evaluation_key_share_component_material_header(
+    verify_evaluation_key_share_component_material_header(proof_family, component_material)?;
+    let chunks = evaluation_key_share_component_material_chunks(component_material)?;
+    let decoded_material = decode_evaluation_key_share_component_vectors(
         proof_family,
         record,
-        component_material,
+        derived_binding,
+        &chunks,
     )?;
-    let chunks = evaluation_key_share_component_material_chunks(component_material)?;
-    let canonical_material_root =
-        evaluation_key_share_component_material_reference_root(proof_family, record)?;
+    let canonical_material_root = evaluation_key_share_component_material_reference_root(
+        proof_family,
+        record,
+        derived_binding,
+        decoded_material.ring_degree,
+    )?;
     if expected_material_root != canonical_material_root {
         return Err(invalid_evaluation_key_share_material(
             "evaluation-key component material root must match the canonical transported material reference",
         ));
     }
-    decode_evaluation_key_share_component_vectors(proof_family, record, &chunks)
+    Ok(decoded_material)
 }
 
 fn verify_evaluation_key_share_component_material_header(
     proof_family: EvaluationKeyShareProofFamily,
-    record: &Value,
     component_material: &Value,
 ) -> CanonicalResult<()> {
     if component_material.get("objectType").and_then(Value::as_str)
@@ -367,29 +381,10 @@ fn verify_evaluation_key_share_component_material_header(
             .get("proofFamily")
             .and_then(Value::as_str)
             != Some(proof_family.proof_family())
-        || component_material
-            .get("keySwitchMaterialEncoding")
-            .and_then(Value::as_str)
-            != Some(EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING)
     {
         return Err(invalid_evaluation_key_share_material(
             "transported evaluation-key component material header is invalid",
         ));
-    }
-    for field_name in [
-        "trusteeIdentity",
-        "trusteeRosterPosition",
-        "keySwitchDomain",
-        "keySwitchSeedHex",
-        "level",
-        "ringDegree",
-        "keySwitchComponentVectorRoot",
-    ] {
-        if component_material.get(field_name) != record.get(field_name) {
-            return Err(invalid_evaluation_key_share_material(format!(
-                "transported evaluation-key component material {field_name} must match the proof record"
-            )));
-        }
     }
     Ok(())
 }
@@ -477,8 +472,9 @@ impl<'a> CanonicalComponentMaterialReader<'a> {
 fn decode_evaluation_key_share_component_vectors(
     proof_family: EvaluationKeyShareProofFamily,
     record: &Value,
+    derived_binding: EvaluationKeyShareDerivedMaterialBinding<'_>,
     material_chunks: &[Vec<u8>],
-) -> CanonicalResult<Vec<Vec<Vec<u64>>>> {
+) -> CanonicalResult<DecodedEvaluationKeyShareComponentMaterial> {
     let mut reader = CanonicalComponentMaterialReader::new(material_chunks)?;
     let magic = reader.read_fixed::<8>()?;
     if &magic != EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_MAGIC {
@@ -501,7 +497,6 @@ fn decode_evaluation_key_share_component_vectors(
     })?;
     let limb_count = digit_count;
     if level != value_usize(record, "level")?
-        || ring_degree != value_usize(record, "ringDegree")?
         || ring_degree == 0
         || ring_degree > POLYNOMIAL_DEGREE
         || limb_count == 0
@@ -511,9 +506,7 @@ fn decode_evaluation_key_share_component_vectors(
             "evaluation-key component material shape does not match the proof record",
         ));
     }
-    let key_switch_domain = string_field(record, "keySwitchDomain")?;
-    let key_switch_seed_hex = string_field(record, "keySwitchSeedHex")?;
-    validate_hex_string(key_switch_seed_hex, "keySwitchSeedHex")?;
+    validate_hex_string(derived_binding.key_switch_seed_hex, "keySwitchSeedHex")?;
     let mut component_b_by_digit = vec![vec![Vec::<u64>::new(); limb_count]; digit_count];
     let mut entries = Vec::with_capacity(digit_count * limb_count);
     for digit_index in 0..digit_count {
@@ -532,7 +525,6 @@ fn decode_evaluation_key_share_component_vectors(
                 "digitIndex": digit_index,
                 "rnsLimbIndex": rns_limb_index,
                 "rnsPrime": DATA_PRIMES[rns_limb_index],
-                "coefficientVectorHash512": evaluation_key_share_component_vector_hash(&coefficients),
                 "coefficientsLeHex": coefficient_vector_le_hex(&coefficients),
             }));
             component_b_by_digit[digit_index][rns_limb_index] = coefficients;
@@ -545,8 +537,8 @@ fn decode_evaluation_key_share_component_vectors(
     }
     let expected_root = evaluation_key_share_component_vector_root(
         proof_family,
-        key_switch_domain,
-        key_switch_seed_hex,
+        derived_binding.key_switch_domain,
+        derived_binding.key_switch_seed_hex,
         level,
         ring_degree,
         &entries,
@@ -557,7 +549,10 @@ fn decode_evaluation_key_share_component_vectors(
         ));
     }
 
-    Ok(component_b_by_digit)
+    Ok(DecodedEvaluationKeyShareComponentMaterial {
+        component_b_by_digit,
+        ring_degree,
+    })
 }
 
 static VERIFIED_EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_CHUNKS: OnceLock<

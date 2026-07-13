@@ -27,6 +27,7 @@ jobs:
         timeout-minutes: 10
         outputs:
             run_heavy: ${{ steps.classify.outputs.run_heavy }}
+            run_routine: ${{ steps.classify.outputs.run_routine }}
         steps:
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
               with:
@@ -35,42 +36,20 @@ jobs:
             - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f
               with:
                   node-version-file: .nvmrc
-            - name: Classify expensive proof lanes
+            - name: Classify CI lanes
               id: classify
               env:
                   EVENT_NAME: ${{ github.event_name }}
                   PULL_REQUEST_BASE_SHA: ${{ github.event.pull_request.base.sha }}
                   PULL_REQUEST_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
                   PUSH_BASE_SHA: ${{ github.event.before }}
-              run: |
-                  if [[ "${EVENT_NAME}" == "pull_request" ]]; then
-                    BASE_SHA="${PULL_REQUEST_BASE_SHA}"
-                    HEAD_SHA="${PULL_REQUEST_HEAD_SHA}"
-                  elif [[ "${EVENT_NAME}" == "push" ]]; then
-                    if [[ "${PUSH_BASE_SHA}" =~ ^0+$ ]]; then
-                      printf '' | node ./tools/ci/classify-ci-changes.mjs
-                      exit 0
-                    fi
-                    BASE_SHA="${PUSH_BASE_SHA}"
-                    HEAD_SHA="${GITHUB_SHA}"
-                  else
-                    if ! BASE_SHA="$(git rev-parse "${GITHUB_SHA}^")"; then
-                      printf '' | node ./tools/ci/classify-ci-changes.mjs
-                      exit 0
-                    fi
-                    HEAD_SHA="${GITHUB_SHA}"
-                  fi
-
-                  CHANGED_PATHS_FILE="$(mktemp)"
-                  if ! git diff --name-status -z "${BASE_SHA}" "${HEAD_SHA}" > "${CHANGED_PATHS_FILE}"; then
-                    echo "Could not compare ${BASE_SHA} with ${HEAD_SHA}; running expensive proof lanes." >&2
-                    printf '' | node ./tools/ci/classify-ci-changes.mjs
-                    exit 0
-                  fi
-                  node ./tools/ci/classify-ci-changes.mjs --base "${BASE_SHA}" --head "${HEAD_SHA}" < "${CHANGED_PATHS_FILE}"
+              run: node ./tools/ci/classify-ci-changes.mjs
 
     static-build:
         name: static and build
+        needs:
+            - changes
+        if: ${{ needs.changes.outputs.run_routine == 'true' }}
         runs-on: ubuntu-24.04
         timeout-minutes: 30
         steps:
@@ -91,6 +70,9 @@ jobs:
 
     rust-fast:
         name: rust fast
+        needs:
+            - changes
+        if: ${{ needs.changes.outputs.run_routine == 'true' }}
         runs-on: ubuntu-24.04
         timeout-minutes: 135
         steps:
@@ -119,6 +101,9 @@ jobs:
 
     node:
         name: node
+        needs:
+            - changes
+        if: ${{ needs.changes.outputs.run_routine == 'true' }}
         runs-on: ubuntu-24.04
         timeout-minutes: 135
         steps:
@@ -244,6 +229,9 @@ jobs:
 
     browser:
         name: browser
+        needs:
+            - changes
+        if: ${{ needs.changes.outputs.run_routine == 'true' }}
         runs-on: ubuntu-24.04
         timeout-minutes: 75
         steps:
@@ -280,12 +268,17 @@ jobs:
             - name: Check verify jobs
               env:
                   RUN_HEAVY: ${{ needs.changes.outputs.run_heavy }}
+                  RUN_ROUTINE: ${{ needs.changes.outputs.run_routine }}
                   RUN_TEN_PARTICIPANT_ACCEPTED_SETUP_EVIDENCE: ${{ github.event_name == 'workflow_dispatch' && inputs.ten_participant_accepted_setup_evidence }}
               run: |
                   node --input-type=module <<'NODE'
                   const needs = ${{ toJSON(needs) }};
                   if (!['true', 'false'].includes(process.env.RUN_HEAVY)) {
                     console.error(`Invalid run_heavy output: ${String(process.env.RUN_HEAVY)}`);
+                    process.exit(1);
+                  }
+                  if (!['true', 'false'].includes(process.env.RUN_ROUTINE)) {
+                    console.error(`Invalid run_routine output: ${String(process.env.RUN_ROUTINE)}`);
                     process.exit(1);
                   }
                   const allowedSkippedJobs = new Set();
@@ -296,6 +289,12 @@ jobs:
                     allowedSkippedJobs.add('rust-heavy');
                     allowedSkippedJobs.add('rust-accepted-setup');
                     allowedSkippedJobs.add('node-kernel-heavy');
+                  }
+                  if (process.env.RUN_ROUTINE === 'false') {
+                    allowedSkippedJobs.add('static-build');
+                    allowedSkippedJobs.add('rust-fast');
+                    allowedSkippedJobs.add('node');
+                    allowedSkippedJobs.add('browser');
                   }
                   const failed = Object.entries(needs).filter(
                     ([jobName, job]) =>

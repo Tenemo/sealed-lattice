@@ -73,7 +73,6 @@ const desktopBrowserTestGlobs = [
     'packages/*/tests/browser/**/*.browser.test.ts',
 ] as const;
 const mobileBrowserTestGlobs = [
-    'packages/sdk/tests/browser/election-foundation-public-api.browser.test.ts',
     'packages/wasm/tests/browser/canonical-stream-runtime.browser.test.ts',
     'packages/wasm/tests/browser/local-storage-root-worker-kernel.browser.test.ts',
     'packages/wasm/tests/browser/state-verifier-runtime.browser.test.ts',

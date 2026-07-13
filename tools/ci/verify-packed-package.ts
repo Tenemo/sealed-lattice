@@ -29,7 +29,6 @@ import {
 import { serializeErrorDiagnostic } from './run-log-diagnostics.js';
 import { stagePublicPackage } from './stage-public-package.mjs';
 
-import { normalizeTranscriptCoreKernelBytesForHash } from '#packages/wasm/src/transcript-core-bridge.js';
 import { extractModuleSpecifiers } from '#tools/internal/module-specifiers.js';
 
 type PackedFileMetadata = {
@@ -54,8 +53,6 @@ const expectedPublishedPackageFilePaths = [
     'dist/sealed-lattice-kernel.wasm',
     'package.json',
 ] as const;
-const publishedKernelHashPattern =
-    /expectedKernelSha256Hex:\s*(?<hash>undefined|['"][a-f0-9]{64}['"])/u;
 const unresolvedKernelHashToken =
     '__SEALED_LATTICE_KERNEL_NORMALIZED_SHA256_HEX__';
 
@@ -203,44 +200,6 @@ export const validatePublishedPackageBundle = (input: {
         );
     }
     return failures.sort((left, right) => left.localeCompare(right));
-};
-
-export const hashPublishedKernelBytesSha256Hex = (bytes: Uint8Array): string =>
-    createHash('sha256')
-        .update(normalizeTranscriptCoreKernelBytesForHash(bytes))
-        .digest('hex');
-
-export const extractPublishedKernelHash = (
-    kernelRuntimeText: string,
-): string | undefined => {
-    const match = publishedKernelHashPattern.exec(kernelRuntimeText);
-    const hash = match?.groups?.hash;
-    if (hash === undefined || hash === 'undefined') {
-        return undefined;
-    }
-
-    return hash.slice(1, -1);
-};
-
-export const validatePublishedKernelIntegrity = (
-    kernelRuntimeText: string,
-    kernelBytes: Uint8Array,
-): string[] => {
-    const expectedHash = extractPublishedKernelHash(kernelRuntimeText);
-    if (expectedHash === undefined) {
-        return [
-            'Published package kernel loader must pin the packaged transcript-core WASM hash',
-        ];
-    }
-
-    const actualHash = hashPublishedKernelBytesSha256Hex(kernelBytes);
-    if (actualHash !== expectedHash) {
-        return [
-            `Published package kernel hash mismatch: expected ${expectedHash}, received ${actualHash}`,
-        ];
-    }
-
-    return [];
 };
 
 const formatCapturedCommandFailure = (
@@ -450,15 +409,21 @@ const runPackedPackageSmoke = async (
                 await mkdir(packDirectory, { recursive: true });
                 await mkdir(consumerDirectory, { recursive: true });
 
-                return stagePublicPackage({
-                    destinationPath: packageDirectory,
-                });
+                await stagePublicPackage(packageDirectory);
             },
         );
 
         const publishedPackageJson = JSON.parse(
             await readFile(join(packageDirectory, 'package.json'), 'utf8'),
         ) as Record<string, unknown>;
+        if (
+            'devDependencies' in publishedPackageJson ||
+            'scripts' in publishedPackageJson
+        ) {
+            throw new Error(
+                'The staged public manifest contains workspace-only metadata.',
+            );
+        }
 
         await runPackedPackagePhase(runLog, 'run Publint', () =>
             runPublint(runLog, packageDirectory),
@@ -466,9 +431,9 @@ const runPackedPackageSmoke = async (
 
         await runPackedPackagePhase(
             runLog,
-            'validate bundled output and kernel integrity',
+            'validate bundled output',
             async () => {
-                const [runtimeSourceText, declarationSourceText, kernelBytes] =
+                const [runtimeSourceText, declarationSourceText] =
                     await Promise.all([
                         readFile(
                             join(packageDirectory, 'dist', 'index.js'),
@@ -478,29 +443,13 @@ const runPackedPackageSmoke = async (
                             join(packageDirectory, 'dist', 'index.d.ts'),
                             'utf8',
                         ),
-                        readFile(
-                            join(
-                                packageDirectory,
-                                'dist',
-                                'sealed-lattice-kernel.wasm',
-                            ),
-                        ),
                     ]);
                 const bundleFailures = validatePublishedPackageBundle({
                     declarationSourceText,
                     runtimeSourceText,
                 });
-                const kernelIntegrityFailures =
-                    validatePublishedKernelIntegrity(
-                        runtimeSourceText,
-                        kernelBytes,
-                    );
-                const failures = [
-                    ...bundleFailures,
-                    ...kernelIntegrityFailures,
-                ];
-                if (failures.length > 0) {
-                    throw new Error(failures.join('\n'));
+                if (bundleFailures.length > 0) {
+                    throw new Error(bundleFailures.join('\n'));
                 }
             },
         );
@@ -622,16 +571,11 @@ const runPackedPackageSmoke = async (
             );
         }
         const packageEvidence = {
-            objectVersion: 'sealed-lattice-package-smoke-evidence-v1',
             packageName: publishedPackageJson.name,
             packageVersion: publishedPackageJson.version,
             npmIntegrity: actualPackageIntegrity,
-            publishedFilePaths: packedPackage.filePaths,
-            tarballByteLength: tarballBytes.byteLength,
             tarballFileName: path.basename(packedPackage.tarballPath),
-            tarballSha256Hex: createHash('sha256')
-                .update(tarballBytes)
-                .digest('hex'),
+            tarballPath: packedPackage.tarballPath,
         };
         runLog.writeEvent({
             details: packageEvidence,

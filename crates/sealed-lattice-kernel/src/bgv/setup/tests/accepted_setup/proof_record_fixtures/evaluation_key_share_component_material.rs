@@ -1,9 +1,9 @@
 use super::*;
 
 use crate::bgv::setup::evaluation_key_share_material::{
-    EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING, EvaluationKeyShareProofFamily,
+    EvaluationKeyShareDerivedMaterialBinding, EvaluationKeyShareProofFamily,
     evaluation_key_share_component_material_reference_root,
-    evaluation_key_share_component_vector_hash, evaluation_key_share_component_vector_root,
+    evaluation_key_share_component_vector_root,
 };
 use crate::bgv::setup::trustee_evaluation_key_proof::public_key_switch_sample;
 use crate::foundation::{CanonicalStreamDomain, CanonicalStreamWriter};
@@ -111,20 +111,26 @@ pub(in super::super) struct AuthenticatedEvaluationKeyShareComponentMaterialFixt
 pub(in super::super) fn authenticate_evaluation_key_share_component_material_fixture(
     proof_family: EvaluationKeyShareProofFamily,
     record: &serde_json::Value,
+    derived_binding: EvaluationKeyShareDerivedMaterialBinding<'_>,
+    ring_degree: usize,
     fixture_material: &EvaluationKeyShareFixtureMaterial,
     accepted_setup_session: crate::bgv::setup::AcceptedSetupProofBindingSession,
 ) -> AuthenticatedEvaluationKeyShareComponentMaterialFixture {
-    let material_root =
-        evaluation_key_share_component_material_reference_root(proof_family, record)
-            .expect("evaluation-key component material reference root");
+    let material_root = evaluation_key_share_component_material_reference_root(
+        proof_family,
+        record,
+        derived_binding,
+        ring_degree,
+    )
+    .expect("evaluation-key component material reference root");
     let material_bytes = encode_evaluation_key_share_component_material(
         record,
+        ring_degree,
         &fixture_material.component_b_by_digit,
     );
     let total_byte_length =
         u64::try_from(material_bytes.len()).expect("component material byte length fits u64");
-    let chunk_size = usize::try_from(SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES)
-        .expect("component material chunk size fits usize");
+    let chunk_size = crate::foundation::FOUNDATION_PROFILE.stream_chunk_byte_length;
     let mut descriptor_writer =
         CanonicalStreamWriter::new(CanonicalStreamDomain::EvaluatorKeyStore, total_byte_length)
             .expect("component material canonical descriptor writer");
@@ -149,20 +155,11 @@ pub(in super::super) fn authenticate_evaluation_key_share_component_material_fix
         accepted_setup_session,
     );
 
-    let level = record["level"].as_u64().expect("component material level");
     AuthenticatedEvaluationKeyShareComponentMaterialFixture {
         material_root: material_root.clone(),
         transported_material: serde_json::json!({
             "objectType": "SetupTransportedEvaluationKeyShareComponentMaterial",
             "proofFamily": proof_family.proof_family(),
-            "keySwitchMaterialEncoding": EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
-            "trusteeIdentity": record["trusteeIdentity"],
-            "trusteeRosterPosition": record["trusteeRosterPosition"],
-            "keySwitchDomain": record["keySwitchDomain"],
-            "keySwitchSeedHex": record["keySwitchSeedHex"],
-            "level": level,
-            "ringDegree": record["ringDegree"],
-            "keySwitchComponentVectorRoot": record["keySwitchComponentVectorRoot"],
             "keySwitchComponentMaterialRoot": material_root,
         }),
     }
@@ -170,14 +167,13 @@ pub(in super::super) fn authenticate_evaluation_key_share_component_material_fix
 
 fn encode_evaluation_key_share_component_material(
     record: &serde_json::Value,
+    ring_degree: usize,
     component_b_by_digit: &[Vec<Vec<u64>>],
 ) -> Vec<u8> {
     const COMPONENT_MATERIAL_MAGIC: &[u8; 8] = b"SLEKCMV1";
 
     let level = record["level"].as_u64().expect("component material level");
-    let ring_degree = record["ringDegree"]
-        .as_u64()
-        .expect("component material ring degree");
+    let ring_degree = u64::try_from(ring_degree).expect("component material ring degree fits u64");
     let digit_count = level
         .checked_add(1)
         .expect("component material digit count");
@@ -358,7 +354,6 @@ fn evaluation_key_component_vector_root(
                         "digitIndex": digit_index,
                         "rnsLimbIndex": rns_limb_index,
                         "rnsPrime": DATA_PRIMES[rns_limb_index],
-                        "coefficientVectorHash512": evaluation_key_share_component_vector_hash(coefficients),
                         "coefficientsLeHex": coefficient_vector_le_hex(coefficients),
                     })
                 })
@@ -386,9 +381,7 @@ pub(in super::super) fn relinearization_key_switch_seed_for_test(
 ) -> String {
     derive_canonical_object_hash(&serde_json::json!({
         "objectType": "RelinearizationKeySwitchPublicSampleSeed",
-        "proofFamily": "relinearization-key-share",
         "evaluatorKeyScheduleRoot": schedule["evaluatorKeyScheduleRoot"],
-        "relinearizationCrpRoot": schedule["relinearizationCrpRoot"],
         "round": round,
         "level": level,
     }))
@@ -404,10 +397,7 @@ pub(in super::super) fn galois_key_switch_seed_for_test(
 ) -> String {
     derive_canonical_object_hash(&serde_json::json!({
         "objectType": "GaloisKeySwitchPublicSampleSeed",
-        "proofFamily": "galois-key-share",
         "evaluatorKeyScheduleRoot": schedule["evaluatorKeyScheduleRoot"],
-        "galoisKeyCrpRoot": schedule["galoisKeyCrpRoot"],
-        "requiredGaloisSetHash": schedule["requiredGaloisSetHash"],
         "rotation": rotation,
         "level": level,
     }))
@@ -516,6 +506,9 @@ fn signed_i128_residue_for_fixture(value: i128, modulus: u64) -> u64 {
 mod tests {
     use super::*;
 
+    use crate::bgv::setup::evaluation_key_share_material::component_b_vectors_from_record;
+    use crate::encoding::CanonicalErrorCode;
+
     // The exact per-digit, per-limb relation the accepted-setup verifier's
     // succinct argument enforces for one key share:
     //   b_{j,l} + a_{j,l} (*) s - p * e_j - [l == j] * source_j == 0 in R_{q_l}.
@@ -609,6 +602,125 @@ mod tests {
 
     fn repeated_test_seed(byte: u8) -> String {
         std::iter::repeat_n(format!("{byte:02x}"), 64).collect()
+    }
+
+    #[test]
+    fn transported_component_material_rejects_derived_binding_substitution() {
+        let proof_family = EvaluationKeyShareProofFamily::Relinearization;
+        let trustee_identity = "trustee-2";
+        let trustee_roster_position = 2_u64;
+        let level = 1_u64;
+        let ring_degree = 16_usize;
+        let key_switch_seed_hex = repeated_test_seed(0xa1);
+        let source = relinearization_round_one_source_by_digit_for_fixture(
+            trustee_roster_position,
+            ring_degree,
+            usize::try_from(level + 1).expect("digit count fits usize"),
+        );
+        let fixture_material = evaluation_key_share_fixture_material(
+            proof_family,
+            trustee_roster_position,
+            level,
+            None,
+            ring_degree,
+            &key_switch_seed_hex,
+            Some(&source),
+        );
+        let mut record = serde_json::json!({
+            "trusteeIdentity": trustee_identity,
+            "trusteeRosterPosition": trustee_roster_position,
+            "level": level,
+            "keySwitchComponentVectorRoot": fixture_material.component_vector_root,
+        });
+        let correct_binding = EvaluationKeyShareDerivedMaterialBinding {
+            trustee_identity,
+            trustee_roster_position,
+            key_switch_domain: "relinearization",
+            key_switch_seed_hex: &key_switch_seed_hex,
+        };
+        let accepted_setup_session =
+            crate::bgv::setup::AcceptedSetupProofBindingSession::begin_fresh()
+                .expect("accepted-setup session");
+        let authenticated_material = authenticate_evaluation_key_share_component_material_fixture(
+            proof_family,
+            &record,
+            correct_binding,
+            ring_degree,
+            &fixture_material,
+            accepted_setup_session,
+        );
+        record["keySwitchComponentMaterialRoot"] =
+            serde_json::Value::String(authenticated_material.material_root.clone());
+        let transported_material_set = serde_json::json!({
+            "objectType": "SetupTransportedEvaluationKeyShareComponentMaterialSet",
+            "componentMaterials": [authenticated_material.transported_material],
+        });
+
+        let decoded_material = component_b_vectors_from_record(
+            proof_family,
+            &record,
+            correct_binding,
+            Some(&transported_material_set),
+        )
+        .expect("correctly derived binding must decode authenticated material");
+        assert_eq!(decoded_material.ring_degree, ring_degree);
+        assert_eq!(
+            decoded_material.component_b_by_digit,
+            fixture_material.component_b_by_digit
+        );
+
+        let wrong_key_switch_seed_hex = repeated_test_seed(0xb2);
+        let substituted_bindings = [
+            (
+                "trustee identity",
+                EvaluationKeyShareDerivedMaterialBinding {
+                    trustee_identity: "trustee-3",
+                    ..correct_binding
+                },
+            ),
+            (
+                "trustee roster position",
+                EvaluationKeyShareDerivedMaterialBinding {
+                    trustee_roster_position: trustee_roster_position + 1,
+                    ..correct_binding
+                },
+            ),
+            (
+                "key-switch domain",
+                EvaluationKeyShareDerivedMaterialBinding {
+                    key_switch_domain: "galois-3",
+                    ..correct_binding
+                },
+            ),
+            (
+                "key-switch seed",
+                EvaluationKeyShareDerivedMaterialBinding {
+                    key_switch_seed_hex: &wrong_key_switch_seed_hex,
+                    ..correct_binding
+                },
+            ),
+        ];
+        for (substituted_field, substituted_binding) in substituted_bindings {
+            let error = component_b_vectors_from_record(
+                proof_family,
+                &record,
+                substituted_binding,
+                Some(&transported_material_set),
+            )
+            .err()
+            .unwrap_or_else(|| panic!("substituted {substituted_field} must be rejected"));
+            assert_eq!(
+                error.code,
+                CanonicalErrorCode::InvalidFixture,
+                "substituted {substituted_field} must fail the authenticated material binding"
+            );
+        }
+
+        crate::bgv::setup::cancel_accepted_setup_proof_binding_session(
+            accepted_setup_session.session_handle,
+            &accepted_setup_session.capability,
+        )
+        .expect("cancel accepted-setup session after hostile binding checks");
     }
 
     #[test]

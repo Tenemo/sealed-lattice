@@ -131,7 +131,6 @@ pub(crate) fn validate_standalone_vss_committed_material_commitment(
         &["ringDegree"],
         &format!("{field_name} ringDegree"),
     )?;
-    let _material_column_mask_degree = unsigned_at_path(commitment, &["materialColumnMaskDegree"])?;
     let commitment_fields = array_at_path(commitment, &["commitmentFields"])?;
     if commitment_fields.len() != VSS_PUBLIC_COMMITMENT_MODULUS_LIMB_INDICES.len() {
         return Err(CanonicalError::new(
@@ -253,8 +252,6 @@ pub(super) fn verify_vss_public_coefficient_record(
     )?;
     let coefficient_commitment_root =
         hash_at_path(input.coefficient_record, &["coefficientCommitmentRoot"])?;
-    let coefficient_opening_root =
-        hash_at_path(input.coefficient_record, &["coefficientOpeningRoot"])?;
     let commitment = verify_vss_committed_material_record_commitment(
         VssCommittedMaterialRecordCommitmentInput {
             commitment: value_at_path(input.coefficient_record, &["commitment"])?,
@@ -275,7 +272,6 @@ pub(super) fn verify_vss_public_coefficient_record(
         "rnsPrime": rns_prime,
         "shamirCoefficientIndex": input.expected_shamir_coefficient_index,
         "coefficientCommitmentRoot": coefficient_commitment_root,
-        "coefficientOpeningRoot": coefficient_opening_root,
         "commitment": commitment,
     }))
 }
@@ -389,11 +385,6 @@ pub(super) fn verify_vss_public_recipient_share_record(
         "VSS recipient-share commitment recipientRosterPosition",
     )?;
     compare_required_u64(
-        unsigned_at_path(input.recipient_share_record, &["recipientTrusteePoint"])?,
-        (input.expected_recipient_roster_position + 1) as u64,
-        "VSS recipient-share commitment recipientTrusteePoint",
-    )?;
-    compare_required_u64(
         unsigned_at_path(input.recipient_share_record, &["rnsLimbIndex"])?,
         input.expected_rns_limb_index as u64,
         "VSS recipient-share commitment rnsLimbIndex",
@@ -410,7 +401,6 @@ pub(super) fn verify_vss_public_recipient_share_record(
     )?;
     let share_commitment_root =
         hash_at_path(input.recipient_share_record, &["shareCommitmentRoot"])?;
-    let share_opening_root = hash_at_path(input.recipient_share_record, &["shareOpeningRoot"])?;
     let commitment = verify_vss_committed_material_record_commitment(
         VssCommittedMaterialRecordCommitmentInput {
             commitment: value_at_path(input.recipient_share_record, &["commitment"])?,
@@ -428,11 +418,9 @@ pub(super) fn verify_vss_public_recipient_share_record(
         "sourceTrusteeRosterPosition": input.source_trustee_roster_position,
         "recipientIdentity": recipient_identity,
         "recipientRosterPosition": input.expected_recipient_roster_position,
-        "recipientTrusteePoint": input.expected_recipient_roster_position + 1,
         "rnsLimbIndex": input.expected_rns_limb_index,
         "rnsPrime": rns_prime,
         "shareCommitmentRoot": share_commitment_root,
-        "shareOpeningRoot": share_opening_root,
         "commitment": commitment,
     }))
 }
@@ -456,11 +444,6 @@ pub(super) fn verify_vss_public_aggregate_threshold_record(
         unsigned_at_path(input.recipient_record, &["recipientRosterPosition"])?,
         input.expected_recipient_roster_position as u64,
         "VSS aggregate threshold commitment recipientRosterPosition",
-    )?;
-    compare_required_u64(
-        unsigned_at_path(input.recipient_record, &["recipientTrusteePoint"])?,
-        (input.expected_recipient_roster_position + 1) as u64,
-        "VSS aggregate threshold commitment recipientTrusteePoint",
     )?;
     compare_required_u64(
         unsigned_at_path(input.recipient_record, &["rnsLimbIndex"])?,
@@ -495,7 +478,6 @@ pub(super) fn verify_vss_public_aggregate_threshold_record(
         "objectType": "VssPublicAggregateThresholdCommitment",
         "recipientIdentity": recipient_identity,
         "recipientRosterPosition": input.expected_recipient_roster_position,
-        "recipientTrusteePoint": input.expected_recipient_roster_position + 1,
         "rnsLimbIndex": input.expected_rns_limb_index,
         "rnsPrime": rns_prime,
         "aggregateCommitmentRoot": aggregate_commitment_root,

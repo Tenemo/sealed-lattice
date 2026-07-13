@@ -13,7 +13,7 @@ use super::{
 pub const SUITE_RECORD_MAXIMUM_BYTE_LENGTH: usize = 65_536;
 
 const SUITE_RECORD_VERSION: u16 = 1;
-const SUITE_RECORD_ITEM_COUNT: usize = 30;
+const SUITE_RECORD_ITEM_COUNT: usize = 28;
 const KEY_SWITCH_METHOD_HYBRID_QP_RNS: u16 = 1;
 const KEY_SWITCH_BASIS_CONVERTER_CENTERED_INTEGER_RNS: u16 = 1;
 const REQUIRED_DISTRIBUTION_COUNT: usize = 12;
@@ -45,8 +45,6 @@ pub struct SuiteRecord {
     pub maximum_ballot_attempts_per_participant: u16,
     pub maximum_recovery_transitions_per_state_key: u16,
     pub maximum_target_share_submissions: u16,
-    pub maximum_private_sampler_candidate_draws_per_output: u32,
-    pub maximum_public_sampler_candidate_draws_per_output: u32,
     pub maximum_candidate_packages_per_action: u32,
     pub maximum_proof_objects_per_action: u32,
     pub maximum_candidate_bytes_per_participant: u64,
@@ -64,8 +62,8 @@ impl SuiteRecord {
     pub fn validate_intrinsic(&self) -> SchemaResult<()> {
         require_suite_record_byte_bound(intrinsic_suite_record_encoded_byte_length(self)?)?;
         self.validate_profile_constants()?;
-        self.validate_ring_parameters()?;
-        self.validate_basis_indexes()?;
+        let twice_polynomial_degree = self.validate_ring_parameters()?;
+        self.validate_basis_indexes(twice_polynomial_degree)?;
         self.validate_key_switch_profile()?;
         self.validate_intrinsic_caps()?;
         self.validate_distributions_and_artifacts()?;
@@ -113,8 +111,6 @@ impl SuiteRecord {
                 CanonicalItem::unsigned16(self.maximum_ballot_attempts_per_participant),
                 CanonicalItem::unsigned16(self.maximum_recovery_transitions_per_state_key),
                 CanonicalItem::unsigned16(self.maximum_target_share_submissions),
-                CanonicalItem::unsigned32(self.maximum_private_sampler_candidate_draws_per_output),
-                CanonicalItem::unsigned32(self.maximum_public_sampler_candidate_draws_per_output),
                 CanonicalItem::unsigned32(self.maximum_candidate_packages_per_action),
                 CanonicalItem::unsigned32(self.maximum_proof_objects_per_action),
                 CanonicalItem::unsigned64(self.maximum_candidate_bytes_per_participant),
@@ -153,20 +149,20 @@ impl SuiteRecord {
         )?;
 
         require_exact_nested_tuple_count(
-            &tuple.items[28],
+            &tuple.items[26],
             REQUIRED_DISTRIBUTION_COUNT,
             "suite record must contain exactly twelve distribution records",
         )?;
         require_exact_nested_tuple_count(
-            &tuple.items[29],
+            &tuple.items[27],
             REQUIRED_ARTIFACT_COUNT,
             "suite record must contain exactly six artifact references",
         )?;
-        let distributions = read_nested_tuple_list(&tuple.items[28], &bounded_limits)?
+        let distributions = read_nested_tuple_list(&tuple.items[26], &bounded_limits)?
             .iter()
             .map(DistributionRecord::from_tuple)
             .collect::<SchemaResult<Vec<_>>>()?;
-        let artifacts = read_nested_tuple_list(&tuple.items[29], &bounded_limits)?
+        let artifacts = read_nested_tuple_list(&tuple.items[27], &bounded_limits)?
             .iter()
             .map(ArtifactReference::from_tuple)
             .collect::<SchemaResult<Vec<_>>>()?;
@@ -189,17 +185,15 @@ impl SuiteRecord {
             maximum_ballot_attempts_per_participant: read_u16(&tuple.items[14])?,
             maximum_recovery_transitions_per_state_key: read_u16(&tuple.items[15])?,
             maximum_target_share_submissions: read_u16(&tuple.items[16])?,
-            maximum_private_sampler_candidate_draws_per_output: read_u32(&tuple.items[17])?,
-            maximum_public_sampler_candidate_draws_per_output: read_u32(&tuple.items[18])?,
-            maximum_candidate_packages_per_action: read_u32(&tuple.items[19])?,
-            maximum_proof_objects_per_action: read_u32(&tuple.items[20])?,
-            maximum_candidate_bytes_per_participant: read_u64(&tuple.items[21])?,
-            maximum_candidate_bytes_per_action: read_u64(&tuple.items[22])?,
-            maximum_setup_bytes_per_participant: read_u64(&tuple.items[23])?,
-            maximum_proof_bytes_per_action: read_u64(&tuple.items[24])?,
-            maximum_public_corpus_bytes: read_u64(&tuple.items[25])?,
-            maximum_participant_upload_bytes: read_u64(&tuple.items[26])?,
-            maximum_ceremony_upload_bytes: read_u64(&tuple.items[27])?,
+            maximum_candidate_packages_per_action: read_u32(&tuple.items[17])?,
+            maximum_proof_objects_per_action: read_u32(&tuple.items[18])?,
+            maximum_candidate_bytes_per_participant: read_u64(&tuple.items[19])?,
+            maximum_candidate_bytes_per_action: read_u64(&tuple.items[20])?,
+            maximum_setup_bytes_per_participant: read_u64(&tuple.items[21])?,
+            maximum_proof_bytes_per_action: read_u64(&tuple.items[22])?,
+            maximum_public_corpus_bytes: read_u64(&tuple.items[23])?,
+            maximum_participant_upload_bytes: read_u64(&tuple.items[24])?,
+            maximum_ceremony_upload_bytes: read_u64(&tuple.items[25])?,
             distributions,
             artifacts,
         };
@@ -234,7 +228,7 @@ impl SuiteRecord {
         Ok(())
     }
 
-    fn validate_ring_parameters(&self) -> SchemaResult<()> {
+    fn validate_ring_parameters(&self) -> SchemaResult<u64> {
         if self.polynomial_degree == 0 || !self.polynomial_degree.is_power_of_two() {
             return Err(FoundationSchemaError::new(
                 RefusalReason::OutsideSupportedProfile,
@@ -293,10 +287,10 @@ impl SuiteRecord {
                 ));
             }
         }
-        Ok(())
+        Ok(twice_polynomial_degree)
     }
 
-    fn validate_basis_indexes(&self) -> SchemaResult<()> {
+    fn validate_basis_indexes(&self, twice_polynomial_degree: u64) -> SchemaResult<()> {
         if self.ordered_sharing_data_prime_indexes.is_empty()
             || self.ordered_target_data_prime_indexes.is_empty()
         {
@@ -345,15 +339,33 @@ impl SuiteRecord {
                     "suite target indexes must be a contiguous prefix contained in the sharing basis",
                 ));
             }
+            let target_prime = self.ordered_data_primes.get(usize::from(target_index)).ok_or_else(
+                || {
+                    FoundationSchemaError::new(
+                        RefusalReason::WrongTypeOrLength,
+                        "suite target data-prime index is out of range",
+                    )
+                },
+            )?;
+            if !(*target_prime - 1).is_multiple_of(self.plaintext_modulus)
+                || !(*target_prime - 1).is_multiple_of(twice_polynomial_degree)
+            {
+                return Err(FoundationSchemaError::new(
+                    RefusalReason::OutsideSupportedProfile,
+                    "suite target data prime lacks the required plaintext-conversion or NTT congruence",
+                ));
+            }
         }
         Ok(())
     }
 
     fn validate_key_switch_profile(&self) -> SchemaResult<()> {
         if self.key_switch_method != KEY_SWITCH_METHOD_HYBRID_QP_RNS
-            || self.key_switch_basis_converter != KEY_SWITCH_BASIS_CONVERTER_CENTERED_INTEGER_RNS
+            || self.key_switch_basis_converter
+                != KEY_SWITCH_BASIS_CONVERTER_CENTERED_INTEGER_RNS
             || self.key_switch_data_primes_per_block == 0
-            || usize::from(self.key_switch_data_primes_per_block) > self.ordered_data_primes.len()
+            || usize::from(self.key_switch_data_primes_per_block)
+                > self.ordered_data_primes.len()
         {
             return Err(FoundationSchemaError::new(
                 RefusalReason::OutsideSupportedProfile,
@@ -371,8 +383,6 @@ impl SuiteRecord {
         ]
         .contains(&0)
             || [
-                self.maximum_private_sampler_candidate_draws_per_output,
-                self.maximum_public_sampler_candidate_draws_per_output,
                 self.maximum_candidate_packages_per_action,
                 self.maximum_proof_objects_per_action,
             ]
@@ -400,7 +410,9 @@ impl SuiteRecord {
             ));
         }
         let maximum_candidate_packages_from_attempts = u32::from(self.roster_size)
-            .checked_mul(u32::from(self.maximum_ballot_attempts_per_participant))
+            .checked_mul(u32::from(
+                self.maximum_ballot_attempts_per_participant,
+            ))
             .ok_or_else(|| {
                 FoundationSchemaError::new(
                     RefusalReason::OutsideSupportedProfile,
@@ -408,7 +420,8 @@ impl SuiteRecord {
                 )
             })?;
         if self.maximum_candidate_packages_per_action < u32::from(self.roster_size)
-            || self.maximum_candidate_packages_per_action > maximum_candidate_packages_from_attempts
+            || self.maximum_candidate_packages_per_action
+                > maximum_candidate_packages_from_attempts
         {
             return Err(FoundationSchemaError::new(
                 RefusalReason::OutsideSupportedProfile,
@@ -453,8 +466,10 @@ impl SuiteRecord {
             ));
         }
 
-        if self.maximum_candidate_bytes_per_participant > self.maximum_candidate_bytes_per_action
-            || self.maximum_candidate_bytes_per_participant > self.maximum_participant_upload_bytes
+        if self.maximum_candidate_bytes_per_participant
+            > self.maximum_candidate_bytes_per_action
+            || self.maximum_candidate_bytes_per_participant
+                > self.maximum_participant_upload_bytes
             || self.maximum_setup_bytes_per_participant > self.maximum_participant_upload_bytes
             || self.maximum_participant_upload_bytes > self.maximum_ceremony_upload_bytes
             || self.maximum_candidate_bytes_per_action > self.maximum_public_corpus_bytes
@@ -540,7 +555,7 @@ fn intrinsic_suite_record_encoded_byte_length(record: &SuiteRecord) -> SchemaRes
     const TUPLE_HEADER_BYTE_LENGTH: usize = 8;
     const ITEM_HEADER_BYTE_LENGTH: usize = 6;
     const FIXED_U16_PAYLOAD_BYTE_LENGTH: usize = 11 * 2;
-    const FIXED_U32_PAYLOAD_BYTE_LENGTH: usize = 5 * 4;
+    const FIXED_U32_PAYLOAD_BYTE_LENGTH: usize = 3 * 4;
     const FIXED_U64_PAYLOAD_BYTE_LENGTH: usize = 8 * 8;
     const HOMOGENEOUS_LIST_HEADER_BYTE_LENGTH: usize = 6;
     const DISTRIBUTION_RECORD_TUPLE_BYTE_LENGTH: usize = 38;
@@ -561,10 +576,7 @@ fn intrinsic_suite_record_encoded_byte_length(record: &SuiteRecord) -> SchemaRes
         (record.ordered_special_primes.len(), 8usize),
         (record.ordered_target_data_prime_indexes.len(), 2usize),
         (record.ordered_sharing_data_prime_indexes.len(), 2usize),
-        (
-            record.distributions.len(),
-            DISTRIBUTION_RECORD_TUPLE_BYTE_LENGTH,
-        ),
+        (record.distributions.len(), DISTRIBUTION_RECORD_TUPLE_BYTE_LENGTH),
         (record.artifacts.len(), ARTIFACT_REFERENCE_TUPLE_BYTE_LENGTH),
     ] {
         byte_length = byte_length
@@ -690,10 +702,9 @@ fn greatest_common_divisor(mut left: u64, mut right: u64) -> u64 {
     left
 }
 
-pub(super) fn is_prime_u64(value: u64) -> bool {
+fn is_prime_u64(value: u64) -> bool {
     const SMALL_PRIMES: [u64; 12] = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37];
-    const DETERMINISTIC_BASES: [u64; 7] =
-        [2, 325, 9_375, 28_178, 450_775, 9_780_504, 1_795_265_022];
+    const DETERMINISTIC_BASES: [u64; 7] = [2, 325, 9_375, 28_178, 450_775, 9_780_504, 1_795_265_022];
 
     if value < 2 {
         return false;
@@ -726,7 +737,7 @@ pub(super) fn is_prime_u64(value: u64) -> bool {
     true
 }
 
-pub(super) fn modular_power(mut base: u64, mut exponent: u64, modulus: u64) -> u64 {
+fn modular_power(mut base: u64, mut exponent: u64, modulus: u64) -> u64 {
     let mut result = 1;
     while exponent > 0 {
         if exponent & 1 == 1 {
@@ -738,7 +749,7 @@ pub(super) fn modular_power(mut base: u64, mut exponent: u64, modulus: u64) -> u
     result
 }
 
-pub(super) fn modular_product(left: u64, right: u64, modulus: u64) -> u64 {
+fn modular_product(left: u64, right: u64, modulus: u64) -> u64 {
     ((u128::from(left) * u128::from(right)) % u128::from(modulus)) as u64
 }
 

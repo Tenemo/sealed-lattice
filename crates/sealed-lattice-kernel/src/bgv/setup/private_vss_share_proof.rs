@@ -47,7 +47,6 @@ pub(super) struct PrivateVssShareSuccinctProofVerificationInput<'a> {
 
 pub(super) struct PrivateVssShareSuccinctProofVerification {
     pub(super) proof_bytes_hash: String,
-    pub(super) proof_statement_root: String,
     pub(super) proof_material_root: String,
     pub(super) statement_hash_hex: String,
 }
@@ -95,14 +94,7 @@ pub(super) fn verify_private_vss_share_succinct_relation_proof(
     }
 
     let statement = private_vss_share_succinct_statement(&input)?;
-    let statement_value = private_vss_share_succinct_statement_value(&input, &statement)?;
-    let proof_statement_root = derive_canonical_object_hash(&statement_value)?;
     let statement_hash_hex = to_hex(&statement.statement_hash());
-    if value_string(input.proof_record, "proofStatementRoot")? != proof_statement_root {
-        return Err(invalid_private_vss_share_proof(
-            "private VSS share proofStatementRoot must match the canonical proof statement",
-        ));
-    }
     if value_string(input.proof_record, "statementHash")? != statement_hash_hex {
         return Err(invalid_private_vss_share_proof(
             "private VSS share statementHash must match the canonical proof statement",
@@ -123,7 +115,6 @@ pub(super) fn verify_private_vss_share_succinct_relation_proof(
     }
     Ok(PrivateVssShareSuccinctProofVerification {
         proof_bytes_hash,
-        proof_statement_root,
         proof_material_root,
         statement_hash_hex,
     })
@@ -154,7 +145,7 @@ fn validate_private_vss_share_statement_material(
             "private VSS share values must be canonical Q_share residues",
         ));
     }
-    let roster = super::accepted_setup::accepted_roster_from_setup_context(input.setup_context);
+    let roster = super::accepted_setup::accepted_roster_from_setup_context(input.setup_context)?;
     let expected_coefficient_count =
         usize::try_from(roster.decryption_threshold).map_err(|_| {
             invalid_private_vss_share_proof("setup decryption threshold does not fit usize")
@@ -194,18 +185,7 @@ fn validate_private_vss_share_proof_record(proof_record: &Value) -> CanonicalRes
         "PrivateVssShareProof",
         "private VSS share proof objectType must be PrivateVssShareProof",
     )?;
-    expect_string_field(
-        proof_record,
-        "proofFamily",
-        PRIVATE_VSS_SHARE_PROOF_FAMILY,
-        "private VSS share proofFamily does not match the VSS opening/carry family",
-    )?;
-    for field_name in [
-        "proofStatementRoot",
-        "statementHash",
-        "proofBytesHash",
-        "proofMaterialRoot",
-    ] {
+    for field_name in ["statementHash", "proofBytesHash", "proofMaterialRoot"] {
         validate_hash(value_string(proof_record, field_name)?, field_name)?;
     }
 
@@ -291,18 +271,12 @@ fn transported_private_vss_share_proof_material_bytes(
 fn verify_transported_private_vss_share_proof_material_set_header(
     value: &Value,
 ) -> CanonicalResult<()> {
-    for (field_name, expected_value) in [
-        (
-            "objectType",
-            PRIVATE_VSS_SHARE_PROOF_TRANSPORT_SET_OBJECT_TYPE,
-        ),
-        ("proofFamily", PRIVATE_VSS_SHARE_PROOF_FAMILY),
-    ] {
-        if value.get(field_name).and_then(Value::as_str) != Some(expected_value) {
-            return Err(invalid_private_vss_share_proof(format!(
-                "transportedPrivateVssShareProofMaterial.{field_name} must be {expected_value}"
-            )));
-        }
+    if value.get("objectType").and_then(Value::as_str)
+        != Some(PRIVATE_VSS_SHARE_PROOF_TRANSPORT_SET_OBJECT_TYPE)
+    {
+        return Err(invalid_private_vss_share_proof(format!(
+            "transportedPrivateVssShareProofMaterial.objectType must be {PRIVATE_VSS_SHARE_PROOF_TRANSPORT_SET_OBJECT_TYPE}"
+        )));
     }
 
     Ok(())
@@ -311,15 +285,12 @@ fn verify_transported_private_vss_share_proof_material_set_header(
 fn verify_transported_private_vss_share_proof_material_header(
     value: &Value,
 ) -> CanonicalResult<()> {
-    for (field_name, expected_value) in [
-        ("objectType", PRIVATE_VSS_SHARE_PROOF_TRANSPORT_OBJECT_TYPE),
-        ("proofFamily", PRIVATE_VSS_SHARE_PROOF_FAMILY),
-    ] {
-        if value.get(field_name).and_then(Value::as_str) != Some(expected_value) {
-            return Err(invalid_private_vss_share_proof(format!(
-                "transported private VSS share proof material {field_name} must be {expected_value}"
-            )));
-        }
+    if value.get("objectType").and_then(Value::as_str)
+        != Some(PRIVATE_VSS_SHARE_PROOF_TRANSPORT_OBJECT_TYPE)
+    {
+        return Err(invalid_private_vss_share_proof(format!(
+            "transported private VSS share proof material objectType must be {PRIVATE_VSS_SHARE_PROOF_TRANSPORT_OBJECT_TYPE}"
+        )));
     }
     validate_hash(
         value_string(value, "proofMaterialRoot")?,
@@ -384,82 +355,15 @@ fn private_vss_share_succinct_statement(
     Ok(statement)
 }
 
-fn private_vss_share_succinct_statement_value(
-    input: &PrivateVssShareSuccinctProofVerificationInput<'_>,
-    statement: &TrusteeEvaluationKeyStatement,
-) -> CanonicalResult<Value> {
-    let coefficient_commitment_roots = input
-        .coefficient_commitment_roots
-        .iter()
-        .enumerate()
-        .map(|(coefficient_index, commitment_root)| {
-            json!({
-                "rnsLimbIndex": input.rns_limb_index,
-                "rnsPrime": input.rns_prime,
-                "shamirCoefficientIndex": coefficient_index,
-                "commitmentRoot": commitment_root,
-            })
-        })
-        .collect::<Vec<_>>();
-    let carry_bound = private_vss_share_lifted_carry_bound(
-        input.recipient_roster_position,
-        input.coefficient_commitments.len(),
-    )?;
-
-    Ok(json!({
-        "objectType": "PrivateVssShareSuccinctProofStatement",
-        "proofFamily": PRIVATE_VSS_SHARE_PROOF_FAMILY,
-        "setupContext": input.setup_context,
-        "publicMatrixSeedHash": input.public_matrix_seed_hash,
-        "privateEnvelopeAadHash": input.private_envelope_aad_hash,
-        "sourceTrusteeIdentity": input.source_trustee_identity,
-        "sourceTrusteeRosterPosition": input.source_trustee_roster_position,
-        "recipientIdentity": input.recipient_identity,
-        "recipientRosterPosition": input.recipient_roster_position,
-        "sourceTrusteeCommitmentRoot": input.source_trustee_commitment_root,
-        "rnsLimbIndex": input.rns_limb_index,
-        "rnsPrime": input.rns_prime,
-        "ringDegree": input.ring_degree,
-        "shareValuesHash": input.share_values_hash,
-        "coefficientCommitmentRoots": coefficient_commitment_roots,
-        "recipientTrusteePoint": canonical_trustee_point(
-            usize::try_from(input.recipient_roster_position).map_err(|_| {
-                invalid_private_vss_share_proof("private VSS recipient roster position does not fit usize")
-            })?,
-            input.rns_prime,
-        )?,
-        "succinctStatementHash": to_hex(&statement.statement_hash()),
-        "relation": "for hidden Shamir coefficient polynomials F_k and hidden carry v, sum_k alpha^k F_k = sigma + q_l*v over lifted integers while every F_k opens the published setup commitment",
-        "carryBound": carry_bound,
-    }))
-}
-
 fn private_vss_share_succinct_transported_proof_material_root(
     statement_hash_hex: &str,
     proof_bytes_hash: &str,
 ) -> CanonicalResult<String> {
     derive_canonical_object_hash(&json!({
         "objectType": "PrivateVssShareTransportedSuccinctProofMaterial",
-        "proofFamily": PRIVATE_VSS_SHARE_PROOF_FAMILY,
         "statementHash": statement_hash_hex,
         "proofBytesHash": proof_bytes_hash,
     }))
-}
-
-fn private_vss_share_lifted_carry_bound(
-    recipient_roster_position: u64,
-    coefficient_count: usize,
-) -> CanonicalResult<i128> {
-    let trustee_point = recipient_roster_position
-        .checked_add(1)
-        .ok_or_else(|| invalid_private_vss_share_proof("private VSS trustee point overflowed"))?;
-    trustee_point_powers_i128(trustee_point, coefficient_count)?
-        .into_iter()
-        .try_fold(0_i128, |accumulator, power| {
-            accumulator.checked_add(power).ok_or_else(|| {
-                invalid_private_vss_share_proof("private VSS carry bound overflowed")
-            })
-        })
 }
 
 fn trustee_point_powers_i128(
@@ -553,9 +457,6 @@ pub(super) fn private_vss_share_succinct_proof_record(
     validate_private_vss_share_witness(&input)?;
     validate_private_vss_share_proof_randomness_seed(input.proof_randomness_seed_hex)?;
     let statement = private_vss_share_succinct_statement(&verification_input)?;
-    let statement_value =
-        private_vss_share_succinct_statement_value(&verification_input, &statement)?;
-    let proof_statement_root = derive_canonical_object_hash(&statement_value)?;
     let statement_hash_hex = to_hex(&statement.statement_hash());
     let witness = TrusteeEvaluationKeyWitness {
         secret_coefficients: Vec::new(),
@@ -633,8 +534,6 @@ pub(super) fn private_vss_share_succinct_proof_record(
     )?;
     Ok(json!({
         "objectType": "PrivateVssShareProof",
-        "proofFamily": PRIVATE_VSS_SHARE_PROOF_FAMILY,
-        "proofStatementRoot": proof_statement_root,
         "statementHash": statement_hash_hex,
         "proofBytesHash": proof_bytes_hash,
         "proofMaterialRoot": proof_material_root,

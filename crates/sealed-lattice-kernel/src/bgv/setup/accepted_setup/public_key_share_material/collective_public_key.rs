@@ -22,24 +22,13 @@ pub(in crate::bgv::setup) fn accepted_setup_collective_public_key_from_package(
             "collective public key must bind the accepted public matrix seed",
         ));
     }
-    let expected_public_derivations =
-        derive_collective_bgv_setup_public_derivations(public_matrix_seed_hash)?;
-    if common_randomness.get("publicDerivations") != Some(&expected_public_derivations) {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ComponentMismatch,
-            "accepted public-key runtime loading requires canonical public derivations",
-        ));
-    }
-    let expected_public_a = derive_bgv_public_a_polynomial(public_matrix_seed_hash)?;
-    if value_string(aggregate_object, "publicAPolynomialRoot")?
-        != value_string(&expected_public_a, "publicPolynomialRoot")?
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ComponentMismatch,
-            "collective public key must bind the accepted BGV public a polynomial",
-        ));
-    }
-    if value_u64(aggregate_object, "ringDegree")? != POLYNOMIAL_DEGREE as u64 {
+    let material_set = setup_package.get("publicKeyShareMaterial").ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "publicKeyShareMaterial was required before accepted public-key runtime loading",
+        )
+    })?;
+    if value_u64(material_set, "ringDegree")? != POLYNOMIAL_DEGREE as u64 {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             "accepted collective public-key runtime material requires full-ring aggregate coefficients",
@@ -77,15 +66,6 @@ pub(super) fn collective_public_key_component_b_from_aggregate_object(
     }
     let mut public_b = Vec::with_capacity(DATA_PRIMES.len());
     for (rns_limb_index, aggregate_limb) in aggregate_limbs.iter().enumerate() {
-        if aggregate_limb.get("rnsLimbIndex").and_then(Value::as_u64) != Some(rns_limb_index as u64)
-            || aggregate_limb.get("rnsPrime").and_then(Value::as_u64)
-                != Some(DATA_PRIMES[rns_limb_index])
-        {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::ComponentMismatch,
-                "collective public-key runtime limb metadata must follow Q_share order",
-            ));
-        }
         let coefficients = coefficient_vector_from_le_hex(
             value_string(aggregate_limb, "coefficientsLeHex")?,
             POLYNOMIAL_DEGREE,
@@ -98,17 +78,6 @@ pub(super) fn collective_public_key_component_b_from_aggregate_object(
             return Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
                 "collective public-key runtime component contains non-canonical Q_share residues",
-            ));
-        }
-        let coefficient_hash = public_key_share_coefficient_vector_hash(&coefficients);
-        if aggregate_limb
-            .get("coefficientVectorHash512")
-            .and_then(Value::as_str)
-            != Some(coefficient_hash.as_str())
-        {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::ComponentMismatch,
-                "collective public-key runtime component hash must match the aggregate coefficients",
             ));
         }
         public_b.push(coefficients);
@@ -144,41 +113,22 @@ pub(super) fn verify_collective_public_key_coefficients(
             "collective public key must contain one aggregate coefficient vector per Q_share limb",
         ));
     }
-    let expected_share_material_roots = material_bindings
-        .values()
-        .map(|binding| {
-            json!({
-                "trusteeIdentity": binding.trustee_identity,
-                "trusteeRosterPosition": binding.trustee_roster_position,
-                "publicKeyShareRoot": binding.public_key_share_root,
-                "publicKeyShareMaterialRoot": binding.public_key_share_material_root,
-            })
-        })
-        .collect::<Vec<_>>();
-    if aggregate_object.get("sourceShareMaterialRoots")
-        != Some(&Value::Array(expected_share_material_roots))
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ComponentMismatch,
-            "collective public key must bind the ordered verified share material roots",
-        ));
-    }
     for (rns_limb_index, aggregate_limb) in aggregate_limbs.iter().enumerate() {
-        if aggregate_limb.get("rnsLimbIndex").and_then(Value::as_u64) != Some(rns_limb_index as u64)
-            || aggregate_limb.get("rnsPrime").and_then(Value::as_u64)
-                != Some(DATA_PRIMES[rns_limb_index])
-        {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::ComponentMismatch,
-                "collective public-key aggregate limb metadata must follow Q_share order",
-            ));
-        }
         let coefficients = coefficient_vector_from_le_hex(
             value_string(aggregate_limb, "coefficientsLeHex")?,
             ring_degree,
             "collective public-key coefficient vector width does not match the material ring degree",
         )?;
         let modulus = DATA_PRIMES[rns_limb_index];
+        if coefficients
+            .iter()
+            .any(|coefficient| *coefficient >= modulus)
+        {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "collective public-key aggregate contains non-canonical Q_share residues",
+            ));
+        }
         let mut expected_coefficients = vec![0_u64; ring_degree];
         for material_binding in material_bindings.values() {
             let share_coefficients = material_binding
@@ -209,17 +159,6 @@ pub(super) fn verify_collective_public_key_coefficients(
             return Err(CanonicalError::new(
                 CanonicalErrorCode::ComponentMismatch,
                 "collective public-key aggregate coefficients must equal the sum of verified public-key shares",
-            ));
-        }
-        let coefficient_hash = public_key_share_coefficient_vector_hash(&coefficients);
-        if aggregate_limb
-            .get("coefficientVectorHash512")
-            .and_then(Value::as_str)
-            != Some(coefficient_hash.as_str())
-        {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::ComponentMismatch,
-                "collective public-key aggregate coefficient hash must match the aggregate coefficients",
             ));
         }
     }

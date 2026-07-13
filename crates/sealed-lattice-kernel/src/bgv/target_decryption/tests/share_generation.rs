@@ -210,9 +210,8 @@ fn target_share_generation_rejects_tampered_aggregate_opening_credentials() {
                     .as_str()
                     .expect("first aggregate opening root")
             {
-                let mut first_value = u64::from_le_bytes(
-                    material[..8].try_into().expect("first aggregate value"),
-                );
+                let mut first_value =
+                    u64::from_le_bytes(material[..8].try_into().expect("first aggregate value"));
                 first_value = add_mod_fast(first_value, 1, DATA_PRIMES[0]);
                 material[..8].copy_from_slice(&first_value.to_le_bytes());
             }
@@ -268,11 +267,6 @@ fn target_share_generation_rejects_tampered_aggregate_opening_credentials() {
     let mut merkle_root_tampered_witness = local_witness;
     merkle_root_tampered_witness["aggregateOpening"]["aggregateThresholdCommitmentRoot"] =
         aggregate_set["aggregateThresholdCommitmentRoot"].clone();
-    merkle_root_tampered_witness["targetDecryptionSmudging"]["setupPackageHash"] = json!(
-        read_setup_binding(&merkle_root_tampered_setup_package)
-            .expect("tampered setup package binding")
-            .setup_package_hash
-    );
     let merkle_root_error =
         with_staged_aggregate_opening_material(&merkle_root_tampered_witness, || {
             generate_bgv_target_decryption_share_from_local_share_request(&json!({

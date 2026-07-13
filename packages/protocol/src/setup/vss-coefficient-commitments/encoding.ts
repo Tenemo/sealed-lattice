@@ -1,6 +1,8 @@
 export {
+    assertNonEmptyString,
     assertNonNegativeSafeInteger,
     assertPositiveSafeInteger,
+    assertProtocolHash,
     contextFields,
     setupContextFieldNames,
 } from '../common-fields.js';
@@ -11,15 +13,6 @@ import {
 } from './constants-and-types.js';
 
 const twoToTheSixtyFourth = 1n << 64n;
-
-export const assertNonEmptyString = (
-    value: string,
-    fieldName: string,
-): void => {
-    if (value.length === 0) {
-        throw new TypeError(`${fieldName} must be non-empty.`);
-    }
-};
 
 export const defaultRandomBytes: VssOpeningRandomByteSource = (byteLength) => {
     const cryptoProvider = globalThis.crypto;
@@ -64,14 +57,6 @@ export class RandomByteSampler {
         return bytes;
     }
 }
-
-export const assertHashLike = (value: string, fieldName: string): void => {
-    if (!/^[0-9a-f]{128}$/u.test(value)) {
-        throw new TypeError(
-            `${fieldName} must be a 512-bit lowercase hex hash.`,
-        );
-    }
-};
 
 export const assertResidueVector = (
     coefficients: readonly number[],

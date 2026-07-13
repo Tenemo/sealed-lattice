@@ -32,9 +32,8 @@ describe('direct encrypted ballot kernel command', () => {
                 ballotValidityProof.statementHash,
                 ballotValidityProof.proofBytesHash,
                 ballotValidityProof.proofTransport.chunkMerkleRoot,
-                ballotValidityProof.proofTransport.publicTransportHash,
             ]).size,
-        ).toBe(4);
+        ).toBe(3);
         expect(result.aggregation.aggregateCiphertextRoot).toBe(
             result.encryptedBallots.ciphertextRoots[0],
         );

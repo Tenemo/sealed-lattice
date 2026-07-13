@@ -6,7 +6,7 @@ const objectSignatureContext = textEncoder.encode(
     'sealed-lattice/object-signature/v1',
 );
 
-export type FoundationBoardSigningKeyPairFixture = Readonly<{
+type FoundationBoardSigningKeyPairFixture = Readonly<{
     publicKey: Uint8Array;
     secretKey: Uint8Array;
 }>;

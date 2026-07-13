@@ -23,27 +23,6 @@ pub(in super::super::super) fn finalize_collective_setup_package(
     package["sameSecretBridgeProofMaterialSet"] =
         same_secret_bridge_proof_material_set_object(&package);
 
-    let coefficient_set = &package["vssPublicCoefficientCommitmentSet"];
-    let statement = &package["vssShareLinkageStatement"];
-    let mut threshold_binding = serde_json::json!({
-        "objectType": "ThresholdShareCommitmentBinding",
-        "publicMatrixSeedHash": coefficient_set["publicMatrixSeedHash"],
-        "participantCount": coefficient_set["participantCount"],
-        "thresholdDegree": coefficient_set["thresholdDegree"],
-        "qShareRnsLimbCount": statement["qShareRnsLimbCount"],
-        "ringDegree": coefficient_set["ringDegree"],
-        "aggregateThresholdCommitmentRoot":
-            package["vssPublicAggregateThresholdCommitmentSet"]["aggregateThresholdCommitmentRoot"],
-        "shareLinkageStatementRoot": statement["statementRoot"],
-        "shareLinkageProofMaterialSetRoot":
-            package["vssShareLinkageProofMaterialSet"]["proofMaterialSetRoot"],
-    });
-    threshold_binding["thresholdShareCommitmentRoot"] = serde_json::json!(
-        derive_canonical_object_hash(&threshold_binding)
-            .expect("threshold-share commitment binding root")
-    );
-    package["thresholdShareCommitments"] = threshold_binding;
-
     // The small canonical BDLOP commitment-root set remains public. Bridge
     // construction above consumes the full opening material and carries only
     // the constant commitment bodies its proof needs. The final package omits

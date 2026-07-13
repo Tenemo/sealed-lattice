@@ -1,7 +1,10 @@
 use super::*;
 use crate::bgv::evaluator::{
     records::MAXIMUM_OPTION_COUNT,
-    top_k::{SELECTED_EVALUATOR_WORKING_LEVEL, selected_evaluator_rotation_key_schedule},
+    top_k::{
+        SELECTED_EVALUATOR_WORKING_LEVEL, inverse_galois_element,
+        selected_evaluator_rotation_key_schedule,
+    },
 };
 
 #[test]
@@ -9,8 +12,9 @@ fn selected_rotation_key_schedule_matches_package_commitment() {
     let package = setup_package();
     let full_schedule = selected_evaluator_rotation_key_schedule(MAXIMUM_OPTION_COUNT)
         .expect("full selected rotation schedule");
+    let inverse_generator = inverse_galois_element(3).expect("inverse slot generator");
 
-    assert_eq!(full_schedule.len(), 23);
+    assert_eq!(full_schedule.len(), 16);
     assert!(
         full_schedule
             .iter()
@@ -19,8 +23,13 @@ fn selected_rotation_key_schedule_matches_package_commitment() {
     assert!(
         full_schedule
             .iter()
-            .any(|(rotation, level)| *rotation == 2 * POLYNOMIAL_DEGREE - 1
+            .any(|(rotation, level)| *rotation == inverse_generator
                 && *level == SELECTED_EVALUATOR_WORKING_LEVEL)
+    );
+    assert!(
+        full_schedule
+            .iter()
+            .all(|(rotation, _)| *rotation != 2 * POLYNOMIAL_DEGREE - 1)
     );
     assert!(
         full_schedule

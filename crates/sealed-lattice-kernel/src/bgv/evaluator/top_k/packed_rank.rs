@@ -44,7 +44,7 @@ pub(crate) fn evaluate_packed_rank_evaluation_from_packed_scores_with_batched_pa
         let shifted_scores = rotate_with_compact_positive_generator_basis(
             context,
             packed_scores,
-            galois_power(shift),
+            galois_power(shift)?,
             packed_scores.level,
             &format!("{seed_hex}-batched-pair-score-shift-{shift}"),
         )?;
@@ -116,7 +116,7 @@ pub(crate) fn evaluate_packed_rank_evaluation_from_packed_scores_with_batched_pa
             rotate_with_compact_positive_generator_basis(
                 context,
                 &windowed_lower_beats_higher,
-                galois_power(window_offset),
+                galois_power(window_offset)?,
                 windowed_lower_beats_higher.level,
                 &format!("{seed_hex}-batched-pair-window-return-{shift}"),
             )?

@@ -105,6 +105,19 @@ describe('State verifier real-WASM runtime in Node', () => {
         kernel = await loadFreshTranscriptCoreKernel();
     });
 
+    it('preserves the exact closed state capability registry', () => {
+        expect(stateCapabilityKinds).toEqual({
+            ballotCandidateList: 1,
+            finalitySignature: 2,
+            targetRelease: 3,
+            setupActionRandomnessRoot: 4,
+            setupPublicSeedBranch: 5,
+            setupDealerSetBranch: 6,
+            setupRkgRoundOneBranch: 7,
+            setupTerminalPackage: 8,
+        });
+    });
+
     it('verifies an exact quorum and consumes streamed output without exposing its bytes', () => {
         expect(kernel.exportedFunctionNames).toEqual(
             expect.arrayContaining([
@@ -419,41 +432,45 @@ describe('State verifier real-WASM runtime in Node', () => {
     });
 
     it('accepts setup reservations but refuses an exact-output lease for them', () => {
-        const session = openSession(kernel, vector);
-        try {
-            const reservation = session.verifyReservation({
-                canonicalReservationIntentCarrier:
-                    vector.reservationOnly.canonicalIntentCarrier,
-                canonicalStateCertificate:
-                    vector.reservationOnly.canonicalStateCertificate,
-                capabilityKind: stateCapabilityKinds.setupActionRandomnessRoot,
-                expectedAuthorizationHash: vector.authorizationHash,
-                subjectParticipantIdentity: vector.subjectParticipantIdentity,
-            });
-            expect(reservation.isValid).toBe(true);
-            if (!reservation.isValid) {
-                throw new Error(reservation.refusalReason);
-            }
-
-            expect(
-                session.openOutputVerification({
-                    canonicalOutputIntentCarrier:
-                        vector.output.canonicalIntentCarrier,
+        for (const reservationOnly of vector.reservationOnly) {
+            const session = openSession(kernel, vector);
+            try {
+                const reservation = session.verifyReservation({
+                    canonicalReservationIntentCarrier:
+                        reservationOnly.certifiedIntent.canonicalIntentCarrier,
                     canonicalStateCertificate:
-                        vector.output.canonicalStateCertificate,
-                    exactOutputDescriptorBytes: descriptorFor(
-                        kernel,
-                        canonicalStreamDomains.stateTargetReleaseExactOutput,
-                        vector.exactOutputBytes,
-                    ),
-                    verifiedReservation: reservation.value,
-                }),
-            ).toEqual({
-                isValid: false,
-                refusalReason: 'wrongTypeOrLength',
-            });
-        } finally {
-            session.cancel();
+                        reservationOnly.certifiedIntent
+                            .canonicalStateCertificate,
+                    capabilityKind: reservationOnly.capabilityKind,
+                    expectedAuthorizationHash: vector.authorizationHash,
+                    subjectParticipantIdentity:
+                        vector.subjectParticipantIdentity,
+                });
+                expect(reservation.isValid).toBe(true);
+                if (!reservation.isValid) {
+                    throw new Error(reservation.refusalReason);
+                }
+
+                expect(
+                    session.openOutputVerification({
+                        canonicalOutputIntentCarrier:
+                            vector.output.canonicalIntentCarrier,
+                        canonicalStateCertificate:
+                            vector.output.canonicalStateCertificate,
+                        exactOutputDescriptorBytes: descriptorFor(
+                            kernel,
+                            canonicalStreamDomains.stateTargetReleaseExactOutput,
+                            vector.exactOutputBytes,
+                        ),
+                        verifiedReservation: reservation.value,
+                    }),
+                ).toEqual({
+                    isValid: false,
+                    refusalReason: 'wrongTypeOrLength',
+                });
+            } finally {
+                session.cancel();
+            }
         }
     });
 });

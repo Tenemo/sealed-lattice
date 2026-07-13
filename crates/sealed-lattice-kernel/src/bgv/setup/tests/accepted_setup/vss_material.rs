@@ -117,19 +117,10 @@ fn valid_vss_complaint_aborts_accepted_setup() {
             let mut complaint_record = complaint_payload;
             complaint_record["complaintRoot"] = serde_json::json!(complaint_root);
             complaint_record["signatureEnvelope"] = signature_fixture.envelope;
-            let mut complaint_set = serde_json::json!({
+            let complaint_set = serde_json::json!({
                 "objectType": "VssComplaintSet",
-                "ceremonyId": setup_context["ceremonyId"],
-                "manifestHash": setup_context["manifestHash"],
-                "rosterHash": setup_context["rosterHash"],
-                "setupParametersHash": setup_context["setupParametersHash"],
-                "setupEpoch": setup_context["setupEpoch"],
-                "privateVssEnvelopeCommitmentRoot": package["privateVssEnvelopeCommitments"]["privateVssEnvelopeCommitmentRoot"],
                 "complaintRecords": [complaint_record],
             });
-            complaint_set["vssComplaintRoot"] = serde_json::json!(
-                derive_canonical_object_hash(&complaint_set).expect("VSS complaint set root")
-            );
             package["vssComplaints"] = complaint_set;
         },
         "vssComplaintAcceptedAbort",
@@ -211,7 +202,6 @@ fn collective_setup_verifier_refuses_malformed_vss_share_acceptance_records() {
         |package| {
             package["vssShareAcceptances"]["acceptanceRecords"][0]["sourceTrusteeCommitmentRoot"] =
                 serde_json::json!(valid_hash('3'));
-            rebind_collective_vss_acceptance_root(package);
         },
         "vssShareAcceptanceSourceTrusteeCommitmentRootMismatch",
     );
@@ -232,7 +222,6 @@ fn collective_setup_verifier_refuses_malformed_vss_share_acceptance_records() {
         |package| {
             package["vssShareAcceptances"]["acceptanceRecords"][0]["localVerificationRoot"] =
                 serde_json::json!(valid_hash('4'));
-            rebind_collective_vss_acceptance_root(package);
         },
         "vssShareAcceptanceLocalVerificationRootMismatch",
     );
@@ -242,7 +231,6 @@ fn collective_setup_verifier_refuses_malformed_vss_share_acceptance_records() {
         |package| {
             package["vssShareAcceptances"]["acceptanceRecords"][0]["privateEnvelopeHash"] =
                 serde_json::json!(valid_hash('8'));
-            rebind_collective_vss_acceptance_root(package);
         },
         "vssShareAcceptancePrivateEnvelopeHashMismatch",
     );
@@ -267,7 +255,6 @@ fn collective_setup_verifier_refuses_malformed_vss_share_acceptance_records() {
             tampered_signature_bytes_hex.replace_range(0..2, replacement_prefix);
             signature_envelope["signatureBytesHex"] =
                 serde_json::json!(tampered_signature_bytes_hex);
-            rebind_collective_vss_acceptance_root(package);
         },
         "InvalidSignature",
     );
@@ -500,19 +487,6 @@ fn collective_setup_verifier_refuses_malformed_aggregate_threshold_proofs() {
         },
         CanonicalErrorCode::ComponentMismatch,
         Some("VSS aggregate proof source share commitment root"),
-    );
-
-    assert_compact_aggregate_threshold_proofs_refused(
-        &fixture,
-        "wrong aggregate threshold source opening root",
-        |aggregate_threshold_commitment_set| {
-            let statement = &mut aggregate_threshold_commitment_set["aggregateThresholdProofs"][0]
-                ["vssShareLinkage"];
-            statement["coefficientOpeningRoots"][0] = serde_json::json!(valid_hash('1'));
-            rebind_aggregate_threshold_statement_root(statement);
-        },
-        CanonicalErrorCode::ComponentMismatch,
-        Some("VSS aggregate proof source share opening root"),
     );
 
     assert_compact_aggregate_threshold_proofs_refused(

@@ -8,6 +8,7 @@ import {
     decryptLocalTrusteeState,
     decryptPrivateVssMailboxEnvelope,
     deriveCanonicalObjectHash,
+    deriveLocalTrusteeSetupStateCommitmentRoot,
     deriveMlDsaPublicKeyHash,
     encryptLocalTrusteeSetupSealedMaterial,
     encryptLocalTrusteeState,
@@ -222,9 +223,7 @@ describe('crypto primitive boundary', () => {
                 recipientMailboxSecretKeyBytesHex:
                     recipientMailboxKeyPair.secretKeyBytesHex,
             }),
-        ).resolves.toMatchObject({
-            privateEnvelope,
-        });
+        ).resolves.toEqual(privateEnvelope);
         const wrongRecipientMailboxKeyPair = createPrivateVssMailboxKeyPair(
             hash512Hex('test/private-vss-mailbox-key', [
                 new TextEncoder().encode('recipient-trustee-4'),
@@ -299,16 +298,6 @@ describe('crypto primitive boundary', () => {
                 commitment: 'threshold-share-commitment-recipient',
             },
         );
-        const issuedVssAcceptanceRoot = deriveCanonicalObjectHash({
-            objectType: 'VssShareAcceptanceRoot',
-            sourceTrusteeIdentity: 'source-trustee-1',
-        });
-        const issuedVssComplaintRoots = [
-            deriveCanonicalObjectHash({
-                objectType: 'VssComplaintRoot',
-                complaint: 'source-trustee-2',
-            }),
-        ];
         const storageKeyBytesHex = '11'.repeat(32);
         const aeadNonceBytesHex = '22'.repeat(12);
         const sealedAggregateThresholdShare =
@@ -331,37 +320,27 @@ describe('crypto primitive boundary', () => {
             );
         const aggregateThresholdShareRoot =
             sealedAggregateThresholdShare.materialRoot;
-        const localStateCommitment = {
+        const localStateCommitmentWithoutRoot = {
             objectType: 'LocalTrusteeSetupStateCommitment',
             ceremonyId: setupContext.ceremonyId,
             manifestHash: setupContext.manifestHash,
             rosterHash: setupContext.rosterHash,
+            setupParametersHash: setupContext.setupParametersHash,
             setupEpoch: setupContext.setupEpoch,
-            localStateRoot: deriveCanonicalObjectHash({
-                objectType: 'LocalTrusteeSetupStateRoot',
-                trustee: 'trustee-3',
-            }),
             trusteeIdentity: 'trustee-3',
             trusteeRosterPosition: 3,
             thresholdShareCommitmentRecipientRoot,
             aggregateThresholdShareRoot,
-            issuedVssAcceptanceRoot,
-            issuedVssComplaintRoots,
+        } as const;
+        const localStateCommitment = {
+            ...localStateCommitmentWithoutRoot,
+            localStateRoot: deriveLocalTrusteeSetupStateCommitmentRoot(
+                localStateCommitmentWithoutRoot,
+            ),
         } as const;
         const localStatePlaintext = {
             objectType: 'LocalTrusteeSetupStateSealedPayload',
-            ceremonyId: setupContext.ceremonyId,
-            manifestHash: setupContext.manifestHash,
-            rosterHash: setupContext.rosterHash,
-            setupEpoch: setupContext.setupEpoch,
-            trusteeIdentity: 'trustee-3',
-            trusteeRosterPosition: 3,
-            deviceEpoch: 0,
-            thresholdShareCommitmentRecipientRoot,
-            sealedAggregateThresholdShare:
-                sealedAggregateThresholdShare.sealedMaterial,
-            issuedVssAcceptanceRoots: [issuedVssAcceptanceRoot],
-            issuedVssComplaintRoots,
+            sealedAggregateThresholdShare,
         } as const;
 
         const encrypted = await withDeterministicWebCryptoRandomness(
@@ -375,40 +354,38 @@ describe('crypto primitive boundary', () => {
                 }),
         );
 
-        expect(encrypted.encryptedLocalState).toMatchObject({
+        expect(encrypted).toMatchObject({
             objectType: 'EncryptedLocalTrusteeSetupState',
             aeadNonceHex: aeadNonceBytesHex,
         });
         await expect(
             decryptLocalTrusteeState({
-                encryptedLocalState: encrypted.encryptedLocalState,
+                encryptedLocalState: encrypted,
                 expectedLocalStateRoot: localStateCommitment.localStateRoot,
                 setupContext,
                 storageKeyBytesHex,
             }),
-        ).resolves.toEqual({ localStatePlaintext });
+        ).resolves.toEqual(localStatePlaintext);
         await expect(
             decryptLocalTrusteeSetupSealedMaterial({
-                sealedMaterial: sealedAggregateThresholdShare.sealedMaterial,
+                sealedMaterial: sealedAggregateThresholdShare,
                 expectedMaterialRoot: aggregateThresholdShareRoot,
                 localStateCommitment,
                 setupContext,
                 storageKeyBytesHex,
             }),
         ).resolves.toMatchObject({
-            materialPlaintext: {
-                objectType: 'LocalTrusteeAggregateThresholdShareMaterial',
-                shareValues: [1, 2, 3],
-            },
+            objectType: 'LocalTrusteeAggregateThresholdShareMaterial',
+            shareValues: [1, 2, 3],
         });
 
         const tamperedSealedCiphertextBytesHex = changeLastHexByte(
-            sealedAggregateThresholdShare.sealedMaterial.ciphertextBytesHex,
+            sealedAggregateThresholdShare.ciphertextBytesHex,
         );
         const tamperedSealedMaterial = {
-            ...sealedAggregateThresholdShare.sealedMaterial,
+            ...sealedAggregateThresholdShare,
             ciphertextBytesHex: tamperedSealedCiphertextBytesHex,
-        } as typeof sealedAggregateThresholdShare.sealedMaterial;
+        } as typeof sealedAggregateThresholdShare;
         await expect(
             decryptLocalTrusteeSetupSealedMaterial({
                 sealedMaterial: tamperedSealedMaterial,
@@ -420,12 +397,12 @@ describe('crypto primitive boundary', () => {
         ).rejects.toThrow();
 
         const tamperedLocalStateCiphertextBytesHex = changeLastHexByte(
-            encrypted.encryptedLocalState.ciphertextBytesHex,
+            encrypted.ciphertextBytesHex,
         );
         const tamperedLocalState = {
-            ...encrypted.encryptedLocalState,
+            ...encrypted,
             ciphertextBytesHex: tamperedLocalStateCiphertextBytesHex,
-        } as typeof encrypted.encryptedLocalState;
+        } as typeof encrypted;
         await expect(
             decryptLocalTrusteeState({
                 encryptedLocalState: tamperedLocalState,
@@ -437,7 +414,7 @@ describe('crypto primitive boundary', () => {
 
         await expect(
             decryptLocalTrusteeState({
-                encryptedLocalState: encrypted.encryptedLocalState,
+                encryptedLocalState: encrypted,
                 expectedLocalStateRoot: localStateCommitment.localStateRoot,
                 setupContext,
                 storageKeyBytesHex: '44'.repeat(32),
@@ -446,7 +423,7 @@ describe('crypto primitive boundary', () => {
 
         await expect(
             decryptLocalTrusteeState({
-                encryptedLocalState: encrypted.encryptedLocalState,
+                encryptedLocalState: encrypted,
                 expectedLocalStateRoot: deriveCanonicalObjectHash({
                     objectType: 'LocalTrusteeSetupStateRoot',
                     trustee: 'wrong',
@@ -457,7 +434,25 @@ describe('crypto primitive boundary', () => {
         ).rejects.toThrow(/expectedLocalStateRoot/u);
         await expect(
             decryptLocalTrusteeState({
-                encryptedLocalState: encrypted.encryptedLocalState,
+                encryptedLocalState: {
+                    ...encrypted,
+                    storageAad: {
+                        ...encrypted.storageAad,
+                        localStateCommitment: {
+                            ...localStateCommitment,
+                            aggregateThresholdShareRoot:
+                                thresholdShareCommitmentRecipientRoot,
+                        },
+                    },
+                },
+                expectedLocalStateRoot: localStateCommitment.localStateRoot,
+                setupContext,
+                storageKeyBytesHex,
+            }),
+        ).rejects.toThrow(/canonical local state commitment/u);
+        await expect(
+            decryptLocalTrusteeState({
+                encryptedLocalState: encrypted,
                 expectedLocalStateRoot: localStateCommitment.localStateRoot,
                 setupContext: {
                     ...setupContext,

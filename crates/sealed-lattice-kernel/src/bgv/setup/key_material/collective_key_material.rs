@@ -1,15 +1,11 @@
 use super::*;
+use crate::bgv::coefficient_codec::coefficient_vector_from_le_hex;
 use crate::bgv::coefficient_codec::coefficient_vector_le_hex;
-use crate::bgv::coefficient_codec::{coefficient_vector_from_le_hex, coefficient_vector_hash512};
 use crate::hashing::derive_canonical_object_hash;
-
-const PUBLIC_KEY_COEFFICIENT_VECTOR_HASH_DOMAIN: &str =
-    "sealed-lattice-bgv-rns/public-key-coefficient-vector";
 
 pub(in crate::bgv::setup) fn collective_public_key(
     input: &PassiveSetupInput,
     bgv_parameters_hash: &str,
-    public_common_random_polynomial_root: &str,
     public_key_share_roots: &[String],
 ) -> CanonicalResult<Value> {
     let participant_descriptors = input
@@ -32,7 +28,6 @@ pub(in crate::bgv::setup) fn collective_public_key(
     let coefficient_material = collective_public_key_coefficient_material(
         &input.setup_seed_hash,
         &input.private_setup_seed_hash,
-        public_common_random_polynomial_root,
         public_key_share_roots,
         participant_descriptors,
         &participant_identities,
@@ -45,7 +40,6 @@ pub(in crate::bgv::setup) fn collective_public_key(
         "manifestHash": input.manifest_hash,
         "rosterHash": input.roster_hash,
         "bgvParametersHash": bgv_parameters_hash,
-        "publicCommonRandomPolynomialRoot": public_common_random_polynomial_root,
         "publicKeyShareRoots": public_key_share_roots,
         "collectivePublicKeyCoefficientRoot": collective_public_key_coefficient_root,
     });
@@ -121,24 +115,6 @@ pub(in crate::bgv::setup) fn collective_public_key_coefficients_from_table(
         read_public_key_coefficient_vector(table, "componentZeroCoefficients")?;
     let component_one_coefficients =
         read_public_key_coefficient_vector(table, "componentOneCoefficients")?;
-    compare_hash_at_path(
-        table,
-        &["componentZeroCoefficientHash512"],
-        &coefficient_vector_hash512(
-            &component_zero_coefficients,
-            PUBLIC_KEY_COEFFICIENT_VECTOR_HASH_DOMAIN,
-        ),
-        "collective public key component-zero coefficient hash",
-    )?;
-    compare_hash_at_path(
-        table,
-        &["componentOneCoefficientHash512"],
-        &coefficient_vector_hash512(
-            &component_one_coefficients,
-            PUBLIC_KEY_COEFFICIENT_VECTOR_HASH_DOMAIN,
-        ),
-        "collective public key component-one coefficient hash",
-    )?;
 
     Ok(CollectivePublicKeyCoefficients {
         component_zero_coefficients,
@@ -155,7 +131,6 @@ pub(in crate::bgv::setup) fn collective_public_key_coefficient_root(
 pub(in crate::bgv::setup) fn collective_public_key_coefficient_material(
     setup_seed_hash: &str,
     private_setup_seed_hash: &str,
-    public_common_random_polynomial_root: &str,
     public_key_share_roots: &[String],
     participant_descriptors: Vec<Value>,
     participant_identities: &[String],
@@ -193,7 +168,6 @@ pub(in crate::bgv::setup) fn collective_public_key_coefficient_material(
         .collect::<CanonicalResult<Vec<_>>>()?;
     Ok(json!({
         "objectType": "BgvCollectivePublicKeyCoefficientMaterial",
-        "publicCommonRandomPolynomialRoot": public_common_random_polynomial_root,
         "publicKeyShareRoots": public_key_share_roots,
         "participants": participant_descriptors,
         "coefficientTables": coefficient_tables,
@@ -215,14 +189,6 @@ pub(in crate::bgv::setup) fn collective_public_key_coefficient_table(
 
     Ok(json!({
         "modulus": modulus,
-        "componentZeroCoefficientHash512": coefficient_vector_hash512(
-            &coefficients.component_zero_coefficients,
-            PUBLIC_KEY_COEFFICIENT_VECTOR_HASH_DOMAIN,
-        ),
-        "componentOneCoefficientHash512": coefficient_vector_hash512(
-            &coefficients.component_one_coefficients,
-            PUBLIC_KEY_COEFFICIENT_VECTOR_HASH_DOMAIN,
-        ),
         "componentZeroCoefficientsLeHex": coefficient_vector_le_hex(&coefficients.component_zero_coefficients),
         "componentOneCoefficientsLeHex": coefficient_vector_le_hex(&coefficients.component_one_coefficients),
     }))

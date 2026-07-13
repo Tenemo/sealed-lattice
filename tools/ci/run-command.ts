@@ -194,21 +194,14 @@ type CommandAbortReason = {
 };
 
 type ProcessTreeKillResult = {
-    readonly actualMechanism:
+    readonly mechanism:
         | 'direct-signal'
         | 'none'
         | 'process-group-signal'
         | 'taskkill-tree-force';
     readonly error?: ReturnType<typeof serializeErrorDiagnostic>;
     readonly fallbackReason?: ReturnType<typeof serializeErrorDiagnostic>;
-    readonly forced: boolean;
-    readonly method:
-        | 'direct-child'
-        | 'none'
-        | 'process-group'
-        | 'windows-taskkill';
     readonly processIdentifier?: number;
-    readonly requestedSignal: NodeJS.Signals;
     readonly status?: number | null;
     readonly succeeded: boolean;
     readonly terminationSignal?: NodeJS.Signals | null;
@@ -250,10 +243,7 @@ export const killProcessTree = (
     const processId = childProcess.pid;
     if (processId === undefined) {
         return {
-            actualMechanism: 'none',
-            forced: false,
-            method: 'none',
-            requestedSignal,
+            mechanism: 'none',
             succeeded: false,
         };
     }
@@ -284,12 +274,9 @@ export const killProcessTree = (
             const status = result?.status;
 
             return {
-                actualMechanism: 'taskkill-tree-force',
+                mechanism: 'taskkill-tree-force',
                 ...(error === undefined ? {} : { error }),
-                forced: true,
-                method: 'windows-taskkill',
                 processIdentifier: processId,
-                requestedSignal,
                 ...(status === undefined ? {} : { status }),
                 succeeded:
                     error === undefined &&
@@ -300,12 +287,9 @@ export const killProcessTree = (
             };
         } catch (error) {
             return {
-                actualMechanism: 'taskkill-tree-force',
+                mechanism: 'taskkill-tree-force',
                 error: serializeErrorDiagnostic(error),
-                forced: true,
-                method: 'windows-taskkill',
                 processIdentifier: processId,
-                requestedSignal,
                 succeeded: false,
             };
         }
@@ -314,11 +298,8 @@ export const killProcessTree = (
         (input.processGroupKiller ?? process.kill)(-processId, requestedSignal);
 
         return {
-            actualMechanism: 'process-group-signal',
-            forced: requestedSignal === 'SIGKILL',
-            method: 'process-group',
+            mechanism: 'process-group-signal',
             processIdentifier: processId,
-            requestedSignal,
             succeeded: true,
         };
     } catch (processGroupError) {
@@ -326,17 +307,14 @@ export const killProcessTree = (
             const succeeded = childProcess.kill(requestedSignal);
 
             return {
-                actualMechanism: 'direct-signal',
+                mechanism: 'direct-signal',
                 fallbackReason: serializeErrorDiagnostic(processGroupError),
-                forced: requestedSignal === 'SIGKILL',
-                method: 'direct-child',
                 processIdentifier: processId,
-                requestedSignal,
                 succeeded,
             };
         } catch (directChildError) {
             return {
-                actualMechanism: 'direct-signal',
+                mechanism: 'direct-signal',
                 error: serializeErrorDiagnostic(
                     Object.assign(
                         new Error(
@@ -345,10 +323,7 @@ export const killProcessTree = (
                         { cause: directChildError },
                     ),
                 ),
-                forced: requestedSignal === 'SIGKILL',
-                method: 'direct-child',
                 processIdentifier: processId,
-                requestedSignal,
                 succeeded: false,
             };
         }
@@ -358,43 +333,30 @@ export const killProcessTree = (
 const describeProcessTerminationAttempt = (input: {
     readonly requestedSignal: NodeJS.Signals;
     readonly requestedStage: 'forced' | 'requested';
-    readonly result: unknown;
-}): Readonly<Record<string, unknown>> => {
-    const processTreeResult =
-        typeof input.result === 'object' &&
-        input.result !== null &&
-        'actualMechanism' in input.result &&
-        'forced' in input.result
-            ? (input.result as ProcessTreeKillResult)
-            : undefined;
-    const forced =
-        processTreeResult?.forced ?? input.requestedStage === 'forced';
-
-    return {
-        actualMechanism: processTreeResult?.actualMechanism ?? 'unknown',
-        actualSignal:
-            processTreeResult?.actualMechanism === 'taskkill-tree-force'
-                ? null
-                : input.requestedSignal,
-        forced,
-        requestedSignal: input.requestedSignal,
-        requestedStage: input.requestedStage,
-        result: input.result,
-        stage: forced ? 'forced' : input.requestedStage,
-    };
-};
+    readonly result: ProcessTreeKillResult;
+}): Readonly<Record<string, unknown>> => ({
+    ...input.result,
+    actualSignal:
+        input.result.mechanism === 'taskkill-tree-force'
+            ? null
+            : input.requestedSignal,
+    requestedSignal: input.requestedSignal,
+    stage: input.requestedStage,
+});
 
 export const installProcessSignalChildCleanup = (input: {
     readonly activeChildProcesses: ReadonlySet<KillableChildProcess>;
     readonly clearScheduledForceKill?: (timer: unknown) => void;
     readonly forceKillChildProcess?: (
         childProcess: KillableChildProcess,
-    ) => unknown;
-    readonly killChildProcess?: (childProcess: KillableChildProcess) => unknown;
+    ) => ProcessTreeKillResult;
+    readonly killChildProcess?: (
+        childProcess: KillableChildProcess,
+    ) => ProcessTreeKillResult;
     readonly onTerminationAttempt?: (event: {
         readonly childProcess: KillableChildProcess;
         readonly processSignal: ProcessSignalName;
-        readonly result: unknown;
+        readonly result: ProcessTreeKillResult;
         readonly stage: 'forced' | 'requested';
     }) => void;
     readonly processEvents?: ProcessSignalEventSource;
@@ -476,7 +438,7 @@ const childProcessTerminationRecorders = new WeakMap<
     KillableChildProcess,
     (input: {
         readonly processSignal: ProcessSignalName;
-        readonly result: unknown;
+        readonly result: ProcessTreeKillResult;
         readonly stage: 'forced' | 'requested';
     }) => void
 >();
@@ -486,7 +448,7 @@ const trackChildProcessForSignalCleanup = (
     childProcess: KillableChildProcess,
     terminationRecorder?: (input: {
         readonly processSignal: ProcessSignalName;
-        readonly result: unknown;
+        readonly result: ProcessTreeKillResult;
         readonly stage: 'forced' | 'requested';
     }) => void,
 ): (() => void) => {
@@ -663,7 +625,7 @@ const runCommandWithOptionalLog = async (
         let scheduledForceKill: NodeJS.Timeout | undefined;
         const recordTerminationAttempt = (input_: {
             readonly processSignal: NodeJS.Signals;
-            readonly result: unknown;
+            readonly result: ProcessTreeKillResult;
             readonly source: string;
             readonly stage: 'forced' | 'requested';
         }): void => {

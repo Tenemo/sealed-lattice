@@ -21,7 +21,7 @@ import {
     verificationExceptionMessage,
 } from '../common/verification-helpers.js';
 
-export const deriveCastReceiptHash = (
+const deriveCastReceiptHash = (
     receipt: Omit<CastReceipt, 'castReceiptHash' | 'signature'>,
 ): ProtocolHash =>
     deriveCanonicalObjectHash({
@@ -37,7 +37,7 @@ export const deriveCastReceiptHash = (
         voterIdentity: receipt.voterIdentity,
     });
 
-export const derivePostVotingClosedContextHash = (input: {
+const derivePostVotingClosedContextHash = (input: {
     readonly ceremonyId: string;
     readonly closeRecordHash: ProtocolHash;
     readonly electionManifestHash: ProtocolHash;
@@ -51,7 +51,7 @@ export const derivePostVotingClosedContextHash = (input: {
         votingClosedBoardHeadHash: input.votingClosedBoardHeadHash,
     });
 
-export const deriveCloseRecordHash = (
+const deriveCloseRecordHash = (
     closeRecord: Omit<
         CloseRecord,
         'closeRecordHash' | 'postVotingClosedContextHash' | 'signature'

@@ -4,15 +4,11 @@ import { describe, expect, it } from 'vitest';
 import {
     acceptedBgvSetupQSharePrimes,
     createEvaluatorKeySchedule,
-    createPublicKeyShareProofSet,
     createPublicKeyShareSet,
-    createRequiredGaloisSet,
     type PublicKeyShareContributionInput,
-    type PublicKeyShareProofSet,
     type PublicKeyShareSet,
     type RequiredGaloisKeyScheduleEntry,
 } from '#packages/protocol/src/index';
-import { selectedEvaluatorWorkingLevel } from '#packages/protocol/src/setup/evaluator-key-schedule';
 import {
     makeSetupContext,
     makeSetupFixtureHash,
@@ -32,9 +28,7 @@ const shareContribution = (
     trusteeIdentity: `trustee-${String(trusteeRosterPosition)}`,
     trusteeRosterPosition,
     shareCoefficientVectorHash512ByLimb: qSharePrimes.map(
-        (rnsPrime, rnsLimbIndex) => ({
-            rnsLimbIndex,
-            rnsPrime,
+        (_unusedRnsPrime, rnsLimbIndex) => ({
             coefficientVectorHash512: fixtureHash(
                 `share-coefficient-${String(trusteeRosterPosition)}-${String(
                     rnsLimbIndex,
@@ -44,11 +38,8 @@ const shareContribution = (
     ),
 });
 
-const publicKeyShareObjects = (): {
-    readonly publicKeyShares: PublicKeyShareSet;
-    readonly publicKeyShareProofs: PublicKeyShareProofSet;
-} => {
-    const publicKeyShares = createPublicKeyShareSet({
+const publicKeySharesFixture = (): PublicKeyShareSet =>
+    createPublicKeyShareSet({
         setupContext,
         qSharePrimes,
         participantCount,
@@ -57,20 +48,6 @@ const publicKeyShareObjects = (): {
         publicAPolynomialRoot: fixtureHash('public-a-polynomial'),
         shareContributions: [shareContribution(0), shareContribution(1)],
     });
-
-    return {
-        publicKeyShares,
-        publicKeyShareProofs: createPublicKeyShareProofSet({
-            setupContext,
-            qSharePrimes,
-            participantCount,
-            publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
-            publicKeyCrpRoot: fixtureHash('public-key-crp'),
-            publicAPolynomialRoot: fixtureHash('public-a-polynomial'),
-            publicKeyShares,
-        }),
-    };
-};
 
 const requiredGaloisKeySchedule = [
     {
@@ -85,8 +62,7 @@ const requiredGaloisKeySchedule = [
 
 describe('evaluator key schedule builder', () => {
     it('creates a deterministic root-bound foundation schedule', () => {
-        const { publicKeyShares, publicKeyShareProofs } =
-            publicKeyShareObjects();
+        const publicKeyShares = publicKeySharesFixture();
         const evaluatorKeySchedule = createEvaluatorKeySchedule({
             setupContext,
             qSharePrimes,
@@ -95,7 +71,6 @@ describe('evaluator key schedule builder', () => {
             relinearizationCrpRoot: fixtureHash('relinearization-crp'),
             galoisKeyCrpRoot: fixtureHash('galois-key-crp'),
             publicKeyShares,
-            publicKeyShareProofs,
             requiredGaloisKeySchedule,
         });
         const { evaluatorKeyScheduleRoot, ...scheduleWithoutRoot } =
@@ -107,15 +82,14 @@ describe('evaluator key schedule builder', () => {
             ),
         ).toEqual([3, 7]);
         expect(evaluatorKeySchedule.relinearizationLevelSchedule).toEqual([
-            { level: selectedEvaluatorWorkingLevel },
+            { level: 16 },
         ]);
         expect(evaluatorKeySchedule.requiredGaloisSetHash).toBe(
-            deriveCanonicalObjectHash(
-                createRequiredGaloisSet(
-                    qSharePrimes.length,
-                    requiredGaloisKeySchedule,
-                ),
-            ),
+            deriveCanonicalObjectHash({
+                objectType: 'RequiredGaloisSet',
+                rnsLimbCount: qSharePrimes.length,
+                entries: evaluatorKeySchedule.requiredGaloisKeySchedule,
+            }),
         );
         expect(evaluatorKeyScheduleRoot).toBe(
             deriveCanonicalObjectHash(scheduleWithoutRoot),
@@ -123,8 +97,7 @@ describe('evaluator key schedule builder', () => {
     });
 
     it('rejects malformed schedule inputs', () => {
-        const { publicKeyShares, publicKeyShareProofs } =
-            publicKeyShareObjects();
+        const publicKeyShares = publicKeySharesFixture();
         const validInput = {
             setupContext,
             qSharePrimes,
@@ -133,7 +106,6 @@ describe('evaluator key schedule builder', () => {
             relinearizationCrpRoot: fixtureHash('relinearization-crp'),
             galoisKeyCrpRoot: fixtureHash('galois-key-crp'),
             publicKeyShares,
-            publicKeyShareProofs,
             requiredGaloisKeySchedule,
         } as const;
 
@@ -146,16 +118,5 @@ describe('evaluator key schedule builder', () => {
                 ],
             }),
         ).toThrow(/must not repeat/u);
-        expect(() =>
-            createEvaluatorKeySchedule({
-                ...validInput,
-                publicKeyShareProofs: {
-                    ...publicKeyShareProofs,
-                    publicKeyShareSetRoot: fixtureHash(
-                        'wrong-public-key-share-set',
-                    ),
-                },
-            }),
-        ).toThrow(/accepted share-set root/u);
     });
 });

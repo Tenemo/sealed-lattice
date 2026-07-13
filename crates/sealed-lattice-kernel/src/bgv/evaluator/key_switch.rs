@@ -40,15 +40,7 @@ pub(crate) struct KeySwitchKey {
 #[derive(Clone)]
 pub(crate) struct KeySwitchComponent {
     component_b_ntt: Vec<Vec<u64>>,
-    component_a_ntt: Option<Vec<Vec<u64>>>,
-    component_a_source: KeySwitchComponentASource,
-    digit_index: usize,
-}
-
-#[derive(Clone)]
-enum KeySwitchComponentASource {
-    DeterministicStream { domain: String, seed_hex: String },
-    RetainedPublicSample,
+    component_a_ntt: Vec<Vec<u64>>,
 }
 
 impl KeySwitchComponent {
@@ -67,43 +59,6 @@ impl KeySwitchComponent {
         component_b: Vec<Vec<u64>>,
         component_a: Vec<Vec<u64>>,
         primes: &[u64],
-        domain: &str,
-        seed_hex: &str,
-        digit_index: usize,
-    ) -> CanonicalResult<Self> {
-        Self::from_coefficients_with_source(
-            component_b,
-            component_a,
-            primes,
-            KeySwitchComponentASource::DeterministicStream {
-                domain: domain.to_string(),
-                seed_hex: seed_hex.to_string(),
-            },
-            digit_index,
-        )
-    }
-
-    fn from_retained_public_sample(
-        component_b: Vec<Vec<u64>>,
-        component_a: Vec<Vec<u64>>,
-        primes: &[u64],
-        digit_index: usize,
-    ) -> CanonicalResult<Self> {
-        Self::from_coefficients_with_source(
-            component_b,
-            component_a,
-            primes,
-            KeySwitchComponentASource::RetainedPublicSample,
-            digit_index,
-        )
-    }
-
-    fn from_coefficients_with_source(
-        component_b: Vec<Vec<u64>>,
-        component_a: Vec<Vec<u64>>,
-        primes: &[u64],
-        component_a_source: KeySwitchComponentASource,
-        digit_index: usize,
     ) -> CanonicalResult<Self> {
         let component_b_ntt = ntt_limbs(&component_b, primes)?;
         let component_a_ntt = ntt_limbs(&component_a, primes)?;
@@ -112,31 +67,8 @@ impl KeySwitchComponent {
 
         Ok(Self {
             component_b_ntt,
-            component_a_ntt: Some(component_a_ntt),
-            component_a_source,
-            digit_index,
+            component_a_ntt,
         })
-    }
-
-    fn component_a_ntt_for_limb(
-        &self,
-        limb_index: usize,
-        modulus: u64,
-    ) -> CanonicalResult<Vec<u64>> {
-        if let Some(component_a_ntt) = &self.component_a_ntt {
-            return Ok(component_a_ntt[limb_index].clone());
-        }
-        let KeySwitchComponentASource::DeterministicStream { domain, seed_hex } =
-            &self.component_a_source
-        else {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "retained public key-switch component-a material is unavailable",
-            ));
-        };
-        let public_sample = public_component_a_limb(domain, seed_hex, self.digit_index, modulus);
-
-        forward_negacyclic_ntt(&public_sample, modulus)
     }
 }
 
@@ -231,14 +163,7 @@ fn generate_key_switch_component_for_digit(
         .collect::<CanonicalResult<Vec<_>>>()?;
     let (component_b, component_a) = limbs.into_iter().unzip();
 
-    KeySwitchComponent::from_coefficients(
-        component_b,
-        component_a,
-        primes,
-        domain,
-        seed_hex,
-        digit_index,
-    )
+    KeySwitchComponent::from_coefficients(component_b, component_a, primes)
 }
 
 struct KeySwitchComponentLimbInput<'a> {
@@ -328,9 +253,8 @@ pub(crate) fn key_switch_key_from_public_components(
             .into_iter()
             .zip(component_a_by_digit.into_iter())
     )
-    .enumerate()
-    .map(|(digit_index, (component_b, component_a))| {
-        public_key_switch_component_for_digit(primes, digit_index, component_b, component_a)
+    .map(|(component_b, component_a)| {
+        public_key_switch_component_for_digit(primes, component_b, component_a)
     })
     .collect::<CanonicalResult<Vec<_>>>()?;
 
@@ -339,7 +263,6 @@ pub(crate) fn key_switch_key_from_public_components(
 
 fn public_key_switch_component_for_digit(
     primes: &[u64],
-    digit_index: usize,
     component_b: Vec<Vec<u64>>,
     component_a: Vec<Vec<u64>>,
 ) -> CanonicalResult<KeySwitchComponent> {
@@ -364,7 +287,7 @@ fn public_key_switch_component_for_digit(
         ));
     }
 
-    KeySwitchComponent::from_retained_public_sample(component_b, component_a, primes, digit_index)
+    KeySwitchComponent::from_coefficients(component_b, component_a, primes)
 }
 
 fn public_component_a_by_digit(
@@ -450,8 +373,8 @@ fn key_switch_component(
             })
             .collect::<CanonicalResult<Vec<_>>>()?;
     for (partial_zero, partial_one) in partials {
-        add_component_in_place(&mut switched_zero, &partial_zero, term_level)?;
-        add_component_in_place(&mut switched_one, &partial_one, term_level)?;
+        add_component_in_place(&mut switched_zero, &partial_zero, term_level);
+        add_component_in_place(&mut switched_one, &partial_one, term_level);
     }
 
     Ok((switched_zero, switched_one))
@@ -474,8 +397,11 @@ fn key_switch_component_digit(
         let digit_ntt = forward_negacyclic_ntt(&digit_in_limb, *modulus)?;
         let product_b =
             multiply_ntt_by_ntt(&digit_ntt, &component.component_b_ntt[limb_index], *modulus)?;
-        let component_a_ntt = component.component_a_ntt_for_limb(limb_index, *modulus)?;
-        let product_a = multiply_ntt_by_ntt(&digit_ntt, &component_a_ntt, *modulus)?;
+        let product_a = multiply_ntt_by_ntt(
+            &digit_ntt,
+            &component.component_a_ntt[limb_index],
+            *modulus,
+        )?;
         switched_zero[limb_index] = product_b;
         switched_one[limb_index] = product_a;
     }
@@ -501,7 +427,7 @@ fn add_component_in_place(
     target: &mut [Vec<u64>],
     addend: &[Vec<u64>],
     level: usize,
-) -> CanonicalResult<()> {
+) {
     for (limb_index, modulus) in DATA_PRIMES[..=level].iter().enumerate() {
         for coefficient_index in 0..POLYNOMIAL_DEGREE {
             target[limb_index][coefficient_index] = add_mod_fast(
@@ -511,8 +437,6 @@ fn add_component_in_place(
             );
         }
     }
-
-    Ok(())
 }
 
 pub(crate) fn generate_relinearization_key(
@@ -550,8 +474,8 @@ pub(crate) fn relinearize(
         key_switch_component(&ciphertext.components[2], relinearization_key)?;
     let mut component_zero = ciphertext.components[0].clone();
     let mut component_one = ciphertext.components[1].clone();
-    add_component_in_place(&mut component_zero, &switched_zero, ciphertext.level)?;
-    add_component_in_place(&mut component_one, &switched_one, ciphertext.level)?;
+    add_component_in_place(&mut component_zero, &switched_zero, ciphertext.level);
+    add_component_in_place(&mut component_one, &switched_one, ciphertext.level);
 
     Ok(Ciphertext {
         components: vec![component_zero, component_one],
@@ -569,12 +493,12 @@ mod tests {
         rotate,
     };
     use crate::bgv::{
+        encoding::decode_plaintext_coefficients_to_logical_slots,
         evaluator::engine::{
             Ciphertext, DevelopmentBgvKey, ciphertext_tensor, encode_slots_to_coefficients,
             modulus_switch,
         },
-        ntt::forward_negacyclic_ntt,
-        parameters::PLAINTEXT_MODULUS,
+        parameters::{PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE},
     };
 
     const DEVELOPMENT_SEED: &str = "0011223344556677";
@@ -629,7 +553,7 @@ mod tests {
             automorphism_residues(&plaintext_coefficients, galois_element, PLAINTEXT_MODULUS)
                 .expect("plaintext automorphism");
         let expected_slots =
-            forward_negacyclic_ntt(&rotated_coefficients, PLAINTEXT_MODULUS).expect("decode");
+            decode_plaintext_coefficients_to_logical_slots(&rotated_coefficients).expect("decode");
 
         assert_eq!(
             key.decrypt_to_slots(&rotated).expect("decrypt"),
@@ -704,7 +628,7 @@ mod tests {
             automorphism_residues(&plaintext_coefficients, galois_element, PLAINTEXT_MODULUS)
                 .expect("plaintext automorphism");
         let expected_slots =
-            forward_negacyclic_ntt(&rotated_coefficients, PLAINTEXT_MODULUS).expect("decode");
+            decode_plaintext_coefficients_to_logical_slots(&rotated_coefficients).expect("decode");
 
         assert_eq!(
             key.decrypt_to_slots(&rotated).expect("decrypt"),
@@ -716,5 +640,45 @@ mod tests {
     fn forward_and_inverse_rotations_match_the_plaintext_automorphism() {
         assert_rotation_matches_plaintext_automorphism(3, "ksk06", "galois-seed");
         assert_rotation_matches_plaintext_automorphism(43_691, "ksk07", "inverse-galois-seed");
+    }
+
+    #[test]
+    fn galois_generator_rotates_each_canonical_logical_slot_half() {
+        let half_slot_count = POLYNOMIAL_DEGREE / 2;
+        let mut slots = vec![0_u64; POLYNOMIAL_DEGREE];
+        for (slot_index, slot_value) in [
+            (0, 11),
+            (1, 22),
+            (2, 33),
+            (17, 44),
+            (half_slot_count - 1, 55),
+            (half_slot_count, 66),
+            (half_slot_count + 1, 77),
+            (POLYNOMIAL_DEGREE - 1, 88),
+        ] {
+            slots[slot_index] = slot_value;
+        }
+        let plaintext_coefficients = encode_slots_to_coefficients(&slots).expect("encode");
+        let rotated_coefficients =
+            automorphism_residues(&plaintext_coefficients, 3, PLAINTEXT_MODULUS)
+                .expect("apply generator automorphism");
+        let rotated_slots =
+            decode_plaintext_coefficients_to_logical_slots(&rotated_coefficients).expect("decode");
+        let expected_slots = slots[..half_slot_count]
+            .iter()
+            .cycle()
+            .skip(1)
+            .take(half_slot_count)
+            .chain(
+                slots[half_slot_count..]
+                    .iter()
+                    .cycle()
+                    .skip(1)
+                    .take(half_slot_count),
+            )
+            .copied()
+            .collect::<Vec<_>>();
+
+        assert_eq!(rotated_slots, expected_slots);
     }
 }
