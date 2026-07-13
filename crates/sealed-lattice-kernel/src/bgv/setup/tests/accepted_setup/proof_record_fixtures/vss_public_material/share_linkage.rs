@@ -263,7 +263,6 @@ pub(super) fn vss_share_linkage_proof_record(
         "linkageItems": linkage_items,
         "vssShareLinkage": vss_share_linkage,
         "proofBytesHash": proof_material.proof_bytes_hash,
-        "proofBytesEncoding": SETUP_PROOF_MATERIAL_ENCODING,
         "proofMaterialRoot": proof_material.proof_material_root,
     });
     proof_record["proofRecordRoot"] = serde_json::json!(

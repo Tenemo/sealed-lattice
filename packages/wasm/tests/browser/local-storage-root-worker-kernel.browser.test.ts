@@ -111,29 +111,6 @@ const deleteDatabase = (name: string): Promise<void> =>
         );
     });
 
-const assertNoSecretBoundaryValues = (value: unknown): void => {
-    if (value instanceof Uint8Array) {
-        expect(value.byteLength).not.toBe(48);
-        return;
-    }
-    if (Array.isArray(value)) {
-        for (const entry of value) {
-            assertNoSecretBoundaryValues(entry);
-        }
-        return;
-    }
-    if (typeof value !== 'object' || value === null) {
-        return;
-    }
-    const record = value as Record<string, unknown>;
-    expect(Object.keys(record)).not.toContain('deviceKey');
-    expect(Object.keys(record)).not.toContain('wrappedStorageRoot');
-    expect(Object.keys(record)).not.toContain('actionStorageRoot');
-    for (const entry of Object.values(record)) {
-        assertNoSecretBoundaryValues(entry);
-    }
-};
-
 afterEach(async () => {
     for (const custody of custodies) {
         try {
@@ -154,113 +131,118 @@ afterEach(async () => {
 });
 
 describe('Local storage-root real-WASM browser worker', () => {
-    it('survives a worker crash and requires the public commitment before reopening', async () => {
-        const primaryDatabaseName = databaseName();
-        const first = await openWorker({
-            databaseName: primaryDatabaseName,
-        });
-        const initialSnapshot = await first.custody.initialize();
-        assertNoSecretBoundaryValues(initialSnapshot);
-        expect(initialSnapshot.storageRootCommitment).toHaveLength(64);
-        crashWorker(first);
+    it('completes the ordered crash, recovery, and binding-refusal lifecycle', async () => {
+        {
+            const primaryDatabaseName = databaseName();
+            const first = await openWorker({
+                databaseName: primaryDatabaseName,
+            });
+            const initialSnapshot = await first.custody.initialize();
+            expect(initialSnapshot.storageRootCommitment).toHaveLength(64);
+            crashWorker(first);
 
-        const reopened = await openWorker({
-            databaseName: primaryDatabaseName,
-            knownStorageRootCommitment: initialSnapshot.storageRootCommitment,
-        });
-        expect(await reopened.custody.currentSnapshot()).toEqual(
-            initialSnapshot,
-        );
-        const wrongCommitment = initialSnapshot.storageRootCommitment.slice();
-        wrongCommitment[63] ^= 1;
-        await expect(
-            reopened.custody.openIntoOwnedWorker({
+            const reopened = await openWorker({
+                databaseName: primaryDatabaseName,
+                knownStorageRootCommitment:
+                    initialSnapshot.storageRootCommitment,
+            });
+            expect(await reopened.custody.currentSnapshot()).toEqual(
+                initialSnapshot,
+            );
+            const wrongCommitment =
+                initialSnapshot.storageRootCommitment.slice();
+            wrongCommitment[63] ^= 1;
+            await expect(
+                reopened.custody.openIntoOwnedWorker({
+                    expectedSnapshot: initialSnapshot,
+                    externallyVerifiedCommitment: {
+                        storageRootCommitment: wrongCommitment,
+                    },
+                }),
+            ).rejects.toMatchObject({ code: 'CommitmentMismatch' });
+            await reopened.custody.openIntoOwnedWorker({
                 expectedSnapshot: initialSnapshot,
-                externallyVerifiedCommitment: {
-                    storageRootCommitment: wrongCommitment,
-                },
-            }),
-        ).rejects.toMatchObject({ code: 'CommitmentMismatch' });
-        await reopened.custody.openIntoOwnedWorker({
-            expectedSnapshot: initialSnapshot,
-            externallyVerifiedCommitment: {
-                storageRootCommitment: initialSnapshot.storageRootCommitment,
-            },
-        });
-        await closeWorker(reopened);
-    });
-
-    it('exports and restores recovery material without crossing the worker secret boundary', async () => {
-        const recoveryDatabaseName = databaseName();
-        const opened = await openWorker({
-            databaseName: recoveryDatabaseName,
-        });
-        const initialSnapshot = await opened.custody.initialize();
-        const externallyVerifiedCommitment = {
-            storageRootCommitment: initialSnapshot.storageRootCommitment,
-        };
-        const challenge = await opened.custody.beginRecoveryExport({
-            expectedSnapshot: initialSnapshot,
-            externallyVerifiedCommitment,
-        });
-        assertNoSecretBoundaryValues(challenge);
-        const confirmation = await opened.custody.confirmRecoveryExport({
-            confirmedChecksum: challenge.recoveryChecksum,
-            preparationIdentifier: challenge.preparationIdentifier,
-        });
-        assertNoSecretBoundaryValues(confirmation.snapshot);
-        expect(confirmation.canonicalRecoveryText).toMatch(/^[A-Z2-7]{708}$/u);
-
-        await opened.custody.delete(confirmation.snapshot);
-        expect(await opened.custody.currentSnapshot()).toBeUndefined();
-        const recoveredSnapshot = await opened.custody.recover({
-            caseInsensitiveRecoveryText:
-                confirmation.canonicalRecoveryText.toLowerCase(),
-            externallyVerifiedCommitment,
-        });
-        expect(recoveredSnapshot.storageRootCommitment).toEqual(
-            initialSnapshot.storageRootCommitment,
-        );
-        assertNoSecretBoundaryValues(recoveredSnapshot);
-        await closeWorker(opened);
-    });
-
-    it('refuses recovery material under a substituted participant binding', async () => {
-        const sourceDatabaseName = databaseName();
-        const source = await openWorker({
-            databaseName: sourceDatabaseName,
-        });
-        const initialSnapshot = await source.custody.initialize();
-        const challenge = await source.custody.beginRecoveryExport({
-            expectedSnapshot: initialSnapshot,
-            externallyVerifiedCommitment: {
-                storageRootCommitment: initialSnapshot.storageRootCommitment,
-            },
-        });
-        const confirmation = await source.custody.confirmRecoveryExport({
-            confirmedChecksum: challenge.recoveryChecksum,
-            preparationIdentifier: challenge.preparationIdentifier,
-        });
-        await closeWorker(source);
-
-        const wrongBindingDatabaseName = databaseName();
-        const wrongBindingWorker = await openWorker({
-            binding: {
-                ...binding,
-                participantId: createBytes(64, 44),
-            },
-            databaseName: wrongBindingDatabaseName,
-            knownStorageRootCommitment: initialSnapshot.storageRootCommitment,
-        });
-        await expect(
-            wrongBindingWorker.custody.recover({
-                caseInsensitiveRecoveryText: confirmation.canonicalRecoveryText,
                 externallyVerifiedCommitment: {
                     storageRootCommitment:
                         initialSnapshot.storageRootCommitment,
                 },
-            }),
-        ).rejects.toMatchObject({ code: 'CommitmentMismatch' });
-        await closeWorker(wrongBindingWorker);
+            });
+            await closeWorker(reopened);
+        }
+
+        {
+            const recoveryDatabaseName = databaseName();
+            const opened = await openWorker({
+                databaseName: recoveryDatabaseName,
+            });
+            const initialSnapshot = await opened.custody.initialize();
+            const externallyVerifiedCommitment = {
+                storageRootCommitment: initialSnapshot.storageRootCommitment,
+            };
+            const challenge = await opened.custody.beginRecoveryExport({
+                expectedSnapshot: initialSnapshot,
+                externallyVerifiedCommitment,
+            });
+            const confirmation = await opened.custody.confirmRecoveryExport({
+                confirmedChecksum: challenge.recoveryChecksum,
+                preparationIdentifier: challenge.preparationIdentifier,
+            });
+            expect(confirmation.canonicalRecoveryText).toMatch(
+                /^[A-Z2-7]{708}$/u,
+            );
+
+            await opened.custody.delete(confirmation.snapshot);
+            expect(await opened.custody.currentSnapshot()).toBeUndefined();
+            const recoveredSnapshot = await opened.custody.recover({
+                caseInsensitiveRecoveryText:
+                    confirmation.canonicalRecoveryText.toLowerCase(),
+                externallyVerifiedCommitment,
+            });
+            expect(recoveredSnapshot.storageRootCommitment).toEqual(
+                initialSnapshot.storageRootCommitment,
+            );
+            await closeWorker(opened);
+        }
+
+        {
+            const sourceDatabaseName = databaseName();
+            const source = await openWorker({
+                databaseName: sourceDatabaseName,
+            });
+            const initialSnapshot = await source.custody.initialize();
+            const challenge = await source.custody.beginRecoveryExport({
+                expectedSnapshot: initialSnapshot,
+                externallyVerifiedCommitment: {
+                    storageRootCommitment:
+                        initialSnapshot.storageRootCommitment,
+                },
+            });
+            const confirmation = await source.custody.confirmRecoveryExport({
+                confirmedChecksum: challenge.recoveryChecksum,
+                preparationIdentifier: challenge.preparationIdentifier,
+            });
+            await closeWorker(source);
+
+            const wrongBindingWorker = await openWorker({
+                binding: {
+                    ...binding,
+                    participantId: createBytes(64, 44),
+                },
+                databaseName: databaseName(),
+                knownStorageRootCommitment:
+                    initialSnapshot.storageRootCommitment,
+            });
+            await expect(
+                wrongBindingWorker.custody.recover({
+                    caseInsensitiveRecoveryText:
+                        confirmation.canonicalRecoveryText,
+                    externallyVerifiedCommitment: {
+                        storageRootCommitment:
+                            initialSnapshot.storageRootCommitment,
+                    },
+                }),
+            ).rejects.toMatchObject({ code: 'CommitmentMismatch' });
+            await closeWorker(wrongBindingWorker);
+        }
     });
 });

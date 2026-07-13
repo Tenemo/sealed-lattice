@@ -57,7 +57,6 @@ export type PrivateVssMailboxDecryptionInput = {
 export type PrivateVssEncryptedEnvelope = Readonly<
     Record<string, unknown> & {
         readonly objectType: 'EncryptedPrivateVssShareEnvelope';
-        readonly ciphertextContentType: 'private-vss-share-envelope';
         readonly privateEnvelopeHash: ProtocolHash;
         readonly privateEnvelopeAad: unknown;
         readonly privateEnvelopeAadHash: ProtocolHash;
@@ -303,7 +302,6 @@ export const encryptPrivateVssMailboxEnvelope = async (
     );
     const envelopeWithoutHash = {
         objectType: 'EncryptedPrivateVssShareEnvelope',
-        ciphertextContentType: 'private-vss-share-envelope',
         ...aadBindingFields(input.privateEnvelopeAad),
         privateEnvelopeHash,
         privateEnvelopeAad: input.privateEnvelopeAad,

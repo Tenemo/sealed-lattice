@@ -171,6 +171,16 @@ impl CollectivePublicKeyAggregationRelationPlan {
                 "collective public-key aggregation evaluation coset does not fit the proof field",
             ));
         }
+        let _fri_fold_count = derive_positive_radix_two_fold_count(
+            opening_degree_bound_exclusive,
+            u64::from(field_schedule.final_polynomial_degree_bound_exclusive),
+        )?;
+        if u64::from(field_schedule.unique_query_count) > evaluation_domain_size / 2 {
+            return Err(schema_error(
+                RefusalReason::OutsideSupportedProfile,
+                "collective public-key aggregation query count exceeds half the evaluation domain",
+            ));
+        }
         if usize::from(field_schedule.non_native_modular_identity_challenge_count)
             < suite_record.ordered_data_primes.len()
         {
@@ -253,6 +263,34 @@ impl CollectivePublicKeyAggregationRelationPlan {
         }
         Ok(expected)
     }
+}
+
+fn derive_positive_radix_two_fold_count(
+    opening_degree_bound_exclusive: u64,
+    final_polynomial_degree_bound_exclusive: u64,
+) -> SchemaResult<u16> {
+    if opening_degree_bound_exclusive <= 1
+        || final_polynomial_degree_bound_exclusive == 0
+        || final_polynomial_degree_bound_exclusive >= opening_degree_bound_exclusive
+    {
+        return Err(schema_error(
+            RefusalReason::OutsideSupportedProfile,
+            "collective public-key aggregation terminal degree bound must be positive and smaller than the initial bound",
+        ));
+    }
+
+    let mut folded_degree_bound = opening_degree_bound_exclusive - 1;
+    for fold_count in 1..=u16::try_from(u64::BITS).expect("u64 bit width fits u16") {
+        folded_degree_bound = folded_degree_bound.div_ceil(2);
+        if folded_degree_bound <= final_polynomial_degree_bound_exclusive {
+            return Ok(fold_count);
+        }
+    }
+
+    Err(schema_error(
+        RefusalReason::OutsideSupportedProfile,
+        "collective public-key aggregation radix-two fold count cannot be represented",
+    ))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -800,7 +838,14 @@ mod tests {
     }
 
     fn valid_profile_set(suite_record: &SuiteRecord) -> ProofProfileSet {
-        let schedule = ProofFieldSchedule::new(0, 4, 3, 2, 8, 4, 3, 6).expect("test schedule");
+        let schedule = ProofFieldSchedule::new(0, 4, 3, 2, 1, 4, 3, 6).expect("test schedule");
+        profile_set_with_schedule(suite_record, schedule).expect("test profile set")
+    }
+
+    fn profile_set_with_schedule(
+        suite_record: &SuiteRecord,
+        schedule: ProofFieldSchedule,
+    ) -> SchemaResult<ProofProfileSet> {
         let families = ProofFamily::ALL.into_iter().collect::<Vec<_>>();
         let mut families = families;
         families.sort_by_key(|family| family.statement_schema_identifier());
@@ -812,7 +857,6 @@ mod tests {
                 .collect(),
             suite_record,
         )
-        .expect("test profile set")
     }
 
     #[test]
@@ -892,6 +936,19 @@ mod tests {
             1
         );
         assert_eq!(
+            super::super::schemas::read_u64(&variant.items[3]).unwrap(),
+            2
+        );
+        assert_eq!(
+            super::super::schemas::read_u64(&variant.items[4]).unwrap(),
+            8
+        );
+        assert_eq!(
+            super::super::schemas::read_u64(&variant.items[5]).unwrap(),
+            2
+        );
+        assert_eq!(derive_positive_radix_two_fold_count(2, 1).unwrap(), 1);
+        assert_eq!(
             super::super::schemas::read_nested_tuple_list(
                 &variant.items[8],
                 &CanonicalDecodeLimits::default(),
@@ -939,7 +996,7 @@ mod tests {
     #[test]
     fn exact_interval_requirement_refuses_an_inadequate_proof_field() {
         let suite_record = valid_suite_record();
-        let schedule = ProofFieldSchedule::new(0, 4, 3, 2, 8, 4, 3, 6).expect("test schedule");
+        let schedule = ProofFieldSchedule::new(0, 4, 3, 2, 1, 4, 3, 6).expect("test schedule");
         let mut families = ProofFamily::ALL;
         families.sort_by_key(|family| family.statement_schema_identifier());
         let error = ProofProfileSet::new(
@@ -953,5 +1010,41 @@ mod tests {
         .expect_err("inadequate exact interval must refuse");
 
         assert_eq!(error.refusal_reason, RefusalReason::OutsideSupportedProfile);
+    }
+
+    #[test]
+    fn relation_schedule_requires_a_smaller_terminal_bound_and_positive_fold_count() {
+        assert_eq!(derive_positive_radix_two_fold_count(8, 2).unwrap(), 2);
+        for (initial_bound, terminal_bound) in [(1, 1), (2, 0), (2, 2), (2, 3)] {
+            assert_eq!(
+                derive_positive_radix_two_fold_count(initial_bound, terminal_bound)
+                    .expect_err("invalid fold bounds must refuse")
+                    .refusal_reason,
+                RefusalReason::OutsideSupportedProfile
+            );
+        }
+
+        let suite_record = valid_suite_record();
+        let invalid_schedule =
+            ProofFieldSchedule::new(0, 4, 3, 2, 2, 4, 3, 6).expect("standalone schedule");
+        assert_eq!(
+            profile_set_with_schedule(&suite_record, invalid_schedule)
+                .expect_err("terminal bound equal to the relation's initial bound must refuse")
+                .refusal_reason,
+            RefusalReason::OutsideSupportedProfile
+        );
+    }
+
+    #[test]
+    fn relation_query_count_cannot_exceed_half_the_evaluation_domain() {
+        let suite_record = valid_suite_record();
+        let invalid_schedule =
+            ProofFieldSchedule::new(0, 4, 3, 2, 1, 5, 3, 6).expect("standalone schedule");
+        assert_eq!(
+            profile_set_with_schedule(&suite_record, invalid_schedule)
+                .expect_err("five representatives do not fit an eight-point evaluation domain")
+                .refusal_reason,
+            RefusalReason::OutsideSupportedProfile
+        );
     }
 }

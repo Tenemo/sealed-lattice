@@ -33,9 +33,6 @@ export const setupTransportSchemeId =
 
 export const setupTransportChunkSizeBytes = 1_048_576;
 
-export const vssCoefficientCommitmentMaterialTransportEncoding =
-    'binary-chunked-full-public-setup-commitment-values';
-
 export const vssCoefficientCommitmentMaterialBinaryMagic =
     new TextEncoder().encode('SLVSSMAT');
 
@@ -161,7 +158,6 @@ export type VssCoefficientCommitmentMaterialSet = Readonly<
         readonly objectType: 'VssCoefficientCommitmentMaterialSet';
         readonly publicMatrixSeedHash: ProtocolHash;
         readonly vssCoefficientCommitmentRoot: ProtocolHash;
-        readonly materialEncoding: 'full-public-setup-commitment-values';
         readonly participantCount: number;
         readonly thresholdDegree: number;
         readonly rnsLimbCount: number;

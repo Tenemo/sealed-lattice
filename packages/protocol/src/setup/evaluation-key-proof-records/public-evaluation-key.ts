@@ -27,11 +27,9 @@ import {
     type RelinearizationKeyShareRounds,
     type TransportedPublicEvaluationKeyMaterialSet,
     evaluationKeyShareComponentMaterialEncoding,
-    publicEvaluationKeyMaterialEncoding,
     publicEvaluationKeyMaterialMagic,
     publicEvaluationKeyMaterialTransportObjectType,
     publicEvaluationKeyMaterialTransportSetObjectType,
-    publicEvaluationKeyTransportMaterialEncoding,
     textEncoder,
 } from './constants-and-types.js';
 import { assertProtocolHash, u64LittleEndianBytes } from './encoding.js';
@@ -109,7 +107,6 @@ export function createPublicEvaluationKeySet(
                 const decompositionDigitCount = level + 1;
                 const relinearizationKeyRoot = deriveCanonicalObjectHash({
                     objectType: 'RelinearizationKeyAggregate',
-                    materialEncoding: publicEvaluationKeyMaterialEncoding,
                     evaluatorKeyScheduleRoot:
                         input.evaluatorKeySchedule.evaluatorKeyScheduleRoot,
                     publicKeyShareSuccinctProofSetRoot:
@@ -192,7 +189,6 @@ export function createPublicEvaluationKeySet(
                 );
                 const galoisKeyRoot = deriveCanonicalObjectHash({
                     objectType: 'GaloisKeyAggregate',
-                    materialEncoding: publicEvaluationKeyMaterialEncoding,
                     evaluatorKeyScheduleRoot:
                         input.evaluatorKeySchedule.evaluatorKeyScheduleRoot,
                     publicKeyShareSuccinctProofSetRoot:
@@ -220,14 +216,6 @@ export function createPublicEvaluationKeySet(
         );
     if (input.publicEvaluationKeyMaterialReference !== undefined) {
         const reference = input.publicEvaluationKeyMaterialReference;
-        if (
-            reference.publicEvaluationKeyMaterialEncoding !==
-            publicEvaluationKeyTransportMaterialEncoding
-        ) {
-            throw new Error(
-                'publicEvaluationKeyMaterialReference uses an unsupported material encoding.',
-            );
-        }
         assertProtocolHash(
             reference.publicEvaluationKeyMaterialRoot,
             'publicEvaluationKeyMaterialRoot',
@@ -236,7 +224,6 @@ export function createPublicEvaluationKeySet(
 
     const evaluationKeysWithoutHash = {
         objectType: 'PublicEvaluationKeySet',
-        materialEncoding: publicEvaluationKeyMaterialEncoding,
         ...contextFields(input.setupContext),
         participantCount: input.participantCount,
         rnsLimbCount: input.qSharePrimes.length,
@@ -378,8 +365,6 @@ const publicEvaluationKeyMaterialManifest = (
     evaluationKeys: PublicEvaluationKeySet,
 ): JsonRecord => ({
     objectType: 'PublicEvaluationKeyMaterialManifest',
-    materialEncoding: publicEvaluationKeyMaterialEncoding,
-    materialTransportEncoding: publicEvaluationKeyTransportMaterialEncoding,
     ...contextFields(input.setupContext),
     participantCount: input.participantCount,
     rnsLimbCount: input.qSharePrimes.length,
@@ -549,7 +534,6 @@ const publicEvaluationKeyMaterialTransportHashes = (
     );
     const chunkRoot = deriveCanonicalObjectHash({
         objectType: 'PublicEvaluationKeyMaterialChunkManifest',
-        materialEncoding: publicEvaluationKeyTransportMaterialEncoding,
         chunkCount: chunkHashes.length,
         totalByteLength,
         chunkHashes,
@@ -573,7 +557,6 @@ const publicEvaluationKeyMaterialReferenceRoot = (
 ): ProtocolHash =>
     deriveCanonicalObjectHash({
         objectType: 'PublicEvaluationKeyMaterialReference',
-        materialEncoding: publicEvaluationKeyTransportMaterialEncoding,
         ceremonyId: evaluationKeys.ceremonyId,
         manifestHash: evaluationKeys.manifestHash,
         rosterHash: evaluationKeys.rosterHash,
@@ -702,8 +685,6 @@ export const createBinaryChunkedPublicEvaluationKeyMaterialTransport = async (
             transportHashes,
         );
     const publicEvaluationKeyMaterialReference = {
-        publicEvaluationKeyMaterialEncoding:
-            publicEvaluationKeyTransportMaterialEncoding,
         publicEvaluationKeyMaterialRoot,
     } satisfies PublicEvaluationKeyMaterialReference;
     const evaluationKeys = createPublicEvaluationKeySet({
@@ -722,11 +703,9 @@ export const createBinaryChunkedPublicEvaluationKeyMaterialTransport = async (
     );
     const transportedPublicEvaluationKeyMaterial = {
         objectType: publicEvaluationKeyMaterialTransportSetObjectType,
-        materialEncoding: publicEvaluationKeyTransportMaterialEncoding,
         publicEvaluationKeyMaterials: [
             {
                 objectType: publicEvaluationKeyMaterialTransportObjectType,
-                materialEncoding: publicEvaluationKeyTransportMaterialEncoding,
                 ...contextFields(input.setupContext),
                 evaluationKeySetHash: evaluationKeys.evaluationKeySetHash,
                 publicEvaluationKeyMaterialRoot,

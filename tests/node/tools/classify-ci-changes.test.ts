@@ -3,52 +3,33 @@ import { Buffer } from 'node:buffer';
 import { describe, expect, it } from 'vitest';
 
 import {
-    isDocumentationOnlyCiPath,
-    isToolingOnlyCiPath,
     isVersionOnlyReleaseManifestChange,
     parseNullDelimitedGitNameStatus,
     shouldRunHeavyCiLanes,
 } from '#tools/ci/classify-ci-changes.mjs';
 
 describe('CI heavy-lane change classification', () => {
-    it('skips heavy lanes for documentation and tooling-only changes', () => {
-        const documentationPaths = [
-            'README.md',
-            'packages/protocol/README.md',
-            'SECURITY.md',
-            'LICENSE',
-            'reference-documents/paper.txt',
-        ];
+    it('skips documentation and tooling while failing closed for runtime and unknown changes', () => {
+        for (const changedPaths of [
+            ['README.md', 'SECURITY.md', 'reference-documents/paper.txt'],
+            [
+                '.github/workflows/ci.yml',
+                'tests/node/tools/run-command.test.ts',
+                'tools/ci/run-command.ts',
+            ],
+        ]) {
+            expect(shouldRunHeavyCiLanes(changedPaths)).toBe(false);
+        }
 
-        expect(documentationPaths.every(isDocumentationOnlyCiPath)).toBe(true);
-        expect(shouldRunHeavyCiLanes(documentationPaths)).toBe(false);
-        const toolingPaths = [
-            '.github/workflows/ci.yml',
-            'eslint.config.js',
-            'tests/node/tools/run-command.test.ts',
-            'tools/ci/run-command.ts',
-            'tools/lattigo-oracle/main.go',
-        ];
-        expect(toolingPaths.every(isToolingOnlyCiPath)).toBe(true);
-        expect(shouldRunHeavyCiLanes(toolingPaths)).toBe(false);
-    });
-
-    it('runs heavy lanes for proof runtime dependencies and unknown paths', () => {
         for (const changedPath of [
             'packages/sdk/src/index.ts',
-            'packages/sdk/package.json',
             'pnpm-lock.yaml',
             'crates/sealed-lattice-kernel/src/bgv/setup.rs',
-            'packages/wasm/tests/node/transcript-core-kernel/core-kernel-and-fixtures.kernel.test.ts',
-            'tools/process-memory-guard/src/main.rs',
             'unclassified/generated.txt',
             '../outside.md',
         ]) {
             expect(shouldRunHeavyCiLanes([changedPath])).toBe(true);
         }
-    });
-
-    it('runs heavy lanes for empty and mixed change sets', () => {
         expect(shouldRunHeavyCiLanes([])).toBe(true);
         expect(
             shouldRunHeavyCiLanes([
@@ -64,23 +45,19 @@ describe('CI heavy-lane change classification', () => {
             name: 'sealed-lattice',
             version: '0.7.12',
         });
-        const patchManifest = JSON.stringify({
-            dependencies: { example: '1.0.0' },
-            name: 'sealed-lattice',
-            version: '0.7.13',
-        });
-        const minorManifest = JSON.stringify({
-            dependencies: { example: '1.0.0' },
-            name: 'sealed-lattice',
-            version: '0.8.0',
-        });
-
-        expect(
-            isVersionOnlyReleaseManifestChange(previousManifest, patchManifest),
-        ).toBe(true);
-        expect(
-            isVersionOnlyReleaseManifestChange(previousManifest, minorManifest),
-        ).toBe(true);
+        for (const version of ['0.7.13', '0.8.0']) {
+            const nextManifest = JSON.stringify({
+                dependencies: { example: '1.0.0' },
+                name: 'sealed-lattice',
+                version,
+            });
+            expect(
+                isVersionOnlyReleaseManifestChange(
+                    previousManifest,
+                    nextManifest,
+                ),
+            ).toBe(true);
+        }
         expect(shouldRunHeavyCiLanes(['packages/sdk/package.json'], true)).toBe(
             false,
         );

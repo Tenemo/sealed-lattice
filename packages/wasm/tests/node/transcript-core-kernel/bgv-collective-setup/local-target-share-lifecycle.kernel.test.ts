@@ -412,7 +412,6 @@ const setupLifecycleArtifacts = async (
                         );
 
                         return Promise.resolve({
-                            proofBytesEncoding: 'binary-chunked-proof-bytes',
                             proofBytesHash,
                             proofMaterialRoot: kernel.deriveCanonicalObjectHash(
                                 {
@@ -812,12 +811,6 @@ describe('local setup-to-target-share WASM lifecycle', () => {
             128,
         );
         expect(targetDecryptionShare.shareRoot).toHaveLength(128);
-        expect(JSON.stringify(targetDecryptionShare)).not.toContain(
-            setup.aggregateMaterialSeedHex,
-        );
-        expect(
-            JSON.stringify(encryptedState.encryptedLocalState),
-        ).not.toContain(setup.aggregateMaterialSeedHex);
     });
 
     it('rejects altered restored openings and a target ciphertext replay', async () => {

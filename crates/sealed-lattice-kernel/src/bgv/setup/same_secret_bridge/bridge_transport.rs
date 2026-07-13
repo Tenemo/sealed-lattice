@@ -23,11 +23,6 @@ pub(super) fn validate_same_secret_bridge_proof_reference(
     let proof_bytes_hash = hash_at_path(proof_record, &["proofBytesHash"])?.to_string();
     let proof_record_root =
         hash_at_path(proof_record, &["sameSecretBridgeProofRecordRoot"])?.to_string();
-    compare_required_string(
-        string_at_path(proof_record, &["proofBytesEncoding"])?,
-        SETUP_PROOF_MATERIAL_ENCODING,
-        "same-secret bridge proof record proofBytesEncoding",
-    )?;
     let proof_material_root = hash_at_path(proof_record, &["proofMaterialRoot"])?.to_string();
     compare_required_string(
         &proof_material_root,
@@ -42,7 +37,6 @@ pub(super) fn validate_same_secret_bridge_proof_reference(
         "proofFamily": SAME_SECRET_BRIDGE_PROOF_FAMILY,
         "sameSecretBridgeStatementRoot": bridge_statement_root,
         "proofBytesHash": &proof_bytes_hash,
-        "proofBytesEncoding": SETUP_PROOF_MATERIAL_ENCODING,
         "proofMaterialRoot": &proof_material_root,
     });
     let expected_proof_record_root = derive_canonical_object_hash(&proof_record_without_root)?;
@@ -233,7 +227,7 @@ mod tests {
     }
 
     #[test]
-    fn bridge_proof_record_binds_hash_encoding_material_root_and_statement() {
+    fn bridge_proof_record_binds_hash_material_root_and_statement() {
         let proof_bytes_hash = "3".repeat(128);
         let proof_material_root =
             crate::bgv::setup::setup_proof::setup_proof_material_reference_root(
@@ -247,7 +241,6 @@ mod tests {
             "proofFamily": SAME_SECRET_BRIDGE_PROOF_FAMILY,
             "sameSecretBridgeStatementRoot": &bridge_statement_root,
             "proofBytesHash": &proof_bytes_hash,
-            "proofBytesEncoding": SETUP_PROOF_MATERIAL_ENCODING,
             "proofMaterialRoot": &proof_material_root,
         });
         proof_record["sameSecretBridgeProofRecordRoot"] = json!(

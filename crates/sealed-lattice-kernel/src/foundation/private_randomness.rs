@@ -4,14 +4,24 @@ use std::collections::BTreeMap;
 use tiny_keccak::{Hasher, Kmac};
 use zeroize::{Zeroize, Zeroizing};
 
+use super::schemas::{SchemaResult, read_hash, read_item, read_u16, require_header};
 use super::{
-    CanonicalCodecError, CanonicalItem, CanonicalTuple, Hash512,
-    PRIVATE_RANDOM_BLOCK_INPUT_SCHEMA_IDENTIFIER, ParticipantIdentity, RandomCursor,
+    CanonicalCodecError, CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple,
+    FoundationSchemaError, Hash512, PRIVATE_RANDOM_BLOCK_INPUT_SCHEMA_IDENTIFIER,
+    ParticipantIdentity, RandomCursor, RefusalReason, hash512,
 };
+
+pub const ACTION_RANDOMNESS_DERIVATION_INPUT_SCHEMA_IDENTIFIER: u16 = 0x0402;
 
 const FOUNDATION_PROTOCOL_VERSION: u16 = 1;
 const PRIVATE_RANDOMNESS_CUSTOMIZATION: &[u8] = b"sealed-lattice/private-randomness/v1";
+const ACTION_RANDOMNESS_KEY_HIERARCHY_CUSTOMIZATION: &[u8] =
+    b"sealed-lattice/private-randomness/action-key-hierarchy/v1";
 const ACTION_RANDOMNESS_ROOT_BYTE_LENGTH: usize = 64;
+const ACTION_RANDOMNESS_CHILD_KEY_BYTE_LENGTH: usize = 64;
+const ACTION_RANDOMNESS_KEY_MATERIAL_BYTE_LENGTH: usize =
+    3 * ACTION_RANDOMNESS_CHILD_KEY_BYTE_LENGTH;
+const ACTION_RANDOMNESS_DERIVATION_INPUT_CANONICAL_BYTE_LENGTH: usize = 296;
 const ATTEMPT_IDENTIFIER_BYTE_LENGTH: usize = 32;
 const RANDOM_BLOCK_BYTE_LENGTH: usize = 64;
 const PROOF_LEAF_SALT_PURPOSE: u16 = 0xfffe;
@@ -160,6 +170,84 @@ impl PrivateRandomnessActionBinding {
     pub const fn participant_identity(&self) -> ParticipantIdentity {
         self.participant_identity
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ActionRandomnessDerivationInput {
+    binding: PrivateRandomnessActionBinding,
+}
+
+impl ActionRandomnessDerivationInput {
+    pub const fn new(binding: PrivateRandomnessActionBinding) -> Self {
+        Self { binding }
+    }
+
+    pub const fn binding(self) -> PrivateRandomnessActionBinding {
+        self.binding
+    }
+
+    pub fn encode(&self) -> Result<Vec<u8>, CanonicalCodecError> {
+        CanonicalTuple::new(
+            ACTION_RANDOMNESS_DERIVATION_INPUT_SCHEMA_IDENTIFIER,
+            FOUNDATION_PROTOCOL_VERSION,
+            vec![
+                CanonicalItem::unsigned16(FOUNDATION_PROTOCOL_VERSION),
+                CanonicalItem::hash512(self.binding.suite_id.into_bytes()),
+                CanonicalItem::hash512(self.binding.ceremony_context_hash.into_bytes()),
+                CanonicalItem::hash512(self.binding.action_context_hash.into_bytes()),
+                CanonicalItem::participant_identity(self.binding.participant_identity.into_bytes()),
+            ],
+        )
+        .encode()
+    }
+
+    pub fn decode(bytes: &[u8], limits: &CanonicalDecodeLimits) -> SchemaResult<Self> {
+        let bounded_limits = CanonicalDecodeLimits {
+            maximum_tuple_byte_length: limits
+                .maximum_tuple_byte_length
+                .min(ACTION_RANDOMNESS_DERIVATION_INPUT_CANONICAL_BYTE_LENGTH),
+            maximum_item_count: limits.maximum_item_count.min(5),
+            maximum_item_byte_length: limits
+                .maximum_item_byte_length
+                .min(ACTION_RANDOMNESS_DERIVATION_INPUT_CANONICAL_BYTE_LENGTH),
+            maximum_nesting_depth: limits.maximum_nesting_depth,
+            maximum_cumulative_work_byte_length: limits
+                .maximum_cumulative_work_byte_length
+                .min(ACTION_RANDOMNESS_DERIVATION_INPUT_CANONICAL_BYTE_LENGTH * 4),
+            maximum_cumulative_allocation_byte_length: limits
+                .maximum_cumulative_allocation_byte_length
+                .min(ACTION_RANDOMNESS_DERIVATION_INPUT_CANONICAL_BYTE_LENGTH * 2),
+        };
+        let tuple = CanonicalTuple::decode(bytes, &bounded_limits)?;
+        require_header(
+            &tuple,
+            ACTION_RANDOMNESS_DERIVATION_INPUT_SCHEMA_IDENTIFIER,
+            5,
+        )?;
+        require_protocol_version(read_u16(&tuple.items[0])?)?;
+        let participant_identity_bytes =
+            read_item(&tuple.items[4], CanonicalItemType::ParticipantIdentity)?;
+        let participant_identity = ParticipantIdentity::from_bytes(
+            participant_identity_bytes.try_into().map_err(|_| {
+                FoundationSchemaError::new(
+                    RefusalReason::WrongTypeOrLength,
+                    "participant identity has the wrong length",
+                )
+            })?,
+        );
+        Ok(Self::new(PrivateRandomnessActionBinding::new(
+            read_hash(&tuple.items[1])?,
+            read_hash(&tuple.items[2])?,
+            read_hash(&tuple.items[3])?,
+            participant_identity,
+        )))
+    }
+}
+
+struct ActionRandomnessKeyHierarchy {
+    action_randomness_commitment_preimage: Zeroizing<[u8; ACTION_RANDOMNESS_CHILD_KEY_BYTE_LENGTH]>,
+    private_randomness_stream_key: Zeroizing<[u8; ACTION_RANDOMNESS_CHILD_KEY_BYTE_LENGTH]>,
+    proof_coin_key: Zeroizing<[u8; ACTION_RANDOMNESS_CHILD_KEY_BYTE_LENGTH]>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -371,6 +459,8 @@ struct PendingPrivateRandomAttempt {
 pub struct ActionPrivateRandomness {
     binding: PrivateRandomnessActionBinding,
     action_randomness_root: Zeroizing<[u8; ACTION_RANDOMNESS_ROOT_BYTE_LENGTH]>,
+    action_randomness_commitment: Hash512,
+    private_randomness_stream_key: Zeroizing<[u8; ACTION_RANDOMNESS_CHILD_KEY_BYTE_LENGTH]>,
     used_attempt_identifiers: Vec<Zeroizing<[u8; ATTEMPT_IDENTIFIER_BYTE_LENGTH]>>,
     pending_resume_attempt: Option<PendingPrivateRandomAttempt>,
 }
@@ -384,16 +474,45 @@ impl ActionPrivateRandomness {
         entropy_source
             .try_fill_bytes(action_randomness_root.as_mut())
             .map_err(|_| PrivateRandomnessError::EntropyUnavailable)?;
-        Ok(Self {
-            binding,
-            action_randomness_root,
-            used_attempt_identifiers: Vec::new(),
-            pending_resume_attempt: None,
-        })
+        Self::from_root(binding, action_randomness_root, Vec::new(), None)
     }
 
     pub const fn binding(&self) -> &PrivateRandomnessActionBinding {
         &self.binding
+    }
+
+    pub const fn action_randomness_commitment(&self) -> Hash512 {
+        self.action_randomness_commitment
+    }
+
+    fn from_root(
+        binding: PrivateRandomnessActionBinding,
+        action_randomness_root: Zeroizing<[u8; ACTION_RANDOMNESS_ROOT_BYTE_LENGTH]>,
+        used_attempt_identifiers: Vec<Zeroizing<[u8; ATTEMPT_IDENTIFIER_BYTE_LENGTH]>>,
+        pending_resume_attempt: Option<PendingPrivateRandomAttempt>,
+    ) -> Result<Self, PrivateRandomnessError> {
+        let key_hierarchy =
+            derive_action_randomness_key_hierarchy(&binding, &action_randomness_root)?;
+        let action_randomness_commitment = derive_action_randomness_commitment(
+            &binding,
+            &key_hierarchy.action_randomness_commitment_preimage,
+        )?;
+        let ActionRandomnessKeyHierarchy {
+            private_randomness_stream_key,
+            proof_coin_key,
+            ..
+        } = key_hierarchy;
+        // No closed proof-attempt derivation consumes this child yet. Keep it
+        // inaccessible and erase it instead of exposing a raw-key interface.
+        drop(proof_coin_key);
+        Ok(Self {
+            binding,
+            action_randomness_root,
+            action_randomness_commitment,
+            private_randomness_stream_key,
+            used_attempt_identifiers,
+            pending_resume_attempt,
+        })
     }
 
     pub fn try_start_attempt<'action, EntropySource: FallibleEntropySource + ?Sized>(
@@ -463,15 +582,15 @@ impl ActionPrivateRandomness {
             })
             .collect();
 
-        Ok(Self {
+        Self::from_root(
             binding,
             action_randomness_root,
             used_attempt_identifiers,
-            pending_resume_attempt: Some(PendingPrivateRandomAttempt {
+            Some(PendingPrivateRandomAttempt {
                 attempt_identifier,
                 streams,
             }),
-        })
+        )
     }
 
     /// Takes the already-validated same-attempt state restored by
@@ -497,6 +616,11 @@ impl fmt::Debug for ActionPrivateRandomness {
             .debug_struct("ActionPrivateRandomness")
             .field("binding", &self.binding)
             .field("action_randomness_root", &"[REDACTED]")
+            .field("private_randomness_stream_key", &"[REDACTED]")
+            .field(
+                "action_randomness_commitment",
+                &self.action_randomness_commitment,
+            )
             .field(
                 "used_attempt_identifier_count",
                 &self.used_attempt_identifiers.len(),
@@ -587,12 +711,12 @@ impl PrivateRandomAttempt<'_> {
     ) -> Result<(), PrivateRandomnessError> {
         let stream_key = PrivateRandomStreamKey::new(domain, derivation_context_hash);
         let binding = self.owner.binding;
-        let action_randomness_root = &*self.owner.action_randomness_root;
+        let private_randomness_stream_key = &*self.owner.private_randomness_stream_key;
         let attempt_identifier = &*self.attempt_identifier;
         let cursor = self.streams.entry(stream_key).or_default();
         cursor.try_fill_bytes(
             &binding,
-            action_randomness_root,
+            private_randomness_stream_key,
             attempt_identifier,
             stream_key,
             destination,
@@ -696,7 +820,7 @@ impl PrivateRandomStreamCursor {
     fn try_fill_bytes(
         &mut self,
         binding: &PrivateRandomnessActionBinding,
-        action_randomness_root: &[u8; ACTION_RANDOMNESS_ROOT_BYTE_LENGTH],
+        private_randomness_stream_key: &[u8; ACTION_RANDOMNESS_CHILD_KEY_BYTE_LENGTH],
         attempt_identifier: &[u8; ATTEMPT_IDENTIFIER_BYTE_LENGTH],
         stream_key: PrivateRandomStreamKey,
         destination: &mut [u8],
@@ -704,7 +828,7 @@ impl PrivateRandomStreamCursor {
         self.preflight_counter_capacity(destination.len())?;
         if let Err(error) = self.try_fill_bytes_after_preflight(
             binding,
-            action_randomness_root,
+            private_randomness_stream_key,
             attempt_identifier,
             stream_key,
             destination,
@@ -733,7 +857,7 @@ impl PrivateRandomStreamCursor {
     fn try_fill_bytes_after_preflight(
         &mut self,
         binding: &PrivateRandomnessActionBinding,
-        action_randomness_root: &[u8; ACTION_RANDOMNESS_ROOT_BYTE_LENGTH],
+        private_randomness_stream_key: &[u8; ACTION_RANDOMNESS_CHILD_KEY_BYTE_LENGTH],
         attempt_identifier: &[u8; ATTEMPT_IDENTIFIER_BYTE_LENGTH],
         stream_key: PrivateRandomStreamKey,
         mut destination: &mut [u8],
@@ -742,7 +866,7 @@ impl PrivateRandomStreamCursor {
             if self.unread_block_offset == RANDOM_BLOCK_BYTE_LENGTH {
                 self.unread_block = derive_private_random_block(
                     binding,
-                    action_randomness_root,
+                    private_randomness_stream_key,
                     attempt_identifier,
                     stream_key,
                     self.next_counter,
@@ -835,11 +959,15 @@ fn validate_private_randomness_resume(
         }
     }
 
+    let key_hierarchy = derive_action_randomness_key_hierarchy(
+        &snapshot.binding,
+        &snapshot.action_randomness_root,
+    )?;
     for stream in &snapshot.streams {
         validate_private_random_stream_snapshot(
             stream,
             &snapshot.binding,
-            &snapshot.action_randomness_root,
+            &key_hierarchy.private_randomness_stream_key,
             &snapshot.attempt_identifier,
         )?;
     }
@@ -849,7 +977,7 @@ fn validate_private_randomness_resume(
 fn validate_private_random_stream_snapshot(
     stream: &PrivateRandomStreamSnapshot,
     binding: &PrivateRandomnessActionBinding,
-    action_randomness_root: &[u8; ACTION_RANDOMNESS_ROOT_BYTE_LENGTH],
+    private_randomness_stream_key: &[u8; ACTION_RANDOMNESS_CHILD_KEY_BYTE_LENGTH],
     attempt_identifier: &[u8; ATTEMPT_IDENTIFIER_BYTE_LENGTH],
 ) -> Result<(), PrivateRandomnessError> {
     if stream.unread_block_offset > RANDOM_BLOCK_BYTE_LENGTH
@@ -868,7 +996,7 @@ fn validate_private_random_stream_snapshot(
         .ok_or(PrivateRandomnessError::InvalidResumeSecretState)?;
     let expected_block = derive_private_random_block(
         binding,
-        action_randomness_root,
+        private_randomness_stream_key,
         attempt_identifier,
         stream.stream_key,
         previous_counter,
@@ -922,7 +1050,7 @@ impl PrivateRandomBlockInput<'_> {
 
 fn derive_private_random_block(
     binding: &PrivateRandomnessActionBinding,
-    action_randomness_root: &[u8; ACTION_RANDOMNESS_ROOT_BYTE_LENGTH],
+    private_randomness_stream_key: &[u8; ACTION_RANDOMNESS_CHILD_KEY_BYTE_LENGTH],
     attempt_identifier: &[u8; ATTEMPT_IDENTIFIER_BYTE_LENGTH],
     stream_key: PrivateRandomStreamKey,
     counter: u64,
@@ -934,23 +1062,78 @@ fn derive_private_random_block(
         counter,
     }
     .encode()?;
-    Ok(kmac256_512(
-        action_randomness_root,
+    Ok(kmac256::<RANDOM_BLOCK_BYTE_LENGTH>(
+        private_randomness_stream_key,
         &input_bytes,
         PRIVATE_RANDOMNESS_CUSTOMIZATION,
     ))
 }
 
-fn kmac256_512(
+fn derive_action_randomness_key_hierarchy(
+    binding: &PrivateRandomnessActionBinding,
+    action_randomness_root: &[u8; ACTION_RANDOMNESS_ROOT_BYTE_LENGTH],
+) -> Result<ActionRandomnessKeyHierarchy, PrivateRandomnessError> {
+    let derivation_input_bytes =
+        Zeroizing::new(ActionRandomnessDerivationInput::new(*binding).encode()?);
+    let key_material = kmac256::<ACTION_RANDOMNESS_KEY_MATERIAL_BYTE_LENGTH>(
+        action_randomness_root,
+        derivation_input_bytes.as_ref(),
+        ACTION_RANDOMNESS_KEY_HIERARCHY_CUSTOMIZATION,
+    );
+    let mut action_randomness_commitment_preimage =
+        Zeroizing::new([0u8; ACTION_RANDOMNESS_CHILD_KEY_BYTE_LENGTH]);
+    action_randomness_commitment_preimage
+        .copy_from_slice(&key_material[..ACTION_RANDOMNESS_CHILD_KEY_BYTE_LENGTH]);
+    let mut private_randomness_stream_key =
+        Zeroizing::new([0u8; ACTION_RANDOMNESS_CHILD_KEY_BYTE_LENGTH]);
+    private_randomness_stream_key.copy_from_slice(
+        &key_material
+            [ACTION_RANDOMNESS_CHILD_KEY_BYTE_LENGTH..2 * ACTION_RANDOMNESS_CHILD_KEY_BYTE_LENGTH],
+    );
+    let mut proof_coin_key = Zeroizing::new([0u8; ACTION_RANDOMNESS_CHILD_KEY_BYTE_LENGTH]);
+    proof_coin_key.copy_from_slice(&key_material[2 * ACTION_RANDOMNESS_CHILD_KEY_BYTE_LENGTH..]);
+    Ok(ActionRandomnessKeyHierarchy {
+        action_randomness_commitment_preimage,
+        private_randomness_stream_key,
+        proof_coin_key,
+    })
+}
+
+fn derive_action_randomness_commitment(
+    binding: &PrivateRandomnessActionBinding,
+    action_randomness_commitment_preimage: &[u8; ACTION_RANDOMNESS_CHILD_KEY_BYTE_LENGTH],
+) -> Result<Hash512, PrivateRandomnessError> {
+    let derivation_input_bytes =
+        Zeroizing::new(ActionRandomnessDerivationInput::new(*binding).encode()?);
+    Ok(hash512(
+        "sealed-lattice/private-randomness/action-root-commitment/v1",
+        &[
+            CanonicalItem::variable_bytes(derivation_input_bytes.as_slice())?,
+            CanonicalItem::fixed_bytes(action_randomness_commitment_preimage)?,
+        ],
+    )?)
+}
+
+fn kmac256<const OUTPUT_BYTE_LENGTH: usize>(
     key: &[u8],
     message: &[u8],
     customization: &[u8],
-) -> Zeroizing<[u8; RANDOM_BLOCK_BYTE_LENGTH]> {
-    let mut output = Zeroizing::new([0u8; RANDOM_BLOCK_BYTE_LENGTH]);
+) -> Zeroizing<[u8; OUTPUT_BYTE_LENGTH]> {
+    let mut output = Zeroizing::new([0u8; OUTPUT_BYTE_LENGTH]);
     let mut kmac = Kmac::v256(key, customization);
     kmac.update(message);
     kmac.finalize(output.as_mut());
     output
+}
+
+fn require_protocol_version(version: u16) -> SchemaResult<()> {
+    if version != FOUNDATION_PROTOCOL_VERSION {
+        return Err(FoundationSchemaError::new(
+            RefusalReason::UnsupportedVersionOrSuite,
+            "the private-randomness derivation input has an unsupported protocol version",
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -958,7 +1141,7 @@ mod tests {
     use std::collections::VecDeque;
 
     use super::*;
-    use crate::foundation::{CanonicalDecodeLimits, CanonicalItemType};
+    use crate::foundation::CanonicalDecodeLimits;
 
     struct DeterministicTestEntropy {
         bytes: VecDeque<u8>,
@@ -1004,6 +1187,25 @@ mod tests {
             Hash512::from_bytes([0x33; 64]),
             ParticipantIdentity::from_bytes([0x44; 64]),
         )
+    }
+
+    fn test_stream_key(
+        binding: &PrivateRandomnessActionBinding,
+        root: &[u8; ACTION_RANDOMNESS_ROOT_BYTE_LENGTH],
+    ) -> Zeroizing<[u8; ACTION_RANDOMNESS_CHILD_KEY_BYTE_LENGTH]> {
+        let key_hierarchy = derive_action_randomness_key_hierarchy(binding, root)
+            .expect("the fixed action randomness hierarchy derives");
+        zeroizing_copy(&key_hierarchy.private_randomness_stream_key)
+    }
+
+    fn lowercase_hexadecimal(bytes: &[u8]) -> String {
+        const HEXADECIMAL_DIGITS: &[u8; 16] = b"0123456789abcdef";
+        let mut output = String::with_capacity(bytes.len() * 2);
+        for byte in bytes {
+            output.push(char::from(HEXADECIMAL_DIGITS[usize::from(byte >> 4)]));
+            output.push(char::from(HEXADECIMAL_DIGITS[usize::from(byte & 0x0f)]));
+        }
+        output
     }
 
     fn deterministic_action_and_attempt() -> (ActionPrivateRandomness, DeterministicTestEntropy) {
@@ -1069,7 +1271,7 @@ mod tests {
     }
 
     #[test]
-    fn kmac256_matches_nist_sp_800_185_sample_four() {
+    fn kmac_and_action_randomness_hierarchy_match_known_answer_vectors() {
         let key: Vec<u8> = (0x40u8..=0x5f).collect();
         let expected = [
             0x20, 0xc5, 0x70, 0xc3, 0x13, 0x46, 0xf7, 0x03, 0xc9, 0xac, 0x36, 0xc6, 0x1c, 0x03,
@@ -1078,106 +1280,149 @@ mod tests {
             0x89, 0xf2, 0x7c, 0xf6, 0xf5, 0x95, 0x1f, 0x01, 0x03, 0xf3, 0x3f, 0x4f, 0x24, 0x87,
             0x10, 0x24, 0xd9, 0xc2, 0x77, 0x73, 0xa8, 0xdd,
         ];
-        let output = kmac256_512(&key, &[0x00, 0x01, 0x02, 0x03], b"My Tagged Application");
+        let output = kmac256::<RANDOM_BLOCK_BYTE_LENGTH>(
+            &key,
+            &[0x00, 0x01, 0x02, 0x03],
+            b"My Tagged Application",
+        );
         assert_eq!(output.as_slice(), expected);
+
+        let binding = test_binding();
+        let input = ActionRandomnessDerivationInput::new(binding);
+        let encoded = input.encode().expect("derivation input encodes");
+        assert_eq!(
+            encoded.len(),
+            ACTION_RANDOMNESS_DERIVATION_INPUT_CANONICAL_BYTE_LENGTH
+        );
+        let decoded =
+            ActionRandomnessDerivationInput::decode(&encoded, &CanonicalDecodeLimits::default())
+                .expect("derivation input decodes");
+        assert_eq!(decoded, input);
+
+        let root = [0x51; ACTION_RANDOMNESS_ROOT_BYTE_LENGTH];
+        let hierarchy = derive_action_randomness_key_hierarchy(&binding, &root)
+            .expect("action key hierarchy derives");
+        let mut combined_key_material =
+            Vec::with_capacity(ACTION_RANDOMNESS_KEY_MATERIAL_BYTE_LENGTH);
+        combined_key_material
+            .extend_from_slice(hierarchy.action_randomness_commitment_preimage.as_slice());
+        combined_key_material.extend_from_slice(hierarchy.private_randomness_stream_key.as_slice());
+        combined_key_material.extend_from_slice(hierarchy.proof_coin_key.as_slice());
+        assert_eq!(
+            lowercase_hexadecimal(&combined_key_material),
+            "95fd3c9109de226d218b1a33d438e91f63fcbf8fa3fb53c42aa3593da68e547c2ab7479129b8a1f05a4797cbd35dddbbf52037b8d337ebddf934630fcb437fbaeb5dab1dc7a488b6d7f10f675ce3400dde2e048be6c713e28b2447356c0cdecc93b8b8522d19ade4c732f3d431bbcf36aad895045814d2eb086e96bc44981e85384ddb46cc8a18da84dea567c0c7506e0688c21376c517cc5293c892faae96b2dbb0bb8d22e326d7e52f474db44f286babb3746b69bc124f415889efc972cefd"
+        );
+
+        let commitment = derive_action_randomness_commitment(
+            &binding,
+            &hierarchy.action_randomness_commitment_preimage,
+        )
+        .expect("action randomness commitment derives");
+        assert_eq!(
+            commitment.to_lowercase_hex(),
+            "b163168184b88a64715dceaf760c1308041a9c5bf0cab3dfe2effcf2752b2e1aab1e960e3626ad8a8d66a5d3a6f4b8f41ad2426cbb6fcfd2cb36bdc67c9c6acd"
+        );
+
+        let mut entropy = DeterministicTestEntropy::new(root);
+        let action = ActionPrivateRandomness::try_new(binding, &mut entropy)
+            .expect("the fixed root constructs the action hierarchy");
+        assert_eq!(action.action_randomness_commitment(), commitment);
     }
 
     #[test]
-    fn private_random_block_input_uses_the_exact_schema_and_field_order() {
-        let attempt_identifier = [0x55; ATTEMPT_IDENTIFIER_BYTE_LENGTH];
-        let domain = PrivateRandomDomain::verifiable_secret_sharing_expansion(
-            VerifiableSecretSharingExpansionRole::RecipientShare,
+    fn action_randomness_hierarchy_separates_domains_and_every_public_context_field() {
+        let binding = test_binding();
+        let root = [0x51; ACTION_RANDOMNESS_ROOT_BYTE_LENGTH];
+        let input_bytes = ActionRandomnessDerivationInput::new(binding)
+            .encode()
+            .expect("derivation input encodes");
+        let randomness_material = kmac256::<ACTION_RANDOMNESS_KEY_MATERIAL_BYTE_LENGTH>(
+            &root,
+            &input_bytes,
+            ACTION_RANDOMNESS_KEY_HIERARCHY_CUSTOMIZATION,
         );
-        let stream_key = PrivateRandomStreamKey::new(domain, Hash512::from_bytes([0x66; 64]));
-        let encoded = PrivateRandomBlockInput {
-            binding: &test_binding(),
-            stream_key,
-            attempt_identifier: &attempt_identifier,
-            counter: 0x0102_0304_0506_0708,
-        }
-        .encode()
-        .expect("fixed canonical private-randomness input encodes");
-        let tuple = CanonicalTuple::decode(&encoded, &CanonicalDecodeLimits::default())
-            .expect("encoded private-randomness input decodes canonically");
+        let storage_domain_material = kmac256::<ACTION_RANDOMNESS_KEY_MATERIAL_BYTE_LENGTH>(
+            &root,
+            &input_bytes,
+            b"sealed-lattice/local-storage/key-hierarchy/v1",
+        );
+        assert_ne!(
+            randomness_material.as_slice(),
+            storage_domain_material.as_slice()
+        );
 
-        assert_eq!(tuple.schema_identifier, 0x0400);
-        assert_eq!(tuple.schema_version, 1);
-        assert_eq!(tuple.items.len(), 10);
-        assert_eq!(tuple.items[0].item_type(), CanonicalItemType::Unsigned16);
-        assert_eq!(tuple.items[0].canonical_bytes(), 1u16.to_le_bytes());
-        assert_eq!(tuple.items[1].canonical_bytes(), [0x11; 64]);
-        assert_eq!(tuple.items[2].canonical_bytes(), [0x22; 64]);
-        assert_eq!(tuple.items[3].canonical_bytes(), [0x33; 64]);
-        assert_eq!(tuple.items[4].canonical_bytes(), [0x44; 64]);
-        assert_eq!(tuple.items[5].canonical_bytes(), 0x2120u16.to_le_bytes());
-        assert_eq!(tuple.items[6].canonical_bytes(), 2u16.to_le_bytes());
-        assert_eq!(tuple.items[7].canonical_bytes(), [0x66; 64]);
-        assert_eq!(tuple.items[8].canonical_bytes(), attempt_identifier);
-        assert_eq!(
-            tuple.items[9].canonical_bytes(),
-            0x0102_0304_0506_0708u64.to_le_bytes()
-        );
-    }
-
-    #[test]
-    fn semantic_domain_constructors_assign_only_the_specified_pairs() {
-        assert_eq!(
-            PrivateRandomDomain::suite_sampling(SuiteSamplingPurpose::SecretContribution),
-            PrivateRandomDomain {
-                family: 0x0116,
-                purpose: 1,
-            }
-        );
-        assert_eq!(
-            PrivateRandomDomain::verifiable_secret_sharing_expansion(
-                VerifiableSecretSharingExpansionRole::AggregateThresholdShare,
+        let base_hierarchy = derive_action_randomness_key_hierarchy(&binding, &root)
+            .expect("base hierarchy derives");
+        let changed_bindings = [
+            PrivateRandomnessActionBinding::new(
+                Hash512::from_bytes([0x12; 64]),
+                binding.ceremony_context_hash(),
+                binding.action_context_hash(),
+                binding.participant_identity(),
             ),
-            PrivateRandomDomain {
-                family: 0x2120,
-                purpose: 3,
-            }
-        );
-        assert_eq!(
-            PrivateRandomDomain::target_flooding(TargetFloodingRole::Order),
-            PrivateRandomDomain {
-                family: 0x1630,
-                purpose: 2,
-            }
-        );
-        assert_eq!(
-            PrivateRandomDomain::proof_leaf_salt(0),
-            Err(PrivateRandomnessError::UnassignedDomain)
-        );
-        assert_eq!(
-            PrivateRandomDomain::proof_leaf_salt(0x1301),
-            Err(PrivateRandomnessError::UnassignedDomain)
-        );
-        assert_eq!(
-            PrivateRandomDomain::proof_leaf_salt(0x1302)
-                .expect("a verified statement schema gets the fixed salt purpose"),
-            PrivateRandomDomain {
-                family: 0x1302,
-                purpose: 0xfffe,
-            }
-        );
+            PrivateRandomnessActionBinding::new(
+                binding.suite_id(),
+                Hash512::from_bytes([0x23; 64]),
+                binding.action_context_hash(),
+                binding.participant_identity(),
+            ),
+            PrivateRandomnessActionBinding::new(
+                binding.suite_id(),
+                binding.ceremony_context_hash(),
+                Hash512::from_bytes([0x34; 64]),
+                binding.participant_identity(),
+            ),
+            PrivateRandomnessActionBinding::new(
+                binding.suite_id(),
+                binding.ceremony_context_hash(),
+                binding.action_context_hash(),
+                ParticipantIdentity::from_bytes([0x45; 64]),
+            ),
+        ];
+        for changed_binding in changed_bindings {
+            let changed_hierarchy = derive_action_randomness_key_hierarchy(&changed_binding, &root)
+                .expect("changed-context hierarchy derives");
+            assert_ne!(
+                base_hierarchy
+                    .action_randomness_commitment_preimage
+                    .as_slice(),
+                changed_hierarchy
+                    .action_randomness_commitment_preimage
+                    .as_slice(),
+            );
+            assert_ne!(
+                base_hierarchy.private_randomness_stream_key.as_slice(),
+                changed_hierarchy.private_randomness_stream_key.as_slice(),
+            );
+            assert_ne!(
+                base_hierarchy.proof_coin_key.as_slice(),
+                changed_hierarchy.proof_coin_key.as_slice(),
+            );
+        }
     }
 
     #[test]
     fn every_bound_field_and_counter_domain_separates_random_blocks() {
         let binding = test_binding();
         let root = [0x71; ACTION_RANDOMNESS_ROOT_BYTE_LENGTH];
+        let private_randomness_stream_key = test_stream_key(&binding, &root);
         let attempt_identifier = [0x72; ATTEMPT_IDENTIFIER_BYTE_LENGTH];
         let base_stream_key = PrivateRandomStreamKey::new(
             PrivateRandomDomain::suite_sampling(SuiteSamplingPurpose::SecretContribution),
             Hash512::from_bytes([0x73; 64]),
         );
-        let base =
-            derive_private_random_block(&binding, &root, &attempt_identifier, base_stream_key, 0)
-                .expect("base block derives");
+        let base = derive_private_random_block(
+            &binding,
+            &private_randomness_stream_key,
+            &attempt_identifier,
+            base_stream_key,
+            0,
+        )
+        .expect("base block derives");
 
         let changed_purpose = derive_private_random_block(
             &binding,
-            &root,
+            &private_randomness_stream_key,
             &attempt_identifier,
             PrivateRandomStreamKey::new(
                 PrivateRandomDomain::suite_sampling(SuiteSamplingPurpose::PublicKeyError),
@@ -1188,7 +1433,7 @@ mod tests {
         .expect("changed-purpose block derives");
         let changed_family = derive_private_random_block(
             &binding,
-            &root,
+            &private_randomness_stream_key,
             &attempt_identifier,
             PrivateRandomStreamKey::new(
                 PrivateRandomDomain::target_flooding(TargetFloodingRole::Identifier),
@@ -1199,7 +1444,7 @@ mod tests {
         .expect("changed-family block derives");
         let changed_context = derive_private_random_block(
             &binding,
-            &root,
+            &private_randomness_stream_key,
             &attempt_identifier,
             PrivateRandomStreamKey::new(
                 PrivateRandomDomain::suite_sampling(SuiteSamplingPurpose::SecretContribution),
@@ -1210,15 +1455,20 @@ mod tests {
         .expect("changed-context block derives");
         let changed_attempt = derive_private_random_block(
             &binding,
-            &root,
+            &private_randomness_stream_key,
             &[0x75; ATTEMPT_IDENTIFIER_BYTE_LENGTH],
             base_stream_key,
             0,
         )
         .expect("changed-attempt block derives");
-        let changed_counter =
-            derive_private_random_block(&binding, &root, &attempt_identifier, base_stream_key, 1)
-                .expect("changed-counter block derives");
+        let changed_counter = derive_private_random_block(
+            &binding,
+            &private_randomness_stream_key,
+            &attempt_identifier,
+            base_stream_key,
+            1,
+        )
+        .expect("changed-counter block derives");
 
         for changed in [
             changed_purpose,
@@ -1250,9 +1500,11 @@ mod tests {
             .expect("the same cursor continues across the block boundary");
 
         let stream_key = PrivateRandomStreamKey::new(domain, derivation_context_hash);
+        let private_randomness_stream_key =
+            test_stream_key(&test_binding(), &[0x51; ACTION_RANDOMNESS_ROOT_BYTE_LENGTH]);
         let first_block = derive_private_random_block(
             &test_binding(),
-            &[0x51; ACTION_RANDOMNESS_ROOT_BYTE_LENGTH],
+            &private_randomness_stream_key,
             &[0x62; ATTEMPT_IDENTIFIER_BYTE_LENGTH],
             stream_key,
             0,
@@ -1260,7 +1512,7 @@ mod tests {
         .expect("first expected block derives");
         let second_block = derive_private_random_block(
             &test_binding(),
-            &[0x51; ACTION_RANDOMNESS_ROOT_BYTE_LENGTH],
+            &private_randomness_stream_key,
             &[0x62; ATTEMPT_IDENTIFIER_BYTE_LENGTH],
             stream_key,
             1,
@@ -1286,7 +1538,7 @@ mod tests {
     }
 
     #[test]
-    fn rejection_sampling_is_little_endian_unbiased_and_consumes_rejections() {
+    fn rejection_sampling_is_unbiased_consumes_rejections_and_handles_full_u64() {
         let (mut action, mut entropy) = deterministic_action_and_attempt();
         let mut attempt = action
             .try_start_attempt(&mut entropy)
@@ -1348,39 +1600,37 @@ mod tests {
             2,
             "bitLength(257) requires exactly two bytes"
         );
-    }
 
-    #[test]
-    fn sampling_handles_the_full_u64_modulus_without_overflow() {
-        let (mut action, mut entropy) = deterministic_action_and_attempt();
-        let mut attempt = action
-            .try_start_attempt(&mut entropy)
+        let (mut full_width_action, mut full_width_entropy) = deterministic_action_and_attempt();
+        let mut full_width_attempt = full_width_action
+            .try_start_attempt(&mut full_width_entropy)
             .expect("test attempt identifier is available");
-        let domain = PrivateRandomDomain::target_flooding(TargetFloodingRole::Order);
-        let derivation_context_hash = Hash512::from_bytes([0xa1; 64]);
-        let stream_key = PrivateRandomStreamKey::new(domain, derivation_context_hash);
-        let mut scripted_block = [0u8; RANDOM_BLOCK_BYTE_LENGTH];
-        scripted_block[..8].copy_from_slice(&u64::MAX.to_le_bytes());
-        scripted_block[8..16].copy_from_slice(&5u64.to_le_bytes());
-        attempt.streams.insert(
-            stream_key,
+        let full_width_domain = PrivateRandomDomain::target_flooding(TargetFloodingRole::Order);
+        let full_width_context = Hash512::from_bytes([0xa1; 64]);
+        let full_width_stream_key =
+            PrivateRandomStreamKey::new(full_width_domain, full_width_context);
+        let mut full_width_block = [0u8; RANDOM_BLOCK_BYTE_LENGTH];
+        full_width_block[..8].copy_from_slice(&u64::MAX.to_le_bytes());
+        full_width_block[8..16].copy_from_slice(&5u64.to_le_bytes());
+        full_width_attempt.streams.insert(
+            full_width_stream_key,
             PrivateRandomStreamCursor {
                 next_counter: 1,
-                unread_block: Zeroizing::new(scripted_block),
+                unread_block: Zeroizing::new(full_width_block),
                 unread_block_offset: 0,
             },
         );
 
         assert_eq!(
-            attempt
-                .try_sample_uniform(domain, derivation_context_hash, u64::MAX, 2)
+            full_width_attempt
+                .try_sample_uniform(full_width_domain, full_width_context, u64::MAX, 2)
                 .expect("the rejected maximum is followed by an accepted candidate"),
             5
         );
         assert_eq!(
-            attempt
+            full_width_attempt
                 .streams
-                .get(&stream_key)
+                .get(&full_width_stream_key)
                 .expect("full-width stream remains open")
                 .unread_block_offset,
             16
@@ -1388,7 +1638,7 @@ mod tests {
     }
 
     #[test]
-    fn invalid_moduli_do_not_consume_randomness() {
+    fn sampling_rejects_invalid_inputs_and_candidate_exhaustion_without_reuse() {
         let (mut action, mut entropy) = deterministic_action_and_attempt();
         let mut attempt = action
             .try_start_attempt(&mut entropy)
@@ -1407,21 +1657,19 @@ mod tests {
             Err(PrivateRandomnessError::InvalidCandidateDrawLimit)
         );
         assert!(attempt.streams.is_empty());
-    }
 
-    #[test]
-    fn sampling_fails_closed_after_the_private_candidate_draw_limit() {
-        let (mut action, mut entropy) = deterministic_action_and_attempt();
-        let mut attempt = action
-            .try_start_attempt(&mut entropy)
+        let (mut limited_action, mut limited_entropy) = deterministic_action_and_attempt();
+        let mut limited_attempt = limited_action
+            .try_start_attempt(&mut limited_entropy)
             .expect("test attempt identifier is available");
-        let domain = PrivateRandomDomain::suite_sampling(SuiteSamplingPurpose::PublicKeyError);
-        let derivation_context_hash = Hash512::from_bytes([0xb2; 64]);
-        let stream_key = PrivateRandomStreamKey::new(domain, derivation_context_hash);
+        let limited_domain =
+            PrivateRandomDomain::suite_sampling(SuiteSamplingPurpose::PublicKeyError);
+        let limited_context = Hash512::from_bytes([0xb2; 64]);
+        let limited_stream_key = PrivateRandomStreamKey::new(limited_domain, limited_context);
         let mut scripted_block = [0u8; RANDOM_BLOCK_BYTE_LENGTH];
         scripted_block[..2].copy_from_slice(&[250, 251]);
-        attempt.streams.insert(
-            stream_key,
+        limited_attempt.streams.insert(
+            limited_stream_key,
             PrivateRandomStreamCursor {
                 next_counter: 1,
                 unread_block: Zeroizing::new(scripted_block),
@@ -1430,13 +1678,13 @@ mod tests {
         );
 
         assert_eq!(
-            attempt.try_sample_uniform(domain, derivation_context_hash, 10, 2),
+            limited_attempt.try_sample_uniform(limited_domain, limited_context, 10, 2),
             Err(PrivateRandomnessError::CandidateDrawLimitExhausted)
         );
         assert_eq!(
-            attempt
+            limited_attempt
                 .streams
-                .get(&stream_key)
+                .get(&limited_stream_key)
                 .expect("scripted stream remains open")
                 .unread_block_offset,
             2,
@@ -1445,7 +1693,7 @@ mod tests {
     }
 
     #[test]
-    fn counter_exhaustion_refuses_before_writing_or_advancing() {
+    fn counter_exhaustion_preserves_output_and_allows_only_the_derived_suffix() {
         let mut cursor = PrivateRandomStreamCursor {
             next_counter: u64::MAX,
             unread_block: Zeroizing::new([0xc1; RANDOM_BLOCK_BYTE_LENGTH]),
@@ -1469,13 +1717,10 @@ mod tests {
         assert_eq!(destination, [0xff], "preflight leaves output untouched");
         assert_eq!(cursor.next_counter, u64::MAX);
         assert_eq!(cursor.unread_block_offset, RANDOM_BLOCK_BYTE_LENGTH);
-    }
 
-    #[test]
-    fn the_final_unread_suffix_remains_consumable_after_counter_exhaustion() {
         let mut block = [0u8; RANDOM_BLOCK_BYTE_LENGTH];
         block[RANDOM_BLOCK_BYTE_LENGTH - 1] = 0xd1;
-        let mut cursor = PrivateRandomStreamCursor {
+        let mut suffix_cursor = PrivateRandomStreamCursor {
             next_counter: u64::MAX,
             unread_block: Zeroizing::new(block),
             unread_block_offset: RANDOM_BLOCK_BYTE_LENGTH - 1,
@@ -1485,7 +1730,7 @@ mod tests {
             Hash512::from_bytes([0xd2; 64]),
         );
         let mut last_byte = [0u8; 1];
-        cursor
+        suffix_cursor
             .try_fill_bytes(
                 &test_binding(),
                 &[0xd3; ACTION_RANDOMNESS_ROOT_BYTE_LENGTH],
@@ -1498,7 +1743,7 @@ mod tests {
 
         let mut beyond_suffix = [0u8; 1];
         assert_eq!(
-            cursor.try_fill_bytes(
+            suffix_cursor.try_fill_bytes(
                 &test_binding(),
                 &[0xd3; ACTION_RANDOMNESS_ROOT_BYTE_LENGTH],
                 &[0xd4; ATTEMPT_IDENTIFIER_BYTE_LENGTH],
@@ -1526,30 +1771,6 @@ mod tests {
                 .try_start_attempt(&mut PartiallyFailingTestEntropy)
                 .expect_err("partial attempt entropy must abort"),
             PrivateRandomnessError::EntropyUnavailable
-        );
-    }
-
-    #[test]
-    fn repeated_attempt_identifiers_refuse_instead_of_reusing_cursors() {
-        let repeated_identifier = [0xf1; ATTEMPT_IDENTIFIER_BYTE_LENGTH];
-        let mut entropy_bytes = Vec::new();
-        entropy_bytes.extend_from_slice(&[0xf0; ACTION_RANDOMNESS_ROOT_BYTE_LENGTH]);
-        entropy_bytes.extend_from_slice(&repeated_identifier);
-        entropy_bytes.extend_from_slice(&repeated_identifier);
-        let mut entropy = DeterministicTestEntropy::new(entropy_bytes);
-        let mut action = ActionPrivateRandomness::try_new(test_binding(), &mut entropy)
-            .expect("action root entropy succeeds");
-        {
-            let first_attempt = action
-                .try_start_attempt(&mut entropy)
-                .expect("first attempt identifier is fresh");
-            assert_eq!(first_attempt.attempt_identifier(), &repeated_identifier);
-        }
-        assert_eq!(
-            action
-                .try_start_attempt(&mut entropy)
-                .expect_err("a repeated identifier would recreate every domain stream"),
-            PrivateRandomnessError::RepeatedAttemptIdentifier
         );
     }
 
@@ -1693,7 +1914,7 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_creation_requires_the_exact_strictly_ordered_live_stream_set() {
+    fn snapshot_and_restore_require_exact_stream_action_and_attempt_bindings() {
         let live_streams = ordered_test_streams();
         let (mut action, mut entropy) = deterministic_action_and_attempt();
         let mut attempt = action
@@ -1730,10 +1951,7 @@ mod tests {
                 .expect_err("omitting an active stream must refuse"),
             PrivateRandomnessError::InvalidResumeStreamSet
         );
-    }
 
-    #[test]
-    fn restore_rejects_wrong_action_attempt_and_derived_context_bindings() {
         let (snapshot, live_streams, random_cursors) = populated_resume_snapshot();
         let wrong_binding = PrivateRandomnessActionBinding::new(
             Hash512::from_bytes([0x91; 64]),
@@ -1787,7 +2005,7 @@ mod tests {
     }
 
     #[test]
-    fn restore_rejects_missing_duplicate_reordered_and_changed_public_cursors() {
+    fn restore_rejects_tampered_public_cursors_and_secret_stream_state() {
         let (snapshot, live_streams, mut random_cursors) = populated_resume_snapshot();
         random_cursors.pop();
         assert_eq!(
@@ -1873,10 +2091,7 @@ mod tests {
             .expect_err("an unassigned public cursor domain must refuse"),
             PrivateRandomnessError::InvalidResumeCursorSet
         );
-    }
 
-    #[test]
-    fn restore_rejects_tampered_counter_offset_and_unread_suffix_state() {
         let (mut snapshot, live_streams, random_cursors) = populated_resume_snapshot();
         snapshot.streams[0].unread_block_offset = RANDOM_BLOCK_BYTE_LENGTH + 1;
         assert_eq!(
@@ -2094,17 +2309,14 @@ mod tests {
     }
 
     #[test]
-    fn resume_snapshot_debug_output_redacts_every_secret() {
+    fn secret_debug_output_is_redacted() {
         let (snapshot, _, _) = populated_resume_snapshot();
         let debug_output = format!("{snapshot:?}");
         assert!(debug_output.contains("[REDACTED]"));
         assert!(!debug_output.contains("81, 81"));
         assert!(!debug_output.contains("98, 98"));
         assert!(!debug_output.contains("unread_block"));
-    }
 
-    #[test]
-    fn secret_debug_output_is_redacted() {
         let mut entropy = DeterministicTestEntropy::new([0xab; ACTION_RANDOMNESS_ROOT_BYTE_LENGTH]);
         let action = ActionPrivateRandomness::try_new(test_binding(), &mut entropy)
             .expect("deterministic test root is available");

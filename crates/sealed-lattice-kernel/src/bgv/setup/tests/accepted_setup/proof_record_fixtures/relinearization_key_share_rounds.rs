@@ -14,6 +14,7 @@ use crate::hashing::derive_canonical_object_hash;
 // verifier's recompute exactly.
 pub(in super::super) fn relinearization_key_share_rounds_fixture(
     package: &serde_json::Value,
+    accepted_setup_session: crate::bgv::setup::AcceptedSetupProofBindingSession,
 ) -> RelinearizationKeyShareRoundsFixture {
     let setup_context = &package["setupContext"];
     let schedule = &package["evaluatorKeySchedule"];
@@ -112,6 +113,7 @@ pub(in super::super) fn relinearization_key_share_rounds_fixture(
                     EvaluationKeyShareProofFamily::Relinearization,
                     &record,
                     &fixture_material,
+                    accepted_setup_session,
                 );
             record["keySwitchComponentMaterialRoot"] =
                 serde_json::json!(authenticated_material.material_root);
@@ -227,6 +229,7 @@ pub(in super::super) fn relinearization_key_share_rounds_fixture(
                     EvaluationKeyShareProofFamily::Relinearization,
                     &record,
                     &fixture_material,
+                    accepted_setup_session,
                 );
             record["keySwitchComponentMaterialRoot"] =
                 serde_json::json!(authenticated_material.material_root);

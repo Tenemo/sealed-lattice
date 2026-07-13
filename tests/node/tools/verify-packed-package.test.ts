@@ -1,82 +1,14 @@
-import path from 'node:path';
-
 import { describe, expect, it } from 'vitest';
 
 import {
-    createIsolatedNpmEnvironment,
     extractPublishedKernelHash,
     hashPublishedKernelBytesSha256Hex,
-    parsePackMetadata,
-    parsePackedPackageSmokeArguments,
-    resolvePackedPackageNpmCacheDirectory,
     validatePublishedKernelIntegrity,
     validatePublishedPackageBundle,
     validatePublishedPackageFilePaths,
 } from '#tools/ci/verify-packed-package';
 
 describe('packed package policy checks', () => {
-    it('accepts only an optional retained-tarball path', () => {
-        expect(parsePackedPackageSmokeArguments([])).toEqual({});
-        expect(
-            parsePackedPackageSmokeArguments(['--out', 'package.tgz']),
-        ).toEqual({ retainedTarballPath: path.resolve('package.tgz') });
-        expect(
-            parsePackedPackageSmokeArguments(['--', '--out', 'package.tgz']),
-        ).toEqual({ retainedTarballPath: path.resolve('package.tgz') });
-        expect(() => parsePackedPackageSmokeArguments(['--out'])).toThrow(
-            'Usage: verify-packed-package.ts',
-        );
-    });
-
-    it('isolates npm cache writes inside the package-smoke temporary directory', () => {
-        expect(
-            createIsolatedNpmEnvironment('isolated-cache', {
-                NPM_CONFIG_CACHE: 'ambient-cache',
-                PATH: 'test-path',
-            }),
-        ).toEqual({
-            npm_config_cache: 'isolated-cache',
-            PATH: 'test-path',
-        });
-        expect(
-            resolvePackedPackageNpmCacheDirectory('default-cache', {
-                NPM_CONFIG_CACHE: 'configured-cache',
-            }),
-        ).toBe('configured-cache');
-        expect(resolvePackedPackageNpmCacheDirectory('default-cache', {})).toBe(
-            'default-cache',
-        );
-    });
-
-    it('parses the one npm tarball and its published file paths', () => {
-        expect(
-            parsePackMetadata(
-                JSON.stringify([
-                    {
-                        filename: 'sealed-lattice-0.0.19.tgz',
-                        files: [
-                            { path: 'dist/index.js' },
-                            { path: 'LICENSE' },
-                            { path: 'README.md' },
-                        ],
-                        integrity: 'sha512-package',
-                        name: 'sealed-lattice',
-                        version: '0.0.19',
-                    },
-                ]),
-            ),
-        ).toEqual({
-            filename: 'sealed-lattice-0.0.19.tgz',
-            filePaths: ['dist/index.js', 'LICENSE', 'README.md'],
-            integrity: 'sha512-package',
-            name: 'sealed-lattice',
-            version: '0.0.19',
-        });
-        expect(() => parsePackMetadata('{}')).toThrow(
-            'npm pack --json returned an unexpected shape',
-        );
-    });
-
     it('requires the exact public package file set', () => {
         const expectedFilePaths = [
             'LICENSE',

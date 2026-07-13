@@ -7,8 +7,6 @@ import { copyCanonicalStreamDescriptor } from '../setup/canonical-stream-descrip
 type JsonRecord = Record<string, unknown>;
 
 export const targetDecryptionShareProofFamily = 'target-decryption-share';
-export const targetDecryptionShareProofBytesEncoding =
-    'binary-chunked-proof-bytes';
 
 export type BgvTargetDecryptionShareProofMaterial = Readonly<
     JsonRecord & {
@@ -68,14 +66,6 @@ const validatedTargetProofMaterialRoot = (
     if (proofRecord.objectType !== 'BgvTargetDecryptionShareProofRecord') {
         throw new TypeError(
             'target-decryption proof record objectType must be BgvTargetDecryptionShareProofRecord.',
-        );
-    }
-    if (
-        proofRecord.proofBytesEncoding !==
-        targetDecryptionShareProofBytesEncoding
-    ) {
-        throw new TypeError(
-            'target-decryption proof record proofBytesEncoding must be binary-chunked-proof-bytes.',
         );
     }
     assertProtocolHash(

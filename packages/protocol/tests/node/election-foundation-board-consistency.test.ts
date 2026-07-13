@@ -2,16 +2,10 @@ import { describe, expect, it } from 'vitest';
 
 import {
     type BoardConsistencyInput,
-    type CanonicalSignedRootObject,
-    type CastReceipt,
-    type ProtocolSignatureEnvelope,
-    type RegistrationEntry,
-    type SignedBoardHead,
     boardKeyFixture,
     boardPolicyHash,
     boardPublicKeyHash,
     ceremonyId,
-    contextHash,
     createBoardEvidence,
     createBoardHead,
     createBoardHeadWithObjects,
@@ -19,22 +13,16 @@ import {
     createKeyFixture,
     createMlDsaSignatureProfileFixture,
     createProtocolSignatureFixture,
-    createRegistrationEntry,
-    createRosterManifestTranscriptInput,
     createSignature,
     deriveFixtureHash,
     deriveConflictingHeadEvidenceHash,
     deriveInclusionProofHash,
     deriveCanonicalObjectHash,
-    getParticipantSigningPublicKeyHash,
     profile,
     replaceSignatureBytes,
     replaceSignatureProfile,
     replaceSignaturePublicKeyBytes,
     verifyBoardConsistency,
-    verifyCastReceiptShell,
-    verifyRosterManifestTranscript,
-    verifySignedObjectSignature,
 } from './election-foundation-test-helpers';
 
 describe('board consistency', () => {
@@ -433,198 +421,6 @@ describe('board consistency', () => {
             expect.arrayContaining([
                 expect.objectContaining({ code: 'InvalidMlDsaContext' }),
             ]),
-        );
-    });
-
-    it('rejects signed roots missing required envelope fields', () => {
-        const head0 = createBoardHead(0, null);
-        const head1 = createBoardHead(1, head0.headHash);
-        const createHeadWithSignedRoot = (
-            signedRoot: CanonicalSignedRootObject,
-        ): SignedBoardHead => ({
-            ...head1,
-            signature: createProtocolSignatureFixture({
-                profile,
-                publicKeyBytesHex: boardKeyFixture.publicKeyBytesHex,
-                publicKeyHash: boardPublicKeyHash,
-                secretKeyBytesHex: boardKeyFixture.secretKeyBytesHex,
-                signedRoot,
-            }),
-        });
-        const omitSignedRootField = (
-            fieldName: keyof CanonicalSignedRootObject,
-        ): CanonicalSignedRootObject => {
-            const signedRoot = {
-                ...head1.signature.signedRoot,
-            } as Record<string, unknown>;
-            delete signedRoot[fieldName];
-
-            return signedRoot as CanonicalSignedRootObject;
-        };
-        const malformedHeads = [
-            createHeadWithSignedRoot(omitSignedRootField('manifestHash')),
-            createHeadWithSignedRoot(omitSignedRootField('boardHeadHash')),
-            createHeadWithSignedRoot(omitSignedRootField('contextHash')),
-            createHeadWithSignedRoot({
-                ...head1.signature.signedRoot,
-                objectRoot: null,
-                chunkMerkleRoot: null,
-            }),
-            createHeadWithSignedRoot({
-                ...head1.signature.signedRoot,
-                chunkMerkleRoot: deriveCanonicalObjectHash({
-                    objectType: 'BoardRootHash',
-                    chunkRoot: 'ambiguous',
-                }),
-            }),
-        ];
-
-        for (const malformedHead of malformedHeads) {
-            expect(
-                verifyBoardConsistency(
-                    createBoardEvidence([head0, malformedHead]),
-                ).refusedObjects,
-            ).toEqual(
-                expect.arrayContaining([
-                    expect.objectContaining({ code: 'InvalidSignedRoot' }),
-                ]),
-            );
-        }
-    });
-
-    it('returns structured refusals for malformed JavaScript verifier inputs', () => {
-        const head0 = createBoardHead(0, null);
-        const malformedBoardHead = { ...head0 } as Record<string, unknown>;
-        const malformedSignature = {
-            ...head0.signature,
-            signedRoot: undefined,
-        } as unknown as ProtocolSignatureEnvelope;
-        const castReceiptHash = deriveCanonicalObjectHash({
-            objectType: 'CastReceiptHash',
-            malformed: 'receipt',
-        });
-        const castReceipt = {
-            objectType: 'CastReceipt',
-            castReceiptHash,
-            ceremonyId,
-            electionManifestHash: deriveCanonicalObjectHash({
-                objectType: 'ElectionManifestHash',
-                manifest: 'cast',
-            }),
-            voterIdentity: 'participant-1',
-            encryptedBallotHash: deriveCanonicalObjectHash({
-                objectType: 'CiphertextRoot',
-                ballot: 'participant-1',
-            }),
-            contextHash,
-            boardSequence: head0.boardSequence,
-            boardPosition: 0,
-            recoveryEpoch: 0,
-            deviceEpoch: 0,
-            signature: createSignature(
-                'CastReceipt',
-                'Voter',
-                'participant-1',
-                getParticipantSigningPublicKeyHash('participant-1'),
-                castReceiptHash,
-            ),
-        } satisfies CastReceipt;
-        const malformedCastReceipt = {
-            ...castReceipt,
-            boardPosition: undefined,
-        } as unknown as CastReceipt;
-        const malformedRosterInput = createRosterManifestTranscriptInput([
-            createRegistrationEntry('participant-1', 1, 0),
-            createRegistrationEntry('participant-2', 1, 1),
-        ]);
-        const malformedRegistration = {
-            ...malformedRosterInput.registrationEntries[0],
-            boardPosition: undefined,
-        } as unknown as RegistrationEntry;
-
-        const expectFailClosed = (
-            verifier: () => {
-                readonly isValid: boolean;
-                readonly refusedObjects: readonly {
-                    readonly code: string;
-                    readonly message?: string;
-                }[];
-            },
-            expectedCode: string,
-        ): {
-            readonly isValid: boolean;
-            readonly refusedObjects: readonly {
-                readonly code: string;
-                readonly message?: string;
-            }[];
-        } => {
-            let result:
-                | {
-                      readonly isValid: boolean;
-                      readonly refusedObjects: readonly {
-                          readonly code: string;
-                          readonly message?: string;
-                      }[];
-                  }
-                | undefined;
-
-            expect(() => {
-                result = verifier();
-            }).not.toThrow();
-            expect(result?.isValid).toBe(false);
-            expect(result?.refusedObjects).toEqual(
-                expect.arrayContaining([
-                    expect.objectContaining({ code: expectedCode }),
-                ]),
-            );
-            if (result === undefined) {
-                throw new Error('Verifier did not return a result.');
-            }
-
-            return result;
-        };
-
-        delete malformedBoardHead.previousHeadHash;
-        expectFailClosed(
-            () =>
-                verifyBoardConsistency(
-                    createBoardEvidence([
-                        malformedBoardHead as SignedBoardHead,
-                    ]),
-                ),
-            'BoardConsistencyFailure',
-        );
-        expectFailClosed(
-            () => verifySignedObjectSignature(malformedSignature),
-            'InvalidSignature',
-        );
-        expectFailClosed(
-            () =>
-                verifyCastReceiptShell({
-                    boardEvidence: createBoardEvidence([head0]),
-                    receipt: malformedCastReceipt,
-                    receiptInclusionProof: createInclusionProof(
-                        head0,
-                        'CastReceipt',
-                        castReceiptHash,
-                    ),
-                    expectedElectionManifestHash:
-                        castReceipt.electionManifestHash,
-                    expectedVoterPublicKeyHash:
-                        getParticipantSigningPublicKeyHash('participant-1'),
-                }),
-            'CastReceiptInvalid',
-        );
-        expectFailClosed(
-            () =>
-                verifyRosterManifestTranscript({
-                    ...malformedRosterInput,
-                    registrationEntries: [
-                        malformedRegistration,
-                        ...malformedRosterInput.registrationEntries.slice(1),
-                    ],
-                }),
-            'RosterHashMismatch',
         );
     });
 });

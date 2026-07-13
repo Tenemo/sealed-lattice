@@ -6,8 +6,6 @@ import type {
     ProtocolRefusalCode,
     ProtocolSignatureEnvelope,
     SignatureVerificationResult,
-    SignedObjectType,
-    SignerRole,
 } from '@sealed-lattice/types';
 
 import { canonicalJson } from './canonical-json.js';
@@ -19,20 +17,11 @@ const supportedMlDsaContextString = 'sealed-lattice:v1';
 const mlDsa65PublicKeyByteLength = ml_dsa65.lengths.publicKey!;
 const mlDsa65SignatureByteLength = ml_dsa65.lengths.signature!;
 
-export type SignatureExpectation = {
-    readonly objectType?: SignedObjectType;
-    readonly signerRole?: SignerRole;
-    readonly signerIdentity?: string;
-    readonly ceremonyId?: string;
-    readonly publicKeyHash?: ProtocolHash;
-    readonly manifestHash?: ProtocolHash | null;
-    readonly objectRoot?: ProtocolHash | null;
-    readonly chunkMerkleRoot?: ProtocolHash | null;
-    readonly boardHeadHash?: ProtocolHash | null;
-    readonly contextHash?: ProtocolHash;
-    readonly recoveryEpoch?: number;
-    readonly deviceEpoch?: number;
-};
+export type SignatureExpectation = Readonly<
+    CanonicalSignedRootObject & {
+        readonly publicKeyHash: ProtocolHash;
+    }
+>;
 
 const emptySignatureVerificationResult = (
     code: ProtocolRefusalCode,
@@ -294,120 +283,84 @@ const validateExpectation = (
 ): SignatureVerificationResult | undefined => {
     const { signedRoot } = signature;
 
-    if (
-        expectation.objectType !== undefined &&
-        signedRoot.objectType !== expectation.objectType
-    ) {
+    if (signedRoot.objectType !== expectation.objectType) {
         return emptySignatureVerificationResult(
             'WrongObjectType',
             'Signature root object type does not match the expected object.',
             signature.signatureHash,
         );
     }
-    if (
-        expectation.signerRole !== undefined &&
-        signedRoot.signerRole !== expectation.signerRole
-    ) {
+    if (signedRoot.signerRole !== expectation.signerRole) {
         return emptySignatureVerificationResult(
             'WrongSignerRole',
             'Signature root signer role does not match the expected role.',
             signature.signatureHash,
         );
     }
-    if (
-        expectation.signerIdentity !== undefined &&
-        signedRoot.signerIdentity !== expectation.signerIdentity
-    ) {
+    if (signedRoot.signerIdentity !== expectation.signerIdentity) {
         return emptySignatureVerificationResult(
             'InvalidSignedRoot',
             'Signature root signer identity does not match the expected identity.',
             signature.signatureHash,
         );
     }
-    if (
-        expectation.ceremonyId !== undefined &&
-        signedRoot.ceremonyId !== expectation.ceremonyId
-    ) {
+    if (signedRoot.ceremonyId !== expectation.ceremonyId) {
         return emptySignatureVerificationResult(
             'WrongCeremony',
             'Signature root ceremony does not match the expected ceremony.',
             signature.signatureHash,
         );
     }
-    if (
-        expectation.publicKeyHash !== undefined &&
-        signature.publicKeyHash !== expectation.publicKeyHash
-    ) {
+    if (signature.publicKeyHash !== expectation.publicKeyHash) {
         return emptySignatureVerificationResult(
             'WrongPublicKey',
             'Signature public key hash does not match the expected key.',
             signature.signatureHash,
         );
     }
-    if (
-        expectation.manifestHash !== undefined &&
-        signedRoot.manifestHash !== expectation.manifestHash
-    ) {
+    if (signedRoot.manifestHash !== expectation.manifestHash) {
         return emptySignatureVerificationResult(
             'InvalidSignedRoot',
             'Signature root manifest hash does not match the expected manifest.',
             signature.signatureHash,
         );
     }
-    if (
-        expectation.objectRoot !== undefined &&
-        signedRoot.objectRoot !== expectation.objectRoot
-    ) {
+    if (signedRoot.objectRoot !== expectation.objectRoot) {
         return emptySignatureVerificationResult(
             'InvalidSignedRoot',
             'Signature root object hash does not match the signed object.',
             signature.signatureHash,
         );
     }
-    if (
-        expectation.chunkMerkleRoot !== undefined &&
-        signedRoot.chunkMerkleRoot !== expectation.chunkMerkleRoot
-    ) {
+    if (signedRoot.chunkMerkleRoot !== expectation.chunkMerkleRoot) {
         return emptySignatureVerificationResult(
             'InvalidSignedRoot',
             'Signature root chunk Merkle root does not match the expected object.',
             signature.signatureHash,
         );
     }
-    if (
-        expectation.boardHeadHash !== undefined &&
-        signedRoot.boardHeadHash !== expectation.boardHeadHash
-    ) {
+    if (signedRoot.boardHeadHash !== expectation.boardHeadHash) {
         return emptySignatureVerificationResult(
             'InvalidSignedRoot',
             'Signature root board-head hash does not match the expected head.',
             signature.signatureHash,
         );
     }
-    if (
-        expectation.recoveryEpoch !== undefined &&
-        signedRoot.recoveryEpoch !== expectation.recoveryEpoch
-    ) {
+    if (signedRoot.recoveryEpoch !== expectation.recoveryEpoch) {
         return emptySignatureVerificationResult(
             'InvalidSignedRoot',
             'Signature root recovery epoch does not match the expected object.',
             signature.signatureHash,
         );
     }
-    if (
-        expectation.deviceEpoch !== undefined &&
-        signedRoot.deviceEpoch !== expectation.deviceEpoch
-    ) {
+    if (signedRoot.deviceEpoch !== expectation.deviceEpoch) {
         return emptySignatureVerificationResult(
             'InvalidSignedRoot',
             'Signature root device epoch does not match the expected object.',
             signature.signatureHash,
         );
     }
-    if (
-        expectation.contextHash !== undefined &&
-        signedRoot.contextHash !== expectation.contextHash
-    ) {
+    if (signedRoot.contextHash !== expectation.contextHash) {
         return emptySignatureVerificationResult(
             'InvalidSignedRoot',
             'Signature root context hash does not match the expected context.',
@@ -418,27 +371,9 @@ const validateExpectation = (
     return undefined;
 };
 
-const hasExplicitSignatureExpectationBinding = (
-    expectation: SignatureExpectation,
-): boolean =>
-    [
-        expectation.objectType,
-        expectation.signerRole,
-        expectation.signerIdentity,
-        expectation.ceremonyId,
-        expectation.publicKeyHash,
-        expectation.manifestHash,
-        expectation.objectRoot,
-        expectation.chunkMerkleRoot,
-        expectation.boardHeadHash,
-        expectation.contextHash,
-        expectation.recoveryEpoch,
-        expectation.deviceEpoch,
-    ].some((value) => value !== undefined);
-
 const verifySignedObjectSignatureInner = (
     signature: ProtocolSignatureEnvelope,
-    expectation: SignatureExpectation = {},
+    expectation: SignatureExpectation,
 ): SignatureVerificationResult => {
     const profileFailure = validateProfile(signature);
     if (profileFailure !== undefined) {
@@ -453,14 +388,6 @@ const verifySignedObjectSignatureInner = (
     const shapeFailure = validateSignedRootShape(signature.signedRoot);
     if (shapeFailure !== undefined) {
         return shapeFailure;
-    }
-
-    if (!hasExplicitSignatureExpectationBinding(expectation)) {
-        return emptySignatureVerificationResult(
-            'InvalidSignedRoot',
-            'Signature verification requires explicit expectation bindings.',
-            signature.signatureHash,
-        );
     }
 
     const expectationFailure = validateExpectation(signature, expectation);
@@ -519,7 +446,7 @@ const verifySignedObjectSignatureInner = (
 
 export const verifySignedObjectSignature = (
     signature: ProtocolSignatureEnvelope,
-    expectation: SignatureExpectation = {},
+    expectation: SignatureExpectation,
 ): SignatureVerificationResult => {
     try {
         return verifySignedObjectSignatureInner(signature, expectation);

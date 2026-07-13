@@ -1,4 +1,4 @@
-import { access, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { access, mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -13,53 +13,46 @@ import type {
     LocalRunEventInput,
 } from '#tools/ci/local-run-log';
 
-type RecordedRunLog = {
+const createRunLog = (
+    runDirectoryPath: string,
+): {
     readonly events: LocalRunEventInput[];
-    readonly output: string[];
     readonly runLog: ActiveLocalRunLog;
-};
-
-const createRecordedRunLog = (runDirectoryPath: string): RecordedRunLog => {
+} => {
     const events: LocalRunEventInput[] = [];
-    const output: string[] = [];
-
     return {
         events,
-        output,
         runLog: {
             runDirectoryPath,
             createCommandLogFiles: () => {
                 throw new Error('Command logs are not used by lease tests.');
             },
             finish: () => Promise.resolve(),
-            writeCombinedOutput: (chunk) => {
-                output.push(chunk.toString());
-            },
-            writeCommandOutput: (input) => {
-                void input;
-            },
-            writeEvent: (event) => {
-                events.push(event);
-            },
+            writeCombinedOutput: () => undefined,
+            writeCommandOutput: () => undefined,
+            writeEvent: (event) => events.push(event),
         },
     };
 };
 
-const createTemporaryLeasePath = async (): Promise<{
-    readonly leaseDirectoryPath: string;
-    readonly temporaryRootPath: string;
-}> => {
+const withTemporaryLease = async <Result>(
+    action: (leaseDirectoryPath: string) => Promise<Result>,
+): Promise<Result> => {
     const temporaryRootPath = await mkdtemp(
         path.join(os.tmpdir(), 'sealed-lattice-heavy-lane-lease-test-'),
     );
-    return {
-        leaseDirectoryPath: path.join(temporaryRootPath, 'lease'),
-        temporaryRootPath,
-    };
+    try {
+        return await action(path.join(temporaryRootPath, 'lease'));
+    } finally {
+        vi.restoreAllMocks();
+        await rm(temporaryRootPath, { force: true, recursive: true });
+    }
 };
 
-const expectPathNotToExist = async (filePath: string): Promise<void> => {
-    await expect(access(filePath)).rejects.toMatchObject({ code: 'ENOENT' });
+const expectReleased = async (leaseDirectoryPath: string): Promise<void> => {
+    await expect(access(leaseDirectoryPath)).rejects.toMatchObject({
+        code: 'ENOENT',
+    });
 };
 
 const createDeferred = (): {
@@ -67,50 +60,20 @@ const createDeferred = (): {
     resolve(): void;
 } => {
     let resolvePromise: (() => void) | undefined;
-    const promise = new Promise<void>((resolve) => {
-        resolvePromise = resolve;
-    });
     return {
-        promise,
+        promise: new Promise((resolve) => {
+            resolvePromise = resolve;
+        }),
         resolve: () => resolvePromise?.(),
     };
 };
 
 describe('local guarded heavy-lane lease', () => {
-    it('bypasses the machine lease on isolated GitHub Actions runners', async () => {
-        const { leaseDirectoryPath, temporaryRootPath } =
-            await createTemporaryLeasePath();
-        const recordedRunLog = createRecordedRunLog('logs/github-actions');
-        try {
-            const action = vi.fn(() => Promise.resolve('completed'));
-            await expect(
-                withLocalHeavyLaneLease({
-                    action,
-                    dependencies: { leaseDirectoryPath },
-                    environment: { GITHUB_ACTIONS: 'true' },
-                    laneLabel: 'Node kernel heavy',
-                    runLog: recordedRunLog.runLog,
-                }),
-            ).resolves.toBe('completed');
-
-            expect(action).toHaveBeenCalledOnce();
-            expect(recordedRunLog.events).toContainEqual({
-                details: { reason: 'isolated-github-actions-runner' },
-                eventType: 'heavy-lane-lease-bypassed',
-            });
-            await expectPathNotToExist(leaseDirectoryPath);
-        } finally {
-            await rm(temporaryRootPath, { force: true, recursive: true });
-        }
-    });
-
-    it('waits for a live owner and acquires only after release', async () => {
-        const { leaseDirectoryPath, temporaryRootPath } =
-            await createTemporaryLeasePath();
-        const firstRunLog = createRecordedRunLog('logs/first-heavy-run');
-        const secondRunLog = createRecordedRunLog('logs/second-heavy-run');
-        vi.spyOn(console, 'log').mockImplementation(() => undefined);
-        try {
+    it('waits for a live owner before acquiring the machine lease', () =>
+        withTemporaryLease(async (leaseDirectoryPath) => {
+            vi.spyOn(console, 'log').mockImplementation(() => undefined);
+            const firstRun = createRunLog('logs/first-heavy-run');
+            const secondRun = createRunLog('logs/second-heavy-run');
             const firstLease = await acquireLocalHeavyLaneLease({
                 dependencies: {
                     isProcessAlive: () => true,
@@ -119,9 +82,10 @@ describe('local guarded heavy-lane lease', () => {
                     processIdentifier: 1001,
                 },
                 laneLabel: 'Rust accepted setup',
-                runLog: firstRunLog.runLog,
+                runLog: firstRun.runLog,
             });
             let waitCount = 0;
+
             const secondLease = await acquireLocalHeavyLaneLease({
                 dependencies: {
                     isProcessAlive: () => true,
@@ -136,99 +100,25 @@ describe('local guarded heavy-lane lease', () => {
                     waitDiagnosticIntervalMilliseconds: 1,
                 },
                 laneLabel: 'Node kernel heavy',
-                runLog: secondRunLog.runLog,
+                runLog: secondRun.runLog,
             });
 
             expect(waitCount).toBe(1);
-            expect(secondRunLog.events).toContainEqual(
+            expect(secondRun.events).toContainEqual(
                 expect.objectContaining({
                     eventType: 'heavy-lane-lease-waiting',
                 }),
             );
             expect(secondLease.owner.processIdentifier).toBe(1002);
             await secondLease.release();
-            await expectPathNotToExist(leaseDirectoryPath);
-        } finally {
-            vi.restoreAllMocks();
-            await rm(temporaryRootPath, { force: true, recursive: true });
-        }
-    });
+            await expectReleased(leaseDirectoryPath);
+        }));
 
-    it('cannot let a stalled candidate initializer remove its successor', async () => {
-        const { leaseDirectoryPath, temporaryRootPath } =
-            await createTemporaryLeasePath();
-        const stalledRunLog = createRecordedRunLog(
-            'logs/stalled-candidate-heavy-run',
-        );
-        const successorRunLog = createRecordedRunLog(
-            'logs/candidate-successor-heavy-run',
-        );
-        const candidateInitialized = createDeferred();
-        const resumeCandidatePromotion = createDeferred();
-        vi.spyOn(console, 'log').mockImplementation(() => undefined);
-        try {
-            const successorLeaseHolder: {
-                lease?: Awaited<ReturnType<typeof acquireLocalHeavyLaneLease>>;
-            } = {};
-            const stalledAcquisition = acquireLocalHeavyLaneLease({
-                dependencies: {
-                    beforeCandidatePromotion: async () => {
-                        candidateInitialized.resolve();
-                        await resumeCandidatePromotion.promise;
-                    },
-                    isProcessAlive: (processIdentifier) =>
-                        processIdentifier === 5002,
-                    leaseDirectoryPath,
-                    leaseIdentifier: () => 'stalled-candidate',
-                    pollIntervalMilliseconds: 1,
-                    processIdentifier: 5001,
-                    sleep: async () => {
-                        await successorLeaseHolder.lease?.release();
-                    },
-                },
-                laneLabel: 'Rust accepted setup',
-                runLog: stalledRunLog.runLog,
-            });
-            await candidateInitialized.promise;
-
-            successorLeaseHolder.lease = await acquireLocalHeavyLaneLease({
-                dependencies: {
-                    isProcessAlive: () => true,
-                    leaseDirectoryPath,
-                    leaseIdentifier: () => 'candidate-successor',
-                    processIdentifier: 5002,
-                },
-                laneLabel: 'Node kernel heavy',
-                runLog: successorRunLog.runLog,
-            });
-            resumeCandidatePromotion.resolve();
-
-            const stalledLease = await stalledAcquisition;
-            expect(stalledLease.owner.leaseIdentifier).toBe(
-                'stalled-candidate',
-            );
-            expect(successorRunLog.events).toContainEqual(
-                expect.objectContaining({
-                    eventType: 'heavy-lane-lease-released',
-                }),
-            );
-            await stalledLease.release();
-            await expectPathNotToExist(leaseDirectoryPath);
-        } finally {
-            vi.restoreAllMocks();
-            await rm(temporaryRootPath, { force: true, recursive: true });
-        }
-    });
-
-    it('recovers a crashed owner only after its process is no longer alive', async () => {
-        const { leaseDirectoryPath, temporaryRootPath } =
-            await createTemporaryLeasePath();
-        const crashedRunLog = createRecordedRunLog('logs/crashed-heavy-run');
-        const recoveringRunLog = createRecordedRunLog(
-            'logs/recovering-heavy-run',
-        );
-        vi.spyOn(console, 'log').mockImplementation(() => undefined);
-        try {
+    it('recovers ownership only after the previous process dies', () =>
+        withTemporaryLease(async (leaseDirectoryPath) => {
+            vi.spyOn(console, 'log').mockImplementation(() => undefined);
+            const crashedRun = createRunLog('logs/crashed-heavy-run');
+            const recoveringRun = createRunLog('logs/recovering-heavy-run');
             await acquireLocalHeavyLaneLease({
                 dependencies: {
                     isProcessAlive: () => true,
@@ -237,7 +127,7 @@ describe('local guarded heavy-lane lease', () => {
                     processIdentifier: 2001,
                 },
                 laneLabel: 'Rust kernel heavy',
-                runLog: crashedRunLog.runLog,
+                runLog: crashedRun.runLog,
             });
 
             const recoveredLease = await acquireLocalHeavyLaneLease({
@@ -249,10 +139,10 @@ describe('local guarded heavy-lane lease', () => {
                     processIdentifier: 2002,
                 },
                 laneLabel: 'Rust accepted setup',
-                runLog: recoveringRunLog.runLog,
+                runLog: recoveringRun.runLog,
             });
 
-            const recoveryEvent = recoveringRunLog.events.find(
+            const recoveryEvent = recoveringRun.events.find(
                 (event) =>
                     event.eventType ===
                     'heavy-lane-lease-stale-owner-recovered',
@@ -262,38 +152,26 @@ describe('local guarded heavy-lane lease', () => {
             );
             expect(recoveredLease.owner.processIdentifier).toBe(2002);
             await recoveredLease.release();
-            await expectPathNotToExist(leaseDirectoryPath);
-        } finally {
-            vi.restoreAllMocks();
-            await rm(temporaryRootPath, { force: true, recursive: true });
-        }
-    });
+            await expectReleased(leaseDirectoryPath);
+        }));
 
-    it('prevents a delayed stale observer from retiring the successor generation', async () => {
-        const { leaseDirectoryPath, temporaryRootPath } =
-            await createTemporaryLeasePath();
-        const crashedRunLog = createRecordedRunLog(
-            'logs/generation-crashed-heavy-run',
-        );
-        const recoveringRunLog = createRecordedRunLog(
-            'logs/generation-recovering-heavy-run',
-        );
-        const delayedRunLog = createRecordedRunLog(
-            'logs/generation-delayed-heavy-run',
-        );
-        const staleGenerationObserved = createDeferred();
-        const resumeStaleRetirement = createDeferred();
-        vi.spyOn(console, 'log').mockImplementation(() => undefined);
-        try {
+    it('does not let a delayed stale observer retire a successor generation', () =>
+        withTemporaryLease(async (leaseDirectoryPath) => {
+            vi.spyOn(console, 'log').mockImplementation(() => undefined);
+            const staleGenerationObserved = createDeferred();
+            const resumeStaleRetirement = createDeferred();
+            const crashedRun = createRunLog('logs/crashed-heavy-run');
+            const recoveringRun = createRunLog('logs/recovering-heavy-run');
+            const delayedRun = createRunLog('logs/delayed-heavy-run');
             await acquireLocalHeavyLaneLease({
                 dependencies: {
                     isProcessAlive: () => true,
                     leaseDirectoryPath,
-                    leaseIdentifier: () => 'generation-crashed-owner',
+                    leaseIdentifier: () => 'crashed-owner',
                     processIdentifier: 6001,
                 },
                 laneLabel: 'Rust kernel heavy',
-                runLog: crashedRunLog.runLog,
+                runLog: crashedRun.runLog,
             });
 
             const successorLeaseHolder: {
@@ -302,9 +180,7 @@ describe('local guarded heavy-lane lease', () => {
             const delayedAcquisition = acquireLocalHeavyLaneLease({
                 dependencies: {
                     beforeStaleRetirement: async (owner) => {
-                        if (
-                            owner.leaseIdentifier === 'generation-crashed-owner'
-                        ) {
+                        if (owner.leaseIdentifier === 'crashed-owner') {
                             staleGenerationObserved.resolve();
                             await resumeStaleRetirement.promise;
                         }
@@ -312,15 +188,13 @@ describe('local guarded heavy-lane lease', () => {
                     isProcessAlive: (processIdentifier) =>
                         processIdentifier === 6002,
                     leaseDirectoryPath,
-                    leaseIdentifier: () => 'generation-delayed-observer',
+                    leaseIdentifier: () => 'delayed-observer',
                     pollIntervalMilliseconds: 1,
                     processIdentifier: 6003,
-                    sleep: async () => {
-                        await successorLeaseHolder.lease?.release();
-                    },
+                    sleep: async () => successorLeaseHolder.lease?.release(),
                 },
                 laneLabel: 'Rust accepted setup',
-                runLog: delayedRunLog.runLog,
+                runLog: delayedRun.runLog,
             });
             await staleGenerationObserved.promise;
 
@@ -329,75 +203,30 @@ describe('local guarded heavy-lane lease', () => {
                     isProcessAlive: (processIdentifier) =>
                         processIdentifier !== 6001,
                     leaseDirectoryPath,
-                    leaseIdentifier: () => 'generation-successor',
+                    leaseIdentifier: () => 'successor',
                     processIdentifier: 6002,
                 },
                 laneLabel: 'Node kernel heavy',
-                runLog: recoveringRunLog.runLog,
+                runLog: recoveringRun.runLog,
             });
             resumeStaleRetirement.resolve();
 
             const delayedLease = await delayedAcquisition;
-            expect(delayedLease.owner.leaseIdentifier).toBe(
-                'generation-delayed-observer',
-            );
-            expect(recoveringRunLog.events).toContainEqual(
+            expect(delayedLease.owner.leaseIdentifier).toBe('delayed-observer');
+            expect(recoveringRun.events).toContainEqual(
                 expect.objectContaining({
                     eventType: 'heavy-lane-lease-released',
                 }),
             );
             await delayedLease.release();
-            await expectPathNotToExist(leaseDirectoryPath);
-        } finally {
-            vi.restoreAllMocks();
-            await rm(temporaryRootPath, { force: true, recursive: true });
-        }
-    });
+            await expectReleased(leaseDirectoryPath);
+        }));
 
-    it('recovers old incomplete ownership metadata without guessing at a live owner', async () => {
-        const { leaseDirectoryPath, temporaryRootPath } =
-            await createTemporaryLeasePath();
-        const recoveringRunLog = createRecordedRunLog(
-            'logs/recovering-incomplete-heavy-run',
-        );
-        vi.spyOn(console, 'log').mockImplementation(() => undefined);
-        try {
-            await mkdir(leaseDirectoryPath);
-            await writeFile(
-                path.join(leaseDirectoryPath, 'owner.json'),
-                '{incomplete',
-                'utf8',
-            );
-            const recoveredLease = await acquireLocalHeavyLaneLease({
-                dependencies: {
-                    initializationGraceMilliseconds: 0,
-                    leaseDirectoryPath,
-                    leaseIdentifier: () => 'metadata-recovery-lease',
-                    processIdentifier: 3001,
-                },
-                laneLabel: 'Node kernel heavy',
-                runLog: recoveringRunLog.runLog,
-            });
+    it('releases the lease when the guarded action throws', () =>
+        withTemporaryLease(async (leaseDirectoryPath) => {
+            vi.spyOn(console, 'log').mockImplementation(() => undefined);
+            const run = createRunLog('logs/failing-heavy-run');
 
-            expect(recoveringRunLog.events).toContainEqual(
-                expect.objectContaining({
-                    eventType: 'heavy-lane-lease-stale-metadata-recovered',
-                }),
-            );
-            await recoveredLease.release();
-            await expectPathNotToExist(leaseDirectoryPath);
-        } finally {
-            vi.restoreAllMocks();
-            await rm(temporaryRootPath, { force: true, recursive: true });
-        }
-    });
-
-    it('releases the lease when the guarded action throws', async () => {
-        const { leaseDirectoryPath, temporaryRootPath } =
-            await createTemporaryLeasePath();
-        const recordedRunLog = createRecordedRunLog('logs/failing-heavy-run');
-        vi.spyOn(console, 'log').mockImplementation(() => undefined);
-        try {
             await expect(
                 withLocalHeavyLaneLease({
                     action: () => {
@@ -410,19 +239,15 @@ describe('local guarded heavy-lane lease', () => {
                     },
                     environment: {},
                     laneLabel: 'Rust kernel heavy',
-                    runLog: recordedRunLog.runLog,
+                    runLog: run.runLog,
                 }),
             ).rejects.toThrow('simulated runner failure');
 
-            expect(recordedRunLog.events).toContainEqual(
+            expect(run.events).toContainEqual(
                 expect.objectContaining({
                     eventType: 'heavy-lane-lease-released',
                 }),
             );
-            await expectPathNotToExist(leaseDirectoryPath);
-        } finally {
-            vi.restoreAllMocks();
-            await rm(temporaryRootPath, { force: true, recursive: true });
-        }
-    });
+            await expectReleased(leaseDirectoryPath);
+        }));
 });

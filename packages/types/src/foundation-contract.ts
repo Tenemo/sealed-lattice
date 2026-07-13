@@ -148,7 +148,9 @@ export const foundationSchemaIdentifiers = Object.freeze({
     deviceWrappedStorageRoot: 0x0305,
     localRecordEnvelope: 0x0306,
     localRecordAuthenticatorInput: 0x0307,
+    actionStorageDerivationInput: 0x0308,
     privateRandomBlockInput: 0x0400,
+    actionRandomnessDerivationInput: 0x0402,
     stateReservationIntent: 0x1610,
     stateOutputIntent: 0x1611,
     stateWitnessVote: 0x1612,
@@ -172,6 +174,24 @@ export const foundationSchemaIdentifiers = Object.freeze({
     relationPlanVariant: 0x2205,
 } as const);
 
+/** Public context bound into the participant-local storage key hierarchy. */
+export type ActionStorageDerivationInput = Readonly<{
+    protocolVersion: number;
+    suiteId: ProtocolHash;
+    ceremonyContextHash: ProtocolHash;
+    actionContextHash: ProtocolHash;
+    participantId: ParticipantIdentity;
+}>;
+
+/** Public context bound into the participant-private randomness key hierarchy. */
+export type ActionRandomnessDerivationInput = Readonly<{
+    protocolVersion: number;
+    suiteId: ProtocolHash;
+    ceremonyContextHash: ProtocolHash;
+    actionContextHash: ProtocolHash;
+    participantId: ParticipantIdentity;
+}>;
+
 /** Public inputs bound by the collective public-key aggregation proof header. */
 export type CollectivePublicKeyAggregateStatement = Readonly<{
     setupProofContextHash: ProtocolHash;
@@ -185,6 +205,11 @@ export const stateCapabilityKinds = Object.freeze({
     ballotCandidateList: 1,
     finalitySignature: 2,
     targetRelease: 3,
+    setupActionRandomnessRoot: 4,
+    setupPublicSeedBranch: 5,
+    setupDealerSetBranch: 6,
+    setupRkgRoundOneBranch: 7,
+    setupTerminalPackage: 8,
 } as const);
 
 export type StateCapabilityKind =

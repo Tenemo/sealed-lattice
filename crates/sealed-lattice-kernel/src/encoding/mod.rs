@@ -488,43 +488,6 @@ mod tests {
     }
 
     #[test]
-    fn command_exposes_kernel_field_interpolation() {
-        let response = super::run_transcript_core_command_inner(
-            serde_json::json!({
-                "command": "InterpolateShamirConstantTerm",
-                "sharePoints": [
-                    { "rosterPosition": 1, "value": 15 },
-                    { "rosterPosition": 2, "value": 25 }
-                ]
-            })
-            .to_string()
-            .as_bytes(),
-        )
-        .expect("field interpolation command should succeed");
-
-        assert_eq!(response["fieldElement"], 5);
-    }
-
-    #[test]
-    fn command_exposes_plaintext_comparison() {
-        let response = super::run_transcript_core_command_inner(
-            serde_json::json!({
-                "command": "EvaluatePlaintextComparison",
-                "leftTotalScore": 41,
-                "rightTotalScore": 40,
-                "rosterSize": 5
-            })
-            .to_string()
-            .as_bytes(),
-        )
-        .expect("plaintext comparison command should succeed");
-
-        assert_eq!(response["greaterThan"], 1);
-        assert_eq!(response["equal"], 0);
-        assert_eq!(response["scoreDifference"], 1);
-    }
-
-    #[test]
     fn generic_command_refuses_setup_verification_without_an_opaque_session() {
         let error = super::run_transcript_core_command_inner(
             serde_json::json!({

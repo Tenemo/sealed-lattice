@@ -97,6 +97,7 @@ export const verifyBoardHead = (
         ceremonyId: input.ceremonyId,
         manifestHash: null,
         objectRoot: head.headHash,
+        chunkMerkleRoot: null,
         boardHeadHash: null,
         recoveryEpoch: 0,
         deviceEpoch: 0,

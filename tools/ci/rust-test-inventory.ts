@@ -10,7 +10,7 @@ export type RustTestInventoryEntry = {
     readonly testName: string;
 };
 
-export const parseLibtestListOutput = (output: string): readonly string[] =>
+const parseLibtestListOutput = (output: string): readonly string[] =>
     [
         ...new Set(
             output

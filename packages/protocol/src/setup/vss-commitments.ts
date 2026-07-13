@@ -11,7 +11,6 @@ export {
 export type {
     VssCommittedMaterialCommitmentValue,
     VssCommittedMaterialCommitmentComputer,
-    VssCommittedMaterialSeedProvider,
     VssShareLinkageProofComputer,
     VssAggregateThresholdProofComputer,
     VssPublicCoefficientCommitmentSet,
@@ -20,15 +19,8 @@ export type {
     LocalTrusteeVssPublicAggregateThresholdCommitmentBundle,
     LocalTrusteeVssPublicAggregateOpeningCredentialHandoff,
     VssPublicSourceTrusteeOpeningState,
-    VssPublicCoefficientCredential,
 } from './vss-commitments/commitment-sets.js';
-export {
-    createVssShareLinkageStatement,
-    createVssShareLinkageProofMaterialSet,
-    createThresholdShareCommitmentBinding,
-    createVssSameSecretBridgeStatementSet,
-    createVssSameSecretBridgeProofMaterialSet,
-} from './vss-commitments/linkage-and-bridge.js';
+export { createVssSameSecretBridgeStatementSet } from './vss-commitments/linkage-and-bridge.js';
 export type {
     VssShareLinkageStatement,
     VssSameSecretBridgeProofMaterialSet,

@@ -39,7 +39,7 @@ fn direct_encrypted_ballot_command_rejects_more_than_twenty_ballots() {
 }
 
 #[test]
-fn direct_encrypted_ballot_command_rejects_missing_ballot_encryption_randomness() {
+fn direct_encrypted_ballot_command_enforces_the_randomness_input_boundary() {
     let setup_package = setup_package_not_reached();
     let error = run_direct_encrypted_ballot(&json!({
         "setupPackage": setup_package,
@@ -67,10 +67,7 @@ fn direct_encrypted_ballot_command_rejects_missing_ballot_encryption_randomness(
 
     assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
     assert!(error.message.contains("ballotEncryptionRandomness"));
-}
 
-#[test]
-fn direct_encrypted_ballot_command_rejects_ballot_embedded_encryption_seed() {
     let setup_package = setup_package_not_reached();
     let error = run_direct_encrypted_ballot(&json!({
         "setupPackage": setup_package,
@@ -107,11 +104,11 @@ fn direct_encrypted_ballot_command_rejects_ballot_embedded_encryption_seed() {
 }
 
 #[test]
-fn direct_encrypted_ballot_command_rejects_reused_encryption_randomness() {
-    let setup_package = setup_package_not_reached();
+fn direct_encrypted_ballot_command_rejects_reused_randomness() {
+    let encryption_setup_package = setup_package_not_reached();
     let reused_randomness = direct_ballot_test_randomness_hex("reused-encryption", 0);
     let error = run_direct_encrypted_ballot(&json!({
-        "setupPackage": setup_package,
+        "setupPackage": encryption_setup_package,
         "setupPrivateWitness": {
             "setupSeed": TEST_SETUP_SEED
         },
@@ -131,14 +128,11 @@ fn direct_encrypted_ballot_command_rejects_reused_encryption_randomness() {
 
     assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
     assert!(error.message.contains("repeats direct ballot randomness"));
-}
 
-#[test]
-fn direct_encrypted_ballot_command_rejects_reused_proof_randomness() {
-    let setup_package = setup_package();
+    let proof_setup_package = setup_package();
     let reused_randomness = direct_ballot_test_randomness_hex("reused-proof", 0);
     let error = run_direct_encrypted_ballot(&json!({
-        "setupPackage": setup_package,
+        "setupPackage": proof_setup_package,
         "setupPrivateWitness": {
             "setupSeed": TEST_SETUP_SEED
         },
@@ -158,14 +152,11 @@ fn direct_encrypted_ballot_command_rejects_reused_proof_randomness() {
 
     assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
     assert!(error.message.contains("repeats direct ballot randomness"));
-}
 
-#[test]
-fn direct_encrypted_ballot_command_rejects_proof_and_encryption_randomness_overlap() {
-    let setup_package = setup_package();
+    let cross_purpose_setup_package = setup_package();
     let reused_randomness = direct_ballot_test_randomness_hex("cross-purpose-randomness", 0);
     let error = run_direct_encrypted_ballot(&json!({
-        "setupPackage": setup_package,
+        "setupPackage": cross_purpose_setup_package,
         "setupPrivateWitness": {
             "setupSeed": TEST_SETUP_SEED
         },
@@ -190,7 +181,7 @@ fn direct_encrypted_ballot_command_rejects_proof_and_encryption_randomness_overl
 }
 
 #[test]
-fn direct_encrypted_ballot_command_rejects_duplicate_voter_identity() {
+fn direct_encrypted_ballot_command_rejects_duplicate_or_unsorted_voters() {
     let setup_package = setup_package_not_reached();
     let error = run_direct_encrypted_ballot(&json!({
         "setupPackage": setup_package,
@@ -231,10 +222,7 @@ fn direct_encrypted_ballot_command_rejects_duplicate_voter_identity() {
 
     assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
     assert!(error.message.contains("duplicate voter identity"));
-}
 
-#[test]
-fn direct_encrypted_ballot_command_rejects_wrong_voter_order() {
     let setup_package = setup_package_not_reached();
     let error = run_direct_encrypted_ballot(&json!({
         "setupPackage": setup_package,
@@ -278,37 +266,6 @@ fn direct_encrypted_ballot_command_rejects_wrong_voter_order() {
 }
 
 #[test]
-fn direct_encrypted_ballot_command_rejects_invalid_score_before_proof_generation() {
-    let setup_package = setup_package_not_reached();
-    let error = run_direct_encrypted_ballot(&json!({
-        "setupPackage": setup_package,
-        "setupPrivateWitness": {
-            "setupSeed": TEST_SETUP_SEED
-        },
-        "ballotEncryptionRandomness": direct_ballot_test_ballot_encryption_randomness(1),
-        "ballots": [
-            {
-                "voterIdentity": "voter-invalid-score",
-                "actionContextHash": derive_canonical_object_hash(
-                    &json!({
-                        "objectType": "ActionContextHash", "action": "direct encrypted ballot invalid score test" }),
-                ).expect("action hash"),
-                "scores": [
-                    10, 9, 8, 7, 6,
-                    5, 4, 3, 11, 1,
-                    1, 2, 3, 4, 5,
-                    6, 7, 8, 9, 10
-                ]
-            }
-        ]
-    }))
-    .expect_err("invalid direct ballot score must reject");
-
-    assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
-    assert!(error.message.contains("score at option 8"));
-}
-
-#[test]
 fn direct_encrypted_ballot_command_rejects_wrong_setup_seed() {
     let setup_package = setup_package();
     let error = run_direct_encrypted_ballot(&json!({
@@ -344,7 +301,7 @@ fn direct_encrypted_ballot_command_rejects_wrong_setup_seed() {
 }
 
 #[test]
-fn direct_ballot_validation_rejects_out_of_range_scores() {
+fn direct_ballot_validation_rejects_invalid_scores_and_witnesses() {
     let mut ballot = valid_ballot_input();
     ballot.scores[7] = 11;
 
@@ -356,10 +313,7 @@ fn direct_ballot_validation_rejects_out_of_range_scores() {
             .message
             .contains("direct encrypted ballot score at option 7")
     );
-}
 
-#[test]
-fn direct_ballot_validation_rejects_mismatched_one_hot_witness() {
     let mut ballot = valid_ballot_input();
     let mut witnesses = ballot
         .scores

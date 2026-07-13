@@ -16,7 +16,6 @@ export type {
 } from './target-decryption/local-target-share-witness.js';
 export {
     createBgvTargetDecryptionShareCanonicalProofMaterialTransport,
-    targetDecryptionShareProofBytesEncoding,
     targetDecryptionShareProofFamily,
 } from './target-decryption/proof-material-transport.js';
 export type {
@@ -85,7 +84,6 @@ export {
     setupCommitmentRandomnessWidth,
     setupTransportChunkSizeBytes,
     setupTransportSchemeId,
-    vssCoefficientCommitmentMaterialTransportEncoding,
 } from './setup/vss-coefficient-commitments.js';
 export {
     createEncryptedLocalTrusteeSetupStateFromVerifiedShares,

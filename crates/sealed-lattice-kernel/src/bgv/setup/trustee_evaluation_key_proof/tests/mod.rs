@@ -34,7 +34,6 @@ use super::{
 // tests can keep referencing them through `super::` after the move under this
 // `tests/` directory.
 use super::{
-    describe_target_decryption_share_proof_layout_from_request,
     generate_target_decryption_share_proof_bytes_from_request,
     generate_trustee_evaluation_key_proof_from_request, prover,
     verify_target_decryption_share_proof_bytes_from_request,

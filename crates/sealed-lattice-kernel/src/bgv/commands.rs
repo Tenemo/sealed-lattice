@@ -284,57 +284,13 @@ fn sample_positions(values: &[u64]) -> Vec<Value> {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        describe_bgv_rns_parameters, encode_bgv_batch_plaintext_from_request,
-        validate_bgv_plaintext_from_request,
-    };
+    use super::{describe_bgv_rns_parameters, encode_bgv_batch_plaintext_from_request};
     use crate::bgv::{
         base_conversion::convert_plaintext_lifted_basis,
         encoding::encode_batch_plaintext_slots,
         parameters::BgvBasisKind,
         serialization::{BgvObjectKind, ciphertext_root, plaintext_root, serialize_bgv_object},
     };
-
-    #[test]
-    fn commands_describe_parameters_and_encode_plaintext() {
-        let parameters = describe_bgv_rns_parameters().expect("parameters description");
-        let layout_binding = parameters["batchLayoutBinding"].clone();
-        assert_eq!(parameters["parameters"]["polynomialDegree"], 32_768);
-        assert_eq!(parameters["parameters"]["plaintextModulus"], 65_537);
-        assert_eq!(
-            parameters["bgvParametersHash"],
-            crate::bgv::parameters::bgv_parameters_hash().expect("BGV parameters hash")
-        );
-
-        let encoded = encode_bgv_batch_plaintext_from_request(&serde_json::json!({
-            "slots": [1, 2, 65_536],
-            "level": 0,
-            "layoutBinding": layout_binding,
-            "includeCanonicalBytesHex": true
-        }))
-        .expect("encode command");
-        assert_eq!(encoded["validation"]["isValid"], true);
-        assert!(
-            encode_bgv_batch_plaintext_from_request(&serde_json::json!({
-                "slots": [1, 2, 65_537],
-                "level": 0
-            }))
-            .is_err()
-        );
-        assert!(
-            encode_bgv_batch_plaintext_from_request(&serde_json::json!({
-                "slots": [1, 2, 3],
-                "level": crate::bgv::parameters::DATA_PRIMES.len()
-            }))
-            .is_err()
-        );
-        let validated = validate_bgv_plaintext_from_request(&serde_json::json!({
-            "canonicalBytesHex": encoded["canonicalBytesHex"].as_str().expect("hex"),
-            "expectedPlaintextRoot": encoded["plaintextRoot"].as_str().expect("root")
-        }))
-        .expect("validate command");
-        assert_eq!(validated["plaintextRoot"], encoded["plaintextRoot"]);
-    }
 
     #[test]
     fn native_commands_produce_stable_bgv_rns_canonical_roots() {

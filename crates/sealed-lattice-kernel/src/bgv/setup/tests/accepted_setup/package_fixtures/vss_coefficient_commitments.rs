@@ -126,7 +126,6 @@ pub(super) fn vss_coefficient_commitments_object(
         "setupEpoch": setup_epoch,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "vssCoefficientCommitmentRoot": commitment_set["vssCoefficientCommitmentRoot"].clone(),
-        "materialEncoding": "full-public-setup-commitment-values",
         "participantCount": participant_count,
         "thresholdDegree": decryption_threshold,
         "rnsLimbCount": DATA_PRIMES.len(),

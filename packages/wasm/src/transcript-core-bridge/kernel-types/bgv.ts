@@ -31,7 +31,6 @@ export type BgvTransportedEvaluationKeyShareComponentMaterialSet =
 export type BgvTransportedPublicEvaluationKeyMaterialSet =
     BgvTransportedMaterialObject<'SetupTransportedPublicEvaluationKeyMaterialSet'> &
         Readonly<{
-            readonly materialEncoding: string;
             readonly publicEvaluationKeyMaterials: readonly BgvJsonRecord[];
             readonly componentMaterials?: readonly BgvJsonRecord[];
         }>;
@@ -442,7 +441,6 @@ export type BgvTrusteeEvaluationKeyProofGeneration = {
     readonly proofFamily: 'trustee-evaluation-key' | 'public-key-share';
     readonly statementHash: ProtocolHash;
     readonly limbCount: number;
-    readonly proofBytesEncoding: 'binary-chunked-proof-bytes';
     readonly proofBytesHash: ProtocolHash;
     readonly proofMaterialRoot: ProtocolHash;
 };
@@ -485,7 +483,6 @@ export type BgvVssShareLinkageProofGeneration = {
     readonly limbCount: number;
     readonly coefficientCommitmentCount: number;
     readonly coefficientWitnessColumnCount: number;
-    readonly proofBytesEncoding: 'binary-chunked-proof-bytes';
     readonly proofBytesHash: ProtocolHash;
     readonly proofMaterialRoot: ProtocolHash;
 };
@@ -495,7 +492,6 @@ export type BgvSameSecretBridgeProofGeneration = {
     readonly statementHash: ProtocolHash;
     readonly limbCount: number;
     readonly bridgeRnsLimbCount: number;
-    readonly proofBytesEncoding: 'binary-chunked-proof-bytes';
     readonly proofBytesHash: ProtocolHash;
     readonly proofMaterialRoot: ProtocolHash;
 };

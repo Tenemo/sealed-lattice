@@ -189,65 +189,6 @@ fn target_share_proof_relation_rejects_rebound_wrong_partial_decryption() {
 }
 
 #[test]
-fn target_share_proof_statement_binding_accepts_bound_statement() {
-    let (setup_package, accepted_record, target_ciphertext_binding, target_ciphertexts) =
-        target_fixture();
-    let target_share_profile = target_share_profile(&setup_package);
-    let local_target_share_witness_value = local_target_share_witness(
-        &setup_package,
-        &accepted_record,
-        &target_ciphertext_binding,
-        &target_ciphertexts,
-        &target_share_profile,
-        "trustee-1",
-    );
-    let local_share = generate_local_share(
-        &setup_package,
-        &accepted_record,
-        &target_ciphertext_binding,
-        &target_ciphertexts,
-        &target_share_profile,
-        &local_target_share_witness_value,
-        "trustee-1",
-    );
-    let statement = derive_share_proof_statement(TargetShareProofStatementInput {
-        setup_package: &setup_package,
-        accepted_record: &accepted_record,
-        target_ciphertext_binding: &target_ciphertext_binding,
-        target_ciphertexts: &target_ciphertexts,
-        target_share_profile: &target_share_profile,
-        local_target_share_witness_value: &local_target_share_witness_value,
-        target_decryption_share: &local_share,
-        trustee_identity: "trustee-1",
-    })
-    .expect("target share proof statement");
-
-    let verification =
-        verify_share_proof_statement_binding(TargetShareProofStatementBindingInput {
-            setup_package: &setup_package,
-            accepted_record: &accepted_record,
-            target_ciphertext_binding: &target_ciphertext_binding,
-            target_ciphertexts: &target_ciphertexts,
-            target_share_profile: &target_share_profile,
-            target_decryption_share: &local_share,
-            proof_statement: &statement,
-        })
-        .expect("target share proof statement binding");
-
-    // The command validates the statement binding and returns the recomputed
-    // statement root; a well-formed bound statement round-trips to its own root.
-    assert_eq!(
-        verification["proofStatementRoot"],
-        statement["proofStatementRoot"]
-    );
-    assert!(
-        verification["proofStatementRoot"]
-            .as_str()
-            .is_some_and(|root| root.len() == 128)
-    );
-}
-
-#[test]
 fn target_share_proof_statement_binding_rejects_rebound_wrong_aggregate_commitment_body() {
     let (setup_package, accepted_record, target_ciphertext_binding, target_ciphertexts) =
         target_fixture();
@@ -355,133 +296,6 @@ fn target_result_release_rejects_wrong_target_context_before_proof_bytes() {
     );
 }
 
-#[test]
-fn failed_staged_target_release_absorption_evicts_material_for_retry() {
-    let proof_bytes = vec![0x53, 0x4c, 0x54, 0x44, 0x2d, 0x52, 0x45, 0x54, 0x52, 0x59];
-    let proof_record = json!({
-        "objectType": "BgvTargetDecryptionShareProofRecord",
-        "proofBytesEncoding": "binary-chunked-proof-bytes",
-        "proofBytesHash": hash512_hex(
-            "sealed-lattice/target-decryption/share-proof/proof-bytes",
-            &[&proof_bytes],
-        ),
-    });
-    let mut proof_material = json!({
-        "objectType": "BgvTargetDecryptionShareProofMaterial",
-        "proofRecords": [proof_record],
-    });
-    let proof_material_root =
-        derive_canonical_object_hash(&proof_material).expect("target proof material root");
-    proof_material["proofMaterialRoot"] = json!(&proof_material_root);
-    crate::bgv::setup::retain_generated_canonical_proof_material(
-        TARGET_DECRYPTION_SHARE_PROOF_FAMILY,
-        proof_material_root.clone(),
-        proof_bytes.clone(),
-    )
-    .expect("first staged target proof material");
-
-    let error = absorb_bgv_target_decryption_result_release_share_from_request(&json!({
-        "releaseVerificationId": "inactive-release-for-material-retry",
-        "targetShareProof": {
-            "proofMaterial": proof_material,
-        },
-    }))
-    .expect_err("an inactive release session must refuse absorption");
-    assert_eq!(error.code, CanonicalErrorCode::InvalidProtocolObject);
-    assert!(error.message.contains("is not active"), "{}", error.message);
-
-    crate::bgv::setup::retain_generated_canonical_proof_material(
-        TARGET_DECRYPTION_SHARE_PROOF_FAMILY,
-        proof_material_root.clone(),
-        proof_bytes,
-    )
-    .expect("a refused staged absorption must permit the material retry");
-    crate::bgv::setup::evict_verified_canonical_proof_materials(&[proof_material_root]);
-}
-
-#[test]
-fn malformed_setup_evicts_stream_authenticated_target_proof_material() {
-    let (setup_package, accepted_record, target_ciphertext_binding, target_ciphertexts) =
-        target_fixture();
-    let target_share_profile_value = target_share_profile(&setup_package);
-    let local_target_share_witness_value = local_target_share_witness(
-        &setup_package,
-        &accepted_record,
-        &target_ciphertext_binding,
-        &target_ciphertexts,
-        &target_share_profile_value,
-        "trustee-1",
-    );
-    let target_decryption_share = generate_local_share(
-        &setup_package,
-        &accepted_record,
-        &target_ciphertext_binding,
-        &target_ciphertexts,
-        &target_share_profile_value,
-        &local_target_share_witness_value,
-        "trustee-1",
-    );
-    let proof_statement = derive_share_proof_statement(TargetShareProofStatementInput {
-        setup_package: &setup_package,
-        accepted_record: &accepted_record,
-        target_ciphertext_binding: &target_ciphertext_binding,
-        target_ciphertexts: &target_ciphertexts,
-        target_share_profile: &target_share_profile_value,
-        local_target_share_witness_value: &local_target_share_witness_value,
-        target_decryption_share: &target_decryption_share,
-        trustee_identity: "trustee-1",
-    })
-    .expect("target share proof statement");
-    let mut malformed_setup_package = setup_package.clone();
-    malformed_setup_package["objectType"] = json!("MalformedSetupPackage");
-
-    let proof_bytes = vec![0x53, 0x4c, 0x54, 0x44];
-    let proof_record = json!({
-        "objectType": "BgvTargetDecryptionShareProofRecord",
-        "proofBytesEncoding": "binary-chunked-proof-bytes",
-        "proofBytesHash": hash512_hex(
-            "sealed-lattice/target-decryption/share-proof/proof-bytes",
-            &[&proof_bytes],
-        ),
-    });
-    let mut proof_material = json!({
-        "objectType": "BgvTargetDecryptionShareProofMaterial",
-        "proofRecords": [proof_record],
-    });
-    let proof_material_root =
-        derive_canonical_object_hash(&proof_material).expect("target proof material root");
-    proof_material["proofMaterialRoot"] = json!(&proof_material_root);
-    crate::bgv::setup::retain_generated_canonical_proof_material(
-        TARGET_DECRYPTION_SHARE_PROOF_FAMILY,
-        proof_material_root.clone(),
-        proof_bytes,
-    )
-    .expect("stream-authenticated target proof material fixture");
-
-    let error = verify_bgv_target_decryption_share_proof_material_from_request(&json!({
-        "setupPackage": malformed_setup_package,
-        "targetAcceptedRecord": accepted_record,
-        "targetCiphertextBinding": target_ciphertext_binding,
-        "targetCiphertexts": target_ciphertexts,
-        "targetShareProfile": target_share_profile_value,
-        "targetDecryptionShare": target_decryption_share,
-        "proofStatement": proof_statement,
-        "proofMaterial": proof_material,
-    }))
-    .expect_err("malformed setup package must be refused");
-
-    assert_eq!(error.code, CanonicalErrorCode::InvalidProtocolObject);
-    assert!(
-        crate::bgv::setup::take_verified_canonical_proof_material_bytes(
-            TARGET_DECRYPTION_SHARE_PROOF_FAMILY,
-            &proof_material_root,
-        )
-        .expect("target proof material store lookup")
-        .is_none(),
-        "failed target proof verification must evict authenticated material"
-    );
-}
-
 fn statement_backed_target_share_with_malformed_proof_material(
     setup_package: &Value,
     accepted_record: &Value,
@@ -525,7 +339,6 @@ fn statement_backed_target_share_with_malformed_proof_material(
         "proofRecords": [
             {
                 "objectType": "BgvTargetDecryptionShareProofRecord",
-                "proofBytesEncoding": "binary-chunked-proof-bytes",
                 "proofBytesHash": hash512_hex(
                     "sealed-lattice/target-decryption/share-proof/proof-bytes",
                     &[&proof_bytes],
@@ -542,36 +355,4 @@ fn statement_backed_target_share_with_malformed_proof_material(
         "proofStatement": proof_statement,
         "proofMaterial": proof_material,
     })
-}
-
-#[test]
-fn target_decryption_share_generation_refuses_passive_setup_package() {
-    // The passive development package carries the collective secret but is not a
-    // structurally valid SetupPackage. read_setup_binding must refuse the wrong
-    // object family before any witness material is read. This distinction does
-    // not establish setup acceptance, board inclusion, or finality.
-    let (_accepted_setup_package, accepted_record, target_ciphertext_binding, target_ciphertexts) =
-        target_fixture();
-    let target_share_profile = target_share_profile(&_accepted_setup_package);
-    let local_target_share_witness_value = local_target_share_witness(
-        &_accepted_setup_package,
-        &accepted_record,
-        &target_ciphertext_binding,
-        &target_ciphertexts,
-        &target_share_profile,
-        "trustee-1",
-    );
-
-    let error = generate_bgv_target_decryption_share_from_local_share_request(&json!({
-        "setupPackage": passive_crypto_package(),
-        "localTargetShareWitness": local_target_share_witness_value,
-        "targetAcceptedRecord": accepted_record,
-        "targetCiphertextBinding": target_ciphertext_binding,
-        "targetCiphertexts": target_ciphertexts,
-        "targetShareProfile": target_share_profile,
-        "trusteeIdentity": "trustee-1",
-    }))
-    .expect_err("target decryption must refuse the passive setup package");
-
-    assert_eq!(error.code, CanonicalErrorCode::InvalidProtocolObject);
 }

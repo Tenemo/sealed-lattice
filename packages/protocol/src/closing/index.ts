@@ -179,12 +179,12 @@ const verifyCastReceiptShellUnchecked = (
             publicKeyHash: input.expectedVoterPublicKeyHash,
             manifestHash: input.expectedElectionManifestHash,
             objectRoot: input.receipt.castReceiptHash,
+            chunkMerkleRoot: null,
             boardHeadHash: input.receiptInclusionProof.boardHeadHash,
             contextHash: input.receipt.contextHash,
             recoveryEpoch: input.receipt.recoveryEpoch,
             deviceEpoch: input.receipt.deviceEpoch,
         },
-        acceptedObjectHash: input.receipt.castReceiptHash,
     });
     const verificationBase = buildSignedBoardShellVerificationBase(evidence);
 
@@ -360,10 +360,6 @@ const verifyCloseRecordShellUnchecked = (
 ): CloseRecordVerification => {
     const evidence = collectSignedBoardInclusionEvidence({
         boardEvidence: input.boardEvidence,
-        extraAcceptedHashes:
-            input.closeRecord.postVotingClosedContextHash === null
-                ? []
-                : [input.closeRecord.postVotingClosedContextHash],
         inclusionProof: input.closeRecordInclusionProof,
         objectRefusals: verifyCloseRecordShape(input),
         signature: input.closeRecord.signature,
@@ -375,6 +371,7 @@ const verifyCloseRecordShellUnchecked = (
             publicKeyHash: input.expectedOrganizerPublicKeyHash,
             manifestHash: input.expectedElectionManifestHash,
             objectRoot: input.closeRecord.closeRecordHash,
+            chunkMerkleRoot: null,
             boardHeadHash: input.closeRecordInclusionProof.boardHeadHash,
             contextHash:
                 input.closeRecord.postVotingClosedContextHash ??
@@ -382,7 +379,6 @@ const verifyCloseRecordShellUnchecked = (
             recoveryEpoch: 0,
             deviceEpoch: 0,
         },
-        acceptedObjectHash: input.closeRecord.closeRecordHash,
     });
     const { headsByHash, refusedObjects } = evidence;
     if (!headsByHash.has(input.closeRecord.closedBoardHeadHash)) {

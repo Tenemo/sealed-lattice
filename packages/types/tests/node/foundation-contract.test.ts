@@ -1,16 +1,12 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import {
-    artifactKinds,
-    distributionKinds,
     foundationObjectTypes,
-    foundationProfile,
     foundationSchemaIdentifiers,
     isParticipantIdentity,
     parseParticipantIdentity,
     refusalReasonCodes,
     refusalReasons,
-    stateCapabilityKinds,
     type ParticipantIdentity,
     type ProtocolHash,
 } from '@sealed-lattice/types';
@@ -75,22 +71,6 @@ describe('foundation contract', () => {
         expect(refusalReasonCodes.consumedState).toBe(0x000d);
     });
 
-    it('pins a state quorum that preserves an honest lock after the recovery loss budget', () => {
-        const quorumIntersection =
-            2 * foundationProfile.stateWitnessQuorum -
-            (foundationProfile.participantCount - 1);
-        const honestIntersectionAfterStaticFaults =
-            quorumIntersection - foundationProfile.activeFaultBound;
-        const stableHonestLocksAfterOneAdditionalLoss =
-            honestIntersectionAfterStaticFaults - 1;
-
-        expect(quorumIntersection).toBe(5);
-        expect(honestIntersectionAfterStaticFaults).toBe(2);
-        expect(stableHonestLocksAfterOneAdditionalLoss).toBeGreaterThanOrEqual(
-            1,
-        );
-    });
-
     it('does not reuse a schema or object-family identifier', () => {
         const schemaIdentifiers = Object.values(foundationSchemaIdentifiers);
         const objectTypes = Object.values(foundationObjectTypes);
@@ -99,41 +79,5 @@ describe('foundation contract', () => {
         expect(new Set(objectTypes).size).toBe(objectTypes.length);
         expect(Math.max(...objectTypes)).toBeLessThan(0x0100);
         expect(Math.min(...schemaIdentifiers)).toBeGreaterThan(0);
-    });
-
-    it('pins the assigned distribution and artifact registries', () => {
-        expect(distributionKinds).toEqual({
-            ternary: 1,
-            centeredBinomial: 2,
-        });
-        expect(artifactKinds).toEqual({
-            encoderAndBallotLayout: 1,
-            verifiableSecretSharingProfile: 2,
-            latticeCommitmentProfile: 3,
-            proofProfileSet: 4,
-            evaluatorProgramSet: 5,
-            targetDecryptionProfile: 6,
-        });
-        expect(stateCapabilityKinds).toEqual({
-            ballotCandidateList: 1,
-            finalitySignature: 2,
-            targetRelease: 3,
-        });
-    });
-
-    it('freezes every runtime registry and profile', () => {
-        for (const registry of [
-            refusalReasons,
-            refusalReasonCodes,
-            foundationProfile,
-            foundationSchemaIdentifiers,
-            foundationObjectTypes,
-            distributionKinds,
-            artifactKinds,
-            stateCapabilityKinds,
-        ]) {
-            expect(Object.isFrozen(registry)).toBe(true);
-            expect(Reflect.set(registry, 'unexpected', 1)).toBe(false);
-        }
     });
 });

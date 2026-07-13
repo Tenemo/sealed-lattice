@@ -556,7 +556,7 @@ mod tests {
     }
 
     #[test]
-    fn homomorphic_addition_matches_slot_addition() {
+    fn homomorphic_addition_and_subtraction_match_slot_arithmetic() {
         let key = shared_key();
         let left = key
             .encrypt_slots(&[3, 100, 65_536], "aa02")
@@ -566,11 +566,7 @@ mod tests {
             .expect("encrypt right");
         let sum = ciphertext_add(&left, &right).expect("add");
         assert_eq!(decrypt_prefix(key, &sum, 3), vec![7, 300, 0]);
-    }
 
-    #[test]
-    fn homomorphic_subtraction_matches_slot_subtraction() {
-        let key = shared_key();
         let left = key.encrypt_slots(&[10, 5], "aa04").expect("encrypt left");
         let right = key.encrypt_slots(&[3, 9], "aa05").expect("encrypt right");
         let difference = ciphertext_sub(&left, &right).expect("sub");
@@ -578,16 +574,12 @@ mod tests {
     }
 
     #[test]
-    fn scalar_multiplication_scales_each_slot() {
+    fn scalar_multiplication_handles_positive_and_centered_negative_scalars() {
         let key = shared_key();
         let ciphertext = key.encrypt_slots(&[2, 3, 4], "aa06").expect("encrypt");
         let scaled = scalar_mul(&ciphertext, 5).expect("scalar mul");
         assert_eq!(decrypt_prefix(key, &scaled, 3), vec![10, 15, 20]);
-    }
 
-    #[test]
-    fn scalar_multiplication_uses_centered_lift_for_negative_plaintext_scalars() {
-        let key = shared_key();
         let ciphertext = key
             .encrypt_slots(&[2, 3, PLAINTEXT_MODULUS - 1], "aa06-negative")
             .expect("encrypt");
@@ -608,17 +600,13 @@ mod tests {
     }
 
     #[test]
-    fn plaintext_multiplication_is_slot_wise() {
+    fn plaintext_and_ciphertext_multiplication_are_slot_wise() {
         let key = shared_key();
         let ciphertext = key.encrypt_slots(&[2, 3, 4, 5], "aa07").expect("encrypt");
         let plaintext = super::encode_slots_to_coefficients(&[10, 0, 7, 1]).expect("encode");
         let product = plaintext_mul(&ciphertext, &plaintext).expect("plaintext mul");
         assert_eq!(decrypt_prefix(key, &product, 4), vec![20, 0, 28, 5]);
-    }
 
-    #[test]
-    fn ciphertext_multiplication_yields_slot_products() {
-        let key = shared_key();
         let left = key.encrypt_slots(&[2, 3, 4], "aa08").expect("encrypt left");
         let right = key
             .encrypt_slots(&[5, 6, 7], "aa09")
@@ -629,7 +617,7 @@ mod tests {
     }
 
     #[test]
-    fn modulus_switch_preserves_slots_and_drops_a_level() {
+    fn modulus_switch_chain_preserves_slots_and_drops_levels() {
         let key = shared_key();
         let ciphertext = key
             .encrypt_slots(&[11, 22, 65_500], "aa10")
@@ -637,11 +625,7 @@ mod tests {
         let switched = modulus_switch(&ciphertext).expect("modulus switch");
         assert_eq!(switched.level, ciphertext.level - 1);
         assert_eq!(decrypt_prefix(key, &switched, 3), vec![11, 22, 65_500]);
-    }
 
-    #[test]
-    fn repeated_modulus_switch_chain_preserves_message() {
-        let key = shared_key();
         let mut ciphertext = key.encrypt_slots(&[42, 9, 100], "aa11").expect("encrypt");
         for _ in 0..4 {
             ciphertext = modulus_switch(&ciphertext).expect("modulus switch");

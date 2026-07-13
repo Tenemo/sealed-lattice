@@ -1,6 +1,6 @@
 use super::{
-    SELECTED_EVALUATOR_WORKING_LEVEL, direct_score_packing_basis_galois_elements,
-    direct_score_packing_galois_elements,
+    GENERATOR_SUBGROUP_ORDER, PACKED_SCORE_GALOIS_GENERATOR, SELECTED_EVALUATOR_WORKING_LEVEL,
+    direct_score_packing_basis_galois_elements, direct_score_packing_galois_elements,
     evaluate_packed_rank_evaluation_from_packed_scores_with_batched_pairs,
     galois_element_moving_slot_to_target, generator_exponent_or_conjugated,
     generator_power_basis_for_exponent, interpolate_coefficients, pack_direct_score_slots,

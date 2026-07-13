@@ -11,6 +11,7 @@ use crate::hashing::derive_canonical_object_hash;
 // profile-identifier fields.
 pub(in super::super) fn galois_key_share_batches_object(
     package: &serde_json::Value,
+    accepted_setup_session: crate::bgv::setup::AcceptedSetupProofBindingSession,
 ) -> GaloisKeyShareBatchesFixture {
     let setup_context = &package["setupContext"];
     let schedule = &package["evaluatorKeySchedule"];
@@ -77,6 +78,7 @@ pub(in super::super) fn galois_key_share_batches_object(
                             EvaluationKeyShareProofFamily::Galois,
                             &material_record,
                             &fixture_material,
+                            accepted_setup_session,
                         );
                     material_record["keySwitchComponentMaterialRoot"] =
                         serde_json::json!(authenticated_material.material_root);

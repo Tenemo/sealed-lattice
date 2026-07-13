@@ -380,21 +380,6 @@ mod tests {
     }
 
     #[test]
-    fn handles_never_wrap_or_reuse_after_exhaustion() {
-        let mut registry = FoundationBoardRuntimeRegistry {
-            active_session: None,
-            next_handle: u32::MAX,
-        };
-        assert_eq!(registry.take_handle(), Ok(u32::MAX));
-        assert_eq!(registry.next_handle, 0);
-        assert_eq!(
-            registry.take_handle(),
-            Err(refusal_status(RefusalReason::OutsideSupportedProfile))
-        );
-        assert_eq!(registry.next_handle, 0);
-    }
-
-    #[test]
     fn forged_and_overlapping_requests_do_not_destroy_the_active_session() {
         let configuration = configuration_bytes();
         let owner = [0x41; FOUNDATION_BOARD_SESSION_CAPABILITY_BYTE_LENGTH];

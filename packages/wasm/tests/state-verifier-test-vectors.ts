@@ -29,6 +29,7 @@ const stateWitnessVoteObjectType = 0x0053;
 const stateRecoveryTransitionObjectType = 0x0054;
 const targetReleaseCapabilityKind = 3;
 const finalitySignatureCapabilityKind = 2;
+const setupActionRandomnessRootCapabilityKind = 4;
 
 type SignedCarrierVector = Readonly<{
     canonicalCarrierBytes: Uint8Array;
@@ -52,6 +53,7 @@ export type StateVerifierTestVector = Readonly<{
     recoveryFirst: CertifiedStateIntentTestVector;
     recoverySecond: CertifiedStateIntentTestVector;
     reservation: CertifiedStateIntentTestVector;
+    reservationOnly: CertifiedStateIntentTestVector;
     subjectParticipantIdentity: Uint8Array;
     suiteIdentifier: Uint8Array;
 }>;
@@ -212,6 +214,28 @@ export const createStateVerifierTestVector = (): StateVerifierTestVector => {
             ),
             objectHash: reservationCarrier.objectHash,
         };
+        const reservationOnlyCarrier = signedCarrier({
+            objectType: stateReservationObjectType,
+            payloadBytes: canonicalTuple(
+                0x1610,
+                unsigned16Item(setupActionRandomnessRootCapabilityKind),
+                hashItem(authorizationHash),
+            ),
+            producerRosterPosition: 0,
+            producerSequence: 0n,
+            recoveryEpoch: 0n,
+            signaturePurpose: 'state-reservation-intent',
+        });
+        const reservationOnly: CertifiedStateIntentTestVector = {
+            canonicalIntentCarrier:
+                reservationOnlyCarrier.canonicalCarrierBytes,
+            canonicalStateCertificate: certificateFor(
+                reservationOnlyCarrier.objectHash,
+                1n,
+                [1, 2, 3, 4, 5, 6, 7],
+            ),
+            objectHash: reservationOnlyCarrier.objectHash,
+        };
 
         const exactOutputBytes = new Uint8Array(
             foundationProfile.streamChunkByteLength + 17,
@@ -312,6 +336,7 @@ export const createStateVerifierTestVector = (): StateVerifierTestVector => {
             recoveryFirst,
             recoverySecond,
             reservation,
+            reservationOnly,
             subjectParticipantIdentity: participantIdentities[0],
             suiteIdentifier,
         };

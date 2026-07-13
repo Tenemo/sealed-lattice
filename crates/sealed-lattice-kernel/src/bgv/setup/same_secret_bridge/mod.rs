@@ -1,7 +1,7 @@
+use super::setup_proof::SetupProofMaterialBytes;
 use super::setup_proof::material_transport::{
     SetupProofMaterialTransportFamily, resolve_transported_setup_proof_material,
 };
-use super::setup_proof::{SETUP_PROOF_MATERIAL_ENCODING, SetupProofMaterialBytes};
 use super::vss_commitment::VSS_PUBLIC_COMMITMENT_BINARY_FORMAT;
 use super::*;
 use crate::bgv::setup_helpers::{

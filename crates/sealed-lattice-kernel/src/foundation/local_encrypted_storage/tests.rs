@@ -75,6 +75,16 @@ fn test_storage_root() -> ActionStorageRoot {
     .expect("the fixed test storage root is canonical")
 }
 
+fn lowercase_hexadecimal(bytes: &[u8]) -> String {
+    const HEXADECIMAL_DIGITS: &[u8; 16] = b"0123456789abcdef";
+    let mut output = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        output.push(char::from(HEXADECIMAL_DIGITS[usize::from(byte >> 4)]));
+        output.push(char::from(HEXADECIMAL_DIGITS[usize::from(byte & 0x0f)]));
+    }
+    output
+}
+
 fn expect_valid<Value>(result: VerificationResult<Value>) -> Value {
     match result {
         VerificationResult::Valid { value } => value,
@@ -160,6 +170,117 @@ fn storage_root_generation_requires_complete_entropy_and_redacts_secret_material
             .expect_err("partial entropy must fail closed"),
         LocalStorageOperationError::EntropyUnavailable
     );
+}
+
+#[test]
+fn action_storage_derivation_input_and_key_hierarchy_match_the_exact_vector() {
+    let binding = test_binding();
+    let input = ActionStorageDerivationInput::new(binding);
+    let encoded = input.encode().expect("derivation input encodes");
+    assert_eq!(
+        encoded.len(),
+        ACTION_STORAGE_DERIVATION_INPUT_CANONICAL_BYTE_LENGTH
+    );
+    let decoded = ActionStorageDerivationInput::decode(&encoded, &CanonicalDecodeLimits::default())
+        .expect("derivation input decodes");
+    assert_eq!(decoded, input);
+
+    let root = [0xab; ACTION_STORAGE_ROOT_BYTE_LENGTH];
+    let hierarchy = derive_action_storage_key_hierarchy(binding, &root)
+        .expect("action storage key hierarchy derives");
+    let mut combined_key_material = Vec::with_capacity(ACTION_STORAGE_KEY_MATERIAL_BYTE_LENGTH);
+    combined_key_material.extend_from_slice(hierarchy.storage_root_commitment_preimage.as_slice());
+    combined_key_material.extend_from_slice(hierarchy.storage_record_key_derivation_key.as_slice());
+    combined_key_material.extend_from_slice(hierarchy.storage_record_authenticator_key.as_slice());
+    assert_eq!(
+        lowercase_hexadecimal(&combined_key_material),
+        "a3c08e7e1a033a926223b02ad9c91347adf54fd07db6206eeac1e59712ec91b44888dcf4b996cd33b456c7ddc67221fa5991c1dbb859dfbe7ae19b793aa6445ba832f0a7499d4f11b9e9a53cccccc23ae072451d73a0ba88318e20a70d279a438de23f13914ec2a01c84d56c6ea52644540b0227f7fb219333559ab9ab5e5066704cbd5e7ec13105ff3412639cdf4082d851c035079172592a42ddddd9248916e7ffbe0910abac3754928cc2ebaa431d4b3e62575e78a8f9170b63bcd9747588"
+    );
+
+    let commitment = derive_storage_root_commitment_from_preimage(
+        binding,
+        &hierarchy.storage_root_commitment_preimage,
+    )
+    .expect("storage commitment derives");
+    assert_eq!(
+        commitment.to_lowercase_hex(),
+        "2874bb4e31e8be4d40ddc7f4b1ad758c848e75746b34be4ac4f5e432454a6ec422f32a19e90dd4878afde42a98c357407519237abba7291a490c91705fe8cdf9"
+    );
+    assert_eq!(test_storage_root().storage_root_commitment(), commitment);
+}
+
+#[test]
+fn action_storage_hierarchy_separates_domains_and_every_public_context_field() {
+    let binding = test_binding();
+    let root = [0xab; ACTION_STORAGE_ROOT_BYTE_LENGTH];
+    let input_bytes = ActionStorageDerivationInput::new(binding)
+        .encode()
+        .expect("derivation input encodes");
+    let storage_material = kmac256::<ACTION_STORAGE_KEY_MATERIAL_BYTE_LENGTH>(
+        &root,
+        &input_bytes,
+        ACTION_STORAGE_KEY_HIERARCHY_CUSTOMIZATION,
+    );
+    let randomness_domain_material = kmac256::<ACTION_STORAGE_KEY_MATERIAL_BYTE_LENGTH>(
+        &root,
+        &input_bytes,
+        b"sealed-lattice/private-randomness/action-key-hierarchy/v1",
+    );
+    assert_ne!(
+        storage_material.as_slice(),
+        randomness_domain_material.as_slice()
+    );
+
+    let base_hierarchy =
+        derive_action_storage_key_hierarchy(binding, &root).expect("base hierarchy derives");
+    let changed_bindings = [
+        LocalStorageBinding::new(
+            test_hash(0x12),
+            binding.ceremony_context_hash(),
+            binding.action_context_hash(),
+            binding.participant_id(),
+        ),
+        LocalStorageBinding::new(
+            binding.suite_id(),
+            test_hash(0x23),
+            binding.action_context_hash(),
+            binding.participant_id(),
+        ),
+        LocalStorageBinding::new(
+            binding.suite_id(),
+            binding.ceremony_context_hash(),
+            test_hash(0x34),
+            binding.participant_id(),
+        ),
+        LocalStorageBinding::new(
+            binding.suite_id(),
+            binding.ceremony_context_hash(),
+            binding.action_context_hash(),
+            ParticipantIdentity::from_bytes([0x45; ParticipantIdentity::BYTE_LENGTH]),
+        ),
+    ];
+    for changed_binding in changed_bindings {
+        let changed_hierarchy = derive_action_storage_key_hierarchy(changed_binding, &root)
+            .expect("changed-context hierarchy derives");
+        assert_ne!(
+            base_hierarchy.storage_root_commitment_preimage.as_slice(),
+            changed_hierarchy
+                .storage_root_commitment_preimage
+                .as_slice(),
+        );
+        assert_ne!(
+            base_hierarchy.storage_record_key_derivation_key.as_slice(),
+            changed_hierarchy
+                .storage_record_key_derivation_key
+                .as_slice(),
+        );
+        assert_ne!(
+            base_hierarchy.storage_record_authenticator_key.as_slice(),
+            changed_hierarchy
+                .storage_record_authenticator_key
+                .as_slice(),
+        );
+    }
 }
 
 #[test]
@@ -729,12 +850,8 @@ fn record_key_derivation_matches_an_independent_kmac256_vector() {
         .derive_record_key(&key_input)
         .expect("record key derives");
     assert_eq!(
-        derived_key.as_ref(),
-        &[
-            0x6a, 0xfc, 0xa0, 0xa3, 0x11, 0x78, 0x66, 0x2c, 0x52, 0x23, 0xfa, 0xed, 0x0b, 0xbc,
-            0xc5, 0x91, 0xe2, 0x3a, 0xd3, 0xc1, 0x38, 0x92, 0x0a, 0x52, 0xe5, 0x5d, 0xf0, 0x52,
-            0xb6, 0x73, 0x34, 0x8b,
-        ]
+        lowercase_hexadecimal(derived_key.as_ref()),
+        "0480262fec9a06e18443c96644861327bf429bb3aba96902dda125dcc7b40941"
     );
     let wrong_binding_input = LocalRecordKeyInput {
         binding: alternate_binding(),

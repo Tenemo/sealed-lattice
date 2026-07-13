@@ -107,7 +107,6 @@ const generateAggregateThresholdProof: VssAggregateThresholdProofComputer = (
     });
 
     return Promise.resolve({
-        proofBytesEncoding: 'binary-chunked-proof-bytes',
         proofBytesHash,
         proofMaterialRoot,
         canonicalMaterial: {
@@ -302,12 +301,6 @@ describe('VSS aggregate threshold commitment handoff', () => {
                     aggregateThresholdCommitmentSet.recipientRecords,
             }),
         );
-        expect(
-            aggregateThresholdCommitmentSet.aggregateThresholdProofs.every(
-                (proof) =>
-                    proof.proofBytesEncoding === 'binary-chunked-proof-bytes',
-            ),
-        ).toBe(true);
         expect(
             localAggregateBundles.flatMap(
                 (bundle) => bundle.aggregateThresholdProofMaterials,

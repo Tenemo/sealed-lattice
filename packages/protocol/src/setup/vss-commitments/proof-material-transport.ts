@@ -53,10 +53,7 @@ const canonicalProofMaterialsToTransport = (
             );
         }
         const proofRecord = proofRecordValue as JsonRecord;
-        if (
-            proofRecord.proofBytesEncoding !== 'binary-chunked-proof-bytes' ||
-            typeof proofRecord.proofMaterialRoot !== 'string'
-        ) {
+        if (typeof proofRecord.proofMaterialRoot !== 'string') {
             throw new TypeError(
                 `${parameters.proofFamily} proofRecords.${String(proofIndex)} must carry a canonical proof-material reference.`,
             );

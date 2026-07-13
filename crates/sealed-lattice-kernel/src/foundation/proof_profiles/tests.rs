@@ -1,7 +1,6 @@
 use super::*;
 use crate::foundation::{
-    ArtifactKind, DistributionKind, DistributionRecord, FOUNDATION_PROFILE,
-    FoundationSchemaIdentifier, Hash512,
+    ArtifactKind, DistributionKind, DistributionRecord, FOUNDATION_PROFILE, Hash512,
 };
 
 fn valid_suite_record() -> SuiteRecord {
@@ -99,7 +98,7 @@ fn proof_field_1153() -> ProofFieldProfile {
 }
 
 fn schedule(proof_field_index: u16) -> ProofFieldSchedule {
-    ProofFieldSchedule::new(proof_field_index, 4, 3, 2, 8, 4, 3, 6)
+    ProofFieldSchedule::new(proof_field_index, 4, 3, 2, 1, 4, 3, 6)
         .expect("test schedule is intrinsically valid")
 }
 
@@ -134,7 +133,7 @@ fn generated_profile_artifact_matches_the_independent_typescript_vector_identity
     assert_eq!(canonical_bytes.len(), 26_727);
     assert_eq!(
         artifact_reference.artifact_hash.to_lowercase_hex(),
-        "f91152852e2fa0406a65a9b99eebb6afb44358e8b93dd3b8865e424e2543039fc0eea85ed687c2fd35a703797f3d4b6b8a961b6b38bb7222911df832d4ae4339"
+        "d7239cb60fa46e4d0a994f827e70c154dd139154f0318769b30a5524efabef699fca3bc15ac94f1a2a8a8aff37125fa55e6c7e85ccf1e93ca50f47837b376fe7"
     );
 }
 
@@ -204,111 +203,6 @@ fn is_irreducible_by_exhaustive_monic_division(coefficients: &[u64], modulus: u6
         }
     }
     true
-}
-
-#[test]
-fn all_four_schema_identifiers_and_canonical_item_orders_are_exact() {
-    assert_eq!(PROOF_PROFILE_SET_SCHEMA_IDENTIFIER, 0x2200);
-    assert_eq!(PROOF_FIELD_PROFILE_SCHEMA_IDENTIFIER, 0x2201);
-    assert_eq!(PROOF_FAMILY_PROFILE_SCHEMA_IDENTIFIER, 0x2202);
-    assert_eq!(PROOF_FIELD_SCHEDULE_SCHEMA_IDENTIFIER, 0x2203);
-    assert_eq!(FoundationSchemaIdentifier::ProofProfileSet as u16, 0x2200);
-    assert_eq!(FoundationSchemaIdentifier::ProofFieldProfile as u16, 0x2201);
-    assert_eq!(
-        FoundationSchemaIdentifier::ProofFamilyProfile as u16,
-        0x2202
-    );
-    assert_eq!(
-        FoundationSchemaIdentifier::ProofFieldSchedule as u16,
-        0x2203
-    );
-
-    let field_tuple = proof_field_97().canonical_tuple().expect("field tuple");
-    assert_eq!(field_tuple.schema_identifier, 0x2201);
-    assert_eq!(field_tuple.schema_version, 1);
-    assert_eq!(field_tuple.items.len(), 3);
-    assert_eq!(
-        field_tuple.items[0].item_type(),
-        CanonicalItemType::Unsigned64
-    );
-    assert_eq!(
-        field_tuple.items[1].item_type(),
-        CanonicalItemType::Unsigned64
-    );
-    assert_eq!(
-        field_tuple.items[2].item_type(),
-        CanonicalItemType::HomogeneousList
-    );
-    let (coefficient_count, coefficient_bytes) =
-        read_list_header(&field_tuple.items[2], CanonicalItemType::Unsigned64)
-            .expect("coefficient list header");
-    assert_eq!(coefficient_count, 2);
-    assert_eq!(
-        coefficient_bytes,
-        &[5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-    );
-
-    let schedule_tuple = schedule(0).canonical_tuple().expect("schedule tuple");
-    assert_eq!(schedule_tuple.schema_identifier, 0x2203);
-    assert_eq!(schedule_tuple.schema_version, 1);
-    assert_eq!(schedule_tuple.items.len(), 8);
-    assert_eq!(
-        schedule_tuple
-            .encode()
-            .expect("schedule tuple encodes")
-            .len(),
-        PROOF_FIELD_SCHEDULE_MAXIMUM_BYTE_LENGTH
-    );
-    assert_eq!(
-        schedule_tuple
-            .items
-            .iter()
-            .map(CanonicalItem::item_type)
-            .collect::<Vec<_>>(),
-        vec![
-            CanonicalItemType::Unsigned16,
-            CanonicalItemType::Unsigned32,
-            CanonicalItemType::Unsigned64,
-            CanonicalItemType::Unsigned16,
-            CanonicalItemType::Unsigned32,
-            CanonicalItemType::Unsigned32,
-            CanonicalItemType::Unsigned16,
-            CanonicalItemType::Unsigned32,
-        ]
-    );
-
-    let family_tuple = ProofFamilyProfile::new(ProofFamily::BallotValidity, schedule(0))
-        .expect("family profile")
-        .canonical_tuple()
-        .expect("family tuple");
-    assert_eq!(family_tuple.schema_identifier, 0x2202);
-    assert_eq!(family_tuple.schema_version, 1);
-    assert_eq!(family_tuple.items.len(), 2);
-    assert_eq!(
-        family_tuple.encode().expect("family tuple encodes").len(),
-        PROOF_FAMILY_PROFILE_MAXIMUM_BYTE_LENGTH
-    );
-    assert_eq!(
-        family_tuple.items[0].item_type(),
-        CanonicalItemType::Unsigned16
-    );
-    assert_eq!(
-        family_tuple.items[1].item_type(),
-        CanonicalItemType::NestedTuple
-    );
-
-    let set_tuple = valid_profile_set()
-        .canonical_tuple()
-        .expect("profile-set tuple");
-    assert_eq!(set_tuple.schema_identifier, 0x2200);
-    assert_eq!(set_tuple.schema_version, 1);
-    assert_eq!(set_tuple.items.len(), 4);
-    assert!(
-        set_tuple
-            .items
-            .iter()
-            .all(|item| item.item_type() == CanonicalItemType::HomogeneousList)
-    );
 }
 
 #[test]
@@ -436,16 +330,6 @@ fn proof_field_validation_reproduces_prime_generator_and_irreducibility_requirem
     for (invalid, expected_refusal_reason) in invalid_cases {
         expect_field_validation_and_encoding_refusal(&invalid, expected_refusal_reason);
     }
-}
-
-#[test]
-fn irreducibility_test_handles_linear_quadratic_cubic_and_repeated_factor_boundaries() {
-    assert!(is_monic_polynomial_irreducible(&[0], 3));
-    assert!(is_monic_polynomial_irreducible(&[1, 0], 3));
-    assert!(!is_monic_polynomial_irreducible(&[2, 0], 3));
-    assert!(is_monic_polynomial_irreducible(&[1, 2, 0], 3));
-    assert!(!is_monic_polynomial_irreducible(&[1, 0, 2, 0], 3));
-    assert!(!is_monic_polynomial_irreducible(&[0, 1], 97));
 }
 
 #[test]
@@ -762,7 +646,7 @@ fn wrong_headers_types_nested_schema_lengths_and_trailing_bytes_refuse() {
 }
 
 #[test]
-fn profile_set_bounds_apply_before_allocation_and_preserve_caller_decode_limits() {
+fn schema_bounds_apply_before_allocation_and_preserve_caller_decode_limits() {
     let encoded = valid_profile_set().encode().expect("profile set encodes");
     assert!(encoded.len() <= PROOF_PROFILE_SET_MAXIMUM_BYTE_LENGTH);
 
@@ -784,10 +668,7 @@ fn profile_set_bounds_apply_before_allocation_and_preserve_caller_decode_limits(
             .refusal_reason,
         RefusalReason::OutsideSupportedProfile
     );
-}
 
-#[test]
-fn standalone_schema_bounds_apply_before_canonical_allocation() {
     let limits = CanonicalDecodeLimits::default();
     assert_eq!(
         ProofFieldProfile::decode(

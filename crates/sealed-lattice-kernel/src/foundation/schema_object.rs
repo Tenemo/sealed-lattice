@@ -1,6 +1,8 @@
 use super::proof_commitments::reencode_canonical_proof_commitment_object;
 use super::{
-    ACTION_DEFINITION_SCHEMA_IDENTIFIER, ARTIFACT_REFERENCE_SCHEMA_IDENTIFIER, ActionDefinition,
+    ACTION_DEFINITION_SCHEMA_IDENTIFIER, ACTION_RANDOMNESS_DERIVATION_INPUT_SCHEMA_IDENTIFIER,
+    ACTION_STORAGE_DERIVATION_INPUT_SCHEMA_IDENTIFIER, ARTIFACT_REFERENCE_SCHEMA_IDENTIFIER,
+    ActionDefinition, ActionRandomnessDerivationInput, ActionStorageDerivationInput,
     ArtifactReference, BOARD_POLICY_SCHEMA_IDENTIFIER, BoardPolicy,
     CHECKPOINT_BOUNDARY_PROFILE_SCHEMA_IDENTIFIER, CHECKPOINT_MANIFEST_SCHEMA_IDENTIFIER,
     CHECKPOINT_RANDOM_USE_PROFILE_SCHEMA_IDENTIFIER,
@@ -139,6 +141,12 @@ pub(crate) fn validate_foundation_schema_object(
             reencode_schema!(DeviceWrappedStorageRoot)
         }
         LOCAL_RECORD_ENVELOPE_SCHEMA_IDENTIFIER => reencode_schema!(LocalRecordEnvelope),
+        ACTION_STORAGE_DERIVATION_INPUT_SCHEMA_IDENTIFIER => {
+            reencode_schema!(ActionStorageDerivationInput)
+        }
+        ACTION_RANDOMNESS_DERIVATION_INPUT_SCHEMA_IDENTIFIER => {
+            reencode_schema!(ActionRandomnessDerivationInput)
+        }
         STATE_RESERVATION_INTENT_SCHEMA_IDENTIFIER => {
             reencode_schema!(StateReservationIntentPayload)
         }

@@ -27,6 +27,7 @@ pub const LOCAL_RECORD_KEY_INPUT_SCHEMA_IDENTIFIER: u16 = 0x0304;
 pub const DEVICE_WRAPPED_STORAGE_ROOT_SCHEMA_IDENTIFIER: u16 = 0x0305;
 pub const LOCAL_RECORD_ENVELOPE_SCHEMA_IDENTIFIER: u16 = 0x0306;
 pub const LOCAL_RECORD_AUTHENTICATOR_INPUT_SCHEMA_IDENTIFIER: u16 = 0x0307;
+pub const ACTION_STORAGE_DERIVATION_INPUT_SCHEMA_IDENTIFIER: u16 = 0x0308;
 
 pub const ACTION_STORAGE_ROOT_BYTE_LENGTH: usize = 48;
 pub const LOCAL_RECORD_NONCE_BYTE_LENGTH: usize = 12;
@@ -35,6 +36,8 @@ pub const LOCAL_RECORD_AUTHENTICATOR_BYTE_LENGTH: usize = 32;
 
 const FOUNDATION_PROTOCOL_VERSION: u16 = 1;
 const LOCAL_RECORD_KEY_BYTE_LENGTH: usize = 32;
+const ACTION_STORAGE_CHILD_KEY_BYTE_LENGTH: usize = 64;
+const ACTION_STORAGE_KEY_MATERIAL_BYTE_LENGTH: usize = 3 * ACTION_STORAGE_CHILD_KEY_BYTE_LENGTH;
 const DEVICE_WRAPPED_STORAGE_ROOT_PLAINTEXT_BYTE_LENGTH: u64 = 48;
 const RECOVERY_CHECKSUM_BYTE_LENGTH: usize = 16;
 const STORAGE_ROOT_COMMITMENT_PAYLOAD_MAXIMUM_BYTE_LENGTH: usize = 78;
@@ -43,6 +46,7 @@ const RECOVERY_VALUE_BASE32_CHARACTER_LENGTH: usize = 708;
 const DEVICE_WRAPPING_ASSOCIATED_DATA_MAXIMUM_BYTE_LENGTH: usize = 380;
 const DEVICE_WRAPPED_STORAGE_ROOT_MAXIMUM_BYTE_LENGTH: usize = 492;
 const LOCAL_RECORD_KEY_INPUT_MAXIMUM_BYTE_LENGTH: usize = 388;
+const ACTION_STORAGE_DERIVATION_INPUT_CANONICAL_BYTE_LENGTH: usize = 296;
 const LOCAL_RECORD_ASSOCIATED_DATA_MAXIMUM_BYTE_LENGTH: usize = 489;
 const MAXIMUM_LOCAL_RECORD_PLAINTEXT_BYTE_LENGTH: usize =
     FOUNDATION_PROFILE.maximum_copied_buffer_byte_length;
@@ -52,6 +56,8 @@ const MAXIMUM_LOCAL_RECORD_ENVELOPE_BYTE_LENGTH: usize =
 const LOCAL_RECORD_KEY_CUSTOMIZATION: &[u8] = b"sealed-lattice/local-record-key/v1";
 const LOCAL_RECORD_AUTHENTICATOR_CUSTOMIZATION: &[u8] =
     b"sealed-lattice/local-record-authenticator/v1";
+const ACTION_STORAGE_KEY_HIERARCHY_CUSTOMIZATION: &[u8] =
+    b"sealed-lattice/local-storage/key-hierarchy/v1";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LocalStorageOperationError {
@@ -156,10 +162,65 @@ impl LocalStorageBinding {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ActionStorageDerivationInput {
+    binding: LocalStorageBinding,
+}
+
+impl ActionStorageDerivationInput {
+    pub const fn new(binding: LocalStorageBinding) -> Self {
+        Self { binding }
+    }
+
+    pub const fn binding(self) -> LocalStorageBinding {
+        self.binding
+    }
+
+    pub fn encode(&self) -> SchemaResult<Vec<u8>> {
+        Ok(CanonicalTuple::new(
+            ACTION_STORAGE_DERIVATION_INPUT_SCHEMA_IDENTIFIER,
+            FOUNDATION_PROTOCOL_VERSION,
+            vec![
+                CanonicalItem::unsigned16(FOUNDATION_PROTOCOL_VERSION),
+                CanonicalItem::hash512(self.binding.suite_id.into_bytes()),
+                CanonicalItem::hash512(self.binding.ceremony_context_hash.into_bytes()),
+                CanonicalItem::hash512(self.binding.action_context_hash.into_bytes()),
+                CanonicalItem::participant_identity(self.binding.participant_id.into_bytes()),
+            ],
+        )
+        .encode()?)
+    }
+
+    pub fn decode(bytes: &[u8], limits: &CanonicalDecodeLimits) -> SchemaResult<Self> {
+        let bounded_limits = bounded_canonical_decode_limits(
+            limits,
+            ACTION_STORAGE_DERIVATION_INPUT_CANONICAL_BYTE_LENGTH,
+            5,
+        );
+        let tuple = CanonicalTuple::decode(bytes, &bounded_limits)?;
+        require_header(&tuple, ACTION_STORAGE_DERIVATION_INPUT_SCHEMA_IDENTIFIER, 5)?;
+        require_protocol_version(read_u16(&tuple.items[0])?)?;
+        Ok(Self::new(LocalStorageBinding::new(
+            read_hash(&tuple.items[1])?,
+            read_hash(&tuple.items[2])?,
+            read_hash(&tuple.items[3])?,
+            read_participant_identity(&tuple.items[4])?,
+        )))
+    }
+}
+
+struct ActionStorageKeyHierarchy {
+    storage_root_commitment_preimage: Zeroizing<[u8; ACTION_STORAGE_CHILD_KEY_BYTE_LENGTH]>,
+    storage_record_key_derivation_key: Zeroizing<[u8; ACTION_STORAGE_CHILD_KEY_BYTE_LENGTH]>,
+    storage_record_authenticator_key: Zeroizing<[u8; ACTION_STORAGE_CHILD_KEY_BYTE_LENGTH]>,
+}
+
 pub struct ActionStorageRoot {
     binding: LocalStorageBinding,
     root: Zeroizing<[u8; ACTION_STORAGE_ROOT_BYTE_LENGTH]>,
     storage_root_commitment: Hash512,
+    storage_record_key_derivation_key: Zeroizing<[u8; ACTION_STORAGE_CHILD_KEY_BYTE_LENGTH]>,
+    storage_record_authenticator_key: Zeroizing<[u8; ACTION_STORAGE_CHILD_KEY_BYTE_LENGTH]>,
 }
 
 impl ActionStorageRoot {
@@ -178,11 +239,22 @@ impl ActionStorageRoot {
         binding: LocalStorageBinding,
         root: Zeroizing<[u8; ACTION_STORAGE_ROOT_BYTE_LENGTH]>,
     ) -> SchemaResult<Self> {
-        let storage_root_commitment = derive_storage_root_commitment(binding, &root)?;
+        let key_hierarchy = derive_action_storage_key_hierarchy(binding, &root)?;
+        let storage_root_commitment = derive_storage_root_commitment_from_preimage(
+            binding,
+            &key_hierarchy.storage_root_commitment_preimage,
+        )?;
+        let ActionStorageKeyHierarchy {
+            storage_record_key_derivation_key,
+            storage_record_authenticator_key,
+            ..
+        } = key_hierarchy;
         Ok(Self {
             binding,
             root,
             storage_root_commitment,
+            storage_record_key_derivation_key,
+            storage_record_authenticator_key,
         })
     }
 
@@ -345,7 +417,7 @@ impl ActionStorageRoot {
         }
         let message = key_input.encode()?;
         Ok(kmac256::<LOCAL_RECORD_KEY_BYTE_LENGTH>(
-            self.root.as_ref(),
+            self.storage_record_key_derivation_key.as_ref(),
             &message,
             LOCAL_RECORD_KEY_CUSTOMIZATION,
         ))
@@ -357,7 +429,7 @@ impl ActionStorageRoot {
     ) -> Result<[u8; LOCAL_RECORD_AUTHENTICATOR_BYTE_LENGTH], LocalStorageOperationError> {
         let message = envelope.authenticator_input_bytes()?;
         let authenticator = kmac256::<LOCAL_RECORD_AUTHENTICATOR_BYTE_LENGTH>(
-            self.root.as_ref(),
+            self.storage_record_authenticator_key.as_ref(),
             &message,
             LOCAL_RECORD_AUTHENTICATOR_CUSTOMIZATION,
         );
@@ -1536,10 +1608,58 @@ fn derive_storage_root_commitment(
     binding: LocalStorageBinding,
     action_storage_root: &[u8; ACTION_STORAGE_ROOT_BYTE_LENGTH],
 ) -> SchemaResult<Hash512> {
-    let mut items = Vec::with_capacity(5);
-    items.extend_from_slice(&binding.canonical_items());
-    items.push(CanonicalItem::fixed_bytes(action_storage_root)?);
-    Ok(hash512("sealed-lattice/local-storage-root/v1", &items)?)
+    let key_hierarchy = derive_action_storage_key_hierarchy(binding, action_storage_root)?;
+    derive_storage_root_commitment_from_preimage(
+        binding,
+        &key_hierarchy.storage_root_commitment_preimage,
+    )
+}
+
+fn derive_action_storage_key_hierarchy(
+    binding: LocalStorageBinding,
+    action_storage_root: &[u8; ACTION_STORAGE_ROOT_BYTE_LENGTH],
+) -> SchemaResult<ActionStorageKeyHierarchy> {
+    let derivation_input_bytes =
+        Zeroizing::new(ActionStorageDerivationInput::new(binding).encode()?);
+    let key_material = kmac256::<ACTION_STORAGE_KEY_MATERIAL_BYTE_LENGTH>(
+        action_storage_root,
+        derivation_input_bytes.as_ref(),
+        ACTION_STORAGE_KEY_HIERARCHY_CUSTOMIZATION,
+    );
+    let mut storage_root_commitment_preimage =
+        Zeroizing::new([0u8; ACTION_STORAGE_CHILD_KEY_BYTE_LENGTH]);
+    storage_root_commitment_preimage
+        .copy_from_slice(&key_material[..ACTION_STORAGE_CHILD_KEY_BYTE_LENGTH]);
+    let mut storage_record_key_derivation_key =
+        Zeroizing::new([0u8; ACTION_STORAGE_CHILD_KEY_BYTE_LENGTH]);
+    storage_record_key_derivation_key.copy_from_slice(
+        &key_material
+            [ACTION_STORAGE_CHILD_KEY_BYTE_LENGTH..2 * ACTION_STORAGE_CHILD_KEY_BYTE_LENGTH],
+    );
+    let mut storage_record_authenticator_key =
+        Zeroizing::new([0u8; ACTION_STORAGE_CHILD_KEY_BYTE_LENGTH]);
+    storage_record_authenticator_key
+        .copy_from_slice(&key_material[2 * ACTION_STORAGE_CHILD_KEY_BYTE_LENGTH..]);
+    Ok(ActionStorageKeyHierarchy {
+        storage_root_commitment_preimage,
+        storage_record_key_derivation_key,
+        storage_record_authenticator_key,
+    })
+}
+
+fn derive_storage_root_commitment_from_preimage(
+    binding: LocalStorageBinding,
+    storage_root_commitment_preimage: &[u8; ACTION_STORAGE_CHILD_KEY_BYTE_LENGTH],
+) -> SchemaResult<Hash512> {
+    let derivation_input_bytes =
+        Zeroizing::new(ActionStorageDerivationInput::new(binding).encode()?);
+    Ok(hash512(
+        "sealed-lattice/local-storage-root/v1",
+        &[
+            CanonicalItem::variable_bytes(derivation_input_bytes.as_slice())?,
+            CanonicalItem::fixed_bytes(storage_root_commitment_preimage)?,
+        ],
+    )?)
 }
 
 fn derive_recovery_checksum(

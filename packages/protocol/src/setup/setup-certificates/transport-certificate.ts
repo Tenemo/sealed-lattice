@@ -45,7 +45,7 @@ function transportedObjectRecords(
         );
         if (input.chunkHashes.length !== expectedChunkCount) {
             throw new Error(
-                `${objectPath}.chunkHashes length must match byteLength and chunkSizeBytes.`,
+                `${objectPath}.chunkHashes length must match byteLength and the configured chunk size.`,
             );
         }
         input.chunkHashes.forEach((chunkHash, chunkIndex) => {

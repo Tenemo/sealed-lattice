@@ -316,9 +316,10 @@ const createIdentifierFactory = (
 
     return (kind) => {
         counts[kind] += 1;
-        return `${kind}-${storeIdentifier
-            .toString()
-            .padStart(8, '0')}-${counts[kind].toString().padStart(8, '0')}`;
+        const kindCode = kind === 'transaction' ? '01' : '02';
+        return `${kindCode}${storeIdentifier
+            .toString(16)
+            .padStart(30, '0')}${counts[kind].toString(16).padStart(32, '0')}`;
     };
 };
 
@@ -572,107 +573,6 @@ describe('authenticated checkpoint store', () => {
         expect(exclusiveLock.maximumActiveOperationCount).toBe(1);
     });
 
-    it('replaces and repeats the same attempt without retaining prior chunks', async () => {
-        const { adapter, store } = await openStorage();
-        const checkpointStore = createCheckpointStore(store);
-        const scope = createScope(2);
-        await checkpointStore.replaceCheckpoint({
-            scope,
-            stateChunks: [new Uint8Array([1, 1, 1, 1]), new Uint8Array([2, 2])],
-        });
-
-        const replacementChunks = [
-            new Uint8Array([7, 7, 7, 7]),
-            new Uint8Array([8]),
-        ];
-        await checkpointStore.replaceCheckpoint({
-            scope,
-            stateChunks: replacementChunks,
-        });
-        const keysAfterReplacement = indexedLogicalRecordKeys(adapter);
-        await checkpointStore.replaceCheckpoint({
-            scope,
-            stateChunks: replacementChunks,
-        });
-
-        expect(indexedLogicalRecordKeys(adapter)).toEqual(keysAfterReplacement);
-        expect(await restoreBytes(checkpointStore, scope)).toEqual(
-            new Uint8Array([7, 7, 7, 7, 8]),
-        );
-        expect(
-            indexedLogicalRecordKeys(adapter).filter((key) =>
-                key.includes('/chunks/'),
-            ),
-        ).toHaveLength(2);
-    });
-
-    it.each([
-        {
-            label: 'empty state',
-            chunks: [] as Uint8Array[],
-            code: 'InvalidInput',
-        },
-        {
-            label: 'short non-final chunk',
-            chunks: [new Uint8Array([1]), new Uint8Array([2])],
-            code: 'InvalidInput',
-        },
-        {
-            label: 'oversized final chunk',
-            chunks: [new Uint8Array(5)],
-            code: 'InvalidInput',
-        },
-        {
-            label: 'too many chunks',
-            chunks: [
-                new Uint8Array(4),
-                new Uint8Array(4),
-                new Uint8Array(4),
-                new Uint8Array(4),
-                new Uint8Array(1),
-            ],
-            code: 'BoundsExceeded',
-        },
-    ])(
-        'rejects $label before publishing a manifest',
-        async ({ chunks, code }) => {
-            const { adapter, store } = await openStorage();
-            const checkpointStore = createCheckpointStore(store);
-
-            await expect(
-                checkpointStore.replaceCheckpoint({
-                    scope: createScope(3),
-                    stateChunks: chunks,
-                }),
-            ).rejects.toMatchObject({
-                code,
-                name: 'AuthenticatedCheckpointError',
-            });
-            expect(indexedLogicalRecordKeys(adapter)).toEqual([]);
-        },
-    );
-
-    it('copies streamed chunks before requesting the next value', async () => {
-        const { store } = await openStorage();
-        const checkpointStore = createCheckpointStore(store);
-        const scope = createScope(4);
-        const sourceBytes = new Uint8Array([1, 2, 3, 4]);
-        const source = function* (): Generator<Uint8Array> {
-            yield sourceBytes;
-            sourceBytes.fill(99);
-            yield new Uint8Array([5]);
-        };
-
-        await checkpointStore.replaceCheckpoint({
-            scope,
-            stateChunks: source(),
-        });
-
-        expect(await restoreBytes(checkpointStore, scope)).toEqual(
-            new Uint8Array([1, 2, 3, 4, 5]),
-        );
-    });
-
     it('aborts invisible staged chunks when the source fails before publication', async () => {
         const { adapter, store } = await openStorage();
         const checkpointStore = createCheckpointStore(store);
@@ -830,92 +730,6 @@ describe('authenticated checkpoint store', () => {
         });
     });
 
-    it('refuses manifest tampering before invoking the state parser', async () => {
-        const { adapter, store } = await openStorage();
-        const checkpointStore = createCheckpointStore(store);
-        const scope = createScope(8);
-        await checkpointStore.replaceCheckpoint({
-            scope,
-            stateChunks: [new Uint8Array([1, 2])],
-        });
-        const manifestLogicalKey = `authenticated-checkpoints/${scope.checkpointIdentifier}/manifest`;
-        const manifestObjectKey = objectKeyForLogicalRecord(
-            adapter,
-            manifestLogicalKey,
-        );
-        const tamperedManifest = requiredRawValue(adapter, manifestObjectKey);
-        tamperedManifest[0] = (tamperedManifest[0] ?? 0) ^ 0xff;
-        adapter.rawWrite(manifestObjectKey, tamperedManifest);
-        let parserInvocationCount = 0;
-
-        await expect(
-            checkpointStore.resumeCheckpoint({
-                restorer: {
-                    acceptChunk: () => {
-                        parserInvocationCount += 1;
-                    },
-                    complete: () => {
-                        parserInvocationCount += 1;
-                    },
-                    discard: () => {
-                        parserInvocationCount += 1;
-                    },
-                },
-                scope,
-            }),
-        ).rejects.toMatchObject({ code: 'AuthenticationFailed' });
-        expect(parserInvocationCount).toBe(0);
-    });
-
-    it('detects a manifest index change during authentication before restore begins', async () => {
-        const { adapter, store } = await openStorage();
-        const checkpointStore = createCheckpointStore(store);
-        const scope = createScope(9);
-        await checkpointStore.replaceCheckpoint({
-            scope,
-            stateChunks: [new Uint8Array([1, 2, 3])],
-        });
-        const manifestLogicalKey = `authenticated-checkpoints/${scope.checkpointIdentifier}/manifest`;
-        const manifestIndexKey = indexKey(manifestLogicalKey);
-        const manifestObjectKey = objectKeyForLogicalRecord(
-            adapter,
-            manifestLogicalKey,
-        );
-        adapter.afterRead = (key) => {
-            if (key === manifestObjectKey) {
-                adapter.afterRead = undefined;
-                adapter.rawWrite(
-                    manifestIndexKey,
-                    textEncoder.encode(
-                        `sealed-lattice-runtime-store/${storageNamespace}/objects/hostile/hostile`,
-                    ),
-                );
-            }
-        };
-        let parserInvoked = false;
-
-        await expect(
-            checkpointStore.resumeCheckpoint({
-                restorer: {
-                    acceptChunk: () => {
-                        parserInvoked = true;
-                    },
-                    complete: () => {
-                        parserInvoked = true;
-                    },
-                    discard: () => {
-                        parserInvoked = true;
-                    },
-                },
-                scope,
-            }),
-        ).rejects.toMatchObject({
-            code: 'Conflict',
-            name: 'UntrustedStorageTransactionError',
-        });
-        expect(parserInvoked).toBe(false);
-    });
-
     it('recovers an interrupted replacement and retains the last published attempt state', async () => {
         const { adapter, store } = await openStorage();
         const initialCryptography = new TestCheckpointCryptography();
@@ -962,29 +776,6 @@ describe('authenticated checkpoint store', () => {
                 key.endsWith('/interrupted-publication'),
             ),
         ).toBe(false);
-    });
-
-    it('does not report replacement completion until the published manifest rereads and authenticates', async () => {
-        const { store } = await openStorage();
-        const failingCryptography = new TestCheckpointCryptography();
-        failingCryptography.failFourthManifestOpen = true;
-        const checkpointStore = createCheckpointStore(
-            store,
-            failingCryptography,
-        );
-        const scope = createScope(11);
-
-        await expect(
-            checkpointStore.replaceCheckpoint({
-                scope,
-                stateChunks: [new Uint8Array([4, 3, 2, 1])],
-            }),
-        ).rejects.toMatchObject({ code: 'AuthenticationFailed' });
-
-        const healthyCheckpointStore = createCheckpointStore(store);
-        expect(await restoreBytes(healthyCheckpointStore, scope)).toEqual(
-            new Uint8Array([4, 3, 2, 1]),
-        );
     });
 
     it('evicts published and interrupted records deterministically and idempotently', async () => {

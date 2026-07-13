@@ -109,7 +109,6 @@ const createCollectivePublicKeyFromAggregateCoefficients = (
     const collectivePublicKeyWithoutRoot = {
         objectType: 'CollectivePublicKey',
         proofFamily: publicKeyShareProofFamily,
-        materialEncoding: 'embedded-full-collective-public-key-coefficients',
         ...contextFields(input.setupContext),
         participantCount: input.participantCount,
         rnsLimbCount: input.qSharePrimes.length,

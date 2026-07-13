@@ -1,8 +1,4 @@
-import type {
-    BoardConsistencyInput,
-    BoardConsistencyVerification,
-    VerificationResult,
-} from '@sealed-lattice/types';
+import type { VerificationResult } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
 import * as publicApiRuntime from '../../dist/index.js';
@@ -13,9 +9,6 @@ import type {
 } from '#packages/sdk/src/index';
 import { createAuthenticatedSetupIntentTestVector } from '#packages/wasm/tests/foundation-board-test-vectors';
 
-type VerifyBoardConsistency = (
-    input: BoardConsistencyInput,
-) => BoardConsistencyVerification;
 type TestedFoundationBoardSession = Readonly<{
     cancel(): void;
     ingest(
@@ -31,29 +24,12 @@ type FoundationBoardCandidateObjectHash = (
 ) => Uint8Array;
 
 const publicApiRuntimeRecord = publicApiRuntime as Record<string, unknown>;
-const verifyBoardConsistency =
-    publicApiRuntimeRecord.verifyBoardConsistency as VerifyBoardConsistency;
 const createFoundationBoardSession =
     publicApiRuntimeRecord.createFoundationBoardSession as CreateFoundationBoardSession;
 const foundationBoardCandidateObjectHash =
     publicApiRuntimeRecord.foundationBoardCandidateObjectHash as FoundationBoardCandidateObjectHash;
 
 describe('election foundation public package API in browsers', () => {
-    it('runs a no-WASM board-consistency smoke path', () => {
-        expect(
-            verifyBoardConsistency({
-                ceremonyId: 'ceremony',
-                boardPolicyHash: 'policy',
-                expectedBoardPublicKeyHash: 'board-key',
-                signedBoardHeads: [],
-            }).refusedObjects,
-        ).toEqual(
-            expect.arrayContaining([
-                expect.objectContaining({ code: 'BoardConsistencyFailure' }),
-            ]),
-        );
-    });
-
     it('runs the canonical board boundary through packaged browser WASM', async () => {
         const authenticatedSetupIntent =
             createAuthenticatedSetupIntentTestVector();

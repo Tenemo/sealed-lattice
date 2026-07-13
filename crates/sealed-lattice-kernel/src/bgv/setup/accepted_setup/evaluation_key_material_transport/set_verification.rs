@@ -232,10 +232,7 @@ pub(in super::super) fn verify_public_evaluation_key_set(
 }
 
 fn public_evaluation_key_set_has_material_reference(evaluation_keys: &Value) -> bool {
-    [
-        "publicEvaluationKeyMaterialEncoding",
-        "publicEvaluationKeyMaterialRoot",
-    ]
-    .into_iter()
-    .any(|field_name| evaluation_keys.get(field_name).is_some())
+    evaluation_keys
+        .get("publicEvaluationKeyMaterialRoot")
+        .is_some()
 }

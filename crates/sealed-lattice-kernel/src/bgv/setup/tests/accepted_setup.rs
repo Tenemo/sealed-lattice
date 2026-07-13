@@ -39,17 +39,15 @@ use self::record_rebinding::{
 };
 
 use super::super::accepted_setup::{
-    PUBLIC_EVALUATION_KEY_TRANSPORT_MATERIAL_ENCODING,
-    PUBLIC_KEY_SHARE_MATERIAL_TRANSPORT_ENCODING,
-    accepted_setup_collective_public_key_from_package, public_key_share_coefficient_vector_hash,
+    PUBLIC_KEY_SHARE_MATERIAL_TRANSPORT_ENCODING, public_key_share_coefficient_vector_hash,
     verify_collective_bgv_setup_package, verify_full_ring_material,
     verify_terminal_setup_transport_policy,
 };
 use super::super::evaluation_key_share_material::EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING;
 use super::super::sampling::{dense_public_residues, negacyclic_product_mod};
 use super::super::setup_proof::{
-    SETUP_PROOF_MATERIAL_ENCODING, SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
-    authenticate_setup_proof_material_stream_for_test,
+    SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES, authenticate_setup_proof_material_stream_for_test,
+    authenticate_setup_proof_material_stream_in_session_for_test,
     canonical_setup_proof_material_transport_accounting,
 };
 use super::super::trustee_evaluation_key_proof::{

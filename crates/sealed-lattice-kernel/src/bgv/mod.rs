@@ -20,7 +20,7 @@ pub(crate) use setup::{
     begin_accepted_setup_canonical_stream, begin_accepted_setup_proof_binding_session,
     begin_bgv_canonical_material_reader, begin_bgv_canonical_stream,
     cancel_accepted_setup_proof_binding_session, cancel_bgv_canonical_material_reader,
-    cancel_bgv_canonical_stream, finish_bgv_canonical_material_reader,
-    finish_bgv_canonical_stream, read_bgv_canonical_material_chunk,
+    cancel_bgv_canonical_stream, finish_bgv_canonical_material_reader, finish_bgv_canonical_stream,
+    read_bgv_canonical_material_chunk,
     verify_collective_bgv_setup_package_with_session_from_request,
 };

@@ -862,12 +862,6 @@ fn trustee_evaluation_key_proof_bytes_from_record(
     proof_record: &Value,
     request: &Value,
 ) -> CanonicalResult<SetupProofMaterialBytes> {
-    if value_string(proof_record, "proofBytesEncoding")? != SETUP_PROOF_MATERIAL_ENCODING {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "trustee evaluation-key proofBytesEncoding must be binary-chunked-proof-bytes",
-        ));
-    }
     let proof_material_root = value_string(proof_record, "proofMaterialRoot")?;
     validate_hash_string(
         proof_material_root,
@@ -936,10 +930,6 @@ fn transported_trustee_evaluation_key_proof_material_bytes(
     for proof_material in proof_materials {
         if proof_material.get("objectType").and_then(Value::as_str)
             != Some(EVALUATION_KEY_SHARE_PROOF_TRANSPORT_OBJECT_TYPE)
-            || proof_material
-                .get("proofBytesEncoding")
-                .and_then(Value::as_str)
-                != Some(SETUP_PROOF_MATERIAL_ENCODING)
             || proof_material.get("proofFamily").and_then(Value::as_str)
                 != Some(TRUSTEE_EVALUATION_KEY_PROOF_FAMILY)
         {

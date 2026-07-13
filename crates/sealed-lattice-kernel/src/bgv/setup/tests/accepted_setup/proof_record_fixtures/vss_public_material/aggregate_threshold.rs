@@ -211,7 +211,6 @@ fn vss_aggregate_threshold_proof_record(
         "recipientRosterPosition": recipient_roster_position,
         "rnsLimbIndex": rns_limb_index,
         "vssShareLinkage": vss_aggregate,
-        "proofBytesEncoding": SETUP_PROOF_MATERIAL_ENCODING,
         "proofBytesHash": proof_material.proof_bytes_hash,
         "proofMaterialRoot": proof_material.proof_material_root,
     })

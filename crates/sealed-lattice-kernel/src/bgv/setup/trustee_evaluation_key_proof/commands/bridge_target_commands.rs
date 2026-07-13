@@ -37,7 +37,6 @@ pub(crate) fn generate_same_secret_bridge_proof_from_request(
         "statementHash": to_hex(&statement.statement_hash()),
         "limbCount": statement.proof_limb_count(),
         "bridgeRnsLimbCount": bridge_statement.bridge_rns_primes.len(),
-        "proofBytesEncoding": SETUP_PROOF_MATERIAL_ENCODING,
         "proofBytesHash": proof_bytes_hash,
         "proofMaterialRoot": proof_material_root,
     }))

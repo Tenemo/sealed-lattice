@@ -57,7 +57,6 @@ pub(super) fn expected_relinearization_key_roots_for_evaluation_keys(
             let key_root = derive_canonical_object_hash(
                 &json!({
                     "objectType": "RelinearizationKeyAggregate",
-                    "materialEncoding": PUBLIC_EVALUATION_KEY_MATERIAL_ENCODING,
                     "evaluatorKeyScheduleRoot": binding.evaluator_key_schedule_root.as_str(),
                     "publicKeyShareSuccinctProofSetRoot": binding
                         .public_key_share_succinct_proof_set_root
@@ -172,7 +171,6 @@ pub(super) fn expected_galois_key_roots_for_evaluation_keys(
             }
             let galois_key_root = derive_canonical_object_hash(&json!({
                 "objectType": "GaloisKeyAggregate",
-                "materialEncoding": PUBLIC_EVALUATION_KEY_MATERIAL_ENCODING,
                 "evaluatorKeyScheduleRoot": binding.evaluator_key_schedule_root.as_str(),
                 "publicKeyShareSuccinctProofSetRoot": binding
                     .public_key_share_succinct_proof_set_root

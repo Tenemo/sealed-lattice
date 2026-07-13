@@ -304,11 +304,6 @@ const validatePublicKeyShareSuccinctProofMaterial = (
     );
     assertProtocolHash(material.statementHash, `${fieldName}.statementHash`);
     assertProtocolHash(material.proofBytesHash, `${fieldName}.proofBytesHash`);
-    if (material.proofBytesEncoding !== 'binary-chunked-proof-bytes') {
-        throw new TypeError(
-            `${fieldName}.proofBytesEncoding must be binary-chunked-proof-bytes.`,
-        );
-    }
     assertProtocolHash(
         material.proofMaterialRoot,
         `${fieldName}.proofMaterialRoot`,
@@ -318,7 +313,6 @@ const validatePublicKeyShareSuccinctProofMaterial = (
 const publicKeyShareSuccinctProofByteMaterial = (
     material: PublicKeyShareSuccinctProofMaterial,
 ): PublicKeyShareSuccinctProofByteMaterial => ({
-    proofBytesEncoding: material.proofBytesEncoding,
     proofMaterialRoot: material.proofMaterialRoot,
 });
 

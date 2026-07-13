@@ -1,5 +1,4 @@
 use super::*;
-use crate::bgv::setup::setup_proof::SETUP_PROOF_MATERIAL_ENCODING;
 
 const PRIVATE_VSS_SUCCINCT_TEST_RING_DEGREE: usize = 128;
 
@@ -217,10 +216,6 @@ fn private_vss_succinct_proof_verifier_accepts_canonical_record() {
         })
         .expect("private VSS proof record");
     assert_eq!(proof_record["proofFamily"], "vss-opening-carry");
-    assert_eq!(
-        proof_record["proofBytesEncoding"],
-        SETUP_PROOF_MATERIAL_ENCODING
-    );
     assert_eq!(
         proof_record["proofMaterialRoot"]
             .as_str()
@@ -567,10 +562,6 @@ fn private_vss_share_envelope_verifier_accepts_transported_succinct_private_shar
         .expect("limb openings")
     {
         let proof_record = &limb_opening["privateVssShareProof"];
-        assert_eq!(
-            proof_record["proofBytesEncoding"],
-            SETUP_PROOF_MATERIAL_ENCODING
-        );
         assert_eq!(
             proof_record["proofMaterialRoot"]
                 .as_str()

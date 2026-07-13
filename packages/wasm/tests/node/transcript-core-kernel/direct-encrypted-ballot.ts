@@ -97,7 +97,6 @@ export type DirectEncryptedBallotResult = {
         readonly proofGate: string;
         readonly proofTransport: {
             readonly encoding: string;
-            readonly chunkSizeBytes: number;
             readonly chunksPerProof: number;
             readonly chunksForBatch: number;
             readonly transportedProofSizeBytes: number;

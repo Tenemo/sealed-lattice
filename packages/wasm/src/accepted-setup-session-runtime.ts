@@ -335,5 +335,3 @@ export const beginAcceptedSetupCanonicalStream = (
     }
     return implementation.beginCanonicalStream(input);
 };
-
-export type { AcceptedSetupSessionKernelContext };

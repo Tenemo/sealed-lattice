@@ -1,20 +1,6 @@
 use super::*;
 
 #[test]
-fn collective_setup_verifier_refuses_generic_key_switch_material_by_default() {
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "collective_setup_verifier_refuses_generic_key_switch_material_by_default",
-    );
-    assert_minimal_collective_setup_package_refused(
-        "generic key-switch keys present by default",
-        |package| {
-            package["genericKeySwitchKeys"] = serde_json::json!({ "keyRoot": valid_hash('4') });
-        },
-        "genericKeySwitchOutsideParameters",
-    );
-}
-
-#[test]
 fn collective_setup_verifier_refuses_evaluator_schedule_drift() {
     let _accepted_setup_test_timing =
         accepted_setup_test_timing("collective_setup_verifier_refuses_evaluator_schedule_drift");

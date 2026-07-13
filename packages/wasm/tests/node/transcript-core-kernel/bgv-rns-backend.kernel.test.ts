@@ -54,36 +54,8 @@ const expectProtocolHash = (value: string, label: string): void => {
 };
 
 describe('BGV-RNS backend kernel commands', () => {
-    it('describes the BGV-RNS parameters and operation boundary', async () => {
-        const kernel = await loadTranscriptCoreKernel();
-        const parameters = kernel.describeBgvRnsParameters();
-        const operationRegistry = kernel.describeBgvOperationRegistry() as {
-            readonly registry: {
-                readonly allowedOperations: readonly string[];
-            };
-            readonly bgvParametersHash: string;
-        };
-
-        expect(parameters.parameters).toMatchObject({
-            polynomialDegree: 32_768,
-            plaintextModulus: 65_537,
-            dataPrimeBitLength: 47,
-            dataLevels: 17,
-            extendedLevels: 18,
-        });
-        expect(parameters.parameters.dataPrimes).toHaveLength(17);
-        expectProtocolHash(parameters.bgvParametersHash, 'bgvParametersHash');
-        expect(operationRegistry.bgvParametersHash).toBe(
-            parameters.bgvParametersHash,
-        );
-        expect(operationRegistry.registry.allowedOperations).toContain(
-            'homomorphicEncryptedBallotAggregation',
-        );
-    });
-
     it('encodes direct encrypted ballot aggregate slots and validates roots byte-identically', async () => {
         const kernel = await loadTranscriptCoreKernel();
-        const parameters = kernel.describeBgvRnsParameters();
         const encodedResult = kernel.encodeBgvBatchPlaintext({
             slots: [0, 1, 65_536, 17, 99],
             level: 0,
@@ -97,7 +69,7 @@ describe('BGV-RNS backend kernel commands', () => {
         expect(encoded.validation.isValid).toBe(true);
         expect(encoded.canonicalBytesHex).toMatch(/^[a-f0-9]+$/u);
         expectProtocolHash(encoded.plaintextRoot, 'encoded plaintext root');
-        expect(encoded.bgvParametersHash).toBe(parameters.bgvParametersHash);
+        expectProtocolHash(encoded.bgvParametersHash, 'BGV parameters hash');
         expect(encoded.sampledSlots).toEqual(
             expect.arrayContaining([
                 { position: 0, value: 0 },

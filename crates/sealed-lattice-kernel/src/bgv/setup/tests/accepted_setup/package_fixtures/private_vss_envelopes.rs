@@ -74,7 +74,6 @@ pub(in super::super) fn private_vss_envelope_commitments_object(
                 let private_envelope_aad = serde_json::json!({
                     "objectType": "PrivateVssEnvelopeAad",
                     "privateEnvelopeObjectType": "PrivateVssShareEnvelope",
-                    "ciphertextContentType": "private-vss-share-envelope",
                     "ceremonyId": ceremony_id,
                     "manifestHash": manifest_hash,
                     "rosterHash": roster_hash,
@@ -111,7 +110,6 @@ pub(in super::super) fn private_vss_envelope_commitments_object(
                 );
                 let mut encrypted_envelope = serde_json::json!({
                     "objectType": "EncryptedPrivateVssShareEnvelope",
-                    "ciphertextContentType": "private-vss-share-envelope",
                     "ceremonyId": ceremony_id,
                     "manifestHash": manifest_hash,
                     "rosterHash": roster_hash,

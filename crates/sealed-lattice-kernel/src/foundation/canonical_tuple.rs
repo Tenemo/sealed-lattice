@@ -1272,17 +1272,14 @@ mod tests {
     }
 
     #[test]
-    fn canonical_tuple_round_trips_byte_identically() {
+    fn representative_tuples_and_homogeneous_lists_round_trip_byte_identically() {
         let tuple = representative_tuple();
         let encoded = tuple.encode().expect("tuple encodes");
         let decoded = CanonicalTuple::decode(&encoded, &CanonicalDecodeLimits::default())
             .expect("tuple decodes");
         assert_eq!(decoded, tuple);
         assert_eq!(decoded.encode().expect("decoded tuple re-encodes"), encoded);
-    }
 
-    #[test]
-    fn fixed_width_lists_and_nested_tuple_lists_round_trip() {
         let hash_values = [
             CanonicalItem::hash512([1; 64]),
             CanonicalItem::hash512([2; 64]),
@@ -1301,7 +1298,7 @@ mod tests {
             ))
             .expect("nested tuple"),
         ];
-        let tuple = CanonicalTuple::new(
+        let list_tuple = CanonicalTuple::new(
             0x0110,
             1,
             vec![
@@ -1311,38 +1308,15 @@ mod tests {
                     .expect("tuple list"),
             ],
         );
-        let encoded = tuple.encode().expect("encode");
+        let encoded = list_tuple.encode().expect("encode");
         assert_eq!(
             CanonicalTuple::decode(&encoded, &CanonicalDecodeLimits::default()).expect("decode"),
-            tuple
+            list_tuple
         );
     }
 
     #[test]
-    fn variable_values_and_raw_byte_lists_use_inner_u32_lengths() {
-        let first = CanonicalItem::variable_bytes([1, 2, 3]).expect("raw bytes");
-        let second = CanonicalItem::variable_bytes([4]).expect("raw bytes");
-        let fixed = CanonicalItem::fixed_bytes([1, 2, 3]).expect("fixed bytes");
-        assert_eq!(first.canonical_bytes(), &[3, 0, 0, 0, 1, 2, 3]);
-        assert_eq!(fixed.canonical_bytes(), &[1, 2, 3]);
-        assert_eq!(
-            first.variable_value_bytes().expect("variable value"),
-            &[1, 2, 3]
-        );
-
-        let list =
-            CanonicalItem::homogeneous_list(CanonicalItemType::RawBytes, &[first.clone(), second])
-                .expect("raw-byte list");
-        let tuple = CanonicalTuple::new(0x1613, 1, vec![list]);
-        let encoded = tuple.encode().expect("encode");
-        assert_eq!(
-            CanonicalTuple::decode(&encoded, &CanonicalDecodeLimits::default()).expect("decode"),
-            tuple
-        );
-    }
-
-    #[test]
-    fn byte_constructors_preflight_limits_and_preserve_exact_boundary_encodings() {
+    fn byte_and_text_constructors_enforce_exact_framed_item_boundaries() {
         let maximum_item_byte_length = CanonicalDecodeLimits::default().maximum_item_byte_length;
 
         let fixed_item = CanonicalItem::fixed_bytes(vec![0x5a; maximum_item_byte_length])
@@ -1391,11 +1365,7 @@ mod tests {
             variable_error.message,
             "variable-width item exceeds the default item limit"
         );
-    }
 
-    #[test]
-    fn text_constructors_enforce_the_exact_framed_item_boundary() {
-        let maximum_item_byte_length = CanonicalDecodeLimits::default().maximum_item_byte_length;
         let maximum_text_byte_length = maximum_item_byte_length - 4;
         let exact_text = "A".repeat(maximum_text_byte_length);
 
@@ -1442,51 +1412,6 @@ mod tests {
         let display_error = CanonicalItem::display_text(&oversized_display_text)
             .expect_err("oversized display text must refuse before cloning");
         assert_eq!(display_error.kind, CanonicalCodecErrorKind::LimitExceeded);
-    }
-
-    #[test]
-    fn variable_value_layout_rejects_unrepresentable_lengths_without_allocation() {
-        let overflow_message = "test variable item length does not fit u32";
-        let error = checked_variable_value_layout(usize::MAX, overflow_message)
-            .expect_err("the largest usize cannot be represented with framing");
-        assert_eq!(error.kind, CanonicalCodecErrorKind::LengthOverflow);
-        assert_eq!(error.message, overflow_message);
-    }
-
-    #[test]
-    fn empty_ascii_and_suite_sized_list_payloads_remain_structurally_decodable() {
-        let empty_ascii = CanonicalItem::ascii("").expect("generic ASCII permits empty values");
-        assert_eq!(empty_ascii.canonical_bytes(), &[0, 0, 0, 0]);
-
-        let field_values = [
-            CanonicalItem::from_canonical_bytes(
-                CanonicalItemType::FieldElement,
-                vec![1, 2, 3],
-                &CanonicalDecodeLimits::default(),
-            )
-            .expect("nonempty field item"),
-            CanonicalItem::from_canonical_bytes(
-                CanonicalItemType::FieldElement,
-                vec![4, 5, 6],
-                &CanonicalDecodeLimits::default(),
-            )
-            .expect("nonempty field item"),
-        ];
-        let tuple = CanonicalTuple::new(
-            0x0105,
-            1,
-            vec![
-                empty_ascii,
-                CanonicalItem::homogeneous_list(CanonicalItemType::FieldElement, &field_values)
-                    .expect("suite-sized list encodes structurally"),
-            ],
-        );
-        let encoded = tuple.encode().expect("tuple encodes");
-        assert_eq!(
-            CanonicalTuple::decode(&encoded, &CanonicalDecodeLimits::default())
-                .expect("profile-aware list payload is preserved for its schema decoder"),
-            tuple
-        );
     }
 
     #[test]
@@ -1604,7 +1529,7 @@ mod tests {
     }
 
     #[test]
-    fn cumulative_work_budget_refuses_recursive_byte_scanning_amplification() {
+    fn cumulative_budgets_refuse_recursive_scanning_and_copy_amplification() {
         let encoded = recursively_nested_single_item_tuple(7, 1_024);
         let cumulative_work_byte_length = encoded
             .len()
@@ -1622,12 +1547,9 @@ mod tests {
             error.message,
             "canonical decoding exceeds the configured cumulative work limit"
         );
-    }
 
-    #[test]
-    fn cumulative_allocation_budget_refuses_recursive_copy_amplification() {
-        let encoded = recursively_nested_single_item_tuple(7, 1_024);
-        let cumulative_allocation_byte_length = encoded
+        let allocation_encoded = recursively_nested_single_item_tuple(7, 1_024);
+        let cumulative_allocation_byte_length = allocation_encoded
             .len()
             .checked_mul(2)
             .expect("test budget multiplication does not overflow");
@@ -1636,7 +1558,7 @@ mod tests {
             ..CanonicalDecodeLimits::default()
         };
 
-        let error = CanonicalTuple::decode(&encoded, &limits)
+        let error = CanonicalTuple::decode(&allocation_encoded, &limits)
             .expect_err("recursive copying must consume one shared allocation budget");
         assert_eq!(error.kind, CanonicalCodecErrorKind::LimitExceeded);
         assert_eq!(

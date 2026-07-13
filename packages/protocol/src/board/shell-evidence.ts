@@ -63,9 +63,7 @@ const collectBoardInclusionEvidence = (input: {
 };
 
 export const collectSignedBoardInclusionEvidence = (input: {
-    readonly acceptedObjectHash: ProtocolHash;
     readonly boardEvidence: BoardConsistencyInput;
-    readonly extraAcceptedHashes?: readonly ProtocolHash[];
     readonly inclusionProof: InclusionProof;
     readonly objectRefusals: readonly RefusalRecord[];
     readonly signature: ProtocolSignatureEnvelope;

@@ -15,7 +15,6 @@ const proofMaterial = (): BgvTargetDecryptionShareProofMaterial => {
         proofRecords: [
             {
                 objectType: 'BgvTargetDecryptionShareProofRecord',
-                proofBytesEncoding: 'binary-chunked-proof-bytes',
                 proofBytesHash,
             },
         ],

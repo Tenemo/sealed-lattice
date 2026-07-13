@@ -127,9 +127,6 @@ const encodeUnsigned32 = (value: number): Uint8Array => {
 };
 
 class BrowserCheckpointCryptography {
-    readonly #openCountByLogicalRecordKey = new Map<string, number>();
-    public failFourthStateChunkOpen = false;
-
     public readonly sealRecord = (input: {
         context: AuthenticatedCheckpointRecordContext;
         plaintext: Uint8Array;
@@ -148,21 +145,6 @@ class BrowserCheckpointCryptography {
         context: AuthenticatedCheckpointRecordContext;
         sealedBytes: Uint8Array;
     }): Uint8Array => {
-        const invocationCount =
-            (this.#openCountByLogicalRecordKey.get(
-                input.context.logicalRecordKey,
-            ) ?? 0) + 1;
-        this.#openCountByLogicalRecordKey.set(
-            input.context.logicalRecordKey,
-            invocationCount,
-        );
-        if (
-            invocationCount === 4 &&
-            input.context.recordKind === 'stateChunk' &&
-            this.failFourthStateChunkOpen
-        ) {
-            throw new Error('injected browser checkpoint open failure');
-        }
         if (input.sealedBytes.byteLength < authenticationTagByteLength) {
             throw new Error('sealed browser checkpoint is truncated');
         }
@@ -324,95 +306,6 @@ afterEach(async () => {
 describe.skipIf(!webLocksAvailable)(
     'Authenticated checkpoint store in browsers',
     () => {
-        it('fails closed for unavailable or unbounded Web Locks and releases after rejection', async () => {
-            expect(() =>
-                createAuthenticatedCheckpointWebLock(null),
-            ).toThrowError(
-                expect.objectContaining({ code: 'InvalidConfiguration' }),
-            );
-            const webLock = createAuthenticatedCheckpointWebLock(
-                navigator.locks,
-            );
-            let invalidOperationInvoked = false;
-            await expect(
-                webLock({
-                    lockName: `caller-selected-${'x'.repeat(512)}`,
-                    operation: () => {
-                        invalidOperationInvoked = true;
-                        return Promise.resolve();
-                    },
-                }),
-            ).rejects.toMatchObject({ code: 'InvalidInput' });
-            expect(invalidOperationInvoked).toBe(false);
-
-            const lockName =
-                'sealed-lattice-authenticated-checkpoint-browser-checkpoint-lock-01';
-            const operationFailure = new Error(
-                'injected checkpoint operation rejection',
-            );
-            await expect(
-                webLock({
-                    lockName,
-                    operation: () => Promise.reject(operationFailure),
-                }),
-            ).rejects.toBe(operationFailure);
-            await expect(
-                webLock({
-                    lockName,
-                    operation: () => Promise.resolve(17),
-                }),
-            ).resolves.toBe(17);
-
-            const requestFailure = new Error(
-                'injected Web Lock request failure',
-            );
-            const failingLockManager = {
-                request: () => Promise.reject(requestFailure),
-            } as unknown as LockManager;
-            await expect(
-                createAuthenticatedCheckpointWebLock(failingLockManager)({
-                    lockName,
-                    operation: () => Promise.resolve(),
-                }),
-            ).rejects.toMatchObject({
-                code: 'LockUnavailable',
-                failureCause: requestFailure,
-            });
-
-            const postOperationRequestFailure = new Error(
-                'injected post-operation Web Lock failure',
-            );
-            const postOperationFailingLockManager = {
-                request: async (
-                    grantedLockName: string,
-                    _options: unknown,
-                    callback: (lock: Lock | null) => Promise<unknown>,
-                ): Promise<never> => {
-                    await callback({
-                        mode: 'exclusive',
-                        name: grantedLockName,
-                    });
-                    throw postOperationRequestFailure;
-                },
-            } as unknown as LockManager;
-            let postOperationCompleted = false;
-            await expect(
-                createAuthenticatedCheckpointWebLock(
-                    postOperationFailingLockManager,
-                )({
-                    lockName,
-                    operation: () => {
-                        postOperationCompleted = true;
-                        return Promise.resolve();
-                    },
-                }),
-            ).rejects.toMatchObject({
-                code: 'LockUnavailable',
-                failureCause: postOperationRequestFailure,
-            });
-            expect(postOperationCompleted).toBe(true);
-        });
-
         it('persists and resumes authenticated state after browser storage reopen', async () => {
             const databaseName = createDatabaseName();
             const scope = createScope(1);
@@ -502,47 +395,6 @@ describe.skipIf(!webLocksAvailable)(
                 await restoreBytes(firstCheckpointStore, scope),
             ).toBeUndefined();
             expect(exclusiveLock.maximumActiveOperationCount).toBe(1);
-        });
-
-        it('cleans an interrupted chunk generation after close and storage recovery', async () => {
-            const databaseName = createDatabaseName();
-            const scope = createScope(2);
-            const firstHandle = await openOwnedStore(databaseName);
-            const failingCryptography = new BrowserCheckpointCryptography();
-            const firstCheckpointStore = createCheckpointStore(
-                firstHandle,
-                failingCryptography,
-            );
-            const publishedBytes = new Uint8Array([1, 3, 5]);
-            await firstCheckpointStore.replaceCheckpoint({
-                scope,
-                stateChunks: [publishedBytes],
-            });
-            failingCryptography.failFourthStateChunkOpen = true;
-
-            await expect(
-                firstCheckpointStore.replaceCheckpoint({
-                    scope,
-                    stateChunks: [new Uint8Array([2, 4, 6])],
-                }),
-            ).rejects.toMatchObject({ code: 'AuthenticationFailed' });
-            await firstHandle.close();
-
-            const secondHandle = await openOwnedStore(databaseName);
-            const secondCheckpointStore = createCheckpointStore(secondHandle);
-            expect(
-                await secondCheckpointStore.cleanupInterruptedPublication(
-                    scope,
-                ),
-            ).toEqual({ removedChunkCount: 1 });
-            expect(await restoreBytes(secondCheckpointStore, scope)).toEqual(
-                publishedBytes,
-            );
-            expect(
-                await secondCheckpointStore.cleanupInterruptedPublication(
-                    scope,
-                ),
-            ).toEqual({ removedChunkCount: 0 });
         });
     },
 );

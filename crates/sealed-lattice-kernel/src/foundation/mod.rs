@@ -10,7 +10,6 @@ mod board_ingestion_runtime;
 mod canonical_stream;
 mod canonical_stream_runtime;
 mod canonical_tuple;
-mod cryptographic_counters;
 mod hash;
 mod local_encrypted_storage;
 mod local_storage_runtime;
@@ -61,18 +60,10 @@ pub use canonical_tuple::{
     CanonicalCodecErrorKind, CanonicalDecodeLimits, CanonicalItem, CanonicalItemType,
     CanonicalTuple,
 };
-pub use cryptographic_counters::{
-    CryptographicCounterSnapshot, CryptographicInterfaceCounters,
-    MAXIMUM_AUTHENTICATED_MAILBOX_OPENINGS_PER_CEREMONY,
-    MAXIMUM_DEVICE_WRAPPING_OPENS_PER_CEREMONY, MAXIMUM_LOCAL_RECORD_OPENS_PER_CEREMONY,
-    MAXIMUM_LOCAL_RECORD_PLAINTEXT_BYTES_PER_CEREMONY, MAXIMUM_MAILBOX_ENCAPSULATIONS_PER_CEREMONY,
-    MAXIMUM_MAILBOX_PLAINTEXT_BYTES_PER_CEREMONY,
-    MAXIMUM_OBJECT_SIGNATURE_GENERATIONS_PER_CEREMONY,
-    MAXIMUM_OBJECT_SIGNATURE_VERIFICATIONS_PER_CEREMONY, MAXIMUM_PROOF_VERIFICATIONS_PER_CEREMONY,
-};
 pub use hash::{Hash512, hash512};
 pub use local_encrypted_storage::{
-    ACTION_STORAGE_ROOT_BYTE_LENGTH, ActionStorageRoot, AuthenticatedLocalRecordEnvelope,
+    ACTION_STORAGE_DERIVATION_INPUT_SCHEMA_IDENTIFIER, ACTION_STORAGE_ROOT_BYTE_LENGTH,
+    ActionStorageDerivationInput, ActionStorageRoot, AuthenticatedLocalRecordEnvelope,
     CanonicalLocalStorageRecoveryIngress, DEVICE_WRAPPED_STORAGE_ROOT_SCHEMA_IDENTIFIER,
     DEVICE_WRAPPING_ASSOCIATED_DATA_SCHEMA_IDENTIFIER, DeviceWrappedStorageRoot,
     DeviceWrappingAssociatedData, LOCAL_RECORD_ASSOCIATED_DATA_SCHEMA_IDENTIFIER,
@@ -100,16 +91,13 @@ pub use participant_identity::{
     derive_participant_identity,
 };
 pub use private_randomness::{
-    ActionPrivateRandomness, EntropySourceError, FallibleEntropySource, PrivateRandomAttempt,
-    PrivateRandomDomain, PrivateRandomStreamContext, PrivateRandomnessActionBinding,
-    PrivateRandomnessError, PrivateRandomnessResumeSnapshot, SuiteSamplingPurpose,
-    TargetFloodingRole, VerifiableSecretSharingExpansionRole,
+    ACTION_RANDOMNESS_DERIVATION_INPUT_SCHEMA_IDENTIFIER, ActionPrivateRandomness,
+    ActionRandomnessDerivationInput, EntropySourceError, FallibleEntropySource,
+    PrivateRandomAttempt, PrivateRandomDomain, PrivateRandomStreamContext,
+    PrivateRandomnessActionBinding, PrivateRandomnessError, PrivateRandomnessResumeSnapshot,
+    SuiteSamplingPurpose, TargetFloodingRole, VerifiableSecretSharingExpansionRole,
 };
-pub use proof_attempts::{
-    EphemeralProofAttemptTracker, ProofApplicationSlot, ProofAttemptProfile,
-    ProofAttemptReservationDisposition, ProofAttemptStartDisposition, ProofFamily,
-    ProofFamilyByteCeiling,
-};
+pub use proof_attempts::ProofFamily;
 pub use proof_commitments::{
     CommonProofTreeOpeningVerification, PROOF_AUTHENTICATION_FRONTIER_SCHEMA_IDENTIFIER,
     PROOF_AUTHENTICATION_NODE_SCHEMA_IDENTIFIER, PROOF_MERKLE_NODE_SCHEMA_IDENTIFIER,

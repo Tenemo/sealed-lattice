@@ -823,6 +823,30 @@ export const validFoundationSchemaObjectVectors = [
         ),
     ),
     schemaObject(
+        'action-storage derivation input',
+        0x0308,
+        canonicalTuple(
+            0x0308,
+            unsigned16(1),
+            hash(0x31),
+            hash(0x32),
+            hash(0x33),
+            participantIdentity(0x34),
+        ),
+    ),
+    schemaObject(
+        'action-randomness derivation input',
+        0x0402,
+        canonicalTuple(
+            0x0402,
+            unsigned16(1),
+            hash(0x41),
+            hash(0x42),
+            hash(0x43),
+            participantIdentity(0x44),
+        ),
+    ),
+    schemaObject(
         'state reservation intent',
         0x1610,
         canonicalTuple(0x1610, unsigned16(1), hash(0x81)),

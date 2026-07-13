@@ -83,6 +83,34 @@ pub(crate) fn authenticate_setup_proof_material_stream_for_test(
     proof_material_root: &str,
     proof_bytes: &[u8],
 ) -> CanonicalResult<SetupProofMaterialTransportHashes> {
+    authenticate_setup_proof_material_stream_for_test_inner(
+        proof_family,
+        proof_material_root,
+        proof_bytes,
+        None,
+    )
+}
+
+pub(crate) fn authenticate_setup_proof_material_stream_in_session_for_test(
+    proof_family: &str,
+    proof_material_root: &str,
+    proof_bytes: &[u8],
+    accepted_setup_session: crate::bgv::setup::AcceptedSetupProofBindingSession,
+) -> CanonicalResult<SetupProofMaterialTransportHashes> {
+    authenticate_setup_proof_material_stream_for_test_inner(
+        proof_family,
+        proof_material_root,
+        proof_bytes,
+        Some(accepted_setup_session),
+    )
+}
+
+fn authenticate_setup_proof_material_stream_for_test_inner(
+    proof_family: &str,
+    proof_material_root: &str,
+    proof_bytes: &[u8],
+    accepted_setup_session: Option<crate::bgv::setup::AcceptedSetupProofBindingSession>,
+) -> CanonicalResult<SetupProofMaterialTransportHashes> {
     let (family_code, stream_domain) = setup_proof_stream_family(proof_family)?;
     let descriptor = derive_canonical_stream_descriptor(stream_domain, proof_bytes).map_err(
         |refusal_reason| {
@@ -100,12 +128,21 @@ pub(crate) fn authenticate_setup_proof_material_stream_for_test(
     })?;
     let material_root_bytes = crate::transcript_core::decode_hex(proof_material_root)?;
     let capability = [0x73; CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH];
-    let stream = crate::bgv::setup::begin_bgv_canonical_stream(
-        family_code,
-        &material_root_bytes,
-        &descriptor_bytes,
-        capability,
-    )
+    let stream = match accepted_setup_session {
+        Some(accepted_setup_session) => crate::bgv::setup::begin_accepted_setup_canonical_stream(
+            family_code,
+            &material_root_bytes,
+            &descriptor_bytes,
+            capability,
+            accepted_setup_session,
+        ),
+        None => crate::bgv::setup::begin_bgv_canonical_stream(
+            family_code,
+            &material_root_bytes,
+            &descriptor_bytes,
+            capability,
+        ),
+    }
     .map_err(|status| {
         CanonicalError::new(
             CanonicalErrorCode::InvalidProtocolObject,

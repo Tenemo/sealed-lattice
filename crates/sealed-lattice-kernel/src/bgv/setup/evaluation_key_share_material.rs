@@ -41,11 +41,6 @@ use crate::{
     foundation::VerifiedCanonicalStreamSummary,
 };
 
-#[cfg(not(target_arch = "wasm32"))]
-use super::setup_proof::SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES;
-#[cfg(not(target_arch = "wasm32"))]
-use crate::hashing::hash512_hex;
-
 pub(super) const EVALUATION_KEY_SHARE_COMPONENT_VECTOR_HASH_DOMAIN: &str =
     "sealed-lattice-bgv-rns/evaluation-key-share-component-vector";
 pub(super) const EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING: &str =

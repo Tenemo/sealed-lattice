@@ -8,13 +8,6 @@ pub(super) fn public_key_share_succinct_proof_bytes_from_record(
     proof_record: &Value,
     request: &Value,
 ) -> CanonicalResult<SetupProofMaterialBytes> {
-    let proof_bytes_encoding = value_string(proof_record, "proofBytesEncoding")?;
-    if proof_bytes_encoding != SETUP_PROOF_MATERIAL_ENCODING {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "public-key share proofBytesEncoding must be binary-chunked-proof-bytes",
-        ));
-    }
     let proof_material_root = value_string(proof_record, "proofMaterialRoot")?;
     validate_hash_string(
         proof_material_root,

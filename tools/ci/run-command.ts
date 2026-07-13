@@ -223,7 +223,7 @@ const isCommandAbortReason = (value: unknown): value is CommandAbortReason =>
         value.initiator === undefined ||
         typeof value.initiator === 'string');
 
-export const createAbortableCommandSpawnOptions = (
+const createAbortableCommandSpawnOptions = (
     env: NodeJS.ProcessEnv,
     stdio: SpawnOptions['stdio'],
     platform: NodeJS.Platform = process.platform,
@@ -355,7 +355,7 @@ export const killProcessTree = (
     }
 };
 
-export const describeProcessTerminationAttempt = (input: {
+const describeProcessTerminationAttempt = (input: {
     readonly requestedSignal: NodeJS.Signals;
     readonly requestedStage: 'forced' | 'requested';
     readonly result: unknown;

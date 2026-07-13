@@ -79,7 +79,6 @@ describe('private VSS mailbox delivery', () => {
         const expectedTransportedMaterialRoot = deriveCanonicalObjectHash({
             objectType: 'PrivateVssShareTransportedSuccinctProofMaterial',
             proofFamily: 'vss-opening-carry',
-            proofBytesEncoding: 'binary-chunked-proof-bytes',
             statementHash: fixtureHash('statement-hash'),
             proofBytesHash,
         });
@@ -134,7 +133,6 @@ describe('private VSS mailbox delivery', () => {
                         proofId:
                             'sealed-lattice-private-vss-share-proof-succinct',
                         proofFamily: 'vss-opening-carry',
-                        proofBytesEncoding: 'binary-chunked-proof-bytes',
                         proofStatementRoot: fixtureHash('statement-root'),
                         statementHash: fixtureHash('statement-hash'),
                         proofBytesHash,
@@ -183,9 +181,6 @@ describe('private VSS mailbox delivery', () => {
         )[0];
         const transportedProofRecord =
             limbOpening.privateVssShareProof as Record<string, unknown>;
-        expect(transportedProofRecord.proofBytesEncoding).toBe(
-            'binary-chunked-proof-bytes',
-        );
         expect(transportedProofRecord.proofMaterialRoot).toBe(
             expectedTransportedMaterialRoot,
         );

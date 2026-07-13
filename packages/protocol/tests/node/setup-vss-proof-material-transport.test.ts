@@ -1,23 +1,10 @@
+import { deriveCanonicalObjectHash, hash512Hex } from '@sealed-lattice/crypto';
 import { describe, expect, it } from 'vitest';
 
-import {
-    deriveCanonicalObjectHash,
-    hash512Hex,
-} from '#packages/crypto/src/index';
 import {
     createBinaryChunkedSameSecretBridgeProofMaterialTransport,
     createBinaryChunkedVssShareLinkageProofMaterialTransport,
 } from '#packages/protocol/src/index';
-import {
-    canonicalStreamDomains,
-    openCanonicalStreamWorkerRuntime,
-    type CanonicalStreamDomain,
-} from '#packages/wasm/src/canonical-stream-runtime';
-import {
-    bgvCanonicalStreamFamilies,
-    loadTranscriptCoreKernel,
-    openBgvCanonicalStreamRuntime,
-} from '#packages/wasm/src/index';
 import { canonicalStreamDescriptorFixture } from '#tests/support/canonical-stream-descriptor-fixture';
 
 type JsonRecord = Record<string, unknown>;
@@ -48,8 +35,6 @@ type ProofMaterialCase = Readonly<{
     readonly proofRecordRootField:
         | 'proofRecordRoot'
         | 'sameSecretBridgeProofRecordRoot';
-    readonly runtimeFamily: number;
-    readonly streamDomain: CanonicalStreamDomain;
     readonly identityFields: (recordIndex: number) => JsonRecord;
     readonly createTransport: (build: CanonicalProofMaterialBuild) => Readonly<{
         readonly proofMaterialSet: JsonRecord;
@@ -69,8 +54,6 @@ const proofMaterialCases = [
         proofBytesHashDomain:
             'sealed-lattice/setup/vss-share-linkage/proof-bytes',
         proofRecordRootField: 'proofRecordRoot',
-        runtimeFamily: bgvCanonicalStreamFamilies.vssShareLinkage,
-        streamDomain: canonicalStreamDomains.dealerVssShareLinkageProof,
         identityFields: (recordIndex: number): JsonRecord => ({
             linkageItems: [
                 {
@@ -111,8 +94,6 @@ const proofMaterialCases = [
         proofBytesHashDomain:
             'sealed-lattice/setup/same-secret-bridge/proof-bytes',
         proofRecordRootField: 'sameSecretBridgeProofRecordRoot',
-        runtimeFamily: bgvCanonicalStreamFamilies.sameSecretBridge,
-        streamDomain: canonicalStreamDomains.sameSecretProof,
         identityFields: (recordIndex: number): JsonRecord => ({
             sameSecretBridgeStatementRoot: `${String(recordIndex)}`.padStart(
                 128,
@@ -158,7 +139,6 @@ const canonicalProofMaterialBuild = (
             proofFamily: proofMaterialCase.proofFamily,
             ...proofMaterialCase.identityFields(recordIndex),
             proofBytesHash,
-            proofBytesEncoding: 'binary-chunked-proof-bytes',
             proofMaterialRoot,
         };
         canonicalProofMaterials.push({
@@ -241,43 +221,6 @@ describe('VSS canonical proof material transport', () => {
                     ],
                 }),
             ).toThrow(/must match exactly one proof record/u);
-        },
-    );
-});
-
-describe('VSS canonical proof material streaming through the kernel', () => {
-    it.each(proofMaterialCases)(
-        'authenticates the supplied $proofFamily descriptor and producer chunks',
-        async (proofMaterialCase) => {
-            const kernel = await loadTranscriptCoreKernel();
-            const chunk = Uint8Array.of(0, 0x11, 0x22, 0x33, 0x44).buffer;
-            const writer = openCanonicalStreamWorkerRuntime({
-                kernel,
-            }).openWriter({
-                streamDomain: proofMaterialCase.streamDomain,
-                totalByteLength: chunk.byteLength,
-            });
-            writer.absorbChunk(0, chunk);
-            const descriptorBytes = writer.finish();
-            const build = canonicalProofMaterialBuild(proofMaterialCase, [
-                descriptorBytes,
-            ]);
-            const transported = proofMaterialCase.createTransport(build);
-            const material = (
-                transported.transportedProofMaterialSet
-                    .proofMaterials as readonly JsonRecord[]
-            )[0];
-            const verifier = openBgvCanonicalStreamRuntime({
-                kernel,
-            }).openVerifier({
-                descriptorBytes: material.descriptorBytes as Uint8Array,
-                family: proofMaterialCase.runtimeFamily,
-                materialRoot: material.proofMaterialRoot as string,
-            });
-            verifier.absorbChunk(0, chunk);
-            verifier.finish();
-
-            expect(verifier.state()).toBe('completed');
         },
     );
 });

@@ -11,8 +11,6 @@ use super::relation::{
     TrusteeEvaluationKeyStatement, TrusteeEvaluationKeyWitness, VssShareLinkageCommitment,
     VssShareLinkageItem, VssShareLinkageStatement,
 };
-#[cfg(test)]
-use super::relation::{LimbColumnLayout, PHASE_TWO_COLUMN_COUNT, TargetDecryptionMessageClaimKind};
 use super::relation::{
     TargetDecryptionShareLimbStatement, TargetDecryptionShareRoleStatement,
     TargetDecryptionShareStatement,
@@ -25,10 +23,10 @@ use crate::bgv::setup::commitment::{
 };
 use crate::bgv::setup::limb_group_key_switch_atom::family_backend::schedule as atom_schedule;
 use crate::bgv::setup::same_secret_bridge::SAME_SECRET_BRIDGE_PROOF_BYTES_HASH_DOMAIN;
+use crate::bgv::setup::setup_proof::SetupProofMaterialBytes;
 use crate::bgv::setup::setup_proof::material_transport::{
     SetupProofMaterialTransportFamily, resolve_transported_setup_proof_material,
 };
-use crate::bgv::setup::setup_proof::{SETUP_PROOF_MATERIAL_ENCODING, SetupProofMaterialBytes};
 use crate::bgv::setup::vss_commitment::VSS_SHARE_LINKAGE_PROOF_BYTES_HASH_DOMAIN;
 use crate::hashing::{derive_canonical_object_hash, hash512_hex, to_hex};
 
@@ -187,7 +185,6 @@ pub(crate) fn generate_trustee_evaluation_key_proof_from_request(
         "proofFamily": statement.context.proof_family,
         "statementHash": statement_hash,
         "limbCount": statement.proof_limb_count(),
-        "proofBytesEncoding": SETUP_PROOF_MATERIAL_ENCODING,
         "proofBytesHash": proof_bytes_hash,
         "proofMaterialRoot": proof_material_root,
     }))
@@ -274,7 +271,6 @@ pub(crate) fn generate_vss_share_linkage_proof_from_request(
         "limbCount": statement.proof_limb_count(),
         "coefficientCommitmentCount": share_linkage_statement.total_coefficient_commitment_count(),
         "coefficientWitnessColumnCount": share_linkage_statement.unique_coefficient_witness_slot_count(),
-        "proofBytesEncoding": SETUP_PROOF_MATERIAL_ENCODING,
         "proofBytesHash": proof_bytes_hash,
         "proofMaterialRoot": proof_material_root,
     }))
@@ -390,8 +386,6 @@ pub(crate) use bridge_target_commands::{
 #[cfg(test)]
 pub(crate) use share_linkage_verification::verify_vss_share_linkage_proof_material_set_from_request;
 pub(in crate::bgv::setup) use share_linkage_verification::verify_vss_share_linkage_statement_and_proof_material_set_from_request;
-#[cfg(test)]
-pub(crate) use target_decryption_parsing::describe_target_decryption_share_proof_layout_from_request;
 pub(in crate::bgv::setup) use target_decryption_parsing::vss_share_linkage_commitment_from_value;
 
 #[cfg(test)]

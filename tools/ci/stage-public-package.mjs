@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 const repositoryRoot = fileURLToPath(new URL('../../', import.meta.url));
 
 /** @param {string} packageJsonText */
-export const sanitizePublicPackageJson = (packageJsonText) => {
+const sanitizePublicPackageJson = (packageJsonText) => {
     const packageJson = JSON.parse(packageJsonText);
     delete packageJson.devDependencies;
     delete packageJson.scripts;

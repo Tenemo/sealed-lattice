@@ -129,6 +129,7 @@ export const verifyRegistrationEntry = (
         ceremonyId: input.ceremonyId,
         manifestHash: null,
         objectRoot: entry.registrationEntryHash,
+        chunkMerkleRoot: null,
         boardHeadHash: null,
         recoveryEpoch: entry.recoveryEpoch,
         deviceEpoch: entry.deviceEpoch,
@@ -268,20 +269,23 @@ export const verifyTrusteeSetupEntry = (
         );
     }
 
-    const signatureResult = verifySignedObjectSignature(entry.signature, {
-        objectType: 'TrusteeSetupEntry',
-        signerRole: 'Trustee',
-        signerIdentity: entry.trusteeIdentity,
-        ceremonyId: input.ceremonyId,
-        manifestHash: null,
-        objectRoot: entry.trusteeSetupEntryHash,
-        boardHeadHash: null,
-        recoveryEpoch: entry.recoveryEpoch,
-        deviceEpoch: entry.deviceEpoch,
-        contextHash: defaultSignedRootContextHash,
-        publicKeyHash: expectedPublicKeyHash,
-    });
-    refusedObjects.push(...signatureResult.refusedObjects);
+    if (expectedPublicKeyHash !== undefined) {
+        const signatureResult = verifySignedObjectSignature(entry.signature, {
+            objectType: 'TrusteeSetupEntry',
+            signerRole: 'Trustee',
+            signerIdentity: entry.trusteeIdentity,
+            ceremonyId: input.ceremonyId,
+            manifestHash: null,
+            objectRoot: entry.trusteeSetupEntryHash,
+            chunkMerkleRoot: null,
+            boardHeadHash: null,
+            recoveryEpoch: entry.recoveryEpoch,
+            deviceEpoch: entry.deviceEpoch,
+            contextHash: defaultSignedRootContextHash,
+            publicKeyHash: expectedPublicKeyHash,
+        });
+        refusedObjects.push(...signatureResult.refusedObjects);
+    }
 
     return refusedObjects;
 };
@@ -381,6 +385,7 @@ export const verifyManifest = (
         ceremonyId: input.ceremonyId,
         manifestHash: null,
         objectRoot: manifest.electionManifestHash,
+        chunkMerkleRoot: null,
         boardHeadHash: null,
         recoveryEpoch: 0,
         deviceEpoch: 0,
@@ -447,6 +452,7 @@ export const verifyRosterExternalAcceptance = (
                 ceremonyId: acceptance.ceremonyId,
                 manifestHash: acceptance.electionManifestHash,
                 objectRoot: acceptance.rosterExternalAcceptanceHash,
+                chunkMerkleRoot: null,
                 boardHeadHash: acceptance.acceptedBoardHeadHash,
                 recoveryEpoch: 0,
                 deviceEpoch: 0,

@@ -218,7 +218,6 @@ const createSuccinctProofFixture = (): PublicKeyShareSuccinctProofSetInput => {
                 proofBytesHash: fixtureHash(
                     `succinct-proof-bytes-${String(proofRecord.trusteeRosterPosition)}`,
                 ),
-                proofBytesEncoding: 'binary-chunked-proof-bytes',
                 proofMaterialRoot: fixtureHash(
                     `succinct-proof-material-${String(proofRecord.trusteeRosterPosition)}`,
                 ),
@@ -435,7 +434,6 @@ describe('public-key share statement builders', () => {
             deriveCanonicalObjectHash(recordWithoutRoot),
         );
         expect(firstProofRecord).toMatchObject({
-            proofBytesEncoding: 'binary-chunked-proof-bytes',
             proofMaterialRoot: input.proofMaterials[0]?.proofMaterialRoot,
         });
     });
@@ -447,19 +445,6 @@ describe('public-key share statement builders', () => {
         if (firstProofMaterial === undefined) {
             throw new Error('Expected the first succinct proof material.');
         }
-
-        expect(() =>
-            createPublicKeyShareSuccinctProofSet({
-                ...input,
-                proofMaterials: [
-                    {
-                        ...firstProofMaterial,
-                        proofBytesEncoding: 'embedded-proof-bytes',
-                    },
-                    ...remainingProofMaterials,
-                ] as unknown as PublicKeyShareSuccinctProofSetInput['proofMaterials'],
-            }),
-        ).toThrow('proofBytesEncoding must be binary-chunked-proof-bytes');
 
         expect(() =>
             createPublicKeyShareSuccinctProofSet({

@@ -12,7 +12,6 @@ export {
     acceptedBgvSetupQSharePrimes,
     setupTransportSchemeId,
     setupTransportChunkSizeBytes,
-    vssCoefficientCommitmentMaterialTransportEncoding,
     type SetupCommitmentLimbValue,
     type SetupCommitmentValue,
     type VssCoefficientOpeningInput,

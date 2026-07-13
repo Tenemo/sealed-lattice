@@ -4,7 +4,6 @@ use super::*;
 fn passive_setup_generation_is_verifiable() {
     let first = setup_package_ref();
 
-    assert_eq!(first["setupInputs"]["defaultSetupSeedUsed"], false);
     assert_eq!(
         first["collectivePublicKey"]["coefficientMaterial"]["objectType"],
         "BgvCollectivePublicKeyCoefficientMaterial"
@@ -15,16 +14,6 @@ fn passive_setup_generation_is_verifiable() {
             .expect("collective public key coefficient root")
             .len(),
         128
-    );
-    assert!(
-        first["participants"][0]
-            .get("sampledLocalSecretCoefficients")
-            .is_none()
-    );
-    assert!(
-        first["participants"][0]
-            .get("sampledLocalErrorCoefficients")
-            .is_none()
     );
     verify_passive_setup_package_from_request(&serde_json::json!({
         "setupPackage": first.clone(),
@@ -72,20 +61,6 @@ fn passive_setup_private_witness_is_required_for_test_decryption_key() {
         "passive-bgv-setup-test-seed",
     )
     .expect("matching private setup witness rebuilds the test decryption key");
-}
-
-#[test]
-fn passive_setup_marks_default_development_seed_usage() {
-    let mut request = request();
-    request
-        .as_object_mut()
-        .expect("request should be an object")
-        .remove("setupSeed");
-
-    let package =
-        generate_passive_setup_package_from_request(&request).expect("default seed setup");
-
-    assert_eq!(package["setupInputs"]["defaultSetupSeedUsed"], true);
 }
 
 #[test]

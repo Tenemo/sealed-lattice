@@ -112,6 +112,7 @@ pub(in super::super) fn authenticate_evaluation_key_share_component_material_fix
     proof_family: EvaluationKeyShareProofFamily,
     record: &serde_json::Value,
     fixture_material: &EvaluationKeyShareFixtureMaterial,
+    accepted_setup_session: crate::bgv::setup::AcceptedSetupProofBindingSession,
 ) -> AuthenticatedEvaluationKeyShareComponentMaterialFixture {
     let material_root =
         evaluation_key_share_component_material_reference_root(proof_family, record)
@@ -159,6 +160,7 @@ pub(in super::super) fn authenticate_evaluation_key_share_component_material_fix
         &descriptor_bytes,
         &material_bytes,
         chunk_size,
+        accepted_setup_session,
     );
 
     let level = record["level"].as_u64().expect("component material level");
@@ -181,7 +183,6 @@ pub(in super::super) fn authenticate_evaluation_key_share_component_material_fix
             "rnsLimbCount": digit_count,
             "keySwitchComponentVectorRoot": record["keySwitchComponentVectorRoot"],
             "keySwitchComponentMaterialRoot": material_root,
-            "chunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
             "chunkCount": chunk_hashes.len(),
             "totalByteLength": total_byte_length,
             "fullObjectHash": full_object_hash,
@@ -242,6 +243,7 @@ fn authenticate_evaluation_key_share_component_material_stream(
     descriptor_bytes: &[u8],
     material_bytes: &[u8],
     chunk_size: usize,
+    accepted_setup_session: crate::bgv::setup::AcceptedSetupProofBindingSession,
 ) {
     let family_code = match proof_family {
         EvaluationKeyShareProofFamily::Relinearization => crate::bgv::setup::canonical_stream_transport::BGV_CANONICAL_STREAM_FAMILY_RELINEARIZATION_COMPONENT,
@@ -250,11 +252,12 @@ fn authenticate_evaluation_key_share_component_material_stream(
     let material_root_bytes =
         crate::transcript_core::decode_hex(material_root).expect("component material root bytes");
     let capability = [0x63; crate::foundation::CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH];
-    let stream = crate::bgv::setup::begin_bgv_canonical_stream(
+    let stream = crate::bgv::setup::begin_accepted_setup_canonical_stream(
         family_code,
         &material_root_bytes,
         descriptor_bytes,
         capability,
+        accepted_setup_session,
     )
     .expect("begin authenticated component material stream");
     for (chunk_index, chunk) in material_bytes.chunks(chunk_size).enumerate() {

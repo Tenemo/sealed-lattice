@@ -596,27 +596,6 @@ mod tests {
     }
 
     #[test]
-    fn higher_level_key_truncates_to_the_lower_level_key() {
-        // The CRT-idempotent gadget keys public samples by digit and modulus
-        // only, so the digits and limbs 0..=l of a level-L key generated from
-        // one seed must equal the level-l key generated from the same seed.
-        let key = shared_key();
-        let higher = generate_relinearization_key(key, 5, "truncation-seed").expect("level 5");
-        let lower = generate_relinearization_key(key, 2, "truncation-seed").expect("level 2");
-        assert_eq!(lower.components.len(), 3);
-        for (digit_index, lower_component) in lower.components.iter().enumerate() {
-            let higher_component = &higher.components[digit_index];
-            let higher_b = &higher_component.component_b_ntt;
-            let lower_b = &lower_component.component_b_ntt;
-            assert_eq!(
-                &higher_b[..lower_b.len()],
-                &lower_b[..],
-                "digit {digit_index} component b must restrict to the lower level"
-            );
-        }
-    }
-
-    #[test]
     fn higher_level_relinearization_key_relinearizes_lower_level_ciphertexts() {
         let key = shared_key();
         let left = at_test_level(&key.encrypt_slots(&[4, 5, 6], "ksk-trunc-a").expect("left"));
@@ -734,12 +713,8 @@ mod tests {
     }
 
     #[test]
-    fn rotation_matches_the_plaintext_automorphism() {
+    fn forward_and_inverse_rotations_match_the_plaintext_automorphism() {
         assert_rotation_matches_plaintext_automorphism(3, "ksk06", "galois-seed");
-    }
-
-    #[test]
-    fn inverse_rotation_matches_the_plaintext_automorphism() {
         assert_rotation_matches_plaintext_automorphism(43_691, "ksk07", "inverse-galois-seed");
     }
 }

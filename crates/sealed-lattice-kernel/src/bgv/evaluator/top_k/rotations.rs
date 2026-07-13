@@ -2,12 +2,18 @@ use super::*;
 
 pub(crate) fn galois_power(exponent: usize) -> usize {
     let modulus = 2 * POLYNOMIAL_DEGREE;
-    let mut value = 1_usize;
-    for _ in 0..(exponent % GENERATOR_SUBGROUP_ORDER) {
-        value = (value * PACKED_SCORE_GALOIS_GENERATOR) % modulus;
+    let mut remaining_exponent = exponent % GENERATOR_SUBGROUP_ORDER;
+    let mut accumulated_power = 1_usize;
+    let mut current_power = PACKED_SCORE_GALOIS_GENERATOR;
+    while remaining_exponent > 0 {
+        if remaining_exponent & 1 == 1 {
+            accumulated_power = (accumulated_power * current_power) % modulus;
+        }
+        current_power = (current_power * current_power) % modulus;
+        remaining_exponent >>= 1;
     }
 
-    value
+    accumulated_power
 }
 
 pub(crate) fn inverse_galois_element(galois_element: usize) -> CanonicalResult<usize> {

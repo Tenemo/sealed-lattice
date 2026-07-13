@@ -30,13 +30,23 @@ pub enum StateCapabilityKind {
     BallotCandidateList = 1,
     FinalitySignature = 2,
     TargetRelease = 3,
+    SetupActionRandomnessRoot = 4,
+    SetupPublicSeedBranch = 5,
+    SetupDealerSetBranch = 6,
+    SetupRkgRoundOneBranch = 7,
+    SetupTerminalPackage = 8,
 }
 
 impl StateCapabilityKind {
-    pub const ALL: [Self; 3] = [
+    pub const ALL: [Self; 8] = [
         Self::BallotCandidateList,
         Self::FinalitySignature,
         Self::TargetRelease,
+        Self::SetupActionRandomnessRoot,
+        Self::SetupPublicSeedBranch,
+        Self::SetupDealerSetBranch,
+        Self::SetupRkgRoundOneBranch,
+        Self::SetupTerminalPackage,
     ];
 
     pub const fn canonical_code(self) -> u16 {
@@ -48,8 +58,20 @@ impl StateCapabilityKind {
             1 => Some(Self::BallotCandidateList),
             2 => Some(Self::FinalitySignature),
             3 => Some(Self::TargetRelease),
+            4 => Some(Self::SetupActionRandomnessRoot),
+            5 => Some(Self::SetupPublicSeedBranch),
+            6 => Some(Self::SetupDealerSetBranch),
+            7 => Some(Self::SetupRkgRoundOneBranch),
+            8 => Some(Self::SetupTerminalPackage),
             _ => None,
         }
+    }
+
+    pub const fn supports_exact_output(self) -> bool {
+        matches!(
+            self,
+            Self::BallotCandidateList | Self::FinalitySignature | Self::TargetRelease
+        )
     }
 }
 
@@ -528,6 +550,12 @@ impl StateExactOutputHasher {
         capability_kind: StateCapabilityKind,
         total_byte_length: u64,
     ) -> StateResult<Self> {
+        if !capability_kind.supports_exact_output() {
+            return Err(StateError::new(
+                RefusalReason::WrongTypeOrLength,
+                "reservation-only state capability has no exact output",
+            ));
+        }
         let raw_payload_byte_length = u32::try_from(total_byte_length).map_err(|_| {
             StateError::new(
                 RefusalReason::OutsideSupportedProfile,
@@ -1188,6 +1216,9 @@ impl StateVerifier {
         verified_stream: VerifiedCanonicalStreamSummary,
     ) -> VerificationResult<VerifiedStateOutput> {
         let binding = verified_reservation.binding;
+        if !binding.capability_kind.supports_exact_output() {
+            return VerificationResult::refused(RefusalReason::WrongTypeOrLength);
+        }
         if verified_stream
             .stream_domain()
             .state_exact_output_capability_kind()

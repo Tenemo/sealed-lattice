@@ -414,6 +414,7 @@ const verifyRecoveryEpochUpdateUnchecked = (
         ceremonyId: update.ceremonyId,
         manifestHash: null,
         objectRoot: update.recoveryEpochUpdateHash,
+        chunkMerkleRoot: null,
         boardHeadHash: update.boardHeadHash,
         recoveryEpoch: update.previousRecoveryEpoch,
         deviceEpoch: update.previousDeviceEpoch,

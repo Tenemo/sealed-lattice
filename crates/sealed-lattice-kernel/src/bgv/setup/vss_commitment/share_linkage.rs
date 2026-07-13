@@ -558,11 +558,6 @@ pub(crate) fn verify_vss_public_aggregate_threshold_proofs(
             "vss-share-linkage",
             "VSS aggregate threshold proof family",
         )?;
-        compare_required_string(
-            string_at_path(proof, &["proofBytesEncoding"])?,
-            crate::bgv::setup::setup_proof::SETUP_PROOF_MATERIAL_ENCODING,
-            "VSS aggregate threshold proof bytes encoding",
-        )?;
         let proof_bytes_hash = hash_at_path(proof, &["proofBytesHash"])?;
         let proof_material_root = hash_at_path(proof, &["proofMaterialRoot"])?;
         compare_required_string(

@@ -6,8 +6,6 @@ pub(in crate::bgv::setup) fn public_evaluation_key_material_manifest(
 ) -> CanonicalResult<Value> {
     Ok(json!({
         "objectType": "PublicEvaluationKeyMaterialManifest",
-        "materialEncoding": PUBLIC_EVALUATION_KEY_MATERIAL_ENCODING,
-        "materialTransportEncoding": PUBLIC_EVALUATION_KEY_TRANSPORT_MATERIAL_ENCODING,
         "ceremonyId": value_string(evaluation_keys, "ceremonyId")?,
         "manifestHash": value_string(evaluation_keys, "manifestHash")?,
         "rosterHash": value_string(evaluation_keys, "rosterHash")?,

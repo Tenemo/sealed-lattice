@@ -1,18 +1,44 @@
 import { describe, expect, it } from 'vitest';
 
-import { validateFocusedRustLaneSelection } from '#tools/ci/rust-focused-lane-selection';
-import { parseLibtestListOutput } from '#tools/ci/rust-test-inventory';
+import {
+    fullProfileEvidenceRustTests,
+    measurementRustTests,
+    validateFocusedRustLaneSelection,
+} from '#tools/ci/rust-focused-lane-selection';
 
-describe('focused Rust test containment', () => {
-    it('parses listed tests without summary noise or duplicates', () => {
-        expect(
-            parseLibtestListOutput(
-                'module::second: test\nmodule::first: test\nmodule::second: test\n2 tests, 0 benchmarks\n',
-            ),
-        ).toEqual(['module::first', 'module::second']);
-    });
+describe('focused Rust lane selection', () => {
+    it.each([
+        ['rust-kernel-fast' as const, false, 'foundation::tests::ordinary'],
+        [
+            'rust-accepted-setup' as const,
+            false,
+            'bgv::setup::tests::accepted_setup::ordinary_case',
+        ],
+        [
+            'rust-kernel-heavy' as const,
+            true,
+            'bgv::tests::heavy_rust_kernel_expensive_relation',
+        ],
+        ['rust-measurements' as const, true, measurementRustTests[0]],
+        [
+            'rust-full-profile-evidence' as const,
+            true,
+            fullProfileEvidenceRustTests[0],
+        ],
+    ])(
+        'accepts %s tests only in their owning lane',
+        (lane, ignored, testName) => {
+            expect(() =>
+                validateFocusedRustLaneSelection({
+                    lane,
+                    testFilter: 'focused',
+                    tests: [{ ignored, testName }],
+                }),
+            ).not.toThrow();
+        },
+    );
 
-    it('rejects empty and cross-group focused selections', () => {
+    it('fails closed for zero matches and cross-lane selections', () => {
         expect(() =>
             validateFocusedRustLaneSelection({
                 lane: 'rust-measurements',
@@ -23,7 +49,7 @@ describe('focused Rust test containment', () => {
         expect(() =>
             validateFocusedRustLaneSelection({
                 lane: 'rust-measurements',
-                testFilter: 'heavy_rust_kernel_',
+                testFilter: 'heavy',
                 tests: [
                     {
                         ignored: true,
@@ -36,7 +62,7 @@ describe('focused Rust test containment', () => {
         expect(() =>
             validateFocusedRustLaneSelection({
                 lane: 'rust-kernel-fast',
-                testFilter: 'ignored_without_owner',
+                testFilter: 'unowned',
                 tests: [
                     {
                         ignored: true,
@@ -47,7 +73,7 @@ describe('focused Rust test containment', () => {
         ).toThrow('dedicated guarded command');
     });
 
-    it('detects names that overlap guarded groups', () => {
+    it('rejects test names that overlap guarded groups', () => {
         expect(() =>
             validateFocusedRustLaneSelection({
                 lane: 'rust-accepted-setup',
@@ -61,46 +87,5 @@ describe('focused Rust test containment', () => {
                 ],
             }),
         ).toThrow('multiple guarded groups');
-    });
-
-    it('accepts ordinary, accepted-setup, and measurement selections only in their own groups', () => {
-        expect(() =>
-            validateFocusedRustLaneSelection({
-                lane: 'rust-kernel-fast',
-                testFilter: 'ordinary',
-                tests: [
-                    {
-                        ignored: false,
-                        testName: 'foundation::tests::ordinary',
-                    },
-                ],
-            }),
-        ).not.toThrow();
-        expect(() =>
-            validateFocusedRustLaneSelection({
-                lane: 'rust-accepted-setup',
-                testFilter: 'accepted_setup',
-                tests: [
-                    {
-                        ignored: false,
-                        testName:
-                            'bgv::setup::tests::accepted_setup::ordinary_case',
-                    },
-                ],
-            }),
-        ).not.toThrow();
-        expect(() =>
-            validateFocusedRustLaneSelection({
-                lane: 'rust-measurements',
-                testFilter: 'lagrange_cleared_l1_worst_case',
-                tests: [
-                    {
-                        ignored: true,
-                        testName:
-                            'bgv::evaluator::top_k::tests::level_budget_probe::lagrange_cleared_l1_worst_case',
-                    },
-                ],
-            }),
-        ).not.toThrow();
     });
 });

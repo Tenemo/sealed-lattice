@@ -2,17 +2,54 @@ use super::*;
 
 #[test]
 fn packed_score_slots_follow_generator_order_without_collisions() {
-    let slots = (0..40).map(packed_score_slot).collect::<Vec<_>>();
-    let unique_slots = slots
+    let generator_slots = (0..GENERATOR_SUBGROUP_ORDER)
+        .map(packed_score_slot)
+        .collect::<Vec<_>>();
+    let unique_generator_slots = generator_slots
         .iter()
         .copied()
         .collect::<std::collections::BTreeSet<_>>();
+    let ring_order = 2 * POLYNOMIAL_DEGREE;
+    let negated_generator_slots = generator_slots
+        .iter()
+        .map(|slot| {
+            let generator_point = 2 * slot + 1;
+            let negated_generator_point = ring_order - generator_point;
+            (negated_generator_point - 1) / 2
+        })
+        .collect::<std::collections::BTreeSet<_>>();
+    let covered_ring_slots = unique_generator_slots
+        .union(&negated_generator_slots)
+        .copied()
+        .collect::<std::collections::BTreeSet<_>>();
 
-    assert_eq!(slots[0], 0);
-    assert_eq!(slots[1], 1);
-    assert_eq!(slots[2], 4);
-    assert_eq!(unique_slots.len(), slots.len());
-    assert!(slots.iter().all(|slot| *slot < POLYNOMIAL_DEGREE));
+    assert_eq!(generator_slots[0], 0);
+    assert_eq!(generator_slots[1], 1);
+    assert_eq!(generator_slots[2], 4);
+    assert!(generator_slots.windows(2).all(|adjacent_slots| {
+        let current_generator_point = 2 * adjacent_slots[0] + 1;
+        let next_generator_point = 2 * adjacent_slots[1] + 1;
+        next_generator_point
+            == (current_generator_point * PACKED_SCORE_GALOIS_GENERATOR) % ring_order
+    }));
+    assert_eq!(
+        ((2 * generator_slots[GENERATOR_SUBGROUP_ORDER - 1] + 1) * PACKED_SCORE_GALOIS_GENERATOR)
+            % ring_order,
+        1
+    );
+    assert_eq!(unique_generator_slots.len(), GENERATOR_SUBGROUP_ORDER);
+    assert_eq!(
+        packed_score_slot(GENERATOR_SUBGROUP_ORDER),
+        generator_slots[0]
+    );
+    assert!(!unique_generator_slots.contains(&(POLYNOMIAL_DEGREE - 1)));
+    assert!(negated_generator_slots.contains(&(POLYNOMIAL_DEGREE - 1)));
+    assert!(unique_generator_slots.is_disjoint(&negated_generator_slots));
+    assert_eq!(covered_ring_slots.len(), POLYNOMIAL_DEGREE);
+    assert_eq!(
+        covered_ring_slots,
+        (0..POLYNOMIAL_DEGREE).collect::<std::collections::BTreeSet<_>>()
+    );
 }
 
 #[test]

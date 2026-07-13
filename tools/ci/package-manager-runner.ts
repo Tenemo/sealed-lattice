@@ -25,7 +25,7 @@ const detectPackageManager = (
     );
 };
 
-export const buildPackageManagerEntryPointCandidates = (
+const buildPackageManagerEntryPointCandidates = (
     packageManager: PackageManager,
     pathEnvironment: string = process.env.PATH ?? '',
     nodeExecutablePath: string = process.execPath,

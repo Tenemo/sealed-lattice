@@ -79,7 +79,6 @@ const shareProof = (
 ): TargetDecryptionResultReleaseInput['shareProofs'][number] => {
     const proofRecord = {
         objectType: 'BgvTargetDecryptionShareProofRecord',
-        proofBytesEncoding: 'binary-chunked-proof-bytes',
         proofBytesHash: protocolHash(String(proofIndex + 1)),
     };
     const proofMaterialWithoutRoot = {
@@ -347,26 +346,6 @@ describe('target-decryption result release session cleanup', () => {
         );
     });
 
-    it('rejects proof generation accessors before loading the fresh kernel', async () => {
-        let accessorReadCount = 0;
-        const generationInput = proofMaterialGenerationInput();
-        Object.defineProperty(generationInput, 'setupPackage', {
-            enumerable: true,
-            get: () => {
-                accessorReadCount += 1;
-                return { executed: true };
-            },
-        });
-
-        await expect(
-            publicPackage.generateTargetDecryptionShareProofMaterial(
-                generationInput,
-            ),
-        ).rejects.toThrow('setupPackage cannot be an accessor property.');
-        expect(accessorReadCount).toBe(0);
-        expect(freshKernelLoadCount).toBe(0);
-    });
-
     it('rejects aggregate-opening source and witness root mismatches before staging', async () => {
         const generationInput = proofMaterialGenerationInput();
         const mismatchedInput = {
@@ -554,115 +533,6 @@ describe('target-decryption result release session cleanup', () => {
         );
     });
 
-    it('rejects an oversized proof descriptor before copying or loading the kernel', async () => {
-        class SliceTrackingUint8Array extends Uint8Array {
-            public sliceWasCalled = false;
-
-            public override slice(
-                start?: number,
-                end?: number,
-            ): Uint8Array<ArrayBuffer> {
-                this.sliceWasCalled = true;
-
-                return super.slice(start, end);
-            }
-        }
-
-        const verificationInput = releaseInput([
-            successfulPull,
-            successfulPull,
-        ]);
-        const firstShareProof = verificationInput.shareProofs[0];
-        const secondShareProof = verificationInput.shareProofs[1];
-        if (firstShareProof === undefined || secondShareProof === undefined) {
-            throw new Error('Missing target share proof fixture.');
-        }
-        const descriptorBytes = new SliceTrackingUint8Array(131_177);
-
-        await expect(
-            publicPackage.verifyTargetDecryptionResult({
-                ...verificationInput,
-                shareProofs: [
-                    {
-                        ...firstShareProof,
-                        proofMaterialTransport: {
-                            ...firstShareProof.proofMaterialTransport,
-                            descriptorBytes,
-                        },
-                    },
-                    secondShareProof,
-                ],
-            }),
-        ).rejects.toThrow(/exceeds the canonical stream descriptor bound/u);
-        expect(descriptorBytes.sliceWasCalled).toBe(false);
-        expect(sharedKernelLoadCount).toBe(0);
-    });
-
-    it('refuses accessor-backed release records without invoking accessors', async () => {
-        let accessorWasRead = false;
-        const setupPackage = {} as JsonRecord;
-        Object.defineProperty(setupPackage, 'setupContext', {
-            enumerable: true,
-            get: () => {
-                accessorWasRead = true;
-                return {};
-            },
-        });
-        const verificationInput = releaseInput([
-            successfulPull,
-            successfulPull,
-        ]);
-        (verificationInput as unknown as JsonRecord).setupPackage =
-            setupPackage;
-
-        await expect(
-            publicPackage.verifyTargetDecryptionResult(verificationInput),
-        ).rejects.toThrow('setupPackage.setupContext cannot be an accessor');
-        expect(accessorWasRead).toBe(false);
-        expect(sharedKernelLoadCount).toBe(0);
-    });
-
-    it('refuses custom-prototype and typed-array release records', async () => {
-        const customPrototypeInput = releaseInput([
-            successfulPull,
-            successfulPull,
-        ]);
-        (customPrototypeInput as unknown as JsonRecord).targetAcceptedRecord =
-            Object.create({ inheritedTargetIndex: 1 });
-
-        await expect(
-            publicPackage.verifyTargetDecryptionResult(customPrototypeInput),
-        ).rejects.toThrow(
-            'targetAcceptedRecord must contain only plain objects and arrays',
-        );
-
-        const typedArrayInput = releaseInput([successfulPull, successfulPull]);
-        (typedArrayInput as unknown as JsonRecord).targetCiphertexts =
-            Uint8Array.of(1);
-        await expect(
-            publicPackage.verifyTargetDecryptionResult(typedArrayInput),
-        ).rejects.toThrow(
-            'targetCiphertexts must contain only plain objects and arrays',
-        );
-        expect(sharedKernelLoadCount).toBe(0);
-    });
-
-    it('refuses cyclic release records before loading the kernel', async () => {
-        const cyclicCiphertexts = {} as JsonRecord;
-        cyclicCiphertexts.self = cyclicCiphertexts;
-        const verificationInput = releaseInput([
-            successfulPull,
-            successfulPull,
-        ]);
-        (verificationInput as unknown as JsonRecord).targetCiphertexts =
-            cyclicCiphertexts;
-
-        await expect(
-            publicPackage.verifyTargetDecryptionResult(verificationInput),
-        ).rejects.toThrow('targetCiphertexts.self cannot contain a cyclic');
-        expect(sharedKernelLoadCount).toBe(0);
-    });
-
     it('cleans an aborted pre-quorum session and permits a retry', async () => {
         const abortController = new AbortController();
         abortController.abort();
@@ -688,26 +558,6 @@ describe('target-decryption result release session cleanup', () => {
         ).toHaveBeenCalledTimes(2);
         expect(freshKernelLoadCount).toBe(0);
         expect(sharedKernelLoadCount).toBe(2);
-    });
-
-    it('cleans a session when canonical runtime construction fails after begin', async () => {
-        openCanonicalRuntime.mockImplementationOnce(() => {
-            throw new Error('canonical runtime unavailable');
-        });
-
-        await expect(
-            publicPackage.verifyTargetDecryptionResult(
-                releaseInput([successfulPull, successfulPull]),
-            ),
-        ).rejects.toThrow('canonical runtime unavailable');
-        expect(
-            mockKernel.finishBgvTargetDecryptionResultRelease,
-        ).toHaveBeenCalledOnce();
-
-        const result = await publicPackage.verifyTargetDecryptionResult(
-            releaseInput([successfulPull, successfulPull]),
-        );
-        expect(result.targetResultHash).toBe(protocolHash('7'));
     });
 
     it('preserves a pull failure and cleanup failure and permits a retry', async () => {

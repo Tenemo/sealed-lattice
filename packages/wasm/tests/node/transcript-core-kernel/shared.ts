@@ -6,9 +6,7 @@ import { pathToFileURL } from 'node:url';
 import { afterEach, vi } from 'vitest';
 
 import {
-    createPublishedSdkKernelLoader,
     createTranscriptCoreKernelLoader,
-    type PublishedSdkKernel,
     type TranscriptCoreKernel,
 } from '#packages/wasm/src/transcript-core-bridge';
 
@@ -53,7 +51,6 @@ const createMockKernelExports = ({
     readonly encodedCommandResponseLength: number;
     readonly getInstantiateCallCount: () => number;
     readonly loadMockKernel: () => Promise<TranscriptCoreKernel>;
-    readonly loadPublishedSdkKernel: () => Promise<PublishedSdkKernel>;
     readonly rejectNextInstantiation: (error: Error) => void;
 } => {
     const encodedCommandResponse = new TextEncoder().encode(
@@ -183,12 +180,6 @@ const createMockKernelExports = ({
         encodedCommandResponseLength: encodedCommandResponse.length,
         getInstantiateCallCount: () => instantiate.mock.calls.length,
         loadMockKernel: createTranscriptCoreKernelLoader(
-            pathToFileURL(path.resolve('mock-sealed-lattice-kernel.wasm')),
-            allowUnpinnedKernel
-                ? { allowUnpinnedKernel: true }
-                : { expectedKernelSha256Hex },
-        ),
-        loadPublishedSdkKernel: createPublishedSdkKernelLoader(
             pathToFileURL(path.resolve('mock-sealed-lattice-kernel.wasm')),
             allowUnpinnedKernel
                 ? { allowUnpinnedKernel: true }

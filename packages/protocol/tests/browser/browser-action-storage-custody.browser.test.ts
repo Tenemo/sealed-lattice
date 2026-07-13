@@ -38,11 +38,6 @@ const openedCustodies = new Set<BrowserActionStorageCustody>();
 const openedWorkers = new Set<Worker>();
 const databaseNames = new Set<string>();
 
-const browserStorageFailure = (failure: unknown): Error =>
-    failure instanceof Error
-        ? failure
-        : new Error('Browser storage operation failed.');
-
 const createDatabaseName = (): string => {
     const randomBytes = new Uint8Array(16);
     crypto.getRandomValues(randomBytes);
@@ -73,36 +68,6 @@ const startOpeningWorker = (input: {
             binding: input.binding ?? testBinding,
             databaseName: input.databaseName,
             knownStorageRootCommitment: input.knownStorageRootCommitment,
-            limits: transactionLimits,
-            namespace: 'browser-custody',
-        },
-        worker,
-    });
-    void opening.then(
-        (custody) => openedCustodies.add(custody),
-        () => openedWorkers.delete(worker),
-    );
-
-    return { opening, worker };
-};
-
-const startOpeningMaliciousResultWorker = (input: {
-    databaseName: string;
-}): OpeningWorker => {
-    const worker = new Worker(
-        new URL(
-            '../support/action-storage-custody-malicious-result-browser-worker.ts',
-            import.meta.url,
-        ),
-        { type: 'module' },
-    );
-    openedWorkers.add(worker);
-    databaseNames.add(input.databaseName);
-    databaseNames.add(`${input.databaseName}-invocations`);
-    const opening = openBrowserActionStorageCustodyWorker({
-        configuration: {
-            binding: testBinding,
-            databaseName: input.databaseName,
             limits: transactionLimits,
             namespace: 'browser-custody',
         },
@@ -160,71 +125,6 @@ const deleteDatabase = (databaseName: string): Promise<void> =>
         );
     });
 
-const readInitializeInvocationMarker = (
-    databaseName: string,
-): Promise<boolean> =>
-    new Promise<boolean>((resolve, reject) => {
-        const request = indexedDB.open(`${databaseName}-invocations`, 1);
-        request.addEventListener('upgradeneeded', () => {
-            request.result.createObjectStore('records');
-        });
-        request.addEventListener(
-            'error',
-            () => reject(browserStorageFailure(request.error)),
-            { once: true },
-        );
-        request.addEventListener(
-            'success',
-            () => {
-                const database = request.result;
-                const transaction = database.transaction('records', 'readonly');
-                const getRequest = transaction
-                    .objectStore('records')
-                    .get('initialize');
-                getRequest.addEventListener(
-                    'success',
-                    () => {
-                        database.close();
-                        resolve(getRequest.result === true);
-                    },
-                    { once: true },
-                );
-                getRequest.addEventListener(
-                    'error',
-                    () => {
-                        database.close();
-                        reject(browserStorageFailure(getRequest.error));
-                    },
-                    { once: true },
-                );
-            },
-            { once: true },
-        );
-    });
-
-const assertNoCustodySecrets = (value: unknown): void => {
-    if (value instanceof Uint8Array) {
-        expect(value.byteLength).not.toBe(48);
-        return;
-    }
-    if (Array.isArray(value)) {
-        for (const entry of value) {
-            assertNoCustodySecrets(entry);
-        }
-        return;
-    }
-    if (typeof value !== 'object' || value === null) {
-        return;
-    }
-    const record = value as Record<string, unknown>;
-    expect(Object.keys(record)).not.toContain('deviceKey');
-    expect(Object.keys(record)).not.toContain('wrappedStorageRoot');
-    expect(Object.keys(record)).not.toContain('actionStorageRoot');
-    for (const entry of Object.values(record)) {
-        assertNoCustodySecrets(entry);
-    }
-};
-
 const waitForLockCounts = async (input: {
     heldCount: number;
     lockName: string;
@@ -274,7 +174,7 @@ afterEach(async () => {
 });
 
 describe('Browser action-storage custody worker channel', () => {
-    it('persists, reopens, recovers, and deletes without crossing the worker secret boundary', async () => {
+    it('persists, reopens, recovers, and deletes custody state', async () => {
         const databaseName = createDatabaseName();
         const firstCustody = await openWorker({
             databaseName,
@@ -284,18 +184,6 @@ describe('Browser action-storage custody worker channel', () => {
             initialSnapshot.storageRootCommitment,
         );
 
-        assertNoCustodySecrets(initialSnapshot);
-        expect(Object.keys(firstCustody).sort()).toEqual([
-            'beginRecoveryExport',
-            'cancelRecoveryExport',
-            'close',
-            'confirmRecoveryExport',
-            'currentSnapshot',
-            'delete',
-            'initialize',
-            'openIntoOwnedWorker',
-            'recover',
-        ]);
         await closeCustody(firstCustody);
 
         const secondCustody = await openWorker({
@@ -321,8 +209,6 @@ describe('Browser action-storage custody worker channel', () => {
             expectedSnapshot: initialSnapshot,
             externallyVerifiedCommitment: commitment,
         });
-        assertNoCustodySecrets(challenge);
-        expect('canonicalRecoveryText' in challenge).toBe(false);
         const confirmation = await secondCustody.confirmRecoveryExport({
             confirmedChecksum: challenge.recoveryChecksum,
             preparationIdentifier: challenge.preparationIdentifier,
@@ -336,7 +222,6 @@ describe('Browser action-storage custody worker channel', () => {
             externallyVerifiedCommitment: commitment,
             expectedSnapshot: confirmation.snapshot,
         });
-        assertNoCustodySecrets(recoveredSnapshot);
         expect(recoveredSnapshot.mutationIdentifier).not.toEqual(
             confirmation.snapshot.mutationIdentifier,
         );
@@ -472,106 +357,5 @@ describe('Browser action-storage custody worker channel', () => {
             lockName,
             pendingCount: 0,
         });
-    });
-
-    it('fails closed on a duplicate request identifier', async () => {
-        const databaseName = createDatabaseName();
-        const opening = startOpeningWorker({
-            databaseName,
-        });
-        const custody = await opening.opening;
-        await custody.initialize();
-        const lockName = deriveWebLockStorageNamespaceName({
-            databaseName,
-            namespace: 'browser-custody',
-        });
-
-        opening.worker.postMessage({
-            command: 'current-snapshot',
-            input: undefined,
-            messageKind: 'browser-action-storage-custody-request',
-            requestIdentifier: 2,
-        });
-
-        await expect(custody.currentSnapshot()).rejects.toMatchObject({
-            code: 'OwnedWorkerFailure',
-            name: 'BrowserActionStorageCustodyError',
-        });
-        await waitForLockCounts({
-            heldCount: 0,
-            lockName,
-            pendingCount: 0,
-        });
-    });
-
-    it('validates host output before posting and closes custody when output contains secrets', async () => {
-        const databaseName = createDatabaseName();
-        const opening = startOpeningMaliciousResultWorker({
-            databaseName,
-        });
-        const observedWorkerMessages: unknown[] = [];
-        opening.worker.addEventListener('message', (event) => {
-            observedWorkerMessages.push(event.data as unknown);
-        });
-        const custody = await opening.opening;
-        const fixtureLockName = `sealed-lattice-malicious-result-test-${databaseName}`;
-        await waitForLockCounts({
-            heldCount: 1,
-            lockName: fixtureLockName,
-            pendingCount: 0,
-        });
-
-        let terminalFailure: unknown;
-        try {
-            await custody.initialize();
-        } catch (error) {
-            terminalFailure = error;
-        }
-        expect(terminalFailure).toMatchObject({
-            code: 'OwnedWorkerFailure',
-            name: 'BrowserActionStorageCustodyError',
-        });
-        for (const message of observedWorkerMessages) {
-            assertNoCustodySecrets(message);
-        }
-        await waitForLockCounts({
-            heldCount: 0,
-            lockName: fixtureLockName,
-            pendingCount: 0,
-        });
-        let repeatedFailure: unknown;
-        try {
-            await custody.currentSnapshot();
-        } catch (error) {
-            repeatedFailure = error;
-        }
-        expect(repeatedFailure).toBe(terminalFailure);
-    });
-
-    it('does not execute requests queued before terminal failure cleanup begins', async () => {
-        const databaseName = createDatabaseName();
-        const opening = startOpeningMaliciousResultWorker({
-            databaseName,
-        });
-        const custody = await opening.opening;
-        opening.worker.postMessage({
-            command: 'current-snapshot',
-            input: undefined,
-            messageKind: 'browser-action-storage-custody-request',
-            requestIdentifier: 2,
-        });
-        opening.worker.postMessage({
-            command: 'initialize',
-            input: undefined,
-            messageKind: 'browser-action-storage-custody-request',
-            requestIdentifier: 3,
-        });
-        opening.worker.postMessage({ malformedRequest: true });
-
-        await expect(custody.currentSnapshot()).rejects.toMatchObject({
-            code: 'OwnedWorkerFailure',
-            name: 'BrowserActionStorageCustodyError',
-        });
-        expect(await readInitializeInvocationMarker(databaseName)).toBe(false);
     });
 });

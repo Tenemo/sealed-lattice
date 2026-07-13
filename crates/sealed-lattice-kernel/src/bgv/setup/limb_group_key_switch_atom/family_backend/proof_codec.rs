@@ -431,42 +431,32 @@ mod tests {
     }
 
     #[test]
-    fn trailing_bytes_are_rejected() {
-        let parameters = sixteen_limb_group_field_parameters();
-        let (_public, _ring_degree, _proof_parameters, proof) = sample_proof();
-        let mut bytes = encode_key_proof(&proof).expect("encode");
-        bytes.push(0);
-        assert!(decode_key_proof(&parameters, &bytes).is_err());
-    }
-
-    #[test]
-    fn truncation_is_rejected() {
+    fn malformed_proof_encodings_are_rejected() {
         let parameters = sixteen_limb_group_field_parameters();
         let (_public, _ring_degree, _proof_parameters, proof) = sample_proof();
         let bytes = encode_key_proof(&proof).expect("encode");
-        assert!(decode_key_proof(&parameters, &bytes[..bytes.len() - 1]).is_err());
-        assert!(decode_key_proof(&parameters, &bytes[..4]).is_err());
-    }
 
-    #[test]
-    fn wrong_magic_is_rejected() {
-        let parameters = sixteen_limb_group_field_parameters();
-        let (_public, _ring_degree, _proof_parameters, proof) = sample_proof();
-        let mut bytes = encode_key_proof(&proof).expect("encode");
-        bytes[0] ^= 0xff;
-        assert!(decode_key_proof(&parameters, &bytes).is_err());
-    }
-
-    #[test]
-    fn a_corrupted_length_prefix_is_rejected() {
-        let parameters = sixteen_limb_group_field_parameters();
-        let (_public, _ring_degree, _proof_parameters, proof) = sample_proof();
-        let mut bytes = encode_key_proof(&proof).expect("encode");
-        // Corrupt the first length prefix after the four roots (base, material,
-        // aux, and quotient), i.e. the FRI layer root count, to an enormous
-        // value: decode must fail bounds checks.
+        let mut trailing = bytes.clone();
+        trailing.push(0);
+        let truncated = bytes[..bytes.len() - 1].to_vec();
+        let truncated_header = bytes[..4].to_vec();
+        let mut wrong_magic = bytes.clone();
+        wrong_magic[0] ^= 0xff;
+        let mut corrupted_length = bytes;
         let offset = CODEC_MAGIC.len() + 4 * MERKLE_DIGEST_BYTES;
-        bytes[offset..offset + 4].copy_from_slice(&u32::MAX.to_le_bytes());
-        assert!(decode_key_proof(&parameters, &bytes).is_err());
+        corrupted_length[offset..offset + 4].copy_from_slice(&u32::MAX.to_le_bytes());
+
+        for (case_name, malformed) in [
+            ("trailing bytes", trailing),
+            ("truncation", truncated),
+            ("truncated header", truncated_header),
+            ("wrong magic", wrong_magic),
+            ("corrupted length", corrupted_length),
+        ] {
+            assert!(
+                decode_key_proof(&parameters, &malformed).is_err(),
+                "{case_name} must be rejected"
+            );
+        }
     }
 }

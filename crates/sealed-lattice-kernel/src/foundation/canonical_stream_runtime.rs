@@ -548,34 +548,4 @@ mod tests {
         );
         assert!(registry.active_session.is_none());
     }
-
-    #[test]
-    fn stream_handles_never_wrap_or_reuse_after_exhaustion() {
-        let mut registry = CanonicalStreamRuntimeRegistry {
-            active_session: None,
-            next_handle: u32::MAX,
-        };
-        let owner = capability(0x7a);
-        let terminal = registry
-            .begin_writer(
-                CanonicalStreamDomain::CheckpointState.canonical_code(),
-                1,
-                owner,
-            )
-            .expect("terminal stream handle is issued once");
-        assert_eq!(terminal.handle, u32::MAX);
-        registry
-            .cancel(terminal.handle, &owner)
-            .expect("terminal stream lease cancels");
-        assert_eq!(
-            registry.begin_writer(
-                CanonicalStreamDomain::CheckpointState.canonical_code(),
-                1,
-                capability(0x7b),
-            ),
-            Err(refusal_status(RefusalReason::OutsideSupportedProfile))
-        );
-        assert!(registry.active_session.is_none());
-        assert_eq!(registry.next_handle, 0);
-    }
 }

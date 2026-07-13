@@ -3,8 +3,8 @@ use super::transport::verified_canonical_public_key_share_material;
 use super::*;
 
 pub(in super::super) fn public_key_share_material_uses_transport(material_set: &Value) -> bool {
-    // Embedded material carries shareMaterialRecords; transport material does not.
-    // Presence is the discriminator - no separate materialEncoding label needed.
+    // Presence is sufficient for transport preflight. Full verification also
+    // checks the materialEncoding discriminator and the selected structure.
     material_set.get("shareMaterialRecords").is_none()
 }
 

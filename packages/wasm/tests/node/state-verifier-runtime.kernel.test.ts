@@ -417,4 +417,43 @@ describe('State verifier real-WASM runtime in Node', () => {
             session.cancel();
         }
     });
+
+    it('accepts setup reservations but refuses an exact-output lease for them', () => {
+        const session = openSession(kernel, vector);
+        try {
+            const reservation = session.verifyReservation({
+                canonicalReservationIntentCarrier:
+                    vector.reservationOnly.canonicalIntentCarrier,
+                canonicalStateCertificate:
+                    vector.reservationOnly.canonicalStateCertificate,
+                capabilityKind: stateCapabilityKinds.setupActionRandomnessRoot,
+                expectedAuthorizationHash: vector.authorizationHash,
+                subjectParticipantIdentity: vector.subjectParticipantIdentity,
+            });
+            expect(reservation.isValid).toBe(true);
+            if (!reservation.isValid) {
+                throw new Error(reservation.refusalReason);
+            }
+
+            expect(
+                session.openOutputVerification({
+                    canonicalOutputIntentCarrier:
+                        vector.output.canonicalIntentCarrier,
+                    canonicalStateCertificate:
+                        vector.output.canonicalStateCertificate,
+                    exactOutputDescriptorBytes: descriptorFor(
+                        kernel,
+                        canonicalStreamDomains.stateTargetReleaseExactOutput,
+                        vector.exactOutputBytes,
+                    ),
+                    verifiedReservation: reservation.value,
+                }),
+            ).toEqual({
+                isValid: false,
+                refusalReason: 'wrongTypeOrLength',
+            });
+        } finally {
+            session.cancel();
+        }
+    });
 });

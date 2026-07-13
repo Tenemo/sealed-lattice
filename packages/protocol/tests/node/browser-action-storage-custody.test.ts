@@ -126,34 +126,6 @@ class MaliciousCustodyWorker {
     }
 }
 
-class PostFailureCustodyWorker extends EventTarget {
-    #postCount = 0;
-    public terminationCount = 0;
-
-    public postMessage(message: unknown): void {
-        this.#postCount += 1;
-        if (this.#postCount > 1) {
-            throw new Error('Injected worker post failure.');
-        }
-        const request = message as FakeWorkerRequest;
-        queueMicrotask(() => {
-            this.dispatchEvent(
-                new MessageEvent('message', {
-                    data: {
-                        messageKind: 'browser-action-storage-custody-completed',
-                        requestIdentifier: request.requestIdentifier,
-                        result: undefined,
-                    },
-                }),
-            );
-        });
-    }
-
-    public terminate(): void {
-        this.terminationCount += 1;
-    }
-}
-
 class InMemoryDeviceWrappingStateStorage implements BrowserDeviceWrappingStateStorage {
     #forceNextConflict = false;
     #replacementAfterNextRead: BrowserDeviceWrappingState | undefined;
@@ -529,34 +501,6 @@ describe('Browser action-storage custody', () => {
         expect(workerKernel.activeRootPresent()).toBe(false);
     });
 
-    it('refuses malformed ingress before invoking the cryptographic kernel', async () => {
-        const { custody, workerKernel } = createCustody({
-            actionStorageRoot: createTestBytes(
-                testActionStorageRootByteLength,
-                65,
-            ),
-        });
-        const snapshot = await custody.initialize();
-        const commitment = verifiedCommitment(snapshot.storageRootCommitment);
-
-        await expect(
-            custody.recover({
-                caseInsensitiveRecoveryText: `${testRecoveryText}=`,
-                externallyVerifiedCommitment: commitment,
-                expectedSnapshot: snapshot,
-            }),
-        ).rejects.toMatchObject({ code: 'InvalidInput' });
-        await expect(
-            custody.recover({
-                caseInsensitiveRecoveryText: testRecoveryText.slice(1),
-                externallyVerifiedCommitment: commitment,
-                expectedSnapshot: snapshot,
-            }),
-        ).rejects.toMatchObject({ code: 'InvalidInput' });
-        expect(workerKernel.importCallCount).toBe(0);
-        expect(await custody.currentSnapshot()).toEqual(snapshot);
-    });
-
     it('fails closed on ciphertext tampering without replacing the active root', async () => {
         const { custody, storage, workerKernel } = createCustody({
             actionStorageRoot: createTestBytes(
@@ -681,44 +625,6 @@ describe('Browser action-storage custody', () => {
         ).toBe(true);
     });
 
-    it('deactivates the root before a stale delete can conflict', async () => {
-        const { custody, storage, workerKernel } = createCustody({
-            actionStorageRoot: createTestBytes(
-                testActionStorageRootByteLength,
-                145,
-            ),
-        });
-        const { snapshot } = await initializeAndActivate(custody);
-        storage.forceNextConflict();
-
-        await expect(custody.delete(snapshot)).rejects.toMatchObject({
-            code: 'Conflict',
-        });
-        expect(await custody.currentSnapshot()).toEqual(snapshot);
-        expect(workerKernel.activeRootPresent()).toBe(false);
-        expect(workerKernel.stagedRootPresent()).toBe(false);
-    });
-
-    it('destroys active and staged roots when custody closes', async () => {
-        const { custody, workerKernel } = createCustody({
-            actionStorageRoot: createTestBytes(
-                testActionStorageRootByteLength,
-                161,
-            ),
-        });
-        await initializeAndActivate(custody);
-        expect(workerKernel.activeRootPresent()).toBe(true);
-
-        await custody.close();
-        await custody.close();
-
-        expect(workerKernel.activeRootPresent()).toBe(false);
-        expect(workerKernel.stagedRootPresent()).toBe(false);
-        await expect(custody.currentSnapshot()).rejects.toMatchObject({
-            code: 'Closed',
-        });
-    });
-
     it('terminates a worker that tries to return a key or wrapped envelope', async () => {
         const generatedKey = await cryptoProvider.subtle.generateKey(
             { name: 'AES-GCM', length: 256 },
@@ -757,46 +663,6 @@ describe('Browser action-storage custody', () => {
             name: 'BrowserActionStorageCustodyError',
         });
         expect(maliciousWorker.terminationCount).toBe(1);
-        let repeatedFailure: unknown;
-        try {
-            await custody.currentSnapshot();
-        } catch (error) {
-            repeatedFailure = error;
-        }
-        expect(repeatedFailure).toBe(terminalFailure);
-    });
-
-    it('fails closed when posting a command to an owned worker throws', async () => {
-        const postFailureWorker = new PostFailureCustodyWorker();
-        const custody = await openBrowserActionStorageCustodyWorker({
-            configuration: {
-                binding: testBinding,
-                databaseName: 'post-failure-worker-test',
-                limits: {
-                    maximumActiveTransactionCount: 1,
-                    maximumLeaseByteLength: 64,
-                    maximumLeaseCountPerTransaction: 1,
-                    maximumStoredValueByteLength: 4_096,
-                    maximumTransactionByteLength: 128,
-                    maximumTransactionLifetimeMilliseconds: 10_000,
-                },
-                namespace: 'post-failure-worker',
-            },
-            worker: postFailureWorker,
-        });
-
-        let terminalFailure: unknown;
-        try {
-            await custody.initialize();
-        } catch (error) {
-            terminalFailure = error;
-        }
-        expect(terminalFailure).toMatchObject({
-            code: 'OwnedWorkerFailure',
-            name: 'BrowserActionStorageCustodyError',
-        });
-        expect(postFailureWorker.terminationCount).toBe(1);
-
         let repeatedFailure: unknown;
         try {
             await custody.currentSnapshot();

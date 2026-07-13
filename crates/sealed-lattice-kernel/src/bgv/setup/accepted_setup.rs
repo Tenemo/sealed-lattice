@@ -52,7 +52,7 @@ use self::evaluation_key_share_rounds::{
     verify_relinearization_key_switch_sample_binding,
 };
 use self::evaluator_key_schedule::{
-    verify_context_fields_match, verify_evaluator_key_schedule, verify_generic_key_switch_policy,
+    verify_context_fields_match, verify_evaluator_key_schedule,
     verify_pending_evaluation_key_material_boundary,
 };
 pub(crate) use self::phase_transcript::accepted_setup_participant_roster_from_package;
@@ -65,9 +65,9 @@ use self::private_vss_envelopes::{
     verify_private_vss_envelope_commitments,
 };
 #[cfg(test)]
-pub(in crate::bgv::setup) use self::public_key_share_material::accepted_setup_collective_public_key_from_package;
-#[cfg(test)]
 pub(in crate::bgv::setup) use self::public_key_share_material::authenticated_public_key_share_material_stream_summary;
+#[cfg(test)]
+pub(in crate::bgv::setup) use self::public_key_share_material::evict_verified_canonical_public_key_share_materials;
 #[cfg(test)]
 pub(in crate::bgv::setup) use self::public_key_share_material::public_key_share_coefficient_vector_hash;
 pub(in crate::bgv::setup) use self::public_key_share_material::{
@@ -79,8 +79,6 @@ pub(in crate::bgv::setup) use self::public_key_share_material::{
     drain_verified_canonical_public_key_share_materials,
     finish_verified_canonical_public_key_share_material_stream,
 };
-#[cfg(test)]
-pub(in crate::bgv::setup) use self::public_key_share_material::evict_verified_canonical_public_key_share_materials;
 use self::public_key_share_material::{
     PublicKeyShareMaterialBinding, public_key_share_material_uses_transport,
     verify_collective_public_key_material, verify_collective_public_key_pair_consistency,
@@ -138,8 +136,8 @@ use super::{
         component_b_vectors_from_record,
     },
     setup_proof::{
-        SETUP_PROOF_BYTES_DOMAIN, SETUP_PROOF_MATERIAL_ENCODING, SETUP_PROOF_SERIALIZATION,
-        SetupProofMaterialBytes, verified_setup_proof_material_bytes_from_request,
+        SETUP_PROOF_BYTES_DOMAIN, SETUP_PROOF_SERIALIZATION, SetupProofMaterialBytes,
+        verified_setup_proof_material_bytes_from_request,
     },
     vss::carry_aware_vss_share_relation_value,
 };
@@ -195,10 +193,6 @@ pub(super) const PUBLIC_EVALUATION_KEY_MATERIAL_TRANSPORT_SET_OBJECT_TYPE: &str 
     "SetupTransportedPublicEvaluationKeyMaterialSet";
 pub(super) const PUBLIC_EVALUATION_KEY_MATERIAL_TRANSPORT_OBJECT_TYPE: &str =
     "SetupTransportedPublicEvaluationKeyMaterial";
-const PUBLIC_EVALUATION_KEY_MATERIAL_ENCODING: &str =
-    "root-bound-public-key-switch-component-roots";
-pub(super) const PUBLIC_EVALUATION_KEY_TRANSPORT_MATERIAL_ENCODING: &str =
-    "binary-chunked-public-evaluation-key-root-manifest";
 const PUBLIC_EVALUATION_KEY_MATERIAL_MAGIC: &[u8; 8] = b"SLEKPMV1";
 use super::trustee_evaluation_key_proof::{
     PUBLIC_KEY_SHARE_PROOF_FAMILY, SAME_SECRET_BRIDGE_PROOF_FAMILY,
@@ -502,6 +496,24 @@ pub(in crate::bgv::setup) fn verify_collective_bgv_setup_package_with_proof_bind
 }
 
 #[cfg(test)]
+pub(in crate::bgv::setup) fn verify_collective_bgv_setup_package_in_proof_binding_session(
+    setup_package: &Value,
+    request: &Value,
+    proof_binding_session: crate::bgv::setup::AcceptedSetupProofBindingSession,
+) -> CanonicalResult<Value> {
+    let _component_material_eviction_guard =
+        VerifiedComponentMaterialEvictionGuard::for_request(request);
+    let _setup_proof_material_eviction_guard =
+        VerifiedSetupProofMaterialEvictionGuard::for_request(request);
+    verify_collective_bgv_setup_package_in_owned_session(
+        setup_package,
+        request,
+        proof_binding_session,
+        &[],
+    )
+}
+
+#[cfg(test)]
 fn verify_collective_bgv_setup_package_inner(
     setup_package: &Value,
     request: &Value,
@@ -655,12 +667,6 @@ fn verify_collective_setup_package(
         return Ok(VerificationFlow::Stop(response));
     }
     if let Some(response) = verify_vss_share_acceptances(setup_package)? {
-        return Ok(VerificationFlow::Stop(response));
-    }
-    // These hash-bound policy checks consume only the canonical setup object
-    // and request metadata, so their typed refusals can be determined without
-    // requiring proof-material handles.
-    if let Some(response) = verify_generic_key_switch_policy(setup_package)? {
         return Ok(VerificationFlow::Stop(response));
     }
     if let Some(response) =

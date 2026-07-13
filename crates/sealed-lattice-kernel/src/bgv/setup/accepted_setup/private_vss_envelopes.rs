@@ -855,7 +855,6 @@ fn verify_encrypted_private_vss_envelope(
     }
 
     for (field_name, expected_value) in [
-        ("ciphertextContentType", "private-vss-share-envelope"),
         ("publicMatrixSeedHash", public_matrix_seed_hash),
         (
             "vssCoefficientCommitmentRoot",
@@ -1078,7 +1077,6 @@ fn private_vss_envelope_aad_value(
     Ok(json!({
         "objectType": PRIVATE_VSS_ENVELOPE_AAD_OBJECT_TYPE,
         "privateEnvelopeObjectType": "PrivateVssShareEnvelope",
-        "ciphertextContentType": "private-vss-share-envelope",
         "ceremonyId": setup_context_string(setup_context, "ceremonyId")?,
         "manifestHash": setup_context_string(setup_context, "manifestHash")?,
         "rosterHash": setup_context_string(setup_context, "rosterHash")?,

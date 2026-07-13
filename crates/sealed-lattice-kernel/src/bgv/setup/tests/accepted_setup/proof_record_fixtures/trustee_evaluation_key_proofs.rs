@@ -6,9 +6,7 @@ use crate::bgv::setup::accepted_setup::{
     verified_same_secret_bridge_material_from_package,
 };
 use crate::bgv::setup::evaluation_key_share_material::EvaluationKeyShareProofFamily;
-use crate::bgv::setup::setup_proof::{
-    SETUP_PROOF_MATERIAL_ENCODING, authenticate_setup_proof_material_stream_for_test,
-};
+use crate::bgv::setup::setup_proof::authenticate_setup_proof_material_stream_for_test;
 use crate::bgv::setup::trustee_evaluation_key_proof::{
     EvaluationKeyShareKind, TRUSTEE_EVALUATION_KEY_PROOF_FAMILY, TrusteeEvaluationKeyStatement,
     TrusteeEvaluationKeyWitness, prove_trustee_evaluation_key_proof_bytes,
@@ -19,8 +17,6 @@ use crate::hashing::{derive_canonical_object_hash, to_hex};
 pub(in super::super) struct TrusteeEvaluationKeyProofFixture {
     pub(in super::super) proof_set: serde_json::Value,
     pub(in super::super) transported_proof_material: serde_json::Value,
-    pub(in super::super) proof_binding_leases:
-        Vec<crate::bgv::setup::CanonicalSetupProofBindingLease>,
 }
 
 pub(in super::super) fn trustee_evaluation_key_proof_material_root_from_fixture_record(
@@ -76,7 +72,6 @@ pub(in super::super) fn trustee_evaluation_key_proofs_object(
 
     let mut proof_records = Vec::with_capacity(trustee_roster_positions.len());
     let mut transported_proof_materials = Vec::with_capacity(trustee_roster_positions.len());
-    let mut proof_binding_leases = Vec::with_capacity(trustee_roster_positions.len());
     for trustee_roster_position in trustee_roster_positions {
         let trustee_identity = format!("trustee-{trustee_roster_position}");
         let statement =
@@ -144,7 +139,6 @@ pub(in super::super) fn trustee_evaluation_key_proofs_object(
             "trusteeRosterPosition": trustee_roster_position,
             "sourceConstantCoefficientCommitmentRoot": source_constant_coefficient_commitment_root,
             "statementHash": statement_hash_hex,
-            "proofBytesEncoding": SETUP_PROOF_MATERIAL_ENCODING,
             "proofBytesHash": proof_bytes_hash,
         });
         let proof_material_root =
@@ -162,7 +156,6 @@ pub(in super::super) fn trustee_evaluation_key_proofs_object(
         let transported_proof_material = serde_json::json!({
             "objectType": "SetupTransportedEvaluationKeyShareProofMaterial",
             "proofFamily": TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
-            "proofBytesEncoding": SETUP_PROOF_MATERIAL_ENCODING,
             "proofMaterialRoot": proof_material_root,
             "proofChunkCount": transport_hashes.chunk_hashes.len(),
             "proofTotalByteLength": transport_hashes.total_byte_length,
@@ -189,15 +182,6 @@ pub(in super::super) fn trustee_evaluation_key_proofs_object(
             verification_binding_hash,
         )
         .expect("retain trustee evaluation-key proof binding");
-        proof_binding_leases.push(
-            crate::bgv::setup::accepted_setup_proof_binding_lease(
-                proof_binding_session.session_handle,
-                &proof_binding_session.capability,
-                &proof_material_root,
-            )
-            .expect("trustee evaluation-key proof binding lease lookup")
-            .expect("trustee evaluation-key proof binding must be retained"),
-        );
         proof_records.push(record);
         transported_proof_materials.push(transported_proof_material);
     }
@@ -257,7 +241,6 @@ pub(in super::super) fn trustee_evaluation_key_proofs_object(
             "proofFamily": TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
             "proofMaterials": transported_proof_materials,
         }),
-        proof_binding_leases,
     }
 }
 

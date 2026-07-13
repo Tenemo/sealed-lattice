@@ -439,15 +439,6 @@ mod tests {
     }
 
     #[test]
-    fn optional_same_secret_bridge_is_absent_by_default() -> CanonicalResult<()> {
-        let response =
-            verify_optional_same_secret_bridge_statement_set(&json!({}), &json!({}), None)?;
-
-        assert!(matches!(response, SameSecretBridgeVerification::Absent));
-        Ok(())
-    }
-
-    #[test]
     fn optional_same_secret_bridge_refuses_proof_material_without_statement_set()
     -> CanonicalResult<()> {
         let response = verify_optional_same_secret_bridge_statement_set(

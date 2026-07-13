@@ -38,6 +38,9 @@ pub(super) const SETUP_TRANSPORT_CHUNK_SIZE_BYTES: u64 = 1_048_576;
 #[cfg(test)]
 mod tests;
 
+pub(in crate::bgv::setup) use accepted_setup::drain_verified_canonical_public_key_share_materials;
+#[cfg(test)]
+pub(in crate::bgv::setup) use accepted_setup::evict_verified_canonical_public_key_share_materials;
 pub(crate) use accepted_setup::{
     accepted_setup_participant_roster_from_package,
     derive_collective_bgv_setup_public_derivations_from_request,
@@ -45,9 +48,6 @@ pub(crate) use accepted_setup::{
     describe_collective_bgv_setup_parameters_for_participant_count,
     verify_collective_bgv_setup_package_in_session_from_request,
 };
-pub(in crate::bgv::setup) use accepted_setup::drain_verified_canonical_public_key_share_materials;
-#[cfg(test)]
-pub(in crate::bgv::setup) use accepted_setup::evict_verified_canonical_public_key_share_materials;
 pub(in crate::bgv::setup) use canonical_stream_transport::{
     AcceptedSetupMaterialStore, AcceptedSetupProofBindingSession,
     accepted_setup_session_owns_material_root,

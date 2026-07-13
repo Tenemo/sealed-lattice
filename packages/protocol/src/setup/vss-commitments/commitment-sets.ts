@@ -61,7 +61,7 @@ export type VssCommittedMaterialCommitmentComputer = (input: {
     readonly materialSeedHex: string;
 }) => VssCommittedMaterialCommitmentComputation;
 
-export type VssCommittedMaterialSeedRequest = {
+type VssCommittedMaterialSeedRequest = {
     readonly commitmentRole: VssCommittedMaterialCommitmentRole;
     readonly rnsLimbIndex: number;
     readonly rnsPrime: number;
@@ -79,7 +79,7 @@ export type VssCommittedMaterialSeedRequest = {
 // be threaded into every proof that opens the commitment, so the prover
 // regenerates byte-identical committed-material trees; the seed itself never
 // appears in the published package.
-export type VssCommittedMaterialSeedProvider = (
+type VssCommittedMaterialSeedProvider = (
     input: VssCommittedMaterialSeedRequest,
 ) => string;
 
@@ -115,7 +115,6 @@ export type VssShareLinkageProofInput = {
 };
 
 export type VssGeneratedCanonicalProofMaterial = {
-    readonly proofBytesEncoding: 'binary-chunked-proof-bytes';
     readonly proofBytesHash: ProtocolHash;
     readonly proofMaterialRoot: ProtocolHash;
     readonly canonicalMaterial: CanonicalGeneratedSetupProofMaterial;
@@ -224,7 +223,6 @@ export type VssAggregateThresholdProofRecord = {
     readonly recipientRosterPosition: number;
     readonly rnsLimbIndex: number;
     readonly vssShareLinkage: Record<string, unknown>;
-    readonly proofBytesEncoding: 'binary-chunked-proof-bytes';
     readonly proofBytesHash: ProtocolHash;
     readonly proofMaterialRoot: ProtocolHash;
 };
@@ -311,7 +309,7 @@ export type VssPublicSourceTrusteeOpeningState = {
 // commitment). Carried out of the coefficient-set builder so the share-linkage
 // and bridge proofs regenerate the same committed trees the set bound, rather
 // than re-deriving a seed and risking a mismatch.
-export type VssPublicCoefficientCredential = {
+type VssPublicCoefficientCredential = {
     readonly sourceTrusteeRosterPosition: number;
     readonly rnsLimbIndex: number;
     readonly rnsPrime: number;
@@ -536,7 +534,7 @@ export const createVssPublicCoefficientCommitmentSet = (input: {
     };
 };
 
-export type VssPublicRecipientShareCredential = {
+type VssPublicRecipientShareCredential = {
     readonly sourceTrusteeIdentity: string;
     readonly sourceTrusteeRosterPosition: number;
     readonly recipientRosterPosition: number;
@@ -831,7 +829,6 @@ const coefficientVectorToLittleEndianHex = (
 // unit-evaluation-point share-linkage proof showing the committed threshold
 // share is the modular sum of the committed source recipient shares.
 const vssAggregateThresholdProofFamily = 'vss-share-linkage';
-const canonicalProofMaterialEncoding = 'binary-chunked-proof-bytes';
 const protocolHashPattern = /^[0-9a-f]{128}$/u;
 
 const assertCanonicalAggregateProofMaterial = (
@@ -841,11 +838,6 @@ const assertCanonicalAggregateProofMaterial = (
     readonly proofMaterialRoot: ProtocolHash;
     readonly descriptorBytes: Uint8Array;
 }> => {
-    if (generatedProof.proofBytesEncoding !== canonicalProofMaterialEncoding) {
-        throw new TypeError(
-            'VSS aggregate threshold proof bytes must use the canonical binary chunked encoding.',
-        );
-    }
     if (!protocolHashPattern.test(generatedProof.proofBytesHash)) {
         throw new TypeError(
             'VSS aggregate threshold proofBytesHash must be a protocol hash.',
@@ -1037,7 +1029,6 @@ const createVssAggregateThresholdProofRecord = async (input: {
             recipientRosterPosition,
             rnsLimbIndex,
             vssShareLinkage,
-            proofBytesEncoding: canonicalProofMaterialEncoding,
             proofBytesHash: canonicalProofMaterial.proofBytesHash,
             proofMaterialRoot: canonicalProofMaterial.proofMaterialRoot,
         },
@@ -1296,7 +1287,6 @@ const aggregateProofReferenceIsCanonical = (
     proof: VssAggregateThresholdProofRecord,
 ): boolean =>
     proof.proofFamily === vssAggregateThresholdProofFamily &&
-    proof.proofBytesEncoding === canonicalProofMaterialEncoding &&
     protocolHashPattern.test(proof.proofBytesHash) &&
     protocolHashPattern.test(proof.proofMaterialRoot) &&
     proof.proofMaterialRoot ===

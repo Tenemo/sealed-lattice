@@ -40,31 +40,14 @@ pub(super) fn verify_public_evaluation_key_material_transport(
     evaluation_keys: &Value,
     request: &Value,
 ) -> CanonicalResult<Option<Value>> {
-    for field_name in [
-        "publicEvaluationKeyMaterialEncoding",
-        "publicEvaluationKeyMaterialRoot",
-    ] {
-        if evaluation_keys.get(field_name).is_none() {
-            return Ok(Some(evaluation_key_material_refusal(
-                "publicEvaluationKeyMaterialReferenceIncomplete",
-                format!(
-                    "evaluationKeys.{field_name} is required when public evaluation-key material is declared"
-                ),
-                format!("setupPackage.evaluationKeys.{field_name}"),
-            )?));
-        }
-    }
     if evaluation_keys
-        .get("publicEvaluationKeyMaterialEncoding")
-        .and_then(Value::as_str)
-        != Some(PUBLIC_EVALUATION_KEY_TRANSPORT_MATERIAL_ENCODING)
+        .get("publicEvaluationKeyMaterialRoot")
+        .is_none()
     {
         return Ok(Some(evaluation_key_material_refusal(
-            "publicEvaluationKeyMaterialEncodingMismatch",
-            format!(
-                "evaluationKeys.publicEvaluationKeyMaterialEncoding must be {PUBLIC_EVALUATION_KEY_TRANSPORT_MATERIAL_ENCODING}"
-            ),
-            "setupPackage.evaluationKeys.publicEvaluationKeyMaterialEncoding",
+            "publicEvaluationKeyMaterialReferenceIncomplete",
+            "evaluationKeys.publicEvaluationKeyMaterialRoot is required when public evaluation-key material is declared",
+            "setupPackage.evaluationKeys.publicEvaluationKeyMaterialRoot",
         )?));
     }
     let Some(transported_material_set) = request.get("transportedPublicEvaluationKeyMaterial")
@@ -478,7 +461,6 @@ pub(in crate::bgv::setup) fn public_evaluation_key_material_transport_hashes(
         .collect::<CanonicalResult<Vec<_>>>()?;
     let chunk_root = derive_canonical_object_hash(&json!({
         "objectType": "PublicEvaluationKeyMaterialChunkManifest",
-        "materialEncoding": PUBLIC_EVALUATION_KEY_TRANSPORT_MATERIAL_ENCODING,
         "chunkCount": chunk_hashes.len(),
         "totalByteLength": total_byte_length,
         "chunkHashes": chunk_hashes,
@@ -538,7 +520,6 @@ pub(in crate::bgv::setup) fn public_evaluation_key_material_reference_root(
 ) -> CanonicalResult<String> {
     derive_canonical_object_hash(&json!({
         "objectType": "PublicEvaluationKeyMaterialReference",
-        "materialEncoding": PUBLIC_EVALUATION_KEY_TRANSPORT_MATERIAL_ENCODING,
         "ceremonyId": value_string(evaluation_keys, "ceremonyId")?,
         "manifestHash": value_string(evaluation_keys, "manifestHash")?,
         "rosterHash": value_string(evaluation_keys, "rosterHash")?,

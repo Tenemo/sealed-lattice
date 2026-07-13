@@ -63,7 +63,6 @@ pub(in super::super) fn collective_public_key_object(
     let mut collective_public_key = serde_json::json!({
         "objectType": "CollectivePublicKey",
         "proofFamily": "public-key-share",
-        "materialEncoding": "embedded-full-collective-public-key-coefficients",
         "ceremonyId": setup_context["ceremonyId"],
         "manifestHash": setup_context["manifestHash"],
         "rosterHash": setup_context["rosterHash"],
@@ -502,7 +501,6 @@ pub(in super::super) fn public_key_share_succinct_proofs_fixture(
             "sameSecretBridgeProofRecordRoot": bridge_binding.same_secret_bridge_proof_record_root,
             "statementHash": statement_hash_hex,
             "proofBytesHash": proof_bytes_hash,
-            "proofBytesEncoding": SETUP_PROOF_MATERIAL_ENCODING,
         });
         let proof_material_root = crate::bgv::setup::accepted_setup::public_key_share_succinct_proof_material_root(
             &proof_record,

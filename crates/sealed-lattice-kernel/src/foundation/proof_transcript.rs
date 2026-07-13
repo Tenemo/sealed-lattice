@@ -327,25 +327,15 @@ impl CanonicalProofTranscript {
             let canonical_tag = ProofChallengeTag::DeepPoint { point_ordinal }
                 .canonical_tag(self.application_statement_schema_identifier);
             let mut challenge_stream = ChallengeByteStream::new(self.state, canonical_tag);
-            let mut point_accepted = false;
-            for _ in 0..maximum_candidate_draws_per_output {
-                let mut point = Vec::with_capacity(usize::from(coordinate_count));
-                for _ in 0..coordinate_count {
-                    point.push(sample_modulo_from_stream(
-                        &mut challenge_stream,
-                        modulus,
-                        maximum_candidate_draws_per_output,
-                    )?);
-                }
-                if occupied_points.insert(point.clone()) {
-                    points.push(point);
-                    point_accepted = true;
-                    break;
-                }
-            }
-            if !point_accepted {
-                return Err(ProofTranscriptError::CandidateDrawLimitExhausted);
-            }
+            let mut candidate_draw_budget =
+                CandidateDrawBudget::new(maximum_candidate_draws_per_output)?;
+            points.push(sample_distinct_extension_point_from_stream(
+                &mut challenge_stream,
+                modulus,
+                coordinate_count,
+                &mut occupied_points,
+                &mut candidate_draw_budget,
+            )?);
         }
         Ok(points)
     }
@@ -369,21 +359,14 @@ impl CanonicalProofTranscript {
             let canonical_tag = ProofChallengeTag::QueryRepresentative { query_ordinal }
                 .canonical_tag(self.application_statement_schema_identifier);
             let mut challenge_stream = ChallengeByteStream::new(self.state, canonical_tag);
-            let mut representative_accepted = false;
-            for _ in 0..maximum_candidate_draws_per_output {
-                let representative = sample_modulo_from_stream(
-                    &mut challenge_stream,
-                    representative_set_cardinality,
-                    maximum_candidate_draws_per_output,
-                )?;
-                if representatives.insert(representative) {
-                    representative_accepted = true;
-                    break;
-                }
-            }
-            if !representative_accepted {
-                return Err(ProofTranscriptError::CandidateDrawLimitExhausted);
-            }
+            let mut candidate_draw_budget =
+                CandidateDrawBudget::new(maximum_candidate_draws_per_output)?;
+            sample_distinct_modulo_from_stream(
+                &mut challenge_stream,
+                representative_set_cardinality,
+                &mut representatives,
+                &mut candidate_draw_budget,
+            )?;
         }
         Ok(representatives.into_iter().collect())
     }
@@ -404,6 +387,27 @@ fn validate_candidate_draw_limit(
         return Err(ProofTranscriptError::InvalidCandidateDrawLimit);
     }
     Ok(())
+}
+
+struct CandidateDrawBudget {
+    remaining_candidate_draws: u32,
+}
+
+impl CandidateDrawBudget {
+    fn new(maximum_candidate_draws_per_output: u32) -> Result<Self, ProofTranscriptError> {
+        validate_candidate_draw_limit(maximum_candidate_draws_per_output)?;
+        Ok(Self {
+            remaining_candidate_draws: maximum_candidate_draws_per_output,
+        })
+    }
+
+    fn consume_candidate_draw(&mut self) -> Result<(), ProofTranscriptError> {
+        self.remaining_candidate_draws = self
+            .remaining_candidate_draws
+            .checked_sub(1)
+            .ok_or(ProofTranscriptError::CandidateDrawLimitExhausted)?;
+        Ok(())
+    }
 }
 
 struct ChallengeByteStream {
@@ -476,7 +480,18 @@ fn sample_modulo_from_stream(
     if modulus == 0 {
         return Err(ProofTranscriptError::InvalidModulus);
     }
-    validate_candidate_draw_limit(maximum_candidate_draws_per_output)?;
+    let mut candidate_draw_budget = CandidateDrawBudget::new(maximum_candidate_draws_per_output)?;
+    sample_modulo_from_stream_with_budget(challenge_stream, modulus, &mut candidate_draw_budget)
+}
+
+fn sample_modulo_from_stream_with_budget(
+    challenge_stream: &mut ChallengeByteStream,
+    modulus: u64,
+    candidate_draw_budget: &mut CandidateDrawBudget,
+) -> Result<u64, ProofTranscriptError> {
+    if modulus == 0 {
+        return Err(ProofTranscriptError::InvalidModulus);
+    }
     let bit_length = u64::BITS - modulus.leading_zeros();
     let candidate_byte_length =
         usize::try_from(bit_length.div_ceil(8)).expect("a u64 challenge width always fits usize");
@@ -484,13 +499,53 @@ fn sample_modulo_from_stream(
     let modulus_u128 = u128::from(modulus);
     let acceptance_limit = candidate_space_size / modulus_u128 * modulus_u128;
 
-    for _ in 0..maximum_candidate_draws_per_output {
+    loop {
+        candidate_draw_budget.consume_candidate_draw()?;
         let candidate = challenge_stream.read_candidate(candidate_byte_length)?;
         if u128::from(candidate) < acceptance_limit {
             return Ok(candidate % modulus);
         }
     }
-    Err(ProofTranscriptError::CandidateDrawLimitExhausted)
+}
+
+fn sample_distinct_modulo_from_stream(
+    challenge_stream: &mut ChallengeByteStream,
+    modulus: u64,
+    occupied_values: &mut BTreeSet<u64>,
+    candidate_draw_budget: &mut CandidateDrawBudget,
+) -> Result<u64, ProofTranscriptError> {
+    loop {
+        let value = sample_modulo_from_stream_with_budget(
+            challenge_stream,
+            modulus,
+            candidate_draw_budget,
+        )?;
+        if occupied_values.insert(value) {
+            return Ok(value);
+        }
+    }
+}
+
+fn sample_distinct_extension_point_from_stream(
+    challenge_stream: &mut ChallengeByteStream,
+    modulus: u64,
+    coordinate_count: u16,
+    occupied_points: &mut BTreeSet<Vec<u64>>,
+    candidate_draw_budget: &mut CandidateDrawBudget,
+) -> Result<Vec<u64>, ProofTranscriptError> {
+    loop {
+        let mut point = Vec::with_capacity(usize::from(coordinate_count));
+        for _ in 0..coordinate_count {
+            point.push(sample_modulo_from_stream_with_budget(
+                challenge_stream,
+                modulus,
+                candidate_draw_budget,
+            )?);
+        }
+        if occupied_points.insert(point.clone()) {
+            return Ok(point);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -781,6 +836,55 @@ mod tests {
             transcript.sample_distinct_query_representatives(1, 2, 0),
             Err(ProofTranscriptError::InvalidCandidateDrawLimit)
         );
+    }
+
+    #[test]
+    fn query_representative_rejection_and_duplicate_share_one_draw_budget() {
+        let mut challenge_stream = ChallengeByteStream::new(
+            Hash512::from_bytes([0u8; Hash512::BYTE_LENGTH]),
+            "proof/1302/query-representative/00000000".to_owned(),
+        );
+        challenge_stream.block[0..3].copy_from_slice(&[0xff, 0, 1]);
+        challenge_stream.block_byte_offset = 0;
+        let mut occupied_values = BTreeSet::from([0]);
+        let mut candidate_draw_budget = CandidateDrawBudget::new(2).expect("positive budget");
+
+        assert_eq!(
+            sample_distinct_modulo_from_stream(
+                &mut challenge_stream,
+                129,
+                &mut occupied_values,
+                &mut candidate_draw_budget,
+            ),
+            Err(ProofTranscriptError::CandidateDrawLimitExhausted)
+        );
+        assert_eq!(challenge_stream.block_byte_offset, 2);
+        assert_eq!(occupied_values, BTreeSet::from([0]));
+    }
+
+    #[test]
+    fn deep_point_rejection_and_forbidden_point_share_one_draw_budget() {
+        let mut challenge_stream = ChallengeByteStream::new(
+            Hash512::from_bytes([0u8; Hash512::BYTE_LENGTH]),
+            "proof/1302/deep-point/0000".to_owned(),
+        );
+        challenge_stream.block[0..5].copy_from_slice(&[0xff, 0, 0, 1, 1]);
+        challenge_stream.block_byte_offset = 0;
+        let mut occupied_points = BTreeSet::from([vec![0, 0]]);
+        let mut candidate_draw_budget = CandidateDrawBudget::new(3).expect("positive budget");
+
+        assert_eq!(
+            sample_distinct_extension_point_from_stream(
+                &mut challenge_stream,
+                129,
+                2,
+                &mut occupied_points,
+                &mut candidate_draw_budget,
+            ),
+            Err(ProofTranscriptError::CandidateDrawLimitExhausted)
+        );
+        assert_eq!(challenge_stream.block_byte_offset, 3);
+        assert_eq!(occupied_points, BTreeSet::from([vec![0, 0]]));
     }
 
     #[test]

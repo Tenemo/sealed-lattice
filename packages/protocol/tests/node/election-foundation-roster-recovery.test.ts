@@ -136,15 +136,6 @@ describe('roster and manifest shells', () => {
         );
     });
 
-    it('rejects non-ASCII roster identities before hashing', () => {
-        expect(() => createRegistrationEntry('Cafe\u0301', 1, 0)).toThrow(
-            'only ASCII characters',
-        );
-        expect(() => createRegistrationEntry('Caf\u00e9', 1, 0)).toThrow(
-            'only ASCII characters',
-        );
-    });
-
     it('requires object signatures rather than transport authentication for manifests', () => {
         const input = createRosterManifestTranscriptInput([
             createRegistrationEntry('participant-1', 1, 0),

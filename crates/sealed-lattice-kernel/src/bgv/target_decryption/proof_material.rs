@@ -4,7 +4,6 @@ const TARGET_DECRYPTION_SHARE_PROOF_MATERIAL_OBJECT_TYPE: &str =
     "BgvTargetDecryptionShareProofMaterial";
 const TARGET_DECRYPTION_SHARE_PROOF_RECORD_OBJECT_TYPE: &str =
     "BgvTargetDecryptionShareProofRecord";
-const TARGET_DECRYPTION_SHARE_PROOF_BYTES_ENCODING: &str = "binary-chunked-proof-bytes";
 const TARGET_DECRYPTION_SHARE_PROOF_BYTES_HASH_DOMAIN: &str =
     "sealed-lattice/target-decryption/share-proof/proof-bytes";
 
@@ -120,7 +119,6 @@ pub(super) fn generate_target_decryption_share_proof_material_from_local_witness
     );
     let proof_record = json!({
         "objectType": TARGET_DECRYPTION_SHARE_PROOF_RECORD_OBJECT_TYPE,
-        "proofBytesEncoding": TARGET_DECRYPTION_SHARE_PROOF_BYTES_ENCODING,
         "proofBytesHash": proof_bytes_hash,
     });
 
@@ -229,14 +227,6 @@ fn verify_target_decryption_share_proof_record(
     }
     let expected_target_rns_limb_indices = (0..input.active_limb_count).collect::<Vec<_>>();
     let expected_target_roles = expected_target_roles();
-    if string_at_path(proof_record, &["proofBytesEncoding"])?
-        != TARGET_DECRYPTION_SHARE_PROOF_BYTES_ENCODING
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "target-decryption proof bytes must use canonical binary stream encoding",
-        ));
-    }
     let proof_bytes_hash = hash_at_path(proof_record, &["proofBytesHash"])?;
     let recomputed_proof_bytes_hash = crate::hashing::hash512_hex_streamed_part(
         TARGET_DECRYPTION_SHARE_PROOF_BYTES_HASH_DOMAIN,

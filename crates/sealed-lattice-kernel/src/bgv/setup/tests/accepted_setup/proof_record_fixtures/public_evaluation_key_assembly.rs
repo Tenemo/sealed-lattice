@@ -43,7 +43,6 @@ pub(in super::super) fn public_evaluation_key_set_object(
                 .expect("round-two aggregate root");
             let relinearization_key_root = derive_canonical_object_hash(&serde_json::json!({
                 "objectType": "RelinearizationKeyAggregate",
-                "materialEncoding": "root-bound-public-key-switch-component-roots",
                 "evaluatorKeyScheduleRoot": schedule["evaluatorKeyScheduleRoot"],
                 "publicKeyShareSuccinctProofSetRoot": package["publicKeyShareSuccinctProofs"]["publicKeyShareSuccinctProofSetRoot"],
                 "relinearizationKeyShareRoundsRoot": relinearization_rounds_root,
@@ -114,7 +113,6 @@ pub(in super::super) fn public_evaluation_key_set_object(
                 .collect::<Vec<_>>();
             let galois_key_root = derive_canonical_object_hash(&serde_json::json!({
                 "objectType": "GaloisKeyAggregate",
-                "materialEncoding": "root-bound-public-key-switch-component-roots",
                 "evaluatorKeyScheduleRoot": schedule["evaluatorKeyScheduleRoot"],
                 "publicKeyShareSuccinctProofSetRoot": package["publicKeyShareSuccinctProofs"]["publicKeyShareSuccinctProofSetRoot"],
                 "galoisKeyCrpRoot": package["commonRandomness"]["publicDerivations"]["crpRoots"]["galoisKeyCrpRoot"],
@@ -139,7 +137,6 @@ pub(in super::super) fn public_evaluation_key_set_object(
 
     let mut evaluation_keys = serde_json::json!({
         "objectType": "PublicEvaluationKeySet",
-        "materialEncoding": "root-bound-public-key-switch-component-roots",
         "ceremonyId": setup_context["ceremonyId"],
         "manifestHash": setup_context["manifestHash"],
         "rosterHash": setup_context["rosterHash"],

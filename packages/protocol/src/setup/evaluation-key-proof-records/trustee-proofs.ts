@@ -21,7 +21,6 @@ import {
     evaluationKeyShareComponentMaterialMagic,
     evaluationKeyShareProofTransportObjectType,
     evaluationKeyShareProofTransportSetObjectType,
-    setupProofMaterialTransportEncoding,
     trusteeEvaluationKeyProofFamily,
 } from './constants-and-types.js';
 import {
@@ -235,12 +234,15 @@ const componentBVectorsFromMaterial = async (
     if (digitCount > qSharePrimes.length) {
         throw new Error(`${objectPath}.level is outside the Q_share basis.`);
     }
-    const materialEncoding = stringRecordField(
+    const keySwitchMaterialEncoding = stringRecordField(
         record,
         'keySwitchMaterialEncoding',
         objectPath,
     );
-    if (materialEncoding === 'embedded-full-key-switch-component-vectors') {
+    if (
+        keySwitchMaterialEncoding ===
+        'embedded-full-key-switch-component-vectors'
+    ) {
         const entriesValue = record.keySwitchComponentVectors;
         if (!Array.isArray(entriesValue)) {
             throw new TypeError(
@@ -346,7 +348,10 @@ const componentBVectorsFromMaterial = async (
 
         return componentBByDigit;
     }
-    if (materialEncoding !== evaluationKeyShareComponentMaterialEncoding) {
+    if (
+        keySwitchMaterialEncoding !==
+        evaluationKeyShareComponentMaterialEncoding
+    ) {
         throw new Error(
             `${objectPath}.keySwitchMaterialEncoding is not accepted.`,
         );
@@ -1015,14 +1020,6 @@ export const createTrusteeEvaluationKeyProofs = async (
             generatedProof.proofMaterialRoot,
             'generatedProof.proofMaterialRoot',
         );
-        if (
-            generatedProof.proofBytesEncoding !==
-            setupProofMaterialTransportEncoding
-        ) {
-            throw new Error(
-                'generatedProof.proofBytesEncoding must be binary-chunked-proof-bytes.',
-            );
-        }
         const expectedProofMaterialRoot = deriveCanonicalObjectHash({
             objectType: 'TrusteeEvaluationKeyProofMaterialReference',
             proofFamily: trusteeEvaluationKeyProofFamily,
@@ -1052,7 +1049,6 @@ export const createTrusteeEvaluationKeyProofs = async (
             trusteeRosterPosition: trusteeReference.trusteeRosterPosition,
             statementHash: generatedProof.statementHash,
             proofBytesHash: generatedProof.proofBytesHash,
-            proofBytesEncoding: generatedProof.proofBytesEncoding,
             proofMaterialRoot: generatedProof.proofMaterialRoot,
         } as JsonRecord;
 

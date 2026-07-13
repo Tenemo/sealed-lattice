@@ -74,12 +74,10 @@ const desktopBrowserTestGlobs = [
 ] as const;
 const mobileBrowserTestGlobs = [
     'packages/sdk/tests/browser/election-foundation-public-api.browser.test.ts',
+    'packages/wasm/tests/browser/canonical-stream-runtime.browser.test.ts',
+    'packages/wasm/tests/browser/local-storage-root-worker-kernel.browser.test.ts',
     'packages/wasm/tests/browser/owned-kernel-worker-channel.browser.test.ts',
-    'packages/protocol/tests/browser/authenticated-checkpoint-store.browser.test.ts',
-    'packages/protocol/tests/browser/browser-action-storage-custody.browser.test.ts',
-    'packages/protocol/tests/browser/durable-non-forking-state-service.browser.test.ts',
-    'packages/protocol/tests/browser/indexed-db-untrusted-storage-adapter.browser.test.ts',
-    'packages/protocol/tests/browser/web-lock-owned-untrusted-storage-transaction-store.browser.test.ts',
+    'packages/wasm/tests/browser/state-verifier-runtime.browser.test.ts',
 ] as const;
 
 const testDiagnosticPaths = resolveTestDiagnosticPaths();
@@ -116,6 +114,10 @@ const browserOptimizedDependencies = [
 ] as const;
 
 const rootPrivateAliases = [
+    {
+        find: '#packages',
+        replacement: resolveFromRepoRoot('packages'),
+    },
     {
         find: '#tests',
         replacement: resolveFromRepoRoot('tests'),

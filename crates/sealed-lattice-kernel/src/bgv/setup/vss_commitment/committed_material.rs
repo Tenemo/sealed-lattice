@@ -347,7 +347,7 @@ mod tests {
         Ok(())
     }
 
-    // SEC-012 binding regression: committed-material roots must separate every
+    // Committed-material roots must separate every
     // distinct canonical message, including single-position and
     // high-digit-only differences, under one fixed seed and context.
     #[test]

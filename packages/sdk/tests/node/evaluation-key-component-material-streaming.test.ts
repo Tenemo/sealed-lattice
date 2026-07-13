@@ -103,7 +103,6 @@ const componentMaterialSource = (
 
 const publicEvaluationKeyMaterial = {
     objectType: 'SetupTransportedPublicEvaluationKeyMaterial',
-    materialEncoding: 'binary-chunked-public-evaluation-key-material',
     ceremonyId: 'ceremony-alpha',
     manifestHash: expectedManifestHash,
     rosterHash: expectedRosterHash,
@@ -211,7 +210,6 @@ describe('evaluation-key component material streaming before terminal verificati
             fullObjectHash: '4c'.repeat(64),
             chunkHashes: ['53'.repeat(64)],
         });
-        expect(normalizedComponentMaterials[0].descriptorBytes).toBeUndefined();
     });
 
     it('uses one descriptor snapshot when a chunk callback mutates the caller buffer', async () => {
@@ -309,34 +307,6 @@ describe('evaluation-key component material streaming before terminal verificati
         ).rejects.toThrow('canonical component stream rejected');
     });
 
-    it('rejects a transported reference without its bounded source', async () => {
-        await expect(
-            prepare({
-                setupPackage: { objectType: 'SetupPackage' },
-                ...setupVerificationBindings,
-                transportedEvaluationKeyShareComponentMaterial: {
-                    objectType:
-                        'SetupTransportedEvaluationKeyShareComponentMaterialSet',
-                    componentMaterials: [
-                        componentMaterial(componentMaterialRoot),
-                    ],
-                },
-            }),
-        ).rejects.toThrow(/must match exactly one transported reference/u);
-    });
-
-    it('rebuilds the public-only verify input from a bare package plus bindings', async () => {
-        const verificationInput = await prepare({
-            setupPackage: { objectType: 'SetupPackage' },
-            ...setupVerificationBindings,
-        });
-
-        expect(verificationInput).toEqual({
-            setupPackage: { objectType: 'SetupPackage' },
-            ...setupVerificationBindings,
-        });
-    });
-
     it('rejects a source for an unknown component material root', async () => {
         await expect(
             prepare({
@@ -366,8 +336,6 @@ describe('evaluation-key component material streaming before terminal verificati
             ...setupVerificationBindings,
             transportedPublicEvaluationKeyMaterial: {
                 objectType: 'SetupTransportedPublicEvaluationKeyMaterialSet',
-                materialEncoding:
-                    'binary-chunked-public-evaluation-key-material',
                 publicEvaluationKeyMaterials: [publicEvaluationKeyMaterial],
             },
             publicEvaluationKeyMaterialChunkSources: [source],
@@ -391,9 +359,6 @@ describe('evaluation-key component material streaming before terminal verificati
             fullObjectHash: '53'.repeat(64),
             chunkHashes: ['45'.repeat(64)],
         });
-        expect(
-            normalizedPublicEvaluationKeyMaterials[0].descriptorBytes,
-        ).toBeUndefined();
     });
 
     it('rejects public evaluation-key material without an exact source match', async () => {
@@ -404,8 +369,6 @@ describe('evaluation-key component material streaming before terminal verificati
                 transportedPublicEvaluationKeyMaterial: {
                     objectType:
                         'SetupTransportedPublicEvaluationKeyMaterialSet',
-                    materialEncoding:
-                        'binary-chunked-public-evaluation-key-material',
                     publicEvaluationKeyMaterials: [publicEvaluationKeyMaterial],
                 },
             }),

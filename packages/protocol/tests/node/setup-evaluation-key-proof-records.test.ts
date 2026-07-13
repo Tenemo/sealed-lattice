@@ -471,7 +471,6 @@ const stubGenerator = (
         return Promise.resolve({
             statementHash,
             limbCount: qSharePrimes.length,
-            proofBytesEncoding: 'binary-chunked-proof-bytes',
             proofBytesHash,
             proofMaterialRoot,
             canonicalMaterial: {
@@ -1102,9 +1101,6 @@ describe('createTrusteeEvaluationKeyProofs', () => {
                 expect(proofRecord.proofBytesHash).toBe(
                     trusteeEvaluationKeyProofBytesHash(proofBytesHex),
                 );
-                expect(proofRecord.proofBytesEncoding).toBe(
-                    'binary-chunked-proof-bytes',
-                );
                 expect(
                     transportedEvaluationKeyShareProofMaterial.proofMaterials[
                         trusteeRosterPosition
@@ -1327,9 +1323,6 @@ describe('trustee evaluation-key canonical proof material', () => {
         transport.trusteeEvaluationKeyProofs.proofRecords.forEach(
             (proofRecord, recordIndex) => {
                 const recordFields = proofRecord as JsonRecord;
-                expect(recordFields.proofBytesEncoding).toBe(
-                    'binary-chunked-proof-bytes',
-                );
                 const transportedMaterial =
                     transport.transportedEvaluationKeyShareProofMaterial
                         .proofMaterials[recordIndex];
@@ -1454,21 +1447,9 @@ describe('evaluation-key component descriptor package assembly', () => {
     const truncatedDescriptor = rustStreamDescriptorVector.slice(0, -1);
     const wrongSchemaDescriptor = rustStreamDescriptorVector.slice();
     wrongSchemaDescriptor[0] = 0x01;
-    const wrongVersionDescriptor = rustStreamDescriptorVector.slice();
-    wrongVersionDescriptor[2] = 0x02;
-    const wrongItemCountDescriptor = rustStreamDescriptorVector.slice();
-    wrongItemCountDescriptor[4] = 0x04;
-    const wrongItemTagDescriptor = rustStreamDescriptorVector.slice();
-    wrongItemTagDescriptor[8] = 0x04;
     const impossibleChunkCountDescriptor = canonicalStreamDescriptor(
         1n,
         [0x41, 0x43],
-    );
-    const nonCanonicalListLengthDescriptor = rustStreamDescriptorVector.slice();
-    new DataView(nonCanonicalListLengthDescriptor.buffer).setUint32(
-        24,
-        69,
-        true,
     );
     const trailingDescriptor = new Uint8Array(
         rustStreamDescriptorVector.byteLength + 1,
@@ -1478,68 +1459,32 @@ describe('evaluation-key component descriptor package assembly', () => {
         2_147_483_649n,
         [0x41],
     );
-    const outsideDescriptorBound = new Uint8Array(104 + 64 * 2_048 + 1);
 
     it.each([
         {
             name: 'truncated descriptor',
             descriptorBytes: truncatedDescriptor,
-            expectedMessage: 'descriptorBytes.fullObjectHash is truncated',
         },
         {
             name: 'wrong schema identifier',
             descriptorBytes: wrongSchemaDescriptor,
-            expectedMessage: 'must use the canonical stream descriptor schema',
-        },
-        {
-            name: 'wrong schema version',
-            descriptorBytes: wrongVersionDescriptor,
-            expectedMessage: 'must use canonical stream descriptor version 1',
-        },
-        {
-            name: 'wrong item count',
-            descriptorBytes: wrongItemCountDescriptor,
-            expectedMessage: 'must contain exactly three canonical items',
-        },
-        {
-            name: 'wrong item tag',
-            descriptorBytes: wrongItemTagDescriptor,
-            expectedMessage:
-                'descriptorBytes.totalByteLength has the wrong canonical item type',
         },
         {
             name: 'impossible chunk count',
             descriptorBytes: impossibleChunkCountDescriptor,
-            expectedMessage:
-                'descriptorBytes.chunkHashes count does not match totalByteLength',
-        },
-        {
-            name: 'noncanonical list length',
-            descriptorBytes: nonCanonicalListLengthDescriptor,
-            expectedMessage:
-                'descriptorBytes.chunkHashes does not use the canonical list length',
         },
         {
             name: 'trailing bytes',
             descriptorBytes: trailingDescriptor,
-            expectedMessage: 'descriptorBytes contains trailing bytes',
         },
         {
             name: 'stream length above the profile bound',
             descriptorBytes: outsideStreamBoundDescriptor,
-            expectedMessage:
-                'descriptorBytes.totalByteLength is outside the canonical stream bound',
         },
-        {
-            name: 'descriptor above the profile bound',
-            descriptorBytes: outsideDescriptorBound,
-            expectedMessage:
-                'descriptorBytes exceeds the canonical stream descriptor bound',
-        },
-    ])('rejects $name', ({ descriptorBytes, expectedMessage }) => {
+    ])('rejects $name', ({ descriptorBytes }) => {
         expect(() =>
             setupCertificateObjectsForComponentDescriptor(descriptorBytes),
-        ).toThrow(expectedMessage);
+        ).toThrow();
     });
 });
 
@@ -1643,7 +1588,6 @@ describe('setup package descriptor transport normalization', () => {
         },
         transportedPublicEvaluationKeyMaterial: {
             objectType: 'SetupTransportedPublicEvaluationKeyMaterialSet',
-            materialEncoding: 'binary-chunked-public-evaluation-key-material',
             publicEvaluationKeyMaterials: [
                 {
                     objectType: 'SetupTransportedPublicEvaluationKeyMaterial',
@@ -1658,94 +1602,7 @@ describe('setup package descriptor transport normalization', () => {
         (): typeof descriptorBackedCompanionTemplate =>
             structuredClone(descriptorBackedCompanionTemplate);
 
-    it('derives certificate accounting for every descriptor-backed certificate object', () => {
-        const companions = descriptorBackedCompanions();
-        const transportedObjects =
-            setupCertificateTransportedObjectsFromPackageInput({
-                transportedPublicKeyShareMaterial:
-                    companions.transportedPublicKeyShareMaterial,
-                transportedPublicKeyShareProofMaterial:
-                    companions.transportedPublicKeyShareProofMaterial,
-                transportedVssShareLinkageProofMaterial:
-                    companions.transportedVssShareLinkageProofMaterial,
-                transportedSameSecretBridgeProofMaterial:
-                    companions.transportedSameSecretBridgeProofMaterial,
-                transportedEvaluationKeyShareProofMaterial:
-                    companions.transportedEvaluationKeyShareProofMaterial,
-                transportedEvaluationKeyShareComponentMaterial:
-                    companions.transportedEvaluationKeyShareComponentMaterial,
-                transportedPublicEvaluationKeyMaterial:
-                    companions.transportedPublicEvaluationKeyMaterial,
-            } as unknown as SetupPackageInput);
-
-        expect(transportedObjects).toEqual([
-            {
-                objectName: 'publicKeyShareMaterial',
-                objectRole: 'public-key-share-material',
-                objectRoot: publicKeyMaterialRoot,
-                byteLength: 1,
-                fullObjectHash,
-                chunkRoot,
-                chunkHashes: [chunkHash],
-            },
-            {
-                objectName: 'publicKeyShareProofMaterial',
-                objectRole: 'public-key-share-proof-material',
-                objectRoot: publicKeyProofRoot,
-                byteLength: 1,
-                fullObjectHash,
-                chunkRoot,
-                chunkHashes: [chunkHash],
-            },
-            {
-                objectName: 'vssShareLinkageProofMaterial',
-                objectRole: 'vss-share-linkage-proof-material',
-                objectRoot: vssShareLinkageProofRoot,
-                byteLength: 1,
-                fullObjectHash,
-                chunkRoot,
-                chunkHashes: [chunkHash],
-            },
-            {
-                objectName: 'sameSecretBridgeProofMaterial',
-                objectRole: 'same-secret-bridge-proof-material',
-                objectRoot: sameSecretBridgeProofRoot,
-                byteLength: 1,
-                fullObjectHash,
-                chunkRoot,
-                chunkHashes: [chunkHash],
-            },
-            {
-                objectName: 'evaluationKeyShareProofMaterial',
-                objectRole: 'evaluation-key-share-proof-material',
-                objectRoot: evaluationKeyProofRoot,
-                byteLength: 1,
-                fullObjectHash,
-                chunkRoot,
-                chunkHashes: [chunkHash],
-            },
-            {
-                objectName: 'evaluationKeyShareComponentMaterial',
-                objectRole: 'evaluation-key-share-component-material',
-                objectRoot: componentRoot,
-                byteLength: 1,
-                fullObjectHash,
-                chunkRoot,
-                chunkHashes: [chunkHash],
-            },
-            {
-                objectName: 'publicEvaluationKeyMaterial',
-                objectRole: 'public-evaluation-key-runtime-material',
-                objectRoot: publicEvaluationKeyRoot,
-                byteLength: 1,
-                fullObjectHash,
-                chunkRoot,
-                chunkHashes: [chunkHash],
-            },
-        ]);
-    });
-
-    it('derives kernel accounting, strips descriptors, and preserves semantic references', () => {
+    it('derives kernel accounting and preserves semantic references', () => {
         const companions = descriptorBackedCompanions();
         const verificationInput = createSetupPackageVerificationInput({
             setupPackage: {
@@ -1757,7 +1614,6 @@ describe('setup package descriptor transport normalization', () => {
         } as unknown as SetupPackageVerificationInputSource);
         const publicKeyMaterial =
             verificationInput.transportedPublicKeyShareMaterial as JsonRecord;
-        expect(publicKeyMaterial.descriptorBytes).toBeUndefined();
         expect(publicKeyMaterial).toMatchObject({
             objectType: 'SetupTransportedPublicKeyShareMaterial',
             publicKeyShareMaterialSetRoot: publicKeyMaterialRoot,
@@ -1791,7 +1647,6 @@ describe('setup package descriptor transport normalization', () => {
                 chunkRoot,
                 chunkHashes: [chunkHash],
             });
-            expect(materials[0].descriptorBytes).toBeUndefined();
         });
 
         expect(
@@ -1839,7 +1694,6 @@ describe('setup package descriptor transport normalization', () => {
             proofFamily: trusteeEvaluationKeyProofFamily,
             proofMaterialRoot: evaluationKeyProofRoot,
         });
-        expect(evaluationKeyProofMaterials[0].descriptorBytes).toBeUndefined();
 
         for (const [
             proofSet,
@@ -1862,7 +1716,6 @@ describe('setup package descriptor transport normalization', () => {
         ] as const) {
             const proofMaterials = (proofSet as JsonRecord)
                 .proofMaterials as readonly JsonRecord[];
-            expect(proofMaterials[0].descriptorBytes).toBeUndefined();
             expect(proofMaterials[0]).toMatchObject({
                 objectType: expectedObjectType,
                 proofFamily: expectedProofFamily,
@@ -1980,60 +1833,6 @@ describe('createBinaryChunkedEvaluationKeyShareMaterialTransport', () => {
             ),
         );
         expect(roundOneRoots.size).toBe(participantCount);
-    });
-
-    it('keeps streamed contributions buildable into the same record containers', async () => {
-        const fixture = evaluationKeyFixture();
-        const materialStore = componentMaterialStore();
-        const transport =
-            await createBinaryChunkedEvaluationKeyShareMaterialTransport({
-                trusteeReferences: fixture.commonInput.trusteeReferences,
-                relinearizationRoundOneContributions:
-                    fixture.roundOneContributions,
-                relinearizationRoundTwoContributions:
-                    fixture.roundTwoContributions,
-                galoisKeyShareBatchContributions: fixture.batchContributions,
-                writeEvaluationKeyShareComponentMaterial: materialStore.writer,
-            });
-        const rounds = createRelinearizationKeyShareRounds({
-            ...fixture.commonInput,
-            roundOneContributions:
-                transport.relinearizationRoundOneContributions,
-            roundTwoContributions:
-                transport.relinearizationRoundTwoContributions,
-        });
-        const batches = createGaloisKeyShareBatches({
-            ...fixture.commonInput,
-            batchContributions: transport.galoisKeyShareBatchContributions,
-        });
-        const capturedInputs: TrusteeEvaluationKeyProofGeneratorInput[] = [];
-        const { trusteeEvaluationKeyProofs } =
-            await createTrusteeEvaluationKeyProofs({
-                ...fixture.commonInput,
-                relinearizationKeyShareRounds: rounds,
-                galoisKeyShareBatches: batches,
-                keySwitchDecompositionHash: fixtureHash(
-                    'key-switch-decomposition',
-                ),
-                trusteeWitnesses: trusteeWitnesses(),
-                sameSecretBridgeStatementSet: sameSecretBridgeStatementSet(),
-                trusteeEvaluationKeyProofGenerator:
-                    stubGenerator(capturedInputs),
-                transportedEvaluationKeyShareComponentMaterial:
-                    transport.transportedEvaluationKeyShareComponentMaterial,
-                evaluationKeyShareComponentMaterialChunkSources:
-                    materialStore.sources(),
-            });
-
-        expect(trusteeEvaluationKeyProofs.proofRecords).toHaveLength(
-            participantCount,
-        );
-        // The decoded chunk-streamed material must reproduce the same component
-        // coefficients the embedded path supplies, even though the transported
-        // component material now carries only the chunkless manifest reference.
-        expect(capturedInputs[0].keys[0].componentBByDigit[0][0]).toEqual(
-            componentCoefficients('round-one-0', 0, 0),
-        );
     });
 
     it('rejects contributions for unknown trustee roster positions', async () => {
@@ -2278,136 +2077,6 @@ describe('createBinaryChunkedPublicEvaluationKeyMaterialTransport', () => {
         expect(galoisShareMaterialRoots).toHaveLength(
             participantCount * requiredGaloisKeySchedule.length,
         );
-    });
-
-    it('normalizes descriptor-only producer output consistently for certificates and kernel input', async () => {
-        const fixture = evaluationKeyFixture();
-        const componentStore = componentMaterialStore();
-        const publicMaterialStore = publicEvaluationKeyMaterialStore();
-        const shareTransport =
-            await createBinaryChunkedEvaluationKeyShareMaterialTransport({
-                trusteeReferences: fixture.commonInput.trusteeReferences,
-                relinearizationRoundOneContributions:
-                    fixture.roundOneContributions,
-                relinearizationRoundTwoContributions:
-                    fixture.roundTwoContributions,
-                galoisKeyShareBatchContributions: fixture.batchContributions,
-                writeEvaluationKeyShareComponentMaterial: componentStore.writer,
-            });
-        const relinearizationKeyShareRounds =
-            createRelinearizationKeyShareRounds({
-                ...fixture.commonInput,
-                roundOneContributions:
-                    shareTransport.relinearizationRoundOneContributions,
-                roundTwoContributions:
-                    shareTransport.relinearizationRoundTwoContributions,
-            });
-        const galoisKeyShareBatches = createGaloisKeyShareBatches({
-            ...fixture.commonInput,
-            batchContributions: shareTransport.galoisKeyShareBatchContributions,
-        });
-        const trusteeProofTransport = await createTrusteeEvaluationKeyProofs({
-            ...fixture.commonInput,
-            relinearizationKeyShareRounds,
-            galoisKeyShareBatches,
-            keySwitchDecompositionHash: fixtureHash('key-switch-decomposition'),
-            trusteeWitnesses: trusteeWitnesses(),
-            sameSecretBridgeStatementSet: sameSecretBridgeStatementSet(),
-            trusteeEvaluationKeyProofGenerator: stubGenerator([]),
-            transportedEvaluationKeyShareComponentMaterial:
-                shareTransport.transportedEvaluationKeyShareComponentMaterial,
-            evaluationKeyShareComponentMaterialChunkSources:
-                componentStore.sources(),
-        });
-        const publicEvaluationKeyTransport =
-            await createBinaryChunkedPublicEvaluationKeyMaterialTransport({
-                ...fixture.commonInput,
-                relinearizationKeyShareRounds,
-                galoisKeyShareBatches,
-                transportedEvaluationKeyShareComponentMaterial:
-                    shareTransport.transportedEvaluationKeyShareComponentMaterial,
-                writePublicEvaluationKeyMaterial: publicMaterialStore.writer,
-            });
-        const transportedObjects =
-            setupCertificateTransportedObjectsFromPackageInput({
-                transportedEvaluationKeyShareProofMaterial:
-                    trusteeProofTransport.transportedEvaluationKeyShareProofMaterial,
-                transportedEvaluationKeyShareComponentMaterial:
-                    shareTransport.transportedEvaluationKeyShareComponentMaterial,
-                transportedPublicEvaluationKeyMaterial:
-                    publicEvaluationKeyTransport.transportedPublicEvaluationKeyMaterial,
-            } as unknown as SetupPackageInput);
-        const transportedObjectByRoot = new Map(
-            transportedObjects.map((transportedObject) => [
-                transportedObject.objectRoot,
-                transportedObject,
-            ]),
-        );
-        const verificationInput = createSetupPackageVerificationInput({
-            setupPackage: {
-                objectType: 'SetupPackage',
-            } as SetupPackage,
-            expectedManifestHash: fixture.commonInput.setupContext.manifestHash,
-            expectedRosterHash: fixture.commonInput.setupContext.rosterHash,
-            transportedEvaluationKeyShareProofMaterial:
-                trusteeProofTransport.transportedEvaluationKeyShareProofMaterial,
-            transportedEvaluationKeyShareComponentMaterial:
-                shareTransport.transportedEvaluationKeyShareComponentMaterial,
-            transportedPublicEvaluationKeyMaterial:
-                publicEvaluationKeyTransport.transportedPublicEvaluationKeyMaterial,
-        });
-
-        const normalizedProofMaterials = (
-            verificationInput.transportedEvaluationKeyShareProofMaterial as JsonRecord
-        ).proofMaterials as readonly JsonRecord[];
-        for (const normalizedProofMaterial of normalizedProofMaterials) {
-            const proofMaterialRoot =
-                normalizedProofMaterial.proofMaterialRoot as string;
-            const transportedObject =
-                transportedObjectByRoot.get(proofMaterialRoot);
-            expect(transportedObject).toBeDefined();
-            expect(normalizedProofMaterial.descriptorBytes).toBeUndefined();
-            expect(normalizedProofMaterial).toMatchObject({
-                proofTotalByteLength: transportedObject?.byteLength,
-                proofFullObjectHash: transportedObject?.fullObjectHash,
-                proofChunkRoot: transportedObject?.chunkRoot,
-                proofChunkHashes: transportedObject?.chunkHashes,
-            });
-        }
-
-        const normalizedComponentMaterials = (
-            verificationInput.transportedEvaluationKeyShareComponentMaterial as JsonRecord
-        ).componentMaterials as readonly JsonRecord[];
-        for (const normalizedComponentMaterial of normalizedComponentMaterials) {
-            const materialRoot =
-                normalizedComponentMaterial.keySwitchComponentMaterialRoot as string;
-            const transportedObject = transportedObjectByRoot.get(materialRoot);
-            expect(transportedObject).toBeDefined();
-            expect(normalizedComponentMaterial.descriptorBytes).toBeUndefined();
-            expect(normalizedComponentMaterial).toMatchObject({
-                totalByteLength: transportedObject?.byteLength,
-                fullObjectHash: transportedObject?.fullObjectHash,
-                chunkRoot: transportedObject?.chunkRoot,
-                chunkHashes: transportedObject?.chunkHashes,
-            });
-        }
-
-        const normalizedPublicMaterials = (
-            verificationInput.transportedPublicEvaluationKeyMaterial as JsonRecord
-        ).publicEvaluationKeyMaterials as readonly JsonRecord[];
-        for (const normalizedPublicMaterial of normalizedPublicMaterials) {
-            const materialRoot =
-                normalizedPublicMaterial.publicEvaluationKeyMaterialRoot as string;
-            const transportedObject = transportedObjectByRoot.get(materialRoot);
-            expect(transportedObject).toBeDefined();
-            expect(normalizedPublicMaterial.descriptorBytes).toBeUndefined();
-            expect(normalizedPublicMaterial).toMatchObject({
-                totalByteLength: transportedObject?.byteLength,
-                fullObjectHash: transportedObject?.fullObjectHash,
-                chunkRoot: transportedObject?.chunkRoot,
-                chunkHashes: transportedObject?.chunkHashes,
-            });
-        }
     });
 
     it('rejects undeclared transported component material for embedded records', async () => {

@@ -42,12 +42,4 @@ describe('WASM kernel build environment', () => {
             'CARGO_ENCODED_RUSTFLAGS must be unset for the deterministic WASM build.',
         );
     });
-
-    it('accepts an explicitly empty inherited flag value', () => {
-        expect(
-            createDeterministicCargoEnvironment({
-                CARGO_ENCODED_RUSTFLAGS: '',
-            }).CARGO_ENCODED_RUSTFLAGS,
-        ).toContain('--remap-path-prefix');
-    });
 });

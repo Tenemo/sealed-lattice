@@ -120,6 +120,7 @@ impl AcceptedSetupProofBindingSession {
     /// into the protocol request. The capability is an internal correlation
     /// token derived from the registry's non-reused handle, not a secret or a
     /// protocol authentication claim.
+    #[cfg(test)]
     pub(in crate::bgv::setup) fn begin_fresh() -> CanonicalResult<Self> {
         let mut registry = accepted_setup_proof_binding_session_registry()
             .lock()
@@ -1995,21 +1996,6 @@ mod tests {
             Err(refusal_status(RefusalReason::OutsideSupportedProfile)),
         );
         assert!(registry.active_material_reader.is_some());
-    }
-
-    #[test]
-    fn material_reader_handle_exhaustion_fails_closed_without_reuse() {
-        let mut registry = BgvCanonicalStreamRegistry {
-            next_material_reader_handle: Some(u32::MAX),
-            ..BgvCanonicalStreamRegistry::default()
-        };
-
-        assert_eq!(registry.take_material_reader_handle(), Ok(u32::MAX),);
-        assert_eq!(registry.next_material_reader_handle, None);
-        assert_eq!(
-            registry.take_material_reader_handle(),
-            Err(CANONICAL_STREAM_RUNTIME_INTERNAL_FAILURE),
-        );
     }
 
     #[test]

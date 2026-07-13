@@ -3,8 +3,7 @@ use sha3::{
     Shake256,
     digest::{ExtendableOutput, Update, XofReader},
 };
-use std::{borrow::Cow, cmp::Ordering};
-use unicode_normalization::UnicodeNormalization;
+use std::cmp::Ordering;
 
 use crate::encoding::{
     CanonicalError, CanonicalErrorCode, CanonicalResult, append_bytes, append_varuint,
@@ -223,9 +222,8 @@ pub fn namespace_root(namespace: &str, canonical_bytes: &[u8]) -> String {
     hash512_hex(namespace, &[canonical_bytes])
 }
 
-// Orders strings by UTF-16 code-unit value to match the JavaScript reference's
-// key sort. This deliberately differs from Rust's native UTF-8 str ordering;
-// using str ordering would fork every canonical-JSON hash from the TS side.
+// Match the JavaScript reference's key ordering exactly. Canonical hash keys
+// are ASCII-only, but keeping the comparator explicit prevents runtime drift.
 fn compare_utf16(left: &str, right: &str) -> Ordering {
     let mut left_units = left.encode_utf16();
     let mut right_units = right.encode_utf16();
@@ -243,14 +241,15 @@ fn compare_utf16(left: &str, right: &str) -> Ordering {
     }
 }
 
-// Non-ASCII strings are NFC-normalized before hashing (ASCII is already NFC);
-// this keeps the canonical form stable across Unicode-equivalent encodings.
-fn normalize_json_string(value: &str) -> Cow<'_, str> {
-    if value.is_ascii() {
-        Cow::Borrowed(value)
-    } else {
-        Cow::Owned(value.nfc().collect())
+fn canonical_json_string(value: &str) -> CanonicalResult<&str> {
+    if !value.is_ascii() {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "canonical JSON hash strings must contain only ASCII characters; use the foundation display-text codec for Unicode",
+        ));
     }
+
+    Ok(value)
 }
 
 fn serialize_json_string(value: &str) -> CanonicalResult<String> {
@@ -425,7 +424,7 @@ fn canonical_json_len_omitting_field_paths<'value>(
         Value::Null => Ok(4),
         Value::Bool(boolean) => Ok(boolean.to_string().len()),
         Value::Number(number) => Ok(serialize_json_number(number)?.len()),
-        Value::String(string) => serialized_json_string_len(&normalize_json_string(string)),
+        Value::String(string) => serialized_json_string_len(canonical_json_string(string)?),
         Value::Array(items) => {
             let mut length = 2_usize;
             for (item_index, item) in items.iter().enumerate() {
@@ -457,21 +456,12 @@ fn canonical_json_len_omitting_field_paths<'value>(
                 }) {
                     continue;
                 }
-                let normalized_key = normalize_json_string(key).into_owned();
-                if entries
-                    .iter()
-                    .any(|existing_key| existing_key == &normalized_key)
-                {
-                    return Err(CanonicalError::new(
-                        CanonicalErrorCode::DuplicateField,
-                        "canonical JSON object keys collide after normalization",
-                    ));
-                }
-                entries.push(normalized_key.clone());
+                let canonical_key = canonical_json_string(key)?.to_owned();
+                entries.push(canonical_key.clone());
                 if entries.len() > 1 {
                     length = checked_len_add(length, 1)?;
                 }
-                length = checked_len_add(length, serialized_json_string_len(&normalized_key)?)?;
+                length = checked_len_add(length, serialized_json_string_len(&canonical_key)?)?;
                 length = checked_len_add(length, 1)?;
                 if omitted_field_paths.is_some() {
                     current_path.push(CanonicalJsonPathSegment::ObjectField(key));
@@ -507,7 +497,7 @@ fn write_canonical_json_omitting_field_paths<'value>(
         Value::Bool(boolean) => sink.write_str(&boolean.to_string()),
         Value::Number(number) => sink.write_str(&serialize_json_number(number)?),
         Value::String(string) => {
-            sink.write_str(&serialize_json_string(&normalize_json_string(string))?)
+            sink.write_str(&serialize_json_string(canonical_json_string(string)?)?)
         }
         Value::Array(items) => {
             sink.write_char('[')?;
@@ -539,28 +529,19 @@ fn write_canonical_json_omitting_field_paths<'value>(
                 }) {
                     continue;
                 }
-                let normalized_key = normalize_json_string(key).into_owned();
-                if entries
-                    .iter()
-                    .any(|(existing_key, _, _)| existing_key == &normalized_key)
-                {
-                    return Err(CanonicalError::new(
-                        CanonicalErrorCode::DuplicateField,
-                        "canonical JSON object keys collide after normalization",
-                    ));
-                }
-                entries.push((normalized_key, key, entry_value));
+                let canonical_key = canonical_json_string(key)?.to_owned();
+                entries.push((canonical_key, key, entry_value));
             }
             entries.sort_by(|left, right| compare_utf16(&left.0, &right.0));
 
             sink.write_char('{')?;
-            for (entry_index, (normalized_key, source_key, entry_value)) in
+            for (entry_index, (canonical_key, source_key, entry_value)) in
                 entries.iter().enumerate()
             {
                 if entry_index > 0 {
                     sink.write_char(',')?;
                 }
-                sink.write_str(&serialize_json_string(normalized_key)?)?;
+                sink.write_str(&serialize_json_string(canonical_key)?)?;
                 sink.write_char(':')?;
                 if omitted_field_paths.is_some() {
                     current_path.push(CanonicalJsonPathSegment::ObjectField(source_key));
@@ -737,53 +718,27 @@ mod tests {
     }
 
     #[test]
-    fn canonical_json_matches_the_typescript_reference_shape() {
-        let canonical = canonical_json(&serde_json::json!({
-            "b": [2, 1],
-            "a": {
-                "z": true
-            }
-        }))
-        .expect("canonical JSON should serialize supported values");
-
-        assert_eq!(canonical, "{\"a\":{\"z\":true},\"b\":[2,1]}");
-        assert!(canonical_json(&serde_json::json!({ "fraction": 1.5 })).is_err());
-    }
-
-    #[test]
     fn canonical_object_hash_matches_typescript_known_answers() {
         let cases = [
             (
                 serde_json::json!({
                     "objectType": "CanonicalHashParityCase",
-                    "objectVersion": 1,
                     "b": [2, 1],
                     "a": {
                         "z": true
                     }
                 }),
-                "{\"a\":{\"z\":true},\"b\":[2,1],\"objectType\":\"CanonicalHashParityCase\",\"objectVersion\":1}",
-                "4f432053917977cd39c0586aebfee7c89dbc800f302f058cdc5dd819b8bc0c6e48f9c193ba17661e52b4d305f1d293b51300405be27e2d734997ebb9b55405cb",
+                "{\"a\":{\"z\":true},\"b\":[2,1],\"objectType\":\"CanonicalHashParityCase\"}",
+                "40bf0c90300eb006c7651ea9d876005bacf7766c149aca024fb07d7743a35c47d78c86729ead75e4ba017e54b5122857ad05e1956f7af59b9e0ba64a74aead93",
             ),
             (
                 serde_json::json!({
                     "objectType": "CanonicalHashParityCase",
-                    "objectVersion": 1,
                     "10": "a",
                     "2": "b"
                 }),
-                "{\"10\":\"a\",\"2\":\"b\",\"objectType\":\"CanonicalHashParityCase\",\"objectVersion\":1}",
-                "00afc8c82b82ab6d37ed1b43b310e075d5e496c597d848a308ef2a7c9f84f3368f95d5a52e364f8892f8b6748a39ff5a5ae1664e5c2a588b83607641011f8b96",
-            ),
-            (
-                serde_json::json!({
-                    "objectType": "CanonicalHashParityCase",
-                    "objectVersion": 1,
-                    "value": "\u{0065}\u{0301}",
-                    "supplementary": "\u{10000}"
-                }),
-                "{\"objectType\":\"CanonicalHashParityCase\",\"objectVersion\":1,\"supplementary\":\"\u{10000}\",\"value\":\"\u{00e9}\"}",
-                "46ffacae8edfc56256c3bcd77395c4dabba324579b67623658f1c6a7b5e1bdf0f6ebdcfb2e6901442c2f4275ca7513e3807ca20ae8f23577fc113dd179dd8b3c",
+                "{\"10\":\"a\",\"2\":\"b\",\"objectType\":\"CanonicalHashParityCase\"}",
+                "d78c2fa846f253977f207061878268b1d3440e84f1237c81cedac4ec4077ee838f0baeb8f4daf08996e0416379d49c4f9070645a11ebff2612ffe52aef9d7813",
             ),
         ];
 
@@ -797,6 +752,21 @@ mod tests {
                     .expect("canonical object hash should compute"),
                 expected_hash
             );
+        }
+        assert!(canonical_json(&serde_json::json!({ "fraction": 1.5 })).is_err());
+    }
+
+    #[test]
+    fn canonical_object_hash_rejects_non_ascii_keys_and_values() {
+        for value in [
+            serde_json::json!({ "objectType": "CanonicalHashParityCase", "value": "\u{00e9}" }),
+            serde_json::json!({ "objectType": "CanonicalHashParityCase", "\u{0065}\u{0301}": 1 }),
+            serde_json::json!({ "objectType": "CanonicalHashParityCase", "value": "\u{10000}" }),
+        ] {
+            let error = super::derive_canonical_object_hash(&value)
+                .expect_err("non-ASCII canonical JSON must be rejected");
+            assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
+            assert!(error.message.contains("only ASCII characters"));
         }
     }
 
@@ -842,8 +812,8 @@ mod tests {
 
     #[test]
     fn canonical_object_hash_separates_by_object_type_and_requires_it() {
-        let alpha = serde_json::json!({ "objectType": "Alpha", "objectVersion": 1, "value": 7 });
-        let beta = serde_json::json!({ "objectType": "Beta", "objectVersion": 1, "value": 7 });
+        let alpha = serde_json::json!({ "objectType": "Alpha", "value": 7 });
+        let beta = serde_json::json!({ "objectType": "Beta", "value": 7 });
         let alpha_hash = super::derive_canonical_object_hash(&alpha).expect("alpha should hash");
         let beta_hash = super::derive_canonical_object_hash(&beta).expect("beta should hash");
 

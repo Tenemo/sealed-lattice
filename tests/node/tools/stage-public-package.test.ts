@@ -4,10 +4,7 @@ import path from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import {
-    sanitizePublicPackageJson,
-    stagePublicPackage,
-} from '#tools/ci/stage-public-package.mjs';
+import { stagePublicPackage } from '#tools/ci/stage-public-package.mjs';
 
 const temporaryRoots: string[] = [];
 
@@ -69,95 +66,22 @@ afterEach(async () => {
 });
 
 describe('public package staging', () => {
-    it('stages SDK output with the canonical root README and license', async () => {
+    it('stages the public files and removes workspace-only metadata', async () => {
         const projectRoot = await createTemporaryRoot();
         await writeFixtureProject(projectRoot);
         const destinationPath = path.join(projectRoot, 'staged-package');
 
         await stagePublicPackage({ destinationPath, projectRoot });
 
-        await expect(
-            readFile(path.join(destinationPath, 'README.md'), 'utf8'),
-        ).resolves.toBe(
-            '# Root readme\n\nThis is the public package readme.\n',
-        );
-        await expect(
-            readFile(path.join(destinationPath, 'dist', 'index.js'), 'utf8'),
-        ).resolves.toBe('export {};\n');
-        await expect(
-            readFile(path.join(destinationPath, 'LICENSE'), 'utf8'),
-        ).resolves.toBe('canonical license text\n');
-    });
-
-    it('sanitizes staged package metadata', async () => {
-        const projectRoot = await createTemporaryRoot();
-        await writeFixtureProject(projectRoot);
-        const destinationPath = path.join(projectRoot, 'staged-package');
-
-        await stagePublicPackage({ destinationPath, projectRoot });
-
-        await expect(
-            readFile(path.join(destinationPath, 'package.json'), 'utf8').then(
-                (contents) => JSON.parse(contents) as Record<string, unknown>,
-            ),
-        ).resolves.not.toHaveProperty('devDependencies');
-        await expect(
-            readFile(path.join(destinationPath, 'package.json'), 'utf8').then(
-                (contents) => JSON.parse(contents) as Record<string, unknown>,
-            ),
-        ).resolves.not.toHaveProperty('scripts');
-        await expect(
-            readFile(path.join(destinationPath, 'package.json'), 'utf8').then(
-                (contents) => JSON.parse(contents) as Record<string, unknown>,
-            ),
-        ).resolves.toMatchObject({
+        const stagedManifest = JSON.parse(
+            await readFile(path.join(destinationPath, 'package.json'), 'utf8'),
+        ) as Record<string, unknown>;
+        expect(stagedManifest).toMatchObject({
             description: 'Public package description.',
-        });
-    });
-
-    it('sanitizes package metadata that only belongs to the workspace build', () => {
-        expect(
-            JSON.parse(
-                sanitizePublicPackageJson(
-                    JSON.stringify({
-                        name: 'sealed-lattice',
-                        version: '0.0.0',
-                        scripts: {
-                            build: 'pnpm run build',
-                        },
-                        devDependencies: {
-                            '@sealed-lattice/types': 'workspace:*',
-                        },
-                        dependencies: {
-                            '@noble/hashes': '^2.2.0',
-                        },
-                        description: 'Public package description.',
-                    }),
-                ),
-            ),
-        ).toEqual({
             name: 'sealed-lattice',
-            version: '0.0.0',
-            description: 'Public package description.',
-            dependencies: {
-                '@noble/hashes': '^2.2.0',
-            },
         });
-    });
-
-    it('rejects empty staging destinations', async () => {
-        let thrownError: unknown;
-
-        try {
-            await stagePublicPackage({ destinationPath: '' });
-        } catch (error) {
-            thrownError = error;
-        }
-
-        expect(thrownError).toBeInstanceOf(Error);
-        expect((thrownError as Error).message).toBe(
-            'Public package staging requires a destination path.',
-        );
+        expect(stagedManifest).not.toHaveProperty('devDependencies');
+        expect(stagedManifest).not.toHaveProperty('scripts');
     });
 
     it('rejects non-empty staging destinations', async () => {

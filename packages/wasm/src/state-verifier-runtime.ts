@@ -109,10 +109,20 @@ export const stateCapabilityKinds = Object.freeze({
     ballotCandidateList: 1,
     finalitySignature: 2,
     targetRelease: 3,
+    setupActionRandomnessRoot: 4,
+    setupPublicSeedBranch: 5,
+    setupDealerSetBranch: 6,
+    setupRkgRoundOneBranch: 7,
+    setupTerminalPackage: 8,
 } as const);
 
 export type StateCapabilityKind =
     (typeof stateCapabilityKinds)[keyof typeof stateCapabilityKinds];
+
+type StateOutputCapabilityKind =
+    | typeof stateCapabilityKinds.ballotCandidateList
+    | typeof stateCapabilityKinds.finalitySignature
+    | typeof stateCapabilityKinds.targetRelease;
 
 declare const verifiedStateReservationBrand: unique symbol;
 declare const verifiedStateOutputBrand: unique symbol;
@@ -256,6 +266,18 @@ const isUint8Array = (value: unknown): value is Uint8Array =>
     Object.prototype.toString.call(value) === '[object Uint8Array]';
 
 const isStateCapabilityKind = (value: unknown): value is StateCapabilityKind =>
+    value === stateCapabilityKinds.ballotCandidateList ||
+    value === stateCapabilityKinds.finalitySignature ||
+    value === stateCapabilityKinds.targetRelease ||
+    value === stateCapabilityKinds.setupActionRandomnessRoot ||
+    value === stateCapabilityKinds.setupPublicSeedBranch ||
+    value === stateCapabilityKinds.setupDealerSetBranch ||
+    value === stateCapabilityKinds.setupRkgRoundOneBranch ||
+    value === stateCapabilityKinds.setupTerminalPackage;
+
+const isStateOutputCapabilityKind = (
+    value: StateCapabilityKind,
+): value is StateOutputCapabilityKind =>
     value === stateCapabilityKinds.ballotCandidateList ||
     value === stateCapabilityKinds.finalitySignature ||
     value === stateCapabilityKinds.targetRelease;
@@ -474,7 +496,7 @@ const resolveVerifiedObject = (
 };
 
 const stateExactOutputDomain = (
-    capabilityKind: StateCapabilityKind,
+    capabilityKind: StateOutputCapabilityKind,
 ): CanonicalStreamDomain => {
     switch (capabilityKind) {
         case stateCapabilityKinds.ballotCandidateList:
@@ -700,6 +722,10 @@ class StateVerifierSessionImplementation implements StateVerifierSession {
         if ('refusalReason' in resolvedReservation) {
             return refused(resolvedReservation.refusalReason);
         }
+        const capabilityKind = resolvedReservation.record.capabilityKind;
+        if (!isStateOutputCapabilityKind(capabilityKind)) {
+            return refused('wrongTypeOrLength');
+        }
         for (const bytes of [
             input.canonicalOutputIntentCarrier,
             input.canonicalStateCertificate,
@@ -731,9 +757,7 @@ class StateVerifierSessionImplementation implements StateVerifierSession {
                 },
                 descriptorBytes: input.exactOutputDescriptorBytes,
                 kernel: this.#kernel,
-                streamDomain: stateExactOutputDomain(
-                    resolvedReservation.record.capabilityKind,
-                ),
+                streamDomain: stateExactOutputDomain(capabilityKind),
             });
             outputLease = new StateOutputVerificationLeaseImplementation(
                 streamLease,

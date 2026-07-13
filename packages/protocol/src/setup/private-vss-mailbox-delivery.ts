@@ -12,7 +12,6 @@ import {
 import {
     canonicalGeneratedSetupProofMaterialDescriptor,
     setupProofMaterialReferenceSetForVerificationInput,
-    setupProofMaterialRecordTransportFields,
     setupTransportedProofMaterialFields,
     type CanonicalGeneratedSetupProofMaterial,
 } from './setup-proof-material-transport.js';
@@ -241,11 +240,9 @@ export type TransportedPrivateVssShareProofMaterialSet = Readonly<
     }
 >;
 
-const privateEnvelopeDeliveryContentType = 'private-vss-share-envelope';
 const privateEnvelopeObjectType = 'PrivateVssShareEnvelope';
 const privateEnvelopeAadObjectType = 'PrivateVssEnvelopeAad';
 const privateVssShareProofFamily = 'vss-opening-carry';
-const transportedSetupProofMaterialEncoding = 'binary-chunked-proof-bytes';
 const validatePositiveSafeInteger = (
     value: number,
     fieldName: string,
@@ -491,7 +488,6 @@ const privateEnvelopeAad = (
 ): JsonRecord => ({
     objectType: privateEnvelopeAadObjectType,
     privateEnvelopeObjectType,
-    ciphertextContentType: privateEnvelopeDeliveryContentType,
     ceremonyId: input.setupContext.ceremonyId,
     manifestHash: input.setupContext.manifestHash,
     rosterHash: input.setupContext.rosterHash,
@@ -522,13 +518,6 @@ const transportPrivateVssShareProofMaterial = (
         proofRecord.proofBytesHash,
         'privateVssShareProof.proofBytesHash',
     );
-    if (
-        proofRecord.proofBytesEncoding !== transportedSetupProofMaterialEncoding
-    ) {
-        throw new Error(
-            'privateVssShareProof.proofBytesEncoding must be binary-chunked-proof-bytes.',
-        );
-    }
     const statementHash = assertProtocolHash(
         proofRecord.statementHash,
         'privateVssShareProof.statementHash',
@@ -537,7 +526,6 @@ const transportPrivateVssShareProofMaterial = (
         value: {
             objectType: 'PrivateVssShareTransportedSuccinctProofMaterial',
             proofFamily: privateVssShareProofFamily,
-            proofBytesEncoding: transportedSetupProofMaterialEncoding,
             statementHash,
             proofBytesHash,
         },
@@ -553,10 +541,7 @@ const transportPrivateVssShareProofMaterial = (
     }
     const transportedProofRecord = {
         ...proofRecord,
-        ...setupProofMaterialRecordTransportFields(
-            proofMaterialRoot,
-            transportedSetupProofMaterialEncoding,
-        ),
+        ...setupTransportedProofMaterialFields(proofMaterialRoot),
     };
 
     return {
@@ -908,7 +893,7 @@ export const createPrivateVssMailboxSourceTrusteeDeliveryReferences = async (
     return envelopeReferences;
 };
 
-export const createPrivateVssMailboxDeliverySetFromReferences = (
+const createPrivateVssMailboxDeliverySetFromReferences = (
     input: PrivateVssMailboxDeliverySetFromReferencesInput,
 ): PrivateVssMailboxDeliverySet => {
     validatePositiveSafeInteger(input.participantCount, 'participantCount');

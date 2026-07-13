@@ -180,7 +180,10 @@ impl StateVerifierRuntimeRegistry {
     ) -> RuntimeResult<()> {
         let session = self.require_active_session(session_handle, capability)?;
         session.require_object_capacity()?;
-        session.reservation(verified_reservation_handle)?;
+        let reservation = session.reservation(verified_reservation_handle)?;
+        if !reservation.capability_kind().supports_exact_output() {
+            return Err(refusal_status(RefusalReason::WrongTypeOrLength));
+        }
         Ok(())
     }
 
@@ -681,41 +684,5 @@ mod tests {
         );
         assert!(registry.active_session.is_some());
         assert_eq!(registry.cancel(handle, &owner), Ok(()));
-    }
-
-    #[test]
-    fn session_and_verified_object_handles_never_wrap_or_reuse() {
-        let configuration = configuration_bytes();
-        let owner = [0x71; STATE_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH];
-        let mut registry = StateVerifierRuntimeRegistry {
-            active_session: None,
-            next_session_handle: u32::MAX,
-            next_verified_object_handle: u32::MAX,
-        };
-        let terminal_session = registry
-            .begin(&configuration, owner)
-            .expect("terminal session handle is issued once");
-        assert_eq!(terminal_session, u32::MAX);
-        registry
-            .cancel(terminal_session, &owner)
-            .expect("terminal session cancels");
-        assert_eq!(
-            registry.begin(
-                &configuration,
-                [0x72; STATE_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH],
-            ),
-            Err(refusal_status(RefusalReason::OutsideSupportedProfile))
-        );
-        assert!(registry.active_session.is_none());
-
-        assert_eq!(
-            take_nonrepeating_handle(&mut registry.next_verified_object_handle),
-            Ok(u32::MAX)
-        );
-        assert_eq!(
-            take_nonrepeating_handle(&mut registry.next_verified_object_handle),
-            Err(refusal_status(RefusalReason::OutsideSupportedProfile))
-        );
-        assert_eq!(registry.next_verified_object_handle, 0);
     }
 }

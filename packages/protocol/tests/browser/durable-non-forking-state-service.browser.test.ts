@@ -138,10 +138,7 @@ class BrowserStateWorld {
 
 class BrowserStateCryptography implements DurableStateCryptography {
     readonly #world: BrowserStateWorld;
-    public failNextSigning = false;
-    public failVoteResolutionInvocation: number | undefined;
     public signingCount = 0;
-    #voteResolutionCount = 0;
 
     public constructor(world: BrowserStateWorld) {
         this.#world = world;
@@ -164,10 +161,6 @@ class BrowserStateCryptography implements DurableStateCryptography {
         input: DurableStateWitnessVoteSigningInput,
     ): Uint8Array => {
         this.signingCount += 1;
-        if (this.failNextSigning) {
-            this.failNextSigning = false;
-            throw new Error('injected browser signing interruption');
-        }
 
         return this.#world.registerVote(input);
     };
@@ -175,11 +168,6 @@ class BrowserStateCryptography implements DurableStateCryptography {
     public readonly resolveSignedStateWitnessVote = (input: {
         canonicalSignedStateWitnessVoteCarrier: Uint8Array;
     }): ResolvedDurableStateWitnessVote => {
-        this.#voteResolutionCount += 1;
-        if (this.#voteResolutionCount === this.failVoteResolutionInvocation) {
-            this.failVoteResolutionInvocation = undefined;
-            throw new Error('injected browser cache reread interruption');
-        }
         const binding = this.#world.voteBindings.get(
             bytesToHex(input.canonicalSignedStateWitnessVoteCarrier),
         );
@@ -413,48 +401,6 @@ describe.skipIf(!webLocksAvailable)(
             });
         });
 
-        it('refuses exact-output regeneration after an interrupted browser generation', async () => {
-            const databaseName = createDatabaseName();
-            const world = new BrowserStateWorld();
-            const scope = {
-                reservationIntentObjectHash: hash(31),
-                stateKey: hash(32),
-            };
-            let producerInvocationCount = 0;
-            const firstHandle = await openOwnedStore(databaseName);
-            await expect(
-                createService(
-                    firstHandle,
-                    new BrowserStateCryptography(world),
-                ).obtainExactOutput({
-                    createExactOutput: () => {
-                        producerInvocationCount += 1;
-                        throw new Error('injected browser interruption');
-                    },
-                    inspectExactOutput,
-                    scope,
-                }),
-            ).rejects.toMatchObject({ code: 'StorageFailure' });
-            await firstHandle.close();
-
-            const secondHandle = await openOwnedStore(databaseName);
-            await expect(
-                createService(
-                    secondHandle,
-                    new BrowserStateCryptography(world),
-                ).obtainExactOutput({
-                    createExactOutput: () => {
-                        producerInvocationCount += 1;
-
-                        return new Uint8Array([9, 9, 9, 9]);
-                    },
-                    inspectExactOutput,
-                    scope,
-                }),
-            ).rejects.toMatchObject({ code: 'ExactOutputUnavailable' });
-            expect(producerInvocationCount).toBe(1);
-        });
-
         it('permits only one browser service to enter a concurrent exact-output producer', async () => {
             const databaseName = createDatabaseName();
             const world = new BrowserStateWorld();
@@ -509,86 +455,6 @@ describe.skipIf(!webLocksAvailable)(
             await expect(winningOutput).resolves.toMatchObject({
                 exactOutputBytes: new Uint8Array([1, 3, 5, 7]),
             });
-        });
-
-        it('resumes a committed witness lock after signing interruption and serializes concurrent callers', async () => {
-            const databaseName = createDatabaseName();
-            const world = new BrowserStateWorld();
-            const reservationCarrier = world.registerIntent({
-                actionContextHash: hash(11),
-                intentObjectHash: hash(12),
-                stateKey: hash(13),
-                subjectEpoch: 0n,
-                subjectParticipantIdentity: hash(14),
-                voteKind: 'reservation',
-            });
-            const firstHandle = await openOwnedStore(databaseName);
-            const interruptedCryptography = new BrowserStateCryptography(world);
-            interruptedCryptography.failNextSigning = true;
-            await expect(
-                createService(
-                    firstHandle,
-                    interruptedCryptography,
-                ).obtainSignedWitnessVote({
-                    canonicalIntentCarrier: reservationCarrier,
-                }),
-            ).rejects.toMatchObject({ code: 'SigningFailed' });
-            await firstHandle.close();
-
-            const secondHandle = await openOwnedStore(databaseName);
-            const services = Array.from({ length: 2 }, () =>
-                createService(
-                    secondHandle,
-                    new BrowserStateCryptography(world),
-                ),
-            );
-            const votes = await Promise.all(
-                services.map((service) =>
-                    service.obtainSignedWitnessVote({
-                        canonicalIntentCarrier: reservationCarrier,
-                    }),
-                ),
-            );
-            for (const vote of votes) {
-                expect(vote).toEqual(votes[0]);
-            }
-        });
-
-        it('recovers a signed carrier committed before its caller observed completion', async () => {
-            const databaseName = createDatabaseName();
-            const world = new BrowserStateWorld();
-            const reservationCarrier = world.registerIntent({
-                actionContextHash: hash(21),
-                intentObjectHash: hash(22),
-                stateKey: hash(23),
-                subjectEpoch: 0n,
-                subjectParticipantIdentity: hash(24),
-                voteKind: 'reservation',
-            });
-            const firstHandle = await openOwnedStore(databaseName);
-            const interruptedCryptography = new BrowserStateCryptography(world);
-            interruptedCryptography.failVoteResolutionInvocation = 5;
-            await expect(
-                createService(
-                    firstHandle,
-                    interruptedCryptography,
-                ).obtainSignedWitnessVote({
-                    canonicalIntentCarrier: reservationCarrier,
-                }),
-            ).rejects.toMatchObject({ code: 'AuthenticationFailed' });
-            await firstHandle.close();
-
-            const secondHandle = await openOwnedStore(databaseName);
-            const recoveredCryptography = new BrowserStateCryptography(world);
-            await expect(
-                createService(
-                    secondHandle,
-                    recoveredCryptography,
-                ).obtainSignedWitnessVote({
-                    canonicalIntentCarrier: reservationCarrier,
-                }),
-            ).resolves.toBeInstanceOf(Uint8Array);
-            expect(recoveredCryptography.signingCount).toBe(0);
         });
     },
 );

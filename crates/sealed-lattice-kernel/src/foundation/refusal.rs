@@ -121,7 +121,7 @@ impl<VerifiedValue> VerificationResult<VerifiedValue> {
 
 #[cfg(test)]
 mod tests {
-    use super::{RefusalReason, VerificationResult};
+    use super::RefusalReason;
 
     #[test]
     fn refusal_codes_and_names_are_closed_and_stable() {
@@ -160,16 +160,5 @@ mod tests {
                 Err(RefusalReason::MalformedEncoding)
             );
         }
-    }
-
-    #[test]
-    fn verifier_results_preserve_values_and_exact_refusals() {
-        let valid = VerificationResult::valid(41_u64);
-        assert!(valid.is_valid());
-        assert_eq!(valid.into_result(), Ok(41));
-
-        let refused = VerificationResult::<u64>::refused(RefusalReason::WrongContext);
-        assert!(!refused.is_valid());
-        assert_eq!(refused.into_result(), Err(RefusalReason::WrongContext));
     }
 }

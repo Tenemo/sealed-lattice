@@ -47,8 +47,6 @@ mod prover;
 mod relation;
 mod verifier;
 
-#[cfg(test)]
-pub(crate) use commands::describe_target_decryption_share_proof_layout_from_request;
 pub(crate) use commands::describe_trustee_evaluation_key_statement_from_request;
 pub(crate) use commands::generate_target_decryption_share_proof_bytes_from_request;
 pub(crate) use commands::generate_trustee_evaluation_key_proof_from_request;

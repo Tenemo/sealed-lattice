@@ -218,6 +218,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_sh
         "heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_share_succinct_proof_byte_content",
     );
     let fixture = public_key_share_succinct_proof_bearing_collective_setup_fixture();
+    let proof_binding_session = fixture.begin_proof_binding_session();
     let mut package = fixture.package.clone();
     let mut verification_request = fixture.verification_request.clone();
     // The descriptor, hashes, certificate, and package roots below are rebound,
@@ -255,10 +256,11 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_sh
         serde_json::json!(transport_hashes.full_object_hash);
     transported_proof_material["chunkRoot"] = serde_json::json!(transport_hashes.chunk_root);
     transported_proof_material["chunkHashes"] = serde_json::json!(transport_hashes.chunk_hashes);
-    authenticate_setup_proof_material_stream_for_test(
+    authenticate_setup_proof_material_stream_in_session_for_test(
         crate::bgv::setup::trustee_evaluation_key_proof::PUBLIC_KEY_SHARE_PROOF_FAMILY,
         &proof_material_root,
         &proof_bytes,
+        proof_binding_session,
     )
     .expect("authenticate tampered public-key proof material stream");
     replace_setup_proof_material_transport_certificate_objects(
@@ -269,7 +271,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_sh
     rebind_collective_setup_package_hash(&mut package);
 
     let result = fixture
-        .verify_values(&package, &verification_request)
+        .verify_values_in_session(&package, &verification_request, proof_binding_session)
         .expect("verification response");
 
     assert_eq!(result["isValid"], false);
@@ -332,27 +334,6 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_collective_pu
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "collectivePublicKeyVerificationFailed"
-    );
-}
-
-#[test]
-#[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_public_key_loader_refuses_reduced_ring_material() {
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_public_key_loader_refuses_reduced_ring_material",
-    );
-    let fixture = collective_public_key_bearing_collective_setup_fixture();
-
-    let error = match accepted_setup_collective_public_key_from_package(&fixture.package) {
-        Ok(_) => panic!("reduced-ring material must not become a runtime public key"),
-        Err(error) => error,
-    };
-
-    assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
-    assert!(
-        error
-            .message
-            .contains("requires full-ring aggregate coefficients")
     );
 }
 

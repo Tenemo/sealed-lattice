@@ -214,7 +214,6 @@ export type SetupPackagePublicKeyShareMaterialSet =
     | BinaryChunkedPublicKeyShareMaterialSet;
 
 export type PublicKeyShareSuccinctProofByteMaterial = Readonly<{
-    readonly proofBytesEncoding: 'binary-chunked-proof-bytes';
     readonly proofMaterialRoot: ProtocolHash;
 }>;
 
@@ -286,7 +285,6 @@ export type CollectivePublicKey = Readonly<
     JsonRecord & {
         readonly objectType: 'CollectivePublicKey';
         readonly proofFamily: typeof publicKeyShareProofFamily;
-        readonly materialEncoding: 'embedded-full-collective-public-key-coefficients';
         readonly participantCount: number;
         readonly rnsLimbCount: number;
         readonly ringDegree: number;

@@ -1,7 +1,9 @@
 const textEncoder = new TextEncoder();
 const fatalTextDecoder = new TextDecoder('utf-8', { fatal: true });
 const maximumLogicalRecordKeyByteLength = 1024;
-const identifierPattern = /^[A-Za-z0-9_-]{16,128}$/u;
+const identifierByteLength = 32;
+const encodedIdentifierCharacterLength = identifierByteLength * 2;
+const identifierPattern = /^[0-9a-f]{64}$/u;
 const namespacePattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 
 export type UntrustedStorageTransactionErrorCode =
@@ -236,7 +238,7 @@ const createWebCryptoIdentifier: IdentifierFactory = () => {
             'Web Crypto getRandomValues is required for storage identifiers.',
         );
     }
-    const identifierBytes = new Uint8Array(16);
+    const identifierBytes = new Uint8Array(identifierByteLength);
     cryptoProvider.getRandomValues(identifierBytes);
 
     return bytesToHex(identifierBytes);
@@ -288,10 +290,10 @@ const assertLimits = (limits: UntrustedStorageTransactionLimits): void => {
 };
 
 const assertIdentifier = (identifier: string, kind: IdentifierKind): void => {
-    if (!identifierPattern.test(identifier)) {
+    if (typeof identifier !== 'string' || !identifierPattern.test(identifier)) {
         throw new UntrustedStorageTransactionError(
             'AdapterFailure',
-            `${kind} identifier must contain 16 through 128 safe ASCII characters.`,
+            `${kind} identifier must be the canonical lowercase hexadecimal encoding of exactly ${identifierByteLength} bytes.`,
         );
     }
 };
@@ -321,6 +323,11 @@ export class UntrustedStorageTransactionStore {
     readonly #maximumIndexValueByteLength: number;
     readonly #objectPrefix: string;
     readonly #transactions = new Map<string, TransactionRecord>();
+    readonly #issuedIdentifiers: Readonly<Record<IdentifierKind, Set<string>>> =
+        {
+            lease: new Set<string>(),
+            transaction: new Set<string>(),
+        };
     #exclusiveOperationTail: Promise<void> = Promise.resolve();
 
     public constructor(configuration: StoreConfiguration) {
@@ -345,7 +352,10 @@ export class UntrustedStorageTransactionStore {
         this.#indexPrefix = `${this.#rootPrefix}indices/`;
         this.#objectPrefix = `${this.#rootPrefix}objects/`;
         this.#maximumIndexValueByteLength =
-            textEncoder.encode(this.#objectPrefix).byteLength + 128 + 1 + 128;
+            textEncoder.encode(this.#objectPrefix).byteLength +
+            encodedIdentifierCharacterLength +
+            1 +
+            encodedIdentifierCharacterLength;
     }
 
     public async recover(): Promise<UntrustedStorageRecoveryReport> {
@@ -473,14 +483,7 @@ export class UntrustedStorageTransactionStore {
                     'active transaction count exceeds the configured limit.',
                 );
             }
-            const identifier = this.#createIdentifier('transaction');
-            assertIdentifier(identifier, 'transaction');
-            if (this.#transactions.has(identifier)) {
-                throw new UntrustedStorageTransactionError(
-                    'AdapterFailure',
-                    'transaction identifier was reused.',
-                );
-            }
+            const identifier = this.#issueIdentifier('transaction');
             const objectKeysForIdentifier = await this.#listedKeys(
                 `${this.#objectPrefix}${identifier}/`,
             );
@@ -680,21 +683,8 @@ export class UntrustedStorageTransactionStore {
                 'logical record changed after the caller inspected it.',
             );
         }
-        const leaseIdentifier = this.#createIdentifier('lease');
-        assertIdentifier(leaseIdentifier, 'lease');
+        const leaseIdentifier = this.#issueIdentifier('lease');
         const objectKey = `${this.#objectPrefix}${transaction.identifier}/${leaseIdentifier}`;
-        if (
-            [...transaction.changes.values()].some(
-                (change) =>
-                    change.kind === 'write' &&
-                    change.lease.objectKey === objectKey,
-            )
-        ) {
-            throw new UntrustedStorageTransactionError(
-                'AdapterFailure',
-                'lease identifier was reused within the transaction.',
-            );
-        }
         if ((await this.#readOwnedObjectValue(objectKey)) !== undefined) {
             throw new UntrustedStorageTransactionError(
                 'AdapterFailure',
@@ -1158,6 +1148,33 @@ export class UntrustedStorageTransactionStore {
         }
 
         return now;
+    }
+
+    #issueIdentifier(kind: IdentifierKind): string {
+        let identifier: string;
+        try {
+            identifier = this.#createIdentifier(kind);
+        } catch (error) {
+            if (error instanceof UntrustedStorageTransactionError) {
+                throw error;
+            }
+            throw new UntrustedStorageTransactionError(
+                'AdapterFailure',
+                `${kind} identifier generation failed.`,
+                error,
+            );
+        }
+        assertIdentifier(identifier, kind);
+        const issuedIdentifiers = this.#issuedIdentifiers[kind];
+        if (issuedIdentifiers.has(identifier)) {
+            throw new UntrustedStorageTransactionError(
+                'AdapterFailure',
+                `${kind} identifier was reused during this store's lifetime.`,
+            );
+        }
+        issuedIdentifiers.add(identifier);
+
+        return identifier;
     }
 
     async #authenticate(

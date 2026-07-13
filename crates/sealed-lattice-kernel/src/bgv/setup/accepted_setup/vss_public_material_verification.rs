@@ -233,14 +233,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn optional_vss_public_material_is_absent_by_default() -> CanonicalResult<()> {
-        let response = verify_optional_vss_public_material(&json!({}), &json!({}), None)?;
-
-        assert!(matches!(response, VssPublicMaterialVerification::Absent));
-        Ok(())
-    }
-
-    #[test]
     fn optional_vss_public_material_requires_complete_field_group() -> CanonicalResult<()> {
         let VssPublicMaterialVerification::Refused(response) = verify_optional_vss_public_material(
             &json!({

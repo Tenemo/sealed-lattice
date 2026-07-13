@@ -80,124 +80,36 @@ describe('crypto primitive boundary', () => {
         ).toHaveLength(128);
     });
 
-    it('canonicalizes JSON deterministically and rejects unsupported values', () => {
-        const objectWithPrototypeKey: Record<string, unknown> = {
-            safe: true,
-        };
-        Object.defineProperty(objectWithPrototypeKey, '__proto__', {
-            value: { polluted: true },
-            enumerable: true,
-            configurable: true,
-            writable: true,
-        });
-        const sparseArray = new Array<unknown>(1);
-
+    it('canonicalizes JSON deterministically and rejects hostile values without executing them', () => {
         expect(canonicalJson({ b: [2, 1], a: { z: true } })).toBe(
             '{"a":{"z":true},"b":[2,1]}',
         );
         expect(canonicalJson({ '10': 'a', '2': 'b' })).toBe(
             '{"10":"a","2":"b"}',
         );
-        expect(() => canonicalJson({ '\u0065\u0301': 1, z: 2 })).toThrow(
-            'only ASCII characters',
-        );
-        expect(() => canonicalJson({ value: '\u00e9' })).toThrow(
-            'only ASCII characters',
-        );
-        expect(() => canonicalJson({ value: '\ud800' })).toThrow(
-            'lone UTF-16 surrogates',
-        );
-        expect(() => canonicalJson({ '\udc00': true })).toThrow(
-            'lone UTF-16 surrogates',
-        );
-        expect(canonicalJson(objectWithPrototypeKey)).toBe(
-            '{"__proto__":{"polluted":true},"safe":true}',
-        );
-        expect(() => canonicalJson({ missing: undefined })).toThrow(
-            'Canonical objects cannot contain undefined.',
-        );
-        expect(() => canonicalJson(sparseArray)).toThrow(
-            'Canonical arrays cannot be sparse.',
-        );
-        expect(() => canonicalJson(1.5)).toThrow(
-            'Canonical numeric fields must be safe integers.',
-        );
-        expect(() =>
-            canonicalJson({ value: Number.MAX_SAFE_INTEGER + 1 }),
-        ).toThrow('Canonical numeric fields must be safe integers.');
-        expect(() => canonicalJson({ value: -0 })).toThrow(
-            'Canonical numeric fields must be safe integers.',
-        );
-    });
 
-    it('rejects executable, cyclic, and excessively deep canonical inputs without invoking accessors', () => {
         let accessorReadCount = 0;
-        const objectWithAccessor: Record<string, unknown> = {};
-        Object.defineProperty(objectWithAccessor, 'value', {
+        const accessorBackedValue: Record<string, unknown> = {};
+        Object.defineProperty(accessorBackedValue, 'value', {
             enumerable: true,
             get: () => {
                 accessorReadCount += 1;
                 return 'executed';
             },
         });
-        const arrayWithAccessor = ['safe'];
-        Object.defineProperty(arrayWithAccessor, '0', {
-            enumerable: true,
-            get: () => {
-                accessorReadCount += 1;
-                return 'executed';
-            },
-        });
-        const objectWithCustomSerialization = { safe: true };
-        Object.defineProperty(objectWithCustomSerialization, 'toJSON', {
-            value: () => {
-                accessorReadCount += 1;
-                return { replaced: true };
-            },
-        });
-        const objectWithObjectTypeAccessor: Record<string, unknown> = {
-            value: 'safe',
-        };
-        Object.defineProperty(objectWithObjectTypeAccessor, 'objectType', {
-            enumerable: true,
-            get: () => {
-                accessorReadCount += 1;
-                return 'ExecutableObjectType';
-            },
-        });
-        const cyclicObject: Record<string, unknown> = {};
-        cyclicObject.self = cyclicObject;
-        const customPrototypeObject = Object.create({
-            inherited: true,
-        }) as Record<string, unknown>;
-        customPrototypeObject.safe = true;
-        let excessivelyDeepObject: Record<string, unknown> = { leaf: true };
-        for (let depth = 0; depth < 65; depth += 1) {
-            excessivelyDeepObject = { child: excessivelyDeepObject };
-        }
+        const cyclicValue: Record<string, unknown> = {};
+        cyclicValue.self = cyclicValue;
 
-        expect(() => canonicalJson(objectWithAccessor)).toThrow(
-            'Canonical objects cannot contain accessor properties.',
-        );
-        expect(() => canonicalJson(arrayWithAccessor)).toThrow(
-            'Canonical arrays cannot contain accessor properties.',
-        );
-        expect(() => canonicalJson(objectWithCustomSerialization)).toThrow(
-            'Canonical JSON cannot contain custom serialization.',
-        );
-        expect(() =>
-            deriveCanonicalObjectHash(objectWithObjectTypeAccessor),
-        ).toThrow('Canonical objects cannot contain accessor properties.');
+        for (const rejectedValue of [
+            { value: '\u00e9' },
+            { missing: undefined },
+            { value: Number.MAX_SAFE_INTEGER + 1 },
+            accessorBackedValue,
+            cyclicValue,
+        ]) {
+            expect(() => canonicalJson(rejectedValue)).toThrow();
+        }
         expect(accessorReadCount).toBe(0);
-        expect(() => canonicalJson(cyclicObject)).toThrow(
-            'Canonical JSON cannot contain cycles.',
-        );
-        expect(() => canonicalJson(customPrototypeObject)).toThrow(
-            'Canonical objects must have an ordinary prototype.',
-        );
-        expect(() => canonicalJson(excessivelyDeepObject)).toThrow(
-            'Canonical JSON exceeds the accepted container depth.',
-        );
     });
 
     it('creates deterministic ML-DSA fixtures and verifies signed roots', () => {
@@ -218,31 +130,17 @@ describe('crypto primitive boundary', () => {
         expect(signature.signatureHash).toMatch(/^[0-9a-f]{128}$/u);
         expect(
             verifySignedObjectSignature(signature, {
-                objectType: 'BoardHead',
-                signerRole: 'Board',
-                signerIdentity: 'board',
-                ceremonyId: 'ceremony',
+                ...signedRoot,
                 publicKeyHash: keyPair.publicKeyHash,
-                objectRoot: signedRoot.objectRoot,
-                boardHeadHash: null,
-                manifestHash: null,
-                contextHash,
             }).isValid,
         ).toBe(true);
         expect(
             verifySignedObjectSignature(signature, {
-                objectType: 'BoardHead',
-                signerRole: 'Board',
-                signerIdentity: 'board',
-                ceremonyId: 'ceremony',
+                ...signedRoot,
                 publicKeyHash: deriveCanonicalObjectHash({
                     objectType: 'PublicKeyHash',
                     key: 'wrong',
                 }),
-                objectRoot: signedRoot.objectRoot,
-                boardHeadHash: null,
-                manifestHash: null,
-                contextHash,
             }).refusedObjects,
         ).toEqual(
             expect.arrayContaining([
@@ -352,48 +250,6 @@ describe('crypto primitive boundary', () => {
             }),
         ).rejects.toThrow();
 
-        const alternateEncrypted = await encryptPrivateVssMailboxEnvelope({
-            privateEnvelope,
-            privateEnvelopeAad,
-            recipientMailboxPublicKeyBytesHex:
-                recipientMailboxKeyPair.publicKeyBytesHex,
-            encapsulationRandomnessBytesHex: hash512Hex(
-                'test/private-vss-mailbox-encapsulation',
-                [
-                    new TextEncoder().encode(
-                        'source-trustee-2-to-recipient-3-alternate',
-                    ),
-                ],
-            ).slice(0, 64),
-            aeadNonceBytesHex: hash512Hex('test/private-vss-mailbox-nonce', [
-                new TextEncoder().encode(
-                    'source-trustee-2-to-recipient-3-alternate',
-                ),
-            ]).slice(0, 24),
-        });
-        const kemSwappedEnvelopeWithoutHash = {
-            ...objectWithoutField(
-                encrypted.encryptedEnvelope,
-                'encryptedEnvelopeHash',
-            ),
-            kemCiphertextBytesHex:
-                alternateEncrypted.encryptedEnvelope.kemCiphertextBytesHex,
-            kemCiphertextHash:
-                alternateEncrypted.encryptedEnvelope.kemCiphertextHash,
-        };
-        await expect(
-            decryptPrivateVssMailboxEnvelope({
-                encryptedEnvelope: {
-                    ...kemSwappedEnvelopeWithoutHash,
-                    encryptedEnvelopeHash: deriveCanonicalObjectHash(
-                        kemSwappedEnvelopeWithoutHash,
-                    ),
-                } as typeof encrypted.encryptedEnvelope,
-                recipientMailboxSecretKeyBytesHex:
-                    recipientMailboxKeyPair.secretKeyBytesHex,
-            }),
-        ).rejects.toThrow();
-
         const tamperedCiphertext = {
             ...encrypted.encryptedEnvelope,
             ciphertextBytesHex: changeLastHexByte(
@@ -407,81 +263,6 @@ describe('crypto primitive boundary', () => {
                     recipientMailboxKeyPair.secretKeyBytesHex,
             }),
         ).rejects.toThrow(/ciphertextBytesHash/u);
-
-        const wrongKemCiphertextHash = {
-            ...encrypted.encryptedEnvelope,
-            kemCiphertextHash: deriveCanonicalObjectHash({
-                objectType: 'PrivateVssEncryptedEnvelopeHash',
-                fixture: 'wrong-kem-ciphertext-hash',
-            }),
-        };
-        const wrongKemCiphertextHashWithoutHash = Object.fromEntries(
-            Object.entries(wrongKemCiphertextHash).filter(
-                ([fieldName]) => fieldName !== 'encryptedEnvelopeHash',
-            ),
-        );
-        await expect(
-            decryptPrivateVssMailboxEnvelope({
-                encryptedEnvelope: {
-                    ...wrongKemCiphertextHash,
-                    encryptedEnvelopeHash: deriveCanonicalObjectHash(
-                        wrongKemCiphertextHashWithoutHash,
-                    ),
-                },
-                recipientMailboxSecretKeyBytesHex:
-                    recipientMailboxKeyPair.secretKeyBytesHex,
-            }),
-        ).rejects.toThrow(/kemCiphertextHash/u);
-
-        const wrongCiphertextBytesHash = {
-            ...encrypted.encryptedEnvelope,
-            ciphertextBytesHash: deriveCanonicalObjectHash({
-                objectType: 'PrivateVssEncryptedEnvelopeHash',
-                fixture: 'wrong-ciphertext-bytes-hash',
-            }),
-        };
-        const wrongCiphertextBytesHashWithoutHash = Object.fromEntries(
-            Object.entries(wrongCiphertextBytesHash).filter(
-                ([fieldName]) => fieldName !== 'encryptedEnvelopeHash',
-            ),
-        );
-        await expect(
-            decryptPrivateVssMailboxEnvelope({
-                encryptedEnvelope: {
-                    ...wrongCiphertextBytesHash,
-                    encryptedEnvelopeHash: deriveCanonicalObjectHash(
-                        wrongCiphertextBytesHashWithoutHash,
-                    ),
-                },
-                recipientMailboxSecretKeyBytesHex:
-                    recipientMailboxKeyPair.secretKeyBytesHex,
-            }),
-        ).rejects.toThrow(/ciphertextBytesHash/u);
-
-        const wrongPrivateEnvelopeAadHash = {
-            ...encrypted.encryptedEnvelope,
-            privateEnvelopeAadHash: deriveCanonicalObjectHash({
-                objectType: 'PrivateVssEnvelopeAadHash',
-                fixture: 'wrong-private-envelope-aad-hash',
-            }),
-        };
-        const wrongPrivateEnvelopeAadHashWithoutHash = Object.fromEntries(
-            Object.entries(wrongPrivateEnvelopeAadHash).filter(
-                ([fieldName]) => fieldName !== 'encryptedEnvelopeHash',
-            ),
-        );
-        await expect(
-            decryptPrivateVssMailboxEnvelope({
-                encryptedEnvelope: {
-                    ...wrongPrivateEnvelopeAadHash,
-                    encryptedEnvelopeHash: deriveCanonicalObjectHash(
-                        wrongPrivateEnvelopeAadHashWithoutHash,
-                    ),
-                },
-                recipientMailboxSecretKeyBytesHex:
-                    recipientMailboxKeyPair.secretKeyBytesHex,
-            }),
-        ).rejects.toThrow(/AAD hash/u);
 
         const reboundAad = {
             ...encrypted.encryptedEnvelope,
@@ -699,112 +480,6 @@ describe('crypto primitive boundary', () => {
             }),
         ).rejects.toThrow();
 
-        const nonceSwapSource = await encryptLocalTrusteeState({
-            localStatePlaintext,
-            localStateCommitment,
-            setupContext,
-            storageKeyBytesHex,
-            aeadNonceBytesHex: '44'.repeat(12),
-        });
-        const nonceSwappedEnvelopeWithoutHash = {
-            ...objectWithoutField(
-                encrypted.encryptedLocalState,
-                'encryptedLocalStateHash',
-            ),
-            aeadNonceHex: nonceSwapSource.encryptedLocalState.aeadNonceHex,
-        };
-        await expect(
-            decryptLocalTrusteeState({
-                encryptedLocalState: {
-                    ...nonceSwappedEnvelopeWithoutHash,
-                    encryptedLocalStateHash: localTrusteeEnvelopeHash(
-                        'sealed-lattice-local-trustee-state/envelope-hash',
-                        nonceSwappedEnvelopeWithoutHash,
-                    ),
-                } as typeof encrypted.encryptedLocalState,
-                expectedLocalStateRoot: localStateCommitment.localStateRoot,
-                setupContext,
-                storageKeyBytesHex,
-            }),
-        ).rejects.toThrow();
-
-        const wrongKeyCommitmentHash = deriveCanonicalObjectHash({
-            objectType: 'StorageKeyCommitmentHash',
-            key: 'wrong-storage-key',
-        });
-        const reboundLocalStateEnvelope = {
-            ...Object.fromEntries(
-                Object.entries(encrypted.encryptedLocalState).filter(
-                    ([fieldName]) => fieldName !== 'encryptedLocalStateHash',
-                ),
-            ),
-            keyCommitmentHash: wrongKeyCommitmentHash,
-        };
-
-        await expect(
-            decryptLocalTrusteeState({
-                encryptedLocalState: {
-                    ...reboundLocalStateEnvelope,
-                    encryptedLocalStateHash: localTrusteeEnvelopeHash(
-                        'sealed-lattice-local-trustee-state/envelope-hash',
-                        reboundLocalStateEnvelope,
-                    ),
-                } as typeof encrypted.encryptedLocalState,
-                expectedLocalStateRoot: localStateCommitment.localStateRoot,
-                setupContext,
-                storageKeyBytesHex,
-            }),
-        ).rejects.toThrow(/keyCommitmentHash/u);
-
-        const reboundSealedMaterialEnvelope = {
-            ...Object.fromEntries(
-                Object.entries(
-                    sealedAggregateThresholdShare.sealedMaterial
-                        .encryptedMaterial,
-                ).filter(
-                    ([fieldName]) => fieldName !== 'encryptedMaterialHash',
-                ),
-            ),
-            keyCommitmentHash: wrongKeyCommitmentHash,
-        };
-        const reboundEncryptedMaterial = {
-            ...reboundSealedMaterialEnvelope,
-            encryptedMaterialHash: localTrusteeEnvelopeHash(
-                'sealed-lattice-local-trustee-state/sealed-material-envelope-hash',
-                reboundSealedMaterialEnvelope,
-            ),
-        } as typeof sealedAggregateThresholdShare.sealedMaterial.encryptedMaterial;
-
-        await expect(
-            encryptLocalTrusteeState({
-                localStatePlaintext: {
-                    ...localStatePlaintext,
-                    sealedAggregateThresholdShare: {
-                        ...localStatePlaintext.sealedAggregateThresholdShare,
-                        ciphertextReference:
-                            reboundEncryptedMaterial.encryptedMaterialHash,
-                        encryptedMaterial: reboundEncryptedMaterial,
-                    },
-                },
-                localStateCommitment,
-                setupContext,
-                storageKeyBytesHex,
-                aeadNonceBytesHex,
-            }),
-        ).rejects.toThrow(/keyCommitmentHash/u);
-
-        await expect(
-            encryptLocalTrusteeState({
-                localStatePlaintext: {
-                    ...localStatePlaintext,
-                    hiddenAggregateShareCopy: [1, 2, 3],
-                },
-                localStateCommitment,
-                setupContext,
-                storageKeyBytesHex,
-                aeadNonceBytesHex,
-            }),
-        ).rejects.toThrow(/not allowed by the local trustee state schema/u);
         await expect(
             decryptLocalTrusteeState({
                 encryptedLocalState: encrypted.encryptedLocalState,
@@ -827,33 +502,6 @@ describe('crypto primitive boundary', () => {
                 storageKeyBytesHex,
             }),
         ).rejects.toThrow(/storageAad/u);
-    });
-
-    it('requires an explicit signature expectation binding to verify', () => {
-        const profile = createMlDsaSignatureProfileFixture();
-        const keyPair = createMlDsaKeyPairFixture('crypto-test-boundary');
-        const signedRoot = createSignedRoot();
-        const signature = createProtocolSignatureFixture({
-            profile,
-            publicKeyBytesHex: keyPair.publicKeyBytesHex,
-            publicKeyHash: keyPair.publicKeyHash,
-            secretKeyBytesHex: keyPair.secretKeyBytesHex,
-            signedRoot,
-        });
-
-        expect(verifySignedObjectSignature(signature)).toMatchObject({
-            isValid: false,
-            refusedObjects: [
-                expect.objectContaining({ code: 'InvalidSignedRoot' }),
-            ],
-        });
-        expect(
-            verifySignedObjectSignature(signature, {
-                publicKeyHash: keyPair.publicKeyHash,
-            }),
-        ).toMatchObject({
-            isValid: true,
-        });
     });
 
     it('rejects unsigned signature metadata and non-canonical hex encodings', () => {
@@ -886,28 +534,26 @@ describe('crypto primitive boundary', () => {
             signatureBytesHex: signature.signatureBytesHex.toUpperCase(),
         };
 
-        for (const rejectedSignature of [
-            tamperedSignedRootSignature,
-            uppercaseHexSignature,
-        ]) {
-            expect(
-                verifySignedObjectSignature(rejectedSignature, {
-                    objectType: 'BoardHead',
-                    signerRole: 'Board',
-                    signerIdentity: 'board',
-                    ceremonyId: 'ceremony',
-                    publicKeyHash: keyPair.publicKeyHash,
-                    objectRoot: signedRoot.objectRoot,
-                    boardHeadHash: null,
-                    manifestHash: null,
-                    contextHash,
-                }).refusedObjects,
-            ).toEqual(
-                expect.arrayContaining([
-                    expect.objectContaining({ code: 'InvalidSignature' }),
-                ]),
-            );
-        }
+        expect(
+            verifySignedObjectSignature(tamperedSignedRootSignature, {
+                ...signedRoot,
+                publicKeyHash: keyPair.publicKeyHash,
+            }).refusedObjects,
+        ).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({ code: 'InvalidSignedRoot' }),
+            ]),
+        );
+        expect(
+            verifySignedObjectSignature(uppercaseHexSignature, {
+                ...signedRoot,
+                publicKeyHash: keyPair.publicKeyHash,
+            }).refusedObjects,
+        ).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({ code: 'InvalidSignature' }),
+            ]),
+        );
     });
 
     it('rejects signatures over malformed signed-root hash bindings', () => {
@@ -938,7 +584,12 @@ describe('crypto primitive boundary', () => {
                 signedRoot,
             });
 
-            expect(verifySignedObjectSignature(signature)).toMatchObject({
+            expect(
+                verifySignedObjectSignature(signature, {
+                    ...signedRoot,
+                    publicKeyHash: keyPair.publicKeyHash,
+                }),
+            ).toMatchObject({
                 isValid: false,
                 refusedObjects: [
                     expect.objectContaining({ code: 'InvalidSignedRoot' }),

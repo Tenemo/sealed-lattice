@@ -37,7 +37,6 @@ const generateAggregateThresholdProof: VssAggregateThresholdProofComputer = (
     );
 
     return Promise.resolve({
-        proofBytesEncoding: 'binary-chunked-proof-bytes',
         proofBytesHash,
         proofMaterialRoot: deriveCanonicalObjectHash({
             objectType: 'SetupProofMaterialReference',

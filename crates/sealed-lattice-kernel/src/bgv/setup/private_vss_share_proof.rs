@@ -9,7 +9,7 @@ use crate::{
 use super::{
     accepted_setup::setup_parameters_hash,
     commitment::{SETUP_COMMITMENT_RANDOMNESS_WIDTH, SetupCommitmentValue, setup_commitment_root},
-    setup_proof::{SETUP_PROOF_MATERIAL_ENCODING, SetupProofMaterialBytes},
+    setup_proof::SetupProofMaterialBytes,
     sharing::canonical_trustee_point,
     trustee_evaluation_key_proof::{
         PRIVATE_VSS_SHARE_PROOF_FAMILY, PrivateVssShareStatement, SuccinctSetupProofContext,
@@ -201,11 +201,6 @@ fn validate_private_vss_share_proof_record(proof_record: &Value) -> CanonicalRes
         PRIVATE_VSS_SHARE_PROOF_FAMILY,
         "private VSS share proofFamily does not match the VSS opening/carry family",
     )?;
-    if value_string(proof_record, "proofBytesEncoding")? != SETUP_PROOF_MATERIAL_ENCODING {
-        return Err(invalid_private_vss_share_proof(
-            "private VSS share proof requires canonical streamed proof material",
-        ));
-    }
     for field_name in [
         "proofStatementRoot",
         "statementHash",
@@ -450,7 +445,6 @@ fn private_vss_share_succinct_transported_proof_material_root(
     derive_canonical_object_hash(&json!({
         "objectType": "PrivateVssShareTransportedSuccinctProofMaterial",
         "proofFamily": PRIVATE_VSS_SHARE_PROOF_FAMILY,
-        "proofBytesEncoding": SETUP_PROOF_MATERIAL_ENCODING,
         "statementHash": statement_hash_hex,
         "proofBytesHash": proof_bytes_hash,
     }))
@@ -646,7 +640,6 @@ pub(super) fn private_vss_share_succinct_proof_record(
     Ok(json!({
         "objectType": "PrivateVssShareProof",
         "proofFamily": PRIVATE_VSS_SHARE_PROOF_FAMILY,
-        "proofBytesEncoding": SETUP_PROOF_MATERIAL_ENCODING,
         "proofStatementRoot": proof_statement_root,
         "statementHash": statement_hash_hex,
         "proofBytesHash": proof_bytes_hash,

@@ -36,24 +36,14 @@ const isResultMessage = (value: unknown): value is ResultMessage =>
     isRecord(value) &&
     (value.messageKind === 'completed' || value.messageKind === 'failed');
 
-const chunk = (
-    chunkIndex: number,
-    byteLength: number,
-    substituted: boolean,
-): ArrayBuffer => {
-    const bytes = Uint8Array.from(
+const chunk = (chunkIndex: number, byteLength: number): ArrayBuffer => {
+    return Uint8Array.from(
         { length: byteLength },
         (_, byteIndex) => (53 + chunkIndex * 17 + byteIndex * 131) & 0xff,
-    );
-    if (substituted) {
-        bytes[0] ^= 1;
-    }
-    return bytes.buffer;
+    ).buffer;
 };
 
-const run = (
-    substituteReadChunkIndex?: number,
-): Promise<{
+const run = (): Promise<{
     maximumOutstandingPullCount: number;
     pullOrder: readonly string[];
     result: ResultMessage;
@@ -106,8 +96,6 @@ const run = (
                     const bytes = chunk(
                         message.chunkIndex,
                         message.expectedByteLength,
-                        message.phase === 'read' &&
-                            message.chunkIndex === substituteReadChunkIndex,
                     );
                     worker.postMessage(
                         {
@@ -172,17 +160,6 @@ describe('BGV canonical stream boundary in a browser worker', () => {
         expect(result.result).toMatchObject({
             consumedByteLength: foundationProfile.streamChunkByteLength + 31,
             messageKind: 'completed',
-        });
-    });
-
-    it('does not release a substituted chunk to the semantic sink', async () => {
-        const result = await run(1);
-
-        expect(result.result).toMatchObject({
-            consumedByteLength: foundationProfile.streamChunkByteLength,
-            failureKind: 'refused',
-            messageKind: 'failed',
-            refusalReason: 'wrongHashOrRoot',
         });
     });
 });

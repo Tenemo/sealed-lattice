@@ -18,12 +18,12 @@ use core::{ptr, slice};
 use std::vec::Vec;
 
 use bgv::{
-    absorb_bgv_canonical_stream_chunk, begin_bgv_canonical_material_reader,
+    absorb_bgv_canonical_stream_chunk, authenticated_accepted_setup_proof_binding_session,
     begin_accepted_setup_canonical_stream, begin_accepted_setup_proof_binding_session,
-    begin_bgv_canonical_stream, cancel_accepted_setup_proof_binding_session,
-    cancel_bgv_canonical_material_reader, cancel_bgv_canonical_stream,
-    finish_bgv_canonical_material_reader, finish_bgv_canonical_stream,
-    read_bgv_canonical_material_chunk, authenticated_accepted_setup_proof_binding_session,
+    begin_bgv_canonical_material_reader, begin_bgv_canonical_stream,
+    cancel_accepted_setup_proof_binding_session, cancel_bgv_canonical_material_reader,
+    cancel_bgv_canonical_stream, finish_bgv_canonical_material_reader, finish_bgv_canonical_stream,
+    read_bgv_canonical_material_chunk,
 };
 use foundation::{
     CANONICAL_STREAM_CAPABILITY_BYTE_LENGTH, CanonicalStreamRuntimeBegin,
@@ -461,9 +461,8 @@ pub unsafe extern "C" fn sealed_lattice_accepted_setup_canonical_stream_begin(
     let material_root =
         unsafe { canonical_stream_input(material_root_pointer, material_root_length) };
     let descriptor = unsafe { canonical_stream_input(descriptor_pointer, descriptor_length) };
-    let stream_capability = unsafe {
-        canonical_stream_capability(stream_capability_pointer, stream_capability_length)
-    };
+    let stream_capability =
+        unsafe { canonical_stream_capability(stream_capability_pointer, stream_capability_length) };
     let result = begin_accepted_setup_canonical_stream(
         family_code,
         material_root,

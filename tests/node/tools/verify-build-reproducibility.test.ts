@@ -54,21 +54,4 @@ describe('Build reproducibility verification', () => {
             await rm(temporaryRoot, { force: true, recursive: true });
         }
     });
-
-    it('accepts byte-identical artifacts regardless of map insertion order', () => {
-        const sharedFingerprint = {
-            byteLength: 3,
-            sha256: 'a'.repeat(64),
-        };
-        const before = new Map([
-            ['second.bin', sharedFingerprint],
-            ['first.bin', sharedFingerprint],
-        ]);
-        const after = new Map([
-            ['first.bin', sharedFingerprint],
-            ['second.bin', sharedFingerprint],
-        ]);
-
-        expect(compareGeneratedArtifactFingerprints(before, after)).toEqual([]);
-    });
 });

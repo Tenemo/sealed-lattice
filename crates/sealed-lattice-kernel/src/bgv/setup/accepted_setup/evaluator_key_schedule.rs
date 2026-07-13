@@ -267,28 +267,3 @@ pub(super) fn verify_pending_evaluation_key_material_boundary(
 
     Ok(None)
 }
-
-pub(super) fn verify_generic_key_switch_policy(
-    setup_package: &Value,
-) -> CanonicalResult<Option<Value>> {
-    // The foundation roster never schedules generic key-switch material and the matching
-    // proof family is unimplemented, so any generic key-switch keys are refused
-    // unconditionally. The frozen evaluator-key schedule the verifier recomputes
-    // (verify_evaluator_key_schedule, EvaluatorKeyScheduleRoot) covers only the
-    // relinearization and Galois key roots and never binds a top-level
-    // genericKeySwitchKeys object, so this is the sole coverage for its absence.
-    if setup_package.get("genericKeySwitchKeys").is_some() {
-        return Ok(Some(verification_response(
-            Some("setupPackageVerification"),
-            Vec::new(),
-            vec![Refusal::new(
-                "genericKeySwitchOutsideParameters",
-                "generic key-switch material is refused: the foundation roster never schedules it and the matching proof family is unimplemented",
-                "setupPackage.genericKeySwitchKeys".to_string(),
-            )],
-            Vec::new(),
-        )?));
-    }
-
-    Ok(None)
-}

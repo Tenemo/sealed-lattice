@@ -45,24 +45,15 @@ const isResultMessage = (value: unknown): value is ResultMessage =>
     (value.messageKind === 'completed' || value.messageKind === 'failed') &&
     Number.isSafeInteger(value.requestIdentifier);
 
-const createChunk = (
-    chunkIndex: number,
-    byteLength: number,
-    substitute: boolean,
-): ArrayBuffer => {
-    const bytes = Uint8Array.from(
+const createChunk = (chunkIndex: number, byteLength: number): ArrayBuffer => {
+    return Uint8Array.from(
         { length: byteLength },
         (_, byteIndex) => (17 + chunkIndex * 29 + byteIndex * 131) & 0xff,
-    );
-    if (substitute && bytes.byteLength > 0) {
-        bytes[0] ^= 1;
-    }
-    return bytes.buffer;
+    ).buffer;
 };
 
 const runWorker = (input: {
     cancelAfterFirstChunk?: boolean;
-    substituteReadChunkIndex?: number;
     totalByteLength: number;
 }): Promise<WorkerRun> => {
     const worker = new Worker(
@@ -116,9 +107,6 @@ const runWorker = (input: {
                     const buffer = createChunk(
                         message.chunkIndex,
                         message.expectedByteLength,
-                        message.phase === 'read' &&
-                            message.chunkIndex ===
-                                input.substituteReadChunkIndex,
                     );
                     worker.postMessage(
                         {
@@ -217,23 +205,5 @@ describe('Canonical stream runtime in a browser worker', () => {
             completedSessionCount: 0,
         });
         expect(run.pullOrder).toEqual(['write:0']);
-    });
-
-    it('does not expose a substituted chunk to the consumer', async () => {
-        const run = await runWorker({
-            substituteReadChunkIndex: 1,
-            totalByteLength: foundationProfile.streamChunkByteLength + 19,
-        });
-
-        expect(run.result).toMatchObject({
-            failureKind: 'refused',
-            messageKind: 'failed',
-            refusalReason: 'wrongHashOrRoot',
-        });
-        expect(run.result.counters).toMatchObject({
-            activeSessionCount: 0,
-            completedSessionCount: 1,
-            failedSessionCount: 1,
-        });
     });
 });

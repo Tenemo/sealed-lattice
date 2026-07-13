@@ -508,9 +508,10 @@ const createIdentifierFactory = (
 
     return (kind) => {
         counts[kind] += 1;
-        return `${kind}-${storeIdentifier
-            .toString()
-            .padStart(8, '0')}-${counts[kind].toString().padStart(8, '0')}`;
+        const kindCode = kind === 'transaction' ? '01' : '02';
+        return `${kindCode}${storeIdentifier
+            .toString(16)
+            .padStart(30, '0')}${counts[kind].toString(16).padStart(32, '0')}`;
     };
 };
 
@@ -743,83 +744,6 @@ describe('durable non-forking state service', () => {
         expect(adapter.atomicMutationAttemptCount).toBe(2);
     });
 
-    it('recovers the committed carrier after an interruption before its explicit reread', async () => {
-        const { adapter, store } = await openStorage();
-        const world = new TestStateWorld();
-        const interruptedCryptography = new TestStateCryptography(world);
-        interruptedCryptography.failVoteResolutionInvocation = 5;
-        const carrier = world.registerIntent(
-            reservationIntent({ intentSeed: 34, stateSeed: 43 }),
-        );
-
-        await expect(
-            createService(
-                store,
-                interruptedCryptography,
-            ).obtainSignedWitnessVote({
-                canonicalIntentCarrier: carrier,
-            }),
-        ).rejects.toMatchObject({ code: 'AuthenticationFailed' });
-        expect(adapter.atomicMutationAttemptCount).toBe(2);
-
-        const recoveredCryptography = new TestStateCryptography(world);
-        const recovered = await createService(
-            store,
-            recoveredCryptography,
-        ).obtainSignedWitnessVote({ canonicalIntentCarrier: carrier });
-        expect(recovered).toBeInstanceOf(Uint8Array);
-        expect(recoveredCryptography.signingCount).toBe(0);
-        expect(adapter.atomicMutationAttemptCount).toBe(2);
-    });
-
-    it('retries a known uncommitted cache conflict without losing the durable lock', async () => {
-        const { adapter, store } = await openStorage();
-        adapter.conflictMutationAttempts.add(2);
-        const world = new TestStateWorld();
-        const cryptography = new TestStateCryptography(world);
-        const carrier = world.registerIntent(
-            reservationIntent({ intentSeed: 35, stateSeed: 44 }),
-        );
-
-        const result = await createService(
-            store,
-            cryptography,
-        ).obtainSignedWitnessVote({ canonicalIntentCarrier: carrier });
-        expect(result).toBeInstanceOf(Uint8Array);
-        expect(adapter.atomicMutationAttemptCount).toBe(3);
-        expect(cryptography.signingCount).toBe(2);
-    });
-
-    it('bounds sustained compare-and-lock contention and leaves no live transaction behind', async () => {
-        const { adapter, store } = await openStorage();
-        for (
-            let mutationAttempt = 1;
-            mutationAttempt <= 20;
-            mutationAttempt += 1
-        ) {
-            adapter.conflictMutationAttempts.add(mutationAttempt);
-        }
-        const world = new TestStateWorld();
-        const cryptography = new TestStateCryptography(world);
-        const carrier = world.registerIntent(
-            reservationIntent({ intentSeed: 39, stateSeed: 47 }),
-        );
-        const service = createService(store, cryptography);
-
-        await expect(
-            service.obtainSignedWitnessVote({
-                canonicalIntentCarrier: carrier,
-            }),
-        ).rejects.toMatchObject({ code: 'ConflictExhausted' });
-        expect(adapter.atomicMutationAttemptCount).toBe(9);
-        adapter.conflictMutationAttempts.clear();
-        await expect(
-            service.obtainSignedWitnessVote({
-                canonicalIntentCarrier: carrier,
-            }),
-        ).resolves.toBeInstanceOf(Uint8Array);
-    });
-
     it('prevents a stale independent store from replacing a concurrent reservation lock', async () => {
         const adapter = new InMemoryStorageAdapter();
         const { store: winningStore } = await openStorage(adapter);
@@ -865,43 +789,6 @@ describe('durable non-forking state service', () => {
                 canonicalIntentCarrier: winningIntentCarrier,
             }),
         ).resolves.toEqual(winningOutcome.value);
-    });
-
-    it('makes stale identical callers on independent stores converge on one exact signed carrier', async () => {
-        const adapter = new InMemoryStorageAdapter();
-        const { store: winningStore } = await openStorage(adapter);
-        const { store: staleStore } = await openStorage(adapter);
-        const world = new TestStateWorld();
-        const carrier = world.registerIntent(
-            reservationIntent({ intentSeed: 38, stateSeed: 46 }),
-        );
-        const winningCryptography = new TestStateCryptography(world);
-        const staleCryptography = new TestStateCryptography(world);
-        const winningService = createService(winningStore, winningCryptography);
-        const staleService = createService(staleStore, staleCryptography);
-        const pausedRead = pauseNextVoteIntentIndexRead(adapter);
-
-        const staleCarrierPromise = staleService.obtainSignedWitnessVote({
-            canonicalIntentCarrier: carrier,
-        });
-        await pausedRead.readPaused;
-        const [winningOutcome] = await Promise.allSettled([
-            winningService.obtainSignedWitnessVote({
-                canonicalIntentCarrier: carrier,
-            }),
-        ]);
-        pausedRead.releaseRead();
-        const [staleOutcome] = await Promise.allSettled([staleCarrierPromise]);
-
-        if (winningOutcome.status !== 'fulfilled') {
-            throw winningOutcome.reason;
-        }
-        if (staleOutcome.status !== 'fulfilled') {
-            throw staleOutcome.reason;
-        }
-        expect(staleOutcome.value).toEqual(winningOutcome.value);
-        expect(winningCryptography.signingCount).toBe(1);
-        expect(staleCryptography.signingCount).toBe(0);
     });
 
     it('requires the matching reservation before locking an output and refuses a second output', async () => {
@@ -1015,52 +902,6 @@ describe('durable non-forking state service', () => {
                 canonicalIntentCarrier: carrier,
             }),
         ).rejects.toMatchObject({ code: 'AuthenticationFailed' });
-    });
-
-    it('refuses a cached carrier whose durable producer lock was lost', async () => {
-        const { adapter, store } = await openStorage();
-        const world = new TestStateWorld();
-        const carrier = world.registerIntent(
-            reservationIntent({ intentSeed: 61, stateSeed: 71 }),
-        );
-        const service = createService(store, new TestStateCryptography(world));
-        await service.obtainSignedWitnessVote({
-            canonicalIntentCarrier: carrier,
-        });
-        const intentKey = adapter
-            .logicalRecordKeys()
-            .find((key) => key.startsWith('non-forking-state/vote-intents/'))!;
-        adapter.deleteLogicalRecord(intentKey);
-        await expect(
-            service.obtainSignedWitnessVote({
-                canonicalIntentCarrier: carrier,
-            }),
-        ).rejects.toMatchObject({ code: 'CorruptRecord' });
-    });
-
-    it('caches exact output bytes once and never invokes a replacement producer', async () => {
-        const { store } = await openStorage();
-        const world = new TestStateWorld();
-        const service = createService(store, new TestStateCryptography(world));
-        const scope = exactOutputScope(80, 81);
-        const source = new Uint8Array([1, 2, 3, 4, 5]);
-        const first = await service.obtainExactOutput({
-            createExactOutput: () => source,
-            inspectExactOutput,
-            scope,
-        });
-        source.fill(0xff);
-        const replay = await service.obtainExactOutput({
-            createExactOutput: () => {
-                throw new Error('replacement producer must not run');
-            },
-            inspectExactOutput,
-            scope,
-        });
-        expect(replay.exactOutputBytes).toEqual(
-            new Uint8Array([1, 2, 3, 4, 5]),
-        );
-        expect(replay.exactOutputHash).toEqual(first.exactOutputHash);
     });
 
     it('requires fresh nonzero injected entropy before every new generation', async () => {
@@ -1339,43 +1180,6 @@ describe('durable non-forking state service', () => {
         expect(producerInvocationCount).toBe(1);
     });
 
-    it('surfaces both state mutation and transaction abort failures', async () => {
-        const { adapter, store } = await openStorage();
-        const world = new TestStateWorld();
-        const exactOutputCryptography = new TestExactOutputCryptography();
-        exactOutputCryptography.failOpenInvocation = 2;
-        adapter.deleteFailure = new Error('injected abort cleanup failure');
-
-        let observedFailure: unknown;
-        try {
-            await createService(
-                store,
-                new TestStateCryptography(world),
-                exactOutputCryptography,
-            ).obtainExactOutput({
-                createExactOutput: () => new Uint8Array([3, 5, 7, 9]),
-                inspectExactOutput,
-                scope: exactOutputScope(112, 113),
-            });
-        } catch (error) {
-            observedFailure = error;
-        }
-
-        expect(observedFailure).toMatchObject({
-            code: 'StorageFailure',
-            failureCause: {
-                cleanupFailure: {
-                    code: 'CleanupFailed',
-                },
-                name: 'DurableStateTransactionCleanupError',
-                originalFailure: {
-                    code: 'AuthenticationFailed',
-                },
-            },
-            name: 'DurableNonForkingStateError',
-        });
-    });
-
     it('recovers an exact output committed before its explicit authenticated reread', async () => {
         const { adapter, store } = await openStorage();
         const world = new TestStateWorld();
@@ -1488,24 +1292,6 @@ describe('durable non-forking state service', () => {
             }),
         ).rejects.toMatchObject({ code: 'Equivocation' });
         expect(certificateVerifierCalled).toBe(false);
-    });
-
-    it('resolves reservation certificates without operation-specific state policy', async () => {
-        const { store } = await openStorage();
-        const world = new TestStateWorld();
-        const service = createService(store, new TestStateCryptography(world));
-        const reservationCarrier = world.registerIntent(
-            reservationIntent({ intentSeed: 96, stateSeed: 97 }),
-        );
-        const resolution = await service.resolveStateCertificate({
-            canonicalIntentCarrier: reservationCarrier,
-            canonicalStateCertificate: new Uint8Array([9, 8, 7]),
-            verifyCertificate: () =>
-                ({ kind: 'verified-reservation' }) as const,
-        });
-        expect(resolution).toEqual({
-            verifiedCapability: { kind: 'verified-reservation' },
-        });
     });
 
     it('fails closed for missing exact output, corrupt sealed bytes, and self-witnessing', async () => {

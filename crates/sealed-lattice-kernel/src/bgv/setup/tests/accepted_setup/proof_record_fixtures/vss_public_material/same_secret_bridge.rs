@@ -193,7 +193,6 @@ pub(super) fn same_secret_bridge_proof_record(
         "proofFamily": SAME_SECRET_BRIDGE_PROOF_FAMILY,
         "sameSecretBridgeStatementRoot": statement_record["sameSecretBridgeStatementRoot"],
         "proofBytesHash": proof_material.proof_bytes_hash,
-        "proofBytesEncoding": SETUP_PROOF_MATERIAL_ENCODING,
         "proofMaterialRoot": proof_material.proof_material_root,
     });
     proof_record["sameSecretBridgeProofRecordRoot"] = serde_json::json!(

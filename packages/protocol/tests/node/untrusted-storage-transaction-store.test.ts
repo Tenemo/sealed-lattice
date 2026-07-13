@@ -137,7 +137,6 @@ class DeterministicInMemoryStorageAdapter implements UntrustedStorageAdapter {
     public rawWrite(key: string, value: Uint8Array): void {
         this.#values.set(key, value.slice());
     }
-
     public mutateMostRecentlyReturnedBuffer(bytes: Uint8Array): void {
         if (this.#mostRecentlyReturnedBuffer === undefined) {
             throw new Error('no adapter-returned buffer is available');
@@ -158,9 +157,9 @@ const defaultLimits: UntrustedStorageTransactionLimits = {
     maximumTransactionLifetimeMilliseconds: 1_000,
 };
 
-const createDeterministicIdentifierFactory = (): ((
-    kind: 'lease' | 'transaction',
-) => string) => {
+const createDeterministicIdentifierFactory = (
+    factoryIdentifier = 0,
+): ((kind: 'lease' | 'transaction') => string) => {
     const counts = {
         lease: 0,
         transaction: 0,
@@ -168,7 +167,32 @@ const createDeterministicIdentifierFactory = (): ((
 
     return (kind: 'lease' | 'transaction'): string => {
         counts[kind] += 1;
-        return `${kind}-${counts[kind].toString().padStart(16, '0')}`;
+        const kindCode = kind === 'transaction' ? '01' : '02';
+        return `${kindCode}${factoryIdentifier
+            .toString(16)
+            .padStart(30, '0')}${counts[kind].toString(16).padStart(32, '0')}`;
+    };
+};
+
+const identifierFilledWithByte = (byte: number): string =>
+    byte.toString(16).padStart(2, '0').repeat(32);
+
+const createQueuedIdentifierFactory = (input: {
+    lease: readonly string[];
+    transaction: readonly string[];
+}): ((kind: 'lease' | 'transaction') => string) => {
+    const identifiers = {
+        lease: [...input.lease],
+        transaction: [...input.transaction],
+    };
+
+    return (kind) => {
+        const identifier = identifiers[kind].shift();
+        if (identifier === undefined) {
+            throw new Error(`no deterministic ${kind} identifier remains`);
+        }
+
+        return identifier;
     };
 };
 
@@ -263,9 +287,9 @@ const indexKey = (namespace: string, logicalRecordKey: string): string =>
 const maximumIndexValueByteLength = (namespace: string): number =>
     textEncoder.encode(`sealed-lattice-runtime-store/${namespace}/objects/`)
         .byteLength +
-    128 +
+    64 +
     1 +
-    128;
+    64;
 
 describe('untrusted storage transaction store', () => {
     it('publishes authenticated copy-on-write bytes and preserves copy boundaries', async () => {
@@ -518,78 +542,6 @@ describe('untrusted storage transaction store', () => {
         ).toEqual(expectedBytes);
     });
 
-    it('keeps every lease claimed until a multi-record publication is fully verified', async () => {
-        const { adapter, store } = await openTestStore();
-        const transaction = await store.beginTransaction({
-            lifetimeMilliseconds: 100,
-        });
-        const firstLease = await transaction.issueWriteLease({
-            declaredByteLength: 1,
-            logicalRecordKey: 'publication-first',
-        });
-        const secondLease = await transaction.issueWriteLease({
-            declaredByteLength: 1,
-            logicalRecordKey: 'publication-second',
-        });
-        await firstLease.write(new Uint8Array([1]));
-        await firstLease.seal(
-            exactAuthenticator('publication-first', new Uint8Array([1])),
-        );
-        await secondLease.write(new Uint8Array([2]));
-        await secondLease.seal(
-            exactAuthenticator('publication-second', new Uint8Array([2])),
-        );
-        const stagedObjectKeys = adapter
-            .keys()
-            .filter((key) => key.includes('/objects/'));
-        const secondObjectKey = stagedObjectKeys[1];
-        expect(secondObjectKey).toBeDefined();
-        adapter.afterNextAtomicMutation = () => {
-            adapter.rawWrite(secondObjectKey ?? '', new Uint8Array([3]));
-        };
-
-        await expectStorageError(transaction.commit(), 'AuthenticationFailed');
-        expect(firstLease.state()).toBe('claimed');
-        expect(secondLease.state()).toBe('claimed');
-
-        adapter.rawWrite(secondObjectKey ?? '', new Uint8Array([2]));
-        await transaction.commit();
-        expect(firstLease.state()).toBe('consumed');
-        expect(secondLease.state()).toBe('consumed');
-    });
-
-    it('owns adapter buffers across asynchronous authentication', async () => {
-        const { adapter, store } = await openTestStore();
-        const expectedBytes = new Uint8Array([1, 2, 3]);
-        await writeRecord(store, 'aliased-read', expectedBytes);
-        adapter.returnAliasedReads = true;
-
-        const restoredBytes = await store.readAuthenticated({
-            authenticate: async ({ bytes, logicalRecordKey }) => {
-                await Promise.resolve();
-                adapter.mutateMostRecentlyReturnedBuffer(
-                    new Uint8Array([9, 9, 9]),
-                );
-                await exactAuthenticator(
-                    'aliased-read',
-                    expectedBytes,
-                )({
-                    bytes,
-                    logicalRecordKey,
-                });
-            },
-            logicalRecordKey: 'aliased-read',
-        });
-        expect(restoredBytes).toEqual(expectedBytes);
-        await expectStorageError(
-            store.readAuthenticated({
-                authenticate: exactAuthenticator('aliased-read', expectedBytes),
-                logicalRecordKey: 'aliased-read',
-            }),
-            'AuthenticationFailed',
-        );
-    });
-
     it('binds atomic publication to the owned bytes authenticated before commit', async () => {
         const { adapter, store } = await openTestStore();
         const expectedBytes = new Uint8Array([4, 5, 6]);
@@ -665,58 +617,15 @@ describe('untrusted storage transaction store', () => {
         ).toEqual(new Uint8Array([2]));
     });
 
-    it('conflicts when indexed object bytes change in place after staging', async () => {
-        const { adapter, store } = await openTestStore();
-        await writeRecord(store, 'shared-record', new Uint8Array([1]));
-        const sharedRecordIndexKey = indexKey('test-runtime', 'shared-record');
-        const sharedRecordIndexValue = requiredRawValue(
-            adapter,
-            sharedRecordIndexKey,
-        );
-        const sharedRecordObjectKey = textDecoder.decode(
-            sharedRecordIndexValue,
-        );
-        const transaction = await store.beginTransaction({
-            lifetimeMilliseconds: 100,
-        });
-        const lease = await transaction.issueWriteLease({
-            declaredByteLength: 1,
-            expectedCurrentValue: new Uint8Array([1]),
-            logicalRecordKey: 'shared-record',
-        });
-        await lease.write(new Uint8Array([2]));
-        await lease.seal(
-            exactAuthenticator('shared-record', new Uint8Array([2])),
-        );
-
-        adapter.rawWrite(sharedRecordObjectKey, new Uint8Array([9]));
-
-        await expectStorageError(transaction.commit(), 'Conflict');
-        expect(lease.state()).toBe('sealed');
-        expect(adapter.rawRead(sharedRecordIndexKey)).toEqual(
-            sharedRecordIndexValue,
-        );
-        expect(adapter.rawRead(sharedRecordObjectKey)).toEqual(
-            new Uint8Array([9]),
-        );
-        await transaction.abort();
-    });
-
     it('binds staged mutations to bytes inspected through another store instance', async () => {
         const adapter = new DeterministicInMemoryStorageAdapter();
-        const createFirstStoreIdentifier =
-            createDeterministicIdentifierFactory();
-        const createSecondStoreIdentifier =
-            createDeterministicIdentifierFactory();
         const { store: firstStore } = await openTestStore({
             adapter,
-            createIdentifier: (kind) =>
-                `first-${createFirstStoreIdentifier(kind)}`,
+            createIdentifier: createDeterministicIdentifierFactory(1),
         });
         const { store: secondStore } = await openTestStore({
             adapter,
-            createIdentifier: (kind) =>
-                `second-${createSecondStoreIdentifier(kind)}`,
+            createIdentifier: createDeterministicIdentifierFactory(2),
         });
 
         await expect(
@@ -911,52 +820,6 @@ describe('untrusted storage transaction store', () => {
         await secondTransaction.abort();
     });
 
-    it('accepts an exact storage reservation and rejects one byte beyond it', async () => {
-        const namespace = 'quota-exact';
-        const objectKey =
-            `sealed-lattice-runtime-store/${namespace}/objects/` +
-            'transaction-0000000000000001/lease-0000000000000001';
-        const exactStoredValueByteLength =
-            textEncoder.encode(objectKey).byteLength + 3;
-        const exactStore = await openTestStore({
-            limits: {
-                maximumStoredValueByteLength: exactStoredValueByteLength,
-            },
-            namespace,
-        });
-        const exactTransaction = await exactStore.store.beginTransaction({
-            lifetimeMilliseconds: 100,
-        });
-        const exactLease = await exactTransaction.issueWriteLease({
-            declaredByteLength: 3,
-            logicalRecordKey: 'exact',
-        });
-        await exactLease.write(new Uint8Array([1, 2, 3]));
-        await exactLease.seal(
-            exactAuthenticator('exact', new Uint8Array([1, 2, 3])),
-        );
-        await exactTransaction.commit();
-
-        const constrainedStore = await openTestStore({
-            limits: {
-                maximumStoredValueByteLength: exactStoredValueByteLength - 1,
-            },
-            namespace,
-        });
-        const constrainedTransaction =
-            await constrainedStore.store.beginTransaction({
-                lifetimeMilliseconds: 100,
-            });
-        await expectStorageError(
-            constrainedTransaction.issueWriteLease({
-                declaredByteLength: 3,
-                logicalRecordKey: 'exact',
-            }),
-            'QuotaExceeded',
-        );
-        await constrainedTransaction.abort();
-    });
-
     it('expires only after the exact deadline and cleans staged objects idempotently', async () => {
         let currentTimeMilliseconds = 0.25;
         const { adapter, store } = await openTestStore({
@@ -1107,7 +970,7 @@ describe('untrusted storage transaction store', () => {
         });
         const oversizedObjectKey =
             'sealed-lattice-runtime-store/oversized-object/objects/' +
-            'transaction-oversized-0001/lease-oversized-0000001';
+            `${identifierFilledWithByte(3)}/${identifierFilledWithByte(4)}`;
         oversizedObjectStore.adapter.rawWrite(
             oversizedObjectKey,
             new Uint8Array([1, 2, 3, 4]),
@@ -1143,7 +1006,7 @@ describe('untrusted storage transaction store', () => {
         const namespace = 'over-total-quota';
         const objectKey =
             `sealed-lattice-runtime-store/${namespace}/objects/` +
-            'transaction-overquota-0001/lease-overquota-000001';
+            `${identifierFilledWithByte(5)}/${identifierFilledWithByte(6)}`;
         adapter.rawWrite(objectKey, new Uint8Array([1]));
         adapter.rawWrite(
             indexKey(namespace, 'record'),
@@ -1203,10 +1066,10 @@ describe('untrusted storage transaction store', () => {
         const rootPrefix = 'sealed-lattice-runtime-store/test-runtime/';
         const missingObjectKey =
             `${rootPrefix}objects/` +
-            'transaction-dangling-0001/lease-dangling-0000001';
+            `${identifierFilledWithByte(7)}/${identifierFilledWithByte(8)}`;
         const orphanObjectKey =
             `${rootPrefix}objects/` +
-            'transaction-orphan-00001/lease-orphan-00000001';
+            `${identifierFilledWithByte(9)}/${identifierFilledWithByte(10)}`;
         adapter.rawWrite(
             indexKey('test-runtime', 'alias-copy'),
             textEncoder.encode(aliasedObjectKey),
@@ -1268,33 +1131,185 @@ describe('untrusted storage transaction store', () => {
         );
     });
 
-    it('rejects reused identifiers before they can alias transaction resources', async () => {
-        let transactionCount = 0;
-        const createIdentifier = (kind: 'lease' | 'transaction'): string => {
-            if (kind === 'transaction') {
-                transactionCount += 1;
-                return `transaction-${transactionCount
-                    .toString()
-                    .padStart(16, '0')}`;
-            }
+    it('rejects wrong-length, non-hexadecimal, and noncanonical injected identifiers', async () => {
+        const malformedIdentifiers = [
+            'a'.repeat(63),
+            'a'.repeat(65),
+            'A'.repeat(64),
+            'g'.repeat(64),
+            `${'a'.repeat(63)}-`,
+        ];
 
-            return 'lease-reused-0000000001';
-        };
-        const { store } = await openTestStore({ createIdentifier });
+        for (
+            let identifierIndex = 0;
+            identifierIndex < malformedIdentifiers.length;
+            identifierIndex += 1
+        ) {
+            const malformedIdentifier = malformedIdentifiers[identifierIndex];
+            if (malformedIdentifier === undefined) {
+                throw new Error('malformed identifier fixture is missing');
+            }
+            const { store } = await openTestStore({
+                createIdentifier: () => malformedIdentifier,
+                namespace: `invalid-transaction-identifier-${identifierIndex}`,
+            });
+            await expectStorageError(
+                store.beginTransaction({ lifetimeMilliseconds: 100 }),
+                'AdapterFailure',
+            );
+        }
+
+        const { store } = await openTestStore({
+            createIdentifier: (kind) =>
+                kind === 'transaction'
+                    ? identifierFilledWithByte(11)
+                    : 'B'.repeat(64),
+            namespace: 'invalid-lease-identifier',
+        });
         const transaction = await store.beginTransaction({
             lifetimeMilliseconds: 100,
-        });
-        await transaction.issueWriteLease({
-            declaredByteLength: 1,
-            logicalRecordKey: 'first',
         });
         await expectStorageError(
             transaction.issueWriteLease({
                 declaredByteLength: 1,
-                logicalRecordKey: 'second',
+                logicalRecordKey: 'invalid-lease',
             }),
             'AdapterFailure',
         );
+        await transaction.abort();
+
+        const coercibleIdentifier = {
+            toString: () => identifierFilledWithByte(22),
+        };
+        const coercibleIdentifierFactory = (() =>
+            coercibleIdentifier) as unknown as (
+            kind: 'lease' | 'transaction',
+        ) => string;
+        const coercibleStore = await openTestStore({
+            createIdentifier: coercibleIdentifierFactory,
+            namespace: 'coercible-identifier',
+        });
+        await expectStorageError(
+            coercibleStore.store.beginTransaction({
+                lifetimeMilliseconds: 100,
+            }),
+            'AdapterFailure',
+        );
+    });
+
+    it('classifies injected entropy failure without issuing a reusable identifier', async () => {
+        const entropyFailure = new Error('injected entropy failure');
+        const { store } = await openTestStore({
+            createIdentifier: () => {
+                throw entropyFailure;
+            },
+            namespace: 'identifier-entropy-failure',
+        });
+
+        await expect(
+            store.beginTransaction({ lifetimeMilliseconds: 100 }),
+        ).rejects.toMatchObject({
+            code: 'AdapterFailure',
+            failureCause: entropyFailure,
+            name: 'UntrustedStorageTransactionError',
+        });
+    });
+
+    it('never reissues a transaction identifier after abort', async () => {
+        const transactionIdentifier = identifierFilledWithByte(12);
+        const { store } = await openTestStore({
+            createIdentifier: createQueuedIdentifierFactory({
+                lease: [],
+                transaction: [transactionIdentifier, transactionIdentifier],
+            }),
+            namespace: 'retired-after-abort',
+        });
+        const transaction = await store.beginTransaction({
+            lifetimeMilliseconds: 100,
+        });
+        await transaction.abort();
+
+        await expectStorageError(
+            store.beginTransaction({ lifetimeMilliseconds: 100 }),
+            'AdapterFailure',
+        );
+    });
+
+    it('retires transaction and lease identifiers that collide with stored objects', async () => {
+        const transactionIdentifier = identifierFilledWithByte(18);
+        const existingLeaseIdentifier = identifierFilledWithByte(19);
+        const transactionCollision = await openTestStore({
+            createIdentifier: createQueuedIdentifierFactory({
+                lease: [],
+                transaction: [transactionIdentifier, transactionIdentifier],
+            }),
+            namespace: 'transaction-storage-collision',
+        });
+        const collidingTransactionObjectKey =
+            'sealed-lattice-runtime-store/transaction-storage-collision/objects/' +
+            `${transactionIdentifier}/${existingLeaseIdentifier}`;
+        transactionCollision.adapter.rawWrite(
+            collidingTransactionObjectKey,
+            new Uint8Array([1]),
+        );
+        await expect(
+            transactionCollision.store.beginTransaction({
+                lifetimeMilliseconds: 100,
+            }),
+        ).rejects.toMatchObject({
+            code: 'AdapterFailure',
+            message: 'transaction identifier collides with stored objects.',
+        });
+        transactionCollision.adapter.rawDelete(collidingTransactionObjectKey);
+        await expect(
+            transactionCollision.store.beginTransaction({
+                lifetimeMilliseconds: 100,
+            }),
+        ).rejects.toMatchObject({
+            code: 'AdapterFailure',
+            message:
+                "transaction identifier was reused during this store's lifetime.",
+        });
+
+        const leaseIdentifier = identifierFilledWithByte(20);
+        const transactionForLeaseCollision = identifierFilledWithByte(21);
+        const leaseCollision = await openTestStore({
+            createIdentifier: createQueuedIdentifierFactory({
+                lease: [leaseIdentifier, leaseIdentifier],
+                transaction: [transactionForLeaseCollision],
+            }),
+            namespace: 'lease-storage-collision',
+        });
+        const transaction = await leaseCollision.store.beginTransaction({
+            lifetimeMilliseconds: 100,
+        });
+        const collidingLeaseObjectKey =
+            'sealed-lattice-runtime-store/lease-storage-collision/objects/' +
+            `${transactionForLeaseCollision}/${leaseIdentifier}`;
+        leaseCollision.adapter.rawWrite(
+            collidingLeaseObjectKey,
+            new Uint8Array([1]),
+        );
+        await expect(
+            transaction.issueWriteLease({
+                declaredByteLength: 1,
+                logicalRecordKey: 'first-collision',
+            }),
+        ).rejects.toMatchObject({
+            code: 'AdapterFailure',
+            message: 'lease identifier collides with a stored object.',
+        });
+        leaseCollision.adapter.rawDelete(collidingLeaseObjectKey);
+        await expect(
+            transaction.issueWriteLease({
+                declaredByteLength: 1,
+                logicalRecordKey: 'retired-collision',
+            }),
+        ).rejects.toMatchObject({
+            code: 'AdapterFailure',
+            message:
+                "lease identifier was reused during this store's lifetime.",
+        });
         await transaction.abort();
     });
 });

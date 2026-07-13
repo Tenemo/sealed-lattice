@@ -34,13 +34,6 @@ pub(super) struct CollectiveSetupVerificationFixture {
 }
 
 impl CollectiveSetupVerificationFixture {
-    pub(super) fn extend_proof_binding_leases(
-        &mut self,
-        proof_binding_leases: Vec<crate::bgv::setup::CanonicalSetupProofBindingLease>,
-    ) {
-        self.proof_binding_leases.extend(proof_binding_leases);
-    }
-
     pub(super) fn begin_proof_binding_session(
         &self,
     ) -> crate::bgv::setup::AcceptedSetupProofBindingSession {
@@ -71,6 +64,31 @@ impl CollectiveSetupVerificationFixture {
             package,
             verification_request,
             &self.proof_binding_leases,
+        )
+    }
+
+    pub(super) fn verify_values_in_session(
+        &self,
+        package: &serde_json::Value,
+        verification_request: &serde_json::Value,
+        proof_binding_session: crate::bgv::setup::AcceptedSetupProofBindingSession,
+    ) -> crate::encoding::CanonicalResult<serde_json::Value> {
+        crate::bgv::setup::accepted_setup::
+            verify_collective_bgv_setup_package_in_proof_binding_session(
+                package,
+                verification_request,
+                proof_binding_session,
+            )
+    }
+
+    pub(super) fn verify_in_session(
+        &self,
+        proof_binding_session: crate::bgv::setup::AcceptedSetupProofBindingSession,
+    ) -> crate::encoding::CanonicalResult<serde_json::Value> {
+        self.verify_values_in_session(
+            &self.package,
+            &self.verification_request,
+            proof_binding_session,
         )
     }
 }

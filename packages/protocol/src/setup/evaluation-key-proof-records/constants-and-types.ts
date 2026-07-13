@@ -18,10 +18,6 @@ export type EvaluationKeyShareProofFamily =
     | 'galois-key-share';
 
 export const trusteeEvaluationKeyProofFamily = 'trustee-evaluation-key';
-export const publicEvaluationKeyMaterialEncoding =
-    'root-bound-public-key-switch-component-roots';
-export const publicEvaluationKeyTransportMaterialEncoding =
-    'binary-chunked-public-evaluation-key-root-manifest';
 export const publicEvaluationKeyMaterialTransportSetObjectType =
     'SetupTransportedPublicEvaluationKeyMaterialSet';
 export const publicEvaluationKeyMaterialTransportObjectType =
@@ -36,7 +32,6 @@ export const evaluationKeyShareComponentMaterialTransportObjectType =
     'SetupTransportedEvaluationKeyShareComponentMaterial';
 export const evaluationKeyShareComponentMaterialEncoding =
     'binary-chunked-key-switch-component-vectors';
-export const setupProofMaterialTransportEncoding = 'binary-chunked-proof-bytes';
 export const evaluationKeyShareComponentVectorHashDomain =
     'sealed-lattice-bgv-rns/evaluation-key-share-component-vector';
 export const evaluationKeyShareComponentMaterialMagic = new Uint8Array([
@@ -210,7 +205,6 @@ export type GaloisKeyShareBatch = Readonly<
 >;
 
 export type TrusteeEvaluationKeyCanonicalProofReference = Readonly<{
-    readonly proofBytesEncoding: typeof setupProofMaterialTransportEncoding;
     readonly proofMaterialRoot: ProtocolHash;
 }>;
 
@@ -285,7 +279,6 @@ export type TrusteeEvaluationKeyStatementContext = Readonly<{
 export type TrusteeEvaluationKeyProofGenerationOutput = Readonly<{
     readonly statementHash: ProtocolHash;
     readonly limbCount: number;
-    readonly proofBytesEncoding: typeof setupProofMaterialTransportEncoding;
     readonly proofBytesHash: ProtocolHash;
     readonly proofMaterialRoot: ProtocolHash;
     readonly canonicalMaterial: CanonicalGeneratedSetupProofMaterial;
@@ -356,7 +349,6 @@ export type GaloisKeyRootReference = Readonly<{
 export type PublicEvaluationKeySet = Readonly<
     JsonRecord & {
         readonly objectType: 'PublicEvaluationKeySet';
-        readonly materialEncoding: typeof publicEvaluationKeyMaterialEncoding;
         readonly participantCount: number;
         readonly rnsLimbCount: number;
         readonly evaluatorKeyScheduleRoot: ProtocolHash;
@@ -368,14 +360,12 @@ export type PublicEvaluationKeySet = Readonly<
         readonly requiredGaloisKeySchedule: readonly RequiredGaloisKeyScheduleEntry[];
         readonly galoisKeyShareBatchRoots: readonly GaloisKeyShareBatchRootReference[];
         readonly galoisKeyRoots: readonly GaloisKeyRootReference[];
-        readonly publicEvaluationKeyMaterialEncoding?: typeof publicEvaluationKeyTransportMaterialEncoding;
         readonly publicEvaluationKeyMaterialRoot?: ProtocolHash;
         readonly evaluationKeySetHash: ProtocolHash;
     }
 >;
 
 export type PublicEvaluationKeyMaterialReference = Readonly<{
-    readonly publicEvaluationKeyMaterialEncoding: typeof publicEvaluationKeyTransportMaterialEncoding;
     readonly publicEvaluationKeyMaterialRoot: ProtocolHash;
 }>;
 
@@ -438,7 +428,6 @@ export type PublicEvaluationKeyMaterialWriter = (
 export type TransportedPublicEvaluationKeyMaterial = Readonly<
     JsonRecord & {
         readonly objectType: typeof publicEvaluationKeyMaterialTransportObjectType;
-        readonly materialEncoding: typeof publicEvaluationKeyTransportMaterialEncoding;
         readonly ceremonyId: string;
         readonly manifestHash: ProtocolHash;
         readonly rosterHash: ProtocolHash;
@@ -453,7 +442,6 @@ export type TransportedPublicEvaluationKeyMaterial = Readonly<
 export type TransportedPublicEvaluationKeyMaterialSet = Readonly<
     JsonRecord & {
         readonly objectType: typeof publicEvaluationKeyMaterialTransportSetObjectType;
-        readonly materialEncoding: typeof publicEvaluationKeyTransportMaterialEncoding;
         readonly publicEvaluationKeyMaterials: readonly TransportedPublicEvaluationKeyMaterial[];
         readonly componentMaterials?: readonly JsonRecord[];
     }

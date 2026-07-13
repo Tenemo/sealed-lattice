@@ -95,20 +95,12 @@ pub(super) fn verify_collective_public_key_material(
             "setupPackage.collectivePublicKey",
         )?));
     }
-    for (field_name, expected_value) in [
-        ("proofFamily", "public-key-share"),
-        (
-            "materialEncoding",
-            "embedded-full-collective-public-key-coefficients",
-        ),
-    ] {
-        if aggregate_object.get(field_name).and_then(Value::as_str) != Some(expected_value) {
-            return Ok(Some(public_key_refusal(
-                "collectivePublicKeyParametersMismatch",
-                format!("collectivePublicKey.{field_name} must be {expected_value}"),
-                format!("setupPackage.collectivePublicKey.{field_name}"),
-            )?));
-        }
+    if aggregate_object.get("proofFamily").and_then(Value::as_str) != Some("public-key-share") {
+        return Ok(Some(public_key_refusal(
+            "collectivePublicKeyParametersMismatch",
+            "collectivePublicKey.proofFamily must be public-key-share",
+            "setupPackage.collectivePublicKey.proofFamily",
+        )?));
     }
     let material_set = setup_package.get("publicKeyShareMaterial").ok_or_else(|| {
         CanonicalError::new(
@@ -294,6 +286,8 @@ pub(super) use material_records::verify_public_key_share_material_set;
 pub(super) use material_set::public_key_share_material_uses_transport;
 #[cfg(test)]
 pub(in crate::bgv::setup) use transport::authenticated_public_key_share_material_stream_summary;
+#[cfg(test)]
+pub(in crate::bgv::setup) use transport::evict_verified_canonical_public_key_share_materials;
 pub(in crate::bgv::setup) use transport::{
     CanonicalPublicKeyShareMaterialStream,
     absorb_verified_canonical_public_key_share_material_chunk,
@@ -303,5 +297,3 @@ pub(in crate::bgv::setup) use transport::{
     drain_verified_canonical_public_key_share_materials,
     finish_verified_canonical_public_key_share_material_stream,
 };
-#[cfg(test)]
-pub(in crate::bgv::setup) use transport::evict_verified_canonical_public_key_share_materials;

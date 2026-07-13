@@ -25,11 +25,6 @@ pub(super) fn validate_vss_share_linkage_proof_reference(
 ) -> CanonicalResult<ValidatedVssShareLinkageProofReference> {
     let proof_bytes_hash = read_string(proof_record, "proofBytesHash")?.to_string();
     let proof_record_root = read_string(proof_record, "proofRecordRoot")?.to_string();
-    compare_string_value(
-        read_string(proof_record, "proofBytesEncoding")?,
-        SETUP_PROOF_MATERIAL_ENCODING,
-        "share-linkage proof record proofBytesEncoding",
-    )?;
     let proof_material_root = read_string(proof_record, "proofMaterialRoot")?.to_string();
     compare_string_value(
         &proof_material_root,
@@ -45,7 +40,6 @@ pub(super) fn validate_vss_share_linkage_proof_reference(
         "linkageItems": coverage,
         "vssShareLinkage": vss_share_linkage,
         "proofBytesHash": &proof_bytes_hash,
-        "proofBytesEncoding": SETUP_PROOF_MATERIAL_ENCODING,
         "proofMaterialRoot": &proof_material_root,
     });
     let expected_record_root = derive_canonical_object_hash(&proof_record_without_root)?;

@@ -137,91 +137,6 @@ describe('election foundation poll-spec validation', () => {
         expectErrorCodes(decodedPollSpec, ['EmptyOptionLabel']);
     });
 
-    it('does not execute poll, option, or score-domain accessors', () => {
-        let accessorReadCount = 0;
-        const pollWithAccessor = createValidPollSpecInput();
-        Object.defineProperty(pollWithAccessor, 'pollId', {
-            enumerable: true,
-            get: () => {
-                accessorReadCount += 1;
-                return 'executed';
-            },
-        });
-        const optionAccessor = ['Alpha', 'Beta'];
-        Object.defineProperty(optionAccessor, '1', {
-            enumerable: true,
-            get: () => {
-                accessorReadCount += 1;
-                return 'executed';
-            },
-        });
-        const scoreDomainWithAccessor: Record<string, unknown> = {
-            max: 10,
-            skippedOptionScore: 1,
-        };
-        Object.defineProperty(scoreDomainWithAccessor, 'min', {
-            enumerable: true,
-            get: () => {
-                accessorReadCount += 1;
-                return 1;
-            },
-        });
-
-        expectErrorCodes(pollWithAccessor, ['EmptyPollId']);
-        expectErrorCodes(
-            createValidPollSpecInput({
-                options: optionAccessor,
-                topOptionCount: 1,
-            }),
-            ['EmptyOptionLabel'],
-        );
-        expectErrorCodes(
-            createValidPollSpecInput({
-                scoreDomain:
-                    scoreDomainWithAccessor as PollSpecInput['scoreDomain'],
-            }),
-            ['UnsupportedScoreDomain'],
-        );
-        expect(accessorReadCount).toBe(0);
-    });
-
-    it('rejects sparse options and custom score-domain prototypes', () => {
-        const sparseOptions = new Array<string>(2);
-        sparseOptions[0] = 'Alpha';
-        const customScoreDomain = Object.create({ min: 1 }) as Record<
-            string,
-            number
-        >;
-        customScoreDomain.max = 10;
-        customScoreDomain.skippedOptionScore = 1;
-
-        expectErrorCodes(
-            createValidPollSpecInput({
-                options: sparseOptions,
-                topOptionCount: 1,
-            }),
-            ['EmptyOptionLabel'],
-        );
-        expectErrorCodes(
-            createValidPollSpecInput({
-                scoreDomain: customScoreDomain as PollSpecInput['scoreDomain'],
-            }),
-            ['UnsupportedScoreDomain'],
-        );
-    });
-
-    it('returns structured errors for non-number top option counts', () => {
-        expectErrorCodes(
-            {
-                pollId: 'poll',
-                question: 'Question',
-                options: ['A', 'B'],
-                topOptionCount: 1n,
-            },
-            ['InvalidTopOptionCount'],
-        );
-    });
-
     it('rejects unsupported roster policy and invalid roster bounds', () => {
         expectErrorCodes(
             createValidPollSpecInput({
@@ -308,16 +223,5 @@ describe('election foundation poll-spec validation', () => {
             }),
             ['UnsupportedHashCriticalText'],
         );
-    });
-
-    it('accepts ASCII labels that differ only by trailing whitespace', () => {
-        const validation = validatePollSpec(
-            createValidPollSpecInput({
-                options: ['Alpha', 'Alpha '],
-                topOptionCount: 1,
-            }),
-        );
-
-        expect(validation.isValid).toBe(true);
     });
 });

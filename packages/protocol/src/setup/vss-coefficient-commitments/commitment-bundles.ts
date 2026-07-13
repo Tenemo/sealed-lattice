@@ -318,7 +318,6 @@ export const createVssCoefficientCommitmentBundle = (
         publicMatrixSeedHash: input.publicMatrixSeedHash,
         vssCoefficientCommitmentRoot:
             commitmentSet.vssCoefficientCommitmentRoot,
-        materialEncoding: 'full-public-setup-commitment-values',
         participantCount: input.participantCount,
         thresholdDegree: input.thresholdDegree,
         rnsLimbCount: input.qSharePrimes.length,

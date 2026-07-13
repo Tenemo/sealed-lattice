@@ -14,27 +14,6 @@ pub(in crate::bgv::setup) fn verify_terminal_setup_transport_policy(
             "setupPackage.publicKeyShareMaterial",
         )?));
     }
-    for (record_set_name, records_field_name, object_path) in [
-        (
-            "publicKeyShareSuccinctProofs",
-            "proofRecords",
-            "setupPackage.publicKeyShareSuccinctProofs.proofRecords",
-        ),
-        (
-            "trusteeEvaluationKeyProofs",
-            "proofRecords",
-            "setupPackage.trusteeEvaluationKeyProofs.proofRecords",
-        ),
-    ] {
-        if let Some(response) = verify_terminal_proof_material_transport_records(
-            setup_package,
-            record_set_name,
-            records_field_name,
-            object_path,
-        )? {
-            return Ok(Some(response));
-        }
-    }
     if let Some(response) = verify_terminal_key_switch_transport_records(
         setup_package
             .get("relinearizationKeyShareRounds")
@@ -78,58 +57,16 @@ pub(in crate::bgv::setup) fn verify_terminal_setup_transport_policy(
             "evaluationKeys was required before terminal transport policy verification",
         )
     })?;
-    for field_name in [
-        "publicEvaluationKeyMaterialEncoding",
-        "publicEvaluationKeyMaterialRoot",
-    ] {
-        if evaluation_keys.get(field_name).is_none() {
-            return Ok(Some(terminal_transport_policy_refusal(
-                "terminalPublicEvaluationKeyMaterialTransportRequired",
-                "terminal accepted setup requires transported public evaluation-key runtime material",
-                format!("setupPackage.evaluationKeys.{field_name}"),
-            )?));
-        }
-    }
     if evaluation_keys
-        .get("publicEvaluationKeyMaterialEncoding")
-        .and_then(Value::as_str)
-        != Some(PUBLIC_EVALUATION_KEY_TRANSPORT_MATERIAL_ENCODING)
+        .get("publicEvaluationKeyMaterialRoot")
+        .is_none()
     {
         return Ok(Some(terminal_transport_policy_refusal(
-            "terminalPublicEvaluationKeyMaterialEncodingMismatch",
-            "terminal accepted setup requires binary-chunked public evaluation-key material",
-            "setupPackage.evaluationKeys.publicEvaluationKeyMaterialEncoding",
+            "terminalPublicEvaluationKeyMaterialTransportRequired",
+            "terminal accepted setup requires transported public evaluation-key runtime material",
+            "setupPackage.evaluationKeys.publicEvaluationKeyMaterialRoot",
         )?));
     }
-    Ok(None)
-}
-
-fn verify_terminal_proof_material_transport_records(
-    setup_package: &Value,
-    record_set_name: &str,
-    records_field_name: &str,
-    object_path: &str,
-) -> CanonicalResult<Option<Value>> {
-    let record_set = setup_package.get(record_set_name).ok_or_else(|| {
-        CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            format!("{record_set_name} was required before terminal transport policy verification"),
-        )
-    })?;
-    for proof_record in array_value(record_set, records_field_name)? {
-        if proof_record
-            .get("proofBytesEncoding")
-            .and_then(Value::as_str)
-            != Some(SETUP_PROOF_MATERIAL_ENCODING)
-        {
-            return Ok(Some(terminal_transport_policy_refusal(
-                "terminalProofMaterialTransportRequired",
-                "terminal accepted setup requires binary-chunked setup proof bytes",
-                format!("{object_path}.proofBytesEncoding"),
-            )?));
-        }
-    }
-
     Ok(None)
 }
 

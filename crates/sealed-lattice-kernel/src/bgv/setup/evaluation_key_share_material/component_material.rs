@@ -6,6 +6,10 @@ use std::collections::BTreeSet;
 use std::io::{BufWriter, Write};
 
 use crate::hashing::derive_canonical_object_hash;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::{
+    bgv::setup::setup_proof::SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES, hashing::hash512_hex,
+};
 
 pub(in crate::bgv::setup) fn evaluation_key_share_component_vector_hash(
     coefficients: &[u64],
@@ -212,6 +216,7 @@ fn discard_verified_component_material_backing(
 // eviction happens once, after verify returns, rather than on first read. Without
 // it the store would grow with every verified package on the wasm runtime, whose
 // linear memory never returns to the OS.
+#[cfg(test)]
 pub(in crate::bgv::setup) fn evict_verified_evaluation_key_share_component_material(
     material_roots: &[String],
 ) {
@@ -230,12 +235,11 @@ pub(in crate::bgv::setup) fn drain_verified_evaluation_key_share_component_mater
         })?;
     let mut first_cleanup_error = None;
     for material_root in material_roots {
-        if let Some(entry) = stored_chunks.remove(material_root) {
-            if let Err(error) = discard_verified_component_material_backing(entry.backing)
-                && first_cleanup_error.is_none()
-            {
-                first_cleanup_error = Some(error);
-            }
+        if let Some(entry) = stored_chunks.remove(material_root)
+            && let Err(error) = discard_verified_component_material_backing(entry.backing)
+            && first_cleanup_error.is_none()
+        {
+            first_cleanup_error = Some(error);
         }
     }
     first_cleanup_error.map_or(Ok(()), Err)
@@ -705,7 +709,7 @@ enum VerifiedComponentMaterialBacking {
 // component resident; the browser wasm runtime has no filesystem and stages in
 // memory. The accepted-setup verifier then reads the handle transiently through
 // the shared read path. The material size, not the staging backend, is the open
-// supported-phone runtime constraint (see SEC-008 and SEC-012).
+// supported-phone runtime constraint (see SEC-008).
 pub(crate) use component_material_stream::{
     CanonicalComponentMaterialStream, absorb_verified_canonical_component_material_chunk,
     begin_verified_canonical_component_material_stream,

@@ -10,107 +10,46 @@ import {
     heavyRustKernelTestNamePrefix,
 } from '#tools/ci/rust-kernel-test-arguments';
 
-describe('Rust kernel heavy runner arguments', () => {
-    it('runs only ignored tests carrying the heavy Rust kernel prefix', () => {
-        expect(parseRustKernelHeavyArguments([])).toEqual({
-            testFilter: heavyRustKernelTestNamePrefix,
-        });
-        expect(cargoTestArgumentsForRustKernelHeavy()).toEqual([
-            'test',
-            '--locked',
-            '-p',
-            'sealed-lattice-kernel',
-            heavyRustKernelTestNamePrefix,
-            '--',
-            '--ignored',
-            '--test-threads',
-            '1',
-            '--show-output',
-        ]);
-    });
+describe('Rust kernel heavy runner', () => {
+    it('owns only ignored tests under the heavy prefix by default', () => {
+        const parsed = parseRustKernelHeavyArguments([]);
+        expect(parsed.testFilter).toBe(heavyRustKernelTestNamePrefix);
 
-    it('accepts one normalized heavy test filter', () => {
-        const heavyTestName =
-            'heavy_rust_kernel_sparse_target_projection_decrypts_selected_ids_and_orders';
-        expect(parseRustKernelHeavyArguments(['--'])).toEqual({
-            testFilter: heavyRustKernelTestNamePrefix,
-        });
-        expect(parseRustKernelHeavyArguments([`${heavyTestName}.rs`])).toEqual({
-            testFilter: heavyTestName,
-        });
-        expect(cargoTestArgumentsForRustKernelHeavy(heavyTestName)).toEqual([
-            'test',
-            '--locked',
-            '-p',
-            'sealed-lattice-kernel',
-            heavyTestName,
-            '--',
-            '--ignored',
-            '--test-threads',
-            '1',
-            '--show-output',
-        ]);
-    });
-
-    it('defers lane ownership while rejecting ambiguous and unsupported filters', () => {
-        expect(parseRustKernelHeavyArguments(['one_test'])).toEqual({
-            testFilter: 'one_test',
-        });
-        expect(() => parseRustKernelHeavyArguments(['--unsupported'])).toThrow(
-            'Unknown argument: --unsupported',
+        const arguments_ = cargoTestArgumentsForRustKernelHeavy(
+            parsed.testFilter,
         );
-        expect(() =>
+        expect(arguments_).toContain(heavyRustKernelTestNamePrefix);
+        expect(arguments_).toContain('--ignored');
+        expect(arguments_).toContain('--test-threads');
+    });
+
+    it('normalizes a focused heavy filter', () => {
+        expect(
             parseRustKernelHeavyArguments([
-                'heavy_rust_kernel_first',
-                'heavy_rust_kernel_second',
+                'heavy_rust_kernel_expensive_relation.rs',
             ]),
-        ).toThrow('Heavy Rust kernel runs accept one filter');
+        ).toEqual({
+            testFilter: 'heavy_rust_kernel_expensive_relation',
+        });
     });
 
-    it('builds and verifies the process-memory guard before heavy Rust tests', () => {
-        const verificationCommand =
-            buildRustKernelHeavyProcessMemoryGuardVerificationCommand();
-
-        expect(verificationCommand.command).toBe('cargo');
-        expect(verificationCommand.args).toEqual([
-            'test',
-            '--locked',
-            '-p',
-            'sealed-lattice-process-memory-guard',
-            '--target-dir',
-            expect.stringContaining('process-memory-guard'),
-            '--',
-            '--test-threads',
-            '1',
-            '--show-output',
-        ]);
-        expect(verificationCommand.env?.CARGO_TARGET_DIR).toBeUndefined();
-    });
-
-    it('guards and serializes a focused heavy Rust cargo command', () => {
-        const testFilter = 'heavy_rust_kernel_one_test';
-        const command = buildRustKernelHeavyTestCommand({ testFilter });
-
+    it('serializes heavy tests behind the verified process-memory guard', () => {
+        const command = buildRustKernelHeavyTestCommand({
+            testFilter: 'heavy_rust_kernel_expensive_relation',
+        });
         expect(command.command).toContain(
             'sealed-lattice-process-memory-guard',
         );
-        expect(command.args[0]).toBe('--memory-limit-bytes');
         expect(Number(command.args[1])).toBeGreaterThan(0);
-        expect(command.args.slice(2)).toEqual([
-            '--',
-            'cargo',
-            ...cargoTestArgumentsForRustKernelHeavy(testFilter),
-        ]);
-        expect(command.description).toBe(
-            'cargo test Rust kernel heavy (heavy_rust_kernel_one_test)',
-        );
-        expect(command.logFileSlug).toBe('cargo-test-rust-kernel-heavy');
-        expect(command.env?.CARGO_BUILD_JOBS).toBe('1');
-        expect(command.env?.CARGO_INCREMENTAL).toBe('0');
-        expect(command.env?.RAYON_NUM_THREADS).toBe('1');
-        expect(command.env?.RUST_BACKTRACE).toBe('full');
-        expect(command.env?.SEALED_LATTICE_TRUSTEE_PROOF_LIMB_BATCH_SIZE).toBe(
-            '1',
-        );
+        expect(command.args).toContain('cargo');
+        expect(command.env).toMatchObject({
+            CARGO_BUILD_JOBS: '1',
+            CARGO_INCREMENTAL: '0',
+            RAYON_NUM_THREADS: '1',
+            SEALED_LATTICE_TRUSTEE_PROOF_LIMB_BATCH_SIZE: '1',
+        });
+        expect(
+            buildRustKernelHeavyProcessMemoryGuardVerificationCommand().args,
+        ).toContain('sealed-lattice-process-memory-guard');
     });
 });

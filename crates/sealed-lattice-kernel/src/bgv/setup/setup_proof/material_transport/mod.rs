@@ -449,5 +449,6 @@ mod verification;
 #[cfg(test)]
 pub(crate) use verification::{
     authenticate_setup_proof_material_stream_for_test,
+    authenticate_setup_proof_material_stream_in_session_for_test,
     canonical_setup_proof_material_transport_accounting,
 };

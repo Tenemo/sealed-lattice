@@ -26,21 +26,6 @@ export type SetupProofMaterialChunkSource = Readonly<{
     readonly pullChunk: CanonicalProofMaterialChunkPull;
 }>;
 
-export const setupProofMaterialRecordTransportFields = <
-    ProofBytesEncoding extends string,
->(
-    proofMaterialRoot: ProtocolHash,
-    proofBytesEncoding: ProofBytesEncoding,
-): Readonly<
-    JsonRecord & {
-        readonly proofBytesEncoding: ProofBytesEncoding;
-        readonly proofMaterialRoot: ProtocolHash;
-    }
-> => ({
-    proofBytesEncoding,
-    proofMaterialRoot,
-});
-
 export const setupTransportedProofMaterialFields = (
     proofMaterialRoot: ProtocolHash,
 ): Readonly<

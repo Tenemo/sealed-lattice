@@ -40,7 +40,7 @@ const custodyErrorCodes: readonly BrowserActionStorageCustodyErrorCode[] = [
     'Unavailable',
 ];
 
-export type BrowserActionStorageCustodyWorkerConfiguration = Readonly<{
+type BrowserActionStorageCustodyWorkerConfiguration = Readonly<{
     acquisitionDeadlineEpochMilliseconds?: number;
     binding: BrowserActionStorageRootBinding;
     databaseName: string;

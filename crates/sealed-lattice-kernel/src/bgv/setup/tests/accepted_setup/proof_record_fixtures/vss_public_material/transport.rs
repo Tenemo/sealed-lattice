@@ -203,13 +203,6 @@ fn rewrite_proof_material_set_for_authenticated_transport(
             )
         } else {
             assert_eq!(
-                proof_record["proofBytesEncoding"]
-                    .as_str()
-                    .expect("descriptor-backed proof bytes encoding"),
-                SETUP_PROOF_MATERIAL_ENCODING,
-                "descriptor-backed proof bytes encoding",
-            );
-            assert_eq!(
                 proof_record["proofMaterialRoot"]
                     .as_str()
                     .expect("descriptor-backed proof material root"),
@@ -254,10 +247,6 @@ fn rewrite_proof_material_set_for_authenticated_transport(
             .expect("proof material record object");
         record_object.remove("proofBytesBase64");
         record_object.remove(fields.proof_record_root_field);
-        record_object.insert(
-            "proofBytesEncoding".to_string(),
-            serde_json::json!(SETUP_PROOF_MATERIAL_ENCODING),
-        );
         record_object.insert(
             "proofMaterialRoot".to_string(),
             serde_json::json!(&proof_material_root),
